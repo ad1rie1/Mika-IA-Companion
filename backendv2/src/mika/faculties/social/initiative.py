@@ -7,19 +7,19 @@ quelqu'un qui manque, chercher du réconfort — et la retenue.
   pas une arrivée).
 - **Le manque** se mesure au rythme de *cette* relation : un ami qui écrit
   tous les deux jours manque après trois jours de silence, un ami mensuel pas
-  avant six semaines. Seulement une amie ou un proche, joignable, en journée —
-  et **jamais deux fois de suite** sans réponse.
+  avant six semaines. Seulement une amie ou un proche, joignable, en journée.
 - **Le réconfort** : quand elle va nettement mal, vers la personne auprès de
   qui elle se sent bien.
-- **La retenue** : rien vers quelqu'un qui a installé une rancune ; chaque
-  initiative restée sans réponse rend la suivante vers la même personne
-  moins probable.
+- **La retenue** : rien vers quelqu'un qui a installé une rancune. Ne pas
+  harceler quelqu'un qui ne répond pas (plus d'initiative ordinaire tant qu'il
+  n'a pas écrit, une seule relance douce après un long délai) est la règle
+  du budget d'initiatives (``agency``, ADR 0033), qui vaut pour toutes les
+  raisons à la fois.
 """
 
 from __future__ import annotations
 
 from mika.contracts import affect as affect_c
-from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as c
@@ -52,6 +52,11 @@ def _daytime(frame: Frame, start: int, end: int) -> bool:
 def _silence_words(days: float) -> str:
     n = round(days)
     return "un jour" if n <= 1 else f"{n} jours"
+
+
+def _habit_words(days: float) -> str:
+    n = round(days)
+    return "tous les jours" if n <= 1 else f"tous les {n} jours"
 
 
 def _address(frame: Frame, person: str) -> str | None:
@@ -95,8 +100,8 @@ def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
         if now - s.greeted.get(person, -GREETING_SPACING) < GREETING_SPACING:
             continue
         name = frame.get(identity_c.IDENTITY(handle)).name
-        who = f"« {name} »" if name else "Quelqu'un"
-        brief = f"{who} vient d'arriver : salue-le ou salue-la, en une phrase ou deux, à ta façon."
+        brief = (f"« {name} » vient d'arriver : salue « {name} » à ta façon, en une phrase ou deux." if name else
+                 "Quelqu'un vient d'arriver : salue cette personne à ta façon, en une phrase ou deux.")
         out.append(Candidate(Kind.INITIATIVE, handle, c.GREETING, GREETING_EVIDENCE, resources=resources,
                              guards=(guard,), args=FrozenDict({"brief:social": brief})))
     return out
@@ -122,8 +127,8 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
         if _RANK[level] < _RANK[c.FRIEND]:
             continue
         reading = frame.get(c.CONTACT(person))
-        if reading.unanswered or not reading.last_in:
-            continue  # elle n'écrit jamais deux fois de suite sans réponse
+        if not reading.last_in:
+            continue  # sans réponse, une relance douce au plus, après un long délai : c'est la retenue d'``agency``
         address = _address(frame, person)
         if address is None:
             continue
@@ -131,10 +136,11 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
         who = f"« {name} »" if name else "cette personne"
         if reading.silence_ratio >= p.recontact_factor:
             silent = reading.silence_ratio * reading.rhythm_days
-            habit = (f"d'habitude vous vous parlez tous les {_silence_words(reading.rhythm_days)}"
-                     if reading.measured else "vous vous parlez d'habitude plus souvent")
-            brief = (f"Tu n'as pas de nouvelles de {who} depuis {_silence_words(silent)} — {habit}. Tu as envie "
-                     "de prendre de ses nouvelles : un mot simple et chaleureux, pas un reproche.")
+            habit = (f", alors que d'habitude vous vous parlez {_habit_words(reading.rhythm_days)}"
+                     if reading.measured else "")
+            brief = (f"Ça fait {_silence_words(silent)} que tu n'as pas de nouvelles de {who}{habit}. Tu as envie "
+                     "de prendre de ses nouvelles : un mot simple et chaleureux — pas un reproche, pas de « ça fait "
+                     "longtemps ».")
             out.append(Candidate(Kind.INITIATIVE, address, c.RECONTACT, p.recontact_evidence,
                                  resources=frozenset({floor(address)}), guards=(_guard(frame, person),),
                                  args=FrozenDict({"brief:social": brief})))
@@ -146,8 +152,7 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
             # juste l'envie de discuter : peu de chose seule, assez quand le besoin de compagnie s'y ajoute
             warmth = frame.get(affect_c.WARMTH(person))
             evidence = (p.chat_close if level == c.CLOSE else p.chat_friend) + p.chat_warmth * warmth
-            brief = (f"Tu as envie de discuter un peu avec {who} : d'habitude vous vous parlez plus souvent. "
-                     "Un mot simple, sans reproche.")
+            brief = f"Tu penses à {who} et tu as envie de discuter un peu. Un mot simple, sans enjeu."
             out.append(Candidate(Kind.INITIATIVE, address, c.CHAT, evidence, resources=frozenset({floor(address)}),
                                  guards=(_guard(frame, person),), args=FrozenDict({"brief:social": brief})))
     if comfort:
@@ -173,21 +178,15 @@ def _in_conversation(s: SocialState, frame: Frame, row: RowView) -> Modulation:
     return Modulation()
 
 
-@SOCIAL.modulate(kinds=[Kind.INITIATIVE], reads=[identity_c.PERSON, affect_c.HOSTILITY, c.CONTACT, presence_c.PRESENT])
+@SOCIAL.modulate(kinds=[Kind.INITIATIVE], reads=[identity_c.PERSON, affect_c.HOSTILITY])
 def _restraint(s: SocialState, frame: Frame, row: RowView) -> Modulation:
-    """Rien vers quelqu'un qui a installé une rancune ; jamais deux messages de
-    suite à quelqu'un d'absent qui n'a pas répondu (quelle qu'en soit la
-    raison) ; avec quelqu'un de présent, chaque initiative restée sans
-    réponse rend la suivante moins probable."""
+    """Rien vers quelqu'un qui a installé une rancune — même pas une salutation.
+    (Ne pas harceler quelqu'un qui ne répond pas, quelle que soit la raison, est
+    la retenue du budget d'initiatives : ``agency``.)"""
     if row.target in ("any", "none") or not is_identifiable(row.target):
         return Modulation()
     p = params(frame.env.params_of("social", frame.root))
     person = frame.get(identity_c.PERSON(row.target))
     if grudging(frame.get(affect_c.HOSTILITY(person)), p):
         return Modulation(veto=c.GRUDGE)
-    if c.GREETING in row.reasons or goals_c.REMIND in row.reasons:
-        return Modulation()  # un rappel promis se dit, même à quelqu'un qui n'a pas répondu
-    unanswered = s.contacts[person].unanswered if person in s.contacts else 0
-    if unanswered and row.target not in frame.get(presence_c.PRESENT):
-        return Modulation(veto=c.UNANSWERED)
-    return Modulation(shift=p.ignored_shift * unanswered) if unanswered else Modulation()
+    return Modulation()

@@ -13,7 +13,7 @@ sudo install -d -o mika -g mika -m 0700 /var/lib/mika /var/backups/mika
 sudo git clone <dépôt> /opt/mika
 cd /opt/mika/backendv2
 sudo python3 -m venv .venv
-sudo .venv/bin/pip install -e ".[llm,memory]"
+sudo .venv/bin/pip install -e ".[llm,memory,telegram,documents]"   # telegram : le robot ; documents : lire les PDF
 sudo dnf install bubblewrap        # ou apt install bubblewrap : la Forge et les ateliers en ont besoin
 ```
 
@@ -44,6 +44,57 @@ sudo systemctl enable --now mika.service mika-backup.timer
 Le serveur écoute sur `127.0.0.1:8001`. Pour l'ouvrir au réseau, place un
 mandataire TLS devant (Caddy, nginx) plutôt que de changer `--host`.
 
+## Derrière un mandataire TLS
+
+Trois options de `serve`, à ajouter à `ExecStart` dans `mika.service` :
+
+- `--origin https://mika.example` (répétable) : l'origine du frontend servi en
+  HTTPS. Elle **remplace** les origines de développement (`localhost:3000`…) :
+  sans elle, le navigateur se voit refuser CORS, CSRF et la WebSocket.
+- `--behind-proxy` : l'adresse du client est lue dans `X-Forwarded-For` (envoyé
+  par un mandataire **local** seulement — 127.0.0.1, ::1) ; l'étranglement des
+  connexions vise alors la vraie adresse. Implique `--cookie-secure`.
+- `--cookie-secure` : cookies de session et CSRF marqués `Secure`.
+
+```bash
+ExecStart=/opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika serve --host 127.0.0.1 --port 8001 \
+    --origin https://mika.example --behind-proxy
+```
+
+Le mandataire **doit** transmettre l'adresse du client (`X-Forwarded-For`) et
+**ne jamais** relayer `/mcp/` : ces points (le relais de Claude Code, la console
+MCP) ne servent que la machine elle-même, et refusent toute requête qui porte
+un en-tête de mandataire — fermer le chemin chez le mandataire est la seconde
+porte. Caddy transmet l'adresse de lui-même :
+
+```
+mika.example {
+    @mcp path /mcp/*
+    respond @mcp 404
+    reverse_proxy 127.0.0.1:8001
+}
+```
+
+nginx :
+
+```nginx
+location /mcp/ { return 404; }
+location / {
+    proxy_pass http://127.0.0.1:8001;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;          # la WebSocket (/ws)
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 120s;                          # le client garde sa WebSocket par des pings
+}
+```
+
+Les journaux ne portent aucun secret : le jeton du robot Telegram (présent dans
+chaque URL de relève), un jeton passé en paramètre d'URL et un `Bearer` sont
+masqués ; `httpx` ne parle qu'en avertissement.
+
 ## Premier démarrage
 
 1. Ouvre le frontend : le premier compte créé est opérateur (ou
@@ -58,6 +109,13 @@ mandataire TLS devant (Caddy, nginx) plutôt que de changer `--host`.
    surcharge seulement dans le bloc « avancé », bornée et journalisée), canaux
    (Telegram), sens (courrier, flux, transcription, appareils), comptes. Chaque
    enregistrement laisse une ligne dans **Journal de configuration**.
+   Le robot Telegram est **fermé par défaut** : seules les conversations de la
+   liste blanche et la conversation privée des propriétaires sont admises
+   (`mika telegram allow <chat>`, `mika telegram owner <utilisateur>`) ; l'ouvrir
+   à tout le monde est un choix explicite (`mika telegram open`, ou la case
+   « Ouvert à tous »). Sans aucune des trois, la relève ne démarre pas. Un
+   démarrage raté (réseau coupé) est relancé avec un délai croissant ; `/health`
+   le dit (`"telegram": "degraded"`, `"ko"` pour un jeton refusé).
 4. Ses boîtes aux lettres : **Courrier › Comptes** (ou Réglages › Sens ›
    Courrier) — un enregistrement par boîte : serveurs IMAP/SMTP, dossiers
    relevés, et sa voix (en son nom, en assistante, ou à ta place ; ton,
@@ -107,8 +165,11 @@ Une archive contient `mind.db` (sa vie : le journal, les contenus, les
 comptes, les réglages), les caches du courrier et des flux, ses apps forgées,
 ses ateliers et `secret.key`, avec un manifeste (sommes SHA-256, tête du
 journal, empreinte de l'état rejoué depuis la copie). `views.db` n'y est pas :
-projections et vecteurs se reconstruisent depuis le journal. Copie les
-archives ailleurs que sur la machine.
+projections et vecteurs se reconstruisent depuis le journal. Les dossiers
+d'appel de Claude Code (prompts privés, jeton de session du relais) ne sont pas
+dans le dossier de données : ils vivent sous `XDG_RUNTIME_DIR` (`/run/mika` avec
+l'unité fournie), en `0700`, effacés en fin d'appel et purgés au démarrage —
+jamais archivés. Copie les archives ailleurs que sur la machine.
 
 ## Restaurer
 
@@ -130,7 +191,7 @@ bon quelques minutes, le temps de réindexer les souvenirs).
 
 ```bash
 sudo -u mika /opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika backup /var/backups/mika
-cd /opt/mika && sudo git pull && cd backendv2 && sudo .venv/bin/pip install -e ".[llm,memory]"
+cd /opt/mika && sudo git pull && cd backendv2 && sudo .venv/bin/pip install -e ".[llm,memory,telegram,documents]"
 sudo systemctl restart mika
 ```
 

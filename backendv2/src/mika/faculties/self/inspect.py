@@ -11,7 +11,19 @@ from collections.abc import Sequence
 
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as c
-from mika.faculties.self import SELF, SelfParams, SelfState, esteem, params
+from mika.faculties.self import (
+    ACHIEVED,
+    HEARD,
+    IGNORED,
+    PROMISE,
+    SELF,
+    STUCK,
+    SelfParams,
+    SelfState,
+    doubt_cause,
+    esteem,
+    params,
+)
 from mika.faculties.self.records import Dream, Journal
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.frame import Frame
@@ -60,8 +72,13 @@ TEMPERAMENT_FR = {
     "perseverance": ("persévérance", "le budget de séances, la demi-vie de l'envie, les échecs avant blocage"),
     "chronotype": ("chronotype", "le décalage du rythme circadien (0 = lève-tôt, 1 = oiseau de nuit)"),
 }
-DREAM_FR = {c.NIGHTMARE: "cauchemar", c.PLEASANT: "doux", c.ASSOCIATIVE: "étrange", c.MUNDANE: "banal"}
-DREAM_TONE = {c.NIGHTMARE: "danger", c.PLEASANT: "ok", c.ASSOCIATIVE: "info", c.MUNDANE: "muted"}
+DREAM_FR = {c.NIGHTMARE: "cauchemar", c.PLEASANT: "doux", c.MELANCHOLIC: "mélancolique", c.ASSOCIATIVE: "étrange",
+            c.MUNDANE: "banal"}
+DREAM_TONE = {c.NIGHTMARE: "danger", c.PLEASANT: "ok", c.MELANCHOLIC: "warn", c.ASSOCIATIVE: "info",
+              c.MUNDANE: "muted"}
+CAUSE_FR = {IGNORED: "une initiative restée sans réponse", HEARD: "une réponse après des initiatives ignorées",
+            ACHIEVED: "quelque chose mené à bout", STUCK: "un blocage", PROMISE: "une promesse non tenue",
+            c.THANKED: "un merci", c.COMPLIMENTED: "un compliment", c.INSULTED: "une insulte"}
 
 
 def number(value: float) -> str:
@@ -139,11 +156,26 @@ def _esteem(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("elle doute sous", number(p.doubt_below)),
         ("sûre d'elle au-dessus de", number(p.assured_above)),
         ("ce qui la bouscule", f"une initiative ignorée {p.ignored_knock:+.2f}, une réponse qui rompt la série "
-                               f"{p.heard_again_knock:+.2f}, un but mené à bout {p.achieved_knock:+.2f}, un but "
-                               f"bloqué {p.stuck_knock:+.2f}, une promesse non tenue "
-                               f"{p.broken_promise_knock:+.2f}".replace(".", ",")),
+                               f"{p.heard_again_knock:+.2f}, un but bloqué {p.stuck_knock:+.2f}, une promesse non "
+                               f"tenue {p.broken_promise_knock:+.2f}".replace(".", ",")),
+        ("ce qu'elle mène à bout", f"{number(p.achieved_base)} à {number(p.achieved_base + p.achieved_effort)} "
+                                   f"selon l'effort (plein à {p.achieved_full_steps} séances, s'il est prouvé), "
+                                   f"au plus {number(p.achieved_daily_cap)} par jour"),
+        ("ce qu'on lui dit d'elle", f"un merci ou un compliment {p.thanked_knock:+.3f}, une insulte qui la vise "
+                                    f"{p.insulted_knock:+.3f} (une amie : en entier ; une connaissance : × "
+                                    f"{number(p.acquaintance_weight)} ; une inconnue : × "
+                                    f"{number(p.stranger_weight)}), au plus {number(p.social_daily_cap)} par "
+                                    "personne et par jour".replace(".", ",")),
     ), title="L'estime", columns=2)
-    return [stats, curve, rules]
+    knocks = Table((Column("quand", "fit"), Column("pourquoi"), Column("coup", "fit")),
+                   tuple((When(k.at), CAUSE_FR.get(k.cause, k.cause), f"{k.delta:+.3f}".replace(".", ","))
+                         for k in reversed(s.knocks)),
+                   title="Les derniers coups", empty="jamais bousculée")
+    cause = doubt_cause(s, frame.now, p) if now < p.doubt_below else ""
+    blocks: list[Block] = [stats, curve, rules, knocks]
+    if cause:
+        blocks.insert(1, Note(f"Elle doute un peu d'elle : {cause}.", tone="warn"))
+    return blocks
 
 
 def _narrative(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -205,6 +237,12 @@ def _inspect_self(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block
 # ── Nuits ─────────────────────────────────────────────────────────────────
 
 
+def _remembered(d: Dream) -> str:
+    if not d.remembered:
+        return "oublié au réveil"
+    return "souvenu au réveil, déjà raconté" if d.recalled else "souvenu au réveil"
+
+
 def _dream_title(d: Dream) -> str:
     return f"Rêve {DREAM_FR.get(d.kind, d.kind)} de la nuit du {d.night}"
 
@@ -215,9 +253,7 @@ def _timeline(journals: Sequence[Journal], dreams: Sequence[Dream], frame: Frame
                for j in journals]
     entries += [Entry(d.at, _dream_title(d), clip(texts[d.text_ref]) if d.text_ref in texts else FORGOTTEN,
                       tone=DREAM_TONE.get(d.kind, ""), href=Ref("event", str(d.id), f"n° {d.id}"),
-                      meta=f"vivacité {number(d.vividness)} · "
-                           f"{'revenu au réveil' if d.recalled else 'pas revenu au réveil'} · "
-                           f"couleur : {feeling(d.emotion)}")
+                      meta=f"vivacité {number(d.vividness)} · {_remembered(d)} · couleur : {feeling(d.emotion)}")
                 for d in dreams]
     entries.sort(key=lambda e: -e.at)
     return Timeline(tuple(entries[:PREVIEW]), title="Ses dernières nuits, en bref",
@@ -228,15 +264,16 @@ def _history(s: SelfState, frame: Frame, ctx: InspectContext) -> Table:
     """Toutes ses nuits, lues dans le journal (la tranche n'en garde que les
     dernières) : par pages de quatorze, des plus récentes aux plus anciennes."""
     before = ctx.int_param("avant", 0) or None
-    events = ctx.events([c.JOURNALED, c.DREAMT], PAGE, before=before)
-    recalled = {d.id: d.recalled for d in s.dreams}
+    found = ctx.events([c.JOURNALED, c.DREAMT], PAGE + 1, before=before)  # un de plus : y a-t-il une suite ?
+    events = found[:PAGE]
+    remembered = {d.id: d.remembered for d in s.dreams}
     rows = []
     for e in events:
         d = e.data
         text = d.text.text
         cell = Text(text, clamp=CLAMP) if text else Text(FORGOTTEN, kind="muted")
         if e.type.name == c.DREAMT.name:
-            back = recalled.get(e.seq)
+            back = remembered.get(e.seq)
             cells: tuple[Cell, ...] = (
                 Ref("event", str(e.seq), f"#{e.seq}"), When(e.at),
                 Badge(f"rêve {DREAM_FR.get(d.kind, d.kind)}", DREAM_TONE.get(d.kind, "")), d.night, cell,
@@ -248,10 +285,10 @@ def _history(s: SelfState, frame: Frame, ctx: InspectContext) -> Table:
             cells = (Ref("event", str(e.seq), f"#{e.seq}"), When(e.at), Badge("journal"), d.day, cell,
                      emotion_cell(d.dominant) if d.dominant else None, None, None, names(frame, d.about))
         rows.append(Row(cells, detail=(Prose(text or FORGOTTEN, title="En entier"),)))
-    pager = Pager(param="avant", size=PAGE, older=(("avant", str(events[-1].seq)),)) if len(events) >= PAGE \
+    pager = Pager(param="avant", size=PAGE, older=(("avant", str(events[-1].seq)),)) if len(found) > PAGE \
         else Pager(param="avant", size=PAGE)
     return Table((Column("n°", "fit", detail=True), Column("écrit", "fit", detail=True), Column("sorte", "fit"), Column("nuit", "fit"),
-                  Column("texte"), Column("couleur", detail=True), Column("vivacité", detail=True), Column("revenu au réveil", "fit"),
+                  Column("texte"), Column("couleur", detail=True), Column("vivacité", detail=True), Column("souvenu au réveil", "fit"),
                   Column("concerne")), tuple(rows), title="Toutes ses nuits",
                  empty="plus rien avant" if before else "pas encore de nuit racontée", pager=pager)
 

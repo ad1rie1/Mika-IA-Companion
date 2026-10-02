@@ -18,7 +18,7 @@
   {% else %}
   {% for f in a.fields %}{{ field(f) }}{% endfor %}
   {% endif %}
-  {% if a.retype %}<div class="field{{ ' has-error' if a.errors.get('_confirmer') }}"><label for="{{ a.id }}-confirmer">Retape « {{ a.subject }} » pour confirmer</label><input id="{{ a.id }}-confirmer" name="_confirmer" autocomplete="off" required>{% if a.errors.get('_confirmer') %}<span class="error">{{ a.errors['_confirmer'] }}</span>{% endif %}</div>{% endif %}
+  {% if a.retype %}<div class="field{{ ' has-error' if a.errors.get('_confirmer') }}"><label for="{{ a.id }}-confirmer">Retape « {{ a.retype_as or a.subject }} » pour confirmer</label><input id="{{ a.id }}-confirmer" name="_confirmer" autocomplete="off" required>{% if a.errors.get('_confirmer') %}<span class="error">{{ a.errors['_confirmer'] }}</span>{% endif %}</div>{% endif %}
   {% if a.confirm %}<noscript><label class="check"><input type="checkbox" name="_je_confirme" required> je confirme : {{ a.confirm }}</label></noscript>{% endif %}
   <div class="form-actions-inline"><button class="btn{{ ' danger' if a.danger else ' quiet' if button_only }}">{{ a.button or a.title }}</button>{% if not compact and a.back %} <a class="btn quiet" href="{{ a.back }}">Annuler</a>{% endif %}</div>
 </form>
@@ -61,7 +61,7 @@
     {% elif f.kind == "datetime" %}
       <input type="datetime-local" name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} value="{{ f.value }}"{{ ' readonly' if f.readonly }}{{ ' required' if f.required and not f.readonly }}>
     {% elif f.kind == "slider" %}
-      <span class="slider"><input type="range" name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} min="{{ f.lo }}" max="{{ f.hi }}" step="{{ f.step or 0.05 }}" value="{{ f.value }}" data-out="{{ f.id }}-out"><output id="{{ f.id }}-out" class="num">{{ f.value }}</output></span>
+      <span class="slider"><input type="range" name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} min="{{ f.lo }}" max="{{ f.hi }}" step="{{ f.step or 0.05 }}" value="{{ f.value }}" data-out="{{ f.id }}-out"><output id="{{ f.id }}-out" class="num">{{ f.value|string|replace(".", ",") }}</output></span>
     {% else %}
       <input name="{{ f.path }}" id="{{ f.id }}"{{ described(f) }} value="{{ f.value }}"{% if f.kind in ("int", "float") %} inputmode="decimal"{% endif %}{% if f.placeholder %} placeholder="{{ f.placeholder }}"{% endif %}{% if f.choices %} list="{{ f.id }}-choix" autocomplete="off"{% endif %}{{ ' readonly' if f.readonly }}{{ ' required' if f.required and not f.readonly }}>
       {% if f.choices %}<datalist id="{{ f.id }}-choix">{% for v, l in f.choices %}<option value="{{ v }}">{{ l }}</option>{% endfor %}</datalist>{% endif %}

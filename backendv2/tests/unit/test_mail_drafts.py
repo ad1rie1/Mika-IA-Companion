@@ -282,7 +282,9 @@ def test_a_reply_you_ask_for_goes_first_and_redoing_it_is_learnt(tmp_path):
     assert out["before"] == []  # pas de brouillon d'elle-même sur cette boîte
     assert out["ask"].ok and not out["ask again"].ok  # déjà demandé : l'action n'est plus offerte
     task = prompt_text(out["task"][0])
-    assert "CE QUE TON OPÉRATEUR VEUT Y RÉPONDRE" in task and "Dis oui, mais pas avant 15 h." in task
+    assert "CE QU'ON TE DEMANDE D'Y RÉPONDRE" in task and "Dis oui, mais pas avant 15 h." in task
+    # elle dit le prénom de qui le lui demande, jamais « ton opérateur »
+    assert "Adrien te demande de préparer une réponse" in task and "opérateur" not in task
     assert out["redo"].ok and out["refuse"].ok
     drafts = sorted(out["state"].drafts.values(), key=lambda d: d.proposal)
     assert [d.state for d in drafts] == ["refuse", "refuse"] and all(d.asked for d in drafts)

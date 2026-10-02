@@ -3,10 +3,17 @@
 Mots de passe : ``scrypt`` (sel aléatoire, paramètres dans l'empreinte).
 Sessions : jeton aléatoire opaque, durée bornée. Le premier compte ne se crée
 que tant qu'il n'en existe aucun ; il est opérateur.
+
+Vérifier un mot de passe coûte **un** scrypt, que le compte existe ou non (le
+leurre est calculé une fois) : la durée ne dit pas qui a un compte. ``verify``
+le fait hors de la boucle (un scrypt la figeait ~20 ms par essai).
+Une session révoquée (compte désactivé, mot de passe changé, droits retirés)
+prévient ceux qui écoutent (``on_revoke``) : ses WebSockets se ferment.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import os
@@ -20,6 +27,15 @@ SESSION_TTL_S = 14 * 24 * 3600
 _N, _R, _P = 2**14, 8, 1
 _COMMON = frozenset({"password", "motdepasse", "azertyuiop", "qwertyuiop", "12345678", "123456789", "iloveyou",
                      "password1", "baseball", "football", "sunshine", "princess", "letmein1", "trustno1"})
+_DECOY: list[str] = []
+
+
+def decoy_hash() -> str:
+    """Une empreinte de leurre, calculée une seule fois : vérifier un mot de passe contre
+    elle coûte exactement un scrypt, comme contre un vrai compte."""
+    if not _DECOY:
+        _DECOY.append(hash_password(secrets.token_urlsafe(16)))
+    return _DECOY[0]
 
 
 def hash_password(password: str) -> str:
@@ -77,10 +93,16 @@ class Accounts:
         self.store = store
         #: prévenu après chaque création ou modification (l'application en fait une personne)
         self.on_change: Callable[[], Awaitable[Any]] | None = None
+        #: prévenus quand les sessions d'un compte cessent de valoir (identifiant du compte)
+        self.on_revoke: list[Callable[[int], Awaitable[Any]]] = []
 
     async def _changed(self) -> None:
         if self.on_change is not None:
             await self.on_change()
+
+    async def _revoked(self, account_id: int) -> None:
+        for listener in list(self.on_revoke):
+            await listener(account_id)
 
     async def open(self) -> None:
         def create(sql: Any) -> None:
@@ -146,10 +168,19 @@ class Accounts:
     def authenticate(self, username: str, password: str) -> Account | None:
         found = self.by_name(username)
         if found is None:
-            check_password(password, hash_password("leurre"))  # même coût qu'un vrai essai
+            check_password(password, decoy_hash())  # un scrypt, comme un vrai essai
             return None
         acc, stored = found
         return acc if acc.active and check_password(password, stored) else None
+
+    async def verify(self, username: str, password: str) -> Account | None:
+        """Comme ``authenticate``, le scrypt hors de la boucle (la lecture du compte, elle, y reste)."""
+        found = self.by_name(username)
+        stored = found[1] if found is not None else decoy_hash()
+        ok = await asyncio.to_thread(check_password, password, stored)
+        if found is None or not ok:
+            return None
+        return found[0] if found[0].active else None
 
     async def open_session(self, account: Account) -> str:
         key = secrets.token_urlsafe(32)
@@ -201,6 +232,9 @@ class Accounts:
 
         await self.store.run_mind(write)
         await self._changed()
+        if not after_active or hashed is not None or (target.operator and not after_operator):
+            # sessions effacées, ou droits retirés : ses WebSockets ouvertes ne valent plus
+            await self._revoked(account_id)
         return None
 
     def session(self, key: str | None) -> Account | None:

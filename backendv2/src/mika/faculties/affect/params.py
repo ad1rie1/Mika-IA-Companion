@@ -7,7 +7,6 @@ comportement des tests, pas la v1 elle-même.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from typing import Annotated, Any
 
@@ -74,6 +73,8 @@ def physics_of(t: Temperament) -> dict[str, Any]:
         "relational_scale": min(1.0, 2.0 * max(0.0, t.contagion)),
         "background": t.background,
         "anchor_half_life_us": round(geometric(6.0, 1.5, t.resilience) * DAY),
+        # le fond d'une journée : plus long chez une âme lente à revenir au calme
+        "fond_tau_us": round(geometric(8.0, 3.0, t.resilience) * HOUR),
         # l'optimisme colore le repos : un peu plus (ou moins) de plaisir quand rien ne se passe
         "rest_valence": round(lerp(-0.12, 0.12, t.optimism), 4),
     }
@@ -169,8 +170,8 @@ class AffectParams(BaseModel):
     #: Part du repos d'une personne qui vient de ce qu'elle a déjà provoqué.
     anchor_weight: Annotated[float, Knob(
         label="Poids de l'ancre dans le repos", group="Repos et ancre", lo=0, hi=1, step=0.05,
-        help="Part du repos d'une posture qui vient de ce que la personne a déjà provoqué (l'ancre) ; le reste "
-             "est le repos commun.")] = 0.6
+        help="Part de l'ancre (ce que la personne a installé, mesuré depuis son repos moyen) qui s'ajoute au "
+             "repos commun pour faire le repos de sa posture envers elle.")] = 0.6
     anchor_alpha: Annotated[float, Knob(
         label="Ce qu'une déclaration fond dans l'ancre", group="Repos et ancre", lo=0, hi=1, step=0.01,
         help="À chaque déclaration envers une personne identifiable, l'ancre se rapproche de l'émotion déclarée "
@@ -185,14 +186,15 @@ class AffectParams(BaseModel):
              "une.")] = 30_000_000
     anchor_half_life_us: Annotated[int, Knob(
         label="Demi-vie de l'ancre", group="Repos et ancre", lo=6 * HOUR, hi=30 * DAY,
-        help="L'ancre guérit vers le repos commun avec cette demi-vie (effacée au-delà de vingt) : le temps "
-             "qu'une rancune ou une tendresse s'estompe. Dérivée de la résilience.")] = _DEFAULTS["anchor_half_life_us"]
-    #: Tant qu'une déclaration est fraîche, c'est elle qui dit ce qu'elle
-    #: ressent (la position n'a fait qu'une partie du chemin vers l'ancre).
-    declared_window_us: Annotated[int, Knob(
-        label="Fraîcheur d'une déclaration", group="Lecture", lo=MINUTE, hi=2 * HOUR,
-        help="Tant que sa dernière émotion déclarée envers quelqu'un est plus récente, c'est elle que le prompt "
-             "lui rappelle pour cette personne, plutôt que la position de sa posture.")] = 1_200_000_000
+        help="La demi-vie de base de l'ancre, qui guérit vers son repos moyen : celle d'un froid ordinaire. Une "
+             "chaleur et une rancune répétée durent plus longtemps (ci-dessous). Dérivée de la résilience.")] = _DEFAULTS["anchor_half_life_us"]
+    #: Ce qu'elle a déclaré envers quelqu'un décroît au rythme de sa posture ;
+    #: en deçà de ce plancher, c'est la position qui parle (plus de fenêtre dure).
+    declared_floor: Annotated[float, Knob(
+        label="Déclaration : plancher", group="Lecture", lo=0, hi=1, step=0.01,
+        help="Sa dernière émotion déclarée envers quelqu'un s'estompe au rythme de sa posture ; tant qu'elle reste "
+             "au-dessus de ce plancher (et de ce que dit la position), c'est elle que le prompt et le visage "
+             "montrent.")] = 0.1
     rest_tolerance: Annotated[float, Knob(
         label="Tolérance du repos", group="Lecture", lo=0, hi=0.5, step=0.01,
         help="En deçà de cette distance à son repos, son humeur est « comme d'habitude » et sa posture envers "
@@ -206,15 +208,83 @@ class AffectParams(BaseModel):
         help="Quand son humeur va dans le sens de son humeur de fond, au-delà de cette intensité le prompt dit "
              "« nettement plus que d'habitude ».")] = 0.6
     anchored_min_norm: Annotated[float, Knob(
-        label="Posture ancrée : intensité minimale", group="Lecture", lo=0, hi=1.2, step=0.05,
-        help="Une posture n'est dite « bien ancrée » (elle ne va pas s'estomper facilement) que si sa position "
-             "est au moins à cette distance de l'origine…")] = 0.4
+        label="Posture installée : écart minimal", group="Lecture", lo=0, hi=1.2, step=0.05,
+        help="Une posture n'est dite installée (« ça fait plusieurs échanges de suite… ») que si elle s'écarte "
+             "de son repos d'au moins cette distance…")] = 0.25
     anchored_min_impulses: Annotated[int, Knob(
         label="Posture ancrée : tours concordants", group="Lecture", lo=1, hi=8,
         help="… et que tant de déclarations récentes vont dans son sens (les huit dernières sont gardées).")] = 2
     anchored_window_us: Annotated[int, Knob(
         label="Posture ancrée : fenêtre", group="Lecture", lo=MINUTE, hi=6 * HOUR,
         help="… dans cette fenêtre.")] = 900_000_000
+    # ── le fond d'une journée ──
+    fond_tau_us: Annotated[int, Knob(
+        label="Fond : durée", group="Le fond d'une journée", lo=HOUR, hi=24 * HOUR,
+        help="La constante de temps (en heures d'éveil) de la moyenne glissante de ses émotions du moment : une "
+             "après-midi triste colore encore la soirée. Dérivée de la résilience.")] = _DEFAULTS["fond_tau_us"]
+    fond_weight: Annotated[float, Knob(
+        label="Fond : poids", group="Le fond d'une journée", lo=0, hi=2, step=0.05,
+        help="Ce que l'émotion du moment, tenue longtemps, laisse au fond (0 : aucun fond, elle revient au repos "
+             "en une vingtaine de minutes ; 1 : une émotion tenue des heures finit par devenir le fond).")] = 0.5
+    fond_max: Annotated[float, Knob(
+        label="Fond : plafond", group="Le fond d'une journée", lo=0, hi=0.6, step=0.01,
+        help="Le fond ne l'éloigne jamais de son repos au-delà de cette distance.")] = 0.2
+    fond_said: Annotated[float, Knob(
+        label="Fond : ce qui se dit", group="Le fond d'une journée", lo=0, hi=0.5, step=0.01,
+        help="Quand son humeur est à peu près au repos, un fond au-delà de cette distance se dit encore (« avec "
+             "un petit reste de tristesse de tout à l'heure »).")] = 0.04
+    sleep_relief: Annotated[float, Knob(
+        label="Ce que le sommeil allège", group="Le fond d'une journée", lo=0, hi=1, step=0.05,
+        help="Le fond ne bouge pas pendant qu'elle dort ; au réveil, il perd cette part. Le reste colore son "
+             "matin.")] = 0.6
+    # ── l'histoire d'une relation ──
+    anchor_history_days: Annotated[float, Knob(
+        label="Histoire qui ralentit l'ancre (jours)", group="L'histoire d'une relation", lo=1, hi=365, step=1,
+        help="Ce qu'une déclaration fond dans l'ancre est divisé par (1 + jours de contact ÷ ceci) : une longue "
+             "amitié ne se défait pas en sept phrases.")] = 14.0
+    empathy_tenderness: Annotated[float, Knob(
+        label="Empathie : tendresse", group="L'histoire d'une relation", lo=0, hi=1, step=0.05,
+        help="Une tristesse, une peur, une solitude dites à quelqu'un qui va mal se fondent dans l'ancre vers un "
+             "point tendre (cette part du chemin vers la tendresse, à pleine intensité), pas vers leur propre "
+             "émotion : consoler rapproche.")] = 0.3
+    warm_heal_factor: Annotated[float, Knob(
+        label="Chaleur : guérison plus lente", group="L'histoire d'une relation", lo=1, hi=20, step=0.5,
+        help="Une ancre chaleureuse guérit tant de fois plus lentement que la demi-vie de base : l'affection ne "
+             "s'évapore pas en une semaine.")] = 5.0
+    hostile_heal_steps: Annotated[int, Knob(
+        label="Rancune : répétitions", group="L'histoire d'une relation", lo=1, hi=100,
+        help="Une ancre hostile guérit (1 + déclarations hostiles ÷ ceci) fois plus lentement que la demi-vie de "
+             "base : une hostilité répétée dure.")] = 6
+    hostile_heal_max_us: Annotated[int, Knob(
+        label="Rancune : demi-vie maximale", group="L'histoire d'une relation", lo=DAY, hi=90 * DAY,
+        help="La demi-vie d'une ancre hostile ne dépasse jamais cette durée.")] = 21 * DAY
+    bond_step: Annotated[float, Knob(
+        label="Attachement : pas", group="L'histoire d'une relation", lo=0, hi=0.2, step=0.005,
+        help="Chaque déclaration chaleureuse ou empathique envers quelqu'un l'attache un peu plus (ce pas × "
+             "intensité × ce qui reste à gagner). L'attachement ne devient jamais négatif.")] = 0.01
+    bond_half_life_us: Annotated[int, Knob(
+        label="Attachement : demi-vie", group="L'histoire d'une relation", lo=7 * DAY, hi=365 * DAY,
+        help="Sans nouvelle déclaration, l'attachement s'estompe avec cette demi-vie.")] = 60 * DAY
+    bond_regard: Annotated[float, Knob(
+        label="Attachement : part dans la chaleur", group="L'histoire d'une relation", lo=0, hi=1, step=0.05,
+        help="Ce que l'attachement ajoute à la chaleur installée (le regard) envers quelqu'un.")] = 0.3
+    bond_damping: Annotated[float, Knob(
+        label="Attachement : ce qu'il ôte à la rancune", group="L'histoire d'une relation", lo=0, hi=1, step=0.05,
+        help="L'hostilité envers quelqu'un est multipliée par (1 − ceci × attachement) : on en veut moins à une "
+             "amie de longue date.")] = 0.6
+    bond_said: Annotated[float, Knob(
+        label="Attachement : « tu tiens à elle »", group="L'histoire d'une relation", lo=0, hi=1, step=0.05,
+        help="Au-delà de cet attachement, le prompt lui dit qu'elle tient à cette personne.")] = 0.35
+    wary_from: Annotated[float, Knob(
+        label="Méfiance : hostilité qui la déclenche", group="L'histoire d'une relation", lo=0, hi=1, step=0.05,
+        help="Envers quelqu'un qui n'est ni une amie ni une proche, une hostilité qui dépasse ce seuil laisse une "
+             "méfiance plancher (ci-dessous) pendant un moment.")] = 0.3
+    wary_floor: Annotated[float, Knob(
+        label="Méfiance : plancher", group="L'histoire d'une relation", lo=0, hi=1, step=0.05,
+        help="L'hostilité ne descend pas sous ce plancher tant que dure la méfiance.")] = 0.1
+    wary_us: Annotated[int, Knob(
+        label="Méfiance : durée", group="L'histoire d'une relation", lo=0, hi=90 * DAY,
+        help="Combien de temps dure la méfiance plancher après la dernière hostilité forte.")] = 14 * DAY
     #: Débordement d'humeur → preuve d'initiative (log-odds).
     overflow_floor: Annotated[float, Knob(
         label="Seuil de débordement de l'humeur", group="Humeur qui déborde", lo=0, hi=0.95, step=0.05,
@@ -224,11 +294,6 @@ class AffectParams(BaseModel):
         label="Preuve d'une humeur débordante", group="Humeur qui déborde", lo=0, hi=4, step=0.1,
         help="Preuve d'initiative (log-odds) d'une humeur pleinement débordante, croissant depuis le seuil. "
              "Plafonnée à 4 par l'arbitrage : seule, elle ne franchit pas le seuil d'initiative.")] = 4.0
-
-    @property
-    def heal_rate(self) -> float:
-        """Taux de guérison d'une ancre, par seconde."""
-        return math.log(2.0) / (self.anchor_half_life_us / 1_000_000)
 
 
 def derive(t: Temperament, overrides: Mapping[str, Any] | None = None) -> AffectParams:

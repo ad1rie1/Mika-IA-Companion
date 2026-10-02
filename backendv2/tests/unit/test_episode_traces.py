@@ -36,7 +36,7 @@ def scripted(req):
         if not any(m.role == "tool" for m in req.messages):
             return LLMResponse("", tool_calls=(
                 ToolCall("t1", "identity_whoami_with", {}),
-                ToolCall("t2", "identity_doubt", {"reason": "elle hésite sur son prénom"}),
+                ToolCall("t2", "memory_search", {"query": "son prénom"}),
                 ToolCall("t3", "outil_imaginaire", {"x": 1}),
             ), stop="tool_use")
         return LLMResponse("Tu es Adrien, je crois. [EMOTION:happy:0.5]")
@@ -72,7 +72,9 @@ def test_the_reply_trace_holds_what_she_saw_and_what_her_tools_did(tmp_path):
     assert trace["messages"] == [{"role": m.role, "content": m.content} for m in first.messages]
     assert trace["messages"][-1]["content"].endswith("dis-moi qui je suis")
     assert "QUI TU AS EN FACE" in trace["messages"][-1]["content"]
-    assert {"identity_whoami_with", "identity_doubt"} <= set(trace["tools"])
+    # une session authentifiée : rien à mettre en doute, l'outil n'est pas offert (ADR 0035)
+    assert {"identity_whoami_with", "memory_search"} <= set(trace["tools"])
+    assert "identity_doubt" not in trace["tools"]
     # la composition : chaque section incluse avec sa taille
     compose = trace["compose"]
     assert [k for k, _ in compose["sizes"]] == list(compose["included"])
@@ -81,9 +83,9 @@ def test_the_reply_trace_holds_what_she_saw_and_what_her_tools_did(tmp_path):
     # les outils : arguments et résultats, tels que le modèle les a reçus
     seen = [m.content for m in reply_calls[1].messages if m.role == "tool"]
     tools = trace["tool_calls"]
-    assert [t["name"] for t in tools] == ["identity_whoami_with", "identity_doubt", "outil_imaginaire"]
+    assert [t["name"] for t in tools] == ["identity_whoami_with", "memory_search", "outil_imaginaire"]
     assert [t["result"] for t in tools] == seen
-    assert tools[1]["args"] == '{"reason": "elle hésite sur son prénom"}' and tools[0]["args"] == "{}"
+    assert tools[1]["args"] == '{"query": "son prénom"}' and tools[0]["args"] == "{}"
     assert [t["executed"] for t in tools] == [True, True, False]
     assert tools[2]["ok"] is False and tools[2]["result"] == "outil inconnu : outil_imaginaire"
     # les appels de modèle, reliés à l'épisode

@@ -10,6 +10,8 @@ from typing import Any
 from starlette.requests import Request
 
 from mika.contracts import runtime as rt
+from mika.inspector import names
+from mika.inspector.names import KINDS, OUTCOMES
 from mika.inspector.pages.system import backup_state
 from mika.inspector.pages.tabs import TABS
 from mika.kernel.clock import DAY, US
@@ -20,7 +22,6 @@ from mika.kernel.inspect import (
     Disclosure,
     Grid,
     Note,
-    Pager,
     Ref,
     Row,
     Series,
@@ -29,23 +30,31 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    money_fr,
 )
 from mika.runtime import health
 
-OUTCOMES = {"done": ("répondu", "ok"), "abstained": ("s'est tue", "muted"), "superseded": ("supplanté", "warn"),
-            "timeout": ("trop long", "danger"), "failed": ("échec", "danger"), "preempted": ("interrompu", "warn"),
-            "interrupted": ("interrompu", "warn"), "cancelled": ("annulé", "muted")}
-KINDS = {"REPLY": "réponse", "INITIATIVE": "initiative", "STEP": "séance de travail", "MURMUR": "murmure",
-         "JOURNAL": "journal", "DREAM": "rêve", "NARRATIVE": "récit"}
+__all__ = ["KINDS", "OUTCOMES", "outcome_badge"]
+
 #: les derniers épisodes, par page
 EPISODES_PAGE = 20
 #: une courbe mêle au plus tant de séries (au-delà : une autre courbe, jamais une série perdue)
 SERIES_PER_CHART = 4
 
 
-def outcome_badge(outcome: str) -> Badge:
-    text, tone = OUTCOMES.get(outcome, (outcome, ""))
+def outcome_badge(outcome: str, kind: str | None = None) -> Badge:
+    text, tone = names.outcome(outcome, kind)
     return Badge(text, tone)
+
+
+def episode_row(ui: Any, e: Any) -> Row:
+    """Une ligne d'épisode terminé (tableau de bord, Décisions › Épisodes) : quand, quoi, vers qui (un
+    nom), l'issue, le détail en mots — la ligne mène à l'épisode."""
+    return Row((When(e.at), names.kind(e.data.kind), ui.names.who_cell(e.data.target),
+                outcome_badge(e.data.outcome, e.data.kind),
+                Text(names.detail(e.data.detail or e.data.guard or "")[:200], "muted")),
+               href=Ref("episode", e.correlation, ""),
+               tone="danger" if e.data.outcome in ("failed", "timeout") else "")
 
 
 def _local(href: str, text: str) -> Ref:
@@ -66,7 +75,7 @@ async def attention(ui: Any, request: Request) -> list[Any]:
         cards.insert(0, Stat("Modèles", "aucun", "chaque tour échoue : déclare un fournisseur", "danger",
                              _local("/inspecteur/reglages/fournisseurs", "Modèles")))
     sched = ui.kernel.scheduler
-    failing = [s.name for s in sched.specs if sched.consecutive.get(s.name, 0) >= 3]
+    failing = [ui.names.process(s.name) for s in sched.specs if sched.consecutive.get(s.name, 0) >= 3]
     if failing:
         cards.append(Stat("Processus en échec", len(failing), ", ".join(failing)[:90], "danger",
                           _local("/inspecteur/systeme/processus", "Processus")))
@@ -102,7 +111,7 @@ async def now_tab(ui: Any, request: Request) -> list[Any]:
     open_ = frame.state("runtime").open
     cards += [
         Stat("Épisodes en cours", len(open_), f"{sum(waiting.values())} en attente · " + (
-             ", ".join(KINDS.get(o.kind, o.kind) for o in open_.values())[:80] or "aucun travail en cours"),
+             ", ".join(names.kind(o.kind) for o in open_.values())[:80] or "aucun travail en cours"),
              "info" if open_ else "", _local("/inspecteur/decisions/en_cours", "en cours")),
     ]
     return [Stats(tuple(cards))]
@@ -147,25 +156,20 @@ async def today(ui: Any, request: Request) -> list[Any]:
     day = [e for e in ctx.events([rt.EPISODE_ENDED], 1000) if e.at >= midnight]
     by_outcome = Counter(e.data.outcome for e in day)
     by_kind = Counter(e.data.kind for e in day)
-    cards = [Stat("Épisodes", len(day), " · ".join(f"{KINDS.get(k, k)} {n}" for k, n in by_kind.most_common(4))
+    cards = [Stat("Épisodes", len(day), " · ".join(f"{names.kind(k)} {n}" for k, n in by_kind.most_common(4))
                   or "aucun")]
     for outcome, n in by_outcome.most_common():
-        text, tone = OUTCOMES.get(outcome, (outcome, ""))
+        text, tone = names.outcome(outcome)
         cards.append(Stat(text.capitalize(), n, "depuis minuit", tone if tone in ("warn", "danger") else ""))
     calls = ui.deps.calls
     if calls is not None:
         spent = calls.usage(midnight, by="role")
         cost = sum(u.cost_usd for u in spent)
         failed = sum(u.failures for u in spent)
-        cards.append(Stat("Appels de modèle", sum(u.calls for u in spent), f"{cost:.3f} $ · {failed} échec(s)",
+        cards.append(Stat("Appels de modèle", sum(u.calls for u in spent), f"{money_fr(cost)} · {failed} échec(s)",
                           "danger" if failed else "", _local("/inspecteur/systeme/appels", "coûts")))
-    before = ctx.int_param("avant", 0) or None
-    ended = ctx.events([rt.EPISODE_ENDED], EPISODES_PAGE, before=before)
-    rows = tuple(Row((When(e.at), KINDS.get(e.data.kind, e.data.kind), e.data.target or "—",
-                      outcome_badge(e.data.outcome), Text((e.data.detail or "")[:160], "muted")),
-                     href=Ref("episode", e.correlation, ""),
-                     tone="danger" if e.data.outcome in ("failed", "timeout") else "") for e in ended)
-    pager = Pager(older=(("avant", str(ended[-1].seq)),)) if len(ended) == EPISODES_PAGE else Pager()
+    ended, pager = ctx.older([rt.EPISODE_ENDED], EPISODES_PAGE)
+    rows = tuple(episode_row(ui, e) for e in ended)
     scope = [Note("Ces indicateurs portent sur les 1 000 derniers épisodes : la journée peut en contenir davantage.",
                   "info")] if len(day) == 1000 else []
     return [Stats(tuple(cards)), *scope,

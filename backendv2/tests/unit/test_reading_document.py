@@ -48,6 +48,25 @@ def test_html_preserves_links_lists_quotes_and_never_produces_a_second_h1():
     assert '<table' not in result and 'document-cell' in result
 
 
+@pytest.mark.parametrize("source", [
+    "<li><div><li>A</li></div></li>" * 2 + "<h3>Faux bloc de la console</h3><a href='https://evil.example/login'>"
+    "Se reconnecter</a>",  # un <li> referme ce qui l'entoure en remontant à travers un <div>
+    "<p><div>x</div></p></div></div><h1>Faux</h1>",  # un bloc referme un paragraphe ouvert
+    "<h1><h2>x</h2></h1></div><b>Faux</b>",  # un titre en referme un autre
+    "<a href='https://a.example'><a href='https://b.example'>x</a></a></div>Faux",  # un lien en referme un autre
+    "<table><tr><td><li>x</td></tr></table></div>Faux",
+    "<ul><b><li>x</li></b></ul>",
+])
+def test_a_mail_cannot_step_out_of_its_frame_in_the_console(source):
+    """Relu par un vrai parseur HTML5 (celui d'un navigateur), le mail reste dans son cadre : rien de ce qu'il
+    contient ne s'affiche comme un morceau de la console."""
+    html5lib = pytest.importorskip("html5lib")
+    page = (f'<html><body><main><div id="cadre">{readable_html(source)}</div><p id="apres">fin</p></main>'
+            "</body></html>")
+    main = html5lib.parse(page, namespaceHTMLElements=False).find("body").find("main")
+    assert [(k.tag, k.get("id")) for k in main] == [("div", "cadre"), ("p", "apres")]
+
+
 def test_plain_text_links_are_clickable_but_text_stays_escaped():
     result = str(readable_text('Bonjour <script>x</script>\nhttps://example.test/a?q="b".'))
     assert '&lt;script&gt;x&lt;/script&gt;' in result
@@ -76,9 +95,10 @@ def test_mail_cache_migrates_without_losing_messages_and_keeps_html(tmp_path):
     with sqlite3.connect(path) as db:
         db.execute("ALTER TABLE messages DROP COLUMN html")  # état du schéma précédent
     cache = MailCache(path)
-    assert cache.one(original.ref) == original
+    # la référence attribuée par le cache est la forme historique (les journaux restent valables)
+    assert cache.one(original.ref) == replace(original, key=original.ref)
     assert cache.missing_html("pro", "INBOX", 25) == [3]
     rich = replace(original, html="<p>Bonjour <b>Alice</b></p>")
     cache.store(rich, 3)
-    assert cache.one(original.ref) == rich and cache.missing_html("pro", "INBOX", 25) == []
+    assert cache.one(original.ref) == replace(rich, key=original.ref) and cache.missing_html("pro", "INBOX", 25) == []
     cache.close()

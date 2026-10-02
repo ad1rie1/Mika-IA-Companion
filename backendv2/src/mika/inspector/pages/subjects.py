@@ -14,7 +14,7 @@ from starlette.routing import Route
 
 from mika.inspector import render
 from mika.inspector.ui import PREFIX, secure
-from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Table, is_page_param
+from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Table, Text, is_page_param
 from mika.runtime import operations
 
 #: Une page par type d'objet, sans plafond sur l'ensemble des résultats.
@@ -26,13 +26,22 @@ def fiche_url(kind: str, key: str, tab: str = "") -> str:
     return base + (f"?{urlencode({'onglet': tab})}" if tab else "")
 
 
-def forget_form(ui: Any, request: Request, kind: str, key: str) -> dict[str, Any]:
+def forget_form(ui: Any, request: Request, kind: str, key: str, shown: str = "") -> dict[str, Any]:
+    """Le formulaire d'oubli : on retape **le nom affiché** (« Adrien »), pas une clé technique."""
+    shown = shown or key
     return {"url": f"{PREFIX}/oublier/{quote(kind, safe='')}/{quote(key, safe='')}", "csrf": ui.csrf(request),
             "nonce": "", "back": fiche_url(kind, key), "title": "Oublier", "fields": [], "retype": True,
-            "subject": key, "danger": True, "button": "Oublier pour de bon", "errors": {}, "id": f"oubli-{kind}",
-            "description": "Efface tout ce qui la concerne (messages, souvenirs, traces) ; le journal garde des "
-                           "enveloppes vides. Les sauvegardes plus anciennes la contiennent encore.",
-            "confirm": "Oublier pour de bon ? C'est irréversible."}
+            "subject": key, "retype_as": shown, "danger": True, "button": "Oublier pour de bon", "errors": {},
+            "id": f"oubli-{kind}",
+            "description": "Efface tout ce qui concerne cette personne (messages, souvenirs, traces) ; le journal "
+                           "garde des enveloppes vides. Les sauvegardes plus anciennes la contiennent encore.",
+            "confirm": f"Oublier « {shown} » pour de bon ? C'est irréversible."}
+
+
+def retyped(given: str, shown: str, key: str) -> bool:
+    """Le nom retapé confirme-t-il l'oubli ? Le nom affiché (casse et espaces près) ou la clé exacte."""
+    folded = " ".join(given.split()).casefold()
+    return bool(folded) and (folded == " ".join(shown.split()).casefold() or given.strip() == key)
 
 
 class Subjects:
@@ -68,9 +77,9 @@ class Subjects:
         actions = self.pages.head_actions(request, kind=kind, subject=key) \
             if not isinstance(head, Head) or (head.automatic_actions and
                 (not head.action_tabs or current is not None and current.name in head.action_tabs)) else []
-        if spec.forgettable:
-            actions.append(forget_form(self.ui, request, kind, key))
         title = head.title if isinstance(head, Head) else key
+        if spec.forgettable:
+            actions.append(forget_form(self.ui, request, kind, key, title))
         home = next((d for d in self.pages.dests.values() if kind in d.subjects), None)
         crumbs = ([(home.label, f"{PREFIX}/{home.key}")] if home else []) + \
             ([] if home and home.label == spec.plural else [(spec.plural, f"{PREFIX}/recherche?sorte={quote(kind)}")])
@@ -81,6 +90,10 @@ class Subjects:
             crumbs = [("Retour à la liste", back)]
         env = self.ui.env()
         facts = [{"label": k, "cell": render.cell(v, env)} for k, v in (head.facts if isinstance(head, Head) else ())]
+        if kind == "person" and isinstance(head, Head):
+            # ce qu'elle ferait maintenant envers cette personne, et ce qui la retient (lecture seule)
+            facts.append({"label": "maintenant", "cell": render.cell(Ref(
+                "local", f"{PREFIX}/decisions/envers", "que ferait-elle envers elle ?", (("personne", key),)), env)})
         badges = [{"text": b.text, "tone": b.tone} for b in (head.badges if isinstance(head, Head) else ())]
         return self.pages.render_page(
             request, title=f"{title} · {spec.label}", heading=title, active=home.key if home else "",
@@ -113,7 +126,8 @@ class Subjects:
             blocks.insert(0, Table(("événement",), ((Ref("event", q, f"l'événement n° {q}"),),), title="Journal"))
         views = [v for v in self.ui.inspection.views() if q and q.lower() in v.title.lower()]
         if views:
-            blocks.append(Table(("vue", "faculté"), tuple((Ref.view(v.owner, v.name, v.title), v.owner)
+            blocks.append(Table(("vue", "faculté"), tuple((Ref.view(v.owner, v.name, v.title),
+                                                          Text(self.ui.names.faculty(v.owner), hint=v.owner))
                                                          for v in views), title="Vues"))
         if not blocks:
             blocks = [Note("Rien ne correspond." if q else "Tape un nom, un numéro d'événement, un titre.", "muted")]
@@ -129,11 +143,12 @@ class Subjects:
         if spec is None or not spec.forgettable or data is None or account is None:
             return self.pages.render_page(request, title="Oubli refusé", active="", status=403,
                                           blocks=[Note("Jeton invalide, ou cet objet ne s'oublie pas.", "danger")])
-        if data.get("_confirmer", "").strip() != key:
-            return self.pages.render_page(request, title="Oubli refusé", active="", status=400,
-                                          blocks=[Note(f"Retape « {key} » pour confirmer.", "danger")],
-                                          crumbs=[("Retour", fiche_url(kind, key))])
         head = self.ui.inspection.head(kind, key)
+        shown = head.title if isinstance(head, Head) else key
+        if not retyped(str(data.get("_confirmer", "")), shown, key):
+            return self.pages.render_page(request, title="Oubli refusé", active="", status=400,
+                                          blocks=[Note(f"Retape « {shown} » pour confirmer.", "danger")],
+                                          crumbs=[("Retour", fiche_url(kind, key))])
         keys = [key, *(head.aliases if isinstance(head, Head) else ())]
         removed = 0
         for k in dict.fromkeys(keys):
@@ -141,7 +156,7 @@ class Subjects:
             removed += sum(v for v in got.values() if isinstance(v, int)) if isinstance(got, dict) else int(got or 0)
         await operations.audit(self.ui.kernel, f"console.oublier.{kind}", by=account.handle, subject_kind=kind,
                                subject=key)
-        self.ui.flash(f"oubli-{key}", "ok", f"« {key} » est oublié·e ({removed} contenu(s) effacé(s)).")
+        self.ui.flash(f"oubli-{key}", "ok", f"« {shown} » est oublié·e ({removed} contenu(s) effacé(s)).")
         return secure(RedirectResponse(f"{PREFIX}/?flash={quote('oubli-' + key, safe='')}", status_code=303))
 
     async def download(self, request: Request) -> Response:

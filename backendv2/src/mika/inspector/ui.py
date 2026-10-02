@@ -5,7 +5,9 @@ vitaux."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import logging
 import secrets
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -20,9 +22,19 @@ from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 
 from mika.adapters.web.accounts import Account, Accounts
+from mika.adapters.web.app import LoginThrottle
 from mika.contracts import runtime as rt
 from mika.inspector import render
-from mika.inspector.catalog import Builtin, Destination, NavGroup, SettingsSection, SettingsTab, builtin_keys
+from mika.inspector.catalog import (
+    Builtin,
+    Destination,
+    Labels,
+    NavGroup,
+    SettingsSection,
+    SettingsTab,
+    builtin_keys,
+)
+from mika.inspector.names import Names
 from mika.kernel import forms
 from mika.kernel.clock import US
 from mika.kernel.inspect import Vital
@@ -36,7 +48,14 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "6"
+ASSET_VERSION = "7"
+
+log = logging.getLogger("mika.console")
+
+#: échecs de connexion tolérés par identifiant et adresse IP, puis par adresse IP seule, sur la fenêtre
+LOGIN_FAILURES = 5
+LOGIN_FAILURES_PER_IP = 20
+LOGIN_WINDOW_S = 60.0
 
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'none'; style-src 'self'; script-src 'self'; img-src 'self' data:; "
@@ -84,6 +103,8 @@ class InspectorDeps:
     #: Configuration › Comportement : (famille, facultés) et le nom lisible de chacune
     param_families: Sequence[tuple[str, Sequence[str]]] = field(default_factory=tuple)
     faculty_labels: Mapping[str, str] = field(default_factory=dict)
+    #: les noms en français de ce que déclarent les facultés (sections, raisons, vetos, processus…)
+    labels: Labels | None = None
 
 
 env = Environment(loader=FileSystemLoader(TEMPLATES), autoescape=select_autoescape(default=True),
@@ -102,9 +123,30 @@ class UI:
         sampler = deps.sampler or getattr(getattr(deps.kernel, "series", None), "read", None)
         self.inspection = Inspection(deps.kernel, sampler=sampler)
         self.sampler = sampler
+        labels = deps.labels or Labels()
+        if not labels.faculties and deps.faculty_labels:
+            labels = dataclasses.replace(labels, faculties=dict(deps.faculty_labels))
+        #: le nom affiché de tout (``names.py``)
+        self.names = Names(deps.kernel, labels)
         self._tz: tuple[int, ZoneInfo] | None = None
         #: les messages d'après une action, lus une fois (clé : le jeton du formulaire)
         self._flash: dict[str, tuple[str, str]] = {}
+        #: la connexion à la console : le même étranglement que /auth/login (identifiant et IP), plus
+        #: un plafond par IP (qui essaierait cent identifiants)
+        self.login_throttle = LoginThrottle(LOGIN_FAILURES, LOGIN_WINDOW_S)
+        self.ip_throttle = LoginThrottle(LOGIN_FAILURES_PER_IP, LOGIN_WINDOW_S)
+
+    def login_blocked(self, ip: str, username: str) -> bool:
+        # l'adresse IP d'abord : une IP déjà bloquée ne fait plus naître d'entrée par identifiant tapé
+        return self.ip_throttle.blocked(ip) or self.login_throttle.blocked(f"{ip}:{username.casefold()}")
+
+    def login_failed(self, ip: str, username: str) -> None:
+        """Un échec compté et journalisé (le nom tapé, borné et sans caractère de contrôle ; jamais le
+        mot de passe)."""
+        self.login_throttle.fail(f"{ip}:{username.casefold()}")
+        self.ip_throttle.fail(ip)
+        shown = "".join(c for c in username if c.isprintable())[:60]
+        log.warning("console : connexion refusée pour « %s » depuis %s", shown, ip)
 
     def flash(self, key: str, tone: str, text: str) -> None:
         self._flash[key] = (tone, text)

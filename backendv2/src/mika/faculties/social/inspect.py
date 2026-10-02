@@ -12,6 +12,8 @@ from __future__ import annotations
 from mika.contracts import identity as identity_c
 from mika.contracts import social as c
 from mika.faculties.social.faculty import SOCIAL, SocialParams, SocialState, params
+from mika.faculties.social.profile import lines_of
+from mika.faculties.social.sections import refs_of
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -42,8 +44,9 @@ SUMMARY_CHARS = 300
 #: La proximité « automatique » (vécue) dans les formulaires : aucune déclaration.
 AUTO = "auto"
 
-CLOSENESS_FR = {c.STRANGER: "une inconnue", c.ACQUAINTANCE: "une connaissance", c.FRIEND: "une amie",
-                c.CLOSE: "une proche"}
+#: Sans genre imposé : la console parle aussi d'Adrien.
+CLOSENESS_FR = {c.STRANGER: "pas encore de lien", c.ACQUAINTANCE: "connaissance", c.FRIEND: "amitié",
+                c.CLOSE: "proche"}
 CLOSENESS_TONE = {c.STRANGER: "muted", c.ACQUAINTANCE: "", c.FRIEND: "info", c.CLOSE: "ok"}
 FORGOTTEN = "(oublié)"
 
@@ -94,10 +97,28 @@ def _silence(reading: c.ContactReading, p: SocialParams) -> Cell:
 
 
 def _texts(s: SocialState, people: list[str], ctx: InspectContext) -> dict[str, str] | None:
-    refs = [s.profiles[p].summary_ref for p in people if p in s.profiles and s.profiles[p].summary_ref]
+    refs = [r for p in people if p in s.profiles for r in refs_of(s.profiles[p])]
     if ctx.store is None:
         return None
     return ctx.store.content(refs) if refs else {}
+
+
+def _part(ref: str, legacy: str, texts: dict[str, str] | None) -> str:
+    """Un texte du profil : gardé à part (« (oublié) » s'il a été oublié), ou en clair (profil ancien)."""
+    if not ref:
+        return legacy or "—"
+    if texts is None:
+        return "(magasin indisponible)"
+    return texts.get(ref) or FORGOTTEN
+
+
+def _listed(ref: str, legacy: tuple[str, ...], texts: dict[str, str] | None) -> str:
+    if not ref:
+        return ", ".join(legacy) or "—"
+    if texts is None:
+        return "(magasin indisponible)"
+    got = texts.get(ref)
+    return ", ".join(lines_of(got)) if got is not None else FORGOTTEN
 
 
 def _summary(s: SocialState, person: str, texts: dict[str, str] | None) -> str:
@@ -139,6 +160,9 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str, *, o
         Fields((
             *((() if on_fiche else (("personne", _ref(frame, person)),))),  # sur sa fiche : pas de lien vers elle-même
             ("jours de contact", reading.days), ("messages reçus", reading.inbound),
+            ("qui ouvre leurs conversations",
+             f"elle {reading.her_starts} fois, la personne {reading.their_starts} fois"
+             + (" — c'est presque toujours elle" if reading.one_sided else "")),
             ("premier message reçu", _when(reading.first_in)),
             ("dernier message envoyé", _when(reading.last_out)),
             ("dernière salutation", _when(s.greeted.get(person, 0))),
@@ -154,9 +178,9 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str, *, o
     else:
         blocks.append(Fields((
             ("relu le", _when(profile.revised_at)),
-            ("comment lui parler", profile.tone or "—"),
-            ("ce qui l'intéresse", ", ".join(profile.interests) or "—"),
-            ("sujets délicats", ", ".join(profile.sensitive) or "—"),
+            ("comment lui parler", _part(profile.tone_ref, profile.tone, texts)),
+            ("ce qui l'intéresse", _listed(profile.interests_ref, profile.interests, texts)),
+            ("sujets délicats", _listed(profile.sensitive_ref, profile.sensitive, texts)),
             ("mémoire relue jusqu'à l'élément", profile.upto),
         ), title="Ce qu'elle en pense", columns=2))
         blocks.append(Prose(_summary(s, person, texts), title="Ce qu'elle en sait", clamp=1200))
@@ -172,7 +196,7 @@ def _link(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if not is_identifiable(person):
         return [Note("Une connexion de passage : aucun lien durable ne s'y attache.", tone="muted")]
     blocks: list[Block] = (_detail(s, frame, ctx, person, on_fiche=True) if person in _known(s) else
-                           [Note("Aucun lien pour l'instant : elle ou il ne lui a jamais écrit, et rien n'a été "
+                           [Note("Aucun lien pour l'instant : cette personne ne lui a jamais écrit, et rien n'a été "
                                  "déclaré.", tone="muted")])
     if settable(frame, person):
         blocks.append(ActionSlot("social.proximite", initial=(("closeness", s.declared.get(person) or AUTO),),

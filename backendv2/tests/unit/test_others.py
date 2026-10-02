@@ -205,8 +205,12 @@ def test_what_she_guesses_replays_to_the_same_model(tmp_path):
 
 
 def _check_ins(kernel, handle):
+    """Ses messages pour prendre de ses nouvelles : la prise de nouvelles (``check_in``), ou la pensée inquiète
+    qui la pousse à lui en reparler (``thought``) — deux chemins vers le même geste, et c'est le hasard de
+    l'arbitre (dérivé du journal) qui décide lequel passe le premier."""
     return [e for e in events(kernel, rt.EPISODE_STARTED.name)
-            if e.data.kind == "INITIATIVE" and e.data.target == handle and others_c.CHECK_IN in e.data.reason]
+            if e.data.kind == "INITIATIVE" and e.data.target == handle
+            and {others_c.CHECK_IN, attention_c.THOUGHT} & set(e.data.reason.split(","))]
 
 
 @pytest.mark.parametrize("last,expected", [("j'en ai marre, je suis épuisée", True), ("bon, à plus !", False)])
@@ -219,11 +223,13 @@ def test_she_checks_on_a_friend_who_did_not_seem_well(tmp_path, last, expected):
         await chat(kernel, "tg_1", LIGHT + [last], channel="telegram")
         sent_at = events(kernel, others_c.READ.name)[-1].at  # quand elle a lu le dernier message
         await asyncio.sleep(10 * HOUR / US)
-        return [(e.at - sent_at) for e in _check_ins(kernel, "tg_1")]
+        return [(e.at - sent_at, e.data.reason) for e in _check_ins(kernel, "tg_1")]
 
     delays = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 11, 0))
     if expected:
-        assert len(delays) == 1 and P.checkin_after_us <= delays[0] <= 10 * HOUR, delays
+        assert len(delays) == 1 and delays[0][0] <= 10 * HOUR, delays
+        if others_c.CHECK_IN in delays[0][1]:  # la prise de nouvelles attend quelques heures
+            assert delays[0][0] >= P.checkin_after_us, delays
     else:
         assert delays == []
 

@@ -51,7 +51,7 @@ from mika.plugins.email import (
     WAITING,
     DraftSeen,
     EmailState,
-    operator_name,
+    operator_label,
 )
 from mika.plugins.email.console.common import (
     NO_PORT,
@@ -65,7 +65,7 @@ from mika.plugins.email.console.common import (
     workspace,
 )
 from mika.plugins.email.console.mail import _document
-from mika.ports.mail import TO_FILL
+from mika.ports.mail import to_fill
 from mika.ports.paging import page_slice
 from mika.vocab.privacy import Sensitivity
 
@@ -108,7 +108,7 @@ def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                     Ref.subject("mail", mail_key(d.mail), clip(answered.subject, 60)) if answered is not None
                     else ("—" if not d.mail else Text("un mail plus dans la boîte", "muted")),
                     Badge("demandé" if d.asked else "d'elle-même", "info" if d.asked else ""), When(d.at),
-                    _badge(d.state), Badge("à compléter", "warn") if got is not None and TO_FILL in got.body else ""),
+                    _badge(d.state), Badge("à compléter", "warn") if got is not None and to_fill(got.body, got.subject) else ""),
                    href=Ref.subject("brouillon", d.draft, clip(got.subject if got else d.draft, 60))
                    if d.draft else None, tone="warn" if d.state == WAITING else "")
 
@@ -136,9 +136,8 @@ def _head(s: EmailState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
         return None
     badges: list[Badge] = [_badge(seen.state if seen is not None else got.state if got is not None else "")]
     if got is not None and got.edited_by:
-        badges.append(Badge(f"retouché par {operator_name(frame, got.edited_by)}".replace("ton opérateur",
-                                                                                          "l'opérateur"), "warn"))
-    if got is not None and TO_FILL in got.body:
+        badges.append(Badge(f"retouché par {operator_label(frame, got.edited_by)}", "warn"))
+    if got is not None and to_fill(got.body, got.subject):
         badges.append(Badge("à compléter", "warn"))
     info = port.account(got.account) if port is not None and got is not None else None
     facts: list[tuple[str, Any]] = []

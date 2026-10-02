@@ -6,10 +6,44 @@ jamais une adresse arbitraire qu'un texte lui aurait soufflée.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Protocol
+from urllib.parse import parse_qsl, urlsplit, urlunsplit
 
 from mika.ports.paging import Page
+
+
+def shown(url: str) -> str:
+    """Une adresse montrable : ni identifiants, ni valeurs de paramètres (un flux
+    privé porte souvent son jeton dans l'adresse)."""
+    try:
+        parts = urlsplit(url.strip())
+        host = parts.hostname or ""
+        port = parts.port
+    except ValueError:
+        return "(adresse illisible)"
+    if port:
+        host = f"{host}:{port}"
+    query = "&".join(f"{k}=…" for k, _ in parse_qsl(parts.query, keep_blank_values=True))
+    return urlunsplit((parts.scheme, host, parts.path, query, ""))[:300]
+
+
+_URL = re.compile(r"https?://[^\s«»()<>\"]+")
+
+
+def tokenless(text: str) -> str:
+    """Un texte où chaque adresse est montrable (les anciens résumés nommaient un flux sans titre par
+    son adresse entière, jeton compris)."""
+    return _URL.sub(lambda m: shown(m.group()), text or "")
+
+
+def feed_name(name: str) -> str:
+    """Le nom d'un flux tel qu'il peut se montrer : un flux sans titre a longtemps été
+    nommé par son adresse entière (jeton compris) — une adresse n'est montrée que
+    sans ses secrets."""
+    text = (name or "").strip()
+    return shown(text) if text.lower().startswith(("http://", "https://")) else text
 
 
 @dataclass(frozen=True, slots=True)

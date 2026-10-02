@@ -114,14 +114,16 @@ class Settings:
 
     # ── Telegram ──
     def telegram(self) -> dict[str, Any]:
-        """``{"token": …, "allowed_chats": [...], "owners": [...]}`` (jeton déchiffré)."""
+        """``{"token": …, "allowed_chats": [...], "owners": [...], "open": bool}`` (jeton déchiffré) ;
+        ``open`` : ouvert à tous — sinon, liste blanche vide, seules les propriétaires lui écrivent."""
         data = dict(self._get(TELEGRAM_KEY) or {})
         return {"token": self.box.open(data.get("token_sealed", "")),
                 "allowed_chats": [int(c) for c in data.get("allowed_chats") or []],
-                "owners": [int(o) for o in data.get("owners") or []]}
+                "owners": [int(o) for o in data.get("owners") or []],
+                "open": bool(data.get("open"))}
 
     async def save_telegram(self, *, token: str | None = None, allowed_chats: list[int] | None = None,
-                            owners: list[int] | None = None) -> None:
+                            owners: list[int] | None = None, open_to_all: bool | None = None) -> None:
         data = dict(self._get(TELEGRAM_KEY) or {})
         if token is not None:
             data["token_sealed"] = self.box.seal(token.strip())
@@ -129,6 +131,8 @@ class Settings:
             data["allowed_chats"] = sorted({int(c) for c in allowed_chats})
         if owners is not None:
             data["owners"] = sorted({int(o) for o in owners})
+        if open_to_all is not None:
+            data["open"] = bool(open_to_all)
         await self._put(TELEGRAM_KEY, data)
 
     # ── Courrier, flux, transcription ──

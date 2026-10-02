@@ -3,14 +3,31 @@
 - Un rôle « voix » sans persona est refusé (``MissingPersona``) : tout ce
   qu'elle dit, pense, écrit ou rêve passe par la même persona.
 - Chaque fournisseur a un nombre de créneaux ; un appel au premier plan
-  (priorité 0) passe devant les appels de fond en attente et, sur un
-  fournisseur à préemption (un modèle local à un créneau), interrompt l'appel
-  de fond en cours — qui se règle en ``preempted`` et sera reproposé.
-- Chaque appel laisse une trace (rôle, fournisseur, modèle, jetons, cache,
-  coût, latence, issue).
-- Un fournisseur peut avoir un repli : s'il échoue (non connecté, quota,
-  délai, panne), l'appel repart une fois sur le repli — deux traces, l'échec
-  puis la reprise. Une annulation n'est jamais reprise ailleurs.
+  (priorité 0) passe devant les appels de fond en attente. À deux créneaux ou
+  plus, **un créneau est réservé au premier plan** : le fond n'en occupe jamais
+  plus que ``n - 1``, une réponse n'attend donc jamais derrière lui. À un seul
+  créneau (un modèle local), l'appel au premier plan interrompt l'appel de fond
+  en cours — qui se règle en ``preempted`` et sera reproposé.
+- Un appel fait **pendant** un épisode (un outil qui regarde par la caméra au
+  milieu d'une réponse) hérite de la priorité et de la voie de cet épisode : il
+  ne repasse pas derrière le fond qu'il devançait.
+- **Chaque appel a un délai**, par voie (``deadlines``) : l'attente d'un créneau
+  comprise. Une réponse n'attend pas dix minutes un fournisseur muet.
+- Un fournisseur peut avoir un repli : s'il échoue (non connecté, quota, délai,
+  panne), l'appel repart une fois sur le repli **avec le temps qui reste** — le
+  principal n'en consomme que ``PRIMARY_SHARE`` quand un repli existe. Deux
+  traces, l'échec puis la reprise. Une annulation n'est jamais reprise ailleurs.
+- **Une boucle d'outils reste sur son fournisseur** (``call_id``) : passée sur le
+  repli, elle y reste ; et elle ne bascule en cours de route que vers un
+  fournisseur qui sait reprendre un fil d'outils déjà commencé — jamais vers la
+  CLI de Claude Code, qui le referait (des outils exécutés deux fois).
+- Une réponse coupée par son plafond de jetons, sans appel d'outil : une sortie
+  structurée (extraction, profil…) est redemandée une fois avec un plafond
+  doublé ; une parole (rôle voix) est coupée à sa dernière phrase complète —
+  redemandée seulement si rien de complet n'en restait (un modèle qui réfléchit
+  a tout dépensé avant le premier mot).
+- Chaque appel laisse une trace (rôle, fournisseur, modèle, jetons, cache, coût,
+  latence, attente, issue).
 """
 
 from __future__ import annotations
@@ -19,19 +36,45 @@ import asyncio
 import heapq
 import itertools
 import logging
-from collections import deque
+import re
+from collections import OrderedDict, deque
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 from typing import Any
 
 from mika.adapters.llm.pricing import price_usd
 from mika.kernel.clock import Clock
-from mika.ports.llm import PREEMPTED, LLMBackend, LLMRequest, LLMResponse, MissingPersona, Usage
+from mika.ports.llm import (
+    PREEMPTED,
+    RETRY_AFTER_CUT,
+    LLMBackend,
+    LLMRequest,
+    LLMResponse,
+    MissingPersona,
+    Usage,
+)
 
 #: les derniers appels gardés en mémoire
 TRACES_KEPT = 2000
+#: le délai d'un appel par voie (secondes, attente d'un créneau comprise) ; une voie inconnue prend « background »
+DEFAULT_DEADLINES: Mapping[str, float] = {"conversation": 120.0, "background": 300.0}
+#: la part du délai que le fournisseur principal peut consommer quand un repli existe
+PRIMARY_SHARE = 2 / 3
+#: en dessous, un repli ne vaut pas la peine d'être tenté (secondes)
+MIN_RETRY_S = 5.0
+#: le plafond d'une sortie redemandée après une coupure
+CUT_RETRY_CEILING = 8192
+#: les boucles d'outils dont on retient le fournisseur (collant par ``call_id``)
+STICKY_KEPT = 4096
 
 log = logging.getLogger("mika.llm.gateway")
+
+#: la priorité et la voie de l'épisode en cours dans cette tâche (posées par son appel principal)
+_AMBIENT: ContextVar[tuple[int, str] | None] = ContextVar("mika_llm_ambient", default=None)
+#: une fin de phrase : ponctuation forte, guillemets ou parenthèses fermants éventuels (« oui ! » à la
+#: française, espace comprise), puis un blanc ou la fin
+_SENTENCE_END = re.compile(r"[.!?…]+(?:[   ]*[»\"'”’)\]])*(?=\s|$)")
 
 
 class UnconfiguredRole(LookupError):
@@ -71,12 +114,36 @@ def correlation_of(req: LLMRequest) -> str:
     return req.call_id.split("#", 1)[0]
 
 
-class PrioritySlots:
-    """``n`` créneaux ; les demandes de plus basse priorité numérique passent d'abord."""
+def last_sentence(text: str) -> str:
+    """Le texte jusqu'à sa dernière phrase complète (vide : aucune)."""
+    ends = list(_SENTENCE_END.finditer(text))
+    return text[: ends[-1].end()].rstrip() if ends else ""
 
-    def __init__(self, n: int) -> None:
+
+def trim_speech(text: str) -> str:
+    """Une parole coupée par son plafond : jusqu'à sa dernière phrase complète ;
+    sans aucune, jusqu'au dernier mot entier, suivie de points de suspension."""
+    kept = last_sentence(text)
+    if kept:
+        return kept
+    words = text.strip().rsplit(maxsplit=1)
+    return f"{words[0].rstrip(' ,;:')}…" if len(words) == 2 else ""
+
+
+def in_tool_loop(req: LLMRequest) -> bool:
+    """La requête continue-t-elle une boucle d'outils déjà commencée ?"""
+    return any(m.role == "tool" or m.tool_calls for m in req.messages)
+
+
+class PrioritySlots:
+    """``n`` créneaux ; les demandes de plus basse priorité numérique passent
+    d'abord ; ``reserved`` créneaux ne servent qu'au premier plan (priorité 0)."""
+
+    def __init__(self, n: int, *, reserved: int = 0) -> None:
         self.n = max(1, n)
+        self.reserved = max(0, min(reserved, self.n - 1))
         self._used = 0
+        self._background = 0
         self._waiters: list[tuple[int, int, asyncio.Future[None]]] = []
         self._counter = itertools.count()
         self._holders: dict[int, tuple[int, asyncio.Task[Any] | None]] = {}
@@ -90,9 +157,28 @@ class PrioritySlots:
     def waiting(self) -> int:
         return sum(1 for _p, _c, fut in self._waiters if not fut.done())
 
+    def _fits(self, priority: int) -> bool:
+        if self._used >= self.n:
+            return False
+        return priority == 0 or self._background < self.n - self.reserved
+
+    def _ahead(self, priority: int) -> bool:
+        """Quelqu'un attend-il déjà, d'une priorité au moins aussi haute ?"""
+        return any(not fut.done() and p <= priority for p, _c, fut in self._waiters)
+
+    def _take(self, priority: int) -> None:
+        self._used += 1
+        if priority > 0:
+            self._background += 1
+
+    def _give_back(self, priority: int) -> None:
+        self._used -= 1
+        if priority > 0:
+            self._background -= 1
+
     async def acquire(self, priority: int, *, preempt: bool = False) -> int:
-        if self._used < self.n and not self._waiters:
-            self._used += 1
+        if self._fits(priority) and not self._ahead(priority):
+            self._take(priority)
             return self._register(priority)
         if preempt and priority == 0 and self._used >= self.n:
             for _token, (prio, task) in list(self._holders.items()):
@@ -106,7 +192,7 @@ class PrioritySlots:
             await fut  # à l'octroi, _wake_next a déjà compté le créneau
         except BaseException:
             if fut.done() and not fut.cancelled():
-                self._used -= 1  # octroyé puis annulé avant de reprendre : on le rend
+                self._give_back(priority)  # octroyé puis annulé avant de reprendre : on le rend
                 self._wake_next()
             else:
                 try:
@@ -123,17 +209,23 @@ class PrioritySlots:
         return token
 
     def release(self, token: int) -> None:
-        if self._holders.pop(token, None) is None:
+        held = self._holders.pop(token, None)
+        if held is None:
             return
-        self._used -= 1
+        self._give_back(held[0])
         self._wake_next()
 
     def _wake_next(self) -> None:
-        while self._waiters and self._used < self.n:
-            _p, _c, fut = heapq.heappop(self._waiters)
-            if not fut.done():
-                self._used += 1
-                fut.set_result(None)
+        while self._waiters:
+            priority, _c, fut = self._waiters[0]
+            if fut.done():
+                heapq.heappop(self._waiters)
+                continue
+            if not self._fits(priority):
+                return  # le premier en file est du fond, et le fond a sa part : le créneau réservé attend
+            heapq.heappop(self._waiters)
+            self._take(priority)
+            fut.set_result(None)
 
 
 class Gateway:
@@ -150,13 +242,15 @@ class Gateway:
         on_trace: Callable[[LLMTrace], None] | None = None,
         pricing: Mapping[str, tuple[str, str]] | None = None,
         backend_fallbacks: Mapping[str, str] | None = None,
+        deadlines: Mapping[str, float] | None = None,
     ) -> None:
         self.backends = dict(backends)
         self.routes = dict(routes)
         self.clock = clock
         self.voice_roles = voice_roles
         self.fallbacks = dict(fallbacks or {})
-        self._slots = {name: PrioritySlots((slots or {}).get(name, 4)) for name in self.backends}
+        counts = {name: (slots or {}).get(name, 4) for name in self.backends}
+        self._slots = {name: PrioritySlots(n, reserved=1 if n >= 2 else 0) for name, n in counts.items()}
         self.preempt = preempt
         #: les derniers appels (bornés : le détail durable va dans ``CallLog``)
         self.traces: deque[LLMTrace] = deque(maxlen=TRACES_KEPT)
@@ -166,6 +260,10 @@ class Gateway:
         #: fournisseur → fournisseur de repli quand il échoue
         self.backend_fallbacks = {k: v for k, v in (backend_fallbacks or {}).items()
                                   if v in self.backends and v != k}
+        #: voie → délai d'un appel (secondes)
+        self.deadlines = {**DEFAULT_DEADLINES, **dict(deadlines or {})}
+        #: boucle d'outils (``call_id``) → le fournisseur qui la tient
+        self._sticky: OrderedDict[str, str] = OrderedDict()
 
     def is_voice(self, role: str) -> bool:
         return role in self.voice_roles
@@ -206,42 +304,108 @@ class Gateway:
             r = self.fallbacks.get(r)
         raise UnconfiguredRole(role)
 
+    def deadline(self, lane: str) -> float:
+        return float(self.deadlines.get(lane, self.deadlines.get("background", DEFAULT_DEADLINES["background"])))
+
+    # ── Appel ────────────────────────────────────────────────────────────
+
     async def call(self, req: LLMRequest) -> LLMResponse:
         if self.is_voice(req.role) and req.persona is None:
             raise MissingPersona(f"le rôle voix « {req.role} » exige une persona")
-        name = self.resolve(req.role)
+        req = _inherit(req)
+        name = self._sticky.get(req.call_id)
+        if name not in self.backends:
+            name = self.resolve(req.role)
+        budget = self.deadline(req.lane)
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        alt = self._fallback_for(name, req)
         try:
-            return await self._on(name, req)
+            resp = await self._on(name, req, budget * PRIMARY_SHARE if alt is not None else budget)
         except Exception as exc:
-            alt = self.backend_fallbacks.get(name)
-            if alt is None:
+            remaining = budget - (loop.time() - start)
+            if alt is None or remaining < MIN_RETRY_S:
                 raise
             log.warning("%s a échoué pour « %s » (%s) : repli sur %s", name, req.role, exc, alt)
-            return await self._on(alt, req)
+            self._stick(req.call_id, alt)  # la suite de cette boucle reste sur le repli
+            name = alt
+            resp = await self._on(alt, req, remaining)
+        else:
+            self._stick(req.call_id, name)
+        return await self._after_cut(name, req, resp, budget - (loop.time() - start))
 
-    async def _on(self, name: str, req: LLMRequest) -> LLMResponse:
+    def _fallback_for(self, name: str, req: LLMRequest) -> str | None:
+        """Le repli permis pour cet appel : en cours de boucle d'outils, seulement un
+        fournisseur qui sait reprendre un fil d'outils (sinon des outils rejoués)."""
+        alt = self.backend_fallbacks.get(name)
+        if alt is None:
+            return None
+        if in_tool_loop(req) and not getattr(self.backends[alt], "resumes_tool_loops", True):
+            return None
+        return alt
+
+    def _stick(self, call_id: str, name: str) -> None:
+        self._sticky[call_id] = name
+        self._sticky.move_to_end(call_id)
+        while len(self._sticky) > STICKY_KEPT:
+            self._sticky.popitem(last=False)
+
+    async def _after_cut(self, name: str, req: LLMRequest, resp: LLMResponse, remaining: float) -> LLMResponse:
+        """Une réponse coupée par son plafond, sans appel d'outil (voir l'en-tête)."""
+        if resp.stop != "max_tokens" or resp.tool_calls or resp.truncated_tool_call:
+            return resp
+        voice = self.is_voice(req.role)
+        if voice and resp.text.strip():
+            return replace(resp, text=trim_speech(resp.text))
+        if req.meta.get(RETRY_AFTER_CUT) or req.max_tokens >= CUT_RETRY_CEILING or remaining < MIN_RETRY_S:
+            return resp
+        retry = replace(req, max_tokens=min(CUT_RETRY_CEILING, req.max_tokens * 2),
+                        meta={**dict(req.meta), RETRY_AFTER_CUT: True})
+        try:
+            again = await self._on(name, retry, remaining)
+        except Exception as exc:  # la première réponse, même coupée, vaut mieux que rien
+            log.info("%s : reprise après coupure impossible (%r)", name, exc)
+            return resp
+        if again.stop == "max_tokens" and not again.tool_calls and voice:
+            return replace(again, text=trim_speech(again.text))
+        return again
+
+    def release(self, call_id: str) -> None:
+        """La boucle d'outils ``call_id`` est finie : oublier son fournisseur, et
+        laisser celui-ci relâcher ce qu'il tient encore (une CLI en attente)."""
+        name = self._sticky.pop(call_id, None)
+        for backend in ([self.backends[name]] if name in self.backends else self.backends.values()):
+            hook = getattr(backend, "release", None)
+            if callable(hook):
+                hook(call_id)
+
+    async def _on(self, name: str, req: LLMRequest, budget: float) -> LLMResponse:
         backend = self.backends[name]
         slots = self._slots[name]
         t_wait = self.clock.now()
-        token = await slots.acquire(req.priority, preempt=name in self.preempt)
-        t0 = self.clock.now()
+        t0: int | None = None
+        token: int | None = None
         outcome = "ok"
         resp: LLMResponse | None = None
         try:
-            resp = await backend.complete(req)
+            async with asyncio.timeout(max(0.0, budget)):
+                token = await slots.acquire(req.priority, preempt=name in self.preempt)
+                t0 = self.clock.now()
+                resp = await backend.complete(req)
             return resp
-        except asyncio.CancelledError as exc:
-            outcome = "preempted" if PREEMPTED in exc.args else "cancelled"
-            raise
         except TimeoutError:
             outcome = "timeout"
+            raise
+        except asyncio.CancelledError as exc:
+            outcome = "preempted" if PREEMPTED in exc.args else "cancelled"
             raise
         except Exception as exc:
             outcome = f"error:{type(exc).__name__}"
             raise
         finally:
-            slots.release(token)
-            self._trace(req, name, resp, t_wait, t0, outcome)
+            if token is not None:
+                slots.release(token)
+            self._trace(req, name, resp, t_wait, t0 if t0 is not None else self.clock.now(), outcome)
 
     def _trace(self, req: LLMRequest, backend: str, resp: LLMResponse | None, t_wait: int, t0: int, outcome: str) -> None:
         now = self.clock.now()
@@ -260,3 +424,17 @@ class Gateway:
         self.traces.append(tr)
         if self._on_trace is not None:
             self._on_trace(tr)
+
+
+def _inherit(req: LLMRequest) -> LLMRequest:
+    """L'appel principal d'un épisode (``meta["episode"]``) pose sa priorité et sa
+    voie pour la tâche ; un appel fait ensuite dans la même tâche sans être celui
+    d'un épisode (un outil qui appelle un modèle) en hérite s'il était moins
+    prioritaire. Le prochain épisode de la tâche repose les siennes."""
+    if req.meta and req.meta.get("episode"):
+        _AMBIENT.set((req.priority, req.lane))
+        return req
+    ambient = _AMBIENT.get()
+    if ambient is not None and ambient[0] < req.priority:
+        return replace(req, priority=ambient[0], lane=ambient[1])
+    return req

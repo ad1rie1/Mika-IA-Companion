@@ -38,10 +38,13 @@
       });
     });
 
-    // Confirmations : le serveur revérifie de toute façon.
-    document.querySelectorAll("form[data-confirm]").forEach(function (f) {
+    // Confirmations (celle du bouton qui envoie, sinon celle du formulaire) : le serveur revérifie de
+    // toute façon. Un bouton « Approuver » se confirme, son voisin « Refuser » non.
+    document.querySelectorAll("form").forEach(function (f) {
       f.addEventListener("submit", function (ev) {
-        if (!window.confirm(f.getAttribute("data-confirm"))) ev.preventDefault();
+        var b = ev.submitter;
+        var msg = (b && b.getAttribute("data-confirm")) || f.getAttribute("data-confirm");
+        if (msg && !window.confirm(msg)) ev.preventDefault();
       });
     });
 
@@ -154,7 +157,8 @@
     // Curseurs : la valeur à côté.
     document.querySelectorAll("input[type=range][data-out]").forEach(function (r) {
       var out = document.getElementById(r.getAttribute("data-out"));
-      r.addEventListener("input", function () { if (out) out.textContent = r.value; });
+      // à la française : « 0,5 », pas « 0.5 » (la valeur envoyée, elle, garde son point)
+      r.addEventListener("input", function () { if (out) out.textContent = String(r.value).replace(".", ","); });
     });
 
     // Vitaux : rafraîchis toutes les 10 s, en pause quand l'onglet est caché.

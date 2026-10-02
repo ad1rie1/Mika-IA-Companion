@@ -17,10 +17,12 @@ from mika.inspector.formview import action_view, visible_fields
 from mika.inspector.pages import accounts, reglages
 from mika.inspector.pages.journal import EPISODE_TABS, episode_head, episode_tab, event_blocks
 from mika.inspector.pages.subjects import Subjects
+from mika.inspector.pages.system import outbox_post
+from mika.inspector.pages.why import why_page
 from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, secure
 from mika.kernel.faculty import InspectSpec
 from mika.kernel.forms import RENDERED, describe
-from mika.kernel.inspect import Filters, Note, Param, Section, Workspace, walk_blocks
+from mika.kernel.inspect import Filters, Note, Param, Section, Workspace, int_query, walk_blocks
 from mika.runtime.operations import dynamic_fields, fixed_values, initial_values, offered, perform
 
 #: les anciennes adresses de l'inspecteur → la console
@@ -309,8 +311,12 @@ class Pages:
         corr = request.path_params["corr"]
         info = episode_head(self.ui, corr)
         if info is None:
+            if self.ui.kernel.mind.store.query_mind("SELECT 1 FROM events WHERE correlation=? LIMIT 1", (corr,)):
+                # une action d'opérateur, un effet, un processus : pas un épisode — ses événements, dans le journal
+                return RedirectResponse(f"{PREFIX}/systeme/chronologie?" + urlencode({"correlation": corr}),
+                                        status_code=303)
             return self.render_page(request, title="Épisode inconnu", active="decisions", status=404,
-                                    blocks=[Note("Aucun événement pour cette corrélation.", "warn")])
+                                    blocks=[Note("Aucun épisode sous ce nom.", "warn")])
         slug = request.query_params.get("onglet", "deroule")
         if slug not in dict(EPISODE_TABS):
             slug = "deroule"
@@ -329,11 +335,26 @@ class Pages:
                                 active="decisions", crumbs=[("Décisions", f"{PREFIX}/decisions/episodes")],
                                 head_badges=info["badges"], facts=info["facts"], tabs=tabs, blocks=blocks)
 
+    async def outbox(self, request: Request) -> Response:
+        """Système › Sorties : relancer un effet en échec, ou le marquer comme vu."""
+        return await outbox_post(self.ui, request)
+
+    async def why(self, request: Request) -> Response:
+        """« Pourquoi a-t-elle dit ça ? » : une de ses paroles, expliquée."""
+        seq = int_query(request.path_params["seq"], 0)
+        got = why_page(self.ui, seq) if seq > 0 else None
+        if got is None:
+            return self.render_page(request, title="Parole introuvable", active="fil", status=404,
+                                    blocks=[Note("Ce numéro n'est pas une de ses paroles.", "warn")])
+        env = self.ui.env()
+        facts = [{"label": k, "cell": render.cell(v, env)} for k, v in got["facts"]]
+        return self.render_page(request, title=got["title"], heading=got["title"], subtitle=got["subtitle"],
+                                active="fil", facts=facts, blocks=got["blocks"],
+                                crumbs=[("Conversations", f"{PREFIX}/fil"),
+                                        ("Son épisode", f"{PREFIX}/episode/{quote(got['correlation'], safe='')}")])
+
     async def event(self, request: Request) -> Response:
-        try:
-            seq = int(request.path_params["seq"])
-        except ValueError:
-            seq = 0
+        seq = int_query(request.path_params["seq"], 0)
         got = event_blocks(self.ui, seq, request.query_params) if seq > 0 else None
         if got is None:
             return self.render_page(request, title="Événement introuvable", active="systeme", status=404,
@@ -350,11 +371,19 @@ class Pages:
         error = ""
         if request.method == "POST":
             data = await self.ui.form(request)
+            ip = request.client.host if request.client else "?"
+            username = str((data or {}).get("username", "")).strip()[:200]
             if data is None:
                 error = "Jeton de formulaire invalide : recharge la page."
+            elif self.ui.login_blocked(ip, username):
+                response = self.ui.bare(request, "login.html", "Connexion", status=429,
+                                        error="Trop de tentatives : réessaie dans une minute.")
+                response.headers["Retry-After"] = "60"
+                return response
             else:
-                acc = self.ui.deps.accounts.authenticate(data.get("username", ""), data.get("password", ""))
+                acc = self.ui.deps.accounts.authenticate(username, data.get("password", ""))
                 if acc is None or not acc.operator:
+                    self.ui.login_failed(ip, username)
                     error = "Identifiants invalides, ou compte non opérateur."
                 else:
                     key = await self.ui.deps.accounts.open_session(acc)
@@ -479,7 +508,9 @@ class Pages:
             Route(PREFIX + "/action/{key:str}", g(self.act), methods=["POST"]),
             Route(PREFIX + "/action/{key:str}", g(self.action_page), methods=["GET"]),
             Route(PREFIX + "/episode/{corr:str}", g(self.episode)),
+            Route(PREFIX + "/parole/{seq:str}", g(self.why)),
             Route(PREFIX + "/evenement/{seq:str}", g(self.event)),
+            Route(PREFIX + "/systeme/sorties", g(self.outbox), methods=["POST"]),
             Route(PREFIX + "/facultes/{owner:str}/{name:str}", g(self.view)),
             *Subjects(self).routes(),
         ]

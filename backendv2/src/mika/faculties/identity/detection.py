@@ -7,6 +7,11 @@ positif lui fait appeler un inconnu par le nom d'un ami ; dans le doute, rien.
 « je suis développeur » ne sont pas des noms — après « je suis », seul un mot
 écrit avec une majuscule, qui ne ressemble ni à un état ni à un participe,
 compte comme un nom.
+
+« Moi c'est » aussi : « moi c'est pizza ce soir, et toi ? » n'est pas une
+présentation. Elle ne compte qu'en tête de phrase (ou après une salutation),
+le nom fermant la proposition (« moi c'est Zoé », « moi c'est Zoé, et toi ? »).
+Un nom commun, une ville, une nationalité ne sont jamais des prénoms.
 """
 
 from __future__ import annotations
@@ -20,12 +25,16 @@ _CORE = r"[A-Za-zÀ-ÖØ-öø-ÿ][A-Za-zÀ-ÖØ-öø-ÿ'’-]{1,30}"
 #: Un ou deux mots ; jamais suivi d'un chiffre (« Agent007 » n'est pas « Agent »).
 _NAME = rf"{_CORE}(?:\s+{_CORE})?(?![A-Za-zÀ-ÖØ-öø-ÿ0-9])"
 MAX_NAME = 40
+#: Où une présentation peut commencer : en tête, après une ponctuation, une salutation ou « et ».
+_OPENING = r"(?:^\s*|[.!?,;:…(]\s*|\b(?:salut|bonjour|bonsoir|coucou|hey|hello|yo|re|ok|bon|alors|et)\b[\s,!]*)"
+#: Où elle finit : le nom ferme la proposition (ou « et toi ? », « enchantée »).
+_CLOSING = r"(?=\s*(?:[.!?,;:…)]|$)|\s+(?:et\s+(?:toi|vous)|enchant[ée]e?s?)\b)"
 
 
 @dataclass(frozen=True, slots=True)
 class Detection:
-    claim: str | None = None  # le nom qu'elle ou il se donne
-    denial: str | None = None  # le nom qu'elle ou il refuse
+    claim: str | None = None  # le nom que la personne se donne
+    denial: str | None = None  # le nom que la personne refuse
     strong: bool = True  # tournure sans ambiguïté (« je m'appelle »)
 
     @property
@@ -38,7 +47,7 @@ _STRONG = (
     re.compile(rf"\bje\s+m['’]appelle\s+({_NAME})", re.I),
     re.compile(rf"\bje\s+me\s+nomme\s+({_NAME})", re.I),
     re.compile(rf"\bmon\s+(?:pr[ée]nom|nom)\s*,?\s+(?:c['’]est|est)\s+({_NAME})", re.I),
-    re.compile(rf"\bmoi\s*,?\s*c['’]est\s+({_NAME})", re.I),
+    re.compile(rf"{_OPENING}moi\s*,?\s*c['’]est\s+({_NAME}){_CLOSING}", re.I),
     re.compile(rf"(?:\bc['’]est\s+)?\b({_NAME})\s+(?:[àa]\s+l['’]appareil|au\s+clavier)", re.I),
     re.compile(rf"^\s*(?:salut|bonjour|bonsoir|coucou|hey|hello|yo)[\s,!]+c['’]est\s+({_NAME})", re.I),
     re.compile(rf"\bmy\s+name\s+is\s+({_NAME})", re.I),
@@ -71,6 +80,24 @@ musicien musicienne dev admin humain humaine personne quelqu moi toi lui elle no
 grave rien tout sympa drole marrant normal possible vrai faux bon bonne mauvais mauvaise bizarre genial super top
 gentil gentille desolé francais francaise chez sure pareil pareille sincere serieux serieuse
 c l j m n s t qu est etait sera
+""".split()) | frozenset("""
+pizza pizzas pates pate burger burgers sushi sushis frites salade soupe raclette fondue tacos kebab sandwich
+crepes crepe gateau chocolat cafe the biere vin apero resto restaurant cantine dessert repas diner dejeuner
+gouter petit ce cette demain soir matin midi aujourd hier ce ca cela week weekend vacances boulot travail taf
+taff cours ecole fac lycee college sport foot football tennis basket velo course gym muscu piscine danse yoga
+cine cinema film films serie series netflix jeu jeux gaming console musique concert lecture livre livres dodo
+sieste douche menage courses lessive vaisselle cuisine maison appart bureau voiture train bus metro avion
+moi toi lui eux nous vous chacun personne tout rien quelqu quelquun chef patron collegue copain copine pote
+amie ami frere soeur maman papa mere pere mari femme fils fille bebe chat chien
+paris lyon marseille toulouse nice nantes bordeaux lille strasbourg montpellier rennes grenoble brest rouen
+toulon dijon reims angers limoges metz caen orleans bruxelles geneve lausanne montreal quebec londres berlin
+madrid rome barcelone lisbonne amsterdam tokyo
+francais francaise parisien parisienne lyonnais lyonnaise marseillais marseillaise toulousain toulousaine
+nantais nantaise bordelais bordelaise lillois lilloise breton bretonne normand normande alsacien alsacienne
+corse basque belge suisse canadien canadienne quebecois quebecoise americain americaine anglais anglaise
+allemand allemande espagnol espagnole italien italienne portugais portugaise chinois chinoise japonais
+japonaise algerien algerienne marocain marocaine tunisien tunisienne africain africaine europeen europeenne
+enchante enchantee enchantes enchantees ravi ravie
 """.split())
 #: Participes : « Allée », « Tombé » (un prénom finit rarement ainsi).
 _PARTICIPLE = re.compile(r"[éèê]e?s?$", re.I)

@@ -5,16 +5,21 @@ from __future__ import annotations
 
 import json
 import re
+import secrets as _secrets
 from collections import defaultdict
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from starlette.requests import Request
+from starlette.responses import RedirectResponse, Response
 
 from mika.adapters.llm.config import ROLE_LABELS
 from mika.contracts import runtime as rt
+from mika.inspector import names
+from mika.inspector.catalog import Panel
 from mika.inspector.pages.tabs import TABS
+from mika.inspector.ui import PREFIX, secure
 from mika.kernel.clock import DAY, US
 from mika.kernel.facts import FactKey
 from mika.kernel.inspect import (
@@ -27,7 +32,6 @@ from mika.kernel.inspect import (
     Nav,
     NavItem,
     Note,
-    Pager,
     Param,
     Prose,
     Ref,
@@ -38,15 +42,28 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    cursor_page,
+    day_fr,
+    describe_error,
+    money_fr,
+    num_fr,
+    pct_fr,
     read_params,
 )
 from mika.runtime import health
+from mika.runtime import operations as ops
 from mika.runtime.boundary import Failed, call
 
 STATE_TONES = {"ok": "ok", "degraded": "warn", "ko": "danger"}
 STATES_FR = {"ok": "en forme", "degraded": "dégradé", "ko": "en panne"}
 CHECKS_FR = {"journal": "journal", "slices": "tranches", "loops": "boucles", "projections": "projections",
-             "processes": "processus", "outbox": "file de sortie", "llm": "modèles", "lanes": "voies"}
+             "processes": "processus", "outbox": "file de sortie", "llm": "modèles", "lanes": "voies",
+             "config": "configuration lisible"}
+#: les états d'une ligne de la file de sortie ; « seen » : un échec qu'un opérateur a vu et laissé
+OUTBOX_LABELS = {"pending": "en attente", "done": "parti", "failed": "échoué", "orphan": "orphelin",
+                 "seen": "vu, laissé"}
+#: ce qui allume le badge « à traiter » de Sorties
+OUTBOX_PROBLEMS = ("failed", "orphan")
 #: les pages de Système qui lisent le journal ou une table, par page
 PAGE = 50
 REPORT_NAME = re.compile(r"^[\w.-]{1,120}\.(md|html|json|txt)$")
@@ -106,38 +123,48 @@ async def appels(ui: Any, request: Request) -> list[Any]:
     total_cost = sum(u.cost_usd for u in days)
     today = next((u for u in days if u.key == day_of(now)), None)
     out: list[Any] = [Stats((
-        Stat("Aujourd'hui", today.calls if today else 0, f"{today.cost_usd:.3f} $" if today else "0 $"),
-        Stat("14 jours", sum(u.calls for u in days), f"{total_cost:.2f} $"),
+        Stat("Aujourd'hui", today.calls if today else 0, money_fr(today.cost_usd) if today else money_fr(0.0)),
+        Stat("14 jours", sum(u.calls for u in days), money_fr(total_cost)),
         Stat("Échecs (14 j)", sum(u.failures for u in days), "", "danger" if any(u.failures for u in days) else ""),
-        Stat("Part du cache (7 j)", f"{_cache(roles):.0%}", "entrée lue depuis le cache"),
+        Stat("Part du cache (7 j)", pct_fr(_cache(roles)), "entrée lue depuis le cache"),
     ))]
+    stamp = {u.key: int(datetime.strptime(u.key, "%Y-%m-%d").replace(tzinfo=ui.tz).timestamp() * US)
+             for u in days}
     if days:
-        stamp = {u.key: int(datetime.strptime(u.key, "%Y-%m-%d").replace(tzinfo=ui.tz).timestamp() * US)
-                 for u in days}
         out.append(Chart((Series("coût", tuple((stamp[u.key], u.cost_usd) for u in days), 2),), kind="bars",
                          title="Coût par jour", unit="$"))
 
-    def usage_table(rows: list[Any], label: str, title: str) -> Table:
+    def day_label(key: str) -> str:
+        d = datetime.strptime(key, "%Y-%m-%d").replace(tzinfo=ui.tz)
+        return day_fr(d.year, d.month, d.day, d.weekday())
+
+    def usage_table(rows: list[Any], label: str, title: str, show: Any = str) -> Table:
         return Table((label, Column("appels", "num"), Column("échecs", "num"), Column("entrée", "num", detail=True),
-                      Column("sortie", "num", detail=True), Column("cache lu", "num", detail=True), Column("part du cache", "num", detail=True),
-                      Column("coût", "num"), Column("durée moy.", "num")), tuple(
-            Row((u.key, u.calls, u.failures, u.input_tokens, u.output_tokens, u.cache_read, f"{u.cache_ratio:.0%}",
-                 f"{u.cost_usd:.3f} $", f"{u.latency_avg_s:.1f} s"), tone="danger" if u.failures else "")
-            for u in rows), title=title, empty="aucun appel")
+                      Column("sortie", "num", detail=True), Column("cache lu", "num", detail=True),
+                      Column("part du cache", "num", detail=True), Column("coût", "num"), Column("durée moy.", "num")),
+                     tuple(Row((show(u.key), u.calls, u.failures, num_fr(u.input_tokens), num_fr(u.output_tokens),
+                                num_fr(u.cache_read), pct_fr(u.cache_ratio), money_fr(u.cost_usd),
+                                f"{num_fr(u.latency_avg_s, 1)} s"), tone="danger" if u.failures else "")
+                           for u in rows), title=title, empty="aucun appel")
 
     models = calls.usage(now - 7 * DAY, by="model")
-    breakdown = [usage_table(list(reversed(days)), "jour", "Par jour"), usage_table(roles, "rôle", "Par rôle (7 j)"),
-            usage_table(backends, "fournisseur", "Par fournisseur (7 j)"),
-            usage_table(models, "fournisseur · modèle", "Par modèle (7 j)")]
+    breakdown = [usage_table(list(reversed(days)), "jour", "Par jour", day_label),
+                 usage_table(roles, "rôle", "Par rôle (7 j)", names.role),
+                 usage_table(backends, "fournisseur", "Par fournisseur (7 j)"),
+                 usage_table(models, "fournisseur · modèle", "Par modèle (7 j)")]
     ctx = ui.inspection.context(request.query_params)
     pager = ctx.pager("page", size=PAGE, total=calls.count())
     recent = calls.recent(pager.size, offset=pager.offset)
-    out.append(Table((Column("quand", "fit"), "rôle", "fournisseur", Column("modèle", detail=True), Column("attente", "num", detail=True),
-                      Column("durée", "num"), Column("jetons", "num", detail=True), Column("coût", "num"), "issue"), tuple(
-        Row((When(t.at), t.role, t.backend, Text(t.model, "mono"), f"{t.wait_us / 1e6:.1f} s",
-             f"{t.latency_us / 1e6:.1f} s", f"{t.input_tokens} → {t.output_tokens}", f"{t.cost_usd:.4f} $",
-             Badge(t.outcome, "ok" if t.outcome == "ok" else "danger")),
-            href=Ref("episode", getattr(t, "correlation", "") or t.call_id.split("#")[0], "")) for t in recent),
+    corr_of = {id(t): getattr(t, "correlation", "") or t.call_id.split("#")[0] for t in recent}
+    episodes = _episode_correlations(ui, set(corr_of.values()))
+    out.append(Table((Column("quand", "fit"), "rôle", "fournisseur", Column("modèle", detail=True),
+                      Column("attente", "num", detail=True), Column("durée", "num"), Column("jetons", "num", detail=True),
+                      Column("coût", "num"), "issue"), tuple(
+        Row((When(t.at), names.role(t.role), t.backend, Text(t.model, "mono"), f"{num_fr(t.wait_us / 1e6, 1)} s",
+             f"{num_fr(t.latency_us / 1e6, 1)} s", f"{num_fr(t.input_tokens)} → {num_fr(t.output_tokens)}",
+             money_fr(t.cost_usd),
+             Badge("réussi" if t.outcome == "ok" else names.detail(t.outcome), "ok" if t.outcome == "ok" else "danger")),
+            href=Ref("episode", corr_of[id(t)], "") if corr_of[id(t)] in episodes else None) for t in recent),
         title="Tous les appels, du plus récent", empty="aucun appel", pager=pager))
     out.append(Disclosure("Répartition des appels et des coûts", tuple(breakdown)))
     return out
@@ -149,7 +176,8 @@ def _cache(rows: list[Any]) -> float:
     return read / total if total else 0.0
 
 
-TIMELINE_PARAMS = (Param("type", "type d'événement"), Param("correlation", "corrélation"))
+TIMELINE_PARAMS = (Param("type", "type d'événement", placeholder="memory., episode.utterance…"),
+                   Param("correlation", "corrélation", placeholder="un épisode, une action"))
 
 
 @TABS.tab("systeme.chronologie", title="Chronologie", group="Journaux",
@@ -174,15 +202,52 @@ async def chronologie(ui: Any, request: Request) -> Any:
         params.append(before)
     where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
     seqs = [int(r[0]) for r in kernel.mind.store.query_mind(
-        f"SELECT seq FROM events {where} ORDER BY seq DESC LIMIT 100", tuple(params))]
-    events = sorted((ui.decode(s) for s in kernel.mind.store.get_events(seqs)), key=lambda e: -e.seq)
-    rows = tuple(Row((Ref("event", str(e.seq), str(e.seq)), When(e.at), Text(e.type.name, "mono"),
-                      Ref("episode", e.correlation, e.correlation[:28]), Text(ui.show(e, 600), "mono", clamp=160)))
+        f"SELECT seq FROM events {where} ORDER BY seq DESC LIMIT {CHRONOLOGY_PAGE + 1}", tuple(params))]
+    found = sorted((ui.decode(s) for s in kernel.mind.store.get_events(seqs)), key=lambda e: -e.seq)
+    events, pager = cursor_page(found, CHRONOLOGY_PAGE, current=before or 0)
+    episodes = _episode_correlations(ui, {e.correlation for e in events})
+    rows = tuple(Row((When(e.at), Text(ui.names.event(e.type.name), hint=e.type.name),
+                      _correlation_cell(e.correlation, episodes),
+                      Ref("event", str(e.seq), f"n° {e.seq}"), Text(e.type.name, "mono"),
+                      Text(e.correlation, "mono")),
+                     href=Ref("event", str(e.seq), ""), detail=(Code(ui.show(e, 4000), "Données"),))
                  for e in events)
-    pager = Pager(older=(("avant", str(events[-1].seq)),)) if len(events) == 100 else Pager()
-    return {"blocks": [Table((Column("seq", "fit"), Column("quand", "fit"), "type", "corrélation", "données"), rows,
-                             title="Le journal", empty="Rien ne correspond.", pager=pager)],
+    notes = [Note(f"Les événements de « {corr[:80]} » : ce n'est pas un épisode (une action d'opérateur, un effet, "
+                  "un processus).", "info")] if corr and corr not in episodes and events else []
+    return {"blocks": [*notes, Table((Column("quand", "fit"), "ce qui s'est passé", "lié à",
+                                      Column("événement", detail=True), Column("type", detail=True),
+                                      Column("corrélation", detail=True)), rows,
+                                     title="Le journal", empty="Rien ne correspond.", pager=pager)],
             "filters": TIMELINE_PARAMS, "values": values}
+
+
+#: la chronologie, par page
+CHRONOLOGY_PAGE = 100
+
+
+def _episode_correlations(ui: Any, correlations: set[str]) -> set[str]:
+    """Parmi ces corrélations, celles d'un épisode (un début ou une fin au journal)."""
+    corrs = sorted(c for c in correlations if c)[:500]
+    if not corrs:
+        return set()
+    marks = ",".join("?" * len(corrs))
+    rows = ui.kernel.mind.store.query_mind(
+        f"SELECT DISTINCT correlation FROM events WHERE type IN (?, ?) AND correlation IN ({marks})",
+        (rt.EPISODE_STARTED.name, rt.EPISODE_ENDED.name, *corrs))
+    return {str(r[0]) for r in rows}
+
+
+def _correlation_cell(corr: str, episodes: set[str]) -> Any:
+    """Un épisode mène à sa page ; le reste (une action d'opérateur, un effet) à ses événements."""
+    if corr in episodes:
+        return Ref("episode", corr, "un épisode")
+    if corr.startswith("opérateur:"):
+        label = "une action d'opérateur"
+    elif corr.startswith("effet:"):
+        label = "un effet"
+    else:
+        label = "les événements liés"
+    return Ref("local", "/inspecteur/systeme/chronologie", label, (("correlation", corr),))
 
 
 @TABS.tab("systeme.etat", title="État et faits", group="Anatomie",
@@ -195,7 +260,7 @@ async def etat(ui: Any, request: Request) -> list[Any]:
     for name, spec in sorted(kernel.registry.providers.items()):
         if isinstance(spec.key, FactKey):
             got = call(frame.get, spec.key, label=f"fait {name}")
-            value = f"(erreur : {got.error!r})" if isinstance(got, Failed) else repr(got)
+            value = f"(erreur : {describe_error(got.error)})" if isinstance(got, Failed) else repr(got)
         else:
             value = "famille : dépend de son argument"
         rows.append((Text(name, "mono"), spec.owner, Text(getattr(spec.key, "doc", ""), "muted"),
@@ -234,7 +299,7 @@ async def contributions(ui: Any, request: Request) -> list[Any]:
             ("fournit", "\n".join(f"{s.key.name} → {_names(readers.get(s.key.name, set()) - {f.name})}"
                                   for s in f.facts) or "—"),
             ("sections", "\n".join(f"{s.key} ({s.zone.value})" for s in f.sections) or "—"),
-            ("preuves", "\n".join(", ".join(f"{r} [{lo:g} ; {hi:g}]" for r, (lo, hi) in s.reasons.items())
+            ("preuves", "\n".join(", ".join(f"{r} [{num_fr(lo)} ; {num_fr(hi)}]" for r, (lo, hi) in s.reasons.items())
                                   for s in f.proposers) or "—"),
             ("processus", _names(s.name for s in f.processes)),
             ("outils", _names(s.name for s in f.tools)),
@@ -243,7 +308,8 @@ async def contributions(ui: Any, request: Request) -> list[Any]:
             ("fiches", _names(s.label for s in f.subjects)),
             ("actions", _names(a.title for a in f.actions)),
         ]
-        out.append(Disclosure(f"{f.name}", (Fields(tuple((k, Text(v, "mono") if "\n" in v else v)
+        label = ui.names.faculty(f.name)
+        out.append(Disclosure(label if label == f.name else f"{label} ({f.name})", (Fields(tuple((k, Text(v, "mono") if "\n" in v else v)
                                                           for k, v in pairs)),)))
     return out
 
@@ -253,16 +319,33 @@ async def contributions(ui: Any, request: Request) -> list[Any]:
                       "un contenu).")
 async def operations(ui: Any, request: Request) -> list[Any]:
     ctx = ui.inspection.context(request.query_params)
-    before = ctx.int_param("avant", 0) or None
-    done = ctx.events([rt.OPERATED], 100, before=before)
-    tones = {"done": "ok", "refused": "warn", "superseded": "warn", "failed": "danger"}
-    rows = tuple(Row((When(e.at), Text(e.data.action, "mono"), e.data.by, e.data.subject or "—",
-                      Badge(e.data.outcome, tones.get(e.data.outcome, "")),
-                      ", ".join(str(s) for s in e.data.seqs) or "—"), href=Ref("event", str(e.seq), ""))
-                 for e in done)
-    pager = Pager(older=(("avant", str(done[-1].seq)),)) if len(done) == 100 else Pager()
-    return [Table((Column("quand", "fit"), "action", "par", "sur", "issue", "événements"), rows,
+    done, pager = ctx.older([rt.OPERATED], OPERATIONS_PAGE)
+    rows = tuple(operation_row(ui, e) for e in done)
+    return [Table((Column("quand", "fit"), "action", "par", "sur", "issue", Column("action (clé)", detail=True),
+                   Column("événements", detail=True)), rows,
                   title="Ce que les opérateurs ont fait", empty="Aucune action d'opérateur encore.", pager=pager)]
+
+
+#: les opérations, par page
+OPERATIONS_PAGE = 100
+
+
+def operation_row(ui: Any, e: Any) -> Row:
+    """Une action d'opérateur : son titre, qui (un nom), sur quoi (un nom), l'issue en mots ; les clés au
+    détail."""
+    label, tone = names.OPERATED.get(e.data.outcome, (e.data.outcome, ""))
+    subject, kind = e.data.subject or "", e.data.subject_kind or ""
+    on: Any = "—"
+    spec = ui.inspection.subject(kind) if kind else None
+    if subject and kind in ("person", "handle"):
+        on = ui.names.who_cell(subject)
+    elif subject and spec is not None:
+        on = Ref.subject(kind, subject, f"{spec.label} {subject}")
+    elif subject:
+        on = Text(subject, hint=kind)
+    return Row((When(e.at), ui.names.action(e.data.action), ui.names.who(e.data.by), on, Badge(label, tone),
+                Text(e.data.action, "mono"), ", ".join(str(s) for s in e.data.seqs) or "—"),
+               href=Ref("event", str(e.seq), ""))
 
 
 @TABS.tab("systeme.simulations", title="Simulations", group="Outils",
@@ -293,7 +376,8 @@ def _q(text: str) -> str:
 @TABS.tab("systeme.vues", title="Toutes les vues", group="Anatomie",
           description="Chaque vue que les facultés déclarent, et où elle est rangée.")
 async def all_views(ui: Any, request: Request) -> list[Any]:
-    rows = tuple((Ref.view(v.owner, v.name, v.title), v.owner, v.section or "—", v.subject or "—",
+    rows = tuple((Ref.view(v.owner, v.name, v.title), Text(ui.names.faculty(v.owner), hint=v.owner),
+                  v.section or "—", v.subject or "—",
                   Badge("cachée", "muted") if v.hidden else "—") for v in ui.inspection.views())
     return [Table(("vue", "faculté", "destination", "fiche", ""), rows, title="Ce que chaque faculté montre d'elle")]
 
@@ -308,24 +392,27 @@ async def processus(ui: Any, request: Request) -> list[Any]:
     running = set(sched.running())
     failing = [s for s in sched.specs if sched.consecutive.get(s.name, 0) >= 3]
     procs = Table(("processus", "faculté", "voie", Column("passages", "num"), Column("échecs", "num"),
-                   Column("d'affilée", "num"), "dernier passage", "dernière erreur"), tuple(
-        Row((s.name + (" · en cours" if s.name in running else ""), s.owner, s.lane, sched.runs.get(s.name, 0),
+                   Column("d'affilée", "num"), "dernier passage", "dernière erreur", Column("nom technique", detail=True)),
+                  tuple(
+        Row((ui.names.process(s.name) + (" · en cours" if s.name in running else ""), ui.names.faculty(s.owner),
+             names.lane(s.lane), sched.runs.get(s.name, 0),
              sched.failures.get(s.name, 0), sched.consecutive.get(s.name, 0),
              When(sched.last_run(s.name) or 0) if sched.last_run(s.name) else "—",
-             Text(sched.last_error.get(s.name, (0, ""))[1], "muted", clamp=160)),
+             Text(names.detail(sched.last_error.get(s.name, (0, ""))[1]), "muted", clamp=160),
+             Text(s.name, "mono")),
             tone="danger" if sched.consecutive.get(s.name, 0) >= 3 else "") for s in sched.specs),
         title="Depuis le démarrage", caption="Ces compteurs repartent de zéro à chaque démarrage ; les échecs "
                                              "gardés au journal sont dessous.")
     ctx = ui.inspection.context(request.query_params)
-    before = ctx.int_param("avant", 0) or None
-    failed = ctx.events([rt.PROCESS_FAILED], PAGE, before=before)
+    failed, pager = ctx.older([rt.PROCESS_FAILED], PAGE)
     history = Table((Column("quand", "fit"), "processus", "erreur"), tuple(
-        Row((When(e.at), Text(e.data.process, "mono"), Text(e.data.error, "muted", clamp=240)),
+        Row((When(e.at), Text(ui.names.process(e.data.process), hint=e.data.process),
+             Text(names.detail(e.data.error), "muted", clamp=240)),
             href=Ref("event", str(e.seq), "")) for e in failed), title="Échecs gardés au journal",
-        empty="Aucun échec de processus au journal.",
-        pager=Pager(older=(("avant", str(failed[-1].seq)),)) if len(failed) == PAGE else Pager())
-    return [Stats((Stat("Processus", len(sched.specs)), Stat("En cours", len(running), ", ".join(sorted(running))),
-                   Stat("En échec d'affilée", len(failing), ", ".join(s.name for s in failing)[:90],
+        empty="Aucun échec de processus au journal.", pager=pager)
+    return [Stats((Stat("Processus", len(sched.specs)),
+                   Stat("En cours", len(running), ", ".join(ui.names.process(n) for n in sorted(running))[:90]),
+                   Stat("En échec d'affilée", len(failing), ", ".join(ui.names.process(s.name) for s in failing)[:90],
                         "danger" if failing else ""),
                    Stat("Échecs depuis le démarrage", sum(sched.failures.values()), "",
                         "warn" if any(sched.failures.values()) else ""))), procs, history]
@@ -369,12 +456,12 @@ async def anomalies(ui: Any, request: Request) -> list[Any]:
           description="La file de sortie : chaque effet visible (une réponse livrée, un mail envoyé) part après son "
                       "écriture au journal. Ce qui attend, ce qui n'a pas pu partir, ce qui n'a trouvé personne pour "
                       "l'exécuter.")
-async def sorties(ui: Any, request: Request) -> list[Any]:
+async def sorties(ui: Any, request: Request) -> Any:
     store = ui.kernel.mind.store
     counts = dict(store.query_mind("SELECT status, COUNT(*) FROM outbox GROUP BY status"))
     ctx = ui.inspection.context(request.query_params)
     status = request.query_params.get("etat", "")
-    labels = {"pending": "en attente", "done": "parti", "failed": "échoué", "orphan": "orphelin"}
+    labels = OUTBOX_LABELS
     invalid = bool(status and status not in labels)
     if invalid:
         status = ""
@@ -383,27 +470,89 @@ async def sorties(ui: Any, request: Request) -> list[Any]:
     pager = ctx.pager("page", size=PAGE, total=total)
     rows = store.query_mind(f"SELECT key, seq, effect, status, attempts, last_error FROM outbox {where} "
                             f"ORDER BY seq DESC LIMIT ? OFFSET ?", (*args, pager.size, pager.offset))
-    tones = {"pending": "info", "done": "ok", "failed": "danger", "orphan": "warn"}
-    chips = tuple(NavItem(f"{labels.get(k, k)}", Ref("local", f"/inspecteur/systeme/sorties?etat={k}", k), count=n,
-                          active=k == status, tone=tones.get(k, "")) for k, n in sorted(counts.items()))
-    return [
+    tones = {"pending": "info", "done": "ok", "failed": "danger", "orphan": "warn", "seen": "muted"}
+    chips = tuple(NavItem(f"{labels.get(k, k)}", Ref("local", "/inspecteur/systeme/sorties", k, (("etat", k),)),
+                          count=n, active=k == status, tone=tones.get(k, "")) for k, n in sorted(counts.items()))
+    back = request.url.path + (f"?{urlencode(_without(request.query_params, 'flash'))}"
+                               if _without(request.query_params, "flash") else "")
+    marks = ",".join("?" * len(OUTBOX_PROBLEMS))
+    problems = [{"key": key, "seq": seq, "label": _effect_label(ui, effect), "status": labels.get(st, st),
+                 "error": names.detail(err) if err else ""}
+                for key, seq, effect, st, err in store.query_mind(
+                    f"SELECT key, seq, effect, status, last_error FROM outbox WHERE status IN ({marks}) "
+                    f"ORDER BY seq DESC LIMIT {OUTBOX_PROBLEMS_SHOWN}", OUTBOX_PROBLEMS)]
+    panel = Panel("outbox.html", {"problems": problems, "back": back,
+                                  "more": max(0, _outbox_problems(ui) - len(problems)), "panel_after": True})
+    return {"panel": panel, "blocks": [
         *([Note("État inconnu : affichage de tous les effets.", "warn")] if invalid else []),
-        Stats(tuple(Stat(labels.get(k, k).capitalize(), n, "", tones.get(k, "") if k != "done" else "")
+        Stats(tuple(Stat(labels.get(k, k).capitalize(), n, "", tones.get(k, "") if k not in ("done", "seen") else "")
                     for k, n in sorted(counts.items())) or (Stat("File", 0, "vide"),)),
         Nav((NavItem("tout", Ref("local", "/inspecteur/systeme/sorties", "tout"), count=sum(counts.values()),
                      active=not status), *chips), title="État"),
-        Table((Column("événement", "fit"), "effet", "état", Column("essais", "num"), "dernière erreur"), tuple(
-            Row((Ref("event", str(seq), str(seq)), Text(effect, "mono"), Badge(labels.get(st, st), tones.get(st, "")),
-                 attempts, Text(err or "—", "muted", clamp=200)), href=Ref("event", str(seq), ""),
-                tone={"failed": "danger", "orphan": "warn"}.get(st, "")) for key, seq, effect, st, attempts, err in rows),
+        Table((Column("n°", "fit", hint="l'événement qui l'a fait partir"), "effet", "état", Column("essais", "num"),
+               "dernière erreur", Column("effet (clé)", detail=True)), tuple(
+            Row((Ref("event", str(seq), f"n° {seq}"), Text(_effect_label(ui, effect), hint=effect),
+                 Badge(labels.get(st, st), tones.get(st, "")), attempts,
+                 Text(names.detail(err) if err else "—", "muted", clamp=200), Text(effect, "mono")),
+                href=Ref("event", str(seq), ""), tone={"failed": "danger", "orphan": "warn"}.get(st, ""))
+            for _key, seq, effect, st, attempts, err in rows),
             title="Effets", empty="Aucun effet.", pager=pager,
-            caption="Orphelin : aucun exécuteur n'était déclaré pour cet effet quand il est parti — il n'a rien fait."),
-    ]
+            caption="Orphelin : aucun exécuteur n'était déclaré pour cet effet quand il est parti — il n'a rien fait. "
+                    "Un effet échoué ou orphelin se relance (un essai de plus) ou se marque comme vu : le badge "
+                    "« à traiter » s'éteint, la ligne reste."),
+    ]}
+
+
+#: les effets en échec montrés avec leurs boutons (les plus récents)
+OUTBOX_PROBLEMS_SHOWN = 50
+
+
+def _without(query: Any, *keys: str) -> dict[str, str]:
+    return {k: v for k, v in query.items() if k not in keys}
+
+
+def _effect_label(ui: Any, effect: str) -> str:
+    """Un effet (« runtime:episode.utterance ») : ce qu'il fait partir."""
+    owner, _, type_name = effect.partition(":")
+    return {"episode.utterance": "une parole à livrer"}.get(type_name, ui.names.event(type_name or owner))
 
 
 def _outbox_problems(ui: Any) -> int:
-    rows = ui.kernel.mind.store.query_mind("SELECT COUNT(*) FROM outbox WHERE status IN ('failed', 'orphan')")
+    marks = ",".join("?" * len(OUTBOX_PROBLEMS))
+    rows = ui.kernel.mind.store.query_mind(f"SELECT COUNT(*) FROM outbox WHERE status IN ({marks})", OUTBOX_PROBLEMS)
     return int(rows[0][0]) if rows else 0
+
+
+async def outbox_post(ui: Any, request: Request) -> Response:
+    """Relancer un effet échoué ou orphelin (un essai de plus, tout de suite), ou le marquer comme vu (il
+    n'allume plus « à traiter ») — audité, jamais sur un effet qui n'est pas en échec."""
+    data = await ui.form(request)
+    account = ui.operator(request)
+    back = str((data or {}).get("_retour", "")) or f"{PREFIX}/systeme/sorties"
+    if not back.startswith(PREFIX + "/") or "//" in back or "\\" in back:
+        back = f"{PREFIX}/systeme/sorties"
+    token = _secrets.token_urlsafe(9)
+    if data is None or account is None:
+        ui.flash(token, "danger", "Jeton de formulaire invalide : recharge la page.")
+    else:
+        key, what = str(data.get("cle", ""))[:300], str(data.get("faire", ""))
+        store = ui.kernel.mind.store
+        found = store.query_mind("SELECT status, last_error FROM outbox WHERE key=?", (key,))
+        if not found or found[0][0] not in OUTBOX_PROBLEMS or what not in ("relancer", "vu"):
+            ui.flash(token, "warn", "Rien à faire : cet effet n'est plus en échec (déjà relancé ou vu ?).")
+        else:
+            error = found[0][1]
+            if what == "relancer":
+                await store.mark_outbox(key, "pending", error)
+                ui.kernel.effects.wake()
+                ui.flash(token, "ok", "Relancé : l'effet repart pour un essai.")
+            else:
+                await store.mark_outbox(key, "seen", error)
+                ui.flash(token, "ok", "Marqué comme vu : il n'est plus « à traiter ».")
+            await ops.audit(ui.kernel, f"console.sorties.{what}", by=account.handle, subject_kind="effet",
+                            subject=key)
+    sep = "&" if "?" in back else "?"
+    return secure(RedirectResponse(f"{back}{sep}flash={token}", status_code=303))
 
 
 @TABS.tab("systeme.passerelle", title="Modèles en service", group="Surveillance",
@@ -419,7 +568,7 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
     rows = []
     for b in status:
         quota = (b.get("extra") or {}).get("quota") or {}
-        quota_text = " · ".join(f"{k} {v:.0%}" for k, v in quota.items()) if quota else "—"
+        quota_text = " · ".join(f"{k} {pct_fr(v)}" for k, v in quota.items()) if quota else "—"
         rows.append(Row((Text(b["name"], "mono"), Text(f"{b['busy']} / {b['slots']}", "num"), b["waiting"],
                          Badge("oui", "info") if b["preempt"] else Text("non", "muted"),
                          Text(b["fallback"] or "—", "mono" if b["fallback"] else "muted"), quota_text),
@@ -430,7 +579,7 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
                                                        f"sur {sum(b['slots'] for b in status)}"),
                Stat("En attente d'un créneau", sum(b["waiting"] for b in status), "",
                     "warn" if any(b["waiting"] for b in status) else ""),
-               Stat("Rôles sans fournisseur", len(unserved), ", ".join(unserved) or "aucun",
+               Stat("Rôles sans fournisseur", len(unserved), ", ".join(names.role(r) for r in unserved) or "aucun",
                     "danger" if unserved else ""))),
         Table(("fournisseur", Column("créneaux", "num"), Column("en attente", "num"), "préempte", "repli",
                "quota d'abonnement"), tuple(rows), title="Fournisseurs",

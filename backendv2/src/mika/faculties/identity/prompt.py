@@ -1,11 +1,19 @@
-"""Ce que ``identity`` met dans le prompt, et l'audience d'un épisode."""
+"""Ce que ``identity`` met dans le prompt, et l'audience d'un épisode.
+
+« QUI TU AS EN FACE » dit qui c'est, sans jamais réciter le mécanisme (une
+connexion, un score) ; depuis quand elles se connaissent ; et, en privé, quand
+elles se sont parlé pour la dernière fois — en mots de calendrier (« hier
+soir », « avant-hier »), pas en durées.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from mika.contracts import identity as c
+from mika.contracts import social as social_c
 from mika.faculties.identity.faculty import IDENTITY, IdentityState, view_of
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import CLOSED as CLOSED_AUDIENCE
@@ -13,27 +21,29 @@ from mika.kernel.frame import Audience, Frame
 from mika.kernel.prompt import SectionBody
 from mika.vocab import privacy
 from mika.vocab.episodes import CONVERSATIONAL, Kind, is_work_target
+from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import ChannelTrust
 
 CHANNEL_FR = {"web": "sur l'application", "telegram": "par Telegram"}
+WEEKDAYS_FR = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+_KNOWN = (social_c.FRIEND, social_c.CLOSE)
 
 
 def describe(view: c.IdentityView, *, public: bool, names: Mapping[str, str] | None = None) -> list[str]:
     """Des phrases, jamais un pourcentage (sinon le modèle finit par réciter
-    des scores à la personne)."""
+    des scores à la personne) ; son prénom plutôt que « elle ou lui » ; et
+    jamais le mécanisme (« elle s'est connectée avec son compte »)."""
     who = f"« {view.name} »" if view.name else ""
     where = CHANNEL_FR.get(view.channel, "")
     lines: list[str] = []
     if view.authenticated:
-        lines.append(f"Tu sais avec certitude que tu parles à {who or 'cette personne'} : "
-                     "la personne s'est connectée avec son compte.")
+        lines.append(f"C'est {who}." if who else "Tu parles à quelqu'un dont tu ne connais pas encore le prénom.")
     elif view.bound:
-        level = privacy.certainty_name(view.certainty)
-        if level == "corroborated":
-            lines.append(f"Tu penses vraiment que c'est {who} : ce qui a été dit recoupe ce que tu sais d'elle "
-                         f"ou de lui (elle ou il t'écrit {where}).")
+        if view.via == c.VIA_CORROBORATED:
+            lines.append(f"Tu es presque sûre que c'est {who}, qui t'écrit {where} : ce qui a été dit recoupe ce "
+                         f"que tu sais de {who}.")
         else:
-            lines.append(f"Tu reconnais {who} : ce contact ({where}) et la personne que tu connais ne font qu'un.")
+            lines.append(f"C'est {who}, qui t'écrit {where}.")
     elif view.trust is ChannelTrust.ACCOUNT:
         lines.append(f"C'est {who}, qui t'écrit {where}." if who else
                      f"Quelqu'un t'écrit {where} ; tu ne connais pas encore son prénom.")
@@ -43,22 +53,86 @@ def describe(view: c.IdentityView, *, public: bool, names: Mapping[str, str] | N
     if view.claim:
         claimed = f"« {view.claim} »"
         if view.claim_target is None:
-            lines.append(f"Elle ou il dit être {claimed}, mais tu connais plusieurs personnes de ce nom : "
+            lines.append(f"Cette personne dit être {claimed}, mais tu connais plusieurs personnes de ce nom : "
                          "tu ne sais pas de qui il s'agit.")
+        elif view.claim_target == view.handle:
+            known = f", alors que tu la connais comme {who}" if who else ""
+            lines.append(f"Cette personne dit s'appeler {claimed}{known} : garde le nom que tu lui connais tant "
+                         "que rien ne le confirme.")
         else:
-            lines.append(f"Elle ou il affirme être {claimed}, que tu connais, mais rien ne le confirme encore. "
+            lines.append(f"Cette personne affirme être {claimed}, que tu connais, mais rien ne le confirme encore. "
                          f"Joue le jeu poliment en gardant une réserve : ne raconte rien de ce que {claimed} "
                          "t'a confié tant que tu n'es pas sûre. Si tu doutes vraiment, dis-le, ou utilise "
                          "identity_doubt.")
     if public:
         lines.append("Vous êtes dans un groupe : d'autres lisent. Rien de personnel sur personne — ni sur les "
-                     "autres, ni sur elle ou lui. Si on te demande quelque chose de personnel sur quelqu'un, ne fais "
-                     "pas semblant de ne pas le connaître : dis simplement que ce n'est pas à toi d'en parler.")
+                     "autres, ni sur la personne qui te parle. Si on te demande quelque chose de personnel sur "
+                     "quelqu'un, ne fais pas semblant de ne pas le connaître : dis simplement que ce n'est pas à "
+                     "toi d'en parler.")
     return lines
 
 
+def _moment(dt: datetime) -> str:
+    if dt.hour < 5:
+        return "nuit"
+    if dt.hour < 12:
+        return "matin"
+    if dt.hour < 18:
+        return "après-midi"
+    return "soir"
+
+
+def calendar_words(then: int, frame: Frame) -> str:
+    """Quand, en mots de calendrier (« hier soir (lundi vers 18 h) », « avant-hier »,
+    « il y a 5 jours ») — les jours comptés sur le calendrier, pas en durée."""
+    now, past = frame.local(), frame.local(then)
+    days = (now.date() - past.date()).days
+    moment = _moment(past)
+    precise = f"{WEEKDAYS_FR[past.weekday()]} vers {past.hour} h"
+    if days <= 0:
+        if frame.now - then < 3_600_000_000:
+            return "tout à l'heure"
+        return {"nuit": "cette nuit", "matin": "ce matin", "après-midi": "cet après-midi",
+                "soir": "ce soir"}[moment] + f" (vers {past.hour} h)"
+    if days == 1:
+        label = {"nuit": "la nuit dernière", "matin": "hier matin", "après-midi": "hier après-midi",
+                 "soir": "hier soir"}[moment]
+        return f"{label} ({precise})"
+    if days == 2:
+        return f"avant-hier ({precise})"
+    if days < 7:
+        return f"il y a {days} jours ({precise})"
+    if days < 14:
+        return f"il y a {days} jours"
+    if days < 60:
+        return f"il y a {days // 7} semaines"
+    return f"il y a {days // 30} mois environ"
+
+
+def last_talk(frame: Frame, person: str, kind: str, name: str = "") -> list[str]:
+    """Quand la personne lui a écrit pour la dernière fois, avant cette
+    conversation-ci — et si Mika lui a écrit depuis."""
+    reading = frame.get(social_c.CONTACT(person))
+    who = f"« {name} »" if name else "cette personne"
+    if kind == Kind.REPLY:
+        out = []
+        if reading.previous:
+            out.append(f"Avant cette conversation, {who} t'avait écrit pour la dernière fois "
+                       f"{calendar_words(reading.previous, frame)}.")
+        if reading.previous < reading.last_out < reading.since:
+            out.append(f"Tu lui avais écrit depuis, {calendar_words(reading.last_out, frame)}.")
+        return out
+    out = []
+    if reading.last_in:
+        out.append(f"{who[:1].upper()}{who[1:]} t'a écrit pour la dernière fois "
+                   f"{calendar_words(reading.last_in, frame)}.")
+    if reading.last_out > reading.last_in:
+        out.append(f"Tu lui as écrit depuis, {calendar_words(reading.last_out, frame)}, sans réponse pour l'instant.")
+    return out
+
+
 @IDENTITY.section("who", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=90, floor_chars=400,
-                  title="QUI TU AS EN FACE", reads=[c.IDENTITY])
+                  title="QUI TU AS EN FACE", reads=[c.IDENTITY, c.PERSON, social_c.CLOSENESS, social_c.CONTACT])
 def _who(s: IdentityState, frame: Frame, enrich: Any) -> SectionBody | None:
     aud = frame.audience
     ep = frame.episode
@@ -67,14 +141,25 @@ def _who(s: IdentityState, frame: Frame, enrich: Any) -> SectionBody | None:
     view = view_of(s, ep.target, frame.now)
     lines = describe(view, public=aud.public)
     if view.known:
-        lines.append(acquaintance(view.first_seen, frame))
+        person = frame.get(c.PERSON(ep.target))
+        level = frame.get(social_c.CLOSENESS(person)) if is_identifiable(ep.target) else ""
+        lines.append(acquaintance(view.first_seen, frame, level))
+        if not aud.public and is_identifiable(ep.target):
+            lines += last_talk(frame, person, ep.kind, view.name)
     return SectionBody("\n".join(lines))
 
 
-def acquaintance(first_seen: int, frame: Frame) -> str:
+def acquaintance(first_seen: int, frame: Frame, closeness: str = "") -> str:
     """Depuis quand elle connaît cette personne — un fait, pour qu'elle ne
-    s'invente pas un passé commun (« on se connaît depuis longtemps »)."""
+    s'invente pas un passé commun (« on se connaît depuis longtemps »). Quand
+    leur lien est déjà une amitié (déclarée, ou un ancien compte), on ne dit
+    pas « presque pas de passé commun » : seulement depuis quand on se parle ici."""
     days = (frame.local().date() - frame.local(first_seen).date()).days
+    if closeness in _KNOWN:
+        if days <= 0:
+            return "Vous vous parlez ici depuis aujourd'hui."
+        if days == 1:
+            return "Vous vous parlez ici depuis hier."
     if days <= 0:
         return "Vous vous connaissez depuis aujourd'hui seulement : vous n'avez pas encore de passé commun."
     if days == 1:
@@ -87,7 +172,9 @@ def acquaintance(first_seen: int, frame: Frame) -> str:
 
 
 def audience_for(frame: Frame, req: Any) -> Audience:
-    """L'audience d'un épisode, résolue une fois au bord. Toute panne → fermée."""
+    """L'audience d'un épisode, résolue une fois au bord. Toute panne → fermée.
+    Les droits d'une propriétaire tiennent à l'adresse qui parle, jamais dans
+    un salon public (``SPEAKS_AS_OWNER``)."""
     target = getattr(req, "target", None)
     kind = getattr(req, "kind", "")
     if not target or is_work_target(target):
@@ -109,7 +196,5 @@ def audience_for(frame: Frame, req: Any) -> Audience:
         persons=(target,), channel=channel, room=room, public=public, level=int(d.level),
         witness_level=int(d.witness_level), private_ok=d.own_file, trust=view.trust.value,
         certainty=view.certainty, name=view.name,
-        owner=bool(frame.get(c.IS_OWNER(frame.get(c.PERSON(target))))),
+        owner=bool(frame.get(c.SPEAKS_AS_OWNER(target))) and not public,
     )
-
-

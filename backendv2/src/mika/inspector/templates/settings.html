@@ -36,6 +36,8 @@
 
   {% if s.record %}{% set rec = s.record %}
   <form method="post" action="{{ action }}" class="form card record-form" id="enregistrement">
+    {# Entrée enregistre, jamais « charger la liste » (le premier bouton d'un formulaire est son défaut) #}
+    <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
     <h3>{{ 'Ajouter' if rec.new else 'Modifier' }} · {{ rec.label }}{% if not rec.new and rec.keyed %} · <span class="mono">{{ rec.key }}</span>{% endif %}</h3>
     <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
     <input type="hidden" name="_enregistrement" value="{{ rec.path }}"><input type="hidden" name="_ancienne" value="{{ rec.key }}">
@@ -68,7 +70,7 @@
       {% for row in r.rows %}
         <tr data-href="{{ row.edit }}">{% if r.keyed %}<td><a href="{{ row.edit }}" class="mono">{{ row.key }}</a></td>{% endif %}{% for c in row.cells %}<td>{{ c }}</td>{% endfor %}
           <td class="row-actions fit"><a class="btn quiet small" href="{{ row.edit }}">modifier</a>
-            <form method="post" action="{{ action }}" class="inline" data-confirm="Retirer « {{ row.key }} » ?">
+            <form method="post" action="{{ action }}" class="inline" data-confirm="{{ row.confirm or ('Retirer « ' ~ row.key ~ ' » ?') }}">
               <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
               <input type="hidden" name="_supprimer" value="{{ r.path }}"><input type="hidden" name="_cle" value="{{ row.key }}">
               <button class="btn quiet small danger">retirer</button>
@@ -84,6 +86,7 @@
 
   {% if s.form %}
   <form method="post" action="{{ action }}" class="form">
+    <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
     <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
     {% for e in s.form.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
     {{ fields_block(s.form) }}

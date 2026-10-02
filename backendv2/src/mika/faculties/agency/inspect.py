@@ -11,7 +11,7 @@ from mika.contracts import agency as c
 from mika.contracts import attention as attention_c
 from mika.contracts import identity as identity_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.agency import AGENCY, AgencyParams, AgencyState, _params, restraint
+from mika.faculties.agency import AGENCY, AgencyParams, AgencyState, _params, length, restraint
 from mika.kernel.clock import HOUR, MINUTE, local
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -56,24 +56,43 @@ def _restraint_fr(frame: Frame) -> str:
     return f"plus rares (décalage {m.shift:+.1f})" if m.shift else "libres"
 
 
-def _spoken(ctx: InspectContext) -> tuple[list[tuple[int, str, str | None, int]], Pager]:
+def _handles(frame: Frame, handle: str) -> tuple[str, ...]:
+    """Toutes les adresses de la personne derrière cette adresse : elle peut
+    répondre d'ailleurs (Telegram après le navigateur)."""
+    if not handle:
+        return ()
+    person = frame.get(identity_c.PERSON(handle)) or handle
+    return tuple(sorted({handle, *frame.get(identity_c.HANDLES(person))}))
+
+
+def _spoken(frame: Frame, ctx: InspectContext) -> tuple[list[tuple[int, str, str | None, int]], Pager]:
     """Une page de ce qu'elle a dit d'elle-même (salutations et rappels compris),
-    et quand la personne lui a écrit depuis (0 : pas encore) : (instant, adresse,
-    texte, réponse) ; ``?avant=`` : la suite, plus ancienne."""
+    et quand la personne lui a écrit depuis, de n'importe laquelle de ses
+    adresses (0 : pas encore) : (instant, adresse, texte, réponse) ; ``?avant=`` :
+    la suite, plus ancienne."""
     pager = Pager(param="avant", size=SPOKEN_PAGE)
     if ctx.store is None:
         return [], pager
     t = transcript_c.THREAD_TABLE
     before = ctx.int_param("avant", 0)
     rows = ctx.store.query_mind(
-        f"SELECT m.id, m.at, m.person, m.text, (SELECT MIN(u.at) FROM {t} u WHERE u.role='user' "
-        f"AND u.person=m.person AND u.id>m.id) FROM {t} m WHERE m.role='assistant' AND m.kind=?"
+        f"SELECT m.id, m.at, m.person, m.text FROM {t} m WHERE m.role='assistant' AND m.kind=?"
         f"{' AND m.id<?' if before else ''} ORDER BY m.id DESC LIMIT ?",
         (str(Kind.INITIATIVE), *((before,) if before else ()), SPOKEN_PAGE + 1))
     page = rows[:SPOKEN_PAGE]
     if len(rows) > SPOKEN_PAGE:
         pager = Pager(param="avant", size=SPOKEN_PAGE, older=(("avant", str(page[-1][0])),))
-    return [(int(at), str(person or ""), text, int(answered or 0)) for _n, at, person, text, answered in page], pager
+    out = []
+    for n, at, person, text in page:
+        handles = _handles(frame, str(person or ""))
+        answered = 0
+        if handles:
+            marks = ",".join("?" * len(handles))
+            got = ctx.store.query_mind(f"SELECT MIN(u.at) FROM {t} u WHERE u.role='user' AND u.person IN ({marks}) "
+                                       "AND u.id>?", (*handles, n))
+            answered = int(got[0][0] or 0) if got else 0
+        out.append((int(at), str(person or ""), text, answered))
+    return out, pager
 
 
 def _excerpt(text: str | None) -> str:
@@ -97,7 +116,7 @@ def _entry(frame: Frame, ctx: InspectContext, at: int, handle: str, text: str | 
 
 def _stretch(s: AgencyState, p: AgencyParams, ignored: int) -> float:
     """La période réfractaire allongée par les initiatives ignorées d'affilée."""
-    return min(p.max_refractory_us, (s.refractory_us or p.refractory_us) * p.ignored_backoff ** max(0, ignored))
+    return length(s, p, ignored)
 
 
 @AGENCY.inspect("initiatives", title="Initiatives", section="decisions", order=50,
@@ -110,7 +129,7 @@ def _inspect(s: AgencyState, frame: Frame, ctx: InspectContext) -> list[Block]:
     capped = r.initiatives_today >= p.daily_cap
     refractory: Cell
     if r.refractory_until > now:
-        refractory, refractory_sub = When(r.refractory_until), "encore retenue jusque-là"
+        refractory, refractory_sub = When(r.refractory_until), "son recul s'estompe jusque-là"
     elif r.refractory_until:
         refractory, refractory_sub = Text("terminée", kind="muted"), f"depuis {ctx.when(r.refractory_until)}"
     else:
@@ -119,7 +138,7 @@ def _inspect(s: AgencyState, frame: Frame, ctx: InspectContext) -> list[Block]:
     tz = frame.env.tz_of(frame.root)
     today = frame.local().date()
     counted = tuple((When(t), "oui" if local(t, tz).date() == today else "non") for t in reversed(s.initiatives))
-    spoken, spoken_pager = _spoken(ctx)
+    spoken, spoken_pager = _spoken(frame, ctx)
     return [
         Stats((
             Stat("aujourd'hui", Meter(r.initiatives_today / max(1, p.daily_cap), f"{r.initiatives_today} / {p.daily_cap}",
@@ -137,6 +156,7 @@ def _inspect(s: AgencyState, frame: Frame, ctx: InspectContext) -> list[Block]:
             ("durée tirée à la dernière", f"{(s.refractory_us or p.refractory_us) / MINUTE:.0f} min"),
             ("allongement par ignorée", f"×{p.ignored_backoff:g}, au plus {p.max_refractory_us / HOUR:.0f} h"),
             ("dernier murmure", ctx.when(r.murmured_at) if r.murmured_at else "—"),
+            ("dernière hésitation", ctx.when(r.hesitated_at) if r.hesitated_at else "—"),
         ), title="En détail", columns=2),
         Disclosure("Initiatives comptées (dernières 24 h)", (
             Table((Column("quand", "fit"), "aujourd'hui"), counted, title="Initiatives comptées",

@@ -4,6 +4,17 @@ On reconstruit des balises connues, sans reprendre aucun attribut source sauf
 une URL http(s) vérifiée. Ni CSS, ni image distante, ni formulaire, ni script.
 Les tableaux de mise en page des mails deviennent des lignes de document.
 Les apps Forge n'ont pas accès à ce format : elles composent des blocs typés.
+
+**Le contenu ne sort jamais de son cadre.** Ce qu'on émet est bien imbriqué,
+mais un navigateur ferme lui-même certaines balises à l'ouverture d'autres
+(un ``<li>`` en ferme un autre en remontant à travers un ``<div>``, un bloc
+ferme un ``<p>`` ouvert, un titre en ferme un autre, un lien un autre lien) :
+son arbre diverge alors du nôtre, et nos fermetures suivantes refermaient le
+cadre de la console — la suite du mail s'affichait comme de l'interface. On
+n'émet donc que ce qu'un navigateur relit **à l'identique** : un ``<li>``
+seulement directement dans une liste (sinon un ``<div>``), aucun bloc dans un
+paragraphe (il y devient un ``<span>``), pas de titre dans un titre ni de
+lien dans un lien.
 """
 
 from __future__ import annotations
@@ -21,6 +32,10 @@ HIDDEN = frozenset(("script", "style", "head", "iframe", "object", "svg", "math"
 LAYOUT = {"table": "document-table", "tr": "document-row", "td": "document-cell", "th": "document-cell"}
 VOID = frozenset(("br", "hr"))
 URL = re.compile(r"https?://[^\s<>]+")
+#: ce qu'un navigateur traite comme un bloc (qui ferme un paragraphe ouvert)
+BLOCKS = frozenset(("p", "div", "ul", "ol", "li", "blockquote", "pre", "hr", "h1", "h2", "h3", "h4", "h5", "h6",
+                    "table", "tr", "td", "th"))
+HEADINGS = frozenset(("h1", "h2", "h3", "h4", "h5", "h6"))
 
 
 def link_url(value: str) -> str:
@@ -53,21 +68,39 @@ class _Document(HTMLParser):
             if alt.strip():
                 self.out.append('<span class="document-image">' + escape(alt) + '</span>')
             return
-        if tag in LAYOUT:
+        if tag not in LAYOUT and tag not in ALLOWED:
+            return
+        rendered = self._rendered(tag)
+        if tag in LAYOUT and rendered == "div":
             self.out.append(f'<div class="{LAYOUT[tag]}">')
             self.stack.append((tag, "div"))
-        elif tag in ALLOWED:
-            rendered = "h3" if tag.startswith("h") and tag != "hr" else tag
-            extra = ""
-            if tag == "a":
-                href = link_url(dict(attrs).get("href") or "")
-                if href:
-                    extra = f' href="{escape(href, quote=True)}" target="_blank" rel="noopener noreferrer nofollow"'
-                else:
-                    rendered = "span"
-            self.out.append(f"<{rendered}{extra}>")
-            if tag not in VOID:
-                self.stack.append((tag, rendered))
+            return
+        extra = ""
+        if tag == "a" and rendered == "a":
+            href = link_url(dict(attrs).get("href") or "")
+            if href:
+                extra = f' href="{escape(href, quote=True)}" target="_blank" rel="noopener noreferrer nofollow"'
+            else:
+                rendered = "span"
+        self.out.append(f"<{rendered}{extra}>")
+        if rendered not in VOID:
+            self.stack.append((tag, rendered))
+
+    def _rendered(self, tag: str) -> str:
+        """La balise émise pour ``tag`` à cet endroit : une que le navigateur relira sans rien fermer
+        de lui-même (sinon son arbre diverge du nôtre, et le contenu sort de son cadre)."""
+        open_tags = [rendered for _, rendered in self.stack]
+        if "p" in open_tags and tag in BLOCKS:  # un bloc ferme un paragraphe ouvert : il reste en ligne
+            return "br" if tag == "hr" else "span"
+        if tag in LAYOUT:
+            return "div"
+        if tag == "li":  # un élément de liste ailleurs que dans une liste en fermerait un autre
+            return "li" if open_tags and open_tags[-1] in ("ul", "ol") else "div"
+        if tag in HEADINGS:
+            return "span" if "h3" in open_tags else "h3"
+        if tag == "a" and "a" in open_tags:
+            return "span"
+        return tag
 
     def handle_endtag(self, tag: str) -> None:
         if self.hidden:

@@ -95,17 +95,40 @@ class SqliteVectorIndex:
         return [(int(self._keys[i]), float(sims[i])) for i in best]
 
     async def forget(self, subject: str) -> int:
-        doomed = [int(k) for k, persons in zip(self._keys, self._persons, strict=True) if subject in persons]
-        table = self.table
+        """Retire les vecteurs de tout ce qui concerne ``subject``, pour tous les
+        modèles (la table peut en garder plusieurs) ; rend combien de clés."""
+        table, like = self.table, f'%"{subject}"%'
+
+        def delete(sql: Any) -> int:
+            keys = {int(r[0]) for r in sql.query(f"SELECT key FROM {table} WHERE persons LIKE ?", (like,))}
+            sql.execute(f"DELETE FROM {table} WHERE persons LIKE ?", (like,))
+            return len(keys)
+
+        removed = int(await self.store.run_views(delete) or 0)
+        doomed = {int(k) for k, persons in zip(self._keys, self._persons, strict=True) if subject in persons}
+        self._drop(doomed)
+        return removed
+
+    async def remove(self, keys: Collection[int]) -> int:
+        """Retire ces clés (l'élément a disparu de la mémoire : oublié, effacé)."""
+        doomed = {int(k) for k in keys}
+        if not doomed:
+            return 0
+        table, rows = self.table, [(k,) for k in sorted(doomed)]
 
         def delete(sql: Any) -> None:
-            sql.execute(f"DELETE FROM {table} WHERE persons LIKE ?", (f'%"{subject}"%',))
+            sql.executemany(f"DELETE FROM {table} WHERE key=?", rows)
 
         await self.store.run_views(delete)
-        keep = [(int(k), self._kinds[p], self._persons[p], self._mat[p]) for k, p in self._pos.items()
-                if int(k) not in set(doomed)]
-        self._reset(sorted(keep, key=lambda r: r[0]))
-        return len(doomed)
+        before = len(self._pos)
+        self._drop(doomed)
+        return before - len(self._pos)
+
+    def _drop(self, doomed: set[int]) -> None:
+        if doomed & set(self._pos):
+            keep = [(int(k), self._kinds[p], self._persons[p], self._mat[p]) for k, p in self._pos.items()
+                    if int(k) not in doomed]
+            self._reset(sorted(keep, key=lambda r: r[0]))
 
     async def clear(self) -> None:
         table, model = self.table, self.model

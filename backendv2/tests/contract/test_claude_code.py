@@ -41,7 +41,7 @@ from mika.adapters.mcp.protocol import Tool
 from mika.adapters.mcp.relay import PREFIX, Relay
 from mika.kernel.clock import ManualClock
 from mika.kernel.faculty import ToolSpec
-from mika.ports.llm import LLMRequest, LLMResponse, Message, PersonaRender, ToolDecl
+from mika.ports.llm import LLMRequest, LLMResponse, Message, PersonaRender, ToolCall, ToolDecl
 from mika.runtime.tools import ToolResult, declare, run_tool_loop
 
 FAKE = Path(__file__).resolve().parents[1] / "fixtures" / "fake_claude.py"
@@ -59,9 +59,11 @@ def cli(tmp_path: Path) -> str:
 
 @contextlib.asynccontextmanager
 async def serving(relay: Relay):
-    """Le relais monté comme dans le serveur, à l'écoute sur un port libre."""
+    """Le relais monté comme dans le serveur, à l'écoute sur un port libre. Un test qui échoue en
+    laissant une CLI suspendue sur un appel d'outil ne fige pas l'arrêt (délai de grâce borné)."""
     server = uvicorn.Server(uvicorn.Config(Starlette(routes=[Mount(PREFIX, app=relay.app)]), host="127.0.0.1",
-                                           port=0, log_level="warning", lifespan="off"))
+                                           port=0, log_level="warning", lifespan="off",
+                                           timeout_graceful_shutdown=5))
     task = asyncio.create_task(server.serve())
     while not server.started:
         await asyncio.sleep(0.01)
@@ -390,3 +392,214 @@ def test_the_backend_opens_its_sessions_on_the_relay_the_server_mounts():
     cfg = LLMConfig(backends={"cc": BackendSpec(kind="claude_code", model="sonnet")}, routes={"reply": "cc"})
     gateway = build_gateway(cfg, ManualClock(0), relay=mounted, relay_base=lambda: "http://127.0.0.1:1")
     assert gateway.backends["cc"].relay is mounted
+
+
+# ── Les bords de la CLI ───────────────────────────────────────────────────
+
+
+async def test_the_reader_survives_lines_it_does_not_understand(tmp_path, cli, monkeypatch):
+    """Une ligne JSON qui n'est pas un objet, un quota d'une autre forme, une ligne géante :
+    sautées, et la réponse arrive. Avant, le lecteur mourait en silence et l'appel attendait sans fin."""
+    from mika.adapters.llm import claude_code as cc
+
+    monkeypatch.setattr(cc, "READ_LIMIT", 4096)
+    relay = Relay()
+    noise = [[1, 2], {"type": "rate_limit_event", "rate_limit_info": {"unifiedWindows": [{"utilization": 0.5}]}},
+             {"type": "assistant", "message": "pas un objet"}, {"type": "assistant", "message": {"content": [1]}},
+             "x" * 20000]
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        req = LLMRequest(role="extract", call_id="n-1#0", system_stable=scenario(noise=noise, say="bonjour"),
+                         messages=(Message("user", "x"),))
+        resp = await asyncio.wait_for(be.complete(req), 20)
+    assert resp.text == "bonjour"
+
+
+async def test_a_cli_that_dies_without_a_result_fails_at_once(tmp_path, cli):
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        req = LLMRequest(role="extract", call_id="d-1#0", system_stable=scenario(noise=[[1]], die=3),
+                         messages=(Message("user", "x"),))
+        with pytest.raises(ClaudeCodeError, match="code 3"):
+            await asyncio.wait_for(be.complete(req), 20)
+        await asyncio.sleep(0.2)
+    assert not be._runs
+
+
+async def test_a_turn_that_never_comes_is_bounded(tmp_path, cli):
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path, turn_timeout_s=0.5)
+        req = LLMRequest(role="extract", call_id="s-1#0", system_stable=scenario(sleep=30),
+                         messages=(Message("user", "x"),))
+        with pytest.raises(ClaudeCodeError, match="rien dit"):
+            await asyncio.wait_for(be.complete(req), 20)
+
+
+async def test_a_tool_loop_begun_elsewhere_is_never_restarted_in_a_fresh_cli(tmp_path, cli):
+    """Aplati en un message, le fil perdait ses échanges d'outils : la CLI refaisait l'outil."""
+    relay, seen = Relay(), []
+    loop = (Message("user", "Adrien: retiens que j'ai rendez-vous jeudi"),
+            Message("assistant", "", tool_calls=(ToolCall("toolu_1", "note_add", {"what": "rdv jeudi"}),)),
+            Message("tool", "noté (souvenir #42)", tool_call_id="toolu_1", name="note_add"))
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        req = LLMRequest(role="reply", call_id="ep-9#0",
+                         system_stable=scenario(calls=[[["mika", "note_add", {"what": "x"}]]]), messages=loop,
+                         tools=declare([notes(seen)]))
+        with pytest.raises(ClaudeCodeError, match="boucle d'outils"):
+            await asyncio.wait_for(be.complete(req), 20)
+        # derrière la passerelle, un repli qui sait reprendre un fil d'outils prend la suite
+        gateway = Gateway({"cc": be, "spare": Spare()}, {"reply": "cc"}, clock=ManualClock(0),
+                          backend_fallbacks={"cc": "spare"})
+        assert (await gateway.call(req)).text == "réponse de repli"
+    assert seen == [] and not be._runs
+
+
+async def test_a_quota_reading_whose_window_has_reset_holds_nothing(tmp_path, cli):
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path, quota_ceiling=0.8)
+        await be.complete(LLMRequest(role="reply", call_id="q-1#0", system_stable=scenario(quota=0.95, resets=-5),
+                                     messages=(Message("user", "x"),), priority=0))
+        background = LLMRequest(role="journal", call_id="q-2#0", system_stable=scenario(say="écrit"),
+                                messages=(Message("user", "x"),), priority=2, lane="background")
+        assert (await be.complete(background)).text == "écrit"  # la fenêtre est passée : plus de réserve
+    assert be.status()["quota"] == {}
+
+
+async def test_releasing_a_loop_stops_its_waiting_session_at_once(tmp_path, cli):
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)  # fauchage par défaut : des minutes
+        gateway = Gateway({"cc": be}, {"extract": "cc"}, clock=ManualClock(0))
+        req = LLMRequest(role="extract", call_id="r-1#0", system_stable=scenario(calls=[[["mika", "t", {}]]]),
+                         messages=(Message("user", "x"),), tools=(ToolDecl("t", "t", {"type": "object"}),))
+        resp = await gateway.call(req)  # lu comme une sortie structurée : on ne rappelle pas
+        assert resp.stop == "tool_use"
+        pid = be._runs["r-1#0"].proc.pid
+        gateway.release("r-1#0")
+        for _ in range(100):
+            if not be._runs:
+                break
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.2)
+    assert not be._runs and len(relay) == 0 and not _alive(pid)
+    assert be.idle_s < be.tool_timeout_s  # fauchée avant que la CLI ne renonce seule à un outil
+
+
+async def test_the_cli_output_follows_the_request_budget(tmp_path, cli):
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        req = LLMRequest(role="journal", call_id="b-1#0", system_stable=scenario(report=True),
+                         messages=(Message("user", "x"),), max_tokens=3000)
+        report = _report((await be.complete(req)).text)
+    assert report["max_output"] == "3000"
+
+
+async def test_call_folders_live_outside_the_data_and_are_private(tmp_path, cli, monkeypatch):
+    from mika.adapters.llm.claude_code import purge_stale, runtime_dir
+
+    run_dir = tmp_path / "xdg"
+    run_dir.mkdir(mode=0o700)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(run_dir))
+    data = tmp_path / "data"
+    where = runtime_dir(data)
+    assert run_dir in where.parents and data not in where.parents
+    assert runtime_dir(data) != runtime_dir(tmp_path / "autre")  # deux Mika ne purgent pas l'une l'autre
+    where.mkdir(parents=True)
+    dead = where / "appel-999999999-abc"
+    mine = where / f"appel-{os.getpid()}-def"
+    dead.mkdir()
+    mine.mkdir()
+    (dead / "mcp.json").write_text("{\"jeton\": 1}")
+    assert purge_stale(where) == 1 and not dead.exists() and mine.exists()
+    relay = Relay()
+    async with serving(relay) as base:
+        be = ClaudeCodeBackend("", relay=relay, relay_base=lambda: base, claude_bin=cli, work_dir=where)
+        req = LLMRequest(role="journal", call_id="w-1#0", system_stable=scenario(report=True),
+                         messages=(Message("user", "x"),))
+        report = _report((await be.complete(req)).text)
+        await asyncio.sleep(0.2)
+    assert Path(report["cwd"]).is_relative_to(where)
+    assert stat.S_IMODE(where.stat().st_mode) == 0o700
+    assert sorted(where.glob("appel-*")) == [mine]  # l'appel fini est effacé ; celui d'un vivant reste
+
+
+async def test_a_call_folder_held_by_another_account_receives_nothing(tmp_path, cli, monkeypatch):
+    """Sans XDG_RUNTIME_DIR, les appels vont sous ``/tmp/mika-<uid>`` : si un autre compte l'a créé
+    d'avance, il pourrait renommer ce qu'on y met (prompt privé, jeton de session du relais). Refusé,
+    rien n'est écrit — et la passerelle bascule sur le repli comme pour toute panne."""
+    from mika.adapters.llm import claude_code as cc
+
+    squatted = tmp_path / "mika-1000"
+    squatted.mkdir()
+    real = os.lstat
+
+    def lstat(p, *a, **kw):  # ce dossier-là appartient à quelqu'un d'autre
+        st = real(p, *a, **kw)
+        if Path(p) == squatted:
+            return SimpleNamespace(st_uid=os.getuid() + 4242, st_mode=st.st_mode)
+        return st
+
+    assert cc.foreign_owner(squatted / "claude-code" / "x") is None  # le vrai propriétaire : nous
+    monkeypatch.setattr(cc.os, "lstat", lstat)
+    assert cc.foreign_owner(squatted / "claude-code" / "x") == squatted
+    relay = Relay()
+    async with serving(relay) as base:
+        be = ClaudeCodeBackend("", relay=relay, relay_base=lambda: base, claude_bin=cli,
+                               work_dir=squatted / "claude-code" / "x")
+        req = LLMRequest(role="journal", call_id="sq-1#0", system_stable=scenario(say="secret"),
+                         messages=(Message("user", "x"),), tools=(ToolDecl("t", "t", {"type": "object"}),))
+        with pytest.raises(ClaudeCodeError, match="autre compte"):
+            await asyncio.wait_for(be.complete(req), 20)
+        gateway = Gateway({"cc": be, "spare": Spare()}, {"journal": "cc"}, clock=ManualClock(0),
+                          backend_fallbacks={"cc": "spare"})
+        assert (await gateway.call(replace(req, call_id="sq-2#0"))).text == "réponse de repli"
+    assert list(squatted.iterdir()) == [] and len(relay) == 0
+
+
+async def test_a_call_that_fails_while_preparing_leaves_no_open_session(tmp_path, cli, monkeypatch):
+    """Le disque plein au moment d'écrire le dossier d'appel : la session du relais, déjà ouverte avec
+    son jeton, est refermée — rien ne reste joignable pour un appel qui n'a jamais commencé."""
+    from mika.adapters.llm import claude_code as cc
+
+    def full(*a, **kw):
+        raise OSError(28, "plus de place sur le périphérique")
+
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        monkeypatch.setattr(cc.tempfile, "mkdtemp", full)
+        req = LLMRequest(role="reply", call_id="df-1#0", system_stable=scenario(say="x"),
+                         messages=(Message("user", "x"),), tools=(ToolDecl("t", "t", {"type": "object"}),))
+        with pytest.raises(OSError):
+            await asyncio.wait_for(be.complete(req), 20)
+    assert len(relay) == 0 and not be._runs
+
+
+async def test_a_closing_word_after_the_last_results_finishes_the_live_session(tmp_path, cli):
+    """Au plafond de tours, le runtime clôt la boucle : les derniers résultats, puis « réponds
+    maintenant, sans outil ». La session vivante reçoit les résultats et ce mot, et finit sa réponse —
+    au lieu d'être arrêtée et refusée comme une boucle commencée ailleurs (elle répondait alors par un
+    échec, ou une nouvelle CLI refaisait les outils)."""
+    relay, seen = Relay(), []
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        req = LLMRequest(role="reply", call_id="cl-1#0", messages=(Message("user", "note : pain"),),
+                         system_stable=scenario(calls=[[["mika", "note_add", {"what": "pain"}]]],
+                                                say="voilà ({results})"),
+                         tools=declare([notes(seen)]))
+        first = await asyncio.wait_for(be.complete(req), 20)
+        assert first.stop == "tool_use"
+        call = first.tool_calls[0]
+        pid = be._runs["cl-1#0"].proc.pid
+        closing = req.extend(Message("assistant", first.text, tool_calls=first.tool_calls),
+                             Message("tool", "noté (souvenir #3)", tool_call_id=call.id, name=call.name),
+                             Message("user", "(Réponds maintenant, sans appeler d'outil.)"))
+        final = await asyncio.wait_for(be.complete(closing), 20)
+        await asyncio.sleep(0.2)
+    assert final.stop == "end" and "noté (souvenir #3)" in final.text and "sans appeler d'outil" in final.text
+    assert not be._runs and not _alive(pid) and len(relay) == 0

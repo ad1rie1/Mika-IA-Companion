@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from mika.contracts.runtime import EPISODE_ENDED, EPISODE_STARTED, UTTERANCE, ToolOutcome
 from mika.kernel.arbitration import Row
 from mika.kernel.builtin import LEASE, LEASE_ACQUIRED, LEASE_RELEASED
-from mika.kernel.codec import to_plain
+from mika.kernel.codec import canonical_json, to_plain
 from mika.kernel.episode import EpisodePolicy, Outcome
 from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.kernel.facts import FactView
@@ -29,7 +29,7 @@ from mika.kernel.frame import CLOSED, Audience, EpisodeRef, Frame
 from mika.kernel.guards import Guard, Superseded, combine, floor
 from mika.kernel.prompt import Budget, Composer, ComposeTrace, SectionBody
 from mika.kernel.state import FrozenDict
-from mika.ports.llm import PREEMPTED, LLMGateway, LLMRequest, Message, PersonaRender
+from mika.ports.llm import PREEMPTED, LLMGateway, LLMRequest, Message, PersonaRender, ToolDecl
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.tools import LoopResult, ToolContext, catalogue, declare, run_tool_loop
 from mika.runtime.traces import STABLE_KEY, EpisodeTraces
@@ -200,10 +200,18 @@ class EpisodeRunner:
 
                 enrich = await self._enrich(frame, policy)
                 blocks = self._sections(frame, enrich)
+                # ce qui part au modèle hors du composeur (persona, catalogue, outils) : le budget le réserve
+                persona = self.persona(frame, policy.persona_depth) if (
+                    policy.role is not None and policy.voice and self.persona) else None
+                tools = self._tools(policy, req.kind, audience,
+                                    req.selected.args.get("bundles") if req.selected is not None else None)
+                offered = list(tools.values())
+                more = catalogue(offered, policy.core_bundles, mind.registry.bundles)
+                declared = declare(offered, policy.core_bundles)
                 prompt, trace = self.composer.compose(
                     blocks, kind=req.kind, audience_level=audience.level, witness_level=audience.witness_level,
-                    muted_tags=policy.muted_tags,
-                    message=message, budget=self.budget, thread_key=req.target or req.kind,
+                    muted_tags=policy.muted_tags, message=message, budget=self.budget,
+                    reserved=_reserved(persona, more, declared) if policy.role is not None else 0,
                 )
                 report.trace = trace
                 seen.update(_composition(req, audience, policy.role, message, trace, enrich),
@@ -211,12 +219,7 @@ class EpisodeRunner:
                 if policy.role is None:
                     await self._end(eid, req, Outcome.DONE)
                     return report
-                persona = self.persona(frame, policy.persona_depth) if (policy.voice and self.persona) else None
-                tools = self._tools(policy, req.kind, audience,
-                                    req.selected.args.get("bundles") if req.selected is not None else None)
-                offered = list(tools.values())
                 stable = (persona.text + "\n\n" + prompt.system_stable).strip() if persona else prompt.system_stable
-                more = catalogue(offered, policy.core_bundles, mind.registry.bundles)
                 llm_req = LLMRequest(
                     role=policy.role, call_id=f"{eid}#0",
                     system_stable=f"{stable}\n\n{more}".strip() if more else stable,
@@ -224,7 +227,7 @@ class EpisodeRunner:
                     # points de cache) : ne pas le répéter dans le système
                     system_volatile="",
                     messages=tuple(Message(m["role"], m["content"]) for m in prompt.chat_messages()),
-                    tools=declare(offered, policy.core_bundles), max_tokens=policy.max_tokens, persona=persona,
+                    tools=declared, max_tokens=policy.max_tokens, persona=persona,
                     lane=policy.lane, priority=req.priority,
                     meta={"episode": eid, "kind": req.kind, "target": req.target, "sections": trace.included,
                           "audience_level": audience.level},
@@ -410,6 +413,8 @@ class EpisodeRunner:
                 continue
             if spec.owner_only and not audience.owner:
                 continue
+            if spec.when is not None and call(spec.when, audience, label=f"offre de {name}") is not True:
+                continue
             out[name] = spec
         return out
 
@@ -492,6 +497,14 @@ def _results(loop: LoopResult) -> dict[str, Any]:
         "reply": loop.text if loop.responses and loop.stop != "running" else None,
         "stop": loop.stop if loop.responses else None,
     }
+
+
+def _reserved(persona: PersonaRender | None, more: str, tools: Sequence[ToolDecl]) -> int:
+    """Les caractères qui partent au modèle hors du composeur : la persona, le
+    catalogue, les déclarations d'outils — toutes, un fournisseur qui ne sait
+    pas différer les envoie."""
+    return (len(persona.text) + 2 if persona else 0) + (len(more) + 2 if more else 0) + sum(
+        len(d.name) + len(d.description) + len(canonical_json(d.schema)) for d in tools)
 
 
 def _describe(error: BaseException) -> str:

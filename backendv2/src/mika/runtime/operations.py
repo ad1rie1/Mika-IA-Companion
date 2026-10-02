@@ -25,7 +25,7 @@ from mika.kernel import forms
 from mika.kernel.events import Origin
 from mika.kernel.faculty import ActionSpec
 from mika.kernel.guards import Superseded
-from mika.kernel.inspect import Ref
+from mika.kernel.inspect import Ref, describe_error
 from mika.kernel.operate import ActionContext, Done, Refused
 from mika.runtime import decisions
 from mika.runtime.boundary import Failed, acall, call
@@ -50,6 +50,8 @@ class Outcome:
     deduped: bool = False
     go: Ref | None = None
     show: tuple[Any, ...] = ()
+    #: rien n'a abouti (une panne, la situation a changé) : le jeton du formulaire est rendu, le renvoyer réessaie
+    retry: bool = False
 
 
 def _wants_ports(fn: Any) -> bool:
@@ -132,11 +134,23 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
     args, errors = parse_args(spec, form, kernel, subject)
     if errors:
         return Outcome(False, "Le formulaire a des erreurs.", "danger", errors=errors)
-    if nonce and not _first_use(kernel, nonce):
+    if nonce and not _reserve(kernel, nonce):
         # un double envoi : l'action a pu agir hors du journal (une app rechargée,
-        # une version précédente) — elle ne s'exécute pas deux fois
+        # une version précédente) — elle ne s'exécute pas deux fois, ni en même temps
         return Outcome(True, "Ce formulaire a déjà été envoyé : rien de plus n'a été fait.", "info", deduped=True)
+    consumed = False
+    try:
+        outcome = await _perform(kernel, spec, args, by=by, subject=subject, nonce=nonce)
+        # le jeton ne sert qu'une fois quand l'action a abouti ou a été refusée ; un échec (une panne, la
+        # situation qui a changé) le rend : renvoyer le même formulaire réessaie au lieu de répondre « déjà envoyé »
+        consumed = not outcome.retry
+    finally:
+        if nonce:
+            _settle(kernel, nonce, consumed=consumed)
+    return outcome
 
+
+async def _perform(kernel: Kernel, spec: ActionSpec, args: Any, *, by: str, subject: str, nonce: str) -> Outcome:
     mind = kernel.mind
     frame = mind.frame()
     ctx = ActionContext(by=by, subject=subject, now=mind.clock.now(), ports=kernel.ports,
@@ -151,7 +165,7 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
             await _audit(kernel, spec, by, subject, (), "refused", correlation, nonce)
             return Outcome(False, got.error.message, "warn", errors=got.error.fields)
         await _audit(kernel, spec, by, subject, (), "failed", correlation, nonce)
-        return Outcome(False, f"L'action a échoué : {got.error!r}"[:400], "danger")
+        return Outcome(False, f"L'action a échoué : {describe_error(got.error)}"[:400], "danger", retry=True)
     done: Done = got if isinstance(got, Done) else Done(message=str(got or ""))
     # la suite est vérifiée avant le premier ajout (sur des numéros fictifs) : rien ne s'écrit à moitié pour un
     # type non déclaré
@@ -178,11 +192,14 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
         keyed = [replace(d, dedupe_key=d.dedupe_key or f"op:{nonce}:{i}") if nonce else d
                  for i, d in enumerate(done.drafts)]
         try:
+            # la garde vérifie ce que l'action a lu (``basis`` : le moment où elle l'a lu), pas la tête contre
+            # elle-même : un état changé entre la lecture et l'ajout supplante l'action
             commit = await mind.append(keyed, emitter=spec.owner, correlation=correlation, origin=Origin.EXTERNAL,
-                                       guard=done.guard)
+                                       basis=frame.root, guard=done.guard)
         except Superseded:
             await _audit(kernel, spec, by, subject, (), "superseded", correlation, nonce)
-            return Outcome(False, "La situation a changé depuis l'ouverture de la page : rien n'a été fait.", "warn")
+            return Outcome(False, "La situation a changé depuis l'ouverture de la page : rien n'a été fait.", "warn",
+                           retry=True)
         seqs, deduped = tuple(commit.seqs), bool(commit.deduped)
         if done.then is not None and seqs:
             # même après un dédoublonnage (un renvoi après une panne) : ses clés rendent la suite rejouable
@@ -190,8 +207,8 @@ async def perform(kernel: Kernel, key: str, form: Mapping[str, Sequence[str]], *
             if isinstance(more, Failed):
                 await _audit(kernel, spec, by, subject, seqs, "failed", correlation, nonce)
                 go = Ref.subject(done.go_created, str(seqs[0]), "") if done.go_created else done.go
-                return Outcome(False, "C'est créé, mais la suite n'a pas pu s'écrire : complète depuis sa fiche.",
-                               "warn", seqs=seqs, go=go)
+                return Outcome(False, "C'est créé, mais la suite n'a pas pu s'écrire : renvoie ce formulaire, ou "
+                               "complète depuis sa fiche.", "warn", seqs=seqs, go=go, retry=True)
             seqs += more
     for proposal, draft in resolutions:
         keyed_ = replace(draft, dedupe_key=f"décision:{proposal}")
@@ -232,25 +249,43 @@ async def _follow(mind: Any, spec: ActionSpec, done: Done, seqs: tuple[int, ...]
 
 #: les jetons de formulaire déjà servis, par noyau (le journal garde les autres : leur audit)
 _USED: WeakKeyDictionary[Any, OrderedDict[str, None]] = WeakKeyDictionary()
+#: ceux dont l'action s'exécute en ce moment (un double clic n'en lance pas deux)
+_INFLIGHT: WeakKeyDictionary[Any, set[str]] = WeakKeyDictionary()
 USED_KEPT = 4096
+#: les issues qui rendent le jeton (rien n'a abouti : renvoyer le formulaire réessaie)
+RETRYABLE = frozenset({"failed", "superseded"})
 
 
-def _first_use(kernel: Kernel, nonce: str) -> bool:
-    """Vrai la première fois qu'un jeton sert ; ensuite (même en cours d'exécution,
-    même après un redémarrage : l'audit porte le jeton) il ne sert plus."""
+def _reserve(kernel: Kernel, nonce: str) -> bool:
+    """Vrai si ce jeton peut servir maintenant : jamais servi (même après un redémarrage : l'audit
+    d'une action aboutie ou refusée porte le jeton) et pas déjà en cours d'exécution."""
     used = _USED.setdefault(kernel, OrderedDict())
-    if nonce in used or kernel.mind.store.find_dedupe(rt.OPERATED.name, f"op:{nonce}:audit") is not None:
+    inflight = _INFLIGHT.setdefault(kernel, set())
+    if nonce in used or nonce in inflight \
+            or kernel.mind.store.find_dedupe(rt.OPERATED.name, f"op:{nonce}:audit") is not None:
         return False
+    inflight.add(nonce)
+    return True
+
+
+def _settle(kernel: Kernel, nonce: str, *, consumed: bool) -> None:
+    """L'action est finie : son jeton est consommé (succès, refus) ou rendu (panne, situation changée)."""
+    _INFLIGHT.setdefault(kernel, set()).discard(nonce)
+    if not consumed:
+        return
+    used = _USED.setdefault(kernel, OrderedDict())
     used[nonce] = None
     while len(used) > USED_KEPT:
         used.popitem(last=False)
-    return True
 
 
 async def _audit(kernel: Kernel, spec: ActionSpec, by: str, subject: str, seqs: tuple[int, ...], outcome: str,
                  correlation: str, nonce: str) -> None:
+    # l'audit d'une issue définitive porte le jeton (il ne resservira pas, même après un redémarrage) ;
+    # celui d'une panne non : chaque essai se journalise, le suivant reste possible
+    key = f"op:{nonce}:audit" if nonce and outcome not in RETRYABLE else None
     draft = rt.OPERATED.draft(action=spec.key, by=by, subject_kind=spec.subject, subject=subject, seqs=seqs,
-                              outcome=outcome, dedupe_key=f"op:{nonce}:audit" if nonce else None)
+                              outcome=outcome, dedupe_key=key)
     await kernel.mind.append([draft], emitter="runtime", correlation=correlation, origin=Origin.EXTERNAL)
 
 

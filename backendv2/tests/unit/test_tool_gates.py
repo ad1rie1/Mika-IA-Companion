@@ -166,7 +166,8 @@ def test_in_conversation_the_core_is_in_hand_and_the_rest_is_fetched_on_demand(t
     req = seen[0]
     deferred = {t.name for t in req.tools if t.deferred}
     in_hand = {t.name for t in req.tools if not t.deferred}
-    assert {"memory_search", "identity_whoami_with", "goal_remind"} <= in_hand
+    assert {"memory_search", "goal_remind"} <= in_hand
+    assert {"identity_whoami_with", "social_about"} <= deferred  # relire une section présente : à la demande
     assert {"forge_write", "rss_list", "camera_look", "forge_call"} <= deferred
     catalogue = req.system_stable.split(CATALOGUE_HEADER, 1)[1]
     assert "- forge : la Forge" in catalogue and "- rss : les flux" in catalogue
@@ -217,5 +218,5 @@ def test_her_file_on_someone_is_read_back_to_them_but_never_to_a_stranger(tmp_pa
             await kernel.stop()
 
     run_virtual(clock, main)
-    assert answers["user_1"].startswith("Pour toi, c'est")
+    assert answers["user_1"].startswith("« Adrien » fait partie de tes amis")
     assert "ne peux pas relire" in answers["web_inconnu"]

@@ -44,6 +44,10 @@ class EffectExecutor:
         self._stopping = True
         self._wake.set()
 
+    def wake(self) -> None:
+        """Reprendre la file maintenant (une ligne qu'un opérateur vient de relancer depuis la console)."""
+        self._wake.set()
+
     async def run(self) -> None:
         while not self._stopping:
             self._wake.clear()

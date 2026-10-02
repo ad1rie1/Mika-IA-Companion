@@ -9,6 +9,7 @@ from mika.faculties.social import (  # noqa: F401 — contributions
     initiative,
     inspect,
     profile,
+    reciprocity,
     sections,
 )
 from mika.faculties.social.faculty import SOCIAL, SocialParams, SocialState

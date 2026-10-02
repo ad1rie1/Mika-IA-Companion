@@ -48,8 +48,10 @@ def world(tmp_path) -> Iterator[tuple[TestClient, object, Echo]]:
     roles = {str(r): "fake" for r in VOICE_ROLES}
     gateway = LiveGateway(Gateway({"fake": backend}, roles, clock=RealClock(),
                                   voice_roles=frozenset(roles), slots={"fake": 1}))
+    # l'horloge est réelle : la nuit, sa réponse à un inconnu attendrait son réveil (ADR 0036) — le
+    # protocole se teste à toute heure, sans cette attente
     app, live = build(tmp_path / "data", web=WebConfig(), gateway=gateway, embedder=HashEmbedder(),
-                      arbitration=ArbitrationPolicy())
+                      arbitration=ArbitrationPolicy(), reply_wait=None)
     with TestClient(app, base_url="http://localhost:8001", headers={"Origin": ORIGIN}) as client:
         yield client, live, backend
 

@@ -2,7 +2,7 @@
 <div class="stack">
 {% for p in items %}
 <div class="card stack">
-  <div class="page-head"><div><h2>{{ p.summary[:110] or p.capability }}</h2><p class="muted">{{ p.capability }} · {{ p.when }}</p></div></div>
+  <div class="page-head"><div><h2>{{ p.summary[:110] or p.capability }}</h2><p class="muted">{{ p.capability }} · {{ p.when }} · <span class="mono">{{ p.capability_key }}</span></p></div></div>
   {% if p.summary|length > 110 %}<div class="prose">{{ p.summary }}</div>{% endif %}
   {% if p.context %}<p class="muted">{{ p.context }}</p>{% endif %}
   {% if p.preview %}
@@ -13,10 +13,12 @@
   <pre class="code">{{ p.args }}</pre>
   {% endif %}
   <form method="post" action="{{ PREFIX }}/approbations" class="approve-form">
+    {# Entrée dans la note ne décide rien : le bouton par défaut d'un formulaire est son premier, désactivé ici #}
+    <button type="submit" class="default-submit" disabled hidden tabindex="-1">Entrée : rien</button>
     <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="proposal" value="{{ p.proposal }}">
     <input type="hidden" name="seen" value="{{ p.seen }}">
     <label class="field">Note (facultative) <input name="note" placeholder="pourquoi, pour elle et pour l'historique"></label>
-    <button class="btn" name="decision" value="approve"{% if p.blocked %} disabled title="{{ p.blocked }}"{% endif %}>Approuver</button>
+    <button class="btn" name="decision" value="approve" data-confirm="Approuver « {{ (p.summary or p.capability)[:90] }} » ? Ce qui est montré partira tel quel."{% if p.blocked %} disabled title="{{ p.blocked }}"{% endif %}>Approuver</button>
     <button class="btn quiet" name="decision" value="reject">Refuser</button>
   </form>
 </div>

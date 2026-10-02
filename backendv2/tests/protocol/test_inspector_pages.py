@@ -90,7 +90,7 @@ def test_why_did_she_say_that(world):  # noqa: F811
     assert "en réponse à" in decision
     cause = re.search(r'/inspecteur/evenement/(\d+)">message n°', decision)
     event = html_of(client.get(f"/inspecteur/evenement/{cause.group(1)}"))
-    assert "réduit par" in event and "transcript" in event and "A déclenché" in event
+    assert "réduit par" in event and "Fil des conversations" in event and "A déclenché" in event
     assert client.get("/inspecteur/evenement/999999").status_code == 404
     # un filtre qui ressemble à du SQL ne casse rien
     assert client.get("/inspecteur/systeme/chronologie?type=%25'%20OR%201=1--&correlation=x").status_code == 200

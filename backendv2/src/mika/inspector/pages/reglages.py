@@ -32,12 +32,12 @@ from mika.inspector.ui import PREFIX, secure
 from mika.kernel import forms
 from mika.kernel.builtin import PARAMS_CHANGED
 from mika.kernel.inspect import (
+    INT_MAX,
     Badge,
     Column,
     Nav,
     NavItem,
     Note,
-    Pager,
     Ref,
     Row,
     Stat,
@@ -45,6 +45,7 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    cursor_page,
 )
 from mika.runtime import operations
 from mika.runtime.params import shown as params_shown
@@ -323,21 +324,50 @@ async def parametres_post(ui: Any, request: Request) -> tuple[Response | None, d
                       "persona, de tempérament ou de surcharge).")
 async def journal(ui: Any, request: Request) -> list[Any]:
     ctx = ui.inspection.context(request.query_params)
-    before = ctx.int_param("avant", 0) or None
-    ops = [e for e in ctx.events([rt.OPERATED], 300, before=before)
-           if e.data.action.startswith("console.") and e.data.outcome == "done"]
-    params = ctx.events([PARAMS_CHANGED], 100, before=before)
-    merged = sorted([*ops, *params], key=lambda e: -e.seq)[:50]
+    before = ctx.int_param("avant", 0)
+    # une seule requête, filtrée en SQL, lue avec une ligne de plus : rien ne tombe entre deux pages (deux flux
+    # lus à part puis fusionnés sous un même curseur perdaient ce qui dépassait le plus court)
+    seqs = [int(r[0]) for r in ui.kernel.mind.store.query_mind(
+        "SELECT seq FROM events WHERE ((type=? AND json_extract(data, '$.action') LIKE 'console.%' "
+        "AND json_extract(data, '$.outcome')='done') OR type=?) AND seq<? ORDER BY seq DESC LIMIT ?",
+        (rt.OPERATED.name, PARAMS_CHANGED.name, before or INT_MAX, JOURNAL_PAGE + 1))]
+    found = sorted((ui.decode(s) for s in ui.kernel.mind.store.get_events(seqs)), key=lambda e: -e.seq)
+    merged, pager = cursor_page(found, JOURNAL_PAGE, current=before)
     rows = []
     for e in merged:
         if e.type.name == PARAMS_CHANGED.name:
             rows.append(Row((When(e.at), Badge("paramètres", "info"),
                              Ref("local", faculty_url(e.data.owner), _label_of(ui, e.data.owner)), "—",
-                             Text(e.correlation or "—", "muted")), href=Ref("event", str(e.seq), "")))
+                             Text(_origin(e.correlation), "muted")), href=Ref("event", str(e.seq), "")))
         else:
-            what = e.data.action.removeprefix("console.")
-            rows.append(Row((When(e.at), Badge("opérateur", "ok"), Text(what, "mono"), e.data.by,
-                             Text(e.data.subject or "—", "muted")), href=Ref("event", str(e.seq), "")))
-    pager = Pager(older=(("avant", str(merged[-1].seq)),)) if len(merged) == 50 else Pager()
+            rows.append(Row((When(e.at), Badge("opérateur", "ok"), Text(_what(ui, e.data.action), hint=e.data.action),
+                             Text(ui.names.who(e.data.by), hint=e.data.by), Text(e.data.subject or "—", "muted")),
+                            href=Ref("event", str(e.seq), "")))
     return [Table((Column("quand", "fit"), "sorte", "quoi", "par", "sur / origine"), tuple(rows),
                   title="Journal des modifications", empty="Rien encore.", pager=pager)]
+
+
+#: le journal des modifications, par page
+JOURNAL_PAGE = 50
+
+
+def _what(ui: Any, action: str) -> str:
+    """Ce qu'un opérateur a changé, en mots : « Réglages · Modèles », « Paramètres · Corps et sommeil »."""
+    parts = action.split(".")
+    forms_ = ui.settings_forms
+    if len(parts) >= 3 and parts[1] == "reglages" and forms_ is not None and parts[2] in forms_.sections:
+        section = forms_.sections[parts[2]]
+        command = next((c.title for c in section.commands if len(parts) > 3 and c.key == parts[3]), "")
+        return f"Réglages · {section.label}" + (f" · {command}" if command else "")
+    if len(parts) >= 3 and parts[1] == "parametres":
+        return f"Paramètres · {_label_of(ui, parts[2])}"
+    return ui.names.action(action)
+
+
+def _origin(correlation: str) -> str:
+    """D'où vient une journalisation des paramètres, en mots."""
+    if not correlation:
+        return "—"
+    return {"params": "le démarrage ou une reconfiguration (persona, tempérament, surcharges)",
+            "persona": "la persona"}.get(correlation, "un réglage d'opérateur" if correlation.startswith("opérateur:")
+                                         else correlation)

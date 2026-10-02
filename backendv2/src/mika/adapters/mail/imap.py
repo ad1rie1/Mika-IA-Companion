@@ -78,6 +78,13 @@ class Session:
                                                         ssl_context=ssl.create_default_context(), timeout=timeout)
         else:
             self.box = imaplib.IMAP4(account.imap_host, account.imap_port, timeout=timeout)
+            # sans SSL d'emblée : chiffrer avant d'envoyer le mot de passe, si le serveur le propose
+            if "STARTTLS" in {str(c).upper() for c in getattr(self.box, "capabilities", ())}:
+                try:
+                    self._ok(self.box.starttls(ssl_context=ssl.create_default_context()), "STARTTLS refusé")
+                except (imaplib.IMAP4.error, ssl.SSLError, OSError) as exc:
+                    self.close()
+                    raise ImapError(f"le chiffrement (STARTTLS) a échoué : {exc}") from None
         try:
             self._ok(self.box.login(account.user, account.password), "connexion refusée")
         except imaplib.IMAP4.error as exc:
@@ -189,6 +196,12 @@ class Session:
     # ── ranger ──
     def store(self, uid: int, flag: str, on: bool) -> None:
         self._ok(self.box.uid("STORE", str(uid), "+FLAGS" if on else "-FLAGS", f"({flag})"), "drapeau refusé")
+
+    def store_many(self, uids: list[int], flag: str, on: bool) -> None:
+        """Un drapeau posé (ou retiré) sur plusieurs mails du dossier ouvert, en une commande."""
+        if uids:
+            self._ok(self.box.uid("STORE", ",".join(str(u) for u in uids), "+FLAGS" if on else "-FLAGS",
+                                  f"({flag})"), "drapeau refusé")
 
     def move(self, uid: int, dest: str) -> int | None:
         """Déplace (dans le dossier ouvert) ; rend l'UID d'arrivée s'il est dit."""

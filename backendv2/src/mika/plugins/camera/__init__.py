@@ -6,8 +6,11 @@
   quelque chose. Une image n'entre jamais dans le journal : seulement ce
   qu'elle en a vu.
 - Ce qu'elle voit se montre en conversation (« ce que tu vois ») à ses
-  propriétaires seulement, cité, tant que c'est récent.
-- ``camera_look`` : regarder maintenant, à la demande de sa propriétaire.
+  propriétaires seulement, **en privé** (jamais devant un salon), cité, tant
+  que c'est récent ; une image de la pièce est personnelle.
+- ``camera_look`` : regarder maintenant, pour la personne qui s'occupe d'elle,
+  en privé. Une image figée (l'appareil n'envoie plus rien) n'est pas décrite
+  comme si elle était actuelle : elle dit depuis quand elle ne voit plus rien.
 """
 
 from __future__ import annotations
@@ -23,7 +26,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mika.contracts import body as body_c
 from mika.contracts import camera as c
-from mika.contracts import identity as identity_c
 from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
@@ -52,6 +54,7 @@ from mika.kernel.inspect import (
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import Image, LLMRequest, Message
+from mika.ports.preprocess import inert
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.privacy import Sensitivity
 
@@ -123,10 +126,10 @@ def read_look(text: str) -> tuple[str, bool]:
         try:
             data = json.loads(found.group(0))
             if isinstance(data, dict):
-                return " ".join(str(data.get("description") or "").split())[:600], bool(data.get("notable"))
+                return inert(str(data.get("description") or ""), 600), bool(data.get("notable"))
         except ValueError:
             pass
-    return " ".join((text or "").split())[:600], False
+    return inert(text or "", 600), False
 
 
 def request(snap: Any, call_id: str) -> LLMRequest:
@@ -139,7 +142,7 @@ def request(snap: Any, call_id: str) -> LLMRequest:
 def seen_draft(snap: Any, description: str, notable: bool) -> Any:
     level = int(Sensitivity.PERSONAL)
     return c.SEEN.draft(
-        source="camera", kind=c.VIEW, summary=Content.of(f"Sur la caméra « {snap.device} » : {description}", level=level),
+        source="camera", kind=c.VIEW, summary=Content.of(f"Sur la caméra « {inert(snap.device, 40)} » : {description}", level=level),
         pertinence=0.7 if notable else 0.2, emotion="curious" if notable else "", intensity=0.15 if notable else 0.0,
         sensitivity=level, bundle=BUNDLE, device=snap.device, digest=snap.digest, notable=notable,
         dedupe_key=f"vu:{snap.device}:{snap.digest}:{snap.at}")
@@ -189,12 +192,26 @@ class Look:
 
 
 def _for_owner(frame: Frame) -> bool:
+    """Ce que voit la caméra : pour ses propriétaires en privé (jamais devant un salon, même quand c'est
+    sa propriétaire qui y parle), ou pour elle quand elle travaille."""
     ep = frame.episode
     if ep is None:
         return False
     if ep.kind in WORKING:
         return True
-    return bool(ep.target) and bool(frame.get(identity_c.IS_OWNER(frame.get(identity_c.PERSON(ep.target)))))
+    audience = frame.audience
+    if not ep.target or audience is None or audience.public or audience.room:
+        return False
+    # l'audience dit si qui écrit en a les droits : l'adresse qui parle, pas une autre adresse de la personne
+    return bool(audience.owner)
+
+
+def _ago(us: int) -> str:
+    minutes = max(1, us // MINUTE)
+    if minutes < 120:
+        return f"{minutes} min"
+    hours = minutes // 60
+    return f"{hours} h" if hours < 48 else f"{hours // 24} jours"
 
 
 @CAMERA.enricher("views", episodes=[*CONVERSATIONAL, Kind.STEP], deadline_ms=300)
@@ -214,7 +231,8 @@ def _section(s: CameraState, frame: Frame, enrich: Mapping[str, Any]) -> Section
     if not texts or not _for_owner(frame):
         return None
     lines = [texts[v.summary_ref] for v in frame.get(c.VIEWS)[:2] if texts.get(v.summary_ref)]
-    return SectionBody("\n".join(lines)) if lines else None
+    # une image de la pièce est personnelle : sa propriétaire la reçoit (témoin), un salon jamais
+    return SectionBody("\n".join(lines), level=int(Sensitivity.PERSONAL), witness=True) if lines else None
 
 
 class LookArgs(BaseModel):
@@ -226,13 +244,19 @@ class LookArgs(BaseModel):
 async def camera_look(args: LookArgs, ctx: Any) -> Any:
     port, llm = ctx.ports.get("camera"), ctx.ports.get("llm")
     if not _for_owner(ctx.frame):
-        return ToolResult(ok=False, content="La caméra est à ta propriétaire : tu ne regardes que pour elle.")
+        return ToolResult(ok=False, content="Tu ne regardes par la caméra que pour la personne qui s'occupe de "
+                                            "toi, en tête-à-tête — jamais devant d'autres.")
     if port is None or llm is None or not port.devices():
         return ToolResult(ok=False, content="Aucune caméra n'est branchée.")
     device = args.device or port.devices()[0]
     snap = port.latest(device)
     if snap is None:
         return ToolResult(ok=False, content=f"Rien de la caméra « {device} ».")
+    frame: Frame = ctx.frame
+    p = params(frame.env.params_of("camera", frame.root))
+    if frame.now - snap.at > p.fresh_us:  # une image figée n'est pas ce qu'on voit maintenant
+        return ToolResult(ok=False, content=f"La caméra « {device} » n'envoie plus d'image depuis "
+                                            f"{_ago(frame.now - snap.at)} : tu ne vois pas la pièce en ce moment.")
     resp = await llm.call(request(snap, f"{ctx.call_id}:look"))
     description, notable = read_look(resp.text)
     if not description:

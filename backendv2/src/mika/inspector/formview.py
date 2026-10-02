@@ -34,12 +34,24 @@ def field_view(f: forms.FormField, value: Any, *, error: str = "", prefix: str =
     return {
         "path": f.path, "id": f"{prefix}-{f.path.replace('.', '-')}", "label": f.label,
         "help": f.help, "kind": kind, "value": checked(value) if kind == "bool" else "" if kind == "file" else text,
-        "error": error, "unit": f.unit if kind != "slider" else "", "readonly": f.readonly,
+        "error": error, "unit": _unit(f), "readonly": f.readonly,
         "required": f.required and kind != "bool", "choices": list(f.choices), "lo": f.lo, "hi": f.hi,
         "step": f.step, "has_value": bool(value) if kind == "secret" else False,
         "only": only_attr(f),
         "rows": _rows(text, kind), "group": f.group,
     }
+
+
+#: l'unité d'un champ telle qu'on la lit en français
+UNITS_FR = {"tokens": "jetons", "us": "µs"}
+
+
+def _unit(f: forms.FormField) -> str:
+    """L'unité montrée à côté du libellé : jamais pour un curseur (sa valeur s'affiche) ni pour une
+    durée (elle se tape avec son unité : « 1 h 30 »)."""
+    if f.kind in ("slider", "duration"):
+        return ""
+    return UNITS_FR.get(f.unit, f.unit)
 
 
 def only_attr(f: forms.FormField) -> str:

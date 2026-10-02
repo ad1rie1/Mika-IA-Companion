@@ -12,6 +12,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mika.kernel.clock import DAY, MINUTE
+from mika.kernel.inspect import describe_error
+from mika.kernel.registry import zone_known
+from mika.runtime.boundary import Failed, call
 
 if TYPE_CHECKING:
     from mika.runtime.bootstrap import Kernel
@@ -113,8 +116,10 @@ def _outbox(kernel: Kernel) -> Check:
     pending = store.pending_outbox()
     oldest = store.get_events([pending[0].seq]) if pending else []
     age = now - oldest[0].at if oldest else 0
-    detail = tuple(f"{r.effect} (seq {r.seq}) : {r.attempts} tentative(s) {r.last_error or ''}" for r in pending[:10])
-    detail += tuple(f"abandonné : {effect} (seq {seq}) — {error or ''}" for seq, effect, error in failed[:10])
+    detail = tuple(f"{r.effect} (seq {r.seq}) : {r.attempts} tentative(s) {describe_error(r.last_error or '')}"
+                   for r in pending[:10])
+    detail += tuple(f"abandonné : {effect} (seq {seq}) — {describe_error(error or '')}"
+                    for seq, effect, error in failed[:10])
     parts = []
     if pending:
         parts.append(f"{len(pending)} effet(s) en attente, le plus vieux depuis {age // 1_000_000} s")
@@ -132,6 +137,24 @@ def _llm(kernel: Kernel) -> Check:
     return Check("llm", OK, "modèles branchés")
 
 
+def _config(kernel: Kernel) -> Check:
+    """La configuration journalisée se relit : chaque faculté retrouve ses paramètres, et le fuseau
+    qu'elle vit existe (sinon elle vit en UTC — ses nuits et ses salutations au mauvais moment)."""
+    registry = kernel.registry
+    root = kernel.mind.root
+    problems: list[str] = []
+    for name in sorted(registry.faculties):
+        got = call(registry.params_of, name, root, label=f"paramètres de {name}")
+        if isinstance(got, Failed):
+            problems.append(f"les paramètres de « {name} » ne se relisent pas : {describe_error(got.error)}")
+        elif name == "kernel" and got is not None and not zone_known(str(getattr(got, "tz", "UTC"))):
+            problems.append(f"fuseau horaire inconnu « {str(got.tz)[:60]} » : elle vit en UTC — corrige-le dans "
+                            "Configuration › Personnage › Identité")
+    if problems:
+        return Check("config", DEGRADED, problems[0][:200], tuple(problems))
+    return Check("config", OK, "paramètres et fuseau lisibles")
+
+
 def _lanes(kernel: Kernel) -> Check:
     lanes = kernel.lanes
     counts = {lane: lanes.pending(lane) for lane in lanes.capacities}
@@ -146,5 +169,5 @@ def report(kernel: Kernel) -> Health:
     if kernel.phase != "ready":
         return Health(kernel.phase, ())
     checks = (_journal(kernel), _slices(kernel), _loops(kernel), _projections(kernel), _processes(kernel),
-              _outbox(kernel), _llm(kernel), _lanes(kernel))
+              _outbox(kernel), _llm(kernel), _lanes(kernel), _config(kernel))
     return Health(kernel.phase, checks)

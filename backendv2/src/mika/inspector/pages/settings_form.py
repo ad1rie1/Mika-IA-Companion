@@ -270,11 +270,12 @@ class SettingsForms:
         if editing is None and query.get("enregistrement") and (query.get("section") in ("", None, s.key)):
             editing = (query["enregistrement"], query.get("cle", ""))
             state.back = back_to(query.get("retour", ""))
-        if editing is not None and editing[1]:
-            # sur la page d'une entrée existante, les choix d'un chargeur se chargent d'eux-mêmes
-            wanted = query.get("charger", "")
+        wanted = query.get("charger", "")
+        if editing is not None and editing[1] and wanted:
+            # un fournisseur n'est interrogé que quand on le demande (« Charger la liste », ou un lien qui
+            # porte ``charger=``) : afficher sa page ne coûte jamais un appel réseau de plusieurs secondes
             for path in self._loader_paths(s, editing[0]):
-                if wanted and path != wanted:
+                if path != wanted:
                     continue
                 got = await self._load_choices(s, editing, path)
                 if isinstance(got, str):
@@ -359,12 +360,18 @@ class SettingsForms:
         pages = max(1, math.ceil(len(items) / RECORDS_PAGE))
         number = min(number, pages)
         window = items[(number - 1) * RECORDS_PAGE:number * RECORDS_PAGE]
+        section_flat = forms.flatten(current) if isinstance(current, BaseModel) else {}
         rows = []
         for key, entry in window:
             flat = forms.flatten(entry) if isinstance(entry, BaseModel) else {}
             cells = [_shown(i, flat.get(i.path)) for i in shown]
             cells += ["défini" if flat.get(i.path) else "—" for i in secrets_]
-            rows.append({"key": key, "cells": cells, "edit": page_url(page, enregistrement=f.path, cle=key)})
+            # retirer annonce ce qui le désignait (ces rôles retomberont sur leur repli)
+            refs = [label for _p, label in forms.references(s.model, section_flat, f.path, key)] if keyed else []
+            confirm = f"Retirer « {key} » ?" + (f" Ce qui le désigne ne le pourra plus : {', '.join(refs)}."
+                                                 if refs else "")
+            rows.append({"key": key, "cells": cells, "edit": page_url(page, enregistrement=f.path, cle=key),
+                         "confirm": confirm[:600]})
         return {"path": f.path, "label": f.label, "help": f.help, "keyed": keyed,
                 "columns": [i.label for i in shown] + [i.label for i in secrets_], "rows": rows,
                 "total": len(items),
@@ -397,10 +404,10 @@ class SettingsForms:
             view = _view(f, given.get(f.path), _error_for(f.path, state.record_errors), prefix, loaded.get(f.path))
             if view is not None:
                 view["load_button"] = view.get("loader", False)
-                view["load_label"] = "Charger la liste" if entry is None else "Enregistrer, puis choisir dans la liste"
-                # entrée neuve : charger n'enregistre rien, le champ vide qu'on vient remplir ne doit pas
-                # bloquer l'envoi (le navigateur refuse un « required » vide)
-                view["load_novalidate"] = entry is None
+                view["load_label"] = "Charger la liste"
+                # charger n'enregistre rien : un champ vide qu'on vient remplir ne doit pas bloquer l'envoi
+                # (le navigateur refuse un « required » vide)
+                view["load_novalidate"] = True
                 if f.secret and f.path in state.stashed:
                     view["has_value"] = True  # tapé, gardé côté serveur : vide = le garder
                 # ce qui ne sert pas au type choisi n'apparaît pas (le script suit les changements)
@@ -471,6 +478,8 @@ class SettingsForms:
         new = None
         if not errors:
             new, errors = forms.validate(s.model, current, values)
+        if new is not None and not errors:
+            errors = _choice_errors(s, current, new)
         if errors or new is None:
             return None, {s.key: State(values=values, errors=errors, messages=[
                 ("danger", "Rien n'a été enregistré : corrige les champs signalés.")])}, 400
@@ -513,15 +522,21 @@ class SettingsForms:
                 lists[f.path] = [kept[f.path]]
         values, errors = forms.parse(fields, lists, current=flat, load=_yaml_load)
         wanted = data.get(LOAD, "")
-        if wanted and entry is None:
+        if wanted:
+            # charger une liste (les modèles d'un fournisseur) n'enregistre rien, entrée neuve ou non : le
+            # fournisseur n'est interrogé que sur ce bouton, avec ce qui vient d'être tapé
             return await self._load_new(s, path, old, data, fields, flat, values, errors, wanted, now)
         errors = {**errors, **forms.within(fields, values)}
         name = data.get(RECORD_KEY, old).strip()[:60] if keyed else old
         collection = getattr(current, path)
+        renamed = keyed and entry is not None and name != old
         if keyed and not name:
             errors[RECORD_KEY] = "Donne un nom."
         elif keyed and name != old and name in collection:
             errors[RECORD_KEY] = "Ce nom existe déjà."
+        elif renamed and path in s.fixed_names:
+            errors[RECORD_KEY] = (f"Le nom « {old} » ne change pas : des données rangées ailleurs le portent. "
+                                  "Ajoute une entrée sous le nouveau nom, puis retire l'ancienne.")
         record = None
         if not errors:
             record, errors = _record_from(model, entry, flat, values)
@@ -530,7 +545,8 @@ class SettingsForms:
         if errors or record is None:
             state.messages = [("danger", "Rien n'a été enregistré : corrige les champs signalés.")]
             return None, {s.key: state}, 400
-        plain = forms.flatten(current)[path]
+        section_flat = forms.flatten(current)
+        plain = section_flat[path]
         if keyed:
             updated = {k: v for k, v in dict(plain).items() if k != old}
             updated[name] = record.model_dump(mode="python")
@@ -540,20 +556,31 @@ class SettingsForms:
                 updated[int(old)] = record.model_dump(mode="python")
             else:
                 updated.append(record.model_dump(mode="python"))
-        new, errors = forms.validate(s.model, current, {path: updated})
+        changes: dict[str, Any] = {path: updated}
+        followed: list[str] = []
+        if renamed:
+            # renommer emporte ce qui le désignait (les rôles, le repli d'un autre fournisseur) : rien ne
+            # retombe en silence sur un repli parce qu'un nom a changé
+            more, followed = forms.rename_references(s.model, {**section_flat, path: updated}, path, old, name)
+            changes.update(more)
+        new, errors = forms.validate(s.model, current, changes)
+        if new is not None and keyed and name != old and not forms.RECORD_NAME.fullmatch(name):
+            # la règle commune des noms, après celle du modèle (qui dit mieux ce qu'il attend, s'il en a une)
+            new, errors = None, {RECORD_KEY: f"Nom refusé : {forms.RECORD_NAME_RULE}."}
         if new is None:
             state.record_errors = errors
             state.messages = [("danger", " ; ".join(errors.values()) or "Refusé.")]
             return None, {s.key: state}, 400
         subject = f"{s.key}/{path}/{name}"
-        response, states, status = await self._commit(ui, s, new, by, page, subject, state,
-                                                      f"« {name} » enregistré." if keyed else "Enregistré.",
+        message = f"« {name} » enregistré." if keyed else "Enregistré."
+        if renamed:
+            message = f"« {old} » s'appelle désormais « {name} »" + (
+                f" ; ce qui le désignait suit : {', '.join(followed)}." if followed else
+                " ; rien d'autre ne le désignait.")
+        response, states, status = await self._commit(ui, s, new, by, page, subject, state, message,
                                                       back_to(data.get(BACK, "")))
         if response is not None:
             self._stash.pop(token, None)
-        if response is not None and wanted:
-            target = page_url(page, enregistrement=path, cle=name, charger=wanted)
-            return secure(RedirectResponse(target, status_code=303)), {}, 303
         return response, states, status
 
     async def _load_new(self, s: SettingsSection, path: str, old: str, data: Mapping[str, str],
@@ -612,8 +639,10 @@ class SettingsForms:
         new, errors = forms.validate(s.model, current, {path: updated})
         if new is None:
             return None, {s.key: State(messages=[("danger", " ; ".join(errors.values()))])}, 400
+        refs = [label for _p, label in forms.references(s.model, forms.flatten(current), path, key)] \
+            if found[1] else []
         return await self._commit(ui, s, new, by, page, f"{s.key}/{path}/{key}", State(),
-                                  f"« {key} » retiré.")
+                                  f"« {key} » retiré." + (f" Ne le désignent plus : {', '.join(refs)}." if refs else ""))
 
     async def _save_yaml(self, ui: Any, s: SettingsSection, text: str, by: str,
                          page: str) -> tuple[Response | None, dict[str, State], int]:
@@ -632,6 +661,13 @@ class SettingsForms:
             return None, {s.key: state}, 400
         except ValueError as exc:
             state.messages = [("danger", str(exc))]
+            return None, {s.key: state}, 400
+        # un import passe par les mêmes choix que le formulaire (un fuseau inventé aurait mis toute la console
+        # et la conversation en panne)
+        refused = _choice_errors(s, s.load(), new)
+        if refused:
+            labels = {f.path: f.label for f in forms.describe(s.model)}
+            state.messages = [("danger", f"{labels.get(p, p)} : {m}") for p, m in refused.items()]
             return None, {s.key: state}, 400
         return await self._commit(ui, s, new, by, page, s.key, state, f"{s.label} : importée.")
 
@@ -655,6 +691,23 @@ class SettingsForms:
             sep = "&" if "?" in back else "?"
             return secure(RedirectResponse(f"{back}{sep}flash={token}", status_code=303))
         return secure(RedirectResponse(page_url(page, flash=token), status_code=303))
+
+
+def _choice_errors(s: SettingsSection, current: Any, new: BaseModel) -> dict[str, str]:
+    """Les champs dont la section connaît les choix (``SettingsSection.choices`` : les fuseaux) : une
+    valeur hors de la liste est refusée — sauf celle déjà en place (elle reste proposée au rendu)."""
+    if not s.choices:
+        return {}
+    before = forms.flatten(current) if isinstance(current, BaseModel) else {}
+    after = forms.flatten(new)
+    errors: dict[str, str] = {}
+    for path, choices in s.choices.items():
+        value = after.get(path)
+        if value in (None, "") or value == before.get(path):
+            continue
+        if str(value) not in {v for v, _ in choices()}:
+            errors[path] = f"choix inconnu : « {str(value)[:80]} »"
+    return errors
 
 
 def back_to(target: str) -> str:

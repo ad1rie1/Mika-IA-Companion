@@ -9,6 +9,11 @@ est filtré par l'adaptateur) : une ligne ``SCENARIO: {json}``. Clés :
 - ``fail`` : terminer par un résultat en erreur portant ce texte ;
 - ``sleep`` : rester bloqué N secondes avant de répondre (annulation) ;
 - ``quota`` : l'utilisation d'abonnement annoncée (``rate_limit_event``) ;
+- ``resets`` : dans combien de secondes sa fenêtre se réinitialise (négatif :
+  déjà passée ; défaut une heure) ;
+- ``noise`` : des lignes brutes écrites avant tout le reste (JSON qui n'est
+  pas un objet, formes inattendues, ligne géante) ;
+- ``die`` : s'arrêter après le bruit, sans résultat (code de sortie donné) ;
 - ``report`` : ajouter au texte final ce que la CLI a reçu (argv, clés
   d'environnement, outils de chaque serveur).
 
@@ -69,9 +74,16 @@ def main():
             states.append({"name": name, "status": "failed"})
     out({"type": "system", "subtype": "init", "tools": [f"mcp__{s}__{t}" for s, ts in listed.items() for t in ts],
          "mcp_servers": states, "apiKeySource": "none"})
+    for raw in scenario.get("noise", []):
+        sys.stdout.write((raw if isinstance(raw, str) else json.dumps(raw)) + "\n")
+        sys.stdout.flush()
+    if "die" in scenario:
+        return int(scenario["die"])
     if "quota" in scenario:
+        resets = int(time.time() + scenario.get("resets", 3600))
         out({"type": "rate_limit_event", "rate_limit_info": {
-            "status": "allowed", "unifiedWindows": {"five_hour": {"utilization": scenario["quota"], "resetsAt": 1}}}})
+            "status": "allowed", "unifiedWindows": {"five_hour": {"utilization": scenario["quota"],
+                                                                  "resetsAt": resets}}}})
     if scenario.get("sleep"):
         time.sleep(scenario["sleep"])
     results = []
@@ -91,7 +103,9 @@ def main():
     if scenario.get("report"):
         text += "\nREPORT " + json.dumps({"argv": sys.argv[1:], "env": sorted(os.environ), "listed": listed,
                                          "user": user["message"]["content"][-1]["text"],
-                                         "api_key": os.environ.get("ANTHROPIC_API_KEY", "")})
+                                         "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
+                                         "max_output": os.environ.get("CLAUDE_CODE_MAX_OUTPUT_TOKENS", ""),
+                                         "cwd": os.getcwd()})
     out({"type": "assistant", "message": {"model": "fake-cc", "content": [{"type": "text", "text": text}]}})
     out({"type": "result", "subtype": "success", "is_error": False, "result": text, "stop_reason": "end_turn",
          "usage": {"input_tokens": 7, "output_tokens": 3, "cache_read_input_tokens": 100,

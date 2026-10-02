@@ -20,7 +20,10 @@ from mika.ports.llm import Usage
 
 log = logging.getLogger("mika.llm.pricing")
 
-#: (entrée, sortie) en $ par million de jetons. Claude : tarifs publiés par Anthropic ; OpenAI : indicatifs.
+#: (entrée, sortie) en $ par million de jetons. Claude : tarifs publiés par Anthropic (vérifiés le
+#: 2026-10-01, y compris les identifiants datés et les modèles 3.x retirés : un registre peut encore en
+#: porter) ; OpenAI : grille publique standard (même date). Les autres serveurs compatibles (GLM, DeepSeek…)
+#: changent de grille trop souvent pour une table figée : non chiffrés, et dits (un avertissement par modèle).
 PRICING_PER_MILLION: dict[str, tuple[float, float]] = {
     # Fable / Mythos — même palier
     "claude-fable": (10.0, 50.0),
@@ -29,19 +32,22 @@ PRICING_PER_MILLION: dict[str, tuple[float, float]] = {
     "claude-mythos": (10.0, 50.0),
     "claude-mythos-5": (10.0, 50.0),
     "claude-mythos-5-1": (10.0, 50.0),
-    # Opus — 5 $/25 $ depuis 4.6 ; 4.0/4.1 gardent l'ancien tarif ; 5.5 moins cher
+    # Opus — 5 $/25 $ depuis 4.5 ; 4.0/4.1 gardent l'ancien tarif (identifiant daté compris) ; 5.5 moins cher
     "claude-opus": (5.0, 25.0),
     "claude-opus-5": (5.0, 25.0),
     "claude-opus-5-5": (4.0, 20.0),
     "claude-opus-4": (5.0, 25.0),
     "claude-opus-4-0": (15.0, 75.0),
+    "claude-opus-4-20250514": (15.0, 75.0),
     "claude-opus-4-1": (15.0, 75.0),
+    "claude-opus-4-5": (5.0, 25.0),
     "claude-opus-4-6": (5.0, 25.0),
     "claude-opus-4-7": (5.0, 25.0),
     "claude-opus-4-8": (5.0, 25.0),
-    # Sonnet — 5 à 2 $/10 $, la génération 4.x à 3 $/15 $
+    # Sonnet — 5.x à 2 $/10 $, la génération 4.x à 3 $/15 $
     "claude-sonnet": (2.0, 10.0),
     "claude-sonnet-5": (2.0, 10.0),
+    "claude-sonnet-5-5": (2.0, 10.0),
     "claude-sonnet-4": (3.0, 15.0),
     "claude-sonnet-4-5": (3.0, 15.0),
     "claude-sonnet-4-6": (3.0, 15.0),
@@ -49,7 +55,21 @@ PRICING_PER_MILLION: dict[str, tuple[float, float]] = {
     "claude-haiku": (1.0, 5.0),
     "claude-haiku-4": (1.0, 5.0),
     "claude-haiku-4-5": (1.0, 5.0),
+    # génération 3 (retirée ou dépréciée)
+    "claude-3-opus": (15.0, 75.0),
+    "claude-3-7-sonnet": (3.0, 15.0),
+    "claude-3-5-sonnet": (3.0, 15.0),
+    "claude-3-5-haiku": (0.8, 4.0),
+    "claude-3-haiku": (0.25, 1.25),
     # OpenAI
+    "gpt-5": (1.25, 10.0),
+    "gpt-5-mini": (0.25, 2.0),
+    "gpt-5-nano": (0.05, 0.4),
+    "gpt-5.1": (1.25, 10.0),
+    "gpt-5.2": (1.75, 14.0),
+    # les variantes « pro » ne sont pas leur famille au rabais : sans leur ligne, le plus long préfixe
+    # (gpt-5, o3, o1) les compterait dix fois moins cher
+    "gpt-5-pro": (15.0, 120.0),
     "gpt-4o": (2.5, 10.0),
     "gpt-4o-mini": (0.15, 0.6),
     "gpt-4.1": (2.0, 8.0),
@@ -57,6 +77,11 @@ PRICING_PER_MILLION: dict[str, tuple[float, float]] = {
     "gpt-4.1-nano": (0.1, 0.4),
     "o1": (15.0, 60.0),
     "o1-mini": (3.0, 12.0),
+    "o1-pro": (150.0, 600.0),
+    "o3": (2.0, 8.0),
+    "o3-mini": (1.1, 4.4),
+    "o3-pro": (20.0, 80.0),
+    "o4-mini": (1.1, 4.4),
 }
 
 #: Lectures de cache publiées à part ($ par million) : Fable 5.1 / Mythos 5.1 à 0,025×, Opus 5.5 à 0,05×.

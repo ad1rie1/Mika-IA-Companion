@@ -90,8 +90,9 @@ async def s09(driver: Driver, rng: RngTree, res: Result) -> None:
                          and any(r.data.proven and r.data.tools for r in reports),
                          "« fini » ne se croit qu'avec un outil qui a produit quelque chose",
                          f"{[(r.data.verdict, r.data.tools) for r in reports]}"),
-        expect.band("son estime monte", esteem_after - esteem_before, "mener quelque chose à bout redonne confiance",
-                    lo=0.02),
+        expect.band("son estime monte", esteem_after - esteem_before,
+                    "mener quelque chose à bout redonne confiance — un peu, pour une seule séance (ADR 0036)",
+                    lo=0.01, hi=0.06),
         expect.invariant("raconté à qui ça concerne, quand il revient", bool(to_him) and bool(said)
                          and "Ce que tu en as tiré" in to_him[0][1],
                          "sa propriétaire, concernée : elle lui raconte tout, à son retour", f"{len(to_him)}"),

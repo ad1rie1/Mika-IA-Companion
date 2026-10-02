@@ -30,30 +30,51 @@ from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect,
 P = SocialParams()
 
 
-def contact(days: int, messages: int) -> Contact:
-    return Contact(days=tuple(range(1000, 1000 + days)), inbound=messages, first_in=1, last_in=1)
+def contact(days: int, messages: int, step: int = 1) -> Contact:
+    """Une histoire : ``days`` jours de contact, espacés de ``step`` jours, ``messages`` en tout."""
+    return Contact(days=tuple(range(1000, 1000 + days * step, step))[:64], inbound=messages, first_in=1, last_in=1,
+                   total_days=days)
 
 
-# (jours, messages, regard, hostilité, attendu, pourquoi)
+# (jours, messages, espacement, regard, hostilité, attendu, pourquoi)
 LIVED = [
-    (0, 0, 0.0, 0.0, "stranger", "jamais parlé"),
-    (1, 12, -0.5, 0.5, "stranger", "dix minutes d'insultes ne font pas une connaissance"),
-    (1, 25, 0.2, 0.0, "acquaintance", "une longue première conversation"),
-    (2, 4, 0.0, 0.0, "acquaintance", "se reparler un autre jour"),
-    (3, 15, 0.0, 0.0, "friend", "trois jours, quinze messages : une amie"),
-    (3, 15, -0.1, 0.0, "friend", "une curiosité banale, sans chaleur particulière, suffit"),
-    (3, 15, -0.4, 0.0, "friend", "un chagrin partagé n'éloigne pas"),
-    (3, 15, -0.3, 0.3, "acquaintance", "une rancune ne fait jamais une amie"),
-    (30, 6, 0.4, 0.0, "acquaintance", "un contact rare reste une connaissance"),
-    (7, 50, 0.3, 0.0, "close", "une semaine de conversations chaleureuses"),
-    (7, 50, 0.0, 0.0, "friend", "beaucoup d'échanges sans chaleur : amie, pas proche"),
-    (14, 100, -0.3, 0.0, "close", "une longue histoire, même dans une mauvaise passe"),
+    (0, 0, 1, 0.0, 0.0, "stranger", "jamais parlé"),
+    (1, 12, 1, -0.5, 0.5, "stranger", "dix minutes d'insultes ne font pas une connaissance"),
+    (1, 25, 1, 0.2, 0.0, "acquaintance", "une longue première conversation"),
+    (2, 4, 1, 0.0, 0.0, "acquaintance", "se reparler un autre jour"),
+    (3, 15, 1, 0.0, 0.0, "friend", "trois jours, quinze messages : une amie"),
+    (3, 15, 1, -0.1, 0.0, "friend", "une curiosité banale, sans chaleur particulière, suffit"),
+    (3, 15, 1, -0.4, 0.0, "friend", "un chagrin partagé n'éloigne pas"),
+    (3, 15, 1, -0.3, 0.3, "acquaintance", "une rancune ne fait jamais une amie naissante"),
+    (30, 6, 1, 0.4, 0.0, "acquaintance", "un contact rare reste une connaissance"),
+    (7, 50, 1, 0.3, 0.0, "friend", "une semaine chaleureuse : amie, pas encore proche (il faut un mois)"),
+    (7, 50, 5, 0.3, 0.0, "close", "un mois de conversations chaleureuses"),
+    (7, 50, 5, 0.0, 0.0, "friend", "beaucoup d'échanges sans chaleur : amie, pas proche"),
+    (14, 100, 3, -0.3, 0.0, "close", "une longue histoire, même dans une mauvaise passe"),
+    (30, 150, 2, 0.4, 0.3, "close", "une dispute n'efface pas deux mois d'amitié"),
+    (30, 150, 2, 0.4, 0.4, "acquaintance", "une rancune lourde, si"),
 ]
 
 
-@pytest.mark.parametrize("days,messages,regard,hostility,expected,why", LIVED)
-def test_closeness_is_lived(days, messages, regard, hostility, expected, why):
-    assert lived(contact(days, messages), regard, P, hostility) == expected, why
+@pytest.mark.parametrize("days,messages,step,regard,hostility,expected,why", LIVED)
+def test_closeness_is_lived(days, messages, step, regard, hostility, expected, why):
+    assert lived(contact(days, messages, step), regard, P, hostility) == expected, why
+
+
+# (jours, messages, espacement, silence en jours, attendu, pourquoi)
+SILENCES = [
+    (60, 300, 1, 10, "close", "dix jours sans nouvelles d'une proche : rien ne change"),
+    (60, 300, 1, 40, "friend", "un long silence la fait descendre d'un cran"),
+    (60, 300, 1, 150, "friend", "cinq mois : une longue histoire ne tombe jamais plus d'un cran"),
+    (5, 25, 1, 40, "acquaintance", "une jeune amitié qui se tait s'éloigne"),
+    (5, 25, 1, 15, "friend", "contrôle : pas encore un long silence"),
+]
+
+
+@pytest.mark.parametrize("days,messages,step,silent,expected,why", SILENCES)
+def test_closeness_follows_a_sliding_window_with_a_floor_of_history(days, messages, step, silent, expected, why):
+    ct = contact(days, messages, step)
+    assert lived(ct, 0.4, P, 0.0, now_day=ct.days[-1] + silent) == expected, why
 
 
 def test_the_rhythm_of_a_relationship_is_its_own():
@@ -125,7 +146,8 @@ def prompts(llm, target, containing=""):
 async def evening(kernel, handle, *, channel="telegram", per_day=4):
     for i in range(per_day):
         p = await kernel.perceive(said(handle, f"message {i} du soir", channel=channel))
-        await p.reply
+        if p.reply is not None:  # endormie, la réponse d'une inconnue attend son réveil (ADR 0036)
+            await p.reply
         await asyncio.sleep(60)
 
 
@@ -197,8 +219,9 @@ def test_in_distress_she_turns_to_the_friend_she_feels_good_with(tmp_path):
 def _profile(kernel, person, sensitive=()):
     return kernel.mind.append([social_c.PROFILE_REVISED.draft(
         person=person, summary=Content.of("C'est quelqu'un de drôle qui adore la montagne.", level=2),
-        tone="taquin", interests=("montagne",), sensitive=tuple(sensitive))], emitter="social", correlation="genese",
-        origin=Origin.GENESIS)
+        tone=Content.of("taquin", level=2), interests=Content.of("montagne", level=2),
+        sensitive=Content.of("\n".join(sensitive), level=2) if sensitive else None)], emitter="social",
+        correlation="genese", origin=Origin.GENESIS)
 
 
 def test_her_notes_on_someone_reach_the_prompt_only_for_them_in_private(tmp_path):
@@ -242,16 +265,17 @@ def test_a_room_reply_sees_the_room_not_her_private_thread(tmp_path):
         p = await kernel.perceive(said("tg_1", "CANARI-PRIVE je te le dis en privé", channel="telegram"))
         await p.reply
         p = await kernel.perceive(said("tg_2", "salut le groupe", channel="telegram", room="tg_chat_-1",
-                                       public=True, addressed=False))
+                                       public=True, addressed=False, display_name="Léa"))
         p = await kernel.perceive(said("tg_1", "Mika, tu en penses quoi ?", channel="telegram", room="tg_chat_-1",
-                                       public=True))
+                                       public=True, display_name="Tom"))
         await p.reply
 
     _, llm = run(tmp_path, scenario, with_llm=True)
     room = prompts(llm, "tg_1", "Mika, tu en penses quoi")
     assert room
     text = room[-1]
-    assert "[tg_2] salut le groupe" in text
+    assert "Léa : salut le groupe" in text  # chacun parle sous son nom, jamais sous son adresse
+    assert "[tg_2]" not in text
     assert "CANARI-PRIVE" not in text
 
 
@@ -274,13 +298,20 @@ def test_contacts_follow_the_person_not_the_handle(tmp_path):
     assert alice.inbound == 2 and handle.inbound == 0
 
 
-def test_whatever_the_reason_no_second_message_to_an_absent_friend_who_has_not_answered(tmp_path):
+def test_whatever_the_reason_no_second_message_to_a_friend_who_has_not_answered(tmp_path):
     """Le filet de sécurité : une raison qui ne connaîtrait pas la règle (une
-    pensée, un but) est arrêtée par la retenue elle-même."""
+    pensée, un but) est arrêtée par la retenue elle-même — présente ou non
+    (ADR 0033 : la règle est celle du budget d'initiatives, pour toutes les
+    raisons à la fois)."""
+    from mika.contracts import agency as agency_c
     from mika.contracts import runtime as rt
-    from mika.faculties.social.initiative import _restraint
+    from mika.faculties.agency import _budget
     from mika.kernel.arbitration import RowView
     from mika.kernel.events import VoiceProvenance
+
+    def budget(kernel):
+        frame = kernel.mind.frame()
+        return _budget(frame.state("agency"), frame, RowView("INITIATIVE", "tg_1", 5.0, ("thought",)))
 
     async def scenario(kernel, clock, script):
         await befriend(kernel, "tg_1", "close")
@@ -290,16 +321,13 @@ def test_whatever_the_reason_no_second_message_to_an_absent_friend_who_has_not_a
             kind="INITIATIVE", text=Content.of("tu vas mieux ?"), target="tg_1", channel="telegram",
             voice=VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m"))],
             emitter="runtime", correlation="genese", origin=Origin.GENESIS)
-        frame = kernel.mind.frame()
-        absent = _restraint(frame.state("social"), frame, RowView("INITIATIVE", "tg_1", 5.0, ("thought",)))
+        absent = budget(kernel)
         await connect(kernel, "tg_1", "Alice")
-        frame = kernel.mind.frame()
-        present = _restraint(frame.state("social"), frame, RowView("INITIATIVE", "tg_1", 5.0, ("thought",)))
-        return absent, present
+        return absent, budget(kernel)
 
     absent, present = run(tmp_path, scenario)
-    assert absent.veto == social_c.UNANSWERED
-    assert present.veto is None and present.shift < 0  # en sa présence : plus rare, pas interdit
+    assert absent.veto == agency_c.UNANSWERED
+    assert present.veto == agency_c.UNANSWERED  # en sa présence non plus : elle ne harcèle pas
 
 
 def test_a_grudge_needs_installed_hostility():

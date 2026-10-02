@@ -92,7 +92,10 @@ def export(out: Path) -> list[str]:
                                   voice_roles=frozenset(roles), slots={"apercu": 1}))
     done: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
-        app, live = build(Path(tmp) / "data", web=WebConfig(), gateway=gateway, embedder=HashEmbedder())
+        # l'horloge est réelle : la nuit, ses réponses attendraient son réveil (ADR 0036) — un aperçu
+        # répond à toute heure
+        app, live = build(Path(tmp) / "data", web=WebConfig(), gateway=gateway, embedder=HashEmbedder(),
+                          reply_wait=None)
         with TestClient(app, base_url=HOST, headers={"Origin": ORIGIN}) as client:
             def token() -> dict[str, str]:
                 client.get("/auth/whoami")
@@ -136,6 +139,10 @@ def export(out: Path) -> list[str]:
                 corr = quote(ended[0].correlation, safe="")
                 urls += [f"/inspecteur/episode/{corr}?onglet={t}" for t in
                          ("deroule", "dit", "prompt", "outils", "appels", "decision")]
+            said = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.utterance"], 1))
+            if said:  # « Pourquoi a-t-elle dit ça ? » sur sa dernière parole
+                urls.append(f"/inspecteur/parole/{said[0].seq}")
+            urls.append("/inspecteur/decisions/envers?personne=adrien")
             urls += ["/inspecteur/reglages/fournisseurs?enregistrement=backends&cle=",
                      "/inspecteur/reglages/comportement-affect?groupe=repos-et-ancre",
                      "/inspecteur/reglages/comptes?nouveau=1", "/inspecteur/recherche?q=a",

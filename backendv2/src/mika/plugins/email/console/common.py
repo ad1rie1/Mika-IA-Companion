@@ -39,7 +39,7 @@ from mika.plugins.email import (
     EmailParams,
     EmailState,
     Seen,
-    operator_name,
+    operator_label,
     params_of,
 )
 from mika.ports.mail import Mail, reference_key, split_ref
@@ -153,10 +153,8 @@ def pertinence(seen: Seen | None) -> Meter | None:
 
 def author(frame: Frame, by: str, *, edited: bool = False) -> Badge:
     if edited:
-        return Badge(f"écrit par elle, retouché par {operator_name(frame, by)}".replace("ton opérateur", "l'opérateur"),
-                     "warn")
-    return Badge(f"écrit par {operator_name(frame, by)}".replace("ton opérateur", "l'opérateur"), "warn") if by \
-        else Badge("écrit par elle", "info")
+        return Badge(f"écrit par elle, retouché par {operator_label(frame, by)}", "warn")
+    return Badge(f"écrit par {operator_label(frame, by)}", "warn") if by else Badge("écrit par elle", "info")
 
 
 def day_start(frame: Frame) -> int:

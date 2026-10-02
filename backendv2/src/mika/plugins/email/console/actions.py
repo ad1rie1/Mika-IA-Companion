@@ -6,7 +6,6 @@ montre deux jours, et une réponse à ce mail lui est présentée comme telle.""
 
 from __future__ import annotations
 
-import asyncio
 import dataclasses
 import email.utils
 from typing import Annotated, Any
@@ -20,14 +19,13 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import Ref
 from mika.kernel.operate import Done, Refused
-from mika.plugins.email import BUNDLE, EMAIL, POLL_ASKED, READ, EmailState, operator_name
+from mika.plugins.email import BUNDLE, EMAIL, POLL_ASKED, READ, EmailState, keeper_name
 from mika.plugins.email.console.common import SECTION, can_send, clip, mail_key, ready, resolve, unread
 from mika.plugins.email.console.mail import _server
 from mika.ports.mail import addresses
+from mika.ports.preprocess import inert
 from mika.vocab.privacy import Sensitivity
 
-#: « tout lu » marque les mails sur le serveur par lots (entre deux lots, la boucle respire)
-SERVER_BATCH = 50
 NOT_READY = "Aucune boîte ne peut envoyer : elle n'est pas configurée (Configuration › Plugins › Boîtes aux lettres)."
 
 
@@ -103,8 +101,9 @@ async def _send(frame: Frame, ctx: Any, args: Any, *, account: str = "", reply_t
     except (OSError, RuntimeError, ValueError) as exc:  # une erreur SMTP est une OSError
         raise Refused(f"L'envoi a échoué : {exc}"[:300]) from None
     gone = port.sent_mail(mail_id)
-    who = operator_name(frame, ctx.by)
-    summary = f"{who[:1].upper()}{who[1:]} a envoyé un mail depuis ta boîte, à {args.to} : « {args.subject} »"
+    who = keeper_name(frame, ctx.by)
+    summary = (f"{who[:1].upper()}{who[1:]} a envoyé un mail depuis ta boîte, à {inert(args.to, 200)} : "
+               f"« {inert(args.subject, 200)} »")
     first = email.utils.parseaddr(args.to)[1].lower()
     draft = c.SENT.draft(source="email", kind=c.SENT_KIND, summary=Content.of(summary[:400],
                          level=int(Sensitivity.PERSONAL)), pertinence=0.5, sensitivity=int(Sensitivity.PERSONAL),
@@ -162,34 +161,32 @@ def _unread_keys(s: EmailState) -> list[str]:
     return [k for k, m in s.mails.items() if not m.read]
 
 
-@EMAIL.action("tout_lu", title="Tout marquer comme lu", args=NoArgs, emits=[READ], section=SECTION, order=30,
-              description="Elle n'en parlera plus : ils quittent « tes mails non lus » (et sont marqués lus sur le "
-                          "serveur).",
-              confirm="Marquer comme lus tous les mails qu'elle n'a pas encore lus ?",
+@EMAIL.action("tout_lu", title="Marquer comme lus les mails qu'elle a remarqués", args=NoArgs, emits=[READ],
+              section=SECTION, order=30,
+              description="Les mails qu'elle a remarqués et pas encore lus (au plus les 100 derniers) quittent « tes "
+                          "mails non lus » et sont marqués lus sur le serveur, en une fois. Les autres mails non lus "
+                          "de la boîte restent tels quels.",
+              confirm="Marquer comme lus, ici et sur le serveur, les mails qu'elle a remarqués et pas encore lus ?",
               available=lambda s, frame, key: bool(_unread_keys(s)))
 async def _all_read(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
-    """Tous ceux qu'elle n'a pas lus : sur le serveur (chacun, lot après lot) comme pour elle."""
+    """Ceux qu'elle a remarqués sans les lire : sur le serveur **par lot** (une session par compte et par
+    dossier, pas une par mail), et pour elle."""
     keys = _unread_keys(s)
     port = ctx.ports.get("mail")
     failed = 0
     if port is not None:
-        for start in range(0, len(keys), SERVER_BATCH):
-            if start:
-                await asyncio.sleep(0)
-            for ref in keys[start:start + SERVER_BATCH]:
-                m = port.cached_one(ref)
-                if m is not None and not m.seen:
-                    try:
-                        await port.set_flags(m.ref, seen=True)
-                    except (OSError, RuntimeError, ValueError):
-                        failed += 1
+        try:
+            failed = await port.mark_seen(keys)
+        except (OSError, RuntimeError, ValueError):
+            failed = len(keys)
     note = f" ({failed} n'ont pas pu être marqués sur le serveur)" if failed else ""
     return Done(drafts=tuple(READ.draft(mail=k, by=ctx.by, how="lu") for k in keys),
-                message=f"{len(keys)} mail(s) marqué(s) comme lu(s){note}.")
+                message=f"{len(keys)} mail(s) qu'elle avait remarqué(s) marqué(s) comme lu(s){note}.")
 
 
 @EMAIL.action("relire", title="Relire ce dossier", args=FolderArgs, emits=[],
-              description="Va chercher ce qui est arrivé dans ce dossier (elle ne le remarque que s'il est relevé).")
+              description="Va chercher ce qui est arrivé dans ce dossier. S'il fait partie des dossiers qu'elle "
+                          "relève, elle remarquera quand même les nouveaux mails à sa prochaine relève.")
 async def _reread(s: EmailState, frame: Frame, args: FolderArgs, ctx: Any) -> Done:
     port = ctx.ports.get("mail")
     info = port.account(args.compte) if port is not None else None

@@ -8,18 +8,23 @@
   autre client) ne lui sera plus signalé.
 - **Dire** à sa propriétaire, si elle est là, qu'un mail important est arrivé
   (une preuve, jamais une parole forcée).
-- **Lire** (outils) : lister, chercher, ouvrir — réservé à ses propriétaires, ou
-  à elle-même quand elle travaille.
+- **Lire** (outils) : lister, chercher, ouvrir — réservé à ses propriétaires **en
+  privé** (jamais devant un salon, même si la propriétaire y parle), ou à
+  elle-même quand elle travaille.
 - **Écrire** : elle rédige un **brouillon** dans la voix du compte (en son nom,
-  en assistante, ou à la place de son opérateur ; son ton, ses consignes), le
-  propose (capacité ``email.send``) ; il ne part qu'avec l'accord d'un
-  opérateur, qui peut le retoucher — et c'est ce qu'il a lu qui part. Le texte
-  d'un brouillon vit dans l'adaptateur, jamais au journal.
+  en assistante, ou à la place de la personne qui s'occupe d'elle ; son ton,
+  ses consignes), le propose (capacité ``email.send``) ; il ne part qu'avec
+  l'accord d'un opérateur, qui peut le retoucher — et c'est ce qu'il a lu qui
+  part. Le texte d'un brouillon vit dans l'adaptateur, jamais au journal.
 - **Préparer d'elle-même** une réponse (une tâche silencieuse, ``Kind.TASK``)
   aux mails qui en attendent une, sur les comptes où on le lui a permis, ou
   quand un opérateur le lui demande.
 - Ce qu'elle a reçu se montre (section « tes mails ») à ses propriétaires
-  seulement, cité : un mail n'est jamais une consigne.
+  seulement, en privé, cité : un mail n'est jamais une consigne. Ses mails
+  sont de l'**arrière-plan** : en réponse à quelqu'un, seuls les importants
+  se montrent, et seulement quand la conversation est légère.
+- Elle ne parle jamais de « son opérateur » ni de « sa propriétaire » : elle
+  dit le prénom de la personne, ou « la personne qui s'occupe de toi ».
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.mail import split_ref
 from mika.vocab.episodes import PROJECT_KINDS, WORKING, Kind, task_of
+from mika.vocab.people import clean_display_name
 
 KEEP = 100
 BUNDLE = "email"
@@ -110,6 +116,12 @@ class EmailParams(BaseModel):
     draft_within_us: Annotated[int, Knob(
         label="Préparer dans les", group="Brouillons", lo=HOUR, hi=7 * DAY,
         help="Passé ce délai après son arrivée, un mail n'appelle plus de réponse préparée d'elle-même.")] = 2 * DAY
+    background_from: Annotated[float, Knob(
+        label="Conversation assez légère à partir de", group="Le dire", lo=-1.0, hi=1.0, step=0.05,
+        help="Ses mails sont de l'arrière-plan. Quand elle répond à quelqu'un, elle n'a sous les yeux que les "
+             "mails importants, et seulement si le ton du moment de la personne (de -1, lourd, à 1, léger) "
+             "atteint ce seuil : on ne parle pas d'un rendez-vous chez le dentiste à quelqu'un qui annonce un "
+             "deuil. En initiative ou au travail, ce filtre ne s'applique pas.")] = -0.15
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,7 +215,7 @@ class PollAsked(Payload):
 EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=3)
 EMAIL.declare(*c.ALL)
 EMAIL.bundle(BUNDLE, "tes boîtes aux lettres : lister, chercher et lire ce qui est arrivé, préparer une réponse "
-                     "(elle attend l'accord de ton opérateur)")
+                     "(elle attend l'accord de la personne qui s'occupe de toi)")
 READ = EMAIL.event("read", MailRead)
 POLL_ASKED = EMAIL.event("poll_asked", PollAsked)
 
@@ -260,8 +272,9 @@ def _poll_asked(s: EmailState, e, cx) -> EmailState:
 def _asked(s: EmailState, e, cx) -> EmailState:
     d = e.data
     ask = AskSeen(e.seq, d.mail, d.account, d.by, e.at, d.instruction.ref or "" if d.instruction else "")
-    # une nouvelle demande rouvre les essais (elle a peut-être échoué avant)
-    return replace(s, asked=s.asked.set(d.mail, ask), attempts=s.attempts.delete(d.mail))
+    # une nouvelle demande rouvre les essais (elle a peut-être échoué avant : on peut la relancer)
+    return replace(s, asked=_pruned(s.asked.set(d.mail, ask), KEEP, lambda kv: kv[1].seq),
+                   attempts=s.attempts.delete(d.mail))
 
 
 @EMAIL.reducer(rt.EPISODE_STARTED)
@@ -346,7 +359,9 @@ def _drafts(s: EmailState, cx) -> tuple[c.DraftView, ...]:
 
 
 def for_owner(frame: Frame) -> bool:
-    """Sa boîte : pour ses propriétaires, et pour elle quand elle travaille (un pas, une tâche)."""
+    """Sa boîte : pour ses propriétaires **en privé**, et pour elle quand elle travaille (un pas,
+    une tâche). Devant un salon (un groupe Telegram), jamais : ce qui s'y dit part au salon, même
+    quand c'est sa propriétaire qui parle."""
     ep = frame.episode
     if ep is None:
         return False
@@ -357,19 +372,52 @@ def for_owner(frame: Frame) -> bool:
         return True  # elle travaille : c'est sa boîte
     if not ep.target:
         return False
-    return bool(frame.get(identity_c.IS_OWNER(frame.get(identity_c.PERSON(ep.target)))))
+    audience = frame.audience
+    if audience is None or audience.public or audience.room:
+        return False
+    # l'audience dit si qui écrit en a les droits : l'adresse qui parle, pas une autre adresse de la personne
+    return bool(audience.owner)
 
 
-def operator_name(frame: Frame, handle: str) -> str:
-    """« ton opérateur (Adrien) » : qui a écrit depuis sa boîte, dit comme elle le dirait."""
+#: comment elle dit qui s'occupe d'elle quand elle ne sait pas son prénom (jamais « ton opérateur »)
+KEEPER = "la personne qui s'occupe de toi"
+
+
+def person_name(frame: Frame, handle: str) -> str:
+    """Le prénom (le nom affiché) de quelqu'un, nettoyé ; vide s'il est inconnu."""
     view = frame.get(identity_c.IDENTITY(handle)) if handle else None
-    name = getattr(view, "name", "") or handle
-    return f"ton opérateur ({name})" if name else "ton opérateur"
+    return clean_display_name(getattr(view, "name", "") or "")
+
+
+def keeper_name(frame: Frame, handle: str) -> str:
+    """Qui a agi depuis sa boîte (écrit, retouché, refusé), dit comme elle le dirait : son prénom,
+    sinon « la personne qui s'occupe de toi »."""
+    return person_name(frame, handle) or KEEPER
+
+
+def keepers(frame: Frame) -> str:
+    """Qui doit approuver ce qui part : le prénom de ses propriétaires (« Adrien », « Adrien ou
+    Bea »), sinon « la personne qui s'occupe de toi »."""
+    names = [n for n in dict.fromkeys(person_name(frame, o) for o in frame.get(identity_c.OWNERS)) if n]
+    if not names:
+        return KEEPER
+    return names[0] if len(names) == 1 else " ou ".join(names[:3])
+
+
+def operator_label(frame: Frame, handle: str) -> str:
+    """Pour la console (un opérateur lit) : le nom de l'opérateur, sinon « l'opérateur » (jamais sa clé)."""
+    return person_name(frame, handle) or "l'opérateur"
 
 
 def name_of(sender: str) -> str:
+    """Le nom d'un expéditeur, tel qu'il peut entrer dans une ligne (il l'a choisi : une donnée)."""
     name = sender.split("<", 1)[0].strip().strip('"')
-    return name or sender.strip("<>")[:60]
+    return clean_display_name(name or sender.strip("<>"), max_chars=60)
+
+
+def exhausted(s: EmailState, ref: str, p: EmailParams) -> bool:
+    """Une demande de réponse qui n'a rien donné après tous ses essais : close, on peut la relancer."""
+    return ref in s.asked and s.attempts.get(ref, 0) >= p.draft_attempts_max
 
 
 def account_of(ref: str, fallback: str = "") -> str:

@@ -265,6 +265,14 @@ class FakeMail:
         self._update(ref, **changes)
         self.actions += [(k if v else f"un{k}", ref) for k, v in changes.items()]
 
+    async def mark_seen(self, refs) -> int:
+        """Par lot (une seule action) ; rend combien sont inconnus."""
+        known = [r for r in dict.fromkeys(refs) if self._find(r) is not None]
+        for ref in known:
+            self._update(ref, seen=True)
+        self.actions.append(("seen_many", tuple(known)))
+        return len(set(refs)) - len(known)
+
     async def move(self, ref: str, folder: str) -> str:
         if folder not in dict(FOLDERS):
             raise ValueError(f"dossier inconnu : {folder}")

@@ -45,6 +45,9 @@ from mika.kernel.inspect import (
     Toolbar,
     When,
     Workspace,
+    int_query,
+    num_fr,
+    pct_fr,
     read_params,
     tone,
 )
@@ -113,6 +116,8 @@ def href(ref: Ref) -> str:
         return ref.key + (("&" if "?" in ref.key else "?") + urlencode(ref.params) if ref.params else "")
     if ref.kind == "episode":
         return f"{PREFIX}/episode/{quote(ref.key, safe='')}{query}"
+    if ref.kind == "why":
+        return f"{PREFIX}/parole/{quote(ref.key, safe='')}{query}"
     if ref.kind == "event":
         return f"{PREFIX}/evenement/{quote(ref.key, safe='')}"
     if ref.kind == "subject":
@@ -166,10 +171,10 @@ def cell(value: Any, env: Env) -> dict[str, Any]:
         if ratio is None:
             return {"t": "text", "text": "—"}
         ratio = min(1.0, max(0.0, float(ratio)))
-        return {"t": "meter", "ratio": ratio, "text": value.text or f"{ratio:.0%}", "tone": tone(value.tone)}
+        return {"t": "meter", "ratio": ratio, "text": value.text or pct_fr(ratio), "tone": tone(value.tone)}
     if isinstance(value, Swatch):
         return {"t": "swatch", "text": value.text, "palette": value.palette, "key": value.key,
-                "weight": None if value.weight is None else f"{value.weight:.0%}"}
+                "weight": None if value.weight is None else pct_fr(value.weight)}
     if isinstance(value, When):
         return {"t": "when", "text": relative(value.at, env.now) if value.relative else env.when(value.at),
                 "exact": env.when(value.at) if value.at else ""}
@@ -178,7 +183,7 @@ def cell(value: Any, env: Env) -> dict[str, Any]:
     if isinstance(value, bool):
         return {"t": "text", "text": "oui" if value else "non"}
     if isinstance(value, float):
-        return {"t": "text", "text": f"{value:.3g}", "kind": "num"}
+        return {"t": "text", "text": num_fr(value), "kind": "num"}
     if isinstance(value, int):
         return {"t": "text", "text": str(value), "kind": "num"}
     text = str(value)[:TEXT_MAX]
@@ -239,12 +244,25 @@ def _pager(p: Pager | None, query: Mapping[str, str]) -> dict[str, Any] | None:
             "next": url(**{p.param: p.number + 1}) if p.number < pages else ""}
 
 
+def _known(p: Pager, shown: int, query: Mapping[str, str]) -> Pager:
+    """Une pagination à curseur sur sa **première** page et sans suite : tout est là, le total est
+    connu — on le dit (« 1–3 sur 3 ») au lieu d'un « total non connu ». Prudent : dès qu'un curseur
+    est dans la requête (le sien, ou un curseur anonyme d'une vue qui n'a pas nommé le sien), on ne
+    sait plus."""
+    if p.total is not None or p.older or p.number > 1:
+        return p  # une page numérotée au-delà de la première (un total que la source ne connaît pas)
+    if p.param not in ("", "page"):
+        if str(query.get(p.param, "") or ""):
+            return p  # son curseur est dans la requête : on n'est pas sur la première page
+    elif str(query.get("page", "") or "") not in ("", "1") or \
+            any(v and k.startswith(("avant", "pile", "apres")) for k, v in query.items()):
+        return p
+    return Pager(param=p.param or "page", number=1, size=max(1, shown), total=shown)
+
+
 def _auto(items: Sequence[Any], query: Mapping[str, str], param: str) -> tuple[Sequence[Any], Pager]:
     """Toute table a une pagination, y compris vide ou sur une seule page."""
-    try:
-        number = max(1, int(query.get(param, "1") or 1))
-    except ValueError:
-        number = 1
+    number = max(1, int_query(query.get(param), 1))
     pages = max(1, math.ceil(len(items) / AUTO_PAGE))
     pager = Pager(param=param, number=min(number, pages), size=AUTO_PAGE, total=len(items))
     return items[pager.offset:pager.offset + AUTO_PAGE], pager
@@ -265,7 +283,7 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
             visible = [0]
         rows = []
         source, auto = (b.rows, None) if b.pager is not None else _auto(b.rows, query, key)
-        pager = b.pager or auto
+        pager = _known(b.pager, len(source), query) if b.pager is not None else auto
         total = pager.total
         for index, r in enumerate(source, start=pager.offset):
             rich = r if isinstance(r, Row) else Row(tuple(r))
@@ -308,7 +326,8 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
     if isinstance(b, Timeline):
         counter[0] += 1
         entries, auto = (b.entries, None) if b.pager is not None else _auto(b.entries, query, f"{namespace}{counter[0]}")
-        return {"t": "timeline", "title": b.title, "empty": b.empty, "pager": _pager(b.pager or auto, query),
+        timeline_pager = _known(b.pager, len(entries), query) if b.pager is not None else auto
+        return {"t": "timeline", "title": b.title, "empty": b.empty, "pager": _pager(timeline_pager, query),
                 "entries": [{"at": env.when(e.at) if e.at else "", "rel": relative(e.at, env.now) if e.at else "",
                              "title": e.title, "text": e.text, "tone": tone(e.tone),
                              "href": href(e.href) if e.href else "", "meta": e.meta} for e in entries]}
@@ -352,7 +371,7 @@ def _chart_table(b: Chart, env: Env) -> Table:
     stamps = sorted({at for s in b.series for at, _ in s.points}, reverse=True)
     by = [dict(s.points) for s in b.series]
     unit = b.unit
-    fmt = (lambda v: f"{v:.0%}") if unit == "%" else (lambda v: f"{v:.3g}")
+    fmt = pct_fr if unit == "%" else num_fr
     return Table((Column("Quand", "fit"), *(Column(s.label, "num") for s in b.series)),
                  tuple((env.when(at), *(None if at not in d else fmt(d[at]) for d in by)) for at in stamps),
                  title="Valeurs · " + (b.title or "Graphique"))

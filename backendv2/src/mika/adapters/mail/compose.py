@@ -16,7 +16,7 @@ import hashlib
 from datetime import UTC, datetime, tzinfo
 from email.message import EmailMessage
 
-from mika.ports.mail import TO_FILL, AccountInfo, Draft, Mail, Preview, addresses
+from mika.ports.mail import AccountInfo, Draft, Mail, Preview, addresses, to_fill
 
 HER_NAME = "Mika"
 
@@ -57,16 +57,21 @@ def digest(*parts: str) -> str:
     return hashlib.sha256("\x1f".join(parts).encode("utf-8", "replace")).hexdigest()[:32]
 
 
-def blocked(draft: Draft, account: AccountInfo | None) -> str:
-    """Pourquoi ce brouillon ne peut pas partir tel quel (vide : il peut)."""
+def blocked(draft: Draft, account: AccountInfo | None, text: str = "") -> str:
+    """Pourquoi ce brouillon ne peut pas partir tel quel (vide : il peut). Un « [À COMPLÉTER »,
+    sous n'importe quelle graphie, ne part jamais : ni dans le texte, ni dans l'objet, ni dans ce qui
+    partirait vraiment (``text`` : signature et citation comprises)."""
     if account is None:
         return "ce compte n'existe plus"
     if not account.can_send:
         return "ce compte ne peut pas envoyer (serveur d'envoi manquant ou compte inactif)"
     if not addresses(draft.to):
         return "aucun destinataire valide"
-    if TO_FILL in draft.body or TO_FILL in draft.subject:
+    if to_fill(draft.body, draft.subject):
         return "il reste des passages à compléter ([À COMPLÉTER …])"
+    if text and to_fill(text):
+        return ("il reste un passage « [À COMPLÉTER » dans la signature ou dans le mail cité : retire-le, ou "
+                "décoche la citation")
     return ""
 
 
@@ -76,7 +81,7 @@ def preview(draft: Draft, account: AccountInfo | None, parent: Mail | None, *, t
     parent_id = parent.message_id if parent is not None else ""
     return Preview(sender=who, to=draft.to, cc=draft.cc, subject=draft.subject, text=text,
                    digest=digest(who, draft.to, draft.cc, draft.subject, text, parent_id),
-                   blocked=blocked(draft, account) or ("le message cité est incomplet : ouvre sa fiche et charge le message intégral"
+                   blocked=blocked(draft, account, text) or ("le message cité est incomplet : ouvre sa fiche et charge le message intégral"
                            if draft.quote and parent is not None and not parent.complete else ""))
 
 

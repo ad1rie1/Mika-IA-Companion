@@ -4,7 +4,8 @@
   souvenir (« Après y avoir repensé cette nuit : … ») — une fois.
 - **Trier** : après trois heures de sommeil, une fois par nuit, un souvenir du
   jour presque identique à un souvenir plus ancien s'y fond (sans modèle) :
-  un seul souvenir, qui garde la plus haute des deux importances.
+  un seul souvenir, qui garde la plus haute des deux importances et des deux
+  sensibilités, et les personnes de l'un et de l'autre (la projection).
 """
 
 from __future__ import annotations
@@ -45,9 +46,11 @@ class Reflect:
                 self.skipped.add(r.thought)  # effacée (oubli) : rien à repenser
                 continue
             mark = f"réflexion:{r.thought}"
+            # une pensée sur quelqu'un vient de ce qu'il ou elle lui a dit : c'est son confident, pas un autre
             drafts.append(c.REMEMBERED.draft(
                 text=Content.of(f"Après y avoir repensé cette nuit : {text}", level=r.sensitivity), about=r.about,
-                sensitivity=r.sensitivity, importance=0.5, emotion=r.emotion, call_id=mark, dedupe_key=mark))
+                sensitivity=r.sensitivity, importance=0.5, emotion=r.emotion, call_id=mark, dedupe_key=mark,
+                told_by=r.about, heard_by=r.about))
         if drafts:
             await ctx.emit(*drafts)
 

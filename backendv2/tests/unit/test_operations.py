@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from mika.contracts import runtime as rt
 from mika.kernel.events import Origin, Payload
+from mika.kernel.facts import FactKey
 from mika.kernel.faculty import Faculty
 from mika.kernel.guards import Guard
 from mika.kernel.operate import Done, Refused
@@ -193,3 +194,88 @@ def test_an_action_that_acts_outside_the_journal_runs_once_per_form(tmp_path):
         assert run_virtual(clock2, after_restart).deduped and len(effects) == 2
     finally:
         BOARD.actions[:] = [a for a in BOARD.actions if a.name != "rembobiner"]
+
+
+COUNT = FactKey("board.count", type=int)
+
+
+@BOARD.fact(COUNT)
+def _count(s: Board, cx) -> int:
+    return len(s.notes)
+
+
+def test_a_guard_checks_what_the_action_read(tmp_path):
+    """KER-28 : la garde d'une action compare ce que l'action a **lu** à l'état au moment d'écrire. Une note
+    épinglée par quelqu'un d'autre pendant que l'action réfléchissait (elle attend un port, un réseau) change
+    ce qu'elle a lu : rien n'est écrit, et l'opérateur l'apprend. (Avant, la garde comparait la tête à
+    elle-même : elle ne voyait jamais rien changer.)"""
+    box: dict = {}
+
+    @BOARD.action("compter", title="Compter", args=NoArgs, emits=[PINNED])
+    async def _count_then_pin(s, frame, args, ctx) -> Done:
+        seen = frame.get(COUNT)
+        await box["kernel"].mind.append([PINNED.draft(text="intrus")], emitter="board", correlation="ailleurs")
+        return Done(drafts=(PINNED.draft(text=f"il y en avait {seen}"),), guard=Guard("le compte", reads=(COUNT,)))
+
+    @BOARD.action("compter_seul", title="Compter seul", args=NoArgs, emits=[PINNED])
+    async def _count_alone(s, frame, args, ctx) -> Done:
+        seen = frame.get(COUNT)
+        return Done(drafts=(PINNED.draft(text=f"il y en avait {seen}"),), guard=Guard("le compte", reads=(COUNT,)))
+
+    try:
+        kernel, clock, _ = build(tmp_path, [BOARD])
+        box["kernel"] = kernel
+
+        async def main():
+            await kernel.start()
+            raced = await perform(kernel, "board.compter", form(), by="user_1", nonce="g1")
+            calm = await perform(kernel, "board.compter_seul", form(), by="user_1", nonce="g2")
+            notes = kernel.mind.frame().state("board").notes
+            await kernel.stop()
+            return raced, calm, notes
+
+        raced, calm, notes = run_virtual(clock, main)
+        assert not raced.ok and "La situation a changé" in raced.message
+        assert calm.ok  # contre-exemple : rien n'a bougé entre la lecture et l'écriture
+        assert notes == ("intrus", "il y en avait 1")
+    finally:
+        BOARD.actions[:] = [a for a in BOARD.actions if a.name not in ("compter", "compter_seul")]
+
+
+def test_a_failed_action_gives_its_form_back(tmp_path):
+    """CON-30 : le jeton d'un formulaire ne se consomme que si l'action a abouti ou a été refusée. Une panne
+    le rend : renvoyer le même formulaire réessaie, au lieu de répondre « déjà envoyé » sur une action qui
+    n'a rien fait. Une réussite, elle, ne se refait pas."""
+    tries: list[int] = []
+
+    @BOARD.action("fragile", title="Fragile", args=PinArgs, emits=[PINNED])
+    def _fragile(s, frame, args, ctx) -> Done:
+        tries.append(1)
+        if len(tries) == 1:
+            raise OSError(5, "disque indisponible")
+        return Done(drafts=(PINNED.draft(text=args.text),), message="Épinglé.")
+
+    try:
+        kernel, clock, _ = build(tmp_path, [BOARD])
+
+        async def main():
+            await kernel.start()
+            failed = await perform(kernel, "board.fragile", form(text="à garder"), by="user_1", nonce="f1")
+            retried = await perform(kernel, "board.fragile", form(text="à garder"), by="user_1", nonce="f1")
+            again = await perform(kernel, "board.fragile", form(text="à garder"), by="user_1", nonce="f1")
+            refused = await perform(kernel, "board.epingler", form(text="interdit"), by="user_1", nonce="f2")
+            refused_again = await perform(kernel, "board.epingler", form(text="ok"), by="user_1", nonce="f2")
+            audit = [(e.data.action, e.data.outcome) for e in events(kernel, rt.OPERATED.name)]
+            await kernel.stop()
+            return failed, retried, again, refused, refused_again, audit
+
+        failed, retried, again, refused, refused_again, audit = run_virtual(clock, main)
+        assert not failed.ok and failed.retry
+        # l'erreur est dite en français, jamais un repr Python
+        assert "disque indisponible" in failed.message and "OSError(" not in failed.message
+        assert retried.ok and not retried.deduped and len(tries) == 2
+        assert again.deduped and len(tries) == 2  # une réussite ne se refait pas
+        assert not refused.ok and refused_again.deduped  # un refus consomme le jeton
+        assert ("board.fragile", "failed") in audit and ("board.fragile", "done") in audit
+    finally:
+        BOARD.actions[:] = [a for a in BOARD.actions if a.name != "fragile"]

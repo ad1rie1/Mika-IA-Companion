@@ -8,7 +8,11 @@ Contrat :
 - ``think`` coupé par défaut : un modèle de raisonnement réfléchit sinon avant
   le premier mot de sa réponse (mesuré sur gemma4:12b : 1,5 s sans, 27 s avec) ;
 - ``num_predict`` = le plus petit de ``max_reply_tokens`` et du ``max_tokens``
-  de la requête : un modèle qui ne s'arrête pas ne tient pas un tour ouvert ;
+  de la requête : un modèle qui ne s'arrête pas ne tient pas un tour ouvert —
+  sauf quand la passerelle redemande une sortie coupée (``RETRY_AFTER_CUT``) :
+  le plafond propre est alors levé, sinon la reprise serait coupée au même mot ;
+- un délai explicite côté client HTTP (``HTTP_TIMEOUT_S``) : la passerelle borne
+  l'appel, mais un serveur muet ne doit pas tenir une connexion sans limite ;
 - un refus du paramètre ``think`` (message qui le nomme, ou 400) est rejoué une
   fois sans lui — aucune autre erreur n'est rejouée ;
 - résultats d'outils sous ``tool_name`` (le champ du SDK : ``name`` serait
@@ -30,7 +34,7 @@ from mika.adapters.llm.openai_compat import (
     system_text,
     tool_content,
 )
-from mika.ports.llm import LLMRequest, LLMResponse, ToolCall, Usage
+from mika.ports.llm import RETRY_AFTER_CUT, LLMRequest, LLMResponse, ToolCall, Usage
 
 try:
     import ollama
@@ -38,6 +42,9 @@ except ImportError:  # pragma: no cover — extra « llm » absent
     ollama = None
 
 log = logging.getLogger("mika.llm.ollama")
+
+#: délai du client HTTP (secondes) : au-delà de tout délai de la passerelle, jamais infini
+HTTP_TIMEOUT_S = 900.0
 
 
 def ollama_messages(req: LLMRequest) -> list[dict[str, Any]]:
@@ -94,7 +101,7 @@ class OllamaBackend:
         if client is None:
             if ollama is None:
                 raise RuntimeError(f"{type(self).__name__} exige le paquet « ollama » (extra « llm »).")
-            client = ollama.AsyncClient(host=host, headers=self.headers)
+            client = ollama.AsyncClient(host=host, headers=self.headers, timeout=HTTP_TIMEOUT_S)
         self._client = client
 
     @property
@@ -104,7 +111,8 @@ class OllamaBackend:
 
     def payload(self, req: LLMRequest) -> dict[str, Any]:
         """Les arguments de ``AsyncClient.chat``."""
-        options: dict[str, Any] = {"num_predict": min(req.max_tokens, self.max_reply_tokens)}
+        cap = req.max_tokens if req.meta.get(RETRY_AFTER_CUT) else min(req.max_tokens, self.max_reply_tokens)
+        options: dict[str, Any] = {"num_predict": cap}
         if self.temperature is not None:
             options["temperature"] = self.temperature
         body: dict[str, Any] = {

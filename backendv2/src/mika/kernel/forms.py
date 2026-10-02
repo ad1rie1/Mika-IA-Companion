@@ -67,6 +67,8 @@ _SUFFIXES = (("_us", "us"), ("_ms", "ms"), ("_s", "s"), ("_min", "min"), ("_h", 
 # un texte dont le nom dit « secret » ne s'affiche jamais, Knob ou non
 _SECRET_NAMES = ("password", "api_key", "token", "secret", "passphrase")
 _NUMERIC = frozenset({"int", "float", "slider", "duration"})
+#: un libellé qui dit déjà son unité, entre parenthèses à la fin (« Contexte (jetons) »)
+_LABEL_UNIT = re.compile(r"\([^()]+\)\s*$")
 UNBOUNDED_NOTE = "(bornes non déclarées : lecture seule)"
 
 Only = tuple[tuple[str, tuple[str, ...]], ...]
@@ -272,6 +274,8 @@ def _number(name: str, annotation: Any, knob: Knob, metadata: Sequence[Any], com
     unit = knob.unit or _guess_unit(name)
     if unit == "min" and not knob.unit and annotation is float:
         unit = ""  # « fond_min », « esteem_min » : un seuil minimal, pas des minutes
+    if not knob.unit and unit not in UNIT_US and _LABEL_UNIT.search(common["label"]):
+        unit = ""  # « Contexte (jetons) » porte déjà son unité : pas de « (tokens) » deviné en plus
     bounds = {"lo": lo, "hi": hi, "step": step, "unit": unit}
     if knob.choices:
         return _make(kind="select", choices=knob.choices, **bounds, **common)
@@ -382,6 +386,65 @@ def _record_model(annotation: Any) -> type[BaseModel] | None:
     else:
         return None
     return target if isinstance(target, type) and issubclass(target, BaseModel) else None
+
+
+#: le nom d'une entrée de liste (un fournisseur, une boîte) : lettres, chiffres, tirets, soulignés
+RECORD_NAME = re.compile(r"[^\W_][\w-]{0,59}")
+RECORD_NAME_RULE = "lettres, chiffres, tirets ou soulignés (60 au plus), en commençant par une lettre ou un chiffre"
+
+
+def references(model: type[BaseModel], flat: Mapping[str, Any], path: str, key: str) -> list[tuple[str, str]]:
+    """Ce qui désigne l'entrée ``key`` de la liste ``path`` par son nom (``choices_from``) : les
+    valeurs d'une correspondance (les rôles qui visent un fournisseur), un champ des entrées d'une
+    liste (le repli d'un autre fournisseur), un champ simple. ``flat`` : la section aplatie
+    (``flatten``). Rend des couples (chemin, libellé lisible) : « routes.reply », « Rôles · répondre »."""
+    out: list[tuple[str, str]] = []
+    for f in describe(model):
+        if f.kind == "mapping" and f.choices_from == path:
+            labels = dict(f.keys)
+            for k, v in (flat.get(f.path) or {}).items():
+                if v == key:
+                    out.append((f"{f.path}.{k}", f"{f.label} · {labels.get(k, k)}"))
+        elif f.kind == "records":
+            entries = flat.get(f.path) or {}
+            items = list(entries.items() if isinstance(entries, Mapping) else enumerate(entries))
+            for item in f.item:
+                if item.choices_from != path or "." in item.path:
+                    continue
+                for k, entry in items:
+                    if isinstance(entry, Mapping) and entry.get(item.path) == key and str(k) != key:
+                        out.append((f"{f.path}.{k}.{item.path}", f"{f.label} · {k} · {item.label}"))
+        elif f.choices_from == path and f.kind not in ("group", "records", "mapping") and flat.get(f.path) == key:
+            out.append((f.path, f.label))
+    return out
+
+
+def rename_references(model: type[BaseModel], flat: Mapping[str, Any], path: str, old: str,
+                      new: str) -> tuple[dict[str, Any], list[str]]:
+    """Ce qui change quand l'entrée ``old`` de ``path`` s'appelle désormais ``new`` : chaque
+    référence suit (``references``). Rend les changements (chemins de premier niveau → valeurs, à
+    fondre par ``validate``) et ce qui a suivi, en mots."""
+    changes: dict[str, Any] = {}
+    touched: list[str] = []
+    for ref, label in references(model, flat, path, old):
+        top, _, rest = ref.partition(".")
+        value = changes.get(top, _plain(flat.get(top)))
+        if not rest:
+            changes[top] = new
+        elif isinstance(value, Mapping):
+            key, _, field = rest.partition(".")
+            value = dict(value)
+            if field:
+                entry = dict(value.get(key) or {})
+                entry[field] = new
+                value[key] = entry
+            else:
+                value[key] = new
+            changes[top] = value
+        else:
+            continue
+        touched.append(label)
+    return changes, touched
 
 
 def record_model(model: type[BaseModel], path: str) -> tuple[type[BaseModel], bool] | None:

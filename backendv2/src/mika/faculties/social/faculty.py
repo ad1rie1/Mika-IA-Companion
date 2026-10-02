@@ -9,6 +9,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import affect as affect_c
+from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
@@ -22,6 +23,13 @@ from mika.vocab.people import fold, is_identifiable
 from mika.vocab.temperament import Temperament, lerp
 
 KEEP_DAYS = 64
+#: Les dernières conversations dont on retient qui les a ouvertes.
+STARTS_KEPT = 20
+#: Les initiatives en cours dont on retient la raison (des épisodes qui n'ont jamais parlé s'y oublient).
+OPENINGS_KEPT = 16
+#: Qui a ouvert une conversation.
+HER, THEM = "her", "them"
+_RANK = {level: i for i, level in enumerate(c.CLOSENESS_LEVELS)}
 
 
 class SocialParams(BaseModel):
@@ -73,8 +81,8 @@ class SocialParams(BaseModel):
         help="Messages reçus pour devenir amie (avec assez de jours de contact, et sans rancune).")] = 15
     close_days: Annotated[int, Knob(
         label="Proche : jours de contact", group="Proximité vécue", lo=1, hi=120,
-        help="Jours de contact distincts pour devenir proche (avec assez de messages, sans rancune, et de la "
-             "chaleur installée ou une longue histoire).")] = 7
+        help="Jours de contact distincts pour devenir proche (avec assez de messages, sans rancune, de la "
+             "chaleur installée ou une longue histoire, et un mois d'histoire au moins).")] = 7
     close_messages: Annotated[int, Knob(
         label="Proche : messages reçus", group="Proximité vécue", lo=1, hi=2000,
         help="Messages reçus pour devenir proche.")] = 50
@@ -87,6 +95,21 @@ class SocialParams(BaseModel):
         label="Proche : longue histoire (jours)", group="Proximité vécue", lo=1, hi=365,
         help="Au-delà de tant de jours de contact, on devient proche même sans chaleur installée : un chagrin "
              "partagé n'éloigne pas.")] = 14
+    close_history_days: Annotated[int, Knob(
+        label="Proche : histoire d'au moins (jours)", group="Proximité vécue", lo=1, hi=365,
+        help="Entre leur premier jour de contact et aujourd'hui, il faut au moins tant de jours pour être "
+             "proche : on ne le devient pas en une semaine, si intense soit-elle.")] = 30
+    closeness_window_days: Annotated[int, Knob(
+        label="Proximité : fenêtre glissante (jours)", group="Proximité vécue", lo=14, hi=730,
+        help="La proximité se lit sur les jours de contact de cette fenêtre ; l'histoire plus ancienne ne la "
+             "fait jamais tomber plus d'un cran sous ce qu'elle a été.")] = 120
+    closeness_silence_factor: Annotated[float, Knob(
+        label="Proximité : long silence (× rythme)", group="Proximité vécue", lo=2, hi=50, step=0.5,
+        help="Un silence d'au moins tant de fois son rythme (et d'au moins le minimum ci-dessous) fait "
+             "descendre la proximité d'un cran — l'histoire la retient un cran sous ce qu'elle a été.")] = 8.0
+    closeness_silence_min_days: Annotated[int, Knob(
+        label="Proximité : long silence d'au moins (jours)", group="Proximité vécue", lo=3, hi=365,
+        help="En deçà, aucun silence ne fait descendre la proximité, quel que soit le rythme.")] = 21
     # reprendre contact : un silence d'une fois et demie son rythme
     recontact_factor: Annotated[float, Knob(
         label="Manque : silence ÷ rythme", group="Reprendre contact", lo=1, hi=10, step=0.1,
@@ -145,11 +168,40 @@ class SocialParams(BaseModel):
         label="Recul par initiative sans réponse", group="Retenue", lo=-10, hi=0, step=0.5,
         help="Envers quelqu'un de présent, chaque initiative restée sans réponse rend la suivante moins probable "
              "d'autant (log-odds) ; envers quelqu'un d'absent, c'est un veto.")] = -1.0
-    # une rancune (hostilité installée) : ni amitié, ni initiative vers elle
+    # une rancune (hostilité installée) : ni initiative vers elle, ni amitié naissante
     grudge: Annotated[float, Knob(
         label="Seuil de rancune", group="Retenue", lo=0.05, hi=1, step=0.05,
-        help="À partir de cette hostilité installée (affect), ni amitié ni initiative vers la personne. Plus "
-             "bas : la moindre contrariété coupe les ponts.")] = 0.2
+        help="À partir de cette hostilité installée (affect), aucune initiative vers la personne. Plus bas : la "
+             "moindre contrariété coupe les ponts.")] = 0.2
+    grudge_demote: Annotated[float, Knob(
+        label="Rancune qui défait une amitié installée", group="Retenue", lo=0.05, hi=1, step=0.05,
+        help="Une amitié installée (ci-dessous) n'est rétrogradée pour rancune qu'à partir de cette hostilité : "
+             "une dispute n'efface pas un mois d'amitié. Une amitié naissante, elle, ne passe pas le seuil de "
+             "rancune ordinaire.")] = 0.35
+    friendship_settled_days: Annotated[int, Knob(
+        label="Une amitié est installée après (jours de contact)", group="Retenue", lo=1, hi=120,
+        help="Au-delà de tant de jours de contact distincts, l'amitié est installée : seule une rancune plus "
+             "lourde la défait.")] = 7
+    # qui ouvre leurs conversations : quand c'est presque toujours elle, elle le remarque
+    conversation_gap_us: Annotated[int, Knob(
+        label="Une nouvelle conversation après", group="Réciprocité", lo=10 * MINUTE, hi=2 * DAY,
+        help="Un silence d'au moins tant sépare deux conversations : qui écrit après lui ouvre la suivante "
+             "(une réponse à sa relance n'en ouvre pas).")] = 2 * HOUR
+    reciprocity_min_starts: Annotated[int, Knob(
+        label="Réciprocité : conversations comptées au moins", group="Réciprocité", lo=2, hi=20,
+        help="En deçà de tant de conversations ouvertes (par l'une ou l'autre), elle ne juge pas qui écrit en "
+             "premier.")] = 5
+    one_sided_share: Annotated[float, Knob(
+        label="C'est presque toujours elle : part au moins", group="Réciprocité", lo=0.5, hi=1, step=0.05,
+        help="Quand elle a ouvert au moins cette part de leurs dernières conversations, elle le remarque : ses "
+             "envies de relancer ou de discuter s'espacent, et une pensée lui reste.")] = 0.7
+    one_sided_shift: Annotated[float, Knob(
+        label="Relances quand c'est toujours elle", group="Réciprocité", lo=-10, hi=0, step=0.5,
+        help="Ses relances, envies de discuter et pensées qui insistent vers cette personne deviennent moins "
+             "probables d'autant (log-odds).")] = -2.0
+    one_sided_spacing_us: Annotated[int, Knob(
+        label="Le remarquer au plus une fois par", group="Réciprocité", lo=DAY, hi=60 * DAY,
+        help="Elle ne s'en fait pas la remarque plus souvent.")] = 7 * DAY
     # profils : relus quand assez de nouveau est su, au plus une fois par jour
     profile_min_items: Annotated[int, Knob(
         label="Fiche : éléments nouveaux", group="Fiches", lo=1, hi=50,
@@ -160,7 +212,8 @@ class SocialParams(BaseModel):
         help="Pas deux relectures de la même fiche plus rapprochées.")] = DAY
     profile_max_items: Annotated[int, Knob(
         label="Fiche : éléments relus", group="Fiches", lo=5, hi=200,
-        help="Combien de ses souvenirs et croyances sur la personne (les plus importants) le modèle relit.")] = 30
+        help="Combien de ses souvenirs et croyances sur la personne (les plus importants) le modèle relit — "
+             "seulement ce qu'elle a dit elle-même, ou ce que Mika a vu avec elle.")] = 30
     profile_per_run: Annotated[int, Knob(
         label="Fiches par passage", group="Fiches", lo=1, hi=10,
         help="Combien de fiches au plus une passe relit (les plus en retard d'abord) : les appels restent "
@@ -179,17 +232,33 @@ class Contact:
     last_in: int = 0
     last_out: int = 0
     unanswered: int = 0  # ses initiatives depuis le dernier message de la personne
+    #: messages reçus chacun de ces jours (en parallèle de ``days``)
+    counts: tuple[int, ...] = ()
+    #: jours de contact distincts depuis le début (``days`` n'en garde que les derniers), et le premier
+    total_days: int = 0
+    first_day: int = 0
+    #: le dernier échange (dans un sens ou dans l'autre) ; le début de la conversation en cours ;
+    #: et le dernier message de la personne avant elle
+    last_activity: int = 0
+    since: int = 0
+    previous: int = 0
+    #: qui a ouvert leurs dernières conversations : ``(jour, HER | THEM)``
+    starts: tuple[tuple[int, str], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class Profile:
     summary_ref: str
-    tone: str = ""
+    tone: str = ""  # en clair, profil d'avant la version 2
     interests: tuple[str, ...] = ()
     sensitive: tuple[str, ...] = ()
     revised_at: int = 0
     upto: int = 0
     mentions_at: int = 0  # combien d'éléments de mémoire la concernaient à la relecture
+    #: les contenus, gardés à part (vides : aucun, ou profil d'avant la version 2)
+    tone_ref: str = ""
+    interests_ref: str = ""
+    sensitive_ref: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,6 +269,10 @@ class SocialState:
     declared: FrozenDict[str, str] = field(default_factory=FrozenDict)  # proximité déclarée par un opérateur
     mentions: FrozenDict[str, int] = field(default_factory=FrozenDict)  # éléments de mémoire la concernant
     comforted_at: int = 0  # la dernière fois qu'elle est allée chercher du réconfort
+    #: ses initiatives en cours : corrélation → raisons (une salutation n'ouvre pas une conversation à elle seule)
+    openings: FrozenDict[str, str] = field(default_factory=FrozenDict)
+    #: quand elle a remarqué, pour la dernière fois, que c'est toujours elle qui écrit à cette personne
+    noticed: FrozenDict[str, int] = field(default_factory=FrozenDict)
 
 
 def derive(t: Temperament, overrides: Any = None) -> SocialParams:
@@ -211,7 +284,9 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
     return SocialParams(**values)
 
 
-SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive)
+#: v2 : messages par jour, histoire totale, conversations ouvertes, contenus des profils à part.
+SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive,
+                 state_version=2)
 SOCIAL.declare(*c.ALL)
 
 
@@ -228,6 +303,10 @@ def _started(s: SocialState, e, cx) -> SocialState:
     reasons = d.reason.split(",")
     if d.kind != Kind.INITIATIVE or not d.target:
         return s
+    openings = s.openings.set(e.correlation, d.reason)
+    if len(openings) > OPENINGS_KEPT:  # les identifiants d'épisode sont chronologiques
+        openings = FrozenDict(sorted(openings.items())[-OPENINGS_KEPT:])
+    s = replace(s, openings=openings)
     if c.COMFORT in reasons:
         s = replace(s, comforted_at=e.at)  # on va vers une personne, pas vers toutes à la suite
     if c.GREETING in reasons:
@@ -235,27 +314,61 @@ def _started(s: SocialState, e, cx) -> SocialState:
     return s
 
 
+def _active(ct: Contact, at: int, gap: int) -> tuple[Contact, bool]:
+    """Un échange de plus : après un long silence, il ouvre une nouvelle
+    conversation, et l'on retient quand la personne avait écrit pour la
+    dernière fois avant elle. Rend aussi si cet échange en ouvre une."""
+    opens = not ct.last_activity or at - ct.last_activity >= gap
+    if not opens:
+        return replace(ct, last_activity=max(ct.last_activity, at)), False
+    return replace(ct, last_activity=max(ct.last_activity, at), previous=ct.last_in, since=at), True
+
+
+def _opened(ct: Contact, day: int, who: str) -> Contact:
+    if (day, who) in ct.starts:
+        return ct  # un jour compte une fois, de chaque côté
+    return replace(ct, starts=(*ct.starts, (day, who))[-STARTS_KEPT:])
+
+
 @SOCIAL.reducer(rt.PERCEPTION_RECEIVED, reads=[identity_c.PERSON])
 def _received(s: SocialState, e, cx) -> SocialState:
     d = e.data
     if not d.addressed or not is_identifiable(d.handle):
         return s  # entendu dans un groupe sans lui être adressé : ce n'est pas un contact
+    p = params(cx.params)
     person = cx.facts.get(identity_c.PERSON(d.handle))
     ct = s.contacts.get(person) or Contact()
     day = cx.local(e.at).date().toordinal()
-    days = ct.days if ct.days and ct.days[-1] == day else (*ct.days, day)[-KEEP_DAYS:]
-    ct = replace(ct, days=days, inbound=ct.inbound + 1, first_in=ct.first_in or e.at, last_in=e.at, unanswered=0)
+    if ct.days and ct.days[-1] == day:
+        days, counts, total = ct.days, (*ct.counts[:-1], (ct.counts[-1] if ct.counts else 0) + 1), ct.total_days
+    else:
+        days, counts = (*ct.days, day)[-KEEP_DAYS:], (*ct.counts, 1)[-KEEP_DAYS:]
+        total = max(ct.total_days, len(ct.days)) + 1
+    answering = ct.unanswered > 0
+    ct, opens = _active(ct, e.at, p.conversation_gap_us)
+    if opens and not answering:
+        ct = _opened(ct, day, THEM)  # elle (ou il) a écrit la première, sans répondre à une relance
+    ct = replace(ct, days=days, counts=counts, total_days=total, first_day=ct.first_day or day,
+                 inbound=ct.inbound + 1, first_in=ct.first_in or e.at, last_in=e.at, unanswered=0)
     return replace(s, contacts=s.contacts.set(person, ct))
 
 
 @SOCIAL.reducer(rt.UTTERANCE, reads=[identity_c.PERSON])
 def _uttered(s: SocialState, e, cx) -> SocialState:
     d = e.data
+    reasons = s.openings.get(e.correlation, "").split(",")
+    if e.correlation in s.openings:
+        s = replace(s, openings=s.openings.delete(e.correlation))
     if not d.visible or not d.target or not is_identifiable(d.target):
         return s
+    p = params(cx.params)
     person = cx.facts.get(identity_c.PERSON(d.target))
     ct = s.contacts.get(person) or Contact()
-    ct = replace(ct, last_out=e.at, unanswered=ct.unanswered + (1 if d.kind == Kind.INITIATIVE else 0))
+    initiative = d.kind == Kind.INITIATIVE
+    ct, opens = _active(ct, e.at, p.conversation_gap_us)
+    if initiative and opens and not {c.GREETING, goals_c.REMIND} & set(reasons):
+        ct = _opened(ct, cx.local(e.at).date().toordinal(), HER)  # c'est elle qui écrit la première
+    ct = replace(ct, last_out=e.at, unanswered=ct.unanswered + (1 if initiative else 0))
     return replace(s, contacts=s.contacts.set(person, ct))
 
 
@@ -270,9 +383,11 @@ def _mentioned(s: SocialState, e, cx) -> SocialState:
 @SOCIAL.reducer(c.PROFILE_REVISED)
 def _profiled(s: SocialState, e, cx) -> SocialState:
     d = e.data
-    profile = Profile(summary_ref=d.summary.ref or "", tone=d.tone,
-                      interests=tuple(d.interests), sensitive=tuple(d.sensitive), revised_at=e.at, upto=d.upto,
-                      mentions_at=s.mentions.get(d.person, 0))
+    profile = Profile(summary_ref=d.summary.ref or "", tone=d.legacy_tone, interests=tuple(d.legacy_interests),
+                      sensitive=tuple(d.legacy_sensitive), revised_at=e.at, upto=d.upto,
+                      mentions_at=s.mentions.get(d.person, 0), tone_ref=d.tone.ref or "" if d.tone else "",
+                      interests_ref=d.interests.ref or "" if d.interests else "",
+                      sensitive_ref=d.sensitive.ref or "" if d.sensitive else "")
     return replace(s, profiles=s.profiles.set(d.person, profile))
 
 
@@ -282,6 +397,12 @@ def _declared(s: SocialState, e, cx) -> SocialState:
     if d.closeness not in c.CLOSENESS_LEVELS:
         return replace(s, declared=s.declared.delete(d.person))
     return replace(s, declared=s.declared.set(d.person, d.closeness))
+
+
+@SOCIAL.reducer(c.ONE_SIDED)
+def _noticed(s: SocialState, e, cx) -> SocialState:
+    about = e.data.about
+    return replace(s, noticed=s.noticed.set(about[0], e.at)) if about else s
 
 
 # ── Lectures ──────────────────────────────────────────────────────────────
@@ -295,28 +416,60 @@ def grudging(hostility: float, p: SocialParams) -> bool:
     return hostility > 0.0 and hostility >= p.grudge
 
 
-def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float = 0.0) -> str:
+def estranged(hostility: float, p: SocialParams, settled: bool = False) -> bool:
+    """Une rancune qui empêche l'amitié : le seuil ordinaire pour une amitié
+    naissante ; une rancune plus lourde pour défaire une amitié installée (une
+    dispute ne suffit pas)."""
+    return hostility > 0.0 and hostility >= (p.grudge_demote if settled else p.grudge)
+
+
+def _level(days: int, messages: int, history: int, regard: float, p: SocialParams, friendly: bool) -> int:
+    if friendly and days >= p.close_days and messages >= p.close_messages and history >= p.close_history_days \
+            and (regard >= p.close_regard or days >= p.close_long_days):
+        return _RANK[c.CLOSE]
+    if friendly and days >= p.friend_days and messages >= p.friend_messages:
+        return _RANK[c.FRIEND]
+    if days >= p.acquaintance_days or messages >= p.acquaintance_messages:
+        return _RANK[c.ACQUAINTANCE]
+    return _RANK[c.STRANGER]
+
+
+def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float = 0.0,
+          now_day: int | None = None) -> str:
     """Ce que leur histoire a fait d'elles : on devient amies en passant du
     temps ensemble, sans rancune — pas en le disant (ni parce qu'un modèle
-    l'a jugé) ; proches, avec de la chaleur ou une longue histoire."""
+    l'a jugé) ; proches, avec de la chaleur ou une longue histoire, et un mois
+    d'histoire au moins.
+
+    Ce qui compte, c'est leur histoire **récente** (une fenêtre glissante) ;
+    un long silence (plusieurs fois son rythme) la fait descendre d'un cran ;
+    une longue histoire ne la laisse jamais tomber plus d'un cran sous ce
+    qu'elle a été. Une dispute ne défait pas une amitié : seule une rancune
+    lourde (``grudge_demote``) le fait."""
     if ct is None or not ct.days:
         return c.STRANGER
-    days, n = len(ct.days), ct.inbound
-    friendly = not grudging(hostility, p)
-    if friendly and days >= p.close_days and n >= p.close_messages and \
-            (regard >= p.close_regard or days >= p.close_long_days):
-        return c.CLOSE
-    if friendly and days >= p.friend_days and n >= p.friend_messages:
-        return c.FRIEND
-    if days >= p.acquaintance_days or n >= p.acquaintance_messages:
-        return c.ACQUAINTANCE
-    return c.STRANGER
+    today = ct.days[-1] if now_day is None else max(now_day, ct.days[-1])
+    friendly = not estranged(hostility, p, max(ct.total_days, len(ct.days)) >= p.friendship_settled_days)
+    history = today - (ct.first_day or ct.days[0])
+    counts = ct.counts
+    if len(counts) != len(ct.days):  # sans décompte par jour : les messages répartis également
+        base, extra = divmod(ct.inbound, len(ct.days))
+        counts = tuple(base + (1 if i < extra else 0) for i in range(len(ct.days)))
+    everything = _level(max(ct.total_days, len(ct.days)), ct.inbound, history, regard, p, friendly)
+    recent = [(day, n) for day, n in zip(ct.days, counts, strict=True) if today - day < p.closeness_window_days]
+    window = _level(len(recent), sum(n for _d, n in recent), history, regard, p, friendly)
+    rhythm_days, _measured = rhythm(ct, today, c.CLOSENESS_LEVELS[everything], p)
+    silent = today - ct.days[-1]
+    if silent >= max(p.closeness_silence_min_days, p.closeness_silence_factor * rhythm_days):
+        window -= 1
+    return c.CLOSENESS_LEVELS[max(_RANK[c.STRANGER], window, everything - 1)]
 
 
-def closeness(s: SocialState, person: str, regard: float, p: SocialParams, hostility: float = 0.0) -> str:
+def closeness(s: SocialState, person: str, regard: float, p: SocialParams, hostility: float = 0.0,
+              now_day: int | None = None) -> str:
     """Déclarée par un opérateur, sinon vécue."""
     declared = s.declared.get(person)
-    return declared if declared is not None else lived(s.contacts.get(person), regard, p, hostility)
+    return declared if declared is not None else lived(s.contacts.get(person), regard, p, hostility, now_day)
 
 
 def rhythm(ct: Contact, now_day: int, level: str, p: SocialParams) -> tuple[float, bool]:
@@ -331,13 +484,23 @@ def rhythm(ct: Contact, now_day: int, level: str, p: SocialParams) -> tuple[floa
     return fallback, False
 
 
+def reciprocity(ct: Contact, p: SocialParams) -> tuple[int, int, bool]:
+    """(ouvertes par elle, par la personne, presque toujours elle ?)"""
+    her = sum(1 for _d, who in ct.starts if who == HER)
+    them = sum(1 for _d, who in ct.starts if who == THEM)
+    total = her + them
+    return her, them, total >= p.reciprocity_min_starts and her / total >= p.one_sided_share
+
+
 def contact_reading(s: SocialState, person: str, now: int, now_day: int, level: str,
                     p: SocialParams) -> c.ContactReading:
     ct = s.contacts.get(person) or Contact()
     days, measured = rhythm(ct, now_day, level, p)
     ratio = (now - ct.last_in) / (days * DAY) if ct.last_in else 0.0
-    return c.ContactReading(person, len(ct.days), ct.inbound, ct.first_in, ct.last_in, ct.last_out, days, measured,
-                            ct.unanswered, max(0.0, ratio))
+    her, them, one_sided = reciprocity(ct, p)
+    return c.ContactReading(person, max(ct.total_days, len(ct.days)), ct.inbound, ct.first_in, ct.last_in,
+                            ct.last_out, days, measured, ct.unanswered, max(0.0, ratio), previous=ct.previous,
+                            since=ct.since, her_starts=her, their_starts=them, one_sided=one_sided)
 
 
 @SOCIAL.fact(c.GREETED)
@@ -348,7 +511,7 @@ def _greeted(s: SocialState, cx, person: str) -> int:
 @SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD, affect_c.HOSTILITY])
 def _closeness(s: SocialState, cx, person: str) -> str:
     return closeness(s, person, cx.facts.get(affect_c.REGARD(person)), params(cx.params),
-                     cx.facts.get(affect_c.HOSTILITY(person)))
+                     cx.facts.get(affect_c.HOSTILITY(person)), cx.local(cx.now).date().toordinal())
 
 
 @SOCIAL.fact(c.CONTACT, reads=[c.CLOSENESS])
@@ -361,6 +524,12 @@ def _contact(s: SocialState, cx, person: str) -> c.ContactReading:
 def _sensitive(s: SocialState, cx, person: str) -> tuple[str, ...]:
     profile = s.profiles.get(person)
     return tuple(fold(t) for t in profile.sensitive) if profile else ()
+
+
+@SOCIAL.fact(c.SENSITIVE_REF)
+def _sensitive_ref(s: SocialState, cx, person: str) -> str:
+    profile = s.profiles.get(person)
+    return profile.sensitive_ref if profile else ""
 
 
 @SOCIAL.fact(c.MISSED, reads=[c.CONTACT, c.CLOSENESS])

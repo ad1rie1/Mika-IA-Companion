@@ -1,13 +1,14 @@
 """Les scénarios de M4 : sa vie intérieure.
 
 - **S06** la journée vide : quelqu'un est là, connecté, mais ne dit rien de
-  la journée. Elle prend la parole d'elle-même, un peu, étalé ; jamais la
-  nuit ; elle s'ennuie ou se sent seule une partie de l'après-midi, sans
-  jamais sombrer ; elle dort.
+  la journée. Elle prend la parole d'elle-même, une fois ou deux, puis
+  n'insiste pas ; jamais la nuit ; elle s'ennuie ou se sent seule une partie
+  de l'après-midi, sans jamais sombrer ; elle dort.
 - **S07** une semaine type : trois personnes à leurs rythmes. Elle dort
   chaque nuit, ne parle jamais en dormant, ne dépasse jamais son budget
-  d'initiatives, n'écrit jamais deux fois de suite à quelqu'un qui ne
-  répond pas, ses pensées s'éteignent, elle ne s'enfonce jamais.
+  d'initiatives, ne relance qu'une fois (doucement, un jour plus tard au
+  plus tôt) quelqu'un qui ne répond pas, ses pensées s'éteignent, elle ne
+  s'enfonce jamais.
 """
 
 from __future__ import annotations
@@ -48,8 +49,8 @@ def _sleep_spans(events: list[Any], end: int) -> list[tuple[int, int]]:
         elif e.type.name == body_c.WOKE.name and start is not None:
             spans.append((start, e.data.at))
             start = None
-        elif e.type.name == rt.PERCEPTION_RECEIVED.name and start is not None and e.data.addressed:
-            spans.append((start, e.at))  # réveillée par un message
+        elif e.type.name == body_c.ROUSED.name and start is not None:
+            spans.append((start, e.at))  # tirée du sommeil par un message (les autres attendent son réveil)
             start = None
     if start is not None:
         spans.append((start, end))
@@ -100,7 +101,8 @@ async def s06(driver: Driver, rng: RngTree, res: Result) -> None:
                         "empty_afternoon": round(len(empty) / max(1, len(afternoon)), 2)})
     res.checks += [
         expect.band("quelques initiatives dans la journée", len(said),
-                    "seule avec quelqu'un qui se tait, elle finit par parler — un peu", lo=1, hi=5),
+                    "seule avec quelqu'un qui se tait, elle finit par parler — une fois ou deux, puis elle n'insiste "
+                    "pas (ADR 0033)", lo=1, hi=2),
         expect.invariant("étalées", all(g >= 60 for g in gaps),
                          "pas deux prises de parole à moins d'une heure quand personne ne répond",
                          f"écarts {[round(g) for g in gaps]} min"),
@@ -188,7 +190,8 @@ async def s07(driver: Driver, rng: RngTree, res: Result) -> None:
         expect.invariant("jamais plus de cinq initiatives par jour", all(n <= 5 for n in per_day.values()),
                          "le plafond quotidien est une politique", f"{per_day}"),
         expect.invariant("jamais deux fois de suite sans réponse", not double,
-                         "elle n'écrit pas deux fois à quelqu'un qui n'a pas répondu", f"{double[:3]}"),
+                         "à quelqu'un qui n'a pas répondu, au plus une relance douce, un jour plus tard au plus tôt",
+                         f"{double[:3]}"),
         expect.invariant("ses pensées s'éteignent", not alive_old,
                          "une pensée de plus de trois jours ne trotte plus", f"{len(alive_old)}"),
         expect.invariant("elle ne s'enfonce jamais", not any(_distressed(m) for _, m in samples),
@@ -200,16 +203,19 @@ async def s07(driver: Driver, rng: RngTree, res: Result) -> None:
 
 
 def _double_texts(events: list[Any]) -> list[tuple[str, str]]:
-    """Deux initiatives de suite vers la même personne, sans message d'elle entre les deux."""
-    last: dict[str, str] = {}
+    """Ses initiatives restées sans réponse qu'elle a doublées trop vite vers la
+    même personne : une deuxième moins d'un jour après la première, ou une
+    troisième (ADR 0033 : une seule relance douce, après un long délai)."""
+    since: dict[str, list[int]] = {}
     out = []
     for e in events:
         if e.type.name == rt.PERCEPTION_RECEIVED.name:
-            last[e.data.handle] = "elle"
+            since.pop(e.data.handle, None)
         elif e.type.name == rt.UTTERANCE.name and e.data.kind == "INITIATIVE" and e.data.target:
-            if last.get(e.data.target) == "mika":
+            sent = since.setdefault(e.data.target, [])
+            if len(sent) >= 2 or (sent and e.at - sent[0] < DAY):
                 out.append((e.data.target, _local(e.at).strftime("%a %H:%M")))
-            last[e.data.target] = "mika"
+            sent.append(e.at)
     return out
 
 
@@ -243,8 +249,8 @@ async def s08(driver: Driver, rng: RngTree, res: Result) -> None:
     await _chat(driver, "tg_5", GENTLE)
     await until(driver, day0 + DAY + 22 * HOUR + 50 * MINUTE)
     await driver.restart()
-    # mercredi : une conversation jusqu'à 1 h 30
-    await until(driver, day0 + 2 * DAY + 23 * HOUR)
+    # mercredi : une conversation jusqu'à 1 h 30 (commencée avant qu'elle ne s'endorme : selon les nuits, dès 22 h 40)
+    await until(driver, day0 + 2 * DAY + 22 * HOUR + 30 * MINUTE)
     await driver.connect("user_2", "Alice")
     while driver.clock.now() < day0 + 3 * DAY + HOUR + 30 * MINUTE:
         await driver.say("user_2", "et sinon, tu penses à quoi là ?")

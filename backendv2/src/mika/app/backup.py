@@ -49,6 +49,9 @@ FORMAT = 1
 MANIFEST = "MANIFEST.json"
 #: jetables : se reconstruisent depuis le journal
 SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm", "sauvegardes.json", "sauvegardes.partial"})
+#: dossiers jamais archivés : ceux des appels de la CLI de Claude Code (prompts privés, jetons de session)
+#: d'une installation d'avant leur déménagement sous XDG_RUNTIME_DIR
+SKIPPED_DIRS = frozenset({"claude-code"})
 _SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
 ARCHIVE_PREFIX = "mika-"
 #: ce que la console lit des sauvegardes : la dernière, la dernière vérification (dans le dossier de données)
@@ -123,6 +126,8 @@ def _members(data: Path) -> list[Path]:
     for path in sorted(data.rglob("*")):
         rel = path.relative_to(data)
         if path.is_dir() or path.is_symlink() or rel.name in SKIPPED or rel.parts[0].startswith("."):
+            continue
+        if rel.parts[0] in SKIPPED_DIRS:
             continue
         if any(rel.name.endswith(".db" + s) for s in _SQLITE_SIDECARS):
             continue

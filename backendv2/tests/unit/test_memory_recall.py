@@ -1,0 +1,259 @@
+"""Ce qui lui revient, et comment elle révise ce qu'elle croit.
+
+- Le rappel cherche ses souvenirs à part des extraits d'échanges : mille
+  échanges des autres n'étouffent pas ce qu'elle sait d'Alice ;
+- une politesse (« ah d'accord ») ne réveille rien ;
+- « vos échanges passés » ne répète pas le fil qu'elle a sous les yeux, et dit
+  qui parlait dans un salon ;
+- un salon se relit d'un seul tenant, ce qui ne lui était pas adressé n'y
+  compte que s'il nomme quelqu'un qu'elle connaît ;
+- Lyon, puis Nantes, puis Lyon : c'est Lyon qu'elle croit ; une même
+  personne qui répète ne rend pas une croyance plus sûre.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import re
+
+from mika.app import composition
+from mika.kernel.clock import DAY, US
+from mika.sim.clock import run_virtual
+from tests.fixtures.memory import SIX, Script, chat, kept, section, seq_of, token
+from tests.fixtures.mika import DOC, boot, build, connect
+
+REVIENT = "CE QUI TE REVIENT"
+EXCHANGES = "VOS ÉCHANGES PASSÉS"
+
+
+def test_other_peoples_exchanges_do_not_crowd_out_her_memories(tmp_path):
+    """Bob a posé dix fois la même question qu'Alice va poser : ses échanges
+    ressemblent plus au message d'Alice que ce qu'elle sait d'Alice. Les
+    souvenirs se cherchent à part : ce qu'elle sait d'Alice revient."""
+
+    def extract(prompt):
+        if "CANARI-E1" not in prompt.split("Les messages :")[-1]:
+            return None
+        return {"croyances": [{"texte": "Alice a un entretien chez Ubisoft mardi (CANARI-E1)",
+                               "personnes": [token(prompt, "Alice")], "sensibilite": "personnel"}]}
+
+    script = Script(extract)
+    kernel, clock, _, _out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await composition.configure(kernel, DOC, {"memory": {"recall_k": 5}})
+        await connect(kernel, "user_2", "Alice")
+        await connect(kernel, "user_3", "Bob")
+        await chat(kernel, "user_2", ["CANARI-E1 mardi j'ai un entretien chez Ubisoft", *SIX[1:]])
+        await chat(kernel, "user_3", ["tu te souviens de mon entretien ?"] * 10, gap_s=30)
+        await asyncio.sleep(15 * 60)
+        await chat(kernel, "user_2", ["tu te souviens de mon entretien ?"])
+        await kernel.stop()
+
+    run_virtual(clock, main)
+    reply = script.replies("user_2")[-1]
+    assert "CANARI-E1" in section(reply, REVIENT)
+    assert "Ce que tu sais (tes notes) :" in section(reply, REVIENT)
+    assert "(on te l'a dit)" not in reply, "le texte dit déjà « m'a dit » : pas de jargon en plus"
+
+
+def test_a_polite_word_brings_nothing_back(tmp_path):
+    """« Ah d'accord », « bonne nuit » : on ne repense pas à sa vie à chaque
+    politesse — même quand un souvenir en a les mots (« Alice m'a souhaité une
+    bonne nuit » ressemble mot pour mot à « bonne nuit ! »)."""
+
+    def extract(prompt):
+        if "Nantes" not in prompt:
+            return None
+        return {"croyances": [{"texte": "Alice m'a dit : Au fait je déménage le mois prochain à Nantes",
+                               "personnes": [token(prompt, "Alice")], "sensibilite": "personnel"}],
+                "souvenirs": [{"texte": "Alice m'a souhaité une bonne nuit", "personnes": [token(prompt, "Alice")],
+                               "sensibilite": "anodin"}]}
+
+    script = Script(extract)
+    kernel, clock, _, _out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_2", "Alice")
+        await chat(kernel, "user_2", ["Au fait je déménage le mois prochain à Nantes", "bonne nuit Mika", *SIX[2:]])
+        await asyncio.sleep(15 * 60)
+        await chat(kernel, "user_2", ["ah d'accord", "bonne nuit !", "tu te souviens où je déménage ?"])
+        await kernel.stop()
+
+    run_virtual(clock, main)
+    agreed, night, asked = script.replies("user_2")[-3:]
+    assert section(agreed, REVIENT) == "" and section(night, REVIENT) == ""
+    assert "Nantes" in section(asked, REVIENT), "contrôle : une vraie question, si"
+
+
+def test_recall_follows_the_conversation_and_stays_on_its_subject(tmp_path):
+    """« Et tu crois qu'il va guérir vite ? » ne nomme rien : c'est la
+    conversation (« je suis chez le vétérinaire avec Moustache ») qui dit de
+    quoi on parle — ce qu'elle sait de Moustache revient. Ce qui ne touche le
+    sujet que de loin (le chien de la voisine) ne revient pas : sous le seuil,
+    rien ne remonte au hasard."""
+    cat, dog = "Moustache, le chat d'Alice, a une peur bleue du vétérinaire", "Alice a promené le chien de sa voisine"
+
+    def extract(prompt):
+        if "peur bleue" not in prompt.split("Les messages :")[1]:
+            return None
+        alice = token(prompt, "Alice")
+        return {"croyances": [{"texte": cat, "personnes": [alice], "sensibilite": "anodin"},
+                              {"texte": f"{dog} au parc", "personnes": [alice], "sensibilite": "anodin"}]}
+
+    script = Script(extract)
+    kernel, clock, _, _out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_2", "Alice")
+        await chat(kernel, "user_2", ["Moustache a une peur bleue du vétérinaire",
+                                      "j'ai promené le chien de ma voisine au parc", *SIX[2:]])
+        await asyncio.sleep(15 * 60)
+        await asyncio.sleep(DAY / US)
+        await chat(kernel, "user_2", ["je suis chez le vétérinaire avec Moustache", "et tu crois qu'il va guérir vite ?"])
+        await kernel.stop()
+
+    run_virtual(clock, main)
+    at_vet, after = (section(r, REVIENT) for r in script.replies("user_2")[-2:])
+    assert cat in at_vet and cat in after, "la question se comprend avec ce qui précède"
+    assert dog not in at_vet and dog not in after, "un rappel au hasard"
+
+
+def test_past_exchanges_do_not_repeat_the_thread_she_sees(tmp_path):
+    """Ce qu'Alice a dit il y a vingt minutes est encore dans le fil : elle le
+    voit déjà, « vos échanges passés » ne le recopie pas. Quand le fil montré
+    est court, le même échange revient — cette fois il n'est plus sous ses yeux."""
+
+    def run(window):
+        script = Script()
+        kernel, clock, _, _out = build(tmp_path / str(window), script)
+
+        async def main():
+            await boot(kernel)
+            if window:
+                await composition.configure(kernel, DOC, {"transcript": {"window": window}})
+            await connect(kernel, "user_2", "Alice")
+            await chat(kernel, "user_2", ["Mon chat Moustache a vomi sur le canapé",
+                                          "Sinon je regarde un film de Miyazaki", "Le Voyage de Chihiro, mon préféré"],
+                       gap_s=40)
+            await asyncio.sleep(15 * 60)
+            await chat(kernel, "user_2", ["tu crois que Moustache est malade, il a vomi sur le canapé ?"])
+            await kernel.stop()
+
+        run_virtual(clock, main)
+        return section(script.replies("user_2")[-1], EXCHANGES)
+
+    assert "Moustache" not in run(0), "le fil le montre déjà"
+    assert "Moustache a vomi" in run(5), "contrôle : hors du fil montré, l'échange revient"
+
+
+def test_in_a_room_each_past_exchange_names_who_spoke(tmp_path):
+    room = {"room": "tg_chat_-9", "channel": "telegram"}
+    script = Script()
+    kernel, clock, _, _out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await composition.configure(kernel, DOC, {"transcript": {"window": 5}})
+        await chat(kernel, "tg_1", ["Mika, Moustache le chat de Léa a vomi ce matin"], display_name="Tom", **room)
+        for text in ("Mika tu joues à quoi ?", "Mika t'as vu le match ?", "Mika il pleut chez toi ?"):
+            await chat(kernel, "tg_3", [text], gap_s=30, display_name="Zoé", **room)
+        await asyncio.sleep(15 * 60)
+        await chat(kernel, "tg_2", ["Mika, tu sais si Moustache a vomi encore ?"], display_name="Léa", **room)
+        await kernel.stop()
+
+    run_virtual(clock, main)
+    shown = section(script.replies("tg_2")[-1], EXCHANGES)
+    assert "Tom : « Mika, Moustache le chat de Léa a vomi" in shown, shown
+    assert "Léa : « Mika, Moustache" not in shown
+
+
+def test_a_room_is_one_conversation_and_asides_count_only_when_they_name_someone(tmp_path):
+    room = {"room": "tg_chat_-3", "channel": "telegram"}
+    script = Script()
+    kernel, clock, _, _out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await chat(kernel, "tg_1", ["Mika, je pars au Japon en avril"], display_name="Tom", **room)
+        await chat(kernel, "tg_2", ["je mange une pomme"], display_name="Léa", addressed=False, **room)
+        await chat(kernel, "tg_3", ["Tom tu me ramènes un kimono ?"], display_name="Zoé", addressed=False, **room)
+        await chat(kernel, "tg_2", ["Mika tu connais Kyoto ?", *SIX[2:]], display_name="Léa", **room)
+        await asyncio.sleep(15 * 60)
+        await kernel.stop()
+
+    run_virtual(clock, main)
+    rooms = [x for x in script.extracts() if "Un salon de groupe" in x]
+    assert rooms and not any("Conversation privée" in x for x in script.extracts()), "jamais découpé par adresse"
+    text = rooms[0]
+    assert "Tom [P1]" in text and "Léa [P2]" in text and "Zoé [P3]" in text
+    assert "je mange une pomme" not in text, "entre eux, et personne qu'elle connaisse"
+    assert re.search(r"Zoé \[P3\] \(entre eux\) : Tom tu me ramènes un kimono", text), "entre eux, mais sur Tom"
+
+
+def test_lyon_then_nantes_then_lyon_means_lyon(tmp_path):
+    plan = ["Lyon", "Nantes", "Lyon"]
+
+    def extract(prompt):
+        known = dict((city, int(i)) for i, city in re.findall(r"^\[#(\d+)\] Alice habite à (\w+)$",
+                                                               prompt.split("Les messages :")[0], re.M))
+        city = plan.pop(0) if plan else None
+        if city is None:
+            return None
+        old = [i for c, i in known.items() if c != city]
+        return {"croyances": [{"texte": f"Alice habite à {city}", "personnes": [token(prompt, "Alice")],
+                               "sensibilite": "anodin", "remplace": old[0] if old else None}]}
+
+    script = Script(extract)
+    kernel, clock, _, _out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_2", "Alice")
+        for city in ("Lyon", "Nantes", "Lyon"):
+            await chat(kernel, "user_2", [f"J'habite à {city} maintenant", *SIX[1:]], gap_s=30)
+            await asyncio.sleep(15 * 60)
+        rows = kept(kernel)
+        await kernel.stop()
+        return rows
+
+    rows = run_virtual(clock, main)
+    active = [r["text"] for r in rows if r["kind"] == "belief" and r["status"] == "active"]
+    assert active == ["Alice habite à Lyon"], rows
+
+
+def test_the_same_informant_repeating_does_not_make_it_surer(tmp_path):
+    """Alice le dit, Carol le confirme (plus sûr), puis Carol le redit : ce
+    n'est pas une troisième source."""
+    fact = "Samedi c'est le mariage de Julie, la sœur d'Alice (CANARI-J1)"
+
+    def extract(prompt):
+        body = prompt.split("Les messages :")[-1]
+        if "CANARI-J1" not in body:
+            return None
+        who = re.search(r"Conversation privée avec (\w+) (\[P\d+\])", prompt)
+        return {"croyances": [{"texte": fact, "personnes": ["Alice"], "source": who.group(2),
+                               "sensibilite": "anodin", "confiance": 0.7, "messages": seq_of(body, "CANARI-J1")}]}
+
+    script = Script(extract)
+    kernel, clock, _, _out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_2", "Alice")
+        await connect(kernel, "user_4", "Carol")
+        for handle in ("user_2", "user_4", "user_4"):
+            await chat(kernel, handle, ["CANARI-J1 samedi c'est le mariage de Julie, la sœur d'Alice", *SIX[1:]])
+            await asyncio.sleep(15 * 60)
+        rows = kept(kernel)
+        await kernel.stop()
+        return rows
+
+    rows = run_virtual(clock, main)
+    beliefs = [r for r in rows if r["kind"] == "belief"]
+    assert len(beliefs) == 1
+    assert abs(beliefs[0]["confidence"] - 0.8) < 1e-9, "Carol a corroboré une fois ; se répéter n'ajoute rien"
+    assert beliefs[0]["informants"] == ["user_2", "user_4"]

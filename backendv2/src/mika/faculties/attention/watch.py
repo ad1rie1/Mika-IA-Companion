@@ -22,13 +22,24 @@ from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.attention.faculty import ATTENTION, AttentionState, Heard, Pending, habituation, params
+from mika.faculties.attention.faculty import (
+    ATTENTION,
+    RELATIONAL,
+    AttentionState,
+    Heard,
+    Pending,
+    habituation,
+    params,
+)
 from mika.kernel.clock import local_date_of_night
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.vocab.affect import Emotion
+from mika.vocab.days import when_fr
+from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.words import stems
 
 EXCERPT = 160
 
@@ -49,19 +60,54 @@ def _last_from(frame: Frame, person: str) -> int:
 
 def met(state: AttentionState, frame: Frame) -> list[str]:
     """Les attentes comblées — et les réponses venues en retard (``late:…``),
-    qui comptent encore : elle n'est plus ignorée. Une promesse ne se comble
-    pas quand la personne écrit : quand elle est tenue (``memory``)."""
+    qui comptent encore tant qu'elles arrivent dans trois fois le délai attendu :
+    elle n'est plus ignorée. Plus tard, la personne écrit, mais ce n'est plus
+    une réponse. Une promesse ne se comble pas quand la personne écrit : quand
+    elle est tenue (``memory``)."""
     out = [k for k, x in state.expectations.items()
            if x.kind in (c.REPLY, c.RETURN) and _last_from(frame, x.person) > x.since]
-    out += [f"late:{person}" for person, since in state.late.items() if _last_from(frame, person) > since]
+    out += [f"late:{person}" for person, late in state.late.items()
+            if late.since < _last_from(frame, person) <= late.until]
     return out
+
+
+def here(frame: Frame) -> dict[str, int]:
+    """Les personnes connectées en ce moment (devant un écran), et depuis quand
+    sans interruption."""
+    out: dict[str, int] = {}
+    for h in frame.get(presence_c.PRESENT):
+        person, since = frame.get(identity_c.PERSON(h)) or h, frame.get(presence_c.SINCE(h))
+        if since is not None:
+            out[person] = min(since, out.get(person, since))
+    return out
+
+
+def left_hanging(state: AttentionState, p: Any, present: dict[str, int]) -> list[tuple[int, str]]:
+    """Les questions qu'elle a posées et qui attendent encore leur réponse, sans
+    qu'elle l'ait encore ressenti : (quand ça se ressentira, personne). Seulement
+    envers quelqu'un qui est resté là depuis, sans répondre : une conversation
+    que l'autre a quittée (on se reparlera demain), quelqu'un qui revient le
+    lendemain, un message lu quand on y pense, ne laissent pas de question en
+    suspens."""
+    return sorted((ex.last_out + p.question_unanswered_us, person) for person, ex in state.exchanges.items()
+                  if ex.unanswered and ex.asked and not ex.owed and not ex.felt and not ex.initiatives
+                  and present.get(person, ex.last_out + 1) <= ex.last_out)
+
+
+def alone_due(state: AttentionState, p: Any) -> int | None:
+    """Quand la prochaine pensée de solitude viendra : un jour sans que
+    personne ne lui écrive, puis une de plus par jour de silence ; ``None``
+    tant que personne ne lui a jamais écrit."""
+    if not state.last_contact or p.alone_after_us <= 0:
+        return None
+    return max(state.last_contact, state.alone_at) + p.alone_after_us
 
 
 @ATTENTION.process("attention.watch", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_STARTED,
                                                memory_c.BELIEVED, memory_c.PROMISE_NOTICED,
                                                memory_c.PROMISE_RESOLVED, goals_c.GOAL_CLOSED,
                                                projects_c.OBJECTIVE_CLOSED, others_c.READ,
-                                               *c.ALL, *body_c.ALL],
+                                               *c.ALL, *body_c.ALL, *presence_c.ALL],
                    wake_on_shapes=[c.Signal],
                    lane="background", catch_up=CatchUp.ONCE, max_quantum_s=1800, priority=30)
 class Watch:
@@ -78,6 +124,10 @@ class Watch:
             if thoughts and thoughts[0].intensity >= p.dwell_from:
                 times.append(state.dwelt_at + p.dwell_every_us)
             times.append(self.missing_at + p.missing_check_us)
+            alone = alone_due(state, p)
+            if alone is not None:
+                times.append(alone)
+            times += [t for t, _person in left_hanging(state, p, here(frame))[:1]]
         return max(frame.now, min(times)) if times else None
 
     async def run(self, ctx: Any) -> None:
@@ -90,10 +140,10 @@ class Watch:
             drafts.append(self._thought(q, frame, store))
         drafts += self._signals(state, frame, store, p)
         met_keys = set(met(state, frame))
-        for person, since in sorted(state.late.items()):
+        for person, late in sorted(state.late.items()):
             if f"late:{person}" in met_keys:
-                drafts.append(c.EXPECTATION_MET.draft(kind=c.REPLY, person=person, since=since,
-                                                      dedupe_key=f"attente:tardive:{person}:{since}"))
+                drafts.append(c.EXPECTATION_MET.draft(kind=c.REPLY, person=person, since=late.since,
+                                                      dedupe_key=f"attente:tardive:{person}:{late.since}"))
         for key, x in sorted(state.expectations.items()):
             mark = f"attente:{x.kind}:{x.person}:{x.since}" + (f":{x.ref}" if x.ref is not None else "")
             if key in met_keys:
@@ -106,6 +156,14 @@ class Watch:
         if awake and frame.now - self.missing_at >= p.missing_check_us:
             self.missing_at = frame.now
             drafts += self._missing(state, frame, p)
+        alone = alone_due(state, p)
+        if awake and alone is not None and alone <= frame.now:
+            drafts.append(self._alone(state, frame, p))
+        if awake:
+            pending = {q.person for q in state.pending if q.origin == c.UNANSWERED}
+            for due, person in left_hanging(state, p, here(frame)):
+                if due <= frame.now and person not in pending:
+                    drafts.append(self._hanging(state, frame, person, p))
         thoughts = frame.get(c.THOUGHTS)
         if awake and thoughts and thoughts[0].intensity >= p.dwell_from \
                 and frame.now - state.dwelt_at >= p.dwell_every_us:
@@ -138,11 +196,18 @@ class Watch:
             return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
                                         origin=q.origin, about=about, sensitivity=sens, source=q.source,
                                         dedupe_key=mark)
+        who = _name(frame, q.person) if q.person else "quelqu'un"
+        if q.origin == c.UNANSWERED:
+            # être ignorée se ressent ; ce n'est pas une confidence, mais ça concerne la personne
+            sens = int(Sensitivity.PERSONAL)
+            return c.THOUGHT_BORN.draft(text=Content.of(f"{who} ne m'a pas répondu.", level=sens),
+                                        emotion=q.emotion, intensity=q.intensity, origin=q.origin,
+                                        about=(q.person,) if q.person else (), sensitivity=sens, source=q.source,
+                                        dedupe_key=mark)
         said = ""
         if store is not None:
             rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id=?", (q.source,))
             said = str(rows[0][0]) if rows else ""
-        who = _name(frame, q.person) if q.person else "quelqu'un"
         if q.origin == c.CONCERN:
             text = (f"{who} n'avait pas l'air comme d'habitude : « {_clip(said)} »" if said else
                     f"{who} n'avait pas l'air comme d'habitude.")
@@ -211,8 +276,61 @@ class Watch:
         return out
 
 
+    def _hanging(self, state: AttentionState, frame: Frame, person: str, p: Any) -> Draft[Any]:
+        """Sa question est restée sans réponse : elle le ressent, un peu (sans
+        lui réécrire pour autant)."""
+        ex = state.exchanges[person]
+        sens = int(Sensitivity.PERSONAL)
+        return c.THOUGHT_BORN.draft(
+            text=Content.of(f"{_name(frame, person)} n'a pas répondu à ma question.", level=sens),
+            emotion=Emotion.SAD.value, intensity=round(p.unanswered_intensity * 0.8, 3), origin=c.UNANSWERED,
+            about=(person,), sensitivity=sens, source=None, dedupe_key=f"question:{person}:{ex.last_out}")
+
+    def _alone(self, state: AttentionState, frame: Frame, p: Any) -> Draft[Any]:
+        """Personne ne lui a écrit depuis plus d'un jour : une pensée de solitude,
+        une par jour de silence (le texte dit depuis quand, en jours du calendrier)."""
+        when = when_fr(state.last_contact, frame.now, frame.env.tz_of(frame.root))
+        since = when[len("il y a "):] if when.startswith("il y a ") else when.removeprefix("dans ")
+        sens = int(Sensitivity.ANODYNE)
+        return c.THOUGHT_BORN.draft(text=Content.of(f"Personne ne m'a parlé depuis {since}.", level=sens),
+                                    emotion=Emotion.LONELY.value, intensity=p.alone_intensity, origin=c.ALONE,
+                                    about=(), sensitivity=sens, source=None,
+                                    dedupe_key=f"seule:{state.last_contact}:{max(state.alone_at, state.last_contact)}")
+
+
 def _about(row: tuple[Any, ...] | None) -> tuple[str, ...]:
     return tuple(json.loads(row[1] or "[]")) if row else ()
+
+
+# ── Ce que la personne écrit recoupe ce qui la concerne ───────────────────
+
+
+@ATTENTION.interpret(rt.PERCEPTION_RECEIVED)
+def _touches(state: AttentionState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]:
+    """Ce qu'elle vient d'écrire recoupe-t-il le sujet d'une inquiétude, d'un
+    échange qui a marqué, la concernant ? (des mots qui portent un sujet en
+    commun, son nom mis à part) — « ok », « oui » ne recoupent rien."""
+    d = ev.data
+    if not d.addressed or not is_identifiable(d.handle) or not d.text.text:
+        return []
+    person = frame.get(identity_c.PERSON(d.handle))
+    thoughts = [t for t in frame.get(c.THOUGHTS) if t.origin in RELATIONAL and person in t.about and t.text_ref]
+    store = ports.get("store") if ports else None
+    if not thoughts or store is None:
+        return []
+    texts = store.content([t.text_ref for t in thoughts])
+    said = stems(d.text.text) - stems(_name(frame, person))
+    hit = tuple(t.id for t in thoughts if said & stems(_subject(texts.get(t.text_ref) or "")))
+    return [c.TOUCHED.draft(person=person, thoughts=hit)] if hit else []
+
+
+def _subject(text: str) -> str:
+    """Le sujet d'une pensée née d'un message : ses mots à elle, entre guillemets
+    — pas le gabarit autour (« … n'avait pas l'air comme d'habitude »), qu'un
+    « comme d'habitude » recouperait sans rien dire du sujet."""
+    if "«" not in text or "»" not in text:
+        return ""
+    return text.split("«", 1)[1].rsplit("»", 1)[0]
 
 
 # ── La nuit ───────────────────────────────────────────────────────────────

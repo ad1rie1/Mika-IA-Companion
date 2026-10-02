@@ -18,8 +18,9 @@ from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.guards import floor
 from mika.kernel.state import FrozenDict
-from mika.plugins.email import BUNDLE, EMAIL, POLL_ASKED, READ, EmailState, name_of, operator_name, params_of
+from mika.plugins.email import BUNDLE, EMAIL, POLL_ASKED, READ, EmailState, keeper_name, name_of, params_of
 from mika.ports.llm import LLMRequest, Message
+from mika.ports.preprocess import inert
 from mika.vocab.episodes import Kind
 from mika.vocab.privacy import Sensitivity
 
@@ -97,12 +98,17 @@ class Poll:
                                  max_tokens=200, lane="background", priority=3)
                 resp = await ctx.ask(req)  # un tri raté n'empêche pas de remarquer le mail
                 triage = read_triage(resp.text, guess) if resp is not None else guess
-            who = name_of(m.sender)
-            where = f" (boîte « {labels.get(m.account, m.account)} »)" if several else ""
-            summary = f"Un mail de {who}{where} : « {m.subject} »" + (f" — {triage['resume']}" if triage["resume"] else "")
+            # l'expéditeur a choisi son nom et son objet : rendus inertes (ni titre de section, ni fin d'état
+            # interne), ce résumé devient une pensée et voyage dans ses prompts
+            who = inert(name_of(m.sender), 80)
+            where = f" (boîte « {inert(labels.get(m.account, m.account), 60)} »)" if several else ""
+            summary = f"Un mail de {who}{where} : « {inert(m.subject, 200)} »" + (
+                f" — {inert(triage['resume'], 300)}" if triage["resume"] else "")
+            if getattr(m, "twin", False):
+                summary += " (un autre mail porte le même identifiant : méfiance)"
             answered = ctx.state.sent.get(m.in_reply_to) if m.in_reply_to else None
             if answered is not None:
-                author = operator_name(frame, answered.by) if answered.by and not answered.draft else "toi"
+                author = keeper_name(frame, answered.by) if answered.by and not answered.draft else "toi"
                 summary = f"Réponse à un mail que {author} a envoyé depuis ta boîte — " + summary
             emotion = triage["emotion"]
             drafts.append(c.NOTICED.draft(

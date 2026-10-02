@@ -8,6 +8,7 @@ remplit, et le rappel décide de ce qui revient — et devant qui.
 from __future__ import annotations
 
 import asyncio
+import re
 
 from mika.contracts import memory as memory_c
 from mika.kernel.clock import DAY, US
@@ -170,8 +171,8 @@ def belief(text, who, source=None, **kw):
     return {"texte": text, "personnes": [who], "source": source or who, "origine": "dit", "confiance": 0.7, **kw}
 
 
-def run_windows(tmp_path, windows, turns):
-    script = Extractions(windows)
+def run_windows(tmp_path, windows, turns, *, script=None):
+    script = (script or Extractions)(windows)
     kernel, clock, _, out = build(tmp_path, script)
 
     async def main():
@@ -243,7 +244,8 @@ class Promising(Extractions):
         if req.role == "reply" and "merci pour le lien" in req.messages[-1].content:
             if not any(m.role == "tool" for m in req.messages):
                 self.calls.append(req)
-                pid = int(req.messages[-1].content.split("CE QUE TU LUI AS PROMIS", 1)[1].split("[#")[1].split("]")[0])
+                section = req.messages[-1].content.split("CE QUE TU LUI AS PROMIS", 1)[1]
+                pid = int(re.search(r"n° (\d+)", section).group(1))
                 return LLMResponse("", tool_calls=(ToolCall("t1", "memory_promise_done",
                                                             {"promise": pid, "status": "honored"}),), stop="tool_use")
         return super().__call__(req)
@@ -350,24 +352,78 @@ def test_an_old_trivial_memory_sleeps_but_a_search_finds_it(tmp_path):
         await chat(kernel, "user_2", SIX)
         await asyncio.sleep(600)
         await asyncio.sleep(60 * DAY / US)  # deux mois plus tard
-        await chat(kernel, "user_2", ["tu te souviens du parapluie jaune ?", "cherche un peu le parapluie jaune"])
+        await chat(kernel, "user_2", ["il pleut, je devrais prendre un parapluie", "cherche un peu le parapluie jaune"])
         await kernel.stop()
 
     run_virtual(clock, main)
     replies = [r for r in script.calls if r.role == "reply"]
-    spontaneous = [r for r in replies if "tu te souviens du parapluie" in r.messages[-1].content][0]
-    assert "parapluie jaune au café" not in spontaneous.messages[-1].content, "il dort : il ne revient pas seul"
+    spontaneous = [r for r in replies if "il pleut" in r.messages[-1].content][0]
+    assert "parapluie jaune au café" not in spontaneous.messages[-1].content, "il dort : un indice vague ne le réveille pas"
     tool_results = [m.content for r in replies for m in r.messages if m.role == "tool"]
     assert any("parapluie jaune au café" in t for t in tool_results), "une recherche délibérée le retrouve"
 
 
-def test_remembering_strengthens(tmp_path):
-    rows, kernel, _ = run_windows(tmp_path, [
+def test_a_strong_cue_wakes_a_sleeping_memory(tmp_path):
+    """On n'oublie pas vraiment : deux mois plus tard, « tu te souviens du
+    parapluie jaune ? » le ramène — pas « il pleut »."""
+    script = Extractions([{"souvenirs": [{"texte": "Alice a oublié son parapluie jaune au café", "personnes": ["Alice"],
+                                          "importance": 1, "sensibilite": "anodin"}]}])
+    kernel, clock, _, out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_2", "Alice")
+        await chat(kernel, "user_2", SIX)
+        await asyncio.sleep(600 + 60 * DAY / US)
+        await chat(kernel, "user_2", ["il pleut, je devrais prendre un parapluie",
+                                      "tu te souviens du parapluie jaune ?"])
+        await kernel.stop()
+
+    run_virtual(clock, main)
+    replies = [r.messages[-1].content for r in script.calls if r.role == "reply"]
+    weak = next(m for m in replies if m.endswith("il pleut, je devrais prendre un parapluie"))
+    strong = next(m for m in replies if m.endswith("tu te souviens du parapluie jaune ?"))
+    assert "parapluie jaune au café" not in weak
+    assert "parapluie jaune au café" in strong.split("CE QUI TE REVIENT", 1)[-1]
+
+
+def test_a_landmark_never_falls_asleep():
+    from mika.faculties.memory.faculty import MemoryParams
+    from mika.faculties.memory.salience import Item, dormant
+
+    p = MemoryParams()
+
+    def item(importance):
+        return Item(1, "souvenir", "x", (), 1, importance, None, None, None, None, 0, 0, 0, 0, "active")
+
+    assert dormant(item(0.7), 3 * 365 * DAY, p), "un souvenir important finit par dormir"
+    assert not dormant(item(0.95), 3 * 365 * DAY, p), "un moment marquant, jamais tout à fait"
+
+
+class Replying(Extractions):
+    """Elle reprend les crêpes dans sa réponse, pas le reste."""
+
+    def __call__(self, req):
+        if req.role == "reply" and "crêpes au sarrasin" in req.messages[-1].content.rsplit("---", 1)[-1]:
+            self.calls.append(req)
+            return LLMResponse("Oh oui, tes crêpes au sarrasin, je m'en souviens ! [EMOTION:happy:0.5]")
+        return super().__call__(req)
+
+
+def test_what_she_actually_uses_strengthens_not_what_she_was_shown(tmp_path):
+    rows, kernel, script = run_windows(tmp_path, [
         {"souvenirs": [{"texte": "Alice m'a appris à faire des crêpes au sarrasin", "personnes": ["Alice"],
+                        "importance": 2},
+                       {"texte": "Alice m'a parlé de sa recette de crêpes au chocolat", "personnes": ["Alice"],
                         "importance": 2}]},
-    ], [("user_2", "Alice", SIX), ("user_2", "Alice", ["tu te souviens des crêpes au sarrasin ?"])])
-    souvenir = next(r for r in rows if r[1] == "souvenir")
-    assert souvenir[5] >= 1, "montré dans un prompt : rappelé, donc renforcé"
+    ], [("user_2", "Alice", SIX), ("user_2", "Alice", ["tu te souviens des crêpes au sarrasin ?",
+                                                        "et les crêpes au chocolat ?"])], script=Replying)
+    used = next(r for r in rows if r[2].startswith("Alice m'a appris"))
+    shown_only = next(r for r in rows if r[2].startswith("Alice m'a parlé"))
+    prompts = [r.messages[-1].content for r in script.calls if r.role == "reply"]
+    assert any("crêpes au chocolat" in m.split("CE QUI TE REVIENT", 1)[-1] for m in prompts), "montré, au moins"
+    assert used[5] >= 1, "elle s'en est servie : rappelé, donc renforcé"
+    assert shown_only[5] == 0, "montré mais pas dit : rien ne le renforce"
 
 
 def test_a_question_is_never_consolidated_without_its_answer(tmp_path):

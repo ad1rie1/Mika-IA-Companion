@@ -1,8 +1,8 @@
 """La vie intérieure (M4), par ses intentions.
 
-- elle dort la nuit (vers 23 h – 7 h), plus tard après une longue soirée ; un
-  message la réveille, et elle se rendort ensuite ; jamais d'initiative en
-  dormant ;
+- elle dort la nuit (vers 23 h – 7 h), plus tard après une longue soirée ; le
+  message d'une amie la réveille, et elle se rendort ensuite ; jamais
+  d'initiative en dormant ;
 - ses besoins montent et retombent ; deux heures sans rien, elle s'ennuie ;
 - ce que les événements font ressentir est déclaré par leur propriétaire et
   reçu par l'affect — et le rejeu retombe exactement sur le même état ;
@@ -53,7 +53,7 @@ def test_left_alone_she_sleeps_around_eleven_and_wakes_around_seven():
     onsets = [_hm(at) for kind, at, _ in steps if kind == "fell_asleep"][2:]
     wakes = [_hm(at) for kind, at, _ in steps if kind == "woke"][2:]
     assert all(22.5 <= h <= 23.75 for h in onsets), onsets
-    assert all(6.5 <= h <= 7.5 for h in wakes), wakes
+    assert all(6.25 <= h <= 7.5 for h in wakes), wakes  # vers 7 h, pas à la minute près (une gigue par nuit)
 
 
 def test_a_late_evening_pushes_sleep_and_waking_later():
@@ -110,8 +110,9 @@ def events(kernel, name):
     return [mind.decode(e) for e in mind.store.read() if e.type == name]
 
 
-def test_a_message_at_three_in_the_morning_wakes_her_and_she_goes_back_to_sleep(tmp_path):
+def test_a_friends_message_at_three_in_the_morning_wakes_her_and_she_goes_back_to_sleep(tmp_path):
     async def scenario(kernel, script, out):
+        await befriend(kernel, "user_1", "friend")
         await asyncio.sleep((at_paris(2026, 9, 29, 3, 0) - kernel.mind.clock.now()) / US)
         asleep = kernel.mind.frame().get(body_c.SLEEP)
         p = await kernel.perceive(said("user_1", "tu dors ?"))
@@ -246,20 +247,25 @@ def test_revising_a_belief_leaves_a_thought(tmp_path):
     assert "Lyon" in next(iter(texts.values())) and "Nantes" in next(iter(texts.values()))
 
 
-def test_ignored_she_doubts_a_little_and_a_late_reply_repairs_it(tmp_path):
+@pytest.mark.parametrize("late, counts", [(20 * MINUTE, True), (DAY, False)])
+def test_ignored_she_doubts_a_little_and_a_late_reply_repairs_it_only_if_not_too_late(tmp_path, late, counts):
+    """Ignorée, elle doute un peu ; une réponse tardive compte encore — dans trois
+    fois le délai attendu (vingt minutes à l'écran : une heure). Le « salut » du
+    lendemain n'est plus une réponse à son initiative : il ne répare rien
+    (PSY-14)."""
     async def scenario(kernel, script, out):
         await befriend(kernel, "user_1", "close")
         await connect(kernel, "user_1", "Alice")
         p = await kernel.perceive(said("user_1", "coucou"))
         await p.reply
-        for _ in range(60):  # elle finit par lui écrire d'elle-même…
+        for _ in range(120):  # elle finit par lui écrire d'elle-même…
             await asyncio.sleep(10 * MINUTE / US)
             if any(e.data.kind == "INITIATIVE" for e in events(kernel, rt.UTTERANCE.name)):
                 break
-        await asyncio.sleep(30 * MINUTE / US)  # … et personne ne répond à temps
+        await asyncio.sleep(25 * MINUTE / US)  # … et personne ne répond à temps
         ignored = kernel.mind.frame().get(attention_c.IGNORED)
         low = kernel.mind.frame().get(self_c.ESTEEM)
-        await asyncio.sleep(2 * HOUR / US)
+        await asyncio.sleep((late - 5 * MINUTE) / US)
         p = await kernel.perceive(said("user_1", "oh pardon, je viens de voir ton message !"))
         await p.reply
         await asyncio.sleep(5)
@@ -267,24 +273,39 @@ def test_ignored_she_doubts_a_little_and_a_late_reply_repairs_it(tmp_path):
 
     ignored, low, after, repaired = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0))
     assert ignored >= 1 and low < 0.5
-    assert after == 0 and repaired > low  # une réponse tardive compte encore
+    if counts:
+        assert after == 0 and repaired > low  # une réponse tardive compte encore
+    else:
+        assert after >= 1 and repaired <= low  # trop tard : elle écrit, ce n'est plus une réponse
 
 
 def test_she_murmurs_before_speaking_up_but_not_every_time(tmp_path):
+    """Une amie là, qui lui répond à chaque fois : elle prend souvent la parole,
+    et se murmure parfois quelque chose avant — pas à chaque fois (PSY-21), pas
+    plus d'une fois par heure ; le murmure n'est jamais un message, et ne se
+    montre que sur les écrans de la personne à qui elle allait écrire."""
     async def scenario(kernel, script, out):
         await befriend(kernel, "user_1", "close")
         await connect(kernel, "user_1", "Alice")
-        await asyncio.sleep(10 * HOUR / US)
+        seen = 0
+        for _ in range(2 * 24 * 6):
+            await asyncio.sleep(10 * MINUTE / US)
+            said_ = [e for e in events(kernel, rt.UTTERANCE.name) if e.data.kind == "INITIATIVE"]
+            if len(said_) > seen:
+                seen = len(said_)
+                await asyncio.sleep(5 * MINUTE / US)
+                p = await kernel.perceive(said("user_1", "oui ça va, et toi ?"))
+                await p.reply
         murmurs = [e for e in events(kernel, rt.UTTERANCE.name) if e.data.kind == "MURMUR"]
         initiatives = [e for e in events(kernel, rt.UTTERANCE.name) if e.data.kind == "INITIATIVE"]
-        return murmurs, initiatives, [d for d in out.items if d.persona == "inner"]
+        return murmurs, initiatives, [d for d in out.items if d.persona == "inner" and d.kind == "speech"]
 
     murmurs, initiatives, inner = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 9, 0))
-    assert murmurs and len(murmurs) < len(initiatives) + 1
+    assert murmurs and len(murmurs) < len(initiatives)
     gaps = [b.at - a.at for a, b in zip(murmurs, murmurs[1:], strict=False)]
     assert all(g >= HOUR for g in gaps)
     assert all(not m.data.visible and m.data.target is None for m in murmurs)  # une pensée, pas un message
-    assert inner  # montrée à l'écran, avec sa voix intérieure
+    assert inner and all(d.target == "user_1" for d in inner)  # sur ses écrans à elle, jamais à tout le monde
 
 
 def test_her_story_is_written_by_her_own_voice_from_anodyne_memories(tmp_path):
@@ -312,6 +333,7 @@ def test_her_story_is_written_by_her_own_voice_from_anodyne_memories(tmp_path):
 @pytest.mark.parametrize("hour", [3, 14])
 def test_her_rhythm_section_says_when_a_message_woke_her(tmp_path, hour):
     async def scenario(kernel, script, out):
+        await befriend(kernel, "user_1", "friend")
         target = at_paris(2026, 9, 29, hour, 30)
         await asyncio.sleep((target - kernel.mind.clock.now()) / US)
         p = await kernel.perceive(said("user_1", "hello ?"))

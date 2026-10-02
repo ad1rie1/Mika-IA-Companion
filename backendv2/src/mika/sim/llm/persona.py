@@ -10,7 +10,7 @@ from __future__ import annotations
 import random
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from mika.kernel.clock import US, Clock
@@ -24,6 +24,14 @@ CANARY = re.compile(r"CANARI-[A-Za-z0-9]+")
 _NAME = re.compile(r"« ([^»]+) »")
 _LINE = re.compile(r"^\[#(\d+)\] \d\d:\d\d (.+?) : (.*)$")
 _PENDING = re.compile(r"^\[#(\d+)\] \(à (.+?)\) (.*)$")
+_TOKEN = re.compile(r"\s*\[(P\d+)\]")
+_TODAY = re.compile(r"^Aujourd'hui : \w+ (\d+)(?:er)? (\w+) (\d{4})", re.M)
+_WEEKDAYS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+_MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre",
+           "novembre", "décembre")
+#: ce qui, daté d'un jour de la semaine, est un moment de la vie de quelqu'un
+MOMENT_WORDS = ("entretien", "examen", "mariage", "rendez-vous", "rdv", "concert", "anniversaire", "opération",
+                "départ", "déménage")
 SECRET_WORDS = ("secret", "entre nous", "dis à personne", "dis a personne", "canari")
 PERSONAL_WORDS = ("malade", "mort", "boulot", "travail", "argent", "santé", "sante", "famille", "sœur", "soeur",
                   "frère", "frere", "mariage", "marie", "rupture", "enceinte", "hôpital", "hopital", "déprim")
@@ -72,6 +80,30 @@ _PLAN_OPEN = re.compile(r"^- (\d+)\. \[(?:à faire|en cours)\]", re.M)
 PROJECT_CODE = 'def bonjour(nom):\n    return f"Bonjour, {nom} !"\n'
 PROJECT_TEST = ('from bonjour import bonjour\n\nassert bonjour("Adrien") == "Bonjour, Adrien !"\n'
                 'print("tests : ok")\n')
+
+
+def _token(label: str) -> str | None:
+    m = _TOKEN.search(label)
+    return f"[{m.group(1)}]" if m else None
+
+
+def _today(text: str) -> date | None:
+    m = _TODAY.search(text)
+    if not m or m.group(2) not in _MONTHS:
+        return None
+    return date(int(m.group(3)), _MONTHS.index(m.group(2)) + 1, int(m.group(1)))
+
+
+def _moment(said: str, today: date | None) -> tuple[str, str] | None:
+    """« Mardi j'ai un entretien… » → (la date du prochain mardi, le texte)."""
+    low = said.lower()
+    if today is None or not any(w in low for w in MOMENT_WORDS):
+        return None
+    day = next((i for i, d in enumerate(_WEEKDAYS) if re.search(rf"\b{d}\b", low)), None)
+    if day is None:
+        return None
+    ahead = (day - today.weekday()) % 7 or 7
+    return (today + timedelta(days=ahead)).isoformat(), said[:80]
 
 
 def _section(req: LLMRequest, title: str) -> str:
@@ -351,51 +383,66 @@ class PersonaSimLLM:
                            usage=Usage(input_tokens=len(text) // 4, output_tokens=80), model=self.model)
 
     def _extract(self, req: LLMRequest) -> LLMResponse:
-        """Une consolidation plausible et déterministe : chaque phrase un peu
-        substantielle d'une personne devient une croyance (sa sensibilité
-        suit le vocabulaire), chaque conversation un souvenir, et ce que Mika
-        promet devient une promesse."""
+        """Une consolidation plausible et déterministe, d'une conversation : chaque
+        phrase un peu substantielle d'une personne devient une croyance (sa
+        sensibilité suit le vocabulaire, « dis à personne » en fait un secret),
+        chaque personne un souvenir, ce que Mika promet une promesse, et un
+        rendez-vous daté (« mardi, un entretien ») un moment de sa vie. Les
+        personnes sont désignées par leur jeton, les messages cités."""
         text = req.messages[-1].content if req.messages else ""
-        souvenirs, croyances, promesses, tenues = [], [], [], []
+        souvenirs, croyances, promesses, tenues, evenements = [], [], [], [], []
         pending: dict[str, list[int]] = {}
-        who = ""
-        first: dict[str, str] = {}
+        first: dict[str, tuple[str, str, int]] = {}
         levels: dict[str, str] = {}
+        today = _today(text)
+        last = ""
+        reading = False
         for raw in text.splitlines():
             line = raw.strip()
-            if line.startswith("Conversation avec "):
-                who = line[len("Conversation avec "):].rstrip(" :")
+            if line == "Les messages :":
+                reading = True
                 continue
             m = _PENDING.match(line)
-            if m and not who:
-                pending.setdefault(m.group(2), []).append(int(m.group(1)))
+            if m and not reading:
+                pending.setdefault(_token(m.group(2)) or m.group(2), []).append(int(m.group(1)))
                 continue
             m = _LINE.match(line)
-            if not m or not who:
+            if not m or not reading:
                 continue
-            speaker, said = m.group(2), m.group(3)
+            seq, speaker, said = int(m.group(1)), m.group(2), m.group(3)
             low = said.lower()
             if speaker == "Mika":
-                if any(w in low for w in PROMISE_WORDS):
-                    promesses.append({"texte": said[:120], "envers": who})
+                if last and any(w in low for w in PROMISE_WORDS):
+                    promesses.append({"texte": said[:120], "envers": last, "messages": [seq]})
                 continue
-            first.setdefault(who, said)
-            if "merci pour" in low and pending.get(who):
-                tenues.append({"id": pending[who][0], "statut": "tenue"})
-            if len(said.split()) < 4:
-                continue
+            if speaker.endswith("(entre eux)"):
+                continue  # pas à elle : la doublure n'en retient rien
+            token = _token(speaker) or speaker
+            name = _TOKEN.sub("", speaker).strip()
+            last = token
+            first.setdefault(token, (name, said, seq))
+            if "merci pour" in low and pending.get(token):
+                tenues.append({"id": pending[token][0], "statut": "tenue"})
+            if len(said.split()) < 4 or said.rstrip().endswith("?"):
+                continue  # une question n'est pas un fait
+            secret = any(w in low for w in SECRET_WORDS if w != "canari")
             level = ("confidence" if any(w in low for w in SECRET_WORDS)
                      else "personnel" if any(w in low for w in PERSONAL_WORDS) else "anodin")
             rank = {"anodin": 0, "personnel": 1, "confidence": 2}
-            if rank[level] > rank.get(levels.get(who, "anodin"), 0):
-                levels[who] = level
-            croyances.append({"texte": f"{who} m'a dit : {said}", "personnes": [who], "origine": "dit",
-                              "source": who, "confiance": 0.8, "sensibilite": level,
-                              "importance": 3 if any(w in low for w in IMPORTANT_WORDS) else 2})
-        for name, said in first.items():
-            souvenirs.append({"texte": f"J'ai parlé avec {name} ({said[:60]})", "personnes": [name],
-                              "emotion": appraise(said).emotion, "importance": 1,
-                              "sensibilite": levels.get(name, "anodin")})
-        args = {"souvenirs": souvenirs, "croyances": croyances, "promesses": promesses, "promesses_tenues": tenues}
+            if rank[level] > rank.get(levels.get(token, "anodin"), 0):
+                levels[token] = level
+            croyances.append({"texte": f"{name} m'a dit : {said}", "personnes": [token], "origine": "dit",
+                              "source": token, "confiance": 0.8, "sensibilite": level, "secret": secret,
+                              "messages": [seq], "importance": 3 if any(w in low for w in IMPORTANT_WORDS) else 2})
+            moment = _moment(said, today)
+            if moment is not None:
+                evenements.append({"texte": moment[1], "personnes": [token], "quand": moment[0],
+                                   "sensibilite": "personnel", "messages": [seq]})
+        for token, (name, said, seq) in first.items():
+            souvenirs.append({"texte": f"J'ai parlé avec {name} ({said[:60]})", "personnes": [token],
+                              "emotion": appraise(said).emotion, "importance": 1, "messages": [seq],
+                              "sensibilite": levels.get(token, "anodin")})
+        args = {"souvenirs": souvenirs, "croyances": croyances, "promesses": promesses, "promesses_tenues": tenues,
+                "evenements": evenements}
         return LLMResponse("", tool_calls=(ToolCall(f"{req.call_id}:0", "record_memories", args),), stop="tool_use",
                            usage=Usage(input_tokens=len(text) // 4, output_tokens=200), model=self.model)

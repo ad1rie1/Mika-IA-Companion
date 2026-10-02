@@ -185,6 +185,17 @@ def bearer(scope: Mapping[str, Any]) -> str:
     return ""
 
 
+#: les en-têtes qu'un mandataire ajoute : une requête qui en porte vient d'ailleurs, même relayée en local
+PROXY_HEADERS = frozenset({b"x-forwarded-for", b"forwarded", b"x-real-ip", b"x-forwarded-host",
+                           b"x-forwarded-proto", b"via"})
+
+
+def proxied(scope: Mapping[str, Any]) -> bool:
+    return any(key.lower() in PROXY_HEADERS for key, _value in scope.get("headers") or ())
+
+
 def loopback(scope: Mapping[str, Any]) -> bool:
+    """La machine elle-même, et pas au travers d'un mandataire : derrière un mandataire
+    local, chaque requête venue d'Internet arrive de 127.0.0.1 — ses en-têtes la trahissent."""
     client = scope.get("client")
-    return bool(client) and client[0] in ("127.0.0.1", "::1")
+    return bool(client) and client[0] in ("127.0.0.1", "::1") and not proxied(scope)

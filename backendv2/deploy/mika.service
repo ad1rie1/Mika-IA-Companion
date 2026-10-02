@@ -14,6 +14,11 @@ WorkingDirectory=/opt/mika/backendv2
 # MIKA_SECRET_KEY (facultatif), HF_HOME…
 EnvironmentFile=-/etc/mika/mika.env
 Environment=HF_HOME=/var/lib/mika/cache/huggingface
+# les dossiers d'appel de Claude Code (prompts privés, jetons de session) : en mémoire, privés, jamais sauvegardés
+RuntimeDirectory=mika
+RuntimeDirectoryMode=0700
+Environment=XDG_RUNTIME_DIR=/run/mika
+# derrière un mandataire TLS : ajouter --origin https://… --behind-proxy (deploy/README.md)
 ExecStart=/opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika serve --host 127.0.0.1 --port 8001
 Restart=on-failure
 RestartSec=5

@@ -3,9 +3,18 @@
 Sécurité, dans l'ordre où elle mord : CORS avec identifiants pour les seules
 origines déclarées (y compris sur les erreurs) ; jeton CSRF à double
 soumission (cookie ``csrftoken`` lisible, en-tête ``X-CSRFToken``) sur tout
-POST ; session opaque en cookie ``HttpOnly`` ; WebSocket refusé à une origine
-inconnue, et accepté **puis** fermé en 4401 sans session quand
-l'authentification est exigée (c'est ce que le client sait lire).
+POST — et sur la déconnexion, quelle que soit sa méthode ; session opaque en
+cookie ``HttpOnly`` ; WebSocket refusé à une origine inconnue, et accepté
+**puis** fermé en 4401 sans session quand l'authentification est exigée (c'est
+ce que le client sait lire) — et dès que sa session est révoquée.
+
+Connexion : un seul scrypt par essai, compte connu ou non, et hors de la
+boucle ; étranglement par adresse IP **et** par (IP, nom), mémoire purgée.
+
+Une connexion WebSocket lit ses trames sans jamais attendre un message en
+cours de traitement : le chat (et le prétraitement de ses pièces jointes)
+avance dans une tâche à part, un message après l'autre ; pings, accusés et
+rattrapages restent libres.
 """
 
 from __future__ import annotations
@@ -18,7 +27,7 @@ import logging
 import secrets
 import time
 from collections import defaultdict, deque
-from collections.abc import Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -32,7 +41,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mika.adapters.web import protocol
 from mika.adapters.web.accounts import Account, Accounts, password_problems
-from mika.adapters.web.hub import Conn, Hub
+from mika.adapters.web.hub import WS_UNAUTHORIZED, Conn, Hub
 from mika.contracts.entry import MindPort
 from mika.contracts.presence import Connected
 from mika.contracts.runtime import AttachmentMeta, PerceptionReceived
@@ -44,35 +53,67 @@ log = logging.getLogger("mika.web")
 
 SESSION_COOKIE = "sessionid"
 CSRF_COOKIE = "csrftoken"
-WS_UNAUTHORIZED = 4401
+#: les origines du frontend en développement (Vite) ; ``--origin`` les remplace
+DEV_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:4173", "http://127.0.0.1:4173")
+#: au-delà, des messages attendent déjà leur tour sur cette connexion : refusé (« saturée »)
+MAX_QUEUED_CHATS = 8
+#: états des contrôles publics qui dégradent la santé
+_DEGRADING = frozenset({"degraded", "ko"})
 
 
 @dataclass(slots=True)
 class WebConfig:
     auth_required: bool = True
-    origins: Sequence[str] = ("http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:4173",
-                              "http://127.0.0.1:4173")
+    origins: Sequence[str] = DEV_ORIGINS
     cookie_secure: bool = False
+    #: derrière un mandataire TLS (le serveur lit l'adresse du client dans ses en-têtes ; le MCP local est fermé)
+    behind_proxy: bool = False
+    #: échecs de connexion tolérés par (IP, nom) dans la fenêtre
     login_failures: int = 5
+    #: échecs de connexion tolérés par IP, tous noms confondus, dans la fenêtre
+    login_ip_failures: int = 20
     login_window_s: float = 60.0
     extra: dict[str, Any] = field(default_factory=dict)
 
 
 class LoginThrottle:
-    def __init__(self, n: int, window: float) -> None:
+    """Fenêtres glissantes d'échecs par clé ; les clés vides sont oubliées, et la
+    mémoire est bornée (un balayage d'adresses ne la fait pas grossir sans fin)."""
+
+    MAX_KEYS = 10_000
+
+    def __init__(self, n: int, window: float, *, monotonic: Callable[[], float] = time.monotonic) -> None:
         self.n = n
         self.window = window
-        self._fails: dict[str, deque[float]] = defaultdict(deque)
+        self._now = monotonic
+        self._fails: dict[str, deque[float]] = {}
 
-    def blocked(self, key: str) -> bool:
-        q = self._fails[key]
-        now = time.monotonic()
+    def _prune(self, key: str, now: float) -> deque[float] | None:
+        q = self._fails.get(key)
+        if q is None:
+            return None
         while q and now - q[0] >= self.window:
             q.popleft()
-        return len(q) >= self.n
+        if not q:
+            del self._fails[key]
+            return None
+        return q
+
+    def blocked(self, key: str) -> bool:
+        q = self._prune(key, self._now())
+        return q is not None and len(q) >= self.n
 
     def fail(self, key: str) -> None:
-        self._fails[key].append(time.monotonic())
+        now = self._now()
+        if len(self._fails) >= self.MAX_KEYS:
+            for k in list(self._fails):
+                self._prune(k, now)
+            while len(self._fails) >= self.MAX_KEYS:  # encore plein : les plus anciennes clés partent
+                del self._fails[next(iter(self._fails))]
+        self._fails.setdefault(key, deque()).append(now)
+
+    def __len__(self) -> int:
+        return len(self._fails)
 
 
 def _whoami(account: Account | None, cfg: WebConfig, accounts: Accounts) -> dict[str, Any]:
@@ -88,9 +129,11 @@ def _whoami(account: Account | None, cfg: WebConfig, accounts: Accounts) -> dict
 def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | None = None,
                lifespan: Any = None, extra_routes: Sequence[Any] = (),
                preprocess: Preprocessor | None = None, camera: Any = None,
-               sensor_token: Any = None) -> Starlette:
+               sensor_token: Any = None, health_extra: Callable[[], Mapping[str, str]] | None = None) -> Starlette:
     cfg = cfg or WebConfig()
-    throttle = LoginThrottle(cfg.login_failures, cfg.login_window_s)
+    by_name = LoginThrottle(cfg.login_failures, cfg.login_window_s)
+    by_ip = LoginThrottle(cfg.login_ip_failures, cfg.login_window_s)
+    accounts.on_revoke.append(lambda account_id: hub.revoke(account=account_id))
 
     def account_of(request: Request) -> Account | None:
         return accounts.session(request.cookies.get(SESSION_COOKIE))
@@ -131,12 +174,14 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             return csrf_refused()
         data = await body(request)
         username = str(data.get("username") or "").strip()
-        key = f"{request.client.host if request.client else '?'}:{username.lower()}"
-        if throttle.blocked(key):
+        ip = request.client.host if request.client else "?"
+        keys = (f"ip:{ip}", f"ip:{ip}:nom:{username.lower()}")
+        if by_ip.blocked(keys[0]) or by_name.blocked(keys[1]):
             return JSONResponse({"error": "Trop de tentatives."}, status_code=429, headers={"Retry-After": "60"})
-        account = accounts.authenticate(username, str(data.get("password") or ""))
+        account = await accounts.verify(username, str(data.get("password") or ""))
         if account is None:
-            throttle.fail(key)
+            by_ip.fail(keys[0])
+            by_name.fail(keys[1])
             return JSONResponse({"error": "Identifiants invalides."}, status_code=401)
         return await logged_in(request, account)
 
@@ -159,17 +204,33 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         return await logged_in(request, account)
 
     async def logout(request: Request) -> Response:
+        """Le client l'appelle en GET avec l'en-tête CSRF (contrat inchangé) : la méthode
+        reste permise, le jeton devient exigé — une image ou un lien d'une autre page
+        ne déconnecte plus personne."""
+        if not csrf_ok(request):
+            return csrf_refused()
         key = request.cookies.get(SESSION_COOKIE)
         if key:
             await accounts.close_session(key)
+            await hub.revoke(session=key)  # ses WebSockets ouvertes ne valent plus
         response = JSONResponse({"ok": True})
         response.delete_cookie(SESSION_COOKIE)
         return response
 
     async def health(request: Request) -> Response:
         """Une sonde : 200 quand elle peut répondre (même moins bien : ``degraded``),
-        503 en démarrage ou en arrêt."""
-        report = port.health()
+        503 en démarrage ou en arrêt. Les canaux (Telegram) y disent leur état."""
+        report = dict(port.health())
+        if health_extra is not None and report.get("ready"):
+            try:
+                extra = dict(health_extra())
+            except Exception as exc:  # une sonde de canal illisible ne casse pas /health
+                log.debug("santé des canaux : %r", exc)
+                extra = {}
+            if extra:
+                report["checks"] = {**dict(report.get("checks") or {}), **extra}
+                if report.get("status") == "ok" and _DEGRADING & set(extra.values()):
+                    report["status"] = "degraded"
         return JSONResponse(report, status_code=200 if report["ready"] else 503,
                             headers={"Cache-Control": "no-store"})
 
@@ -237,12 +298,14 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         if not origin or origin not in cfg.origins:
             await websocket.close(code=1008)
             return
-        account = accounts.session(websocket.cookies.get(SESSION_COOKIE))
+        key = websocket.cookies.get(SESSION_COOKIE)
+        account = accounts.session(key)
         await websocket.accept()
         if account is None and cfg.auth_required:
             await websocket.close(code=WS_UNAUTHORIZED)
             return
-        session = _Session(websocket, port, hub, account, preprocess)
+        session = _Session(websocket, port, hub, account, preprocess, accounts=accounts,
+                           session_key=key if account is not None else None)
         await session.run()
 
     async def camera_ws(websocket: WebSocket) -> None:
@@ -294,23 +357,36 @@ class _Session:
     """Une connexion WebSocket : son adresse, ses limites, son dialogue."""
 
     def __init__(self, websocket: WebSocket, port: MindPort, hub: Hub, account: Account | None,
-                 preprocess: Preprocessor | None = None) -> None:
+                 preprocess: Preprocessor | None = None, *, accounts: Accounts | None = None,
+                 session_key: str | None = None) -> None:
         self.ws = websocket
         self.port = port
         self.preprocess = preprocess
         self.hub = hub
         self.account = account
+        self.accounts = accounts
+        self.session_key = session_key
         self._lock = asyncio.Lock()
+        #: un message à la fois, dans l'ordre (asyncio.Lock réveille dans l'ordre d'arrivée)
+        self._chat_lock = asyncio.Lock()
+        self._chats: set[asyncio.Future[Any]] = set()
         self._watchers: set[asyncio.Future[Any]] = set()
-        kw: dict[str, Any] = {}
+        self._closed = False
+        kw: dict[str, Any] = {"session": session_key, "close": self.close}
         if account is not None:
-            kw = {"handle": account.handle, "authenticated": True, "account": account.id,
-                  "operator": account.operator, "display_name": account.display_name}
+            kw |= {"handle": account.handle, "authenticated": True, "account": account.id,
+                   "operator": account.operator, "display_name": account.display_name}
         self.conn: Conn = hub.attach(self.send, **kw)
 
     async def send(self, frame: dict[str, Any]) -> None:
         async with self._lock:
             await self.ws.send_json(frame)
+
+    async def close(self, code: int) -> None:
+        """Fermée par le serveur (session révoquée) : le client lit 4401 et ne réessaie pas."""
+        self._closed = True
+        async with self._lock:
+            await self.ws.close(code=code)
 
     async def announce(self) -> None:
         c = self.conn
@@ -326,11 +402,11 @@ class _Session:
         try:
             if self.account is not None:
                 await self.announce()
-            while True:
+            while not self._closed:
                 raw = await self.ws.receive_text()
                 await self.dispatch(raw)
-        except WebSocketDisconnect:
-            pass
+        except (WebSocketDisconnect, RuntimeError):
+            pass  # RuntimeError : la socket fermée par le serveur (révocation) pendant une lecture
         finally:
             self.hub.detach(self.conn)
             if self.conn.announced:
@@ -353,7 +429,31 @@ class _Session:
             if self.conn.control.allow():
                 await self.sync(frame)
         elif kind == "chat":
-            await self.chat(frame)
+            self.enqueue_chat(frame)
+
+    def enqueue_chat(self, frame: dict[str, Any]) -> None:
+        """Le chat avance dans sa propre tâche : la lecture des trames continue pendant
+        qu'une pièce jointe se décrit (le client, sans pong, se reconnecterait)."""
+        task = asyncio.ensure_future(self._chat_in_turn(frame))
+        self._chats.add(task)
+        task.add_done_callback(self._chats.discard)
+
+    async def _chat_in_turn(self, frame: dict[str, Any]) -> None:
+        cid = str(frame.get("client_msg_id") or "")[: protocol.MAX_CLIENT_MSG_ID]
+        if len(self._chats) > MAX_QUEUED_CHATS:
+            await self._safe_send(protocol.ack(cid, "overloaded"))
+            return
+        async with self._chat_lock:
+            try:
+                await self.chat(frame)
+            except (WebSocketDisconnect, RuntimeError, OSError) as exc:  # la connexion est partie en route
+                log.debug("message non accusé (%s) : %r", self.conn.id, exc)
+
+    async def _safe_send(self, frame: dict[str, Any]) -> None:
+        try:
+            await self.send(frame)
+        except (WebSocketDisconnect, RuntimeError, OSError) as exc:
+            log.debug("envoi impossible sur %s : %r", self.conn.id, exc)
 
     async def identify(self, frame: dict[str, Any]) -> None:
         c = self.conn
@@ -365,7 +465,8 @@ class _Session:
             if not c.announced:
                 await self.announce()
             return
-        if wanted != c.handle or not c.announced:
+        if wanted != c.handle or not c.announced or name != c.display_name:
+            # une autre adresse, ou un nouveau nom (le client renvoie identify quand on le change)
             if c.announced:
                 await self.port.disconnected(c.handle, c.id)
                 c.announced = False
@@ -387,9 +488,19 @@ class _Session:
             rows, truncated = self.port.recent(c.handle, protocol.HISTORY_INITIAL), False
         await self.send(protocol.history("catchup", rows, after_id=after_id, truncated=truncated))
 
+    def _session_valid(self) -> bool:
+        """Revérifiée à chaque message : une session effacée ailleurs (un autre processus,
+        une expiration) ne parle plus."""
+        if self.session_key is None or self.accounts is None:
+            return True
+        return self.accounts.session(self.session_key) is not None
+
     async def chat(self, frame: dict[str, Any]) -> None:
         c = self.conn
         cid = str(frame.get("client_msg_id") or "")[: protocol.MAX_CLIENT_MSG_ID]
+        if not self._session_valid():
+            await self.hub.revoke(session=self.session_key)
+            return
         if not c.chat.allow():
             await self.send(protocol.ack(cid, "rate_limited"))
             return
@@ -404,6 +515,7 @@ class _Session:
         if not text and not kept:
             await self.send(protocol.ack(cid, "attachments_rejected" if rejected else "empty", rejected))
             return
+        self.hub.note_asked(c, cid)
         seen = await self._perceive(kept)
         body = "\n".join(x for x in [text, render(seen)] if x).strip()
         perception = PerceptionReceived(
@@ -428,7 +540,8 @@ class _Session:
         return await self.preprocess.perceive([Upload(a.name, a.mime, a.data) for a in kept])
 
     async def _watch(self, admission: Any, cid: str | None) -> None:
-        """Si la réponse échoue, la personne l'apprend (sinon elle attend pour rien)."""
+        """Si la réponse échoue ou qu'elle choisit de se taire, la personne l'apprend
+        (sinon « Mika écrit… » tourne pour rien)."""
         try:
             report = await admission.reply
         except Exception as exc:  # l'épisode a levé : même effet qu'un échec
@@ -437,7 +550,5 @@ class _Session:
         else:
             detail = str(getattr(report, "detail", ""))
         outcome = str(getattr(report, "outcome", "failed")) if report is not None else "failed"
-        if outcome in protocol.FAILED_OUTCOMES:
-            frame = protocol.fallback_speech(self.conn.handle, detail, user_message_id=admission.seq,
-                                             client_msg_id=cid)
-            await self.hub.send_to(self.conn.handle, frame)
+        if outcome in protocol.FAILED_OUTCOMES or outcome == protocol.ABSTAINED_OUTCOME:
+            await self.hub.settle_reply(self.conn.handle, admission.seq, cid, outcome, detail)

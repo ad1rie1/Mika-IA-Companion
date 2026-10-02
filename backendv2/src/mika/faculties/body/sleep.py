@@ -5,9 +5,11 @@ pendant le sommeil, elle retombe vers 0 (``tau_sleep``). Forme close à tout
 instant depuis la dernière transition.
 
 **Seuils** : haut (s'endormir) et bas (se réveiller), modulés par un cosinus
-circadien dont le maximum est l'après-midi (décalé par le chronotype). Avec
-les valeurs par défaut, sans personne pour la tenir éveillée, elle s'endort
-vers 23 h et se réveille vers 7 h.
+circadien dont le maximum est l'après-midi (décalé par le chronotype), et
+par une petite **gigue** tirée de la date (rejouable) : on ne s'endort pas à
+la minute près chaque soir. Avec les valeurs par défaut, sans personne pour
+la tenir éveillée, elle s'endort vers 23 h et se réveille vers 7 h, l'un et
+l'autre à une demi-heure près (un écart type d'environ 20 min).
 
 **Croisements** : trouvés exactement (balayage par pas de 5 min puis
 bissection à la seconde), jamais à la cadence d'une boucle. On ne s'endort
@@ -21,7 +23,8 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, replace
-from datetime import timedelta
+from datetime import date, datetime, timedelta
+from functools import lru_cache
 from typing import Annotated
 from zoneinfo import ZoneInfo
 
@@ -29,6 +32,7 @@ from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import body as c
 from mika.kernel.clock import HOUR, MINUTE, US, local
+from mika.kernel.codec import h64
 from mika.kernel.forms import Knob
 
 SECOND = US
@@ -60,6 +64,11 @@ class SleepParams(BaseModel):
         label="Heure du pic des seuils", lo=0, hi=24,
         help="L'heure locale (avant décalage du rythme) où les seuils culminent : c'est l'après-midi qu'il lui "
              "est le plus dur de s'endormir.")] = 16.0
+    jitter: Annotated[float, Knob(
+        label="Variation d'une nuit à l'autre", lo=0, hi=0.1, step=0.005,
+        help="Les deux seuils bougent chaque nuit d'au plus autant (un tirage dérivé de la date : le rejeu "
+             "retombe sur les mêmes nuits). 0,02 : elle s'endort et se réveille à une demi-heure près ; "
+             "0 : à la minute près, chaque soir.")] = 0.02
     #: pas d'endormissement moins d'un quart d'heure après la dernière interaction
     settle_us: Annotated[int, Knob(
         label="Calme avant de s'endormir", lo=0, hi=2 * HOUR,
@@ -106,15 +115,53 @@ def pressure(s: Sleep, t: int, p: SleepParams, tz: ZoneInfo) -> float:
     return 1.0 - (1.0 - s0) * math.exp(-dt_h / p.tau_wake_h)
 
 
-def _circadian(t: int, p: SleepParams, tz: ZoneInfo, shift_minutes: int) -> float:
-    dt = local(t, tz)
-    hour = dt.hour + dt.minute / 60 + dt.second / 3600
-    return math.cos(2 * math.pi * (hour - p.acrophase_h - shift_minutes / 60) / 24)
+def _hour(dt: datetime) -> float:
+    return dt.hour + dt.minute / 60 + dt.second / 3600
+
+
+def _circadian(dt: datetime, p: SleepParams, shift_minutes: int) -> float:
+    return math.cos(2 * math.pi * (_hour(dt) - p.acrophase_h - shift_minutes / 60) / 24)
+
+
+@lru_cache(maxsize=512)
+def _draw(kind: str, day: date) -> float:
+    """Un tirage dans [−1, 1] pour la nuit de ``day`` (dérivé de la date)."""
+    return h64("nuit", kind, day.isoformat()) / 2**63 - 1.0
+
+
+def nightly(dt: datetime, kind: str, amplitude: float) -> float:
+    """La gigue d'un seuil : un tirage par jour, posé à minuit et interpolé
+    jusqu'au minuit suivant — une nuit diffère de la veille, sans jamais de
+    saut (un saut ferait une transition à heure ronde)."""
+    if amplitude <= 0:
+        return 0.0
+    day = dt.date()
+    a, b = _draw(kind, day), _draw(kind, day + timedelta(days=1))
+    return amplitude * (a + (b - a) * _hour(dt) / 24)
 
 
 def thresholds(t: int, p: SleepParams, tz: ZoneInfo, shift_minutes: int = 0) -> tuple[float, float]:
-    c_ = _circadian(t, p, tz, shift_minutes)
-    return p.upper + p.amplitude * c_, p.lower + p.amplitude * c_
+    dt = local(t, tz)
+    c_ = _circadian(dt, p, shift_minutes)
+    return (p.upper + p.amplitude * c_ + nightly(dt, "endormissement", p.jitter),
+            p.lower + p.amplitude * c_ + nightly(dt, "réveil", p.jitter))
+
+
+def hours_to_sleep(s: Sleep, t: int, p: SleepParams, tz: ZoneInfo, shift_minutes: int = 0) -> float:
+    """Éveillée : dans combien d'heures elle s'endormirait si rien ne la tenait
+    éveillée — négatif : elle a passé son seuil depuis autant d'heures. Une
+    estimation locale (l'écart au seuil ÷ la vitesse à laquelle il se referme),
+    juste à quelques minutes près, ce qui suffit à un ressenti."""
+    up, _ = thresholds(t, p, tz, shift_minutes)
+    value = pressure(s, t, p, tz)
+    margin = up - value
+    rise = (1.0 - value) / p.tau_wake_h
+    phase = 2 * math.pi * (_hour(local(t, tz)) - p.acrophase_h - shift_minutes / 60) / 24
+    slope = -p.amplitude * (2 * math.pi / 24) * math.sin(phase)
+    closing = rise - slope
+    if closing <= 0.005:
+        return math.inf if margin > 0 else margin / 0.03
+    return margin / closing
 
 
 def _gap(s: Sleep, t: int, p: SleepParams, tz: ZoneInfo, shift: int) -> float:

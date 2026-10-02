@@ -15,8 +15,13 @@ de modèle de langage :
 - **les heures où elle répond** : chaque initiative restée sans réponse, ou
   comblée, à une heure donnée, rend la suivante à cette heure-là plus ou moins
   probable ;
-- **prendre de ses nouvelles** : une amie qui n'avait pas l'air bien et qui
-  n'a plus rien dit depuis, quelques heures plus tard, elle lui écrit.
+- **prendre de ses nouvelles** : une amie qui n'avait pas l'air bien (ou dont
+  la réponse l'a elle-même attristée ou inquiétée) et qui n'a plus rien dit
+  depuis, quelques heures plus tard, elle lui écrit ; un « ok » ne la rassure
+  pas, un vrai message plus léger, si ;
+- **la contagion** : le ton du moment de quelqu'un la colore un peu, selon
+  leur proximité — elle s'allège avec quelqu'un de joyeux, se tend avec
+  quelqu'un de stressé.
 
 Chaque lecture d'un message est un jugement enregistré (``others.read``) :
 le rejeu retombe exactement sur le même modèle.
@@ -60,6 +65,16 @@ class ToneRead(Payload):
     #: nettement plus sombre que d'habitude, chez quelqu'un qui compte : elle s'inquiète
     concern: bool = False
     public: bool = False
+    #: un événement grave (un deuil, une maladie, une rupture, des mots de détresse) : il inquiète
+    #: venant d'une amie, quel que soit son ton habituel
+    grave: bool = False
+    #: ce message la rassure sur une inquiétude (assez long, et revenu à son ton habituel) ;
+    #: ``None`` : lecture d'avant ce jugement (n'importe quel message pas lourd rassurait)
+    relief: bool | None = None
+    #: la contagion de son ton du moment (proportionnée à leur proximité, plafonnée par fenêtre de
+    #: temps) : l'émotion et son intensité — jamais un mot du message
+    contagion: float = 0.0
+    contagion_emotion: str = ""
 
 
 READ = event_type("others.read", OWNER, ToneRead, public=True, subjects=("person",))

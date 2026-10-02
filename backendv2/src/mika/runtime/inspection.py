@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mika.kernel.faculty import ActionSpec, InspectSpec, SubjectSpec, VitalSpec
-from mika.kernel.inspect import Block, Found, Head, InspectContext, Note, Vital, read_params
+from mika.kernel.inspect import Block, Found, Head, InspectContext, Note, Vital, describe_error, read_params
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.effects import with_content
 
@@ -101,7 +101,7 @@ class Inspection:
             out = Failed(RuntimeError("vue asynchrone : à exécuter par arun"))
         self._time(f"{spec.owner}/{spec.name}", clock.now() - t0, isinstance(out, Failed))
         if isinstance(out, Failed):
-            return [Note(f"Cette vue a échoué : {out.error!r}"[:500], tone="danger")]
+            return [Note(f"Cette vue a échoué : {describe_error(out.error)}"[:500], tone="danger")]
         return [Note(n, tone="warn") for n in notes] + list(out or [])
 
     async def arun(self, spec: InspectSpec, params: Mapping[str, str] | None = None,
@@ -119,7 +119,7 @@ class Inspection:
             out = await acall(lambda: pending, label=f"vue {spec.owner}/{spec.name}")
         self._time(f"{spec.owner}/{spec.name}", clock.now() - t0, isinstance(out, Failed))
         if isinstance(out, Failed):
-            return [Note(f"Cette vue a échoué : {out.error!r}"[:500], tone="danger")]
+            return [Note(f"Cette vue a échoué : {describe_error(out.error)}"[:500], tone="danger")]
         return [Note(n, tone="warn") for n in notes] + list(out or [])
 
     def head(self, kind: str, key: str, when: Callable[[int], str] = str) -> Head | Note | None:
@@ -131,7 +131,7 @@ class Inspection:
         out: Any = call(spec.head, frame.state(spec.owner), frame, self.context(None, when, subject=key), key,
                         label=f"fiche {kind}")
         if isinstance(out, Failed):
-            return Note(f"L'en-tête de cette fiche a échoué : {out.error!r}"[:500], tone="danger")
+            return Note(f"L'en-tête de cette fiche a échoué : {describe_error(out.error)}"[:500], tone="danger")
         return out
 
     def search(self, kind: str, text: str, limit: int = 20, *, offset: int = 0) -> list[Found]:

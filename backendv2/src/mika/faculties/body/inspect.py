@@ -9,6 +9,7 @@ minutes (``body.energie``, ``body.pression``).
 from __future__ import annotations
 
 from mika.contracts import body as c
+from mika.contracts import identity as identity_c
 from mika.faculties.body import BODY, FOG, BodyParams, BodyState, energy, gate, night, params, rhythm
 from mika.faculties.body import sleep as sl
 from mika.kernel.clock import DAY
@@ -111,16 +112,41 @@ def _pressure_series(s: BodyState, frame: Frame) -> float:
 # ── Rythme ────────────────────────────────────────────────────────────────
 
 
-def _transitions(ctx: InspectContext) -> tuple[tuple[Entry, ...], Pager]:
-    """Une page de ses transitions (``?avant=`` : la suite, plus ancienne)."""
-    found = ctx.events([c.FELL_ASLEEP, c.WOKE], TRANSITIONS_PAGE + 1, before=ctx.int_param("avant", 0) or None)
+ROUSED_FR = {c.CLOSE_ONE: "quelqu'un de proche", c.URGENT: "quelque chose d'urgent"}
+
+
+def _who(frame: Frame, person: str, handle: str) -> str:
+    if person:
+        name = frame.get(identity_c.IDENTITY(person)).name
+        if name:
+            return f"« {name} »"
+    return "quelqu'un"
+
+
+def _transitions(ctx: InspectContext, frame: Frame) -> tuple[tuple[Entry, ...], Pager]:
+    """Une page de ses transitions (``?avant=`` : la suite, plus ancienne) —
+    les réveils par un message compris, et les messages qui ont attendu son
+    réveil."""
+    found = ctx.events([c.FELL_ASLEEP, c.WOKE, c.ROUSED, c.WAITED], TRANSITIONS_PAGE + 1,
+                       before=ctx.int_param("avant", 0) or None)
     page = found[:TRANSITIONS_PAGE]
     out = []
     for e in page:
+        href = Ref("event", str(e.seq), "l'événement")
+        if e.type.name == c.ROUSED.name:
+            out.append(Entry(e.at, "tirée du sommeil par un message",
+                             f"de {_who(frame, e.data.person, e.data.handle)} — "
+                             f"{ROUSED_FR.get(e.data.reason, e.data.reason)}", tone="warn", href=href))
+            continue
+        if e.type.name == c.WAITED.name:
+            out.append(Entry(e.at, "un message attend son réveil",
+                             f"de {_who(frame, e.data.person, e.data.handle)} : elle dort, elle y répondra au réveil",
+                             tone="muted", href=href))
+            continue
         asleep = e.type.name == c.FELL_ASLEEP.name
         out.append(Entry(int(e.data.at), "s'endort" if asleep else "se réveille",
                          f"pression de sommeil {_percent(float(e.data.pressure))}", tone="info" if asleep else "ok",
-                         href=Ref("event", str(e.seq), "l'événement")))
+                         href=href))
     older = (("avant", str(page[-1].seq)),) if len(found) > TRANSITIONS_PAGE else ()
     return tuple(out), Pager(param="avant", size=TRANSITIONS_PAGE, older=older)
 
@@ -143,7 +169,7 @@ def _rhythm_view(s: BodyState, frame: Frame, ctx: InspectContext) -> list[Block]
     tired = level < p.tired_below
     phase = circadian.phase_of(frame.local(), profile)
     since = now - DAY
-    transitions, pager = _transitions(ctx)
+    transitions, pager = _transitions(ctx, frame)
     return [
         Stats((
             Stat("sommeil", SLEEP_FR[sl.phase(sleep, now, p.sleep)],
@@ -164,6 +190,7 @@ def _rhythm_view(s: BodyState, frame: Frame, ctx: InspectContext) -> list[Block]
             ("sommeil", SLEEP_FR[sl.phase(sleep, now, p.sleep)]),
             ("depuis", ctx.when(sleep.since) if sleep.since else "aucune transition observée"),
             ("réveillée par un message", "oui" if sleep.woken_by_message and not sleep.asleep else "non"),
+            ("messages qui attendent son réveil", str(len(s.waiting)) if s.waiting else "aucun"),
             ("phase du jour", circadian.PHASE_FR[phase]),
             ("prochaine transition", f"{what} — {ctx.when(nxt)}" if nxt is not None else f"{what} : pas dans les 48 h"),
             ("dernière interaction", ctx.when(sleep.active_at) if sleep.active_at else "—"),

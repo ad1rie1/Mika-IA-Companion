@@ -90,8 +90,19 @@ les plafonds silencieux (10, 12, 20, 50, 64, 100, 200…) par des pages, et
 corrige les défauts relevés (le compte « dans la boîte », les commits datés de
 1970, le filtre d'autorité des buts clos, la 5ᵉ courbe perdue de l'accueil).
 
+### Pourquoi a-t-elle dit ça ? (ADR 0042)
+Une page par parole (`/inspecteur/parole/<seq>`), liée depuis le fil, l'onglet
+« Échanges » d'une personne, chaque épisode et chaque événement de parole : ce
+qu'elle a dit ; ce qui l'a fait parler (le message, ou la ligne exacte de
+l'arbitre pas à pas) ; les sections de son prompt, nommées ; ce dont elle s'est
+souvenue, avec le texte ; ses outils et leurs résultats. Les clés techniques
+sont dans « Détails techniques ».
+
 ### Décisions
 - **Maintenant** : la table de l'arbitre (preuves → score → taux), la politique.
+- **Que ferait-elle ?** *(nouveau)* : pour une personne, ses lignes, ce qui la
+  pousse, ce qui la retient, dans combien de temps elle agirait en moyenne ; la
+  fiche d'une personne y mène.
 - **En cours** *(nouveau)* : épisodes ouverts (sorte, cible, depuis), files
   d'attente par voie, baux tenus.
 - **Initiatives** : budget du jour, période réfractaire, ignorées.

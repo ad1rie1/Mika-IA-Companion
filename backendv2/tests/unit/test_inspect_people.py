@@ -201,8 +201,10 @@ async def live(kernel):
     await say(kernel, said("user_1", "salut Mika, tu as passé une bonne journée ?"))
     await say(kernel, said(ANON, "moi c'est Alice"))
     await kernel.mind.append([social_c.PROFILE_REVISED.draft(
-        person="user_1", summary=Content.of(SUMMARY, level=int(Sensitivity.PERSONAL)), tone="avec douceur",
-        interests=("le café",))], emitter="social", correlation="genese:profil", origin=Origin.GENESIS)
+        person="user_1", summary=Content.of(SUMMARY, level=int(Sensitivity.PERSONAL)),
+        tone=Content.of("avec douceur", level=int(Sensitivity.PERSONAL)),
+        interests=Content.of("le café", level=int(Sensitivity.PERSONAL)))], emitter="social",
+        correlation="genese:profil", origin=Origin.GENESIS)
 
 
 def all_tabs(kernel, key_person: str, key_handle: str) -> dict:
@@ -291,7 +293,7 @@ def test_a_person_has_a_fiche_that_gathers_her_handles(tmp_path):
         await live(kernel)
         insp = Inspection(kernel)
         before = insp.head("person", ANON, when), insp.head("person", "user_1", when)
-        linked = await perform(kernel, "identity.relier", form(person="Alice"), by="user_1", subject=ANON,
+        linked = await perform(kernel, "identity.relier", form(person="Alice", confirmed="on"), by="user_1", subject=ANON,
                                nonce="r1")
         after = {k: insp.head("person", k, when) for k in (ANON, "user_1")}
         handle = insp.head("handle", ANON, when)
@@ -303,14 +305,15 @@ def test_a_person_has_a_fiche_that_gathers_her_handles(tmp_path):
     assert isinstance(alice_before, Head) and alice_before.key == "user_1" and alice_before.title == "Alice"
     assert anon_before.key == ANON  # pas encore reliée : elle parle pour elle-même
     assert {b.text for b in alice_before.badges} >= {"propriétaire", "non liée", "en privé : confidences"}
-    assert alice_before.subtitle.startswith("Une proche, et sa propriétaire")
+    assert alice_before.subtitle.startswith("Proche · propriétaire")  # sans genre imposé
     assert len(alice_before.facts) <= 6 and dict(alice_before.facts)["adresses"] == 1
-    assert alice_before.aliases == ("user_1",)
+    # l'oubli atteint ses adresses, et le nom qu'elle seule porte (« name:alice », ce que d'autres ont dit d'elle)
+    assert alice_before.aliases == ("user_1", "name:alice")
 
     assert linked.ok
     # une adresse reliée renvoie à sa personne (la console y redirige)
     assert after[ANON].key == "user_1" and after["user_1"].key == "user_1"
-    assert after["user_1"].aliases == tuple(sorted(("user_1", ANON)))
+    assert after["user_1"].aliases == (*sorted(("user_1", ANON)), "name:alice")
     assert "liée · 2 adresses" in {b.text for b in after["user_1"].badges}
     assert isinstance(handle, Head) and handle.key == ANON and "Parle pour Alice" in handle.subtitle
     assert {b.text for b in handle.badges} >= {"publique", "liée"}
@@ -364,7 +367,7 @@ def test_the_verdict_is_explained_and_differs_between_an_operator_and_an_anonymo
 
     # en public, même l'opératrice n'obtient rien de privé
     public = row_of(titled(alice, "Ce que ça ouvre"), "en public")
-    assert public["sur autrui"] == "anodin" and public["si elle ou il est concerné"] == "anodin"
+    assert public["sur autrui"] == "anodin" and public["si la personne est concernée"] == "anodin"
     assert "audience publique" in public["pourquoi"] and public["sa propre fiche"].startswith("fermée")
 
     # la revendication, sa cible, ce qui manque, et le registre qui la garde
@@ -423,7 +426,7 @@ def test_the_lists_say_who_is_who_and_what_each_would_hear(tmp_path):
 
     people = table(listing, "personne")
     assert {row_cells(r)[0].key for r in people.rows} == {"person/user_1", f"person/{ANON}"}
-    assert plain(row_of(people, "user_1")["proximité"]) == "une proche"
+    assert plain(row_of(people, "user_1")["proximité"]) == "proche"
     assert [row_cells(r)[0].key for r in table(searched, "personne").rows] == ["person/user_1"]
 
     # la politique est lue, pas recopiée
@@ -467,8 +470,8 @@ def test_linking_and_unlinking_a_handle_is_journaled_and_audited(tmp_path):
                                        nonce="b")
         out["self"] = await perform(kernel, "identity.relier", form(person=ANON), by="user_1", subject=ANON,
                                     nonce="c")
-        out["ok"] = await perform(kernel, "identity.relier", form(person="Alice"), by="user_1", subject=ANON,
-                                  nonce="d")
+        out["ok"] = await perform(kernel, "identity.relier", form(person="Alice", confirmed="on"), by="user_1",
+                                  subject=ANON, nonce="d")
         out["again"] = await perform(kernel, "identity.relier", form(person="user_1"), by="user_1", subject=ANON,
                                      nonce="e")
         out["view linked"] = kernel.mind.frame().get(identity_c.IDENTITY(ANON))
@@ -529,10 +532,12 @@ def test_operator_evidence_is_weighed_like_any_other(tmp_path):
         out["denied view"] = kernel.mind.frame().get(identity_c.IDENTITY(ANON))
         # sur un compte (Telegram), affirmation + garantie atteignent la barre : l'adresse est reliée
         await say(kernel, said("tg_5", "moi c'est Alice", channel="telegram"))
-        out["tg vouch"] = await perform(kernel, "identity.preuve", form(kind=identity_c.VOUCHED), by="user_1",
+        out["tg vouch"] = await perform(kernel, "identity.preuve", form(kind=identity_c.VOUCHED, confirmed="on"), by="user_1",
                                         subject="tg_5", nonce="h")
         out["tg view"] = kernel.mind.frame().get(identity_c.IDENTITY("tg_5"))
         out["evidence"] = events(kernel, identity_c.EVIDENCE.name)
+        refs = [e.data.note.ref for e in out["evidence"] if e.data.note is not None]
+        out["notes"] = kernel.mind.store.content(refs)  # la raison est gardée à part : l'oubli l'atteint
         return out
 
     out = run(tmp_path, scenario)
@@ -549,8 +554,10 @@ def test_operator_evidence_is_weighed_like_any_other(tmp_path):
     assert out["tg vouch"].ok and "confirmée : elle parle désormais pour Alice" in out["tg vouch"].message
     assert out["tg view"].bound and out["tg view"].person == "user_1" and 0.7 <= out["tg view"].certainty < 0.85
     ops = [e for e in out["evidence"] if e.data.by == "operator"]
-    assert [(e.data.kind, e.data.note) for e in ops] == [(identity_c.VOUCHED, "je la connais"),
-                                                         (identity_c.DENIED, ""), (identity_c.VOUCHED, "")]
+    notes = [out["notes"].get(e.data.note.ref, "") if e.data.note else "" for e in ops]
+    assert [(e.data.kind, note) for e, note in zip(ops, notes, strict=True)] == [
+        (identity_c.VOUCHED, "je la connais"), (identity_c.DENIED, ""), (identity_c.VOUCHED, "")]
+    assert ops[1].data.denies == identity_c.DENIES_CLAIM  # ce que vise le démenti est jugé à l'action
     assert all(e.origin is Origin.EXTERNAL for e in ops)
 
 
@@ -570,7 +577,7 @@ def test_the_operator_sets_closeness_from_the_person_fiche(tmp_path):
         out["auto"] = await perform(kernel, "social.proximite", form(closeness="auto"), by="user_1",
                                     subject="user_1", nonce="d")
         out["lived"] = kernel.mind.frame().get(social_c.CLOSENESS("user_1"))
-        await perform(kernel, "identity.relier", form(person="user_1"), by="user_1", subject=ANON, nonce="e")
+        await perform(kernel, "identity.relier", form(person="user_1", confirmed="on"), by="user_1", subject=ANON, nonce="e")
         out["offered bound"] = offered(kernel, spec, ANON)  # une adresse reliée n'est plus une personne à part
         out["set"] = events(kernel, social_c.CLOSENESS_SET.name)
         out["audit"] = events(kernel, rt.OPERATED.name)
@@ -612,7 +619,7 @@ def test_links_show_closeness_rhythm_and_profile_and_a_forgotten_profile_shows_a
         assert not failed(blocks)
     links = table(listing, "personne")
     alice = row_of(links, "user_1")
-    assert plain(alice["proximité"]) == "une proche (déclarée)"
+    assert plain(alice["proximité"]) == "proche (déclarée)"
     assert "repli selon la proximité" in alice["rythme"]  # une seule journée : pas encore de rythme mesuré
     assert isinstance(alice["dernier message reçu"], When)
     assert isinstance(alice["silence ÷ rythme"], Meter)

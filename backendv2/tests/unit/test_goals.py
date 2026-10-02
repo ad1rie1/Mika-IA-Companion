@@ -134,7 +134,7 @@ def test_a_worry_becomes_a_goal_then_pride_then_she_tells_the_person_it_concerns
     assert [c.data.status for c in closed] == [goals_c.ACHIEVED]
     steps = r.of(goals_c.STEP_REPORTED)
     assert steps and steps[-1].data.proven and "memory_search" in steps[-1].data.tools
-    assert esteem1 > esteem0 + 0.02  # elle a mené quelque chose à bout
+    assert esteem1 > esteem0 + 0.01  # elle a mené quelque chose à bout (une séance : un peu, ADR 0036)
     # un pas n'est jamais livré à personne, ni écrit dans le fil
     step_utterances = [e for e in r.of(rt.UTTERANCE) if e.data.kind == "STEP"]
     assert step_utterances and all(not u.data.visible for u in step_utterances)
@@ -151,7 +151,7 @@ def test_a_friend_hears_a_mention_and_a_stranger_nothing(tmp_path):
     async def scenario(kernel, llm):
         await befriend(kernel, "user_2", "friend")
         await connect(kernel, "user_2", "Bea")
-        await (await kernel.perceive(said("user_2", "je suis triste, ma grand-mère est à l'hôpital"))).reply
+        await (await kernel.perceive(said("user_2", "je suis triste, ma grand-mère est malade"))).reply
         await asyncio.sleep(3 * HOUR / US)
         await connect(kernel, "user_3", "Zoé")
         await (await kernel.perceive(said("user_3", "j'ai peur de rater mon permis demain"))).reply

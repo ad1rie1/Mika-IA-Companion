@@ -10,6 +10,12 @@ projection T0 ``thread`` (même transaction que l'ajout : un client qui
 demande l'historique voit toujours le message qu'on vient de lui annoncer).
 Les jetons prosodiques y sont retirés : ils sont pour la voix, pas pour le
 fil que relisent le modèle et la personne.
+
+L'historique du prompt est le fil tel qu'on le perçoit (ADR 0041) : un tour
+qui arrive après un silence porte un repère de temps (« [le lendemain, mardi
+14h13] »), calculé en jours vécus et seulement entre deux messages — stable
+d'un prompt à l'autre ; dans un salon chacun parle sous son nom ; ses propres
+tours gardent leur balise d'émotion ; la fenêtre avance par paquets.
 """
 
 from __future__ import annotations
@@ -17,7 +23,9 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from datetime import datetime
 from typing import Annotated, Any
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
 
@@ -26,7 +34,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as c
-from mika.kernel.clock import DAY, MINUTE
+from mika.kernel.clock import DAY, MINUTE, local, local_date_of_night
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, Tier, Zone
 from mika.kernel.forms import Knob
@@ -56,11 +64,16 @@ from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.store import Sql
 from mika.vocab.affect import Declared, emotion_cell, strip_prosody
+from mika.vocab.circadian import DAYS_FR, MONTHS_FR
 from mika.vocab.episodes import CONVERSATIONAL, Kind
-from mika.vocab.people import is_internal
+from mika.vocab.people import clean_display_name, fold, is_internal
 
 #: Messages relus au plus pour composer l'historique (le budget coupe ensuite).
 THREAD_WINDOW = 60
+#: Le début de cette fenêtre avance par paquets de tant de messages.
+WINDOW_STEP = 20
+#: Un message qui arrive après un tel silence porte un repère de temps.
+MARK_AFTER = 20 * MINUTE
 
 
 class TranscriptParams(BaseModel):
@@ -70,6 +83,16 @@ class TranscriptParams(BaseModel):
         label="Messages relus pour l'historique", group="Fil", lo=5, hi=500,
         help="Combien de messages du fil (après le dernier résumé) sont relus pour composer l'historique d'un "
              "tour ; le budget du prompt en coupe ensuite le début s'il le faut.")] = THREAD_WINDOW
+    window_step: Annotated[int, Knob(
+        label="Le début de l'historique avance par paquets de (messages)", group="Fil", lo=1, hi=250,
+        help="Le début de l'historique ne glisse pas à chaque message : il avance par paquets de tant de messages "
+             "(au plus la moitié de la fenêtre), si bien que le début du prompt reste identique d'un tour à "
+             "l'autre et reste en cache. 1 : il glisse à chaque message.")] = WINDOW_STEP
+    mark_after_us: Annotated[int, Knob(
+        label="Repère de temps après un silence de", group="Fil", lo=5 * MINUTE, hi=DAY,
+        help="Dans l'historique, un message qui arrive après un tel silence est précédé d'un repère de temps "
+             "(« [25 minutes plus tard] », « [plus tard, vers 17h] », « [le lendemain, mardi 14h13] ») : elle sait "
+             "quand chaque chose a été dite, et depuis combien de temps on ne s'était pas parlé.")] = MARK_AFTER
     #: au-delà de tant de messages depuis le dernier résumé, le début se replie…
     compact_after: Annotated[int, Knob(
         label="Résumer au-delà de (messages)", group="Résumé des longs fils", lo=20, hi=2000,
@@ -248,79 +271,267 @@ def count_after(store: Any, person: str, after: int) -> int:
     return int(rows[0][0]) if rows else 0
 
 
+def window_start(total: int, window: int, step: int) -> int:
+    """Le rang du premier message montré sur ``total`` : les ``window`` derniers
+    au plus, mais un début qui n'avance que par paquets de ``step`` (au plus la
+    moitié de la fenêtre) — entre deux sauts, le début du fil, donc du prompt,
+    ne bouge pas."""
+    start = max(0, total - window)
+    step = max(1, min(step, window // 2))
+    return -(-start // step) * step
+
+
+def _window(store: Any, where: str, args: Sequence[Any], window: int, step: int) -> list[dict[str, Any]]:
+    total = int(store.query_mind(f"SELECT COUNT(*) FROM {c.THREAD_TABLE} WHERE {where}", tuple(args))[0][0])
+    start = window_start(total, window, step)
+    rows = store.query_mind(
+        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE {where} ORDER BY id LIMIT ? OFFSET ?",
+        (*args, total - start, start),
+    )
+    return [dict(zip(_COLUMNS, r, strict=True)) for r in rows]
+
+
 def private_thread(store: Any, handles: Sequence[str], limit: int, before: int | None = None,
-                   after: int = 0) -> list[dict[str, Any]]:
+                   after: int = 0, step: int = 1) -> list[dict[str, Any]]:
     """Le fil privé avec une personne, toutes ses adresses confondues (ce
     qu'elle a dit dans un salon n'y est pas : hors de son contexte)."""
     bound = before if before is not None else 2**62
     marks = ",".join("?" * len(handles))
-    rows = store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person IN ({marks}) AND room IS NULL AND id<? "
-        "AND id>? ORDER BY id DESC LIMIT ?", (*handles, bound, after, limit),
-    )
-    return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
+    return _window(store, f"person IN ({marks}) AND room IS NULL AND id<? AND id>?", (*handles, bound, after),
+                   limit, step)
 
 
-def room_thread(store: Any, room: str, limit: int, before: int | None = None) -> list[dict[str, Any]]:
+def room_thread(store: Any, room: str, limit: int, before: int | None = None, step: int = 1) -> list[dict[str, Any]]:
     """Ce qui s'est dit dans un salon (public pour ce salon), tous ensemble."""
     bound = before if before is not None else 2**62
-    rows = store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE room=? AND id<? ORDER BY id DESC LIMIT ?",
-        (room, bound, limit),
-    )
-    return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
+    return _window(store, "room=? AND id<?", (room, bound), limit, step)
+
+
+def _message(store: Any, seq: int) -> dict[str, Any] | None:
+    rows = store.query_mind(f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE id=?", (seq,))
+    return dict(zip(_COLUMNS, rows[0], strict=True)) if rows else None
+
+
+# ── Les repères de temps ──────────────────────────────────────────────────
+
+#: Avant cette heure, une heure de la nuit appartient encore à la veille : « le
+#: lendemain » se compte en jours vécus, pas en passages de minuit.
+DAY_STARTS_AT = 5
+_NUMBERS = ("zéro", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "onze", "douze",
+            "treize")
+
+
+def _clock(dt: datetime) -> str:
+    return f"{dt.hour}h{dt.minute:02d}"
+
+
+def _about(dt: datetime) -> str:
+    """L'heure à la demi-heure près : « vers 17h », « vers 17h30 », « vers minuit »."""
+    h, m = divmod(((dt.hour * 60 + dt.minute + 15) // 30 * 30) % (24 * 60), 60)
+    if h in (0, 12):
+        return f"vers {'minuit' if h == 0 else 'midi'}{' et demie' if m else ''}"
+    return f"vers {h}h{'30' if m else ''}"
+
+
+def _lapse(minutes: int) -> str:
+    """Un silence de moins de deux heures, dit comme on le dit (à cinq minutes près)."""
+    m = max(5, round(minutes / 5) * 5)
+    if m == 30:
+        return "une demi-heure plus tard"
+    if m == 45:
+        return "trois quarts d'heure plus tard"
+    if m < 55:
+        return f"{m} minutes plus tard"
+    if m < 75:
+        return "une heure plus tard"
+    return "une heure et demie plus tard" if m < 105 else "presque deux heures plus tard"
+
+
+def _day(dt: datetime) -> str:
+    """Le jour et l'heure ; une heure de la nuit dit de quelle nuit il s'agit."""
+    if dt.hour < DAY_STARTS_AT:
+        return f"dans la nuit de {DAYS_FR[(dt.weekday() - 1) % 7]} à {DAYS_FR[dt.weekday()]}, {_clock(dt)}"
+    return f"{DAYS_FR[dt.weekday()]} {_clock(dt)}"
+
+
+def _date(dt: datetime, year: bool) -> str:
+    return f"{DAYS_FR[dt.weekday()]} {dt.day} {MONTHS_FR[dt.month - 1]}{f' {dt.year}' if year else ''}, {_clock(dt)}"
+
+
+def gap_mark(prev: int, at: int, tz: ZoneInfo, after_us: int = MARK_AFTER) -> str:
+    """Le repère d'un message par rapport au précédent, tel qu'on le perçoit :
+    rien quand il suit de près ; « 25 minutes plus tard », « une heure plus
+    tard », puis « plus tard, vers 17h » le même jour ; « le lendemain, mardi
+    14h13 », « cinq jours plus tard, samedi 18h08 », « trois semaines plus
+    tard, lundi 19 octobre, 9h02 » au-delà. Compté en jours vécus du calendrier
+    local, et fonction des deux instants seulement : le même repère d'un prompt
+    à l'autre (le préfixe en cache ne bouge pas)."""
+    if at - prev < after_us:
+        return ""
+    then, now = local(prev, tz), local(at, tz)
+    days = (local_date_of_night(at, tz, DAY_STARTS_AT) - local_date_of_night(prev, tz, DAY_STARTS_AT)).days
+    if days <= 0:
+        minutes = (at - prev) // MINUTE
+        if minutes < 110:
+            return _lapse(minutes)
+        return f"plus tard{' dans la nuit' if now.hour < DAY_STARTS_AT else ''}, {_about(now)}"
+    if days == 1:
+        return f"le lendemain, {_day(now)}"
+    if days == 2:
+        return f"le surlendemain, {_day(now)}"
+    if days < 7:
+        return f"{_NUMBERS[days]} jours plus tard, {_day(now)}"
+    if days == 7:
+        lap = "une semaine plus tard"
+    elif days < 14:
+        lap = f"{_NUMBERS[days]} jours plus tard"
+    elif days < 30:
+        lap = f"{_NUMBERS[days // 7]} semaines plus tard"
+    elif days < 365:
+        months = max(1, round(days / 30.44))
+        lap = "un mois plus tard" if months == 1 else f"{_NUMBERS[months]} mois plus tard"
+    else:
+        years = days // 365
+        lap = "un an plus tard" if years == 1 else f"{years} ans plus tard"
+    return f"{lap}, {_date(now, now.year != then.year)}"
+
+
+def opening_mark(at: int, now: int, tz: ZoneInfo) -> str:
+    """Le repère absolu d'un message qui ouvre l'historique : « lundi 28
+    septembre, 18h02 » (avec l'année quand ce n'est pas celle-ci)."""
+    dt = local(at, tz)
+    return _date(dt, dt.year != local(now, tz).year)
 
 
 # ── L'historique du prompt ────────────────────────────────────────────────
 
+#: Comment apparaît, dans le fil d'un salon, quelqu'un dont on ne connaît pas le nom.
+SOMEONE = "Quelqu'un"
+SUMMARY_TURN = "(Plus tôt, entre vous — en résumé : {text})"
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadView:
+    """Ce que montre l'historique : le fil (la clé de sa coupe), ses tours, et
+    comment se présente le message en cours (son repère, qui parle)."""
+
+    key: str
+    turns: tuple[ChatTurn, ...] = ()
+    current: ChatTurn | None = None
+
+
+def speakers(frame: Frame, handles: Sequence[str]) -> dict[str, str]:
+    """Le nom sous lequel chacun parle dans le fil d'un salon : son nom
+    d'affichage nettoyé, jamais son adresse ; des homonymes se distinguent par
+    un numéro, dans l'ordre (stable) de leurs adresses."""
+    out: dict[str, str] = {}
+    taken: dict[str, int] = {}
+    for h in sorted({h for h in handles if not is_internal(h)}):
+        name = clean_display_name(frame.get(identity_c.IDENTITY(h)).name) or SOMEONE
+        n = taken[fold(name)] = taken.get(fold(name), 0) + 1
+        out[h] = name if n == 1 else f"{name} ({n})"
+    return out
+
+
+def tagged(r: Mapping[str, Any]) -> str:
+    """Son propre message tel qu'elle l'a écrit : avec sa balise d'émotion (le
+    fil la garde en annotation), pour que le modèle ne désapprenne pas à la mettre."""
+    text = r["text"] or ""
+    if not text.strip() or not r.get("emotion"):
+        return text
+    value = f"{float(r['emotion_intensity'] or 0.0):.2f}".rstrip("0")
+    return f"{text} [EMOTION:{r['emotion']}:{value + '0' if value.endswith('.') else value}]"
+
+
+def thread_turns(rows: Sequence[Mapping[str, Any]], tz: ZoneInfo, now: int, after_us: int,
+                 names: Mapping[str, str] | None = None) -> list[ChatTurn]:
+    """Les tours du fil, chacun avec son repère par rapport au précédent (et le
+    repère absolu qui le remplace s'il ouvre l'historique) ; dans un salon,
+    chacun sous son nom."""
+    out: list[ChatTurn] = []
+    prev: int | None = None
+    for r in rows:
+        at = int(r["at"])
+        mark = gap_mark(prev, at, tz, after_us) if prev is not None else ""
+        prev = at
+        opening = opening_mark(at, now, tz)
+        if r["role"] == "assistant":
+            out.append(ChatTurn("assistant", tagged(r), id=r["id"], mark=mark, opening=opening))
+        else:
+            out.append(ChatTurn("user", r["text"] or "", speaker=(names or {}).get(r["person"], ""), id=r["id"],
+                                mark=mark, opening=opening))
+    return out
+
 
 @TRANSCRIPT.enricher("thread", episodes=CONVERSATIONAL, deadline_ms=1500)
-async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) -> tuple[ChatTurn, ...]:
+async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) -> ThreadView | None:
     """Le fil avec l'interlocuteur. Ce que les autres lui ont dit en privé n'y
     est pas : cela passe par la mémoire, filtrée par la divulgation (un fil
     partagé verbatim ferait lire à Bob ce qu'Alice a écrit en privé). Dans un
-    salon, le fil du salon — tout le monde l'a lu. En privé, ses adresses
-    reliées s'ajoutent seulement si sa fiche est ouverte."""
+    salon, le fil du salon — tout le monde l'a lu —, chacun sous son nom. En
+    privé, ses adresses reliées s'ajoutent seulement si sa fiche est ouverte,
+    et le résumé du début du fil est épinglé (jamais coupé faute de place)."""
     store = ports.get("store")
     ep = frame.episode
     if store is None or ep is None or not ep.target:
-        return ()
+        return None
     p = _params(frame.env.params_of("transcript", frame.root))
+    tz = frame.env.tz_of(frame.root)
     before = ep.attrs.get("reply_to")
     room = ep.attrs.get("room")
+    asked = _message(store, before) if before is not None else None
+    names: dict[str, str] = {}
+    pinned: list[ChatTurn] = []
     if room:
-        rows = room_thread(store, room, p.window, before=before)
-        return tuple(_turn(r, ep.target) for r in rows)
-    summary = s.summaries.get(ep.target)
-    since = summary[0] if summary else 0
-    aud = frame.audience
-    handles: tuple[str, ...] = (ep.target,)
-    if aud is not None and aud.private_ok:
-        person = frame.get(identity_c.PERSON(ep.target))
-        handles = tuple(sorted({ep.target, *frame.get(identity_c.HANDLES(person))}))
-    rows = private_thread(store, handles, p.window, before=before, after=since)
-    turns = [ChatTurn("assistant" if r["role"] == "assistant" else "user", r["text"], id=r["id"]) for r in rows]
-    if summary:
-        text = store.content([summary[1]]).get(summary[1])
-        if text:
-            turns.insert(0, ChatTurn("user", f"(Plus tôt, entre vous — en résumé : {text})", id=since))
-    return tuple(turns)
+        rows = room_thread(store, room, p.window, before=before, step=p.window_step)
+        names = speakers(frame, [str(r["person"]) for r in rows if r["role"] != "assistant"] +
+                         ([str(asked["person"])] if asked else []))
+        key = f"room:{room}"
+    else:
+        summary = s.summaries.get(ep.target)
+        since = summary[0] if summary else 0
+        aud = frame.audience
+        handles: tuple[str, ...] = (ep.target,)
+        key = f"private:{ep.target}"
+        if aud is not None and aud.private_ok:
+            person = frame.get(identity_c.PERSON(ep.target))
+            # ses adresses dont la liaison est confirmée (une liaison par simple recoupement : son seul fil)
+            handles = tuple(sorted({ep.target, *frame.get(identity_c.THREAD(ep.target))}))
+            key = f"private:{person}"
+        rows = private_thread(store, handles, p.window, before=before, after=since, step=p.window_step)
+        text = store.content([summary[1]]).get(summary[1]) if summary else None
+        if summary and text:
+            pinned.append(ChatTurn("user", SUMMARY_TURN.format(text=text), id=since, pinned=True))
+    turns = pinned + thread_turns(rows, tz, frame.now, p.mark_after_us, names)
+    # le message en cours (la question, ou « maintenant » pour une initiative), situé par rapport au dernier tour
+    at = int(asked["at"]) if asked else frame.now
+    mark = gap_mark(int(rows[-1]["at"]), at, tz, p.mark_after_us) if rows else ""
+    who = names.get(str(asked["person"]), "") if (room and asked) else ""
+    return ThreadView(key, tuple(turns), ChatTurn("user", "", speaker=who, mark=mark) if (mark or who) else None)
 
 
 COMPACT_SYSTEM = """Tu aides Mika à se souvenir d'une longue conversation. On te donne le début de son fil avec \
-quelqu'un (et le résumé des échanges encore plus anciens, s'il existe). Écris un résumé à la première personne, du \
-point de vue de Mika (« On a parlé de… », « Il m'a dit que… »), en 5 à 10 phrases : les faits, ce qui a été promis, \
-le ton de la relation. N'invente rien. Réponds seulement par le résumé."""
+quelqu'un (et le résumé des échanges encore plus anciens, s'il existe) ; un repère entre crochets dit quand un \
+message a été écrit. Écris un résumé à la première personne, du point de vue de Mika (« On a parlé de… », « Il \
+m'a dit que… »), en 5 à 10 phrases : les faits, ce qui a été promis, le ton de la relation. Situe ce qui compte \
+par sa date (« le lundi 28 septembre au soir »), jamais par « hier » ou « la semaine dernière » : ce résumé sera \
+relu bien plus tard. N'invente rien. Réponds seulement par le résumé."""
 
 
-def _turn(r: Mapping[str, Any], target: str) -> ChatTurn:
-    """Un tour du fil d'un salon : ce que disent les autres est cité avec leur
-    nom d'affichage (adresse), pour qu'elle sache qui parle."""
-    if r["role"] == "assistant":
-        return ChatTurn("assistant", r["text"], id=r["id"])
-    if r["person"] == target:
-        return ChatTurn("user", r["text"], id=r["id"])
-    return ChatTurn("user", f"[{r['person']}] {r['text']}", id=r["id"])
+def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]], after_us: int) -> str:
+    """Les échanges à replier, chacun sous le nom de qui parle et daté comme
+    dans l'historique (le premier en absolu)."""
+    tz = frame.env.tz_of(frame.root)
+    name = clean_display_name(frame.get(identity_c.IDENTITY(person)).name) or "La personne"
+    lines = []
+    prev: int | None = None
+    for r in rows:
+        at = int(r["at"])
+        mark = gap_mark(prev, at, tz, after_us) if prev is not None else opening_mark(at, frame.now, tz)
+        prev = at
+        who = "Mika" if r["role"] == "assistant" else name
+        lines.append(f"{f'[{mark}] ' if mark else ''}{who} : {r['text']}")
+    return "\n".join(lines)
 
 
 @TRANSCRIPT.process("transcript.compact", wake_on=[memory_c.CONSOLIDATED], lane="background",
@@ -355,12 +566,12 @@ class Compact:
             if total <= p.compact_after:
                 continue
             # les plus anciens d'abord, par lots : jamais « résumé » ce qui n'a pas été lu
-            fold = [r for r in oldest_after(store, person, since, min(total - p.keep, p.compact_batch))
-                    if r["id"] <= checkpoint]
-            if len(fold) < p.compact_min_fold:
+            folded = [r for r in oldest_after(store, person, since, min(total - p.keep, p.compact_batch))
+                      if r["id"] <= checkpoint]
+            if len(folded) < p.compact_min_fold:
                 continue
             previous = store.content([summary[1]]).get(summary[1]) if summary else None
-            lines = "\n".join(f"{'Mika' if r['role'] == 'assistant' else 'Elle ou lui'} : {r['text']}" for r in fold)
+            lines = _compact_lines(frame, person, folded, p.mark_after_us)
             prompt = (f"Résumé précédent : {previous}\n\n" if previous else "") + f"Suite des échanges :\n{lines}"
             self.retry_at = frame.now + p.compact_retry_us  # si l'appel lève, pas de rafale
             request = LLMRequest(role="compact", call_id=f"{ctx.run_id}#{person}", system_stable=COMPACT_SYSTEM,
@@ -372,18 +583,18 @@ class Compact:
             if not text:
                 self.seen = checkpoint  # rien d'utilisable : on réessaiera à la prochaine consolidation
                 return
-            await ctx.emit(c.COMPACTED.draft(person=person, upto=fold[-1]["id"], summary=Content.of(text, level=2),
-                                             count=len(fold), call_id=request.call_id, model=response.model))
+            await ctx.emit(c.COMPACTED.draft(person=person, upto=folded[-1]["id"], summary=Content.of(text, level=2),
+                                             count=len(folded), call_id=request.call_id, model=response.model))
             return  # un fil par passage ; le suivant au prochain réveil
         self.seen = checkpoint
 
 
 @TRANSCRIPT.section("history", zone=Zone.HISTORY, episodes=CONVERSATIONAL)
 def _history(s: TranscriptState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
-    turns = enrich.get("thread")
-    if not turns:
+    view: ThreadView | None = enrich.get("thread")
+    if view is None or not (view.turns or view.current):
         return None
-    return SectionBody(tuple(turns))
+    return SectionBody(view.turns, thread=view.key, current=view.current)
 
 
 # ── Inspection ────────────────────────────────────────────────────────────
@@ -470,7 +681,7 @@ def _messages(frame: Frame, ctx: InspectContext, rows: Sequence[Mapping[str, Any
             emotion_cell(r["emotion"], r["emotion_intensity"]) if mine and r["emotion"] else "",
             Badge("en attente", "warn") if r["id"] in pending else "",
             Ref("episode", corr, "épisode") if corr else "—",
-        ), tone="muted" if _internal(r) else "",
+        ), tone="muted" if _internal(r) else "", href=Ref.why(int(r["id"])) if mine and corr else None,
             detail=(Prose(r["text"] or FORGOTTEN, title="Message", reading=True),)))
     return tuple(out)
 

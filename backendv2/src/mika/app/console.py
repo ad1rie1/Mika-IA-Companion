@@ -11,7 +11,7 @@ décide-t-on, la machine tient-elle (Exploitation). ``docs/console-carte.md`` d�
 
 from __future__ import annotations
 
-from mika.inspector.catalog import Destination, NavGroup
+from mika.inspector.catalog import Destination, Labels, NavGroup
 
 NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("", (
@@ -37,9 +37,10 @@ NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("Son activité", (
         Destination("decisions", "Décisions", "⚖", "Pourquoi elle parle ou se tait : les preuves de l'arbitre, ce "
                     "qui tourne en ce moment, son budget d'initiatives, ses choix, ses épisodes, ses échéances.",
-                    builtin=("decisions.maintenant", "decisions.en_cours", "decisions.selections",
+                    builtin=("decisions.maintenant", "decisions.envers", "decisions.en_cours", "decisions.selections",
                              "decisions.episodes", "decisions.echeances"),
-                    order=("maintenant", "en_cours", "initiatives", "selections", "episodes", "echeances")),
+                    order=("maintenant", "envers", "en_cours", "initiatives", "selections", "episodes",
+                           "echeances")),
         Destination("buts", "Buts", "➤", "Ce qu'elle se propose de faire ensuite : ses rappels et ses "
                     "explorations, où ils en sont.", subjects=("goal",)),
         Destination("projets", "Projets", "▦", "Ses projets : des espaces de travail qu'on pilote — objectifs, "
@@ -82,5 +83,110 @@ FACULTY_LABELS: dict[str, str] = {
     "attention": "Attention et pensées", "memory": "Mémoire", "transcript": "Fil des conversations",
     "social": "Liens", "others": "Ce qu'elle devine des autres", "identity": "Identités",
     "agency": "Initiatives", "goals": "Buts", "projects": "Projets", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
-    "forge": "Moteur de la Forge", "kernel": "Noyau",
+    "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
+    "sensors": "Appareils", "runtime": "Moteur",
 }
+
+#: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
+SECTION_LABELS: dict[str, str] = {
+    "who": "Qui elle a en face", "history": "Le fil de la conversation", "memories": "Ses souvenirs rappelés",
+    "shared_memories": "Ce qu'ils ont vécu ensemble", "past_exchanges": "Des échanges passés",
+    "promises": "Ce qu'elle a promis", "rhythm": "Son rythme (heure, énergie)",
+    "fog": "Sa fatigue (brouillard)", "mood": "Son humeur", "stance": "Sa posture envers la personne",
+    "needs": "Ses besoins", "their_state": "Ce qu'elle devine de l'autre", "thoughts": "Ce qui lui trotte dans la tête",
+    "narrative": "Qui elle est devenue (récit de soi)", "self_state": "Son estime d'elle-même",
+    "yesterday": "Son fil d'hier (journal)", "dream": "Son rêve de la nuit", "style": "Sa façon de parler",
+    "about_person": "Ce qu'elle sait de la personne", "step": "Ce à quoi elle travaille",
+    "subject": "Le sujet de l'initiative", "goals": "Ses buts en cours", "project": "Ce projet",
+    "project_share": "Un projet à partager", "projects": "Ses projets", "mails": "Ses mails non lus",
+    "drafts": "Ses brouillons de mails", "voice": "Sa voix dans cette boîte", "task_mail": "Le mail à traiter",
+    "task_ask": "Ce qu'on lui demande pour ce mail", "headlines": "Les titres de ses flux",
+    "views": "Ce que voit la caméra", "apps": "Ses apps forgées",
+    # déclarées par des lots voisins (ADR 0033, 0034, 0036) : nommées d'avance, sans effet tant qu'elles n'existent pas
+    "life": "Ce qui se passe dans la vie de la personne", "matter": "Ce dont elle pourrait parler",
+    "noticed": "Ce qu'elle a remarqué",
+}
+
+#: Les raisons des preuves de l'arbitre : ce qui la pousse à agir.
+REASON_LABELS: dict[str, str] = {
+    "mood_overflow": "Une humeur qui déborde", "need_expression": "Besoin de s'exprimer",
+    "need_social": "Envie de compagnie", "check_in": "Prendre des nouvelles", "thought": "Une pensée à partager",
+    "greeting": "Saluer", "present": "Quelqu'un de présent", "chat": "Envie de bavarder",
+    "comfort": "Réconforter", "recontact": "Reprendre contact après un silence", "work": "Avancer sur un but",
+    "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
+    "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
+    "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
+    "second_thoughts": "Elle s'est ravisée",
+}
+
+#: Les vetos : ce qui l'empêche d'agir.
+VETO_LABELS: dict[str, str] = {
+    "asleep": "Elle dort", "waking": "Elle vient de se réveiller", "woken_at_night": "Réveillée en pleine nuit",
+    "daily_cap": "Budget d'initiatives du jour épuisé", "grudge": "Elle est fâchée contre cette personne",
+    "unanswered": "Sa dernière initiative est restée sans réponse", "run_cap": "Assez d'exécutions pour l'heure",
+    "step_cap": "Assez de séances de travail pour l'heure",
+    "awaiting_reply": "Son dernier message attend encore une réponse", "changed_mind": "Elle s'est ravisée",
+}
+
+#: Les processus de fond : ce qu'ils font.
+PROCESS_LABELS: dict[str, str] = {
+    "transcript.compact": "Replier les longs fils en résumé", "memory.consolidate": "Retenir (souvenirs, croyances)",
+    "memory.index": "Indexer la mémoire", "memory.reflect": "Repenser à ce qu'elle sait",
+    "memory.night": "Trier la mémoire la nuit", "body.sleep": "S'endormir et se réveiller",
+    "needs.empty": "Sentir le vide", "attention.watch": "Remarquer et attendre",
+    "attention.digest": "Digérer ses pensées la nuit", "self.narrate": "Se raconter",
+    "self.journal": "Tenir son journal", "self.dream": "Rêver", "social.profile": "Comprendre les gens",
+    "goals.seed": "Se proposer des buts", "goals.tend": "Suivre ses buts", "projects.tend": "Suivre ses projets",
+    "projects.remote": "Pousser et récupérer les dépôts", "email.poll": "Relever le courrier",
+    "rss.poll": "Relever les flux", "camera.look": "Regarder par la caméra", "forge.tick": "Faire tourner les apps",
+    "forge.events": "Transmettre les événements aux apps", "forge.discover": "Découvrir les apps",
+    "memory.promises": "Laisser filer les promesses échues", "self.wake": "Se réveiller avec sa nuit",
+}
+
+#: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
+EVENT_LABELS: dict[str, str] = {
+    "presence.connected": "Connexion", "presence.disconnected": "Déconnexion",
+    "identity.claimed": "Un nom revendiqué", "identity.evidence": "Une preuve d'identité",
+    "identity.linked": "Une adresse reliée", "identity.registered": "Un compte enregistré",
+    "transcript.compacted": "Un fil replié en résumé",
+    "memory.believed": "Une croyance retenue", "memory.consolidated": "Une relecture de la mémoire",
+    "memory.night_sorted": "La mémoire triée la nuit", "memory.promise_noticed": "Une promesse remarquée",
+    "memory.promise_resolved": "Une promesse tenue ou abandonnée", "memory.reinforced": "Un souvenir renforcé",
+    "memory.remembered": "Un souvenir retenu",
+    "body.fell_asleep": "Endormie", "body.woke": "Réveillée", "needs.felt": "Un besoin ressenti",
+    "others.read": "Ce qu'elle devine de quelqu'un",
+    "attention.digested": "Une pensée digérée", "attention.dwelt": "Une pensée ressassée",
+    "attention.expectation_met": "Une attente comblée", "attention.expectation_missed": "Une attente déçue",
+    "attention.noticed": "Quelque chose de remarqué", "attention.thought_born": "Une pensée née",
+    "self.dreamt": "Un rêve", "self.journaled": "Son journal", "self.narrated": "Son récit de soi",
+    "self.persona_revised": "Sa persona révisée",
+    "social.closeness_set": "La proximité réglée", "social.profile_revised": "Un profil revu",
+    "goals.amended": "Un but modifié", "goals.awaited": "Un but en attente", "goals.closed": "Un but clos",
+    "goals.deposited": "Un fichier déposé dans un but", "goals.noted": "Une note sur un but",
+    "goals.nudged": "Un but relancé", "goals.opened": "Un but ouvert", "goals.paused": "Un but en pause",
+    "goals.reframed": "Un but recadré", "goals.reopened": "Un but rouvert", "goals.resumed": "Un but repris",
+    "goals.step_reported": "Une séance de travail rendue", "goals.task_added": "Une tâche ajoutée",
+    "goals.task_changed": "Une tâche modifiée", "goals.task_removed": "Une tâche retirée",
+    "projects.amended": "Un projet modifié", "projects.archived": "Un projet archivé",
+    "projects.created": "Un projet créé", "projects.decided": "Une décision technique",
+    "projects.decision_changed": "Une décision technique revue", "projects.deposited": "Un fichier déposé",
+    "projects.noted": "Une note sur un projet", "projects.nudged": "Un projet relancé",
+    "projects.objective_added": "Un objectif ajouté", "projects.objective_changed": "Un objectif modifié",
+    "projects.objective_closed": "Un objectif clos", "projects.paused": "Un projet en pause",
+    "projects.reframed": "Un projet recadré", "projects.remote_requested": "Un échange avec le dépôt distant demandé",
+    "projects.restored": "Un projet restauré", "projects.resumed": "Un projet repris",
+    "projects.run_reported": "Une exécution rendue",
+    "email.draft_asked": "Une réponse à un mail demandée", "email.noticed": "Un mail remarqué",
+    "email.poll_asked": "Une relève demandée", "email.read": "Un mail lu", "email.sent": "Un mail envoyé",
+    "rss.noticed": "Un article remarqué", "camera.seen": "Ce que la caméra a vu",
+    "forge.emitted": "Une app a signalé", "forge.handled": "Une app a traité un événement",
+    "forge.signaled": "Une app l'a interpellée", "forge.switched": "Une app allumée ou éteinte",
+    "forge.ticked": "Une app a tourné", "forge.written": "Une app écrite", "sensors.sensed": "Un appareil a signalé",
+    "memory.event_noted": "Un événement de la vie de quelqu'un, noté", "body.roused": "Réveillée par un message",
+    "body.waited": "Un message attend son réveil", "attention.touched": "Une pensée effleurée par un message",
+    "self.woke_with": "Ce qu'elle emporte de sa nuit", "self.touched": "Touchée par ce qu'on lui a dit",
+}
+
+#: Tout ce que la console nomme en français, d'un bloc.
+LABELS = Labels(faculties=FACULTY_LABELS, sections=SECTION_LABELS, reasons=REASON_LABELS, vetoes=VETO_LABELS,
+                processes=PROCESS_LABELS, events=EVENT_LABELS)

@@ -243,6 +243,11 @@ class LiveGateway:
             raise UnconfiguredRole(req.role)
         return await self._inner.call(req)
 
+    def release(self, call_id: str) -> None:
+        """La boucle d'outils ``call_id`` est finie (voir ``Gateway.release``)."""
+        if self._inner is not None:
+            self._inner.release(call_id)
+
     async def aclose(self) -> None:
         """Arrête ce que les fournisseurs tiennent encore (les CLI de Claude Code)."""
         for backend in (self._inner.backends.values() if self._inner is not None else ()):

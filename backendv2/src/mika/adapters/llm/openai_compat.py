@@ -9,9 +9,11 @@ Contrat :
   résultat → un tour ``tool`` ; une erreur voyage comme ``{"error": …}``, un
   résultat vide comme un texte explicite ;
 - déclarations triées par nom : préfixe stable pour le cache automatique ;
-- ``max_tokens`` d'abord ; un 400 qui le nomme → ``max_completion_tokens`` ; un
-  400 qui nomme ``temperature`` → sans elle ; chaque refus est mémorisé par
-  modèle (``ParamMemo``), une reprise au plus par paramètre ;
+- ``max_tokens`` d'abord ; un 400 qui refuse ce **nom** → ``max_completion_tokens``
+  (un 400 sur sa valeur, « trop grand », ne fait rien changer) ; un 400 qui nomme
+  ``temperature`` → sans elle ; chaque refus est mémorisé par modèle
+  (``ParamMemo``), une reprise au plus par paramètre ;
+- au premier plan, une seule nouvelle tentative du SDK au lieu de deux ;
 - ``finish_reason == "length"`` avec un appel entamé → ``truncated_tool_call`` ;
   des arguments illisibles → ``{"_raw": texte}``, que la validation du runtime
   renvoie au modèle comme une erreur ;
@@ -133,6 +135,23 @@ def rejects(exc: BaseException, param: str) -> bool:
     return getattr(exc, "status_code", None) == 400 and param in str(exc)
 
 
+#: ce qu'un serveur dit quand il ne connaît pas un paramètre (et non quand sa valeur déplaît)
+_UNSUPPORTED = ("unsupported", "not supported", "unknown parameter", "unrecognized", "unexpected keyword",
+                "extra inputs are not permitted", "max_completion_tokens")
+
+
+def rejects_name(exc: BaseException, param: str) -> bool:
+    """Un 400 qui refuse le **nom** ``param`` (« Unsupported parameter: 'max_tokens' … use
+    'max_completion_tokens' ») — pas sa valeur (« max_tokens is too large ») : sinon
+    une valeur trop grande faisait changer de paramètre à vie."""
+    text = str(exc).lower()
+    return rejects(exc, param) and any(marker in text for marker in _UNSUPPORTED)
+
+
+#: tentatives du SDK pour un appel au premier plan (sa valeur par défaut : 2)
+FOREGROUND_RETRIES = 1
+
+
 def count(obj: Any, attr: str) -> int:
     value = getattr(obj, attr, 0) if obj is not None else 0
     return value if isinstance(value, int) else 0
@@ -212,9 +231,14 @@ class OpenAICompatBackend:
         return body
 
     async def complete(self, req: LLMRequest) -> LLMResponse:
-        return self._read(await self._create(self.payload(req), req.max_tokens))
+        client = self._client
+        with_options = getattr(client, "with_options", None)
+        if req.priority == 0 and callable(with_options):  # la passerelle borne l'appel et sait se replier
+            client = with_options(max_retries=FOREGROUND_RETRIES)
+        return self._read(await self._create(self.payload(req), req.max_tokens, client))
 
-    async def _create(self, body: dict[str, Any], max_tokens: int) -> Any:
+    async def _create(self, body: dict[str, Any], max_tokens: int, client: Any = None) -> Any:
+        client = client if client is not None else self._client
         memo = self.memo
         token_param = memo.token_param.get(self.model, "max_tokens")
         send_temperature = self.temperature is not None and self.model not in memo.no_temperature
@@ -224,9 +248,9 @@ class OpenAICompatBackend:
             if send_temperature:
                 kwargs["temperature"] = self.temperature
             try:
-                return await self._client.chat.completions.create(**kwargs)
+                return await client.chat.completions.create(**kwargs)
             except Exception as exc:
-                if token_param == "max_tokens" and not renamed and rejects(exc, "max_tokens"):
+                if token_param == "max_tokens" and not renamed and rejects_name(exc, "max_tokens"):
                     renamed = True
                     token_param = memo.token_param[self.model] = "max_completion_tokens"
                     log.info("%s refuse « max_tokens » : « max_completion_tokens » mémorisé", self.model)

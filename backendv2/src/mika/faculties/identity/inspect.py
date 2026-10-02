@@ -28,6 +28,7 @@ from mika.faculties.identity.faculty import (
     _root,
     handles_of,
     known_as,
+    proves_owner,
     view_of,
 )
 from mika.kernel.events import Event
@@ -85,21 +86,36 @@ LEVEL_FR = {Sensitivity.NONE: "rien sur autrui", Sensitivity.ANODYNE: "anodin", 
             Sensitivity.CONFIDENCE: "confidences"}
 LEVEL_TONE = {Sensitivity.NONE: "muted", Sensitivity.ANODYNE: "muted", Sensitivity.PERSONAL: "info",
               Sensitivity.CONFIDENCE: "ok"}
-CLOSENESS_FR = {social_c.STRANGER: "une inconnue", social_c.ACQUAINTANCE: "une connaissance",
-                social_c.FRIEND: "une amie", social_c.CLOSE: "une proche"}
-EVIDENCE_FR = {"self_declared": "affirmation", c.SHARED_MEMORY: "souvenir partagé recoupé", c.DENIED: "démenti",
+#: Sans genre imposé : la console parle aussi d'Adrien.
+CLOSENESS_FR = {social_c.STRANGER: "pas encore de lien", social_c.ACQUAINTANCE: "connaissance",
+                social_c.FRIEND: "amitié", social_c.CLOSE: "proche"}
+EVIDENCE_FR = {"self_declared": "affirmation", c.SHARED_MEMORY: "souvenir partagé recoupé (seconde preuve)",
+               c.SHARED_HINT: "souvenir partagé recoupé (première preuve)", c.DENIED: "démenti",
                c.CONTRADICTED: "contredit", c.REVOKED: "liaison oubliée", c.VOUCHED: "un opérateur s'en porte garant",
                "passive_inference": "indice passif", "authenticated": "session authentifiée"}
-VIA_FR = {"corroborated": "recoupement", "operator": "opérateur", "vouched": "garantie d'un opérateur"}
+VIA_FR = {c.VIA_CORROBORATED: "recoupement (pas encore confirmé)", c.VIA_OPERATOR: "opérateur",
+          c.VIA_VOUCHED: "garantie d'un opérateur"}
 BY_FR = {"kernel": "le noyau", "tool": "elle (outil)", "operator": "un opérateur"}
+#: Un texte du registre que l'oubli a effacé.
+FORGOTTEN = "(oublié)"
 
 
 def number(value: float) -> str:
     return f"{value:.2f}".replace(".", ",")
 
 
-def certainty_fr(value: float) -> str:
-    return f"{number(value)} ({CERTAINTY_FR.get(privacy.certainty_name(value), '?')})"
+def certainty_fr(value: float, *, bound: bool = True) -> str:
+    """Une certitude et son degré. Pour une adresse qui parle pour elle-même, le
+    degré dit ce que prouve son canal — jamais « liée » : elle n'est liée à personne."""
+    name = privacy.certainty_name(value)
+    if not bound and name in ("bound", "corroborated"):
+        return f"{number(value)} (sûre du compte)"
+    return f"{number(value)} ({CERTAINTY_FR.get(name, '?')})"
+
+
+def view_certainty(view: c.IdentityView) -> str:
+    """La certitude d'une adresse, dite comme il faut selon qu'elle est liée ou non."""
+    return certainty_fr(view.certainty, bound=view.bound)
 
 
 def disclosure_fr(d: Disclosure) -> str:
@@ -148,7 +164,7 @@ def _declared_owners(frame: Frame) -> tuple[str, ...]:
 
 
 def people(s: IdentityState, frame: Frame) -> dict[str, tuple[str, ...]]:
-    """Chaque personne connue et ses adresses (une propriétaire déclarée qui
+    """Chaque personne connue et ses adresses (une adresse déclarée propriétaire qui
     n'a jamais écrit est une personne sans adresse)."""
     out: dict[str, list[str]] = {}
     for key, h in s.handles.items():
@@ -200,16 +216,37 @@ def _why_owner(s: IdentityState, frame: Frame, person: str) -> str:
     for k in handles_of(s, person) or (person,):
         h = s.handles.get(k)
         if h is not None and h.authenticated and h.operator:
-            return f"opératrice authentifiée ({k})"
-        if k in owners:
-            return f"déclarée propriétaire ({k})"
+            return f"compte d'opérateur authentifié ({k})"
+        if k in owners and (h is None or proves_owner(k, h, owners)):
+            return f"adresse déclarée propriétaire ({k})"
     return ""
+
+
+def name_aliases(s: IdentityState, person: str) -> tuple[str, ...]:
+    """Les clés « connue seulement de nom » (``name:alice``) qui ne peuvent désigner
+    qu'elle : un nom qu'aucune autre personne connue ne porte. Oublier la personne
+    les oublie aussi ; un homonyme les garde (on ne sait pas de qui on parlait)."""
+    names = {known_as(s, person)} | {s.handles[k].name for k in handles_of(s, person) if k in s.handles}
+    others = [fold(known_as(s, p)) for p in {(h.person or k) for k, h in s.handles.items()} if p != person]
+    out: set[str] = set()
+    for name in names:
+        folded = " ".join(fold(name).split())
+        if not folded or folded.startswith(NAMED):
+            continue
+        first = folded.split()[0]
+        # le nom complet : personne d'autre ne le porte (ni un prénom seul qui pourrait être lui)
+        if not any(o == folded or o == first for o in others):
+            out.add(f"{NAMED}{folded}")
+        # le prénom : personne d'autre n'a ce prénom
+        if not any(o.split()[:1] == [first] for o in others if o):
+            out.add(f"{NAMED}{first}")
+    return tuple(sorted(out))
 
 
 def _closeness_fr(frame: Frame, person: str) -> str:
     if not is_identifiable(person):
         return "—"
-    return CLOSENESS_FR.get(frame.get(social_c.CLOSENESS(person)), "une inconnue")
+    return CLOSENESS_FR.get(frame.get(social_c.CLOSENESS(person)), CLOSENESS_FR[social_c.STRANGER])
 
 
 def _when(ctx: InspectContext, at: int, never: str = "jamais") -> str:
@@ -237,7 +274,7 @@ def _person_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) 
         subtitle = "Une connexion de passage : rien de durable ne s'y attache."
     else:
         subtitle = relation[:1].upper() + relation[1:]
-        subtitle += ", et sa propriétaire" if owner else ""
+        subtitle += " · propriétaire" if owner else ""
         subtitle += f" — connue depuis {ctx.when(first)}" if first else ""
     badges: list[Badge] = []
     if owner:
@@ -250,12 +287,14 @@ def _person_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) 
         private, _public = _disclosures(frame, main, h)
         badges.append(Badge(f"en privé : {LEVEL_FR.get(private.level, '?')}", LEVEL_TONE.get(private.level, "")))
         facts += [("canal principal", f"{h.channel or '—'} · {TRUST_SHORT[h.trust]}"),
-                  ("certitude", certainty_fr(view.certainty))]
+                  ("certitude", view_certainty(view))]
     if not is_identifiable(person):
         badges.append(Badge("jetable", "muted"))
     facts += [("proximité", relation), ("vue pour la première fois", _when(ctx, first, "—")),
               ("dernier message reçu", _when(ctx, _last_from(frame, handles)))]
-    return Head(person, known_as(s, person), subtitle, tuple(badges), tuple(facts[:6]), handles)
+    # ses adresses, et les noms qui ne désignent qu'elle : oublier la personne les oublie tous
+    aliases = (*handles, *(n for n in name_aliases(s, person) if n not in handles))
+    return Head(person, known_as(s, person), subtitle, tuple(badges), tuple(facts[:6]), aliases)
 
 
 @IDENTITY.search("person")
@@ -300,13 +339,17 @@ def _handle_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) 
     else:
         subtitle = "Reliée à personne : rien ne dit encore qui écrit d'ici."
     badges = [Badge(TRUST_SHORT[h.trust], TRUST_TONE[h.trust]),
-              Badge(f"certitude {certainty_fr(view.certainty)}",
+              Badge(f"certitude {view_certainty(view)}",
                     "ok" if view.certainty >= privacy.POLICY.private_threshold else "muted"),
               Badge("liée", "ok") if view.bound else Badge("non liée", "muted")]
     if view.claim:
         badges.append(Badge(f"revendique « {view.claim} »", "warn"))
-    if frame.get(c.IS_OWNER(view.person)):
-        badges.append(Badge("propriétaire", "info"))
+    if frame.get(c.SPEAKS_AS_OWNER(handle)):
+        badges.append(Badge("droits de propriétaire", "info"))
+    elif frame.get(c.IS_OWNER(view.person)):
+        badges.append(Badge("propriétaire, sans ses droits ici", "warn"))
+    if view.bound and view.via == c.VIA_CORROBORATED:
+        badges.append(Badge("liaison à confirmer", "warn"))
     if not is_identifiable(handle):
         badges.append(Badge("jetable", "muted"))
     facts: tuple[tuple[str, Cell], ...] = (
@@ -356,13 +399,14 @@ def _steps(h: Handle, effective: float) -> list[tuple[str, str, str]]:
     floor, ceiling = privacy.FLOORS[h.trust], privacy.CEILINGS[h.trust]
     raised = max(stored, floor)
     capped = min(raised, ceiling)
-    steps = [("certitude enregistrée", certainty_fr(stored), why),
+    bound = bool(h.person)
+    steps = [("certitude enregistrée", certainty_fr(stored, bound=bound), why),
              ("plancher du canal", number(floor),
               f"relevée de {number(stored)} à {number(raised)}" if raised > stored else "déjà au-dessus : inchangée"),
              ("plafond du canal", number(ceiling),
               f"le plafond mord : {number(raised)} ramenée à {number(capped)}" if capped < raised
               else "sous le plafond : inchangée"),
-             ("certitude effective", certainty_fr(effective), "celle qui vaut sur ce canal")]
+             ("certitude effective", certainty_fr(effective, bound=bound), "celle qui vaut sur ce canal")]
     if abs(capped - effective) > 1e-9:
         steps.append(("écart", number(capped), "le calcul pas à pas ne retombe pas sur la lecture de la faculté"))
     bar = privacy.POLICY.private_threshold
@@ -385,9 +429,10 @@ def why_level(certainty: float, trust: ChannelTrust, *, closeness: str, warmth: 
                 "anodin seulement")
     rank = privacy.closeness_rank(closeness)
     link = f"pour elle, {CLOSENESS_FR.get(closeness, closeness or 'une inconnue')} ; chaleur {number(warmth)}"
-    if not (rank >= privacy.CLOSENESS_RANK[social_c.FRIEND] or warmth >= pol.warmth_min):
-        return (f"aucun lien assez fort ({link}) : anodin — être amie, proche, ou une chaleur d'au moins "
-                f"{number(pol.warmth_min)} ouvrirait le personnel")
+    warm = warmth >= pol.warmth_min and rank >= privacy.CLOSENESS_RANK[social_c.ACQUAINTANCE]
+    if not (rank >= privacy.CLOSENESS_RANK[social_c.FRIEND] or warm):
+        return (f"aucun lien assez fort ({link}) : anodin — être amie, proche, ou une connaissance pour qui elle a "
+                f"une chaleur d'au moins {number(pol.warmth_min)} ouvrirait le personnel")
     if certainty >= pol.confidence_threshold and rank >= privacy.CLOSENESS_RANK[social_c.CLOSE]:
         return f"proche et reconnue à au moins {number(pol.confidence_threshold)} ({link}) : jusqu'aux confidences"
     return (f"un lien ({link}) ouvre le personnel ; les confidences demandent une proche reconnue à au moins "
@@ -415,7 +460,7 @@ def _opens(frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> Table:
                      why_level(view.certainty, h.trust, closeness=closeness, warmth=warmth, public=audience_public),
                      LEVEL_FR.get(d.witness_level, "?"),
                      why_file(view.certainty, h.trust, public=audience_public)))
-    return Table(("audience", "sur autrui", "pourquoi", "si elle ou il est concerné", "sa propre fiche"),
+    return Table(("audience", "sur autrui", "pourquoi", "si la personne est concernée", "sa propre fiche"),
                  tuple(rows), title="Ce que ça ouvre")
 
 
@@ -424,9 +469,21 @@ def _verdict(frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> list
             _opens(frame, handle, h, view)]
 
 
+def _owner_here(s: IdentityState, frame: Frame, handle: str, h: Handle, person: str) -> str:
+    """Les droits de propriétaire de qui écrit par cette adresse, et pourquoi (ou pourquoi pas)."""
+    if not frame.get(c.IS_OWNER(person)):
+        return "non"
+    why = _why_owner(s, frame, person) or "par une autre de ses adresses"
+    if frame.get(c.SPEAKS_AS_OWNER(handle)):
+        how = "" if not h.person else " ; un opérateur a relié cette adresse"
+        return f"oui — {why}{how} (jamais dans un salon public)"
+    if h.trust not in (ChannelTrust.ACCOUNT, ChannelTrust.AUTHENTICATED):
+        return f"la personne l'est ({why}), mais rien ne prouve qui écrit d'ici : pas ses droits"
+    return (f"la personne l'est ({why}), mais cette adresse a été reliée par "
+            f"{VIA_FR.get(h.via, h.via or '?')} : pas ses droits tant qu'un opérateur ne l'a pas reliée")
+
+
 def _handle_fields(s: IdentityState, frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> Fields:
-    owner = frame.get(c.IS_OWNER(view.person))
-    why = _why_owner(s, frame, view.person)
     return Fields((
         ("clé", Text(handle, "mono")), ("nom", view.name or "—"), ("canal", h.channel or "—"),
         ("confiance du canal", TRUST_FR.get(h.trust, str(h.trust))),
@@ -435,7 +492,7 @@ def _handle_fields(s: IdentityState, frame: Frame, handle: str, h: Handle, view:
         ("compte authentifié", "oui" if h.authenticated else "non"),
         ("joignable d'elle-même", "oui (conversation privée)" if h.push else "non"),
         ("parle pour", person_ref(s, view.person)),
-        ("propriétaire", f"oui — {why or 'par une autre de ses adresses'}" if owner else "non"),
+        ("droits de propriétaire", _owner_here(s, frame, handle, h, view.person)),
         ("jetable", "non" if is_identifiable(handle) else "oui : aucune mémoire durable ne s'y attache"),
     ), title="L'adresse", columns=2)
 
@@ -460,18 +517,27 @@ def _claim(s: IdentityState, h: Handle, view: c.IdentityView, ctx: InspectContex
         ("vers la barre", Meter(certainty / bar if bar else 0.0, f"{number(certainty)} / {number(bar)}",
                                 "ok" if certainty >= bar else "")),
         ("preuves déjà comptées", ", ".join(_used(u) for u in claim.used) or "—"),
+        ("premières preuves de recoupement",
+         ", ".join(f"élément n°{x.item}{' (détail rare)' if x.rare else ''}" for x in claim.hints) or "aucune"),
         ("depuis", When(claim.at)),
         ("s'éteint", When(claim.at + ttl) if view.claim else "déjà éteinte"),
         ("état", "active" if view.claim else "éteinte (jamais confirmée à temps)"),
     ), title="Revendication en cours", columns=2)]
-    if view.claim and claim.target:
+    if view.claim and claim.target and claim.target != view.handle:
         missing = max(0.0, bar - certainty)
         blocks.append(Note(
-            f"Il manque {number(missing)} pour atteindre la barre. Ce qui peut la confirmer : un souvenir partagé "
-            f"que seule {known_as(s, claim.target)} pouvait connaître (+{number(privacy.EVIDENCE[c.SHARED_MEMORY])}), "
-            f"un opérateur qui s'en porte garant (+{number(privacy.EVIDENCE[c.VOUCHED])}), ou qui relie directement "
-            f"cette adresse (certitude {number(privacy.BOUND)}). Le plafond du canal reste "
-            f"{number(privacy.CEILINGS[h.trust])}.", title="Pour la confirmer"))
+            f"Il manque {number(missing)} pour atteindre la barre. Ce qui peut la confirmer : ce que seule "
+            f"{known_as(s, claim.target)} pouvait savoir, recoupé sur deux messages différents (jamais celui où "
+            f"la personne se présente), dont un avec un détail rare — un nom propre, un nombre, une date "
+            f"(+{number(privacy.EVIDENCE[c.SHARED_MEMORY])}) ; un opérateur qui s'en porte garant "
+            f"(+{number(privacy.EVIDENCE[c.VOUCHED])}) ; ou qui relie directement cette adresse (certitude "
+            f"{number(privacy.BOUND)}). Le plafond du canal reste {number(privacy.CEILINGS[h.trust])}. Une liaison "
+            "par recoupement reste « à confirmer » : le fil des autres adresses lui reste fermé tant qu'un opérateur "
+            "ne l'a pas confirmée.", title="Pour la confirmer"))
+    elif view.claim and claim.target == view.handle:
+        blocks.append(Note(f"Elle se donne un autre nom que celui sous lequel elle la connaît : rien ne change tant "
+                           f"que rien ne le confirme (« {claim.name} » ne délie ni ne renomme cette adresse).",
+                           tone="muted", title="Un autre nom"))
     return blocks
 
 
@@ -482,7 +548,7 @@ def _describe_event(e: Event[Any], s: IdentityState) -> tuple[str, str]:
         if target is None:
             aim = "plusieurs personnes portent ce nom"
         elif target == data.handle:
-            aim = "personne d'autre ne le porte : elle ou il se présente"
+            aim = "personne d'autre ne le porte : la personne se présente"
         else:
             aim = f"vise {known_as(s, str(target))}"
         where = " (en public)" if data.public else ""
@@ -491,12 +557,14 @@ def _describe_event(e: Event[Any], s: IdentityState) -> tuple[str, str]:
         kind = str(data.kind)
         weight = privacy.EVIDENCE.get(kind, privacy.COUNTER_EVIDENCE.get(kind, 0.0))
         detail = f"{EVIDENCE_FR.get(kind, kind)} ({'+' if weight >= 0 else ''}{number(weight)})"
-        if data.name:
-            detail += f" — nom « {data.name} »"
+        name = _said(data.name, data.legacy_name)
+        if name:
+            detail += f" — nom « {name} »" if name != FORGOTTEN else f" — nom {FORGOTTEN}"
         if data.item is not None:
-            detail += f" — élément de mémoire n°{data.item}"
-        if data.note:
-            detail += f" — {data.note}"
+            detail += f" — élément de mémoire n°{data.item}" + (" (détail rare)" if data.rare else "")
+        note = _said(data.note, data.legacy_note)
+        if note:
+            detail += f" — {note}"
         return "preuve", detail
     person = data.person
     if person is None or person == data.handle:
@@ -507,14 +575,27 @@ def _describe_event(e: Event[Any], s: IdentityState) -> tuple[str, str]:
 _KIND_TONE = {"revendication": "warn", "preuve": "info", "liaison": "ok"}
 
 
+def _said(content: Any, legacy: str = "") -> str:
+    """Un texte du registre : gardé à part (« (oublié) » une fois oublié), ou en clair
+    pour une preuve d'avant la version 2."""
+    if content is None:
+        return legacy
+    text = getattr(content, "text", None)
+    return text if text is not None else FORGOTTEN
+
+
 def _ledger(s: IdentityState, handle: str, ctx: InspectContext) -> Block:
     """Le registre des raisons de croire (ou de ne plus croire), relu au
-    journal : ces événements ne portent aucun contenu, rien n'y est oublié.
-    L'opérateur qui a agi est lu dans l'audit de la console."""
+    journal. Le nom démenti et la note sont gardés à part : oubliés, ils se
+    lisent « (oublié) ». L'opérateur qui a agi est lu dans l'audit de la console.
+    On lit une ligne de plus que la page : « plus anciens » n'est offert que s'il
+    en reste vraiment."""
     if ctx.journal is None:
         return Note("Le magasin n'est pas disponible : le registre des preuves ne peut pas être relu.", tone="muted")
     before = ctx.int_param("avant", 0) or None
-    found = ctx.events((c.CLAIMED, c.EVIDENCE, c.LINKED), MAX_LEDGER, where=("handle", handle), before=before)
+    found = ctx.events((c.CLAIMED, c.EVIDENCE, c.LINKED), MAX_LEDGER + 1, where=("handle", handle), before=before)
+    more = len(found) > MAX_LEDGER
+    found = found[:MAX_LEDGER]
     operators: dict[int, str] = {}
     if any(str(getattr(e.data, "by", "")) == "operator" for e in found):
         for op in ctx.events((rt.OPERATED,), 200, where=("subject", handle)):
@@ -531,7 +612,7 @@ def _ledger(s: IdentityState, handle: str, ctx: InspectContext) -> Block:
         rows.append(Row((Ref("event", str(e.seq), str(e.seq)), When(e.at), Badge(label, _KIND_TONE.get(label, "")),
                          detail, who, Ref("event", str(message), f"message {message}") if message is not None
                          else "—")))
-    pager = Pager(older=(("avant", str(found[-1].seq)),)) if len(found) == MAX_LEDGER else Pager()
+    pager = Pager(older=(("avant", str(found[-1].seq)),)) if more else Pager()
     return Table((Column("n°", "fit"), Column("quand", "fit"), "sorte", "détail", "par", "message"), tuple(rows),
                  title="Registre des preuves (les plus récentes d'abord)", pager=pager,
                  empty="aucune revendication, preuve ni liaison")
@@ -546,7 +627,7 @@ def _handles_table(s: IdentityState, frame: Frame, ctx: InspectContext, handles:
         o = s.handles[k]
         view = view_of(s, k, frame.now)
         rows.append(Row((handle_ref(s, k), o.channel or "—", Badge(TRUST_SHORT[o.trust], TRUST_TONE[o.trust]),
-                         certainty_fr(view.certainty), "non liée" if not o.person else VIA_FR.get(o.via, o.via or "?"),
+                         view_certainty(view), "non liée" if not o.person else VIA_FR.get(o.via, o.via or "?"),
                          f"« {view.claim} »" if view.claim else "—",
                          When(o.first_seen) if o.first_seen else "—",
                          When(last) if (last := frame.get(transcript_c.LAST_FROM(k))) else "jamais",
@@ -592,18 +673,18 @@ def _synthesis(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
         ("connue depuis", When(first) if first else "—"),
         ("proximité", _closeness_fr(frame, person)),
         ("joignable d'elle-même", ", ".join(reachable) if reachable
-         else "non : il faut qu'elle ou il écrive le premier"),
+         else "non : il faut que la personne écrive d'abord"),
     ), title="Qui", columns=2))
     main = principal(s, person)
     if main is None:
-        blocks.append(Note("Aucune adresse connue : déclarée propriétaire, elle ou il n'a encore jamais écrit.",
+        blocks.append(Note("Aucune adresse connue : adresse déclarée propriétaire, qui n'a encore jamais écrit.",
                            tone="muted"))
         return blocks
     h = s.handles[main]
     view = view_of(s, main, frame.now)
     blocks.append(Section("Ce qu'elle peut lui dire", (
         Fields((("adresse principale", handle_ref(s, main)), ("canal", f"{h.channel or '—'} · {TRUST_FR[h.trust]}"),
-                ("certitude effective", certainty_fr(view.certainty)),
+                ("certitude effective", view_certainty(view)),
                 ("barre de divulgation", number(privacy.POLICY.private_threshold))), columns=2),
         _opens(frame, main, h, view),
     ), description="Sur son adresse principale (celle dont le canal prouve le plus). Chaque adresse a son verdict "
@@ -719,7 +800,7 @@ def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
         rows.append(Row((
             person_ref(s, person), len(handles),
             Badge(TRUST_SHORT[h.trust], TRUST_TONE[h.trust]) if h else "—",
-            certainty_fr(view.certainty) if view else "—",
+            view_certainty(view) if view else "—",
             Badge(CLOSENESS_FR.get(closeness, "—"), "info" if closeness in (social_c.FRIEND, social_c.CLOSE) else "")
             if closeness else "—",
             Badge("propriétaire", "info") if frame.get(c.IS_OWNER(person)) else "",
@@ -753,7 +834,7 @@ def _directory(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
         private, public = _disclosures(frame, handle, h)
         rows.append(Row((
             handle_ref(s, handle), h.channel or "—", Badge(TRUST_FR[h.trust], TRUST_TONE[h.trust]),
-            certainty_fr(view.certainty), person_ref(s, view.person),
+            view_certainty(view), person_ref(s, view.person),
             "oui" if frame.get(c.IS_OWNER(view.person)) else "non",
             f"« {view.claim} »" if view.claim else "—", disclosure_fr(private), disclosure_fr(public),
             When(h.first_seen) if h.first_seen else "—", Text(handle, "mono"),
@@ -856,7 +937,7 @@ def _policy(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
              "l'atteignent." if problem is None else f"Calibration fausse : {problem}.",
              tone="ok" if problem is None else "danger", title="Calibration"),
         Fields((("déclarés dans les réglages", ", ".join(owners) or "aucun"),
-                ("en vigueur (opératrices comprises)", ", ".join(known_as(s, p) for p in frame.get(c.OWNERS))
+                ("en vigueur (comptes d'opérateur compris)", ", ".join(known_as(s, p) for p in frame.get(c.OWNERS))
                  or "aucun")), title="Propriétaires"),
     ]
 

@@ -22,7 +22,7 @@ from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from mika.vocab import privacy
 from mika.vocab.privacy import ChannelTrust, Disclosure, Sensitivity, decide, disclosable
-from tests.fixtures.mika import boot, build, connect, said
+from tests.fixtures.mika import befriend, boot, build, connect, said
 
 A, P, C = Sensitivity.ANODYNE, Sensitivity.PERSONAL, Sensitivity.CONFIDENCE
 ACC, AUTH, PUB, INT = ChannelTrust.ACCOUNT, ChannelTrust.AUTHENTICATED, ChannelTrust.PUBLIC, ChannelTrust.INTERNAL
@@ -36,12 +36,15 @@ MATRIX = [
     (0.70, ACC, "stranger", 0.0, False, A, "à la barre sans lien : anodin"),
     (0.70, ACC, "acquaintance", 0.1, False, A, "une connaissance n'est pas un lien"),
     (0.70, ACC, "friend", 0.0, False, P, "un ami, à la barre"),
-    (0.70, ACC, "stranger", 0.5, False, P, "un lien tiède compte comme un lien"),
+    (0.70, ACC, "stranger", 0.5, False, A, "la chaleur seule, pour une inconnue, n'ouvre rien sur autrui"),
+    (0.70, ACC, "acquaintance", 0.5, False, P, "de la chaleur pour quelqu'un qu'elle connaît : un lien"),
     (0.70, ACC, "stranger", 0.0, True, P, "il était là quand ça s'est dit"),
     (0.70, ACC, "close", 1.0, False, P, "un proche à 0,70 n'a pas encore la confidence"),
     (0.85, ACC, "close", 0.0, False, C, "un proche, en privé, à haute certitude"),
     (0.85, ACC, "friend", 0.0, False, P, "un ami n'est pas un proche"),
-    (0.85, ACC, "stranger", 0.0, True, C, "la personne concernée elle-même"),
+    (0.85, ACC, "stranger", 0.0, True, P, "un simple témoin n'est pas un confident"),
+    (0.85, ACC, "friend", 0.0, True, C, "une amie qui était là"),
+    (1.0, AUTH, "stranger", 1.0, True, P, "même chaleureuse, une inconnue témoin n'a pas la confidence"),
     (1.0, AUTH, "stranger", 0.0, False, A, "le canal ne donne pas le lien"),
     (1.0, AUTH, "friend", 0.0, False, P, "la relation, oui"),
     (1.0, AUTH, "close", 0.0, False, C, "proche et connecté"),
@@ -129,27 +132,33 @@ def test_the_composer_drops_what_the_audience_may_not_hear():
 def test_disclosure_fact_follows_warmth_for_an_authenticated_person(tmp_path):
     """Connectée avec son compte : sa fiche est ouverte ; ce qu'on peut lui
     dire des autres suit le lien — ici, la chaleur que leurs échanges ont
-    installée."""
+    installée, pour quelqu'un qu'elle connaît déjà. La même chaleur pour une
+    inconnue d'un jour n'ouvre rien sur autrui."""
     kernel, clock, _llm, _out = build(tmp_path, lambda req: LLMResponse("oui [EMOTION:love:0.9]"))
 
     async def main():
         await boot(kernel)
         await connect(kernel, "user_1", "Adrien")
+        await connect(kernel, "user_4", "Zoé")
+        await befriend(kernel, "user_1", "acquaintance")
         first = kernel.mind.frame().get(identity_c.DISCLOSURE(("user_1", "web", False)))
         for _ in range(8):
-            p = await kernel.perceive(said("user_1", "tu comptes beaucoup pour moi"))
-            await p.reply
-            await asyncio.sleep(60)
+            for handle in ("user_1", "user_4"):
+                p = await kernel.perceive(said(handle, "tu comptes beaucoup pour moi"))
+                await p.reply
+                await asyncio.sleep(60)
         later = kernel.mind.frame().get(identity_c.DISCLOSURE(("user_1", "web", False)))
+        warm_stranger = kernel.mind.frame().get(identity_c.DISCLOSURE(("user_4", "web", False)))
         public = kernel.mind.frame().get(identity_c.DISCLOSURE(("user_1", "web", True)))
         stranger = kernel.mind.frame().get(identity_c.DISCLOSURE(("web_x", "web", False)))
         internal = kernel.mind.frame().get(identity_c.DISCLOSURE(("conscience_mika", "internal", False)))
         await kernel.stop()
-        return first, later, public, stranger, internal
+        return first, later, warm_stranger, public, stranger, internal
 
-    first, later, public, stranger, internal = run_virtual(clock, main)
+    first, later, warm_stranger, public, stranger, internal = run_virtual(clock, main)
     assert first.own_file and first.level is A
     assert later.level is P  # la chaleur a ouvert le personnel
+    assert warm_stranger.own_file and warm_stranger.level is A, "la chaleur seule ne fait pas d'une inconnue une confidente"
     assert public.level is A and not public.own_file
     assert stranger.level is A and not stranger.own_file
     assert internal.closed

@@ -1,15 +1,23 @@
 """Comment elle écrit depuis chaque boîte, et ce qu'elle voit de son courrier.
 
 - **Sa voix** par compte (réglée par un opérateur : de confiance) : en son nom,
-  en assistante, ou **à la place** de son opérateur — à la première personne,
-  sans évoquer sa nature, en laissant ``[À COMPLÉTER : …]`` ce qu'elle ne sait
-  pas plutôt que de l'inventer (un brouillon qui en contient ne part pas).
-  Puis le ton, les consignes ; la signature est ajoutée à l'envoi.
-- **Ce qu'elle voit** : ses mails non lus et ce qu'un opérateur a envoyé
-  (**cités** : ce sont des données) ; ses brouillons et ce qu'ils sont
-  devenus ; pendant une tâche de rédaction, le mail et son fil (cités) et ce
-  que son opérateur veut y dire. Tout cela pour ses propriétaires seulement,
-  ou pour elle quand elle travaille.
+  en assistante, ou **à la place** de la personne qui s'occupe d'elle — à la
+  première personne, sans évoquer sa nature, en laissant ``[À COMPLÉTER : …]``
+  ce qu'elle ne sait pas plutôt que de l'inventer (un brouillon qui en
+  contient ne part pas). Puis le ton, les consignes ; la signature est
+  ajoutée à l'envoi.
+- **Ce qu'elle voit** : ses mails non lus et ce qu'un opérateur a envoyé ;
+  ses brouillons et ce qu'ils sont devenus ; pendant une tâche de rédaction,
+  le mail et son fil. **Tout ce qui vient d'un mail est cité** (un objet, un
+  expéditeur, des destinataires : l'expéditeur les a choisis) — jamais dans
+  une section de confiance. Seule sa voix, réglée par un opérateur, et ce
+  qu'un opérateur lui demande d'y répondre le sont.
+- **Pour qui** : ses propriétaires en privé, ou elle quand elle travaille ; un
+  courrier est personnel (niveau « personnel », au titre de témoin : la
+  propriétaire le reçoit, un salon jamais).
+- **Quand** : c'est de l'arrière-plan. En initiative ou au travail, elle a
+  tout sous les yeux ; en réponse à quelqu'un, seulement les mails
+  importants, et seulement quand le ton de la personne est assez léger.
 """
 
 from __future__ import annotations
@@ -18,6 +26,8 @@ from collections.abc import Mapping
 from typing import Any
 
 from mika.contracts import email as c
+from mika.contracts import identity as identity_c
+from mika.contracts import others as others_c
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
@@ -25,17 +35,22 @@ from mika.plugins.email import (
     EMAIL,
     FAILED,
     GONE,
+    KEEPER,
     REFUSED,
     SENT_SHOWN_FOR,
     WAITING,
     EmailState,
     SentSeen,
     for_owner,
-    operator_name,
+    keeper_name,
+    keepers,
+    params_of,
     task_mail,
 )
 from mika.ports.mail import AccountInfo, Mail, split_ref
+from mika.ports.preprocess import inert
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
+from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import Sensitivity
 
 #: ce que dit une voix au plus (le ton, les consignes)
@@ -44,12 +59,15 @@ THREAD_MAX = 3
 OUTCOMES_SHOWN = 4
 TALK = [*CONVERSATIONAL, *WORKING]
 ALL = [*CONVERSATIONAL, *WORKING, Kind.TASK]
+#: un courrier est personnel ; sa propriétaire le reçoit (témoin), un salon jamais
+LEVEL = int(Sensitivity.PERSONAL)
+BACKGROUND = "TES MAILS NON LUS — de l'arrière-plan : réponds d'abord à ce qu'on vient de te dire"
 
 
-def voice_text(info: AccountInfo, *, owner_fallback: str = "ton opérateur") -> str:
+def voice_text(info: AccountInfo, *, owner_fallback: str = KEEPER) -> str:
     """Comment écrire depuis cette boîte : sa voix, son ton, ses consignes."""
     owner = info.display_name.strip() or owner_fallback
-    head = f"Boîte « {info.name} » ({info.address or 'sans adresse'}) : "
+    head = f"Boîte « {inert(info.name, 80)} » ({inert(info.address, 120) or 'sans adresse'}) : "
     if info.voice == "proprietaire":
         head += (f"tu y écris **à la place** de {owner}, à la première personne, comme cette personne le ferait "
                  f"(le mail part signé de son nom) ; tu n'évoques ni toi ni ta nature. Ce que {owner} saurait et que "
@@ -88,6 +106,31 @@ def _outcomes(s: EmailState, frame: Frame) -> list[Any]:
                   key=lambda d: -d.proposal)[:OUTCOMES_SHOWN]
 
 
+def light(frame: Frame) -> bool:
+    """Le courrier est de l'arrière-plan : en réponse à quelqu'un, il ne vient que si le ton du
+    moment de la personne est assez léger (une initiative, un travail : toujours)."""
+    ep = frame.episode
+    if ep is None or ep.kind != Kind.REPLY:
+        return True
+    if not ep.target or not is_identifiable(ep.target):
+        return False
+    reading = frame.get(others_c.MIND(frame.get(identity_c.PERSON(ep.target))))
+    return reading.current_valence >= params_of(frame).background_from
+
+
+def _shown_unread(frame: Frame) -> list[c.MailView]:
+    """Les mails non lus qu'elle a sous les yeux : tous (cinq) en initiative ou au travail ; en
+    réponse à quelqu'un, les importants seulement, et rien si la conversation est lourde."""
+    unread = list(frame.get(c.UNREAD))
+    ep = frame.episode
+    if ep is not None and ep.kind == Kind.REPLY:
+        if not light(frame):
+            return []
+        p = params_of(frame)
+        unread = [m for m in unread if m.importance >= p.mention_from]
+    return unread[:5]
+
+
 def _thread(port: Any, mail: Mail) -> list[Mail]:
     """Ce à quoi ce mail répond (du plus récent au plus ancien), dans le cache."""
     out: list[Mail] = []
@@ -114,7 +157,7 @@ async def _gather(s: EmailState, frame: Frame, ports: Mapping[str, Any]) -> dict
     if store is None or not for_owner(frame):
         return None
     out: dict[str, Any] = {"texts": {}, "accounts": {}, "drafts": {}, "task": None}
-    refs = [m.summary_ref for m in frame.get(c.UNREAD)[:5] if m.summary_ref]
+    refs = [m.summary_ref for m in _shown_unread(frame) if m.summary_ref]
     refs += [m.summary_ref for _, m in _recent_sent(s, frame) if m.summary_ref]
     mail = task_mail(frame)
     ask = s.asked.get(mail) if mail else None
@@ -137,7 +180,7 @@ async def _gather(s: EmailState, frame: Frame, ports: Mapping[str, Any]) -> dict
 
 
 @EMAIL.section("mails", zone=Zone.VOLATILE, episodes=TALK, trim_rank=20, title="TES MAILS NON LUS",
-               untrusted=True, reads=[c.UNREAD])
+               untrusted=True, reads=[c.UNREAD, others_c.MIND, identity_c.PERSON])
 def _mails(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
     texts, accounts = got.get("texts") or {}, got.get("accounts") or {}
@@ -145,26 +188,31 @@ def _mails(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
         return None
     several = len(accounts) > 1
     lines = []
-    for m in frame.get(c.UNREAD)[:5]:
+    for m in _shown_unread(frame):
         text = texts.get(m.summary_ref)
         if text:
             flag = " (important)" if m.importance >= 0.8 else ""
             flag += " (attend une réponse)" if m.needs_reply else ""
-            box = f" [{accounts[m.account].name}]" if several and m.account in accounts else ""
-            lines.append(f"[{m.mail}]{box}{flag} {text}")
+            box = f" [{inert(accounts[m.account].name, 60)}]" if several and m.account in accounts else ""
+            lines.append(f"[{m.mail}]{box}{flag} {inert(text)}")
     for k, m in _recent_sent(s, frame):
         text = texts.get(m.summary_ref)
         if text:
-            who = "toi, retouché par " + operator_name(frame, m.by) if m.edited else (
-                operator_name(frame, m.by) if m.by and not m.draft else "toi")
-            lines.append(f"[{k}] (parti de ta boîte, écrit par {who}) {text}")
-    return SectionBody("\n".join(lines), level=int(Sensitivity.NONE)) if lines else None
+            who = "toi, retouché par " + keeper_name(frame, m.by) if m.edited else (
+                keeper_name(frame, m.by) if m.by and not m.draft else "toi")
+            lines.append(f"[{k}] (parti de ta boîte, écrit par {who}) {inert(text)}")
+    if not lines:
+        return None
+    ep = frame.episode
+    title = BACKGROUND if ep is not None and ep.kind == Kind.REPLY else None
+    return SectionBody("\n".join(lines), level=LEVEL, witness=True, title=title)
 
 
-# ── Ses brouillons (ce qu'elle a fait : de confiance) ─────────────────────
+# ── Ses brouillons : ce qu'elle a fait, mais à qui et à quel propos vient d'un mail (cité) ─
 
 
-@EMAIL.section("drafts", zone=Zone.VOLATILE, episodes=ALL, trim_rank=30, title="TES BROUILLONS DE MAILS")
+@EMAIL.section("drafts", zone=Zone.VOLATILE, episodes=ALL, trim_rank=30, title="TES BROUILLONS DE MAILS",
+               untrusted=True)
 def _drafts(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
     known = got.get("drafts") or {}
@@ -173,17 +221,17 @@ def _drafts(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
     lines = []
     for d in _outcomes(s, frame):
         to, subject = known.get(d.draft, ("?", "?"))
-        what = f"Ton brouillon à {to} (« {subject} »)"
+        what = f"Ton brouillon à {inert(to, 120)} (« {inert(subject, 160)} »)"
         if d.state == WAITING:
-            lines.append(f"{what} attend l'accord de ton opérateur.")
+            lines.append(f"{what} attend l'accord de {keepers(frame)}.")
         elif d.state == GONE:
             lines.append(f"{what} est parti.")
         elif d.state == REFUSED:
-            note = f" : « {d.note} »" if d.note else ""
-            lines.append(f"{what} a été refusé par {operator_name(frame, d.by)}{note}.")
+            note = f" : « {inert(d.note, 300)} »" if d.note else ""
+            lines.append(f"{what} a été refusé par {keeper_name(frame, d.by)}{note}.")
         elif d.state == FAILED:
-            lines.append(f"{what} n'a pas pu partir ({d.result or 'une erreur'}).")
-    return SectionBody("\n".join(lines)) if lines else None
+            lines.append(f"{what} n'a pas pu partir ({inert(d.result, 200) or 'une erreur'}).")
+    return SectionBody("\n".join(lines), level=LEVEL, witness=True) if lines else None
 
 
 # ── Sa voix (réglée par un opérateur : de confiance) ──────────────────────
@@ -213,10 +261,13 @@ def _voice(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
 
 
 def _render_mail(m: Mail) -> str:
-    head = [f"De : {m.sender}", f"À : {m.to}"] + ([f"Cc : {m.cc}"] if m.cc else [])
-    head.append(f"Objet : {m.subject}")
+    head = [f"De : {inert(m.sender, 200)}", f"À : {inert(m.to, 300)}"] + ([f"Cc : {inert(m.cc, 300)}"] if m.cc else [])
+    head.append(f"Objet : {inert(m.subject, 300)}")
     if m.attachments:
-        head.append("Pièces jointes : " + ", ".join(a.name for a in m.attachments[:10]))
+        head.append("Pièces jointes : " + ", ".join(inert(a.name, 80) for a in m.attachments[:10]))
+    if m.twin:
+        head.append("(attention : un autre mail de cette boîte porte le même identifiant — l'un des deux peut "
+                    "être une imitation)")
     return "\n".join(head) + "\n\n" + m.body[:6000]
 
 
@@ -231,11 +282,11 @@ def _task_mail(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
     text = f"[{task_mail(frame)}]\n" + _render_mail(mail)
     for older in thread:
         text += f"\n\n— plus tôt dans le fil —\n{_render_mail(older)[:2000]}"
-    return SectionBody(text, level=int(Sensitivity.NONE))
+    return SectionBody(text, level=LEVEL, witness=True)
 
 
 @EMAIL.section("task_ask", zone=Zone.VOLATILE, episodes=[Kind.TASK], trim_rank=95,
-               title="CE QUE TON OPÉRATEUR VEUT Y RÉPONDRE")
+               title="CE QU'ON TE DEMANDE D'Y RÉPONDRE")
 def _task_ask(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     mail = task_mail(frame)
     ask = s.asked.get(mail) if mail else None
@@ -243,6 +294,6 @@ def _task_ask(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> Section
         return None
     text = ((enrich.get("mail") or {}).get("texts") or {}).get(ask.instruction_ref, "") if ask.instruction_ref \
         else ""
-    who = operator_name(frame, ask.by)
+    who = keeper_name(frame, ask.by)
     said = f"{who[:1].upper()}{who[1:]} te demande de préparer une réponse à ce mail"
     return SectionBody(f"{said}. Ce qu'il faut y dire :\n{text}" if text else f"{said}.")

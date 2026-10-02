@@ -11,7 +11,9 @@
   arrêté ; l'ancien dossier est mis de côté) ;
 - ``llm show|backend|route|remove|context`` : les modèles (clés chiffrées) ;
 - ``account <nom> <mot de passe> [--operator]`` : un compte ;
-- ``telegram show|token|allow|disallow|owner`` : le robot Telegram (jeton chiffré) ;
+- ``telegram show|token|allow|disallow|owner|open|close`` : le robot Telegram
+  (jeton chiffré ; fermé par défaut : liste blanche et propriétaires) ;
+- ``serve --origin URL --cookie-secure --behind-proxy`` : derrière un mandataire TLS ;
 - ``console apercu --out DOSSIER`` : chaque page de la console, exportée ;
 - ``identity link|unlink`` et ``social closeness`` : ce qu'un opérateur sait
   mieux qu'elle (serveur arrêté : une seule écriture à la fois dans ``mind.db``).
@@ -29,14 +31,15 @@ import tempfile
 import time
 from pathlib import Path
 
-from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError
+from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError, runtime_dir
 from mika.adapters.llm.config import BackendSpec, LLMConfig
 from mika.adapters.mail import LEGACY_ACCOUNT
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
+from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
 from mika.adapters.web.accounts import Accounts, password_problems
-from mika.app import backup, datadir
+from mika.app import backup, composition, datadir
 from mika.app.composition import faculties, for_simulation
 from mika.app.server import serve
 from mika.app.settings import SecretBox, Settings
@@ -46,6 +49,7 @@ from mika.kernel.codec import digest
 from mika.kernel.registry import Registry
 from mika.plugins.forge import SWITCHED
 from mika.ports.llm import LLMRequest, Message
+from mika.runtime.bootstrap import Kernel
 from mika.runtime.mind import Mind
 from mika.runtime.state import RUNTIME
 from mika.sim.catalog import run_lane
@@ -99,11 +103,23 @@ async def rebuild(data: Path, owners: list[str]) -> dict[str, object]:
 
 
 async def forget(data: Path, subject: str) -> dict[str, object]:
-    mind = _mind(data)
-    await mind.boot(append_boot=False)
-    n = await mind.forget(subject)
-    await mind.close()
-    return {"sujet": subject, "contenus_effacés": n}
+    """L'oubli, comme la console le fait : par ``Kernel.forget`` — contenus et
+    projections, traces d'épisode, et tout port qui garde une trace dérivée
+    (l'index des vecteurs). Rien ne démarre : aucun processus, aucun modèle."""
+    datadir.hold(data)  # serveur arrêté : une seule écriture à la fois
+    store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
+    vectors = SqliteVectorIndex(store, SentenceEmbedder())  # le modèle ne se charge qu'à un plongement : jamais ici
+    kernel = Kernel(composition.deps(store=store, clock=RealClock(), ids=RandomIdGen(), ports={"vectors": vectors}))
+    try:
+        await kernel.mind.boot(append_boot=False)
+        await vectors.open()
+        await kernel.traces.open()
+        report = await kernel.forget(subject)
+    finally:
+        await kernel.mind.close()
+        datadir.release(data)
+    return {"sujet": subject, "contenus_effacés": report.get("contents", 0), "traces_effacées": report.get("traces", 0),
+            "vecteurs_effacés": report.get("vectors", 0)}
 
 
 async def _with_settings(data: Path, fn):  # type: ignore[no-untyped-def]
@@ -171,7 +187,7 @@ async def claude_code_check(data: Path, name: str | None) -> dict[str, object]:
     """Un appel sans outil : la CLI répond-elle, avec quel modèle, quel usage de l'abonnement ?"""
     spec = await _claude_code_spec(data, name)
     backend = ClaudeCodeBackend(spec.model, relay=Relay(), relay_base=None, auth=spec.auth, api_key=spec.api_key,
-                                claude_bin=spec.claude_bin, config_dir=spec.config_dir, work_dir=data / "claude-code")
+                                claude_bin=spec.claude_bin, config_dir=spec.config_dir, work_dir=runtime_dir(data))
     req = LLMRequest(role="check", call_id="verification#0", system_stable="Réponds exactement : ok",
                      messages=(Message("user", "ping"),), priority=0)
     t0 = time.monotonic()
@@ -225,9 +241,11 @@ async def telegram_command(data: Path, args: argparse.Namespace) -> dict[str, ob
             await settings.save_telegram(allowed_chats=[c for c in cfg["allowed_chats"] if c not in args.chats])
         elif args.tg_cmd == "owner":
             await settings.save_telegram(owners=[*cfg["owners"], *args.users])
+        elif args.tg_cmd in ("open", "close"):
+            await settings.save_telegram(open_to_all=args.tg_cmd == "open")
         cfg = settings.telegram()
         return {"token": "…" + cfg["token"][-4:] if cfg["token"] else "", "allowed_chats": cfg["allowed_chats"],
-                "owners": cfg["owners"]}
+                "owners": cfg["owners"], "open": cfg["open"]}
 
     return await _with_settings(data, run)
 
@@ -311,6 +329,13 @@ def _run(argv: list[str] | None) -> int:
     sv.add_argument("--port", type=int, default=8001)
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--reports", type=Path, default=None, help="dossier des rapports de simulation (inspecteur)")
+    sv.add_argument("--origin", action="append", default=[], dest="origins",
+                    help="une origine admise du frontend (répétable, ex. https://mika.example) ; remplace celles "
+                         "du développement")
+    sv.add_argument("--cookie-secure", action="store_true", help="cookies « Secure » (servi en HTTPS)")
+    sv.add_argument("--behind-proxy", action="store_true",
+                    help="derrière un mandataire TLS local : l'adresse du client vient de ses en-têtes, cookies "
+                         "« Secure », et les points MCP refusent toute requête relayée")
     bk = sub.add_parser("backup", help="archiver ce qui ne se reconstruit pas (serveur en marche : sans risque)")
     bk.add_argument("dest", type=Path, help="dossier des archives")
     bk.add_argument("--keep", type=int, default=0, help="n'en garder que les N plus récentes (0 : toutes)")
@@ -366,6 +391,8 @@ def _run(argv: list[str] | None) -> int:
     td.add_argument("chats", nargs="+", type=int)
     to = tsub.add_parser("owner", help="comptes Telegram propriétaires (identifiants d'utilisateur)")
     to.add_argument("users", nargs="+", type=int)
+    tsub.add_parser("open", help="ouvrir à tout le monde, liste blanche comprise (sinon : fermé par défaut)")
+    tsub.add_parser("close", help="revenir à la liste blanche et aux propriétaires")
     idp = sub.add_parser("identity", help="relier une adresse à une personne (serveur arrêté)")
     isub = idp.add_subparsers(dest="id_cmd", required=True)
     il = isub.add_parser("link")
@@ -460,7 +487,8 @@ def _run(argv: list[str] | None) -> int:
         print(f"{len(pages)} pages exportées : {args.out / 'index.html'}")
         return 0
     if args.cmd == "serve":
-        serve(host=args.host, port=args.port, data=args.data, reports=args.reports)
+        serve(host=args.host, port=args.port, data=args.data, reports=args.reports, origins=args.origins,
+              cookie_secure=args.cookie_secure, behind_proxy=args.behind_proxy)
         return 0
     if args.cmd in ("backup", "verify", "restore"):
         try:

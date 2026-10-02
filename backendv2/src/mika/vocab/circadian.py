@@ -1,10 +1,15 @@
-"""Le rythme circadien : des phases locales, une teinte, une énergie.
+"""Le rythme circadien : des phases locales, une teinte, une vigilance.
 
 Fonctions pures d'un profil et d'une heure locale. Les phases changent à des
 instants **déterministes** (les débuts de phase, en heure locale, heure d'été
 comprise) : les physiques qui en dépendent (le repos de l'humeur) sont
 constantes par morceaux entre ces instants, jamais échantillonnées à la
 cadence d'une boucle.
+
+La **vigilance de l'heure** (le processus C) culmine en début de soirée, avec
+un creux après le déjeuner et son plus bas au petit matin. Ce n'est pas la
+fatigue : elle vient de la pression de sommeil (``body``) — on est fatigué
+près de l'heure où l'on s'endort, pas « parce qu'il est 22 h ».
 """
 
 from __future__ import annotations
@@ -13,7 +18,7 @@ import enum
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
 
@@ -35,11 +40,20 @@ PHASE_FR: Mapping[Phase, str] = MappingProxyType({
     Phase.NIGHT: "nuit",
 })
 
+#: « c'est le matin »…
+MOMENT_FR: Mapping[Phase, str] = MappingProxyType({
+    Phase.MORNING: "le matin",
+    Phase.AFTERNOON: "l'après-midi",
+    Phase.EVENING: "le soir",
+    Phase.NIGHT: "la nuit",
+})
+
+#: Une tendance, dite comme une tendance (jamais une consigne).
 _TENDENCY_FR: Mapping[Phase, str] = MappingProxyType({
-    Phase.MORNING: "tu es dans ta phase la plus tonique et optimiste",
-    Phase.AFTERNOON: "tu es pleinement active, facilement enjouée",
-    Phase.EVENING: "tu te poses, ton ton devient plus doux et chaleureux",
-    Phase.NIGHT: "tu es en mode introspection, plus rêveuse et intime",
+    Phase.MORNING: "Le matin, tu es d'ordinaire plutôt d'attaque.",
+    Phase.AFTERNOON: "L'après-midi, tu es souvent en forme, facilement enjouée.",
+    Phase.EVENING: "Le soir, tu te poses, et ton ton se fait souvent plus doux.",
+    Phase.NIGHT: "La nuit, tu es souvent plus rêveuse.",
 })
 
 
@@ -59,14 +73,17 @@ def _default_tints() -> Mapping[Phase, Emotion]:
 @dataclass(frozen=True, slots=True)
 class Profile:
     """Un rythme : débuts de phase (minutes locales), teinte de chaque phase,
-    courbe d'énergie (cosinus sur 24 h)."""
+    vigilance de l'heure (un cosinus sur 24 h culminant en début de soirée,
+    moins un creux après le déjeuner)."""
 
     starts: tuple[tuple[Phase, int], ...] = field(default_factory=_default_starts)
     tints: Mapping[Phase, Emotion] = field(default_factory=_default_tints)
     tint_strength: float = 0.35
-    energy_peak_hour: float = 14.0
-    energy_amplitude: float = 0.7
-    energy_baseline: float = 0.55
+    energy_peak_hour: float = 18.0
+    energy_amplitude: float = 0.36
+    energy_baseline: float = 0.62
+    energy_dip_hour: float = 14.0
+    energy_dip: float = 0.08
 
     def __post_init__(self) -> None:
         ordered = tuple(sorted(self.starts, key=lambda s: s[1]))
@@ -87,6 +104,8 @@ class Profile:
             energy_peak_hour=(self.energy_peak_hour + minutes / 60.0) % 24.0,
             energy_amplitude=self.energy_amplitude,
             energy_baseline=self.energy_baseline,
+            energy_dip_hour=(self.energy_dip_hour + minutes / 60.0) % 24.0,
+            energy_dip=self.energy_dip,
         )
 
 
@@ -125,11 +144,15 @@ def tint(phase: Phase, profile: Profile = DEFAULT) -> Vec3:
 
 
 def energy(dt: datetime, profile: Profile = DEFAULT) -> float:
-    """Énergie circadienne dans [0, 1] : cosinus culminant à ``energy_peak_hour``."""
+    """La vigilance de l'heure, dans [0, 1] : un cosinus culminant à
+    ``energy_peak_hour``, moins un creux (une gaussienne d'une heure et demie)
+    autour de ``energy_dip_hour``. Sans la fatigue (``body``)."""
     hour = dt.hour + dt.minute / 60.0 + dt.second / 3600.0
     value = profile.energy_baseline + profile.energy_amplitude / 2.0 * math.cos(
         2 * math.pi * (hour - profile.energy_peak_hour) / 24.0
     )
+    gap = (hour - profile.energy_dip_hour + 12.0) % 24.0 - 12.0
+    value -= profile.energy_dip * math.exp(-((gap / 1.5) ** 2))
     return max(0.0, min(1.0, value))
 
 
@@ -150,15 +173,35 @@ MONTHS_FR = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "
              "novembre", "décembre")
 
 
-def date_fr(dt: datetime) -> str:
-    return f"{DAYS_FR[dt.weekday()]} {dt.day} {MONTHS_FR[dt.month - 1]} {dt.year}"
+def date_fr(dt: date) -> str:
+    """« lundi 28 septembre 2026 »."""
+    return f"{day_fr(dt)} {dt.year}"
+
+
+def day_fr(dt: date) -> str:
+    """« lundi 28 septembre » (sans l'année, comme on le dit)."""
+    return f"{DAYS_FR[dt.weekday()]} {dt.day} {MONTHS_FR[dt.month - 1]}"
+
+
+def energy_feel(value: float) -> str:
+    """Ce que son énergie lui fait, en mots (jamais un nombre) ; vide quand il
+    n'y a rien à en dire."""
+    if value >= 0.7:
+        return "tu as la pêche"
+    if value >= 0.5:
+        return "tu es en forme"
+    if value >= 0.35:
+        return ""
+    if value >= 0.2:
+        return "tu es fatiguée"
+    return "tu es épuisée"
 
 
 def describe(dt: datetime, profile: Profile = DEFAULT, level: float | None = None) -> str:
-    """« Nous sommes lundi 28 septembre 2026, il est 23h05. En phase nuit, … »"""
+    """« Nous sommes lundi 28 septembre 2026, il est 23h23 — c'est la nuit, et
+    tu es épuisée. La nuit, tu es souvent plus rêveuse. » Ni pourcentage ni
+    jargon : la date, l'heure, le moment, ce qu'elle ressent, une tendance."""
     phase = phase_of(dt, profile)
-    value = energy(dt, profile) if level is None else level
-    return (
-        f"Nous sommes {date_fr(dt)}, il est {dt.hour:02d}h{dt.minute:02d}. En phase {PHASE_FR[phase]}, "
-        f"{_TENDENCY_FR[phase]}. Ton énergie est {energy_word(value)} ({round(value * 100)} %)."
-    )
+    feel = energy_feel(energy(dt, profile) if level is None else level)
+    moment = f"c'est {MOMENT_FR[phase]}" + (f", et {feel}" if feel else "")
+    return f"Nous sommes {date_fr(dt)}, il est {dt.hour}h{dt.minute:02d} — {moment}. {_TENDENCY_FR[phase]}"

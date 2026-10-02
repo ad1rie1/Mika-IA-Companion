@@ -165,6 +165,9 @@ class ToolSpec:
     #: réservé à ses propriétaires : pas offert à quelqu'un d'autre, sauf quand
     #: elle travaille (STEP, personne n'écoute). Le gestionnaire garde sa garde.
     owner_only: bool = False
+    #: offert seulement devant une audience qui le rend utile (``fn(audience) -> bool``) :
+    #: un outil qui ne peut rien y faire n'invite pas le modèle à essayer
+    when: Callable[[Any], bool] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -561,12 +564,13 @@ class Faculty(Generic[S, Pm]):
         effect: EffectClass = EffectClass.NONE,
         max_calls_per_episode: int | None = None,
         owner_only: bool = False,
+        when: Callable[[Any], bool] | None = None,
     ):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
-                    frozenset(episodes), min_level, effect, max_calls_per_episode, owner_only,
+                    frozenset(episodes), min_level, effect, max_calls_per_episode, owner_only, when,
                 )
             )
             return fn

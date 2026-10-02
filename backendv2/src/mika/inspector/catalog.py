@@ -136,14 +136,38 @@ class SettingsSection:
     #: ses sous-pages (vide : une seule page, la section entière)
     pages: tuple[SettingsPage, ...] = ()
     #: des choix connus au rendu pour un champ texte (chemin → ``fn() -> [(valeur, libellé)]``) :
-    #: il devient un sélecteur (les fuseaux horaires)
+    #: il devient un sélecteur (les fuseaux horaires) — et ils sont appliqués à l'écriture, import
+    #: YAML compris (une valeur hors liste est refusée, sauf celle déjà en place)
     choices: Mapping[str, Callable[[], Sequence[tuple[str, str]]]] = field(default_factory=dict)
+    #: les listes dont le nom d'une entrée ne change plus une fois créée (ailleurs, des données le
+    #: portent : les mails rangés d'une boîte) — renommer est refusé, en le disant
+    fixed_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class SettingsTab:
     key: str
     title: str
+
+
+@dataclass(frozen=True, slots=True)
+class Labels:
+    """Les noms en français de ce que les facultés déclarent, décidés par la composition comme la
+    carte (``app/console.py``) : la console n'en connaît aucun. Une clé sans libellé reste lisible
+    (une forme générique : « Courrier · mail draft »), jamais un trou."""
+
+    #: faculté → son nom pour un opérateur (« Humeur et postures »)
+    faculties: Mapping[str, str] = field(default_factory=dict)
+    #: section du prompt (sa clé) → ce qu'elle lui montre (« Sa posture envers la personne »)
+    sections: Mapping[str, str] = field(default_factory=dict)
+    #: raison d'une preuve de l'arbitre → ce qui pousse (« Envie de compagnie »)
+    reasons: Mapping[str, str] = field(default_factory=dict)
+    #: veto d'un modulateur → ce qui retient (« Elle dort »)
+    vetoes: Mapping[str, str] = field(default_factory=dict)
+    #: processus (« memory.consolidate ») → ce qu'il fait
+    processes: Mapping[str, str] = field(default_factory=dict)
+    #: type d'événement d'une faculté → ce qui s'est passé (« Un souvenir retenu »)
+    events: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

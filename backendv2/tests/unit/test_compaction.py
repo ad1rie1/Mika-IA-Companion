@@ -44,6 +44,11 @@ def test_a_long_thread_folds_into_a_summary(tmp_path):
     assert history == 26, "le verbatim reste dans l'historique"
     assert all(c.upto <= kernel.mind.root.slices["memory"].checkpoint for c in compacted), \
         "on ne replie que ce que la mémoire a déjà relu"
+    # le résumé reçoit des échanges nommés et datés (il sera relu bien plus tard)
+    folded = [r for r in llm.calls if r.role == "compact"][0].messages[-1].content
+    lines = folded.split("Suite des échanges :\n", 1)[1].splitlines()
+    assert lines[0].startswith("[lundi 28 septembre, 14h") and "Alice : message numéro 0" in lines[0]
+    assert "Elle ou lui" not in folded
 
 
 def test_a_backlog_folds_oldest_first_in_bounded_batches(tmp_path):

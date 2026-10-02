@@ -13,6 +13,7 @@ from mika.contracts import identity as c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
+from mika.kernel.clock import DAY, US
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
@@ -23,6 +24,10 @@ from mika.vocab.privacy import ChannelTrust, Disclosure
 _TRUST_ORDER = {ChannelTrust.INTERNAL: 0, ChannelTrust.PUBLIC: 1, ChannelTrust.ACCOUNT: 2,
                 ChannelTrust.AUTHENTICATED: 3}
 _PUSH_CHANNELS = frozenset({"telegram"})
+#: Les canaux qui prouvent un compte : seuls ceux-là peuvent porter les droits d'une propriétaire.
+_PROVEN = frozenset({ChannelTrust.ACCOUNT, ChannelTrust.AUTHENTICATED})
+#: Au plus tant de souvenirs recoupés retenus sur une revendication en attente.
+HINTS_KEPT = 4
 
 
 class IdentityParams(BaseModel):
@@ -31,9 +36,27 @@ class IdentityParams(BaseModel):
     #: Adresses de propriétaires sans compte opérateur (un Telegram, par exemple).
     owners: Annotated[tuple[str, ...], Knob(
         label="Propriétaires (adresses)", group="Propriétaires",
-        help="Une adresse par ligne (ex. tg_123456789) traitée comme l'opératrice sans compte : récit complet de "
-             "ses travaux, outils réservés (forge, caméra…). Fourni par les réglages Telegram (onglet « Canaux ») : "
+        help="Une adresse par ligne (ex. tg_123456789) traitée comme la propriétaire, sans compte : récit complet "
+             "de ses travaux, outils réservés (forge, caméra…). Seulement sur un canal qui prouve le compte "
+             "(Telegram) et jamais dans un salon public. Fourni par les réglages Telegram (onglet « Canaux ») : "
              "quand des propriétaires y sont déclarés, ce champ se lit ici sans se changer.")] = ()
+    #: Deux preuves de recoupement : sur deux messages au moins aussi espacés.
+    proof_spacing_us: Annotated[int, Knob(
+        label="Recoupement : écart entre les deux preuves", group="Être convaincue", lo=0, hi=DAY,
+        help="Pour qu'on la croie sans compte, quelqu'un qui dit être une personne qu'elle connaît doit recouper "
+             "ce que seule cette personne savait sur deux messages différents, au moins aussi espacés (dont un "
+             "avec un détail rare : un nom propre, un nombre, une date). Jamais dans le message où elle se "
+             "présente.")] = 30 * US
+
+
+@dataclass(frozen=True, slots=True)
+class Hint:
+    """Un souvenir recoupé, en attente de sa seconde preuve."""
+
+    item: int
+    message: int
+    at: int
+    rare: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +66,8 @@ class Claim:
     certainty: float  # enregistrée, avant le plafond du transport
     at: int
     used: tuple[str, ...] = ()  # preuves déjà comptées (identiques : non cumulables)
+    #: les premières preuves d'un recoupement (il en faut deux, sur deux messages)
+    hints: tuple[Hint, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,7 +91,9 @@ class IdentityState:
     handles: FrozenDict[str, Handle] = field(default_factory=FrozenDict)
 
 
-IDENTITY = Faculty("identity", state=IdentityState, init=lambda p: IdentityState(), params=IdentityParams)
+#: v2 : revendications à deux preuves, démentis jugés à la lecture, une session ne se relie jamais.
+IDENTITY = Faculty("identity", state=IdentityState, init=lambda p: IdentityState(), params=IdentityParams,
+                   state_version=2)
 IDENTITY.declare(*c.ALL)
 
 
@@ -93,7 +120,8 @@ def _seen(s: IdentityState, handle: str, at: int, *, channel: str, authenticated
         current = replace(current, push=True)  # une conversation privée : on peut lui écrire
     cleaned = clean_display_name(name)
     if authenticated:
-        current = replace(current, authenticated=True, name=cleaned or current.name)
+        # une session prouve qui écrit : elle parle pour elle-même, jamais pour une autre
+        current = replace(_unbound(current), authenticated=True, name=cleaned or current.name, claim=None)
         if operator is not None:
             current = replace(current, operator=operator)
     elif cleaned and not current.name:
@@ -132,6 +160,12 @@ def _unbound(h: Handle) -> Handle:
     return replace(h, person=None, certainty=0.0, via="")
 
 
+def _claim_of(h: Handle, name: str, target: str | None, at: int, public: bool) -> Claim:
+    trust = ChannelTrust.PUBLIC if public else h.trust
+    base = privacy.apply_evidence(privacy.FLOORS[trust], "self_declared", trust)
+    return Claim(name, target, base, at, ("self_declared",))
+
+
 @IDENTITY.reducer(c.CLAIMED)
 def _claimed(s: IdentityState, e, cx) -> IdentityState:
     d = e.data
@@ -139,26 +173,66 @@ def _claimed(s: IdentityState, e, cx) -> IdentityState:
     name = clean_display_name(d.name)
     if h is None or h.authenticated or not name:
         return s  # une session prouve déjà qui parle : « je suis Thomas » y est une blague
+    if h.claim is not None and h.claim.target == d.target and same_name(name, h.claim.name) \
+            and live_claim(h, e.at) is not None:
+        return s  # elle le redit : la revendication en cours, et ses preuves, restent
     if d.target == d.handle:
-        # personne d'autre ne porte ce nom : elle se présente
-        h = replace(_unbound(h) if h.person else h, name=name, claim=None)
+        # personne d'autre ne porte ce nom : elle se présente. Une adresse liée ou déjà nommée
+        # autrement ne se délie ni ne se renomme sur une phrase (« moi c'est pizza ce soir ») :
+        # c'est une revendication, qui n'ouvre rien et ne défait rien
+        if h.person or (h.name and not same_name(name, h.name)):
+            h = replace(h, claim=_claim_of(h, name, d.handle, e.at, d.public))
+        else:
+            h = replace(h, name=h.name or name, claim=None)
     elif d.target is not None and d.target == h.person:
         return s  # elle le savait déjà
     else:
-        trust = ChannelTrust.PUBLIC if d.public else h.trust
-        base = privacy.apply_evidence(privacy.FLOORS[trust], "self_declared", trust)
         # une autre identité revendiquée défait la liaison en cours : la
         # certitude gagnée pour l'une ne vaut rien pour l'autre
-        h = replace(_unbound(h), claim=Claim(name, d.target, base, e.at, ("self_declared",)))
+        h = replace(_unbound(h), claim=_claim_of(h, name, d.target, e.at, d.public))
     return replace(s, handles=s.handles.set(d.handle, h))
+
+
+def aims_elsewhere(h: Handle, handle: str, claim: Claim | None = None) -> bool:
+    """Sa revendication vise-t-elle une autre personne qu'elle connaît ? (Pas un simple
+    nom qu'elle se donne — celui-là vise l'adresse elle-même — ni la personne liée.)"""
+    claim = h.claim if claim is None else claim
+    return claim is not None and claim.target is not None and claim.target not in (handle, h.person)
+
+
+def denial_target(h: Handle, name: str, now: int = 0, person_name: str = "") -> str:
+    """Ce que vise un démenti (« je ne suis pas Alice ») : sa liaison si c'est le
+    nom de la personne liée (celui de l'adresse, ou ``person_name``, celui sous
+    lequel elle connaît la personne), sa revendication si c'est le nom
+    revendiqué, le nom qu'elle lui prête ; rien sinon (« c'est pas grave »)."""
+    if h.person and (same_name(name, h.name) or (person_name and same_name(name, person_name))):
+        return c.DENIES_BINDING
+    if h.claim is not None and same_name(name, h.claim.name) and live_claim(h, now) is not None:
+        return c.DENIES_CLAIM
+    if h.name and same_name(name, h.name):
+        return c.DENIES_NAME
+    return ""
+
+
+def _hinted(h: Handle, e: Any) -> Handle:
+    d = e.data
+    claim = h.claim
+    if claim is None or not aims_elsewhere(h, d.handle) or d.item is None:
+        return h
+    if any(x.item == d.item for x in claim.hints):
+        return h
+    hint = Hint(int(d.item), int(d.message or 0), e.at, bool(d.rare))
+    return replace(h, claim=replace(claim, hints=(*claim.hints, hint)[-HINTS_KEPT:]))
 
 
 def _apply(h: Handle, e: Any) -> Handle:
     d = e.data
     bar = privacy.POLICY.private_threshold
+    if d.kind == c.SHARED_HINT:
+        return _hinted(h, e)
     if d.kind == c.SHARED_MEMORY:
         claim = h.claim
-        if claim is None or claim.target is None or claim.target == h.person:
+        if claim is None or not aims_elsewhere(h, d.handle):
             return h
         mark = f"item:{d.item}"
         if c.SHARED_MEMORY in claim.used or mark in claim.used:
@@ -166,28 +240,30 @@ def _apply(h: Handle, e: Any) -> Handle:
         certainty = privacy.apply_evidence(claim.certainty, c.SHARED_MEMORY, h.trust)
         claim = replace(claim, certainty=certainty, used=(*claim.used, c.SHARED_MEMORY, mark))
         if certainty >= bar:
-            return replace(h, person=claim.target, certainty=certainty, via="corroborated", name=claim.name,
+            return replace(h, person=claim.target, certainty=certainty, via=c.VIA_CORROBORATED, name=claim.name,
                            claim=None)
         return replace(h, claim=claim)
     if d.kind == c.VOUCHED:
         # un opérateur se porte garant de la revendication : une preuve de plus,
         # pesée comme les autres (seule, elle ne franchit pas la barre en public)
         claim = h.claim
-        if claim is None or claim.target is None or claim.target == h.person or c.VOUCHED in claim.used:
+        if claim is None or not aims_elsewhere(h, d.handle) or c.VOUCHED in claim.used:
             return h
         certainty = privacy.apply_evidence(claim.certainty, c.VOUCHED, h.trust)
         claim = replace(claim, certainty=certainty, used=(*claim.used, c.VOUCHED))
         if certainty >= bar:
-            return replace(h, person=claim.target, certainty=certainty, via="vouched", name=claim.name, claim=None)
+            return replace(h, person=claim.target, certainty=certainty, via=c.VIA_VOUCHED, name=claim.name,
+                           claim=None)
         return replace(h, claim=claim)
     if d.kind == c.DENIED:
-        if h.person and same_name(d.name, h.name):
+        target = d.denies or (denial_target(h, d.legacy_name) if d.legacy_name else "")
+        if target == c.DENIES_BINDING and h.person:
             certainty = privacy.apply_evidence(h.certainty, c.DENIED, h.trust)
             h = _unbound(h) if certainty < bar else replace(h, certainty=certainty)
             return replace(h, name="") if h.person is None else h
-        if h.claim and same_name(d.name, h.claim.name):
+        if target == c.DENIES_CLAIM and h.claim is not None:
             return replace(h, claim=None)
-        if same_name(d.name, h.name):
+        if target == c.DENIES_NAME and h.name:
             return replace(h, name="")
         return h  # « c'est pas grave » : aucun nom qu'elle lui connaisse
     if d.kind == c.CONTRADICTED:
@@ -222,13 +298,15 @@ def _linked(s: IdentityState, e, cx) -> IdentityState:
         # l'opérateur peut relier une adresse avant qu'elle ait écrit
         channel = "telegram" if d.handle.startswith("tg_") else "web"
         h = Handle(channel=channel, trust=privacy.channel_trust(channel), first_seen=e.at)
+    if h.authenticated:
+        return s  # une session parle pour elle-même : on ne la relie à personne
     if d.person is None or d.person == d.handle:
         h = replace(_unbound(h), claim=None)
     else:
         root = _root(s, d.person)
         if root == d.handle:
             return s
-        h = replace(h, person=root, certainty=privacy.BOUND, via="operator", claim=None)
+        h = replace(h, person=root, certainty=privacy.BOUND, via=c.VIA_OPERATOR, claim=None)
     return replace(s, handles=s.handles.set(d.handle, h))
 
 
@@ -244,6 +322,21 @@ def _root(s: IdentityState, key: str) -> str:
 
 def handles_of(s: IdentityState, person: str) -> tuple[str, ...]:
     out = {k for k, h in s.handles.items() if (h.person or k) == person}
+    return tuple(sorted(out))
+
+
+def confirmed(h: Handle) -> bool:
+    """Une adresse qui parle pour elle-même, ou reliée par une décision d'opérateur."""
+    return not h.person or h.via in c.CONFIRMED_VIA
+
+
+def thread_of(s: IdentityState, handle: str) -> tuple[str, ...]:
+    """Les adresses dont le fil verbatim peut se montrer à qui écrit par ``handle``."""
+    h = s.handles.get(handle)
+    if h is not None and not confirmed(h):
+        return (handle,)  # par simple recoupement : son propre fil, rien de plus tant qu'on n'a pas confirmé
+    person = _root(s, handle)
+    out = {handle, person} | {k for k in handles_of(s, person) if confirmed(s.handles[k])}
     return tuple(sorted(out))
 
 
@@ -286,6 +379,14 @@ def resolve_target(s: IdentityState, handle: str, name: str) -> str | None:
     return found.pop() if len(found) == 1 else None
 
 
+def live_claim(h: Handle, now: int) -> Claim | None:
+    """Sa revendication, si elle ne s'est pas éteinte (jamais confirmée à temps)."""
+    claim = h.claim
+    if claim is not None and now and now - claim.at > privacy.POLICY.pending_claim_ttl_days * DAY:
+        return None
+    return claim
+
+
 def _certainty(h: Handle, trust: ChannelTrust) -> float:
     if h.authenticated:
         return privacy.VERIFIED
@@ -300,16 +401,14 @@ def view_of(s: IdentityState, handle: str, now: int = 0) -> c.IdentityView:
     if h is None:
         trust = ChannelTrust.INTERNAL if is_internal(handle) else ChannelTrust.PUBLIC
         return c.IdentityView(handle, handle, "", trust, 0.0, False, False, False)
-    claim = h.claim
-    if claim is not None and now and now - claim.at > privacy.POLICY.pending_claim_ttl_days * 86_400_000_000:
-        claim = None  # une revendication jamais confirmée s'éteint
+    claim = live_claim(h, now)  # une revendication jamais confirmée s'éteint
     person = h.person or handle
     return c.IdentityView(
         handle=handle, person=person, name=h.name, trust=h.trust, certainty=_certainty(h, h.trust),
         authenticated=h.authenticated, operator=h.operator, known=True, bound=bool(h.person),
         claim=claim.name if claim else "", claim_certainty=privacy.effective(claim.certainty, h.trust) if claim else 0.0,
         claim_target=claim.target if claim else None, channel=h.channel, push=h.push,
-        first_seen=_first_seen(s, person, h.first_seen),
+        first_seen=_first_seen(s, person, h.first_seen), via=h.via if h.person else "",
     )
 
 
@@ -330,23 +429,60 @@ def _handles(s: IdentityState, cx, person: str) -> tuple[str, ...]:
 
 @IDENTITY.fact(c.REACHABLE)
 def _reachable(s: IdentityState, cx, person: str) -> tuple[str, ...]:
-    return tuple(k for k in handles_of(s, person) if s.handles[k].push)
+    return tuple(k for k in handles_of(s, person) if s.handles[k].push and confirmed(s.handles[k]))
+
+
+@IDENTITY.fact(c.THREAD)
+def _thread(s: IdentityState, cx, handle: str) -> tuple[str, ...]:
+    return thread_of(s, handle)
+
+
+def proves_owner(key: str, h: Handle | None, declared: set[str] | frozenset[str]) -> bool:
+    """Cette adresse prouve-t-elle d'elle-même être une propriétaire ? Une session
+    d'opérateur, ou une adresse déclarée sur un canal qui prouve le compte."""
+    if h is None:
+        return False
+    if h.authenticated and h.operator:
+        return True
+    return key in declared and h.trust in _PROVEN
+
+
+def owner_person(s: IdentityState, person: str, declared: set[str] | frozenset[str]) -> bool:
+    """La personne est-elle une propriétaire : une de ses adresses le prouve (ou une adresse
+    déclarée qui n'a encore jamais écrit)."""
+    for k in handles_of(s, person) or (person,):
+        h = s.handles.get(k)
+        if proves_owner(k, h, declared) or (h is None and k in declared):
+            return True
+    return False
+
+
+def speaks_as_owner(s: IdentityState, handle: str, declared: set[str] | frozenset[str]) -> bool:
+    """Qui écrit par cette adresse a-t-il les droits d'une propriétaire ? Elle le
+    prouve elle-même, ou un opérateur l'a reliée à une propriétaire sur un canal
+    qui prouve le compte. Jamais une liaison par recoupement ou garantie."""
+    h = s.handles.get(handle)
+    if h is None or is_internal(handle) or not is_identifiable(handle) or h.trust not in _PROVEN:
+        return False
+    if proves_owner(handle, h, declared):
+        return True
+    return bool(h.person) and h.via == c.VIA_OPERATOR and owner_person(s, h.person, declared)
 
 
 @IDENTITY.fact(c.IS_OWNER)
 def _is_owner(s: IdentityState, cx, person: str) -> bool:
-    owners = set(_params(cx.params).owners)
-    for k in handles_of(s, person) or (person,):
-        h = s.handles.get(k)
-        if k in owners or (h is not None and h.authenticated and h.operator):
-            return True
-    return False
+    return owner_person(s, person, set(_params(cx.params).owners))
+
+
+@IDENTITY.fact(c.SPEAKS_AS_OWNER)
+def _speaks_as_owner(s: IdentityState, cx, handle: str) -> bool:
+    return speaks_as_owner(s, handle, set(_params(cx.params).owners))
 
 
 @IDENTITY.fact(c.OWNERS)
 def _owners(s: IdentityState, cx) -> tuple[str, ...]:
     declared = set(_params(cx.params).owners)
-    out = {_root(s, k) for k, h in s.handles.items() if k in declared or (h.authenticated and h.operator)}
+    out = {_root(s, k) for k, h in s.handles.items() if proves_owner(k, h, declared)}
     out |= {k for k in declared if k not in s.handles}
     return tuple(sorted(out))
 

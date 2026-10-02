@@ -94,6 +94,9 @@ class LLMResponse:
 
 
 PREEMPTED = "préempté par le premier plan"
+#: ``meta`` d'une requête redemandée après une coupure par ``max_tokens`` : un
+#: fournisseur qui bride sa sortie (un modèle local) lève alors son propre plafond
+RETRY_AFTER_CUT = "retry_after_cut"
 
 
 class MissingPersona(ValueError):
@@ -101,12 +104,23 @@ class MissingPersona(ValueError):
 
 
 class LLMBackend(Protocol):
+    """Un fournisseur. Facultatifs : ``resumes_tool_loops`` (faux : il ne sait pas
+    reprendre une boucle d'outils commencée ailleurs — la passerelle ne bascule
+    jamais vers lui en cours de boucle) et ``release(call_id)`` (la boucle est
+    finie : relâcher ce qu'il tient encore pour elle)."""
+
     name: str
 
     async def complete(self, req: LLMRequest) -> LLMResponse: ...
 
 
 class LLMGateway(Protocol):
+    """``release(call_id)`` (facultatif, à appeler par ``getattr``) : la boucle
+    d'outils ``call_id`` est finie — y compris quand on s'arrête sur un appel
+    d'outil lu comme une sortie structurée, ou au plafond de tours. Sans lui, un
+    fournisseur à session (la CLI de Claude Code) ne la relâche qu'à son délai
+    d'inactivité."""
+
     def is_voice(self, role: str) -> bool: ...
 
     async def call(self, req: LLMRequest) -> LLMResponse: ...

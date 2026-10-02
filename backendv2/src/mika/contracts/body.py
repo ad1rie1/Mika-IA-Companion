@@ -5,7 +5,9 @@ pendant la veille et retombe pendant le sommeil, et le **rythme circadien**
 qui module les seuils d'endormissement et de réveil. Elle s'endort quand la
 pression franchit le seuil haut (et que plus personne ne lui parle depuis un
 moment), se réveille quand elle retombe sous le seuil bas — ou quand un
-message la réveille.
+message la réveille : la nuit, seulement celui d'une amie ou d'une proche, ou
+quelque chose d'urgent (``body.roused``). Les autres messages attendent son
+réveil (``body.waited``) : elle y répond le matin.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from __future__ import annotations
 import enum
 
 from mika.kernel.events import Payload, event_type
-from mika.kernel.facts import FactKey
+from mika.kernel.facts import FactFamily, FactKey
 from mika.vocab.circadian import Phase, Profile
 
 OWNER = "body"
@@ -50,9 +52,34 @@ class Woke(Payload):
     pressure: float
 
 
+class Roused(Payload):
+    """Un message l'a tirée du sommeil : une amie, une proche, ou quelque chose
+    d'urgent. Un jugement enregistré (le rejeu retombe sur le même réveil)."""
+
+    message: int
+    handle: str
+    person: str = ""
+    reason: str = ""  # CLOSE_ONE | URGENT
+
+
+class Waited(Payload):
+    """Un message arrivé pendant sa nuit, qui ne la réveille pas : il attend son
+    réveil, et elle y répondra le matin."""
+
+    message: int
+    handle: str
+    person: str = ""
+
+
+#: Raisons d'un réveil par message.
+CLOSE_ONE, URGENT = "close", "urgent"
+
 FELL_ASLEEP = event_type("body.fell_asleep", OWNER, FellAsleep, public=True)
 WOKE = event_type("body.woke", OWNER, Woke, public=True)
-ALL = (FELL_ASLEEP, WOKE)
+ROUSED = event_type("body.roused", OWNER, Roused, public=True, subjects=("person",))
+WAITED = event_type("body.waited", OWNER, Waited, public=True, subjects=("person",))
+#: Ce qui change son sommeil (s'endormir, se réveiller, être tirée du sommeil).
+ALL = (FELL_ASLEEP, WOKE, ROUSED)
 
 
 
@@ -66,3 +93,9 @@ AWAKE_SINCE = FactKey("body.awake_since", type=int)
 ASLEEP_SINCE = FactKey("body.asleep_since", type=int)
 #: Ce qui a changé son sommeil pour la dernière fois (pour les gardes).
 EPOCH = FactKey("body.epoch", type=tuple)
+#: Tirée du sommeil en pleine nuit par un message : elle répond, puis va se rendormir.
+NIGHT_WAKING = FactKey("body.night_waking", type=bool, time_varying=True)
+#: ``REPLY_WAIT(seq)`` : la réponse à ce message attend-elle son réveil ? ``None`` : rien de particulier ;
+#: ``0`` : elle dort (ou a été tirée du sommeil par quelqu'un d'autre), la réponse attend ; sinon l'instant
+#: d'où la réponse est due (son réveil).
+REPLY_WAIT = FactFamily("body.reply_wait", arg=int, type=object, time_varying=True)

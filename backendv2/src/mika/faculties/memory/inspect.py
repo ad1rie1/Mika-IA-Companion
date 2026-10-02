@@ -60,7 +60,7 @@ RUNS_PAGE = 25
 RUNS_CURSOR = "avant"
 NIGHTS_CURSOR = "avant_nuits"
 
-KIND_FR = {c.SOUVENIR: "souvenir", c.BELIEF: "croyance", c.PROMISE: "promesse"}
+KIND_FR = {c.SOUVENIR: "souvenir", c.BELIEF: "croyance", c.PROMISE: "promesse", c.EVENT: "moment de sa vie"}
 STATUS_FR = {"active": "actif", "superseded": "remplacée", "merged": "fondu dans un autre", "pending": "en cours",
              c.HONORED: "tenue", c.DROPPED: "abandonnée"}
 STATUS_TONE = {"active": "ok", "superseded": "muted", "merged": "muted", "pending": "info", c.HONORED: "ok",
@@ -183,6 +183,8 @@ def _text(item: Item) -> Text:
 
 
 def _sensitivity(item: Item) -> Badge:
+    if item.secret:
+        return Badge("secret", "danger")  # on lui a demandé de ne pas le répéter
     return Badge(SENSITIVITY_FR.get(item.sensitivity, str(item.sensitivity)),
                  SENSITIVITY_TONE.get(item.sensitivity, ""))
 
@@ -205,6 +207,15 @@ def _detail(k: Kept, frame: Frame, names: dict[str, str], ctx: InspectContext) -
     pairs: list[tuple[str, Cell]] = [("sorte", KIND_FR.get(item.kind, item.kind))]
     pairs += [("concerne", _person_ref(frame, a, names)) for a in item.about] or [("concerne", "personne")]
     if item.kind != c.PROMISE:
+        pairs += [("confié par", _person_ref(frame, a, names)) for a in item.told_by] or [
+            ("confié par", Text("personne : elle l'a vécu, vu ou raconté d'elle-même", kind="muted"))]
+        pairs += [("entendu par", _person_ref(frame, a, names)) for a in item.heard_by]
+        if item.secret:
+            pairs.append(("secret", "oui : on lui a demandé de ne pas le répéter (ou ça laisse deviner un secret) — "
+                                    "il ne ressort que devant qui l'a confié"))
+        if item.about_self:
+            pairs.append(("sur elle", "ce qu'elle a raconté de sa vie : s'efface en quelques jours"))
+    if item.kind != c.PROMISE:
         pairs += [("touché pour la dernière fois", When(item.touched_at)),
                   ("rappels", f"{item.recalls}" + (f", le dernier {ctx.when(item.recalled_at)}"
                                                    if item.recalled_at else ""))]
@@ -215,6 +226,8 @@ def _detail(k: Kept, frame: Frame, names: dict[str, str], ctx: InspectContext) -
             pairs.append(("remplace", Ref("event", str(k.replaces), f"la croyance n° {k.replaces}")))
     if item.kind == c.PROMISE:
         pairs.append(("échéance", When(item.due, relative=False) if item.due else "sans échéance"))
+    if item.kind == c.EVENT and item.due:
+        pairs.append(("quand", When(item.due, relative=False)))
     if item.emotion and item.kind != c.SOUVENIR:
         pairs.append(("émotion", emotion_cell(item.emotion)))
     pairs += [("vient du message", Ref("event", str(s), f"message n° {s}")) for s in k.sources[:SOURCES_SHOWN]]
@@ -254,6 +267,12 @@ def _belief(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tu
             _meter(it.importance), origin, _status(it, frame, p), When(it.born_at))
 
 
+def _event(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
+    it = k.item
+    return (_n(k), _text(it), _about(frame, it.about, names), _sensitivity(it),
+            When(it.due) if it.due else "—", _status(it, frame, p), When(it.born_at))
+
+
 def _promise(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
     it = k.item
     return (_n(k), _text(it), _about(frame, it.about, names), _sensitivity(it),
@@ -277,13 +296,17 @@ PROMISES = Listing(c.PROMISE, "Ses promesses", "pas encore de promesse",
                    (("pending", "en cours"), (c.HONORED, "tenue"), (c.DROPPED, "abandonnée")),
                    (N, Column("promesse"), Column("à qui"), Column("sensibilité", "fit"), Column("échéance", "fit"),
                     Column("statut", "fit"), Column("faite", "fit", detail=True)), _promise)
-LISTINGS = {x.kind: x for x in (SOUVENIRS, BELIEFS, PROMISES)}
+EVENTS = Listing(c.EVENT, "Ce qui se passe dans la vie des autres", "pas encore de moment noté",
+                 (("active", "à suivre"), ("superseded", "remplacé")),
+                 (N, Column("moment"), Column("de qui"), Column("sensibilité", "fit"), Column("quand", "fit"),
+                  Column("statut", "fit"), Column("noté", "fit", detail=True)), _event)
+LISTINGS = {x.kind: x for x in (SOUVENIRS, BELIEFS, PROMISES, EVENTS)}
 
 
 def _rows(listing: Listing, kept: Sequence[Kept], frame: Frame, ctx: InspectContext) -> tuple[Row, ...]:
     p = _p(frame)
-    names = names_of(frame, {a for k in kept for a in k.item.about} | {k.item.source for k in kept
-                                                                        if k.item.source})
+    names = names_of(frame, {a for k in kept for a in (*k.item.about, *k.item.told_by, *k.item.heard_by)}
+                     | {k.item.source for k in kept if k.item.source})
     return tuple(Row(listing.cells(k, frame, names, p), detail=_detail(k, frame, names, ctx),
                      tone="muted" if not k.item.text else "") for k in kept)
 
@@ -339,6 +362,13 @@ def _beliefs(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
                 description="Ce qu'elle a promis, à qui, pour quand — et si elle l'a tenu.")
 def _promises(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return _list(PROMISES, frame, ctx)
+
+
+@MEMORY.inspect("moments", title="La vie des autres", section="memoire", order=35, params=_params(EVENTS),
+                description="Ce qui va arriver aux gens qu'elle connaît (un entretien, un examen, un départ) : elle "
+                            "y pense quand c'est proche, et leur en demande des nouvelles après.")
+def _moments(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    return _list(EVENTS, frame, ctx)
 
 
 # ── La relecture ──────────────────────────────────────────────────────────
@@ -456,7 +486,7 @@ def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
         if _told_exists(ctx.store) else 0
     sections: list[Block] = []
     totals: dict[str, int] = {}
-    for listing in (SOUVENIRS, BELIEFS, PROMISES):
+    for listing in (SOUVENIRS, BELIEFS, PROMISES, EVENTS):
         where, wargs = [*base, "kind=?"], [*args, listing.kind]
         total = _count(ctx.store, where, wargs)
         totals[listing.kind] = total
@@ -468,6 +498,7 @@ def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
         Stat("Souvenirs", totals[c.SOUVENIR]),
         Stat("Croyances", totals[c.BELIEF]),
         Stat("Promesses", totals[c.PROMISE], f"{sum(1 for x in s.promises.values() if x.to in keys)} en cours"),
+        Stat("Moments de sa vie", totals[c.EVENT]),
         Stat("Ce qu'elle lui a raconté", told, "éléments de sa mémoire déjà dits à cette personne"),
     ))
     return [stats, *sections]

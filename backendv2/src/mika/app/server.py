@@ -2,13 +2,22 @@
 l'adaptateur web par-dessus, un seul processus.
 
 ``python -m mika serve --port 8001`` puis, dans ``frontend/`` : ``npm run dev``.
+Derrière un mandataire TLS : ``--origin https://mika.example --cookie-secure
+--behind-proxy`` (voir ``deploy/README.md``).
+
+Les journaux ne portent jamais un secret : le jeton du robot Telegram (dans
+l'URL de chaque relève), un jeton passé en paramètre d'URL (un flux), un
+``Bearer`` sont masqués ; ``httpx``/``httpcore`` ne parlent qu'en avertissement.
 """
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
-from collections.abc import AsyncIterator, Mapping
+import re
+import shutil
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,6 +30,7 @@ from mika.adapters.camera import CameraBuffer
 from mika.adapters.feeds import HttpFeeds
 from mika.adapters.forge import ForgeHost
 from mika.adapters.llm.calls import CallLog
+from mika.adapters.llm.claude_code import runtime_dir
 from mika.adapters.llm.config import LiveGateway, build_gateway
 from mika.adapters.llm.gateway import LLMTrace
 from mika.adapters.mail import ImapSmtpMail
@@ -34,11 +44,11 @@ from mika.adapters.telegram.ptb import Poller
 from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
 from mika.adapters.web import protocol
 from mika.adapters.web.accounts import Accounts
-from mika.adapters.web.app import WebConfig, create_app
+from mika.adapters.web.app import DEV_ORIGINS, WebConfig, create_app
 from mika.adapters.web.hub import Hub
 from mika.adapters.workshop import BwrapWorkshop
 from mika.app import backup, composition, datadir, reglages
-from mika.app.console import FACULTY_LABELS, NAVIGATION, PARAM_FAMILIES
+from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.delivery import Router
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
@@ -56,6 +66,54 @@ from mika.runtime.bootstrap import Kernel
 from mika.vocab.people import clean_display_name
 
 log = logging.getLogger("mika.server")
+
+#: la relance du robot Telegram après un démarrage raté : délai initial, plafond (secondes)
+TELEGRAM_RETRY_MIN_S = 5.0
+TELEGRAM_RETRY_MAX_S = 600.0
+#: l'état du robot, pour ``/health`` (des états, jamais un contenu)
+_TELEGRAM_HEALTH = {"running": "ok", "starting": "degraded", "retrying": "degraded", "closed": "degraded",
+                    "invalid": "ko"}
+_TELEGRAM_FR = {"running": "en marche", "starting": "démarrage…", "retrying": "relance en cours",
+                "closed": "fermé : personne ne peut lui écrire", "invalid": "jeton refusé", "off": "arrêté"}
+
+#: ce qu'un journal ne doit jamais montrer
+_SECRETS = (
+    (re.compile(r"(/bot)\d+:[A-Za-z0-9_-]+"), r"\1<jeton>"),
+    (re.compile(r"([?&](?:token|key|api[_-]?key|access_token|secret|password|passwd|auth|sig|signature)=)"
+                r"[^&\s\"'#]+", re.IGNORECASE), r"\1…"),
+    (re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE), r"\1…"),
+)
+
+
+def redact(text: str) -> str:
+    """Le texte d'un journal, secrets masqués."""
+    for pattern, replacement in _SECRETS:
+        text = pattern.sub(replacement, text)
+    return text
+
+
+class RedactingFilter(logging.Filter):
+    """Masque les secrets de chaque enregistrement (posé sur les gestionnaires : tous
+    les journaux y passent, ceux des bibliothèques compris)."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except (TypeError, ValueError):
+            return True
+        clean = redact(message)
+        if clean != message:
+            record.msg, record.args = clean, None
+        return True
+
+
+def configure_logging(level: int = logging.INFO) -> None:
+    logging.basicConfig(level=level, format="%(asctime)s %(levelname)s %(name)s : %(message)s")
+    for name in ("httpx", "httpcore"):  # chaque requête, URL comprise (le jeton du robot y est)
+        logging.getLogger(name).setLevel(logging.WARNING)
+    for handler in logging.getLogger().handlers:
+        if not any(isinstance(f, RedactingFilter) for f in handler.filters):
+            handler.addFilter(RedactingFilter())
 
 
 class ForgeSettingsStore:
@@ -124,6 +182,25 @@ class Live:
     #: l'adresse locale où le serveur l'écoute (fixée par ``serve``) ; vide : pas joignable
     relay_base: str = ""
     data: Path | None = None
+    #: fabrique du robot (un faux en test) : ``(jeton, fabrique du canal) -> Poller``
+    make_poller: Callable[..., Any] = Poller
+    #: off | starting | running | retrying | closed | invalid
+    telegram_status: str = "off"
+    telegram_attempts: int = 0
+    telegram_error: str = ""
+    _telegram_task: asyncio.Task[None] | None = None
+
+    def telegram_state(self) -> str:
+        """L'état du robot, en mots (la console)."""
+        text = _TELEGRAM_FR.get(self.telegram_status, self.telegram_status)
+        if self.telegram_status == "retrying":
+            text += f" ({self.telegram_attempts} essai(s), dernière erreur : {self.telegram_error})"
+        return text
+
+    def channel_health(self) -> dict[str, str]:
+        """Ce que ``/health`` dit des canaux : un état par canal configuré."""
+        state = _TELEGRAM_HEALTH.get(self.telegram_status)
+        return {"telegram": state} if state else {}
 
     def trace(self, tr: LLMTrace) -> None:
         self.gateway.traces.append(tr)
@@ -163,34 +240,90 @@ class Live:
         return []
 
     async def start_telegram(self) -> None:
-        """Le robot Telegram, s'il est configuré (``mika telegram token …``)."""
+        """Le robot Telegram, s'il est configuré (``mika telegram token …``). Fermé par
+        défaut : sans liste blanche, ni propriétaire, ni ouverture explicite, personne
+        ne peut lui écrire et la relève ne démarre pas. Un démarrage raté (réseau
+        coupé au lancement) est relancé avec un délai croissant ; ``/health`` le dit."""
+        await self.stop_telegram()
         cfg = self.settings.telegram()
         for problem in await self.reconfigure():  # les propriétaires sont une entrée de l'identité
             log.warning("Telegram : %s", problem)
         if not cfg["token"]:
+            self.telegram_status = "off"
             return
-        config = TelegramConfig(allowed_chats=frozenset(cfg["allowed_chats"]))
-        poller = Poller(cfg["token"], lambda bot: TelegramChannel(self.port, bot, config, preprocess=self.preprocess))
-        await poller.start()
-        self.telegram = poller
-        self.router.telegram = poller.channel
-        log.info("Telegram : relève démarrée (%s)", "liste blanche" if config.allowed_chats else "ouvert à tous")
+        config = TelegramConfig(allowed_chats=frozenset(cfg["allowed_chats"]), owners=frozenset(cfg["owners"]),
+                                open_to_all=cfg["open"], name=self.persona().name or "Mika")
+        if config.closed:
+            self.telegram_status = "closed"
+            log.warning("Telegram : ni liste blanche, ni propriétaire, ni ouverture à tous — personne ne peut lui "
+                        "écrire, la relève ne démarre pas (mika telegram allow|owner|open)")
+            return
+        self.telegram_attempts, self.telegram_error, self.telegram_status = 0, "", "starting"
+        self._telegram_task = asyncio.create_task(self._run_telegram(cfg["token"], config), name="telegram")
+
+    async def _run_telegram(self, token: str, config: TelegramConfig) -> None:
+        delay = TELEGRAM_RETRY_MIN_S
+        while True:
+            self.telegram_status = "starting"
+            self.telegram_attempts += 1
+            poller = None
+            try:
+                poller = self.make_poller(token, lambda bot: TelegramChannel(self.port, bot, config,
+                                                                             preprocess=self.preprocess))
+                await poller.start()
+            except asyncio.CancelledError:
+                if poller is not None:
+                    with contextlib.suppress(Exception):
+                        await poller.stop()
+                raise
+            except Exception as exc:  # noqa: BLE001 — un robot qui ne démarre pas n'empêche pas le reste de vivre
+                if poller is not None:
+                    with contextlib.suppress(Exception):
+                        await poller.stop()
+                self.telegram_error = type(exc).__name__
+                if self.telegram_error in ("InvalidToken", "Unauthorized"):
+                    self.telegram_status = "invalid"
+                    log.warning("Telegram : jeton refusé, relève abandonnée (mika telegram token …)")
+                    return
+                self.telegram_status = "retrying"
+                log.warning("Telegram : démarrage impossible (%s), nouvel essai dans %.0f s", self.telegram_error,
+                            delay)
+                await asyncio.sleep(delay)
+                delay = min(TELEGRAM_RETRY_MAX_S, delay * 2)
+                continue
+            self.telegram = poller
+            self.router.telegram = poller.channel
+            self.telegram_status = "running"
+            access = "ouvert à tous" if config.open_to_all else "liste blanche" if config.allowed_chats else \
+                "propriétaires"
+            log.info("Telegram : relève démarrée (%s)", access)
+            return
 
     async def stop_telegram(self) -> None:
+        task, self._telegram_task = self._telegram_task, None
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
         if self.telegram is not None:
             self.router.telegram = None
             await self.telegram.stop()
             self.telegram = None
+        self.telegram_status = "off"
 
     async def reload_llm(self) -> list[str]:
+        if self.data is not None and (self.data / "claude-code").is_dir():
+            # l'ancien emplacement des dossiers d'appel, dans le dossier de données (donc sauvegardé)
+            shutil.rmtree(self.data / "claude-code", ignore_errors=True)
         if self.fixed:
             return []
         cfg = self.settings.llm()
         problems = cfg.problems()
         if cfg.backends and not problems:
+            # les dossiers d'appel de la CLI (prompts privés, jeton de session MCP) hors du dossier de
+            # données — donc hors des sauvegardes — et en mémoire (XDG_RUNTIME_DIR)
             self.gateway.set(build_gateway(cfg, self.kernel.deps.clock, on_trace=self.trace, relay=self.relay,
                                            relay_base=lambda: self.relay_base,
-                                           work_dir=self.data / "claude-code" if self.data else None))
+                                           work_dir=runtime_dir(self.data) if self.data else None))
             self.kernel.runner.budget = Budget(max_tokens=cfg.context_tokens)
         else:
             self.gateway.set(None)
@@ -265,7 +398,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                      reports=reports, navigation=NAVIGATION,
                                      sections=reglages.sections(live), settings_tabs=reglages.TABS,
                                      parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
-                                     faculty_labels=FACULTY_LABELS, backups=lambda: backup.overview(data)),
+                                     faculty_labels=FACULTY_LABELS, labels=LABELS,
+                                     backups=lambda: backup.overview(data)),
                        cookie_secure=(web.cookie_secure if web else False))
     preprocess = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     live.preprocess = preprocess
@@ -273,7 +407,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token))
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[*inspector, relay, console_mcp],
-                      preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token), live
+                      preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token,
+                      health_extra=live.channel_health), live
 
 
 async def register_accounts(kernel: Kernel, accounts: Accounts) -> int:
@@ -306,14 +441,27 @@ def relay_base(host: str, port: int) -> str:
     return ""
 
 
+def web_config(*, origins: Sequence[str] = (), cookie_secure: bool = False, behind_proxy: bool = False) -> WebConfig:
+    """La configuration web d'un déploiement : les origines du frontend (par défaut celles du
+    développement), des cookies ``Secure`` derrière TLS, l'adresse du client lue chez le mandataire."""
+    clean = tuple(dict.fromkeys(o.strip().rstrip("/") for o in origins if o.strip()))
+    return WebConfig(origins=clean or DEV_ORIGINS, cookie_secure=cookie_secure or behind_proxy,
+                     behind_proxy=behind_proxy)
+
+
 def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/v2"),
-          reports: Path | None = None) -> None:
+          reports: Path | None = None, origins: Sequence[str] = (), cookie_secure: bool = False,
+          behind_proxy: bool = False) -> None:
     import uvicorn  # noqa: PLC0415 — seul le serveur réel en a besoin
 
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s : %(message)s")
+    configure_logging()
     datadir.hold(data)  # avant d'ouvrir quoi que ce soit : refusé tout de suite, en le disant
-    app, live = build(data, reports=reports)
+    app, live = build(data, reports=reports, web=web_config(origins=origins, cookie_secure=cookie_secure,
+                                                            behind_proxy=behind_proxy))
     live.relay_base = relay_base(host, port)
-    # un arrêt (SIGTERM) laisse 20 s aux connexions, puis le cycle de vie arrête le noyau
+    # un arrêt (SIGTERM) laisse 20 s aux connexions, puis le cycle de vie arrête le noyau. Les en-têtes de
+    # mandataire ne sont crus que derrière un mandataire déclaré (local) ; ailleurs, l'adresse vue fait foi.
+    # ``log_config=None`` : les journaux d'uvicorn passent par les nôtres (et leur masque des secrets).
     uvicorn.run(app, host=host, port=port, ws_max_size=protocol.MAX_FRAME_BYTES, log_level="info",
-                timeout_graceful_shutdown=20)
+                timeout_graceful_shutdown=20, log_config=None, proxy_headers=behind_proxy,
+                forwarded_allow_ips="127.0.0.1,::1" if behind_proxy else None)

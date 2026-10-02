@@ -163,10 +163,18 @@ def _blend(parts: Sequence[tuple[str, float]]) -> list[dict[str, Any]]:
     return out
 
 
-def speech(d: Delivery, *, present: bool = True, muted: bool = False) -> dict[str, Any]:
+#: la voix d'un autre onglet de la même personne : un seul écran parle, sinon l'écho
+OTHER_TAB = "other_tab"
+
+
+def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bool = True) -> dict[str, Any]:
+    """Une parole ou une pensée. Une pensée à voix haute (persona ``inner``) n'est
+    pas dans le fil : ``message_id`` nul (le client la range après son curseur et
+    ne l'avance pas). ``voiced`` faux : un autre écran de la même personne parle."""
     decision = voice.decide(voice.SCREEN, hour=d.local_hour, sleep_phase=d.sleep_phase, present=present,
                             muted=muted, persona=d.persona)
     emotion = emotion_of(d.emotion.emotion) or Emotion.NEUTRAL
+    inner = d.persona == voice.INNER
     return {
         "type": "speech",
         "text": d.text,
@@ -176,18 +184,43 @@ def speech(d: Delivery, *, present: bool = True, muted: bool = False) -> dict[st
         "emotion_blend": _blend(d.emotion.blend),
         "source": d.source,
         "person_id": d.target,
-        "speak": decision.speak,
-        "voice_reason": decision.reason,
+        "speak": decision.speak and voiced,
+        "voice_reason": decision.reason if voiced or not decision.speak else OTHER_TAB,
         "voice_persona": d.persona,
         "voice_profile": voice.profile_for(d.persona).to_dict(),
-        "message_id": d.message_id,
-        "user_message_id": d.reply_to,
-        "client_msg_id": d.client_msg_id,
+        "message_id": None if inner else d.message_id,
+        "user_message_id": None if inner else d.reply_to,
+        "client_msg_id": None if inner else d.client_msg_id,
+    }
+
+
+def silence(handle: str, face: affect_c.Face, *, user_message_id: int | None,
+            client_msg_id: str | None) -> dict[str, Any]:
+    """Elle a choisi de ne pas répondre : une trame ``speech`` sans texte. Le client
+    cesse d'afficher « Mika écrit… », rattache sa bulle au message enregistré, et le
+    visage garde ce qu'il montrait (son visage du moment, pas un neutre)."""
+    blend = [{"emotion": e.value, "weight": round(w, 2)} for e, w in face.blend]
+    return {
+        "type": "speech", "text": "", "emotion": face.emotion.value,
+        "emotion_intensity": round(float(face.intensity), 2), "emotion_state": face_state(face),
+        "emotion_blend": blend, "source": "reply", "person_id": handle, "speak": False,
+        "voice_reason": "silence", "voice_persona": voice.SPEAKING,
+        "voice_profile": voice.profile_for(voice.SPEAKING).to_dict(), "message_id": None,
+        "user_message_id": user_message_id, "client_msg_id": client_msg_id,
     }
 
 
 def face_signature(face: affect_c.Face) -> tuple[str, float, tuple[str, ...]]:
     return face.emotion.value, face.intensity, tuple(e.value for e, _ in face.blend)
+
+
+def face_state(face: affect_c.Face) -> dict[str, Any]:
+    return {
+        "person": {"emotion": face.person[0].value, "intensity": face.person[1]},
+        "global": {"emotion": face.mood[0].value, "intensity": face.mood[1]},
+        "message": {"emotion": face.emotion.value, "intensity": face.intensity,
+                    "blend": [{"emotion": e.value, "weight": round(w, 2)} for e, w in face.blend]},
+    }
 
 
 def emotion_update(person_id: str, face: affect_c.Face) -> dict[str, Any]:
@@ -197,12 +230,7 @@ def emotion_update(person_id: str, face: affect_c.Face) -> dict[str, Any]:
         "emotion": face.emotion.value,
         "emotion_intensity": face.intensity,
         "emotion_blend": [{"emotion": e.value, "weight": round(w, 2)} for e, w in face.blend],
-        "emotion_state": {
-            "person": {"emotion": face.person[0].value, "intensity": face.person[1]},
-            "global": {"emotion": face.mood[0].value, "intensity": face.mood[1]},
-            "message": {"emotion": face.emotion.value, "intensity": face.intensity,
-                        "blend": [{"emotion": e.value, "weight": round(w, 2)} for e, w in face.blend]},
-        },
+        "emotion_state": face_state(face),
     }
 
 
@@ -245,23 +273,50 @@ def inner_state_update(frame: Frame, handle: str | None, panel: dict[str, Any] |
 
 
 FAILED_OUTCOMES = frozenset({"failed", "timeout"})
+ABSTAINED_OUTCOME = "abstained"
+#: le statut d'``ack`` qui dit qu'une question acceptée n'aura pas de réponse : le client
+#: passe la bulle en échec, avec sa raison (« Mika est saturée, réessaie dans un instant »)
+REPLY_FAILED_STATUS = "overloaded"
+UNCONFIGURED = "UnconfiguredRole"
 
 
 def fallback_text(detail: str) -> str:
-    if "UnconfiguredRole" in detail:
+    if UNCONFIGURED in detail:
         return ("Je n'ai pas encore de modèle pour répondre : il faut en configurer un "
                 "(python -m mika llm …).")
     return "Désolée, je n'arrive pas à te répondre là tout de suite… Réessaie dans un instant ?"
 
 
-def fallback_speech(handle: str, detail: str, *, user_message_id: int | None, client_msg_id: str | None) -> dict[str, Any]:
+def fallback_speech(handle: str, detail: str, *, user_message_id: int | None, client_msg_id: str | None,
+                    persona: str = voice.SPEAKING) -> dict[str, Any]:
     """Une réponse ratée se dit, sans voix et sans émotion : ce n'est pas elle
     qui parle, c'est la machine. Rien n'est journalisé (``message_id`` nul :
-    le curseur du client n'avance pas)."""
+    le curseur du client n'avance pas). Avec un ``client_msg_id``, l'échec se dit
+    plutôt par un second ``ack`` (``reply_failed_frames``) : une bulle sans
+    identifiant et sans pensée restait épinglée en bas du fil pour toujours."""
     return {
         "type": "speech", "text": fallback_text(detail), "emotion": Emotion.NEUTRAL.value, "emotion_intensity": 0.0,
         "emotion_state": {}, "emotion_blend": [], "source": "error", "person_id": handle, "speak": False,
-        "voice_reason": "error_fallback_muted", "voice_persona": voice.SPEAKING,
-        "voice_profile": voice.profile_for(voice.SPEAKING).to_dict(), "message_id": None,
-        "user_message_id": user_message_id, "client_msg_id": client_msg_id,
+        "voice_reason": "error_fallback_muted", "voice_persona": persona,
+        "voice_profile": voice.profile_for(persona).to_dict(), "message_id": None,
+        "user_message_id": None if persona == voice.INNER else user_message_id,
+        "client_msg_id": None if persona == voice.INNER else client_msg_id,
     }
+
+
+def reply_failed_frames(handle: str, detail: str, face: affect_c.Face, *, user_message_id: int | None,
+                        client_msg_id: str | None) -> list[dict[str, Any]]:
+    """Ce que voit l'écran quand la réponse ne viendra pas : d'abord une trame sans
+    texte (« Mika écrit… » disparaît, le regard « je réfléchis » cesse, la bulle se
+    rattache à son message), puis un second ``ack`` qui passe la bulle en échec
+    avec sa raison. Une installation sans modèle le dit en plus, en note (une
+    pensée : rangée à sa place, jamais épinglée). Un client sans identifiant de
+    message reçoit l'ancienne trame de repli."""
+    if not client_msg_id:
+        return [fallback_speech(handle, detail, user_message_id=user_message_id, client_msg_id=None)]
+    frames = [silence(handle, face, user_message_id=user_message_id, client_msg_id=client_msg_id),
+              ack(client_msg_id, REPLY_FAILED_STATUS)]
+    if UNCONFIGURED in detail:
+        frames.append(fallback_speech(handle, detail, user_message_id=user_message_id, client_msg_id=None,
+                                      persona=voice.INNER))
+    return frames

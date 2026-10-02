@@ -148,9 +148,13 @@ def test_a_proven_objective_is_checked_and_in_her_mode_makes_her_proud(tmp_path)
     async def scenario(kernel, llm):
         before = kernel.mind.frame().get(self_c.ESTEEM)
         pid = await create(kernel, "p1", title="Un module", objectives="Créer un module RDP")
-        await wait(30)
+        after = None
+        for _ in range(30):  # l'estime à l'instant où elle mène à bout (le reste de la demi-heure peut la
+            await wait(1)  # bousculer autrement : une initiative restée sans réponse…)
+            if after is None and events(kernel, c.OBJECTIVE_CLOSED):
+                after = kernel.mind.frame().get(self_c.ESTEEM)
         await kernel.lanes.join()
-        return events(kernel, c.OBJECTIVE_CLOSED), (before, kernel.mind.frame().get(self_c.ESTEEM)), pid, \
+        return events(kernel, c.OBJECTIVE_CLOSED), (before, after), pid, \
             kernel.mind.frame().state("projects").projects[pid]
 
     closed, esteem, pid, project = live(tmp_path, scenario)

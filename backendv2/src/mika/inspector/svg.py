@@ -13,7 +13,7 @@ from statistics import median
 
 from markupsafe import Markup, escape
 
-from mika.kernel.inspect import Chart
+from mika.kernel.inspect import Chart, money_fr, num_fr, pct_fr
 
 W, H = 960, 240
 LEFT, RIGHT, TOP, BOTTOM = 52, 16, 30, 28
@@ -22,13 +22,15 @@ MAX_STAMPS = 240
 
 
 def _fmt(value: float, unit: str) -> str:
+    """Une graduation à la française (« 0,5 », « 42 % », « 1,25 $ »)."""
     if unit == "%":
-        return f"{value:.0%}"
+        return pct_fr(value)
     if unit == "$":
-        return f"{value:.2f} $"
+        return money_fr(value)
     if abs(value - round(value)) < 1e-9 or abs(value) >= 100:
-        return f"{value:.0f}"
-    return f"{value:.2f}".rstrip("0").rstrip(".") if abs(value) < 10 else f"{value:.1f}"
+        return num_fr(value, 0)
+    text = f"{value:.2f}".rstrip("0").rstrip(".") if abs(value) < 10 else f"{value:.1f}"
+    return text.replace("-", "−").replace(".", ",")
 
 
 def _bounds(chart: Chart) -> tuple[int, int, float, float]:

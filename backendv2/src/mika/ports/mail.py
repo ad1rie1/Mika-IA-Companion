@@ -7,9 +7,16 @@ que ce qu'elle en a remarqué, décidé ou appris. Un mail est un texte venu
 d'ailleurs : une donnée, jamais une consigne.
 
 - **Plusieurs comptes** : chacun a une clé courte (``perso``) ; un mail se
-  désigne par sa **référence** ``compte:Message-ID`` (``mail_ref``). Une
-  référence sans compte (les journaux d'avant les comptes) désigne le mail
-  dans n'importe quelle boîte.
+  désigne par sa **référence**, que **l'adaptateur attribue** à l'arrivée et
+  que l'expéditeur ne choisit pas (``Mail.key``). Le premier mail d'un
+  Message-ID propre garde la forme ``compte:Message-ID`` (``mail_ref`` : les
+  journaux existants restent valables) ; un second mail qui porte le même
+  Message-ID avec un autre contenu en reçoit une autre (``compte:Message-ID#2``)
+  et les deux sont signalés (``Mail.twin``) — un faux ne prend jamais la place
+  du vrai. Un Message-ID qui ne tient pas dans une référence propre (blancs,
+  crochets, trop long) est remplacé par une empreinte (``compte:#…``). Une
+  référence sans compte (les journaux d'avant les comptes) désigne le premier
+  mail de ce Message-ID, dans n'importe quelle boîte.
 - **Sa voix** par compte (``AccountInfo.voice``) : en son nom, en assistante,
   ou à la place de son opérateur — la façon d'écrire est dite par le plugin,
   la mise en forme finale (expéditeur, signature, citation) par l'adaptateur.
@@ -23,7 +30,11 @@ from __future__ import annotations
 import email.utils
 import hashlib
 import re
+import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
+from email.errors import HeaderParseError
+from email.headerregistry import Address
 from typing import Literal, Protocol
 
 from mika.ports.paging import Page
@@ -35,8 +46,12 @@ VOICES: tuple[tuple[str, str], ...] = (
     ("assistante", "en assistante (« Mika, pour … »)"),
     ("proprietaire", "à ta place (en ton nom)"),
 )
-#: ce qu'un brouillon ne peut pas contenir au moment de partir (ce qu'elle n'a pas su)
+#: ce qu'un brouillon ne peut pas contenir au moment de partir (ce qu'elle n'a pas su) ; reconnu sous
+#: toutes ses graphies par ``to_fill`` (casse, accents, blancs, « à remplir », « à préciser »)
 TO_FILL = "[À COMPLÉTER"
+_TO_FILL = re.compile(r"\[\s*(?:a\s*)?(?:completer|remplir|preciser)\b")
+#: un Message-ID qui peut entrer tel quel dans une référence (et dans un prompt, entre crochets)
+_CLEAN_MID = re.compile(r"^<[A-Za-z0-9!#$%&'*+./=?^_`{|}~@:-]{1,298}>$")
 #: les rôles de dossiers reconnus (special-use, RFC 6154)
 ROLES: tuple[tuple[str, str], ...] = (
     ("inbox", "Réception"), ("sent", "Envoyés"), ("drafts", "Brouillons"), ("archive", "Archives"),
@@ -46,9 +61,36 @@ _ACCOUNT = re.compile(r"^([a-z0-9][a-z0-9_-]{0,39}):(.+)$", re.S)
 ACCOUNT_KEY = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 
 
+def to_fill(*texts: str) -> bool:
+    """Reste-t-il un « [À COMPLÉTER » (sous n'importe quelle graphie : casse, accents
+    décomposés, blancs, « à remplir », « à préciser », crochets pleine chasse) ?"""
+    for text in texts:
+        folded = "".join(ch for ch in unicodedata.normalize("NFKD", text or "") if not unicodedata.combining(ch))
+        if _TO_FILL.search(folded.casefold()):
+            return True
+    return False
+
+
 def mail_ref(account: str, message_id: str) -> str:
     """La référence d'un mail : ``compte:Message-ID`` (sans compte : le Message-ID seul)."""
     return f"{account}:{message_id}" if account else message_id
+
+
+def clean_message_id(message_id: str) -> bool:
+    """Un Message-ID qui peut servir tel quel de référence (ni blancs, ni crochets, borné)."""
+    return bool(_CLEAN_MID.match(message_id or ""))
+
+
+def assigned_ref(account: str, message_id: str, rank: int = 1) -> str:
+    """La référence que l'adaptateur donne au ``rank``-ième mail distinct portant ce
+    Message-ID dans ce compte : le premier garde la forme historique, les suivants
+    sont numérotés ; un Message-ID impropre devient une empreinte."""
+    if clean_message_id(message_id):
+        local = message_id if rank <= 1 else f"{message_id}#{rank}"
+    else:
+        digest = hashlib.sha256((message_id or "").encode("utf-8", "replace")).hexdigest()[:20]
+        local = f"#{digest}" if rank <= 1 else f"#{digest}.{rank}"
+    return mail_ref(account, local)
 
 
 def split_ref(ref: str) -> tuple[str, str]:
@@ -86,12 +128,22 @@ def addresses(field: str) -> list[tuple[str, str]]:
     return [(n, a.lower()) for n, a in email.utils.getaddresses([field or ""]) if "@" in a]
 
 
+def address_text(name: str, address: str) -> str:
+    """« Nom <adresse> » tel qu'on le lit et qu'il se relit : un nom qui porte une
+    virgule ou des guillemets est cité (``"Dupré, Élodie" <elodie@exemple.fr>``),
+    jamais encodé en RFC 2047 — un champ « À » pré-rempli reste une seule adresse."""
+    try:
+        return str(Address(display_name=name or "", addr_spec=address))
+    except (ValueError, IndexError, TypeError, HeaderParseError):
+        return email.utils.formataddr((name, address))
+
+
 def reply_recipients(mail: Mail, own: tuple[str, ...], *, everyone: bool = False) -> tuple[str, str]:
     """``(à, copie)`` d'une réponse : à l'adresse de réponse (sinon l'expéditeur) ;
     pour tous, les autres destinataires en copie — jamais ses propres adresses."""
     mine = {a.lower() for a in own}
     first = addresses(mail.reply_to) or addresses(mail.sender)
-    to = [email.utils.formataddr(p) for p in first if p[1] not in mine] or [mail.sender]
+    to = [address_text(*p) for p in first if p[1] not in mine] or [mail.sender]
     if not everyone:
         return ", ".join(to), ""
     taken = {a for _, a in first} | mine
@@ -99,7 +151,7 @@ def reply_recipients(mail: Mail, own: tuple[str, ...], *, everyone: bool = False
     for name, address in addresses(mail.to) + addresses(mail.cc):
         if address not in taken:
             taken.add(address)
-            cc.append(email.utils.formataddr((name, address)))
+            cc.append(address_text(name, address))
     return ", ".join(to), ", ".join(cc)
 
 
@@ -137,10 +189,14 @@ class Mail:
     html: str = ""
     #: Un ancien cache peut ne contenir qu'un extrait ; le lecteur peut le compléter.
     complete: bool = True
+    #: la référence attribuée par l'adaptateur (vide : la forme historique ``compte:Message-ID``)
+    key: str = ""
+    #: un autre mail de ce compte porte le même Message-ID avec un autre contenu : méfiance
+    twin: bool = False
 
     @property
     def ref(self) -> str:
-        return mail_ref(self.account, self.message_id)
+        return self.key or mail_ref(self.account, self.message_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,11 +422,17 @@ class MailPort(Protocol):
     async def refresh_folders(self, account: str) -> list[Folder]: ...
 
     async def sync_folder(self, account: str, folder: str, limit: int) -> int:
-        """Relit un dossier pour la console (ce qu'elle ne relève pas n'est jamais
-        rendu par ``fetch_new``) ; rend le nombre de mails nouveaux dans le cache."""
+        """Relit un dossier pour la console ; rend le nombre de mails nouveaux dans le
+        cache. Un dossier qu'elle relève garde le curseur de la relève : ce que la
+        console vient de ranger, ``fetch_new`` le lui rendra quand même."""
         ...
 
     async def set_flags(self, ref: str, *, seen: bool | None = None, flagged: bool | None = None) -> None: ...
+
+    async def mark_seen(self, refs: Sequence[str]) -> int:
+        """Marque ces mails comme lus sur le serveur, **par lot** (une session par
+        compte et par dossier, pas une par mail) ; rend combien n'ont pas pu l'être."""
+        ...
 
     async def move(self, ref: str, folder: str) -> str:
         """Déplace ; rend le dossier d'arrivée."""

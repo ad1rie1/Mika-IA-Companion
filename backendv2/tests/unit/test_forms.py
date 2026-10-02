@@ -162,7 +162,18 @@ def test_units_are_guessed_from_the_name_suffix():
     f = fields_by_path(Sample)
     assert (f["inner.tau_h"].unit, f["inner.settle_us"].unit) == ("h", "us")
     assert f["count"].unit == ""
-    assert fields_by_path(LLMConfig)["context_tokens"].unit == "tokens"
+
+    class Budget(BaseModel):
+        reply_tokens: Annotated[int, Knob(lo=0, hi=100)] = 1
+        context_tokens: Annotated[int, Knob(label="Contexte (jetons)", lo=0, hi=100)] = 1
+        settle_s: Annotated[int, Knob(label="Délai (s)", lo=0, hi=100)] = 1
+
+    b = fields_by_path(Budget)
+    assert b["reply_tokens"].unit == "tokens"
+    # un libellé qui porte déjà son unité ne reçoit pas une seconde unité devinée (« Contexte (jetons) (tokens) ») —
+    # sauf une durée, dont l'unité sert à lire la valeur
+    assert b["context_tokens"].unit == "" and fields_by_path(LLMConfig)["context_tokens"].unit == ""
+    assert b["settle_s"].unit == "s"
 
 
 def test_select_choices_from_literal_enum_and_knob():

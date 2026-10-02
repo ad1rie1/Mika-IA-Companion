@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mika.kernel.events import Payload, event_type
-from mika.kernel.facts import FactKey
+from mika.kernel.facts import FactFamily, FactKey
 
 OWNER = "needs"
 
@@ -47,3 +47,28 @@ class NeedsReading:
 
 
 NEEDS = FactKey("needs.needs", type=NeedsReading, time_varying=True)
+
+#: Les sortes de matière (de quoi parler quand c'est l'envie de compagnie qui la pousse).
+THOUGHT_MATTER = "thought"  # une pensée qui la travaille (un titre lu, un but où elle bloque…)
+DONE_MATTER = "done"  # ce qu'elle a fini récemment (un but, un objectif de projet)
+WORKING_MATTER = "working"  # ce sur quoi elle est en ce moment (un but en cours, un projet)
+TOLD_MATTER = "told"  # ce que la personne lui a raconté récemment
+
+
+@dataclass(frozen=True, slots=True)
+class Matter:
+    """Une matière concrète pour lancer la conversation : jamais inventée, un
+    texte déjà écrit (``ref``) et à qui il appartient. Ce qui vient d'ailleurs
+    (``external`` : un flux, un mail, une app) se cite, jamais comme une consigne."""
+
+    kind: str
+    ref: str
+    at: int
+    about: tuple[str, ...] = ()
+    sensitivity: int = 1
+    external: bool = False
+
+
+#: ``MATTER(adresse)`` : ce dont elle pourrait parler à cette adresse (``Matter``), ou ``None`` — sans
+#: matière, l'envie de compagnie ne suffit presque plus à prendre la parole.
+MATTER = FactFamily("needs.matter", arg=str, type=object, time_varying=True)

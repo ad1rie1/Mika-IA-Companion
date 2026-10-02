@@ -18,11 +18,12 @@ standard, dans un fil), un cache SQLite à part pour ce qui est arrivé.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import smtplib
 import ssl
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta, tzinfo
 from email import policy
@@ -47,7 +48,6 @@ from mika.ports.mail import (
     Preview,
     Sent,
     forwarded_text,
-    mail_ref,
     split_ref,
 )
 
@@ -146,15 +146,32 @@ class ImapSmtpMail:
             self._cache.save_folder(key, name, role=role_of(name, flags))
         self._cache.keep_folders(key, [n for n, _ in found])
 
+    def _read(self, raw: bytes, uid: int, key: str, folder: str, flags: frozenset[str]) -> Mail:
+        """Un mail brut lu ; un mail que la lecture ne comprend pas devient une ligne qui le dit
+        (on ne le relira pas à chaque relevé : il est rangé, et le curseur passe)."""
+        try:
+            mail = parse(raw, str(uid), account=key, folder=folder, complete=True)
+        except Exception as exc:  # un mail hostile ou cassé n'arrête jamais un relevé
+            log.warning("courrier : un mail illisible dans %s/%s (%s)", key, folder, type(exc).__name__)
+            mail = Mail(f"<illisible-{hashlib.sha256(raw).hexdigest()[:20]}@mika>", "(expéditeur illisible)", "",
+                        "(un mail illisible)", 0, "Ce mail n'a pas pu être lu.", account=key, folder=folder)
+        return replace(mail, seen="\\seen" in flags, flagged="\\flagged" in flags, answered="\\answered" in flags)
+
     def _sync_sync(self, s: Session, key: str, account: MailAccount, folder: str, limit: int, *,
                    hand: bool) -> list[Mail]:
         """Relit un dossier : ce qui est nouveau (au plus ``limit``), puis les drapeaux
-        des derniers mails connus. Rend les mails nouveaux jamais rendus (``hand``)."""
+        des derniers mails connus. Rend les mails nouveaux jamais rendus (``hand``).
+
+        Le curseur avance **mail après mail** : un relevé interrompu reprend après le dernier mail
+        rangé, et un mail illisible ne revient pas à chaque relevé. Relu depuis la console
+        (``hand`` faux), un dossier qu'elle relève garde le curseur de la relève : ce que la
+        console vient de ranger, elle le remarquera quand même au prochain relevé."""
         _count, validity, uidnext = s.select(folder)
         cursor = self._cache.cursor(key, folder)
         if cursor is not None and cursor[0] and validity and cursor[0] != validity:
             self._cache.reset_folder(key, folder)  # les UID ont changé de sens : tout se relit
             cursor = None
+        owns_cursor = hand or folder not in account.folders  # la console relit un dossier relevé : pas son curseur
         start = cursor[1] if cursor is not None and cursor[1] > 0 else 0
         if start:
             uids = [u for u in s.search(f"UID {start}:*") if u >= start]
@@ -162,22 +179,24 @@ class ImapSmtpMail:
             uids = s.search(f"SINCE {since(self._now() - timedelta(days=max(0, account.since_days)))}")
         taken = uids[:max(0, limit)]
         out: list[Mail] = []
-        for uid, flags, raw in s.fetch(taken):
-            mail = replace(parse(raw, str(uid), account=key, folder=folder, complete=True), seen="\\seen" in flags,
-                           flagged="\\flagged" in flags, answered="\\answered" in flags)
-            self._cache.store(mail, uid)
-            if hand and not self._cache.handed(key, mail.message_id):
-                self._cache.hand(key, mail.message_id)
-                out.append(mail)
+        for uid, flags, raw in sorted(s.fetch(taken)):
+            stored = self._cache.store(self._read(raw, uid, key, folder, flags), uid)
+            local = split_ref(stored.ref)[1]
+            if hand and not self._cache.handed(key, local):
+                self._cache.hand(key, local)
+                out.append(stored)
+            if owns_cursor:
+                self._cache.save_folder(key, folder, uidvalidity=validity or None, uidnext=uid + 1)
         if not hand:
             for uid, flags, raw in s.fetch(self._cache.missing_html(key, folder, limit)):
-                self._cache.store(replace(parse(raw, str(uid), account=key, folder=folder, complete=True),
-                                          seen="\\seen" in flags, flagged="\\flagged" in flags,
-                                          answered="\\answered" in flags), uid)
+                self._cache.store(self._read(raw, uid, key, folder, flags), uid)
         nxt = (max(taken) + 1) if len(taken) < len(uids) else max(uidnext, (max(taken) + 1) if taken else start)
         self._refresh_flags(s, key, folder, hand=hand)
-        self._cache.save_folder(key, folder, uidvalidity=validity or None, uidnext=nxt or None,
-                                last_sync=self._at())
+        if owns_cursor:
+            self._cache.save_folder(key, folder, uidvalidity=validity or None, uidnext=nxt or None,
+                                    last_sync=self._at())
+        else:
+            self._cache.save_folder(key, folder, last_sync=self._at())
         self._cache.recount(key, folder)
         return out
 
@@ -189,15 +208,16 @@ class ImapSmtpMail:
         gone = [u for u, _, _ in known if u not in flags]
         if gone:
             self._cache.forget_uids(key, folder, gone)  # rangés ou supprimés ailleurs
-        for uid, mid, was_seen in known:
+        for uid, ref, was_seen in known:
             now = flags.get(uid)
             if now is None:
                 continue
             seen = "\\seen" in now
             self._cache.set_flags(key, folder, uid, seen=seen, flagged="\\flagged" in now,
                                   answered="\\answered" in now)
-            if hand and seen and not was_seen:
-                self._seen_elsewhere.append(mail_ref(key, mid))
+            # su même quand c'est la console qui relit : la relève suivante ne le reverrait plus changer
+            if seen and not was_seen and ref:
+                self._seen_elsewhere.append(ref)
 
     # ── lire le cache ──
     async def get(self, ref: str) -> Mail | None:
@@ -348,10 +368,8 @@ class ImapSmtpMail:
                 uids = sorted(u for u in session.search(f"UID 1:{first - 1}" if first else "ALL") if not first or u < first)
                 rows = session.fetch(uids[-max(1, min(100, limit)):])
                 for uid, flags, raw in rows:
-                    mail = replace(parse(raw, str(uid), account=account, folder=folder, complete=True),
-                                   seen="\\seen" in flags, flagged="\\flagged" in flags, answered="\\answered" in flags)
-                    self._cache.store(mail, uid)
-                    self._cache.hand(account, mail.message_id)
+                    stored = self._cache.store(self._read(raw, uid, account, folder, flags), uid)
+                    self._cache.hand(account, split_ref(stored.ref)[1])
                 self._cache.save_folder(account, folder, uidvalidity=validity or None)
                 self._cache.recount(account, folder)
                 return len(rows)
@@ -391,6 +409,48 @@ class ImapSmtpMail:
                 self._cache.recount(key, mail.folder)
 
         await self._in_thread(key, run)
+
+    async def mark_seen(self, refs: Sequence[str]) -> int:
+        """Marque comme lus, par lot : une session par compte, un ``STORE`` par dossier pour tous
+        ses mails ; rend combien n'ont pas pu l'être (inconnus du cache, ou refusés)."""
+        wanted = list(dict.fromkeys(refs))
+        found = self._cache.located_all(wanted)
+        failed = len(wanted) - len(found)
+        by_account: dict[str, dict[str, list[tuple[Mail, int]]]] = {}
+        for mail, uid in found:
+            if not mail.seen:
+                by_account.setdefault(mail.account, {}).setdefault(mail.folder, []).append((mail, uid))
+        for key, folders in by_account.items():
+            acc = self._accounts().get(key)
+            if acc is None or not acc.ready:
+                failed += sum(len(v) for v in folders.values())
+                continue
+
+            def run(acc: MailAccount = acc, key: str = key, folders: dict = folders) -> int:
+                missed = 0
+                with self._session(acc) as s:
+                    for folder, items in folders.items():
+                        s.select(folder, write=True)
+                        real = []
+                        for mail, uid in items:
+                            try:
+                                real.append(self._uid_sync(s, mail, uid))
+                            except ValueError:
+                                missed += 1
+                        for i in range(0, len(real), 200):
+                            batch = real[i:i + 200]
+                            s.store_many(batch, "\\Seen", True)
+                            for u in batch:
+                                self._cache.set_flags(key, folder, u, seen=True)
+                        self._cache.recount(key, folder)
+                return missed
+
+            try:
+                failed += int(await self._in_thread(key, run))
+            except (OSError, ImapError, ValueError, EOFError) as exc:
+                failed += sum(len(v) for v in folders.values())
+                self._cache.note(key, at=self._at(), error=_why(exc))
+        return failed
 
     async def move(self, ref: str, folder: str) -> str:
         key, acc, mail, uid = self._where(ref)

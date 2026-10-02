@@ -5,7 +5,6 @@ et ce qu'on peut en faire : répondre, lui faire rédiger une réponse, ranger
 from __future__ import annotations
 
 import dataclasses
-from email.header import decode_header, make_header
 from typing import Annotated, Any
 from urllib.parse import quote
 
@@ -48,6 +47,7 @@ from mika.plugins.email import (
     WAITING,
     EmailState,
     Seen,
+    exhausted,
     name_of,
     params_of,
 )
@@ -57,7 +57,6 @@ from mika.plugins.email.console.common import (
     UNKNOWN,
     author,
     box_link,
-    can_send,
     clip,
     draft_state,
     fold,
@@ -77,6 +76,8 @@ from mika.vocab.privacy import Sensitivity
 def _badges(seen: Seen | None, mail: Any, frame: Frame) -> tuple[Badge, ...]:
     p = params_of(frame)
     out = [state_badge(seen, mail, p)]
+    if mail is not None and getattr(mail, "twin", False):
+        out.append(Badge("identifiant en double : un autre mail porte le même Message-ID, méfiance", "danger"))
     if mail is not None and mail.flagged:
         out.append(Badge("suivi", "warn"))
     if mail is not None and mail.answered:
@@ -254,9 +255,9 @@ def _tab_message(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
     slots: list[Block] = []
     if info is not None and info.can_send:
         own = tuple(a.address for a in port.accounts())
+        # lisibles et relisibles tels quels : « "Dupré, Élodie" <elodie@…> » reste une seule adresse
         to, _ = reply_recipients(m, own)
         to_all, cc_all = reply_recipients(m, own, everyone=True)
-        to, to_all, cc_all = (str(make_header(decode_header(value))) for value in (to, to_all, cc_all))
         base = (("subject", reply_subject(m.subject)[:200]), ("reply_to", m.ref), ("quote", True), ("_bouton", "Envoyer la réponse"))
         slots.append(ActionSlot("email.repondre", (("to", to), *base), title="Répondre", presentation="button"))
         if cc_all:
@@ -335,7 +336,11 @@ def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
         blocks.append(Fields((("brouillon de réponse", Ref.subject("brouillon", latest.draft, latest.draft)),
                               ("où il en est", Badge(*draft_state(latest.state)))), title="Sa réponse"))
     ask = s.asked.get(ref)
-    if ask is not None:
+    if ask is not None and exhausted(s, ref, params_of(frame)):
+        blocks.append(Note(f"Tu lui as demandé d'y répondre ({ctx.when(ask.at)}), mais elle n'y est pas arrivée "
+                           f"({s.attempts.get(ref, 0)} essais) : la demande est close. Tu peux la relancer "
+                           "(« Faire préparer une réponse par Mika »).", tone="warn"))
+    elif ask is not None:
         blocks.append(Note(f"Tu lui as demandé d'y répondre ({ctx.when(ask.at)}) : elle le fera à son prochain "
                            "moment de travail (au réveil si elle dort).", tone="info"))
     if seen is None:
@@ -532,11 +537,19 @@ async def _delete(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
 
 
 def _can_ask(s: EmailState, frame: Frame, key: str, ports: Any = None) -> bool:
+    """Offert quand la boîte **de ce mail** peut envoyer, qu'aucun brouillon n'attend déjà, et qu'aucune
+    demande n'est en cours — une demande dont tous les essais ont échoué est close : on peut la relancer."""
     port = ports.get("mail") if ports is not None else None
     ref = resolve(s, port, key) if port is not None else resolve_state(s, key)
-    if ref is None or ref in s.asked or (port is not None and port.sent_mail(ref) is not None):
+    if ref is None or (port is not None and port.sent_mail(ref) is not None):
         return False
-    return not any(d.mail == ref and d.state == WAITING for d in s.drafts.values()) and can_send(port)
+    if ref in s.asked and not exhausted(s, ref, params_of(frame)):
+        return False
+    if any(d.mail == ref and d.state == WAITING for d in s.drafts.values()):
+        return False
+    m = port.cached_one(ref) if port is not None else None
+    info = port.account(m.account) if port is not None and m is not None else None
+    return info is not None and info.can_send
 
 
 @EMAIL.action("rediger", title="Lui faire rédiger une réponse", args=AskArgs, emits=[c.DRAFT_ASKED], subject="mail",

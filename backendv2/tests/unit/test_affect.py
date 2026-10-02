@@ -16,6 +16,7 @@ from mika.faculties.affect import physics as ph
 from mika.faculties.affect import prose
 from mika.faculties.affect.params import DEFAULT, derive
 from mika.kernel.clock import DAY, HOUR, MINUTE
+from mika.kernel.dynamics import propagate
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from mika.vocab import affect as A
@@ -59,7 +60,7 @@ async def turn(kernel, script, handle, emotion, intensity, text="…"):
 
 def stance_prose(kernel, handle) -> str:
     frame = kernel.mind.frame()
-    return prose.stance(frame.get(affect_c.STANCE(handle)), frame.get(affect_c.MOOD).home, DEFAULT)
+    return prose.stance(frame.get(affect_c.STANCE(handle)), DEFAULT, now=frame.now)
 
 
 def overflow(kernel) -> float:
@@ -136,20 +137,25 @@ def test_an_hour_of_banal_chat_never_overflows(tmp_path):
 # ── Balise : ce qu'elle déclare, et seulement ce qu'elle déclare ──────────
 
 
-def test_no_tag_moves_nothing_and_explicit_neutral_does(tmp_path):
+def test_no_tag_and_neutral_move_nothing(tmp_path):
+    """« Rien de particulier » n'est pas une émotion : ni impulsion, ni ligne de
+    posture (elle visait l'origine, sous le repos : neutre la dégonflait)."""
     async def scenario(kernel, script):
         await turn(kernel, script, "user_1", "angry", 0.8)
-        angry = stance(kernel, "user_1").position
+        angry = stance(kernel, "user_1")
         await turn(kernel, script, "user_1", None, 0)  # pas de balise
-        untouched = stance(kernel, "user_1").position
+        untouched = stance(kernel, "user_1")
         await turn(kernel, script, "user_1", "neutral", 0.8)
-        calmed = stance(kernel, "user_1").position
-        return angry, untouched, calmed
+        after_neutral = stance(kernel, "user_1")
+        await turn(kernel, script, "user_2", "neutral", 0.8)  # une inconnue à qui elle ne dit que « neutre »
+        return angry, untouched, after_neutral, stance(kernel, "user_2"), stance_prose(kernel, "user_2")
 
-    angry, untouched, calmed = run(tmp_path, scenario)
-    # seul le temps a passé entre les deux premières lectures (quelques ms)
-    assert A.distance(angry, untouched) < 1e-3
-    assert A.norm(calmed) < A.norm(angry) - 0.1  # une impulsion vers l'origine
+    angry, untouched, after_neutral, stranger, stranger_line = run(tmp_path, scenario)
+    # seul le temps a passé entre les lectures (quelques ms)
+    assert A.distance(angry.position, untouched.position) < 1e-3
+    assert A.distance(angry.position, after_neutral.position) < 1e-3
+    assert after_neutral.declared is not None and after_neutral.declared.emotion is Emotion.ANGRY
+    assert stranger.anchor is None and stranger.declared is None and stranger_line == ""
 
 
 def test_unknown_emotion_name_is_no_impulse(tmp_path):
@@ -219,7 +225,8 @@ def test_warmth_comes_back_on_the_next_turn(tmp_path):
         return stance_prose(kernel, "user_1")
 
     line = run(tmp_path, scenario)
-    assert line.startswith("Envers cette personne, tu te sens") and "contente" in line.splitlines()[0]
+    first = line.splitlines()[0]
+    assert first.startswith("À l'instant, en lui répondant, tu étais") and "contente" in first, line
 
 
 # ── Une posture par personne ──────────────────────────────────────────────
@@ -233,7 +240,8 @@ def test_anger_at_one_person_leaves_the_others_untouched(tmp_path):
         return stance(kernel, "user_9"), stance(kernel, "user_2")
 
     troll, alice = run(tmp_path, scenario)
-    assert A.valence(troll.declared.emotion) < 0
+    felt = troll.declared.emotion if troll.declared is not None else troll.felt
+    assert A.valence(felt) < 0
     assert alice.at_rest and alice.declared is None and alice.anchor is None
 
 
@@ -262,7 +270,7 @@ def test_a_grudge_is_still_there_the_next_day_and_gone_two_weeks_later(tmp_path)
         return next_day, later
 
     next_day, later = run(tmp_path, scenario)
-    assert "ton fond est plutôt" in next_day
+    assert "au fond, tu restes plutôt" in next_day, next_day
     assert any(A.FR[e] in next_day for e in Emotion if A.valence(e) < 0)
     assert later == ""
 
@@ -275,28 +283,56 @@ def _cw() -> ph.Clockwork:
 
 
 def test_reading_in_one_jump_or_many_steps_is_the_same_across_phase_changes():
+    """L'émotion du moment, le fond qui la moyenne, le repos jumeau : lus d'un
+    coup ou pas à pas, à travers 18 h, c'est la même humeur."""
     p = DEFAULT
     cw = _cw()
     t0 = at_paris(2026, 9, 28, 17, 30)  # traverse le début du soir (18 h)
-    osc = ph.Osc(A.to_pad(Emotion.SAD, 0.8), (0.0, 0.0, 0.0), t0)
-    one = ph.advance_mood(osc, t0 + 2 * HOUR, p, cw)
-    many = osc
+    m = ph.Mood(ph.Osc(ph.common_home(t0, p, cw), (0.0, 0.0, 0.0), t0), gap=A.scale(A.ANCHORS[Emotion.SAD], 0.5),
+                fond=(-0.1, 0.0, -0.05))
+    one = ph.advance_mood(m, t0 + 2 * HOUR, p, cw)
+    many = m
     for k in range(1, 25):
         many = ph.advance_mood(many, t0 + k * 5 * MINUTE, p, cw)
-    assert A.distance(one.position, many.position) < 1e-9
+    assert A.distance(ph.mood_position(one, p), ph.mood_position(many, p)) < 1e-9
+    assert A.distance(one.fond, many.fond) < 1e-12
+
+
+def test_the_fond_is_the_exact_moving_average_of_the_moment():
+    """Le fond suit ``f' = (poids·émotion − f)/τ`` : la forme close rejoint une
+    intégration fine (le contre-exemple serait un fond qui dérive du pas)."""
+    p = DEFAULT
+    osc = p.mood.oscillator()
+    e0, v0, f0 = (0.3, -0.2, 0.1), (1e-4, 0.0, -2e-4), (0.05, 0.0, -0.02)
+    tau = p.fond_tau_us / 1e6
+    for dt in (60.0, 1800.0, 4 * 3600.0):
+        e, v, f = list(e0), list(v0), list(f0)
+        remaining = dt
+        while remaining > 1e-9:
+            h = min(0.05, remaining)
+            for i in range(3):
+                v[i] += (-osc.stiffness * e[i] - osc.damping * v[i]) / osc.mass * h
+                f[i] += (p.fond_weight * e[i] - f[i]) / tau * h
+                e[i] += v[i] * h
+            remaining -= h
+        e1, v1 = propagate(osc, e0, v0, (0.0, 0.0, 0.0), dt)
+        got = ph._lowpass(osc, e0, v0, e1, v1, f0, tau, p.fond_weight, dt)
+        assert max(abs(a - b) for a, b in zip(got, f, strict=True)) < 1e-5
 
 
 def test_stance_with_a_healing_anchor_is_step_independent():
     p = DEFAULT
     cw = _cw()
     t0 = at_paris(2026, 9, 28, 22, 0)
-    st = ph.Stance(ph.Osc(A.to_pad(Emotion.ANGRY, 0.7), (0.0, 0.0, 0.0), t0), anchor=A.to_pad(Emotion.ANGRY, 0.4))
+    st = ph.Stance(ph.Osc(ph.common_home(t0, p, cw), (0.0, 0.0, 0.0), t0), gap=A.to_pad(Emotion.ANGRY, 0.4),
+                   anchor=(-0.3, 0.2, 0.25), hostile=7, bond=0.4)
     one = ph.advance_stance(st, t0 + 6 * HOUR, p, cw)
     many = st
     for k in range(1, 73):
         many = ph.advance_stance(many, t0 + k * 5 * MINUTE, p, cw)
-    assert A.distance(one.osc.position, many.osc.position) < 1e-9
+    assert A.distance(one.position, many.position) < 1e-9
     assert A.distance(one.anchor, many.anchor) < 1e-12
+    assert one.bond == pytest.approx(many.bond, abs=1e-12)
 
 
 def test_resonance_amplifies_only_what_matches_the_background():

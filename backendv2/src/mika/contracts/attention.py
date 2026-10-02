@@ -9,6 +9,12 @@
   elle se comble ou se dément, et chacun en tire ce qui le concerne
   (l'humeur, l'estime, la retenue). Une promesse qui passe son échéance sans
   être tenue ne s'oublie pas en silence : elle le sait, et ça la travaille.
+  Une réponse tardive ne compte que dans trois fois le délai attendu ;
+- le **fil avec chacun** (``AWAITING``) : ses initiatives restées sans réponse
+  et si son dernier message attend encore — par personne ; la retenue
+  d'``agency`` s'en sert (ADR 0033). Être ignorée, rester sans réponse à une
+  question, plus d'un jour sans que personne n'écrive : des pensées qui se
+  ressentent, jamais des raisons de réécrire.
 """
 
 from __future__ import annotations
@@ -16,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mika.kernel.events import Content, Payload, event_type
-from mika.kernel.facts import FactKey
+from mika.kernel.facts import FactFamily, FactKey
 
 OWNER = "attention"
 
@@ -29,6 +35,10 @@ PROMISE = "promise"
 BLOCKED = "blocked"
 #: ce qu'une source extérieure lui a signalé (un mail, un titre, ce qu'elle voit)
 SIGNAL = "signal"
+#: une initiative restée sans réponse : « Adrien ne m'a pas répondu » — un ressenti, jamais une relance
+UNANSWERED = "unanswered"
+#: personne ne lui a écrit depuis plus d'un jour : « Personne ne m'a parlé depuis hier »
+ALONE = "alone"
 REPLY, RETURN = "reply", "return"
 #: une attente envers elle-même : tenir une promesse avant son échéance (clé : ``PROMISE``)
 #: Raison de preuve d'initiative : une pensée qui insiste, vers la personne concernée.
@@ -98,6 +108,15 @@ class ExpectationMissed(Payload):
     ref: int | None = None
 
 
+class Touched(Payload):
+    """Ce que la personne vient d'écrire recoupe le sujet de pensées qui la
+    concernent (une inquiétude, un échange qui a marqué) : en parler les
+    allègera — un « ok » ne recoupe rien."""
+
+    person: str
+    thoughts: tuple[int, ...] = ()
+
+
 class DigestedThought(Payload):
     thought: int
     before: float
@@ -124,7 +143,8 @@ EXPECTATION_MISSED = event_type("attention.expectation_missed", OWNER, Expectati
                                 subjects=("person",))
 DIGESTED = event_type("attention.digested", OWNER, Digested, public=True)
 NOTICED = event_type("attention.noticed", OWNER, Noticed, public=True)
-ALL = (THOUGHT_BORN, DWELT, EXPECTATION_MET, EXPECTATION_MISSED, DIGESTED, NOTICED)
+TOUCHED = event_type("attention.touched", OWNER, Touched, subjects=("person",))
+ALL = (THOUGHT_BORN, DWELT, EXPECTATION_MET, EXPECTATION_MISSED, DIGESTED, NOTICED, TOUCHED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +160,27 @@ class ThoughtReading:
     bundle: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class AwaitingReading:
+    """Où en est le fil avec une personne, vu de son côté à elle : ce qu'elle
+    lui a écrit depuis le dernier message de cette personne, et ce qui attend
+    encore une réponse. Tout se remet à zéro quand la personne écrit."""
+
+    person: str
+    last_in: int = 0  # le dernier message de la personne (adressé)
+    last_out: int = 0  # son dernier message à elle vers cette personne (réponse comprise)
+    asked: bool = False  # ce dernier message posait une question
+    owed: bool = False  # … et c'était une salutation ou un rappel promis
+    initiatives: int = 0  # ses initiatives ordinaires depuis le dernier message de la personne
+    last_initiative_at: int = 0
+    ignored: int = 0  # parmi elles, celles dont l'attente de réponse est passée
+    #: son dernier message attend encore une réponse (la personne n'a pas écrit depuis)
+    unanswered: bool = False
+
+
 #: Les pensées vivantes, la plus forte d'abord.
 THOUGHTS = FactKey("attention.thoughts", type=tuple, time_varying=True)
 #: Ses initiatives restées sans réponse, d'affilée (toutes personnes).
 IGNORED = FactKey("attention.ignored", type=int)
+#: Le fil avec une personne (``AwaitingReading``) : ses initiatives sans réponse, par personne.
+AWAITING = FactFamily("attention.awaiting", arg=str, type=AwaitingReading)

@@ -3,15 +3,25 @@ dossier ; les dossiers et leur curseur IMAP ; ce qui a déjà été rendu ; les
 brouillons ; ce qui est parti ; l'état de chaque compte.
 
 Une ligne par (compte, dossier, UID) : les UID ne valent que dans leur
-dossier (et leur UIDVALIDITY). Ce qui a été rendu se retient par
-(compte, Message-ID) : un mail qui change de dossier n'est pas rendu deux fois.
+dossier (et leur UIDVALIDITY). **Un mail se désigne par sa référence**
+(colonne ``ref``), attribuée ici à son arrivée — jamais choisie par
+l'expéditeur : le premier mail d'un Message-ID garde la forme historique
+``compte:Message-ID``, une copie du même mail (un autre dossier, même
+contenu) la partage, un autre mail qui porte le même Message-ID en reçoit
+une autre (``…#2``) et les deux sont marqués (``twin``). Un mail qui se dit
+l'un de ses envois sans être rangé dans « Envoyés » est traité de même. Ce
+qui a été rendu se retient par référence : un mail qui change de dossier
+n'est pas rendu deux fois, un faux qui imite un vrai l'est (on le remarque).
 
 Le cache d'avant les comptes (une table ``mails``, des ``uids``) est repris
-sous le compte « principal », dossier ``INBOX``.
+sous le compte « principal », dossier ``INBOX`` ; celui d'avant les
+références reçoit les siennes (le premier mail de chaque Message-ID garde la
+forme historique : les journaux restent valables).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 import threading
@@ -29,6 +39,7 @@ from mika.ports.mail import (
     Mail,
     Sent,
     addresses,
+    assigned_ref,
     mail_ref,
     reference_key,
     split_ref,
@@ -37,7 +48,7 @@ from mika.ports.paging import fold_text
 
 #: limite d'une purge de maintenance explicite ; la synchronisation ne purge pas l'historique
 KEEP_PER_FOLDER = 2000
-SCHEMA = 4
+SCHEMA = 5
 LEGACY_ACCOUNT = "principal"
 
 _SCHEMA = """
@@ -63,7 +74,8 @@ CREATE TABLE IF NOT EXISTS envoyes(message_id TEXT PRIMARY KEY, dest TEXT, subje
   in_reply_to TEXT, by TEXT);
 """
 _COLUMNS = ("account", "folder", "uid", "message_id", "sender", "address", "reply_to", "dest", "cc", "subject",
-            "date", "body", "has_html", "attachments", "in_reply_to", "refs", "bulk", "seen", "flagged", "answered", "html", "complete")
+            "date", "body", "has_html", "attachments", "in_reply_to", "refs", "bulk", "seen", "flagged", "answered", "html",
+            "complete", "ref", "twin")
 _SENT_COLUMNS = ("message_id", "dest", "subject", "body", "date", "in_reply_to", "by", "account", "draft", "cc", "attachments")
 _DRAFT_COLUMNS = ("id", "account", "dest", "cc", "subject", "body", "reply_to", "quote", "author", "created",
                   "updated", "state", "sent_id", "edited_by")
@@ -94,6 +106,11 @@ class MailCache:
             self._db.execute("ALTER TABLE messages ADD COLUMN html TEXT NOT NULL DEFAULT ''")
         if "complete" not in mail_cols:
             self._db.execute("ALTER TABLE messages ADD COLUMN complete INTEGER NOT NULL DEFAULT 0")
+        if "ref" not in mail_cols:
+            self._db.execute("ALTER TABLE messages ADD COLUMN ref TEXT NOT NULL DEFAULT ''")
+        if "twin" not in mail_cols:
+            self._db.execute("ALTER TABLE messages ADD COLUMN twin INTEGER NOT NULL DEFAULT 0")
+        self._db.execute("CREATE INDEX IF NOT EXISTS messages_ref ON messages(account, ref)")
         sent_cols = {r[1] for r in self._db.execute("PRAGMA table_info(envoyes)")}
         if "source" not in sent_cols:
             self._db.execute("ALTER TABLE envoyes ADD COLUMN source BLOB")
@@ -131,8 +148,52 @@ class MailCache:
             self._db.execute("UPDATE envoyes SET account=? WHERE account IS NULL OR account=''", (LEGACY_ACCOUNT,))
             self._db.execute("DROP TABLE mails")
             self._db.execute("DROP TABLE IF EXISTS uids")
+        # un cache d'avant les références : chaque ligne reçoit la sienne, dans l'ordre d'arrivée
+        # (le premier mail d'un Message-ID garde la forme historique, que le journal connaît déjà)
+        pending = self._db.execute("SELECT rowid, account, folder, message_id FROM messages WHERE ref='' "
+                                   "ORDER BY rowid").fetchall()
+        for rowid, account, folder, mid in pending:
+            ref, twin = self._assign(account, folder, mid, self._print_of_row(rowid), legacy=True)
+            self._db.execute("UPDATE messages SET ref=?, twin=? WHERE rowid=?", (ref, int(twin), rowid))
         self._db.execute("INSERT OR REPLACE INTO meta VALUES('schema', ?)", (str(SCHEMA),))
         self._db.commit()
+
+    # ── références ──
+    @staticmethod
+    def _print(address: str, subject: str, date: int, body: str) -> str:
+        """L'empreinte d'un contenu : deux copies du même mail (deux dossiers) ont la même."""
+        raw = "\x1f".join((address or "", subject or "", str(date or 0), (body or "")[:20_000]))
+        return hashlib.sha256(raw.encode("utf-8", "replace")).hexdigest()
+
+    def _print_of_row(self, rowid: int) -> str:
+        row = self._db.execute("SELECT address, subject, date, body FROM messages WHERE rowid=?", (rowid,)).fetchone()
+        return self._print(*row) if row else ""
+
+    def _assign(self, account: str, folder: str, message_id: str, fingerprint: str, *,
+                legacy: bool = False) -> tuple[str, bool]:
+        """La référence d'un mail qui arrive (et s'il a un jumeau) : celle d'une copie du même contenu
+        s'il en a une ; la forme historique s'il est le premier de ce Message-ID ; sinon une
+        référence numérotée — et l'autre mail est marqué lui aussi."""
+        rows = self._db.execute("SELECT rowid, ref, twin FROM messages WHERE account=? AND message_id=? AND ref!='' "
+                                "ORDER BY rowid", (account, message_id)).fetchall()
+        for rowid, ref, twin in rows:
+            if self._print_of_row(rowid) == fingerprint:
+                return ref, bool(twin)
+        role = self._db.execute("SELECT role FROM folders WHERE account=? AND name=?", (account, folder)).fetchone()
+        # un mail qui reprend le Message-ID de l'un de ses envois sans être rangé dans « Envoyés » : un imitateur
+        claims_hers = not legacy and (role is None or role[0] != "sent") and self._db.execute(
+            "SELECT 1 FROM envoyes WHERE message_id IN (?, ?) AND (account=? OR account='')",
+            (message_id, mail_ref(account, message_id), account)).fetchone() is not None
+        taken = {r[1] for r in rows}
+        if not rows and not claims_hers:
+            first = mail_ref(account, message_id) if legacy else assigned_ref(account, message_id)
+            return first, False
+        rank = 2
+        while assigned_ref(account, message_id, rank) in taken:
+            rank += 1
+        if rows:
+            self._db.execute("UPDATE messages SET twin=1 WHERE account=? AND message_id=?", (account, message_id))
+        return assigned_ref(account, message_id, rank), True
 
     # ── mails ──
     @staticmethod
@@ -147,27 +208,53 @@ class MailCache:
                     in_reply_to=d["in_reply_to"] or "", bulk=bool(d["bulk"]), account=d["account"],
                     folder=d["folder"], cc=d["cc"] or "", reply_to=d["reply_to"] or "", references=d["refs"] or "",
                     seen=bool(d["seen"]), flagged=bool(d["flagged"]), answered=bool(d["answered"]),
-                    attachments=files, has_html=bool(d["has_html"]), html=d["html"] or "", complete=bool(d["complete"]))
+                    attachments=files, has_html=bool(d["has_html"]), html=d["html"] or "", complete=bool(d["complete"]),
+                    key=d["ref"] or "", twin=bool(d["twin"]))
 
-    def store(self, m: Mail, uid: int) -> None:
+    def store(self, m: Mail, uid: int) -> Mail:
+        """Garde un mail à sa place (compte, dossier, UID) et rend ce qui est gardé, avec sa référence :
+        celle qu'il avait déjà à cette place (ou à sa place provisoire, s'il vient d'être déplacé),
+        sinon celle que lui attribue ``_assign``."""
         files = json.dumps([[a.name, a.mime, a.size] for a in m.attachments], ensure_ascii=False)
         with self._lock:
+            known = self._db.execute(
+                "SELECT ref, twin FROM messages WHERE account=? AND folder=? AND ((uid=? AND message_id=?) OR "
+                "(uid<=0 AND message_id=?)) AND ref!='' ORDER BY uid DESC LIMIT 1",
+                (m.account, m.folder, uid, m.message_id, m.message_id)).fetchone()
             # un mail déplacé d'ici attendait son vrai UID (une place provisoire, négative) : il l'a
             self._db.execute("DELETE FROM messages WHERE account=? AND folder=? AND message_id=? AND uid<=0",
                              (m.account, m.folder, m.message_id))
+            if known is not None:
+                ref, twin = str(known[0]), bool(known[1])
+            else:
+                self._db.execute("DELETE FROM messages WHERE account=? AND folder=? AND uid=?",
+                                 (m.account, m.folder, uid))  # cette place change d'occupant
+                ref, twin = self._assign(m.account, m.folder, m.message_id,
+                                         self._print(m.address, m.subject, m.date, m.body))
             self._db.execute(
                 f"INSERT OR REPLACE INTO messages({', '.join(_COLUMNS)}) VALUES({', '.join('?' * len(_COLUMNS))})",
                 (m.account, m.folder, uid, m.message_id, m.sender, m.address, m.reply_to, m.to, m.cc, m.subject,
                  m.date, m.body, int(m.has_html), files, m.in_reply_to, m.references, int(m.bulk), int(m.seen),
-                 int(m.flagged), int(m.answered), m.html, int(m.complete)))
+                 int(m.flagged), int(m.answered), m.html, int(m.complete), ref, int(twin)))
             self._db.commit()
+        return replace(m, key=ref, twin=twin)
+
+    def _where_ref(self, ref: str) -> tuple[str, tuple[Any, ...]]:
+        """Où chercher une référence : exactement elle ; sans compte (un ancien journal), le premier mail
+        de ce Message-ID, jamais un jumeau arrivé après."""
+        account, local = split_ref(ref)
+        if account:
+            first = assigned_ref(account, local)
+            return ("account=? AND (ref=? OR (message_id=? AND ref=? AND ref!=?))",
+                    (account, ref, local, first, ref))
+        return "message_id=? AND ref=mail_ref(account, message_id)", (local,)
 
     def one(self, ref: str) -> Mail | None:
-        account, mid = split_ref(ref)
-        where, args = ("account=? AND message_id=?", (account, mid)) if account else ("message_id=?", (mid,))
+        where, args = self._where_ref(ref)
         with self._lock:
             rows = self._db.execute(f"SELECT {', '.join(_COLUMNS)} FROM messages WHERE {where} "
-                                    "ORDER BY (folder='INBOX') DESC, date DESC LIMIT 1", args).fetchall()
+                                    "ORDER BY (ref=?) DESC, (folder='INBOX') DESC, date DESC LIMIT 1",
+                                    (*args, ref)).fetchall()
         return self._mail(rows[0]) if rows else None
 
     def at_row(self, rowid: int, *, sent: bool = False):
@@ -185,12 +272,23 @@ class MailCache:
 
     def located(self, ref: str) -> tuple[Mail, int] | None:
         """Le mail et son UID dans son dossier."""
-        account, mid = split_ref(ref)
-        where, args = ("account=? AND message_id=?", (account, mid)) if account else ("message_id=?", (mid,))
+        where, args = self._where_ref(ref)
         with self._lock:
             rows = self._db.execute(f"SELECT {', '.join(_COLUMNS)} FROM messages WHERE {where} "
-                                    "ORDER BY (folder='INBOX') DESC, date DESC LIMIT 1", args).fetchall()
+                                    "ORDER BY (ref=?) DESC, (folder='INBOX') DESC, date DESC LIMIT 1",
+                                    (*args, ref)).fetchall()
         return (self._mail(rows[0]), int(rows[0][2])) if rows else None
+
+    def located_all(self, refs: Iterable[str]) -> list[tuple[Mail, int]]:
+        """Chaque mail (et son UID) de ces références, sans doublon."""
+        out: list[tuple[Mail, int]] = []
+        seen: set[tuple[str, str, int]] = set()
+        for ref in refs:
+            found = self.located(ref)
+            if found is not None and (found[0].account, found[0].folder, found[1]) not in seen:
+                seen.add((found[0].account, found[0].folder, found[1]))
+                out.append(found)
+        return out
 
     def recent(self, limit: int, *, account: str = "", folder: str = "") -> list[Mail]:
         clauses, args = [], []
@@ -217,10 +315,10 @@ class MailCache:
         return [self._mail(r) for r in rows]
 
     def uids(self, account: str, folder: str, limit: int) -> list[tuple[int, str, bool]]:
-        """Les derniers ``(uid, Message-ID, lu)`` d'un dossier."""
+        """Les derniers ``(uid, référence, lu)`` d'un dossier."""
         with self._lock:
-            return [(int(u), str(m), bool(s)) for u, m, s in self._db.execute(
-                "SELECT uid, message_id, seen FROM messages WHERE account=? AND folder=? AND uid>0 "
+            return [(int(u), str(r), bool(s)) for u, r, s in self._db.execute(
+                "SELECT uid, ref, seen FROM messages WHERE account=? AND folder=? AND uid>0 "
                 "ORDER BY uid DESC LIMIT ?", (account, folder, max(0, limit)))]
 
     def oldest_uid(self, account: str, folder: str) -> int:
@@ -234,7 +332,7 @@ class MailCache:
 
     def find_ref(self, key: str) -> str | None:
         with self._lock:
-            row = self._db.execute("SELECT mail_ref(account,message_id) FROM messages WHERE mail_key(mail_ref(account,message_id))=? "
+            row = self._db.execute("SELECT ref FROM messages WHERE mail_key(ref)=? "
                 "UNION ALL SELECT mail_ref(account,mail_mid(message_id)) FROM envoyes "
                 "WHERE mail_key(mail_ref(account,mail_mid(message_id)))=? OR mail_key(message_id)=? LIMIT 1", (key, key, key)).fetchone()
         return row[0] if row else None
@@ -458,4 +556,4 @@ class MailCache:
 
 
 def ref_of(m: Mail) -> str:
-    return mail_ref(m.account, m.message_id)
+    return m.ref

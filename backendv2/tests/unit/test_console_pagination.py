@@ -134,11 +134,26 @@ def test_repeated_actions_get_distinct_form_slots():
 
 
 def test_an_unknown_cursor_total_is_never_reported_as_a_total():
-    table = render.blocks([Table(("x",), rows(3), pager=Pager())], env(), {})[0]
+    # une suite existe : le total n'est pas connu, on ne l'invente pas
+    table = render.blocks([Table(("x",), rows(3), pager=Pager(older=(("avant", "7"),)))], env(), {})[0]
     assert table["count"] is None and table["shown"] == 3
     assert table["pager"]["cursor"] is True
+    # plus loin dans l'historique (un curseur dans la requête), pas davantage
+    later = render.blocks([Table(("x",), rows(3), pager=Pager())], env(), {"avant": "40"})[0]
+    assert later["count"] is None and later["pager"]["cursor"] is True
     empty = render.blocks([Table(("x",), ())], env(), {})[0]
     assert empty["pager"]["total"] == 0 and empty["pager"]["first"] == 0
+
+
+def test_a_first_cursor_page_with_nothing_after_says_its_total():
+    """CON-26 : « Page 1 · total non connu » pour trois lignes — le total l'était, puisque rien ne suit."""
+    table = render.blocks([Table(("x",), rows(3), pager=Pager())], env(), {})[0]
+    assert table["count"] == 3 and table["pager"]["cursor"] is False and table["pager"]["total"] == 3
+    named = render.blocks([Table(("x",), rows(2), pager=Pager(param="avant_x"))], env(), {"avant": "9"})[0]
+    assert named["count"] == 2  # un autre curseur dans la page ne concerne pas cette table-ci
+    # contre-exemple : la page 3 d'une source qui ne connaît pas son total ne devient pas « 1–2 sur 2 »
+    third = render.blocks([Table(("x",), rows(2), pager=Pager(number=3, size=25))], env(), {"page": "3"})[0]
+    assert third["count"] is None
 
 
 def test_a_very_large_remote_total_has_only_a_bounded_number_of_page_links():

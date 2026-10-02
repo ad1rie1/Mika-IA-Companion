@@ -15,7 +15,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import lru_cache
 from typing import Any
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, TypeAdapter
 
@@ -424,7 +424,21 @@ def _default_params(f: Faculty[Any, Any]) -> Any:
 
 @lru_cache(maxsize=16)
 def _zone(name: str) -> ZoneInfo:
+    """Le fuseau qu'elle vit ; un nom inconnu (un fuseau inventé, importé avant toute validation) ne met
+    rien en panne : elle vit en UTC, et la santé le dit (« configuration lisible », ``zone_known``)."""
+    if not zone_known(name):
+        return ZoneInfo("UTC")
     return ZoneInfo(name)
+
+
+@lru_cache(maxsize=16)
+def zone_known(name: str) -> bool:
+    """Ce nom désigne-t-il un fuseau que la machine connaît ?"""
+    try:
+        ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError, TypeError, OSError):
+        return False
+    return True
 
 
 def _find_cycle(graph: Mapping[str, Sequence[str]]) -> list[str] | None:

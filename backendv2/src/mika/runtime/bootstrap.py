@@ -75,6 +75,11 @@ class KernelDeps:
     #: Au-delà, une question restée sans réponse au démarrage n'est plus reprise :
     #: répondre des heures plus tard à « t'es là ? » serait pire que se taire.
     max_reply_age_s: float = 600.0
+    #: Une réponse peut attendre (elle dort) : ``reply_wait(frame, seq)`` rend ``None``
+    #: (rien de particulier), ``0`` (la réponse attend encore : le message reste en
+    #: attente, sans épisode) ou l'instant d'où elle est due — son réveil, d'où la
+    #: reprise au démarrage compte l'âge de la question.
+    reply_wait: Callable[[Frame, int], int | None] | None = None
 
 
 class ReadOnlyStore:
@@ -129,6 +134,8 @@ class Kernel:
         self.mind.subscribe(self.arbiter.invalidate)
         self.mind.subscribe(self._retry_replies)
         self._retries: set[asyncio.Task[None]] = set()
+        #: les messages dont la réponse attend (``reply_wait``), dans l'ordre d'arrivée
+        self._held: dict[int, None] = {}
         #: les mesures des courbes de la console (``@f.series``), dans ``views.db``
         self.series = SeriesStore(deps.store)
         self.sampler = Sampler(self.series, list(registry.series.values()))
@@ -258,6 +265,9 @@ class Kernel:
         await self._interpret(seq, correlation)
         if not data.addressed or self.deps.reply_kind not in self.runner.policies:
             return Perceived(commit, None)
+        if self._wait_of(seq, self.mind.root) == 0:
+            self._held[seq] = None  # elle dort : la réponse attend son réveil (``_release_held``)
+            return Perceived(commit, None)
         fut = self.lanes.submit(EpisodeRequest(
             kind=self.deps.reply_kind, target=data.handle, trigger=f"perception:{seq}", reply_to=seq,
             message=data.text.text or "", priority=0, channel=data.channel, room=data.room,
@@ -318,10 +328,15 @@ class Kernel:
             )
             interrupted += 1
         rs = self.mind.root.slices["runtime"]
-        resumed = abandoned = 0
+        resumed = abandoned = held = 0
         now = self.mind.clock.now()
         for seq, pending in rs.pending.items():
-            too_old = now - pending.at > self.deps.max_reply_age_s * 1_000_000
+            due = self._wait_of(seq, self.mind.root)
+            if due == 0:
+                self._held[seq] = None  # elle dort encore : la réponse attend son réveil
+                held += 1
+                continue
+            too_old = now - max(pending.at, due or 0) > self.deps.max_reply_age_s * 1_000_000
             if pending.attempts >= MAX_REPLY_ATTEMPTS or too_old:
                 detail = "trop tard pour répondre" if too_old else "abandonnée après deux tentatives"
                 await self.mind.append(
@@ -334,19 +349,66 @@ class Kernel:
             await self._interpret(seq, f"reprise:{seq}")  # un arrêt entre le message et son interprétation
             if self.deps.reply_kind not in self.runner.policies:
                 continue
+            if self._wait_of(seq, self.mind.root) == 0:  # interprété à l'instant : il attend son réveil
+                self._held[seq] = None
+                held += 1
+                continue
             ev = with_content(self.mind, self.mind.decode(self.mind.store.get_events([seq])[0]))
             self.lanes.submit(EpisodeRequest(
                 kind=self.deps.reply_kind, target=ev.data.handle, trigger=f"reprise:{seq}", reply_to=seq,
                 message=ev.data.text.text or "", priority=0, channel=ev.data.channel, room=ev.data.room,
             ))
             resumed += 1
-        return {"interrupted": interrupted, "resumed": resumed, "abandoned": abandoned}
+        return {"interrupted": interrupted, "resumed": resumed, "abandoned": abandoned, "held": held}
+
+    def _wait_of(self, seq: int, root: Any) -> int | None:
+        """``reply_wait`` sur cette racine ; une panne ne retient rien (``None``)."""
+        if self.deps.reply_wait is None:
+            return None
+        got = call(self.deps.reply_wait, Frame(root, self.mind.clock.now(), self.mind.registry), seq,
+                   label="attente d'une réponse")
+        return None if isinstance(got, Failed) else got
+
+    def _release_held(self, root: Any) -> None:
+        """Les réponses qui attendaient son réveil partent quand il vient : une
+        par personne — à son dernier message ; les précédents sont lus avec lui.
+        Si la personne vient de la réveiller elle-même (un message plus récent,
+        qui n'attend pas), tous ses messages de la nuit sont lus avec celui-là."""
+        rs = root.slices["runtime"]
+        due: dict[str, list[int]] = {}
+        for seq in list(self._held):
+            if seq not in rs.pending:
+                self._held.pop(seq, None)
+                continue
+            if self._wait_of(seq, root) == 0:
+                continue
+            self._held.pop(seq, None)
+            due.setdefault(rs.pending[seq].handle, []).append(seq)
+        for handle, seqs in due.items():
+            seqs.sort()
+            newer = [s for s, p in rs.pending.items() if p.handle == handle and s > seqs[-1] and s not in self._held]
+            if newer:
+                task = asyncio.ensure_future(self._fold(seqs, handle, max(newer)))
+            else:
+                task = asyncio.ensure_future(self._resubmit(seqs[-1], folded=tuple(seqs[:-1])))
+            self._retries.add(task)
+            task.add_done_callback(self._retries.discard)
+
+    async def _fold(self, seqs: Sequence[int], handle: str, into: int) -> None:
+        await self.mind.append(
+            [EPISODE_ENDED.draft(kind=self.deps.reply_kind, outcome="abstained", target=handle, reply_to=s,
+                                 detail="lu avec son message suivant : une seule réponse") for s in seqs],
+            emitter="runtime", correlation=f"lu-avec:{into}", origin=Origin.KERNEL,
+        )
 
     def _retry_replies(self, events: Sequence[Any], root: Any) -> None:
         """Une réponse supplantée (ce qu'elle avait composé ne valait plus pour
         cette audience) ou préemptée est recomposée tout de suite, tant que la
-        question attend encore — jamais perdue en silence."""
+        question attend encore — jamais perdue en silence. Une réponse qui
+        attendait son réveil part quand il vient."""
         rs = root.slices["runtime"]
+        if self._held and self.started:
+            self._release_held(root)
         for e in events:
             if e.type.name != EPISODE_ENDED.name or e.data.kind != self.deps.reply_kind:
                 continue
@@ -358,11 +420,13 @@ class Kernel:
             self._retries.add(task)
             task.add_done_callback(self._retries.discard)
 
-    async def _resubmit(self, seq: int) -> None:
+    async def _resubmit(self, seq: int, folded: tuple[int, ...] = ()) -> None:
         stored = self.mind.store.get_events([seq])
         if not stored:
             return
         ev = with_content(self.mind, self.mind.decode(stored[0]))
+        if folded:  # ses messages précédents sont lus avec le dernier : une seule réponse
+            await self._fold(folded, ev.data.handle, seq)
         self.lanes.submit(EpisodeRequest(
             kind=self.deps.reply_kind, target=ev.data.handle, trigger=f"reprise:{seq}", reply_to=seq,
             message=ev.data.text.text or "", priority=0, channel=ev.data.channel, room=ev.data.room,

@@ -35,6 +35,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import attention as attention_c
+from mika.contracts import expression as expression_c
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import others as c
@@ -52,7 +53,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, floor
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
-from mika.vocab.affect import Appraisal, Emotion
+from mika.vocab.affect import Appraisal, Declared, Emotion, emotion_of
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.people import is_identifiable
 from mika.vocab.temperament import Temperament, lerp
@@ -174,6 +175,39 @@ class OthersParams(BaseModel):
     receptivity_late_weight: Annotated[float, Knob(
         label="Une réponse tardive compte pour", group="Les heures où elle répond", lo=0.0, hi=1.0, step=0.05,
         help="Une réponse arrivée après le délai attendu rattrape d'autant l'initiative restée sans réponse.")] = 0.5
+    # ce qui la rassure, ce qui l'inquiète aussi
+    relief_min_words: Annotated[int, Knob(
+        label="Rassurée : un message d'au moins (mots)", group="Surprise et inquiétude", lo=1, hi=20,
+        help="Un « ok » ne la rassure pas : un message plus léger d'au moins tant de mots, revenu à peu près à son "
+             "ton habituel, éteint l'inquiétude (un message franchement joyeux aussi, quelle que soit sa "
+             "longueur).")] = 3
+    relief_margin: Annotated[float, Knob(
+        label="Rassurée : ton habituel, à tant près", group="Surprise et inquiétude", lo=0.0, hi=1.0, step=0.05,
+        help="Le message qui rassure est au plus aussi en dessous de son ton habituel.")] = 0.3
+    relief_valence: Annotated[float, Knob(
+        label="Rassurée : un message franchement léger dès", group="Surprise et inquiétude", lo=0.0, hi=1.0,
+        step=0.05, help="Un message au moins aussi léger rassure, même court.")] = 0.3
+    declared_concern_from: Annotated[float, Knob(
+        label="S'inquiéter de sa propre réponse dès", group="Surprise et inquiétude", lo=0.1, hi=1.0, step=0.05,
+        help="Quand elle répond à une amie triste, anxieuse ou effrayée au moins à ce point (sa balise d'émotion), "
+             "c'est que le message l'a inquiétée — même si les mots ne le disaient pas : elle prendra de ses "
+             "nouvelles. Pas chez quelqu'un dont c'est le ton habituel.")] = 0.6
+    # la contagion : son ton du moment la colore un peu, selon leur proximité
+    contagion_gain: Annotated[float, Knob(
+        label="Contagion : force", group="Contagion", lo=0.0, hi=0.5, step=0.01,
+        help="Le ton du moment de quelqu'un la colore d'autant (× l'intensité du ton × la proximité : rien d'une "
+             "inconnue, la moitié d'une connaissance, tout d'une proche). Elle s'allège avec quelqu'un de joyeux, "
+             "se tend avec quelqu'un de stressé.")] = 0.12
+    contagion_from: Annotated[float, Knob(
+        label="Contagion : un ton d'au moins", group="Contagion", lo=0.0, hi=1.0, step=0.05,
+        help="Un message plus neutre que ça ne la colore pas.")] = 0.25
+    contagion_cap: Annotated[float, Knob(
+        label="Contagion : au plus, par fenêtre", group="Contagion", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité cumulée qu'une même personne peut lui transmettre dans la fenêtre ci-dessous : une "
+             "conversation agitée la colore, elle ne la submerge pas.")] = 0.3
+    contagion_window_us: Annotated[int, Knob(
+        label="Contagion : fenêtre", group="Contagion", lo=MINUTE, hi=DAY,
+        help="La fenêtre du plafond ci-dessus.")] = 10 * MINUTE
 
 
 def derive(t: Temperament, overrides: Any = None) -> OthersParams:
@@ -212,9 +246,13 @@ class OthersState:
     missed: tuple[str, ...] = ()
     #: personne → (message qui l'a inquiétée, quand, à partir de quand prendre de ses nouvelles)
     concerns: FrozenDict[str, tuple[int, int, int]] = field(default_factory=FrozenDict)
+    #: personne → (début de la fenêtre, contagion déjà reçue dans la fenêtre)
+    contagion: FrozenDict[str, tuple[int, float]] = field(default_factory=FrozenDict)
 
 
-OTHERS = Faculty("others", state=OthersState, init=lambda p: OthersState(), params=OthersParams, derive=derive)
+#: v2 : ce qui rassure se juge à la lecture ; sa propre réponse peut l'inquiéter ; la contagion.
+OTHERS = Faculty("others", state=OthersState, init=lambda p: OthersState(), params=OthersParams, derive=derive,
+                 state_version=2)
 OTHERS.declare(*c.ALL)
 
 
@@ -318,12 +356,50 @@ def _read(s: OthersState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]
     level = frame.get(social_c.CLOSENESS(person))
     known = confidence(m, p, level)
     close = level in (social_c.FRIEND, social_c.CLOSE)
-    concern = (close and known >= p.concern_confidence and tone.valence <= p.concern_below
-               and expected - tone.valence >= p.concern_drop)
+    # un événement grave inquiète venant d'une amie, quel que soit son ton habituel ; un message lourd, seulement
+    # s'il tranche avec ce qu'elle attendait d'elle
+    concern = close and (tone.grave or (known >= p.concern_confidence and tone.valence <= p.concern_below
+                                        and expected - tone.valence >= p.concern_drop))
+    contagion, emotion = _contagion(s, person, tone, level, ev.at, p)
     return [c.READ.draft(person=person, handle=d.handle, message=ev.seq, valence=tone.valence, arousal=tone.arousal,
                          cues=tone.cues, expected=round(expected, 3), confidence=round(known, 3),
                          surprise=round(abs(tone.valence - expected) * known, 3), concern=concern,
-                         public=bool(d.public or d.room))]
+                         public=bool(d.public or d.room), grave=tone.grave,
+                         relief=reassuring(m, tone.valence, text, p), contagion=contagion,
+                         contagion_emotion=emotion)]
+
+
+def reassuring(m: Model, valence: float, text: str, p: OthersParams) -> bool:
+    """Ce message la rassure-t-il sur une inquiétude ? Pas un « ok » : un message
+    plus léger, assez long, revenu à peu près à son ton habituel — ou franchement
+    léger, quelle que soit sa longueur."""
+    if valence <= p.concern_below:
+        return False
+    if valence >= p.relief_valence:
+        return True
+    return len(text.split()) >= p.relief_min_words and valence >= m.usual_valence - p.relief_margin
+
+
+#: L'intensité de la contagion selon leur proximité : rien d'une inconnue, tout d'une proche.
+CONTAGION_BY_CLOSENESS = {social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 0.8,
+                          social_c.CLOSE: 1.0}
+
+
+def _contagion(s: OthersState, person: str, tone: Any, level: str, at: int, p: OthersParams) -> tuple[float, str]:
+    """Ce que son ton du moment lui transmet : une émotion (joie, tension, peine)
+    et une petite intensité, proportionnée à leur proximité, plafonnée par fenêtre."""
+    if abs(tone.valence) < p.contagion_from:
+        return 0.0, ""
+    raw = p.contagion_gain * abs(tone.valence) * CONTAGION_BY_CLOSENESS.get(level, 0.0)
+    start, used = s.contagion.get(person, (at, 0.0))
+    if at - start >= p.contagion_window_us:
+        used = 0.0
+    intensity = round(max(0.0, min(raw, p.contagion_cap - used)), 3)
+    if intensity < 0.01:
+        return 0.0, ""
+    if tone.valence > 0:
+        return intensity, Emotion.HAPPY.value
+    return intensity, (Emotion.ANXIOUS if tone.arousal >= 0.5 else Emotion.SAD).value
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
@@ -335,11 +411,19 @@ def _learned(s: OthersState, e, cx) -> OthersState:
     p = params(cx.params)
     m = learn(s.people.get(d.person) or Model(), d.valence, d.arousal, d.message, tuple(d.cues), e.at, p)
     s = replace(s, people=s.people.set(d.person, m))
+    if d.contagion > 0:
+        start, used = s.contagion.get(d.person, (e.at, 0.0))
+        if e.at - start >= p.contagion_window_us:
+            start, used = e.at, 0.0
+        s = replace(s, contagion=s.contagion.set(d.person, (start, round(used + d.contagion, 4))))
     if d.concern:
         opens = e.at + round(p.checkin_after_us * (1.0 + p.checkin_jitter * cx.rng.random()))
         return replace(s, concerns=s.concerns.set(d.person, (d.message, e.at, opens)))
-    if d.person in s.concerns and d.valence > p.concern_below:
-        return replace(s, concerns=s.concerns.delete(d.person))  # elle va mieux : plus d'inquiétude
+    # elle va mieux : plus d'inquiétude — un vrai message plus léger, pas un « ok » (lecture d'avant ce
+    # jugement : n'importe quel message pas lourd)
+    relieved = d.relief if d.relief is not None else d.valence > p.concern_below
+    if d.person in s.concerns and relieved:
+        return replace(s, concerns=s.concerns.delete(d.person))
     return s
 
 
@@ -354,12 +438,38 @@ def _reaching_out(s: OthersState, e, cx) -> OthersState:
     return replace(s, openings=openings)
 
 
-@OTHERS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON])
+#: Ce qu'elle déclare en répondant et qui dit qu'elle s'inquiète pour la personne.
+WORRIED = frozenset({Emotion.SAD, Emotion.ANXIOUS, Emotion.SCARED})
+
+
+def _worried_reply(s: OthersState, e: Any, cx: Any) -> OthersState:
+    """Elle répond à une amie avec de la tristesse, de l'anxiété ou de la peur :
+    le message l'a inquiétée, même si les mots ne le disaient pas (« ma mère est
+    partie ce matin »). Pas chez quelqu'un dont c'est le ton habituel, ni une
+    inquiétude déjà là."""
+    d = e.data
+    declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
+    p = params(cx.params)
+    if declared is None or declared.emotion not in WORRIED or declared.intensity < p.declared_concern_from:
+        return s
+    person = cx.facts.get(identity_c.PERSON(d.target))
+    if person in s.concerns or cx.facts.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+        return s
+    m = s.people.get(person)
+    if m is not None and m.usual_valence <= p.concern_below:
+        return s  # elle râle toujours : sa propre peine pour elle ne dit rien de neuf
+    opens = e.at + round(p.checkin_after_us * (1.0 + p.checkin_jitter * cx.rng.random()))
+    return replace(s, concerns=s.concerns.set(person, (d.reply_to or e.seq, e.at, opens)))
+
+
+@OTHERS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, social_c.CLOSENESS])
 def _wrote(s: OthersState, e, cx) -> OthersState:
     """Elle écrit d'elle-même à quelqu'un : on mesurera le temps qu'il met à
     répondre (pas à une salutation ni à un rappel : ce n'était pas une
-    question)."""
+    question). Elle lui répond, inquiète : elle prendra de ses nouvelles."""
     d = e.data
+    if d.kind == Kind.REPLY and d.visible and d.target and is_identifiable(d.target) and d.room is None:
+        return _worried_reply(s, e, cx)
     if d.kind != Kind.INITIATIVE or not d.visible or not d.target or not is_identifiable(d.target):
         return s
     reasons = s.openings.get(e.correlation, "").split(",")
@@ -443,6 +553,10 @@ def _read_felt(e, cx) -> list[Appraisal]:
     if d.concern:
         # s'inquiéter pour quelqu'un suit la contagion du tempérament
         out.append(Appraisal(Emotion.ANXIOUS, p.worry_intensity, reason="inquiétude", relational=True))
+    emotion = emotion_of(d.contagion_emotion) if d.contagion > 0 else None
+    if emotion is not None:
+        # son ton du moment la colore un peu : un nombre et une émotion, jamais un mot du message
+        out.append(Appraisal(emotion, d.contagion, reason="contagion", relational=True))
     return out
 
 

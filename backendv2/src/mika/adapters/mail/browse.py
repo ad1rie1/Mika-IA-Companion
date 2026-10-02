@@ -17,17 +17,17 @@ from mika.ports.paging import Page, fold_text
 # La copie locale fait autorité pour les envois ; INBOX pour les autres copies.
 INDEX = """
 WITH RECURSIVE candidates AS (
-  SELECT rowid AS rid, 0 AS local, account, message_id, subject, date, sender, address,
+  SELECT rowid AS rid, 0 AS local, account, message_id, ref, subject, date, sender, address,
          dest, cc, mail_mid(in_reply_to) AS parent, (folder='INBOX') AS priority,
          (EXISTS(SELECT 1 FROM folders f WHERE f.account=messages.account AND f.name=messages.folder
                  AND f.role='sent') OR lower(folder) IN ('sent','sent items','envoyés')) AS is_sent
   FROM messages
   UNION ALL
-  SELECT rowid, 1, account, mail_mid(message_id), subject, date, '', '', dest, cc,
-         mail_mid(in_reply_to), 2, 1 FROM envoyes
+  SELECT rowid, 1, account, mail_mid(message_id), mail_ref(account, mail_mid(message_id)), subject, date, '', '',
+         dest, cc, mail_mid(in_reply_to), 2, 1 FROM envoyes
 ), ranked AS (
-  SELECT *, MAX(is_sent) OVER(PARTITION BY account,message_id) AS sent,
-         ROW_NUMBER() OVER(PARTITION BY account,message_id ORDER BY priority DESC,date DESC,rid DESC) AS rank
+  SELECT *, MAX(is_sent) OVER(PARTITION BY account,ref) AS sent,
+         ROW_NUMBER() OVER(PARTITION BY account,ref ORDER BY priority DESC,date DESC,rid DESC) AS rank
   FROM candidates
 ), letters AS (SELECT * FROM ranked WHERE rank=1)
 """
@@ -50,7 +50,7 @@ def conditions(query: MailQuery) -> tuple[str, list[Any]]:
             args.append(fold_text(value))
     for refs, negate in ((query.refs, False), (query.exclude, True)):
         if refs is not None and (refs or not negate):
-            clauses.append(f"mail_ref(account,message_id) {'NOT IN' if negate else 'IN'} (SELECT value FROM json_each(?))")
+            clauses.append(f"ref {'NOT IN' if negate else 'IN'} (SELECT value FROM json_each(?))")
             args.append(json.dumps(refs))
     return " AND ".join(clauses) or "1", args
 
@@ -87,7 +87,7 @@ class Browse:
 
     def hits(self, text: str, limit: int, offset: int, *, count: bool = False):
         # Recherche dans tout le contenu ; on ne matérialise que les en-têtes de la page.
-        sql = INDEX + " SELECT account,message_id,subject,date,sender,dest,sent FROM letters WHERE " \
+        sql = INDEX + " SELECT account,message_id,subject,date,sender,dest,sent,ref FROM letters WHERE " \
             "instr(fold(subject || ' ' || sender || ' ' || dest || ' ' || CASE WHEN local=1 THEN " \
             "(SELECT body FROM envoyes WHERE rowid=letters.rid) ELSE " \
             "(SELECT body FROM messages WHERE rowid=letters.rid) END),?)>0 " \
@@ -102,8 +102,8 @@ class Browse:
 
     @staticmethod
     def hit(r):
-        account, mid, subject, date, sender, dest, sent = r
-        return MailHit(mail_ref(account, mid), mid, account, subject or "", date or 0,
+        account, mid, subject, date, sender, dest, sent, ref = r
+        return MailHit(ref or mail_ref(account, mid), mid, account, subject or "", date or 0,
                        f"à {dest}" if sent else sender or "", bool(sent))
 
     def thread(self, ref: str, page: int, size: int):
@@ -116,7 +116,7 @@ class Browse:
                   UNION SELECT parent a,message_id b FROM scoped WHERE parent!=''),
         connected(id) AS (VALUES(?) UNION SELECT e.b FROM edges e JOIN connected c ON e.a=c.id),
         result AS (SELECT * FROM scoped WHERE message_id IN (SELECT id FROM connected))"""
-        return self.page(sql, (account, mid), "account,message_id,subject,date,sender,dest,sent",
+        return self.page(sql, (account, mid), "account,message_id,subject,date,sender,dest,sent,ref",
                          "date,account,message_id", self.hit, page, size)
 
     def contacts(self, account: str, text: str, own: tuple[str, ...], page: int, size: int):

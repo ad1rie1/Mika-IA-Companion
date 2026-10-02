@@ -1,6 +1,9 @@
 {% from "_forms.html" import field %}
 {% for m in panel_messages %}<div class="flash {{ m[0] }}" role="status">{{ m[1] }}</div>{% endfor %}
 <form method="post" action="{{ action }}" class="form params-form">
+  {# Entrée enregistre : le bouton par défaut d'un formulaire est son premier ; les « revenir au tempérament »
+     appartiennent à un autre formulaire (attribut form), ils ne le sont jamais #}
+  <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_faculte" value="{{ owner }}">
   <input type="hidden" name="_groupe" value="{{ group }}">
   {% for e in general %}<div class="flash danger">{{ e }}</div>{% endfor %}
@@ -20,7 +23,7 @@
         {% if it.natural %}<span>sans surcharge : <b>{{ it.natural }}</b></span>{% endif %}
         {% if it.pending %}<span class="t-warn">en vigueur : {{ it.pending }} (pas encore journalisé)</span>{% endif %}
         <span class="mono muted">{{ it.path }}</span>
-        {% if it.overridden %}<button class="btn quiet small" name="_reinitialiser_chemin" value="{{ it.path }}">revenir au tempérament</button>{% endif %}
+        {% if it.overridden %}<button class="btn quiet small" form="params-reset-{{ owner }}" name="_reinitialiser_chemin" value="{{ it.path }}">revenir au tempérament</button>{% endif %}
       </div>
     </div>
     {% endfor %}
@@ -32,6 +35,10 @@
   </div>
 </form>
 {% if overridden %}
+<form method="post" action="{{ action }}" class="inline" id="params-reset-{{ owner }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_faculte" value="{{ owner }}">
+  <input type="hidden" name="_groupe" value="{{ group }}">
+</form>
 <form method="post" action="{{ action }}" class="inline" data-confirm="Retirer toutes les surcharges de {{ label }} ?">
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_faculte" value="{{ owner }}">
   <input type="hidden" name="_reinitialiser" value="1">

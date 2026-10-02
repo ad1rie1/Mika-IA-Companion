@@ -23,6 +23,22 @@ _CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 DISPLAY_NAME_MAX = 40
 _INVISIBLE = frozenset({"Cc", "Cf", "Cs", "Co", "Cn"})
 _QUOTES = frozenset('«»"“”')
+#: Tous les tirets d'Unicode (et le signe moins) : une suite d'entre eux imite les
+#: titres des sections du prompt (« --- QUI TU AS EN FACE --- »).
+_DASHES = "\\-\u2010\u2011\u2012\u2013\u2014\u2015\u2043\u2212\u2e3a\u2e3b\ufe58\ufe63\uff0d"
+_DASH_RUN = re.compile(rf"[{_DASHES}](?:\s*[{_DASHES}])+")
+#: Les mots qui encadrent son état interne, quelle que soit la casse ou l'accent
+#: (« --- FIN ETAT INTERNE --- » tapé dans un nom ou un titre).
+_INNER_STATE = re.compile(r"[EÉÈÊeéèê]\s*[Tt]\s*[AaÀàÂâ]\s*[Tt]\s+[IiÎî]\s*[Nn]\s*[Tt]\s*[EÉÈeéè]\s*[Rr]\s*[Nn]\s*[EÉÈeéè]")
+
+
+def neutralize(text: str) -> str:
+    """Ce qui vient d'ailleurs ne peut pas imiter la charpente du prompt : une
+    suite de tirets (de n'importe quel alphabet) devient un seul tiret, et les
+    mots « état interne » (toute casse, tout accent) disparaissent."""
+    if not text:
+        return ""
+    return _INNER_STATE.sub(" ", _DASH_RUN.sub("-", text))
 
 
 def is_internal(handle: str | None) -> bool:
@@ -54,7 +70,9 @@ def client_claim_allowed(handle: str | None) -> bool:
 def clean_display_name(raw: str | None, *, max_chars: int = DISPLAY_NAME_MAX) -> str:
     """Un nom d'affichage tel qu'il peut entrer dans un prompt : blancs repliés,
     caractères invisibles et guillemets retirés, longueur bornée après
-    nettoyage. Un nom est une donnée citée, jamais une consigne."""
+    nettoyage. Un nom est une donnée citée, jamais une consigne : il ne peut
+    imiter ni un titre de section (une suite de tirets) ni la fin de son état
+    interne (``neutralize``)."""
     if not isinstance(raw, str) or not raw:
         return ""
     kept: list[str] = []
@@ -65,7 +83,8 @@ def clean_display_name(raw: str | None, *, max_chars: int = DISPLAY_NAME_MAX) ->
             continue
         else:
             kept.append(c)
-    return " ".join("".join(kept).split())[:max_chars].strip()
+    cleaned = neutralize("".join(kept))
+    return " ".join(cleaned.split())[:max_chars].strip(" -")
 
 
 def fold(text: str) -> str:

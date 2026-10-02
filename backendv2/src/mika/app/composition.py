@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from mika.app.paths import PERSONA
+from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import self_ as self_c
 from mika.faculties.affect import AFFECT
@@ -62,6 +63,12 @@ def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) ->
     if not target or audience is None:
         return None
     return Guard("divulgation", reads=(identity_c.DISCLOSURE((target, audience.channel, audience.public)),))
+
+
+def _reply_wait(frame: Frame, seq: int) -> int | None:
+    """La nuit, la réponse à un message qui ne l'a pas réveillée attend son
+    réveil (``body``) : ``0`` tant qu'elle dort, puis l'instant de son réveil."""
+    return frame.get(body_c.REPLY_WAIT(seq))
 
 
 #: les lots qu'un projet peut avoir (chaque projet choisit les siens parmi eux)
@@ -134,6 +141,7 @@ def deps(**kw: Any) -> KernelDeps:
         "audience_of": audience_for,
         "parsers": [parse_reply],
         "reply_kind": Kind.REPLY,
+        "reply_wait": _reply_wait,
     }
     base.update(kw)
     return KernelDeps(**base)

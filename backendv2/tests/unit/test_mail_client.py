@@ -141,7 +141,8 @@ def test_the_operator_writes_replies_and_she_knows(tmp_path):
     assert [e.data.outcome for e in out["audit"] if e.data.action.startswith("email.")] == ["done", "done", "refused"]
     answer = next(e for e in out["noticed"] if e.data.mail == "<m2@exemple.fr>")
     summary = out["texts"].get(answer.data.summary.ref, "")
-    assert summary.startswith("Réponse à un mail que ton opérateur")  # la réponse ne la surprend pas
+    # la réponse ne la surprend pas ; et elle ne dit jamais « ton opérateur » (son prénom, sinon ceci)
+    assert summary.startswith("Réponse à un mail que la personne qui s'occupe de toi a envoyé")
     gone = table(out["envoyés"], "Envoyés")
     assert len(gone.rows) == 2 and all(isinstance(r.cells[3], Badge) and "opérateur" in r.cells[3].text
                                        for r in gone.rows)

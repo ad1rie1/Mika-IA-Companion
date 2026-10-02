@@ -1,17 +1,23 @@
 """Lire un mail brut : en-têtes utiles, texte brut (même d'un mail HTML, sans
 scripts ni styles), pièces jointes (nom, type, taille — jamais leur contenu),
-envoi de masse reconnu."""
+envoi de masse reconnu.
+
+Le texte d'un mail HTML se lit en **une passe linéaire** sur une source bornée
+(``ports.preprocess.html_text``) : un mail de 5 Mo bâti pour faire revenir une
+expression régulière en arrière ne fige plus rien. Un mail sans Message-ID
+reçoit un identifiant tiré de son contenu (le même mail rangé dans deux
+dossiers garde le même)."""
 
 from __future__ import annotations
 
 import email.utils
-import html
-import re
+import hashlib
 from email import policy
 from email.parser import BytesParser
 from typing import Any
 
 from mika.ports.mail import Attachment, File, Mail
+from mika.ports.preprocess import html_text
 
 BODY_MAX = 20_000
 HTML_MAX = 200_000
@@ -21,10 +27,8 @@ _NOREPLY = ("noreply", "no-reply", "ne-pas-repondre", "nepasrepondre", "donotrep
 
 
 def strip_html(raw: str) -> str:
-    text = re.sub(r"(?is)<(script|style|head)[^>]*>.*?</\1>", " ", raw)
-    text = re.sub(r"(?i)<br\s*/?>|</p>|</div>|</li>|</tr>", "\n", text)
-    text = html.unescape(re.sub(r"(?s)<[^>]+>", " ", text))
-    return re.sub(r"\s*\n\s*", "\n", re.sub(r"[ \t ]+", " ", text)).strip()
+    """Le texte d'un corps HTML, en temps linéaire sur une source bornée."""
+    return html_text(raw)
 
 
 def _text_of(msg: Any) -> tuple[str, bool]:
@@ -101,7 +105,7 @@ def parse(raw: bytes, uid: str = "", *, account: str = "", folder: str = "", com
     auto = _header(msg, "Auto-Submitted").lower()
     bulk = bool(msg.get("List-Unsubscribe")) or _header(msg, "Precedence").lower() in ("bulk", "list", "junk") \
         or (auto not in ("", "no")) or address.split("@")[0].startswith(_NOREPLY)
-    message_id = _header(msg, "Message-ID") or f"<uid-{uid or 'x'}@imap>"
+    message_id = _header(msg, "Message-ID") or f"<sans-id-{hashlib.sha256(raw).hexdigest()[:20]}@mika>"
     return Mail(
         message_id=message_id, sender=sender[:200], address=address, subject=_header(msg, "Subject") or "(sans objet)",
         date=date, body=body.strip() if complete else body.strip()[:BODY_MAX], to=_header(msg, "To"), in_reply_to=_header(msg, "In-Reply-To"),

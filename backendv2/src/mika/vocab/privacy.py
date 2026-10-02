@@ -14,9 +14,14 @@ Deux notions orthogonales :
 La **divulgation** est graduée : chaque contenu sur autrui porte une
 sensibilité (anodin, personnel, confidence) et chaque audience un niveau. Au
 public, jamais plus qu'anodin ; sous la barre de certitude, anodin ; un lien
-(ami, proche, chaleur, témoin) ouvre le personnel ; la confidence ne sort
-qu'en privé, à haute certitude, pour la personne concernée ou un proche.
-La fiche de l'interlocuteur lui-même est une porte à part (``own_file``).
+ouvre le personnel — être amie ou proche, ou de la chaleur pour quelqu'un
+qu'elle connaît déjà (la chaleur seule, pour une inconnue, n'ouvre rien sur
+autrui), ou avoir été là quand ça s'est dit (témoin) ; la confidence ne sort
+qu'en privé, à haute certitude, pour une proche — ou une amie qui était là.
+Ce que quelqu'un a demandé de ne répéter à personne (un secret) ne ressort
+que devant qui l'a confié : ce n'est pas un niveau, c'est la mémoire qui le
+garde (``faculties/memory``). La fiche de l'interlocuteur lui-même est une
+porte à part (``own_file``).
 
 C'est une **politique**, pas du caractère : elle ne se calibre jamais.
 Fonctions pures, sans lecture d'état.
@@ -210,8 +215,11 @@ def disclosable(
 ) -> Sensitivity:
     """Le niveau le plus sensible qui peut sortir sur autrui dans ce tour.
 
-    ``witness`` : l'interlocuteur est lui-même concerné (il était là) — la
-    proximité avec la personne concernée est alors acquise.
+    ``witness`` : l'interlocuteur était là quand ça s'est dit — il l'a
+    entendu lui-même, le personnel lui est ouvert ; la confidence, seulement
+    s'il est au moins un ami (un simple témoin n'est pas un confident).
+    La chaleur seule n'ouvre rien sur autrui à une inconnue : il faut au moins
+    la connaître.
     """
     if trust is ChannelTrust.INTERNAL:
         return Sensitivity.CONFIDENCE
@@ -220,9 +228,11 @@ def disclosable(
     if certainty < policy.private_threshold:
         return Sensitivity.ANODYNE
     rank = closeness_rank(closeness)
-    if not (rank >= CLOSENESS_RANK["friend"] or warmth >= policy.warmth_min or witness):
+    warm = warmth >= policy.warmth_min and rank >= CLOSENESS_RANK["acquaintance"]
+    if not (rank >= CLOSENESS_RANK["friend"] or warm or witness):
         return Sensitivity.ANODYNE
-    if certainty >= policy.confidence_threshold and (rank >= CLOSENESS_RANK["close"] or witness):
+    if certainty >= policy.confidence_threshold and (
+            rank >= CLOSENESS_RANK["close"] or (witness and rank >= CLOSENESS_RANK["friend"])):
         return Sensitivity.CONFIDENCE
     return Sensitivity.PERSONAL
 

@@ -1,17 +1,25 @@
 """``body`` : le rythme circadien, l'énergie, le sommeil.
 
 - le rythme (profil décalé par le chronotype), la phase et l'énergie à
-  l'instant — l'énergie baisse aussi avec la pression de sommeil ;
+  l'instant — l'énergie est la vigilance de l'heure, que la **proximité du
+  sommeil** fait chuter : on est fatigué dans l'heure qui précède le moment où
+  l'on s'endort (ou passé ce moment, tenu éveillé), pas « parce qu'il est
+  22 h » ;
 - le sommeil (``sleep``) : endormissement et réveil au croisement exact des
-  seuils, cycles de 90 min ; un message la réveille ; on ne s'endort pas en
-  pleine conversation ;
+  seuils (qui bougent un peu d'une nuit à l'autre), cycles de 90 min ; on ne
+  s'endort pas en pleine conversation ;
+- la nuit, **seul un message d'une amie ou d'une proche, ou quelque chose
+  d'urgent, la réveille** (``body.roused``) ; les autres attendent son réveil
+  (``body.waited``) — la réponse part le matin, et elle sait qu'elle dormait ;
 - elle ne prend pas la parole en dormant, et moins quand elle est fatiguée ;
-- ses sections : son rythme (et « ce message t'a réveillée »), et le
-  brouillard de la fatigue.
+- ses sections : son rythme (la date, l'heure, ce qu'elle ressent ; « ce
+  message t'a réveillée »), et le brouillard de la fatigue.
 """
 
 from __future__ import annotations
 
+import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
@@ -19,11 +27,14 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import body as c
+from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
+from mika.contracts import social as social_c
 from mika.faculties.body import sleep as sl
 from mika.kernel.arbitration import Modulation, RowView
-from mika.kernel.clock import HOUR, MINUTE
+from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.clock import local as to_local
+from mika.kernel.events import Draft
 from mika.kernel.faculty import CatchUp, Faculty, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
@@ -33,6 +44,7 @@ from mika.vocab import circadian
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
 from mika.vocab.temperament import Temperament
+from mika.vocab.words import fold
 
 
 class BodyParams(BaseModel):
@@ -47,14 +59,23 @@ class BodyParams(BaseModel):
         label="Sommeil", group="Sommeil",
         help="La pression de sommeil qui monte en veille et retombe la nuit, les seuils circadiens qu'elle "
              "croise pour s'endormir et se réveiller, les cycles.")] = sl.SleepParams()
-    #: ce que la pression de sommeil retire à l'énergie au-delà de ce seuil
-    pressure_drag_from: Annotated[float, Knob(
-        label="Fatigue : pression à partir de", group="Énergie", lo=0, hi=1, step=0.05,
-        help="Au-delà de ce niveau de pression de sommeil, son énergie baisse de (pression − seuil) × pente, "
-             "en plus de la courbe de la journée.")] = 0.55
-    pressure_drag: Annotated[float, Knob(
-        label="Fatigue : pente de la pression", group="Énergie", lo=0, hi=3, step=0.05,
-        help="Ce que chaque point de pression au-delà du seuil retire à son énergie.")] = 0.8
+    #: la fatigue : la proximité du moment où elle s'endormirait
+    drowsy_hours: Annotated[float, Knob(
+        label="Somnolente dans les … heures avant de s'endormir", group="Énergie", lo=0.25, hi=6, step=0.25,
+        help="Son énergie commence à baisser quand elle n'est plus qu'à tant d'heures du moment où elle "
+             "s'endormirait si personne ne la tenait éveillée — et non à heure fixe chaque soir.")] = 1.25
+    drowsy_depth: Annotated[float, Knob(
+        label="Ce que la somnolence retire", group="Énergie", lo=0, hi=1, step=0.05,
+        help="La part de sa vigilance qu'elle a perdue au moment où elle s'endormirait (et pendant son "
+             "sommeil).")] = 0.65
+    overtired_slope: Annotated[float, Knob(
+        label="Tenue éveillée : énergie perdue par heure", group="Énergie", lo=0, hi=1, step=0.05,
+        help="Passé le moment où elle se serait endormie (une conversation qui se prolonge), elle perd encore "
+             "autant d'énergie par heure : elle finit par tomber de sommeil.")] = 0.1
+    night_waking_energy: Annotated[float, Knob(
+        label="Tirée du sommeil la nuit : énergie au plus", group="Énergie", lo=0, hi=1, step=0.05,
+        help="Réveillée par un message au milieu de sa nuit, elle est dans le brouillard : son énergie ne dépasse "
+             "pas ce niveau.")] = 0.25
     #: fatigue : sous ce niveau d'énergie, prendre la parole d'elle-même se fait plus rare
     tired_below: Annotated[float, Knob(
         label="Fatiguée sous (énergie)", group="Fatigue", lo=0, hi=1, step=0.05,
@@ -76,6 +97,12 @@ class BodyParams(BaseModel):
     inertia_shift: Annotated[float, Knob(
         label="Au réveil : retenue initiale", group="Réveil", lo=-20, hi=0, step=0.5,
         help="Le recul (log-odds) au début de cette retenue.")] = -6.0
+    #: qui la réveille la nuit
+    woken_by: Annotated[tuple[str, ...], Knob(
+        label="La nuit, réveillée par", group="Réveil",
+        help="Les proximités dont un message privé la réveille la nuit (« friend », « close ») ; les autres "
+             "attendent son réveil — sauf quelque chose d'urgent, qui la réveille toujours.")] = \
+        (social_c.FRIEND, social_c.CLOSE)
 
 
 def derive(t: Temperament, overrides: Mapping[str, Any] | None = None) -> BodyParams:
@@ -83,12 +110,34 @@ def derive(t: Temperament, overrides: Mapping[str, Any] | None = None) -> BodyPa
 
 
 @dataclass(frozen=True, slots=True)
+class Waiting:
+    """Un message arrivé pendant sa nuit, qui attend son réveil."""
+
+    message: int
+    at: int
+    handle: str
+
+
+@dataclass(frozen=True, slots=True)
 class BodyState:
     sleep: sl.Sleep = field(default_factory=sl.Sleep)
+    #: le message qui l'a tirée du sommeil en dernier (0 : aucun), et d'où il venait
+    roused_by: int = 0
+    roused_handle: str = ""
+    #: les messages arrivés pendant sa nuit qui ne l'ont pas réveillée, pas encore répondus
+    waiting: tuple[Waiting, ...] = ()
 
 
-BODY = Faculty("body", state=BodyState, init=lambda p: BodyState(), params=BodyParams, derive=derive)
-BODY.declare(*c.ALL)
+#: un message en attente plus vieux est oublié de la liste (la reprise le juge comme les autres)
+WAITING_KEPT_US = 2 * DAY
+WAITING_MAX = 64
+#: les issues d'épisode après lesquelles un message attend encore sa réponse (un arrêt, une
+#: supplantation) ou la trouvera avec un autre (lu avec le suivant : « abstained »)
+_KEPT = frozenset({"interrupted", "cancelled", "superseded", "preempted", "abstained"})
+
+BODY = Faculty("body", state=BodyState, init=lambda p: BodyState(), params=BodyParams, derive=derive,
+               state_version=2, retired_params=("pressure_drag_from", "pressure_drag"))
+BODY.declare(*c.ALL, c.WAITED)
 
 
 def params(p: BodyParams | None) -> BodyParams:
@@ -104,6 +153,59 @@ def night(p: BodyParams | None) -> tuple[int, int]:
 def rhythm(p: BodyParams | None) -> circadian.Profile:
     shift = p.shift_minutes if p is not None else 0
     return circadian.DEFAULT.shifted(shift) if shift else circadian.DEFAULT
+
+
+def night_waking(s: BodyState, now: int, p: BodyParams, tz: Any) -> bool:
+    """Tirée du sommeil par un message au milieu de sa nuit : elle va se rendormir."""
+    return not s.sleep.asleep and s.sleep.woken_by_message and sl.in_night(now, tz, night(p))
+
+
+def in_her_night(s: BodyState, now: int, p: BodyParams, tz: Any) -> bool:
+    """Elle dort, ou n'est réveillée que le temps de répondre à qui l'a tirée du sommeil."""
+    return s.sleep.asleep or night_waking(s, now, p, tz)
+
+
+# ── Ce qui la réveille la nuit ────────────────────────────────────────────
+
+#: Des mots qui disent l'urgence (repliés, sans accents ni ponctuation).
+_URGENT = ("urgent", "urgence", "au secours", "a l aide", "aide moi", "aidez moi", "sos", "help",
+           "c est grave", "reveille toi", "besoin de toi", "hopital", "accident", "reponds moi", "repond moi")
+_NEGATIONS = frozenset({"pas", "rien", "aucune", "aucun", "jamais"})
+_PUNCT = re.compile(r"[^a-z0-9]+")
+
+
+def urgent(text: str) -> bool:
+    """Un message qui dit l'urgence (« c'est urgent », « au secours »…) — pas
+    « rien d'urgent » ni « c'est pas grave »."""
+    low = " " + _PUNCT.sub(" ", fold(text)).strip() + " "
+    for cue in _URGENT:
+        for m in re.finditer(rf" {re.escape(cue)} ", low):
+            before = low[: m.start()].split()[-2:]
+            if not _NEGATIONS & set(before):
+                return True
+    return False
+
+
+@BODY.interpret(rt.PERCEPTION_RECEIVED)
+def _rouse_or_wait(s: BodyState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]:
+    """Un message pendant sa nuit : il la réveille (une amie, une proche, en
+    privé ; ou quelque chose d'urgent, d'où qu'il vienne) — ou il attend son
+    réveil. Un jugement enregistré : le rejeu retombe sur le même sommeil."""
+    d = ev.data
+    if not d.addressed:
+        return []
+    p = params(frame.env.params_of("body", frame.root))
+    tz = frame.env.tz_of(frame.root)
+    if not in_her_night(s, ev.at, p, tz):
+        return []
+    person = frame.get(identity_c.PERSON(d.handle)) if is_identifiable(d.handle) else ""
+    close = bool(person) and not d.room and frame.get(social_c.CLOSENESS(person)) in p.woken_by
+    reason = c.URGENT if urgent(d.text.text or "") else c.CLOSE_ONE if close else ""
+    if reason and is_identifiable(d.handle):
+        if not s.sleep.asleep:
+            return []  # déjà tirée du sommeil : elle répond
+        return [c.ROUSED.draft(message=ev.seq, handle=d.handle, person=person, reason=reason)]
+    return [c.WAITED.draft(message=ev.seq, handle=d.handle, person=person)]
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
@@ -123,37 +225,79 @@ def _woke(s: BodyState, e, cx) -> BodyState:
     return replace(s, sleep=sl.wake(s.sleep, e.data.at, params(cx.params).sleep, cx.tz))
 
 
-@BODY.reducer(rt.PERCEPTION_RECEIVED)
-def _perceived(s: BodyState, e, cx) -> BodyState:
-    """Un message qu'on lui adresse la réveille ; tout message adressé la tient éveillée."""
-    d = e.data
-    if not d.addressed or not is_identifiable(d.handle):
-        return s
+@BODY.reducer(c.ROUSED)
+def _roused(s: BodyState, e, cx) -> BodyState:
+    """Un message l'a tirée du sommeil : elle émerge pour lui répondre."""
     current = s.sleep
     if current.asleep:
         current = sl.wake(current, e.at, params(cx.params).sleep, cx.tz, by_message=True)
-    return replace(s, sleep=replace(current, active_at=e.at))
+    return replace(s, sleep=replace(current, active_at=e.at), roused_by=e.data.message,
+                   roused_handle=e.data.handle)
+
+
+@BODY.reducer(c.WAITED)
+def _waited(s: BodyState, e, cx) -> BodyState:
+    kept = tuple(w for w in s.waiting if e.at - w.at < WAITING_KEPT_US and w.message != e.data.message)
+    return replace(s, waiting=(*kept, Waiting(e.data.message, e.at, e.data.handle))[-WAITING_MAX:])
+
+
+@BODY.reducer(rt.PERCEPTION_RECEIVED)
+def _perceived(s: BodyState, e, cx) -> BodyState:
+    """Un message adressé la tient éveillée — en journée. La nuit, c'est son
+    réveil (``body.roused``) qui en décide, jamais le message seul."""
+    d = e.data
+    if not d.addressed or not is_identifiable(d.handle) or s.sleep.asleep:
+        return s
+    if night_waking(s, e.at, params(cx.params), cx.tz):
+        return s
+    return replace(s, sleep=replace(s.sleep, active_at=e.at))
 
 
 @BODY.reducer(rt.UTTERANCE)
 def _uttered(s: BodyState, e, cx) -> BodyState:
     """Parler la tient éveillée ; parler en dormant (une raison assez forte pour
-    passer la barre de réveil) la réveille — elle se rendormira ensuite."""
-    if not e.data.visible:
+    passer la barre de réveil) la réveille — elle se rendormira ensuite. Une
+    réponse à quelqu'un règle les messages de lui qui attendaient son réveil
+    (un rappel qu'elle lui dit, non : ce n'est pas lui répondre)."""
+    d = e.data
+    if not d.visible:
         return s
     current = s.sleep
     if current.asleep:
         current = sl.wake(current, e.at, params(cx.params).sleep, cx.tz, by_message=True)
-    return replace(s, sleep=replace(current, active_at=e.at))
+        s = replace(s, roused_by=0, roused_handle="")
+    answered = d.target if d.target and d.reply_to is not None else None
+    waiting = tuple(w for w in s.waiting if w.handle != answered) if answered else s.waiting
+    return replace(s, sleep=replace(current, active_at=e.at), waiting=waiting)
+
+
+@BODY.reducer(rt.EPISODE_ENDED)
+def _ended(s: BodyState, e, cx) -> BodyState:
+    """Une question abandonnée (trop tard, en panne) ne l'attend plus. Une
+    question lue avec la suivante reste jusqu'à la réponse, qui sait qu'elles
+    sont arrivées pendant qu'elle dormait."""
+    d = e.data
+    if d.reply_to is None or d.outcome in _KEPT or not any(w.message == d.reply_to for w in s.waiting):
+        return s
+    return replace(s, waiting=tuple(w for w in s.waiting if w.message != d.reply_to))
 
 
 # ── Faits ─────────────────────────────────────────────────────────────────
 
 
 def energy(s: BodyState, now: int, p: BodyParams, tz: Any) -> float:
+    """La vigilance de l'heure, moins la somnolence : celle-ci ne vient qu'à
+    l'approche du moment où elle s'endormirait (``drowsy_hours``), et
+    continue de creuser si on la tient éveillée au-delà."""
     base = circadian.energy(to_local(now, tz), rhythm(p))
-    drag = max(0.0, sl.pressure(s.sleep, now, p.sleep, tz) - p.pressure_drag_from) * p.pressure_drag
-    return max(0.0, min(1.0, base - drag))
+    if s.sleep.asleep:
+        return round(max(0.0, base * (1.0 - p.drowsy_depth)), 4)
+    left = sl.hours_to_sleep(s.sleep, now, p.sleep, tz, p.shift_minutes)
+    drowsy = 0.0 if math.isinf(left) else max(0.0, 1.0 - left / p.drowsy_hours)
+    value = base * (1.0 - p.drowsy_depth * min(1.0, drowsy)) - p.overtired_slope * max(0.0, -left)
+    if night_waking(s, now, p, tz):
+        value = min(value, p.night_waking_energy)
+    return round(max(0.0, min(1.0, value)), 4)
 
 
 @BODY.fact(c.RHYTHM)
@@ -189,6 +333,26 @@ def _asleep_since(s: BodyState, cx) -> int:
 @BODY.fact(c.EPOCH)
 def _epoch(s: BodyState, cx) -> tuple[Any, ...]:
     return (s.sleep.asleep, s.sleep.since, s.sleep.active_at)
+
+
+@BODY.fact(c.NIGHT_WAKING)
+def _night_waking(s: BodyState, cx) -> bool:
+    return night_waking(s, cx.now, params(cx.params), cx.tz)
+
+
+@BODY.fact(c.REPLY_WAIT)
+def _reply_wait(s: BodyState, cx, message: int) -> int | None:
+    """La réponse à ce message attend-elle son réveil ? ``0`` tant qu'elle est
+    dans sa nuit ; ensuite, l'instant d'où elle est due (son réveil)."""
+    w = next((w for w in s.waiting if w.message == message), None)
+    if w is None:
+        return None
+    if s.sleep.asleep:
+        return 0
+    p = params(cx.params)
+    if night_waking(s, cx.now, p, cx.tz) and w.handle != s.roused_handle:
+        return 0  # tirée du sommeil par quelqu'un d'autre : elle ne répond qu'à lui
+    return max(w.at, s.sleep.since)
 
 
 # ── Endormissement et réveil ──────────────────────────────────────────────
@@ -248,6 +412,11 @@ async def _awake_shown(ev: Any, ports: Mapping[str, Any]) -> None:
     await _show(ev, ports)
 
 
+@BODY.effect(c.ROUSED)
+async def _roused_shown(ev: Any, ports: Mapping[str, Any]) -> None:
+    await _show(ev, ports)
+
+
 async def _show(ev: Any, ports: Mapping[str, Any]) -> None:
     """Le visage s'endort ou s'éveille : les clients reçoivent l'état (sans parole)."""
     port = ports.get("delivery")
@@ -280,7 +449,7 @@ def gate(s: BodyState, frame: Frame) -> Modulation:
     if frame.get(c.SLEEP) is not c.SleepPhase.AWAKE:
         return Modulation(veto=c.ASLEEP)
     p = params(frame.env.params_of("body", frame.root))
-    if s.sleep.woken_by_message and sl.in_night(frame.now, frame.env.tz_of(frame.root), night(p)):
+    if night_waking(s, frame.now, p, frame.env.tz_of(frame.root)):
         return Modulation(veto=c.WOKEN_AT_NIGHT)
     shift = 0.0
     since = frame.get(c.AWAKE_SINCE)
@@ -298,25 +467,59 @@ def gate(s: BodyState, frame: Frame) -> Modulation:
 
 # ── Prompt ────────────────────────────────────────────────────────────────
 
+#: tant de minutes après avoir été tirée du sommeil, elle émerge encore
+WAKING_WINDOW_US = 20 * MINUTE
 
-@BODY.section("rhythm", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=40, title="TON RYTHME")
+
+def _minutes(n: int) -> str:
+    return "un instant" if n < 1 else f"{n} minute{'s' if n > 1 else ''}"
+
+
+def _woke_line(s: BodyState, frame: Frame) -> str:
+    """Ce que son sommeil fait à cette réponse-ci : dite une fois, au bon tour."""
+    ep = frame.episode
+    if ep is None or ep.kind not in CONVERSATIONAL:
+        return ""
+    if s.sleep.asleep:
+        return "Tu dormais : tu te réveilles juste pour ça."
+    reply_to = ep.attrs.get("reply_to") if ep.kind == Kind.REPLY else None
+    if reply_to is not None:
+        if reply_to == s.roused_by and s.sleep.woken_by_message:
+            return "Tu dormais : ce message vient de te réveiller."
+        held = [w for w in s.waiting if w.handle == ep.target]
+        if any(w.message == reply_to for w in held):
+            first = frame.local(min(w.at for w in held))
+            when = f"vers {first.hour}h{first.minute:02d}"
+            if len(held) > 1:
+                return (f"Ses messages de la nuit (le premier {when}) sont arrivés pendant que tu dormais : tu les "
+                        "découvres en te levant, tu peux le lui dire.")
+            return (f"Ce message est arrivé {when}, pendant que tu dormais : tu le découvres en te levant, tu peux "
+                    "le lui dire.")
+    if s.sleep.woken_by_message and frame.now - s.sleep.since < WAKING_WINDOW_US:
+        ago = _minutes(int((frame.now - s.sleep.since) // MINUTE))
+        who = "Son message" if s.roused_handle and s.roused_handle == ep.target else "Un message"
+        return f"{who} t'a tirée du sommeil il y a {ago} : tu émerges encore."
+    return ""
+
+
+@BODY.section("rhythm", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.STEP, Kind.WORK], trim_rank=40,
+              title="TON RYTHME")
 def _rhythm_section(s: BodyState, frame: Frame, enrich: Any) -> str:
     profile = frame.get(c.RHYTHM)
     text = circadian.describe(frame.local(), profile, frame.get(c.ENERGY))
-    if s.sleep.woken_by_message and frame.now - s.sleep.since < 20 * MINUTE:
-        text += " Tu dormais : ce message vient de te réveiller."
-    return text
+    line = _woke_line(s, frame)
+    return f"{text} {line}" if line else text
 
 
 FOG = (
     (0.12, "Tu tombes de sommeil : tu as du mal à suivre, tes réponses sont très courtes, tu peux le dire."),
     (0.2, "Tu es très fatiguée : phrases courtes, pas d'élan pour les longues discussions."),
-    (0.3, "Tu es fatiguée : tu restes gentille mais tu vas à l'essentiel."),
+    (0.3, "Tu es fatiguée : moins de patience, moins d'élan, tes phrases raccourcissent."),
 )
 
 
-@BODY.section("fog", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.WORK], after=["rhythm"], trim_rank=45,
-              tags=[Tag.AFFECTIVE], title="ÉTAT COGNITIF", reads=[c.ENERGY])
+@BODY.section("fog", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.STEP, Kind.WORK], after=["rhythm"],
+              trim_rank=45, tags=[Tag.AFFECTIVE], title="ÉTAT COGNITIF", reads=[c.ENERGY])
 def _fog(s: BodyState, frame: Frame, enrich: Any) -> str | None:
     e = frame.get(c.ENERGY)
     for limit, text in FOG:

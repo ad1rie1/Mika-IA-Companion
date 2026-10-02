@@ -65,12 +65,17 @@ def test_models_are_records_with_sealed_keys_roles_and_a_loader_that_degrades(wo
     taken = post(client, url, {**backend("claude", kind="ollama", model="x"), "_ancienne": "local"})
     assert taken.status_code == 400 and "Ce nom existe déjà" in html_of(taken)
     # la page d'un fournisseur : le repli est un sélecteur parmi les autres, la clé ne se montre que si elle sert,
-    # et la liste des modèles se charge d'elle-même (injoignable : un message, pas une erreur)
+    # et la liste des modèles ne se charge que sur le bouton — afficher la page n'interroge personne (CON-30) ;
+    # injoignable : un message, pas une erreur, et rien n'est enregistré
     edit = html_of(client.get(f"{url}?enregistrement=backends&cle=local"))
     assert re.search(r'<select name="fallback"[^>]*>.*?<option value="claude"', edit, re.S)
     assert 'value="local"' not in re.search(r'<select name="fallback".*?</select>', edit, re.S).group(0)
     assert 'data-only="kind=claude|openai|ollama_cloud||kind=claude_code;auth=cle_api"' in edit
-    assert "Liste indisponible" in edit and "Options avancées" in edit
+    assert "Liste indisponible" not in edit and "Charger la liste" in edit and "Options avancées" in edit
+    asked = post(client, url, {**backend("local", kind="ollama", model="autre", host="http://127.0.0.1:9"),
+                               "_ancienne": "local", "_charger": "model"})
+    assert asked.status_code == 200 and "Liste indisponible" in html_of(asked)
+    assert client.portal.call(live.settings.llm).backends["local"].model == "gemma"  # rien d'enregistré
     # les rôles : une correspondance rôle → fournisseur ; un choix hors liste est refusé ; ce qui sert vraiment
     roles = f"{BASE}/roles"
     routed = post(client, roles, {"_section": "modeles", "_champs": ["routes"], "routes.reply": "claude",
@@ -254,7 +259,9 @@ def test_every_settings_change_lands_in_the_configuration_journal_without_conten
     post(client, f"{BASE}/transcription", {"_section": "transcription", "_champs": ["api_key"],
                                            "api_key": CANARY_STT})
     journal = html_of(client.get(f"{BASE}/journal"))
-    assert "reglages.modeles" in journal and "reglages.transcription" in journal and "user_1" in journal
+    # en mots (la section, le nom de l'opérateur) ; les clés restent au survol
+    assert "Réglages · Modèles" in journal and "Réglages · Transcription" in journal and ">adrien<" in journal
+    assert 'title="console.reglages.modeles"' in journal and 'title="user_1"' in journal
     ops = client.portal.call(lambda: live.kernel.mind.store.latest([rt.OPERATED.name], 50))
     raw = " ".join(o.data for o in ops)
     assert CANARY_KEY not in raw and CANARY_STT not in raw

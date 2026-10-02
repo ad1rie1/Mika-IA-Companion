@@ -20,6 +20,7 @@ from mika.faculties.attention import prompt as attention_prompt
 from mika.faculties.identity import describe
 from mika.faculties.projects import work as projects_work
 from mika.faculties.self import night
+from mika.faculties.social.sections import profile_parts, refs_of
 from mika.kernel.clock import local
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience, Frame
@@ -80,8 +81,14 @@ class KernelPort:
         person = frame.get(identity_c.PERSON(handle))
         thoughts = [t for t in frame.get(attention_c.THOUGHTS) if attention_prompt.admissible(t, person, audience)][:3]
         texts = self._store.content([t.text_ref for t in thoughts if t.text_ref])
-        out["ruminations"] = [{"summary": texts.get(t.text_ref, ""), "intensity": round(t.intensity, 2),
-                               "emotion": t.emotion} for t in thoughts if texts.get(t.text_ref)]
+
+        def name_of(key: str) -> str:
+            return frame.get(identity_c.IDENTITY(key)).name
+
+        # les mots d'un message privé ne se citent qu'à qui les a écrits (attention)
+        out["ruminations"] = [{"summary": attention_prompt.shown(t, texts[t.text_ref], person, name_of),
+                               "intensity": round(t.intensity, 2), "emotion": t.emotion}
+                              for t in thoughts if texts.get(t.text_ref)]
         yesterday, dream = frame.get(self_c.YESTERDAY), frame.get(self_c.DREAM_RESIDUE)
         if yesterday is not None and night.hearable(yesterday.about, 2, person, audience):
             text = self._store.content([yesterday.text_ref]).get(yesterday.text_ref)
@@ -174,18 +181,18 @@ class KernelPort:
         }}
         disclosure = frame.get(identity_c.DISCLOSURE((handle, view.channel or "web", False)))
         out.update(self._inner_life(frame, handle, disclosure))
-        if frame.get(identity_c.IS_OWNER(frame.get(identity_c.PERSON(handle)))):
+        if frame.get(identity_c.SPEAKS_AS_OWNER(handle)):  # les droits tiennent à l'adresse qui parle
             out.update(self._work(frame))
         if not disclosure.own_file:
             return out  # sa fiche est fermée : rien de ce qu'elle sait de la personne
         person = frame.get(identity_c.PERSON(handle))
         profile = frame.state("social").profiles.get(person)
         contact = frame.get(social_c.CONTACT(person))
-        summary = self._store.content([profile.summary_ref]).get(profile.summary_ref, "") if profile else ""
+        parts = profile_parts(profile, self._store.content(refs_of(profile))) if profile else (None, "", (), ())
         out["person_profile"] = {
-            "name": view.name, "summary": summary or "", "closeness": frame.get(social_c.CLOSENESS(person)),
-            "preferred_tone": profile.tone if profile else "", "topics_of_interest": list(profile.interests if profile else ()),
-            "sensitive_topics": list(profile.sensitive if profile else ()), "interaction_count": contact.inbound,
+            "name": view.name, "summary": parts[0] or "", "closeness": frame.get(social_c.CLOSENESS(person)),
+            "preferred_tone": parts[1], "topics_of_interest": list(parts[2]), "sensitive_topics": list(parts[3]),
+            "interaction_count": contact.inbound,
         }
         promises = frame.get(memory_c.PROMISES_TO(person))
         if promises:

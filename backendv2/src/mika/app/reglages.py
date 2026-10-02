@@ -9,9 +9,11 @@ rechargement est défait : on ne laisse pas une configuration à moitié prise.
 from __future__ import annotations
 
 import logging
+import re
 import zoneinfo
 from functools import cache
 from typing import TYPE_CHECKING, Annotated, Any
+from urllib.parse import urlsplit
 
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
@@ -46,9 +48,13 @@ ROLE_FAMILIES = {**{str(r): "voix" for r in VOICE_ROLES}, "extract": "mémoire",
 
 @cache
 def timezones() -> tuple[tuple[str, str], ...]:
-    """Les fuseaux IANA connus de la machine (Europe/Paris…), triés."""
+    """Les fuseaux IANA connus de la machine (Europe/Paris…), triés, et UTC."""
     names = sorted(n for n in zoneinfo.available_timezones() if "/" in n and not n.startswith(("Etc/", "SystemV")))
-    return tuple((n, n.replace("_", " ")) for n in names)
+    return (("UTC", "UTC (temps universel)"), *((n, n.replace("_", " ")) for n in names))
+
+
+#: un hôte seul (github.com, git.exemple.org:8443) : ni schéma, ni chemin, ni espace
+_HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+(?::[0-9]{1,5})?")
 
 
 class TelegramSettings(BaseModel):
@@ -57,11 +63,16 @@ class TelegramSettings(BaseModel):
     token: Annotated[str, Knob(label="Jeton du robot", help="Donné par @BotFather. Vide : pas de robot.",
                                secret=True, advanced=False, order=10)] = ""
     allowed_chats: Annotated[tuple[int, ...], Knob(
-        label="Conversations autorisées", help="Un identifiant de conversation par ligne ; vide : tout le monde "
-                                               "peut lui écrire.", advanced=False, order=20)] = ()
+        label="Conversations autorisées", help="Un identifiant de conversation par ligne. Vide : seules les "
+                                               "propriétaires lui écrivent (en privé).", advanced=False,
+        order=20)] = ()
     owners: Annotated[tuple[int, ...], Knob(
         label="Propriétaires", help="Les comptes Telegram (un identifiant par ligne) qu'elle traite comme toi : "
-                                    "ils voient ses coulisses.", advanced=False, order=30)] = ()
+                                    "ils voient ses coulisses, et leur conversation privée est toujours admise.",
+        advanced=False, order=30)] = ()
+    open_to_all: Annotated[bool, Knob(
+        label="Ouvert à tous", help="N'importe qui peut lui écrire, même hors de la liste : à cocher seulement "
+                                    "si c'est voulu (chaque message coûte un tour de modèle).", order=40)] = False
 
 
 class FeedsSettings(BaseModel):
@@ -89,6 +100,17 @@ class SttSettings(BaseModel):
     api_key: Annotated[str, Knob(label="Clé d'API", help="Chiffrée, jamais réaffichée. Vide : inchangée.",
                                  secret=True, advanced=False, order=30)] = ""
 
+    @field_validator("base_url")
+    @classmethod
+    def _url(cls, url: str) -> str:
+        url = url.strip()
+        if not url:
+            return url
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https") or not parts.hostname or " " in url:
+            raise ValueError("une adresse http(s) complète (https://api.exemple.org/v1), ou vide pour OpenAI")
+        return url
+
 
 class GitSettings(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -103,6 +125,24 @@ class GitSettings(BaseModel):
         ("github.com",)
     user: Annotated[str, Knob(label="Utilisateur", help="Le nom qui accompagne le jeton ; « x-access-token » convient "
                                                         "à GitHub.", order=20)] = "x-access-token"
+
+    @field_validator("hosts")
+    @classmethod
+    def _hosts(cls, hosts: tuple[str, ...]) -> tuple[str, ...]:
+        cleaned = tuple(dict.fromkeys(h.strip().lower() for h in hosts if h.strip()))
+        bad = [h for h in cleaned if not _HOST.fullmatch(h)]
+        if bad:
+            raise ValueError(f"« {bad[0][:80]} » n'est pas un hôte : écris-le seul, sans « https:// » ni chemin "
+                             "(github.com)")
+        return cleaned
+
+    @field_validator("user")
+    @classmethod
+    def _user(cls, user: str) -> str:
+        user = user.strip()
+        if not user or any(c.isspace() or c in ":@/" for c in user):
+            raise ValueError("un nom sans espace ni « : @ / » (« x-access-token » pour GitHub)")
+        return user
 
 
 def _dump(doc: PersonaDoc) -> str:
@@ -177,6 +217,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     # ── personnalité ──
     async def save_persona(doc: PersonaDoc, by: str) -> list[str]:
+        if not doc.name.strip():
+            return ["Son nom ne peut pas être vide : c'est ainsi qu'elle se présente."]
         previous = settings.persona_yaml()
         await settings.save_persona(_dump(doc))
         problems = await live.reconfigure()
@@ -236,10 +278,11 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     def telegram() -> TelegramSettings:
         tg = settings.telegram()
         return TelegramSettings(token=tg["token"], allowed_chats=tuple(tg["allowed_chats"]),
-                                owners=tuple(tg["owners"]))
+                                owners=tuple(tg["owners"]), open_to_all=tg["open"])
 
     async def save_telegram(cfg: TelegramSettings, by: str) -> list[str]:
-        await settings.save_telegram(token=cfg.token, allowed_chats=list(cfg.allowed_chats), owners=list(cfg.owners))
+        await settings.save_telegram(token=cfg.token, allowed_chats=list(cfg.allowed_chats), owners=list(cfg.owners),
+                                     open_to_all=cfg.open_to_all)
         try:
             await live.stop_telegram()
             await live.start_telegram()
@@ -249,8 +292,26 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     def telegram_facts() -> list[tuple[str, str]]:
         tg = settings.telegram()
-        state = "en marche" if live.telegram is not None else ("arrêté" if tg["token"] else "non configuré")
-        return [("Robot", state), ("Accès", "liste blanche" if tg["allowed_chats"] else "ouvert à tous")]
+        state = live.telegram_state() if tg["token"] else "non configuré"
+        access = "ouvert à tous" if tg["open"] else "liste blanche" if tg["allowed_chats"] else \
+            "propriétaires seulement" if tg["owners"] else "fermé (personne)"
+        return [("Robot", state), ("Accès", access)]
+
+    def telegram_warning() -> list[Any]:
+        """Ce que l'accès au robot implique, en tête de page. Fermé par défaut (ADR 0038) : on avertit
+        quand il est ouvert à tous, et quand il n'est ouvert à personne (il ne démarre pas)."""
+        tg = settings.telegram()
+        if not tg["token"]:
+            return []
+        if tg["open"]:
+            return [Note("N'importe qui trouvant le robot peut lui écrire, même hors de la liste (et chaque "
+                         "message lui coûte un tour). Décoche « Ouvert à tous » pour réserver l'accès.", "warn",
+                         title="Ouvert à tous")]
+        if not tg["allowed_chats"] and not tg["owners"]:
+            return [Note("Ni conversation autorisée ni propriétaire : le robot ne répond à personne et ne démarre "
+                         "pas. Liste les identifiants de conversation, ou ses propriétaires.", "warn",
+                         title="Fermé à tous")]
+        return []
 
     # ── sens ──
     async def save_mail(cfg: MailConfig, by: str) -> list[str]:
@@ -273,7 +334,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     def stt() -> SttSettings:
         got = settings.stt()
-        return SttSettings(base_url=got["base_url"], model=got["model"], api_key=got["api_key"])
+        return _tolerant(SttSettings, base_url=got["base_url"], model=got["model"], api_key=got["api_key"])
 
     async def save_stt(cfg: SttSettings, by: str) -> list[str]:
         await settings.save_stt(cfg.base_url, cfg.api_key, cfg.model or "whisper-1")
@@ -281,7 +342,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     def git() -> GitSettings:
         got = settings.git()
-        return GitSettings(token=got["token"], user=got["user"], hosts=tuple(got["hosts"]))
+        return _tolerant(GitSettings, token=got["token"], user=got["user"], hosts=tuple(got["hosts"]))
 
     async def save_git(cfg: GitSettings, by: str) -> list[str]:
         await settings.save_git(cfg.token, cfg.user, list(cfg.hosts))
@@ -362,8 +423,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "curseur, mesuré en le poussant à ses deux bouts.")),)),
         SettingsSection("telegram", "Telegram", "canaux", TelegramSettings, telegram, save_telegram,
                         description="Le robot qui la relie à Telegram. L'enregistrer le redémarre.",
-                        facts=telegram_facts,
-                        pages=(SettingsPage("telegram", "Telegram", description=(
+                        facts=telegram_facts, blocks=telegram_warning,
+                        pages=(SettingsPage("telegram", "Telegram", blocks=True, description=(
                             "Le robot qui la relie à Telegram : son jeton, qui peut lui écrire, et qui elle traite "
                             "comme toi. L'enregistrer redémarre le robot. Les identifiants se lisent dans "
                             "Identités › Adresses (tg_<nombre>).")),)),
@@ -378,7 +439,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         SettingsSection("courrier", "Courrier", "sens", MailConfig, settings.email, save_mail,
                         description="Ses boîtes aux lettres (IMAP pour lire et ranger, SMTP pour envoyer) et, pour "
                                     "chacune, sa façon d'y écrire. Relues à chaque relève.", order=10,
-                        facts=mail_facts,
+                        facts=mail_facts, fixed_names=("accounts",),
                         pages=(SettingsPage("boites", "Boîtes aux lettres", ("accounts",), description=(
                             "Chaque boîte a sa page : lire (IMAP), envoyer (SMTP), sa voix dans cette boîte et ce "
                             "qu'elle y prépare d'elle-même. Ce qui s'y passe se lit dans Courrier.")),)),
@@ -402,6 +463,15 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "(en-tête Authorization: Bearer). Un nouveau jeton se montre une seule fois ; l'ancien "
                             "ne vaut plus rien.")),)),
     )
+
+
+def _tolerant(cls: type[BaseModel], /, **data: Any) -> Any:
+    """Une valeur enregistrée avant qu'une règle existe (un hôte « https://github.com/ ») s'affiche
+    quand même, telle quelle : la page reste ouverte pour la corriger ; l'enregistrer la revalide."""
+    try:
+        return cls(**data)
+    except ValidationError:
+        return cls.model_construct(**data)
 
 
 def _num(value: Any) -> str:

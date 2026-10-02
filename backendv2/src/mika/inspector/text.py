@@ -38,6 +38,8 @@ from mika.kernel.inspect import (
     Toolbar,
     When,
     Workspace,
+    num_fr,
+    pct_fr,
 )
 
 MAX_DEPTH = 8
@@ -53,6 +55,8 @@ def target(ref: Ref) -> str:
         return f"vue:{ref.key}" + (f"?{params}" if params else "")
     if ref.kind == "subject":
         return f"fiche:{ref.key}" + (f"?{params}" if params else "")
+    if ref.kind == "why":
+        return f"parole:{ref.key}"
     return f"{ref.kind}:{ref.key}"
 
 
@@ -62,7 +66,7 @@ def cell(value: Any, when: Callable[[int], str], now: int) -> str:
     if isinstance(value, bool):
         return "oui" if value else "non"
     if isinstance(value, float):
-        return f"{value:.3g}"
+        return num_fr(value)
     if isinstance(value, int):
         return str(value)
     if isinstance(value, Ref):
@@ -72,7 +76,7 @@ def cell(value: Any, when: Callable[[int], str], now: int) -> str:
     if isinstance(value, Badge):
         return f"[{value.text}]"
     if isinstance(value, Meter):
-        return value.text or (f"{value.ratio:.0%}" if value.ratio == value.ratio else "—")
+        return value.text or pct_fr(value.ratio)
     if isinstance(value, Swatch):
         return value.text
     if isinstance(value, When):
@@ -124,7 +128,7 @@ def _block(b: Any, out: list[str], when: Callable[[int], str], now: int, depth: 
         out += [f"{pad}## {title}"] if title else []
         for s in b.series:
             last = s.points[-1] if s.points else None
-            shown = "—" if last is None else (f"{last[1]:.0%}" if b.unit == "%" else f"{last[1]:.3g}{b.unit}")
+            shown = "—" if last is None else (pct_fr(last[1]) if b.unit == "%" else f"{num_fr(last[1])}{b.unit}")
             out.append(f"{pad}- {s.label} : {len(s.points)} points, dernier {shown}")
     elif isinstance(b, (Section, Disclosure)):
         out.append(f"{pad}## {title}")
