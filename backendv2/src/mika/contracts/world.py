@@ -245,6 +245,8 @@ class RoomDef(Payload):
 class PlaceDef(Payload):
     """Un endroit où un acteur peut se tenir : le milieu de la pièce, la fenêtre, le bureau, le lit.
 
+    ``label`` se lit après « tu es » (« à ton bureau », « sur ton lit », « devant ta bibliothèque ») : la posture
+    le précède (« assise à ton bureau ») ;
     ``pos`` : le point d'approche, là où l'on arrive debout (pour s'asseoir, on y arrive avant de s'asseoir) ;
     ``facing`` : l'orientation une fois là, un lacet en radians dont l'avant est ``(sin φ, cos φ)`` sur
     ``(x, z)`` — 0 regarde vers +Z ; ``of_object`` : le meuble qui le porte (un lieu SEAT ou BED est presque
@@ -300,7 +302,8 @@ class Affordance(Payload):
 class ArchetypeDef(Payload):
     """Une sorte d'objet : une tasse, une lampe, une étagère.
 
-    ``states`` / ``initial_state`` : ses états (vide : il n'en a pas) ; ``surface_slots`` : combien d'objets
+    ``states`` / ``initial_state`` : ses états (vide : il n'en a pas) ; ``state_labels`` : comment elle les dit
+    (``{"off": "éteinte"}``) ; ``surface_slots`` : combien d'objets
     se posent dessus ; ``container_slots`` : combien il en contient ; ``salience`` : ce qu'il attire
     l'attention (ce qui compte dans son prompt quand la pièce est pleine)."""
 
@@ -311,6 +314,7 @@ class ArchetypeDef(Payload):
     size: Size = Size.HAND
     states: tuple[Ident, ...] = ()
     initial_state: Ident | None = None
+    state_labels: dict[str, Label] = Field(default_factory=dict)
     affordances: tuple[Affordance, ...] = ()
     surface_slots: int = Field(default=0, ge=0, le=64)
     container_slots: int = Field(default=0, ge=0, le=256)
@@ -326,6 +330,8 @@ class ArchetypeDef(Payload):
             raise ValueError(f"l'archétype « {self.id} » part d'un état qu'il ne déclare pas")
         if self.states and self.initial_state is None:
             raise ValueError(f"l'archétype « {self.id} » a des états : il lui faut initial_state")
+        if unknown := sorted(set(self.state_labels) - known):
+            raise ValueError(f"l'archétype « {self.id} » nomme des états qu'il ne déclare pas : {', '.join(unknown)}")
         ids = [a.id for a in self.affordances]
         if len(set(ids)) != len(ids):
             raise ValueError(f"l'archétype « {self.id} » déclare deux fois une même action")
@@ -622,6 +628,8 @@ class ActorState(Payload):
     room: Ident
     place: Ident | None = None
     posture: Posture = Posture.STAND
+    #: depuis quand il est là (0 : depuis la création du monde)
+    since: int = 0
     holding: tuple[Ident, ...] = ()
     activity: Activity | None = None
     moving: Movement | None = None
