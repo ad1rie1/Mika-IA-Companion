@@ -4,6 +4,7 @@ import type { VRMHumanBoneName } from "@pixiv/three-vrm";
 import type { EmotionName, SleepPhase, VoicePersona } from "../../../types";
 import { forwardSign } from "../../vrmVersion";
 import type { GazeIntent } from "../attention";
+import { EMOTION_AROUSAL } from "../affect";
 
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -42,11 +43,40 @@ export class OverlayContext {
    * GazeController for the blink coupling. */
   gazeShift = 0;
 
+  /** Character the voice is at in the reply being spoken (−1 = none),
+   * fed by the lip-sync cursor — the speech beats fire on it. */
+  speechCursor = -1;
+  /** Brow flash of the speech beat just fired, 0…1, decaying — published
+   * by SpeechBodyOverlay, read by the FaceIdleController. */
+  speechEmphasis = 0;
+  /** A question is being asked: brows held up, 0…1. */
+  speechQuestion = 0;
+
+  /** She is walking across the room (the locomotion controller). */
+  walking = false;
+
+  /** Tiredness 0 (fresh) … 1 (exhausted), from the backend's energy level
+   * — slower breath, a stiller body, heavier blinks. */
+  fatigue = 0;
+
+  /** Breath fill, 0 (empty) … 1 (full lungs), published by the breathing
+   * layer — the face and the head can ride it. */
+  breath = 0;
+  /** One-shot request to the breathing layer, consumed by it: a quick
+   * catch-breath before a clause, or a full sigh. */
+  breathRequest: "catch" | "sigh" | null = null;
+
   /** +1 for a rig facing +Z (VRM 1.0), −1 for −Z (VRM 0.x). */
   readonly sign: 1 | -1;
 
   constructor(readonly vrm: VRM) {
     this.sign = forwardSign(vrm);
+  }
+
+  /** Signed arousal of the current emotion scaled by its intensity,
+   * −1 (drained) … 1 (wired) — how much the body moves. */
+  get arousal(): number {
+    return EMOTION_AROUSAL[this.emotion] * this.intensity;
   }
 
   /** Post-multiply a small Euler delta (VRM 1.0 convention) in the bone's

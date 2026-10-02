@@ -166,7 +166,7 @@ export class BlinkController implements ProceduralOverlay {
       return;
     }
 
-    const heavy = HEAVY.has(ctx.emotion);
+    const heavy = HEAVY.has(ctx.emotion) || ctx.fatigue > 0.5;
     const roll = Math.random();
     if (roll < (heavy ? 0.45 : 0.15)) {
       this.shape = SOFT;
@@ -181,6 +181,7 @@ export class BlinkController implements ProceduralOverlay {
     let base = 2.5 + Math.random() * 3;
     if (RESTLESS.has(ctx.emotion)) base *= 0.65;
     else if (HEAVY.has(ctx.emotion)) base *= 1.3;
+    base *= 1 + 0.3 * ctx.fatigue; // tired lids blink slower and longer
     if (ctx.speaking) base *= 0.85; // people blink more while talking
     return base;
   }

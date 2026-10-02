@@ -129,6 +129,9 @@ def opening(ws) -> None:
     bound(ws)
     assert ws.receive_json()["type"] == "history"
     assert ws.receive_json()["type"] == "emotion_update"
+    # son état intérieur à la connexion (sommeil, énergie, où elle est dans sa chambre)
+    state = ws.receive_json()
+    assert state["type"] == "inner_state_update" and "place" in state["inner_state"]
 
 
 def until(ws, kind: str, limit: int = 30) -> list[dict]:

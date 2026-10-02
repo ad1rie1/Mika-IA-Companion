@@ -79,6 +79,12 @@ export interface ClipManifestEntry {
    */
   arousal?: number;
   valence?: number;
+  /**
+   * Load a left/right mirrored twin of this clip too (default true for
+   * idle, talk and gesture clips — see animation/clipMirror.ts). Set false
+   * for a clip whose side carries meaning.
+   */
+  mirror?: boolean;
 }
 
 export interface AnimationManifest {
@@ -131,4 +137,6 @@ export interface AvatarStateSnapshot {
   emotion: EmotionName;
   emotionIntensity: number;
   anchorId?: AnchorId | null;
+  /** Where the AI put her in the room (locomotion/roomLayout.ts). */
+  place?: string | null;
 }

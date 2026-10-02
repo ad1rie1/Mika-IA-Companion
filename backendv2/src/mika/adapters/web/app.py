@@ -397,6 +397,9 @@ class _Session:
         c.announced = True
         await self.send(protocol.history("initial", self.port.recent(c.handle, protocol.HISTORY_INITIAL)))
         await self.hub.push_face(c.handle, force=True)
+        # l'état intérieur tout de suite (sommeil, énergie, et où elle est dans sa chambre) : sans lui, un
+        # écran qui s'ouvre la montrait au milieu de la pièce jusqu'au prochain changement d'état
+        await self.hub.refresh_panels([c.handle])
 
     async def run(self) -> None:
         try:

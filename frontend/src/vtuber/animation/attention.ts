@@ -27,6 +27,8 @@ import type { GazeAngles } from "./gazeMath";
 export type AttentionState =
   | "contact" // eyes on the viewer
   | "avert" // a short look-away, then back
+  | "wander" // alone with her thoughts: looking around the room
+  | "walking" // crossing the room: eyes on the way, a glance now and then
   | "thinking" // a reply is being composed: absorbed, up-and-to-the-side
   | "inner" // murmuring to herself: not to you
   | "away" // the viewer is out of reach (behind her): forward gaze
@@ -49,6 +51,8 @@ export interface AttentionInput {
   /** Angular distance to the viewer (rad): sizes the jump when contact
    * toggles, for the blink coupling. */
   viewerAngle: number;
+  /** Crossing the room: she looks where she goes. */
+  walking?: boolean;
 }
 
 export interface GazeIntent {
@@ -131,6 +135,31 @@ export const SACCADE_INTERVAL: [number, number] = [1.8, 4.5];
 export const SACCADE_AMPLITUDE_CONTACT: [number, number] = [0.02, 0.07];
 export const SACCADE_AMPLITUDE_FREE: [number, number] = [0.04, 0.1];
 
+/**
+ * Left alone, a person does not stare at the spot where someone was. After
+ * a while with nobody speaking or typing, her attention drifts to the room
+ * — the door, the bed, her hands, the floor, the light from the window, the
+ * middle distance — in long looks, with glances back at the viewer between
+ * them. Any sign of the person (typing, a message, her own reply) brings
+ * the eyes straight back: being noticed is the point.
+ */
+export const WALKING_OFFSET: GazeAngles = { pitch: 0.16, yaw: 0 };
+export const WANDER_AFTER_S = 25;
+export const WANDER_P = 0.75;
+export const WANDER_DURATION: [number, number] = [2.5, 7];
+export const WANDER_INTERVAL: [number, number] = [2, 6];
+/** Points of interest in her semantic gaze frame (pitch > 0 down, yaw > 0
+ * her left), laid out after the room (Environment.ts). */
+export const WANDER_POINTS: GazeAngles[] = [
+  { pitch: 0.04, yaw: 0.55 }, // the door, front-left
+  { pitch: 0.24, yaw: -0.5 }, // the bed, front-right
+  { pitch: 0.34, yaw: 0.08 }, // the floor in front of her
+  { pitch: 0.3, yaw: -0.14 }, // her hands
+  { pitch: -0.12, yaw: -0.72 }, // the light from the window
+  { pitch: -0.2, yaw: 0.32 }, // up and away — daydreaming
+  { pitch: 0.02, yaw: -0.38 }, // the plant by the bed
+];
+
 const AVERSION_DIRS: GazeAngles[] = [
   { pitch: 0.14, yaw: 0.16 },
   { pitch: 0.14, yaw: -0.16 },
@@ -165,6 +194,9 @@ export class AttentionDirector {
 
   private wasSpeaking = false;
   private wasPending = false;
+  /** Seconds with nobody to attend to (no speech, no typing, no reply). */
+  private idleFor = 0;
+  private wandering = false;
 
   /** Reused across frames — read it during the frame, never keep it. */
   private readonly out: GazeIntent = {
@@ -215,9 +247,22 @@ export class AttentionDirector {
       this.checkinRemaining = 0;
     }
     this.thinkingElapsed = input.replyPending ? this.thinkingElapsed + dt : 0;
+    const engaged = input.speaking || input.replyPending || input.listening;
+    this.idleFor = engaged ? 0 : this.idleFor + dt;
+    if (engaged && this.wandering) {
+      // Someone is there again: the look-away ends now, not when it was
+      // due to — and the next aversion is a normal conversational one.
+      this.wandering = false;
+      this.aversionRemaining = 0;
+      this.offset.pitch = this.offset.yaw = 0;
+      this.aversionTimer = 0;
+      this.nextAversionAt = this.sample(AVERSION_INTERVAL);
+    }
 
     let mode: AttentionState;
-    if (input.persona === "inner" && input.speaking) {
+    if (input.walking) {
+      mode = "walking";
+    } else if (input.persona === "inner" && input.speaking) {
       mode = "inner";
     } else if (
       input.replyPending &&
@@ -231,7 +276,14 @@ export class AttentionDirector {
       mode = "contact";
     }
 
-    if (mode === "inner") {
+    if (mode === "walking") {
+      // Eyes a few steps ahead on the floor; aversions make no sense here.
+      this.aversionRemaining = 0;
+      this.wandering = false;
+      this.contact = input.speaking ? 0.35 : 0;
+      this.offset.pitch = WALKING_OFFSET.pitch;
+      this.offset.yaw = 0;
+    } else if (mode === "inner") {
       if (this.state !== "inner") this.innerSide = this.random() < 0.5 ? -1 : 1;
       this.aversionRemaining = 0;
       this.contact = INNER_CONTACT;
@@ -276,13 +328,32 @@ export class AttentionDirector {
         this.offset.pitch = PLANNING_OFFSET.pitch;
         this.offset.yaw = PLANNING_OFFSET.yaw * side;
       }
+      const alone = this.idleFor >= WANDER_AFTER_S;
       if (this.aversionRemaining > 0) {
         this.aversionRemaining -= dt;
         if (this.aversionRemaining <= 0) {
           this.aversionRemaining = 0;
+          this.wandering = false;
           this.offset.pitch = this.offset.yaw = 0;
           this.aversionTimer = 0;
-          this.nextAversionAt = this.sample(AVERSION_INTERVAL) * this.intervalScale(input);
+          this.nextAversionAt = alone
+            ? this.sample(WANDER_INTERVAL)
+            : this.sample(AVERSION_INTERVAL) * this.intervalScale(input);
+        }
+      } else if (alone) {
+        this.offset.pitch = this.offset.yaw = 0;
+        this.aversionTimer += dt;
+        if (this.aversionTimer >= this.nextAversionAt) {
+          this.aversionTimer = 0;
+          this.nextAversionAt = this.sample(WANDER_INTERVAL);
+          if (this.random() < WANDER_P) {
+            this.wandering = true;
+            this.aversionRemaining = this.sample(WANDER_DURATION);
+            const point =
+              WANDER_POINTS[Math.min(WANDER_POINTS.length - 1, Math.floor(this.random() * WANDER_POINTS.length))];
+            this.offset.pitch = point.pitch;
+            this.offset.yaw = point.yaw;
+          }
         }
       } else {
         this.offset.pitch = this.offset.yaw = 0;
@@ -302,8 +373,10 @@ export class AttentionDirector {
           }
         }
       }
-      this.contact = 1;
-      mode = this.aversionRemaining > 0 ? "avert" : "contact";
+      // Wandering looks at the room itself (relative to her forward), not
+      // at a point beside the viewer.
+      this.contact = this.wandering ? 0 : 1;
+      mode = this.wandering ? "wander" : this.aversionRemaining > 0 ? "avert" : "contact";
     }
 
     if (!input.reachable) {

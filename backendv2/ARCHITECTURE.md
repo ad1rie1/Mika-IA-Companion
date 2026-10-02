@@ -39,6 +39,7 @@ Vérifié à chaque test (`lint-imports`) : une couche n'importe que celles d'en
 | Faculté | Ce qu'elle tient |
 |---|---|
 | `presence` | les connexions vivantes (volatile) |
+| `place` | où elle est dans sa chambre ; l'outil `move_to` (ADR 0049) |
 | `identity` | adresses, confiance du transport, revendications, preuves, liaisons ; la divulgation (ADR 0012). La propriété se juge sur **l'adresse qui parle** (`audience.owner`), jamais en salon public ; une liaison par recoupement demande deux preuves sur deux messages, et le fil des autres adresses (`THREAD`) reste fermé tant qu'un opérateur ne l'a pas confirmée (ADR 0035) ; un nom dont on lui a parlé (`name:alice`) se relie à une personne par un opérateur, jamais deviné (ADR 0048) |
 | `transcript` | le fil (id d'un message = son `seq`), les résumés des fils longs |
 | `memory` | souvenirs, croyances, promesses, échanges ; consolidation par conversation, index, rappel hybride filtré (ADR 0010). Qui l'a confié (`told_by`) et qui l'a entendu ; le secret explicite ne quitte jamais son confident, la confidence peut s'ouvrir aux proches ; au-dessus de l'audience, elle sait qu'elle sait (« ce n'est pas à moi d'en parler ») ; ce qui se passe dans la vie des autres (`memory.life_events`, situations en cours comprises) ; un secret ne laisse même pas deviner qu'il existe, le privé se tait sans mensonge (ADR 0043) ; tenir une promesse datée à l'heure (`memory.keep_promise`, due) ; ce qu'elle dit d'elle-même (goût, avis, fait) tient un an (ADR 0046) |

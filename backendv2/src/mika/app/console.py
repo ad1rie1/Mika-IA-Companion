@@ -84,7 +84,7 @@ FACULTY_LABELS: dict[str, str] = {
     "social": "Liens", "others": "Ce qu'elle devine des autres", "identity": "Identités",
     "agency": "Initiatives", "goals": "Buts", "projects": "Projets", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
     "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
-    "sensors": "Appareils", "runtime": "Moteur",
+    "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -111,6 +111,7 @@ SECTION_LABELS: dict[str, str] = {
     "greeting_tone": "Le ton de ses bonjours (sa persona)",
     # ADR 0046
     "self_said": "Ce qu'elle a déjà dit d'elle-même", "register": "Le ton entre elles (selon leur lien)",
+    "place": "Où elle est dans sa chambre",
 }
 
 #: Les raisons des preuves de l'arbitre : ce qui la pousse à agir.
@@ -155,6 +156,7 @@ PROCESS_LABELS: dict[str, str] = {
 #: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
 EVENT_LABELS: dict[str, str] = {
     "presence.connected": "Connexion", "presence.disconnected": "Déconnexion",
+    "place.moved": "Elle s'est déplacée dans sa chambre",
     "identity.claimed": "Un nom revendiqué", "identity.evidence": "Une preuve d'identité",
     "identity.linked": "Une adresse reliée", "identity.registered": "Un compte enregistré",
     "identity.name_bound": "Un nom relié à une personne (« celle dont on lui a parlé »)",

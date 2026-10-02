@@ -7,10 +7,11 @@ import type {
 } from "../../types";
 import { ClipLibrary, REST_CLIP_NAME, type LoadedClip } from "./ClipLibrary";
 import { affectHoldScale, affectTimeScale, clipAffinity } from "./affect";
+import { baseClipName } from "./clipMirror";
 
-// v2: flip when locomotion clips + the root-motion driver land. Until
-// then "walking"/"interacting" are declared but unreachable.
-export const LOCOMOTION_ENABLED = false;
+// "walking" is driven by the locomotion controller (setWalking);
+// "interacting" stays reserved.
+export const LOCOMOTION_ENABLED = true;
 
 // Per-edge crossfade durations (seconds). One primitive (playClip) does
 // every transition — there is structurally no code path that snaps.
@@ -23,6 +24,8 @@ const FADE = {
   gestureInterrupt: 0.2,
   toSleep: 1.2,
   sleepPhaseSwap: 1.0,
+  toWalk: 0.35,
+  fromWalk: 0.45,
   wake: 1.0, // waking up is slow on purpose
   start: 0.5,
 };
@@ -51,6 +54,16 @@ export const WAKE_STRETCH_CLIP = "gesture_stretch";
 /** Ease speed of the affect tempo (1/s) — a mood change retunes the
  * clip's playback over ~half a second, never in one frame. */
 const TEMPO_EASE = 2.0;
+
+/**
+ * Per-pick playback jitter (±). A recorded clip that always comes back at
+ * the same speed, from the same frame, is a loop the eye learns within a
+ * minute; drawn anew at every pick, the same motion is never quite the
+ * same twice. Symmetric around 1 so a centred random source (tests inject
+ * 0.5) reproduces the unjittered behaviour exactly.
+ */
+export const BASE_TEMPO_JITTER = 0.07;
+export const GESTURE_TEMPO_JITTER = 0.1;
 
 export interface StateMachineHooks {
   onHandShapes?: (left: HandShapeName, right: HandShapeName) => void;
@@ -103,11 +116,22 @@ export class AnimationStateMachine {
   /** Emotion-driven idle override (sad/anxious/bored postures). */
   private idleVariant: string | null = null;
 
+  /**
+   * Seated or lying: one clip stands in for both base pools, held without
+   * rotation, and sleep dozes in it. Standing gestures and talk clips move
+   * the legs — they would stand her up off the chair — so none plays.
+   */
+  private postureClip: LoadedClip | null = null;
+  /** Walk clip while the locomotion controller moves the root. */
+  private walkClip: LoadedClip | null = null;
+
   /** Affect feeding pool weights, tempo and hold. */
   private affectEmotion: EmotionName = "neutral";
   private affectIntensity = 0.5;
   private tempoTarget = 1;
   private tempo = 1;
+  /** This pick's playback jitter (see BASE_TEMPO_JITTER). */
+  private pickTempo = 1;
 
   /** Seconds left before the talking posture returns to idle (null = no
    * return pending). */
@@ -177,6 +201,12 @@ export class AnimationStateMachine {
     switch (this._state) {
       case "idle":
       case "talking": {
+        if (this.postureClip) {
+          // A posture is held, not rotated; only the tempo follows mood.
+          this.settleRemaining = null;
+          this.updateTempo(dt);
+          break;
+        }
         if (this.settleRemaining !== null) {
           this.settleRemaining -= dt;
           if (this.settleRemaining <= 0) {
@@ -198,11 +228,66 @@ export class AnimationStateMachine {
         this.updateGesture(dt);
         break;
       }
-      case "sleeping":
       case "walking":
+        // The walk's pace is the root's travel (no affect tempo): feet that
+        // step faster than the body moves slide.
+        this.currentAction?.setEffectiveTimeScale(this.currentTimeScale);
+        break;
+      case "sleeping":
       case "interacting":
         break;
     }
+  }
+
+  // ── Locomotion (driven by the LocomotionController) ───────────────
+
+  /** Walk (loaded clip at a playback speed matching the root's travel), or
+   * stop walking (null) back into the posture / base pool. */
+  setWalking(loaded: LoadedClip | null, timeScale = 1): void {
+    if (!this.started) return;
+    if (loaded) {
+      this.walkClip = loaded;
+      this.queuedGesture = null;
+      this.gestureHoldRemaining = null;
+      this.sleepAfterGesture = false;
+      this.settleRemaining = null;
+      this._state = "walking";
+      this.pickTempo = 1;
+      if (this.currentClip?.name === loaded.name) {
+        this.currentTimeScale = timeScale;
+      } else {
+        this.playClip(loaded, FADE.toWalk, { timeScale });
+      }
+      return;
+    }
+    if (!this.walkClip) return;
+    this.walkClip = null;
+    if (this._state !== "walking") return;
+    if (this.sleepPhase !== "awake") this.enterSleeping(FADE.fromWalk);
+    else this.enterBase(this.speaking ? "talking" : "idle", FADE.fromWalk);
+  }
+
+  /** Seated / lying posture clip, or null to stand. */
+  setPosture(loaded: LoadedClip | null, fade = 0.9): void {
+    if (loaded === this.postureClip) return;
+    this.postureClip = loaded;
+    if (!this.started || this.debugPinned || this._state === "walking") return;
+    if (this._state === "sleeping") {
+      this.enterSleeping(fade);
+      return;
+    }
+    // A gesture in flight is cut: one does not finish a wave while sitting.
+    this.queuedGesture = null;
+    this.gestureHoldRemaining = null;
+    this.enterBase(this.speaking ? "talking" : "idle", fade);
+  }
+
+  get isWalking(): boolean {
+    return this._state === "walking";
+  }
+
+  get posture(): LoadedClip | null {
+    return this.postureClip;
   }
 
   // ── Inputs ────────────────────────────────────────────────────────
@@ -211,7 +296,7 @@ export class AnimationStateMachine {
     if (speaking === this.speaking) return;
     this.speaking = speaking;
     if (!this.started || this.debugPinned) return;
-    if (this._state === "sleeping") return;
+    if (this._state === "sleeping" || this._state === "walking") return;
     if (this._state === "gesture") {
       // A gesture owns the base layer until it fades back; finishGesture
       // re-reads this.speaking, so the flip needs nothing but the flag.
@@ -234,6 +319,10 @@ export class AnimationStateMachine {
     this.sleepPhase = phase;
     if (!this.started || this.debugPinned) return;
 
+    if (this._state === "walking") {
+      // The walk finishes first; setWalking(null) lands in the right state.
+      return;
+    }
     if (phase === "awake") {
       if (this._state === "gesture") {
         // Woken mid-yawn: let it finish, it lands on a base pool by itself.
@@ -242,7 +331,7 @@ export class AnimationStateMachine {
       }
       // Waking with a stretch, when one is on disk and she is not already
       // answering someone — the wake fade carries the sleep→stretch edge.
-      const stretch = this.library.get(WAKE_STRETCH_CLIP);
+      const stretch = this.postureClip ? null : this.library.variant(WAKE_STRETCH_CLIP, this.random);
       if (stretch && !this.speaking) {
         this.sleepAfterGesture = false;
         this.startGesture(stretch, FADE.wake);
@@ -259,7 +348,7 @@ export class AnimationStateMachine {
       // Yawn first, then doze — nobody drops straight from standing to
       // sleep. A running gesture is not interrupted for a yawn; a phase
       // change while she is already asleep never yawns.
-      const yawn = this.library.get(SLEEP_YAWN_CLIP);
+      const yawn = this.postureClip ? null : this.library.variant(SLEEP_YAWN_CLIP, this.random);
       if (yawn && !this.speaking) {
         this.settleRemaining = null;
         this.sleepAfterGesture = true;
@@ -294,6 +383,8 @@ export class AnimationStateMachine {
    * false when the state forbids it (sleeping, not started). */
   requestGesture(loaded: LoadedClip): boolean {
     if (!this.started || this.debugPinned) return false;
+    // Standing clips: never while seated, lying or walking.
+    if (this.postureClip) return false;
     if (this._state === "sleeping" || this._state === "walking" || this._state === "interacting") {
       return false;
     }
@@ -302,8 +393,10 @@ export class AnimationStateMachine {
       // Re-requesting the gesture that is ALREADY playing would land on
       // the same AnimationAction and hard-reset it to t=0 (a visible
       // snap, e.g. two [LAUGH] tokens in one reply) — treat it as
-      // satisfied instead.
-      if (this.currentClip?.name === loaded.name) return true;
+      // satisfied instead. Its mirrored twin counts as the same gesture.
+      if (this.currentClip && baseClipName(this.currentClip.name) === baseClipName(loaded.name)) {
+        return true;
+      }
       const progressed =
         this.clipDuration > 0 ? this.clipTime / this.clipDuration : 1;
       if (progressed >= 0.25) {
@@ -347,7 +440,8 @@ export class AnimationStateMachine {
     if (!this.debugPinned) return;
     this.debugPinned = false;
     this.debugIndex = -1;
-    if (this.sleepPhase !== "awake") this.enterSleeping(FADE.sleepPhaseSwap);
+    if (this.walkClip) this.setWalking(this.walkClip);
+    else if (this.sleepPhase !== "awake") this.enterSleeping(FADE.sleepPhaseSwap);
     else this.enterBase(this.speaking ? "talking" : "idle", FADE.toIdle);
   }
 
@@ -371,7 +465,9 @@ export class AnimationStateMachine {
   private updateTempo(dt: number): void {
     this.tempo += (this.tempoTarget - this.tempo) * Math.min(1, dt * TEMPO_EASE);
     if (this.currentAction) {
-      this.currentAction.setEffectiveTimeScale(this.currentTimeScale * this.tempo);
+      this.currentAction.setEffectiveTimeScale(
+        this.currentTimeScale * this.tempo * this.pickTempo
+      );
     }
   }
 
@@ -424,7 +520,10 @@ export class AnimationStateMachine {
     this._state = "gesture";
     this.gestureFadeOut = loaded.meta.fadeOut ?? FADE.gestureOut;
     const loops = loaded.meta.loop === true;
-    this.playClip(loaded, fadeIn, { once: !loops });
+    this.playClip(loaded, fadeIn, {
+      once: !loops,
+      timeScale: (loaded.meta.timeScale ?? 1) * this.jitter(GESTURE_TEMPO_JITTER),
+    });
     this.gestureHoldRemaining = loops
       ? this.sample(loaded.meta.hold ?? [3.5, 5.5])
       : null;
@@ -435,7 +534,10 @@ export class AnimationStateMachine {
     this.gestureHoldRemaining = null;
     this.settleRemaining = null;
     const loaded = this.pickBaseClip(state);
-    this.playClip(loaded, fade);
+    // A new pick enters its loop at a random frame and its own pace: the
+    // same idle never restarts from the same breath twice.
+    this.pickTempo = this.postureClip ? 1 : this.jitter(BASE_TEMPO_JITTER);
+    this.playClip(loaded, fade, { randomPhase: !this.postureClip });
     this.holdTimer = 0;
     this.holdDuration =
       this.sample(loaded.meta.hold ?? DEFAULT_HOLD[state]) *
@@ -446,6 +548,12 @@ export class AnimationStateMachine {
     if (this.sleepPhase === "awake") return;
     this._state = "sleeping";
     this.settleRemaining = null;
+    this.pickTempo = 1;
+    if (this.postureClip) {
+      // Dozing in the chair, asleep in the bed: the posture holds.
+      this.playClip(this.postureClip, fade);
+      return;
+    }
     const { loaded, timeScale } = this.library.sleepConfig(this.sleepPhase);
     this.playClip(loaded, fade, { timeScale });
   }
@@ -460,11 +568,13 @@ export class AnimationStateMachine {
   }
 
   private pickBaseClip(state: "idle" | "talking"): LoadedClip {
+    if (this.postureClip) return this.postureClip;
     // Emotion-selected variant bypasses the weighted rotation entirely
     // (variants ship with weight 0 precisely so they are ONLY reachable
     // this way).
     if (state === "idle" && this.idleVariant) {
-      const variant = this.library.get(this.idleVariant);
+      // Either side: a slump held for a minute shifts its weight over.
+      const variant = this.library.variant(this.idleVariant, this.random);
       if (variant) return variant;
     }
 
@@ -491,9 +601,10 @@ export class AnimationStateMachine {
     // Weighted random, excluding the current clip when possible. The
     // affinity term (affect.ts) tilts the draw toward clips whose declared
     // arousal/valence match the emotion; undeclared clips keep their weight.
-    const candidates = spontaneous.filter(
-      (c) => c.name !== this.currentClip?.name
-    );
+    // Neither the current clip nor its mirrored twin: the same motion
+    // from the other side right after is still the same motion.
+    const current = this.currentClip ? baseClipName(this.currentClip.name) : null;
+    const candidates = spontaneous.filter((c) => baseClipName(c.name) !== current);
     const usable = candidates.length > 0 ? candidates : spontaneous;
     const weights = usable.map((c) => this.poolWeight(c));
     const total = weights.reduce((s, w) => s + w, 0);
@@ -509,12 +620,17 @@ export class AnimationStateMachine {
     return range[0] + this.random() * Math.max(0, range[1] - range[0]);
   }
 
+  /** 1 ± amount, centred: a random source returning 0.5 yields exactly 1. */
+  private jitter(amount: number): number {
+    return 1 + amount * (2 * this.random() - 1);
+  }
+
   /** THE crossfade primitive: reset → play → crossFadeTo. Every clip
    * change in the system goes through here. */
   private playClip(
     loaded: LoadedClip,
     fade: number,
-    opts: { once?: boolean; timeScale?: number; forceLoop?: boolean } = {}
+    opts: { once?: boolean; timeScale?: number; forceLoop?: boolean; randomPhase?: boolean } = {}
   ): THREE.AnimationAction {
     const timeScale = opts.timeScale ?? loaded.meta.timeScale ?? 1;
     const action = this.mixer.clipAction(loaded.clip);
@@ -544,6 +660,9 @@ export class AnimationStateMachine {
 
     action.reset(); // CRITICAL: clears residual weight/time from any
     action.enabled = true; // previous fade-out of this same action
+    if (opts.randomPhase && !opts.once) {
+      action.time = this.random() * loaded.clip.duration;
+    }
     action.setEffectiveTimeScale(timeScale);
     action.setEffectiveWeight(1);
     if (opts.once && !opts.forceLoop) {

@@ -3,12 +3,24 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 // The camera is ALWAYS centered on Mika: orbit + zoom only, no panning.
 // FALLBACK_TARGET covers the placeholder path (no VRM → no avatar root);
-// once main.ts calls setFollowTarget the camera tracks the avatar root,
-// so v2 locomotion gets a following camera for free.
+// once main.ts calls setFollowTarget the camera tracks that object.
 const FALLBACK_TARGET = new THREE.Vector3(0, 1.15, -0.5);
 const DEFAULT_FOLLOW_OFFSET = new THREE.Vector3(0, 1.15, 0);
-const DEFAULT_POSITION = new THREE.Vector3(0, 1.35, 2.1);
+/** Where a double-click puts the camera, relative to the pivot. */
+const RESET_OFFSET = new THREE.Vector3(0, 0.2, 2.6);
+const DEFAULT_POSITION = FALLBACK_TARGET.clone().add(RESET_OFFSET);
 const RESET_DURATION = 0.7; // seconds (double-click re-framing)
+
+/**
+ * Time constant of the pivot's follow (s). She now walks around her room:
+ * the pivot rides her head, smoothed so a walking bob does not shake the
+ * whole picture.
+ */
+const FOLLOW_TAU = 0.3;
+
+/** The camera stays inside the room (walls, floor, ceiling), with a margin
+ * — following her to the door must not carry it through the front wall. */
+const CAMERA_BOUNDS = { minX: -3.75, maxX: 3.75, minY: 0.3, maxY: 2.95, minZ: -4.25, maxZ: 3.25 };
 
 export class CameraController {
   public controls: OrbitControls;
@@ -19,6 +31,13 @@ export class CameraController {
   private followTarget: THREE.Object3D | null = null;
   private followOffset = DEFAULT_FOLLOW_OFFSET.clone();
   private tmpTarget = new THREE.Vector3();
+  /** Smoothed pivot, and last frame's — the camera is carried by their
+   * difference, so a walk keeps the angle and distance the user chose. */
+  private pivot = new THREE.Vector3();
+  private lastPivot = new THREE.Vector3();
+  private hasPivot = false;
+  private tmpDelta = new THREE.Vector3();
+  private resetTo = new THREE.Vector3();
 
   constructor(camera: THREE.PerspectiveCamera, domElement: HTMLCanvasElement) {
     this.camera = camera;
@@ -56,11 +75,14 @@ export class CameraController {
     domElement.addEventListener("dblclick", () => this.startReset());
   }
 
-  /** Pin the orbit target onto an object (the avatar root). The offset
-   * lifts the pivot from the feet to the chest/face area. */
+  /** Pin the orbit target onto an object (the avatar's head, or root).
+   * The offset lifts the pivot from the object's origin. */
   setFollowTarget(target: THREE.Object3D, offset?: THREE.Vector3): void {
     this.followTarget = target;
-    if (offset) this.followOffset.copy(offset);
+    this.followOffset.copy(offset ?? DEFAULT_FOLLOW_OFFSET);
+    // A new target is a re-pin, not a move: the camera is not carried by
+    // the jump between the old pivot and the new one.
+    this.hasPivot = false;
   }
 
   /** Smoothly re-frame Mika from wherever the camera currently is. */
@@ -70,20 +92,45 @@ export class CameraController {
   }
 
   update(delta = 1 / 60): void {
+    // The target can never drift: re-pinned every frame (on the followed
+    // object when set, else on the legacy constant), smoothed.
+    if (this.followTarget) {
+      this.followTarget.getWorldPosition(this.tmpTarget).add(this.followOffset);
+    } else {
+      this.tmpTarget.copy(FALLBACK_TARGET);
+    }
+    if (!this.hasPivot) {
+      this.pivot.copy(this.tmpTarget);
+      this.lastPivot.copy(this.pivot);
+      this.hasPivot = true;
+    } else {
+      this.pivot.lerp(this.tmpTarget, 1 - Math.exp(-delta / FOLLOW_TAU));
+    }
+    // Carry the camera with her: same angle, same distance, new place.
+    this.tmpDelta.subVectors(this.pivot, this.lastPivot);
+    this.camera.position.add(this.tmpDelta);
+    this.lastPivot.copy(this.pivot);
+
     if (this.resetAlpha < 1) {
       this.resetAlpha = Math.min(1, this.resetAlpha + delta / RESET_DURATION);
       const a = this.resetAlpha;
       const t = a * a * (3 - 2 * a); // smoothstep ease
-      this.camera.position.lerpVectors(this.resetFrom, DEFAULT_POSITION, t);
+      this.resetTo.copy(this.pivot).add(RESET_OFFSET);
+      clampToRoom(this.resetTo);
+      this.camera.position.lerpVectors(this.resetFrom, this.resetTo, t);
     }
-    // The target can never drift: re-pin it every frame (on the avatar
-    // root when set, else on the legacy constant).
-    if (this.followTarget) {
-      this.followTarget.getWorldPosition(this.tmpTarget).add(this.followOffset);
-      this.controls.target.copy(this.tmpTarget);
-    } else {
-      this.controls.target.copy(FALLBACK_TARGET);
-    }
+
+    this.controls.target.copy(this.pivot);
+    clampToRoom(this.camera.position);
     this.controls.update();
   }
+}
+
+function clampToRoom(p: THREE.Vector3): void {
+  const b = CAMERA_BOUNDS;
+  p.set(
+    Math.max(b.minX, Math.min(b.maxX, p.x)),
+    Math.max(b.minY, Math.min(b.maxY, p.y)),
+    Math.max(b.minZ, Math.min(b.maxZ, p.z))
+  );
 }

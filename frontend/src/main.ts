@@ -16,6 +16,8 @@ import { InnerLifePanel } from "./ui/InnerLifePanel";
 import { LoginOverlay } from "./ui/LoginOverlay";
 import { SpeechPresenter } from "./ui/SpeechPresenter";
 import { WS_URL } from "./network/api";
+import { articulationFor } from "./vtuber/animation/affect";
+import type { EmotionBlend, EmotionName } from "./types";
 
 function wireIdentityBar(identity: IdentityService, ws: WebSocketClient) {
   const nameInput = document.getElementById("identity-name") as HTMLInputElement;
@@ -102,6 +104,11 @@ async function init() {
   // Scene setup
   const sceneManager = new SceneManager(container);
   const environment = new Environment(sceneManager.scene);
+  // The desk chair is hers to pull out: once the room is in (GLB or the
+  // procedural fallback, both name it), the locomotion moves it.
+  void environment.ready.then(() =>
+    animationSystem.setPlaceProp("desk", environment.group.getObjectByName("DeskChair") ?? null)
+  );
   const cameraController = new CameraController(
     sceneManager.camera,
     sceneManager.renderer.domElement
@@ -135,7 +142,11 @@ async function init() {
       emotionController.setVRM(vrm);
       lipSyncController.setVRM(vrm);
       const root = vtuberModel.getRoot();
-      if (root) cameraController.setFollowTarget(root);
+      // The pivot rides her head (eye level), wherever she walks, sits or
+      // lies; the camera is carried along at the angle the user chose.
+      const head = vrm.humanoid?.getRawBoneNode("head");
+      if (head) cameraController.setFollowTarget(head, new THREE.Vector3(0, 0.05, 0));
+      else if (root) cameraController.setFollowTarget(root);
       // Starts animating synchronously on the rest pose, then streams the
       // Mixamo clips in — not awaited so the app boots without waiting for
       // FBX downloads.
@@ -174,7 +185,11 @@ async function init() {
     // rapprochées faisaient sinon articuler la bouche sur le texte suivant
     // pendant que l'audio du précédent tournait encore.
     onUtteranceStart: (text, rate) => {
-      lipSyncController.startFromPlan(tts.lipSyncPlan(text), msPerCharForRate(rate));
+      const msPerChar = msPerCharForRate(rate);
+      lipSyncController.startFromPlan(tts.lipSyncPlan(text), msPerChar);
+      // The head and brows punctuate the same text, fired as the lip-sync
+      // cursor reaches each beat (see animation/speechBeats.ts).
+      animationSystem.beginUtterance(text, msPerChar);
     },
     // La synthèse dit où en est la voix (début réel, puis chaque mot là où
     // le navigateur le donne) : la bouche s'y recale au lieu de courir sur
@@ -183,9 +198,22 @@ async function init() {
       lipSyncController.seekToChar(charIndex);
     },
   });
+  // The face port also sets how wide the mouth articulates: it follows the
+  // reply's emotion at the moment the voice starts, like the expression.
+  let fatigue = 0;
+  const face = {
+    setEmotion: (emotion: EmotionName, intensity: number, blend?: EmotionBlend) => {
+      emotionController.setEmotion(emotion, intensity, blend);
+      lipSyncController.setArticulation(articulationFor(emotion, intensity, fatigue));
+    },
+    setEnergy: (energy: number) => {
+      fatigue = Math.max(0, Math.min(1, (0.55 - energy) / 0.4));
+      emotionController.setEnergy(energy);
+    },
+  };
   const presenter = new SpeechPresenter({
     voice: tts,
-    face: emotionController,
+    face,
     body: animationSystem,
     stage: environment,
     readouts: {
@@ -316,6 +344,9 @@ async function init() {
   sceneManager.onUpdate((delta) => {
     cameraController.update(delta);
     emotionController.update(delta);
+    // The voice's position in the reply (one frame old — nothing reads it
+    // at that precision) drives the speech beats.
+    animationSystem.setSpeechCursor(lipSyncController.currentCharOffset);
     // Owns every bone writer, in order: resetNormalizedPose → state
     // machine → clip mixer → additive overlays → hands → gaze → blink.
     animationSystem.update(delta);

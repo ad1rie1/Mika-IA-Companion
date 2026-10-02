@@ -1,0 +1,153 @@
+# 0050 — Le monde : un créateur l'écrit, elle le fait vivre, le moteur le joue
+
+**Contexte.** Depuis l'ADR 0049, Mika choisit où elle se tient dans sa chambre parmi six lieux, et le client
+web la fait marcher, s'asseoir, s'allonger. La suite demandée va plus loin : elle doit **prendre, porter et
+poser** des objets, dans un monde de **plusieurs pièces** avec **d'autres personnages**, et des personnes doivent
+pouvoir y entrer et **interagir avec elle** (lui tendre quelque chose, lui faire signe, s'asseoir à côté
+d'elle). Un vrai moteur de jeu (Unity) fera le rendu, la navigation, l'IK et la physique ; le client web
+restera. Trois exigences de l'utilisateur : un **créateur** de monde et d'objets ; **c'est l'IA** qui fait vivre
+le monde ; **le moteur** charge le monde et tient la **synchronisation dans les deux sens** (ce qui se passe dans
+la 3D lui parvient, ce qu'elle fait se voit dans la 3D) — pour un monde **cohérent**.
+
+Deux façons d'échouer, évitées ici : laisser la physique d'un moteur décider de ce qui est vrai (deux écrans qui
+ne montrent plus la même chose, et Mika qui croit autre chose que ce qu'on voit) ; et faire de chaque geste un
+appel de modèle (un monde vivant ruinerait le budget et la latence).
+
+**Décision.**
+
+1. *Le noyau est le monde.* Une faculté `world` (contrat `contracts/world.py`) tient la définition et l'état
+   vécu dans le journal, comme tout le reste de sa vie : rejouable, explicable, simulable, sauvegardé. Les
+   moteurs sont des clients qui montrent, jouent et constatent ; aucun n'est une source de vérité.
+
+2. *Deux couches.* La **définition** (`WorldDef`) — pièces et passages, lieux (`spot`, `seat`, `bed`, capacité,
+   tags `sleep`/`work`/`spawn`), archétypes et leurs actions, objets, personnages — est écrite par un créateur
+   et versionnée (`rev`). L'**état vécu** (`WorldState`) — où est chaque acteur et chaque objet, son état, qui
+   tient quoi, qui fait quoi, ce qui est en route, ce qui attend une réponse — change par les actions. Une
+   définition est **cohérente ou n'existe pas** : `WorldDef` refuse à la validation tout ce qui nomme
+   l'inexistant ou met deux choses au même endroit, et dit tout d'un coup.
+
+3. *La vérité est discrète.* Un lieu, une place de surface, un contenant, une main. Seule la définition porte
+   une position grossière par lieu, pour les distances et les durées de marche ; la géométrie, les modèles, les
+   ancres et les animations sont dans le projet du moteur, référencés par des clés que le noyau ne lit pas. La
+   physique est un rendu : elle peut faire rebondir une tasse, pas la déplacer dans l'état du monde sans un
+   constat validé.
+
+4. *Un même vocabulaire pour tous les acteurs.* Mika, une personne et un personnage du moteur agissent par les
+   mêmes actions, validées par les mêmes règles : des **actions de base** (`take`, `put`, `give`, `drop`,
+   `sit`, `lie`, `stand`) et des **affordances** déclarées par l'archétype — un nom libre (`allumer`,
+   `arroser`, `lire`) et un **effet pris dans une liste fermée** (`state`, `activity`, `consume`). On ne prend
+   pas ce que l'autre tient : on demande, on tend, et l'autre accepte ou non. L'**accès** d'un objet est gradué
+   (`anyone`, `friends`, `owners`, `mika`) : une amie peut feuilleter son carnet, une inconnue non.
+
+5. *Une action est une intention planifiée.* Le noyau valide, découpe en pas (se lever, marcher, prendre),
+   donne à chacun sa durée nominale, réserve ce qu'elle va prendre ou occuper (des baux, `kernel/guards.py`),
+   et fixe une échéance (`deadline` = `eta` + une marge). Le moteur **hôte** la joue et la termine (`done`) ou
+   dit qu'il n'y arrive pas (`failed` + où est vraiment l'acteur) ; **sans hôte, le noyau la termine comme
+   prévu à l'échéance**. Le moteur peut refuser et constater, jamais décider : un monde sans spectateur continue
+   de vivre, et le premier écran qui arrive le pose tel qu'il est.
+
+6. *Trois étages de vie, un seul qui coûte un appel de modèle.*
+   - Les **réflexes** sont des règles du noyau, sans modèle : elle s'endort → elle va au lieu `sleep` et
+     s'allonge (la règle de l'ADR 0049, généralisée) ; elle se réveille → elle s'assied au bord ; elle travaille
+     sur un projet → elle va au lieu `work`. Un réflexe est un **réducteur** de l'événement qui le cause, jamais
+     un processus qui émet après coup : l'intention du coucher naît dans la même transaction que
+     `body.fell_asleep` (son identifiant dérive de l'événement), si bien que les écrans reçoivent l'endormissement
+     et la destination ensemble — elle marche jusqu'au lit les yeux ouverts puis s'endort allongée, au lieu de
+     s'endormir debout et de se réveiller pour marcher. Le rejeu redonne la même intention.
+   - Les **décisions** sont les siennes, par ses outils, quand elle a de toute façon un épisode (une réponse,
+     une initiative) : aucun geste du monde ne déclenche un appel de modèle pour lui-même.
+   - La **micro-vie** (se gratter la joue, feuilleter une page, changer d'appui) appartient au moteur et n'est
+     jamais journalisée.
+
+7. *Ce qu'elle perçoit, ce qu'elle fait.*
+   - Une section volatile « AUTOUR DE TOI » remplace « OÙ TU ES » : la pièce, sa posture et son occupation, ce
+     qu'elle tient, ce qui est à portée et dans quel état avec les actions possibles, qui est là et ce qu'on y
+     fait, ce qui a changé récemment par d'autres. Bornée par la saillance (ce qu'elle tient, puis ce qui est à
+     portée, puis le reste).
+   - Un lot d'outils `world`, en main dans les épisodes où elle parle (comme `room` aujourd'hui) : `go_to`
+     (un lieu, une pièce, un objet, quelqu'un), `interact` (un objet, une action, une cible), `respond` (une
+     demande qu'on lui fait), `gesture`. Le résultat dit ce qui est lancé ; l'issue arrive ensuite, et un échec
+     lui parvient comme un signal (« tu n'as pas pu… »). Le vocabulaire reste **fermé côté modèle** : un
+     identifiant est validé contre la définition en vigueur avant toute écriture (inventé → une erreur qui
+     liste les choix possibles, rien d'écrit), un seul `go_to` par épisode, aller là où elle est déjà n'écrit
+     rien (les règles de `move_to`, ADR 0049). Aller sur un lieu `bed` éveillée, c'est s'y asseoir ; s'y allonger
+     est le coucher, ou un `lie` explicite.
+   - Ce qui se passe dans le monde est un **signal** (`world.noticed`, forme `attention.Signal`) : dosé et
+     habitué par l'attention comme les autres sens (ADR 0022) — quelqu'un entre, une tasse tombe, sa plante a
+     changé de place. Ce qui lui est **adressé** (un geste vers elle, une demande) est une perception adressée
+     : elle y répond comme à un message. Un geste se ressent selon qui le fait (la proximité, ADR 0013).
+
+8. *Les personnes ont un corps.* Il est piloté par leur client ; le noyau ne retient que les **arrivées**
+   (une pièce, le lieu le plus proche), jamais la trajectoire, relayée à 20 Hz aux autres clients sans passer
+   par le journal. Leurs actions sur les objets sont instantanées pour le noyau et validées (proximité, accès,
+   mains, état). Une pièce où plusieurs personnes se tiennent est un **salon** (ADR 0014) : elle ne dit rien de
+   privé devant qui ne doit pas l'entendre.
+
+9. *Le protocole `mika.world/1`* (`adapters/world/protocol.py`, spécification `docs/protocole-monde.md`) :
+   WebSocket `/ws/world` ; des rôles (`viewer`, `host` par bail, `creator`) ; un client propose, le noyau valide,
+   journalise et diffuse à tous, y compris à qui a proposé ; chaque trame diffusée porte son `seq` (trou →
+   `sync`, retard trop grand → `snapshot`) ; chaque commande porte son `cmd` (accusé `result`, dédoublonnage) et
+   peut porter `expect` (le `seq` sur lequel elle a été décidée : un état qui a changé → `stale`). Un client
+   natif s'authentifie par un jeton de son compte ; un navigateur par sa session et son `Origin`. Les types sont
+   publiés en schéma JSON (`json_schema()`), d'où le moteur génère les siens.
+
+10. *Le créateur.* Une opératrice édite par lots écrits sur une révision (`edit`, `base`), qui passent en
+    entier ou pas du tout (`apply_changes`) ; la prose (« la plante qu'Adrien t'a offerte ») passe par
+    `describe` et devient un texte gardé (`Content`, `about`) que l'oubli atteint (ADR 0024). Les noms qu'elle
+    lit sont courts et sans retour à la ligne : un nom ne peut pas imiter un titre de section. Le moteur dit ce
+    qui lui manque pour charger une révision (`loaded`), la console l'affiche. Elle **remarque** ce qui change
+    chez elle (un objet apparu, son lit déplacé).
+
+11. *Ce qui est fait maintenant (P0)* : le contrat (`contracts/world.py`), les trames (`adapters/world/
+    protocol.py`), un monde d'exemple (`examples/monde/chambre.json` : la chambre de l'ADR 0049 et un salon, une
+    vingtaine d'objets, un chat), la spécification, et leurs tests. **Rien n'est encore branché** : ni faculté
+    dans la composition, ni route, ni changement de `place`.
+
+12. *La suite.*
+    - **P1, la faculté `world`** : tranche, réducteurs, validation des actions, faits, section, outils,
+      réflexes, terminaison sans hôte, vues de console — elle **reprend `place`**, avec qui le tient, et sans
+      rien casser de ce qui est déjà au journal ou à l'écran :
+      - le contrat `place` reste (type `place.moved` public, même nom) et `world` le réduit comme un
+        déplacement de Mika : des `place.moved` existent dans les journaux dès le premier lancement, un
+        événement orphelin serait refusé au rejeu ou ferait diverger l'état ;
+      - le monde par défaut garde les six lieux de l'ADR 0049, mêmes identifiants et mêmes postures (`desk` et
+        `bed` sont des assises ; `bed` + sommeil = allongée) ;
+      - `inner_state.place` reste une chaîne simple, un état et non un ordre ; ce qu'on transmet en plus
+        (destination et position courante, « en route ») prend d'autres clés.
+    - **P2, l'adaptateur** : la route `/ws/world`, les rôles, le bail d'hôte, les jetons de client natif (aussi
+      acceptés sur `/ws`), instantanés et rattrapage, débits.
+    - **P3, les clients** : le client web en `viewer` (ses lieux viennent de la définition),
+      un hôte Unity d'essai (charger, poser, jouer un trajet, prendre et poser un objet).
+      Le client web ignore tout lieu inconnu de sa table (`roomLayout.ts`) : un lieu ajouté au monde sans
+      géométrie côté client y est muet. Deux tables à garder égales à la main, c'est le défaut classique : la
+      définition devient la source de ce qu'un client sans éditeur ne peut pas déduire (point d'approche,
+      orientation, hauteur d'assise, pose couchée, emprises des meubles, bornes de la pièce, et le siège mobile
+      — la chaise qu'on tire avant de s'asseoir et qui rentre quand on part : de la chorégraphie, pas de l'état,
+      la chaise ne change pas de place dans le monde), en champs optionnels de `PlaceDef` et `RoomDef`, et
+      `roomLayout.ts` la lit. D'ici là : mêmes identifiants des deux côtés, et `pos`/`facing` des six lieux
+      recopiés de `roomLayout.ts` (recalé sur `room.glb`) dans `examples/monde/chambre.json`.
+    - **P4, les personnes** : entrer, agir, gestes, demandes, perception et ressenti.
+    - **P5, le créateur** : édition depuis le moteur, import et export d'un monde, console.
+    - **Prérequis d'un client natif** : la voix part du noyau (synthèse et visèmes dans la trame `speech`) ; un
+      moteur n'a pas la synthèse vocale d'un navigateur, et la règle « lettres → visèmes » ne doit exister
+      qu'une fois.
+
+**Conséquences.**
+- Le journal grossit d'une action, pas d'une image : une intention et sa fin, une arrivée, un geste. Ce qui est
+  continu (les poses) ne l'atteint jamais.
+- Un seul hôte à la fois : simple et suffisant tant que le monde tient sur une machine ; plusieurs hôtes
+  (un par pièce) seraient une révision de ce document, pas un correctif.
+- Deux clients ne valent pas deux fois le travail : le client web a le droit d'être en retard, il ignore ce
+  qu'il ne sait pas montrer.
+- La surface d'injection reste fermée : les personnes n'envoient au monde que des identifiants et des codes
+  (seule la conversation porte du texte libre, et elle passe par `/ws`) ; les noms sont bornés ; la prose est
+  citée comme le reste de ce qui vient d'ailleurs.
+- Questions laissées à l'utilisateur : un seul monde ou plusieurs ; des personnages animés par un modèle (pas
+  seulement par le moteur) ; Mika qui fait entrer de nouveaux objets dans son monde (une capacité, proposée puis
+  approuvée, comme le courrier) ; plusieurs personnes à distance dans le même monde.
+
+Tests : `tests/unit/test_world_contract.py` (le monde d'exemple est cohérent et garde les six lieux de l'ADR
+0049 ; chaque incohérence est refusée, tout est dit d'un coup ; une édition passe en entier ou pas du tout ; un nom
+ne peut pas porter de retour à la ligne) et `tests/protocol/test_world_wire.py` (chaque exemple JSON de la
+spécification se lit et respecte le schéma publié ; une trame inconnue ou un champ inconnu est refusé ; chaque
+commande déclare ses rôles et son débit).

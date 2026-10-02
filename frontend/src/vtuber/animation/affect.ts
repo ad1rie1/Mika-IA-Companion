@@ -63,6 +63,16 @@ export function clipAffinity(
 
 /** Playback tempo of a base clip: agitation speeds it up a little, torpor
  * slows it down — bounded so a clip never reads as fast-forwarded. */
+/**
+ * How wide the mouth moves when she speaks (LipSyncController
+ * `setArticulation`): an excited voice articulates big, a sad, bored or
+ * tired one barely parts the lips. Arousal × intensity, minus tiredness.
+ */
+export function articulationFor(emotion: EmotionName, intensity: number, fatigue = 0): number {
+  const a = EMOTION_AROUSAL[emotion] * Math.max(0, Math.min(1, intensity));
+  return Math.max(0.6, Math.min(1.15, 1 + 0.35 * a - 0.25 * Math.max(0, Math.min(1, fatigue))));
+}
+
 export const TEMPO_GAIN = 0.12;
 export const TEMPO_MIN = 0.85;
 export const TEMPO_MAX = 1.15;

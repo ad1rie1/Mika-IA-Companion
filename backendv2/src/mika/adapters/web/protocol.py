@@ -24,6 +24,7 @@ from mika.contracts import affect as affect_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import needs as needs_c
+from mika.contracts import place as place_c
 from mika.contracts import self_ as self_c
 from mika.contracts.entry import HistoryRow
 from mika.kernel.frame import Frame
@@ -249,6 +250,8 @@ def inner_state(frame: Frame, handle: str | None, panel: dict[str, Any] | None =
     out: dict[str, Any] = {
         "sleep_phase": frame.get(body_c.SLEEP).value,
         "energy": round(energy, 3),
+        # où elle est dans sa chambre : un état que le corps rejoint en marchant (place)
+        "place": frame.get(place_c.PLACE).value,
         "circadian": {"phase": phase.value, "hour": local.hour, "energy": round(energy, 3),
                       "bias_emotion": rhythm.tints[phase].value},
         "ruminations": [],

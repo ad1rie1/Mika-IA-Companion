@@ -9,13 +9,28 @@ import type {
   VoicePersona,
 } from "../../types";
 import { ClipLibrary, applyRestPose } from "./ClipLibrary";
-import { AnimationStateMachine } from "./AnimationStateMachine";
+import { AnimationStateMachine, SLEEP_YAWN_CLIP } from "./AnimationStateMachine";
 import { BlinkController } from "./BlinkController";
 import { FaceIdleController } from "./FaceIdleController";
 import { HandAnimator } from "./HandAnimator";
 import { GazeController } from "./GazeController";
 import { OverlayContext, type ProceduralOverlay } from "./overlays/Overlay";
 import { BreathingOverlay } from "./overlays/BreathingOverlay";
+import { LifeOverlay } from "./overlays/LifeOverlay";
+import { SpeechBodyOverlay } from "./overlays/SpeechBodyOverlay";
+import { planSpeechBeats } from "./speechBeats";
+import { LocomotionController } from "../locomotion/LocomotionController";
+import { isPlaceId, type PlaceId, type Posture } from "../locomotion/roomLayout";
+import {
+  LIE_CLIP_NAME,
+  SIT_CLIP_NAME,
+  WALK_CLIP_NAME,
+  buildLieClip,
+  buildSitClip,
+  buildWalkClip,
+  standingHipsHeight,
+} from "../locomotion/proceduralClips";
+import type { LoadedClip } from "./ClipLibrary";
 import { SleepOverlay } from "./overlays/SleepOverlay";
 import { HeadEmotionOverlay } from "./overlays/HeadEmotionOverlay";
 import { HeadAttentionOverlay, viewerReachable } from "./overlays/HeadAttentionOverlay";
@@ -28,6 +43,10 @@ const DEFAULT_MANIFEST_URL = "/animations/manifest.json";
  * to — the gaze rests on the viewer while they type. */
 export const LISTENING_HOLD_S = 2.5;
 
+/** A yawn needs real tiredness, and comes every few minutes at most. */
+export const YAWN_MIN_FATIGUE = 0.55;
+export const YAWN_INTERVAL_S: [number, number] = [120, 300];
+
 /**
  * Facade over the whole body-animation stack — the ONLY object main.ts
  * wires. Owns, in per-frame order:
@@ -36,8 +55,10 @@ export const LISTENING_HOLD_S = 2.5;
  *   2. state machine                    clip scheduling / transitions
  *   3. THREE.AnimationMixer             base layer (bones + hips pos)
  *   4. AttentionDirector                where her attention is (pure)
- *   5. overlays (additive quaternions)  breathing → sleep tilt → emotion
- *                                       head pose → attention head turn
+ *   5. overlays (additive quaternions)  breathing → life (micro-motion,
+ *                                       weight shifts) → sleep tilt →
+ *                                       emotion head pose → attention head
+ *                                       turn → speech beats (nods, tilts)
  *   6. HandAnimator                     fingers (absolute; clips are
  *                                       stripped of finger tracks)
  *   7. GazeController                   eyes (absolute; clips have none) —
@@ -63,16 +84,30 @@ export class AnimationSystem {
   private hands = new HandAnimator();
   private gaze = new GazeController();
   private director = new AttentionDirector();
+  private speechBody = new SpeechBodyOverlay();
+  /** Character the voice is at (lip-sync cursor), −1 = none. */
+  private speechCursor = -1;
   private root: THREE.Object3D | null = null;
   private camera: THREE.Object3D | null = null;
 
+  /** What the body shows (see effectiveSleep). */
   private sleepPhase: SleepPhase = "awake";
+  /** What the backend says. */
+  private requestedSleep: SleepPhase = "awake";
+  private locomotion: LocomotionController | null = null;
+  /** A place received before the model loaded — applied as a snap. */
+  private pendingPlace: PlaceId | null = null;
+  /** Movable seats handed over before the model loaded. */
+  private pendingProps = new Map<PlaceId, THREE.Object3D | null>();
   private speaking = false;
   private replyPending = false;
   /** Internal clock (sum of clamped dt) — the typing memo is stamped on it. */
   private clock = 0;
   private lastTypingAt = -Infinity;
   private lastOneshotAt: number | null = null;
+  private fatigue = 0;
+  /** Seconds until a tired, idle Mika yawns (null = not tired enough). */
+  private yawnIn: number | null = null;
   private lastPersona: VoicePersona | undefined;
   private _ready = false;
 
@@ -116,14 +151,20 @@ export class AnimationSystem {
     this.ctx.sleepPhase = this.sleepPhase;
     this.ctx.speaking = this.speaking;
     this.ctx.persona = this.lastPersona;
+    this.ctx.fatigue = this.fatigue;
     this.ctx.camera = this.camera;
     this.overlays = [
       new BreathingOverlay(),
+      new LifeOverlay(),
       new SleepOverlay(),
       new HeadEmotionOverlay(),
-      // Last of the head writers: it measures the viewer in the head frame
-      // as everything above posed it, so its turn is the residual.
+      // It measures the viewer in the head frame as everything above posed
+      // it, so its turn is the residual.
       new HeadAttentionOverlay(),
+      // Speech beats after the attention turn: a nod is a gesture, not a
+      // change of where she looks — the gaze (run after every head writer)
+      // keeps the eyes on the viewer through it.
+      this.speechBody,
     ];
 
     // Re-apply signals that may have arrived before init.
@@ -131,12 +172,18 @@ export class AnimationSystem {
     this.machine.setSleepPhase(this.sleepPhase);
     this.machine.setAffect(this.ctx.emotion, this.ctx.intensity);
     this.machine.start();
+    if (this.root) this.initLocomotion(vrm, this.root);
     this.vrm = vrm; // update() starts animating from this point on
 
     await this.library.loadManifest(opts.manifestUrl ?? DEFAULT_MANIFEST_URL, {
       onProgress: opts.onProgress,
       // As downloaded clips stream in, swap the rest pose for real life.
-      onClipLoaded: () => this.machine?.refreshBaseIfResting(),
+      onClipLoaded: (loaded) => {
+        this.machine?.refreshBaseIfResting();
+        // A downloaded walk (manifest category "locomotion") replaces the
+        // procedural one.
+        if (loaded.meta.category === "locomotion") this.walkClip = loaded;
+      },
     });
     this._ready = true;
     console.log(
@@ -151,6 +198,12 @@ export class AnimationSystem {
 
     const dt = Math.min(delta, 0.1);
     this.clock += dt;
+
+    if (this.locomotion) {
+      this.locomotion.update(dt);
+      this.applyEffectiveSleep();
+      ctx.walking = this.locomotion.walking;
+    }
 
     if (this.machine && this.mixer && vrm.humanoid) {
       // Identity base every frame: a clip missing some tracks degrades
@@ -175,14 +228,17 @@ export class AnimationSystem {
       emotion: ctx.emotion,
       intensity: ctx.intensity,
       sleepPhase: this.sleepPhase,
+      walking: ctx.walking,
       reachable:
         ctx.camera !== null &&
         ctx.viewerMeasured &&
         viewerReachable(ctx.viewerYaw, ctx.viewerPitch),
       viewerAngle: ctx.viewerMeasured ? Math.hypot(ctx.viewerYaw, ctx.viewerPitch) : 0,
     };
+    this.updateYawn(dt);
     const intent = this.director.update(dt, input);
     ctx.attention = intent;
+    ctx.speechCursor = this.speechCursor;
 
     for (const overlay of this.overlays) {
       overlay.update(dt, ctx);
@@ -205,10 +261,61 @@ export class AnimationSystem {
     this.machine?.setSpeaking(speaking);
   }
 
+  /**
+   * Energy 0…1 from the inner state (circadian rhythm × REST drive). Below
+   * ~0.55 she gets tired in her body: slower breath, less fidgeting, heavier
+   * blinks, and now and then — idle, awake, not mid-conversation — a yawn.
+   */
+  setEnergy(energy: number): void {
+    this.fatigue = Math.max(0, Math.min(1, (0.55 - energy) / 0.4));
+    if (this.ctx) this.ctx.fatigue = this.fatigue;
+    if (this.fatigue < YAWN_MIN_FATIGUE) this.yawnIn = null;
+    else if (this.yawnIn === null) this.yawnIn = this.sampleYawnDelay();
+  }
+
+  private sampleYawnDelay(): number {
+    const [lo, hi] = YAWN_INTERVAL_S;
+    return (lo + Math.random() * (hi - lo)) / Math.max(0.3, this.fatigue);
+  }
+
+  private updateYawn(dt: number): void {
+    if (this.yawnIn === null) return;
+    const idle =
+      this.sleepPhase === "awake" &&
+      !this.speaking &&
+      !this.replyPending &&
+      this.clock - this.lastTypingAt > LISTENING_HOLD_S &&
+      this.machine?.state === "idle";
+    if (!idle) return;
+    this.yawnIn -= dt;
+    if (this.yawnIn > 0) return;
+    this.yawnIn = this.sampleYawnDelay();
+    const yawn = this.library.variant(SLEEP_YAWN_CLIP);
+    if (yawn) this.machine?.requestGesture(yawn);
+  }
+
+  /** The voice starts an utterance: plan where the head and brows will
+   * punctuate it. Called with the text the TTS actually plays (same
+   * contract as the lip-sync plan). */
+  beginUtterance(text: string, _msPerChar?: number): void {
+    this.speechBody.begin(planSpeechBeats(text));
+  }
+
+  /** Where the voice is in the utterance (the lip-sync cursor), each
+   * frame; −1 when nothing is being articulated. */
+  setSpeechCursor(charIndex: number): void {
+    this.speechCursor = charIndex;
+  }
+
   /** A message was accepted and no reply came yet: she is composing —
    * the gaze goes up and to the side with brief check-ins. Cleared by the
    * reply; the director also gives up on its own after THINKING_MAX_S. */
   setReplyPending(pending: boolean): void {
+    // Receiving the message is visible: a small acknowledging nod before
+    // the gaze goes off to compose — never while asleep.
+    if (pending && !this.replyPending && this.sleepPhase === "awake") {
+      this.speechBody.acknowledge();
+    }
     this.replyPending = pending;
   }
 
@@ -267,7 +374,9 @@ export class AnimationSystem {
     this.machine.setIdleVariant(null);
 
     if (decision.action === "oneshot") {
-      const loaded = this.library.get(decision.clip);
+      // Either side: the same reaction does not always come from the same
+      // hand.
+      const loaded = this.library.variant(decision.clip);
       if (loaded && this.machine.requestGesture(loaded)) {
         this.lastOneshotAt = performance.now();
       }
@@ -275,11 +384,102 @@ export class AnimationSystem {
   }
 
   setSleepPhase(phase: SleepPhase): void {
+    this.requestedSleep = phase;
+    this.locomotion?.setSleepPhase(phase);
+    this.applyEffectiveSleep();
+  }
+
+  /**
+   * Asleep is shown once she is in her place for it. When the backend puts
+   * her to sleep and sends her to bed in the same breath, she walks there
+   * with her eyes open and dozes off once lying down — not a sleepwalker
+   * crossing the room with closed eyes. The lights (Environment) dim at
+   * once all the same.
+   */
+  private applyEffectiveSleep(): void {
+    const loco = this.locomotion;
+    const travelling = loco !== null && loco.moving && loco.posture !== "lie";
+    const phase: SleepPhase = this.requestedSleep !== "awake" && travelling ? "awake" : this.requestedSleep;
+    if (phase === this.sleepPhase) return;
     this.sleepPhase = phase;
     if (this.ctx) this.ctx.sleepPhase = phase;
     this.hands.setSleepPhase(phase);
     this.gaze.setSleepPhase(phase);
     this.machine?.setSleepPhase(phase);
+  }
+
+  // ── Locomotion ────────────────────────────────────────────────────
+
+  private walkClip: LoadedClip | null = null;
+
+  private initLocomotion(vrm: VRM, root: THREE.Object3D): void {
+    const machine = this.machine;
+    if (!machine) return;
+    const synth = (name: string, clip: THREE.AnimationClip): LoadedClip => ({
+      name,
+      clip,
+      meta: { url: "", category: "locomotion", loop: true, hands: ["relaxed", "relaxed"] },
+      report: null,
+    });
+    this.walkClip = this.library.byCategory("locomotion")[0] ?? synth(WALK_CLIP_NAME, buildWalkClip(vrm));
+    const sit = synth(SIT_CLIP_NAME, buildSitClip(vrm));
+    const lie = synth(LIE_CLIP_NAME, buildLieClip(vrm));
+    this.locomotion = new LocomotionController({
+      root,
+      baseYaw: root.rotation.y,
+      hipsHeight: standingHipsHeight(vrm),
+      body: {
+        walk: (timeScale) => {
+          if (timeScale === null) machine.setWalking(null);
+          else if (this.walkClip) machine.setWalking(this.walkClip, timeScale);
+        },
+        posture: (posture: Posture, fade) =>
+          machine.setPosture(posture === "sit" ? sit : posture === "lie" ? lie : null, fade),
+      },
+    });
+    this.locomotion.setSleepPhase(this.requestedSleep);
+    for (const [place, obj] of this.pendingProps) this.locomotion.setProp(place, obj);
+    this.pendingProps.clear();
+    if (this.pendingPlace) {
+      this.locomotion.setPlace(this.pendingPlace, { instant: true });
+      this.pendingPlace = null;
+    }
+  }
+
+  /**
+   * Where the AI put her (the backend's `place`, state not command). An
+   * unknown value is ignored; the first place ever received snaps her there,
+   * every later change is walked.
+   */
+  setPlace(place: unknown, opts: { instant?: boolean } = {}): void {
+    if (!isPlaceId(place)) {
+      if (place !== undefined && place !== null) console.warn(`AnimationSystem: unknown place "${String(place)}"`);
+      return;
+    }
+    if (!this.locomotion) {
+      this.pendingPlace = place;
+      return;
+    }
+    this.locomotion.setPlace(place, opts);
+  }
+
+  /**
+   * The room's movable seat for a place (room.glb's `DeskChair` for the
+   * desk): she pulls it out, sits, rolls in with it. Null removes it.
+   */
+  setPlaceProp(place: PlaceId, obj: THREE.Object3D | null): void {
+    if (this.locomotion) this.locomotion.setProp(place, obj);
+    else this.pendingProps.set(place, obj);
+  }
+
+  /** Where she is (null before any place was received), and her posture. */
+  get place(): { place: PlaceId | null; posture: Posture; moving: boolean } {
+    const loco = this.locomotion;
+    return {
+      place: loco?.place ?? this.pendingPlace,
+      posture: loco?.posture ?? "stand",
+      moving: loco?.moving ?? false,
+    };
   }
 
   /** Prosodic beat from the TTS ([SIGH]/[LAUGH]/[BREATH]). Bypasses the
@@ -291,9 +491,15 @@ export class AnimationSystem {
     if (this.sleepPhase !== "awake" || this.lastPersona === "inner" || !this.machine) {
       return;
     }
+    // The breath IS the cue, before any clip: a sigh empties the lungs
+    // even when no sigh clip is on disk.
+    if (this.ctx) {
+      if (cue === "sigh") this.ctx.breathRequest = "sigh";
+      else if (cue === "breath") this.ctx.breathRequest = "catch";
+    }
     const clipName = CUE_GESTURE[cue];
     if (!clipName) return;
-    const loaded = this.library.get(clipName);
+    const loaded = this.library.variant(clipName);
     if (loaded) this.machine.requestGesture(loaded);
   }
 
@@ -322,6 +528,7 @@ export class AnimationSystem {
       emotion: this.ctx?.emotion ?? "neutral",
       emotionIntensity: this.ctx?.intensity ?? 0,
       anchorId: null,
+      place: this.locomotion?.place ?? null,
     };
   }
 

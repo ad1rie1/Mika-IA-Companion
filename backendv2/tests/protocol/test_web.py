@@ -160,6 +160,9 @@ def test_ws_conversation_round_trip(world):
         face = ws.receive_json()
         assert face["type"] == "emotion_update" and face["emotion"] in NAMES
         assert isinstance(face["emotion_blend"], list)
+        # puis l'état intérieur, tout de suite : où elle est dans sa chambre, sans attendre un changement
+        state = ws.receive_json()
+        assert state["type"] == "inner_state_update" and state["inner_state"]["place"] == "center"
         ws.send_json({"type": "identify", "person_id": "user_99", "display_name": "Usurpateur"})
         ws.send_json({"type": "ping", "t": 123})
         assert ws.receive_json() == {"type": "pong", "t": 123}
@@ -258,7 +261,9 @@ def test_a_reply_goes_only_to_its_person(world):
     key_b = client.portal.call(second_session)
     # une seule application, deux navigateurs : le second passe sa propre session
     with client.websocket_connect(WS) as a, client.websocket_connect(WS, headers={"cookie": f"sessionid={key_b}"}) as b:
-        a.receive_json(), a.receive_json(), b.receive_json(), b.receive_json()
+        # l'ouverture de chacun : historique, visage, état intérieur
+        for ws in (a, b):
+            ws.receive_json(), ws.receive_json(), ws.receive_json()
         a.send_json({"type": "chat", "message": "un secret d'Adrien", "client_msg_id": "s1"})
         speech = recv_until(a, "speech")[-1]
         assert speech["person_id"] == "user_1"

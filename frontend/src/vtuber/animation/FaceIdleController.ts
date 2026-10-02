@@ -108,6 +108,15 @@ export const EMOTION_ACCENT: Partial<Record<EmotionName, Record<string, number>>
   melancholic: { BrowInnerUp: 0.4, MouthFrownLeft: 0.25, MouthFrownRight: 0.25, EyeSquintLeft: 0.15, EyeSquintRight: 0.15 },
 };
 
+/** Brow/lid response to the speech beats, at emphasis = 1 / question = 1. */
+export const SPEECH_BROWS: Record<string, { emphasis: number; question: number }> = {
+  BrowInnerUp: { emphasis: 0.28, question: 0.22 },
+  BrowOuterUpLeft: { emphasis: 0.32, question: 0.3 },
+  BrowOuterUpRight: { emphasis: 0.3, question: 0.26 },
+  EyeWideLeft: { emphasis: 0.12, question: 0.08 },
+  EyeWideRight: { emphasis: 0.12, question: 0.08 },
+};
+
 /** How fast accents ease in/out when the emotion changes. */
 const ACCENT_EASE = 2.5;
 /** Micro amplitude retained while asleep — a sleeping face still breathes. */
@@ -127,7 +136,10 @@ export class FaceIdleController implements ProceduralOverlay {
     const found = new Set<string>();
     if (!manager) return found;
 
-    const candidates = new Set<string>(MICRO_CHANNELS.map((m) => m.name));
+    const candidates = new Set<string>([
+      ...MICRO_CHANNELS.map((m) => m.name),
+      ...Object.keys(SPEECH_BROWS),
+    ]);
     for (const accents of Object.values(EMOTION_ACCENT)) {
       for (const name of Object.keys(accents)) candidates.add(name);
     }
@@ -182,6 +194,17 @@ export class FaceIdleController implements ProceduralOverlay {
     for (const [name, weight] of this.accent) {
       if (!this.available.has(name)) continue;
       values.set(name, (values.get(name) ?? 0) + weight);
+    }
+    // Speech punctuation: the brows flash on a stressed word and stay up
+    // through a question (SpeechBodyOverlay publishes both, decaying).
+    if (!asleep) {
+      const e = ctx.speechEmphasis;
+      const q = ctx.speechQuestion;
+      for (const [name, weight] of Object.entries(SPEECH_BROWS)) {
+        if (!this.available.has(name)) continue;
+        const v = weight.emphasis * e + weight.question * q;
+        if (v > 0.001) values.set(name, (values.get(name) ?? 0) + v);
+      }
     }
 
     for (const [name, value] of values) {

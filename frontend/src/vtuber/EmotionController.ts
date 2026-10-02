@@ -1,5 +1,7 @@
 import { VRM } from "@pixiv/three-vrm";
-import { EMOTION_NAMES, type EmotionName } from "../types";
+import { EMOTION_NAMES, isEmotionName, type EmotionBlend, type EmotionName } from "../types";
+import { cleanName, registerCleanGroups } from "./faceRig";
+import { FacePhysiology } from "./FacePhysiology";
 
 /**
  * FACE-ONLY emotion rendering: maps the 29 emotions to VRM expression
@@ -60,7 +62,14 @@ const STANDARD_EMOTION_MAP: Record<EmotionName, BlendShapeTarget> = {
 // Map for the Perula model (PerfectSync build), whose custom expressions
 // are far richer than the standard presets — its standard `angry` preset
 // is even empty (0 binds), so anger MUST go through the custom shapes.
-// Names are case-sensitive and match blendShapeGroups in the .vrm.
+// Names are the model's groups (case-sensitive), played through their
+// `clean:` copies (faceRig.registerCleanGroups): the author's brows, lids
+// and mouth, WITHOUT the manga symbols bundled in — `Shocked` drew swirl
+// eyes and a sweat drop on every surprise, `Sad1`/`Sad3`/`Angry1`/`LMAO` a
+// tear at any intensity, `Healthy` (determined) dark circles, `BadSmile2`
+// (jealous) black eyes, `Numbly` (thinking) swirl eyes, `Hau` (confused)
+// ><-eyes. Blush and tears now come from FacePhysiology, on their own
+// slow clock and only when the feeling is strong enough.
 const PERULA_EMOTION_MAP: Record<EmotionName, BlendShapeTarget> = {
   neutral: {},
 
@@ -69,35 +78,50 @@ const PERULA_EMOTION_MAP: Record<EmotionName, BlendShapeTarget> = {
   excited: { Joy2: 0.9, InWonder: 0.2 },
   love: { Love1: 0.9 },
   proud: { Prond: 0.9 }, // sic — the model's author spelled "proud" this way
-  grateful: { Smile2: 0.8, Relaxy: 0.2 },
-  playful: { Smile4: 0.7, Wink1: 0.3 },
-  amused: { LMAO: 0.85 },
-  hopeful: { Smile3: 0.5, InWonder: 0.4 },
-  relieved: { Relaxy: 0.9 },
+  grateful: { Smile2: 0.8, Relaxy: 0.15 },
+  playful: { Smile4: 0.7, Wink1: 0.25 },
+  amused: { LMAO: 0.8 },
+  hopeful: { Smile3: 0.5, InWonder: 0.35 },
+  relieved: { Relaxy: 0.7, Smile2: 0.2 },
 
   // --- Negative ---
-  sad: { Sad1: 0.9 },
-  angry: { Angry1: 0.9 },
+  sad: { Sad1: 0.85 },
+  angry: { Angry4: 0.7, Angry1: 0.3 },
   scared: { Shocked2: 0.7, Pain: 0.25 },
-  disgusted: { Disgust: 0.9 },
-  frustrated: { Angry2: 0.7, GiveUp: 0.25 },
+  disgusted: { Disgust: 0.85 },
+  frustrated: { Angry2: 0.6, GiveUp: 0.25 },
   lonely: { Sad3: 0.8 },
-  anxious: { Pain: 0.5, Sad1: 0.3 },
+  anxious: { Pain: 0.45, Sad1: 0.25 },
   bored: { Boring: 0.85 },
-  jealous: { BadSmile2: 0.5, Angry2: 0.4 },
+  jealous: { BadSmile2: 0.5, Angry2: 0.35 },
 
   // --- Complex ---
   surprised: { Shocked: 0.9 },
-  thinking: { Interesting: 0.55, Numbly: 0.15 },
-  confused: { Hau: 0.7 },
+  thinking: { Numbly: 0.35, Interesting: 0.15 },
+  confused: { Hau: 0.55 },
   embarrassed: { Shy: 0.85 },
-  nostalgic: { Sad2: 0.35, Smile2: 0.35, Relaxy: 0.2 },
-  dreamy: { InWonder: 0.6, Relaxy: 0.3 },
+  nostalgic: { Sad2: 0.3, Smile2: 0.35, Relaxy: 0.2 },
+  dreamy: { InWonder: 0.55, Relaxy: 0.3 },
   determined: { Healthy: 0.6, Angry4: 0.2 },
-  mischievous: { BadSmile1: 0.7, Taunt1: 0.2 },
-  curious: { Interesting: 0.8 },
-  melancholic: { Sad2: 0.6, Relaxy: 0.2 },
+  mischievous: { BadSmile1: 0.65, Taunt1: 0.2 },
+  curious: { Interesting: 0.75 },
+  melancholic: { Sad2: 0.55, Relaxy: 0.2 },
 };
+
+/**
+ * Share of a secondary emotion shown on the face, relative to its weight
+ * in the blend. Real faces are rarely one emotion: a smile through
+ * sadness, worry under a laugh. The body stays still on strong ambivalence
+ * (gestures.ts); the face shows both.
+ */
+export const SECONDARY_SHARE = 0.45;
+
+/** The model's sleepy face (heavy lids, parted lips), cleaned, at most this
+ * much on a tired awake face. */
+const TIRED_GROUP = "Sleepy";
+const TIRED_MAX = 0.32;
+/** Below this weight ratio the secondary is noise, not a feeling. */
+export const SECONDARY_MIN_RATIO = 0.3;
 
 /** Slow incommensurate sines — a held expression breathes instead of
  * freezing at an exact weight. Amplitude is a few percent: the point is
@@ -154,6 +178,24 @@ export function offsetSpeedFor(emotion: EmotionName): number {
   return Math.max(MIN_OFFSET_SPEED, onsetSpeedFor(emotion) * OFFSET_RATIO);
 }
 
+/** The strongest feeling in the blend other than the primary, with its
+ * weight relative to the primary's; null when there is none worth showing. */
+export function secondaryOf(
+  primary: EmotionName,
+  blend: EmotionBlend
+): { emotion: EmotionName; ratio: number } | null {
+  if (blend.length < 2) return null;
+  const top = blend.find((b) => b.emotion === primary)?.weight ?? blend[0].weight;
+  if (!(top > 0)) return null;
+  for (const other of blend) {
+    if (other.emotion === primary || other.emotion === "neutral") continue;
+    if (!isEmotionName(other.emotion)) continue;
+    const ratio = Math.min(1, other.weight / top);
+    return ratio >= SECONDARY_MIN_RATIO ? { emotion: other.emotion, ratio } : null;
+  }
+  return null;
+}
+
 export class EmotionController {
   private vrm: VRM | null = null;
   private currentEmotion: EmotionName = "neutral";
@@ -163,14 +205,22 @@ export class EmotionController {
   private time = 0;
   private activeMap: Record<EmotionName, BlendShapeTarget> =
     STANDARD_EMOTION_MAP;
+  private blendKey = "";
+  private blend: EmotionBlend = [];
+  /** Heavy lids of a tired face (clean:Sleepy), 0…TIRED_MAX. */
+  private tiredTarget = 0;
+  private tiredName: string | null = null;
+  /** Blush, tears and pupils — the face's slow, non-muscular layer. */
+  readonly physiology = new FacePhysiology();
 
   setVRM(vrm: VRM) {
     this.vrm = vrm;
+    this.physiology.setVRM(vrm);
     this.activeMap = this.resolveEmotionMap(vrm);
     // Re-apply the current emotion so the new map takes effect immediately
     const emotion = this.currentEmotion;
     this.currentEmotion = "neutral";
-    this.setEmotion(emotion, this.intensity);
+    this.setEmotion(emotion, this.intensity, this.blend);
   }
 
   /** Per emotion, prefer the rich (Perula) entry when the model exposes
@@ -181,15 +231,22 @@ export class EmotionController {
     const manager = vrm.expressionManager;
     if (!manager) return STANDARD_EMOTION_MAP;
 
-    const has = (name: string) => manager.getExpression(name) != null;
+    const groups = new Set<string>();
+    for (const recipe of Object.values(PERULA_EMOTION_MAP)) {
+      for (const group of Object.keys(recipe)) groups.add(group);
+    }
+    const clean = registerCleanGroups(vrm, [...groups, TIRED_GROUP]);
+    this.tiredName = clean.has(TIRED_GROUP) ? cleanName(TIRED_GROUP) : null;
     const resolved = {} as Record<EmotionName, BlendShapeTarget>;
     let richCount = 0;
 
     for (const emotion of Object.keys(PERULA_EMOTION_MAP) as EmotionName[]) {
       const rich = PERULA_EMOTION_MAP[emotion];
       const richKeys = Object.keys(rich);
-      if (richKeys.length > 0 && richKeys.every(has)) {
-        resolved[emotion] = rich;
+      if (richKeys.length > 0 && richKeys.every((g) => clean.has(g))) {
+        resolved[emotion] = Object.fromEntries(
+          Object.entries(rich).map(([g, w]) => [cleanName(g), w])
+        );
         richCount++;
       } else {
         resolved[emotion] = STANDARD_EMOTION_MAP[emotion];
@@ -202,19 +259,36 @@ export class EmotionController {
     return resolved;
   }
 
-  setEmotion(emotion: EmotionName, intensity: number = 0.7) {
+  setEmotion(emotion: EmotionName, intensity: number = 0.7, blend: EmotionBlend = []) {
     const clampedIntensity = Math.max(0.0, Math.min(1.0, intensity));
-    if (emotion === this.currentEmotion && clampedIntensity === this.intensity)
+    const secondary = secondaryOf(emotion, blend);
+    const blendKey = secondary ? `${secondary.emotion}:${secondary.ratio.toFixed(2)}` : "";
+    this.physiology.setEmotion(emotion, clampedIntensity);
+    if (
+      emotion === this.currentEmotion &&
+      clampedIntensity === this.intensity &&
+      blendKey === this.blendKey
+    )
       return;
 
     this.currentEmotion = emotion;
     this.intensity = clampedIntensity;
+    this.blendKey = blendKey;
+    this.blend = blend;
 
-    // Scale blend shape targets by intensity
+    // Scale blend shape targets by intensity; a secondary feeling shows
+    // through at a share of its weight, making room in the primary.
     const baseTargets = this.activeMap[emotion] || {};
+    const primaryScale = secondary ? 1 - 0.25 * secondary.ratio : 1;
     this.targetWeights = {};
     for (const [key, value] of Object.entries(baseTargets)) {
-      this.targetWeights[key] = value * clampedIntensity;
+      this.targetWeights[key] = value * clampedIntensity * primaryScale;
+    }
+    if (secondary) {
+      const share = clampedIntensity * secondary.ratio * SECONDARY_SHARE;
+      for (const [key, value] of Object.entries(this.activeMap[secondary.emotion] || {})) {
+        this.targetWeights[key] = Math.min(1, (this.targetWeights[key] ?? 0) + value * share);
+      }
     }
 
     console.log(
@@ -226,6 +300,7 @@ export class EmotionController {
     if (!this.vrm?.expressionManager) return;
 
     this.time += delta;
+    this.physiology.update(delta);
     // Onset at the emotion's own speed, offset slower — per shape, since a
     // shape leaving (the previous emotion's) and one arriving coexist.
     const onset = Math.min(1, delta * onsetSpeedFor(this.currentEmotion));
@@ -237,11 +312,13 @@ export class EmotionController {
       ...Object.keys(this.targetWeights),
       ...this.currentWeights.keys(),
     ]);
+    if (this.tiredName && this.tiredTarget > 0) names.add(this.tiredName);
 
     let seed = 0;
     for (const name of names) {
       seed++;
-      const target = this.targetWeights[name] ?? 0;
+      const target =
+        (this.targetWeights[name] ?? 0) + (name === this.tiredName ? this.tiredTarget : 0);
       const current = this.currentWeights.get(name) ?? 0;
       const lerpFactor = target > current ? onset : offset;
       const newValue = current + (target - current) * lerpFactor;
@@ -262,6 +339,13 @@ export class EmotionController {
         Math.max(0, Math.min(1, shaded))
       );
     }
+  }
+
+  /** Energy 0…1: past ~0.55 of tiredness the lids get heavy and the lips
+   * part a little — slowly, it is not an expression. */
+  setEnergy(energy: number): void {
+    const fatigue = Math.max(0, Math.min(1, (0.55 - energy) / 0.4));
+    this.tiredTarget = TIRED_MAX * fatigue;
   }
 
   getCurrentEmotion(): EmotionName {

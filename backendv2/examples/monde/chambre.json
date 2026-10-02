@@ -1,0 +1,138 @@
+{
+  "format": "mika.world/1",
+  "id": "maison",
+  "label": "chez Mika",
+  "rev": 0,
+  "rooms": [
+    {
+      "id": "bedroom",
+      "label": "ta chambre",
+      "exits": [{"via": "door", "to": "living_room", "arrives": "living_door"}]
+    },
+    {
+      "id": "living_room",
+      "label": "le salon",
+      "exits": [{"via": "living_door", "to": "bedroom", "arrives": "door"}]
+    }
+  ],
+  "places": [
+    {"id": "center", "room": "bedroom", "label": "le milieu de ta chambre, sur le tapis",
+     "pos": {"x": 0.0, "z": -0.5}, "facing": 0.0},
+    {"id": "window", "room": "bedroom", "label": "la fenêtre",
+     "pos": {"x": -3.25, "z": -1.2}, "facing": -1.5708},
+    {"id": "desk", "room": "bedroom", "label": "ton bureau", "place_kind": "seat", "of_object": "desk_chair",
+     "pos": {"x": -0.7, "z": -3.3}, "facing": -2.8416, "tags": ["work"]},
+    {"id": "bed", "room": "bedroom", "label": "ton lit", "place_kind": "bed", "of_object": "bed_frame",
+     "pos": {"x": -2.33, "z": 1.3}, "facing": 1.5708, "tags": ["sleep"]},
+    {"id": "bookshelf", "room": "bedroom", "label": "ta bibliothèque",
+     "pos": {"x": 3.22, "z": -2.2}, "facing": 1.5708},
+    {"id": "door", "room": "bedroom", "label": "la porte de ta chambre",
+     "pos": {"x": 1.8, "z": 2.75}, "facing": 0.0, "tags": ["spawn"]},
+    {"id": "living_door", "room": "living_room", "label": "la porte du salon",
+     "pos": {"x": -2.0, "z": 0.0}, "tags": ["spawn"]},
+    {"id": "sofa", "room": "living_room", "label": "le canapé", "place_kind": "seat", "capacity": 3,
+     "of_object": "sofa_frame", "pos": {"x": 1.0, "z": 1.5}, "facing": 3.1416}
+  ],
+  "archetypes": [
+    {"id": "desk_table", "label": "bureau", "asset": "furniture/desk", "size": "fixed", "surface_slots": 4},
+    {"id": "chair", "label": "chaise", "asset": "furniture/desk_chair", "size": "fixed"},
+    {"id": "bed_frame", "label": "lit", "asset": "furniture/bed", "size": "fixed"},
+    {"id": "shelves", "label": "bibliothèque", "asset": "furniture/bookshelf", "size": "fixed",
+     "surface_slots": 6},
+    {"id": "sofa", "label": "canapé", "asset": "furniture/sofa", "size": "fixed"},
+    {"id": "lamp", "label": "lampe", "asset": "props/desk_lamp", "states": ["off", "on"], "initial_state": "off",
+     "affordances": [
+       {"id": "allumer", "label": "allumer", "effect": "state", "requires_state": ["off"], "to_state": "on",
+        "duration_s": 1.0, "animation": "press"},
+       {"id": "eteindre", "label": "éteindre", "effect": "state", "requires_state": ["on"], "to_state": "off",
+        "duration_s": 1.0, "animation": "press"}
+     ]},
+    {"id": "mug", "label": "tasse", "asset": "props/mug", "states": ["empty", "full"], "initial_state": "full",
+     "affordances": [
+       {"id": "boire", "label": "boire", "effect": "state", "requires_state": ["full"], "to_state": "empty",
+        "held": true, "duration_s": 4.0, "animation": "drink"}
+     ]},
+    {"id": "sketchbook", "label": "carnet de croquis", "asset": "props/sketchbook", "salience": 0.7,
+     "affordances": [
+       {"id": "dessiner", "label": "dessiner", "effect": "activity", "activity": "draw", "held": true,
+        "duration_s": null, "animation": "draw"}
+     ]},
+    {"id": "book", "label": "livre", "asset": "props/book",
+     "affordances": [
+       {"id": "lire", "label": "lire", "effect": "activity", "activity": "read", "held": true,
+        "duration_s": null, "animation": "read"}
+     ]},
+    {"id": "window", "label": "fenêtre", "asset": "fixtures/window", "size": "fixed",
+     "states": ["closed", "open"], "initial_state": "closed",
+     "affordances": [
+       {"id": "ouvrir", "label": "ouvrir", "effect": "state", "requires_state": ["closed"], "to_state": "open"},
+       {"id": "fermer", "label": "fermer", "effect": "state", "requires_state": ["open"], "to_state": "closed"},
+       {"id": "regarder_dehors", "label": "regarder dehors", "effect": "activity", "activity": "look_outside",
+        "duration_s": 60.0}
+     ]},
+    {"id": "door", "label": "porte", "asset": "fixtures/door", "size": "fixed",
+     "states": ["closed", "open"], "initial_state": "closed",
+     "affordances": [
+       {"id": "ouvrir", "label": "ouvrir", "effect": "state", "requires_state": ["closed"], "to_state": "open",
+        "noise": 0.3},
+       {"id": "fermer", "label": "fermer", "effect": "state", "requires_state": ["open"], "to_state": "closed",
+        "noise": 0.3}
+     ]},
+    {"id": "plant", "label": "plante", "asset": "props/plant", "size": "arms", "states": ["dry", "watered"],
+     "initial_state": "watered", "salience": 0.6,
+     "affordances": [
+       {"id": "arroser", "label": "arroser", "effect": "state", "requires_state": ["dry"], "to_state": "watered",
+        "duration_s": 6.0}
+     ]},
+    {"id": "guitar", "label": "guitare", "asset": "props/guitar", "size": "arms", "salience": 0.7,
+     "affordances": [
+       {"id": "jouer", "label": "jouer un morceau", "effect": "activity", "activity": "play_music", "held": true,
+        "duration_s": null, "noise": 0.8}
+     ]},
+    {"id": "jar", "label": "bocal", "asset": "props/cookie_jar", "container_slots": 6},
+    {"id": "cookie", "label": "biscuit", "asset": "props/cookie", "salience": 0.3,
+     "affordances": [
+       {"id": "manger", "label": "manger", "effect": "consume", "held": true, "duration_s": 5.0}
+     ]},
+    {"id": "tv", "label": "télé", "asset": "furniture/tv", "size": "fixed", "states": ["off", "on"],
+     "initial_state": "off",
+     "affordances": [
+       {"id": "allumer", "label": "allumer", "effect": "state", "requires_state": ["off"], "to_state": "on",
+        "noise": 0.5},
+       {"id": "eteindre", "label": "éteindre", "effect": "state", "requires_state": ["on"], "to_state": "off"}
+     ]}
+  ],
+  "objects": [
+    {"id": "writing_desk", "archetype": "desk_table", "home": {"kind": "room", "room": "bedroom", "near": "desk"}},
+    {"id": "desk_chair", "archetype": "chair", "home": {"kind": "room", "room": "bedroom", "near": "desk"}},
+    {"id": "bed_frame", "archetype": "bed_frame", "home": {"kind": "room", "room": "bedroom", "near": "bed"}},
+    {"id": "shelves", "archetype": "shelves", "home": {"kind": "room", "room": "bedroom", "near": "bookshelf"}},
+    {"id": "desk_lamp", "archetype": "lamp", "home": {"kind": "on", "object": "writing_desk", "slot": 0},
+     "state": "off"},
+    {"id": "mug", "archetype": "mug", "label": "ta tasse préférée", "owner": "mika",
+     "home": {"kind": "on", "object": "writing_desk", "slot": 1}},
+    {"id": "sketchbook", "archetype": "sketchbook", "label": "ton carnet de croquis", "owner": "mika",
+     "access": "friends", "home": {"kind": "on", "object": "writing_desk", "slot": 2}},
+    {"id": "cookie_jar", "archetype": "jar", "home": {"kind": "on", "object": "writing_desk", "slot": 3}},
+    {"id": "cookie_1", "archetype": "cookie", "home": {"kind": "in", "object": "cookie_jar"}},
+    {"id": "cookie_2", "archetype": "cookie", "home": {"kind": "in", "object": "cookie_jar"}},
+    {"id": "petit_prince", "archetype": "book", "label": "« Le Petit Prince »",
+     "home": {"kind": "on", "object": "shelves", "slot": 0}},
+    {"id": "poems", "archetype": "book", "label": "un recueil de poèmes",
+     "home": {"kind": "on", "object": "shelves", "slot": 1}},
+    {"id": "window_pane", "archetype": "window", "label": "ta fenêtre",
+     "home": {"kind": "room", "room": "bedroom", "near": "window"}},
+    {"id": "bedroom_door", "archetype": "door", "label": "la porte de ta chambre",
+     "home": {"kind": "room", "room": "bedroom", "near": "door"}},
+    {"id": "plant", "archetype": "plant", "label": "ta plante", "owner": "mika",
+     "home": {"kind": "room", "room": "bedroom", "near": "window"}},
+    {"id": "guitar", "archetype": "guitar", "label": "ta guitare", "owner": "mika", "access": "friends",
+     "home": {"kind": "room", "room": "bedroom", "near": "bed"}},
+    {"id": "sofa_frame", "archetype": "sofa", "home": {"kind": "room", "room": "living_room", "near": "sofa"}},
+    {"id": "tv", "archetype": "tv", "home": {"kind": "room", "room": "living_room", "near": "sofa"}}
+  ],
+  "actors": [
+    {"id": "mika", "label": "Mika", "asset": "avatars/mika", "home": "center", "controller": "kernel"},
+    {"id": "npc:moka", "label": "Moka, le chat", "asset": "npc/cat", "home": "sofa", "controller": "host"}
+  ]
+}

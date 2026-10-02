@@ -59,6 +59,9 @@ export type DreamType = (typeof DREAM_TYPES)[number];
 export interface InnerState {
   drives?: Record<string, { tension: number; last_satisfied: number }>;
   energy?: number;
+  /** Where she is in her room — decided by the backend (the AI), one of
+   * the places of vtuber/locomotion/roomLayout.ts. */
+  place?: string;
   /** Estime de soi ∈ [0,1] — la variable lente ; absente si illisible. */
   estime?: number;
   circadian?: {

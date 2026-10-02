@@ -107,6 +107,7 @@ modules = [
     "mika.faculties.affect",
     "mika.faculties.needs",
     "mika.faculties.presence",
+    "mika.faculties.place",
     "mika.faculties.identity",
     "mika.faculties.social",
     "mika.faculties.transcript",

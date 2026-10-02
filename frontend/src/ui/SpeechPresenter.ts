@@ -30,9 +30,14 @@ export interface VoicePort {
   requestWakeUpDelay(ms: number): void;
 }
 
-/** Le visage (blend shapes d'émotion). */
+/** Le visage (blend shapes d'émotion). Le mélange, quand il y en a un,
+ * laisse transparaître l'émotion secondaire — un sourire teinté de
+ * tristesse plutôt qu'un masque d'une seule émotion. */
 export interface FacePort {
-  setEmotion(emotion: EmotionName, intensity: number): void;
+  setEmotion(emotion: EmotionName, intensity: number, blend?: EmotionBlend): void;
+  /** Énergie 0…1 (rythme circadien + fatigue) : des paupières lourdes
+   * quand elle est épuisée. Optionnel. */
+  setEnergy?(energy: number): void;
 }
 
 /** Le corps : regard, mains, postures, one-shots, et les signaux de
@@ -49,6 +54,10 @@ export interface BodyPort {
   setReplyPending(pending: boolean): void;
   noteUserTyping(): void;
   setSleepPhase(phase: SleepPhase): void;
+  /** Énergie 0…1 : respiration, agitation, clignements, bâillements. */
+  setEnergy?(energy: number): void;
+  /** Où l'IA l'a mise dans sa chambre (un état, pas un ordre). */
+  setPlace?(place: unknown): void;
 }
 
 /** La scène (lumières, fond) — ne suit que le sommeil. */
@@ -160,6 +169,7 @@ export class SpeechPresenter {
     this.readouts.setEmotion(emotion, intensity);
     this.readouts.setEmotionBlend(blend, intensity);
     this.readouts.applyInnerState(data.inner_state);
+    this.applyBodyState(data.inner_state);
     // Quoi qu'elle composait, c'est ceci : le regard « je réfléchis » cesse
     // quand le texte arrive, la voix suit.
     this.body.setReplyPending(false);
@@ -217,6 +227,18 @@ export class SpeechPresenter {
    * nuit, action de projet mise en attente). */
   handleInnerStateUpdate(data: InnerStateUpdateMessage): void {
     this.readouts.applyInnerState(data.inner_state);
+    this.applyBodyState(data.inner_state);
+  }
+
+  /** La fatigue se voit sur l'avatar, pas seulement dans le panneau. */
+  private applyBodyState(state: InnerState | undefined): void {
+    // Le lieu voyage dans le même état intérieur : un changement se marche,
+    // le même lieu renvoyé (reconnexion) ne fait rien.
+    if (state?.place !== undefined) this.body.setPlace?.(state.place);
+    const energy = state?.energy;
+    if (typeof energy !== "number" || !Number.isFinite(energy)) return;
+    this.face.setEnergy?.(energy);
+    this.body.setEnergy?.(energy);
   }
 
   /**
@@ -290,8 +312,8 @@ export class SpeechPresenter {
   // ── Debug ─────────────────────────────────────────────────────────
 
   /** Avatar + afficheur d'un coup, hors de toute voix (raccourcis QA). */
-  showEmotion(emotion: EmotionName, intensity: number): void {
-    this.applyAvatar(emotion, intensity, [], undefined, {});
+  showEmotion(emotion: EmotionName, intensity: number, blend: EmotionBlend = []): void {
+    this.applyAvatar(emotion, intensity, blend, undefined, {});
     this.readouts.setEmotion(emotion, intensity);
   }
 
@@ -304,7 +326,7 @@ export class SpeechPresenter {
     persona: VoicePersona | undefined,
     opts: { ambient?: boolean }
   ): void {
-    this.face.setEmotion(emotion, intensity);
+    this.face.setEmotion(emotion, intensity, blend);
     this.body.setEmotion(emotion, intensity, blend, persona, opts);
   }
 

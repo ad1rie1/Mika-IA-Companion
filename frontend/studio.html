@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mika · Studio</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; overflow: hidden; background: #1a1a2e;
+        font-family: system-ui, "Segoe UI", sans-serif; color: #e8e8f4; }
+      #app { width: 100%; height: 100%; position: relative; }
+      canvas { display: block; }
+      #studio-panel { position: absolute; top: 12px; right: 12px; width: 300px;
+        max-height: calc(100% - 24px); overflow-y: auto; padding: 12px;
+        background: rgba(18, 18, 34, 0.86); border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 10px; backdrop-filter: blur(8px); font-size: 13px; }
+      #studio-panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+        color: #a5a8ff; margin: 10px 0 6px; }
+      #studio-panel h2:first-child { margin-top: 0; }
+      #studio-panel label { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+      #studio-panel select, #studio-panel input[type=range] { flex: 1; min-width: 0; }
+      #studio-panel select, #studio-panel textarea { background: #23233d; color: inherit;
+        border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 4px 6px; }
+      #studio-panel textarea { width: 100%; height: 64px; resize: vertical; font: inherit; }
+      #studio-panel .row { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; }
+      #studio-panel button { background: #3a3a6a; color: inherit; border: 0; border-radius: 6px;
+        padding: 5px 8px; cursor: pointer; font: inherit; }
+      #studio-panel button:hover { background: #4b4b8a; }
+      #studio-panel .muted { color: #9a9ab8; font-size: 12px; }
+      #studio-state { white-space: pre; font-family: ui-monospace, monospace; font-size: 11px;
+        color: #b8b8d8; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="studio-panel">
+      <h2>Émotion</h2>
+      <label>Principale <select id="emo"></select></label>
+      <label>Intensité <input id="emo-int" type="range" min="0" max="1" step="0.05" value="0.7" /></label>
+      <label>Secondaire <select id="emo2"><option value="">—</option></select></label>
+      <label>Poids <input id="emo2-w" type="range" min="0" max="1" step="0.05" value="0.5" /></label>
+      <div class="row">
+        <button id="emo-reply">Comme réponse</button>
+        <button id="emo-drift">Comme dérive</button>
+      </div>
+      <h2>Parole</h2>
+      <textarea id="say">Coucou ! Tu sais, j'ai repensé à ce que tu m'as dit hier… C'était vraiment gentil. Et toi, ta journée, ça s'est passé comment ?</textarea>
+      <div class="row">
+        <button id="say-sim">Simuler (sans voix)</button>
+        <button id="say-voice">Dire (voix)</button>
+        <button id="say-stop">Stop</button>
+      </div>
+      <div class="row">
+        <button id="pending">Réfléchit</button>
+        <button id="typing">Tu tapes</button>
+      </div>
+      <h2>Sommeil</h2>
+      <div class="row" id="sleep-row"></div>
+      <h2>Lieu (décidé par l'IA en vrai)</h2>
+      <div class="row" id="place-row"></div>
+      <h2>Gestes</h2>
+      <div class="row" id="gesture-row"><span class="muted">chargement…</span></div>
+      <h2>Caméra</h2>
+      <div class="row">
+        <button data-cam="face">Visage</button>
+        <button data-cam="bust">Buste</button>
+        <button data-cam="body">En pied</button>
+        <button data-cam="room">Pièce</button>
+      </div>
+      <div id="studio-state"></div>
+    </div>
+    <script type="module" src="/src/studio.ts"></script>
+  </body>
+</html>

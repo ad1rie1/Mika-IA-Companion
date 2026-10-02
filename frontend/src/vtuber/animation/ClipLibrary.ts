@@ -9,6 +9,7 @@ import type {
 } from "../../types";
 import { retargetMixamoClip, type RetargetReport } from "./mixamoRetarget";
 import { forwardSign } from "../vrmVersion";
+import { MIRROR_SUFFIX, buildMirrorNodeMap, isMirrorName, mirrorClip } from "./clipMirror";
 
 export const REST_CLIP_NAME = "__rest__";
 
@@ -20,6 +21,9 @@ const SLEEP_TIMESCALE_DEFAULT: Record<Exclude<SleepPhase, "awake">, number> = {
 };
 
 const LOAD_CONCURRENCY = 3;
+
+/** Categories that get a mirrored twin unless the entry says `mirror: false`. */
+const MIRRORED_CATEGORIES: ReadonlySet<ClipCategory> = new Set(["idle", "talk", "gesture"]);
 
 export interface LoadedClip {
   name: string;
@@ -68,6 +72,7 @@ export class ClipLibrary {
   private clips = new Map<string, LoadedClip>();
   private restLoadedClip: LoadedClip | null = null;
   private failed: Array<{ name: string; url: string; reason: string }> = [];
+  private mirrorNodes = new Map<string, string>();
 
   get restLoaded(): LoadedClip {
     if (!this.restLoadedClip) {
@@ -78,6 +83,7 @@ export class ClipLibrary {
 
   prepare(vrm: VRM): void {
     this.vrm = vrm;
+    this.mirrorNodes = buildMirrorNodeMap(vrm);
     this.restLoadedClip = {
       name: REST_CLIP_NAME,
       clip: buildRestClip(vrm),
@@ -191,6 +197,9 @@ export class ClipLibrary {
         const loaded: LoadedClip = { name, clip, meta: entry, report };
         this.clips.set(name, loaded);
         this.reports.push(report);
+        if (entry.mirror !== false && MIRRORED_CATEGORIES.has(entry.category)) {
+          this.addMirror(loaded);
+        }
         onLoaded?.(loaded);
       } finally {
         disposeFbxAsset(asset);
@@ -198,6 +207,29 @@ export class ClipLibrary {
     } catch (e) {
       this.failed.push({ name, url: entry.url, reason: String(e) });
     }
+  }
+
+  /** Register the left/right mirrored twin of a loaded clip, under
+   * `<name>~m`, with its hand shapes swapped. */
+  addMirror(loaded: LoadedClip): void {
+    if (isMirrorName(loaded.name) || this.mirrorNodes.size === 0) return;
+    const name = loaded.name + MIRROR_SUFFIX;
+    const hands = loaded.meta.hands;
+    this.clips.set(name, {
+      name,
+      clip: mirrorClip(loaded.clip, this.mirrorNodes, name),
+      meta: { ...loaded.meta, hands: hands ? [hands[1], hands[0]] : undefined },
+      report: loaded.report,
+    });
+  }
+
+  /** A clip or, half of the time, its mirrored twin when one exists —
+   * how gestures and postures come back from either side. */
+  variant(name: string, random: () => number = Math.random): LoadedClip | null {
+    const original = this.get(name);
+    if (!original) return null;
+    const twin = this.clips.get(name + MIRROR_SUFFIX);
+    return twin && random() < 0.5 ? twin : original;
   }
 
   get(name: string): LoadedClip | null {
@@ -213,8 +245,14 @@ export class ClipLibrary {
     return [...this.clips.values()].filter((c) => c.meta.category === category);
   }
 
+  /** Every playable clip, mirrored twins included (Alt+M cycles them). */
   listNames(): string[] {
     return [...this.clips.keys()];
+  }
+
+  /** Manifest clips only — what a picker should offer. */
+  listOriginalNames(): string[] {
+    return [...this.clips.keys()].filter((n) => !isMirrorName(n));
   }
 
   /** Which clip + timeScale to play for a sleep phase. Falls back:
