@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
 
 from mika.contracts import attention as attention_c
@@ -14,6 +16,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import sensors as sensors_c
 from mika.contracts import social as social_c
+from mika.contracts import world as w
 from mika.contracts.entry import Admission, HistoryRow
 from mika.contracts.runtime import PerceptionReceived
 from mika.faculties import transcript
@@ -22,10 +25,13 @@ from mika.faculties.identity import describe
 from mika.faculties.projects import work as projects_work
 from mika.faculties.self import night
 from mika.faculties.social.sections import profile_parts, refs_of
+from mika.faculties.world import commands as world_commands
 from mika.kernel.clock import local
-from mika.kernel.events import Content, Origin
+from mika.kernel.events import Content, Event, Origin
 from mika.kernel.frame import Audience, Frame
+from mika.kernel.guards import Superseded
 from mika.kernel.operate import Preview
+from mika.kernel.state import Root
 from mika.ports.workshop import argv_lines
 from mika.runtime import decisions, health
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
@@ -54,10 +60,18 @@ def _proposal_text(summary: str, capability: str, effect: Any) -> str:
     return summary if exact in summary else f"{summary}\n\nLa commande exacte, un argument par ligne :\n{exact}"
 
 
+#: ce que les écrans du monde reçoivent sans que le monde le réduise : les gestes, les présences, les demandes
+#: (ce qu'elle remarque et la prose ne regardent qu'elle)
+_WORLD_SHOWN = frozenset(t.name for t in w.ALL) - {w.NOTICED.name, w.DESCRIBED.name}
+#: ce qu'un client lit quand l'état a bougé entre la décision et l'écriture
+_STALE = "Le monde a changé entre-temps : relis-le, puis recommence."
+
+
 class KernelPort:
     def __init__(self, kernel: Kernel) -> None:
         self.kernel = kernel
         self._store = ReadOnlyStore(kernel.deps.store)
+        self._world_types: tuple[Any, frozenset[str]] | None = None
 
     async def perceive(self, p: PerceptionReceived, *, dedupe_key: str | None = None) -> Admission:
         got = await self.kernel.perceive(p, dedupe_key=dedupe_key)
@@ -221,3 +235,65 @@ class KernelPort:
                                           tuple(ids))
             out["pending_commitments"] = [r[0] for r in rows]
         return out
+
+    # ── le monde (ADR 0050, 0051) ──
+    def world_view(self) -> tuple[w.WorldDef, w.WorldState]:
+        frame = self.kernel.mind.frame()
+        return frame.get(w.DEFINITION), frame.get(w.STATE)
+
+    async def world_command(self, command: Any, *, actor: str, handle: str | None, operator: bool,
+                            session: str | None = None) -> w.CommandResult:
+        """Une seule racine pour décider et pour écrire : la faculté rend son verdict sur ``frame``, et l'écriture
+        se fait sur la même base, sous sa garde — si le monde a bougé entre-temps, rien n'est écrit (``stale``)."""
+        frame = self.kernel.mind.frame()
+        verdict = world_commands.handle(frame, command, actor=actor, handle=handle, operator=operator)
+        if not verdict.ok:
+            return w.CommandResult(status=w.CommandStatus.REFUSED, code=verdict.code, message=verdict.message[:300])
+        if not verdict.drafts:
+            return w.CommandResult(status=w.CommandStatus.ACCEPTED)  # un progrès, un chargement : rien à écrire
+        # la clé du noyau d'abord (une fin d'action : ``fin:<intent>``, que l'échéance partage) ; sinon celle de
+        # la commande, par brouillon (deux brouillons d'un même type sous une même clé n'en feraient qu'un)
+        drafts = [d if d.dedupe_key is not None or session is None
+                  else replace(d, dedupe_key=f"{session}:{command.cmd}:{i}") for i, d in enumerate(verdict.drafts)]
+        try:
+            commit = await self.kernel.mind.append(drafts, emitter=w.OWNER, correlation=f"monde:{actor}",
+                                                   origin=Origin.EXTERNAL, basis=frame.root, guard=verdict.guard)
+        except Superseded:
+            return w.CommandResult(status=w.CommandStatus.REFUSED, code=w.Refusal.STALE, message=_STALE)
+        return w.CommandResult(status=w.CommandStatus.ACCEPTED, seq=commit.seqs[-1] if commit.seqs else None)
+
+    def _screen_types(self) -> frozenset[str]:
+        """Les types qui changent ce que montrent les écrans du monde : ceux que la faculté ``world`` réduit (lus
+        dans la composition, pas recopiés : un réflexe de plus s'y ajoute seul) et ceux qu'elle diffuse."""
+        registry = self.kernel.mind.registry
+        if self._world_types is None or self._world_types[0] is not registry:
+            reduced = {name for name, specs in registry.reducers_by_type.items()
+                       if any(spec.owner == w.OWNER for spec in specs)}
+            self._world_types = (registry, frozenset(reduced) | _WORLD_SHOWN)
+        return self._world_types[1]
+
+    def world_events(self, after: int, *, limit: int) -> list[Event[Any]] | None:
+        mind = self.kernel.mind
+        events: list[Event[Any]] = []
+        rows = mind.store.read(after=max(0, after), types=self._screen_types(), upto=mind.head)
+        try:
+            for stored in rows:
+                if len(events) >= limit:
+                    return None
+                events.append(mind.decode(stored))
+        finally:
+            close = getattr(rows, "close", None)
+            if close is not None:
+                close()
+        return events
+
+    def world_update(self, events: Sequence[Event[Any]], root: Root
+                     ) -> tuple[list[Event[Any]], w.WorldDef, w.WorldState] | None:
+        """Ce qu'un lot commité change pour les écrans du monde (``None`` : rien), avec le monde après le lot —
+        branché sur ``Mind.subscribe`` par le serveur."""
+        types = self._screen_types()
+        relevant = [e for e in events if e.type.name in types]
+        if not relevant:
+            return None
+        view = self.kernel.mind.view(root)
+        return relevant, view.get(w.DEFINITION), view.get(w.STATE)

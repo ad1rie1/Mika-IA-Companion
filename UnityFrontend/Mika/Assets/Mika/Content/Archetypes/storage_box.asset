@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 736c6f4baece5352a99a0d61486a7a64, type: 3}
+  m_Name: storage_box
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.ArchetypeAsset
+  id: storage_box
+  label: "bo\xEEte de rangement"
+  assetKey: props/shelf_basket_1
+  prefab: {fileID: 5855956002818531796, guid: 3c85346a80cf6467eb8979f5db14fbb5, type: 3}
+  size: 1
+  states: []
+  initialState: 
+  stateLabels: []
+  affordances: []
+  surfaceSlots: 0
+  containerSlots: 6
+  salience: 0.15
+  tags: []

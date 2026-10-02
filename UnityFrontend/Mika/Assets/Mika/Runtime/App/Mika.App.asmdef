@@ -1,0 +1,25 @@
+{
+    "name": "Mika.App",
+    "rootNamespace": "Mika.App",
+    "references": [
+        "Mika.World.Protocol",
+        "Mika.World.Model",
+        "Mika.Net",
+        "Mika.Chat",
+        "Mika.World.Engine",
+        "Mika.Player",
+        "Mika.UI",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

@@ -1,0 +1,19 @@
+{
+    "name": "Mika.Avatar",
+    "rootNamespace": "Mika.Avatar",
+    "references": [
+        "VRM10",
+        "UniGLTF",
+        "UniGLTF.Utils",
+        "UniHumanoid"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

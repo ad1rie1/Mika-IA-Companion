@@ -1,0 +1,61 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 736c6f4baece5352a99a0d61486a7a64, type: 3}
+  m_Name: wardrobe
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.ArchetypeAsset
+  id: wardrobe
+  label: armoire
+  assetKey: furniture/wardrobe
+  prefab: {fileID: 2414227137826233395, guid: 0aadc0db70640f1bb8f5c3744b21f6cb, type: 3}
+  size: 2
+  states:
+  - closed
+  - open
+  initialState: closed
+  stateLabels:
+  - state: closed
+    label: "ferm\xE9e"
+  - state: open
+    label: ouverte
+  affordances:
+  - id: ouvrir
+    label: ouvrir
+    effect: 0
+    toState: open
+    requiresState:
+    - closed
+    activity: 
+    held: 0
+    durationS: 1.5
+    untilInterrupted: 0
+    overrideAccess: 0
+    access: 0
+    noise: 0.2
+    animation: 
+  - id: fermer
+    label: fermer
+    effect: 0
+    toState: closed
+    requiresState:
+    - open
+    activity: 
+    held: 0
+    durationS: 1.5
+    untilInterrupted: 0
+    overrideAccess: 0
+    access: 0
+    noise: 0.2
+    animation: 
+  surfaceSlots: 0
+  containerSlots: 0
+  salience: 0.3
+  tags: []

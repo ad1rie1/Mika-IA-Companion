@@ -1,0 +1,24 @@
+{
+    "name": "Mika.UI",
+    "rootNamespace": "Mika.UI",
+    "references": [
+        "Mika.World.Protocol",
+        "Mika.World.Model",
+        "Mika.Net",
+        "Mika.Chat",
+        "Mika.World.Engine",
+        "Mika.Player",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

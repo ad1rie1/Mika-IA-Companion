@@ -11,6 +11,9 @@
   arrêté ; l'ancien dossier est mis de côté) ;
 - ``llm show|backend|route|remove|context`` : les modèles (clés chiffrées) ;
 - ``account <nom> <mot de passe> [--operator]`` : un compte ;
+- ``token create <compte> [--label …]`` / ``token list [<compte>]`` / ``token revoke <id>`` : les jetons
+  d'un client natif (un moteur de jeu sur ``/ws/world``, ADR 0051) — montrés une seule fois, gardés en
+  empreinte ; serveur en marche, une révocation ferme ses connexions au plus tard dix secondes après ;
 - ``telegram show|token|allow|disallow|owner|open|close`` : le robot Telegram
   (jeton chiffré ; fermé par défaut : liste blanche et propriétaires) ;
 - ``serve --origin URL --cookie-secure --behind-proxy`` : derrière un mandataire TLS ;
@@ -32,6 +35,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError, runtime_dir
@@ -353,6 +357,43 @@ async def account_command(data: Path, args: argparse.Namespace) -> dict[str, obj
     return await _with_settings(data, run)
 
 
+def _when(ts: int | None) -> str | None:
+    return datetime.fromtimestamp(ts, tz=UTC).isoformat(timespec="seconds") if ts else None
+
+
+async def token_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
+    """Les jetons des clients natifs : un jeton parle sous l'adresse de son compte (``user_<pk>``)."""
+    async def run(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
+        accounts = Accounts(store)
+        await accounts.open()
+        if args.token_cmd == "create":
+            found = accounts.by_name(args.username)
+            if found is None:
+                return {"ok": False, "error": f"Compte inconnu : « {args.username} »."}
+            try:
+                info, raw = await accounts.create_token(found[0].id, args.label)
+            except ValueError as exc:
+                return {"ok": False, "error": str(exc)}
+            return {"ok": True, "id": info.id, "person_id": found[0].handle, "token": raw,
+                    "usage": "montré une seule fois : hello.token, ou l'en-tête « Authorization: Bearer <jeton> », "
+                             "sur /ws/world (et /ws, sans en-tête Origin)"}
+        if args.token_cmd == "list":
+            account = None
+            if args.username:
+                found = accounts.by_name(args.username)
+                if found is None:
+                    return {"ok": False, "error": f"Compte inconnu : « {args.username} »."}
+                account = found[0].id
+            return {"ok": True, "tokens": [{"id": t.id, "account": t.username, "label": t.label,
+                                            "created": _when(t.created_at), "last_used": _when(t.last_used),
+                                            "revoked": t.revoked} for t in accounts.tokens(account)]}
+        if await accounts.revoke_token(args.id):
+            return {"ok": True, "revoked": args.id}
+        return {"ok": False, "error": f"Jeton inconnu ou déjà révoqué : {args.id}."}
+
+    return await _with_settings(data, run)
+
+
 async def telegram_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
     async def run(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
         cfg = settings.telegram()
@@ -494,6 +535,15 @@ def _run(argv: list[str] | None) -> int:
     ac.add_argument("password")
     ac.add_argument("--operator", action="store_true")
     ac.add_argument("--full-name", default="")
+    tk = sub.add_parser("token", help="les jetons d'un client natif (un moteur de jeu sur /ws/world)")
+    tksub = tk.add_subparsers(dest="token_cmd", required=True)
+    tkc = tksub.add_parser("create", help="un jeton neuf pour un compte, montré une seule fois")
+    tkc.add_argument("username")
+    tkc.add_argument("--label", default="", help="à quoi il sert (« Unity, PC du salon »)")
+    tkl = tksub.add_parser("list", help="les jetons, jamais leur secret")
+    tkl.add_argument("username", nargs="?", default=None)
+    tkr = tksub.add_parser("revoke", help="révoquer un jeton : il ne vaut plus rien, ses connexions se ferment")
+    tkr.add_argument("id", type=int)
     tg = sub.add_parser("telegram", help="le robot Telegram")
     tsub = tg.add_subparsers(dest="tg_cmd", required=True)
     tsub.add_parser("show")
@@ -646,6 +696,10 @@ def _run(argv: list[str] | None) -> int:
     if args.cmd == "account":
         out = asyncio.run(account_command(args.data, args))
         print(json.dumps(out, ensure_ascii=False))
+        return 0 if out["ok"] else 1
+    if args.cmd == "token":
+        out = asyncio.run(token_command(args.data, args))
+        print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0 if out["ok"] else 1
     if args.cmd == "telegram":
         print(json.dumps(asyncio.run(telegram_command(args.data, args)), ensure_ascii=False))

@@ -34,7 +34,7 @@ namespace Mika.Net
         }
     }
 
-    public enum SessionState
+    public enum LinkState
     {
         Offline,
         Connecting,
@@ -65,6 +65,7 @@ namespace Mika.Net
         double _lastPing;
         double _retryAt;
         double _backoff = 1;
+        int _failures;
         long _pingSentLocalUs;
 
         sealed class Pending
@@ -88,7 +89,7 @@ namespace Mika.Net
         public WorldSessionOptions Options { get; }
         public WorldMirror Mirror { get; }
         public KernelClock Clock { get; } = new KernelClock();
-        public SessionState State { get; private set; } = SessionState.Offline;
+        public LinkState State { get; private set; } = LinkState.Offline;
         public Welcome Welcome { get; private set; }
         public IReadOnlyList<Role> Granted => Welcome?.Granted ?? (IReadOnlyList<Role>)Array.Empty<Role>();
         /// <summary>L'acteur de la personne connectée (<c>player:…</c>), <c>null</c> pour un écran sans corps.</summary>
@@ -100,7 +101,7 @@ namespace Mika.Net
         public bool Wants(Role role) => Options.Roles.Contains(role);
         public bool Has(Role role) => Granted.Contains(role);
 
-        public event Action<SessionState> StateChanged;
+        public event Action<LinkState> StateChanged;
         public event Action<Welcome> Welcomed;
         public event Action<bool> HostChanged;
         public event Action<Failure> ServerError;
@@ -113,7 +114,7 @@ namespace Mika.Net
         // --- cycle de vie -------------------------------------------------------------------------------------
         public void Connect()
         {
-            if (State == SessionState.Connecting || State == SessionState.Greeting || State == SessionState.Online)
+            if (State == LinkState.Connecting || State == LinkState.Greeting || State == LinkState.Online)
                 return;
             Open();
         }
@@ -122,13 +123,13 @@ namespace Mika.Net
         {
             _channel.Close();
             SetHost(false);
-            SetState(SessionState.Offline);
+            SetState(LinkState.Offline);
             FailPending("déconnecté");
         }
 
         void Open()
         {
-            SetState(SessionState.Connecting);
+            SetState(LinkState.Connecting);
             var headers = new Dictionary<string, string>();
             if (!string.IsNullOrEmpty(Options.Token))
                 headers["Authorization"] = "Bearer " + Options.Token;
@@ -157,13 +158,13 @@ namespace Mika.Net
                 }
             }
 
-            if (State == SessionState.Offline && _retryAt > 0 && _now >= _retryAt)
+            if (State == LinkState.Offline && _retryAt > 0 && _now >= _retryAt)
             {
                 _retryAt = 0;
                 Open();
             }
 
-            if (State == SessionState.Greeting || State == SessionState.Online)
+            if (State == LinkState.Greeting || State == LinkState.Online)
             {
                 if (_now - _lastPing >= Options.PingIntervalS)
                 {
@@ -192,14 +193,15 @@ namespace Mika.Net
 
         void OnOpened()
         {
-            SetState(SessionState.Greeting);
+            SetState(LinkState.Greeting);
             _backoff = 1;
+            _failures = 0;
             var hello = new Hello
             {
                 Roles = Options.Roles.Distinct().ToList(),
                 Client = new ClientInfo { Name = Options.ClientName, Version = Options.ClientVersion, Engine = Options.Engine },
-                Rev = Mirror.World?.Rev,
-                After = Mirror.Ready ? Mirror.Seq : (long?)null,
+                Rev = Mirror.Provisional ? null : Mirror.World?.Rev,
+                After = Mirror.Ready && !Mirror.Provisional ? Mirror.Seq : (long?)null,
                 Token = string.IsNullOrEmpty(Options.Token) ? null : Options.Token,
                 Avatar = Options.Avatar,
             };
@@ -215,12 +217,14 @@ namespace Mika.Net
             if (code == 4401 || code == 1008)
             {
                 Log($"monde : connexion refusée ({code}{(reason != null ? ", " + reason : "")}) — vérifie le jeton");
-                SetState(SessionState.Refused);
+                SetState(LinkState.Refused);
                 return;
             }
-            if (State != SessionState.Offline)
+            // Une connexion qui tombe se dit ; les essais qui suivent, une fois sur dix seulement.
+            if (State == LinkState.Online || State == LinkState.Greeting || _failures % 10 == 0)
                 Log($"monde : connexion fermée ({reason ?? code.ToString()}), nouvel essai dans {_backoff:0.#} s" + (wasHost ? " — bail d'hôte perdu" : ""));
-            SetState(SessionState.Offline);
+            _failures = State == LinkState.Online ? 0 : _failures + 1;
+            SetState(LinkState.Offline);
             _retryAt = _now + _backoff;
             _backoff = Math.Min(_backoff * 1.5, 30);
         }
@@ -240,7 +244,7 @@ namespace Mika.Net
                 case Welcome w:
                     Welcome = w;
                     Clock.Sync(w.Now, KernelClock.LocalNowUs());
-                    SetState(SessionState.Online);
+                    SetState(LinkState.Online);
                     Welcomed?.Invoke(w);
                     break;
                 case Result r:
@@ -285,7 +289,7 @@ namespace Mika.Net
             SetCmd(frame, cmd);
             if (!Allow(frame.Type))
                 return Task.FromResult(new Result { Cmd = cmd, Status = Status.Refused, Code = Refusal.RateLimited, Message = "trop de commandes" });
-            if (State != SessionState.Online)
+            if (State != LinkState.Online)
                 return Task.FromResult(new Result { Cmd = cmd, Status = Status.Refused, Message = "pas connecté au monde" });
             var done = new TaskCompletionSource<Result>();
             _pending[cmd] = new Pending { Done = done, Deadline = _now + Options.CommandTimeoutS };
@@ -296,7 +300,7 @@ namespace Mika.Net
         /// <summary>La pose continue du corps (20 par seconde au plus) : relayée, jamais journalisée, sans accusé.</summary>
         public void SendPose(double x, double y, double z, double yaw, string anim = null)
         {
-            if (State != SessionState.Online || !Allow("pose"))
+            if (State != LinkState.Online || !Allow("pose"))
                 return;
             Send(new PoseIn { T = Clock.NowUs, Pos = new Vec3 { X = x, Y = y, Z = z }, Yaw = yaw, Anim = anim }, track: false);
         }
@@ -304,7 +308,7 @@ namespace Mika.Net
         /// <summary>Redemande ce qui a suivi le dernier <c>seq</c> appliqué.</summary>
         public void RequestSync()
         {
-            if (State == SessionState.Online && Mirror.Ready && Allow("sync"))
+            if (State == LinkState.Online && Mirror.Ready && Allow("sync"))
                 Send(new Sync { After = Mirror.Seq }, track: false);
         }
 
@@ -350,7 +354,7 @@ namespace Mika.Net
             _pending.Clear();
         }
 
-        void SetState(SessionState s)
+        void SetState(LinkState s)
         {
             if (State == s) return;
             State = s;

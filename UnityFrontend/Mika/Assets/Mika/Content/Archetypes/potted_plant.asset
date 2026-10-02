@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 736c6f4baece5352a99a0d61486a7a64, type: 3}
+  m_Name: potted_plant
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.ArchetypeAsset
+  id: potted_plant
+  label: plante
+  assetKey: props/potted_plant
+  prefab: {fileID: 5439933462840119130, guid: 0e7c6794bc5780238a5860a6c97fc9a5, type: 3}
+  size: 2
+  states: []
+  initialState: 
+  stateLabels: []
+  affordances:
+  - id: arroser
+    label: arroser
+    effect: 1
+    toState: 
+    requiresState: []
+    activity: water_plant
+    held: 0
+    durationS: 8
+    untilInterrupted: 0
+    overrideAccess: 0
+    access: 0
+    noise: 0
+    animation: 
+  surfaceSlots: 0
+  containerSlots: 0
+  salience: 0.5
+  tags: []

@@ -9,6 +9,14 @@ leurre est calculé une fois) : la durée ne dit pas qui a un compte. ``verify``
 le fait hors de la boucle (un scrypt la figeait ~20 ms par essai).
 Une session révoquée (compte désactivé, mot de passe changé, droits retirés)
 prévient ceux qui écoutent (``on_revoke``) : ses WebSockets se ferment.
+
+Jetons de client natif (ADR 0051) : un moteur de jeu n'a ni cookie ni ``Origin``,
+il s'authentifie par un jeton porteur de son compte (``mw_…``). Un jeton parle
+sous l'adresse du compte (``user_<pk>``) : l'identité reste authentifiée, comme
+depuis le navigateur. Il n'est gardé qu'en empreinte (SHA-256 : un jeton tiré au
+hasard sur 256 bits n'a pas besoin d'un hachage lent), montré une seule fois, et
+révocable un par un — un jeton révoqué prévient ``on_token_revoke`` : ses
+connexions se ferment. Un compte désactivé rend tous ses jetons muets.
 """
 
 from __future__ import annotations
@@ -24,6 +32,11 @@ from dataclasses import dataclass
 from typing import Any
 
 SESSION_TTL_S = 14 * 24 * 3600
+#: le préfixe d'un jeton de client natif (il se reconnaît dans un journal, et ne ressemble à aucune session)
+TOKEN_PREFIX = "mw_"
+#: la clé de « session » d'une connexion ouverte par un jeton (``token:<id>``) : ce qu'elle revérifie, ce qu'on
+#: révoque ; une clé de session web n'a jamais de deux-points (``token_urlsafe``), les deux ne se confondent pas
+TOKEN_KEY = "token:"
 _N, _R, _P = 2**14, 8, 1
 _COMMON = frozenset({"password", "motdepasse", "azertyuiop", "qwertyuiop", "12345678", "123456789", "iloveyou",
                      "password1", "baseball", "football", "sunshine", "princess", "letmein1", "trustno1"})
@@ -86,6 +99,28 @@ class Account:
         return f"user_{self.id}"
 
 
+@dataclass(frozen=True, slots=True)
+class ClientToken:
+    """Un jeton de client natif, tel qu'on le montre : jamais le secret, seulement de quoi le reconnaître."""
+
+    id: int
+    account: int
+    username: str
+    label: str
+    created_at: int
+    last_used: int | None
+    revoked: bool
+
+    @property
+    def key(self) -> str:
+        """La clé de ses connexions (``token:<id>``)."""
+        return f"{TOKEN_KEY}{self.id}"
+
+
+def token_digest(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
 class Accounts:
     """Sur le port de magasin : écritures par ``run_mind``, lectures par ``query_mind``."""
 
@@ -95,6 +130,8 @@ class Accounts:
         self.on_change: Callable[[], Awaitable[Any]] | None = None
         #: prévenus quand les sessions d'un compte cessent de valoir (identifiant du compte)
         self.on_revoke: list[Callable[[int], Awaitable[Any]]] = []
+        #: prévenus quand un jeton de client natif est révoqué (identifiant du jeton)
+        self.on_token_revoke: list[Callable[[int], Awaitable[Any]]] = []
 
     async def _changed(self) -> None:
         if self.on_change is not None:
@@ -111,6 +148,9 @@ class Accounts:
                         "active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL)")
             sql.execute("CREATE TABLE IF NOT EXISTS sessions(key TEXT PRIMARY KEY, account INTEGER NOT NULL, "
                         "created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)")
+            sql.execute("CREATE TABLE IF NOT EXISTS client_tokens(id INTEGER PRIMARY KEY, account INTEGER NOT NULL, "
+                        "label TEXT NOT NULL DEFAULT '', digest TEXT UNIQUE NOT NULL, created_at INTEGER NOT NULL, "
+                        "last_used INTEGER, revoked_at INTEGER)")
 
         await self.store.run_mind(create)
 
@@ -245,3 +285,86 @@ class Accounts:
             "ON a.id = s.account WHERE s.key=? AND s.expires_at >= ?", (key, int(time.time())))
         acc = self._account(rows[0]) if rows else None
         return acc if acc is not None and acc.active else None
+
+    # ── jetons de client natif ──
+    async def create_token(self, account_id: int, label: str = "") -> tuple[ClientToken, str]:
+        """Un jeton neuf pour ce compte (actif) : rend sa fiche et le secret, qu'on ne reverra jamais.
+        ``ValueError`` (en français) pour un compte inconnu ou désactivé."""
+        account = next((a for a in self.all() if a.id == account_id), None)
+        if account is None or not account.active:
+            raise ValueError("Compte inconnu ou désactivé : pas de jeton.")
+        raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
+        clean = " ".join(label.split())[:60]
+        now = int(time.time())
+
+        def insert(sql: Any) -> None:
+            sql.execute("INSERT INTO client_tokens(account, label, digest, created_at) VALUES(?,?,?,?)",
+                        (account_id, clean, token_digest(raw), now))
+
+        await self.store.run_mind(insert)
+        rows = self.store.query_mind("SELECT id FROM client_tokens WHERE digest=?", (token_digest(raw),))
+        return ClientToken(int(rows[0][0]), account_id, account.username, clean, now, None, False), raw
+
+    def tokens(self, account_id: int | None = None) -> list[ClientToken]:
+        """Les jetons (révoqués compris), du plus ancien au plus récent — jamais leur secret."""
+        sql = ("SELECT t.id, t.account, COALESCE(a.username, '?'), t.label, t.created_at, t.last_used, t.revoked_at "
+               "FROM client_tokens t LEFT JOIN accounts a ON a.id = t.account")
+        params: tuple[Any, ...] = ()
+        if account_id is not None:
+            sql += " WHERE t.account=?"
+            params = (account_id,)
+        rows = self.store.query_mind(sql + " ORDER BY t.id", params)
+        return [ClientToken(int(r[0]), int(r[1]), r[2], r[3], int(r[4]), r[5], r[6] is not None) for r in rows]
+
+    def token(self, raw: str | None) -> tuple[Account, int] | None:
+        """Le compte (actif) d'un jeton valide, et l'identifiant du jeton ; ``None`` sinon."""
+        if not raw or not raw.startswith(TOKEN_PREFIX) or len(raw) > 200:
+            return None
+        rows = self.store.query_mind(
+            "SELECT a.id, a.username, a.full_name, a.operator, a.active, t.id FROM client_tokens t JOIN accounts a "
+            "ON a.id = t.account WHERE t.digest=? AND t.revoked_at IS NULL", (token_digest(raw),))
+        if not rows:
+            return None
+        acc = self._account(rows[0][:5])
+        return (acc, int(rows[0][5])) if acc is not None and acc.active else None
+
+    async def use_token(self, raw: str | None) -> tuple[Account, int] | None:
+        """Comme ``token``, et la date de dernier usage notée (ce que la liste des jetons montre)."""
+        found = self.token(raw)
+        if found is not None:
+            now, token_id = int(time.time()), found[1]
+            await self.store.run_mind(lambda sql: sql.execute("UPDATE client_tokens SET last_used=? WHERE id=?",
+                                                              (now, token_id)))
+        return found
+
+    async def revoke_token(self, token_id: int) -> bool:
+        """Révoque un jeton (il ne vaut plus rien, ses connexions se ferment) ; ``False`` s'il n'existe pas ou
+        l'était déjà."""
+        now = int(time.time())
+        done: list[bool] = []
+
+        def write(sql: Any) -> None:
+            cur = sql.execute("UPDATE client_tokens SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
+                              (now, token_id))
+            done.append(bool(getattr(cur, "rowcount", 0)))
+
+        await self.store.run_mind(write)
+        if not (done and done[0]):
+            return False
+        for listener in list(self.on_token_revoke):
+            await listener(token_id)
+        return True
+
+    def credential(self, key: str | None) -> Account | None:
+        """Ce qu'une connexion ouverte revérifie : sa session web, ou son jeton (``token:<id>``)."""
+        if key and key.startswith(TOKEN_KEY):
+            try:
+                token_id = int(key[len(TOKEN_KEY):])
+            except ValueError:
+                return None
+            rows = self.store.query_mind(
+                "SELECT a.id, a.username, a.full_name, a.operator, a.active FROM client_tokens t JOIN accounts a "
+                "ON a.id = t.account WHERE t.id=? AND t.revoked_at IS NULL", (token_id,))
+            acc = self._account(rows[0]) if rows else None
+            return acc if acc is not None and acc.active else None
+        return self.session(key)

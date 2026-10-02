@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 736c6f4baece5352a99a0d61486a7a64, type: 3}
+  m_Name: chair
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.ArchetypeAsset
+  id: chair
+  label: chaise de bureau
+  assetKey: furniture/desk_chair
+  prefab: {fileID: 4922994203962559846, guid: 8530411b571892e058885f18a32cafec, type: 3}
+  size: 2
+  states: []
+  initialState: 
+  stateLabels: []
+  affordances: []
+  surfaceSlots: 0
+  containerSlots: 0
+  salience: 0.1
+  tags: []

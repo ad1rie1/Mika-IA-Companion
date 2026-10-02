@@ -1,0 +1,223 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 917126443c1fabec7bf07bd53011f562, type: 3}
+  m_Name: AssetCatalog
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.AssetCatalog
+  archetypes:
+  - {fileID: 11400000, guid: c153054b94d96e9d9922e9d981c94a9d, type: 2}
+  - {fileID: 11400000, guid: ae11443cca3deca6e9b8d0ea8a523f05, type: 2}
+  - {fileID: 11400000, guid: 1a805aba0032e4ba5b5d7eab7c09cdc7, type: 2}
+  - {fileID: 11400000, guid: 06446344d63001af5b9519f6c3d967b1, type: 2}
+  - {fileID: 11400000, guid: bf738b44223864aca932e635ea178219, type: 2}
+  - {fileID: 11400000, guid: d54fc0327ba4d3c0cbbfca0fbe6759eb, type: 2}
+  - {fileID: 11400000, guid: 18cc8f23317a406b7b14abc3f7febabb, type: 2}
+  - {fileID: 11400000, guid: dc8df9c07153337bbbdf0152e421b811, type: 2}
+  - {fileID: 11400000, guid: 010fbcadb6ac870cca45c5f795162fad, type: 2}
+  - {fileID: 11400000, guid: 3523c8ff2bdc766f190aad9823ba2d85, type: 2}
+  - {fileID: 11400000, guid: a5d16fa7707927e26ab10008b4e74d72, type: 2}
+  - {fileID: 11400000, guid: b25814c97f128adf0bf43284a4910a54, type: 2}
+  - {fileID: 11400000, guid: 18028065b68e9a922bddb1bdce7cae61, type: 2}
+  - {fileID: 11400000, guid: ea71a0b92f9767b06b7337f3da2c0ebb, type: 2}
+  - {fileID: 11400000, guid: a4e38c6af327ffeb68e088d992671843, type: 2}
+  - {fileID: 11400000, guid: 27add6c0bc5db635bb254dc8e5dcd098, type: 2}
+  - {fileID: 11400000, guid: f0abedf1e97f4eb6f9747894ef34bf7d, type: 2}
+  - {fileID: 11400000, guid: c66f6fc3a6e8c3ad7a3f0cf955e02327, type: 2}
+  - {fileID: 11400000, guid: 3a058cb129ca012d58877bd530b7ace5, type: 2}
+  - {fileID: 11400000, guid: 4a331214b95853c0bbd240d3ca4d666e, type: 2}
+  - {fileID: 11400000, guid: f672b44a079e5390ebe58cd79c5e874c, type: 2}
+  - {fileID: 11400000, guid: 63276acf6648bfe4d9e9698251164c3c, type: 2}
+  - {fileID: 11400000, guid: 9fea6d6f16c608ceea5df5770671ec06, type: 2}
+  - {fileID: 11400000, guid: f7f3e5daf81cbeb35a61c001ffbd5ddb, type: 2}
+  - {fileID: 11400000, guid: 40981d1149368cc6196d02a7c04cead2, type: 2}
+  - {fileID: 11400000, guid: 11cc9f68f7595c32ead92ca13104d741, type: 2}
+  - {fileID: 11400000, guid: b496320603877e3159506885456f5ed3, type: 2}
+  - {fileID: 11400000, guid: a9f2608a69a2aace6a8909f02cd2ce12, type: 2}
+  - {fileID: 11400000, guid: e52be609a85efc333bb4ccdc7eb5bbe2, type: 2}
+  - {fileID: 11400000, guid: b8a232a9d9032b339b189f8354a2f3fb, type: 2}
+  - {fileID: 11400000, guid: 5b98486f9d5949e6fb462efc75a904b5, type: 2}
+  - {fileID: 11400000, guid: e50b0e3310eb03dd19da3925182baa1a, type: 2}
+  - {fileID: 11400000, guid: 6a805ac64f559266e9a840cc2d0d2ba6, type: 2}
+  - {fileID: 11400000, guid: cf5985eb7ab1f4d75a39d841dbd49785, type: 2}
+  - {fileID: 11400000, guid: df997cef9f2f2be239d7c94eaf958490, type: 2}
+  entries:
+  - key: avatars/mika
+    prefab: {fileID: 4867611594997949613, guid: dfbac68735fd5daca92e2f15eea497b9, type: 3}
+  - key: avatars/default
+    prefab: {fileID: 1372487147016513945, guid: 86c5eff546c51f8328830747252e5801, type: 3}
+  - key: architecture/room_ceiling
+    prefab: {fileID: 4514469627478259625, guid: 392ef42a0689bb1f9a0beba3e6fd8a87, type: 3}
+  - key: architecture/room_floor
+    prefab: {fileID: 6796102795036161851, guid: 875fcaca4c3a412469ddad25e98ed54d, type: 3}
+  - key: architecture/room_walls
+    prefab: {fileID: 2186527621594056406, guid: c51bf4589f720e4a98b1f124b84857c3, type: 3}
+  - key: architecture/window_sky
+    prefab: {fileID: 5812175188240885625, guid: db07126fad2b9ffa9b0f6baa3ffeea9f, type: 3}
+  - key: decor/books_shelf_0
+    prefab: {fileID: 142426288949942506, guid: 0821af327dc03ab0b92112ac7000bdec, type: 3}
+  - key: decor/books_shelf_1
+    prefab: {fileID: 4078161197039243360, guid: 6781d60fe03d66960b697a0ed764102d, type: 3}
+  - key: decor/books_shelf_2
+    prefab: {fileID: 6321106659536340510, guid: fed2110a38940e17e9d9f7fe41454d67, type: 3}
+  - key: decor/books_shelf_3
+    prefab: {fileID: 8895544370925337967, guid: cb247b3dbac447ef6bc526b3ce980b77, type: 3}
+  - key: decor/books_shelf_4
+    prefab: {fileID: 1743464344954413098, guid: 6e117fad514ad6a94b5ed5327ce4acdb, type: 3}
+  - key: decor/desk_cables
+    prefab: {fileID: 283956990706097489, guid: 5bb2452d0dddcd277a270e0184b46de9, type: 3}
+  - key: decor/mirror
+    prefab: {fileID: 1666544267096007894, guid: 72e4d868f92863658b236666f421d1c7, type: 3}
+  - key: decor/neon_sign
+    prefab: {fileID: 4648753375005961258, guid: 4833f4047c900825ba64bd282aef7115, type: 3}
+  - key: decor/pinboard
+    prefab: {fileID: 7491355325273598162, guid: 1500df4b253f8e30995760de1438e409, type: 3}
+  - key: decor/poster_city
+    prefab: {fileID: 2206373124242733813, guid: f2094886c58effc4f9e7ea6ab515b8f6, type: 3}
+  - key: decor/poster_moon
+    prefab: {fileID: 722927829006976326, guid: 86b2a7f05d31bc386a716d3ec40123f8, type: 3}
+  - key: decor/poster_peaks
+    prefab: {fileID: 5499182887690613081, guid: b564db362f85059e597dbf43fb0fd113, type: 3}
+  - key: decor/print_cat
+    prefab: {fileID: 662997982880480800, guid: f7f64f51b2d4bae8d91e3177ba85f647, type: 3}
+  - key: decor/print_flower
+    prefab: {fileID: 8340710516403620600, guid: 77b6b15b3f8437a2fa915f093e227a3d, type: 3}
+  - key: decor/rug
+    prefab: {fileID: 997671256525913497, guid: efb4d28dc711492e5a698f57983fa1e8, type: 3}
+  - key: decor/wall_clock
+    prefab: {fileID: 5197715806413429657, guid: 5140da713eac1ac169e8aa1938b67af6, type: 3}
+  - key: decor/wall_hooks
+    prefab: {fileID: 7674736985707332047, guid: eff03bd6636d4e5bf938ff9e1c41a31c, type: 3}
+  - key: fixtures/bedroom_door
+    prefab: {fileID: 5608727302921585830, guid: 2c69853d25a871d5994e4074cdd9fb89, type: 3}
+  - key: fixtures/ceiling_lamp
+    prefab: {fileID: 7657165474731890501, guid: 812af3f8041989fa0b4617c36ec4f9e1, type: 3}
+  - key: fixtures/curtains
+    prefab: {fileID: 3834214865375605537, guid: 765fe47f2d12f12a9b571d5b7780e28c, type: 3}
+  - key: fixtures/light_switch
+    prefab: {fileID: 3332417033088840458, guid: 027c2d5ddda6a2279822b701c18862e4, type: 3}
+  - key: fixtures/monitor
+    prefab: {fileID: 2112936541039695156, guid: 08ee9547219e75f8fb350ff126b8f1cc, type: 3}
+  - key: fixtures/window_pane
+    prefab: {fileID: 2918588624569886435, guid: 16f9052b7535c8ba7879460effb132d2, type: 3}
+  - key: furniture/bed_frame
+    prefab: {fileID: 4797475909267332186, guid: a2b987e6c0e0947e6b25d614571fce8b, type: 3}
+  - key: furniture/desk_chair
+    prefab: {fileID: 4922994203962559846, guid: 8530411b571892e058885f18a32cafec, type: 3}
+  - key: furniture/dresser
+    prefab: {fileID: 3791460731311296417, guid: c2e182e63014a2e26b9ed50bc1f8e279, type: 3}
+  - key: furniture/nightstand
+    prefab: {fileID: 5134860673372698138, guid: 32aa61ab088b2a1a7bdad7d96e37b4c0, type: 3}
+  - key: furniture/shelves
+    prefab: {fileID: 6731258210211870218, guid: e9de2e9df48ab811fb4a3b676124b244, type: 3}
+  - key: furniture/trinket_shelf
+    prefab: {fileID: 7554388142997501068, guid: 5cb2a9f2ad8bc23329e9db86520ac5a5, type: 3}
+  - key: furniture/wardrobe
+    prefab: {fileID: 2414227137826233395, guid: 0aadc0db70640f1bb8f5c3744b21f6cb, type: 3}
+  - key: furniture/writing_desk
+    prefab: {fileID: 5712565485049873531, guid: 329c5a2a6561d1fed998c5ffb530ccb7, type: 3}
+  - key: props/alarm_clock
+    prefab: {fileID: 5495297958898858218, guid: edbc395c7e50ae818b088baa01e65b33, type: 3}
+  - key: props/bedside_lamp
+    prefab: {fileID: 7690795206919533386, guid: d76718f89234d7584a0c18360fc5505e, type: 3}
+  - key: props/book_desk_1
+    prefab: {fileID: 64212838955863535, guid: 2b5e3a817358dd68484ef91464382bfb, type: 3}
+  - key: props/book_desk_2
+    prefab: {fileID: 2867642536435158397, guid: 5b15015a31db050f3b8620f703a51ddb, type: 3}
+  - key: props/book_nightstand_1
+    prefab: {fileID: 3798131947983083689, guid: aa26a98ae36445cf1aec2b4d9d36799a, type: 3}
+  - key: props/book_nightstand_2
+    prefab: {fileID: 6189898852471162334, guid: 7d260ca150b00d5618e39ad7c8f7af21, type: 3}
+  - key: props/book_stack_floor
+    prefab: {fileID: 3417230324671198088, guid: f372d4e87d3d1930fafa6206695d2940, type: 3}
+  - key: props/bunny_figurine
+    prefab: {fileID: 3859105698464530723, guid: 1fbf1e923dba1790c8cba0c66c29a840, type: 3}
+  - key: props/cactus_bookshelf
+    prefab: {fileID: 3561722499007792291, guid: 92f875d35df06d22bb9e16096f8ce0f2, type: 3}
+  - key: props/cactus_trinket_shelf
+    prefab: {fileID: 2250596764631417485, guid: 1d79d2b182d4c30358dcce073937a5ce, type: 3}
+  - key: props/cactus_windowsill
+    prefab: {fileID: 4701825460861357362, guid: 2b6cdc1f850f2c2daa6f73ef2520d679, type: 3}
+  - key: props/candle
+    prefab: {fileID: 5484028114717921210, guid: 7178c2fecba606a79aff271e839b3947, type: 3}
+  - key: props/cat_figurine
+    prefab: {fileID: 6743601183779165532, guid: f590fb8602d0b65bea068974e98227de, type: 3}
+  - key: props/desk_lamp
+    prefab: {fileID: 820608796604580545, guid: 676e7d2b190019d77890ed20081246ce, type: 3}
+  - key: props/desk_mat
+    prefab: {fileID: 3500279134715999220, guid: e0c1c121c8e81f0c7b4084da16011abd, type: 3}
+  - key: props/dried_flowers
+    prefab: {fileID: 6608037421417760267, guid: f73ef80268467c28090c8028c30b71c3, type: 3}
+  - key: props/ficus
+    prefab: {fileID: 8214350515509357226, guid: b8e46d138c84fb390936dacb6446e7e6, type: 3}
+  - key: props/floor_cushion
+    prefab: {fileID: 6542107054721527872, guid: fed9f37d1f0784fec83b973146ded89d, type: 3}
+  - key: props/jewelry_box
+    prefab: {fileID: 2429465523697628356, guid: 97250dee22f9a46f49da34faabd512ab, type: 3}
+  - key: props/keyboard
+    prefab: {fileID: 4415762602532134228, guid: b8018beff9503b4d9a6c0107534ea015, type: 3}
+  - key: props/laundry_basket
+    prefab: {fileID: 3937212295611125530, guid: 3a2d47ea39cf97702b0246653ebd9551, type: 3}
+  - key: props/moon_lamp
+    prefab: {fileID: 4859463726459060126, guid: 2ee50b318d0fef540a1affd587143168, type: 3}
+  - key: props/mouse
+    prefab: {fileID: 6025866166880409723, guid: 1858c5034fb147ca4bd57b6e843352da, type: 3}
+  - key: props/mug
+    prefab: {fileID: 6399322698800713289, guid: ed55aab75fd142ab3b327c01a15c02b2, type: 3}
+  - key: props/notebook
+    prefab: {fileID: 4869209508467259309, guid: 5720368d0c7dfc4d98e8339037d2fa56, type: 3}
+  - key: props/open_book
+    prefab: {fileID: 1158741859357657127, guid: 94a83bb12bab60f409915eebe6d03202, type: 3}
+  - key: props/paper_ball
+    prefab: {fileID: 2884013869493213850, guid: 17e29050da132839898f9f2aabad56a1, type: 3}
+  - key: props/pen
+    prefab: {fileID: 1845248262688209788, guid: 2b8f6f43cc6fb182e900431eb1223581, type: 3}
+  - key: props/pen_cup
+    prefab: {fileID: 2893900433679958503, guid: f1dbb52a8137005e983b4d59f4009043, type: 3}
+  - key: props/perfume_bottle
+    prefab: {fileID: 1847226884196245009, guid: ab41411813ca3cb68bb42e0537d88840, type: 3}
+  - key: props/photo_frame_bookshelf
+    prefab: {fileID: 2911241670669994486, guid: 5e1c076e007efaaccb1ecc52f9c17fde, type: 3}
+  - key: props/photo_frame_trinket_shelf
+    prefab: {fileID: 8532813457780746391, guid: 97434439ec3912c728e8edad45b0f510, type: 3}
+  - key: props/plushie
+    prefab: {fileID: 7591611751532563538, guid: 593a089f9791ade3899a881c8cc8284b, type: 3}
+  - key: props/pothos
+    prefab: {fileID: 7007331229742554040, guid: d82cecaee28f9cf4682290917eb82154, type: 3}
+  - key: props/scarf
+    prefab: {fileID: 3247629151748633125, guid: 64cd2a80016211a81b892ba9b09e701d, type: 3}
+  - key: props/shelf_basket_1
+    prefab: {fileID: 5855956002818531796, guid: 3c85346a80cf6467eb8979f5db14fbb5, type: 3}
+  - key: props/shelf_basket_2
+    prefab: {fileID: 3850216493299712197, guid: 85bb7b4586ccb76c8aa8f972a58e2bda, type: 3}
+  - key: props/slippers
+    prefab: {fileID: 3135977071532760270, guid: 64c042140faefe7b6812047a11c7c206, type: 3}
+  - key: props/snake_plant
+    prefab: {fileID: 5439933462840119130, guid: 0e7c6794bc5780238a5860a6c97fc9a5, type: 3}
+  - key: props/speaker
+    prefab: {fileID: 5685426322053598253, guid: 07b26909c67d6c6338b9595c7e3af4b0, type: 3}
+  - key: props/star_lamp
+    prefab: {fileID: 8371063225730001702, guid: 920e2bc9cb8e5d9609ceea020c2407a9, type: 3}
+  - key: props/storage_box_bookshelf
+    prefab: {fileID: 1042696921377443316, guid: a7233b3631dd10b8ca2956040d79e188, type: 3}
+  - key: props/succulent_desk
+    prefab: {fileID: 6778588052780719704, guid: d4c6a036fa14c53dfa9b19f17e4922f8, type: 3}
+  - key: props/succulent_windowsill
+    prefab: {fileID: 5362629424523301653, guid: 87d4e5bc92a73094e9d9a7af80d07bdf, type: 3}
+  - key: props/tote_bag
+    prefab: {fileID: 3559882434871699497, guid: faaefdc888268d9e5bcbd3e958b79e86, type: 3}
+  - key: props/vase_bookshelf
+    prefab: {fileID: 2213184009471435092, guid: 71ac088366b7cb729be9bbf78e74d034, type: 3}
+  - key: props/wardrobe_box_a
+    prefab: {fileID: 1768676522781315588, guid: 27233e8f33bc0fec8990b2f719d446c6, type: 3}
+  - key: props/wardrobe_box_b
+    prefab: {fileID: 6905365074789950019, guid: 0126010d763c02c1ea138fb9a6bedd68, type: 3}
+  - key: props/waste_bin
+    prefab: {fileID: 4431396906709699632, guid: a31e9844d682847dca681254d1964355, type: 3}

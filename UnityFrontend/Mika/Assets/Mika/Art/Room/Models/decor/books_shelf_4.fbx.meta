@@ -3,7 +3,67 @@ guid: d6eb496cf02f32d73ba12ed780e24d3d
 ModelImporter:
   serializedVersion: 24600
   internalIDToNameTable: []
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book00
+    second: {fileID: 2100000, guid: 7179c5c8252414f7c97437c59854715d, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book01
+    second: {fileID: 2100000, guid: df71d2c6b6212d603ab7316f12c4200b, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book02
+    second: {fileID: 2100000, guid: 83e277d3d89653e4cb1c096de33ac7ee, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book03
+    second: {fileID: 2100000, guid: 7603ba3dd3e5cb56fb0c4a1b5f1f8ba5, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book04
+    second: {fileID: 2100000, guid: b586d6255821a7ade8be0bd8738f886f, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book05
+    second: {fileID: 2100000, guid: ee04e8b08c5710b11b0ece36891534b0, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book06
+    second: {fileID: 2100000, guid: f06f5adb97d2a83c39df509c6bd90fb0, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book07
+    second: {fileID: 2100000, guid: 3f0ef6bfc6134d62aafe1a6a33857201, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book08
+    second: {fileID: 2100000, guid: 82177b04114f22cc395fd4675c20bec9, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book09
+    second: {fileID: 2100000, guid: 42163adb6fa2b7981a21d7c2d5522ab2, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book10
+    second: {fileID: 2100000, guid: 5f6b6a0f9f47d4323ad16439dea9d62b, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: M_Book12
+    second: {fileID: 2100000, guid: 240dda1f1eab6d056aea9a134e9415b1, type: 2}
   materials:
     materialImportMode: 2
     materialName: 0
@@ -31,7 +91,7 @@ ModelImporter:
     extraExposedTransformPaths: []
     extraUserProperties: []
     clipAnimations: []
-    isReadable: 0
+    isReadable: 1
   meshes:
     lODScreenPercentages: []
     globalScale: 1
@@ -44,12 +104,12 @@ ModelImporter:
     importPhysicalCameras: 1
     importVisibility: 1
     importBlendShapes: 1
-    importCameras: 1
-    importLights: 1
+    importCameras: 0
+    importLights: 0
     nodeNameCollisionStrategy: 1
     fileIdsGeneration: 2
     swapUVChannels: 0
-    generateSecondaryUV: 0
+    generateSecondaryUV: 1
     useFileUnits: 1
     keepQuads: 0
     weldVertices: 1
@@ -85,7 +145,7 @@ ModelImporter:
     normalSmoothingSource: 0
     calculateBlendshapeNormalsDeltaFromImportedNormals: 0
   referencedClips: []
-  importAnimation: 1
+  importAnimation: 0
   humanDescription:
     serializedVersion: 3
     human: []
@@ -104,7 +164,7 @@ ModelImporter:
     skeletonHasParents: 1
   lastHumanDescriptionAvatarSource: {instanceID: 0}
   autoGenerateAvatarMappingIfUnspecified: 1
-  animationType: 2
+  animationType: 0
   humanoidOversampling: 1
   avatarSetup: 0
   addHumanoidExtraRootOnlyWhenUsingAvatar: 1

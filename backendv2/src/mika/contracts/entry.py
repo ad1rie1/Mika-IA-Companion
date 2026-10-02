@@ -12,8 +12,10 @@ from collections.abc import Awaitable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from mika.contracts import world as w
 from mika.contracts.presence import Connected
 from mika.contracts.runtime import PerceptionReceived
+from mika.kernel.events import Event
 from mika.kernel.frame import Frame
 
 
@@ -76,4 +78,24 @@ class MindPort(Protocol):
                              seen: str = "") -> str:
         """Approuver ou refuser un effet externe proposé : ``"approved"``,
         ``"rejected"``, ``"unknown"`` (rien en attente sous ce numéro)."""
+        ...
+
+    # ── le monde (ADR 0050, 0051) ──
+    def world_view(self) -> tuple[w.WorldDef, w.WorldState]:
+        """La définition en vigueur et l'état vécu, lus sur la même racine (``WorldState.seq`` : le dernier
+        événement qui a changé le monde)."""
+        ...
+
+    async def world_command(self, command: w.Command, *, actor: str, handle: str | None, operator: bool,
+                            session: str | None = None) -> w.CommandResult:
+        """Ce que le noyau fait d'une commande d'un client du monde, pour l'acteur qu'il incarne : validée par la
+        faculté ``world``, journalisée si elle est acceptée. ``session`` : la connexion qui l'envoie (sa clé de
+        dédoublonnage au journal, ``<session>:<cmd>``)."""
+        ...
+
+    def world_events(self, after: int, *, limit: int) -> list[Event[Any]] | None:
+        """Ce qui a changé ce que montrent les écrans du monde après ``after``, jusqu'à la tête publiée : les
+        événements que le monde réduit (les siens et ceux d'autres facultés, comme l'endormissement) et ceux
+        qu'il diffuse sans les réduire (gestes, présences) — jamais ce qu'elle remarque ni la prose. ``None`` :
+        plus de ``limit`` (le client recevra un instantané)."""
         ...

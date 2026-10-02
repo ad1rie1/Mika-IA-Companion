@@ -52,6 +52,12 @@ namespace Mika.World.Model
         /// <summary>Vrai dès qu'une définition et un état complet ont été reçus.</summary>
         public bool Ready => World != null && Seq >= 0;
 
+        /// <summary>
+        /// Vrai quand ce qui est montré ne vient pas du noyau (aperçu hors ligne d'un monde lu sur disque) : à la
+        /// connexion, on redemande tout plutôt que de se croire à jour.
+        /// </summary>
+        public bool Provisional { get; set; }
+
         public IReadOnlyDictionary<string, ActorState> Actors => _actors;
         public IReadOnlyDictionary<string, ObjectState> Objects => _objects;
         public IReadOnlyDictionary<string, Intent> Intents => _intents;
@@ -192,6 +198,7 @@ namespace Mika.World.Model
             foreach (var gone in _visitors.Keys.Where(k => !_actors.ContainsKey(k)).ToList())
                 _visitors.Remove(gone);
             Seq = state.Seq;
+            Provisional = false;
             StateReset?.Invoke();
         }
 

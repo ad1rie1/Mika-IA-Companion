@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 736c6f4baece5352a99a0d61486a7a64, type: 3}
+  m_Name: shelves
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.ArchetypeAsset
+  id: shelves
+  label: "biblioth\xE8que"
+  assetKey: furniture/bookshelf
+  prefab: {fileID: 6731258210211870218, guid: e9de2e9df48ab811fb4a3b676124b244, type: 3}
+  size: 2
+  states: []
+  initialState: 
+  stateLabels: []
+  affordances:
+  - id: bouquiner
+    label: feuilleter un livre
+    effect: 1
+    toState: 
+    requiresState: []
+    activity: browse_books
+    held: 0
+    durationS: 300
+    untilInterrupted: 0
+    overrideAccess: 0
+    access: 0
+    noise: 0
+    animation: 
+  surfaceSlots: 12
+  containerSlots: 0
+  salience: 0.6
+  tags: []

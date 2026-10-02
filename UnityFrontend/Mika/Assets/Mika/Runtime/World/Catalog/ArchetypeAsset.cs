@@ -43,9 +43,9 @@ namespace Mika.World.Engine
             RequiresState = requiresState?.Where(s => !string.IsNullOrWhiteSpace(s)).ToList() ?? new List<string>(),
             Activity = effect == Effect.Activity ? NullIfEmpty(activity) : null,
             Held = held,
-            DurationS = untilInterrupted ? (double?)null : durationS,
+            DurationS = untilInterrupted ? (double?)null : Round(durationS),
             Access = overrideAccess ? access : (Access?)null,
-            Noise = noise,
+            Noise = Round(noise),
             Animation = NullIfEmpty(animation),
         };
 
@@ -67,6 +67,9 @@ namespace Mika.World.Engine
         };
 
         internal static string NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        /// <summary>Un réglage d'inspecteur (float) tel qu'on l'a tapé : 0.7, pas 0.699999988.</summary>
+        internal static double Round(float v) => Math.Round((double)v, 4);
     }
 
     [Serializable]
@@ -115,7 +118,7 @@ namespace Mika.World.Engine
             Affordances = affordances?.Select(a => a.ToDef()).ToList() ?? new List<Affordance>(),
             SurfaceSlots = surfaceSlots,
             ContainerSlots = containerSlots,
-            Salience = salience,
+            Salience = AffordanceSpec.Round(salience),
             Tags = tags?.ToList() ?? new List<string>(),
         };
 

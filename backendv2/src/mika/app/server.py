@@ -3,7 +3,9 @@ l'adaptateur web par-dessus, un seul processus.
 
 ``python -m mika serve --port 8001`` puis, dans ``frontend/`` : ``npm run dev``.
 Derrière un mandataire TLS : ``--origin https://mika.example --cookie-secure
---behind-proxy`` (voir ``deploy/README.md``).
+--behind-proxy`` (voir ``deploy/README.md``). Un moteur de jeu se connecte au monde
+sur ``/ws/world`` (ADR 0051) avec un jeton de son compte : ``python -m mika token
+create <compte> --label "Unity"``.
 
 Les journaux ne portent jamais un secret : le jeton du robot Telegram (dans
 l'URL de chaque relève), un jeton passé en paramètre d'URL (un flux), un
@@ -47,6 +49,7 @@ from mika.adapters.web.accounts import Accounts
 from mika.adapters.web.app import DEV_ORIGINS, WebConfig, create_app
 from mika.adapters.web.hub import Hub
 from mika.adapters.workshop import BwrapWorkshop
+from mika.adapters.world.server import WorldHub
 from mika.app import backup, composition, datadir, reglages
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.delivery import Router
@@ -184,6 +187,8 @@ class Live:
     data: Path | None = None
     #: fabrique du robot (un faux en test) : ``(jeton, fabrique du canal) -> Poller``
     make_poller: Callable[..., Any] = Poller
+    #: les clients du monde (``/ws/world``, ADR 0051) : moteurs de jeu et écrans
+    world: WorldHub | None = None
     #: off | starting | running | retrying | closed | invalid
     telegram_status: str = "off"
     telegram_attempts: int = 0
@@ -336,6 +341,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     """L'application et ce qu'elle fait vivre. Tout est construit ici ; le
     cycle de vie ouvre, démarre et arrête."""
     data.mkdir(parents=True, exist_ok=True)
+    web = web or WebConfig()
     store = SqliteStore(data / "mind.db", data / "views.db", threaded=True)
     clock = RealClock()
     fixed = gateway is not None
@@ -357,6 +363,16 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     hub.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, router, fixed, calls=CallLog(store),
                 persona_file=persona, data=data)
+    # le monde (ADR 0051) : chaque lot commité qui change ce que montrent ses écrans leur part, traduit en trames
+    world_hub = live.world = WorldHub(port, live.accounts, origins=web.origins, auth_required=web.auth_required)
+
+    def publish_world(events: Sequence[Any], root: Any) -> None:
+        if world_hub.listening:
+            update = port.world_update(events, root)
+            if update is not None:
+                world_hub.publish(*update)
+
+    kernel.mind.subscribe(publish_world)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
@@ -377,6 +393,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         for problem in problems:
             log.warning("configuration des modèles : %s", problem)
         hub.start()
+        world_hub.start()
         try:
             await live.start_telegram()
         except Exception as exc:  # noqa: BLE001 — un robot mal configuré n'empêche pas le reste de vivre
@@ -385,6 +402,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         try:
             yield
         finally:
+            await world_hub.stop()
             await live.stop_telegram()
             await hub.stop()
             await gateway.aclose()
@@ -404,13 +422,13 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                      parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
                                      faculty_labels=FACULTY_LABELS, labels=LABELS,
                                      backups=lambda: backup.overview(data)),
-                       cookie_secure=(web.cookie_secure if web else False))
+                       cookie_secure=web.cookie_secure)
     preprocess = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     live.preprocess = preprocess
     relay = Mount(RELAY_PREFIX, app=live.relay.app)
     console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token))
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
-                      extra_routes=[*inspector, relay, console_mcp],
+                      extra_routes=[*inspector, relay, console_mcp, world_hub.route()],
                       preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token,
                       health_extra=live.channel_health), live
 

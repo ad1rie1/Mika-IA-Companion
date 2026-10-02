@@ -1,0 +1,61 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 736c6f4baece5352a99a0d61486a7a64, type: 3}
+  m_Name: candle
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.ArchetypeAsset
+  id: candle
+  label: bougie
+  assetKey: props/candle
+  prefab: {fileID: 5484028114717921210, guid: 7178c2fecba606a79aff271e839b3947, type: 3}
+  size: 0
+  states:
+  - lit
+  - out
+  initialState: lit
+  stateLabels:
+  - state: lit
+    label: "allum\xE9e"
+  - state: out
+    label: "\xE9teinte"
+  affordances:
+  - id: allumer
+    label: allumer
+    effect: 0
+    toState: lit
+    requiresState:
+    - out
+    activity: 
+    held: 0
+    durationS: 1.5
+    untilInterrupted: 0
+    overrideAccess: 0
+    access: 0
+    noise: 0
+    animation: 
+  - id: souffler
+    label: souffler
+    effect: 0
+    toState: out
+    requiresState:
+    - lit
+    activity: 
+    held: 0
+    durationS: 1
+    untilInterrupted: 0
+    overrideAccess: 0
+    access: 0
+    noise: 0
+    animation: 
+  surfaceSlots: 0
+  containerSlots: 0
+  salience: 0.35
+  tags: []

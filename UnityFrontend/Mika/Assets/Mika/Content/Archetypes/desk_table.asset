@@ -1,0 +1,53 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 736c6f4baece5352a99a0d61486a7a64, type: 3}
+  m_Name: desk_table
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.ArchetypeAsset
+  id: desk_table
+  label: bureau
+  assetKey: furniture/desk
+  prefab: {fileID: 5712565485049873531, guid: 329c5a2a6561d1fed998c5ffb530ccb7, type: 3}
+  size: 2
+  states: []
+  initialState: 
+  stateLabels: []
+  affordances:
+  - id: travailler
+    label: travailler
+    effect: 1
+    toState: 
+    requiresState: []
+    activity: work
+    held: 0
+    durationS: 0
+    untilInterrupted: 1
+    overrideAccess: 0
+    access: 0
+    noise: 0
+    animation: 
+  - id: dessiner
+    label: dessiner
+    effect: 1
+    toState: 
+    requiresState: []
+    activity: draw
+    held: 0
+    durationS: 0
+    untilInterrupted: 1
+    overrideAccess: 0
+    access: 0
+    noise: 0
+    animation: 
+  surfaceSlots: 8
+  containerSlots: 0
+  salience: 0.7
+  tags: []

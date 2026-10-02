@@ -1,0 +1,24 @@
+{
+    "name": "Mika.Avatar.Editor",
+    "rootNamespace": "Mika.Avatar.Editor",
+    "references": [
+        "Mika.Avatar",
+        "VRM10",
+        "VRM10.Editor",
+        "UniGLTF",
+        "UniGLTF.Editor",
+        "UniGLTF.Utils",
+        "UniHumanoid"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

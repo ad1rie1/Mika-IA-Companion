@@ -24,14 +24,19 @@ namespace Mika.World.Engine
         WorldSession _session;
         readonly Dictionary<WorldObject, float> _restingSince = new Dictionary<WorldObject, float>();
         long _loadedRev = -1;
+        bool _builtHooked;
 
         public bool Active => _session != null && _session.IsHost;
 
         public void Bind(WorldSession session, WorldStage worldStage)
         {
             _session = session;
-            stage = worldStage;
-            stage.Built += _ => _loadedRev = -1;
+            if (stage != worldStage || !_builtHooked)
+            {
+                stage = worldStage;
+                stage.Built += _ => _loadedRev = -1;
+                _builtHooked = true;
+            }
             session.HostChanged += host =>
             {
                 if (host) _loadedRev = -1;

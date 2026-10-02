@@ -31,6 +31,8 @@ namespace Mika.World.Engine
         public Transform dynamicRoot;
         [Tooltip("L'acteur piloté localement (la joueuse de ce poste) : la scène ne le replace pas.")]
         public string localActor;
+        [Tooltip("Où la joueuse de ce poste tient ce qu'elle a pris (devant la caméra).")]
+        public Transform localHand;
 
         readonly Dictionary<string, RoomView> _rooms = new Dictionary<string, RoomView>();
         readonly Dictionary<string, PlaceView> _places = new Dictionary<string, PlaceView>();
@@ -276,6 +278,13 @@ namespace Mika.World.Engine
 
         void ApplyActor(ActorState state, bool instant)
         {
+            if (state.Id == localActor)
+            {
+                // La joueuse de ce poste a son propre corps (son contrôleur) : pas de double.
+                if (_actors.TryGetValue(state.Id, out var twin) && twin != null) Destroy(twin.gameObject);
+                _actors.Remove(state.Id);
+                return;
+            }
             ActorBody body;
             if (_mirror.World.Actor(state.Id) is { } def)
                 body = EnsureActor(state.Id, def.Asset, def.Label);
@@ -285,7 +294,6 @@ namespace Mika.World.Engine
                 body = EnsureActor(state.Id, visitor?.Asset ?? "avatars/default", visitor?.Label);
             }
             body.SetActivity(state.Activity?.Name);
-            if (state.Id == localActor) return; // la joueuse de ce poste se déplace elle-même
             var player = body.GetComponent<IntentPlayer>();
             if (player != null && player.Current != null && !instant) return; // l'action en cours amène le corps
             var place = Place(state.Place);
@@ -333,14 +341,30 @@ namespace Mika.World.Engine
             foreach (var body in _actors.Values)
                 if (!(location is Held h && body.actorId == h.Actor) && body.IsHolding(view))
                     body.Release(view);
+            if (localHand != null && view.transform.parent == localHand && !(location is Held lh && lh.Actor == localActor))
+                view.transform.SetParent(dynamicRoot, true);
             switch (location)
             {
+                case Held held when held.Actor == localActor && localHand != null:
+                {
+                    view.SetPhysics(ObjectPhysics.Held);
+                    view.SetVisible(true);
+                    view.transform.SetParent(localHand, false);
+                    view.transform.localRotation = Quaternion.identity;
+                    view.transform.position += localHand.position - view.GripPoint;
+                    break;
+                }
                 case Held held:
                 {
                     var body = Actor(held.Actor);
                     if (body != null && !body.IsHolding(view)) body.Hold(view, held.Hand);
                     break;
                 }
+                case On on when instant && IsAuthoredHome(view, location):
+                    // À sa place d'origine : tel que la scène le pose (une pile de livres reste une pile).
+                    view.SetVisible(true);
+                    view.SetPhysics(fixedObject ? ObjectPhysics.Fixed : ObjectPhysics.Placed);
+                    break;
                 case On on:
                 {
                     view.SetVisible(true);
@@ -394,6 +418,14 @@ namespace Mika.World.Engine
                     break;
                 }
             }
+        }
+
+        /// <summary>L'objet vient de la scène et le monde le dit à son emplacement de départ.</summary>
+        bool IsAuthoredHome(WorldObject view, Location location)
+        {
+            if (view.GetComponent<ObjectAuthoring>() == null) return false;
+            var home = _mirror?.World?.Object(view.id)?.Home;
+            return home != null && WireJson.Write(home) == WireJson.Write(location);
         }
 
         void DropNear(WorldObject view, InRoom where, bool settle)

@@ -6,7 +6,10 @@ soumission (cookie ``csrftoken`` lisible, en-tête ``X-CSRFToken``) sur tout
 POST — et sur la déconnexion, quelle que soit sa méthode ; session opaque en
 cookie ``HttpOnly`` ; WebSocket refusé à une origine inconnue, et accepté
 **puis** fermé en 4401 sans session quand l'authentification est exigée (c'est
-ce que le client sait lire) — et dès que sa session est révoquée.
+ce que le client sait lire) — et dès que sa session est révoquée. Un client
+natif (un moteur de jeu, ADR 0051) n'a ni cookie ni ``Origin`` : il présente un
+jeton de son compte (``Authorization: Bearer mw_…``), accepté **seulement sans**
+``Origin`` (un navigateur ne peut pas poser cet en-tête sur un WebSocket).
 
 Connexion : un seul scrypt par essai, compte connu ou non, et hors de la
 boucle ; étranglement par adresse IP **et** par (IP, nom), mémoire purgée.
@@ -40,7 +43,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mika.adapters.web import protocol
-from mika.adapters.web.accounts import Account, Accounts, password_problems
+from mika.adapters.web.accounts import TOKEN_KEY, Account, Accounts, password_problems
 from mika.adapters.web.hub import WS_UNAUTHORIZED, Conn, Hub
 from mika.contracts.entry import MindPort
 from mika.contracts.presence import Connected
@@ -116,6 +119,12 @@ class LoginThrottle:
         return len(self._fails)
 
 
+def bearer(header: str | None) -> str:
+    """Le jeton d'un en-tête ``Authorization: Bearer …`` (vide sans en-tête, ou pour un autre schéma)."""
+    scheme, _, value = (header or "").strip().partition(" ")
+    return value.strip() if scheme.lower() == "bearer" else ""
+
+
 def _whoami(account: Account | None, cfg: WebConfig, accounts: Accounts) -> dict[str, Any]:
     if account is None:
         return {"authenticated": False, "auth_required": cfg.auth_required, "needs_bootstrap": accounts.count() == 0}
@@ -134,6 +143,7 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
     by_name = LoginThrottle(cfg.login_failures, cfg.login_window_s)
     by_ip = LoginThrottle(cfg.login_ip_failures, cfg.login_window_s)
     accounts.on_revoke.append(lambda account_id: hub.revoke(account=account_id))
+    accounts.on_token_revoke.append(lambda token_id: hub.revoke(session=f"{TOKEN_KEY}{token_id}"))
 
     def account_of(request: Request) -> Account | None:
         return accounts.session(request.cookies.get(SESSION_COOKIE))
@@ -295,6 +305,19 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
 
     async def ws(websocket: WebSocket) -> None:
         origin = websocket.headers.get("origin")
+        token = bearer(websocket.headers.get("authorization"))
+        if origin is None and token:
+            # un client natif (ADR 0051) : pas d'Origin, un jeton de son compte. Un navigateur ne peut pas poser
+            # cet en-tête sur un WebSocket : avec une Origin, seule la session compte.
+            await websocket.accept()
+            found = await accounts.use_token(token)
+            if found is None:
+                await websocket.close(code=WS_UNAUTHORIZED)
+                return
+            native, token_id = found
+            await _Session(websocket, port, hub, native, preprocess, accounts=accounts,
+                           session_key=f"{TOKEN_KEY}{token_id}").run()
+            return
         if not origin or origin not in cfg.origins:
             await websocket.close(code=1008)
             return
@@ -493,10 +516,10 @@ class _Session:
 
     def _session_valid(self) -> bool:
         """Revérifiée à chaque message : une session effacée ailleurs (un autre processus,
-        une expiration) ne parle plus."""
+        une expiration) ou un jeton révoqué (``mika token revoke``) ne parle plus."""
         if self.session_key is None or self.accounts is None:
             return True
-        return self.accounts.session(self.session_key) is not None
+        return self.accounts.credential(self.session_key) is not None
 
     async def chat(self, frame: dict[str, Any]) -> None:
         c = self.conn

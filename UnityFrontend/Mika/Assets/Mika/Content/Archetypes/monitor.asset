@@ -1,0 +1,61 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 736c6f4baece5352a99a0d61486a7a64, type: 3}
+  m_Name: monitor
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.ArchetypeAsset
+  id: monitor
+  label: "\xE9cran"
+  assetKey: fixtures/monitor
+  prefab: {fileID: 2112936541039695156, guid: 08ee9547219e75f8fb350ff126b8f1cc, type: 3}
+  size: 2
+  states:
+  - off
+  - on
+  initialState: on
+  stateLabels:
+  - state: on
+    label: "allum\xE9"
+  - state: off
+    label: "\xE9teint"
+  affordances:
+  - id: allumer
+    label: allumer
+    effect: 0
+    toState: on
+    requiresState:
+    - off
+    activity: 
+    held: 0
+    durationS: 1.2
+    untilInterrupted: 0
+    overrideAccess: 0
+    access: 0
+    noise: 0
+    animation: 
+  - id: eteindre
+    label: "\xE9teindre"
+    effect: 0
+    toState: off
+    requiresState:
+    - on
+    activity: 
+    held: 0
+    durationS: 1.2
+    untilInterrupted: 0
+    overrideAccess: 0
+    access: 0
+    noise: 0
+    animation: 
+  surfaceSlots: 0
+  containerSlots: 0
+  salience: 0.4
+  tags: []

@@ -1,0 +1,61 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 736c6f4baece5352a99a0d61486a7a64, type: 3}
+  m_Name: curtains
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.ArchetypeAsset
+  id: curtains
+  label: rideaux
+  assetKey: fixtures/curtains
+  prefab: {fileID: 3834214865375605537, guid: 765fe47f2d12f12a9b571d5b7780e28c, type: 3}
+  size: 2
+  states:
+  - open
+  - closed
+  initialState: open
+  stateLabels:
+  - state: open
+    label: ouverts
+  - state: closed
+    label: "tir\xE9s"
+  affordances:
+  - id: tirer
+    label: tirer les rideaux
+    effect: 0
+    toState: closed
+    requiresState:
+    - open
+    activity: 
+    held: 0
+    durationS: 2
+    untilInterrupted: 0
+    overrideAccess: 0
+    access: 0
+    noise: 0
+    animation: 
+  - id: ouvrir
+    label: ouvrir les rideaux
+    effect: 0
+    toState: open
+    requiresState:
+    - closed
+    activity: 
+    held: 0
+    durationS: 2
+    untilInterrupted: 0
+    overrideAccess: 0
+    access: 0
+    noise: 0
+    animation: 
+  surfaceSlots: 0
+  containerSlots: 0
+  salience: 0.3
+  tags: []

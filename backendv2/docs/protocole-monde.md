@@ -50,7 +50,8 @@ test le dise.
 6. **Tout est validé par les mêmes règles**, qu'il vienne de Mika, d'une joueuse, de l'hôte ou du créateur ;
    un refus a un code (§ 9) et une phrase en français.
 7. **L'ordre est celui du journal.** Chaque trame diffusée porte son `seq` ; un client applique dans l'ordre
-   et redemande ce qui manque (`sync`).
+   et redemande ce qui manque (`sync`). Les `seq` sont ceux du journal de sa vie entière : **croissants, pas
+   contigus** — un écart n'est pas une perte (§ 5, « Rattraper »).
 8. **Le monde existe sans spectateur.** Sans moteur hôte, une action se termine comme prévue à son échéance
    (`deadline`). Le premier client qui arrive reçoit l'état tel qu'il est, et le pose sans le rejouer.
 9. **Ce qui est continu ne compte pas.** La pose d'un avatar (`pose`, 20 par seconde) est relayée aux autres
@@ -131,8 +132,18 @@ client de calculer son décalage).
 ## 5. Se connecter
 
 WebSocket sur **`/ws/world`**, trames JSON texte. Un navigateur s'authentifie par sa session (et l'en-tête
-`Origin` est vérifié) ; un client natif par un **jeton** de son compte dans `hello.token` (pas d'`Origin` :
-sans jeton, refusé).
+`Origin` est vérifié) ; un client natif par un **jeton** de son compte dans `hello.token` ou l'en-tête
+`Authorization: Bearer …` (pas d'`Origin` : sans jeton, refusé ; avec une `Origin`, seule la session compte et
+un jeton est refusé). Le jeton se crée sur le serveur, il n'est montré qu'une fois :
+
+```bash
+python -m mika token create adrien --label "Unity, PC du salon"   # {"token": "mw_…", "person_id": "user_1", …}
+python -m mika token list            # jamais le secret : à qui, à quoi il sert, son dernier usage
+python -m mika token revoke 1        # il ne vaut plus rien ; ses connexions se ferment (4401)
+```
+
+Un jeton parle sous l'adresse de son compte (`user_1`, l'acteur `player:user_1`) : l'identité reste
+authentifiée, comme depuis le navigateur. Le même jeton ouvre `/ws` (la conversation), aux mêmes conditions.
 
 ```json client
 {"type": "hello", "protocol": "mika.world/1", "roles": ["viewer", "host"],
@@ -149,9 +160,11 @@ répond :
 ```
 
 puis, dans cet ordre : `definition` si le client n'a pas la révision `rev` (la définition entière) ;
-`snapshot` si `after` est absent ou trop loin, sinon les trames manquées depuis `after` ; `host` si le client
-a demandé le rôle d'hôte ; enfin `presence` de la personne qui vient d'entrer (son corps apparaît au lieu
-`spawn` de la pièce où Mika se trouve, ou à défaut au premier lieu `spawn`).
+`snapshot` si `after` est absent ou trop loin (ou si la définition vient de partir : une autre révision, c'est
+un autre état), sinon les trames manquées depuis `after` ; `host` si le client a demandé le rôle d'hôte ; enfin
+`presence` de la personne qui vient d'entrer (son corps apparaît au lieu `spawn` de la pièce où Mika se trouve,
+ou à défaut au premier lieu `spawn` — P4). `welcome.seq` est le dernier événement qui a changé le monde : un
+client à jour (`after` égal) ne reçoit rien de plus.
 
 **Les rôles.**
 
@@ -177,13 +190,37 @@ Sans hôte, le monde continue : chaque action se termine à son `deadline`.
 {"type": "pong", "t": 1790000128000000}
 ```
 
-**Rattraper.** Un client qui voit un trou dans les `seq` demande la suite :
+**Rattraper.** Les `seq` sont ceux du journal, qui porte toute sa vie (ses pensées, ses messages, ses nuits) :
+d'une trame du monde à la suivante, ils **sautent**, et un écart ne dit rien. Sur une connexion ouverte, rien ne
+se perd : un client trop lent est fermé (1013) plutôt que de sauter une trame. Un client qui revient (ou qui
+doute) dit où il en est, par `hello.after` ou :
 
 ```json client
 {"type": "sync", "after": 1544}
 ```
 
-Au-delà de 500 trames de retard, il reçoit un `snapshot` à la place.
+Au-delà de 500 événements du monde de retard, il reçoit un `snapshot` à la place — et aussi quand l'état a
+changé sans action à rejouer entre-temps (elle s'est réveillée, une édition a déplacé ce qui n'avait plus sa
+place), ou quand `after` est inconnu de ce journal (une sauvegarde restaurée). Un rattrapage peut redonner une
+trame déjà en route : un client ignore ce dont le `seq` est déjà appliqué.
+
+**Ce que la connexion garantit** (ADR 0051) :
+
+- l'accusé d'abord : une commande acceptée reçoit son `result` (avec son `seq`), **puis** la trame qui l'applique ;
+- un `snapshot` peut arriver à tout moment, sans qu'on l'ait demandé : il remplace tout l'état (le noyau en
+  envoie un quand l'état change sans action à rejouer — le réveil au bord du lit, ce qu'une édition réconcilie) ;
+- le bail attend : un opérateur qui demande `host` alors qu'il est pris reçoit `host` `granted: false`, puis
+  `granted: true` dès que l'hôte le perd (silence, déconnexion) ; un hôte qui a perdu le bail le reprend par
+  son prochain `ping`, s'il est libre ;
+- pas encore : la `presence` de la personne qui entre, et son corps dans le monde (P4).
+
+**Les erreurs de protocole** (`error`) : `bad_frame` (trame illisible : la phrase nomme le champ, et le `cmd`
+s'il y en a un ; non fatale — fatale si ce n'est pas un objet JSON en texte, fermeture 1003), `hello_expected`
+(la première trame, dans les 10 s ; fermeture 1008), `unauthorized` (pas d'identifiant valable, ou il a été
+révoqué ; fermeture 4401, le client ne réessaie pas sans nouvel identifiant), `rate_limited` (un `sync` ou un
+`ping` en trop ; une commande en trop reçoit son `result`), `too_slow` (fermeture 1013 : revenir par
+`hello.after`), `shutdown` (le noyau s'arrête, fermeture 1001). Une `Origin` inconnue est refusée avant
+l'ouverture (1008).
 
 ## 6. Mika agit
 

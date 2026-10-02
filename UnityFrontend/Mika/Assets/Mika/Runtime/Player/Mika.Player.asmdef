@@ -1,0 +1,20 @@
+{
+    "name": "Mika.Player",
+    "rootNamespace": "Mika.Player",
+    "references": [
+        "Mika.World.Protocol",
+        "Mika.World.Model",
+        "Mika.Net",
+        "Mika.World.Engine",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": ["Newtonsoft.Json.dll"],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

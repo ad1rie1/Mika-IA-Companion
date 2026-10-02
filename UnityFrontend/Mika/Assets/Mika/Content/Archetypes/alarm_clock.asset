@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 736c6f4baece5352a99a0d61486a7a64, type: 3}
+  m_Name: alarm_clock
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.ArchetypeAsset
+  id: alarm_clock
+  label: "r\xE9veil"
+  assetKey: props/alarm_clock
+  prefab: {fileID: 5495297958898858218, guid: edbc395c7e50ae818b088baa01e65b33, type: 3}
+  size: 0
+  states: []
+  initialState: 
+  stateLabels: []
+  affordances: []
+  surfaceSlots: 0
+  containerSlots: 0
+  salience: 0.2
+  tags: []

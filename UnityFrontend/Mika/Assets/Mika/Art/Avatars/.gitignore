@@ -1,0 +1,4 @@
+# Le modèle (≈100 Mo) n'est pas versionné, comme sa source frontend/public/models/default.vrm : le menu
+# « Mika/Avatar/Importer l'avatar du frontend » le recopie ici et l'importe.
+# Son .meta, lui, est versionné : Mika.prefab, variante du modèle, dépend de son GUID.
+/default.vrm
