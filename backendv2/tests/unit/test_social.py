@@ -77,6 +77,43 @@ def test_closeness_follows_a_sliding_window_with_a_floor_of_history(days, messag
     assert lived(ct, 0.4, P, 0.0, now_day=ct.days[-1] + silent) == expected, why
 
 
+# (jours, messages, espacement, regard, attachement, attendu, pourquoi)
+BONDS = [
+    (7, 50, 5, -0.1, 0.25, "close", "un mois d'amitié à laquelle elle tient, dans une mauvaise passe : toujours proche"),
+    (7, 50, 5, -0.1, 0.05, "friend", "contrôle : sans attachement, la mauvaise passe la laisse amie"),
+    (10, 100, 1, 0.0, 0.3, "friend", "dix soirées d'affilée, même chaleureuses : on ne devient pas proche en dix jours"),
+    (11, 110, 3, 0.0, 0.3, "close", "les mêmes soirées sur un mois : proche, avant la longue histoire"),
+]
+
+
+@pytest.mark.parametrize("days,messages,step,regard,bond,expected,why", BONDS)
+def test_an_installed_attachment_makes_a_close_friend_after_a_month(days, messages, step, regard, bond, expected,
+                                                                      why):
+    """WP1 (ADR 0032) installe un attachement lent (``affect.bond``) ; la proximité le lit, sous le même plancher
+    d'histoire (un mois) que la chaleur du moment."""
+    ct = contact(days, messages, step)
+    assert lived(ct, regard, P, 0.0, bond=bond) == expected, why
+    # un réglage à zéro ne fait pas une proche de quelqu'un à qui elle ne tient pas du tout
+    assert lived(ct, regard, SocialParams(close_bond=0.0), 0.0, bond=0.0) == lived(ct, regard, P, 0.0)
+
+
+def test_a_retired_setting_still_replays():
+    """``social.ignored_shift`` n'a plus de lecteur (la retenue est celle d'``agency``) : un ancien
+    ``kernel.params_changed`` qui le porte se relit sans lui ; une clé inconnue reste une erreur."""
+    import json
+
+    from pydantic import ValidationError
+
+    from mika.faculties.social.faculty import SOCIAL
+    from mika.kernel.registry import _decode_params
+
+    old = json.dumps({"ignored_shift": -1.5, "grudge": 0.3})
+    assert _decode_params(SocialParams, old, SOCIAL.retired_params).grudge == 0.3
+    assert "ignored_shift" not in SocialParams.model_fields
+    with pytest.raises(ValidationError):
+        _decode_params(SocialParams, json.dumps({"ignored_shif": -1.5}), SOCIAL.retired_params)
+
+
 def test_the_rhythm_of_a_relationship_is_its_own():
     daily = Contact(days=tuple(range(100, 108)))
     every_three = Contact(days=(100, 103, 106, 109, 112))

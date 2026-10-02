@@ -22,6 +22,7 @@ ses événements font ressentir (ADR 0031).
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from typing import Annotated, Any
@@ -138,6 +139,11 @@ class ProjectsParams(BaseModel):
     share_attempts: Annotated[int, Knob(
         label="Tentatives de raconter", group="Raconter", lo=1, hi=10,
         help="Après autant de tentatives qui n'ont pas abouti, elle n'essaie plus.")] = 2
+    self_done_after_us: Annotated[int, Knob(
+        label="Clore ses projets finis après", group="Ses projets à elle", lo=HOUR, hi=60 * DAY,
+        help="Un projet à elle qui n'a plus aucun objectif ouvert depuis ce délai, elle le clôt d'elle-même (un "
+             "soulagement s'il en a fait quelque chose) : il ne reste pas « en cours » pour toujours. Un opérateur "
+             "peut le restaurer.")] = 3 * DAY
     run_programs_us: Annotated[int, Knob(
         label="Temps des programmes par exécution", group="Les exécutions", lo=MINUTE, hi=30 * MINUTE,
         help="Les programmes qu'elle lance pendant une exécution (ws_run) ont au plus ce temps à eux tous. À garder "
@@ -1030,7 +1036,10 @@ def _objective_closed(s: ProjectsState, e, cx) -> ProjectsState:
 
 
 def _effect_line(p: Project, line: str) -> Project:
-    return replace(p, effects=(*p.effects, line)[-EFFECTS_KEPT:])
+    """Où en est une demande (« #N … ») : sa ligne la plus récente remplace la précédente (proposée, puis faite)."""
+    key = line.split(" ", 1)[0]
+    kept = tuple(x for x in p.effects if x.split(" ", 1)[0] != key) if key.startswith("#") else p.effects
+    return replace(p, effects=(*kept, line)[-EFFECTS_KEPT:])
 
 
 @PROJECTS.reducer(rt.EFFECT_PROPOSED)
@@ -1098,17 +1107,20 @@ def _executed(s: ProjectsState, e, cx) -> ProjectsState:
     return _set(s, p)
 
 
+#: ce que l'atelier dit d'une commande finie (``RunResult.summary``) : « … — code 0 (12 ms) »
+_CODE = re.compile(r"— code (-?\d+) \(\d+ ms\)")
+
+
 def _code_of(result: str) -> str:
-    """Le code de sortie d'une commande, s'il se lit dans son résultat (« — code 0 »)."""
-    head = result.split("\n", 1)[0]
-    at = head.rfind("— code ")
-    if at >= 0:
-        code = head[at + len("— code "):].split(" ", 1)[0]
-        if code.lstrip("-").isdigit():
-            return f" (code {code})"
+    """Le code de sortie d'une commande, lu dans son résumé — avant ce qu'elle a écrit (``sortie :``,
+    ``erreurs :``), qu'une sortie ne puisse pas le contrefaire ; une commande peut tenir sur plusieurs lignes."""
+    head = re.split(r"\n(?:sortie|erreurs) :\n", result, maxsplit=1)[0]
+    codes = _CODE.findall(head)
+    if codes:
+        return f" (code {codes[-1]})"
     if "délai dépassé" in head:
         return " (délai dépassé)"
-    if head.startswith("Refusé") or head.startswith("refusé"):
+    if head.startswith(("Refusé", "refusé")):
         return " (refusé)"
     return ""
 

@@ -274,6 +274,16 @@ class BwrapWorkshop:
         if goal in self._sizes:
             self._sizes[goal] += n
 
+    async def _room(self, goal: int) -> None:
+        """Lève ``WorkshopFull`` si l'atelier dépasse sa taille. Sa taille se mesure une première fois (hors de la
+        boucle) au premier besoin : un atelier rempli fichier par fichier, sans jamais rien lancer, est borné lui
+        aussi ; ensuite, chaque écriture l'ajoute, et chaque exécution la remesure."""
+        if goal not in self._sizes and self.exists(goal):
+            loop = asyncio.get_running_loop()
+            self._sizes[goal] = await loop.run_in_executor(None, self._measure, self.folder(goal))
+        if why := self.full(goal):
+            raise WorkshopFull(why)
+
     async def tree(self, goal: int, path: str = ".") -> list[str]:
         """Les fichiers de l'atelier (ou d'un de ses dossiers), en largeur d'abord : ce que git suit et ce qui est
         nouveau sans être ignoré (ni ``.venv`` ni ``node_modules``), sinon un parcours borné. Chaque entrée est lue
@@ -356,8 +366,7 @@ class BwrapWorkshop:
 
     async def write(self, goal: int, path: str, content: str) -> str:
         target = self.path(goal, path, write=True)
-        if why := self.full(goal):
-            raise WorkshopFull(why)
+        await self._room(goal)
         await self._init(goal)  # l'amorce d'abord : le premier travail sera son propre commit
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(str(content), encoding="utf-8")
@@ -366,8 +375,7 @@ class BwrapWorkshop:
 
     async def write_bytes(self, goal: int, path: str, data: bytes) -> str:
         target = self.path(goal, path, write=True)
-        if why := self.full(goal):
-            raise WorkshopFull(why)
+        await self._room(goal)
         await self._init(goal)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(bytes(data))
@@ -387,8 +395,7 @@ class BwrapWorkshop:
         target = self.path(goal, path, write=True)
         if not target.is_file():
             raise FileNotFoundError(f"{path} n'existe pas dans l'atelier")
-        if why := self.full(goal):
-            raise WorkshopFull(why)
+        await self._room(goal)
         await self._init(goal)
         text = target.read_text(encoding="utf-8", errors="replace")
         n = text.count(old)

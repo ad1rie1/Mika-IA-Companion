@@ -21,11 +21,14 @@ V = TypeVar("V")
 
 
 class FrozenDict(Generic[K, V]):
-    __slots__ = ("_m",)
+    #: ``_keys`` : l'ordre trié, calculé à la première itération puis gardé (la valeur est immuable)
+    __slots__ = ("_m", "_keys")
 
     def __init__(self, data: Mapping[K, V] | Iterable[tuple[K, V]] | None = None) -> None:
+        self._keys: list[K] | None = None
         if isinstance(data, FrozenDict):
             self._m = data._m
+            self._keys = data._keys
         elif isinstance(data, immutables.Map):
             self._m = data
         else:
@@ -48,16 +51,25 @@ class FrozenDict(Generic[K, V]):
         return len(self._m) > 0
 
     def keys(self) -> list[K]:
-        return sorted(self._m.keys(), key=_sort_key)
+        if self._keys is None:
+            self._keys = sorted(self._m.keys(), key=_sort_key)
+        return list(self._keys)
 
     def __iter__(self) -> Iterator[K]:
-        return iter(self.keys())
+        return iter(self._sorted())
 
     def items(self) -> list[tuple[K, V]]:
-        return [(k, self._m[k]) for k in self.keys()]
+        m = self._m
+        return [(k, m[k]) for k in self._sorted()]
 
     def values(self) -> list[V]:
-        return [self._m[k] for k in self.keys()]
+        m = self._m
+        return [m[k] for k in self._sorted()]
+
+    def _sorted(self) -> list[K]:
+        if self._keys is None:
+            self._keys = sorted(self._m.keys(), key=_sort_key)
+        return self._keys
 
     # écriture (nouvelle valeur)
     def set(self, key: K, value: V) -> FrozenDict[K, V]:

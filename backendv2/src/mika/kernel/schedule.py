@@ -136,8 +136,36 @@ def next_after(rule: Rule, t: int, tz: ZoneInfo) -> int | None:
     if rule.kind == "interval":
         return t + rule.every_us
     if rule.kind == "cron":
-        # l'heure locale naïve, puis ré-attachée au fuseau : les changements
-        # d'heure donnent l'heure murale attendue
-        nxt = _next_cron(rule, local(t, tz).replace(tzinfo=None))
-        return instant(nxt.replace(tzinfo=tz)) if nxt is not None else None
+        return _next_cron_instant(rule, t, tz)
     return None
+
+
+#: le plus grand décalage d'un changement d'heure : au-delà, aucune heure murale ne revient
+_SHIFT = timedelta(hours=1)
+
+
+def _next_cron_instant(rule: Rule, t: int, tz: ZoneInfo) -> int | None:
+    """Le premier instant **strictement après** ``t`` dont l'heure murale (dans ``tz``) satisfait la règle.
+
+    On cherche en heure locale naïve, puis on ré-attache le fuseau : les changements d'heure donnent l'heure
+    murale attendue. À l'heure d'hiver, une heure murale existe deux fois (``fold`` 0 puis 1) : les deux
+    passages comptent, et la recherche commence une heure plus tôt pour ne pas sauter le second. Une heure
+    murale qui n'existe pas (au printemps) se lit après le saut, comme avant. Jamais une échéance passée —
+    elle reviendrait due à chaque tour (un ``forge.tick`` en boucle pendant une heure)."""
+    now = local(t, tz).replace(tzinfo=None)
+    cursor, horizon = now - _SHIFT, now + _SHIFT
+    best: int | None = None
+    for _ in range(240):
+        nxt = _next_cron(rule, cursor)
+        if nxt is None:
+            break
+        for fold in (0, 1):
+            when = instant(nxt.replace(tzinfo=tz, fold=fold))
+            if fold == 1 and local(when, tz).replace(tzinfo=None) != nxt:
+                continue  # pas une heure murale qui revient (un trou de printemps) : déjà vue en fold 0
+            if when > t and (best is None or when < best):
+                best = when
+        if best is not None and nxt > horizon:
+            break
+        cursor = nxt
+    return best

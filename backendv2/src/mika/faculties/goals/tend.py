@@ -108,6 +108,13 @@ def _live_self(s: GoalsState, now: int) -> int:
     return sum(1 for g in s.goals.values() if live(g, now) and g.authority == c.SELF)
 
 
+def inherited(source: str) -> tuple[str, ...]:
+    """Les lots d'une exploration née d'un signal : les siens, et de sa source seulement de quoi lire (ses flux,
+    la caméra) ou réparer une app à elle — jamais un outil qui écrit au-dehors ou envoie (un brouillon de mail, les
+    outils d'une app)."""
+    return tuple(sorted({*EXPLORE_BUNDLES, *({source} & READ_ONLY_SOURCES)}))
+
+
 def jitter_min(frame: Frame, p: Any) -> int:
     """Le flottement du jour (minutes, dans ±``seed_jitter_min``), tiré de la date : le même jour donne toujours le
     même, un rejeu le retrouve."""
@@ -215,7 +222,7 @@ class Seed:
             if not text:
                 continue
             source = f"thought:{t.id}"
-            bundles = tuple(sorted({*EXPLORE_BUNDLES, *({t.bundle} & READ_ONLY_SOURCES)}))
+            bundles = inherited(t.bundle)
             owner = t.about[0] if t.about else None
             await ctx.emit(c.GOAL_OPENED.draft(
                 kind=c.EXPLORATION, authority=c.SELF,

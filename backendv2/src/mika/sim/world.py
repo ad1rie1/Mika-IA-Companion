@@ -24,7 +24,7 @@ from mika.contracts import presence as presence_c
 from mika.contracts.runtime import PerceptionReceived
 from mika.kernel.events import Content, Origin
 from mika.kernel.ids import SeededIdGen
-from mika.ports.delivery import Delivery
+from mika.ports.delivery import REPLY_OUTCOMES, Delivery
 from mika.ports.llm import LLMBackend
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.runtime.effects import with_content
@@ -73,10 +73,15 @@ class Transport:
         self.failures = 0
         self.fail_next = False
         self.states = 0
+        #: les messages que le transport a appris sans réponse : (message, issue)
+        self.no_replies: list[tuple[int | None, str]] = []
 
     async def deliver(self, d: Delivery) -> bool:
         if d.kind == "state":
             self.states += 1
+            return True
+        if d.kind in REPLY_OUTCOMES:
+            self.no_replies.append((d.reply_to, d.source))
             return True
         if self.fail_next:
             self.fail_next = False

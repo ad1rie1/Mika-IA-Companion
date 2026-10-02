@@ -227,6 +227,9 @@ async def s18(driver: Driver, rng: RngTree, res: Result) -> None:
 
 
 SENSES: tuple[Plan, ...] = (
-    Plan("S17 une journée de courrier et de flux", s17, persona_llm, at_paris(2026, 9, 28, 8, 30)),
+    # plusieurs graines : le mail urgent doit être dit quel que soit le tirage (une initiative ordinaire restée
+    # sans réponse le bloquait avant ; ADR 0033, « INFORMS »)
+    Plan("S17 une journée de courrier et de flux", s17, persona_llm, at_paris(2026, 9, 28, 8, 30),
+         seeds=(1, 2, 3, 4, 5, 6)),
     Plan("S18 ses apps", s18, persona_llm, at_paris(2026, 9, 28, 13, 0)),
 )

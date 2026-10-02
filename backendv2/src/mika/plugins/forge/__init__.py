@@ -469,12 +469,16 @@ def _section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> SectionB
 
 
 def _may_build(ctx: Any) -> bool:
+    """Elle écrit ou utilise ses apps quand elle travaille, ou devant quelqu'un qui s'occupe d'elle — jugé sur
+    l'adresse qui parle (``audience.owner`` : jamais dans un groupe public ni un salon), pas sur « une adresse de la
+    personne est propriétaire » (l'offre le filtre déjà ; le gestionnaire le revérifie)."""
     ep = ctx.frame.episode
     if ep is None:
         return False
     if ep.kind in WORKING:
         return True
-    return bool(ep.target) and bool(ctx.frame.get(identity_c.IS_OWNER(ctx.frame.get(identity_c.PERSON(ep.target)))))
+    aud = ctx.frame.audience
+    return bool(ep.target) and aud is not None and aud.owner
 
 
 def _caretaker(frame: Frame) -> str:

@@ -82,15 +82,21 @@ class SocialParams(BaseModel):
     close_days: Annotated[int, Knob(
         label="Proche : jours de contact", group="Proximité vécue", lo=1, hi=120,
         help="Jours de contact distincts pour devenir proche (avec assez de messages, sans rancune, de la "
-             "chaleur installée ou une longue histoire, et un mois d'histoire au moins).")] = 7
+             "chaleur installée, de l'attachement ou une longue histoire, et un mois d'histoire au moins).")] = 7
     close_messages: Annotated[int, Knob(
         label="Proche : messages reçus", group="Proximité vécue", lo=1, hi=2000,
         help="Messages reçus pour devenir proche.")] = 50
-    #: proche : de la chaleur installée — ou une longue histoire (un chagrin partagé n'éloigne pas)
+    #: proche : de la chaleur installée, un attachement — ou une longue histoire (un chagrin partagé n'éloigne pas)
     close_regard: Annotated[float, Knob(
         label="Proche : chaleur installée", group="Proximité vécue", lo=0, hi=1, step=0.01,
         help="Le regard installé (affect : 0 au repos, 1 chaleur pleine) qu'il faut pour devenir proche — "
-             "sauf longue histoire (ci-dessous).")] = 0.1
+             "ou l'attachement ci-dessous, ou une longue histoire. Des soirées chaleureuses ordinaires l'installent "
+             "(de l'ordre de 0,25 en un mois) ; des échanges sans chaleur, non.")] = 0.1
+    close_bond: Annotated[float, Knob(
+        label="Proche : attachement", group="Proximité vécue", lo=0, hi=1, step=0.01,
+        help="L'attachement (affect : nourri par ses déclarations chaleureuses ou tendres, lent, demi-vie de deux "
+             "mois) qui suffit, à lui seul, pour être proche : une mauvaise passe qui assombrit le regard du moment "
+             "n'éloigne pas quelqu'un à qui elle tient. Le mois d'histoire reste exigé.")] = 0.15
     close_long_days: Annotated[int, Knob(
         label="Proche : longue histoire (jours)", group="Proximité vécue", lo=1, hi=365,
         help="Au-delà de tant de jours de contact, on devient proche même sans chaleur installée : un chagrin "
@@ -163,11 +169,6 @@ class SocialParams(BaseModel):
         label="Écrire d'elle-même : jusqu'à", group="Heures d'initiative", lo=0, hi=24 * 60,
         help="Heure locale après laquelle elle ne le fait plus. Avant le début, la plage passe minuit (un "
              "tempérament nocturne : de 18 h à 1 h).")] = 20 * 60 + 30
-    # initiatives restées sans réponse : chaque nouvelle vers la même personne attend plus
-    ignored_shift: Annotated[float, Knob(
-        label="Recul par initiative sans réponse", group="Retenue", lo=-10, hi=0, step=0.5,
-        help="Envers quelqu'un de présent, chaque initiative restée sans réponse rend la suivante moins probable "
-             "d'autant (log-odds) ; envers quelqu'un d'absent, c'est un veto.")] = -1.0
     # une rancune (hostilité installée) : ni initiative vers elle, ni amitié naissante
     grudge: Annotated[float, Knob(
         label="Seuil de rancune", group="Retenue", lo=0.05, hi=1, step=0.05,
@@ -285,8 +286,10 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
 
 
 #: v2 : messages par jour, histoire totale, conversations ouvertes, contenus des profils à part.
+#: ``ignored_shift`` est retiré : ne pas harceler quelqu'un qui ne répond pas est la retenue d'``agency``
+#: (ADR 0033) ; d'anciens réglages qui le portent se relisent sans lui.
 SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive,
-                 state_version=2)
+                 state_version=2, retired_params=("ignored_shift",))
 SOCIAL.declare(*c.ALL)
 
 
@@ -423,9 +426,10 @@ def estranged(hostility: float, p: SocialParams, settled: bool = False) -> bool:
     return hostility > 0.0 and hostility >= (p.grudge_demote if settled else p.grudge)
 
 
-def _level(days: int, messages: int, history: int, regard: float, p: SocialParams, friendly: bool) -> int:
+def _level(days: int, messages: int, history: int, regard: float, p: SocialParams, friendly: bool,
+           bond: float = 0.0) -> int:
     if friendly and days >= p.close_days and messages >= p.close_messages and history >= p.close_history_days \
-            and (regard >= p.close_regard or days >= p.close_long_days):
+            and (regard >= p.close_regard or (bond > 0.0 and bond >= p.close_bond) or days >= p.close_long_days):
         return _RANK[c.CLOSE]
     if friendly and days >= p.friend_days and messages >= p.friend_messages:
         return _RANK[c.FRIEND]
@@ -435,11 +439,12 @@ def _level(days: int, messages: int, history: int, regard: float, p: SocialParam
 
 
 def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float = 0.0,
-          now_day: int | None = None) -> str:
+          now_day: int | None = None, bond: float = 0.0) -> str:
     """Ce que leur histoire a fait d'elles : on devient amies en passant du
     temps ensemble, sans rancune — pas en le disant (ni parce qu'un modèle
-    l'a jugé) ; proches, avec de la chaleur ou une longue histoire, et un mois
-    d'histoire au moins.
+    l'a jugé) ; proches, avec de la chaleur installée, de l'attachement ou une
+    longue histoire, et un mois d'histoire au moins (dix soirées chaleureuses
+    d'affilée font une amie à qui elle tient, pas encore une proche).
 
     Ce qui compte, c'est leur histoire **récente** (une fenêtre glissante) ;
     un long silence (plusieurs fois son rythme) la fait descendre d'un cran ;
@@ -455,9 +460,9 @@ def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float =
     if len(counts) != len(ct.days):  # sans décompte par jour : les messages répartis également
         base, extra = divmod(ct.inbound, len(ct.days))
         counts = tuple(base + (1 if i < extra else 0) for i in range(len(ct.days)))
-    everything = _level(max(ct.total_days, len(ct.days)), ct.inbound, history, regard, p, friendly)
+    everything = _level(max(ct.total_days, len(ct.days)), ct.inbound, history, regard, p, friendly, bond)
     recent = [(day, n) for day, n in zip(ct.days, counts, strict=True) if today - day < p.closeness_window_days]
-    window = _level(len(recent), sum(n for _d, n in recent), history, regard, p, friendly)
+    window = _level(len(recent), sum(n for _d, n in recent), history, regard, p, friendly, bond)
     rhythm_days, _measured = rhythm(ct, today, c.CLOSENESS_LEVELS[everything], p)
     silent = today - ct.days[-1]
     if silent >= max(p.closeness_silence_min_days, p.closeness_silence_factor * rhythm_days):
@@ -466,10 +471,10 @@ def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float =
 
 
 def closeness(s: SocialState, person: str, regard: float, p: SocialParams, hostility: float = 0.0,
-              now_day: int | None = None) -> str:
+              now_day: int | None = None, bond: float = 0.0) -> str:
     """Déclarée par un opérateur, sinon vécue."""
     declared = s.declared.get(person)
-    return declared if declared is not None else lived(s.contacts.get(person), regard, p, hostility, now_day)
+    return declared if declared is not None else lived(s.contacts.get(person), regard, p, hostility, now_day, bond)
 
 
 def rhythm(ct: Contact, now_day: int, level: str, p: SocialParams) -> tuple[float, bool]:
@@ -508,10 +513,11 @@ def _greeted(s: SocialState, cx, person: str) -> int:
     return s.greeted.get(person, 0)
 
 
-@SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD, affect_c.HOSTILITY])
+@SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD, affect_c.HOSTILITY, affect_c.BOND])
 def _closeness(s: SocialState, cx, person: str) -> str:
     return closeness(s, person, cx.facts.get(affect_c.REGARD(person)), params(cx.params),
-                     cx.facts.get(affect_c.HOSTILITY(person)), cx.local(cx.now).date().toordinal())
+                     cx.facts.get(affect_c.HOSTILITY(person)), cx.local(cx.now).date().toordinal(),
+                     cx.facts.get(affect_c.BOND(person)))
 
 
 @SOCIAL.fact(c.CONTACT, reads=[c.CLOSENESS])

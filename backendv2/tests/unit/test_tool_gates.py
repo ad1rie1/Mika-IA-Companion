@@ -166,11 +166,14 @@ def test_in_conversation_the_core_is_in_hand_and_the_rest_is_fetched_on_demand(t
     req = seen[0]
     deferred = {t.name for t in req.tools if t.deferred}
     in_hand = {t.name for t in req.tools if not t.deferred}
-    assert {"memory_search", "goal_remind"} <= in_hand
+    # en main, ce qu'une conversation sert vraiment (chercher dans sa mémoire, poser un rappel) ; le reste,
+    # l'identité comprise, à la demande — une réponse ordinaire ne porte pas trente outils d'emblée
+    assert {"memory_search", "goal_remind"} <= in_hand and len(in_hand) <= 6
     assert {"identity_whoami_with", "social_about"} <= deferred  # relire une section présente : à la demande
     assert {"forge_write", "rss_list", "camera_look", "forge_call"} <= deferred
     catalogue = req.system_stable.split(CATALOGUE_HEADER, 1)[1]
     assert "- forge : la Forge" in catalogue and "- rss : les flux" in catalogue
+    assert "- social" in catalogue  # relire ce que ses sections disent déjà : à la demande
     assert "- memory" not in catalogue  # ce qui est en main n'est pas à chercher
 
 

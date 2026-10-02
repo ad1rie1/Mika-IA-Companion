@@ -194,15 +194,20 @@ def confidant(g: Goal, frame: Frame) -> tuple[str, str, str] | None:
     return None
 
 
+def worry_of(g: Goal, person: str | None) -> bool:
+    """Ce but est-il une inquiétude pour cette personne-là (ce qu'elle lui a confié) ? Alors ce n'est pas un
+    résultat à lui annoncer."""
+    worry = g.origin == c.FROM_EXCHANGE or (not g.origin and g.source.startswith("thought:"))
+    return worry and person is not None and (person == g.owner or person in g.about)
+
+
 def share_brief(g: Goal, person: str, address: str, level: str, frame: Frame) -> str:
     """Ce qu'elle se dit avant de raconter, selon d'où venait le but : une inquiétude pour quelqu'un n'est pas un
     résultat à annoncer à cette personne-là (elle prend de ses nouvelles). La consigne ne renvoie à aucune section
     et ne dit rien du contenu (le murmure qui la précède s'entend)."""
     name = _name(frame, person) or _name(frame, address)
     who = f"« {name} »" if name else "cette personne"
-    concerned = person == g.owner or person in g.about
-    worry = g.origin == c.FROM_EXCHANGE or (not g.origin and g.source.startswith("thought:"))
-    if concerned and worry:
+    if worry_of(g, person):
         return (f"Tu as beaucoup repensé à ce que {who} t'avait confié. Ce n'est pas un résultat à annoncer : prends "
                 "de ses nouvelles, et si ta réflexion t'a apporté quelque chose d'utile, glisse-le simplement.")
     return {

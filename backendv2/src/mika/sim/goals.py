@@ -50,7 +50,8 @@ def _never_delivered(driver: Driver, events: list[Any]) -> list[str]:
 
 def _shares(driver: Driver) -> list[tuple[str, str]]:
     return [(c.meta.get("target"), c.messages[-1].content) for c in driver.llm.calls  # type: ignore[attr-defined]
-            if c.role == "initiative" and "MENÉ À BOUT" in c.messages[-1].content]
+            if c.role == "initiative" and ("MENÉ À BOUT" in c.messages[-1].content
+                                           or "AS REPENSÉ" in c.messages[-1].content)]
 
 
 # ── S09 : une exploration ─────────────────────────────────────────────────
@@ -94,8 +95,9 @@ async def s09(driver: Driver, rng: RngTree, res: Result) -> None:
                     "mener quelque chose à bout redonne confiance — un peu, pour une seule séance (ADR 0036)",
                     lo=0.01, hi=0.06),
         expect.invariant("raconté à qui ça concerne, quand il revient", bool(to_him) and bool(said)
-                         and "Ce que tu en as tiré" in to_him[0][1],
-                         "sa propriétaire, concernée : elle lui raconte tout, à son retour", f"{len(to_him)}"),
+                         and "Ce que ta réflexion t'a apporté" in to_him[0][1],
+                         "son inquiétude à lui : elle prend de ses nouvelles à son retour, avec ce que sa réflexion lui "
+                         "a apporté (ADR 0039)", f"{len(to_him)}"),
         expect.invariant("une séance n'est livrée à personne", not _never_delivered(driver, events),
                          "elle travaille pour elle seule"),
         expect.invariant("elle ne travaille pas en dormant", not _steps_asleep(events, driver.clock.now()),

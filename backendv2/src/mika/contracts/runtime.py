@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
-from mika.kernel.facts import FactKey
+from mika.kernel.facts import FactFamily, FactKey
 
 OWNER = "runtime"
 NAMESPACES = ("perception", "episode", "effect", "runtime")
@@ -44,6 +44,9 @@ class EpisodeStarted(Payload):
     #: ce sur quoi porte l'épisode quand ce n'est pas sa cible (``goal:12`` pour
     #: un rappel adressé à quelqu'un) : son propriétaire le reconnaît
     subject: str | None = None
+    #: le ``seq`` exact de l'événement ``kernel.selected`` qui a choisi cet épisode (une initiative, un pas) ;
+    #: ``None`` pour ce que personne n'a choisi (une réponse) — et dans un journal plus ancien
+    selected: int | None = None
 
 
 class ToolOutcome(Payload):
@@ -65,6 +68,10 @@ class Utterance(Payload):
     sections: tuple[str, ...] = ()
     #: ce que le prompt lui montrait (souvenirs, contenus) : ``"memory:12"``…
     provenance: tuple[str, ...] = ()
+    #: les messages que cet énoncé règle : tout le tour de la personne (ses messages encore sans réponse, de la
+    #: même adresse et du même salon, jusqu'à ``reply_to`` compris — une rafale reçoit une seule réponse qui les
+    #: a tous lus). Vide dans un journal plus ancien : l'énoncé ne réglait alors que ``reply_to``.
+    answers: tuple[int, ...] = ()
 
     def annotation(self, key: str) -> str | None:
         for k, v in self.annotations:
@@ -81,6 +88,12 @@ class EpisodeEnded(Payload):
     detail: str = ""
     guard: str | None = None
     changed: tuple[str, ...] = ()
+    #: les messages que cette fin laisse sans réponse, pour de bon (elle a choisi de se taire, la réponse a
+    #: échoué, les tentatives sont épuisées, il est trop tard) : une intention de la fin, pas un état
+    #: recalculé. ``None`` dans un journal plus ancien : la règle d'alors (issue × tentatives) s'y applique.
+    #: Le transport l'apprend par la file de sortie (``ports.delivery`` : ``reply_abstained`` si elle s'est
+    #: tue, ``reply_failed`` sinon, pour le dernier message du tour).
+    unanswered: tuple[int, ...] | None = None
 
 
 class ProcessFailed(Payload):
@@ -152,6 +165,12 @@ ALL = (
 
 #: Les messages (``seq``) qui attendent encore leur réponse.
 AWAITING = FactKey("runtime.awaiting", type=tuple, doc="perceptions sans réponse encore réglée")
+#: Le tour en cours d'une adresse en un lieu, ``TURN((adresse, salon))`` (salon ``None`` en privé) : ses
+#: messages encore sans réponse, du plus ancien au plus récent. Une réponse règle le tour entier ; un nouveau
+#: message du même tour supplante la réponse en train de s'écrire (elle sera recomposée en le lisant).
+TURN = FactFamily("runtime.turn", arg=tuple, type=tuple,
+                  doc="les messages sans réponse d'une adresse en un lieu (adresse, salon)")
+
 
 
 @dataclass(frozen=True, slots=True)

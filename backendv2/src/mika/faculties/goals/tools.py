@@ -19,6 +19,7 @@ toujours un refus (``ToolResult(ok=False)``), jamais une réussite.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from datetime import datetime
 from typing import Any, Literal
 
@@ -86,10 +87,39 @@ def _goal(ctx: Any) -> Goal | None:
     return g if g is not None and workable(g, ctx.frame.now) else None
 
 
+#: un ancien journal mettait dans le titre d'une exploration le texte d'où elle venait (« En savoir plus — « Jeux
+#: rétro… » (Le Journal) ») : on en garde ses mots à elle, le reste est une citation
+LEGACY_TITLES = (("En savoir plus — ", "En savoir plus sur ce que j'ai remarqué"),
+                 ("Y voir plus clair — ", "Y voir plus clair sur ce qui me trotte dans la tête"))
+LEGACY_DEFAULT = "Repenser à ce qui me trotte dans la tête"
+
+
+def titled(g: Goal, texts: Mapping[str, str]) -> tuple[str, str]:
+    """(son titre, dans ses mots à elle ; ce qui vient d'ailleurs, à ne montrer que **cité** — vide : rien).
+
+    Une exploration née d'un signal (un titre d'article, l'objet d'un mail, ce qu'une app a dit) vient d'un texte
+    qu'elle n'a pas écrit : il reste à part, et ne se montre qu'en citation, inerte. Un ancien journal le mettait
+    dans le titre même : on l'en sépare au rendu (le journal, lui, ne se réécrit pas)."""
+    title = texts.get(g.title_ref, "")
+    if g.kind != c.EXPLORATION or not title:
+        return title, ""
+    if g.origin == c.FROM_SIGNAL:
+        return title, texts.get(g.details_ref, "")
+    if not g.origin and g.source.startswith("thought:"):
+        for prefix, mine in LEGACY_TITLES:
+            if title.startswith(prefix):
+                return mine, title[len(prefix):].strip()
+        return LEGACY_DEFAULT, title
+    return title, ""
+
+
 def title_of(ctx: Any, g: Goal) -> Content:
+    """Le titre qu'une clôture emporte (son journal, ce qu'elle racontera) : ses mots à elle, jamais un texte venu
+    d'ailleurs."""
     store = ctx.ports.get("store")
-    text = store.content([g.title_ref]).get(g.title_ref) if store is not None and g.title_ref else None
-    return Content.of(text or "(un but dont le titre est oublié)", level=g.sensitivity)
+    texts = store.content([g.title_ref]) if store is not None and g.title_ref else {}
+    mine, _ = titled(g, texts)
+    return Content.of(mine or "(un but dont le titre est oublié)", level=g.sensitivity)
 
 
 def closing(ctx: Any, g: Goal, status: str, *, result: str | None = None, notable: float = 0.0,

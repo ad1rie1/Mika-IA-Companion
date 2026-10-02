@@ -333,7 +333,7 @@ def _awaiting(frame: Frame, p: Project, person: str) -> str:
 
 
 @PROJECTS.section("projects", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["goals"], trim_rank=44,
-                  title="TES PROJETS", reads=[identity_c.PERSON, identity_c.IS_OWNER, rt.PENDING_EFFECTS])
+                  title="TES PROJETS", reads=[identity_c.PERSON, rt.PENDING_EFFECTS])
 def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     texts: Mapping[str, str] = (enrich.get("projects") or {}).get("texts") or {}
     ep, aud = frame.episode, frame.audience
@@ -341,7 +341,7 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
         return None
     pm = params(frame.env.params_of("projects", frame.root))
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
-    owner = bool(person) and bool(frame.get(identity_c.IS_OWNER(person)))
+    owner = bool(person) and aud.owner  # l'adresse qui parle, là où elle parle (jamais un groupe public)
     lines, level, witness = [], 0, False
     for p in _recent(s)[-SHOWN * 2:]:
         title = texts.get(p.title_ref)

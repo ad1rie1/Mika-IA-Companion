@@ -99,8 +99,12 @@ def _processes(kernel: Kernel) -> Check:
     failing = {n: k for n, k in sched.consecutive.items() if k >= PROCESS_FAILURES_MAX}
     detail = tuple(f"{n} : {k} échec(s) d'affilée — {sched.last_error.get(n, (0, ''))[1]}"
                    for n, k in sorted(failing.items()))
-    if failing:
-        return Check("processes", DEGRADED, f"{len(failing)} processus en échec", detail)
+    # un processus qui a tourné en rafale (retenu par l'ordonnanceur) : un défaut à comprendre, jamais un régime
+    detail += tuple(f"{n} : {k} rafale(s) retenue(s)" for n, k in sorted(sched.storms.items()) if k)
+    if failing or sched.storms:
+        what = [f"{len(failing)} processus en échec"] if failing else []
+        what += [f"{len(sched.storms)} processus en rafale"] if sched.storms else []
+        return Check("processes", DEGRADED, " ; ".join(what), detail)
     return Check("processes", OK, f"{len(sched.specs)} processus", detail)
 
 
@@ -109,8 +113,9 @@ def _outbox(kernel: Kernel) -> Check:
     (un message qui n'est jamais parti ne doit pas disparaître en silence)."""
     store = kernel.mind.store
     now = kernel.mind.clock.now()
-    rows = store.query_mind("SELECT seq, effect, last_error FROM outbox WHERE status='failed' ORDER BY seq DESC "
-                            "LIMIT 50")
+    # abandonné après ses réessais, ou capacité interrompue par une panne et pas relancée (à décider)
+    rows = store.query_mind("SELECT seq, effect, last_error FROM outbox WHERE status IN ('failed', 'interrupted') "
+                            "ORDER BY seq DESC LIMIT 50")
     at = {e.seq: e.at for e in store.get_events([r[0] for r in rows])}
     failed = [(seq, effect, error) for seq, effect, error in rows if now - at.get(seq, 0) < DAY]
     pending = store.pending_outbox()

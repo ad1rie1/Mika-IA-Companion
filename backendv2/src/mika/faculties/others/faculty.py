@@ -19,7 +19,8 @@
 - **Prendre de ses nouvelles** : une amie ou une proche dont le dernier
   message l'a inquiétée, et qui n'a rien écrit de plus léger depuis — passé
   quelques heures (et pas trop), en journée, elle lui écrit. Une fois : lui
-  écrire, ou un message d'elle qui va mieux, éteint l'inquiétude.
+  écrire (cette prise de nouvelles, ou la pensée inquiète qui l'a poussée à
+  lui écrire avant), ou un vrai message d'elle qui va mieux, éteint l'inquiétude.
 
 Tout se déduit du journal : les lectures de ton sont des jugements
 enregistrés (``others.read``), le reste des événements publics des autres.
@@ -462,6 +463,12 @@ def _worried_reply(s: OthersState, e: Any, cx: Any) -> OthersState:
     return replace(s, concerns=s.concerns.set(person, (d.reply_to or e.seq, e.at, opens)))
 
 
+#: Ce qui, dans une initiative vers elle, est déjà prendre de ses nouvelles : la prise de nouvelles,
+#: ou la pensée qui pèse entre elles (« tu repenses à votre dernier échange… prendre de ses nouvelles »)
+#: — deux chemins vers le même geste ; le premier qui part éteint l'inquiétude, l'autre n'en refait pas un second.
+REACHED = frozenset({c.CHECK_IN, attention_c.THOUGHT})
+
+
 @OTHERS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, social_c.CLOSENESS])
 def _wrote(s: OthersState, e, cx) -> OthersState:
     """Elle écrit d'elle-même à quelqu'un : on mesurera le temps qu'il met à
@@ -475,7 +482,7 @@ def _wrote(s: OthersState, e, cx) -> OthersState:
     reasons = s.openings.get(e.correlation, "").split(",")
     s = replace(s, openings=s.openings.delete(e.correlation))
     person = cx.facts.get(identity_c.PERSON(d.target))
-    if c.CHECK_IN in reasons:
+    if REACHED & set(reasons):
         s = replace(s, concerns=s.concerns.delete(person))  # c'est fait : elle a pris de ses nouvelles
     if social_c.GREETING in reasons or goals_c.REMIND in reasons:
         return s

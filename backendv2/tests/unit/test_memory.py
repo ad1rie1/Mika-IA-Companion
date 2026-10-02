@@ -446,7 +446,9 @@ def test_a_question_is_never_consolidated_without_its_answer(tmp_path):
     ups = [e.data.upto for e in events_of(kernel, "memory.consolidated")]
     thread = [e for e in events_of(kernel, "perception.received", "episode.utterance")]
     questions = {e.seq for e in thread if e.type.name == "perception.received"}
-    answered_after = {e.data.reply_to: e.seq for e in thread if e.type.name == "episode.utterance"}
+    # une réponse règle tout le tour (``answers``) : une rafale reçoit une réponse qui les a tous lus
+    answered_after = {q: e.seq for e in thread if e.type.name == "episode.utterance"
+                      for q in (e.data.answers or (e.data.reply_to,))}
     assert ups, "la fenêtre a fini par être relue"
     for upto in ups:
         for q in questions:

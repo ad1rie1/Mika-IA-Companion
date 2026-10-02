@@ -1,6 +1,9 @@
 """Preuve M0 — outils en cours d'épisode : A émet, B voit l'effet ; l'épisode
 dépasse son délai → l'événement de A reste et ``episode.ended{timeout}`` est
-écrit ; le même identifiant d'appel renvoyé est dédoublonné."""
+écrit. Deux épisodes distincts qui font le même appel écrivent chacun : une
+écriture d'outil se dédoublonne par ce qu'elle est dans son épisode (son tour),
+jamais par l'identifiant d'appel du fournisseur, qui revient d'un épisode à
+l'autre (``call_0``, « c1 » ici — ADR 0040, KER-23)."""
 
 from __future__ import annotations
 
@@ -93,8 +96,8 @@ def test_tools_emit_midepisode_timeout_and_dedupe(tmp_path):
     # B a vu l'effet de A (lecture de ses propres écritures)
     seen = [m.content for m in llm.calls[2].messages if m.role == "tool"]
     assert seen == ["noté", "1"]
-    # le même identifiant d'appel « c1 » dans le second épisode est dédoublonné
-    assert count == 1
+    # le même identifiant d'appel « c1 » dans un second épisode, indépendant, n'efface pas sa note
+    assert count == 2
     assert second.outcome is Outcome.TIMEOUT
 
     k2, _, _ = build(tmp_path, [NOTES], policies=POLICIES)
@@ -107,5 +110,5 @@ def test_tools_emit_midepisode_timeout_and_dedupe(tmp_path):
         return added, ended
 
     added, ended = run_virtual(k2.deps.clock, read)
-    assert len(added) == 1
+    assert len(added) == 2
     assert [e.data.outcome for e in ended] == ["timeout", "timeout"]

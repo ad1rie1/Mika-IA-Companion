@@ -417,7 +417,7 @@ class CreateArgs(BaseModel):
                args=CreateArgs, bundle="projects", episodes=[Kind.REPLY], max_calls_per_episode=1, owner_only=True)
 async def create_project(args: CreateArgs, ctx: Any) -> Any:
     who = _person(ctx.frame)
-    if who is None or not ctx.frame.get(identity_c.IS_OWNER(who[1])):
+    if who is None or not owner_speaks(ctx.frame):
         return ToolResult(ok=False, content=f"Seul(e) {caretaker(ctx.frame)} peut te confier un projet. Si l'idée te "
                                             "plaît, tu peux en ouvrir un à toi (start_project).")
     handle, person = who
@@ -452,13 +452,20 @@ def _own_live(s: ProjectsState) -> int:
                and any(o.status == c.OPEN for o in p.objectives))
 
 
+def owner_speaks(frame: Frame) -> bool:
+    """Celle qui lui parle s'occupe-t-elle d'elle ? Jugé sur l'adresse qui parle et là où elle parle
+    (``audience.owner`` : jamais dans un groupe public ni un salon) — l'offre des outils le filtre déjà, le
+    gestionnaire le revérifie."""
+    aud = frame.audience
+    return aud is not None and aud.owner
+
+
 def _talking_to_owner(frame: Frame) -> bool:
     """En conversation, elle ne s'engage (ou ne se dégage) que devant quelqu'un qui s'occupe d'elle."""
     ep = frame.episode
     if ep is None or ep.kind != Kind.REPLY:
         return True
-    who = _person(frame)
-    return who is not None and bool(frame.get(identity_c.IS_OWNER(who[1])))
+    return _person(frame) is not None and owner_speaks(frame)
 
 
 @PROJECTS.tool("start_project", description="Ouvrir un projet à toi : un vrai travail suivi (un dossier, son dépôt git, "

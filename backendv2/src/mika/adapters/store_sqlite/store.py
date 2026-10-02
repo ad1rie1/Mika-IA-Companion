@@ -301,14 +301,7 @@ class SqliteStore:
             raise StoreSealed("magasin scellé")
 
         def wrapped(m: sqlite3.Connection, v: sqlite3.Connection) -> Any:
-            v.execute("BEGIN")
-            try:
-                result = fn(SqlConn(v))
-            except BaseException:
-                v.execute("ROLLBACK")
-                raise
-            v.execute("COMMIT")
-            return result
+            return _transaction((v,), lambda: fn(SqlConn(v)))
 
         return await self._writer.run(wrapped)
 
@@ -317,33 +310,29 @@ class SqliteStore:
             raise StoreSealed("magasin scellé")
 
         def wrapped(m: sqlite3.Connection, v: sqlite3.Connection) -> Any:
-            m.execute("BEGIN")
-            try:
-                result = fn(SqlConn(m))
-            except BaseException:
-                m.execute("ROLLBACK")
-                raise
-            m.execute("COMMIT")
-            return result
+            return _transaction((m,), lambda: fn(SqlConn(m)))
 
         return await self._writer.run(wrapped)
 
     async def forget_subject(self, subject: str, purge: Callable[[Sql, Sql], None]) -> int:
+        """Efface les contenus d'un sujet et ce que les projections en reprennent, dans une transaction par
+        base : une purge qui lève défait tout (les deux bases), et l'écrivain reste utilisable. Les pages
+        libérées sont mises à zéro par ``secure_delete`` et le WAL tronqué : pas de ``VACUUM``, qui
+        réécrirait toute la base sous l'unique fil d'écriture (et figerait Mika le temps de le faire)."""
+
         def fn(m: sqlite3.Connection, v: sqlite3.Connection) -> int:
-            m.execute("BEGIN")
-            v.execute("BEGIN")
-            refs = [r[0] for r in m.execute("SELECT ref FROM content_subjects WHERE subject=?", (subject,))]
-            for ref in refs:
-                m.execute("DELETE FROM content WHERE ref=?", (ref,))
-                m.execute("DELETE FROM content_subjects WHERE ref=?", (ref,))
-            purge(SqlConn(m), SqlConn(v))
-            m.execute("COMMIT")
-            v.execute("COMMIT")
+            def body() -> int:
+                refs = [r[0] for r in m.execute("SELECT ref FROM content_subjects WHERE subject=?", (subject,))]
+                for ref in refs:
+                    m.execute("DELETE FROM content WHERE ref=?", (ref,))
+                    m.execute("DELETE FROM content_subjects WHERE ref=?", (ref,))
+                purge(SqlConn(m), SqlConn(v))
+                return len(refs)
+
+            removed = _transaction((m, v), body)
             for c in (m, v):
                 c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                c.execute("VACUUM")
-                c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            return len(refs)
+            return removed
 
         return await self._writer.run(fn)
 
@@ -481,42 +470,59 @@ class StoreSealed(RuntimeError):
     pass
 
 
-def _write_batch(m: sqlite3.Connection, batch: AppendBatch) -> None:
-    m.execute("BEGIN")
+def _transaction(conns: Sequence[sqlite3.Connection], body: Callable[[], Any]) -> Any:
+    """``body`` dans une transaction sur chaque connexion : validées ensemble, ou toutes défaites — une
+    validation qui échoue (disque plein, base verrouillée) défait aussi, jamais une transaction laissée
+    ouverte (l'écrivain unique serait empoisonné : plus aucun ``BEGIN`` ne passerait)."""
+    for c in conns:
+        c.execute("BEGIN")
     try:
-        m.executemany(
-            "INSERT INTO events(seq,id,type,v,at,causation,correlation,basis,origin,data) VALUES(?,?,?,?,?,?,?,?,?,?)",
-            [(e.seq, e.id, e.type, e.v, e.at, e.causation, e.correlation, e.basis, e.origin, e.data) for e in batch.events],
-        )
-        if batch.contents:
-            m.executemany(
-                "INSERT INTO content(ref, seq, level, text) VALUES(?,?,?,?)",
-                [(c.ref, c.seq, c.level, c.text) for c in batch.contents],
-            )
-            m.executemany(
-                "INSERT OR IGNORE INTO content_subjects(ref, subject) VALUES(?,?)",
-                [(c.ref, s) for c in batch.contents for s in c.subjects],
-            )
-        if batch.dedupe:
-            m.executemany("INSERT INTO dedupe(type, key, seq) VALUES(?,?,?)", batch.dedupe)
-        if batch.outbox:
-            m.executemany(
-                "INSERT INTO outbox(key, seq, effect, status, attempts, last_error) VALUES(?,?,?,?,?,?)",
-                [(o.key, o.seq, o.effect, o.status, o.attempts, o.last_error) for o in batch.outbox],
-            )
-        if batch.t0 is not None:
-            batch.t0(SqlConn(m))
-        if batch.snapshot is not None:
-            s = batch.snapshot
-            m.execute("INSERT OR REPLACE INTO snapshots(seq, at, data) VALUES(?,?,?)", (s.seq, s.at, s.data))
-            m.execute(
-                "DELETE FROM snapshots WHERE seq NOT IN (SELECT seq FROM snapshots ORDER BY seq DESC LIMIT ?)",
-                (SNAPSHOTS_KEPT,),
-            )
+        result = body()
+        for c in conns:
+            c.execute("COMMIT")
     except BaseException:
-        m.execute("ROLLBACK")
+        for c in conns:
+            if c.in_transaction:
+                c.execute("ROLLBACK")
         raise
-    m.execute("COMMIT")
+    return result
+
+
+def _write_batch(m: sqlite3.Connection, batch: AppendBatch) -> None:
+    _transaction((m,), lambda: _write_rows(m, batch))
+
+
+def _write_rows(m: sqlite3.Connection, batch: AppendBatch) -> None:
+    """Le corps d'une transaction d'ajout (voir ``_write_batch``)."""
+    m.executemany(
+        "INSERT INTO events(seq,id,type,v,at,causation,correlation,basis,origin,data) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        [(e.seq, e.id, e.type, e.v, e.at, e.causation, e.correlation, e.basis, e.origin, e.data) for e in batch.events],
+    )
+    if batch.contents:
+        m.executemany(
+            "INSERT INTO content(ref, seq, level, text) VALUES(?,?,?,?)",
+            [(c.ref, c.seq, c.level, c.text) for c in batch.contents],
+        )
+        m.executemany(
+            "INSERT OR IGNORE INTO content_subjects(ref, subject) VALUES(?,?)",
+            [(c.ref, s) for c in batch.contents for s in c.subjects],
+        )
+    if batch.dedupe:
+        m.executemany("INSERT INTO dedupe(type, key, seq) VALUES(?,?,?)", batch.dedupe)
+    if batch.outbox:
+        m.executemany(
+            "INSERT INTO outbox(key, seq, effect, status, attempts, last_error) VALUES(?,?,?,?,?,?)",
+            [(o.key, o.seq, o.effect, o.status, o.attempts, o.last_error) for o in batch.outbox],
+        )
+    if batch.t0 is not None:
+        batch.t0(SqlConn(m))
+    if batch.snapshot is not None:
+        s = batch.snapshot
+        m.execute("INSERT OR REPLACE INTO snapshots(seq, at, data) VALUES(?,?,?)", (s.seq, s.at, s.data))
+        m.execute(
+            "DELETE FROM snapshots WHERE seq NOT IN (SELECT seq FROM snapshots ORDER BY seq DESC LIMIT ?)",
+            (SNAPSHOTS_KEPT,),
+        )
 
 
 __all__ = ["SqliteStore", "SqlConn", "StoreSealed", "ContentRow", "OutboxRow", "SnapshotRow", "StoredEvent"]

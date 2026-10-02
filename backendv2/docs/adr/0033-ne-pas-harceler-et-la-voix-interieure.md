@@ -20,3 +20,11 @@
 9. *La console* : « plus anciens » ne mène jamais à une page vide (on lit une ligne de plus) ; une initiative compte comme répondue quand la personne écrit depuis n'importe laquelle de ses adresses ; la fiche d'une personne montre le fil vu de son côté à elle (onglet « Pensées » : ce qui la retient de lui réécrire).
 
 **Conséquences.** S20 (l'ami qui ne répond plus, la sonde) : au plus un mot, pas avant des heures, un ressenti ; une amie qui répond reçoit toujours des initiatives. S05 : une relance, puis au plus une relance douce ≥ max(24 h, 2 × son rythme). S06 (quelqu'un de connecté qui se tait toute la journée) : une ou deux prises de parole, puis elle n'insiste pas — l'ADR 0018 en attendait trois ou quatre. Tranches : `attention` v4, `agency` v2, `needs` v2, `expression` v2 (reconstruites depuis la genèse). Tests : `tests/unit/test_speaking_up.py`, `tests/unit/test_inner_voice.py`, et les cibles reprises dans `test_inner_life.py`, `test_social.py`.
+
+## Complément (intégration, 2026-10-02) — prévenir n'est pas relancer
+
+Mesuré sur S17 (graines 3 à 6) : une initiative ordinaire restée sans réponse (un partage) bloquait ensuite l'annonce
+d'un mail urgent à sa propriétaire — le veto « ne pas harceler » ne distinguait pas *relancer quelqu'un* de *le
+prévenir de ce qui ne peut pas attendre*. `INFORMS` (aujourd'hui : `email.mail_mention`) passe ce veto ; l'annonce reste
+bornée par sa source (une fois par mail, au-dessus d'un seuil d'importance), et le plafond du jour comme le recul s'y
+appliquent toujours. S17 tourne désormais sur six graines.

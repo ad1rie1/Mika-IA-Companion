@@ -131,7 +131,7 @@ OUTCOME_FR = {"done": "fait", "abstained": "abstenue", "superseded": "supplanté
               "failed": "échec", "preempted": "préemptée", "interrupted": "interrompue", "cancelled": "annulée"}
 OUTCOME_TONE = {"done": "ok", "abstained": "muted", "superseded": "warn", "timeout": "danger", "failed": "danger",
                 "preempted": "warn", "interrupted": "warn", "cancelled": "muted"}
-AUTHOR_FR = {"operator": "toi", "owner": "sa propriétaire", "self": "elle"}
+AUTHOR_FR = {"operator": "toi", "owner": "qui le lui a confié", "self": "elle"}
 
 STATE_PARAM = Param("etat", "État", kind="select", default="vivants",
                     choices=(("vivants", "actifs et en pause"), (c.ACTIVE, "actifs"), (c.PAUSED, "en pause"),
@@ -139,6 +139,11 @@ STATE_PARAM = Param("etat", "État", kind="select", default="vivants",
 MODE_PARAM = Param("mode", "Mode", kind="select", choices=((c.PERSONA, "Mika"), (c.PLAIN, "impersonnel")))
 PROJECT_PARAM = Param("projet", "Projet n°", kind="int", lo=1)
 VERDICT_PARAM = Param("verdict", "Verdict", kind="select", choices=tuple(VERDICT_FR.items()))
+OBJECTIVE_PARAM = Param("objectifs", "Objectifs", kind="select", default="vivants",
+                        choices=(("vivants", "ouverts et bloqués"), (c.DONE, "faits"), (c.DROPPED, "retirés"),
+                                 ("tous", "tous")))
+#: un objectif est « vivant » tant qu'il est ouvert ou bloqué
+LIVING = (c.OPEN, c.BLOCKED)
 DECISION_PARAM = Param("statut", "Statut", kind="select", default=c.IN_FORCE,
                        choices=((c.IN_FORCE, "en vigueur"), (c.SUPERSEDED, "remplacées"),
                                 (c.WITHDRAWN, "retirées"), ("toutes", "toutes")))
@@ -674,10 +679,11 @@ OBJECTIVE_COLUMNS = (Column("n°", "fit"), Column("objectif"), Column("sorte", "
                      Column("posé par", "fit", detail=True))
 
 
-@PROJECTS.inspect("objectifs", title="Objectifs", subject="project", order=20,
+@PROJECTS.inspect("objectifs", title="Objectifs", subject="project", order=20, params=[OBJECTIVE_PARAM],
                   description="Ce que le projet cherche, ligne par ligne : un objectif ponctuel se coche une fois (avec "
                               "une preuve), un objectif constant revient selon sa cadence. Déplie une ligne pour la "
-                              "lancer, la modifier ou changer son statut.")
+                              "lancer, la modifier ou changer son statut. Les objectifs ouverts et bloqués d'abord ; "
+                              "les faits et les retirés se filtrent.")
 def _objectives_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     p = _subject(s, ctx)
     if isinstance(p, Note):
@@ -686,9 +692,14 @@ def _objectives_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list
     key = str(p.id)
     editable = _editable(s, frame, key)
     runnable = _runnable(s, frame, key)
-    texts = _texts(ctx, [r for o in p.objectives for r in (o.text_ref, o.note_ref, o.result_ref)])
+    wanted = str(ctx.value("objectifs") or "vivants")
+    chosen = sorted((o for o in p.objectives if wanted == "tous" or o.status == wanted
+                     or (wanted == "vivants" and o.status in LIVING)),
+                    key=lambda o: (OBJ_ORDER.get((o.kind, o.status), 9), o.id))
+    page, pager = paginate(chosen, ctx.pager(size=PAGE, total=len(chosen)))  # une page de formulaires, pas mille
+    texts = _texts(ctx, [r for o in page for r in (o.text_ref, o.note_ref, o.result_ref)])
     rows = []
-    for o in sorted(p.objectives, key=lambda o: (OBJ_ORDER.get((o.kind, o.status), 9), o.id)):
+    for o in page:
         text = _text(texts, o.text_ref)
         detail: list[Any] = []
         if o.result_ref:
@@ -721,8 +732,8 @@ def _objectives_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list
                     "ils reviennent selon leur cadence"),
                Stat("Bloqués", sum(1 for o in p.objectives if o.status == c.BLOCKED), "",
                     "danger" if any(o.status == c.BLOCKED for o in p.objectives) else ""))),
-        Table(OBJECTIVE_COLUMNS, tuple(rows), title="Ses objectifs",
-              empty="aucun objectif : ajoutes-en un ci-dessous",
+        Table(OBJECTIVE_COLUMNS, tuple(rows), title="Ses objectifs", pager=pager,
+              empty="aucun objectif : ajoutes-en un ci-dessous" if not p.objectives else "aucun objectif ici (filtre)",
               caption=f"Une exécution vise un objectif : celui que tu lances, sinon le constant le plus en retard, sinon "
                       f"le premier ponctuel ouvert. Un ponctuel qui n'est pas fait après {pm.once_runs_max} exécutions "
                       f"bloque ; un objectif qui n'a rien conclu {pm.silent_before_blocked} fois de suite aussi."),
@@ -1240,7 +1251,18 @@ def _person_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
     rows = [Row((_link(p, _text(texts, p.title_ref, "(sans titre)")), _mode(p), _state(p), _progress(p),
                  "pour cette personne" if p.owner in handles else "la concerne", When(p.created_at)), href=_link(p))
             for p in page]
-    return [Table((Column("projet"), Column("mode", "fit"), Column("état", "fit"), Column("objectifs"),
-                   Column("lien", "fit"), Column("ouvert", "fit")), tuple(rows), title="Ses projets", pager=pager,
-                  empty="aucun projet pour cette personne ni à son sujet")]
+    out: list[Block] = []
+    if concerned:  # l'oubli efface sa vie (contenus, journal) ; un atelier est un dossier : il faut le dire
+        out.append(Note(FORGET_NOTE.format(n=len(concerned)), tone="warn", title="L'oubli et les ateliers"))
+    return [*out, Table((Column("projet"), Column("mode", "fit"), Column("état", "fit"), Column("objectifs"),
+                         Column("lien", "fit"), Column("ouvert", "fit")), tuple(rows), title="Ses projets",
+                        pager=pager, empty="aucun projet pour cette personne ni à son sujet")]
+
+
+#: ce que l'oubli d'une personne n'atteint pas (PRJ-9) : dit sur sa fiche, avant qu'on l'oublie
+FORGET_NOTE = ("Oublier cette personne efface ce que la vie de Mika garde de ces {n} projet(s) — titres, comptes "
+               "rendus, carnets, décisions —, pas leurs ateliers : les fichiers, l'historique git (dont les messages "
+               "de commit restent neutres) et ce qui est déjà parti vers un dépôt distant. Ouvre chaque projet pour "
+               "faire le ménage dans son atelier, ou archive-le. Le stockage des apps de la Forge n'est pas atteint "
+               "non plus (« Vider le stockage » sur la fiche d'une app).")
 

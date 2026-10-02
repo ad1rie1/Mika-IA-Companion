@@ -239,3 +239,38 @@ def test_a_higher_priority_weighs_more_among_goals_that_can_step(tmp_path):
     got, same, low, high = live(tmp_path, scenario)
     assert got.ok and not same.ok
     assert high == min(12.0, low + params(None).priority_step)
+
+
+def test_editing_a_task_never_writes_the_forgotten_mark_and_an_emptied_note_is_erased(tmp_path):
+    """« Modifier la tâche » part du vrai texte : renvoyer la mention « (oublié) » ne la réécrit pas comme du texte,
+    et vider la note l'efface (CON-19)."""
+    async def scenario(kernel, llm):
+        from tests.fixtures.mika import connect
+
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        gid = str(await explore(kernel))
+        await perform(kernel, "goals.pause", form(), by="user_1", subject=gid, nonce="p")
+        await perform(kernel, "goals.tache_ajouter", form(text="Lister les consoles"), by="user_1", subject=gid,
+                      nonce="t1")
+        await perform(kernel, "goals.tache_modifier", row_form({"task": "1"}, text="Lister les consoles",
+                                                               note="il en manque deux"),
+                      by="user_1", subject=gid, nonce="e1")
+        out = {"forgotten": await perform(kernel, "goals.tache_modifier",
+                                          row_form({"task": "1"}, text="(oublié)", note="il en manque deux"),
+                                          by="user_1", subject=gid, nonce="e2")}
+        out["cleared"] = await perform(kernel, "goals.tache_modifier", row_form({"task": "1"},
+                                                                                text="Lister les consoles", note=""),
+                                       by="user_1", subject=gid, nonce="e3")
+        g = kernel.mind.frame().state("goals").goals[int(gid)]
+        texts = kernel.mind.store.content([g.tasks[0].text_ref])
+        out["task"] = (texts.get(g.tasks[0].text_ref), g.tasks[0].note_ref)
+        out["resume"] = await tab(kernel, "resume", gid)
+        return out
+
+    out = live(tmp_path, scenario)
+    assert not out["forgotten"].ok  # « (oublié) » n'est pas un texte : rien n'a changé
+    assert out["cleared"].ok and out["task"] == ("Lister les consoles", "")  # la note vidée est effacée
+    plan = next(b for b in nested(out["resume"]) if getattr(b, "title", "").startswith("Plan de travail"))
+    [row] = plan.rows
+    [slot] = [b for b in nested(row.detail) if isinstance(b, ActionSlot) and b.action == "goals.tache_modifier"]
+    assert dict(slot.initial) == {"task": "1", "text": "Lister les consoles", "note": ""}  # le vrai texte

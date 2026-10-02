@@ -74,6 +74,17 @@ def _reply_wait(frame: Frame, seq: int) -> int | None:
 #: les lots qu'un projet peut avoir (chaque projet choisit les siens parmi eux)
 PROJECT_TOOLS = frozenset({"projects", "workshop", "memory", "email", "rss", "camera", "forge", "forge_apps"})
 
+# Les lots « en main » de chaque sorte d'épisode : ce qu'une conversation ordinaire sert vraiment — chercher
+# dans sa mémoire, dire qu'une promesse est tenue, poser un rappel. Le reste (l'identité, les projets, le
+# courrier, la Forge…) reste offert, à la demande : le modèle le cherche quand il en a besoin, et une
+# réponse ordinaire ne porte plus trente outils d'emblée (ni l'invitation à « vérifier » ce que ses sections
+# lui disent déjà). Un épisode dont le candidat a choisi ses lots (un pas sur un but, une exécution de
+# projet) les a tous en main.
+REPLY_IN_HAND = frozenset({"memory", "goals"})
+INITIATIVE_IN_HAND = frozenset({"memory"})
+STEP_IN_HAND = frozenset({"goals", "memory"})
+PROJECT_IN_HAND = frozenset({"projects", "workshop", "memory"})
+
 
 def policies() -> dict[str, EpisodePolicy]:
     return {
@@ -82,27 +93,29 @@ def policies() -> dict[str, EpisodePolicy]:
                                   tool_bundles=frozenset({"memory", "identity", "goals", "projects", "email", "rss",
                                                           "camera", "forge", "forge_apps", "self", "attention",
                                                           "social"}),
-                                  core_bundles=frozenset({"memory", "identity", "goals"})),
+                                  core_bundles=REPLY_IN_HAND),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
                                        tool_bundles=frozenset({"memory", "identity", "rss", "forge_apps", "self",
                                                                "attention", "social"}),
-                                       core_bundles=frozenset({"memory", "identity"})),
+                                       core_bundles=INITIATIVE_IN_HAND),
         # un pas de travail : sa voix (compacte), pour elle seule — ni fil, ni livraison ; le verdict fait l'affect
         Kind.STEP: EpisodePolicy(kind=Kind.STEP, role=Role.STEP, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=step_brief,
                                  max_tool_turns=12, max_tokens=2048, deadline_s=300.0,
                                  tool_bundles=frozenset({"goals", "memory", "projects", "email", "rss",
-                                                         "camera", "forge", "forge_apps"})),
+                                                         "camera", "forge", "forge_apps"}),
+                                 core_bundles=STEP_IN_HAND),
         # une exécution sur un projet, dans son mode à elle : sa voix (compacte), son humeur, ses avis — pour
         # elle seule, ni fil ni livraison ; ses outils, ceux du projet (``bundles`` du candidat)
         Kind.WORK: EpisodePolicy(kind=Kind.WORK, role=Role.PROJECT, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=work_brief,
-                                 max_tool_turns=16, max_tokens=4096, deadline_s=600.0, tool_bundles=PROJECT_TOOLS),
+                                 max_tool_turns=16, max_tokens=4096, deadline_s=600.0, tool_bundles=PROJECT_TOOLS,
+                                 core_bundles=PROJECT_IN_HAND),
         # une exécution impersonnelle : aucune persona, aucune section affective
         Kind.JOB: EpisodePolicy(kind=Kind.JOB, role=Role.JOB, voice=False, priority=2, lane="background",
                                 visible=False, delivered=False, brief=job_brief, max_tool_turns=16, max_tokens=4096,
-                                deadline_s=600.0, tool_bundles=PROJECT_TOOLS,
+                                deadline_s=600.0, tool_bundles=PROJECT_TOOLS, core_bundles=PROJECT_IN_HAND,
                                 muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER})),
         # une tâche qu'une faculté lui confie (préparer un brouillon de réponse) : sa voix, pour elle seule
         Kind.TASK: EpisodePolicy(kind=Kind.TASK, role=Role.STEP, priority=2, lane="background",

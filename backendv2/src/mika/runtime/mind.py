@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections import deque
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -28,7 +29,16 @@ from typing import Any
 from mika.kernel.builtin import BOOT
 from mika.kernel.clock import Clock
 from mika.kernel.codec import canonical_json, digest
-from mika.kernel.events import Content, Draft, Event, EventType, Origin, Payload, VoiceProvenance
+from mika.kernel.events import (
+    RETIRED_OWNER,
+    Content,
+    Draft,
+    Event,
+    EventType,
+    Origin,
+    Payload,
+    VoiceProvenance,
+)
 from mika.kernel.facts import FactView, ReduceContext
 from mika.kernel.faculty import Tier
 from mika.kernel.frame import Audience, EpisodeRef, Frame
@@ -40,6 +50,9 @@ from mika.ports.store import AppendBatch, ContentRow, EventStore, OutboxRow, Sna
 from mika.runtime.boundary import Failed, call
 
 log = logging.getLogger("mika.mind")
+
+#: les dernières anomalies gardées en mémoire (réducteurs qui lèvent, instantanés impossibles…)
+ANOMALIES_KEPT = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +115,11 @@ class Mind:
         self._last_snapshot_at = 0
         self.traces: list[Trace] = []
         self._trace_size = trace_size
-        self.anomalies: list[str] = []
+        self.anomalies: deque[str] = deque(maxlen=ANOMALIES_KEPT)
+        #: les tranches qu'on ne sait pas mettre en instantané (elles se reconstruisent depuis la genèse)
+        self.unsnapshotted: set[str] = set()
+        #: les types d'événements relus sans propriétaire (une faculté retirée de la composition)
+        self.retired: set[str] = set()
 
     # ── lecture ────────────────────────────────────────────────────────────
     @property
@@ -141,6 +158,7 @@ class Mind:
     # ── démarrage ──────────────────────────────────────────────────────────
     async def boot(self, *, append_boot: bool = True) -> BootReport:
         await self.store.open()
+        self._check_round_trip()
         snap = self.store.latest_snapshot()
         root = self.registry.initial_root()
         stale: set[str] = set()
@@ -156,28 +174,55 @@ class Mind:
         self._root = root
         self._last_snapshot_seq = snap.seq if snap else 0
         self._last_snapshot_at = snap.at if snap else 0
+        if self.retired:
+            log.warning("types d'événements retirés (relus sans effet) : %s", ", ".join(sorted(self.retired)))
+            self.trace("retired", types=sorted(self.retired))
         if append_boot:
             await self.append([BOOT.draft(code=self.code)], emitter="kernel", origin=Origin.KERNEL, correlation="boot")
         return BootReport(snap.seq if snap else 0, replayed, tuple(sorted(stale)), self.head)
+
+    def _check_round_trip(self) -> None:
+        """Chaque tranche doit pouvoir aller en instantané et en revenir : vérifié au démarrage sur son état
+        initial. Une tranche qui ne le peut pas est tenue hors des instantanés (elle se reconstruit depuis la
+        genèse) et signalée — jamais un instantané qui bloquerait les écritures ou le prochain démarrage."""
+        initial = self.registry.initial_root()
+        for owner in self.registry.persisted_owners():
+            adapter = self.registry.slice_adapter(owner)
+            back = call(lambda a=adapter, o=owner: a.validate_python(a.dump_python(initial.slices[o], mode="json")),
+                        label=f"aller-retour de la tranche {owner}")
+            if isinstance(back, Failed) or back != initial.slices[owner]:
+                self.unsnapshotted.add(owner)
+                self.anomalies.append(f"instantané impossible pour {owner} : hors des instantanés")
 
     async def close(self) -> None:
         await self.store.close()
 
     def decode(self, stored: StoredEvent) -> Event[Any]:
-        t, data = self.registry.events.decode(stored.type, stored.v, stored.data)
+        t, data = self.registry.events.decode_or_retired(stored.type, stored.v, stored.data)
+        if t.owner == RETIRED_OWNER:
+            self.retired.add(t.name)
         return Event(
             seq=stored.seq, id=stored.id, type=t, at=stored.at, data=data, causation=stored.causation,
             correlation=stored.correlation, basis=stored.basis, origin=Origin(stored.origin),
         )
 
     def snapshot_data(self, root: Root) -> str:
+        """L'instantané d'une racine. Une tranche qu'on ne sait pas sérialiser en est absente (elle se
+        reconstruira depuis la genèse au démarrage) et le dit — jamais d'exception ici : l'instantané est
+        écrit dans la transaction d'un ajout, et un échec bloquerait toutes les écritures."""
         slices = {}
         for owner in self.registry.persisted_owners():
+            if owner in self.unsnapshotted:
+                continue
             adapter = self.registry.slice_adapter(owner)
-            slices[owner] = {
-                "v": self.registry.faculties[owner].state_version,
-                "data": adapter.dump_python(root.slices[owner], mode="json"),
-            }
+            data = call(lambda a=adapter, o=owner: _jsonable(a.dump_python(root.slices[o], mode="json")),
+                        label=f"instantané de {owner}")
+            if isinstance(data, Failed):
+                self.unsnapshotted.add(owner)
+                self.anomalies.append(f"instantané impossible pour {owner} @{root.seq}: {data.error!r}")
+                self.trace("snapshot_failed", owner=owner, seq=root.seq, error=repr(data.error))
+                continue
+            slices[owner] = {"v": self.registry.faculties[owner].state_version, "data": data}
         return canonical_json(
             {"seq": root.seq, "at": root.at, "slices": slices,
              "changed": root.changed.to_dict(), "tainted": root.tainted.to_dict()}
@@ -194,7 +239,13 @@ class Mind:
             if entry is None or entry["v"] != f.state_version:
                 stale.add(owner)
                 continue
-            slices[owner] = self.registry.slice_adapter(owner).validate_python(entry["data"])
+            got = call(self.registry.slice_adapter(owner).validate_python, entry["data"],
+                       label=f"relecture de l'instantané de {owner}")
+            if isinstance(got, Failed):
+                stale.add(owner)  # illisible : reconstruite depuis la genèse, plutôt qu'un démarrage impossible
+                self.anomalies.append(f"instantané illisible pour {owner} : reconstruite ({got.error!r})")
+                continue
+            slices[owner] = got
         root = Root(
             seq=int(data["seq"]), at=int(data["at"]), slices=FrozenDict(slices),
             changed=FrozenDict({k: int(v) for k, v in data.get("changed", {}).items()}),
@@ -337,7 +388,7 @@ class Mind:
 
             # 3. garde
             if guard is not None:
-                failure = check(
+                failure = _checked(
                     guard,
                     holder=holder or correlation,
                     basis_view=FactView(basis or head_root, now, self.registry),
@@ -374,6 +425,8 @@ class Mind:
                 if d.dedupe_key is not None:
                     dedupe.append((d.type.name, d.dedupe_key, seq))
                 for eff in self.registry.effects.get(d.type.name, ()):
+                    if eff.when is not None and call(eff.when, d.data, label=f"effet {eff.owner}") is False:
+                        continue  # rien à faire pour cette charge utile (un prédicat qui lève : en file quand même)
                     outbox.append(OutboxRow(f"{eid}:{eff.owner}", seq, f"{eff.owner}:{d.type.name}"))
                 root = self._apply(root, ev)
 
@@ -483,8 +536,8 @@ class Mind:
         for corr, inf in list(self._inflight.items()):
             if corr == author:
                 continue
-            failure = check(inf.guard, holder=inf.holder,
-                            basis_view=FactView(inf.basis, now, self.registry), head_view=head_view)
+            failure = _checked(inf.guard, holder=inf.holder,
+                               basis_view=FactView(inf.basis, now, self.registry), head_view=head_view)
             if failure is not None:
                 self._inflight.pop(corr, None)
                 self.trace("superseded", correlation=corr, guard=failure.guard, reason=failure.reason,
@@ -550,10 +603,27 @@ class Mind:
 
     @staticmethod
     def _decode_with(registry: Registry, stored: StoredEvent) -> Event[Any]:
-        t, data = registry.events.decode(stored.type, stored.v, stored.data)
+        t, data = registry.events.decode_or_retired(stored.type, stored.v, stored.data)
         return Event(stored.seq, stored.id, t, stored.at, data, stored.causation, stored.correlation,
                      stored.basis, Origin(stored.origin))
 
 
 def event_type_names(types: Iterable[EventType[Any]]) -> set[str]:
     return {t.name for t in types}
+
+
+def _jsonable(data: Any) -> Any:
+    """Une tranche vidée en JSON doit s'écrire en JSON canonique (sinon l'instantané entier échouerait)."""
+    canonical_json(data)
+    return data
+
+
+def _checked(guard: Guard, *, holder: str, basis_view: FactView, head_view: FactView) -> Superseded | None:
+    """``check`` qui ne lève jamais : une garde illisible (un prédicat qui lève, un fait qui ne se calcule
+    plus) ne tient plus — l'épisode est supplanté, et l'ajout d'autrui n'échoue pas après son commit."""
+    got = call(lambda: check(guard, holder=holder, basis_view=basis_view, head_view=head_view),
+               label=f"garde « {guard.name} »")
+    if isinstance(got, Failed):
+        return Superseded(guard.name, f"la garde a levé : {got.error!r}"[:300], basis=basis_view.root.seq,
+                          head=head_view.root.seq)
+    return got

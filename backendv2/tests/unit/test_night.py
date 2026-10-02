@@ -423,8 +423,12 @@ def test_her_journal_says_what_she_did_promised_and_how_her_mood_turned(tmp_path
     assert "tu as bloqué sur « Réparer son vieux lecteur »" in tuesday
     assert "CANARI-VEILLE" not in tuesday  # la veille n'est pas cette journée
     assert "Ce que tu as promis : « lui envoyer la recette » (à « Adrien »)." in tuesday
-    assert "Ton humeur en parlant : le matin, plutôt contente ; l'après-midi, plutôt contente ; le soir, plutôt " \
-        "triste." in tuesday
+    # le soir, elle est triste ; si elle écrit encore à Adrien avant de s'endormir (vers 23 h, il est là et elle
+    # est éveillée : une initiative ordinaire, qu'un murmure « sans suite » retient une fois sur cinq — un tirage),
+    # ce dernier mot compte pour « la nuit », triste lui aussi
+    mood = next(line for line in tuesday.splitlines() if line.startswith("Ton humeur en parlant : "))
+    evening = "Ton humeur en parlant : le matin, plutôt contente ; l'après-midi, plutôt contente ; le soir, plutôt triste"
+    assert mood in (evening + ".", evening + " ; la nuit, plutôt triste.")
 
 
 def test_a_dream_made_of_a_confidence_is_not_told_to_someone_else(tmp_path):

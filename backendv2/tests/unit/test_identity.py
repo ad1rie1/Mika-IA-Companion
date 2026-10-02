@@ -53,6 +53,8 @@ DETECTION = [
     ("moi c'est pizza ce soir, et toi ?", None, None, "« moi c'est » au milieu d'une phrase : un menu, pas un nom"),
     ("moi c'est les pâtes", None, None, "un nom commun"),
     ("moi c'est Lyon", None, None, "une ville"),
+    ("le meilleur jeu pour moi c'est Zelda", None, None, "« moi c'est » au milieu d'une phrase : un avis, pas un nom"),
+    ("moi c'est Marc qui conduit ce soir", None, None, "le nom ne ferme pas la proposition : Marc conduit"),
     ("Je suis Français", None, None, "une nationalité"),
     ("je m'appelle pizza", None, None, "un nom commun, même dans une tournure sûre"),
     ("je ne suis pas Thomas en fait", None, "Thomas", "un démenti, même suivi d'autres mots"),

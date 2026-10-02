@@ -195,7 +195,9 @@ def test_several_messages_in_the_night_get_one_answer_in_the_morning(tmp_path):
 
     (ended, said_), llm = run(tmp_path, scenario)
     assert len(said_) == 1 and _hm(said_[0].at) >= 6  # une réponse, le matin
-    assert sum(1 for e in ended if e.data.outcome == "abstained") == 2  # les deux premiers, lus avec le dernier
+    # elle répond au dernier, et sa réponse règle les trois (son tour : ADR 0040) — aucun « sans réponse »
+    assert len(said_[0].data.answers) == 3 and said_[0].data.reply_to == max(said_[0].data.answers)
+    assert not [e for e in ended if e.data.unanswered]
     shown = replies_to(llm, "user_2")[0].messages[-1].content
     assert "Ses messages de la nuit" in shown
 
@@ -214,7 +216,10 @@ def test_when_the_one_who_waited_wakes_her_she_answers_once(tmp_path):
             [e.data.outcome for e in of(kernel, rt.EPISODE_ENDED) if e.data.target == "user_2"]
 
     (said_, outcomes), _ = run(tmp_path, scenario)
-    assert len(said_) == 1 and outcomes.count("abstained") == 1, ([(e.data.reply_to, e.data.text.text) for e in said_], outcomes)
+    # une seule réponse, au message urgent, qui règle aussi celui de 2 h (le tour : ADR 0040)
+    assert len(said_) == 1 and len(said_[0].data.answers) == 2, ([(e.data.reply_to, e.data.answers) for e in said_],
+                                                                 outcomes)
+    assert outcomes == ["done"]
 
 
 def test_a_message_waiting_for_her_survives_a_restart_and_is_answered(tmp_path):

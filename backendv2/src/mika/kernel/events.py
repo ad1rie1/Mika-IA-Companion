@@ -170,6 +170,33 @@ class EventRegistry:
         raw = t.upcast(version, json.loads(raw_json))
         return t, t.payload.model_validate(raw)
 
+    def decode_or_retired(self, name: str, version: int, raw_json: str) -> tuple[EventType[Any], Payload]:
+        """Comme ``decode`` ; un type que plus personne ne déclare (une faculté ou un plugin retiré de la
+        composition) se relit comme un événement **retiré** : son contenu brut, aucun réducteur — le journal
+        reste lisible, la vie continue sans ce qu'elle ne sait plus faire."""
+        if name in self._by_name:
+            return self.decode(name, version, raw_json)
+        try:
+            raw = json.loads(raw_json)
+        except ValueError:
+            raw = {}
+        return retired(name, version), Retired(data=raw if isinstance(raw, dict) else {})
+
+
+#: Le propriétaire d'un événement retiré (son type n'est plus déclaré par personne).
+RETIRED_OWNER = "retired"
+
+
+class Retired(Payload):
+    """La charge utile d'un événement retiré, telle qu'elle était écrite."""
+
+    data: dict[str, Any] = {}
+
+
+def retired(name: str, version: int = 1) -> EventType[Any]:
+    """Le type d'un événement que plus personne ne déclare : aucun réducteur ne le voit, rien ne l'émet."""
+    return EventType(name=name, owner=RETIRED_OWNER, payload=Retired, version=version)
+
 
 def event_type(
     name: str,

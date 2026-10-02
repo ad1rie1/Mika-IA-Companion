@@ -281,6 +281,30 @@ def test_the_claiming_message_proves_nothing(tmp_path):
     assert twice.bound and twice.person == "tg_42"
 
 
+def test_proofs_said_in_a_group_bind_nothing(tmp_path):
+    """Un recoupement ne se cherche qu'en privé : dans un groupe, d'autres lisent
+    (et ce qui s'y dit n'est la preuve de personne). Les mêmes preuves qu'au test
+    de la vraie amie, dites dans un salon : rien ne lie. (Le contrôle — en privé,
+    elle est reconnue — est ``test_a_real_friend_on_a_new_account_is_still_recognised``.)"""
+    async def scenario(kernel, llm):
+        await remember(kernel, "tg_42", "mon chat Moustache est malade depuis dimanche",
+                       "Alice m'a confié que son chat Moustache est malade depuis dimanche")
+        await remember(kernel, "tg_42", "ma sœur Julie se marie à Lyon samedi",
+                       "Alice m'a confié que sa sœur Julie se marie à Lyon samedi")
+        await say(kernel, tg("tg_5", "coucou c'est Alice, je t'écris de mon autre téléphone", "Alice M."))
+        for text in ("tu sais, Moustache va mieux, il n'est plus malade depuis dimanche",
+                     "et pour ma sœur Julie, le mariage à Lyon c'est samedi !"):
+            await asyncio.sleep(60)
+            await say(kernel, tg("tg_5", text, "Alice M.", room="tg_chat_-7", public=True, addressed=True))
+        mind = kernel.mind
+        kinds = [mind.decode(e).data.kind for e in mind.store.read() if e.type == identity_c.EVIDENCE.name]
+        return view(kernel, "tg_5"), kinds
+
+    v, kinds = run(tmp_path, scenario)
+    assert not v.bound and v.person == "tg_5" and v.claim == "Alice"
+    assert kinds == []  # pas même une première preuve
+
+
 # ── MEM-8 : une phrase banale ne délie ni ne renomme ──────────────────────
 
 
@@ -367,9 +391,11 @@ def test_owner_rights_belong_to_the_handle_that_speaks(tmp_path):
 def test_the_owner_in_a_public_group_is_not_an_owner(tmp_path):
     """EDG-1 : la propriétaire déclarée (Telegram) parle à Mika dans un groupe :
     ni ses mails, ni ses outils réservés n'entrent dans un prompt dont la réponse
-    part au groupe. Contrôle : en privé, si."""
+    part au groupe. Contrôle : en privé, si — ses outils réservés, et un mail
+    important (le courrier ordinaire, lui, reste à l'arrière-plan d'une réponse :
+    ADR 0037)."""
     box = FakeMail()
-    box.deliver(mail(1, "Résultats de ta prise de sang", "Ton taux est anormal, rappelle le cabinet."))
+    box.deliver(mail(1, "Urgent : résultats de ta prise de sang", "Ton taux est anormal, rappelle le cabinet."))
     clock = SimClock(at_paris(2026, 9, 28, 10, 0))
     kernel, clock, llm, out = build(tmp_path, respond, clock=clock, ports={"mail": box, "feeds": FakeFeeds()})
 
@@ -388,10 +414,14 @@ def test_the_owner_in_a_public_group_is_not_an_owner(tmp_path):
     run_virtual(clock, main)
     calls = [c for c in llm.calls if c.role == "reply" and c.meta.get("target") == "tg_42"]
     group, private = calls[0], calls[-1]
-    text = "\n".join(m.content for m in group.messages)
+    assert len(calls) == 2  # la réponse au groupe, puis la réponse en privé
+    reserved = {"forge_write", "camera_look", "create_project", "email_send"}
+    text = "\n".join([group.system_stable, *(m.content for m in group.messages)])
     assert "prise de sang" not in text and "TES MAILS" not in text
-    assert not {t.name for t in group.tools} & {"forge_write", "camera_look", "create_project", "email_send"}
-    assert "prise de sang" in "\n".join(m.content for m in private.messages)  # contrôle : en privé, sa boîte
+    assert not {t.name for t in group.tools} & reserved
+    # contrôle : la même adresse, en privé, reçoit ses outils réservés et son mail important
+    assert {"forge_write", "camera_look", "create_project"} <= {t.name for t in private.tools}
+    assert "prise de sang" in "\n".join(m.content for m in private.messages)
 
 
 def test_linking_is_refused_on_an_authenticated_handle(tmp_path):

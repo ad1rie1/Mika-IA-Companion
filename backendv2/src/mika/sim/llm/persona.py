@@ -202,7 +202,7 @@ class PersonaSimLLM:
             names = _NAME.findall(message)
             who = f" {names[0]}" if names else ""
             reminder = _section(req, "LE RAPPEL")
-            done = _section(req, "CE QUE TU AS MENÉ À BOUT")
+            done = _section(req, "CE QUE TU AS MENÉ À BOUT") or _section(req, "CE À QUOI TU AS REPENSÉ")
             if reminder:
                 text, tone = f"Petit rappel, comme promis : {reminder}", Tone((), "happy", 0.5, "")
             elif done:

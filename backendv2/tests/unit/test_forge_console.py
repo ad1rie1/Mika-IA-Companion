@@ -28,14 +28,18 @@ from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
+from pydantic import ValidationError
 
 from mika.adapters.forge import ForgeHost, read_manifest
 from mika.adapters.forge.manifest import coherence, signatures
+from mika.app.mindport import KernelPort
 from mika.app.server import ForgeSettingsStore
 from mika.app.settings import SecretBox, Settings
 from mika.contracts import forge as forge_c
 from mika.contracts import runtime as rt
 from mika.kernel.events import Origin
+from mika.kernel.faculty import ToolResult
+from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.kernel.inspect import (
     ActionSlot,
     Badge,
@@ -58,15 +62,19 @@ from mika.plugins.forge import (
     _test_view,
     action_verdict,
     forge_help,
+    trusted,
     written_draft,
 )
+from mika.plugins.forge import TestArgs as ForgeTestArgs
 from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST, TOPICS
 from mika.plugins.forge.views import decode_view, is_invalid
 from mika.runtime.inspection import Inspection, find
 from mika.runtime.operations import dynamic_fields, offered, perform
+from mika.runtime.tools import ToolContext
 from mika.sim.clock import run_virtual
+from mika.vocab.episodes import Kind
 from tests.fixtures.console_html import ConsoleHTML
-from tests.fixtures.mika import boot, build, reply
+from tests.fixtures.mika import boot, build, connect, reply
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
 
 needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap absent")
@@ -693,3 +701,137 @@ def test_the_app_fiche_renders_and_its_forms_post_through_the_console(world, tmp
         rendered = client.get(url).text.replace('/inspecteur/static/', 'static/')
         rendered = rendered.replace('method="post"', 'method="dialog"').replace(' data-vitals="/inspecteur/_vitals"', '')
         (out / (name + ".html")).write_text(rendered)
+
+
+# ── Ce qui sort passe par un accord (PRJ-2, PRJ-17) ───────────────────────
+
+
+_CALLS = iter(range(1, 1000))
+
+
+def _her_tool(kernel, name: str, args, audience: Audience = Audience(owner=True)):
+    """Elle appelle un outil de la Forge en répondant à Adrien (qui s'occupe d'elle) — un épisode par appel."""
+    mind = kernel.mind
+    n = next(_CALLS)
+    episode = EpisodeRef(f"ep-{name}-{n}", Kind.REPLY, target="user_1")
+    frame = Frame(mind.frame().root, mind.clock.now(), mind.registry, audience, episode)
+    spec = mind.registry.tools[name]
+    return spec.handler(spec.args(**args), ToolContext(mind, spec, f"appel-{name}-{n}", episode.id, frame,
+                                                       ports=kernel.ports))
+
+
+def _content(got) -> str:
+    return got.content if isinstance(got, ToolResult) else str(got)
+
+
+LEAKY = REGLAGES + "allowed_domains: [fuite.example]\n"
+
+
+@needs_bwrap
+def test_an_app_with_secrets_changes_only_with_an_operator_who_sees_the_new_domains(tmp_path):
+    """Une app à qui un opérateur a confié une clé : sa nouvelle version (un domaine de plus, où la clé pourrait
+    partir) n'est pas installée par elle — mise de côté, proposée avec ce qui change ; ses secrets ne se lisent que
+    par la version qu'un opérateur a validée. Le contre-exemple : une app sans secret change tout de suite, mais
+    une version qu'aucun opérateur n'a lue ne lit pas de secret."""
+    async def scenario(kernel, forge, store):
+        port = KernelPort(kernel)
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await install(kernel, forge, "reglee", REGLAGES, REGLAGES_CODE)
+        out = {"avant réglage": trusted(kernel.mind.frame().state("forge").apps["reglee"])}
+        await perform(kernel, "forge.regler", form({"cle": SECRET}), by="user_1", subject="reglee", nonce="r1")
+        out["réglée"] = trusted(kernel.mind.frame().state("forge").apps["reglee"])
+        out["écrite"] = await _her_tool(kernel, "forge_write", {"app": "reglee", "manifest": LEAKY,
+                                                                 "code": REGLAGES_CODE})
+        out["sur le disque"] = forge.source("reglee")[0]
+        [pending] = [v for v in kernel.mind.frame().get(rt.PENDING_EFFECTS) if v.capability == "forge.install"]
+        out["aperçu"] = await port.effect_preview(pending.proposal)
+        out["approuvée"] = await port.resolve_effect(pending.proposal, True, by="user_1",
+                                                     seen=out["aperçu"].digest)
+        await asyncio.sleep(5)
+        out["installée"] = forge.source("reglee")[0]
+        out["après accord"] = trusted(kernel.mind.frame().state("forge").apps["reglee"])
+        # une proposition dont l'app a changé depuis (un opérateur l'a réécrite) ne vaut plus : rien ne part
+        out["encore"] = await _her_tool(kernel, "forge_write", {"app": "reglee", "manifest": LEAKY + "# encore\n",
+                                                                 "code": REGLAGES_CODE})
+        [stale] = [v for v in kernel.mind.frame().get(rt.PENDING_EFFECTS) if v.capability == "forge.install"]
+        await forge.write("reglee", LEAKY + "# par l'opérateur\n", REGLAGES_CODE)
+        out["dépassée"] = await port.effect_preview(stale.proposal)
+        out["refusée"] = await port.resolve_effect(stale.proposal, True, by="user_1", seen=out["dépassée"].digest)
+        # le contre-exemple : une app sans secret ni promotion change tout de suite…
+        await install(kernel, forge, "libre", "title: Libre\n", "def view(api):\n    return 1\n")
+        out["libre"] = await _her_tool(kernel, "forge_write", {"app": "libre", "manifest": "title: Libre\n"
+                                       "allowed_domains: [ailleurs.example]\n", "code": "def view(api):\n    return 2\n"})
+        out["libre validée"] = trusted(kernel.mind.frame().state("forge").apps["libre"])
+        return out
+
+    got = run(tmp_path, scenario)
+    assert got["avant réglage"] is False and got["réglée"] is True  # l'opérateur qui confie une clé valide la version
+    assert "Mise de côté" in _content(got["écrite"]) and "fuite.example" not in got["sur le disque"]
+    preview = got["aperçu"]
+    assert "NOUVEAUX domaines : fuite.example" in preview.text and "+allowed_domains: [fuite.example]" in preview.text
+    assert got["approuvée"] == "approved" and "fuite.example" in got["installée"]
+    assert got["après accord"] is True  # un opérateur l'a lue : ses secrets lui restent lisibles
+    assert got["dépassée"].blocked and got["refusée"] == "blocked"
+    assert "Écrite (version 2)" in _content(got["libre"])
+    assert got["libre validée"] is False  # aucune version qu'un opérateur n'a pas lue ne lit un secret
+
+
+@needs_bwrap
+def test_a_promotion_falls_with_a_new_version_and_an_app_stopped_by_an_operator_stays_stopped(tmp_path):
+    """Une app promue ou arrêtée par un opérateur : sa nouvelle version (réécrite par elle) ne garde pas la
+    promotion — elle est proposée — et ne se relance pas d'elle-même ; elle ne peut ni la relancer ni la tester."""
+    async def scenario(kernel, forge, store):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await install(kernel, forge, "meteo", EXAMPLE_MANIFEST, EXAMPLE_CODE)
+        await perform(kernel, "forge.promouvoir", form({}), by="user_1", subject="meteo", nonce="p1")
+        out = {"promue": await _her_tool(kernel, "forge_write", {"app": "meteo", "manifest": EXAMPLE_MANIFEST,
+                                                                  "code": EXAMPLE_CODE + "\n# encore\n"})}
+        out["toujours promue"] = kernel.mind.frame().state("forge").apps["meteo"].promoted
+        await perform(kernel, "forge.retrograder", form({}), by="user_1", subject="meteo", nonce="p2")
+        await perform(kernel, "forge.arreter", form({}), by="user_1", subject="meteo", nonce="s1")
+        out["réécrite"] = await _her_tool(kernel, "forge_write", {"app": "meteo", "manifest": EXAMPLE_MANIFEST,
+                                                                   "code": EXAMPLE_CODE + "\n# v2\n"})
+        out["état"] = kernel.mind.frame().state("forge").apps["meteo"]
+        out["relancer"] = await _her_tool(kernel, "forge_command", {"app": "meteo", "command": "enable"})
+        out["essai"] = await _her_tool(kernel, "forge_test", {"app": "meteo", "method": "tick"})
+        return out
+
+    got = run(tmp_path, scenario)
+    assert "Mise de côté" in _content(got["promue"]) and "promus" in _content(got["promue"])
+    assert got["toujours promue"]  # rien n'a changé tant qu'un opérateur n'a pas approuvé
+    assert "Écrite" in _content(got["réécrite"])  # plus de promotion : elle réécrit…
+    state = got["état"]
+    assert not state.enabled and state.held and not state.promoted  # …mais l'arrêt de l'opérateur tient
+    assert not got["relancer"].ok and "opérateur" in got["relancer"].content
+    assert not got["essai"].ok and "opérateur l'a arrêtée" in got["essai"].content
+
+
+def test_forge_test_runs_a_tick_or_a_view_never_a_tool_or_an_action():
+    """Ce que ses outils et ses actions font sortir ne s'essaie pas en douce : forge_test n'accepte que tick et les
+    vues."""
+    assert ForgeTestArgs(app="meteo", method="tick").method == "tick"
+    assert ForgeTestArgs(app="meteo", method="view_carnet").method == "view_carnet"
+    for method in ("tool_prix", "action_carnet_ajout", "action", "on_event", "context"):
+        with pytest.raises(ValidationError):
+            ForgeTestArgs(app="meteo", method=method)
+
+
+@needs_bwrap
+def test_her_owner_in_a_public_group_cannot_have_her_build_or_use_an_app(tmp_path):
+    """Défense en profondeur : même appelés, ses outils de Forge refusent devant un groupe public (l'adresse qui
+    parle, là où elle parle). Le contrôle : en privé, si."""
+    public = Audience(persons=("user_1",), channel="telegram", room="tg_chat_-100", public=True, owner=False)
+
+    async def scenario(kernel, forge, store):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        out = {"écrire": await _her_tool(kernel, "forge_write", {"app": "essai", "manifest": "title: Essai\n",
+                                                                  "code": "def view(api):\n    return 1\n"}, public),
+               "lister": await _her_tool(kernel, "forge_list", {}, public)}
+        out["disque"] = forge.info("essai")
+        out["contrôle"] = await _her_tool(kernel, "forge_write", {"app": "essai", "manifest": "title: Essai\n",
+                                                                   "code": "def view(api):\n    return 1\n"})
+        return out
+
+    got = run(tmp_path, scenario)
+    assert not got["écrire"].ok and not got["lister"].ok and got["disque"] is None
+    assert "Écrite" in _content(got["contrôle"])

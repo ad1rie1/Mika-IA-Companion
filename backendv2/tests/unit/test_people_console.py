@@ -168,6 +168,11 @@ def test_old_evidence_and_profiles_still_replay():
     bound = Handle(channel="telegram", trust=privacy.ChannelTrust.ACCOUNT, first_seen=0, name="Alice",
                    person="user_1", certainty=privacy.BOUND, via="operator")
     assert _apply(bound, SimpleNamespace(at=0, data=ev)).person is None  # le démenti ancien délie, comme avant
+    # « c'est pas grave », lu jadis comme un démenti de « Grave » : un nom qu'elle ne lui connaît pas ne délie rien
+    _t, grave = registry.events.decode("identity.evidence", 1, json.dumps(
+        {"handle": "tg_5", "kind": identity_c.DENIED, "name": "Grave", "item": None, "message": 4, "by": "kernel"}))
+    kept = _apply(bound, SimpleNamespace(at=0, data=grave))
+    assert kept.person == "user_1" and kept.name == "Alice" and kept.certainty == privacy.BOUND
     _t, profile = registry.events.decode("social.profile_revised", 1, json.dumps(
         {"person": "user_1", "summary": {"ref": "9.summary", "level": 2}, "tone": "doux", "interests": ["montagne"],
          "sensitive": ["sa santé"], "upto": 4, "call_id": "", "model": ""}))

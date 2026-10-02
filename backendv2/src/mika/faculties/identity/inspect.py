@@ -428,15 +428,17 @@ def why_level(certainty: float, trust: ChannelTrust, *, closeness: str, warmth: 
         return (f"certitude {number(certainty)} sous la barre ({number(pol.private_threshold)}) : "
                 "anodin seulement")
     rank = privacy.closeness_rank(closeness)
-    link = f"pour elle, {CLOSENESS_FR.get(closeness, closeness or 'une inconnue')} ; chaleur {number(warmth)}"
+    link = (f"pour elle, {CLOSENESS_FR.get(closeness, closeness or CLOSENESS_FR[social_c.STRANGER])} ; "
+            f"chaleur {number(warmth)}")
     warm = warmth >= pol.warmth_min and rank >= privacy.CLOSENESS_RANK[social_c.ACQUAINTANCE]
     if not (rank >= privacy.CLOSENESS_RANK[social_c.FRIEND] or warm):
-        return (f"aucun lien assez fort ({link}) : anodin — être amie, proche, ou une connaissance pour qui elle a "
-                f"une chaleur d'au moins {number(pol.warmth_min)} ouvrirait le personnel")
+        return (f"aucun lien assez fort ({link}) : anodin — une amitié, un lien proche, ou une connaissance pour "
+                f"qui elle a une chaleur d'au moins {number(pol.warmth_min)} ouvrirait le personnel")
     if certainty >= pol.confidence_threshold and rank >= privacy.CLOSENESS_RANK[social_c.CLOSE]:
-        return f"proche et reconnue à au moins {number(pol.confidence_threshold)} ({link}) : jusqu'aux confidences"
-    return (f"un lien ({link}) ouvre le personnel ; les confidences demandent une proche reconnue à au moins "
-            f"{number(pol.confidence_threshold)}")
+        return (f"un lien proche, et une certitude d'au moins {number(pol.confidence_threshold)} ({link}) : "
+                "jusqu'aux confidences")
+    return (f"un lien ({link}) ouvre le personnel ; les confidences demandent un lien proche et une certitude d'au "
+            f"moins {number(pol.confidence_threshold)}")
 
 
 def why_file(certainty: float, trust: ChannelTrust, *, public: bool) -> str:

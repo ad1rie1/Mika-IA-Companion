@@ -6,6 +6,17 @@ rendu au modèle. Un appel d'outil coupé par la limite de jetons est rejoué un
 fois avec une limite doublée. Un outil émet ses événements tout de suite ; le
 suivant voit l'état à jour (il lit ses propres écritures).
 
+Jamais un marqueur interne comme sa parole : au plafond de tours, ou quand un
+appel d'outil reste coupé, un **dernier tour sans outil** lui demande de
+répondre avec ce qu'elle sait ; s'il ne rend toujours pas de texte, la boucle
+rend un texte vide (l'épisode se règle en échec, rien n'est dit).
+
+Une écriture d'outil est dédoublonnée par ce qu'elle *est* dans l'épisode —
+``portée:outil:empreinte des arguments:occurrence:rang`` — jamais par
+l'identifiant d'appel du fournisseur (``call_0`` revient d'un épisode à
+l'autre). La portée d'une réponse est son tour de conversation : quand elle
+est supplantée puis recomposée, refaire le même appel ne refait pas l'écriture.
+
 Chaque appel d'outil laisse un ``ToolRecord`` (arguments et résultat bornés,
 durée lue sur l'horloge injectée) : de quoi répondre à « pourquoi a-t-elle dit
 ça ? » sans rejouer l'épisode.
@@ -21,19 +32,23 @@ from typing import TYPE_CHECKING, Any
 from pydantic import ValidationError
 
 from mika.contracts import runtime as rt
+from mika.kernel.codec import h64
 from mika.kernel.events import Draft, Origin
 from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, combine
 from mika.ports.llm import LLMGateway, LLMRequest, LLMResponse, Message, ToolCall, ToolDecl
+from mika.runtime import boundary
 from mika.runtime.boundary import Failed, acall
 
 if TYPE_CHECKING:
     from mika.runtime.mind import Commit, Mind
 
 TOOL_CALL_CAP_CEILING = 16_384
-TRUNCATED_MARKER = "[réponse tronquée avant l'appel d'outil]"
-MAX_TURNS_MARKER = "[trop d'appels d'outils : j'arrête là]"
+#: Ce qu'on lui dit au dernier tour, quand elle a épuisé ses tours d'outils (ou qu'un appel reste coupé) :
+#: répondre maintenant. Ce texte n'est jamais livré : c'est une consigne, pas sa parole.
+CLOSING = ("(Tu as fait le tour de ce que tu pouvais faire avec tes outils. Réponds maintenant, avec ce que tu "
+           "sais déjà, sans appeler d'outil.)")
 #: Clé que posent les fournisseurs quand les arguments d'un appel ne sont pas
 #: du JSON : l'appel est refusé au modèle, jamais exécuté avec des défauts.
 RAW_ARGS_KEY = "_raw"
@@ -56,6 +71,10 @@ class ToolContext:
     #: les appels d'outils déjà faits dans cet épisode (nom, réussi) : ce
     #: qu'elle a réellement fait, pour qui doit en juger (« fini » exige une preuve)
     calls: tuple[tuple[str, bool], ...] = ()
+    #: la portée du dédoublonnage de ses écritures (le tour d'une réponse ; l'épisode sinon)
+    dedupe_scope: str | None = None
+    #: ce qu'est l'appel dans l'épisode : ``outil:empreinte des arguments:occurrence`` (posé par la boucle)
+    call_key: str | None = None
     _emitted: int = 0
 
     @property
@@ -85,8 +104,9 @@ class ToolContext:
 
     async def _append(self, drafts: Sequence[Draft[Any]], *, emitter: str, guard: Guard | None = None) -> Commit:
         keyed = []
+        scope = self.dedupe_scope or self.episode_id
         for d in drafts:
-            key = d.dedupe_key or f"{self.call_id}:{self._emitted}"
+            key = d.dedupe_key or f"{scope}:{self.call_key or self.call_id}:{self._emitted}"
             self._emitted += 1
             keyed.append(replace(d, dedupe_key=key))
         commit = await self.mind.append(
@@ -176,12 +196,39 @@ async def run_tool_loop(
 ) -> LoopResult:
     """``clock`` date les appels d'outils (sans horloge : durées nulles) ;
     ``result``, s'il est donné, est rempli au fil de l'eau — ce qui a été fait
-    reste lisible quand l'épisode est coupé en route (délai, supplantation)."""
+    reste lisible quand l'épisode est coupé en route (délai, supplantation).
+    La boucle finie, de quelque façon que ce soit (réponse, plafond, coupure,
+    annulation), la passerelle la relâche (``release(call_id)``) : un
+    fournisseur à session n'attend pas son délai d'inactivité."""
+    try:
+        return await _loop(gateway, request, tools, make_context, max_turns=max_turns, clock=clock, result=result)
+    finally:
+        release(gateway, request.call_id)
+
+
+def release(gateway: Any, call_id: str) -> None:
+    """``gateway.release(call_id)`` s'il existe (facultatif) ; une panne n'empêche rien."""
+    hook = getattr(gateway, "release", None)
+    if callable(hook):
+        boundary.call(hook, call_id, label="relâcher une boucle de modèle")
+
+
+async def _loop(
+    gateway: LLMGateway,
+    request: LLMRequest,
+    tools: Mapping[str, ToolSpec],
+    make_context: Callable[[ToolSpec, str], ToolContext],
+    *,
+    max_turns: int,
+    clock: Callable[[], int] | None,
+    result: LoopResult | None,
+) -> LoopResult:
     result = result if result is not None else LoopResult(text="")
     result.stop = "running"  # chaque sortie le fixe ; resté tel quel, la boucle a été coupée en route
     now = clock or _no_clock
     req = request
     counts: dict[str, int] = {}
+    same: dict[str, int] = {}
     replayed = False
     for _turn in range(max_turns):
         resp = await gateway.call(req)
@@ -193,9 +240,7 @@ async def run_tool_loop(
                 replayed = True
                 req = replace(req, max_tokens=min(TOOL_CALL_CAP_CEILING, req.max_tokens * 2))
                 continue
-            result.text = (resp.text + "\n" + TRUNCATED_MARKER).strip()
-            result.stop = "truncated"
-            return result
+            return await _close(gateway, req, result, "truncated")
         if not resp.tool_calls:
             result.text = resp.text
             result.stop = resp.stop
@@ -222,6 +267,9 @@ async def run_tool_loop(
             ctx = make_context(spec, call.id)
             if isinstance(ctx, ToolContext):
                 ctx.calls = tuple(result.calls)
+                what = f"{call.name}:{_args_digest(call.args)}"
+                same[what] = same.get(what, 0) + 1
+                ctx.call_key = f"{what}:{same[what]}"
             t0 = now()
             out = await acall(spec.handler, args, ctx, label=f"outil {call.name}")
             elapsed = max(0, now() - t0)
@@ -238,8 +286,20 @@ async def run_tool_loop(
                                              _bounded(tr.content), elapsed))
             outputs.append(Message("tool", tr.content, tool_call_id=call.id, name=call.name, is_error=not tr.ok))
         req = req.extend(Message("assistant", resp.text, tool_calls=resp.tool_calls), *outputs)
-    result.text = MAX_TURNS_MARKER
-    result.stop = "max_turns"
+    return await _close(gateway, req, result, "max_turns")
+
+
+async def _close(gateway: LLMGateway, req: LLMRequest, result: LoopResult, stop: str) -> LoopResult:
+    """Le dernier tour, sans outil : ce qu'elle répond avec ce qu'elle sait. Un appel d'outil malgré tout
+    (ou une coupure) n'est pas une réponse — son texte n'est qu'un préambule (« je vérifie… ») : la boucle
+    rend alors un texte vide, et l'épisode se règle en échec plutôt que de dire un marqueur."""
+    resp = await gateway.call(req.extend(Message("user", CLOSING)))
+    result.responses += 1
+    result.last = resp
+    result.exchanges.append((req.call_id, resp))
+    answered = not resp.tool_calls and not resp.truncated_tool_call
+    result.text = resp.text if answered else ""
+    result.stop = stop
     return result
 
 
@@ -267,6 +327,16 @@ def _args_json(args: Mapping[str, Any]) -> str:
     except (TypeError, ValueError):
         raw = repr(dict(args))
     return _bounded(raw)
+
+
+def _args_digest(args: Mapping[str, Any]) -> str:
+    """L'empreinte des arguments entiers (jamais bornés : deux appels qui ne diffèrent qu'à la fin restent
+    deux appels)."""
+    try:
+        raw = json.dumps(dict(args), ensure_ascii=False, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        raw = repr(sorted(dict(args).items(), key=lambda kv: str(kv[0])))
+    return f"{h64('outil', raw):016x}"
 
 
 def _as_text(value: Any) -> str:

@@ -148,6 +148,9 @@ class ProcessSpec:
     lane: str = "background"
     reads: frozenset[str] = frozenset()
     wake_shapes: tuple[type, ...] = ()
+    #: au-delà, un passage est coupé et compte comme un échec (``None`` : l'échéance par défaut de
+    #: l'ordonnanceur) — un processus figé ne garde jamais sa place
+    deadline_s: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,11 +183,30 @@ class ProjectorSpec:
     projector: Any  # objet avec schema(), apply(conn, events), reset(conn)
 
 
+#: Les deux files de sortie : la parole et ce qui se montre (rapide, dans l'ordre de chaque destinataire),
+#: les capacités (lentes — une commande réseau, un envoi — chacune à part, en parallèle borné).
+DELIVERY_LANE = "delivery"
+CAPABILITY_LANE = "capability"
+
+
 @dataclass(frozen=True, slots=True)
 class EffectSpec:
+    """Ce qu'un événement commis fait partir hors du journal, par la file de sortie.
+
+    ``lane`` : ``delivery`` (la parole, les changements d'état) ou ``capability`` (un effet lent sur le monde).
+    ``deadline_s`` : au-delà, le gestionnaire est coupé et la ligne réessayée plus tard. ``when(charge)`` :
+    pure ; faux, l'événement ne met rien en file (évite des lignes sans objet). ``on_interrupted(ev, ports)`` :
+    pour un effet qui ne se rejoue pas sans risque — la ligne est marquée « en cours » avant de partir, et si
+    le processus meurt pendant, au démarrage suivant ce crochet décide : ``None`` la rejoue, des brouillons
+    (l'échec dit) la closent sans la relancer."""
+
     owner: str
     type: EventType[Any]
     fn: Callable[..., Any]
+    lane: str = DELIVERY_LANE
+    deadline_s: float = 60.0
+    when: Callable[[Any], bool] | None = None
+    on_interrupted: Callable[..., Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -328,6 +350,9 @@ class CapabilitySpec:
     description: str
     fn: Callable[..., Any]
     preview: Callable[..., Any] | None = None
+    #: se rejoue sans risque (lire, récupérer) : après un arrêt brutal pendant son exécution, elle repart
+    #: seule ; sinon (un envoi, une commande réseau) son échec est dit et personne ne la relance en silence
+    idempotent: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -535,6 +560,7 @@ class Faculty(Generic[S, Pm]):
         lane: str = "background",
         reads: Iterable[Declared | str] = (),
         wake_on_shapes: Iterable[type] = (),
+        deadline_s: float | None = None,
     ):
         wake = frozenset(w if isinstance(w, str) else w.name for w in wake_on)
         shapes = tuple(wake_on_shapes)
@@ -545,7 +571,7 @@ class Faculty(Generic[S, Pm]):
             self.processes.append(
                 ProcessSpec(
                     self.name, name, obj, wake, priority, catch_up,
-                    int(max_quantum_s * 1_000_000), lane, _names(reads), shapes,
+                    int(max_quantum_s * 1_000_000), lane, _names(reads), shapes, deadline_s,
                 )
             )
             return obj
@@ -592,20 +618,24 @@ class Faculty(Generic[S, Pm]):
 
         return deco
 
-    def capability(self, name: str, *, description: str, preview: Callable[..., Any] | None = None):
+    def capability(self, name: str, *, description: str, preview: Callable[..., Any] | None = None,
+                   idempotent: bool = False):
         """Un effet externe exécutable (voir ``CapabilitySpec``) ; le nom est
         préfixé par la faculté (``goals.networked``)."""
         full = name if "." in name else f"{self.name}.{name}"
 
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
-            self.capabilities.append(CapabilitySpec(self.name, full, description, fn, preview))
+            self.capabilities.append(CapabilitySpec(self.name, full, description, fn, preview, idempotent))
             return fn
 
         return deco
 
-    def effect(self, type_: EventType[Any]):
+    def effect(self, type_: EventType[Any], *, lane: str = DELIVERY_LANE, deadline_s: float = 60.0,
+               when: Callable[[Any], bool] | None = None, on_interrupted: Callable[..., Any] | None = None):
+        """Un effet après commit (voir ``EffectSpec``). Un seul par (faculté, type d'événement)."""
+
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
-            self.effects.append(EffectSpec(self.name, type_, fn))
+            self.effects.append(EffectSpec(self.name, type_, fn, lane, deadline_s, when, on_interrupted))
             return fn
 
         return deco

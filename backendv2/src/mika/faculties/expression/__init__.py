@@ -261,7 +261,7 @@ def murmur(frame: Frame, req: Any) -> Prelude | None:
     tail = (f"{ask} en une seule phrase de moins de quinze mots, comme on se parle à mi-voix, à soi-même. "
             "Pas de balise, pas de guillemets, rien que tu ne saches pas.")
     tag = c.MURMUR_ADRIFT if adrift else c.MURMUR
-    return Prelude(Kind.MURMUR, f"{scene} {intent} {tail}", reason=f"{tag}:{target}")
+    return Prelude(Kind.MURMUR, f"{scene} {intent} {tail}", reason=f"{tag}:{target}", instead=adrift)
 
 
 @EXPRESSION.reducer(rt.EPISODE_STARTED)

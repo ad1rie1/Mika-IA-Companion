@@ -55,11 +55,23 @@ _HAPPY_TEARS = re.compile(r"\b(morte?s? de rire|mourir de rire|meurs de rire|ple
 _KIN = (r"(?:pere|mere|papa|maman|parents?|frere|soeur|grand[- ]?(?:pere|mere|parents?)|papi|papy|mamie|mamy|"
         r"oncle|tante|cousine?|fils|fille|enfant|bebe|mari|femme|epou(?:x|se)|copain|copine|compagne?|ami|amie|"
         r"meilleure? ami|neveu|niece|chat|chatte|chien|chienne|beau[- ]pere|belle[- ]mere)")
+#: Ce qui emprunte les mots d'un événement grave sans en être un (replié, sans accents) : un enterrement de vie
+#: de garçon, travailler à l'hôpital, une licence de club, un signe du zodiaque. Retiré avant de chercher.
+_NOT_GRAVE = re.compile(
+    r"\benterrements?\s+de\s+vie\s+de\s+(?:garcon|jeune\s+fille|celibataire)\b|"
+    r"\b(?:travaille|travaillais|bosse|bossais|taffe|stage|garde|nuit|interne|externe|infirmiere?|medecin|"
+    r"docteure?|aide[- ]soignante?|brancardiere?|sage[- ]femme|chirurgienne?)\s+(?:a\s+l'hopital|aux\s+urgences)\b|"
+    r"\blicencie(?:e|s|es)?\s+(?:au|a\s+la|a\s+l'|en|dans\s+(?:un|une|le|la|mon|ma))\s*(?:club|federation|fede|"
+    r"asso\w*|equipe|section|tennis|foot\w*|judo|karate|basket|rugby|natation|escalade|athle\w*|hand\w*|volley|"
+    r"badminton|cyclisme|equitation|golf|ski|boxe|danse)\b|"
+    r"\b(?:suis|es|est|signe|ascendant|natif|native)\s+(?:du\s+|de\s+)?cancer\b|"
+    r"\brupture\s+conventionnelle\b")
 #: (motif sur le texte replié, valence, étiquette) : les événements graves, qui comptent venant de n'importe qui.
-#: Pas les hyperboles de tous les jours : « mourir de chaud », « hâte d'en finir avec ce dossier », « ma mère
-#: va me tuer », « le suicide de Werther », « un petit accident de café », « rupture de stock ».
+#: Pas les hyperboles de tous les jours : « mourir de chaud », « j'ai un oral demain, je vais mourir », « hâte
+#: d'en finir avec ce dossier », « ma mère va me tuer », « le suicide de Werther », « un petit accident de café »,
+#: « un accident sur le périph », « rupture de stock ».
 _GRAVE = (
-    (re.compile(r"\b(?:veux|voudrais|vais|envie de|prefererais)\s+(?:mourir|crever|disparaitre)\b(?!\s+d[e'])|"
+    (re.compile(r"\b(?:veux|voudrais|envie de|prefererais)\s+(?:mourir|crever|disparaitre)\b(?!\s+d[e'])|"
                 r"\b(?:veux|voudrais|vais|envie d'|besoin d')\s*en\s+finir\b(?!\s+avec)|"
                 r"\b(?:me|je)\s+suicider\b|\bsuicidaire|\btentative de suicide\b|\bidees noires\b|"
                 r"\bplus\s+envie\s+de\s+vivre\b|\b(?:veux|vais|envie de)\s+me\s+tuer\b"),
@@ -71,14 +83,18 @@ _GRAVE = (
                 rf"\bperdu\s+(?:mon|ma|mes)\s+{_KIN}\b"),
      -0.9, "un deuil"),
     (re.compile(r"\b(?:cancer|tumeur|chimio|chimiotherapie|leucemie|hospitalisee?s?|avc|infarctus|fausse couche)\b|"
-                r"\b(?:a l'hopital|aux urgences)\b|(?<!petit )\baccident\b(?!\s+de\s+(?:cafe|the|parcours))|"
-                r"\bcrise cardiaque\b"),
+                r"\b(?:a l'hopital|aux urgences)\b|\baccidentee?s?\b|\bcrise cardiaque\b|"
+                # un accident qui arrive à quelqu'un — pas « il y a eu un accident sur le périph »
+                r"(?<!y a )\b(?:eu|fait|victime d')\s*(?:un|une)?\s*(?:grave\s+|gros\s+|terrible\s+)?accident\b|"
+                r"\b(?:grave|terrible|gros|horrible)\s+accident\b|"
+                r"\baccident\s+(?:de|en)\s+(?:voiture|moto|scooter|velo|bus|ski|la route|travail|avion|trottinette|"
+                r"cheval)\b"),
      -0.85, "une maladie, un accident"),
     (re.compile(r"\b(?:fait|fais|faire|suis|ete|etre)\s+(?:virer?|viree)\b|\blicencie(?:e|s|es)?\b|"
                 r"\blicenciement\b|\b(?:au|mise? au)\s+chomage\b|"
                 r"\bperdu\s+(?:mon|ma)\s+(?:travail|boulot|job|emploi|taf)\b"),
      -0.75, "une perte de travail"),
-    (re.compile(r"\brupture\b(?!\s+de\s+(?:stock|contrat|charge))|\bm'a\s+quittee?\b|\bnous\s+sommes\s+separes?\b|"
+    (re.compile(r"\brupture\b(?!\s+(?:de\s+(?:stock|contrat|charge)|conventionnelle))|\bm'a\s+quittee?\b|\bnous\s+sommes\s+separes?\b|"
                 r"\bon\s+s'est\s+separee?s?\b|\bdivorce\b|\blarguee?\b|\bon\s+se\s+separe\b"),
      -0.75, "une rupture"),
 )
@@ -118,6 +134,7 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 def grave(low: str) -> tuple[float, str] | None:
     """Le plus grave des événements nommés dans le texte replié (valence, étiquette)."""
+    low = _NOT_GRAVE.sub(" ", low)
     found = [(v, label) for pattern, v, label in _GRAVE if pattern.search(low)]
     return min(found) if found else None
 

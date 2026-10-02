@@ -4,7 +4,8 @@ La **proximité** d'une personne (inconnue, connaissance, amie, proche) naît
 de leur **histoire vécue** : des jours de contact, des messages, et ce que
 ces échanges ont installé (jamais amie d'une rancune installée). On ne
 devient pas « proche » en trois messages, ni en une semaine — il y faut un
-mois d'histoire —, quoi qu'on en dise, ni quoi qu'en dise un modèle. Elle se
+mois d'histoire, et de la chaleur installée, un attachement (``affect.bond``)
+ou une longue histoire —, quoi qu'on en dise, ni quoi qu'en dise un modèle. Elle se
 lit sur une fenêtre glissante : un long silence la fait descendre d'un cran,
 sans jamais faire tomber une longue histoire plus d'un cran sous ce qu'elle a
 été. Un opérateur peut la déclarer (genèse, correction).
@@ -32,10 +33,9 @@ RECONTACT = "recontact"
 COMFORT = "comfort"
 #: Envie de discuter avec une amie, sans autre raison que l'envie.
 CHAT = "chat"
-#: Veto : on ne va pas vers quelqu'un qui a installé une rancune.
+#: Veto : on ne va pas vers quelqu'un qui a installé une rancune. (Ne pas écrire deux fois de suite à
+#: quelqu'un qui n'a pas répondu est la retenue d'``agency`` : ``agency.UNANSWERED``.)
 GRUDGE = "grudge"
-#: Veto : on n'écrit pas deux fois de suite à quelqu'un d'absent qui n'a pas répondu.
-UNANSWERED = "unanswered"
 
 STRANGER, ACQUAINTANCE, FRIEND, CLOSE = "stranger", "acquaintance", "friend", "close"
 CLOSENESS_LEVELS = (STRANGER, ACQUAINTANCE, FRIEND, CLOSE)

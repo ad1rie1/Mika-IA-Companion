@@ -3,7 +3,10 @@
 **Tenir** (``projects.tend``) : un objectif qui n'a rien conclu trois
 exécutions de suite bloque ; un ponctuel à bout d'exécutions aussi ; un projet
 dont le modèle ne répond plus trois fois d'affilée se met en pause (« en
-panne ») — sans reproche, et rien ne le relance avant qu'on le reprenne.
+panne ») — sans reproche, et rien ne le relance avant qu'on le reprenne. Un
+projet **à elle** qui n'a plus rien d'ouvert depuis quelques jours, elle le
+clôt (soulagée s'il a abouti, un peu mélancolique sinon) : il ne reste pas
+« en cours » pour toujours.
 
 **Ce qui sort** (``projects.remote``) : ce qu'un opérateur demande depuis la
 console (pousser, récupérer) devient une proposition d'effet, exécutée tout de
@@ -21,6 +24,7 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects.atelier import network_proposal, remote_proposal
 from mika.faculties.projects.faculty import (
+    ARCHIVED,
     NETWORK_QUEUED,
     OBJECTIVE_CHANGED,
     PAUSED,
@@ -60,6 +64,22 @@ def closures(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective, s
     return out
 
 
+def finished_at(p: Project, pm: Any) -> int | None:
+    """Quand elle clôt un projet à elle qui n'a plus rien d'ouvert (``None`` : il n'en est pas là)."""
+    if p.authority != c.SELF or p.status != c.ACTIVE or not p.objectives:
+        return None
+    if any(o.status == c.OPEN for o in p.objectives):
+        return None
+    return max(o.closed_at for o in p.objectives) + pm.self_done_after_us
+
+
+def finished(s: ProjectsState, frame: Frame) -> list[Project]:
+    """Ses projets à elle, finis depuis assez longtemps pour qu'elle les close."""
+    pm = params(frame.env.params_of("projects", frame.root))
+    return [p for p in sorted(s.projects.values(), key=lambda p: p.id)
+            if not busy(s, p.id) and (at := finished_at(p, pm)) is not None and at <= frame.now]
+
+
 def broken(s: ProjectsState, frame: Frame) -> list[Project]:
     """Les projets actifs dont le modèle a échoué trop de fois d'affilée."""
     pm = params(frame.env.params_of("projects", frame.root))
@@ -71,8 +91,10 @@ def broken(s: ProjectsState, frame: Frame) -> list[Project]:
                   catch_up=CatchUp.ONCE, max_quantum_s=3600, priority=40)
 class Tend:
     def next_due(self, s: ProjectsState, frame: Frame, last_run: int | None) -> int | None:
-        if not (closures(s, frame) or broken(s, frame)):
-            return None
+        if not (closures(s, frame) or broken(s, frame) or finished(s, frame)):
+            pm = params(frame.env.params_of("projects", frame.root))
+            later = [at for p in s.projects.values() if (at := finished_at(p, pm)) is not None]
+            return min(later) if later else None
         # par prudence : une passe qui vient d'avoir lieu sans rien changer (écriture dédoublonnée, garde) ne
         # repart pas aussitôt — au pire une minute de retard, jamais une boucle
         return frame.now if last_run is None else max(frame.now, last_run + RETRY_US)
@@ -97,9 +119,15 @@ class Tend:
                                                             "(le modèle n'a pas répondu, ou le délai d'une exécution "
                                                             "est passé)", owner=p.owner, about=p.about,
                                        dedupe_key=f"panne:{p.id}:{p.tried_at}"))
+        done_now = finished(s, frame)
+        for p in done_now:  # elle le clôt elle-même : il a fait son temps (ou elle y renonce, rien n'a abouti)
+            ending = "done" if any(o.status == c.DONE for o in p.objectives) else "dropped"
+            drafts.append(ARCHIVED.draft(project=p.id, reason="clos par elle : plus rien d'ouvert depuis quelques "
+                                                              "jours", by="self", ending=ending, owner=p.owner,
+                                         about=p.about, dedupe_key=f"fini:{p.id}:{max(o.closed_at for o in p.objectives)}"))
         if not drafts:
             return
-        ids = tuple({p.id for p, _, _ in closing_now} | {p.id for p in broken(s, frame)})
+        ids = tuple({p.id for p, _, _ in closing_now} | {p.id for p in broken(s, frame)} | {p.id for p in done_now})
         keys = tuple((p.id, o.id) for p, o, _ in closing_now)
         await ctx.emit(*drafts, guard=Guard("projets actifs, objectifs ouverts", predicate=lambda view, ids=ids,
                                             keys=keys: all(view.get(c.STATUS(i)) == c.ACTIVE for i in ids)

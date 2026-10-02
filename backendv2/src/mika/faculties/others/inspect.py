@@ -8,7 +8,7 @@ Lecture seule ; les lectures viennent du journal (``ctx.events``).
 from __future__ import annotations
 
 from mika.contracts import others as c
-from mika.faculties.others.faculty import OTHERS, OthersState, band_of, params, receptivity
+from mika.faculties.others.faculty import OTHERS, OthersParams, OthersState, band_of, params, receptivity
 from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -27,7 +27,10 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    num_fr,
+    pct_fr,
 )
+from mika.vocab.affect import FR, emotion_of
 from mika.vocab.people import is_identifiable
 
 BANDS_FR = {c.NIGHT: "la nuit (0 h – 6 h)", c.MORNING: "le matin (6 h – 12 h)",
@@ -53,11 +56,30 @@ def tone_words(valence: float) -> str:
 def _duration(us: int) -> str:
     if us < HOUR:
         return f"{max(1, round(us / MINUTE))} min"
-    return f"{us / HOUR:.1f} h"
+    return f"{num_fr(us / HOUR, 1)} h"
 
 
 def _ratio(x: float) -> Meter:
-    return Meter(x, f"{round(x * 100)} %")
+    return Meter(x, pct_fr(x))
+
+
+def _state(d: c.ToneRead, p: OthersParams) -> Cell:
+    """Ce que la lecture a fait d'elle : inquiète (un événement grave, ou un ton qui tranche), surprise, rien."""
+    if d.concern:
+        return Badge("inquiète · un événement grave" if d.grave else "inquiète", "warn")
+    if d.grave:
+        return Badge("un événement grave", "warn")
+    if d.surprise >= p.surprise_from:
+        return Badge("surprise", "info")
+    return Text("—", kind="muted")
+
+
+def _caught(d: c.ToneRead) -> Cell:
+    """La contagion : une émotion et un nombre, jamais un mot du message."""
+    emotion = emotion_of(d.contagion_emotion) if d.contagion > 0 else None
+    if emotion is None:
+        return Text("—", kind="muted")
+    return f"{FR.get(emotion, emotion.value)} {num_fr(d.contagion, 2)}"
 
 
 @OTHERS.inspect("devine", title="Ce qu'elle devine", subject="person", order=35,
@@ -77,8 +99,9 @@ def _guessed(s: OthersState, frame: Frame, ctx: InspectContext) -> list[Block]:
     else:
         tone = "warn" if abs(r.deviation) >= p.notable_deviation and r.confidence >= 1.0 else ""
         blocks.append(Stats((
-            Stat("ton habituel", tone_words(r.usual_valence), f"valence {r.usual_valence:+.2f}"),
-            Stat("en ce moment", tone_words(r.current_valence), f"écart {r.deviation:+.2f}", tone=tone),
+            Stat("ton habituel", tone_words(r.usual_valence), f"valence {num_fr(r.usual_valence, 2, signed=True)}"),
+            Stat("en ce moment", tone_words(r.current_valence), f"écart {num_fr(r.deviation, 2, signed=True)}",
+                 tone=tone),
             Stat("la connaît", _ratio(r.confidence), f"{r.observed} message(s) lu(s)"),
             Stat("dernier message lu", When(r.last_at) if r.last_at else Text("—", kind="muted")),
         )))
@@ -98,7 +121,7 @@ def _guessed(s: OthersState, frame: Frame, ctx: InspectContext) -> list[Block]:
     rows: list[tuple[Cell, ...]] = []
     for band in c.BANDS:
         answered, missed, estimate, shift = receptivity(s, person, band, p)
-        effect: Cell = (Badge(f"{shift:+.2f}", "ok" if shift > 0 else "warn") if shift else
+        effect: Cell = (Badge(num_fr(shift, 2, signed=True), "ok" if shift > 0 else "warn") if shift else
                         Text("aucun", kind="muted"))
         rows.append((BANDS_FR[band] + (" — maintenant" if band == now_band else ""), f"{answered:g}", f"{missed:g}",
                      _ratio(estimate), effect))
@@ -112,10 +135,9 @@ def _guessed(s: OthersState, frame: Frame, ctx: InspectContext) -> list[Block]:
     reads, more = got[:READS_PAGE], len(got) > READS_PAGE
     blocks.append(Table(
         (Column("quand", "fit"), Column("ton lu"), Column("attendu"), Column("surprise", "num"), Column("état"),
-         Column("message", "fit")),
-        tuple((When(e.at), tone_words(e.data.valence), tone_words(e.data.expected), f"{e.data.surprise:.2f}",
-               Badge("inquiète", "warn") if e.data.concern else
-               (Badge("surprise", "info") if e.data.surprise >= p.surprise_from else Text("—", kind="muted")),
+         Column("ce qu'elle en a pris", detail=True), Column("message", "fit")),
+        tuple((When(e.at), tone_words(e.data.valence), tone_words(e.data.expected), num_fr(e.data.surprise, 2),
+               _state(e.data, p), _caught(e.data),
                Ref("event", str(e.data.message), f"n° {e.data.message}")) for e in reads),
         title="Ses lectures, de la plus récente", empty="plus rien avant" if before else "aucune lecture encore",
         pager=Pager(param="avant", older=(("avant", str(reads[-1].seq)),) if more and reads else ())

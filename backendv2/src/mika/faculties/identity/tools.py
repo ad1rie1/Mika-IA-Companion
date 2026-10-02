@@ -16,9 +16,11 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from mika.contracts import identity as c
+from mika.contracts import social as social_c
 from mika.faculties.identity.faculty import IDENTITY, view_of
 from mika.faculties.identity.prompt import acquaintance, describe
 from mika.vocab.episodes import CONVERSATIONAL
+from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import ChannelTrust
 
 BUNDLE = "identity"
@@ -60,7 +62,9 @@ async def whoami_with(args: NoArgs, ctx: Any) -> str:
     aud = ctx.frame.audience
     lines = describe(view, public=bool(aud and aud.public))
     if view.known:
-        lines.append(acquaintance(view.first_seen, ctx.frame))
+        # la même phrase que la section : jamais « presque pas de passé commun » à côté de « proche »
+        level = ctx.frame.get(social_c.CLOSENESS(view.person)) if is_identifiable(target) else ""
+        lines.append(acquaintance(view.first_seen, ctx.frame, level))
     return "\n".join(lines)
 
 

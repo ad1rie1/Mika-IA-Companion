@@ -20,7 +20,7 @@ import math
 import random
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from mika.kernel.builtin import RowRecord
@@ -164,8 +164,41 @@ def pool(
                 resources, guards, FrozenDict(args), min(deadlines) if deadlines else None,
                 threshold=threshold, aging=aging, shifts=tuple(sorted(by_owner.items())))
         )
+    rows = _share_any(rows, {k: sum(p[2] for p in v) for k, v in any_parts.items()}, policy)
     rows.sort(key=lambda r: (-r.hazard, r.key))
     return rows
+
+
+def _share_any(rows: list[Row], any_evidence: Mapping[str, float], policy: ArbitrationPolicy) -> list[Row]:
+    """Une envie « ANY » (parler à quelqu'un, n'importe qui) est **une** envie,
+    pas une par présent : sans cela, huit personnes connectées multipliaient
+    par huit son taux d'initiative. Ce qu'elle ajoute à l'intensité est donc
+    partagé entre les lignes de son type : au total, pas plus que ce qu'elle
+    ajoute à la ligne qu'elle soulève le plus — chacune en garde une part au
+    prorata de ce qu'elle lui ajoutait (le choix de la cible reste au prorata).
+    Une envie négative (une retenue) freine chaque ligne, elle n'a pas à être
+    partagée."""
+    extra: dict[int, float] = {}
+    own: dict[int, float] = {}
+    for i, r in enumerate(rows):
+        ev = any_evidence.get(r.kind, 0.0)
+        if r.target == Anyone.NONE or not ev or r.vetoes or r.hazard <= 0.0:
+            continue
+        base = policy.max_rates.get(r.kind, 0.0) * sigmoid(r.score - ev)
+        if r.hazard > base:
+            own[i], extra[i] = base, r.hazard - base
+    by_kind: dict[str, list[int]] = defaultdict(list)
+    for i in extra:
+        by_kind[rows[i].kind].append(i)
+    out = list(rows)
+    for idx in by_kind.values():
+        total, most = sum(extra[i] for i in idx), max(extra[i] for i in idx)
+        if total <= most:
+            continue
+        factor = most / total
+        for i in idx:
+            out[i] = replace(rows[i], hazard=own[i] + extra[i] * factor)
+    return out
 
 
 def rate_bound(rows: Sequence[Row], policy: ArbitrationPolicy) -> float:

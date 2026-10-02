@@ -20,6 +20,7 @@ from mika.faculties import affect as F
 from mika.faculties.affect import physics as ph
 from mika.faculties.affect import prose
 from mika.faculties.affect.params import DEFAULT
+from mika.faculties.social.faculty import SocialParams
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
@@ -28,6 +29,8 @@ from mika.vocab import circadian
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import Kind
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, said
+
+SOCIAL_PARAMS = SocialParams()
 
 #: des soirées entre amies, telles qu'un modèle les balise
 WARM_MIX = [("happy", 0.6), ("amused", 0.5), ("curious", 0.5), ("playful", 0.6), ("thinking", 0.4),
@@ -68,14 +71,15 @@ def fact(kernel, key):
     return kernel.mind.frame().get(key)
 
 
-async def evenings(kernel, script, handle, mix, n, *, per=10, gap_s=120):
-    """``n`` soirées : ``per`` tours vers 20 h, puis le reste de la journée."""
+async def evenings(kernel, script, handle, mix, n, *, per=10, gap_s=120, every=1):
+    """``n`` soirées : ``per`` tours vers 20 h, puis le reste de la journée (une soirée tous les ``every``
+    jours)."""
     for day in range(n):
         for k in range(per):
             emotion, intensity = mix[(day * per + k) % len(mix)]
             await turn(kernel, script, handle, emotion, intensity)
             await asyncio.sleep(gap_s)
-        await asyncio.sleep((DAY - per * gap_s * US) / US)
+        await asyncio.sleep((every * DAY - per * gap_s * US) / US)
 
 
 # ── PSY-1 : une émotion ordinaire va dans son sens, à toute heure ─────────
@@ -102,25 +106,33 @@ def test_a_little_joy_lifts_her_and_a_little_sadness_lowers_her_alike(tmp_path, 
 
 
 def test_ordinary_warm_evenings_make_a_close_friend(tmp_path):
-    """Dix soirées d'échanges chaleureux ordinaires installent un regard
-    nettement positif — assez pour devenir proches avant la « longue histoire ».
+    """Des soirées d'échanges chaleureux ordinaires installent un regard
+    nettement positif et un attachement — assez pour devenir proches avant la
+    « longue histoire » (quatorze jours de contact), mais pas avant un mois
+    d'histoire : on ne devient pas proche en dix jours (ADR 0035, MEM-17).
     Contre-exemple : les mêmes soirées sans chaleur n'installent rien."""
     async def scenario(kernel, script):
         await asyncio.sleep(6 * HOUR / US)  # 20 h
-        await evenings(kernel, script, "user_1", WARM_MIX, 10)
-        await evenings(kernel, script, "user_2", FLAT_MIX, 0)
+        await evenings(kernel, script, "user_1", WARM_MIX, 10, every=2)  # dix soirées en trois semaines
+        early = fact(kernel, social_c.CLOSENESS("user_1"))
+        await asyncio.sleep(10 * DAY / US)
+        await evenings(kernel, script, "user_1", WARM_MIX, 1)  # une onzième, un mois après la première
         warm = (fact(kernel, affect_c.REGARD("user_1")), fact(kernel, social_c.CLOSENESS("user_1")),
-                fact(kernel, affect_c.BOND("user_1")))
-        return warm
+                fact(kernel, affect_c.BOND("user_1")), fact(kernel, social_c.CONTACT("user_1")).days)
+        return early, warm
 
-    regard, closeness, bond = run(tmp_path / "chaleur", scenario, start=at_paris(2026, 9, 28, 14, 0))
+    early, (regard, closeness, bond, days) = run(tmp_path / "chaleur", scenario, start=at_paris(2026, 9, 28, 14, 0))
+    assert early == social_c.FRIEND, early  # trois semaines : une amie à qui elle tient, pas encore une proche
     assert 0.15 <= regard <= 0.8, regard
     assert closeness == social_c.CLOSE, closeness
     assert bond > 0.1
+    assert days < SOCIAL_PARAMS.close_long_days  # par la chaleur, pas par la longue histoire
 
     async def flat(kernel, script):
         await asyncio.sleep(6 * HOUR / US)
-        await evenings(kernel, script, "user_1", FLAT_MIX, 10)
+        await evenings(kernel, script, "user_1", FLAT_MIX, 10, every=2)
+        await asyncio.sleep(10 * DAY / US)
+        await evenings(kernel, script, "user_1", FLAT_MIX, 1)
         return fact(kernel, affect_c.REGARD("user_1")), fact(kernel, social_c.CLOSENESS("user_1"))
 
     regard, closeness = run(tmp_path / "plat", flat, start=at_paris(2026, 9, 28, 14, 0))

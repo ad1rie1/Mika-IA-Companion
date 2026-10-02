@@ -51,11 +51,17 @@ Brief = Callable[[Frame, Any], str]
 
 @dataclass(frozen=True, slots=True)
 class Prelude:
-    """Un épisode sans destinataire qui en précède un autre (un murmure)."""
+    """Un épisode sans destinataire qui en précède un autre (un murmure).
+
+    ``instead`` : il le remplace — elle y pense, puis se ravise. Il passe alors
+    juste après le départ gardé de l'épisode principal, qui se règle sans être
+    composé (rien ne part, aucun appel de modèle perdu). Sinon, il passe une
+    fois la réponse de l'épisode principal prête, juste avant son énoncé."""
 
     kind: str
     message: str
     reason: str = ""
+    instead: bool = False
 
 
 @dataclass(frozen=True, slots=True)

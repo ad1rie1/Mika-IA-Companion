@@ -14,18 +14,21 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from mika.contracts import attention as attention_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
+from mika.faculties.identity.prompt import calendar_words
 from mika.faculties.social.reciprocity import _one_sided
 from mika.kernel.arbitration import RowView
-from mika.kernel.clock import DAY, HOUR, US
+from mika.kernel.clock import DAY, HOUR, US, local
 from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
-from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
+from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, said
 
 
 class Script:
@@ -200,3 +203,28 @@ def test_a_stranger_is_someone_she_does_not_know_yet(tmp_path):
     last = [r for r in llm.calls if r.role == "reply" and r.meta.get("target") == "user_3"][-1]
     text = "\n".join(m.content for m in last.messages)
     assert "c'est inconnue" not in text
+
+
+class _Clock:
+    """Le strict nécessaire d'un cadre pour dire « quand » : l'instant et l'heure locale (Paris)."""
+
+    def __init__(self, now: int) -> None:
+        self.now = now
+
+    def local(self, t: int | None = None):
+        return local(self.now if t is None else t, PARIS)
+
+
+@pytest.mark.parametrize("then,now,expected", [
+    (at_paris(2026, 9, 28, 18, 0), at_paris(2026, 9, 29, 14, 13), "hier soir (lundi vers 18 h)"),
+    # douze heures seulement, mais la veille : « hier soir », jamais « aujourd'hui »
+    (at_paris(2026, 9, 28, 21, 30), at_paris(2026, 9, 29, 9, 30), "hier soir (lundi vers 21 h)"),
+    (at_paris(2026, 9, 29, 8, 0), at_paris(2026, 9, 29, 15, 0), "ce matin (vers 8 h)"),
+    (at_paris(2026, 9, 29, 14, 30), at_paris(2026, 9, 29, 15, 0), "tout à l'heure"),
+    (at_paris(2026, 9, 26, 10, 0), at_paris(2026, 9, 28, 9, 0), "avant-hier (samedi vers 10 h)"),
+    (at_paris(2026, 9, 23, 20, 0), at_paris(2026, 9, 28, 9, 0), "il y a 5 jours (mercredi vers 20 h)"),
+    (at_paris(2026, 9, 1, 20, 0), at_paris(2026, 9, 28, 9, 0), "il y a 3 semaines"),
+])
+def test_when_is_said_in_calendar_days(then, now, expected):
+    """PRM-19 : les jours se comptent sur le calendrier, pas en durée."""
+    assert calendar_words(then, _Clock(now)) == expected

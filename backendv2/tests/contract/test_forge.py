@@ -14,11 +14,14 @@ peut pas faire.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import os
 import shutil
+import socket
 
 import pytest
 
+from mika.adapters import forge as forge_adapter
 from mika.adapters.forge import ForgeHost, lint
 from mika.ports.forge import ForgeRefused
 
@@ -345,3 +348,103 @@ def test_a_slow_huge_or_invalid_view_becomes_a_note_and_the_app_lives_on(tmp_pat
     assert bad.title == "Vue invalide" and "blocks[0].rows[0] : 2 cellules pour 1 colonnes" in bad.text
     assert alive == Note("vivante")  # l'app repart après avoir été tuée
     h.shutdown()
+
+
+# ── http_get : une seule résolution, Internet seulement, une durée totale (PRJ-16) ──
+
+
+@pytest.mark.parametrize("address, public", [
+    ("93.184.216.34", True), ("2606:2800:220:1:248:1893:25c8:1946", True),
+    ("127.0.0.1", False), ("10.1.2.3", False), ("192.168.1.1", False), ("169.254.169.254", False),
+    ("100.64.0.1", False),  # l'espace partagé d'un opérateur (CGNAT) : pas Internet
+    ("::1", False), ("fd00::1", False), ("fe80::1", False),
+    ("::ffff:10.0.0.1", False),  # une adresse privée déguisée en IPv6
+    ("64:ff9b::a00:1", False),  # …derrière le préfixe NAT64
+    ("64:ff9b::5db8:d822", True),  # une adresse publique derrière NAT64, elle, l'est
+    ("2002:a00:1::", False),  # 6to4 vers 10.0.0.1
+    ("224.0.0.1", False), ("0.0.0.0", False),
+])
+def test_only_an_internet_address_is_public(address, public):
+    assert forge_adapter.is_global(ipaddress.ip_address(address)) is public
+
+
+class _Answer:
+    status_code = 200
+
+    def __init__(self, chunks):
+        self.chunks = chunks
+
+    def iter_bytes(self):
+        yield from self.chunks
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_http_get_resolves_once_and_connects_to_the_address_it_checked(monkeypatch):
+    """Le DNS qui répond une adresse publique au contrôle puis la machine elle-même à la connexion (le
+    « rebinding ») ne joint rien : on se connecte à l'adresse vérifiée, le nom ne sert qu'à l'en-tête et au
+    certificat."""
+    answers = iter([[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))],
+                    [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))]])
+    resolved, seen = [], {}
+
+    def getaddrinfo(host, port, *args, **kwargs):
+        resolved.append(host)
+        return next(answers)
+
+    class Client:
+        def __init__(self, **kw):
+            seen["client"] = kw
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def stream(self, method, url, headers=None, extensions=None):
+            seen.update(url=url, headers=headers, extensions=extensions)
+            return _Answer([b"ok"])
+
+    monkeypatch.setattr(forge_adapter.socket, "getaddrinfo", getaddrinfo)
+    monkeypatch.setattr(forge_adapter.httpx, "Client", Client)
+    assert forge_adapter.real_http_get("https://api.exemple.fr/prix?j=1") == "ok"
+    assert resolved == ["api.exemple.fr"]  # une seule résolution
+    assert seen["url"] == "https://93.184.216.34:443/prix?j=1"
+    assert seen["headers"]["Host"] == "api.exemple.fr" and seen["extensions"] == {"sni_hostname": "api.exemple.fr"}
+    assert seen["client"]["follow_redirects"] is False and seen["client"]["trust_env"] is False
+    monkeypatch.setattr(forge_adapter.socket, "getaddrinfo",
+                        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443)),
+                                         (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", 443))])
+    with pytest.raises(ValueError, match="privée"):  # une seule adresse privée parmi les réponses suffit
+        forge_adapter.real_http_get("https://melange.exemple.fr/")
+
+
+def test_http_get_stops_at_the_call_deadline_not_per_read(monkeypatch):
+    """Une réponse qui goutte (un octet de temps en temps, sans jamais dépasser le délai d'une lecture) s'arrête au
+    délai de l'appel."""
+    clock = iter(range(0, 10_000))
+    monkeypatch.setattr(forge_adapter.time, "monotonic", lambda: float(next(clock)))
+    monkeypatch.setattr(forge_adapter.socket, "getaddrinfo",
+                        lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))])
+
+    class Client:
+        def __init__(self, **kw):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def stream(self, method, url, headers=None, extensions=None):
+            return _Answer([b"x"] * 1000)
+
+    monkeypatch.setattr(forge_adapter.httpx, "Client", Client)
+    with pytest.raises(RuntimeError, match="délai"):
+        forge_adapter.real_http_get("https://lent.exemple.fr/", deadline=20.0)

@@ -18,13 +18,23 @@ def log_metrics(events: Sequence[Any], driver: Driver) -> dict[str, Any]:
     utterances = [e for e in events if e.type.name == rt.UTTERANCE.name]
     ended = [e for e in events if e.type.name == rt.EPISODE_ENDED.name]
     started = [e for e in events if e.type.name == rt.EPISODE_STARTED.name]
+    # une réponse règle tout le tour de la personne (``answers``) ; un journal plus ancien, son seul ``reply_to``
     replies: dict[int, list[Any]] = defaultdict(list)
     for u in utterances:
-        if u.data.reply_to is not None:
-            replies[u.data.reply_to].append(u)
+        for s in (u.data.answers or ((u.data.reply_to,) if u.data.reply_to is not None else ())):
+            replies[s].append(u)
     outcomes = Counter((e.data.kind, e.data.outcome) for e in ended)
     latencies = sorted((replies[s][0].at - p.at) / US for s, p in perceptions.items() if replies.get(s))
-    abandoned = {e.data.reply_to: e.data.detail for e in ended if e.data.reply_to is not None and e.data.outcome == "failed"}
+    # ce qu'une fin a laissé sans réponse, en le disant (``unanswered``) ; avant, un échec sur ``reply_to``
+    closed: dict[int, tuple[str, str]] = {}
+    for e in ended:
+        if e.data.unanswered is not None:
+            seqs: tuple[int, ...] = e.data.unanswered
+        else:
+            seqs = (e.data.reply_to,) if e.data.reply_to is not None and e.data.outcome == "failed" else ()
+        for s in seqs:
+            closed[s] = (e.data.outcome, e.data.detail)
+    abandoned = {s: detail for s, (outcome, detail) in closed.items() if outcome != "abstained"}
     transport = driver.transport
     assert transport is not None
     heard_keys = {h.key for h in transport.heard}
@@ -32,8 +42,10 @@ def log_metrics(events: Sequence[Any], driver: Driver) -> dict[str, Any]:
         "perceptions": len(perceptions),
         "answered": sum(1 for s in perceptions if replies.get(s)),
         "answered_twice": sum(1 for v in replies.values() if len(v) > 1),
-        "unanswered": sorted(s for s in perceptions if not replies.get(s) and s not in abandoned),
+        "unanswered": sorted(s for s in perceptions if not replies.get(s) and s not in closed),
         "abandoned": abandoned,
+        "abstained": sorted(s for s, (outcome, _d) in closed.items() if outcome == "abstained"),
+        "replies": len({u.seq for v in replies.values() for u in v}),
         "latency_max_s": latencies[-1] if latencies else None,
         "latency_median_s": latencies[len(latencies) // 2] if latencies else None,
         "initiatives_started": sum(1 for e in started if e.data.kind == "INITIATIVE"),

@@ -19,6 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from mika.contracts import attention as attention_c
 from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
@@ -64,14 +65,23 @@ def test_what_is_not_heavy_is_not_read_heavy(text, lo, hi):
 @pytest.mark.parametrize("text", ["c'est mort pour ce soir, désolée", "mon téléphone est mort", "le projet est mort",
                                   "je vais mourir de chaud", "j'ai hâte d'en finir avec ce dossier",
                                   "ma mère va me tuer", "le suicide de Werther, quel livre",
-                                  "j'ai eu un petit accident de café sur mon clavier", "rupture de stock de croissants"])
+                                  "j'ai eu un petit accident de café sur mon clavier", "rupture de stock de croissants",
+                                  "j'ai un oral demain, je vais mourir",
+                                  "je vais à un enterrement de vie de garçon samedi",
+                                  "je bosse à l'hôpital ce week-end", "je suis infirmière aux urgences cette nuit",
+                                  "je suis licenciée au club de tennis depuis cinq ans", "je suis cancer ascendant lion",
+                                  "il y a eu un accident sur le périph, je suis coincée",
+                                  "rupture conventionnelle signée, je change de boulot"])
 def test_everyday_hyperboles_are_not_grave_events(text):
     """Une batterie morte ou « mourir de chaud » n'inquiètent personne : pas de prise de nouvelles pour ça."""
     assert not measure(text).grave, text
 
 
 @pytest.mark.parametrize("text", ["mon chat est mort cette nuit", "mon grand-père vient de mourir",
-                                  "j'ai envie d'en finir", "j'ai eu un accident de voiture"])
+                                  "j'ai envie d'en finir", "j'ai eu un accident de voiture",
+                                  "j'ai eu un accident sur l'autoroute", "mon frère a eu un accident",
+                                  "ma grand-mère est à l'hôpital", "on m'a diagnostiqué un cancer",
+                                  "je suis licencié depuis lundi", "l'enterrement de mon oncle est jeudi"])
 def test_the_same_words_said_of_a_life_are_grave(text):
     """Contrôle : les mêmes mots, quand ils disent une vie, se lisent graves."""
     assert measure(text).grave, text
@@ -120,11 +130,17 @@ def reads(kernel):
     return [mind.decode(e).data for e in mind.store.read() if e.type == others_c.READ.name]
 
 
-def check_ins(kernel, handle):
+def check_ins(kernel, handle, reasons=frozenset({others_c.CHECK_IN})):
     mind = kernel.mind
     return [mind.decode(e) for e in mind.store.read() if e.type == rt.EPISODE_STARTED.name
             and mind.decode(e).data.kind == "INITIATIVE" and mind.decode(e).data.target == handle
-            and others_c.CHECK_IN in mind.decode(e).data.reason]
+            and reasons & set(mind.decode(e).data.reason.split(","))]
+
+
+#: Prendre de ses nouvelles : la prise de nouvelles (``check_in``), ou la pensée inquiète qui la pousse à lui
+#: écrire (``thought``, « tu repenses à votre dernier échange… ») — deux chemins vers le même geste, et c'est le
+#: hasard de l'arbitre (dérivé du journal) qui décide lequel passe le premier.
+REACHING_OUT = frozenset({others_c.CHECK_IN, attention_c.THOUGHT})
 
 
 def test_a_grave_event_worries_her_even_from_a_friend_who_always_complains(tmp_path):
@@ -147,8 +163,10 @@ def test_a_grave_event_worries_her_even_from_a_friend_who_always_complains(tmp_p
 def test_her_own_worried_reply_makes_her_check_in_later(tmp_path):
     """« Ma grand-mère est partie ce matin » : les mots ne disent rien de lourd,
     mais elle y répond triste. Elle s'inquiète : quelques heures plus tard, elle
-    prend de ses nouvelles. Contrôle : chez une amie qui râle toujours, sa
-    peine pour elle ne dit rien de neuf."""
+    prend de ses nouvelles — une fois (la prise de nouvelles, ou la pensée
+    inquiète qui l'y pousse : le premier geste éteint l'inquiétude, l'autre n'en
+    refait pas un second). Contrôle : chez une amie qui râle toujours, sa peine
+    pour elle ne dit rien de neuf."""
     async def scenario(kernel, script):
         await befriend(kernel, "tg_1", social_c.CLOSE)
         await befriend(kernel, "tg_6", social_c.FRIEND)
@@ -156,15 +174,19 @@ def test_her_own_worried_reply_makes_her_check_in_later(tmp_path):
         await chat(kernel, "tg_6", GRUMPY[:8])
         script.tags = {"tg_1": "[EMOTION:sad:0.8]", "tg_6": "[EMOTION:sad:0.8]"}
         await chat(kernel, "tg_1", ["ma grand-mère est partie ce matin"])
+        sad_at = kernel.mind.clock.now()
         await chat(kernel, "tg_6", ["ma grand-mère est partie ce matin"])
         concerns = dict(kernel.mind.root.slices["others"].concerns.items())
         script.tags = {}
         await asyncio.sleep(10 * HOUR / US)
-        return concerns, check_ins(kernel, "tg_1"), check_ins(kernel, "tg_6")
+        after = dict(kernel.mind.root.slices["others"].concerns.items())
+        return (concerns, after, sad_at, check_ins(kernel, "tg_1", REACHING_OUT), check_ins(kernel, "tg_6"))
 
-    concerns, to_alice, to_bea = run(tmp_path, scenario)
+    concerns, after, sad_at, to_alice, to_bea = run(tmp_path, scenario)
     assert "tg_1" in concerns and "tg_6" not in concerns
-    assert len(to_alice) == 1 and not to_bea
+    assert len(to_alice) == 1 and not to_bea, (to_alice, to_bea)
+    assert HOUR <= to_alice[0].at - sad_at <= 10 * HOUR  # quelques heures plus tard, pas dans la foulée
+    assert "tg_1" not in after  # c'est fait : elle a pris de ses nouvelles, l'inquiétude est éteinte
 
 
 def test_an_ok_does_not_reassure_her_a_real_lighter_message_does(tmp_path):

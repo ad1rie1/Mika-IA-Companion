@@ -66,13 +66,14 @@ def test_health_names_what_goes_wrong_and_recovers(tmp_path):
         fresh = health.report(kernel)
         await asyncio.sleep(4 * MINUTE / US)  # quatre passages ratés d'affilée
         failing = health.report(kernel)
-        for i in range(6):  # un effet qui échoue à chaque tentative : abandonné
-            await kernel.mind.append([PING.draft(n=i)], emitter="flaky", correlation="t", origin=Origin.KERNEL)
-            await asyncio.sleep(1)
-        abandoned = health.report(kernel)
         await kernel.mind.append([REPAIRED.draft()], emitter="flaky", correlation="t", origin=Origin.KERNEL)
         await asyncio.sleep(2 * MINUTE / US)
         repaired = health.report(kernel)
+        for i in range(6):  # un effet qui échoue à chaque tentative (réessais datés, avec recul) : abandonné
+            await kernel.mind.append([PING.draft(n=i)], emitter="flaky", correlation="t", origin=Origin.KERNEL)
+            await asyncio.sleep(1)
+        await asyncio.sleep(15 * MINUTE / US)
+        abandoned = health.report(kernel)
         kernel._tasks[0].cancel()  # l'ordonnanceur meurt en marche
         await asyncio.sleep(1)
         dead = health.report(kernel)

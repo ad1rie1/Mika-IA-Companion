@@ -129,6 +129,8 @@ def test_the_projects_menu_fresh_then_alive(tmp_path):
     assert [b.text for b in head.badges][:3] == ["impersonnel", "actif", "confié"] and head.default_tab == "apercu"
     assert [f.key for f in alive["by_title"]] == [str(pid)] == [f.key for f in alive["by_number"]]
     assert "Outils réseau" in flat(alive["person"])
+    # avant d'oublier quelqu'un, sa fiche dit ce que l'oubli n'atteint pas : l'atelier de ses projets (PRJ-9)
+    assert "pas leurs ateliers" in flat(alive["person"]) and "Vider le stockage" in flat(alive["person"])
 
 
 # ── Créer ─────────────────────────────────────────────────────────────────
@@ -181,6 +183,7 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
             summary=Content.of("installer requests", level=0), approval=True, context=f"project:{pid}")],
             emitter="runtime", correlation="t", origin=Origin.TOOL)
         tabs = {name: await tab(kernel, name, str(pid)) for name in TABS}
+        tabs["tous les objectifs"] = await tab(kernel, "objectifs", str(pid), objectifs="tous")
         commits = await atelier.commits(pid, 1)
         tabs["commit"] = await tab(kernel, "git", str(pid), commit=commits[0].sha)
         tabs["file"] = await tab(kernel, "fichiers", str(pid), fichier="JOURNAL.md")
@@ -197,8 +200,10 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
     grid = next(b for b in overview if isinstance(b, Grid))
     assert [f.title for f in grid.items] == ["Où il en est", "Prochaine exécution", "Son dépôt"]
     assert "Dernières exécutions" in flat(overview) and "Décisions en vigueur (les dernières)" in flat(overview)
-    objectifs = tables(tabs["objectifs"])["Ses objectifs"]
-    assert [r.cells[2].text for r in objectifs.rows] == ["constant", "ponctuel"]  # ce qui revient d'abord
+    # par défaut, ce qui vit (le ponctuel fait se filtre) ; tous : ce qui revient d'abord
+    assert [r.cells[2].text for r in tables(tabs["objectifs"])["Ses objectifs"].rows] == ["constant"]
+    objectifs = tables(tabs["tous les objectifs"])["Ses objectifs"]
+    assert [r.cells[2].text for r in objectifs.rows] == ["constant", "ponctuel"]
     assert any(isinstance(b, ActionSlot) and b.action == "projects.objectif_ajouter" for b in nested(tabs["objectifs"]))
     runs = tables(tabs["executions"])["Ses exécutions"]
     assert runs.rows and runs.rows[-1].cells[1] == "Mika" and runs.rows[-1].cells[4].text == "fait"
@@ -631,3 +636,60 @@ def test_her_project_with_a_forgotten_title_can_still_be_driven(tmp_path):
 
     title, paced = live(tmp_path, scenario)
     assert title == "" and paced.ok  # le titre oublié reste oublié, le reste se pilote
+
+
+# ── Ce qui sort, et les gardes de la fiche (CON-13, CON-15, CON-24) ───────
+
+
+def test_what_leaves_the_machine_is_confirmed_guarded_and_said_true(tmp_path):
+    """« Pousser maintenant » et « Approuver » font sortir quelque chose : une confirmation, marquées comme telles ;
+    pousser une amorce seule est refusé. « Déposer » sur le nom d'un dossier est refusé en français, avant d'écrire."""
+    atelier = Atelier(token="ghp_x")
+
+    async def scenario(kernel, llm):
+        pid = await create(kernel, "p1", title="Outils", objectives="Écrire l'outil", start="3:00", end="4:00",
+                           remote="https://github.com/moi/outils.git")
+        await atelier.write(pid, "src/a.py", "x")  # une amorce, puis du travail non enregistré
+        out = {"seed": await perform(kernel, "projects.pousser", form(), by="user_1", subject=str(pid), nonce="u1")}
+        await atelier.commit(pid, "première version")
+        out["pushed"] = await perform(kernel, "projects.pousser", form(), by="user_1", subject=str(pid), nonce="u2")
+        upload = {"_champs": ["file", "folder", "note", "replace"], "folder": [""], "note": [""],
+                  "file": [Upload(name="src", data=b"pas un dossier")], "replace": ["on"]}
+        out["folder"] = await perform(kernel, "projects.deposer", upload, by="user_1", subject=str(pid), nonce="d1")
+        out["specs"] = {n: kernel.registry.actions[f"projects.{n}"] for n in ("pousser", "approuver")}
+        return out
+
+    out = live(tmp_path, scenario, atelier=atelier)
+    for name in ("pousser", "approuver"):
+        assert out["specs"][name].confirm and out["specs"][name].danger
+    assert not out["seed"].ok and "amorce" in out["seed"].message  # rien d'enregistré : rien ne part
+    assert out["pushed"].ok
+    assert not out["folder"].ok and "est un dossier" in out["folder"].message
+
+
+def test_living_objectives_stay_capped_whatever_the_path_and_launch_is_offered_only_when_it_can_start(tmp_path):
+    async def scenario(kernel, llm):
+        many = "\n".join(f"Objectif {i}" for i in range(1, 61))
+        pid = str(await create(kernel, "p1", title="Plein", objectives=many, start="3:00", end="4:00"))
+        out = {"done": await perform(kernel, "projects.objectif_statut", row_form({"objective": "1", "status": "done"}),
+                                     by="user_1", subject=pid, nonce="s1")}
+        await perform(kernel, "projects.objectif_ajouter", form(text="Un de plus", kind="once"), by="user_1",
+                      subject=pid, nonce="a1")
+        # retiré → bloqué → ouvert : le plafond tient à chaque passage vers un objectif vivant
+        out["blocked"] = await perform(kernel, "projects.objectif_statut",
+                                       row_form({"objective": "1", "status": "blocked"}), by="user_1", subject=pid,
+                                       nonce="s2")
+        out["constant"] = await perform(kernel, "projects.objectif_modifier",
+                                        row_form({"objective": "1"}, text="Objectif 1", kind="constant",
+                                                 cadence_hours="2"), by="user_1", subject=pid, nonce="m1")
+        one = str(await create(kernel, "p2", title="Fini", objectives="Une chose", start="3:00", end="4:00"))
+        await perform(kernel, "projects.objectif_statut", row_form({"objective": "1", "status": "done"}),
+                      by="user_1", subject=one, nonce="s3")
+        out["launch"] = offered(kernel, kernel.registry.actions["projects.lancer"], one)
+        return out
+
+    out = live(tmp_path, scenario)
+    assert out["done"].ok
+    assert not out["blocked"].ok and "60" in out["blocked"].message
+    assert not out["constant"].ok and "constant" in out["constant"].message
+    assert out["launch"] is False  # rien ne pourrait partir : « Lancer » n'est pas offert

@@ -61,10 +61,15 @@ HESITANT = frozenset({"abstained", "failed", "timeout"})
 #: au-delà de tant de fois sa durée, la période réfractaire ne pèse plus rien (e^-3 du recul initial)
 REFRACTORY_SPAN = 3
 #: ce qui la concerne, elle — prendre de ses nouvelles parce qu'on s'inquiète, revenir sur ce qui pèse entre vous,
-#: lui rendre ce qu'on a fait de ce qui la concernait, lui signaler un mail pour elle : ça n'attend pas que son
-#: dernier message ait trouvé sa réponse (mais une initiative restée sans réponse, si). Ce qui vient de Mika
-#: (l'envie de parler, son humeur, le manque) attend.
-ABOUT_THEM = frozenset({others_c.CHECK_IN, attention_c.THOUGHT, goals_c.SHARE, projects_c.SHARE, email_c.MENTION})
+#: lui rendre ce qu'on a fait de ce qui la concernait, lui dire que le projet qu'elle lui a confié bloque sans elle,
+#: lui signaler un mail pour elle : ça n'attend pas que son dernier message ait trouvé sa réponse (mais une
+#: initiative restée sans réponse, si). Ce qui vient de Mika (l'envie de parler, son humeur, le manque) attend.
+ABOUT_THEM = frozenset({others_c.CHECK_IN, attention_c.THOUGHT, goals_c.SHARE, projects_c.SHARE, projects_c.NEED,
+                        email_c.MENTION})
+#: prévenir de ce qui ne peut pas attendre — un mail important arrivé pour sa propriétaire — n'est pas relancer
+#: quelqu'un : l'annonce passe même après une initiative restée sans réponse (elle est déjà bornée par sa source :
+#: une fois par mail, au-dessus d'un seuil d'importance) ; le plafond du jour et le recul s'y appliquent toujours
+INFORMS = frozenset({email_c.MENTION})
 
 
 class AgencyParams(BaseModel):
@@ -269,7 +274,7 @@ def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str |
     ce qui concerne la personne elle-même (``ABOUT_THEM``) n'attend pas la fin
     de cette retenue-là ; ce qui vient de Mika (l'envie de parler, son humeur,
     le manque), si. Rend le veto, ou ``None``."""
-    if not is_identifiable(target):
+    if not is_identifiable(target) or INFORMS & set(reasons):
         return None
     person = frame.get(identity_c.PERSON(target))
     mine = frame.get(attention_c.AWAITING(person))

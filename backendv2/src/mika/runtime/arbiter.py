@@ -37,7 +37,7 @@ from mika.runtime.boundary import Failed, call
 if TYPE_CHECKING:
     from mika.runtime.scheduler import ProcessContext
 
-Submit = Callable[[Row, Frame], Awaitable[Any]]
+Submit = Callable[[Row, Frame, int], Awaitable[Any]]
 
 
 #: Au plus tard, l'intensité est réévaluée à ce rythme (une preuve qui monte
@@ -158,13 +158,14 @@ class Arbiter:
         for res in sorted(row.resources):
             if frame.get(LEASE(res)) is not None:
                 return  # ressource occupée : l'occurrence est perdue, pas reportée
-        await ctx.emit(
+        commit = await ctx.emit(
             SELECTED.draft(rows=tuple(r.record() for r in shown(rows, row, reg.arbitration.top_k)),
                            fired=(row.key,), draw=draw, candidates=len(rows), bound=bound, total=total),
             emitter="kernel",
         )
         self.fired.append((ctx.now, row.key))
-        if await self._submit(row, frame):
+        # l'épisode porte le numéro exact de la sélection qui l'a choisi (``episode.started.selected``)
+        if await self._submit(row, frame, commit.seqs[-1]):
             self.queued.add(row.key)
 
 

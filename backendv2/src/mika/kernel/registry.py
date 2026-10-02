@@ -24,6 +24,8 @@ from mika.kernel.codec import canonical_json
 from mika.kernel.events import EventRegistry, EventType
 from mika.kernel.facts import FactSpec, UnknownFact
 from mika.kernel.faculty import (
+    CAPABILITY_LANE,
+    DELIVERY_LANE,
     ActionSpec,
     AppraisalSpec,
     CapabilitySpec,
@@ -227,6 +229,12 @@ class Registry:
             self.projectors[s.name] = s
         self.effects: dict[str, list[EffectSpec]] = defaultdict(list)
         for s in (s for f in facs for s in f.effects):
+            # une ligne de file de sortie par (événement, propriétaire de l'effet) : deux effets d'une même
+            # faculté sur un même type se fondent en un seul gestionnaire (sinon chaque ajout lèverait)
+            if any(o.owner == s.owner for o in self.effects[s.type.name]):
+                problems.append(f"{s.owner} déclare deux effets sur {s.type.name} : un seul gestionnaire par type")
+            if s.lane not in (DELIVERY_LANE, CAPABILITY_LANE):
+                problems.append(f"effet de {s.owner} sur {s.type.name} : file de sortie inconnue « {s.lane} »")
             self.effects[s.type.name].append(s)
         self.capabilities: dict[str, CapabilitySpec] = {}
         for s in (s for f in facs for s in f.capabilities):

@@ -361,8 +361,11 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         datadir.hold(data)  # un seul Mika par dossier : un second processus est refusé, pas mêlé au journal
-        await kernel.start(configure=lambda k: composition.configure(k, live.persona(), settings.overrides(),
-                                                                     live.inputs()))
+        # deux temps : relire sa vie et sa configuration, brancher tout ce qui fait sortir sa parole
+        # (passerelle des modèles, budget, écrans, Telegram), puis seulement la vie (reprises, processus,
+        # file de sortie) — sinon une reprise au démarrage partait sans modèle ni canal.
+        await kernel.boot(configure=lambda k: composition.configure(k, live.persona(), settings.overrides(),
+                                                                    live.inputs()))
         await live.settings.open()
         await live.accounts.open()
         await register_accounts(kernel, live.accounts)  # ceux d'avant, et ceux créés hors ligne (mika account)
@@ -378,6 +381,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             await live.start_telegram()
         except Exception as exc:  # noqa: BLE001 — un robot mal configuré n'empêche pas le reste de vivre
             log.warning("Telegram : démarrage impossible (%r)", exc)
+        await kernel.live()
         try:
             yield
         finally:

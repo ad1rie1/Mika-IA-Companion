@@ -7,7 +7,15 @@
   réseau, ni le reste du disque ; un délai tue tout son groupe ; la sortie
   est bornée ;
 - sans bubblewrap, rien ne s'exécute (pas de repli aux droits du serveur) ;
-- git : une amorce, puis un commit seulement quand quelque chose a changé.
+- git : une amorce, puis un commit seulement quand quelque chose a changé ;
+- un programme est borné comme une app de la Forge (mémoire, taille d'un
+  fichier, sortie par un tube plafonné : au-delà, il est tué) ; un atelier trop
+  gros n'accepte plus que du ménage ; une exécution annulée tue ce qu'elle a
+  lancé (PRJ-1, PRJ-11) ;
+- une commande approuvée a Internet, jamais la machine ni le réseau local ;
+  sans réseau isolé, elle ne part pas (PRJ-6) ;
+- l'arbre se lit depuis git, un lien cassé y est une entrée, ``.venv`` et
+  ``node_modules`` n'y sont pas (PRJ-7, PRJ-15).
 """
 
 from __future__ import annotations
@@ -15,13 +23,18 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import socket
+import threading
 
 import pytest
 
-from mika.adapters.workshop import BwrapWorkshop
-from mika.ports.workshop import OutsideWorkshop
+from mika.adapters.workshop import BwrapWorkshop, Limits
+from mika.ports.workshop import OutsideWorkshop, WorkshopFull
 
 needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap absent")
+needs_pasta = pytest.mark.skipif(not all(shutil.which(x) for x in ("bwrap", "pasta", "ip")),
+                                 reason="bubblewrap, pasta ou ip absent")
+MIB = 1024 ** 2
 
 
 def go(coro):
@@ -198,3 +211,129 @@ def test_a_push_sends_the_pinned_commit_not_what_head_became(tmp_path):
     [args] = seen
     assert f"{pinned}:refs/heads/main" in args and "credential.helper=" in args and "protocol.allow=never" in args
     assert go(ws.push(1, "https://github.com/moi/depot.git", "main", "0" * 40)).refused  # un commit inconnu
+
+
+# ── Un bac à sable qui tient (PRJ-1, PRJ-11, PRJ-6, PRJ-7, PRJ-15) ──────────
+
+
+@needs_bwrap
+def test_a_program_is_bounded_in_memory_file_size_and_output(tmp_path):
+    ws = BwrapWorkshop(tmp_path, limits=Limits(memory_bytes=512 * MIB, file_bytes=MIB, output_bytes=MIB))
+    hungry = go(ws.run(1, ["python3", "-c", "x = bytearray(1024 * 1024 ** 2); print('alloué')"]))
+    assert not hungry.ok and "alloué" not in hungry.stdout  # la mémoire : son espace, pas celui du serveur
+    fat = go(ws.run(1, ["python3", "-c", "open('gros', 'wb').write(b'x' * (4 * 1024 ** 2))"]))
+    assert not fat.ok and (ws.folder(1) / "gros").stat().st_size <= MIB  # un fichier : borné aussi
+    loud = go(ws.run(1, ["python3", "-c", "import sys\nwhile True: sys.stdout.write('x' * 65536)"], timeout_s=60))
+    assert not loud.ok and not loud.timed_out and loud.duration_ms < 20_000  # tué au dépassement, pas au délai
+    assert any("sortie dépassait" in n for n in loud.notes) and loud.truncated
+
+
+@needs_bwrap
+def test_a_workshop_too_big_only_accepts_cleaning(tmp_path):
+    ws = BwrapWorkshop(tmp_path, limits=Limits(workshop_bytes=MIB))
+    grew = go(ws.run(1, ["python3", "-c", "open('gros', 'wb').write(b'x' * (2 * 1024 ** 2))"]))
+    assert grew.ok and any("fais de la place" in n for n in grew.notes)  # elle le lit dans ce que ça a donné
+    with pytest.raises(WorkshopFull):
+        go(ws.write(1, "notes.md", "encore"))
+    assert "fais de la place" in go(ws.run(1, ["python3", "-c", "print(1)"])).refused
+    assert go(ws.run(1, ["rm", "gros"])).ok  # le ménage, si
+    assert go(ws.write(1, "notes.md", "de la place")) == "notes.md"
+
+
+def test_a_workshop_filled_file_by_file_is_bounded_without_running_anything(tmp_path):
+    ws = BwrapWorkshop(tmp_path, bwrap="", limits=Limits(workshop_bytes=MIB))
+    (ws.folder(1)).mkdir(parents=True)
+    (ws.folder(1) / "deja.bin").write_bytes(b"x" * (2 * MIB))  # posé là avant (un dépôt, une version d'avant)
+    with pytest.raises(WorkshopFull):
+        go(ws.write(1, "un-de-plus.md", "x"))
+
+
+@needs_bwrap
+def test_a_cancelled_run_kills_what_it_started(tmp_path):
+    ws = BwrapWorkshop(tmp_path)
+
+    async def scenario():
+        task = asyncio.create_task(ws.run(1, ["sh", "-c", "sleep 3; echo fait > marque"], timeout_s=60))
+        await asyncio.sleep(1.5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(3)
+
+    go(scenario())
+    assert not (ws.folder(1) / "marque").exists()  # l'exécution annulée n'a rien laissé tourner derrière elle
+
+
+class _Listener:
+    """Un service de la machine hôte (toutes ses adresses) : la cage ne doit jamais le joindre."""
+
+    def __init__(self) -> None:
+        self.sock = socket.socket()
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(("0.0.0.0", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        self.reached: list[object] = []
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                conn, peer = self.sock.accept()
+            except OSError:
+                return
+            self.reached.append(peer)
+            conn.close()
+
+    def close(self) -> None:
+        self.sock.close()
+
+
+@needs_pasta
+def test_an_approved_network_command_reaches_neither_the_machine_nor_the_local_network(tmp_path):
+    ws = BwrapWorkshop(tmp_path)
+    host = _Listener()
+    try:
+        targets = [("127.0.0.1", host.port), *((str(a), host.port) for a in ws._host_addresses()),
+                   ("10.0.0.1", 80), ("100.64.0.1", 80), ("169.254.169.254", 80), ("192.168.1.1", 80)]
+        code = ("import socket\n"
+                f"for h, p in {targets!r}:\n"
+                "    try:\n"
+                "        socket.create_connection((h, p), 2); print('JOINT', h)\n"
+                "    except OSError as e:\n"
+                "        print('non', h)\n")
+        r = go(ws.run(1, ["python3", "-c", code], network=True, timeout_s=60))
+    finally:
+        host.close()
+    assert r.returncode == 0, r.summary() + r.stderr
+    assert "JOINT" not in r.stdout and r.stdout.count("non ") == len(targets)
+    assert host.reached == []  # rien n'est arrivé jusqu'à la machine
+
+
+@needs_bwrap
+def test_without_an_isolated_network_a_network_command_does_not_leave(tmp_path):
+    ws = BwrapWorkshop(tmp_path, pasta="")
+    r = go(ws.run(1, ["curl", "https://exemple.org"], network=True))
+    assert r.returncode is None and "réseau isolé" in r.refused  # jamais le réseau de l'hôte en repli
+
+
+@needs_bwrap
+def test_the_tree_comes_from_git_keeps_a_broken_link_and_skips_the_noise(tmp_path):
+    ws = BwrapWorkshop(tmp_path)
+    go(ws.write(1, "src/app.py", "print(1)\n"))
+    os.symlink("nulle-part", ws.folder(1) / "lien")
+    noise = ws.folder(1) / "node_modules" / "paquet"
+    noise.mkdir(parents=True)
+    for i in range(300):
+        (noise / f"f{i}.js").write_text("x")
+    (ws.folder(1) / "vieux.pyc").write_bytes(b"x")  # ignoré par git : pas une entrée de son travail
+    tree = go(ws.tree(1))
+    assert "lien (lien)" in tree and "src/app.py (9 o)" in tree  # un lien cassé est une entrée, pas une panne
+    assert not [t for t in tree if "node_modules" in t or ".pyc" in t]
+    ignore = next(i for i, t in enumerate(tree) if t.startswith(".gitignore ("))
+    assert ignore < tree.index("src/app.py (9 o)")  # les plus proches de la racine d'abord
+    bare = BwrapWorkshop(tmp_path / "sans-git", bwrap="")  # sans dépôt : un parcours borné, même règle
+    (bare.folder(2) / "node_modules" / "x").mkdir(parents=True)
+    (bare.folder(2) / "node_modules" / "x" / "y.js").write_text("x")
+    os.symlink("nulle-part", bare.folder(2) / "lien")
+    assert go(bare.tree(2)) == ["lien (lien)"]

@@ -214,6 +214,23 @@ def network_summary(p: Project, argv: list[str] | tuple[str, ...], why: str) -> 
             f"Ses mots, pour expliquer : « {why.strip()} »")
 
 
+def _already(frame: Any, p: Project, argv: list[str]) -> bool:
+    """La même commande réseau attend-elle déjà, pour ce projet (en file, ou un accord) ?"""
+    wanted = [str(a) for a in argv]
+    if any(list(queued) == wanted for _, queued, _ in p.network):
+        return True
+    state = frame.state("projects")
+    for v in frame.get(rt.PENDING_EFFECTS):
+        if v.capability != NETWORKED or project_of(v.context) != p.id:
+            continue
+        try:
+            if [str(a) for a in json.loads(state.awaiting.get(v.proposal, "{}")).get("argv") or []] == wanted:
+                return True
+        except (ValueError, AttributeError):
+            continue
+    return False
+
+
 @PROJECTS.tool("ws_network", description="Proposer une commande qui a besoin du réseau (installer une dépendance, "
                "télécharger…). Elle ne part pas tout de suite : selon le projet, un opérateur doit l'approuver, sinon "
                "elle part à la fin de cette exécution.", args=NetworkArgs, bundle=BUNDLE, episodes=RUNS,
@@ -224,6 +241,9 @@ async def ws_network(args: NetworkArgs, ctx: Any) -> Any:
         return GONE
     p, _ = got
     about = tuple(x for x in (p.owner, *p.about) if x)
+    if _already(ctx.frame, p, args.argv):  # la même commande ne s'empile pas : elle attend déjà
+        return wrap_up(ctx, ToolResult(ok=False, content="Cette commande attend déjà (un accord, ou la fin de "
+                                                         "l'exécution) : inutile de la redemander."))
     if not p.approval:  # sans accord : elle partira quand cette exécution aura fini (l'atelier est à elle d'ici là)
         await ctx.emit(NETWORK_QUEUED.draft(project=p.id, argv=tuple(args.argv),
                                             why=Content.of(args.why.strip(), level=p.sensitivity),
