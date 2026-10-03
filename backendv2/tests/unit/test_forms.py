@@ -176,6 +176,27 @@ def test_units_are_guessed_from_the_name_suffix():
     assert b["settle_s"].unit == "s"
 
 
+def test_a_rate_per_hour_is_a_number_not_a_duration():
+    """G-8 : « Le vide se creuse de, par heure » s'affichait « 3 min » (0,05 lu comme 0,05 h) et refusait « 0.1 »
+    (« précisez l'unité »). Un débit (``…_per_h``, ``…_per_min``, ``…_per_s``) n'a pas d'unité de temps devinée ;
+    contre-exemple : ``…_h`` reste une durée."""
+    from mika.faculties.needs import NeedsParams
+
+    class Rates(BaseModel):
+        growth_per_h: Annotated[float, Knob(lo=0, hi=1)] = 0.05
+        steps_per_min: Annotated[float, Knob(lo=0, hi=10)] = 1.0
+        tau_h: Annotated[int, Knob(lo=0, hi=10 * HOUR)] = HOUR
+
+    r = fields_by_path(Rates)
+    assert (r["growth_per_h"].kind, r["growth_per_h"].unit) == ("float", "")
+    assert (r["steps_per_min"].kind, r["steps_per_min"].unit) == ("float", "")
+    assert (r["tau_h"].kind, r["tau_h"].unit) == ("duration", "h")
+    empty = fields_by_path(NeedsParams)["empty_growth_per_h"]
+    assert (empty.kind, empty.unit) == ("float", "")
+    values, errors = parse([empty], form(empty.path, empty_growth_per_h="0.1"), current={empty.path: 0.05})
+    assert not errors and values[empty.path] == 0.1
+
+
 def test_select_choices_from_literal_enum_and_knob():
     f = fields_by_path(Sample)
     assert f["mode"].choices == (("a", "a"), ("b", "b"))

@@ -1,17 +1,21 @@
 // Backend HTTP API base + session-auth helpers.
 //
-// The VTuber WebSocket authenticates via the Django session cookie
-// (AuthMiddlewareStack on the backend). The frontend logs in over HTTP first;
-// the resulting session cookie then authenticates the WebSocket handshake.
+// Le serveur visé est Mika v2 (`backendv2/`, `python -m mika serve`, port
+// 8001 par défaut). Le WebSocket s'authentifie par le cookie de session : le
+// frontend se connecte d'abord en HTTP (`/auth/login`), le cookie obtenu
+// authentifie ensuite la poignée de main du WebSocket.
 //
-// All requests use `credentials: "include"` so the session cookie is sent.
-// When the frontend runs on a different origin than the backend (e.g. Vite on
-// :3000 vs backend on :8000), the backend must enable credentialed CORS
-// (CORS_ALLOW_CREDENTIALS=True + explicit CORS_ALLOWED_ORIGINS) and an
-// appropriate SESSION_COOKIE_SAMESITE.
+// Toutes les requêtes partent avec `credentials: "include"`. Quand le
+// frontend tourne sur une autre origine que le serveur (Vite sur :3000, le
+// serveur sur :8001), le serveur doit admettre cette origine : celles du
+// développement (localhost/127.0.0.1, ports 3000 et 4173) le sont par
+// défaut ; une autre se déclare par `python -m mika serve --origin <adresse>`.
+//
+// `VITE_BACKEND_ORIGIN` (voir `frontend/.env.example`) change la cible —
+// l'ancien moteur (v1, Django) écoutait sur http://localhost:8000.
 
 const BACKEND_ORIGIN =
-  (import.meta as any).env?.VITE_BACKEND_ORIGIN ?? "http://localhost:8000";
+  (import.meta as any).env?.VITE_BACKEND_ORIGIN ?? "http://localhost:8001";
 
 export const API_BASE = BACKEND_ORIGIN;
 export const WS_URL =
@@ -41,7 +45,7 @@ export interface AuthState {
 }
 
 /**
- * Read Django's CSRF token from the cookie it sets on `/auth/whoami`.
+ * Read the server's CSRF token from the cookie it sets on `/auth/whoami`.
  *
  * The cookie is deliberately not HttpOnly: it is not the secret. What a
  * cross-site page cannot do is produce the *pair* — it can neither read this
@@ -77,12 +81,17 @@ export async function postJson(path: string, body: unknown): Promise<Response> {
   }
 }
 
+/** Ce qu'il faut lancer pour que le serveur admette cette page. */
+export function serveCommand(origin: string): string {
+  return `python -m mika serve --origin ${origin}`;
+}
+
 /**
- * Erreur de transport : le backend n'a jamais répondu, ou le navigateur a
- * jeté sa réponse (origine absente de CORS_ALLOWED_ORIGINS). Distinguée d'un
- * refus applicatif parce que les deux se soignent très différemment — et que
- * les confondre affiche « identifiants invalides » à quelqu'un dont le mot de
- * passe est juste.
+ * Erreur de transport : le serveur n'a jamais répondu, ou le navigateur a
+ * jeté sa réponse (cette origine n'est pas admise par le serveur).
+ * Distinguée d'un refus applicatif parce que les deux se soignent très
+ * différemment — et que les confondre affiche « identifiants invalides » à
+ * quelqu'un dont le mot de passe est juste.
  */
 export class BackendUnreachableError extends Error {
   /** L'erreur `fetch` d'origine — `cause` demanderait la lib ES2022. */
@@ -90,8 +99,10 @@ export class BackendUnreachableError extends Error {
 
   constructor(reason?: unknown) {
     super(
-      `Backend injoignable sur ${API_BASE}. Vérifie qu'il tourne, et que ` +
-        `l'origine ${location.origin} est bien dans CORS_ALLOWED_ORIGINS.`
+      `Le serveur de Mika ne répond pas sur ${API_BASE}. Vérifie qu'il tourne ` +
+        `(dans backendv2/ : python -m mika serve), et qu'il admet cette page : ` +
+        `${serveCommand(location.origin)}. Un autre serveur se vise par ` +
+        `VITE_BACKEND_ORIGIN (frontend/.env.example).`
     );
     this.name = "BackendUnreachableError";
     this.reason = reason;
@@ -99,8 +110,8 @@ export class BackendUnreachableError extends Error {
 }
 
 export async function whoami(): Promise<AuthState> {
-  // Also the call that plants the CSRF cookie (see @ensure_csrf_cookie on
-  // the view), so it has to happen before any mutating request.
+  // Also the call that plants the CSRF cookie (the server sets `csrftoken`
+  // on it), so it has to happen before any mutating request.
   //
   // Une panne de transport n'est délibérément plus rattrapée ici : renvoyer
   // `{authenticated:false}` faisait afficher l'écran de login alors que rien
@@ -115,9 +126,22 @@ export async function whoami(): Promise<AuthState> {
   return (await resp.json()) as AuthState;
 }
 
+/** Refus applicatif du serveur : il a répondu, il dit non. */
+export class LoginRefusedError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = "LoginRefusedError";
+  }
+}
+
+/** Le statut de « un compte existe déjà » : la fenêtre du premier compte est
+ * fermée (un autre onglet l'a créé entre-temps). */
+export const BOOTSTRAP_CLOSED = 409;
+
 /**
- * Create the first account. Open only while the user table is empty; the
- * backend returns 409 forever once anyone exists.
+ * Create the first account. Open only while no account exists; the server
+ * answers 409 forever once anyone exists — a `LoginRefusedError` carrying
+ * that status, which is what the login screen reads (never the wording).
  */
 export async function bootstrap(
   username: string,
@@ -126,17 +150,9 @@ export async function bootstrap(
   const resp = await postJson("/auth/bootstrap", { username, password });
   const body = await resp.json().catch(() => ({}));
   if (!resp.ok) {
-    throw new Error(body.error || "bootstrap refusé");
+    throw new LoginRefusedError(resp.status, body.error || "création du compte refusée");
   }
   return body as AuthState;
-}
-
-/** Refus applicatif du serveur : il a répondu, il dit non. */
-export class LoginRefusedError extends Error {
-  constructor(readonly status: number, message: string) {
-    super(message);
-    this.name = "LoginRefusedError";
-  }
 }
 
 export async function login(
@@ -146,16 +162,16 @@ export async function login(
   const resp = await postJson("/auth/login", { username, password });
   if (!resp.ok) {
     // Seul le 401 parle du couple identifiant/mot de passe. Un 403 est un
-    // rejet CSRF (cookie absent, origine non listée dans
-    // CSRF_TRUSTED_ORIGINS) — un mot de passe correct n'y changera rien.
+    // rejet CSRF (cookie absent, ou cette origine non admise par le serveur)
+    // — un mot de passe correct n'y changera rien.
     if (resp.status === 401) {
       throw new LoginRefusedError(401, "Identifiants invalides.");
     }
     if (resp.status === 403) {
       throw new LoginRefusedError(
         403,
-        "Requête refusée (CSRF). Recharge la page ; si ça persiste, vérifie " +
-          `que ${location.origin} est dans CSRF_TRUSTED_ORIGINS.`
+        "Requête refusée (CSRF). Recharge la page ; si ça persiste, le serveur " +
+          `n'admet pas cette page : ${serveCommand(location.origin)}.`
       );
     }
     // Le backend plafonne les échecs par fenêtre glissante : réessayer tout

@@ -86,3 +86,89 @@ def test_forgetting_whoever_confided_it_forgets_what_they_said(tmp_path):
     assert json.loads(row[1]) == ["name:carol"] and json.loads(row[2]) == ["user_3"]
     assert left == 0, "ce que Bob a confié s'oublie avec lui"
     assert stale and pruned, "le cache perd ce que la mémoire a perdu"
+
+
+def test_a_rebuilt_thread_does_not_bring_back_someone_forgotten(tmp_path):
+    """Alice est oubliée ; plus tard, la table du fil change de version et se reconstruit depuis le journal (une mise
+    à jour) : les messages d'Alice n'y reviennent pas — ni en texte vide, ni par les noms de leurs pièces jointes
+    (audit du lot L2 du 2026-10-03). Contre-exemple : ceux de Bob, oui."""
+    def first():
+        kernel, clock, _, _ = build(tmp_path, Script())
+
+        async def main():
+            await boot(kernel)
+            await connect(kernel, "user_2", "Alice")
+            await connect(kernel, "user_3", "Bob")
+            await chat(kernel, "user_2", ["coucou, c'est Alice", "je déménage à Lyon"])
+            await chat(kernel, "user_3", ["salut, c'est Bob"])
+            await kernel.forget("user_2")
+            await kernel.stop()
+
+        run_virtual(clock, main)
+
+    first()
+    with sqlite3.connect(tmp_path / "mind.db") as db:  # la table telle qu'une version d'avant l'avait laissée
+        db.execute("UPDATE meta SET value='1' WHERE key='t0:thread'")
+    kernel, clock, _, _ = build(tmp_path, Script())
+
+    async def main():
+        await boot(kernel)
+        rows = kernel.mind.store.query_mind("SELECT person, text FROM thread")
+        await kernel.stop()
+        return rows
+
+    rows = run_virtual(clock, main)
+    assert not [r for r in rows if r[0] == "user_2"], rows
+    assert any(r[0] == "user_3" for r in rows), "contre-exemple : le fil de Bob se reconstruit"
+
+
+def test_forgetting_someone_a_memory_was_reinforced_by_erases_its_text_for_good(tmp_path):
+    """Sam lui apprend un fait ; plus tard il le redit en nommant Inès : le souvenir est renforcé, et rattaché à Inès
+    aussi — sans que son texte la nomme. Oublier Inès retirait la ligne, mais pas le texte : une reconstruction le
+    faisait revenir, rattaché à elle (audit du lot L2 du 2026-10-03). Désormais le texte s'efface avec elle."""
+    fact = "Le concert de jazz CANARI-RENFORT est samedi au Pavillon"
+
+    def extract(prompt):
+        said_ = prompt.split("Les messages :")[-1]
+        if "CANARI-RENFORT" not in said_:
+            return None
+        people = [token(prompt, "Sam")] + (["Inès"] if "Inès" in said_ else [])
+        return {"croyances": [{"texte": fact, "personnes": people, "sensibilite": "personnel",
+                               "messages": seq_of(said_, "CANARI-RENFORT")}]}
+
+    def first():
+        kernel, clock, _, _ = build(tmp_path, Script(extract))
+
+        async def main():
+            await boot(kernel)
+            await connect(kernel, "user_1", "Sam")
+            await chat(kernel, "user_1", ["le concert de jazz CANARI-RENFORT est samedi au Pavillon", *SIX[1:]])
+            await asyncio.sleep(3 * 3600)
+            await chat(kernel, "user_1", ["j'y vais avec Inès, au concert de jazz CANARI-RENFORT samedi au Pavillon",
+                                          *SIX[1:]])
+            await asyncio.sleep(900)
+            before = kernel.mind.store.query_mind(f"SELECT id, about FROM {memory_c.ITEMS_TABLE} "
+                                                  "WHERE text LIKE '%CANARI-RENFORT%'")
+            await kernel.forget("name:ines")
+            after = kernel.mind.store.query_mind(f"SELECT COUNT(*) FROM {memory_c.ITEMS_TABLE} "
+                                                 "WHERE text LIKE '%CANARI-RENFORT%'")[0][0]
+            await kernel.stop()
+            return before, after
+
+        return run_virtual(clock, main)
+
+    before, after = first()
+    assert len(before) == 1 and set(json.loads(before[0][1])) == {"user_1", "name:ines"}, before  # renforcé, rattaché
+    assert after == 0
+    with sqlite3.connect(tmp_path / "mind.db") as db:  # une mise à jour reconstruit la table des souvenirs
+        db.execute(f"UPDATE meta SET value='1' WHERE key='t0:{memory_c.ITEMS_TABLE}'")
+    kernel, clock, _, _ = build(tmp_path, Script(extract))
+
+    async def main():
+        await boot(kernel)
+        rows = kernel.mind.store.query_mind(f"SELECT id, text, about FROM {memory_c.ITEMS_TABLE} "
+                                            f"WHERE id={before[0][0]}")
+        await kernel.stop()
+        return rows
+
+    assert run_virtual(clock, main) == [], "le texte oublié ne revient pas à la reconstruction"

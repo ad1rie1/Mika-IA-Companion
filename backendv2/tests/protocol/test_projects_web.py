@@ -77,12 +77,17 @@ def test_an_operator_approves_from_the_panel_and_the_action_runs_isolated(world)
         project = state["projects"][0]
         assert project["title"] == "Un script de bonjour" and project["schedule_rule"] == "cron:0 9 * * MON"
         assert project["next_run_at"] and project["origin"] == "user" and project["emotion_policy"] == "full"
+        # ce que le panneau montre, en mots (ADR 0056) : pas « full », pas « cron:0 9 * * MON »
+        assert project["mode_label"] == "" and project["schedule_label"] == "le lundi à 9 h"
         assert (project["tasks_total"], project["tasks_done"]) == (1, 0)  # ses objectifs ponctuels
         assert set(project) == {"id", "title", "status", "priority", "origin", "emotion_policy", "schedule_rule",
-                                "next_run_at", "tasks_total", "tasks_done", "tasks_blocked"}
+                                "next_run_at", "tasks_total", "tasks_done", "tasks_blocked", "mode_label",
+                                "schedule_label"}
         [pending] = state["pending_project_actions"]
         assert pending["id"] == action and pending["project_id"] == pid
         assert pending["project_title"] == "Un script de bonjour" and pending["payload_kind"] == "projects.networked"
+        assert pending["owner_label"] == "Un script de bonjour"
+        assert pending["kind_label"] == "Lancer une commande avec le réseau dans l'atelier d'un projet."
         assert "Installer une dépendance" in pending["proposal"]
 
         assert client.post(f"/api/projects/pending/{action}/approve", json={}).status_code == 403  # sans CSRF

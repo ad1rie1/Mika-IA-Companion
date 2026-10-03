@@ -16,23 +16,29 @@ import logging
 import re
 import shutil
 import tempfile
+import time
+from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote
 
 from starlette.testclient import TestClient
 
-from mika.adapters.llm.config import LiveGateway
-from mika.adapters.llm.gateway import Gateway
+from mika.adapters.llm.config import BackendSpec, LiveGateway, LLMConfig
+from mika.adapters.llm.gateway import Gateway, LLMTrace
 from mika.adapters.system import RealClock
 from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import WebConfig
 from mika.app.console import NAVIGATION
 from mika.app.server import build
-from mika.ports.llm import LLMRequest, LLMResponse
+from mika.ports.llm import LLMRequest, LLMResponse, Usage
 from mika.runtime.operations import perform
-from mika.sim.llm.scripted import ScriptedLLM
-from mika.vocab.episodes import VOICE_ROLES
+from mika.sim.llm.persona import PersonaSimLLM
+from mika.vocab.episodes import FALLBACKS, VOICE_ROLES
 
+#: le fournisseur de l'aperçu (la doublure du simulateur, locale : rien ne sort de la machine)
+NAME = "apercu"
+#: la relecture de ses conversations, attendue au plus tant de fois 0,1 s
+CONSOLIDATION_WAIT_STEPS = 100
 ORIGIN = "http://localhost:3000"
 HOST = "http://localhost:8001"
 PASSWORD = "une-phrase-de-passe-longue"
@@ -62,11 +68,18 @@ async def _project(kernel) -> str:
     return got.go.key.split("/", 1)[1] if got.ok and got.go is not None else ""
 
 
-def _respond(req: LLMRequest) -> LLMResponse:
-    if req.role != "reply":
-        return LLMResponse("[SILENCE]")
-    text, emotion, intensity = next(REPLIES)
-    return LLMResponse(f"{text} [EMOTION:{emotion}:{intensity}]")
+class _Model(PersonaSimLLM):
+    """La doublure du simulateur, qui tient tous les rôles (retenir, son journal, comprendre les gens…) : une
+    vie complète, que la mémoire, la consolidation et les coûts montrent. Ses réponses, elles, varient d'un
+    message à l'autre sans jamais se taire (l'aperçu veut une parole à chaque message)."""
+
+    async def complete(self, req: LLMRequest) -> LLMResponse:
+        if req.role != "reply":
+            return await super().complete(req)
+        self.calls.append(req)
+        text, emotion, intensity = next(REPLIES)
+        return LLMResponse(f"{text} [EMOTION:{emotion}:{intensity}]", model=self.model,
+                           usage=Usage(input_tokens=sum(len(m.content) for m in req.messages) // 4, output_tokens=20))
 
 
 def _page(text: str, theme: str, depth: int) -> str:
@@ -87,16 +100,24 @@ def export(out: Path) -> list[str]:
     out.mkdir(parents=True, exist_ok=True)
     shutil.copytree(STATIC, out / "static", dirs_exist_ok=True)
     clock = RealClock()
-    roles = {str(r): "apercu" for r in VOICE_ROLES}
-    gateway = LiveGateway(Gateway({"apercu": ScriptedLLM(clock, _respond)}, roles, clock=clock,
-                                  voice_roles=frozenset(roles), slots={"apercu": 1}))
+    sink: list[Callable[[LLMTrace], None]] = []
+    # un seul fournisseur, déclaré comme un opérateur le ferait : il sert « répondre », les autres rôles y
+    # retombent (replis de rôle) ; chaque appel laisse sa trace (Coûts, Pourquoi a-t-elle dit ça ?)
+    gateway = LiveGateway(Gateway({NAME: _Model(clock, latency=0.0, abstain_rate=0.0)}, {"reply": NAME},
+                                  clock=clock, voice_roles=frozenset(str(r) for r in VOICE_ROLES),
+                                  fallbacks={str(k): str(v) for k, v in FALLBACKS.items()}, slots={NAME: 1},
+                                  on_trace=lambda tr: [f(tr) for f in sink]))
     done: list[str] = []
+    failed: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
         # l'horloge est réelle : la nuit, ses réponses attendraient son réveil (ADR 0036) — un aperçu
         # répond à toute heure
         app, live = build(Path(tmp) / "data", web=WebConfig(), gateway=gateway, embedder=HashEmbedder(),
                           reply_wait=None)
+        sink.append(live.trace)
         with TestClient(app, base_url=HOST, headers={"Origin": ORIGIN}) as client:
+            client.portal.call(lambda: live.settings.save_llm(LLMConfig(backends={NAME: BackendSpec(
+                kind="ollama", model="doublure-du-simulateur")})))
             def token() -> dict[str, str]:
                 client.get("/auth/whoami")
                 return {"X-CSRFToken": client.cookies.get("csrftoken", "")}
@@ -115,6 +136,12 @@ def export(out: Path) -> list[str]:
                         for _ in range(30):
                             if ws.receive_json().get("type") == "speech":
                                 break
+            # six messages reçus : elle relit la conversation (souvenirs, croyances) — attendre qu'elle l'ait fait,
+            # pour que Mémoire et Consolidation montrent une vie, pas des pages vides
+            for _ in range(CONSOLIDATION_WAIT_STEPS):
+                if client.portal.call(lambda: live.kernel.mind.store.latest(["memory.consolidated"], 1)):
+                    break
+                time.sleep(0.1)
             client.post("/auth/login", json=operator, headers=token())
             urls: list[str] = []
             for group in NAVIGATION:
@@ -149,6 +176,9 @@ def export(out: Path) -> list[str]:
                      "/inspecteur/action/projects.creer?retour=/inspecteur/projets"]
             for url in dict.fromkeys(u for u in urls if u):
                 r = client.get(url, follow_redirects=True)
+                if r.status_code != 200:  # une page en erreur ne s'exporte pas comme si de rien n'était
+                    failed.append(f"{url} ({r.status_code})")
+                    continue
                 name = _name(url)
                 for theme in ("clair", "sombre"):
                     target = out / theme / name
@@ -159,4 +189,14 @@ def export(out: Path) -> list[str]:
                       for u in done)
     (out / "index.html").write_text(f"<!doctype html><meta charset=utf-8><title>Aperçu de la console</title>"
                                     f"<h1>Aperçu de la console</h1><ul>{index}</ul>", encoding="utf-8")
+    if failed:
+        raise ExportFailed(failed)
     return done
+
+
+class ExportFailed(RuntimeError):
+    """Des pages de la console ont répondu autre chose que 200 : les autres sont exportées, celles-ci nommées."""
+
+    def __init__(self, pages: list[str]) -> None:
+        self.pages = pages
+        super().__init__(f"{len(pages)} page(s) en erreur : " + ", ".join(pages[:10]))

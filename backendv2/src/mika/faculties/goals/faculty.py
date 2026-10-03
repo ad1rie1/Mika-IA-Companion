@@ -74,6 +74,11 @@ class GoalsParams(BaseModel):
         help="Une rêverie (une curiosité sans endroit où chercher du neuf) se vit d'un trait : elle l'écrit, c'est "
              "tout. Plus de séances la font tourner en rond, et chaque séance est une boucle d'outils du "
              "modèle.")] = 1
+    reflection_steps: Annotated[int, Knob(
+        label="Séances par réflexion", group="Les séances", lo=1, hi=10,
+        help="Repenser à ce qu'on lui a confié, ou à une croyance qu'elle a dû revoir, se fait en une séance, "
+             "l'échange sous les yeux : elle écrit ce qu'elle en pense, c'est tout. Plus de séances en font une "
+             "enquête qui tourne en rond et finit par inventer (sonde réelle du 2026-10-03).")] = 1
     silent_before_blocked: Annotated[int, Knob(
         label="Séances sans verdict avant blocage", group="Les séances", lo=1, hi=10,
         help="Après autant de séances de suite où le modèle a travaillé sans rien conclure, le but est bloqué.")] = 3
@@ -161,6 +166,18 @@ class GoalsParams(BaseModel):
         label="Repos d'un centre d'intérêt", group="Entreprendre d'elle-même", lo=HOUR, hi=90 * DAY,
         help="Un centre d'intérêt exploré n'est pas réexploré avant ce délai ; parmi les autres, elle va plus "
              "volontiers vers ceux qu'elle a délaissés, sans ordre fixe.")] = 3 * DAY
+    musings_per_day: Annotated[int, Knob(
+        label="Rêveries par jour, au plus", group="Entreprendre d'elle-même", lo=0, hi=12,
+        help="Ce que sa curiosité lui fait ouvrir d'elle-même dans une journée — rêvasser autour d'un sujet, "
+             "fouiller ses flux — ne dépasse pas ce nombre, étalé sur sa journée (deux : une le matin, une "
+             "l'après-midi) : une personne ne rêvasse pas toutes les deux heures (sonde réelle du 2026-10-03 : "
+             "quatre à cinq rêveries par jour). 0 : jamais.")] = 2
+    talk_lookback_us: Annotated[int, Knob(
+        label="Un sujet de conversation reste une graine pendant", group="Entreprendre d'elle-même", lo=HOUR,
+        hi=14 * DAY,
+        help="Ce dont on lui a parlé et qui l'a intéressée (ce qu'une amie lui a fait découvrir, un sujet qui l'a "
+             "enthousiasmée) peut la faire rêvasser pendant ce délai — avant ses centres d'intérêt de "
+             "toujours.")] = 2 * DAY
     # raconter ce qu'elle a mené à bout
     share_notable_from: Annotated[float, Knob(
         label="Notable à partir de", group="Raconter", lo=0.0, hi=1.0, step=0.05,
@@ -309,8 +326,20 @@ INNER_BUNDLES = frozenset({"goals", "memory", "identity", "self", "attention", "
 
 
 def musing(g: Goal) -> bool:
-    """Une curiosité sans source où chercher du neuf : une rêverie."""
-    return g.origin == c.FROM_INTEREST and not set(g.bundles) - INNER_BUNDLES
+    """Une curiosité sans source où chercher du neuf : une rêverie — autour d'un de ses centres d'intérêt, ou de ce
+    dont on lui a parlé et qui lui a plu."""
+    return g.origin in c.MUSING_ORIGINS and not set(g.bundles) - INNER_BUNDLES
+
+
+#: les sources d'une curiosité (un centre d'intérêt, un sujet de conversation) : ce qu'elle a déjà exploré
+CURIOSITY_SOURCES = ("interest:", "talk:")
+
+
+def curious_today(s: GoalsState, day: str, local_date: Any) -> int:
+    """Combien de fois sa curiosité lui a fait ouvrir quelque chose ce jour-là (``local_date(t)`` : la date locale
+    d'un instant, en AAAA-MM-JJ) — le plafond de ses rêveries."""
+    return sum(1 for source, at in s.explored.items() if source.startswith(CURIOSITY_SOURCES)
+               and local_date(at) == day)
 
 
 #: v3 : un rappel, un récit devancés, interrompus ou dont elle s'est ravisée ne comptent plus comme essais.
@@ -566,7 +595,10 @@ def _prune(s: GoalsState, now: int) -> GoalsState:
         goals = goals.delete(gid)
     sources = FrozenDict({k: v for k, v in s.closed_sources.items() if now - v <= 7 * DAY})
     proposals = FrozenDict({k: v for k, v in s.proposals.items() if v in goals})
-    return replace(s, goals=goals, closed_sources=sources, proposals=proposals)
+    # un sujet de conversation passé l'horizon où il peut la faire rêvasser (au plus deux semaines) s'oublie ; ses
+    # centres d'intérêt, eux, restent
+    explored = FrozenDict({k: v for k, v in s.explored.items() if not k.startswith("talk:") or now - v <= 15 * DAY})
+    return replace(s, goals=goals, closed_sources=sources, proposals=proposals, explored=explored)
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
@@ -584,7 +616,7 @@ def _opened(s: GoalsState, e, cx) -> GoalsState:
         origin=d.origin, origin_at=d.origin_at,
     )
     s = _set(s, g)
-    if d.source.startswith("interest:"):
+    if d.source.startswith(CURIOSITY_SOURCES):
         s = replace(s, explored=s.explored.set(d.source, e.at))
     if d.authority == c.SELF:
         s = replace(s, self_opened_at=e.at)
@@ -939,8 +971,8 @@ def _closed_felt(e, cx) -> Appraisal | None:
         return Appraisal(Emotion.PROUD, 0.4, reason="abouti")
     if d.status == c.STUCK:
         return Appraisal(Emotion.FRUSTRATED, 0.35, reason="bloquée")
-    if d.status == c.ABANDONED and d.reason == c.DISSIPATED:
-        return None  # une rêverie qui s'efface ne laisse rien : on n'a renoncé à rien
+    if d.status == c.ABANDONED and d.reason in c.QUIET_ENDS:
+        return None  # une rêverie qui s'efface, une réflexion sans suite : on n'a renoncé à rien
     if d.status == c.ABANDONED:
         return Appraisal(Emotion.MELANCHOLIC, 0.25, reason="abandon")
     return None

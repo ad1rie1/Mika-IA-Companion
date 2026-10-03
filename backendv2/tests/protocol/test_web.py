@@ -98,7 +98,8 @@ def test_bootstrap_then_409_forever(world):
     assert me["display_name"] == "adrien"
     again = client.post("/auth/bootstrap", json={"username": "b", "password": "un-autre-long-mdp"},
                         headers=csrf(client))
-    assert again.status_code == 409 and "existe deja" in again.json()["error"]
+    # avec son accent : ``LoginOverlay`` lit le statut 409, plus la phrase
+    assert again.status_code == 409 and again.json()["error"] == "Un compte existe déjà : connecte-toi."
 
 
 def test_weak_password_refused_at_bootstrap(world):
@@ -156,7 +157,10 @@ def test_ws_conversation_round_trip(world):
     bootstrap(client)
     with client.websocket_connect(WS) as ws:
         first = ws.receive_json()
-        assert first == {"type": "history", "mode": "initial", "messages": [], "last_id": 0, "truncated": False}
+        life = first.pop("life")
+        assert first == {"type": "history", "mode": "initial", "messages": [], "last_id": 0, "truncated": False,
+                         "reset": False}
+        assert isinstance(life, str) and len(life) == 16  # l'empreinte de sa vie, opaque
         face = ws.receive_json()
         assert face["type"] == "emotion_update" and face["emotion"] in NAMES
         assert isinstance(face["emotion_blend"], list)
@@ -195,7 +199,7 @@ def test_ws_conversation_round_trip(world):
         # rattrapage : ce qui suit le curseur
         ws.send_json({"type": "sync", "after_id": speech["user_message_id"] - 1})
         catch = recv_until(ws, "history")[-1]
-        assert catch["mode"] == "catchup"
+        assert catch["mode"] == "catchup" and catch["reset"] is False and catch["life"] == life
         assert [m["id"] for m in catch["messages"]] == [speech["user_message_id"], speech["message_id"]]
         assert catch["messages"][1]["text"] == speech["text"].replace(" [SIGH]", "")  # sans prosodie
         assert catch["last_id"] == speech["message_id"]

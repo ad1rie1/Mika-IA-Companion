@@ -96,6 +96,10 @@ class SimEventLoop(asyncio.SelectorEventLoop):
         # flottant ne distingue plus la résolution d'asyncio (1 ns) et un
         # minuteur échu n'était jamais jugé prêt — la boucle tournait à vide.
         self._base = clock.now()
+        # … et la résolution est celle de l'horloge simulée (la microseconde) : au-delà de 2²⁴ s de temps de boucle
+        # (194 jours virtuels), l'écart entre deux flottants dépasse 1 ns, « time() + 1e-9 == time() », et la
+        # boucle retombait dans le même piège (audit « vie longue » du 2026-10-03)
+        self._clock_resolution = 1 / US
         self.errors: list[BaseException] = []
         self.set_exception_handler(self._on_error)
 

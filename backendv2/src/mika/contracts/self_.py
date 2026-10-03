@@ -3,7 +3,9 @@ le récit de soi, le journal de ses journées et ses rêves.
 
 Le **journal** est écrit la nuit par sa voix, un par journée vécue (une
 heure du matin appartient encore à la veille ; la journée commence une heure
-avant son matin) ; une nuit coupée par une conversation le fait réécrire. Les
+avant son matin) ; une nuit coupée par une conversation le fait réécrire. Ce
+qu'elle en raconterait à n'importe qui (``shareable``) est rendu d'après les
+faits, sans modèle : rien d'inventé, personne d'autre (ADR 0053). Les
 **rêves** naissent en sommeil paradoxal, deux par nuit au plus, de fragments
 de ce qu'elle a vécu ; **au réveil** (``self.woke_with``) elle se souvient —
 parfois — du plus vif, et ce que la nuit a apaisé se ressent à ce moment-là.
@@ -66,9 +68,9 @@ class PersonaDoc(BaseModel):
         "snob sans en avoir jamais bu ») : le sujet seul titre ses explorations.", 90)] = ()
     speech: Annotated[tuple[str, ...], _lines("Façons de parler", "Ses tournures.", 100, "Sa parole")] = ()
     greetings: Annotated[tuple[str, ...], _lines(
-        "Salutations", "Des exemples du ton de ses bonjours, montrés quand elle salue quelqu'un qui arrive — jamais "
-        "recopiés tels quels. Pas d'humeur ni d'heure dedans (« j'ai la patate », « ce soir ») : elle les "
-        "redirait à contretemps.", 110, "Sa parole")] = ()
+        "Salutations", "Des exemples de ses bonjours : seuls leurs premiers mots (« hey », « yooo ») lui sont montrés "
+        "quand elle salue quelqu'un qu'elle connaît — jamais la phrase, qu'un modèle recopiait.", 110,
+        "Sa parole")] = ()
     life: Annotated[tuple[str, ...], _lines(
         "Sa vie, à sa façon", "Ce qu'elle fait vraiment, en IA VTuber (jouer, regarder, lire des recettes sans "
         "cuisiner…) : ce qu'elle raconte de son quotidien reste compatible avec ça.", 120, "Sa vie")] = ()
@@ -145,8 +147,10 @@ class Journaled(Payload):
     about: tuple[str, ...] = ()
     dominant: str = ""
     messages: int = 0
-    #: ce qu'elle raconterait de sa journée à n'importe qui : sa vie à elle, écrite d'après des notes où personne
-    #: d'autre n'apparaît (``None`` : un journal d'avant, qui ne se montre qu'à qui en est le seul concerné)
+    #: ce qu'elle raconterait de sa journée à n'importe qui : sa vie à elle, où personne d'autre n'apparaît —
+    #: rendu d'après les faits qu'elle a le droit de dire, sans modèle (ADR 0053 ; avant : écrit par sa voix d'après
+    #: des notes maigres, qu'elle comblait) ; ``None`` : un journal d'avant, qui ne se montre qu'à qui en est le seul
+    #: concerné
     shareable: Content | None = None
 
 

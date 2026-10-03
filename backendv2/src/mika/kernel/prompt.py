@@ -118,6 +118,10 @@ class SectionBody:
     #: vrai quand ce qui est dit d'autrui concerne aussi l'interlocuteur (il était
     #: là) : la garde compare alors au niveau « témoin » de l'audience
     witness: bool = False
+    #: vrai quand ce qui est dit d'autrui a été admis, élément par élément, parce que
+    #: l'interlocuteur a un lien avec les personnes concernées : la garde compare
+    #: alors au niveau « lié » de l'audience (jamais plus que le témoin)
+    tied: bool = False
     #: zone historique : l'identité du fil (``room:…``, ``private:…``), clé de sa
     #: coupe — deux fils ne partagent jamais leur hystérésis
     thread: str = ""
@@ -126,11 +130,15 @@ class SectionBody:
     current: ChatTurn | None = None
 
 
-def audible(body: SectionBody, audience_level: int, witness_level: int | None = None) -> bool:
+def audible(body: SectionBody, audience_level: int, witness_level: int | None = None,
+            tied_level: int | None = None) -> bool:
     """La seconde barrière de la divulgation : ce qu'un bloc dit d'autrui ne
     dépasse pas ce que l'audience peut entendre (au niveau « témoin » quand
-    l'interlocuteur y figure lui-même)."""
+    l'interlocuteur y figure lui-même, au niveau « lié » quand il a un lien avec
+    les personnes concernées)."""
     limit = witness_level if (body.witness and witness_level is not None) else audience_level
+    if body.tied and tied_level is not None:
+        limit = max(limit, tied_level)
     return body.level <= limit
 
 
@@ -141,7 +149,8 @@ def readable(body: SectionBody | str | None, audience: Any) -> str | None:
         return None
     if isinstance(body, str):
         body = SectionBody(body)
-    if audience is None or not audible(body, audience.level, audience.witness_level):
+    if audience is None or not audible(body, audience.level, audience.witness_level,
+                                       getattr(audience, "tied_level", None)):
         return None
     text = body.content if isinstance(body.content, str) else "\n".join(t.content for t in body.content)
     return text.strip() or None
@@ -257,6 +266,7 @@ class Composer:
         thread_key: str = "",
         witness_level: int | None = None,
         reserved: int = 0,
+        tied_level: int | None = None,
     ) -> tuple[ChatPrompt, ComposeTrace]:
         """``reserved`` : les caractères qui partiront au modèle hors du composeur
         (persona, catalogue, déclarations d'outils) ; ``thread_key`` : la clé de
@@ -269,7 +279,7 @@ class Composer:
             if spec.tags & muted_tags:
                 dropped.append((spec.key, "coupée pour cet épisode"))
                 continue
-            if not audible(body, audience_level, witness_level):
+            if not audible(body, audience_level, witness_level, tied_level):
                 dropped.append((spec.key, "trop sensible pour l'audience"))
                 continue
             b = _Block(spec, body)

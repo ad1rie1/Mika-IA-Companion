@@ -91,6 +91,13 @@ class IdentityState:
     handles: FrozenDict[str, Handle] = field(default_factory=FrozenDict)
     #: les personnes connues d'abord de nom (``name:alice`` → sa clé), reliées par un opérateur
     names: FrozenDict[str, str] = field(default_factory=FrozenDict)
+    #: chaque personne → ses adresses (triées) : celles qui parlent pour elle, et elle-même quand c'est une adresse.
+    #: Un index tenu par les réducteurs (``_put``) : « les adresses d'Alice » se lit sans parcourir toutes les
+    #: adresses connues — avec trois cents inconnues de passage, chaque calcul de proximité le faisait (ADR 0059).
+    by_person: FrozenDict[str, tuple[str, ...]] = field(default_factory=FrozenDict)
+    #: les adresses d'une session d'opérateur (triées), tenues de même : « qui sont ses propriétaires ? » ne
+    #: parcourt pas toutes les adresses à chaque passage de l'ordonnanceur (ADR 0059)
+    operators: tuple[str, ...] = ()
 
 
 #: une personne connue seulement de nom (une clé de la mémoire)
@@ -98,13 +105,34 @@ NAMED = "name:"
 
 #: v2 : revendications à deux preuves, démentis jugés à la lecture, une session ne se relie jamais.
 #: v3 : les noms reliés (ADR 0048).
+#: v4 : l'index personne → adresses (``by_person``) et les sessions d'opérateur (``operators``), ADR 0059 —
+#: reconstruits depuis la genèse.
 IDENTITY = Faculty("identity", state=IdentityState, init=lambda p: IdentityState(), params=IdentityParams,
-                   state_version=3)
+                   state_version=4)
 IDENTITY.declare(*c.ALL)
 
 
 def _params(p: IdentityParams | None) -> IdentityParams:
     return p if p is not None else IdentityParams()
+
+
+def _put(s: IdentityState, handle: str, h: Handle) -> IdentityState:
+    """Range une adresse, et tient l'index personne → adresses : une adresse qui change de personne (liée,
+    déliée) quitte l'une et rejoint l'autre ; une personne sans plus aucune adresse sort de l'index."""
+    old = s.handles.get(handle)
+    before = (old.person or handle) if old is not None else None
+    after = h.person or handle
+    by_person = s.by_person
+    if before != after:
+        if before is not None:
+            left = tuple(k for k in by_person.get(before, ()) if k != handle)
+            by_person = by_person.set(before, left) if left else by_person.delete(before)
+        by_person = by_person.set(after, tuple(sorted({*by_person.get(after, ()), handle})))
+    operators = s.operators
+    if (h.authenticated and h.operator) != (handle in operators):
+        operators = tuple(sorted({*operators, handle} if h.authenticated and h.operator else
+                                 set(operators) - {handle}))
+    return replace(s, handles=s.handles.set(handle, h), by_person=by_person, operators=operators)
 
 
 # ── Ce qu'on voit passer ──────────────────────────────────────────────────
@@ -132,7 +160,7 @@ def _seen(s: IdentityState, handle: str, at: int, *, channel: str, authenticated
             current = replace(current, operator=operator)
     elif cleaned and not current.name:
         current = replace(current, name=cleaned)
-    return replace(s, handles=s.handles.set(handle, current))
+    return _put(s, handle, current)
 
 
 @IDENTITY.reducer(presence_c.CONNECTED)
@@ -196,7 +224,7 @@ def _claimed(s: IdentityState, e, cx) -> IdentityState:
         # une autre identité revendiquée défait la liaison en cours : la
         # certitude gagnée pour l'une ne vaut rien pour l'autre
         h = replace(_unbound(h), claim=_claim_of(h, name, d.target, e.at, d.public))
-    return replace(s, handles=s.handles.set(d.handle, h))
+    return _put(s, d.handle, h)
 
 
 def aims_elsewhere(h: Handle, handle: str, claim: Claim | None = None) -> bool:
@@ -291,7 +319,7 @@ def _evidence(s: IdentityState, e, cx) -> IdentityState:
     h = s.handles.get(e.data.handle)
     if h is None or h.authenticated:
         return s
-    return replace(s, handles=s.handles.set(e.data.handle, _apply(h, e)))
+    return _put(s, e.data.handle, _apply(h, e))
 
 
 @IDENTITY.reducer(c.LINKED)
@@ -313,7 +341,7 @@ def _linked(s: IdentityState, e, cx) -> IdentityState:
         if root == d.handle:
             return s
         h = replace(h, person=root, certainty=privacy.BOUND, via=c.VIA_OPERATOR, claim=None)
-    return replace(s, handles=s.handles.set(d.handle, h))
+    return _put(s, d.handle, h)
 
 
 @IDENTITY.reducer(c.NAME_BOUND)
@@ -342,8 +370,8 @@ def _root(s: IdentityState, key: str) -> str:
 
 
 def handles_of(s: IdentityState, person: str) -> tuple[str, ...]:
-    out = {k for k, h in s.handles.items() if (h.person or k) == person}
-    return tuple(sorted(out))
+    """Les adresses d'une personne (triées) : celles qui parlent pour elle, et elle-même si c'est une adresse."""
+    return s.by_person.get(person, ())
 
 
 def confirmed(h: Handle) -> bool:
@@ -503,7 +531,9 @@ def _speaks_as_owner(s: IdentityState, cx, handle: str) -> bool:
 @IDENTITY.fact(c.OWNERS)
 def _owners(s: IdentityState, cx) -> tuple[str, ...]:
     declared = set(_params(cx.params).owners)
-    out = {_root(s, k) for k, h in s.handles.items() if proves_owner(k, h, declared)}
+    # les adresses qui le prouvent : une session d'opérateur, ou une adresse déclarée (seulement elles)
+    proving = [*s.operators, *(k for k in declared if proves_owner(k, s.handles.get(k), declared))]
+    out = {_root(s, k) for k in proving}
     out |= {k for k in declared if k not in s.handles}
     return tuple(sorted(out))
 

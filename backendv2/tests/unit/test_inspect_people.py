@@ -304,7 +304,7 @@ def test_a_person_has_a_fiche_that_gathers_her_handles(tmp_path):
     (anon_before, alice_before), linked, after, handle, found, found_handles, tabs = run(tmp_path, scenario)
     assert isinstance(alice_before, Head) and alice_before.key == "user_1" and alice_before.title == "Alice"
     assert anon_before.key == ANON  # pas encore reliée : elle parle pour elle-même
-    assert {b.text for b in alice_before.badges} >= {"propriétaire", "non liée", "en privé : confidences"}
+    assert {b.text for b in alice_before.badges} >= {"propriétaire", "non liée", "en privé : personnel"}
     assert alice_before.subtitle.startswith("Proche · propriétaire")  # sans genre imposé
     assert len(alice_before.facts) <= 6 and dict(alice_before.facts)["adresses"] == 1
     # l'oubli atteint ses adresses, et le nom qu'elle seule porte (« name:alice », ce que d'autres ont dit d'elle)
@@ -332,7 +332,9 @@ def test_a_person_has_a_fiche_that_gathers_her_handles(tmp_path):
     pointer = next(b for b in synthese if isinstance(b, Fields) and b.title == "Ses adresses")
     assert pointer.pairs[0][1].params == (("onglet", "adresses"),)  # la synthèse y renvoie, sans la répéter
     assert not any(isinstance(b, Table) and b.title == "Ses adresses" for b in synthese)
-    assert row_of(titled(synthese, "Ce que ça ouvre"), "en privé")["sur autrui"] == "confidences"
+    opens = row_of(titled(synthese, "Ce que ça ouvre"), "en privé")
+    # proche : l'anecdote sur autrui ; la confidence, seulement sur quelqu'un qu'elle connaît (ADR 0058)
+    assert opens["sur autrui"] == "personnel" and opens["sur quelqu'un qu'elle connaît"] == "confidences"
     others = tabs[("handle", "identity", "autres")]
     assert [row_cells(r)[0].key for r in titled(others, "Les autres adresses").rows] == ["handle/user_1"]
 
@@ -353,7 +355,8 @@ def test_the_verdict_is_explained_and_differs_between_an_operator_and_an_anonymo
     assert "session authentifiée" in steps["pourquoi"]
     assert row_of(titled(alice, "Le verdict"), "barre de divulgation")["pourquoi"] == "atteinte"
     opened = row_of(titled(alice, "Ce que ça ouvre"), "en privé")
-    assert opened["sur autrui"] == "confidences" and "jusqu'aux confidences" in opened["pourquoi"]
+    assert opened["sur autrui"] == "personnel" and opened["sur quelqu'un qu'elle connaît"] == "confidences"
+    assert "jusqu'aux confidences d'une personne qu'elle connaît" in opened["pourquoi"]
     assert opened["sa propre fiche"].startswith("ouverte")
 
     steps = row_of(titled(anon, "Le verdict"), "certitude enregistrée")
@@ -416,7 +419,7 @@ def test_the_lists_say_who_is_who_and_what_each_would_hear(tmp_path):
         private, public = facts[handle]
         assert row["divulgation en privé"].startswith(LEVEL_FR[private.level])
         assert row["divulgation en public"].startswith(LEVEL_FR[public.level])
-    assert alice["divulgation en privé"] == "confidences · sa fiche ouverte"
+    assert alice["divulgation en privé"] == "personnel · sa fiche ouverte"  # la confidence : sur qui elle connaît
     assert anon["divulgation en privé"] == "anodin · sa fiche fermée"
     for row in handles.rows:  # une audience publique n'obtient jamais rien de privé
         assert as_dict(handles, row)["divulgation en public"] == "anodin · sa fiche fermée"

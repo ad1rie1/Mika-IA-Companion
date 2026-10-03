@@ -40,6 +40,9 @@ AWAITING_REPLY = "awaiting_reply"
 FAREWELL = "farewell"
 #: Veto : elle allait lui écrire et s'est ravisée (un murmure sans suite) — pas tout de suite, donc.
 CHANGED_MIND = "changed_mind"
+#: Veto : ses dernières envies de lui écrire ont fini en silence (ou en panne), d'affilée — elle laisse passer de
+#: plus en plus de temps avant d'y revenir.
+HESITATING = "hesitating"
 #: Raison (sans preuve) des candidats qui portent la garde « elle s'est ravisée » vers une adresse présente.
 SECOND_THOUGHTS = "second_thoughts"
 
@@ -64,6 +67,14 @@ GREETS = frozenset({social_c.GREETING})
 #: Ce qui n'est pas prendre la parole pour qu'on lui réponde : saluer qui arrive, tenir parole. Ni compté au
 #: budget, ni suivi d'une période réfractaire, ni attendu en retour (ce n'était pas une question).
 NOT_SPEAKING_UP = GREETS | OWED
+
+#: Après tant d'initiatives restées sans réponse vers quelqu'un, plus rien vers cette personne tant qu'elle n'a pas
+#: écrit (ADR 0033) : elle ne peut plus lui écrire — ce qui lui reste, c'est d'y penser (``attention``).
+GIVE_UP_AFTER = 2
+#: … sauf, longtemps après, prendre de ses nouvelles **une fois** (``social.REKINDLE``, ADR 0058) : ça passe la
+#: retenue « sans réponse » tant que la personne n'a pas plus de ``GIVE_UP_AFTER`` initiatives sans réponse — dite,
+#: elle en a une de plus, et plus rien ne passe. Être ignorée n'en diminue pas l'envie (c'est déjà rare, et unique).
+ONCE_MORE = frozenset({social_c.REKINDLE})
 
 #: Les fins d'une initiative qui ne sont pas un **essai** : elle a été devancée (la personne a écrit pendant
 #: qu'elle composait), interrompue, annulée — elle n'a pas eu lieu. (Un murmure sans suite non plus : elle s'est

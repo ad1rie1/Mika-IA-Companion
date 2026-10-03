@@ -9,6 +9,16 @@ lue à la personne ne doit pas lui répéter ce que Bob a dit d'elle. Le modèle
 dit qui elle est, comment lui parler, ce qui l'intéresse, ce qui est
 délicat — des textes gardés à part, que l'oubli de la personne efface. La
 proximité, elle, ne se juge pas : elle se vit (``faculty.lived``).
+
+**Une fiche n'invente pas** (ADR 0055). Ce qu'elle dit de la situation de la
+personne (en couple ou non, enfants, famille, travail, âge, où et avec qui
+elle vit) doit se lire dans ce que le modèle a relu : sinon la proposition
+tombe (la sonde réelle du 2026-10-03 avait écrit « Sam a 30 ans, célibataire »,
+que personne n'avait dit). Ce qui l'intéresse, ce sont ses goûts, pas ses
+tracas du moment (« sa santé dentaire », « son anniversaire »). Les matériaux
+sont choisis par importance, sans les banalités (« allez j'y vais ») ni les
+répliques de Mika recopiées par une extraction ancienne ; ce qui n'appartient
+qu'à elles deux (un surnom) se vit dans leur registre, pas dans la fiche.
 """
 
 from __future__ import annotations
@@ -22,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
+from mika.contracts import self_ as self_c
 from mika.contracts import social as c
 from mika.faculties.social.faculty import SOCIAL, SocialState, params
 from mika.kernel.events import Content
@@ -29,7 +40,7 @@ from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolDecl
 from mika.vocab.privacy import Sensitivity
-from mika.vocab.words import elided
+from mika.vocab.words import banal, elided, fold
 
 TOOL_NAME = "record_profile"
 
@@ -52,12 +63,14 @@ dit elle-même et de ce que Mika a vécu avec elle. Écris comme des notes de Mi
 nommer Mika ni parler d'elle (ni « Mika », ni « elle », ni « moi », ni « me ») : la personne à la troisième \
 personne, avec son prénom (« C'est quelqu'un qui… »).
 - resume : qui est cette personne — sa vie, ce qui compte pour elle, son caractère, et les proches qu'elle a nommés \
-(« sa sœur Léa », « son chat Moustache ») — en 2 à 4 phrases ; n'invente rien, ne répète pas les détails intimes. \
-Ni chiffres, ni jugement sur votre lien (« connaissance récente », « ami proche ») : le lien, Mika le vit, elle ne \
-le note pas.
+(« sa sœur Léa », « son chat Moustache ») — en 2 à 4 phrases ; ne répète pas les détails intimes. N'invente rien : \
+rien de sa situation (en couple ou non, enfants, famille, travail, âge, où et avec qui elle vit) que ces notes ne \
+disent pas. Ni chiffres, ni jugement sur votre lien (« connaissance récente », « ami proche ») : le lien, Mika le \
+vit, elle ne le note pas.
 - ton : comment lui parler — une consigne de ton (« direct et taquin, il aime qu'on le charrie »), jamais une \
 phrase à lui dire.
-- interets : ce qui l'intéresse (quelques mots chacun, au plus 6).
+- interets : ses goûts et ses passions — ce qu'elle aime faire, regarder, écouter, lire (quelques mots chacun, au \
+plus 6) ; jamais ses soucis du moment, sa santé, ses rendez-vous ni ce qui lui arrive ; aucun si rien ne le dit.
 - sujets_sensibles : les sujets délicats avec cette personne (au plus 6), sinon une liste vide.
 Réponds uniquement en appelant l'outil record_profile."""
 
@@ -98,6 +111,76 @@ def _lines(values: Sequence[str]) -> Content | None:
 
 def lines_of(text: str | None) -> tuple[str, ...]:
     return tuple(x.strip() for x in (text or "").splitlines() if x.strip())
+
+
+#: ce qu'une fiche dit de la situation de quelqu'un, par domaine (replié) : un domaine que ses notes n'abordent pas,
+#: la fiche n'en dit rien
+SITUATION = {
+    "couple": re.compile(r"\b(?:celibataire|en couple|mariee?s?|divorcee?s?|separee?s?|veuf|veuve|fiancee?s?|"
+                         r"copain|copine|petite? amie?|compagnon|compagne|conjointe?|mari|epoux|epouse|sa femme|"
+                         r"son homme|rupture|relation amoureuse)\b"),
+    "enfants": re.compile(r"\b(?:enfants?|fils|bebes?|enceinte|grossesse)\b"),
+    "famille": re.compile(r"\b(?:parents?|pere|mere|papa|maman|freres?|soeurs?|grands?-?parents?|"
+                          r"grand-?(?:pere|mere))\b"),
+    "travail": re.compile(r"\b(?:metier|emploi|chomage|etudiante?s?|etudes|retraitee?|salariee?|profession\w*|"
+                          r"travail\w*|boulot|bosse\w*|job|taf|collegues?|patron|bureau)\b"),
+    "logement": re.compile(r"\b(?:vit (?:seule?|avec|en|a|chez)|habite\w*|appartement|appart|maison|colocation|"
+                           r"coloc|demenag\w*|loge\w*)\b"),
+}
+#: un âge, qui doit être celui que ses notes disent (« 30 ans » ; pas « la trentaine » qu'elles ne disent pas)
+_AGE = re.compile(r"\b(?:\d{1,3} ans|trentaine|quarantaine|vingtaine|cinquantaine|soixantaine|trentenaire|"
+                  r"quarantenaire|cinquantenaire|jeune adulte)\b")
+#: un intérêt qui n'est pas un goût : un tracas, un rendez-vous, un moment de sa vie (replié)
+_WORRY = re.compile(r"\b(?:sante|dentaire|dentiste|medec\w*|medic\w*|docteur|veto|veterinaire|rendez|rdv|maladie|"
+                    r"malade|hopital|operation|soins?|traitement|anniversaire|deuil|perte|examen|entretien|"
+                    r"inquietude|soucis?|problemes?|stress|age)\b")
+#: tu, toi, ton… hors d'une citation : une réplique recopiée, pas une note sur la personne
+_SECOND_PERSON = re.compile(r"\b(?:tu|toi|ton|ta|tes)\b|\bt'")
+_QUOTE = re.compile(r"«[^»]*»|\"[^\"]*\"")
+_SENTENCE = re.compile(r"(?<=[.!?…])\s+")
+_CLAUSE = re.compile(r",\s+|;\s+|\s+[—–-]\s+")
+
+
+def _folded(text: str) -> str:
+    return " ".join(fold(text).replace("’", "'").split())
+
+
+def supported(clause: str, notes: str) -> bool:
+    """Ce que cette proposition dit de sa situation, ses notes l'abordent-elles ? (``notes`` : replié)"""
+    said = _folded(clause)
+    for found in _AGE.finditer(said):
+        if found.group(0) not in notes:
+            return False
+    return all(pattern.search(notes) for pattern in SITUATION.values() if pattern.search(said))
+
+
+def grounded(summary: str, notes: str) -> str:
+    """Le portrait sans ce qu'il invente de sa situation : une proposition qui en parle sans que ses notes
+    l'abordent tombe — toute la phrase quand c'est son début (le sujet), sinon la proposition seule (« Sam a 30
+    ans, célibataire, vit avec son chat » → « Sam a 30 ans. »)."""
+    out = []
+    for sentence in _SENTENCE.split(" ".join(summary.split())):
+        clauses = _CLAUSE.split(sentence)
+        if not clauses or not supported(clauses[0], notes):
+            continue
+        kept = [c for c in clauses if supported(c, notes)]
+        text = ", ".join(kept).strip()
+        if text and text[-1] not in ".!?…":
+            text += "."
+        if text:
+            out.append(text[0].upper() + text[1:])
+    return " ".join(out)
+
+
+def tastes(interests: Sequence[str]) -> list[str]:
+    """Ses goûts seulement : « sa santé dentaire », « son anniversaire » ne sont pas des intérêts."""
+    return [i for i in interests if not _WORRY.search(_folded(i))]
+
+
+def note_worthy(text: str, names: Sequence[str]) -> bool:
+    """Un matériau de fiche : pas une banalité (« Sam est parti en disant 'allez j'y vais' »), pas une réplique de
+    Mika recopiée (« Dors bien Sam… », adressée à quelqu'un)."""
+    return not banal(text, names) and not _SECOND_PERSON.search(_QUOTE.sub(" ", _folded(text)))
 
 
 def _due(s: SocialState, now: int, p: Any) -> list[tuple[int, str]]:
@@ -150,13 +233,18 @@ class Revise:
             self.tried[person] = state.mentions.get(person, 0)
             # ce qu'elle a dit elle-même, ou ce que Mika a vu — jamais ce qu'un autre a confié sur elle
             only = json.dumps([person], ensure_ascii=False)
-            items = store.query_mind(
+            # par importance, sans banalités ni répliques recopiées ; ce qui n'appartient qu'à elles deux (un surnom)
+            # vit dans leur registre, pas dans la fiche
+            names = [frame.get(identity_c.IDENTITY(person)).name or "", frame.get(self_c.PERSONA).name or "Mika"]
+            rows = store.query_mind(
                 f"SELECT id, text, importance FROM {memory_c.ITEMS_TABLE} WHERE about=? AND told_by IN ('[]', ?) "
-                "AND status='active' AND kind IN (?, ?) ORDER BY importance DESC, id DESC LIMIT ?",
-                (only, only, memory_c.SOUVENIR, memory_c.BELIEF, p.profile_max_items))
+                "AND status='active' AND kind IN (?, ?) AND between_us=0 ORDER BY importance DESC, id DESC LIMIT ?",
+                (only, only, memory_c.SOUVENIR, memory_c.BELIEF, p.profile_max_items * 2))
+            items = [r for r in rows if note_worthy(str(r[1]), names)][: p.profile_max_items]
             if not items:
                 continue
-            prompt = self._prompt(frame, state, person, items, store)
+            notes = _folded(" ".join(str(t) for _i, t, _imp in items))
+            prompt = self._prompt(frame, state, person, items, store, notes)
             request = LLMRequest(role="profile", call_id=f"{ctx.run_id}#{person}", system_stable=SYSTEM,
                                  messages=(Message("user", prompt),), tools=(tool(),), max_tokens=900,
                                  lane="background", priority=3)
@@ -164,15 +252,19 @@ class Revise:
             got = parse(response)
             if got is None:
                 continue
+            summary = grounded(got.resume, notes)
+            if not summary:
+                continue  # rien qui tienne : la fiche d'avant reste
             tone = got.ton.strip()[:300]
             await ctx.emit(c.PROFILE_REVISED.draft(
-                person=person, summary=Content.of(got.resume.strip(), level=int(Sensitivity.PERSONAL)),
+                person=person, summary=Content.of(summary, level=int(Sensitivity.PERSONAL)),
                 tone=Content.of(tone, level=int(Sensitivity.PERSONAL)) if tone else None,
-                interests=_lines(_short(got.interets)), sensitive=_lines(_short(got.sujets_sensibles)),
+                interests=_lines(_short(tastes(got.interets))), sensitive=_lines(_short(got.sujets_sensibles)),
                 upto=max(int(i) for i, _t, _imp in items), call_id=request.call_id, model=response.model))
         self.retry_at = 0
 
-    def _prompt(self, frame: Frame, state: SocialState, person: str, items: list[tuple[Any, ...]], store: Any) -> str:
+    def _prompt(self, frame: Frame, state: SocialState, person: str, items: list[tuple[Any, ...]], store: Any,
+                notes: str = "") -> str:
         view = frame.get(identity_c.IDENTITY(person))
         name = view.name or "cette personne"
         # ni comptes ni ressenti : un modèle qui voit « 15 messages » ou « de la sympathie » les recopie dans la
@@ -182,6 +274,8 @@ class Revise:
         previous = state.profiles.get(person)
         if previous is not None:
             text = store.content([previous.summary_ref]).get(previous.summary_ref) if previous.summary_ref else None
+            # ce qu'une fiche d'avant avait inventé ne se redonne pas à recopier (« célibataire »)
+            text = grounded(text, notes) if text and notes else text
             if text:
                 lines.append(f"Ce qu'elle en pensait jusqu'ici : {text}")
         lines.append("")

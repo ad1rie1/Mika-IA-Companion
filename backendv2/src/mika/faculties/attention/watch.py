@@ -3,14 +3,19 @@ comblées ou déçues, remarquer qui lui manque, y repenser par moments.
 
 Les textes des pensées ne sont jamais inventés : ce qu'on lui a dit, entre
 guillemets, ce qu'elle croyait et ce qu'elle croit maintenant, le nom de
-quelqu'un qui lui manque.
+quelqu'un qui lui manque. Une pensée née d'un échange porte ce que l'échange
+voulait dire, pas une réplique isolée : le moment le plus marquant et ce que la
+personne a dit autour — et, quand elle répondait à peine (« ouais », « bof »,
+« laisse tomber »), c'est cela qui reste (ADR 0053).
 """
 
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
+from mika.contracts import agency as agency_c
 from mika.contracts import attention as c
 from mika.contracts import body as body_c
 from mika.contracts import goals as goals_c
@@ -28,10 +33,11 @@ from mika.faculties.attention.faculty import (
     AttentionState,
     Heard,
     Pending,
+    awaiting,
     habituation,
     params,
 )
-from mika.kernel.clock import HOUR, local_date_of_night, next_local
+from mika.kernel.clock import DAY, HOUR, MINUTE, local_date_of_night, next_local
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
@@ -51,6 +57,59 @@ def _clip(text: str, n: int = EXCERPT) -> str:
 
 def _name(frame: Frame, person: str) -> str:
     return frame.get(identity_c.IDENTITY(person)).name or "quelqu'un"
+
+
+#: l'échange d'où naît une pensée : dans les heures qui précèdent, depuis le dernier silence de trois quarts d'heure
+GIST_LOOKBACK = 3 * HOUR
+GIST_GAP = 45 * MINUTE
+#: une réponse de si peu de mots (« ouais », « bof », « je sais pas ») : on répond à peine
+CURT_WORDS = 4
+#: ce qu'on cite de ses autres messages, avec le moment marquant
+ALSO_SHOWN = 2
+
+
+def gist(frame: Frame, store: Any, q: Pending) -> tuple[str, list[tuple[int, str]]]:
+    """L'échange d'où naît la pensée : le message le plus marquant (``q.source``), et tous les messages de la
+    personne dans cet échange, dans l'ordre — (n°, texte). Un échange : ses messages et ceux de Mika avec elle,
+    depuis le dernier silence."""
+    rows = store.query_mind(f"SELECT id, at, role, text, room FROM {transcript_c.THREAD_TABLE} WHERE id=?",
+                            (q.source,))
+    if not rows:
+        return "", []
+    marked_at, said, room = int(rows[0][1]), str(rows[0][3] or ""), rows[0][4]
+    if not q.person:
+        return said, [(q.source, said)]
+    handles = tuple(frame.get(identity_c.HANDLES(q.person)) or (q.person,))
+    marks = ",".join("?" * len(handles))
+    rows = store.query_mind(
+        f"SELECT id, at, role, text, room FROM {transcript_c.THREAD_TABLE} WHERE person IN ({marks}) AND at >= ? "
+        "AND at <= ? ORDER BY id", (*handles, marked_at - GIST_LOOKBACK, frame.now))
+    # le même fil seulement : ce qu'elle a dit en privé ne se mêle pas à une pensée née dans un salon (anodine)
+    rows = [r[:4] for r in rows if r[4] == room]
+    segment: list[tuple[int, int, str, str]] = []
+    for row in rows:
+        if segment and row[1] - segment[-1][1] > GIST_GAP:
+            if any(r[0] == q.source for r in segment):
+                break
+            segment = []
+        segment.append((int(row[0]), int(row[1]), str(row[2]), str(row[3] or "")))
+    theirs = [(i, t) for i, _at, role, t in segment if role == "user" and t.strip()]
+    return said, theirs if any(i == q.source for i, _ in theirs) else [(q.source, said)]
+
+
+def curt(texts: list[str]) -> bool:
+    """La personne répondait à peine : au moins trois messages, presque tous de quelques mots, aucun vraiment
+    long (« je crois que j'ai tout raté à mon entretien » n'est pas répondre à peine)."""
+    words = [len(t.split()) for t in texts]
+    short = sum(1 for n in words if n <= CURT_WORDS)
+    return len(words) >= 3 and 3 * short >= 2 * len(words) and max(words) <= 2 * CURT_WORDS
+
+
+def _also(lines: list[tuple[int, str]]) -> str:
+    """Ses autres messages de l'échange, les plus nourris (dans l'ordre où ils sont venus) : la matière autour."""
+    fuller = sorted(sorted(lines, key=lambda x: (-len(x[1].split()), x[0]))[:ALSO_SHOWN])
+    fuller = [x for x in fuller if len(x[1].split()) > CURT_WORDS]
+    return (" — et aussi : " + ", ".join(f"« {_clip(t, 120)} »" for _i, t in fuller)) if fuller else ""
 
 
 def ripe(q: Pending, frame: Frame, p: Any) -> int:
@@ -106,6 +165,13 @@ def left_hanging(state: AttentionState, p: Any, present: dict[str, int]) -> list
 _EXPECTED_AFTER_US = 12 * HOUR
 
 
+def missing_tranche(silence_us: int, usual_days: float) -> int:
+    """Le stade d'un silence, compté en doublements de son rythme : 0 jusqu'à quatre fois son rythme (le premier
+    manque), puis 1 jusqu'à huit fois, 2 jusqu'à seize… — une pensée par stade, de plus en plus espacées."""
+    ratio = silence_us / (max(0.5, usual_days) * DAY)
+    return max(0, math.floor(math.log2(ratio)) - 1) if ratio >= 1 else 0
+
+
 def expected_back(frame: Frame, person: str, p: Any) -> int | None:
     """Quand une amie ou une proche qui écrit presque chaque jour, à peu près à la même heure, passera sans doute :
     son heure habituelle, le jour d'après son dernier message. ``None`` pour qui n'a pas ce rythme-là."""
@@ -131,7 +197,10 @@ def alone_due(state: AttentionState, p: Any, frame: Frame | None = None) -> int 
     due = max(state.last_contact, state.alone_at) + p.alone_after_us
     if frame is None:
         return due
-    expected = [t for person in sorted(state.exchanges) if (t := expected_back(frame, person, p)) is not None]
+    # seules ses amies peuvent être attendues : les inconnues de passage ne coûtent rien ici (ADR 0058)
+    circle = set(frame.get(social_c.CIRCLE))
+    expected = [t for person in sorted(circle.intersection(state.exchanges))
+                if (t := expected_back(frame, person, p)) is not None]
     if expected:
         due = max(due, min(expected) + p.alone_margin_us)
     return due
@@ -246,15 +315,19 @@ class Watch:
                                         emotion=q.emotion, intensity=q.intensity, origin=q.origin,
                                         about=(q.person,) if q.person else (), sensitivity=sens, source=q.source,
                                         dedupe_key=mark)
-        said = ""
-        if store is not None:
-            rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id=?", (q.source,))
-            said = str(rows[0][0]) if rows else ""
-        if q.origin == c.CONCERN:
+        said, theirs = gist(frame, store, q) if store is not None else ("", [])
+        lines = [x for x in theirs if x[0] != q.source]
+        if said and curt([t for _i, t in theirs]):
+            # ce que l'échange voulait dire, pas une réplique isolée (sonde réelle du 2026-10-03 : « Sam m'a dit :
+            # « laisse tomber » », d'où une réflexion qui cherchait ce qu'il fallait laisser tomber — il répondait à
+            # peine, sans envie de parler)
+            text = f"{who} répondait à peine : " + ", ".join(f"« {_clip(t, 90)} »" for _i, t in theirs[-6:]) + "."
+        elif q.origin == c.CONCERN:
             text = (f"{who} n'avait pas l'air comme d'habitude : « {_clip(said)} »" if said else
-                    f"{who} n'avait pas l'air comme d'habitude.")
+                    f"{who} n'avait pas l'air comme d'habitude.") + _also(lines)
         else:
-            text = f"{who} m'a dit : « {_clip(said)} »" if said else f"Un échange avec {who} m'a marquée."
+            text = (f"{who} m'a dit : « {_clip(said)} »" if said else f"Un échange avec {who} m'a marquée.") \
+                + _also(lines)
         sens = int(Sensitivity.ANODYNE if q.public else Sensitivity.PERSONAL)
         return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
                                     origin=q.origin, about=(q.person,) if q.person else (), sensitivity=sens,
@@ -297,25 +370,49 @@ class Watch:
         return out
 
     def _missing(self, state: AttentionState, frame: Frame, p: Any) -> list[Draft[Any]]:
-        """Une amie qui manque et qu'elle ne peut pas joindre : une pensée
-        (joignable, elle lui écrirait — c'est ``social``)."""
+        """Une amie qui manque et à qui elle n'écrit pas : une pensée. Joignable, et tant qu'elle peut encore lui
+        écrire, elle lui écrirait — c'est ``social``. Mais une amie qui ne répond plus (deux messages sans réponse :
+        ``agency`` ne la laisse plus écrire), ou qui n'est plus qu'un souvenir d'amitié, ne disparaît pas de sa vie
+        intérieure : elle y repense, de plus en plus rarement — quand son silence atteint quatre fois son rythme,
+        puis huit, seize… —, chaque fois un peu moins fort (ADR 0058)."""
         present = set(frame.get(presence_c.PRESENT))
-        already = {a for t in state.thoughts.values() if t.origin == c.MISSING for a in t.about}
+        already = {a for t in frame.get(c.THOUGHTS) if t.origin == c.MISSING for a in t.about}
         out: list[Draft[Any]] = []
         for person, _ratio in frame.get(social_c.MISSED):
             if person in already:
                 continue
             handles = frame.get(identity_c.HANDLES(person))
-            if frame.get(identity_c.REACHABLE(person)) or any(h in present for h in handles):
+            if any(h in present for h in handles) or self._can_write(state, frame, person):
                 continue
-            text = f"J'aimerais bien avoir des nouvelles {elided(_name(frame, person), 'de')}."
+            reading = frame.get(social_c.CONTACT(person))
+            if not reading.last_in:
+                continue
+            tranche = missing_tranche(frame.now - reading.last_in, reading.usual_days or reading.rhythm_days)
+            before = state.missing.get(person, 0)
+            if before > reading.last_in and \
+                    missing_tranche(before - reading.last_in, reading.usual_days or reading.rhythm_days) >= tranche:
+                continue  # déjà pensé à elle à ce stade de son silence
+            name = _name(frame, person)
+            text = (f"Je me demande ce que devient {name}." if tranche >= 2 else
+                    f"J'aimerais bien avoir des nouvelles {elided(name, 'de')}.")
+            intensity = round(max(p.fade_below + 0.05, p.missing_intensity * p.missing_fading ** tranche), 3)
             out.append(c.THOUGHT_BORN.draft(
                 text=Content.of(text, level=int(Sensitivity.ANODYNE)), emotion=Emotion.NOSTALGIC.value,
-                intensity=p.missing_intensity, origin=c.MISSING, about=(person,),
+                intensity=intensity, origin=c.MISSING, about=(person,),
                 sensitivity=int(Sensitivity.ANODYNE), source=None,
-                dedupe_key=f"manque:{person}:{frame.get(social_c.CONTACT(person)).last_in}"))
+                dedupe_key=f"manque:{person}:{reading.last_in}:{tranche}"))
             break  # un manque à la fois
         return out
+
+    @staticmethod
+    def _can_write(state: AttentionState, frame: Frame, person: str) -> bool:
+        """Elle peut encore lui écrire d'elle-même : joignable, une amie aujourd'hui, et pas déjà heurtée à son
+        silence (``agency.GIVE_UP_AFTER`` initiatives sans réponse)."""
+        if not frame.get(identity_c.REACHABLE(person)):
+            return False
+        if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+            return False
+        return awaiting(state, person).initiatives < agency_c.GIVE_UP_AFTER
 
 
     def _hanging(self, state: AttentionState, frame: Frame, person: str, p: Any) -> Draft[Any]:

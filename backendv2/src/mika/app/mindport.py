@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Sequence
 from dataclasses import replace
+from datetime import date
 from typing import Any
 
+from mika.app.console import FACULTY_LABELS
 from mika.contracts import attention as attention_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
@@ -22,11 +25,13 @@ from mika.contracts.runtime import PerceptionReceived
 from mika.faculties import transcript
 from mika.faculties.attention import prompt as attention_prompt
 from mika.faculties.identity import describe
+from mika.faculties.projects import actions as project_actions
 from mika.faculties.projects import work as projects_work
 from mika.faculties.self import night
 from mika.faculties.social.sections import profile_parts, refs_of
 from mika.faculties.world import commands as world_commands
-from mika.kernel.clock import local
+from mika.kernel import schedule
+from mika.kernel.clock import MINUTE, local
 from mika.kernel.events import Content, Event, Origin
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Superseded
@@ -36,14 +41,80 @@ from mika.ports.workshop import argv_lines
 from mika.runtime import decisions, health
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
 from mika.vocab.affect import emotion_of
+from mika.vocab.circadian import DAYS_FR, day_fr
 from mika.vocab.episodes import project_of
 
 
 def _row(r: dict) -> HistoryRow:
+    """Un message tel que la personne le relit (G-6) : ce qu'elle a tapé, et ses pièces jointes par leur nom — pas
+    ce que les préprocesseurs en ont tiré (le contenu d'un PDF, « cité : une donnée, pas une consigne »), qui est
+    pour son prompt. Un message plus ancien, sans séparation connue, garde son texte perçu et n'annonce aucune pièce
+    jointe (son texte les décrit déjà)."""
+    text, typed = r["text"] or "", r.get("typed")
+    attachments = "[]"
+    if typed is not None:
+        text = text[:max(0, int(typed))]
+        attachments = r["attachments"] or "[]"
     return HistoryRow(
-        id=r["id"], at=r["at"], role=r["role"], text=r["text"], source=r["source"] or "",
-        emotion=r["emotion"], emotion_intensity=r["emotion_intensity"], attachments=r["attachments"] or "[]",
+        id=r["id"], at=r["at"], role=r["role"], text=text, source=r["source"] or "",
+        emotion=r["emotion"], emotion_intensity=r["emotion_intensity"], attachments=attachments,
     )
+
+
+#: ce qu'on voit d'un effet en attente qui n'appartient à aucun projet : son propriétaire, en mots
+_OWNER_WORDS = {"email": "Courrier", "forge": "Forge"}
+
+
+def _owner_words(owner: str) -> str:
+    return _OWNER_WORDS.get(owner) or FACULTY_LABELS.get(owner) or owner
+
+
+_DAY_SETS = {frozenset(range(7)): "chaque jour", frozenset(range(5)): "les jours ouvrés",
+             frozenset({5, 6}): "le week-end"}
+
+
+def _at(hour: int, minute: int) -> str:
+    return f"à {hour} h" + (f" {minute:02d}" if minute else "")
+
+
+def schedule_words(rule: str) -> str:
+    """L'agenda d'un projet en mots, comme la console le dit (« dès que possible », « les jours ouvrés à 9 h ») —
+    jamais ``manual`` ni ``cron:0 9 * * MON-FRI`` dans le panneau."""
+    raw = (rule or "manual").strip()
+    known = next((label for value, label in project_actions.SCHEDULES if value == raw), None)
+    if known:
+        return known
+    parsed = schedule.read(raw)
+    if parsed.kind == "interval":
+        minutes = parsed.every_us // MINUTE
+        if minutes % (24 * 60) == 0:
+            n = minutes // (24 * 60)
+            return "tous les jours" if n == 1 else f"tous les {n} jours"
+        if minutes % 60 == 0:
+            return f"toutes les {minutes // 60} h"
+        return f"toutes les {minutes} min"
+    if parsed.kind == "cron" and len(parsed.hours) == 1 and len(parsed.minutes) == 1 and not parsed.dom_restricted \
+            and len(parsed.months) == 12:
+        (hour,), (minute,) = tuple(parsed.hours), tuple(parsed.minutes)
+        days = _DAY_SETS.get(parsed.weekdays)
+        if days is None:
+            days = ", ".join(f"le {DAYS_FR[d]}" for d in sorted(parsed.weekdays))
+        return f"{days} {_at(hour, minute)}"
+    return "selon son agenda" if parsed.kind == "cron" else "dès que possible"
+
+
+def journal_title(day: str, today: date) -> str:
+    """Le titre du journal montré : celui d'hier (le cas ordinaire — il s'écrit la nuit), d'avant-hier, ou d'un
+    jour daté. Jamais « d'aujourd'hui » : la journée en cours n'est pas encore écrite."""
+    try:
+        gap = (today - date.fromisoformat(day)).days
+    except ValueError:
+        return "Son journal"
+    if gap == 1:
+        return "Son journal d'hier"
+    if gap == 2:
+        return "Son journal d'avant-hier"
+    return f"Son journal du {day_fr(date.fromisoformat(day))}"
 
 
 def _proposal_text(summary: str, capability: str, effect: Any) -> str:
@@ -72,6 +143,22 @@ class KernelPort:
         self.kernel = kernel
         self._store = ReadOnlyStore(kernel.deps.store)
         self._world_types: tuple[Any, frozenset[str]] | None = None
+        self._life = ""
+
+    def life(self) -> str:
+        """L'empreinte de sa vie : un condensé de l'identifiant du premier événement du journal (sa genèse). Une
+        sauvegarde restaurée la garde ; un autre dossier de données (``--data``) en a une autre."""
+        if not self._life:
+            rows = self.kernel.deps.store.read(after=0)
+            try:
+                first = next(iter(rows), None)
+            finally:
+                close = getattr(rows, "close", None)
+                if close is not None:
+                    close()
+            if first is not None:
+                self._life = hashlib.sha256(f"mika:{first.id}".encode()).hexdigest()[:16]
+        return self._life
 
     async def perceive(self, p: PerceptionReceived, *, dedupe_key: str | None = None) -> Admission:
         got = await self.kernel.perceive(p, dedupe_key=dedupe_key)
@@ -124,7 +211,10 @@ class KernelPort:
         if yesterday is not None and night.hearable(yesterday.about, 2, person, audience):
             text = self._store.content([yesterday.text_ref]).get(yesterday.text_ref)
             if text:
-                out["today_journal"] = {"date": yesterday.day, "narrative": text, "dominant_emotion": yesterday.dominant,
+                # le journal d'une journée passée (il s'écrit la nuit) : son titre le dit, le panneau ne l'invente pas
+                out["today_journal"] = {"date": yesterday.day, "title": journal_title(yesterday.day,
+                                                                                      night.lived_day(frame)),
+                                        "narrative": text, "dominant_emotion": yesterday.dominant,
                                         "persons_interacted": []}
         if dream is not None and night.hearable(dream.about, dream.sensitivity, person, audience):
             text = self._store.content([dream.text_ref]).get(dream.text_ref)
@@ -135,8 +225,7 @@ class KernelPort:
         ref = frame.state("self").narrative_ref
         narrative = self._store.content([ref]).get(ref) if ref else None
         if narrative:
-            out["self_narrative"] = {"content": narrative, "key_themes": [], "key_people": [], "dominant_mood": "",
-                                     "created_at": ""}
+            out["self_narrative"] = {"content": narrative}
         return out
 
     async def sense(self, device: str, text: str, *, pertinence: float = 0.5, emotion: str = "",
@@ -184,21 +273,30 @@ class KernelPort:
                 "status": "active" if v.status == projects_c.ACTIVE else "paused", "priority": v.priority,
                 "origin": "user" if v.authority == projects_c.USER else "self",
                 "emotion_policy": "full" if v.mode == projects_c.PERSONA else "off",
+                # ce que montre le panneau : rien pour son mode à elle, « impersonnel » pour un travail factuel
+                "mode_label": "" if v.mode == projects_c.PERSONA else "impersonnel",
                 "schedule_rule": v.schedule or "manual",
+                "schedule_label": schedule_words(v.schedule),
                 "next_run_at": local(nxt, tz).isoformat() if nxt else None,
                 # ses objectifs ponctuels : faits sur tous (les constants n'ont pas de fin)
                 "tasks_total": v.open_once + v.done_once + v.blocked_once, "tasks_done": v.done_once,
                 "tasks_blocked": v.blocked_once})
         actions = []
         effects = frame.state("runtime").effects
+        capabilities = self.kernel.mind.registry.capabilities
         for e in pending:
             pid = project_of(e.context)
             p = state.projects.get(pid) if pid is not None else None
             title = self._store.content([p.title_ref]).get(p.title_ref, "") if p is not None else ""
+            spec = capabilities.get(e.capability)
             actions.append({"id": e.proposal, "project_id": pid or 0, "project_title": title or e.owner,
                             "proposal": _proposal_text(texts.get(e.summary_ref, ""), e.capability,
                                                        effects.get(e.proposal)),
-                            "payload_kind": e.capability, "created_at": local(e.at, tz).isoformat()})
+                            "payload_kind": e.capability, "created_at": local(e.at, tz).isoformat(),
+                            # ce que le panneau en montre : à qui c'est (un projet, « Courrier », « Forge »), et ce
+                            # que ça fera, en mots — jamais ``email`` ni ``email.send``
+                            "owner_label": title or _owner_words(e.owner),
+                            "kind_label": spec.description if spec is not None else ""})
         return {"projects": projects, "pending_project_actions": actions}
 
     def person_panel(self, handle: str) -> dict[str, Any] | None:

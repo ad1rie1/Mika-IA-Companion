@@ -42,9 +42,13 @@ class FakeBot:
         self.sent: list[tuple[int, str]] = []
         self.files: dict[str, bytes] = {}
         self.downloaded: list[str] = []
+        #: (conversation, texte, message cité) — seulement ce qui en cite un
+        self.quoted: list[tuple[int, str, int]] = []
 
-    async def send_message(self, chat_id: int, text: str) -> None:
+    async def send_message(self, chat_id: int, text: str, reply_to: int | None = None) -> None:
         self.sent.append((chat_id, text))
+        if reply_to is not None:
+            self.quoted.append((chat_id, text, reply_to))
 
     async def download(self, file_id: str) -> bytes:
         self.downloaded.append(file_id)
@@ -443,3 +447,197 @@ async def test_updates_run_in_parallel_across_chats_and_in_order_within_one():
                          poller._handle(msg(3, "salut", chat=6, user=6)))
     assert order.index(("fin", 1)) < order.index(("début", 2))  # même conversation : dans l'ordre
     assert order.index(("fin", 3)) < order.index(("fin", 1))  # une autre conversation n'attend pas
+
+
+# ── Elle a l'air là, elle lit tout, et on l'appaire (ADR 0057) ─────────────
+
+
+class TypingBot(FakeBot):
+    """Un robot qui sait montrer « en train d'écrire… »."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.typing: list[int] = []
+
+    async def send_typing(self, chat_id: int) -> None:
+        self.typing.append(chat_id)
+
+
+class FakePort:
+    """Le cœur réduit à l'admission : il accepte — ou, endormie, retient la réponse pour son réveil."""
+
+    def __init__(self, *, held: bool = False) -> None:
+        self.held = held
+        self.seen: list = []
+
+    async def perceive(self, p, *, dedupe_key=None):
+        from mika.contracts.entry import Admission
+
+        self.seen.append(p)
+        return Admission("accepted", seq=len(self.seen), held=self.held)
+
+
+def virtual_sleep(t: list[float]):
+    async def sleep(seconds: float) -> None:
+        t[0] += seconds
+        await asyncio.sleep(0)
+
+    return sleep
+
+
+async def _turns(n: int = 6) -> None:
+    for _ in range(n):
+        await asyncio.sleep(0)
+
+
+async def test_she_is_seen_typing_until_she_answers_bounded_and_never_while_she_sleeps():
+    """G-4 : de quelques secondes à deux minutes sans signe de vie, elle paraissait absente. Dès qu'un message
+    adressé est accepté : « en train d'écrire… », renouvelé jusqu'à sa réponse (ou son silence), borné à deux
+    minutes. Endormie, sa réponse attend son réveil : rien ne s'affiche. Contre-exemple : un robot sans
+    ``send_typing`` ne casse rien."""
+    from mika.adapters.telegram.channel import TYPING_EVERY_S, TYPING_MAX_S
+    from mika.ports import delivery as delivery_p
+
+    t = [0.0]
+    bot = TypingBot()
+    channel = TelegramChannel(FakePort(), bot, OPEN, monotonic=lambda: t[0], sleep=virtual_sleep(t))
+    assert await channel.receive(msg(1, "tu fais quoi ?", chat=42, user=42)) == "accepted"
+    await _turns()
+    assert len(bot.typing) >= 2 and set(bot.typing) == {42}  # renouvelé tant qu'elle compose
+    assert await channel.deliver(_delivery("je lis un manga !", target="tg_42"))
+    stopped = len(bot.typing)
+    await _turns()
+    assert len(bot.typing) == stopped  # sa réponse est partie : elle n'écrit plus
+    assert await channel.receive(msg(2, "et sinon ?", chat=42, user=42)) == "accepted"
+    await _turns(200)  # la réponse ne vient pas
+    assert len(bot.typing) - stopped <= TYPING_MAX_S / TYPING_EVERY_S + 1  # borné : deux minutes au plus
+    assert await channel.receive(msg(3, "allo ?", chat=42, user=42)) == "accepted"
+    await _turns()
+    shown = len(bot.typing)
+    assert await channel.deliver(_delivery("", key="k9", target="tg_42", kind=delivery_p.REPLY_ABSTAINED,
+                                           reply_to=3))
+    await _turns()
+    assert len(bot.typing) == shown  # elle a choisi de se taire : elle n'écrit plus non plus
+
+    asleep_bot = TypingBot()
+    asleep = TelegramChannel(FakePort(held=True), asleep_bot, OPEN, monotonic=lambda: t[0],
+                             sleep=virtual_sleep(t))
+    assert await asleep.receive(msg(4, "tu dors ?", chat=7, user=7)) == "accepted"
+    await _turns()
+    assert asleep_bot.typing == []  # endormie : sa réponse attend son réveil
+
+    plain = TelegramChannel(FakePort(), FakeBot(), OPEN, monotonic=lambda: t[0], sleep=virtual_sleep(t))
+    assert await plain.receive(msg(5, "coucou", chat=8, user=8)) == "accepted"
+    await channel.close()
+
+
+def test_a_sticker_a_video_and_a_gif_are_perceived_in_one_line_not_ignored(tmp_path):
+    """G-4 : un autocollant ne passait pas le filtre, sans un mot — et ils comptent dans une conversation intime.
+    Perçu en une ligne, avec son émoji ; une vidéo ou un GIF aussi, jamais téléchargés. Contre-exemple : ce qui
+    n'a ni texte, ni fichier, ni rien à percevoir reste ignoré."""
+    user = SimpleNamespace(id=42, is_bot=False, first_name="Léa", last_name="", username="")
+
+    def update(i, **kw):
+        base = dict(message_id=i, text=None, caption=None, from_user=user, reply_to_message=None, photo=None,
+                    voice=None, audio=None, document=None, chat=SimpleNamespace(id=42, type="private"))
+        return SimpleNamespace(update_id=i, message=SimpleNamespace(**{**base, **kw}))
+
+    sticker = inbound_from_update(update(1, sticker=SimpleNamespace(emoji="😂")), 999, "mika_bot")
+    assert sticker is not None and sticker.noted == "(t'envoie un autocollant 😂)"
+    gif = inbound_from_update(update(2, animation=SimpleNamespace(file_id="a"), document=SimpleNamespace(
+        file_id="a", file_name="anim.mp4", mime_type="video/mp4", file_size=10)), 999, "mika_bot")
+    assert gif is not None and gif.noted.startswith("(t'envoie un GIF") and gif.media == ()  # pas un document
+    video = inbound_from_update(update(3, video=SimpleNamespace(file_id="v"), caption="regarde ça"), 999,
+                                "mika_bot")
+    assert video is not None and video.text == "regarde ça" and "une vidéo" in video.noted
+    assert inbound_from_update(update(4), 999, "mika_bot") is None
+
+    async def scenario(kernel, bot, channel, t):
+        status = await channel.receive(msg(1, "", chat=42, user=42, noted=sticker.noted))
+        captioned = await channel.receive(msg(2, "regarde ça", chat=42, user=42, noted=video.noted))
+        texts = [with_content(kernel.mind, kernel.mind.decode(e)).data for e in perceptions(kernel)]
+        return status, captioned, texts
+
+    status, captioned, seen = run(tmp_path, scenario)
+    assert (status, captioned) == ("accepted", "accepted")
+    assert seen[0].text.text == "(t'envoie un autocollant 😂)"
+    assert seen[1].text.text == "regarde ça\n(t'envoie une vidéo, que tu ne peux pas regarder)"
+    assert seen[1].typed_chars == len("regarde ça")  # ce qu'elle a tapé, à part de ce qu'elle a envoyé
+
+
+def test_a_long_message_is_read_up_to_telegram_s_own_limit(tmp_path):
+    """G-4 : au-delà de 2000 caractères, elle répondait « tu peux faire plus court ? » — à un message que Telegram
+    permet. Elle lit jusqu'à 4096 (la limite de Telegram) ; seul le prompt coupe."""
+    long = "Il faut que je te raconte ma journée. " * 80  # ~3000 caractères
+
+    async def scenario(kernel, bot, channel, t):
+        status = await channel.receive(msg(1, long, chat=42, user=42))
+        return status, [with_content(kernel.mind, kernel.mind.decode(e)).data.text.text for e in perceptions(kernel)]
+
+    status, texts = run(tmp_path, scenario)
+    assert 2000 < len(long) <= 4096
+    assert status == "accepted" and texts == [long]
+
+
+def test_in_a_room_her_answer_quotes_the_message_it_answers(tmp_path):
+    """G-4 : dans un salon actif, on ne savait pas à qui elle répondait. Sa réponse cite le message d'origine ;
+    en privé, rien à citer."""
+    async def scenario(kernel, bot, channel, t):
+        await channel.receive(msg(1, "Mika, t'en penses quoi ?", chat=-5, user=7, kind="group", name="Bob",
+                                  message_id=77))
+        await kernel.lanes.join()
+        await channel.receive(msg(2, "salut Mika", chat=42, user=42, message_id=78))
+        await kernel.lanes.join()
+        return list(bot.sent), list(bot.quoted)
+
+    sent, quoted = run(tmp_path, scenario)
+    assert quoted == [(-5, "coucou toi", 77)]
+    assert (42, "coucou toi") in sent and not [q for q in quoted if q[0] == 42]
+
+
+async def test_bold_does_not_leave_as_asterisks_and_without_a_model_she_says_she_is_not_ready():
+    """G-4 : « **vraiment** » partait tel quel (le web le met en forme, Telegram non) ; sans modèle configuré, elle
+    disait « réessaie dans un instant » indéfiniment. Contre-exemple : une panne passagère dit toujours
+    « réessaie »."""
+    from mika.adapters.telegram.channel import FAILED, NOT_READY
+    from mika.ports import delivery as delivery_p
+
+    bot = FakeBot()
+    channel = TelegramChannel(None, bot, OPEN)  # type: ignore[arg-type]
+    assert await channel.deliver(_delivery("C'est **vraiment** bien, et *ça* aussi."))
+    failed = {"kind": delivery_p.REPLY_FAILED, "reply_to": 3}
+    assert await channel.deliver(_delivery("UnconfiguredRole: aucun modèle associé au rôle « reply »", key="k2",
+                                           **failed))
+    assert await channel.deliver(_delivery("ConnectionError: Failed to connect", key="k3", **failed))
+    assert [text for _chat, text in bot.sent] == ["C'est vraiment bien, et *ça* aussi.", NOT_READY, FAILED]
+
+
+async def test_a_start_code_in_private_pairs_its_sender_as_an_owner_and_she_greets_her():
+    """G-3 : fermé par défaut, le robot était inutilisable tant qu'on ne connaissait pas son identifiant. Le code
+    d'appairage, envoyé en privé (``/start <code>``), fait de son auteur une propriétaire — et c'est sa première
+    arrivée. Contre-exemples : sans code, un faux code, ou dans un groupe, rien n'est perçu ; les essais sont
+    bornés (au-delà, le code n'est même plus vérifié)."""
+    from mika.adapters.telegram.channel import PAIR_TRIES_PER_ACCOUNT, PAIR_WRONG, PAIRED
+
+    asked: list[tuple[int, str]] = []
+
+    async def pair(user: int, code: str, name: str) -> str:
+        asked.append((user, code))
+        return "paired" if code == "K7QF-M3XP" else "wrong"
+
+    port, bot = FakePort(), FakeBot()
+    channel = TelegramChannel(port, bot, TelegramConfig(), pair=pair)  # type: ignore[arg-type] — fermé : personne
+    assert await channel.receive(msg(1, "salut", chat=42, user=42)) == "refused"
+    assert await channel.receive(msg(2, "", chat=42, user=42, opened=True, start_arg="AAAA-BBBB")) == "refused"
+    assert await channel.receive(msg(3, "", chat=-5, user=42, kind="group", opened=True,
+                                     start_arg="K7QF-M3XP")) == "refused"
+    assert port.seen == [] and (42, PAIR_WRONG) in bot.sent
+    assert await channel.receive(msg(4, "", chat=42, user=42, opened=True, start_arg="K7QF-M3XP")) == "accepted"
+    assert 42 in channel.config.owners and (42, PAIRED) in bot.sent
+    assert len(port.seen) == 1 and "ouvrir la conversation" in port.seen[0].text.text
+    assert "K7QF" not in port.seen[0].text.text  # le code n'entre jamais au journal
+    assert await channel.receive(msg(5, "coucou", chat=42, user=42)) == "accepted"  # sa conversation est admise
+    before = len(asked)
+    for i in range(PAIR_TRIES_PER_ACCOUNT + 3):
+        await channel.receive(msg(10 + i, "", chat=50, user=50, opened=True, start_arg=f"ESSAI-{i}"))
+    assert len(asked) - before == PAIR_TRIES_PER_ACCOUNT  # borné par compte

@@ -43,7 +43,8 @@ EXCERPT = 160
 
 #: ses retenues, en mots (la console les nomme aussi : ``app/console.py``)
 VETO_FR = {c.DAILY_CAP: "le plafond du jour est atteint", c.UNANSWERED: "une initiative est restée sans réponse",
-           c.AWAITING_REPLY: "son dernier message attend encore une réponse", c.CHANGED_MIND: "elle s'est ravisée"}
+           c.AWAITING_REPLY: "elle attend sa réponse (elle a écrit en dernier)", c.CHANGED_MIND: "elle s'est ravisée",
+           c.HESITATING: "elle hésite encore (ses derniers essais ont fini en silence)"}
 
 
 def _name(frame: Frame, handle: str) -> str:

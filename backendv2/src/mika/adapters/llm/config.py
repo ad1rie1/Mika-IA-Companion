@@ -2,9 +2,13 @@
 rechargeable à chaud.
 
 Une installation neuve n'a aucun modèle : chaque tour échoue proprement
-(« aucun modèle associé au rôle… ») jusqu'à ce qu'on en déclare un. Les clés
-ne passent jamais par ce module en clair ailleurs qu'à la construction du
-client.
+(« aucun modèle associé au rôle… ») jusqu'à ce qu'on en déclare un. Le
+**premier fournisseur déclaré sert « répondre » d'office** (tous les autres
+rôles y retombent déjà) : déclarer un fournisseur suffit pour qu'elle parle,
+il n'y a pas de seconde étape à oublier. « Configurée » veut dire « elle peut
+répondre » — le rôle ``reply`` se résout —, jamais seulement « un fournisseur
+existe ». Les clés ne passent jamais par ce module en clair ailleurs qu'à la
+construction du client.
 """
 
 from __future__ import annotations
@@ -13,13 +17,19 @@ from collections import deque
 from collections.abc import Callable, Mapping
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from mika.adapters.llm.gateway import TRACES_KEPT, Gateway, LLMTrace, UnconfiguredRole
+from mika.kernel import forms
 from mika.kernel.clock import Clock
 from mika.kernel.forms import Knob
 from mika.ports.llm import LLMBackend, LLMRequest, LLMResponse, MissingPersona
 from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, Role
+
+#: le seul rôle qu'il faut servir : tout ce qui parle, et les utilitaires, y retombent
+REPLY = str(Role.REPLY)
+#: les rôles qui existent (une route vers un autre nom ne servirait jamais rien)
+ROLES = tuple(str(r) for r in Role)
 
 Kind = Literal["claude", "claude_code", "openai", "ollama", "ollama_cloud"]
 
@@ -102,9 +112,12 @@ class BackendSpec(BaseModel):
         return self.kind == "ollama"
 
     def redacted(self) -> dict[str, Any]:
+        """Ce qui se montre de lui : la clé masquée, et seulement les champs qui servent à son type (la
+        connexion d'un abonnement Claude Code ne se lit pas sur un Ollama)."""
         data = self.model_dump()
         data["api_key"] = "••••" if self.api_key else ""
-        return data
+        shown = {f.path for f in forms.describe(BackendSpec) if forms.visible(f, data)}
+        return {k: v for k, v in data.items() if k in shown}
 
 
 #: les rôles, en français (voix d'abord)
@@ -134,11 +147,33 @@ class LLMConfig(BaseModel):
                                         "citations extérieures coupées d'abord.", lo=2_000, hi=1_000_000,
                                         step=1_000, advanced=False, order=30)] = Field(default=24_000, ge=2_000)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _reply_served(cls, data: Any) -> Any:
+        """Le premier fournisseur déclaré sert « répondre » d'office : un fournisseur sans rôle donnait une
+        configuration « valide » où chaque tour échouait. Un choix explicite (vers un fournisseur déclaré)
+        n'est jamais changé ; un fournisseur retiré qui servait « répondre » passe la main au premier qui
+        reste."""
+        if not isinstance(data, Mapping):
+            return data
+        backends = data.get("backends") or {}
+        routes = data.get("routes") or {}
+        if not isinstance(backends, Mapping) or not isinstance(routes, Mapping) or not backends:
+            return data
+        if routes.get(REPLY) in backends:
+            return data
+        return {**data, "routes": {**dict(routes), REPLY: str(next(iter(backends)))}}
+
     def problems(self) -> list[str]:
         out = []
         for role, name in self.routes.items():
-            if name not in self.backends:
+            if role not in ROLES:
+                out.append(f"le rôle « {role} » n'existe pas (les rôles : {', '.join(ROLES)}) — seul « {REPLY} » "
+                           "est nécessaire, les autres y retombent")
+            elif name not in self.backends:
                 out.append(f"le rôle « {role} » vise un fournisseur inconnu : {name}")
+        if self.backends and REPLY not in self.routes:
+            out.append(f"aucun fournisseur ne sert « {REPLY} » (répondre) : chaque tour échouerait")
         for name, spec in self.backends.items():
             if spec.fallback and spec.fallback not in self.backends:
                 out.append(f"le fournisseur « {name} » se replie sur un inconnu : {spec.fallback}")
@@ -147,6 +182,24 @@ class LLMConfig(BaseModel):
             if spec.kind == "claude_code" and spec.auth == "cle_api" and not spec.api_key:
                 out.append(f"le fournisseur « {name} » (clé d'API) n'a pas de clé")
         return out
+
+
+#: une issue d'appel (``LLMTrace.outcome`` : ``timeout``, ``error:<classe>``) en mots, par ce que dit le nom
+_FAILURES_FR = (("Connect", "connexion impossible"), ("Timeout", "délai dépassé"),
+                ("Authentication", "clé refusée"), ("Permission", "accès refusé"),
+                ("RateLimit", "limite de débit ou quota atteints"), ("NotFound", "modèle introuvable"),
+                ("Quota", "quota atteint"))
+
+
+def failure_fr(outcome: str) -> str:
+    """Pourquoi un appel a échoué, en mots (« connexion impossible », « délai dépassé »)."""
+    if outcome == "timeout":
+        return "délai dépassé"
+    name = outcome.partition(":")[2] if outcome.startswith("error:") else outcome
+    for marker, text in _FAILURES_FR:
+        if marker.lower() in name.lower():
+            return text
+    return f"erreur {name}" if name else "erreur"
 
 
 def build_backend(name: str, spec: BackendSpec, *, relay: Any = None, relay_base: Any = None,
@@ -219,7 +272,32 @@ class LiveGateway:
 
     @property
     def configured(self) -> bool:
-        return self._inner is not None
+        """Peut-elle parler ? Le rôle « répondre » se résout vers un fournisseur déclaré. Un fournisseur
+        déclaré sans rôle ne suffit pas : chaque tour échouerait."""
+        return bool(self.serving(REPLY))
+
+    def serving(self, role: str) -> str:
+        """Le fournisseur qui sert vraiment ce rôle (replis compris) ; « » : aucun."""
+        if self._inner is None:
+            return ""
+        try:
+            return self._inner.resolve(role)
+        except UnconfiguredRole:
+            return ""
+
+    def failing(self, role: str, now: int, window_us: int) -> tuple[str, int, str] | None:
+        """Le fournisseur de ce rôle ne répond plus : ses derniers appels (dans ``window_us``) ont tous échoué,
+        sans un succès depuis. Rend ``(fournisseur, depuis quand, cause)`` — la cause en mots —, ou ``None``
+        (il répond, ou personne ne l'a appelé récemment). Une annulation ou une préemption ne compte pas :
+        ce n'est pas le fournisseur qui a manqué."""
+        since, backend, cause = 0, "", ""
+        for tr in reversed(list(self.traces)):  # une copie : un appel peut s'ajouter pendant la lecture
+            if tr.role != role or tr.outcome in ("cancelled", "preempted"):
+                continue
+            if now - tr.at > window_us or tr.outcome == "ok":
+                break
+            since, backend, cause = tr.at, backend or tr.backend, cause or failure_fr(tr.outcome)
+        return (backend, since, cause) if since else None
 
     def routes(self) -> Mapping[str, str]:
         return dict(self._inner.routes) if self._inner is not None else {}

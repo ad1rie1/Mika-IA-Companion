@@ -6,13 +6,21 @@ en reste.
   lui a parlé et à quel moment, ce qu'elle a dit, à qui elle a écrit d'elle-même
   et si on lui a répondu, ce qu'elle a fait (mené à bout, bloqué, entrepris),
   ce qu'elle a promis, ce qu'elle a retenu, ce qui la travaille, comment son
-  humeur a tourné. Rien d'inventé, aucun comptage. Un par journée vécue : la
-  journée commence une heure avant son matin ; une nuit blanche (s'endormir à
-  6 h 30) appartient encore à la veille ; une nuit coupée par une conversation
-  fait réécrire le journal en se rendormant. Une nuit manquée (serveur arrêté,
-  modèle en panne) se rattrape au matin. « [SILENCE] » n'est pas un journal.
+  humeur a tourné. Rien d'inventé, aucun comptage, et jamais ses propres
+  phrases à recopier (le ton de ses réponses, pas leurs mots). Un par journée
+  vécue : la journée commence une heure avant son matin ; une nuit blanche
+  (s'endormir à 6 h 30) appartient encore à la veille ; une nuit coupée par une
+  conversation fait réécrire le journal en se rendormant. Une nuit manquée
+  (serveur arrêté, modèle en panne) se rattrape au matin. « [SILENCE] » n'est
+  pas un journal.
+- **Ce qu'elle en raconterait** à n'importe qui (``shareable``) n'est plus écrit
+  par un modèle : il est rendu d'après les faits qu'elle a le droit de dire —
+  combien de gens et quand, ce qu'elle a fait de son côté, le ton de la journée,
+  vague mais vrai (ADR 0053).
 - **Les rêves** : en sommeil paradoxal, au plus deux par nuit, espacés, à
-  partir de fragments des derniers jours (et d'une pensée qui insiste) ; un
+  partir de fragments des derniers jours — des souvenirs nés ou revécus
+  (renforcés, repris en parlant) depuis trois jours : une vie routinière rêve
+  encore (ADR 0058) — et d'une pensée qui insiste ; un
   cauchemar seulement quand ce qu'elle vit est vraiment sombre ou qu'une peur
   la travaille, sinon un rêve mélancolique. Tirés au sort par cycle, d'un
   hasard dérivé de la nuit : le rejeu retombe sur les mêmes.
@@ -47,6 +55,7 @@ from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as c
 from mika.contracts import transcript as transcript_c
+from mika.contracts import world as world_c
 from mika.faculties.self import (
     ABANDONED,
     BLOCKED,
@@ -83,6 +92,8 @@ CYCLE = 90 * MINUTE
 DREAM_LINGERS = 7 * HOUR
 #: au-delà, un journal ne passe plus pour son « fil d'hier »
 YESTERDAY_DAYS = 2
+#: les rêves puisent dans ce qu'elle a vécu ou revécu depuis tant de temps
+DREAM_LOOKBACK = 3 * DAY
 
 
 def _starts(frame: Frame) -> int:
@@ -249,17 +260,11 @@ class Wake:
 
 JOURNAL_SYSTEM = """Tu écris ton journal intime, la nuit, sur la journée qui vient de passer : deux à cinq phrases, \
 à la première personne, avec tes mots — ce qui t'a marquée, ce que tu as fait, ce que tu as ressenti, les gens \
-avec qui tu as parlé (par leur prénom). Rien d'inventé : seulement ce que disent tes notes de la journée, et aux \
-moments qu'elles disent (le matin, le soir…). Si tu as écrit à quelqu'un sans réponse, ce n'est pas que personne ne \
-t'a parlé : dis-le comme tu l'as vécu. Si la journée a été vide, dis-le simplement. Pas de date en tête, pas de \
-liste, pas de balise. Réponds seulement par le texte du journal."""
-
-SHAREABLE_SYSTEM = """Quelqu'un te demande « et toi, t'as fait quoi hier ? ». Écris en une à trois phrases, à la \
-première personne et avec tes mots, ce que tu lui raconterais de ta journée : ce que tu as fait de ton côté, ce qui \
-t'a occupée, comment tu te sentais. Seulement ta vie à toi, d'après tes notes : personne d'autre n'y figure et tu \
-n'en ajoutes pas ; rien d'inventé. Si tu as parlé avec des gens, dis seulement que tu as discuté — jamais avec qui, \
-ni de quoi, ni comment ils allaient. Si tu n'as rien fait de particulier, dis-le simplement. Pas de date, pas de \
-balise. Réponds seulement par ce texte."""
+avec qui tu as parlé (par leur prénom). Seulement ce que disent tes notes, aux moments qu'elles disent (le matin, le \
+soir…) : n'ajoute aucune activité ni aucun détail qui n'y soit pas (une boisson, un repas, un projet, une habitude \
+de quelqu'un), et ne recopie pas tes notes — raconte. Si tu as écrit à quelqu'un sans réponse, ce n'est pas que \
+personne ne t'a parlé : dis-le comme tu l'as vécu. Si la journée a été vide, dis-le simplement. Pas de date en tête, \
+pas de liste, pas de balise, pas de signature. Réponds seulement par le texte du journal."""
 
 #: ce que « [SILENCE] » et ses variantes ne sont pas : un journal
 _SILENT = re.compile(r"^\W*silence\W*$", re.IGNORECASE)
@@ -352,22 +357,17 @@ class Write:
         text = (response.text or "").strip()
         if silent(text):
             return
-        # ce qu'elle raconterait de sa journée à n'importe qui : écrit d'après des notes où personne d'autre
-        # n'apparaît — ce qui n'est pas dans les notes ne peut pas s'ébruiter (sonde réelle du 2026-10-02 : le
-        # journal, prénoms masqués, livrait à Chloé ce qu'Adrien avait demandé de lui taire)
-        told = await ctx.llm.call(LLMRequest(
-            role="journal", call_id=f"{ctx.run_id}#{key}:partage", persona=persona,
-            system_stable=persona.text + "\n\n" + SHAREABLE_SYSTEM,
-            messages=(Message("user", public_notes_of(frame, store, state, date.fromisoformat(day))),),
-            max_tokens=250, lane="background", priority=4, meta={"purpose": "shareable"}))
-        shareable = (told.text or "").strip()
+        # ce qu'elle raconterait de sa journée à n'importe qui : rendu d'après les faits qu'elle a le droit de dire,
+        # sans modèle — un modèle comblait des notes maigres avec sa persona (sonde réelle du 2026-10-03 : « j'ai
+        # bricolé un overlay pour mon stream », « on a refait le monde entre deux parties de jeux indé »), et ce qui
+        # n'est pas dans les faits ne peut ni s'inventer ni s'ébruiter
+        shareable = told_day(frame, store, state, date.fromisoformat(day))
         self.retry_at = 0
         await ctx.emit(c.JOURNALED.draft(
             day=day, text=Content.of(text[:2000], level=int(Sensitivity.PERSONAL)), about=about, dominant=dominant,
             messages=messages, voice=VoiceProvenance(call_id=request.call_id, persona_hash=persona.hash,
                                                      role="journal", model=response.model),
-            shareable=None if silent(shareable) else Content.of(shareable[:800]),
-            dedupe_key=f"journal:{key}"))
+            shareable=Content.of(shareable[:1200]) if shareable else None, dedupe_key=f"journal:{key}"))
 
 
 def _listed(raw: Any) -> list[str]:
@@ -389,7 +389,9 @@ def notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> tuple[str
     rows = store.query_mind(f"SELECT at, person, role, kind, text, emotion FROM {transcript_c.THREAD_TABLE} "
                             "WHERE at >= ? AND at < ? ORDER BY id", (start, end))
     told: dict[str, list[tuple[int, str]]] = {}
-    said: dict[str, list[tuple[int, str, float]]] = {}
+    # ce qu'elle a dit : quand, et sur quel ton — jamais ses phrases, qu'un modèle recopiait telles quelles dans son
+    # journal (sonde réelle du 2026-10-03 : « Hey Sam ! Je viens de penser à toi… prendre… »)
+    said: dict[str, list[tuple[int, str]]] = {}
     reached: dict[str, list[tuple[int, str]]] = {}
     heard_at: dict[str, list[int]] = {}
     felt: list[tuple[int, str]] = []
@@ -404,9 +406,9 @@ def notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> tuple[str
         if not person:
             continue
         if kind == Kind.INITIATIVE:
-            reached.setdefault(person, []).append((at, _quote(text, 110)))
+            reached.setdefault(person, []).append((at, emotion or ""))
         else:
-            said.setdefault(person, []).append((at, _quote(text, 110), 0.0))
+            said.setdefault(person, []).append((at, emotion or ""))
     people = set(told) | set(said) | set(reached)
     names = _names(frame, {p for p in people if p})
 
@@ -418,12 +420,11 @@ def notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> tuple[str
     if told:
         order = sorted(told, key=lambda p: (-len(told[p]), told[p][0][0]))
         for p in order[:4]:
-            times = [t for t, _ in told[p]] + [t for t, _, _ in said.get(p, ())]
+            times = [t for t, _ in told[p]] + [t for t, _ in said.get(p, ())]
             lines.append(f"Avec {who(p)} ({_moments(frame, times)}) : on t'a dit, entre autres, "
                          + " / ".join(f"« {t} »" for _, t in told[p][-3:]) + ".")
             if said.get(p):
-                lines.append("Tu lui as répondu, entre autres, " + " / ".join(f"« {t} »" for _, t, _ in said[p][-2:])
-                             + ".")
+                lines.append(f"Tu lui as répondu{_tone_of(said[p])}.")
     elif reached:
         lines.append("Personne n'est venu te parler de lui-même aujourd'hui : c'est toi qui as écrit.")
     else:
@@ -431,10 +432,9 @@ def notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> tuple[str
     for p in sorted(reached, key=lambda p: reached[p][0][0])[:4]:
         first = reached[p][0][0]
         answered = any(t > first for t in heard_at.get(p, ()))
-        lines.append(f"De toi-même, tu as écrit à {who(p)} ({_moments(frame, [t for t, _ in reached[p]])} : "
-                     + " / ".join(f"« {t} »" for _, t in reached[p][-2:]) + ") — "
+        lines.append(f"De toi-même, tu as écrit à {who(p)} ({_moments(frame, [t for t, _ in reached[p]])}) — "
                      + (f"{who(p)} t'a répondu." if answered else "pas de réponse."))
-    lines += _deeds(frame, store, state, start, end)
+    lines += _deeds(frame, store, state, start, end) + room_doings(frame, start, end)
     promised = store.query_mind(
         f"SELECT text, recipient FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND born_at >= ? AND born_at < ? "
         "ORDER BY id LIMIT 4", (memory_c.PROMISE, start, end))
@@ -464,25 +464,128 @@ def notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> tuple[str
     return "\n".join(lines), about, dominant, sum(len(v) for v in told.values())
 
 
-def public_notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> str:
-    """Ses notes de la journée sans personne d'autre : ce qu'elle a fait de son côté (ce qui ne concerne qu'elle),
-    comment son humeur a tourné, et combien de gens elle a vus — jamais qui, ni ce qu'ils ont dit."""
+#: combien de gens, en toutes lettres (au-delà : « plusieurs »)
+COUNT_FR = {1: "une personne", 2: "deux personnes", 3: "trois personnes", 4: "quatre personnes",
+            5: "cinq personnes"}
+#: « un peu lourde » : ce qui a pesé fait au moins la moitié de ce qui a été léger ; « bonne » : le lourd reste sous
+#: le quart du léger
+HEAVY_AGAINST_LIGHT, LIGHT_AGAINST_HEAVY = 0.5, 0.25
+#: une valence au-delà de laquelle une émotion pèse, ou allège
+WEIGHS = 0.15
+
+
+def told_day(frame: Frame, store: Any, state: SelfState, day: date) -> str:
+    """Ce qu'elle peut raconter de sa journée à n'importe qui, rendu d'après les faits qu'elle a le droit de dire
+    — jamais écrit par un modèle (ADR 0053) : à partir de notes maigres, il comblait avec sa persona (sonde réelle du
+    2026-10-03 : un overlay de stream, un débrief d'anime, « rien de spécial » le jour où le chat d'un ami est mort).
+    Personne d'autre n'y figure : combien de gens elle a vus et à quels moments (jamais qui, ni de quoi, ni comment
+    ils allaient), ce qu'elle a fait de son côté et qui ne concerne qu'elle (``doings_of``), et le ton de sa
+    journée — vague mais vrai (« une journée un peu lourde »), jamais pourquoi. Le modèle de la conversation le dit
+    avec ses mots quand on le lui demande."""
     tz = frame.env.tz_of(frame.root)
     start, end = d_.day_window(day, tz, _starts(frame))
-    rows = store.query_mind(f"SELECT person, role, emotion FROM {transcript_c.THREAD_TABLE} "
+    rows = store.query_mind(f"SELECT at, person, role, emotion, emotion_intensity FROM {transcript_c.THREAD_TABLE} "
                             "WHERE at >= ? AND at < ? ORDER BY id", (start, end))
-    people = {frame.get(identity_c.PERSON(h)) for h, _r, _e in rows if h}
-    felt = store.query_mind(f"SELECT at, emotion FROM {transcript_c.THREAD_TABLE} "
-                            "WHERE at >= ? AND at < ? AND role != 'user' AND emotion != '' ORDER BY id", (start, end))
-    lines = [f"Ta journée du {circadian.day_fr(day)}."]
-    n = len({p for p in people if p})
-    lines.append("Tu n'as parlé avec personne." if not n else
-                 "Tu as parlé avec une personne." if n == 1 else f"Tu as parlé avec {n} personnes.")
-    lines += _deeds(frame, store, state, start, end, public=True)
-    mood = _mood_line(frame, [(int(at), str(e)) for at, e in felt])
-    if mood:
-        lines.append(mood)
-    return "\n".join(lines)
+    heard: dict[str, list[int]] = {}
+    reached: dict[str, list[int]] = {}
+    felt: list[tuple[str, float]] = []
+    for at, handle, role, emotion, intensity in rows:
+        person = frame.get(identity_c.PERSON(handle)) if handle else ""
+        if role == "user":
+            if person:
+                heard.setdefault(person, []).append(int(at))
+            continue
+        if emotion:
+            felt.append((str(emotion), float(intensity) if intensity is not None else 0.5))
+        if person:
+            reached.setdefault(person, []).append(int(at))
+    lines: list[str] = []
+    if heard:
+        times = [t for p in heard for t in (*heard[p], *reached.get(p, ()))]
+        lines.append(f"Tu as discuté avec {COUNT_FR.get(len(heard), 'plusieurs personnes')} "
+                     f"({_moments(frame, times)}).")
+    silent_to = [p for p in reached if p not in heard]
+    if silent_to:
+        lines.append("Tu as écrit à quelqu'un qui ne t'a pas répondu." if len(silent_to) == 1 else
+                     "Tu as écrit à des gens qui ne t'ont pas répondu.")
+    if not heard and not silent_to:
+        lines.append("Tu n'as parlé avec personne.")
+    doings = doings_of(frame, store, state, start, end)
+    lines += doings
+    born = [(t.emotion, t.intensity) for t in frame.get(attention_c.THOUGHTS) if start <= t.born_at < end]
+    tone = day_tone(felt + born, params(frame.env.params_of("self", frame.root)).heavy_day_from)
+    if tone:
+        lines.append(tone)
+    elif not heard and not silent_to and not doings:
+        lines.append("Une journée calme, sans rien de particulier.")
+    return " ".join(lines)
+
+
+def doings_of(frame: Frame, store: Any, state: SelfState, start: int, end: int) -> list[str]:
+    """Ce qu'elle a fait de son côté, cette journée-là, qui ne concerne qu'elle : ce qu'elle a entrepris, mené à
+    bout, laissé tomber, ses projets, ses rêveries (par leur titre), et ce qu'elle a fait dans sa chambre."""
+    return _deeds(frame, store, state, start, end, public=True) + room_doings(frame, start, end)
+
+
+#: une occupation de quelques instants (regarder dehors une minute) ne se raconte pas
+ROOM_DOING_MIN_US = 5 * MINUTE
+#: au-delà, « un long moment »
+ROOM_DOING_LONG_US = HOUR
+ROOM_DOINGS_KEPT = 4
+
+
+def room_doings(frame: Frame, start: int, end: int) -> list[str]:
+    """Ce qu'elle a fait dans sa chambre ce jour-là (le fait ``world.lived`` : dessiner, lire, jouer un morceau),
+    tel qu'elle le dirait, avec le moment de la journée : de quoi raconter sa journée sans l'inventer (sonde réelle
+    du 2026-10-03 : un modèle comblait avec un stream qu'elle n'a jamais fait). Seulement ce qui ne concerne
+    qu'elle. Une occupation encore en cours compte jusqu'à maintenant ; la même, reprise, compte une fois."""
+    spent: dict[tuple[str, str], int] = {}
+    when: dict[tuple[str, str], list[int]] = {}
+    for x in frame.get(world_c.LIVED) or ():
+        a = max(x.since, start)
+        b = min(x.until if x.until is not None else frame.now, end)
+        if b <= a or not x.label:
+            continue
+        key = (x.label, x.object_label)
+        spent[key] = spent.get(key, 0) + b - a
+        when.setdefault(key, []).append(a)
+    kept = sorted((k for k, t in spent.items() if t >= ROOM_DOING_MIN_US),
+                  key=lambda k: (-spent[k], min(when[k])))[:ROOM_DOINGS_KEPT]
+    if not kept:
+        return []
+    parts = []
+    for k in sorted(kept, key=lambda k: min(when[k])):
+        label, obj = k
+        details = [d for d in (obj, _moments(frame, when[k]),
+                               "un long moment" if spent[k] >= ROOM_DOING_LONG_US else "") if d]
+        de = "d'" if label[:1].lower() in "aeéèêiîouyh" else "de "
+        parts.append(de + label + (f" ({', '.join(details)})" if details else ""))
+    joined = parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " et " + parts[-1]
+    return [f"Dans ta chambre, tu as pris le temps {joined}."]
+
+
+def day_tone(felt: list[tuple[str, float]], heavy_from: float) -> str:
+    """Le ton d'une journée, vague mais vrai, d'après ce qu'elle a ressenti (ses émotions déclarées en parlant, ses
+    pensées nées ce jour-là, chacune de son intensité) : « un peu lourde » dès que ce qui a pesé compte — même
+    entre deux sourires ; « bonne » quand le léger domine nettement ; « en demi-teinte » entre les deux ; rien
+    sinon. Jamais pourquoi."""
+    heavy = light = 0.0
+    for name, intensity in felt:
+        e = A.emotion_of(name)
+        if e is None:
+            continue
+        v = A.valence(e)
+        if v <= -WEIGHS:
+            heavy += intensity
+        elif v >= WEIGHS:
+            light += intensity
+    if heavy >= heavy_from and heavy >= HEAVY_AGAINST_LIGHT * light:
+        return "Une journée un peu lourde."
+    if light >= heavy_from and heavy < LIGHT_AGAINST_HEAVY * light:
+        return "Une bonne journée."
+    if heavy >= heavy_from / 2 and light >= heavy_from / 2:
+        return "Une journée en demi-teinte."
+    return ""
 
 
 def _deeds(frame: Frame, store: Any, state: SelfState, start: int, end: int, *, public: bool = False) -> list[str]:
@@ -526,6 +629,13 @@ def _deeds(frame: Frame, store: Any, state: SelfState, start: int, end: int, *, 
         lines.append(f"Tu as aussi laissé ton esprit vagabonder un moment (« {_quote(named[0], 100)} ») : une "
                      "rêverie, rien de plus.")
     return lines
+
+
+def _tone_of(said: list[tuple[int, str]]) -> str:
+    """Le ton de ses réponses (ce qu'elle a déclaré en parlant) — pas ses mots : « , plutôt triste »."""
+    counts = Counter(e for _, e in said if e)
+    e = A.emotion_of(counts.most_common(1)[0][0]) if counts else None
+    return f", plutôt {A.FR[e]}" if e is not None else ""
 
 
 def _mood_line(frame: Frame, felt: list[tuple[int, str]]) -> str:
@@ -643,10 +753,12 @@ class Dreaming:
         rng = random.Random(h64("rêve", night, cycle))
         if rng.random() >= p.dream_chance:
             return
+        # ce qu'elle a vécu ces derniers jours — né, ou revécu (renforcé, repris en parlant) : une vie routinière
+        # rêve encore de ce qui revient (ADR 0058) ; ``touched_at`` vaut au moins ``born_at``
         rows = store.query_mind(
             f"SELECT id, text, emotion, about, sensitivity FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND "
-            "status='active' AND born_at >= ? ORDER BY importance DESC, id DESC LIMIT 8",
-            (memory_c.SOUVENIR, frame.now - 3 * DAY))
+            "status='active' AND touched_at >= ? ORDER BY importance DESC, id DESC LIMIT 8",
+            (memory_c.SOUVENIR, frame.now - DREAM_LOOKBACK))
         picked = rng.sample(rows, k=min(3, len(rows))) if rows else []
         thoughts = [t for t in frame.get(attention_c.THOUGHTS) if t.intensity >= 0.3][:1]
         texts = store.content([t.text_ref for t in thoughts if t.text_ref])
@@ -690,7 +802,8 @@ def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None,
     """Les règles de la mémoire (``vocab.privacy.hearable``)."""
     if aud is None:
         return not about and sensitivity <= Sensitivity.ANODYNE
-    return privacy.hearable(about, sensitivity, interlocutor, aud.level, aud.witness_level, aud.private_ok)
+    return privacy.hearable(about, sensitivity, interlocutor, aud.level, aud.witness_level, aud.private_ok,
+                            tied_level=aud.tied_level, ties=aud.ties)
 
 
 @SELF.enricher("night", episodes=CONVERSATIONAL, deadline_ms=400)
@@ -744,7 +857,8 @@ def _yesterday_section(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) ->
     if text == texts.get(y.text_ref):
         return SectionBody(f"Ce que tu as écrit dans ton journal {when} : {text}")
     day = "d'hier" if "d'hier" in when else "d'avant-hier"
-    return SectionBody(f"Ta journée {day}, telle que tu la raconterais : {text}")
+    return SectionBody(f"Ce que tu peux raconter de ta journée {day} à n'importe qui, si on te le demande — avec tes "
+                       f"mots, sans rien y ajouter ni dire pourquoi : {text}")
 
 
 @SELF.section("dream", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=30, tags=[Tag.AFFECTIVE],

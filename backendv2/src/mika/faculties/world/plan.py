@@ -239,6 +239,19 @@ def salience(defn: w.WorldDef, obj: str) -> float:
     return a.salience if a is not None else 0.5
 
 
+def usable(defn: w.WorldDef, actors: Actors, objects: Objects, actor: str) -> list[str]:
+    """Ce dont un acteur peut se servir dans sa pièce (au moins une action possible), du plus saillant au moins."""
+    me = actors.get(actor)
+    if me is None:
+        return []
+    out = []
+    for oid in objects:
+        anchor = anchor_of(defn, actors, objects, oid)
+        if anchor is not None and anchor[0] == me.room and actions_of(defn, objects, me, oid):
+            out.append(oid)
+    return sorted(out, key=lambda o: (-salience(defn, o), o))
+
+
 def present(actors: Actors, actor: str) -> list[str]:
     """Les autres acteurs dans la même pièce."""
     me = actors.get(actor)

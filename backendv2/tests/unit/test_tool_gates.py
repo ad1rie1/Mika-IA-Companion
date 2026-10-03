@@ -177,6 +177,35 @@ def test_in_conversation_the_core_is_in_hand_and_the_rest_is_fetched_on_demand(t
     assert "- memory" not in catalogue  # ce qui est en main n'est pas à chercher
 
 
+def test_a_provider_that_cannot_defer_tools_gets_them_all_and_no_catalogue(tmp_path):
+    """Ollama et les compatibles OpenAI ignorent ``deferred`` et reçoivent tous les outils : leur dire « ces outils
+    ne sont pas chargés, cherche-les » était faux (sonde réelle du 2026-10-03, nemotron). Contre-exemple : le test
+    précédent, où le fournisseur sait différer."""
+    seen: list[LLMRequest] = []
+
+    def respond(req: LLMRequest) -> LLMResponse:
+        if req.meta.get("target") == "user_1":
+            seen.append(req)
+        return LLMResponse("D'accord. [EMOTION:neutral:0.3]")
+
+    kernel, clock, llm, _ = build(tmp_path, respond, start=at_paris(2026, 9, 28, 15, 0))
+    llm.defers_tools = False
+
+    async def main():
+        await boot(kernel)
+        try:
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            await (await kernel.perceive(said("user_1", "Salut !"))).reply
+            await kernel.lanes.join()
+        finally:
+            await kernel.stop()
+
+    run_virtual(clock, main)
+    req = seen[0]
+    assert not any(t.deferred for t in req.tools) and {"forge_write", "memory_search"} <= {t.name for t in req.tools}
+    assert CATALOGUE_HEADER not in req.system_stable
+
+
 # ── Relire ce qui n'était que poussé : même porte que la section ──────────
 
 

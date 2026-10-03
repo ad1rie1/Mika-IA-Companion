@@ -15,7 +15,7 @@ from typing import Protocol
 @dataclass(frozen=True, slots=True)
 class VectorItem:
     key: int  # le ``seq`` de l'événement qui a créé l'élément
-    kind: str  # "souvenir" | "belief" | "promise" | "chunk"
+    kind: str  # "souvenir" | "belief" | "promise" | "event" | "chunk" | "room_chunk" (un échange dans un salon)
     text: str
     persons: tuple[str, ...] = ()
 
@@ -35,7 +35,11 @@ class VectorIndex(Protocol):
     async def upsert(self, items: Sequence[VectorItem]) -> int: ...
 
     async def search(self, query: str, k: int, *, kinds: Collection[str] | None = None,
-                     keys: Collection[int] | None = None) -> list[tuple[int, float]]: ...
+                     keys: Collection[int] | None = None,
+                     persons: Collection[str] | None = None) -> list[tuple[int, float]]:
+        """Les ``k`` plus proches (clé, similarité), du plus proche au plus lointain, ex æquo départagés par la clé.
+        Filtres cumulables : ces sortes, ces clés, au moins une de ces personnes (``VectorItem.persons``)."""
+        ...
 
     async def forget(self, subject: str) -> int: ...
 

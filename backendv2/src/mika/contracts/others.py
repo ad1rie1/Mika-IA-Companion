@@ -25,7 +25,11 @@ de modèle de langage :
   pas, un vrai message plus léger, si ;
 - **ce qu'une amie avait de prévu** : la veille (ou le matin même), un mot pour
   l'encourager ; quelques heures après, si elle n'a pas eu de nouvelles,
-  « alors, ça s'est passé comment ? » — une fois chacun ;
+  « alors, ça s'est passé comment ? » — une fois chacun ; avec insistance pour
+  ce qui compte, si elle y pense pour le reste, et rien de banal quand quelque
+  chose de grave la touche ces jours-ci ;
+- **ce qui se fête** (un anniversaire, un mariage) : le jour même, ses vœux,
+  une fois ;
 - **la contagion** : le ton du moment de quelqu'un la colore un peu, selon
   leur proximité — elle s'allège avec quelqu'un de joyeux, se tend avec
   quelqu'un de stressé.
@@ -55,10 +59,14 @@ CHECK_IN = "check_in"
 FOLLOW_UP = "follow_up"
 #: … et la veille (ou le matin même) : « bonne chance pour demain ! » — plus faible, elle le fait si elle y pense
 CHEER = "cheer"
-#: Un mot pour encourager n'attend pas de réponse : ni attente déçue, ni « sans réponse », et il n'empêche pas de
-#: demander le lendemain comment ça s'est passé (la retenue envers qui ne répond pas ne le compte pas). Il reste
+#: un moment qui se fête (un anniversaire, un mariage, une crémaillère) se souhaite **le jour même**, d'elle-même,
+#: une fois — plus fort qu'un suivi ; ni « bonne chance » la veille, ni « comment ça s'est passé » le lendemain si
+#: elle l'a souhaité (ADR 0052)
+CELEBRATE = "celebrate"
+#: Un vœu n'attend pas de réponse : ni attente déçue, ni « sans réponse », et un mot pour encourager n'empêche pas
+#: de demander le lendemain comment ça s'est passé (la retenue envers qui ne répond pas ne le compte pas). Il reste
 #: une prise de parole (le budget du jour, la période réfractaire s'y appliquent).
-WELL_WISHES = frozenset({CHEER})
+WELL_WISHES = frozenset({CHEER, CELEBRATE})
 
 
 class ToneRead(Payload):

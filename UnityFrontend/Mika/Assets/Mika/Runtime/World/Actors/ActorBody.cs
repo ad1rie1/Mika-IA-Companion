@@ -142,6 +142,24 @@ namespace Mika.World.Engine
             // La cheville au-dessus de la plante du pied : la hauteur de l'os du pied au-dessus des orteils, au repos.
             var toes = a.GetBoneTransform(HumanBodyBones.LeftToes);
             _ankle = toes != null ? Mathf.Clamp(lf.position.y - toes.position.y + 0.03f, 0.05f, 0.14f) : 0.08f;
+            // L'avant-pied (l'articulation des orteils) devant la cheville, le talon un peu plus de moitié moins loin derrière.
+            if (toes != null)
+            {
+                var ball = Vector3.ProjectOnPlane(toes.position - lf.position, Vector3.up).magnitude;
+                _planter.Configure(ball * 0.55f, ball);
+            }
+            for (var s = 0; s < 2; s++)
+            {
+                _legUpper[s] = a.GetBoneTransform(s == 0 ? HumanBodyBones.LeftUpperLeg : HumanBodyBones.RightUpperLeg);
+                _legLower[s] = a.GetBoneTransform(s == 0 ? HumanBodyBones.LeftLowerLeg : HumanBodyBones.RightLowerLeg);
+                _legFoot[s] = a.GetBoneTransform(s == 0 ? HumanBodyBones.LeftFoot : HumanBodyBones.RightFoot);
+                _legToes[s] = a.GetBoneTransform(s == 0 ? HumanBodyBones.LeftToes : HumanBodyBones.RightToes);
+                if (_legFoot[s] == null) continue;
+                // Au repos le pied est à plat : son repère regarde vers ses orteils (ou devant elle), le dessus en haut.
+                var along = _legToes[s] != null ? Vector3.ProjectOnPlane(_legToes[s].position - _legFoot[s].position, Vector3.up) : Vector3.zero;
+                var heading = along.sqrMagnitude > 1e-6f ? along.normalized : FlatDir(a.transform.forward);
+                _footFrame[s] = Quaternion.Inverse(_legFoot[s].rotation) * Quaternion.LookRotation(heading, Vector3.up);
+            }
         }
 
         // --- état de chaque image ---------------------------------------------------------------------------
@@ -183,6 +201,7 @@ namespace Mika.World.Engine
                 var seatHeight = _anchor.HasValue ? Mathf.Max(0.25f, _anchor.Value.position.y - transform.position.y) : 0.45f;
                 _poser.Apply(_sit, _lie, _walk, _phase, seatHeight, Mathf.Sin(_breathT * 1.6f), _reach);
             }
+            if (!_procedural && animator != null) FeetOnFloor();
             RecalAnchor();
         }
 
@@ -232,6 +251,7 @@ namespace Mika.World.Engine
         /// <summary>Pose le corps sans rien jouer (un instantané, une arrivée tardive).</summary>
         public void Snap(Vector3 position, Quaternion rotation, Posture posture, PlaceView place = null)
         {
+            AbandonChoreography();
             StopAgent(keepEnabled: false);
             _posture = posture;
             _place = place;
@@ -264,6 +284,7 @@ namespace Mika.World.Engine
             _lastPos = transform.position;
             _planter.Reset();
             ApplyAnimatorPostureNow();
+            JumpToPostureState();
             // Les cheveux et les vêtements à ressorts prendraient ce saut pour une vitesse : on les remet au repos.
             BroadcastMessage("OnTeleported", SendMessageOptions.DontRequireReceiver);
         }
@@ -388,6 +409,21 @@ namespace Mika.World.Engine
 
         /// <summary>Vrai pendant un changement de posture : l'occupation lâche les mains et ne touche pas la chaise.</summary>
         public bool Choreographing { get; private set; }
+
+        /// <summary>
+        /// Une chorégraphie interrompue (l'action remplacée en cours de route, un saut d'état) : Unity arrête une
+        /// coroutine sans passer par ses <c>finally</c>, si bien qu'une assise abandonnée laissait le corps
+        /// « chorégraphié » pour de bon — pieds jamais rendus au sol, mouvement de racine du clip toujours appliqué,
+        /// posture à moitié ancrée. On rend ce qu'elle tenait et on achève l'ancrage là où elle allait.
+        /// </summary>
+        public void AbandonChoreography()
+        {
+            if (!Choreographing && !_rootMotion) return;
+            Choreographing = false;
+            _rootMotion = false;
+            if (_anchor.HasValue) _anchorBlend = 1f;
+            ReleaseFeet(0.2f);
+        }
 
         /// <summary>De combien on recule une chaise à roulettes pour s'y asseoir ou en sortir (m).</summary>
         const float PullOut = 0.28f;
@@ -782,8 +818,12 @@ namespace Mika.World.Engine
         /// <summary>Où regarder (une personne, un objet) ; <c>null</c> : devant soi.</summary>
         public void LookAt(Vector3? point) => _look = point;
 
-        float _groundOffset, _floorProbeAt = -1f, _floorProbe;
+        float _groundOffset, _floorLeft, _floorRight;
+        static readonly RaycastHit[] FloorHits = new RaycastHit[8];
         readonly FootPlanter _planter = new FootPlanter();
+
+        /// <summary>Pour le labo : la correction du bassin et l'état des pieds (voir <see cref="FootPlanter.Describe"/>).</summary>
+        public string FeetState() => $"bassin {_groundOffset:+0.000;-0.000} sol {_floorLeft:0.000}/{_floorRight:0.000} {_planter.Describe()}";
 
         /// <summary>Debout, rien ne dirige les pieds (ni une chorégraphie, ni l'assise) : ils tiennent au sol d'eux-mêmes.</summary>
         bool FeetFree => _posture == Posture.Stand && !Choreographing && !_procedural && plantFeet && _seated <= 0f;
@@ -795,31 +835,72 @@ namespace Mika.World.Engine
         /// plus bas de l'animation touche le sol.
         /// </summary>
         /// <remarks>
-        /// Asymétrique : un pied sous le sol remonte le bassin tout de suite ; des pieds au-dessus ne le font
-        /// redescendre que lentement (vite en marchant, où le pied d'appui change à chaque pas). Sinon un petit saut
-        /// de l'attente joyeuse était pris pour un flottement : le bassin descendait pendant le saut et, rattrapant en
-        /// retard, enfonçait les pieds dans le sol à l'atterrissage.
+        /// Asymétrique : une semelle sous le sol remonte le bassin tout de suite ; des pieds au-dessus ne le font
+        /// redescendre que lentement debout (plus vite en marchant, où le pied d'appui change à chaque pas). Lissé
+        /// dans les deux sens, l'ancrage écrasait le rebond de l'attente joyeuse et, en retard, enfonçait les pieds
+        /// dans le sol au bas du rebond. En haut du rebond, ce sont les talons qui montent (<see cref="FootPlanter"/>).
         /// </remarks>
-        void Ground()
+        void FeetOnFloor()
         {
+            if (_legFoot[0] == null || _legFoot[1] == null) return;
+            // Les os portent la pose de l'animation, bassin compris tel que la passe IK l'a placé à cette image.
+            var applied = _groundOffset;
+            _planter.SampleBones(_legFoot, _footFrame, applied);
             var active = FeetFree;
             var target = 0f;
             if (active)
             {
-                if (Time.time > _floorProbeAt)
-                {
-                    _floorProbe = GroundUnder(transform.position);
-                    _floorProbeAt = Time.time + 0.25f;
-                }
-                var l = animator.GetIKPosition(AvatarIKGoal.LeftFoot).y - animator.leftFeetBottomHeight;
-                var r = animator.GetIKPosition(AvatarIKGoal.RightFoot).y - animator.rightFeetBottomHeight;
-                target = Mathf.Clamp(_floorProbe - Mathf.Min(l, r), -0.12f, 0.06f);
+                // Le sol sous chaque pied, pas sous le corps : sondé sous son centre, il sautait de la hauteur du
+                // tapis d'un coup quand elle y entrait, et les deux pieds avec.
+                _floorLeft = FloorUnderFoot(_planter.FkPosition(0));
+                _floorRight = FloorUnderFoot(_planter.FkPosition(1));
+                // Le point le plus bas des semelles (talon ou avant-pied), pas la cheville : sur la pointe des
+                // pieds, descendre le bassin d'après la cheville enfonçait l'avant-pied dans le sol.
+                target = Mathf.Clamp(-_planter.LowestGap(animator, _floorLeft, _floorRight), -0.12f, 0.06f);
             }
-            var tau = target > _groundOffset ? 0.03f : _speed > 0.1f ? 0.15f : 0.6f;
+            // En marchant, le bassin ne suit que la moyenne du pas (le talon qui se lève, l'IK des jambes font le
+            // reste) : suivre chaque pied le faisait plonger de 5 cm en fin d'appui et remonter d'un coup à
+            // l'attaque suivante, un hoquet à chaque pas. Un pied franchement sous le sol le remonte tout de suite.
+            float tau;
+            if (_speed > 0.1f) tau = target - _groundOffset > 0.03f ? 0.02f : 0.4f;
+            else tau = target > _groundOffset ? 0.02f : 1.5f;
             _groundOffset = Mathf.Lerp(_groundOffset, target, 1f - Mathf.Exp(-Time.deltaTime / tau));
-            if (Mathf.Abs(_groundOffset) > 1e-4f)
-                animator.bodyPosition += Vector3.up * _groundOffset;
+            // Les pieds, eux, sont placés tout de suite, sur la pose de cette image.
+            _planter.Update(animator, active, _floorLeft, _floorRight, applied, _speed, Time.deltaTime, active && ClipHoldsFeet());
+            _planter.Solve(_legUpper, _legLower, _legFoot, _legToes, _footFrame, FlatDir(transform.forward));
         }
+
+        Vector3 _stillPos;
+        float _stillYaw, _stillFor;
+        int _gestureLayer = -2, _handLayer = -2;
+
+        /// <summary>
+        /// L'animation tient-elle les pieds d'elle-même ? Debout et à l'arrêt, hors fondu entre deux clips, sans geste
+        /// ni bras tendu en cours (ces couches touchent au bassin), le corps immobile depuis un quart de seconde (un
+        /// demi-tour sur place emporte les pieds) : les clips de l'atelier ont alors leurs appuis justes, et
+        /// <see cref="FootPlanter"/> les suit au lieu de les verrouiller.
+        /// </summary>
+        bool ClipHoldsFeet()
+        {
+            var dt = Mathf.Max(Time.deltaTime, 1e-4f);
+            var pos = transform.position;
+            var yaw = transform.eulerAngles.y;
+            var moving = Ground(pos - _stillPos).magnitude / dt > 0.05f || Mathf.Abs(Mathf.DeltaAngle(yaw, _stillYaw)) / dt > 8f;
+            _stillPos = pos;
+            _stillYaw = yaw;
+            _stillFor = moving ? 0f : _stillFor + Time.deltaTime;
+            if (_speed > 0.1f || _stillFor < 0.25f || animator.IsInTransition(0)) return false;
+            if (_gestureLayer == -2) _gestureLayer = animator.GetLayerIndex("Gestes");
+            if (_handLayer == -2) _handLayer = animator.GetLayerIndex("Main");
+            return !LayerBusy(_gestureLayer) && !LayerBusy(_handLayer);
+        }
+
+        bool LayerBusy(int layer) => layer >= 0 && (animator.IsInTransition(layer) || animator.GetCurrentAnimatorClipInfoCount(layer) > 0);
+
+        // Les jambes, pour l'IK des pieds (voir FootPlanter) ; le repère de chaque pied (avant = la pointe, haut = le
+        // dessus du pied à plat), relevé sur le squelette au repos.
+        readonly Transform[] _legUpper = new Transform[2], _legLower = new Transform[2], _legFoot = new Transform[2], _legToes = new Transform[2];
+        readonly Quaternion[] _footFrame = { Quaternion.identity, Quaternion.identity };
 
         /// <summary>Où regarde l'occupation en cours (l'écran, le livre) quand personne n'attire son regard.</summary>
         public void SetActivityLook(Vector3? point) => _activityLook = point;
@@ -901,12 +982,10 @@ namespace Mika.World.Engine
         internal void OnIK(int layer = 0)
         {
             if (animator == null) return;
-            if (layer == 0)
-            {
-                _planter.Sample(animator);
-                Ground();
-                _planter.Update(animator, FeetFree, _floorProbe, _groundOffset, _speed, Time.deltaTime);
-            }
+            // Le bassin, monté ou descendu pour que les pieds touchent le sol (calculé après l'animation, à l'image
+            // précédente : voir FeetOnFloor) ; les mains épinglées en tiennent compte.
+            if (layer == 0 && Mathf.Abs(_groundOffset) > 1e-4f)
+                animator.bodyPosition += Vector3.up * _groundOffset;
             for (var g = 0; g < 4; g++)
             {
                 var goal = (AvatarIKGoal)g;
@@ -931,7 +1010,6 @@ namespace Mika.World.Engine
                     animator.SetIKHintPositionWeight(hint, 0f);
                 }
             }
-            _planter.Apply(animator, _limbs[(int)AvatarIKGoal.LeftFoot].Weight > 0f, _limbs[(int)AvatarIKGoal.RightFoot].Weight > 0f);
             SeatedFeet();
             if (_ikPoint.HasValue)
             {
@@ -998,9 +1076,25 @@ namespace Mika.World.Engine
         /// Assise : les pieds à plat sur le sol devant le siège, genoux au-dessus — quelle que soit la hauteur du
         /// siège (une chaise haute pour ses jambes, le bord du lit). Une épingle de pied explicite passe avant.
         /// </summary>
+        /// <summary>
+        /// Assise, les pieds viennent du clip (pivoter la chaise : ils font leurs petits pas) plutôt que de l'IK qui
+        /// les pose devant le siège — celle-ci tournait avec la chaise et les faisait glisser sur le sol.
+        /// </summary>
+        public bool FeetFromClip { get; set; }
+
         void SeatedFeet()
         {
             if (_seated <= 0f || !_anchor.HasValue || _hips == null) return;
+            if (FeetFromClip)
+            {
+                foreach (var goal in new[] { AvatarIKGoal.LeftFoot, AvatarIKGoal.RightFoot })
+                {
+                    if (_limbs[(int)goal].Weight > 0f) continue;
+                    animator.SetIKPositionWeight(goal, 0f);
+                    animator.SetIKRotationWeight(goal, 0f);
+                }
+                return;
+            }
             var a = Anchor.Value;
             var fwd = a.rotation * Vector3.forward;
             fwd.y = 0;
@@ -1063,8 +1157,24 @@ namespace Mika.World.Engine
             _agent.stoppingDistance = 0.04f;
             _agent.autoBraking = true;
             _agent.obstacleAvoidanceType = ObstacleAvoidanceType.LowQualityObstacleAvoidance;
+            // Le maillage de navigation flotte au-dessus du vrai sol (3,3 cm ici) : posé dessus, le corps marchait
+            // jambes fléchies, l'ancrage abaissant le bassin à chaque pas. On le pose sur le sol lui-même.
+            _agent.baseOffset = Mathf.Clamp(FloorBelow(hit.position) - hit.position.y, -0.1f, 0f);
             _agent.Warp(hit.position);
             return _agent;
+        }
+
+        /// <summary>Le vrai sol sous un point du maillage de navigation : la surface la plus basse juste en dessous (sous un tapis, le parquet).</summary>
+        float FloorBelow(Vector3 p)
+        {
+            var n = Physics.RaycastNonAlloc(p + Vector3.up * 0.3f, Vector3.down, FloorHits, 0.6f, ~0, QueryTriggerInteraction.Ignore);
+            var floor = p.y;
+            for (var i = 0; i < n; i++)
+            {
+                var hit = FloorHits[i];
+                if (hit.normal.y > 0.7f && !hit.transform.IsChildOf(transform) && hit.point.y < floor) floor = hit.point.y;
+            }
+            return floor;
         }
 
         void WarpAgent(Vector3 position)
@@ -1101,6 +1211,24 @@ namespace Mika.World.Engine
         /// Le sol sous un point : la première surface horizontale touchée en descendant (le plancher, un tapis),
         /// sinon le navmesh — qui flotte de quelques centimètres au-dessus du sol réel.
         /// </summary>
+        /// <summary>Le sol sous un pied (le plus haut sol praticable sous lui, sans allocation : à chaque image).</summary>
+        float FloorUnderFoot(Vector3 foot)
+        {
+            // Depuis 30 cm : un pied ne monte pas sur plus haut (une assise, le bord du lit au-dessus de lui ne comptent pas).
+            var origin = new Vector3(foot.x, transform.position.y + 0.3f, foot.z);
+            var n = Physics.RaycastNonAlloc(origin, Vector3.down, FloorHits, 1.3f, ~0, QueryTriggerInteraction.Ignore);
+            var best = float.NegativeInfinity;
+            var bestDistance = float.MaxValue;
+            for (var i = 0; i < n; i++)
+            {
+                var hit = FloorHits[i];
+                if (hit.normal.y <= 0.7f || hit.transform.IsChildOf(transform) || hit.distance >= bestDistance) continue;
+                bestDistance = hit.distance;
+                best = hit.point.y;
+            }
+            return float.IsNegativeInfinity(best) ? transform.position.y : best;
+        }
+
         float GroundUnder(Vector3 p)
         {
             var hits = Physics.RaycastAll(p + Vector3.up * 0.6f, Vector3.down, 3f, ~0, QueryTriggerInteraction.Ignore);
@@ -1119,6 +1247,25 @@ namespace Mika.World.Engine
         {
             if (_procedural || animator == null || animator.runtimeAnimatorController == null) return;
             animator.SetInteger(BodyAnim.Posture, BodyAnim.PostureValue(_posture));
+        }
+
+        /// <summary>
+        /// Un saut d'état saute aussi l'animation : l'Animator joue tout de suite la boucle de la posture (l'attente
+        /// par défaut, l'assise, l'allongée). Sans ça, il finissait le geste en cours — s'asseoir, rester assise, se
+        /// lever — là où l'on venait de la poser debout.
+        /// </summary>
+        void JumpToPostureState()
+        {
+            if (_procedural || animator == null || animator.runtimeAnimatorController == null) return;
+            var state = _posture switch
+            {
+                Posture.Sit => "Assise",
+                Posture.Lie => "Allongée",
+                _ => clips != null && clips.idles.Count > 0 ? "Attente · " + clips.idles[0].clip : null,
+            };
+            if (state == null) return;
+            var hash = Animator.StringToHash(state);
+            if (animator.HasState(0, hash)) animator.Play(hash, 0, 0f);
         }
     }
 }

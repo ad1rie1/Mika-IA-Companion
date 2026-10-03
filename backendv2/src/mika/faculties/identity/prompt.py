@@ -26,6 +26,9 @@ from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import ChannelTrust
 
 CHANNEL_FR = {"web": "sur l'application", "telegram": "par Telegram"}
+#: ce qu'est pour elle la personne qui s'occupe d'elle (en privé seulement : jamais dit devant un salon)
+OWNER_LINE = ("C'est quelqu'un qui s'occupe de toi : ton serveur, tes réglages et ce que tu as le droit de faire "
+              "passent par cette personne. Tu le sais, sans en faire un sujet.")
 WEEKDAYS_FR = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 _KNOWN = (social_c.FRIEND, social_c.CLOSE)
 
@@ -140,6 +143,10 @@ def _who(s: IdentityState, frame: Frame, enrich: Any) -> SectionBody | None:
         return None
     view = view_of(s, ep.target, frame.now)
     lines = describe(view, public=aud.public)
+    if aud.owner and not aud.public:
+        # sans cette ligne, sa propriétaire n'était qu'une « amie » tombée du ciel le premier jour (« c'est la
+        # première fois que vous vous parlez » et « fait partie de tes amis », sonde réelle du 2026-10-03)
+        lines.append(OWNER_LINE)
     if view.known:
         person = frame.get(c.PERSON(ep.target))
         level = frame.get(social_c.CLOSENESS(person)) if is_identifiable(ep.target) else ""
@@ -186,7 +193,7 @@ def audience_for(frame: Frame, req: Any) -> Audience:
         d = privacy.EVERYTHING
         return Audience(persons=(), channel="internal", public=False, level=int(d.level),
                         witness_level=int(d.witness_level), private_ok=True, trust=ChannelTrust.INTERNAL.value,
-                        owner=True)
+                        owner=True, tied_level=int(d.tied_level))
     s: IdentityState = frame.state("identity")
     room = getattr(req, "room", None)
     h = s.handles.get(target)
@@ -194,9 +201,13 @@ def audience_for(frame: Frame, req: Any) -> Audience:
     view = view_of(s, target, frame.now)
     public = room is not None or view.trust is ChannelTrust.PUBLIC
     d = frame.get(c.DISCLOSURE((target, channel, room is not None)))
+    # avec qui la personne qui écoute a un lien : la confidence d'une autre ne s'ouvre qu'à une proche qui la
+    # connaît (ADR 0058) — inutile de le chercher quand rien de plus ne s'ouvrirait
+    ties = tuple(frame.get(social_c.TIES(frame.get(c.PERSON(target))))) \
+        if d.tied_level > d.level and is_identifiable(target) else ()
     return Audience(
         persons=(target,), channel=channel, room=room, public=public, level=int(d.level),
         witness_level=int(d.witness_level), private_ok=d.own_file, trust=view.trust.value,
         certainty=view.certainty, name=view.name,
-        owner=bool(frame.get(c.SPEAKS_AS_OWNER(target))) and not public,
+        owner=bool(frame.get(c.SPEAKS_AS_OWNER(target))) and not public, tied_level=int(d.tied_level), ties=ties,
     )

@@ -21,7 +21,9 @@ confié (``told_by``) et qui l'a entendu (``heard_by``). Pour l'interlocuteur :
 - un secret (« dis-le à personne ») ne sort **que** devant qui l'a confié ;
 - le reste concerne d'autres — tout confident autre que lui est un « autre » :
   ce que Bob a confié sur Alice n'est pas « à Alice » — et se dit jusqu'au
-  niveau de l'audience, le niveau « témoin » s'il était là quand ça s'est dit ;
+  niveau de l'audience, le niveau « témoin » s'il était là quand ça s'est dit,
+  le niveau « lié » s'il a un lien avec chacune des personnes concernées
+  (``Audience.ties``, ADR 0058) ;
   au-delà de l'anodin, une étiquette nomme qui l'a confié pour qu'elle arbitre.
 
 Ce qui ne peut pas se dire ici n'est pas pour autant inconnu : elle peut
@@ -42,8 +44,8 @@ from mika.faculties.memory.faculty import MemoryParams
 from mika.kernel.clock import DAY
 from mika.kernel.frame import Audience
 from mika.vocab.affect import emotion_of, valence
-from mika.vocab.privacy import Sensitivity
-from mika.vocab.words import fold, stems
+from mika.vocab.privacy import Sensitivity, tied_to
+from mika.vocab.words import elided, fold, stems
 
 
 def _keys(raw: Any) -> tuple[str, ...]:
@@ -81,6 +83,8 @@ class Item:
     shown_at: int = 0
     #: ce qu'elle a dit d'elle qui la définit (un goût, un avis, un fait de sa vie) : ça tient
     durable_self: bool = False
+    #: ce qui n'appartient qu'à elle et à la personne : un surnom, une blague à elles (ADR 0055)
+    between_us: bool = False
 
     @classmethod
     def of(cls, row: dict[str, Any]) -> Item:
@@ -94,6 +98,7 @@ class Item:
             told_by=_keys(row.get("told_by")), heard_by=_keys(row.get("heard_by")), secret=bool(row.get("secret")),
             informants=_keys(row.get("informants")), about_self=bool(row.get("about_self")),
             shown_at=int(row.get("shown_at") or 0), durable_self=int(row.get("about_self") or 0) >= 2,
+            between_us=bool(row.get("between_us")),
         )
 
 
@@ -130,6 +135,8 @@ class Verdict:
     level: int = 0  # ce qu'il faut pour l'entendre (sur autrui) : 0 quand c'est sa fiche ou sa vie à elle
     tellers: tuple[str, ...] = ()  # qui l'a confié, hors l'interlocuteur
     secret: bool = False
+    #: admis parce que l'interlocuteur a un lien avec les personnes concernées (au niveau « lié », ADR 0058)
+    tied: bool = False
 
 
 def admissible(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, audience: Audience, *,
@@ -152,7 +159,12 @@ def admissible(about: tuple[str, ...], sensitivity: int, interlocutor: str | Non
     if secret:  # « dis-le à personne » : jamais hors de qui l'a confié
         return Verdict(False, others, witness, int(sensitivity), tellers, True)
     limit = audience.witness_level if witness else audience.level
-    return Verdict(sensitivity <= limit, others, witness, int(sensitivity), tellers)
+    tied = False
+    if sensitivity > limit and interlocutor is not None and tied_to(others, audience.ties):
+        # il a un lien avec chacune (ils se sont parlé ensemble, ou elle l'a nommé elle-même) : une proche peut
+        # entendre sa confidence — jamais quelqu'un qui a seulement prononcé son nom (ADR 0058)
+        limit, tied = max(limit, audience.tied_level), True
+    return Verdict(sensitivity <= limit, others, witness, int(sensitivity), tellers, tied=tied)
 
 
 def _names(keys: Sequence[str], names: dict[str, str]) -> tuple[str, bool]:
@@ -220,6 +232,22 @@ def unsaid_line(person: str, names: dict[str, str], *, heavy: bool, close: bool,
         return (f"- {who} t'a confié des choses en privé, et ce dont on te parle là ({words}) en fait partie : "
                 "ce n'est pas à toi d'en parler ici.")
     return f"- {who} t'a confié des choses en privé : ce n'est pas à toi d'en parler ici."
+
+
+def unsaid_public_line(person: str, names: dict[str, str], when: str = "") -> str:
+    """Devant un salon : ce que la personne lui a dit en privé ne se raconte pas, mais elle ne fait pas comme si
+    elle ne savait rien — sinon le modèle invente qu'il ne l'a pas vue (sonde réelle du 2026-10-03, dans un groupe
+    Telegram : « je l'ai pas vu non plus depuis le week-end », alors qu'elle lui avait parlé la veille). Ni le
+    contenu, ni « moment difficile » : le salon n'a pas à deviner ce qui pèse."""
+    who = names.get(person, person)
+    if when:
+        # quand elles se sont parlé n'est pas ce qu'elle lui a dit : sans ce repère, même avec la consigne, un modèle
+        # répondait encore « j'ai pas eu de nouvelles non plus » (sonde du 2026-10-03)
+        return (f"- Tu as parlé avec {who} {when}. Ce {elided(who, 'que')} t'a dit ne se raconte pas ici : si on te "
+                "demande de ses nouvelles, ne dis surtout pas que tu n'en as pas — dis que vous vous êtes parlé et que "
+                f"c'est à {who} de raconter.")
+    return (f"- Ce {elided(who, 'que')} t'a dit en privé ne se raconte pas ici : si on te demande de ses nouvelles, "
+            f"ne prétends pas ne rien savoir — c'est à {who} de raconter, renvoie vers lui ou elle.")
 
 
 def valence_sign(emotion: str | None) -> int:

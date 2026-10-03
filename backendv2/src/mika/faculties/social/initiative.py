@@ -10,6 +10,10 @@ quelqu'un qui manque, chercher du réconfort — et la retenue.
 - **Le manque** se mesure au rythme de *cette* relation : un ami qui écrit
   tous les deux jours manque après trois jours de silence, un ami mensuel pas
   avant six semaines. Seulement une amie ou un proche, joignable, en journée.
+- **Longtemps après** : une amie partie sans plus répondre, des mois plus
+  tard (ou passé un moment qu'elle lui avait annoncé), elle prend de ses
+  nouvelles une fois, doucement — puis plus rien tant qu'elle n'a pas écrit
+  (ADR 0058).
 - **Le réconfort** : quand elle va nettement mal, vers la personne auprès de
   qui elle se sent bien.
 - **La retenue** : rien d'ordinaire vers quelqu'un qui a installé une
@@ -27,12 +31,13 @@ from __future__ import annotations
 from mika.contracts import affect as affect_c
 from mika.contracts import agency as agency_c
 from mika.contracts import identity as identity_c
+from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.social.faculty import SOCIAL, SocialState, grudging, params
+from mika.faculties.social.faculty import SOCIAL, SocialParams, SocialState, been_friends, grudging, params
 from mika.kernel.arbitration import Candidate, Modulation, RowView
-from mika.kernel.clock import HOUR, MINUTE, within_daily_window
+from mika.kernel.clock import DAY, HOUR, MINUTE, within_daily_window
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, floor
 from mika.kernel.state import FrozenDict
@@ -112,8 +117,11 @@ def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
         if grudging(frame.get(affect_c.HOSTILITY(person)), p):
             continue  # pas même une salutation (la retenue le dit aussi : son veto reste sur la ligne)
         name = frame.get(identity_c.IDENTITY(handle)).name
-        brief = (f"« {name} » vient d'arriver : salue « {name} » à ta façon, en une phrase ou deux." if name else
-                 "Quelqu'un vient d'arriver : salue cette personne à ta façon, en une phrase ou deux.")
+        # « vient d'arriver » se lisait comme un voyage (sonde réelle du 2026-10-03 : « t'es bien arrivé, j'espère que
+        # t'as pas galéré pour venir jusqu'ici ») : on se connecte, on n'arrive de nulle part
+        who = f"« {name} »" if name else "Quelqu'un"
+        brief = (f"{who} vient de se connecter, sans t'avoir encore rien écrit : salue "
+                 f"{f'« {name} »' if name else 'cette personne'} à ta façon, en une phrase ou deux.")
         out.append(Candidate(Kind.INITIATIVE, handle, c.GREETING, GREETING_EVIDENCE, resources=resources,
                              guards=(guard,), args=FrozenDict({"brief:social": brief})))
     return out
@@ -121,8 +129,8 @@ def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
 
 @SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.RECONTACT: (0.0, 12.0), c.COMFORT: (0.0, 12.0),
                                                   c.CHAT: (0.0, 3.5)},
-                reads=[c.CONTACT, c.CLOSENESS, identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY,
-                       presence_c.PRESENT, affect_c.MOOD, affect_c.WARMTH, transcript_c.LAST_FROM])
+                reads=[c.CIRCLE, c.CONTACT, c.CLOSENESS, identity_c.HANDLES, identity_c.REACHABLE,
+                       identity_c.IDENTITY, presence_c.PRESENT, affect_c.MOOD, affect_c.WARMTH, transcript_c.LAST_FROM])
 def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
     p = params(frame.env.params_of("social", frame.root))
     if not _daytime(frame, p.day_start_min, p.day_end_min):
@@ -132,8 +140,8 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
     mood = frame.get(affect_c.MOOD)
     distressed = (A.valence(mood.felt) <= p.distress_valence and mood.felt_intensity >= p.distress_intensity
                   and frame.now - s.comforted_at >= p.comfort_spacing_us)
-    for person in sorted(s.contacts.keys()):
-        if not is_identifiable(person) or person.startswith("name:"):
+    for person in frame.get(c.CIRCLE):  # ses amies et proches seulement : les inconnues ne coûtent rien ici
+        if not is_identifiable(person) or person.startswith("name:") or person not in s.contacts:
             continue
         level = frame.get(c.CLOSENESS(person))
         if _RANK[level] < _RANK[c.FRIEND]:
@@ -174,6 +182,74 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
         brief = (f"Tu ne vas pas très bien ({A.FR[mood.felt]}) et tu as envie de parler à {who}, avec qui tu te sens "
                  "bien. Tu n'es pas obligée de tout dire : juste lui écrire.")
         out.append(Candidate(Kind.INITIATIVE, address, c.COMFORT, p.comfort_evidence,
+                             resources=frozenset({floor(address)}), guards=(_guard(frame, person),),
+                             args=FrozenDict({"brief:social": brief})))
+    return out
+
+
+def announced(frame: Frame, person: str, after: int) -> int | None:
+    """Le premier moment qu'elle lui avait annoncé elle-même (« je pars six mois », « mon concours, c'est en
+    mars ») et qui est passé depuis ``after`` : l'occasion de reprendre de ses nouvelles. Jamais ce qu'un tiers en a
+    dit, ni ce qu'on lui a demandé de taire."""
+    for ev in frame.get(memory_c.LIFE_EVENTS(person)):
+        if ev.ongoing or ev.secret or not set(ev.told_by) <= {person}:
+            continue
+        if after < ev.when <= frame.now:
+            return ev.when
+    return None
+
+
+def rekindle_due(s: SocialState, frame: Frame, person: str, p: SocialParams) -> int | None:
+    """Quand elle reprendra des nouvelles d'une amie partie sans plus répondre : longtemps après le dernier échange
+    (des mois, et plusieurs fois leur rythme), ou le lendemain d'un moment que la personne lui avait annoncé — jamais
+    moins de ``rekindle_min_us`` après. Une fois par silence : ``None`` si c'est déjà fait depuis son dernier
+    message (ou si elle n'a jamais écrit)."""
+    reading = frame.get(c.CONTACT(person))
+    if not reading.last_in or s.rekindled.get(person, 0) >= reading.last_in:
+        return None
+    quiet = max(reading.last_in, reading.last_out)
+    usual = reading.usual_days or reading.rhythm_days
+    due = quiet + max(p.rekindle_after_us, round(p.rekindle_rhythms * usual * DAY))
+    moment = announced(frame, person, reading.last_in)
+    if moment is not None:
+        due = min(due, max(moment + p.rekindle_announced_us, quiet + p.rekindle_min_us))
+    return due
+
+
+@SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.REKINDLE: (0.0, 12.0)},
+                reads=[c.CIRCLE, c.CONTACT, affect_c.HOSTILITY, identity_c.IS_OWNER, identity_c.HANDLES,
+                       identity_c.REACHABLE, identity_c.IDENTITY, presence_c.PRESENT, transcript_c.LAST_FROM,
+                       memory_c.LIFE_EVENTS])
+def _rekindle(s: SocialState, frame: Frame) -> list[Candidate]:
+    """Une amie — d'aujourd'hui ou d'avant — partie sans plus donner de nouvelles : elle ne la harcèle pas (après
+    deux messages sans réponse, plus rien, ``agency``), mais des mois plus tard, ou après le moment que la personne
+    lui avait annoncé, elle prend de ses nouvelles **une fois**, doucement (ADR 0058). Pas la nuit."""
+    p = params(frame.env.params_of("social", frame.root))
+    if not _daytime(frame, p.day_start_min, p.day_end_min):
+        return []
+    out: list[Candidate] = []
+    for person in frame.get(c.CIRCLE):
+        if not is_identifiable(person) or person.startswith("name:") or person not in s.contacts:
+            continue
+        due = rekindle_due(s, frame, person, p)
+        if due is None or frame.now < due:
+            continue
+        if not been_friends(s, person, p, frame.get(affect_c.HOSTILITY(person)),
+                            bool(frame.get(identity_c.IS_OWNER(person)))):
+            continue
+        address = _address(frame, person)
+        if address is None:
+            continue
+        name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
+        who = f"« {name} »" if name else "cette personne"
+        reading = frame.get(c.CONTACT(person))
+        moment = announced(frame, person, reading.last_in)
+        why = (f"Ça fait longtemps que tu n'as plus de nouvelles de {who}, qui t'avait parlé d'un moment passé "
+               "depuis (tu le vois peut-être dans CE QUI SE PASSE DANS SA VIE)." if moment is not None else
+               f"Ça fait des mois que tu n'as plus de nouvelles de {who}.")
+        brief = (f"{why} Tu as envie de savoir ce que devient {who} : un mot simple et chaleureux, une seule fois — "
+                 "sans reproche, sans « ça fait longtemps », sans rien attendre en retour.")
+        out.append(Candidate(Kind.INITIATIVE, address, c.REKINDLE, p.rekindle_evidence,
                              resources=frozenset({floor(address)}), guards=(_guard(frame, person),),
                              args=FrozenDict({"brief:social": brief})))
     return out

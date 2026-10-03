@@ -455,31 +455,43 @@ def _their_moment(m: Any, person: str, now: int, p: NeedsParams) -> bool:
     trahirait le tiers), pas un secret, bientôt ou tout juste passé."""
     if tuple(m.about) != (person,) or m.secret or not m.text_ref or set(m.told_by) - {person}:
         return False
-    if m.when <= now and getattr(m, "followed_at", 0) > m.when:
-        return False  # passé, et elle lui en a déjà reparlé
+    if getattr(m, "followed_at", 0):
+        return False  # elles en ont déjà reparlé (ce que la personne en raconte le jour même compte : ADR 0052)
     return -p.matter_moment_ahead_us <= now - m.when <= p.matter_told_us
 
 
 def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, goals: Any,
-           projects: Any, moments: Any = ()) -> c.Matter | None:
+           projects: Any, moments: Any = (), hard: bool = False) -> c.Matter | None:
     """Ce dont elle pourrait parler à cette personne — jamais inventé, jamais déjà dit dans une initiative. **Ce
-    qui la concerne d'abord** : une pensée sur elle (une inquiétude, ce qu'elles ont vécu), un moment de sa vie
-    (bientôt, ou tout juste passé), ce qu'elle lui a raconté (le plus important, pas le plus récent) ; **ses
-    choses à elle ensuite** : une pensée anodine à partager, ce qu'elle a fini, ce sur quoi elle est (jamais une
-    rêverie : rien de neuf n'est arrivé). Un humain écrit à une amie pour elle avant d'écrire pour lui (HUM-10)."""
+    qui la concerne d'abord** : une pensée sur elle (une inquiétude, ce qu'elles ont vécu), puis **ce qui pèse le
+    plus dans sa vie** parmi un moment de sa vie (bientôt, ou tout juste passé) et ce qu'elle lui a raconté — à
+    poids égal, le moment (il a son heure) ; **ses choses à elle ensuite** : une pensée anodine à partager, ce
+    qu'elle a fini, ce sur quoi elle est (jamais une rêverie : rien de neuf n'est arrivé). Un humain écrit à une
+    amie pour elle avant d'écrire pour lui (HUM-10) — et part de ce qui pèse, pas du prochain rendez-vous banal
+    (sonde réelle du 2026-10-03 : « un mot pour l'encourager » pour le dentiste, le soir où son chat était au plus
+    mal). Ce qui se fête n'en est pas une (ses vœux, le jour même, sont une raison à part) ; quand quelque chose
+    de grave la touche ces jours-ci (``hard``), un moment ordinaire non plus."""
     used = s.used
     live = [t for t in thoughts if t.intensity >= p.matter_thought_from and t.text_ref and t.text_ref not in used]
     for t in live:
         if t.about == (person,) and t.origin in WITH_THEM:
             return c.Matter(c.THOUGHT_MATTER, t.text_ref, t.born_at, tuple(t.about), t.sensitivity,
                             external=t.origin == attention_c.SIGNAL)
-    for m in sorted(moments, key=lambda m: (abs(now - m.when), m.id)):
+    weighed: list[tuple[tuple[float, int, int, str], c.Matter]] = []
+    for m in moments:
+        weight = float(getattr(m, "importance", memory_c.IMPORTANT_MOMENT))
+        if getattr(m, "festive", False) or (hard and weight < memory_c.IMPORTANT_MOMENT):
+            continue
         if _their_moment(m, person, now, p) and m.text_ref not in used:
-            return c.Matter(c.MOMENT_MATTER, m.text_ref, m.when, (person,), m.sensitivity)
-    told = [t for t in s.told.get(person, ()) if now - t.at <= p.matter_told_us and t.ref not in used]
-    if told:
-        best = max(told, key=lambda t: (t.importance, t.at, t.ref))
-        return c.Matter(c.TOLD_MATTER, best.ref, best.at, (person,), best.sensitivity)
+            weighed.append(((-weight, 0, abs(now - m.when), m.text_ref),
+                            c.Matter(c.MOMENT_MATTER, m.text_ref, m.when, (person,), m.sensitivity,
+                                     ongoing=bool(getattr(m, "ongoing", False)))))
+    for t in s.told.get(person, ()):
+        if now - t.at <= p.matter_told_us and t.ref not in used:
+            weighed.append(((-t.importance, 1, now - t.at, t.ref),
+                            c.Matter(c.TOLD_MATTER, t.ref, t.at, (person,), t.sensitivity)))
+    if weighed:
+        return min(weighed, key=lambda w: w[0])[1]
     for t in live:
         if not t.about and t.origin in SHAREABLE and t.sensitivity <= Sensitivity.ANODYNE:
             return c.Matter(c.THOUGHT_MATTER, t.text_ref, t.born_at, (), t.sensitivity,
@@ -502,14 +514,15 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
 
 
 @NEEDS.fact(c.MATTER, reads=[identity_c.PERSON, attention_c.THOUGHTS, goals_c.LIVE, projects_c.LIVE,
-                             memory_c.LIFE_EVENTS])
+                             memory_c.LIFE_EVENTS, memory_c.HARD_TIMES])
 def _matter(s: NeedsState, cx, handle: str) -> c.Matter | None:
     if not is_identifiable(handle):
         return None
     person = cx.facts.get(identity_c.PERSON(handle))
     return matter(s, person, cx.now, params(cx.params), cx.facts.get(attention_c.THOUGHTS),
                   cx.facts.get(goals_c.LIVE), cx.facts.get(projects_c.LIVE),
-                  cx.facts.get(memory_c.LIFE_EVENTS(person)) or ())
+                  cx.facts.get(memory_c.LIFE_EVENTS(person)) or (),
+                  hard=cx.facts.get(memory_c.HARD_TIMES(person)) > 0)
 
 
 # ── Prendre la parole ─────────────────────────────────────────────────────
@@ -709,6 +722,11 @@ def _lead(m: c.Matter, frame: Frame, name: str) -> str:
     if m.kind == c.WORKING_MATTER:
         return "Ce sur quoi tu es en ce moment"
     if m.kind == c.MOMENT_MATTER:
+        if m.ongoing:
+            # une situation qui dure n'est ni « à venir » ni « passée » : elle la vit encore
+            since = when[len("il y a "):] if when.startswith("il y a ") else when  # « depuis 4 jours », « depuis hier »
+            return (f"Ce {elided(name, 'que')} vit en ce moment, depuis {since} — {name} te l'avait raconté (prends de "
+                    "ses nouvelles)")
         if m.at > frame.now:
             return (f"Ce qui l'attend, {ahead_fr(m.at, frame.now, tz)} — {name} te l'avait annoncé (un mot pour "
                     "l'encourager, si tu veux)")

@@ -45,9 +45,9 @@ def _candidates(store: Any, s: IdentityState, person: str,
     """Ce que seule ``person`` pouvait savoir (voir ``corroboration``)."""
     own = set(handles_of(s, person)) | {person}
     rows = store.query_mind(
-        f"SELECT id, text, sources FROM {memory_c.ITEMS_TABLE} WHERE about LIKE ? AND sensitivity >= ? "
-        "AND status='active' AND kind IN (?, ?) ORDER BY id", (f'%"{person}"%', int(privacy.Sensitivity.PERSONAL),
-                                                               memory_c.SOUVENIR, memory_c.BELIEF))
+        f"SELECT id, text, sources FROM {memory_c.ITEMS_TABLE} WHERE id IN (SELECT item FROM {memory_c.ABOUT_TABLE} "
+        "WHERE person=?) AND sensitivity >= ? AND status='active' AND kind IN (?, ?) ORDER BY id",
+        (person, int(privacy.Sensitivity.PERSONAL), memory_c.SOUVENIR, memory_c.BELIEF))
     rows = [r for r in rows if int(r[0]) not in exclude]
     if not rows:
         return []

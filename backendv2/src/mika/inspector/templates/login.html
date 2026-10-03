@@ -7,8 +7,17 @@
 <div class="brand"><span class="brand-mark">M</span><span><span class="brand-name">Mika</span><br><span class="brand-sub">console des opérateurs</span></span></div>
 <form method="post" class="form">
 <input type="hidden" name="csrf" value="{{ csrf }}">
+{% if bootstrap %}
+<p>Aucun compte n'existe encore : crée le tien. Le premier compte est opérateur — il ouvre cette console et le chat.</p>
+<div class="field"><label for="u">Identifiant</label><input id="u" name="username" value="{{ username }}" autocomplete="username" required></div>
+<div class="field"><label for="p">Mot de passe</label><input id="p" name="password" type="password" autocomplete="new-password" minlength="8" required></div>
+<div class="field"><label for="p2">Encore une fois</label><input id="p2" name="password2" type="password" autocomplete="new-password" minlength="8" required></div>
+{% if error %}<div class="flash danger">{{ error }}</div>{% endif %}
+<div><button class="btn">Créer le compte opérateur</button></div>
+{% else %}
 <div class="field"><label for="u">Identifiant</label><input id="u" name="username" autocomplete="username" required></div>
 <div class="field"><label for="p">Mot de passe</label><input id="p" name="password" type="password" autocomplete="current-password" required></div>
 {% if error %}<div class="flash danger">{{ error }}</div>{% endif %}
 <div><button class="btn">Se connecter</button></div>
+{% endif %}
 </form></main></body></html>

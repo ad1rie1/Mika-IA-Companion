@@ -20,10 +20,22 @@ promesse est tenue (``memory.promises`` la règle) ; un silence choisi, une
 panne sont des essais, bornés ; une promesse sans date ne déclenche rien. Si
 elles se sont parlé depuis le début de la fenêtre, la conversation était
 l'occasion : elle ne revient pas dessus d'elle-même (le prompt le lui montrait).
+Un jour sans heure (« je te le rappelle mercredi ») est dû **toute cette
+journée-là** en conversation, jusqu'au soir : quelqu'un qu'elle ne voit qu'à
+19 h l'entend quand même (ADR 0052).
+
+**Quand un moment s'ouvre.** Un moment « jour entier » (« le véto, ce
+midi ») a pour instant la fin d'après-midi de ce jour-là ; mais ce que la
+personne en raconte **ce jour-là** (« le véto dit insuffisance rénale ») le
+reprend déjà — sinon, le lendemain, elle lui demandait comment ça s'était passé
+(sonde réelle du 2026-10-03). Un moment qui se fête (un anniversaire) s'ouvre
+au début de sa journée, pour l'une comme pour l'autre : ses vœux (« joyeux
+anniversaire ! ») le reprennent.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from datetime import datetime, time
 from typing import Any
@@ -43,10 +55,18 @@ from mika.kernel.guards import Guard, floor
 from mika.kernel.state import FrozenDict
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
-from mika.vocab.words import stems
+from mika.vocab.words import fold, stems
 
 #: le début de la fenêtre d'une promesse : la preuve monte depuis là
 KEEP_EVIDENCE_START = 2.0
+#: des vœux (replié, sans accents) : « joyeux anniv ! », « bon anniversaire », « félicitations », « tous mes vœux »
+_WISHES = re.compile(r"\b(?:joyeux|joyeuse|bon|bonne|happy)\s+(?:anniv\w*|fete|birthday|mariage|noel)\b|"
+                     r"\bfelicit\w*|\b(?:tous\s+)?mes\s+(?:meilleurs\s+)?voeux\b|\bjoyeux\s+\d+\s+ans\b")
+#: les mots d'une tâche, de sa date, du rappel lui-même (des radicaux) : deux tâches ne se ressemblent pas pour
+#: avoir le même jour ou le même verbe
+_TASK_STEMS = frozenset({"rappel", "penser", "oublie", "noubli", "prendr", "lundi", "mardi", "mercre", "jeudi",
+                         "vendre", "samedi", "dimanc", "demain", "matin", "soir", "soiree", "heure", "heures",
+                         "aprem", "midi", "rendez"})
 
 
 def takes_up(moment: str, said: str, names: Iterable[str] = ()) -> bool:
@@ -56,14 +76,50 @@ def takes_up(moment: str, said: str, names: Iterable[str] = ()) -> bool:
     return bool(own & stems(said))
 
 
-def open_moment(ev: c.LifeEvent, now: int, p: MemoryParams) -> bool:
-    """Un moment dont on peut encore reparler : passé depuis peu et pas encore repris ; une situation en cours,
-    pas reprise ces derniers jours."""
+def wishes(said: str) -> bool:
+    """Des vœux : « joyeux anniversaire ! », « bon anniv », « félicitations »."""
+    return bool(_WISHES.search(fold(said)))
+
+
+def takes_up_moment(ev: c.LifeEvent, moment: str, said: str, names: Iterable[str] = ()) -> bool:
+    """Ce qui est dit reprend-il ce moment ? Pour un moment qui se fête, des vœux suffisent (« bon anniv ! »
+    n'a pas le radical d'« anniversaire »)."""
+    return takes_up(moment, said, names) or (ev.festive and wishes(said))
+
+
+def same_task(a: str, b: str) -> bool:
+    """Deux phrases qui parlent de la même chose à faire (« lui rappeler de prendre rendez-vous chez le
+    dentiste » et « prendre rdv chez le dentiste ») : un mot du sujet en commun, hors du rappel, du jour et des
+    verbes de tous les jours."""
+    return bool((stems(a) - _TASK_STEMS) & (stems(b) - _TASK_STEMS))
+
+
+def day_start(t: int, frame: Frame) -> int:
+    """Minuit (heure locale) du jour de cet instant."""
+    return instant(datetime.combine(frame.local(t).date(), time(0, 0), tzinfo=frame.env.tz_of(frame.root)))
+
+
+def opens_at(ev: c.LifeEvent, frame: Frame, *, theirs: bool) -> int:
+    """Depuis quand un moment passé peut être repris en mots. Une situation : depuis qu'elle dure. Un moment qui
+    se fête : dès le début de sa journée (ses vœux le reprennent). Un moment « jour entier », par ce que la
+    personne en dit : dès le début de sa journée aussi (« le véto dit insuffisance rénale », à 13 h, raconte le
+    rendez-vous de midi — sa date, 18 h, n'est qu'une fin d'après-midi de convention). Sinon : son heure."""
+    if ev.ongoing:
+        return ev.when
+    if ev.festive or (theirs and ev.all_day):
+        return min(ev.when, day_start(ev.when, frame))
+    return ev.when
+
+
+def open_moment(ev: c.LifeEvent, now: int, p: MemoryParams, opens: int | None = None) -> bool:
+    """Un moment dont on peut encore reparler : ouvert (``opens``, son heure par défaut), passé depuis peu et pas
+    encore repris ; une situation en cours, pas reprise ces derniers jours."""
     if ev.ongoing:
         if not ev.when <= now <= ev.when + round(p.situation_days * DAY):
             return False
         return not ev.followed_at or now - ev.followed_at >= round(p.situation_reask_days * DAY)
-    return not ev.followed_at and ev.when <= now <= ev.when + round(p.event_recent_days * DAY)
+    start = ev.when if opens is None else opens
+    return not ev.followed_at and start <= now <= ev.when + round(p.event_recent_days * DAY)
 
 
 def _names(frame: Frame, person: str) -> tuple[str, ...]:
@@ -83,14 +139,17 @@ def _told_about(s: MemoryState, frame: Frame, ev: Any, ports: Any) -> list[Draft
         return []
     p = params(frame.env.params_of("memory", frame.root))
     person = frame.get(identity_c.PERSON(d.handle)) or d.handle
-    mine = [e for e in s.events.values() if person in e.about and e.id < ev.seq and open_moment(e, ev.at, p)]
+    # ce qui se fête n'est « repris » que par ses vœux à elle : « c'est mon anniv aujourd'hui ! » ne le lui souhaite pas
+    mine = [e for e in s.events.values() if person in e.about and e.id < ev.seq and not e.festive
+            and open_moment(e, ev.at, p, opens_at(e, frame, theirs=True))]
     store = ports.get("store") if ports else None
     if not mine or store is None:
         return []
     texts = store.content([e.text_ref for e in mine if e.text_ref])
     names = _names(frame, person)
     return [c.MOMENT_FOLLOWED.draft(event=e.id, by=person, dedupe_key=f"repris:{e.id}:{ev.seq}")
-            for e in sorted(mine, key=lambda e: e.id) if takes_up(texts.get(e.text_ref) or "", text, names)]
+            for e in sorted(mine, key=lambda e: e.id)
+            if takes_up_moment(e, texts.get(e.text_ref) or "", text, names)]
 
 
 # ── Ce qu'elle en a dit : relu après coup ─────────────────────────────────
@@ -108,7 +167,7 @@ class Follow:
 
     def next_due(self, state: MemoryState, frame: Frame, last_run: int | None) -> int | None:
         p = params(frame.env.params_of("memory", frame.root))
-        if not any(open_moment(e, frame.now, p) for e in state.events.values()):
+        if not any(open_moment(e, frame.now, p, opens_at(e, frame, theirs=False)) for e in state.events.values()):
             return None
         return frame.now if frame.get(transcript_c.HEAD) > self.upto else None
 
@@ -118,11 +177,12 @@ class Follow:
         store = ctx.ports.get("store")
         head = frame.get(transcript_c.HEAD)
         p = params(frame.env.params_of("memory", frame.root))
-        moments = [e for e in state.events.values() if open_moment(e, frame.now, p)]
+        opens = {e.id: opens_at(e, frame, theirs=False) for e in state.events.values()}
+        moments = [e for e in state.events.values() if open_moment(e, frame.now, p, opens[e.id])]
         if store is None or not moments:
             self.upto = head
             return
-        since = min(e.when for e in moments)
+        since = min(opens[e.id] for e in moments)
         rows = store.query_mind(f"SELECT id, at, person, text FROM {transcript_c.THREAD_TABLE} WHERE role='assistant' "
                                 "AND id>? AND id<=? AND at>=? ORDER BY id", (self.upto, head, since))
         texts = store.content([e.text_ref for e in moments if e.text_ref])
@@ -132,9 +192,9 @@ class Follow:
             person = frame.get(identity_c.PERSON(handle)) or handle
             names = _names(frame, person)
             for e in moments:
-                if e.id in done or person not in e.about or int(seq) < e.id or int(at) < e.when:
+                if e.id in done or person not in e.about or int(seq) < e.id or int(at) < opens[e.id]:
                     continue
-                if takes_up(texts.get(e.text_ref) or "", str(said or ""), names):
+                if takes_up_moment(e, texts.get(e.text_ref) or "", str(said or ""), names):
                     done.add(e.id)
                     drafts.append(c.MOMENT_FOLLOWED.draft(event=e.id, dedupe_key=f"repris:{e.id}:{seq}"))
         self.upto = head
@@ -147,7 +207,9 @@ class Follow:
 
 def keep_window(pr: c.PendingPromise, frame: Frame, p: MemoryParams) -> tuple[int, int, int] | None:
     """(début, preuve pleine à partir de, fin) de la fenêtre où tenir une promesse datée ; ``None`` sans date.
-    À une heure dite : un peu avant, jusqu'à un peu après ; un jour sans heure : dans la journée."""
+    À une heure dite : un peu avant, jusqu'à un peu après ; un jour sans heure : dans la journée — l'envie monte
+    dès le matin, pleine à mi-chemin de son échéance du soir, et la fenêtre reste ouverte jusqu'au soir (quelqu'un
+    qu'elle ne voit qu'à 21 h l'entend quand même)."""
     if pr.due is None or pr.implicit_due:
         return None
     if pr.all_day:
@@ -155,10 +217,31 @@ def keep_window(pr: c.PendingPromise, frame: Frame, p: MemoryParams) -> tuple[in
         day = frame.local(pr.due).date()
         start = instant(datetime.combine(day, time(p.promise_day_start_min // 60 % 24, p.promise_day_start_min % 60),
                                          tzinfo=tz))
-        full = max(start + 1, pr.due - p.promise_lead_us)
+        full = max(start + 1, (start + pr.due) // 2)
     else:
         start, full = pr.due - p.promise_lead_us, pr.due
     return min(start, pr.due), max(full, start + 1), pr.due + p.keep_late_us
+
+
+def due_now(pr: c.PendingPromise, frame: Frame, p: MemoryParams) -> bool:
+    """En conversation, est-ce le moment de la tenir ? Dans sa fenêtre ; un jour sans heure, **toute cette
+    journée-là** jusqu'au soir — dès le matin, quand on se parle (« au fait, c'est aujourd'hui, le dentiste ! »)."""
+    window = keep_window(pr, frame, p)
+    if window is None or pr.due is None:
+        return False
+    start, _full, end = window
+    if pr.all_day:
+        start = min(start, day_start(pr.due, frame))
+    return start <= frame.now <= end
+
+
+def kept_too_early(pr: c.PendingPromise, at: int, frame: Frame) -> bool:
+    """Une promesse datée ne se tient pas avant son jour : la veille au soir, « demain, je te le rappelle comme
+    promis » n'est pas la tenir (sonde réelle du 2026-10-03 : réglée mardi, le rappel du mercredi n'est jamais
+    venu). Sans date, elle se tient quand elle se tient."""
+    if pr.due is None or pr.implicit_due:
+        return False
+    return frame.local(at).date() < frame.local(pr.due).date()
 
 
 def _address(frame: Frame, person: str) -> str | None:

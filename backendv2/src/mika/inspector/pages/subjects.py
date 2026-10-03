@@ -93,7 +93,7 @@ class Subjects:
         if kind == "person" and isinstance(head, Head):
             # ce qu'elle ferait maintenant envers cette personne, et ce qui la retient (lecture seule)
             facts.append({"label": "maintenant", "cell": render.cell(Ref(
-                "local", f"{PREFIX}/decisions/envers", "que ferait-elle envers elle ?", (("personne", key),)), env)})
+                "local", f"{PREFIX}/decisions/envers", "que ferait-elle envers cette personne ?", (("personne", key),)), env)})
         badges = [{"text": b.text, "tone": b.tone} for b in (head.badges if isinstance(head, Head) else ())]
         return self.pages.render_page(
             request, title=f"{title} · {spec.label}", heading=title, active=home.key if home else "",
@@ -124,6 +124,13 @@ class Subjects:
                     empty="Aucun résultat."))
         if q.isdigit():
             blocks.insert(0, Table(("événement",), ((Ref("event", q, f"l'événement n° {q}"),),), title="Journal"))
+        # les vues qui cherchent dans leurs textes (un filtre « q » : les messages) — la recherche ne lit pas les
+        # messages elle-même, elle y mène
+        texts = [v for v in self.ui.inspection.views() if q and not v.subject and any(p == "q" for p, _l in v.params)]
+        if texts:
+            blocks.insert(0, Table(("chercher dans", "faculté"), tuple(
+                (Ref.view(v.owner, v.name, f"« {q} » dans {v.title.lower()}", q=q),
+                 Text(self.ui.names.faculty(v.owner), hint=v.owner)) for v in texts), title="Dans les textes"))
         views = [v for v in self.ui.inspection.views() if q and q.lower() in v.title.lower()]
         if views:
             blocks.append(Table(("vue", "faculté"), tuple((Ref.view(v.owner, v.name, v.title),

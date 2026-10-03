@@ -215,6 +215,9 @@ def _detail(k: Kept, frame: Frame, names: dict[str, str], ctx: InspectContext) -
                                     "il ne ressort que devant qui l'a confié"))
         if item.about_self:
             pairs.append(("sur elle", "ce qu'elle a raconté de sa vie : s'efface en quelques jours"))
+        if item.between_us:
+            pairs.append(("leur lien", "n'appartient qu'à elle et à cette personne (un surnom, une blague) : "
+                                       "revient quand on lui en parle et, avec une amie, dans leur ton"))
     if item.kind != c.PROMISE:
         pairs += [("touché pour la dernière fois", When(item.touched_at)),
                   ("rappels", f"{item.recalls}" + (f", le dernier {ctx.when(item.recalled_at)}"

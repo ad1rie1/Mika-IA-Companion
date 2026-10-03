@@ -35,6 +35,7 @@ garde : si l'initiative est devancée avant de parler, le murmure ne part pas.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -50,7 +51,7 @@ from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.kernel.facts import FactView
 from mika.kernel.frame import CLOSED, Audience, EpisodeRef, Frame
 from mika.kernel.guards import Guard, Superseded, combine, floor
-from mika.kernel.prompt import Budget, Composer, ComposeTrace, SectionBody
+from mika.kernel.prompt import CONTEXT_FOOTER, Budget, Composer, ComposeTrace, SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import PREEMPTED, LLMGateway, LLMRequest, Message, PersonaRender, ToolDecl
 from mika.runtime.boundary import Failed, acall, call
@@ -84,6 +85,45 @@ def is_silence(text: str) -> bool:
         return True
     bare = text.strip(_DRESSING).rstrip(".!?…:;,").strip(_DRESSING)
     return bool(_BARE_SILENCE.fullmatch(bare))
+
+
+#: les balises (``[EMOTION:happy:0.5]``, que le fil montré au modèle garde ; ``[SIGH]``, ``[PAUSE:500]``) et la
+#: ponctuation ne font pas une autre phrase
+_VOICE_TOKEN = re.compile(r"\[[^\[\]\n]{1,40}\]")
+_NOT_WORDS = re.compile(r"[^\w]+")
+#: en deçà (en caractères), un petit mot (« d'accord ») : il se redit
+REPEAT_MIN_CHARS = 30
+#: une réponse à quelques mots seulement (« re », « hey ») …
+SHORT_WORDS = 2
+#: … qui ressemble à ce point à son dernier message en est une redite
+NEAR_RATIO = 0.85
+
+
+def _plain(text: str) -> str:
+    return " ".join(_NOT_WORDS.sub(" ", _VOICE_TOKEN.sub(" ", text).lower()).split())
+
+
+def repeats_last(text: str, req: LLMRequest) -> bool:
+    """Elle allait redire, mot pour mot, son dernier message du fil qu'on lui a montré (sonde réelle du
+    2026-10-03 : à « re », la même phrase que son initiative d'une minute plus tôt, à l'identique). Une personne ne
+    se répète pas ainsi : mieux vaut se taire."""
+    last = next((m.content for m in reversed(req.messages) if m.role == "assistant" and m.content.strip()), "")
+    mine, before = _plain(text), _plain(last)
+    if min(len(mine), len(before)) < REPEAT_MIN_CHARS:
+        return False  # « d'accord », « haha ok » : un petit mot se redit sans qu'on se répète
+    if mine == before:
+        return True  # à l'identique (à la ponctuation et aux balises près)
+    # presque la même phrase, quand la personne n'a dit que deux mots (« re », « hey ») : la sonde du 2026-10-03,
+    # « joyeux anniversaire pour tes 30 ans… » à son initiative, puis « joyeux anniv' pour tes 30 ans… » à « hey ».
+    # Ailleurs, une variante (« numéro 3 », « numéro 4 ») n'est pas une redite : « CE QUE TU TE RÉPÈTES » s'en charge
+    heard = _plain(_current_message(req))
+    return 0 < len(heard.split()) <= SHORT_WORDS and difflib.SequenceMatcher(None, mine, before).ratio() >= NEAR_RATIO
+
+
+def _current_message(req: LLMRequest) -> str:
+    """Ce que la personne vient d'écrire : la fin du dernier tour (après l'état interne, s'il y est)."""
+    last = req.messages[-1].content if req.messages and req.messages[-1].role == "user" else ""
+    return last.rsplit(CONTEXT_FOOTER, 1)[-1]
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,11 +334,14 @@ class EpisodeRunner:
                                     req.selected.args.get("bundles") if req.selected is not None else None)
                 offered = list(tools.values())
                 core = _in_hand(policy, req)
+                if core is not None and policy.role is not None and not _defers(self.gateway, policy.role):
+                    # un fournisseur sans recherche d'outils reçoit tout : le prompt ne parle pas d'outils à chercher
+                    core = None
                 more = catalogue(offered, core, mind.registry.bundles)
                 declared = declare(offered, core)
                 prompt, trace = self.composer.compose(
                     blocks, kind=req.kind, audience_level=audience.level, witness_level=audience.witness_level,
-                    muted_tags=policy.muted_tags, message=message, budget=self.budget,
+                    tied_level=audience.tied_level, muted_tags=policy.muted_tags, message=message, budget=self.budget,
                     reserved=_reserved(persona, more, declared) if policy.role is not None else 0,
                 )
                 report.trace = trace
@@ -351,6 +394,9 @@ class EpisodeRunner:
                                                                       f"({loop.stop})")
                     else:
                         await self._settle(ep, Outcome.ABSTAINED)
+                    return
+                if policy.delivered and repeats_last(text, llm_req):
+                    await self._settle(ep, Outcome.ABSTAINED, detail="elle allait redire son dernier message")
                     return
                 # le prélude (un murmure) : après le départ gardé, la réponse prête, sous la même garde
                 await self._preludes(ep, guard, preludes)
@@ -644,6 +690,15 @@ def _scope(root: Any, req: EpisodeRequest, eid: str) -> str:
     turn = turn_upto(root.slices[RUNTIME.name], req.reply_to)
     first = turn[0] if turn else req.reply_to
     return f"tour:{req.target}:{req.room or ''}:{first}"
+
+
+def _defers(gateway: LLMGateway | None, role: str) -> bool:
+    """Le fournisseur de ce rôle sait-il différer des outils ? Sans réponse (ou en panne) : oui."""
+    ask = getattr(gateway, "defers_tools", None)
+    if ask is None:
+        return True
+    got = call(ask, role, label="outils différables")
+    return True if isinstance(got, Failed) else bool(got)
 
 
 def _in_hand(policy: EpisodePolicy, req: EpisodeRequest) -> frozenset[str] | None:

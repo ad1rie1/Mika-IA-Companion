@@ -100,7 +100,7 @@ def test_a_blocked_exploration_reopens_takes_a_step_and_she_feels_nothing_about_
 
         await connect(kernel, "user_1", "Adrien", operator=True)
         llm.step_mode = "stuck"
-        gid = str(await explore(kernel))
+        gid = str(await explore(kernel, origin=goals_c.FROM_SIGNAL))  # une réflexion ne bloque pas (ADR 0053)
         await _until(kernel, lambda: events(kernel, goals_c.GOAL_CLOSED))
         spec = kernel.registry.actions["goals.rouvrir"]
         out = {"closed": kernel.mind.frame().get(goals_c.STATUS(int(gid))), "offered": offered(kernel, spec, gid)}

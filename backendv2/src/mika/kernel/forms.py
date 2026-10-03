@@ -87,7 +87,8 @@ class Knob:
     lo: float | None = None
     hi: float | None = None
     step: float | None = None
-    #: "us" | "ms" | "s" | "min" | "h" | "%" | "tokens" | "" ; deviné du suffixe du nom quand vide
+    #: "us" | "ms" | "s" | "min" | "h" | "%" | "tokens" | "" ; deviné du suffixe du nom quand vide — jamais une
+    #: durée pour un débit (``…_per_h``, ``…_per_min``, ``…_per_s`` : tant par heure)
     unit: str = ""
     widget: str = ""
     choices: Pairs = ()
@@ -492,7 +493,14 @@ def _rebase_only(only: Only, prefix: str) -> Only:
     return tuple((prefix + path, tuple(values)) for path, values in only)
 
 
+def _rate(name: str) -> bool:
+    """« empty_growth_per_h », « steps_per_s » : un débit (tant par heure), pas une durée."""
+    return any(name.endswith(f"_per{suffix}") for suffix, unit in _SUFFIXES if unit in UNIT_US)
+
+
 def _guess_unit(name: str) -> str:
+    if _rate(name):
+        return ""  # « par heure » est dans le nom, pas une unité de la valeur : 0,05 par heure n'est pas 3 min
     for suffix, unit in _SUFFIXES:
         if name.endswith(suffix):
             return unit
@@ -503,7 +511,7 @@ def _humanize(name: str) -> str:
     """``tau_wake_h`` → « Tau wake » : l'unité de temps s'affiche à part."""
     base = name
     for suffix, unit in _SUFFIXES:
-        if unit in UNIT_US and base.endswith(suffix) and len(base) > len(suffix):
+        if unit in UNIT_US and base.endswith(suffix) and len(base) > len(suffix) and not _rate(base):
             base = base[: -len(suffix)]
             break
     text = base.replace("_", " ").strip()
@@ -900,6 +908,11 @@ def errors_fr(exc: ValidationError) -> dict[str, str]:
         if message not in bucket:
             bucket.append(message)
     return {path: " ; ".join(messages) for path, messages in grouped.items()}
+
+
+def message_fr(err: Mapping[str, Any]) -> str:
+    """Une erreur de pydantic (un élément de ``ValidationError.errors()``) en une phrase française."""
+    return _message_fr(err)
 
 
 def _message_fr(err: Mapping[str, Any]) -> str:

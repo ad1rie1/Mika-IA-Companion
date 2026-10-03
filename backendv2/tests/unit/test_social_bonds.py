@@ -232,3 +232,26 @@ class _Clock:
 def test_when_is_said_in_calendar_days(then, now, expected):
     """PRM-19 : les jours se comptent sur le calendrier, pas en durée."""
     assert calendar_words(then, _Clock(now)) == expected
+
+
+def test_the_person_who_looks_after_her_is_named_as_such_and_only_to_herself(tmp_path):
+    """Sa propriétaire n'est pas une « amie » tombée du ciel : elle sait que c'est la personne qui s'occupe d'elle
+    (sonde réelle du 2026-10-03 : « première fois que vous vous parlez » + « fait partie de tes amis », sans plus).
+    Une amie qui n'est pas opératrice ne l'est pas."""
+    async def scenario(kernel, script):
+        await connect(kernel, "user_1", "Sam", operator=True)
+        await connect(kernel, "user_2", "Inès")
+        for handle in ("user_1", "user_2"):
+            p = await kernel.perceive(said(handle, "salut, tu fais quoi ?"))
+            await p.reply
+        return None
+
+    _, llm, _s = run(tmp_path, scenario)
+
+    def who(handle):
+        last = [r for r in llm.calls if r.role == "reply" and r.meta.get("target") == handle][-1]
+        text = "\n".join(m.content for m in last.messages)
+        return text.split("--- QUI TU AS EN FACE ---", 1)[1].split("\n--- ", 1)[0]
+
+    assert "s'occupe de toi" in who("user_1")
+    assert "s'occupe de toi" not in who("user_2"), "contre-exemple : Inès n'est pas sa propriétaire"

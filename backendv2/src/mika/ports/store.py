@@ -8,7 +8,7 @@ vecteurs — jetable, reconstructible).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Collection, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -125,4 +125,6 @@ class EventStore(Protocol):
 
     async def run_mind(self, fn: Callable[[Sql], Any]) -> Any: ...
 
-    async def forget_subject(self, subject: str, purge: Callable[[Sql, Sql], None]) -> int: ...
+    async def forget_subject(self, subject: str, purge: Callable[[Sql, Sql], Iterable[str] | None]) -> int: ...
+    # ``purge`` peut rendre des références de contenus à effacer aussi : des textes qui ne nomment pas ce sujet,
+    # mais que les projections lui ont rattachés depuis (un souvenir renforcé par ce qu'il a dit, ADR 0054)

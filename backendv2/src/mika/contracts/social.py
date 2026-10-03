@@ -4,16 +4,31 @@ La **proximité** d'une personne (inconnue, connaissance, amie, proche) naît
 de leur **histoire vécue** : des jours de contact, des messages, et ce que
 ces échanges ont installé (jamais amie d'une rancune installée). On ne
 devient pas « proche » en trois messages, ni en une semaine — il y faut un
-mois d'histoire, et de la chaleur installée, un attachement (``affect.bond``)
-ou une longue histoire —, quoi qu'on en dise, ni quoi qu'en dise un modèle. Elle se
-lit sur une fenêtre glissante : un long silence la fait descendre d'un cran,
-sans jamais faire tomber une longue histoire plus d'un cran sous ce qu'elle a
-été. Un opérateur peut la déclarer (genèse, correction).
+mois d'histoire **vécue** (du premier au dernier jour de contact : une
+absence n'y ajoute rien), et de la chaleur installée ou un attachement
+(``affect.bond`` ; un attachement plus modeste suffit à une longue
+histoire — l'assiduité seule ne fait pas une intimité) —, quoi qu'on en
+dise, ni quoi qu'en dise un modèle. Elle se lit sur une fenêtre glissante :
+un long silence la fait descendre d'un cran ; une longue amitié ne tombe
+jamais plus d'un cran sous ce qu'elle a été, une amitié courte que son
+silence a dépassée redevient une connaissance (ADR 0058). Un opérateur peut
+la déclarer (genèse, correction).
 
 Le **rythme** d'une relation est l'écart médian entre les jours où la
 personne a écrit : c'est à lui, pas à une horloge commune, que se mesure un
 silence. La **réciprocité** compte qui ouvre les conversations : quand c'est
 presque toujours elle, elle le remarque, et ses relances s'espacent.
+
+**Qui a un lien avec qui** (``TIES``) : deux personnes qui étaient ensemble
+dans une petite conversation se connaissent ; une personne qui en nomme une
+autre en lui racontant sa vie la compte dans son entourage. Prononcer le nom
+de quelqu'un ne crée aucun lien. C'est ce qui ouvre la confidence d'une
+personne à une proche de Mika (``vocab.privacy``, ADR 0058).
+
+**Longtemps après** (``REKINDLE``) : une amie partie sans plus répondre, elle
+reprend de ses nouvelles une fois, doucement — des mois plus tard, ou après
+une date que la personne lui avait annoncée ; puis plus rien tant qu'elle
+n'a pas écrit (``agency``).
 """
 
 from __future__ import annotations
@@ -33,6 +48,8 @@ RECONTACT = "recontact"
 COMFORT = "comfort"
 #: Envie de discuter avec une amie, sans autre raison que l'envie.
 CHAT = "chat"
+#: Reprendre des nouvelles d'une amie partie sans plus répondre, longtemps après — une fois (ADR 0058).
+REKINDLE = "rekindle"
 #: Veto : on ne va pas vers quelqu'un qui a installé une rancune. (Ne pas écrire deux fois de suite à
 #: quelqu'un qui n'a pas répondu est la retenue d'``agency`` : ``agency.UNANSWERED``.)
 GRUDGE = "grudge"
@@ -112,6 +129,9 @@ class ContactReading:
     their_starts: int = 0
     #: c'est presque toujours elle qui écrit la première
     one_sided: bool = False
+    #: leur rythme tel qu'il était à leur dernier jour de contact (un long silence ne le change pas : c'est à lui
+    #: qu'il se mesure) ; ``rhythm_days`` est celui d'aujourd'hui, qui retombe sur un repli après des mois
+    usual_days: float = 0.0
 
 
 #: Instant de la dernière salutation adressée à cette personne (0 si jamais).
@@ -127,6 +147,14 @@ SENSITIVE = FactFamily("social.sensitive", arg=str, type=tuple)
 #: magasin ; vide : aucun). Oubliée, la personne n'en a plus.
 SENSITIVE_REF = FactFamily("social.sensitive_ref", arg=str, type=str)
 
-#: Les amies et proches dont le silence dépasse une fois et demie leur rythme :
-#: ``(personne, silence ÷ rythme)``, du plus long au plus court.
+#: Les amies et proches — d'aujourd'hui ou d'avant : une amie partie sans plus donner de nouvelles manque encore —
+#: dont le silence dépasse une fois et demie leur rythme : ``(personne, silence ÷ rythme)``, du plus long au plus
+#: court.
 MISSED = FactKey("social.missed", type=tuple, time_varying=True)
+#: Celles qui sont, ou ont pu être, des amies ou des proches (assez d'histoire, une proximité déclarée, une
+#: propriétaire) : un tri bon marché, sans affect, qui contient toute amie ou proche d'aujourd'hui — ce qui ne
+#: regarde que les amies ne paie pas le prix de toutes les inconnues de passage.
+CIRCLE = FactKey("social.circle", type=tuple)
+#: Les personnes avec qui celle-ci a un lien (elles étaient ensemble dans une petite conversation, ou l'une l'a
+#: nommée en lui racontant sa vie), telles qu'elles valent maintenant (ADR 0058).
+TIES = FactFamily("social.ties", arg=str, type=tuple)

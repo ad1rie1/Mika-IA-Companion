@@ -14,7 +14,15 @@ from pydantic import BaseModel, Field
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.faculties.memory.faculty import MEMORY, params
-from mika.faculties.memory.recall import items_by_id, names_of, relevance, topic, verdict_of
+from mika.faculties.memory.recall import (
+    about_us,
+    between_us,
+    items_by_id,
+    names_of,
+    relevance,
+    topic,
+    verdict_of,
+)
 from mika.faculties.memory.salience import age_words, tag
 from mika.vocab.episodes import CONVERSATIONAL, WORKING
 
@@ -46,11 +54,12 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
     wanted = topic(args.query)
     items = items_by_id(store, list(hits))
     scores = {i: relevance(hits[i], wanted, it.text) for i, it in items.items()}
-    found = []
     memo: dict[str, str] = {}
+    # « comment je t'appelle ? » : ce qui n'appartient qu'à vous, que les vecteurs ne rapprochent pas (ADR 0055)
+    found = between_us(frame, store, person, aud, memo) if person and about_us(args.query) else []
     for item in sorted((it for it in items.values() if scores[it.id] >= p.recall_floor * 0.8),
                        key=lambda it: (-scores[it.id], it.id)):
-        if item.status != "active":
+        if item.status != "active" or any(it.id == item.id for it, _v in found):
             continue
         verdict = verdict_of(frame, item, person, aud, memo, store)
         if verdict.ok:

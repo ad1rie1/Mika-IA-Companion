@@ -4,8 +4,10 @@
   elle y avance seule, le mène à bout avec une preuve, en est fière, son
   estime monte — et elle le lui raconte quand il revient ;
 - **S10** un but bloqué : elle prétend avoir fini sans rien faire — aucune
-  fierté ; à bout de pas, elle bloque (frustration, estime en baisse, « Je
-  bloque sur… ») et ne rouvre pas la même chose sous 24 h ;
+  fierté ; une exploration (ce qu'elle a remarqué dans ses flux) à bout de
+  pas bloque (frustration, estime en baisse, « Je bloque sur… ») ; repenser à
+  l'inquiétude d'une amie sans rien en écrire en reste là, sans « je bloque »
+  (ADR 0053), et ne se rouvre pas sous 24 h ;
 - **S11** des rappels pendant son sommeil : l'ordinaire attend son réveil,
   l'urgent la réveille à l'heure puis elle se rendort ; un rappel que le
   modèle ne peut pas dire est retenté trois fois au plus, espacé ;
@@ -21,6 +23,7 @@ from mika.contracts import goals as goals_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
+from mika.kernel.events import Content, Origin
 from mika.sim import expect
 from mika.sim.inner import _asleep_at, _sleep_spans, until
 from mika.sim.lane import PARIS, Plan, Result, at_paris, persona_llm
@@ -118,6 +121,15 @@ async def s10(driver: Driver, rng: RngTree, res: Result) -> None:
     await driver.disconnect("user_2")
     assert driver.kernel is not None
     before = driver.kernel.mind.frame().get(self_c.ESTEEM)
+    await until(driver, day0 + 14 * HOUR)
+    # une exploration née de ce qu'elle a remarqué dans ses flux : là, prétendre avoir fini ne mène nulle part
+    title = Content.of("En savoir plus sur ce que j'ai remarqué dans mes flux", level=0)
+    commit = await driver.kernel.mind.append([goals_c.GOAL_OPENED.draft(
+        kind=goals_c.EXPLORATION, authority=goals_c.SELF, title=title,
+        details=Content.of("Un article sur les marées", level=0), bundles=("goals", "memory", "rss"), max_steps=3,
+        source="signal:s10", sensitivity=0, desire=1.0, origin=goals_c.FROM_SIGNAL)],
+        emitter="goals", correlation="s10", origin=Origin.GENESIS)
+    explored = commit.seqs[-1]
     await until(driver, day0 + 16 * HOUR)
     after = driver.kernel.mind.frame().get(self_c.ESTEEM)
     await until(driver, day0 + 19 * HOUR + 30 * MINUTE)
@@ -129,6 +141,7 @@ async def s10(driver: Driver, rng: RngTree, res: Result) -> None:
     reports = _of(events, goals_c.STEP_REPORTED.name)
     closed = _of(events, goals_c.GOAL_CLOSED.name)
     from_thought = [c for c in closed if c.data.source.startswith("thought:")]
+    from_signal = [c for c in closed if c.data.goal == explored]
     opened = _of(events, goals_c.GOAL_OPENED.name)
     blocked = [e for e in _of(events, "attention.thought_born") if e.data.origin == "blocked"]
     about_bea = [o for o in opened if "user_2" in o.data.about]
@@ -146,8 +159,13 @@ async def s10(driver: Driver, rng: RngTree, res: Result) -> None:
                          "dire qu'on a fini n'est pas avoir fini", f"{res.metrics['clos']}"),
         expect.control("elle prétendait avoir fini", any(v == "done" and not p for v, p in res.metrics["verdicts"]),
                        "sinon ce scénario ne dit rien", f"{res.metrics['verdicts']}"),
-        expect.invariant("à bout de séances, elle bloque", bool(from_thought) and from_thought[0].data.status == goals_c.STUCK,
-                         "un but qui n'avance pas finit par bloquer", f"{res.metrics['clos']}"),
+        expect.invariant("à bout de séances, elle bloque", bool(from_signal) and from_signal[0].data.status == goals_c.STUCK,
+                         "une exploration qui n'avance pas finit par bloquer", f"{res.metrics['clos']}"),
+        expect.invariant("repenser à ce qu'on lui a confié ne bloque jamais",
+                         bool(from_thought) and all(c.data.status == goals_c.ABANDONED
+                                                    and c.data.reason == goals_c.LET_GO for c in from_thought),
+                         "une réflexion qui n'a rien donné en sa séance en reste là (ADR 0053)",
+                         f"{res.metrics['clos']}"),
         expect.band("son estime baisse", before - after, "bloquer lui coûte un peu", lo=0.01),
         expect.band("découragée, elle met du temps à se relancer", pause_h,
                     "après un échec, on n'entreprend pas aussitôt autre chose (heures)", lo=3.0),

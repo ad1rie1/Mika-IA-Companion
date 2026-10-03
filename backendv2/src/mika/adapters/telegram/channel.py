@@ -28,16 +28,32 @@
   répondre plus tôt et invite à redire si c'est encore d'actualité — comme on
   le fait en retrouvant un message manqué ; dans un salon, où la conversation
   est passée à autre chose et où un mot sans destinataire ne voudrait rien
-  dire, elle ne dit rien.
+  dire, elle ne dit rien. Une question restée sans réponse **faute de modèle**
+  n'est pas une panne passagère : « je ne suis pas encore tout à fait prête ».
+- **Elle a l'air là** : pendant qu'elle compose une réponse, la conversation
+  montre « en train d'écrire… » (renouvelé, borné à deux minutes, jamais pendant
+  son sommeil : sa réponse attend alors son réveil). Un autocollant (avec son
+  émoji), une vidéo, une note vidéo, un GIF, une position ou un contact sont
+  perçus en une ligne plutôt qu'ignorés. Un message est lu jusqu'à 4096
+  caractères (la limite de Telegram) ; seul le prompt coupe. Dans un salon, sa
+  réponse cite le message d'origine ; le gras (``**…**``) ne part pas en
+  astérisques.
+- **L'appairage** : tant que le robot n'est ouvert à personne, il ne sert qu'à
+  ça. Un code à usage unique, montré dans la console, envoyé en privé
+  (``/start <code>``), fait de son auteur une propriétaire (``pair``, fourni par
+  le serveur, qui le journalise ; le code n'y entre jamais). Les essais sont
+  bornés par compte et en tout ; un code faux ne dit rien de plus.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import time
 from collections import OrderedDict
-from collections.abc import Callable
-from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 from mika.contracts.entry import MindPort
@@ -49,25 +65,45 @@ from mika.ports.preprocess import Perceived, Preprocessor, Upload, render
 from mika.vocab import voice
 from mika.vocab.affect import strip_prosody
 
+log = logging.getLogger("mika.telegram")
+
 CHANNEL = "telegram"
 HANDLE_PREFIX = "tg_"
 ROOM_PREFIX = "tg_chat_"
-MAX_TEXT = 2000
+TELEGRAM_LIMIT = 4096
+#: ce qu'elle lit d'un message : tout ce que Telegram permet (seul le prompt coupe, s'il le faut)
+MAX_TEXT = TELEGRAM_LIMIT
 MAX_FILE = 5_000_000
 MAX_FILES = 3
-TELEGRAM_LIMIT = 4096
 REFUSAL_SPACING_S = 600.0
 SENT_MEMORY = 2048
+#: « en train d'écrire… » : Telegram l'efface au bout de 5 s ; renouvelé jusqu'à la réponse, au plus tant
+TYPING_EVERY_S = 4.5
+TYPING_MAX_S = 120.0
+#: l'appairage : essais par compte, et en tout, sur une heure (au-delà, rien n'est même vérifié)
+PAIR_TRIES_PER_ACCOUNT = 5
+PAIR_TRIES_TOTAL = 30
+PAIR_WINDOW_S = 3600.0
 
 REFUSED = "Désolée, je ne parle pas dans cette conversation."
 TOO_FAST = "Doucement… je n'arrive pas à suivre, réessaie dans un instant."
 TOO_LONG = "C'est un peu long pour moi : tu peux faire plus court ?"
 OVERLOADED = "Je suis débordée, réessaie un peu plus tard."
 FAILED = "Désolée, je n'arrive pas à te répondre là tout de suite… Réessaie dans un instant ?"
+#: une question restée sans réponse parce qu'aucun modèle ne la fait parler (l'installation n'est pas finie)
+NOT_READY = "Je ne suis pas encore tout à fait prête… Repasse un peu plus tard ?"
 #: une question abandonnée parce qu'il était trop tard pour y répondre (dite en privé seulement)
 LATE = "Désolée, je n'ai pas pu te répondre plus tôt… Si c'est encore d'actualité, redis-le-moi ?"
 #: ce qu'elle perçoit quand quelqu'un ouvre la conversation (``/start``) : une arrivée, pas des mots
 OPENED = "(vient d'ouvrir la conversation avec toi sur Telegram)"
+#: l'appairage
+PAIRED = "C'est fait : je te reconnais maintenant 😊"
+PAIR_WRONG = "Ce code ne me dit rien… Vérifie-le dans la console."
+PAIR_EXPIRED = "Ce code n'est plus valable : demandes-en un nouveau dans la console."
+#: le détail technique d'une réponse impossible faute de modèle (``gateway.UnconfiguredRole``)
+_NO_MODEL = re.compile(r"UnconfiguredRole|aucun modèle associé", re.IGNORECASE)
+#: le gras d'un texte (``**…**``) : Telegram, en texte simple, l'écrirait en astérisques
+_BOLD = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
 
 #: les jetons de voix (canoniques et variantes) et toute balise d'émotion restée : rien de ça ne s'écrit
 _VOICE_TOKENS = re.compile(
@@ -76,6 +112,9 @@ _VOICE_TOKENS = re.compile(
 
 
 class Bot(Protocol):
+    """``send_message(chat_id, text, reply_to=<message>)`` cite un message (``reply_to`` n'est passé que pour
+    citer) ; ``send_typing(chat_id)``, facultatif (appelé par ``getattr``), montre « en train d'écrire… »."""
+
     async def send_message(self, chat_id: int, text: str) -> None: ...
 
     async def download(self, file_id: str) -> bytes: ...
@@ -109,6 +148,10 @@ class Inbound:
     message_id: int = 0
     #: ``/start`` : la personne ouvre la conversation
     opened: bool = False
+    #: ce qui suit ``/start`` (un code d'appairage, ou le paramètre d'un lien t.me/robot?start=…)
+    start_arg: str = ""
+    #: ce qui n'est pas du texte et ne se télécharge pas (un autocollant, une vidéo), perçu en une ligne
+    noted: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -148,10 +191,10 @@ def too_late(d: Delivery) -> bool:
 
 
 def clean_outgoing(text: str) -> str:
-    """Le texte d'une messagerie : sans jetons de voix ni balise (Telegram n'a pas de voix), la
-    ponctuation recollée là où un jeton laissait un trou (« Bon . » ; l'espace française avant
-    « ! ? ; : » reste)."""
-    text = strip_prosody(_VOICE_TOKENS.sub("", text))
+    """Le texte d'une messagerie : sans jetons de voix ni balise (Telegram n'a pas de voix), sans le gras
+    en astérisques (``**très**`` → « très » : le texte part brut), la ponctuation recollée là où un jeton
+    laissait un trou (« Bon . » ; l'espace française avant « ! ? ; : » reste)."""
+    text = _BOLD.sub(r"\1", strip_prosody(_VOICE_TOKENS.sub("", text)))
     text = re.sub(r"[ \t]+([,.…)])", r"\1", text)
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 
@@ -189,6 +232,11 @@ class _Window:
         return True
 
 
+#: ``pair(compte, code, nom)`` : « paired » (le compte est désormais propriétaire), « wrong », « expired »,
+#: ou « none » (aucun appairage en cours)
+Pairing = Callable[[int, str, str], Awaitable[str]]
+
+
 @dataclass(slots=True)
 class TelegramChannel:
     port: MindPort
@@ -196,10 +244,19 @@ class TelegramChannel:
     config: TelegramConfig = field(default_factory=TelegramConfig)
     monotonic: Callable[[], float] = time.monotonic
     preprocess: Preprocessor | None = None
+    #: l'appairage (fourni par le serveur) ; ``None`` : pas d'appairage possible
+    pair: Pairing | None = None
+    #: l'attente entre deux « en train d'écrire… » (injectée en test)
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
     _limits: dict[str, _Window] = field(default_factory=dict)
     _overheard: dict[int, _Window] = field(default_factory=dict)
     _told: dict[tuple[int, str], float] = field(default_factory=dict)
     _sent: OrderedDict[str, None] = field(default_factory=OrderedDict)
+    _pair_tries: dict[int, _Window] = field(default_factory=dict)
+    _pair_all: _Window = field(default_factory=lambda: _Window(PAIR_TRIES_TOTAL, PAIR_WINDOW_S))
+    #: conversation → la tâche « en train d'écrire… », et jusqu'à quand elle le montre
+    _typing: dict[int, asyncio.Task[None]] = field(default_factory=dict)
+    _typing_until: dict[int, float] = field(default_factory=dict)
     delivered: list[tuple[int, str]] = field(default_factory=list)
 
     def admitted(self, chat_id: int, chat_type: str, user_id: int) -> bool:
@@ -253,11 +310,36 @@ class TelegramChannel:
         meta = tuple(AttachmentMeta(name=p.name, kind=p.kind, extracted=p.extracted, error=p.error) for p in notes)
         return render(notes), meta
 
+    async def _pairing(self, m: Inbound, admitted: bool) -> str | None:
+        """``/start <code>`` en privé : un appairage. Rend le statut à rendre, ou ``None`` pour continuer comme
+        une arrivée ordinaire (pas d'appairage en cours, une conversation déjà admise, ou un appairage réussi —
+        sa première arrivée en propriétaire). Les essais sont bornés : au-delà, rien n'est vérifié."""
+        assert self.pair is not None
+        now = self.monotonic()
+        tries = self._pair_tries.setdefault(m.user_id, _Window(PAIR_TRIES_PER_ACCOUNT, PAIR_WINDOW_S))
+        if not admitted and not (tries.allow(now) and self._pair_all.allow(now)):
+            return "refused"
+        got = await self.pair(m.user_id, m.start_arg, m.name)
+        if got == "paired":
+            self.config = replace(self.config, owners=self.config.owners | {m.user_id})
+            await self.bot.send_message(m.chat_id, PAIRED)
+            return None
+        if admitted or got not in ("wrong", "expired"):
+            return None
+        await self.bot.send_message(m.chat_id, PAIR_EXPIRED if got == "expired" else PAIR_WRONG)
+        return "refused"
+
     async def receive(self, m: Inbound) -> str:
-        if m.chat_type == "channel" or (not m.text.strip() and not m.media and not m.opened):
+        if m.chat_type == "channel" or (not m.text.strip() and not m.media and not m.opened and not m.noted):
             return "ignored"
         addressed = self.addressed(m)
-        if not self.admitted(m.chat_id, m.chat_type, m.user_id):
+        admitted = self.admitted(m.chat_id, m.chat_type, m.user_id)
+        if m.opened and m.chat_type == "private" and m.start_arg and self.pair is not None:
+            paired = await self._pairing(m, admitted)
+            if paired is not None:
+                return paired
+            admitted = self.admitted(m.chat_id, m.chat_type, m.user_id)
+        if not admitted:
             if addressed:  # on lui parle : elle le dit, de temps en temps ; le bavardage est ignoré sans un mot
                 await self._say_once(m.chat_id, "refused", REFUSED)
             return "refused"  # rien n'est écrit : ni perception, ni adresse
@@ -276,23 +358,70 @@ class TelegramChannel:
             window = self._overheard.setdefault(m.chat_id, _Window(self.config.overheard_per_minute, 60.0))
             if not window.allow(now):
                 return "ignored"  # le bavardage d'un groupe très actif ne s'écrit pas en entier
-        text, attachments = (OPENED if m.opened else m.text[:MAX_TEXT]), ()
+        typed = "" if m.opened else m.text[:MAX_TEXT]
+        seen, attachments = "", ()
         if addressed and m.media:  # le bavardage d'un groupe n'est pas téléchargé
             seen, attachments = await self._files(m)
-            text = "\n".join(x for x in (text, seen) if x)
+        perceived = "\n".join(x for x in (OPENED if m.opened else "", m.noted, seen) if x)
+        text = "\n".join(x for x in (typed, perceived) if x)
         if not text.strip():
             return "ignored"
         p = PerceptionReceived(
             handle=handle, channel=CHANNEL, text=Content.of(text), room=None if private else room_of(m.chat_id),
             public=not private, reply_ref=str(m.chat_id), display_name=m.name, addressed=addressed,
             attachments=attachments,
+            # le message d'origine : sa réponse le cite dans un salon
+            client_msg_id=str(m.message_id) if m.message_id else None,
+            # ce que la personne a tapé, à part de ce qu'elle a envoyé d'autre (un autocollant, un fichier)
+            typed_chars=len(typed) if perceived and not m.opened else None,
         )
         key = f"tg:{m.chat_id}:{m.message_id}" if m.message_id else f"tg:{m.update_id}"
         got = await self.port.perceive(p, dedupe_key=key)
         if got.status == "overloaded":
             await self._say_once(m.chat_id, "overloaded", OVERLOADED)
             return "overloaded"
-        return "duplicate" if got.duplicate else "accepted"
+        if got.duplicate:
+            return "duplicate"
+        if addressed and not got.held:  # elle compose ; endormie, sa réponse attend son réveil : rien à montrer
+            self.typing(m.chat_id)
+        return "accepted"
+
+    # ── « en train d'écrire… » ──
+    def typing(self, chat: int) -> None:
+        """Montrer qu'elle écrit dans cette conversation, jusqu'à sa réponse (au plus ``TYPING_MAX_S``)."""
+        if getattr(self.bot, "send_typing", None) is None:
+            return
+        self._typing_until[chat] = self.monotonic() + TYPING_MAX_S
+        task = self._typing.get(chat)
+        if task is None or task.done():
+            self._typing[chat] = asyncio.create_task(self._type(chat), name=f"telegram-ecrit-{chat}")
+
+    async def _type(self, chat: int) -> None:
+        try:
+            while self.monotonic() < self._typing_until.get(chat, 0.0):
+                try:
+                    await self.bot.send_typing(chat)  # type: ignore[attr-defined]
+                except Exception as exc:  # un indicateur qui ne passe pas ne gêne en rien la réponse
+                    log.debug("Telegram : « en train d'écrire » impossible (%r)", exc)
+                    return
+                await self.sleep(TYPING_EVERY_S)
+        finally:
+            if self._typing.get(chat) is asyncio.current_task():
+                self._typing.pop(chat, None)
+                self._typing_until.pop(chat, None)
+
+    def stop_typing(self, chat: int) -> None:
+        self._typing_until.pop(chat, None)
+        task = self._typing.pop(chat, None)
+        if task is not None and not task.done():
+            task.cancel()
+
+    async def close(self) -> None:
+        """La relève s'arrête : plus aucun « en train d'écrire… »."""
+        tasks = list(self._typing.values())
+        for chat in list(self._typing):
+            self.stop_typing(chat)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     @staticmethod
     def chat_for(d: Delivery) -> int | None:
@@ -310,15 +439,21 @@ class TelegramChannel:
         return None
 
     async def deliver(self, d: Delivery) -> bool:
-        if d.kind == delivery_p.REPLY_ABSTAINED or d.kind == delivery_p.STATE:
-            return True  # un silence, un changement d'état : rien à écrire dans une messagerie
+        if d.kind == delivery_p.STATE:
+            return True  # un changement d'état : rien à écrire dans une messagerie
         if d.kind == delivery_p.SPEECH and d.persona == voice.INNER:
             return True  # une pensée ne part jamais en message
+        if d.kind == delivery_p.REPLY_ABSTAINED:  # elle a choisi de se taire : elle n'écrit plus
+            chat = self.chat_for(d)
+            if chat is not None:
+                self.stop_typing(chat)
+            return True
         if d.kind not in (delivery_p.SPEECH, delivery_p.REPLY_FAILED):
             return True
         chat = self.chat_for(d)
         if chat is None:
             return False
+        self.stop_typing(chat)
         private = chat > 0
         if not self.admitted(chat, "private" if private else "group", chat):
             return True  # plus admise depuis : on n'écrit pas
@@ -327,9 +462,17 @@ class TelegramChannel:
         late = d.kind == delivery_p.REPLY_FAILED and too_late(d)
         if late and not private:
             return True  # dans un salon, la conversation est passée à autre chose : rien
-        text = (LATE if late else FAILED) if d.kind == delivery_p.REPLY_FAILED else clean_outgoing(d.text)
-        for part in split_message(text):
-            await self.bot.send_message(chat, part)
+        if d.kind == delivery_p.REPLY_FAILED:
+            text = LATE if late else NOT_READY if _NO_MODEL.search(d.text) else FAILED
+        else:
+            text = clean_outgoing(d.text)
+        # dans un salon, la réponse cite le message d'origine (sinon, à qui répond-elle ?)
+        quoted = int(d.client_msg_id) if not private and (d.client_msg_id or "").isdigit() else None
+        for i, part in enumerate(split_message(text)):
+            if quoted is not None and i == 0:
+                await self.bot.send_message(chat, part, reply_to=quoted)  # type: ignore[call-arg]
+            else:
+                await self.bot.send_message(chat, part)
             self.delivered.append((chat, part))
             if len(self.delivered) > SENT_MEMORY:
                 del self.delivered[: len(self.delivered) - SENT_MEMORY]

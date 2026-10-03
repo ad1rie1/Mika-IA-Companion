@@ -41,7 +41,7 @@ from mika.kernel.state import FrozenDict
 from mika.vocab import affect as A
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
-from mika.vocab.privacy import Sensitivity
+from mika.vocab.privacy import Sensitivity, hearable
 
 SHOWN = 3
 #: les pensées nées d'un signal extérieur montrées au plus
@@ -84,18 +84,14 @@ def feeling(emotion: str) -> str:
 
 
 def admissible(t: c.ThoughtReading, interlocutor: str | None, aud: Audience | None) -> bool:
-    """Les règles de la mémoire : ce qui ne concerne personne passe s'il est
-    anodin (ou si l'audience peut l'entendre) ; ce qui ne concerne que l'interlocuteur, s'il est anodin ou si sa fiche est ouverte ;
-    ce qui concerne d'autres, jusqu'au niveau de l'audience."""
+    """Les règles de la mémoire (``vocab.privacy.hearable``) : ce qui ne concerne personne passe s'il est
+    anodin (ou si l'audience peut l'entendre) ; ce qui ne concerne que l'interlocuteur, s'il est anodin ou si sa
+    fiche est ouverte ; ce qui concerne d'autres, jusqu'au niveau de l'audience (« lié » quand l'interlocuteur a un
+    lien avec chacune, ADR 0058)."""
     if aud is None:
         return not t.about and t.sensitivity <= Sensitivity.ANODYNE
-    if not t.about:  # personne d'identifié (un mail, un signal) : anodin, ou ce que l'audience peut entendre
-        return t.sensitivity <= max(Sensitivity.ANODYNE, aud.level)
-    others = [a for a in t.about if a != interlocutor]
-    if not others:
-        return t.sensitivity <= Sensitivity.ANODYNE or aud.private_ok
-    limit = aud.witness_level if interlocutor in t.about else aud.level
-    return t.sensitivity <= limit
+    return hearable(tuple(t.about), t.sensitivity, interlocutor, aud.level, aud.witness_level, aud.private_ok,
+                    tied_level=aud.tied_level, ties=aud.ties)
 
 
 def shown(t: c.ThoughtReading, text: str, interlocutor: str | None, name_of: Callable[[str], str]) -> str:

@@ -14,6 +14,7 @@ libellé reste lisible sous une forme générique, jamais un trou.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 from typing import Any
 
@@ -49,6 +50,8 @@ EVENTS: dict[str, str] = {
     "effect.resolved": "Décision d'un opérateur", "effect.executed": "Effet exécuté",
     "runtime.operated": "Action d'opérateur", "runtime.process_failed": "Échec d'un processus",
 }
+#: les processus du noyau, sans faculté (ceux des facultés : ``Labels.processes``)
+PROCESSES: dict[str, str] = {"arbitre": "Décider d'agir (l'arbitre)", "séries": "Relever les courbes de sa journée"}
 #: issues d'une action d'opérateur
 OPERATED: dict[str, tuple[str, str]] = {"done": ("faite", "ok"), "refused": ("refusée", "warn"),
                                         "superseded": ("la situation avait changé", "warn"),
@@ -78,10 +81,20 @@ def lane(value: str | None) -> str:
     return LANES.get(str(value or ""), str(value or "—"))
 
 
+#: un nom de rôle cité dans un détail technique (« aucun modèle associé au rôle « reply » »)
+_ROLE_QUOTED = re.compile(r"rôle « ([a-z_]+) »")
+
+
 def detail(text: str | None) -> str:
     """Un détail d'issue tel qu'un humain le lit : sans nom de classe Python en tête
-    (« UnconfiguredRole: … », « TimeoutError() »)."""
-    return describe_error((text or "").strip())
+    (« UnconfiguredRole: … », « TimeoutError() ») ni nom interne de rôle (« reply » → « répondre »)."""
+    return _ROLE_QUOTED.sub(lambda m: f"rôle « {_role_word(m.group(1))} »", describe_error((text or "").strip()))
+
+
+def _role_word(key: str) -> str:
+    """Le rôle en un mot (« répondre », sans la famille entre parenthèses) ; la clé si elle n'en a pas."""
+    label = ROLE_LABELS.get(key)
+    return label.split(" (")[0] if label else key
 
 
 def humanize(key: str) -> str:
@@ -205,6 +218,8 @@ class Names:
     def process(self, name: str) -> str:
         if name in self.labels.processes:
             return self.labels.processes[name]
+        if name in PROCESSES:
+            return PROCESSES[name]
         owner, _, rest = name.partition(".")
         return f"{self.faculty(owner)} · {humanize(rest or name)}"
 
@@ -233,7 +248,8 @@ class Names:
         if key.startswith("console."):
             parts = key.split(".")
             what = {"oublier": "Oublier", "reglages": "Réglages", "parametres": "Paramètres",
-                    "sorties": "File de sortie"}.get(parts[1] if len(parts) > 1 else "", humanize(key))
+                    "sorties": "File de sortie", "telegram": "Telegram"}.get(parts[1] if len(parts) > 1 else "",
+                                                                            humanize(key))
             return f"{what} · {' · '.join(parts[2:])}" if len(parts) > 2 else what
         return humanize(key)
 

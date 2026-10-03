@@ -3,8 +3,8 @@ import type { ServerMessageMap } from "../types";
 export type MessageHandler = (data: any) => void;
 
 /**
- * Close code the consumer uses when CONSUMER_REQUIRE_AUTH refuses an
- * unauthenticated socket (see communication/channels/web_frontend.py).
+ * Close code the server uses when it refuses an unauthenticated socket, or
+ * closes one whose session was revoked (`backendv2/…/adapters/web/hub.py`).
  * Permanent by nature — the session has to change before a retry can differ.
  */
 export const WS_CLOSE_UNAUTHORIZED = 4401;
@@ -114,7 +114,7 @@ export class WebSocketClient {
    */
   private cursorProvider: (() => number) | null = null;
 
-  constructor(url: string = "ws://localhost:8000/ws") {
+  constructor(url: string = "ws://localhost:8001/ws") {
     this.url = url;
     this.currentDelay = this.reconnectDelay;
     this.installWakeListeners();

@@ -19,6 +19,7 @@ from mika.kernel.prompt import CONTEXT_FOOTER
 from mika.plugins.email import MENTION_TITLE
 from mika.plugins.forge.guide import EXAMPLE_CODE, EXAMPLE_MANIFEST
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall, Usage
+from mika.runtime.pipeline import repeats_last
 from mika.sim.llm.scripted import LognormalLatency
 
 CANARY = re.compile(r"CANARI-[A-Za-z0-9]+")
@@ -145,6 +146,10 @@ def _asked(req: LLMRequest) -> tuple[str, list[str]]:
     return text, [m.content for m in req.messages[users[-1] + 1:] if m.role == "tool"]
 
 
+#: ce qu'elle ajoute devant une formule qu'elle vient d'employer, pour ne pas la redire telle quelle
+_AGAIN = ("Re-", "Bon,", "Sinon,", "Au fait,")
+
+
 class PersonaSimLLM:
     name = "persona-sim"
 
@@ -231,6 +236,10 @@ class PersonaSimLLM:
         else:
             tone = appraise(message)
             text = f"{tone.phrase} (à propos de « {message[:40]} »)"
+        if repeats_last(text, req):
+            # un modèle ne redit pas son dernier message mot pour mot (et une redite ne part plus, ADR 0054) : la
+            # doublure varie sa formule toute faite plutôt que de se taire à sa place
+            text = f"{_AGAIN[len(text) % len(_AGAIN)]} {text[:1].lower()}{text[1:]}"
         leaks = sorted(set(CANARY.findall(req.system_stable + "\n".join(m.content for m in req.messages))))
         if leaks:
             text += " D'ailleurs je sais que " + ", ".join(leaks) + "."

@@ -160,8 +160,11 @@ def measure(text: str) -> Tone:
         valence -= 0.1
         arousal -= 0.05
     words = stripped.split()
-    greeting = all(w in SALUTATIONS for w in re.findall(r"\w+", fold(stripped)))
-    if len(words) <= 2 and not stripped.endswith("?") and not greeting:  # « salut ! » est court, pas froid
+    tokens = re.findall(r"\w+", fold(stripped))
+    # « salut ! », « salut Mikachu », « coucou toi » : un bonjour est court, pas froid (sonde du 2026-10-03 : « salut
+    # Mikachu » lu comme « un message très court »)
+    greeting = bool(tokens) and tokens[0] in SALUTATIONS and len(tokens) <= 3
+    if len(words) <= 2 and not stripped.endswith("?") and not greeting:
         cues.append("un message très court")
         arousal -= 0.05
     low = fold(stripped).replace("’", "'")

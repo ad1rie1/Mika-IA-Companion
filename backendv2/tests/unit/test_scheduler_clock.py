@@ -13,7 +13,7 @@ from mika.kernel.builtin import KernelParams
 from mika.kernel.clock import HOUR, MINUTE, instant, local, local_date_of_night, next_local
 from mika.kernel.events import Payload
 from mika.kernel.faculty import Faculty
-from mika.sim.clock import run_virtual
+from mika.sim.clock import SimClock, run_virtual
 from tests.fixtures.harness import build, events_of
 
 PARIS = ZoneInfo("Europe/Paris")
@@ -118,3 +118,16 @@ def test_dst_fall_back_night(tmp_path):
 
     written = run_virtual(kernel.deps.clock, main)
     assert written == [("2026-10-24", "03:30"), ("2026-10-25", "03:30"), ("2026-10-26", "03:30")]
+
+
+def test_the_virtual_loop_keeps_going_past_194_days():
+    """Au-delà de 2²⁴ s de temps de boucle (194,18 jours), un minuteur échu n'était plus jugé prêt : la boucle
+    tournait à vide pour toujours (audit « vie longue » du 2026-10-03). Une année de virtuel va au bout."""
+    async def main():
+        loop = asyncio.get_running_loop()
+        while loop.time() < 365 * 86400:
+            await asyncio.sleep(6 * 3600)
+        await asyncio.sleep(1.0)
+        return loop.time()
+
+    assert run_virtual(SimClock(1_791_000_000 * 10**6), main) >= 365 * 86400

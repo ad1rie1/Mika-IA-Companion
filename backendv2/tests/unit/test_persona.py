@@ -16,7 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from mika.contracts import self_ as self_c
-from mika.faculties.self import render
+from mika.faculties.self import interjections, render
 from mika.kernel.clock import HOUR, US
 from mika.kernel.codec import canonical_json
 from mika.ports.llm import LLMResponse
@@ -127,9 +127,39 @@ def test_her_greetings_set_the_tone_of_a_greeting_and_are_never_given_as_lines_t
     replies = [c for c in llm.calls if c.role == "reply"]
     assert greets and replies
     shown = greets[0].messages[-1].content
-    assert "TA FAÇON DE DIRE BONJOUR" in shown and "jamais cette phrase telle quelle" in shown
-    # un seul exemple, qui change d'un jour à l'autre : trois à chaque arrivée, un modèle en recopiait un mot pour
-    # mot (sonde finale : « Yooo, te revoilà ! » cinq soirs sur six)
-    assert sum(g in shown for g in DOC.greetings) == 1
+    assert "TA FAÇON DE DIRE BONJOUR" in shown and "jamais une formule toute faite" in shown
+    # jamais une phrase entière : un modèle la recopiait, même marquée « pour le ton seulement » (sonde finale :
+    # « Yooo, te revoilà ! » cinq soirs sur six ; sonde du 2026-10-03 : « Heeey ~ alors, raconte-moi tout. » comme
+    # message entier, trois initiatives sur dix) — ses petits mots seulement
+    assert not any(g in shown for g in DOC.greetings)
+    assert all(w in shown for w in interjections(DOC.greetings)) and interjections(DOC.greetings)
     assert not any(DOC.greetings[0] in c.system_stable for c in llm.calls)
     assert DOC.greetings[0] not in replies[-1].messages[-1].content
+
+
+def test_a_first_greeting_to_someone_she_does_not_know_is_simple_not_a_friends_hello(tmp_path):
+    """Ses bonjours d'amie (« te revoilà », « raconte-moi tout ») supposent qu'on se connaît : à quelqu'un qui arrive
+    pour la première fois, un bonjour simple (sonde réelle du 2026-10-03 : « Heeey ~ alors, raconte-moi tout » à
+    une inconnue). Contre-exemple : une amie a toujours son exemple de ton."""
+    def script(req):
+        if req.role in ("extract", "profile", "compact"):
+            return LLMResponse("{}")
+        return LLMResponse("hey ! [EMOTION:happy:0.5]")
+
+    kernel, clock, llm, _ = build(tmp_path, script, start=at_paris(2026, 9, 28, 19, 0))
+
+    async def main():
+        await boot(kernel)
+        try:
+            await befriend(kernel, "user_1", "friend")
+            await connect(kernel, "user_1", "Adrien")
+            await connect(kernel, "user_2", "Inès")
+            await asyncio.sleep(HOUR / US)
+        finally:
+            await kernel.stop()
+
+    run_virtual(clock, main)
+    greets = {c.meta.get("target"): c.messages[-1].content for c in llm.calls if c.role == "initiative"}
+    assert "user_2" in greets and "user_1" in greets
+    assert "un bonjour simple" in greets["user_2"] and not any(g in greets["user_2"] for g in DOC.greetings)
+    assert "tes petits mots" in greets["user_1"], "contre-exemple : une amie garde son ton"

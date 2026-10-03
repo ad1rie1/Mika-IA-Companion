@@ -20,11 +20,16 @@ from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
+from mika.vocab import affect as A
+from mika.vocab.affect import Emotion
 from mika.vocab.episodes import Kind
 from mika.vocab.people import fold, is_identifiable
 from mika.vocab.temperament import Temperament, lerp
 
 KEEP_DAYS = 64
+#: les liens retenus par personne (les plus récents), et les personnes dont on retient les liens
+TIES_KEPT = 32
+TIED_PERSONS_KEPT = 512
 #: Les dernières conversations dont on retient qui les a ouvertes.
 STARTS_KEPT = 20
 #: Les initiatives en cours dont on retient la raison (des épisodes qui n'ont jamais parlé s'y oublient).
@@ -87,16 +92,17 @@ class SocialParams(BaseModel):
     close_days: Annotated[int, Knob(
         label="Proche : jours de contact", group="Proximité vécue", lo=1, hi=120,
         help="Jours de contact distincts pour devenir proche (avec assez de messages, sans rancune, de la "
-             "chaleur installée, de l'attachement ou une longue histoire, et un mois d'histoire au moins).")] = 7
+             "chaleur installée ou de l'attachement — moins d'attachement pour une longue histoire —, et un mois "
+             "d'histoire vécue au moins).")] = 7
     close_messages: Annotated[int, Knob(
         label="Proche : messages reçus", group="Proximité vécue", lo=1, hi=2000,
         help="Messages reçus pour devenir proche.")] = 50
-    #: proche : de la chaleur installée, un attachement — ou une longue histoire (un chagrin partagé n'éloigne pas)
+    #: proche : de la chaleur installée, un attachement — jamais la seule assiduité (ADR 0058)
     close_regard: Annotated[float, Knob(
         label="Proche : chaleur installée", group="Proximité vécue", lo=0, hi=1, step=0.01,
         help="Le regard installé (affect : 0 au repos, 1 chaleur pleine) qu'il faut pour devenir proche — "
-             "ou l'attachement ci-dessous, ou une longue histoire. Des soirées chaleureuses ordinaires l'installent "
-             "(de l'ordre de 0,25 en un mois) ; des échanges sans chaleur, non.")] = 0.1
+             "ou l'attachement ci-dessous. Des soirées chaleureuses ordinaires l'installent (de l'ordre de 0,25 en "
+             "un mois) ; des échanges sans chaleur, non.")] = 0.1
     close_bond: Annotated[float, Knob(
         label="Proche : attachement", group="Proximité vécue", lo=0, hi=1, step=0.01,
         help="L'attachement (affect : nourri par ses déclarations chaleureuses ou tendres, lent, demi-vie de deux "
@@ -111,20 +117,32 @@ class SocialParams(BaseModel):
              "opérateur l'emporte ; une rancune lourde lève ce plancher, comme elle défait une amitié.")] = c.FRIEND
     close_long_days: Annotated[int, Knob(
         label="Proche : longue histoire (jours)", group="Proximité vécue", lo=1, hi=365,
-        help="Au-delà de tant de jours de contact, on devient proche même sans chaleur installée : un chagrin "
-             "partagé n'éloigne pas.")] = 14
+        help="Au-delà de tant de jours de contact, un attachement plus modeste (ci-dessous) suffit pour être "
+             "proche : le temps approfondit ce qui est là, il ne le crée pas — l'assiduité seule, sans chaleur ni "
+             "attachement, ne fait pas une intimité.")] = 60
+    close_long_bond: Annotated[float, Knob(
+        label="Proche : attachement d'une longue histoire", group="Proximité vécue", lo=0, hi=1, step=0.01,
+        help="L'attachement (affect) qui suffit, avec une longue histoire, pour être proche. Une politesse sans "
+             "chaleur, des mois durant, reste une amitié ; même réglé à zéro, il faut un attachement.")] = 0.08
     close_history_days: Annotated[int, Knob(
         label="Proche : histoire d'au moins (jours)", group="Proximité vécue", lo=1, hi=365,
-        help="Entre leur premier jour de contact et aujourd'hui, il faut au moins tant de jours pour être "
-             "proche : on ne le devient pas en une semaine, si intense soit-elle.")] = 30
+        help="Entre leur premier et leur dernier jour de contact, il faut au moins tant de jours pour être "
+             "proche : on ne le devient pas en une semaine, si intense soit-elle — ni pendant une absence (le "
+             "temps vécu ensemble, pas le calendrier).")] = 30
     closeness_window_days: Annotated[int, Knob(
         label="Proximité : fenêtre glissante (jours)", group="Proximité vécue", lo=14, hi=730,
         help="La proximité se lit sur les jours de contact de cette fenêtre ; l'histoire plus ancienne ne la "
-             "fait jamais tomber plus d'un cran sous ce qu'elle a été.")] = 120
+             "fait pas tomber plus d'un cran sous ce qu'elle a été — sauf une histoire courte que son silence a "
+             "dépassée (ci-dessous).")] = 120
     closeness_silence_factor: Annotated[float, Knob(
         label="Proximité : long silence (× rythme)", group="Proximité vécue", lo=2, hi=50, step=0.5,
         help="Un silence d'au moins tant de fois son rythme (et d'au moins le minimum ci-dessous) fait "
              "descendre la proximité d'un cran — l'histoire la retient un cran sous ce qu'elle a été.")] = 8.0
+    lasting_days: Annotated[int, Knob(
+        label="Une longue amitié : jours de contact", group="Proximité vécue", lo=7, hi=365,
+        help="Une proche d'au moins tant de jours de contact garde, quel que soit le silence, un plancher : amie. "
+             "Une histoire plus courte, quand son silence a duré plus que toute leur histoire, redevient une "
+             "connaissance — comme une amitié de trois semaines suivie de mois sans nouvelles.")] = 45
     closeness_silence_min_days: Annotated[int, Knob(
         label="Proximité : long silence d'au moins (jours)", group="Proximité vécue", lo=3, hi=365,
         help="En deçà, aucun silence ne fait descendre la proximité, quel que soit le rythme.")] = 21
@@ -137,6 +155,39 @@ class SocialParams(BaseModel):
         label="Preuve d'une relance", group="Reprendre contact", lo=0, hi=12, step=0.5,
         help="Preuve d'initiative (log-odds) d'un manque. Au-dessus du seuil d'initiative (9 par défaut), une "
              "relance part seule ; plafonnée à 12 par l'arbitrage.")] = 10.5
+    # longtemps après : une amie partie sans plus répondre, elle reprend de ses nouvelles une fois (ADR 0058)
+    rekindle_after_us: Annotated[int, Knob(
+        label="Longtemps après : un silence d'au moins", group="Reprendre des nouvelles, longtemps après",
+        lo=14 * DAY, hi=365 * DAY,
+        help="Une amie (ou quelqu'un qui l'a été) qui ne répond plus : passé ce silence, des deux côtés, elle peut "
+             "prendre de ses nouvelles une fois, doucement — même après deux messages restés sans réponse. Pas "
+             "de nouvelle tentative tant que la personne n'a pas écrit.")] = 90 * DAY
+    rekindle_rhythms: Annotated[float, Knob(
+        label="Longtemps après : au moins tant de fois son rythme", group="Reprendre des nouvelles, longtemps après",
+        lo=2, hi=50, step=0.5,
+        help="… et au moins ce multiple du rythme de la relation (une amie mensuelle n'est pas « longtemps » "
+             "silencieuse au bout de trois mois).")] = 6.0
+    rekindle_announced_us: Annotated[int, Knob(
+        label="Après une date qu'elle avait annoncée", group="Reprendre des nouvelles, longtemps après",
+        lo=HOUR, hi=14 * DAY,
+        help="Si la personne lui avait annoncé un moment (un départ, un retour, un examen) qui est passé pendant son "
+             "silence, elle peut en prendre des nouvelles dès ce délai après — sans attendre des mois.")] = DAY
+    rekindle_min_us: Annotated[int, Knob(
+        label="Après une date annoncée : pas avant", group="Reprendre des nouvelles, longtemps après",
+        lo=3 * DAY, hi=90 * DAY,
+        help="… mais jamais moins de ce silence depuis leur dernier échange : ce n'est pas une relance.")] \
+        = 14 * DAY
+    rekindle_evidence: Annotated[float, Knob(
+        label="Preuve de cette prise de nouvelles", group="Reprendre des nouvelles, longtemps après",
+        lo=0, hi=12, step=0.5,
+        help="Preuve d'initiative (log-odds). Au-dessus du seuil (9), elle le fait dans la journée ; plafonnée à "
+             "12 par l'arbitrage.")] = 10.0
+    # se connaître : qui a un lien avec qui (ADR 0058)
+    tie_room_max: Annotated[int, Knob(
+        label="Se connaître : une conversation d'au plus", group="Qui se connaît", lo=2, hi=50,
+        help="Deux personnes qui étaient ensemble dans une conversation d'au plus tant de personnes se connaissent "
+             "(un lien) ; au-delà, un grand salon ne fait pas des proches qui se connaissent. Une personne qui en "
+             "nomme une autre lui crée aussi un lien — jamais celle qui prononce seulement un nom.")] = 6
     # chercher du réconfort : une humeur nettement sombre
     comfort_evidence: Annotated[float, Knob(
         label="Preuve d'une recherche de réconfort", group="Réconfort", lo=0, hi=12, step=0.5,
@@ -304,6 +355,11 @@ class SocialState:
     #: quand chaque adresse a quitté ses écrans pour la dernière fois (sa dernière connexion fermée) ; à un
     #: redémarrage, qui était là y est compté parti à l'instant où elle revient — ce n'est pas lui qui est parti
     left: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: qui a un lien avec qui : personne → {personne avec qui elle a un lien → la dernière fois que ça s'est vu}.
+    #: Ils étaient ensemble dans une petite conversation, ou la seconde a nommé la première (ADR 0058)
+    ties: FrozenDict[str, FrozenDict[str, int]] = field(default_factory=FrozenDict)
+    #: quand elle a repris des nouvelles de quelqu'un, longtemps après (une fois par silence)
+    rekindled: FrozenDict[str, int] = field(default_factory=FrozenDict)
 
 
 def derive(t: Temperament, overrides: Any = None) -> SocialParams:
@@ -319,8 +375,9 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
 #: ``ignored_shift`` est retiré : ne pas harceler quelqu'un qui ne répond pas est la retenue d'``agency``
 #: (ADR 0033) ; d'anciens réglages qui le portent se relisent sans lui.
 #: v3 : qui était là, et quand chacun est parti (une reconnexion, un redémarrage d'elle ne sont pas des arrivées).
+#: v4 : qui a un lien avec qui, et les prises de nouvelles longtemps après (ADR 0058).
 SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive,
-                 state_version=3, retired_params=("ignored_shift",))
+                 state_version=4, retired_params=("ignored_shift",))
 SOCIAL.declare(*c.ALL)
 
 
@@ -403,6 +460,8 @@ def _uttered(s: SocialState, e, cx) -> SocialState:
     if initiative and opens and not agency_c.NOT_SPEAKING_UP & set(reasons):
         ct = _opened(ct, cx.local(e.at).date().toordinal(), HER)  # c'est elle qui écrit la première
     ct = replace(ct, last_out=e.at, unanswered=ct.unanswered + (1 if initiative else 0))
+    if initiative and c.REKINDLE in reasons:
+        s = replace(s, rekindled=s.rekindled.set(person, e.at))  # une fois par silence
     return replace(s, contacts=s.contacts.set(person, ct))
 
 
@@ -453,6 +512,51 @@ def _mentioned(s: SocialState, e, cx) -> SocialState:
     return replace(s, mentions=mentions)
 
 
+#: une personne nommée avec hostilité (« Bruno m'a trahie ») n'est pas pour autant de son entourage
+_HOSTILE = frozenset({Emotion.ANGRY, Emotion.DISGUSTED, Emotion.FRUSTRATED, Emotion.JEALOUS})
+
+
+def _tie(ties: FrozenDict[str, FrozenDict[str, int]], person: str, other: str,
+         at: int) -> FrozenDict[str, FrozenDict[str, int]]:
+    mine = (ties.get(person) or FrozenDict()).set(other, at)
+    if len(mine) > TIES_KEPT:
+        mine = FrozenDict(sorted(mine.items(), key=lambda kv: (kv[1], kv[0]))[-TIES_KEPT:])
+    ties = ties.set(person, mine)
+    if len(ties) > TIED_PERSONS_KEPT:  # les liens vus le moins récemment s'oublient
+        ties = FrozenDict(sorted(ties.items(), key=lambda kv: (max(kv[1].values()), kv[0]))[-TIED_PERSONS_KEPT:])
+    return ties
+
+
+@SOCIAL.reducer(memory_c.REMEMBERED, memory_c.BELIEVED, memory_c.EVENT_NOTED, memory_c.REINFORCED,
+                reads=[identity_c.PERSON])
+def _knit(s: SocialState, e, cx) -> SocialState:
+    """Qui a un lien avec qui, d'après ce qu'elle retient (ADR 0058) : deux personnes qui étaient ensemble dans
+    une petite conversation (``heard_by``) se connaissent ; une personne qui en nomme une autre en lui racontant sa
+    vie (``told_by`` → ``about``) la compte dans son entourage — l'autre a un lien avec elle. L'inverse, jamais :
+    prononcer le nom de quelqu'un ne crée aucun lien avec lui. Nommée avec colère ou dégoût, non plus."""
+    d = e.data
+    p = params(cx.params)
+
+    def persons(keys: Any) -> set[str]:
+        return {cx.facts.get(identity_c.PERSON(k)) or k for k in keys
+                if is_identifiable(k) and not k.startswith("name:")}
+
+    pairs: set[tuple[str, str]] = set()
+    hostile = A.emotion_of(getattr(d, "emotion", None)) in _HOSTILE
+    if not hostile:
+        about = persons(d.about)
+        pairs |= {(named, teller) for teller in persons(d.told_by) for named in about if named != teller}
+    heard = persons(d.heard_by)
+    if 2 <= len(heard) <= p.tie_room_max:
+        pairs |= {(a, b) for a in heard for b in heard if a != b}
+    if not pairs:
+        return s
+    ties = s.ties
+    for person, other in sorted(pairs):
+        ties = _tie(ties, person, other, e.at)
+    return replace(s, ties=ties)
+
+
 @SOCIAL.reducer(c.PROFILE_REVISED)
 def _profiled(s: SocialState, e, cx) -> SocialState:
     d = e.data
@@ -498,8 +602,9 @@ def estranged(hostility: float, p: SocialParams, settled: bool = False) -> bool:
 
 def _level(days: int, messages: int, history: int, regard: float, p: SocialParams, friendly: bool,
            bond: float = 0.0) -> int:
+    attached = bond > 0.0 and (bond >= p.close_bond or (days >= p.close_long_days and bond >= p.close_long_bond))
     if friendly and days >= p.close_days and messages >= p.close_messages and history >= p.close_history_days \
-            and (regard >= p.close_regard or (bond > 0.0 and bond >= p.close_bond) or days >= p.close_long_days):
+            and (regard >= p.close_regard or attached):
         return _RANK[c.CLOSE]
     if friendly and days >= p.friend_days and messages >= p.friend_messages:
         return _RANK[c.FRIEND]
@@ -508,36 +613,64 @@ def _level(days: int, messages: int, history: int, regard: float, p: SocialParam
     return _RANK[c.STRANGER]
 
 
+def _counts(ct: Contact) -> tuple[int, ...]:
+    if len(ct.counts) == len(ct.days):
+        return ct.counts
+    base, extra = divmod(ct.inbound, len(ct.days))  # sans décompte par jour : les messages répartis également
+    return tuple(base + (1 if i < extra else 0) for i in range(len(ct.days)))
+
+
+def span(ct: Contact) -> int:
+    """Le temps vécu ensemble, en jours : de leur premier à leur dernier jour de contact — jamais le calendrier
+    (une absence ne rend pas leur histoire plus longue)."""
+    return ct.days[-1] - (ct.first_day or ct.days[0]) if ct.days else 0
+
+
+def known(ct: Contact | None, regard: float, p: SocialParams, hostility: float = 0.0, bond: float = 0.0) -> str:
+    """Ce qu'elles ont été l'une pour l'autre, sur toute leur histoire (sans le silence ni la fenêtre)."""
+    if ct is None or not ct.days:
+        return c.STRANGER
+    total = max(ct.total_days, len(ct.days))
+    friendly = not estranged(hostility, p, total >= p.friendship_settled_days)
+    return c.CLOSENESS_LEVELS[_level(total, ct.inbound, span(ct), regard, p, friendly, bond)]
+
+
 def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float = 0.0,
           now_day: int | None = None, bond: float = 0.0) -> str:
     """Ce que leur histoire a fait d'elles : on devient amies en passant du
     temps ensemble, sans rancune — pas en le disant (ni parce qu'un modèle
-    l'a jugé) ; proches, avec de la chaleur installée, de l'attachement ou une
-    longue histoire, et un mois d'histoire au moins (dix soirées chaleureuses
-    d'affilée font une amie à qui elle tient, pas encore une proche).
+    l'a jugé) ; proches, avec de la chaleur installée ou de l'attachement (un
+    attachement plus modeste suffit à une longue histoire : le temps approfondit,
+    il ne crée pas — l'assiduité seule ne fait pas une intimité), et un mois
+    d'histoire **vécue** au moins (dix soirées chaleureuses d'affilée font une
+    amie à qui elle tient, pas encore une proche ; dix jours de silence n'y
+    ajoutent rien).
 
     Ce qui compte, c'est leur histoire **récente** (une fenêtre glissante) ;
     un long silence (plusieurs fois son rythme) la fait descendre d'un cran ;
-    une longue histoire ne la laisse jamais tomber plus d'un cran sous ce
-    qu'elle a été. Une dispute ne défait pas une amitié : seule une rancune
-    lourde (``grudge_demote``) le fait."""
+    une longue amitié (``lasting_days``) ne la laisse jamais tomber plus d'un
+    cran sous ce qu'elle a été — une amitié courte que le silence a dépassée
+    (il dure plus que toute leur histoire) redevient une connaissance. Une
+    dispute ne défait pas une amitié : seule une rancune lourde
+    (``grudge_demote``) le fait (ADR 0058)."""
     if ct is None or not ct.days:
         return c.STRANGER
-    today = ct.days[-1] if now_day is None else max(now_day, ct.days[-1])
-    friendly = not estranged(hostility, p, max(ct.total_days, len(ct.days)) >= p.friendship_settled_days)
-    history = today - (ct.first_day or ct.days[0])
-    counts = ct.counts
-    if len(counts) != len(ct.days):  # sans décompte par jour : les messages répartis également
-        base, extra = divmod(ct.inbound, len(ct.days))
-        counts = tuple(base + (1 if i < extra else 0) for i in range(len(ct.days)))
-    everything = _level(max(ct.total_days, len(ct.days)), ct.inbound, history, regard, p, friendly, bond)
-    recent = [(day, n) for day, n in zip(ct.days, counts, strict=True) if today - day < p.closeness_window_days]
+    last = ct.days[-1]
+    today = last if now_day is None else max(now_day, last)
+    total = max(ct.total_days, len(ct.days))
+    friendly = not estranged(hostility, p, total >= p.friendship_settled_days)
+    history = span(ct)
+    everything = _level(total, ct.inbound, history, regard, p, friendly, bond)
+    recent = [(day, n) for day, n in zip(ct.days, _counts(ct), strict=True) if today - day < p.closeness_window_days]
     window = _level(len(recent), sum(n for _d, n in recent), history, regard, p, friendly, bond)
-    rhythm_days, _measured = rhythm(ct, today, c.CLOSENESS_LEVELS[everything], p)
-    silent = today - ct.days[-1]
+    rhythm_days, _measured = rhythm(ct, last, c.CLOSENESS_LEVELS[everything], p)  # le rythme qu'elles avaient
+    silent = today - last
     if silent >= max(p.closeness_silence_min_days, p.closeness_silence_factor * rhythm_days):
         window -= 1
-    return c.CLOSENESS_LEVELS[max(_RANK[c.STRANGER], window, everything - 1)]
+    floor = everything - 1
+    if silent > history and total < p.lasting_days:
+        floor = min(floor, _RANK[c.ACQUAINTANCE])  # une amitié plus courte que son silence
+    return c.CLOSENESS_LEVELS[max(_RANK[c.STRANGER], window, floor)]
 
 
 #: au plus l'amitié d'office : « proche » se vit
@@ -584,11 +717,12 @@ def contact_reading(s: SocialState, person: str, now: int, now_day: int, level: 
                     p: SocialParams) -> c.ContactReading:
     ct = s.contacts.get(person) or Contact()
     days, measured = rhythm(ct, now_day, level, p)
+    usual = rhythm(ct, ct.days[-1], level, p)[0] if ct.days else days
     ratio = (now - ct.last_in) / (days * DAY) if ct.last_in else 0.0
     her, them, one_sided = reciprocity(ct, p)
     return c.ContactReading(person, max(ct.total_days, len(ct.days)), ct.inbound, ct.first_in, ct.last_in,
                             ct.last_out, days, measured, ct.unanswered, max(0.0, ratio), previous=ct.previous,
-                            since=ct.since, her_starts=her, their_starts=them, one_sided=one_sided)
+                            since=ct.since, her_starts=her, their_starts=them, one_sided=one_sided, usual_days=usual)
 
 
 @SOCIAL.fact(c.GREETED)
@@ -596,12 +730,32 @@ def _greeted(s: SocialState, cx, person: str) -> int:
     return s.greeted.get(person, 0)
 
 
+def _could_be_friends(ct: Contact, p: SocialParams) -> bool:
+    """Assez d'histoire pour avoir pu être une amie (jours de contact et messages) : en deçà, une connaissance au
+    plus, quoi que l'affect en dise — la proximité ne dépasse jamais ce que l'histoire permet."""
+    return max(ct.total_days, len(ct.days)) >= p.friend_days and ct.inbound >= p.friend_messages
+
+
 @SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD, affect_c.HOSTILITY, affect_c.BOND, identity_c.IS_OWNER])
 def _closeness(s: SocialState, cx, person: str) -> str:
-    p, hostility = params(cx.params), cx.facts.get(affect_c.HOSTILITY(person))
-    level = closeness(s, person, cx.facts.get(affect_c.REGARD(person)), p, hostility,
-                      cx.local(cx.now).date().toordinal(), cx.facts.get(affect_c.BOND(person)))
-    if person not in s.declared and cx.facts.get(identity_c.IS_OWNER(person)):
+    """Déclarée, sinon vécue ; le plancher d'une propriétaire. Ce qui coûte (l'affect, la propriété) ne se lit
+    que quand ça peut changer quelque chose : une inconnue sans histoire n'a ni chaleur ni rancune à peser."""
+    declared = s.declared.get(person)
+    if declared is not None:
+        return declared
+    p = params(cx.params)
+    ct = s.contacts.get(person)
+    floor = p.owner_floor if p.owner_floor in _OWNER_FLOORS else c.STRANGER
+    if ct is None or not ct.days or not _could_be_friends(ct, p):
+        # une connaissance au plus : ni la chaleur, ni l'attachement, ni la rancune n'y changent rien
+        level = lived(ct, 0.0, p, 0.0, cx.local(cx.now).date().toordinal())
+        if _RANK[level] >= _RANK[floor] or not cx.facts.get(identity_c.IS_OWNER(person)):
+            return level
+        return owner_floored(level, p, cx.facts.get(affect_c.HOSTILITY(person)))
+    hostility = cx.facts.get(affect_c.HOSTILITY(person))
+    level = lived(ct, cx.facts.get(affect_c.REGARD(person)), p, hostility, cx.local(cx.now).date().toordinal(),
+                  cx.facts.get(affect_c.BOND(person)))
+    if _RANK[level] < _RANK[floor] and cx.facts.get(identity_c.IS_OWNER(person)):
         return owner_floored(level, p, hostility)
     return level
 
@@ -610,6 +764,43 @@ def _closeness(s: SocialState, cx, person: str) -> str:
 def _contact(s: SocialState, cx, person: str) -> c.ContactReading:
     return contact_reading(s, person, cx.now, cx.local(cx.now).date().toordinal(), cx.facts.get(c.CLOSENESS(person)),
                            params(cx.params))
+
+
+@SOCIAL.fact(c.CIRCLE, reads=[identity_c.OWNERS])
+def _circle(s: SocialState, cx) -> tuple[str, ...]:
+    """Celles qui sont — ou ont pu être — des amies ou des proches : un tri bon marché, sans affect ni calcul de
+    proximité, pour que ce qui ne regarde que les amies ne pèse pas le prix de toutes les inconnues de passage
+    (une amie a eu assez de jours de contact et de messages ; une proximité déclarée ; une propriétaire, amie
+    d'office). Toute amie ou proche d'aujourd'hui en est (``CLOSENESS`` ne dépasse jamais l'histoire)."""
+    p = params(cx.params)
+    out = {person for person, level in s.declared.items() if level in (c.FRIEND, c.CLOSE)}
+    out |= {person for person, ct in s.contacts.items() if person not in s.declared and _could_be_friends(ct, p)}
+    if p.owner_floor == c.FRIEND:
+        out |= {o for o in cx.facts.get(identity_c.OWNERS) if o not in s.declared}
+    return tuple(sorted(out))
+
+
+def been_friends(s: SocialState, person: str, p: SocialParams, hostility: float, owner: bool) -> bool:
+    """A-t-elle été une amie (ou une proche) — sur toute leur histoire, pas seulement aujourd'hui ? Une amitié
+    qu'une rancune lourde a défaite, non."""
+    declared = s.declared.get(person)
+    if declared is not None:
+        return declared in (c.FRIEND, c.CLOSE)
+    if _RANK[known(s.contacts.get(person), 0.0, p, hostility)] >= _RANK[c.FRIEND]:
+        return True
+    return owner and p.owner_floor == c.FRIEND and not estranged(hostility, p, settled=True)
+
+
+@SOCIAL.fact(c.TIES, reads=[identity_c.PERSON])
+def _ties(s: SocialState, cx, person: str) -> tuple[str, ...]:
+    """Les personnes avec qui elle a un lien (ADR 0058), telles qu'elles valent maintenant : une adresse reliée
+    depuis à quelqu'un, un nom qu'un opérateur a relié à une personne parlent pour elle."""
+    out: set[str] = set()
+    for key, others in s.ties.items():
+        if key == person or (cx.facts.get(identity_c.PERSON(key)) or key) == person:
+            out |= {cx.facts.get(identity_c.PERSON(o)) or o for o in others}
+    out.discard(person)
+    return tuple(sorted(out))
 
 
 @SOCIAL.fact(c.SENSITIVE)
@@ -624,16 +815,19 @@ def _sensitive_ref(s: SocialState, cx, person: str) -> str:
     return profile.sensitive_ref if profile else ""
 
 
-@SOCIAL.fact(c.MISSED, reads=[c.CONTACT, c.CLOSENESS])
+@SOCIAL.fact(c.MISSED, reads=[c.CIRCLE, c.CONTACT, affect_c.HOSTILITY, identity_c.IS_OWNER])
 def _missed(s: SocialState, cx) -> tuple[tuple[str, float], ...]:
+    """Celles qui lui manquent : des amies ou des proches — d'aujourd'hui ou d'avant, une amie partie sans plus
+    donner de nouvelles manque encore (ADR 0058) — dont le silence dépasse son seuil."""
     p = params(cx.params)
     out = []
-    for person in s.contacts.keys():
-        if not is_identifiable(person) or person.startswith("name:"):
-            continue
-        if cx.facts.get(c.CLOSENESS(person)) not in (c.FRIEND, c.CLOSE):
+    for person in cx.facts.get(c.CIRCLE):
+        if not is_identifiable(person) or person.startswith("name:") or person not in s.contacts:
             continue
         ratio = cx.facts.get(c.CONTACT(person)).silence_ratio
-        if ratio >= p.recontact_factor:
+        if ratio < p.recontact_factor:
+            continue
+        hostility = cx.facts.get(affect_c.HOSTILITY(person))
+        if been_friends(s, person, p, hostility, bool(cx.facts.get(identity_c.IS_OWNER(person)))):
             out.append((person, round(ratio, 3)))
     return tuple(sorted(out, key=lambda x: (-x[1], x[0])))

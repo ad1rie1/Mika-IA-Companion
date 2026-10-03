@@ -233,18 +233,61 @@ async def _own_openings(s: ExpressionState, frame: Frame, ports: Mapping[str, An
     return tuple(str(r[0] or "") for r in reversed(rows))
 
 
+@EXPRESSION.enricher("last_heard", episodes=[Kind.REPLY], deadline_ms=300)
+async def _last_heard(s: ExpressionState, frame: Frame, ports: Mapping[str, Any]) -> str | None:
+    """Le message auquel elle répond."""
+    store, ep = ports.get("store"), frame.episode
+    reply_to = ep.attrs.get("reply_to") if ep is not None else None
+    if store is None or reply_to is None:
+        return None
+    rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id=?", (reply_to,))
+    return str(rows[0][0] or "") if rows else None
+
+
+#: une question qu'elle vient de poser attend encore sa réponse pendant ce temps
+QUESTION_PENDING_US = 15 * MINUTE
+_QUESTION = re.compile(r"[^.!?…\n]*\?")
+
+
+def pending_question(said: Sequence[tuple[int, str]], heard: str, now: int) -> str | None:
+    """La question qu'elle vient de poser, quand la personne n'a répondu qu'un bonjour (« re », « salut ») : elle
+    ne la repose pas. Sonde réelle du 2026-10-03 : « comment s'est passé ton anniversaire hier ? », puis, à « re »,
+    « comment s'est passé hier ? » — deux fois dans la semaine."""
+    words = _words(heard)
+    if not said or not words or len(words) > 3 or not all(w in GREETINGS for w in words):
+        return None
+    at, text = said[-1]
+    if now - at > QUESTION_PENDING_US:
+        return None
+    asked = [q.strip() for q in _QUESTION.findall(A.strip_prosody(text)) if len(q.strip()) > 3]
+    if not asked:
+        return None
+    q = asked[-1]
+    return q if len(q) <= 90 else "…" + q[-89:]
+
+
 @EXPRESSION.section("habits", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=55,
                     title="CE QUE TU TE RÉPÈTES")
 def _habits(s: ExpressionState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
     ep = frame.episode
     opened = enrich.get("own_openings") or () if ep is not None and ep.kind == Kind.INITIATIVE else ()
-    found = repeats(enrich.get("own_words") or (), frame.now, opened)
-    if not found:
+    said = enrich.get("own_words") or ()
+    found = repeats(said, frame.now, opened)
+    asked = pending_question(said, enrich.get("last_heard") or "", frame.now) \
+        if ep is not None and ep.kind == Kind.REPLY else None
+    if not found and not asked:
         return None
     # une remarque pour elle seule : la sonde finale l'a vue s'en excuser à voix haute (« je vais varier mon
     # langage, promis ! »)
-    return (f"En te relisant : {' ; '.join(found)}. Ça sonne mécanique : dis-le autrement cette fois, ou pas du "
-            "tout. C'est une remarque pour toi seule — tu n'en parles pas, tu changes seulement ta façon de dire.")
+    out = []
+    if found:
+        out.append(f"En te relisant : {' ; '.join(found)}. Ça sonne mécanique : dis-le autrement cette fois, ou pas "
+                   "du tout.")
+    if asked:
+        out.append(f"Tu viens de lui demander « {asked} » : son bonjour n'y répond pas encore. Ne repose pas la "
+                   "question et ne redis pas bonjour : un mot suffit, laisse-lui la place de répondre.")
+    out.append("C'est une remarque pour toi seule — tu n'en parles pas, tu changes seulement ta façon de dire.")
+    return " ".join(out)
 
 
 def _client_msg_id(store: Any, reply_to: int | None) -> str | None:
@@ -287,9 +330,11 @@ CHARGED = frozenset({affect_c.MOOD_OVERFLOW, others_c.CHECK_IN, social_c.COMFORT
 #: citation) : le murmure se montre à l'écran de la personne, qui n'a pas à lire ce qui la travaille
 WHY: Mapping[str, str] = {
     social_c.RECONTACT: "prendre de ses nouvelles : ça fait un moment",
+    social_c.REKINDLE: "prendre de ses nouvelles, après si longtemps",
     others_c.CHECK_IN: "prendre de ses nouvelles",
     others_c.FOLLOW_UP: "lui demander comment ça s'est passé",
     others_c.CHEER: "lui souhaiter bonne chance",
+    others_c.CELEBRATE: "lui faire tes vœux : c'est un jour qui se fête",
     memory_c.KEEP_PROMISE: "faire ce que tu lui avais promis",
     social_c.COMFORT: "lui parler, parce que tu ne vas pas très bien",
     attention_c.THOUGHT: "revenir sur quelque chose qui te trotte dans la tête",

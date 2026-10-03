@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 
 WORD = re.compile(r"[a-z0-9]+")
 
@@ -35,6 +36,26 @@ SALUTATIONS = frozenset("""
 salut coucou hey heey yo yop re bonjour bonsoir hello hi bonne nuit soiree journee bisous bises bisou ciao bye
 plus tard demain dodo merci toi vous tout le monde mika
 """.split())
+
+
+#: Ce qui ne dit rien d'une vie (repliés) : partir, aller dormir, retourner bosser, se dire au revoir — et les mots
+#: qui rapportent une parole (« en disant », « a mentionné »). Une phrase faite de ça seul est une banalité.
+BANAL = frozenset("""
+allez allons file filer filons part pars partir parti partie partis rentre rentrer rentree dormir dors dort dodo
+coucher couche couches nuit bonne bonnes soiree soir journee aprem tard bientot bisous bises bisou bonjour bonsoir
+hello revoir ciao bye retourner retourne bosser bosse boulot taf taff travailler travaille essayer essaie essaye
+pause faut dois doit devoir disant mentionne raconte souhaite souhaiter annonce repondu repond ecrit allait partait
+""".split())
+
+
+def banal(text: str, names: Iterable[str] = ()) -> bool:
+    """Une banalité : rien d'autre que des noms, des mots vides et ce qui ne dit rien d'une vie (« allez j'y vais »,
+    « je vais essayer de dormir », « Sam doit retourner travailler »). « Pixel est parti cet après-midi » n'en est
+    pas une : Pixel, cet après-midi."""
+    named = {w for n in names for w in WORD.findall(fold(n))}
+    plain = BANAL | (CHATTER - {"merci"})  # « Sam m'a dit merci d'avoir été là » dit quelque chose
+    return not [w for w in WORD.findall(fold(text)) if len(w) >= 3 and w not in STOPWORDS and w not in plain
+                and w not in named]
 
 
 def fold(text: str) -> str:

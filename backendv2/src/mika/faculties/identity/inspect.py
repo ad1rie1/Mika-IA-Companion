@@ -166,12 +166,10 @@ def _declared_owners(frame: Frame) -> tuple[str, ...]:
 def people(s: IdentityState, frame: Frame) -> dict[str, tuple[str, ...]]:
     """Chaque personne connue et ses adresses (une adresse déclarée propriétaire qui
     n'a jamais écrit est une personne sans adresse)."""
-    out: dict[str, list[str]] = {}
-    for key, h in s.handles.items():
-        out.setdefault(h.person or key, []).append(key)
+    out: dict[str, tuple[str, ...]] = dict(s.by_person.items())
     for key in _declared_owners(frame):
-        out.setdefault(_root(s, key), [])
-    return {p: tuple(sorted(hs)) for p, hs in out.items()}
+        out.setdefault(_root(s, key), ())
+    return out
 
 
 def principal(s: IdentityState, person: str) -> str | None:
@@ -187,16 +185,11 @@ def _last_from(frame: Frame, handles: Sequence[str]) -> int:
     return max((frame.get(transcript_c.LAST_FROM(k)) for k in handles), default=0)
 
 
-def _like(text: str) -> str:
-    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
 def _named_exists(ctx: InspectContext, key: str) -> bool:
     """Une personne connue seulement de nom existe si la mémoire en parle."""
     if len(key) <= len(NAMED) or ctx.store is None:
         return False
-    rows = ctx.store.query_mind(f"SELECT 1 FROM {memory_c.ITEMS_TABLE} WHERE about LIKE ? ESCAPE '\\' LIMIT 1",
-                                (f'%"{_like(key)}"%',))
+    rows = ctx.store.query_mind(f"SELECT 1 FROM {memory_c.ABOUT_TABLE} WHERE person=? LIMIT 1", (key,))
     return bool(rows)
 
 
@@ -227,7 +220,7 @@ def name_aliases(s: IdentityState, person: str) -> tuple[str, ...]:
     qu'elle : un nom qu'aucune autre personne connue ne porte. Oublier la personne
     les oublie aussi ; un homonyme les garde (on ne sait pas de qui on parlait)."""
     names = {known_as(s, person)} | {s.handles[k].name for k in handles_of(s, person) if k in s.handles}
-    others = [fold(known_as(s, p)) for p in {(h.person or k) for k, h in s.handles.items()} if p != person]
+    others = [fold(known_as(s, p)) for p in s.by_person.keys() if p != person]
     out: set[str] = set()
     for name in names:
         folded = " ".join(fold(name).split())
@@ -437,8 +430,9 @@ def why_level(certainty: float, trust: ChannelTrust, *, closeness: str, warmth: 
         return (f"aucun lien assez fort ({link}) : anodin — une amitié, un lien proche, ou une connaissance pour "
                 f"qui elle a une chaleur d'au moins {number(pol.warmth_min)} ouvrirait le personnel")
     if certainty >= pol.confidence_threshold and rank >= privacy.CLOSENESS_RANK[social_c.CLOSE]:
-        return (f"un lien proche, et une certitude d'au moins {number(pol.confidence_threshold)} ({link}) : "
-                "jusqu'aux confidences")
+        return (f"un lien proche, et une certitude d'au moins {number(pol.confidence_threshold)} ({link}) : le "
+                "personnel sur autrui ; jusqu'aux confidences d'une personne qu'elle connaît (elles se sont parlé "
+                "ensemble, ou cette personne l'a nommée) — être proche de Mika ne suffit pas")
     return (f"un lien ({link}) ouvre le personnel ; les confidences demandent un lien proche et une certitude d'au "
             f"moins {number(pol.confidence_threshold)}")
 
@@ -462,10 +456,10 @@ def _opens(frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> Table:
         audience_public = flag or h.trust is ChannelTrust.PUBLIC
         rows.append((label, LEVEL_FR.get(d.level, "?"),
                      why_level(view.certainty, h.trust, closeness=closeness, warmth=warmth, public=audience_public),
-                     LEVEL_FR.get(d.witness_level, "?"),
+                     LEVEL_FR.get(d.witness_level, "?"), LEVEL_FR.get(d.tied_level, "?"),
                      why_file(view.certainty, h.trust, public=audience_public)))
-    return Table(("audience", "sur autrui", "pourquoi", "si la personne est concernée", "sa propre fiche"),
-                 tuple(rows), title="Ce que ça ouvre")
+    return Table(("audience", "sur autrui", "pourquoi", "si la personne est concernée",
+                  "sur quelqu'un qu'elle connaît", "sa propre fiche"), tuple(rows), title="Ce que ça ouvre")
 
 
 def _verdict(frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> list[Block]:

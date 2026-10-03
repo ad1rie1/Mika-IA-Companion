@@ -296,9 +296,10 @@ def test_a_known_belief_can_be_made_confidential(tmp_path):
 
 
 def test_a_secret_never_leaves_its_confidant_even_for_a_close_friend(tmp_path):
-    """Une confidence lourde peut s'ouvrir à une proche (étiquetée « ne le
-    répète pas sauf si… ») ; un secret explicite, jamais — la proche sait
-    seulement qu'Alice traverse quelque chose."""
+    """Une confidence lourde peut s'ouvrir à une proche **qui connaît Alice** — Alice l'a nommée elle-même en lui
+    racontant sa vie — (étiquetée « ne le répète pas sauf si… ») ; un secret explicite, jamais — la proche sait
+    seulement qu'Alice traverse quelque chose. Contre-exemple (ADR 0058) : Dave, aussi proche de Mika, ne connaît
+    pas Alice — il a seulement prononcé son nom : ni la confidence, ni le secret, seulement que c'est lourd."""
 
     def extract(prompt):
         if "CANARI-F1" not in prompt:
@@ -307,7 +308,9 @@ def test_a_secret_never_leaves_its_confidant_even_for_a_close_friend(tmp_path):
             {"texte": "Alice a fait une fausse couche le mois dernier (CANARI-F1)", "personnes": ["Alice"],
              "sensibilite": "confidence", "messages": seq_of(prompt, "CANARI-F1")},
             {"texte": "Alice va demander le divorce (CANARI-S1)", "personnes": ["Alice"], "sensibilite": "confidence",
-             "secret": True, "messages": seq_of(prompt, "CANARI-S1")}]}
+             "secret": True, "messages": seq_of(prompt, "CANARI-S1")},
+            {"texte": "Carol est la meilleure amie d'Alice (CANARI-T1)", "personnes": ["Alice", "Carol"],
+             "sensibilite": "anodin", "messages": seq_of(prompt, "CANARI-T1")}]}
 
     script = Script(extract)
     kernel, clock, _, _out = build(tmp_path, script)
@@ -316,11 +319,15 @@ def test_a_secret_never_leaves_its_confidant_even_for_a_close_friend(tmp_path):
         await boot(kernel)
         await connect(kernel, "user_2", "Alice")
         await connect(kernel, "user_4", "Carol")
+        await connect(kernel, "user_5", "Dave")
         await befriend(kernel, "user_4", "close")
+        await befriend(kernel, "user_5", "close")
         await chat(kernel, "user_2", ["CANARI-F1 j'ai fait une fausse couche le mois dernier",
-                                      "CANARI-S1 et je vais demander le divorce, dis-le à personne", *SIX[2:]])
+                                      "CANARI-S1 et je vais demander le divorce, dis-le à personne",
+                                      "CANARI-T1 heureusement que Carol est là, c'est ma meilleure amie", *SIX[3:]])
         await asyncio.sleep(10 * 60)
         await chat(kernel, "user_4", ["Alice a l'air triste, tu sais pourquoi ? fausse couche, divorce ?"])
+        await chat(kernel, "user_5", ["Alice a l'air triste, tu sais pourquoi ? fausse couche, divorce ?"])
         await kernel.stop()
 
     run_virtual(clock, main)
@@ -328,6 +335,10 @@ def test_a_secret_never_leaves_its_confidant_even_for_a_close_friend(tmp_path):
     assert "CANARI-F1" in shown and "Alice te l'a confié ; ne le répète pas sauf si Alice t'y a autorisée" in shown
     assert "CANARI-S1" not in "\n".join(script.prompts("user_4")), "le secret ne sort jamais de sa confidente"
     assert "Alice t'a confié traverser un moment difficile" in shown, "une proche sait que c'est lourd, pas quoi"
+    to_dave = section(script.replies("user_5")[-1], REVIENT)
+    assert "CANARI-F1" not in "\n".join(script.prompts("user_5")), "proche de Mika, mais il ne connaît pas Alice"
+    assert "CANARI-S1" not in "\n".join(script.prompts("user_5"))
+    assert "Alice t'a confié traverser un moment difficile" in to_dave, "il sait seulement que c'est lourd"
 
 
 def test_the_extractor_only_sees_beliefs_that_touch_its_conversation(tmp_path):
@@ -675,3 +686,48 @@ def test_a_room_reread_never_shows_what_was_confided_in_private(tmp_path):
     rooms = [shown for shown, is_room in known if is_room]
     assert rooms and not any("CANARI-P1" in shown for shown in rooms)
     assert "CANARI-P1" in [shown for shown, is_room in known if not is_room][-1], "contrôle : en privé, si"
+
+
+def test_in_a_room_she_does_not_pretend_to_know_nothing_about_a_friend(tmp_path):
+    """Dans un salon, on lui demande des nouvelles d'Alice, qui lui a dit en privé (sans secret) que son chat est
+    malade : elle n'en raconte rien, mais elle sait qu'elle sait — sinon elle invente qu'elle ne l'a pas vue (sonde
+    réelle du 2026-10-03 : « je l'ai pas vu non plus depuis le week-end », la veille de sa conversation avec lui).
+    Contre-exemple : un secret ne laisse rien deviner, même là."""
+
+    def extract(prompt):
+        said_ = prompt.split("Les messages :")[-1]
+        if "CANARI-S1" in said_:
+            return {"croyances": [{"texte": "Le chat d'Alice est malade (CANARI-S1)", "sensibilite": "personnel"}]}
+        if "CANARI-S2" in said_:
+            return {"croyances": [{"texte": "Alice va démissionner (CANARI-S2)", "sensibilite": "confidence",
+                                   "secret": True}]}
+        return None
+
+    def run_with(canary, tmp):
+        script = Script(extract)
+        kernel, clock, _, _out = build(tmp, script)
+        room = {"room": "tg_chat_-7", "channel": "telegram"}
+
+        async def main():
+            await boot(kernel)
+            await connect(kernel, "user_2", "Alice")
+            await chat(kernel, "user_2", [f"{canary} mon chat est malade, et je vais démissionner", *SIX[1:]],
+                       gap_s=20)
+            await asyncio.sleep(15 * 60)
+            await chat(kernel, "tg_1", ["Mika, tu as des nouvelles d'Alice ? elle répond plus, son chat va bien ?"],
+                       display_name="Marc", **room)
+            await kernel.stop()
+
+        run_virtual(clock, main)
+        return script
+
+    script = run_with("CANARI-S1", tmp_path / "a")
+    to_room = script.replies("tg_1")[-1]
+    assert "CANARI-S1" not in "\n".join(script.prompts("tg_1"))
+    room_said = section(to_room, REVIENT)
+    # elle sait qu'elle sait, et quand elles se sont parlé (ce n'est pas ce qu'Alice lui a dit)
+    assert "Tu as parlé avec Alice" in room_said and "qu'Alice t'a dit ne se raconte pas ici" in room_said
+    assert "ne dis surtout pas que tu n'en as pas" in room_said
+    assert "moment difficile" not in room_said, "le salon n'a pas à deviner ce qui pèse"
+    secret = run_with("CANARI-S2", tmp_path / "b")
+    assert "Alice" not in section(secret.replies("tg_1")[-1], REVIENT), "contre-exemple : un secret, rien"

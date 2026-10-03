@@ -14,6 +14,9 @@ Contre-exemple : une exploration qui a vraiment lu ses flux, prouvée, reste une
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
+
+import pytest
 
 from mika.contracts import goals as goals_c
 from mika.contracts import needs as needs_c
@@ -21,9 +24,10 @@ from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.faculties.goals.faculty import GoalsParams
 from mika.faculties.goals.tend import lowered, of_words, short
-from mika.kernel.clock import DAY, HOUR, US
+from mika.kernel.clock import DAY, HOUR, US, local
 from mika.kernel.events import Content, Origin
-from tests.fixtures.mika import DOC, at_paris, befriend, connect
+from mika.sim.llm.persona import _section
+from tests.fixtures.mika import DOC, PARIS, at_paris, befriend, connect, said
 from tests.unit.test_goals import run
 
 MONDAY_8H = at_paris(2026, 9, 28, 8, 0)
@@ -96,6 +100,56 @@ def test_a_real_exploration_stays_something_to_tell_and_lifts_her_a_little(tmp_p
     matter, esteem = run(tmp_path, scenario, start=MONDAY_8H).result
     assert matter is not None and matter.kind == needs_c.DONE_MATTER
     assert esteem > 0.505
+
+
+def _musings(r) -> list:
+    return [o.at for o in r.of(goals_c.GOAL_OPENED) if o.data.origin in goals_c.MUSING_ORIGINS]
+
+
+@pytest.mark.parametrize(("cap", "most"), [(2, 2), (6, 3)])
+def test_she_daydreams_a_few_times_a_day_not_every_two_hours(tmp_path, cap, most):
+    """Une personne rêvasse moins souvent (sonde réelle du 2026-10-03 : quatre à cinq rêveries par jour, trois
+    appels chacune) : au plus ``musings_per_day`` par jour, même quand sa curiosité ne retombe jamais — et étalées
+    sur sa journée, pas deux d'affilée le matin puis plus rien. Contre-exemple : réglé plus haut, la même curiosité
+    en ouvre davantage."""
+    async def scenario(kernel, llm):
+        await kernel.set_params("goals", GoalsParams(seed_curiosity_from=0.0, musings_per_day=cap))
+        await asyncio.sleep(3 * DAY / US)
+
+    opened = _musings(run(tmp_path, scenario, start=MONDAY_8H))
+    days = Counter(local(t, PARIS).date() for t in opened)
+    if cap == 2:
+        assert len(days) >= 3, "elle a rêvassé chaque jour (sinon le test ne prouve rien)"
+        assert max(days.values()) <= 2
+        same_day = [b - a for a, b in zip(opened, opened[1:], strict=False)
+                    if local(a, PARIS).date() == local(b, PARIS).date()]
+        assert same_day and min(same_day) >= 5 * HOUR  # une le matin, une l'après-midi
+    else:  # sans plafond serré, ses cinq centres d'intérêt y passent dès le premier jour
+        assert max(days.values()) >= most
+
+
+def test_what_a_friend_made_her_discover_is_the_seed_of_her_next_daydream(tmp_path):
+    """Ce qu'une amie lui a fait découvrir la fait rêvasser avant ses centres d'intérêt de toujours (sonde réelle du
+    2026-10-03 : Inès lui parle de city pop japonaise, elle rêvasse ensuite à la cuisine, au café, à la bidouille).
+    Une rêverie dit « j'aimerais », pas « je fais ». Contre-exemple : « je le note, merci » ne porte aucun sujet."""
+    async def scenario(kernel, llm):
+        await befriend(kernel, "user_1", social_c.FRIEND)
+        await connect(kernel, "user_1", "Inès")
+        await (await kernel.perceive(said("user_1", "je le note, merci"))).reply
+        await (await kernel.perceive(said("user_1", "tu devrais écouter de la city pop japonaise, Mariya Takeuchi "
+                                                    "c'est trop beau"))).reply
+        await kernel.set_params("goals", GoalsParams(seed_curiosity_from=0.0))
+        await asyncio.sleep(3 * HOUR / US)
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0))
+    musings = [o for o in r.of(goals_c.GOAL_OPENED) if o.data.origin in goals_c.MUSING_ORIGINS]
+    first = musings[0].data
+    assert first.origin == goals_c.FROM_TALK and first.musing and first.about == ("user_1",)
+    assert first.title.text == "Rêvasser à ce dont « Inès » m'a parlé" and "city pop" in first.details.text
+    assert not [m for m in musings if "je le note" in (m.data.details.text or "")]
+    step = next(c for c in r.llm.calls if c.role == "step")
+    assert "city pop" in _section(step, "CE QUI L'A FAIT NAÎTRE")
+    assert "pas ce que tu fais" in _section(step, "CE À QUOI TU TRAVAILLES")
 
 
 def test_her_daydreams_are_titled_by_their_subject_in_good_french():

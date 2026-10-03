@@ -64,7 +64,9 @@ LIVED = [
     (7, 50, 1, 0.3, 0.0, "friend", "une semaine chaleureuse : amie, pas encore proche (il faut un mois)"),
     (7, 50, 5, 0.3, 0.0, "close", "un mois de conversations chaleureuses"),
     (7, 50, 5, 0.0, 0.0, "friend", "beaucoup d'échanges sans chaleur : amie, pas proche"),
-    (14, 100, 3, -0.3, 0.0, "close", "une longue histoire, même dans une mauvaise passe"),
+    (14, 100, 3, -0.3, 0.0, "friend", "quatorze jours de contact sans chaleur ni attachement : l'assiduité seule "
+                                      "ne fait pas une intimité (ADR 0058)"),
+    (60, 300, 7, 0.06, 0.0, "friend", "Bruno : soixante samedis polis, sans chaleur installée — amie, jamais proche"),
     (30, 150, 2, 0.4, 0.3, "close", "une dispute n'efface pas deux mois d'amitié"),
     (30, 150, 2, 0.4, 0.4, "acquaintance", "une rancune lourde, si"),
 ]
@@ -80,8 +82,16 @@ SILENCES = [
     (60, 300, 1, 10, "close", "dix jours sans nouvelles d'une proche : rien ne change"),
     (60, 300, 1, 40, "friend", "un long silence la fait descendre d'un cran"),
     (60, 300, 1, 150, "friend", "cinq mois : une longue histoire ne tombe jamais plus d'un cran"),
+    (60, 300, 1, 1000, "friend", "même des années plus tard : une longue amitié garde son plancher"),
     (5, 25, 1, 40, "acquaintance", "une jeune amitié qui se tait s'éloigne"),
     (5, 25, 1, 15, "friend", "contrôle : pas encore un long silence"),
+    # ADR 0058 : l'histoire se mesure au temps vécu ensemble, pas au calendrier
+    (20, 240, 1, 15, "friend", "Chloé, trois semaines intenses puis quinze jours de silence : pas devenue proche "
+                               "pendant son absence"),
+    (20, 240, 1, 60, "acquaintance", "deux mois sans nouvelles après trois semaines : une connaissance"),
+    (20, 240, 1, 365, "acquaintance", "un an plus tard : une connaissance, pas une amie pour toujours"),
+    (40, 400, 1, 200, "acquaintance", "une proche d'un mois et demi, que son silence a dépassée : une connaissance"),
+    (40, 400, 1, 30, "friend", "contrôle : la même, un mois après — un cran plus bas, encore amie"),
 ]
 
 
@@ -91,12 +101,26 @@ def test_closeness_follows_a_sliding_window_with_a_floor_of_history(days, messag
     assert lived(ct, 0.4, P, 0.0, now_day=ct.days[-1] + silent) == expected, why
 
 
+def test_an_absence_does_not_lengthen_a_story():
+    """Chloé (la course d'un an de l'audit) : vingt jours intenses, puis plus rien. Mesurée au calendrier, son
+    histoire passait le mois au jour 30 et elle devenait « proche » en silence — et le restait, un cran plus bas,
+    pour toujours. Mesurée au temps vécu, elle reste une amie, puis redevient une connaissance."""
+    ct = Contact(days=tuple(range(1000, 1020)), counts=(12,) * 20, total_days=20, first_day=1000, inbound=240)
+    seen = [lived(ct, 0.2, P, now_day=1019 + silent, bond=0.2) for silent in (0, 5, 11, 15, 20, 21, 60, 365, 1000)]
+    assert social_c.CLOSE not in seen, seen
+    assert seen[:5] == [social_c.FRIEND] * 5 and seen[-3:] == [social_c.ACQUAINTANCE] * 3, seen
+
+
 # (jours, messages, espacement, regard, attachement, attendu, pourquoi)
 BONDS = [
     (7, 50, 5, -0.1, 0.25, "close", "un mois d'amitié à laquelle elle tient, dans une mauvaise passe : toujours proche"),
     (7, 50, 5, -0.1, 0.05, "friend", "contrôle : sans attachement, la mauvaise passe la laisse amie"),
     (10, 100, 1, 0.0, 0.3, "friend", "dix soirées d'affilée, même chaleureuses : on ne devient pas proche en dix jours"),
     (11, 110, 3, 0.0, 0.3, "close", "les mêmes soirées sur un mois : proche, avant la longue histoire"),
+    # ADR 0058 : le temps approfondit un attachement modeste ; il ne le crée pas
+    (60, 300, 2, 0.0, 0.10, "close", "deux mois de contacts et un attachement modeste : proche"),
+    (30, 150, 2, 0.0, 0.10, "friend", "contrôle : le même attachement sur une histoire plus courte : amie"),
+    (60, 300, 2, 0.0, 0.05, "friend", "contrôle : la même histoire, sans s'y attacher (lien 0,05) : amie"),
 ]
 
 

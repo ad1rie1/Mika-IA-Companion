@@ -24,6 +24,7 @@ from mika.faculties.self import (
     esteem,
     params,
 )
+from mika.faculties.self.night import lived_day, told_day
 from mika.faculties.self.records import Dream, Journal
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.frame import Frame
@@ -221,7 +222,7 @@ def _persona(s: SelfState) -> list[Block]:
         ("valeurs", _lines(doc.values)),
         ("centres d'intérêt", _lines(doc.interests)),
         ("façons de parler", _lines(doc.speech)),
-        ("salutations (le ton, jamais recopiées)", _lines(doc.greetings)),
+        ("salutations (seuls leurs premiers mots lui sont montrés)", _lines(doc.greetings)),
         ("sa vie, à sa façon", _lines(doc.life)),
         ("ses goûts et ses avis", _lines(doc.tastes)),
         ("ce qui est vrai d'elle", _lines(doc.facts)),
@@ -311,8 +312,9 @@ def _history(s: SelfState, frame: Frame, ctx: InspectContext) -> Table:
 
 
 @SELF.inspect("nuits", title="Nuits", section="pensees", order=40,
-              description="Le journal qu'elle écrit la nuit, un par journée vécue, et ses rêves (deux par nuit au "
-                          "plus) : ce qui revient au réveil peut se dire le matin.")
+              description="Le journal qu'elle écrit la nuit, un par journée vécue, ce qu'elle en raconte à n'importe "
+                          "qui (rendu d'après les faits, sans modèle), et ses rêves (deux par nuit au plus) : ce qui "
+                          "revient au réveil peut se dire le matin.")
 def _inspect_nights(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
     journals = [j for _, j in sorted(s.journals.items(), reverse=True)][:RECENT]
     dreams = sorted(s.dreams, key=lambda d: -d.id)[:RECENT]
@@ -324,4 +326,11 @@ def _inspect_nights(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Blo
     if journals:
         latest = journals[0]
         blocks.append(Prose(texts.get(latest.text_ref) or FORGOTTEN, title=f"Journal du {latest.day}, en entier"))
+        told = ctx.store.content([latest.shareable_ref]).get(latest.shareable_ref) if latest.shareable_ref else None
+        if told:
+            blocks.append(Prose(told, title=f"Ce qu'elle en raconte à n'importe qui ({latest.day})"))
+    # ce qu'elle dira de sa journée en cours, d'après les faits (sans modèle) : ce qui sera dit demain
+    today = lived_day(frame)
+    blocks.append(Prose(told_day(frame, ctx.store, s, today) or "—",
+                        title=f"Sa journée en cours, telle qu'elle pourra la raconter ({today.isoformat()})"))
     return [*blocks, _timeline(journals, dreams, frame, texts), _history(s, frame, ctx)]

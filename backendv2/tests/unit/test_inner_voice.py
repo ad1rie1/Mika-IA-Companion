@@ -369,6 +369,6 @@ def test_the_person_page_says_why_she_holds_back(tmp_path):
 
     held, after = run(tmp_path, scenario)
     assert held["ses initiatives depuis, sans réponse"] == "1"
-    assert held["son dernier message attend une réponse"] == "oui, une question"
+    assert held["elle attend sa réponse (elle a écrit en dernier)"] == "oui, une question"
     assert after["ses initiatives depuis, sans réponse"] == "0"
 

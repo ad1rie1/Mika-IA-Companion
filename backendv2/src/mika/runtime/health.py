@@ -11,15 +11,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from mika.kernel.clock import DAY, MINUTE
+from mika.kernel.clock import DAY, MINUTE, US
+from mika.kernel.forms import show_duration
 from mika.kernel.inspect import describe_error
 from mika.kernel.registry import zone_known
 from mika.runtime.boundary import Failed, call
+from mika.vocab.episodes import Role
 
 if TYPE_CHECKING:
     from mika.runtime.bootstrap import Kernel
 
 OK, DEGRADED, KO = "ok", "degraded", "ko"
+
+#: le rôle sans lequel elle ne parle pas
+REPLY_ROLE = str(Role.REPLY)
+#: des réponses en échec plus vieilles que ça ne disent plus rien de l'état du fournisseur
+FAILING_WINDOW_US = DAY
 
 #: au-delà, une projection différée est « en retard » (le rappel lit du vieux)
 PROJECTION_LAG_MAX = 500
@@ -135,11 +142,30 @@ def _outbox(kernel: Kernel) -> Check:
 
 
 def _llm(kernel: Kernel) -> Check:
+    """Peut-elle répondre ? Un modèle doit servir « répondre » (un fournisseur déclaré sans ce rôle ne suffit
+    pas), et ce fournisseur doit répondre : des réponses qui échouent toutes depuis un moment, c'est une
+    panne, même si la configuration est juste (un Ollama arrêté, une clé révoquée)."""
     gateway = kernel.deps.gateway
     configured = getattr(gateway, "configured", gateway is not None)
     if not configured:
-        return Check("llm", DEGRADED, "aucun modèle configuré : elle ne peut pas parler")
+        return Check("llm", DEGRADED, "aucun modèle ne sert « répondre » : elle ne peut pas parler — déclare un "
+                                      "fournisseur (Configuration › Fournisseurs)")
+    failing = getattr(gateway, "failing", None)
+    if callable(failing):
+        now = kernel.mind.clock.now()
+        got = call(failing, REPLY_ROLE, now, FAILING_WINDOW_US, label="santé des modèles")
+        if not isinstance(got, Failed) and got:
+            backend, since, cause = got
+            return Check("llm", DEGRADED, f"le fournisseur « {backend} » ne répond pas ({cause}) depuis "
+                                          f"{_span(now - since)} : ses réponses échouent",
+                         (f"dernières réponses en échec depuis {_span(now - since)}",))
     return Check("llm", OK, "modèles branchés")
+
+
+def _span(us: int) -> str:
+    """Une durée lisible, à la minute près au-delà d'une minute (« 12 min », « 2 h 5 min », « 40 s »)."""
+    step = MINUTE if us >= MINUTE else US
+    return show_duration(max(US, us - us % step))
 
 
 def _config(kernel: Kernel) -> Check:

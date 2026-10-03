@@ -9,18 +9,26 @@ dort ne revient que sur un indice fort. Puis il garde ce qui peut se dire
 devant cette audience, le classe (pertinence × ce qu'il en reste × lien avec
 la personne × humeur × pas montré à l'instant), et rend :
 
-- ses souvenirs et ce qu'elle sait (``CE QUI TE REVIENT``) — ce qui vient
+- ses souvenirs et ce qu'elle sait (``CE QUI TE REVIENT``) — une personne
+  qu'elle connaît, nommée dans le message ou juste avant, y fait revenir ce
+  qu'elle sait d'elle ; « comment je t'appelle ? », ce qui n'appartient qu'à
+  eux (ADR 0055) ; ce qui vient
   d'autres au-delà de l'anodin porte une étiquette qui nomme qui l'a confié ;
   ce qui ne peut pas se dire ici devient une ligne vague (elle sait qu'elle
   sait, sans un mot du contenu) ;
 - ce qu'elle a vécu avec l'interlocuteur et d'autres (il était là) ;
 - des extraits d'échanges passés **avec cette personne** (ou dans ce salon),
   cherchés à part — les extraits des autres n'étouffent pas ses souvenirs —
-  et jamais ce que le fil montré contient déjà ;
+  et jamais ce que le fil montré contient déjà ; ni un échange qui n'apprend
+  rien (« coucou Mika ! »), ni deux fois le même ;
 - les promesses qu'elle lui a faites (sa fiche, donc seulement si elle est
-  ouverte), et celle qu'il est temps de tenir ; ce qui se passe dans sa vie (un
-  entretien jeudi, et après : « alors ? » — envers une amie, la première chose
-  qu'elle demanderait ; une situation qui dure, son chat malade) ;
+  ouverte), et celle qu'il est temps de tenir (un jour sans heure : toute la
+  journée) — quand quelque chose de grave la touche, seulement ce qui est dû
+  aujourd'hui ; ce qui se passe dans sa vie (un entretien jeudi, et après :
+  « alors ? » — envers une amie, la première chose qu'elle demanderait si ça
+  compte ; une situation qui dure, son chat malade ; le jour d'un anniversaire,
+  ses vœux). Quand quelque chose de grave la touche ces jours-ci (un deuil, une
+  rupture), le banal se tait et ce qui compte passe après des nouvelles d'elle ;
 - au premier mot d'une conversation (« salut ! »), ou quand elle écrit
   d'elle-même, ce que la personne lui a raconté de sa vie ces derniers jours
   (sa fiche, de première main) : « et Moustache, il va mieux ? » ne dépend plus
@@ -40,17 +48,18 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from mika.contracts import affect as affect_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
+from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.memory.extraction import day_words
+from mika.faculties.memory.extraction import day_words, same_moment
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, params
-from mika.faculties.memory.life import keep_window
+from mika.faculties.memory.life import due_now, kept_too_early, takes_up_moment
 from mika.faculties.memory.projections import ITEM_COLUMNS
 from mika.faculties.memory.salience import (
     Item,
@@ -64,6 +73,7 @@ from mika.faculties.memory.salience import (
     touched,
     unsaid,
     unsaid_line,
+    unsaid_public_line,
     valence_sign,
 )
 from mika.kernel.clock import DAY, HOUR, MINUTE
@@ -71,11 +81,11 @@ from mika.kernel.faculty import Zone
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.prompt import SectionBody
 from mika.vocab import affect as A
-from mika.vocab.days import window_of
+from mika.vocab.days import when_fr, window_of
 from mika.vocab.episodes import CONVERSATIONAL
 from mika.vocab.people import clean_tokens, is_identifiable
 from mika.vocab.privacy import Sensitivity
-from mika.vocab.words import fold, stems, words
+from mika.vocab.words import WORD, fold, stems, words
 
 #: ce qu'elle devine se dit comme tel ; ce qu'on lui a dit se lit déjà dans le texte
 ORIGIN_FR = {"inferred": "tu le devines"}
@@ -108,6 +118,16 @@ DATED_AFTER_US = 7 * DAY
 _TO_HER = re.compile(r"\b(?:tu|toi|ton|ta|tes)\b|\bt'")
 #: au premier mot d'une conversation, ce qui la concerne, cherché parmi au plus tant d'éléments récents
 _THEIR_LIFE_POOL = 40
+#: on lui demande comment on l'appelle, son surnom, leur blague (replié) : ce qui n'appartient qu'à eux revient
+_ABOUT_US = re.compile(r"\b(?:surnoms?|petits? noms?|comment (?:est-ce qu'?|est ce qu'?)?(?:(?:je|j'|j) "
+                       r"(?:te |t'|t )?|on (?:te |t'))appel\w*|comment tu (?:m'|m |me )?appel\w*|"
+                       r"tu m'?\s?appel\w* comment|"
+                       r"je t'?\s?appel\w* comment|not(?:re|'?) (?:blague|expression|delire|truc)|"
+                       r"nos (?:blagues|expressions|delires|trucs))")
+#: ce qui n'appartient qu'à eux, rendu au plus
+_BETWEEN_SHOWN = 4
+#: au plus tant de personnes nommées dont ce qu'elle sait revient (« t'as des nouvelles de Sam ? »)
+_NAMED_PEOPLE = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +145,8 @@ class Exchange:
     reply_text: str
     person: str = ""  # qui parlait (un salon en compte plusieurs)
     question: int | None = None
+    #: le moment que sa question désigne (« ce que je t'ai dit lundi matin ») : il se cite même s'il est dans le fil
+    dated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +157,8 @@ class Moment:
     text: str
     verdict: Verdict
     label: str
+    #: elle en a déjà parlé dans cette conversation (un moment à venir : pas la peine d'y revenir)
+    mentioned: bool = False
 
 
 @dataclass(slots=True)
@@ -142,8 +166,8 @@ class Recall:
     souvenirs: list[Recalled] = field(default_factory=list)
     beliefs: list[Recalled] = field(default_factory=list)
     exchanges: list[Exchange] = field(default_factory=list)
-    #: (id, texte, échéance, échéance implicite)
-    promised: list[tuple[int, str, int | None, bool]] = field(default_factory=list)
+    #: (id, texte, échéance, échéance implicite, un jour sans heure)
+    promised: list[tuple[int, str, int | None, bool, bool]] = field(default_factory=list)
     #: parmi elles, celles qu'il est temps de tenir (le moment dit est là)
     due_now: set[int] = field(default_factory=set)
     unsaid: list[str] = field(default_factory=list)
@@ -154,6 +178,8 @@ class Recall:
     self_said: list[Item] = field(default_factory=list)
     #: proche, ou amie : la première chose qu'une amie demanderait
     close: bool = False
+    #: quelque chose de grave la touche ces jours-ci (``memory.hard_times``) : le banal se tait
+    hard: bool = False
 
 
 def names_of(frame: Frame, keys: set[str]) -> dict[str, str]:
@@ -186,6 +212,95 @@ def phatic(text: str) -> bool:
 def addresses_her(text: str) -> bool:
     """On lui parle d'elle : « tu », « ton », « t'as »… (« c'est quoi ton plat préféré ? »)."""
     return bool(_TO_HER.search(fold(text)))
+
+
+def about_any(keys: Sequence[str]) -> str:
+    """La condition SQL « l'élément concerne l'une de ces clés » (``memory_about``, indexée par personne) ; les clés
+    vont en paramètres, dans l'ordre."""
+    return f"id IN (SELECT item FROM {c.ABOUT_TABLE} WHERE person IN ({','.join('?' * len(keys))}))"
+
+
+def about_us(text: str) -> bool:
+    """On lui demande ce qui n'appartient qu'à eux : comment on l'appelle, son surnom, leur blague (« tu te souviens
+    comment je t'appelle ? » — une question faite de mots qui, sinon, ne réveillent rien)."""
+    return bool(_ABOUT_US.search(fold(text)))
+
+
+def between_us(frame: Frame, store: Any, person: str, aud: Audience, memo: dict[str, str]) -> list[tuple[Item,
+                                                                                                         Verdict]]:
+    """Ce qui n'appartient qu'à elle et à cette personne (un surnom, leur blague), tel que ça peut se dire ici :
+    à la personne elle-même, en privé (dit en privé : jamais en public)."""
+    if not is_identifiable(person):
+        return []
+    handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
+    rows = store.query_mind(
+        f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE kind=? AND status='active' AND between_us=1 "
+        f"AND {about_any(handles)} ORDER BY importance DESC, id DESC LIMIT ?", (c.BELIEF, *handles, _BETWEEN_SHOWN))
+    out = []
+    for row in rows:
+        item = Item.of(dict(zip(ITEM_COLUMNS, row, strict=True)))
+        verdict = verdict_of(frame, item, person, aud, memo, store)
+        if verdict.ok:
+            out.append((item, verdict))
+    return out
+
+
+def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
+                 memo: dict[str, str]) -> dict[str, tuple[str, ...]]:
+    """Les personnes qu'elle connaît (dont elle sait quelque chose) nommées dans ce texte — par leur nom ou leur
+    prénom, quand un seul le porte (deux Alice ne se devinent pas) —, hors l'interlocuteur : la personne (sa clé) →
+    les clés sous lesquelles elle est notée. « qq a des nouvelles de Sam ? », puis « toi tu sais comment il va ? »
+    (sonde réelle du 2026-10-03 : rien ne revenait, et elle répondait « j'ai pas de nouvelles non plus »)."""
+    said = " ".join(WORD.findall(fold(text)))
+    if not said:
+        return {}
+    her = " ".join(WORD.findall(fold(frame.get(self_c.PERSONA).name or "Mika")))
+    tokens = set(said.split())
+    rows = store.query_mind(f"SELECT DISTINCT a.person FROM {c.ABOUT_TABLE} a JOIN {c.ITEMS_TABLE} i ON i.id = a.item "
+                            "WHERE i.status='active' AND i.kind IN (?, ?)", (c.SOUVENIR, c.BELIEF))
+    raw = {str(k) for (k,) in rows if k}
+    by_name: dict[str, set[str]] = {}
+    keys_of: dict[str, set[str]] = {}
+    for k in sorted(raw):
+        person = canon(frame, (k,), memo)[0]
+        keys_of.setdefault(person, set()).add(k)
+        name = k[5:] if k.startswith("name:") else frame.get(identity_c.IDENTITY(k)).name
+        folded = " ".join(WORD.findall(fold(name or "")))
+        for n in {folded, *folded.split()[:1]}:
+            if len(n) >= 3:
+                by_name.setdefault(n, set()).add(person)
+    out: dict[str, tuple[str, ...]] = {}
+    for n in sorted(by_name, key=lambda n: (-len(n), n)):
+        persons = by_name[n]
+        hit = re.search(rf"(?<!\w){re.escape(n)}(?!\w)", said) if " " in n else n in tokens
+        if not hit or len(persons) != 1:
+            continue
+        person = next(iter(persons))
+        if person != interlocutor and person not in out and n != her:
+            out[person] = tuple(sorted(keys_of.get(person, ())))
+    return dict(list(out.items())[:_NAMED_PEOPLE])
+
+
+def about_named(frame: Frame, store: Any, named: Mapping[str, tuple[str, ...]], p: MemoryParams) -> list[Item]:
+    """Ce qu'elle sait de chaque personne nommée, quelques éléments, les plus importants et les plus frais d'abord
+    (ils passent ensuite par les verdicts habituels : en salon, « pas à toi d'en parler » ; un secret, rien)."""
+    out: list[Item] = []
+    for keys in named.values():
+        if not keys:
+            continue
+        rows = store.query_mind(
+            f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE kind IN (?, ?) AND status='active' "
+            f"AND {about_any(keys)} ORDER BY importance DESC, id DESC LIMIT ?",
+            (c.SOUVENIR, c.BELIEF, *keys, _THEIR_LIFE_POOL))
+        items = [Item.of(dict(zip(ITEM_COLUMNS, r, strict=True))) for r in rows]
+        items.sort(key=lambda it: (-it.importance * min(1.0, salience(it, frame.now, p)), -it.id))
+        out += items[: max(1, p.max_person_items)]
+    return out
+
+
+def due_today(pr: c.PendingPromise, frame: Frame) -> bool:
+    """Une promesse datée dont le jour est venu (ou passé) ; pas une promesse vague, ni celle de demain."""
+    return pr.due is not None and not pr.implicit_due and not kept_too_early(pr, frame.now, frame)
 
 
 def query_of(frame: Frame, store: Any) -> str:
@@ -344,7 +459,7 @@ def bond_of(frame: Frame, keys: Sequence[str], memo: dict[str, float]) -> float:
 
 @MEMORY.enricher("recall", episodes=CONVERSATIONAL, deadline_ms=2500,
                  reads=[identity_c.PERSON, identity_c.IDENTITY, identity_c.HANDLES, c.PROMISES_TO, c.LIFE_EVENTS,
-                        affect_c.MOOD, affect_c.BOND, social_c.CLOSENESS])
+                        c.HARD_TIMES, affect_c.MOOD, affect_c.BOND, social_c.CLOSENESS, social_c.CONTACT])
 async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Recall | None:
     vectors, store = ports.get("vectors"), ports.get("store")
     ep, aud = frame.episode, frame.audience
@@ -353,34 +468,59 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     p = params(frame.env.params_of("memory", frame.root))
     person = frame.get(identity_c.PERSON(ep.target))
     out = Recall(name=frame.get(identity_c.IDENTITY(ep.target)).name,
-                 close=is_identifiable(person) and frame.get(social_c.CLOSENESS(person)) in _BOND_FLOOR)
+                 close=is_identifiable(person) and frame.get(social_c.CLOSENESS(person)) in _BOND_FLOOR,
+                 hard=is_identifiable(person) and frame.get(c.HARD_TIMES(person)) > 0)
     memo: dict[str, str] = {}
     if aud.private_ok:
-        pending = sorted(frame.get(c.PROMISES_TO(person)), key=lambda pr: (pr.due or 2**62, pr.id))[: p.max_promises]
+        pending = sorted(frame.get(c.PROMISES_TO(person)), key=lambda pr: (pr.due or 2**62, pr.id))
+        out.due_now = {pr.id for pr in pending if due_now(pr, frame, p)}
+        if out.hard:
+            # un soir de deuil, pas de logistique (sonde réelle du 2026-10-03 : « demain je te rappellerai pour ton
+            # rdv chez le dentiste », juste après « on l'a endormi ») : ce qui n'est pas dû aujourd'hui attend son
+            # jour — la promesse reste due, elle reviendra le jour dit
+            pending = [pr for pr in pending if pr.id in out.due_now or due_today(pr, frame)]
+        pending = pending[: p.max_promises]
         texts = {i: it.text for i, it in items_by_id(store, [pr.id for pr in pending]).items()}
-        out.promised = [(pr.id, texts[pr.id], pr.due, pr.implicit_due) for pr in pending if texts.get(pr.id)]
-        for pr in pending:
-            window = keep_window(pr, frame, p)
-            if window is not None and window[0] <= frame.now <= window[2]:
-                out.due_now.add(pr.id)
-    out.moments = _moments(frame, store, person, aud, p, memo)
+        out.promised = [(pr.id, texts[pr.id], pr.due, pr.implicit_due, pr.all_day) for pr in pending
+                        if texts.get(pr.id)]
+        out.due_now &= {pr.id for pr in pending}
+    out.moments = _already_mentioned(_moments(frame, store, person, aud, p, memo, hard=out.hard), frame, store,
+                                     ep.target)
     bonds: dict[str, float] = {}
     is_reply = ep.attrs.get("reply_to") is not None
     query = query_of(frame, store) if is_reply else ""
     context = context_of(frame, store, p.context_messages) if is_reply else ""
-    if not is_reply or (phatic(query) and not context.strip()):
+    if is_reply and about_us(query):
+        # « tu te souviens comment je t'appelle ? » : ce qui n'appartient qu'à eux revient (ADR 0055)
+        mine = between_us(frame, store, person, aud, memo)
+        out.names = names_of(frame, {o for it, v in mine for o in (*v.others, *it.about)})
+        out.beliefs += [Recalled(it, v, it.text + tag(v, out.names)) for it, v in mine]
+    # une personne qu'elle connaît, nommée dans le message ou juste avant : elle y pense (ADR 0055)
+    named = named_people(frame, store, f"{context} {query}", person, memo) if is_reply else {}
+    # « tu te souviens de ce que je t'ai dit hier soir ? » est fait des mots d'une politesse (« hier », « soir »),
+    # mais désigne un moment : elle s'en souvient aussi par le temps (ADR 0059)
+    dated = is_reply and window_of(query, frame.now, frame.env.tz_of(frame.root)) is not None
+    if not is_reply or (phatic(query) and not context.strip() and not named):
         # le premier mot d'une conversation (« salut ! »), ou elle qui écrit d'elle-même : ce qui se passe dans sa
         # vie à elle — pas les mots d'une consigne ni d'une politesse, qui ne désignent rien
         _their_life(out, frame, store, person, aud, p, memo, bonds)
-        return out
-    if vectors is None or not query.strip() or phatic(query):
+        if not dated:
+            return out
+    searching = vectors is not None and bool(query.strip()) and not phatic(query)
+    if not searching and not named and not dated:
         return out  # une politesse ne réveille rien
-    if addresses_her(query):
-        out.self_said = await _self_said(vectors, store, query, p)
-    near, wider = await search(vectors, query, context, p.recall_k, kinds={c.SOUVENIR, c.BELIEF})
+    near: dict[int, float] = {}
+    wider: dict[int, float] = {}
+    if searching:
+        if addresses_her(query):
+            out.self_said = await _self_said(vectors, store, query, p)
+        near, wider = await search(vectors, query, context, p.recall_k, kinds={c.SOUVENIR, c.BELIEF})
     found = items_by_id(store, sorted({*near, *wider}))
     candidates = kept(scored(near, wider, {i: it.text for i, it in found.items()}, query, context), p)
-    said_ids = {it.id for it in out.self_said}
+    for item in about_named(frame, store, named, p):
+        found.setdefault(item.id, item)
+        candidates[item.id] = max(candidates.get(item.id, 0.0), p.recall_floor)
+    said_ids = {it.id for it in out.self_said} | {r.item.id for r in out.beliefs}
     items = {i: found[i] for i in candidates if i in found and i not in said_ids}
     mood = frame.get(affect_c.MOOD)
     mood_valence = A.valence(mood.felt) * mood.felt_intensity if mood.felt_intensity >= 0.1 else 0.0
@@ -411,18 +551,33 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
         ranked.append((rank(item, candidates[item.id], now, p, interlocutor=person, mood_valence=mood_valence,
                             bond=bond), item, verdict))
     ranked.sort(key=lambda r: (-r[0], r[1].id))
-    names = names_of(frame, {o for _, it, v in ranked for o in (*v.others, *it.about)} | set(hidden))
+    names = {**out.names, **names_of(frame, {o for _, it, v in ranked for o in (*v.others, *it.about)} | set(hidden))}
     out.names = names
     for _score, item, verdict in ranked:
         bucket, cap = (out.souvenirs, p.max_souvenirs) if item.kind == c.SOUVENIR else (out.beliefs, p.max_beliefs)
         if len(bucket) < cap:
             bucket.append(Recalled(item, verdict, item.text + tag(verdict, names)))
-    if hidden and not aud.public and p.max_unsaid:
+    if hidden and p.max_unsaid:
         for who in sorted(hidden, key=lambda w: (-max(candidates[i.id] for i in hidden[w]), w))[: p.max_unsaid]:
-            out.unsaid.append(unsaid_line(who, names, heavy=any(heavy(i) for i in hidden[who]), close=close,
+            out.unsaid.append(unsaid_public_line(who, names, _last_talk(frame, who)) if aud.public else
+                              unsaid_line(who, names, heavy=any(heavy(i) for i in hidden[who]), close=close,
                                           asked=asked.get(who, ())[:3]))
-    out.exchanges = await _exchanges_for(frame, store, vectors, query, context, person, aud, p)
+    if searching or dated:
+        out.exchanges = await _exchanges_for(frame, store, vectors if searching else None, query, context, person,
+                                             aud, p, (frame.get(self_c.PERSONA).name or "Mika", out.name))
     return out
+
+
+def _last_talk(frame: Frame, person: str) -> str:
+    """Quand cette personne lui a écrit pour la dernière fois, en mots (« hier soir », « il y a 3 jours ») ; « »
+    sans trace ou au-delà d'un mois (là, ce n'est plus « avoir des nouvelles »)."""
+    try:
+        last = frame.get(social_c.CONTACT(person)).last_in
+    except KeyError:
+        return ""
+    if not last or frame.now - last > 30 * DAY:
+        return ""
+    return when_fr(last, frame.now, frame.env.tz_of(frame.root))
 
 
 def heavy(item: Item) -> bool:
@@ -439,11 +594,10 @@ def _their_life(out: Recall, frame: Frame, store: Any, person: str, aud: Audienc
         return
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
     since = frame.now - round(p.person_recall_days * DAY)
-    where = " OR ".join("about LIKE ?" for _ in handles)
     rows = store.query_mind(
         f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE kind IN (?, ?) AND status='active' "
-        f"AND born_at>=? AND ({where}) ORDER BY importance DESC, id DESC LIMIT ?",
-        (c.SOUVENIR, c.BELIEF, since, *(f'%"{h}"%' for h in handles), _THEIR_LIFE_POOL))
+        f"AND born_at>=? AND {about_any(handles)} ORDER BY importance DESC, id DESC LIMIT ?",
+        (c.SOUVENIR, c.BELIEF, since, *handles, _THEIR_LIFE_POOL))
     picked: list[tuple[float, Item, Verdict]] = []
     for row in rows:
         item = Item.of(dict(zip(ITEM_COLUMNS, row, strict=True)))
@@ -455,7 +609,9 @@ def _their_life(out: Recall, frame: Frame, store: Any, person: str, aud: Audienc
         bond = bond_of(frame, canon(frame, item.about, memo), bonds) if item.kind == c.SOUVENIR else 0.0
         picked.append((item.importance * min(1.0, salience(item, frame.now, p, bond)), item, verdict))
     picked.sort(key=lambda x: (-x[0], -x[1].id))
-    names = names_of(frame, {o for _, it, v in picked for o in (*v.others, *it.about)})
+    taken = {r.item.id for r in (*out.souvenirs, *out.beliefs)}
+    picked = [x for x in picked if x[1].id not in taken]
+    names = {**out.names, **names_of(frame, {o for _, it, v in picked for o in (*v.others, *it.about)})}
     out.names = names
     for _w, item, verdict in picked[: p.max_person_items]:
         bucket = out.souvenirs if item.kind == c.SOUVENIR else out.beliefs
@@ -480,53 +636,120 @@ async def _self_said(vectors: Any, store: Any, query: str, p: MemoryParams) -> l
     return [found[i] for i in order[: p.max_self_said] if i in found]
 
 
+#: deux échanges dont ce qu'on lui a dit porte à ce point les mêmes mots du sujet sont le même échange
+SAME_EXCHANGE = 0.8
+_EXCHANGE_COLUMNS = "id, at, user_text, reply_text, person, question"
+
+
+def contentless(text: str, names: Sequence[str] = ()) -> bool:
+    """Ce qu'on lui a dit ne porte aucun sujet : une salutation, un « ok », un prénom (« coucou Mika ! ») — un échange
+    qui n'apprend rien à se rappeler."""
+    named = {w[:6] for n in names for w in words(n, min_len=4)}
+    return not (topic(text) - named)
+
+
+def same_exchange(a: Exchange, b: Exchange) -> bool:
+    """Le même échange, redit : ce qu'on lui a dit porte presque les mêmes mots du sujet."""
+    x, y = topic(a.user_text), topic(b.user_text)
+    return bool(x and y) and len(x & y) / len(x | y) >= SAME_EXCHANGE
+
+
+def distinct(exchanges: Sequence[Exchange], taken: Sequence[Exchange] = ()) -> list[Exchange]:
+    """Dans cet ordre de préférence, un seul de chaque échange redit (ni deux fois le même, ni ce que ``taken``
+    montre déjà)."""
+    out: list[Exchange] = []
+    for e in exchanges:
+        if not any(same_exchange(e, o) for o in (*taken, *out)):
+            out.append(e)
+    return out
+
+
 async def _exchanges_for(frame: Frame, store: Any, vectors: Any, query: str, context: str, person: str,
-                         aud: Audience, p: MemoryParams) -> list[Exchange]:
+                         aud: Audience, p: MemoryParams, names: Sequence[str] = ()) -> list[Exchange]:
     """Les échanges passés avec cette personne (ou dans ce salon), cherchés
-    parmi les siens seulement : ceux des autres ne prennent pas leur place."""
+    parmi les siens seulement : ceux des autres ne prennent pas leur place. Ni un échange qui n'apprend rien
+    (« coucou Mika ! » : ce qu'on lui a dit ne porte aucun sujet), ni deux fois le même — avec les années, les
+    salutations se ressemblent et se multiplient (ADR 0059). Jamais la liste de tous ses échanges : le temps se lit
+    sur l'intervalle, les vecteurs se filtrent par personne. Sans ``vectors`` : seulement le moment désigné."""
     ep = frame.episode
     if ep is None or p.max_chunks <= 0:
         return []
     room = ep.attrs.get("room") or aud.room
+    before = ep.attrs.get("reply_to") or frame.now
+    # ce qui est encore à l'écran (sans fil connu) ne se répète pas (le fil exact se vérifie à la composition)
+    shown_after = frame.now - RECENT_EXCHANGE_US
     if room:
         # dans un salon : seulement ce qui s'y est dit (public pour ce salon)
+        scope, args = "room=?", (room,)
         ids = [int(r[0]) for r in store.query_mind(f"SELECT id FROM {c.CHUNKS_TABLE} WHERE room=?", (room,))]
+        if not ids:
+            return []
+        among: dict[str, Any] = {"keys": ids}
     else:
         # en privé : ses échanges privés — sur ses autres adresses seulement si sa fiche est ouverte
         # (une liaison par simple recoupement, pas encore confirmée : ses seuls échanges)
         handles = tuple(frame.get(identity_c.THREAD(ep.target))) if aud.private_ok else ()
         handles = tuple(sorted({ep.target, *handles}))
-        marks = ",".join("?" * len(handles))
-        ids = [int(r[0]) for r in store.query_mind(
-            f"SELECT id FROM {c.CHUNKS_TABLE} WHERE room IS NULL AND person IN ({marks})", handles)]
-    if not ids:
-        return []
-    before = ep.attrs.get("reply_to") or frame.now
+        scope, args = f"room IS NULL AND person IN ({','.join('?' * len(handles))})", handles
+        among = {"kinds": {c.CHUNK}, "persons": handles}
+    speakers: dict[str, str] = {}
+
+    def worth(e: Exchange) -> bool:
+        if e.person and e.person not in speakers:
+            speakers[e.person] = frame.get(identity_c.IDENTITY(e.person)).name
+        return not contentless(e.user_text, (*names, speakers.get(e.person, "")))
+
+    def exchanges(rows: Sequence[tuple[Any, ...]]) -> list[Exchange]:
+        got = [Exchange(int(i), int(at), u, r, who or "", q) for i, at, u, r, who, q in rows]
+        return [e for e in got if e.at < shown_after and e.id < before and worth(e)]
+
     # se souvenir par le temps : « ce que je t'ai dit lundi matin » ne contient aucun mot du souvenir (sonde réelle
     # du 2026-10-02 : elle ne retrouvait pas l'entretien) — les échanges de ce moment-là, les plus fournis d'abord
     dated: list[Exchange] = []
     window = window_of(query, frame.now, frame.env.tz_of(frame.root)) if ep.attrs.get("reply_to") else None
     if window is not None:
-        marks = ",".join("?" * len(ids))
-        dated = [Exchange(int(i), int(at), u, r, who or "", q) for i, at, u, r, who, q in store.query_mind(
-            f"SELECT id, at, user_text, reply_text, person, question FROM {c.CHUNKS_TABLE} WHERE id IN ({marks}) "
-            "AND at >= ? AND at < ? ORDER BY length(user_text) DESC, id LIMIT ?",
-            (*ids, window[0], window[1], p.max_chunks))]
-        dated = [e for e in dated if frame.now - e.at > RECENT_EXCHANGE_US and e.id < before]
-    near, wider = await search(vectors, query, context, p.max_chunks * 4, keys=ids)
+        dated = distinct(exchanges(store.query_mind(
+            f"SELECT {_EXCHANGE_COLUMNS} FROM {c.CHUNKS_TABLE} WHERE {scope} AND at >= ? AND at < ? AND at < ? "
+            "AND id < ? ORDER BY length(user_text) DESC, id LIMIT ?",
+            (*args, window[0], window[1], shown_after, before, p.max_chunks * 4))))[: p.max_chunks]
+        dated = [replace(e, dated=True) for e in dated]
+    if vectors is None:
+        return dated  # une question faite des mots d'une politesse : seulement le moment qu'elle désigne
+    near, wider = await search(vectors, query, context, p.max_chunks * 4, **among)
     if not near and not wider:
         return dated
-    marks = ",".join("?" * len({*near, *wider}))
-    rows = store.query_mind(f"SELECT id, at, user_text, reply_text, person, question FROM {c.CHUNKS_TABLE} "
-                            f"WHERE id IN ({marks})", tuple(sorted({*near, *wider})))
-    sims = kept(scored(near, wider, {int(r[0]): f"{r[2]}\n{r[3]}" for r in rows}, query, context), p)
-    rows = [r for r in rows if int(r[0]) in sims]
-    exchanges = [Exchange(int(i), int(at), u, r, who or "", q) for i, at, u, r, who, q in rows]
-    # ce qui est encore dans le fil montré ne se répète pas (le fil exact se vérifie à la composition)
-    exchanges = [e for e in exchanges if frame.now - e.at > RECENT_EXCHANGE_US and e.id < before]
-    exchanges.sort(key=lambda e: (-sims.get(e.id, 0.0), e.id))
-    taken = {e.id for e in dated}
-    return (dated + [e for e in exchanges if e.id not in taken])[: p.max_chunks * 2]
+    hits = tuple(sorted({*near, *wider}))
+    found = exchanges(store.query_mind(
+        f"SELECT {_EXCHANGE_COLUMNS} FROM {c.CHUNKS_TABLE} WHERE id IN ({','.join('?' * len(hits))}) AND {scope}",
+        (*hits, *args)))
+    ok = {e.id for e in found}
+    sims = kept(scored({k: v for k, v in near.items() if k in ok}, {k: v for k, v in wider.items() if k in ok},
+                       {e.id: f"{e.user_text}\n{e.reply_text}" for e in found}, query, context), p)
+    found = [e for e in found if e.id in sims]
+    # le plus proche d'abord ; entre deux fois le même échange, le plus récent
+    found = distinct(sorted(found, key=lambda e: (-sims[e.id], -e.at, -e.id)), dated)
+    found.sort(key=lambda e: (-sims[e.id], e.id))
+    return (dated + found)[: p.max_chunks * 2]
+
+
+#: une conversation : ce qu'elle a dit depuis ce temps-là
+MENTIONED_SPAN_US = 2 * HOUR
+ALREADY_SAID = " — tu lui en as déjà parlé tout à l'heure : pas la peine d'y revenir."
+
+
+def _already_mentioned(moments: list[Moment], frame: Frame, store: Any, handle: str) -> list[Moment]:
+    """Les moments à venir qu'elle a déjà évoqués dans cette conversation : « demain, c'est ton anniversaire » ne se
+    redit pas à chaque réponse (sonde réelle du 2026-10-03 : trois fois de suite, à « ouais », « bof », « je sais
+    pas »)."""
+    if store is None or not any(not m.event.ongoing and m.event.when > frame.now for m in moments):
+        return moments
+    rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE person=? AND room IS NULL AND "
+                           "role='assistant' AND at>=? ORDER BY id DESC LIMIT 12",
+                           (handle, frame.now - MENTIONED_SPAN_US))
+    said = [str(r[0] or "") for r in rows]
+    names = (frame.get(identity_c.IDENTITY(handle)).name, "Mika")
+    return [replace(m, mentioned=True) if not m.event.ongoing and m.event.when > frame.now and any(
+        takes_up_moment(m.event, m.label, line, names) for line in said) else m for m in moments]
 
 
 def followed_lately(ev: c.LifeEvent, now: int) -> bool:
@@ -535,11 +758,13 @@ def followed_lately(ev: c.LifeEvent, now: int) -> bool:
 
 
 def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryParams,
-             memo: dict[str, str]) -> list[Moment]:
+             memo: dict[str, str], *, hard: bool = False) -> list[Moment]:
     """Ce qui se passe dans sa vie : à venir bientôt, tout juste passé et dont
-    elles n'ont pas encore reparlé (en mots : pas seulement montré), une
-    situation qui dure — et ce dont elles viennent de reparler, le temps de la
-    conversation."""
+    elles n'ont pas encore reparlé (en mots : pas seulement montré ; ce que la
+    personne en a raconté le jour même compte), une situation qui dure — et ce
+    dont elles viennent de reparler, le temps de la conversation. Quand quelque
+    chose de grave la touche ces jours-ci, le banal (ni important, ni à fêter)
+    se tait."""
     now = frame.now
     shown: list[tuple[c.LifeEvent, Verdict]] = []
     for ev in frame.get(c.LIFE_EVENTS(person)):
@@ -547,10 +772,14 @@ def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryPara
             current = ev.when <= now <= ev.when + round(p.situation_days * DAY)
             keep = current and (not ev.followed_at or followed_lately(ev, now)
                                 or now - ev.followed_at >= round(p.situation_reask_days * DAY))
+        elif hard and not ev.festive and ev.importance < c.IMPORTANT_MOMENT:
+            keep = False  # le lendemain d'un deuil, on ne demande pas comment s'est passé le coiffeur
+        elif ev.followed_at:
+            # repris (par elle, ou par ce que la personne en a raconté) : sous ses yeux le temps de la conversation
+            keep = followed_lately(ev, now) and now <= ev.when + round(p.event_recent_days * DAY)
         else:
             upcoming = now <= ev.when <= now + round(p.event_ahead_days * DAY)
-            recent = ev.when < now <= ev.when + round(p.event_recent_days * DAY) and (
-                not ev.followed_at or followed_lately(ev, now))
+            recent = ev.when < now <= ev.when + round(p.event_recent_days * DAY)
             keep = upcoming or recent
         if not keep:
             continue
@@ -562,11 +791,17 @@ def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryPara
         return []
     texts = store.content([ev.text_ref for ev, _ in shown])
     names = names_of(frame, {o for _, v in shown for o in v.others})
-    out = []
+    who = [*names_of(frame, {person, *(o for ev, _ in shown for o in ev.about)}).values()]
+    out: list[Moment] = []
     for ev, verdict in shown:
         text = texts.get(ev.text_ref)
-        if text:  # oublié : rien
-            out.append(Moment(ev, text, verdict, text + tag(verdict, names)))
+        if not text:
+            continue  # oublié : rien
+        day = frame.local(ev.when).date()
+        if any(m.event.ongoing == ev.ongoing and frame.local(m.event.when).date() == day
+               and same_moment(text, m.text, who) for m in out):
+            continue  # « son anniversaire » et « l'anniversaire de Sam », le même samedi : un seul moment
+        out.append(Moment(ev, text, verdict, text + tag(verdict, names)))
     return out
 
 
@@ -611,7 +846,8 @@ def _body(recall: Recall, frame: Frame, *, witness: bool) -> SectionBody | None:
             advice += " Ce qu'on t'a confié en privé, à toi de juger si ça se dit ici."
         lines.append(advice)
     return SectionBody("\n".join(lines), level=max((r.verdict.level for r in shown), default=0),
-                       provenance=tuple(f"memory:{r.item.id}" for r in shown), witness=witness)
+                       provenance=tuple(f"memory:{r.item.id}" for r in shown), witness=witness,
+                       tied=any(r.verdict.tied for r in shown))
 
 
 @MEMORY.section("memories", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["stance"], trim_rank=30,
@@ -645,7 +881,9 @@ def _exchanges(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> Secti
     if not recall or not recall.exchanges:
         return None
     since = shown_since(enrich)
-    exchanges = [e for e in recall.exchanges if since is None or (e.question or e.id) < since]
+    # ce qui est déjà dans le fil ne se répète pas — sauf le moment que sa question désigne : au bout d'une semaine de
+    # fil, qui a dit quoi lundi matin s'y perd (sonde réelle du 2026-10-03 : elle lui a prêté son propre rêve)
+    exchanges = [e for e in recall.exchanges if e.dated or since is None or (e.question or e.id) < since]
     p = params(frame.env.params_of("memory", frame.root))
     exchanges = exchanges[: p.max_chunks]
     if not exchanges:
@@ -683,10 +921,14 @@ def _promises(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
     if not recall or not recall.promised:
         return None
     lines = []
-    for pid, text, due, implicit in recall.promised:
+    today = frame.local().date()
+    for pid, text, due, implicit, all_day in recall.promised:
         when = ""
         if due and not implicit:
-            when = f" (c'était pour {when_words(due, frame)})" if due < frame.now else f" (pour {when_words(due, frame)})"
+            # un jour sans heure n'est passé qu'une fois la journée finie : le soir même, c'est encore « pour
+            # aujourd'hui »
+            past = frame.local(due).date() < today if all_day else due < frame.now
+            when = f" (c'était pour {when_words(due, frame)})" if past else f" (pour {when_words(due, frame)})"
         now = " — c'est le moment de le faire" if pid in recall.due_now else ""
         lines.append(f"- {text}{when}{now} — n° {pid}")
     return SectionBody("\n".join(lines), provenance=tuple(f"memory:{pid}" for pid, *_ in recall.promised))
@@ -698,16 +940,23 @@ def _life(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
     recall: Recall | None = enrich.get("recall")
     if not recall or not recall.moments:
         return None
+    aud = frame.audience
     lines = []
+    if recall.hard and aud is not None and aud.private_ok:
+        # en privé seulement : un salon n'a pas à deviner ce qui pèse (ADR 0054)
+        lines.append("Ces jours-ci, quelque chose de dur lui est arrivé : d'abord prendre de ses nouvelles, le reste "
+                     "vient après.")
     for m in recall.moments:
-        lines.append(_moment_line(m, frame, recall.close))
+        lines.append(_moment_line(m, frame, recall.close, recall.hard))
     return SectionBody("\n".join(lines), level=max(m.verdict.level for m in recall.moments),
-                       provenance=tuple(f"memory:{m.event.id}" for m in recall.moments))
+                       provenance=tuple(f"memory:{m.event.id}" for m in recall.moments),
+                       tied=any(m.verdict.tied for m in recall.moments))
 
 
-def _moment_line(m: Moment, frame: Frame, close: bool) -> str:
-    """Un moment, dit comme on y pense : à venir ; passé — envers une amie, c'est la première chose qu'elle
-    demanderait ; une situation qui dure ; ce dont vous venez de reparler."""
+def _moment_line(m: Moment, frame: Frame, close: bool, hard: bool = False) -> str:
+    """Un moment, dit comme on y pense : à venir ; le jour d'une fête, ses vœux ; passé — envers une amie, si ça
+    compte, c'est la première chose qu'elle demanderait (après des nouvelles d'elle, quand quelque chose de grave
+    la touche) ; sinon, si ça vient ; une situation qui dure ; ce dont vous venez de reparler."""
     ev = m.event
     if ev.ongoing:
         since = when_words(ev.when, frame)
@@ -718,14 +967,34 @@ def _moment_line(m: Moment, frame: Frame, close: bool) -> str:
             return f"{head} — une amie lui demanderait comment ça va de ce côté-là."
         return f"{head} — tu peux lui en demander des nouvelles, si ça vient."
     when = when_words(ev.when, frame, all_day=ev.all_day)
+    if ev.festive:
+        return _festive_line(m, frame, when, hard)
+    if ev.followed_at:
+        return f"- {when} : {m.label} — " + ("vous en avez reparlé." if ev.when > frame.now
+                                              else "c'est passé, et vous en avez reparlé.")
     if ev.when > frame.now:
-        return f"- {when} : {m.label}"
-    if followed_lately(ev, frame.now):
-        return f"- {when} : {m.label} — c'est passé, et vous en avez reparlé."
-    if close:
+        return f"- {when} : {m.label}" + (ALREADY_SAID if m.mentioned else "")
+    important = ev.importance >= c.IMPORTANT_MOMENT
+    if hard:
+        return (f"- {when} : {m.label} — c'est passé ; tu pourras lui demander comment ça s'est passé, après avoir "
+                "pris de ses nouvelles.")
+    if close and important:
         return (f"- {when} : {m.label} — c'est passé : c'est la première chose qu'une amie lui demanderait, comment "
                 "ça s'est passé.")
     return f"- {when} : {m.label} — c'est passé : tu peux lui demander comment ça s'est passé, si ça vient."
+
+
+def _festive_line(m: Moment, frame: Frame, when: str, hard: bool) -> str:
+    """Ce qui se fête : le jour même, ses vœux (une fois) ; jamais « comment ça s'est passé » quand c'est fait."""
+    ev = m.event
+    soft = " Avec douceur : ces jours-ci sont durs." if hard else ""
+    if ev.followed_at:
+        return f"- {when} : {m.label} — tu le lui as souhaité."
+    if frame.local(ev.when).date() == frame.local().date():
+        return f"- aujourd'hui : {m.label} — souhaite-le-lui si ce n'est pas fait.{soft}"
+    if ev.when > frame.now:
+        return f"- {when} : {m.label}" + (ALREADY_SAID if m.mentioned else "")
+    return f"- {when} : {m.label} — c'est passé, et tu ne le lui as pas souhaité : un mot, même en retard, si ça vient."
 
 
 @MEMORY.section("self_said", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["memories"], trim_rank=35,

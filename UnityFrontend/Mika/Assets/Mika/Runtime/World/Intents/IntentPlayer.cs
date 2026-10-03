@@ -59,7 +59,12 @@ namespace Mika.World.Engine
         /// <summary>Arrête de jouer (fin reçue, ou une autre action prend la place).</summary>
         public void Stop()
         {
-            if (_run != null) StopCoroutine(_run);
+            if (_run != null)
+            {
+                StopCoroutine(_run);
+                // Un pas de posture coupé en route ne repasse pas par ses finally : le corps rend ce qu'il tenait.
+                if (_body != null) _body.AbandonChoreography();
+            }
             _run = null;
             _intent = null;
         }

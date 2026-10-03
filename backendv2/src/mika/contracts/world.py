@@ -615,6 +615,18 @@ class Activity(Payload):
     until: int | None = None
 
 
+class Lived(Payload):
+    """Une occupation qu'elle a eue — ou qu'elle a encore (``until`` vide) —, telle qu'elle la dirait :
+    « dessiner », « ton bureau ». Ce que son journal peut raconter de sa journée sans rien inventer."""
+
+    name: Ident
+    label: str = Field(max_length=60)
+    object: Ident | None = None
+    object_label: str = Field(default="", max_length=60)
+    since: int
+    until: int | None = None
+
+
 class Movement(Payload):
     """Un acteur en chemin : un écran qui s'ouvre en route le place sur le trajet d'après ``started``/``eta``."""
 
@@ -1019,5 +1031,8 @@ SELF = FactKey("world.self", type=ActorState, doc="son corps dans le monde")
 AROUND = FactKey("world.around", type=tuple, doc="qui est dans la pièce avec elle")
 #: Les objets à portée d'un acteur (son lieu, ce qu'il tient, ce qui est posé là), du plus saillant au moins.
 REACH = FactFamily("world.reach", arg=str, type=tuple, doc="ce qu'un acteur a à portée")
+#: Ce qu'elle a fait de ses derniers jours (ses occupations, de la plus ancienne à celle en cours) : la matière
+#: d'un journal qui raconte sa journée sans l'inventer.
+LIVED = FactKey("world.lived", type=tuple, time_varying=True, doc="ses occupations, avec leur début et leur fin")
 #: Les demandes qui attendent la réponse de cet acteur.
 PENDING = FactFamily("world.pending", arg=str, type=tuple, doc="ce qu'on lui demande et qui attend")

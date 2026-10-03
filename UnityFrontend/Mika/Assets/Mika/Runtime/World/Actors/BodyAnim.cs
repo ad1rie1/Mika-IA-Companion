@@ -50,6 +50,20 @@ namespace Mika.World.Engine
         public static readonly string[] Poses =
         {
             "none", "type", "write", "read", "lap", "mattress", "sill", "reach_high", "pour", "lean_desk",
+            "desk", "mouse", "drink", "take", "stretch", "turn_left_45", "turn_right_45", "turn_left_90", "turn_right_90",
+        };
+
+        /// <summary>
+        /// Les poses jouées par un clip de l'atelier du bureau (assise seulement, calque <see cref="PoseLayer"/>) : le
+        /// corps entier, mains comprises, réglé sur le bureau tel que la chaise le présente (voir BodyActivity). Les
+        /// autres poses restent des intentions que l'IK réalise.
+        /// </summary>
+        public static readonly (string pose, string clip)[] DeskClips =
+        {
+            ("desk", "desk_rest"), ("type", "desk_type"), ("mouse", "desk_mouse"), ("write", "desk_write"), ("read", "desk_read"),
+            ("lap", "desk_lap"), ("lean_desk", "desk_think"), ("drink", "desk_drink"), ("take", "desk_take"), ("stretch", "desk_stretch"),
+            ("turn_left_45", "chair_turn_left_45"), ("turn_right_45", "chair_turn_right_45"),
+            ("turn_left_90", "chair_turn_left_90"), ("turn_right_90", "chair_turn_right_90"),
         };
 
         public static int PoseId(string name)

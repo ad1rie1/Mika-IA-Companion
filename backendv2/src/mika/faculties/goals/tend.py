@@ -4,13 +4,19 @@
 - une pensée qui insiste — une inquiétude, une peine, une croyance à
   réviser (pas la colère d'une insulte) — encore vive après une demi-heure
   devient une exploration : repenser à ce qu'on lui a confié, y voir plus
-  clair sur ce qu'elle croyait, en savoir plus sur ce qu'elle a remarqué ;
-- une curiosité qui la tient, en journée, lui fait fouiller un peu du côté
-  d'un de ses centres d'intérêt (pas le même avant trois jours) quand elle a
-  où chercher (ses flux) ; sans source, elle **rêvasse** autour : une rêverie
-  se prouve en l'écrivant, et ne se raconte jamais comme une nouvelle (rien de
-  neuf n'est arrivé). Le début de sa journée flotte un peu d'un jour à l'autre
-  (une gigue tirée de la date : rejouable).
+  clair sur ce qu'elle croyait (une **réflexion** : une séance, sa tête et sa
+  mémoire pour seuls outils — ADR 0053), en savoir plus sur ce qu'elle a
+  remarqué ;
+- une curiosité qui la tient, en journée, la fait **rêvasser** — d'abord à ce
+  qui l'a touchée : ce qu'une amie lui a fait découvrir, un sujet de
+  conversation qui l'a enthousiasmée (lu dans le fil : ce qu'elle a déclaré
+  en répondant) ; ses centres d'intérêt de toujours en dernier (pas le même
+  avant trois jours), et quand elle a où chercher (ses flux), elle va y
+  fouiller. Pas plus de ``musings_per_day`` par jour : une personne ne rêvasse
+  pas toutes les deux heures. Une rêverie se prouve en l'écrivant, et ne se
+  raconte jamais comme une nouvelle (rien de neuf n'est arrivé). Le début de
+  sa journée flotte un peu d'un jour à l'autre (une gigue tirée de la date :
+  rejouable).
 Le **titre** est le sien (« Repenser à ce qu'Adrien m'a confié ») ; ce qui l'a
 fait naître (ses mots à lui, un titre d'article) est gardé à part et **cité**
 au travail, jamais donné comme le but. Une exploration n'hérite de sa source
@@ -35,7 +41,7 @@ from __future__ import annotations
 import math
 import random
 import re
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -47,15 +53,18 @@ from mika.contracts import needs as needs_c
 from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
+from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.goals.faculty import (
     AWAITED,
+    CURIOSITY_SOURCES,
     GOAL_PAUSED,
     GOAL_RESUMED,
     GOALS,
     Goal,
     GoalsState,
     budget,
+    curious_today,
     desire,
     live,
     musing,
@@ -64,13 +73,16 @@ from mika.faculties.goals.faculty import (
     subject_key,
     workable,
 )
-from mika.faculties.goals.tools import closing
-from mika.kernel.clock import DAY, instant, within_daily_window
+from mika.faculties.goals.tools import closing, reflective
+from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local, within_daily_window
 from mika.kernel.codec import h64
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
+from mika.vocab import affect as A
+from mika.vocab.people import is_identifiable
+from mika.vocab.privacy import Sensitivity
 
 SEEDING_ORIGINS = frozenset({attention_c.EXCHANGE, attention_c.REVISION, attention_c.SIGNAL})
 #: une inquiétude, une peine, un doute, une frustration (quelque chose qui ne marche pas) donnent envie
@@ -79,6 +91,23 @@ SEEDING_EMOTIONS = frozenset({"sad", "anxious", "scared", "confused", "lonely", 
                               "surprised", "curious", "nostalgic", "frustrated"})
 #: une exploration peut devenir un projet à elle (``start_project``) quand elle s'avère plus grosse qu'une envie
 EXPLORE_BUNDLES = ("goals", "memory", "projects")
+#: repenser à ce qu'on lui a confié, à ce qu'elle croyait : sa tête et sa mémoire, rien d'autre — une réflexion ne
+#: devient pas un projet (sonde réelle du 2026-10-03 : « je prépare un nouveau format de stream », inventé)
+REFLECT_BUNDLES = ("goals", "memory")
+#: les pensées dont le travail est d'y repenser (une séance : ``reflection_steps``)
+REFLECTING_ORIGINS = frozenset({attention_c.EXCHANGE, attention_c.REVISION})
+#: ce qu'elle déclare quand un sujet de conversation l'intéresse vraiment (assez pour en rêvasser après)
+INTERESTED = frozenset({"curious", "excited"})
+#: …au moins aussi fort
+INTERESTED_FROM = 0.5
+#: un message qui porte un sujet (« moi je suis à fond dans la city pop japonaise »), pas un « je le note, merci »
+TALK_MIN_WORDS = 6
+#: ce qu'on lui fait découvrir (« tu devrais écouter… », « je te conseille… ») : une graine, quel que soit son ton
+RECOMMENDS = re.compile(
+    r"\b(?:tu devrais|il faut que tu|faut que tu|faut absolument que tu)\s+(?:absolument\s+)?(?:écouter|regarder|"
+    r"lire|essayer|tester|jouer|voir|découvrir|écoutes|regardes|lises|essaies|testes|joues|voies|découvres)\b|"
+    r"\bje te (?:conseille|recommande)\b", re.IGNORECASE)
+_TALK_WORD = re.compile(r"[\wÀ-ÿ']+")
 #: ce qu'une exploration peut garder de sa source : la lecture (ses flux, la caméra), et la Forge pour réparer
 #: une app (son écriture a son propre sas : une app qui a des secrets ou une promotion ne change qu'avec l'accord
 #: d'un opérateur) — jamais un outil qui envoie (un brouillon de mail, les outils d'une app qui appellent ses
@@ -173,6 +202,10 @@ def explored_title(t: attention_c.ThoughtReading, name: str) -> str:
                                       *c.ALL], lane="background", catch_up=CatchUp.ONCE, max_quantum_s=1800,
                priority=60)
 class Seed:
+    def __init__(self) -> None:
+        #: sa curiosité n'a rien trouvé à ouvrir : elle ne recherche pas avant cet instant
+        self.idle_until = 0
+
     def _thoughts(self, s: GoalsState, frame: Frame, p: Any) -> list[attention_c.ThoughtReading]:
         busy = _live_sources(s, frame.now)
         return [t for t in frame.get(attention_c.THOUGHTS)
@@ -180,11 +213,16 @@ class Seed:
                 and not {f"thought:{t.id}", subject_key(f"thought:{t.id}", t.about)} & busy
                 and not _recently_closed(s, subject_key(f"thought:{t.id}", t.about), frame.now, p)]
 
-    def _interest(self, s: GoalsState, frame: Frame, p: Any, *, anytime: bool = False) -> str | None:
+    def _curious(self, s: GoalsState, frame: Frame, p: Any, *, anytime: bool = False) -> bool:
+        """Sa curiosité la tient, en journée, ne lui a pas déjà fait ouvrir assez de choses aujourd'hui, et pas
+        à l'instant : ses rêveries s'espacent sur la journée."""
         if frame.get(needs_c.NEEDS).curiosity < p.seed_curiosity_from:
-            return None
+            return False
         if not anytime and not _daytime(frame, p):
-            return None
+            return False
+        return not capped(s, frame, p) and (anytime or frame.now >= spaced_until(s, p))
+
+    def _interest(self, s: GoalsState, frame: Frame, p: Any) -> str | None:
         busy = _live_sources(s, frame.now)
         options: list[tuple[float, str]] = []
         for interest in frame.get(self_c.PERSONA).interests:
@@ -211,10 +249,11 @@ class Seed:
         if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE or _live_self(s, frame.now) >= p.live_self_max:
             return None
         times = [t.born_at + p.seed_thought_age_us for t in self._thoughts(s, frame, p)]
-        if self._interest(s, frame, p) is not None:
-            times.append(frame.now)
-        elif self._interest(s, frame, p, anytime=True) is not None and (opens := _day_opens(frame, p)):
-            times.append(opens)  # sa journée s'ouvre plus tard : elle s'y mettra à ce moment-là
+        if self._curious(s, frame, p, anytime=True):
+            if _daytime(frame, p):
+                times.append(max(frame.now, self.idle_until, spaced_until(s, p)))
+            elif opens := _day_opens(frame, p):
+                times.append(max(opens, spaced_until(s, p)))  # sa journée s'ouvre plus tard : elle s'y mettra alors
         if not times:
             return None
         return max(frame.now, min(times), ready_to_undertake(s, p))
@@ -235,18 +274,31 @@ class Seed:
             if not text:
                 continue
             source = f"thought:{t.id}"
-            bundles = inherited(t.bundle)
+            # y repenser se fait en une séance, sa tête et sa mémoire pour seuls outils ; une curiosité née d'un
+            # signal, elle, va lire ailleurs
+            reflecting = t.origin in REFLECTING_ORIGINS
             owner = t.about[0] if t.about else None
             await ctx.emit(c.GOAL_OPENED.draft(
                 kind=c.EXPLORATION, authority=c.SELF,
                 title=Content.of(explored_title(t, _name(frame, owner)), level=t.sensitivity),
-                details=Content.of(text, level=t.sensitivity), owner=owner, about=t.about, bundles=bundles,
-                max_steps=p.exploration_steps, source=source, sensitivity=t.sensitivity,
-                desire=round(min(1.0, 0.4 + t.intensity), 4), origin=ORIGINS.get(t.origin, t.origin),
-                origin_at=t.born_at, dedupe_key=f"but:{source}"))
+                details=Content.of(text, level=t.sensitivity), owner=owner, about=t.about,
+                bundles=REFLECT_BUNDLES if reflecting else inherited(t.bundle),
+                max_steps=p.reflection_steps if reflecting else p.exploration_steps, source=source,
+                sensitivity=t.sensitivity, desire=round(min(1.0, 0.4 + t.intensity), 4),
+                origin=ORIGINS.get(t.origin, t.origin), origin_at=t.born_at, dedupe_key=f"but:{source}"))
+            return
+        if not self._curious(s, frame, p):
+            return
+        # ce qui l'a touchée d'abord (ce qu'une amie lui a fait découvrir, un sujet qui l'a enthousiasmée), ses
+        # centres d'intérêt de toujours en dernier (sonde réelle du 2026-10-03 : cuisine, café, bidouille en
+        # tourniquet, sans lien avec la city pop dont Inès venait de lui parler)
+        talk = next(iter(talk_subjects(s, frame, store, p)), None)
+        if talk is not None:
+            await ctx.emit(_talk_musing(frame, talk, p))
             return
         interest = self._interest(s, frame, p)
         if interest is None:
+            self.idle_until = frame.now + HOUR  # rien à rêvasser : elle ne recherche pas à chaque événement
             return
         source = f"interest:{interest}"
         day = frame.local().date().isoformat()
@@ -257,10 +309,94 @@ class Seed:
         title = f"Fouiller un peu du côté {subject}" if sources else f"Rêvasser un peu autour {subject}"
         await ctx.emit(c.GOAL_OPENED.draft(
             kind=c.EXPLORATION, authority=c.SELF, title=Content.of(title, level=0),
-            details=Content.of(interest, level=0), bundles=tuple(sorted({*EXPLORE_BUNDLES, *sources})),
+            details=Content.of(interest, level=0),
+            # une rêverie dit « j'aimerais », pas « je fais » : elle ne devient pas un projet
+            bundles=tuple(sorted({*EXPLORE_BUNDLES, *sources})) if sources else REFLECT_BUNDLES,
             max_steps=p.exploration_steps if sources else p.musing_steps, source=source, sensitivity=0,
             origin=c.FROM_INTEREST, origin_at=frame.now, musing=not sources,
             desire=round(min(1.0, frame.get(needs_c.NEEDS).curiosity), 4), dedupe_key=f"but:{source}:{day}"))
+
+
+def capped(s: GoalsState, frame: Frame, p: Any) -> bool:
+    """Sa curiosité lui a déjà fait ouvrir assez de choses aujourd'hui (``musings_per_day``)."""
+    tz = frame.env.tz_of(frame.root)
+    day = frame.local().date().isoformat()
+    return curious_today(s, day, lambda t: local(t, tz).date().isoformat()) >= p.musings_per_day
+
+
+def spaced_until(s: GoalsState, p: Any) -> int:
+    """Pas avant cet instant : ses rêveries s'étalent sur sa journée (deux par jour : une le matin, une
+    l'après-midi), plutôt que deux d'affilée puis plus rien jusqu'au lendemain."""
+    last = max((at for source, at in s.explored.items() if source.startswith(CURIOSITY_SOURCES)), default=0)
+    if not last or p.musings_per_day <= 0:
+        return 0
+    span = (p.seed_day_end_min - p.seed_day_start_min) % (24 * 60) or 24 * 60
+    return last + max(p.seed_spacing_us, span * MINUTE // p.musings_per_day)
+
+
+@dataclass(frozen=True, slots=True)
+class Talk:
+    """Un sujet de conversation qui l'a intéressée : le message de la personne, et ce qui en fait une graine."""
+
+    message: int
+    at: int
+    person: str
+    text: str
+    public: bool
+    #: on le lui a fait découvrir (« tu devrais écouter… »)
+    recommended: bool
+    #: une amie ou une proche
+    close: bool
+
+
+def talk_subjects(s: GoalsState, frame: Frame, store: Any, p: Any) -> list[Talk]:
+    """Ce dont on lui a parlé ces derniers jours et qui l'a intéressée, pas encore rêvassé : ce qu'une amie lui a
+    fait découvrir d'abord, puis ce qu'une amie lui a dit qui l'a enthousiasmée, puis n'importe qui — du plus récent
+    au plus ancien. « Intéressée », c'est ce qu'elle a déclaré en répondant (curieuse, enthousiaste), sur un message
+    qui porte un sujet ; « faire découvrir », une recommandation (« tu devrais écouter… ») qui ne l'a pas
+    attristée. Lu dans le fil, jamais deviné par un modèle."""
+    if store is None or p.talk_lookback_us <= 0:
+        return []
+    t = transcript_c.THREAD_TABLE
+    rows = store.query_mind(
+        f"SELECT u.id, u.at, u.person, u.room, u.text, a.emotion, a.emotion_intensity FROM {t} a JOIN {t} u "
+        "ON u.id = a.reply_to WHERE a.role='assistant' AND a.at >= ? AND u.role='user' ORDER BY u.id DESC LIMIT 60",
+        (frame.now - p.talk_lookback_us,))
+    busy = _live_sources(s, frame.now)
+    seen: set[int] = set()
+    out: list[Talk] = []
+    for mid, at, handle, room, text, emotion, intensity in rows:
+        source = f"talk:{mid}"
+        if mid in seen or source in s.explored or source in busy or _recently_closed(s, source, frame.now, p):
+            continue
+        seen.add(mid)
+        if not handle or not is_identifiable(handle):
+            continue
+        said = str(text or "")
+        felt = A.emotion_of(emotion or "")
+        recommended = bool(RECOMMENDS.search(said)) and (felt is None or A.valence(felt) > -0.15)
+        interested = felt is not None and felt.value in INTERESTED and float(intensity or 0) >= INTERESTED_FROM \
+            and len(_TALK_WORD.findall(said)) >= TALK_MIN_WORDS
+        if not (recommended or interested):
+            continue
+        person = frame.get(identity_c.PERSON(handle))
+        close = frame.get(social_c.CLOSENESS(person)) in (social_c.FRIEND, social_c.CLOSE)
+        out.append(Talk(int(mid), int(at), person, said, room is not None, recommended, close))
+    return sorted(out, key=lambda x: (not (x.recommended and x.close), not x.close, not x.recommended, -x.at))
+
+
+def _talk_musing(frame: Frame, talk: Talk, p: Any) -> Any:
+    """Rêvasser à ce dont on lui a parlé : le titre est le sien, ce qu'on lui a dit est gardé à part (cité au
+    travail) ; ce que la personne a dit la concerne — un message privé est personnel."""
+    name = _name(frame, talk.person)
+    level = int(Sensitivity.ANODYNE if talk.public else Sensitivity.PERSONAL)
+    title = f"Rêvasser à ce dont « {name} » m'a parlé" if name else "Rêvasser à ce dont on m'a parlé"
+    return c.GOAL_OPENED.draft(
+        kind=c.EXPLORATION, authority=c.SELF, title=Content.of(title, level=level),
+        details=Content.of(talk.text[:600], level=level), owner=talk.person, about=(talk.person,),
+        bundles=REFLECT_BUNDLES, max_steps=p.musing_steps, source=f"talk:{talk.message}", sensitivity=level,
+        origin=c.FROM_TALK, origin_at=talk.at, musing=True,
+        desire=round(min(1.0, frame.get(needs_c.NEEDS).curiosity), 4), dedupe_key=f"but:talk:{talk.message}")
 
 
 def short(interest: str) -> str:
@@ -342,6 +478,12 @@ def closures(s: GoalsState, frame: Frame) -> list[tuple[Goal, str, str]]:
             # rêvasser ne se rate pas : une rêverie qui ne donne rien, ou dont l'envie passe, se dissipe — sans
             # « je bloque », sans frustration ni mélancolie
             out.append((g, c.ABANDONED, c.DISSIPATED))
+        elif reflective(g) and (g.silent >= p.silent_before_blocked or g.steps >= budget(g, p)
+                                or desire(g, now, p) < p.abandon_below):
+            # repenser à ce qu'on lui a confié ne se rate pas non plus (ADR 0053) : une réflexion qui n'a rien donné en
+            # sa séance en reste là, comme une rêverie qui se dissipe — sans « Je bloque sur : Repenser à ce que Sam
+            # m'a confié », ni frustration ; la pensée d'où elle venait, elle, demeure
+            out.append((g, c.ABANDONED, c.LET_GO))
         elif g.silent >= p.silent_before_blocked:
             out.append((g, c.STUCK, f"{g.silent} séances de suite sans rien conclure"))
         elif g.steps >= budget(g, p):

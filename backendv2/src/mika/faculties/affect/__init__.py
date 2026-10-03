@@ -47,7 +47,9 @@ class AffectState:
 #: v2 : une humeur à trois couches (repos jumeau, émotion du moment, fond), des
 #: ancres mesurées depuis le repos moyen, l'attachement (ADR 0032). v3 : des excuses pardonnent (ADR 0047).
 AFFECT = Faculty("affect", state=AffectState, init=lambda p: AffectState(), params=AffectParams, derive=derive,
-                 state_version=3, retired_params=("declared_window_us",))
+                 # 4 : ses réducteurs lisent la proximité, dont la règle a changé (ADR 0058) — instantané et genèse
+                 # ne donnaient plus la même tranche sur une installation existante (audit du lot L2)
+                 state_version=4, retired_params=("declared_window_us",))
 
 #: Ni une amie ni une proche : une hostilité forte y laisse de la méfiance.
 _DISTANT = frozenset({social_c.STRANGER, social_c.ACQUAINTANCE})

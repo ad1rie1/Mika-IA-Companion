@@ -268,6 +268,15 @@ class Gateway:
     def is_voice(self, role: str) -> bool:
         return role in self.voice_roles
 
+    def defers_tools(self, role: str) -> bool:
+        """Le fournisseur qui sert ce rôle sait-il différer des outils ? Un fournisseur qui n'en dit rien : oui
+        (la déclaration le dit) ; un rôle sans fournisseur : oui (l'appel échouera de toute façon)."""
+        try:
+            backend = self.backends[self.resolve(role)]
+        except UnconfiguredRole:
+            return True
+        return bool(getattr(backend, "defers_tools", True))
+
     def status(self) -> list[dict[str, Any]]:
         """L'état vivant de chaque fournisseur : créneaux (total, occupés, en attente),
         préemption, repli, et ce que le fournisseur dit de lui (le quota d'un abonnement)."""

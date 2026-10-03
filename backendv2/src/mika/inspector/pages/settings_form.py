@@ -364,8 +364,10 @@ class SettingsForms:
         rows = []
         for key, entry in window:
             flat = forms.flatten(entry) if isinstance(entry, BaseModel) else {}
-            cells = [_shown(i, flat.get(i.path)) for i in shown]
-            cells += ["défini" if flat.get(i.path) else "—" for i in secrets_]
+            # un champ qui ne sert pas à cette entrée (la connexion d'un abonnement, pour un Ollama) ne s'affiche
+            # pas plus dans la liste que sur sa page
+            cells = [_shown(i, flat.get(i.path)) if forms.visible(i, flat) else "—" for i in shown]
+            cells += [("défini" if flat.get(i.path) else "—") if forms.visible(i, flat) else "—" for i in secrets_]
             # retirer annonce ce qui le désignait (ces rôles retomberont sur leur repli)
             refs = [label for _p, label in forms.references(s.model, section_flat, f.path, key)] if keyed else []
             confirm = f"Retirer « {key} » ?" + (f" Ce qui le désigne ne le pourra plus : {', '.join(refs)}."

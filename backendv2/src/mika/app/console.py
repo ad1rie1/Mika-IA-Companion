@@ -111,8 +111,11 @@ SECTION_LABELS: dict[str, str] = {
     # ADR 0047
     "greeting_tone": "Le ton de ses bonjours (sa persona)",
     # ADR 0046
-    "self_said": "Ce qu'elle a déjà dit d'elle-même", "register": "Le ton entre elles (selon leur lien)",
+    "self_said": "Ce qu'elle a déjà dit d'elle-même", "register": "Le ton entre eux (selon leur lien)",
     "world": "Autour d'elle : son corps, ce qu'elle a à portée",
+    # ADR 0053
+    "step_exchange": "L'échange d'où vient sa réflexion", "step_life": "Ce qui se passe dans la vie de la personne "
+    "(sa réflexion)",
 }
 
 #: Les raisons des preuves de l'arbitre : ce qui la pousse à agir.
@@ -126,6 +129,9 @@ REASON_LABELS: dict[str, str] = {
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
     "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet",
     "keep_promise": "Tenir une promesse au moment dit", "cheer": "Encourager avant un moment important",
+    "celebrate": "Souhaiter ce qui se fête (un anniversaire), le jour même",
+    # ADR 0058
+    "rekindle": "Reprendre des nouvelles, longtemps après (une fois)",
 }
 
 #: Les vetos : ce qui l'empêche d'agir.
@@ -134,7 +140,7 @@ VETO_LABELS: dict[str, str] = {
     "daily_cap": "Budget d'initiatives du jour épuisé", "grudge": "Elle est fâchée contre cette personne",
     "unanswered": "Sa dernière initiative est restée sans réponse", "run_cap": "Assez d'exécutions pour l'heure",
     "step_cap": "Assez de séances de travail pour l'heure",
-    "awaiting_reply": "Son dernier message attend encore une réponse", "farewell": "Ils viennent de se dire au revoir", "changed_mind": "Elle s'est ravisée",
+    "awaiting_reply": "Elle attend sa réponse (elle a écrit en dernier)", "farewell": "Ils viennent de se dire au revoir", "changed_mind": "Elle s'est ravisée", "hesitating": "Elle hésite encore (ses derniers essais ont fini en silence)",
 }
 
 #: Les processus de fond : ce qu'ils font.

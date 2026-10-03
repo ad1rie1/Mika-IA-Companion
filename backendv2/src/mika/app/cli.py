@@ -10,12 +10,12 @@
   (sans risque serveur en marche), vérification, restauration (serveur
   arrêté ; l'ancien dossier est mis de côté) ;
 - ``llm show|backend|route|remove|context`` : les modèles (clés chiffrées) ;
-- ``account <nom> <mot de passe> [--operator]`` : un compte ;
+- ``account <nom> [<mot de passe>] [--operator]`` : un compte (sans mot de passe : demandé sans écho) ;
 - ``token create <compte> [--label …]`` / ``token list [<compte>]`` / ``token revoke <id>`` : les jetons
   d'un client natif (un moteur de jeu sur ``/ws/world``, ADR 0051) — montrés une seule fois, gardés en
   empreinte ; serveur en marche, une révocation ferme ses connexions au plus tard dix secondes après ;
-- ``telegram show|token|allow|disallow|owner|open|close`` : le robot Telegram
-  (jeton chiffré ; fermé par défaut : liste blanche et propriétaires) ;
+- ``telegram show|token|allow|disallow|owner|open|close|pair`` : le robot Telegram
+  (jeton chiffré ; fermé par défaut : liste blanche et propriétaires ; « pair » : un code d'appairage) ;
 - ``serve --origin URL --cookie-secure --behind-proxy`` : derrière un mandataire TLS ;
 - ``console apercu --out DOSSIER`` : chaque page de la console, exportée ;
 - ``identity link|unlink``, ``social closeness`` et ``forge promote|demote`` : ce
@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import importlib.util
 import json
 import os
@@ -35,11 +36,12 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError, runtime_dir
-from mika.adapters.llm.config import BackendSpec, LLMConfig, build_backend
+from mika.adapters.llm.config import REPLY, ROLE_LABELS, ROLES, BackendSpec, LLMConfig, build_backend
 from mika.adapters.mail import LEGACY_ACCOUNT
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.store_sqlite import SqliteStore
@@ -48,7 +50,7 @@ from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
 from mika.adapters.web.accounts import Accounts, password_problems
 from mika.app import backup, composition, datadir
 from mika.app.composition import faculties, for_simulation
-from mika.app.server import serve
+from mika.app.server import PAIRING_TTL_S, serve
 from mika.app.settings import SecretBox, Settings
 from mika.contracts import identity as identity_c
 from mika.kernel import forms
@@ -70,6 +72,26 @@ from mika.vocab.people import is_identifiable
 
 #: qui opère depuis la ligne de commande (l'audit ``runtime.operated`` le dit)
 CLI_BY = "ligne de commande"
+
+#: ce que ``mika --help`` dit à qui la lance pour la première fois
+FIRST_STEPS = """Premiers pas :
+  1. mika serve                 lance Mika (http://127.0.0.1:8001), ses données dans ./data/v2
+  2. http://127.0.0.1:8001/inspecteur/
+                                la console : crée le compte opérateur (le premier compte l'est)
+  3. Configuration › Fournisseurs › Ajouter
+                                un modèle (Claude, Ollama…) : le premier déclaré la fait parler
+  4. le frontend : cd frontend && npm install && npm run dev, puis http://localhost:3000
+                                (il vise :8001 ; VITE_BACKEND_ORIGIN pour une autre adresse)
+
+Tout se règle aussi d'ici : mika llm, mika account, mika telegram… (mika <commande> --help).
+Démarrage local pas à pas : backendv2/README.md ; en service (systemd) : deploy/README.md."""
+
+
+def ask_password(ask: Callable[[str], str] | None = None) -> str | None:
+    """Le mot de passe demandé sans écho, deux fois ; ``None`` s'ils diffèrent."""
+    ask = ask or getpass.getpass
+    first = ask("Mot de passe : ")
+    return first if ask("Encore une fois : ") == first else None
 
 
 def _mind(data: Path, *, snapshot_every: int = 500) -> Mind:
@@ -250,7 +272,8 @@ def _sonde(data: Path, args: argparse.Namespace) -> int:
         return 2
     # le vrai modèle de plongements quand il est installé (la mémoire rappelle comme en service), sinon le hachage
     embedder = SentenceEmbedder() if importlib.util.find_spec("sentence_transformers") else None
-    out = run_probe(for_simulation(), build_backend(name, spec), args.out, embedder=embedder)
+    out = run_probe(for_simulation(), build_backend(name, spec), args.out, embedder=embedder,
+                    which=args.semaine)
     print((out / "bilan.txt").read_text(), end="")
     print(f"la semaine : {out / 'fil.txt'}")
     return 0
@@ -287,11 +310,16 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
             routes = {r: b for r, b in routes.items() if b != args.name}
         elif args.llm_cmd == "context":
             context = args.tokens
-        cfg = LLMConfig(backends=backends, routes=routes, context_tokens=context)
         if args.llm_cmd != "show":
-            await settings.save_llm(cfg)
+            # ce qui vaut désormais : le premier fournisseur déclaré y sert « répondre » d'office ; une
+            # configuration refusée (un fournisseur inconnu) l'est en le disant, rien n'est gardé
+            try:
+                cfg = await settings.save_llm(LLMConfig(backends=backends, routes=routes, context_tokens=context))
+            except ValueError as exc:
+                return {"ok": False, "problems": [p.strip() for p in str(exc).split(";") if p.strip()]}
         return {"backends": {n: b.redacted() for n, b in cfg.backends.items()}, "routes": cfg.routes,
-                "context_tokens": cfg.context_tokens, "problems": cfg.problems()}
+                "répondre": cfg.routes.get(REPLY, ""), "context_tokens": cfg.context_tokens,
+                "problems": cfg.problems()}
 
     return await _with_settings(data, run)
 
@@ -407,6 +435,10 @@ async def telegram_command(data: Path, args: argparse.Namespace) -> dict[str, ob
             await settings.save_telegram(owners=[*cfg["owners"], *args.users])
         elif args.tg_cmd in ("open", "close"):
             await settings.save_telegram(open_to_all=args.tg_cmd == "open")
+        elif args.tg_cmd == "pair":
+            code = await settings.new_telegram_pairing(int(time.time()), PAIRING_TTL_S)
+            return {"code": code, "usage": f"envoie au robot, en privé : /start {code} — le compte qui l'envoie "
+                                           "devient sa propriétaire (une seule fois, valable 24 h)"}
         cfg = settings.telegram()
         return {"token": "…" + cfg["token"][-4:] if cfg["token"] else "", "allowed_chats": cfg["allowed_chats"],
                 "owners": cfg["owners"], "open": cfg["open"]}
@@ -464,13 +496,15 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run(argv: list[str] | None) -> int:
-    p = argparse.ArgumentParser(prog="mika")
+    p = argparse.ArgumentParser(prog="mika", description="Mika v2 : le serveur, sa console, et ce qu'un opérateur "
+                                                         "règle sans elle.",
+                                epilog=FIRST_STEPS, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data", type=Path, default=Path("data/v2"), help="dossier des bases (mind.db, views.db)")
-    sub = p.add_subparsers(dest="cmd", required=True)
-    rp = sub.add_parser("replay")
-    rp.add_argument("--verify", action="store_true")
-    rb = sub.add_parser("rebuild")
-    rb.add_argument("owners", nargs="+")
+    sub = p.add_subparsers(dest="cmd", required=True, metavar="commande")
+    rp = sub.add_parser("replay", help="rejouer sa vie depuis la genèse (--verify : comparer à l'état sauvegardé)")
+    rp.add_argument("--verify", action="store_true", help="comparer le rejeu complet à instantané + queue")
+    rb = sub.add_parser("rebuild", help="reconstruire des tranches depuis le journal (diagnostic, serveur arrêté)")
+    rb.add_argument("owners", nargs="+", help="les facultés à reconstruire (memory, social…)")
     fg = sub.add_parser("forget", help="oublier quelqu'un (serveur arrêté), comme la console")
     fg.add_argument("subject", help="sa clé ou l'une de ses adresses : elle est oubliée avec toutes ses adresses "
                                     "et les noms qui ne désignent qu'elle")
@@ -480,9 +514,12 @@ def _run(argv: list[str] | None) -> int:
     sm.add_argument("--report", type=Path, default=Path("sim-reports"))
     sm.add_argument("--out", type=Path, default=Path("sonde"), help="sonde : où écrire la semaine (vidé d'abord)")
     sm.add_argument("--backend", default="", help="sonde : le fournisseur (défaut : celui qui répond, rôle reply)")
-    sv = sub.add_parser("serve")
-    sv.add_argument("--port", type=int, default=8001)
-    sv.add_argument("--host", default="127.0.0.1")
+    sm.add_argument("--semaine", default="1", choices=["1", "2"],
+                    help="sonde : 1 = Adrien, Chloé, Léo ; 2 = Sam (un deuil, un rappel, ses 30 ans), Inès, un salon")
+    sv = sub.add_parser("serve", help="lancer Mika : le serveur du chat et sa console (http://127.0.0.1:8001/"
+                                      "inspecteur/)")
+    sv.add_argument("--port", type=int, default=8001, help="le port (défaut : 8001)")
+    sv.add_argument("--host", default="127.0.0.1", help="l'adresse d'écoute (défaut : cette machine seulement)")
     sv.add_argument("--reports", type=Path, default=None, help="dossier des rapports de simulation (inspecteur)")
     sv.add_argument("--origin", action="append", default=[], dest="origins",
                     help="une origine admise du frontend (répétable, ex. https://mika.example) ; remplace celles "
@@ -523,17 +560,21 @@ def _run(argv: list[str] | None) -> int:
                        ("login", "se connecter dans le dossier dédié du fournisseur (s'il en a un)")):
         c = ccsub.add_parser(name, help=text)
         c.add_argument("--name", default=None, help="le fournisseur (défaut : le premier de type claude_code)")
-    lr = lsub.add_parser("route", help="associer des rôles à un fournisseur")
-    lr.add_argument("name")
-    lr.add_argument("roles", nargs="+")
+    lr = lsub.add_parser("route", help="associer des rôles à un fournisseur (seul « reply » est nécessaire : le "
+                                       "premier fournisseur déclaré le sert d'office, les autres rôles y "
+                                       "retombent)",
+                         epilog="Les rôles : " + " ; ".join(f"{r} ({ROLE_LABELS.get(r, r)})" for r in ROLES))
+    lr.add_argument("name", help="un fournisseur déclaré (mika llm backend …)")
+    lr.add_argument("roles", nargs="+", choices=ROLES, metavar="rôle", help="reply, initiative, extract…")
     lx = lsub.add_parser("remove")
     lx.add_argument("name")
     lc = lsub.add_parser("context", help="taille du contexte (jetons)")
     lc.add_argument("tokens", type=int)
-    ac = sub.add_parser("account", help="créer un compte")
+    ac = sub.add_parser("account", help="créer un compte (serveur arrêté)")
     ac.add_argument("username")
-    ac.add_argument("password")
-    ac.add_argument("--operator", action="store_true")
+    ac.add_argument("password", nargs="?", default=None,
+                    help="laissé vide : demandé sans écho (il ne reste ni dans l'historique du shell, ni dans ps)")
+    ac.add_argument("--operator", action="store_true", help="ouvre la console")
     ac.add_argument("--full-name", default="")
     tk = sub.add_parser("token", help="les jetons d'un client natif (un moteur de jeu sur /ws/world)")
     tksub = tk.add_subparsers(dest="token_cmd", required=True)
@@ -557,6 +598,8 @@ def _run(argv: list[str] | None) -> int:
     to.add_argument("users", nargs="+", type=int)
     tsub.add_parser("open", help="ouvrir à tout le monde, liste blanche comprise (sinon : fermé par défaut)")
     tsub.add_parser("close", help="revenir à la liste blanche et aux propriétaires")
+    tsub.add_parser("pair", help="un code d'appairage : envoyé au robot en privé (/start <code>), il fait de son "
+                                 "auteur une propriétaire — sans connaître son identifiant Telegram")
     idp = sub.add_parser("identity", help="relier une adresse à une personne (serveur arrêté)")
     isub = idp.add_subparsers(dest="id_cmd", required=True)
     il = isub.add_parser("link")
@@ -659,9 +702,13 @@ def _run(argv: list[str] | None) -> int:
         print(json.dumps(out, ensure_ascii=False))
         return 0 if all(out.values()) else 1
     if args.cmd == "console":
-        from mika.app.apercu import export  # noqa: PLC0415 — le client de test n'est chargé que pour l'aperçu
+        from mika.app import apercu  # noqa: PLC0415 — le client de test n'est chargé que pour l'aperçu
 
-        pages = export(args.out)
+        try:
+            pages = apercu.export(args.out)
+        except apercu.ExportFailed as exc:
+            print(f"Aperçu exporté, sauf : {exc}", file=sys.stderr)
+            return 1
         print(f"{len(pages)} pages exportées : {args.out / 'index.html'}")
         return 0
     if args.cmd == "serve":
@@ -694,6 +741,12 @@ def _run(argv: list[str] | None) -> int:
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0 if out["ok"] else 1
     if args.cmd == "account":
+        if args.password is None:
+            args.password = ask_password()
+            if args.password is None:
+                print(json.dumps({"ok": False, "error": "Les deux mots de passe ne sont pas les mêmes."},
+                                 ensure_ascii=False))
+                return 1
         out = asyncio.run(account_command(args.data, args))
         print(json.dumps(out, ensure_ascii=False))
         return 0 if out["ok"] else 1

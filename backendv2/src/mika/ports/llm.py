@@ -106,8 +106,10 @@ class MissingPersona(ValueError):
 class LLMBackend(Protocol):
     """Un fournisseur. Facultatifs : ``resumes_tool_loops`` (faux : il ne sait pas
     reprendre une boucle d'outils commencée ailleurs — la passerelle ne bascule
-    jamais vers lui en cours de boucle) et ``release(call_id)`` (la boucle est
-    finie : relâcher ce qu'il tient encore pour elle)."""
+    jamais vers lui en cours de boucle), ``defers_tools`` (faux : il ignore
+    ``ToolDecl.deferred`` et envoie tous les outils — le prompt ne lui parle alors
+    pas d'outils « à chercher ») et ``release(call_id)`` (la boucle est finie :
+    relâcher ce qu'il tient encore pour elle)."""
 
     name: str
 
@@ -124,3 +126,6 @@ class LLMGateway(Protocol):
     def is_voice(self, role: str) -> bool: ...
 
     async def call(self, req: LLMRequest) -> LLMResponse: ...
+
+    # facultatif (à appeler par ``getattr``) : ``defers_tools(role) -> bool`` — le fournisseur qui sert ce rôle
+    # sait-il différer des outils (une recherche d'outils) ? Sans réponse : oui.

@@ -13,7 +13,10 @@ tenir son plan ou ouvrir un projet ne prouvent rien. Une réflexion sur ce qu'on
 lui a confié se prouve en l'écrivant vraiment (``goal_reflect`` : quelques
 phrases à elle, pas la redite de ce qu'on lui a dit). Un « fini » non prouvé est
 noté mais **n'est pas un verdict** : le pas peut encore conclure. Un refus est
-toujours un refus (``ToolResult(ok=False)``), jamais une réussite.
+toujours un refus (``ToolResult(ok=False)``), jamais une réussite. La **dernière
+séance** qu'un but s'accorde (une réflexion, une rêverie n'en ont qu'une) se
+clôt sur ce qu'elle a fait, même si le modèle dit « je reprendrai » : il n'y aura
+pas d'autre séance (ADR 0053).
 """
 
 from __future__ import annotations
@@ -36,7 +39,9 @@ from mika.faculties.goals.faculty import (
     TASKS_KEPT,
     Goal,
     GoalsState,
+    budget,
     musing,
+    params,
     task_at,
     workable,
 )
@@ -71,6 +76,11 @@ def reflective(g: Goal) -> bool:
     if g.origin:
         return g.origin in (c.FROM_EXCHANGE, c.FROM_REVISION) or musing(g)
     return g.kind == c.EXPLORATION and g.source.startswith("thought:")
+
+
+def last_session(g: Goal, ctx: Any) -> bool:
+    """Cette séance est la dernière que ce but s'accorde (elle est déjà comptée à son départ)."""
+    return g.steps >= budget(g, params(ctx.frame.env.params_of("goals", ctx.frame.root)))
 
 
 def _goal(ctx: Any) -> Goal | None:
@@ -142,7 +152,7 @@ GOALS.bundle("goals", "tes rappels et tes explorations ; noter et rendre compte 
 @GOALS.tool(REPORT, description="Conclure cette séance de travail par un verdict. « done » n'est cru que si tu as "
             "réellement fait quelque chose pendant ce but (lu, écrit, cherché ailleurs que dans ta mémoire ; pour une "
             "réflexion, l'avoir écrite avec goal_reflect) ; sinon il est noté, refusé, et tu peux conclure autrement.",
-            args=ReportArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=3)
+            args=ReportArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=3, ends_loop=True)
 async def report_step(args: ReportArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
@@ -151,6 +161,11 @@ async def report_step(args: ReportArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content="Tu as déjà conclu cette séance : arrête-toi là.")
     worked = tuple(sorted({name for name, ok in ctx.calls if ok and (proves(ctx, name) or
                                                                        (name == REFLECT and reflective(g)))}))
+    if last_session(g, ctx) and args.verdict in (c.CONTINUE, c.WAIT) and (g.evidence + len(worked)) > 0:
+        # sa dernière séance (une réflexion, une rêverie : la seule) : ce qu'elle a écrit la clôt, même si le modèle
+        # dit qu'il reprendra — il n'y aura pas d'autre séance (sonde réelle du 2026-10-03 : « continue » après
+        # chaque réflexion écrite, quatre séances d'enquête, puis l'invention)
+        args = args.model_copy(update={"verdict": c.DONE})
     proven = args.verdict == c.DONE and (g.evidence + len(worked)) > 0
     summary = Content.of(args.summary.strip(), level=g.sensitivity)
     drafts: list[Any] = [c.STEP_REPORTED.draft(
@@ -160,6 +175,9 @@ async def report_step(args: ReportArgs, ctx: Any) -> Any:
     if proven:
         drafts.append(closing(ctx, g, c.ACHIEVED, result=args.summary.strip(), notable=args.notable,
                               reason=c.MUSED if musing(g) else ""))
+    elif args.verdict == c.BLOCKED and reflective(g):
+        # rêvasser, repenser à ce qu'on lui a confié : ça ne se rate pas — elle en reste là, sans « je bloque »
+        drafts.append(closing(ctx, g, c.ABANDONED, reason=c.DISSIPATED if musing(g) else c.LET_GO))
     elif args.verdict == c.BLOCKED:
         drafts.append(closing(ctx, g, c.STUCK, reason=args.summary))
     await ctx.emit(*drafts)
@@ -176,6 +194,8 @@ async def report_step(args: ReportArgs, ctx: Any) -> Any:
             f"Pas encore : rien de concret n'a été fait pour ce but (noter ou fouiller ta mémoire ne suffit pas). "
             f"Pour en venir à bout, {how} ; sinon dis honnêtement où tu en es (« continue », « blocked », "
             "« wait »)."))
+    if args.verdict == c.BLOCKED and reflective(g):
+        return "D'accord : tu en restes là pour l'instant."
     if args.verdict == c.BLOCKED:
         return "C'est noté : tu bloques là-dessus."
     if args.verdict == c.WAIT:

@@ -2,7 +2,8 @@
 
 La tranche ne garde que des résumés (point de contrôle, messages pas encore
 relus, promesses en cours et ce qu'elle a fait pour les tenir, moments de la
-vie des autres à venir ou tout juste passés, situations en cours) ; les
+vie des autres à venir ou tout juste passés, situations en cours, la dernière
+fois que quelque chose de grave a touché chacun) ; les
 éléments retenus vivent dans la projection T0 ``memory_items`` et leurs
 vecteurs dans l'index (un cache).
 
@@ -19,13 +20,18 @@ from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import agency as agency_c
 from mika.contracts import attention as attention_c
+from mika.contracts import expression as expression_c
+from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
+from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
+from mika.vocab.affect import Declared, Emotion, emotion_of, valence
 from mika.vocab.episodes import Kind
+from mika.vocab.people import is_identifiable
 
 PENDING_CAP = 500
 #: les moments de la vie des autres gardés dans la tranche, au plus
@@ -34,6 +40,8 @@ EVENTS_CAP = 300
 KEEPING_KEPT = 16
 #: le sujet d'une initiative qui tient une promesse : ``promise:<id>``
 PROMISE_SUBJECT = "promise:"
+#: les personnes que quelque chose de grave a touchées, retenues au plus (les plus récentes)
+HARD_KEPT = 64
 
 
 def promise_of(subject: str | None) -> int | None:
@@ -133,6 +141,12 @@ class MemoryParams(BaseModel):
         label="Une promesse pour un jour : à partir de", group="Tenir parole", lo=0, hi=24 * 60,
         help="« Je t'envoie ça jeudi » (un jour sans heure) se tient dans la journée, à partir de cette heure "
              "locale (minutes depuis minuit) et avant le soir.")] = 10 * 60
+    promise_day_end_min: Annotated[int, Knob(
+        label="Une promesse pour un jour : son échéance", group="Tenir parole", lo=12 * 60, hi=24 * 60 - 1,
+        help="… et son échéance est cette heure-là (minutes depuis minuit) : l'envie de la tenir est pleine à "
+             "mi-chemin entre le début ci-dessus et cette heure, et elle peut encore la tenir « au plus tard après "
+             "l'heure » au-delà — quelqu'un qu'elle ne voit que le soir l'entend quand même. En conversation, ce "
+             "jour-là, c'est le moment de le faire dès le matin.")] = 20 * 60
     keep_evidence: Annotated[float, Knob(
         label="Tenir une promesse : preuve pleine", group="Tenir parole", lo=0.0, hi=12.0, step=0.5,
         help="La preuve (log-odds) à l'heure dite ; elle monte depuis 2 au début de la fenêtre (elle le fait à un "
@@ -166,6 +180,16 @@ class MemoryParams(BaseModel):
     situation_reask_days: Annotated[float, Knob(
         label="Situation : redemander après (jours)", group="La vie des autres", lo=0.5, hi=30, step=0.5,
         help="Après en avoir reparlé, elle ne redemande pas des nouvelles d'une situation avant tant de jours.")] = 3.0
+    hard_days: Annotated[float, Knob(
+        label="Quelque chose de grave : pendant (jours)", group="La vie des autres", lo=0, hi=30, step=0.5,
+        help="Après un deuil, une rupture, une maladie (ce qu'elle a lu de grave dans ses messages, ou ce qui l'a "
+             "profondément attristée pour la personne), les moments banals de sa vie se taisent pendant tant de "
+             "jours — ni « comment s'est passé ton dentiste ? », ni « bonne chance » pour une course — et ce qui "
+             "compte passe après des nouvelles d'elle. 0 : jamais.")] = 5.0
+    hard_reply_from: Annotated[float, Knob(
+        label="Grave : ce qui l'attriste au moins à ce point", group="La vie des autres", lo=0.3, hi=1.0, step=0.05,
+        help="Une réponse, en privé, où elle se dit triste au moins à ce point (sa balise d'émotion) dit que ce "
+             "que la personne lui a confié est grave, même sans un mot qui le nomme (« Pixel est parti »).")] = 0.75
     # oubli : l'importance s'estompe à la lecture, jamais par balayage
     dormant: Annotated[float, Knob(
         label="Seuil d'endormissement", group="Oubli", lo=0.0, hi=0.5, step=0.01,
@@ -285,6 +309,8 @@ class MemoryState:
     kept: tuple[int, ...] = ()
     #: les moments de la vie des autres, à venir ou passés depuis peu ; les situations en cours
     events: FrozenDict[int, c.LifeEvent] = field(default_factory=FrozenDict)
+    #: personne → la dernière fois que quelque chose de grave l'a touchée (un deuil, une rupture…)
+    hard: FrozenDict[str, int] = field(default_factory=FrozenDict)
     reflections: tuple[Reflection, ...] = ()
     sorted_night: str = ""
     #: la dernière relecture journalisée (``seq``, instant), et les fenêtres
@@ -297,7 +323,8 @@ class MemoryState:
 
 #: v4 : un moment repris est un jugement enregistré (``moment_followed``), plus « elle l'avait sous les yeux » ;
 #: les situations en cours ; tenir une promesse au moment dit.
-MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=4)
+#: v5 : l'importance d'un moment, ce qui se fête, et ce qui touche gravement quelqu'un (ADR 0052).
+MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=5)
 MEMORY.declare(*c.ALL)
 
 
@@ -311,11 +338,23 @@ def _perceived(s: MemoryState, e, cx) -> MemoryState:
     return replace(s, pending=(*s.pending, e.seq)[-PENDING_CAP:], unaddressed=unaddressed, last_message_at=e.at)
 
 
-@MEMORY.reducer(rt.UTTERANCE)
+def _hard(s: MemoryState, person: str, at: int) -> MemoryState:
+    """Quelque chose de grave touche cette personne, à cet instant."""
+    if not is_identifiable(person) or s.hard.get(person, 0) >= at:
+        return s
+    hard = s.hard.set(person, at)
+    if len(hard) > HARD_KEPT:
+        hard = FrozenDict(sorted(hard.items(), key=lambda kv: (kv[1], kv[0]))[-HARD_KEPT:])
+    return replace(s, hard=hard)
+
+
+@MEMORY.reducer(rt.UTTERANCE, reads=[identity_c.PERSON])
 def _uttered(s: MemoryState, e, cx) -> MemoryState:
     """Ce qu'elle dit : un échange de plus à indexer — et, quand c'est l'initiative qui tient une promesse, la
     promesse est tenue (dite au moment dit ; ``memory.promises`` la règle). Qu'elle ait repris un moment de la vie
-    de la personne ne se lit pas ici : c'est un jugement sur ses mots (``life.py``)."""
+    de la personne ne se lit pas ici : c'est un jugement sur ses mots (``life.py``). Quand elle répond, en privé,
+    profondément triste pour quelqu'un, ce qu'il lui a confié est grave (« Pixel est parti » : aucun mot ne le
+    nomme, sa peine le dit)."""
     d = e.data
     if not d.visible:
         return s
@@ -324,7 +363,19 @@ def _uttered(s: MemoryState, e, cx) -> MemoryState:
         s = replace(s, keeping=s.keeping.delete(e.correlation))
         if keeping[0] in s.promises and keeping[0] not in s.kept:
             s = replace(s, kept=(*s.kept, keeping[0]))
+    if d.kind == Kind.REPLY and d.target and d.room is None and is_identifiable(d.target):
+        declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
+        if declared is not None and declared.emotion == Emotion.SAD \
+                and declared.intensity >= params(cx.params).hard_reply_from:
+            s = _hard(s, cx.facts.get(identity_c.PERSON(d.target)) or d.target, e.at)
     return replace(s, last_message_at=e.at, chunks=s.chunks + (1 if d.target and d.reply_to else 0))
+
+
+@MEMORY.reducer(others_c.READ)
+def _read_grave(s: MemoryState, e, cx) -> MemoryState:
+    """Ce qu'elle a lu de grave dans un message (un deuil, une maladie, une rupture, une perte de travail, des mots
+    de détresse) touche la personne qui l'a écrit."""
+    return _hard(s, e.data.person, e.at) if e.data.grave else s
 
 
 @MEMORY.reducer(rt.EPISODE_STARTED)
@@ -390,7 +441,8 @@ def _noted(s: MemoryState, e, cx) -> MemoryState:
     keep_ongoing = e.at - round(p.situation_days * DAY)
     events = s.events.delete(d.replaces) if d.replaces is not None else s.events
     events = events.set(e.seq, c.LifeEvent(e.seq, tuple(d.about), d.when, d.all_day, d.sensitivity,
-                                           tuple(d.told_by), d.text.ref or "", d.secret, ongoing=d.ongoing))
+                                           tuple(d.told_by), d.text.ref or "", d.secret, ongoing=d.ongoing,
+                                           importance=d.importance, festive=d.festive))
     stale = [ev.id for ev in events.values() if ev.when < (keep_ongoing if ev.ongoing else keep_until)]
     for i in stale:
         events = events.delete(i)
@@ -402,8 +454,17 @@ def _noted(s: MemoryState, e, cx) -> MemoryState:
 
 @MEMORY.reducer(c.REMEMBERED, c.BELIEVED)
 def _retained(s: MemoryState, e, cx) -> MemoryState:
-    reflections = tuple(r for r in s.reflections if e.data.call_id != f"réflexion:{r.thought}")
-    return replace(s, items=s.items + 1, reflections=reflections)
+    """Un élément retenu de plus. Un souvenir marquant et douloureux (un deuil vécu avec quelqu'un) dit aussi que
+    quelque chose de grave touche les personnes qu'il concerne."""
+    d = e.data
+    reflections = tuple(r for r in s.reflections if d.call_id != f"réflexion:{r.thought}")
+    s = replace(s, items=s.items + 1, reflections=reflections)
+    if e.type.name == c.REMEMBERED.name and d.importance >= params(cx.params).landmark_importance:
+        felt = emotion_of(d.emotion)
+        if felt is not None and valence(felt) < 0:
+            for person in d.about:
+                s = _hard(s, person, e.at)
+    return s
 
 
 @MEMORY.reducer(attention_c.DIGESTED)
@@ -450,3 +511,14 @@ def _promises_to(s: MemoryState, cx, person: str) -> tuple[c.PendingPromise, ...
 @MEMORY.fact(c.LIFE_EVENTS)
 def _life_events(s: MemoryState, cx, person: str) -> tuple[c.LifeEvent, ...]:
     return tuple(sorted((ev for ev in s.events.values() if person in ev.about), key=lambda ev: (ev.when, ev.id)))
+
+
+def hard_since(s: MemoryState, person: str, now: int, p: MemoryParams) -> int:
+    """Quand quelque chose de grave a touché cette personne, s'il y a moins de ``hard_days`` ; 0 sinon."""
+    at = s.hard.get(person, 0)
+    return at if at and 0 <= now - at <= round(p.hard_days * DAY) else 0
+
+
+@MEMORY.fact(c.HARD_TIMES)
+def _hard_times(s: MemoryState, cx, person: str) -> int:
+    return hard_since(s, person, cx.now, params(cx.params))

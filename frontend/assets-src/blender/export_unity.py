@@ -5,7 +5,11 @@
 #       --out UnityFrontend/Mika/Assets/Mika/Art/Room
 #
 # Options après « -- » : --out <dossier> (défaut : le chemin ci-dessus, depuis la
-# racine du dépôt), --dry-run (construit et classe, n'écrit rien).
+# racine du dépôt), --dry-run (construit et classe, n'écrit rien), --blend-dir
+# <dossier> (écrit aussi un .blend par objet logique, <catégorie>/<id>.blend — la
+# source Blender de chaque objet, que l'atelier d'animation ouvre pour vérifier une
+# animation contre le vrai meuble ; défaut des .blend : frontend/assets-src/objects),
+# --no-unity (n'écrit ni FBX ni JSON : seulement les .blend).
 #
 # Le pipeline web (room.blend, room.glb, run_final.py) n'est pas touché : ce script
 # reconstruit la chambre en mémoire avec les scripts existants, dans l'ordre de
@@ -41,6 +45,7 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 DEFAULT_OUT = os.path.join(REPO, "UnityFrontend", "Mika", "Assets", "Mika", "Art", "Room")
+DEFAULT_BLEND_DIR = os.path.join(REPO, "frontend", "assets-src", "objects")
 SOURCE = "frontend/assets-src"
 
 P = namedtuple("P", "x y z")   # point de l'espace de la pièce (centre d'une pièce Blender)
@@ -620,10 +625,35 @@ def export_fbx(root, children, path):
         raise RuntimeError(f"export FBX échoué : {path} ({res})")
 
 
+def write_blends(blend_dir, exports, entries):
+    """
+    Un .blend par objet logique (<catégorie>/<id>.blend) : l'objet ramené à son pivot comme dans le FBX, ses
+    enfants animables, ses matériaux (textures en chemins relatifs), dans une collection du nom de l'objet. Sa
+    place dans la pièce est gardée en propriétés (`room_pos`, `room_yaw`, espace de la pièce) : l'atelier
+    d'animation l'y remet, ou le pose là où Unity le met (chaise pivotée, objets glissés).
+    """
+    by_id = {e["id"]: e for e in entries}
+    for oid, root, child_objs, rel in exports:
+        e = by_id[oid]
+        coll = bpy.data.collections.new(oid)
+        for o in [root] + child_objs:
+            coll.objects.link(o)
+        root["room_pos"] = [e["pos"]["x"], e["pos"]["y"], e["pos"]["z"]]
+        root["room_yaw"] = e["yaw"]
+        root["category"] = e["category"]
+        root["source"] = "frontend/assets-src/blender/export_unity.py"
+        path = os.path.join(blend_dir, e["category"], f"{oid}.blend")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        bpy.data.libraries.write(path, {coll}, path_remap="RELATIVE_ALL", fake_user=True, compress=True)
+        print(f"[export_unity] .blend {os.path.relpath(path, REPO)}")
+
+
 def main(argv):
     ap = argparse.ArgumentParser(prog="export_unity.py")
     ap.add_argument("--out", default=DEFAULT_OUT)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--blend-dir", nargs="?", const=DEFAULT_BLEND_DIR, default=None)
+    ap.add_argument("--no-unity", action="store_true")
     args = ap.parse_args(argv)
     out = os.path.abspath(args.out)
     t0 = time.time()
@@ -798,6 +828,12 @@ def main(argv):
     if tris_export != tris_build:
         raise RuntimeError(f"triangles perdus : {tris_export} exportés pour {tris_build} construits")
     if args.dry_run:
+        return
+
+    if args.blend_dir:
+        write_blends(os.path.abspath(args.blend_dir), exports, entries)
+    if args.no_unity:
+        print(f"[export_unity] .blend écrits en {time.time() - t0:.1f} s (rien pour Unity)")
         return
 
     # ---------------------------------------------------------------- écriture

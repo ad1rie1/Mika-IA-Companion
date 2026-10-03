@@ -33,6 +33,10 @@ class Admission:
 
 @dataclass(frozen=True, slots=True)
 class HistoryRow:
+    """Un message du fil tel que la personne le relit : ``text`` est ce qu'elle a tapé et ``attachments`` (JSON)
+    ses pièces jointes, par leur nom et leur sorte — ce qu'elle en a perçu reste dans le fil de son prompt. Un
+    message d'un journal plus ancien, sans séparation connue, garde son texte perçu et aucune pièce jointe."""
+
     id: int
     at: int
     role: str
@@ -55,6 +59,12 @@ class MindPort(Protocol):
     def recent(self, handle: str, limit: int) -> list[HistoryRow]: ...
 
     def after(self, handle: str, after_id: int, limit: int) -> tuple[list[HistoryRow], bool]: ...
+
+    def life(self) -> str:
+        """L'empreinte de sa vie : la même tant que c'est le même journal depuis sa genèse (une sauvegarde
+        restaurée comprise), une autre pour un autre dossier de données. Opaque ; vide si inconnue. Un écran
+        qui garde le fil d'une autre vie le vide avant de fusionner."""
+        ...
 
     def ready(self) -> bool: ...
 

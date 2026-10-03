@@ -21,6 +21,7 @@ from mika.contracts import attention as attention_c
 from mika.contracts import goals as goals_c
 from mika.contracts import memory as memory_c
 from mika.contracts import needs as needs_c
+from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.faculties.agency import _budget, restraint
@@ -223,12 +224,13 @@ def test_the_rule_vetoes_every_ordinary_reason_and_allows_one_gentle_follow_up(t
         sent = initiatives(kernel, "tg_1")
         briefs = [c.messages[-1].content for c in llm.calls if c.role == "initiative"]
         after_two = veto(kernel)
+        birthday = veto(kernel, (others_c.CELEBRATE,))
         p = await kernel.perceive(said("tg_1", "désolée, j'étais débordée !", channel="telegram"))
         await p.reply
         answered = kernel.mind.frame().get(attention_c.AWAITING("tg_1"))
-        return free, absent, present, greeting, early, first, sent, briefs, after_two, answered
+        return free, absent, present, greeting, early, first, sent, briefs, after_two, birthday, answered
 
-    free, absent, present, greeting, early, first, sent, briefs, after_two, answered = run(tmp_path, scenario)
+    free, absent, present, greeting, early, first, sent, briefs, after_two, birthday, answered = run(tmp_path, scenario)
     assert free is None
     assert absent == present == agency_c.UNANSWERED  # présente ou non
     assert greeting is None  # saluer qui arrive n'est pas prendre la parole
@@ -237,6 +239,7 @@ def test_the_rule_vetoes_every_ordinary_reason_and_allows_one_gentle_follow_up(t
     assert len(follow_ups) == 1 and follow_ups[0].at - first >= 6 * DAY, [e.at - first for e in sent]
     assert any("relance douce" in b for b in briefs)
     assert after_two == agency_c.UNANSWERED  # après deux sans réponse : plus rien
+    assert birthday is None  # … sauf lui souhaiter son anniversaire le jour même : un vœu n'est pas une relance
     assert answered.initiatives == 0 and answered.ignored == 0  # elle a écrit : tout repart de zéro
 
 
@@ -470,3 +473,30 @@ def test_sometimes_she_thinks_of_writing_then_changes_her_mind(tmp_path):
     assert murmurs and "tu te ravises" in murmurs[0]
     assert not composed and not sent  # l'initiative qu'il précédait ne part pas
     assert reading.hesitated_at  # une courte hésitation
+
+
+def test_an_urge_that_always_ends_in_silence_does_not_come_back_every_ten_minutes(tmp_path):
+    """Une envie de lui écrire qui finit toujours en silence (le modèle répond [SILENCE], ou une panne) : chaque
+    hésitation d'affilée envers la même personne dure le double de la précédente (audit L2 du 2026-10-03 : quatre
+    cents essais par jour vers une amie, tous en abstention — avec un vrai modèle, quatre cents appels payés).
+    Contre-exemple : envers une autre personne, rien n'est retenu."""
+    script = Script()
+    script.initiative = "[SILENCE]"
+
+    async def scenario(kernel, script, out, llm):
+        await befriend(kernel, "user_1", social_c.FRIEND)
+        await connect(kernel, "user_1", "Adrien")
+        await asyncio.sleep(90)
+        await chat(kernel, "user_1", ["salut mika ! ça va ?", "moi ça va, je bosse"])
+        await asyncio.sleep(DAY / US)
+        started = [e for e in events(kernel, rt.EPISODE_STARTED.name)
+                   if e.data.kind == "INITIATIVE" and e.data.target == "user_1"
+                   and social_c.GREETING not in e.data.reason.split(",")]
+        frame = kernel.mind.frame()
+        other = restraint(frame, "user_2", ("chat",)).veto
+        return started, frame.state("agency").hesitations.get("user_1"), other
+
+    started, hesitations, other = run(tmp_path, scenario, script=script)
+    assert hesitations is not None and hesitations[1] >= 2, hesitations
+    assert len(started) <= 8, f"{len(started)} essais en un jour (seize sans doubler l'hésitation)"
+    assert other != agency_c.HESITATING, "contre-exemple : l'hésitation envers Adrien ne retient pas les autres"

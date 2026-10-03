@@ -67,15 +67,17 @@ def test_other_peoples_exchanges_do_not_crowd_out_her_memories(tmp_path):
 def test_a_polite_word_brings_nothing_back(tmp_path):
     """« Ah d'accord », « bonne nuit » : on ne repense pas à sa vie à chaque
     politesse — même quand un souvenir en a les mots (« Alice m'a souhaité une
-    bonne nuit » ressemble mot pour mot à « bonne nuit ! »)."""
+    bonne nuit, toute contente de son déménagement » ressemble à « bonne nuit ! » ;
+    « Alice m'a souhaité une bonne nuit » tout court, une banalité, ne se garde
+    plus du tout : ADR 0055)."""
 
     def extract(prompt):
         if "Nantes" not in prompt:
             return None
         return {"croyances": [{"texte": "Alice m'a dit : Au fait je déménage le mois prochain à Nantes",
                                "personnes": [token(prompt, "Alice")], "sensibilite": "personnel"}],
-                "souvenirs": [{"texte": "Alice m'a souhaité une bonne nuit", "personnes": [token(prompt, "Alice")],
-                               "sensibilite": "anodin"}]}
+                "souvenirs": [{"texte": "Alice m'a souhaité une bonne nuit, toute contente de son déménagement",
+                               "personnes": [token(prompt, "Alice")], "sensibilite": "anodin"}]}
 
     script = Script(extract)
     kernel, clock, _, _out = build(tmp_path, script)
@@ -401,3 +403,31 @@ def test_she_remembers_by_the_time_it_was_said(tmp_path):
     monday, tuesday = run_virtual(clock, main)
     assert "CANARI-T1" in monday and "CANARI-T2" not in monday, monday
     assert "CANARI-T2" in tuesday, tuesday
+
+
+def test_the_moment_she_is_asked_about_is_quoted_even_when_still_in_the_thread(tmp_path):
+    """Toute la semaine est encore dans le fil montré : « ce que je t'ai dit lundi matin ? » cite quand même ce
+    qu'Adrien a dit lundi matin, à son nom (sonde réelle du 2026-10-03 : noyée dans soixante-sept messages, elle lui
+    a prêté son propre rêve). Contre-exemple : sans date, ce que le fil montre déjà ne se répète pas."""
+    script = Script()
+    kernel, clock, _, _out = build(tmp_path, script, start=at_paris(2026, 10, 5, 8, 30))
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_2", "Adrien")
+        await chat(kernel, "user_2", ["CANARI-T1 j'ai un entretien chez Ubisoft jeudi à 14h", *SIX[1:3]], gap_s=60)
+        await asyncio.sleep((at_paris(2026, 10, 6, 20, 0) - clock.now()) / US)
+        await chat(kernel, "user_2", ["CANARI-T2 mon chat a vomi sur le canapé ce soir", *SIX[3:5]], gap_s=60)
+        await asyncio.sleep((at_paris(2026, 10, 11, 15, 0) - clock.now()) / US)
+        await chat(kernel, "user_2", ["tu te souviens de ce que je t'ai dit lundi matin ?"])
+        reply = script.replies("user_2")[-1]
+        monday = section(reply, EXCHANGES)
+        await chat(kernel, "user_2", ["tu te souviens de mon entretien chez Ubisoft ?"])
+        plain = section(script.replies("user_2")[-1], EXCHANGES)
+        await kernel.stop()
+        return reply, monday, plain
+
+    reply, monday, plain = run_virtual(clock, main)
+    assert "CANARI-T1" in reply.replace(monday, ""), "le test suppose lundi encore dans le fil"
+    assert "Adrien : « CANARI-T1" in monday and "CANARI-T2" not in monday, monday
+    assert "CANARI-T1" not in plain, plain

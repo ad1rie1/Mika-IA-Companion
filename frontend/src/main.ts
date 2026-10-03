@@ -226,7 +226,7 @@ async function init() {
   // and fans it out here (animation + environment + wake-up stamp).
   innerLifePanel.onSleepPhaseChange((phase) => presenter.setSleepPhase(phase));
 
-  // Auth: the WebSocket authenticates via the Django session cookie.
+  // Auth: the WebSocket authenticates via the server's session cookie.
   //
   // The gate is driven by the *backend* (`auth_required` in /auth/whoami)
   // rather than a build-time flag, so the frontend can't be configured into
@@ -289,21 +289,8 @@ async function init() {
   ws.on("inner_state_update", (data) => presenter.handleInnerStateUpdate(data));
   ws.on("emotion_update", (data) => presenter.handleEmotionUpdate(data));
   ws.on("ack", (data) => presenter.handleAck(data));
-
-  // Project reports — silent by default (no TTS). Show as a message
-  // in the chat overlay so the user sees what Mika wrapped up. Prefixed
-  // to distinguish from regular conversation.
-  ws.on("project_report", (data) => {
-    // Not a `Message` row, so it will never get a server id. Marked as
-    // such, or the merge's "no id means not written yet, therefore
-    // newest" rule pinned it to the bottom of the thread for the rest of
-    // the session, below every reply that came after it.
-    chatOverlay.addMessage(
-      `[Projet · ${data.project_title}] ${data.text}`,
-      "vtuber",
-      { localOnly: true },
-    );
-  });
+  // Pas de trame `project_report` : le serveur v2 n'en émet pas. Ce qu'elle
+  // raconte d'un projet arrive comme une parole (`speech`), dans le fil.
 
   ws.connect();
 

@@ -11,6 +11,7 @@ from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
+from mika.adapters.web.accounts import password_problems
 from mika.inspector import render
 from mika.inspector.catalog import Builtin, Destination, Panel, builtin_keys, destinations
 from mika.inspector.formview import action_view, visible_fields
@@ -368,7 +369,21 @@ class Pages:
         return self.ui.fragment("_vitals.html", vitals=self.ui.vitals())
 
     async def login(self, request: Request) -> Response:
+        """La porte de la console. Sans aucun compte, elle crée le compte opérateur (le même chemin que
+        ``/auth/bootstrap`` : mêmes règles de mot de passe, et seulement tant qu'aucun compte n'existe). Un compte
+        du chat déjà connecté apprend que ce compte n'ouvre pas la console, au lieu d'être renvoyé ici sans un
+        mot."""
+        accounts = self.ui.deps.accounts
+        if accounts.count() == 0:
+            return await self._bootstrap(request)
         error = ""
+        if request.method == "GET":
+            current = accounts.session(request.cookies.get(SESSION_COOKIE))
+            if current is not None and current.operator:
+                return secure(RedirectResponse(PREFIX + "/", status_code=303))
+            if current is not None:
+                error = (f"Ce compte ({current.display_name or current.username}) n'ouvre pas la console : "
+                         "demande à un opérateur, ou connecte-toi avec un compte opérateur.")
         if request.method == "POST":
             data = await self.ui.form(request)
             ip = request.client.host if request.client else "?"
@@ -392,6 +407,37 @@ class Pages:
                                         secure=self.ui.cookie_secure)
                     return secure(response)
         return self.ui.bare(request, "login.html", "Connexion", error=error)
+
+    async def _bootstrap(self, request: Request) -> Response:
+        """Aucun compte encore : créer le compte opérateur, comme ``/auth/bootstrap`` (``password_problems``,
+        ``Accounts.bootstrap`` qui refuse dès qu'un compte existe — deux onglets ne créent pas deux comptes)."""
+        accounts = self.ui.deps.accounts
+        error, username = "", ""
+        if request.method == "POST":
+            data = await self.ui.form(request)
+            username = str((data or {}).get("username", "")).strip()[:150]
+            password = str((data or {}).get("password", ""))
+            if data is None:
+                error = "Jeton de formulaire invalide : recharge la page."
+            elif not username:
+                error = "Donne un identifiant."
+            elif password != str(data.get("password2", "")):
+                error = "Les deux mots de passe ne sont pas les mêmes."
+            else:
+                problems = password_problems(password, username)
+                if problems:
+                    error = " ".join(problems)
+                else:
+                    account = await accounts.bootstrap(username, password)
+                    if account is None:  # créé entre-temps (un autre onglet) : se connecter, maintenant
+                        return secure(RedirectResponse(PREFIX + "/connexion", status_code=303))
+                    key = await accounts.open_session(account)
+                    response = RedirectResponse(PREFIX + "/", status_code=303)
+                    response.set_cookie(SESSION_COOKIE, key, httponly=True, samesite="lax",
+                                        secure=self.ui.cookie_secure)
+                    return secure(response)
+        return self.ui.bare(request, "login.html", "Créer le compte opérateur", error=error, bootstrap=True,
+                            username=username, status=400 if error else 200)
 
     async def logout(self, request: Request) -> Response:
         data = await self.ui.form(request)

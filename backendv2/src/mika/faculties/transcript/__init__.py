@@ -174,8 +174,10 @@ def _head(s: TranscriptState, cx) -> int:
 
 # ── Le fil matérialisé ────────────────────────────────────────────────────
 
+#: ``typed`` : avec des pièces jointes, combien de caractères du début de ``text`` la personne a tapés (le reste
+#: est ce qu'elle en a perçu, pour le prompt) ; nul quand il n'y a rien à séparer (version 2 de la table)
 _COLUMNS = ("id", "at", "role", "person", "channel", "room", "source", "kind", "text", "client_msg_id",
-            "reply_to", "emotion", "emotion_intensity", "attachments")
+            "reply_to", "emotion", "emotion_intensity", "attachments", "typed")
 
 
 class Thread:
@@ -186,7 +188,7 @@ class Thread:
             f"CREATE TABLE IF NOT EXISTS {c.THREAD_TABLE}{sfx}("
             "id INTEGER PRIMARY KEY, at INTEGER NOT NULL, role TEXT NOT NULL, person TEXT NOT NULL, "
             "channel TEXT, room TEXT, source TEXT, kind TEXT, text TEXT NOT NULL, client_msg_id TEXT, "
-            "reply_to INTEGER, emotion TEXT, emotion_intensity REAL, attachments TEXT)"
+            "reply_to INTEGER, emotion TEXT, emotion_intensity REAL, attachments TEXT, typed INTEGER)"
         )
         sql.execute(f"CREATE INDEX IF NOT EXISTS {c.THREAD_TABLE}{sfx}_person ON {c.THREAD_TABLE}{sfx}(person, id)")
 
@@ -203,17 +205,28 @@ class Thread:
         sql.execute(f"DELETE FROM {c.THREAD_TABLE}{sfx} WHERE person=?", (subject,))
 
 
+def _forgotten(text: Any) -> bool:
+    """Un texte relu après l'oubli de qui il concerne : sa référence reste, plus son texte."""
+    return text is not None and getattr(text, "ref", None) is not None and getattr(text, "text", None) is None
+
+
 def _row(e: Any) -> tuple[Any, ...] | None:
     d = e.data
+    if _forgotten(getattr(d, "text", None)):
+        # une reconstruction (une nouvelle version de la table) relit tout le journal : ce qui a été oublié ne revient
+        # pas, ni en texte vide ni par les noms de ses pièces jointes (audit du lot L2 du 2026-10-03)
+        return None
     if e.type.name == rt.PERCEPTION_RECEIVED.name:
         attachments = json.dumps([a.model_dump() for a in d.attachments], ensure_ascii=False) if d.attachments else "[]"
-        return (e.seq, e.at, "user", d.handle, d.channel, d.room, d.channel, "message", d.text.text or "",
-                d.client_msg_id, None, None, None, attachments)
+        text = d.text.text or ""
+        typed = None if d.typed_chars is None else max(0, min(len(text), d.typed_chars))
+        return (e.seq, e.at, "user", d.handle, d.channel, d.room, d.channel, "message", text,
+                d.client_msg_id, None, None, None, attachments, typed)
     if e.type.name == rt.UTTERANCE.name and d.visible:
         declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
         return (e.seq, e.at, "assistant", d.target or "", d.channel, d.room, _source(d.kind), d.kind,
                 strip_prosody(d.text.text or ""), None, d.reply_to,
-                declared.emotion.value if declared else None, declared.intensity if declared else None, "[]")
+                declared.emotion.value if declared else None, declared.intensity if declared else None, "[]", None)
     return None
 
 
@@ -221,7 +234,9 @@ def _source(kind: str) -> str:
     return "conscience" if kind != Kind.REPLY else "reply"
 
 
-TRANSCRIPT.projector(c.THREAD_TABLE, version=1, tier=Tier.T0, types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE])(Thread)
+#: version 2 : la colonne ``typed`` (ce que la personne a tapé, à part de ce que ses pièces jointes ont donné) —
+#: la table se reconstruit depuis le journal au premier démarrage
+TRANSCRIPT.projector(c.THREAD_TABLE, version=2, tier=Tier.T0, types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE])(Thread)
 
 
 def recent(store: Any, person: str, limit: int) -> list[dict[str, Any]]:
@@ -701,9 +716,52 @@ MESSAGE_COLUMNS = (Column("n°", "fit", detail=True), Column("quand", "fit"), "q
                    "réponse", Column("épisode", detail=True))
 
 
+def _answers(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[int, int]:
+    """Pour chaque message reçu de la page, la parole qui l'a réglé (son n°) : celle qui y répond, ou celle qui
+    répond au dernier message de sa rafale et l'a lu avec (``Utterance.answers``). Absent : sans réponse (elle
+    s'est tue, la réponse a échoué) ou encore en attente."""
+    store = ctx.store
+    asked = [r for r in rows if r["role"] == "user" and not _internal(r)]
+    if store is None or not asked:
+        return {}
+    ids = [int(r["id"]) for r in asked]
+    marks = ",".join("?" * len(ids))
+    out = {int(q): int(a) for a, q in store.query_mind(
+        f"SELECT id, reply_to FROM {c.THREAD_TABLE} WHERE role='assistant' AND reply_to IN ({marks})", tuple(ids))}
+    for r in asked:
+        q = int(r["id"])
+        if q in out:
+            continue
+        # le premier énoncé vers la même adresse, au même endroit, qui répond à un message d'après : il a peut-être
+        # lu celui-ci avec (une rafale reçoit une seule réponse, à son dernier message)
+        later = store.query_mind(
+            f"SELECT id FROM {c.THREAD_TABLE} WHERE person=? AND role='assistant' AND id>? AND reply_to>? "
+            "AND COALESCE(room, '')=? ORDER BY id LIMIT 1", (r["person"], q, q, r["room"] or ""))
+        if not later:
+            continue
+        seq = int(later[0][0])
+        found = ctx.events((rt.UTTERANCE,), 1, before=seq + 1)
+        if found and found[0].seq == seq and q in found[0].data.answers:
+            out[q] = seq
+    return out
+
+
+def _answer_cell(r: Mapping[str, Any], pending: set[int], answers: Mapping[int, int]) -> Cell:
+    """La colonne « réponse » d'un message reçu : en attente, la parole qui l'a réglé, ou sans réponse."""
+    if r["role"] != "user" or _internal(r):
+        return ""
+    q = int(r["id"])
+    if q in pending:
+        return Badge("en attente", "warn")
+    if q in answers:
+        return Ref.why(answers[q], f"répondue → n° {answers[q]}")
+    return Text("sans réponse", "muted")
+
+
 def _messages(frame: Frame, ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> tuple[Row, ...]:
     pending = {int(x) for x in frame.get(rt.AWAITING)}
     episodes = _episodes(ctx, rows)
+    answers = _answers(ctx, rows)
     out = []
     for r in rows:
         mine = r["role"] == "assistant"
@@ -714,7 +772,7 @@ def _messages(frame: Frame, ctx: InspectContext, rows: Sequence[Mapping[str, Any
             f"salon « {r['room']} »" if r["room"] else "en privé",
             Text((r["text"] or "")[:TEXT_CAP], clamp=INSPECT_CHARS),
             emotion_cell(r["emotion"], r["emotion_intensity"]) if mine and r["emotion"] else "",
-            Badge("en attente", "warn") if r["id"] in pending else "",
+            _answer_cell(r, pending, answers),
             Ref("episode", corr, "épisode") if corr else "—",
         ), tone="muted" if _internal(r) else "", href=Ref.why(int(r["id"])) if mine and corr else None,
             detail=(Prose(r["text"] or FORGOTTEN, title="Message", reading=True),)))

@@ -11,20 +11,24 @@ from __future__ import annotations
 import logging
 import re
 import zoneinfo
+from datetime import datetime
 from functools import cache
 from typing import TYPE_CHECKING, Annotated, Any
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
-from mika.adapters.llm.config import ROLE_LABELS, BackendSpec, LLMConfig
+from mika.adapters.llm.config import REPLY, ROLE_LABELS, BackendSpec, LLMConfig
 from mika.adapters.llm.models import ListingFailed, list_models
 from mika.adapters.mail import MailConfig
+from mika.app import persona as persona_file
 from mika.contracts import self_ as self_c
 from mika.contracts.self_ import PersonaDoc
 from mika.inspector.catalog import Command, SettingsPage, SettingsSection, SettingsTab
 from mika.kernel import forms
+from mika.kernel.clock import US
 from mika.kernel.forms import Knob
 from mika.kernel.inspect import Badge, Column, Nav, NavItem, Note, Ref, Row, Table, Text, When
 from mika.runtime.params import Parameters
@@ -212,8 +216,25 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     def llm_facts() -> list[tuple[str, str]]:
         cfg = settings.llm()
-        return [("Passerelle", "configurée" if live.gateway.configured else "aucun modèle : chaque tour échoue "
+        serving = live.gateway.serving(REPLY) if live.gateway.configured else ""
+        return [("Répondre", f"servi par « {serving} »" if serving else "aucun modèle : chaque tour échoue "
                  "proprement"), ("Fournisseurs", str(len(cfg.backends))), ("Rôles routés", str(len(cfg.routes)))]
+
+    def who_replies() -> list[Any]:
+        """Qui la fait parler : le premier fournisseur déclaré sert « répondre » d'office — la page le dit,
+        pour qu'il n'y ait pas de seconde étape à deviner."""
+        cfg = settings.llm()
+        name = cfg.routes.get(REPLY, "")
+        spec = cfg.backends.get(name)
+        if spec is None:
+            return [Note("Aucun fournisseur : elle ne peut pas parler. Ajoute-en un — le premier déclaré sert "
+                         "« répondre » d'office, et tous les autres rôles y retombent.", "warn",
+                         title="Elle ne peut pas encore répondre")]
+        others = len(cfg.backends) - 1
+        return [Note(f"« {name} » ({spec.kind} · {spec.model}) sert « répondre » : c'est lui qui la fait parler, "
+                     "et les rôles sans fournisseur à eux y retombent. Le premier fournisseur déclaré le sert "
+                     "d'office" + (" ; pour en changer, va dans Qui sert quoi." if others else "."), "info",
+                     title="Qui la fait parler")]
 
     # ── personnalité ──
     async def save_persona(doc: PersonaDoc, by: str) -> list[str]:
@@ -233,6 +254,11 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     async def back_to_file(by: str) -> tuple[str, str]:
         if settings.persona_yaml() is None:
             return "info", "La persona vient déjà du fichier."
+        try:
+            persona_file.read(live.persona_file)
+        except persona_file.PersonaInvalid as exc:  # revenir à un fichier illisible, c'est revenir à rien
+            raise ValueError(f"Le fichier ne se lit pas : {exc.problem}. La persona de la console reste en "
+                             "place.") from None
         previous = settings.persona_yaml()
         await settings.save_persona(None)
         problems = await live.reconfigure()
@@ -243,7 +269,13 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return "ok", "Retour au fichier : la persona du fichier fait foi (une révision est journalisée)."
 
     def persona_facts() -> list[tuple[str, str]]:
-        return [("Source", "la console" if settings.persona_yaml() else f"le fichier {live.persona_file.name}")]
+        if settings.persona_yaml():
+            return [("Source", "la console")]
+        live.persona()  # relue : le problème du fichier, s'il en a un, est à jour
+        if live.persona_problem:
+            return [("Source", "sa dernière persona gardée au journal : le fichier ne se lit pas"),
+                    ("Le fichier", live.persona_problem)]
+        return [("Source", f"le fichier {live.persona_file.name}")]
 
     def revisions() -> list[Any]:
         """Les révisions de sa persona, de la plus récente, et ce que chacune a changé."""
@@ -294,24 +326,51 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         tg = settings.telegram()
         state = live.telegram_state() if tg["token"] else "non configuré"
         access = "ouvert à tous" if tg["open"] else "liste blanche" if tg["allowed_chats"] else \
-            "propriétaires seulement" if tg["owners"] else "fermé (personne)"
+            "propriétaires seulement" if tg["owners"] else "fermé (personne) : en attente d'appairage"
         return [("Robot", state), ("Accès", access)]
 
     def telegram_warning() -> list[Any]:
         """Ce que l'accès au robot implique, en tête de page. Fermé par défaut (ADR 0038) : on avertit
-        quand il est ouvert à tous, et quand il n'est ouvert à personne (il ne démarre pas)."""
+        quand il est ouvert à tous ; fermé à tous, le robot attend un appairage, et la page en montre le code
+        (ADR 0057) — personne n'a à connaître son identifiant Telegram."""
         tg = settings.telegram()
         if not tg["token"]:
             return []
+        out: list[Any] = []
         if tg["open"]:
-            return [Note("N'importe qui trouvant le robot peut lui écrire, même hors de la liste (et chaque "
-                         "message lui coûte un tour). Décoche « Ouvert à tous » pour réserver l'accès.", "warn",
-                         title="Ouvert à tous")]
-        if not tg["allowed_chats"] and not tg["owners"]:
-            return [Note("Ni conversation autorisée ni propriétaire : le robot ne répond à personne et ne démarre "
-                         "pas. Liste les identifiants de conversation, ou ses propriétaires.", "warn",
-                         title="Fermé à tous")]
-        return []
+            out.append(Note("N'importe qui trouvant le robot peut lui écrire, même hors de la liste (et chaque "
+                            "message lui coûte un tour). Décoche « Ouvert à tous » pour réserver l'accès.", "warn",
+                            title="Ouvert à tous"))
+        closed = not tg["open"] and not tg["allowed_chats"] and not tg["owners"]
+        pairing = settings.telegram_pairing()
+        if pairing is None:
+            if closed:
+                out.append(Note("Personne ne peut encore lui écrire. Demande un code d'appairage (bouton dessous) : "
+                                "envoyé au robot en privé, il fait de toi sa propriétaire.", "warn",
+                                title="En attente d'appairage"))
+            return out
+        code, until = pairing
+        now = live.kernel.mind.clock.now() // US
+        if until <= now:
+            out.append(Note("Le code d'appairage a expiré : demandes-en un nouveau (bouton dessous).",
+                            "warn" if closed else "muted", title="Appairage"))
+            return out
+        bot = getattr(live.telegram, "username", "") if live.telegram is not None else ""
+        link = f" — ou ouvre https://t.me/{bot}?start={code}" if bot else ""
+        expires = datetime.fromtimestamp(until, ZoneInfo(live.persona().timezone))
+        out.append(Note(f"Envoie au robot, en privé : /start {code}{link}. Le compte qui l'envoie devient sa "
+                        f"propriétaire (une seule fois ; valable jusqu'au {expires:%d/%m à %H:%M}). Le code ne se "
+                        "montre que dans la console, jamais au journal.", "info" if not closed else "warn",
+                        title="En attente d'appairage" if closed else "Un appairage en cours"))
+        return out
+
+    async def new_pairing(by: str) -> tuple[str, str]:
+        if not settings.telegram()["token"]:
+            raise ValueError("Pas de robot : colle d'abord son jeton.")
+        code, _until = await live.telegram_pairing_code(fresh=True)
+        if live.telegram_status in ("off", "closed"):  # fermé et arrêté : il démarre pour attendre ce code
+            await live.start_telegram()
+        return "ok", f"Code d'appairage neuf (l'ancien ne vaut plus) : envoie au robot, en privé, /start {code}"
 
     # ── sens ──
     async def save_mail(cfg: MailConfig, by: str) -> list[str]:
@@ -378,14 +437,17 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         description="Les fournisseurs de modèles, et lequel sert chaque rôle. Les clés sont "
                                     "chiffrées, jamais réaffichées.", loaders={"models": models}, facts=llm_facts,
                         pages=(
-                            SettingsPage("fournisseurs", "Fournisseurs", ("backends",), order=10, description=(
+                            SettingsPage("fournisseurs", "Fournisseurs", ("backends",), order=10, extra=who_replies,
+                                         description=(
                                 "Les services qui font tourner ses modèles. Chaque fournisseur a sa page : son "
                                 "type, le modèle choisi dans la liste qu'il propose, sa clé ; le reste est rangé "
-                                "dans « Options avancées ».")),
+                                "dans « Options avancées ». Le premier déclaré sert « répondre » d'office.")),
                             SettingsPage("roles", "Qui sert quoi", ("routes",), order=20, extra=routing,
                                          facts=False, description=(
                                              "Chaque rôle (répondre, rêver, retenir, trier le courrier…) choisit "
-                                             "son fournisseur. Laisse vide : le rôle retombe sur son repli.")),
+                                             "son fournisseur. Laisse vide : le rôle retombe sur son repli. "
+                                             "« Répondre » est toujours servi : sans choix, par le premier "
+                                             "fournisseur déclaré.")),
                             SettingsPage("contexte", "Contexte", ("context_tokens",), order=30, facts=False,
                                          description="La place que le prompt peut occuper : plus grande, elle se "
                                                      "souvient de plus de fil et de souvenirs, pour plus cher."),
@@ -430,10 +492,14 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         SettingsSection("telegram", "Telegram", "canaux", TelegramSettings, telegram, save_telegram,
                         description="Le robot qui la relie à Telegram. L'enregistrer le redémarre.",
                         facts=telegram_facts, blocks=telegram_warning,
-                        pages=(SettingsPage("telegram", "Telegram", blocks=True, description=(
+                        commands=(Command("appairer", "Nouveau code d'appairage", new_pairing,
+                                          confirm="Le code en cours, s'il y en a un, ne vaudra plus rien."),),
+                        pages=(SettingsPage("telegram", "Telegram", blocks=True, commands=True, description=(
                             "Le robot qui la relie à Telegram : son jeton, qui peut lui écrire, et qui elle traite "
-                            "comme toi. L'enregistrer redémarre le robot. Les identifiants se lisent dans "
-                            "Identités › Adresses (tg_<nombre>).")),)),
+                            "comme toi. L'enregistrer redémarre le robot. Pour devenir sa propriétaire sans "
+                            "connaître ton identifiant Telegram : un code d'appairage, envoyé au robot en privé "
+                            "(/start <code>). Les identifiants se lisent ensuite dans Identités › Adresses "
+                            "(tg_<nombre>).")),)),
         SettingsSection("depots", "Dépôts git", "canaux", GitSettings, git, save_git,
                         description="Le jeton avec lequel ses projets poussent vers leur dépôt distant.",
                         facts=lambda: [("Jeton", "défini" if settings.git()["token"] else "aucun")],

@@ -21,9 +21,11 @@ class Audience:
 
     ``level`` est le niveau de sensibilité maximal qu'on peut dire devant elle
     sur autrui (les niveaux sont nommés dans ``vocab``), ``witness_level``
-    celui d'un contenu où l'interlocuteur figure lui-même, ``private_ok`` la
-    porte de sa propre fiche. Toute panne de résolution doit donner
-    l'audience fermée (niveaux 0, publique, fiche fermée).
+    celui d'un contenu où l'interlocuteur figure lui-même, ``tied_level``
+    celui d'un contenu sur des personnes avec qui l'interlocuteur a un lien
+    (``ties`` : ces personnes), ``private_ok`` la porte de sa propre fiche.
+    Toute panne de résolution doit donner l'audience fermée (niveaux 0,
+    publique, fiche fermée, aucun lien).
     """
 
     persons: tuple[str, ...] = ()
@@ -39,6 +41,8 @@ class Audience:
     #: l'interlocuteur est l'un de ses propriétaires (ou personne n'écoute :
     #: elle travaille pour elle) — ouvre les outils ``owner_only``
     owner: bool = False
+    tied_level: int = 0
+    ties: tuple[str, ...] = ()
 
 
 CLOSED = Audience()

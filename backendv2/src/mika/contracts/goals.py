@@ -38,6 +38,12 @@ OWNER = "goals"
 REMINDER, EXPLORATION, PROJECT = "reminder", "exploration", "project"
 # d'où vient une exploration
 FROM_EXCHANGE, FROM_REVISION, FROM_SIGNAL, FROM_INTEREST = "exchange", "revision", "signal", "interest"
+#: un sujet de conversation qui l'a intéressée (ce dont une amie lui a parlé, ce qu'on lui a fait découvrir) :
+#: une rêverie ancrée dans ce qu'on lui a dit, avant ses centres d'intérêt de toujours (ADR 0053)
+FROM_TALK = "talk"
+#: ce qui fait une rêverie quand elle n'a nulle part où chercher du neuf : un centre d'intérêt, un sujet de
+#: conversation
+MUSING_ORIGINS = frozenset({FROM_INTEREST, FROM_TALK})
 KINDS = (REMINDER, EXPLORATION, PROJECT)
 USER, SELF = "user", "self"
 
@@ -58,6 +64,12 @@ MUSED = "rêverie"
 DISSIPATED = "rêverie dissipée"
 #: les raisons de clôture d'une rêverie, quelle qu'en soit l'issue : ce qui les lit n'a pas à recopier une chaîne
 MUSINGS = frozenset({MUSED, DISSIPATED})
+#: la raison d'une réflexion (repenser à ce qu'on lui a confié, à ce qu'elle croyait) qui n'a rien donné en sa
+#: séance : elle en reste là — comme une rêverie qui se dissipe, ce n'est ni un échec ni un renoncement (ni « je
+#: bloque », ni frustration, ni mélancolie) ; la pensée d'où elle venait, elle, reste (ADR 0053)
+LET_GO = "réflexion sans suite"
+#: les fins qui ne se ressentent pas et ne se racontent pas : une rêverie dissipée, une réflexion sans suite
+QUIET_ENDS = frozenset({DISSIPATED, LET_GO})
 CLOSED_STATUSES = (ACHIEVED, STUCK, ABANDONED, FAILED, CANCELLED)
 
 # priorités (le vocabulaire du panneau du frontend) : elles déplacent la preuve d'un pas
@@ -107,7 +119,8 @@ class GoalOpened(Payload):
     #: ``low`` | ``normal`` | ``high`` | ``urgent``
     priority: str = NORMAL
     #: explorations : ce qui l'a fait naître — ``exchange`` (ce qu'on lui a confié), ``revision`` (une croyance
-    #: revue), ``signal`` (un titre, un mail…), ``interest`` (un de ses centres d'intérêt) ; vide : un ancien journal
+    #: revue), ``signal`` (un titre, un mail…), ``interest`` (un de ses centres d'intérêt), ``talk`` (un sujet de
+    #: conversation qui l'a intéressée) ; vide : un ancien journal
     origin: str = ""
     #: …et quand (la pensée d'où il vient est née à cet instant ; 0 : inconnu)
     origin_at: int = 0

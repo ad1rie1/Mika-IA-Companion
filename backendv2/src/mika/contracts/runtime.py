@@ -33,6 +33,10 @@ class PerceptionReceived(Payload):
     #: Adressé à elle ? Dans un salon, elle entend tout mais ne répond qu'à ce
     #: qui lui parle (son nom, une réponse à son message) ; en privé, toujours.
     addressed: bool = True
+    #: Avec des pièces jointes : combien de caractères, au début de ``text``, la personne a tapés — la suite est
+    #: ce que ses fichiers lui ont donné à percevoir (pour le prompt, jamais pour la bulle qu'elle relit).
+    #: ``None`` : rien à séparer (pas de pièce jointe, ou un journal plus ancien, qui garde son affichage).
+    typed_chars: int | None = None
 
 
 class EpisodeStarted(Payload):

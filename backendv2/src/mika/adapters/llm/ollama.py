@@ -79,6 +79,9 @@ def ollama_messages(req: LLMRequest) -> list[dict[str, Any]]:
 class OllamaBackend:
     """Un serveur Ollama : un appel ``/api/chat`` par requête, aucune boucle."""
 
+    #: il ne sait pas différer des outils (pas de recherche d'outils) : tous partent déclarés
+    defers_tools = False
+
     def __init__(
         self,
         model: str,

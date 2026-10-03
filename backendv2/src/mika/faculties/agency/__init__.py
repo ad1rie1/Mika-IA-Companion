@@ -11,8 +11,9 @@
 - **Être ignorée l'espace** : chaque initiative restée sans réponse (d'affilée,
   toutes personnes) allonge la période réfractaire (×2,5, jusqu'à six
   heures) ; envers la personne même, chacune abaisse l'envie de recommencer.
-  La retenue envers quelqu'un qui ne répond pas (plus d'initiative ordinaire
-  tant qu'il n'a pas écrit) est celle de ``social``.
+  Envers quelqu'un qui ne répond pas : plus d'initiative ordinaire tant qu'il
+  n'a pas écrit (une relance douce, puis rien) ; des mois plus tard, une
+  prise de nouvelles, une seule (``ONCE_MORE``, ADR 0058).
 - **Se raviser** : un murmure « sans suite » (elle allait écrire à quelqu'un,
   puis non) arrête l'initiative qu'il précédait.
 - La salutation et le rappel promis ne sont pas concernés — saluer
@@ -72,8 +73,11 @@ REFRACTORY_SPAN = 3
 #: et tout ce qui la prévient (``c.INFORMS``) : ça n'attend pas que son dernier message ait trouvé sa réponse (mais
 #: une initiative restée sans réponse, si — sauf pour prévenir). Ce qui vient de Mika (l'envie de parler, son
 #: humeur, le manque) attend.
-ABOUT_THEM = c.INFORMS | frozenset({others_c.CHECK_IN, others_c.FOLLOW_UP, attention_c.THOUGHT, goals_c.SHARE,
-                                    projects_c.SHARE})
+ABOUT_THEM = c.INFORMS | others_c.WELL_WISHES | frozenset({others_c.CHECK_IN, others_c.FOLLOW_UP,
+                                                            attention_c.THOUGHT, goals_c.SHARE, projects_c.SHARE})
+#: ce qui ne relance pas même quelqu'un qui ne répond plus : lui souhaiter son anniversaire le jour même (un vœu
+#: n'attend pas de réponse, et ne pas le faire se remarque plus que de le faire)
+NOT_A_NUDGE = frozenset({others_c.CELEBRATE})
 
 
 class AgencyParams(BaseModel):
@@ -100,6 +104,10 @@ class AgencyParams(BaseModel):
         help="Après une initiative à laquelle elle a renoncé (un silence, un murmure sans suite) ou qui n'a pas "
              "pu partir (une panne), la suivante est moins probable pendant cette durée ; rien n'est "
              "consommé.")] = 10 * MINUTE
+    hesitation_max_us: Annotated[int, Knob(
+        label="Hésitation la plus longue", group="Période réfractaire", lo=0, hi=24 * HOUR,
+        help="Envers la même personne, chaque hésitation d'affilée (un silence, une panne) dure le double de la "
+             "précédente, jusqu'à cette durée ; elle repart de zéro quand elle a fini par lui écrire.")] = 6 * HOUR
     hesitation_shift: Annotated[float, Knob(
         label="Recul d'une hésitation", group="Période réfractaire", lo=-10, hi=0, step=0.5,
         help="Recul (log-odds) juste après une hésitation, qui s'efface linéairement.")] = -4.0
@@ -155,9 +163,13 @@ class AgencyState:
     hesitated_at: int = 0
     #: les adresses auxquelles elle allait écrire, puis s'est ravisée (adresse → quand)
     renounced: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: envers qui elle a hésité d'affilée (une abstention, une panne) : adresse → (quand, combien de fois)
+    hesitations: FrozenDict[str, tuple[int, int]] = field(default_factory=FrozenDict)
 
 
-AGENCY = Faculty("agency", state=AgencyState, init=lambda p: AgencyState(), params=AgencyParams, state_version=2)
+AGENCY = Faculty("agency", state=AgencyState, init=lambda p: AgencyState(), params=AgencyParams, state_version=3)
+#: les adresses dont on garde les hésitations, au plus
+HESITATIONS_KEPT = 64
 
 
 def _params(p: AgencyParams | None) -> AgencyParams:
@@ -206,6 +218,8 @@ def _said(s: AgencyState, e, cx) -> AgencyState:
         return s
     if not d.visible or _uncounted(reason.split(",")):
         return s
+    if d.target and d.target in s.hesitations:
+        s = replace(s, hesitations=s.hesitations.delete(d.target))  # elle a fini par lui écrire : tout repart
     p = _params(cx.params)
     kept = tuple(t for t in s.initiatives if e.at - t < DAY)
     jittered = round(p.refractory_us * (1.0 + p.jitter * (2.0 * cx.rng.random() - 1.0)))
@@ -222,7 +236,17 @@ def _ended(s: AgencyState, e, cx) -> AgencyState:
     s = replace(s, openings=s.openings.delete(e.correlation))
     if e.data.kind != Kind.INITIATIVE or _uncounted(reason.split(",")) or e.data.outcome not in HESITANT:
         return s
-    return replace(s, hesitated_at=e.at)
+    target = e.data.target
+    if not target:
+        return replace(s, hesitated_at=e.at)
+    # d'affilée envers la même personne, chaque hésitation dure le double de la précédente : une envie de lui écrire
+    # qui finit toujours en silence (ou en panne) ne se remet pas en route toutes les dix minutes (audit L2 du
+    # 2026-10-03 : quatre cents essais par jour vers une amie, tous en abstention)
+    _at, n = s.hesitations.get(target, (0, 0))
+    hesitations = s.hesitations.set(target, (e.at, n + 1))
+    if len(hesitations) > HESITATIONS_KEPT:
+        hesitations = FrozenDict(sorted(hesitations.items(), key=lambda kv: kv[1][0])[-HESITATIONS_KEPT:])
+    return replace(s, hesitated_at=e.at, hesitations=hesitations)
 
 
 def length(s: AgencyState, p: AgencyParams, ignored: int) -> int:
@@ -280,16 +304,20 @@ def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str |
     """Ne pas harceler (ADR 0033) : après une initiative restée sans réponse,
     plus d'initiative ordinaire vers la personne tant qu'elle n'a pas écrit —
     sauf une relance douce, après un long délai, vers une amie ou une proche ;
-    après deux, plus rien. Si son dernier message (réponse comprise) attend
+    après deux, plus rien — sinon, des mois plus tard, prendre de ses nouvelles
+    une seule fois (``ONCE_MORE``, ADR 0058). Si son dernier message (réponse comprise) attend
     encore, quelques heures de retenue — davantage s'il posait une question ;
     ce qui concerne la personne elle-même (``ABOUT_THEM``) n'attend pas la fin
     de cette retenue-là ; ce qui vient de Mika (l'envie de parler, son humeur,
     le manque), si. Rend le veto, ou ``None``."""
-    if not is_identifiable(target) or c.INFORMS & set(reasons):
-        return None  # prévenir n'est pas relancer
+    if not is_identifiable(target) or (c.INFORMS | NOT_A_NUDGE) & set(reasons):
+        return None  # prévenir n'est pas relancer ; souhaiter un anniversaire non plus
     person = frame.get(identity_c.PERSON(target))
     mine = frame.get(attention_c.AWAITING(person))
-    if mine.initiatives >= 2:
+    if c.ONCE_MORE & set(reasons):
+        # des mois plus tard, une prise de nouvelles, une seule : dite, elle compte une initiative de plus (ADR 0058)
+        return None if mine.initiatives <= c.GIVE_UP_AFTER else c.UNANSWERED
+    if mine.initiatives >= c.GIVE_UP_AFTER:
         return c.UNANSWERED
     if mine.initiatives == 1:
         friendly = frame.get(social_c.CLOSENESS(person)) in (social_c.FRIEND, social_c.CLOSE)
@@ -325,7 +353,7 @@ def restraint(frame: Frame, target: str | None = None, reasons: Any = ()) -> Mod
         if veto is not None:
             return Modulation(veto=veto)
     shift = 0.0
-    if target and is_identifiable(target) and not informs:
+    if target and is_identifiable(target) and not informs and not c.ONCE_MORE & set(reasons):
         mine = frame.get(attention_c.AWAITING(frame.get(identity_c.PERSON(target))))
         shift += p.ignored_shift * min(3, mine.ignored)
     until = (r.base_until or r.refractory_until) if informs else r.refractory_until
@@ -334,7 +362,21 @@ def restraint(frame: Frame, target: str | None = None, reasons: Any = ()) -> Mod
         shift += p.refractory_shift * math.exp(-(frame.now - r.last_initiative_at) / tau)
     if r.hesitated_at and p.hesitation_us and frame.now - r.hesitated_at < p.hesitation_us:
         shift += p.hesitation_shift * (1.0 - (frame.now - r.hesitated_at) / p.hesitation_us)
+    if target and not informs:
+        at, n = frame.state("agency").hesitations.get(target, (0, 0))
+        span = hesitation_span(n, p)
+        if n >= 2 and frame.now - at < span:
+            # la première hésitation, c'est la courte d'au-dessus ; à partir de la deuxième, envers elle, ça dure
+            return Modulation(veto=c.HESITATING)
     return Modulation(shift=shift) if shift else Modulation()
+
+
+def hesitation_span(n: int, p: AgencyParams) -> int:
+    """Combien de temps elle laisse passer après sa n-ième hésitation d'affilée envers quelqu'un : la courte
+    hésitation, doublée à chaque fois, bornée."""
+    if n <= 0 or not p.hesitation_us:
+        return 0
+    return min(p.hesitation_max_us, p.hesitation_us * 2 ** min(n - 1, 20))
 
 
 # ── La consigne d'une initiative ──────────────────────────────────────────

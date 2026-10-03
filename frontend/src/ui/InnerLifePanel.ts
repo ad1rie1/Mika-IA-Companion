@@ -5,7 +5,7 @@
  * ``speech`` diffusé par le backend :
  *   - blend émotionnel (ambivalence multi-label)
  *   - self-narrative (qui elle pense être devenue)
- *   - drives (4 tensions intrinsèques)
+ *   - besoins (compagnie, s'exprimer, apprendre — les mots de la console)
  *   - ruminations actives
  *   - profil de la personne courante + engagements pendants
  *
@@ -37,12 +37,43 @@ const PHASE_META: Record<
   night: { label: "Nuit", icon: "🌙", color: "#6366f1" },
 };
 
-const DRIVE_LABELS: Record<string, { label: string; icon: string; color: string }> = {
-  curiosity: { label: "Curiosité", icon: "❔", color: "#6366f1" },
-  social: { label: "Lien social", icon: "👥", color: "#ec4899" },
-  expression: { label: "Expression", icon: "💬", color: "#f59e0b" },
-  rest: { label: "Repos", icon: "💤", color: "#10b981" },
+/**
+ * Ses besoins, avec les mots de la console (`faculties/needs/inspect.py` :
+ * compagnie, s'exprimer, apprendre) — un seul vocabulaire, vérifié par un
+ * test côté serveur. Le panneau disait « Pulsions : Lien social, Expression,
+ * Curiosité » quand la console disait « Besoins : compagnie… ».
+ */
+export const DRIVE_LABELS: Record<string, { label: string; icon: string; color: string }> = {
+  social: { label: "Compagnie", icon: "👥", color: "#ec4899" },
+  expression: { label: "S'exprimer", icon: "💬", color: "#f59e0b" },
+  curiosity: { label: "Apprendre", icon: "❔", color: "#6366f1" },
 };
+
+/** La confiance du transport, en mots (`vocab/privacy.py::ChannelTrust`) —
+ * le panneau affichait « (100 % — authenticated) ». */
+export const TRUST_LABEL: Record<string, string> = {
+  authenticated: "connexion authentifiée",
+  account: "compte privé",
+  public: "salon public",
+  internal: "interne",
+};
+
+/** Le titre du journal montré : le serveur le date (« Son journal d'hier »).
+ * Jamais « d'aujourd'hui » : la journée en cours ne s'écrit que la nuit. */
+export function journalTitle(journal: { title?: string } | undefined): string {
+  const title = journal?.title?.trim();
+  return title || "Son dernier journal";
+}
+
+/** Une revendication d'identité en une ligne : la phrase citée seulement
+ * quand il y en a une (sinon « — «  » »). */
+export function claimLine(claim: { name: string; evidence?: string }): string {
+  const evidence = (claim.evidence ?? "").trim();
+  return (
+    `se présente comme <strong>${escapeHtml(claim.name)}</strong>` +
+    (evidence ? ` — « ${escapeHtml(evidence)} »` : "")
+  );
+}
 
 const CLOSENESS_LABEL: Record<string, string> = {
   stranger: "inconnu·e",
@@ -135,11 +166,11 @@ export class InnerLifePanel {
           <div class="il-dream-body"></div>
         </section>
         <section class="il-section" id="il-journal" hidden>
-          <h4>Journal d'aujourd'hui</h4>
+          <h4 class="il-journal-title">Son dernier journal</h4>
           <div class="il-journal-body"></div>
         </section>
         <section class="il-section" id="il-pending-actions" hidden>
-          <h4>⚠ Actions en attente de ton accord</h4>
+          <h4>⚠ Ce qui attend ton accord</h4>
           <div class="il-pending-body"></div>
         </section>
         <section class="il-section" id="il-projects" hidden>
@@ -151,7 +182,7 @@ export class InnerLifePanel {
           <div class="il-blend-body">—</div>
         </section>
         <section class="il-section" id="il-drives">
-          <h4>Pulsions</h4>
+          <h4>Besoins</h4>
           <div class="il-drives-body"></div>
         </section>
         <section class="il-section" id="il-narrative" hidden>
@@ -363,10 +394,11 @@ export class InnerLifePanel {
           p.tasks_blocked > 0
             ? `<span class="il-project-blocked">⛔ ${p.tasks_blocked}</span>`
             : "";
-        const emoPolicyTag =
-          p.emotion_policy !== "off"
-            ? `<span class="il-project-ep">${escapeHtml(p.emotion_policy)}</span>`
-            : "";
+        // Son mode en mots (« impersonnel »), rien pour son mode à elle —
+        // jamais `full` / `off` bruts.
+        const emoPolicyTag = p.mode_label
+          ? `<span class="il-project-ep">${escapeHtml(p.mode_label)}</span>`
+          : "";
         return `
           <div class="il-project" data-project-id="${p.id}">
             <div class="il-project-head">
@@ -382,8 +414,8 @@ export class InnerLifePanel {
               <span class="il-project-pct">${p.tasks_done}/${p.tasks_total}</span>
             </div>
             <div class="il-project-sched">
-              ${escapeHtml(p.schedule_rule || "manuel")}
-              ${p.next_run_at ? `· prochain run ${nextRun}` : ""}
+              ${escapeHtml(p.schedule_label || "dès que possible")}
+              ${p.next_run_at ? `· prochaine séance ${nextRun}` : ""}
             </div>
           </div>
         `;
@@ -417,8 +449,8 @@ export class InnerLifePanel {
         (a) => `
           <div class="il-pending" data-action-id="${a.id}">
             <div class="il-pending-project">
-              ${escapeHtml(a.project_title)}
-              ${a.payload_kind ? `<span class="il-pending-kind">${escapeHtml(a.payload_kind)}</span>` : ""}
+              ${escapeHtml(a.owner_label || a.project_title)}
+              ${a.kind_label ? `<span class="il-pending-kind">${escapeHtml(a.kind_label)}</span>` : ""}
             </div>
             <div class="il-pending-proposal">${escapeHtml(a.proposal)}</div>
             <div class="il-pending-actions">
@@ -518,6 +550,8 @@ export class InnerLifePanel {
       return;
     }
     section.removeAttribute("hidden");
+    const title = section.querySelector(".il-journal-title");
+    if (title) title.textContent = journalTitle(journal);
     const emotionTag = journal.dominant_emotion
       ? `<span class="il-journal-emotion">${escapeHtml(emotionFr(journal.dominant_emotion))}</span>`
       : "";
@@ -626,7 +660,7 @@ export class InnerLifePanel {
     parts.push(`
       <ul class="il-profile-tags">
         <li>relation : <strong>${closeness}</strong></li>
-        <li>ton : <strong>${tone}</strong></li>
+        ${tone ? `<li>ton : <strong>${tone}</strong></li>` : ""}
         <li>intérêts : ${escapeHtml(topics)}</li>
         ${avoid ? `<li>sujets sensibles : ${escapeHtml(avoid)}</li>` : ""}
         <li>${profile.interaction_count} échange(s)</li>
@@ -675,17 +709,14 @@ function renderIdentity(identity: NonNullable<InnerState["identity"]>): string {
   const parts = [
     `<div class="il-identity il-identity-${tone}">`,
     `<span class="il-identity-name">${escapeHtml(identity.known_as)}</span>`,
-    `<span class="il-weight">(${pct}% — ${escapeHtml(identity.trust)})</span>`,
+    `<span class="il-weight">(${pct}% — ${escapeHtml(TRUST_LABEL[identity.trust] ?? identity.trust)})</span>`,
     `<p class="il-identity-level">${escapeHtml(identity.level)}</p>`,
   ];
 
   if (identity.pending_claims?.length) {
     parts.push(`<ul class="il-identity-claims">`);
     for (const claim of identity.pending_claims) {
-      parts.push(
-        `<li>se présente comme <strong>${escapeHtml(claim.name)}</strong>` +
-          ` — « ${escapeHtml(claim.evidence)} »</li>`,
-      );
+      parts.push(`<li>${claimLine(claim)}</li>`);
     }
     parts.push(`</ul>`);
   }

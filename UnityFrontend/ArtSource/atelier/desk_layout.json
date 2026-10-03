@@ -1,0 +1,8 @@
+{
+  "seat_hips": [0.0000,0.5900,0.0000],
+  "chair_roll": 0,
+  "objects": [
+    {"id": "writing_desk", "name": "writing_desk", "origin": [0.2335,0.0000,0.7547], "yaw": -162.8, "local_center": [0.0000,0.3800,0.0000], "local_size": [1.9000,0.7600,0.7200], "world_min": [1.2474,0.0000,0.8179], "world_max": [-0.7805,0.7600,0.6915]},
+    {"id": "desk_chair", "name": "desk_chair", "origin": [0.0000,0.0000,0.0000], "yaw": -180.0, "local_center": [0.0000,0.6168,0.0477], "local_size": [0.7028,1.2336,0.6875], "world_min": [0.5455,0.0000,0.2360], "world_max": [-0.5455,1.2336,-0.3314]}
+  ]
+}

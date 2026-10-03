@@ -171,6 +171,9 @@ class ToolSpec:
     #: offert seulement devant une audience qui le rend utile (``fn(audience) -> bool``) :
     #: un outil qui ne peut rien y faire n'invite pas le modèle à essayer
     when: Callable[[Any], bool] | None = None
+    #: une fois réussi, il clôt la boucle d'outils : le modèle n'est pas rappelé pour écrire une conclusion que
+    #: personne ne lit (conclure une séance de travail : ``report_step``)
+    ends_loop: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -592,12 +595,13 @@ class Faculty(Generic[S, Pm]):
         max_calls_per_episode: int | None = None,
         owner_only: bool = False,
         when: Callable[[Any], bool] | None = None,
+        ends_loop: bool = False,
     ):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
-                    frozenset(episodes), min_level, effect, max_calls_per_episode, owner_only, when,
+                    frozenset(episodes), min_level, effect, max_calls_per_episode, owner_only, when, ends_loop,
                 )
             )
             return fn

@@ -14,7 +14,8 @@ from mika.inspector import names
 from mika.inspector.names import KINDS, OUTCOMES
 from mika.inspector.pages.system import backup_state
 from mika.inspector.pages.tabs import TABS
-from mika.kernel.clock import DAY, US
+from mika.kernel.clock import DAY, MINUTE, US
+from mika.kernel.forms import show_duration
 from mika.kernel.inspect import (
     Badge,
     Chart,
@@ -33,6 +34,7 @@ from mika.kernel.inspect import (
     money_fr,
 )
 from mika.runtime import health
+from mika.vocab.episodes import Kind
 
 __all__ = ["KINDS", "OUTCOMES", "outcome_badge"]
 
@@ -62,6 +64,35 @@ def _local(href: str, text: str) -> Ref:
     return Ref("local", href, text)
 
 
+#: les épisodes (Décisions › Épisodes)
+EPISODES_HREF = "/inspecteur/decisions/episodes"
+#: les réponses relues pour savoir si elles échouent (les plus récentes d'abord)
+REPLIES_SCANNED = 200
+_REPLY = str(Kind.REPLY)
+
+
+def failed_replies(ui: Any, ctx: Any) -> tuple[int, int, str] | None:
+    """Ses réponses échouent : combien d'affilée depuis la dernière qui a abouti (dans les dernières 24 h), depuis
+    quand, et pourquoi la plus récente a échoué, en mots. ``None`` : la dernière réponse a abouti (ou elle s'est
+    tue), ou aucune en 24 h. Une configuration juste avec un fournisseur injoignable ne se voyait qu'au fil des
+    « Derniers épisodes »."""
+    now = ui.now()
+    count, since, why = 0, 0, ""
+    for e in ctx.events([rt.EPISODE_ENDED], REPLIES_SCANNED, where=("kind", _REPLY)):
+        if now - e.at > DAY or e.data.outcome not in ("failed", "timeout"):
+            break
+        count, since = count + 1, e.at
+        why = why or names.detail(e.data.detail or e.data.outcome)
+    return (count, since, why or "échec") if count else None
+
+
+def render_ago(us: int) -> str:
+    """Une durée passée, à la minute (« 12 min », « 3 h 5 min ») — « moins d'une minute » en dessous."""
+    if us < MINUTE:
+        return "moins d'une minute"
+    return show_duration(us - us % MINUTE)
+
+
 @TABS.tab("accueil.a_traiter", title="À traiter",
           description="Chaque cadre mène à la page où décider. Vide : rien n'attend.")
 async def attention(ui: Any, request: Request) -> list[Any]:
@@ -72,8 +103,14 @@ async def attention(ui: Any, request: Request) -> list[Any]:
     cards = [Stat(i["label"], i["count"], i["hint"] or "à regarder", "warn", _local(i["href"], i["label"]))
              for i in items]
     if not getattr(gateway, "configured", gateway is not None):
-        cards.insert(0, Stat("Modèles", "aucun", "chaque tour échoue : déclare un fournisseur", "danger",
-                             _local("/inspecteur/reglages/fournisseurs", "Modèles")))
+        cards.insert(0, Stat("Modèles", "aucun", "rien ne sert « répondre » : chaque tour échoue — déclare un "
+                             "fournisseur", "danger", _local("/inspecteur/reglages/fournisseurs", "Modèles")))
+    else:
+        failed = failed_replies(ui, ui.inspection.context(request.query_params))
+        if failed is not None:
+            count, since, why = failed
+            cards.insert(0, Stat("Réponses en échec", count, f"depuis {render_ago(ui.now() - since)} — {why}"[:90],
+                                 "danger", _local(f"{EPISODES_HREF}?sorte=reply", "Réponses en échec")))
     sched = ui.kernel.scheduler
     failing = [ui.names.process(s.name) for s in sched.specs if sched.consecutive.get(s.name, 0) >= 3]
     if failing:

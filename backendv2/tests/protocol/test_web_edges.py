@@ -7,8 +7,9 @@ Ce qu'une personne verrait :
 - elle envoie trois photos et la connexion reste vivante (le ping répond
   pendant qu'on les décrit) ;
 - Mika choisit de se taire : « Mika écrit… » disparaît (une trame sans texte) ;
-- la réponse échoue : la bulle passe en échec avec sa raison, rien n'est
-  épinglé en bas du fil ;
+- la réponse échoue : son message reste envoyé (il est reçu), une note dit que
+  la réponse ne viendra pas ; la cause en clair et où la réparer, aux seules
+  opératrices ; rien n'est épinglé en bas du fil ;
 - le murmure ne part qu'aux écrans de la personne à qui elle va écrire — un
   inconnu dont l'onglet est ouvert n'entend rien ; sans cible, seulement aux
   opératrices ; jamais d'identifiant de message ;
@@ -248,10 +249,14 @@ def test_when_she_chooses_silence_the_typing_bubble_goes_away(make):
         assert [f["type"] for f in until(ws, "pong")] == ["pong"]  # une seule fois
 
 
-def test_a_failed_reply_marks_the_bubble_failed_instead_of_pinning_an_orphan(make):
-    client, _ = make(Fake(fail=RuntimeError("panne du fournisseur")))
+def test_a_failed_reply_keeps_the_message_sent_and_says_no_reply_is_coming(make):
+    """G-1 : la réponse échoue. Son message, lui, est reçu (il est dans le fil) : la bulle ne se raye pas
+    (« refusé — Mika est saturée »), un second ``ack`` ``no_reply`` dit que la réponse ne viendra pas, avec sa
+    cause en un mot ; le client pose « Mika n'a pas pu répondre — réessaie » sous la bulle."""
+    client, live = make(Fake(fail=RuntimeError("panne du fournisseur")))
     bootstrap(client)
-    with client.websocket_connect(WS) as ws:
+    key_b = second_session(client, live, "bea")  # une personne du chat, pas une opératrice
+    with client.websocket_connect(WS, headers={"cookie": f"sessionid={key_b}"}) as ws:
         opening(ws)
         ws.send_json({"type": "chat", "message": "allo ?", "client_msg_id": "f1"})
         first = until(ws, "ack")[-1]
@@ -259,24 +264,46 @@ def test_a_failed_reply_marks_the_bubble_failed_instead_of_pinning_an_orphan(mak
         frames = until(ws, "ack")
         speech = next(f for f in frames if f["type"] == "speech")
         assert speech["text"] == "" and speech["client_msg_id"] == "f1"  # « Mika écrit… » disparaît
+        user_id = speech["user_message_id"]
         second = frames[-1]
-        # chatSync.applyAck : la bulle passe en échec, raison « Mika est saturée, réessaie dans un instant »
-        assert second == {"type": "ack", "client_msg_id": "f1", "status": "overloaded"}
+        # chatSync.applyAck : la bulle reste « envoyée », une note dessous ; ni la cause en clair ni la console
+        assert second == {"type": "ack", "client_msg_id": "f1", "status": "no_reply", "reason": "error"}
+        ws.send_json({"type": "sync", "after_id": user_id - 1})
+        catch = until(ws, "history")[-1]
+        assert [m["text"] for m in catch["messages"] if m["id"] == user_id] == ["allo ?"]  # il est bien dans son fil
         assert not [f for f in frames if f["type"] == "speech" and f["text"]]  # aucune bulle sans id épinglée
 
 
-def test_without_a_model_the_failure_says_how_to_fix_it_as_a_note_not_an_orphan(make):
-    client, _ = make(Fake(fail=UnconfiguredRole("reply")))
-    bootstrap(client)
-    with client.websocket_connect(WS) as ws:
+def test_without_a_model_only_an_operator_reads_how_to_fix_it(make):
+    """G-5 : sans modèle, une personne du chat ne lit jamais une consigne d'administration (« python -m mika llm
+    … »), ni de la bouche de Mika ni ailleurs : seulement la note de G-1. Une opératrice lit la cause en clair et
+    où la réparer — la console, pas la ligne de commande — dans l'accusé, une note de la machine (jamais une pensée
+    de Mika)."""
+    client, live = make(Fake(fail=UnconfiguredRole("reply")))
+    bootstrap(client)  # adrien, opérateur
+    key_b = second_session(client, live, "bea")
+
+    def failed_turn(ws, cid: str) -> list[dict]:
         opening(ws)
-        ws.send_json({"type": "chat", "message": "salut", "client_msg_id": "u1"})
+        ws.send_json({"type": "chat", "message": "salut", "client_msg_id": cid})
         until(ws, "ack")
         frames = until(ws, "ack")
-        frames += [ws.receive_json()]
-        note = next(f for f in frames if f["type"] == "speech" and f["text"])
-        # ChatOverlay : une pensée sans id est rangée après le curseur (localOnly), jamais épinglée
-        assert note["voice_persona"] == "inner" and note["message_id"] is None and "modèle" in note["text"]
+        ws.send_json({"type": "ping", "t": 9})
+        return frames + until(ws, "pong")
+
+    with client.websocket_connect(WS, headers={"cookie": f"sessionid={key_b}"}) as bea:
+        seen = failed_turn(bea, "u1")
+    no_reply = next(f for f in seen if f.get("status") == "no_reply")
+    assert no_reply == {"type": "ack", "client_msg_id": "u1", "status": "no_reply", "reason": "no_model"}
+    assert not [f for f in seen if f["type"] == "speech" and f["text"]]  # rien que Mika « dirait »
+    assert "mika llm" not in str(seen) and "inspecteur" not in str(seen)
+
+    with client.websocket_connect(WS) as adrien:
+        seen = failed_turn(adrien, "u2")
+    no_reply = next(f for f in seen if f.get("status") == "no_reply")
+    assert no_reply["reason"] == "no_model" and no_reply["href"] == protocol.PROVIDERS_HREF
+    assert "fournisseur" in no_reply["detail"] and "mika llm" not in no_reply["detail"]
+    assert not [f for f in seen if f["type"] == "speech" and f["text"]]
 
 
 def test_a_reply_failure_reported_by_the_outbox_is_said_once(make):
@@ -293,7 +320,8 @@ def test_a_reply_failure_reported_by_the_outbox_is_said_once(make):
 
         assert client.portal.call(twice) == (True, True)
         frames = until(ws, "ack")
-        assert frames[-1] == {"type": "ack", "client_msg_id": "k1", "status": "overloaded"}
+        assert frames[-1]["status"] == "no_reply" and frames[-1]["reason"] == "timeout"
+        assert "délai" in frames[-1]["detail"]  # adrien est opérateur : la cause en clair
         ws.send_json({"type": "ping", "t": 2})
         assert [f["type"] for f in until(ws, "pong")] == ["pong"]  # dit une fois, pas deux
 
@@ -309,7 +337,24 @@ def test_a_question_abandoned_as_too_old_is_not_called_a_saturation(make):
                         reply_to=42, client_msg_id="k2", text=delivery_p.TOO_LATE)
         client.portal.call(lambda: live.hub.deliver(late))
         frames = until(ws, "ack")
-        assert frames[-1] == {"type": "ack", "client_msg_id": "k2", "status": "too_late"}
+        assert frames[-1]["status"] == "no_reply" and frames[-1]["reason"] == "too_late"
+
+
+@pytest.mark.parametrize("outcome, detail, reason", [
+    ("failed", "UnconfiguredRole: aucun modèle associé au rôle « reply »", protocol.NO_MODEL),
+    ("failed", "ConnectionError: Failed to connect to Ollama", protocol.UNREACHABLE),
+    ("failed", "APIConnectionError: Connection error.", protocol.UNREACHABLE),
+    ("failed", "ConnectError: [Errno 111] Connection refused", protocol.UNREACHABLE),
+    ("timeout", "", protocol.TIMEOUT),
+    ("failed", "timeout", protocol.TIMEOUT),  # la file de sortie : l'issue en guise de détail
+    ("failed", "TimeoutError()", protocol.TIMEOUT),
+    ("failed", "ReadTimeout: lecture trop longue", protocol.TIMEOUT),
+    ("failed", delivery_p.TOO_LATE, protocol.TOO_LATE_REASON),
+    ("failed", "RuntimeError: panne", protocol.ERROR),
+    ("failed", "abandonnée après deux tentatives", protocol.ERROR),
+])
+def test_the_cause_of_a_missing_reply_is_read_from_its_detail(outcome, detail, reason):
+    assert protocol.no_reply_reason(outcome, detail) == reason
 
 
 def test_a_message_held_for_her_morning_does_not_leave_her_typing_all_night(make):

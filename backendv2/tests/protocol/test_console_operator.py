@@ -257,10 +257,10 @@ def test_settings_refuse_what_cannot_work(world):  # noqa: F811
                                                                                           "git.exemple.org:8443"}
     unnamed = post(client, f"{BASE}/reglages/identite", {"_section": "personnage", "_champs": ["name"], "name": " "})
     assert unnamed.status_code == 400 and "nom ne peut pas être vide" in html_of(unnamed)
-    open_, shut = "N'importe qui trouvant le robot", "ne répond à personne"
+    open_, shut = "N'importe qui trouvant le robot", "Personne ne peut encore lui écrire"
     page = html_of(client.get(f"{BASE}/reglages/telegram"))
     assert open_ not in page and shut not in page  # pas de robot : rien à dire
-    # sans liste ni propriétaires, le robot est fermé (ADR 0038) : on le dit, sans crier « ouvert »
+    # sans liste ni propriétaires, le robot est fermé (ADR 0038) : on le dit, et comment s'appairer (ADR 0057)
     client.portal.call(lambda: live.settings.save_telegram(token="123:abc", allowed_chats=[], owners=[]))
     page = html_of(client.get(f"{BASE}/reglages/telegram"))
     assert shut in page and open_ not in page

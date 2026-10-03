@@ -18,9 +18,11 @@ diffusion à tout le monde.
   ``REPLY_HOLD_S`` après une réplique, la synchronisation ne pousse pas une
   autre émotion que celle déclarée (elle lit ``FACE``, qui porte la balise de
   la dernière réplique tant qu'elle décroît).
-- **Le sort d'une question se dit** : abstention (trame sans texte), échec (la
-  bulle passe en échec) — une seule fois par question, qu'on l'apprenne par
-  l'attente de la connexion ou par la file de sortie.
+- **Le sort d'une question se dit** : abstention (trame sans texte), réponse
+  impossible (second ``ack`` ``no_reply`` : la bulle reste envoyée, une note
+  dit que la réponse ne viendra pas ; la cause en clair et où la réparer, aux
+  seules connexions opératrices) — une seule fois par question, qu'on
+  l'apprenne par l'attente de la connexion ou par la file de sortie.
 - Une session révoquée (déconnexion, compte désactivé, mot de passe changé,
   droits retirés) ferme ses WebSockets en 4401.
 """
@@ -218,7 +220,16 @@ class Hub:
             return
         rows = [r for r in rows if r.id in earlier and r.role == "user"]
         if rows:
-            await self.send_to(handle, protocol.history("catchup", rows, after_id=min(earlier) - 1))
+            await self.send_to(handle, protocol.history("catchup", rows, after_id=min(earlier) - 1,
+                                                        life=self.life()))
+
+    def life(self) -> str:
+        """L'empreinte de sa vie, jointe à chaque trame ``history`` (vide si le port ne la connaît pas)."""
+        try:
+            return self.port.life()
+        except Exception as exc:  # une empreinte illisible ne retient pas le fil : le client ne videra rien
+            log.debug("empreinte de la vie illisible : %r", exc)
+            return ""
 
     def _hold(self, handle: str, d: Delivery) -> None:
         """La réplique livrée devient la référence du visage pour ce qui suit."""
@@ -239,15 +250,19 @@ class Hub:
             self._settled.popitem(last=False)
         face = self.face(handle)
         if outcome == protocol.ABSTAINED_OUTCOME:
-            frames = [protocol.silence(handle, face, user_message_id=reply_to, client_msg_id=client_msg_id)]
-        elif outcome in protocol.FAILED_OUTCOMES:
-            frames = protocol.reply_failed_frames(handle, detail, face, user_message_id=reply_to,
-                                                  client_msg_id=client_msg_id)
-        else:
+            return await self.send_to(handle, protocol.silence(handle, face, user_message_id=reply_to,
+                                                               client_msg_id=client_msg_id))
+        if outcome not in protocol.FAILED_OUTCOMES:
             return 0
         sent = 0
-        for frame in frames:
-            sent += await self.send_to(handle, frame)
+        for c in self.of(handle):
+            # la cause en clair et où la réparer : à une opératrice seulement (G-5) — les autres lisent « Mika n'a
+            # pas pu répondre », jamais une consigne d'administration
+            frames = protocol.reply_failed_frames(handle, outcome, detail, face, user_message_id=reply_to,
+                                                  client_msg_id=client_msg_id,
+                                                  operator=c.operator and c.authenticated)
+            for frame in frames:
+                sent += await self._send([c], frame)
         return sent
 
     async def refresh_panels(self, handles: list[str] | None = None) -> int:

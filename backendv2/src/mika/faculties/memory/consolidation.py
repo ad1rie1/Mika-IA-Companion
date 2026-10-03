@@ -11,7 +11,10 @@ l'a confié** (les auteurs des messages d'où il vient) et **qui l'a entendu**
 (les personnes de la conversation) ; ce qu'on a demandé de taire est un
 secret. Ce qui ressemble de très près à ce qu'elle sait déjà le **renforce**
 (au plus sensible des deux) au lieu de faire un doublon ; une croyance n'est
-corroborée que par quelqu'un qui ne l'avait pas encore dite. Tout part en un
+corroborée que par quelqu'un qui ne l'avait pas encore dite. Une réplique
+recopiée n'est pas un souvenir (la sienne jamais ; celle de la personne, citée
+en disant qui parle), une banalité ne se garde pas, et comment la personne
+l'appelle se retient même quand le modèle l'oublie (ADR 0055). Tout part en un
 seul ajout gardé par le point de contrôle, qui n'avance que sur un succès —
 ou, après plusieurs échecs sur la même fenêtre, en le disant (``failed``).
 
@@ -27,16 +30,21 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime, time
 from typing import Any
 
+from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import runtime as rt
+from mika.contracts import self_ as self_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, params
+from mika.faculties.memory.life import kept_too_early, same_task
 from mika.faculties.memory.projections import ITEM_COLUMNS, informants_of
-from mika.kernel.clock import DAY, MINUTE
+from mika.kernel.clock import DAY, MINUTE, instant
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
@@ -46,7 +54,7 @@ from mika.ports.vectors import VectorItem
 from mika.vocab.affect import emotion_of
 from mika.vocab.people import clean_display_name, fold, is_identifiable
 from mika.vocab.privacy import Sensitivity
-from mika.vocab.words import WORD, stems
+from mika.vocab.words import WORD, banal, stems
 
 BATCH = 64
 #: les croyances déjà connues montrées au modèle, au plus
@@ -123,7 +131,8 @@ class Consolidate:
             if cached is None:
                 labels = {s.person: s.label for s in conv.speakers}
                 prompt = x.render(conv, now=frame.local(), beliefs=known,
-                                  promises=[(i, labels.get(to, to), t) for i, to, t in promises])
+                                  promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
+                                            for i, to, t in promises])
                 request = LLMRequest(role="extract", call_id=f"{ctx.run_id}#{n}", system_stable=x.SYSTEM,
                                      messages=(Message("user", prompt),), tools=(x.tool(),), max_tokens=2500,
                                      lane="background", priority=2,
@@ -313,6 +322,12 @@ class Consolidate:
             return asked_silence(flag, cited, sens) or (bool(text) and x.echoes(text, secrets, names))
 
         seen: set[tuple[str, str]] = set()  # le même élément deux fois dans un lot n'en fait qu'un
+        her = frame.get(self_c.PERSONA).name or "Mika"
+        said_names = [*(sp.name for sp in conv.speakers), her]
+        name_of = {sp.person: sp.name for sp in conv.speakers}
+        mine = [ln for ln in conv.lines if ln.person is None]
+        nicks = self._heard_nicknames(conv, her)  # « salut Mikachu » : comment la personne l'appelle
+        ours: list[str] = []  # ce qui n'appartient qu'à elles deux, retenu dans ce lot
 
         def fresh(kind: str, text: str) -> bool:
             key = (kind, " ".join(fold(text).split()))
@@ -324,37 +339,65 @@ class Consolidate:
         for s in ex.souvenirs:
             if not fresh(c.SOUVENIR, s.texte):
                 continue
-            if s.sur_elle:
+            if s.sur_elle and not people.resolve(s.personnes):
                 drafts += await self._about_self(s, store, vectors, p, provenance, call_id, known_ids)
                 continue
+            text, cited_seqs = s.texte, list(s.messages)
+            if banal(text, said_names):
+                continue  # « Sam est parti en disant 'allez j'y vais' » : une banalité ne se retient pas
+            line = x.copy_of(text, conv.lines)
+            if line is not None:
+                # une réplique recopiée n'est pas un souvenir (sonde réelle du 2026-10-03 : « Dors bien Sam… », « on
+                # l'a endormi ») : la sienne, jamais ; celle de la personne, citée en disant qui parle, si elle compte
+                if line.person is None or s.importance < 2:
+                    continue
+                text, cited_seqs = x.quoted(name_of.get(line.person, ""), text), [line.seq]
             about = concerned(s.personnes)
-            sources, told_by, cited = provenance(s.messages)
+            sources, told_by, cited = provenance(cited_seqs)
             sens = x.sensitivity(s.sensibilite, has_person=bool(about or told_by))
-            secret = secret_of(s.secret, cited, sens, s.texte)
-            twin = await self._twin(store, vectors, s.texte, c.SOUVENIR, about, p)
+            secret = secret_of(s.secret, cited, sens, text)
+            twin = await self._twin(store, vectors, text, c.SOUVENIR, about, p)
             if twin is not None:
                 drafts.append(c.REINFORCED.draft(item=twin, sources=sources, sensitivity=sens, about=about,
                                                  told_by=told_by, heard_by=heard, secret=secret))
                 continue
             e = emotion_of(s.emotion)
             drafts.append(c.REMEMBERED.draft(
-                text=Content.of(s.texte, level=sens), about=about, sensitivity=sens,
+                text=Content.of(text, level=sens), about=about, sensitivity=sens,
                 importance=x.IMPORTANCE.get(s.importance, 0.45), emotion=e.value if e else None,
                 sources=sources, call_id=call_id, told_by=told_by, heard_by=heard, secret=secret))
         for b in ex.croyances:
             if not fresh(c.BELIEF, b.texte):
                 continue
-            if b.sur_elle:
+            if b.sur_elle and not people.resolve(b.personnes):
+                # ce qu'elle dit d'elle seule ; « Mika a dit à Sam : … », lui, nomme quelqu'un : ce n'est pas une
+                # note anodine sur elle (elle sortait telle quelle dans un salon — sonde du 2026-10-03), il suit le
+                # chemin commun (sa réplique n'est pas ce qu'on lui a appris)
                 drafts += await self._about_self(b, store, vectors, p, provenance, call_id, known_ids)
                 continue
-            if hers(b.messages):
-                continue  # ce qu'elle a dit des autres n'est pas ce qu'on lui a appris d'eux
+            between = b.entre_vous or any(fold(n) in fold(b.texte) for n in nicks)
+            if (not between and hers(b.messages)) or banal(b.texte, said_names):
+                continue  # ce qu'elle a dit des autres n'est pas ce qu'on lui a appris d'eux ; une banalité, rien
+            if x.copy_of(b.texte, mine) is not None:
+                continue  # sa réplique recopiée, quoi qu'en disent les numéros cités (ADR 0048, 0055)
             about = concerned(b.personnes)
             sources, told_by, cited = provenance(b.messages)
-            source = people.one(b.source) if b.source else None
+            # leur lien, de première main : ce qu'un tiers en raconte n'est pas ce qui n'appartient qu'à elles deux
+            between = between and set(told_by) <= set(about)
+            # qui l'a dit : celle qu'on nomme, sinon la seule personne dont viennent les messages cités (un modèle
+            # oublie souvent de la nommer — sonde réelle du 2026-10-03 : « Pixel souffre d'insuffisance rénale »,
+            # dit par Sam, sans source, n'était plus « ce qu'il lui a raconté de sa vie »)
+            source = people.one(b.source) if b.source else (told_by[0] if len(told_by) == 1 else None)
             sens = x.sensitivity(b.sensibilite, has_person=bool(about or told_by))
+            if between and not conv.room:
+                sens = max(sens, int(Sensitivity.PERSONAL))  # dit en privé : jamais devant une inconnue
+            importance = x.IMPORTANCE.get(b.importance, 0.45)
+            if between:
+                importance = max(importance, x.IMPORTANCE[3])  # entre amis, c'est ce qui fait un lien
             secret = secret_of(b.secret, cited, sens, b.texte)
             replaces = b.remplace if b.remplace in known_ids else None
+            if between:
+                ours.append(fold(b.texte))
             twin = await self._twin(store, vectors, b.texte, c.BELIEF, about, p)
             if replaces is not None and same_words(known_texts.get(replaces, ""), b.texte):
                 twin = replaces  # la croyance « remplacée » dit la même chose : c'est elle
@@ -365,20 +408,64 @@ class Consolidate:
                 drafts.append(c.REINFORCED.draft(
                     item=twin, corroborated=bool(new - set(self._informants(store, twin))), source=source,
                     sources=sources, sensitivity=sens, about=about, told_by=told_by, heard_by=heard, secret=secret,
-                    replaces=replaces if replaces != twin else None))
+                    replaces=replaces if replaces != twin else None, between_us=between))
                 continue
             drafts.append(c.BELIEVED.draft(
                 text=Content.of(b.texte, level=sens), about=about, sensitivity=sens,
-                importance=x.IMPORTANCE.get(b.importance, 0.45), confidence=round(b.confiance, 3),
+                importance=importance, confidence=round(b.confiance, 3),
                 origin=x.ORIGIN.get(fold(b.origine), "told"), source=source, replaces=replaces, sources=sources,
-                call_id=call_id, told_by=told_by, heard_by=heard, secret=secret))
+                call_id=call_id, told_by=told_by, heard_by=heard, secret=secret, between_us=between))
+        drafts += self._called(nicks, ours, store, conv, call_id)
         for item in ex.confidentiel:
             if item in known_ids:
                 drafts.append(c.REINFORCED.draft(item=item, sensitivity=int(Sensitivity.CONFIDENCE), secret=True))
-        drafts += await self._promised(ex, frame, store, conv, people, promises, vectors, p, provenance, fresh,
-                                       call_id, lambda text: x.echoes(text, secrets, names))
-        drafts += await self._events(ex, frame, state, store, people, vectors, p, provenance, concerned, secret_of,
-                                     heard, fresh, call_id)
+        drafts += await self._promised(ex, frame, state, store, conv, people, promises, vectors, p, provenance,
+                                       fresh, call_id, lambda text: x.echoes(text, secrets, names))
+        drafts += await self._events(ex, frame, state, store, conv, people, vectors, p, provenance, concerned,
+                                     secret_of, heard, fresh, call_id)
+        return drafts
+
+    @staticmethod
+    def _heard_nicknames(conv: x.Conversation, her: str) -> dict[str, list[int]]:
+        """En privé, les surnoms que la personne lui donne en la saluant (« salut Mikachu ») et où elle l'a fait."""
+        if conv.room or len(conv.persons) != 1:
+            return {}
+        heard: dict[str, list[int]] = {}
+        for ln in conv.lines:
+            if ln.person == conv.persons[0]:
+                for nick in x.nicknames(ln.text, her):
+                    heard.setdefault(nick, []).append(ln.seq)
+        return heard
+
+    @staticmethod
+    def _called(heard: dict[str, list[int]], ours: list[str], store: Any, conv: x.Conversation,
+                call_id: str) -> list[Draft[Any]]:
+        """Comment la personne l'appelle, quand le modèle ne l'a pas retenu : en privé, un mot qui la salue et
+        dérive de son prénom (« salut Mikachu ») — la sonde réelle du 2026-10-03 l'a vue l'oublier, puis répondre
+        « je t'appelle Sam, tout simplement » à « tu te souviens comment je t'appelle ? ». Redit, il renforce ce
+        qu'elle en sait déjà ; ce que le modèle en a retenu lui-même (``ours``) n'est pas noté deux fois."""
+        if not heard:
+            return []
+        person = conv.persons[0]
+        noted = ours
+        known = store.query_mind(f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE kind=? AND status='active' "
+                                 f"AND between_us=1 AND id IN (SELECT item FROM {c.ABOUT_TABLE} WHERE person=?) "
+                                 "ORDER BY id", (c.BELIEF, person))
+        name = next((sp.name for sp in conv.speakers if sp.person == person), "")
+        drafts: list[Draft[Any]] = []
+        for nick, seqs in heard.items():
+            folded = fold(nick)
+            if any(folded in t for t in noted):
+                continue
+            hit = next((int(i) for i, t in known if folded in fold(str(t))), None)
+            if hit is not None:
+                drafts.append(c.REINFORCED.draft(item=hit, sources=tuple(seqs)))
+                continue
+            sens = int(Sensitivity.PERSONAL)
+            drafts.append(c.BELIEVED.draft(
+                text=Content.of(f"{name or 'On'} m'appelle « {nick} »", level=sens), about=(person,),
+                sensitivity=sens, importance=x.IMPORTANCE[3], confidence=0.9, origin=c.OBSERVED, source=person,
+                sources=tuple(seqs), call_id=call_id, told_by=(person,), heard_by=conv.persons, between_us=True))
         return drafts
 
     @staticmethod
@@ -388,8 +475,8 @@ class Consolidate:
         for person in conv.persons:
             like = f'%"{person}"%'
             out += [str(t) for (t,) in store.query_mind(
-                f"SELECT text FROM {c.ITEMS_TABLE} WHERE secret=1 AND status='active' AND (about LIKE ? OR "
-                "told_by LIKE ?) ORDER BY id DESC LIMIT 50", (like, like))]
+                f"SELECT text FROM {c.ITEMS_TABLE} WHERE secret=1 AND status='active' AND (id IN (SELECT item FROM "
+                f"{c.ABOUT_TABLE} WHERE person=?) OR told_by LIKE ?) ORDER BY id DESC LIMIT 50", (person, like))]
         return out
 
     async def _about_self(self, b: x.XSouvenir | x.XCroyance, store: Any, vectors: Any, p: MemoryParams,
@@ -410,15 +497,22 @@ class Consolidate:
             importance=x.IMPORTANCE[3 if durable else 1], confidence=round(getattr(b, "confiance", 0.7), 3),
             origin=c.OBSERVED, sources=sources, replaces=replaces, call_id=call_id, about_self=True, durable=durable)]
 
-    async def _promised(self, ex: x.Extraction, frame: Frame, store: Any, conv: x.Conversation, people: x.People,
-                        promises: list[tuple[int, str, str]], vectors: Any, p: MemoryParams, provenance: Any,
-                        fresh: Any, call_id: str, secretive: Any) -> list[Draft[Any]]:
+    async def _promised(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
+                        people: x.People, promises: list[tuple[int, str, str]], vectors: Any, p: MemoryParams,
+                        provenance: Any, fresh: Any, call_id: str, secretive: Any) -> list[Draft[Any]]:
         """Ce qu'elle a promis : à une personne (toutes ses adresses), une seule
         fois (une promesse redite n'en fait pas deux), avec une échéance même
         quand rien n'a été dit — l'horizon d'une promesse vague. Une promesse
-        qui laisse deviner un secret est aussi sensible qu'une confidence."""
+        qui laisse deviner un secret est aussi sensible qu'une confidence.
+
+        Un rappel qu'on lui a demandé et qu'elle a accepté en mots est une
+        promesse — sauf s'il est déjà programmé (l'outil ``goal_remind``, un but
+        ``goals``) : il existe une fois et une seule. Une promesse datée ne se
+        règle « tenue » qu'à partir de son jour (la veille, en parler n'est pas
+        la tenir) ; abandonnée (la personne y renonce), à tout moment."""
         drafts: list[Draft[Any]] = []
         tz = frame.env.tz_of(frame.root)
+        reminders = reminders_of(frame, store)
         for pr in ex.promesses:
             if not fresh(c.PROMISE, pr.texte):
                 continue
@@ -429,6 +523,12 @@ class Consolidate:
                 continue
             got = x.when(pr.echeance, tz)
             due, all_day = got if got is not None else (None, False)
+            if any(r.owner == to and same_task(pr.texte, r.title) and same_day(frame, due, r.due)
+                   for r in reminders):
+                continue  # le rappel est programmé (goal_remind) : il le portera, pas une promesse de plus
+            if due is not None and all_day:
+                # un jour sans heure : dû jusqu'au soir (quelqu'un qu'elle ne voit qu'à 19 h l'entend quand même)
+                due = _at(frame, due, p.promise_day_end_min)
             implicit = due is None
             if due is None:
                 due = frame.now + round(p.promise_horizon_days * DAY)
@@ -438,10 +538,15 @@ class Consolidate:
                 text=Content.of(pr.texte, level=sens), to=to, due=due, sensitivity=sens, sources=sources,
                 call_id=call_id, implicit_due=implicit, all_day=all_day))
         pending_ids = {i for i, _, _ in promises}
+        said_at = max((ln.at for ln in conv.lines if ln.person is None), default=frame.now)
         for done in ex.promesses_tenues:
-            if done.id in pending_ids:
-                status = c.HONORED if fold(done.statut).startswith("tenu") else c.DROPPED
-                drafts.append(c.PROMISE_RESOLVED.draft(promise=done.id, status=status))
+            if done.id not in pending_ids:
+                continue
+            status = c.HONORED if fold(done.statut).startswith("tenu") else c.DROPPED
+            pending = state.promises.get(done.id)
+            if status == c.HONORED and pending is not None and kept_too_early(pending, said_at, frame):
+                continue  # la veille, « demain je te le rappelle » ne la tient pas : elle part le jour dit
+            drafts.append(c.PROMISE_RESOLVED.draft(promise=done.id, status=status))
         return drafts
 
     async def _already_promised(self, store: Any, vectors: Any, frame: Frame, to: str, text: str,
@@ -458,14 +563,22 @@ class Consolidate:
         return any(len(mine & stems(t)) >= max(2, (len(mine) + 1) // 2) for (t,) in store.query_mind(
             f"SELECT text FROM {c.ITEMS_TABLE} WHERE id IN ({marks})", tuple(pending)))
 
-    async def _events(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, people: x.People,
-                      vectors: Any, p: MemoryParams, provenance: Any, concerned: Any, secret_of: Any,
-                      heard: tuple[str, ...], fresh: Any, call_id: str) -> list[Draft[Any]]:
+    async def _events(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
+                      people: x.People, vectors: Any, p: MemoryParams, provenance: Any, concerned: Any,
+                      secret_of: Any, heard: tuple[str, ...], fresh: Any, call_id: str) -> list[Draft[Any]]:
         """Ce qui va arriver dans la vie de quelqu'un : daté, à venir ; ou une
         situation qui dure (depuis quand). Le même moment redit ne se note pas
-        deux fois ; une date qui change remplace."""
+        deux fois ; une date qui change remplace. Avec ce qu'il pèse (ce qui
+        compte : un entretien, un examen) et s'il se fête (un anniversaire). Une
+        chose à faire n'en est pas un : « rappelle-moi de prendre rendez-vous
+        chez le dentiste » est une promesse, pas « son rendez-vous chez le
+        dentiste » dont on prendrait des nouvelles."""
         drafts: list[Draft[Any]] = []
         tz = frame.env.tz_of(frame.root)
+        tasks = self._tasks(ex, frame, conv, people, store)
+        # « son anniversaire » et « l'anniversaire de Sam », le même samedi : un seul moment (sonde du 2026-10-03)
+        names = [*(sp.name for sp in conv.speakers), frame.get(self_c.PERSONA).name or "Mika"]
+        noted: list[tuple[str, int, tuple[str, ...]]] = []
         for ev in ex.evenements:
             got = x.when(ev.quand, tz) or ((frame.now, True) if ev.en_cours else None)
             if got is None or not fresh(c.EVENT, ev.texte):
@@ -476,23 +589,60 @@ class Consolidate:
                 at = max(frame.now - round(p.situation_days * DAY) + DAY, min(at, frame.now))
             elif at < frame.now - DAY:
                 continue  # du passé : ce n'est plus à suivre
+            if not ev.en_cours and (x.task_words(ev.texte) or any(
+                    (not seqs or not ev.messages or set(seqs) & set(ev.messages)) and same_task(ev.texte, text)
+                    and same_day(frame, at, due) for text, seqs, due in tasks)):
+                continue  # une chose à faire (une promesse, un rappel), pas un moment de sa vie
             about = concerned(ev.personnes)
             sources, told_by, cited = provenance(ev.messages)
             sens = max(x.sensitivity(ev.sensibilite, has_person=True), int(Sensitivity.ANODYNE))
-            twin = await self._same_event(store, state, vectors, ev.texte, about, p)
+            if any(set(a) & set(about) and same_day(frame, t, at) and x.same_moment(ev.texte, n, names)
+                   for n, t, a in noted):
+                continue  # dit deux fois dans la même conversation
+            twin = await self._same_event(store, state, vectors, ev.texte, about, p, frame=frame, at=at,
+                                          names=names)
             if twin is not None and (ev.en_cours or abs(twin.when - at) < DAY // 2):
                 continue  # déjà noté (une situation redite dure toujours : rien à changer)
+            noted.append((ev.texte, at, about))
             drafts.append(c.EVENT_NOTED.draft(
                 text=Content.of(ev.texte, level=sens), when=at, about=about, all_day=all_day, sensitivity=sens,
                 sources=sources, told_by=told_by, heard_by=heard, secret=secret_of(ev.secret, cited, sens, ev.texte),
-                replaces=twin.id if twin is not None else None, call_id=call_id, ongoing=ev.en_cours))
+                replaces=twin.id if twin is not None else None, call_id=call_id, ongoing=ev.en_cours,
+                importance=x.moment_importance(ev), festive=not ev.en_cours and x.festive(ev)))
         return drafts
 
+    @staticmethod
+    def _tasks(ex: x.Extraction, frame: Frame, conv: x.Conversation, people: x.People,
+               store: Any) -> list[tuple[str, tuple[int, ...], int | None]]:
+        """Les choses à faire de cette conversation (texte, messages cités, échéance) : ses promesses, et les
+        rappels programmés pendant qu'elle avait lieu pour une de ses personnes."""
+        tz = frame.env.tz_of(frame.root)
+        out: list[tuple[str, tuple[int, ...], int | None]] = []
+        for pr in ex.promesses:
+            got = x.when(pr.echeance, tz)
+            out.append((pr.texte, tuple(pr.messages), got[0] if got else None))
+        persons = set(conv.persons)
+        start = min((ln.at for ln in conv.lines), default=frame.now)
+        end = max((ln.at for ln in conv.lines), default=frame.now) + 10 * MINUTE
+        out += [(r.title, (), r.due) for r in reminders_of(frame, store)
+                if r.owner in persons and start <= r.opened_at <= end]
+        return out
+
     async def _same_event(self, store: Any, state: MemoryState, vectors: Any, text: str, about: tuple[str, ...],
-                          p: MemoryParams) -> c.LifeEvent | None:
+                          p: MemoryParams, *, frame: Frame | None = None, at: int | None = None,
+                          names: Sequence[str] = ()) -> c.LifeEvent | None:
+        """Le moment déjà noté que ce texte redit : presque les mêmes mots (vecteurs, radicaux) — ou, le même jour
+        pour la même personne, les mêmes mots une fois les prénoms ôtés (« son anniversaire » est « l'anniversaire
+        de Sam »)."""
         mine = [ev for ev in state.events.values() if set(ev.about) & set(about)]
         if not mine:
             return None
+        if frame is not None and at is not None:
+            day = [ev for ev in mine if not ev.ongoing and same_day(frame, ev.when, at) and ev.text_ref]
+            said = store.content([ev.text_ref for ev in day]) if day else {}
+            for ev in day:
+                if x.same_moment(text, said.get(ev.text_ref) or "", names):
+                    return ev
         if vectors is not None:
             hits = await vectors.search(text, 1, kinds={c.EVENT}, keys=[ev.id for ev in mine])
             if hits and hits[0][1] >= p.dedup_similarity:
@@ -535,25 +685,78 @@ class Consolidate:
         return _keys(rows[0][0]) or ([rows[0][1]] if rows[0][1] else [])
 
 
+@dataclass(frozen=True, slots=True)
+class Reminder:
+    """Un rappel programmé (un but ``goals`` vivant, de la sorte ``reminder``) : à qui, quoi, pour quand."""
+
+    id: int
+    owner: str
+    title: str
+    due: int | None
+    opened_at: int
+
+
+def reminders_of(frame: Frame, store: Any) -> list[Reminder]:
+    """Les rappels programmés en cours (``goals.LIVE``), avec leur texte."""
+    live = [g for g in frame.get(goals_c.LIVE) if g.kind == goals_c.REMINDER and g.owner and g.title_ref]
+    if not live or store is None:
+        return []
+    texts = store.content([g.title_ref for g in live])
+    return [Reminder(g.id, g.owner, texts.get(g.title_ref) or "", g.due, g.opened_at) for g in live
+            if texts.get(g.title_ref)]
+
+
+def _whom(frame: Frame, state: MemoryState, promise: int, label: str) -> str:
+    """À qui, et pour quand (une promesse datée) : le modèle voit qu'elle n'est due que ce jour-là."""
+    pr = state.promises.get(promise)
+    if pr is None or pr.due is None or pr.implicit_due:
+        return label
+    due = frame.local(pr.due)
+    return f"{label}, pour {x.day_words(due.date())}" + ("" if pr.all_day else f" à {due:%H:%M}")
+
+
+def same_day(frame: Frame, a: int | None, b: int | None) -> bool:
+    """Le même jour (heure locale) — ou l'un des deux sans date : rien ne les distingue."""
+    return a is None or b is None or frame.local(a).date() == frame.local(b).date()
+
+
+def _at(frame: Frame, t: int, minutes: int) -> int:
+    """Ce jour-là (heure locale), à cette heure (minutes depuis minuit)."""
+    return instant(datetime.combine(frame.local(t).date(), time(minutes // 60 % 24, minutes % 60),
+                                    tzinfo=frame.env.tz_of(frame.root)))
+
+
 def same_words(a: str, b: str) -> bool:
     """Deux textes qui disent la même chose mot pour mot (casse, accents et ponctuation à part ; pas un mot de
     moins — « n'habite pas » n'est pas « habite »)."""
     return bool(a) and WORD.findall(fold(a)) == WORD.findall(fold(b))
 
 
-@MEMORY.process("memory.promises", wake_on=[c.PROMISE_NOTICED, c.PROMISE_RESOLVED, rt.UTTERANCE],
+@MEMORY.process("memory.promises", wake_on=[c.PROMISE_NOTICED, c.PROMISE_RESOLVED, rt.UTTERANCE,
+                                             goals_c.GOAL_OPENED],
                 lane="background", catch_up=CatchUp.ONCE, max_quantum_s=3600)
 class LetGo:
     """Une promesse qu'elle vient de tenir en le disant (l'initiative qui la tenait a parlé) est réglée : tenue.
     Une promesse ni tenue ni abandonnée s'abandonne quelques jours après son
-    échéance : elle y a repensé (l'attention le lui a rappelé), puis elle laisse filer."""
+    échéance : elle y a repensé (l'attention le lui a rappelé), puis elle laisse filer. Un rappel programmé
+    ensuite pour la même chose (« à 9 h, stp » : l'outil ``goal_remind``) la porte désormais : la promesse lui
+    laisse la place (un rappel demandé existe une fois et une seule)."""
+
+    def __init__(self) -> None:
+        #: les rappels programmés déjà confrontés aux promesses
+        self.seen: set[int] = set()
 
     def _due(self, state: MemoryState, p: MemoryParams) -> list[tuple[int, int]]:
         grace = round(p.promise_drop_days * DAY)
         return sorted((pr.due + grace, pr.id) for pr in state.promises.values() if pr.due is not None)
 
+    def _fresh_reminders(self, state: MemoryState, frame: Frame) -> bool:
+        owners = {pr.to for pr in state.promises.values()}
+        return any(g.kind == goals_c.REMINDER and g.owner in owners and g.id not in self.seen
+                   for g in frame.get(goals_c.LIVE))
+
     def next_due(self, state: MemoryState, frame: Frame, last_run: int | None) -> int | None:
-        if any(k in state.promises for k in state.kept):
+        if any(k in state.promises for k in state.kept) or self._fresh_reminders(state, frame):
             return frame.now
         due = self._due(state, params(frame.env.params_of("memory", frame.root)))
         return max(frame.now, due[0][0]) if due else None
@@ -568,16 +771,76 @@ class LetGo:
         drafts += [c.PROMISE_RESOLVED.draft(promise=pid, status=c.DROPPED, by=c.EXPIRED_BY,
                                             dedupe_key=f"promesse-abandonnée:{pid}")
                    for at, pid in self._due(state, p) if at <= frame.now and pid not in kept]
+        done = {d.data.promise for d in drafts}
+        drafts += [c.PROMISE_RESOLVED.draft(promise=pid, status=c.DROPPED, by=c.REMINDER_BY,
+                                            dedupe_key=f"promesse-rappel:{pid}")
+                   for pid in self._carried(ctx.ports.get("store"), state, frame) if pid not in done]
         if drafts:
             await ctx.emit(*drafts)
+
+    def _carried(self, store: Any, state: MemoryState, frame: Frame) -> list[int]:
+        """Les promesses qu'un rappel programmé après elles porte désormais : la même chose, pour la même
+        personne, le même jour."""
+        self.seen = {g.id for g in frame.get(goals_c.LIVE) if g.kind == goals_c.REMINDER}
+        reminders = reminders_of(frame, store)
+        pending = [pr for pr in state.promises.values() if pr.id not in state.kept]
+        if not reminders or not pending or store is None:
+            return []
+        marks = ",".join("?" * len(pending))
+        texts = dict(store.query_mind(f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE id IN ({marks})",
+                                      tuple(pr.id for pr in pending)))
+        return sorted(pr.id for pr in pending if any(
+            r.owner == pr.to and r.opened_at >= pr.at and same_task(texts.get(pr.id) or "", r.title)
+            and same_day(frame, None if pr.implicit_due else pr.due, r.due) for r in reminders))
+
+
+#: au plus tant de clés par requête ``IN (…)`` (SQLite en refuse au-delà de 32 766)
+IN_MAX = 500
+_CHUNK_COLUMNS = ("id", "person", "user_text", "reply_text", "room")
+
+
+def _item_vector(r: dict[str, Any]) -> VectorItem:
+    return VectorItem(int(r["id"]), r["kind"], r["text"], tuple(sorted({*_keys(r["about"]), *_keys(r["told_by"])})))
+
+
+def _chunk_vector(r: dict[str, Any]) -> VectorItem:
+    """Un échange : en privé (``chunk``), retrouvé avec la personne ; dans un salon (``room_chunk``), dans ce salon
+    seulement."""
+    kind = c.CHUNK if r["room"] is None else c.ROOM_CHUNK
+    return VectorItem(int(r["id"]), kind, f"{r['user_text']}\n{r['reply_text']}", (r["person"],))
+
+
+def _by_ids(store: Any, table: str, columns: tuple[str, ...], ids: Sequence[int]) -> list[dict[str, Any]]:
+    """Ces lignes, par paquets (jamais une liste ``IN`` sans borne)."""
+    out: list[dict[str, Any]] = []
+    for i in range(0, len(ids), IN_MAX):
+        part = tuple(ids[i:i + IN_MAX])
+        out += _rows(store, f"SELECT {','.join(columns)} FROM {table} WHERE id IN ({','.join('?' * len(part))}) "
+                            "ORDER BY id", part, columns)
+    return out
+
+
+def forgets_of(store: Any) -> int:
+    """Combien de fois la mémoire a oublié quelqu'un (``memory_forgets``)."""
+    rows = store.query_mind(f"SELECT n FROM {c.FORGETS_TABLE}")
+    return int(rows[0][0]) if rows else 0
 
 
 @MEMORY.process("memory.index", wake_on=[c.REMEMBERED, c.BELIEVED, c.PROMISE_NOTICED, c.EVENT_NOTED, rt.UTTERANCE],
                 lane="background", catch_up=CatchUp.ONCE, max_quantum_s=600)
 class Index:
+    """L'index des vecteurs (un cache) suit la mémoire : à chaque passage, ce qui est né depuis le précédent
+    (``id > ?``, textes compris) ; au premier passage, et après un oubli (``memory_forgets`` a bougé), un
+    rapprochement par les seuls identifiants — ce qui a disparu part, ce qui manque s'ajoute. Relire toute la
+    mémoire, textes compris, à chaque énoncé coûtait 80 ms à cinquante mille éléments, sur la boucle (ADR 0059)."""
+
     def __init__(self) -> None:
         self.done: tuple[int, int] | None = None
         self.retry_at = 0
+        #: les plus grands identifiants déjà confiés à l'index (éléments, échanges)
+        self.upto = (0, 0)
+        #: le compte d'oublis vu au dernier rapprochement
+        self.forgets = 0
 
     def next_due(self, state: MemoryState, frame: Frame, last_run: int | None) -> int | None:
         if (state.items, state.chunks) == self.done:
@@ -593,24 +856,40 @@ class Index:
             return
         # si le plongement lève (modèle absent), pas de nouvel essai avant un moment : aucune rafale
         self.retry_at = ctx.frame.now + INDEX_RETRY_US
+        forgets = forgets_of(store)
+        if self.done is None or forgets != self.forgets:
+            todo, upto = await self._reconcile(vectors, store)
+        else:
+            todo, upto = self._fresh(store)
+        for i in range(0, len(todo), BATCH):
+            await vectors.upsert(todo[i:i + BATCH])
+        self.upto, self.forgets, self.done = upto, forgets, key
+        self.retry_at = 0
+
+    def _fresh(self, store: Any) -> tuple[list[VectorItem], tuple[int, int]]:
+        """Ce qui est né depuis le dernier passage."""
+        items = _rows(store, f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE id > ? ORDER BY id",
+                      (self.upto[0],), ITEM_COLUMNS)
+        chunks = _rows(store, f"SELECT {','.join(_CHUNK_COLUMNS)} FROM {c.CHUNKS_TABLE} WHERE id > ? ORDER BY id",
+                       (self.upto[1],), _CHUNK_COLUMNS)
+        upto = (max([self.upto[0], *(int(r["id"]) for r in items)]),
+                max([self.upto[1], *(int(r["id"]) for r in chunks)]))
+        return [*map(_item_vector, items), *map(_chunk_vector, chunks)], upto
+
+    @staticmethod
+    async def _reconcile(vectors: Any, store: Any) -> tuple[list[VectorItem], tuple[int, int]]:
+        """Toute la mémoire, par ses identifiants : l'oubli efface des lignes, leurs vecteurs partent aussi (l'index
+        n'est qu'un cache) ; ce qui manque (un index neuf, jeté) s'ajoute."""
         indexed = vectors.indexed()
-        items = _rows(store, f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE}", (), ITEM_COLUMNS)
-        chunks = _rows(store, f"SELECT id, person, user_text, reply_text FROM {c.CHUNKS_TABLE}", (),
-                       ("id", "person", "user_text", "reply_text"))
-        # l'oubli efface des lignes : leurs vecteurs partent aussi (l'index n'est qu'un cache)
-        gone = indexed - {int(r["id"]) for r in items} - {int(r["id"]) for r in chunks}
+        items = {int(r[0]) for r in store.query_mind(f"SELECT id FROM {c.ITEMS_TABLE}")}
+        chunks = {int(r[0]) for r in store.query_mind(f"SELECT id FROM {c.CHUNKS_TABLE}")}
+        gone = indexed - items - chunks
         remove = getattr(vectors, "remove", None)
         if gone and remove is not None:
             await remove(sorted(gone))
-        todo = [VectorItem(int(r["id"]), r["kind"], r["text"], tuple(sorted({*_keys(r["about"]),
-                                                                               *_keys(r["told_by"])})))
-                for r in items if int(r["id"]) not in indexed]
-        todo += [VectorItem(int(r["id"]), c.CHUNK, f"{r['user_text']}\n{r['reply_text']}", (r["person"],))
-                 for r in chunks if int(r["id"]) not in indexed]
-        for i in range(0, len(todo), BATCH):
-            await vectors.upsert(todo[i:i + BATCH])
-        self.done = key
-        self.retry_at = 0
+        todo = [*map(_item_vector, _by_ids(store, c.ITEMS_TABLE, ITEM_COLUMNS, sorted(items - indexed))),
+                *map(_chunk_vector, _by_ids(store, c.CHUNKS_TABLE, _CHUNK_COLUMNS, sorted(chunks - indexed)))]
+        return todo, (max(items, default=0), max(chunks, default=0))
 
 
 def window(rows: list[tuple[Any, ...]], awaiting: set[int]) -> list[tuple[Any, ...]]:

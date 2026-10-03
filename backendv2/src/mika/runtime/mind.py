@@ -550,15 +550,16 @@ class Mind:
         reprennent ; le journal garde ses enveloppes (références orphelines)."""
         projectors = list(self.registry.projectors.values())
 
-        def purge(mind_sql: Any, views_sql: Any) -> None:
+        def purge(mind_sql: Any, views_sql: Any) -> list[str]:
+            """Chaque projection oublie le sujet ; elle peut rendre les contenus qu'elle lui avait rattachés."""
+            extra: list[str] = []
             for p in projectors:
                 hook = getattr(p.projector, "forget", None)
                 if hook is None:
                     continue
-                if p.tier is Tier.T0:
-                    hook(mind_sql, subject, "")
-                else:
-                    hook(views_sql, subject, f"_v{p.version}")
+                got = hook(mind_sql, subject, "") if p.tier is Tier.T0 else hook(views_sql, subject, f"_v{p.version}")
+                extra.extend(str(r) for r in (got or ()) if r)
+            return extra
 
         async with self._lock:
             removed = await self.store.forget_subject(subject, purge)

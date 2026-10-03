@@ -44,7 +44,7 @@ def test_greets_on_arrival_then_replies(tmp_path):
     assert stance.declared is not None and stance.declared.emotion is Emotion.EXCITED
     # l'initiative a reçu sa consigne ; la réponse, le message de la personne
     initiative = next(c for c in llm.calls if c.role == "initiative")
-    assert "vient d'arriver" in initiative.messages[-1].content
+    assert "vient de se connecter" in initiative.messages[-1].content
     assert "« Adrien »" in initiative.messages[-1].content
     reply_call = next(c for c in llm.calls if c.role == "reply")
     assert reply_call.messages[-1].content.endswith("salut ça va ?")

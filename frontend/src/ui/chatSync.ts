@@ -15,14 +15,16 @@
  * while the database held both.
  */
 
-import type { HistoryEntry, RejectedAttachment } from "../types";
+import type { AckMessage, HistoryAttachment, HistoryEntry, RejectedAttachment } from "../types";
 
 /**
  * What happened to a message the user sent.
  *
  * - `pending`  — painted locally, still in the transport's outbox.
  * - `sent`     — the server acknowledged receiving it (not answering it).
- * - `failed`   — refused, and it will never be answered.
+ * - `failed`   — refused: the server never took it, so it will never be
+ *                answered. A message the server *did* take and could not
+ *                answer stays `sent` — see `replyNote` (ADR 0056).
  *
  * Only user messages carry one. Before this existed, a queued message and a
  * delivered one looked identical, which is how three messages could sit on
@@ -45,10 +47,9 @@ export interface StoredMessage {
   cid?: string;
   status?: MessageStatus;
   /**
-   * What the server stores for this message, when it differs from what is
-   * displayed. A message carrying files is painted as `texte [photo.png]`
-   * while the row holds `texte` alone, so matching on the bubble's text
-   * could never adopt it and a reconnect drew it twice.
+   * What was typed, when it differs from what is displayed. A message
+   * carrying files is painted as `texte [photo.png]` while the server row's
+   * `text` holds `texte` alone (the files come apart, by name).
    */
   matchText?: string;
   /** Why a message failed, in French, for the bubble's tooltip. */
@@ -78,6 +79,21 @@ export interface StoredMessage {
    * ça ? » se lisait comme une question posée à l'interlocuteur.
    */
   inner?: boolean;
+  /**
+   * Ce qu'est devenue la réponse à ce message quand elle ne viendra pas
+   * (second `ack` `no_reply`), en français, affiché **sous** la bulle. Le
+   * message, lui, est reçu : rayer sa bulle (« refusé — Mika est saturée »)
+   * disait l'inverse de ce qui s'était passé.
+   */
+  replyNote?: string;
+  /** Pour une opératrice : où réparer (une page de la console, `/inspecteur/…`). */
+  replyHref?: string;
+  /**
+   * Elle dort : la réponse attend son réveil (`speech` sans texte,
+   * `voice_reason: "asleep"`). Dit sous la bulle tant qu'elle n'a rien dit
+   * depuis — voir `asleepNoteShown`.
+   */
+  waiting?: "asleep";
 }
 
 /**
@@ -92,10 +108,9 @@ export interface StoredMessage {
 const ACK_REASONS: Record<string, string> = {
   rate_limited: "trop de messages d'affilée",
   empty: "message vide",
+  // Une file pleine : le message n'a pas été pris. (Une réponse qui échoue
+  // n'est plus dite ainsi : c'est `no_reply`, et le message reste envoyé.)
   overloaded: "Mika est saturée, réessaie dans un instant",
-  // Une question restée sans réponse jusqu'à ce qu'il soit trop tard (une
-  // reprise au démarrage, des heures après) : ce n'est pas une saturation.
-  too_late: "trop tard pour répondre — repose ta question",
   too_long: "message trop long",
   attachments_rejected: "pièces jointes refusées (format ou taille)",
   frame_too_large: "envoi trop volumineux — retire une pièce jointe",
@@ -231,22 +246,94 @@ export function restoredStatus(
   return { status };
 }
 
-/** Record what the server said became of a message we sent. */
+/** Le statut d'un message reçu dont la réponse ne viendra pas (ADR 0056). */
+export const NO_REPLY = "no_reply";
+
+/**
+ * La note posée sous la bulle quand la réponse ne viendra pas. Pour tout le
+ * monde : que Mika n'a pas pu répondre, et quoi faire. Une opératrice reçoit
+ * en plus la cause en clair (`detail`) — à elle seule, le serveur ne l'envoie
+ * qu'à ses connexions — jamais une consigne d'administration dite à quelqu'un
+ * qui ne peut rien y faire.
+ */
+export function noReplyNote(reason?: string, detail?: string): string {
+  const base =
+    reason === "too_late"
+      ? "Mika n'a pas pu répondre à temps — redis-le-lui si c'est encore d'actualité."
+      : "Mika n'a pas pu répondre — réessaie.";
+  const cause = typeof detail === "string" ? detail.trim() : "";
+  return cause ? `${base} (${cause})` : base;
+}
+
+/** Une page de la console, et rien d'autre : le lien posé sous une bulle ne
+ * mène jamais hors de `/inspecteur/`. */
+export function consoleHref(href: unknown): string | undefined {
+  return typeof href === "string" && /^\/inspecteur\/[\w\-/]*$/.test(href)
+    ? href
+    : undefined;
+}
+
+/** Record what the server said became of a message we sent.
+ *
+ * `failed` : the message was refused (it never reached her). `settled` : no
+ * reply is coming — a refusal, or a `no_reply` on a message she did receive;
+ * the caller stops the typing indicator on either.
+ */
 export function applyAck(
   history: StoredMessage[],
   cid: string,
   status: string,
-  rejected?: RejectedAttachment[]
-): { changed: boolean; failed: boolean } {
+  rejected?: RejectedAttachment[],
+  extra: Pick<AckMessage, "reason" | "detail" | "href"> = {}
+): { changed: boolean; failed: boolean; settled: boolean } {
   const msg = history.find((m) => m.cid === cid);
-  if (!msg) return { changed: false, failed: false };
+  if (!msg) return { changed: false, failed: false, settled: false };
+  if (status === NO_REPLY || status === "too_late") {
+    // Reçu : la bulle reste envoyée (et garde la note d'un envoi partiel,
+    // posée par le premier `ack`) ; la réponse ne viendra pas, une note le dit.
+    msg.status = "sent";
+    msg.reason = undefined;
+    msg.waiting = undefined;
+    const reason = status === "too_late" ? "too_late" : extra.reason;
+    msg.replyNote = noReplyNote(reason, extra.detail);
+    msg.replyHref = consoleHref(extra.href);
+    return { changed: true, failed: false, settled: true };
+  }
   const failed = status !== "accepted";
   msg.status = failed ? "failed" : "sent";
   msg.reason = failed ? ackReason(status) : undefined;
   // Un envoi partiel repart avec le statut `accepted` : sans cette note, la
   // bulle affiche trois fichiers dont un que Mika n'a jamais reçu.
   msg.note = rejected?.length ? rejectedNote(rejected) : undefined;
-  return { changed: true, failed };
+  return { changed: true, failed, settled: failed };
+}
+
+/** Sa note de sommeil : « elle dort, elle te répondra à son réveil ». */
+export const ASLEEP_NOTE = "Mika dort — elle te répondra à son réveil.";
+
+/**
+ * Une trame `speech` sans texte, `voice_reason: "asleep"` : elle dort, la
+ * réponse à ce message attend son réveil. Rien ne le disait — « Mika
+ * écrit… » s'éteignait et la bulle restait là, sans explication.
+ */
+export function markAsleep(history: StoredMessage[], cid: string): boolean {
+  const msg = history.find((m) => m.cid === cid);
+  if (!msg || msg.waiting === "asleep") return false;
+  msg.waiting = "asleep";
+  return true;
+}
+
+/**
+ * La note de sommeil ne se montre que tant qu'elle n'a rien dit depuis : sa
+ * réponse au réveil (ou n'importe quelle parole qui suit, pas un murmure)
+ * la rend caduque, même arrivée par un rattrapage après un rechargement.
+ */
+export function asleepNoteShown(history: StoredMessage[], index: number): boolean {
+  const msg = history[index];
+  if (!msg || msg.waiting !== "asleep") return false;
+  return !history
+    .slice(index + 1)
+    .some((m) => m.sender === "vtuber" && !m.inner);
 }
 
 /**
@@ -265,28 +352,48 @@ export function bindServerId(
   if (!msg) return false;
   if (typeof userId === "number") msg.id = userId;
   msg.status = "sent";
+  // Quoi que dise cette trame (sa réponse au réveil, un silence choisi), elle
+  // n'est plus en train de dormir sur ce message.
+  msg.waiting = undefined;
   return true;
+}
+
+/**
+ * Ce que montre la bulle d'un message avec des fichiers : `texte [a.png,
+ * b.pdf]`, ou `[a.png]` sans légende. La même composition à l'envoi et au
+ * rechargement — c'est ce qui permet de reconnaître sa propre bulle.
+ */
+export function withAttachments(text: string, names: string[]): string {
+  const label = names.filter((n) => typeof n === "string" && n).join(", ");
+  if (!label) return text;
+  return text ? `${text} [${label}]` : `[${label}]`;
+}
+
+function attachmentNames(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((a: Partial<HistoryAttachment> | null) =>
+      a && typeof a.name === "string" ? a.name : ""
+    )
+    .filter((n) => n);
 }
 
 /**
  * Does this server row belong to a bubble we painted ourselves?
  *
- * Exact text is the normal answer. A message carrying files is the one
- * case where the two sides legitimately differ, and they differ *twice*:
- * the bubble shows `regarde ça [photo.png]` while the row holds the
- * caption **plus whatever the preprocessors made of the files** —
- * `regarde ça [image: un chat roux dort sur un canapé]`. So the stored
- * text is neither what we typed nor a substring of what we displayed; it
- * is what we typed, extended. Hence the prefix rule, deliberately
- * narrowed to user messages carrying a non-empty `matchText`: an
- * attachment-only message has nothing to anchor on and would otherwise
- * match any user row at all. It stays recognisable through its
- * `client_msg_id` instead.
+ * The server now sends what was typed (`text`) and the files by name
+ * (`attachments`) apart from what the preprocessors made of them (ADR 0056),
+ * so the display both sides compose is the same: exact equality is the
+ * rule. `matchText` — what was typed — still adopts a bubble whose files
+ * did not all make it (the server dropped one, or cleaned its name), never
+ * an attachment-only bubble (nothing to anchor on: it stays recognisable
+ * through its `client_msg_id`). The old prefix rule (« what we typed,
+ * extended by the preprocessors ») is gone with the reason it existed.
  */
-function matches(msg: StoredMessage, serverText: string): boolean {
-  if (msg.text === serverText) return true;
+function matches(msg: StoredMessage, display: string, typed: string): boolean {
+  if (msg.text === display) return true;
   if (msg.sender !== "user" || !msg.matchText) return false;
-  return serverText === msg.matchText || serverText.startsWith(msg.matchText);
+  return typed === msg.matchText;
 }
 
 /**
@@ -330,14 +437,19 @@ export function mergeHistory(
   for (const entry of entries ?? []) {
     if (typeof entry?.id !== "number" || known.has(entry.id)) continue;
     const sender = entry.role === "user" ? "user" : "vtuber";
+    const typed = typeof entry.text === "string" ? entry.text : "";
+    // Sa bulle comme à l'envoi : ce qu'elle a tapé, ses fichiers par leur nom
+    // — jamais ce que les préprocesseurs en ont tiré.
     const text =
-      sender === "vtuber" ? stripProsody(entry.text ?? "") : entry.text ?? "";
+      sender === "vtuber"
+        ? stripProsody(typed)
+        : withAttachments(typed, attachmentNames(entry.attachments));
     if (!text) continue;
 
     if (sender === "vtuber") sawReply = true;
 
     const mine = history.find(
-      (m) => m.id === undefined && m.sender === sender && matches(m, text)
+      (m) => m.id === undefined && m.sender === sender && matches(m, text, typed)
     );
     if (mine) {
       mine.id = entry.id;
@@ -365,4 +477,74 @@ export function mergeHistory(
     history = history.slice(-maxMessages);
   }
   return { history, added, adopted, sawReply };
+}
+
+// ── Le fil d'une autre vie (ADR 0056) ─────────────────────────────────
+
+/**
+ * Ce que le navigateur garde du fil : ses messages, et l'empreinte de la vie
+ * d'où ils viennent (`HistoryMessage.life`).
+ *
+ * Sans empreinte, un cache survivait au changement de moteur : l'ancien
+ * envoyait la clé Django d'un message, le nouveau le `seq` de son journal,
+ * qui repart de quelques dizaines, sous la **même** clé de cache
+ * (`user_<n>`). Le curseur de l'ancien fil cachait alors le nouveau, et ses
+ * identifiants passaient pour des messages déjà connus.
+ */
+export interface CachedThread {
+  life: string;
+  messages: unknown[];
+}
+
+/** Relire le cache : `{life, messages}`, ou un simple tableau (un cache d'avant
+ * l'empreinte, donc d'une vie inconnue). Illisible : rien. */
+export function readCache(raw: string | null): CachedThread {
+  if (!raw) return { life: "", messages: [] };
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) return { life: "", messages: parsed };
+    if (parsed && typeof parsed === "object") {
+      const { life, messages } = parsed as { life?: unknown; messages?: unknown };
+      return {
+        life: typeof life === "string" ? life : "",
+        messages: Array.isArray(messages) ? messages : [],
+      };
+    }
+  } catch {
+    // illisible : comme vide
+  }
+  return { life: "", messages: [] };
+}
+
+export function writeCache(life: string, messages: StoredMessage[]): string {
+  return JSON.stringify({ life, messages });
+}
+
+/**
+ * Ce que montre l'écran vient-il d'une autre vie que celle qui parle ?
+ *
+ * Oui quand le serveur le dit (`reset` : le curseur dépassait la tête de ce
+ * fil — une sauvegarde plus ancienne restaurée, un fil oublié), ou quand son
+ * empreinte n'est pas celle du cache — un cache **sans** empreinte compris :
+ * il vient de l'ancien moteur. Un serveur qui n'envoie pas d'empreinte ne
+ * fait rien vider (on ne sait pas).
+ */
+export function fromAnotherLife(
+  cachedLife: string,
+  frame: { life?: unknown; reset?: unknown }
+): boolean {
+  if (frame.reset === true) return true;
+  return typeof frame.life === "string" && frame.life !== "" && frame.life !== cachedLife;
+}
+
+/**
+ * Ce qui survit au changement de vie : seulement les messages de cet onglet
+ * encore en partance (`pending`, dans la file d'envoi) — ils partiront vers
+ * la vie qui parle. Tout le reste (identifiants d'ailleurs, pensées, échecs
+ * d'avant) est vidé avant de fusionner le fil du serveur.
+ */
+export function keepAcrossLives(history: StoredMessage[]): StoredMessage[] {
+  return history.filter(
+    (m) => m.sender === "user" && m.id === undefined && m.status === "pending"
+  );
 }

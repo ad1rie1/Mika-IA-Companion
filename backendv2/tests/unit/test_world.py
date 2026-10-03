@@ -181,3 +181,44 @@ def test_les_durees_viennent_de_ses_reglages(tmp_path):
     assert me.moving is not None
     span = me.moving.eta - me.moving.started
     assert 3 * US < span < 5 * US  # ~3,4 m à 0,9 m/s
+
+
+def test_autour_de_toi_ne_pose_pas_les_objets_sur_les_lieux():
+    """« sur ton lit (`bed`) : ta sansevière » se lisait « la plante est sur le lit » : où aller et de quoi se
+    servir sont deux listes, et la section reste courte (elle est dans chaque prompt)."""
+    from mika.faculties.world import WorldParams, around, genesis
+
+    text = around(genesis(), 0, WorldParams())
+    assert "sur ton lit (`bed`) :" not in text and "→" not in text
+    assert "Tu peux aller" in text and "de quoi te servir" in text
+    assert "ta sansevière (`snake_plant`) : arroser" in text
+    assert len(text.splitlines()) <= 4
+
+
+def test_ce_qu_elle_a_vecu_se_lit(tmp_path):
+    """Ses occupations, terminées ou en cours, sont un fait (``world.lived``) : son journal peut raconter sa
+    journée sans l'inventer."""
+    from mika.faculties.world import plan, timing
+
+    async def intend(kernel, steps_of):
+        frame = kernel.mind.frame()
+        s = frame.state("world")
+        intent = plan.intent_of(w.MIKA, steps_of(s), frame.now, timing(None),
+                                w.Cause(source=w.Source.MIKA, actor=w.MIKA), f"i-{frame.now}")
+        await kernel.mind.append([w.INTENDED.draft(intent=intent)], emitter="world", correlation="test:vecu",
+                                 origin=Origin.EXTERNAL)
+
+    async def script(kernel, out):
+        await intend(kernel, lambda s: plan.plan_interact(s.definition, timing(None), s.actors, s.objects, w.MIKA,
+                                                          "writing_desk", "dessiner"))
+        await asyncio.sleep(600)
+        out["drawing"] = kernel.mind.frame().get(w.LIVED)
+        await intend(kernel, lambda s: plan.plan_go(s.definition, timing(None), s.actors, w.MIKA, "window"))
+        await asyncio.sleep(30)
+
+    _, out, _ = _run(tmp_path, lambda req: LLMResponse("…"), script)
+    (current,) = out["drawing"]
+    assert (current.name, current.label, current.until) == ("draw", "dessiner", None)  # en cours
+    (done,) = out["frame"].get(w.LIVED)
+    assert (done.name, done.object_label) == ("draw", "ton bureau")
+    assert done.until is not None and done.until - done.since >= 590 * US

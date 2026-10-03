@@ -1,0 +1,5 @@
+# L'atelier d'animation travaille sur le modèle de l'acheteur (licence « ExplicitlyLicensedPerson ») : ni la scène qui le
+# contient, ni les rendus de contrôle ne sont versionnés. Seuls les mouvements exportés (os, sans maillage) le sont.
+*.blend
+*.blend1
+previews/

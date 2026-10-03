@@ -345,7 +345,7 @@ def _thread(s: AttentionState, frame: Frame, key: str) -> Fields | None:
     return Fields((
         ("la personne lui a écrit", When(ex.last_in) if ex.last_in else Text("pas encore", kind="muted")),
         ("elle lui a écrit", When(ex.last_out) if ex.last_out else Text("pas encore", kind="muted")),
-        ("son dernier message attend une réponse", waiting),
+        ("elle attend sa réponse (elle a écrit en dernier)", waiting),
         ("ses initiatives depuis, sans réponse", str(ex.initiatives)),
         ("dont le délai attendu est passé", str(ex.ignored)),
         ("elle a ressenti ce silence", "oui" if ex.felt else "non"),

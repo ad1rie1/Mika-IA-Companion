@@ -164,6 +164,8 @@ def declare(specs: Sequence[ToolSpec], core: frozenset[str] | None = None) -> tu
 
 
 CATALOGUE_HEADER = "--- CE QUE TU PEUX AUSSI FAIRE ---"
+#: la boucle s'est arrêtée sur un outil qui conclut (``ToolSpec.ends_loop``)
+ENDED_BY_TOOL = "tool_end"
 
 
 def catalogue(specs: Sequence[ToolSpec], core: frozenset[str] | None, described: Mapping[str, str]) -> str:
@@ -246,6 +248,7 @@ async def _loop(
             result.stop = resp.stop
             return result
         outputs: list[Message] = []
+        ended = False
         for call in resp.tool_calls:
             spec = tools.get(call.name)
             if spec is None:
@@ -285,6 +288,13 @@ async def _loop(
             result.records.append(ToolRecord(call.id, call.name, _args_json(call.args), tr.ok,
                                              _bounded(tr.content), elapsed))
             outputs.append(Message("tool", tr.content, tool_call_id=call.id, name=call.name, is_error=not tr.ok))
+            ended = ended or (spec.ends_loop and tr.ok)
+        if ended:
+            # l'outil qui conclut a réussi : rien à écrire de plus (le rappeler coûtait un appel sur trois des
+            # séances de sa vie intérieure, pour une conclusion que personne ne lisait — sonde du 2026-10-03)
+            result.text = resp.text
+            result.stop = ENDED_BY_TOOL
+            return result
         req = req.extend(Message("assistant", resp.text, tool_calls=resp.tool_calls), *outputs)
     return await _close(gateway, req, result, "max_turns")
 

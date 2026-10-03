@@ -93,13 +93,13 @@ MonoBehaviour:
   - point
   - poke
   - pat_head
-  walkClipSpeed: 1.3525527
-  walkSlowNorm: 0.6050359
-  walkNorm: 1.0379283
-  walkSlowSeconds: 1.6000001
-  walkSeconds: 1.1333334
-  sitTravelNorm: 0.41766644
-  sitHipsNorm: 0.5824444
-  standTravelNorm: 0.38562626
+  walkClipSpeed: 1.157526
+  walkSlowNorm: 0.58289796
+  walkNorm: 1.0104443
+  walkSlowSeconds: 1.6
+  walkSeconds: 1.1333333
+  sitTravelNorm: 0.34755751
+  sitHipsNorm: 0.7246352
+  standTravelNorm: 0.32318693
   sitDownSeconds: 1.5666667
-  standUpSeconds: 0.86666673
+  standUpSeconds: 0.8666667

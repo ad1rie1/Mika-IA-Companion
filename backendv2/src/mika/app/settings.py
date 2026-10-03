@@ -9,6 +9,7 @@ fichier ``secret.key`` créé au premier démarrage à côté des bases (droits
 from __future__ import annotations
 
 import json
+import logging
 import os
 import secrets
 import sqlite3
@@ -17,8 +18,12 @@ from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from mika.adapters.llm.config import BackendSpec, LLMConfig
+from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
+
+log = logging.getLogger("mika.settings")
+#: les rôles inconnus déjà signalés au journal
+_IGNORED_ROLES: set[str] = set()
 
 LLM_KEY = "llm"
 TELEGRAM_KEY = "telegram"
@@ -33,6 +38,26 @@ CONSOLE_MCP_KEY = "console_mcp"
 PERSONA_KEY = "persona"
 OVERRIDES_KEY = "overrides"
 FORGE_CONFIG_KEY = "forge_config"
+
+
+#: un code d'appairage Telegram : sans caractère qu'on confond (0/O, 1/I/L), deux groupes de quatre
+PAIRING_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+
+
+def pairing_code() -> str:
+    """« K7QF-M3XP » : huit signes sur 31 (près de 40 bits), à usage unique."""
+    raw = "".join(secrets.choice(PAIRING_ALPHABET) for _ in range(8))
+    return f"{raw[:4]}-{raw[4:]}"
+
+
+def same_pairing_code(given: str, expected: str) -> bool:
+    """Le code tapé est-il le bon ? Sans tenir compte de la casse, des espaces ni du tiret ; comparé en temps
+    constant."""
+    def norm(text: str) -> str:
+        return "".join(c for c in text.upper() if c.isalnum())
+
+    a, b = norm(given), norm(expected)
+    return bool(b) and secrets.compare_digest(a.encode(), b.encode())
 
 
 class SecretBox:
@@ -97,10 +122,22 @@ class Settings:
             spec = dict(spec)
             spec["api_key"] = self.box.open(spec.pop("api_key_sealed", ""))
             backends[name] = BackendSpec.model_validate(spec)
-        return LLMConfig(backends=backends, routes=data.get("routes") or {},
-                         context_tokens=data.get("context_tokens") or 24_000)
+        routes = dict(data.get("routes") or {})
+        # un rôle qui n'existe pas (« reponse », gardé avant qu'on les vérifie) ne servait rien : il ne bloque
+        # pas pour autant toute la passerelle au démarrage
+        for role in [r for r in routes if r not in ROLES]:
+            if role not in _IGNORED_ROLES:  # dit une fois (la console relit la configuration à chaque page)
+                _IGNORED_ROLES.add(role)
+                log.warning("modèles : le rôle « %s » n'existe pas, sa route est ignorée", role[:40])
+            routes.pop(role)
+        return LLMConfig(backends=backends, routes=routes, context_tokens=data.get("context_tokens") or 24_000)
 
-    async def save_llm(self, cfg: LLMConfig) -> None:
+    async def save_llm(self, cfg: LLMConfig) -> LLMConfig:
+        """Enregistre la configuration des modèles et rend celle qui vaut désormais : revalidée (une copie
+        modifiée, ``model_copy``, ne passe pas par les validateurs) — le premier fournisseur déclaré y sert
+        « répondre » d'office."""
+        cfg = LLMConfig.model_validate({"backends": dict(cfg.backends), "routes": dict(cfg.routes),
+                                        "context_tokens": cfg.context_tokens})
         problems = cfg.problems()
         if problems:
             raise ValueError("; ".join(problems))
@@ -111,6 +148,7 @@ class Settings:
             backends[name] = data
         await self._put(LLM_KEY, {"backends": backends, "routes": dict(cfg.routes),
                                   "context_tokens": cfg.context_tokens})
+        return cfg
 
     # ── Telegram ──
     def telegram(self) -> dict[str, Any]:
@@ -134,6 +172,28 @@ class Settings:
         if open_to_all is not None:
             data["open"] = bool(open_to_all)
         await self._put(TELEGRAM_KEY, data)
+
+    def telegram_pairing(self) -> tuple[str, int] | None:
+        """Le code d'appairage en cours (déchiffré) et son échéance (secondes depuis l'époque), ou ``None``."""
+        data = dict(self._get(TELEGRAM_KEY) or {})
+        code = self.box.open(data.get("pairing_sealed", ""))
+        return (code, int(data.get("pairing_expires") or 0)) if code else None
+
+    async def new_telegram_pairing(self, now_s: int, ttl_s: int) -> str:
+        """Un code d'appairage neuf (l'ancien ne vaut plus), scellé comme un secret ; rendu pour être montré."""
+        code = pairing_code()
+        data = dict(self._get(TELEGRAM_KEY) or {})
+        data["pairing_sealed"] = self.box.seal(code)
+        data["pairing_expires"] = int(now_s + ttl_s)
+        await self._put(TELEGRAM_KEY, data)
+        return code
+
+    async def clear_telegram_pairing(self) -> None:
+        data = dict(self._get(TELEGRAM_KEY) or {})
+        if "pairing_sealed" in data or "pairing_expires" in data:
+            data.pop("pairing_sealed", None)
+            data.pop("pairing_expires", None)
+            await self._put(TELEGRAM_KEY, data)
 
     # ── Courrier, flux, transcription ──
     #: les secrets d'un compte de courrier (scellés à part, jamais en clair dans ``mind.db``)

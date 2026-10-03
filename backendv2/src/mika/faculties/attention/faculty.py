@@ -35,7 +35,11 @@
 - **Seule** : plus d'un jour sans que personne ne lui écrive, une pensée
   (« Personne ne m'a parlé depuis hier ») — pas avant l'heure où une amie
   qui écrit presque chaque jour passe d'habitude (on l'attend, on n'est pas
-  seule).
+  seule). Elle met des mots sur le vide que ``needs`` lui fait sentir, sans
+  le faire ressentir une seconde fois (ADR 0058).
+- **Une amie qui lui manque** et à qui elle n'écrit pas (injoignable, ou qui
+  ne répond plus) : une pensée, puis d'autres, de plus en plus rares à mesure
+  que le silence double, et de moins en moins fortes (ADR 0058).
 - **Un bel échange** reste en tête : le lendemain, s'il n'y a pas eu d'autre
   contact, il peut donner envie de lui en reparler (« encore bravo pour le
   poste ! ») — une raison faible.
@@ -126,6 +130,12 @@ class AttentionParams(BaseModel):
     missing_check_us: Annotated[int, Knob(
         label="Vérifier les manques toutes les", group="Révision, manque, blocage", lo=5 * MINUTE, hi=12 * HOUR,
         help="Éveillée, elle se demande à ce rythme qui lui manque sans qu'elle puisse le joindre.")] = 30 * MINUTE
+    missing_fading: Annotated[float, Knob(
+        label="Un manque qui dure : chaque pensée plus faible de", group="Révision, manque, blocage", lo=0.3, hi=1.0,
+        step=0.05,
+        help="Quelqu'un qui lui manque et qu'elle ne peut (ou ne veut plus) relancer lui revient en tête de plus en "
+             "plus rarement : une pensée quand son silence atteint quatre fois son rythme, puis huit, seize… "
+             "Chacune est plus faible que la précédente de ce facteur (jamais sous le seuil d'extinction).")] = 0.8
     # y repenser
     dwell_every_us: Annotated[int, Knob(
         label="Y repenser au plus toutes les", group="Y repenser", lo=5 * MINUTE, hi=12 * HOUR,
@@ -425,12 +435,17 @@ class AttentionState:
     #: un bel échange avec quelqu'un (personne → (la pensée, quand elle est née)) : le lendemain, l'envie d'en
     #: reparler, s'il n'y a pas eu d'autre contact
     glad: FrozenDict[str, tuple[int, int]] = field(default_factory=FrozenDict)
+    #: la dernière pensée de manque pour chacun (personne → quand) : la suivante attend que son silence ait doublé
+    missing: FrozenDict[str, int] = field(default_factory=FrozenDict)
 
 
 #: v5 : une conversation close (« bonne nuit ») n'est pas « sans réponse » ; le délai de réponse court sur les
 #: heures de la personne (le canal est retenu avec l'attente) ; un bel échange reste en tête.
+#: v6 : la dernière pensée de manque de chacun (un manque qui dure revient de plus en plus rarement, ADR 0058).
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    state_version=5)
+                    state_version=6)
+#: les manques dont on retient la dernière pensée (les plus récents)
+MISSING_KEPT = 64
 
 #: Les pensées nées d'une relation : une par personne à la fois, trois au plus.
 RELATIONAL = (c.EXCHANGE, c.CONCERN)
@@ -760,7 +775,7 @@ def _reaching_out(s: AttentionState, e, cx) -> AttentionState:
     if len(openings) > 16:  # des épisodes qui n'ont jamais parlé (abstention, supplantés)
         openings = FrozenDict(sorted(openings.items())[-16:])  # les identifiants d'épisode sont chronologiques
     s = replace(s, openings=openings)
-    if not {social_c.RECONTACT, social_c.CHAT} & set(d.reason.split(",")):
+    if not {social_c.RECONTACT, social_c.CHAT, social_c.REKINDLE} & set(d.reason.split(",")):
         return s
     return _expect(s, c.RETURN, cx.facts.get(identity_c.PERSON(d.target)), e.at, None)
 
@@ -775,6 +790,10 @@ def _born(s: AttentionState, e, cx) -> AttentionState:
                 pending=tuple(q for q in s.pending if q.source != d.source or q.origin != d.origin))
     if d.origin == c.MISSING and d.about:
         s = _expect(s, c.RETURN, d.about[0], e.at, None)
+        missing = s.missing.set(d.about[0], e.at)
+        if len(missing) > MISSING_KEPT:
+            missing = FrozenDict(sorted(missing.items(), key=lambda kv: (kv[1], kv[0]))[-MISSING_KEPT:])
+        s = replace(s, missing=missing)
     if d.origin == c.ALONE:
         s = replace(s, alone_at=e.at)
     if d.origin == c.UNANSWERED and d.about and d.about[0] in s.exchanges:
@@ -931,8 +950,16 @@ def _emotion(name: str) -> Emotion:
     return A.emotion_of(name) or Emotion.THINKING
 
 
+#: les pensées qui disent un état déjà ressenti ailleurs : « Personne ne m'a parlé depuis hier » met des mots sur
+#: le vide que ``needs`` lui fait déjà sentir (``needs.felt``, borné) — le ressentir une seconde fois serait compter
+#: deux fois la même solitude (S07, ADR 0058)
+NAMES_A_FEELING = frozenset({c.ALONE})
+
+
 @ATTENTION.appraisal(c.THOUGHT_BORN)
-def _birth_felt(e, cx) -> Appraisal:
+def _birth_felt(e, cx) -> Appraisal | None:
+    if e.data.origin in NAMES_A_FEELING:
+        return None
     p = params(cx.params)
     return Appraisal(_emotion(e.data.emotion), e.data.intensity * p.birth_appraisal_factor, reason=e.data.origin,
                      relational=e.data.origin == c.EXCHANGE)
@@ -948,7 +975,9 @@ def _noticed_felt(e, cx) -> Appraisal | None:
 
 
 @ATTENTION.appraisal(c.DWELT)
-def _dwell_felt(e, cx) -> Appraisal:
+def _dwell_felt(e, cx) -> Appraisal | None:
+    if e.data.origin in NAMES_A_FEELING:
+        return None
     p = params(cx.params)
     return Appraisal(_emotion(e.data.emotion), e.data.intensity * p.dwell_factor, reason="elle y repense",
                      relational=e.data.origin == c.EXCHANGE)

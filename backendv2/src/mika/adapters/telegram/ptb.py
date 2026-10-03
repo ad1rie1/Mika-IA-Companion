@@ -11,7 +11,12 @@ limites, perceptions, livraison) vit dans ``channel`` et se teste sans réseau.
   la mention d'un compte qui est le robot) — jamais par sous-chaîne
   (``@mika_bot_officiel`` n'est pas ``@mika_bot``).
 - ``/start`` (la personne ouvre la conversation) est une arrivée, perçue comme
-  telle ; les autres commandes sont ignorées.
+  telle ; ``/start <code>`` porte un code d'appairage ; les autres commandes
+  sont ignorées.
+- Un autocollant, une vidéo, une note vidéo, un GIF, une position, un contact
+  passent le filtre : perçus en une ligne (``noted_of``), jamais téléchargés.
+- « En train d'écrire… » (``send_typing``) et la citation du message d'origine
+  (``reply_to``) passent par ``PtbBot``.
 - Les noms de fichiers reçus sont assainis (contrôles, chemins, longueur).
 """
 
@@ -39,8 +44,36 @@ def safe_name(name: Any, default: str) -> str:
     return (" ".join(text.split()) or default)[:FILENAME_MAX]
 
 
+def noted_of(message: Any) -> str:
+    """Ce qu'on lui envoie qui n'est pas du texte et qu'elle ne télécharge pas, en une ligne (comme une
+    arrivée) : un autocollant et son émoji — ils comptent dans une conversation intime —, une vidéo, une
+    note vidéo, un GIF, une position, un contact (jamais son numéro). Vide : rien de tel."""
+    sticker = getattr(message, "sticker", None)
+    if sticker is not None:
+        emoji = str(getattr(sticker, "emoji", "") or "").strip()[:8]
+        return f"(t'envoie un autocollant {emoji})" if emoji else "(t'envoie un autocollant)"
+    for attr, text in (("animation", "(t'envoie un GIF animé, que tu ne peux pas regarder)"),
+                       ("video_note", "(t'envoie une note vidéo, que tu ne peux pas regarder)"),
+                       ("video", "(t'envoie une vidéo, que tu ne peux pas regarder)"),
+                       ("location", "(t'envoie une position sur une carte)"),
+                       ("contact", "(t'envoie la fiche d'un contact)")):
+        if getattr(message, attr, None) is not None:
+            return text
+    return ""
+
+
+def start_arg_of(text: str) -> str:
+    """Ce qui suit ``/start`` (``/start@robot K7QF-M3XP`` → « K7QF-M3XP ») : un code d'appairage, ou le
+    paramètre d'un lien ``t.me/robot?start=…`` ; borné, un seul mot."""
+    parts = text.strip().split(maxsplit=1)
+    if len(parts) < 2 or not parts[0].lower().startswith("/start"):
+        return ""
+    return parts[1].split()[0][:64] if parts[1].split() else ""
+
+
 def media_of(message: Any) -> tuple[Media, ...]:
-    """Les fichiers joints d'un message (la plus grande taille d'une photo)."""
+    """Les fichiers joints d'un message (la plus grande taille d'une photo). Un GIF, que Telegram range
+    aussi en document, n'en est pas un : il est perçu en une ligne (``noted_of``)."""
     out: list[Media] = []
     photos = getattr(message, "photo", None) or ()
     if photos:
@@ -50,8 +83,11 @@ def media_of(message: Any) -> tuple[Media, ...]:
     if voice is not None:
         out.append(Media(str(voice.file_id), "vocal.ogg", str(getattr(voice, "mime_type", "") or "audio/ogg")[:100],
                          int(getattr(voice, "file_size", 0) or 0)))
+    gif = getattr(message, "animation", None) is not None
     for attr, default_name, default_mime in (("audio", "audio", "audio/mpeg"),
                                              ("document", "document", "application/octet-stream")):
+        if attr == "document" and gif:
+            continue
         f = getattr(message, attr, None)
         if f is not None:
             out.append(Media(str(f.file_id), safe_name(getattr(f, "file_name", ""), default_name),
@@ -93,7 +129,8 @@ def inbound_from_update(update: Any, bot_id: int, bot_username: str, *, opened: 
     if message is None:
         return None
     media = media_of(message)
-    if not getattr(message, "text", None) and not media and not opened:
+    noted = noted_of(message)
+    if not getattr(message, "text", None) and not media and not opened and not noted:
         return None
     user = getattr(message, "from_user", None)
     chat = getattr(message, "chat", None)
@@ -108,7 +145,14 @@ def inbound_from_update(update: Any, bot_id: int, bot_username: str, *, opened: 
         name=name or str(getattr(user, "username", "") or ""), text="" if opened else text,
         mentions_me=_mentions(message, text, bot_id, bot_username), reply_to_me=reply_to_me, media=media,
         message_id=int(getattr(message, "message_id", 0) or 0), opened=opened,
+        start_arg=start_arg_of(text) if opened else "", noted=noted,
     )
+
+
+def _reply_parameters(message_id: int) -> Any:
+    from telegram import ReplyParameters  # noqa: PLC0415 — seulement si configuré
+
+    return ReplyParameters(message_id=message_id, allow_sending_without_reply=True)
 
 
 class PtbBot:
@@ -117,8 +161,16 @@ class PtbBot:
     def __init__(self, bot: Any) -> None:
         self._bot = bot
 
-    async def send_message(self, chat_id: int, text: str) -> None:
-        await self._bot.send_message(chat_id=chat_id, text=text)
+    async def send_message(self, chat_id: int, text: str, reply_to: int | None = None) -> None:
+        if reply_to is None:
+            await self._bot.send_message(chat_id=chat_id, text=text)
+            return
+        # citer le message d'origine ; s'il a disparu entre-temps, la réponse part quand même
+        await self._bot.send_message(chat_id=chat_id, text=text,
+                                     reply_parameters=_reply_parameters(reply_to))
+
+    async def send_typing(self, chat_id: int) -> None:
+        await self._bot.send_chat_action(chat_id=chat_id, action="typing")
 
     async def download(self, file_id: str) -> bytes:
         f = await self._bot.get_file(file_id)
@@ -160,7 +212,10 @@ class Poller:
         self.app = Application.builder().token(token).concurrent_updates(True).build()
         self.channel: TelegramChannel = make_channel(PtbBot(self.app.bot))
         self.locks = ChatLocks()
-        wanted = filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL
+        # ce qui ne se lit pas (autocollant, vidéo…) se perçoit quand même, en une ligne (``noted_of``)
+        wanted = (filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL
+                  | filters.Sticker.ALL | filters.VIDEO | filters.VIDEO_NOTE | filters.ANIMATION | filters.LOCATION
+                  | filters.CONTACT)
         # les éditions sont écartées : elles recevaient une seconde réponse
         self.app.add_handler(MessageHandler(wanted & ~filters.COMMAND & filters.UpdateType.MESSAGE, self._on_message))
         self.app.add_handler(CommandHandler("start", self._on_start, filters=filters.UpdateType.MESSAGE))
@@ -191,7 +246,16 @@ class Poller:
         assert self.app.updater is not None
         await self.app.updater.start_polling(drop_pending_updates=False)
 
+    @property
+    def username(self) -> str:
+        """Le nom du robot (connu une fois démarré) : de quoi donner un lien t.me/<nom>?start=<code>."""
+        try:
+            return str(self.app.bot.username or "")
+        except RuntimeError:  # pas encore initialisé
+            return ""
+
     async def stop(self) -> None:
+        await self.channel.close()
         try:
             if self.app.updater is not None and self.app.updater.running:
                 await self.app.updater.stop()

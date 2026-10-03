@@ -1,4 +1,23 @@
-import { bootstrap, login, whoami, type AuthState } from "../network/api";
+import {
+  BOOTSTRAP_CLOSED,
+  LoginRefusedError,
+  bootstrap,
+  login,
+  whoami,
+  type AuthState,
+} from "../network/api";
+
+/**
+ * La création du premier compte a-t-elle été refusée parce qu'un compte
+ * existe déjà ? Le statut fait foi (409) ; la phrase, accentuée ou non, ne
+ * sert qu'à un serveur qui ne le donnerait pas. Chercher « existe deja » sans
+ * accent avait figé la correction de la phrase côté serveur.
+ */
+export function bootstrapClosed(err: unknown): boolean {
+  if (err instanceof LoginRefusedError && err.status === BOOTSTRAP_CLOSED) return true;
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  return /existe d[ée]j[àa]/i.test(message);
+}
 
 // Full-screen auth gate. Resolves once the user is authenticated, so the app
 // only connects the (authenticated) WebSocket afterwards.
@@ -137,7 +156,7 @@ export class LoginOverlay {
           // than leaving the user staring at a form that can't succeed.
           const message =
             err instanceof Error ? err.message : "Identifiants invalides.";
-          if (isBootstrap && message.includes("existe deja")) {
+          if (isBootstrap && bootstrapClosed(err)) {
             this.root.remove();
             resolve(await this.prompt(false));
             return;

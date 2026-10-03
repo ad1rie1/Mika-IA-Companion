@@ -66,6 +66,15 @@ namespace Mika.Editor.Animation
             var loops = MocapLoops();
             var clips = ImportFolder(WebSource, Root, category => Looping.Contains(category), travel: false);
             foreach (var kv in ImportFolder(MocapSource, Root + "/mocap", _ => false, travel: true, loops)) clips[kv.Key] = kv.Value;
+            // La vitesse de la prise (sa racine) se lit sur le clip importé.
+            _rawWalk = clips.TryGetValue("walking", out var rawWalk) ? rawWalk : null;
+            // Les mouvements de l'atelier Blender (adaptés sur son squelette, au sol, appuis bloqués) remplacent les
+            // prises du même nom ; les autres marches restent des copies aux pieds redressés, rendues symétriques.
+            _atelier = AtelierImporter.Clips();
+            foreach (var kv in _atelier) clips[kv.Key] = kv.Value;
+            foreach (var n in new[] { "walking", "walking_slow" })
+                if (!_atelier.ContainsKey(n) && clips.TryGetValue(n, out var raw))
+                    clips[n] = FlatFeet(raw, $"{n}_pieds_a_plat");
             var base_ = BasePose(clips.TryGetValue("idle_breathing", out var idle) ? idle : clips.Values.FirstOrDefault());
             var body = GenerateClips(base_);
             foreach (var kv in Preferred)
@@ -650,8 +659,9 @@ namespace Mika.Editor.Animation
             // L'unité « humaine » est celle qu'Unity donne au squelette de la prise (son humanScale), pas la hauteur
             // de hanches notée par l'export : on la retrouve par la marche (m/s réels ÷ vitesse normalisée du clip).
             var scale = 0.95f;
-            if (Clip("walking") is { } wk && clips["walking"].averageSpeed.magnitude > 0.1f)
-                scale = wk["speed_m_s"].Value<float>() / clips["walking"].averageSpeed.magnitude;
+            var rootWalk = _rawWalk != null ? _rawWalk : clips.TryGetValue("walking", out var w0) ? w0 : null;
+            if (Clip("walking") is { } wk && rootWalk != null && rootWalk.averageSpeed.magnitude > 0.1f)
+                scale = wk["speed_m_s"].Value<float>() / rootWalk.averageSpeed.magnitude;
             float Rest(JToken c) => scale;
             float Hips(JToken c, string key, int i) => c?[key] is JArray a && a.Count == 3 ? a[i].Value<float>() : 0f;
             if (Clip("walking") is { } w) set.walkNorm = w["speed_m_s"].Value<float>() / Rest(w);
@@ -675,6 +685,51 @@ namespace Mika.Editor.Animation
                 var dz = Hips(su, "hips_end_unity_m", 2) - Hips(su, "hips_start_unity_m", 2);
                 set.standTravelNorm = Mathf.Abs(dz) / Rest(su);
                 set.standUpSeconds = clips["stand_up"].length;
+            }
+            // Les clips de l'atelier sont adaptés à son squelette et à la hauteur de ses sièges : leurs grandeurs se
+            // lisent sur eux, la fiche de la prise CMU ne leur correspond plus (hanches assises à 0,46 m d'après elle,
+            // à 0,57 m dans le clip — le jeu soulevait la racine de 13 cm de trop).
+            if (_atelier.TryGetValue("sit_down", out var asd) && HipsPath(asd) is { } down)
+            {
+                set.sitTravelNorm = Mathf.Abs(down.travel);
+                set.sitHipsNorm = down.endHeight;
+                set.sitDownSeconds = asd.length;
+            }
+            if (_atelier.TryGetValue("stand_up", out var asu) && HipsPath(asu) is { } up)
+            {
+                set.standTravelNorm = Mathf.Abs(up.travel);
+                set.standUpSeconds = asu.length;
+            }
+        }
+
+        /// <summary>
+        /// Le chemin des hanches d'un clip joué sur elle : leur déplacement vers l'avant entre le début et la fin, et
+        /// leur hauteur à la fin, en tailles (÷ humanScale). L'échantillon garde le déplacement de la prise.
+        /// </summary>
+        static (float travel, float endHeight)? HipsPath(AnimationClip clip)
+        {
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Mika/Art/Avatars/Mika.prefab");
+            if (prefab == null || clip == null || clip.length <= 0f) return null;
+            var go = UnityEngine.Object.Instantiate(prefab);
+            go.hideFlags = HideFlags.HideAndDontSave;
+            go.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            try
+            {
+                var a = go.GetComponentInChildren<Animator>();
+                if (a == null || !a.isHuman || a.humanScale <= 0f) return null;
+                var hips = a.GetBoneTransform(HumanBodyBones.Hips);
+                clip.SampleAnimation(a.gameObject, 0f);
+                var start = a.transform.InverseTransformPoint(hips.position);
+                clip.SampleAnimation(a.gameObject, clip.length);
+                var end = a.transform.InverseTransformPoint(hips.position);
+                var travel = (end.z - start.z) / a.humanScale;
+                var height = end.y / a.humanScale;
+                Debug.Log($"[Mika] « {clip.name} » : les hanches avancent de {end.z - start.z:+0.00;-0.00} m et finissent à {end.y:0.00} m du sol.");
+                return (travel, height);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
             }
         }
 
@@ -706,12 +761,13 @@ namespace Mika.Editor.Animation
                          ("TalkVariant", AnimatorControllerParameterType.Int), ("Tempo", AnimatorControllerParameterType.Float),
                          ("WalkPlayback", AnimatorControllerParameterType.Float), ("WalkBlend", AnimatorControllerParameterType.Float),
                          ("Pose", AnimatorControllerParameterType.Int), ("LieSide", AnimatorControllerParameterType.Int),
-                         ("Covered", AnimatorControllerParameterType.Bool),
+                         ("Covered", AnimatorControllerParameterType.Bool), ("Symetrie", AnimatorControllerParameterType.Float),
                      })
                 ac.AddParameter(name, type);
             var ps = ac.parameters;
             foreach (var p in ps)
                 if (p.name == "Tempo" || p.name == "WalkPlayback") p.defaultFloat = 1f;
+                else if (p.name == "Symetrie") p.defaultFloat = 0.5f;
             ac.parameters = ps;
 
             var layers = ac.layers;
@@ -733,13 +789,18 @@ namespace Mika.Editor.Animation
             {
                 var tree = new BlendTree { name = "Marche", blendParameter = "WalkBlend", useAutomaticThresholds = false, hideFlags = HideFlags.HideInHierarchy };
                 AssetDatabase.AddObjectToAsset(tree, ac);
-                tree.AddChild(slowWalk, 0f);
-                tree.AddChild(normalWalk, 1f);
                 // Les deux prises ne commencent pas sur le même pied : mélangées telles quelles, les jambes se
                 // contrarient (les pieds bougent ensemble, ne se posent jamais, elle semble léviter). On décale la
                 // marche lente pour que ses foulées tombent sur celles de la marche normale.
+                var offset = CycleOffset(normalWalk, slowWalk);
+                // Une marche de l'atelier est déjà symétrique : elle entre telle quelle.
+                if (_atelier.ContainsKey("walking_slow")) tree.AddChild(slowWalk, 0f);
+                else tree.AddChild(Symmetric(ac, slowWalk, "Marche lente", 0f), 0f);
+                if (_atelier.ContainsKey("walking")) tree.AddChild(normalWalk, 1f);
+                else tree.AddChild(Symmetric(ac, normalWalk, "Marche normale", 0f), 1f);
                 var children = tree.children;
-                children[0].cycleOffset = CycleOffset(normalWalk, slowWalk);
+                if (children[0].motion is AnimationClip) children[0].cycleOffset = offset;
+                else ShiftTree((BlendTree)children[0].motion, offset);
                 tree.children = children;
                 walkMotion = tree;
             }
@@ -796,6 +857,44 @@ namespace Mika.Editor.Animation
             Link(lie, sit, 1.4f, ("Posture", AnimatorConditionMode.Equals, 1));
             Link(lie, idles[0], 1.2f, ("Posture", AnimatorConditionMode.Equals, 0));
 
+            // Au bureau : les clips de l'atelier (taper, écrire, lire, boire, pivoter la chaise…), le corps entier,
+            // seulement assise. Une pose sans clip (ou debout) laisse passer le calque de base (état vide).
+            // Passe IK : le regard vers quelqu'un et les pieds assis s'appliquent par-dessus le clip.
+            var osm = AddLayer(ac, BodyAnim.PoseLayer, null, AnimatorLayerBlendingMode.Override, ikPass: true);
+            var free = osm.AddState("Rien", new Vector3(300, 0));
+            osm.defaultState = free;
+            var toFree = osm.AddAnyStateTransition(free);
+            toFree.hasExitTime = false;
+            toFree.duration = 0.45f;
+            toFree.canTransitionToSelf = false;
+            toFree.AddCondition(AnimatorConditionMode.NotEqual, 1, "Posture");
+            var row = 0;
+            var desked = new HashSet<int>();
+            foreach (var (pose, clipName) in BodyAnim.DeskClips)
+            {
+                if (!clips.TryGetValue(clipName, out var deskClip)) continue;
+                var id = BodyAnim.PoseId(pose);
+                desked.Add(id);
+                var st = osm.AddState(pose, new Vector3(650, 50 * row++));
+                st.motion = deskClip;
+                var enter = osm.AddAnyStateTransition(st);
+                enter.hasExitTime = false;
+                // Pivoter : le geste suit la chaise dès qu'elle part ; le reste se fond en douceur.
+                enter.duration = pose.StartsWith("turn_") ? 0.15f : 0.45f;
+                enter.canTransitionToSelf = false;
+                enter.AddCondition(AnimatorConditionMode.Equals, id, "Pose");
+                enter.AddCondition(AnimatorConditionMode.Equals, 1, "Posture");
+            }
+            for (var id = 0; id < BodyAnim.Poses.Length; id++)
+            {
+                if (desked.Contains(id)) continue;
+                var back = osm.AddAnyStateTransition(free);
+                back.hasExitTime = false;
+                back.duration = 0.45f;
+                back.canTransitionToSelf = false;
+                back.AddCondition(AnimatorConditionMode.Equals, id, "Pose");
+            }
+
             // Gestes : le haut du corps, par-dessus.
             var upper = Mask(UpperMaskPath, AvatarMaskBodyPart.Body, AvatarMaskBodyPart.Head, AvatarMaskBodyPart.LeftArm, AvatarMaskBodyPart.RightArm,
                 AvatarMaskBodyPart.LeftFingers, AvatarMaskBodyPart.RightFingers, AvatarMaskBodyPart.LeftHandIK, AvatarMaskBodyPart.RightHandIK);
@@ -848,11 +947,33 @@ namespace Mika.Editor.Animation
         /// bassin au début de chaque transition. Les clips générés sont calés au sol à la construction.
         /// </remarks>
         /// <summary>
+        /// Une marche rendue symétrique : la prise et son miroir décalé d'un demi-cycle, à parts égales (paramètre
+        /// constant « Symetrie » à 0,5). Retargetées sur elle, les marches capturées boitaient — un pas de 86 cm, le
+        /// suivant de 35 — ; dans le miroir décalé, la jambe droite fait ce que la gauche faisait et inversement, et la
+        /// moyenne des deux égalise les pas sans changer l'allure.
+        /// </summary>
+        static BlendTree Symmetric(AnimatorController ac, AnimationClip clip, string name, float offset)
+        {
+            var tree = new BlendTree { name = name, blendParameter = "Symetrie", useAutomaticThresholds = false, hideFlags = HideFlags.HideInHierarchy };
+            AssetDatabase.AddObjectToAsset(tree, ac);
+            tree.AddChild(clip, 0f);
+            tree.AddChild(clip, 1f);
+            var children = tree.children;
+            children[0].cycleOffset = offset;
+            children[1].mirror = true;
+            // Un demi-cycle pour une marche régulière ; la leur ne l'est pas (un pied se pose 0,43 s après l'autre,
+            // l'autre 0,70 s après) : on cale le miroir sur les foulées de la prise.
+            children[1].cycleOffset = Mathf.Repeat(offset + CycleOffset(clip, clip, otherMirrored: true), 1f);
+            tree.children = children;
+            return tree;
+        }
+
+        /// <summary>
         /// Le décalage de cycle (0 → 1) qui aligne les foulées de <paramref name="other"/> sur celles de
         /// <paramref name="reference"/> : la phase de la foulée (pied gauche moins pied droit, le long de la marche,
         /// relatif aux hanches) échantillonnée sur l'avatar, puis la corrélation la plus forte.
         /// </summary>
-        static float CycleOffset(AnimationClip reference, AnimationClip other)
+        static float CycleOffset(AnimationClip reference, AnimationClip other, bool otherMirrored = false)
         {
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Mika/Art/Avatars/Mika.prefab");
             if (prefab == null) return 0f;
@@ -881,6 +1002,9 @@ namespace Mika.Editor.Animation
                 }
                 var r = Stride(reference);
                 var o = Stride(other);
+                // En miroir, la gauche devient la droite : la foulée (gauche moins droite) change de signe.
+                if (otherMirrored)
+                    for (var i = 0; i < n; i++) o[i] = -o[i];
                 var best = 0;
                 var bestScore = float.MinValue;
                 for (var k = 0; k < n; k++)
@@ -893,13 +1017,151 @@ namespace Mika.Editor.Animation
                         best = k;
                     }
                 }
-                Debug.Log($"[Mika] marche : « {other.name} » décalée de {best / (float)n:0.00} cycle pour suivre « {reference.name} ».");
+                Debug.Log($"[Mika] marche : « {other.name} »{(otherMirrored ? " en miroir" : "")} décalée de {best / (float)n:0.00} cycle pour suivre « {reference.name} ».");
                 return best / (float)n;
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(go);
             }
+        }
+
+        static AnimationClip _rawWalk;
+        static Dictionary<string, AnimationClip> _atelier = new Dictionary<string, AnimationClip>();
+
+        /// <summary>Décale tous les enfants d'un mélange d'une même fraction de cycle.</summary>
+        static void ShiftTree(BlendTree tree, float offset)
+        {
+            var children = tree.children;
+            for (var i = 0; i < children.Length; i++) children[i].cycleOffset = Mathf.Repeat(children[i].cycleOffset + offset, 1f);
+            tree.children = children;
+        }
+
+        /// <summary>
+        /// Les pieds à plat à l'appui. Retargetées sur elle, les marches capturées posaient un pied pointe en l'air
+        /// et l'autre sur la pointe pendant tout l'appui (de 15 à 25°, l'inverse dans la marche lente) : elle
+        /// marchait sur un talon et sur une pointe. On mesure sur son squelette l'inclinaison moyenne de chaque pied
+        /// quand il est au sol, et on décale d'autant sa courbe « Foot Up-Down » (méthode de Newton, la pente du
+        /// muscle mesurée elle aussi). La copie corrigée, dans Generated, remplace la prise.
+        /// </summary>
+        static AnimationClip FlatFeet(AnimationClip source, string name)
+        {
+            var path = $"{Generated}/{name}.anim";
+            var clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(path);
+            if (clip == null)
+            {
+                clip = new AnimationClip { name = name };
+                AssetDatabase.CreateAsset(clip, path);
+            }
+            clip.ClearCurves();
+            clip.frameRate = source.frameRate;
+            foreach (var b in AnimationUtility.GetCurveBindings(source))
+                AnimationUtility.SetEditorCurve(clip, b, AnimationUtility.GetEditorCurve(source, b));
+            AnimationUtility.SetAnimationClipSettings(clip, AnimationUtility.GetAnimationClipSettings(source));
+
+            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Mika/Art/Avatars/Mika.prefab");
+            if (prefab == null) return clip;
+            var go = UnityEngine.Object.Instantiate(prefab);
+            go.hideFlags = HideFlags.HideAndDontSave;
+            go.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
+            try
+            {
+                var a = go.GetComponentInChildren<Animator>();
+                if (a == null || !a.isHuman) return clip;
+                // L'inclinaison talon-orteils d'un pied posé à plat : celle du squelette au repos.
+                var rest = new float[2];
+                for (var s = 0; s < 2; s++) rest[s] = FootSlope(a, s);
+                var before = StanceSlope(clip, a, rest);
+                var now = before;
+                for (var iter = 0; iter < 3; iter++)
+                {
+                    if (Mathf.Abs(now[0]) < 1f && Mathf.Abs(now[1]) < 1f) break;
+                    const float probe = 0.05f;
+                    for (var s = 0; s < 2; s++) OffsetMuscle(clip, $"{Sides[s]} Foot Up-Down", probe);
+                    var probed = StanceSlope(clip, a, rest);
+                    for (var s = 0; s < 2; s++)
+                    {
+                        var gain = (probed[s] - now[s]) / probe;
+                        var step = Mathf.Abs(gain) > 1f ? Mathf.Clamp(-now[s] / gain, -0.6f, 0.6f) : 0f;
+                        OffsetMuscle(clip, $"{Sides[s]} Foot Up-Down", step - probe);
+                    }
+                    now = StanceSlope(clip, a, rest);
+                }
+                Debug.Log($"[Mika] marche « {source.name} » → {name} : pieds à l'appui {before[0]:+0;-0}°/{before[1]:+0;-0}° → {now[0]:+0;-0}°/{now[1]:+0;-0}° (gauche/droit, + pointe en bas).");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+            EditorUtility.SetDirty(clip);
+            return clip;
+        }
+
+        /// <summary>La pente cheville → orteils d'un pied (degrés, + pointe en bas) dans la pose actuelle.</summary>
+        static float FootSlope(Animator a, int side)
+        {
+            var foot = a.GetBoneTransform(side == 0 ? HumanBodyBones.LeftFoot : HumanBodyBones.RightFoot).position;
+            var toes = a.GetBoneTransform(side == 0 ? HumanBodyBones.LeftToes : HumanBodyBones.RightToes).position;
+            var d = toes - foot;
+            return Mathf.Atan2(-d.y, new Vector2(d.x, d.z).magnitude) * Mathf.Rad2Deg;
+        }
+
+        /// <summary>
+        /// L'inclinaison moyenne de chaque pied (degrés par rapport au pied posé à plat, + pointe en bas) pendant
+        /// qu'il est d'appui : bas, et presque immobile au sol (la pose de <c>SampleAnimation</c> garde le
+        /// déplacement de la prise).
+        /// </summary>
+        static float[] StanceSlope(AnimationClip clip, Animator a, float[] rest)
+        {
+            const int n = 60;
+            var dt = clip.length / n;
+            var height = new float[2, n + 1];
+            var along = new float[2, n + 1];
+            var slope = new float[2, n + 1];
+            var hips = new float[n + 1];
+            for (var i = 0; i <= n; i++)
+            {
+                clip.SampleAnimation(a.gameObject, i * dt);
+                var fwd = a.transform.forward;
+                hips[i] = Vector3.Dot(a.GetBoneTransform(HumanBodyBones.Hips).position, fwd);
+                for (var s = 0; s < 2; s++)
+                {
+                    var p = a.GetBoneTransform(s == 0 ? HumanBodyBones.LeftFoot : HumanBodyBones.RightFoot).position;
+                    height[s, i] = p.y;
+                    along[s, i] = Vector3.Dot(p, fwd);
+                    slope[s, i] = FootSlope(a, s) - rest[s];
+                }
+            }
+            var stride = Mathf.Abs(hips[n] - hips[0]) / clip.length;
+            var result = new float[2];
+            for (var s = 0; s < 2; s++)
+            {
+                var low = float.MaxValue;
+                for (var i = 0; i <= n; i++) low = Mathf.Min(low, height[s, i]);
+                var sum = 0f;
+                var count = 0;
+                for (var i = 1; i < n; i++)
+                {
+                    var v = (along[s, i + 1] - along[s, i - 1]) / (2f * dt);
+                    if (height[s, i] > low + 0.03f || Mathf.Abs(v) > 0.4f * stride) continue;
+                    sum += slope[s, i];
+                    count++;
+                }
+                result[s] = count > 0 ? sum / count : 0f;
+            }
+            return result;
+        }
+
+        /// <summary>Décale toute la courbe d'un muscle (les tangentes suivent).</summary>
+        static void OffsetMuscle(AnimationClip clip, string muscle, float delta)
+        {
+            var binding = EditorCurveBinding.FloatCurve("", typeof(Animator), muscle);
+            var curve = AnimationUtility.GetEditorCurve(clip, binding);
+            if (curve == null) return;
+            var keys = curve.keys;
+            for (var i = 0; i < keys.Length; i++) keys[i].value += delta;
+            curve.keys = keys;
+            AnimationUtility.SetEditorCurve(clip, binding, curve);
         }
 
         /// <summary>

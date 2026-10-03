@@ -407,9 +407,28 @@ def test_she_asks_how_it_went_once_it_is_over_but_never_betrays_who_told_her(tmp
 
 @pytest.mark.parametrize("text, short", [
     ("salut !", False), ("re", False), ("bonne nuit", False), ("coucou toi", False),  # courts par nature
-    ("ok.", True), ("bof", True),  # contre-exemples : là, la brièveté dit quelque chose
+    ("salut Mikachu", False), ("hey Mika !", False),  # un bonjour et un nom (sonde du 2026-10-03)
+    ("ok.", True), ("bof", True), ("laisse tomber", True),  # contre-exemples : là, la brièveté dit quelque chose
 ])
 def test_a_greeting_is_short_by_nature_not_cold(text, short):
     """« salut ! » n'est pas « un message très court » : l'indice faisait prêter de la froideur à chaque
     salutation du soir (audit HUM-18)."""
     assert ("un message très court" in measure(text).cues) is short
+
+
+def test_three_words_answers_in_a_row_tell_her_to_keep_it_short(tmp_path):
+    """« ouais », « bof », « je sais pas » : la personne n'a pas envie de parler — elle fait court, sans questions ni
+    idées pour se changer les idées (sonde réelle du 2026-10-03 : de longs messages pleins de propositions à Sam en
+    deuil). Contre-exemple : une vraie phrase rompt la série."""
+    async def scenario(kernel, script, out):
+        await connect(kernel, "user_1", "Sam")
+        await befriend(kernel, "user_1", social_c.FRIEND)
+        await chat(kernel, "user_1", ["salut", "ouais", "bof", "je sais pas"])
+        await chat(kernel, "user_1", ["en fait j'ai passé une journée horrible au boulot, mon chef m'a hurlé dessus"])
+        return None
+
+    _, llm = run(tmp_path, scenario, with_llm=True)
+    prompts = [c.messages[-1].content for c in llm.calls if c.role == "reply"]
+    assert "ne te répond que par quelques mots" in prompts[3]
+    assert "ne te répond que par quelques mots" not in prompts[2], "deux mots courts ne font pas une série"
+    assert "ne te répond que par quelques mots" not in prompts[4], "contre-exemple : une vraie phrase"

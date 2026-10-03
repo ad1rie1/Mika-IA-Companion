@@ -127,11 +127,20 @@ def ack(client_msg_id: str, status: str, rejected: Sequence[dict[str, str]] = ()
     return frame
 
 
-def history_item(row: HistoryRow) -> dict[str, Any]:
+def _shown_attachments(raw: str) -> list[dict[str, str]]:
+    """Les pièces jointes d'un message telles que l'écran les montre : un nom et une sorte, jamais ce qu'elle en a
+    perçu (le contenu d'un document, une description : c'est pour son prompt, pas pour la bulle)."""
     try:
-        attachments = json.loads(row.attachments) if row.attachments else []
+        items = json.loads(raw) if raw else []
     except ValueError:
-        attachments = []
+        return []
+    if not isinstance(items, list):
+        return []
+    return [{"name": sanitize_filename(a.get("name")), "kind": str(a.get("kind") or "file")[:10]}
+            for a in items if isinstance(a, dict)]
+
+
+def history_item(row: HistoryRow) -> dict[str, Any]:
     emotion = emotion_of(row.emotion)
     return {
         "id": row.id,
@@ -141,17 +150,24 @@ def history_item(row: HistoryRow) -> dict[str, Any]:
         "source": row.source,
         "emotion": emotion.value if emotion else "",
         "emotion_intensity": float(row.emotion_intensity or 0.0),
-        "attachments": attachments if isinstance(attachments, list) else [],
+        "attachments": _shown_attachments(row.attachments),
     }
 
 
-def history(mode: str, rows: Sequence[HistoryRow], *, after_id: int = 0, truncated: bool = False) -> dict[str, Any]:
+def history(mode: str, rows: Sequence[HistoryRow], *, after_id: int = 0, truncated: bool = False,
+            life: str = "", reset: bool = False) -> dict[str, Any]:
+    """Un morceau du fil. ``life`` : l'empreinte de sa vie (le même journal depuis sa genèse) — un navigateur qui
+    garde le fil d'une autre vie (l'ancien moteur, un autre dossier de données) le vide avant de fusionner.
+    ``reset`` : le curseur du client dépassait la tête de ce fil (une vie restaurée plus ancienne, un fil oublié,
+    des identifiants d'ailleurs) ; ce fil initial remplace ce qu'il montre au lieu de s'y ajouter."""
     return {
         "type": "history",
         "mode": mode,
         "messages": [history_item(r) for r in rows],
         "last_id": rows[-1].id if rows else after_id,
         "truncated": bool(truncated),
+        "life": life,
+        "reset": bool(reset),
     }
 
 
@@ -282,53 +298,110 @@ def inner_state_update(frame: Frame, handle: str | None, panel: dict[str, Any] |
 
 FAILED_OUTCOMES = frozenset({"failed", "timeout"})
 ABSTAINED_OUTCOME = "abstained"
-#: le statut d'``ack`` qui dit qu'une question acceptée n'aura pas de réponse : le client
-#: passe la bulle en échec, avec sa raison (« Mika est saturée, réessaie dans un instant »)
-REPLY_FAILED_STATUS = "overloaded"
-#: …et celui d'une question abandonnée parce que trop vieille (une reprise au démarrage, des heures
-#: plus tard) : ce n'est pas une saturation, « trop tard pour répondre — repose ta question »
-TOO_LATE_STATUS = "too_late"
+#: le statut du second ``ack`` qui dit qu'une question **reçue** n'aura pas de réponse. Ce n'est pas un refus :
+#: le message est dans son fil, la bulle reste « envoyée » ; le client pose une note dessous (« Mika n'a pas pu
+#: répondre — réessaie »). ``overloaded`` reste ce qu'il dit : une file pleine, un message **non reçu**.
+NO_REPLY_STATUS = "no_reply"
+#: pourquoi, en un mot (``ack.reason``) — pour une note courte, et la cause en clair pour une opératrice
+NO_MODEL = "no_model"  # aucun modèle ne sert « répondre »
+UNREACHABLE = "unreachable"  # le fournisseur ne répond pas (connexion)
+TIMEOUT = "timeout"  # délai dépassé
+TOO_LATE_REASON = "too_late"  # une question reprise trop tard (au démarrage, des heures après)
+ERROR = "error"  # autre chose
 UNCONFIGURED = "UnconfiguredRole"
+#: où une opératrice répare un modèle absent ou injoignable (la console, pas la ligne de commande)
+PROVIDERS_HREF = "/inspecteur/reglages/fournisseurs"
+_OPERATOR_DETAIL = {
+    NO_MODEL: "aucun modèle ne sert encore à répondre : déclare un fournisseur dans la console",
+    UNREACHABLE: "le fournisseur du modèle ne répond pas (connexion impossible)",
+    TIMEOUT: "le modèle a mis trop longtemps à répondre (délai dépassé)",
+    TOO_LATE_REASON: "la question a attendu trop longtemps (une reprise après un arrêt)",
+}
+_OPERATOR_HREF = {NO_MODEL: PROVIDERS_HREF, UNREACHABLE: PROVIDERS_HREF}
+#: au-delà, le détail technique d'une erreur inconnue est coupé (une opératrice le lit en entier dans la console)
+DETAIL_MAX = 200
 
 
-def fallback_text(detail: str) -> str:
-    if UNCONFIGURED in detail:
-        return ("Je n'ai pas encore de modèle pour répondre : il faut en configurer un "
-                "(python -m mika llm …).")
-    return "Désolée, je n'arrive pas à te répondre là tout de suite… Réessaie dans un instant ?"
+def no_reply_reason(outcome: str, detail: str) -> str:
+    """La cause d'une réponse qui ne viendra pas, lue dans l'issue de l'épisode et son détail technique
+    (« UnconfiguredRole: … », « ConnectionError: Failed to connect… », « TimeoutError() », « timeout »)."""
+    text = (detail or "").strip()
+    if text.startswith(TOO_LATE):
+        return TOO_LATE_REASON
+    head = re.split(r"[:(]", text, maxsplit=1)[0].strip()
+    if UNCONFIGURED in head or UNCONFIGURED in text:
+        return NO_MODEL
+    if outcome == TIMEOUT or text == TIMEOUT or "Timeout" in head:
+        return TIMEOUT
+    if "Connect" in head or "Failed to connect" in text or "Connection refused" in text:
+        return UNREACHABLE
+    return ERROR
 
 
-def fallback_speech(handle: str, detail: str, *, user_message_id: int | None, client_msg_id: str | None,
-                    persona: str = voice.SPEAKING) -> dict[str, Any]:
+def operator_detail(reason: str, detail: str) -> str:
+    """La cause en clair, pour une opératrice (jamais pour les autres : c'est l'affaire de qui administre)."""
+    known = _OPERATOR_DETAIL.get(reason)
+    if known:
+        return known
+    text = " ".join((detail or "").split())
+    return f"erreur : {text[:DETAIL_MAX]}" if text else "erreur inconnue"
+
+
+def no_reply_ack(client_msg_id: str, reason: str, detail: str = "", *, operator: bool = False) -> dict[str, Any]:
+    """Le second ``ack`` : sa question est reçue, la réponse ne viendra pas. Une connexion opératrice reçoit en plus
+    la cause en clair (``detail``) et où la réparer (``href``, une page de la console) — une note de la machine,
+    jamais une phrase de Mika."""
+    frame = ack(client_msg_id, NO_REPLY_STATUS)
+    frame["reason"] = reason
+    if operator:
+        frame["detail"] = operator_detail(reason, detail)
+        if reason in _OPERATOR_HREF:
+            frame["href"] = _OPERATOR_HREF[reason]
+    return frame
+
+
+def fallback_text(reason: str, *, operator: bool = False) -> str:
+    """Pour un client qui n'envoie pas d'identifiant de message (il ne lit pas le second ``ack``) : une phrase
+    simple, la même pour tous ; une opératrice apprend en plus où réparer. Jamais une commande d'administration
+    dite à quelqu'un qui ne peut rien y faire."""
+    if reason == TOO_LATE_REASON:
+        text = "Désolée, je n'ai pas pu te répondre à temps… Si c'est encore d'actualité, redis-le-moi ?"
+    else:
+        text = "Désolée, je n'arrive pas à te répondre là tout de suite… Réessaie dans un instant ?"
+    if operator and reason in _OPERATOR_HREF:
+        text += f" ({operator_detail(reason, '')} : {PROVIDERS_HREF})"
+    return text
+
+
+def fallback_speech(handle: str, reason: str, *, user_message_id: int | None, client_msg_id: str | None,
+                    operator: bool = False) -> dict[str, Any]:
     """Une réponse ratée se dit, sans voix et sans émotion : ce n'est pas elle
-    qui parle, c'est la machine. Rien n'est journalisé (``message_id`` nul :
-    le curseur du client n'avance pas). Avec un ``client_msg_id``, l'échec se dit
-    plutôt par un second ``ack`` (``reply_failed_frames``) : une bulle sans
-    identifiant et sans pensée restait épinglée en bas du fil pour toujours."""
+    qui parle, c'est la machine (``source`` « error »). Rien n'est journalisé
+    (``message_id`` nul : le curseur du client n'avance pas). Avec un
+    ``client_msg_id``, l'échec se dit plutôt par un second ``ack``
+    (``reply_failed_frames``) : une bulle sans identifiant restait épinglée en bas
+    du fil pour toujours."""
     return {
-        "type": "speech", "text": fallback_text(detail), "emotion": Emotion.NEUTRAL.value, "emotion_intensity": 0.0,
-        "emotion_state": {}, "emotion_blend": [], "source": "error", "person_id": handle, "speak": False,
-        "voice_reason": "error_fallback_muted", "voice_persona": persona,
-        "voice_profile": voice.profile_for(persona).to_dict(), "message_id": None,
-        "user_message_id": None if persona == voice.INNER else user_message_id,
-        "client_msg_id": None if persona == voice.INNER else client_msg_id,
+        "type": "speech", "text": fallback_text(reason, operator=operator), "emotion": Emotion.NEUTRAL.value,
+        "emotion_intensity": 0.0, "emotion_state": {}, "emotion_blend": [], "source": "error", "person_id": handle,
+        "speak": False, "voice_reason": "error_fallback_muted", "voice_persona": voice.SPEAKING,
+        "voice_profile": voice.profile_for(voice.SPEAKING).to_dict(), "message_id": None,
+        "user_message_id": user_message_id, "client_msg_id": client_msg_id,
     }
 
 
-def reply_failed_frames(handle: str, detail: str, face: affect_c.Face, *, user_message_id: int | None,
-                        client_msg_id: str | None) -> list[dict[str, Any]]:
+def reply_failed_frames(handle: str, outcome: str, detail: str, face: affect_c.Face, *,
+                        user_message_id: int | None, client_msg_id: str | None,
+                        operator: bool = False) -> list[dict[str, Any]]:
     """Ce que voit l'écran quand la réponse ne viendra pas : d'abord une trame sans
     texte (« Mika écrit… » disparaît, le regard « je réfléchis » cesse, la bulle se
-    rattache à son message), puis un second ``ack`` qui passe la bulle en échec
-    avec sa raison. Une installation sans modèle le dit en plus, en note (une
-    pensée : rangée à sa place, jamais épinglée). Un client sans identifiant de
-    message reçoit l'ancienne trame de repli."""
+    rattache à son message), puis un second ``ack`` ``no_reply`` avec sa cause en un
+    mot : la bulle reste envoyée (elle l'est), une note dessous dit que la réponse ne
+    viendra pas. Une connexion opératrice lit en plus la cause en clair et où la
+    réparer. Un client sans identifiant de message reçoit l'ancienne trame de repli."""
+    reason = no_reply_reason(outcome, detail)
     if not client_msg_id:
-        return [fallback_speech(handle, detail, user_message_id=user_message_id, client_msg_id=None)]
-    status = TOO_LATE_STATUS if detail.startswith(TOO_LATE) else REPLY_FAILED_STATUS
-    frames = [silence(handle, face, user_message_id=user_message_id, client_msg_id=client_msg_id),
-              ack(client_msg_id, status)]
-    if UNCONFIGURED in detail:
-        frames.append(fallback_speech(handle, detail, user_message_id=user_message_id, client_msg_id=None,
-                                      persona=voice.INNER))
-    return frames
+        return [fallback_speech(handle, reason, user_message_id=user_message_id, client_msg_id=None,
+                                operator=operator)]
+    return [silence(handle, face, user_message_id=user_message_id, client_msg_id=client_msg_id),
+            no_reply_ack(client_msg_id, reason, detail, operator=operator)]

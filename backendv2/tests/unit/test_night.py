@@ -30,11 +30,15 @@ from mika.contracts import goals as goals_c
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
+from mika.contracts import world as w
 from mika.faculties.body import BodyParams
 from mika.faculties.body import sleep as sl
+from mika.faculties.goals.faculty import GoalsParams
 from mika.faculties.self import SelfParams, days
 from mika.faculties.self.night import CYCLE, JournalArgs, classify, recall_chance, self_journal, vividness_of
 from mika.faculties.self.records import Dream
+from mika.faculties.world import plan as world_plan
+from mika.faculties.world import timing as world_timing
 from mika.kernel.clock import DAY, MINUTE, US, instant
 from mika.kernel.codec import digest
 from mika.kernel.events import Content, Origin, VoiceProvenance
@@ -50,7 +54,6 @@ from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect,
 class Script:
     def __init__(self) -> None:
         self.journal = "J'ai parlé avec Alice de son chagrin, et avec Bob de cuisine."
-        self.shareable = "J'ai surtout rangé mon bureau et écouté de la musique."
         self.dream = "Je vole au-dessus d'un marché où Alice vend des nuages."
         self.tag = "[EMOTION:happy:0.5]"
 
@@ -58,7 +61,7 @@ class Script:
         if req.role in ("extract", "profile", "compact"):
             return LLMResponse("{}")
         if req.role == "journal":
-            return LLMResponse(self.shareable if req.meta.get("purpose") == "shareable" else self.journal)
+            return LLMResponse(self.journal)
         if req.role == "dream":
             return LLMResponse(self.dream)
         if req.role in ("murmur", "narrative"):
@@ -69,6 +72,14 @@ class Script:
 def events(kernel, name):
     mind = kernel.mind
     return [mind.decode(e) for e in mind.store.read() if e.type == name]
+
+
+def told_texts(kernel) -> dict[str, str]:
+    """Ce qu'elle raconterait de chaque journée à n'importe qui (``self.journaled.shareable``), par journée."""
+    journals = events(kernel, self_c.JOURNALED.name)
+    refs = [j.data.shareable.ref for j in journals if j.data.shareable is not None]
+    texts = kernel.mind.store.content(refs)
+    return {j.data.day: texts.get(j.data.shareable.ref, "") for j in journals if j.data.shareable is not None}
 
 
 async def until(kernel, t):
@@ -143,9 +154,11 @@ def test_a_night_missed_with_the_server_off_is_written_in_the_morning(tmp_path):
 
 def test_yesterdays_thread_tells_others_only_her_own_day(tmp_path):
     """Son journal intime parle de tout le monde : devant quelqu'un qui n'en est pas le seul concerné, elle a en
-    tête sa journée à elle, écrite d'après des notes où personne d'autre n'apparaît — jamais ce qu'Alice lui a
-    dit, même prénom masqué (sonde réelle du 2026-10-02 : « il m'a demandé de ne rien dire à Chloé », lu à Chloé).
-    Contre-exemple : un jour où seule Alice lui a parlé, Alice retrouve le journal entier."""
+    tête sa journée à elle — ce qu'elle peut en raconter à n'importe qui, rendu d'après des faits où personne
+    d'autre n'apparaît : jamais ce qu'Alice lui a dit, même prénom masqué (sonde réelle du 2026-10-02 : « il m'a
+    demandé de ne rien dire à Chloé », lu à Chloé). Et ce n'est plus un modèle qui l'écrit : un appel par nuit, le
+    journal intime (ADR 0053). Contre-exemple : un jour où seule Alice lui a parlé, Alice retrouve le journal
+    entier."""
     async def scenario(kernel):
         await connect(kernel, "user_1", "Alice")
         await (await kernel.perceive(said("user_1", "je suis triste ce soir"))).reply
@@ -158,17 +171,127 @@ def test_yesterdays_thread_tells_others_only_her_own_day(tmp_path):
         await (await kernel.perceive(said("user_1", "re ! ça va mieux"))).reply  # ce jour-là, seule Alice
         await until(kernel, at_paris(2026, 10, 1, 10, 0))
         await (await kernel.perceive(said("user_1", "coucou"))).reply
+        return told_texts(kernel)
 
-    _, llm = build_run(tmp_path, scenario)
+    journals, llm = build_run(tmp_path, scenario)
     replies = [(c.meta.get("target"), c.messages[-1].content) for c in llm.calls if c.role == "reply"]
-    shareable_notes = [c.messages[-1].content for c in llm.calls if c.meta.get("purpose") == "shareable"]
-    assert shareable_notes and all("Alice" not in n and "Bob" not in n and "triste" not in n and "cuisine" not in n
-                                   for n in shareable_notes), "ses notes à raconter ne contiennent personne"
+    told = journals["2026-09-28"]
+    assert told.startswith("Tu as discuté avec deux personnes (")
+    assert all(w not in told for w in ("Alice", "Bob", "triste", "cuisine")), "ce qu'elle raconte ne nomme personne"
+    assert len([c for c in llm.calls if c.role == "journal"]) == len(journals)  # un appel par nuit : l'intime
     morning = {who: text for who, text in replies[2:4]}
     for who in ("user_1", "user_3"):
-        assert "rangé mon bureau" in morning[who], who  # sa journée à elle…
+        assert "Tu as discuté avec deux personnes" in morning[who], who  # sa journée à elle…
         assert "chagrin" not in morning[who] and "cuisine" not in morning[who], who  # …jamais celle des autres
     assert "Alice de son chagrin" in replies[-1][1], "contre-exemple : seule concernée, Alice relit le journal"
+
+
+def test_a_heavy_day_is_told_vaguely_but_truly(tmp_path):
+    """Ce qu'elle raconte à n'importe qui d'une journée lourde (le chat d'un ami est mort, elle a été triste en lui
+    répondant) : « un peu lourde », sans dire pourquoi — ni « rien de spécial », ni une activité qui n'a pas eu lieu,
+    ni personne (sonde réelle du 2026-10-03 : « rien de spécial, des échanges tranquilles » le jour où Pixel est
+    mort ; « j'ai bricolé un petit overlay pour mon stream », inventé). Contre-exemples : une journée légère est
+    « bonne » ; une journée vide est calme, et se dit comme telle."""
+    script = Script()
+    script.tag = "[EMOTION:sad:0.8]"
+
+    async def scenario(kernel):
+        await kernel.set_params("goals", GoalsParams(musings_per_day=0))  # rien d'autre n'arrive de son côté
+        await befriend(kernel, "user_1", "close")
+        await connect(kernel, "user_1", "Sam")
+        for text in ["Pixel est parti cet après-midi", "on l'a endormi. j'étais avec lui jusqu'au bout",
+                     "je vais essayer de dormir"]:
+            await (await kernel.perceive(said("user_1", text))).reply
+            await asyncio.sleep(2 * MINUTE / US)
+        await until(kernel, at_paris(2026, 9, 29, 5, 30))
+        script.tag = "[EMOTION:happy:0.7]"  # le mardi, tout ce qu'elle dit est léger
+        await until(kernel, at_paris(2026, 9, 29, 18, 0))
+        for text in ["coucou ! j'ai eu mon permis !!", "trop contente, on fête ça ce soir"]:
+            await (await kernel.perceive(said("user_1", text))).reply
+            await asyncio.sleep(2 * MINUTE / US)
+        await until(kernel, at_paris(2026, 10, 1, 10, 0))  # le mercredi, personne
+        await connect(kernel, "user_2", "Léo")
+        await (await kernel.perceive(said("user_2", "salut, t'as fait quoi lundi ?"))).reply
+        return told_texts(kernel)
+
+    told, llm = build_run(tmp_path, scenario, start=at_paris(2026, 9, 28, 18, 0), script=script)
+    monday, tuesday, wednesday = told["2026-09-28"], told["2026-09-29"], told["2026-09-30"]
+    assert "Une journée un peu lourde." in monday
+    assert "rien de spécial" not in monday and "rien de particulier" not in monday
+    assert all(w not in monday for w in ("Sam", "Pixel", "endormi", "triste")), "ni qui, ni quoi, ni pourquoi"
+    assert "de ton côté" not in monday and "vagabonder" not in monday, "aucune activité qui n'a pas eu lieu"
+    assert "Une bonne journée." in tuesday and "lourde" not in tuesday
+    assert wednesday == "Tu n'as parlé avec personne. Une journée calme, sans rien de particulier."
+    to_leo = next(c.messages[-1].content for c in llm.calls if c.meta.get("target") == "user_2")
+    assert "Pixel" not in to_leo and "Sam" not in to_leo
+
+
+def test_her_own_day_tells_a_daydream_and_keeps_others_out(tmp_path):
+    """Une journée où elle a rêvassé : ce qu'elle en raconte le dit (une rêverie, par son titre) — c'est sa vie à
+    elle. Contre-exemple : ce à quoi elle a repensé pour quelqu'un, le même jour, n'y est pas (ça concerne Sam) ;
+    son journal intime, lui, le sait."""
+    title = "Rêvasser un peu autour du café"
+    reflection = "Repenser à ce que « Sam » m'a confié"
+
+    async def scenario(kernel):
+        await kernel.set_params("goals", GoalsParams(musings_per_day=0))
+        await connect(kernel, "user_1", "Sam")
+        await (await kernel.perceive(said("user_1", "salut ! je file au boulot"))).reply
+        mused = Content.of(title, level=0)
+        mine = Content.of(reflection, level=2)
+        await kernel.mind.append([
+            goals_c.GOAL_CLOSED.draft(goal=1, status=goals_c.ACHIEVED, kind=goals_c.EXPLORATION,
+                                      authority=goals_c.SELF, title=mused, reason=goals_c.MUSED, sensitivity=0),
+            goals_c.GOAL_CLOSED.draft(goal=2, status=goals_c.ACHIEVED, kind=goals_c.EXPLORATION,
+                                      authority=goals_c.SELF, title=mine, owner="user_1", about=("user_1",),
+                                      sensitivity=2)], emitter="goals", correlation="buts", origin=Origin.GENESIS)
+        await until(kernel, at_paris(2026, 9, 29, 10, 0))
+        return told_texts(kernel)
+
+    told, llm = build_run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0))
+    monday = told["2026-09-28"]
+    assert f"« {title} »" in monday and "rêverie" in monday
+    assert "Sam" not in monday and "Repenser" not in monday
+    notes = next(c.messages[-1].content for c in llm.calls if c.role == "journal")
+    assert reflection in notes  # son journal intime, lui, sait ce qu'elle a fait pour Sam
+
+
+async def intend(kernel, steps_of):
+    """Elle se met à faire quelque chose dans sa chambre (comme si elle l'avait décidé)."""
+    frame = kernel.mind.frame()
+    s = frame.state("world")
+    intent = world_plan.intent_of(w.MIKA, steps_of(s), frame.now, world_timing(None),
+                                  w.Cause(source=w.Source.MIKA, actor=w.MIKA), f"i-{frame.now}")
+    await kernel.mind.append([w.INTENDED.draft(intent=intent)], emitter="world", correlation="test:chambre",
+                             origin=Origin.EXTERNAL)
+
+
+def interacting(obj: str, action: str):
+    return lambda s: world_plan.plan_interact(s.definition, world_timing(None), s.actors, s.objects, w.MIKA, obj,
+                                              action)
+
+
+def test_her_day_tells_what_she_did_in_her_room(tmp_path):
+    """Un après-midi à dessiner à son bureau : ce qu'elle raconte de sa journée le dit, avec le moment (le fait
+    ``world.lived``), et son journal intime le sait — de quoi raconter sa journée sans l'inventer (sonde réelle du
+    2026-10-03 : un modèle comblait avec un stream qu'elle n'a jamais fait). Contre-exemple : une minute à regarder
+    dehors ne se raconte pas."""
+
+    async def scenario(kernel):
+        await until(kernel, at_paris(2026, 9, 28, 15, 0))
+        await intend(kernel, interacting("writing_desk", "dessiner"))
+        await until(kernel, at_paris(2026, 9, 28, 16, 30))
+        await intend(kernel, interacting("window_pane", "regarder_dehors"))
+        await until(kernel, at_paris(2026, 9, 29, 10, 0))
+        return told_texts(kernel)
+
+    told, llm = build_run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0))
+    monday = told["2026-09-28"]
+    assert "Dans ta chambre, tu as pris le temps de dessiner (ton bureau, l'après-midi, un long moment)." in monday, \
+        monday
+    assert "regarder dehors" not in monday, monday
+    notes = next(c.messages[-1].content for c in llm.calls if c.role == "journal")
+    assert "de dessiner (ton bureau" in notes
 
 
 VOICE = VoiceProvenance(call_id="genese", persona_hash="-", role="dream", model="-")
@@ -299,8 +422,11 @@ def test_what_the_night_leaves_is_felt_on_waking_not_at_three(tmp_path):
         after = [v for t, v in samples if at <= t <= at + 2 * MINUTE]
         return after[-1] - before[0]
 
-    assert jump(woke[0].at) > 0.02  # au réveil, le soulagement se sent
-    assert abs(jump(digested[0].at)) < 0.01  # pas en pleine nuit
+    # au réveil, le soulagement se sent — une pensée apaisée (0,1), moins la teinte d'un rêve mélancolique oublié ;
+    # avant l'ADR 0053, une seconde pensée (« Je bloque sur : Repenser à ce qu'Alice m'a confié », une réflexion
+    # que le modèle laissait vide) s'apaisait aussi, et le saut dépassait 0,02
+    assert jump(woke[0].at) > 0.005
+    assert abs(jump(digested[0].at)) < 0.001  # pas en pleine nuit
 
 
 def test_yesterday_is_only_called_yesterday_when_it_was(tmp_path):
@@ -391,7 +517,10 @@ def test_a_day_with_answers_says_who_spoke_and_when(tmp_path):
     _, llm = build_run(tmp_path, scenario)
     notes = next(c.messages[-1].content for c in llm.calls if c.role == "journal")
     assert "Avec « Adrien » (le soir) : on t'a dit, entre autres, « salut mika, je suis crevé »." in notes
-    assert "Tu lui as répondu, entre autres, « d'accord »." in notes
+    # ce qu'elle a répondu, et sur quel ton — jamais ses phrases, qu'un modèle recopiait telles quelles (sonde réelle
+    # du 2026-10-03 : « Hey Sam ! Je viens de penser à toi… prendre… ») ; ce qu'on lui a dit, oui (ci-dessus)
+    assert "Tu lui as répondu, plutôt contente." in notes
+    assert "d'accord" not in notes
 
 
 def _goal(gid: int, title: str, status: str):

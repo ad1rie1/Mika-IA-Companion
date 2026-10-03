@@ -13,6 +13,16 @@ dont elle s'est servie : être montré date seulement l'anti-répétition
 (au moins deux radicaux en commun) compte comme un rappel, qui le fait durer.
 
 L'oubli d'une personne efface ses lignes : ce qui la concerne, et ce qu'elle a confié.
+Une projection reconstruite (sa version change) ne les fait pas revenir : un
+élément dont le texte a été oublié ne se recopie pas.
+
+**Tenir des années** (ADR 0059) : ``memory_items`` est indexée par sorte,
+statut et naissance ; ``memory_about`` dit qui concerne chaque élément, une
+personne par ligne (« ce qu'elle sait d'Alice » ne parcourt plus toute la
+mémoire) ; ``memory_chunks`` est indexée par personne et par salon, dans le
+temps (« ce que je t'ai dit lundi » se lit sur l'intervalle, jamais par la
+liste de tous ses échanges) ; ``memory_forgets`` compte les oublis, pour que
+l'index des vecteurs se rapproche de ce qui reste sans tout relire.
 """
 
 from __future__ import annotations
@@ -32,8 +42,12 @@ from mika.vocab.words import stems
 
 ITEM_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",
                 "emotion", "born_at", "touched_at", "recalled_at", "recalls", "status", "replaces", "recipient",
-                "due", "sources", "told_by", "heard_by", "secret", "informants", "about_self", "shown_at")
+                "due", "sources", "told_by", "heard_by", "secret", "informants", "about_self", "shown_at", "between_us")
 CHUNK_TEXT_MAX = 600
+#: élément → la référence de son texte (``Content.ref``)
+REFS_TABLE = "memory_refs"
+#: les événements qui créent un élément (et portent son texte)
+_CREATES = frozenset({c.REMEMBERED.name, c.BELIEVED.name, c.PROMISE_NOTICED.name, c.EVENT_NOTED.name})
 #: deux radicaux en commun entre ce qu'elle a dit et un élément montré : elle s'en est servie
 USED_STEMS = 2
 
@@ -56,6 +70,16 @@ def informants_of(source: str | None, told_by: Sequence[str]) -> tuple[str, ...]
     return (source,) if source else tuple(sorted(set(told_by)))
 
 
+def forgotten(text: Any) -> bool:
+    """Un texte oublié (relu après l'oubli de qui il concerne) : sa référence reste, plus son texte."""
+    return text is not None and text.ref is not None and text.text is None
+
+
+def _about_rows(sql: Sql, table: str, item: int, keys: Iterable[str]) -> None:
+    sql.executemany(f"INSERT OR IGNORE INTO {table}(item, person) VALUES(?,?)",
+                    [(item, k) for k in sorted({k for k in keys if k})])
+
+
 def used(item_text: str, said: str) -> bool:
     """Elle s'en est servie : ce qu'elle a dit reprend l'élément (radicaux communs)."""
     return len(stems(item_text) & stems(said)) >= USED_STEMS
@@ -71,26 +95,44 @@ class Items:
             "status TEXT NOT NULL, replaces INTEGER, recipient TEXT, due INTEGER, sources TEXT NOT NULL, "
             "told_by TEXT NOT NULL DEFAULT '[]', heard_by TEXT NOT NULL DEFAULT '[]', "
             "secret INTEGER NOT NULL DEFAULT 0, informants TEXT NOT NULL DEFAULT '[]', "
-            "about_self INTEGER NOT NULL DEFAULT 0, shown_at INTEGER NOT NULL DEFAULT 0)"
+            "about_self INTEGER NOT NULL DEFAULT 0, shown_at INTEGER NOT NULL DEFAULT 0, "
+            "between_us INTEGER NOT NULL DEFAULT 0)"
         )
+        t, about = f"{c.ITEMS_TABLE}{sfx}", f"{c.ABOUT_TABLE}{sfx}"
+        sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_kind ON {t}(kind, status, born_at)")
+        sql.execute(f"CREATE TABLE IF NOT EXISTS {about}(item INTEGER NOT NULL, person TEXT NOT NULL, "
+                    "PRIMARY KEY(item, person)) WITHOUT ROWID")
+        sql.execute(f"CREATE INDEX IF NOT EXISTS {about}_person ON {about}(person, item)")
+        sql.execute(f"CREATE TABLE IF NOT EXISTS {REFS_TABLE}{sfx}(item INTEGER PRIMARY KEY, ref TEXT NOT NULL)")
+        sql.execute(f"CREATE TABLE IF NOT EXISTS {c.FORGETS_TABLE}{sfx}(n INTEGER NOT NULL)")
+        if not sql.query(f"SELECT 1 FROM {c.FORGETS_TABLE}{sfx}"):
+            sql.execute(f"INSERT INTO {c.FORGETS_TABLE}{sfx}(n) VALUES(0)")
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"DROP TABLE IF EXISTS {c.ITEMS_TABLE}{sfx}")
+        for table in (c.ITEMS_TABLE, c.ABOUT_TABLE, c.FORGETS_TABLE, REFS_TABLE):
+            sql.execute(f"DROP TABLE IF EXISTS {table}{sfx}")
 
     def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
-        t = f"{c.ITEMS_TABLE}{sfx}"
+        t, about = f"{c.ITEMS_TABLE}{sfx}", f"{c.ABOUT_TABLE}{sfx}"
         cols = ",".join(ITEM_COLUMNS)
         marks = ",".join("?" * len(ITEM_COLUMNS))
 
         def insert(row: dict[str, Any]) -> None:
             full = {"confidence": None, "origin": None, "source": None, "emotion": None, "recalled_at": 0,
                     "recalls": 0, "replaces": None, "recipient": None, "due": None, "told_by": "[]",
-                    "heard_by": "[]", "secret": 0, "informants": "[]", "about_self": 0, "shown_at": 0, **row}
+                    "heard_by": "[]", "secret": 0, "informants": "[]", "about_self": 0, "shown_at": 0, "between_us": 0,
+                    **row}
             sql.execute(f"INSERT OR REPLACE INTO {t}({cols}) VALUES({marks})", tuple(full[k] for k in ITEM_COLUMNS))
+            _about_rows(sql, about, int(full["id"]), _loads(full["about"]))
 
         for e in events:
             d = e.data
             name = e.type.name
+            if name in _CREATES and forgotten(d.text):
+                continue  # relu après un oubli (une reconstruction) : ce qui a été oublié ne revient pas
+            if name in _CREATES and d.text is not None and d.text.ref:
+                # la référence de son texte : l'oubli d'une personne rattachée depuis (un renfort) l'atteint aussi
+                sql.execute(f"INSERT OR REPLACE INTO {REFS_TABLE}{sfx}(item, ref) VALUES(?,?)", (e.seq, d.text.ref))
             if name == c.REMEMBERED.name:
                 insert({"id": e.seq, "kind": c.SOUVENIR, "text": d.text.text or "", "about": _keys(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance, "emotion": d.emotion,
@@ -104,7 +146,7 @@ class Items:
                         "told_by": _keys(d.told_by), "heard_by": _keys(d.heard_by), "secret": int(d.secret),
                         "informants": _keys(informants_of(d.source, d.told_by)),
                         # 1 : ce qu'elle raconte d'elle, qui s'efface ; 2 : ce qui la définit (un goût, un avis), qui tient
-                        "about_self": 2 if d.durable else int(d.about_self)})
+                        "about_self": 2 if d.durable else int(d.about_self), "between_us": int(d.between_us)})
                 if d.replaces is not None:
                     sql.execute(f"UPDATE {t} SET status='superseded' WHERE id=?", (d.replaces,))
             elif name == c.PROMISE_NOTICED.name:
@@ -113,7 +155,7 @@ class Items:
                         "status": "pending", "recipient": d.to, "due": d.due, "sources": json.dumps(list(d.sources))})
             elif name == c.EVENT_NOTED.name:
                 insert({"id": e.seq, "kind": c.EVENT, "text": d.text.text or "", "about": _keys(d.about),
-                        "sensitivity": d.sensitivity, "importance": 0.6, "born_at": e.at, "touched_at": e.at,
+                        "sensitivity": d.sensitivity, "importance": d.importance, "born_at": e.at, "touched_at": e.at,
                         "status": "active", "due": d.when, "replaces": d.replaces,
                         "sources": json.dumps(list(d.sources)), "told_by": _keys(d.told_by),
                         "heard_by": _keys(d.heard_by), "secret": int(d.secret)})
@@ -122,10 +164,10 @@ class Items:
             elif name == c.PROMISE_RESOLVED.name:
                 sql.execute(f"UPDATE {t} SET status=?, touched_at=? WHERE id=?", (d.status, e.at, d.promise))
             elif name == c.REINFORCED.name:
-                self._reinforce(sql, t, d, e.at)
+                self._reinforce(sql, t, about, d, e.at)
             elif name == c.NIGHT_SORTED.name:
                 for keep, drop in d.merges:
-                    self._merge(sql, t, keep, drop, e.at)
+                    self._merge(sql, t, about, keep, drop, e.at)
             elif name == rt.UTTERANCE.name:
                 self._uttered(sql, t, d, e.at)
 
@@ -138,7 +180,7 @@ class Items:
         return dict(zip(("about", "told_by", "heard_by", "informants", "sensitivity", "secret", "importance"), got[0],
                         strict=True))
 
-    def _reinforce(self, sql: Sql, t: str, d: Any, at: int) -> None:
+    def _reinforce(self, sql: Sql, t: str, about: str, d: Any, at: int) -> None:
         """Ce qui revient dure plus longtemps ; il garde la plus haute
         sensibilité, et les personnes, confidents et témoins s'unissent."""
         row = self._row(sql, t, d.item)
@@ -154,12 +196,15 @@ class Items:
             (at, sens, _keys([*_loads(row["about"]), *d.about]), _keys([*_loads(row["told_by"]), *d.told_by]),
              _keys([*_loads(row["heard_by"]), *d.heard_by]), int(bool(row["secret"]) or d.secret), _keys(informants),
              d.item))
+        _about_rows(sql, about, d.item, d.about)
         if d.corroborated:
             sql.execute(f"UPDATE {t} SET confidence=MIN(0.95, COALESCE(confidence, 0.5) + 0.1) WHERE id=?", (d.item,))
+        if d.between_us:
+            sql.execute(f"UPDATE {t} SET between_us=1 WHERE id=?", (d.item,))
         if d.replaces is not None and d.replaces != d.item:
             sql.execute(f"UPDATE {t} SET status='superseded' WHERE id=?", (d.replaces,))
 
-    def _merge(self, sql: Sql, t: str, keep: int, drop: int, at: int) -> None:
+    def _merge(self, sql: Sql, t: str, about: str, keep: int, drop: int, at: int) -> None:
         """La nuit, un souvenir se fond dans un autre : le gardé prend le plus
         haut de chaque et l'union des personnes — une confidence fondue dans un
         souvenir anodin reste une confidence."""
@@ -173,6 +218,7 @@ class Items:
                  _keys([*_loads(a["told_by"]), *_loads(b["told_by"])]),
                  _keys([*_loads(a["heard_by"]), *_loads(b["heard_by"])]), int(bool(a["secret"]) or bool(b["secret"])),
                  at, keep))
+            _about_rows(sql, about, keep, _loads(b["about"]))
         sql.execute(f"UPDATE {t} SET status='merged' WHERE id=?", (drop,))
 
     @staticmethod
@@ -190,16 +236,27 @@ class Items:
         if hits:
             sql.executemany(f"UPDATE {t} SET recalls=recalls+1, recalled_at=?, touched_at=? WHERE id=?", hits)
 
-    def forget(self, sql: Sql, subject: str, sfx: str) -> None:
-        t = f"{c.ITEMS_TABLE}{sfx}"
+    def forget(self, sql: Sql, subject: str, sfx: str) -> list[str]:
+        t, about = f"{c.ITEMS_TABLE}{sfx}", f"{c.ABOUT_TABLE}{sfx}"
         like = f'%"{subject}"%'
-        sql.execute(f"DELETE FROM {t} WHERE about LIKE ? OR told_by LIKE ? OR recipient=?", (like, like, subject))
+        doomed = [(int(i),) for (i,) in sql.query(
+            f"SELECT id FROM {t} WHERE id IN (SELECT item FROM {about} WHERE person=?) OR told_by LIKE ? "
+            "OR recipient=?", (subject, like, subject))]
+        refs = [str(r) for (i,) in doomed for (r,) in sql.query(f"SELECT ref FROM {REFS_TABLE}{sfx} WHERE item=?", (i,))]
+        sql.executemany(f"DELETE FROM {t} WHERE id=?", doomed)
+        sql.executemany(f"DELETE FROM {about} WHERE item=?", doomed)
+        sql.executemany(f"DELETE FROM {REFS_TABLE}{sfx} WHERE item=?", doomed)
+        # l'index des vecteurs saura qu'il a quelque chose à oublier (``memory.index``)
+        sql.execute(f"UPDATE {c.FORGETS_TABLE}{sfx} SET n=n+1")
         # qui l'a seulement entendu (un salon) ou appris en passant : son nom s'efface des listes
         for column in ("heard_by", "informants"):
             for item, raw in sql.query(f"SELECT id, {column} FROM {t} WHERE {column} LIKE ?", (like,)):
                 sql.execute(f"UPDATE {t} SET {column}=? WHERE id=?",
                             (_keys(k for k in _loads(raw) if k != subject), item))
         sql.execute(f"UPDATE {t} SET source=NULL WHERE source=?", (subject,))
+        # un élément qu'on lui a rattaché par un renfort ne nomme pas toujours ce sujet dans son texte : le magasin
+        # efface ces textes-là aussi (sinon une reconstruction le ferait revenir — audit du lot L2 du 2026-10-03)
+        return refs
 
 
 def _joined(texts: Iterable[str | None]) -> str:
@@ -219,11 +276,14 @@ class Chunks:
     """T0 : un échange par réponse visible — ce qu'on lui a dit (tout le tour) et ce qu'elle a répondu."""
 
     def create(self, sql: Sql, sfx: str) -> None:
+        t = f"{c.CHUNKS_TABLE}{sfx}"
         sql.execute(
-            f"CREATE TABLE IF NOT EXISTS {c.CHUNKS_TABLE}{sfx}(id INTEGER PRIMARY KEY, person TEXT NOT NULL, "
+            f"CREATE TABLE IF NOT EXISTS {t}(id INTEGER PRIMARY KEY, person TEXT NOT NULL, "
             "question INTEGER, user_text TEXT NOT NULL, reply_text TEXT NOT NULL, at INTEGER NOT NULL, room TEXT)"
         )
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {c.CHUNKS_TABLE}{sfx}_person ON {c.CHUNKS_TABLE}{sfx}(person, id)")
+        # ses échanges dans le temps (« ce que je t'ai dit lundi »), et ceux d'un salon
+        sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_person_at ON {t}(person, at)")
+        sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_room_at ON {t}(room, at)")
 
     def drop(self, sql: Sql, sfx: str) -> None:
         sql.execute(f"DROP TABLE IF EXISTS {c.CHUNKS_TABLE}{sfx}")
@@ -231,7 +291,7 @@ class Chunks:
     def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
         for e in events:
             d = e.data
-            if not d.visible or not d.target or d.reply_to is None:
+            if not d.visible or not d.target or d.reply_to is None or forgotten(d.text):
                 continue
             # une réponse règle tout le tour (``answers`` : « salut », « t'as vu le match ? », « allo ? ») ; la
             # question n'est souvent pas le dernier message — l'échange les garde tous, dans l'ordre (un journal
@@ -275,8 +335,12 @@ class Told:
         sql.execute(f"DELETE FROM {c.TOLD_TABLE}{sfx} WHERE handle=?", (subject,))
 
 
-MEMORY.projector(c.ITEMS_TABLE, version=2, tier=Tier.T0,
+# v3 : ce qui n'appartient qu'à elle et à la personne (``between_us`` : un surnom, une blague à elles, ADR 0055)
+# v4 : index (sorte, statut, naissance), ``memory_about``, ``memory_forgets`` ; l'oublié ne revient pas (ADR 0059)
+# v5 : ``memory_refs`` (élément → référence de son texte) : l'oubli d'une personne rattachée par un renfort l'efface
+MEMORY.projector(c.ITEMS_TABLE, version=5, tier=Tier.T0,
                  types=[*c.ALL, rt.UTTERANCE])(Items)
 # v3 : l'échange garde tout le tour (``Utterance.answers``), pas seulement le dernier message d'une rafale
-MEMORY.projector(c.CHUNKS_TABLE, version=3, tier=Tier.T0, types=[rt.UTTERANCE])(Chunks)
+# v4 : index (personne, instant) et (salon, instant) ; l'oublié ne revient pas (ADR 0059)
+MEMORY.projector(c.CHUNKS_TABLE, version=4, tier=Tier.T0, types=[rt.UTTERANCE])(Chunks)
 MEMORY.projector(c.TOLD_TABLE, version=1, tier=Tier.T0, types=[rt.UTTERANCE])(Told)

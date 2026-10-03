@@ -21,6 +21,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
+from difflib import SequenceMatcher
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -30,7 +31,8 @@ from mika.kernel.clock import instant
 from mika.ports.llm import LLMResponse, ToolDecl
 from mika.vocab.people import clean_tokens, fold
 from mika.vocab.privacy import Sensitivity
-from mika.vocab.words import stems
+from mika.vocab.words import WORD, stems, words
+from mika.vocab.words import fold as wfold
 
 TOOL_NAME = "record_memories"
 SELF_NAMES = frozenset({"mika", "moi", "je", "elle-meme", "elle meme", "elle"})
@@ -131,6 +133,10 @@ class XCroyance(_Item):
     confiance: float = Field(default=0.7, ge=0.0, le=1.0)
     importance: int = Field(default=2, ge=1, le=4)
     remplace: int | None = None
+    entre_vous: bool = Field(default=False, validation_alias=AliasChoices("entre_vous", "entre_nous", "lien"),
+                             description="ce qui n'appartient qu'à Mika et cette personne : comment elle appelle "
+                                         "Mika (un surnom), le surnom que Mika lui donne, une blague ou une "
+                                         "expression à eux")
 
 
 class XPromesse(_Lenient):
@@ -163,6 +169,12 @@ class XEvenement(_Item):
     quand: str = Field(min_length=8, max_length=40, description="AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite")
     en_cours: bool = Field(default=False, description="une situation qui dure (son chat malade, un déménagement) : "
                                                       "« quand » est le jour où elle a commencé")
+    importance: int = Field(default=2, ge=1, le=4, description="ce que ça pèse dans sa vie : 2 un rendez-vous "
+                            "ordinaire, une sortie ; 3 un entretien, un examen, une opération, un départ ; 4 un "
+                            "mariage, une naissance, un deuil")
+    a_feter: bool = Field(default=False, validation_alias=AliasChoices("a_feter", "à_fêter", "a_fêter", "festif"),
+                          description="un moment qui se fête (un anniversaire, un mariage, une crémaillère) : on le "
+                                      "souhaite le jour même")
 
 
 class Extraction(_Lenient):
@@ -193,14 +205,23 @@ Chaque personne de la conversation est marquée d'un jeton : « Alice [P1] ». D
 prénom ; le jeton, lui, est unique.
 
 Ce que tu peux retenir :
-- des souvenirs : ce qu'elle a vécu, à la première personne (« J'ai consolé Adrien : son chat Pixel est mort ce \
-matin »). Un souvenir se suffit à lui-même : des prénoms, jamais « il », « l'utilisateur » ou « la personne ».
-- des croyances : des faits sur quelqu'un ou sur le monde (« Le chat d'Adrien s'appelait Pixel »), avec qui les a \
-dits (source) et d'où elle le tient (origine : dit, observé ou déduit). Si une croyance déjà connue est contredite, \
-donne dans « remplace » le numéro qu'elle remplace. Ne répète pas une croyance déjà connue. Écris toute date en \
-absolu (« le week-end du 3 octobre », « depuis le 27 septembre »), jamais « ce week-end », « dimanche » ou « hier » : \
-relue dans trois semaines, une croyance doit encore être vraie. Ce qui ne vaut qu'un temps est un événement, pas une \
-croyance.
+- des souvenirs : ce qu'elle a vécu, raconté avec ses mots à elle, à la première personne (« J'ai consolé Adrien : \
+son chat Pixel est mort ce matin »). Un souvenir se suffit à lui-même : des prénoms, jamais « il », « l'utilisateur » \
+ou « la personne ». Ce n'est jamais une phrase recopiée de la conversation — ni une réplique de Mika, ni un message \
+de la personne : si les mots exacts de quelqu'un comptent, cite-les en disant qui parle (« Adrien m'a dit : « j'étais \
+avec lui jusqu'au bout » »).
+- des croyances : des faits sur quelqu'un ou sur le monde, ses goûts compris (« Le chat d'Adrien s'appelait Pixel », \
+« Chloé adore la city pop »), avec qui les a dits (source) et d'où elle le tient (origine : dit, observé ou déduit). \
+Si une croyance déjà connue est contredite, ou si la personne revient sur ce qu'elle avait dit (« oublie ce que je \
+t'ai dit sur la city pop, c'était une phase »), écris ce qui est vrai maintenant (« Chloé n'est plus dans la city \
+pop : c'était une phase ») et donne dans « remplace » le numéro de l'ancienne. Ne répète pas une croyance déjà \
+connue. Écris toute date en absolu (« le week-end du 3 octobre », « depuis le 27 septembre »), jamais « ce \
+week-end », « dimanche » ou « hier » : relue dans trois semaines, une croyance doit encore être vraie. Ce qui ne vaut \
+qu'un temps est un événement, pas une croyance.
+- ce qui n'appartient qu'à eux : comment la personne appelle Mika (« Adrien m'appelle Mimi »), le surnom que Mika \
+lui donne, une blague ou une expression qu'ils partagent — une croyance à la première personne, rattachée à la \
+personne, avec « entre_vous » vrai et importance 3 : entre amis, c'est ce qui fait un lien.
+- rien de banal : un au revoir, « je vais dormir », « je retourne bosser », une politesse ne se retiennent pas.
 - ce que Mika raconte d'elle-même : une croyance à la première personne, avec « sur_elle » vrai, sans personne, et \
 son « genre » — « anecdote » pour sa petite vie de tous les jours (« J'ai ressorti mon fer à souder pour réparer \
 ma lampe », importance 1 : elle s'en souviendra quelques jours) ; « gout », « avis » ou « fait » pour ce qui la \
@@ -208,16 +229,23 @@ définit (« Mon plat préféré, c'est les ramen », « Je trouve les jeux mobi
 s'en souviendra longtemps, pour ne jamais se contredire). Si elle change d'avis, donne dans « remplace » le numéro \
 de ce qu'elle pensait avant.
 - des promesses : ce que Mika elle-même a promis de faire pour quelqu'un — une chose à faire, à l'infinitif (« lui \
-demander comment s'est passé son entretien »), pas « garder le secret » (ça, c'est le secret lui-même), ni un rappel \
-qu'on lui a demandé (« rappelle-moi… » : il est noté ailleurs) —, avec l'échéance si elle a été dite (AAAA-MM-JJ, \
-ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « jeudi soir », 20:00). Si une promesse en cours a été tenue \
-ou abandonnée, indique-la dans promesses_tenues.
+demander comment s'est passé son entretien »), pas « garder le secret » (ça, c'est le secret lui-même) —, avec \
+l'échéance si elle a été dite (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « jeudi soir », \
+20:00). Un rappel qu'on lui a demandé et qu'elle a accepté (« rappelle-moi de prendre rendez-vous mercredi » — « ok, \
+je te le rappelle ») en est une : « lui rappeler de prendre rendez-vous », pour ce jour-là. Si une promesse en cours \
+a été tenue ou abandonnée, indique-la dans promesses_tenues : une promesse datée n'est tenue que le jour dit (la \
+veille, dire « demain je te le rappelle », ce n'est pas la tenir) ; elle est abandonnée si la personne y renonce.
 - des événements : ce qui va arriver dans la vie de quelqu'un et dont on prend des nouvelles après (un entretien, \
-un examen, un rendez-vous médical, un départ, un mariage), en quelques mots (« son entretien chez Ubisoft »), avec \
-sa date dans « quand » (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite), calculée d'après la date \
-d'aujourd'hui. Seulement ce qui est à venir et daté. Ou une situation qui dure dans sa vie et dont on prend des \
-nouvelles (son chat malade, un déménagement en cours, un proche à l'hôpital) : « en_cours » vrai, et dans « quand » \
-le jour où ça a commencé (aujourd'hui si on ne sait pas).
+un examen, un rendez-vous médical, un départ, un mariage, un anniversaire), en quelques mots (« son entretien chez \
+Ubisoft »), avec sa date dans « quand » (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « ce \
+midi », 12:00), calculée d'après la date d'aujourd'hui, son importance (2 un rendez-vous ordinaire, une sortie ; 3 \
+un entretien, un examen, une opération, un départ ; 4 un mariage, une naissance, un deuil), et « a_feter » vrai si \
+c'est un moment qui se fête (un anniversaire, un mariage, une crémaillère). Seulement ce qui est à venir et daté, \
+et qui lui arrive à elle ou lui : pas une chose à faire, ni ce qu'on lui a demandé de rappeler (« rappelle-moi de \
+prendre rendez-vous chez le dentiste » : prendre rendez-vous est une promesse, pas un rendez-vous dont on prendra \
+des nouvelles). Ou une situation qui dure dans sa vie et dont on prend des nouvelles (son chat malade, un \
+déménagement en cours, un proche à l'hôpital) : « en_cours » vrai, et dans « quand » le jour où ça a commencé \
+(aujourd'hui si on ne sait pas).
 
 Pour chaque élément :
 - « personnes » : qui il concerne — le jeton pour quelqu'un de la conversation ([P1]), le prénom pour quelqu'un \
@@ -420,6 +448,42 @@ def says_secret(texts: Sequence[str]) -> bool:
     return False
 
 
+#: ce qui commence comme une chose à faire (replié, sans accents) : « prendre rendez-vous chez le dentiste »,
+#: « lui rappeler de… », « appeler sa mère » — pas ce qui lui arrive (« prendre l'avion pour Tokyo » en est un)
+_TASK = re.compile(r"^\s*(?:lui\s+|me\s+|se\s+)?(?:rappeler|prendre\s+(?:un\s+)?(?:rdv|rendez)|appeler|reserver|"
+                   r"acheter|payer|envoyer|commander|repondre|remplir|renvoyer|penser a|ne pas oublier)\b")
+#: ce qui compte à coup sûr, quoi qu'en dise le modèle (replié, sans accents) : la consigne demande une importance,
+#: un modèle faible l'oublie — « son entretien chez Ubisoft » n'est jamais un détail
+_IMPORTANT = re.compile(r"\b(?:entretiens?|examens?|exam|partiels?|concours|soutenance|oral de|operation|operee?|"
+                        r"chirurgie|accouchement|naissance|mariage|enterrement|obseques|demenagement|permis|bac|"
+                        r"diplome|resultats?|greffe|biopsie|audience|proces)\b")
+#: ce qui se fête (replié, sans accents)…
+_FESTIVE = re.compile(r"\b(?:anniv\w*|mariage|noces|fiancailles|cremaillere|bapteme|fete|soiree d'anniv\w*|"
+                      r"enterrement de vie de \w+|pot de depart|baby shower)\b")
+#: … sauf le souvenir d'un deuil (« l'anniversaire de la mort de son père »)
+_MOURNING = re.compile(r"\b(?:mort|morte|deces|decede\w*|deuil|disparition|obseques|enterrement(?! de vie)|"
+                       r"commemoration|hommage)\b")
+
+
+def task_words(text: str) -> bool:
+    """Une chose à faire, pas un moment de la vie de quelqu'un (« prendre rendez-vous chez le dentiste »)."""
+    return bool(_TASK.search(fold(text)))
+
+
+def moment_importance(ev: XEvenement) -> float:
+    """Ce qu'un moment pèse : ce qu'en dit le modèle, et au moins « important » pour ce qui l'est à coup sûr (un
+    entretien, un examen, une opération, un mariage)."""
+    rated = IMPORTANCE.get(ev.importance, 0.45)
+    return max(rated, IMPORTANCE[3]) if _IMPORTANT.search(fold(ev.texte)) else rated
+
+
+def festive(ev: XEvenement) -> bool:
+    """Un moment qui se fête : le modèle le dit, ou ses mots (« son anniversaire de 30 ans ») — jamais le souvenir
+    d'un deuil (« l'anniversaire de la mort de son père »)."""
+    text = fold(ev.texte)
+    return (ev.a_feter or bool(_FESTIVE.search(text))) and not _MOURNING.search(text)
+
+
 def echoes(text: str, secrets: Sequence[str], names: set[str]) -> bool:
     """Ce texte laisse-t-il deviner un de ces secrets ? (au moins deux mots du
     sujet en commun — un seul si le secret n'en a qu'un —, prénoms exclus)."""
@@ -429,6 +493,85 @@ def echoes(text: str, secrets: Sequence[str], names: set[str]) -> bool:
         if theirs and len(mine & theirs) >= min(2, len(theirs)):
             return True
     return False
+
+
+#: un texte qui reprend au moins cette part de ses mots, dans l'ordre, à une réplique la recopie
+COPY_SHARE = 0.8
+
+
+def copied(text: str, line: str) -> bool:
+    """Ce texte recopie-t-il cette réplique ? Presque tous ses mots y sont, dans le même ordre (casse, accents et
+    ponctuation à part) : « Pixel est parti cet après-midi », c'est le message de Sam ; « Sam m'a dit que Pixel est
+    parti cet après-midi » le rapporte, il ne le recopie pas. Un texte de moins de quatre mots ne recopie qu'une
+    suite exacte."""
+    mine, theirs = WORD.findall(wfold(text)), WORD.findall(wfold(line))
+    if not mine or not theirs:
+        return False
+    if len(mine) < 4:
+        return any(theirs[i:i + len(mine)] == mine for i in range(len(theirs) - len(mine) + 1))
+    blocks = SequenceMatcher(None, mine, theirs, autojunk=False).get_matching_blocks()
+    return sum(b.size for b in blocks) >= COPY_SHARE * len(mine)
+
+
+def copy_of(text: str, lines: Sequence[Line]) -> Line | None:
+    """La réplique que ce texte recopie (celle qui en reprend le plus), ou ``None``. À égalité, celle d'une personne
+    plutôt que la sienne : Mika reprend souvent les mots qu'on vient de lui dire."""
+    best: tuple[float, int, Line] | None = None
+    mine = WORD.findall(wfold(text))
+    for ln in lines:
+        if not copied(text, ln.text):
+            continue
+        theirs = WORD.findall(wfold(ln.text))
+        share = sum(b.size for b in SequenceMatcher(None, mine, theirs, autojunk=False).get_matching_blocks())
+        key = (share / max(1, len(mine)), 1 if ln.person else 0, ln)
+        if best is None or key[:2] > best[:2]:
+            best = key
+    return best[2] if best else None
+
+
+def quoted(name: str, text: str) -> str:
+    """Ce que quelqu'un lui a dit, mot pour mot, en disant qui parle."""
+    words_ = " ".join(text.split()).strip().strip("«»\"' ")
+    return f"{name or 'On'} m'a dit : « {words_} »"
+
+
+#: un mot qui salue, remercie ou prend congé, suivi d'un nom : celui par lequel on s'adresse à elle (« salut
+#: Mikachu », « bonne soirée Mikachu », « merci Mikachu ! »)
+_VOCATIVE = re.compile(r"(?<![\w'])(?:salut|coucou|hey|hello|bonjour|bonsoir|yo|re|merci|bisous|bises|bye|ciao|"
+                       r"[àa] plus|[àa] demain|bonne (?:nuit|soir[ée]e|journ[ée]e|aprem))[\s,]+([^\W\d_][\w-]{2,30})"
+                       r"(?![\w'])", re.IGNORECASE)
+
+
+def _squeezed(text: str) -> str:
+    """Replié, lettres répétées réduites (« Mikaaa » est « Mika » qu'on étire, pas un surnom)."""
+    return re.sub(r"(.)\1+", r"\1", wfold(text))
+
+
+def nicknames(text: str, her: str) -> list[str]:
+    """Les surnoms qu'un message lui donne : un mot qui la salue (« salut Mikachu ») et qui dérive de son prénom
+    sans l'être — il le contient, ou en garde le début (« Mikachu », « Mikou » ; pas « Mika », ni « Mikaaa »). Ce
+    qui ne dérive pas de son prénom (« salut Chef ») reste au modèle : un nom qui suit un bonjour peut aussi être
+    celui de quelqu'un d'autre."""
+    own = _squeezed(her)
+    out: list[str] = []
+    if len(own) < 3:
+        return out
+    for m in _VOCATIVE.finditer(text):
+        word = m.group(1)
+        folded = _squeezed(word)
+        if (own in folded or folded[:3] == own[:3]) and folded != own and word not in out:
+            out.append(word)
+    return out
+
+
+def same_moment(a: str, b: str, names: Sequence[str] = ()) -> bool:
+    """Deux façons de dire le même moment de la vie de quelqu'un : une fois les prénoms ôtés, les mots de l'un sont
+    tous dans l'autre (« son anniversaire », « l'anniversaire de Sam », « son anniversaire de 30 ans »). À l'appelant
+    de vérifier que c'est le même jour, pour la même personne : « son rendez-vous chez le dentiste » n'est pas « son
+    rendez-vous chez le véto »."""
+    named = {w for n in names for w in WORD.findall(wfold(n))}
+    mine, theirs = set(words(a)) - named, set(words(b)) - named
+    return bool(mine) and bool(theirs) and (mine <= theirs or theirs <= mine)
 
 
 def due(value: str | None, tz: ZoneInfo) -> int | None:

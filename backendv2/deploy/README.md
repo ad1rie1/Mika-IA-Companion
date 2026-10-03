@@ -97,11 +97,12 @@ masqués ; `httpx` ne parle qu'en avertissement.
 
 ## Premier démarrage
 
-1. Ouvre le frontend : le premier compte créé est opérateur (ou
-   `sudo -u mika .venv/bin/python -m mika --data /var/lib/mika account <nom> <mot de passe> --operator`).
-2. `http://localhost:8001/inspecteur/reglages/modeles` (la console, **Réglages ›
-   Modèles**) : ajoute un fournisseur (sa clé est chiffrée et jamais réaffichée ;
-   « Enregistrer et charger la liste » propose ses modèles) et associe les rôles.
+1. Ouvre la console (`http://localhost:8001/`) ou le frontend : le premier compte créé est opérateur (ou
+   `sudo -u mika .venv/bin/python -m mika --data /var/lib/mika account <nom> --operator`, le mot de passe
+   demandé sans écho).
+2. `http://localhost:8001/inspecteur/reglages/fournisseurs` (la console, **Configuration ›
+   Fournisseurs**) : ajoute un fournisseur (sa clé est chiffrée et jamais réaffichée ;
+   « Charger la liste » propose ses modèles). Le premier déclaré sert « répondre » d'office.
    Tant qu'aucun modèle n'est branché, `/health` dit `degraded` et elle ne peut
    pas parler.
 3. Le reste se règle dans la console, **Réglages** : personnalité et tempérament
@@ -113,7 +114,9 @@ masqués ; `httpx` ne parle qu'en avertissement.
    liste blanche et la conversation privée des propriétaires sont admises
    (`mika telegram allow <chat>`, `mika telegram owner <utilisateur>`) ; l'ouvrir
    à tout le monde est un choix explicite (`mika telegram open`, ou la case
-   « Ouvert à tous »). Sans aucune des trois, la relève ne démarre pas. Un
+   « Ouvert à tous »). Sans aucune des trois, la relève tourne en mode
+   appairage : la page Telegram de la console montre un code, et `/start <code>`
+   envoyé au robot en privé fait de son auteur une propriétaire (ADR 0057). Un
    démarrage raté (réseau coupé) est relancé avec un délai croissant ; `/health`
    le dit (`"telegram": "degraded"`, `"ko"` pour un jeton refusé).
 4. Ses boîtes aux lettres : **Courrier › Comptes** (ou Réglages › Sens ›

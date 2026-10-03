@@ -1,9 +1,10 @@
 """Contrat d'``attention`` : ce qui lui trotte dans la tête, et ce qu'elle attend.
 
 - une **pensée** naît d'un échange qui l'a marquée, d'une croyance qu'elle
-  doit réviser, du manque de quelqu'un qu'elle ne peut pas joindre, ou d'avoir
-  été dure avec une amie ; elle s'estompe (demi-vie), revient par moments, et
-  s'allège quand elle en parle ;
+  doit réviser, du manque de quelqu'un à qui elle n'écrit pas (injoignable, ou
+  qui ne répond plus — de plus en plus rarement à mesure que le silence dure,
+  ADR 0058), ou d'avoir été dure avec une amie ; elle s'estompe (demi-vie),
+  revient par moments, et s'allège quand elle en parle ;
 - une **attente** naît quand elle écrit d'elle-même à quelqu'un (une
   réponse), quand quelqu'un lui manque (un retour), ou quand elle promet
   quelque chose pour une date (sa parole : une attente envers elle-même) :

@@ -40,14 +40,15 @@ MATRIX = [
     (0.70, ACC, "acquaintance", 0.5, False, P, "de la chaleur pour quelqu'un qu'elle connaît : un lien"),
     (0.70, ACC, "stranger", 0.0, True, P, "il était là quand ça s'est dit"),
     (0.70, ACC, "close", 1.0, False, P, "un proche à 0,70 n'a pas encore la confidence"),
-    (0.85, ACC, "close", 0.0, False, C, "un proche, en privé, à haute certitude"),
+    (0.85, ACC, "close", 0.0, False, P, "un proche, en privé, à haute certitude — mais qui ne connaît pas la "
+                                        "personne concernée : l'anecdote, pas la confidence (ADR 0058)"),
     (0.85, ACC, "friend", 0.0, False, P, "un ami n'est pas un proche"),
     (0.85, ACC, "stranger", 0.0, True, P, "un simple témoin n'est pas un confident"),
     (0.85, ACC, "friend", 0.0, True, C, "une amie qui était là"),
     (1.0, AUTH, "stranger", 1.0, True, P, "même chaleureuse, une inconnue témoin n'a pas la confidence"),
     (1.0, AUTH, "stranger", 0.0, False, A, "le canal ne donne pas le lien"),
     (1.0, AUTH, "friend", 0.0, False, P, "la relation, oui"),
-    (1.0, AUTH, "close", 0.0, False, C, "proche et connecté"),
+    (1.0, AUTH, "close", 0.0, False, P, "proche et connecté, sans lien avec la personne concernée"),
     (0.0, INT, "", 0.0, False, C, "personne n'écoute : toute sa mémoire"),
 ]
 
@@ -57,9 +58,49 @@ def test_policy_matrix(certainty, trust, closeness, warmth, witness, expected, w
     assert disclosable(certainty, trust, closeness=closeness, warmth=warmth, witness=witness) is expected, why
 
 
+# (certitude, canal, proximité, chaleur, public, attendu, pourquoi) — l'auditeur a un lien avec la personne concernée
+TIED = [
+    (0.85, ACC, "close", 0.0, False, C, "une proche qui la connaît, en privé, à haute certitude : sa confidence"),
+    (1.0, AUTH, "close", 0.0, False, C, "proche, connectée, et elle la connaît"),
+    (0.70, ACC, "close", 1.0, False, P, "à 0,70, même liée : pas encore la confidence"),
+    (0.85, ACC, "friend", 0.0, False, P, "une amie qui la connaît : l'anecdote, pas la confidence (il faut être "
+                                         "proche, ou avoir été là)"),
+    (1.0, AUTH, "acquaintance", 0.5, False, P, "une connaissance chaleureuse qui la connaît : le personnel"),
+    (1.0, AUTH, "stranger", 0.0, False, A, "un lien avec autrui n'ouvre rien à une inconnue"),
+    (1.0, AUTH, "close", 1.0, True, A, "en public, jamais plus qu'anodin"),
+]
+
+
+@pytest.mark.parametrize("certainty,trust,closeness,warmth,public,expected,why", TIED)
+def test_a_confidence_reaches_only_a_close_friend_who_knows_the_person(certainty, trust, closeness, warmth, public,
+                                                                       expected, why):
+    assert disclosable(certainty, trust, closeness=closeness, warmth=warmth, tied=True, public=public) is expected, why
+    assert disclosable(certainty, trust, closeness=closeness, warmth=warmth, public=public) <= expected
+
+
+def test_a_tie_is_with_every_identified_person_concerned_never_a_bare_name():
+    """Prononcer un nom ne crée aucun lien : ``name:…`` (quelqu'un dont on lui a parlé) ne compte pas, mais il faut
+    au moins une personne identifiée, et un lien avec chacune."""
+    assert privacy.tied_to(("alice",), ("alice", "bob"))
+    assert privacy.tied_to(("alice", "name:paul"), ("alice",)), "son frère Paul est dans son histoire à elle"
+    assert not privacy.tied_to(("alice", "carol"), ("alice",)), "un lien avec chacune"
+    assert not privacy.tied_to(("name:paul",), ("alice",)), "il faut au moins une personne identifiée"
+    assert not privacy.tied_to(("alice",), ())
+
+
 def test_an_anecdote_can_slip_out_to_a_close_friend_at_the_bar():
     assert disclosable(0.70, ACC, closeness="close") is P
     assert Disclosure(P, P).admits("personnel")
+
+
+def test_decide_gives_the_tied_facet():
+    """La facette « liée » : une proche connectée reçoit l'anecdote sur n'importe qui, la confidence seulement sur
+    quelqu'un qu'elle connaît."""
+    d = decide(1.0, AUTH, closeness="close")
+    assert d.level is P and d.tied_level is C and d.witness_level is C
+    assert not d.admits(C) and d.admits(C, tied=True)
+    assert decide(1.0, AUTH, closeness="friend").tied_level is P
+    assert privacy.EVERYTHING.tied_level is C and privacy.CLOSED.tied_level is Sensitivity.NONE
 
 
 def test_a_confidence_never_leaves_in_a_public_room():
@@ -101,12 +142,15 @@ def test_unreadable_sensitivity_is_personal():
 
 
 @given(st.floats(0.0, 1.0), st.floats(0.0, 1.0), st.sampled_from(list(ChannelTrust)),
-       st.sampled_from(["", "stranger", "acquaintance", "friend", "close"]), st.floats(0.0, 1.0), st.booleans())
-def test_more_certainty_never_discloses_less(c1, c2, trust, closeness, warmth, witness):
+       st.sampled_from(["", "stranger", "acquaintance", "friend", "close"]), st.floats(0.0, 1.0), st.booleans(),
+       st.booleans())
+def test_more_certainty_never_discloses_less(c1, c2, trust, closeness, warmth, witness, tied):
     lo, hi = sorted((c1, c2))
-    kw = {"closeness": closeness, "warmth": warmth, "witness": witness}
+    kw = {"closeness": closeness, "warmth": warmth, "witness": witness, "tied": tied}
     assert disclosable(lo, trust, **kw) <= disclosable(hi, trust, **kw)
     assert disclosable(hi, trust, public=True, **kw) <= A or trust is INT
+    # un lien n'ôte jamais rien
+    assert disclosable(hi, trust, **{**kw, "tied": False}) <= disclosable(hi, trust, **{**kw, "tied": True})
 
 
 # ── La garde du composeur ─────────────────────────────────────────────────
@@ -124,6 +168,22 @@ def test_the_composer_drops_what_the_audience_may_not_hear():
         _, trace = Composer().compose(blocks, kind="REPLY", audience_level=int(audience), muted_tags=frozenset(),
                                       message="?", budget=Budget(max_tokens=4000))
         assert set(trace.included) == kept, audience
+
+
+def test_the_composer_knows_a_block_admitted_through_a_tie():
+    """La seconde barrière : un bloc dont les confidences ont été admises, une à une, parce que l'interlocuteur
+    connaît la personne concernée se compare au niveau « lié » — un bloc ordinaire, au niveau de l'audience."""
+    spec = SectionSpec("test", "souvenirs", Zone.VOLATILE, frozenset({"REPLY"}), lambda *a: None)
+    tied = SectionBody("une confidence d'Alice", level=int(C), tied=True)
+    plain = SectionBody("une confidence d'Alice", level=int(C))
+    for body, kept in ((tied, True), (plain, False)):
+        _, trace = Composer().compose([(spec, body)], kind="REPLY", audience_level=int(P), witness_level=int(C),
+                                      tied_level=int(C), muted_tags=frozenset(), message="?",
+                                      budget=Budget(max_tokens=4000))
+        assert (set(trace.included) == {"souvenirs"}) is kept
+    _, trace = Composer().compose([(spec, tied)], kind="REPLY", audience_level=int(P), witness_level=int(C),
+                                  tied_level=int(P), muted_tags=frozenset(), message="?", budget=Budget(max_tokens=4000))
+    assert not trace.included, "lié, mais l'audience n'ouvre pas la confidence à qui la connaît"
 
 
 # ── De bout en bout : le fait DISCLOSURE ──────────────────────────────────

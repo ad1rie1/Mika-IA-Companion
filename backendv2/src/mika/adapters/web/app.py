@@ -199,7 +199,7 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         if not csrf_ok(request):
             return csrf_refused()
         if accounts.count() > 0:
-            return JSONResponse({"error": "Un compte existe deja : connecte-toi."}, status_code=409)
+            return JSONResponse({"error": "Un compte existe déjà : connecte-toi."}, status_code=409)
         data = await body(request)
         username = str(data.get("username") or "").strip()
         password = str(data.get("password") or "")
@@ -210,7 +210,7 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             return JSONResponse({"error": " ".join(problems)}, status_code=400)
         account = await accounts.bootstrap(username, password)
         if account is None:
-            return JSONResponse({"error": "Un compte existe deja : connecte-toi."}, status_code=409)
+            return JSONResponse({"error": "Un compte existe déjà : connecte-toi."}, status_code=409)
         return await logged_in(request, account)
 
     async def logout(request: Request) -> Response:
@@ -418,7 +418,8 @@ class _Session:
             operator=c.operator, display_name=c.display_name,
         ))
         c.announced = True
-        await self.send(protocol.history("initial", self.port.recent(c.handle, protocol.HISTORY_INITIAL)))
+        await self.send(protocol.history("initial", self.port.recent(c.handle, protocol.HISTORY_INITIAL),
+                                         life=self.hub.life()))
         await self.hub.push_face(c.handle, force=True)
         # l'état intérieur tout de suite (sommeil, énergie, et où elle est dans sa chambre) : sans lui, un
         # écran qui s'ouvre la montrait au milieu de la pièce jusqu'au prochain changement d'état
@@ -508,11 +509,20 @@ class _Session:
             after_id = max(0, int(frame.get("after_id") or 0))
         except (TypeError, ValueError):
             after_id = 0
+        life = self.hub.life()
         if after_id:
+            head = self.port.recent(c.handle, 1)
+            if after_id > (head[-1].id if head else 0):
+                # un curseur venu d'ailleurs (l'ancien moteur, une vie restaurée plus ancienne, un fil oublié) : un
+                # « rattrapage » vide le laisserait cacher tout ce qui est plus petit que lui — le fil initial
+                # remplace ce que l'écran montre
+                rows = self.port.recent(c.handle, protocol.HISTORY_INITIAL)
+                await self.send(protocol.history("initial", rows, life=life, reset=True))
+                return
             rows, truncated = self.port.after(c.handle, after_id, protocol.HISTORY_MAX)
         else:
             rows, truncated = self.port.recent(c.handle, protocol.HISTORY_INITIAL), False
-        await self.send(protocol.history("catchup", rows, after_id=after_id, truncated=truncated))
+        await self.send(protocol.history("catchup", rows, after_id=after_id, truncated=truncated, life=life))
 
     def _session_valid(self) -> bool:
         """Revérifiée à chaque message : une session effacée ailleurs (un autre processus,
@@ -547,6 +557,9 @@ class _Session:
         perception = PerceptionReceived(
             handle=c.handle, channel="web", text=Content.of(body), authenticated=c.authenticated,
             client_msg_id=cid or None, display_name=c.display_name,
+            # ce qu'elle a tapé est le début du texte ; la suite, ce que ses pièces jointes ont donné à percevoir
+            # (pour le prompt) — le fil relu ne montre que le premier, et les fichiers par leur nom (G-6)
+            typed_chars=len(text) if seen else None,
             attachments=tuple(AttachmentMeta(name=a.name, kind=a.kind, mime=a.mime, extracted=p.extracted,
                                              error=p.error) for a, p in zip(kept, seen, strict=True)),
         )

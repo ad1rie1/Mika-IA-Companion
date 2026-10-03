@@ -17,7 +17,12 @@ public, jamais plus qu'anodin ; sous la barre de certitude, anodin ; un lien
 ouvre le personnel — être amie ou proche, ou de la chaleur pour quelqu'un
 qu'elle connaît déjà (la chaleur seule, pour une inconnue, n'ouvre rien sur
 autrui), ou avoir été là quand ça s'est dit (témoin) ; la confidence ne sort
-qu'en privé, à haute certitude, pour une proche — ou une amie qui était là.
+qu'en privé, à haute certitude, pour une amie qui était là — ou pour une
+proche **qui a un lien avec la personne concernée** (elles se sont parlé
+ensemble, ou la personne concernée l'a nommée elle-même : ``tied``). Être
+proche de Mika ne suffit pas : c'est l'anecdote qui échappe en grande
+confiance, pas la confidence lourde de quelqu'un qu'on ne connaît pas — et
+prononcer un nom ne crée aucun lien (ADR 0058).
 Ce que quelqu'un a demandé de ne répéter à personne (un secret) ne ressort
 que devant qui l'a confié : ce n'est pas un niveau, c'est la mémoire qui le
 garde (``faculties/memory``). La fiche de l'interlocuteur lui-même est une
@@ -30,7 +35,7 @@ Fonctions pures, sans lecture d'état.
 from __future__ import annotations
 
 import enum
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
@@ -210,6 +215,7 @@ def disclosable(
     closeness: str = "",
     warmth: float = 0.0,
     witness: bool = False,
+    tied: bool = False,
     public: bool = False,
     policy: TrustPolicy = POLICY,
 ) -> Sensitivity:
@@ -218,6 +224,10 @@ def disclosable(
     ``witness`` : l'interlocuteur était là quand ça s'est dit — il l'a
     entendu lui-même, le personnel lui est ouvert ; la confidence, seulement
     s'il est au moins un ami (un simple témoin n'est pas un confident).
+    ``tied`` : l'interlocuteur a un lien avec la personne concernée (ils se
+    sont parlé ensemble devant elle, ou cette personne l'a nommé elle-même) —
+    une proche qui a ce lien peut recevoir sa confidence ; une proche sans ce
+    lien, l'anecdote seulement (ADR 0058).
     La chaleur seule n'ouvre rien sur autrui à une inconnue : il faut au moins
     la connaître.
     """
@@ -232,31 +242,38 @@ def disclosable(
     if not (rank >= CLOSENESS_RANK["friend"] or warm or witness):
         return Sensitivity.ANODYNE
     if certainty >= policy.confidence_threshold and (
-            rank >= CLOSENESS_RANK["close"] or (witness and rank >= CLOSENESS_RANK["friend"])):
+            (tied and rank >= CLOSENESS_RANK["close"]) or (witness and rank >= CLOSENESS_RANK["friend"])):
         return Sensitivity.CONFIDENCE
     return Sensitivity.PERSONAL
 
 
 @dataclass(frozen=True, slots=True)
 class Disclosure:
-    """Le niveau d'un tour, en deux facettes, plus la porte de sa propre fiche."""
+    """Le niveau d'un tour, en trois facettes — ce qu'elle peut dire d'autrui ;
+    quand l'interlocuteur était là (témoin) ; quand il a un lien avec la
+    personne concernée (``tied``) —, plus la porte de sa propre fiche."""
 
     level: Sensitivity = Sensitivity.NONE
     witness_level: Sensitivity = Sensitivity.NONE
     own_file: bool = False
+    tied_level: Sensitivity = Sensitivity.NONE
 
-    def admits(self, sensitivity: Sensitivity | int | str, *, witness: bool = False) -> bool:
-        return Sensitivity.parse(sensitivity) <= (self.witness_level if witness else self.level)
+    def admits(self, sensitivity: Sensitivity | int | str, *, witness: bool = False, tied: bool = False) -> bool:
+        limit = self.witness_level if witness else self.level
+        if tied:
+            limit = max(limit, self.tied_level)
+        return Sensitivity.parse(sensitivity) <= limit
 
     @property
     def closed(self) -> bool:
-        return self.level is Sensitivity.NONE and self.witness_level is Sensitivity.NONE
+        return (self.level is Sensitivity.NONE and self.witness_level is Sensitivity.NONE
+                and self.tied_level is Sensitivity.NONE)
 
 
 #: Le repli du bord, sur une panne : rien sur personne d'autre.
 CLOSED = Disclosure()
 #: Un tour interne (personne n'écoute) : toute sa mémoire.
-EVERYTHING = Disclosure(Sensitivity.CONFIDENCE, Sensitivity.CONFIDENCE, True)
+EVERYTHING = Disclosure(Sensitivity.CONFIDENCE, Sensitivity.CONFIDENCE, True, Sensitivity.CONFIDENCE)
 
 
 def decide(
@@ -273,7 +290,17 @@ def decide(
         level=disclosable(certainty, trust, witness=False, **common),
         witness_level=disclosable(certainty, trust, witness=True, **common),
         own_file=may_disclose_private(certainty, trust, policy) and not public,
+        tied_level=disclosable(certainty, trust, tied=True, **common),
     )
+
+
+def tied_to(others: Collection[str], ties: Collection[str]) -> bool:
+    """L'interlocuteur a-t-il un lien avec **toutes** les personnes concernées
+    (``others`` : celles qui ne sont pas lui) ? Un nom dont on lui a parlé
+    (``name:…``) ne compte pas — c'est un détail de l'histoire de qui le
+    raconte ; il faut au moins une personne identifiée, et un lien avec chacune."""
+    persons = [o for o in others if not o.startswith("name:")]
+    return bool(persons) and all(o in ties for o in persons)
 
 
 def describe_fr(certainty: float, trust: ChannelTrust, name: str = "") -> str:
@@ -303,16 +330,20 @@ def describe_fr(certainty: float, trust: ChannelTrust, name: str = "") -> str:
 
 
 def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, level: int, witness_level: int,
-             own_file: bool) -> bool:
+             own_file: bool, *, tied_level: int = 0, ties: Collection[str] = ()) -> bool:
     """Ce qu'on peut dire devant une audience : ce qui ne concerne personne
     d'identifié passe s'il est anodin ou si l'audience peut l'entendre (un
     mail reçu n'est pas à tout le monde) ; ce qui ne concerne que
     l'interlocuteur, s'il est anodin ou si sa fiche est ouverte ; ce qui
     concerne d'autres, jusqu'au niveau de l'audience (le niveau « témoin »
-    quand l'interlocuteur en est aussi)."""
+    quand l'interlocuteur en est aussi, le niveau « lié » quand il a un lien
+    avec chacune des autres personnes concernées — ``ties``)."""
     if not about:
         return sensitivity <= max(Sensitivity.ANODYNE, level)
     others = [a for a in about if a != interlocutor]
     if not others:
         return sensitivity <= Sensitivity.ANODYNE or own_file
-    return sensitivity <= (witness_level if interlocutor in about else level)
+    limit = witness_level if interlocutor in about else level
+    if tied_to(others, ties):
+        limit = max(limit, tied_level)
+    return sensitivity <= limit

@@ -34,7 +34,46 @@ namespace Mika.Editor.Dev
                 var stage = Stage;
                 _body = stage.SpawnUnlisted(BodyId, "avatars/mika", "Labo");
                 ShowReal(false);
+                Rehearsal(true);
                 return _body;
+            }
+        }
+
+        // Ce que la tenue de répétition retire : les vêtements amples (veste, jupe, haut) et ce qu'ils couvraient.
+        static readonly string[] LooseClothes = { "ClothCoat", "ClothSkirt", "ClothShirt", "ClothUnder", "ClothNecklace" };
+        static Material _suit;
+        static Material[] _skin;
+
+        /// <summary>
+        /// La tenue de répétition du corps d'essai : sans la veste ample, la jupe ni le haut, le corps couvert d'une
+        /// combinaison unie, mate, près du corps — on voit les hanches, les genoux, les épaules et les contacts sur
+        /// les images. Chaussettes et chaussures restent (le contact au sol se juge avec elles). false lui rend sa
+        /// tenue et sa peau (pour juger les vêtements contre les mains). Le prefab ne change pas.
+        /// </summary>
+        public static void Rehearsal(bool on)
+        {
+            if (_body == null) return;
+            foreach (var r in _body.GetComponentsInChildren<SkinnedMeshRenderer>(true))
+            {
+                if (Array.IndexOf(LooseClothes, r.name) >= 0) r.enabled = !on;
+                if (r.name != "Body2") continue;
+                if (on)
+                {
+                    if (_suit == null)
+                    {
+                        _suit = new Material(Shader.Find("Universal Render Pipeline/Lit")) { name = "Combinaison de répétition" };
+                        _suit.SetColor("_BaseColor", new Color(0.33f, 0.38f, 0.46f));
+                        _suit.SetFloat("_Smoothness", 0.25f);
+                    }
+                    var mats = r.sharedMaterials;
+                    if (_skin == null || Array.IndexOf(mats, _suit) < 0) _skin = (Material[])mats.Clone();
+                    for (var i = 0; i < mats.Length; i++) mats[i] = _suit;
+                    r.sharedMaterials = mats;
+                }
+                else if (_skin != null && _skin.Length == r.sharedMaterials.Length)
+                {
+                    r.sharedMaterials = _skin;
+                }
             }
         }
 

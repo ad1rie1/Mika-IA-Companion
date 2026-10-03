@@ -152,9 +152,11 @@ def test_a_worry_becomes_a_goal_then_pride_then_she_tells_the_person_it_concerns
     # noter ou fouiller sa mémoire ne prouve rien : c'est la réflexion écrite qui prouve
     assert steps and steps[-1].data.proven and steps[-1].data.tools == ("goal_reflect",)
     assert esteem1 > esteem0 + 0.01  # elle a mené quelque chose à bout (une séance : un peu, ADR 0036)
-    # un pas n'est jamais livré à personne, ni écrit dans le fil
+    # un pas n'est jamais livré à personne, ni écrit dans le fil (une séance qui conclut par report_step ne
+    # rappelle même plus le modèle pour une conclusion : souvent, aucun énoncé)
     step_utterances = [e for e in r.of(rt.UTTERANCE) if e.data.kind == "STEP"]
-    assert step_utterances and all(not u.data.visible for u in step_utterances)
+    assert all(not u.data.visible for u in step_utterances)
+    assert not [e for e in r.of(rt.UTTERANCE) if e.data.kind == "STEP" and e.data.target == "user_1"]
     assert not [d for d in r.out.items if d.key in {u.id for u in step_utterances}]
     # elle le raconte à Adrien : il est concerné, et c'est son propriétaire — tout
     shares = _shares(r.llm)
@@ -167,7 +169,7 @@ def test_a_worry_becomes_a_goal_then_pride_then_she_tells_the_person_it_concerns
     # au travail : le but dans ses mots, qui le lui a confié et quand — jamais « Sorte : … » ; ses mots à lui, cités
     step = next(c for c in r.llm.calls if c.role == "step")
     work = _section(step, "CE À QUOI TU TRAVAILLES")
-    assert "« Adrien » t'a confié ça cet après-midi" in work and "Sorte" not in work and "examen" not in work
+    assert "« Adrien » t'a dit ça cet après-midi" in work and "Sorte" not in work and "examen" not in work
     assert "examen" in _section(step, "CE QUI L'A FAIT NAÎTRE")
     # la pensée d'où c'était venu s'est apaisée : elle a fait la chose
     source = int(opened[0].data.source.split(":")[1])
@@ -197,9 +199,15 @@ def test_a_friend_hears_a_mention_and_a_stranger_nothing(tmp_path):
 
 
 def test_done_without_proof_is_no_pride_then_she_blocks_and_does_not_reopen(tmp_path):
+    """Une exploration (ce qu'elle a remarqué dans ses flux) où elle dit « fini » sans rien avoir fait : aucune
+    fierté ; à bout de séances, elle bloque — frustration, estime en baisse, « Je bloque sur… »."""
     async def scenario(kernel, llm):
-        await connect(kernel, "user_1", "Adrien")
-        await (await kernel.perceive(said("user_1", "j'angoisse pour mon entretien demain"))).reply
+        await kernel.mind.append([goals_c.GOAL_OPENED.draft(
+            kind=goals_c.EXPLORATION, authority=goals_c.SELF,
+            title=Content.of("En savoir plus sur ce que j'ai remarqué dans mes flux", level=0),
+            details=Content.of("Un article sur les marées", level=0), bundles=("goals", "memory", "projects", "rss"),
+            max_steps=3, source="thought:42", sensitivity=0, desire=1.0, origin=goals_c.FROM_SIGNAL)],
+            emitter="goals", correlation="genese", origin=Origin.GENESIS)
         esteem0 = kernel.mind.frame().get(self_c.ESTEEM)
         await asyncio.sleep(5 * HOUR / US)
         mid = kernel.mind.frame()
@@ -219,6 +227,33 @@ def test_done_without_proof_is_no_pride_then_she_blocks_and_does_not_reopen(tmp_
     assert sources.count(closed[0].data.source) == 1  # pas rouvert sous 24 h
     assert not [s for s in sources if s.startswith("thought:") and s != closed[0].data.source
                 and "bloque" in s]  # sa frustration ne devient pas un nouveau chantier
+
+
+def test_a_reflection_claimed_done_without_writing_is_no_pride_and_no_frustration(tmp_path):
+    """Repenser à ce qu'on lui a confié et dire « fini » sans rien avoir écrit : ni fierté (rien n'est prouvé), ni
+    « je bloque » — une réflexion qui n'a rien donné en sa séance en reste là (ADR 0053) ; la même inquiétude
+    n'est pas rouverte sous 24 h."""
+    async def scenario(kernel, llm):
+        await connect(kernel, "user_1", "Adrien")
+        await (await kernel.perceive(said("user_1", "j'angoisse pour mon entretien demain"))).reply
+        esteem0 = kernel.mind.frame().get(self_c.ESTEEM)
+        await asyncio.sleep(5 * HOUR / US)
+        mid = kernel.mind.frame()
+        await (await kernel.perceive(said("user_1", "j'angoisse encore, vraiment, pour mon entretien"))).reply
+        await asyncio.sleep(15 * HOUR / US)
+        return esteem0, mid.get(self_c.ESTEEM), mid.get(attention_c.THOUGHTS)
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0), mode="liar")
+    esteem0, esteem1, thoughts = r.result
+    closed = [c for c in r.of(goals_c.GOAL_CLOSED) if c.data.source.startswith("thought:")]
+    reports = [x for x in r.of(goals_c.STEP_REPORTED) if x.data.goal in {c.data.goal for c in closed}]
+    assert reports and all(x.data.verdict == "done" and not x.data.proven for x in reports)
+    assert len(reports) == 1, "une réflexion tient en une séance"
+    assert [(c.data.status, c.data.reason) for c in closed] == [(goals_c.ABANDONED, goals_c.LET_GO)]
+    assert esteem1 <= esteem0  # aucune fierté
+    assert not [t for t in thoughts if t.origin == attention_c.BLOCKED]  # ni « je bloque », ni frustration
+    opened = [o for o in r.of(goals_c.GOAL_OPENED) if o.data.owner == "user_1"]
+    assert len(opened) == 1  # l'inquiétude redite le soir même n'est pas une nouvelle affaire
 
 
 # ── Les rappels ───────────────────────────────────────────────────────────
@@ -288,6 +323,9 @@ def test_she_does_not_work_while_asleep_and_resumes_in_the_morning(tmp_path):
 
 def test_a_nominative_wait_lifts_as_soon_as_the_person_writes(tmp_path):
     async def scenario(kernel, llm):
+        # une réflexion tient en une séance (ADR 0053) : ici on lui en accorde une seconde, pour qu'attendre la
+        # réponse de la personne ait une suite
+        await kernel.set_params("goals", GoalsParams(reflection_steps=2))
         await connect(kernel, "user_1", "Adrien", operator=True)
         await (await kernel.perceive(said("user_1", "j'ai peur, je stresse pour mon oral de demain"))).reply
         await asyncio.sleep(2 * HOUR / US)
@@ -535,6 +573,35 @@ def test_a_daydream_is_written_but_never_told_as_news(tmp_path):
     assert not _shares(r.llm)  # pas une nouvelle à raconter
 
 
+def test_a_session_that_concludes_does_not_call_the_model_again(tmp_path):
+    """Conclure une séance (``report_step``) clôt la boucle : le modèle n'est pas rappelé pour écrire une conclusion
+    que personne ne lit — c'était un appel sur trois des séances de sa vie intérieure (sonde du 2026-10-03).
+    Contre-exemple : un « done » refusé (rien n'a été fait) laisse la séance continuer."""
+    def daydreams(req):
+        if [m for m in req.messages if m.role == "tool"]:
+            return LLMResponse("fin")
+        return llm_call(req, ("goal_reflect", {"text": "Ce qui me plaît dans les jeux rétro, c'est leur simplicité : "
+                                                       "des règles qu'on comprend tout de suite, et pourtant on y "
+                                                       "revient pendant des heures, juste pour le plaisir."}),
+                        ("report_step", {"verdict": "done", "summary": "J'ai rêvassé, c'était doux."}))
+
+    async def scenario(kernel, llm):
+        llm._step = daydreams
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await kernel.mind.append([goals_c.GOAL_OPENED.draft(
+            kind=goals_c.EXPLORATION, authority=goals_c.SELF, title=Content.of("Rêvasser un peu autour des jeux rétro"),
+            details=Content.of("Gaming"), bundles=("goals", "memory", "projects"), max_steps=3,
+            source="interest:Gaming", sensitivity=0, desire=1.0, origin=goals_c.FROM_INTEREST)],
+            emitter="goals", correlation="genese", origin=Origin.GENESIS)
+        await asyncio.sleep(4 * HOUR / US)
+
+    r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0))
+    [closed] = [x for x in r.of(goals_c.GOAL_CLOSED) if x.data.source == "interest:Gaming"]
+    assert closed.data.status == goals_c.ACHIEVED
+    steps = [c for c in r.llm.calls if c.role == "step"]
+    assert len(steps) == 1, f"une séance qui conclut d'un trait : un appel, pas {len(steps)}"
+
+
 def test_her_daydreams_follow_no_fixed_rotation_and_last_one_session(tmp_path):
     """Sans flux où chercher du neuf, sa curiosité la fait rêvasser : chaque rêverie se vit d'un trait (une
     séance), et ses sujets ne défilent pas dans l'ordre de sa persona, un par jour comme un métronome (sonde réelle
@@ -553,19 +620,21 @@ def test_her_daydreams_follow_no_fixed_rotation_and_last_one_session(tmp_path):
     assert order != rotation, "pas un tourniquet sur la liste de sa persona"
 
 
-@pytest.mark.parametrize("origin", [goals_c.FROM_INTEREST, goals_c.FROM_EXCHANGE])
+@pytest.mark.parametrize("origin", [goals_c.FROM_INTEREST, goals_c.FROM_EXCHANGE, goals_c.FROM_SIGNAL])
 def test_a_daydream_that_gives_nothing_fades_away_it_never_blocks(tmp_path, origin):
     """Rêvasser ne se rate pas : une rêverie dont les séances ne donnent rien se dissipe — ni « je bloque », ni
-    frustration, ni estime en baisse, ni « tu as laissé tomber » dans son journal. Contre-exemple : la même
-    absence de résultat sur ce qu'on lui a confié, c'est bloquer (sonde réelle du 2026-10-02 : « Je bloque sur :
-    Rêvasser un peu autour de Gaming — ça t'agace »)."""
+    frustration, ni estime en baisse, ni « tu as laissé tomber » dans son journal (sonde réelle du 2026-10-02 :
+    « Je bloque sur : Rêvasser un peu autour de Gaming — ça t'agace »). Repenser à ce qu'on lui a confié non plus :
+    une réflexion qui ne donne rien en reste là (ADR 0053). Contre-exemple : une exploration qui va lire ses flux
+    et n'en tire rien, c'est bloquer."""
     async def scenario(kernel, llm):
         llm._step = lambda req: LLMResponse("")  # des séances qui ne concluent rien
         await connect(kernel, "user_1", "Adrien", operator=True)
         esteem0 = kernel.mind.frame().get(self_c.ESTEEM)
+        reads = ("rss",) if origin == goals_c.FROM_SIGNAL else ()
         await kernel.mind.append([goals_c.GOAL_OPENED.draft(
             kind=goals_c.EXPLORATION, authority=goals_c.SELF, title=Content.of("Rêvasser un peu autour des jeux rétro"),
-            details=Content.of("Gaming"), bundles=("goals", "memory", "projects"), max_steps=5,
+            details=Content.of("Gaming"), bundles=("goals", "memory", "projects", *reads), max_steps=5,
             source="interest:Gaming" if origin == goals_c.FROM_INTEREST else "thought:42", sensitivity=0,
             desire=1.0, origin=origin)], emitter="goals", correlation="genese", origin=Origin.GENESIS)
         assert await when(kernel, closed_now, limit=12 * HOUR)
@@ -578,8 +647,9 @@ def test_a_daydream_that_gives_nothing_fades_away_it_never_blocks(tmp_path, orig
     esteem0, esteem1, thoughts, deeds = r.result
     [closed] = r.of(goals_c.GOAL_CLOSED)
     blocked = [t for t in thoughts if t.origin == attention_c.BLOCKED]
-    if origin == goals_c.FROM_INTEREST:
-        assert (closed.data.status, closed.data.reason) == (goals_c.ABANDONED, goals_c.DISSIPATED)
+    if origin in (goals_c.FROM_INTEREST, goals_c.FROM_EXCHANGE):
+        quietly = goals_c.DISSIPATED if origin == goals_c.FROM_INTEREST else goals_c.LET_GO
+        assert (closed.data.status, closed.data.reason) == (goals_c.ABANDONED, quietly)
         assert not blocked and esteem1 == esteem0
         assert not [d for d in deeds if d.what in ("abandoned", "blocked")]
     else:

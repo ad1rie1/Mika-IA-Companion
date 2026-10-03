@@ -60,9 +60,24 @@ class FakePoller:
 class _Settings:
     def __init__(self, **tg: Any) -> None:
         self.tg = {"token": "t", "allowed_chats": [], "owners": [], "open": False, **tg}
+        self.pairing: tuple[str, int] | None = None
 
     def telegram(self) -> dict[str, Any]:
         return self.tg
+
+    async def save_telegram(self, *, owners: list[int] | None = None, **_: Any) -> None:
+        if owners is not None:
+            self.tg["owners"] = sorted(set(owners))
+
+    def telegram_pairing(self) -> tuple[str, int] | None:
+        return self.pairing
+
+    async def new_telegram_pairing(self, now_s: int, ttl_s: int) -> str:
+        self.pairing = ("K7QF-M3XP", now_s + ttl_s)
+        return self.pairing[0]
+
+    async def clear_telegram_pairing(self) -> None:
+        self.pairing = None
 
 
 class _Router:
@@ -72,11 +87,16 @@ class _Router:
 class _Live(Live):
     """Le robot seul, sans noyau."""
 
+    now_s = 1_000
+
     async def reconfigure(self) -> list[str]:
         return []
 
     def persona(self) -> Any:
         return type("P", (), {"name": "Mika"})()
+
+    def _now_s(self) -> int:
+        return self.now_s
 
 
 def live_with(poller: FakePoller, **tg: Any) -> Live:
@@ -120,9 +140,43 @@ async def test_a_refused_token_is_not_retried_and_a_closed_robot_does_not_start(
     await asyncio.sleep(0.05)
     assert live.telegram_status == "invalid" and poller.starts == 1
     assert live.channel_health() == {"telegram": "ko"}
+
+
+async def test_a_closed_robot_waits_for_a_pairing_and_the_code_makes_its_sender_an_owner(monkeypatch):
+    """G-3 : fermé (ni liste, ni propriétaire, ni ouverture), le robot ne démarrait pas — la propriétaire lui
+    écrivait dans le vide et devait trouver son identifiant numérique ailleurs. Désormais la relève tourne en
+    mode appairage, avec un code à usage unique : le bon code, encore valable, fait de son auteur une
+    propriétaire ; un faux, un expiré, ou le même une seconde fois, non."""
+    from mika.app import server
+
+    audits: list[tuple[str, str]] = []
+
+    async def audit(kernel, action, *, by, **kw):
+        audits.append((action, by))
+
+    monkeypatch.setattr(server.operations, "audit", audit)
     closed = live_with(FakePoller(fail=0))  # ni liste, ni propriétaire, ni ouverture
+    closed.kernel = None  # type: ignore[assignment]
     await closed.start_telegram()
-    assert closed.telegram_status == "closed" and closed.make_poller.starts == 0  # type: ignore[attr-defined]
+    for _ in range(100):
+        if closed.telegram_status != "starting":
+            break
+        await asyncio.sleep(0.01)
+    assert closed.telegram_status == "pairing" and closed.make_poller.starts == 1  # type: ignore[attr-defined]
+    assert closed.channel_health() == {"telegram": "degraded"}  # personne ne peut encore lui écrire
+    code, until = closed.settings.telegram_pairing()  # type: ignore[misc]
+    assert until == 1_000 + server.PAIRING_TTL_S
+    assert await closed.pair_telegram(42, "ZZZZ-ZZZZ", "Léa") == "wrong"
+    assert await closed.pair_telegram(42, code.lower().replace("-", " "), "Léa") == "paired"  # casse, séparateur
+    assert closed.settings.telegram()["owners"] == [42] and closed.telegram_status == "running"
+    assert await closed.pair_telegram(43, code, "Bob") == "none"  # à usage unique
+    assert audits == [("console.telegram.appairage", "tg_42")]  # journalisé, sans le code
+    await closed.telegram_pairing_code()
+    closed.now_s += server.PAIRING_TTL_S + 1  # un jour plus tard : expiré
+    expired_code, _ = closed.settings.telegram_pairing()  # type: ignore[misc]
+    assert await closed.pair_telegram(44, expired_code, "Zoé") == "expired"
+    assert closed.settings.telegram()["owners"] == [42]
+    await closed.stop_telegram()
 
 
 def test_a_deployment_behind_a_proxy_declares_its_origin_and_secure_cookies():

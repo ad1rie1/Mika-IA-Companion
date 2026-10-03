@@ -37,6 +37,12 @@ BURST = ("salut", "t'as vu le match hier ?", "allo ?")
 def _llm(clock: SimClock, seed: int) -> ScriptedLLM:
     def respond(req: LLMRequest) -> LLMResponse:
         if req.role == "reply":
+            # une réponse à ce qu'on vient de lui dire (une phrase redite à l'identique ne part plus, ADR 0054)
+            said = req.messages[-1].content.rsplit("--- FIN ETAT INTERNE ---", 1)[-1]
+            if "manger" in said:
+                return LLMResponse("Bon appétit alors, à tout à l'heure ! [EMOTION:happy:0.4]")
+            if "rentré" in said:
+                return LLMResponse("Re ! Alors, c'était bon ce repas ? [EMOTION:happy:0.5]")
             return LLMResponse("Coucou ! Oui je l'ai vu, quel match ! [EMOTION:excited:0.6]")
         if req.role == "step":
             return LLMResponse("J'ai avancé. [EMOTION:determined:0.4]")

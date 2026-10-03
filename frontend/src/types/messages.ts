@@ -25,7 +25,14 @@ export interface ProjectSummary {
   priority: string;
   origin: string;
   emotion_policy: string;
+  /** Son mode, en mots (`app/mindport.py`) : vide pour son mode à elle,
+   * « impersonnel » pour un travail factuel. Ce que montre le panneau —
+   * jamais `emotion_policy` brut (« full »). */
+  mode_label?: string;
   schedule_rule: string;
+  /** Son agenda en mots, comme la console le dit (« les jours ouvrés à
+   * 9 h ») — jamais `manual` ni `cron:…` dans le panneau. */
+  schedule_label?: string;
   next_run_at: string | null;
   tasks_total: number;
   tasks_done: number;
@@ -39,6 +46,12 @@ export interface PendingProjectAction {
   proposal: string;
   payload_kind: string;
   created_at: string;
+  /** À qui c'est, en mots : un projet, « Courrier », « Forge » (jamais
+   * `email` brut). */
+  owner_label?: string;
+  /** Ce que ça fera, en mots (la description de la capacité), jamais
+   * `email.send`. */
+  kind_label?: string;
 }
 
 /**
@@ -71,8 +84,14 @@ export interface InnerState {
     bias_emotion: string;
   };
   sleep_phase?: SleepPhase;
+  /**
+   * Son dernier journal écrit — celui d'une journée **passée** (il s'écrit la
+   * nuit), malgré le nom historique de la clé. `title` le dit (« Son journal
+   * d'hier ») ; `date` est le jour qu'il couvre.
+   */
   today_journal?: {
     date: string;
+    title?: string;
     narrative: string;
     dominant_emotion: string;
     persons_interacted: string[];
@@ -89,10 +108,6 @@ export interface InnerState {
   pending_project_actions?: PendingProjectAction[];
   self_narrative?: {
     content: string;
-    key_themes: string[];
-    key_people: string[];
-    dominant_mood: string;
-    created_at: string;
   };
   ruminations?: Array<{
     summary: string;
@@ -173,17 +188,31 @@ export interface SpeechMessage {
   client_msg_id?: string | null;
 }
 
+/** Une pièce jointe d'un message relu : son nom et sa sorte, jamais ce
+ * qu'elle en a perçu (ça, c'est pour son prompt). */
+export interface HistoryAttachment {
+  name: string;
+  /** `image` | `audio` | `file` */
+  kind: string;
+}
+
 /** One persisted message as the history frame carries it. */
 export interface HistoryEntry {
   id: number;
   role: string;
+  /**
+   * Ce que la personne a tapé (ADR 0056) ; ses fichiers sont à part, dans
+   * `attachments`, et s'affichent `texte [photo.png]` comme à l'envoi. Un
+   * message d'un journal plus ancien porte son texte perçu tel quel, sans
+   * pièce jointe annoncée.
+   */
   text: string;
   /** Epoch milliseconds — read straight into `new Date()`. */
   ts: number;
   source?: string;
   emotion?: string;
   emotion_intensity?: number;
-  attachments?: unknown[];
+  attachments?: HistoryAttachment[];
 }
 
 /**
@@ -202,6 +231,19 @@ export interface HistoryMessage {
   messages: HistoryEntry[];
   last_id: number;
   truncated: boolean;
+  /**
+   * L'empreinte de sa vie (le même journal depuis sa genèse). Un cache local
+   * gardé sous une autre empreinte — ou sans empreinte : l'ancien moteur —
+   * vient d'une autre vie, dont les identifiants ne veulent rien dire ici :
+   * il est vidé avant de fusionner (ADR 0056).
+   */
+  life?: string;
+  /**
+   * Le curseur envoyé dépassait la tête de ce fil (une sauvegarde plus
+   * ancienne restaurée, un fil oublié) : ce fil initial **remplace** ce que
+   * l'écran montre.
+   */
+  reset?: boolean;
 }
 
 /**
@@ -230,11 +272,11 @@ export interface AckMessage {
    */
   rejected_attachments?: RejectedAttachment[];
   /**
-   * Anything other than `accepted` means no reply is ever coming. The list
-   * must stay in step with the consumer (`_send_ack` call sites in
-   * communication/channels/web_frontend.py): a status missing here is
-   * still treated as a refusal at runtime, but the type would be claiming
-   * the server cannot send it.
+   * Anything other than `accepted` and `no_reply` means the message was
+   * refused and no reply is ever coming. The list must stay in step with
+   * the server (`adapters/web/protocol.py`): a status missing here is still
+   * treated as a refusal at runtime, but the type would be claiming the
+   * server cannot send it.
    */
   status:
     | "accepted"
@@ -243,7 +285,13 @@ export interface AckMessage {
     | "overloaded"
     | "too_long"
     | "attachments_rejected"
-    // Une question acceptée, abandonnée parce que trop vieille (second ack).
+    // Second ack d'une question **reçue** dont la réponse ne viendra pas (le
+    // modèle manque, ne répond pas, a dépassé son délai, ou la question a
+    // attendu trop longtemps) : pas un refus — la bulle reste envoyée et une
+    // note dit que la réponse ne viendra pas.
+    | "no_reply"
+    // L'ancien nom du cas « trop tard » (un serveur d'avant `no_reply`) : lu
+    // comme `no_reply` + `reason: "too_late"`.
     | "too_late"
     // Refus émis par le client lui-même (WebSocketClient), jamais reçus du
     // serveur : un frame trop gros est rejeté par le transport avant
@@ -252,6 +300,14 @@ export interface AckMessage {
     // même chemin d'affichage — un refus reste un refus.
     | "frame_too_large"
     | "send_abandoned";
+  /** Avec `no_reply` : pourquoi, en un mot (`no_model` | `unreachable` |
+   * `timeout` | `too_late` | `error`). */
+  reason?: string;
+  /** Avec `no_reply`, aux seules connexions opératrices : la cause en clair. */
+  detail?: string;
+  /** Avec `no_reply`, aux seules opératrices : où la réparer, une page de la
+   * console (`/inspecteur/…`, relative au serveur). */
+  href?: string;
 }
 
 /** Answer to the client's keepalive; `t` is echoed back verbatim. */
@@ -281,13 +337,6 @@ export interface EmotionUpdateMessage {
   emotion_state?: Record<string, unknown>;
 }
 
-export interface ProjectReportMessage {
-  type: "project_report";
-  project_id: number;
-  project_title: string;
-  text: string;
-}
-
 /**
  * v2 (reserved, not yet emitted by the backend): authoritative body
  * state broadcast so all clients render the same pose. The frontend
@@ -314,7 +363,6 @@ export interface ServerMessageMap {
   pong: PongMessage;
   inner_state_update: InnerStateUpdateMessage;
   emotion_update: EmotionUpdateMessage;
-  project_report: ProjectReportMessage;
   avatar_state: AvatarStateMessage;
   connection: ConnectionEvent;
 }

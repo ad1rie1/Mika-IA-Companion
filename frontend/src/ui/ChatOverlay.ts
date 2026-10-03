@@ -1,14 +1,24 @@
 import { renderInline } from "./inlineMarkup";
 import { WebSocketClient } from "../network/WebSocketClient";
-import type { HistoryEntry, RejectedAttachment } from "../types";
+import { API_BASE } from "../network/api";
+import type { AckMessage, HistoryMessage, RejectedAttachment } from "../types";
 import {
   applyAck,
+  ASLEEP_NOTE,
+  asleepNoteShown,
   bindServerId,
+  consoleHref,
   cursorOf,
+  fromAnotherLife,
+  keepAcrossLives,
+  markAsleep,
   mergeHistory,
   nextClientMsgId,
+  readCache,
   restoredStatus,
   stripProsody,
+  withAttachments,
+  writeCache,
 } from "./chatSync";
 import type { MessageStatus, StoredMessage } from "./chatSync";
 
@@ -34,6 +44,14 @@ const ACCEPTED_TYPES = [
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
 const MAX_ATTACHMENTS = 5;
 const MAX_MESSAGES = 50;
+/**
+ * La longueur maximale d'un message, celle du serveur
+ * (`adapters/web/protocol.py::MAX_MESSAGE_CHARS`) : au-delà, il le refuse
+ * (`too_long`) — et le champ, vidé à l'envoi, avait déjà perdu le texte.
+ */
+export const MAX_MESSAGE_CHARS = 2000;
+/** Le compteur ne se montre qu'à l'approche de la limite. */
+const COUNTER_FROM = 1800;
 /**
  * Prefix of the per-identity cache key. It used to be a single global key,
  * which meant the thread survived a change of identity: "Réinitialiser ton
@@ -107,6 +125,9 @@ export class ChatOverlay {
    */
   private attachmentNotices: string[] = [];
   private history: StoredMessage[] = [];
+  /** L'empreinte de la vie d'où vient ce fil (voir chatSync.CachedThread). */
+  private life = "";
+  private counterEl: HTMLElement | null = null;
   private typingEl: HTMLElement | null = null;
   private typingTimer: number | null = null;
   /** The server dropped the oldest part of a catch-up; said, not hidden. */
@@ -125,6 +146,13 @@ export class ChatOverlay {
     this.sendBtn = document.getElementById("chat-send")!;
     this.attachBtn = document.getElementById("chat-attach")!;
     this.previewsEl = document.getElementById("attachment-previews")!;
+    // La limite du serveur, connue du champ : on ne tape pas 2 500 caractères
+    // pour se les voir refuser après l'envoi.
+    this.inputEl.maxLength = MAX_MESSAGE_CHARS;
+    this.counterEl = document.createElement("div");
+    this.counterEl.className = "chat-note chat-counter";
+    this.counterEl.hidden = true;
+    this.previewsEl.after(this.counterEl);
 
     // Hidden file input
     this.fileInput = document.createElement("input");
@@ -172,14 +200,14 @@ export class ChatOverlay {
 
   private restoreHistory() {
     try {
-      const raw = localStorage.getItem(this.historyKey);
-      if (!raw) return;
-      const stored = JSON.parse(raw);
-      if (!Array.isArray(stored)) return;
+      const cached = readCache(localStorage.getItem(this.historyKey));
+      this.life = cached.life;
+      const stored = cached.messages as Array<Partial<StoredMessage> | null>;
+      if (!stored.length) return;
       this.history = stored
         .filter(
           (m): m is StoredMessage =>
-            m &&
+            !!m &&
             typeof m.text === "string" &&
             (m.sender === "user" || m.sender === "vtuber")
         )
@@ -210,7 +238,7 @@ export class ChatOverlay {
 
   private persistHistory() {
     try {
-      localStorage.setItem(this.historyKey, JSON.stringify(this.history));
+      localStorage.setItem(this.historyKey, writeCache(this.life, this.history));
     } catch {
       // Quota exceeded / private mode — history is best-effort only.
     }
@@ -241,7 +269,10 @@ export class ChatOverlay {
     });
 
     // Auto-resize the textarea up to ~5 lines, then scroll inside.
-    this.inputEl.addEventListener("input", () => this.autoResizeInput());
+    this.inputEl.addEventListener("input", () => {
+      this.autoResizeInput();
+      this.updateCounter();
+    });
 
     this.attachBtn.addEventListener("click", () => this.fileInput.click());
 
@@ -299,6 +330,14 @@ export class ChatOverlay {
       // instead of the whole window.
       if (data.client_msg_id) {
         this.bindServerId(data.client_msg_id, data.user_message_id ?? undefined);
+        // Elle dort : la réponse attend son réveil. Sans ce mot, « Mika
+        // écrit… » s'éteignait et la bulle restait là, sans explication.
+        if (!data.text && data.voice_reason === "asleep") {
+          if (markAsleep(this.history, data.client_msg_id)) {
+            this.persistHistory();
+            this.repaint({ animate: false });
+          }
+        }
       }
       if (typeof data.text === "string" && data.text) {
         // Un murmure n'est pas persisté : il n'aura jamais d'id. Sans
@@ -313,17 +352,9 @@ export class ChatOverlay {
       }
     });
 
-    this.ws.on("ack", (data) => {
-      this.applyAck(data.client_msg_id, data.status, data.rejected_attachments);
-    });
+    this.ws.on("ack", (data) => this.applyAck(data));
 
-    this.ws.on("history", (data) => {
-      this.mergeHistory(
-        data.messages ?? [],
-        data.truncated === true,
-        data.mode === "initial" ? "initial" : "catchup"
-      );
-    });
+    this.ws.on("history", (data) => this.receiveHistory(data));
 
     // A terminal refusal (4401) means nothing queued will ever be sent.
     // Leaving those bubbles "en attente d'envoi" reads as "still on its
@@ -353,19 +384,41 @@ export class ChatOverlay {
   // ── Synchronisation ───────────────────────────────────────────────
 
   /** Record what the server said became of a message we sent. */
-  private applyAck(
-    cid: string,
-    status: string,
-    rejected?: RejectedAttachment[]
-  ) {
-    const { changed, failed } = applyAck(this.history, cid, status, rejected);
+  private applyAck(data: AckMessage) {
+    const rejected: RejectedAttachment[] | undefined = data.rejected_attachments;
+    const { changed, settled } = applyAck(
+      this.history, data.client_msg_id, data.status, rejected,
+      { reason: data.reason, detail: data.detail, href: data.href },
+    );
     if (!changed) return;
-    // A refused message is never answered, so the typing indicator has to go
-    // with it — otherwise it spins until its own timeout and reads as "she
-    // is thinking about it".
-    if (failed) this.hideTyping();
+    // A refused message — or one whose reply will not come — is never
+    // answered, so the typing indicator has to go with it: otherwise it
+    // spins until its own timeout and reads as "she is thinking about it".
+    if (settled) this.hideTyping();
     this.persistHistory();
     this.repaint({ animate: false });
+  }
+
+  /**
+   * Un morceau du fil arrive. S'il vient d'une autre vie que ce que l'écran
+   * garde (empreinte changée, ou `reset` : le curseur dépassait la tête du
+   * fil), l'écran est vidé d'abord — sinon le fil d'avant (l'ancien moteur,
+   * une sauvegarde plus récente que celle restaurée) cachait celui-ci.
+   */
+  private receiveHistory(data: HistoryMessage) {
+    let wiped = false;
+    if (fromAnotherLife(this.life, data)) {
+      this.history = keepAcrossLives(this.history);
+      this.truncated = false;
+      wiped = true;
+    }
+    if (typeof data.life === "string" && data.life) this.life = data.life;
+    this.mergeHistory(
+      data.messages ?? [],
+      data.truncated === true,
+      data.mode === "initial" ? "initial" : "catchup",
+      wiped,
+    );
   }
 
   /**
@@ -388,9 +441,10 @@ export class ChatOverlay {
    * flight.
    */
   private mergeHistory(
-    entries: HistoryEntry[],
+    entries: HistoryMessage["messages"],
     truncated: boolean,
-    mode: "initial" | "catchup" = "catchup"
+    mode: "initial" | "catchup" = "catchup",
+    wiped = false,
   ) {
     const before = this.history.length;
     const result = mergeHistory(this.history, entries, MAX_MESSAGES);
@@ -401,7 +455,7 @@ export class ChatOverlay {
     // session, long after the gap it described had been filled.
     this.truncated =
       mode === "initial" ? truncated : this.truncated || truncated;
-    const changed = result.added > 0 || result.adopted > 0;
+    const changed = wiped || result.added > 0 || result.adopted > 0;
     if (!changed && this.history.length === before && !truncated) {
       // Nothing new and nothing to say about a gap: repainting would flash
       // the whole thread for no reason.
@@ -430,6 +484,16 @@ export class ChatOverlay {
     const max = 120; // ~5 lines
     this.inputEl.style.height =
       Math.min(this.inputEl.scrollHeight, max) + "px";
+  }
+
+  /** « 1 850 / 2 000 » à l'approche de la limite ; rien avant. */
+  private updateCounter() {
+    if (!this.counterEl) return;
+    const n = this.inputEl.value.length;
+    this.counterEl.hidden = n < COUNTER_FROM;
+    this.counterEl.textContent =
+      `${n.toLocaleString("fr-FR")} / ${MAX_MESSAGE_CHARS.toLocaleString("fr-FR")} caractères` +
+      (n >= MAX_MESSAGE_CHARS ? " — c'est la limite" : "");
   }
 
   /** Animated "Mika écrit…" bubble shown between send and reply. */
@@ -561,11 +625,13 @@ export class ChatOverlay {
     let sent: boolean;
 
     if (this.pendingAttachments.length > 0) {
-      const label = this.pendingAttachments.map((a) => a.name).join(", ");
-      const display = text ? `${text} [${label}]` : `[${label}]`;
-      // The server stores the caption alone — the files live in their own
-      // store. `matchText` is what a history merge compares against, so the
-      // row can still recognise the bubble it belongs to.
+      // La même composition que le fil relu (chatSync.withAttachments) : la
+      // ligne du serveur reconnaît ainsi la bulle qui lui appartient.
+      // `matchText` — ce qui a été tapé — l'adopte encore si un fichier n'est
+      // pas passé.
+      const display = withAttachments(
+        text, this.pendingAttachments.map((a) => a.name),
+      );
       this.addMessage(display, "user", {
         cid,
         status: "pending",
@@ -590,6 +656,7 @@ export class ChatOverlay {
 
     this.inputEl.value = "";
     this.autoResizeInput();
+    this.updateCounter();
     // A message that never left the browser is not being answered, so no
     // typing indicator: the pending mark on the bubble is the truthful
     // signal, and it clears itself when the ack arrives after a reconnect.
@@ -656,23 +723,43 @@ export class ChatOverlay {
       const note = document.createElement("div");
       note.className = "chat-note";
       note.textContent =
-        "Historique plus ancien tronqué — la suite est dans le tableau de bord.";
+        "Historique plus ancien tronqué : seuls les derniers messages sont affichés ici.";
       this.insertBeforeTyping(note);
     }
 
-    for (const msg of this.history) {
+    this.history.forEach((msg, index) => {
       this.insertBeforeTyping(this.buildBubble(msg, opts.animate));
       // Ce que le serveur a écarté de cet envoi. Sous la bulle plutôt que
       // dans son infobulle : l'envoi a été *accepté*, donc rien dans son
       // apparence ne le distingue d'un envoi complet.
-      if (msg.note) {
-        const note = document.createElement("div");
-        note.className = "chat-note";
-        note.textContent = msg.note;
-        this.insertBeforeTyping(note);
+      if (msg.note) this.insertBeforeTyping(this.buildNote(msg.note));
+      // La réponse ne viendra pas : dit sous la bulle (le message, lui, est
+      // bien reçu) — pour une opératrice, avec où réparer.
+      if (msg.replyNote) {
+        this.insertBeforeTyping(this.buildNote(msg.replyNote, msg.replyHref));
+      } else if (asleepNoteShown(this.history, index)) {
+        this.insertBeforeTyping(this.buildNote(ASLEEP_NOTE));
       }
-    }
+    });
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  /** Une note de la machine sous une bulle (jamais une parole de Mika). Un
+   * lien n'y mène qu'à une page de la console. */
+  private buildNote(text: string, href?: string): HTMLElement {
+    const note = document.createElement("div");
+    note.className = "chat-note";
+    note.textContent = text;
+    const page = consoleHref(href);
+    if (page) {
+      const link = document.createElement("a");
+      link.href = `${API_BASE}${page}`;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = "ouvrir la console";
+      note.append(" ", link);
+    }
+    return note;
   }
 
   private insertBeforeTyping(el: HTMLElement) {

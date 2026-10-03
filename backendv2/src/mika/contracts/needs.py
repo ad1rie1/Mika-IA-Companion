@@ -87,6 +87,8 @@ class Matter:
     about: tuple[str, ...] = ()
     sensitivity: int = 1
     external: bool = False
+    #: un moment qui dure (une situation : un chat malade, un déménagement) — ``at`` : depuis quand
+    ongoing: bool = False
 
 
 #: ``MATTER(adresse)`` : ce dont elle pourrait parler à cette adresse (``Matter``), ou ``None`` — sans

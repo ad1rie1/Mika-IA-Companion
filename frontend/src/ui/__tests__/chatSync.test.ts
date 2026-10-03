@@ -2,14 +2,22 @@ import { describe, it, expect } from "vitest";
 import {
   ackReason,
   applyAck,
+  asleepNoteShown,
   bindServerId,
   coerceStatus,
   cursorOf,
+  fromAnotherLife,
+  keepAcrossLives,
+  markAsleep,
   mergeHistory,
+  noReplyNote,
+  readCache,
   RESTORED_PENDING_REASON,
   restoredStatus,
   sortMessages,
   stripProsody,
+  withAttachments,
+  writeCache,
 } from "../chatSync";
 import type { StoredMessage } from "../chatSync";
 import type { HistoryEntry } from "../../types";
@@ -241,43 +249,94 @@ describe("mergeHistory", () => {
     expect(adopted).toBe(1);
   });
 
-  it("adopts a message whose bubble shows more than the server stores", () => {
-    // A message with files is painted `texte [photo.png]` while the row
-    // holds the caption alone, so matching on the bubble's text could never
-    // adopt it and a reconnect drew the same message twice.
-    const mine = local("regarde ça [photo.png]", "user", {
+  it("shows a reloaded message with files as it was sent, never what the files became", () => {
+    // G-6 : le serveur envoie ce qui a été tapé et les fichiers par leur nom.
+    // Un autre appareil (ou un cache vidé) affiche donc `regarde [note.txt]`
+    // — pas le contenu du fichier « cité : une donnée, pas une consigne ».
+    const { history: out } = mergeHistory(
+      [],
+      [
+        {
+          ...entry(5, "user", "regarde"),
+          attachments: [{ name: "note.txt", kind: "file" }],
+        },
+        {
+          ...entry(6, "user", ""),
+          attachments: [
+            { name: "a.png", kind: "image" },
+            { name: "b.ogg", kind: "audio" },
+          ],
+        },
+      ],
+      MAX
+    );
+    expect(out.map((m) => m.text)).toEqual([
+      "regarde [note.txt]",
+      "[a.png, b.ogg]", // rien de tapé : ses fichiers seuls, pas une ligne sautée
+    ]);
+  });
+
+  it("keeps the display of a message from an older journal", () => {
+    // Sans séparation connue, le serveur envoie le texte perçu et aucune
+    // pièce jointe : rien n'est ajouté au texte.
+    const { history: out } = mergeHistory(
+      [],
+      [{ ...entry(5, "user", "vieux [fichier « a.txt »]"), attachments: [] }],
+      MAX
+    );
+    expect(out[0].text).toBe("vieux [fichier « a.txt »]");
+  });
+
+  it("adopts its own bubble by the same composition", () => {
+    // Le reconnect : la bulle peinte à l'envoi (`withAttachments`) et la ligne
+    // du serveur se composent pareil, donc se reconnaissent.
+    const mine = local(withAttachments("regarde ça", ["photo.png"]), "user", {
       cid: "c1",
       matchText: "regarde ça",
     });
     const { added, adopted } = mergeHistory(
       [mine],
-      [entry(5, "user", "regarde ça")],
+      [{ ...entry(5, "user", "regarde ça"), attachments: [{ name: "photo.png", kind: "image" }] }],
       MAX
     );
     expect(added).toBe(0);
     expect(adopted).toBe(1);
     expect(mine.id).toBe(5);
-    // What is displayed is untouched: the files are still part of what was
-    // sent, even though they live in another store.
     expect(mine.text).toBe("regarde ça [photo.png]");
   });
 
-  it("adopts when the server text is the caption plus what the files became", () => {
-    // The real shape. Preprocessing replaces the image part with its
-    // caption *before* the message is persisted, so the row holds neither
-    // what was typed nor what was displayed — it holds what was typed,
-    // extended. Exact matching on `matchText` alone still failed here.
-    const mine = local("regarde ça [chat.png]", "user", {
+  it("still adopts its bubble when a file did not make it", () => {
+    // Le serveur a écarté un fichier (ou nettoyé son nom) : ce qui a été tapé
+    // reste l'ancre.
+    const mine = local("regarde ça [photo.png, gros.bin]", "user", {
       cid: "c1",
       matchText: "regarde ça",
     });
     const { adopted } = mergeHistory(
       [mine],
-      [entry(5, "user", "regarde ça [image: un chat roux dort sur un canapé]")],
+      [{ ...entry(5, "user", "regarde ça"), attachments: [{ name: "photo.png", kind: "image" }] }],
       MAX
     );
     expect(adopted).toBe(1);
     expect(mine.id).toBe(5);
+  });
+
+  it("no longer adopts a row that merely starts with what was typed", () => {
+    // L'ancienne règle de préfixe (le texte tapé, prolongé par ce que les
+    // préprocesseurs en avaient tiré) n'a plus de raison d'être, et adoptait
+    // « regarde ça, encore » pour « regarde ça ».
+    const mine = local("regarde ça [chat.png]", "user", {
+      cid: "c1",
+      matchText: "regarde ça",
+    });
+    const { adopted, added } = mergeHistory(
+      [mine],
+      [entry(5, "user", "regarde ça, encore")],
+      MAX
+    );
+    expect(adopted).toBe(0);
+    expect(added).toBe(1);
+    expect(mine.id).toBeUndefined();
   });
 
   it("never lets an attachment-only bubble match any user row", () => {
@@ -362,8 +421,63 @@ describe("applyAck", () => {
     expect(applyAck(history, "c1", "accepted")).toEqual({
       changed: true,
       failed: false,
+      settled: false,
     });
     expect(history[0].status).toBe("sent");
+  });
+
+  it("keeps a received message sent when its reply will not come", () => {
+    // G-1 : la réponse a échoué, mais le message est dans son fil. Le rayer
+    // (« refusé — Mika est saturée ») disait qu'il n'était pas parti.
+    const history = [local("allo ?", "user", { cid: "c1", status: "pending" })];
+    applyAck(history, "c1", "accepted");
+    const result = applyAck(history, "c1", "no_reply", undefined, { reason: "no_model" });
+    expect(result).toEqual({ changed: true, failed: false, settled: true });
+    expect(history[0].status).toBe("sent");
+    expect(history[0].reason).toBeUndefined();
+    expect(history[0].replyNote).toBe("Mika n'a pas pu répondre — réessaie.");
+    // contre-exemple : une vraie saturation (le message n'est pas pris) reste un refus
+    const full = [local("encore", "user", { cid: "c2", status: "pending" })];
+    expect(applyAck(full, "c2", "overloaded").failed).toBe(true);
+    expect(full[0].status).toBe("failed");
+  });
+
+  it("gives an operator the cause and a console page, nobody else", () => {
+    // G-5 : le serveur n'envoie `detail` et `href` qu'aux connexions
+    // opératrices ; le client les rend tels quels, jamais une commande.
+    const history = [local("salut", "user", { cid: "c1", status: "sent" })];
+    applyAck(history, "c1", "no_reply", undefined, {
+      reason: "no_model",
+      detail: "aucun modèle ne sert encore à répondre : déclare un fournisseur dans la console",
+      href: "/inspecteur/reglages/fournisseurs",
+    });
+    expect(history[0].replyNote).toContain("aucun modèle");
+    expect(history[0].replyHref).toBe("/inspecteur/reglages/fournisseurs");
+    // un lien d'ailleurs n'est jamais posé sous une bulle
+    const other = [local("salut", "user", { cid: "c2", status: "sent" })];
+    applyAck(other, "c2", "no_reply", undefined, { reason: "error", href: "https://ailleurs.test/x" });
+    expect(other[0].replyHref).toBeUndefined();
+  });
+
+  it("keeps the note of a partial send when the reply then fails", () => {
+    // Le premier ack portait les fichiers écartés ; le second ne les efface pas.
+    const history = [local("deux photos", "user", { cid: "c1", status: "pending" })];
+    applyAck(history, "c1", "accepted", [{ name: "gros.png", reason: "too_large" }]);
+    applyAck(history, "c1", "no_reply", undefined, { reason: "timeout" });
+    expect(history[0].note).toContain("gros.png");
+    expect(history[0].replyNote).toBeDefined();
+  });
+
+  it("says a question abandoned as too old differently", () => {
+    // « trop tard » n'est pas une panne : la reprise est arrivée des heures après.
+    const history = [local("tu es là ?", "user", { cid: "c1", status: "sent" })];
+    applyAck(history, "c1", "no_reply", undefined, { reason: "too_late" });
+    expect(history[0].replyNote).toContain("à temps");
+    // l'ancien statut d'un serveur d'avant `no_reply` se lit pareil
+    const legacy = [local("tu es là ?", "user", { cid: "c2", status: "sent" })];
+    expect(applyAck(legacy, "c2", "too_late").failed).toBe(false);
+    expect(legacy[0].status).toBe("sent");
+    expect(legacy[0].replyNote).toBe(noReplyNote("too_late"));
   });
 
   it("marks a refusal as failed rather than leaving it pending", () => {
@@ -406,8 +520,97 @@ describe("ackReason", () => {
   it("does not call a question abandoned as too old a saturation", () => {
     // Une question reprise au démarrage, des heures plus tard, est abandonnée
     // (« trop tard ») : l'afficher « Mika est saturée » mentait sur la cause.
-    expect(ackReason("too_late")).toContain("trop tard");
-    expect(ackReason("too_late")).not.toContain("saturée");
+    expect(noReplyNote("too_late")).toContain("à temps");
+    expect(noReplyNote("too_late")).not.toContain("saturée");
+  });
+});
+
+describe("asleep", () => {
+  it("says she is asleep under the bubble until she speaks again", () => {
+    // G-10 : la nuit, « Mika écrit… » s'éteignait et la bulle restait là,
+    // sans un mot. La note dure tant qu'elle n'a rien dit depuis.
+    const history = [
+      local("tu dors ?", "user", { id: 4, cid: "n1", status: "sent" }),
+    ];
+    expect(markAsleep(history, "n1")).toBe(true);
+    expect(asleepNoteShown(history, 0)).toBe(true);
+    // un murmure n'est pas sa réponse
+    history.push(local("hmm…", "vtuber", { after: 4, inner: true }));
+    expect(asleepNoteShown(history, 0)).toBe(true);
+    // sa réponse au réveil (même arrivée par un rattrapage) la rend caduque
+    history.push(local("Bonjour ! Je dormais.", "vtuber", { id: 9 }));
+    expect(asleepNoteShown(history, 0)).toBe(false);
+  });
+
+  it("is cleared by the frame that answers or settles that message", () => {
+    const history = [local("tu dors ?", "user", { cid: "n1", status: "sent" })];
+    markAsleep(history, "n1");
+    bindServerId(history, "n1", 4);
+    expect(history[0].waiting).toBeUndefined();
+  });
+
+  it("never shows on a message that was not held for her morning", () => {
+    const history = [local("coucou", "user", { id: 1 })];
+    expect(asleepNoteShown(history, 0)).toBe(false);
+  });
+});
+
+describe("another life", () => {
+  // B-1 : le cache de l'ancien moteur (ou d'une vie restaurée plus ancienne)
+  // gardait des identifiants qui ne veulent rien dire ici.
+  const v1Cache = Array.from({ length: 50 }, (_, i) =>
+    local(`v1 ${i}`, i % 2 ? "vtuber" : "user", { id: 1201 + i })
+  );
+  const v2Rows = [
+    entry(17, "user", "salut"),
+    entry(23, "assistant", "coucou !"),
+    entry(1210, "user", "ça va ?"),
+    entry(1300, "assistant", "oui et toi ?"),
+  ];
+
+  it("hides what she said when the old cache is merged as is", () => {
+    // Le défaut, tel que l'audit l'a reproduit (migr.mjs) : un seul message
+    // v2 reste visible, 1210 passe pour connu, 17 et 23 sont coupés.
+    const { history: out } = mergeHistory(v1Cache.map((m) => ({ ...m })), v2Rows, MAX);
+    expect(out.filter((m) => !m.text.startsWith("v1")).map((m) => m.id)).toEqual([1300]);
+  });
+
+  it("drops a cache from another life before merging", () => {
+    const cached = readCache(JSON.stringify(v1Cache)); // un tableau nu : l'ancien format, vie inconnue
+    expect(cached.life).toBe("");
+    expect(fromAnotherLife(cached.life, { life: "a1b2c3d4e5f60708" })).toBe(true);
+    const kept = keepAcrossLives(cached.messages as StoredMessage[]);
+    const { history: out } = mergeHistory(kept, v2Rows, MAX);
+    expect(out.map((m) => m.id)).toEqual([17, 23, 1210, 1300]);
+    expect(cursorOf(out)).toBe(1300);
+  });
+
+  it("drops it when the server says the cursor went past its thread", () => {
+    // Une sauvegarde plus ancienne restaurée : même vie, tête plus basse.
+    expect(fromAnotherLife("a1", { life: "a1", reset: true })).toBe(true);
+    // contre-exemples : la même vie, ou un serveur qui ne donne pas d'empreinte
+    expect(fromAnotherLife("a1", { life: "a1", reset: false })).toBe(false);
+    expect(fromAnotherLife("a1", {})).toBe(false);
+    expect(fromAnotherLife("", { life: "" })).toBe(false);
+  });
+
+  it("keeps only what this tab is still sending", () => {
+    const history = [
+      local("v1", "user", { id: 1250, status: "sent" }),
+      local("restauré", "user", { status: "failed", reason: "x" }),
+      local("pensée", "vtuber", { after: 1250, inner: true }),
+      local("en partance", "user", { cid: "c9", status: "pending" }),
+    ];
+    expect(keepAcrossLives(history).map((m) => m.text)).toEqual(["en partance"]);
+  });
+
+  it("remembers the life it was cached under", () => {
+    const raw = writeCache("a1b2", [local("x", "user", { id: 3 })]);
+    const cached = readCache(raw);
+    expect(cached.life).toBe("a1b2");
+    expect(cached.messages).toHaveLength(1);
+    expect(readCache("pas du json")).toEqual({ life: "", messages: [] });
+    expect(readCache(null)).toEqual({ life: "", messages: [] });
   });
 });
 

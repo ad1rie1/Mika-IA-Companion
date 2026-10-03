@@ -20,7 +20,14 @@ enregistré : ce qu'elle a dit, ou ce que la personne lui en a dit elle-même,
 le reprend en mots, une fois le moment passé — pas seulement « il était sous
 ses yeux ». Une promesse **datée** se tient au moment dit
 (``KEEP_PROMISE``, une raison **due**, ``agency.OWED``) : dite à l'heure, elle
-est tenue (``promise_resolved``, ``by=KEPT_BY``).
+est tenue (``promise_resolved``, ``by=KEPT_BY``) ; jamais la veille. Un rappel
+demandé existe une fois : programmé (``goals``), il remplace la promesse
+(``by=REMINDER_BY``).
+
+Un moment dit ce qu'il pèse (``importance`` : ``IMPORTANT_MOMENT`` et plus, il
+compte) et s'il se fête (``festive`` : un anniversaire se souhaite le jour
+même). ``HARD_TIMES`` dit quand quelque chose de grave a touché quelqu'un ces
+derniers jours : le banal de sa vie se tait (ADR 0052).
 
 Chacune porte sa sensibilité (``vocab.privacy.Sensitivity``), les messages
 d'où elle vient, **qui le lui a confié** (``told_by`` : les auteurs de ces
@@ -29,6 +36,12 @@ conversation, un salon en compte plusieurs). Ce qu'une personne a demandé
 explicitement de ne répéter à personne est un **secret** (``secret``) : il ne
 ressort que devant celle qui l'a confié. Les textes sont des ``Content`` :
 effaçables par l'oubli, qui atteint aussi ce qu'une personne a confié.
+
+Une croyance peut n'appartenir qu'à elle et à la personne qu'elle concerne
+(``between_us`` : comment elle l'appelle, le surnom qu'elle lui donne, leurs
+blagues) : la colonne ``between_us`` de ``memory_items`` le dit à qui lit le
+lien (``social``, son registre avec une amie). Jamais devant une inconnue ni en
+public quand ça s'est dit en privé (ADR 0055).
 """
 
 from __future__ import annotations
@@ -50,6 +63,14 @@ DROPPED = "dropped"
 EXPIRED_BY = "échéance"
 #: qui règle une promesse qu'elle a tenue au moment dit, en le disant (une initiative ``KEEP_PROMISE``)
 KEPT_BY = "parole"
+#: qui règle une promesse qu'un rappel programmé (``goals``, l'outil ``goal_remind``) porte désormais : un rappel
+#: demandé existe une fois et une seule (ADR 0052)
+REMINDER_BY = "rappel"
+
+#: À partir de cette importance, un moment de la vie de quelqu'un compte (un entretien, un examen, un départ, une
+#: opération) : envers une amie, c'est la première chose qu'on demande après. En dessous (un rendez-vous de
+#: routine, une sortie), on peut en reparler si ça vient — et, quand quelque chose de grave la touche, ça se tait.
+IMPORTANT_MOMENT = 0.7
 
 #: Raison de preuve d'initiative : tenir une promesse datée au moment dit (« je te demanderai jeudi soir comment
 #: ça s'est passé » : jeudi soir, elle le demande). C'est **dû** (``agency.OWED``), jamais une relance.
@@ -60,6 +81,8 @@ BELIEF = "belief"
 PROMISE = "promise"
 EVENT = "event"
 CHUNK = "chunk"
+#: un échange dans un salon (un groupe) : retrouvé dans ce salon, jamais en privé (ADR 0059)
+ROOM_CHUNK = "room_chunk"
 
 
 class Remembered(Payload):
@@ -99,6 +122,9 @@ class Believed(Payload):
     #: … sauf ce qui la définit : un goût, un avis, un fait de sa vie (« les ramen, mon plat préféré ») — elle
     #: s'en souvient longtemps, et quand elle change d'avis, la nouvelle croyance remplace l'ancienne
     durable: bool = False
+    #: ce qui n'appartient qu'à elle et à la personne (``about``) : comment elle l'appelle (« Sam m'appelle
+    #: Mikachu »), le surnom qu'elle lui donne, leurs blagues, leurs expressions — de première main (ADR 0055)
+    between_us: bool = False
 
 
 class Reinforced(Payload):
@@ -119,6 +145,8 @@ class Reinforced(Payload):
     heard_by: tuple[str, ...] = ()
     secret: bool = False
     replaces: int | None = None
+    #: ce qui revient se révèle n'appartenir qu'à elles deux (un surnom) : ça le reste (ADR 0055)
+    between_us: bool = False
 
 
 class PromiseNoticed(Payload):
@@ -162,6 +190,12 @@ class EventNoted(Payload):
     call_id: str = ""
     #: une situation qui dure (un chat malade, un déménagement), pas un moment daté
     ongoing: bool = False
+    #: ce que le moment pèse dans sa vie (``IMPORTANT_MOMENT`` et plus : il compte) ; dans un journal plus ancien,
+    #: où rien ne le disait, il compte — comme alors
+    importance: float = 0.7
+    #: un moment qui se fête (un anniversaire, un mariage, une crémaillère) : il se souhaite le jour même, sans
+    #: « bonne chance » la veille ni « comment ça s'est passé » le lendemain (faux dans un journal plus ancien)
+    festive: bool = False
 
 
 class MomentFollowed(Payload):
@@ -240,6 +274,9 @@ class LifeEvent:
     secret: bool = False
     followed_at: int = 0
     ongoing: bool = False
+    #: ce qu'il pèse (``IMPORTANT_MOMENT`` et plus : il compte) ; un moment qui se fête (souhaité le jour même)
+    importance: float = 0.7
+    festive: bool = False
 
 
 #: Le dernier message relu par la consolidation.
@@ -253,9 +290,21 @@ PROMISES_TO = FactFamily("memory.promises_to", arg=str, type=tuple)
 #: alors, cet entretien ? »). Ce qui la concerne seulement : un moment qu'un
 #: tiers a raconté porte ce tiers dans ``told_by``, à respecter avant d'en parler.
 LIFE_EVENTS = FactFamily("memory.life_events", arg=str, type=tuple)
+#: Quelque chose de grave l'a touchée ces derniers jours (un deuil, une rupture, une maladie — ce qu'elle a lu de
+#: grave dans ses messages, ou ce qui l'a elle-même profondément attristée pour elle) : l'instant, 0 sinon. Un
+#: moment banal de sa vie se tait alors (ni « comment s'est passé ton dentiste ? » le lendemain d'un deuil, ni
+#: « bonne chance » pour un rendez-vous de routine) ; ce qui compte passe après des nouvelles d'elle.
+HARD_TIMES = FactFamily("memory.hard_times", arg=str, type=int, time_varying=True)
 
 ITEMS_TABLE = "memory_items"
 CHUNKS_TABLE = "memory_chunks"
+#: Qui concerne chaque élément (``item``, ``person``) : les clés de ``memory_items.about``, une par ligne, indexées
+#: par personne. « Ce qu'elle sait d'Alice » se lit sans parcourir toute la mémoire (ADR 0059) ; une clé telle
+#: qu'elle a été notée (une adresse, ``name:…``), jamais résolue.
+ABOUT_TABLE = "memory_about"
+#: Combien de fois la mémoire a oublié quelqu'un (une ligne, ``n``) : ce qui dit à l'index des vecteurs, qui n'est
+#: qu'un cache, de se rapprocher de ce qui reste — sans relire toute la mémoire à chaque énoncé (ADR 0059).
+FORGETS_TABLE = "memory_forgets"
 #: À qui elle a répété quoi (``item``, ``handle``, ``at``) : d'après la
 #: provenance de ce qu'elle a dit. Ce qu'elle a raconté à Bob, Bob le sait.
 TOLD_TABLE = "memory_told"

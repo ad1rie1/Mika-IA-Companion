@@ -202,6 +202,9 @@ def chat_messages(req: LLMRequest) -> list[dict[str, Any]]:
 class OpenAICompatBackend:
     """Un endpoint ``/chat/completions`` : un appel par requête, aucune boucle."""
 
+    #: il ne sait pas différer des outils (pas de recherche d'outils) : tous partent déclarés
+    defers_tools = False
+
     def __init__(
         self,
         api_key: str,

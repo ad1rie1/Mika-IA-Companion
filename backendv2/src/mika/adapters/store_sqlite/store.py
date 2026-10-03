@@ -18,10 +18,11 @@ import queue
 import re
 import sqlite3
 import threading
-from collections.abc import Callable, Collection, Iterator, Sequence
+from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
+from mika.kernel.clock import DAY
 from mika.ports.store import (
     AppendBatch,
     ContentRow,
@@ -61,6 +62,11 @@ CREATE TABLE IF NOT EXISTS projector_quarantine(name TEXT NOT NULL, seq INTEGER 
 """
 
 SNAPSHOTS_KEPT = 3
+#: Une ligne « partie » de la file de sortie se garde tant de temps, puis s'efface à l'instantané suivant : elle ne
+#: sert plus qu'à la console (« Sorties ») — le journal garde l'événement, et une clé de sortie ne revient jamais
+#: (l'identifiant de l'événement en fait partie). Ce qui n'est pas parti (en attente, en cours, échoué, interrompu,
+#: périmé, vu) reste, quel que soit son âge (ADR 0059).
+OUTBOX_DONE_KEPT_US = 30 * DAY
 
 
 class SqlConn:
@@ -314,7 +320,7 @@ class SqliteStore:
 
         return await self._writer.run(wrapped)
 
-    async def forget_subject(self, subject: str, purge: Callable[[Sql, Sql], None]) -> int:
+    async def forget_subject(self, subject: str, purge: Callable[[Sql, Sql], Iterable[str] | None]) -> int:
         """Efface les contenus d'un sujet et ce que les projections en reprennent, dans une transaction par
         base : une purge qui lève défait tout (les deux bases), et l'écrivain reste utilisable. Les pages
         libérées sont mises à zéro par ``secure_delete`` et le WAL tronqué : pas de ``VACUUM``, qui
@@ -326,8 +332,12 @@ class SqliteStore:
                 for ref in refs:
                     m.execute("DELETE FROM content WHERE ref=?", (ref,))
                     m.execute("DELETE FROM content_subjects WHERE ref=?", (ref,))
-                purge(SqlConn(m), SqlConn(v))
-                return len(refs)
+                # ce que les projections lui ont rattaché sans que le texte le nomme (un renfort) : effacé aussi
+                extra = sorted({r for r in (purge(SqlConn(m), SqlConn(v)) or ()) if r and r not in refs})
+                for ref in extra:
+                    m.execute("DELETE FROM content WHERE ref=?", (ref,))
+                    m.execute("DELETE FROM content_subjects WHERE ref=?", (ref,))
+                return len(refs) + len(extra)
 
             removed = _transaction((m, v), body)
             for c in (m, v):
@@ -523,6 +533,32 @@ def _write_rows(m: sqlite3.Connection, batch: AppendBatch) -> None:
             "DELETE FROM snapshots WHERE seq NOT IN (SELECT seq FROM snapshots ORDER BY seq DESC LIMIT ?)",
             (SNAPSHOTS_KEPT,),
         )
+        _prune_outbox(m, s.at)
+
+
+def _prune_outbox(m: sqlite3.Connection, at: int) -> None:
+    """Efface les lignes parties de la file de sortie depuis plus de ``OUTBOX_DONE_KEPT_US`` (à chaque instantané,
+    quelques fois par jour : une recherche dichotomique dans le journal et une suppression indexée)."""
+    upto = _seq_before(m, at - OUTBOX_DONE_KEPT_US)
+    if upto:
+        m.execute("DELETE FROM outbox WHERE status='done' AND seq <= ?", (upto,))
+
+
+def _seq_before(m: sqlite3.Connection, t: int) -> int:
+    """Le dernier ``seq`` du journal écrit avant l'instant ``t`` (0 s'il n'y en a pas). Les instants du journal ne
+    décroissent jamais : une dichotomie sur la clé, jamais un parcours."""
+    first = m.execute("SELECT seq, at FROM events ORDER BY seq LIMIT 1").fetchone()
+    if first is None or int(first[1]) >= t:
+        return 0
+    lo, hi = int(first[0]), int(m.execute("SELECT MAX(seq) FROM events").fetchone()[0])
+    while lo < hi:  # l'événement ``lo`` est d'avant ``t``
+        mid = (lo + hi + 1) // 2
+        seq, at = m.execute("SELECT seq, at FROM events WHERE seq >= ? ORDER BY seq LIMIT 1", (mid,)).fetchone()
+        if int(at) < t:
+            lo = int(seq)
+        else:
+            hi = mid - 1
+    return lo
 
 
 __all__ = ["SqliteStore", "SqlConn", "StoreSealed", "ContentRow", "OutboxRow", "SnapshotRow", "StoredEvent"]

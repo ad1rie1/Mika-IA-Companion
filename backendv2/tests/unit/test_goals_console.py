@@ -208,11 +208,13 @@ def live(tmp_path, scenario, *, mode: str = "liar", start: int = MONDAY, ports=N
     return run_virtual(clock, main)
 
 
-async def explore(kernel, title: str = "Explorer : les jeux rétro", *, desire_: float = 1.0) -> int:
-    # une réflexion (ce qu'on lui a confié) : une séance s'y prouve en écrivant ce qu'elle en pense
+async def explore(kernel, title: str = "Explorer : les jeux rétro", *, desire_: float = 1.0,
+                  origin: str = goals_c.FROM_EXCHANGE) -> int:
+    # une réflexion (ce qu'on lui a confié) : une séance s'y prouve en écrivant ce qu'elle en pense ; une
+    # exploration née d'un signal (``FROM_SIGNAL``) peut, elle, bloquer (une réflexion en reste là, ADR 0053)
     commit = await kernel.mind.append([goals_c.GOAL_OPENED.draft(
         kind=goals_c.EXPLORATION, authority=goals_c.SELF, title=Content.of(title, level=0), bundles=("goals",),
-        max_steps=8, source="genese", sensitivity=0, desire=desire_, origin=goals_c.FROM_EXCHANGE)],
+        max_steps=8, source="genese", sensitivity=0, desire=desire_, origin=origin)],
         emitter="goals", correlation="genese", origin=Origin.GENESIS)
     return commit.seqs[-1]
 

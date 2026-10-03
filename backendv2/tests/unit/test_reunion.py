@@ -61,7 +61,9 @@ def test_a_close_friend_after_a_hollow_day_does_her_good_and_her_mood_says_it_in
     before, after, reunited, prompts = evening_after_a_hollow_day(tmp_path, social_c.CLOSE)
     assert before.cause == "lonely", "une journée creuse : elle se sentait seule"  # le décor du test
     assert [r.after for r in reunited] == [needs_c.LONELY]  # une fois, au premier message
-    assert after.position[0] - before.position[0] > 0.05  # la valence a remonté
+    # la valence a remonté (nettement plus qu'au message d'une inconnue, sous 0,03) ; une rêverie l'après-midi
+    # (ADR 0053 : deux par jour, étalées) laisse la journée un peu moins creuse qu'avant, où le mardi était vide
+    assert after.position[0] - before.position[0] > 0.04
     assert all(ALONE not in p for p in prompts)  # avant : « Personne ne t'a parlé » en pleine conversation
     assert any("seule une partie de la journée" in p for p in prompts) or after.cause != "lonely"
 

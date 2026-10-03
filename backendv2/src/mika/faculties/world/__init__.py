@@ -32,7 +32,7 @@ from mika.contracts import body as body_c
 from mika.contracts import place as place_c
 from mika.contracts import world as w
 from mika.faculties.world import plan
-from mika.kernel.clock import US
+from mika.kernel.clock import DAY, US
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
@@ -97,6 +97,8 @@ class WorldState:
     requests: FrozenDict[str, w.Request] = field(default_factory=FrozenDict)
     #: le dernier événement du monde réduit (l'instantané dit « où en est le journal »)
     seq: int = 0
+    #: ses occupations terminées des derniers jours (``world.lived`` y ajoute celle en cours)
+    lived: tuple[w.Lived, ...] = ()
 
 
 def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
@@ -104,13 +106,29 @@ def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
     return WorldState(definition=defn, actors=FrozenDict(actors), objects=FrozenDict(objects))
 
 
-WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams)
+WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=2)
+
+#: Ce qu'on garde de ses occupations passées : trois jours, soixante au plus.
+LIVED_KEPT_US = 3 * DAY
+LIVED_KEPT = 60
 WORLD.declare(*w.ALL)
 
 
 def _lived(s: WorldState, actors: Mapping[str, w.ActorState], objects: Mapping[str, w.ObjectState],
-           seq: int, **more: Any) -> WorldState:
-    return replace(s, actors=FrozenDict(actors), objects=FrozenDict(objects), seq=seq, **more)
+           seq: int, at: int | None = None, **more: Any) -> WorldState:
+    """La tranche après un changement de l'état vécu ; une occupation de Mika qui s'arrête (une autre commence,
+    elle part, son temps est passé) entre dans ce qu'elle a vécu."""
+    out = replace(s, actors=FrozenDict(actors), objects=FrozenDict(objects), seq=seq, **more)
+    before, after = s.actors.get(w.MIKA), actors.get(w.MIKA)
+    old = before.activity if before is not None else None
+    if old is None or at is None or (after is not None and after.activity == old):
+        return out
+    end = min(old.until, at) if old.until is not None else at
+    entry = w.Lived(name=old.name, label=plan.affordance_label(s.definition, old)[:60], object=old.object,
+                    object_label=plan.label_of(s.definition, old.object)[:60] if old.object else "",
+                    since=old.since, until=end)
+    kept = tuple(x for x in s.lived if x.since >= at - LIVED_KEPT_US)[-(LIVED_KEPT - 1):]
+    return replace(out, lived=(*kept, entry))
 
 
 def _start(s: WorldState, intent: w.Intent, seq: int) -> WorldState:
@@ -125,7 +143,7 @@ def _start(s: WorldState, intent: w.Intent, seq: int) -> WorldState:
     actors[intent.actor] = me.model_copy(update={"moving": moving, "activity": None})
     intents = {k: v for k, v in s.intents.items() if v.actor != intent.actor}
     intents[intent.id] = intent
-    return _lived(s, actors, s.objects, seq, intents=FrozenDict(intents))
+    return _lived(s, actors, s.objects, seq, intent.started, intents=FrozenDict(intents))
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
@@ -145,13 +163,13 @@ def _ended(s: WorldState, e: Any, cx: Any) -> WorldState:
     if me is not None:
         actors[e.data.actor] = me.model_copy(update={"moving": None})
     intents = {k: v for k, v in s.intents.items() if k != e.data.intent}
-    return _lived(s, actors, objects, e.seq, intents=FrozenDict(intents))
+    return _lived(s, actors, objects, e.seq, e.at, intents=FrozenDict(intents))
 
 
 @WORLD.reducer(w.CHANGED)
 def _changed(s: WorldState, e: Any, cx: Any) -> WorldState:
     actors, objects = plan.apply(s.actors, s.objects, e.data.changes, e.at)
-    return _lived(s, actors, objects, e.seq)
+    return _lived(s, actors, objects, e.seq, e.at)
 
 
 @WORLD.reducer(w.AUTHORED)
@@ -165,7 +183,7 @@ def _authored(s: WorldState, e: Any, cx: Any) -> WorldState:
         return s
     actors, objects = plan.reconcile(defn, s.actors, s.objects)
     intents = {k: v for k, v in s.intents.items() if v.actor in actors}
-    return _lived(replace(s, definition=defn), actors, objects, e.seq, intents=FrozenDict(intents))
+    return _lived(replace(s, definition=defn), actors, objects, e.seq, e.at, intents=FrozenDict(intents))
 
 
 @WORLD.reducer(place_c.MOVED)
@@ -179,7 +197,7 @@ def _placed(s: WorldState, e: Any, cx: Any) -> WorldState:
     actors[w.MIKA] = me.model_copy(update={"room": place.room, "place": place.id, "posture": plan.default_posture(place),
                                            "since": e.at, "moving": None, "activity": None})
     intents = {k: v for k, v in s.intents.items() if v.actor != w.MIKA}
-    return _lived(s, actors, s.objects, e.seq, intents=FrozenDict(intents))
+    return _lived(s, actors, s.objects, e.seq, e.at, intents=FrozenDict(intents))
 
 
 @WORLD.reducer(body_c.FELL_ASLEEP)
@@ -215,7 +233,7 @@ def _woke(s: WorldState, e: Any, cx: Any) -> WorldState:
     actors[w.MIKA] = me.model_copy(update={"room": bed.room, "place": bed.id, "posture": w.Posture.SIT,
                                            "moving": None, "since": me.since if me.place == bed.id else e.at})
     intents = {k: v for k, v in s.intents.items() if v.actor != w.MIKA}
-    return _lived(s, actors, s.objects, e.seq, intents=FrozenDict(intents))
+    return _lived(s, actors, s.objects, e.seq, e.at, intents=FrozenDict(intents))
 
 
 # ── Faits ─────────────────────────────────────────────────────────────────
@@ -246,6 +264,19 @@ def _around_fact(s: WorldState, cx: Any) -> tuple[str, ...]:
 @WORLD.fact(w.REACH)
 def _reach(s: WorldState, cx: Any, actor: str) -> tuple[str, ...]:
     return tuple(plan.reachable(s.definition, s.actors, s.objects, actor))
+
+
+@WORLD.fact(w.LIVED)
+def _lived_fact(s: WorldState, cx: Any) -> tuple[w.Lived, ...]:
+    me = s.actors[w.MIKA]
+    a = me.activity
+    if a is None:
+        return s.lived
+    ended = a.until if a.until is not None and a.until <= cx.now else None
+    current = w.Lived(name=a.name, label=plan.affordance_label(s.definition, a)[:60], object=a.object,
+                      object_label=plan.label_of(s.definition, a.object)[:60] if a.object else "", since=a.since,
+                      until=ended)
+    return (*s.lived, current)
 
 
 @WORLD.fact(w.PENDING)
@@ -380,21 +411,20 @@ def around(s: WorldState, now: int, p: WorldParams) -> str:
         budget -= len(me.holding)
     reach = [o for o in plan.reachable(defn, s.actors, s.objects, w.MIKA) if o not in me.holding]
     if reach and budget > 0:
-        lines.append("À portée : " + " ; ".join(_thing(s, me, o) for o in reach[:budget]) + ".")
+        lines.append("À portée de main : " + " ; ".join(_thing(s, me, o) for o in reach[:budget]) + ".")
         budget -= len(reach[:budget])
-    elsewhere: list[str] = []
+    # où aller, puis de quoi se servir : deux listes, jamais « sur ton lit : ta plante » (qui se lit « la plante
+    # est sur le lit ») — ``interact`` y va de lui-même, l'endroit d'un objet n'a pas à se dire
+    places = []
     for pl in [pl for pl in defn.places if pl.id != me.place][:p.shown_places]:
-        if pl.room != me.room:
-            room = defn.room(pl.room)
-            elsewhere.append(f"{pl.label} (`{pl.id}`), dans {room.label if room else pl.room}")
-            continue
-        near = [o for o in _anchored(s, pl.id) if o not in reach
-                and plan.actions_of(defn, s.objects, me, o)][:max(0, min(2, budget))]
-        budget -= len(near)
-        things = (" : " + ", ".join(_thing(s, me, o) for o in near)) if near else ""
-        elsewhere.append(f"{pl.label} (`{pl.id}`){things}")
-    if elsewhere:
-        lines.append("Ailleurs, où tu peux aller :\n" + "\n".join(f"- {e}" for e in elsewhere))
+        room = defn.room(pl.room) if pl.room != me.room else None
+        places.append(f"{pl.label} (`{pl.id}`" + (f", dans {room.label}" if room is not None else "") + ")")
+    if places:
+        lines.append("Tu peux aller " + " ; ".join(places) + ".")
+    usable = [o for o in plan.usable(defn, s.actors, s.objects, w.MIKA)
+              if o not in reach and o not in me.holding][:max(0, budget)]
+    if usable:
+        lines.append("Dans la pièce, de quoi te servir : " + " ; ".join(_thing(s, me, o) for o in usable) + ".")
     return "\n".join(lines)
 
 
@@ -403,19 +433,9 @@ def _thing(s: WorldState, me: w.ActorState, oid: str) -> str:
     identifiants qu'attend ``interact``)."""
     defn = s.definition
     state = plan.state_label(defn, oid, s.objects[oid].state)
-    acts = ", ".join(f"`{i}`" for i, _ in plan.actions_of(defn, s.objects, me, oid))
+    acts = ", ".join(i for i, _ in plan.actions_of(defn, s.objects, me, oid))
     return f"{plan.label_of(defn, oid)} (`{oid}`" + (f", {state}" if state else "") + ")" + (
-        f" → {acts}" if acts else "")
-
-
-def _anchored(s: WorldState, place: str) -> list[str]:
-    """Les objets qu'on atteint depuis ce lieu, du plus saillant au moins."""
-    out = []
-    for oid in s.objects:
-        anchor = plan.anchor_of(s.definition, s.actors, s.objects, oid)
-        if anchor is not None and anchor[1] == place:
-            out.append(oid)
-    return sorted(out, key=lambda o: (-plan.salience(s.definition, o), o))
+        f" : {acts}" if acts else "")
 
 
 @WORLD.section("world", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["rhythm"], trim_rank=70,

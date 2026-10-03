@@ -35,3 +35,14 @@ def test_the_week_goes_to_the_end_and_is_written_down(tmp_path):
 def test_without_a_configured_model_the_probe_says_so(tmp_path, capsys):
     assert cli.main(["--data", str(tmp_path / "v2"), "sim", "sonde", "--out", str(tmp_path / "sonde")]) == 2
     assert "mika llm backend" in capsys.readouterr().out
+
+
+def test_the_second_week_goes_to_the_end_with_its_group_and_its_report(tmp_path):
+    fake = Fake()
+    out = run_probe(for_simulation(), fake, tmp_path / "sonde", log=lambda _line: None, which="2")
+    fil = (out / "fil.txt").read_text()
+    assert "Sam > salut Mikachu" in fil and "Julie > joyeux anniv Sam" in fil
+    assert "Marc > @Mika toi tu sais comment il va ?" in fil and "Inès > tu dors ?" in fil
+    assert "Mika → Sam" in fil
+    bilan = (out / "bilan.txt").read_text()
+    assert "le rappel du dentiste" in bilan and "ses 30 ans" in bilan and "dans le salon Telegram" in bilan

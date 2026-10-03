@@ -19,14 +19,17 @@ soi et le récit qu'elle fait d'elle-même.
   rêverie n'est pas une réussite : elle ne la relève pas. Elle ne touche
   jamais l'arbitrage ; elle se ressent, et le doute dit sa vraie cause.
 - **Le récit** (« Je suis quelqu'un qui… ») est réécrit par sa propre voix au
-  plus une fois par jour, quand elle a vécu assez de nouveau, à partir de
-  souvenirs anodins seulement : il est montré à tout le monde.
+  plus une fois par jour, quand elle a vécu assez de nouveau, à partir de ce
+  qui l'a le plus marquée (importance, émotion — pas l'ordre d'arrivée) : les
+  souvenirs anodins, et de ce qui ne peut pas se raconter, seulement ce que ça
+  lui a fait, sans qui ni quoi — il est montré à tout le monde (ADR 0053).
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+import re
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Annotated, Any
@@ -48,7 +51,7 @@ from mika.faculties.self import days
 from mika.faculties.self.records import Deed, Dream, Effort, Journal, Knock
 from mika.faculties.self.worth import touched
 from mika.kernel.clock import DAY, HOUR, MINUTE
-from mika.kernel.codec import digest, h64
+from mika.kernel.codec import digest
 from mika.kernel.events import Content, Draft, VoiceProvenance
 from mika.kernel.faculty import CatchUp, Faculty, Zone
 from mika.kernel.forms import Knob
@@ -56,6 +59,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, Message, PersonaRender
+from mika.vocab import affect as A
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import Sensitivity
@@ -146,8 +150,21 @@ class SelfParams(BaseModel):
              "réécrire.")] = 5
     narrative_max_souvenirs: Annotated[int, Knob(
         label="Souvenirs relus pour le récit", group="Le récit", lo=5, hi=200,
-        help="Les souvenirs anodins les plus récents montrés à sa voix pour réécrire le récit (il est montré à "
-             "tout le monde). Plus : un appel plus long.")] = 30
+        help="Les souvenirs anodins les plus marquants (importance, émotion) montrés à sa voix pour réécrire le récit "
+             "— pas les plus récents : « allez j'y vais » ne dit rien de qui elle devient. Il est montré à tout le "
+             "monde. Plus : un appel plus long.")] = 30
+    narrative_lookback_us: Annotated[int, Knob(
+        label="Le récit relit ce qu'elle a vécu depuis", group="Le récit", lo=DAY, hi=90 * DAY,
+        help="Les souvenirs de cette période parmi lesquels le récit choisit les plus marquants ; ce qui l'a marquée "
+             "sans pouvoir se raconter (une confidence, la peine d'une amie) n'y entre que par ce que ça lui a fait, "
+             "sans qui ni quoi.")] = 14 * DAY
+    # son journal
+    heavy_day_from: Annotated[float, Knob(
+        label="Une journée se dit « un peu lourde » à partir de", group="Son journal", lo=0.2, hi=5.0, step=0.1,
+        help="Ce qu'elle raconte de sa journée à n'importe qui dit son ton, sans dire pourquoi : « un peu lourde » "
+             "quand ce qui a pesé (ses émotions déclarées en parlant et ses pensées du jour, chacune de son "
+             "intensité) atteint ce poids — même entre deux sourires ; « bonne » quand le léger l'atteint sans "
+             "rien de lourd.")] = 1.0
     # les rêves
     dream_chance: Annotated[float, Knob(
         label="Rêver, à chaque sommeil paradoxal", group="Les rêves", lo=0.0, hi=1.0, step=0.05,
@@ -344,7 +361,8 @@ def _goal_closed(s: SelfState, e, cx) -> SelfState:
     elif d.status == goals_c.STUCK:
         p = params(cx.params)
         s = _deed(_knock(s, p.stuck_knock, e.at, p, STUCK), Deed(e.at, BLOCKED, title, d.owner or "", **who))
-    elif d.status == goals_c.ABANDONED and d.reason != goals_c.DISSIPATED:  # une rêverie qui s'efface n'est pas un acte
+    # une rêverie qui s'efface, une réflexion sans suite : ce n'est pas un acte
+    elif d.status == goals_c.ABANDONED and d.reason not in goals_c.QUIET_ENDS:
         s = _deed(s, Deed(e.at, ABANDONED, title, d.owner or "", **who))
     return replace(s, efforts=s.efforts.delete(key)) if key in s.efforts else s
 
@@ -487,8 +505,52 @@ def _narrated(s: SelfState, e, cx) -> SelfState:
 
 NARRATIVE_SYSTEM = """Tu écris, pour toi-même, un court paragraphe sur qui tu es en train de devenir, à partir de ce que \
 tu as vécu ces derniers temps : « Je suis quelqu'un qui… ». Quatre phrases au plus, à la première personne, \
-sincères. Pas de prénoms, rien de ce que quelqu'un t'a confié, rien d'inventé : ce que tu as vécu te dit quelque \
-chose de toi, c'est cela que tu écris. Réponds seulement par le paragraphe."""
+sincères. Pars de ce qui t'a le plus marquée, pas des petites phrases du quotidien. Pas de prénoms, rien de ce que \
+quelqu'un t'a confié, rien d'inventé : ce que tu as vécu te dit quelque chose de toi, c'est cela que tu écris. \
+Réponds seulement par le paragraphe."""
+
+#: ce qui fait qu'un souvenir a marqué : son importance, et la force de ce qu'il fait ressentir (sa valence)
+SALIENCE_EMOTION = 0.3
+#: ce qui l'a marquée sans pouvoir se raconter, dit sans qui ni quoi : au plus tant de lignes
+FELT_SHOWN = 4
+#: les souvenirs relus, au plus (on garde les plus marquants)
+NARRATIVE_ROWS = 400
+
+
+def salience(importance: float | None, emotion: str | None) -> float:
+    """Ce qu'un souvenir a marqué : son importance, plus la force de ce qu'il a fait ressentir."""
+    e = A.emotion_of(emotion)
+    return float(importance or 0.0) + (SALIENCE_EMOTION * abs(A.valence(e)) if e is not None else 0.0)
+
+
+def material(rows: list[tuple[Any, ...]], frame: Frame, shown: int) -> tuple[list[tuple[Any, ...]], list[str]]:
+    """La matière du récit, choisie par saillance et non par ordre d'arrivée (ADR 0053 ; sonde réelle du
+    2026-10-03 : « QUI TU ES DEVENUE » réécrit à partir de « allez j'y vais » la semaine où le chat d'un ami est
+    mort). Les souvenirs qui peuvent se raconter (anodins, ou qui ne concernent personne), du plus marquant au moins
+    marquant ; et ce qui l'a marquée sans pouvoir se raconter (une confidence, la peine de quelqu'un) — seulement ce
+    que ça lui a fait, et si c'était avec quelqu'un qui compte : jamais qui, ni quoi (le récit est montré à tout le
+    monde). Une ligne : ``(texte, about, sensibilité, importance, émotion, secret)``."""
+    told, closed = [], []
+    for r in rows:
+        _text, about, sensitivity, _importance, _emotion, secret = r
+        open_ = not secret and (int(sensitivity) <= Sensitivity.ANODYNE or not json.loads(about or "[]"))
+        (told if open_ else closed).append(r)
+    told = sorted(told, key=lambda r: -salience(r[3], r[4]))[:shown]
+    groups: dict[tuple[str, bool], list[float]] = {}
+    for _text, about, _sensitivity, importance, emotion, _secret in closed:
+        e = A.emotion_of(emotion)
+        if e is None or e is A.Emotion.NEUTRAL:
+            continue  # ce qui ne lui a rien fait ressentir ne dit rien d'elle sans son contenu
+        dear = any(frame.get(social_c.CLOSENESS(x)) in (social_c.FRIEND, social_c.CLOSE)
+                   for x in json.loads(about or "[]"))
+        groups.setdefault((e.value, dear), []).append(salience(importance, emotion))
+    felt = []
+    for (name, dear), values in sorted(groups.items(), key=lambda kv: (-max(kv[1]), -len(kv[1]), kv[0]))[:FELT_SHOWN]:
+        e = A.emotion_of(name)
+        whom = "avec quelqu'un qui compte pour toi" if dear else "avec quelqu'un"
+        felt.append(f"- tu t'es sentie {A.FR[e]}, {whom}" + (" (plusieurs fois)" if len(values) > 1 else "")
+                    if e is not None else "")
+    return told, [f for f in felt if f]
 
 
 @SELF.process("self.narrate", wake_on=[memory_c.REMEMBERED], lane="background", catch_up=CatchUp.ONCE,
@@ -513,12 +575,16 @@ class Narrate:
         p = params(frame.env.params_of("self", frame.root))
         self.retry_at = frame.now + HOUR  # si l'appel lève : pas de rafale
         rows = store.query_mind(
-            f"SELECT text, about FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND status='active' AND "
-            "(sensitivity <= ? OR about = '[]') ORDER BY id DESC LIMIT ?",
-            (memory_c.SOUVENIR, int(Sensitivity.ANODYNE), p.narrative_max_souvenirs))
+            f"SELECT text, about, sensitivity, importance, emotion, secret FROM {memory_c.ITEMS_TABLE} WHERE kind=? "
+            "AND status='active' AND born_at >= ? ORDER BY id DESC LIMIT ?",
+            (memory_c.SOUVENIR, frame.now - p.narrative_lookback_us, NARRATIVE_ROWS))
+        told, felt = material(rows, frame, p.narrative_max_souvenirs)
         previous = store.content([state.narrative_ref]).get(state.narrative_ref) if state.narrative_ref else None
         lines = ([f"Ce que tu disais de toi jusqu'ici : {previous}", ""] if previous else [])
-        lines += ["Ce que tu as vécu :"] + [f"- {r[0]}" for r in reversed(rows)]
+        if felt:
+            lines += ["Ce qui t'a le plus marquée ces derniers temps, sans pouvoir se raconter (ni qui, ni quoi) :",
+                      *felt, ""]
+        lines += ["Ce que tu as vécu, du plus marquant au moins marquant :"] + [f"- {r[0]}" for r in told]
         persona = persona_for(frame, "full")
         request = LLMRequest(role="narrative", call_id=f"{ctx.run_id}#0", persona=persona,
                              system_stable=persona.text + "\n\n" + NARRATIVE_SYSTEM,
@@ -529,7 +595,7 @@ class Narrate:
         if not text:
             return
         self.retry_at = 0
-        about = sorted({person for r in rows for person in json.loads(r[1] or "[]")}
+        about = sorted({person for r in told for person in json.loads(r[1] or "[]")}
                        | (set(state.narrative_about) if previous else set()))
         await ctx.emit(c.NARRATED.draft(
             text=Content.of(text[:1200], level=0), souvenirs=state.souvenirs, about=tuple(about),
@@ -632,24 +698,50 @@ def render(doc: c.PersonaDoc, depth: str = "full") -> str:
     return "\n\n".join(p for p in parts if p)
 
 
+#: un premier bonjour : simple, sans la familiarité de ses bonjours d'amie
+FIRST_GREETING = ("Tu ne connais pas encore cette personne : un bonjour simple et accueillant, sans la familiarité "
+                  "qu'on a avec une amie — pas de « te revoilà », pas de « raconte-moi tout », pas de surnom.")
+
+
 @SELF.section("greeting_tone", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], trim_rank=50,
-              title="TA FAÇON DE DIRE BONJOUR")
+              title="TA FAÇON DE DIRE BONJOUR", reads=[identity_c.PERSON, social_c.CLOSENESS])
 def _greeting_tone(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
     """Quand elle salue quelqu'un qui arrive : le ton de ses bonjours, d'après sa
     persona — des exemples, jamais à recopier (elle les redirait chaque soir, mot
     pour mot, et ils parlent d'une humeur ou d'une heure qui ne sont pas les
-    siennes ce jour-là)."""
+    siennes ce jour-là). Ses bonjours d'amie supposent qu'on se connaît : à une
+    inconnue, un bonjour simple (sonde réelle du 2026-10-03 : « Heeey ~ alors,
+    raconte-moi tout » à quelqu'un qui arrivait pour la première fois)."""
     ep = frame.episode
     if ep is None or social_c.GREETING not in (ep.attrs.get("reasons") or ()) or not s.persona.greetings:
         return None
-    # un seul exemple, qui change d'un jour à l'autre : trois exemples montrés à chaque arrivée, un modèle en
-    # recopiait un mot pour mot (sonde finale du 2026-10-02 : « Yooo, te revoilà ! » cinq soirs sur six)
-    day = frame.local().date().isoformat()
-    pick = s.persona.greetings[h64("salut", day, ep.target) % len(s.persona.greetings)]
-    examples = f"- {pick}"
-    return (f"Pour le ton seulement — jamais cette phrase telle quelle, ni ses mots :\n{examples}\n"
-            "Ta salutation, maintenant, est la tienne : selon ton humeur du moment et la personne qui arrive ; si "
-            "tu as déjà salué comme ça récemment, autrement.")
+    person = frame.get(identity_c.PERSON(ep.target)) if ep.target else ""
+    if not is_identifiable(person) or frame.get(social_c.CLOSENESS(person)) in ("", social_c.STRANGER):
+        return FIRST_GREETING
+    # jamais une phrase entière : montrée « pour le ton seulement », un modèle la recopiait quand même, et en faisait
+    # tout son message (sonde finale du 2026-10-02 : « Yooo, te revoilà ! » cinq soirs sur six ; sonde du
+    # 2026-10-03 : « Heeey ~ alors, raconte-moi tout. » pour trois initiatives sur dix) — ses petits mots, oui
+    words = interjections(s.persona.greetings)
+    mine = f" ({', '.join(words)})" if words else ""
+    return (f"Avec quelqu'un que tu connais, tes bonjours sont courts et à toi — tes petits mots{mine}, un seul, "
+            "pas toujours le même —, jamais une formule toute faite : pars de ce que tu sais de sa journée, de ce "
+            "qui te passe par la tête, ou de ton humeur du moment.")
+
+
+#: le petit mot qui ouvre une salutation (« Heeey ~ », « Yooo »), jusqu'à la première ponctuation
+_INTERJECTION = re.compile(r"^\s*([^\W\d_][\w'’]*(?:\s*~)?)")
+
+
+def interjections(greetings: Sequence[str]) -> list[str]:
+    """Les petits mots qui ouvrent ses salutations (« hey », « yooo », « heeey ~ »), sans doublon : de quoi donner
+    son ton sans lui tendre une phrase à recopier."""
+    out: list[str] = []
+    for g in greetings:
+        m = _INTERJECTION.match(g)
+        word = m.group(1).strip().lower() if m else ""
+        if word and word not in out:
+            out.append(word)
+    return out[:4]
 
 
 def persona_for(frame: Frame, depth: str) -> PersonaRender:
