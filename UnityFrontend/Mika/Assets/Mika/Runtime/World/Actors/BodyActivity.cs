@@ -514,10 +514,10 @@ namespace Mika.World.Engine
         // --- au bureau : les clips de l'atelier ----------------------------------------------------------------
         // Ils sont faits (frontend/assets-src/blender/atelier_desk.py) dans un repère de travail : l'objet de
         // l'occupation à une place précise devant elle — le clavier à 8 cm à droite et 39 cm devant les hanches, le
-        // carnet à 36 cm droit devant. Ici la chaise pivote et roule pour présenter le vrai bureau ainsi ; la souris
+        // carnet à 40 cm droit devant. Ici la chaise pivote et roule pour présenter le vrai bureau ainsi ; la souris
         // et la tasse sont rapprochées à leur place (une petite qui tape à un bureau d'adulte les a sous la main).
-        const float TypeLateral = 0.08f, TypeForward = 0.39f, WriteLateral = 0f, WriteForward = 0.36f;
-        static readonly Vector3 MouseSpot = new Vector3(0.36f, 0f, 0.36f);   // (à droite, —, devant), repère de travail
+        const float TypeLateral = 0.08f, TypeForward = 0.39f, WriteLateral = 0f, WriteForward = 0.40f;
+        static readonly Vector3 MouseSpot = new Vector3(0.36f, 0f, 0.30f);   // (à droite, —, devant), repère de travail : à portée de sa main
         static readonly Vector3 MugSpot = new Vector3(-0.30f, 0f, 0.33f);   // à gauche du clavier : elle boit de la main gauche
         static readonly Vector3 WriteMugSpot = new Vector3(-0.28f, 0f, 0.46f);   // pour écrire : à gauche du carnet, loin du bord
         // Le livre tenu (desk_read) : son centre (à droite, hauteur au-dessus du sol, devant) et sa pente vers elle.
@@ -632,6 +632,7 @@ namespace Mika.World.Engine
             }
             CarryMug(now);
             CarryPen(now);
+            CarryMouse(now);
         }
 
         bool _targetSet, _targetEngaged;
@@ -930,6 +931,7 @@ namespace Mika.World.Engine
                     _bounds.Remove(kv.Key);
                 }
             _moved.Clear();
+            _mouseInHand = null;
             _mug = null;
             _mugSpot = null;
             _pad = null;
@@ -981,6 +983,42 @@ namespace Mika.World.Engine
         }
 
         bool _mugHeld;
+
+        WorldObject _mouseInHand;
+        // Le centre de la souris sous la paume, un peu vers les doigts (desk_mouse, mesuré dans l'atelier).
+        const float MouseUnderPalm = 0.025f;
+
+        /// <summary>
+        /// La souris sous la main pendant qu'elle s'en sert (desk_mouse : la paume sur son dos, de petits déplacements) :
+        /// elle rejoint en douceur le point sous la paume, puis le suit, à plat sur le tapis. (Un écart relevé au début de
+        /// la pose valait n'importe quoi : la souris glissait encore vers sa place de travail.)
+        /// </summary>
+        void CarryMouse(float now)
+        {
+            var using_ = _clipPose == "mouse" && now - _clipStart > 0.3f;
+            if (!using_)
+            {
+                _mouseInHand = null;
+                return;
+            }
+            var hand = _animator.GetBoneTransform(HumanBodyBones.RightHand);
+            var knuckles = _animator.GetBoneTransform(HumanBodyBones.RightMiddleProximal);
+            if (hand == null || knuckles == null) return;
+            if (_mouseInHand == null)
+            {
+                _mouseInHand = Find(MouseKeys, 1.6f);
+                if (_mouseInHand == null) return;
+                if (!_moved.ContainsKey(_mouseInHand)) _moved[_mouseInHand] = (_mouseInHand.transform.position, _mouseInHand.transform.rotation);
+            }
+            var palm = Vector3.Lerp(hand.position, knuckles.position, 0.6f);
+            var fingers = Flat(knuckles.position - hand.position);
+            var target = Flat(palm) + (fingers.sqrMagnitude > 1e-6f ? fingers.normalized * MouseUnderPalm : Vector3.zero);
+            var t = _mouseInHand.transform;
+            var k = 1f - Mathf.Exp(-Time.deltaTime * 12f);
+            var p = Vector3.Lerp(Flat(t.position), target, k);
+            t.position = new Vector3(p.x, t.position.y, p.z);
+            _bounds.Remove(_mouseInHand);
+        }
 
         static readonly string[] PenKeys = { "=pen", "=pencil", "stylo", "crayon" };
         enum PenHold { None, Writing, Shown }

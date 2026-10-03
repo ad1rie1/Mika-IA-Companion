@@ -98,8 +98,8 @@ MonoBehaviour:
   walkNorm: 1.0104443
   walkSlowSeconds: 1.6
   walkSeconds: 1.1333333
-  sitTravelNorm: 0.34755751
-  sitHipsNorm: 0.7246352
-  standTravelNorm: 0.32318693
+  sitTravelNorm: 0.39840895
+  sitHipsNorm: 0.7182787
+  standTravelNorm: 0.37398753
   sitDownSeconds: 1.5666667
   standUpSeconds: 0.8666667

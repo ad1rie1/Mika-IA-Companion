@@ -143,7 +143,7 @@ def build_bed_cloth(M):
 
 def build_hoodie(M):
     remove_prefix("Desk_Hoodie")
-    from build_desk import CHAIR_POS, CHAIR_YAW
+    from build_desk import CHAIR_DROP, CHAIR_POS, CHAIR_YAW
     chair = bpy.data.objects.get("DeskChair")
     yaw = CHAIR_YAW
     cx, cz = CHAIR_POS
@@ -155,14 +155,17 @@ def build_hoodie(M):
 
     def fn(u, v):
         x = -W / 2 + W * u
-        z = 0.26 - Lz * 0.45 + Lz * v
-        return local(x, 1.26, z)
+        # Jeté sur le dossier : un repli sur le haut du devant, le reste pend derrière. Plus de tissu devant (0,45) :
+        # un pan dépassait vers l'avant, là où elle s'adosse ; moins (0,12) : il glisse derrière et la simulation
+        # s'emmêle.
+        z = 0.26 - Lz * 0.30 + Lz * v
+        return local(x, 1.26 - CHAIR_DROP, z)
 
     h = grid_obj("Desk_Hoodie", 22, 40, fn, M["hoodie"], W / 0.25, Lz / 0.25)
     # Proxy collider: the real backrest is several overlapping boxes, whose
     # interior faces confuse one-sided cloth collision (it tunnels through).
-    proxy = box("Tmp_BackProxy", 0.48, 0.68, 0.085, 0, 0.87, 0.255, None, 0.03, 3, rx=0.12)
-    seat = box("Tmp_SeatProxy", 0.52, 0.1, 0.5, 0, 0.46, 0.0, None, 0.03, 3)
+    proxy = box("Tmp_BackProxy", 0.48, 0.68, 0.085, 0, 0.87 - CHAIR_DROP, 0.255, None, 0.03, 3, rx=0.12)
+    seat = box("Tmp_SeatProxy", 0.52, 0.1, 0.5, 0, 0.46 - CHAIR_DROP, 0.0, None, 0.03, 3)
     for o in (proxy, seat):
         o.matrix_basis = chair.matrix_basis @ o.matrix_basis
     apply_modifiers([proxy, seat])
@@ -177,12 +180,13 @@ def build_hoodie(M):
     for s in (-1, 1):
         pts = [(s * 0.2, 1.19, 0.27), (s * 0.29, 1.12, 0.285), (s * 0.31, 0.95, 0.29), (s * 0.305, 0.78, 0.275),
                (s * 0.3, 0.68, 0.26)]
+        pts = [(x, y - CHAIR_DROP, z) for x, y, z in pts]
         sl = tube("Desk_HoodieSleeve", [V(*p) for p in pts], 0.04, M["hoodie"], 12,
                   radii=[0.045, 0.045, 0.042, 0.038, 0.034])
         extra.append(sl)
-        extra.append(sphere("Desk_HoodieCuff", 0.034, 0.02, 0.034, s * 0.3, 0.665, 0.258, M["hoodie"], 12, 8))
-    hood = sphere("Desk_HoodieHood", 0.13, 0.12, 0.055, 0, 1.0, 0.33, M["hoodie"], 20, 12)
-    place(hood, 0, 1.03, 0.335, rx=0.12)
+        extra.append(sphere("Desk_HoodieCuff", 0.034, 0.02, 0.034, s * 0.3, 0.665 - CHAIR_DROP, 0.258, M["hoodie"], 12, 8))
+    hood = sphere("Desk_HoodieHood", 0.13, 0.12, 0.055, 0, 1.0 - CHAIR_DROP, 0.33, M["hoodie"], 20, 12)
+    place(hood, 0, 1.03 - CHAIR_DROP, 0.335, rx=0.12)
     extra.append(hood)
     for o in extra:
         o.matrix_basis = chair.matrix_basis @ o.matrix_basis

@@ -12,8 +12,8 @@ namespace Mika.Editor.Dev
 {
     /// <summary>
     /// Une visite guidée des animations du corps, en mode jeu, dans la fenêtre Game : le corps d'essai du labo
-    /// (<see cref="AnimLab"/>) enchaîne marche, chaise, clavier, carnet, livre, lit, couette, fenêtre et
-    /// bibliothèque, filmé par une caméra de démo qui passe devant celle de la joueuse, une légende par étape.
+    /// (<see cref="AnimLab"/>) enchaîne marche, chaise, tout le bureau (clavier, souris, réfléchir, boire, prendre son
+    /// stylo, s'étirer, pivoter vers la personne qui parle, écrire, lire), lit, couette, fenêtre et bibliothèque, filmé par une caméra de démo qui passe devant celle de la joueuse, une légende par étape.
     /// La vraie Mika est masquée le temps de la visite et rendue à la fin.
     /// </summary>
     public static class AnimDemo
@@ -31,10 +31,25 @@ namespace Mika.Editor.Dev
                 Debug.LogWarning("[Mika] démo : lancer d'abord le mode jeu.");
                 return;
             }
-            // Une démo interrompue par l'arrêt du jeu laisse _running levé, mais sa caméra a disparu.
             if (_running && _cam != null) return;
+            ResetState();
             _running = true;
             AnimLab.Run(Tour(AnimLab.Body));
+        }
+
+        /// <summary>
+        /// L'état de la démo remis à zéro. Le projet entre en mode jeu sans recharger les scripts (Enter Play Mode
+        /// Options) : les statiques survivent d'une session à l'autre, et la boucle de caméra rappelait le plan de suivi
+        /// de la démo précédente, sur un corps détruit — elle s'arrêtait sur l'exception, la caméra figée à l'origine.
+        /// </summary>
+        [InitializeOnEnterPlayMode]
+        static void ResetState()
+        {
+            _running = false;
+            _cam = null;
+            _follow = null;
+            _eye = _at = _eyeVel = _atVel = _targetEye = _targetAt = Vector3.zero;
+            _room = null;
         }
 
         [MenuItem("Mika/Animation/Arrêter la démo", priority = 41)]
@@ -68,16 +83,78 @@ namespace Mika.Editor.Dev
         }
 
         /// <summary>Un plan qui suit le corps (de côté, à hauteur d'épaule).</summary>
-        static void Follow(ActorBody b, float side, float front, float up)
+        /// <summary>
+        /// Un plan qui l'accompagne pendant qu'elle marche de <paramref name="from"/> à <paramref name="to"/> : de côté
+        /// par rapport au trajet (pas par rapport à son corps — quand elle tournait, la caméra balayait à travers
+        /// elle), du côté où la pièce laisse le plus de place, un peu en avant d'elle.
+        /// </summary>
+        static void Follow(ActorBody b, Vector3 from, Vector3 to, float side, float front, float up)
+        {
+            var dir = to - from;
+            dir.y = 0f;
+            var basis = Quaternion.LookRotation(dir.sqrMagnitude > 1e-4f ? dir.normalized : b.transform.forward, Vector3.up);
+            var mid = (from + to) * 0.5f;
+            var room = RoomBounds();
+            if (room.HasValue)
+            {
+                var c = room.Value.center;
+                var right = basis * Vector3.right;
+                if (Vector3.Dot(new Vector3(c.x - mid.x, 0f, c.z - mid.z), right) < 0f) side = -side;
+            }
+            _follow = () =>
+            {
+                var chest = b.animator.GetBoneTransform(HumanBodyBones.Chest);
+                var at = chest != null ? chest.position : b.transform.position + Vector3.up;
+                return (at + basis * new Vector3(side, up, front), at);
+            };
+        }
+
+        static Bounds? _room;
+
+        /// <summary>L'intérieur de la pièce (le sol, sur toute la hauteur), pour y garder la caméra.</summary>
+        static Bounds? RoomBounds()
+        {
+            if (_room.HasValue) return _room;
+            foreach (var r in Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Exclude))
+                if (r.name.Contains("room_floor") || (r.transform.parent != null && r.transform.parent.name.Contains("room_floor")))
+                {
+                    var b = r.bounds;
+                    _room = new Bounds(new Vector3(b.center.x, 1.4f, b.center.z), new Vector3(b.size.x, 2.8f, b.size.z));
+                    break;
+                }
+            return _room;
+        }
+
+        static Vector3 InsideRoom(Vector3 p)
+        {
+            var room = RoomBounds();
+            if (!room.HasValue) return p;
+            var b = room.Value;
+            const float margin = 0.25f;
+            return new Vector3(Mathf.Clamp(p.x, b.min.x + margin, b.max.x - margin), Mathf.Clamp(p.y, 0.3f, b.max.y - margin),
+                Mathf.Clamp(p.z, b.min.z + margin, b.max.z - margin));
+        }
+
+        /// <summary>
+        /// Un plan attaché au siège (qui tourne et roule avec la chaise) : œil et cible dans son repère (x à droite,
+        /// y en haut, z devant).
+        /// </summary>
+        static void SeatShot(ActorBody b, Vector3 eye, Vector3 at, bool cut = false)
         {
             _follow = () =>
             {
-                var t = b.transform;
-                var chest = b.animator.GetBoneTransform(HumanBodyBones.Chest);
-                var at = chest != null ? chest.position : t.position + Vector3.up;
-                var basis = Quaternion.Euler(0, t.eulerAngles.y, 0);
-                return (at + basis * new Vector3(side, up, front), at);
+                var s = b.Anchor ?? new Pose(b.transform.position, b.transform.rotation);
+                var f = s.rotation * Vector3.forward;
+                f.y = 0f;
+                var q = Quaternion.LookRotation(f.sqrMagnitude > 1e-4f ? f.normalized : Vector3.forward, Vector3.up);
+                var floor = new Vector3(s.position.x, b.FloorY, s.position.z);
+                return (floor + q * eye, floor + q * at);
             };
+            if (cut)
+            {
+                var (e, a) = _follow();
+                Aim(e, a, true);
+            }
         }
 
         static void Aim(Vector3 eye, Vector3 at, bool cut)
@@ -100,13 +177,24 @@ namespace Mika.Editor.Dev
             {
                 if (_follow != null)
                 {
-                    var (e, a) = _follow();
-                    _targetEye = e;
-                    _targetAt = a;
+                    // Un plan dont la cible a disparu ne doit pas arrêter la caméra : on garde le dernier cadrage.
+                    try
+                    {
+                        var (e, a) = _follow();
+                        _targetEye = e;
+                        _targetAt = a;
+                    }
+                    catch (System.Exception ex)
+                    {
+                        Debug.LogWarning("[démo] plan de suivi abandonné : " + ex.Message);
+                        _follow = null;
+                    }
                 }
-                _eye = Vector3.SmoothDamp(_eye, _targetEye, ref _eyeVel, 0.8f);
+                _eye = Vector3.SmoothDamp(_eye, InsideRoom(_targetEye), ref _eyeVel, 0.8f);
                 _at = Vector3.SmoothDamp(_at, _targetAt, ref _atVel, 0.5f);
-                _cam.transform.SetPositionAndRotation(_eye, Quaternion.LookRotation(_at - _eye, Vector3.up));
+                var look = _at - _eye;
+                if (look.sqrMagnitude > 1e-6f)
+                    _cam.transform.SetPositionAndRotation(_eye, Quaternion.LookRotation(look, Vector3.up));
                 yield return null;
             }
         }
@@ -128,7 +216,7 @@ namespace Mika.Editor.Dev
         {
             MakeCamera();
             _eye = Vector3.zero;
-            b.StartCoroutine(Drive());
+            _follow = null;
             var stage = AnimLab.Stage;
             var act = b.GetComponent<BodyActivity>();
             act.turnEvery = new Vector2(1000f, 1000f);
@@ -144,58 +232,86 @@ namespace Mika.Editor.Dev
 
             b.Snap(center.Position, center.Rotation, Posture.Stand);
             Shot(center.Position + new Vector3(1.6f, 1.4f, 1.8f), center.Position + Vector3.up * 0.9f, cut: true);
+            // La caméra ne part qu'une fois le premier plan posé.
+            b.StartCoroutine(Drive());
             Say("Démo des animations — le corps de Mika, sans le noyau");
             yield return Wait(3f);
 
             // 1. La marche capturée
             Say("Marche : capture de mouvement réelle (CMU), lente ou normale selon la vitesse");
-            Follow(b, 1.8f, 0.6f, 0.25f);
+            Follow(b, center.Position, desk.Position, 1.8f, 0.6f, 0.25f);
             yield return b.WalkTo(desk.Position, desk.Rotation, Vector3.Distance(center.Position, desk.Position) / 0.85f);
 
             // 2. S'asseoir au bureau
             Say("S'asseoir : elle recule la chaise, fait un pas devant, s'assoit (capture), puis roule au bureau");
             Shot(new Vector3(2.75f, 1.05f, -2.95f), new Vector3(1.3f, 0.65f, -3.35f));
             yield return b.ChangePosture(Posture.Sit, desk, 1f);
-            Say("Pieds à plat au sol en IK : la chaise est haute pour elle");
+            Say("Assise : la chaise réglée pour elle, les talons un peu levés, les pieds entre les branches du piètement");
             Shot(new Vector3(1.9f, 0.55f, -2.55f), new Vector3(1.4f, 0.35f, -3.35f));
             yield return Wait(4f);
 
-            // 3. Taper
-            Say("Travailler : elle tape par rafales, va à la souris, regarde l'écran");
+            // 3. Le travail : clavier et souris (la chaise pivote et roule pour lui présenter le clavier)
+            Say("Travailler : la chaise pivote et avance vers le clavier ; elle tape par rafales");
             act.Set("work", null);
-            Shot(new Vector3(2.6f, 1.5f, -2.6f), new Vector3(1.35f, 0.75f, -3.6f));
-            yield return Wait(4f);
-            Shot(new Vector3(2.15f, 1.25f, -3.05f), new Vector3(1.4f, 0.82f, -3.65f));
-            yield return Wait(6f);
+            SeatShot(b, new Vector3(0.95f, 1.15f, 0.9f), new Vector3(0.05f, 0.75f, 0.35f), cut: true);
+            yield return Wait(5f);
+            Say("… et passe de temps en temps à la souris (main droite)");
+            SeatShot(b, new Vector3(0.75f, 1.3f, 0.75f), new Vector3(0.15f, 0.75f, 0.4f));
+            yield return Wait(9f);
 
-            // 4. On lui parle
-            Say("On lui parle : elle recule et fait pivoter sa chaise vers toi");
-            Shot(new Vector3(0.55f, 1.4f, -1.85f), new Vector3(1.3f, 0.8f, -3.3f));
+            // 4. Au repos : les petits gestes (d'ordinaire tirés au hasard, ici à la suite)
+            act.Set(null, null);
+            Say("Au repos : réfléchir, le menton sur le poing");
+            // De face, côté souris : la lampe de bureau, à sa gauche, masquerait les gestes de la main gauche.
+            SeatShot(b, new Vector3(0.9f, 1.25f, 0.95f), new Vector3(-0.05f, 0.95f, 0.2f));
+            yield return Wait(2.5f);
+            act.PlayDeskGesture("think");
+            yield return Wait(5f);
+            Say("Boire une gorgée — de la main gauche : la tasse attend à gauche du clavier");
+            act.PlayDeskGesture("drink");
+            yield return Wait(5.3f);
+            Say("Prendre son stylo, le regarder, le reposer");
+            act.PlayDeskGesture("take");
+            yield return Wait(5.3f);
+            Say("S'étirer sur sa chaise");
+            SeatShot(b, new Vector3(1.05f, 1.35f, 1.15f), new Vector3(0f, 1.05f, 0.1f));
+            act.PlayDeskGesture("stretch");
+            yield return Wait(5f);
+
+            // 5. On lui parle
+            Say("On lui parle : elle lève les pieds et fait pivoter sa chaise vers toi");
+            Shot(new Vector3(0.55f, 1.4f, -1.85f), new Vector3(1.3f, 0.8f, -3.3f), cut: true);
             yield return Wait(1.2f);
             act.Engage(9f);
             yield return Wait(10f);
+            Say("La conversation finie, elle se retourne vers son bureau");
+            yield return Wait(3f);
 
-            // 5. Écrire
-            Say("Écrire : elle ramène son carnet et tourne un peu la chaise vers lui");
+            // 6. Écrire
+            Say("Écrire : elle tire son carnet, tourne la chaise vers lui, prend son stylo");
             act.Set("draw", null);
-            Shot(new Vector3(0.6f, 1.35f, -2.95f), new Vector3(1.5f, 0.8f, -3.6f));
-            yield return Wait(8f);
+            // Par-dessus son épaule droite : de face à gauche, le bras de la lampe passait au premier plan ; de face à
+            // droite, la chaise tournée vers le carnet, l'écran bouchait tout.
+            SeatShot(b, new Vector3(0.55f, 1.55f, -0.25f), new Vector3(0f, 0.75f, 0.4f), cut: true);
+            yield return Wait(9f);
             act.Set(null, null);
-            yield return Wait(1.5f);
+            Say("Elle repose le stylo et range le carnet");
+            yield return Wait(3f);
 
-            // 6. Lire
+            // 6 bis. Lire
             WorldObject book = null;
             foreach (var o in Object.FindObjectsByType<WorldObject>(FindObjectsInactive.Exclude))
-                if (o.id == "book_desk_1") book = o;
+                if (o.id == "book_desk_2") book = o;
             var bookPos = book != null ? book.transform.position : Vector3.zero;
             var bookRot = book != null ? book.transform.rotation : Quaternion.identity;
             if (book != null)
             {
-                Say("Lire : elle prend un livre et le tient à deux mains, tourne les pages");
-                Shot(new Vector3(2.2f, 1.3f, -2.85f), new Vector3(1.4f, 0.85f, -3.5f));
-                yield return b.Reach(book.GripPoint, 1.2f, () => b.Hold(book, Hand.Right));
+                // Le livre est au bout du bureau, hors de portée assise : on le lui met dans les mains (plan coupé).
+                b.Hold(book, Hand.Right);
                 act.Set("read", book.id);
-                yield return Wait(8f);
+                Say("Lire : le livre tenu à deux mains, une page tournée de temps en temps");
+                SeatShot(b, new Vector3(0.9f, 1.15f, 0.9f), new Vector3(0f, 0.85f, 0.25f), cut: true);
+                yield return Wait(10f);
                 act.Set(null, null);
                 yield return Wait(0.5f);
                 b.Release(book);
@@ -206,7 +322,7 @@ namespace Mika.Editor.Dev
             Say("Se lever : la chaise recule avec elle, elle se redresse et s'écarte");
             Shot(new Vector3(2.75f, 1.05f, -2.95f), new Vector3(1.2f, 0.7f, -3.3f));
             yield return b.ChangePosture(Posture.Stand, desk, 1f);
-            Follow(b, 1.8f, 0.6f, 0.25f);
+            Follow(b, desk.Position, bed.Position, 1.8f, 0.6f, 0.25f);
             yield return b.WalkTo(bed.Position, bed.Rotation, Vector3.Distance(desk.Position, bed.Position) / 0.85f);
             Say("Le soir : elle s'assoit au bord du lit, s'allonge en se glissant dessous…");
             Shot(new Vector3(1.75f, 1.5f, 0.15f), new Vector3(3.2f, 0.55f, 1.45f));
@@ -230,7 +346,7 @@ namespace Mika.Editor.Dev
 
             // 8. Debout
             Say("À la fenêtre : les mains sur le rebord, le regard qui flâne dehors");
-            Follow(b, 1.6f, 0.4f, 0.3f);
+            Follow(b, bed.Position, window.Position, 1.6f, 0.4f, 0.3f);
             yield return b.WalkTo(window.Position, window.Rotation, Vector3.Distance(bed.Position, window.Position) / 0.85f);
             act.Set("look_outside", null);
             var wf = window.Rotation * Vector3.forward;
@@ -239,7 +355,7 @@ namespace Mika.Editor.Dev
             yield return Wait(7f);
             act.Set(null, null);
             Say("À la bibliothèque : elle parcourt les rayons et effleure les livres");
-            Follow(b, 1.6f, 0.4f, 0.3f);
+            Follow(b, window.Position, shelf.Position, 1.6f, 0.4f, 0.3f);
             yield return b.WalkTo(shelf.Position, shelf.Rotation, Vector3.Distance(window.Position, shelf.Position) / 0.85f);
             act.Set("browse_books", null);
             var sf = shelf.Rotation * Vector3.forward;

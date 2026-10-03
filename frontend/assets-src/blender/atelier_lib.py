@@ -442,6 +442,44 @@ def two_bone(frame, rig, side, target):
     frame["d"][lo] = swing @ frame["d"][lo]
 
 
+def raise_heels(motion, rig, height, weights):
+    """
+    Les talons levés de `height` (m) × le poids de l'image (0..1), la pointe du pied (l'articulation des orteils) restant
+    où elle est : le pied pivote sur elle, les orteils restent à plat, la jambe suit (two_bone). Assise sur un siège un
+    peu haut pour elle, c'est ainsi que ses cuisses reposent à plat sur le coussin au lieu d'en traverser le bord.
+    """
+    for frame, w in zip(motion.frames, weights):
+        if w <= 0.0:
+            continue
+        j = rig.joints(frame, ("leftFoot", "rightFoot", "leftToes", "rightToes"))
+        for side in ("left", "right"):
+            ankle, ball = j[f"{side}Foot"], j[f"{side}Toes"]
+            along = ball - ankle
+            if along.length < 1e-4:
+                continue
+            axis = along.cross(Vector((0.0, 0.0, 1.0)))
+            if axis.length < 1e-6:
+                continue
+            angle = math.asin(min(0.9, height * w / along.length))
+            turn = Quaternion(axis.normalized(), -angle)
+            frame["d"][f"{side}Foot"] = turn @ frame["d"][f"{side}Foot"]
+            two_bone(frame, rig, side, ball + turn @ (ankle - ball))
+
+
+def feet_ahead(motion, rig, ahead, seated):
+    """
+    Les pieds `ahead` m plus en avant (elle regarde −Y) à chaque image, sans changer leur orientation ; les hanches
+    suivent là où elle est debout (poids `seated` : 0 debout → 1 assise), si bien que l'assise ne bouge pas et que,
+    debout devant le siège, elle se tient d'autant plus loin de son bord.
+    """
+    shift = Vector((0.0, -ahead, 0.0))
+    for frame, s in zip(motion.frames, seated):
+        frame["hips"] += shift * (1.0 - s)
+        j = rig.joints(frame, ("leftFoot", "rightFoot"))
+        for side in ("left", "right"):
+            two_bone(frame, rig, side, j[f"{side}Foot"] + shift * s)
+
+
 def lock_feet(motion, soles, flags_by_side, blend=3, softness=0.004):
     """
     Les pieds en appui ne glissent plus : sur chaque plage d'appui, ce qui touche le sol reste où il s'est posé. Pas la

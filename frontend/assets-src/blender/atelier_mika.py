@@ -57,9 +57,17 @@ OVERRIDES = {
     "sitting_idle": dict(head="recenter", straighten={"head": 12.0}, note="CMU 113_15"),
 }
 
-# Hauteur des hanches assises (m au-dessus du sol) : sa chaise de bureau les met à 0,59, le bord du lit à 0,55 ; le
-# jeu rattrape le reste en montant ou descendant la racine.
-SEAT_HIPS = 0.57
+# Hauteur des hanches assises (m au-dessus du sol du clip, 2 cm sous le vrai), mesurée dans l'atelier avec les vrais
+# meubles (atelier_desk_check.py) : assise, le dessous de ses fesses est 15 cm sous l'os du bassin. Sa chaise (vérin
+# réglé pour elle, build_desk.CHAIR_DROP) a son coussin à 0,447 m, qui s'enfonce d'un peu plus d'un centimètre ; le
+# matelas, à 0,47 m, de trois → bassin à 0,585 / 0,59 m réels, un seul clip pour les deux. La scène pose les ancres
+# des sièges à cette hauteur (ChambreSceneBuilder). Pieds à plat, ses cuisses traverseraient encore le bord du coussin :
+# elle lève un peu les talons (SEAT_HEELS).
+SEAT_HIPS = 0.565
+SEAT_HEELS = 0.04
+# Les pieds un peu en avant de ceux de la prise : debout devant le siège pour s'asseoir (et en se relevant), ses
+# mollets entraient de 3 cm dans le bord du coussin ; assise, ils s'écartent aussi du piètement.
+SEAT_FEET_AHEAD = 0.04
 
 
 def catalog():
@@ -135,6 +143,20 @@ def build(name, spec, rig, soles, clearance, previews):
         report.append(f"assise {lo:.2f} → {SEAT_HIPS:.2f} m")
     al.lock_feet(motion, soles, flags)
     report.append("appuis " + " ".join(f"{s}:{sum(f)}" for s, f in flags.items()))
+    if spec["kind"] == "sit":
+        # Les talons se lèvent une fois le poids sur le siège (fin de la descente) et se reposent avant qu'elle se
+        # relève (début de la montée) : le poids du bas de course des hanches.
+        zs = [f["hips"].z for f in motion.frames]
+        lo = min(zs)
+        weights = [max(0.0, min(1.0, 1.0 - (z - lo) / 0.06)) for z in zs]
+        weights = [w * w * (3 - 2 * w) for w in weights]
+        al.raise_heels(motion, rig, SEAT_HEELS, weights)
+        report.append(f"talons levés de {SEAT_HEELS * 100:.0f} cm assise")
+        # Debout → assise : la part de la descente faite (les hanches qui reculent vers le siège).
+        span = max(zs) - lo
+        seated = [1.0 if span < 0.05 else min(1.0, max(0.0, (max(zs) - z) / span)) for z in zs]
+        al.feet_ahead(motion, rig, SEAT_FEET_AHEAD, seated)
+        report.append(f"pieds {SEAT_FEET_AHEAD * 100:.0f} cm plus en avant")
     if spec["kind"] in ("stand", "sit"):
         rest = al.clear_arms(motion, clearance)
         report.append("bras dégagés" + (f" (reste {rest} cm)" if rest else ""))

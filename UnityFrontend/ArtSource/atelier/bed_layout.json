@@ -1,0 +1,203 @@
+{
+ "format": "mika.desk-layout/2",
+ "note": "repère de l'assise du lit (Unity) : origine au sol sous les hanches, x à droite, y en haut, z devant ; la couette et le plaid (DuvetRig, origine au centre de la pièce) ajoutés d'après leur rendu",
+ "seat_hips": [
+  0,
+  0.59,
+  0
+ ],
+ "objects": [
+  {
+   "id": "curtains",
+   "part": "Curtain_R",
+   "origin": [
+    -1.1595,
+    2.49,
+    -1.0141
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "bedside_lamp",
+   "part": "Modèle",
+   "origin": [
+    1.39,
+    0.48,
+    -0.81
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "book_nightstand_1",
+   "part": "Modèle",
+   "origin": [
+    1.42,
+    0.135,
+    -0.74
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "print_flower",
+   "part": "Modèle",
+   "origin": [
+    0.15,
+    1.34,
+    -1.139
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "plushie",
+   "part": "Modèle",
+   "origin": [
+    0.6431,
+    0.411,
+    -0.704
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "bed_frame",
+   "part": "Modèle",
+   "origin": [
+    -0.0161,
+    0.0,
+    -0.4315
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "succulent_windowsill",
+   "part": "Modèle",
+   "origin": [
+    -2.05,
+    1.204,
+    -1.12
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "book_nightstand_2",
+   "part": "Modèle",
+   "origin": [
+    1.43,
+    0.165,
+    -0.73
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "print_cat",
+   "part": "Modèle",
+   "origin": [
+    -0.45,
+    1.215,
+    -1.139
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "snake_plant",
+   "part": "Modèle",
+   "origin": [
+    1.9178,
+    0.0,
+    -0.71
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "slippers",
+   "part": "Modèle",
+   "origin": [
+    1.4014,
+    -0.042,
+    0.3517
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "nightstand",
+   "part": "Modèle",
+   "origin": [
+    1.45,
+    0.0,
+    -0.742
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "nightstand",
+   "part": "Bedside_Drawer",
+   "origin": [
+    1.45,
+    0.38,
+    -0.554
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "alarm_clock",
+   "part": "Modèle",
+   "origin": [
+    1.55,
+    0.478,
+    -0.636
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": false
+  },
+  {
+   "id": "duvet",
+   "part": "Modèle",
+   "origin": [
+    -1.3,
+    0.0,
+    2.85
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": true
+  },
+  {
+   "id": "throw",
+   "part": "Modèle",
+   "origin": [
+    -1.3,
+    0.0,
+    2.85
+   ],
+   "yaw": 90.0,
+   "tilt": 0.0,
+   "skinned": true
+  }
+ ]
+}

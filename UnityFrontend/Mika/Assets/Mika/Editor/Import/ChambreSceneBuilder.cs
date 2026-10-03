@@ -37,13 +37,24 @@ namespace Mika.Editor.Import
         const string ThemePath = "Assets/Mika/UI/MikaTheme.tss";
         const string VolumeProfilePath = ContentDir + "/ChambreVolume.asset";
 
-        /// <summary>Où s'asseoir et où s'allonger (repris du client web, roomLayout.ts, recalé sur room.glb).</summary>
-        static readonly Dictionary<string, (Vector3 seat, double seatFacing, Vector3? lie, double lieYaw)> Seats =
-            new Dictionary<string, (Vector3, double, Vector3?, double)>
+        /// <summary>
+        /// Où s'asseoir et où s'allonger (repris du client web, roomLayout.ts, recalé sur room.glb) : le dessus du siège,
+        /// et de combien il s'enfonce sous elle (le coussin de la chaise, dont le vérin est réglé pour elle — build_desk.py,
+        /// CHAIR_DROP —, un peu ; le matelas, davantage).
+        /// </summary>
+        static readonly Dictionary<string, (Vector3 seat, double seatFacing, Vector3? lie, double lieYaw, float sink)> Seats =
+            new Dictionary<string, (Vector3, double, Vector3?, double, float)>
             {
-                ["desk"] = (new Vector3(-1.4f, 0.51f, -3.3f), -System.Math.PI + 0.3, null, 0),
-                ["bed"] = (new Vector3(-2.85f, 0.47f, 1.3f), System.Math.PI / 2, new Vector3(-3.32f, 0.56f, 1.62f), 0),
+                ["desk"] = (new Vector3(-1.4f, 0.447f, -3.3f), -System.Math.PI + 0.3, null, 0, 0.015f),
+                ["bed"] = (new Vector3(-2.85f, 0.47f, 1.3f), System.Math.PI / 2, new Vector3(-3.32f, 0.56f, 1.62f), 0, 0.03f),
             };
+
+        /// <summary>
+        /// Assise, l'os du bassin est à cette hauteur au-dessus du dessous de ses fesses (mesuré sur son modèle dans
+        /// l'atelier d'animation, avec les vrais meubles : atelier_desk_check.py). Les clips assis de l'atelier ont leurs
+        /// hanches à la hauteur qui en résulte (0,585 m) : la chaise et le lit les reçoivent tels quels, pieds compris.
+        /// </summary>
+        const float HipsAboveSeat = 0.15f;
 
         [MenuItem("Mika/Art/Tout reconstruire (import + scène)", priority = 3)]
         public static void RebuildAll()
@@ -137,8 +148,8 @@ namespace Mika.Editor.Import
                 if (p.OfObject != null && authored.TryGetValue(p.OfObject, out var carrier)) pa.ofObject = carrier;
                 if (Seats.TryGetValue(p.Id, out var s))
                 {
-                    // Les hanches se posent un peu au-dessus du dessus du siège (l'os du bassin n'est pas la peau).
-                    pa.seat = Child(go.transform, "Assise", room.transform, s.seat + Vector3.up * 0.08f, s.seatFacing);
+                    // Les hanches au-dessus du dessus du siège (l'os du bassin n'est pas la peau), le siège enfoncé.
+                    pa.seat = Child(go.transform, "Assise", room.transform, s.seat + Vector3.up * (HipsAboveSeat - s.sink), s.seatFacing);
                     if (s.lie.HasValue) pa.lie = Child(go.transform, "Allongée", room.transform, s.lie.Value, s.lieYaw);
                 }
                 placeByid[p.Id] = pa;

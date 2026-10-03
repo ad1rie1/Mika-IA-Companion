@@ -1073,19 +1073,27 @@ namespace Mika.World.Engine
         };
 
         /// <summary>
-        /// Assise : les pieds à plat sur le sol devant le siège, genoux au-dessus — quelle que soit la hauteur du
-        /// siège (une chaise haute pour ses jambes, le bord du lit). Une épingle de pied explicite passe avant.
-        /// </summary>
-        /// <summary>
-        /// Assise, les pieds viennent du clip (pivoter la chaise : ils font leurs petits pas) plutôt que de l'IK qui
-        /// les pose devant le siège — celle-ci tournait avec la chaise et les faisait glisser sur le sol.
+        /// Assise, les pieds viennent du clip (pivoter la chaise : ils se lèvent et tournent avec elle) plutôt que de
+        /// l'IK qui les pose devant le siège.
         /// </summary>
         public bool FeetFromClip { get; set; }
 
+        /// <summary>
+        /// Le siège est à la hauteur pour laquelle les clips assis sont faits (leurs hanches au-dessus du sol, à 3 cm
+        /// près) : leurs pieds sont déjà au sol, vérifiés dans l'atelier contre la vraie chaise (entre les branches du
+        /// piètement, talons un peu levés). L'IK les replaçait à sa façon, sur les branches.
+        /// </summary>
+        bool SeatFitsClips => _anchor.HasValue && Mathf.Abs(_anchor.Value.position.y - _floorY - SeatedHipsAboveRoot) < 0.03f;
+
+        /// <summary>
+        /// Assise : les pieds à plat sur le sol devant le siège, genoux au-dessus, quand le siège n'est pas à la
+        /// hauteur des clips (un siège d'une autre hauteur que la chaise et le lit). Une épingle de pied explicite
+        /// passe avant.
+        /// </summary>
         void SeatedFeet()
         {
             if (_seated <= 0f || !_anchor.HasValue || _hips == null) return;
-            if (FeetFromClip)
+            if (FeetFromClip || SeatFitsClips)
             {
                 foreach (var goal in new[] { AvatarIKGoal.LeftFoot, AvatarIKGoal.RightFoot })
                 {

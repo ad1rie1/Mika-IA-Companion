@@ -838,6 +838,13 @@ def main(argv):
 
     # ---------------------------------------------------------------- écriture
     os.makedirs(out, exist_ok=True)
+    # Les FBX qu'un export précédent a écrits (ceux de son room_layout.json) : les seuls qu'on peut retirer s'ils
+    # n'existent plus. D'autres scripts écrivent dans Models/ (duvet_states.py : duvet.fbx, throw.fbx).
+    ours = set()
+    old_layout = os.path.join(out, "room_layout.json")
+    if os.path.exists(old_layout):
+        with open(old_layout, encoding="utf-8") as f:
+            ours = {os.path.normpath(os.path.join(out, e["fbx"])) for e in json.load(f).get("objects", [])}
     written = set()
     for oid, root, child_objs, rel in exports:
         path = os.path.join(out, rel)
@@ -854,7 +861,7 @@ def main(argv):
         for dirpath, _, files in os.walk(os.path.join(out, sub)):
             for f in files:
                 p = os.path.normpath(os.path.join(dirpath, f))
-                if f.lower().endswith(exts) and p not in written:
+                if f.lower().endswith(exts) and p not in written and (sub != "Models" or p in ours):
                     os.remove(p)
                     if os.path.exists(p + ".meta"):
                         os.remove(p + ".meta")

@@ -274,6 +274,10 @@ def build(M):
 
 CHAIR_POS = (-1.4, -3.3)   # three (x, z) of the floor point under the seat centre
 CHAIR_YAW = 0.3            # rotation.y; local -Z faces the desk, +Z is the backrest
+# Le vérin de la chaise réglé pour Mika (petite) : tout ce qui est au-dessus du piètement descend de CHAIR_DROP —
+# coussin à 0,447 m au lieu de 0,507. Plus haut, assise pieds à plat, ses cuisses traversaient le bord du coussin
+# (mesuré dans l'atelier d'animation avec cette chaise : atelier_desk_check.py) ; elle lève un peu les talons.
+CHAIR_DROP = 0.06
 
 
 def build_chair(M):
@@ -284,8 +288,10 @@ def build_chair(M):
     remove_prefix("Desk_Chair")
     ch = []
     hub_y = 0.075
+    # Une branche droit en arrière : l'écart entre les deux branches avant (±36°) est centré devant l'assise, les
+    # pieds de qui s'assoit s'y posent (décalées de 17°, l'une passait sous son pied droit).
     for k in range(5):
-        a = k * 2 * math.pi / 5 + 0.3
+        a = k * 2 * math.pi / 5
         sx, sz = math.sin(a), math.cos(a)
         ch.append(box("Chair_Spoke", 0.04, 0.035, 0.3, 0.15 * sx, hub_y, 0.15 * sz, M["metal_dark"], 0.008, 2, ry=a))
         # caster: fork + wheel
@@ -293,18 +299,18 @@ def build_chair(M):
         ch.append(cyl("Chair_Wheel", 0.026, 0.024, 0.29 * sx - 0.012 * math.cos(a), 0.026, 0.29 * sz + 0.012 * math.sin(a),
                       M["plastic_dark"], 14, rz=math.pi / 2, bev=0.006))
     ch.append(cyl("Chair_Hub", 0.05, 0.05, 0, 0.05, 0, M["metal_dark"], 20, bev=0.01))
-    ch.append(cyl("Chair_Gas", 0.022, 0.32, 0, 0.09, 0, M["metal_light"], 16))
+    ch.append(cyl("Chair_Gas", 0.022, 0.32 - CHAIR_DROP, 0, 0.09, 0, M["metal_light"], 16))
     ch.append(cyl("Chair_GasCover", 0.032, 0.14, 0, 0.09, 0, M["plastic_dark"], 16, r2=0.028))
-    ch.append(box("Chair_Plate", 0.22, 0.03, 0.22, 0, 0.41, 0, M["metal_dark"], 0.006, 2))
-    ch.append(box("Chair_Seat", 0.5, 0.085, 0.48, 0, 0.465, 0.0, M["chair"], 0.038, 5))
-    ch.append(box("Chair_BackBar", 0.06, 0.32, 0.03, 0, 0.56, 0.255, M["metal_dark"], 0.008, 2, rx=0.12))
-    ch.append(box("Chair_Back", 0.47, 0.6, 0.075, 0, 0.88, 0.26, M["chair"], 0.034, 5, rx=0.12))
-    ch.append(box("Chair_Headrest", 0.3, 0.11, 0.06, 0, 1.105, 0.25, M["chair_accent"], 0.026, 4, rx=0.12))
-    ch.append(box("Chair_Lumbar", 0.34, 0.12, 0.05, 0, 0.66, 0.205, M["chair_accent"], 0.022, 4, rx=0.12))
+    ch.append(box("Chair_Plate", 0.22, 0.03, 0.22, 0, 0.41 - CHAIR_DROP, 0, M["metal_dark"], 0.006, 2))
+    ch.append(box("Chair_Seat", 0.5, 0.085, 0.48, 0, 0.465 - CHAIR_DROP, 0.0, M["chair"], 0.038, 5))
+    ch.append(box("Chair_BackBar", 0.06, 0.32, 0.03, 0, 0.56 - CHAIR_DROP, 0.255, M["metal_dark"], 0.008, 2, rx=0.12))
+    ch.append(box("Chair_Back", 0.47, 0.6, 0.075, 0, 0.88 - CHAIR_DROP, 0.26, M["chair"], 0.034, 5, rx=0.12))
+    ch.append(box("Chair_Headrest", 0.3, 0.11, 0.06, 0, 1.105 - CHAIR_DROP, 0.25, M["chair_accent"], 0.026, 4, rx=0.12))
+    ch.append(box("Chair_Lumbar", 0.34, 0.12, 0.05, 0, 0.66 - CHAIR_DROP, 0.205, M["chair_accent"], 0.022, 4, rx=0.12))
     for s in (-1, 1):
-        ch.append(box("Chair_ArmPost", 0.03, 0.2, 0.04, s * 0.27, 0.57, 0.06, M["metal_dark"], 0.008, 2))
-        ch.append(box("Chair_ArmPad", 0.06, 0.026, 0.25, s * 0.27, 0.68, 0.0, M["plastic_dark"], 0.011, 3))
-        ch.append(box("Chair_ArmLink", 0.03, 0.03, 0.14, s * 0.24, 0.48, 0.04, M["metal_dark"], 0.008, 2))
+        ch.append(box("Chair_ArmPost", 0.03, 0.2, 0.04, s * 0.27, 0.57 - CHAIR_DROP, 0.06, M["metal_dark"], 0.008, 2))
+        ch.append(box("Chair_ArmPad", 0.06, 0.026, 0.25, s * 0.27, 0.68 - CHAIR_DROP, 0.0, M["plastic_dark"], 0.011, 3))
+        ch.append(box("Chair_ArmLink", 0.03, 0.03, 0.14, s * 0.24, 0.48 - CHAIR_DROP, 0.04, M["metal_dark"], 0.008, 2))
     o = join(ch, "DeskChair")
     place(o, CHAIR_POS[0], 0, CHAIR_POS[1], ry=CHAIR_YAW)
     return o
