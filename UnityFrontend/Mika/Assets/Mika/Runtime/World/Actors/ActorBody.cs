@@ -29,6 +29,10 @@ namespace Mika.World.Engine
         [Tooltip("Longueur d'une foulée (m) : règle la cadence des pas sur la vitesse.")]
         public float stride = 1.1f;
         public float turnSpeedDeg = 360f;
+        [Tooltip("Ce que le contrôleur sait jouer (clips capturés : reculs, hauteurs) — posé par la scène.")]
+        public BodyClipSet clips;
+        [Tooltip("Garder les pieds plantés au sol pendant qu'elle s'assoit ou se lève.")]
+        public bool plantFeet = true;
 
         NavMeshAgent _agent;
         HumanoidPoser _poser;
@@ -36,26 +40,56 @@ namespace Mika.World.Engine
         Transform _hips, _rightHand, _leftHand, _head;
 
         Posture _posture = Posture.Stand;
+        PlaceView _place;
         float _sit, _lie, _walk, _phase, _reach, _breathT;
         float _sitTarget, _lieTarget, _reachTarget;
         Pose? _anchor;                 // où recaler les hanches (assise) ou le corps (allongée)
+        Transform _anchorLive;         // le siège lui-même quand la scène le décrit : il peut pivoter, rouler
         float _anchorBlend;
+        float _floorY;                 // le sol sous le siège (les pieds s'y posent)
+        float _seated;                 // 0 → 1 : la posture assise atteinte (les pieds se posent)
 
+        bool _rootMotion;              // appliquer le déplacement horizontal du clip (s'asseoir, se lever capturés)
         Vector3? _ikPoint;
         AvatarIKGoal _ikGoal = AvatarIKGoal.RightHand;
         float _ikWeight, _ikWeightTarget;
-        Vector3? _look;
+        Vector3? _look, _activityLook;
         float _lookWeight;
         Vector3 _lastPos;
         float _speed;
 
+        // Ce que le squelette mesure au repos (pour poser pieds et mains sans clip dédié).
+        float _thigh = 0.38f, _shin = 0.38f, _ankle = 0.08f, _hipHalfWidth = 0.08f;
+
         readonly Dictionary<WorldObject, Hand> _held = new Dictionary<WorldObject, Hand>();
+        readonly Limb[] _limbs = { new Limb(), new Limb(), new Limb(), new Limb() };
 
         public Posture Posture => _posture;
+        /// <summary>Le lieu où le corps se tient (assis, allongé, debout à son point d'approche), s'il est connu.</summary>
+        public PlaceView Place => _place;
         public bool Procedural => _procedural;
         public float Speed => _speed;
         public IReadOnlyDictionary<WorldObject, Hand> Held => _held;
         public Transform Head => _head != null ? _head : transform;
+        public Transform Hips => _hips;
+        /// <summary>0 → 1 : la posture assise est atteinte (transition finie), les pieds sont posés.</summary>
+        public float Seatedness => _seated;
+        /// <summary>Le siège ou le lit actuel, tel qu'il est maintenant (une chaise qui pivote l'emporte).</summary>
+        public Pose? Anchor => _anchorLive != null ? new Pose(_anchorLive.position, _anchorLive.rotation) : _anchor;
+        public float FloorY => _floorY;
+        public float ThighLength => _thigh;
+        public float ShinLength => _shin;
+
+        /// <summary>Une épingle IK : une main ou un pied tenu à un point (un clavier, un livre, le sol).</summary>
+        sealed class Limb
+        {
+            public Vector3 Position;
+            public Quaternion Rotation;
+            public bool HasRotation;
+            public Vector3? Hint;
+            public float Target, Weight;
+            public float FadeS = 0.35f;
+        }
 
         /// <summary>Un geste demandé au corps (pour que le visage suive : un clin d'œil avec le signe de la main).</summary>
         public event Action<string> GesturePlayed;
@@ -77,7 +111,13 @@ namespace Mika.World.Engine
             _rightHand = a.GetBoneTransform(HumanBodyBones.RightHand);
             _leftHand = a.GetBoneTransform(HumanBodyBones.LeftHand);
             _head = a.GetBoneTransform(HumanBodyBones.Head);
-            _procedural = a.runtimeAnimatorController == null || !BodyAnim.HasParameter(a, BodyAnim.Speed);
+            _neck = a.GetBoneTransform(HumanBodyBones.Neck);
+            var lArm = a.GetBoneTransform(HumanBodyBones.LeftUpperArm);
+            var rArm = a.GetBoneTransform(HumanBodyBones.RightUpperArm);
+            // La largeur du buste : celle des épaules, plus l'épaisseur du sweat.
+            if (lArm != null && rArm != null) _torsoHalfWidth = Vector3.Distance(lArm.position, rArm.position) * 0.5f + 0.02f;
+            MeasureLegs(a);
+            _procedural =a.runtimeAnimatorController == null || !BodyAnim.HasParameter(a, BodyAnim.Speed);
             _poser?.Dispose();
             _poser = _procedural ? new HumanoidPoser(a) : null;
             if (_procedural)
@@ -87,6 +127,22 @@ namespace Mika.World.Engine
         }
 
         void OnDestroy() => _poser?.Dispose();
+
+        /// <summary>Longueurs des jambes et largeur du bassin, lues sur le squelette au repos.</summary>
+        void MeasureLegs(Animator a)
+        {
+            var lu = a.GetBoneTransform(HumanBodyBones.LeftUpperLeg);
+            var ll = a.GetBoneTransform(HumanBodyBones.LeftLowerLeg);
+            var lf = a.GetBoneTransform(HumanBodyBones.LeftFoot);
+            var ru = a.GetBoneTransform(HumanBodyBones.RightUpperLeg);
+            if (lu == null || ll == null || lf == null) return;
+            _thigh = Vector3.Distance(lu.position, ll.position);
+            _shin = Vector3.Distance(ll.position, lf.position);
+            if (ru != null) _hipHalfWidth = Vector3.Distance(lu.position, ru.position) * 0.5f;
+            // La cheville au-dessus de la plante du pied : la hauteur de l'os du pied au-dessus des orteils, au repos.
+            var toes = a.GetBoneTransform(HumanBodyBones.LeftToes);
+            _ankle = toes != null ? Mathf.Clamp(lf.position.y - toes.position.y + 0.03f, 0.05f, 0.14f) : 0.08f;
+        }
 
         // --- état de chaque image ---------------------------------------------------------------------------
         void Update()
@@ -105,10 +161,15 @@ namespace Mika.World.Engine
             _walk = Mathf.MoveTowards(_walk, Mathf.Clamp01(_speed / Mathf.Max(0.1f, walkSpeed)), dt / 0.25f);
             _phase += _speed / Mathf.Max(0.2f, stride) * Mathf.PI * dt;
             _breathT += dt;
+            var seatedNow = _posture == Posture.Sit && _anchor.HasValue && (_procedural ? _sit > 0.9f : InPostureState());
+            // Les pieds se posent pendant la fin de la transition, et quittent le sol dès qu'elle se lève.
+            _seated = Mathf.MoveTowards(_seated, seatedNow ? 1f : 0f, dt / (seatedNow ? 0.45f : 0.25f));
+            foreach (var l in _limbs)
+                l.Weight = Mathf.MoveTowards(l.Weight, l.Target, dt / Mathf.Max(0.05f, l.FadeS));
 
             if (!_procedural && animator != null && animator.runtimeAnimatorController != null)
             {
-                animator.SetFloat(BodyAnim.Speed, _speed);
+                animator.SetFloat(BodyAnim.Speed, StepSpeed);
                 animator.SetInteger(BodyAnim.Posture, BodyAnim.PostureValue(_posture));
                 if (BodyAnim.HasParameter(animator, BodyAnim.Holding))
                     animator.SetBool(BodyAnim.Holding, _held.Count > 0);
@@ -129,18 +190,42 @@ namespace Mika.World.Engine
         void RecalAnchor()
         {
             if (!_anchor.HasValue || _hips == null) return;
-            var a = _anchor.Value;
+            // On ne recale que quand la posture est atteinte (états marqués « seated », « lying » par le
+            // constructeur), transition terminée : pendant un fondu, les hanches sont encore à hauteur debout, et
+            // les amener sur le siège enfonçait tout le corps dans le sol.
+            if (!_procedural && animator != null && animator.runtimeAnimatorController != null && !InPostureState()) return;
+            var a = Anchor.Value;
             var k = 1f - Mathf.Exp(-Time.deltaTime * 8f);
             if (_posture == Posture.Sit && _sit > 0.5f)
             {
                 var delta = a.position - _hips.position;
                 transform.position += delta * k * _anchorBlend;
+                if (_seated >= 1f)
+                {
+                    var above = _hips.position.y - transform.position.y;
+                    _seatedHips = _seatedHips > 0f ? Mathf.Lerp(_seatedHips, above, 0.05f) : above;
+                }
+                // Le corps suit le siège qui pivote (une chaise de bureau tournée vers quelqu'un).
+                if (_anchorLive != null)
+                    transform.rotation = Quaternion.Slerp(transform.rotation, a.rotation, k * _anchorBlend);
             }
             else if (_posture == Posture.Lie && _lie > 0.5f)
             {
-                var delta = a.position - _hips.position;
+                // Sur le côté, les hanches sont plus hautes que sur le dos (la largeur du bassin) : sans ce relèvement
+                // elle s'enfoncerait dans le matelas.
+                _lieLift = Mathf.MoveTowards(_lieLift, _lieSide != 0 ? 0.07f : 0f, Time.deltaTime / 1.6f * 0.07f);
+                var delta = a.position + Vector3.up * _lieLift - _hips.position;
                 transform.position += delta * k * _anchorBlend;
             }
+        }
+
+        static readonly int SeatedTag = Animator.StringToHash("seated");
+        static readonly int LyingTag = Animator.StringToHash("lying");
+
+        bool InPostureState()
+        {
+            var tag = _posture == Posture.Sit ? SeatedTag : LyingTag;
+            return !animator.IsInTransition(0) && animator.GetCurrentAnimatorStateInfo(0).tagHash == tag;
         }
 
         // --- primitives ---------------------------------------------------------------------------------------
@@ -149,14 +234,18 @@ namespace Mika.World.Engine
         {
             StopAgent(keepEnabled: false);
             _posture = posture;
+            _place = place;
             _sit = _sitTarget = posture == Posture.Sit ? 1f : 0f;
             _lie = _lieTarget = posture == Posture.Lie ? 1f : 0f;
             _anchor = null;
+            _anchorLive = null;
             _anchorBlend = 0;
+            _floorY = place != null ? GroundUnder(place.Position) : GroundUnder(position);
             if (place != null && posture == Posture.Sit)
             {
                 var seat = place.Seat;
                 _anchor = seat;
+                _anchorLive = place.SeatTransform;
                 _anchorBlend = 1;
                 transform.SetPositionAndRotation(new Vector3(seat.position.x, position.y, seat.position.z), seat.rotation);
             }
@@ -173,7 +262,10 @@ namespace Mika.World.Engine
                 WarpAgent(position);
             }
             _lastPos = transform.position;
+            _planter.Reset();
             ApplyAnimatorPostureNow();
+            // Les cheveux et les vêtements à ressorts prendraient ce saut pour une vitesse : on les remet au repos.
+            BroadcastMessage("OnTeleported", SendMessageOptions.DontRequireReceiver);
         }
 
         /// <summary>
@@ -233,6 +325,8 @@ namespace Mika.World.Engine
 
         public IEnumerator TurnTo(Quaternion facing, float duration)
         {
+            // Les pieds restent plantés pendant que le corps pivote, et font de petits pas pour suivre
+            // (FootPlanter) : la marche jouée sur place faisait pédaler les jambes, pieds glissant en arrière.
             var from = transform.rotation;
             var t = 0f;
             while (t < duration)
@@ -244,40 +338,341 @@ namespace Mika.World.Engine
             transform.rotation = facing;
         }
 
-        /// <summary>Change de posture sur un lieu (s'asseoir, s'allonger, se lever) en <paramref name="duration"/> secondes.</summary>
+        /// <summary>La vitesse de marche à jouer : celle du corps.</summary>
+        public float StepSpeed => _speed;
+
+        /// <summary>
+        /// Change de posture sur un lieu (s'asseoir, s'allonger, se lever). Avec un contrôleur d'animation, le
+        /// geste est chorégraphié comme le ferait quelqu'un : reculer la chaise, faire un pas devant l'assise, s'y
+        /// asseoir, rouler vers le bureau ; s'asseoir au bord du lit avant de s'y allonger ; l'inverse pour se
+        /// lever. <paramref name="duration"/> (celle du noyau) est un minimum : un geste plus court attend la fin.
+        /// </summary>
         public IEnumerator ChangePosture(Posture to, PlaceView place, float duration)
         {
             if (to == _posture && (place == null || _anchor.HasValue)) yield break;
             StopAgent(keepEnabled: false); // la transition déplace le corps hors du sol navigable
+            var started = Time.time;
+            var from = _posture;
+            if (!_procedural && animator != null && animator.runtimeAnimatorController != null)
+            {
+                var here = place ?? _place;
+                Choreographing = true;
+                try
+                {
+                    if (from == Posture.Stand && to == Posture.Sit && here != null) yield return SitDown(here);
+                    else if (from == Posture.Stand && to == Posture.Lie && here != null)
+                    {
+                        yield return SitDown(here);
+                        yield return LieDown(here);
+                    }
+                    else if (from == Posture.Sit && to == Posture.Lie && here != null) yield return LieDown(here);
+                    else if (from == Posture.Lie && to == Posture.Sit && here != null) yield return SitUp(here);
+                    else if (from == Posture.Lie && to == Posture.Stand && here != null)
+                    {
+                        yield return SitUp(here);
+                        yield return StandUp(here);
+                    }
+                    else if (from == Posture.Sit && to == Posture.Stand) yield return StandUp(here);
+                    else yield return Blend(to, place, duration);
+                }
+                finally
+                {
+                    Choreographing = false;
+                }
+                var rest = duration - (Time.time - started);
+                if (rest > 0.05f) yield return new WaitForSeconds(rest);
+                yield break;
+            }
+            yield return Blend(to, place, duration);
+        }
+
+        /// <summary>Vrai pendant un changement de posture : l'occupation lâche les mains et ne touche pas la chaise.</summary>
+        public bool Choreographing { get; private set; }
+
+        /// <summary>De combien on recule une chaise à roulettes pour s'y asseoir ou en sortir (m).</summary>
+        const float PullOut = 0.28f;
+        /// <summary>Où l'on se tient avant de s'asseoir : un peu devant l'assise, dos à elle.</summary>
+        const float StandOff = 0.2f;
+
+        /// <summary>
+        /// S'asseoir : reculer la chaise s'il y en a une, faire un pas devant l'assise (dos à elle), descendre
+        /// dessus en une seconde — le buste penché, les hanches vers l'arrière —, puis rouler vers le bureau.
+        /// </summary>
+        IEnumerator SitDown(PlaceView place)
+        {
+            var chair = place.Chair;
+            var seatT = place.SeatTransform;
+            if (chair != null)
+            {
+                chair.Carry(seatT);
+                chair.SwivelTo(0f);
+                chair.RollTo(-PullOut);
+            }
+            _floorY = GroundUnder(transform.position);
+            var seat = place.Seat;
+            var fwd = FlatDir(seat.rotation * Vector3.forward);
+            // Le clip capturé recule les hanches d'une longueur connue : on se place d'autant devant l'assise
+            // (telle qu'elle sera, chaise reculée), dos à elle.
+            var captured = Captured(clips != null ? clips.sitTravelNorm : 0f);
+            var travel = captured ? clips.sitTravelNorm * animator.humanScale : StandOff;
+            var pulled = seat.position - (chair != null ? fwd * PullOut : Vector3.zero);
+            var stand = new Vector3(pulled.x, _floorY, pulled.z) + fwd * travel;
+            yield return Step(stand, Quaternion.LookRotation(fwd), 0.75f);
+
+            _place = place;
+            _posture = Posture.Sit;
+            _anchor = seat;
+            _anchorLive = seatT;
+            _sitTarget = 1f;
+            _lieTarget = 0f;
+            _anchorBlend = 0f;
+            PlantFeet();
+            ApplyAnimatorPostureNow();
+            var start = transform.position;
+            var startRot = transform.rotation;
+            var d = captured && clips.sitDownSeconds > 0.3f ? clips.sitDownSeconds : 1.05f;
+            _rootMotion = captured;
+            var t = 0f;
+            while (t < d + 0.3f)
+            {
+                t += Time.deltaTime;
+                var now = Anchor.Value;
+                var p = Mathf.Clamp01(t / d);
+                // Le siège est plus haut (ou plus bas) que celui de la prise : la racine monte d'autant pendant que
+                // les hanches descendent (seconde moitié), les pieds restent plantés.
+                var rootY = Mathf.Max(_floorY, now.position.y - SeatedHipsAboveRoot);
+                var y = Mathf.Lerp(start.y, rootY, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((p - 0.35f) / 0.6f)));
+                if (captured)
+                {
+                    // Le clip recule les hanches ; on ne corrige que l'écart restant à la toute fin.
+                    var pos = transform.position;
+                    var late = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((p - 0.8f) / 0.2f));
+                    var onSeat = new Vector3(now.position.x, pos.y, now.position.z);
+                    var xz = Vector3.Lerp(pos, onSeat, late * 0.25f);
+                    transform.SetPositionAndRotation(new Vector3(xz.x, y, xz.z), Quaternion.Slerp(startRot, now.rotation, Mathf.SmoothStep(0f, 1f, p)));
+                }
+                else
+                {
+                    var root = new Vector3(now.position.x, rootY, now.position.z);
+                    var k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((p - 0.15f) / 0.85f));
+                    var xz = Vector3.Lerp(start, root, k);
+                    transform.SetPositionAndRotation(new Vector3(xz.x, y, xz.z), Quaternion.Slerp(startRot, now.rotation, k));
+                }
+                _anchorBlend = p;
+                if (p >= 1f && InPostureState()) break;
+                yield return null;
+            }
+            _rootMotion = false;
+            _anchorBlend = 1f;
+            // Assise : les pieds passent de leur appui debout à leur place devant le siège.
+            ReleaseFeet(0.5f);
+            if (chair != null)
+            {
+                chair.RollTo(0f);
+                yield return new WaitForSeconds(0.55f);
+            }
+        }
+
+        /// <summary>
+        /// Se lever : reculer la chaise (avec soi), se redresser au-dessus de ses pieds — la capture avance les
+        /// hanches d'une longueur connue —, puis s'écarter vers le point d'approche.
+        /// </summary>
+        IEnumerator StandUp(PlaceView place)
+        {
+            var chair = place != null ? place.Chair : null;
+            if (chair != null)
+            {
+                chair.Carry(place.SeatTransform);
+                chair.SwivelTo(0f);
+                chair.RollTo(-PullOut);
+                yield return new WaitForSeconds(0.6f);
+            }
+            var a = Anchor ?? new Pose(transform.position, transform.rotation);
+            var fwd = FlatDir(a.rotation * Vector3.forward);
+            var floor = _floorY != 0f || place == null ? _floorY : GroundUnder(place.Position);
+            var captured = Captured(clips != null ? clips.standTravelNorm : 0f);
+            var travel = captured ? clips.standTravelNorm * animator.humanScale : StandOff;
+            var stand = new Vector3(a.position.x, floor, a.position.z) + fwd * travel;
+            PlantFeet();
+            _posture = Posture.Stand;
+            _anchor = null;
+            _anchorLive = null;
+            _sitTarget = 0f;
+            _lieTarget = 0f;
+            _anchorBlend = 0f;
+            ApplyAnimatorPostureNow();
+            var start = transform.position;
+            var startRot = transform.rotation;
+            var face = Quaternion.LookRotation(fwd);
+            var d = captured && clips.standUpSeconds > 0.3f ? clips.standUpSeconds : 0.95f;
+            _rootMotion = captured;
+            var t = 0f;
+            while (t < d)
+            {
+                t += Time.deltaTime;
+                var p = Mathf.Clamp01(t / d);
+                // La racine redescend au sol pendant que les jambes poussent (première moitié).
+                var y = Mathf.Lerp(start.y, floor, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(p / 0.6f)));
+                Vector3 xz;
+                if (captured)
+                {
+                    var pos = transform.position;
+                    xz = Vector3.Lerp(pos, stand, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((p - 0.75f) / 0.25f)) * 0.3f);
+                }
+                else
+                {
+                    xz = Vector3.Lerp(start, stand, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(p * 1.15f)));
+                }
+                transform.SetPositionAndRotation(new Vector3(xz.x, y, xz.z), Quaternion.Slerp(startRot, face, Mathf.SmoothStep(0f, 1f, p)));
+                yield return null;
+            }
+            _rootMotion = false;
+            ReleaseFeet(0.3f);
+            if (place != null && Vector3.Distance(Ground(place.Position), Ground(transform.position)) > 0.12f)
+                yield return Step(new Vector3(place.Position.x, floor, place.Position.z), place.Rotation, 0.75f);
+            if (chair != null) chair.RollTo(0f);
+            EnsureAgent();
+            WarpAgent(transform.position);
+        }
+
+        /// <summary>S'allonger depuis le bord du lit : pivoter, ramener les jambes, se laisser aller sur le dos.</summary>
+        IEnumerator LieDown(PlaceView place)
+        {
+            var lie = place.Lie;
+            var start = transform.position;
+            var startRot = transform.rotation;
+            var end = LieRootPosition(lie);
+            var endRot = LieRootRotation(lie);
+            _place = place;
+            _posture = Posture.Lie;
+            _anchor = lie;
+            _anchorLive = null;
+            _lieTarget = 1f;
+            _sitTarget = 0f;
+            _anchorBlend = 0f;
+            ApplyAnimatorPostureNow();
+            const float d = 1.6f;
+            var t = 0f;
+            while (t < d)
+            {
+                t += Time.deltaTime;
+                var k = Mathf.SmoothStep(0f, 1f, t / d);
+                // Le corps pivote d'abord (les jambes montent sur le lit), puis s'allonge.
+                var turn = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t / d * 1.4f));
+                transform.SetPositionAndRotation(Vector3.Lerp(start, end, k), Quaternion.Slerp(startRot, endRot, turn));
+                _anchorBlend = k;
+                yield return null;
+            }
+            _anchorBlend = 1f;
+        }
+
+        /// <summary>Se redresser au bord du lit : l'inverse de <see cref="LieDown"/>.</summary>
+        IEnumerator SitUp(PlaceView place)
+        {
+            SetLieSide(0);
+            var seat = place.Seat;
+            var start = transform.position;
+            var startRot = transform.rotation;
+            _place = place;
+            _posture = Posture.Sit;
+            _anchor = seat;
+            _anchorLive = place.SeatTransform;
+            _sitTarget = 1f;
+            _lieTarget = 0f;
+            _anchorBlend = 0f;
+            ApplyAnimatorPostureNow();
+            var end = new Vector3(seat.position.x, Mathf.Max(_floorY, seat.position.y - SeatedHipsAboveRoot), seat.position.z);
+            const float d = 1.5f;
+            var t = 0f;
+            while (t < d)
+            {
+                t += Time.deltaTime;
+                var k = Mathf.SmoothStep(0f, 1f, t / d);
+                var turn = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((t / d - 0.25f) / 0.75f));
+                transform.SetPositionAndRotation(Vector3.Lerp(start, end, k), Quaternion.Slerp(startRot, seat.rotation, turn));
+                _anchorBlend = k;
+                yield return null;
+            }
+            _anchorBlend = 1f;
+        }
+
+        /// <summary>
+        /// Quelques pas courts jusqu'à un point proche (devant une chaise, à côté d'un lit), sans navmesh : la
+        /// marche se joue d'elle-même (la vitesse mesurée l'enclenche). Au-delà de 30 cm on se tourne dans le sens
+        /// de la marche ; en deçà on se décale sans se retourner.
+        /// </summary>
+        IEnumerator Step(Vector3 target, Quaternion facing, float speed)
+        {
+            var start = transform.position;
+            target.y = start.y;
+            var delta = Ground(target - start);
+            var dist = delta.magnitude;
+            if (dist > 0.04f)
+            {
+                var walkFacing = dist > 0.3f ? Quaternion.LookRotation(delta.normalized) : transform.rotation;
+                var d = Mathf.Max(0.45f, dist / speed);
+                var t = 0f;
+                while (t < d)
+                {
+                    t += Time.deltaTime;
+                    var k = Mathf.SmoothStep(0f, 1f, t / d);
+                    transform.position = Vector3.Lerp(start, target, k);
+                    var want = t > d * 0.75f ? facing : walkFacing;
+                    transform.rotation = Quaternion.RotateTowards(transform.rotation, want, turnSpeedDeg * 0.8f * Time.deltaTime);
+                    yield return null;
+                }
+                transform.position = target;
+            }
+            if (Quaternion.Angle(transform.rotation, facing) > 2f)
+                yield return TurnTo(facing, Mathf.Clamp(Quaternion.Angle(transform.rotation, facing) / 220f, 0.2f, 0.6f));
+        }
+
+        /// <summary>Une direction ramenée à l'horizontale, normée (devant soi si elle est verticale).</summary>
+        static Vector3 FlatDir(Vector3 v)
+        {
+            v.y = 0f;
+            return v.sqrMagnitude > 1e-6f ? v.normalized : Vector3.forward;
+        }
+
+        static Vector3 Ground(Vector3 p) => new Vector3(p.x, 0f, p.z);
+
+        /// <summary>Le changement de posture sans chorégraphie (poseur procédural, cas imprévus) : un fondu sur place.</summary>
+        IEnumerator Blend(Posture to, PlaceView place, float duration)
+        {
             var fromPos = transform.position;
             var fromRot = transform.rotation;
             Vector3 toPos;
             Quaternion toRot;
+            if (_posture == Posture.Stand) _floorY = GroundUnder(fromPos);
             switch (to)
             {
                 case Posture.Sit when place != null:
                     var seat = place.Seat;
-                    toPos = new Vector3(seat.position.x, fromPos.y, seat.position.z);
+                    toPos = new Vector3(seat.position.x, Mathf.Max(fromPos.y, seat.position.y - SeatedHipsAboveRoot), seat.position.z);
                     toRot = seat.rotation;
                     _anchor = seat;
+                    _anchorLive = place.SeatTransform;
                     break;
                 case Posture.Lie when place != null:
                     var lie = place.Lie;
                     toPos = LieRootPosition(lie);
                     toRot = LieRootRotation(lie);
                     _anchor = lie;
+                    _anchorLive = null;
                     break;
                 default:
-                    // Se lever : un pas vers le point d'approche du lieu.
-                    toPos = place != null ? place.Position : new Vector3(fromPos.x, FloorY(fromPos), fromPos.z);
+                    toPos = place != null ? place.Position : new Vector3(fromPos.x, GroundUnder(fromPos), fromPos.z);
                     toRot = place != null ? place.Rotation : Quaternion.Euler(0, fromRot.eulerAngles.y, 0);
                     _anchor = null;
+                    _anchorLive = null;
                     break;
             }
+            _place = place;
             _posture = to;
             _sitTarget = to == Posture.Sit ? 1f : 0f;
             _lieTarget = to == Posture.Lie ? 1f : 0f;
             _anchorBlend = 0;
+            ApplyAnimatorPostureNow();
             var d = Mathf.Max(0.2f, duration);
             var t = 0f;
             while (t < d)
@@ -367,30 +762,282 @@ namespace Mika.World.Engine
                 animator.SetBool(BodyAnim.Asleep, asleep);
         }
 
+        int _lieSide;
+        float _lieLift;
+
+        /// <summary>Allongée : 0 sur le dos, 1 sur le côté gauche, 2 sur le côté droit.</summary>
+        public int LieSide => _lieSide;
+
+        /// <summary>Se retourner (allongée) : le contrôleur fait rouler le corps d'un côté à l'autre.</summary>
+        public void SetLieSide(int side)
+        {
+            _lieSide = Mathf.Clamp(side, 0, 2);
+            if (!_procedural && animator != null && BodyAnim.HasParameter(animator, BodyAnim.LieSide))
+                animator.SetInteger(BodyAnim.LieSide, _lieSide);
+        }
+
+        /// <summary>La droite du corps allongé (dans le monde) : sur le dos, sa droite est le −X de la racine.</summary>
+        public Vector3 LyingRight => transform.TransformDirection(Vector3.left);
+
         /// <summary>Où regarder (une personne, un objet) ; <c>null</c> : devant soi.</summary>
         public void LookAt(Vector3? point) => _look = point;
 
+        float _groundOffset, _floorProbeAt = -1f, _floorProbe;
+        readonly FootPlanter _planter = new FootPlanter();
+
+        /// <summary>Debout, rien ne dirige les pieds (ni une chorégraphie, ni l'assise) : ils tiennent au sol d'eux-mêmes.</summary>
+        bool FeetFree => _posture == Posture.Stand && !Choreographing && !_procedural && plantFeet && _seated <= 0f;
+
+        /// <summary>
+        /// Ancrage au sol (debout, en marchant) : les clips capturés sont ramenés à sa taille par la hauteur des
+        /// hanches, mais ses jambes sont plus courtes que celles de l'acteur par rapport à ses hanches — sans
+        /// correction ses pieds flottaient de 4 cm. À chaque image, le bassin descend (ou monte) pour que le pied le
+        /// plus bas de l'animation touche le sol.
+        /// </summary>
+        /// <remarks>
+        /// Asymétrique : un pied sous le sol remonte le bassin tout de suite ; des pieds au-dessus ne le font
+        /// redescendre que lentement (vite en marchant, où le pied d'appui change à chaque pas). Sinon un petit saut
+        /// de l'attente joyeuse était pris pour un flottement : le bassin descendait pendant le saut et, rattrapant en
+        /// retard, enfonçait les pieds dans le sol à l'atterrissage.
+        /// </remarks>
+        void Ground()
+        {
+            var active = FeetFree;
+            var target = 0f;
+            if (active)
+            {
+                if (Time.time > _floorProbeAt)
+                {
+                    _floorProbe = GroundUnder(transform.position);
+                    _floorProbeAt = Time.time + 0.25f;
+                }
+                var l = animator.GetIKPosition(AvatarIKGoal.LeftFoot).y - animator.leftFeetBottomHeight;
+                var r = animator.GetIKPosition(AvatarIKGoal.RightFoot).y - animator.rightFeetBottomHeight;
+                target = Mathf.Clamp(_floorProbe - Mathf.Min(l, r), -0.12f, 0.06f);
+            }
+            var tau = target > _groundOffset ? 0.03f : _speed > 0.1f ? 0.15f : 0.6f;
+            _groundOffset = Mathf.Lerp(_groundOffset, target, 1f - Mathf.Exp(-Time.deltaTime / tau));
+            if (Mathf.Abs(_groundOffset) > 1e-4f)
+                animator.bodyPosition += Vector3.up * _groundOffset;
+        }
+
+        /// <summary>Où regarde l'occupation en cours (l'écran, le livre) quand personne n'attire son regard.</summary>
+        public void SetActivityLook(Vector3? point) => _activityLook = point;
+
+        /// <summary>
+        /// Tient une main ou un pied à un point (un clavier, un livre, le matelas) ; <paramref name="rotation"/> :
+        /// l'orientation de la main ou du pied, <paramref name="hint"/> : vers où plier le coude ou le genou.
+        /// À rappeler à chaque image tant que le point bouge ; le poids monte et descend en douceur.
+        /// </summary>
+        public void Pin(AvatarIKGoal goal, Vector3 position, Quaternion? rotation = null, Vector3? hint = null, float weight = 1f, float fadeS = 0.35f)
+        {
+            var l = _limbs[(int)goal];
+            l.Position = position;
+            l.HasRotation = rotation.HasValue;
+            if (rotation.HasValue) l.Rotation = rotation.Value;
+            l.Hint = hint;
+            l.Target = Mathf.Clamp01(weight);
+            l.FadeS = fadeS;
+        }
+
+        public void Unpin(AvatarIKGoal goal, float fadeS = 0.35f)
+        {
+            var l = _limbs[(int)goal];
+            l.Target = 0f;
+            l.FadeS = fadeS;
+        }
+
+        public float PinWeight(AvatarIKGoal goal) => _limbs[(int)goal].Weight;
+
+        /// <summary>Le déplacement du clip pour cette image (relayé par <see cref="IkRelay"/>) : appliqué à l'horizontale si demandé.</summary>
+        internal void OnRootMotion(Vector3 delta)
+        {
+            if (!_rootMotion) return;
+            delta.y = 0f;
+            transform.position += delta;
+        }
+
+        /// <summary>Plante les pieds là où ils sont (on s'assoit, on se lève sans qu'ils glissent).</summary>
+        void PlantFeet()
+        {
+            if (!plantFeet) return;
+            for (var s = 0; s < 2; s++)
+            {
+                var goal = s == 0 ? AvatarIKGoal.LeftFoot : AvatarIKGoal.RightFoot;
+                var bone = animator.GetBoneTransform(s == 0 ? HumanBodyBones.LeftFoot : HumanBodyBones.RightFoot);
+                if (bone == null) continue;
+                var fwd = FlatDir(transform.forward);
+                var toe = Quaternion.AngleAxis(s == 0 ? -8f : 8f, Vector3.up) * fwd;
+                // Côte à côte sous elle, pas là où le dernier pas les a laissés (un pied encore en arrière resterait
+                // coincé sous la chaise pendant toute la descente).
+                var right = Vector3.Cross(Vector3.up, fwd);
+                var p = transform.position + fwd * 0.04f + right * ((s == 0 ? -1f : 1f) * (_hipHalfWidth + 0.02f));
+                p.y = _floorY + _ankle;
+                var l = _limbs[(int)goal];
+                l.Position = p;
+                l.Rotation = Quaternion.LookRotation(toe, Vector3.up);
+                l.HasRotation = true;
+                l.Hint = p + fwd * 0.35f + Vector3.up * 0.45f;
+                l.Target = 1f;
+                l.Weight = Mathf.Max(l.Weight, 0.6f);
+                l.FadeS = 0.2f;
+            }
+        }
+
+        void ReleaseFeet(float fadeS)
+        {
+            Unpin(AvatarIKGoal.LeftFoot, fadeS);
+            Unpin(AvatarIKGoal.RightFoot, fadeS);
+        }
+
+        bool Captured(float norm) => clips != null && norm > 0f && animator != null && animator.humanScale > 0f;
+
+        /// <summary>La hauteur des hanches au-dessus de la racine en posture assise (mesurée une fois assise).</summary>
+        float SeatedHipsAboveRoot => _seatedHips > 0f ? _seatedHips
+            : Captured(clips != null ? clips.sitHipsNorm : 0f) ? clips.sitHipsNorm * animator.humanScale : _shin + _ankle;
+        float _seatedHips;
+
         // --- IK (appelé par IkRelay depuis l'objet qui porte l'Animator) -------------------------------------
-        internal void OnIK()
+        internal void OnIK(int layer = 0)
         {
             if (animator == null) return;
+            if (layer == 0)
+            {
+                _planter.Sample(animator);
+                Ground();
+                _planter.Update(animator, FeetFree, _floorProbe, _groundOffset, _speed, Time.deltaTime);
+            }
+            for (var g = 0; g < 4; g++)
+            {
+                var goal = (AvatarIKGoal)g;
+                var l = _limbs[g];
+                var w = l.Weight;
+                // Tendre la main (prendre, poser) passe avant une épingle de la même main.
+                if (_ikPoint.HasValue && goal == _ikGoal) continue;
+                animator.SetIKPositionWeight(goal, w);
+                animator.SetIKRotationWeight(goal, l.HasRotation ? w : 0f);
+                if (w <= 0f) continue;
+                var target = goal == AvatarIKGoal.LeftHand || goal == AvatarIKGoal.RightHand ? OutsideTorso(l.Position) : l.Position;
+                animator.SetIKPosition(goal, target);
+                if (l.HasRotation) animator.SetIKRotation(goal, l.Rotation);
+                var hint = HintOf(goal);
+                if (l.Hint.HasValue)
+                {
+                    animator.SetIKHintPositionWeight(hint, w);
+                    animator.SetIKHintPosition(hint, l.Hint.Value);
+                }
+                else
+                {
+                    animator.SetIKHintPositionWeight(hint, 0f);
+                }
+            }
+            _planter.Apply(animator, _limbs[(int)AvatarIKGoal.LeftFoot].Weight > 0f, _limbs[(int)AvatarIKGoal.RightFoot].Weight > 0f);
+            SeatedFeet();
             if (_ikPoint.HasValue)
             {
                 animator.SetIKPositionWeight(_ikGoal, _ikWeight);
-                animator.SetIKPosition(_ikGoal, _ikPoint.Value);
+                animator.SetIKPosition(_ikGoal, OutsideTorso(_ikPoint.Value));
             }
-            else
+            var look = _look ?? _activityLook;
+            if (look.HasValue)
             {
-                animator.SetIKPositionWeight(_ikGoal, 0);
-            }
-            if (_look.HasValue)
-            {
-                animator.SetLookAtWeight(_lookWeight, 0.25f, 0.8f, 1f, 0.6f);
-                animator.SetLookAtPosition(_look.Value);
+                var w = _look.HasValue ? _lookWeight : 1f;
+                // Regarder son travail (l'écran, la page) penche aussi le buste ; regarder quelqu'un, surtout la tête.
+                animator.SetLookAtWeight(w, _look.HasValue ? 0.25f : 0.4f, 0.8f, 1f, 0.6f);
+                animator.SetLookAtPosition(look.Value);
             }
             else
             {
                 animator.SetLookAtWeight(0);
+            }
+        }
+
+        /// <summary>
+        /// Une main ne traverse pas son propre buste : le torse est une boîte arrondie autour de la colonne (des
+        /// hanches au cou, largeur des épaules, épaisseur du sweat) ; une cible de main dedans est repoussée devant,
+        /// à la distance d'une main posée contre le ventre.
+        /// </summary>
+        Vector3 OutsideTorso(Vector3 p)
+        {
+            if (_hips == null || _neck == null) return p;
+            var bottom = _hips.position;
+            var top = _neck.position;
+            var axis = top - bottom;
+            var len = axis.magnitude;
+            if (len < 1e-3f) return p;
+            var up = axis / len;
+            var along = Mathf.Clamp(Vector3.Dot(p - bottom, up), 0f, len);
+            var center = bottom + up * along;
+            // Le devant du buste : l'avant du corps, ramené perpendiculaire à la colonne (qui peut se pencher).
+            var fwd = Vector3.ProjectOnPlane(transform.forward, up).normalized;
+            if (_posture == Posture.Lie) return p;
+            var side = Vector3.Cross(up, fwd);
+            var d = p - center;
+            var x = Vector3.Dot(d, side);
+            var z = Vector3.Dot(d, fwd);
+            const float hand = 0.05f;
+            var halfWidth = _torsoHalfWidth + hand;
+            var halfDepth = _torsoHalfDepth + hand;
+            if (Mathf.Abs(x) >= halfWidth || z >= halfDepth || z <= -halfDepth) return p;
+            // Dedans : vers l'avant (là où vont les mains), jamais à travers le dos.
+            return p + fwd * (halfDepth - z);
+        }
+
+        Transform _neck;
+        float _torsoHalfWidth = 0.15f, _torsoHalfDepth = 0.12f;
+
+        static AvatarIKHint HintOf(AvatarIKGoal goal) => goal switch
+        {
+            AvatarIKGoal.LeftFoot => AvatarIKHint.LeftKnee,
+            AvatarIKGoal.RightFoot => AvatarIKHint.RightKnee,
+            AvatarIKGoal.LeftHand => AvatarIKHint.LeftElbow,
+            _ => AvatarIKHint.RightElbow,
+        };
+
+        /// <summary>
+        /// Assise : les pieds à plat sur le sol devant le siège, genoux au-dessus — quelle que soit la hauteur du
+        /// siège (une chaise haute pour ses jambes, le bord du lit). Une épingle de pied explicite passe avant.
+        /// </summary>
+        void SeatedFeet()
+        {
+            if (_seated <= 0f || !_anchor.HasValue || _hips == null) return;
+            var a = Anchor.Value;
+            var fwd = a.rotation * Vector3.forward;
+            fwd.y = 0;
+            fwd = fwd.sqrMagnitude > 1e-4f ? fwd.normalized : transform.forward;
+            var right = Vector3.Cross(Vector3.up, fwd);
+            var drop = Mathf.Max(0f, a.position.y - _floorY);
+            // Les genoux à une cuisse devant les hanches, les pieds sous les genoux (un peu en avant si le siège
+            // est bas, un peu en arrière s'il est haut : les talons reviennent sous le siège).
+            var knee = _thigh * 0.92f;
+            var under = Mathf.Clamp(drop - _shin - _ankle, -0.15f, 0.2f);
+            var forward = knee - under * 0.6f;
+            for (var s = 0; s < 2; s++)
+            {
+                var goal = s == 0 ? AvatarIKGoal.LeftFoot : AvatarIKGoal.RightFoot;
+                var l = _limbs[(int)goal];
+                // Un pied épinglé à fond (planté pendant qu'elle s'assoit) garde son épingle.
+                if (l.Target > 0f && l.Weight >= 0.999f) continue;
+                var side = (s == 0 ? -1f : 1f) * (_hipHalfWidth + 0.03f);
+                var pos = new Vector3(a.position.x, _floorY + _ankle, a.position.z) + fwd * forward + right * side;
+                var toe = Quaternion.AngleAxis(s == 0 ? -8f : 8f, Vector3.up) * fwd;
+                var rot = Quaternion.LookRotation(toe, Vector3.up);
+                var ws = Mathf.SmoothStep(0f, 1f, _seated);
+                // Une épingle qui s'efface (le pied quitte son appui debout) glisse vers la place assise.
+                var wl = l.Weight;
+                if (wl > 0f)
+                {
+                    pos = Vector3.Lerp(pos, l.Position, wl);
+                    if (l.HasRotation) rot = Quaternion.Slerp(rot, l.Rotation, wl);
+                }
+                var w = Mathf.Max(ws, wl);
+                animator.SetIKPositionWeight(goal, w);
+                animator.SetIKRotationWeight(goal, w);
+                animator.SetIKPosition(goal, pos);
+                animator.SetIKRotation(goal, rot);
+                var hint = HintOf(goal);
+                animator.SetIKHintPositionWeight(hint, w);
+                animator.SetIKHintPosition(hint, new Vector3(pos.x, a.position.y + 0.05f, pos.z) + fwd * 0.25f);
             }
         }
 
@@ -450,7 +1097,19 @@ namespace Mika.World.Engine
             return l;
         }
 
-        static float FloorY(Vector3 p) => NavMesh.SamplePosition(p, out var hit, 2f, NavMesh.AllAreas) ? hit.position.y : 0f;
+        /// <summary>
+        /// Le sol sous un point : la première surface horizontale touchée en descendant (le plancher, un tapis),
+        /// sinon le navmesh — qui flotte de quelques centimètres au-dessus du sol réel.
+        /// </summary>
+        float GroundUnder(Vector3 p)
+        {
+            var hits = Physics.RaycastAll(p + Vector3.up * 0.6f, Vector3.down, 3f, ~0, QueryTriggerInteraction.Ignore);
+            System.Array.Sort(hits, (x, y) => x.distance.CompareTo(y.distance));
+            foreach (var hit in hits)
+                if (hit.normal.y > 0.7f && !hit.transform.IsChildOf(transform))
+                    return hit.point.y;
+            return NavMesh.SamplePosition(p, out var nav, 2f, NavMesh.AllAreas) ? nav.position.y : 0f;
+        }
 
         Vector3 LieRootPosition(Pose lie) => _procedural ? lie.position : new Vector3(lie.position.x, lie.position.y - (_hips != null ? 0.1f : 0f), lie.position.z);
 

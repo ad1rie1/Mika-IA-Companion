@@ -156,13 +156,13 @@ namespace Mika.World.Engine
                 var anchorId = place.Anchor ?? place.Id;
                 if (scenePlaces.TryGetValue(anchorId, out var pa))
                 {
-                    _places[place.Id] = new PlaceView { Id = place.Id, Def = place, Room = room, Approach = pa.transform, Authoring = pa };
+                    _places[place.Id] = new PlaceView { Id = place.Id, Def = place, Room = room, Approach = pa.transform, Authoring = pa, Stage = this };
                     continue;
                 }
                 if (!_places.TryGetValue(place.Id, out var view) || view.Authoring != null)
                 {
                     var go = new GameObject($"Lieu {place.Id}");
-                    view = new PlaceView { Id = place.Id, Approach = go.transform };
+                    view = new PlaceView { Id = place.Id, Approach = go.transform, Stage = this };
                     _places[place.Id] = view;
                     _missingAnchors.Add(place.Id);
                 }
@@ -224,6 +224,20 @@ namespace Mika.World.Engine
         ActorBody EnsureActor(string id, string assetKey, string label)
         {
             if (_actors.TryGetValue(id, out var existing) && existing != null) return existing;
+            var body = Spawn(id, assetKey, label);
+            _actors[id] = body;
+            ActorSpawned?.Invoke(id, body);
+            return body;
+        }
+
+        /// <summary>
+        /// Un corps monté exactement comme ceux du monde, mais que le noyau ne connaît pas et ne pilote pas : un
+        /// banc d'essai d'animations, un aperçu du créateur. À détruire par qui l'a demandé.
+        /// </summary>
+        public ActorBody SpawnUnlisted(string id, string assetKey, string label) => Spawn(id, assetKey, label);
+
+        ActorBody Spawn(string id, string assetKey, string label)
+        {
             var prefab = catalog != null ? catalog.Prefab(assetKey) : null;
             GameObject go;
             if (prefab != null)
@@ -244,15 +258,20 @@ namespace Mika.World.Engine
             if (animator != null && animator.isHuman && catalog != null && catalog.humanoidController != null)
             {
                 animator.runtimeAnimatorController = catalog.humanoidController;
-                animator.applyRootMotion = false;
+                // Le mouvement de racine est calculé (s'asseoir capturé recule) mais jamais appliqué d'office :
+                // le relais IK le reçoit (OnAnimatorMove) et le corps décide.
+                animator.applyRootMotion = true;
             }
             var body = go.GetOrAdd<ActorBody>();
+            if (catalog != null) body.clips = catalog.bodyClips;
             if (animator != null) body.Bind(animator);
+            if (animator != null && animator.runtimeAnimatorController != null && catalog != null && catalog.bodyClips != null)
+                go.GetOrAdd<BodyExpression>().Bind(body, catalog.bodyClips);
             body.actorId = id;
+            if (animator != null && animator.runtimeAnimatorController != null)
+                go.GetOrAdd<BodyActivity>().Bind(body, this);
             var player = go.GetOrAdd<IntentPlayer>();
             player.Init(body, this);
-            _actors[id] = body;
-            ActorSpawned?.Invoke(id, body);
             return body;
         }
 
@@ -303,6 +322,8 @@ namespace Mika.World.Engine
                 body = EnsureActor(state.Id, visitor?.Asset ?? "avatars/default", visitor?.Label);
             }
             body.SetActivity(state.Activity?.Name);
+            if (body.TryGetComponent<BodyActivity>(out var activity))
+                activity.Set(state.Activity?.Name, state.Activity?.Object);
             var player = body.GetComponent<IntentPlayer>();
             if (player != null && player.Current != null && !instant) return; // l'action en cours amène le corps
             var place = Place(state.Place);

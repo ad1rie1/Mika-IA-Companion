@@ -1,0 +1,105 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: bda1a917f54dd8533b1233ffccf4d149, type: 3}
+  m_Name: BodyClipSet
+  m_EditorClassIdentifier: Mika.World.Engine::Mika.World.Engine.BodyClipSet
+  idles:
+  - clip: idle_breathing
+    index: 0
+    weight: 3
+    hold: {x: 8, y: 16}
+    valence: 0
+    arousal: 0
+  - clip: idle_happy
+    index: 1
+    weight: 2
+    hold: {x: 7, y: 14}
+    valence: 0.7
+    arousal: 0.2
+  - clip: idle_bored
+    index: 2
+    weight: 0
+    hold: {x: 8, y: 14}
+    valence: 0
+    arousal: 0
+  - clip: idle_nervous
+    index: 3
+    weight: 0
+    hold: {x: 7, y: 12}
+    valence: 0
+    arousal: 0
+  - clip: idle_sad
+    index: 4
+    weight: 0
+    hold: {x: 8, y: 14}
+    valence: 0
+    arousal: 0
+  - clip: waiting
+    index: 5
+    weight: 2
+    hold: {x: 8, y: 14}
+    valence: 0
+    arousal: 0
+  talks:
+  - clip: talk_main
+    index: 0
+    weight: 2
+    hold: {x: 4, y: 9}
+    valence: 0
+    arousal: 0
+  - clip: talk_variant_b
+    index: 1
+    weight: 2
+    hold: {x: 4, y: 9}
+    valence: 0
+    arousal: 0
+  - clip: talk_variant_c
+    index: 2
+    weight: 2
+    hold: {x: 4, y: 9}
+    valence: 0
+    arousal: 0
+  - clip: talk_heated
+    index: 3
+    weight: 1
+    hold: {x: 4, y: 8}
+    valence: -0.3
+    arousal: 0.8
+  gestures:
+  - wave
+  - nod
+  - shake_head
+  - headshake
+  - think
+  - laugh
+  - sigh
+  - stretch
+  - yawn
+  - surprised
+  - bashful
+  - excited
+  - angry
+  - clap
+  - bow
+  - point
+  - poke
+  - pat_head
+  walkClipSpeed: 1.3525527
+  walkSlowNorm: 0.6050359
+  walkNorm: 1.0379283
+  walkSlowSeconds: 1.6000001
+  walkSeconds: 1.1333334
+  sitTravelNorm: 0.41766644
+  sitHipsNorm: 0.5824444
+  standTravelNorm: 0.38562626
+  sitDownSeconds: 1.5666667
+  standUpSeconds: 0.86666673

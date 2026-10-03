@@ -25,6 +25,8 @@ namespace Mika.App
 
         ActorBody _body;
         MikaFace _face;
+        BodyExpression _expression;
+        BodyActivity _activity;
         // Le dernier état intérieur reçu : il peut arriver avant que la scène ait fait apparaître le corps.
         string _sleepPhase;
         float? _energy;
@@ -55,11 +57,19 @@ namespace Mika.App
                 return _body != null;
             _body = body;
             _face = body != null ? body.GetComponentInChildren<MikaFace>() : null;
+            _expression = body != null ? body.GetComponent<BodyExpression>() : null;
+            _activity = body != null ? body.GetComponent<BodyActivity>() : null;
+            if (_activity != null && player != null && player.view != null) _activity.companion = player.view.transform;
             if (_face != null)
             {
                 _face.SpeechEnded += () =>
                 {
                     if (_body != null) _body.SetTalking(false);
+                };
+                // Un soupir, un rire dans la voix : le corps les joue au bon moment.
+                _face.ProsodicCue += cue =>
+                {
+                    if (_expression != null) _expression.Cue(cue);
                 };
                 if (player != null && player.view != null) _face.LookAt(player.view.transform);
             }
@@ -87,7 +97,10 @@ namespace Mika.App
                 return;
             }
             _face.SetReplyPending(false);
+            // Elle répond à quelqu'un : elle se tourne vers lui (sa chaise pivote, son occupation attend).
+            if (!s.Inner && _activity != null) _activity.Engage(14f);
             _face.ShowEmotion(s.Emotion, s.EmotionIntensity, Blend(s.EmotionBlend), ambient: false);
+            Express(s.Emotion, s.EmotionIntensity, s.EmotionBlend, s.Inner, ambient: false);
             if (string.IsNullOrEmpty(s.Text)) return;
             _face.InnerVoice = s.Inner;
             // « speak: false » : on montre le texte sans articuler (un autre écran parle, ou elle est muette ici).
@@ -100,6 +113,7 @@ namespace Mika.App
         {
             if (Bind() && _face != null)
                 _face.ShowEmotion(u.Emotion, u.EmotionIntensity, Blend(u.EmotionBlend), ambient: true);
+            if (_body != null) Express(u.Emotion, u.EmotionIntensity, u.EmotionBlend, inner: false, ambient: true);
         }
 
         void OnInnerState(InnerStateFrame s)
@@ -113,6 +127,7 @@ namespace Mika.App
         {
             if (_body == null) return;
             if (_sleepPhase != null) _body.SetAsleep(_sleepPhase != "awake");
+            if (_sleepPhase != null && _expression != null) _expression.SetAsleep(_sleepPhase != "awake");
             if (_face == null) return;
             if (_sleepPhase != null) _face.SetSleepPhase(_sleepPhase);
             if (_energy.HasValue) _face.SetEnergy(_energy.Value);
@@ -120,13 +135,28 @@ namespace Mika.App
 
         void OnAck(AckFrame a)
         {
-            if (a.Status == "accepted" && Bind() && _face != null) _face.SetReplyPending(true);
+            if (a.Status != "accepted" || !Bind()) return;
+            if (_face != null) _face.SetReplyPending(true);
+            if (_activity != null) _activity.Engage(16f);
         }
 
         /// <summary>Quand la joueuse écrit, Mika l'écoute (le regard se pose sur elle).</summary>
         public void NoteUserTyping()
         {
-            if (Bind() && _face != null) _face.NoteUserTyping();
+            if (!Bind()) return;
+            if (_face != null) _face.NoteUserTyping();
+            if (_activity != null) _activity.Engage(8f);
+        }
+
+        /// <summary>L'humeur du tour dans le corps : l'attente et le tempo qu'elle choisit, le geste qu'elle déclenche.</summary>
+        void Express(string emotion, float intensity, List<BlendPart> blend, bool inner, bool ambient)
+        {
+            if (_expression == null) return;
+            _expression.SetAffect(emotion, intensity, Emotions.ValenceOf(emotion), Emotions.ArousalOf(emotion));
+            var parts = (blend ?? new List<BlendPart>()).OrderByDescending(p => p.Weight).ToList();
+            var first = parts.Count > 0 ? parts[0].Weight : 0f;
+            var second = parts.Count > 1 ? parts[1].Weight : 0f;
+            _expression.React(emotion, intensity, first, second, inner, ambient);
         }
 
         static IReadOnlyList<KeyValuePair<string, float>> Blend(List<BlendPart> parts) =>

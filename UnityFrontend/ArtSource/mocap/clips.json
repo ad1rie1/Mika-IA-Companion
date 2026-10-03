@@ -1,0 +1,1025 @@
+{
+  "source": "Carnegie Mellon University Graphics Lab Motion Capture Database (mocap.cs.cmu.edu)",
+  "bvh_conversion": "cgspeed / Bruce Hahne (MotionBuilder-friendly), github.com/una-dinosauria/cmu-mocap",
+  "generator": "frontend/assets-src/blender/mocap_unity.py",
+  "fps": 30,
+  "source_fps": 120,
+  "frames_convention": "indices d'image 0-based de la section MOTION du BVH ; 0 = pose T de cgspeed ; bornes incluses",
+  "rest_pose": "pose T (image 0 du BVH), hanches à 0,95 m, face à +Z Unity",
+  "rig_root": "CMU_Rig",
+  "bones": [
+    {
+      "name": "Hips",
+      "parent": null
+    },
+    {
+      "name": "LHipJoint",
+      "parent": "Hips"
+    },
+    {
+      "name": "LeftUpLeg",
+      "parent": "LHipJoint"
+    },
+    {
+      "name": "LeftLeg",
+      "parent": "LeftUpLeg"
+    },
+    {
+      "name": "LeftFoot",
+      "parent": "LeftLeg"
+    },
+    {
+      "name": "LeftToeBase",
+      "parent": "LeftFoot"
+    },
+    {
+      "name": "RHipJoint",
+      "parent": "Hips"
+    },
+    {
+      "name": "RightUpLeg",
+      "parent": "RHipJoint"
+    },
+    {
+      "name": "RightLeg",
+      "parent": "RightUpLeg"
+    },
+    {
+      "name": "RightFoot",
+      "parent": "RightLeg"
+    },
+    {
+      "name": "RightToeBase",
+      "parent": "RightFoot"
+    },
+    {
+      "name": "LowerBack",
+      "parent": "Hips"
+    },
+    {
+      "name": "Spine",
+      "parent": "LowerBack"
+    },
+    {
+      "name": "Spine1",
+      "parent": "Spine"
+    },
+    {
+      "name": "Neck",
+      "parent": "Spine1"
+    },
+    {
+      "name": "Neck1",
+      "parent": "Neck"
+    },
+    {
+      "name": "Head",
+      "parent": "Neck1"
+    },
+    {
+      "name": "LeftShoulder",
+      "parent": "Spine1"
+    },
+    {
+      "name": "LeftArm",
+      "parent": "LeftShoulder"
+    },
+    {
+      "name": "LeftForeArm",
+      "parent": "LeftArm"
+    },
+    {
+      "name": "LeftHand",
+      "parent": "LeftForeArm"
+    },
+    {
+      "name": "LeftFingerBase",
+      "parent": "LeftHand"
+    },
+    {
+      "name": "LeftHandIndex1",
+      "parent": "LeftFingerBase"
+    },
+    {
+      "name": "LThumb",
+      "parent": "LeftHand"
+    },
+    {
+      "name": "RightShoulder",
+      "parent": "Spine1"
+    },
+    {
+      "name": "RightArm",
+      "parent": "RightShoulder"
+    },
+    {
+      "name": "RightForeArm",
+      "parent": "RightArm"
+    },
+    {
+      "name": "RightHand",
+      "parent": "RightForeArm"
+    },
+    {
+      "name": "RightFingerBase",
+      "parent": "RightHand"
+    },
+    {
+      "name": "RightHandIndex1",
+      "parent": "RightFingerBase"
+    },
+    {
+      "name": "RThumb",
+      "parent": "RightHand"
+    }
+  ],
+  "clips": [
+    {
+      "name": "walking",
+      "file": "walking.fbx",
+      "source_take": "35_01",
+      "frames": [
+        83,
+        219
+      ],
+      "seconds": 1.133,
+      "loop": true,
+      "category": "locomotion",
+      "description": "Marche normale (≈1,2 m/s), un cycle complet de l'appui du pied droit à l'appui suivant du même pied (deux pas), droite.",
+      "fps": 30,
+      "frame_count": 35,
+      "anchor": "self (travel)",
+      "scale_m_per_bvh_unit": 0.05208,
+      "hips_rest_height_bvh_units": 18.241,
+      "floor_offset_cm": 2.33,
+      "floor_measured_cm": 2.33,
+      "hips_start_unity_m": [
+        -0.0,
+        0.897,
+        -0.0
+      ],
+      "hips_end_unity_m": [
+        -0.0,
+        0.897,
+        1.34
+      ],
+      "facing_start_deg": -2.5,
+      "facing_end_deg": -3.7,
+      "head_from_hips_end_unity_m": [
+        -0.009,
+        0.389,
+        0.0
+      ],
+      "speed_m_s": 1.182,
+      "advance_m": 1.34,
+      "seam_pose_rms_cm": 1.52,
+      "seam_hips_cm": [
+        -0.0,
+        0.6,
+        -0.0
+      ],
+      "seam_yaw_deg": 1.2,
+      "seam_max_bone_deg": {
+        "bone": "RightToeBase",
+        "deg": 6.26
+      },
+      "seam_max_finger_deg": 5.4,
+      "checks": {
+        "fbx_frames": 35,
+        "fbx_first_frame": 1.0,
+        "rest_hips_height_m": 0.95,
+        "rest_ankles_z_m": [
+          0.053,
+          0.039
+        ],
+        "rest_upper_arm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_forearm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_thigh_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_shin_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_arm_span_axis": "X",
+        "rest_facing": [
+          0.025,
+          -1.0,
+          0.0
+        ],
+        "roundtrip_max_err_mm": 0.003,
+        "loop_last_vs_first_pose_mm": 0.001,
+        "loop_last_vs_first_hips_mm": 0.0
+      }
+    },
+    {
+      "name": "walking_slow",
+      "file": "walking_slow.fbx",
+      "source_take": "142_13",
+      "frames": [
+        3095,
+        3287
+      ],
+      "seconds": 1.6,
+      "loop": true,
+      "category": "locomotion",
+      "description": "Marche lente détendue (≈0,67 m/s), un cycle de l'appui du pied gauche au suivant (deux pas), droite.",
+      "fps": 30,
+      "frame_count": 49,
+      "anchor": "self (travel)",
+      "scale_m_per_bvh_unit": 0.057035,
+      "hips_rest_height_bvh_units": 16.657,
+      "floor_offset_cm": 2.44,
+      "floor_measured_cm": 2.44,
+      "hips_start_unity_m": [
+        -0.0,
+        0.948,
+        -0.0
+      ],
+      "hips_end_unity_m": [
+        -0.0,
+        0.948,
+        1.078
+      ],
+      "facing_start_deg": 4.1,
+      "facing_end_deg": 3.9,
+      "head_from_hips_end_unity_m": [
+        0.005,
+        0.458,
+        -0.023
+      ],
+      "speed_m_s": 0.674,
+      "advance_m": 1.078,
+      "seam_pose_rms_cm": 1.13,
+      "seam_hips_cm": [
+        0.0,
+        0.5,
+        -0.0
+      ],
+      "seam_yaw_deg": 0.22,
+      "seam_max_bone_deg": {
+        "bone": "Neck1",
+        "deg": 9.18
+      },
+      "seam_max_finger_deg": 17.83,
+      "checks": {
+        "fbx_frames": 49,
+        "fbx_first_frame": 1.0,
+        "rest_hips_height_m": 0.95,
+        "rest_ankles_z_m": [
+          0.034,
+          0.031
+        ],
+        "rest_upper_arm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_forearm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_thigh_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_shin_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_arm_span_axis": "X",
+        "rest_facing": [
+          0.016,
+          -1.0,
+          0.0
+        ],
+        "roundtrip_max_err_mm": 0.003,
+        "loop_last_vs_first_pose_mm": 0.001,
+        "loop_last_vs_first_hips_mm": 0.0
+      }
+    },
+    {
+      "name": "sit_down",
+      "file": "sit_down.fbx",
+      "source_take": "143_18",
+      "frames": [
+        44,
+        232
+      ],
+      "seconds": 1.567,
+      "loop": false,
+      "category": "transition",
+      "description": "Debout immobile -> assise sur une chaise (siège ≈0,47 m), mains posées sur le siège.",
+      "fps": 30,
+      "frame_count": 48,
+      "anchor": "self (facing)",
+      "scale_m_per_bvh_unit": 0.062868,
+      "hips_rest_height_bvh_units": 15.111,
+      "floor_offset_cm": 6.68,
+      "floor_measured_cm": 6.68,
+      "hips_start_unity_m": [
+        -0.0,
+        0.91,
+        -0.0
+      ],
+      "hips_end_unity_m": [
+        -0.003,
+        0.509,
+        -0.365
+      ],
+      "facing_start_deg": 0.1,
+      "facing_end_deg": -1.1,
+      "head_from_hips_end_unity_m": [
+        0.012,
+        0.42,
+        0.025
+      ],
+      "retarget_max_err_mm": 0.0,
+      "checks": {
+        "fbx_frames": 48,
+        "fbx_first_frame": 1.0,
+        "rest_hips_height_m": 0.95,
+        "rest_ankles_z_m": [
+          0.037,
+          0.042
+        ],
+        "rest_upper_arm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_forearm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_thigh_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_shin_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_arm_span_axis": "X",
+        "rest_facing": [
+          0.014,
+          -1.0,
+          0.0
+        ],
+        "roundtrip_max_err_mm": 0.003
+      }
+    },
+    {
+      "name": "sitting_idle",
+      "file": "sitting_idle.fbx",
+      "source_take": "113_15",
+      "frames": [
+        370,
+        514
+      ],
+      "seconds": 1.2,
+      "loop": true,
+      "category": "idle",
+      "description": "Assise sur une chaise, tenue calme (mains sur les cuisses), bouclable. Posée sur la fin de sit_down.",
+      "fps": 30,
+      "frame_count": 37,
+      "anchor": "end:sit_down",
+      "scale_m_per_bvh_unit": 0.058032,
+      "hips_rest_height_bvh_units": 16.37,
+      "floor_offset_cm": 1.7,
+      "floor_measured_cm": 1.7,
+      "hips_start_unity_m": [
+        -0.003,
+        0.516,
+        -0.365
+      ],
+      "hips_end_unity_m": [
+        -0.003,
+        0.516,
+        -0.365
+      ],
+      "facing_start_deg": -1.1,
+      "facing_end_deg": -1.5,
+      "head_yaw_recentered": {
+        "mode": "constant",
+        "removed_yaw_deg": [
+          56.2,
+          56.2,
+          56.2
+        ]
+      },
+      "head_from_hips_end_unity_m": [
+        -0.084,
+        0.411,
+        -0.013
+      ],
+      "seam_pose_rms_cm": 1.03,
+      "seam_hips_cm": [
+        -0.0,
+        0.6,
+        0.7
+      ],
+      "seam_yaw_deg": 0.46,
+      "seam_max_bone_deg": {
+        "bone": "LeftHand",
+        "deg": 9.68
+      },
+      "seam_max_finger_deg": 4.09,
+      "checks": {
+        "fbx_frames": 37,
+        "fbx_first_frame": 1.0,
+        "rest_hips_height_m": 0.95,
+        "rest_ankles_z_m": [
+          0.04,
+          0.046
+        ],
+        "rest_upper_arm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_forearm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_thigh_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_shin_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_arm_span_axis": "X",
+        "rest_facing": [
+          0.035,
+          -0.999,
+          0.0
+        ],
+        "roundtrip_max_err_mm": 0.021,
+        "loop_last_vs_first_pose_mm": 0.0,
+        "loop_last_vs_first_hips_mm": 0.0
+      }
+    },
+    {
+      "name": "stand_up",
+      "file": "stand_up.fbx",
+      "source_take": "143_18",
+      "frames": [
+        268,
+        372
+      ],
+      "seconds": 0.867,
+      "loop": false,
+      "category": "transition",
+      "description": "Assise -> debout (même prise et même placement que sit_down).",
+      "fps": 30,
+      "frame_count": 27,
+      "anchor": "same:sit_down",
+      "scale_m_per_bvh_unit": 0.062868,
+      "hips_rest_height_bvh_units": 15.111,
+      "floor_offset_cm": 6.68,
+      "floor_measured_cm": 6.68,
+      "hips_start_unity_m": [
+        -0.001,
+        0.508,
+        -0.367
+      ],
+      "hips_end_unity_m": [
+        0.039,
+        0.909,
+        -0.03
+      ],
+      "facing_start_deg": -0.3,
+      "facing_end_deg": 4.7,
+      "head_from_hips_end_unity_m": [
+        0.023,
+        0.424,
+        0.071
+      ],
+      "retarget_max_err_mm": 0.0,
+      "checks": {
+        "fbx_frames": 27,
+        "fbx_first_frame": 1.0,
+        "rest_hips_height_m": 0.95,
+        "rest_ankles_z_m": [
+          0.037,
+          0.042
+        ],
+        "rest_upper_arm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_forearm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_thigh_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_shin_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_arm_span_axis": "X",
+        "rest_facing": [
+          0.014,
+          -1.0,
+          0.0
+        ],
+        "roundtrip_max_err_mm": 0.003
+      }
+    },
+    {
+      "name": "lie_down",
+      "file": "lie_down.fbx",
+      "source_take": "113_08",
+      "frames": [
+        40,
+        708
+      ],
+      "seconds": 5.567,
+      "loop": false,
+      "category": "transition",
+      "description": "Debout -> à genoux, assise au sol, puis allongée sur le dos.",
+      "fps": 30,
+      "frame_count": 168,
+      "anchor": "self (facing)",
+      "scale_m_per_bvh_unit": 0.058032,
+      "hips_rest_height_bvh_units": 16.37,
+      "floor_offset_cm": 0.0,
+      "floor_measured_cm": 2.6,
+      "hips_start_unity_m": [
+        -0.0,
+        0.927,
+        -0.0
+      ],
+      "hips_end_unity_m": [
+        0.549,
+        0.071,
+        -0.081
+      ],
+      "facing_start_deg": 0.0,
+      "facing_end_deg": 83.7,
+      "head_yaw_recentered": {
+        "mode": "constant",
+        "removed_yaw_deg": [
+          55.5,
+          55.5,
+          55.5
+        ]
+      },
+      "head_from_hips_end_unity_m": [
+        0.415,
+        0.028,
+        -0.092
+      ],
+      "retarget_max_err_mm": 0.0,
+      "checks": {
+        "fbx_frames": 168,
+        "fbx_first_frame": 1.0,
+        "rest_hips_height_m": 0.95,
+        "rest_ankles_z_m": [
+          0.04,
+          0.046
+        ],
+        "rest_upper_arm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_forearm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_thigh_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_shin_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_arm_span_axis": "X",
+        "rest_facing": [
+          0.035,
+          -0.999,
+          0.0
+        ],
+        "roundtrip_max_err_mm": 0.014
+      }
+    },
+    {
+      "name": "lying_idle",
+      "file": "lying_idle.fbx",
+      "source_take": "113_08",
+      "frames": [
+        708,
+        1064
+      ],
+      "seconds": 2.967,
+      "loop": true,
+      "category": "idle",
+      "description": "Allongée sur le dos, immobile (respiration), bouclable. Même prise et placement que lie_down.",
+      "fps": 30,
+      "frame_count": 90,
+      "anchor": "same:lie_down",
+      "scale_m_per_bvh_unit": 0.058032,
+      "hips_rest_height_bvh_units": 16.37,
+      "floor_offset_cm": 0.0,
+      "floor_measured_cm": 2.6,
+      "hips_start_unity_m": [
+        0.549,
+        0.071,
+        -0.081
+      ],
+      "hips_end_unity_m": [
+        0.549,
+        0.071,
+        -0.081
+      ],
+      "facing_start_deg": 83.7,
+      "facing_end_deg": 85.0,
+      "head_yaw_recentered": {
+        "mode": "constant",
+        "removed_yaw_deg": [
+          55.5,
+          55.5,
+          55.5
+        ]
+      },
+      "head_from_hips_end_unity_m": [
+        0.413,
+        0.023,
+        -0.098
+      ],
+      "seam_pose_rms_cm": 1.23,
+      "seam_hips_cm": [
+        -0.2,
+        0.3,
+        -0.2
+      ],
+      "seam_yaw_deg": -1.32,
+      "seam_max_bone_deg": {
+        "bone": "RightToeBase",
+        "deg": 7.02
+      },
+      "seam_max_finger_deg": 1.29,
+      "checks": {
+        "fbx_frames": 90,
+        "fbx_first_frame": 1.0,
+        "rest_hips_height_m": 0.95,
+        "rest_ankles_z_m": [
+          0.04,
+          0.046
+        ],
+        "rest_upper_arm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_forearm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_thigh_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_shin_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_arm_span_axis": "X",
+        "rest_facing": [
+          0.035,
+          -0.999,
+          0.0
+        ],
+        "roundtrip_max_err_mm": 0.003,
+        "loop_last_vs_first_pose_mm": 0.001,
+        "loop_last_vs_first_hips_mm": 0.0
+      }
+    },
+    {
+      "name": "get_up",
+      "file": "get_up.fbx",
+      "source_take": "113_08",
+      "frames": [
+        1100,
+        1792
+      ],
+      "seconds": 5.767,
+      "loop": false,
+      "category": "transition",
+      "description": "Allongée sur le dos -> assise, à genoux, debout. Même prise et placement que lie_down.",
+      "fps": 30,
+      "frame_count": 174,
+      "anchor": "same:lie_down",
+      "scale_m_per_bvh_unit": 0.058032,
+      "hips_rest_height_bvh_units": 16.37,
+      "floor_offset_cm": 0.0,
+      "floor_measured_cm": 2.6,
+      "hips_start_unity_m": [
+        0.552,
+        0.069,
+        -0.083
+      ],
+      "hips_end_unity_m": [
+        0.201,
+        0.929,
+        -0.038
+      ],
+      "facing_start_deg": 84.8,
+      "facing_end_deg": 2.4,
+      "head_yaw_recentered": {
+        "mode": "constant",
+        "removed_yaw_deg": [
+          55.5,
+          55.5,
+          55.5
+        ]
+      },
+      "head_from_hips_end_unity_m": [
+        -0.067,
+        0.419,
+        -0.001
+      ],
+      "retarget_max_err_mm": 0.0,
+      "checks": {
+        "fbx_frames": 174,
+        "fbx_first_frame": 1.0,
+        "rest_hips_height_m": 0.95,
+        "rest_ankles_z_m": [
+          0.04,
+          0.046
+        ],
+        "rest_upper_arm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_forearm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_thigh_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_shin_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_arm_span_axis": "X",
+        "rest_facing": [
+          0.035,
+          -0.999,
+          0.0
+        ],
+        "roundtrip_max_err_mm": 0.024
+      }
+    },
+    {
+      "name": "picking_up",
+      "file": "picking_up.fbx",
+      "source_take": "26_09",
+      "frames": [
+        36,
+        476
+      ],
+      "seconds": 3.667,
+      "loop": false,
+      "category": "gesture",
+      "description": "Se pencher en fléchissant les genoux, ramasser un objet au sol de la main droite, se relever.",
+      "fps": 30,
+      "frame_count": 111,
+      "anchor": "self (facing)",
+      "scale_m_per_bvh_unit": 0.052515,
+      "hips_rest_height_bvh_units": 18.09,
+      "floor_offset_cm": 4.7,
+      "floor_measured_cm": 4.7,
+      "hips_start_unity_m": [
+        -0.0,
+        0.923,
+        -0.0
+      ],
+      "hips_end_unity_m": [
+        -0.015,
+        0.923,
+        -0.016
+      ],
+      "facing_start_deg": 0.1,
+      "facing_end_deg": -0.7,
+      "head_from_hips_end_unity_m": [
+        -0.021,
+        0.399,
+        0.015
+      ],
+      "retarget_max_err_mm": 0.0,
+      "checks": {
+        "fbx_frames": 111,
+        "fbx_first_frame": 1.0,
+        "rest_hips_height_m": 0.95,
+        "rest_ankles_z_m": [
+          0.032,
+          0.042
+        ],
+        "rest_upper_arm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_forearm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_thigh_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_shin_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_arm_span_axis": "X",
+        "rest_facing": [
+          -0.009,
+          -1.0,
+          0.0
+        ],
+        "roundtrip_max_err_mm": 0.011
+      }
+    },
+    {
+      "name": "stretch",
+      "file": "stretch.fbx",
+      "source_take": "113_23",
+      "frames": [
+        36,
+        916
+      ],
+      "seconds": 7.333,
+      "loop": false,
+      "category": "gesture",
+      "description": "Étirement lent : bras montés au-dessus de la tête, tenue, redescente (« stretch and yawn »).",
+      "fps": 30,
+      "frame_count": 221,
+      "anchor": "self (facing)",
+      "scale_m_per_bvh_unit": 0.058032,
+      "hips_rest_height_bvh_units": 16.37,
+      "floor_offset_cm": 0.91,
+      "floor_measured_cm": 0.91,
+      "hips_start_unity_m": [
+        -0.0,
+        0.938,
+        -0.0
+      ],
+      "hips_end_unity_m": [
+        0.003,
+        0.937,
+        -0.045
+      ],
+      "facing_start_deg": -0.0,
+      "facing_end_deg": 2.0,
+      "head_yaw_recentered": {
+        "mode": "smooth",
+        "removed_yaw_deg": [
+          8.2,
+          20.4,
+          54.1
+        ]
+      },
+      "head_from_hips_end_unity_m": [
+        -0.071,
+        0.419,
+        0.006
+      ],
+      "retarget_max_err_mm": 0.0,
+      "checks": {
+        "fbx_frames": 221,
+        "fbx_first_frame": 1.0,
+        "rest_hips_height_m": 0.95,
+        "rest_ankles_z_m": [
+          0.04,
+          0.046
+        ],
+        "rest_upper_arm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_forearm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_thigh_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_shin_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_arm_span_axis": "X",
+        "rest_facing": [
+          0.035,
+          -0.999,
+          0.0
+        ],
+        "roundtrip_max_err_mm": 0.006
+      }
+    },
+    {
+      "name": "waiting",
+      "file": "waiting.fbx",
+      "source_take": "113_21",
+      "frames": [
+        500,
+        1064
+      ],
+      "seconds": 4.7,
+      "loop": true,
+      "category": "idle",
+      "description": "Attente debout naturelle : le poids passe d'un appui à l'autre et revient, bouclable.",
+      "fps": 30,
+      "frame_count": 142,
+      "anchor": "self (facing)",
+      "scale_m_per_bvh_unit": 0.058032,
+      "hips_rest_height_bvh_units": 16.37,
+      "floor_offset_cm": 1.65,
+      "floor_measured_cm": 1.65,
+      "hips_start_unity_m": [
+        -0.0,
+        0.897,
+        -0.0
+      ],
+      "hips_end_unity_m": [
+        -0.0,
+        0.897,
+        -0.0
+      ],
+      "facing_start_deg": -0.0,
+      "facing_end_deg": -1.3,
+      "head_yaw_recentered": {
+        "mode": "constant",
+        "removed_yaw_deg": [
+          71.0,
+          71.0,
+          71.0
+        ]
+      },
+      "head_from_hips_end_unity_m": [
+        -0.084,
+        0.417,
+        0.019
+      ],
+      "seam_pose_rms_cm": 1.65,
+      "seam_hips_cm": [
+        -0.4,
+        -1.1,
+        -0.9
+      ],
+      "seam_yaw_deg": 1.29,
+      "seam_max_bone_deg": {
+        "bone": "Head",
+        "deg": 11.71
+      },
+      "seam_max_finger_deg": 1.42,
+      "checks": {
+        "fbx_frames": 142,
+        "fbx_first_frame": 1.0,
+        "rest_hips_height_m": 0.95,
+        "rest_ankles_z_m": [
+          0.04,
+          0.046
+        ],
+        "rest_upper_arm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_forearm_from_horizontal_deg": [
+          -8.0,
+          -8.0
+        ],
+        "rest_thigh_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_shin_from_vertical_deg": [
+          1.0,
+          1.0
+        ],
+        "rest_arm_span_axis": "X",
+        "rest_facing": [
+          0.035,
+          -0.999,
+          0.0
+        ],
+        "roundtrip_max_err_mm": 0.01,
+        "loop_last_vs_first_pose_mm": 0.0,
+        "loop_last_vs_first_hips_mm": 0.0
+      }
+    }
+  ]
+}

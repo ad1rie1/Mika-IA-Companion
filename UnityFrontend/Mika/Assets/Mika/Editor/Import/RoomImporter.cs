@@ -234,6 +234,8 @@ namespace Mika.Editor.Import
             Surfaces(root, obj);
             Hinges(root, model, obj);
             Lights(root, model, obj, layout, emissiveMats);
+            if (obj.Materials.Contains("M_Duvet") && Bedding.Available)
+                Bedding.Dress(root, model, obj);
             if (obj.Id == "wall_clock")
             {
                 var clock = root.AddComponent<WallClock>();

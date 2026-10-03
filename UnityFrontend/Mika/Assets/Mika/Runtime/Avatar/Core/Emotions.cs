@@ -59,6 +59,8 @@ namespace Mika.Avatar
 
         public static float ArousalOf(string emotion) => emotion != null && Arousal.TryGetValue(emotion, out var a) ? a : 0f;
 
+        public static float ValenceOf(string emotion) => emotion != null && Valence.TryGetValue(emotion, out var v) ? v : 0f;
+
         /// <summary>
         /// Amplitude de l'articulation quand elle parle (<c>affect.ts::articulationFor</c>) : une voix excitée
         /// articule grand, une voix triste, blasée ou fatiguée entrouvre à peine les lèvres. Activation ×

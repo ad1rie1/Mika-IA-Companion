@@ -30,6 +30,26 @@ namespace Mika.World.Engine
         public RoomView Room;
         public Transform Approach;
         public PlaceAuthoring Authoring;
+        public WorldStage Stage;
+
+        /// <summary>Le meuble qui porte ce lieu (une chaise, un lit), s'il est dans la scène.</summary>
+        public WorldObject Furniture => Stage != null && !string.IsNullOrEmpty(Def?.OfObject) ? Stage.Object(Def.OfObject) : null;
+
+        /// <summary>
+        /// La chaise à roulettes de ce lieu, si c'en est une : on la recule pour s'asseoir, on la rapproche du
+        /// bureau, on la fait pivoter vers quelqu'un.
+        /// </summary>
+        public ChairRig Chair
+        {
+            get
+            {
+                if (Kind != PlaceKind.Seat) return null;
+                var f = Furniture;
+                if (f == null) return null;
+                var id = (f.id ?? f.name).ToLowerInvariant();
+                return id.Contains("chair") || id.Contains("chaise") || id.Contains("fauteuil") ? f.gameObject.GetOrAdd<ChairRig>() : null;
+            }
+        }
 
         public Vector3 Position => Approach.position;
         public Quaternion Rotation => Approach.rotation;
@@ -47,6 +67,9 @@ namespace Mika.World.Engine
                 return new Pose(Approach.position + Approach.forward * 0.15f + Vector3.up * 0.45f, Approach.rotation);
             }
         }
+
+        /// <summary>Le siège décrit par la scène (il suit son meuble : une chaise qui pivote ou recule), sinon rien.</summary>
+        public Transform SeatTransform => Authoring != null ? Authoring.seat : null;
 
         /// <summary>La racine du corps allongé (orientation : le sens de la tête).</summary>
         public Pose Lie

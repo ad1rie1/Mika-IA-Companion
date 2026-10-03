@@ -102,13 +102,14 @@ namespace Mika.World.Engine
                 EnsureCollider();
             }
             var free = mode == ObjectPhysics.Free;
-            _body.isKinematic = !free;
-            _body.useGravity = free;
-            if (!free)
+            // Arrêter l'objet avant de le rendre cinématique : un corps cinématique n'a pas de vitesse à remettre à zéro.
+            if (!free && !_body.isKinematic)
             {
                 _body.linearVelocity = Vector3.zero;
                 _body.angularVelocity = Vector3.zero;
             }
+            _body.isKinematic = !free;
+            _body.useGravity = free;
             foreach (var c in GetComponentsInChildren<Collider>())
                 c.enabled = mode != ObjectPhysics.Held;
         }

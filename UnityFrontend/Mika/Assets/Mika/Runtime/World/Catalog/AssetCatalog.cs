@@ -28,6 +28,8 @@ namespace Mika.World.Engine
         public List<AssetEntry> entries = new List<AssetEntry>();
         [Tooltip("Le contrôleur d'animation de tout corps humanoïde (Mika, personnages, personnes) : un avatar n'est qu'une apparence, le corps se joue partout pareil (contrat BodyAnim).")]
         public RuntimeAnimatorController humanoidController;
+        [Tooltip("Ce que ce contrôleur sait jouer (attentes, paroles, gestes), pour le choisir selon l'humeur.")]
+        public BodyClipSet bodyClips;
 
         [NonSerialized] Dictionary<string, GameObject> _byKey;
         [NonSerialized] Dictionary<string, ArchetypeAsset> _byArchetype;

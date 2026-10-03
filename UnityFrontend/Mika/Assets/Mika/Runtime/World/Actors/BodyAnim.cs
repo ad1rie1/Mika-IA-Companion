@@ -25,6 +25,38 @@ namespace Mika.World.Engine
         /// <summary>Une occupation en cours (lire, dessiner…), voir <see cref="ActivityId"/>.</summary>
         public static readonly int Activity = Animator.StringToHash("Activity");
         public static readonly int Asleep = Animator.StringToHash("Asleep");
+        /// <summary>Quelle attente (index d'une variante, voir <see cref="BodyClipSet"/>).</summary>
+        public static readonly int IdleVariant = Animator.StringToHash("IdleVariant");
+        /// <summary>Quelle manière de parler.</summary>
+        public static readonly int TalkVariant = Animator.StringToHash("TalkVariant");
+        /// <summary>Le tempo des attentes et des paroles (0,85 → 1,15 selon l'activation).</summary>
+        public static readonly int Tempo = Animator.StringToHash("Tempo");
+        /// <summary>La cadence du clip de marche, réglée sur la vitesse au sol (pieds sans glisse).</summary>
+        public static readonly int WalkPlayback = Animator.StringToHash("WalkPlayback");
+        /// <summary>Le calque additif du souffle et des micro-mouvements.</summary>
+        public const string LifeLayer = "Vie";
+        /// <summary>La pose du haut du corps pendant une occupation (voir <see cref="Poses"/>) ; l'IK pose les mains.</summary>
+        public static readonly int Pose = Animator.StringToHash("Pose");
+        /// <summary>Allongée : 0 sur le dos, 1 sur le côté gauche, 2 sur le côté droit.</summary>
+        public static readonly int LieSide = Animator.StringToHash("LieSide");
+        /// <summary>Sous la couette (les bras restent dessous, le corps plus ramassé).</summary>
+        public static readonly int Covered = Animator.StringToHash("Covered");
+        public const string PoseLayer = "Occupation";
+
+        /// <summary>
+        /// Les poses d'occupation, par identifiant (0 : aucune, le clip de posture seul). Ce sont des intentions
+        /// de buste et de bras ; les mains, elles, sont posées par l'IK à l'endroit exact (une touche, une page).
+        /// </summary>
+        public static readonly string[] Poses =
+        {
+            "none", "type", "write", "read", "lap", "mattress", "sill", "reach_high", "pour", "lean_desk",
+        };
+
+        public static int PoseId(string name)
+        {
+            var i = System.Array.IndexOf(Poses, name);
+            return i < 0 ? 0 : i;
+        }
 
         public static int PostureValue(Posture p) => p switch
         {

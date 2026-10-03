@@ -268,6 +268,25 @@ namespace Mika.Avatar
         /// <summary>Les noms d'expression connus sur le modèle (presets, groupes, copies, morphs bruts).</summary>
         public IEnumerable<string> ExpressionNames => _rig?.Names ?? Enumerable.Empty<string>();
 
+        /// <summary>
+        /// Le corps vient d'être téléporté (un instantané du monde, une arrivée) : les ressorts des cheveux et des
+        /// vêtements prendraient ce saut pour une vitesse énorme et s'envoleraient ; on les remet au repos.
+        /// Reçu par message (<c>BroadcastMessage("OnTeleported")</c>) : le corps ne connaît pas l'avatar.
+        /// </summary>
+        public void OnTeleported()
+        {
+            if (vrm == null) return;
+            try
+            {
+                vrm.Runtime?.SpringBone?.RestoreInitialTransform();
+            }
+            catch (System.Exception e)
+            {
+                // Avant la première image l'exécution VRM n'est pas encore prête : rien à remettre au repos.
+                Debug.LogWarning($"[Mika] ressorts non réinitialisés : {e.Message}");
+            }
+        }
+
         // ── Cycle de vie ────────────────────────────────────────────────────
 
         void Awake()
