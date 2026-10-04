@@ -455,11 +455,13 @@ def _uttered(s: SocialState, e, cx) -> SocialState:
     p = params(cx.params)
     person = cx.facts.get(identity_c.PERSON(d.target))
     ct = s.contacts.get(person) or Contact()
+    # saluer, tenir parole : ni ouvrir une conversation, ni attendre une réponse (ce n'était pas une question)
+    speaking_up = d.kind == Kind.INITIATIVE and not agency_c.NOT_SPEAKING_UP & set(reasons)
     initiative = d.kind == Kind.INITIATIVE
     ct, opens = _active(ct, e.at, p.conversation_gap_us)
-    if initiative and opens and not agency_c.NOT_SPEAKING_UP & set(reasons):
+    if speaking_up and opens:
         ct = _opened(ct, cx.local(e.at).date().toordinal(), HER)  # c'est elle qui écrit la première
-    ct = replace(ct, last_out=e.at, unanswered=ct.unanswered + (1 if initiative else 0))
+    ct = replace(ct, last_out=e.at, unanswered=ct.unanswered + (1 if speaking_up else 0))
     if initiative and c.REKINDLE in reasons:
         s = replace(s, rekindled=s.rekindled.set(person, e.at))  # une fois par silence
     return replace(s, contacts=s.contacts.set(person, ct))
