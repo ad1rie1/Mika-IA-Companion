@@ -19,3 +19,5 @@ keystore.properties
 # Les portraits de Mika (frontend/Web/assets-src/blender/portraits.py) : rendus d'un modèle sous licence de
 # l'acheteur, jamais versionnés. Sans eux, l'app n'affiche simplement pas d'avatar.
 app/src/main/assets/avatar/
+# Les clips du labo de l'avatar (frontend/Web/assets-src/blender/portrait_loops.py), même licence.
+avatar-lab/out/

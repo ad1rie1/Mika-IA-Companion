@@ -78,7 +78,7 @@ PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Esprit", ("attention", "memory", "transcript")),
     ("Relations", ("social", "others", "identity")),
     ("Action", ("agency", "goals", "projects", "shares", "imaging", "world")),
-    ("Canaux", ("email", "rss", "camera", "forge")),
+    ("Canaux", ("email", "rss", "web", "camera", "forge")),
     ("Noyau", ("kernel",)),
 )
 FACULTY_LABELS: dict[str, str] = {
@@ -89,7 +89,7 @@ FACULTY_LABELS: dict[str, str] = {
     "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "imaging": "Dessins",
-    "mcp": "Outils extérieurs",
+    "mcp": "Outils extérieurs", "web": "Recherche web",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).

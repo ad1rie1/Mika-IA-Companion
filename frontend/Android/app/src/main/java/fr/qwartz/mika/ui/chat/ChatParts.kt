@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -246,7 +247,9 @@ internal fun ChatConversation(
             reverseLayout = true,
             verticalArrangement = Arrangement.spacedBy(4.dp),
             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
-            modifier = Modifier.fillMaxWidth(),
+            // Toute la hauteur : un fil court part du bas, comme dans une messagerie (sinon il se colle en
+            // haut — sur son visage quand elle est en fond).
+            modifier = Modifier.fillMaxSize(),
         ) {
             items(reversed, key = { it.key }) { item ->
                 when (item) {

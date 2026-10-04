@@ -48,6 +48,7 @@ from mika.plugins.imaging import IMAGING
 from mika.plugins.mcp import MCP
 from mika.plugins.rss import RSS
 from mika.plugins.sensors import SENSORS
+from mika.plugins.web import WEB
 from mika.runtime import params
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.sim.world import Composition
@@ -60,7 +61,7 @@ def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, WORLD, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
             EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, EMAIL, RSS, CAMERA, FORGE, SENSORS, IMAGING,
-            MCP]
+            MCP, WEB]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:

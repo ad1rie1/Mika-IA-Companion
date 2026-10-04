@@ -14,6 +14,7 @@ avertissement.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import re
@@ -43,6 +44,7 @@ from mika.adapters.mail import ImapSmtpMail
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
 from mika.adapters.mcp.relay import Relay
+from mika.adapters.mcp.system import SystemServers
 from mika.adapters.preprocess import LocalPreprocessor, whisper
 from mika.adapters.shares import DiskShares
 from mika.adapters.store_sqlite import SqliteStore
@@ -54,7 +56,7 @@ from mika.adapters.web.app import DEV_ORIGINS, WebConfig, create_app
 from mika.adapters.web.hub import Hub
 from mika.adapters.workshop import BwrapWorkshop
 from mika.adapters.world.server import WorldHub
-from mika.app import backup, composition, datadir, reglages
+from mika.app import backup, composition, datadir, reglages, system_mcp
 from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.mindport import KernelPort
@@ -67,6 +69,7 @@ from mika.inspector.mcp import PREFIX as CONSOLE_MCP_PREFIX
 from mika.inspector.mcp import console_app
 from mika.inspector.ui import PREFIX as CONSOLE_PREFIX
 from mika.inspector.ui import InspectorDeps
+from mika.kernel.builtin import PARAMS_CHANGED
 from mika.kernel.events import Origin
 from mika.kernel.prompt import Budget
 from mika.runtime.bootstrap import Kernel
@@ -314,10 +317,30 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
              "forge": forge, "forge_settings": forge_settings, "imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
     world["shares"] = DiskShares(data / "partages")
-    # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi
-    mcp = world["mcp"] = McpHub(settings.mcp, settings.mcp_tools, settings.save_mcp_tools, local_root=data / "mcp")
+    # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi — plus les
+    # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)
+    system = SystemServers(lambda: system_mcp.provided(
+        lambda owner: kernel.mind.registry.params_of(owner, kernel.mind.root)))
+    mcp = world["mcp"] = McpHub(lambda: system.config(settings.mcp()), lambda: system.reviews(settings.mcp_tools()),
+                                system.saving(settings.save_mcp_tools), local_root=data / "mcp")
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": hub, "vectors": vectors, **world}, **deps))
+
+    reconfiguring: set[asyncio.Task[None]] = set()
+
+    def reconfigure_mcp(events: Sequence[Any], root: Any) -> None:
+        """Les paramètres d'un plugin qui apporte un serveur ont changé (activé, désactivé, réglé) : le client MCP
+        ferme ce qui a changé et rejoint ce qui doit l'être ; ses outils suivent."""
+        if not any(e.type is PARAMS_CHANGED and e.data.owner in system_mcp.OWNERS for e in events):
+            return
+        try:
+            task = asyncio.get_running_loop().create_task(mcp.reconfigure())
+        except RuntimeError:  # pas de boucle (une commande hors ligne) : il se reconfigurera au démarrage
+            return
+        reconfiguring.add(task)
+        task.add_done_callback(reconfiguring.discard)
+
+    kernel.mind.subscribe(reconfigure_mcp)
     port = KernelPort(kernel)
     hub.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),

@@ -211,44 +211,71 @@ private class Star(random: Random) {
     val phase = random.nextFloat()
 }
 
-/** Le souffle (0 → 1 → 0) et l'élan d'un changement de pose (≈ 0,975 → 1). */
-private class Living(val breath: State<Float>, val pop: Animatable<Float, AnimationVector1D>, val depth: Float)
+/**
+ * Le souffle (0 → 1 → 0), le balancement (−1 → 1 → −1) et l'élan d'un changement de pose
+ * (≈ 0,96 → 1), avec leur ampleur.
+ */
+private class Living(
+    val breath: State<Float>,
+    val sway: State<Float>,
+    val pop: Animatable<Float, AnimationVector1D>,
+    val depth: Float,
+    val swayDegrees: Float,
+    val swayShiftPx: Float,
+)
 
 /**
- * Ce qui la fait vivre sans changer d'image : un souffle (le haut du corps monte d'un ou deux pixels,
- * plus lent et plus profond endormie) et un petit élan quand elle change de pose.
+ * Ce qui la fait vivre sans changer d'image : un souffle (le haut du corps monte d'une quinzaine de
+ * pixels, plus lent et plus profond endormie), un balancement d'un appui sur l'autre sur un autre
+ * rythme que le souffle (les deux ne retombent jamais ensemble, rien ne se répète à l'identique), et
+ * un petit élan quand elle change de pose. Plus discret, sur un téléphone posé, il ne se voyait pas.
  */
 @Composable
 private fun rememberLiving(motion: Boolean, asleep: Boolean, portraitId: String?): Living {
-    val breath = if (motion) {
-        rememberInfiniteTransition(label = "breath").animateFloat(
-            0f, 1f,
-            infiniteRepeatable(tween(if (asleep) 5_600 else 3_800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-            label = "breath",
-        )
-    } else {
-        remember { mutableFloatStateOf(0f) }
-    }
+    val still = remember { mutableFloatStateOf(0f) }
+    val transition = if (motion) rememberInfiniteTransition(label = "living") else null
+    val breath = transition?.animateFloat(
+        0f, 1f,
+        infiniteRepeatable(tween(if (asleep) 5_400 else 3_600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "breath",
+    ) ?: still
+    val sway = transition?.animateFloat(
+        -1f, 1f,
+        infiniteRepeatable(tween(if (asleep) 9_000 else 6_700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "sway",
+    ) ?: still
     val pop = remember { Animatable(1f) }
     LaunchedEffect(portraitId) {
         if (motion && portraitId != null) {
-            pop.snapTo(0.975f)
-            pop.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 220f))
+            pop.snapTo(0.96f)
+            pop.animateTo(1f, spring(dampingRatio = 0.45f, stiffness = 260f))
         }
     }
-    return Living(breath, pop, if (asleep) 0.011f else 0.007f)
+    val density = LocalDensity.current.density
+    return Living(
+        breath = breath,
+        sway = sway,
+        pop = pop,
+        depth = if (asleep) 0.02f else 0.016f,
+        swayDegrees = if (asleep) 0.5f else 1.1f,
+        swayShiftPx = (if (asleep) 2f else 5f) * density,
+    )
 }
 
 /**
- * Le souffle et l'élan, lus au dessin seulement (rien ne se recompose à chaque image), puis le bas du
- * corps fondu dans le fond pour que la conversation passe par-dessus sans couture.
+ * Le souffle, le balancement et l'élan, lus au dessin seulement (rien ne se recompose à chaque
+ * image) — pivot au bas du portrait, comme un corps debout. Puis le bas du corps fondu dans le fond
+ * pour que la conversation passe par-dessus sans couture.
  */
 private fun Modifier.livingLayer(living: Living): Modifier = this
     .graphicsLayer {
         val b = living.breath.value
+        val s = living.sway.value
         val pop = living.pop.value
         scaleY = pop * (1f + living.depth * b)
-        scaleX = pop * (1f + living.depth * 0.3f * b)
+        scaleX = pop * (1f + living.depth * 0.35f * b)
+        rotationZ = living.swayDegrees * s
+        translationX = living.swayShiftPx * s
         transformOrigin = TransformOrigin(0.5f, 1f)
         compositingStrategy = CompositingStrategy.Offscreen
     }

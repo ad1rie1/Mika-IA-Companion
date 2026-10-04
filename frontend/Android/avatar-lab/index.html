@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Labo de Mika en fond</title>
+<style>
+  :root {
+    --bg: #f3f1f8; --panel: #ffffff; --ink: #1b1b21; --muted: #5d5b66; --line: rgba(0,0,0,.1);
+    --surface: #fdf8ff; --on: #1b1b21; --variant: #47464f; --primary: #4f46e5; --on-primary: #fff;
+    --sec: #e3e1f9; --on-sec: #1b1a2c; --comp: #f3eef9; --aura: #e1e0ff;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e0e12; --panel: #1a1a20; --ink: #e8e6ee; --muted: #a09eaa; --line: rgba(255,255,255,.1);
+    --surface: #131318; --on: #e4e1e9; --variant: #c8c5d0; --primary: #c1c1ff; --on-primary: #22217a;
+    --sec: #46455b; --on-sec: #e3e1f9; --comp: #1f1f25; --aura: #3b3ba6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); font: 14px/1.4 Inter, system-ui, sans-serif; min-height: 100vh;
+    display: flex; gap: 32px; justify-content: center; align-items: flex-start; padding: 24px 16px; flex-wrap: wrap; }
+  .phone { width: 390px; height: 844px; border-radius: 44px; overflow: hidden; position: relative;
+    background: var(--surface); box-shadow: 0 0 0 10px #111, 0 30px 80px rgba(0,0,0,.35); flex: none; }
+  .aura { position: absolute; inset: 0; transition: background 1.2s ease; }
+  .stars { position: absolute; inset: 0 0 40% 0; opacity: 0; transition: opacity 1.8s ease; pointer-events: none; }
+  .night .stars { opacity: 1; }
+  canvas.mika { position: absolute; left: 0; width: 390px; height: 520px;
+    -webkit-mask-image: linear-gradient(to bottom, #000 58%, transparent 97%);
+            mask-image: linear-gradient(to bottom, #000 58%, transparent 97%); }
+  .statusbar { position: absolute; top: 0; left: 0; right: 0; height: 24px; padding: 4px 22px; font-size: 12px; color: var(--on);
+    display: flex; justify-content: space-between; }
+  .topbar { position: absolute; top: 24px; left: 0; right: 0; height: 64px; display: flex; align-items: center; gap: 12px; padding: 0 16px; }
+  .face { width: 40px; height: 40px; border-radius: 50%; background: var(--aura-now, var(--aura)); }
+  .topbar b { display: block; font-size: 16px; color: var(--on); }
+  .topbar small { color: var(--variant); font-size: 12px; }
+  .thread { position: absolute; left: 0; right: 0; bottom: 88px; top: 88px; display: flex; flex-direction: column;
+    justify-content: flex-end; gap: 4px; padding: 8px 12px; transition: opacity .3s; }
+  .hidden { opacity: 0; pointer-events: none; }
+  .bubble { max-width: 85%; padding: 8px 12px; border-radius: 16px; font-size: 15px; line-height: 1.35; }
+  .bubble small { display: block; text-align: right; font-size: 11px; opacity: .7; margin-top: 2px; }
+  .me { align-self: flex-end; background: var(--primary); color: var(--on-primary); border-bottom-right-radius: 4px; }
+  .her { align-self: flex-start; background: var(--sec); color: var(--on-sec); border-bottom-left-radius: 4px; }
+  .pill { align-self: center; font-size: 12px; color: var(--variant); background: color-mix(in srgb, var(--surface) 82%, transparent);
+    border-radius: 12px; padding: 3px 10px; }
+  .pill.left { align-self: flex-start; }
+  .composer { position: absolute; left: 0; right: 0; bottom: 0; height: 88px; background: var(--comp); display: flex; align-items: flex-start;
+    gap: 10px; padding: 12px 12px 0; }
+  .composer .field { flex: 1; height: 44px; border: 1.5px solid var(--variant); border-radius: 22px; padding: 11px 16px; color: var(--variant); }
+  .composer .send { width: 44px; height: 44px; border-radius: 50%; background: var(--primary); }
+  .panel { width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 18px; display: grid; gap: 14px; }
+  .panel h1 { font-size: 17px; }
+  .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin-bottom: 6px; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; }
+  button { font: inherit; border: 1px solid var(--line); background: transparent; color: var(--ink); border-radius: 999px; padding: 6px 12px; cursor: pointer; }
+  button.on { background: var(--primary); color: var(--on-primary); border-color: transparent; }
+  label { display: flex; gap: 8px; align-items: center; }
+  pre { font: 12px/1.5 ui-monospace, monospace; color: var(--muted); white-space: pre-wrap; }
+  .error { color: #b3261e; }
+</style>
+</head>
+<body>
+<div class="phone" id="phone">
+  <div class="aura" id="aura"></div>
+  <canvas class="stars" id="stars" width="390" height="506"></canvas>
+  <canvas class="mika" id="mika" width="720" height="960"></canvas>
+  <div class="statusbar"><span>23:42</span><span>▴ ◔ 84</span></div>
+  <div class="topbar"><canvas class="face" id="face" width="80" height="80"></canvas>
+    <div><b>Mika</b><small id="status">en ligne</small></div></div>
+  <div class="thread" id="thread">
+    <div class="pill">aujourd'hui</div>
+    <div class="bubble me">Coucou Mika ! Tu as passé une bonne journée ?<small>23:31</small></div>
+    <div class="bubble her">Plutôt oui ! J'ai fini de ranger mes carnets, et j'ai trouvé une <b>vieille photo</b> de nous deux.<small>23:32</small></div>
+    <div class="bubble me">Ah oui ? Laquelle ?<small>23:40</small></div>
+    <div class="bubble her">Celle de la fête foraine, quand tu avais gagné la peluche. Je l'ai mise sur mon bureau.<small>23:41</small></div>
+    <div class="pill left hidden" id="typing">Mika écrit…</div>
+  </div>
+  <div class="composer"><span style="font-size:22px;color:var(--on)">+</span><div class="field">Message</div><div class="send"></div></div>
+</div>
+
+<div class="panel">
+  <h1>Labo — Mika en fond</h1>
+  <div><h2>État</h2><div class="row" id="states"></div></div>
+  <div><h2>Scènes</h2><div class="row">
+    <button id="reply">Elle répond (écrit… puis émotion)</button>
+    <button id="demo">Démo automatique</button>
+  </div></div>
+  <div><h2>Rendu</h2>
+    <label><input type="checkbox" id="blend" checked /> Fondu entre les images</label>
+    <label><input type="checkbox" id="bubbles" checked /> Conversation par-dessus</label>
+    <label><input type="checkbox" id="dark" /> Thème sombre</label>
+  </div>
+  <pre id="info">chargement…</pre>
+</div>
+
+<script>
+"use strict";
+/* Le lecteur de clips : ce que l'app fera en Kotlin. Chaque état a une boucle ; un geste a une entrée et une
+   sortie ; un geste ponctuel se joue puis rend la main. Un changement d'état part de l'image affichée par un
+   fondu court ; à l'intérieur d'un clip, deux images voisines sont fondues selon le temps (une boucle à
+   10 images/s reste fluide). Les images sont décodées à la demande, peu à la fois. */
+const BASE = "out/";
+const LABELS = { neutral: "Neutre", happy: "Contente", sad: "Triste", thinking: "Réfléchit", angry: "En colère",
+  surprised: "Surprise !", wave: "Coucou", sleep: "Endormie" };
+const STATUS = { neutral: "en ligne", happy: "contente", sad: "triste", thinking: "écrit…", angry: "en colère",
+  surprised: "surprise", wave: "en ligne", sleep: "endormie" };
+const AURA = {
+  light: { neutral: "#e1e0ff", warm: "#ffd3cc", cool: "#c9d7f4", dusk: "#ddd1f8", night: "#c2c8e6" },
+  dark: { neutral: "#3b3ba6", warm: "#5e2f45", cool: "#1f3459", dusk: "#392e68", night: "#0d1330" },
+};
+const FAMILY = { neutral: "neutral", happy: "warm", wave: "warm", sad: "cool", angry: "cool", thinking: "dusk",
+  surprised: "dusk", sleep: "night" };
+const FADE_MS = 280;
+const SLEEP_SPEED = 0.6;
+
+const $ = (id) => document.getElementById(id);
+const canvas = $("mika"), ctx = canvas.getContext("2d");
+const work = new OffscreenCanvas(720, 960), wctx = work.getContext("2d");
+const snap = new OffscreenCanvas(720, 960), sctx = snap.getContext("2d");
+const faceCtx = $("face").getContext("2d");
+
+/* Les images décodées, gardées en petit nombre (une image 720×960 décodée pèse 2,7 Mo). */
+class Frames {
+  constructor(max = 48) { this.max = max; this.map = new Map(); this.pending = new Map(); }
+  key(clip, i) { return clip + "/" + String(i).padStart(3, "0"); }
+  get(clip, i) {
+    const k = this.key(clip, i), b = this.map.get(k);
+    if (b) { this.map.delete(k); this.map.set(k, b); return b; }
+    this.load(k);
+    return null;
+  }
+  load(k) {
+    if (this.map.has(k) || this.pending.has(k)) return;
+    const p = fetch(BASE + k + ".webp").then((r) => r.blob()).then(createImageBitmap).then((b) => {
+      this.pending.delete(k);
+      this.map.set(k, b);
+      while (this.map.size > this.max) { const [old, bmp] = this.map.entries().next().value; this.map.delete(old); bmp.close(); }
+    }).catch(() => this.pending.delete(k));
+    this.pending.set(k, p);
+  }
+  prefetch(clip, from, count, n, loop) {
+    for (let j = 0; j < count; j++) {
+      const i = loop ? (from + j) % n : Math.min(n - 1, from + j);
+      this.load(this.key(clip, i));
+    }
+  }
+}
+
+class Player {
+  constructor(manifest) {
+    this.m = manifest; this.frames = new Frames();
+    this.state = null; this.base = "neutral";
+    this.cur = null; this.plan = []; this.fade = null; this.last = null;
+  }
+  clip(id) { return { id, ...this.m.clips[id], loop: id.endsWith(".loop"), t0: performance.now() }; }
+  /* Ce qu'il faut jouer pour aller de l'état courant à `target`. */
+  request(target) {
+    const st = this.m.states[target];
+    if (!st || (target === this.state && !st.once)) return;
+    const from = this.state ? this.m.states[this.state] : null;
+    const steps = [];
+    if (from && from.exit && this.cur && this.cur.id !== from.exit) steps.push(from.exit);
+    if (st.once) {
+      steps.push(st.once);
+      const back = this.m.states[this.base];
+      if (back.enter) steps.push(back.enter);
+      steps.push(back.loop);
+    } else {
+      if (st.enter) steps.push(st.enter);
+      steps.push(st.loop);
+      this.base = target;
+    }
+    this.state = st.once ? this.base : target;
+    this.shown = target;
+    this.startFade();
+    this.cur = this.clip(steps.shift());
+    this.plan = steps;
+    this.onChange && this.onChange(target);
+  }
+  startFade() {
+    if (!this.last) return;
+    sctx.clearRect(0, 0, 720, 960); sctx.drawImage(canvas, 0, 0);
+    this.fade = { t0: performance.now() };
+  }
+  speed() { return this.base === "sleep" && this.cur && this.cur.id.startsWith("sleep") ? SLEEP_SPEED : 1; }
+  tick(now, blend) {
+    let c = this.cur;
+    if (!c) return;
+    let pos = ((now - c.t0) / 1000) * c.fps * this.speed();
+    if (!c.loop && pos >= c.frames - 1 && this.plan.length) {
+      // Fin d'un clip non bouclé : on enchaîne, avec un fondu court (les poses se rejoignent à peu près).
+      this.startFade();
+      this.cur = c = this.clip(this.plan.shift());
+      pos = 0;
+      // Un geste ponctuel fini : on est revenue à l'état de base.
+      const base = this.m.states[this.base];
+      if (c.id === base.loop || c.id === base.enter) this.shown = this.base;
+      this.onChange && this.onChange(this.shown);
+    }
+    const n = c.frames;
+    let i = Math.floor(pos), frac = pos - i;
+    if (c.loop) i %= n; else if (i >= n - 1) { i = n - 1; frac = 0; }
+    const j = c.loop ? (i + 1) % n : Math.min(n - 1, i + 1);
+    this.frames.prefetch(c.id, i, 8, n, c.loop);
+    for (const next of this.plan.slice(0, 1)) this.frames.prefetch(next, 0, 4, this.m.clips[next].frames, false);
+    const a = this.frames.get(c.id, i), b = this.frames.get(c.id, j);
+    if (!a) return; // pas encore décodée : l'image précédente reste à l'écran
+    wctx.globalCompositeOperation = "copy";
+    wctx.globalAlpha = 1;
+    wctx.drawImage(a, 0, 0);
+    if (blend && b && frac > 0.01) {
+      // Fondu exact (pré-multiplié) : a·(1−f) + b·f, jamais transparent là où les deux sont opaques.
+      wctx.globalCompositeOperation = "copy"; wctx.globalAlpha = 1 - frac; wctx.drawImage(a, 0, 0);
+      wctx.globalCompositeOperation = "lighter"; wctx.globalAlpha = frac; wctx.drawImage(b, 0, 0);
+    }
+    ctx.globalCompositeOperation = "copy"; ctx.globalAlpha = 1;
+    if (this.fade) {
+      const t = Math.min(1, (now - this.fade.t0) / FADE_MS);
+      ctx.globalAlpha = 1 - t; ctx.drawImage(snap, 0, 0);
+      ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = t; ctx.drawImage(work, 0, 0);
+      if (t >= 1) this.fade = null;
+    } else {
+      ctx.drawImage(work, 0, 0);
+    }
+    this.last = { clip: c.id, i, frac };
+    // Son visage dans la barre du haut, découpé de l'image affichée.
+    faceCtx.clearRect(0, 0, 80, 80);
+    faceCtx.drawImage(canvas, 360 - 95, 215 - 95, 190, 190, 0, 0, 80, 80);
+  }
+}
+
+/* Les étoiles de la nuit (thème sombre). */
+function drawStars(t) {
+  const c = $("stars").getContext("2d");
+  c.clearRect(0, 0, 390, 506);
+  if (document.documentElement.dataset.theme !== "dark") return;
+  let seed = 13;
+  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  for (let k = 0; k < 26; k++) {
+    const x = rnd() * 390, y = rnd() * 506, r = 0.6 + rnd() * 1.2, b = 0.4 + rnd() * 0.6, ph = rnd();
+    const glow = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(2 * Math.PI * (t / 5000 + ph)));
+    c.fillStyle = `rgba(255,255,255,${glow * b})`;
+    c.beginPath(); c.arc(x, y, r, 0, 7); c.fill();
+  }
+}
+
+function setAura(state) {
+  const theme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+  const col = AURA[theme][FAMILY[state] || "neutral"];
+  const surface = getComputedStyle(document.documentElement).getPropertyValue("--surface");
+  $("aura").style.background =
+    `radial-gradient(circle at 50% 200px, ${col} 0, color-mix(in srgb, ${col} 45%, transparent) 40%, transparent 62%),` +
+    `linear-gradient(to bottom, color-mix(in srgb, ${col} 55%, ${surface}), color-mix(in srgb, ${col} 18%, ${surface}) 70%, ${surface})`;
+  $("phone").classList.toggle("night", state === "sleep");
+  $("phone").style.setProperty("--aura-now", col);
+}
+
+async function main() {
+  let manifest;
+  try {
+    manifest = await (await fetch(BASE + "manifest.json")).json();
+  } catch (e) {
+    $("info").innerHTML = '<span class="error">Pas de clips : lance portrait_loops.py (sortie dans out/).</span>';
+    return;
+  }
+  // Le haut du rendu (l'air au-dessus de son nœud) passe sous la barre, comme dans l'app.
+  canvas.style.top = (24 + 64 - 520 * 0.045) + "px";
+  const player = new Player(manifest);
+  const row = $("states");
+  const buttons = {};
+  for (const s of Object.keys(manifest.states)) {
+    const b = document.createElement("button");
+    b.textContent = LABELS[s] || s;
+    b.onclick = () => player.request(s);
+    row.appendChild(b);
+    buttons[s] = b;
+  }
+  player.onChange = (s) => {
+    for (const [k, b] of Object.entries(buttons)) b.classList.toggle("on", k === s);
+    $("status").textContent = STATUS[s] || s;
+    $("typing").classList.toggle("hidden", s !== "thinking");
+    setAura(s === "wave" ? "wave" : player.base === "sleep" ? "sleep" : s);
+  };
+  player.request("neutral");
+
+  $("dark").onchange = (e) => { document.documentElement.dataset.theme = e.target.checked ? "dark" : "light"; setAura(player.shown); };
+  $("bubbles").onchange = (e) => $("thread").classList.toggle("hidden", !e.target.checked);
+  let timers = [];
+  const clear = () => { timers.forEach(clearTimeout); timers = []; };
+  $("reply").onclick = () => {
+    clear();
+    player.request("thinking");
+    const emotions = ["happy", "sad", "angry", "surprised"].filter((s) => manifest.states[s]);
+    timers.push(setTimeout(() => player.request(emotions[Math.floor(Math.random() * emotions.length)]), 4500));
+  };
+  $("demo").onclick = () => {
+    clear();
+    const seq = ["wave", "happy", "thinking", "angry", "surprised", "sad", "neutral", "sleep", "neutral"]
+      .filter((s) => manifest.states[s]);
+    seq.forEach((s, k) => timers.push(setTimeout(() => player.request(s), k * 6500)));
+  };
+
+  const blend = $("blend");
+  let frames = 0, fpsT = performance.now(), fps = 0;
+  function loop(now) {
+    player.tick(now, blend.checked);
+    drawStars(now);
+    frames++;
+    if (now - fpsT > 1000) { fps = frames; frames = 0; fpsT = now; }
+    const l = player.last;
+    $("info").textContent =
+      `état : ${player.shown}   base : ${player.base}\n` +
+      `clip : ${l ? l.clip : "—"}  image ${l ? l.i : "—"}  (+${l ? l.frac.toFixed(2) : "0"})\n` +
+      `à suivre : ${player.plan.join(" → ") || "—"}\n` +
+      `${fps} images/s à l'écran, ${player.frames.map.size} décodées`;
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+main();
+</script>
+</body>
+</html>
