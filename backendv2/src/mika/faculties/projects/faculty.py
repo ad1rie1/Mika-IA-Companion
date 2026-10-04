@@ -1020,8 +1020,10 @@ def _reported(s: ProjectsState, e, cx) -> ProjectsState:
         o = replace(o, silent=0, evidence=o.evidence + gained, note_ref=d.summary.ref or o.note_ref,
                     waiting_until=0)
         needed = d.need.ref if d.need is not None and d.need.ref else ""
-        if needed and needed != o.need_ref:  # un nouveau besoin : elle le dira
+        if needed and not o.need_ref:  # un nouveau besoin : elle le dira
             o = replace(o, need_ref=needed, asked=False, ask_attempts=0)
+        elif needed:  # le même besoin, redit à chaque exécution (sa référence change) : déjà dit, on ne relance pas
+            o = replace(o, need_ref=needed)
         elif not needed and d.verdict in (c.CONTINUE, c.DONE):  # elle avance seule à nouveau
             o = replace(o, need_ref="")
         if d.verdict == c.WAIT:
