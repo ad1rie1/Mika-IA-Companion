@@ -1,12 +1,12 @@
 # Chambre de Mika — export Unity
 
-Généré par `frontend/assets-src/blender/export_unity.py` à partir des scripts de
-`frontend/assets-src/blender/` (les mêmes que le `room.glb` du client web). **Ne pas
+Généré par `frontend/Web/assets-src/blender/export_unity.py` à partir des scripts de
+`frontend/Web/assets-src/blender/` (les mêmes que le `room.glb` du client web). **Ne pas
 éditer à la main** : relancer l'export.
 
 ```sh
-blender -b --factory-startup --python frontend/assets-src/blender/export_unity.py -- \
-    --out UnityFrontend/Mika/Assets/Mika/Art/Room
+blender -b --factory-startup --python frontend/Web/assets-src/blender/export_unity.py -- \
+    --out frontend/Unity/Mika/Assets/Mika/Art/Room
 ```
 
 (`--dry-run` construit et classe sans rien écrire.) La table de regroupement
@@ -24,7 +24,7 @@ tête du script.
   métal, émission (couleur + force), alpha, double face, textures. Pas de carte
   normale ni de rugosité dans les sources ; l'échelle des textures est cuite dans les
   UV (pas de nœud Mapping), d'où `uv_scale: null`.
-- `Textures/` — les images utilisées, copiées de `frontend/assets-src/textures/`.
+- `Textures/` — les images utilisées, copiées de `frontend/Web/assets-src/textures/`.
 
 ## Conventions
 

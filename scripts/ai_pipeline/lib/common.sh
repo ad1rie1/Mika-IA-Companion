@@ -231,7 +231,7 @@ Moteur VTuber : un avatar 3D animé par une IA conversationnelle, avec émotions
 temps réel (espace PAD), mémoire à long terme, conscience autonome, cycle de
 sommeil, pulsions intrinsèques et projets de travail.
 
-- `backend/` — Django + Channels servi par Uvicorn. Apps : `ai` (routage
+- `old/backend/` — Django + Channels servi par Uvicorn. Apps : `ai` (routage
   multi-provider), `communication` (WebSocket, Telegram), `pipeline`
   (perception → routeur → processeur), `memory`, `emotion`, `drives`,
   `conscience`, `identity`, `projects`, `modules` (système de plugins, dont la
@@ -304,13 +304,13 @@ Aucun CI ne relira ton travail : la vérification, c'est toi, puis un humain.
 Mais la suite complète est hors de question (≈1000 tests pytest, plusieurs
 minutes de `tsc`). Tu vérifies donc CIBLÉ, et seulement ce que tu as touché.
 
-- N'exécute JAMAIS la suite complète : ni `pytest` nu, ni `pytest backend/tests/`, ni `python manage.py test`, ni `npm test`, ni `tox`.
+- N'exécute JAMAIS la suite complète : ni `pytest` nu, ni `pytest old/backend/tests/`, ni `python manage.py test`, ni `npm test`, ni `tox`.
 - N'écris AUCUN nouveau fichier ni fonction de test, même "pour valider" ta correction. Aucune PR de ce pipeline n'a pour objet d'ajouter de la couverture.
 - Ne crée PAS de script jetable de reproduction : relis le code à la place.
 - Ne modifie un test existant QUE si ta correction le casse mécaniquement (signature ou API changée). Dans ce cas : adaptation minimale, jamais de réécriture.
 - Vérification autorisée, et une seule fois, à la fin :
-  - Python : `python -m py_compile <fichiers modifiés>`, puis AU PLUS UN fichier de test ciblé s'il en existe un qui couvre la zone touchée, par exemple `python -m pytest backend/tests/test_pipeline_signals.py -x -q`.
-  - TypeScript : `cd frontend && npx tsc --noEmit` — c'est le garde-fou dur du frontend, ne le saute pas si tu as modifié `frontend/src/`.
+  - Python : `python -m py_compile <fichiers modifiés>`, puis AU PLUS UN fichier de test ciblé s'il en existe un qui couvre la zone touchée, par exemple `python -m pytest old/backend/tests/test_pipeline_signals.py -x -q`.
+  - TypeScript : `cd frontend/Web && npx tsc --noEmit` — c'est le garde-fou dur du frontend, ne le saute pas si tu as modifié `frontend/Web/src/`.
 - Si un test ciblé échoue à cause de ta modification, corrige ta modification. S'il échouait déjà avant, ne le touche pas et signale-le dans le corps de la PR.
 
 Exception unique : si l'issue traitée demande EXPLICITEMENT d'ajouter ou de corriger un test, fais uniquement ce qui est demandé.

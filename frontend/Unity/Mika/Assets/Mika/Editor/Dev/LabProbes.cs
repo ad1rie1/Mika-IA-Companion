@@ -12,7 +12,7 @@ namespace Mika.Editor.Dev
     /// Des relevés du labo d'animation (<see cref="AnimLab"/>), en mode jeu : la cinématique des jambes pendant une
     /// marche (un CSV, une ligne par image à 30 i/s) pour trouver ce qui saute d'une image à l'autre ; et la place
     /// réelle des objets autour d'un lieu (le bureau, le lit, la fenêtre, la bibliothèque), dans le repère où l'atelier
-    /// d'animation Blender construit les gestes (UnityFrontend/ArtSource/atelier/*_layout.json).
+    /// d'animation Blender construit les gestes (frontend/Unity/ArtSource/atelier/*_layout.json).
     /// </summary>
     public static class LabProbes
     {

@@ -3,7 +3,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { LIGHT_ANCHOR_NAMES, type RoomParts } from "./RoomParts";
 
 /**
- * The authored room (frontend/assets-src/room.blend → public/models/room.glb).
+ * The authored room (frontend/Web/assets-src/room.blend → public/models/room.glb).
  *
  * The GLB carries a baked ambient-occlusion atlas as each material's glTF
  * occlusionTexture on UV set 1; GLTFLoader turns it into `aoMap` on uv

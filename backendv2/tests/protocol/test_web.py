@@ -1,5 +1,5 @@
 """Le protocole que parle le frontend, vérifié contre son propre code
-(``frontend/src/types/messages.ts``, ``network/api.ts``, ``WebSocketClient.ts``)."""
+(``frontend/Web/src/types/messages.ts``, ``network/api.ts``, ``WebSocketClient.ts``)."""
 
 from __future__ import annotations
 
@@ -285,7 +285,7 @@ def test_every_dream_kind_the_server_sends_is_one_the_frontend_names():
 
     from mika.contracts import self_ as self_c
 
-    source = Path(__file__).resolve().parents[3] / "frontend" / "src" / "types" / "messages.ts"
+    source = Path(__file__).resolve().parents[3] / "frontend" / "Web" / "src" / "types" / "messages.ts"
     if not source.exists():
         pytest.skip("frontend absent")
     declared = re.search(r"DREAM_TYPES\s*=\s*\[(.*?)\]\s*as const", source.read_text(encoding="utf-8"), re.S)

@@ -1,7 +1,7 @@
 """Le serveur : le noyau réel (horloge, identifiants, magasin, modèles),
 l'adaptateur web par-dessus, un seul processus.
 
-``python -m mika serve --port 8001`` puis, dans ``frontend/`` : ``npm run dev``.
+``python -m mika serve --port 8001`` puis, dans ``frontend/Web/`` : ``npm run dev``.
 Derrière un mandataire TLS : ``--origin https://mika.example --cookie-secure
 --behind-proxy`` (voir ``deploy/README.md``). Un moteur de jeu se connecte au monde
 sur ``/ws/world`` (ADR 0051) avec un jeton de son compte : ``python -m mika token

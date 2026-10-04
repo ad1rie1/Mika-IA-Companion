@@ -21,9 +21,9 @@ from pathlib import Path
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
-REPO = Path(__file__).resolve().parents[3]
-AVATAR = REPO / "UnityFrontend/Mika/Assets/Mika/Art/Avatars/default.vrm"
-WORKDIR = REPO / "UnityFrontend/ArtSource/atelier"
+REPO = Path(__file__).resolve().parents[4]
+AVATAR = REPO / "frontend/Unity/Mika/Assets/Mika/Art/Avatars/default.vrm"
+WORKDIR = REPO / "frontend/Unity/ArtSource/atelier"
 RIG_BLEND = WORKDIR / "mika_rig.blend"
 
 # Ce que la tenue de répétition retire (les vêtements amples) et la combinaison qui couvre le corps.

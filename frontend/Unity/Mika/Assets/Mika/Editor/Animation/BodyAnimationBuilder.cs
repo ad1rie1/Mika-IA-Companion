@@ -14,7 +14,7 @@ namespace Mika.Editor.Animation
     /// Les animations du corps de Mika, et le contrôleur qui les joue selon le contrat <see cref="BodyAnim"/> :
     /// <list type="bullet">
     /// <item>les clips Mixamo du client web (attentes, paroles, gestes) et les clips de motion capture réelle
-    /// (base CMU, préparés par <c>frontend/assets-src/blender/mocap_unity.py</c> dans <c>UnityFrontend/ArtSource/mocap</c> :
+    /// (base CMU, préparés par <c>frontend/Web/assets-src/blender/mocap_unity.py</c> dans <c>frontend/Unity/ArtSource/mocap</c> :
     /// marche, s'asseoir, assise, se lever, allongée…), importés en humanoïde — Mecanim les retarget sur
     /// n'importe quel avatar ;</item>
     /// <item>à défaut, des clips générés en muscles humanoïdes à partir de sa vraie pose de repos ;</item>
@@ -31,9 +31,9 @@ namespace Mika.Editor.Animation
         const string ClipSetPath = Root + "/BodyClipSet.asset";
         const string UpperMaskPath = Root + "/UpperBody.mask";
         const string ArmMaskPath = Root + "/RightArm.mask";
-        static string RepoRoot => Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", ".."));
-        static string WebSource => Path.Combine(RepoRoot, "frontend", "public", "animations");
-        static string MocapSource => Path.Combine(RepoRoot, "UnityFrontend", "ArtSource", "mocap");
+        static string RepoRoot => Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "..", ".."));
+        static string WebSource => Path.Combine(RepoRoot, "frontend", "Web", "public", "animations");
+        static string MocapSource => Path.Combine(RepoRoot, "frontend", "Unity", "ArtSource", "mocap");
 
         /// <summary>Les catégories du client web qui bouclent (une attente, une parole, une marche).</summary>
         static readonly HashSet<string> Looping = new HashSet<string> { "idle", "talk", "locomotion", "sleep" };

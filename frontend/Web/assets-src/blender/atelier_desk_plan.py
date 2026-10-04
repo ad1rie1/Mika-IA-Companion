@@ -9,7 +9,7 @@
 # de dessus (previews/plan_bureau.png) et écrit les places (repère du siège, Unity) et leur équivalent dans la pièce
 # (coordonnées three.js de build_desk.py) dans ArtSource/atelier/desk_plan.json.
 #
-#   blender -b UnityFrontend/ArtSource/atelier/mika_rig.blend --python frontend/assets-src/blender/atelier_desk_plan.py
+#   blender -b frontend/Unity/ArtSource/atelier/mika_rig.blend --python frontend/Web/assets-src/blender/atelier_desk_plan.py
 import json
 import math
 import sys

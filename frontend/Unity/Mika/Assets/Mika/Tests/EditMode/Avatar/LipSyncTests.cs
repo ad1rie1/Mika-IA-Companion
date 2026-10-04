@@ -5,7 +5,7 @@ using NUnit.Framework;
 namespace Mika.Avatar.Tests
 {
     /// <summary>Le curseur, le recalage, la coarticulation et le plafond d'ouverture — les cas de
-    /// <c>frontend/src/audio/__tests__/LipSyncController.test.ts</c>, sur le cœur pur.</summary>
+    /// <c>frontend/Web/src/audio/__tests__/LipSyncController.test.ts</c>, sur le cœur pur.</summary>
     public class LipSyncTests
     {
         const float Step = 1f / 120f;

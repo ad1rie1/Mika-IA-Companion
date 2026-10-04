@@ -3,7 +3,7 @@
 # le stylo couché sur le carnet, rien qui se touche ni ne déborde du plateau. Empreintes au sol des vrais modèles
 # (enveloppes convexes), déplacées sans recharger la scène. Imprime les meilleures solutions.
 #
-#   blender -b UnityFrontend/ArtSource/atelier/mika_rig.blend --python frontend/assets-src/blender/atelier_desk_search.py
+#   blender -b frontend/Unity/ArtSource/atelier/mika_rig.blend --python frontend/Web/assets-src/blender/atelier_desk_search.py
 import math
 import sys
 from pathlib import Path

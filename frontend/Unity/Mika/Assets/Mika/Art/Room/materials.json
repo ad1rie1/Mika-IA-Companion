@@ -1,6 +1,6 @@
 {
  "format": "mika.room-materials/1",
- "source": "frontend/assets-src",
+ "source": "frontend/Web/assets-src",
  "color_note": "linear = valeurs du shader Blender ; srgb_hex = même couleur encodée sRGB",
  "materials": {
   "M_Basket": {

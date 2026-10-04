@@ -7,7 +7,7 @@ using UnityEngine;
 namespace Mika.Editor.Import
 {
     /// <summary>
-    /// La literie du lit : la couette et le plaid simulés en plusieurs formes (frontend/assets-src/blender/duvet_states.py
+    /// La literie du lit : la couette et le plaid simulés en plusieurs formes (frontend/Web/assets-src/blender/duvet_states.py
     /// → duvet.fbx, throw.fbx) remplacent ceux qui étaient fondus dans le maillage du lit, pour qu'elle puisse ouvrir
     /// son lit, tirer la couette sur elle, se retourner dessous et la repousser (<see cref="DuvetRig"/>).
     /// </summary>

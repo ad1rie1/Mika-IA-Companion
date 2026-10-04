@@ -1,9 +1,9 @@
 # Atelier d'animation de Mika — au bureau : taper, la souris, écrire, lire, boire, prendre un objet, réfléchir,
 # s'étirer, pivoter la chaise vers quelqu'un. Les mouvements sont construits ici (pas de capture) sur son squelette,
-# assise sur sa chaise, devant son bureau tel qu'Unity le relève (UnityFrontend/ArtSource/atelier/desk_layout.json),
+# assise sur sa chaise, devant son bureau tel qu'Unity le relève (frontend/Unity/ArtSource/atelier/desk_layout.json),
 # puis exportés comme les autres (motions/desk_*.json.gz → « Importer les mouvements de l'atelier Blender »).
 #
-#   blender -b UnityFrontend/ArtSource/atelier/mika_rig.blend --python frontend/assets-src/blender/atelier_desk.py -- \
+#   blender -b frontend/Unity/ArtSource/atelier/mika_rig.blend --python frontend/Web/assets-src/blender/atelier_desk.py -- \
 #       [--only desk_type,desk_write] [--no-previews]
 #
 # Le repère de travail : elle est assise, hanches à l'origine (x, y) — Blender : elle regarde −Y, sa gauche est +X —,

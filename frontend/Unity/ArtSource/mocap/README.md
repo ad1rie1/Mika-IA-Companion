@@ -1,6 +1,6 @@
 # Mocap CMU — clips pour le corps de Mika
 
-FBX produits par `frontend/assets-src/blender/mocap_unity.py` (Blender 5.2, sans interface) à partir de la base de
+FBX produits par `frontend/Web/assets-src/blender/mocap_unity.py` (Blender 5.2, sans interface) à partir de la base de
 capture de mouvement de Carnegie Mellon. Dossier hors de `Assets/` exprès : on importe
 dans Unity ce dont on a besoin.
 
@@ -197,8 +197,8 @@ LeftHandIndex1, LThumb et leurs symétriques (doigts sommaires et bruités de la
 ## Relancer
 
 ```
-blender -b --factory-startup --python frontend/assets-src/blender/mocap_unity.py -- \
-    --bvh-dir ~/.cache/mika-mocap/cmu --out UnityFrontend/ArtSource/mocap
+blender -b --factory-startup --python frontend/Web/assets-src/blender/mocap_unity.py -- \
+    --bvh-dir ~/.cache/mika-mocap/cmu --out frontend/Unity/ArtSource/mocap
 ```
 
 `--only walking,sit_down` limite aux clips nommés (les clips dont ils dépendent pour le

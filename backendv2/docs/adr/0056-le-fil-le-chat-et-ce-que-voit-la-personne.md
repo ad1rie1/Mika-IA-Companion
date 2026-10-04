@@ -1,7 +1,7 @@
 # 0056 — Le fil, le chat et ce que voit la personne
 
 **Contexte.** Un audit des interfaces (2026-10-03, lecture seule) a branché un serveur v2 neuf sur un client qui
-imite le frontend web (`frontend/`), trame par trame. Le protocole était aligné (les 29 émotions, les phases, les
+imite le frontend web (`frontend/Web/`), trame par trame. Le protocole était aligné (les 29 émotions, les phases, les
 statuts d'`ack`), mais ce que voyait la personne ne l'était pas : un navigateur passé de l'ancien moteur à v2 cachait
 les messages de v2 derrière son cache ; le frontend visait encore le port de l'ancien moteur ; une réponse ratée
 rayait le message de la personne comme s'il n'était pas parti ; sans modèle, tout le monde lisait une commande
@@ -29,7 +29,7 @@ nuit, rien ne disait qu'elle dormait ; et le panneau parlait en identifiants (`f
    sont perdues cette fois-là).
 
 2. *Le frontend vise v2 (B-2).* Défaut `http://localhost:8001` (`network/api.ts`, `WebSocketClient`), un
-   `frontend/.env.example` qui documente `VITE_BACKEND_ORIGIN` (l'ancien moteur : 8000), et des messages d'erreur
+   `frontend/Web/.env.example` qui documente `VITE_BACKEND_ORIGIN` (l'ancien moteur : 8000), et des messages d'erreur
    qui disent quoi faire en v2 (`python -m mika serve --origin <cette page>`) au lieu de `CORS_ALLOWED_ORIGINS`.
 
 3. *Une réponse ratée ne raye plus le message (G-1).* Le second `ack` d'une question **reçue** dont la réponse ne

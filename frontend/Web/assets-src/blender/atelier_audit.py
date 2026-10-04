@@ -3,7 +3,7 @@
 # sauts d'un os d'une image à l'autre, posture (buste, cou), genoux en hyperextension, avant-bras et mains dans le
 # corps (sur son maillage). « --clean » mesure aussi le mouvement après le traitement de l'atelier.
 #
-#   blender -b UnityFrontend/ArtSource/atelier/mika_rig.blend --python frontend/assets-src/blender/atelier_audit.py -- \
+#   blender -b frontend/Unity/ArtSource/atelier/mika_rig.blend --python frontend/Web/assets-src/blender/atelier_audit.py -- \
 #       [--only idle_happy,talk_main] [--clean] [--no-mesh] [--json chemin]
 import argparse
 import json
@@ -15,8 +15,8 @@ import bpy
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import atelier_lib as al  # noqa: E402
 
-WEB = al.REPO / "frontend/public/animations"
-MOCAP = al.REPO / "UnityFrontend/ArtSource/mocap"
+WEB = al.REPO / "frontend/Web/public/animations"
+MOCAP = al.REPO / "frontend/Unity/ArtSource/mocap"
 
 
 def sources():

@@ -186,7 +186,7 @@ namespace Mika.Editor.Import
         }
 
         // --- le monde par défaut du noyau ------------------------------------------------------------------------
-        static string KernelWorldPath => Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "..", "backendv2", "src", "mika", "faculties", "world", "chambre.json"));
+        static string KernelWorldPath => Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "..", "..", "backendv2", "src", "mika", "faculties", "world", "chambre.json"));
 
         static WorldDef ReadKernelWorld() => WireJson.ReadWorld(File.ReadAllText(KernelWorldPath));
 

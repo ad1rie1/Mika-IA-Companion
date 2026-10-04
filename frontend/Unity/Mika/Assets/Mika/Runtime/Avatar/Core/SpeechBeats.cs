@@ -39,7 +39,7 @@ namespace Mika.Avatar
 
     /// <summary>
     /// Où une phrase se ponctue — analyse du texte seule. Portage de
-    /// <c>frontend/src/vtuber/animation/speechBeats.ts</c>.
+    /// <c>frontend/Web/src/vtuber/animation/speechBeats.ts</c>.
     /// </summary>
     /// <remarks>
     /// Personne ne parle la tête immobile : la tête plonge sur les mots accentués, les sourcils se lèvent sur

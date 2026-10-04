@@ -2,7 +2,7 @@
 
 Le visage de Mika dans le client Unity : émotions, physiologie, clignements, micro-expressions,
 synchronisation labiale, sommeil, énergie et regard des yeux. C'est le portage de la couche visage du
-client web (`frontend/src/vtuber/`, `frontend/src/audio/`) ; le `CLAUDE.md` racine (sections « Face
+client web (`frontend/Web/src/vtuber/`, `frontend/Web/src/audio/`) ; le `CLAUDE.md` racine (sections « Face
 layers », « Humanisation pass », « Lip-sync follows the voice ») décrit le comportement visé.
 
 - `Core/` — la logique, pure (aucune dépendance au modèle chargé), testée en mode édition

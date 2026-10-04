@@ -1,6 +1,6 @@
 # Audit du contrat d’autonomie et de continuité personnelle de Mika
 
-> **État historique avant corrections.** La mise en œuvre autorisée ensuite est décrite dans [autonomie-implementation-2026-09-20.md](autonomie-implementation-2026-09-20.md). Les sondes ci-dessous caractérisent la révision initiale ; les assertions des comportements corrigés sont dans `backend/tests/test_autonomie_contrat.py`.
+> **État historique avant corrections.** La mise en œuvre autorisée ensuite est décrite dans [autonomie-implementation-2026-09-20.md](autonomie-implementation-2026-09-20.md). Les sondes ci-dessous caractérisent la révision initiale ; les assertions des comportements corrigés sont dans `old/backend/tests/test_autonomie_contrat.py`.
 
 Audit du 20 septembre 2026, sur la révision `429dc3e` et l’arbre de travail initialement propre.
 
@@ -40,7 +40,7 @@ Les sondes sont conservées dans [audit_contrat_autonomie_probes.py](audit_contr
 | Construire ses plugins | Écriture de code, validation, versions, rechargement, journaux, tests de handlers, disjoncteur, stockage et HTTP de la Forge | Capacité opérationnelle ; sa mobilisation spontanée reste incomplète |
 | Survivre aux interruptions | Persistance, reprise, quotas, compteurs de dégradation, arrêt supervisé | À conserver ; cela rend une vie autonome durablement exploitable |
 
-Sources principales : `conscience/engine.py`, `conscience/travaux.py`, `conscience/models.py`, `memory/models.py`, `emotion/engine.py`, `emotion/persistence.py`, `memory/sleep.py`, `identity/divulgation.py`, `modules/plugins/forge/`, `config/asgi.py` — tous sous `backend/`.
+Sources principales : `conscience/engine.py`, `conscience/travaux.py`, `conscience/models.py`, `memory/models.py`, `emotion/engine.py`, `emotion/persistence.py`, `memory/sleep.py`, `identity/divulgation.py`, `modules/plugins/forge/`, `config/asgi.py` — tous sous `old/backend/`.
 
 ## Écarts prioritaires
 
@@ -54,7 +54,7 @@ La sonde crée un projet confié, formel, prioritaire et récurrent ; l’appel 
 
 **À changer :** séparer le contrat versionné du projet de son état d’exécution. Le modèle peut proposer une révision, déclarer un blocage et modifier son plan de travail ; seul un acte autorisé de l’utilisateur change le contrat confié. Vérifier cette règle au point d’écriture, quelle que soit l’entrée utilisée.
 
-Références : `backend/projects/tools.py:483`, `backend/projects/models.py:33`.
+Références : `old/backend/projects/tools.py:483`, `old/backend/projects/models.py:33`.
 
 ### C02 — Le périmètre de l’atelier ne borne pas les programmes exécutés
 
@@ -68,7 +68,7 @@ Ce point compte directement pour le contrat : les bornes affichées comme strict
 
 **À changer :** exécuter les programmes dans un processus réellement isolé, avec l’atelier monté en écriture, les références autorisées en lecture et un accès réseau conforme au projet. L’absence de cette isolation doit rendre cette capacité indisponible, sans empêcher les activités qui n’en ont pas besoin.
 
-Références : `backend/projects/workspace.py:67`, `backend/projects/execution.py:175`, `backend/projects/toolkit.py`, `backend/projects/context_builder.py:172`.
+Références : `old/backend/projects/workspace.py:67`, `old/backend/projects/execution.py:175`, `old/backend/projects/toolkit.py`, `old/backend/projects/context_builder.py:172`.
 
 ### C03 — Un projet personnel s’arrête aussi après dix avances sans humain
 
@@ -80,7 +80,7 @@ La sonde vérifie qu’un projet personnel actif, dû et à dix avances est excl
 
 **À changer :** piloter l’autonomie par les budgets, le progrès observé, les répétitions et les blocages. Un projet personnel qui avance utilement doit pouvoir continuer sans validation périodique d’une présence humaine. Un arrêt doit porter sa cause, une condition de reprise et un état lisible.
 
-Références : `backend/projects/runner.py:151`, `backend/projects/runner.py:681`, `backend/projects/config_schema.py:109`, `backend/projects/apps.py:36`.
+Références : `old/backend/projects/runner.py:151`, `old/backend/projects/runner.py:681`, `old/backend/projects/config_schema.py:109`, `old/backend/projects/apps.py:36`.
 
 ### C04 — Le runner de projets ne sait pas employer les modules déclarés
 
@@ -94,7 +94,7 @@ Avec `requires_approval=True`, il peut proposer une action ; l’exécuteur d’
 
 **À changer :** une même couche d’exécution doit recevoir le contrat actif et construire les capacités autorisées, en conversation comme en tâche de fond. Une action autorisée peut être exécutée ; une action nécessitant un accord est mise en attente. L’accès aux fichiers de référence doit être un outil de lecture explicitement borné.
 
-Références : `backend/projects/runner.py:197`, `backend/projects/context_builder.py:141`, `backend/projects/runner.py:557`, `backend/projects/views.py:565`, `backend/pipeline/context.py:506`.
+Références : `old/backend/projects/runner.py:197`, `old/backend/projects/context_builder.py:141`, `old/backend/projects/runner.py:557`, `old/backend/projects/views.py:565`, `old/backend/pipeline/context.py:506`.
 
 ### C05 — Une phrase du modèle peut devenir une réussite, puis un souvenir
 
@@ -108,7 +108,7 @@ Une pensée ou une composition peuvent naturellement aboutir sans outil. Le prob
 
 **À changer :** porter un résultat par action : tentative, exécution constatée, échec, résultat incertain et éléments de preuve. Séparer ce résultat de l’interprétation que Mika en fait. Un envoi dispose d’un accusé technique ; un fichier d’un artefact ; une lecture d’un contenu obtenu ; une réflexion peut être explicitement déclarative. Les souvenirs d’action doivent garder cette provenance.
 
-Références : `backend/conscience/acte.py:354`, `backend/conscience/acte.py:384`, `backend/conscience/travaux.py:705`, `backend/conscience/travaux.py:857`.
+Références : `old/backend/conscience/acte.py:354`, `old/backend/conscience/acte.py:384`, `old/backend/conscience/travaux.py:705`, `old/backend/conscience/travaux.py:857`.
 
 ### C06 — Les refus de la Forge peuvent être comptés comme des succès
 
@@ -120,7 +120,7 @@ Ce défaut atteint la psychologie : le nombre de réussites alimente le soulagem
 
 **À changer :** normaliser le résultat de tous les outils, sans dépendre de la langue du message : état, code d’erreur, contenu et effets constatés. Vérifier ce format aux frontières des modules. Soulager ensuite une pulsion selon ce que l’action lui a apporté, pas seulement selon le succès technique d’un appel.
 
-Références : `backend/modules/collectors.py:33`, `backend/modules/collectors.py:124`, `backend/modules/plugins/forge/tools.py:119`, `backend/projects/toolkit.py:34`, `backend/drives/engine.py:213`.
+Références : `old/backend/modules/collectors.py:33`, `old/backend/modules/collectors.py:124`, `old/backend/modules/plugins/forge/tools.py:119`, `old/backend/projects/toolkit.py:34`, `old/backend/drives/engine.py:213`.
 
 ### C07 — Une personne canonique garde plusieurs relations affectives selon ses canaux
 
@@ -132,7 +132,7 @@ La sonde rattache deux handles à la même identité et vérifie leur résolutio
 
 **À changer :** conserver les adresses dans la couche transport et ancrer la relation sur une identité canonique. Un contexte spécifique au canal peut ensuite moduler cette relation. Prévoir une fusion prudente des traces existantes lors d’une reconnaissance, et une séparation possible lors d’une identité corrigée.
 
-Références : `backend/identity/models.py:21`, `backend/emotion/engine.py:290`, `backend/emotion/persistence.py:146`, `backend/pipeline/processor.py:166`, `backend/pipeline/processor.py:449`.
+Références : `old/backend/identity/models.py:21`, `old/backend/emotion/engine.py:290`, `old/backend/emotion/persistence.py:146`, `old/backend/pipeline/processor.py:166`, `old/backend/pipeline/processor.py:449`.
 
 ### C08 — La réponse de Bob peut annuler le silence d’Alice
 
@@ -144,7 +144,7 @@ La sonde crée une initiative adressée à Alice : elle compte comme ignorée. E
 
 **À changer :** distinguer la compagnie générale, une réponse de la personne attendue et une réponse à l’initiative précise. Les relances et attentes nominatives doivent utiliser l’identité canonique et, lorsque disponible, un lien vers le message concerné.
 
-Référence : `backend/conscience/introspection.py:36`, notamment la collecte des réponses à partir de la ligne 91.
+Référence : `old/backend/conscience/introspection.py:36`, notamment la collecte des réponses à partir de la ligne 91.
 
 ## Limites de l’autonomie et du réalisme à revoir
 
@@ -158,7 +158,7 @@ La sonde confirme ce cycle perdu. Ce n’est pas une preuve d’arrêt permanent
 
 **À changer :** rendre la disponibilité de l’audience connue avant l’arbitrage ; distinguer exécution et communication. L’absence de chat doit laisser possibles une lecture, une construction ou une action distante autorisée. Publier ou raconter son résultat est un choix supplémentaire.
 
-Références : `backend/conscience/conduite.py:539`, `backend/conscience/engine.py:447`, `backend/conscience/engine.py:476`, `backend/conscience/acte.py:201`.
+Références : `old/backend/conscience/conduite.py:539`, `old/backend/conscience/engine.py:447`, `old/backend/conscience/engine.py:476`, `old/backend/conscience/acte.py:201`.
 
 ### C10 — La Forge sait réparer spontanément ; l’invention a peu de prises
 
@@ -172,7 +172,7 @@ Les chantiers ont aussi une portée courte par défaut : cinq pas, envie décroi
 
 **À changer :** donner à Mika une capacité de découvrir et demander les outils appropriés à son intention ; transformer un manque de capacité en projet de Forge ; permettre le passage d’une exploration à un projet personnel durable. Ajouter une version candidate testée avant remplacement de la version active : aujourd’hui l’écriture précède le chargement et le rollback après échec est manuel.
 
-Références : `backend/modules/plugins/forge/module.py:1011`, `backend/conscience/conduite.py:390`, `backend/conscience/trousse.py:65`, `backend/conscience/travaux.py:386`, `backend/modules/plugins/forge/module.py:771`, `backend/conscience/models.py:305`.
+Références : `old/backend/modules/plugins/forge/module.py:1011`, `old/backend/conscience/conduite.py:390`, `old/backend/conscience/trousse.py:65`, `old/backend/conscience/travaux.py:386`, `old/backend/modules/plugins/forge/module.py:771`, `old/backend/conscience/models.py:305`.
 
 ### C11 — Les connaissances naissent trop certaines et avec peu de provenance
 
@@ -184,7 +184,7 @@ La nuance peut encore être conservée dans le texte d’une connaissance. Le ba
 
 **À changer :** attacher les croyances à leurs sources et conserver leur modalité et leur incertitude. La répétition d’une même affirmation peut renforcer la familiarité sans constituer une nouvelle preuve indépendante. Cela permet des erreurs crédibles, des doutes et des corrections motivées.
 
-Références : `backend/memory/storage/consolidator.py:930`, `backend/memory/models.py:174`, `backend/memory/extraction/extractor.py:145`.
+Références : `old/backend/memory/storage/consolidator.py:930`, `old/backend/memory/models.py:174`, `old/backend/memory/extraction/extractor.py:145`.
 
 ### C12 — Le soulagement et certains affects sont trop peu liés à ce qui s’est passé
 
@@ -198,7 +198,7 @@ Le mode professionnel constitue un autre arbitrage discutable : le pipeline peut
 
 **À changer :** rattacher le soulagement à la préoccupation abordée, à un progrès, à une réponse attendue ou à une réévaluation ; conserver séparément un léger bénéfice général de socialisation si souhaité. Distinguer émotion éprouvée, émotion exprimée et conduite choisie.
 
-Références : `backend/conscience/ruminations.py:203`, `backend/drives/engine.py:202`, `backend/drives/engine.py:213`, `backend/pipeline/processor.py:449`, `backend/projects/context_builder.py:141`.
+Références : `old/backend/conscience/ruminations.py:203`, `old/backend/drives/engine.py:202`, `old/backend/drives/engine.py:213`, `old/backend/pipeline/processor.py:449`, `old/backend/projects/context_builder.py:141`.
 
 ## Ce que je modifierais dans l’architecture
 
@@ -274,7 +274,7 @@ Commande des sondes sur l’état initial uniquement (elle n’est plus une vér
 python -m pytest -q -c pytest.ini docs/audit_contrat_autonomie_probes.py
 ```
 
-Ces sondes sont volontairement hors de `backend/tests/`, afin de ne pas ériger les écarts observés en exigences permanentes. Lors de leur correction, les convertir en tests de régression portant le comportement voulu.
+Ces sondes sont volontairement hors de `old/backend/tests/`, afin de ne pas ériger les écarts observés en exigences permanentes. Lors de leur correction, les convertir en tests de régression portant le comportement voulu.
 
 Les 34 fichiers existants exécutés couvrent : `test_conscience_engine`, `test_conscience_scoring`, `test_conscience_conduite`, `test_conscience_travail`, `test_conscience_pas`, `test_conscience_agentique`, `test_conscience_honnetete`, `test_conscience_boucles`, `test_conscience_trousse`, `test_intention_verdict`, `test_intention_origine`, `test_vie_interieure_correctifs`, `test_drives`, `test_emotion_engine`, `test_emotion_audit_correctifs`, `test_scenario_multi_person`, `test_person_profile`, `test_memory_restart_continuity`, `test_context_scoping`, `test_divulgation_graduee`, `test_frontiere_intime_outils`, `test_identity_resolver`, `test_sleep`, `test_sleep_rest_recovery`, `test_projects`, `test_projects_atelier`, `test_projects_correctifs`, `test_forge_host`, `test_forge_store`, `test_forge_pool`, `test_forge_sandbox`, `test_forge_api`, `test_cadence_llm`, `test_tool_trace`.
 

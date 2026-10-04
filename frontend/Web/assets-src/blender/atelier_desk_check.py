@@ -4,7 +4,7 @@
 # entre où (pieds et jambes dans la chaise ou le bureau, dos dans le dossier, bras dans les accoudoirs, mains dans le
 # plateau) et rend une planche par clip (previews/verif_<clip>.png).
 #
-#   blender -b UnityFrontend/ArtSource/atelier/mika_rig.blend --python frontend/assets-src/blender/atelier_desk_check.py -- \
+#   blender -b frontend/Unity/ArtSource/atelier/mika_rig.blend --python frontend/Web/assets-src/blender/atelier_desk_check.py -- \
 #       [--only desk_type,desk_lap] [--no-previews]
 import argparse
 import gzip

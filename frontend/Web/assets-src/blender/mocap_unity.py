@@ -1,8 +1,8 @@
 # Animations de capture de mouvement (base CMU) -> un FBX par clip pour le corps de
 # Mika dans Unity, avec la pose T comme pose de repos.
 #
-#   blender -b --factory-startup --python frontend/assets-src/blender/mocap_unity.py -- \
-#       --bvh-dir <cache des BVH> [--out UnityFrontend/ArtSource/mocap] [--only walking,sit_down]
+#   blender -b --factory-startup --python frontend/Web/assets-src/blender/mocap_unity.py -- \
+#       --bvh-dir <cache des BVH> [--out frontend/Unity/ArtSource/mocap] [--only walking,sit_down]
 #       [--no-previews] [--no-download]
 #
 # Source : la conversion BVH « MotionBuilder-friendly » de cgspeed (Bruce Hahne) de la
@@ -70,12 +70,12 @@ import numpy as np
 from mathutils import Matrix, Quaternion, Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-DEFAULT_OUT = os.path.join(REPO, "UnityFrontend", "ArtSource", "mocap")
+REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
+DEFAULT_OUT = os.path.join(REPO, "frontend", "Unity", "ArtSource", "mocap")
 DEFAULT_BVH = os.environ.get("MIKA_CMU_BVH_DIR") or os.path.join(
     os.path.expanduser("~"), ".cache", "mika-mocap", "cmu")
 BVH_URL = "https://raw.githubusercontent.com/una-dinosauria/cmu-mocap/master/data/{subject:03d}/{take}.bvh"
-SOURCE = "frontend/assets-src/blender/mocap_unity.py"
+SOURCE = "frontend/Web/assets-src/blender/mocap_unity.py"
 
 SRC_FPS = 120
 FPS = 30
@@ -1126,7 +1126,7 @@ LeftHandIndex1, LThumb et leurs symétriques (doigts sommaires et bruités de la
 
 ```
 blender -b --factory-startup --python {source} -- \\
-    --bvh-dir ~/.cache/mika-mocap/cmu --out UnityFrontend/ArtSource/mocap
+    --bvh-dir ~/.cache/mika-mocap/cmu --out frontend/Unity/ArtSource/mocap
 ```
 
 `--only walking,sit_down` limite aux clips nommés (les clips dont ils dépendent pour le

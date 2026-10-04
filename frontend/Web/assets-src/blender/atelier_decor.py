@@ -1,10 +1,10 @@
 # Le décor réel de l'atelier d'animation : les objets de la pièce, chacun depuis son propre fichier
-# (frontend/assets-src/objects/<catégorie>/<id>.blend, écrits par `export_unity.py --blend-dir`), posés autour de Mika
+# (frontend/Web/assets-src/objects/<catégorie>/<id>.blend, écrits par `export_unity.py --blend-dir`), posés autour de Mika
 # exactement comme Unity les pose — pour qu'une animation se vérifie contre la vraie chaise, le vrai bureau, le vrai
 # clavier, et pas contre des boîtes.
 #
 # Le repère : celui des clips (Mika assise, hanches à l'origine, elle regarde −Y, sa gauche est +X, Z en haut ; le sol
-# du clip est 2 cm sous le vrai). Les places viennent du relevé Unity (UnityFrontend/ArtSource/atelier/desk_layout.json,
+# du clip est 2 cm sous le vrai). Les places viennent du relevé Unity (frontend/Unity/ArtSource/atelier/desk_layout.json,
 # repère du siège : x à droite, y en haut, z devant, chaise ni tournée ni roulée). La chaise de bureau tourne sur son
 # pied et roule le long de son assise d'origine (ChairRig) : elle et la chaise bougent ensemble, c'est donc le reste
 # de la pièce qui tourne et recule autour d'elle. Les calculs de place (repère de travail, objets glissés sur le
@@ -18,7 +18,7 @@ from mathutils.bvhtree import BVHTree
 
 import atelier_lib as al
 
-OBJECTS = al.REPO / "frontend/assets-src/objects"
+OBJECTS = al.REPO / "frontend/Web/assets-src/objects"
 DESK_LAYOUT = al.WORKDIR / "desk_layout.json"
 FLOOR_DROP = 0.02           # hanches à 0,57 dans le clip, siège à 0,59 dans Unity
 
@@ -83,8 +83,8 @@ def load(oid):
 
 # La couette et le plaid du lit : simulés par duvet_states.py, livrés en FBX à formes (la base = le lit fait), origine
 # au centre de la pièce.
-FBX_OBJECTS = {"duvet": "UnityFrontend/Mika/Assets/Mika/Art/Room/Models/furniture/duvet.fbx",
-               "throw": "UnityFrontend/Mika/Assets/Mika/Art/Room/Models/furniture/throw.fbx"}
+FBX_OBJECTS = {"duvet": "frontend/Unity/Mika/Assets/Mika/Art/Room/Models/furniture/duvet.fbx",
+               "throw": "frontend/Unity/Mika/Assets/Mika/Art/Room/Models/furniture/throw.fbx"}
 
 
 def load_fbx(oid):

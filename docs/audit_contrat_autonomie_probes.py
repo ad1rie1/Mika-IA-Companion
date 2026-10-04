@@ -1,5 +1,5 @@
 """Historical probes for revision 429dc3e BEFORE the implementation.
-Current regression suite: backend/tests/test_autonomie_contrat.py
+Current regression suite: old/backend/tests/test_autonomie_contrat.py
 
 Audit probes: passing means the observed gap exists, NOT desired behavior.
 

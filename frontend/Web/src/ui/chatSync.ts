@@ -123,7 +123,7 @@ export function ackReason(status: string): string {
   return ACK_REASONS[status] ?? "refusé par le serveur";
 }
 
-/** Pourquoi une pièce jointe n'est pas passée (backend/pipeline/media.py). */
+/** Pourquoi une pièce jointe n'est pas passée (old/backend/pipeline/media.py). */
 const REJECT_REASONS: Record<string, string> = {
   too_large: "trop volumineux",
   too_many: "au-delà de la limite de pièces jointes",

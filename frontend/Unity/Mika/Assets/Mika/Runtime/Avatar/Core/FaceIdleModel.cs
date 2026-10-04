@@ -5,7 +5,7 @@ namespace Mika.Avatar
 {
     /// <summary>
     /// Couche de micro-expressions — l'équivalent, pour le visage, des clips d'attente du corps. Portage de
-    /// <c>frontend/src/vtuber/animation/FaceIdleController.ts</c>.
+    /// <c>frontend/Web/src/vtuber/animation/FaceIdleController.ts</c>.
     /// </summary>
     /// <remarks>
     /// Sans elle le visage ne fait que cligner et tenir la forme d'émotion, ce qui, à côté d'un corps animé,

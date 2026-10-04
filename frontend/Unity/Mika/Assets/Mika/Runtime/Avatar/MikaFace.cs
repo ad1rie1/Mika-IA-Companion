@@ -10,7 +10,7 @@ namespace Mika.Avatar
     /// Le visage de Mika : émotions, physiologie (rougeur, larmes, pupilles), clignements, micro-mouvements,
     /// synchronisation labiale, sommeil, énergie et regard des yeux. Se pose sur la racine de l'avatar, à côté
     /// du <see cref="Vrm10Instance"/>. Équivalent Unity de la couche visage du client web
-    /// (<c>frontend/src/vtuber/</c>, <c>frontend/src/audio/</c>) ; voir le README du dossier.
+    /// (<c>frontend/Web/src/vtuber/</c>, <c>frontend/Web/src/audio/</c>) ; voir le README du dossier.
     /// </summary>
     /// <remarks>
     /// <para>

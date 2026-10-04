@@ -47,13 +47,13 @@ et le tableau de bord le dit (« À traiter » › Modèles) ; `/health` aussi.
 ## 4. Le frontend
 
 ```bash
-cd frontend
+cd frontend/Web
 npm install
 npm run dev        # http://localhost:3000
 ```
 
 Il vise `http://localhost:8001` par défaut ; pour une autre adresse,
-`VITE_BACKEND_ORIGIN` dans `frontend/.env.local` (voir `frontend/.env.example`).
+`VITE_BACKEND_ORIGIN` dans `frontend/Web/.env.local` (voir `frontend/Web/.env.example`).
 Le serveur admet les origines de développement (`localhost:3000`, `:4173`) ;
 servi d'ailleurs, ajoute `--origin <adresse du frontend>` à `serve`.
 

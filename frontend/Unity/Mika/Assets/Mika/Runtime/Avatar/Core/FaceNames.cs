@@ -6,7 +6,7 @@ namespace Mika.Avatar
 {
     /// <summary>
     /// Les noms des expressions que le visage enregistre lui-même sur le modèle, et la liste de ce qu'il en
-    /// retire. Portage des conventions de <c>frontend/src/vtuber/faceRig.ts</c>.
+    /// retire. Portage des conventions de <c>frontend/Web/src/vtuber/faceRig.ts</c>.
     /// </summary>
     /// <remarks>
     /// Deux familles d'expressions ajoutées au <c>VRM10Object</c> (sur une copie, jamais sur l'asset importé) :

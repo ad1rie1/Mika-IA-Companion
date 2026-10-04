@@ -4,7 +4,7 @@
 # Unity les pose (relevés ArtSource/atelier/window_layout.json et shelf_layout.json, repère du lieu : origine au sol là
 # où elle se tient, z devant elle), et vérifiés contre eux (contacts mesurés, planches previews/verif_<clip>.png).
 #
-#   blender -b UnityFrontend/ArtSource/atelier/mika_rig.blend --python frontend/assets-src/blender/atelier_stand.py -- \
+#   blender -b frontend/Unity/ArtSource/atelier/mika_rig.blend --python frontend/Web/assets-src/blender/atelier_stand.py -- \
 #       [--only window_lean] [--no-previews]
 #
 # Avant ces gestes, le regard d'une occupation debout était posé par l'IK d'Unity, le buste compris : regarder un livre

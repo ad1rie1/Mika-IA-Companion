@@ -70,7 +70,7 @@ namespace Mika.Avatar
 
     /// <summary>
     /// Où est l'attention de Mika — la couche de décision derrière les yeux. Portage de
-    /// <c>frontend/src/vtuber/animation/attention.ts</c>. Pur : aléa injectable, le temps n'entre que par
+    /// <c>frontend/Web/src/vtuber/animation/attention.ts</c>. Pur : aléa injectable, le temps n'entre que par
     /// <c>dt</c>.
     /// </summary>
     /// <remarks>

@@ -12,8 +12,8 @@ using Object = UnityEngine.Object;
 namespace Mika.Editor.Animation
 {
     /// <summary>
-    /// Les mouvements de l'atelier Blender (<c>frontend/assets-src/blender/atelier_*.py</c>), adaptés sur le squelette
-    /// de Mika, deviennent des clips humanoïdes : <c>UnityFrontend/ArtSource/atelier/motions/*.json.gz</c> →
+    /// Les mouvements de l'atelier Blender (<c>frontend/Web/assets-src/blender/atelier_*.py</c>), adaptés sur le squelette
+    /// de Mika, deviennent des clips humanoïdes : <c>frontend/Unity/ArtSource/atelier/motions/*.json.gz</c> →
     /// <c>Art/Animations/Atelier/*.anim</c>.
     /// </summary>
     /// <remarks>

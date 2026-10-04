@@ -24,7 +24,7 @@ Corrige le problème décrit dans l'issue GitHub ci-dessous. L'issue peut venir 
 - Ne touche PAS aux migrations existantes. Si une migration est nécessaire, crée-en une nouvelle.
 
 ### Frontend (Vite + TypeScript + Three.js)
-- `tsc` est le garde-fou dur : si tu modifies `frontend/src/`, termine par `cd frontend && npx tsc --noEmit`.
+- `tsc` est le garde-fou dur : si tu modifies `frontend/Web/src/`, termine par `cd frontend/Web && npx tsc --noEmit`.
 - Les types partagés vivent dans `src/types/` et ne se redéclarent jamais par fichier.
 - Les expressions VRM s'ACCUMULENT : deux couches qui écrivent la même forme peuvent dépasser 1.0.
 - Les couches d'animation écrivent sur des ensembles disjoints — n'en fais pas se chevaucher deux.

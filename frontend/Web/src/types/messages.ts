@@ -176,7 +176,7 @@ export interface SpeechMessage {
   voice_persona?: VoicePersona;
   voice_profile?: VoiceProfile;
   /**
-   * Persistence cursors (backend/communication/history.py). `message_id` is
+   * Persistence cursors (old/backend/communication/history.py). `message_id` is
    * this reply's row; the client keeps the highest it has rendered and asks
    * for everything after it on reconnect. Null when the turn was not
    * persisted — a message the server did not record must never advance the
@@ -248,7 +248,7 @@ export interface HistoryMessage {
 
 /**
  * Une pièce jointe que la validation serveur a écartée
- * (backend/pipeline/media.py::RejectedAttachment).
+ * (old/backend/pipeline/media.py::RejectedAttachment).
  */
 export interface RejectedAttachment {
   name: string;
@@ -322,7 +322,7 @@ export interface InnerStateUpdateMessage {
 }
 
 /**
- * Live emotional state, pushed between turns (backend/emotion/sync.py).
+ * Live emotional state, pushed between turns (old/backend/emotion/sync.py).
  * Same emotion fields as `speech`, no text and no inner state: the PAD
  * oscillators keep moving while Mika is silent, and this is what stops the
  * face and the readout from freezing on the last reply. Applied as ambient

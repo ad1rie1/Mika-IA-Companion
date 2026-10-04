@@ -7596,7 +7596,7 @@ MonoBehaviour:
   interactor: {fileID: 1075513668}
   hud: {fileID: 1664741043}
   offlineWorld: {fileID: 4900000, guid: e37edd9a0d986ea2497142a57fdcd524, type: 3}
-  repoWorldPath: ../../backendv2/src/mika/faculties/world/chambre.json
+  repoWorldPath: ../../../backendv2/src/mika/faculties/world/chambre.json
   offlineAfter: 3
   mikaActor: mika
 --- !u!114 &1820009359

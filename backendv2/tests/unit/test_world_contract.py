@@ -31,7 +31,7 @@ from mika.faculties.world import DEFAULT_WORLD
 
 EXAMPLE = Path(__file__).resolve().parents[2] / "examples" / "monde" / "chambre.json"
 #: La table des lieux du client web, tant qu'elle ne lit pas la définition (ADR 0050, P3).
-ROOM_LAYOUT = Path(__file__).resolve().parents[3] / "frontend" / "src" / "vtuber" / "locomotion" / "roomLayout.ts"
+ROOM_LAYOUT = Path(__file__).resolve().parents[3] / "frontend" / "Web" / "src" / "vtuber" / "locomotion" / "roomLayout.ts"
 
 
 def _raw() -> dict[str, Any]:

@@ -1,8 +1,8 @@
 # Atelier d'animation de Mika : les mouvements adaptés à son squelette, posés au sol, appuis bloqués, exportés pour
-# Unity (UnityFrontend/ArtSource/atelier/motions/*.json.gz → menu « Mika › Animation › Importer les mouvements de
+# Unity (frontend/Unity/ArtSource/atelier/motions/*.json.gz → menu « Mika › Animation › Importer les mouvements de
 # l'atelier Blender »).
 #
-#   blender -b UnityFrontend/ArtSource/atelier/mika_rig.blend --python frontend/assets-src/blender/atelier_mika.py -- \
+#   blender -b frontend/Unity/ArtSource/atelier/mika_rig.blend --python frontend/Web/assets-src/blender/atelier_mika.py -- \
 #       [--only walking,idle_breathing] [--no-previews]
 #
 # mika_rig.blend (non versionnée : elle contient le modèle de l'acheteur) se fait une fois depuis une session Blender
@@ -38,8 +38,8 @@ import bpy
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import atelier_lib as al  # noqa: E402
 
-MOCAP = al.REPO / "UnityFrontend/ArtSource/mocap"
-WEB = al.REPO / "frontend/public/animations"
+MOCAP = al.REPO / "frontend/Unity/ArtSource/mocap"
+WEB = al.REPO / "frontend/Web/public/animations"
 
 # Ce qui s'écarte du traitement par défaut, clip par clip.
 OVERRIDES = {

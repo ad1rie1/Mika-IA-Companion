@@ -5,7 +5,7 @@ namespace Mika.Avatar
 {
     /// <summary>
     /// Ce que le visage fait et qui n'est PAS une expression : le sang, les larmes, les pupilles. Portage de
-    /// <c>frontend/src/vtuber/FacePhysiology.ts</c>.
+    /// <c>frontend/Web/src/vtuber/FacePhysiology.ts</c>.
     /// </summary>
     /// <remarks>
     /// Une expression est un muscle — elle arrive en une fraction de seconde et repart presque aussi vite.

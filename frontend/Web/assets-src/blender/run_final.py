@@ -1,7 +1,7 @@
 # Full pipeline: build -> second UV -> AO bake (Cycles, CPU) -> glTF wiring ->
 # export public/models/room.glb -> save assets-src/room.blend.
 # In Blender's Python console:
-#   BLENDER_SCRIPTS_DIR = "/path/to/frontend/assets-src/blender"
+#   BLENDER_SCRIPTS_DIR = "/path/to/frontend/Web/assets-src/blender"
 #   exec(open(BLENDER_SCRIPTS_DIR + "/run_final.py").read())
 import os
 _dir = BLENDER_SCRIPTS_DIR if "BLENDER_SCRIPTS_DIR" in globals() else os.path.dirname(os.path.abspath(__file__))

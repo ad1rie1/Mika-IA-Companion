@@ -11,7 +11,7 @@
 // développement (localhost/127.0.0.1, ports 3000 et 4173) le sont par
 // défaut ; une autre se déclare par `python -m mika serve --origin <adresse>`.
 //
-// `VITE_BACKEND_ORIGIN` (voir `frontend/.env.example`) change la cible —
+// `VITE_BACKEND_ORIGIN` (voir `frontend/Web/.env.example`) change la cible —
 // l'ancien moteur (v1, Django) écoutait sur http://localhost:8000.
 
 const BACKEND_ORIGIN =
@@ -102,7 +102,7 @@ export class BackendUnreachableError extends Error {
       `Le serveur de Mika ne répond pas sur ${API_BASE}. Vérifie qu'il tourne ` +
         `(dans backendv2/ : python -m mika serve), et qu'il admet cette page : ` +
         `${serveCommand(location.origin)}. Un autre serveur se vise par ` +
-        `VITE_BACKEND_ORIGIN (frontend/.env.example).`
+        `VITE_BACKEND_ORIGIN (frontend/Web/.env.example).`
     );
     this.name = "BackendUnreachableError";
     this.reason = reason;

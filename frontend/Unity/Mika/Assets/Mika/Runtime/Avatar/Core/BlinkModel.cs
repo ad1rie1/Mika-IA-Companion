@@ -5,7 +5,7 @@ namespace Mika.Avatar
 {
     /// <summary>
     /// Clignements, fermeture des yeux dans le sommeil et frémissement du sommeil paradoxal, sur la seule
-    /// expression <c>blink</c>. Portage de <c>frontend/src/vtuber/animation/BlinkController.ts</c>.
+    /// expression <c>blink</c>. Portage de <c>frontend/Web/src/vtuber/animation/BlinkController.ts</c>.
     /// </summary>
     /// <remarks>
     /// Trois clignements (rapide / double / doux), une cadence modulée par l'émotion et la fatigue, un peu plus

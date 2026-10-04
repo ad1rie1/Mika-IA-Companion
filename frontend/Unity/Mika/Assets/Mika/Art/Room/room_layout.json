@@ -1,6 +1,6 @@
 {
  "format": "mika.room-layout/1",
- "source": "frontend/assets-src",
+ "source": "frontend/Web/assets-src",
  "units": "m",
  "space": "room (three.js: y up, facing = (sin φ, cos φ))",
  "room": {

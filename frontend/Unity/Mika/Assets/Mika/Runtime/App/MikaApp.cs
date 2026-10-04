@@ -30,7 +30,7 @@ namespace Mika.App
         [Tooltip("Le monde à montrer hors ligne (le monde par défaut du noyau).")]
         public TextAsset offlineWorld;
         [Tooltip("Chemin du monde par défaut dans le dépôt (lu de préférence dans l'éditeur : il ne vieillit pas).")]
-        public string repoWorldPath = "../../backendv2/src/mika/faculties/world/chambre.json";
+        public string repoWorldPath = "../../../backendv2/src/mika/faculties/world/chambre.json";
         [Tooltip("Sans réponse du noyau après ce délai (s), montrer l'aperçu.")]
         public float offlineAfter = 3f;
         [Tooltip("L'acteur de Mika dans le monde.")]

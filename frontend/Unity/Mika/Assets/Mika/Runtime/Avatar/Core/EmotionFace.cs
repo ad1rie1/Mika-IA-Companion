@@ -6,7 +6,7 @@ namespace Mika.Avatar
     /// <summary>
     /// Le visage des émotions : les 29 émotions traduites en poids d'expressions, avec l'intensité, la
     /// secondaire du mélange, des vitesses de montée propres à chaque émotion et une descente plus lente.
-    /// Portage de <c>frontend/src/vtuber/EmotionController.ts</c>.
+    /// Portage de <c>frontend/Web/src/vtuber/EmotionController.ts</c>.
     /// </summary>
     /// <remarks>
     /// Pur : aucune dépendance au modèle chargé. Ce qui existe sur le modèle arrive par deux prédicats au

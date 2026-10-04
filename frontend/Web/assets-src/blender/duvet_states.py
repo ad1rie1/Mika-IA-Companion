@@ -1,7 +1,7 @@
 # Les états de la couette (et du plaid) du lit de Mika, simulés en tissu et livrés en FBX à formes (shape keys).
 #
-#   blender -b --factory-startup --python frontend/assets-src/blender/duvet_states.py -- \
-#       [--poses UnityFrontend/Mika/Temp/lab/poses] [--out UnityFrontend/Mika/Assets/Mika/Art/Room/Models/furniture]
+#   blender -b --factory-startup --python frontend/Web/assets-src/blender/duvet_states.py -- \
+#       [--poses frontend/Unity/Mika/Temp/lab/poses] [--out frontend/Unity/Mika/Assets/Mika/Art/Room/Models/furniture]
 #
 # La couette du lit est une simulation (cloth.build_bed_cloth) : un drap de 48 × 72 carreaux, retombé sur le
 # matelas, puis épaissi. On rejoue la même simulation depuis d'autres départs — même grille, même épaisseur, donc
@@ -27,7 +27,7 @@ import time
 import bpy
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 sys.path.insert(0, HERE)
 
 import roomlib  # noqa: E402
@@ -280,8 +280,8 @@ def export(obj, path):
 
 def main(argv):
     ap = argparse.ArgumentParser(prog="duvet_states.py")
-    ap.add_argument("--poses", default=os.path.join(REPO, "UnityFrontend", "Mika", "Temp", "lab", "poses"))
-    ap.add_argument("--out", default=os.path.join(REPO, "UnityFrontend", "Mika", "Assets", "Mika", "Art", "Room", "Models", "furniture"))
+    ap.add_argument("--poses", default=os.path.join(REPO, "frontend", "Unity", "Mika", "Temp", "lab", "poses"))
+    ap.add_argument("--out", default=os.path.join(REPO, "frontend", "Unity", "Mika", "Assets", "Mika", "Art", "Room", "Models", "furniture"))
     ap.add_argument("--frames", type=int, default=60)
     ap.add_argument("--preview", default=None, help="dossier où rendre un aperçu de chaque forme")
     args = ap.parse_args(argv)

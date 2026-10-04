@@ -323,7 +323,7 @@ namespace Mika.World.Engine
         }
 
         // --- au bureau : les clips de l'atelier ----------------------------------------------------------------
-        // Faits contre le vrai bureau (frontend/assets-src/blender/atelier_desk.py, atelier_desk_gestures.py) pour des
+        // Faits contre le vrai bureau (frontend/Web/assets-src/blender/atelier_desk.py, atelier_desk_gestures.py) pour des
         // positions nommées de la chaise (relevé : ArtSource/atelier/desk_plan.json, repère du siège) :
         //   - « home » : là où elle s'assoit et se lève, la chaise à sa place ;
         //   - « type » : la chaise pivotée et avancée qui lui présente le clavier (taper, la souris, boire, prendre son

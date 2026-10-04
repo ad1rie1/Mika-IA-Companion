@@ -160,7 +160,7 @@ async function init() {
     .catch(() => {
       console.warn(
         "No VRM model found at /models/default.vrm - running without model.",
-        "Place a .vrm file in frontend/public/models/default.vrm"
+        "Place a .vrm file in frontend/Web/public/models/default.vrm"
       );
       createPlaceholder(sceneManager);
     });

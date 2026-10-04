@@ -5,7 +5,7 @@ using NUnit.Framework;
 
 namespace Mika.Avatar.Tests
 {
-    /// <summary>Les cas de <c>frontend/src/audio/__tests__/frenchVisemes.test.ts</c>, portés tels quels : le web
+    /// <summary>Les cas de <c>frontend/Web/src/audio/__tests__/frenchVisemes.test.ts</c>, portés tels quels : le web
     /// et Unity doivent articuler la même bouche sur le même texte.</summary>
     public class FrenchVisemesTests
     {

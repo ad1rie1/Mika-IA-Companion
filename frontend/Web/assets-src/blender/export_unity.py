@@ -1,14 +1,14 @@
 # Export de la chambre de Mika pour Unity : un FBX par objet logique + une
 # description (room_layout.json, materials.json, Textures/, README.md).
 #
-#   blender -b --factory-startup --python frontend/assets-src/blender/export_unity.py -- \
-#       --out UnityFrontend/Mika/Assets/Mika/Art/Room
+#   blender -b --factory-startup --python frontend/Web/assets-src/blender/export_unity.py -- \
+#       --out frontend/Unity/Mika/Assets/Mika/Art/Room
 #
 # Options après « -- » : --out <dossier> (défaut : le chemin ci-dessus, depuis la
 # racine du dépôt), --dry-run (construit et classe, n'écrit rien), --blend-dir
 # <dossier> (écrit aussi un .blend par objet logique, <catégorie>/<id>.blend — la
 # source Blender de chaque objet, que l'atelier d'animation ouvre pour vérifier une
-# animation contre le vrai meuble ; défaut des .blend : frontend/assets-src/objects),
+# animation contre le vrai meuble ; défaut des .blend : frontend/Web/assets-src/objects),
 # --no-unity (n'écrit ni FBX ni JSON : seulement les .blend).
 #
 # Le pipeline web (room.blend, room.glb, run_final.py) n'est pas touché : ce script
@@ -40,13 +40,13 @@ import numpy as np
 from mathutils import Matrix, Vector
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+REPO = os.path.abspath(os.path.join(HERE, "..", "..", "..", ".."))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
-DEFAULT_OUT = os.path.join(REPO, "UnityFrontend", "Mika", "Assets", "Mika", "Art", "Room")
-DEFAULT_BLEND_DIR = os.path.join(REPO, "frontend", "assets-src", "objects")
-SOURCE = "frontend/assets-src"
+DEFAULT_OUT = os.path.join(REPO, "frontend", "Unity", "Mika", "Assets", "Mika", "Art", "Room")
+DEFAULT_BLEND_DIR = os.path.join(REPO, "frontend", "Web", "assets-src", "objects")
+SOURCE = "frontend/Web/assets-src"
 
 P = namedtuple("P", "x y z")   # point de l'espace de la pièce (centre d'une pièce Blender)
 
@@ -641,7 +641,7 @@ def write_blends(blend_dir, exports, entries):
         root["room_pos"] = [e["pos"]["x"], e["pos"]["y"], e["pos"]["z"]]
         root["room_yaw"] = e["yaw"]
         root["category"] = e["category"]
-        root["source"] = "frontend/assets-src/blender/export_unity.py"
+        root["source"] = "frontend/Web/assets-src/blender/export_unity.py"
         path = os.path.join(blend_dir, e["category"], f"{oid}.blend")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         bpy.data.libraries.write(path, {coll}, path_remap="RELATIVE_ALL", fake_user=True, compress=True)
@@ -892,13 +892,13 @@ def main(argv):
 
 README_HEAD = """# Chambre de Mika — export Unity
 
-Généré par `frontend/assets-src/blender/export_unity.py` à partir des scripts de
-`frontend/assets-src/blender/` (les mêmes que le `room.glb` du client web). **Ne pas
+Généré par `frontend/Web/assets-src/blender/export_unity.py` à partir des scripts de
+`frontend/Web/assets-src/blender/` (les mêmes que le `room.glb` du client web). **Ne pas
 éditer à la main** : relancer l'export.
 
 ```sh
-blender -b --factory-startup --python frontend/assets-src/blender/export_unity.py -- \\
-    --out UnityFrontend/Mika/Assets/Mika/Art/Room
+blender -b --factory-startup --python frontend/Web/assets-src/blender/export_unity.py -- \\
+    --out frontend/Unity/Mika/Assets/Mika/Art/Room
 ```
 
 (`--dry-run` construit et classe sans rien écrire.) La table de regroupement
@@ -916,7 +916,7 @@ tête du script.
   métal, émission (couleur + force), alpha, double face, textures. Pas de carte
   normale ni de rugosité dans les sources ; l'échelle des textures est cuite dans les
   UV (pas de nœud Mapping), d'où `uv_scale: null`.
-- `Textures/` — les images utilisées, copiées de `frontend/assets-src/textures/`.
+- `Textures/` — les images utilisées, copiées de `frontend/Web/assets-src/textures/`.
 
 ## Conventions
 

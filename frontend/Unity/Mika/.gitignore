@@ -28,7 +28,7 @@ sysinfo.txt
 *.aab
 *.unitypackage
 
-# L'avatar (100 Mo) n'est pas versionné, comme dans frontend/public/models :
+# L'avatar (100 Mo) n'est pas versionné, comme dans frontend/Web/public/models :
 # menu Mika › Avatar › Importer l'avatar du frontend le recopie ici. Son .meta, lui, est versionné :
 # Mika.prefab est une variante qui dépend de son GUID.
 /Assets/Mika/Art/Avatars/*.vrm

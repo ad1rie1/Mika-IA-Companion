@@ -1,8 +1,8 @@
 # Vérifier les clips assis au bord du lit (s'asseoir, assise, se lever — les mêmes que sur la chaise de bureau) contre
-# le vrai lit, sa couette faite et ce qui l'entoure (relevé Unity : UnityFrontend/ArtSource/atelier/bed_layout.json,
+# le vrai lit, sa couette faite et ce qui l'entoure (relevé Unity : frontend/Unity/ArtSource/atelier/bed_layout.json,
 # repère de l'assise du lit). Contacts mesurés, planches previews/verif_lit_<clip>.png.
 #
-#   blender -b UnityFrontend/ArtSource/atelier/mika_rig.blend --python frontend/assets-src/blender/atelier_bed_check.py -- \
+#   blender -b frontend/Unity/ArtSource/atelier/mika_rig.blend --python frontend/Web/assets-src/blender/atelier_bed_check.py -- \
 #       [--only sitting_idle] [--no-previews]
 import argparse
 import sys

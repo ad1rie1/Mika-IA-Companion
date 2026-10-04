@@ -1,4 +1,4 @@
-# Generates every texture of Mika's room into frontend/assets-src/textures.
+# Generates every texture of Mika's room into frontend/Web/assets-src/textures.
 # Photo textures come from Poly Haven (CC0); the rest is drawn here.
 import math, random, os
 import numpy as np

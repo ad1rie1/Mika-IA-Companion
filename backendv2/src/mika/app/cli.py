@@ -80,7 +80,7 @@ FIRST_STEPS = """Premiers pas :
                                 la console : crée le compte opérateur (le premier compte l'est)
   3. Configuration › Fournisseurs › Ajouter
                                 un modèle (Claude, Ollama…) : le premier déclaré la fait parler
-  4. le frontend : cd frontend && npm install && npm run dev, puis http://localhost:3000
+  4. le frontend : cd frontend/Web && npm install && npm run dev, puis http://localhost:3000
                                 (il vise :8001 ; VITE_BACKEND_ORIGIN pour une autre adresse)
 
 Tout se règle aussi d'ici : mika llm, mika account, mika telegram… (mika <commande> --help).

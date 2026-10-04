@@ -6,7 +6,7 @@ namespace Mika.Avatar
 {
     /// <summary>
     /// La bouche qui articule le français que la voix prononce. Portage de
-    /// <c>frontend/src/audio/LipSyncController.ts</c>, sans le modèle : ce cœur avance un curseur dans les frames
+    /// <c>frontend/Web/src/audio/LipSyncController.ts</c>, sans le modèle : ce cœur avance un curseur dans les frames
     /// de visèmes, calcule une cible coarticulée et la poursuit, et rend 15 niveaux (un par visème) ; c'est
     /// <see cref="VisemeRouting"/> qui les écrit sur les formes du modèle.
     /// </summary>

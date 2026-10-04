@@ -115,7 +115,7 @@ export class ClipLibrary {
       console.warn(
         `ClipLibrary: no animation manifest at ${url} (${e}). ` +
           "Mika runs on the synthetic rest pose — drop Mixamo FBX files in " +
-          "frontend/public/animations/ (see the README there) to bring her to life."
+          "frontend/Web/public/animations/ (see the README there) to bring her to life."
       );
       return;
     }
@@ -170,7 +170,7 @@ export class ClipLibrary {
         `ClipLibrary: ${this.failed.length}/${total} clip(s) missing or invalid ` +
           "(pools shrink, gestures degrade to face-only):\n" +
           this.failed.map((f) => `  - ${f.name} (${f.url}): ${f.reason}`).join("\n") +
-          "\nSee frontend/public/animations/README.md for the download list."
+          "\nSee frontend/Web/public/animations/README.md for the download list."
       );
     }
     const suspicious = this.reports.filter((r) => r.hipsScaleSuspicious);

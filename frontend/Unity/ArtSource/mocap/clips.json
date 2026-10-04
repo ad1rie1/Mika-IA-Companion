@@ -1,7 +1,7 @@
 {
   "source": "Carnegie Mellon University Graphics Lab Motion Capture Database (mocap.cs.cmu.edu)",
   "bvh_conversion": "cgspeed / Bruce Hahne (MotionBuilder-friendly), github.com/una-dinosauria/cmu-mocap",
-  "generator": "frontend/assets-src/blender/mocap_unity.py",
+  "generator": "frontend/Web/assets-src/blender/mocap_unity.py",
   "fps": 30,
   "source_fps": 120,
   "frames_convention": "indices d'image 0-based de la section MOTION du BVH ; 0 = pose T de cgspeed ; bornes incluses",

@@ -6,7 +6,7 @@ namespace Mika.Chat
 {
     /// <summary>
     /// Les trames de la conversation (<c>/ws</c>), celles que lit le client web
-    /// (<c>frontend/src/types/messages.ts</c>, écrites par <c>backendv2/src/mika/adapters/web/protocol.py</c>).
+    /// (<c>frontend/Web/src/types/messages.ts</c>, écrites par <c>backendv2/src/mika/adapters/web/protocol.py</c>).
     /// Écrites à la main : le protocole de conversation n'a pas de schéma publié, et seul ce que le moteur
     /// montre est lu ici — le reste reste dans <see cref="Raw"/>.
     /// </summary>

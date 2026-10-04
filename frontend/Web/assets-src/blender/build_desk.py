@@ -7,7 +7,7 @@ from roomlib import *
 TOP_Y = 0.76
 
 # Les objets que ses gestes prennent (three.js : x, z au sol ; rotations Y en radians) — voir build() et
-# frontend/assets-src/blender/atelier_desk_plan.py, qui les calcule depuis le repère du siège.
+# frontend/Web/assets-src/blender/atelier_desk_plan.py, qui les calcule depuis le repère du siège.
 MOUSE_POS = (-1.1038, -3.8291)
 MOUSE_RY = 0.0653               # le grand axe de la souris dans le sens de sa main droite posée dessus
 NOTEBOOK_POS = (-1.7236, -3.8859)
@@ -142,7 +142,7 @@ def build(M):
     pr = []
     pr.append(box("Desk_Mat", 0.86, 0.004, 0.34, -1.28, TOP_Y + 0.002, -3.92, M["mousepad"], 0.002, 1))
     # La souris, le carnet, son stylo et la tasse sont posés là où les gestes de Mika les prennent (atelier d'animation,
-    # atelier_desk_plan.py → UnityFrontend/ArtSource/atelier/desk_plan.json) : rien ne glisse tout seul sur le bureau
+    # atelier_desk_plan.py → frontend/Unity/ArtSource/atelier/desk_plan.json) : rien ne glisse tout seul sur le bureau
     # quand elle s'y assoit. La souris à sa place de travail (la chaise tournée et avancée vers le clavier), son grand
     # axe dans le sens de la main ; le carnet droit devant elle quand la chaise a pivoté de 45° vers sa gauche, tourné
     # vers elle ; le stylo dessus, le long de son bord droit ; la tasse devant à gauche (le seul endroit à portée de ses

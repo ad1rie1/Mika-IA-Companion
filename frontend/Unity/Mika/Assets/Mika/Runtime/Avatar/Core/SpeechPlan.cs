@@ -7,7 +7,7 @@ namespace Mika.Avatar
 {
     /// <summary>
     /// La cadence de l'estimation texte, partagée par tout ce qui doit lire le même débit (portage de
-    /// <c>frontend/src/audio/cadence.ts</c>).
+    /// <c>frontend/Web/src/audio/cadence.ts</c>).
     /// </summary>
     public static class SpeechCadence
     {

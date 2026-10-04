@@ -1,6 +1,6 @@
 """Le protocole du frontend, en fonctions pures : trames sortantes, validation
 des trames entrantes, limites. Le contrat est celui que lit le code du
-frontend (``frontend/src/types/messages.ts``, ``network/WebSocketClient.ts``).
+frontend (``frontend/Web/src/types/messages.ts``, ``network/WebSocketClient.ts``).
 
 Invariants tenus ici : ``emotion`` est l'un des 29 noms ; ``emotion_blend``
 est toujours un tableau ; ``voice_profile`` n'est jamais nul ; les

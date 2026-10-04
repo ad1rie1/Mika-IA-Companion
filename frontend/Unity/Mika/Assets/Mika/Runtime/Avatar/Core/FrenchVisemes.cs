@@ -53,7 +53,7 @@ namespace Mika.Avatar
 
     /// <summary>
     /// Texte français → visèmes, pour une bouche qui articule. Portage fidèle de
-    /// <c>frontend/src/audio/frenchVisemes.ts</c> (mêmes règles, mêmes cas de test).
+    /// <c>frontend/Web/src/audio/frenchVisemes.ts</c> (mêmes règles, mêmes cas de test).
     /// </summary>
     /// <remarks>
     /// Un passage graphème → phonème raisonnable (digraphes, nasales, lettres muettes, élisions, nombres en

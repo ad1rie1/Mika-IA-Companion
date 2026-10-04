@@ -8,7 +8,7 @@ namespace Mika.Avatar
 {
     /// <summary>
     /// Ce que le visage enregistre sur le modèle chargé, à travers l'API d'expressions d'UniVRM 1.0 — l'équivalent
-    /// de <c>frontend/src/vtuber/faceRig.ts</c>.
+    /// de <c>frontend/Web/src/vtuber/faceRig.ts</c>.
     /// </summary>
     /// <remarks>
     /// <para>

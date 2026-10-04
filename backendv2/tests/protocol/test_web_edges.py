@@ -1,4 +1,4 @@
-"""Les bords du web, vérifiés contre le contrat réel du frontend (``frontend/src`` en
+"""Les bords du web, vérifiés contre le contrat réel du frontend (``frontend/Web/src`` en
 lecture : ``ChatOverlay.ts``, ``chatSync.ts``, ``SpeechPresenter.ts``,
 ``InnerLifePanel.ts``, ``WebSocketClient.ts``).
 

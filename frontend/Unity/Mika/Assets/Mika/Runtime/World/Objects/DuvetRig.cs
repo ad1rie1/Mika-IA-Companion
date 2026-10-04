@@ -16,7 +16,7 @@ namespace Mika.World.Engine
     }
 
     /// <summary>
-    /// La couette d'un lit : ses formes viennent d'une simulation de tissu (frontend/assets-src/blender/duvet_states.py),
+    /// La couette d'un lit : ses formes viennent d'une simulation de tissu (frontend/Web/assets-src/blender/duvet_states.py),
     /// une par état, sur le même maillage — passer de l'une à l'autre est un fondu de formes. Le corps qui s'y couche
     /// (<see cref="BodyActivity"/>) dit quand l'ouvrir, la tirer sur lui, se retourner dessous ou la repousser.
     /// </summary>

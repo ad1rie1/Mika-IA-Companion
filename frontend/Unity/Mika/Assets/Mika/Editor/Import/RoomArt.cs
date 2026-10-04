@@ -5,7 +5,7 @@ using Newtonsoft.Json;
 namespace Mika.Editor.Import
 {
     /// <summary>
-    /// Ce que l'export Blender (<c>frontend/assets-src/blender/export_unity.py</c>) écrit à côté des FBX :
+    /// Ce que l'export Blender (<c>frontend/Web/assets-src/blender/export_unity.py</c>) écrit à côté des FBX :
     /// <c>room_layout.json</c> (où va chaque objet, ses enfants mobiles, ses surfaces, les ancres de lumière) et
     /// <c>materials.json</c> (les matériaux tels que Blender les rend). Lu tel quel, sans rien deviner.
     /// </summary>

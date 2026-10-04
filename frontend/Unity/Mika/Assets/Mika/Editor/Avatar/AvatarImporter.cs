@@ -12,7 +12,7 @@ using UnityEngine;
 namespace Mika.Avatar.Editor
 {
     /// <summary>
-    /// Fait de l'avatar du client web (<c>frontend/public/models/default.vrm</c>, un VRM 0.x) un prefab Unity
+    /// Fait de l'avatar du client web (<c>frontend/Web/public/models/default.vrm</c>, un VRM 0.x) un prefab Unity
     /// prêt à poser : le modèle importé par UniVRM (migré en VRM 1.0), avec son <see cref="Animator"/> humanoïde
     /// sans contrôleur et son <see cref="Vrm10Instance"/>, plus <see cref="MikaFace"/>.
     /// </summary>
@@ -40,9 +40,9 @@ namespace Mika.Avatar.Editor
         /// <summary>Rapport du dernier import (expressions trouvées, manques), pour un outil sans fenêtre.</summary>
         public static string ReportPath => Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Temp", "mika-avatar-import.txt"));
 
-        /// <summary>Le modèle du client web, à la racine du dépôt (<c>Assets/</c> est dans <c>UnityFrontend/Mika/</c>).</summary>
+        /// <summary>Le modèle du client web, à la racine du dépôt (<c>Assets/</c> est dans <c>frontend/Unity/Mika/</c>).</summary>
         public static string SourcePath =>
-            Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "..", "frontend", "public", "models", "default.vrm"));
+            Path.GetFullPath(Path.Combine(Application.dataPath, "..", "..", "..", "..", "frontend", "Web", "public", "models", "default.vrm"));
 
         [MenuItem("Mika/Avatar/Importer l'avatar du frontend", priority = 10)]
         public static void ImportFromFrontend()

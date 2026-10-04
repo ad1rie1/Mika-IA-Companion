@@ -4,7 +4,7 @@
 
 **Contexte.** Le frontend montre Mika dans sa chambre (bureau, fenêtre, lit, bibliothèque, porte, le tapis au
 milieu), mais elle y restait plantée au milieu, debout, y compris pour dormir. Le corps sait maintenant marcher,
-contourner les meubles, s'asseoir et s'allonger (`frontend/src/vtuber/locomotion/`) ; restait à dire **qui décide**
+contourner les meubles, s'asseoir et s'allonger (`frontend/Web/src/vtuber/locomotion/`) ; restait à dire **qui décide**
 où elle va. Ce n'est pas le client : c'est elle, donc le modèle — et ce qu'un modèle pilote doit tenir face à ce
 qu'un modèle fait (inventer un lieu, rappeler l'outil, zigzaguer).
 

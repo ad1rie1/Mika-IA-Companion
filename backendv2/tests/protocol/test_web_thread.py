@@ -1,5 +1,5 @@
 """Le fil tel que la personne le relit (ADR 0056), vérifié contre le contrat du frontend
-(``frontend/src/ui/chatSync.ts``, ``ChatOverlay.ts``) :
+(``frontend/Web/src/ui/chatSync.ts``, ``ChatOverlay.ts``) :
 
 - un navigateur qui garde le fil d'une autre vie (l'ancien moteur, une sauvegarde
   plus ancienne restaurée, un fil oublié) ne cache plus ce que celle-ci a dit : un
@@ -36,7 +36,7 @@ from mika.kernel.registry import ArbitrationPolicy
 from mika.vocab.episodes import VOICE_ROLES
 from tests.protocol.test_web import ORIGIN, WS, Echo, bootstrap, csrf, recv_until
 
-FRONTEND = Path(__file__).resolve().parents[3] / "frontend" / "src"
+FRONTEND = Path(__file__).resolve().parents[3] / "frontend" / "Web" / "src"
 
 
 def serve(data: Path) -> tuple[TestClient, object, Echo]:
