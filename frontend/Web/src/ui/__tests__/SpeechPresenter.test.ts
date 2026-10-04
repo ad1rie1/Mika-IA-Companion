@@ -240,14 +240,14 @@ describe("SpeechPresenter — une réponse vocalisée", () => {
     expect(h.body.emotions.map((e) => e.emotion)).toEqual(["excited"]);
   });
 
-  it("muet ou sans texte : idem, immédiat et sans voix", () => {
+  it("muet : idem, immédiat et sans voix ; sans texte : ni voix ni avatar", () => {
     const h = harness();
     h.voice.isMuted = true;
     h.presenter.handleSpeech(speech());
     h.voice.isMuted = false;
     h.presenter.handleSpeech(speech({ text: "" }));
     expect(h.voice.calls).toEqual([]);
-    expect(h.body.emotions).toHaveLength(2);
+    expect(h.body.emotions).toHaveLength(1);
   });
 
   it("une émotion inconnue vaut neutral, une intensité absente 0.7", () => {
