@@ -1,4 +1,4 @@
-"""Le port d'entrée : ce que les adaptateurs (web, Telegram…) peuvent
+"""Le port d'entrée : ce que les adaptateurs (web, monde…) peuvent
 demander au cœur. Ils ne voient jamais le Mind ni les facultés : ils
 soumettent des stimulus, lisent des vues, et reçoivent les livraisons.
 

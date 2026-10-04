@@ -83,8 +83,6 @@ class InspectorDeps:
     calls: Any = None
     #: rejournalise la persona et les paramètres (persona, tempérament, surcharges)
     reconfigure: Callable[[], Awaitable[list[str]]] | None = None
-    #: redémarre le robot Telegram après un changement de réglages
-    restart_telegram: Callable[[], Awaitable[None]] | None = None
     #: après une décision d'approbation (rafraîchit les panneaux du frontend)
     after_decision: Callable[[], Awaitable[Any]] | None = None
     #: les rapports de simulation (``mika sim run --report``)

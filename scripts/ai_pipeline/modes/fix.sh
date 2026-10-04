@@ -8,7 +8,9 @@ build_fix_prompt() {
     local issue_context=""
 
     if [[ -n "$ISSUE_NUMBER" ]]; then
-        issue_context=$(gh issue view "$ISSUE_NUMBER" --json title,body,labels,comments \
+        # Une issue illisible n'est pas une consigne : la phrase « Impossible de
+        # charger l'issue » partait autrefois dans le prompt à sa place.
+        issue_context=$(gh_query gh issue view "$ISSUE_NUMBER" --json number,title,body,labels,comments \
             --template '## Issue #{{.number}}: {{.title}}
 
 {{.body}}
@@ -19,7 +21,7 @@ build_fix_prompt() {
 ### Commentaires
 {{range .comments}}---
 {{.body}}
-{{end}}' 2>/dev/null || echo "Impossible de charger l'issue #${ISSUE_NUMBER}")
+{{end}}') || return 1
     fi
 
     cat <<PROMPT
@@ -34,23 +36,10 @@ ${issue_context}
 ## Périmètre d'analyse
 
 Concentre ton analyse sur les modules suivants : ${module_paths}
-Tu peux lire n'importe quel fichier du projet si nécessaire (imports, dépendances, modèles partagés, etc.), mais ne corrige que le code des modules ci-dessus.
+Tu peux lire n'importe quel fichier du projet si nécessaire (contrats, faits, événements des autres facultés, frontend…), mais ne corrige que le code des modules ci-dessus.
 $(module_scope_note "$module_paths")
 
-## Contraintes ABSOLUES
-
-1. Tu peux LIRE, MODIFIER des fichiers et exécuter des commandes bash
-2. Pour chaque correction, fais un commit séparé avec : git add <fichiers> && git commit -m "prefix: description"
-   - Préfixes obligatoires : bug: / security: / feat: selon le type de correction
-   - Message de commit en français
-   - Exemple : git commit -m "bug: correction du NoneType sur person_id dans le résolveur d'identité"
-3. Tu ne dois JAMAIS exécuter : git push, git branch, git checkout, git merge, git rebase, git reset, git stash
-4. Tu ne dois JAMAIS exécuter de commandes système dangereuses (rm -rf, etc.)
-5. Tu ne dois JAMAIS modifier les fichiers protégés : settings.py, manage.py, */migrations/*, *.env, personality.yaml, data/*, uploads/*, pytest.ini, requirements.txt, package.json
-6. Tu ne dois JAMAIS ajouter d'alias ou renommer des fonctions existantes
-7. Chaque modification doit être minimale et ciblée
-8. Lis TOUJOURS le fichier CLAUDE.md à la racine du projet et respecte ses règles
-9. Respecte la politique de tests ci-dessous : pas de nouveaux tests, pas de suite complète, vérification ciblée uniquement
+$(ai_write_constraints)
 
 $(ai_test_policy write)
 PROMPT
@@ -62,9 +51,7 @@ main_fix() {
     log "Issue: ${ISSUE_NUMBER:-aucune}"
     log "Log: $LOG_FILE"
 
-    if [[ "$DRY_RUN" == true ]]; then
-        warn "Mode dry-run - aucune action réelle"
-    fi
+    [[ "$DRY_RUN" == true ]] && warn "Mode dry-run - aucune action réelle"
 
     # 1. Prérequis
     check_prerequisites
@@ -73,7 +60,7 @@ main_fix() {
     if [[ -n "$ISSUE_NUMBER" ]]; then
         if check_existing_issue_pr "$ISSUE_NUMBER"; then
             warn "Abandon - merger ou fermer la PR existante d'abord."
-            exit 0
+            exit "$EXIT_NOTHING"
         fi
         ok "Aucune PR en doublon pour l'issue #${ISSUE_NUMBER}"
     fi
@@ -82,18 +69,25 @@ main_fix() {
     local module_paths
     if [[ "$MODULES" == "all" && -z "$ISSUE_NUMBER" ]]; then
         local picked
-        picked=$(pick_available_module "$PROFILE")
+        picked=$(pick_module pr "$PROFILE")
         if [[ -z "$picked" ]]; then
             ok "Tous les modules ont déjà une PR '${PROFILE}' ouverte. Rien à faire."
-            exit 0
+            exit "$EXIT_NOTHING"
         fi
         MODULES="$picked"
         log "Module choisi automatiquement: $picked"
         module_paths="$picked"
     else
-        module_paths=$(resolve_modules "$MODULES")
+        module_paths=$(resolve_modules "$MODULES") || exit "$EXIT_FAIL"
     fi
+    report_set module "$module_paths"
     log "Modules ciblés: $module_paths"
+
+    local prompt
+    if ! prompt=$(build_fix_prompt "$module_paths"); then
+        err "Impossible de construire le prompt (issue #${ISSUE_NUMBER} illisible ?)"
+        exit "$EXIT_FAIL"
+    fi
 
     # 4. Créer la branche
     local branch_name
@@ -102,44 +96,28 @@ main_fix() {
 
     if [[ "$DRY_RUN" == true ]]; then
         log "Prompt qui serait envoyé:"
-        build_fix_prompt "$module_paths"
+        echo "$prompt"
         ok "Dry-run terminé"
-        exit 0
+        exit "$EXIT_OK"
     fi
 
-    cd "$PROJECT_ROOT"
-
-    local original_branch
-    original_branch=$(git rev-parse --abbrev-ref HEAD)
-
-    # Repartir d'un arbre propre : un reste non commité d'une tâche précédente
-    # est emporté par le checkout et se retrouve dans la branche suivante.
-    park_dirty_worktree "avant fix ${PROFILE}/${module_paths}" || true
-
-    git checkout "$BASE_BRANCH" 2>&1 | tee -a "$LOG_FILE"
-    git pull "$REPO_REMOTE" "$BASE_BRANCH" 2>&1 | tee -a "$LOG_FILE"
-
-    git checkout -b "$branch_name" 2>&1 | tee -a "$LOG_FILE"
-    ok "Branche $branch_name créée"
+    ensure_workspace || exit "$EXIT_FAIL"
+    start_task_branch "$branch_name" || exit "$EXIT_FAIL"
+    ok "Branche $branch_name créée sur ${BASE_REF}"
 
     local base_ref
     base_ref=$(git rev-parse HEAD)
 
     # 5. Lancer l'agent IA
-    header "Lancement IA : ${PROFILE} sur ${module_paths}"
+    header "Lancement IA : ${PROFILE:-issue} sur ${module_paths}"
     local start_time
     start_time=$(date +%s)
-    local prompt
-    prompt=$(build_fix_prompt "$module_paths")
 
-    local ai_exit=0
-    local ai_output
+    local ai_exit=0 ai_out ai_output
     # Background + wait : permet au trap Ctrl+C de s'exécuter sans attendre la fin de l'agent IA
-    local ai_out
     ai_out=$(mktemp)
     run_ai_agent "write" "$prompt" "$ai_out" &
-    local ai_pid=$!
-    wait "$ai_pid" || ai_exit=$?
+    wait $! || ai_exit=$?
     ai_output=$(cat "$ai_out")
     rm -f "$ai_out"
 
@@ -153,7 +131,7 @@ main_fix() {
         echo "$ai_output" | tail -10
         rollback "$branch_name"
         notify "failure" "Fix ${PROFILE} sur ${module_paths} échoué - ${reason}"
-        exit 1
+        exit "$EXIT_FAIL"
     fi
 
     ok "Analyse IA terminée (${PROFILE}/${module_paths} en ${elapsed}s)"
@@ -164,15 +142,14 @@ main_fix() {
         err "Impossible de finaliser les commits IA"
         rollback "$branch_name"
         notify "failure" "Fix ${PROFILE} sur ${module_paths} échoué - commit IA impossible"
-        exit 1
+        exit "$EXIT_FAIL"
     fi
 
     if [[ "$commit_count" -eq 0 ]]; then
         warn "Aucune modification effectuée par l'IA"
-        return_to_branch "$original_branch" || true
-        git branch -D "$branch_name" 2>/dev/null
+        finish_task_branch "$branch_name" || true
         notify "success" "Analyse ${PROFILE} - Aucune modification nécessaire"
-        exit 0
+        exit "$EXIT_NO_RESULT"
     fi
 
     # 7. Vérifier les fichiers interdits
@@ -180,30 +157,39 @@ main_fix() {
         err "L'IA a modifié des fichiers protégés. Annulation."
         rollback "$branch_name"
         notify "failure" "Analyse ${PROFILE} - Fichiers protégés modifiés"
-        exit 1
+        exit "$EXIT_FAIL"
     fi
     ok "Vérification fichiers protégés: OK (${commit_count} commit(s))"
 
-    # 8. Push et PR (les tests sont délégués au CI/CD GitHub)
+    # 8. Push et PR
     local pr_url=""
-    if [[ "$NO_CREATE" != true ]]; then
-        header "Push et Pull Request"
-        git push "$REPO_REMOTE" "$branch_name" 2>&1 | tee -a "$LOG_FILE"
-        ok "Push effectué"
-        pr_url=$(create_pull_request "$branch_name" "$base_ref")
-    else
+    if [[ "$NO_CREATE" == true ]]; then
         warn "Push et PR désactivés (--no-create)"
         log "Les modifications restent sur la branche locale: $branch_name"
+        finish_task_branch "$branch_name" keep || true
+    else
+        header "Push et Pull Request"
+        if ! git push --quiet "$REPO_REMOTE" "$branch_name" >> "$LOG_FILE" 2>&1; then
+            err "git push a échoué (voir $LOG_FILE) - branche locale conservée : $branch_name"
+            finish_task_branch "$branch_name" keep || true
+            notify "failure" "Fix ${PROFILE} sur ${module_paths} - push en échec"
+            exit "$EXIT_FAIL"
+        fi
+        ok "Push effectué"
+        if ! pr_url=$(create_pull_request "$branch_name" "$base_ref"); then
+            finish_task_branch "$branch_name" || true
+            notify "failure" "Fix ${PROFILE} sur ${module_paths} - branche poussée mais PR en échec (${branch_name})"
+            exit "$EXIT_FAIL"
+        fi
+        finish_task_branch "$branch_name" || true
     fi
 
-    # 10. Retour sur la branche d'origine
-    return_to_branch "$original_branch" || true
-
-    # 11. Notifications
-    notify "success" "Analyse ${PROFILE} terminée" "$pr_url"
+    # 9. Notifications
+    notify "success" "Analyse ${PROFILE:-issue #$ISSUE_NUMBER} terminée" "$pr_url"
 
     header "Pipeline terminé avec succès"
     log "Branche: $branch_name"
     [[ -n "$pr_url" ]] && log "PR: $pr_url"
     log "Log complet: $LOG_FILE"
+    exit "$EXIT_OK"
 }

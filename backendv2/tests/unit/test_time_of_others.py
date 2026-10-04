@@ -168,13 +168,13 @@ def test_a_message_at_night_waits_for_her_morning_and_an_active_friend_is_still_
     p = AttentionParams()
     since = at_paris(2026, 10, 1, 21, 30)
     morning = hours_reading(_pairs([8, 9]), OthersParams())
-    deadline = reply_deadline(_cx(morning), "x", "telegram", since, p)
+    deadline = reply_deadline(_cx(morning), "x", "external", since, p)
     assert deadline >= at_paris(2026, 10, 2, 9, 0), local(deadline, PARIS)
     everywhere = others_c.HoursReading(10, (True,) * 24, True, 12)
-    assert reply_deadline(_cx(everywhere), "x", "telegram", since, p) == since + p.reply_window_message_us
+    assert reply_deadline(_cx(everywhere), "x", "external", since, p) == since + p.reply_window_message_us
     # les heures creuses n'allongent jamais d'un jour de plus : une amie qui ne répond pas est ignorée
     never = others_c.HoursReading(10, (False,) * 24, True, 12)
-    assert reply_deadline(_cx(never), "x", "telegram", since, p) <= since + p.reply_window_message_us + DAY
+    assert reply_deadline(_cx(never), "x", "external", since, p) <= since + p.reply_window_message_us + DAY
 
 
 @pytest.mark.parametrize("answers_at", ["09:00", "jamais"])
@@ -186,19 +186,19 @@ def test_a_friend_who_writes_in_the_morning_is_not_ignored_overnight(tmp_path, a
     script = Script()
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
+        await befriend(kernel, "ext_1", social_c.FRIEND)
         for day in range(4):  # de lundi à jeudi : chaque matin vers 9 h
             await until(kernel, at_paris(2026, 9, 28, 9, 0) + day * DAY)
-            await chat(kernel, "tg_1", ["coucou, bonne journée !"], channel="telegram")
-        learned = kernel.mind.frame().get(others_c.HOURS("tg_1"))
+            await chat(kernel, "ext_1", ["coucou, bonne journée !"], channel="external")
+        learned = kernel.mind.frame().get(others_c.HOURS("ext_1"))
         await until(kernel, at_paris(2026, 10, 1, 21, 30))
         sent = kernel.mind.clock.now()
-        await initiative(kernel, "tg_1", "tu fais quoi ce soir ?", "telegram", 1)
+        await initiative(kernel, "ext_1", "tu fais quoi ce soir ?", "external", 1)
         if answers_at == "09:00":
             await until(kernel, at_paris(2026, 10, 2, 9, 0))
         else:
             await until(kernel, at_paris(2026, 10, 3, 18, 0))
-        await chat(kernel, "tg_1", ["désolée, je vois ton message que maintenant"], channel="telegram")
+        await chat(kernel, "ext_1", ["désolée, je vois ton message que maintenant"], channel="external")
         await asyncio.sleep(5 * MINUTE / US)
         missed = [e for e in events(kernel, attention_c.EXPECTATION_MISSED.name) if e.data.since == sent]
         met = [e for e in events(kernel, attention_c.EXPECTATION_MET.name) if e.data.since == sent]
@@ -225,10 +225,10 @@ def test_she_is_not_lonely_at_the_hour_a_close_friend_usually_comes(tmp_path):
     script = Script()
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.CLOSE)
+        await befriend(kernel, "ext_1", social_c.CLOSE)
         for day in range(6):  # lundi → samedi, vers 19 h
             await until(kernel, at_paris(2026, 9, 28, 19, 0) + day * DAY)
-            await chat(kernel, "tg_1", ["coucou !", "bonne soirée !"], channel="telegram")
+            await chat(kernel, "ext_1", ["coucou !", "bonne soirée !"], channel="external")
         await until(kernel, at_paris(2026, 10, 4, 23, 0))  # dimanche : rien
         return [e for e in events(kernel, attention_c.THOUGHT_BORN.name) if e.data.origin == attention_c.ALONE]
 

@@ -820,7 +820,7 @@ def test_forge_test_runs_a_tick_or_a_view_never_a_tool_or_an_action():
 def test_her_owner_in_a_public_group_cannot_have_her_build_or_use_an_app(tmp_path):
     """Défense en profondeur : même appelés, ses outils de Forge refusent devant un groupe public (l'adresse qui
     parle, là où elle parle). Le contrôle : en privé, si."""
-    public = Audience(persons=("user_1",), channel="telegram", room="tg_chat_-100", public=True, owner=False)
+    public = Audience(persons=("user_1",), channel="external", room="ext_chat_-100", public=True, owner=False)
 
     async def scenario(kernel, forge, store):
         await connect(kernel, "user_1", "Adrien", operator=True)

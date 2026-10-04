@@ -30,7 +30,7 @@ import logging
 import secrets
 import time
 from collections import defaultdict, deque
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -60,8 +60,6 @@ CSRF_COOKIE = "csrftoken"
 DEV_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:4173", "http://127.0.0.1:4173")
 #: au-delà, des messages attendent déjà leur tour sur cette connexion : refusé (« saturée »)
 MAX_QUEUED_CHATS = 8
-#: états des contrôles publics qui dégradent la santé
-_DEGRADING = frozenset({"degraded", "ko"})
 
 
 @dataclass(slots=True)
@@ -138,7 +136,7 @@ def _whoami(account: Account | None, cfg: WebConfig, accounts: Accounts) -> dict
 def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | None = None,
                lifespan: Any = None, extra_routes: Sequence[Any] = (),
                preprocess: Preprocessor | None = None, camera: Any = None,
-               sensor_token: Any = None, health_extra: Callable[[], Mapping[str, str]] | None = None) -> Starlette:
+               sensor_token: Any = None) -> Starlette:
     cfg = cfg or WebConfig()
     by_name = LoginThrottle(cfg.login_failures, cfg.login_window_s)
     by_ip = LoginThrottle(cfg.login_ip_failures, cfg.login_window_s)
@@ -229,18 +227,8 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
 
     async def health(request: Request) -> Response:
         """Une sonde : 200 quand elle peut répondre (même moins bien : ``degraded``),
-        503 en démarrage ou en arrêt. Les canaux (Telegram) y disent leur état."""
+        503 en démarrage ou en arrêt."""
         report = dict(port.health())
-        if health_extra is not None and report.get("ready"):
-            try:
-                extra = dict(health_extra())
-            except Exception as exc:  # une sonde de canal illisible ne casse pas /health
-                log.debug("santé des canaux : %r", exc)
-                extra = {}
-            if extra:
-                report["checks"] = {**dict(report.get("checks") or {}), **extra}
-                if report.get("status") == "ok" and _DEGRADING & set(extra.values()):
-                    report["status"] = "degraded"
         return JSONResponse(report, status_code=200 if report["ready"] else 503,
                             headers={"Cache-Control": "no-store"})
 

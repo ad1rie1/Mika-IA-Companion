@@ -252,7 +252,7 @@ def test_every_view_and_tab_opens_on_a_fresh_kernel(tmp_path):
         insp = Inspection(kernel)
         got = {key: show(kernel, *key) for key in OWN_VIEWS}
         # des paramètres qui ne désignent rien, ou qui ressemblent à du SQL
-        got["personne inconnue"] = show(kernel, "identity", "personne", handle="tg_404")
+        got["personne inconnue"] = show(kernel, "identity", "personne", handle="ext_404")
         got["lien inconnu"] = show(kernel, "social", "liens", person="user_404")
         got["fil inconnu"] = show(kernel, "transcript", "messages", handle="web_404")
         got["recherche piégée"] = show(kernel, "transcript", "messages", q="%' OR 1=1 --_\\")
@@ -260,8 +260,8 @@ def test_every_view_and_tab_opens_on_a_fresh_kernel(tmp_path):
         for kind in ("person", "handle"):
             for spec in (s for s in insp.tabs(kind) if s.owner in MINE):
                 got[(kind, spec.owner, spec.name, "")] = insp.run(spec, {}, when, subject="")
-                got[(kind, spec.owner, spec.name, "?")] = insp.run(spec, {}, when, subject="tg_404")
-        heads = {k: insp.head(k, "tg_404", when) for k in ("person", "handle")}
+                got[(kind, spec.owner, spec.name, "?")] = insp.run(spec, {}, when, subject="ext_404")
+        heads = {k: insp.head(k, "ext_404", when) for k in ("person", "handle")}
         heads["name"] = insp.head("person", "name:personne", when)
         heads["vide"] = insp.head("person", "", when)
         searches = {k: insp.search(k, "") for k in ("person", "handle")}
@@ -276,7 +276,7 @@ def test_every_view_and_tab_opens_on_a_fresh_kernel(tmp_path):
     assert table(got[("social", "liens")], "personne").rows == ()
     assert titled(got[("identity", "politique")], "Les canaux").rows
     assert "Choisissez une adresse" in text(got[("identity", "personne")])
-    assert "Adresse inconnue : « tg_404 »" in text(got["personne inconnue"])
+    assert "Adresse inconnue : « ext_404 »" in text(got["personne inconnue"])
     assert "Aucun lien avec « user_404 »" in text(got["lien inconnu"])
     assert "Aucun message avec « web_404 »" in text(got["fil inconnu"])
     assert table(got["recherche piégée"], "n°").rows == ()
@@ -533,11 +533,11 @@ def test_operator_evidence_is_weighed_like_any_other(tmp_path):
         out["deny"] = await perform(kernel, "identity.preuve", form(kind=identity_c.DENIED, name="alice"),
                                     by="user_1", subject=ANON, nonce="g")
         out["denied view"] = kernel.mind.frame().get(identity_c.IDENTITY(ANON))
-        # sur un compte (Telegram), affirmation + garantie atteignent la barre : l'adresse est reliée
-        await say(kernel, said("tg_5", "moi c'est Alice", channel="telegram"))
+        # sur un compte (extérieur), affirmation + garantie atteignent la barre : l'adresse est reliée
+        await say(kernel, said("ext_5", "moi c'est Alice", channel="external"))
         out["tg vouch"] = await perform(kernel, "identity.preuve", form(kind=identity_c.VOUCHED, confirmed="on"), by="user_1",
-                                        subject="tg_5", nonce="h")
-        out["tg view"] = kernel.mind.frame().get(identity_c.IDENTITY("tg_5"))
+                                        subject="ext_5", nonce="h")
+        out["tg view"] = kernel.mind.frame().get(identity_c.IDENTITY("ext_5"))
         out["evidence"] = events(kernel, identity_c.EVIDENCE.name)
         refs = [e.data.note.ref for e in out["evidence"] if e.data.note is not None]
         out["notes"] = kernel.mind.store.content(refs)  # la raison est gardée à part : l'oubli l'atteint
@@ -648,7 +648,7 @@ def test_presence_lists_live_connections_with_their_audience_and_a_vital(tmp_pat
         empty = dict((s.key, v) for s, v in insp.vitals())["presence.presents"]
         await live(kernel)
         await kernel.mind.append([presence_c.CONNECTED.draft(
-            handle="tg_77", channel="telegram", connection="tg-group", room="tg:-100", public=True,
+            handle="ext_77", channel="external", connection="tg-group", room="tg:-100", public=True,
             display_name="Bob")], emitter="presence", correlation="ws:tg", origin=Origin.EXTERNAL)
         vital = dict((s.key, v) for s, v in insp.vitals())["presence.presents"]
         return show(kernel, "presence", "presents"), empty, vital
@@ -660,7 +660,7 @@ def test_presence_lists_live_connections_with_their_audience_and_a_vital(tmp_pat
     by_handle = {plain(row_cells(r)[1]): as_dict(rows, r) for r in rows.rows}
     assert plain(by_handle["user_1"]["audience"]) == "privée"
     assert plain(by_handle[ANON]["audience"]) == "publique (rien ne prouve qui écrit)"
-    assert plain(by_handle["tg_77"]["audience"]) == "publique (salon « tg:-100 »)"
+    assert plain(by_handle["ext_77"]["audience"]) == "publique (salon « tg:-100 »)"
     assert isinstance(by_handle["user_1"]["présente depuis"], When)
     assert by_handle["user_1"]["nom"] == "Alice" and by_handle["user_1"]["personne"].key == "person/user_1"
     assert all(r.href.kind == "subject" and r.href.key.startswith("person/") for r in rows.rows)

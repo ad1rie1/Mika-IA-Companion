@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Sauvegarde de Mika : la base SQLite + le magasin vectoriel Chroma (OPS-10).
+# Sauvegarde de la v1 ARCHIVÉE (old/backend) : la base SQLite + le magasin
+# vectoriel Chroma (OPS-10).
+#
+# Le moteur vivant (backendv2) a sa propre sauvegarde, prouvée par rejeu :
+#   backendv2/.venv/bin/python -m mika --data <dossier> backup <archives>
+# (voir backendv2/deploy/README.md, et l'unité mika-backup.timer).
 #
 #   scripts/backup.sh [DOSSIER_DESTINATION]      (défaut : data/backups)
 #
@@ -18,13 +23,13 @@
 # * Chroma n'a pas d'API d'instantané : le tar lit des fichiers que le
 #   consolidateur (tick 60 s) et l'indexeur épisodique peuvent être en train
 #   d'écrire. Il n'existe pas d'endpoint « pause ». Deux façons propres :
-#     - service ARRÊTÉ (`systemctl --user stop mika`) : instantané exact, et
-#       l'arrêt propre a fait un `wal_checkpoint(TRUNCATE)` (config/asgi.py) ;
-#     - service EN MARCHE : accepter la fenêtre. SQL est la vérité ; une
+#     - moteur ARRÊTÉ : instantané exact, et l'arrêt propre a fait un
+#       `wal_checkpoint(TRUNCATE)` (config/asgi.py) ;
+#     - moteur EN MARCHE : accepter la fenêtre. SQL est la vérité ; une
 #       incohérence entre lignes et vecteurs se resynchronise à la
-#       restauration (voir deploy/README.md : `reindexer_vecteurs` +
+#       restauration (`python old/backend/manage.py reindexer_vecteurs` puis
 #       `backfill_episodic`), jamais l'inverse.
-#   Le MANIFEST note si le service tournait, pour savoir à la restauration
+#   Le MANIFEST note si le moteur tournait, pour savoir à la restauration
 #   si la resynchronisation est nécessaire ou seulement prudente.
 #
 # * Le `.env` (clé de chiffrement des secrets du registre) n'est PAS copié
@@ -36,9 +41,12 @@ set -euo pipefail
 RACINE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DEST="${1:-$RACINE/data/backups}"
 KEEP="${KEEP:-7}"
+# KEEP=0 faisait `head -n -0`, qui liste TOUT : la rotation effaçait aussi la
+# sauvegarde qu'on venait de faire.
+[[ "$KEEP" =~ ^[0-9]+$ && "$KEEP" -ge 1 ]] || { echo "KEEP doit être un entier >= 1 (reçu : $KEEP)" >&2; exit 1; }
 PYTHON="${PYTHON:-python3}"
 
-DB="$RACINE/data/vtuber.db"
+DB="${DB:-$RACINE/data/vtuber.db}"
 CHROMA="${CHROMA_PERSIST_DIR:-$RACINE/data/chromadb}"
 case "$CHROMA" in /*) ;; *) CHROMA="$RACINE/$CHROMA" ;; esac
 
@@ -48,14 +56,14 @@ HORODATAGE="$(date +%Y%m%d-%H%M%S)"
 CIBLE="$DEST/mika-$HORODATAGE"
 mkdir -p "$CIBLE"
 
-# Le service tourne-t-il ? (indicatif — pour le MANIFEST)
-EN_MARCHE="inconnu"
-if command -v systemctl >/dev/null 2>&1; then
-    if systemctl --user is-active --quiet mika 2>/dev/null || systemctl is-active --quiet mika 2>/dev/null; then
-        EN_MARCHE="oui"
-    else
-        EN_MARCHE="non"
-    fi
+# Le moteur v1 tourne-t-il ? (indicatif — pour le MANIFEST)
+# Ce n'est plus l'unité systemd `mika` qu'il faut interroger : elle lance
+# désormais la v2, et son état faisait écrire « resynchronisation nécessaire »
+# dans la sauvegarde d'une v1 arrêtée. La v1 n'a plus d'unité ; on cherche son
+# processus ASGI.
+EN_MARCHE="non"
+if pgrep -f "config\.asgi:application" >/dev/null 2>&1; then
+    EN_MARCHE="oui"
 fi
 
 echo "→ SQLite : $DB"
@@ -82,6 +90,7 @@ else
 fi
 
 {
+    echo "moteur=v1 (old/backend, archivé)"
     echo "date=$HORODATAGE"
     echo "service_en_marche=$EN_MARCHE"
     echo "db=$DB"

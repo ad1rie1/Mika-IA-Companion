@@ -71,13 +71,13 @@ async def her_initiative(kernel, handle: str, n: int) -> None:
     await kernel.mind.append([rt.EPISODE_STARTED.draft(kind="INITIATIVE", target=handle, reason=social_c.CHAT)],
                              emitter="runtime", correlation=corr, origin=Origin.GENESIS)
     await kernel.mind.append([rt.UTTERANCE.draft(
-        kind="INITIATIVE", text=Content.of("coucou, ça va ?"), target=handle, channel="telegram",
+        kind="INITIATIVE", text=Content.of("coucou, ça va ?"), target=handle, channel="external",
         voice=VoiceProvenance(call_id=corr, persona_hash="", role="initiative", model="m"))],
         emitter="runtime", correlation=corr, origin=Origin.GENESIS)
 
 
 async def they_say(kernel, handle: str, text: str) -> None:
-    p = await kernel.perceive(said(handle, text, channel="telegram"))
+    p = await kernel.perceive(said(handle, text, channel="external"))
     if p.reply is not None:
         await p.reply
 
@@ -87,28 +87,28 @@ async def they_say(kernel, handle: str, text: str) -> None:
 
 def test_she_notices_when_she_always_writes_first_and_her_reaching_out_slows_down(tmp_path):
     async def scenario(kernel, script):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
-        await befriend(kernel, "tg_2", social_c.FRIEND)
+        await befriend(kernel, "ext_1", social_c.FRIEND)
+        await befriend(kernel, "ext_2", social_c.FRIEND)
         for day in range(6):
-            await her_initiative(kernel, "tg_1", day)  # c'est toujours elle…
+            await her_initiative(kernel, "ext_1", day)  # c'est toujours elle…
             await asyncio.sleep(HOUR / US)
-            await they_say(kernel, "tg_1", "ah coucou, oui ça va")  # … la personne répond, sans jamais ouvrir
+            await they_say(kernel, "ext_1", "ah coucou, oui ça va")  # … la personne répond, sans jamais ouvrir
             if day % 2:
-                await her_initiative(kernel, "tg_2", day)
+                await her_initiative(kernel, "ext_2", day)
                 await asyncio.sleep(HOUR / US)
-                await they_say(kernel, "tg_2", "coucou toi")
+                await they_say(kernel, "ext_2", "coucou toi")
             else:
-                await they_say(kernel, "tg_2", "salut Mika, devine quoi")  # l'autre amie ouvre aussi
+                await they_say(kernel, "ext_2", "salut Mika, devine quoi")  # l'autre amie ouvre aussi
             await asyncio.sleep(DAY / US - 2 * HOUR / US)
         await asyncio.sleep(60)
         frame = kernel.mind.frame()
         state = frame.state("social")
-        modulation = {reason: _one_sided(state, frame, RowView("INITIATIVE", "tg_1", 5.0, (reason,)))
+        modulation = {reason: _one_sided(state, frame, RowView("INITIATIVE", "ext_1", 5.0, (reason,)))
                       for reason in (social_c.CHAT, social_c.RECONTACT, attention_c.THOUGHT, "remind")}
-        other = _one_sided(state, frame, RowView("INITIATIVE", "tg_2", 5.0, (social_c.CHAT,)))
+        other = _one_sided(state, frame, RowView("INITIATIVE", "ext_2", 5.0, (social_c.CHAT,)))
         thoughts = events(kernel, attention_c.THOUGHT_BORN.name)
         texts = kernel.mind.store.content([t.data.text.ref for t in thoughts])
-        return (frame.get(social_c.CONTACT("tg_1")), frame.get(social_c.CONTACT("tg_2")), modulation, other,
+        return (frame.get(social_c.CONTACT("ext_1")), frame.get(social_c.CONTACT("ext_2")), modulation, other,
                 events(kernel, social_c.ONE_SIDED.name), list(texts.values()))
 
     (one, both, modulation, other, noticed, thoughts), _llm, _s = run(tmp_path, scenario)
@@ -118,7 +118,7 @@ def test_she_notices_when_she_always_writes_first_and_her_reaching_out_slows_dow
     assert modulation[attention_c.THOUGHT].shift < 0
     assert modulation["remind"].shift == 0 and modulation["remind"].veto is None  # un rappel promis se dit
     assert other.shift == 0
-    assert [e.data.about for e in noticed] == [("tg_1",)]  # une fois, pour elle seule
+    assert [e.data.about for e in noticed] == [("ext_1",)]  # une fois, pour elle seule
     assert any("toujours moi qui écris la première" in t for t in thoughts)
 
 

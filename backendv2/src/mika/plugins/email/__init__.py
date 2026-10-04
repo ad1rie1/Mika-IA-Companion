@@ -441,7 +441,7 @@ def _drafts(s: EmailState, cx) -> tuple[c.DraftView, ...]:
 
 def for_owner(frame: Frame) -> bool:
     """Sa boîte : pour ses propriétaires **en privé**, et pour elle quand elle travaille (un pas,
-    une tâche). Devant un salon (un groupe Telegram), jamais : ce qui s'y dit part au salon, même
+    une tâche). Devant un salon (un groupe), jamais : ce qui s'y dit part au salon, même
     quand c'est sa propriétaire qui parle."""
     ep = frame.episode
     if ep is None:

@@ -23,7 +23,6 @@ from mika.vocab.privacy import ChannelTrust, Disclosure
 
 _TRUST_ORDER = {ChannelTrust.INTERNAL: 0, ChannelTrust.PUBLIC: 1, ChannelTrust.ACCOUNT: 2,
                 ChannelTrust.AUTHENTICATED: 3}
-_PUSH_CHANNELS = frozenset({"telegram"})
 #: Les canaux qui prouvent un compte : seuls ceux-là peuvent porter les droits d'une propriétaire.
 _PROVEN = frozenset({ChannelTrust.ACCOUNT, ChannelTrust.AUTHENTICATED})
 #: Au plus tant de souvenirs recoupés retenus sur une revendication en attente.
@@ -33,13 +32,12 @@ HINTS_KEPT = 4
 class IdentityParams(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    #: Adresses de propriétaires sans compte opérateur (un Telegram, par exemple).
+    #: Adresses de propriétaires sans compte opérateur (un compte du chat, par exemple).
     owners: Annotated[tuple[str, ...], Knob(
         label="Propriétaires (adresses)", group="Propriétaires",
-        help="Une adresse par ligne (ex. tg_123456789) traitée comme la propriétaire, sans compte : récit complet "
-             "de ses travaux, outils réservés (forge, caméra…). Seulement sur un canal qui prouve le compte "
-             "(Telegram) et jamais dans un salon public. Fourni par les réglages Telegram (onglet « Canaux ») : "
-             "quand des propriétaires y sont déclarés, ce champ se lit ici sans se changer.")] = ()
+        help="Une adresse par ligne (ex. user_3) traitée comme la propriétaire, sans compte opérateur : récit "
+             "complet de ses travaux, outils réservés (forge, caméra…). Seulement sur un canal qui prouve le "
+             "compte, et jamais dans un salon public.")] = ()
     #: Deux preuves de recoupement : sur deux messages au moins aussi espacés.
     proof_spacing_us: Annotated[int, Knob(
         label="Recoupement : écart entre les deux preuves", group="Être convaincue", lo=0, hi=DAY,
@@ -143,14 +141,14 @@ def _seen(s: IdentityState, handle: str, at: int, *, channel: str, authenticated
     if not handle or is_internal(handle):
         return s
     # ce que prouve le transport, indépendamment de l'auditoire : un compte
-    # Telegram reste un compte dans un groupe (c'est la salle qui est publique)
+    # extérieur reste un compte dans un salon (c'est la salle qui est publique)
     trust = privacy.channel_trust(channel, authenticated=authenticated)
     current = s.handles.get(handle)
     if current is None:
         current = Handle(channel=privacy.normalize_channel(channel), trust=trust, first_seen=at)
     if _TRUST_ORDER[trust] > _TRUST_ORDER[current.trust]:
         current = replace(current, trust=trust)  # monte, ne descend jamais
-    if privacy.normalize_channel(channel) in _PUSH_CHANNELS and not public and not current.push:
+    if privacy.is_messaging(channel) and not public and not current.push:
         current = replace(current, push=True)  # une conversation privée : on peut lui écrire
     cleaned = clean_display_name(name)
     if authenticated:
@@ -330,7 +328,7 @@ def _linked(s: IdentityState, e, cx) -> IdentityState:
     h = s.handles.get(d.handle)
     if h is None:
         # l'opérateur peut relier une adresse avant qu'elle ait écrit
-        channel = "telegram" if d.handle.startswith("tg_") else "web"
+        channel = privacy.channel_of(d.handle)
         h = Handle(channel=channel, trust=privacy.channel_trust(channel), first_seen=e.at)
     if h.authenticated:
         return s  # une session parle pour elle-même : on ne la relie à personne

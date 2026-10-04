@@ -2,7 +2,7 @@
 
 Les entrées sont des sorties réelles de modèles (l'audit des prompts en a
 passé une cinquantaine au parseur) : ce qui en sort doit être **prêt à
-livrer** — à la voix du frontend, au chat, à Telegram, au fil relu.
+livrer** — à la voix du frontend, au chat, à un message écrit, au fil relu.
 """
 
 from __future__ import annotations

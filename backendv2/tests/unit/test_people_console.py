@@ -81,12 +81,12 @@ async def ledger_rows(kernel, handle: str, n: int) -> None:
 def test_the_ledger_offers_older_rows_only_when_there_are_some(tmp_path):
     async def scenario(kernel):
         await connect(kernel, "user_1", "Adrien", operator=True)
-        p = await kernel.perceive(said("tg_5", "salut", channel="telegram", display_name="Didi"))
+        p = await kernel.perceive(said("ext_5", "salut", channel="external", display_name="Didi"))
         await p.reply
-        await ledger_rows(kernel, "tg_5", MAX_LEDGER)
-        exactly = ledger(show(kernel, "identity", "preuves", subject="tg_5"))
-        await ledger_rows(kernel, "tg_6", MAX_LEDGER + 1)
-        one_more = ledger(show(kernel, "identity", "preuves", subject="tg_6"))
+        await ledger_rows(kernel, "ext_5", MAX_LEDGER)
+        exactly = ledger(show(kernel, "identity", "preuves", subject="ext_5"))
+        await ledger_rows(kernel, "ext_6", MAX_LEDGER + 1)
+        one_more = ledger(show(kernel, "identity", "preuves", subject="ext_6"))
         return exactly, one_more
 
     exactly, one_more = run(tmp_path, scenario)
@@ -99,14 +99,14 @@ def test_an_operator_note_is_forgotten_with_the_person(tmp_path):
         await connect(kernel, "user_1", "Adrien", operator=True)
         await connect(kernel, "user_2", "Alice")
         await befriend(kernel, "user_2", "close")
-        p = await kernel.perceive(said("tg_9", "moi c'est Alice", channel="telegram", display_name="Bob"))
+        p = await kernel.perceive(said("ext_9", "moi c'est Alice", channel="external", display_name="Bob"))
         await p.reply
         got = await perform(kernel, "identity.preuve",
                             form(kind="vouched", note="CANARI-NOTE elle me l'a dit", confirmed="on"),
-                            by="user_1", subject="tg_9", nonce="n1")
-        before = ledger(show(kernel, "identity", "preuves", subject="tg_9"))
+                            by="user_1", subject="ext_9", nonce="n1")
+        before = ledger(show(kernel, "identity", "preuves", subject="ext_9"))
         await kernel.forget("user_2")  # la note concerne Alice (la personne revendiquée)
-        after = ledger(show(kernel, "identity", "preuves", subject="tg_9"))
+        after = ledger(show(kernel, "identity", "preuves", subject="ext_9"))
         return got, before, after
 
     got, before, after = run(tmp_path, scenario)
@@ -140,10 +140,10 @@ def test_forgetting_a_person_reaches_the_names_only_she_carries(tmp_path):
 def test_labels_do_not_force_the_feminine_nor_call_an_unbound_handle_bound(tmp_path):
     async def scenario(kernel):
         await connect(kernel, "user_1", "Adrien", operator=True)
-        p = await kernel.perceive(said("tg_5", "salut", channel="telegram", display_name="Didi"))
+        p = await kernel.perceive(said("ext_5", "salut", channel="external", display_name="Didi"))
         await p.reply
         insp = Inspection(kernel)
-        return insp.head("person", "user_1", when), insp.head("handle", "tg_5", when)
+        return insp.head("person", "user_1", when), insp.head("handle", "ext_5", when)
 
     adrien, handle = run(tmp_path, scenario)
     assert "propriétaire" in adrien.subtitle and "sa propriétaire" not in adrien.subtitle
@@ -162,15 +162,15 @@ def test_old_evidence_and_profiles_still_replay():
     par le nom."""
     registry = Registry([RUNTIME, *faculties()])
     _t, ev = registry.events.decode("identity.evidence", 1, json.dumps(
-        {"handle": "tg_5", "kind": identity_c.DENIED, "name": "Alice", "item": None, "message": 3, "by": "kernel",
+        {"handle": "ext_5", "kind": identity_c.DENIED, "name": "Alice", "item": None, "message": 3, "by": "kernel",
          "note": "elle hésite"}))
     assert ev.name is None and ev.legacy_name == "Alice" and ev.legacy_note == "elle hésite" and not ev.denies
-    bound = Handle(channel="telegram", trust=privacy.ChannelTrust.ACCOUNT, first_seen=0, name="Alice",
+    bound = Handle(channel="external", trust=privacy.ChannelTrust.ACCOUNT, first_seen=0, name="Alice",
                    person="user_1", certainty=privacy.BOUND, via="operator")
     assert _apply(bound, SimpleNamespace(at=0, data=ev)).person is None  # le démenti ancien délie, comme avant
     # « c'est pas grave », lu jadis comme un démenti de « Grave » : un nom qu'elle ne lui connaît pas ne délie rien
     _t, grave = registry.events.decode("identity.evidence", 1, json.dumps(
-        {"handle": "tg_5", "kind": identity_c.DENIED, "name": "Grave", "item": None, "message": 4, "by": "kernel"}))
+        {"handle": "ext_5", "kind": identity_c.DENIED, "name": "Grave", "item": None, "message": 4, "by": "kernel"}))
     kept = _apply(bound, SimpleNamespace(at=0, data=grave))
     assert kept.person == "user_1" and kept.name == "Alice" and kept.certainty == privacy.BOUND
     _t, profile = registry.events.decode("social.profile_revised", 1, json.dumps(

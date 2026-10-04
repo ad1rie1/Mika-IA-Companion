@@ -336,7 +336,7 @@ TEXT_TAG = re.compile(
 TAG_DEBRIS = re.compile(r"\[\s*[ÉE]MOTIONS?\b[^\]\n]*\]", re.IGNORECASE)
 #: Les jetons prosodiques, dans la grammaire exacte du frontend : pour la voix
 #: seulement (le frontend les cale sur l'audio). Partout ailleurs — fil relu
-#: par le modèle, mémoire, Telegram — ce sont des didascalies parasites.
+#: par le modèle, mémoire, messages écrits — ce sont des didascalies parasites.
 PROSODY = re.compile(r"\[(?:SIGH|LAUGH|BREATH|PAUSE:\d+)\]")
 #: Le silence : un autre étage le reconnaît ; on ne l'abîme jamais.
 SILENCE_TOKEN = "[SILENCE]"
@@ -627,8 +627,8 @@ def parse_tag(text: str) -> Tag:
 
 
 def strip_prosody(text: str) -> str:
-    """Le texte sans voix : pour le fil relu par le modèle, la mémoire,
-    Telegram. Les variantes sont reconnues (un texte ancien n'a pas été
+    """Le texte sans voix : pour le fil relu par le modèle, la mémoire, un
+    message écrit. Les variantes sont reconnues (un texte ancien n'a pas été
     normalisé) ; le silence reste."""
     if not text:
         return text

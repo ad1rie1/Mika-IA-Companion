@@ -1,8 +1,9 @@
 """``identity`` : qui est derrière chaque adresse, et ce que ça ouvre.
 
 - Une adresse parle **pour elle-même** : sur un transport qui prouve le
-  compte (session, message privé Telegram), elle est sûre de sa continuité ;
-  sur un transport qui ne prouve rien (navigateur sans compte), de rien.
+  compte (session, message privé d'un compte extérieur), elle est sûre de sa
+  continuité ; sur un transport qui ne prouve rien (navigateur sans compte),
+  de rien.
 - Quelqu'un peut **dire être** une autre personne qu'elle connaît (« moi c'est
   Alice », sur un nouveau compte) : c'est une revendication, notée, qui
   n'ouvre rien. Elle devient une **liaison** quand ce que l'adresse dit

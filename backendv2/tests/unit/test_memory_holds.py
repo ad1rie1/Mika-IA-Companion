@@ -133,7 +133,7 @@ def test_a_memory_with_someone_she_holds_dear_sleeps_later():
     """Un souvenir notable (0,45), quatre mois plus tard : avec une inconnue, il dort ; avec une proche (lien
     1), il revient encore sur un indice moyen (audit HUM-17)."""
     p = MemoryParams()
-    souvenir = Item(1, memory_c.SOUVENIR, "notre première soirée jeux", ("tg_1",), 1, 0.45, None, None, None, "happy",
+    souvenir = Item(1, memory_c.SOUVENIR, "notre première soirée jeux", ("ext_1",), 1, 0.45, None, None, None, "happy",
                     0, 0, 0, 0, "active")
     four_months = 120 * DAY
     assert dormant(souvenir, four_months, p, bond=0.0), "avec une inconnue : endormi"

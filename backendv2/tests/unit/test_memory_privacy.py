@@ -193,23 +193,23 @@ def test_the_label_names_who_confided_it(tmp_path):
 
 
 def test_two_people_with_the_same_name_are_never_confused(tmp_path):
-    """Deux comptes Telegram s'appellent « Alice ». Ce que la première a confié
+    """Deux comptes extérieurs s'appellent « Alice ». Ce que la première a confié
     ne revient pas à la seconde ; dans un même salon, chacune a son jeton."""
     clock = SimClock(AFTERNOON)
     llm = PersonaSimLLM(clock, seed=1, latency=2.0, abstain_rate=0.0)
     kernel, clock, _s, _out = build(tmp_path, lambda r: None, clock=clock, llm=llm)
-    tg = {"channel": "telegram"}
+    tg = {"channel": "external"}
 
     async def main():
         await boot(kernel)
-        await chat(kernel, "tg_42", ["CANARI-HOMONYME je suis malade, ne le dis à personne"], gap_s=30,
+        await chat(kernel, "ext_42", ["CANARI-HOMONYME je suis malade, ne le dis à personne"], gap_s=30,
                    display_name="Alice", **tg)
-        await chat(kernel, "tg_99", ["coucou", "il fait beau ici", "je mange des pâtes", "bonne journée à toi"],
+        await chat(kernel, "ext_99", ["coucou", "il fait beau ici", "je mange des pâtes", "bonne journée à toi"],
                    gap_s=30, display_name="Alice", **tg)
         await asyncio.sleep(15 * 60)
-        await chat(kernel, "tg_99", ["tu te souviens si je suis malade ?"], **tg)
-        for handle in ("tg_42", "tg_99"):
-            p = await kernel.perceive(said(handle, "Mika, on se fait un ciné ce soir ?", room="tg_chat_-7",
+        await chat(kernel, "ext_99", ["tu te souviens si je suis malade ?"], **tg)
+        for handle in ("ext_42", "ext_99"):
+            p = await kernel.perceive(said(handle, "Mika, on se fait un ciné ce soir ?", room="ext_chat_-7",
                                            display_name="Alice", **tg))
             await p.reply
             await asyncio.sleep(30)
@@ -219,8 +219,8 @@ def test_two_people_with_the_same_name_are_never_confused(tmp_path):
         return rows
 
     rows = run_virtual(clock, main)
-    assert {tuple(r["about"]) for r in rows if "CANARI-HOMONYME" in r["text"]} == {("tg_42",)}
-    assert not any("CANARI-HOMONYME" in p for p in prompts_for(llm, "tg_99"))
+    assert {tuple(r["about"]) for r in rows if "CANARI-HOMONYME" in r["text"]} == {("ext_42",)}
+    assert not any("CANARI-HOMONYME" in p for p in prompts_for(llm, "ext_99"))
     room = [r.messages[-1].content for r in llm.calls if r.role == "extract" and "salon" in r.messages[-1].content]
     assert room and "Alice [P1]" in room[-1] and "Alice [P2]" in room[-1]
 
@@ -589,20 +589,20 @@ def test_in_a_room_two_alices_are_told_apart_by_their_token(tmp_path):
 
     script = Script(extract)
     kernel, clock, _, _out = build(tmp_path, script)
-    room = {"room": "tg_chat_-11", "channel": "telegram", "display_name": "Alice"}
+    room = {"room": "ext_chat_-11", "channel": "external", "display_name": "Alice"}
 
     async def main():
         await boot(kernel)
-        await chat(kernel, "tg_42", ["Mika, salut tout le monde"], gap_s=30, **room)
-        await chat(kernel, "tg_99", ["Mika, je suis enceinte de trois mois !"], gap_s=30, **room)
-        await chat(kernel, "tg_42", ["Mika, félicite-la !", *SIX[3:]], gap_s=30, **room)
+        await chat(kernel, "ext_42", ["Mika, salut tout le monde"], gap_s=30, **room)
+        await chat(kernel, "ext_99", ["Mika, je suis enceinte de trois mois !"], gap_s=30, **room)
+        await chat(kernel, "ext_42", ["Mika, félicite-la !", *SIX[3:]], gap_s=30, **room)
         await asyncio.sleep(15 * 60)
         rows = kept(kernel)
         await kernel.stop()
         return rows
 
     rows = run_virtual(clock, main)
-    assert [r["about"] for r in rows if "enceinte" in r["text"]] == [["tg_99"]]
+    assert [r["about"] for r in rows if "enceinte" in r["text"]] == [["ext_99"]]
 
 
 def test_in_a_room_what_tom_says_is_told_by_tom(tmp_path):
@@ -617,14 +617,14 @@ def test_in_a_room_what_tom_says_is_told_by_tom(tmp_path):
 
     script = Script(extract)
     kernel, clock, _, _out = build(tmp_path, script)
-    room = {"room": "tg_chat_-5", "channel": "telegram"}
+    room = {"room": "ext_chat_-5", "channel": "external"}
 
     async def main():
         await boot(kernel)
-        await chat(kernel, "tg_2", ["Mika, coucou !"], gap_s=30, display_name="Léa", **room)
-        await chat(kernel, "tg_1", ["Mika, Léa a été licenciée la semaine dernière"], gap_s=30, display_name="Tom",
+        await chat(kernel, "ext_2", ["Mika, coucou !"], gap_s=30, display_name="Léa", **room)
+        await chat(kernel, "ext_1", ["Mika, Léa a été licenciée la semaine dernière"], gap_s=30, display_name="Tom",
                    **room)
-        await chat(kernel, "tg_3", ["Mika, tu joues à quoi ce soir ?", *SIX[3:]], gap_s=30, display_name="Zoé", **room)
+        await chat(kernel, "ext_3", ["Mika, tu joues à quoi ce soir ?", *SIX[3:]], gap_s=30, display_name="Zoé", **room)
         await asyncio.sleep(15 * 60)
         rows = kept(kernel)
         await kernel.stop()
@@ -632,8 +632,8 @@ def test_in_a_room_what_tom_says_is_told_by_tom(tmp_path):
 
     rows = run_virtual(clock, main)
     item = next(r for r in rows if "licenciée" in r["text"])
-    assert item["told_by"] == ["tg_1"], "c'est Tom qui l'a dit"
-    assert item["about"] == ["tg_2"] and item["heard_by"] == ["tg_1", "tg_2", "tg_3"]
+    assert item["told_by"] == ["ext_1"], "c'est Tom qui l'a dit"
+    assert item["about"] == ["ext_2"] and item["heard_by"] == ["ext_1", "ext_2", "ext_3"]
 
 
 def test_the_vague_line_never_names_someone_who_did_not_confide():
@@ -666,18 +666,18 @@ def test_a_room_reread_never_shows_what_was_confided_in_private(tmp_path):
 
     script = Script(extract)
     kernel, clock, _, _out = build(tmp_path, script)
-    tg = {"channel": "telegram"}
-    room = {"room": "tg_chat_-8", **tg}
+    tg = {"channel": "external"}
+    room = {"room": "ext_chat_-8", **tg}
 
     async def main():
         await boot(kernel)
-        await chat(kernel, "tg_2", ["CANARI-P1 je cherche un appartement à Lyon", *SIX[1:]], display_name="Alice", **tg)
+        await chat(kernel, "ext_2", ["CANARI-P1 je cherche un appartement à Lyon", *SIX[1:]], display_name="Alice", **tg)
         await asyncio.sleep(10 * 60)
-        await chat(kernel, "tg_2", ["Mika, vous connaissez des appartements sympas à Lyon ?"], display_name="Alice",
+        await chat(kernel, "ext_2", ["Mika, vous connaissez des appartements sympas à Lyon ?"], display_name="Alice",
                    **room)
-        await chat(kernel, "tg_3", ["Mika, moi j'adore Lyon", *SIX[2:]], display_name="Bob", **room)
+        await chat(kernel, "ext_3", ["Mika, moi j'adore Lyon", *SIX[2:]], display_name="Bob", **room)
         await asyncio.sleep(10 * 60)
-        await chat(kernel, "tg_2", ["toujours pas d'appartement à Lyon", *SIX[1:]], display_name="Alice", **tg)
+        await chat(kernel, "ext_2", ["toujours pas d'appartement à Lyon", *SIX[1:]], display_name="Alice", **tg)
         await asyncio.sleep(10 * 60)
         await kernel.stop()
 
@@ -706,7 +706,7 @@ def test_in_a_room_she_does_not_pretend_to_know_nothing_about_a_friend(tmp_path)
     def run_with(canary, tmp):
         script = Script(extract)
         kernel, clock, _, _out = build(tmp, script)
-        room = {"room": "tg_chat_-7", "channel": "telegram"}
+        room = {"room": "ext_chat_-7", "channel": "external"}
 
         async def main():
             await boot(kernel)
@@ -714,7 +714,7 @@ def test_in_a_room_she_does_not_pretend_to_know_nothing_about_a_friend(tmp_path)
             await chat(kernel, "user_2", [f"{canary} mon chat est malade, et je vais démissionner", *SIX[1:]],
                        gap_s=20)
             await asyncio.sleep(15 * 60)
-            await chat(kernel, "tg_1", ["Mika, tu as des nouvelles d'Alice ? elle répond plus, son chat va bien ?"],
+            await chat(kernel, "ext_1", ["Mika, tu as des nouvelles d'Alice ? elle répond plus, son chat va bien ?"],
                        display_name="Marc", **room)
             await kernel.stop()
 
@@ -722,12 +722,12 @@ def test_in_a_room_she_does_not_pretend_to_know_nothing_about_a_friend(tmp_path)
         return script
 
     script = run_with("CANARI-S1", tmp_path / "a")
-    to_room = script.replies("tg_1")[-1]
-    assert "CANARI-S1" not in "\n".join(script.prompts("tg_1"))
+    to_room = script.replies("ext_1")[-1]
+    assert "CANARI-S1" not in "\n".join(script.prompts("ext_1"))
     room_said = section(to_room, REVIENT)
     # elle sait qu'elle sait, et quand elles se sont parlé (ce n'est pas ce qu'Alice lui a dit)
     assert "Tu as parlé avec Alice" in room_said and "qu'Alice t'a dit ne se raconte pas ici" in room_said
     assert "ne dis surtout pas que tu n'en as pas" in room_said
     assert "moment difficile" not in room_said, "le salon n'a pas à deviner ce qui pèse"
     secret = run_with("CANARI-S2", tmp_path / "b")
-    assert "Alice" not in section(secret.replies("tg_1")[-1], REVIENT), "contre-exemple : un secret, rien"
+    assert "Alice" not in section(secret.replies("ext_1")[-1], REVIENT), "contre-exemple : un secret, rien"

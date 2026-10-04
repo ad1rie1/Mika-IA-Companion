@@ -7,19 +7,18 @@ Derrière un mandataire TLS : ``--origin https://mika.example --cookie-secure
 sur ``/ws/world`` (ADR 0051) avec un jeton de son compte : ``python -m mika token
 create <compte> --label "Unity"``.
 
-Les journaux ne portent jamais un secret : le jeton du robot Telegram (dans
-l'URL de chaque relève), un jeton passé en paramètre d'URL (un flux), un
-``Bearer`` sont masqués ; ``httpx``/``httpcore`` ne parlent qu'en avertissement.
+Les journaux ne portent jamais un secret : un jeton passé en paramètre d'URL
+(un flux), un ``Bearer`` sont masqués ; ``httpx``/``httpcore`` ne parlent qu'en
+avertissement.
 """
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import logging
 import re
 import shutil
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -43,8 +42,6 @@ from mika.adapters.mcp.relay import Relay
 from mika.adapters.preprocess import LocalPreprocessor, whisper
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
-from mika.adapters.telegram import TelegramChannel, TelegramConfig, handle_of
-from mika.adapters.telegram.ptb import Poller
 from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
 from mika.adapters.web import protocol
 from mika.adapters.web.accounts import Accounts
@@ -55,10 +52,9 @@ from mika.adapters.world.server import WorldHub
 from mika.app import backup, composition, datadir, reglages
 from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
-from mika.app.delivery import Router
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
-from mika.app.settings import SecretBox, Settings, same_pairing_code
+from mika.app.settings import SecretBox, Settings
 from mika.contracts import identity as identity_c
 from mika.contracts.self_ import PersonaDoc
 from mika.inspector.app import routes
@@ -66,31 +62,15 @@ from mika.inspector.mcp import PREFIX as CONSOLE_MCP_PREFIX
 from mika.inspector.mcp import console_app
 from mika.inspector.ui import PREFIX as CONSOLE_PREFIX
 from mika.inspector.ui import InspectorDeps
-from mika.kernel.clock import US
 from mika.kernel.events import Origin
 from mika.kernel.prompt import Budget
-from mika.runtime import operations
 from mika.runtime.bootstrap import Kernel
 from mika.vocab.people import clean_display_name
 
 log = logging.getLogger("mika.server")
 
-#: la relance du robot Telegram après un démarrage raté : délai initial, plafond (secondes)
-TELEGRAM_RETRY_MIN_S = 5.0
-TELEGRAM_RETRY_MAX_S = 600.0
-#: l'état du robot, pour ``/health`` (des états, jamais un contenu)
-_TELEGRAM_HEALTH = {"running": "ok", "starting": "degraded", "retrying": "degraded", "closed": "degraded",
-                    "pairing": "degraded", "invalid": "ko"}
-_TELEGRAM_FR = {"running": "en marche", "starting": "démarrage…", "retrying": "relance en cours",
-                "closed": "fermé : personne ne peut lui écrire",
-                "pairing": "en attente d'appairage : personne ne peut encore lui écrire",
-                "invalid": "jeton refusé", "off": "arrêté"}
-#: un code d'appairage Telegram vaut tant (secondes), et une seule fois
-PAIRING_TTL_S = 24 * 3600
-
 #: ce qu'un journal ne doit jamais montrer
 _SECRETS = (
-    (re.compile(r"(/bot)\d+:[A-Za-z0-9_-]+"), r"\1<jeton>"),
     (re.compile(r"([?&](?:token|key|api[_-]?key|access_token|secret|password|passwd|auth|sig|signature)=)"
                 r"[^&\s\"'#]+", re.IGNORECASE), r"\1…"),
     (re.compile(r"(Bearer\s+)[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE), r"\1…"),
@@ -182,10 +162,8 @@ class Live:
     accounts: Accounts
     settings: Settings
     gateway: LiveGateway
-    router: Router
     #: une passerelle fournie de l'extérieur (tests, simulateur) n'est pas rechargée
     fixed: bool = False
-    telegram: Any = None
     preprocess: Any = None
     calls: CallLog | None = None
     persona_file: Path = PERSONA
@@ -199,27 +177,8 @@ class Live:
     persona_problem: str = ""
     _persona_said: str = ""
     data: Path | None = None
-    #: fabrique du robot (un faux en test) : ``(jeton, fabrique du canal) -> Poller``
-    make_poller: Callable[..., Any] = Poller
     #: les clients du monde (``/ws/world``, ADR 0051) : moteurs de jeu et écrans
     world: WorldHub | None = None
-    #: off | starting | running | retrying | closed | invalid
-    telegram_status: str = "off"
-    telegram_attempts: int = 0
-    telegram_error: str = ""
-    _telegram_task: asyncio.Task[None] | None = None
-
-    def telegram_state(self) -> str:
-        """L'état du robot, en mots (la console)."""
-        text = _TELEGRAM_FR.get(self.telegram_status, self.telegram_status)
-        if self.telegram_status == "retrying":
-            text += f" ({self.telegram_attempts} essai(s), dernière erreur : {self.telegram_error})"
-        return text
-
-    def channel_health(self) -> dict[str, str]:
-        """Ce que ``/health`` dit des canaux : un état par canal configuré."""
-        state = _TELEGRAM_HEALTH.get(self.telegram_status)
-        return {"telegram": state} if state else {}
 
     def trace(self, tr: LLMTrace) -> None:
         self.gateway.traces.append(tr)
@@ -260,9 +219,6 @@ class Live:
         """Ce que les réglages d'exploitation fournissent aux paramètres des facultés
         (jamais des surcharges : une reconfiguration ne les efface pas)."""
         out: dict[str, dict[str, Any]] = {"kernel": {"tz": self.persona().timezone}}
-        owners = self.settings.telegram()["owners"]
-        if owners:
-            out["identity"] = {"owners": tuple(handle_of(o) for o in owners)}
         accounts = self.settings.email().accounts
         drafting = tuple(sorted(k for k, a in accounts.items() if a.autodraft and a.enabled))
         if drafting:
@@ -277,116 +233,6 @@ class Live:
         except (ValueError, TypeError) as exc:
             return [str(exc)]
         return []
-
-    async def start_telegram(self) -> None:
-        """Le robot Telegram, s'il est configuré (``mika telegram token …``). Fermé par
-        défaut : sans liste blanche, ni propriétaire, ni ouverture explicite, personne
-        ne peut lui écrire — la relève tourne alors **en mode appairage** : un code à
-        usage unique (montré dans la console, page Telegram), envoyé au robot en privé
-        (``/start <code>``), fait de son auteur une propriétaire. Un démarrage raté
-        (réseau coupé au lancement) est relancé avec un délai croissant ; ``/health`` le dit."""
-        await self.stop_telegram()
-        cfg = self.settings.telegram()
-        for problem in await self.reconfigure():  # les propriétaires sont une entrée de l'identité
-            log.warning("Telegram : %s", problem)
-        if not cfg["token"]:
-            self.telegram_status = "off"
-            return
-        config = TelegramConfig(allowed_chats=frozenset(cfg["allowed_chats"]), owners=frozenset(cfg["owners"]),
-                                open_to_all=cfg["open"], name=self.persona().name or "Mika")
-        if config.closed:
-            await self.telegram_pairing_code()  # un code valide, neuf s'il n'y en a pas
-            log.warning("Telegram : ni liste blanche, ni propriétaire, ni ouverture à tous — personne ne peut lui "
-                        "écrire. La relève tourne en mode appairage : le code est sur la page Telegram de la "
-                        "console, à envoyer au robot en privé (/start <code>)")
-        self.telegram_attempts, self.telegram_error, self.telegram_status = 0, "", "starting"
-        self._telegram_task = asyncio.create_task(self._run_telegram(cfg["token"], config), name="telegram")
-
-    def _now_s(self) -> int:
-        return self.kernel.mind.clock.now() // US
-
-    async def telegram_pairing_code(self, *, fresh: bool = False) -> tuple[str, int]:
-        """Le code d'appairage en cours et son échéance (secondes) ; un neuf s'il n'y en a pas, s'il a expiré, ou
-        si on le demande (l'ancien ne vaut plus)."""
-        got = self.settings.telegram_pairing()
-        if got is not None and not fresh and got[1] > self._now_s():
-            return got
-        code = await self.settings.new_telegram_pairing(self._now_s(), PAIRING_TTL_S)
-        return code, self._now_s() + PAIRING_TTL_S
-
-    async def pair_telegram(self, user_id: int, code: str, name: str) -> str:
-        """``/start <code>`` en privé : le bon code, encore valable, fait de ce compte une propriétaire — comme
-        si un opérateur l'avait ajouté (réglage enregistré, identité reconfigurée, opération journalisée). Le
-        code sert une fois ; il n'entre jamais au journal."""
-        expected = self.settings.telegram_pairing()
-        if expected is None:
-            return "none"
-        if not same_pairing_code(code, expected[0]):
-            log.warning("Telegram : appairage refusé (mauvais code) pour %s", handle_of(user_id))
-            return "wrong"
-        if expected[1] <= self._now_s():
-            return "expired"
-        owners = self.settings.telegram()["owners"]
-        await self.settings.save_telegram(owners=[*owners, user_id])
-        await self.settings.clear_telegram_pairing()
-        await operations.audit(self.kernel, "console.telegram.appairage", by=handle_of(user_id),
-                               subject_kind="handle", subject=handle_of(user_id))
-        for problem in await self.reconfigure():  # sa conversation privée : celle d'une propriétaire
-            log.warning("Telegram : %s", problem)
-        if self.telegram_status == "pairing":
-            self.telegram_status = "running"
-        log.info("Telegram : %s est désormais propriétaire (appairage)", handle_of(user_id))
-        return "paired"
-
-    async def _run_telegram(self, token: str, config: TelegramConfig) -> None:
-        delay = TELEGRAM_RETRY_MIN_S
-        while True:
-            self.telegram_status = "starting"
-            self.telegram_attempts += 1
-            poller = None
-            try:
-                poller = self.make_poller(token, lambda bot: TelegramChannel(self.port, bot, config,
-                                                                             preprocess=self.preprocess,
-                                                                             pair=self.pair_telegram))
-                await poller.start()
-            except asyncio.CancelledError:
-                if poller is not None:
-                    with contextlib.suppress(Exception):
-                        await poller.stop()
-                raise
-            except Exception as exc:  # noqa: BLE001 — un robot qui ne démarre pas n'empêche pas le reste de vivre
-                if poller is not None:
-                    with contextlib.suppress(Exception):
-                        await poller.stop()
-                self.telegram_error = type(exc).__name__
-                if self.telegram_error in ("InvalidToken", "Unauthorized"):
-                    self.telegram_status = "invalid"
-                    log.warning("Telegram : jeton refusé, relève abandonnée (mika telegram token …)")
-                    return
-                self.telegram_status = "retrying"
-                log.warning("Telegram : démarrage impossible (%s), nouvel essai dans %.0f s", self.telegram_error,
-                            delay)
-                await asyncio.sleep(delay)
-                delay = min(TELEGRAM_RETRY_MAX_S, delay * 2)
-                continue
-            self.telegram = poller
-            self.router.telegram = poller.channel
-            self.telegram_status = "pairing" if config.closed else "running"
-            access = "en attente d'appairage" if config.closed else "ouvert à tous" if config.open_to_all else \
-                "liste blanche" if config.allowed_chats else "propriétaires"
-            log.info("Telegram : relève démarrée (%s)", access)
-            return
-
-    async def stop_telegram(self) -> None:
-        task, self._telegram_task = self._telegram_task, None
-        if task is not None and not task.done():
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-        if self.telegram is not None:
-            self.router.telegram = None
-            await self.telegram.stop()
-            self.telegram = None
-        self.telegram_status = "off"
 
     async def reload_llm(self) -> list[str]:
         if self.data is not None and (self.data / "claude-code").is_dir():
@@ -420,7 +266,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     fixed = gateway is not None
     gateway = gateway or LiveGateway()
     hub = Hub(port=None)  # type: ignore[arg-type] — relié au port juste après
-    router = Router(hub)
     vectors = SqliteVectorIndex(store, embedder or SentenceEmbedder())
     camera = CameraBuffer(clock.now)
     settings = Settings(store, SecretBox.for_data(data))
@@ -431,10 +276,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
              "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git), "camera": camera,
              "forge": forge, "forge_settings": forge_settings}
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
-                                     ports={"delivery": router, "vectors": vectors, **world}, **deps))
+                                     ports={"delivery": hub, "vectors": vectors, **world}, **deps))
     port = KernelPort(kernel)
     hub.port = port
-    live = Live(kernel, hub, port, Accounts(store), settings, gateway, router, fixed, calls=CallLog(store),
+    live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data)
     # le monde (ADR 0051) : chaque lot commité qui change ce que montrent ses écrans leur part, traduit en trames
     world_hub = live.world = WorldHub(port, live.accounts, origins=web.origins, auth_required=web.auth_required)
@@ -451,7 +296,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         datadir.hold(data)  # un seul Mika par dossier : un second processus est refusé, pas mêlé au journal
         # deux temps : relire sa vie et sa configuration, brancher tout ce qui fait sortir sa parole
-        # (passerelle des modèles, budget, écrans, Telegram), puis seulement la vie (reprises, processus,
+        # (passerelle des modèles, budget, écrans), puis seulement la vie (reprises, processus,
         # file de sortie) — sinon une reprise au démarrage partait sans modèle ni canal.
         await kernel.boot(configure=lambda k: composition.configure(k, live.persona(), settings.overrides(),
                                                                     live.inputs()))
@@ -470,29 +315,20 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             log.warning("configuration des modèles : %s", problem)
         hub.start()
         world_hub.start()
-        try:
-            await live.start_telegram()
-        except Exception as exc:  # noqa: BLE001 — un robot mal configuré n'empêche pas le reste de vivre
-            log.warning("Telegram : démarrage impossible (%r)", exc)
         await kernel.live()
         try:
             yield
         finally:
             await world_hub.stop()
-            await live.stop_telegram()
             await hub.stop()
             await gateway.aclose()
             await live.calls.flush()
             await kernel.stop()
             datadir.release(data)
 
-    async def restart_telegram() -> None:
-        await live.stop_telegram()
-        await live.start_telegram()
-
     inspector = routes(InspectorDeps(kernel, live.accounts, live.settings, live.reload_llm, gateway.traces,
                                      port=port, calls=live.calls, reconfigure=live.reconfigure,
-                                     restart_telegram=restart_telegram, after_decision=hub.refresh_panels,
+                                     after_decision=hub.refresh_panels,
                                      reports=reports, navigation=NAVIGATION,
                                      sections=reglages.sections(live), settings_tabs=reglages.TABS,
                                      parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
@@ -506,8 +342,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *inspector, relay, console_mcp,
                                     world_hub.route()],
-                      preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token,
-                      health_extra=live.channel_health), live
+                      preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token), live
 
 
 async def register_accounts(kernel: Kernel, accounts: Accounts) -> int:

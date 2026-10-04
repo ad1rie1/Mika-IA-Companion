@@ -13,7 +13,7 @@ sudo install -d -o mika -g mika -m 0700 /var/lib/mika /var/backups/mika
 sudo git clone <dépôt> /opt/mika
 cd /opt/mika/backendv2
 sudo python3 -m venv .venv
-sudo .venv/bin/pip install -e ".[llm,memory,telegram,documents]"   # telegram : le robot ; documents : lire les PDF
+sudo .venv/bin/pip install -e ".[llm,memory,documents]"   # documents : lire les PDF
 sudo dnf install bubblewrap        # ou apt install bubblewrap : la Forge et les ateliers en ont besoin
 ```
 
@@ -27,7 +27,7 @@ tourne — il n'y a pas de repli.
 
 ```ini
 # La clé qui chiffre les secrets rangés dans mind.db (clés d'API, jeton
-# Telegram, mot de passe IMAP). Sans elle, un fichier secret.key est créé
+# des dépôts git, mot de passe IMAP). Sans elle, un fichier secret.key est créé
 # dans /var/lib/mika au premier démarrage — et il est sauvegardé avec le reste.
 # Si tu la mets ici, sauvegarde-la à part : sans elle, les secrets sont perdus.
 #MIKA_SECRET_KEY=...
@@ -91,9 +91,8 @@ location / {
 }
 ```
 
-Les journaux ne portent aucun secret : le jeton du robot Telegram (présent dans
-chaque URL de relève), un jeton passé en paramètre d'URL et un `Bearer` sont
-masqués ; `httpx` ne parle qu'en avertissement.
+Les journaux ne portent aucun secret : un jeton passé en paramètre d'URL et un
+`Bearer` sont masqués ; `httpx` ne parle qu'en avertissement.
 
 ## Premier démarrage
 
@@ -108,17 +107,11 @@ masqués ; `httpx` ne parle qu'en avertissement.
 3. Le reste se règle dans la console, **Réglages** : personnalité et tempérament
    (avec ce que pilote chaque curseur), paramètres internes (lisibles ; une
    surcharge seulement dans le bloc « avancé », bornée et journalisée), canaux
-   (Telegram), sens (courrier, flux, transcription, appareils), comptes. Chaque
+   (dépôts git), sens (courrier, flux, transcription, appareils), comptes. Chaque
    enregistrement laisse une ligne dans **Journal de configuration**.
-   Le robot Telegram est **fermé par défaut** : seules les conversations de la
-   liste blanche et la conversation privée des propriétaires sont admises
-   (`mika telegram allow <chat>`, `mika telegram owner <utilisateur>`) ; l'ouvrir
-   à tout le monde est un choix explicite (`mika telegram open`, ou la case
-   « Ouvert à tous »). Sans aucune des trois, la relève tourne en mode
-   appairage : la page Telegram de la console montre un code, et `/start <code>`
-   envoyé au robot en privé fait de son auteur une propriétaire (ADR 0057). Un
-   démarrage raté (réseau coupé) est relancé avec un délai croissant ; `/health`
-   le dit (`"telegram": "degraded"`, `"ko"` pour un jeton refusé).
+   On lui écrit par une application dédiée (le frontend web, le client Unity),
+   avec un compte : il n'y a pas de robot de messagerie (ADR 0060). Un client
+   natif s'authentifie par un jeton de son compte (`mika token create <compte>`).
 4. Ses boîtes aux lettres : **Courrier › Comptes** (ou Réglages › Sens ›
    Courrier) — un enregistrement par boîte : serveurs IMAP/SMTP, dossiers
    relevés, et sa voix (en son nom, en assistante, ou à ta place ; ton,
@@ -194,7 +187,7 @@ bon quelques minutes, le temps de réindexer les souvenirs).
 
 ```bash
 sudo -u mika /opt/mika/backendv2/.venv/bin/python -m mika --data /var/lib/mika backup /var/backups/mika
-cd /opt/mika && sudo git pull && cd backendv2 && sudo .venv/bin/pip install -e ".[llm,memory,telegram,documents]"
+cd /opt/mika && sudo git pull && cd backendv2 && sudo .venv/bin/pip install -e ".[llm,memory,documents]"
 sudo systemctl restart mika
 ```
 

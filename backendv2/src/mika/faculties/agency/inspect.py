@@ -64,7 +64,7 @@ def _restraint_fr(frame: Frame) -> str:
 
 def _handles(frame: Frame, handle: str) -> tuple[str, ...]:
     """Toutes les adresses de la personne derrière cette adresse : elle peut
-    répondre d'ailleurs (Telegram après le navigateur)."""
+    répondre d'ailleurs (un compte extérieur après le navigateur)."""
     if not handle:
         return ()
     person = frame.get(identity_c.PERSON(handle)) or handle

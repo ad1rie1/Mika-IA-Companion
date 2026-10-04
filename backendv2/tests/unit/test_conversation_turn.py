@@ -86,7 +86,7 @@ def test_a_burst_gets_one_reply_that_read_every_message(tmp_path):
 
 def test_a_burst_she_cannot_answer_is_told_once_on_its_last_message(tmp_path):
     """La réponse impossible se dit par tour, pas par message : trois messages coup sur coup, une réponse qui
-    échoue — le transport l'apprend une fois, pour le dernier (Telegram n'écrit pas trois « désolée »)."""
+    échoue — le transport l'apprend une fois, pour le dernier (une messagerie n'écrit pas trois « désolée »)."""
 
     def respond(req: LLMRequest) -> LLMResponse:
         if req.role == "reply":

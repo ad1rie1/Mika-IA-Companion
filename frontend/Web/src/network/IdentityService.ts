@@ -7,8 +7,8 @@
  *     accumulate across sessions (otherwise each reconnect = new UUID =
  *     Mika never recognizes returning visitors on the web)
  *
- * The ID is prefixed with "web_" so it cannot collide with Telegram IDs
- * (which use "tg_<user_id>") or backend-internal IDs.
+ * The ID is prefixed with "web_" so it cannot collide with external-account
+ * IDs (which use "ext_…") or backend-internal IDs.
  *
  * If localStorage is unavailable (SSR, private mode restrictions), we
  * fall back to a per-session ID that lasts only as long as the tab.

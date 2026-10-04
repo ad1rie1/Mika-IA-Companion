@@ -253,46 +253,6 @@ def test_the_cli_tells_the_first_steps_and_never_wants_a_password_in_argument(tm
     assert cli.main(["--data", str(tmp_path / "v2"), "account", "bea"]) == 1  # deux saisies différentes : rien
 
 
-# ── G-3 : l'appairage, vu de la console ────────────────────────────────────
-
-
-class StubPoller:
-    """Le robot, sans réseau : il démarre, il s'arrête."""
-
-    def __init__(self, token: str, make_channel) -> None:
-        self.channel = make_channel(object())
-
-    async def start(self) -> None:
-        return None
-
-    async def stop(self) -> None:
-        return None
-
-
-def test_the_telegram_page_shows_the_pairing_code_and_renews_it_on_demand(tmp_path):
-    """Après « colle le jeton », la page Telegram renvoyait vers Identités › Adresses — où aucune adresse ``tg_``
-    n'apparaîtrait jamais, la relève ne démarrant pas. Elle montre désormais le code à envoyer au robot ; un
-    nouveau code remplace l'ancien ; le code n'entre jamais au journal."""
-    app, live = server(tmp_path, Fake())
-    live.make_poller = StubPoller
-    with client_of(app) as client:
-        bootstrap(client)
-        client.portal.call(lambda: live.settings.save_telegram(token="123456:jeton-du-robot"))
-        client.portal.call(live.start_telegram)
-        code = client.portal.call(live.settings.telegram_pairing)[0]
-        page = html.unescape(client.get("/inspecteur/reglages/telegram").text)
-        assert f"/start {code}" in page and "En attente d'appairage" in page
-        assert client.get("/health").json()["checks"]["telegram"] == "degraded"
-        token = client.cookies.get("csrftoken")
-        renewed = client.post("/inspecteur/reglages/telegram",
-                              data={"csrf": token, "_section": "telegram", "_commande": "appairer"})
-        fresh = client.portal.call(live.settings.telegram_pairing)[0]
-        assert fresh != code and f"/start {fresh}" in html.unescape(renewed.text)
-        journal = client.portal.call(live.kernel.mind.store.query_mind, "SELECT data FROM events")
-        assert not [row for row in journal if fresh in row[0] or code in row[0]]
-        client.portal.call(live.stop_telegram)
-
-
 # ── Cosmétique de la console ──────────────────────────────────────────────
 
 

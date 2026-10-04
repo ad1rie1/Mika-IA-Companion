@@ -2,21 +2,23 @@
 # ============================================================================
 # AI Pipeline - Fonctions GitHub (PR, issues, labels, déduplication)
 # ============================================================================
+#
+# Convention de sortie : une fonction appelée dans `$(...)` n'écrit QUE son
+# résultat sur stdout, tout message va sur stderr. `create_pull_request`
+# imprimait sa bannière sur stdout : l'« URL » de la PR transmise aux
+# notifications contenait trois lignes de décor.
 
-# Crée un label GitHub s'il n'existe pas
+# Crée un label GitHub s'il n'existe pas (silencieux : il est appelé dans des
+# fonctions dont la sortie est capturée).
 ensure_label() {
     local name="$1"
     local color="${2:-bfdadc}"
     local desc="${3:-}"
-    gh label create "$name" --color "$color" --description "$desc" 2>/dev/null || true
+    gh label create "$name" --color "$color" --description "$desc" >/dev/null 2>&1 || true
 }
 
 ai_agent_pr_label() {
-    case "$AI_AGENT" in
-        claude) echo "ai-agent:claude" ;;
-        codex)  echo "ai-agent:codex" ;;
-        *)      echo "ai-agent:${AI_AGENT}" ;;
-    esac
+    echo "ai-agent:${AI_AGENT}"
 }
 
 ensure_ai_agent_pr_label() {
@@ -32,79 +34,85 @@ ensure_ai_agent_pr_label() {
     echo "$label"
 }
 
-# -- Cache PR ouvertes -------------------------------------------------------
-_OPEN_PRS_CACHE=""
-_OPEN_PRS_LOADED=false
+# -- PR ouvertes du pipeline --------------------------------------------------
 
-get_open_ai_prs() {
-    if [[ "$_OPEN_PRS_LOADED" == true ]]; then
-        echo "$_OPEN_PRS_CACHE"
-        return
-    fi
-    _OPEN_PRS_CACHE=$(gh pr list --label "$PR_LABEL" --state open --limit 1000 \
-        --json title,headRefName,url,body \
-        --template '{{range .}}{{.headRefName}}|{{.title}}|{{.url}}|{{.body}}{{"\n"}}{{end}}' \
-        2>/dev/null || echo "")
-    _OPEN_PRS_LOADED=true
-    echo "$_OPEN_PRS_CACHE"
+# PR ouvertes dont la branche commence par <préfixe>, une par ligne :
+#   numéro|branche|url
+# Filtrées par jq sur le nom de branche, et non par `--search head:…` : l'API
+# Search ne suit pas les renommages de dépôt (cf. gh_query), et son `head:`
+# matche un mot, pas un préfixe exact.
+open_prs_with_branch_prefix() {
+    local prefix="$1"
+    gh_query gh pr list --state open --limit 1000 \
+        --json number,headRefName,url \
+        --jq ".[] | select(.headRefName | startswith(\"${prefix}\")) | \"\(.number)|\(.headRefName)|\(.url)\""
 }
 
-# Vérifie s'il existe déjà une PR ouverte pour une issue donnée
+# Vérifie s'il existe déjà une PR ouverte pour une issue donnée. Le motif
+# `issue-<n>-` est délimité : `issue-4` matchait aussi `issue-42`.
+# Une requête en échec compte comme « PR existante » : sauter une issue se
+# rattrape au tour suivant, une PR en double non.
 check_existing_issue_pr() {
     local issue="$1"
-    local open_prs
-    open_prs=$(get_open_ai_prs)
-
-    [[ -z "$open_prs" ]] && return 1
-
     local match
-    match=$(echo "$open_prs" | grep "issue-${issue}" || true)
+    if ! match=$(open_prs_with_branch_prefix "${BRANCH_PREFIX}/issue-${issue}-"); then
+        warn "Vérification des PR existantes impossible pour l'issue #${issue} - abandon par précaution" >&2
+        return 0
+    fi
     if [[ -n "$match" ]]; then
-        local pr_url
-        pr_url=$(echo "$match" | head -1 | cut -d'|' -f3)
-        warn "PR déjà ouverte pour l'issue #${issue}: $pr_url"
+        warn "PR déjà ouverte pour l'issue #${issue}: $(head -1 <<< "$match" | cut -d'|' -f3)" >&2
         return 0
     fi
     return 1
 }
 
-# -- Déduplication PR par module ----------------------------------------------
+# -- Choix d'un module --------------------------------------------------------
 
-# Retourne 0 si une PR ouverte existe pour ce (profil, module), sinon 1.
-# On filtre côté GitHub par les 3 labels et on demande `--limit 1` : pas besoin
-# de ramener toutes les PR puis de grepper localement.
-_module_has_open_pr() {
-    local profile="$1" mod="$2"
+# Retourne 0 si le (profil, module) est déjà couvert : une PR ouverte (mode
+# fix) ou une issue d'audit ouverte (mode audit). Une requête en échec renvoyait
+# autrefois « 0 », c'est-à-dire « pas couvert » : le pipeline repartait
+# travailler sur un module déjà traité et ouvrait un doublon. En cas d'échec on
+# considère le module comme couvert — le sauter se rattrape au tour suivant.
+_module_is_covered() {
+    local kind="$1" profile="$2" mod="$3"
     local count
-    # Une requête en échec renvoyait "0", c'est-à-dire « aucune PR ouverte » :
-    # le pipeline repartait alors travailler sur un module déjà couvert et
-    # ouvrait un doublon. En cas d'échec on considère le module comme couvert —
-    # sauter un module est rattrapable au tour suivant, une PR en double non.
-    if ! count=$(gh_query gh pr list --state open --limit 1 \
-        --label "$PR_LABEL" \
+    local -a query=(gh pr list --state open --limit 1 --label "$PR_LABEL")
+    [[ "$kind" == "audit" ]] && query=(gh issue list --state open --limit 1 --label "ai-audit")
+    if ! count=$(gh_query "${query[@]}" \
         --label "ai-${profile}" \
         --label "module:${mod}" \
         --json number --jq 'length'); then
-        warn "Dédup PR impossible pour ${profile}/${mod} - module sauté par précaution" >&2
+        warn "Dédup impossible pour ${profile}/${mod} - module sauté par précaution" >&2
         return 0
     fi
     [[ "$count" -gt 0 ]]
 }
 
-pick_available_module() {
-    local profile="$1"
+# Choisit au hasard un module non couvert pour ce profil.
+#   pick_module pr|audit <profil>
+# Les modules déjà vus dans la session run.sh courante arrivent en CSV par
+# AI_PIPELINE_SKIP_MODULES.
+pick_module() {
+    local kind="$1" profile="$2"
 
-    # Modules déjà traités dans la session run.sh courante (CSV via env var)
     local -a session_skip=()
     if [[ -n "${AI_PIPELINE_SKIP_MODULES:-}" ]]; then
         IFS=',' read -ra session_skip <<< "$AI_PIPELINE_SKIP_MODULES"
     fi
 
-    local available=()
+    local -a available=()
+    local mod skipped is_skipped
     for mod in "${AVAILABLE_MODULES[@]}"; do
-        [[ ! -d "${PROJECT_ROOT}/${mod}" ]] && continue
+        [[ -d "${PROJECT_ROOT}/${mod}" ]] || continue
 
-        local is_skipped=false
+        # GitHub refuse un label de plus de 50 caractères, et ensure_label
+        # échoue en silence : toutes les issues du module partaient en erreur.
+        if (( ${#mod} + 7 > 50 )); then
+            warn "Module ignoré, label trop long pour GitHub (> 50) : module:${mod}" >&2
+            continue
+        fi
+
+        is_skipped=false
         for skipped in "${session_skip[@]}"; do
             if [[ -n "$skipped" && "$skipped" == "$mod" ]]; then
                 is_skipped=true
@@ -113,109 +121,44 @@ pick_available_module() {
         done
         [[ "$is_skipped" == true ]] && continue
 
-        _module_has_open_pr "$profile" "$mod" && continue
-
+        _module_is_covered "$kind" "$profile" "$mod" && continue
         available+=("$mod")
     done
 
-    if [[ ${#available[@]} -eq 0 ]]; then
-        return
-    fi
-
-    local idx=$(( RANDOM % ${#available[@]} ))
-    echo "${available[$idx]}"
+    [[ ${#available[@]} -eq 0 ]] && return 0
+    echo "${available[RANDOM % ${#available[@]}]}"
 }
 
-# -- Déduplication issues par module ------------------------------------------
-
+# Issues d'audit ouvertes pour (profil, module), une ligne « #n - titre ».
 get_existing_issues() {
     local profile="$1"
     local module="$2"
-    gh issue list --state open --limit 1000 \
+    gh_query gh issue list --state open --limit 1000 \
         --label "ai-audit" \
         --label "ai-${profile}" \
         --label "module:${module}" \
         --json number,title \
-        --template '{{range .}}#{{.number}} - {{.title}}{{"\n"}}{{end}}' \
-        2>/dev/null || echo ""
-}
-
-# Retourne 0 si une issue audit ouverte existe pour ce (profil, module), sinon 1.
-_module_has_open_audit_issue() {
-    local profile="$1" mod="$2"
-    local count
-    # Même raisonnement que _module_has_open_pr : en cas d'échec de requête, on
-    # considère le module comme déjà audité plutôt que de créer des doublons.
-    if ! count=$(gh_query gh issue list --state open --limit 1 \
-        --label "ai-audit" \
-        --label "ai-${profile}" \
-        --label "module:${mod}" \
-        --json number --jq 'length'); then
-        warn "Dédup issues impossible pour ${profile}/${mod} - module sauté par précaution" >&2
-        return 0
-    fi
-    [[ "$count" -gt 0 ]]
-}
-
-pick_audit_available_module() {
-    local profile="$1"
-
-    # Modules déjà traités dans la session run.sh courante (CSV via env var)
-    local -a session_skip=()
-    if [[ -n "${AI_PIPELINE_SKIP_MODULES:-}" ]]; then
-        IFS=',' read -ra session_skip <<< "$AI_PIPELINE_SKIP_MODULES"
-    fi
-
-    local available=()
-    for mod in "${AVAILABLE_MODULES[@]}"; do
-        [[ ! -d "${PROJECT_ROOT}/${mod}" ]] && continue
-
-        local is_skipped=false
-        for skipped in "${session_skip[@]}"; do
-            if [[ -n "$skipped" && "$skipped" == "$mod" ]]; then
-                is_skipped=true
-                break
-            fi
-        done
-        [[ "$is_skipped" == true ]] && continue
-
-        _module_has_open_audit_issue "$profile" "$mod" && continue
-
-        available+=("$mod")
-    done
-
-    if [[ ${#available[@]} -eq 0 ]]; then
-        return
-    fi
-
-    local idx=$(( RANDOM % ${#available[@]} ))
-    echo "${available[$idx]}"
+        --template '{{range .}}#{{.number}} - {{.title}}{{"\n"}}{{end}}'
 }
 
 # -- Création PR --------------------------------------------------------------
 
+# Ouvre la PR d'une branche déjà poussée et écrit son URL sur stdout, rien
+# d'autre.
 create_pull_request() {
-    if [[ "$NO_CREATE" == true ]]; then
-        warn "Création PR désactivée (--no-create)"
-        return 0
-    fi
-
-    header "Création de la Pull Request"
-
     local branch_name="$1"
     local base_ref="$2"
 
-    local commit_log
-    commit_log=$(git log --oneline "${base_ref}..HEAD")
+    header "Création de la Pull Request" >&2
 
-    local changed_files
+    local commit_log changed_files
+    commit_log=$(git log --oneline "${base_ref}..HEAD")
     changed_files=$(git diff --stat "${base_ref}..HEAD")
 
-    local corrections_list=""
+    local corrections_list="" line
     while IFS= read -r line; do
         [[ -z "$line" ]] && continue
-        corrections_list="${corrections_list}- \`${line}\`
-"
+        corrections_list+="- \`${line}\`"$'\n'
     done <<< "$commit_log"
 
     local module_name="${MODULES}"
@@ -259,35 +202,21 @@ ${changed_files}
 PRBODY
 )
 
-    local draft_flag=""
-    if [[ "$PR_DRAFT" == true ]]; then
-        draft_flag="--draft"
-    fi
-
-    local reviewer_flag=""
-    if [[ -n "$PR_REVIEWERS" ]]; then
-        reviewer_flag="--reviewer ${PR_REVIEWERS}"
-    fi
-
-    # Labels : ai-suggestion + ai-<profile> + module:<module> + ai-agent:<agent>
     # PR_LABEL doit exister AVANT le `gh pr create` : un label inconnu fait
-    # échouer la création entière, et c'était le seul des quatre à ne pas passer
-    # par ensure_label — donc la toute première PR sur un dépôt neuf échouait.
+    # échouer la création entière.
     ensure_label "$PR_LABEL" "0e8a16" "PR proposée par AI Pipeline"
-    local label_args="--label ${PR_LABEL}"
-    local agent_label
-    agent_label=$(ensure_ai_agent_pr_label)
-    label_args="${label_args} --label ${agent_label}"
+    local -a extra_args=(--label "$PR_LABEL" --label "$(ensure_ai_agent_pr_label)")
 
     if [[ -n "$PROFILE" ]]; then
         ensure_label "ai-${PROFILE}" "d73a4a" "AI Pipeline - ${PROFILE}"
-        label_args="${label_args} --label ai-${PROFILE}"
+        extra_args+=(--label "ai-${PROFILE}")
     fi
-    if [[ -n "$MODULES" && "$MODULES" != "all" ]]; then
-        # Un seul module en mode auto
+    if [[ -n "$MODULES" && "$MODULES" != "all" && "$MODULES" != *" "* ]]; then
         ensure_label "module:${MODULES}" "bfdadc" "Module ${MODULES}"
-        label_args="${label_args} --label module:${MODULES}"
+        extra_args+=(--label "module:${MODULES}")
     fi
+    [[ "$PR_DRAFT" == true ]] && extra_args+=(--draft)
+    [[ -n "$PR_REVIEWERS" ]] && extra_args+=(--reviewer "$PR_REVIEWERS")
 
     local pr_url
     pr_url=$(gh pr create \
@@ -295,54 +224,50 @@ PRBODY
         --head "$branch_name" \
         --title "$pr_title" \
         --body "$pr_body" \
-        $label_args \
-        $draft_flag \
-        $reviewer_flag \
+        "${extra_args[@]}" \
         2>&1) || {
-        err "Échec création PR: $pr_url"
+        err "Échec création PR: $pr_url" >&2
         return 1
     }
 
-    ok "PR créée: $pr_url"
-
-    # Invalider le cache pour que le prochain pick_available_module voie cette PR
-    _OPEN_PRS_CACHE=""
-    _OPEN_PRS_LOADED=false
-
+    pr_url=$(tail -n 1 <<< "$pr_url")
+    ok "PR créée: $pr_url" >&2
     echo "$pr_url"
 }
 
 # -- Création issues ----------------------------------------------------------
 
+# Découpe la sortie d'audit en un fichier par bloc ISSUE_START…ISSUE_END.
+# Les marqueurs sont reconnus même indentés ou suivis d'espaces / d'un \r.
 parse_audit_issues() {
-    local claude_output="$1"
+    local agent_output="$1"
     local tmpdir
     tmpdir=$(mktemp -d)
 
-    local in_issue=false
-    local issue_idx=0
-    local current_file=""
-
+    local in_issue=false issue_idx=0 current_file="" line marker
     while IFS= read -r line; do
-        if [[ "$line" == "ISSUE_START" ]]; then
+        line="${line%$'\r'}"
+        marker="${line//[[:space:]]/}"
+        if [[ "$marker" == "ISSUE_START" ]]; then
             in_issue=true
             issue_idx=$((issue_idx + 1))
             current_file="${tmpdir}/issue_${issue_idx}.txt"
-            > "$current_file"
+            : > "$current_file"
             continue
         fi
-        if [[ "$line" == "ISSUE_END" ]]; then
+        if [[ "$marker" == "ISSUE_END" ]]; then
             in_issue=false
             continue
         fi
         if [[ "$in_issue" == true && -n "$current_file" ]]; then
-            echo "$line" >> "$current_file"
+            printf '%s\n' "$line" >> "$current_file"
         fi
-    done <<< "$claude_output"
+    done <<< "$agent_output"
 
     echo "$tmpdir"
 }
 
+# Crée les issues GitHub d'un audit. Écrit le nombre créé sur stdout.
 create_github_issues() {
     local issues_dir="$1"
     local profile="$2"
@@ -356,7 +281,7 @@ create_github_issues() {
     # Propose_AI_PR déclenche la reprise automatique par le worker. Certains
     # profils ne doivent pas l'obtenir : une idée de fonctionnalité se décide
     # avant d'être codée. Le label s'ajoute alors à la main sur l'issue retenue.
-    local auto_pr=true
+    local auto_pr=true _skip
     for _skip in "${AUDIT_NO_AUTO_PR_PROFILES[@]}"; do
         [[ "$profile" == "$_skip" ]] && auto_pr=false && break
     done
@@ -367,28 +292,28 @@ create_github_issues() {
         log "Profil '${profile}' : issues créées SANS Propose_AI_PR (arbitrage humain)" >&2
     fi
 
+    local issue_file
     for issue_file in "${issues_dir}"/issue_*.txt; do
         [[ ! -f "$issue_file" ]] && continue
 
         local title severity files description
-        title=$(grep "^title:" "$issue_file" | sed 's/^title: *//')
-        severity=$(grep "^severity:" "$issue_file" | sed 's/^severity: *//')
-        files=$(grep "^files:" "$issue_file" | sed 's/^files: *//')
-        description=$(sed -n '/^description:/,$ p' "$issue_file" | tail -n +2)
+        title=$(grep -m1 "^title:" "$issue_file" | sed 's/^title: *//')
+        # Premier mot seulement : « high (impact sur chaque tour) » doit donner high.
+        severity=$(grep -m1 "^severity:" "$issue_file" | sed 's/^severity: *//' | awk '{print tolower($1)}')
+        files=$(grep -m1 "^files:" "$issue_file" | sed 's/^files: *//')
+        # Le texte peut commencer sur la ligne même de « description: ».
+        description=$(sed -n '/^description:/,$ p' "$issue_file" | sed '1s/^description: *//' | sed '1{/^$/d}')
 
         if [[ -z "$title" ]]; then
             warn "Issue sans titre dans $issue_file, ignorée" >&2
             continue
         fi
 
-        local severity_label="severity:medium"
         case "$severity" in
-            critical) severity_label="severity:critical" ;;
-            high)     severity_label="severity:high" ;;
-            medium)   severity_label="severity:medium" ;;
-            low)      severity_label="severity:low" ;;
+            critical|high|medium|low) ;;
+            *) severity="medium" ;;
         esac
-
+        local severity_label="severity:${severity}"
         ensure_label "${severity_label}" "fbca04" "Sévérité ${severity}"
 
         # Une proposition de fonctionnalité n'est pas un « problème détecté »
@@ -442,7 +367,7 @@ ISSUEBODY
             continue
         }
 
-        ok "Issue créée: $issue_url" >&2
+        ok "Issue créée: $(tail -n 1 <<< "$issue_url")" >&2
         created=$((created + 1))
     done
 

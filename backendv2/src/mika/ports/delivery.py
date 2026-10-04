@@ -13,7 +13,7 @@ Les sortes (``kind``) :
 
 - ``speech`` : ce qu'elle dit ; ``persona`` dit si c'est une parole adressée
   (``speaking``) ou une pensée à voix haute (``inner``, le murmure). Une
-  pensée ne part jamais en message (Telegram), seulement aux écrans de la
+  pensée ne part jamais en message écrit, seulement aux écrans de la
   personne à qui elle s'apprête à parler (``target``) — ou, sans cible, des
   opératrices ; elle n'a pas d'identifiant de message (elle n'est pas dans le
   fil) ;

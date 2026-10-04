@@ -184,22 +184,22 @@ def test_midnight_does_not_move_what_was_already_said(tmp_path):
 
 def test_in_a_room_everyone_speaks_under_their_name(tmp_path):
     kernel, clock, llm, _ = build(tmp_path, respond, start=at_paris(2026, 9, 30, 20, 0))
-    room = {"channel": "telegram", "room": "tg_chat_-7", "public": True}
+    room = {"channel": "external", "room": "ext_chat_-7", "public": True}
 
     async def main():
         await boot(kernel)
-        await kernel.perceive(said("tg_7", "salut tout le monde", display_name="Léa", addressed=False, **room))
-        await kernel.perceive(said("tg_9", "yo", display_name="Max Dupont", addressed=False, **room))
-        await kernel.perceive(said("tg_10", "yo aussi", display_name="Max Dupont", addressed=False, **room))
-        await kernel.perceive(said("tg_11", "…", addressed=False, **room))
-        p = await kernel.perceive(said("tg_8", "Mika t'es là ?", display_name="Tom", **room))
+        await kernel.perceive(said("ext_7", "salut tout le monde", display_name="Léa", addressed=False, **room))
+        await kernel.perceive(said("ext_9", "yo", display_name="Max Dupont", addressed=False, **room))
+        await kernel.perceive(said("ext_10", "yo aussi", display_name="Max Dupont", addressed=False, **room))
+        await kernel.perceive(said("ext_11", "…", addressed=False, **room))
+        p = await kernel.perceive(said("ext_8", "Mika t'es là ?", display_name="Tom", **room))
         await p.reply
-        p = await kernel.perceive(said("tg_8", "en privé cette fois", channel="telegram", display_name="Tom"))
+        p = await kernel.perceive(said("ext_8", "en privé cette fois", channel="external", display_name="Tom"))
         await p.reply
         await kernel.stop()
 
     run_virtual(clock, main)
-    in_room, private = replies_to(llm, "tg_8")[-2:]
+    in_room, private = replies_to(llm, "ext_8")[-2:]
     shown = [m.content for m in in_room.messages]
     assert any(m.endswith("Léa : salut tout le monde") for m in shown)
     maxes = {m for m in shown if m.startswith("Max Dupont")}
@@ -207,7 +207,7 @@ def test_in_a_room_everyone_speaks_under_their_name(tmp_path):
                      {"Max Dupont (2) : yo", "Max Dupont : yo aussi"}), "deux homonymes se distinguent"
     assert "Quelqu'un : …" in shown, "un nom inconnu n'est jamais remplacé par l'adresse"
     assert after_footer(in_room) == "Tom : Mika t'es là ?", "l'interlocuteur aussi parle sous son nom"
-    assert not any("tg_" in m for m in shown)
+    assert not any("ext_" in m for m in shown)
     # contre-exemple : en privé, deux personnes, pas d'étiquette
     assert after_footer(private) == "en privé cette fois"
 
@@ -244,7 +244,7 @@ def test_the_budget_counts_persona_and_tools(tmp_path):
 
 
 def _row(n: int, at: int, role: str, kind: str, text: str, room: str | None = None) -> dict:
-    return {"id": n, "at": at, "role": role, "person": "tg_1", "room": room, "kind": kind, "text": text,
+    return {"id": n, "at": at, "role": role, "person": "ext_1", "room": room, "kind": kind, "text": text,
             "emotion": None, "emotion_intensity": None}
 
 

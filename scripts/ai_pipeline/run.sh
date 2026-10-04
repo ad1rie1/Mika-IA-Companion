@@ -3,11 +3,10 @@
 # AI Pipeline - Runner principal
 # ============================================================================
 # Exécute les tâches par priorité :
+#   0. Rebase   (PR du pipeline en conflit ou devenues obsolètes)
 #   1. Worker   (issues taggées Propose_AI_PR → PR)
-#   2. Fix      (corrections rapides → PR)
-#   3. Audit    (analyse en profondeur → issues)
-#
-# Vérifie la disponibilité de l'agent IA entre chaque étape.
+#   2. Audit    (analyse en profondeur → issues)
+# puis recommence tant qu'il reste des Propose_AI_PR, et se rendort.
 #
 # Usage:
 #   ./run.sh                  # Tout exécuter par priorité
@@ -17,21 +16,18 @@
 #
 # Surcharges par variable d'environnement : AI_PIPELINE_AGENT,
 # AI_PIPELINE_EFFORT, AI_PIPELINE_THINKING_TOKENS (et non AI_AGENT /
-# CLAUDE_EFFORT, que le CLI Claude Code exporte déjà pour son propre compte).
+# CLAUDE_EFFORT, que le CLI Claude Code exporte déjà pour son propre compte),
+# RELOOP_SLEEP_SECONDS, TOKEN_WAIT_SECONDS.
+#
+# Le pipeline travaille dans son propre worktree : la copie de travail du
+# dépôt peut rester sale, et on peut continuer à y travailler pendant qu'il
+# tourne.
 # ============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/config.sh"
 source "${SCRIPT_DIR}/lib/common.sh"
-
-# Couleurs
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
 
 # ============================================================================
 # Arrêt propre : kill récursif de l'arbre de processus (agent IA inclus)
@@ -52,33 +48,36 @@ _on_interrupt() {
     # Éviter réentrance si TERM arrive pendant qu'on traite INT
     trap '' INT TERM
     echo ""
-    echo -e "${RED}[STOP]${NC} Ctrl+C reçu - arrêt du pipeline"
+    echo -e "${RED}[STOP]${NC} Interruption reçue - arrêt du pipeline"
+    # L'orchestrateur reçoit TERM en premier : c'est son trap qui arrête
+    # l'agent et remet le worktree à zéro. On lui en laisse le temps avant
+    # le KILL.
     local c
     for c in $(pgrep -P $$ 2>/dev/null); do
-        _kill_tree "$c" TERM
+        kill -TERM "$c" 2>/dev/null || true
     done
-    sleep 2
+    sleep 5
     for c in $(pgrep -P $$ 2>/dev/null); do
         _kill_tree "$c" KILL
     done
+    rm -f "${REPORT_FILE:-}"
     exit 130
 }
 
 trap _on_interrupt INT TERM
 
 ORCHESTRATOR="${SCRIPT_DIR}/orchestrator.sh"
-# Choix possible ici: "claude" ou "codex" (surchargeable par --agent ou env AI_AGENT)
-AI_AGENT="${AI_AGENT:-claude}"
 MAX_TASKS=0        # 0 = illimité
 DRY_RUN=false
 TASKS_DONE=0
+REPORT_FILE=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --agent)
-            case "$2" in
+            case "${2:-}" in
                 claude|codex) AI_AGENT="$2" ;;
-                *) echo "Agent inconnu: '$2' (attendu: claude ou codex)"; exit 1 ;;
+                *) echo "Agent inconnu: '${2:-}' (attendu: claude ou codex)"; exit 1 ;;
             esac
             shift 2 ;;
         --max-tasks)  MAX_TASKS="$2"; shift 2 ;;
@@ -102,6 +101,13 @@ EOF
         *)  echo "Option inconnue: $1"; exit 1 ;;
     esac
 done
+[[ "$MAX_TASKS" =~ ^[0-9]+$ ]] || { echo "--max-tasks attend un entier (reçu: '${MAX_TASKS}')"; exit 1; }
+
+# Une simulation ne paie pas d'appel d'agent, même pour la sonde.
+if [[ "$DRY_RUN" == true ]]; then
+    check_ai_tokens() { return 0; }
+fi
+
 # Transmis à orchestrator.sh (processus fils qui re-source config.sh) sous les
 # noms cloisonnés AI_PIPELINE_* : `AI_AGENT` et `CLAUDE_EFFORT` sont exportés
 # par le CLI Claude Code lui-même, cf. le commentaire dans config.sh.
@@ -113,92 +119,70 @@ export AI_AGENT AI_PIPELINE_AGENT AI_PIPELINE_EFFORT AI_PIPELINE_THINKING_TOKENS
 # ============================================================================
 # Helpers
 # ============================================================================
+banner() {
+    echo -e "\n${CYAN}══════════════════════════════════════════${NC}"
+    echo -e "${CYAN}  $*${NC}"
+    echo -e "${CYAN}══════════════════════════════════════════${NC}\n"
+}
+
 task_limit_reached() {
-    if [[ "$MAX_TASKS" -gt 0 && "$TASKS_DONE" -ge "$MAX_TASKS" ]]; then
-        return 0
-    fi
-    return 1
+    [[ "$MAX_TASKS" -gt 0 && "$TASKS_DONE" -ge "$MAX_TASKS" ]]
 }
 
 # Renvoie le nombre d'issues Propose_AI_PR ouvertes, ou sort en échec si la
 # requête n'a pas abouti — l'appelant ne doit surtout pas lire ça comme un zéro.
 count_pending_propose_ai_pr() {
-    local pending
-    pending=$(gh_query gh issue list --state open --limit 1000 --label "Propose_AI_PR" \
-        --json number --template '{{range .}}{{.number}}{{"\n"}}{{end}}') || return 1
-    if [[ -z "$pending" ]]; then
-        echo 0
-    else
-        echo "$pending" | grep -c . || echo 0
-    fi
+    gh_query gh issue list --state open --limit 1000 --label "Propose_AI_PR" \
+        --json number --jq 'length'
 }
 
-run_task() {
-    local description="$1"
-    shift
-
-    if task_limit_reached; then
-        echo -e "${YELLOW}[SKIP]${NC} Limite de tâches atteinte ($MAX_TASKS)"
-        return 1
-    fi
-
-    if ! check_ai_tokens; then
-        echo -e "${RED}[STOP]${NC} Agent IA indisponible - arrêt du pipeline"
-        return 1
-    fi
-
-    echo -e "\n${CYAN}──────────────────────────────────────────${NC}"
-    echo -e "${CYAN}  Tâche $((TASKS_DONE + 1)): ${description}${NC}"
-    echo -e "${CYAN}──────────────────────────────────────────${NC}\n"
-
+# Lance l'orchestrateur et rend son code de sortie (contrat : lib/common.sh).
+# En arrière-plan + wait pour que Ctrl+C soit traité tout de suite. Le module
+# choisi revient par le compte rendu (AI_PIPELINE_REPORT), et non plus en
+# cherchant « Module choisi automatiquement: » dans la sortie.
+LAST_MODULE=""
+run_orchestrator() {
+    LAST_MODULE=""
     if [[ "$DRY_RUN" == true ]]; then
         echo -e "${YELLOW}[DRY-RUN]${NC} $ORCHESTRATOR $*"
-        TASKS_DONE=$((TASKS_DONE + 1))
-        return 0
+        return "$EXIT_NOTHING"
     fi
 
-    if "$ORCHESTRATOR" "$@"; then
-        TASKS_DONE=$((TASKS_DONE + 1))
-        echo -e "${GREEN}[OK]${NC} ${description} terminé"
-    else
-        echo -e "${YELLOW}[WARN]${NC} ${description} échoué (on continue)"
-    fi
-    return 0
+    REPORT_FILE=$(mktemp)
+    local rc=0
+    AI_PIPELINE_REPORT="$REPORT_FILE" "$ORCHESTRATOR" "$@" &
+    wait $! || rc=$?
+    LAST_MODULE=$(sed -n 's/^module=//p' "$REPORT_FILE" | tail -1)
+    rm -f "$REPORT_FILE"
+    REPORT_FILE=""
+    return "$rc"
 }
 
 # ============================================================================
 # ÉTAPE PRÉLIMINAIRE : Rebase/Cleanup des PRs ouvertes
 # ============================================================================
-# - Rebase automatique des PRs en conflit avec main
-# - Fermeture des PRs (et issues liées) devenues non pertinentes
 run_rebase() {
-    echo -e "\n${CYAN}══════════════════════════════════════════${NC}"
-    echo -e "${CYAN}  ÉTAPE : Rebase / Cleanup des PRs ouvertes${NC}"
-    echo -e "${CYAN}══════════════════════════════════════════${NC}\n"
+    banner "ÉTAPE : Rebase / Cleanup des PRs ouvertes"
 
     if task_limit_reached; then
         echo -e "${YELLOW}[SKIP]${NC} Limite de tâches atteinte"
         return 1
     fi
-
     if ! check_ai_tokens; then
         echo -e "${RED}[STOP]${NC} Agent IA indisponible - skip rebase"
         return 1
     fi
 
-    if [[ "$DRY_RUN" == true ]]; then
-        echo -e "${YELLOW}[DRY-RUN]${NC} $ORCHESTRATOR --rebase"
-        return 0
-    fi
-
-    local tmpout
-    tmpout=$(mktemp)
-    "$ORCHESTRATOR" --rebase 2>&1 | tee "$tmpout" &
-    local pipe_pid=$!
-    wait "$pipe_pid" || true
-    rm -f "$tmpout"
-
-    echo -e "${GREEN}[OK]${NC} Rebase/Cleanup terminé"
+    local rc=0
+    run_orchestrator --rebase || rc=$?
+    case "$rc" in
+        "$EXIT_OK"|"$EXIT_NOTHING"|"$EXIT_NO_RESULT")
+            echo -e "${GREEN}[OK]${NC} Rebase/Cleanup terminé" ;;
+        "$EXIT_BUSY")
+            echo -e "${YELLOW}[BUSY]${NC} Une autre instance travaille - rebase sauté" ;;
+        *)
+            echo -e "${YELLOW}[WARN]${NC} Rebase/Cleanup en échec (exit ${rc}) - on continue" ;;
+    esac
     return 0
 }
 
@@ -206,209 +190,147 @@ run_rebase() {
 # PRIORITÉ 1 : Worker (issues Propose_AI_PR → PR)
 # ============================================================================
 run_workers() {
-    echo -e "\n${CYAN}══════════════════════════════════════════${NC}"
-    echo -e "${CYAN}  PRIORITÉ 1 : Worker (Propose_AI_PR)${NC}"
-    echo -e "${CYAN}══════════════════════════════════════════${NC}\n"
+    banner "PRIORITÉ 1 : Worker (Propose_AI_PR)"
 
     local pending
-    if ! pending=$(gh_query gh issue list --state open --limit 1000 --label "Propose_AI_PR" \
-        --json number --template '{{range .}}{{.number}}{{"\n"}}{{end}}'); then
+    if ! pending=$(count_pending_propose_ai_pr); then
         echo -e "${RED}[STOP]${NC} Impossible de lister les issues Propose_AI_PR - étape worker sautée"
         return 1
     fi
-
-    if [[ -z "$pending" ]]; then
+    if [[ "$pending" -eq 0 ]]; then
         echo -e "${GREEN}[OK]${NC} Aucune issue Propose_AI_PR en attente"
         return 0
     fi
+    echo -e "${BLUE}[INFO]${NC} ${pending} issue(s) Propose_AI_PR à traiter"
 
-    local count
-    count=$(echo "$pending" | wc -l)
-    echo -e "${BLUE}[INFO]${NC} ${count} issue(s) Propose_AI_PR à traiter"
+    if task_limit_reached; then
+        echo -e "${YELLOW}[SKIP]${NC} Limite de tâches atteinte ($MAX_TASKS)"
+        return 1
+    fi
+    if ! check_ai_tokens; then
+        echo -e "${RED}[STOP]${NC} Agent IA indisponible - arrêt du pipeline"
+        return 1
+    fi
 
-    run_task "Worker - traitement des issues Propose_AI_PR" --worker || return 1
+    local rc=0
+    run_orchestrator --worker || rc=$?
+    case "$rc" in
+        "$EXIT_OK")
+            TASKS_DONE=$((TASKS_DONE + 1))
+            echo -e "${GREEN}[OK]${NC} Worker terminé (tâche #${TASKS_DONE})" ;;
+        "$EXIT_NOTHING"|"$EXIT_NO_RESULT")
+            echo -e "${BLUE}[INFO]${NC} Worker terminé sans nouvelle PR" ;;
+        "$EXIT_BUSY")
+            echo -e "${YELLOW}[BUSY]${NC} Une autre instance travaille - worker sauté" ;;
+        *)
+            echo -e "${YELLOW}[WARN]${NC} Worker en échec (exit ${rc}) - on continue" ;;
+    esac
     return 0
 }
 
 # ============================================================================
-# PRIORITÉ 2 : Fix (corrections rapides → PR, tous les modules)
+# Balayage des modules pour un profil (fix ou audit)
 # ============================================================================
-run_fixes() {
-    echo -e "\n${CYAN}══════════════════════════════════════════${NC}"
-    echo -e "${CYAN}  PRIORITÉ 2 : Fix (tous les modules)${NC}"
-    echo -e "${CYAN}══════════════════════════════════════════${NC}\n"
+# Tourne tant que l'orchestrateur trouve un module non couvert. Un module déjà
+# passé dans cette session est retiré du tirage (AI_PIPELINE_SKIP_MODULES) :
+# sans PR ni issue créée, rien d'autre ne le marquerait comme couvert.
+#   sweep_modules fix|audit <profil>
+sweep_modules() {
+    local mode="$1" profile="$2"
+    local -a session_skipped=()
+    local -a mode_args=(--profile "$profile")
+    [[ "$mode" == "audit" ]] && mode_args=(--audit --profile "$profile")
 
-    # Profils actifs pour le fix (bugs et security désactivés)
-    local profiles=("bugs")
-    #    local profiles=("bugs" "security" "quality")
-    for profile in "${profiles[@]}"; do
-        echo -e "\n${BLUE}[INFO]${NC} Profil: ${profile} - parcours des modules"
+    echo -e "\n${BLUE}[INFO]${NC} ${mode} profil: ${profile} - parcours des modules"
 
-        # Modules déjà traités dans cette session pour ce profil
-        # (évite de repasser sur un module qui n'a rien à corriger tant qu'aucune
-        # PR n'a été créée, puisque sans PR le module n'est pas marqué comme "couvert")
-        local -a session_skipped=()
+    while true; do
+        if task_limit_reached; then
+            echo -e "${YELLOW}[SKIP]${NC} Limite de tâches atteinte"
+            return 1
+        fi
+        if ! check_ai_tokens; then
+            echo -e "${RED}[STOP]${NC} Agent IA indisponible - arrêt"
+            return 1
+        fi
 
-        # Boucle tant que pick_available_module trouve des modules non couverts
-        while true; do
-            if task_limit_reached; then
-                echo -e "${YELLOW}[SKIP]${NC} Limite de tâches atteinte"
-                unset AI_PIPELINE_SKIP_MODULES
-                return 1
-            fi
+        local rc=0
+        AI_PIPELINE_SKIP_MODULES="$(IFS=,; echo "${session_skipped[*]}")" \
+            run_orchestrator "${mode_args[@]}" || rc=$?
+        local picked="${LAST_MODULE:-?}"
 
-            if ! check_ai_tokens; then
-                echo -e "${RED}[STOP]${NC} Agent IA indisponible - arrêt"
-                unset AI_PIPELINE_SKIP_MODULES
-                return 1
-            fi
-
-            # Exporter la liste (CSV) pour pick_available_module via orchestrator.sh
-            if [[ ${#session_skipped[@]} -gt 0 ]]; then
-                export AI_PIPELINE_SKIP_MODULES="$(IFS=,; echo "${session_skipped[*]}")"
-            else
-                export AI_PIPELINE_SKIP_MODULES=""
-            fi
-
-            # Lancer l'orchestrateur avec sortie visible + capturée dans un fichier temp
-            # Background + wait pour que Ctrl+C soit interceptable immédiatement par le trap
-            local tmpout
-            tmpout=$(mktemp)
-
-            "$ORCHESTRATOR" --profile "$profile" 2>&1 | tee "$tmpout" &
-            local pipe_pid=$!
-            wait "$pipe_pid" || true
-
-            local output
-            output=$(cat "$tmpout")
-            rm -f "$tmpout"
-
-            # Extraire le module choisi depuis les logs
-            local picked_module
-            picked_module=$(echo "$output" | grep -oP '(?<=Module choisi automatiquement: )\S+' || echo "?")
-
-            if echo "$output" | grep -q "Rien à faire"; then
-                echo -e "${GREEN}[OK]${NC} Tous les modules couverts pour '${profile}'"
-                break
-            fi
-
-            if echo "$output" | grep -q "Pipeline terminé avec succès"; then
+        case "$rc" in
+            "$EXIT_OK")
                 TASKS_DONE=$((TASKS_DONE + 1))
-                echo -e "${GREEN}[OK]${NC} Fix ${profile}/${picked_module} terminé (tâche #${TASKS_DONE})"
-                [[ "$picked_module" != "?" ]] && session_skipped+=("$picked_module")
-            elif echo "$output" | grep -q "Aucune modification nécessaire"; then
-                echo -e "${BLUE}[INFO]${NC} Fix ${profile}/${picked_module}: rien à corriger, module suivant"
-                [[ "$picked_module" != "?" ]] && session_skipped+=("$picked_module")
-            else
-                echo -e "${YELLOW}[WARN]${NC} Fix ${profile}/${picked_module} échoué, on passe au profil suivant"
-                break
-            fi
-        done
-        unset AI_PIPELINE_SKIP_MODULES
+                echo -e "${GREEN}[OK]${NC} ${mode} ${profile}/${picked} terminé (tâche #${TASKS_DONE})"
+                ;;
+            "$EXIT_NO_RESULT")
+                echo -e "${BLUE}[INFO]${NC} ${mode} ${profile}/${picked}: rien à signaler, module suivant"
+                ;;
+            "$EXIT_NOTHING")
+                echo -e "${GREEN}[OK]${NC} Tous les modules couverts pour '${profile}'"
+                return 0
+                ;;
+            "$EXIT_BUSY")
+                echo -e "${YELLOW}[BUSY]${NC} Une autre instance travaille - profil '${profile}' sauté"
+                return 0
+                ;;
+            *)
+                echo -e "${YELLOW}[WARN]${NC} ${mode} ${profile}/${picked} en échec (exit ${rc}), on passe au profil suivant"
+                return 0
+                ;;
+        esac
+
+        # Sans module connu, on ne peut pas l'exclure : on s'arrête plutôt que
+        # de reboucler sur le même tirage.
+        if [[ "$picked" == "?" ]]; then
+            echo -e "${YELLOW}[WARN]${NC} Module traité inconnu - fin du balayage '${profile}'"
+            return 0
+        fi
+        session_skipped+=("$picked")
     done
-    return 0
 }
 
-# ============================================================================
+# PRIORITÉ 2 (hors boucle par défaut) : corrections rapides → PR. Les profils
+# bugs/security/quality de small_fix restent lançables par l'orchestrateur ou
+# le cron ; pour les remettre dans la boucle, appeler run_fixes dans
+# run_pipeline_loop.
+run_fixes() {
+    banner "PRIORITÉ 2 : Fix (tous les modules)"
+    # bugs seul : security et quality ont été retirés de la boucle de fix.
+    local -a profiles=("bugs")
+    local profile
+    for profile in "${profiles[@]}"; do
+        sweep_modules fix "$profile" || return 1
+    done
+}
+
 # PRIORITÉ 3 : Audit (analyse profonde → issues, tous les modules)
-# ============================================================================
 run_audits() {
-    echo -e "\n${CYAN}══════════════════════════════════════════${NC}"
-    echo -e "${CYAN}  PRIORITÉ 3 : Audit (tous les modules)${NC}"
-    echo -e "${CYAN}══════════════════════════════════════════${NC}\n"
-    #local profiles=("bugs")
+    banner "PRIORITÉ 3 : Audit (tous les modules)"
     # "features" produit des propositions de fonctionnalités. Ses issues ne sont
     # PAS taguées Propose_AI_PR (cf. AUDIT_NO_AUTO_PR_PROFILES) : elles ne
     # partent donc jamais toutes seules en PR, elles attendent un arbitrage.
-    local profiles=("bugs" "quality" "security" "features")
-    #local profiles=("security" "bugs" "quality")
-    for profile in "${profiles[@]}"; do
-        echo -e "\n${BLUE}[INFO]${NC} Audit profil: ${profile} - parcours des modules"
-
-        # Modules déjà traités dans cette session pour ce profil
-        # (évite de repasser sur un module sans problème détecté tant qu'aucune
-        # issue n'a été créée, puisque sans issue le module n'est pas "couvert")
-        local -a session_skipped=()
-
-        while true; do
-            if task_limit_reached; then
-                echo -e "${YELLOW}[SKIP]${NC} Limite de tâches atteinte"
-                unset AI_PIPELINE_SKIP_MODULES
-                return 1
-            fi
-
-            if ! check_ai_tokens; then
-                echo -e "${RED}[STOP]${NC} Agent IA indisponible - arrêt"
-                unset AI_PIPELINE_SKIP_MODULES
-                return 1
-            fi
-
-            # Exporter la liste (CSV) pour pick_audit_available_module via orchestrator.sh
-            if [[ ${#session_skipped[@]} -gt 0 ]]; then
-                export AI_PIPELINE_SKIP_MODULES="$(IFS=,; echo "${session_skipped[*]}")"
-            else
-                export AI_PIPELINE_SKIP_MODULES=""
-            fi
-
-            # Lancer l'orchestrateur avec sortie visible + capturée dans un fichier temp
-            # Background + wait pour que Ctrl+C soit interceptable immédiatement par le trap
-            local tmpout
-            tmpout=$(mktemp)
-
-            "$ORCHESTRATOR" --audit --profile "$profile" 2>&1 | tee "$tmpout" &
-            local pipe_pid=$!
-            wait "$pipe_pid" || true
-
-            local output
-            output=$(cat "$tmpout")
-            rm -f "$tmpout"
-
-            # Extraire le module choisi depuis les logs
-            local picked_module
-            picked_module=$(echo "$output" | grep -oP '(?<=Module choisi automatiquement: )\S+' || echo "?")
-
-            if echo "$output" | grep -q "Rien à faire"; then
-                echo -e "${GREEN}[OK]${NC} Tous les modules audités pour '${profile}'"
-                break
-            fi
-
-            if echo "$output" | grep -q "Audit terminé avec succès"; then
-                TASKS_DONE=$((TASKS_DONE + 1))
-                echo -e "${GREEN}[OK]${NC} Audit ${profile}/${picked_module} terminé (tâche #${TASKS_DONE})"
-                [[ "$picked_module" != "?" ]] && session_skipped+=("$picked_module")
-            elif echo "$output" | grep -q "Aucun problème détecté"; then
-                echo -e "${BLUE}[INFO]${NC} Audit ${profile}/${picked_module}: aucun problème détecté, module suivant"
-                [[ "$picked_module" != "?" ]] && session_skipped+=("$picked_module")
-            else
-                echo -e "${YELLOW}[WARN]${NC} Audit ${profile}/${picked_module} - problème, on passe au profil suivant"
-                echo "$output" | tail -5
-                break
-            fi
-        done
-        unset AI_PIPELINE_SKIP_MODULES
+    local profile
+    for profile in "bugs" "quality" "security" "features"; do
+        sweep_modules audit "$profile" || return 1
     done
-    return 0
 }
 
 # ============================================================================
 # BOUCLE PIPELINE : Worker ↔ Audit jusqu'à stabilité, puis réveil périodique
 # ============================================================================
-# Fonctionnement :
-#   - Boucle interne : alterne run_workers (traite les Propose_AI_PR) et
-#     run_audits (crée de nouvelles issues Propose_AI_PR). On itère tant qu'il
-#     reste des issues Propose_AI_PR ouvertes après le passage de l'audit.
-#   - Une fois stable (0 issue Propose_AI_PR ET aucun nouvel audit positif),
-#     on sleep RELOOP_SLEEP_SECONDS (30 min par défaut) puis on relance un
-#     cycle complet pour voir si les PRs ont été mergées / si de nouveaux
-#     problèmes apparaissent.
-#   - MAX_TASKS et indisponibilité de l'agent IA coupent proprement la boucle.
-# ============================================================================
+# - Boucle interne : alterne run_workers (traite les Propose_AI_PR) et
+#   run_audits (crée de nouvelles issues Propose_AI_PR). On itère tant qu'il
+#   reste des issues Propose_AI_PR ouvertes après le passage de l'audit.
+# - Une fois stable, on dort RELOOP_SLEEP_SECONDS (30 min par défaut) puis on
+#   relance un cycle complet pour voir si les PRs ont été mergées / si de
+#   nouveaux problèmes apparaissent.
+# - MAX_TASKS et indisponibilité de l'agent IA coupent proprement la boucle.
 RELOOP_SLEEP_SECONDS="${RELOOP_SLEEP_SECONDS:-1800}"
 TOKEN_WAIT_SECONDS="${TOKEN_WAIT_SECONDS:-1800}"
 
-# Boucle bloquante tant que l'agent IA n'a pas de tokens disponibles.
-# On retente toutes les TOKEN_WAIT_SECONDS (30 min par défaut, surchargeable).
-# Ctrl+C interrompt le sleep via le trap principal.
+# Attend que l'agent IA ait de nouveau des tokens, en revérifiant toutes les
+# TOKEN_WAIT_SECONDS.
 wait_for_ai_tokens() {
     local attempt=0
     while ! check_ai_tokens; do
@@ -417,7 +339,7 @@ wait_for_ai_tokens() {
         next_try=$(date -d "+${TOKEN_WAIT_SECONDS} seconds" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "+${TOKEN_WAIT_SECONDS}s")
         echo -e "\n${YELLOW}[WAIT]${NC} Agent IA indisponible (tokens/quota) - tentative ${attempt}"
         echo -e "${YELLOW}       Nouvelle vérification dans $((TOKEN_WAIT_SECONDS / 60)) min (${next_try})${NC}"
-        sleep "$TOKEN_WAIT_SECONDS"
+        pause_for "$TOKEN_WAIT_SECONDS"
     done
     [[ $attempt -gt 0 ]] && echo -e "${GREEN}[OK]${NC} Tokens à nouveau disponibles après ${attempt} attente(s)"
     return 0
@@ -425,40 +347,30 @@ wait_for_ai_tokens() {
 
 run_pipeline_loop() {
     while true; do
-        echo -e "\n${CYAN}══════════════════════════════════════════${NC}"
-        echo -e "${CYAN}  Cycle pipeline démarré : $(date '+%Y-%m-%d %H:%M')${NC}"
-        echo -e "${CYAN}══════════════════════════════════════════${NC}\n"
+        banner "Cycle pipeline démarré : $(date '+%Y-%m-%d %H:%M')"
 
         local iteration=0
         while true; do
             iteration=$((iteration + 1))
             echo -e "\n${BLUE}[ITER]${NC} Itération ${iteration} du cycle courant"
 
-            # Boucle d'attente tokens : on ne sort plus, on patiente jusqu'à dispo
             wait_for_ai_tokens
 
             # Étape 0 : Rebase auto des PRs en conflit + fermeture des PRs obsolètes
             run_rebase || true
-
-            if task_limit_reached; then
-                echo -e "${YELLOW}[STOP]${NC} Limite de tâches atteinte"
-                return 0
-            fi
+            task_limit_reached && { echo -e "${YELLOW}[STOP]${NC} Limite de tâches atteinte"; return 0; }
 
             # Étape 1 : Worker traite toutes les issues Propose_AI_PR existantes
             run_workers || true
-
-            if task_limit_reached; then
-                echo -e "${YELLOW}[STOP]${NC} Limite de tâches atteinte"
-                return 0
-            fi
+            task_limit_reached && { echo -e "${YELLOW}[STOP]${NC} Limite de tâches atteinte"; return 0; }
 
             # Étape 2 : Audit produit éventuellement de nouvelles issues
             # (déjà taggées Propose_AI_PR → reprises au tour suivant par le worker)
             run_audits || true
+            task_limit_reached && { echo -e "${YELLOW}[STOP]${NC} Limite de tâches atteinte"; return 0; }
 
-            if task_limit_reached; then
-                echo -e "${YELLOW}[STOP]${NC} Limite de tâches atteinte"
+            if [[ "$DRY_RUN" == true ]]; then
+                echo -e "${YELLOW}[DRY-RUN]${NC} Un cycle simulé - arrêt"
                 return 0
             fi
 
@@ -468,22 +380,17 @@ run_pipeline_loop() {
                 echo -e "${RED}[STOP]${NC} Décompte des issues impossible - on ne conclut PAS à la stabilité"
                 break
             fi
-
             if [[ "$pending" -eq 0 ]]; then
                 echo -e "${GREEN}[STABLE]${NC} Aucune issue Propose_AI_PR en attente et tous les audits clean"
                 break
             fi
-
             echo -e "${BLUE}[INFO]${NC} ${pending} issue(s) Propose_AI_PR encore ouverte(s) - on relance worker+audit"
         done
 
         local next_run
         next_run=$(date -d "+${RELOOP_SLEEP_SECONDS} seconds" '+%Y-%m-%d %H:%M' 2>/dev/null || echo "+${RELOOP_SLEEP_SECONDS}s")
-        echo -e "\n${CYAN}══════════════════════════════════════════${NC}"
-        echo -e "${YELLOW}[SLEEP]${NC} Pipeline stable - réveil dans $((RELOOP_SLEEP_SECONDS / 60)) min pour re-checker"
-        echo -e "${CYAN}  Prochain cycle : ${next_run}${NC}"
-        echo -e "${CYAN}══════════════════════════════════════════${NC}\n"
-        sleep "$RELOOP_SLEEP_SECONDS"
+        banner "Pipeline stable - prochain cycle : ${next_run}"
+        pause_for "$RELOOP_SLEEP_SECONDS"
     done
 }
 
@@ -491,7 +398,7 @@ run_pipeline_loop() {
 # MAIN
 # ============================================================================
 echo -e "\n${CYAN}══════════════════════════════════════════${NC}"
-echo -e "${CYAN}  AI Pipeline - Runner$([ "$DRY_RUN" == true ] && echo ' (DRY-RUN)')${NC}"
+echo -e "${CYAN}  AI Pipeline - Runner$([[ "$DRY_RUN" == true ]] && echo ' (DRY-RUN)')${NC}"
 echo -e "${CYAN}  $(date '+%Y-%m-%d %H:%M')${NC}"
 echo -e "${CYAN}  Agent IA: $(ai_agent_label)${NC}"
 if [[ "$AI_AGENT" == "claude" ]]; then
@@ -499,6 +406,7 @@ if [[ "$AI_AGENT" == "claude" ]]; then
 else
     echo -e "${CYAN}  Effort/réflexion: ${CODEX_EFFORT:-défaut CLI}${NC}"
 fi
+echo -e "${CYAN}  Worktree: ${WORK_ROOT}${NC}"
 [[ "$MAX_TASKS" -gt 0 ]] && echo -e "${CYAN}  Max tâches: ${MAX_TASKS}${NC}"
 echo -e "${CYAN}══════════════════════════════════════════${NC}\n"
 
@@ -509,7 +417,4 @@ wait_for_ai_tokens
 # ou atteinte de MAX_TASKS.
 run_pipeline_loop || true
 
-# Résumé
-echo -e "\n${CYAN}══════════════════════════════════════════${NC}"
-echo -e "${CYAN}  Terminé - ${TASKS_DONE} tâche(s) exécutée(s)${NC}"
-echo -e "${CYAN}══════════════════════════════════════════${NC}\n"
+banner "Terminé - ${TASKS_DONE} tâche(s) exécutée(s)"

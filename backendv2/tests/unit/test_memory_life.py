@@ -92,7 +92,7 @@ def test_a_coming_moment_comes_back_before_and_after(tmp_path, asked):
 
 
 def test_a_promise_is_to_a_person_once_and_reads_like_a_sentence(tmp_path):
-    """Sur son Telegram relié à son compte, Alice reçoit une promesse : la
+    """Sur son compte extérieur relié à son compte, Alice reçoit une promesse : la
     relecture suivante la voit (elle est à Alice, pas à une adresse), ne la
     note pas deux fois, et « ce que tu lui as promis » se lit comme une phrase."""
     calls: list[str] = []
@@ -109,12 +109,12 @@ def test_a_promise_is_to_a_person_once_and_reads_like_a_sentence(tmp_path):
     async def main():
         await boot(kernel)
         await connect(kernel, "user_2", "Alice")
-        await kernel.mind.append([identity_c.LINKED.draft(handle="tg_5", person="user_2")], emitter="identity",
+        await kernel.mind.append([identity_c.LINKED.draft(handle="ext_5", person="user_2")], emitter="identity",
                                  correlation="opérateur", origin=Origin.GENESIS)
-        tg = {"channel": "telegram", "display_name": "Alice"}
-        await chat(kernel, "tg_5", ["tu peux m'envoyer le lien du concert ?", *SIX[1:]], **tg)
+        tg = {"channel": "external", "display_name": "Alice"}
+        await chat(kernel, "ext_5", ["tu peux m'envoyer le lien du concert ?", *SIX[1:]], **tg)
         await asyncio.sleep(10 * 60)
-        await chat(kernel, "tg_5", ["et le concert, tu as le lien ?", *SIX[1:]], **tg)
+        await chat(kernel, "ext_5", ["et le concert, tu as le lien ?", *SIX[1:]], **tg)
         await asyncio.sleep(10 * 60)
         await chat(kernel, "user_2", ["tu te souviens de ce que tu m'as promis ?"])
         promises = list(kernel.mind.root.slices["memory"].promises.values())

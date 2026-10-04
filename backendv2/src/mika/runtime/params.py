@@ -4,8 +4,8 @@ Quatre étages, du plus faible au plus fort :
 
 1. **défaut** — la valeur déclarée par le modèle de paramètres ;
 2. **tempérament** — ce que ``derive`` en fait (le caractère) ;
-3. **réglage** — ce que l'exploitation fournit comme une donnée (les
-   propriétaires Telegram de l'identité, par exemple) : jamais une surcharge,
+3. **réglage** — ce que l'exploitation fournit comme une donnée (le fuseau
+   de sa persona, les boîtes où elle prépare des réponses) : jamais une surcharge,
    donc jamais effacé par une reconfiguration ;
 4. **surcharge** — le bloc « avancé » de la console, par chemin pointé.
 

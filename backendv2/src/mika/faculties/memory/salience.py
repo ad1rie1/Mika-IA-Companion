@@ -236,8 +236,8 @@ def unsaid_line(person: str, names: dict[str, str], *, heavy: bool, close: bool,
 
 def unsaid_public_line(person: str, names: dict[str, str], when: str = "") -> str:
     """Devant un salon : ce que la personne lui a dit en privé ne se raconte pas, mais elle ne fait pas comme si
-    elle ne savait rien — sinon le modèle invente qu'il ne l'a pas vue (sonde réelle du 2026-10-03, dans un groupe
-    Telegram : « je l'ai pas vu non plus depuis le week-end », alors qu'elle lui avait parlé la veille). Ni le
+    elle ne savait rien — sinon le modèle invente qu'il ne l'a pas vue (sonde réelle du 2026-10-03, dans un salon :
+    « je l'ai pas vu non plus depuis le week-end », alors qu'elle lui avait parlé la veille). Ni le
     contenu, ni « moment difficile » : le salon n'a pas à deviner ce qui pèse."""
     who = names.get(person, person)
     if when:

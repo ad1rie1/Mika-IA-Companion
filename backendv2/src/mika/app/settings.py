@@ -26,7 +26,6 @@ log = logging.getLogger("mika.settings")
 _IGNORED_ROLES: set[str] = set()
 
 LLM_KEY = "llm"
-TELEGRAM_KEY = "telegram"
 EMAIL_KEY = "email"
 FEEDS_KEY = "feeds"
 STT_KEY = "stt"
@@ -38,26 +37,9 @@ CONSOLE_MCP_KEY = "console_mcp"
 PERSONA_KEY = "persona"
 OVERRIDES_KEY = "overrides"
 FORGE_CONFIG_KEY = "forge_config"
-
-
-#: un code d'appairage Telegram : sans caractère qu'on confond (0/O, 1/I/L), deux groupes de quatre
-PAIRING_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-
-
-def pairing_code() -> str:
-    """« K7QF-M3XP » : huit signes sur 31 (près de 40 bits), à usage unique."""
-    raw = "".join(secrets.choice(PAIRING_ALPHABET) for _ in range(8))
-    return f"{raw[:4]}-{raw[4:]}"
-
-
-def same_pairing_code(given: str, expected: str) -> bool:
-    """Le code tapé est-il le bon ? Sans tenir compte de la casse, des espaces ni du tiret ; comparé en temps
-    constant."""
-    def norm(text: str) -> str:
-        return "".join(c for c in text.upper() if c.isalnum())
-
-    a, b = norm(given), norm(expected)
-    return bool(b) and secrets.compare_digest(a.encode(), b.encode())
+#: les réglages d'un canal retiré (Telegram, ADR 0060) : effacés à l'ouverture — un jeton scellé que plus
+#: rien ne lit ne reste pas dans ``mind.db`` ni dans ses sauvegardes
+RETIRED_KEYS = ("telegram",)
 
 
 class SecretBox:
@@ -99,6 +81,8 @@ class Settings:
     async def open(self) -> None:
         await self.store.run_mind(lambda sql: sql.execute(
             "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)"))
+        await self.store.run_mind(lambda sql: sql.executemany(
+            "DELETE FROM settings WHERE key=?", [(k,) for k in RETIRED_KEYS]))
         data = self._get(FORGE_CONFIG_KEY) or {}
         self._forge = {str(k): dict(v) for k, v in data.items() if isinstance(v, dict)}
 
@@ -149,51 +133,6 @@ class Settings:
         await self._put(LLM_KEY, {"backends": backends, "routes": dict(cfg.routes),
                                   "context_tokens": cfg.context_tokens})
         return cfg
-
-    # ── Telegram ──
-    def telegram(self) -> dict[str, Any]:
-        """``{"token": …, "allowed_chats": [...], "owners": [...], "open": bool}`` (jeton déchiffré) ;
-        ``open`` : ouvert à tous — sinon, liste blanche vide, seules les propriétaires lui écrivent."""
-        data = dict(self._get(TELEGRAM_KEY) or {})
-        return {"token": self.box.open(data.get("token_sealed", "")),
-                "allowed_chats": [int(c) for c in data.get("allowed_chats") or []],
-                "owners": [int(o) for o in data.get("owners") or []],
-                "open": bool(data.get("open"))}
-
-    async def save_telegram(self, *, token: str | None = None, allowed_chats: list[int] | None = None,
-                            owners: list[int] | None = None, open_to_all: bool | None = None) -> None:
-        data = dict(self._get(TELEGRAM_KEY) or {})
-        if token is not None:
-            data["token_sealed"] = self.box.seal(token.strip())
-        if allowed_chats is not None:
-            data["allowed_chats"] = sorted({int(c) for c in allowed_chats})
-        if owners is not None:
-            data["owners"] = sorted({int(o) for o in owners})
-        if open_to_all is not None:
-            data["open"] = bool(open_to_all)
-        await self._put(TELEGRAM_KEY, data)
-
-    def telegram_pairing(self) -> tuple[str, int] | None:
-        """Le code d'appairage en cours (déchiffré) et son échéance (secondes depuis l'époque), ou ``None``."""
-        data = dict(self._get(TELEGRAM_KEY) or {})
-        code = self.box.open(data.get("pairing_sealed", ""))
-        return (code, int(data.get("pairing_expires") or 0)) if code else None
-
-    async def new_telegram_pairing(self, now_s: int, ttl_s: int) -> str:
-        """Un code d'appairage neuf (l'ancien ne vaut plus), scellé comme un secret ; rendu pour être montré."""
-        code = pairing_code()
-        data = dict(self._get(TELEGRAM_KEY) or {})
-        data["pairing_sealed"] = self.box.seal(code)
-        data["pairing_expires"] = int(now_s + ttl_s)
-        await self._put(TELEGRAM_KEY, data)
-        return code
-
-    async def clear_telegram_pairing(self) -> None:
-        data = dict(self._get(TELEGRAM_KEY) or {})
-        if "pairing_sealed" in data or "pairing_expires" in data:
-            data.pop("pairing_sealed", None)
-            data.pop("pairing_expires", None)
-            await self._put(TELEGRAM_KEY, data)
 
     # ── Courrier, flux, transcription ──
     #: les secrets d'un compte de courrier (scellés à part, jamais en clair dans ``mind.db``)

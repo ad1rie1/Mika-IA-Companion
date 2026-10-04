@@ -4,8 +4,9 @@ qu'elle peut dire d'autrui devant cette audience.
 Deux notions orthogonales :
 
 - la **confiance du canal** est une propriété du transport (une session
-  authentifiée prouve le compte ; un compte Telegram prouve seulement que le
-  même compte est revenu ; un salon public ne prouve rien). Elle donne un
+  authentifiée prouve le compte ; un compte sur un réseau extérieur — forum,
+  messagerie, réseau social où elle échangerait d'elle-même — prouve seulement
+  que le même compte est revenu ; un salon public ne prouve rien). Elle donne un
   plancher et impose un **plafond** : aucune conversation ne rend une
   affirmation faite en public aussi sûre qu'une connexion ;
 - la **certitude** est une propriété du lien adresse → personne ; elle bouge
@@ -39,7 +40,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
-from mika.vocab.people import clean_display_name
+from mika.vocab.people import EXTERNAL_PREFIX, clean_display_name
 
 
 class ChannelTrust(enum.StrEnum):
@@ -90,7 +91,14 @@ COUNTER_EVIDENCE: Mapping[str, float] = MappingProxyType({
     "revoked": -1.0,
 })
 
-_ACCOUNT_CHANNELS = frozenset({"telegram", "discord", "signal", "email"})
+#: le web : l'application, avec ou sans compte
+WEB = "web"
+#: un compte sur un réseau extérieur (forum, messagerie, réseau social), adresses ``ext_…`` : un compte
+#: stable, rien ne prouve qui le tient — le nom générique d'un canal non sécurisé
+EXTERNAL = "external"
+#: les canaux d'un compte stable en conversation privée. Ce sont aussi des **messageries** : un message s'y
+#: lit quand on y pense (pas quand il arrive), et elle peut y écrire à quelqu'un d'absent
+_ACCOUNT_CHANNELS = frozenset({EXTERNAL, "discord", "signal", "email"})
 _INTERNAL_CHANNELS = frozenset({"conscience", "internal", "module", "system"})
 _ALIASES = MappingProxyType({"frontend": "web", "websocket": "web", "ws": "web"})
 
@@ -98,6 +106,18 @@ _ALIASES = MappingProxyType({"frontend": "web", "websocket": "web", "ws": "web"}
 def normalize_channel(channel: str | None) -> str:
     name = (channel or "").strip().lower()
     return _ALIASES.get(name, name)
+
+
+def channel_of(handle: str) -> str:
+    """Le canal d'une adresse d'après sa forme, pour une adresse qui n'a encore jamais écrit (un opérateur
+    la relie d'avance) : ``ext_…`` est un compte extérieur, le reste le web."""
+    return EXTERNAL if handle.startswith(EXTERNAL_PREFIX) else WEB
+
+
+def is_messaging(channel: str | None) -> bool:
+    """Une messagerie : on y lit quand on y pense, et elle peut y écrire à quelqu'un d'absent (en privé).
+    L'écran (le web) est l'inverse : on y répond en minutes, et seulement si on est là."""
+    return normalize_channel(channel) in _ACCOUNT_CHANNELS
 
 
 def channel_trust(channel: str | None, *, authenticated: bool = False, public: bool = False) -> ChannelTrust:

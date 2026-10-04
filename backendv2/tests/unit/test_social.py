@@ -230,7 +230,7 @@ def prompts(llm, target, containing=""):
             if c.meta.get("target") == target and containing in c.messages[-1].content]
 
 
-async def evening(kernel, handle, *, channel="telegram", per_day=4):
+async def evening(kernel, handle, *, channel="external", per_day=4):
     for i in range(per_day):
         p = await kernel.perceive(said(handle, f"message {i} du soir", channel=channel))
         if p.reply is not None:  # endormie, la réponse d'une inconnue attend son réveil (ADR 0036)
@@ -238,7 +238,7 @@ async def evening(kernel, handle, *, channel="telegram", per_day=4):
         await asyncio.sleep(60)
 
 
-async def daily(kernel, handle, days, *, channel="telegram", per_day=4, start_hour=None):
+async def daily(kernel, handle, days, *, channel="external", per_day=4, start_hour=None):
     """Une relation qui vit : quelques messages chaque soir."""
     del start_hour  # l'heure de départ est celle de la course
     for _ in range(days):
@@ -255,8 +255,8 @@ def started(kernel):
 
 def test_she_misses_a_reachable_friend_but_not_an_acquaintance_nor_someone_unreachable(tmp_path):
     async def scenario(kernel, clock, script):
-        await daily(kernel, "tg_1", 5)  # une amie, sur Telegram (joignable)
-        await daily(kernel, "tg_2", 1, per_day=5)  # une connaissance d'un soir
+        await daily(kernel, "ext_1", 5)  # une amie, sur un compte extérieur (joignable)
+        await daily(kernel, "ext_2", 1, per_day=5)  # une connaissance d'un soir
         await connect(kernel, "user_3", "Chloé")
         await daily(kernel, "user_3", 5, channel="web")  # une amie, mais seulement dans le navigateur
         await disconnect(kernel, "user_3")
@@ -265,12 +265,12 @@ def test_she_misses_a_reachable_friend_but_not_an_acquaintance_nor_someone_unrea
 
     fired = run(tmp_path, scenario)
     outreach = {t for t, reason in fired if {social_c.RECONTACT, social_c.CHAT} & set(reason.split(","))}
-    assert outreach == {"tg_1"}, fired
+    assert outreach == {"ext_1"}, fired
 
 
 def test_she_never_writes_to_an_absent_friend_at_night(tmp_path):
     async def scenario(kernel, clock, script):
-        await daily(kernel, "tg_1", 5, start_hour=23)
+        await daily(kernel, "ext_1", 5, start_hour=23)
         await asyncio.sleep(3 * DAY / US)
         return [(local(e.at, PARIS), e.data.reason) for e in started(kernel) if e.data.kind == "INITIATIVE"]
 
@@ -284,9 +284,9 @@ def test_in_distress_she_turns_to_the_friend_she_feels_good_with(tmp_path):
     async def scenario(kernel, clock, script):
         for _ in range(4):  # deux amies qui écrivent chaque jour
             script.tag = "[EMOTION:love:0.8]"
-            await evening(kernel, "tg_1")  # celle qui lui fait du bien
+            await evening(kernel, "ext_1")  # celle qui lui fait du bien
             script.tag = "[EMOTION:curious:0.4]"
-            await evening(kernel, "tg_2")  # l'autre, sans plus
+            await evening(kernel, "ext_2")  # l'autre, sans plus
             await asyncio.sleep(DAY / US - 8 * 60)
         await befriend(kernel, "user_9", "close")
         script.tag = "[EMOTION:sad:0.9]"  # quelqu'un de proche va très mal : elle aussi
@@ -300,7 +300,7 @@ def test_in_distress_she_turns_to_the_friend_she_feels_good_with(tmp_path):
 
     fired = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 11, 0))
     comfort = [t for t, reason in fired if social_c.COMFORT in reason.split(",")]
-    assert comfort == ["tg_1"], fired  # vers celle qui lui fait du bien — et une seule
+    assert comfort == ["ext_1"], fired  # vers celle qui lui fait du bien — et une seule
 
 
 def _profile(kernel, person, sensitive=()):
@@ -349,20 +349,20 @@ def test_a_memory_touching_someones_sensitive_topic_becomes_a_confidence(tmp_pat
 
 def test_a_room_reply_sees_the_room_not_her_private_thread(tmp_path):
     async def scenario(kernel, clock, script):
-        p = await kernel.perceive(said("tg_1", "CANARI-PRIVE je te le dis en privé", channel="telegram"))
+        p = await kernel.perceive(said("ext_1", "CANARI-PRIVE je te le dis en privé", channel="external"))
         await p.reply
-        p = await kernel.perceive(said("tg_2", "salut le groupe", channel="telegram", room="tg_chat_-1",
+        p = await kernel.perceive(said("ext_2", "salut le groupe", channel="external", room="ext_chat_-1",
                                        public=True, addressed=False, display_name="Léa"))
-        p = await kernel.perceive(said("tg_1", "Mika, tu en penses quoi ?", channel="telegram", room="tg_chat_-1",
+        p = await kernel.perceive(said("ext_1", "Mika, tu en penses quoi ?", channel="external", room="ext_chat_-1",
                                        public=True, display_name="Tom"))
         await p.reply
 
     _, llm = run(tmp_path, scenario, with_llm=True)
-    room = prompts(llm, "tg_1", "Mika, tu en penses quoi")
+    room = prompts(llm, "ext_1", "Mika, tu en penses quoi")
     assert room
     text = room[-1]
     assert "Léa : salut le groupe" in text  # chacun parle sous son nom, jamais sous son adresse
-    assert "[tg_2]" not in text
+    assert "[ext_2]" not in text
     assert "CANARI-PRIVE" not in text
 
 
@@ -371,15 +371,15 @@ def test_contacts_follow_the_person_not_the_handle(tmp_path):
     from mika.contracts import identity as identity_c
 
     async def scenario(kernel, clock, script):
-        await kernel.mind.append([identity_c.LINKED.draft(handle="tg_5", person="user_1")], emitter="identity",
+        await kernel.mind.append([identity_c.LINKED.draft(handle="ext_5", person="user_1")], emitter="identity",
                                  correlation="genese", origin=Origin.GENESIS)
         await connect(kernel, "user_1", "Alice")
         p = await kernel.perceive(said("user_1", "coucou"))
         await p.reply
         await asyncio.sleep(HOUR / US)
-        p = await kernel.perceive(said("tg_5", "c'est encore moi", channel="telegram"))
+        p = await kernel.perceive(said("ext_5", "c'est encore moi", channel="external"))
         await p.reply
-        return kernel.mind.frame().get(social_c.CONTACT("user_1")), kernel.mind.frame().get(social_c.CONTACT("tg_5"))
+        return kernel.mind.frame().get(social_c.CONTACT("user_1")), kernel.mind.frame().get(social_c.CONTACT("ext_5"))
 
     alice, handle = run(tmp_path, scenario)
     assert alice.inbound == 2 and handle.inbound == 0
@@ -398,18 +398,18 @@ def test_whatever_the_reason_no_second_message_to_a_friend_who_has_not_answered(
 
     def budget(kernel):
         frame = kernel.mind.frame()
-        return _budget(frame.state("agency"), frame, RowView("INITIATIVE", "tg_1", 5.0, ("thought",)))
+        return _budget(frame.state("agency"), frame, RowView("INITIATIVE", "ext_1", 5.0, ("thought",)))
 
     async def scenario(kernel, clock, script):
-        await befriend(kernel, "tg_1", "close")
-        p = await kernel.perceive(said("tg_1", "coucou", channel="telegram"))
+        await befriend(kernel, "ext_1", "close")
+        p = await kernel.perceive(said("ext_1", "coucou", channel="external"))
         await p.reply
         await kernel.mind.append([rt.UTTERANCE.draft(
-            kind="INITIATIVE", text=Content.of("tu vas mieux ?"), target="tg_1", channel="telegram",
+            kind="INITIATIVE", text=Content.of("tu vas mieux ?"), target="ext_1", channel="external",
             voice=VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m"))],
             emitter="runtime", correlation="genese", origin=Origin.GENESIS)
         absent = budget(kernel)
-        await connect(kernel, "tg_1", "Alice")
+        await connect(kernel, "ext_1", "Alice")
         return absent, budget(kernel)
 
     absent, present = run(tmp_path, scenario)
@@ -455,15 +455,15 @@ def test_a_night_owl_reaches_out_to_a_friend_late_in_the_evening(tmp_path):
     async def scenario(kernel, window):
         await boot(kernel)
         await kernel.set_params("social", SocialParams(day_start_min=window[0], day_end_min=window[1]))
-        await befriend(kernel, "tg_1", social_c.FRIEND)
+        await befriend(kernel, "ext_1", social_c.FRIEND)
         for day in range(4):  # une amie qui écrit tous les jours à 22 h 30…
             await asyncio.sleep((DAY if day else 0) / US)
-            p = await kernel.perceive(said("tg_1", "coucou, tu fais quoi ce soir ?", channel="telegram"))
+            p = await kernel.perceive(said("ext_1", "coucou, tu fais quoi ce soir ?", channel="external"))
             await p.reply
         await asyncio.sleep(2 * DAY / US + HOUR / US)  # … puis plus rien
         mind = kernel.mind
         sent = [mind.decode(e) for e in mind.store.read() if e.type == rt.UTTERANCE.name]
-        return [local(e.at, PARIS).hour for e in sent if e.data.kind == "INITIATIVE" and e.data.target == "tg_1"]
+        return [local(e.at, PARIS).hour for e in sent if e.data.kind == "INITIATIVE" and e.data.target == "ext_1"]
 
     def go(path, window):
         kernel, clock, _, _ = build(path, lambda req: LLMResponse("d'accord [EMOTION:happy:0.5]"),

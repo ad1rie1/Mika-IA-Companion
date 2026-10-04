@@ -68,6 +68,7 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab import affect as A
+from mika.vocab import privacy
 from mika.vocab.affect import Appraisal, Declared, Emotion
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
@@ -157,8 +158,8 @@ class AttentionParams(BaseModel):
              "elle compte comme ignorée : son estime baisse et elle se fait plus réservée.")] = 20 * MINUTE
     reply_window_message_us: Annotated[int, Knob(
         label="Délai de réponse (messagerie)", group="Attentes", lo=5 * MINUTE, hi=DAY,
-        help="Le même délai sur Telegram, où un message se lit quand on y pense, pas quand il arrive : une amie "
-             "qui n'a pas répondu en une heure, le soir, ne l'ignore pas.")] = 3 * HOUR
+        help="Le même délai sur une messagerie (un compte extérieur), où un message se lit quand on y pense, pas "
+             "quand il arrive : une amie qui n'a pas répondu en une heure, le soir, ne l'ignore pas.")] = 3 * HOUR
     reply_learned_after: Annotated[int, Knob(
         label="Délais mesurés avant d'en tenir compte", group="Attentes", lo=1, hi=50,
         help="Après tant de réponses mesurées de la même personne sur le même canal, elle attend à la mesure de "
@@ -604,7 +605,7 @@ def reply_window(cx: Any, person: str, channel: str, p: AttentionParams) -> int:
     a appris que cette personne met plus longtemps — un multiple de son délai
     habituel (borné). Jamais moins que le délai du canal : répondre vite
     d'habitude ne rend pas impatiente."""
-    window = p.reply_window_message_us if channel == "telegram" else p.reply_window_us
+    window = p.reply_window_message_us if privacy.is_messaging(channel) else p.reply_window_us
     learned = cx.facts.get(others_c.REPLY_DELAY((person, channel)))
     if learned.samples >= p.reply_learned_after:
         window = max(window, min(p.reply_window_max_us, round(learned.median_us * p.reply_window_factor)))
@@ -889,7 +890,7 @@ def _missed(s: AttentionState, e, cx) -> AttentionState:
     # répond quand on y pense : dans les jours qui suivent
     window = (expected.deadline - expected.since) if expected is not None and expected.deadline else p.reply_window_us
     until = round(window * p.late_reply_factor)
-    if expected is not None and expected.channel == "telegram":
+    if expected is not None and privacy.is_messaging(expected.channel):
         until = max(until, p.late_reply_message_us)
     late = Late(d.since, d.since + until)
     ex = s.exchanges.get(d.person) or Exchange()

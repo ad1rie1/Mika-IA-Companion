@@ -84,7 +84,7 @@ class LinkArgs(BaseModel):
 
     person: Annotated[str, Field(min_length=1, max_length=80), Knob(
         label="Personne", subject="person", advanced=False,
-        help="Sa clé (user_7, tg_42…) ou le nom sous lequel elle la connaît.")]
+        help="Sa clé (user_7, ext_42…) ou le nom sous lequel elle la connaît.")]
     confirmed: Annotated[bool, Knob(label="Je confirme", advanced=False, help=CONFIRM_HELP)] = False
 
 
@@ -119,7 +119,7 @@ def _can_link(s: IdentityState, frame: Frame, key: str) -> bool:
 
 @IDENTITY.action("relier", title="Relier à une personne", args=LinkArgs, emits=[c.LINKED], subject="handle",
                  description="Cette adresse parlera pour la personne choisie (certitude « liée ») : sa mémoire, "
-                             "ses liens, sa fiche et son fil s'y attachent — et, sur un compte Telegram, les droits "
+                             "ses liens, sa fiche et son fil s'y attachent — et, sur un compte extérieur, les droits "
                              "d'une propriétaire. Jamais sur une session authentifiée : elle prouve déjà qui écrit.",
                  confirm="Relier cette adresse ? Elle recevra tout ce que la personne choisie lui a confié.",
                  available=_can_link, order=10)

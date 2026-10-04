@@ -14,8 +14,6 @@
 - ``token create <compte> [--label …]`` / ``token list [<compte>]`` / ``token revoke <id>`` : les jetons
   d'un client natif (un moteur de jeu sur ``/ws/world``, ADR 0051) — montrés une seule fois, gardés en
   empreinte ; serveur en marche, une révocation ferme ses connexions au plus tard dix secondes après ;
-- ``telegram show|token|allow|disallow|owner|open|close|pair`` : le robot Telegram
-  (jeton chiffré ; fermé par défaut : liste blanche et propriétaires ; « pair » : un code d'appairage) ;
 - ``serve --origin URL --cookie-secure --behind-proxy`` : derrière un mandataire TLS ;
 - ``console apercu --out DOSSIER`` : chaque page de la console, exportée ;
 - ``identity link|unlink``, ``social closeness`` et ``forge promote|demote`` : ce
@@ -50,7 +48,7 @@ from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
 from mika.adapters.web.accounts import Accounts, password_problems
 from mika.app import backup, composition, datadir
 from mika.app.composition import faculties, for_simulation
-from mika.app.server import PAIRING_TTL_S, serve
+from mika.app.server import serve
 from mika.app.settings import SecretBox, Settings
 from mika.contracts import identity as identity_c
 from mika.kernel import forms
@@ -83,7 +81,7 @@ FIRST_STEPS = """Premiers pas :
   4. le frontend : cd frontend/Web && npm install && npm run dev, puis http://localhost:3000
                                 (il vise :8001 ; VITE_BACKEND_ORIGIN pour une autre adresse)
 
-Tout se règle aussi d'ici : mika llm, mika account, mika telegram… (mika <commande> --help).
+Tout se règle aussi d'ici : mika llm, mika account, mika token… (mika <commande> --help).
 Démarrage local pas à pas : backendv2/README.md ; en service (systemd) : deploy/README.md."""
 
 
@@ -207,7 +205,7 @@ async def operate(data: Path, key: str, subject: str, values: dict[str, str]) ->
 
 
 async def _prelink(kernel: Kernel, handle: str, person: str) -> dict[str, object]:
-    """Relier une adresse qui n'a encore jamais écrit (un compte Telegram qu'on attend) : la console
+    """Relier une adresse qui n'a encore jamais écrit (un compte qu'on attend) : la console
     n'en a pas la fiche, le réducteur l'accepte. Seulement vers une personne connue, par sa clé ;
     jamais une adresse interne ou jetable. Audité."""
     frame = kernel.mind.frame()
@@ -422,30 +420,6 @@ async def token_command(data: Path, args: argparse.Namespace) -> dict[str, objec
     return await _with_settings(data, run)
 
 
-async def telegram_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
-    async def run(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
-        cfg = settings.telegram()
-        if args.tg_cmd == "token":
-            await settings.save_telegram(token=args.token)
-        elif args.tg_cmd == "allow":
-            await settings.save_telegram(allowed_chats=[*cfg["allowed_chats"], *args.chats])
-        elif args.tg_cmd == "disallow":
-            await settings.save_telegram(allowed_chats=[c for c in cfg["allowed_chats"] if c not in args.chats])
-        elif args.tg_cmd == "owner":
-            await settings.save_telegram(owners=[*cfg["owners"], *args.users])
-        elif args.tg_cmd in ("open", "close"):
-            await settings.save_telegram(open_to_all=args.tg_cmd == "open")
-        elif args.tg_cmd == "pair":
-            code = await settings.new_telegram_pairing(int(time.time()), PAIRING_TTL_S)
-            return {"code": code, "usage": f"envoie au robot, en privé : /start {code} — le compte qui l'envoie "
-                                           "devient sa propriétaire (une seule fois, valable 24 h)"}
-        cfg = settings.telegram()
-        return {"token": "…" + cfg["token"][-4:] if cfg["token"] else "", "allowed_chats": cfg["allowed_chats"],
-                "owners": cfg["owners"], "open": cfg["open"]}
-
-    return await _with_settings(data, run)
-
-
 async def world_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
     """Le courrier, les flux, la transcription : ce qu'elle perçoit du monde."""
 
@@ -585,21 +559,6 @@ def _run(argv: list[str] | None) -> int:
     tkl.add_argument("username", nargs="?", default=None)
     tkr = tksub.add_parser("revoke", help="révoquer un jeton : il ne vaut plus rien, ses connexions se ferment")
     tkr.add_argument("id", type=int)
-    tg = sub.add_parser("telegram", help="le robot Telegram")
-    tsub = tg.add_subparsers(dest="tg_cmd", required=True)
-    tsub.add_parser("show")
-    tt = tsub.add_parser("token")
-    tt.add_argument("token")
-    ta = tsub.add_parser("allow", help="n'écouter que ces conversations (identifiants de chat)")
-    ta.add_argument("chats", nargs="+", type=int)
-    td = tsub.add_parser("disallow")
-    td.add_argument("chats", nargs="+", type=int)
-    to = tsub.add_parser("owner", help="comptes Telegram propriétaires (identifiants d'utilisateur)")
-    to.add_argument("users", nargs="+", type=int)
-    tsub.add_parser("open", help="ouvrir à tout le monde, liste blanche comprise (sinon : fermé par défaut)")
-    tsub.add_parser("close", help="revenir à la liste blanche et aux propriétaires")
-    tsub.add_parser("pair", help="un code d'appairage : envoyé au robot en privé (/start <code>), il fait de son "
-                                 "auteur une propriétaire — sans connaître son identifiant Telegram")
     idp = sub.add_parser("identity", help="relier une adresse à une personne (serveur arrêté)")
     isub = idp.add_subparsers(dest="id_cmd", required=True)
     il = isub.add_parser("link")
@@ -754,9 +713,6 @@ def _run(argv: list[str] | None) -> int:
         out = asyncio.run(token_command(args.data, args))
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0 if out["ok"] else 1
-    if args.cmd == "telegram":
-        print(json.dumps(asyncio.run(telegram_command(args.data, args)), ensure_ascii=False))
-        return 0
     if args.cmd == "mcp":
         async def mcp_token(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
             token = await settings.new_console_mcp_token()

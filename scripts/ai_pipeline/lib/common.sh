@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# AI Pipeline - Fonctions communes (logging, notifications, prérequis)
+# AI Pipeline - Fonctions communes (logging, agent IA, prompts, notifications)
 # ============================================================================
 
 # Couleurs
@@ -11,17 +11,66 @@ BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+# -- Codes de sortie de l'orchestrateur ---------------------------------------
+# run.sh décidait de la suite en cherchant des phrases dans la sortie de
+# l'orchestrateur (« Rien à faire », « Pipeline terminé avec succès »…) : une
+# reformulation d'un message cassait la boucle sans que rien ne le signale. Le
+# contrat est désormais le code de sortie.
+EXIT_OK=0            # travail livré : PR, issues, PR rebasées
+EXIT_FAIL=1          # échec
+EXIT_NOTHING=10      # rien à faire : aucun module disponible, aucune issue en attente
+EXIT_NO_RESULT=11    # passage fait, sans résultat : aucune modification, aucun constat
+EXIT_BUSY=75         # une autre instance tient le verrou (EX_TEMPFAIL)
+
+mkdir -p "$LOGS_DIR"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-LOG_FILE="${LOGS_DIR}/run-${TIMESTAMP}.log"
+LOG_FILE="${LOGS_DIR}/run-${TIMESTAMP}-$$.log"
 
-log()    { echo -e "${BLUE}[$(date +%H:%M:%S)]${NC} $*" | tee -a "$LOG_FILE"; }
-ok()     { echo -e "${GREEN}[OK]${NC} $*" | tee -a "$LOG_FILE"; }
-warn()   { echo -e "${YELLOW}[WARN]${NC} $*" | tee -a "$LOG_FILE"; }
-err()    { echo -e "${RED}[ERR]${NC} $*" | tee -a "$LOG_FILE"; }
-header() { echo -e "\n${CYAN}══════════════════════════════════════════${NC}" | tee -a "$LOG_FILE"
-           echo -e "${CYAN}  $*${NC}" | tee -a "$LOG_FILE"
-           echo -e "${CYAN}══════════════════════════════════════════${NC}\n" | tee -a "$LOG_FILE"; }
+# Le terminal reçoit les couleurs, le fichier du texte brut : les journaux
+# étaient pleins de séquences `\033[0;34m` qui rendaient grep et less pénibles.
+_emit() {
+    local color="$1" tag="$2"; shift 2
+    printf '%b%s%b %s\n' "$color" "$tag" "$NC" "$*"
+    printf '%s %s\n' "$tag" "$*" >> "$LOG_FILE"
+}
+log()    { _emit "$BLUE"   "[$(date +%H:%M:%S)]" "$@"; }
+ok()     { _emit "$GREEN"  "[OK]"   "$@"; }
+warn()   { _emit "$YELLOW" "[WARN]" "$@"; }
+err()    { _emit "$RED"    "[ERR]"  "$@"; }
+header() {
+    local bar="══════════════════════════════════════════"
+    printf '\n%b%s\n  %s\n%s%b\n\n' "$CYAN" "$bar" "$*" "$bar" "$NC"
+    printf '\n%s\n  %s\n%s\n\n' "$bar" "$*" "$bar" >> "$LOG_FILE"
+}
 
+# Garde les LOGS_KEEP journaux les plus récents. Chaque invocation de
+# l'orchestrateur en crée un ; sans rotation le dossier en accumulait des
+# centaines.
+prune_logs() {
+    local keep="${LOGS_KEEP:-200}"
+    (( keep > 0 )) || return 0
+    find "$LOGS_DIR" -maxdepth 1 -name 'run-*.log' -printf '%T@ %p\n' 2>/dev/null \
+        | sort -rn | tail -n +$((keep + 1)) | cut -d' ' -f2- \
+        | while IFS= read -r old; do rm -f -- "$old"; done
+}
+
+# Pause interruptible : un `sleep` au premier plan retient un SIGTERM envoyé au
+# seul shell jusqu'à sa fin (30 min). Mis en arrière-plan puis attendu, il
+# laisse le trap s'exécuter tout de suite.
+pause_for() {
+    sleep "$1" &
+    wait $!
+}
+
+# Écrit une clé du compte rendu que run.sh relit (module choisi, etc.).
+report_set() {
+    [[ -n "${AI_PIPELINE_REPORT:-}" ]] || return 0
+    printf '%s=%s\n' "$1" "$2" >> "$AI_PIPELINE_REPORT"
+}
+
+# ============================================================================
+# Agent IA
+# ============================================================================
 ai_agent_label() {
     case "$AI_AGENT" in
         claude) echo "Claude Code" ;;
@@ -43,56 +92,36 @@ check_ai_agent_config() {
         claude|codex) ;;
         *)
             err "AI_AGENT invalide: '$AI_AGENT' (attendu: claude ou codex)"
-            exit 1
+            exit "$EXIT_FAIL"
             ;;
     esac
 }
 
 check_ai_cli() {
     check_ai_agent_config
-    case "$AI_AGENT" in
-        claude)
-            command -v "$CLAUDE_CMD" >/dev/null || {
-                err "Prérequis manquant: $CLAUDE_CMD (Claude Code CLI)"
-                exit 1
-            }
-            ;;
-        codex)
-            command -v "$CODEX_CMD" >/dev/null || {
-                err "Prérequis manquant: $CODEX_CMD (Codex CLI)"
-                exit 1
-            }
-            ;;
-    esac
+    local cmd="$CLAUDE_CMD" name="Claude Code CLI"
+    [[ "$AI_AGENT" == "codex" ]] && cmd="$CODEX_CMD" name="Codex CLI"
+    command -v "$cmd" >/dev/null || {
+        err "Prérequis manquant: $cmd ($name)"
+        exit "$EXIT_FAIL"
+    }
 }
 
 # Détecte une sortie d'agent IA causée par un rate limit / quota épuisé.
-# Renvoie 0 si la sortie ressemble à un rate limit, non-zéro sinon.
+#
+# Seule la FIN de la sortie compte : c'est là que le CLI écrit son erreur. Le
+# texte entier contenait la réflexion de l'agent, et ce projet parle de quotas,
+# de limites et de 429 dans son propre code — un agent qui échouait après avoir
+# lu le routeur LLM était pris pour un agent rate-limité, et attendait 30 min.
 _ai_output_is_rate_limit() {
     local output_file="$1"
     [[ -s "$output_file" ]] || return 1
-    # "You've hit your limit · resets ..." (Claude Code), "rate limit", "quota",
-    # "usage limit", "429", "credits exhausted/insufficient" (Codex/OpenAI), etc.
-    grep -qiE "hit your (usage )?limit|usage limit reached|rate[ _-]?limit|quota|too many requests|\b429\b|credits? (exhausted|insufficient|exceeded)|insufficient_quota|resets (at )?[0-9]" "$output_file"
+    tail -n 40 "$output_file" | grep -qiE \
+        "hit your (usage )?limit|usage limit reached|rate[ _-]?limit(ed)?|too many requests|\b429\b|credits? (exhausted|insufficient|exceeded)|insufficient_quota|quota (exceeded|reached)|exceeded your current quota|resets (at )?[0-9]"
 }
 
-# Sleep interruptible par signal (Ctrl+C / SIGTERM via le trap d'orchestrator.sh).
-# On découpe en tranches de 30s pour que le trap ait un signal frais à traiter
-# et qu'on puisse loguer une progression utile pendant l'attente.
-_ai_sleep_interruptible() {
-    local total="$1"
-    local elapsed=0
-    local chunk=30
-    while (( elapsed < total )); do
-        local remaining=$(( total - elapsed ))
-        (( remaining < chunk )) && chunk=$remaining
-        sleep "$chunk" || return $?
-        elapsed=$(( elapsed + chunk ))
-    done
-    return 0
-}
-
-# Exécute une seule fois la CLI de l'agent IA. Pas de retry ici.
+# Exécute une seule fois la CLI de l'agent IA, depuis le répertoire courant
+# (le worktree du pipeline). Pas de retry ici.
 _run_ai_agent_once() {
     local mode="$1" prompt="$2" output_file="$3"
     local timeout_s
@@ -100,7 +129,17 @@ _run_ai_agent_once() {
 
     case "$AI_AGENT" in
         claude)
-            local -a claude_args=("$CLAUDE_CMD" -p "$prompt")
+            # --strict-mcp-config sans --mcp-config : aucun serveur MCP. Sans lui,
+            # chaque appel démarrait ceux de l'utilisateur (Blender, Unity,
+            # navigateur…) — lent, et des outils qu'aucune tâche n'a à toucher.
+            # --no-session-persistence : des centaines de tâches automatiques ne
+            # viennent plus remplir l'historique de sessions de l'utilisateur.
+            local -a claude_args=(
+                "$CLAUDE_CMD" -p "$prompt"
+                --strict-mcp-config
+                --no-session-persistence
+                --no-chrome
+            )
             if [[ "$mode" == "read" ]]; then
                 claude_args+=(--allowedTools "Read,Glob,Grep")
             else
@@ -120,7 +159,7 @@ _run_ai_agent_once() {
         codex)
             local -a codex_args=(
                 "$CODEX_CMD" exec
-                --cd "$PROJECT_ROOT"
+                --cd "$PWD"
                 --color never
                 --ephemeral
             )
@@ -154,20 +193,14 @@ run_ai_agent() {
         exit_code=0
         _run_ai_agent_once "$mode" "$prompt" "$output_file" || exit_code=$?
 
-        if [[ $exit_code -eq 0 ]]; then
-            return 0
-        fi
+        [[ $exit_code -eq 0 ]] && return 0
 
         # Ne pas retry sur un timeout (124) — c'est un vrai problème de durée,
         # pas un rate limit.
-        if [[ $exit_code -eq 124 ]]; then
-            return $exit_code
-        fi
+        [[ $exit_code -eq 124 ]] && return $exit_code
 
-        if ! _ai_output_is_rate_limit "$output_file"; then
-            # Vrai échec (auth, crash, etc.) → on remonte l'erreur immédiatement.
-            return $exit_code
-        fi
+        # Vrai échec (auth, crash, etc.) → on remonte l'erreur immédiatement.
+        _ai_output_is_rate_limit "$output_file" || return $exit_code
 
         if (( attempt >= max_retries )); then
             err "${label}: rate limit toujours présent après ${attempt} retry(s), abandon"
@@ -176,11 +209,11 @@ run_ai_agent() {
 
         attempt=$(( attempt + 1 ))
         local hint
-        hint=$(grep -oiE "resets [0-9][0-9aApPmM:\. -]+(\([^)]+\))?" "$output_file" | head -1 || true)
+        hint=$(tail -n 40 "$output_file" | grep -oiE "resets [0-9][0-9aApPmM:\. -]+(\([^)]+\))?" | head -1 || true)
         warn "${label}: rate limit détecté${hint:+ ($hint)} — attente ${delay}s avant retry ${attempt}/${max_retries}"
         notify_slack "AI Pipeline [WAIT] - ${label} rate-limited, retry ${attempt}/${max_retries} dans ${delay}s${hint:+ — $hint}"
 
-        if ! _ai_sleep_interruptible "$delay"; then
+        if ! pause_for "$delay"; then
             err "Attente interrompue, abandon des retries"
             return $exit_code
         fi
@@ -188,20 +221,33 @@ run_ai_agent() {
     done
 }
 
+# Sonde de disponibilité : 0 = l'agent répond (ou échoue pour une autre raison
+# qu'un quota, on tente quand même), 1 = quota/rate limit.
+#
+# Une seule tentative, sans le retry de run_ai_agent : c'est à l'appelant de
+# décider s'il attend (wait_for_ai_tokens) — la sonde pouvait sinon bloquer six
+# heures avant de rendre la main. Effort minimal : demander « OK » ne justifie
+# pas de payer le niveau de réflexion des tâches. Un succès vaut AI_PROBE_TTL
+# secondes, partagé entre run.sh et les orchestrateurs qu'il lance.
 check_ai_tokens() {
     check_ai_cli
 
-    local label
+    local label stamp="${LOGS_DIR}/.probe-ok"
     label=$(ai_agent_label)
-    local test_output
-    local test_exit=0
-    test_output=$(mktemp)
 
-    run_ai_agent "read" "Réponds uniquement OK" "$test_output" || test_exit=$?
+    if [[ -f "$stamp" ]]; then
+        local age=$(( $(date +%s) - $(stat -c %Y "$stamp" 2>/dev/null || echo 0) ))
+        (( age < ${AI_PROBE_TTL:-600} )) && return 0
+    fi
+
+    local test_output test_exit=0
+    test_output=$(mktemp)
+    CLAUDE_EFFORT=low CODEX_EFFORT=low CLAUDE_MAX_THINKING_TOKENS="" \
+        _run_ai_agent_once "read" "Réponds uniquement OK" "$test_output" || test_exit=$?
 
     if [[ $test_exit -ne 0 ]]; then
-        if grep -qi "rate\|limit\|exceeded\|quota\|429\|capacity\|credits" "$test_output"; then
-            rm -f "$test_output"
+        if _ai_output_is_rate_limit "$test_output"; then
+            rm -f "$test_output" "$stamp"
             err "Limite de tokens/crédits ${label} atteinte"
             return 1
         fi
@@ -212,6 +258,7 @@ check_ai_tokens() {
     fi
 
     rm -f "$test_output"
+    touch "$stamp"
     ok "Agent IA disponible: ${label}"
     return 0
 }
@@ -220,54 +267,65 @@ check_ai_tokens() {
 # Contexte projet injecté dans TOUS les prompts IA
 # ============================================================================
 # Sans ce bloc, chaque audit redécouvre le projet de zéro et re-signale les
-# mêmes décisions d'architecture délibérées comme si c'étaient des bugs. Elles
-# sont toutes documentées et justifiées dans CLAUDE.md — l'agent doit l'avoir lu
-# avant d'ouvrir la moindre issue.
+# mêmes décisions d'architecture délibérées comme si c'étaient des bugs. Il ne
+# recopie pas l'architecture : il dit où elle est écrite, et ce qui ferait
+# fausse route.
 ai_project_context() {
     cat <<'CONTEXT'
 ## Le projet
 
-Moteur VTuber : un avatar 3D animé par une IA conversationnelle, avec émotions
-temps réel (espace PAD), mémoire à long terme, conscience autonome, cycle de
-sommeil, pulsions intrinsèques et projets de travail.
+Mika : un personnage d'IA compagne, présent en continu, avec un avatar 3D.
 
-- `old/backend/` — Django + Channels servi par Uvicorn. Apps : `ai` (routage
-  multi-provider), `communication` (WebSocket, Telegram), `pipeline`
-  (perception → routeur → processeur), `memory`, `emotion`, `drives`,
-  `conscience`, `identity`, `projects`, `modules` (système de plugins, dont la
-  Forge où l'IA écrit ses propres modules à l'exécution), `GestionSysteme`
-  (admin rendu côté serveur), `configs` (registre de configuration).
-- `frontend/` — Vite + TypeScript + Three.js + VRM. Rendu 3D, retarget
-  d'animations Mixamo, TTS navigateur, lip-sync.
-- Base SQLite en WAL, sous écriture concurrente permanente (six boucles de fond).
-- Langue du produit : français. Code et commentaires en français.
+- `backendv2/` — le moteur VIVANT (paquet Python `mika`, sans Django). Une
+  psyché à **journal d'événements** : tout ce qui lui arrive s'ajoute au
+  journal, l'état de chaque faculté s'en déduit par des réducteurs purs. Couches
+  (`kernel` → `vocab` → `ports` → `contracts` → `faculties`/`plugins`/`adapters`
+  → `runtime` → `inspector`/`sim` → `app`), facultés (`memory`, `affect`,
+  `identity`, `social`, `others`, `goals`, `projects`, `world`…), plugins
+  (`email`, `forge`, `rss`, `camera`), console d'opérateur (`inspector`).
+- `frontend/Web/` — client Vite + TypeScript + Three.js + VRM : rendu 3D,
+  animation, TTS navigateur, lip-sync. Son protocole avec le backend est lu
+  dans son propre code.
+- `old/` — la v1 (Django) ARCHIVÉE. On ne la modifie pas, on ne la prend pas
+  pour référence : son comportement n'est pas un oracle.
+- Langues : identifiants de code en anglais ; prompts, interface, commentaires
+  et documentation en français.
 
-**Lis `CLAUDE.md` à la racine AVANT toute analyse.** Il documente l'architecture
-et, surtout, le POURQUOI de choix qui ont l'air d'erreurs vus de loin.
+**Lis AVANT toute analyse : `backendv2/ARCHITECTURE.md`**, puis les ADR de
+`backendv2/docs/adr/` qui touchent ton périmètre. Le `CLAUDE.md` à la racine
+documente surtout la v1 archivée : il ne fait PAS foi pour `backendv2/`.
 
-## Choix DÉLIBÉRÉS — ne les signale jamais comme des défauts
+## Ce qui fait foi dans backendv2 — ne le « corrige » jamais
 
-Chacun est documenté dans CLAUDE.md avec sa justification. Les re-signaler fait
-perdre un cycle complet à chaque passage :
+Un choix couvert par un ADR n'est pas un défaut. Les règles suivantes sont
+vérifiées par `lint-imports` et `ruff` ; les contourner est une régression :
 
-- **Exceptions avalées en masse** (`logger.debug`, `except: pass`, replis
-  silencieux). Une boucle de fond n'a pas de superviseur : une exception qui
-  s'échappe la tue pour la durée du processus. Elles sont comptées par
-  `utils/degradation.py`, c'est le compromis assumé.
-- **Le tampon court-terme de la mémoire n'est pas filtré par `person_id`.** Ce
-  n'est pas une fuite : c'est la prémisse du moteur (« quelqu'un dans une pièce
-  entend ce qui s'y dit »). L'arbitrage est confié au prompt, pas à un `WHERE`.
-- **`DASHBOARD_REQUIRE_AUTH=False` par défaut**, compensé par une écoute sur
-  loopback : une installation neuve n'a pas encore de superuser.
-- **Le sandbox de la Forge s'exécute in-process.** Le modèle de menace est la
-  prévention d'accident et l'injection de prompt, pas l'isolation OS.
-- **SQLite en WAL avec `synchronous=NORMAL`**, et le PRAGMA est invisible en
-  test (base en mémoire) : c'est l'`init_command` déclaré qui est testé.
-- **Les pieds de bloc du prompt système sont volontairement inconsistants**
-  (`--- FIN PROJET ---`, `--- FIN ---`) : les unifier change ce que le modèle lit.
-- **`emotion_policy` par défaut à OFF sur les projets**, **les émotions sont
-  stockées en anglais et affichées en français**, **une seule horloge naïve
-  locale** (`date.today()`, jamais `timezone.localdate()`).
+- **Une faculté n'importe jamais une autre faculté** ; elles se lisent par les
+  faits (`kernel/facts.py`). Les adaptateurs n'importent ni facultés ni
+  runtime ; ni le runtime ni l'inspecteur ne nomment une faculté. Pas d'import
+  dans une fonction.
+- **L'heure, le hasard et les identifiants sont injectés.** Une lecture directe
+  de l'horloge (`datetime.now()`, `time.time()`), de `random` ou d'`uuid` hors
+  des points d'injection EST un défaut — c'est l'inverse de la v1.
+- **`except Exception` aveugle** : permis seulement dans `runtime/boundary.py`
+  et les adaptateurs. Ailleurs, une exception avalée est un vrai défaut.
+- **Un réducteur est pur et total** ; une charge utile d'événement porte des
+  observations, des intentions, des deltas ou des tirages enregistrés — jamais
+  un état recalculé. Un type d'événement appartient à son propriétaire, seul à
+  l'émettre. Changer la forme d'une charge utile exige un *upcaster*, sinon le
+  rejeu du journal existant casse.
+- **Tout texte gardé déclare qui il concerne** (`Content`, ADR 0024) : l'oubli
+  doit pouvoir l'atteindre.
+- **Aucun effet ne part avant son commit** ; ce qui sort de la machine est une
+  capacité, exécutée tout de suite ou après accord d'un opérateur.
+- **Les garde-fous de la personne sont gradués, pas binaires** (divulgation,
+  confidences, affect, fatigue) : remplacer une gradation par un interdit est
+  une régression. La certitude sur *qui parle*, elle, reste mécanique.
+- **Telegram fermé par défaut**, atelier et Forge sous bubblewrap **sans
+  repli**, fournisseur Claude Code par **la CLI et son propre login** (jamais
+  un jeton OAuth extrait) : délibérés.
+- Un comportement se valide par une **cible d'intention** (ce qu'une personne
+  ferait), jamais par parité avec la v1.
 
 Si tu crois vraiment tenir un problème sur l'un de ces points, il te faut un
 scénario de défaillance concret et reproductible — sinon, passe.
@@ -278,9 +336,10 @@ CONTEXT
 # Politique de tests injectée dans TOUS les prompts IA
 # ============================================================================
 # Aucun workflow GitHub Actions n'existe sur ce dépôt : rien ne validera la PR
-# après coup. Mais la suite complète (~1000 tests pytest + tsc) est trop longue
-# et trop coûteuse pour tourner à chaque tâche. D'où le compromis : vérification
-# CIBLÉE obligatoire sur ce qu'on a touché, suite complète interdite.
+# après coup. Mais la suite complète est trop longue et trop gourmande (la
+# machine a déjà été tuée par OOM sous plusieurs suites parallèles). D'où le
+# compromis : vérification CIBLÉE obligatoire sur ce qu'on a touché, suite
+# complète interdite.
 #   ai_test_policy write  → modes fix / worker (l'agent peut modifier le code)
 #   ai_test_policy read   → mode audit (lecture seule)
 ai_test_policy() {
@@ -290,31 +349,62 @@ ai_test_policy() {
         cat <<'POLICY'
 ## Politique de TESTS (règle ABSOLUE)
 
-- N'exécute AUCUN test : ni `pytest`, ni `manage.py test`, ni `npm test`, ni script de reproduction.
+- N'exécute AUCUN test ni outil : ni `pytest`, ni `mika sim`, ni `npm test`, ni script de reproduction.
 - Ne signale JAMAIS "tests manquants", "couverture insuffisante" ou "il faudrait un test de non-régression" : c'est hors périmètre de cet audit et ce type d'issue est systématiquement rejeté.
 - La correction suggérée dans une issue doit porter sur le CODE, jamais sur l'ajout de tests.
 POLICY
         return 0
     fi
 
-    cat <<'POLICY'
-## Politique de TESTS (règle ABSOLUE - coût et durée)
+    local policy
+    policy=$(cat <<'POLICY'
+## Politique de TESTS (règle ABSOLUE - coût, durée et mémoire)
 
 Aucun CI ne relira ton travail : la vérification, c'est toi, puis un humain.
-Mais la suite complète est hors de question (≈1000 tests pytest, plusieurs
-minutes de `tsc`). Tu vérifies donc CIBLÉ, et seulement ce que tu as touché.
+Mais la suite complète est hors de question. Tu vérifies donc CIBLÉ, et
+seulement ce que tu as touché.
 
-- N'exécute JAMAIS la suite complète : ni `pytest` nu, ni `pytest old/backend/tests/`, ni `python manage.py test`, ni `npm test`, ni `tox`.
+- N'exécute JAMAIS une suite complète : ni `pytest` nu, ni `pytest tests/`, ni `npm test`, ni `npx vitest run` sans fichier.
+- N'exécute JAMAIS le simulateur (`mika sim run`) ni la sonde (`mika sim sonde` : elle appelle un vrai modèle, elle coûte).
 - N'écris AUCUN nouveau fichier ni fonction de test, même "pour valider" ta correction. Aucune PR de ce pipeline n'a pour objet d'ajouter de la couverture.
 - Ne crée PAS de script jetable de reproduction : relis le code à la place.
 - Ne modifie un test existant QUE si ta correction le casse mécaniquement (signature ou API changée). Dans ce cas : adaptation minimale, jamais de réécriture.
-- Vérification autorisée, et une seule fois, à la fin :
-  - Python : `python -m py_compile <fichiers modifiés>`, puis AU PLUS UN fichier de test ciblé s'il en existe un qui couvre la zone touchée, par exemple `python -m pytest old/backend/tests/test_pipeline_signals.py -x -q`.
-  - TypeScript : `cd frontend/Web && npx tsc --noEmit` — c'est le garde-fou dur du frontend, ne le saute pas si tu as modifié `frontend/Web/src/`.
-- Si un test ciblé échoue à cause de ta modification, corrige ta modification. S'il échouait déjà avant, ne le touche pas et signale-le dans le corps de la PR.
+- Vérification autorisée, une seule fois, à la fin. Tu travailles dans un worktree : le paquet `mika` de l'environnement pointe sur une AUTRE copie du code, d'où le `PYTHONPATH=src` obligatoire.
+  - backendv2, depuis `backendv2/` :
+    - `"@V2_VENV@/bin/ruff" check <fichiers modifiés>`
+    - `PYTHONPATH=src "@V2_VENV@/bin/lint-imports"` (contrats de couches, rapide)
+    - AU PLUS DEUX fichiers de test ciblés qui couvrent la zone touchée : `PYTHONPATH=src "@V2_VENV@/bin/python" -m pytest tests/unit/test_<zone>.py -x -q`
+  - frontend, depuis `frontend/Web/` : `npx tsc --noEmit` (garde-fou dur, ne le saute pas si tu as modifié `frontend/Web/src/`), puis au plus un fichier ciblé : `npx vitest run <chemin/du/test>`.
+- Si un test ciblé échoue à cause de ta modification, corrige ta modification. S'il échouait déjà avant, ne le touche pas et signale-le dans ton résumé.
 
 Exception unique : si l'issue traitée demande EXPLICITEMENT d'ajouter ou de corriger un test, fais uniquement ce qui est demandé.
 POLICY
+)
+    printf '%s\n' "${policy//@V2_VENV@/$V2_VENV}"
+}
+
+# Contraintes communes à tout mode qui modifie le code (fix, worker). La liste
+# des fichiers protégés vient de FORBIDDEN_PATTERNS : elle était recopiée à la
+# main dans chaque prompt, et avait divergé de celle que le pipeline vérifie.
+ai_write_constraints() {
+    local protected
+    protected=$(printf '`%s`, ' "${FORBIDDEN_PATTERNS[@]}")
+    protected="${protected%, }"
+    cat <<CONSTRAINTS
+## Contraintes ABSOLUES
+
+1. Tu peux LIRE, MODIFIER des fichiers et exécuter des commandes bash, dans le répertoire courant uniquement.
+2. Pour chaque correction, fais un commit séparé : \`git add <fichiers précis> && git commit -m "prefix: description"\`
+   - Jamais \`git add -A\`, \`git add .\` ni \`git commit -a\` : n'ajoute que ce que tu as modifié.
+   - Préfixes obligatoires : bug: / security: / feat: selon le type de correction
+   - Message de commit en français
+3. Tu ne dois JAMAIS exécuter : git push, git branch, git checkout, git switch, git merge, git rebase, git reset, git stash, git worktree
+4. Tu ne dois JAMAIS exécuter de commandes système dangereuses (rm -rf, etc.)
+5. Fichiers protégés, à ne JAMAIS modifier (motifs glob depuis la racine) : ${protected}. Si la correction l'exige, ne la fais pas : décris-la dans ton résumé, un humain l'appliquera.
+6. Tu ne dois JAMAIS ajouter d'alias ni renommer une fonction existante
+7. Chaque modification doit être minimale et ciblée, dans le style du code qui l'entoure
+8. Respecte la politique de tests ci-dessous : pas de nouveaux tests, pas de suite complète, vérification ciblée uniquement
+CONSTRAINTS
 }
 
 # Exécute une requête `gh` en distinguant « zéro résultat » de « la requête a
@@ -339,51 +429,32 @@ gh_query() {
     printf '%s' "$out"
 }
 
-# Vérifie les prérequis système
+# Vérifie les prérequis système. La copie de travail de l'utilisateur n'a plus
+# besoin d'être propre : le pipeline travaille dans son propre worktree.
 check_prerequisites() {
     local missing=()
-
-    command -v git    >/dev/null || missing+=("git")
-    command -v gh     >/dev/null || missing+=("gh (GitHub CLI)")
+    local tool
+    for tool in git gh jq flock timeout; do
+        command -v "$tool" >/dev/null || missing+=("$tool")
+    done
     check_ai_cli
 
     if [[ ${#missing[@]} -gt 0 ]]; then
         err "Prérequis manquants: ${missing[*]}"
-        exit 1
+        exit "$EXIT_FAIL"
     fi
 
     if ! gh auth status &>/dev/null; then
         err "GitHub CLI non authentifié. Lancer: gh auth login"
-        exit 1
+        exit "$EXIT_FAIL"
     fi
 
-    cd "$PROJECT_ROOT"
-    # Vérifier que le repo est propre (en ignorant les fichiers du pipeline)
-    local dirty
-    dirty=$(git status --porcelain | grep -v "scripts/ai_pipeline/" || true)
-    if [[ -n "$dirty" ]]; then
-        err "Le repo a des changements non commités. Commit ou stash d'abord."
-        echo "$dirty"
-        exit 1
+    if [[ -z "${GH_REPO:-}" ]]; then
+        err "Dépôt GitHub introuvable : le remote '${REPO_REMOTE}' de ${PROJECT_ROOT} ne pointe pas sur github.com"
+        exit "$EXIT_FAIL"
     fi
 
-    ok "Prérequis validés"
-}
-
-# Vérifie les prérequis légers (pas besoin de repo propre)
-check_prerequisites_light() {
-    local missing=()
-    command -v gh     >/dev/null || missing+=("gh (GitHub CLI)")
-    check_ai_cli
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        err "Prérequis manquants: ${missing[*]}"
-        exit 1
-    fi
-    if ! gh auth status &>/dev/null; then
-        err "GitHub CLI non authentifié. Lancer: gh auth login"
-        exit 1
-    fi
-    ok "Prérequis validés"
+    ok "Prérequis validés (dépôt ${GH_REPO})"
 }
 
 # Retranche du périmètre les sous-dossiers qui sont eux-mêmes des modules du
@@ -395,77 +466,58 @@ module_scope_note() {
     echo "Hors périmètre pour ce module : ${excl}. Tu peux LIRE ces fichiers pour comprendre les interactions, mais tu n'y signales ni n'y corriges rien : ils ont leur propre passage."
 }
 
-# Résout les modules ciblés en liste de chemins
+# Résout les modules ciblés en liste de chemins. Les messages vont sur stderr :
+# la fonction est appelée dans `$(...)`, et un avertissement sur stdout
+# devenait un « module » de plus.
 resolve_modules() {
     local modules_arg="$1"
     local paths=()
+    local mod
 
     if [[ "$modules_arg" == "all" ]]; then
         for mod in "${AVAILABLE_MODULES[@]}"; do
-            if [[ -d "${PROJECT_ROOT}/${mod}" ]]; then
-                paths+=("$mod")
-            fi
+            [[ -d "${PROJECT_ROOT}/${mod}" ]] && paths+=("$mod")
         done
     else
+        local -a mod_list=()
         IFS=',' read -ra mod_list <<< "$modules_arg"
         for mod in "${mod_list[@]}"; do
             mod=$(echo "$mod" | xargs)
+            mod="${mod%/}"
             if [[ -d "${PROJECT_ROOT}/${mod}" ]]; then
                 paths+=("$mod")
             else
-                warn "Module introuvable: $mod (ignoré)"
+                warn "Module introuvable: $mod (ignoré)" >&2
             fi
         done
     fi
 
     if [[ ${#paths[@]} -eq 0 ]]; then
-        err "Aucun module valide trouvé"
-        exit 1
+        err "Aucun module valide trouvé" >&2
+        return 1
     fi
 
     echo "${paths[*]}"
 }
 
-# Lance les tests
-run_tests() {
-    if [[ "$SKIP_TESTS" == true || "$RUN_TESTS" != true ]]; then
-        warn "Tests ignorés (--no-tests ou config)"
-        return 0
-    fi
-
-    header "Lancement des tests"
-    cd "$PROJECT_ROOT"
-
-    local test_output
-    local test_exit=0
-
-    test_output=$(timeout "$TEST_TIMEOUT" $TEST_CMD $TEST_ARGS 2>&1) || test_exit=$?
-
-    echo "$test_output" >> "$LOG_FILE"
-
-    if [[ $test_exit -ne 0 ]]; then
-        err "Tests échoués (exit code: $test_exit)"
-        echo "$test_output" | tail -20
-        return 1
-    fi
-
-    ok "Tests passés"
-    return 0
-}
-
-# Notification Slack
+# ============================================================================
+# Notifications
+# ============================================================================
 notify_slack() {
     local message="$1"
     if [[ "$NOTIFY_SLACK" != true || -z "$SLACK_WEBHOOK_URL" ]]; then
         return 0
     fi
+    # Charge utile construite par jq : un titre d'issue contenant un guillemet
+    # cassait le JSON assemblé à la main, et la notification partait en 400.
+    local payload
+    payload=$(jq -n --arg text "$message" '{text: $text}')
     curl -s -X POST "$SLACK_WEBHOOK_URL" \
         -H 'Content-type: application/json' \
-        -d "{\"text\": \"${message}\"}" \
+        -d "$payload" \
         >/dev/null 2>&1 || warn "Échec notification Slack"
 }
 
-# Notification email
 notify_email() {
     local subject="$1"
     local body="$2"
@@ -476,7 +528,6 @@ notify_email() {
         2>/dev/null || warn "Échec notification email"
 }
 
-# Notification générique
 notify() {
     local status="$1"
     local message="$2"
@@ -491,5 +542,5 @@ notify() {
     notify_slack "$full_message"
     notify_email "AI Pipeline - ${status}" "$full_message"
 
-    log "Notification envoyée: $full_message"
+    log "Notification: $full_message"
 }

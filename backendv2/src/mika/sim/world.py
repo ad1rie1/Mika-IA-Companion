@@ -30,7 +30,9 @@ from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.runtime.effects import with_content
 from mika.sim.clock import SimClock
 from mika.sim.outside import FakeFeeds, FakeMail
+from mika.vocab import privacy
 from mika.vocab.episodes import FALLBACKS
+from mika.vocab.people import EXTERNAL_PREFIX
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,8 +124,8 @@ class Driver:
     embedder: Any = None
 
     def __post_init__(self) -> None:
-        # une messagerie (Telegram) reçoit même hors ligne : on y écrit à quelqu'un d'absent
-        self.transport = Transport(self.clock, lambda h: h in self.online or h.startswith("tg_"))
+        # une messagerie (un compte extérieur) reçoit même hors ligne : on y écrit à quelqu'un d'absent
+        self.transport = Transport(self.clock, lambda h: h in self.online or h.startswith(EXTERNAL_PREFIX))
 
     # ── cycle de vie ──
     async def boot(self) -> Kernel:
@@ -189,14 +191,14 @@ class Driver:
 
     async def say(self, handle: str, text: str, *, wait: bool = True, key: str | None = None,
                   room: str | None = None, addressed: bool = True) -> Any:
-        """Un message : web authentifié pour ``user_…``, Telegram pour ``tg_…``
+        """Un message : web authentifié pour ``user_…``, compte extérieur (non sécurisé) pour ``ext_…``
         (privé, ou dans le salon ``room``)."""
         assert self.kernel is not None
-        telegram = handle.startswith("tg_")
-        p = PerceptionReceived(handle=handle, channel="telegram" if telegram else "web", text=Content.of(text),
-                               authenticated=not telegram, display_name=self.names.get(handle, ""),
+        external = handle.startswith(EXTERNAL_PREFIX)
+        p = PerceptionReceived(handle=handle, channel=privacy.channel_of(handle), text=Content.of(text),
+                               authenticated=not external, display_name=self.names.get(handle, ""),
                                client_msg_id=key, room=room, public=room is not None, addressed=addressed,
-                               reply_ref=room or (handle[3:] if telegram else None))
+                               reply_ref=room or (handle[len(EXTERNAL_PREFIX):] if external else None))
         got = await self.kernel.perceive(p, dedupe_key=f"{handle}:{key}" if key else None)
         if wait and got.reply is not None:
             try:

@@ -38,7 +38,7 @@ MOVED = {"chronologie": "systeme/chronologie", "etat": "systeme/etat", "contribu
 MOVED_TABS = {("reglages", "apps"): "apps", ("sens", "courrier"): "courrier/reception",
               ("courrier", "comptes"): "reglages/boites",
               ("reglages", "modeles"): "reglages/fournisseurs", ("reglages", "personnalite"): "reglages/identite",
-              ("reglages", "canaux"): "reglages/telegram", ("reglages", "sens"): "reglages/boites",
+              ("reglages", "canaux"): "reglages/depots", ("reglages", "sens"): "reglages/boites",
               ("reglages", "parametres"): "reglages/comportement"}
 
 

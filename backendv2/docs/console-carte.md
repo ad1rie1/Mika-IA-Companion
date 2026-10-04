@@ -127,8 +127,7 @@ sont dans « Détails techniques ».
 | | Sa vie | sa vie d'IA VTuber à sa façon, ses goûts et avis, ce qui est vrai d'elle (ADR 0047) |
 | | Tempérament | les huit curseurs, l'humeur de fond, ce que pilote chaque curseur |
 | | Import / export | le document YAML, revenir au fichier, l'historique des révisions |
-| Canaux | Telegram | robot, conversations autorisées, propriétaires |
-| | Dépôts git | le jeton avec lequel ses projets poussent vers leur dépôt distant (jamais réaffiché, jamais dans le journal) |
+| Canaux | Dépôts git | le jeton avec lequel ses projets poussent vers leur dépôt distant (jamais réaffiché, jamais dans le journal) |
 | Plugins | Vue d’ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d’utilisation ; les réglages des apps restent dans la Forge |
 | | Boîtes aux lettres | liste ; chaque boîte a sa page (lire, envoyer, sa voix, initiative) |
 | | Flux RSS | adresses suivies |
@@ -206,7 +205,7 @@ sans navigation multi-compte visible et sans lecteur HTML. Les contrôles se tro
 | Forge : état, vues, réglages, code, journal, vécu | Les paramètres de vue sont de vrais filtres natifs. La configuration d’une app reste sur sa fiche : formulaire d’abord, valeurs effectives dans un détail. Journaux et exécutions ont chacun leur explication. |
 | Configuration : fournisseurs, rôles, contexte | Listes paginées ; titre spécifique lors de l’ajout ou de la modification d’un fournisseur ; sélecteurs et aides communs. |
 | Configuration : identité, parole, caractère, tempérament, document | Un sujet par page, aides sous les champs et erreurs rattachées aux contrôles. |
-| Configuration : Telegram, plugins, boîtes, flux, transcription, appareils | Point d’entrée « Plugins » et distinction explicite entre paramètres du moteur Forge et paramètres d’une app. |
+| Configuration : dépôts git, plugins, boîtes, flux, transcription, appareils | Point d’entrée « Plugins » et distinction explicite entre paramètres du moteur Forge et paramètres d’une app. |
 | Configuration : comportement, chaque faculté et ses groupes | Navigation par rubrique conservée ; menu repliable sur petit écran. |
 | Configuration : comptes, créer, modifier, journal | Titres d’action spécifiques ; liste et historique paginés ; protections du dernier opérateur et des secrets inchangées. |
 | Système : santé, processus, anomalies, sorties, modèles, coûts, stockage | Informations d’exploitation distinctes des réglages ; nombres affichés avec leur portée réelle. |

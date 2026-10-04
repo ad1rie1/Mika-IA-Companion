@@ -195,37 +195,37 @@ def test_a_burst_is_kept_whole_and_its_real_question_comes_back(tmp_path):
 
 
 def test_in_a_room_each_past_exchange_names_who_spoke(tmp_path):
-    room = {"room": "tg_chat_-9", "channel": "telegram"}
+    room = {"room": "ext_chat_-9", "channel": "external"}
     script = Script()
     kernel, clock, _, _out = build(tmp_path, script)
 
     async def main():
         await boot(kernel)
         await composition.configure(kernel, DOC, {"transcript": {"window": 5}})
-        await chat(kernel, "tg_1", ["Mika, Moustache le chat de Léa a vomi ce matin"], display_name="Tom", **room)
+        await chat(kernel, "ext_1", ["Mika, Moustache le chat de Léa a vomi ce matin"], display_name="Tom", **room)
         for text in ("Mika tu joues à quoi ?", "Mika t'as vu le match ?", "Mika il pleut chez toi ?"):
-            await chat(kernel, "tg_3", [text], gap_s=30, display_name="Zoé", **room)
+            await chat(kernel, "ext_3", [text], gap_s=30, display_name="Zoé", **room)
         await asyncio.sleep(15 * 60)
-        await chat(kernel, "tg_2", ["Mika, tu sais si Moustache a vomi encore ?"], display_name="Léa", **room)
+        await chat(kernel, "ext_2", ["Mika, tu sais si Moustache a vomi encore ?"], display_name="Léa", **room)
         await kernel.stop()
 
     run_virtual(clock, main)
-    shown = section(script.replies("tg_2")[-1], EXCHANGES)
+    shown = section(script.replies("ext_2")[-1], EXCHANGES)
     assert "Tom : « Mika, Moustache le chat de Léa a vomi" in shown, shown
     assert "Léa : « Mika, Moustache" not in shown
 
 
 def test_a_room_is_one_conversation_and_asides_count_only_when_they_name_someone(tmp_path):
-    room = {"room": "tg_chat_-3", "channel": "telegram"}
+    room = {"room": "ext_chat_-3", "channel": "external"}
     script = Script()
     kernel, clock, _, _out = build(tmp_path, script)
 
     async def main():
         await boot(kernel)
-        await chat(kernel, "tg_1", ["Mika, je pars au Japon en avril"], display_name="Tom", **room)
-        await chat(kernel, "tg_2", ["je mange une pomme"], display_name="Léa", addressed=False, **room)
-        await chat(kernel, "tg_3", ["Tom tu me ramènes un kimono ?"], display_name="Zoé", addressed=False, **room)
-        await chat(kernel, "tg_2", ["Mika tu connais Kyoto ?", *SIX[2:]], display_name="Léa", **room)
+        await chat(kernel, "ext_1", ["Mika, je pars au Japon en avril"], display_name="Tom", **room)
+        await chat(kernel, "ext_2", ["je mange une pomme"], display_name="Léa", addressed=False, **room)
+        await chat(kernel, "ext_3", ["Tom tu me ramènes un kimono ?"], display_name="Zoé", addressed=False, **room)
+        await chat(kernel, "ext_2", ["Mika tu connais Kyoto ?", *SIX[2:]], display_name="Léa", **room)
         await asyncio.sleep(15 * 60)
         await kernel.stop()
 

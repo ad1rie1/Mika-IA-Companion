@@ -55,6 +55,7 @@ from mika.kernel.inspect import (
     pct_fr,
 )
 from mika.vocab import affect as A
+from mika.vocab import privacy
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
 
@@ -384,7 +385,7 @@ def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Bloc
 
 
 #: par où elle lui a parlé (une personne peut avoir plusieurs adresses)
-CHANNEL_FR = {"web": "sur le web", "telegram": "sur Telegram"}
+CHANNEL_FR = {privacy.WEB: "sur le web", privacy.EXTERNAL: "par un compte extérieur"}
 
 
 def _where(frame: Frame, handle: str) -> str:

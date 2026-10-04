@@ -69,11 +69,11 @@ def events(kernel, name):
 
 
 async def evenings(kernel, people, days, *, per_day=4):
-    """Des relations qui vivent : quelques messages chaque soir, sur Telegram (elle peut leur écrire)."""
+    """Des relations qui vivent : quelques messages chaque soir, sur un compte extérieur (elle peut leur écrire)."""
     for _ in range(days):
         for handle, name in people:
             for i in range(per_day):
-                p = await kernel.perceive(said(handle, f"message {i} du soir", channel="telegram",
+                p = await kernel.perceive(said(handle, f"message {i} du soir", channel="external",
                                                display_name=name))
                 if p.reply is not None:
                     await p.reply
@@ -105,21 +105,21 @@ def test_a_tie_is_being_together_or_being_named_never_saying_a_name(tmp_path):
         await genesis(kernel, belief("Dave et Eve préparent un concert", about=("user_5", "user_6"),
                                      told_by=("user_5", "user_6"), heard_by=("user_5", "user_6")))
         # un grand salon ne fait pas des gens qui se connaissent
-        crowd = tuple(f"tg_{i}" for i in range(10, 20))
+        crowd = tuple(f"ext_{i}" for i in range(10, 20))
         await genesis(kernel, belief("Il pleut sur le salon", about=(), told_by=crowd, heard_by=crowd))
         # nommé avec colère : pas de son entourage pour autant
         await genesis(kernel, memory_c.REMEMBERED.draft(
             text=Content.of("Alice m'a dit que Fred l'avait trahie", level=2), about=("user_2", "user_7"),
             told_by=("user_2",), heard_by=("user_2",), sensitivity=2, emotion="angry"))
         frame = kernel.mind.frame()
-        return {k: frame.get(social_c.TIES(k)) for k in ("user_2", "user_3", "user_4", "user_5", "user_7", "tg_10")}
+        return {k: frame.get(social_c.TIES(k)) for k in ("user_2", "user_3", "user_4", "user_5", "user_7", "ext_10")}
 
     ties = run(tmp_path, scenario)
     assert "user_2" in ties["user_4"], "Alice a nommé Carol : Carol a un lien avec Alice"
     assert "user_2" not in ties["user_3"], "Bruno n'a fait que prononcer son nom"
     assert "user_3" in ties["user_2"], "… c'est Alice qui entre dans l'entourage de Bruno, pas l'inverse"
     assert "user_6" in ties["user_5"]
-    assert ties["tg_10"] == (), "un grand salon"
+    assert ties["ext_10"] == (), "un grand salon"
     assert "user_2" not in ties["user_7"], "nommé avec colère"
 
 
@@ -134,7 +134,7 @@ def test_a_silence_is_thought_of_more_and_more_rarely():
 
 
 def test_a_friend_who_stopped_answering_stays_in_her_thoughts_and_gets_one_gentle_word_after_her_trip(tmp_path):
-    """Chloé et Dana, joignables sur Telegram, écrivent six soirs puis plus rien ; Chloé avait annoncé qu'elle
+    """Chloé et Dana, joignables sur un compte extérieur, écrivent six soirs puis plus rien ; Chloé avait annoncé qu'elle
     partait trois semaines. Mika prend de leurs nouvelles, une relance douce, puis ne leur écrit plus (ADR 0033)
     — mais elle y repense, de plus en plus rarement (avant : plus une pensée, plus jamais) ; le lendemain du retour
     annoncé de Chloé, elle prend de ses nouvelles une fois, doucement. Jamais une seconde ; et rien pour Dana, qui
@@ -142,29 +142,29 @@ def test_a_friend_who_stopped_answering_stays_in_her_thoughts_and_gets_one_gentl
     start = at_paris(2026, 9, 28, 19, 0)
 
     async def scenario(kernel, llm):
-        await evenings(kernel, [("tg_4", "Chloé"), ("tg_5", "Dana")], 6)
+        await evenings(kernel, [("ext_4", "Chloé"), ("ext_5", "Dana")], 6)
         back = start + 20 * DAY + 12 * HOUR
         await genesis(kernel, memory_c.EVENT_NOTED.draft(
-            text=Content.of("Chloé rentre d'Australie", level=2), when=back, about=("tg_4",), told_by=("tg_4",),
-            heard_by=("tg_4",), sensitivity=2, importance=0.7))
+            text=Content.of("Chloé rentre d'Australie", level=2), when=back, about=("ext_4",), told_by=("ext_4",),
+            heard_by=("ext_4",), sensitivity=2, importance=0.7))
         await asyncio.sleep(23 * DAY / US)
         frame = kernel.mind.frame()
         reasons = {e.correlation: e.data.reason.split(",") for e in events(kernel, rt.EPISODE_STARTED.name)}
         said_to = {h: [(e.at, reasons.get(e.correlation, [])) for e in events(kernel, rt.UTTERANCE.name)
-                       if e.data.kind == "INITIATIVE" and e.data.target == h] for h in ("tg_4", "tg_5")}
+                       if e.data.kind == "INITIATIVE" and e.data.target == h] for h in ("ext_4", "ext_5")}
         thoughts = [(e.at, e.data.intensity, e.data.text.text) for e in events(kernel, attention_c.THOUGHT_BORN.name)
-                    if e.data.origin == attention_c.MISSING and e.data.about == ("tg_4",)]
-        return (back, said_to, thoughts, frame.get(social_c.CLOSENESS("tg_4")), dict(frame.get(social_c.MISSED)))
+                    if e.data.origin == attention_c.MISSING and e.data.about == ("ext_4",)]
+        return (back, said_to, thoughts, frame.get(social_c.CLOSENESS("ext_4")), dict(frame.get(social_c.MISSED)))
 
     back, said_to, thoughts, closeness, missed = run(tmp_path, scenario, start=start)
-    for handle in ("tg_4", "tg_5"):
+    for handle in ("ext_4", "ext_5"):
         early = [at for at, _r in said_to[handle] if at < start + 12 * DAY]
         assert len(early) == 2, f"{handle} : une prise de nouvelles, une relance douce — {said_to[handle]}"
-    rekindled = [(at, r) for at, r in said_to["tg_4"] if social_c.REKINDLE in r]
-    assert len(rekindled) == 1, said_to["tg_4"]
+    rekindled = [(at, r) for at, r in said_to["ext_4"] if social_c.REKINDLE in r]
+    assert len(rekindled) == 1, said_to["ext_4"]
     assert back <= rekindled[0][0] <= back + 3 * DAY, "passé le retour qu'elle avait annoncé"
-    assert len(said_to["tg_4"]) == 3, "une seule fois : plus rien après"
-    assert len(said_to["tg_5"]) == 2, "sans date annoncée : pas trois semaines plus tard"
+    assert len(said_to["ext_4"]) == 3, "une seule fois : plus rien après"
+    assert len(said_to["ext_5"]) == 2, "sans date annoncée : pas trois semaines plus tard"
     # elle y repense, de plus en plus rarement, de moins en moins fort
     assert len(thoughts) >= 3, thoughts
     times = [t for t, _i, _x in thoughts]
@@ -174,7 +174,7 @@ def test_a_friend_who_stopped_answering_stays_in_her_thoughts_and_gets_one_gentl
     assert times[-1] >= start + 18 * DAY, "longtemps après, elle y pense encore"
     assert any("ce que devient Chloé" in x for _t, _i, x in thoughts), thoughts
     # trois semaines d'amitié suivies de trois semaines de silence : une connaissance — qui lui manque encore
-    assert closeness == social_c.ACQUAINTANCE and "tg_4" in missed
+    assert closeness == social_c.ACQUAINTANCE and "ext_4" in missed
 
 
 # ── Ce que coûtent les inconnues de passage ───────────────────────────────
@@ -202,14 +202,14 @@ def test_what_only_concerns_her_friends_does_not_pay_for_every_stranger(tmp_path
         return trace.count(social_c.CLOSENESS.name)
 
     async def scenario(kernel, llm):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
+        await befriend(kernel, "ext_1", social_c.FRIEND)
         for _ in range(3):
-            p = await kernel.perceive(said("tg_1", "coucou", channel="telegram", display_name="Alice"))
+            p = await kernel.perceive(said("ext_1", "coucou", channel="external", display_name="Alice"))
             await p.reply
             await asyncio.sleep(HOUR / US)
         alone = closeness_reads(kernel)
         for i in range(60):  # des inconnues de passage, chacune un mot, chacune une réponse
-            p = await kernel.perceive(said(f"tg_{100 + i}", "salut, t'es qui ?", channel="telegram"))
+            p = await kernel.perceive(said(f"ext_{100 + i}", "salut, t'es qui ?", channel="external"))
             await p.reply
         await asyncio.sleep(MINUTE / US)
         crowd = closeness_reads(kernel)

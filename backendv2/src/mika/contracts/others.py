@@ -134,7 +134,7 @@ class DelayReading:
 #: ``MIND(personne)``.
 MIND = FactFamily("others.mind", arg=str, type=MindReading, time_varying=True)
 #: ``REPLY_DELAY((personne, canal))`` — le canal tel que le transport le nomme
-#: (« web », « telegram ») ; la classe (écran, messagerie) est tranchée ici.
+#: (« web », « external ») ; la classe (écran, messagerie) est tranchée ici.
 REPLY_DELAY = FactFamily("others.reply_delay", arg=tuple, type=DelayReading)
 
 

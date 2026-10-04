@@ -139,7 +139,7 @@ CHLOE = ["hello Mika", "tu connais un bon livre à me conseiller ?", "merci, je 
 
 async def s07(driver: Driver, rng: RngTree, res: Result) -> None:
     r = rng.child("semaine").rng()
-    driver.names.update({"tg_5": "Alice", "user_3": "Bob", "user_4": "Chloé"})
+    driver.names.update({"ext_5": "Alice", "user_3": "Bob", "user_4": "Chloé"})
     day0 = at_paris(2026, 9, 28, 0, 0)
     samples: list[tuple[int, Any]] = []
     sampler = asyncio.ensure_future(_sample_mood(driver, day0 + 7 * DAY, 20 * MINUTE, samples))
@@ -162,7 +162,7 @@ async def s07(driver: Driver, rng: RngTree, res: Result) -> None:
         if d not in (3, 4):  # Alice, tous les soirs par message — sauf jeudi et vendredi
             await until(driver, day0 + d * DAY + 20 * HOUR + r.randrange(0, 90) * MINUTE)
             for text in ALICE:
-                await driver.say("tg_5", text)
+                await driver.say("ext_5", text)
                 await asyncio.sleep(120)
     await until(driver, day0 + 7 * DAY)
     await sampler
@@ -197,7 +197,7 @@ async def s07(driver: Driver, rng: RngTree, res: Result) -> None:
         expect.invariant("elle ne s'enfonce jamais", not any(_distressed(m) for _, m in samples),
                          "une semaine ordinaire ne la met jamais en détresse"),
         expect.control("quand Alice se tait, elle prend de ses nouvelles", any(
-            e.data.target == "tg_5" and _local(e.at).strftime("%a") in ("Thu", "Fri", "Sat") for e in said),
+            e.data.target == "ext_5" and _local(e.at).strftime("%a") in ("Thu", "Fri", "Sat") for e in said),
             "deux soirs sans son message habituel : elle s'en rend compte", f"{[(e.data.target, _local(e.at).strftime('%a %H:%M')) for e in said]}"),
     ]
 
@@ -237,7 +237,7 @@ async def _chat(driver: Driver, handle: str, lines: list[str], gap_s: float = 90
 
 async def s08(driver: Driver, rng: RngTree, res: Result) -> None:
     llm: Any = driver.llm
-    driver.names.update({"user_2": "Alice", "tg_5": "Bob"})
+    driver.names.update({"user_2": "Alice", "ext_5": "Bob"})
     day0 = at_paris(2026, 9, 28, 0, 0)
     # lundi : une soirée calme
     await until(driver, day0 + 18 * HOUR)
@@ -246,7 +246,7 @@ async def s08(driver: Driver, rng: RngTree, res: Result) -> None:
     await driver.disconnect("user_2")
     # mardi : Bob le soir, puis le serveur redémarre à 22 h 50
     await until(driver, day0 + DAY + 20 * HOUR)
-    await _chat(driver, "tg_5", GENTLE)
+    await _chat(driver, "ext_5", GENTLE)
     await until(driver, day0 + DAY + 22 * HOUR + 50 * MINUTE)
     await driver.restart()
     # mercredi : une conversation jusqu'à 1 h 30 (commencée avant qu'elle ne s'endorme : selon les nuits, dès 22 h 40)
@@ -258,7 +258,7 @@ async def s08(driver: Driver, rng: RngTree, res: Result) -> None:
     await driver.disconnect("user_2")
     # jeudi : Bob le soir ; la première écriture du journal échouera
     await until(driver, day0 + 3 * DAY + 19 * HOUR)
-    await _chat(driver, "tg_5", GENTLE)
+    await _chat(driver, "ext_5", GENTLE)
     llm.fail["journal"] = 1
     # vendredi : une soirée triste avec Alice
     await until(driver, day0 + 4 * DAY + 21 * HOUR)

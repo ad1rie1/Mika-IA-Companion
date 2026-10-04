@@ -154,29 +154,6 @@ def test_temperament_sliders_rederive_the_parameters(world):  # noqa: F811
     assert out.status_code == 400 and "doit être entre 0 et 1" in html_of(out)
 
 
-def test_telegram_owners_are_an_input_that_survives_reconfiguration(world):  # noqa: F811
-    client, live, _ = world
-    bootstrap(client)
-    url = f"{BASE}/telegram"
-    client.get(url)
-    bad = post(client, url, {"_section": "telegram", "_champs": ["owners"], "owners": "12\nabc"})
-    assert bad.status_code == 400 and "doit être un nombre entier" in html_of(bad)
-    ok = post(client, url, {"_section": "telegram", "_champs": ["allowed_chats", "owners"],
-                            "allowed_chats": "", "owners": "12\n34"})
-    assert ok.status_code == 200 and "Telegram : enregistré" in html_of(ok)
-    assert client.portal.call(live.settings.telegram)["owners"] == [12, 34]
-    kernel = live.kernel
-
-    def owners():
-        return client.portal.call(lambda: kernel.mind.frame().env.params_of("identity", kernel.mind.root)).owners
-
-    assert owners() == ("tg_12", "tg_34")
-    client.portal.call(live.reconfigure)  # un changement de persona ne les efface pas
-    assert owners() == ("tg_12", "tg_34")
-    params = html_of(client.get(f"{BASE}/comportement-identity"))
-    assert "réglage" in params
-
-
 def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)

@@ -420,11 +420,11 @@ def test_person_tabs_show_only_what_concerns_that_person_on_all_her_handles(tmp_
     async def scenario(kernel):
         await connect(kernel, "user_2", "Alice")
         await connect(kernel, "user_3", "Bob")
-        # une adresse Telegram reliée à Alice par un opérateur
-        await kernel.mind.append([identity_c.LINKED.draft(handle="tg_42", person="user_2")], emitter="identity",
+        # une adresse extérieure reliée à Alice par un opérateur
+        await kernel.mind.append([identity_c.LINKED.draft(handle="ext_42", person="user_2")], emitter="identity",
                                  correlation="op", origin=Origin.EXTERNAL)
         await remember(kernel, ("Alice aime les crêpes CANARI-A", ("user_2",)),
-                       ("Alice m'a écrit sur Telegram CANARI-TG", ("tg_42",)),
+                       ("Alice m'a écrit depuis son compte extérieur CANARI-EXT", ("ext_42",)),
                        ("Bob collectionne les timbres CANARI-B", ("user_3",)),
                        ("Il pleut sur la ville", ()))
         await remember(kernel, ("Alice est infirmière", ("user_2",)), ("Bob est pompier", ("user_3",)),
@@ -441,7 +441,7 @@ def test_person_tabs_show_only_what_concerns_that_person_on_all_her_handles(tmp_
         ins = Inspection(kernel)
         memory, attention = ins.find("memory", "memoire"), ins.find("attention", "pensees_personne")
         return {who: (ins.run(memory, {}, subject=who), ins.run(attention, {}, subject=who))
-                for who in ("user_2", "tg_42", "user_3")}
+                for who in ("user_2", "ext_42", "user_3")}
 
     shown = live(tmp_path, scenario)
     for mem, att in shown.values():
@@ -449,7 +449,7 @@ def test_person_tabs_show_only_what_concerns_that_person_on_all_her_handles(tmp_
 
     alice_mem, alice_att = shown["user_2"]
     text = text_of(alice_mem)
-    assert "CANARI-A" in text and "CANARI-TG" in text, "toutes ses adresses"
+    assert "CANARI-A" in text and "CANARI-EXT" in text, "toutes ses adresses"
     assert "Alice est infirmière" in text and "Envoyer la recette à Alice" in text
     assert "CANARI-B" not in text and "pompier" not in text and "Rappeler Bob" not in text, "jamais un autre"
     assert "Il pleut" not in text
@@ -457,7 +457,7 @@ def test_person_tabs_show_only_what_concerns_that_person_on_all_her_handles(tmp_
     assert table(alice_mem, "Ses croyances").title == "Ses croyances (1)"
     assert table(alice_mem, "Ses promesses").title == "Ses promesses (1)"
     # l'adresse reliée lit la même personne
-    assert text_of(shown["tg_42"][0]) == text
+    assert text_of(shown["ext_42"][0]) == text
 
     thoughts = text_of(alice_att)
     assert "CANARI-MANQUE" in thoughts and "CANARI-VEXEE" not in thoughts
@@ -466,7 +466,7 @@ def test_person_tabs_show_only_what_concerns_that_person_on_all_her_handles(tmp_
 
     bob_mem, bob_att = shown["user_3"]
     assert "CANARI-B" in text_of(bob_mem) and "CANARI-A" not in text_of(bob_mem)
-    assert "CANARI-TG" not in text_of(bob_mem)
+    assert "CANARI-EXT" not in text_of(bob_mem)
     assert "CANARI-VEXEE" in text_of(bob_att) and "CANARI-MANQUE" not in text_of(bob_att)
     assert table(bob_att, "Ce qu'elle en attend").rows == ()
 

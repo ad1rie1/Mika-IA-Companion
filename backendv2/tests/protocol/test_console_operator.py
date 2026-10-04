@@ -243,7 +243,7 @@ def test_a_mailbox_keeps_its_name(world):  # noqa: F811
 def test_settings_refuse_what_cannot_work(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
-    for page in ("transcription", "depots", "identite", "telegram"):
+    for page in ("transcription", "depots", "identite"):
         client.get(f"{BASE}/reglages/{page}")
     stt = post(client, f"{BASE}/reglages/transcription", {"_section": "transcription", "_champs": ["base_url"],
                                                         "base_url": "pas une url"})
@@ -257,19 +257,6 @@ def test_settings_refuse_what_cannot_work(world):  # noqa: F811
                                                                                           "git.exemple.org:8443"}
     unnamed = post(client, f"{BASE}/reglages/identite", {"_section": "personnage", "_champs": ["name"], "name": " "})
     assert unnamed.status_code == 400 and "nom ne peut pas être vide" in html_of(unnamed)
-    open_, shut = "N'importe qui trouvant le robot", "Personne ne peut encore lui écrire"
-    page = html_of(client.get(f"{BASE}/reglages/telegram"))
-    assert open_ not in page and shut not in page  # pas de robot : rien à dire
-    # sans liste ni propriétaires, le robot est fermé (ADR 0038) : on le dit, et comment s'appairer (ADR 0057)
-    client.portal.call(lambda: live.settings.save_telegram(token="123:abc", allowed_chats=[], owners=[]))
-    page = html_of(client.get(f"{BASE}/reglages/telegram"))
-    assert shut in page and open_ not in page
-    client.portal.call(lambda: live.settings.save_telegram(token="123:abc", open_to_all=True))
-    assert open_ in html_of(client.get(f"{BASE}/reglages/telegram"))
-    client.portal.call(lambda: live.settings.save_telegram(token="123:abc", allowed_chats=[42], owners=[],
-                                                           open_to_all=False))
-    page = html_of(client.get(f"{BASE}/reglages/telegram"))
-    assert open_ not in page and shut not in page
 
 
 # ── vérité des listes et des badges ───────────────────────────────────────
@@ -340,7 +327,7 @@ def test_a_failed_delivery_can_be_retried_or_marked_seen(world):  # noqa: F811
 
 
 def test_stale_and_interrupted_effects_are_named_filtered_and_to_handle(world):  # noqa: F811
-    """Une réponse Telegram devenue « stale » (robot coupé plus de dix minutes) n'est jamais dite, ni par une
+    """Une réponse devenue « stale » (transport coupé plus de dix minutes) n'est jamais dite, ni par une
     réponse ni par « désolée » ; une commande réseau « interrupted » non plus. La console les montrait en anglais,
     refusait leur filtre (« État inconnu ») et n'allumait rien dans « À traiter »."""
     client, live, _ = world

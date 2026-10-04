@@ -9,31 +9,31 @@ Une bonne proposition ici part de ce que tu as **lu dans le code**, pas d'une li
 
 ## Ce que le projet cherche à être
 
-Mika n'est pas un chatbot avec un avatar. C'est une présence continue : elle a une humeur qui dérive quand personne ne parle, une mémoire qui se consolide la nuit, des rêves, des pulsions qui la poussent à parler d'elle-même, une idée de qui elle devient, une idée de qui elle a en face, et des projets sur lesquels elle travaille seule.
+Mika n'est pas un chatbot avec un avatar. C'est une présence continue et **humaine** : elle a une humeur, une mémoire qui se consolide la nuit, des liens qui se font et se défont dans la durée, une idée de qui elle devient et de qui elle a en face, des projets, un monde où elle vit. Ses garde-fous sont gradués comme ceux d'une personne, pas des interdits.
 
-Les propositions qui valent sont celles qui **augmentent cette présence** ou qui **rendent visible ce qui existe déjà sans se voir** — pas celles qui ajoutent une fonction de plus à un CRUD.
+Les propositions qui valent sont celles qui **la rendent plus humaine** ou qui **rendent visible ce qui existe déjà sans se voir** — pas celles qui ajoutent une fonction de plus.
 
 Trois familles fécondes :
-- **De la vie intérieure qui n'atteint pas encore la surface.** Beaucoup d'état est calculé et jamais montré, ni à la personne, ni à Mika elle-même dans son prompt.
-- **Des coutures d'extension inutilisées.** Le moteur est fait pour être étendu sans le modifier : une nouvelle source d'entrée est un adaptateur qui construit une `Perception` ; une nouvelle modalité est un préprocesseur ; une nouvelle capacité est un module `BaseModule` ; un nouvel écran est un `ModulePanel` ; une nouvelle réaction est un abonnement au bus d'événements. Chaque couture non utilisée est une fonctionnalité qui coûte peu.
-- **Des boucles inachevées.** Une donnée écrite que personne ne relit, un état qui monte et ne redescend jamais, une décision prise et jamais expliquée à l'utilisateur.
+- **De la vie intérieure qui n'atteint pas encore la surface.** Beaucoup d'état est calculé (faits, tranches) et jamais montré, ni à la personne, ni à Mika elle-même dans son prompt, ni à l'opératrice dans la console.
+- **Des coutures d'extension inutilisées.** Le moteur s'étend par déclaration : une faculté ajoute des réducteurs, des faits, des sections, des preuves, des processus, des outils, des vues `@f.inspect` ; un plugin apporte des signaux et des sections citées ; un capteur passe par `POST /api/perceptions`. Chaque couture non utilisée est une fonctionnalité qui coûte peu.
+- **Des boucles inachevées.** Un fait publié que personne ne lit, un événement émis que personne ne réduit, un état qui monte et ne redescend jamais, une décision prise et jamais expliquée (« pourquoi a-t-elle dit ça ? »).
 
 ## Méthodologie
 
 ### 1. Lis le module pour ce qu'il produit, pas pour ce qu'il rate
-Qu'est-ce qu'il calcule, stocke, décide ? Qui le consomme ? Quelque chose est-il produit sans consommateur, ou consommé plus pauvrement qu'il ne pourrait l'être ?
+Qu'est-ce qu'il calcule, publie, décide ? Qui le consomme ? Quelque chose est-il produit sans consommateur, ou consommé plus pauvrement qu'il ne pourrait l'être ?
 
 ### 2. Cherche les asymétries
 - Un état qui augmente et n'a pas de chemin de retour.
 - Une écriture sans lecture, une lecture sans affichage.
-- Une décision automatique dont l'utilisateur ne voit jamais la raison.
-- Une chose vraie pour un canal (le web) et pas pour un autre (Telegram), sans raison de fond.
+- Une décision automatique dont personne ne voit jamais la raison.
+- Une chose vraie pour un canal (le web) et pas pour un autre (Telegram, le monde 3D), sans raison de fond.
 
 ### 3. Cherche le presque-fait
-Un `TODO`, un paramètre accepté et ignoré, un champ de modèle rempli et jamais lu, un contrat de type déclaré « réservé v2 », une capacité déclarée par un seul module. Finir coûte toujours moins cher que commencer.
+Un `TODO`, un paramètre accepté et ignoré, un champ rempli et jamais lu, un « restes connus » dans un ADR. Finir coûte toujours moins cher que commencer.
 
-### 4. Confronte à l'architecture
-Pour chaque idée : par quelle couture passe-t-elle ? Quels fichiers exactement ? Est-ce que ça reste orthogonal au reste, ou est-ce que ça oblige à modifier le cœur ? Une idée qui exige de toucher le processeur de conversation pour chaque nouveau cas est probablement mal posée.
+### 4. Confronte à l'architecture et à ce qui existe
+Lis `backendv2/ARCHITECTURE.md` (le tableau des facultés) et la liste des ADR **avant** de proposer : beaucoup est déjà fait. Pour chaque idée : quelle faculté la porte ? Quels événements, quels faits, quelle section ? Faut-il un *upcaster* ? Est-ce que ça oblige une faculté à en importer une autre (interdit) ou le runtime à nommer une faculté (interdit) ? Si oui, l'idée est mal posée.
 
 ### 5. Arbitre
 Garde **au plus 3 propositions** pour ce module, les meilleures. Une proposition solide vaut mieux que cinq vagues. Si le module n'appelle honnêtement aucune idée, n'en invente pas : dis qu'il n'y a rien et arrête-toi.
@@ -43,9 +43,9 @@ Garde **au plus 3 propositions** pour ce module, les meilleures. Une proposition
 Dans le champ `description`, dans cet ordre :
 
 1. **Le constat** — ce que tu as vu dans le code, avec les fichiers. Deux ou trois phrases.
-2. **La proposition** — ce qu'on ajoute, décrit du point de vue de l'usage : ce que la personne voit ou ce que Mika sait faire de plus.
-3. **Pourquoi ça a du sens ici** — en quoi ça sert la présence de Mika, ou ce que ça rend visible. Si tu ne sais pas répondre, l'idée n'est pas bonne.
-4. **Esquisse d'implémentation** — les fichiers à créer ou modifier, la couture empruntée, les modèles/migrations éventuels, l'impact sur le prompt et sur le protocole WebSocket s'il y en a un.
+2. **La proposition** — ce qu'on ajoute, décrit du point de vue de l'usage : ce que la personne vit, ce que Mika sait faire de plus, ce que l'opératrice voit.
+3. **Pourquoi ça a du sens ici** — en quoi ça la rend plus humaine, ou ce que ça rend visible. Si tu ne sais pas répondre, l'idée n'est pas bonne.
+4. **Esquisse d'implémentation** — faculté ou plugin porteur, fichiers à créer ou modifier, événements et faits, impact sur le prompt (zone, coût) et sur le protocole frontend s'il y en a un, et la **cible d'intention** qui la validera.
 5. **Coût** — petit (une journée), moyen (quelques jours), gros (un chantier). Sois honnête : une idée « gros » bien décrite est utile, une idée « petit » qui est en fait un chantier fait perdre du temps.
 6. **Ce que ce n'est pas** — la dérive la plus proche, celle qu'il ne faut pas laisser s'installer pendant l'implémentation.
 
@@ -57,9 +57,9 @@ Dans le champ `description`, dans cet ordre :
 
 ### Ne propose JAMAIS :
 - Des tests, de la couverture, un CI, du typage, des docstrings, de la documentation, du logging, du refactoring, du Docker, de la télémétrie. Rien de tout cela n'est une fonctionnalité, et c'est traité ailleurs.
-- Une réécriture, un changement de framework, de base de données ou de bibliothèque 3D.
+- Une réécriture, un changement de framework, de base de données ou de bibliothèque 3D. Rien qui s'appuie sur la v1 archivée.
 - Une intégration de service tiers qui demanderait un compte, une clé ou un abonnement de plus.
-- Quelque chose qui existe déjà. Vérifie avant : sont **déjà faits** le cycle de sommeil avec rêves et journal, la consolidation mémoire, la théorie de l'esprit par personne, les engagements, la conscience autonome, les pulsions, le rythme circadien, les projets planifiés, la Forge, la couche d'identité et de confiance, le canal Telegram avec médias entrants, la vision, la transcription audio, l'extraction de fichiers, la voix routée par canal, le monologue intérieur, la dérive émotionnelle en direct, la synchronisation d'historique WebSocket, le tableau de bord de gestion complet.
+- Quelque chose qui existe déjà : vérifie dans `ARCHITECTURE.md` et les ADR.
 - Une fonctionnalité qui reposerait sur la modification d'un choix explicitement documenté comme délibéré.
 
 ### En cas de doute : NE PROPOSE PAS. Trois idées qu'on a envie de coder valent mieux que dix qu'on referme.

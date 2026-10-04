@@ -77,15 +77,15 @@ def test_an_initiative_says_its_strongest_reason_and_at_most_a_second(tmp_path):
     remind, mail = "C'est l'heure de son rappel.", "Un mail important vient d'arriver pour elle."
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
+        await befriend(kernel, "ext_1", social_c.FRIEND)
         frame = kernel.mind.frame()
-        many = _brief(frame, "tg_1", [("social", social_c.COMFORT, 10.0), ("goals", goals_c.SHARE, 9.0),
+        many = _brief(frame, "ext_1", [("social", social_c.COMFORT, 10.0), ("goals", goals_c.SHARE, 9.0),
                                       ("needs", needs_c.NEED_SOCIAL, 3.0), ("affect", "mood_overflow", 2.0)],
                       {"brief:social": comfort, "brief:goals": share})
-        owed = _brief(frame, "tg_1", [("goals", goals_c.REMIND, 12.0), ("email", email_c.MENTION, 8.0),
+        owed = _brief(frame, "ext_1", [("goals", goals_c.REMIND, 12.0), ("email", email_c.MENTION, 8.0),
                                       ("social", social_c.RECONTACT, 10.5)],
                       {"brief:goals": remind, "brief:email": mail, "brief:social": comfort})
-        lone = _brief(frame, "tg_1", [("social", social_c.COMFORT, 10.0), ("needs", needs_c.NEED_SOCIAL, 2.0)],
+        lone = _brief(frame, "ext_1", [("social", social_c.COMFORT, 10.0), ("needs", needs_c.NEED_SOCIAL, 2.0)],
                       {"brief:social": comfort})
         return many, owed, lone
 
@@ -112,20 +112,20 @@ async def _her_finished_exploration(kernel):
 
 
 async def _believed(kernel, text: str, importance: float, n: int):
-    await kernel.mind.append([memory_c.BELIEVED.draft(text=Content.of(text, level=1), about=("tg_1",), sensitivity=1,
-                                                      source="tg_1", importance=importance)],
+    await kernel.mind.append([memory_c.BELIEVED.draft(text=Content.of(text, level=1), about=("ext_1",), sensitivity=1,
+                                                      source="ext_1", importance=importance)],
                              emitter="memory", correlation=f"croyance{n}", origin=Origin.GENESIS)
 
 
 def test_her_friends_life_comes_before_her_own_finished_thing(tmp_path):
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
+        await befriend(kernel, "ext_1", social_c.FRIEND)
         await _her_finished_exploration(kernel)
-        mine = kernel.mind.frame().get(needs_c.MATTER("tg_1"))
+        mine = kernel.mind.frame().get(needs_c.MATTER("ext_1"))
         await kernel.mind.append([memory_c.EVENT_NOTED.draft(
             text=Content.of("son entretien chez Ubisoft", level=2), when=kernel.mind.clock.now() + DAY,
-            about=("tg_1",), told_by=("tg_1",))], emitter="memory", correlation="moment", origin=Origin.GENESIS)
-        theirs = kernel.mind.frame().get(needs_c.MATTER("tg_1"))
+            about=("ext_1",), told_by=("ext_1",))], emitter="memory", correlation="moment", origin=Origin.GENESIS)
+        theirs = kernel.mind.frame().get(needs_c.MATTER("ext_1"))
         return mine, theirs
 
     mine, theirs = run(tmp_path, scenario)
@@ -135,30 +135,30 @@ def test_her_friends_life_comes_before_her_own_finished_thing(tmp_path):
 
 def test_what_a_third_told_of_her_life_is_never_a_matter_with_her(tmp_path):
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
+        await befriend(kernel, "ext_1", social_c.FRIEND)
         await kernel.mind.append([memory_c.EVENT_NOTED.draft(
-            text=Content.of("son départ au Japon", level=2), when=kernel.mind.clock.now() + DAY, about=("tg_1",),
-            told_by=("tg_2",))], emitter="memory", correlation="moment", origin=Origin.GENESIS)
-        return kernel.mind.frame().get(needs_c.MATTER("tg_1"))
+            text=Content.of("son départ au Japon", level=2), when=kernel.mind.clock.now() + DAY, about=("ext_1",),
+            told_by=("ext_2",))], emitter="memory", correlation="moment", origin=Origin.GENESIS)
+        return kernel.mind.frame().get(needs_c.MATTER("ext_1"))
 
     assert run(tmp_path, scenario) is None  # le lui dire trahirait qui le lui a raconté
 
 
 def test_what_she_told_counts_by_its_weight_and_a_matter_said_is_not_said_again(tmp_path):
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
+        await befriend(kernel, "ext_1", social_c.FRIEND)
         await _believed(kernel, "Son chat Moustache est malade", 0.9, 1)
         await asyncio.sleep(HOUR / US)
         await _believed(kernel, "Elle a mangé des pâtes ce midi", 0.2, 2)
-        first = kernel.mind.frame().get(needs_c.MATTER("tg_1"))
+        first = kernel.mind.frame().get(needs_c.MATTER("ext_1"))
         texts = kernel.mind.store.content([first.ref])
-        await kernel.mind.append([rt.EPISODE_STARTED.draft(kind="INITIATIVE", target="tg_1", reason="need_social")],
+        await kernel.mind.append([rt.EPISODE_STARTED.draft(kind="INITIATIVE", target="ext_1", reason="need_social")],
                                  emitter="runtime", correlation="ep1", origin=Origin.KERNEL)
         await kernel.mind.append([rt.UTTERANCE.draft(kind="INITIATIVE", text=Content.of("et Moustache ?"),
-                                                     target="tg_1", voice=voice(),
+                                                     target="ext_1", voice=voice(),
                                                      provenance=(f"matter:{first.ref}",))],
                                  emitter="runtime", correlation="ep1", origin=Origin.KERNEL)
-        then = kernel.mind.frame().get(needs_c.MATTER("tg_1"))
+        then = kernel.mind.frame().get(needs_c.MATTER("ext_1"))
         return texts[first.ref], then.ref if then is not None else None, first.ref
 
     first_text, then_ref, first_ref = run(tmp_path, scenario)

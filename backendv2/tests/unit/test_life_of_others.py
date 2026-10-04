@@ -200,21 +200,21 @@ def test_a_moment_shown_but_not_spoken_of_is_still_to_be_asked_about(tmp_path, t
     script = Script()
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
-        await chat(kernel, "tg_1", ["salut !", "bonne soirée !"], channel="telegram")
-        moment = await note(kernel, "son entretien chez Ubisoft", at_paris(2026, 10, 1, 14, 0), "tg_1")
+        await befriend(kernel, "ext_1", social_c.FRIEND)
+        await chat(kernel, "ext_1", ["salut !", "bonne soirée !"], channel="external")
+        moment = await note(kernel, "son entretien chez Ubisoft", at_paris(2026, 10, 1, 14, 0), "ext_1")
         await until(kernel, at_paris(2026, 10, 1, 15, 0))
-        await chat(kernel, "tg_1", ["l'entretien s'est super bien passé !" if told_herself else "coucou",
-                                    "bon, à plus !"], channel="telegram")
+        await chat(kernel, "ext_1", ["l'entretien s'est super bien passé !" if told_herself else "coucou",
+                                    "bon, à plus !"], channel="external")
         await until(kernel, at_paris(2026, 10, 3, 11, 0))
-        await chat(kernel, "tg_1", ["salut !"], channel="telegram")
+        await chat(kernel, "ext_1", ["salut !"], channel="external")
         followed = [e for e in events(kernel, memory_c.MOMENT_FOLLOWED.name) if e.data.event == moment]
         return followed, started(kernel, others_c.FOLLOW_UP)
 
     followed, follow_ups = run(tmp_path, scenario, script, start=at_paris(2026, 9, 28, 18, 0))
-    saturday = section(script.prompts("reply", "tg_1")[-1], LIFE)
+    saturday = section(script.prompts("reply", "ext_1")[-1], LIFE)
     if told_herself:
-        assert followed and followed[0].data.by == "tg_1"
+        assert followed and followed[0].data.by == "ext_1"
         assert "Ubisoft" not in saturday, "il le lui a raconté : elle ne le redemande pas"
     else:
         assert not followed
@@ -231,12 +231,12 @@ def test_the_eve_of_a_big_moment_she_cheers_her_friend_once(tmp_path, talked_tha
     script = Script(initiative="Bonne chance pour demain, tu vas assurer ! [EMOTION:happy:0.6]")
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
-        await chat(kernel, "tg_1", ["salut !", "bonne soirée !"], channel="telegram")
-        await note(kernel, "son entretien chez Ubisoft", at_paris(2026, 10, 1, 14, 0), "tg_1")
+        await befriend(kernel, "ext_1", social_c.FRIEND)
+        await chat(kernel, "ext_1", ["salut !", "bonne soirée !"], channel="external")
+        await note(kernel, "son entretien chez Ubisoft", at_paris(2026, 10, 1, 14, 0), "ext_1")
         await until(kernel, at_paris(2026, 9, 30, 13, 0))
         if talked_that_evening:
-            await chat(kernel, "tg_1", ["je stresse pour demain", "bon, à plus !"], channel="telegram")
+            await chat(kernel, "ext_1", ["je stresse pour demain", "bon, à plus !"], channel="external")
         await until(kernel, at_paris(2026, 10, 1, 13, 0))
         return started(kernel, others_c.CHEER)
 
@@ -247,7 +247,7 @@ def test_the_eve_of_a_big_moment_she_cheers_her_friend_once(tmp_path, talked_tha
         assert len(cheers) == 1, cheers
         assert cheers[0].data.subject.startswith("moment:")
         assert at_paris(2026, 9, 30, 18, 0) <= cheers[0].at <= at_paris(2026, 9, 30, 22, 0), "la veille au soir"
-        prompt = script.prompts("initiative", "tg_1")[-1]
+        prompt = script.prompts("initiative", "ext_1")[-1]
         assert "encourager" in prompt and "Ubisoft" in section(prompt, LIFE)
 
 
@@ -303,17 +303,17 @@ def test_good_news_from_a_friend_can_be_spoken_of_again_the_next_day(tmp_path, g
     script = Script(reply=lambda m: f"Waouh, bravo !! {tag}" if "poste" in m or "salade" in m else None)
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
-        await chat(kernel, "tg_1", ["j'ai eu le poste !!" if glad else "j'ai mangé une salade", "bonne soirée !"],
-                   channel="telegram")
+        await befriend(kernel, "ext_1", social_c.FRIEND)
+        await chat(kernel, "ext_1", ["j'ai eu le poste !!" if glad else "j'ai mangé une salade", "bonne soirée !"],
+                   channel="external")
         await asyncio.sleep(40 * HOUR / US)
-        return [e for e in started(kernel, attention_c.THOUGHT) if e.data.target == "tg_1"]
+        return [e for e in started(kernel, attention_c.THOUGHT) if e.data.target == "ext_1"]
 
     fired = run(tmp_path, scenario, script, start=at_paris(2026, 9, 28, 18, 0))
     if glad:
         assert fired, "le lendemain, l'envie de lui en reparler"
         assert 12 * HOUR <= fired[0].at - at_paris(2026, 9, 28, 18, 0) <= 40 * HOUR
-        prompt = script.prompts("initiative", "tg_1")[0]
+        prompt = script.prompts("initiative", "ext_1")[0]
         assert "Tu repenses avec plaisir" in prompt
     else:
         assert fired == []
@@ -330,15 +330,15 @@ def test_after_snapping_at_a_friend_she_feels_she_was_harsh(tmp_path, friend):
 
     async def scenario(kernel):
         if friend:
-            await befriend(kernel, "tg_1", social_c.FRIEND)
-        await chat(kernel, "tg_1", ["t'es vraiment nulle aujourd'hui"], channel="telegram", display_name="Alice")
+            await befriend(kernel, "ext_1", social_c.FRIEND)
+        await chat(kernel, "ext_1", ["t'es vraiment nulle aujourd'hui"], channel="external", display_name="Alice")
         await asyncio.sleep(HOUR / US)
         born = [e for e in events(kernel, attention_c.THOUGHT_BORN.name) if e.data.origin == attention_c.REMORSE]
         return born, kernel.mind.store.content([e.data.text.ref for e in born])
 
     remorse, texts = run(tmp_path, scenario, script, start=at_paris(2026, 9, 28, 18, 0))
     if friend:
-        assert len(remorse) == 1 and remorse[0].data.about == ("tg_1",)
+        assert len(remorse) == 1 and remorse[0].data.about == ("ext_1",)
         assert texts[remorse[0].data.text.ref] == "J'ai été dure avec Alice."
     else:
         assert remorse == []

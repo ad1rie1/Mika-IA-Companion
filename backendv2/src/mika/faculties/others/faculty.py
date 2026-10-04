@@ -72,6 +72,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, floor
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
+from mika.vocab import privacy
 from mika.vocab.affect import Appraisal, Declared, Emotion, emotion_of
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.people import is_identifiable
@@ -347,7 +348,7 @@ def params(p: OthersParams | None) -> OthersParams:
 
 def channel_class(channel: str) -> str:
     """Par messagerie, on lit quand on y pense ; à l'écran, on répond en minutes."""
-    return c.MESSAGE if channel == "telegram" else c.SCREEN
+    return c.MESSAGE if privacy.is_messaging(channel) else c.SCREEN
 
 
 def band_of(hour: int) -> str:

@@ -199,35 +199,35 @@ def test_the_rule_vetoes_every_ordinary_reason_and_allows_one_gentle_follow_up(t
 
     async def initiative(kernel, n):
         await kernel.mind.append([rt.UTTERANCE.draft(
-            kind="INITIATIVE", text=Content.of("tu vas mieux ?"), target="tg_1", channel="telegram", voice=voice())],
+            kind="INITIATIVE", text=Content.of("tu vas mieux ?"), target="ext_1", channel="external", voice=voice())],
             emitter="runtime", correlation=f"genese{n}", origin=Origin.GENESIS)
 
     def veto(kernel, reasons=("thought",)):
         frame = kernel.mind.frame()
-        return _budget(frame.state("agency"), frame, RowView("INITIATIVE", "tg_1", 5.0, reasons)).veto
+        return _budget(frame.state("agency"), frame, RowView("INITIATIVE", "ext_1", 5.0, reasons)).veto
 
     async def scenario(kernel, script, out, llm):
-        await befriend(kernel, "tg_1", social_c.CLOSE)
-        p = await kernel.perceive(said("tg_1", "coucou", channel="telegram"))
+        await befriend(kernel, "ext_1", social_c.CLOSE)
+        p = await kernel.perceive(said("ext_1", "coucou", channel="external"))
         await p.reply
         await asyncio.sleep(13 * HOUR / US)
         free = veto(kernel)
         await initiative(kernel, 1)
         absent = veto(kernel)
-        await connect(kernel, "tg_1", "Alice")
+        await connect(kernel, "ext_1", "Alice")
         present = veto(kernel)
         greeting = veto(kernel, (social_c.GREETING,))
         first = kernel.mind.clock.now()
         await asyncio.sleep(DAY / US)
         early = veto(kernel)  # proche, rythme supposé de trois jours : deux fois ça, pas encore
         await asyncio.sleep(9 * DAY / US)  # elle relance d'elle-même, une fois, doucement
-        sent = initiatives(kernel, "tg_1")
+        sent = initiatives(kernel, "ext_1")
         briefs = [c.messages[-1].content for c in llm.calls if c.role == "initiative"]
         after_two = veto(kernel)
         birthday = veto(kernel, (others_c.CELEBRATE,))
-        p = await kernel.perceive(said("tg_1", "désolée, j'étais débordée !", channel="telegram"))
+        p = await kernel.perceive(said("ext_1", "désolée, j'étais débordée !", channel="external"))
         await p.reply
-        answered = kernel.mind.frame().get(attention_c.AWAITING("tg_1"))
+        answered = kernel.mind.frame().get(attention_c.AWAITING("ext_1"))
         return free, absent, present, greeting, early, first, sent, briefs, after_two, birthday, answered
 
     free, absent, present, greeting, early, first, sent, briefs, after_two, birthday, answered = run(tmp_path, scenario)

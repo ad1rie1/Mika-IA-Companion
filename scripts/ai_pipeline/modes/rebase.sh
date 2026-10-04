@@ -12,23 +12,21 @@
 # existant uniquement.
 # ============================================================================
 
-# Liste les PRs ouvertes dont la branche source commence par BRANCH_PREFIX/
+# PRs ouvertes dont la branche commence par BRANCH_PREFIX/, en tableau JSON.
+# Filtrées par jq et non par `--search head:` : l'API Search ne suit pas les
+# renommages de dépôt, et son échec était lu comme « aucune PR ».
 _rebase_list_pipeline_prs() {
-    gh pr list --state open --limit 1000 \
-        --search "head:${BRANCH_PREFIX}/" \
+    gh_query gh pr list --state open --limit 1000 \
         --json number,headRefName,title,body,mergeable,url \
-        2>/dev/null || echo "[]"
+        --jq "[.[] | select(.headRefName | startswith(\"${BRANCH_PREFIX}/\"))]"
 }
 
 # Résout un statut mergeable=UNKNOWN en interrogeant `gh pr view` (qui force
 # GitHub à calculer le merge state, lazy-computed après ouverture/push).
-# Retries quelques fois pour laisser le temps au calcul de se finaliser.
 # Retourne sur stdout : MERGEABLE | CONFLICTING | UNKNOWN
 _rebase_resolve_mergeable() {
     local pr_num="$1"
-    local attempts=3
-    local delay=2
-    local i mergeable
+    local attempts=3 delay=2 i mergeable
     for ((i = 1; i <= attempts; i++)); do
         mergeable=$(gh pr view "$pr_num" --json mergeable -q .mergeable 2>/dev/null || echo "UNKNOWN")
         if [[ "$mergeable" == "MERGEABLE" || "$mergeable" == "CONFLICTING" ]]; then
@@ -43,8 +41,17 @@ _rebase_resolve_mergeable() {
 # Extrait les numéros d'issues que la PR fermerait (Closes/Fixes/Resolves #N)
 _rebase_extract_closing_issues() {
     local body="$1"
-    echo "$body" | grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' \
-        | grep -oE '#[0-9]+' | tr -d '#' | sort -u
+    grep -oiE '(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]+#[0-9]+' <<< "$body" \
+        | grep -oE '#[0-9]+' | tr -d '#' | sort -u || true
+}
+
+# La branche distante contient-elle la pointe de la branche de base ? C'est la
+# preuve qu'un rebase a eu lieu ET a été poussé — l'exit code de l'agent ne
+# prouvait que l'absence de plantage.
+_rebase_branch_is_up_to_date() {
+    local branch="$1"
+    git fetch --quiet "$REPO_REMOTE" "$BASE_BRANCH" "$branch" >> "$LOG_FILE" 2>&1 || return 1
+    git merge-base --is-ancestor "$BASE_REF" "${REPO_REMOTE}/${branch}"
 }
 
 # Demande à l'IA de rebase une branche en conflit sur BASE_BRANCH
@@ -57,72 +64,70 @@ _rebase_rebase_pr() {
     prompt=$(cat <<PROMPT
 La PR #${pr_num} (branche \`${branch}\`) est en conflit avec \`${BASE_BRANCH}\`.
 
+$(ai_project_context)
+
 ## Tâche
 
-Rebase la branche \`${branch}\` sur \`${REPO_REMOTE}/${BASE_BRANCH}\` et résous les conflits en préservant l'intention de la PR.
+Rebase la branche \`${branch}\` sur \`${BASE_REF}\` et résous les conflits en préservant l'intention de la PR. Tu es dans un worktree dédié au pipeline, en tête détachée.
 
 ## Étapes attendues
 
-1. \`git fetch ${REPO_REMOTE} ${BASE_BRANCH}\`
-2. \`git checkout ${branch}\` (ou \`git checkout -b ${branch} ${REPO_REMOTE}/${branch}\` si la branche locale n'existe pas)
-3. \`git rebase ${REPO_REMOTE}/${BASE_BRANCH}\`
+1. \`git fetch ${REPO_REMOTE} ${BASE_BRANCH} ${branch}\`
+2. \`git checkout -B ${branch} ${REPO_REMOTE}/${branch}\`
+3. \`git rebase ${BASE_REF}\`
 4. Pour chaque conflit :
    - Lis les deux versions
    - Identifie l'intention de la PR (commits originaux)
-   - Résous en gardant cette intention sans casser les changements de main
+   - Résous en gardant cette intention sans casser les changements de ${BASE_BRANCH}
    - \`git add <fichier>\`
    - \`git rebase --continue\`
 5. Une fois propre : \`git push --force-with-lease ${REPO_REMOTE} ${branch}\`
 
 ## Si rebase impossible
 
-Si les conflits sont trop massifs ou si l'intention de la PR est devenue incompatible avec main (refactor structurel, suppression de fichiers ciblés, etc.) :
+Si les conflits sont trop massifs ou si l'intention de la PR est devenue incompatible avec ${BASE_BRANCH} (refactor structurel, suppression de fichiers ciblés, etc.) :
 - \`git rebase --abort\`
-- \`git checkout ${BASE_BRANCH}\`
 - Réponds en première ligne EXACTEMENT : \`REBASE_ABORTED: <raison courte en français>\`
 
 ## Contraintes
 
 - N'effectue AUCUN \`git push --force\` sans \`--with-lease\`
-- Ne touche PAS aux autres branches
-- Ne modifie PAS \`${BASE_BRANCH}\` localement
+- Ne touche PAS aux autres branches, ne pousse rien d'autre que \`${branch}\`
+- N'exécute aucun test (une vérification \`ruff\`/\`tsc\` ciblée sur un fichier en conflit est permise)
 - Réponds en français
 PROMPT
 )
 
-    local ai_out
+    local ai_out ai_exit=0 output
     ai_out=$(mktemp)
-    local ai_exit=0
-    run_ai_agent "edit" "$prompt" "$ai_out" &
-    local ai_pid=$!
-    wait "$ai_pid" || ai_exit=$?
-
-    local output
+    run_ai_agent "write" "$prompt" "$ai_out" &
+    wait $! || ai_exit=$?
     output=$(cat "$ai_out")
     echo "$output" >> "$LOG_FILE"
     rm -f "$ai_out"
 
-    # S'assurer qu'on n'est pas resté sur la branche de la PR (sécurité)
-    cd "$PROJECT_ROOT"
-    git checkout "$BASE_BRANCH" 2>/dev/null || true
-
-    if [[ $ai_exit -ne 0 ]]; then
-        warn "Agent IA a échoué (exit $ai_exit) pour le rebase de #${pr_num}"
-        return 1
-    fi
-
+    local outcome=1
     if grep -qE '^REBASE_ABORTED' <<< "$output"; then
         local reason
         reason=$(grep -m1 '^REBASE_ABORTED' <<< "$output" | sed 's/^REBASE_ABORTED:[[:space:]]*//')
         warn "Rebase abandonné pour #${pr_num} : ${reason}"
         gh pr comment "$pr_num" \
             --body "AI Pipeline n'a pas pu rebase automatiquement cette PR. Raison : ${reason}. Intervention manuelle requise." \
-            2>/dev/null || true
-        return 1
+            >> "$LOG_FILE" 2>&1 || true
+    elif [[ $ai_exit -ne 0 ]]; then
+        warn "Agent IA a échoué (exit $ai_exit) pour le rebase de #${pr_num}"
+    elif _rebase_branch_is_up_to_date "$branch"; then
+        ok "PR #${pr_num} rebasée"
+        outcome=0
+    else
+        warn "L'agent dit avoir fini, mais ${REPO_REMOTE}/${branch} ne contient pas ${BASE_REF} : rebase non poussé"
     fi
 
-    ok "PR #${pr_num} rebasée"
-    return 0
+    # Le worktree revient sur la base ; la copie locale de la branche part
+    # (elle vit sur le distant).
+    workspace_reset "après le rebase de #${pr_num}" || true
+    git branch -q -D "$branch" >> "$LOG_FILE" 2>&1 || true
+    return $outcome
 }
 
 # Demande à l'IA si la PR est encore pertinente. Retourne une ligne :
@@ -131,20 +136,23 @@ PROMPT
 _rebase_check_pr_relevance() {
     local pr_num="$1" title="$2" body="$3"
 
+    # Diff borné à 400 lignes. `gh pr diff | head` échouait sous pipefail dès
+    # que le diff dépassait la borne (SIGPIPE), et « (diff non disponible) »
+    # s'ajoutait au diff tronqué.
     local diff
-    diff=$(gh pr diff "$pr_num" 2>/dev/null | head -400 || echo "(diff non disponible)")
+    diff=$(gh pr diff "$pr_num" 2>/dev/null) || diff="(diff non disponible)"
+    diff=$(head -n 400 <<< "$diff")
 
-    local issue_refs
+    local issue_refs issue_section="" n
     issue_refs=$(_rebase_extract_closing_issues "$body")
-
-    local issue_section=""
     if [[ -n "$issue_refs" ]]; then
-        local n
         for n in $issue_refs; do
             local issue_data
             issue_data=$(gh issue view "$n" --json state,title,body \
-                --template '- État: {{.state}}\n- Titre: {{.title}}\n- Body:\n{{.body}}' \
-                2>/dev/null || echo "(issue #${n} introuvable)")
+                --template '- État: {{.state}}
+- Titre: {{.title}}
+- Body:
+{{.body}}' 2>/dev/null || echo "(issue #${n} introuvable)")
             issue_section+=$'\n### Issue #'"${n}"$'\n'"${issue_data}"$'\n'
         done
     else
@@ -153,7 +161,7 @@ _rebase_check_pr_relevance() {
 
     local prompt
     prompt=$(cat <<PROMPT
-Évalue si cette PR du pipeline AI est ENCORE pertinente.
+Évalue si cette PR du pipeline AI est ENCORE pertinente. Le répertoire courant contient le code actuel de \`${BASE_BRANCH}\`.
 
 ## PR #${pr_num} : ${title}
 
@@ -190,24 +198,18 @@ Aucun markdown. Pas de phrase d'introduction. Une seule ligne.
 PROMPT
 )
 
-    local ai_out
+    local ai_out ai_exit=0 verdict=""
     ai_out=$(mktemp)
-    local ai_exit=0
     run_ai_agent "read" "$prompt" "$ai_out" &
-    local ai_pid=$!
-    wait "$ai_pid" || ai_exit=$?
-
-    local verdict=""
+    wait $! || ai_exit=$?
     if [[ $ai_exit -eq 0 ]]; then
-        verdict=$(grep -oE '^(KEEP|STALE):.*$' "$ai_out" | head -1 || true)
+        # Tolère les accents graves que le modèle recopie parfois du gabarit.
+        verdict=$(sed 's/^`//; s/`$//' "$ai_out" | grep -oE '^(KEEP|STALE):.*$' | head -1 || true)
     fi
     rm -f "$ai_out"
 
     # En cas d'absence de verdict clair, on conserve par défaut (safe)
-    if [[ -z "$verdict" ]]; then
-        verdict="KEEP: verdict IA absent ou illisible (conservation par sécurité)"
-    fi
-
+    [[ -z "$verdict" ]] && verdict="KEEP: verdict IA absent ou illisible (conservation par sécurité)"
     echo "$verdict"
 }
 
@@ -215,36 +217,37 @@ main_rebase() {
     header "AI Pipeline - Mode REBASE / Cleanup PRs"
     log "Log: $LOG_FILE"
 
-    check_prerequisites_light
-    cd "$PROJECT_ROOT"
-
-    # On part toujours de main propre pour ne pas polluer une branche en cours
-    git checkout "$BASE_BRANCH" 2>/dev/null || true
-    git pull "$REPO_REMOTE" "$BASE_BRANCH" 2>/dev/null || true
+    check_prerequisites
 
     local prs_json
-    prs_json=$(_rebase_list_pipeline_prs)
-
-    local pr_count
-    pr_count=$(echo "$prs_json" | jq 'length' 2>/dev/null || echo 0)
-
-    if [[ "$pr_count" -eq 0 || "$pr_count" == "null" ]]; then
-        ok "Aucune PR pipeline ouverte - rien à faire"
-        return 0
+    if ! prs_json=$(_rebase_list_pipeline_prs); then
+        err "Impossible de lister les PR du pipeline"
+        exit "$EXIT_FAIL"
     fi
 
-    log "${pr_count} PR(s) pipeline ouverte(s) à examiner"
+    local -a pr_numbers=()
+    mapfile -t pr_numbers < <(jq -r '.[].number' <<< "$prs_json")
 
-    local rebased=0 closed=0 kept=0 failed=0
+    if [[ ${#pr_numbers[@]} -eq 0 ]]; then
+        ok "Aucune PR pipeline ouverte - rien à faire"
+        exit "$EXIT_NOTHING"
+    fi
 
-    # tsv pour parsing simple (les champs peuvent contenir des newlines → jq @tsv
-    # remplace par \t \n littéraux, qu'on re-substitue ensuite)
-    while IFS=$'\t' read -r pr_num branch title body mergeable url; do
-        [[ -z "$pr_num" ]] && continue
+    log "${#pr_numbers[@]} PR(s) pipeline ouverte(s) à examiner"
 
-        # jq @tsv encode les sauts de ligne en littéral \n — on les restaure
-        body=${body//\\n/$'\n'}
-        title=${title//\\n/ }
+    # L'agent lit le code de la base dans le worktree, et y rebase.
+    if [[ "$DRY_RUN" != true ]]; then
+        ensure_workspace || exit "$EXIT_FAIL"
+    fi
+
+    local rebased=0 closed=0 kept=0 failed=0 pr_num
+    for pr_num in "${pr_numbers[@]}"; do
+        local branch title body mergeable url
+        branch=$(jq -r --argjson n "$pr_num" '.[] | select(.number == $n) | .headRefName' <<< "$prs_json")
+        title=$(jq -r --argjson n "$pr_num" '.[] | select(.number == $n) | .title' <<< "$prs_json")
+        body=$(jq -r --argjson n "$pr_num" '.[] | select(.number == $n) | .body' <<< "$prs_json")
+        mergeable=$(jq -r --argjson n "$pr_num" '.[] | select(.number == $n) | .mergeable' <<< "$prs_json")
+        url=$(jq -r --argjson n "$pr_num" '.[] | select(.number == $n) | .url' <<< "$prs_json")
 
         log ""
         log "─── PR #${pr_num} : ${title}"
@@ -267,11 +270,12 @@ main_rebase() {
             fi
         fi
 
+        if ! check_ai_tokens; then
+            err "Agent IA indisponible - arrêt du rebase"
+            break
+        fi
+
         if [[ "$mergeable" == "CONFLICTING" ]]; then
-            if ! check_ai_tokens; then
-                err "Agent IA indisponible - arrêt du rebase"
-                return 1
-            fi
             if _rebase_rebase_pr "$pr_num" "$branch"; then
                 rebased=$((rebased + 1))
             else
@@ -281,11 +285,6 @@ main_rebase() {
         fi
 
         # Cas MERGEABLE / UNKNOWN : check de pertinence
-        if ! check_ai_tokens; then
-            err "Agent IA indisponible - arrêt du rebase"
-            return 1
-        fi
-
         local verdict
         verdict=$(_rebase_check_pr_relevance "$pr_num" "$title" "$body")
         log "    Verdict: $verdict"
@@ -296,28 +295,33 @@ main_rebase() {
 
             gh pr close "$pr_num" --delete-branch \
                 --comment "Fermée automatiquement par AI Pipeline — PR plus pertinente : ${reason}" \
-                2>&1 | tee -a "$LOG_FILE" || true
+                >> "$LOG_FILE" 2>&1 || warn "Fermeture de la PR #${pr_num} en échec"
 
             # Fermer aussi les issues liées
-            local issue_refs
-            issue_refs=$(_rebase_extract_closing_issues "$body")
             local n
-            for n in $issue_refs; do
-                gh issue close "$n" \
+            for n in $(_rebase_extract_closing_issues "$body"); do
+                if gh issue close "$n" \
                     --comment "Fermée automatiquement par AI Pipeline (PR #${pr_num} obsolète) — ${reason}" \
-                    2>&1 | tee -a "$LOG_FILE" || true
-                ok "Issue #${n} fermée"
+                    >> "$LOG_FILE" 2>&1; then
+                    ok "Issue #${n} fermée"
+                else
+                    warn "Fermeture de l'issue #${n} en échec"
+                fi
             done
 
             closed=$((closed + 1))
         else
             kept=$((kept + 1))
         fi
-    done < <(echo "$prs_json" | jq -r '.[] | [.number, .headRefName, .title, .body, .mergeable, .url] | @tsv')
+    done
 
     header "Mode rebase terminé"
-    log "  Rebasées : $rebased"
-    log "  Fermées  : $closed"
-    log "  Conservées : $kept"
-    log "  Échecs   : $failed"
+    log "  Rebasées    : $rebased"
+    log "  Fermées     : $closed"
+    log "  Conservées  : $kept"
+    log "  Échecs      : $failed"
+
+    (( rebased + closed > 0 )) && exit "$EXIT_OK"
+    (( failed > 0 )) && exit "$EXIT_FAIL"
+    exit "$EXIT_NO_RESULT"
 }

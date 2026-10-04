@@ -464,7 +464,7 @@ def test_taking_back_a_taste_revises_it(tmp_path):
 
 @pytest.mark.parametrize("secret", [False, True])
 def test_someone_named_just_before_brings_back_what_she_knows(tmp_path, secret):
-    """Salon Telegram : « qq a des nouvelles de Sam ? il répond plus » (entre eux), puis « @Mika toi tu sais comment
+    """Salon extérieur : « qq a des nouvelles de Sam ? il répond plus » (entre eux), puis « @Mika toi tu sais comment
     il va ? ». Sam lui a dit en privé que Pixel était au plus mal : elle n'en raconte rien, mais ne prétend pas ne
     rien savoir (sonde réelle du 2026-10-03 : « j'ai pas de nouvelles non plus »). Contre-exemple : un secret ne
     laisse rien deviner."""
@@ -478,20 +478,20 @@ def test_someone_named_just_before_brings_back_what_she_knows(tmp_path, secret):
                                "personnel", "secret": secret, "messages": seq_of(said_, "CANARI-N1")}]}
 
     script = Script(extract=extract)
-    room = {"room": "tg_chat_-9", "channel": "telegram"}
+    room = {"room": "ext_chat_-9", "channel": "external"}
 
     async def scenario(kernel):
         await connect(kernel, "user_1", "Sam")
         await chat(kernel, "user_1", ["CANARI-N1 Pixel est au plus mal" + (", dis-le à personne" if secret else ""),
                                       *SIX[1:]])
         await asyncio.sleep(15 * MINUTE / US)
-        await chat(kernel, "tg_7", ["qq a des nouvelles de Sam ? il répond plus"], display_name="Marc",
+        await chat(kernel, "ext_7", ["qq a des nouvelles de Sam ? il répond plus"], display_name="Marc",
                    addressed=False, **room)
-        await chat(kernel, "tg_7", ["@Mika toi tu sais comment il va ?"], display_name="Marc", **room)
+        await chat(kernel, "ext_7", ["@Mika toi tu sais comment il va ?"], display_name="Marc", **room)
 
     run(tmp_path, scenario, script)
-    to_room = script.prompts("tg_7", ("reply",))[-1]
-    assert "CANARI-N1" not in "\n".join(script.prompts("tg_7"))
+    to_room = script.prompts("ext_7", ("reply",))[-1]
+    assert "CANARI-N1" not in "\n".join(script.prompts("ext_7"))
     if secret:
         assert "Sam" not in section(to_room, REVIENT)
     else:

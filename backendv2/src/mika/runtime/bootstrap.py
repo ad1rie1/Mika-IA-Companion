@@ -9,7 +9,7 @@ donnés.
 Le démarrage se fait en deux temps : ``boot`` (relire sa vie, journaliser la
 configuration) puis ``live`` (les voies, la reprise, les processus, la file de
 sortie). Entre les deux, l'hôte branche ce dont la vie a besoin — la
-passerelle des modèles, le budget, les écrans, Telegram — : rien ne part,
+passerelle des modèles, le budget, les écrans — : rien ne part,
 rien ne se décide avant que tout soit en place. ``start`` fait les deux.
 
 Les reprises de réponses sont datées : une réponse supplantée revient tout de

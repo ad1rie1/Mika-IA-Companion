@@ -323,9 +323,9 @@ def test_older_never_leads_to_an_empty_page(tmp_path, n, older):
 
 
 def test_an_initiative_answered_from_another_of_her_addresses_is_answered(tmp_path):
-    """CON-27 : elle écrit à Alice dans le navigateur, Alice répond sur Telegram."""
+    """CON-27 : elle écrit à Alice dans le navigateur, Alice répond depuis son compte extérieur."""
     async def scenario(kernel, script, llm):
-        await kernel.mind.append([identity_c.LINKED.draft(handle="tg_5", person="user_1")], emitter="identity",
+        await kernel.mind.append([identity_c.LINKED.draft(handle="ext_5", person="user_1")], emitter="identity",
                                  correlation="genese", origin=Origin.GENESIS)
         await befriend(kernel, "user_1", social_c.CLOSE)
         await connect(kernel, "user_1", "Alice")
@@ -334,7 +334,7 @@ def test_an_initiative_answered_from_another_of_her_addresses_is_answered(tmp_pa
             voice=VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m"))],
             emitter="runtime", correlation="genese2", origin=Origin.GENESIS)
         await asyncio.sleep(MINUTE / US)
-        p = await kernel.perceive(said("tg_5", "coucou ! je suis sur mon téléphone", channel="telegram"))
+        p = await kernel.perceive(said("ext_5", "coucou ! je suis sur mon téléphone", channel="external"))
         await p.reply
         blocks = run_view(kernel, find(kernel, "agency", "initiatives"), {})
         return next(b for b in blocks if isinstance(b, Timeline))

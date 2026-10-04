@@ -30,6 +30,7 @@ from mika.kernel.inspect import (
     num_fr,
     pct_fr,
 )
+from mika.vocab import privacy
 from mika.vocab.affect import FR, emotion_of
 from mika.vocab.people import is_identifiable
 
@@ -111,7 +112,7 @@ def _guessed(s: OthersState, frame: Frame, ctx: InspectContext) -> list[Block]:
     for klass in (c.SCREEN, c.MESSAGE):
         samples = s.delays.get(f"{person}|{klass}", ())
         if samples:
-            reading = frame.get(c.REPLY_DELAY((person, "telegram" if klass == c.MESSAGE else "web")))
+            reading = frame.get(c.REPLY_DELAY((person, privacy.EXTERNAL if klass == c.MESSAGE else privacy.WEB)))
             delays.append((CLASSES_FR[klass], reading.samples, _duration(reading.median_us),
                            _duration(max(samples))))
     blocks.append(Table((Column("canal"), Column("réponses mesurées", "num"), Column("délai habituel", "num"),

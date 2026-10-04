@@ -625,12 +625,3 @@ def test_the_throttle_forgets_empty_windows():
     for i in range(100):
         assert not t.blocked(f"ip:{i}")
     assert len(t) == 0
-
-
-def test_health_reports_the_channels_and_degrades_when_one_is_down(make):
-    client, live = make(Fake())
-    live.telegram_status = "retrying"
-    body = client.get("/health").json()
-    assert body["checks"]["telegram"] == "degraded" and body["status"] == "degraded"
-    live.telegram_status = "running"
-    assert client.get("/health").json()["checks"]["telegram"] == "ok"

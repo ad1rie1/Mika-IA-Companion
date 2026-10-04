@@ -131,8 +131,10 @@ def handle_ref(s: IdentityState, handle: str, tab: str = "") -> Ref:
 
 
 def kind_of(h: Handle) -> str:
-    """Par où, en mots (un compte, Telegram, le web…) : jamais la clé brute."""
-    return ("compte opérateur" if h.operator else "compte") if h.authenticated else (h.channel or "inconnu")
+    """Par où, en mots (un compte, un compte extérieur, le web…) : jamais la clé brute."""
+    if h.authenticated:
+        return "compte opérateur" if h.operator else "compte"
+    return "compte extérieur" if h.channel == privacy.EXTERNAL else (h.channel or "inconnu")
 
 
 def handle_label(s: IdentityState, key: str) -> str:
@@ -307,7 +309,7 @@ def _search_people(s: IdentityState, frame: Frame, ctx: InspectContext, text: st
 
 
 def _where(s: IdentityState, handles: Sequence[str]) -> str:
-    """Par où on la connaît, en mots (un compte, Telegram…) : ce qui distingue deux homonymes sans
+    """Par où on la connaît, en mots (un compte, un compte extérieur…) : ce qui distingue deux homonymes sans
     montrer de clé brute."""
     words: list[str] = []
     for key in handles:
@@ -771,7 +773,7 @@ def _handle_others(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[
 
 # ── Les destinations ──────────────────────────────────────────────────────
 
-SEARCH = Param("q", "nom ou adresse", placeholder="Alice, tg_42…")
+SEARCH = Param("q", "nom ou adresse", placeholder="Alice, user_7…")
 TRUSTS = Param("confiance", "confiance du canal", kind="select",
                choices=tuple((t.value, TRUST_SHORT[t]) for t in ChannelTrust if t is not ChannelTrust.INTERNAL))
 

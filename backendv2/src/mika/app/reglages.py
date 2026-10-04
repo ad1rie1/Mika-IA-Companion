@@ -11,11 +11,9 @@ from __future__ import annotations
 import logging
 import re
 import zoneinfo
-from datetime import datetime
 from functools import cache
 from typing import TYPE_CHECKING, Annotated, Any
 from urllib.parse import urlsplit
-from zoneinfo import ZoneInfo
 
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
@@ -28,7 +26,6 @@ from mika.contracts import self_ as self_c
 from mika.contracts.self_ import PersonaDoc
 from mika.inspector.catalog import Command, SettingsPage, SettingsSection, SettingsTab
 from mika.kernel import forms
-from mika.kernel.clock import US
 from mika.kernel.forms import Knob
 from mika.kernel.inspect import Badge, Column, Nav, NavItem, Note, Ref, Row, Table, Text, When
 from mika.runtime.params import Parameters
@@ -59,24 +56,6 @@ def timezones() -> tuple[tuple[str, str], ...]:
 
 #: un hôte seul (github.com, git.exemple.org:8443) : ni schéma, ni chemin, ni espace
 _HOST = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+(?::[0-9]{1,5})?")
-
-
-class TelegramSettings(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    token: Annotated[str, Knob(label="Jeton du robot", help="Donné par @BotFather. Vide : pas de robot.",
-                               secret=True, advanced=False, order=10)] = ""
-    allowed_chats: Annotated[tuple[int, ...], Knob(
-        label="Conversations autorisées", help="Un identifiant de conversation par ligne. Vide : seules les "
-                                               "propriétaires lui écrivent (en privé).", advanced=False,
-        order=20)] = ()
-    owners: Annotated[tuple[int, ...], Knob(
-        label="Propriétaires", help="Les comptes Telegram (un identifiant par ligne) qu'elle traite comme toi : "
-                                    "ils voient ses coulisses, et leur conversation privée est toujours admise.",
-        advanced=False, order=30)] = ()
-    open_to_all: Annotated[bool, Knob(
-        label="Ouvert à tous", help="N'importe qui peut lui écrire, même hors de la liste : à cocher seulement "
-                                    "si c'est voulu (chaque message coûte un tour de modèle).", order=40)] = False
 
 
 class FeedsSettings(BaseModel):
@@ -306,72 +285,6 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return [Table((Column("curseur", "fit"), "ce qu'il pilote (à 0 → à 1)"), rows,
                       title="Ce que pilote chaque curseur")]
 
-    # ── canaux ──
-    def telegram() -> TelegramSettings:
-        tg = settings.telegram()
-        return TelegramSettings(token=tg["token"], allowed_chats=tuple(tg["allowed_chats"]),
-                                owners=tuple(tg["owners"]), open_to_all=tg["open"])
-
-    async def save_telegram(cfg: TelegramSettings, by: str) -> list[str]:
-        await settings.save_telegram(token=cfg.token, allowed_chats=list(cfg.allowed_chats), owners=list(cfg.owners),
-                                     open_to_all=cfg.open_to_all)
-        try:
-            await live.stop_telegram()
-            await live.start_telegram()
-        except Exception as exc:  # noqa: BLE001 — enregistré quand même : l'état du robot le dira
-            log.warning("Telegram : redémarrage impossible (%s)", type(exc).__name__)
-        return []
-
-    def telegram_facts() -> list[tuple[str, str]]:
-        tg = settings.telegram()
-        state = live.telegram_state() if tg["token"] else "non configuré"
-        access = "ouvert à tous" if tg["open"] else "liste blanche" if tg["allowed_chats"] else \
-            "propriétaires seulement" if tg["owners"] else "fermé (personne) : en attente d'appairage"
-        return [("Robot", state), ("Accès", access)]
-
-    def telegram_warning() -> list[Any]:
-        """Ce que l'accès au robot implique, en tête de page. Fermé par défaut (ADR 0038) : on avertit
-        quand il est ouvert à tous ; fermé à tous, le robot attend un appairage, et la page en montre le code
-        (ADR 0057) — personne n'a à connaître son identifiant Telegram."""
-        tg = settings.telegram()
-        if not tg["token"]:
-            return []
-        out: list[Any] = []
-        if tg["open"]:
-            out.append(Note("N'importe qui trouvant le robot peut lui écrire, même hors de la liste (et chaque "
-                            "message lui coûte un tour). Décoche « Ouvert à tous » pour réserver l'accès.", "warn",
-                            title="Ouvert à tous"))
-        closed = not tg["open"] and not tg["allowed_chats"] and not tg["owners"]
-        pairing = settings.telegram_pairing()
-        if pairing is None:
-            if closed:
-                out.append(Note("Personne ne peut encore lui écrire. Demande un code d'appairage (bouton dessous) : "
-                                "envoyé au robot en privé, il fait de toi sa propriétaire.", "warn",
-                                title="En attente d'appairage"))
-            return out
-        code, until = pairing
-        now = live.kernel.mind.clock.now() // US
-        if until <= now:
-            out.append(Note("Le code d'appairage a expiré : demandes-en un nouveau (bouton dessous).",
-                            "warn" if closed else "muted", title="Appairage"))
-            return out
-        bot = getattr(live.telegram, "username", "") if live.telegram is not None else ""
-        link = f" — ou ouvre https://t.me/{bot}?start={code}" if bot else ""
-        expires = datetime.fromtimestamp(until, ZoneInfo(live.persona().timezone))
-        out.append(Note(f"Envoie au robot, en privé : /start {code}{link}. Le compte qui l'envoie devient sa "
-                        f"propriétaire (une seule fois ; valable jusqu'au {expires:%d/%m à %H:%M}). Le code ne se "
-                        "montre que dans la console, jamais au journal.", "info" if not closed else "warn",
-                        title="En attente d'appairage" if closed else "Un appairage en cours"))
-        return out
-
-    async def new_pairing(by: str) -> tuple[str, str]:
-        if not settings.telegram()["token"]:
-            raise ValueError("Pas de robot : colle d'abord son jeton.")
-        code, _until = await live.telegram_pairing_code(fresh=True)
-        if live.telegram_status in ("off", "closed"):  # fermé et arrêté : il démarre pour attendre ce code
-            await live.start_telegram()
-        return "ok", f"Code d'appairage neuf (l'ancien ne vaut plus) : envoie au robot, en privé, /start {code}"
-
     # ── sens ──
     async def save_mail(cfg: MailConfig, by: str) -> list[str]:
         await settings.save_email(cfg)
@@ -489,17 +402,6 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "Huit curseurs (0,5 = comme la plupart des gens) et une humeur de fond. Chaque "
                             "faculté en dérive ses paramètres ; la table dessous dit ce que pilote chaque "
                             "curseur, mesuré en le poussant à ses deux bouts.")),)),
-        SettingsSection("telegram", "Telegram", "canaux", TelegramSettings, telegram, save_telegram,
-                        description="Le robot qui la relie à Telegram. L'enregistrer le redémarre.",
-                        facts=telegram_facts, blocks=telegram_warning,
-                        commands=(Command("appairer", "Nouveau code d'appairage", new_pairing,
-                                          confirm="Le code en cours, s'il y en a un, ne vaudra plus rien."),),
-                        pages=(SettingsPage("telegram", "Telegram", blocks=True, commands=True, description=(
-                            "Le robot qui la relie à Telegram : son jeton, qui peut lui écrire, et qui elle traite "
-                            "comme toi. L'enregistrer redémarre le robot. Pour devenir sa propriétaire sans "
-                            "connaître ton identifiant Telegram : un code d'appairage, envoyé au robot en privé "
-                            "(/start <code>). Les identifiants se lisent ensuite dans Identités › Adresses "
-                            "(tg_<nombre>).")),)),
         SettingsSection("depots", "Dépôts git", "canaux", GitSettings, git, save_git,
                         description="Le jeton avec lequel ses projets poussent vers leur dépôt distant.",
                         facts=lambda: [("Jeton", "défini" if settings.git()["token"] else "aucun")],

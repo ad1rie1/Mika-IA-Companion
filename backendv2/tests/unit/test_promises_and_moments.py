@@ -327,24 +327,24 @@ def test_the_day_after_a_loss_she_checks_in_and_does_not_ask_about_the_dentist(t
     script = Script(reply)
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
-        await chat(kernel, "tg_1", ["salut !", "bonne journée"], channel="telegram", display_name="Sam")
-        moment = await note(kernel, "son rendez-vous chez le dentiste", at_paris(2026, 10, 7, 14, 0), "tg_1")
-        await note(kernel, "son entretien chez Ubisoft", at_paris(2026, 10, 7, 10, 0), "tg_1", importance=0.7)
+        await befriend(kernel, "ext_1", social_c.FRIEND)
+        await chat(kernel, "ext_1", ["salut !", "bonne journée"], channel="external", display_name="Sam")
+        moment = await note(kernel, "son rendez-vous chez le dentiste", at_paris(2026, 10, 7, 14, 0), "ext_1")
+        await note(kernel, "son entretien chez Ubisoft", at_paris(2026, 10, 7, 10, 0), "ext_1", importance=0.7)
         await until(kernel, at_paris(2026, 10, 6, 22, 30))
-        await chat(kernel, "tg_1", ["Pixel est parti cet après-midi" if grief else "rien de spécial aujourd'hui",
-                                    "je vais dormir"], channel="telegram", display_name="Sam")
+        await chat(kernel, "ext_1", ["Pixel est parti cet après-midi" if grief else "rien de spécial aujourd'hui",
+                                    "je vais dormir"], channel="external", display_name="Sam")
         await until(kernel, at_paris(2026, 10, 7, 16, 30))
         frame = kernel.mind.frame()
         proposed = [cand for cand in _follow_up(kernel.mind.root.slices["others"], frame)
                     if cand.args.get("subject") == f"moment:{moment}"]
-        hard = frame.get(memory_c.HARD_TIMES("tg_1"))
-        checked = started(kernel, others_c.CHECK_IN, "tg_1")
-        await chat(kernel, "tg_1", ["coucou"], channel="telegram", display_name="Sam")
+        hard = frame.get(memory_c.HARD_TIMES("ext_1"))
+        checked = started(kernel, others_c.CHECK_IN, "ext_1")
+        await chat(kernel, "ext_1", ["coucou"], channel="external", display_name="Sam")
         return proposed, hard, checked
 
     proposed, hard, checked = run(tmp_path, scenario, script)
-    life = section(script.prompts("reply", "tg_1")[-1][1], LIFE)
+    life = section(script.prompts("reply", "ext_1")[-1][1], LIFE)
     if grief:
         assert hard > 0, "un deuil la touche : sa peine pour lui le dit, même sans le mot « mort »"
         assert proposed == [], "pas de « comment s'est passé ton dentiste ? » le lendemain d'un deuil"
@@ -365,12 +365,12 @@ def test_a_grave_message_touches_her_without_her_being_sad(tmp_path):
     réponse à peine triste à un message ordinaire ne fait pas un deuil."""
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
-        await befriend(kernel, "tg_2", social_c.FRIEND)
-        await chat(kernel, "tg_1", ["mon père est décédé ce matin"], channel="telegram")
-        await chat(kernel, "tg_2", ["j'ai raté mon bus"], channel="telegram")
+        await befriend(kernel, "ext_1", social_c.FRIEND)
+        await befriend(kernel, "ext_2", social_c.FRIEND)
+        await chat(kernel, "ext_1", ["mon père est décédé ce matin"], channel="external")
+        await chat(kernel, "ext_2", ["j'ai raté mon bus"], channel="external")
         frame = kernel.mind.frame()
-        return frame.get(memory_c.HARD_TIMES("tg_1")), frame.get(memory_c.HARD_TIMES("tg_2"))
+        return frame.get(memory_c.HARD_TIMES("ext_1")), frame.get(memory_c.HARD_TIMES("ext_2"))
 
     grave, ordinary = run(tmp_path, scenario, Script(lambda m, r: "Oh… [EMOTION:sad:0.5]"))
     assert grave > 0 and ordinary == 0
@@ -395,13 +395,13 @@ def test_a_birthday_is_wished_on_the_day_once_neither_the_eve_nor_the_day_after(
     script = Script(reply, initiative="Joyeux anniversaire Sam !! 30 ans ! 🎂 [EMOTION:happy:0.7]")
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
-        await chat(kernel, "tg_1", ["coucou !", "bonne journée"], channel="telegram", display_name="Sam")
-        moment = await note(kernel, "son anniversaire de 30 ans", at_paris(2026, 10, 10, 18, 0), "tg_1",
+        await befriend(kernel, "ext_1", social_c.FRIEND)
+        await chat(kernel, "ext_1", ["coucou !", "bonne journée"], channel="external", display_name="Sam")
+        moment = await note(kernel, "son anniversaire de 30 ans", at_paris(2026, 10, 10, 18, 0), "ext_1",
                             all_day=True, festive=True)
         if morning:
             await until(kernel, at_paris(2026, 10, 10, 8, 30))
-            await chat(kernel, "tg_1", [morning], channel="telegram", display_name="Sam")
+            await chat(kernel, "ext_1", [morning], channel="external", display_name="Sam")
         await until(kernel, at_paris(2026, 10, 11, 23, 0))
         return moment, (started(kernel, others_c.CHEER), started(kernel, others_c.CELEBRATE),
                         started(kernel, others_c.FOLLOW_UP))
@@ -412,12 +412,12 @@ def test_a_birthday_is_wished_on_the_day_once_neither_the_eve_nor_the_day_after(
         "souhaité le jour même : pas de « comment ça s'est passé » le lendemain"
     if in_reply:
         assert celebrations == [], "elle le lui a souhaité en répondant : rien de plus"
-        prompt = script.prompts("reply", "tg_1")[-1][1]
+        prompt = script.prompts("reply", "ext_1")[-1][1]
         assert "souhaite-le-lui si ce n'est pas fait" in section(prompt, LIFE)
     else:
         assert len(celebrations) == 1 and celebrations[0].data.subject == f"moment:{moment}", celebrations
         assert at_paris(2026, 10, 10, 9, 0) <= celebrations[0].at <= at_paris(2026, 10, 10, 22, 0), "le jour même"
-        prompt = script.prompts("initiative", "tg_1")[-1][1]
+        prompt = script.prompts("initiative", "ext_1")[-1][1]
         assert "souhaite-le-lui" in prompt and "son anniversaire" in section(prompt, LIFE)
 
 
@@ -428,9 +428,9 @@ def test_an_interview_keeps_its_eve_cheer_and_its_follow_up(tmp_path):
     box = {}
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
-        await chat(kernel, "tg_1", ["salut !", "bonne soirée !"], channel="telegram", display_name="Sam")
-        box["moment"] = await note(kernel, "son entretien chez Ubisoft", at_paris(2026, 10, 8, 14, 0), "tg_1",
+        await befriend(kernel, "ext_1", social_c.FRIEND)
+        await chat(kernel, "ext_1", ["salut !", "bonne soirée !"], channel="external", display_name="Sam")
+        box["moment"] = await note(kernel, "son entretien chez Ubisoft", at_paris(2026, 10, 8, 14, 0), "ext_1",
                                    importance=0.7)
         await until(kernel, at_paris(2026, 10, 8, 23, 0))
         box["starts"] = (started(kernel, others_c.CHEER), started(kernel, others_c.FOLLOW_UP),
@@ -455,22 +455,22 @@ def test_what_he_tells_the_same_day_takes_up_an_all_day_moment(tmp_path, told):
     script = Script()
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
-        await chat(kernel, "tg_1", ["Pixel est tout mou, je l'emmène chez le véto ce midi"], channel="telegram",
+        await befriend(kernel, "ext_1", social_c.FRIEND)
+        await chat(kernel, "ext_1", ["Pixel est tout mou, je l'emmène chez le véto ce midi"], channel="external",
                    display_name="Sam")
-        await note(kernel, "son rendez-vous chez le véto pour Pixel", at_paris(2026, 10, 5, 18, 0), "tg_1",
+        await note(kernel, "son rendez-vous chez le véto pour Pixel", at_paris(2026, 10, 5, 18, 0), "ext_1",
                    all_day=True, importance=0.7)
         await until(kernel, at_paris(2026, 10, 5, 13, 41))
-        await chat(kernel, "tg_1", ["le véto dit insuffisance rénale" if told else "coucou"], channel="telegram",
+        await chat(kernel, "ext_1", ["le véto dit insuffisance rénale" if told else "coucou"], channel="external",
                    display_name="Sam")
         await until(kernel, at_paris(2026, 10, 6, 22, 30))
-        await chat(kernel, "tg_1", ["salut"], channel="telegram", display_name="Sam")
+        await chat(kernel, "ext_1", ["salut"], channel="external", display_name="Sam")
         return events(kernel, memory_c.MOMENT_FOLLOWED.name)
 
     followed = run(tmp_path, scenario, script)
-    life = section(script.prompts("reply", "tg_1")[-1][1], LIFE)
+    life = section(script.prompts("reply", "ext_1")[-1][1], LIFE)
     if told:
-        assert len(followed) == 1 and followed[0].data.by == "tg_1"
+        assert len(followed) == 1 and followed[0].data.by == "ext_1"
         assert "véto" not in life, "il le lui a raconté le jour même : rien à redemander"
     else:
         assert followed == [] and "véto" in life and "c'est passé" in life
@@ -497,12 +497,12 @@ def test_what_she_could_talk_about_starts_from_what_weighs_most(tmp_path, weight
     script = Script(extract=extract)
 
     async def scenario(kernel):
-        await befriend(kernel, "tg_1", social_c.FRIEND)
-        await chat(kernel, "tg_1", ["le véto dit insuffisance rénale" if weighty else "je sors de chez le véto",
-                                    "à plus"], channel="telegram", display_name="Sam")
+        await befriend(kernel, "ext_1", social_c.FRIEND)
+        await chat(kernel, "ext_1", ["le véto dit insuffisance rénale" if weighty else "je sors de chez le véto",
+                                    "à plus"], channel="external", display_name="Sam")
         await asyncio.sleep(10 * MINUTE / US)
-        await note(kernel, "son rendez-vous chez le dentiste", kernel.mind.clock.now() + 20 * HOUR, "tg_1")
-        matter = kernel.mind.frame().get(needs_c.MATTER("tg_1"))
+        await note(kernel, "son rendez-vous chez le dentiste", kernel.mind.clock.now() + 20 * HOUR, "ext_1")
+        matter = kernel.mind.frame().get(needs_c.MATTER("ext_1"))
         return matter, kernel.mind.store.content([matter.ref]) if matter else {}
 
     matter, texts = run(tmp_path, scenario, script)
@@ -519,8 +519,8 @@ def test_a_situation_that_lasts_is_spoken_of_in_the_present():
     ponctuel passé garde sa question."""
     now = at_paris(2026, 10, 8, 18, 0)
     frame = SimpleNamespace(now=now, root=None, env=SimpleNamespace(tz_of=lambda root: PARIS))
-    lasting = needs_c.Matter(needs_c.MOMENT_MATTER, "r", now - 3 * DAY, ("tg_1",), ongoing=True)
-    done = needs_c.Matter(needs_c.MOMENT_MATTER, "r", now - 3 * DAY, ("tg_1",))
+    lasting = needs_c.Matter(needs_c.MOMENT_MATTER, "r", now - 3 * DAY, ("ext_1",), ongoing=True)
+    done = needs_c.Matter(needs_c.MOMENT_MATTER, "r", now - 3 * DAY, ("ext_1",))
     assert _lead(lasting, frame, "« Sam »").startswith("Ce que « Sam » vit en ce moment, depuis 3 jours")
     assert "comment ça s'est passé" in _lead(done, frame, "« Sam »")
 

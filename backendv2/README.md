@@ -10,7 +10,7 @@ l'installation en service (systemd, sauvegardes, mandataire TLS) dans
 ```bash
 cd backendv2
 python3 -m venv .venv
-.venv/bin/pip install -e ".[llm,memory]"     # + telegram (le robot), documents (lire les PDF), dev (les tests)
+.venv/bin/pip install -e ".[llm,memory]"     # + documents (lire les PDF), dev (les tests)
 ```
 
 Bubblewrap (`dnf install bubblewrap`, `apt install bubblewrap`) n'est utile
@@ -61,10 +61,10 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
 
 ## Et ensuite
 
-- **Telegram** : Configuration › Canaux › Telegram, colle le jeton donné par
-  @BotFather. Le robot est fermé par défaut ; la page affiche un code
-  d'appairage : envoie `/start <code>` au robot, en privé, et tu deviens sa
-  propriétaire.
+- **Lui écrire** se fait par une application dédiée (le frontend web, le client
+  Unity), avec un compte : il n'y a plus de robot Telegram (ADR 0060). Un client
+  natif s'authentifie par un jeton de son compte (`python -m mika token create
+  <compte> --label …`).
 - **Le tableau de bord** (`/inspecteur/`) dit ce qui attend ton attention ;
   « Pourquoi a-t-elle dit ça ? » s'ouvre depuis chacune de ses paroles.
 - **Tout se règle aussi en ligne de commande** : `python -m mika --help`.

@@ -273,8 +273,8 @@ async def _no_reply(ev: Any, ports: Mapping[str, Any]) -> None:
     parole ni voix — ``reply_abstained`` quand elle a choisi de se taire, ``reply_failed`` sinon (la réponse a
     échoué, expiré, ses tentatives sont épuisées, une reprise au démarrage arrive trop tard ; ``text`` porte
     le détail technique, jamais montré tel quel). Une livraison par tour, pour son dernier message : les
-    précédents étaient lus avec lui (le web passe sa bulle en échec et éteint « Mika écrit… » ; Telegram
-    ne l'écrit qu'une fois). Personne ne reste devant « Mika écrit… », même pour une réponse reprise que
+    précédents étaient lus avec lui (le web passe sa bulle en échec et éteint « Mika écrit… » ; une
+    messagerie ne l'écrit qu'une fois). Personne ne reste devant « Mika écrit… », même pour une réponse reprise que
     personne n'attend plus. Un transport qui ne peut pas la prendre rend ``False`` : la file de sortie
     réessaiera."""
     d = ev.data

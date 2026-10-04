@@ -220,11 +220,11 @@ def test_she_checks_on_a_friend_who_did_not_seem_well(tmp_path, last, expected):
     l'après-midi, elle prend de ses nouvelles — une fois. Contrôle : si le
     dernier message allait, rien."""
     async def scenario(kernel, script, out):
-        await befriend(kernel, "tg_1", social_c.CLOSE)
-        await chat(kernel, "tg_1", LIGHT + [last], channel="telegram")
+        await befriend(kernel, "ext_1", social_c.CLOSE)
+        await chat(kernel, "ext_1", LIGHT + [last], channel="external")
         sent_at = events(kernel, others_c.READ.name)[-1].at  # quand elle a lu le dernier message
         await asyncio.sleep(10 * HOUR / US)
-        return [(e.at - sent_at, e.data.reason) for e in _check_ins(kernel, "tg_1")]
+        return [(e.at - sent_at, e.data.reason) for e in _check_ins(kernel, "ext_1")]
 
     delays = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 11, 0))
     if expected:
@@ -239,16 +239,16 @@ def test_she_checks_on_a_friend_who_did_not_seem_well(tmp_path, last, expected):
 
 
 def test_she_learns_that_a_friend_takes_two_hours_and_stops_feeling_ignored(tmp_path):
-    """Sur Telegram, une amie qui répond toujours deux heures plus tard : les
+    """Sur une messagerie (un compte extérieur), une amie qui répond toujours deux heures plus tard : les
     premières fois, l'attente (réglée ici à une heure) est déçue puis rattrapée ;
     une fois le délai appris, elle ne l'est plus."""
     async def scenario(kernel, script, out):
         await kernel.set_params("attention", AttentionParams(reply_window_message_us=HOUR))
-        await befriend(kernel, "tg_1", social_c.CLOSE)
+        await befriend(kernel, "ext_1", social_c.CLOSE)
         for day in range(3):  # une amie qui écrit chaque jour vers midi
             if day:
                 await asyncio.sleep(DAY / US)
-            await chat(kernel, "tg_1", ["coucou, ça va ?"], channel="telegram")
+            await chat(kernel, "ext_1", ["coucou, ça va ?"], channel="external")
         rounds = []
         for _ in range(5):
             waited = 0
@@ -260,11 +260,11 @@ def test_she_learns_that_a_friend_takes_two_hours_and_stops_feeling_ignored(tmp_
             if not fresh:
                 break
             await asyncio.sleep(2 * HOUR / US)  # elle répond, deux heures plus tard
-            await chat(kernel, "tg_1", ["désolée, je vois ton message que maintenant"], channel="telegram")
+            await chat(kernel, "ext_1", ["désolée, je vois ton message que maintenant"], channel="external")
             await asyncio.sleep(5)
             missed = [e for e in events(kernel, attention_c.EXPECTATION_MISSED.name) if e.data.since == fresh[0].at]
             rounds.append(bool(missed))
-        return rounds, kernel.mind.frame().get(others_c.REPLY_DELAY((person_of(kernel, "tg_1"), "telegram")))
+        return rounds, kernel.mind.frame().get(others_c.REPLY_DELAY((person_of(kernel, "ext_1"), "external")))
 
     rounds, delay = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 12, 0))
     assert len(rounds) >= 5, rounds
@@ -274,7 +274,7 @@ def test_she_learns_that_a_friend_takes_two_hours_and_stops_feeling_ignored(tmp_
 
 
 def _initiatives(kernel):
-    return [e for e in events(kernel, rt.UTTERANCE.name) if e.data.kind == "INITIATIVE" and e.data.target == "tg_1"]
+    return [e for e in events(kernel, rt.UTTERANCE.name) if e.data.kind == "INITIATIVE" and e.data.target == "ext_1"]
 
 
 def test_a_learned_reply_window_only_ever_lengthens():
@@ -283,11 +283,11 @@ def test_a_learned_reply_window_only_ever_lengthens():
     def cx(samples, median):
         return SimpleNamespace(facts=SimpleNamespace(get=lambda ref: others_c.DelayReading(samples, median)))
 
-    assert reply_window(cx(0, 0), "x", "telegram", p) == p.reply_window_message_us
-    assert reply_window(cx(5, 2 * HOUR), "x", "telegram", p) == 4 * HOUR
-    assert reply_window(cx(2, 2 * HOUR), "x", "telegram", p) == p.reply_window_message_us  # pas encore appris
+    assert reply_window(cx(0, 0), "x", "external", p) == p.reply_window_message_us
+    assert reply_window(cx(5, 2 * HOUR), "x", "external", p) == 4 * HOUR
+    assert reply_window(cx(2, 2 * HOUR), "x", "external", p) == p.reply_window_message_us  # pas encore appris
     assert reply_window(cx(9, MINUTE), "x", "web", p) == p.reply_window_us  # répondre vite ne rend pas impatiente
-    assert reply_window(cx(9, 3 * DAY), "x", "telegram", p) == p.reply_window_max_us
+    assert reply_window(cx(9, 3 * DAY), "x", "external", p) == p.reply_window_max_us
 
 
 def test_she_learns_at_what_time_of_day_she_gets_answers():

@@ -193,7 +193,7 @@ def overview(ui: Any) -> list[Any]:
                Stat("Surcharges refusées", totals["refus"], tone="danger" if totals["refus"] else "",
                     sub="ignorées : hors bornes ou devenues invalides"))),
         Note("D'où vient chaque valeur : le défaut de la faculté, puis ce que le tempérament en dérive, puis ce "
-             "qu'un autre réglage fournit (les propriétaires Telegram, les boîtes où elle prépare des réponses), "
+             "qu'un autre réglage fournit (le fuseau de sa persona, les boîtes où elle prépare des réponses), "
              "puis une surcharge d'opérateur. Ouvre une faculté pour lire et changer ses paramètres.", "info"),
         Table((Column("faculté"), Column("nom technique", "fit"), Column("paramètres", "num"),
                "dérive du tempérament", "surcharges", "réglés ailleurs", "refus", "en vigueur"), tuple(rows),

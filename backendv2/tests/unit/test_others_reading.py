@@ -120,7 +120,7 @@ def run(tmp_path, scenario, *, start=at_paris(2026, 9, 28, 11, 0)):
 
 async def chat(kernel, handle, texts, gap=60):
     for text in texts:
-        p = await kernel.perceive(said(handle, text, channel="telegram"))
+        p = await kernel.perceive(said(handle, text, channel="external"))
         await p.reply
         await asyncio.sleep(gap)
 
@@ -148,11 +148,11 @@ def test_a_grave_event_worries_her_even_from_a_friend_who_always_complains(tmp_p
     l'inquiétait pas — même « ma mère est décédée ». Un deuil n'est pas une
     plainte de plus."""
     async def scenario(kernel, script):
-        await befriend(kernel, "tg_6", social_c.FRIEND)
-        await chat(kernel, "tg_6", GRUMPY)
-        await chat(kernel, "tg_6", ["j'en ai marre, je suis épuisée"])
+        await befriend(kernel, "ext_6", social_c.FRIEND)
+        await chat(kernel, "ext_6", GRUMPY)
+        await chat(kernel, "ext_6", ["j'en ai marre, je suis épuisée"])
         habitual = reads(kernel)[-1]
-        await chat(kernel, "tg_6", ["ma mère est décédée ce matin"])
+        await chat(kernel, "ext_6", ["ma mère est décédée ce matin"])
         return habitual, reads(kernel)[-1]
 
     habitual, grief = run(tmp_path, scenario)
@@ -168,37 +168,37 @@ def test_her_own_worried_reply_makes_her_check_in_later(tmp_path):
     refait pas un second). Contrôle : chez une amie qui râle toujours, sa peine
     pour elle ne dit rien de neuf."""
     async def scenario(kernel, script):
-        await befriend(kernel, "tg_1", social_c.CLOSE)
-        await befriend(kernel, "tg_6", social_c.FRIEND)
-        await chat(kernel, "tg_1", LIGHT[:8])
-        await chat(kernel, "tg_6", GRUMPY[:8])
-        script.tags = {"tg_1": "[EMOTION:sad:0.8]", "tg_6": "[EMOTION:sad:0.8]"}
-        await chat(kernel, "tg_1", ["ma grand-mère est partie ce matin"])
+        await befriend(kernel, "ext_1", social_c.CLOSE)
+        await befriend(kernel, "ext_6", social_c.FRIEND)
+        await chat(kernel, "ext_1", LIGHT[:8])
+        await chat(kernel, "ext_6", GRUMPY[:8])
+        script.tags = {"ext_1": "[EMOTION:sad:0.8]", "ext_6": "[EMOTION:sad:0.8]"}
+        await chat(kernel, "ext_1", ["ma grand-mère est partie ce matin"])
         sad_at = kernel.mind.clock.now()
-        await chat(kernel, "tg_6", ["ma grand-mère est partie ce matin"])
+        await chat(kernel, "ext_6", ["ma grand-mère est partie ce matin"])
         concerns = dict(kernel.mind.root.slices["others"].concerns.items())
         script.tags = {}
         await asyncio.sleep(10 * HOUR / US)
         after = dict(kernel.mind.root.slices["others"].concerns.items())
-        return (concerns, after, sad_at, check_ins(kernel, "tg_1", REACHING_OUT), check_ins(kernel, "tg_6"))
+        return (concerns, after, sad_at, check_ins(kernel, "ext_1", REACHING_OUT), check_ins(kernel, "ext_6"))
 
     concerns, after, sad_at, to_alice, to_bea = run(tmp_path, scenario)
-    assert "tg_1" in concerns and "tg_6" not in concerns
+    assert "ext_1" in concerns and "ext_6" not in concerns
     assert len(to_alice) == 1 and not to_bea, (to_alice, to_bea)
     assert HOUR <= to_alice[0].at - sad_at <= 10 * HOUR  # quelques heures plus tard, pas dans la foulée
-    assert "tg_1" not in after  # c'est fait : elle a pris de ses nouvelles, l'inquiétude est éteinte
+    assert "ext_1" not in after  # c'est fait : elle a pris de ses nouvelles, l'inquiétude est éteinte
 
 
 def test_an_ok_does_not_reassure_her_a_real_lighter_message_does(tmp_path):
     async def scenario(kernel, script):
-        await befriend(kernel, "tg_1", social_c.CLOSE)
-        await chat(kernel, "tg_1", LIGHT)
-        await chat(kernel, "tg_1", ["j'en ai marre, je suis épuisée"])
-        worried = "tg_1" in kernel.mind.root.slices["others"].concerns
-        await chat(kernel, "tg_1", ["ok"])
-        after_ok = "tg_1" in kernel.mind.root.slices["others"].concerns
-        await chat(kernel, "tg_1", ["ça va mieux, merci d'avoir pensé à moi !"])
-        return worried, after_ok, "tg_1" in kernel.mind.root.slices["others"].concerns
+        await befriend(kernel, "ext_1", social_c.CLOSE)
+        await chat(kernel, "ext_1", LIGHT)
+        await chat(kernel, "ext_1", ["j'en ai marre, je suis épuisée"])
+        worried = "ext_1" in kernel.mind.root.slices["others"].concerns
+        await chat(kernel, "ext_1", ["ok"])
+        after_ok = "ext_1" in kernel.mind.root.slices["others"].concerns
+        await chat(kernel, "ext_1", ["ça va mieux, merci d'avoir pensé à moi !"])
+        return worried, after_ok, "ext_1" in kernel.mind.root.slices["others"].concerns
 
     worried, after_ok, after_better = run(tmp_path, scenario)
     assert worried and after_ok  # un « ok » ne dit pas qu'elle va mieux
@@ -207,14 +207,14 @@ def test_an_ok_does_not_reassure_her_a_real_lighter_message_does(tmp_path):
 
 def test_the_mood_of_a_close_friend_is_contagious_a_strangers_is_not(tmp_path):
     async def scenario(kernel, script):
-        await befriend(kernel, "tg_1", social_c.CLOSE)
-        await chat(kernel, "tg_1", LIGHT, gap=30)  # dix messages joyeux en cinq minutes
-        await chat(kernel, "tg_9", LIGHT[:3], gap=30)
+        await befriend(kernel, "ext_1", social_c.CLOSE)
+        await chat(kernel, "ext_1", LIGHT, gap=30)  # dix messages joyeux en cinq minutes
+        await chat(kernel, "ext_9", LIGHT[:3], gap=30)
         return reads(kernel)
 
     got = run(tmp_path, scenario)
-    friend = [r for r in got if r.handle == "tg_1"]
-    stranger = [r for r in got if r.handle == "tg_9"]
+    friend = [r for r in got if r.handle == "ext_1"]
+    stranger = [r for r in got if r.handle == "ext_9"]
     assert all(r.contagion == 0.0 for r in stranger)  # on ne s'allège pas avec une inconnue
     caught = [r for r in friend if r.contagion > 0]
     assert caught and all(r.contagion_emotion == Emotion.HAPPY.value for r in caught)
@@ -236,11 +236,11 @@ def test_contagion_is_felt_without_a_word_of_the_message():
 def test_contagion_window_resets(tmp_path):
     """Une fois la fenêtre passée, une nouvelle conversation joyeuse la colore à nouveau."""
     async def scenario(kernel, script):
-        await befriend(kernel, "tg_1", social_c.CLOSE)
-        await chat(kernel, "tg_1", LIGHT, gap=30)
+        await befriend(kernel, "ext_1", social_c.CLOSE)
+        await chat(kernel, "ext_1", LIGHT, gap=30)
         first = sum(r.contagion for r in reads(kernel))
         await asyncio.sleep(2 * P.contagion_window_us / US + MINUTE / US)
-        await chat(kernel, "tg_1", LIGHT[:2], gap=30)
+        await chat(kernel, "ext_1", LIGHT[:2], gap=30)
         return first, [r.contagion for r in reads(kernel)][-2:]
 
     first, later = run(tmp_path, scenario)

@@ -795,7 +795,7 @@ def _no_store() -> list[Block]:
     return [Note("Le magasin n'est pas disponible : le fil ne peut pas être relu.", tone="muted")]
 
 
-HANDLE = Param("handle", "Personne ou identifiant", placeholder="Alice, tg_42, user_7…")
+HANDLE = Param("handle", "Personne ou identifiant", placeholder="Alice, user_7, ext_42…")
 QUERY = Param("q", "texte", placeholder="un mot…")
 ROLE = Param("role", "qui parle", kind="select", choices=ROLES)
 

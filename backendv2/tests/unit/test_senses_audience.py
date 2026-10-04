@@ -60,7 +60,7 @@ def urgent(n: int, subject: str, body: str) -> Mail:
                 body)
 
 
-def run(tmp_path, scenario, *, mail=None, feeds=None, camera=None, owners=("tg_42",)):
+def run(tmp_path, scenario, *, mail=None, feeds=None, camera=None, owners=("ext_42",)):
     clock = SimClock(START)
     llm = PersonaSimLLM(clock, seed=1, abstain_rate=0.0, latency=2.0)
     ports = {"mail": mail or FakeMail(), "feeds": feeds or FakeFeeds()}
@@ -86,8 +86,8 @@ def prompt_of(llm, target, contains=""):
     return "\n".join(m.content for m in calls[-1].messages)
 
 
-def telegram(text: str, *, room: str | None = None) -> PerceptionReceived:
-    return PerceptionReceived(handle="tg_42", channel="telegram", text=Content.of(text), room=room,
+def external(text: str, *, room: str | None = None) -> PerceptionReceived:
+    return PerceptionReceived(handle="ext_42", channel="external", text=Content.of(text), room=room,
                               public=room is not None, reply_ref=room or "42", display_name="Adrien",
                               addressed=True)
 
@@ -108,11 +108,11 @@ def test_her_owner_in_a_public_group_hears_neither_her_mail_nor_her_camera_but_i
         await asyncio.sleep(15 * MINUTE / US)
         ports["camera"].put("salon", "image/jpeg", b"\xff\xd8autre-image" * 50)
         await asyncio.sleep(3 * MINUTE / US)
-        await (await kernel.perceive(telegram("Mika, quoi de neuf ?", room="tg_chat_-100"))).reply
-        await (await kernel.perceive(telegram("Mika, quoi de neuf ? (en privé)"))).reply
+        await (await kernel.perceive(external("Mika, quoi de neuf ?", room="ext_chat_-100"))).reply
+        await (await kernel.perceive(external("Mika, quoi de neuf ? (en privé)"))).reply
 
     _, llm, _ = run(tmp_path, scenario, mail=box, camera=camera)
-    calls = [c for c in llm.calls if c.role == "reply" and c.meta.get("target") == "tg_42"]
+    calls = [c for c in llm.calls if c.role == "reply" and c.meta.get("target") == "ext_42"]
     assert len(calls) == 2  # le salon, puis le tête-à-tête, ont chacun eu leur réponse
     group = "\n".join(m.content for m in calls[0].messages)
     private = "\n".join(m.content for m in calls[-1].messages)
@@ -126,9 +126,9 @@ def test_her_owner_in_a_public_group_hears_neither_her_mail_nor_her_camera_but_i
 def tool_ctx(kind=Kind.REPLY, *, public=False, room=None, owner=True, ports=None, now=0, params=None):
     """Le contexte d'un outil : l'audience résolue au bord ; les faits d'identité disent « propriétaire »
     exactement quand l'audience le dit."""
-    audience = Audience(persons=("tg_42",), public=public, room=room, owner=owner, level=3, witness_level=3)
+    audience = Audience(persons=("ext_42",), public=public, room=room, owner=owner, level=3, witness_level=3)
     frame = NS(root=None, now=now, env=NS(params_of=lambda name, root: params), audience=audience,
-               episode=EpisodeRef("e", kind, target="tg_42" if kind == Kind.REPLY else "goal:1"),
+               episode=EpisodeRef("e", kind, target="ext_42" if kind == Kind.REPLY else "goal:1"),
                get=lambda ref: owner)
     return NS(frame=frame, ports=ports or {}, call_id="c1", emit=None)
 
@@ -148,7 +148,7 @@ def test_reading_an_article_goes_on_the_network_only_for_her_owner_in_private_or
     feeds = Feeds()
     args = rss_plugin.ReadArgs(entry="e1")
     stranger = asyncio.run(rss_plugin.rss_read(args, tool_ctx(owner=False, ports={"feeds": feeds})))
-    group = asyncio.run(rss_plugin.rss_read(args, tool_ctx(public=True, room="tg_chat_-1", ports={"feeds": feeds})))
+    group = asyncio.run(rss_plugin.rss_read(args, tool_ctx(public=True, room="ext_chat_-1", ports={"feeds": feeds})))
     assert not stranger.ok and not group.ok and feeds.read == []  # rien n'est allé sur le réseau
     owner = asyncio.run(rss_plugin.rss_read(args, tool_ctx(ports={"feeds": feeds})))
     working = asyncio.run(rss_plugin.rss_read(args, tool_ctx(Kind.STEP, owner=False, ports={"feeds": feeds})))
@@ -267,7 +267,7 @@ def test_a_frozen_camera_image_is_not_described_as_what_she_sees_now():
     ctx = tool_ctx(ports={"camera": fresh, "llm": Llm()}, now=now, params=camera_plugin.CameraParams())
     ctx.emit = emit
     assert "Personne dans la pièce" in asyncio.run(camera_plugin.camera_look(camera_plugin.LookArgs(), ctx))
-    group = tool_ctx(public=True, room="tg_chat_-1", ports={"camera": fresh, "llm": Llm()}, now=now,
+    group = tool_ctx(public=True, room="ext_chat_-1", ports={"camera": fresh, "llm": Llm()}, now=now,
                      params=camera_plugin.CameraParams())
     assert not asyncio.run(camera_plugin.camera_look(camera_plugin.LookArgs(), group)).ok  # jamais devant un salon
 

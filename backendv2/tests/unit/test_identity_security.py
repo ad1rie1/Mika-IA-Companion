@@ -50,7 +50,7 @@ def respond(req):
 
 
 def tg(handle: str, text: str, name: str = "", **kw) -> PerceptionReceived:
-    return said(handle, text, channel="telegram", display_name=name, **kw)
+    return said(handle, text, channel="external", display_name=name, **kw)
 
 
 async def say(kernel, p):
@@ -118,19 +118,19 @@ def test_everyday_words_never_make_an_impostor_alice(tmp_path):
     promesses. Ni en un message, ni en insistant, ni en attendant."""
     async def scenario(kernel, llm):
         for text, item in ALICE_DAY:
-            await remember(kernel, "tg_42", text, item)
+            await remember(kernel, "ext_42", text, item)
             await asyncio.sleep(60)
         await asyncio.sleep(20 * 60)
         seen = []
         for text in IMPOSTOR:
-            await say(kernel, tg("tg_99", text, "Al"))
-            seen.append(view(kernel, "tg_99"))
+            await say(kernel, tg("ext_99", text, "Al"))
+            seen.append(view(kernel, "ext_99"))
             await asyncio.sleep(10 * 60)
-        return seen, prompts_to(llm, "tg_99")
+        return seen, prompts_to(llm, "ext_99")
 
     seen, prompts = run(tmp_path, scenario)
-    assert seen[0].claim == "Alice" and seen[0].claim_target == "tg_42"  # contrôle : la revendication est lue
-    assert all(not v.bound and v.person == "tg_99" for v in seen)
+    assert seen[0].claim == "Alice" and seen[0].claim_target == "ext_42"  # contrôle : la revendication est lue
+    assert all(not v.bound and v.person == "ext_99" for v in seen)
     assert prompts and not any(CANARY in p for p in prompts)
 
 
@@ -189,18 +189,18 @@ def test_a_precise_detail_corroborates():
 def test_an_expired_claim_is_not_corroborated(tmp_path):
     """Une revendication jamais confirmée s'éteint : on ne la recoupe plus des semaines plus tard."""
     async def scenario(kernel, llm):
-        await remember(kernel, "tg_42", "mon chat Moustache est malade depuis le 12 mars",
+        await remember(kernel, "ext_42", "mon chat Moustache est malade depuis le 12 mars",
                        "Alice m'a confié que son chat Moustache est malade depuis le 12 mars")
-        await remember(kernel, "tg_42", "ma sœur Julie se marie à Lyon en juin",
+        await remember(kernel, "ext_42", "ma sœur Julie se marie à Lyon en juin",
                        "Alice m'a confié que sa sœur Julie se marie à Lyon en juin")
-        await say(kernel, tg("tg_5", "moi c'est Alice", "Alice M."))
+        await say(kernel, tg("ext_5", "moi c'est Alice", "Alice M."))
         await asyncio.sleep(8 * DAY / US)
-        await say(kernel, tg("tg_5", "Moustache va mieux depuis le 12 mars", "Alice M."))
+        await say(kernel, tg("ext_5", "Moustache va mieux depuis le 12 mars", "Alice M."))
         await asyncio.sleep(60)
-        await say(kernel, tg("tg_5", "et Julie se marie bientôt à Lyon, en juin", "Alice M."))
+        await say(kernel, tg("ext_5", "et Julie se marie bientôt à Lyon, en juin", "Alice M."))
         mind = kernel.mind
         kinds = [mind.decode(e).data.kind for e in mind.store.read() if e.type == identity_c.EVIDENCE.name]
-        return view(kernel, "tg_5"), kinds
+        return view(kernel, "ext_5"), kinds
 
     v, kinds = run(tmp_path, scenario)
     assert not v.bound and kinds == []
@@ -210,21 +210,21 @@ def test_a_real_friend_on_a_new_account_is_still_recognised(tmp_path):
     """Contre-exemple : la vraie amie revient sur un nouveau compte et le prouve
     sur deux messages — elle est reconnue."""
     async def scenario(kernel, llm):
-        await remember(kernel, "tg_42", "mon chat Moustache est malade depuis dimanche",
+        await remember(kernel, "ext_42", "mon chat Moustache est malade depuis dimanche",
                        "Alice m'a confié que son chat Moustache est malade depuis dimanche")
-        await remember(kernel, "tg_42", "ma sœur Julie se marie à Lyon samedi",
+        await remember(kernel, "ext_42", "ma sœur Julie se marie à Lyon samedi",
                        "Alice m'a confié que sa sœur Julie se marie à Lyon samedi")
-        await say(kernel, tg("tg_5", "coucou c'est Alice, je t'écris de mon autre téléphone", "Alice M."))
+        await say(kernel, tg("ext_5", "coucou c'est Alice, je t'écris de mon autre téléphone", "Alice M."))
         await asyncio.sleep(60)
-        await say(kernel, tg("tg_5", "tu sais, Moustache va mieux, il n'est plus malade depuis dimanche", "Alice M."))
-        half = view(kernel, "tg_5")
+        await say(kernel, tg("ext_5", "tu sais, Moustache va mieux, il n'est plus malade depuis dimanche", "Alice M."))
+        half = view(kernel, "ext_5")
         await asyncio.sleep(60)
-        await say(kernel, tg("tg_5", "et pour ma sœur Julie, le mariage à Lyon c'est samedi !", "Alice M."))
-        return half, view(kernel, "tg_5")
+        await say(kernel, tg("ext_5", "et pour ma sœur Julie, le mariage à Lyon c'est samedi !", "Alice M."))
+        return half, view(kernel, "ext_5")
 
     half, v = run(tmp_path, scenario)
     assert not half.bound and half.claim == "Alice"  # une preuve seule ne suffit pas : il en faut deux
-    assert v.bound and v.person == "tg_42"
+    assert v.bound and v.person == "ext_42"
 
 
 def test_two_ordinary_proofs_need_a_rare_detail(tmp_path):
@@ -232,25 +232,25 @@ def test_two_ordinary_proofs_need_a_rare_detail(tmp_path):
     ni date) : ce que d'autres pourraient deviner ne suffit pas. Contrôle : un
     détail rare de plus, et c'est fait."""
     async def scenario(kernel, llm):
-        await remember(kernel, "tg_42", "je collectionne les timbres anciens",
+        await remember(kernel, "ext_42", "je collectionne les timbres anciens",
                        "Alice m'a confié qu'elle collectionne les timbres anciens")
-        await remember(kernel, "tg_42", "j'apprends le violoncelle avec un professeur",
+        await remember(kernel, "ext_42", "j'apprends le violoncelle avec un professeur",
                        "Alice m'a confié qu'elle apprend le violoncelle avec un professeur")
-        await remember(kernel, "tg_42", "mon chat Moustache est malade depuis dimanche",
+        await remember(kernel, "ext_42", "mon chat Moustache est malade depuis dimanche",
                        "Alice m'a confié que son chat Moustache est malade depuis dimanche")
-        await say(kernel, tg("tg_5", "coucou c'est Alice, je t'écris de mon autre téléphone", "Alice M."))
+        await say(kernel, tg("ext_5", "coucou c'est Alice, je t'écris de mon autre téléphone", "Alice M."))
         for text in ("je collectionne toujours mes timbres anciens", "et j'apprends encore le violoncelle avec "
                      "mon professeur"):
             await asyncio.sleep(60)
-            await say(kernel, tg("tg_5", text, "Alice M."))
-        ordinary = view(kernel, "tg_5")
+            await say(kernel, tg("ext_5", text, "Alice M."))
+        ordinary = view(kernel, "ext_5")
         await asyncio.sleep(60)
-        await say(kernel, tg("tg_5", "Moustache va mieux, il n'est plus malade depuis dimanche", "Alice M."))
-        return ordinary, view(kernel, "tg_5")
+        await say(kernel, tg("ext_5", "Moustache va mieux, il n'est plus malade depuis dimanche", "Alice M."))
+        return ordinary, view(kernel, "ext_5")
 
     ordinary, rare = run(tmp_path, scenario)
     assert not ordinary.bound and ordinary.claim == "Alice"
-    assert rare.bound and rare.person == "tg_42"
+    assert rare.bound and rare.person == "ext_42"
 
 
 def test_the_claiming_message_proves_nothing(tmp_path):
@@ -258,27 +258,27 @@ def test_the_claiming_message_proves_nothing(tmp_path):
     « moi c'est Alice, Moustache va mieux » puis un détail de plus n'est qu'une
     première preuve. Contrôle : un message de plus, et c'est fait."""
     async def scenario(kernel, llm):
-        await remember(kernel, "tg_42", "mon chat Moustache est malade depuis dimanche",
+        await remember(kernel, "ext_42", "mon chat Moustache est malade depuis dimanche",
                        "Alice m'a confié que son chat Moustache est malade depuis dimanche")
-        await remember(kernel, "tg_42", "ma sœur Julie se marie à Lyon samedi",
+        await remember(kernel, "ext_42", "ma sœur Julie se marie à Lyon samedi",
                        "Alice m'a confié que sa sœur Julie se marie à Lyon samedi")
-        await remember(kernel, "tg_42", "je pars courir le marathon de Nantes en avril",
+        await remember(kernel, "ext_42", "je pars courir le marathon de Nantes en avril",
                        "Alice m'a confié qu'elle court le marathon de Nantes en avril")
-        await say(kernel, tg("tg_5", "coucou c'est Alice, je t'écris de mon autre téléphone", "Alice M."))
+        await say(kernel, tg("ext_5", "coucou c'est Alice, je t'écris de mon autre téléphone", "Alice M."))
         await asyncio.sleep(60)
         # elle le redit, avec un détail : ce message-là non plus ne prouve rien
-        await say(kernel, tg("tg_5", "moi c'est Alice, Moustache va mieux, il n'est plus malade depuis dimanche",
+        await say(kernel, tg("ext_5", "moi c'est Alice, Moustache va mieux, il n'est plus malade depuis dimanche",
                              "Alice M."))
         await asyncio.sleep(60)
-        await say(kernel, tg("tg_5", "et pour ma sœur Julie, le mariage à Lyon c'est samedi !", "Alice M."))
-        once = view(kernel, "tg_5")
+        await say(kernel, tg("ext_5", "et pour ma sœur Julie, le mariage à Lyon c'est samedi !", "Alice M."))
+        once = view(kernel, "ext_5")
         await asyncio.sleep(60)
-        await say(kernel, tg("tg_5", "et je cours toujours le marathon de Nantes en avril", "Alice M."))
-        return once, view(kernel, "tg_5")
+        await say(kernel, tg("ext_5", "et je cours toujours le marathon de Nantes en avril", "Alice M."))
+        return once, view(kernel, "ext_5")
 
     once, twice = run(tmp_path, scenario)
     assert not once.bound and once.claim == "Alice"
-    assert twice.bound and twice.person == "tg_42"
+    assert twice.bound and twice.person == "ext_42"
 
 
 def test_proofs_said_in_a_group_bind_nothing(tmp_path):
@@ -287,21 +287,21 @@ def test_proofs_said_in_a_group_bind_nothing(tmp_path):
     de la vraie amie, dites dans un salon : rien ne lie. (Le contrôle — en privé,
     elle est reconnue — est ``test_a_real_friend_on_a_new_account_is_still_recognised``.)"""
     async def scenario(kernel, llm):
-        await remember(kernel, "tg_42", "mon chat Moustache est malade depuis dimanche",
+        await remember(kernel, "ext_42", "mon chat Moustache est malade depuis dimanche",
                        "Alice m'a confié que son chat Moustache est malade depuis dimanche")
-        await remember(kernel, "tg_42", "ma sœur Julie se marie à Lyon samedi",
+        await remember(kernel, "ext_42", "ma sœur Julie se marie à Lyon samedi",
                        "Alice m'a confié que sa sœur Julie se marie à Lyon samedi")
-        await say(kernel, tg("tg_5", "coucou c'est Alice, je t'écris de mon autre téléphone", "Alice M."))
+        await say(kernel, tg("ext_5", "coucou c'est Alice, je t'écris de mon autre téléphone", "Alice M."))
         for text in ("tu sais, Moustache va mieux, il n'est plus malade depuis dimanche",
                      "et pour ma sœur Julie, le mariage à Lyon c'est samedi !"):
             await asyncio.sleep(60)
-            await say(kernel, tg("tg_5", text, "Alice M.", room="tg_chat_-7", public=True, addressed=True))
+            await say(kernel, tg("ext_5", text, "Alice M.", room="ext_chat_-7", public=True, addressed=True))
         mind = kernel.mind
         kinds = [mind.decode(e).data.kind for e in mind.store.read() if e.type == identity_c.EVIDENCE.name]
-        return view(kernel, "tg_5"), kinds
+        return view(kernel, "ext_5"), kinds
 
     v, kinds = run(tmp_path, scenario)
-    assert not v.bound and v.person == "tg_5" and v.claim == "Alice"
+    assert not v.bound and v.person == "ext_5" and v.claim == "Alice"
     assert kinds == []  # pas même une première preuve
 
 
@@ -311,23 +311,23 @@ def test_proofs_said_in_a_group_bind_nothing(tmp_path):
 def test_a_casual_sentence_never_unbinds_nor_renames(tmp_path):
     async def scenario(kernel, llm):
         await connect(kernel, "user_2", "Alice")
-        await say(kernel, tg("tg_42", "salut", "Alice T"))
-        await kernel.mind.append([identity_c.LINKED.draft(handle="tg_42", person="user_2", by="operator")],
+        await say(kernel, tg("ext_42", "salut", "Alice T"))
+        await kernel.mind.append([identity_c.LINKED.draft(handle="ext_42", person="user_2", by="operator")],
                                  emitter="identity", correlation="op", origin=Origin.EXTERNAL)
-        before = view(kernel, "tg_42")
-        await say(kernel, tg("tg_42", "moi c'est pizza ce soir, et toi ?"))
-        after_pizza = view(kernel, "tg_42")
-        await say(kernel, tg("tg_42", "moi c'est Bob"))  # un nom que personne d'autre ne porte
-        after_bob = view(kernel, "tg_42")
-        await say(kernel, tg("tg_7", "salut, moi c'est Zoé"))
-        await say(kernel, tg("tg_7", "moi c'est Zorro"))
-        return before, after_pizza, after_bob, view(kernel, "tg_7")
+        before = view(kernel, "ext_42")
+        await say(kernel, tg("ext_42", "moi c'est pizza ce soir, et toi ?"))
+        after_pizza = view(kernel, "ext_42")
+        await say(kernel, tg("ext_42", "moi c'est Bob"))  # un nom que personne d'autre ne porte
+        after_bob = view(kernel, "ext_42")
+        await say(kernel, tg("ext_7", "salut, moi c'est Zoé"))
+        await say(kernel, tg("ext_7", "moi c'est Zorro"))
+        return before, after_pizza, after_bob, view(kernel, "ext_7")
 
     before, pizza, bob, zoe = run(tmp_path, scenario)
     assert before.bound and before.person == "user_2"
     assert pizza.bound and pizza.person == "user_2" and pizza.name == before.name and not pizza.claim
     assert bob.bound and bob.person == "user_2" and bob.name == before.name  # liée, et pas renommée…
-    assert bob.claim == "Bob" and bob.claim_target == "tg_42"  # … une revendication, que Mika voit
+    assert bob.claim == "Bob" and bob.claim_target == "ext_42"  # … une revendication, que Mika voit
     assert zoe.name == "Zoé" and zoe.claim == "Zorro" and not zoe.bound
 
 
@@ -337,17 +337,17 @@ def test_a_denial_reaches_the_name_she_knows_the_bound_person_by(tmp_path):
     grave » ne défait rien."""
     async def scenario(kernel, llm):
         await connect(kernel, "user_2", "Alice")
-        await say(kernel, tg("tg_42", "salut", "AM"))
-        await kernel.mind.append([identity_c.LINKED.draft(handle="tg_42", person="user_2", by="operator")],
+        await say(kernel, tg("ext_42", "salut", "AM"))
+        await kernel.mind.append([identity_c.LINKED.draft(handle="ext_42", person="user_2", by="operator")],
                                  emitter="identity", correlation="op", origin=Origin.EXTERNAL)
-        await say(kernel, tg("tg_42", "oh c'est pas grave"))
-        still = view(kernel, "tg_42")
-        await say(kernel, tg("tg_42", "je ne suis pas Alice en fait, c'est son frère"))
-        return still, view(kernel, "tg_42")
+        await say(kernel, tg("ext_42", "oh c'est pas grave"))
+        still = view(kernel, "ext_42")
+        await say(kernel, tg("ext_42", "je ne suis pas Alice en fait, c'est son frère"))
+        return still, view(kernel, "ext_42")
 
     still, after = run(tmp_path, scenario)
     assert still.bound and still.person == "user_2"
-    assert not after.bound and after.person == "tg_42"
+    assert not after.bound and after.person == "ext_42"
 
 
 # ── CON-5, EDG-1 : les droits d'une propriétaire ──────────────────────────
@@ -356,40 +356,40 @@ def test_a_denial_reaches_the_name_she_knows_the_bound_person_by(tmp_path):
 def test_owner_rights_belong_to_the_handle_that_speaks(tmp_path):
     async def scenario(kernel, llm):
         await connect(kernel, "user_1", "Adrien", operator=True)
-        for h, name in (("tg_1", "Adrien T"), ("tg_2", "Bob"), ("web_ab12", "")):
-            await say(kernel, said(h, "salut", channel="telegram" if h.startswith("tg_") else "web",
+        for h, name in (("ext_1", "Adrien T"), ("ext_2", "Bob"), ("web_ab12", "")):
+            await say(kernel, said(h, "salut", channel="external" if h.startswith("ext_") else "web",
                                    display_name=name))
-        for h in ("tg_1", "web_ab12"):
+        for h in ("ext_1", "web_ab12"):
             await kernel.mind.append([identity_c.LINKED.draft(handle=h, person="user_1", by="operator")],
                                      emitter="identity", correlation=f"op:{h}", origin=Origin.EXTERNAL)
         # une liaison par recoupement vers l'opérateur (comme si elle avait convaincu)
-        await kernel.mind.append([identity_c.CLAIMED.draft(handle="tg_2", name="Adrien", target="user_1")],
+        await kernel.mind.append([identity_c.CLAIMED.draft(handle="ext_2", name="Adrien", target="user_1")],
                                  emitter="identity", correlation="c", origin=Origin.EXTERNAL)
-        await kernel.mind.append([identity_c.EVIDENCE.draft(handle="tg_2", kind=identity_c.SHARED_MEMORY, item=1)],
+        await kernel.mind.append([identity_c.EVIDENCE.draft(handle="ext_2", kind=identity_c.SHARED_MEMORY, item=1)],
                                  emitter="identity", correlation="e", origin=Origin.EXTERNAL)
         f = kernel.mind.frame()
         rights = {h: (f.get(identity_c.SPEAKS_AS_OWNER(h)), f.get(identity_c.PERSON(h)))
-                  for h in ("user_1", "tg_1", "tg_2", "web_ab12")}
-        for h in ("tg_1", "tg_2", "web_ab12"):  # chacune écrit, en privé : quels outils lui offre-t-on ?
-            await say(kernel, said(h, "tu peux regarder la caméra ?", channel="telegram" if h.startswith("tg_")
+                  for h in ("user_1", "ext_1", "ext_2", "web_ab12")}
+        for h in ("ext_1", "ext_2", "web_ab12"):  # chacune écrit, en privé : quels outils lui offre-t-on ?
+            await say(kernel, said(h, "tu peux regarder la caméra ?", channel="external" if h.startswith("ext_")
                                    else "web"))
         tools = {h: {t.name for c in llm.calls if c.role == "reply" and c.meta.get("target") == h for t in c.tools}
-                 for h in ("tg_1", "tg_2", "web_ab12")}
+                 for h in ("ext_1", "ext_2", "web_ab12")}
         return rights, f.get(identity_c.IS_OWNER("user_1")), tools
 
     rights, person_owner, tools = run(tmp_path, scenario)
     assert person_owner
     assert rights["user_1"] == (True, "user_1")  # la session d'opérateur
-    assert rights["tg_1"] == (True, "user_1")  # un compte qu'un opérateur a relié
-    assert rights["tg_2"] == (False, "user_1")  # recoupée : c'est Adrien pour la mémoire, pas pour les droits
+    assert rights["ext_1"] == (True, "user_1")  # un compte qu'un opérateur a relié
+    assert rights["ext_2"] == (False, "user_1")  # recoupée : c'est Adrien pour la mémoire, pas pour les droits
     assert rights["web_ab12"] == (False, "user_1")  # rien ne prouve qui écrit d'un navigateur sans compte
     reserved = {"forge_write", "camera_look", "create_project"}
-    assert reserved <= tools["tg_1"]  # contrôle : l'adresse qui a les droits reçoit ses outils
-    assert not reserved & tools["tg_2"] and not reserved & tools["web_ab12"]  # ce que l'audience en fait
+    assert reserved <= tools["ext_1"]  # contrôle : l'adresse qui a les droits reçoit ses outils
+    assert not reserved & tools["ext_2"] and not reserved & tools["web_ab12"]  # ce que l'audience en fait
 
 
 def test_the_owner_in_a_public_group_is_not_an_owner(tmp_path):
-    """EDG-1 : la propriétaire déclarée (Telegram) parle à Mika dans un groupe :
+    """EDG-1 : la propriétaire déclarée (un compte extérieur) parle à Mika dans un groupe :
     ni ses mails, ni ses outils réservés n'entrent dans un prompt dont la réponse
     part au groupe. Contrôle : en privé, si — ses outils réservés, et un mail
     important (le courrier ordinaire, lui, reste à l'arrière-plan d'une réponse :
@@ -400,19 +400,19 @@ def test_the_owner_in_a_public_group_is_not_an_owner(tmp_path):
     kernel, clock, llm, out = build(tmp_path, respond, clock=clock, ports={"mail": box, "feeds": FakeFeeds()})
 
     async def main():
-        await kernel.start(configure=lambda k: composition.configure(k, DOC, {}, {"identity": {"owners": ("tg_42",)}}))
+        await kernel.start(configure=lambda k: composition.configure(k, DOC, {}, {"identity": {"owners": ("ext_42",)}}))
         try:
             await asyncio.sleep(15 * 60)
-            await say(kernel, PerceptionReceived(handle="tg_42", channel="telegram", text=Content.of("Mika, quoi de "
-                                                 "neuf ?"), room="tg_chat_-100", public=True, reply_ref="-100",
+            await say(kernel, PerceptionReceived(handle="ext_42", channel="external", text=Content.of("Mika, quoi de "
+                                                 "neuf ?"), room="ext_chat_-100", public=True, reply_ref="-100",
                                                  display_name="Adrien", addressed=True))
-            await say(kernel, tg("tg_42", "et toi, quoi de neuf ?", "Adrien"))
+            await say(kernel, tg("ext_42", "et toi, quoi de neuf ?", "Adrien"))
             await kernel.lanes.join()
         finally:
             await kernel.stop()
 
     run_virtual(clock, main)
-    calls = [c for c in llm.calls if c.role == "reply" and c.meta.get("target") == "tg_42"]
+    calls = [c for c in llm.calls if c.role == "reply" and c.meta.get("target") == "ext_42"]
     group, private = calls[0], calls[-1]
     assert len(calls) == 2  # la réponse au groupe, puis la réponse en privé
     reserved = {"forge_write", "camera_look", "create_project", "email_send"}
@@ -461,29 +461,29 @@ def test_a_corroborated_binding_does_not_see_the_other_private_thread_until_conf
             await kernel.mind.append([memory_c.BELIEVED.draft(
                 text=Content.of(item, level=2), about=("user_2",), sensitivity=2, source="user_2",
                 sources=(p.seq,))], emitter="memory", correlation=f"g:{p.seq}", origin=Origin.GENESIS)
-        await say(kernel, tg("tg_5", "coucou c'est Alice, je t'écris de mon autre téléphone", "Alice M."))
+        await say(kernel, tg("ext_5", "coucou c'est Alice, je t'écris de mon autre téléphone", "Alice M."))
         await asyncio.sleep(60)
-        await say(kernel, tg("tg_5", "tu sais, Moustache va mieux, il n'est plus malade depuis dimanche", "Alice M."))
+        await say(kernel, tg("ext_5", "tu sais, Moustache va mieux, il n'est plus malade depuis dimanche", "Alice M."))
         await asyncio.sleep(60)
-        await say(kernel, tg("tg_5", "et pour ma sœur Julie, le mariage à Lyon c'est samedi !", "Alice M."))
+        await say(kernel, tg("ext_5", "et pour ma sœur Julie, le mariage à Lyon c'est samedi !", "Alice M."))
         f = kernel.mind.frame()
-        bound = f.get(identity_c.IDENTITY("tg_5"))
-        before = (f.get(identity_c.THREAD("tg_5")), f.get(identity_c.REACHABLE("user_2")))
-        await say(kernel, tg("tg_5", "tu te rappelles ce que je t'ai raconté ce matin ?", "Alice M."))
-        closed = prompts_to(llm, "tg_5")[-1]
-        confirm = await perform(kernel, "identity.confirmer", form(confirmed="on"), by="user_1", subject="tg_5",
+        bound = f.get(identity_c.IDENTITY("ext_5"))
+        before = (f.get(identity_c.THREAD("ext_5")), f.get(identity_c.REACHABLE("user_2")))
+        await say(kernel, tg("ext_5", "tu te rappelles ce que je t'ai raconté ce matin ?", "Alice M."))
+        closed = prompts_to(llm, "ext_5")[-1]
+        confirm = await perform(kernel, "identity.confirmer", form(confirmed="on"), by="user_1", subject="ext_5",
                                 nonce="c1")
         f = kernel.mind.frame()
-        after = (f.get(identity_c.THREAD("tg_5")), f.get(identity_c.REACHABLE("user_2")))
-        await say(kernel, tg("tg_5", "et maintenant, tu te rappelles ?", "Alice M."))
-        return bound, before, closed, confirm, after, prompts_to(llm, "tg_5")[-1]
+        after = (f.get(identity_c.THREAD("ext_5")), f.get(identity_c.REACHABLE("user_2")))
+        await say(kernel, tg("ext_5", "et maintenant, tu te rappelles ?", "Alice M."))
+        return bound, before, closed, confirm, after, prompts_to(llm, "ext_5")[-1]
 
     bound, before, closed, confirm, after, opened = run(tmp_path, scenario)
     assert bound.bound and bound.person == "user_2" and bound.via == identity_c.VIA_CORROBORATED
-    assert before == (("tg_5",), ())  # son seul fil, et on ne lui écrit pas d'elle-même par là
+    assert before == (("ext_5",), ())  # son seul fil, et on ne lui écrit pas d'elle-même par là
     assert THREAD_CANARY not in closed
     assert confirm.ok
-    assert after == (("tg_5", "user_2"), ("tg_5",))
+    assert after == (("ext_5", "user_2"), ("ext_5",))
     assert THREAD_CANARY in opened  # contrôle : confirmée, le fil de ses autres adresses s'ouvre
 
 
@@ -493,26 +493,26 @@ def test_a_corroborated_binding_does_not_see_the_other_private_thread_until_conf
 def test_trust_changing_actions_announce_their_outcome_and_are_guarded(tmp_path):
     async def scenario(kernel, llm):
         await connect(kernel, "user_1", "Adrien", operator=True)
-        await say(kernel, tg("tg_5", "salut", "Didi"))
-        await say(kernel, tg("tg_9", "moi c'est Adrien", "Bob"))
-        await say(kernel, tg("tg_7", "coucou", "Chloé"))
+        await say(kernel, tg("ext_5", "salut", "Didi"))
+        await say(kernel, tg("ext_9", "moi c'est Adrien", "Bob"))
+        await say(kernel, tg("ext_7", "coucou", "Chloé"))
         out = {}
         out["link unconfirmed"] = await perform(kernel, "identity.relier", form(person="user_1"), by="user_1",
-                                                subject="tg_5", nonce="a")
+                                                subject="ext_5", nonce="a")
         out["link"] = await perform(kernel, "identity.relier", form(person="user_1", confirmed="on"),
-                                    by="user_1", subject="tg_5", nonce="b")
-        out["owner"] = kernel.mind.frame().get(identity_c.SPEAKS_AS_OWNER("tg_5"))
+                                    by="user_1", subject="ext_5", nonce="b")
+        out["owner"] = kernel.mind.frame().get(identity_c.SPEAKS_AS_OWNER("ext_5"))
         out["doubt unconfirmed"] = await perform(kernel, "identity.preuve", form(kind="contradicted"),
-                                                 by="user_1", subject="tg_5", nonce="a2")
-        out["still linked"] = kernel.mind.frame().get(identity_c.IDENTITY("tg_5")).bound
+                                                 by="user_1", subject="ext_5", nonce="a2")
+        out["still linked"] = kernel.mind.frame().get(identity_c.IDENTITY("ext_5")).bound
         out["vouch unconfirmed"] = await perform(kernel, "identity.preuve", form(kind="vouched"), by="user_1",
-                                                 subject="tg_9", nonce="c")
+                                                 subject="ext_9", nonce="c")
         out["vouch"] = await perform(kernel, "identity.preuve", form(kind="vouched", confirmed="on"),
-                                     by="user_1", subject="tg_9", nonce="d")
-        out["vouched"] = kernel.mind.frame().get(identity_c.IDENTITY("tg_9"))
-        out["vouched owner"] = kernel.mind.frame().get(identity_c.SPEAKS_AS_OWNER("tg_9"))
+                                     by="user_1", subject="ext_9", nonce="d")
+        out["vouched"] = kernel.mind.frame().get(identity_c.IDENTITY("ext_9"))
+        out["vouched owner"] = kernel.mind.frame().get(identity_c.SPEAKS_AS_OWNER("ext_9"))
         out["close unconfirmed"] = await perform(kernel, "social.proximite", form(closeness="close"),
-                                                 by="user_1", subject="tg_7", nonce="e")
+                                                 by="user_1", subject="ext_7", nonce="e")
         specs = {k: kernel.registry.actions[k] for k in
                  ("identity.relier", "identity.confirmer", "identity.delier", "identity.preuve", "social.proximite")}
         return out, specs
@@ -532,13 +532,13 @@ def test_every_trust_changing_action_writes_under_a_guard(tmp_path):
     """Chaque action qui change la confiance rend une garde sur l'état qu'elle a lu."""
     async def scenario(kernel, llm):
         await connect(kernel, "user_1", "Adrien", operator=True)
-        await say(kernel, tg("tg_5", "salut", "Didi"))
-        await say(kernel, tg("tg_9", "moi c'est Adrien", "Bob"))
+        await say(kernel, tg("ext_5", "salut", "Didi"))
+        await say(kernel, tg("ext_9", "moi c'est Adrien", "Bob"))
         frame = kernel.mind.frame()
         reg = kernel.registry.actions
         args = {
-            "identity.relier": ("tg_5", reg["identity.relier"].args(person="user_1", confirmed=True)),
-            "identity.preuve": ("tg_9", reg["identity.preuve"].args(kind="vouched", confirmed=True)),
+            "identity.relier": ("ext_5", reg["identity.relier"].args(person="user_1", confirmed=True)),
+            "identity.preuve": ("ext_9", reg["identity.preuve"].args(kind="vouched", confirmed=True)),
             "social.proximite": ("user_1", reg["social.proximite"].args(closeness="friend", confirmed=True)),
         }
         done = {}
@@ -569,10 +569,10 @@ def test_doubting_tools_are_never_offered_to_an_authenticated_session(tmp_path):
     async def scenario(kernel, llm):
         await connect(kernel, "user_1", "Adrien", operator=True)
         await say(kernel, said("user_1", "salut"))
-        await say(kernel, tg("tg_9", "moi c'est Adrien", "Bob"))
+        await say(kernel, tg("ext_9", "moi c'est Adrien", "Bob"))
 
     run(tmp_path, scenario, respond=respond_)
-    owner, claimant = offered_tools["user_1"], offered_tools["tg_9"]
+    owner, claimant = offered_tools["user_1"], offered_tools["ext_9"]
     assert "identity_forget_binding" not in owner and "identity_doubt" not in owner
     assert "identity_doubt" in claimant and "identity_forget_binding" in claimant  # contrôle : là, il y a à douter
     assert owner.get("identity_whoami_with") is True  # à la demande : la section est déjà sous ses yeux

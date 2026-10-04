@@ -380,15 +380,15 @@ def test_never_two_messages_in_a_row_to_an_absent_friend_whatever_the_reason(tmp
     from mika.contracts import social as social_c
 
     async def scenario(kernel, script, out):
-        await befriend(kernel, "tg_1", social_c.CLOSE)
+        await befriend(kernel, "ext_1", social_c.CLOSE)
         script.tag = "[EMOTION:sad:0.85]"
         for text in ["ça va pas trop en ce moment", "mon père est malade", "j'ai peur"]:
-            p = await kernel.perceive(said("tg_1", text, channel="telegram"))
+            p = await kernel.perceive(said("ext_1", text, channel="external"))
             await p.reply
             await asyncio.sleep(60)
         script.tag = "[EMOTION:happy:0.5]"
         await asyncio.sleep(2 * DAY / US)
-        return [e for e in events(kernel, rt.UTTERANCE.name) if e.data.kind == "INITIATIVE" and e.data.target == "tg_1"]
+        return [e for e in events(kernel, rt.UTTERANCE.name) if e.data.kind == "INITIATIVE" and e.data.target == "ext_1"]
 
     sent = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 11, 0))
     assert len(sent) == 1, [local(e.at, TZ).strftime("%a %H:%M") for e in sent]

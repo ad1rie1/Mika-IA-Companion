@@ -1,7 +1,7 @@
 """Contrat d'``identity`` : qui est derrière une adresse, à quel point elle en
 est sûre, et ce que ça ouvre.
 
-Une **clé de personne** est l'adresse d'une personne (``user_7``, ``tg_42``)
+Une **clé de personne** est l'adresse d'une personne (``user_7``, ``ext_42``)
 ou, pour quelqu'un connu seulement de nom, ``name:<nom replié>``. Une adresse
 parle pour elle-même, sauf si elle a été **liée** à une autre personne :
 quand ce qu'elle a dit recoupe ce que seule cette personne pouvait savoir, ou

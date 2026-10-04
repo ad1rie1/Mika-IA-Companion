@@ -2,8 +2,9 @@
 
 Une adresse (``handle``) est ce par quoi quelqu'un lui écrit : ``user_7``
 (compte web authentifié), ``web_…`` (navigateur identifié sans compte),
-``anon_…`` (une connexion, jetable), ``tg_…`` (Telegram). Une personne peut
-en avoir plusieurs ; la faculté ``identity`` les relie.
+``anon_…`` (une connexion, jetable), ``ext_…`` (un compte sur un réseau
+extérieur, non sécurisé). Une personne peut en avoir plusieurs ; la faculté
+``identity`` les relie.
 """
 
 from __future__ import annotations
@@ -15,9 +16,10 @@ import unicodedata
 INTERNAL_IDS = frozenset({"conscience_mika", "__global__", "anonymous", ""})
 EPHEMERAL_PREFIX = "anon_"
 ACCOUNT_PREFIX = "user_"
+EXTERNAL_PREFIX = "ext_"
 #: Préfixes qu'un client ne peut pas revendiquer dans une trame ``identify`` :
-#: ils sont émis par le serveur (compte, connexion, Telegram, modules, soi).
-RESERVED_PREFIXES = ("tg_", "module_", "conscience", ACCOUNT_PREFIX, EPHEMERAL_PREFIX)
+#: ils sont émis par le serveur (compte, connexion, compte extérieur, modules, soi).
+RESERVED_PREFIXES = (EXTERNAL_PREFIX, "module_", "conscience", ACCOUNT_PREFIX, EPHEMERAL_PREFIX)
 _CLIENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 DISPLAY_NAME_MAX = 40

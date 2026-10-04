@@ -45,4 +45,4 @@ def test_the_second_week_goes_to_the_end_with_its_group_and_its_report(tmp_path)
     assert "Marc > @Mika toi tu sais comment il va ?" in fil and "Inès > tu dors ?" in fil
     assert "Mika → Sam" in fil
     bilan = (out / "bilan.txt").read_text()
-    assert "le rappel du dentiste" in bilan and "ses 30 ans" in bilan and "dans le salon Telegram" in bilan
+    assert "le rappel du dentiste" in bilan and "ses 30 ans" in bilan and "dans le salon extérieur" in bilan

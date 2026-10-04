@@ -92,41 +92,41 @@ def brute(s, person):
 
 
 def test_her_addresses_are_read_without_going_through_every_stranger(tmp_path):
-    """Alice écrit par son compte et par Telegram (relié par un opérateur) ; deux cents inconnues sont passées.
+    """Alice écrit par son compte et par un compte extérieur (relié par un opérateur) ; deux cents inconnues sont passées.
     « Les adresses d'Alice », sa propriété, sa fiche se lisent sans parcourir les deux cents — l'audit d'une foule
     comptait 621 467 parcours de toutes les adresses en une journée à trois cents personnes (C5). Délier
-    Telegram la rend à elle-même ; et le journal, rejoué depuis la genèse, redonne le même index. « Qui sont ses
+    son compte extérieur la rend à elle-même ; et le journal, rejoué depuis la genèse, redonne le même index. « Qui sont ses
     propriétaires ? » non plus ne parcourt pas les inconnues."""
 
     async def scenario(kernel, clock, script):
         await connect(kernel, "user_1", "Camille", operator=True)
         await connect(kernel, "user_2", "Alice")
-        await genesis(kernel, identity_c.LINKED.draft(handle="tg_5", person="user_2"), emitter="identity")
+        await genesis(kernel, identity_c.LINKED.draft(handle="ext_5", person="user_2"), emitter="identity")
         for i in range(200):
             await connect(kernel, f"web_{i}", authenticated=False)
         frame = kernel.mind.frame()
         s = frame.state("identity")
         spy = replace(s, handles=Counting(s.handles))
         Counting.walks[0] = 0
-        got = {p: handles_of(spy, p) for p in ("user_2", "tg_5", "web_7", "personne")}
+        got = {p: handles_of(spy, p) for p in ("user_2", "ext_5", "web_7", "personne")}
         owner = owner_person(spy, "user_2", set())
-        view = view_of(spy, "tg_5", frame.now)
+        view = view_of(spy, "ext_5", frame.now)
         owners = _owners(spy, SimpleNamespace(params=None))
         walks = Counting.walks[0]
         linked = {p: brute(s, p) for p in got}
-        await genesis(kernel, identity_c.LINKED.draft(handle="tg_5", person=None), emitter="identity")
+        await genesis(kernel, identity_c.LINKED.draft(handle="ext_5", person=None), emitter="identity")
         s2 = kernel.mind.frame().state("identity")
-        unlinked = {p: (handles_of(s2, p), brute(s2, p)) for p in ("user_2", "tg_5")}
+        unlinked = {p: (handles_of(s2, p), brute(s2, p)) for p in ("user_2", "ext_5")}
         everyone = {p for k, h in s2.handles.items() for p in (h.person or k,)}
         consistent = all(handles_of(s2, p) == brute(s2, p) for p in everyone) and set(s2.by_person.keys()) == everyone
         replayed = kernel.mind._rebuild_from_genesis(kernel.mind.root, {"identity"}, kernel.mind.head)
         return got, linked, walks, (owner, owners), view, unlinked, consistent, replayed.slices["identity"] == s2
 
     got, linked, walks, (owner, owners), view, unlinked, consistent, same = run(tmp_path, scenario)
-    assert got == linked and got["user_2"] == ("tg_5", "user_2") and got["personne"] == ()
+    assert got == linked and got["user_2"] == ("ext_5", "user_2") and got["personne"] == ()
     assert walks == 0, f"{walks} parcours de toutes les adresses"
     assert owner is False and owners == ("user_1",) and view.person == "user_2" and view.first_seen > 0
-    assert unlinked == {"user_2": (("user_2",), ("user_2",)), "tg_5": (("tg_5",), ("tg_5",))}
+    assert unlinked == {"user_2": (("user_2",), ("user_2",)), "ext_5": (("ext_5",), ("ext_5",))}
     assert consistent, "l'index et le parcours disent la même chose pour chacune"
     assert same, "rejoué depuis la genèse, le même index"
 
@@ -170,13 +170,13 @@ def test_what_was_said_in_a_room_does_not_come_back_in_private(tmp_path):
     ne revient pas — même quand l'index des vecteurs le range comme un échange privé (un index écrit avant ce lot,
     où les échanges de salon n'avaient pas leur sorte) : la recherche filtrée par personne repasse par la condition
     du privé. Dans le salon, il revient."""
-    room = {"room": "tg_chat_-9", "channel": "telegram"}
+    room = {"room": "ext_chat_-9", "channel": "external"}
 
     async def scenario(kernel, clock, script):
         await composition.configure(kernel, DOC, {"transcript": {"window": 2}})
-        await chat(kernel, "tg_1", ["CANARI-SALON Mika, le chat de Léa a vomi sur le tapis ce matin"],
+        await chat(kernel, "ext_1", ["CANARI-SALON Mika, le chat de Léa a vomi sur le tapis ce matin"],
                    display_name="Tom", **room)
-        await chat(kernel, "tg_1", ["Mika tu joues à quoi ?", "Mika il pleut chez toi ?"], display_name="Tom",
+        await chat(kernel, "ext_1", ["Mika tu joues à quoi ?", "Mika il pleut chez toi ?"], display_name="Tom",
                    **room)
         await asyncio.sleep(15 * 60)
         vectors = kernel.deps.ports["vectors"]
@@ -184,12 +184,12 @@ def test_what_was_said_in_a_room_does_not_come_back_in_private(tmp_path):
                                             "WHERE user_text LIKE '%CANARI-SALON%'")
         kinds = {vectors._kind_names[int(vectors._kinds[vectors._pos[int(r[0])]])] for r in rows}
         await vectors.upsert([VectorItem(int(i), memory_c.CHUNK, f"{u}\n{r}", (who,)) for i, u, r, who in rows])
-        await chat(kernel, "tg_1", ["tu sais si le chat de Léa a encore vomi sur le tapis ?"], channel="telegram",
+        await chat(kernel, "ext_1", ["tu sais si le chat de Léa a encore vomi sur le tapis ?"], channel="external",
                    display_name="Tom")
-        private = section(script.replies("tg_1")[-1], EXCHANGES)
-        await chat(kernel, "tg_1", ["Mika, tu sais si le chat de Léa a encore vomi sur le tapis ?"],
+        private = section(script.replies("ext_1")[-1], EXCHANGES)
+        await chat(kernel, "ext_1", ["Mika, tu sais si le chat de Léa a encore vomi sur le tapis ?"],
                    display_name="Tom", **room)
-        return kinds, private, section(script.replies("tg_1")[-1], EXCHANGES)
+        return kinds, private, section(script.replies("ext_1")[-1], EXCHANGES)
 
     kinds, private, in_room = run(tmp_path, scenario)
     assert kinds == {memory_c.ROOM_CHUNK}, "un échange de salon a sa sorte"
@@ -247,7 +247,7 @@ def _random_items(rng, n):
     for key in rng.sample(range(10 * n), n):  # dans le désordre : l'ordre d'arrivée ne doit rien changer
         text = " ".join(rng.choice(words) for _ in range(rng.randint(1, 4)))
         items.append(VectorItem(key, rng.choice(("chunk", "belief", "souvenir")), text,
-                                tuple(rng.sample(("user_1", "user_2", "tg_3", "name:sam"), rng.randint(1, 2)))))
+                                tuple(rng.sample(("user_1", "user_2", "ext_3", "name:sam"), rng.randint(1, 2)))))
     return items
 
 
@@ -286,15 +286,15 @@ def test_the_vector_index_answers_like_an_exhaustive_search_and_grows_without_co
         for item in items:
             await index.upsert([item])
             matrices.add(index._mat.shape[0])  # une capacité nouvelle : une recopie
-        queries = [("chat guitare", {}), ("pluie", {"kinds": {"belief"}}), ("film plage", {"persons": {"tg_3"}}),
+        queries = [("chat guitare", {}), ("pluie", {"kinds": {"belief"}}), ("film plage", {"persons": {"ext_3"}}),
                    ("crepes", {"keys": {i.key for i in items[::3]}, "kinds": {"chunk", "souvenir"}}),
                    ("velo train", {"persons": {"user_1", "name:sam"}, "kinds": {"souvenir"}})]
         got = [await index.search(q, 25, **kw) for q, kw in queries]
         again = SqliteVectorIndex(store, embedder)
         await again.open()
         reopened = [await again.search(q, 25, **kw) for q, kw in queries]
-        await again.forget("tg_3")
-        left = [i for i in items if "tg_3" not in i.persons]
+        await again.forget("ext_3")
+        left = [i for i in items if "ext_3" not in i.persons]
         forgotten = [await again.search(q, 25, **kw) for q, kw in queries]
         await store.close()
         return matrices, got, reopened, left, forgotten
@@ -305,7 +305,7 @@ def test_the_vector_index_answers_like_an_exhaustive_search_and_grows_without_co
     def same(a, b):
         return [k for k, _ in a] == [k for k, _ in b] and np.allclose([s for _, s in a], [s for _, s in b], atol=1e-5)
 
-    queries = [("chat guitare", {}), ("pluie", {"kinds": {"belief"}}), ("film plage", {"persons": {"tg_3"}}),
+    queries = [("chat guitare", {}), ("pluie", {"kinds": {"belief"}}), ("film plage", {"persons": {"ext_3"}}),
                ("crepes", {"keys": {i.key for i in items[::3]}, "kinds": {"chunk", "souvenir"}}),
                ("velo train", {"persons": {"user_1", "name:sam"}, "kinds": {"souvenir"}})]
     expected = [_exhaustive(embedder, items, q, 25, **kw) for q, kw in queries]
@@ -461,7 +461,7 @@ def extract(prompt):
 
 
 def test_an_install_from_before_migrates_by_itself_and_what_was_forgotten_stays_forgotten(tmp_path):
-    """Une vie écrite par le code d'avant : Alice et Bob ont parlé, Telegram est relié à Alice, puis Alice a été
+    """Une vie écrite par le code d'avant : Alice et Bob ont parlé, un compte extérieur est relié à Alice, puis Alice a été
     oubliée. Au démarrage, la mémoire se reconstruit (nouvelle version), l'index des adresses aussi (depuis la
     genèse) ; « qui concerne quoi » se remplit ; et rien d'Alice ne revient — avant, une reconstruction recopiait
     les éléments oubliés, texte vide, toujours rangés à son nom."""
@@ -473,7 +473,7 @@ def test_an_install_from_before_migrates_by_itself_and_what_was_forgotten_stays_
         await boot(kernel)
         await connect(kernel, "user_2", "Alice")
         await connect(kernel, "user_3", "Bob")
-        await genesis(kernel, identity_c.LINKED.draft(handle="tg_9", person="user_3"), emitter="identity")
+        await genesis(kernel, identity_c.LINKED.draft(handle="ext_9", person="user_3"), emitter="identity")
         await chat(kernel, "user_2", ["CANARI-ALICE mon chat Moustache est adorable", *six])
         await chat(kernel, "user_3", ["CANARI-BOB je joue de la guitare le soir", *six])
         await asyncio.sleep(20 * 60)
@@ -507,6 +507,6 @@ def test_an_install_from_before_migrates_by_itself_and_what_was_forgotten_stays_
     assert chunks and all(p != "user_2" for (p,) in chunks)
     assert {f"{memory_c.ITEMS_TABLE}_kind", f"{memory_c.CHUNKS_TABLE}_person_at"} <= indexes
     assert ok and joined > 0
-    assert handles == ("tg_9", "user_3"), "l'index des adresses s'est reconstruit"
+    assert handles == ("ext_9", "user_3"), "l'index des adresses s'est reconstruit"
     assert hits, "l'index des vecteurs a rattrapé"
     assert not [a for a in anomalies if "identity" in a], anomalies

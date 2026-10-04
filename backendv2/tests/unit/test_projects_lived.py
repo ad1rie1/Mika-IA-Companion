@@ -403,7 +403,7 @@ def test_her_owner_in_a_public_group_can_neither_confide_open_nor_close_a_projec
     """Les outils sont réservés (l'offre les filtre) ; leurs gestionnaires revérifient sur l'adresse qui parle et
     là où elle parle : dans un groupe public, Adrien n'est pas « quelqu'un qui s'occupe d'elle ». Ce qui attend son
     accord ne s'y dit pas non plus. Le contrôle : en privé, si."""
-    public = Audience(persons=("user_1",), channel="telegram", room="tg_chat_-100", public=True, owner=False)
+    public = Audience(persons=("user_1",), channel="external", room="ext_chat_-100", public=True, owner=False)
     private = Audience(persons=("user_1",), channel="web", public=False, level=3, witness_level=3, private_ok=True,
                        owner=True)
 

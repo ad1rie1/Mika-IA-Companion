@@ -515,10 +515,10 @@ def test_a_reminder_goes_where_the_person_is_when_it_is_due(tmp_path):
     """Promis sur le web, dit à l'heure là où elle est joignable maintenant : pas à l'adresse d'où venait la demande,
     fermée depuis (PRJ-24)."""
     async def scenario(kernel, llm):
-        await kernel.mind.append([identity_c.LINKED.draft(handle="tg_5", person="user_1", by="operator")],
+        await kernel.mind.append([identity_c.LINKED.draft(handle="ext_5", person="user_1", by="operator")],
                                  emitter="identity", correlation="genese", origin=Origin.GENESIS)
         await connect(kernel, "user_1", "Adrien")
-        await (await kernel.perceive(said("tg_5", "coucou, c'est moi sur Telegram", channel="telegram"))).reply
+        await (await kernel.perceive(said("ext_5", "coucou, c'est moi sur mon compte extérieur", channel="external"))).reply
         await (await kernel.perceive(said("user_1", "rappelle-moi dans 20 minutes de rappeler Paul"))).reply
         await disconnect(kernel, "user_1")
         await asyncio.sleep(HOUR / US)
@@ -527,7 +527,7 @@ def test_a_reminder_goes_where_the_person_is_when_it_is_due(tmp_path):
     [opened] = [o for o in r.of(goals_c.GOAL_OPENED) if o.data.kind == goals_c.REMINDER]
     assert opened.data.address == "user_1"  # demandé sur le web…
     said_ = [e for e in r.of(rt.EPISODE_STARTED) if goals_c.REMIND in e.data.reason.split(",")]
-    assert said_ and said_[0].data.target == "tg_5"  # …dit là où il est joignable à l'heure dite
+    assert said_ and said_[0].data.target == "ext_5"  # …dit là où il est joignable à l'heure dite
 
 
 def test_her_exploration_day_does_not_start_at_the_same_minute_every_day(tmp_path):

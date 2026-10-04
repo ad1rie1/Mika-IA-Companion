@@ -111,13 +111,13 @@ def test_a_thought_born_in_a_room_never_quotes_their_private_words(tmp_path):
     """Une pensée née dans un salon est anodine : elle porte l'échange du salon, jamais ce que la même personne lui a
     écrit en privé juste avant."""
     async def scenario(kernel, mika):
-        await befriend(kernel, "tg_1", "close")
-        tg = {"channel": "telegram", "display_name": "Sam"}
-        await (await kernel.perceive(said("tg_1", "CANARI-PRIVE mon chat est malade, je te le dis à toi", **tg))).reply
+        await befriend(kernel, "ext_1", "close")
+        tg = {"channel": "external", "display_name": "Sam"}
+        await (await kernel.perceive(said("ext_1", "CANARI-PRIVE mon chat est malade, je te le dis à toi", **tg))).reply
         await asyncio.sleep(5 * MINUTE / US)
         for text, emotion, intensity in SAM_EVENING[:4]:
             mika.tag = (emotion, intensity)
-            p = await kernel.perceive(said("tg_1", text, room="tg_chat_-7", **tg))
+            p = await kernel.perceive(said("ext_1", text, room="ext_chat_-7", **tg))
             if p.reply is not None:
                 await p.reply
             await asyncio.sleep(2 * MINUTE / US)

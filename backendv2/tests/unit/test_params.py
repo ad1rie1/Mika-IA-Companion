@@ -1,8 +1,8 @@
 """Les paramètres des facultés : défaut ← tempérament ← réglages ← surcharges.
 
 Chaque valeur dit d'où elle vient ; une surcharge refusée est écartée sans
-emporter les autres ; les propriétaires Telegram (un réglage) survivent à
-toute reconfiguration ; chaque curseur dit ce qu'il pilote.
+emporter les autres ; les propriétaires (un réglage) survivent à toute
+reconfiguration ; chaque curseur dit ce qu'il pilote.
 """
 
 from __future__ import annotations
@@ -51,9 +51,9 @@ TOY = Faculty("toy", state=Toy, init=lambda p: Toy(), params=ToyParams, derive=d
 
 
 def test_each_value_says_where_it_comes_from():
-    p = params.planned(TOY, Temperament(reactivity=1.0), {"inner.tau_h": 12.0}, {"owners": ("tg_1",)})
+    p = params.planned(TOY, Temperament(reactivity=1.0), {"inner.tau_h": 12.0}, {"owners": ("ext_1",)})
     assert p is not None
-    assert p.value.gain == 0.8 and p.value.inner.tau_h == 12.0 and p.value.owners == ("tg_1",)
+    assert p.value.gain == 0.8 and p.value.inner.tau_h == 12.0 and p.value.owners == ("ext_1",)
     assert p.sources["gain"] == TEMPERAMENT
     assert p.sources["inner.tau_h"] == OVERRIDE
     assert p.sources["owners"] == SETTING
@@ -97,7 +97,7 @@ def _kernel(tmp_path):
 def test_console_changes_are_bounded_reverted_and_kept_apart_from_settings(tmp_path):
     kernel, clock = _kernel(tmp_path)
     stored: dict[str, dict[str, Any]] = {}
-    owners = {"toy": {"owners": ("tg_7",)}}
+    owners = {"toy": {"owners": ("ext_7",)}}
     temperament = Temperament(reactivity=0.5)
 
     async def save(value: dict[str, dict[str, Any]]) -> None:
@@ -135,30 +135,30 @@ def test_console_changes_are_bounded_reverted_and_kept_apart_from_settings(tmp_p
     out = run_virtual(clock, main)
     assert out["set"] == (True, {})
     assert out["after_set"] == {"toy": {"gain": 0.9}}  # seul ce qui diffère de la valeur naturelle
-    assert out["journaled"].gain == 0.9 and out["journaled"].owners == ("tg_7",)
+    assert out["journaled"].gain == 0.9 and out["journaled"].owners == ("ext_7",)
     assert out["bad"][0] is False and "gain" in out["bad"][1]
     assert out["after_bad"] == {"toy": {"gain": 0.9}}
     assert out["back"] == (True, {}) and out["after_back"] == {}
-    assert out["final"].gain == 0.5 and out["final"].owners == ("tg_7",)  # le réglage survit
+    assert out["final"].gain == 0.5 and out["final"].owners == ("ext_7",)  # le réglage survit
 
 
-def test_configure_keeps_telegram_owners_through_a_reconfiguration(tmp_path):
+def test_configure_keeps_owners_through_a_reconfiguration(tmp_path):
     kernel, clock, _ = build(tmp_path, composition.faculties())
     doc = composition.load(composition.PERSONA)
 
     async def main():
         await kernel.start()
-        await composition.configure(kernel, doc, {}, {"identity": {"owners": ("tg_42",)}})
+        await composition.configure(kernel, doc, {}, {"identity": {"owners": ("ext_42",)}})
         first = kernel.mind.root.slices["kernel"].params["identity"].data
         await composition.configure(kernel, doc, {"body": {"shift_minutes": 15}},
-                                    {"identity": {"owners": ("tg_42",)}})
+                                    {"identity": {"owners": ("ext_42",)}})
         second = kernel.mind.root.slices["kernel"].params["identity"].data
         body = kernel.mind.root.slices["kernel"].params["body"].data
         await kernel.stop()
         return first, second, body
 
     first, second, body = run_virtual(clock, main)
-    assert "tg_42" in first and first == second
+    assert "ext_42" in first and first == second
     assert '"shift_minutes":15' in body.replace(" ", "")
 
 

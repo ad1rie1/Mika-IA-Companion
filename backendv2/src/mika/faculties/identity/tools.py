@@ -44,7 +44,7 @@ def _target(ctx: Any) -> str | None:
 def something_to_doubt(audience: Any) -> bool:
     """Une session authentifiée prouve qui écrit (une propriétaire connectée, par
     exemple) : il n'y a rien à mettre en doute, ni de lien à défaire. Sur un compte
-    relié (Telegram), douter reste possible : c'est le garde-fou d'un compte volé."""
+    relié (un compte extérieur), douter reste possible : c'est le garde-fou d'un compte volé."""
     return getattr(audience, "trust", "") != ChannelTrust.AUTHENTICATED.value
 
 
