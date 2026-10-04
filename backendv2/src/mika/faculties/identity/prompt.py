@@ -161,8 +161,9 @@ def acquaintance(first_seen: int, frame: Frame, closeness: str = "") -> str:
     """Depuis quand elle connaît cette personne — un fait, pour qu'elle ne
     s'invente pas un passé commun (« on se connaît depuis longtemps »). Quand
     leur lien est déjà une amitié (déclarée, ou un ancien compte), on ne dit
-    pas « presque pas de passé commun » : seulement depuis quand on se parle ici."""
-    days = (frame.local().date() - frame.local(first_seen).date()).days
+    pas « presque pas de passé commun » : seulement depuis quand on se parle ici. ``first_seen`` à 0 :
+    jamais encore vue (un compte créé à l'avance) — pas de passé commun."""
+    days = (frame.local().date() - frame.local(first_seen).date()).days if first_seen else 0
     if closeness in _KNOWN:
         if days <= 0:
             return "C'est la première fois que vous vous parlez ici."

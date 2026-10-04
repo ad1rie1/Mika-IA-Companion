@@ -157,7 +157,7 @@ class IdentityView:
     claim_target: str | None = None
     channel: str = ""
     push: bool = False  # on peut lui écrire sans qu'elle soit connectée (message privé)
-    first_seen: int = 0  # la première fois que cette personne a été vue, toutes adresses
+    first_seen: int = 0  # la première fois que cette personne a été vue, toutes adresses (0 : jamais encore)
     #: comment elle a été reliée (``VIA_*``), vide pour une adresse qui parle pour elle-même
     via: str = ""
 
