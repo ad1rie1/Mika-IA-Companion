@@ -209,14 +209,15 @@ def main():
 
     path = out / "manifest.json"
     manifest = json.loads(path.read_text()) if path.exists() and only else {"clips": {}, "states": {}}
+    manifest.update({"version": 2, "width": SIZE[0], "height": SIZE[1]})
     for state, parts in states.items():
-        for role, clip in parts.items():
+        for clip in parts.values():
             t = time.time()
             manifest["clips"][clip] = render_clip(rig, cam, groups, clip, CLIPS[clip], out)
             print(f"clip {clip}: {manifest['clips'][clip]['frames']} images, {time.time() - t:.0f} s", flush=True)
+        # Écrit état par état : un lecteur ouvert voit chaque état dès qu'il est complet.
         manifest["states"][state] = parts
-    manifest.update({"version": 2, "width": SIZE[0], "height": SIZE[1]})
-    path.write_text(json.dumps(manifest, indent=1) + "\n")
+        path.write_text(json.dumps(manifest, indent=1) + "\n")
     print(path)
 
 

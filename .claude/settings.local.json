@@ -41,7 +41,8 @@
       "Skill(claude-api)",
       "Skill(claude-api:*)",
       "Bash(python3 -c \"import sys; print\\(sys.version\\)\")",
-      "Bash(timeout 300 python3 -m pytest backend/tests/ --collect-only -q)"
+      "Bash(timeout 300 python3 -m pytest backend/tests/ --collect-only -q)",
+      "ClaudeInChromeDomain(127.0.0.1:8765)"
     ]
   }
 }

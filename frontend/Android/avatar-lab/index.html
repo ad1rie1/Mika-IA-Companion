@@ -108,7 +108,10 @@ const AURA = {
 };
 const FAMILY = { neutral: "neutral", happy: "warm", wave: "warm", sad: "cool", angry: "cool", thinking: "dusk",
   surprised: "dusk", sleep: "night" };
-const FADE_MS = 280;
+/* Fondu d'une boucle à une autre (deux poses qui ne se rejoignent pas) et d'un clip à celui qui le suit
+   (entrée → tenue, tenue → sortie : les poses se rejoignent déjà, le fondu ne fait que lisser). */
+const FADE_SWITCH_MS = 450;
+const FADE_CHAIN_MS = 160;
 const SLEEP_SPEED = 0.6;
 
 const $ = (id) => document.getElementById(id);
@@ -170,15 +173,15 @@ class Player {
     }
     this.state = st.once ? this.base : target;
     this.shown = target;
-    this.startFade();
+    this.startFade(FADE_SWITCH_MS);
     this.cur = this.clip(steps.shift());
     this.plan = steps;
     this.onChange && this.onChange(target);
   }
-  startFade() {
+  startFade(ms) {
     if (!this.last) return;
     sctx.clearRect(0, 0, 720, 960); sctx.drawImage(canvas, 0, 0);
-    this.fade = { t0: performance.now() };
+    this.fade = { t0: performance.now(), ms };
   }
   speed() { return this.base === "sleep" && this.cur && this.cur.id.startsWith("sleep") ? SLEEP_SPEED : 1; }
   tick(now, blend) {
@@ -187,7 +190,7 @@ class Player {
     let pos = ((now - c.t0) / 1000) * c.fps * this.speed();
     if (!c.loop && pos >= c.frames - 1 && this.plan.length) {
       // Fin d'un clip non bouclé : on enchaîne, avec un fondu court (les poses se rejoignent à peu près).
-      this.startFade();
+      this.startFade(FADE_CHAIN_MS);
       this.cur = c = this.clip(this.plan.shift());
       pos = 0;
       // Un geste ponctuel fini : on est revenue à l'état de base.
@@ -213,7 +216,7 @@ class Player {
     }
     ctx.globalCompositeOperation = "copy"; ctx.globalAlpha = 1;
     if (this.fade) {
-      const t = Math.min(1, (now - this.fade.t0) / FADE_MS);
+      const t = Math.min(1, (now - this.fade.t0) / this.fade.ms);
       ctx.globalAlpha = 1 - t; ctx.drawImage(snap, 0, 0);
       ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = t; ctx.drawImage(work, 0, 0);
       if (t >= 1) this.fade = null;
