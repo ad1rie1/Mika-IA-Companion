@@ -51,6 +51,7 @@ namespace Mika.World.Engine
         {
             "none", "type", "write", "read", "lap", "mattress", "sill", "reach_high", "pour", "lean_desk",
             "desk", "mouse", "drink", "take", "stretch", "turn_left_45", "turn_right_45", "turn_left_90", "turn_right_90",
+            "pull_in", "push_out", "write_start", "write_end", "browse",
         };
 
         /// <summary>
@@ -64,7 +65,29 @@ namespace Mika.World.Engine
             ("lap", "desk_lap"), ("lean_desk", "desk_think"), ("drink", "desk_drink"), ("take", "desk_take"), ("stretch", "desk_stretch"),
             ("turn_left_45", "chair_turn_left_45"), ("turn_right_45", "chair_turn_right_45"),
             ("turn_left_90", "chair_turn_left_90"), ("turn_right_90", "chair_turn_right_90"),
+            ("pull_in", "chair_pull_in"), ("push_out", "chair_push_out"),
+            ("write_start", "desk_write_start"), ("write_end", "desk_write_end"),
         };
+
+        /// <summary>
+        /// Les poses debout jouées par un clip de l'atelier (debout seulement, même calque) : devant un meuble, le corps
+        /// entier, réglé dans l'atelier contre le vrai meuble (atelier_stand.py) — à la fenêtre, devant la bibliothèque.
+        /// </summary>
+        public static readonly (string pose, string clip)[] StandClips =
+        {
+            ("sill", "window_lean"), ("browse", "shelf_browse"),
+        };
+
+        /// <summary>
+        /// Les courbes des gestes de l'atelier, devenues paramètres de l'Animator (préfixe « Geste ») : ce que le geste fait
+        /// bouger, image par image. La chaise : pivot et roulement faits (0 → 1) ; les mains posées sur le bureau ; l'objet
+        /// dans la main (0 posé, 0,5 tenu tel qu'il a été pris, 1 tenu en main pour écrire).
+        /// </summary>
+        public static readonly int ChairYaw = Animator.StringToHash("GesteChairYaw");
+        public static readonly int ChairRoll = Animator.StringToHash("GesteChairRoll");
+        public static readonly int HandsOnDesk = Animator.StringToHash("GesteHandsOnDesk");
+        public static readonly int Hold = Animator.StringToHash("GesteHold");
+        public static readonly string[] GestureCurves = { "GesteChairYaw", "GesteChairRoll", "GesteHandsOnDesk", "GesteHold" };
 
         public static int PoseId(string name)
         {

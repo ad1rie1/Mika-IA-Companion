@@ -764,6 +764,10 @@ namespace Mika.Editor.Animation
                          ("Covered", AnimatorControllerParameterType.Bool), ("Symetrie", AnimatorControllerParameterType.Float),
                      })
                 ac.AddParameter(name, type);
+            // Les courbes des gestes de l'atelier (AtelierImporter : « Geste… ») : un paramètre du même nom que la courbe la
+            // reçoit à chaque image du clip qui la porte (la chaise que le geste déplace, l'objet dans la main).
+            foreach (var name in BodyAnim.GestureCurves)
+                ac.AddParameter(name, AnimatorControllerParameterType.Float);
             var ps = ac.parameters;
             foreach (var p in ps)
                 if (p.name == "Tempo" || p.name == "WalkPlayback") p.defaultFloat = 1f;
@@ -863,28 +867,32 @@ namespace Mika.Editor.Animation
             var osm = AddLayer(ac, BodyAnim.PoseLayer, null, AnimatorLayerBlendingMode.Override, ikPass: true);
             var free = osm.AddState("Rien", new Vector3(300, 0));
             osm.defaultState = free;
-            var toFree = osm.AddAnyStateTransition(free);
-            toFree.hasExitTime = false;
-            toFree.duration = 0.45f;
-            toFree.canTransitionToSelf = false;
-            toFree.AddCondition(AnimatorConditionMode.NotEqual, 1, "Posture");
             var row = 0;
             var desked = new HashSet<int>();
-            foreach (var (pose, clipName) in BodyAnim.DeskClips)
-            {
-                if (!clips.TryGetValue(clipName, out var deskClip)) continue;
-                var id = BodyAnim.PoseId(pose);
-                desked.Add(id);
-                var st = osm.AddState(pose, new Vector3(650, 50 * row++));
-                st.motion = deskClip;
-                var enter = osm.AddAnyStateTransition(st);
-                enter.hasExitTime = false;
-                // Pivoter : le geste suit la chaise dès qu'elle part ; le reste se fond en douceur.
-                enter.duration = pose.StartsWith("turn_") ? 0.15f : 0.45f;
-                enter.canTransitionToSelf = false;
-                enter.AddCondition(AnimatorConditionMode.Equals, id, "Pose");
-                enter.AddCondition(AnimatorConditionMode.Equals, 1, "Posture");
-            }
+            // Assise : les clips du bureau ; debout : ceux de la fenêtre et de la bibliothèque. Chaque état quitte la
+            // couche quand la posture change (elle se lève, s'assoit, s'allonge).
+            foreach (var (clipsOf, posture) in new[] { (BodyAnim.DeskClips, 1), (BodyAnim.StandClips, 0) })
+                foreach (var (pose, clipName) in clipsOf)
+                {
+                    if (!clips.TryGetValue(clipName, out var poseClip)) continue;
+                    var id = BodyAnim.PoseId(pose);
+                    desked.Add(id);
+                    var st = osm.AddState(pose, new Vector3(650, 50 * row++));
+                    st.motion = poseClip;
+                    var enter = osm.AddAnyStateTransition(st);
+                    enter.hasExitTime = false;
+                    // Un geste qui déplace quelque chose (pivoter, rouler la chaise, prendre le stylo) part tout de suite : sa
+                    // courbe commence au repos ; le reste se fond en douceur.
+                    enter.duration = pose.StartsWith("turn_") || pose == "pull_in" || pose == "push_out" ? 0.25f
+                        : pose.StartsWith("write_") ? 0.3f : 0.45f;
+                    enter.canTransitionToSelf = false;
+                    enter.AddCondition(AnimatorConditionMode.Equals, id, "Pose");
+                    enter.AddCondition(AnimatorConditionMode.Equals, posture, "Posture");
+                    var leave = st.AddTransition(free);
+                    leave.hasExitTime = false;
+                    leave.duration = 0.45f;
+                    leave.AddCondition(AnimatorConditionMode.NotEqual, posture, "Posture");
+                }
             for (var id = 0; id < BodyAnim.Poses.Length; id++)
             {
                 if (desked.Contains(id)) continue;

@@ -8,24 +8,31 @@ namespace Mika.World.Engine
     /// si bien que la personne assise tourne et roule avec elle. Le noyau ne voit rien de tout cela : la chaise
     /// reste à sa place, seul son modèle bouge.
     /// </summary>
+    /// <remarks>
+    /// La chaise ne bouge jamais d'elle-même : elle est menée, image par image, par le geste qui la déplace — les mains
+    /// sur le bord du bureau qui la tirent ou la repoussent, les pieds qui poussent le sol pour la faire pivoter
+    /// (<see cref="BodyActivity"/>, courbes du geste « ChairYaw », « ChairRoll »). Lissée vers une cible, elle roulait et
+    /// pivotait seule pendant que le corps ne faisait rien.
+    /// </remarks>
     [DisallowMultipleComponent]
     [AddComponentMenu("Mika/Monde/Chaise pivotante")]
     public sealed class ChairRig : MonoBehaviour
     {
         [Tooltip("Ce qui tourne et roule (le modèle de la chaise).")]
         public Transform model;
-        [Tooltip("Vitesse de rotation (°/s) et de roulement (m/s).")]
-        public float swivelSpeed = 70f, rollSpeed = 0.35f;
         [Tooltip("Débattement maximal (°) de part et d'autre de la position d'origine.")]
         public float maxSwivel = 150f;
+        [Tooltip("Roulement maximal (m), en avant (vers le bureau) comme en arrière.")]
+        public float maxRoll = 0.4f;
 
         Vector3 _homePos, _rollAxis = Vector3.forward;
         Quaternion _homeRot;
-        float _yaw, _yawTarget, _roll, _rollTarget;
-        float _yawVel, _rollVel;
+        float _yaw, _roll;
         bool _ready;
 
+        /// <summary>Le pivot actuel (°, positif : vers la droite de qui est assis).</summary>
         public float Yaw => _yaw;
+        /// <summary>Le roulement actuel (m, positif : vers le bureau).</summary>
         public float Roll => _roll;
 
         void Awake() => Init();
@@ -55,11 +62,19 @@ namespace Mika.World.Engine
             }
         }
 
-        /// <summary>Pivote de <paramref name="degrees"/> par rapport à la position d'origine (positif : vers sa droite).</summary>
-        public void SwivelTo(float degrees) => _yawTarget = Mathf.Clamp(degrees, -maxSwivel, maxSwivel);
-
-        /// <summary>Avance (positif, vers le bureau) ou recule le long de l'assise d'origine, en mètres.</summary>
-        public void RollTo(float meters) => _rollTarget = Mathf.Clamp(meters, -0.4f, 0.4f);
+        /// <summary>
+        /// Place la chaise : pivotée de <paramref name="yaw"/>° (positif : vers sa droite) et roulée de
+        /// <paramref name="roll"/> m. Appelé à chaque image par le geste qui la déplace, ou une fois pour un instantané.
+        /// </summary>
+        public void Set(float yaw, float roll)
+        {
+            Init();
+            _yaw = Mathf.Clamp(yaw, -maxSwivel, maxSwivel);
+            _roll = Mathf.Clamp(roll, -maxRoll, maxRoll);
+            // Le roulement suit le sens d'origine de l'assise (vers le bureau), pas le pivot.
+            model.localRotation = Quaternion.AngleAxis(_yaw, Vector3.up) * _homeRot;
+            model.localPosition = _homePos + _rollAxis * _roll;
+        }
 
         /// <summary>Le pivot qui amène le dos de la chaise face à un point (l'assise regarde vers lui).</summary>
         public float YawToward(Vector3 point, Quaternion seatHome)
@@ -69,17 +84,6 @@ namespace Mika.World.Engine
             fwd.y = 0;
             to.y = 0;
             return to.sqrMagnitude < 1e-4f ? 0f : Vector3.SignedAngle(fwd, to, Vector3.up);
-        }
-
-        void Update()
-        {
-            Init();
-            _yaw = Mathf.SmoothDamp(_yaw, _yawTarget, ref _yawVel, 0.45f, swivelSpeed);
-            _roll = Mathf.SmoothDamp(_roll, _rollTarget, ref _rollVel, 0.35f, rollSpeed);
-            var rot = Quaternion.AngleAxis(_yaw, Vector3.up) * _homeRot;
-            // Le roulement suit le sens d'origine de l'assise (vers le bureau), pas le pivot.
-            model.localRotation = rot;
-            model.localPosition = _homePos + _rollAxis * _roll;
         }
     }
 }

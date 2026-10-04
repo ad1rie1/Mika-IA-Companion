@@ -232,14 +232,29 @@ class Rig:
 class Motion:
     """Un mouvement de Mika : une image = position monde des hanches + changement d'orientation (monde) de chaque os."""
 
-    def __init__(self, rig, name, frames, loop=False, travel=False, fps=30):
+    def __init__(self, rig, name, frames, loop=False, travel=False, fps=30, curves=None):
         self.rig, self.name, self.frames = rig, name, frames
         self.loop, self.travel, self.fps = loop, travel, fps
+        # Des courbes du geste, une valeur par image, qu'Unity reçoit en paramètres de l'Animator : la chaise que le
+        # geste fait pivoter et rouler (« ChairYaw », « ChairRoll », 0 → 1), les mains posées sur le bureau (« HandsOnDesk »),
+        # l'objet dans la main (« Hold »). Le jeu y synchronise ce que le geste déplace : rien ne bouge tout seul.
+        self.curves = curves or {}
 
     def copy_frames(self):
         return [{"hips": f["hips"].copy(), "d": {h: q.copy() for h, q in f["d"].items()}} for f in self.frames]
 
     # --- vers Blender (aperçu, rendus) et vers Unity ---------------------------------------------------------------
+    def explicit(self):
+        """
+        Chaque os humanoïde porte son orientation monde à chaque image (comme après un export puis une relecture) : un
+        os absent de l'image héritait de son parent, et une IK posée ensuite (two_bone) ne déplaçait pas ce qu'il porte.
+        """
+        humans = [h for h in self.rig.hmap]
+        for i, frame in enumerate(self.frames):
+            pose = self.rig.fk(frame)
+            d = {h: rot(pose[self.rig.hmap[h]]) @ self.rig.rest[h].inverted() for h in humans}
+            self.frames[i] = {"hips": pose[self.rig.hmap["hips"]].translation.copy(), "d": d}
+
     def to_action(self):
         """L'action de l'armature de Mika pour ce mouvement (clés sur les os humanoïdes), images 0..N-1."""
         rig, arm = self.rig, self.rig.arm
@@ -302,6 +317,8 @@ class Motion:
         MOTIONS.mkdir(parents=True, exist_ok=True)
         data = {"name": self.name, "fps": self.fps, "loop": self.loop, "travel": self.travel, "note": note,
                 "bones": human, "rest": rest, "frames": rows}
+        if self.curves:
+            data["curves"] = {k: [round(float(v), 4) for v in vs] for k, vs in self.curves.items()}
         path = MOTIONS / f"{self.name}.json.gz"
         with gzip.open(path, "wt", encoding="utf-8") as f:
             json.dump(data, f, separators=(",", ":"))
@@ -418,12 +435,13 @@ def intervals(flags, loop):
     return spans
 
 
-def two_bone(frame, rig, side, target):
+def two_bone(frame, rig, side, target, limb="leg"):
     """
-    Amène la cheville de ce côté sur `target` (monde) en tournant cuisse et tibia ; le pied garde son orientation monde.
-    Le genou reste dans le plan où il plie.
+    Amène la cheville (ou le poignet, `limb="arm"`) de ce côté sur `target` (monde) en tournant les deux segments ; le
+    pied (la main) garde son orientation monde. Le genou (le coude) reste dans le plan où il plie.
     """
-    up, lo, ft = (f"{side}UpperLeg", f"{side}LowerLeg", f"{side}Foot")
+    up, lo, ft = (f"{side}UpperLeg", f"{side}LowerLeg", f"{side}Foot") if limb == "leg" else \
+        (f"{side}UpperArm", f"{side}LowerArm", f"{side}Hand")
     j = rig.joints(frame, (up, lo, ft))
     a, b, c = j[up], j[lo], j[ft]
     lab, lcb = (b - a).length, (c - b).length

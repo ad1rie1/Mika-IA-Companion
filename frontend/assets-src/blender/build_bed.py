@@ -105,7 +105,10 @@ def build(M):
     # pillows (head end = +Z)
     pillow("Bed_Pillow", 0.72, 0.44, 0.17, BX + 0.03, MATTRESS_TOP + 0.075, BZ + 0.83, M["pillow"], rx=-0.22, ry=0.04, seed=1)
     pillow("Bed_Cushion", 0.4, 0.4, 0.13, BX + 0.24, MATTRESS_TOP + 0.2, BZ + 0.95, M["pillow_pink"], rx=-1.05, ry=-0.25, rz=0.08, seed=2)
-    plushie(M, BX - 0.22, MATTRESS_TOP - 0.004, BZ + 0.62, ry=0.5)
+    # La peluche assise dans le coin côté mur, contre la tête de lit, à gauche de l'oreiller : allongée, sa tête
+    # (devant l'oreiller, au milieu du lit) en reste à une cinquantaine de centimètres. Devant l'oreiller, elle était
+    # là où se pose sa tête, et rien ne doit l'écarter sans un geste.
+    plushie(M, BX - 0.44, MATTRESS_TOP - 0.004, BZ + 0.95, ry=math.pi - 0.35)
 
     # ------------------------------------------------------------ bedside table
     tx, tz = -3.6, 2.75

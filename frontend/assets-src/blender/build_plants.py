@@ -167,7 +167,7 @@ def build(M):
     join(parts + vines, "Plant_Pothos")
 
     # ------------------------------------------------------------ window sill succulents
-    sill_y = 1.204
+    sill_y = 0.924              # le dessus de l'appui (build_shell.WIN y0 + 4 mm)
     sp = []
     sp.append(lathe("Plant_SillPot1", [(0, 0), (0.035, 0), (0.042, 0.07), (0.038, 0.07), (0, 0.062)], 20,
                     -3.98, sill_y, -1.72, M["terracotta"], sharp=60))

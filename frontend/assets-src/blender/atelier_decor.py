@@ -31,6 +31,13 @@ WRITE_MUG_SPOT = (-0.28, 0.46)
 PEN_SPOT = (-0.20, 0.42)
 NOTEBOOK_LEFT = 0.17
 MAX_ROLL = 0.38
+# Écrire : la chaise pivote de 45° vers sa gauche depuis la position de frappe (un pas des pieds, chair_turn_left_45) ;
+# le carnet est posé droit devant elle à cette position (atelier_desk_plan.py, build_desk.py).
+WRITE_TURN = -45.0
+# Tirer ou repousser la chaise : les mains sur le bord du bureau, de part et d'autre (dans l'axe de ses épaules quand
+# la chaise présente le clavier), à cette distance du bord sur le plateau.
+GRIP_LATERAL = 0.17
+GRIP_INSIDE = 0.04
 # Ce que le décor contient : le bureau, la chaise, et ce qui est posé dessus ou autour.
 DESK_OBJECTS = ("writing_desk", "desk_chair", "desk_mat", "keyboard", "mouse", "monitor", "mug", "notebook", "pen",
                 "pen_cup", "book_desk_1", "book_desk_2", "succulent_desk", "desk_lamp", "waste_bin")
@@ -205,6 +212,111 @@ class Layout:
         ahead = (math.sin(math.radians(yaw)), math.cos(math.radians(yaw)))
         return self.onto_desk(self.work_point(yaw, roll, spot), ahead, margin)
 
+    # --- les positions de la chaise que les gestes relient ----------------------------------------------------------
+    def chair_pose(self, name):
+        """
+        (pivot °, roulement m) d'une position nommée de la chaise : « home » (là où elle s'assoit et se lève, la chaise
+        à sa place), « type » (le clavier présenté), « write » (pivotée de 45° vers sa gauche depuis « type » : le
+        carnet droit devant elle), « type+45 », « type-90 »… (tournée vers quelqu'un, d'un pas des pieds).
+        """
+        if name == "home":
+            return 0.0, 0.0
+        ty, tr = self.typing()
+        if name == "type":
+            return ty, tr
+        if name == "write":
+            return ty + WRITE_TURN, tr
+        for base in ("type", "write", "home"):
+            if name.startswith(base) and len(name) > len(base):
+                y, r = self.chair_pose(base)
+                return y + float(name[len(base):]), r
+        raise KeyError(name)
+
+    def desk_edge(self):
+        """Le bord avant du plateau (repère du siège, chaise d'origine) : deux points (x, z) et la normale vers le fond."""
+        (dx, _, dz), dyaw = self.home["writing_desk"]
+        x0, x1, z0, z1 = self.desk_box()
+        a = math.radians(dyaw)
+
+        def seat(lx, lz):
+            return Vector((lx * math.cos(a) + lz * math.sin(a) + dx, -lx * math.sin(a) + lz * math.cos(a) + dz))
+        # Le bord le plus proche du siège.
+        edges = [(seat(x0, z1), seat(x1, z1)), (seat(x0, z0), seat(x1, z0))]
+        e0, e1 = min(edges, key=lambda e: ((e[0] + e[1]) / 2).length)
+        t = (e1 - e0).normalized()
+        n = Vector((-t.y, t.x))
+        centre = seat((x0 + x1) / 2, (z0 + z1) / 2)
+        if (centre - e0).dot(n) < 0:
+            n = -n
+        return e0, e1, n
+
+    def grips(self):
+        """
+        Où ses mains se posent sur le bord du bureau pour tirer ou repousser la chaise (repère du siège, (x, z)) : de
+        part et d'autre, dans l'axe de ses épaules quand la chaise présente le clavier, à GRIP_INSIDE du bord.
+        """
+        e0, e1, n = self.desk_edge()
+        ty, tr = self.typing()
+        a = math.radians(ty)
+        wf, wr = Vector((math.sin(a), math.cos(a))), Vector((math.cos(a), -math.sin(a)))
+        origin = Vector((0.0, tr))
+        out = []
+        for lx in (-GRIP_LATERAL, GRIP_LATERAL):
+            p0 = origin + wr * lx
+            # p0 + wf·s sur la droite du bord : (p0 + wf s − e0) · n = 0
+            s = (e0 - p0).dot(n) / wf.dot(n)
+            out.append(p0 + wf * s + n * GRIP_INSIDE)
+        return out
+
+
+# --- passer du repère du siège à celui du clip ------------------------------------------------------------------------
+def to_clip(p, chair):
+    """Un point du repère du siège (Unity, chaise d'origine) vu d'elle, la chaise en `chair` (pivot °, roulement m)."""
+    q, _ = seen_from_her(p, 0.0, chair[0], chair[1])
+    return unity_to_atelier(q)
+
+
+def to_seat(v, chair):
+    """L'inverse : un point du clip (Blender), la chaise en `chair`, dans le repère du siège (Unity)."""
+    x, y, z = -v.x, v.z + FLOOR_DROP, -v.y
+    a = math.radians(-chair[0])
+    return (x * math.cos(a) - z * math.sin(a), y, x * math.sin(a) + z * math.cos(a) + chair[1])
+
+
+def features(layout, chair):
+    """
+    Ce que les gestes prennent sur le bureau, mesuré sur les vrais modèles posés (repère du clip, la chaise en
+    `chair`) : la tasse (centre du fond, hauteur, direction de l'anse), le stylo (centre, axe), le carnet (centre du
+    dessus, son grand axe), le haut du plateau.
+    """
+    Scene(layout, chair).apply(0)
+
+    def pts(oid):
+        return [o.matrix_world @ v.co for o in meshes(load(oid)) for v in o.data.vertices]
+    out = {}
+    m = pts("mug")
+    zmin = min(p.z for p in m)
+    base = [p for p in m if p.z < zmin + 0.004]
+    c = sum(base, Vector()) / len(base)
+    far = max(m, key=lambda p: (p.xy - c.xy).length)
+    h = (far.xy - c.xy).normalized()
+    # L'anse : un demi-anneau dans le plan vertical (fond → haut), à 4,4 + 2,6 cm de l'axe, centré 5,2 cm au-dessus du fond ;
+    # son trou (où passent l'index et le majeur) à mi-chemin.
+    out["mug"] = dict(base=Vector((c.x, c.y, zmin)), handle=Vector((h.x, h.y, 0.0)),
+                      hole=Vector((c.x, c.y, zmin + 0.052)) + Vector((h.x, h.y, 0.0)) * 0.057,
+                      height=max(p.z for p in m) - zmin)
+    p = pts("pen")
+    pc = sum(p, Vector()) / len(p)
+    far = max(p, key=lambda q: (q - pc).length)
+    out["pen"] = dict(center=pc, axis=(far - pc).normalized(), half=(far - pc).length)
+    nb = pts("notebook")
+    top = max(q.z for q in nb)
+    nc = sum(nb, Vector()) / len(nb)
+    far = max(nb, key=lambda q: (q.xy - nc.xy).length)
+    out["notebook"] = dict(center=Vector((nc.x, nc.y, top)), top=top)
+    out["desk_top"] = max(q.z for o in meshes(load("writing_desk")) for q in [o.matrix_world @ Vector(b) for b in o.bound_box])
+    return out
+
 
 # --- une scène : où est la chaise, où sont les objets ---------------------------------------------------------------
 class Scene:
@@ -213,12 +325,15 @@ class Scene:
     tasse, stylo, carnet : là où BodyActivity les glisse) et les objets tenus (une matrice atelier par image).
     """
 
-    def __init__(self, layout, chair, moved=None, held=None, hidden=(), objects=DESK_OBJECTS):
+    def __init__(self, layout, chair, moved=None, held=None, hidden=(), objects=DESK_OBJECTS, moves=None):
         self.layout = layout
         self.objects = objects
         self.chair = chair            # (yaw, roll) ou fonction image → (yaw, roll)
         self.moved = moved or {}      # id → ((x, y, z), yaw), repère du siège (chaise d'origine)
         self.held = held or {}        # id → [matrice atelier ou None, …] (None : à sa place)
+        # id → [déplacement rigide depuis sa place, matrice du clip, …] : un objet que la main a pris et porte
+        # (atelier_desk_gestures) ; l'identité quand il est posé.
+        self.moves = moves or {}
         self.hidden = set(hidden)
 
     def chair_at(self, f):
@@ -235,7 +350,11 @@ class Scene:
         pos, yaw = self.moved.get(oid, self.layout.home[oid])
         cy, cr = self.chair_at(f)
         p, y = seen_from_her(pos, yaw, cy, cr)
-        return matrix(p, y)
+        rest = matrix(p, y)
+        moves = self.moves.get(oid)
+        if moves is not None and f < len(moves) and moves[f] is not None:
+            return moves[f] @ rest
+        return rest
 
     def apply(self, f):
         for oid in self.objects:
@@ -322,18 +441,42 @@ class Contacts:
             ev.to_mesh_clear()
         return BVHTree.FromPolygons(verts, polys)
 
+    # Les objets posés sur un plan (un clavier : des touches sur une plaque, des volumes imbriqués) : « dedans », c'est
+    # sous leur dessus, mesuré par un rayon vers le bas. Le côté de la face la plus proche se trompe sur eux : un doigt
+    # pris dans la plaque avait pour face la plus proche le dessous d'une touche, tourné vers le bas — « dehors ».
+    HEIGHTFIELD = {"keyboard", "desk_mat", "notebook", "pen", "book_desk_1", "book_desk_2"}
+    # Les récipients ouverts (une tasse) : la face la plus proche d'un point dehors peut être la paroi intérieure, tournée
+    # vers l'axe — « dedans » à tort (une poitrine à 6 cm d'une tasse levée y entrait de 7 cm). On les mesure comme un
+    # cylindre plein : rayon et hauteur du corps, l'axe du modèle (son haut).
+    CYLINDERS = {"mug": (0.046, 0.098)}
+
     def check(self, motion, scene, targets, frames, tolerance=0.006):
         """{(partie, objet): (profondeur cm, image, os)} pour les images demandées, sur les objets `targets`."""
         import numpy as np
 
         out = {}
-        static = not callable(scene.chair) and not scene.held
+        static = not callable(scene.chair) and not scene.held and not scene.moves
         trees = {}
+        boxes = {}
         for f in frames:
             motion.pose(f)
             scene.apply(f)
             if not static or not trees:
                 trees = {oid: self.tree(meshes(load(oid))) for oid in targets}
+                cyl_frames = {}
+                for oid in targets:
+                    if oid in self.CYLINDERS:
+                        root = load(oid)
+                        pts = [o.matrix_world @ v.co for o in meshes(root) for v in o.data.vertices]
+                        axis = (root.matrix_world.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized()
+                        low = min(q.dot(axis) for q in pts)
+                        bottom = [q for q in pts if q.dot(axis) < low + 0.004]
+                        cyl_frames[oid] = (sum(bottom, Vector()) / len(bottom), axis)
+                for oid in targets:
+                    if oid in self.HEIGHTFIELD:
+                        pts = [o.matrix_world @ Vector(c) for o in meshes(load(oid)) for c in o.bound_box]
+                        boxes[oid] = (min(q.x for q in pts), max(q.x for q in pts), min(q.y for q in pts),
+                                      max(q.y for q in pts), min(q.z for q in pts), max(q.z for q in pts))
             deps = bpy.context.evaluated_depsgraph_get()
             for obj, own in zip(self.objs, self.owner):
                 ev = obj.evaluated_get(deps)
@@ -349,9 +492,29 @@ class Contacts:
                         continue
                     p = Vector(co[i])
                     for oid, tree in trees.items():
-                        loc, nor, _, dist = tree.find_nearest(p, 0.08)
-                        if loc is None or (p - loc).dot(nor) >= -tolerance:
-                            continue
+                        if oid in self.CYLINDERS:
+                            r, hgt = self.CYLINDERS[oid]
+                            base, axis = cyl_frames[oid]
+                            v = p - base
+                            along = v.dot(axis)
+                            if not (0.0 <= along <= hgt):
+                                continue
+                            radial = (v - axis * along).length
+                            if radial >= r - tolerance:
+                                continue
+                            dist = r - radial
+                        elif oid in boxes:
+                            x0, x1, y0, y1, z0, z1 = boxes[oid]
+                            if not (x0 <= p.x <= x1 and y0 <= p.y <= y1 and z0 - 0.005 <= p.z <= z1):
+                                continue
+                            loc, _, _, _ = tree.ray_cast(Vector((p.x, p.y, z1 + 0.05)), Vector((0.0, 0.0, -1.0)), 0.3)
+                            if loc is None or p.z >= loc.z - tolerance:
+                                continue
+                            dist = loc.z - p.z
+                        else:
+                            loc, nor, _, dist = tree.find_nearest(p, 0.08)
+                            if loc is None or (p - loc).dot(nor) >= -tolerance:
+                                continue
                         key = (part, oid)
                         if key not in out or dist * 100 > out[key][0]:
                             out[key] = (round(dist * 100, 1), f, own[i], tuple(round(v, 3) for v in p))

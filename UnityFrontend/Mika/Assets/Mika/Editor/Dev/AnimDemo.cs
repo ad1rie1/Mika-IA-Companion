@@ -243,7 +243,7 @@ namespace Mika.Editor.Dev
             yield return b.WalkTo(desk.Position, desk.Rotation, Vector3.Distance(center.Position, desk.Position) / 0.85f);
 
             // 2. S'asseoir au bureau
-            Say("S'asseoir : elle recule la chaise, fait un pas devant, s'assoit (capture), puis roule au bureau");
+            Say("S'asseoir : un pas devant la chaise, laissée à sa place, et elle s'assoit (capture)");
             Shot(new Vector3(2.75f, 1.05f, -2.95f), new Vector3(1.3f, 0.65f, -3.35f));
             yield return b.ChangePosture(Posture.Sit, desk, 1f);
             Say("Assise : la chaise réglée pour elle, les talons un peu levés, les pieds entre les branches du piètement");
@@ -251,10 +251,12 @@ namespace Mika.Editor.Dev
             yield return Wait(4f);
 
             // 3. Le travail : clavier et souris (la chaise pivote et roule pour lui présenter le clavier)
-            Say("Travailler : la chaise pivote et avance vers le clavier ; elle tape par rafales");
+            Say("Travailler : ses pieds font rouler la chaise, puis ses mains sur le bord du bureau l'amènent au clavier");
             act.Set("work", null);
             SeatShot(b, new Vector3(0.95f, 1.15f, 0.9f), new Vector3(0.05f, 0.75f, 0.35f), cut: true);
-            yield return Wait(5f);
+            yield return Wait(4.5f);
+            Say("Elle tape par rafales");
+            yield return Wait(4f);
             Say("… et passe de temps en temps à la souris (main droite)");
             SeatShot(b, new Vector3(0.75f, 1.3f, 0.75f), new Vector3(0.15f, 0.75f, 0.4f));
             yield return Wait(9f);
@@ -267,36 +269,36 @@ namespace Mika.Editor.Dev
             yield return Wait(2.5f);
             act.PlayDeskGesture("think");
             yield return Wait(5f);
-            Say("Boire une gorgée — de la main gauche : la tasse attend à gauche du clavier");
+            Say("Boire une gorgée : la tasse prise par l'anse, de la main gauche, et reposée à sa place");
             act.PlayDeskGesture("drink");
-            yield return Wait(5.3f);
-            Say("Prendre son stylo, le regarder, le reposer");
+            yield return Wait(6f);
+            Say("Prendre son stylo sur le carnet, le regarder, le reposer où il était");
             act.PlayDeskGesture("take");
-            yield return Wait(5.3f);
+            yield return Wait(6f);
             Say("S'étirer sur sa chaise");
             SeatShot(b, new Vector3(1.05f, 1.35f, 1.15f), new Vector3(0f, 1.05f, 0.1f));
             act.PlayDeskGesture("stretch");
             yield return Wait(5f);
 
             // 5. On lui parle
-            Say("On lui parle : elle lève les pieds et fait pivoter sa chaise vers toi");
+            Say("On lui parle : ses pieds poussent le sol et font pivoter sa chaise vers toi");
             Shot(new Vector3(0.55f, 1.4f, -1.85f), new Vector3(1.3f, 0.8f, -3.3f), cut: true);
             yield return Wait(1.2f);
             act.Engage(9f);
             yield return Wait(10f);
             Say("La conversation finie, elle se retourne vers son bureau");
-            yield return Wait(3f);
+            yield return Wait(6f);
 
             // 6. Écrire
-            Say("Écrire : elle tire son carnet, tourne la chaise vers lui, prend son stylo");
+            Say("Écrire : elle fait pivoter sa chaise vers le carnet, prend le stylo posé dessus");
             act.Set("draw", null);
             // Par-dessus son épaule droite : de face à gauche, le bras de la lampe passait au premier plan ; de face à
             // droite, la chaise tournée vers le carnet, l'écran bouchait tout.
             SeatShot(b, new Vector3(0.55f, 1.55f, -0.25f), new Vector3(0f, 0.75f, 0.4f), cut: true);
-            yield return Wait(9f);
+            yield return Wait(13f);
             act.Set(null, null);
-            Say("Elle repose le stylo et range le carnet");
-            yield return Wait(3f);
+            Say("En fin de ligne, elle repose le stylo sur le carnet et se tourne vers le clavier");
+            yield return Wait(10f);
 
             // 6 bis. Lire
             WorldObject book = null;
@@ -319,7 +321,7 @@ namespace Mika.Editor.Dev
             }
 
             // 7. Le lit
-            Say("Se lever : la chaise recule avec elle, elle se redresse et s'écarte");
+            Say("Se lever : elle repousse la chaise des mains et des pieds, se redresse et s'écarte");
             Shot(new Vector3(2.75f, 1.05f, -2.95f), new Vector3(1.2f, 0.7f, -3.3f));
             yield return b.ChangePosture(Posture.Stand, desk, 1f);
             Follow(b, desk.Position, bed.Position, 1.8f, 0.6f, 0.25f);

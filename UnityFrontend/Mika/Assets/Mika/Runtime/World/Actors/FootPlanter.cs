@@ -3,11 +3,11 @@ using UnityEngine;
 namespace Mika.World.Engine
 {
     /// <summary>
-    /// Les pieds tiennent au sol. Le clip joue la jambe, mais rien ne garantit que le pied d'appui reste où il s'est
-    /// posé : la cadence de la marche ne colle jamais exactement à la vitesse du corps (au démarrage, à l'arrêt, dans
-    /// un virage), et un corps qui pivote sur place emporte ses pieds avec lui. Un pied posé est donc épinglé (IK) là
-    /// où il a touché le sol, jusqu'à ce que le clip le lève. Debout, quand le corps s'en est trop éloigné (il a
-    /// tourné, l'attente a changé d'appui), le pied fait un vrai petit pas — levé, porté, reposé —, un pied à la fois.
+    /// Les pieds tiennent au sol. Debout, le clip joue la jambe, mais un corps qui pivote sur place emporte ses pieds
+    /// avec lui, et un fondu entre deux attentes les fait glisser : un pied posé est donc épinglé (IK) là où il a
+    /// touché le sol, jusqu'à ce que le clip le lève ; quand le corps s'en est trop éloigné (il a tourné, l'attente a
+    /// changé d'appui), le pied fait un vrai petit pas — levé, porté, reposé —, un pied à la fois. En marchant, le clip
+    /// tient lui-même ses appuis (sa cadence suit la vitesse du corps) : le pied n'est que retenu au-dessus du sol.
     /// </summary>
     /// <remarks>
     /// La pose « du clip » est lue sur les os, après l'animation (<see cref="SampleBones"/>), et l'IK des jambes est
@@ -24,7 +24,6 @@ namespace Mika.World.Engine
             public bool Planted, Stepping;
             public Vector3 Lock;                 // où il s'est posé (la hauteur, elle, suit le clip : talon, pointe)
             public Vector3 LockBall;             // l'avant-pied posé : le point qui ne bouge pas quand le talon monte
-            public bool WalkAnchored;            // ancré comme en marchant (la cheville) plutôt que debout (l'avant-pied)
             public bool OnBall;                  // tient sur l'avant-pied (LockBall) plutôt que sur la cheville (Lock)
             public bool Following;               // suit le clip (voir Update) plutôt que de le verrouiller
             public Quaternion LockRot;
@@ -32,8 +31,6 @@ namespace Mika.World.Engine
             public Quaternion FromRot;
             public float StepT, Weight;
             public Vector3 Fk;                   // la pose du clip, lue avant que le bassin bouge
-            public Vector3 PrevFk;               // la même, à l'image précédente (bassin compris)
-            public bool HasPrev;
             public Quaternion FkRot;
             public Vector3 Target;
             public Quaternion TargetRot;
@@ -45,6 +42,8 @@ namespace Mika.World.Engine
 
         readonly Foot[] _feet = { new Foot { Goal = AvatarIKGoal.LeftFoot }, new Foot { Goal = AvatarIKGoal.RightFoot } };
         float _active;
+        float _walkGrace;
+        const float WalkGraceSeconds = 0.45f;
         // La semelle, dans le repère de la cible IK du pied (la cheville ; avant = la pointe, haut = le dessus du pied
         // posé à plat) : le talon derrière la cheville, l'avant-pied sous l'articulation des orteils. Le point le plus
         // bas des deux touche le sol — la cheville seule ne le dit pas dès que le pied s'incline : sur la pointe des
@@ -54,9 +53,8 @@ namespace Mika.World.Engine
 
         // Un pied touche le sol sous 1,8 cm (semelle au-dessus du sol), le quitte au-delà de 3 cm.
         const float ContactDown = 0.018f, ContactUp = 0.03f;
-        // En marchant, un pied posé que le clip emmène plus loin que ça le suit (il glisse un peu) plutôt que d'être
-        // lâché puis reposé plus loin : lâché à 14 cm et reposé aussitôt, la jambe sautait — elle tremblait.
-        const float WalkSlack = 0.05f;
+        // En marchant, la semelle du clip peut passer d'autant sous le sol avant d'être retenue (m).
+        const float WalkFloorSlack = 0.012f;
         // Debout : un pas dès que le pied est à 7 cm ou 22° de là où le clip le voudrait.
         const float StepDistance = 0.07f, StepAngle = 22f, StepSeconds = 0.3f, StepLift = 0.045f;
         // L'autre pied peut partir quand le premier a fait l'essentiel de son pas.
@@ -113,15 +111,22 @@ namespace Mika.World.Engine
             return sb.ToString();
         }
 
+        /// <summary>
+        /// Le corps est immobile (la fin d'un lever) : plus de délai de marche, les pieds sont tenus tout de suite là où
+        /// ils sont — le fondu vers l'attente les aurait sinon fait glisser vers sa propre position.
+        /// </summary>
+        public void Still() => _walkGrace = 0f;
+
         /// <summary>Oublie où étaient les pieds (une téléportation, une posture reprise).</summary>
         public void Reset()
         {
             foreach (var f in _feet)
             {
-                f.Planted = f.Stepping = f.HasPrev = f.OnBall = f.Following = false;
+                f.Planted = f.Stepping = f.OnBall = f.Following = false;
                 f.Weight = 0f;
             }
             _active = 0f;
+            _walkGrace = 0f;
         }
 
         /// <summary>
@@ -153,13 +158,16 @@ namespace Mika.World.Engine
         /// </param>
         public void Update(Animator a, bool active, float floorLeft, float floorRight, float lift, float speed, float dt, bool follow = false)
         {
-            var walking = speed > 0.1f;
+            // La marche continue de tenir les pieds le temps du fondu vers l'attente (0,3 s) : repris aussitôt, les
+            // pieds posés pendant que le clip les ramenait sous elle faisaient de petits pas (genou à 17° par image).
+            _walkGrace = speed > 0.1f ? WalkGraceSeconds : Mathf.Max(0f, _walkGrace - dt);
+            var walking = _walkGrace > 0f;
             _active = Mathf.MoveTowards(_active, active ? 1f : 0f, dt / 0.2f);
             if (!active)
             {
                 foreach (var f in _feet)
                 {
-                    f.Planted = f.Stepping = f.HasPrev = false;
+                    f.Planted = f.Stepping = false;
                     f.Raise = 0f;
                 }
                 return;
@@ -174,20 +182,29 @@ namespace Mika.World.Engine
                 // Aucune cible sous le sol : la cheville assez haut pour que la semelle, inclinée comme dans le clip,
                 // s'y pose au plus bas.
                 var minY = fk.y - sole;
-                // Se poser, se décoller : debout, d'après le point le plus bas de la semelle ; en marchant, d'après
-                // la cheville, comme un pas — le pied se libère quand le talon se lève, pas quand la pointe quitte le
-                // sol (sinon la cheville restait clouée pendant tout le déroulé du pied et la pointe reculait).
-                var height = walking ? fk.y - bottom - floorY : sole;
                 var floorHold = false;
                 f.Raise = 0f;
                 if (!(follow && !walking && f.Planted)) f.Following = false;
-                // En marchant, un pied ne se pose que s'il ne file plus : en fin de balancement la cheville passe au
-                // ras du sol alors que le pied avance encore — l'épingler là le figerait en arrière de son pas.
-                var footSpeed = f.HasPrev && dt > 0f ? Flat(fk - f.PrevFk).magnitude / dt : 0f;
-                f.PrevFk = fk;
-                f.HasPrev = true;
-                var settled = !walking || footSpeed < Mathf.Max(0.3f, 0.9f * speed);
-                if (f.Stepping)
+                if (walking)
+                {
+                    // En marchant, le clip tient ses appuis : sa cadence suit la vitesse du corps (WalkPlayback) et la
+                    // cheville y roule d'elle-même du talon à la pointe. L'épingler là où le talon touchait le sol, puis
+                    // la rendre au clip quand il décolle, faisait sauter la cuisse de 8 à 13° en une image à la fin de
+                    // chaque appui — le tremblement. Le pied posé debout est rendu au clip en douceur ; il n'est plus
+                    // que retenu au-dessus du sol.
+                    f.Stepping = false;
+                    f.Planted = false;
+                    f.OnBall = false;
+                    var clip = new Vector3(fk.x, Mathf.Max(fk.y, minY), fk.z);
+                    var k = f.Weight > 0f ? 1f - Mathf.Exp(-dt / 0.06f) : 1f;
+                    f.Target = Vector3.Lerp(f.Target, clip, k);
+                    f.TargetRot = Quaternion.Slerp(f.TargetRot, f.FkRot, k);
+                    if (f.Weight <= 0f) f.RotWeight = 0f;
+                    // Un talon qui attaque le sol l'effleure d'un ou deux millimètres sous le sol dans le clip : retenu
+                    // dès zéro, le genou sautait de 8° le temps d'une image. Seul un pied franchement dessous est retenu.
+                    floorHold = sole < -WalkFloorSlack;
+                }
+                else if (f.Stepping)
                 {
                     f.StepT += dt / StepSeconds;
                     var k = Mathf.SmoothStep(0f, 1f, f.StepT);
@@ -199,10 +216,9 @@ namespace Mika.World.Engine
                     {
                         f.Stepping = false;
                         Plant(f, fk, bottom);
-                        f.WalkAnchored = walking;
                     }
                 }
-                else if (f.Planted && follow && !walking)
+                else if (f.Planted && follow)
                 {
                     if (sole > ContactUp)
                     {
@@ -231,18 +247,15 @@ namespace Mika.World.Engine
                         f.RotWeight = 1f;
                         // Repris par le verrou (un fondu commence) : l'avant-pied sera ré-ancré là où est le pied.
                         f.OnBall = false;
-                        f.WalkAnchored = false;
                     }
                 }
                 else if (f.Planted)
                 {
-                    // Debout, on ne fige du pied que son cap (il ne vrille pas avec le corps qui tourne) ; en marchant,
-                    // il déroule comme le clip le dit.
-                    var rot = walking ? f.FkRot : KeepHeading(f.FkRot, f.LockRot);
+                    // On ne fige du pied que son cap (il ne vrille pas avec le corps qui tourne).
+                    var rot = KeepHeading(f.FkRot, f.LockRot);
                     // Un pied posé que le clip soulève est un talon qui monte : le pied pivote sur l'avant-pied, qui
-                    // reste au sol. Debout, sans ça, tout le pied montait et descendait d'un bloc avec le rebond de
-                    // l'attente joyeuse, comme une barre ; en marchant, ses jambes (plus courtes que celles de
-                    // l'acteur, semelles comprises) décollaient le pied à plat en fin d'appui et le bassin plongeait.
+                    // reste au sol. Sans ça, tout le pied montait et descendait d'un bloc avec le rebond de l'attente
+                    // joyeuse, comme une barre.
                     if (!HeelRaise(fk.y - floorY, rot, bottom, out var raise))
                     {
                         // Même talon levé, l'avant-pied ne touche plus : le clip lève vraiment le pied, il le reprend.
@@ -251,23 +264,9 @@ namespace Mika.World.Engine
                     }
                     else
                     {
-                        // Passer de la marche à l'arrêt (ou l'inverse) change le point d'ancrage : on le reprend
-                        // là où est le pied, sans à-coup.
-                        if (walking != f.WalkAnchored)
-                        {
-                            f.Lock = f.Target;
-                            f.LockBall = f.Target + f.TargetRot * new Vector3(0f, -bottom, _ballFront);
-                            f.WalkAnchored = walking;
-                        }
-                        // Sur quoi le pied tient : debout, toujours l'avant-pied ; en marchant, le talon (la cheville)
-                        // tant que le pied attaque et se pose, l'avant-pied dès qu'il se déroule (talon levé par le
-                        // clip ou par nous). Ancré par l'avant-pied encore en l'air à l'attaque, le talon glissait.
-                        var fwd = rot * Vector3.forward;
-                        var clipPitch = -Mathf.Asin(Mathf.Clamp(fwd.y, -1f, 1f)) * Mathf.Rad2Deg;
-                        var onBall = !walking || raise > 0.5f || clipPitch > 5f;
-                        if (onBall && !f.OnBall) f.LockBall = f.Target + f.TargetRot * new Vector3(0f, -bottom, _ballFront);
-                        if (!onBall && f.OnBall) f.Lock = f.Target;
-                        f.OnBall = onBall;
+                        // Debout, le pied tient sur l'avant-pied : le talon peut monter sans qu'il glisse.
+                        if (!f.OnBall) f.LockBall = f.Target + f.TargetRot * new Vector3(0f, -bottom, _ballFront);
+                        f.OnBall = true;
                         if (raise > 0f)
                         {
                             f.Raise = raise;
@@ -275,43 +274,21 @@ namespace Mika.World.Engine
                             rot = Quaternion.AngleAxis(raise, f.RaiseAxis) * rot;
                         }
                         var ball = rot * new Vector3(0f, -bottom, _ballFront);
-                        if (walking)
-                        {
-                            // Le clip emmène le pied plus loin que la tolérance : l'ancre suit (il glisse un peu).
-                            var anchor = onBall ? f.LockBall : f.Lock;
-                            var drift = Flat((onBall ? fk + ball : fk) - anchor);
-                            var away = drift.magnitude;
-                            if (away > WalkSlack)
-                            {
-                                if (onBall) f.LockBall += drift * ((away - WalkSlack) / away);
-                                else f.Lock += drift * ((away - WalkSlack) / away);
-                            }
-                        }
-                        Vector3 ankle;
-                        if (onBall)
-                        {
-                            // L'avant-pied reste où il s'est posé ; la cheville se place au-dessus, à la hauteur du clip.
-                            ankle = new Vector3(f.LockBall.x - ball.x, fk.y, f.LockBall.z - ball.z);
-                            var under = SoleY(ankle, rot, bottom) - floorY;
-                            if (under < 0f) ankle.y -= under;
-                        }
-                        else
-                        {
-                            ankle = new Vector3(f.Lock.x, Mathf.Max(fk.y, minY), f.Lock.z);
-                        }
+                        // L'avant-pied reste où il s'est posé ; la cheville se place au-dessus, à la hauteur du clip.
+                        var ankle = new Vector3(f.LockBall.x - ball.x, fk.y, f.LockBall.z - ball.z);
+                        var under = SoleY(ankle, rot, bottom) - floorY;
+                        if (under < 0f) ankle.y -= under;
                         f.Target = ankle;
                         f.TargetRot = rot;
-                        // Le pied orienté par nous dès que nous fixons son cap ou levons son talon ; sinon celui du clip.
-                        f.RotWeight = !walking || raise > 0f ? 1f : 0f;
+                        f.RotWeight = 1f;
                     }
                 }
-                else if (height < ContactDown && settled)
+                else if (sole < ContactDown)
                 {
                     Plant(f, fk, bottom);
-                    f.WalkAnchored = walking;
                     f.Target = new Vector3(fk.x, Mathf.Max(fk.y, minY), fk.z);
                     f.TargetRot = f.FkRot;
-                    f.RotWeight = walking ? 0f : 1f;
+                    f.RotWeight = 1f;
                 }
                 else if (sole < 0f)
                 {
@@ -337,7 +314,7 @@ namespace Mika.World.Engine
                 }
                 // La retenue au-dessus du sol vient et s'en va en quelques images : allumée d'un coup, elle faisait
                 // sauter le genou de la jambe presque tendue qui attaque le sol.
-                f.Floor = Mathf.MoveTowards(f.Floor, floorHold ? 1f : 0f, dt / 0.04f);
+                f.Floor = Mathf.MoveTowards(f.Floor, floorHold ? 1f : 0f, dt / (walking ? 0.1f : 0.04f));
             }
             if (!walking) MaybeStep(lift, follow ? FollowStep : StepDistance);
             foreach (var f in _feet)

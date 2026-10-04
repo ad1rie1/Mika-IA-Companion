@@ -1,0 +1,78 @@
+{
+  "note": "places des objets du bureau (repère du siège, Unity : x à droite, z devant ; lacet en degrés) et dans la pièce (three.js)",
+  "P_type": [
+    19.45,
+    0.2549
+  ],
+  "P_write": [
+    -25.55,
+    0.2549
+  ],
+  "notebook_in_write_frame": [
+    0.05,
+    0.42
+  ],
+  "objects": {
+    "notebook": {
+      "seat": [
+        -0.136,
+        0.76,
+        0.6554
+      ],
+      "yaw": -5.55,
+      "room": [
+        -1.7236,
+        -3.8859
+      ],
+      "room_ry": -2.7447
+    },
+    "pen": {
+      "seat": [
+        -0.0763,
+        0.7765,
+        0.6612
+      ],
+      "yaw": -5.55,
+      "room": [
+        -1.6683,
+        -3.9091
+      ],
+      "room_ry": -2.7447
+    },
+    "mouse": {
+      "seat": [
+        0.4394,
+        0.747,
+        0.4179
+      ],
+      "yaw": 13.45,
+      "room": [
+        -1.1038,
+        -3.8291
+      ],
+      "room_ry": -3.0763
+    },
+    "mug": {
+      "seat": [
+        -0.2973,
+        0.76,
+        0.6144
+      ],
+      "yaw": -2.794,
+      "room": [
+        -1.8655,
+        -3.7991
+      ],
+      "room_ry": -2.7928
+    }
+  },
+  "report": {
+    "proches": [
+      "mouse ↔ keyboard : 2.8 cm",
+      "mug ↔ notebook : 0.0 cm",
+      "notebook ↔ keyboard : 0.0 cm",
+      "notebook ↔ mug : 0.0 cm",
+      "pen ↔ keyboard : 0.3 cm"
+    ]
+  }
+}

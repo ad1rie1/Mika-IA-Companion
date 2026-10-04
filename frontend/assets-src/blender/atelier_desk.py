@@ -49,10 +49,7 @@ KEY_TOP = 0.775
 # maximum, elle est petite).
 MOUSE = dict(center=Vector((-0.36, -0.30, 0.747)), size=(0.06, 0.10, 0.04))
 MONITOR = dict(center=Vector((-0.067, -0.74, 1.186)), size=(0.66, 0.03, 0.39))
-# Le carnet à 40 cm devant elle (BodyActivity.WriteForward) : à 36, la chaise roulait si près que, penchée pour
-# écrire, sa poitrine touchait le bord du bureau.
-NOTEBOOK = dict(center=Vector((0.0, -0.40, 0.746)), size=(0.21, 0.30, 0.012))
-MUG = dict(center=Vector((-0.30, -0.33, 0.789)), size=(0.08, 0.08, 0.098))
+# Le carnet, le stylo et la tasse : pris sur la vraie pièce (atelier_desk_gestures.Geo, atelier_decor.features).
 BOOK = dict(size=(0.25, 0.19, 0.028))   # les livres du bureau (fermés : Unity les tient tels quels)
 
 
@@ -299,6 +296,13 @@ def desk_type(desk, t, period):
         palm = Vector((-sx * 0.35, 0.0, -1.0))
         arm_ik(desk, f, side, wrist, elbow, fingers_dir, palm)
         base = {"Index": (22.0, 32.0, 14.0), "Middle": (24.0, 34.0, 15.0), "Ring": (26.0, 34.0, 15.0), "Little": (28.0, 32.0, 14.0)}
+        # Le poignet monte d'autant qu'il faut pour que, doigts au repos, leur pulpe touche le dessus des touches (le
+        # poignet à 1,3 cm au-dessus du clavier enfonçait le bout des doigts de 2 cm dedans).
+        curl(desk, f, side, base, thumb=(18.0, 12.0, 8.0), spread=4.0)
+        low = min(p.z for p in fingertips(desk, f, side)) - FINGER_PAD - UNITY_FINGER_DROP
+        if low < KEY_TOP:
+            wrist = wrist + Vector((0.0, 0.0, KEY_TOP - low))
+            arm_ik(desk, f, side, wrist, elbow, fingers_dir, palm)
         # Les frappes : un doigt à la fois, pour un tempo de 6 à 8 touches/s à deux mains.
         taps = []
         for a, b in bursts:
@@ -308,8 +312,10 @@ def desk_type(desk, t, period):
                 x += rnd.uniform(0.18, 0.42)
         pose = {}
         for name, (p, i, d) in base.items():
+            # Une frappe : la pulpe ne descend que de la course d'une touche (quelques millimètres) — plus, le doigt
+            # entrait dans le clavier (ses touches ne s'enfoncent pas dans le jeu).
             press = sum(bump(t, x, 0.12) for x, fn in taps if fn == name)
-            pose[name] = (p + 14.0 * press, i + 6.0 * press, d)
+            pose[name] = (p + 5.0 * press, i + 2.5 * press, d)
         thumb_press = sum(bump(t, x, 0.14) for x, fn in taps if fn == "Index") * 0.3
         curl(desk, f, side, pose, thumb=(18.0, 12.0 + 10 * thumb_press, 8.0), spread=4.0)
     # Le regard : l'écran, des lignes qui se lisent, un coup d'œil aux touches au milieu de la boucle.
@@ -320,24 +326,33 @@ def desk_type(desk, t, period):
     return f
 
 
+FINGER_PAD = 0.007      # du bout de l'os de la dernière phalange à la pulpe qui touche
+# Dans Unity, un doigt n'a qu'un muscle de flexion par phalange : une part de la courbure du clip se perd au passage en
+# muscles et le bout des doigts arrive plus bas que dans l'atelier (mesuré sur desk_type, avatar nu : 7 mm, et le siège
+# du jeu 3 mm plus bas). Une pulpe posée sur une surface l'est donc d'autant plus haut ici.
+UNITY_FINGER_DROP = 0.008
+
+
+def fingertips(desk, frame, side):
+    """Le bout de chaque doigt (le bout de l'os de sa dernière phalange), au monde."""
+    rig = desk.rig
+    pose = rig.fk(frame)
+    out = []
+    for name in ("Index", "Middle", "Ring", "Little", "Thumb"):
+        h = f"{side}{name}Distal"
+        if h not in rig.hmap:
+            continue
+        b = rig.arm.data.bones[rig.hmap[h]]
+        length = ((rig.world @ b.tail_local) - (rig.world @ b.head_local)).length
+        m = pose[rig.hmap[h]]
+        out.append(m.translation + m.to_3x3() @ Vector((0.0, length, 0.0)))
+    return out
+
+
 def hand_matrix(desk, frame, side):
     """La matrice monde de la main (os de la main) pour cette image."""
     rig = desk.rig
     return rig.fk(frame)[rig.hmap[f"{side}Hand"]].copy()
-
-
-def in_palm(desk, f, side, along, out):
-    """Un objet tenu : `along` m devant le poignet le long des doigts, `out` m du côté de la paume ; son haut suit le
-    pouce (une tasse tenue de côté reste droite)."""
-    rig = desk.rig
-    hand = f["d"][f"{side}Hand"]
-    fingers = hand @ desk.rest_dir[f"{side}Hand"]
-    palm = hand @ desk.palm0
-    wrist = rig.joints(f, (f"{side}Hand",))[f"{side}Hand"]
-    thumb_side = fingers.cross(palm) * (1 if side == "right" else -1)
-    rot = basis(fingers, palm).to_matrix().to_4x4()
-    up = Vector((0.0, 0.0, 1.0)).rotation_difference(thumb_side).to_matrix().to_4x4()
-    return Matrix.Translation(wrist + fingers * along + palm * out) @ up
 
 
 def relaxed(desk, f, side, amount=1.0):
@@ -348,11 +363,12 @@ def relaxed(desk, f, side, amount=1.0):
 
 
 def rest_arms(desk, f, t, period, which=("left", "right")):
-    """Les mains posées sur le bureau, près du bord, avant-bras sur le plateau."""
+    """Les mains posées sur le bureau, près du bord, avant-bras sur le plateau ; le bout des doigts s'arrête avant le
+    clavier (posées 8 cm plus loin, ses doigts reposaient sur son bord — dedans, une fois mesuré)."""
     for side, sx in (("left", 1.0), ("right", -1.0)):
         if side not in which:
             continue
-        wrist = Vector((sx * 0.115 - 0.02, -0.255, 0.765)) + Vector((0.006 * noise(t, period, 21 + sx), 0.006 * noise(t, period, 23 + sx), 0.0))
+        wrist = Vector((sx * 0.115 - 0.02, -0.175, 0.765)) + Vector((0.006 * noise(t, period, 21 + sx), 0.006 * noise(t, period, 23 + sx), 0.0))
         arm_ik(desk, f, side, wrist, Vector((sx * 0.16, -0.13, 0.75)), Vector((-sx * 0.35, -1.0, -0.05)), Vector((-sx * 0.15, 0.0, -1.0)))
         relaxed(desk, f, side)
 
@@ -389,36 +405,12 @@ def desk_mouse(desk, t, period):
          thumb=(22.0, 10.0, 6.0), spread=2.0)
     rest_arms(desk, f, t, period, which=("left",))
     look(desk, f, MONITOR["center"] + Vector((0.2 * noise(t, period, 45), 0.0, 0.08 * noise(t, period, 47))))
-    return f, {"Souris": Matrix.Translation(mc + move)}
-
-
-def desk_write(desk, t, period):
-    """Écrire : le carnet devant elle, la main gauche le tient, la droite trace des lignes ; le regard suit le stylo."""
-    f = copy(desk.seated)
-    breathe = math.sin(TAU * 2 * t / period)
-    lean(f, 18.0 + 0.6 * breathe, turn_deg=4.0, side_deg=-2.0)
-    nb = NOTEBOOK["center"]
-    # Deux lignes par boucle : écrire 3,2 s de gauche à droite, revenir en 0,8 s.
-    line_t = (t % (period / 2)) / (period / 2)
-    k = line_t / 0.8 if line_t < 0.8 else 1.0 - (line_t - 0.8) / 0.2
-    k = max(0.0, min(1.0, k))
-    row = 0.0 if t < period / 2 else 0.018
-    lift = 0.0 if line_t < 0.8 else math.sin(math.pi * (line_t - 0.8) / 0.2) * 0.012
-    loops = Vector((math.sin(t * 15.0) * 0.004, math.cos(t * 12.0) * 0.003, max(0.0, math.sin(t * 9.0)) * 0.002))
-    tip = nb + Vector((0.04 - 0.11 * k, 0.02 - row, NOTEBOOK["size"][2] / 2 + 0.002 + lift)) + loops
-    fingers = Vector((0.35, -1.0, -0.55))
-    palm = Vector((0.55, 0.0, -0.8))
-    wrist = tip - fingers.normalized() * 0.085 + Vector((-0.02, 0.0, 0.03))
-    arm_ik(desk, f, "right", wrist, Vector((-0.20, -0.12, 0.76)), fingers, palm)
-    # La prise du stylo : pouce et index pincent, le majeur soutient, annulaire et auriculaire repliés.
-    curl(desk, f, "right", {"Index": (28, 24, 18), "Middle": (38, 34, 20), "Ring": (55, 50, 25), "Little": (60, 52, 25)},
-         thumb=(30.0, 18.0, 10.0), spread=0.0)
-    # La gauche à plat sur le côté gauche du carnet.
-    lw = nb + Vector((0.13, 0.03, 0.03))
-    arm_ik(desk, f, "left", lw, Vector((0.18, -0.12, 0.75)), Vector((-0.6, -1.0, -0.1)), Vector((-0.1, 0.0, -1.0)))
-    relaxed(desk, f, "left", 0.6)
-    look(desk, f, tip + Vector((0.0, 0.0, 0.0)), neck_share=0.45)
-    return f, {"Carnet": Matrix.Translation(nb), "Stylo": stylus(desk, f)}
+    # La souris dans le sens de la main : son grand axe (la boîte de contrôle : Y) suit la direction des doigts, à plat.
+    j = desk.rig.joints(f, ("rightHand", "rightMiddleProximal"))
+    along = j["rightMiddleProximal"] - j["rightHand"]
+    along.z = 0.0
+    yaw = math.atan2(along.x, -along.y) if along.length > 1e-6 else 0.0
+    return f, {"Souris": Matrix.Translation(mc + move) @ Matrix.Rotation(yaw, 4, "Z")}
 
 
 def stylus(desk, f):
@@ -442,7 +434,8 @@ def desk_read(desk, t, period):
     f = copy(desk.seated)
     breathe = math.sin(TAU * 2 * t / period)
     lean(f, 12.0 + 0.6 * breathe, turn_deg=1.0 * noise(t, period, 51))
-    center = Vector((-0.02, -0.29, 0.845)) + Vector((0.005 * noise(t, period, 53), 0.004 * noise(t, period, 55), 0.004 * noise(t, period, 57)))
+    # Le livre un peu haut et près d'elle : ses avant-bras passent au-dessus du clavier (la chaise reste où elle tape).
+    center = Vector((-0.02, -0.265, 0.875)) + Vector((0.005 * noise(t, period, 53), 0.004 * noise(t, period, 55), 0.004 * noise(t, period, 57)))
     tilt = math.radians(45.0)        # le livre incliné vers elle
     rot = Matrix.Rotation(tilt, 4, "X")
     half = BOOK["size"][0] / 2       # tenu par ses bords
@@ -461,97 +454,6 @@ def desk_read(desk, t, period):
     line = book @ Vector((0.06 * math.sin(TAU * 4 * t / period), 0.05 - 0.1 * ((t % (period / 2)) / (period / 2)), 0.01))
     look(desk, f, line, neck_share=0.45)
     return f, {"Livre": book}
-
-
-def reach_cycle(desk, f, t, side, start, obj, lift_to, grip_dir, palm, timing):
-    """
-    Aller prendre un objet et le ramener : de la main posée (start) vers l'objet (obj), puis vers lift_to, puis le
-    reposer et revenir. timing = (départ, prise, levé, tenu, reposé, retour) en secondes. Rend (poignet, porté).
-    """
-    t0, t1, t2, t3, t4, t5 = timing
-    to_obj = ease(t, t0, t1)
-    up = ease(t, t1 + 0.15, t2)
-    down = ease(t, t3, t4)
-    back = ease(t, t4 + 0.15, t5)
-    held = up * (1 - down)
-    p = start.lerp(obj, to_obj)
-    p = p.lerp(lift_to, held)
-    p = p.lerp(start, back)
-    carried = (t1 + 0.1 < t < t4 + 0.1)
-    return p, carried
-
-
-def desk_drink(desk, t, period):
-    """Boire : prendre la tasse à droite, la porter aux lèvres, une gorgée, la reposer."""
-    f = copy(desk.seated)
-    breathe = math.sin(TAU * 2 * t / period)
-    timing = (0.4, 1.1, 1.9, 3.3, 4.0, 4.6)
-    sip = ease(t, timing[1] + 0.2, timing[2]) * (1 - ease(t, timing[3], timing[4]))
-    lean(f, 9.0 + 0.6 * breathe - 4.0 * sip, turn_deg=-4.0 * (1 - sip))
-    rest_arms(desk, f, t, period, which=("left",))
-    mug = MUG["center"]
-    start = Vector((-0.135, -0.255, 0.765))
-    # Le poignet se déduit de la tasse : tenue dans la paume (in_palm : 5,5 cm le long des doigts, 4,5 cm côté paume).
-    def wrist_for(mug_center, rot):
-        return mug_center - (rot @ desk.rest_dir["rightHand"]) * 0.055 - (rot @ desk.palm0) * 0.045
-    lips = Vector((0.0, -0.15, 0.895))     # la tasse aux lèvres : son centre 5 cm devant la bouche, 2 cm plus bas
-    grip = wrist_for(mug, hand_rotation(desk, "right", Vector((0.3, -1.0, -0.05)), Vector((1.0, 0.2, -0.1))))
-    mouth = wrist_for(lips, hand_rotation(desk, "right", Vector((0.55, -0.35, 0.75)), Vector((0.8, 0.4, -0.45))))
-    wrist, carried = reach_cycle(desk, f, t, "right", start, grip, mouth, None, None, timing)
-    # La main droite : posée (doigts vers l'intérieur, paume en bas), puis de côté contre la tasse (pouce en haut,
-    # paume vers la tasse), puis la tasse qui bascule vers les lèvres.
-    on_desk = hand_rotation(desk, "right", Vector((0.35, -1.0, -0.05)), Vector((0.15, 0.0, -1.0)))
-    at_mug = hand_rotation(desk, "right", Vector((0.3, -1.0, -0.05)), Vector((1.0, 0.2, -0.1)))
-    at_mouth = hand_rotation(desk, "right", Vector((0.55, -0.35, 0.75)), Vector((0.8, 0.4, -0.45)))
-    reach = ease(t, timing[0], timing[1]) * (1 - ease(t, timing[4], timing[5]))
-    rot = on_desk.slerp(at_mug, reach).slerp(at_mouth, sip)
-    grab = ease(t, timing[1] - 0.15, timing[1] + 0.1) * (1 - ease(t, timing[4] - 0.05, timing[4] + 0.2))
-    # Le coude bas et en avant quand elle boit : l'avant-bras monte vers la bouche (levé à hauteur d'épaule, il
-    # arrivait de côté, à l'horizontale).
-    elbow = Vector((-0.20, -0.08, 0.78)).lerp(Vector((-0.13, -0.17, 0.69)), sip)
-    arm_ik(desk, f, "right", wrist, elbow, None, None, hand_rot=rot)
-    k = grab
-    curl(desk, f, "right", {"Index": (15 + 45 * k, 20 + 40 * k, 10 + 20 * k), "Middle": (18 + 45 * k, 20 + 40 * k, 10 + 20 * k),
-                            "Ring": (20 + 45 * k, 22 + 40 * k, 10 + 20 * k), "Little": (22 + 45 * k, 24 + 40 * k, 10 + 20 * k)},
-         thumb=(10 + 15 * k, 8 + 10 * k, 4 + 6 * k), spread=1.0)
-    eye_target = mug.lerp(lips + Vector((0.0, -0.3, 0.0)), ease(t, timing[1], timing[2]) * (1 - ease(t, timing[3], timing[4])))
-    look(desk, f, eye_target if t < timing[4] + 0.3 else MONITOR["center"].lerp(eye_target, 1 - ease(t, timing[4] + 0.3, timing[5])))
-    if carried:
-        mug_m = in_palm(desk, f, "right", 0.055, 0.045)
-    else:
-        mug_m = Matrix.Translation(mug)
-    return f, {"Tasse": mug_m}
-
-
-def desk_take(desk, t, period):
-    """Prendre un objet posé devant elle (à droite), le regarder dans sa main, le reposer. Joué en miroir (main gauche)."""
-    f = copy(desk.seated)
-    breathe = math.sin(TAU * 2 * t / period)
-    timing = (0.4, 1.2, 1.9, 3.4, 4.1, 4.7)
-    look_at = ease(t, timing[1] + 0.2, timing[2]) * (1 - ease(t, timing[3], timing[4]))
-    lean(f, 12.0 + 0.6 * breathe + 4.0 * (ease(t, timing[0], timing[1]) * (1 - ease(t, timing[1] + 0.1, timing[2]))), turn_deg=-6.0)
-    rest_arms(desk, f, t, period, which=("left",))
-    obj = Vector((-0.20, -0.42, 0.775))
-    start = Vector((-0.135, -0.255, 0.765))
-    view = Vector((-0.05, -0.24, 0.93))
-    wrist, carried = reach_cycle(desk, f, t, "right", start, obj + Vector((0.0, 0.07, 0.03)), view, None, None, timing)
-    on_desk = hand_rotation(desk, "right", Vector((0.35, -1.0, -0.05)), Vector((0.15, 0.0, -1.0)))
-    grasp = hand_rotation(desk, "right", Vector((0.1, -1.0, -0.5)), Vector((0.1, 0.0, -1.0)))
-    show = hand_rotation(desk, "right", Vector((0.35, -0.85, 0.3)), Vector((0.2, 0.35, 0.9)))
-    reach = ease(t, timing[0], timing[1]) * (1 - ease(t, timing[4], timing[5]))
-    arm_ik(desk, f, "right", wrist, Vector((-0.21, -0.10, 0.76)), None, None, hand_rot=on_desk.slerp(grasp, reach).slerp(show, look_at))
-    k = ease(t, timing[1] - 0.15, timing[1] + 0.1) * (1 - ease(t, timing[4] - 0.05, timing[4] + 0.2))
-    curl(desk, f, "right", {"Index": (15 + 35 * k, 20 + 30 * k, 10 + 15 * k), "Middle": (18 + 35 * k, 20 + 30 * k, 10 + 15 * k),
-                            "Ring": (20 + 35 * k, 22 + 30 * k, 10 + 15 * k), "Little": (22 + 35 * k, 24 + 30 * k, 10 + 15 * k)},
-         thumb=(10 + 25 * k, 8 + 12 * k, 4 + 6 * k), spread=1.0)
-    target = MONITOR["center"].lerp(obj, ease(t, timing[0] - 0.3, timing[1] - 0.2)).lerp(view, look_at)
-    target = target.lerp(MONITOR["center"], ease(t, timing[4], timing[5] + 0.2))
-    look(desk, f, target, neck_share=0.4)
-    if carried:
-        om = in_palm(desk, f, "right", 0.06, 0.025)
-    else:
-        om = Matrix.Translation(obj)
-    return f, {"Objet": om}
 
 
 def desk_think(desk, t, period):
@@ -604,57 +506,42 @@ def lap_hands(desk, f, t, period):
         relaxed(desk, f, side, 0.8)
 
 
-def chair_turn(desk, t, period, degrees):
-    """
-    Pivoter la chaise vers sa gauche de `degrees` (Unity fait tourner la chaise, et elle avec) : elle lève un peu les
-    pieds, ramenés sous elle, le temps du pivot, et les repose une fois tournée ; le buste puis la tête mènent le
-    mouvement, les mains sur les cuisses. Dans le jeu, tout le modèle de la chaise tourne, piètement compris : des pieds
-    restés au sol voyaient ses branches passer dessous (vérifié avec la vraie chaise, atelier_desk_check.py).
-    """
-    f = copy(desk.seated)
-    rig = desk.rig
-    turn = ease(t, 0.1, period - 0.25)
-    lead = math.sin(math.pi * turn)
-    lean(f, 6.0, turn_deg=12.0 * lead)
-    lap_hands(desk, f, t, period)
-    look(desk, f, Vector((math.sin(math.radians(30.0 * lead)), -math.cos(math.radians(30.0 * lead)), 0.0)) * 2.0 + Vector((0.0, 0.0, 1.0)))
-    # Levés dès le départ, reposés à la fin ; le pied qui mène (côté du pivot) un peu avant l'autre.
-    up = {"left": ease(t, 0.0, 0.25) * (1 - ease(t, period - 0.4, period - 0.1)),
-          "right": ease(t, 0.06, 0.31) * (1 - ease(t, period - 0.34, period - 0.04))}
-    base = desk.seated
-    for side in ("left", "right"):
-        home = rig.joints(base, (f"{side}Foot",))[f"{side}Foot"]
-        k = up[side]
-        al.two_bone(f, rig, side, home + Vector((0.0, 0.012 * k, 0.045 * k)))
-    return f
-
-
-def chair_turn_45(desk, t, period):
-    return chair_turn(desk, t, period, 45.0)
-
-
-def chair_turn_90(desk, t, period):
-    return chair_turn(desk, t, period, 90.0)
+def _gestures():
+    import atelier_desk_gestures as g
+    return g
 
 
 CLIPS = {
     "desk_rest": dict(build=desk_rest, seconds=8.0, loop=True, note="au bureau, les mains posées"),
-    "desk_type": dict(build=desk_type, seconds=8.0, loop=True, note="taper au clavier, par rafales"),
+    # Taper : la pulpe d'un doigt qui frappe descend de la course d'une touche (4 mm), les touches ne bougeant pas.
+    "desk_type": dict(build=desk_type, seconds=8.0, loop=True, note="taper au clavier, par rafales", tip_dip=0.004),
     "desk_mouse": dict(build=desk_mouse, seconds=6.0, loop=True, note="la souris"),
-    "desk_write": dict(build=desk_write, seconds=8.0, loop=True, note="écrire dans le carnet"),
+    # Écrire (la chaise pivotée de 45° vers sa gauche : le carnet devant elle, un peu à droite) : prendre le stylo couché
+    # sur le carnet, écrire, le reposer exactement où il était.
+    "desk_write_start": dict(grasp="right", build=lambda d, t, p: _gestures().desk_write_start(d, t, p), seconds=1.8, loop=False,
+                             note="prendre le stylo sur le carnet pour écrire"),
+    "desk_write": dict(build=lambda d, t, p: _gestures().desk_write(d, t, p), seconds=8.0, loop=True, note="écrire dans le carnet"),
+    "desk_write_end": dict(grasp="right", build=lambda d, t, p: _gestures().desk_write_end(d, t, p), seconds=1.8, loop=False,
+                           note="reposer le stylo sur le carnet"),
     "desk_read": dict(build=desk_read, seconds=10.0, loop=True, note="lire un livre tenu"),
-    # Boire se joue de la main gauche (desk_drink, le miroir) : la tasse attend à gauche du clavier — à droite, elle
-    # était sur le chemin de la souris.
-    "desk_drink_droite": dict(build=desk_drink, seconds=5.0, loop=False, note="boire à la tasse (main droite)",
-                              mirror="desk_drink"),
-    # Prendre se joue aussi de la main gauche (desk_take, le miroir) : l'objet (son stylo) attend à gauche du clavier,
-    # la droite reste sur le bureau, près de la souris.
-    "desk_take_droite": dict(build=desk_take, seconds=5.0, loop=False, note="prendre un objet, le regarder, le reposer (main droite)", mirror="desk_take"),
+    # Boire se joue de la main gauche (desk_drink, le miroir) : la tasse attend devant à gauche, l'anse vers l'extérieur.
+    "desk_drink_droite": dict(grasp="right", build=lambda d, t, p: _gestures().desk_drink(d, t, p), seconds=5.0, loop=False,
+                              note="boire à la tasse prise par l'anse (main droite)", mirror="desk_drink"),
+    # Prendre se joue aussi de la main gauche (desk_take, le miroir) : son stylo, couché sur le carnet à gauche du clavier.
+    "desk_take_droite": dict(grasp="right", build=lambda d, t, p: _gestures().desk_take(d, t, p), seconds=5.0, loop=False,
+                             note="prendre son stylo, le regarder, le reposer (main droite)", mirror="desk_take"),
     "desk_think": dict(build=desk_think, seconds=8.0, loop=True, note="réfléchir, accoudée", clear=False),
     "desk_stretch": dict(build=desk_stretch, seconds=4.6, loop=False, note="s'étirer sur sa chaise"),
     "desk_lap": dict(build=lambda desk, t, period: lap_pose(desk, t, period), seconds=8.0, loop=True, note="assise, les mains sur les cuisses"),
-    "chair_turn_left_45": dict(build=chair_turn_45, seconds=1.4, loop=False, note="pivoter la chaise d'un quart à gauche, les pieds levés", mirror="chair_turn_right_45"),
-    "chair_turn_left_90": dict(build=chair_turn_90, seconds=2.0, loop=False, note="pivoter la chaise d'un demi-tour à gauche, les pieds levés", mirror="chair_turn_right_90"),
+    # La chaise : tirée vers le bureau ou repoussée, les mains sur son bord ; pivotée, les pieds poussant le sol.
+    "chair_pull_in": dict(build=lambda d, t, p: _gestures().chair_pull_in(d, t, p), seconds=3.1, loop=False,
+                          note="se tirer vers le bureau, les mains sur son bord"),
+    "chair_push_out": dict(build=lambda d, t, p: _gestures().chair_push_out(d, t, p), seconds=2.9, loop=False,
+                           note="repousser la chaise du bureau, les mains sur son bord"),
+    "chair_turn_left_45": dict(build=lambda d, t, p: _gestures().chair_turn_left_45(d, t, p), seconds=2.6, loop=False,
+                               note="pivoter la chaise d'un quart vers sa gauche, les pieds poussant le sol", mirror="chair_turn_right_45"),
+    "chair_turn_left_90": dict(build=lambda d, t, p: _gestures().chair_turn_left_90(d, t, p), seconds=3.9, loop=False,
+                               note="pivoter la chaise d'un demi-tour vers sa gauche, les pieds poussant le sol", mirror="chair_turn_right_90"),
 }
 
 
@@ -668,34 +555,114 @@ def lap_pose(desk, t, period):
     return f
 
 
-def clear_desk(motion, scene, frames_per_scene=None, tolerance=0.003):
+HAND_SURFACES = ("writing_desk", "desk_mat", "keyboard", "mouse", "notebook")
+# La souris, un volume fermé et simple : on la mesure par sa face la plus proche, et seul ce qui appuie sur son dessus
+# soulève la main (« sous son dessus » prenait le pouce posé sur son flanc pour un doigt enfoncé dedans).
+CLOSED_SURFACES = ("mouse",)
+
+
+def settle_hands(motion, scene, tolerance=0.0015, reach=0.06, tip_dip=0.0, skip=None):
     """
-    Les avant-bras et les mains au-dessus du plateau du vrai bureau (posé par `scene` comme Unity le pose) : assise à un
-    bureau d'adulte, ses coudes sont au bord et l'avant-bras qui le passe y entrait d'un centimètre. Chaque bras qui
-    s'enfonce tourne sur l'axe épaule–poignet (le coude monte sur son cercle, la main ne bouge pas) du plus petit angle
-    qui le dégage ; les angles sont lissés dans le temps. Rend l'angle le plus grand (°).
+    Les mains posées sur ce qu'il y a dessous, sans y entrer : le bout de chaque doigt, ses phalanges et la paume
+    au-dessus de la vraie surface (une touche du clavier, le dos de la souris, le carnet, le plateau — lancer de rayon
+    vers le bas sur les modèles posés par `scene`, comme Unity), à l'épaisseur de la peau près. Une main qui y entre est
+    remontée par son poignet (IK du bras, la main garde son orientation), d'autant qu'il faut ; les hauteurs sont
+    lissées dans le temps. Une main à plus de `reach` sous une surface (sur les cuisses, sous le bureau) n'est pas
+    concernée. `skip` ({côté: images}) : la main qui prend un objet posé (le stylo couché sur le carnet) doit le toucher,
+    elle n'est pas soulevée pendant la prise. Rend la plus grande remontée (cm).
+    """
+    import atelier_decor as dc
+    from mathutils.bvhtree import BVHTree  # noqa: F401  (l'arbre vient de dc.Contacts.tree)
+
+    rig = motion.rig
+    n = len(motion.frames)
+    length = {}
+
+    def tail(pose, h):
+        bn = rig.hmap[h]
+        if h not in length:
+            b = rig.arm.data.bones[bn]
+            length[h] = ((rig.world @ b.tail_local) - (rig.world @ b.head_local)).length
+        m = pose[bn]
+        return m.translation + m.to_3x3() @ Vector((0.0, length[h], 0.0))
+
+    def points(frame, side):
+        pose = rig.fk(frame)
+        pts = []
+        for fname in ("Index", "Middle", "Ring", "Little", "Thumb"):
+            h = f"{side}{fname}Distal"
+            if h in rig.hmap:
+                pts.append((tail(pose, h), FINGER_PAD + UNITY_FINGER_DROP - tip_dip))
+                pts.append((pose[rig.hmap[h]].translation, 0.008))
+        hand = pose[rig.hmap[f"{side}Hand"]].translation
+        mid = pose[rig.hmap[f"{side}MiddleProximal"]].translation
+        pts.append((hand.lerp(mid, 0.6), 0.012))
+        return pts
+
+    static = not callable(scene.chair) and not scene.held and not scene.moves
+    tree = closed = None
+    lifts = {"left": [0.0] * n, "right": [0.0] * n}
+    for i, frame in enumerate(motion.frames):
+        if tree is None or not static:
+            scene.apply(i)
+            tree = dc.Contacts.tree([o for oid in HAND_SURFACES if oid not in CLOSED_SURFACES for o in dc.meshes(dc.load(oid))])
+            closed = dc.Contacts.tree([o for oid in CLOSED_SURFACES for o in dc.meshes(dc.load(oid))])
+        for side in ("left", "right"):
+            if skip and i in skip.get(side, ()):
+                continue
+            need = 0.0
+            for p, pad in points(frame, side):
+                loc, _, _, _ = tree.ray_cast(Vector((p.x, p.y, p.z + 0.25)), Vector((0.0, 0.0, -1.0)), 0.6)
+                if loc is not None and p.z >= loc.z - reach:
+                    need = max(need, loc.z + pad - tolerance - p.z)
+                loc, nor, _, _ = closed.find_nearest(p, 0.05)
+                if loc is not None and nor.z > 0.5:
+                    gap = (p - loc).dot(nor) - (pad - tolerance)
+                    if gap < 0.0:
+                        need = max(need, -gap / nor.z)
+            lifts[side][i] = min(need, reach)
+    worst = 0.0
+    for side, values in lifts.items():
+        if max(values) <= 0.0:
+            continue
+        at = (lambda k: values[k % n]) if motion.loop else (lambda k: values[min(n - 1, max(0, k))])
+        held = [max(at(i + k) for k in range(-4, 5)) for i in range(n)]
+        at2 = (lambda k: held[k % n]) if motion.loop else (lambda k: held[min(n - 1, max(0, k))])
+        smooth = [max(held[i], sum(at2(i + k) for k in range(-3, 4)) / 7) for i in range(n)]
+        for i, lift in enumerate(smooth):
+            if lift <= 1e-4:
+                continue
+            frame = motion.frames[i]
+            wrist = rig.joints(frame, (f"{side}Hand",))[f"{side}Hand"]
+            al.two_bone(frame, rig, side, wrist + Vector((0.0, 0.0, lift)), limb="arm")
+            worst = max(worst, lift)
+    return round(worst * 100, 1)
+
+
+def clear_desk(motion, scene, tolerance=0.003, reach=0.08):
+    """
+    Les avant-bras et les mains au-dessus du plateau du vrai bureau et de ce qui est posé dessus (posés par `scene`
+    comme Unity les pose) : assise à un bureau d'adulte, ses coudes sont au bord et l'avant-bras qui le passe y entrait
+    d'un centimètre ; en lisant, l'avant-bras gauche posait sur le clavier. Chaque bras qui s'enfonce tourne sur l'axe
+    épaule–poignet (le coude monte sur son cercle, la main ne bouge pas) du plus petit angle qui le dégage ; les angles
+    sont lissés dans le temps. Rend l'angle le plus grand (°).
     """
     import atelier_decor as dc
 
     rig = motion.rig
-    desk = dc.load("writing_desk")
-    corners = [Vector(c) for o in dc.meshes(desk) for c in (o.matrix_world @ Vector(v) for v in o.bound_box)]
-    inv0 = desk.matrix_world.inverted()
-    loc = [inv0 @ c for c in corners]
-    lo = Vector((min(p.x for p in loc), min(p.y for p in loc), 0.0))
-    hi = Vector((max(p.x for p in loc), max(p.y for p in loc), max(p.z for p in loc)))
     n = len(motion.frames)
 
-    def depth(frame, inv, side, angle=0.0):
+    def depth(frame, tree, side, angle=0.0):
         f = frame if angle == 0.0 else swiveled(frame, side, angle)
         j = rig.joints(f, (f"{side}LowerArm", f"{side}Hand", f"{side}MiddleProximal"))
         worst = 0.0
         for a, b, r, steps in ((j[f"{side}LowerArm"], j[f"{side}Hand"], 0.028, 8), (j[f"{side}Hand"], j[f"{side}MiddleProximal"], 0.016, 3)):
             for i in range(steps + 1):
-                p = inv @ a.lerp(b, i / steps)
-                if not (lo.x <= p.x <= hi.x and lo.y <= p.y <= hi.y and hi.z - 0.15 < p.z < hi.z + r):
+                p = a.lerp(b, i / steps)
+                loc, _, _, _ = tree.ray_cast(Vector((p.x, p.y, p.z + 0.25)), Vector((0.0, 0.0, -1.0)), 0.6)
+                if loc is None or p.z < loc.z - reach:
                     continue
-                worst = max(worst, hi.z + r - p.z)
+                worst = max(worst, loc.z + r - p.z)
         return worst
 
     def swiveled(frame, side, angle):
@@ -707,16 +674,19 @@ def clear_desk(motion, scene, frames_per_scene=None, tolerance=0.003):
             f["d"][h] = q @ frame["d"][h]
         return f
 
+    static = not callable(scene.chair) and not scene.held and not scene.moves
+    tree = None
     best = {"left": [0.0] * n, "right": [0.0] * n}
     for i, frame in enumerate(motion.frames):
-        scene.apply(i)
-        inv = desk.matrix_world.inverted()
+        if tree is None or not static:
+            scene.apply(i)
+            tree = dc.Contacts.tree([o for oid in HAND_SURFACES if oid not in CLOSED_SURFACES for o in dc.meshes(dc.load(oid))])
         for side in ("left", "right"):
-            if depth(frame, inv, side) <= tolerance:
+            if depth(frame, tree, side) <= tolerance:
                 continue
             tries = [a * s for a in [2.5 * k for k in range(1, 13)] for s in (1, -1)]
-            ok = [a for a in tries if depth(frame, inv, side, a) <= tolerance]
-            best[side][i] = ok[0] if ok else min(tries, key=lambda a: depth(frame, inv, side, a))
+            ok = [a for a in tries if depth(frame, tree, side, a) <= tolerance]
+            best[side][i] = ok[0] if ok else min(tries, key=lambda a: depth(frame, tree, side, a))
     worst = 0.0
     for side, angles in best.items():
         if not any(angles):
@@ -725,8 +695,7 @@ def clear_desk(motion, scene, frames_per_scene=None, tolerance=0.003):
         smooth = []
         for i in range(n):
             window = [angles[(i + k) % n] if motion.loop else angles[min(n - 1, max(0, i + k))] for k in range(-4, 5)]
-            big = max(window, key=abs)
-            smooth.append(big)
+            smooth.append(max(window, key=abs))
         smooth = [sum(smooth[(i + k) % n] if motion.loop else smooth[min(n - 1, max(0, i + k))] for k in range(-3, 4)) / 7 for i in range(n)]
         for i, a in enumerate(smooth):
             if abs(a) > 1e-3:
@@ -775,43 +744,46 @@ def main():
     built_names = []
     import atelier_decor as dc
     import atelier_desk_check
-    decor_scenes = atelier_desk_check.scenes(dc.Layout())
+    layout = dc.Layout()
+    desk.layout = layout
+    desk.geo = _gestures().Geo(layout)
     for name, spec in CLIPS.items():
-        if only and name not in only:
+        if only and name not in only and spec.get("mirror") not in only:
             continue
         n = int(round(spec["seconds"] * FPS))
         built = [spec["build"](desk, i / FPS, spec["seconds"]) for i in range(n)]
         frames = [b[0] if isinstance(b, tuple) else b for b in built]
-        held = [b[1] if isinstance(b, tuple) else {} for b in built]
+        held = [b[1] if isinstance(b, tuple) and len(b) > 1 else {} for b in built]
+        curves = {}
+        for b in built:
+            if isinstance(b, tuple) and len(b) > 2:
+                for k, v in b[2].items():
+                    curves.setdefault(k, []).append(v)
         if spec["loop"]:
             frames.append(copy(frames[0]))
             held.append(held[0])
-        motion = al.Motion(rig, name, frames, loop=spec["loop"])
+            for k in curves:
+                curves[k].append(curves[k][0])
+        motion = al.Motion(rig, name, frames, loop=spec["loop"], curves=curves)
         # Les mains contre le corps (posées sur les cuisses, le poing sous le menton) : au contact, pas dedans.
         if spec.get("clear", True):
             al.clear_arms(motion, clearance, margin=0.004)
-        scene = decor_scenes.get(name)
-        if scene is not None and spec.get("desk", True):
-            swivel = clear_desk(motion, scene)
-            if swivel:
-                print(f"[bureau] {name} : coudes relevés au-dessus du plateau (au plus {swivel}°)", flush=True)
+        save_held(name, held)
+        _settle(motion, name, layout, held, spec, atelier_desk_check)
         frames = motion.frames
         jump = al.jumps(motion)
         hands = clearance.measure(motion, step=4)
         report = f"{len(frames)} images, saut max {jump['saut']}° ({jump['os']}), mains dans le corps " \
                  f"{hands['left']['profondeur_cm']}/{hands['right']['profondeur_cm']} cm"
         path = motion.export(note=f"atelier du bureau — {spec['note']} — {report}")
-        save_held(name, held)
         print(f"[bureau] {name} : {report} → {path}", flush=True)
         if spec.get("mirror"):
             save_held(spec["mirror"], held, mirror=True)
-            mirrored = al.Motion(rig, spec["mirror"], [al.mirror_frame(fr) for fr in frames], loop=spec["loop"])
+            mirrored = al.Motion(rig, spec["mirror"], [al.mirror_frame(fr) for fr in frames], loop=spec["loop"], curves=motion.curves)
             # Le bureau, lui, n'est pas symétrique : le miroir (celui que le jeu joue) se vérifie contre lui.
-            mscene = decor_scenes.get(spec["mirror"])
-            if mscene is not None and spec.get("desk", True):
-                swivel = clear_desk(mirrored, mscene)
-                if swivel:
-                    print(f"[bureau] {spec['mirror']} : coudes relevés au-dessus du plateau (au plus {swivel}°)", flush=True)
+            flip = Matrix.Scale(-1.0, 4, Vector((1.0, 0.0, 0.0)))
+            mheld = [{k: (flip @ m @ flip) for k, m in h.items()} for h in held]
+            _settle(mirrored, spec["mirror"], layout, mheld, spec, atelier_desk_check)
             mpath = mirrored.export(note=f"atelier du bureau — miroir de {name} — {spec['note'].replace('gauche', 'droite')}")
             print(f"[bureau] {spec['mirror']} (miroir) → {mpath}", flush=True)
         built_names.append(name)
@@ -819,6 +791,33 @@ def main():
             built_names.append(spec["mirror"])
     # La vérification contre les vrais meubles et objets (contacts mesurés, planches previews/verif_<clip>.png).
     atelier_desk_check.verify(rig, built_names, previews=not args.no_previews)
+
+
+def _settle(motion, name, layout, held, spec, check):
+    """Les mains posées sur les vraies surfaces et les avant-bras au-dessus du plateau, dans le décor du clip (la chaise où
+    le geste la met, image par image ; les objets là où sa main les porte)."""
+    scene = check.scene_for(name, layout, motion)
+    if scene is None or not spec.get("desk", True):
+        return
+    absolute, moves = check.split_held(held, layout)
+    scene.held = absolute
+    scene.moves = moves
+    # La main qui prend un objet (spec « grasp » : la main du geste construit ; le miroir prend l'autre) n'est pas soulevée
+    # pendant qu'elle le tient ni juste avant ou après (elle se pose dessus).
+    skip = None
+    hold = motion.curves.get("Hold")
+    if spec.get("grasp") and hold:
+        side = spec["grasp"] if name != spec.get("mirror") else ("left" if spec["grasp"] == "right" else "right")
+        held_frames = [i for i, v in enumerate(hold) if v > 0.0]
+        margin = 10
+        skip = {side: {j for i in held_frames for j in range(i - margin, i + margin + 1)}}
+    lift = settle_hands(motion, scene, tip_dip=spec.get("tip_dip", 0.0), skip=skip)
+    if lift:
+        print(f"[bureau] {name} : mains posées sur les surfaces (remontées d'au plus {lift} cm)", flush=True)
+    swivel = clear_desk(motion, scene)
+    if swivel:
+        print(f"[bureau] {name} : coudes relevés au-dessus du plateau (au plus {swivel}°)", flush=True)
+
 
 if __name__ == "__main__":
     main()

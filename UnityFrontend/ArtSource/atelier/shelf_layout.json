@@ -1,0 +1,26 @@
+{
+  "format": "mika.desk-layout/2",
+  "note": "repère du lieu (Unity) : origine au sol là où elle se tient, x à droite, y en haut, z devant elle",
+  "seat_hips": [0, 0.0000, 0],
+  "objects": [
+    {"id": "poster_peaks", "part": "Modèle", "origin": [1.5000, 1.4080, 0.6890], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "books_shelf_0", "part": "Modèle", "origin": [0.4500, 0.0820, 0.5333], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "books_shelf_1", "part": "Modèle", "origin": [-0.2356, 0.4720, 0.4558], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "books_shelf_2", "part": "Modèle", "origin": [-0.0012, 0.8620, 0.4981], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "books_shelf_3", "part": "Modèle", "origin": [0.1750, 1.2520, 0.4559], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "books_shelf_4", "part": "Modèle", "origin": [-0.3847, 1.6320, 0.4546], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "shelves", "part": "Modèle", "origin": [0.0000, 0.0000, 0.5050], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "ficus", "part": "Modèle", "origin": [-1.7418, 0.0000, 0.1454], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "pothos", "part": "Modèle", "origin": [-0.2948, 1.3953, 0.4283], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "shelf_basket_1", "part": "Modèle", "origin": [-0.5200, 0.0820, 0.5175], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "shelf_basket_2", "part": "Modèle", "origin": [-0.0700, 0.0820, 0.5175], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "vase_bookshelf", "part": "Modèle", "origin": [0.5200, 0.4720, 0.5075], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "bunny_figurine", "part": "Modèle", "origin": [-0.6000, 0.9782, 0.4969], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "moon_lamp", "part": "Modèle", "origin": [-0.5807, 1.2520, 0.5075], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "photo_frame_bookshelf", "part": "Modèle", "origin": [0.2200, 1.6301, 0.5527], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "cactus_bookshelf", "part": "Modèle", "origin": [0.5407, 1.6320, 0.5075], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "storage_box_bookshelf", "part": "Modèle", "origin": [0.4500, 2.0000, 0.4975], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "floor_cushion", "part": "Modèle", "origin": [1.3000, -0.0145, -0.3000], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "open_book", "part": "Modèle", "origin": [1.3200, 0.1430, -0.2800], "yaw": 90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false}
+  ]
+}

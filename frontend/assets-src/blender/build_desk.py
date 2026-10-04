@@ -6,6 +6,17 @@ from roomlib import *
 
 TOP_Y = 0.76
 
+# Les objets que ses gestes prennent (three.js : x, z au sol ; rotations Y en radians) — voir build() et
+# frontend/assets-src/blender/atelier_desk_plan.py, qui les calcule depuis le repère du siège.
+MOUSE_POS = (-1.1038, -3.8291)
+MOUSE_RY = 0.0653               # le grand axe de la souris dans le sens de sa main droite posée dessus
+NOTEBOOK_POS = (-1.7236, -3.8859)
+NOTEBOOK_RY = 0.3967            # tourné vers elle quand la chaise a pivoté pour écrire, 20° de plus vers sa droite
+PEN_BASE = (-1.6412, -3.8446)   # le bout du stylo couché sur le carnet (son axe le long du bord droit du carnet)
+PEN_RY = -1.1741
+MUG_POS = (-1.8523, -3.8069)    # le centre de la tasse : devant à gauche, à portée de sa main gauche
+MUG_HANDLE = 2.6105             # l'anse, angle dans le plan (x, z) depuis +x : vers l'extérieur (sa gauche), un peu vers elle
+
 
 def quad_uv(name, corners3, uvs, m):
     """Single textured quad from three-space corners (CCW seen from front)."""
@@ -130,22 +141,34 @@ def build(M):
     # ------------------------------------------------------------ props on the desk
     pr = []
     pr.append(box("Desk_Mat", 0.86, 0.004, 0.34, -1.28, TOP_Y + 0.002, -3.92, M["mousepad"], 0.002, 1))
-    pr.append(sphere("Desk_Mouse", 0.031, 0.02, 0.056, -0.96, TOP_Y + 0.007, -3.9, M["plastic_white"], 16, 10, ry_rot=0.15))
+    # La souris, le carnet, son stylo et la tasse sont posés là où les gestes de Mika les prennent (atelier d'animation,
+    # atelier_desk_plan.py → UnityFrontend/ArtSource/atelier/desk_plan.json) : rien ne glisse tout seul sur le bureau
+    # quand elle s'y assoit. La souris à sa place de travail (la chaise tournée et avancée vers le clavier), son grand
+    # axe dans le sens de la main ; le carnet droit devant elle quand la chaise a pivoté de 45° vers sa gauche, tourné
+    # vers elle ; le stylo dessus, le long de son bord droit ; la tasse devant à gauche (le seul endroit à portée de ses
+    # petits bras que le clavier, la souris et le carnet laissent libre), l'anse vers l'extérieur : sa main gauche la
+    # prend à côté, les doigts dans l'anse (atelier_desk_search.py).
+    pr.append(sphere("Desk_Mouse", 0.031, 0.02, 0.056, MOUSE_POS[0], TOP_Y + 0.007, MOUSE_POS[1], M["plastic_white"], 16, 10,
+                     ry_rot=MOUSE_RY))
     # mug with coffee + handle
     mug_prof = [(0, 0), (0.037, 0), (0.041, 0.005), (0.043, 0.05), (0.046, 0.095), (0.0455, 0.098),
                 (0.043, 0.097), (0.04, 0.05), (0.036, 0.013), (0, 0.013)]
-    pr.append(lathe("Desk_Mug", mug_prof, 28, -0.82, TOP_Y, -3.86, M["ceramic_pink"], sharp=70))
-    pr.append(cyl("Desk_Coffee", 0.0405, 0.002, -0.82, TOP_Y + 0.074, -3.86, M["coffee"], 24))
+    mx, mz = MUG_POS
+    hx, hz = math.cos(MUG_HANDLE), math.sin(MUG_HANDLE)   # l'anse, dans le plan du sol (x, z)
+    pr.append(lathe("Desk_Mug", mug_prof, 28, mx, TOP_Y, mz, M["ceramic_pink"], sharp=70))
+    pr.append(cyl("Desk_Coffee", 0.0405, 0.002, mx, TOP_Y + 0.074, mz, M["coffee"], 24))
     hp = []
     for k in range(9):
         a = -math.pi / 2 + math.pi * k / 8
-        hp.append(V(-0.82 + 0.044 + 0.026 * math.cos(a), TOP_Y + 0.052 + 0.03 * math.sin(a), -3.86))
+        r = 0.044 + 0.026 * math.cos(a)
+        hp.append(V(mx + hx * r, TOP_Y + 0.052 + 0.03 * math.sin(a), mz + hz * r))
     pr.append(tube("Desk_MugHandle", hp, 0.0065, M["ceramic_pink"], 8))
     # notebook + pen
-    pr.append(textured_box("Desk_Notebook", 0.17, 0.012, 0.23, -1.98, TOP_Y + 0.006, -3.93, M["notebook"], 0.002, ry=0.35))
-    pr.append(box("Desk_NotebookPages", 0.162, 0.009, 0.222, -1.98, TOP_Y + 0.0062, -3.93, M["paper"], 0.0, ry=0.35))
+    nx, nz = NOTEBOOK_POS
+    pr.append(textured_box("Desk_Notebook", 0.17, 0.012, 0.23, nx, TOP_Y + 0.006, nz, M["notebook"], 0.002, ry=NOTEBOOK_RY))
+    pr.append(box("Desk_NotebookPages", 0.162, 0.009, 0.222, nx, TOP_Y + 0.0062, nz, M["paper"], 0.0, ry=NOTEBOOK_RY))
     pen = cyl("Desk_Pen", 0.0045, 0.14, 0, 0, 0, M["pin_blue"], 10)
-    place(pen, -1.95, TOP_Y + 0.017, -3.9, ry=0.9, rz=math.pi / 2)
+    place(pen, PEN_BASE[0], TOP_Y + 0.017, PEN_BASE[1], ry=PEN_RY, rz=math.pi / 2)
     pr.append(pen)
     # pen cup with pens
     cup_prof = [(0, 0), (0.034, 0), (0.035, 0.1), (0.031, 0.1), (0.03, 0.006), (0, 0.006)]

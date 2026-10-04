@@ -29,6 +29,7 @@
 #  10. export du mouvement, rendus de contrôle en tenue de répétition (previews/<clip>.png, non versionnés).
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -88,6 +89,60 @@ def catalog():
         if name in clips:
             clips[name].update(extra)
     return clips
+
+
+def clear_desk_edge(motion, scene, margin=0.006, passes=8):
+    """
+    Les mains et les avant-bras sortis du plateau du bureau, mesurés sur la peau (le maillage déformé, comme le
+    contrôle) : une main qui s'appuie sur le bureau pour se lever y entrait de quelques centimètres sous la ligne des
+    os, et une main juste devant la tranche du plateau échappait aux rayons vers le bas. Le poignet est soulevé d'autant
+    qu'il faut (IK du bras), lissé dans le temps ; on recommence tant qu'il reste un contact. Rend la plus grande
+    remontée (cm).
+    """
+    import atelier_decor as dc
+    import atelier_desk as ad
+    from mathutils import Vector
+    rig = motion.rig
+    contacts = dc.Contacts(rig)
+    desk = ad.Desk(rig)
+    n = len(motion.frames)
+    scene.apply(0)
+    top = max((o.matrix_world @ Vector(c)).z for o in dc.meshes(dc.load("writing_desk")) for c in o.bound_box)
+    worst = 0.0
+    for _ in range(passes):
+        needs = {"left": [0.0] * n, "right": [0.0] * n}
+        for i in range(n):
+            found = contacts.check(motion, scene, ("writing_desk",), [i], tolerance=0.002)
+            for (part, _oid), (depth, f, bone, at) in found.items():
+                if part not in ("mains", "bras"):
+                    continue
+                side = "left" if bone.startswith("left") else "right"
+                # Au-dessus du plateau : la distance à la face la plus proche sous-estime une main enfoncée dans son
+                # épaisseur (elle est plus près de la tranche que du dessus).
+                needs[side][i] = max(needs[side][i], depth / 100.0, top - at[2]) + margin
+        if os.environ.get("MIKA_DEBUG"):
+            print("[debug] besoins", {k: [round(x * 100, 1) for x in v if x > 0] for k, v in needs.items()},
+                  {k: [i for i, x in enumerate(v) if x > 0] for k, v in needs.items()}, flush=True)
+        if not any(max(v) > 0.0 for v in needs.values()):
+            break
+        for side, values in needs.items():
+            if max(values) <= 0.0:
+                continue
+            held = [max(values[min(n - 1, max(0, i + k))] for k in range(-3, 4)) for i in range(n)]
+            smooth = [max(held[i], sum(held[min(n - 1, max(0, i + k))] for k in range(-2, 3)) / 5) for i in range(n)]
+            for i, lift in enumerate(smooth):
+                if lift <= 1e-4:
+                    continue
+                frame = motion.frames[i]
+                j = rig.joints(frame, (f"{side}UpperArm", f"{side}LowerArm", f"{side}Hand"))
+                # Le coude dans le plan où il plie, ou, bras tendu (elle s'appuie sur le bureau), en arrière et en dehors :
+                # soulever un poignet le long d'un bras droit ne le déplaçait pas.
+                sx = 1.0 if side == "left" else -1.0
+                hint = j[f"{side}LowerArm"] + Vector((sx * 0.08, 0.10, 0.0))
+                ad.arm_ik(desk, frame, side, j[f"{side}Hand"] + Vector((0.0, 0.0, lift)), hint, None, None,
+                          hand_rot=frame["d"][f"{side}Hand"].copy())
+                worst = max(worst, lift)
+    return round(worst * 100, 1)
 
 
 def build(name, spec, rig, soles, clearance, previews):
@@ -160,6 +215,22 @@ def build(name, spec, rig, soles, clearance, previews):
     if spec["kind"] in ("stand", "sit"):
         rest = al.clear_arms(motion, clearance)
         report.append("bras dégagés" + (f" (reste {rest} cm)" if rest else ""))
+    if name in ("sit_down", "stand_up"):
+        # Au bureau, elle s'assoit et se lève la chaise à sa place (rien ne la recule) : la main qui accompagne le mouvement
+        # passe près du bord du plateau — posée dessus, pas dedans (vérifié avec le vrai bureau, atelier_desk_check.py).
+        import atelier_decor as dc
+        import atelier_desk as ad
+        layout = dc.Layout()
+        scene = dc.Scene(layout, layout.chair_pose("home"))
+        motion.explicit()
+        lift = ad.settle_hands(motion, scene, reach=0.05)
+        swivel = ad.clear_desk(motion, scene)
+        # En dernier : mesuré sur la peau, après tout ce qui fait bouger le bras.
+        edge = clear_desk_edge(motion, scene)
+        if lift or swivel or edge:
+            report.append(f"mains au-dessus du bureau (posées {lift} cm, sorties du plateau {edge} cm, coudes {swivel}°)")
+        left = dc.Contacts(rig).check(motion, scene, ("writing_desk",), range(len(motion.frames)), tolerance=0.002)
+        print(f"[atelier] {name} : reste contre le bureau {dc.report(left) or 'rien'}", flush=True)
     if motion.loop:
         # Le raccord après traitement : de la dernière image unique à la première, pas plus qu'un pas ordinaire.
         seam, usual = al.seam_step(motion)

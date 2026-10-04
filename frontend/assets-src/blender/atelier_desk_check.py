@@ -39,111 +39,164 @@ def ease(t, a, b):
     return x * x * (3 - 2 * x)
 
 
+# Où est la chaise pendant chaque clip : une position nommée (atelier_decor.Layout.chair_pose), ou un trajet d'une
+# position à une autre que le geste parcourt selon ses courbes « ChairYaw » (le pivot) et « ChairRoll » (le
+# roulement), de 0 à 1 — exactement ce qu'Unity fera.
+STATIC = {
+    "desk_rest": "type", "desk_type": "type", "desk_mouse": "type", "desk_think": "type", "desk_stretch": "type",
+    "desk_drink": "type", "desk_take": "type", "desk_read": "type",
+    "desk_write": "write", "desk_write_start": "write", "desk_write_end": "write",
+    "desk_lap": "type-90", "desk_lap_droite": "type+90",
+    "sitting_idle": "home", "sit_down": "home", "stand_up": "home",
+}
+PATHS = {
+    "chair_pull_in": ("home", "type"),
+    "chair_push_out": ("type", "home"),
+    "chair_turn_left_45": ("type", "type-45"),
+    "chair_turn_right_45": ("type", "type+45"),
+    "chair_turn_left_90": ("type", "type-90"),
+    "chair_turn_right_90": ("type", "type+90"),
+}
+# Les pivots se jouent aussi depuis d'autres positions : vérifiés depuis chacune (« clip@départ »).
+VARIANTS = {
+    "chair_turn_right_45@write": ("chair_turn_right_45", "write", "type"),
+    "chair_turn_left_45@home": ("chair_turn_left_45", "home", "home-45"),
+    "chair_turn_right_90@home": ("chair_turn_right_90", "home", "home+90"),
+}
+
+
+def curves_of(name):
+    """Les courbes du geste exporté (motions/<clip>.json.gz)."""
+    path = al.MOTIONS / f"{name}.json.gz"
+    if not path.exists():
+        return {}
+    return json.load(gzip.open(path, "rt")).get("curves", {})
+
+
+def scene_for(name, layout, motion=None):
+    """Le décor du clip `name` (ou d'une variante « clip@départ »), comme le jeu le pose ; None si le clip n'en a pas."""
+    clip, path = name, None
+    if name in VARIANTS:
+        clip, a, b = VARIANTS[name]
+        path = (a, b)
+    elif name in PATHS:
+        path = PATHS[name]
+    if path is not None:
+        curves = motion.curves if motion is not None else curves_of(clip)
+        yaw, roll = curves.get("ChairYaw"), curves.get("ChairRoll")
+        c0, c1 = layout.chair_pose(path[0]), layout.chair_pose(path[1])
+        if not yaw and not roll:
+            return dc.Scene(layout, c0)
+
+        def at(seq, f):
+            return seq[min(f, len(seq) - 1)] if seq else 0.0
+
+        def chair(f, yaw=yaw, roll=roll, c0=c0, c1=c1):
+            return c0[0] + (c1[0] - c0[0]) * at(yaw, f), c0[1] + (c1[1] - c0[1]) * at(roll, f)
+        return dc.Scene(layout, chair)
+    if clip in STATIC:
+        return dc.Scene(layout, layout.chair_pose(STATIC[clip]))
+    return None
+
+
 def scenes(layout):
-    """Le décor de chaque clip, comme BodyActivity le pose."""
-    ty, tr = layout.typing()
-    wy, wr = layout.writing()
-
-    def at(oid, xz, yaw=None):
-        (_, y, _), home_yaw = layout.home[oid]
-        return (xz[0], y, xz[1]), (home_yaw if yaw is None else yaw)
-
-    work = {
-        "mouse": at("mouse", layout.work_spot(ty, tr, dc.MOUSE_SPOT, 0.07), ty),
-        "mug": at("mug", layout.work_spot(ty, tr, dc.MUG_SPOT, 0.08)),
-        "pen": at("pen", layout.work_spot(ty, tr, dc.PEN_SPOT, 0.08), ty - 25.0),
-    }
-    write = dict(work)
-    write["mug"] = at("mug", layout.work_spot(wy, wr, dc.WRITE_MUG_SPOT, 0.08))
-    write["notebook"] = at("notebook", layout.writing_spot(), -8.0)
-
-    def turning(y0, y1, r0, r1, seconds):
-        n = seconds * 30
-
-        def chair(f):
-            k = ease(f / n * seconds, 0.1, seconds - 0.25)
-            return y0 + (y1 - y0) * k, r0 + (r1 - r0) * min(1.0, k * 1.6)
-        return chair
-
-    toward = -70.0   # quelqu'un à sa gauche (la démo) ; le symétrique se vérifie par les clips de droite
+    """Toutes les scènes connues (clips et variantes)."""
     out = {}
-    for name in ("desk_rest", "desk_type", "desk_mouse", "desk_think", "desk_stretch", "desk_drink", "desk_take", "desk_read"):
-        out[name] = dc.Scene(layout, (ty, tr), moved=work, hidden=("pen",) if name == "desk_take" else ())
-    out["desk_write"] = dc.Scene(layout, (wy, wr), moved=write, hidden=("pen",))
-    out["desk_lap"] = dc.Scene(layout, (toward, 0.0), moved=work)
-    out["desk_lap_droite"] = dc.Scene(layout, (ty + 70.0, 0.0), moved=work)
-    # Les clips de posture : assise au bureau (chaise d'origine) ; s'asseoir et se lever, chaise reculée (ActorBody :
-    # PullOut) — le clip finit (ou commence) assis à l'origine, sur la chaise.
-    out["sitting_idle"] = dc.Scene(layout, (0.0, 0.0))
-    out["sit_down"] = dc.Scene(layout, (0.0, -0.28))
-    out["stand_up"] = dc.Scene(layout, (0.0, -0.28))
-    out["chair_turn_left_90"] = dc.Scene(layout, turning(ty, toward, tr, 0.0, 2.0), moved=work)
-    out["chair_turn_right_90"] = dc.Scene(layout, turning(toward, ty, 0.0, tr, 2.0), moved=work)
-    out["chair_turn_left_45"] = dc.Scene(layout, turning(ty, ty - 45.0, tr, tr, 1.4), moved=work)
-    out["chair_turn_right_45"] = dc.Scene(layout, turning(ty, ty + 45.0, tr, tr, 1.4), moved=work)
+    for name in list(STATIC) + list(PATHS) + list(VARIANTS):
+        sc = scene_for(name, layout)
+        if sc is not None:
+            out[name] = sc
     return out
 
 
-HELD_OBJECTS = {"Tasse": "mug", "Stylo": "pen", "Objet": "pen", "Livre": "book_desk_1", "Souris": "mouse"}
+# Les boîtes de contrôle des anciens clips (souris, livre) : la boîte → l'objet de la pièce.
+HELD_OBJECTS = {"Livre": "book_desk_1", "Souris": "mouse"}
+
+
+def split_held(held, layout):
+    """
+    Les objets tenus d'un clip, image par image (une liste de dicts) : (absolus, déplacements). Les clés qui sont des
+    objets de la pièce (« mug », « pen ») portent un déplacement rigide depuis leur place ; les autres, une boîte de
+    contrôle (matrice absolue), ramenée au vrai objet.
+    """
+    rows = {}
+    for h in held:
+        for k in h:
+            rows.setdefault(k, None)
+    absolute, moves = {}, {}
+    for k in rows:
+        seq = [h.get(k) for h in held]
+        if k in layout.home:
+            moves[k] = seq
+        elif k in HELD_OBJECTS:
+            absolute.update(_absolute(k, seq, layout))
+    return absolute, moves
 
 
 def held_matrices(name, layout):
-    """Les objets tenus du clip (held/<clip>.json, écrit par atelier_desk.py), ramenés aux vrais objets : du centre de
-    la boîte de contrôle au pivot du modèle (le bas, au centre), l'axe long du stylo sur celui de la boîte."""
+    """Les objets tenus du clip (held/<clip>.json, écrit par atelier_desk.py) : (absolus, déplacements)."""
     path = al.WORKDIR / "held" / f"{name}.json"
     if not path.exists():
-        return {}
+        return {}, {}
     data = json.loads(path.read_text())
-    out = {}
-    for box, rows in data.items():
-        oid = HELD_OBJECTS.get(box)
-        if oid is None:
-            continue
-        fix = Matrix.Identity(4)
-        if oid == "mouse":
-            # Elle glisse sur le bureau : seule sa place à plat vient du clip, sa hauteur et son orientation restent
-            # celles qu'Unity lui donne (tournée comme la chaise, posée sur le tapis).
-            (_, y, _), _ = layout.home["mouse"]
-            out[oid] = [None if r is None else
-                        Matrix.Translation((r[3], r[7], y - dc.FLOOR_DROP)) @ Matrix.Rotation(0.0, 4, "Z")
-                        for r in rows]
-            continue
-        if oid == "mug":
-            fix = Matrix.Translation((0.0, 0.0, -0.049))
-        elif oid == "book_desk_1":
-            fix = Matrix.Rotation(math.pi / 2, 4, "Z") @ Matrix.Translation((0.0, 0.0, -0.014))
-        elif oid == "pen":
-            axis = pen_axis()
-            to = Vector((0.0, 0.0, 1.0)) if box == "Stylo" else Vector((1.0, 0.0, 0.0))
-            fix = axis.rotation_difference(to).to_matrix().to_4x4()
+    n = max((len(v) for v in data.values()), default=0)
+    held = [{} for _ in range(n)]
+    for k, rows in data.items():
+        for i, r in enumerate(rows):
+            if r is not None:
+                held[i][k] = Matrix([r[0:4], r[4:8], r[8:12], r[12:16]])
+    return split_held(held, layout)
+
+
+def _absolute(box, rows, layout):
+    oid = HELD_OBJECTS[box]
+    if oid == "mouse":
+        # Elle glisse sur le bureau, dans le sens de la main : sa place à plat et son lacet viennent du clip, sa
+        # hauteur reste celle du tapis ; son grand axe (le modèle est un ovale) sur celui de la boîte de contrôle.
+        (_, y, _), _ = layout.home["mouse"]
+        axis = long_axis("mouse")
+        fix = Vector((axis.x, axis.y, 0.0)).rotation_difference(Vector((0.0, -1.0, 0.0))).to_matrix().to_4x4()
         mats = []
-        for r in rows:
-            if r is None:
+        for m in rows:
+            if m is None:
                 mats.append(None)
                 continue
-            m = Matrix([r[0:4], r[4:8], r[8:12], r[12:16]])
-            # Une boîte « rangée » sous le sol : l'objet n'est pas tenu à cette image, il est à sa place.
-            mats.append(None if m.translation.z < -1.0 else m @ fix)
-        out[oid] = mats
-    return out
+            yaw = m.to_euler().z
+            mats.append(Matrix.Translation((m.translation.x, m.translation.y, y - dc.FLOOR_DROP)) @ Matrix.Rotation(yaw, 4, "Z") @ fix)
+        return {oid: mats}
+    fix = Matrix.Rotation(math.pi / 2, 4, "Z") @ Matrix.Translation((0.0, 0.0, -0.014))
+    return {oid: [None if m is None or m.translation.z < -1.0 else m @ fix for m in rows]}
+
+
+def long_axis(oid):
+    """Le grand axe d'un objet dans son modèle (vers son sommet le plus éloigné du centre)."""
+    obj = dc.load(oid)
+    c = sum((Vector(b) for b in obj.bound_box), Vector()) / 8
+    far = max(obj.data.vertices, key=lambda v: (v.co - c).length)
+    return (far.co - c).normalized()
 
 
 def pen_axis():
-    """L'axe long du stylo dans son modèle (vers son sommet le plus éloigné du centre)."""
-    pen = dc.load("pen")
-    c = sum((Vector(b) for b in pen.bound_box), Vector()) / 8
-    far = max(pen.data.vertices, key=lambda v: (v.co - c).length)
-    return (far.co - c).normalized()
+    """L'axe long du stylo dans son modèle."""
+    return long_axis("pen")
 
 
 def grip(motion, scene, name, frames):
     """
-    Ce que la main fait de l'objet de l'occupation, mesuré : la paume (entre le poignet et la base des doigts) au-dessus
-    du centre de la souris ; le bout des doigts sur les touches du clavier. Les contacts ne disent que ce qui entre
-    où : une paume posée à côté de la souris, sur le tapis, passait.
+    Ce que la main fait de l'objet de l'occupation, mesuré : la paume au-dessus de la souris ; le bout des doigts sur
+    les touches ; l'index et le majeur dans l'anse de la tasse ; le stylo entre le pouce et l'index ; les mains posées à
+    plat sur le bureau pendant qu'elles tirent ou repoussent la chaise. Les contacts ne disent que ce qui entre où : une
+    paume posée à côté de la souris, sur le tapis, passait.
     """
+    import atelier_desk
+    import atelier_desk_gestures as gs
     rig = motion.rig
     lines = []
+
+    class _D:
+        pass
+    d = _D()
+    d.rig = rig
     if name == "desk_mouse":
         worst_d, worst_h = 0.0, 0.0
         for f in frames:
@@ -163,37 +216,93 @@ def grip(motion, scene, name, frames):
         inv = kb.matrix_world.inverted()
         lo = Vector([min(v[i] for v in kb.bound_box) for i in range(3)])
         hi = Vector([max(v[i] for v in kb.bound_box) for i in range(3)])
-        outside, high = 0, 0.0
+        outside, low, high = 0, 1.0, -1.0
         for f in frames:
-            j = rig.joints(motion.frames[f], ("leftIndexDistal", "rightIndexDistal", "leftMiddleDistal", "rightMiddleDistal"))
-            for p in j.values():
-                q = inv @ p
-                if not (lo.x <= q.x <= hi.x and lo.y <= q.y <= hi.y):
-                    outside += 1
-                high = max(high, q.z - hi.z)
-        lines.append(f"bout des doigts sur le clavier : {outside} hors des touches, au plus {high * 100:.1f} cm au-dessus")
+            for side in ("left", "right"):
+                for p in atelier_desk.fingertips(d, motion.frames[f], side)[:4]:
+                    q = inv @ p
+                    if not (lo.x <= q.x <= hi.x and lo.y <= q.y <= hi.y):
+                        outside += 1
+                        continue
+                    pad = q.z - atelier_desk.FINGER_PAD - hi.z
+                    low, high = min(low, pad), max(high, pad)
+        drop = atelier_desk.UNITY_FINGER_DROP
+        lines.append(f"pulpe des doigts sur le clavier : {outside} hors des touches, de {low * 100:.1f} à {high * 100:.1f} cm "
+                     f"du dessus des touches (dans le jeu, {(low - drop) * 100:.1f} à {(high - drop) * 100:.1f} cm)")
+    hold = motion.curves.get("Hold")
+    if name == "desk_drink" and hold:
+        side = "left"
+        feat = dc.features(scene.layout, scene.chair_at(0))
+        hole0 = feat["mug"]["hole"]
+        worst = 0.0
+        held_frames = [f for f in range(len(motion.frames)) if hold[f] >= 0.25]
+        moves = scene.moves.get("mug", [])
+        for f in held_frames:
+            pose = rig.fk(motion.frames[f])
+            g = gs.handle_grip_point(d, side)(pose)
+            m = moves[f] if f < len(moves) and moves[f] is not None else Matrix.Identity(4)
+            worst = max(worst, (g - m @ hole0).length)
+        lines.append(f"anse de la tasse : l'index et le majeur à {worst * 100:.1f} cm au plus du trou de l'anse ({len(held_frames)} images tenues)")
+    if name in ("desk_take", "desk_write_start", "desk_write_end") and hold:
+        side = "left" if name == "desk_take" else "right"
+        feat = dc.features(scene.layout, scene.chair_at(0))
+        c0 = feat["pen"]["center"]
+        moves = scene.moves.get("pen", [])
+        worst = 0.0
+        held_frames = [f for f in range(len(motion.frames)) if 0.25 <= hold[f] <= 0.55]
+        for f in held_frames:
+            pose = rig.fk(motion.frames[f])
+            g = gs.pinch_point(d, side)(pose)
+            m = moves[f] if f < len(moves) and moves[f] is not None else Matrix.Identity(4)
+            worst = max(worst, (g - m @ c0).length)
+        lines.append(f"stylo pincé : le pouce et l'index à {worst * 100:.1f} cm au plus de son milieu ({len(held_frames)} images)")
+    on = motion.curves.get("HandsOnDesk")
+    if on:
+        worst_h, worst_slide = 0.0, 0.0
+        first = {}
+        top = 0.74
+        for f in range(len(motion.frames)):
+            if on[f] < 0.95:
+                continue
+            chair = scene.chair_at(f)
+            for side in ("left", "right"):
+                pose = rig.fk(motion.frames[f])
+                hand = head(rig, pose, f"{side}Hand").lerp(head(rig, pose, f"{side}MiddleProximal"), 0.5)
+                seat = dc.to_seat(hand, chair)
+                first.setdefault(side, seat)
+                worst_slide = max(worst_slide, math.hypot(seat[0] - first[side][0], seat[2] - first[side][2]))
+                worst_h = max(worst_h, abs(hand.z - top - 0.025))
+        lines.append(f"mains sur le bureau : la paume glisse de {worst_slide * 100:.1f} cm au plus sur le plateau pendant que la chaise roule, "
+                     f"hauteur ±{worst_h * 100:.1f} cm")
     return lines
+
+
+def head(rig, pose, h):
+    return pose[rig.hmap[h]].translation
 
 
 def verify(rig, names, previews=True):
     """Les clips `names` (exportés) contre le décor réel : contacts mesurés et, si demandé, une planche chacun."""
     al.rehearsal(True)
     layout = dc.Layout()
-    print(f"[vérif] taper : chaise {layout.typing()[0]:.1f}° / {layout.typing()[1]:.3f} m ; écrire : "
-          f"{layout.writing()[0]:.1f}° / {layout.writing()[1]:.3f} m", flush=True)
+    print(f"[vérif] taper : chaise {layout.chair_pose('type')[0]:.1f}° / {layout.chair_pose('type')[1]:.3f} m ; écrire : "
+          f"{layout.chair_pose('write')[0]:.1f}° / {layout.chair_pose('write')[1]:.3f} m", flush=True)
     contacts = dc.Contacts(rig)
-    targets = ("desk_chair", "writing_desk")
-    all_scenes = scenes(layout)
-    for name in names:
-        scene = all_scenes.get(name)
+    # Les meubles, et ce que ses mains touchent sur le bureau (une main dans le clavier ou dans la souris passait).
+    targets = ("desk_chair", "writing_desk", "keyboard", "mouse", "desk_mat", "notebook", "monitor", "mug", "desk_lamp")
+    wanted = list(names) + [v for v, (clip, _, _) in VARIANTS.items() if clip in names]
+    for name in wanted:
+        clip = VARIANTS[name][0] if name in VARIANTS else ("desk_lap" if name == "desk_lap_droite" else name)
+        if not (al.MOTIONS / f"{clip}.json.gz").exists():
+            continue
+        motion = load_motion(rig, clip)
+        motion.curves = curves_of(clip)
+        scene = scene_for(name, layout, motion)
         if scene is None:
             continue
-        clip = "desk_lap" if name == "desk_lap_droite" else name
-        motion = load_motion(rig, clip)
-        held = held_matrices(clip, layout)
-        if held:
-            scene.held = held
-            scene.hidden = scene.hidden - set(held)
+        absolute, moves = held_matrices(clip, layout)
+        scene.held = absolute
+        scene.moves = moves
         n = len(motion.frames)
         frames = range(0, n, max(1, n // 12))
         found = contacts.check(motion, scene, targets, frames)
@@ -218,7 +327,7 @@ def main():
     args = ap.parse_args(argv)
     rig = al.Rig(al.mika_armature())
     layout = dc.Layout()
-    names = [n for n in args.only.split(",") if n] or list(scenes(layout))
+    names = [n for n in args.only.split(",") if n] or list(STATIC) + list(PATHS)
     verify(rig, names, previews=not args.no_previews)
 
 

@@ -6,7 +6,8 @@ from mathutils import Vector
 from roomlib import *
 
 ROOM = dict(minX=-4.0, maxX=4.0, minZ=-4.5, maxZ=3.5, H=3.2)
-WIN = dict(z0=-1.9, z1=-0.5, y0=1.2, y1=2.3)        # left wall opening
+WIN = dict(z0=-1.9, z1=-0.5, y0=0.92, y1=2.3)       # left wall opening (appui à 0,92 m : à 1,20 il arrivait
+                                                     # aux épaules de Mika, qui tendait les bras pour s'y accouder)
 DOOR = dict(x0=1.35, x1=2.25, y1=2.06)              # front wall opening
 REVEAL = 0.15
 

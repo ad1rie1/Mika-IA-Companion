@@ -1,0 +1,15 @@
+{
+  "format": "mika.desk-layout/2",
+  "note": "repère du lieu (Unity) : origine au sol là où elle se tient, x à droite, y en haut, z devant elle",
+  "seat_hips": [0, 0.0000, 0],
+  "objects": [
+    {"id": "window_pane", "part": "Modèle", "origin": [0.0000, 0.8380, 0.3850], "yaw": -90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "window_pane", "part": "Window_Sash", "origin": [0.6450, 0.9750, 0.4500], "yaw": -90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "curtains", "part": "Modèle", "origin": [0.0000, 0.0350, 0.2859], "yaw": -90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "curtains", "part": "Curtain_L", "origin": [1.3233, 2.4900, 0.2401], "yaw": -90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "curtains", "part": "Curtain_R", "origin": [-1.3405, 2.4900, 0.2441], "yaw": -90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "cactus_windowsill", "part": "Modèle", "origin": [0.5189, 0.9240, 0.3600], "yaw": -90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "succulent_windowsill", "part": "Modèle", "origin": [-0.4500, 0.9240, 0.3500], "yaw": -90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false},
+    {"id": "window_sky", "part": "Modèle", "origin": [0.0000, -0.6000, 0.9800], "yaw": -90.0002, "tilt": 0.0000, "scale": [1.0000, 1.0000, 1.0000], "skinned": false}
+  ]
+}

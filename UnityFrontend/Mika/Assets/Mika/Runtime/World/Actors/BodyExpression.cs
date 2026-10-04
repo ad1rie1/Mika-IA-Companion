@@ -23,7 +23,8 @@ namespace Mika.World.Engine
 
         ActorBody _body;
         Animator _animator;
-        int _lifeLayer = -1;
+        int _lifeLayer = -1, _poseLayer = -1;
+        float _life = 1f;
 
         string _emotion = "neutral";
         float _intensity, _valence, _arousal;
@@ -44,6 +45,7 @@ namespace Mika.World.Engine
             clips = set;
             _animator = body.animator;
             _lifeLayer = _animator != null && _animator.runtimeAnimatorController != null ? _animator.GetLayerIndex(BodyAnim.LifeLayer) : -1;
+            _poseLayer = _animator != null && _animator.runtimeAnimatorController != null ? _animator.GetLayerIndex(BodyAnim.PoseLayer) : -1;
             _idle = -1;
             _talk = -1;
         }
@@ -123,7 +125,16 @@ namespace Mika.World.Engine
             {
                 _animator.SetFloat(BodyAnim.WalkPlayback, Mathf.Clamp(walk / Mathf.Max(0.3f, clips.walkClipSpeed), 0.55f, 1.6f));
             }
-            if (_lifeLayer >= 0) _animator.SetLayerWeight(_lifeLayer, _asleep ? 0.35f : 1f);
+            if (_lifeLayer >= 0)
+            {
+                // Un clip d'occupation (le bureau) a son propre souffle, réglé dans l'atelier avec les objets que ses mains
+                // touchent : le souffle et les micro-mouvements ajoutés par-dessus tournaient colonne et poitrine de 1 à 2°,
+                // et ses mains entraient de 2 cm dans le clavier et dans la souris. Le calque s'efface le temps du clip.
+                var occupied = _poseLayer >= 0 && _animator.GetCurrentAnimatorClipInfoCount(_poseLayer) > 0;
+                var lifeTarget = occupied ? 0f : _asleep ? 0.35f : 1f;
+                _life = Mathf.MoveTowards(_life, lifeTarget, Time.deltaTime / 0.4f);
+                _animator.SetLayerWeight(_lifeLayer, _life);
+            }
 
             if (_idle < 0 || now >= _idleUntil) PickIdle(now);
             var talking = _animator.GetBool(BodyAnim.Talking);

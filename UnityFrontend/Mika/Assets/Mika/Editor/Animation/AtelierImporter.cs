@@ -129,6 +129,15 @@ namespace Mika.Editor.Animation
                     for (var m = 0; m < muscles.Length; m++) Curve(muscles[m]).AddKey(time, pose.muscles[m]);
                 }
                 handler.Dispose();
+                // Les courbes du geste (la chaise qu'il fait rouler, les mains sur le bureau, l'objet tenu) : des
+                // paramètres de l'Animator du même nom, que le jeu lit pour déplacer l'objet avec le geste.
+                if (data["curves"] is JObject extra)
+                    foreach (var kv in extra)
+                    {
+                        var values = (JArray)kv.Value;
+                        var curve = Curve(GestureCurvePrefix + kv.Key);
+                        for (var i = 0; i < values.Count; i++) curve.AddKey(i / fps, values[i].Value<float>());
+                    }
                 return Save(name, curves, loop, travel, fps);
             }
             finally
@@ -182,8 +191,15 @@ namespace Mika.Editor.Animation
             return clip;
         }
 
-        /// <summary>L'écart toléré par courbe : un muscle (≈ 0,1°), la position du corps (≈ 0,4 mm), son orientation.</summary>
-        static float Tolerance(string property) => property.StartsWith("RootT") ? 0.0005f : property.StartsWith("RootQ") ? 0.0002f : 0.0015f;
+        /// <summary>L'écart toléré par courbe : un muscle (≈ 0,1°), la position du corps (≈ 0,4 mm), son orientation, une courbe du geste.</summary>
+        static float Tolerance(string property) => property.StartsWith("RootT") ? 0.0005f : property.StartsWith("RootQ") ? 0.0002f
+            : property.StartsWith(GestureCurvePrefix) ? 0.002f : 0.0015f;
+
+        /// <summary>
+        /// Le préfixe des courbes du geste devenues paramètres de l'Animator (« GesteChairDrive ») : leur nom ne doit
+        /// pas pouvoir se confondre avec un muscle ni avec un paramètre que le code règle lui-même.
+        /// </summary>
+        public const string GestureCurvePrefix = "Geste";
 
         /// <summary>
         /// Une courbe réduite (Ramer–Douglas–Peucker, segments linéaires) : une clé n'est gardée que si la retirer

@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using Mika.World.Protocol;
 using UnityEngine;
@@ -12,11 +13,15 @@ namespace Mika.World.Engine
     /// </summary>
     /// <remarks>
     /// L'occupation vient du noyau (<c>actor_activity</c>), la posture et le lieu du corps (<see cref="ActorBody"/>) ;
-    /// ce composant ne décide rien de nouveau, il donne une forme crédible à ce qui est. Le contrôleur fournit
-    /// l'attitude du buste (paramètre <see cref="BodyAnim.Pose"/>), l'IK pose les mains au point exact des objets
-    /// réels de la scène : un clavier déplacé reste sous ses doigts.
+    /// ce composant ne décide rien de nouveau, il donne une forme crédible à ce qui est. Au bureau, devant la fenêtre et
+    /// la bibliothèque, ce sont les clips de l'atelier Blender qui jouent le corps entier (réglés contre les vrais
+    /// meubles) ; ailleurs, le contrôleur fournit l'attitude du buste et l'IK pose les mains au point exact des objets.
+    /// Aucun objet ne bouge sans le geste qui le déplace : la chaise suit les courbes du geste qui la roule ou la fait
+    /// pivoter (mains sur le bord du bureau, pieds qui poussent le sol), la tasse et le stylo suivent la main qui les a
+    /// pris et sont rendus là où elle les repose.
     /// </remarks>
     [DisallowMultipleComponent]
+    [DefaultExecutionOrder(-50)]    // avant ActorBody : la chaise menée par le geste, puis le corps recalé sur le siège
     [AddComponentMenu("Mika/Monde/Occupation du corps")]
     public sealed class BodyActivity : MonoBehaviour
     {
@@ -54,19 +59,14 @@ namespace Mika.World.Engine
         WorldObject _book;          // un livre tenu à deux mains pendant la lecture
         Hand _bookHand;
 
-        // Taper : chaque main tape à son rythme, par rafales ; la droite part parfois à la souris.
+        // Taper (sans clip) : chaque main tape à son rythme, par rafales ; la droite part parfois à la souris.
         readonly Typist _left = new Typist(), _right = new Typist();
         float _burstUntil, _pauseUntil, _mouseUntil;
         bool _bursting;
-        // Écrire : une ligne qui avance, puis la suivante.
+        // Écrire (sans clip) : une ligne qui avance, puis la suivante.
         float _line, _lineX;
-        // Regard qui flâne (fenêtre, rayonnages) et page qu'on tourne.
+        // Regard qui flâne et page qu'on tourne.
         Vector3 _gaze, _gazeTarget;
-        Vector3 _workPoint;         // où travaillent les mains (le clavier, la page) : règle la distance au bureau
-        float _workYaw;             // de combien la chaise se tourne vers le travail (un carnet à droite du clavier)
-        WorldObject _pulled;        // un objet ramené devant elle (le carnet pour écrire), et d'où il venait
-        Vector3 _pulledFrom;
-        Quaternion _pulledRot;
         float _gazeNext, _pageNext, _pageT = -1f;
         float _reachNext, _reachT = -1f;
         Vector3 _reachPoint;
@@ -85,6 +85,8 @@ namespace Mika.World.Engine
             _body = body;
             _stage = stage;
             _animator = body.animator;
+            _clipLengths.Clear();
+            body.BeforeStanding = LeaveSeat;
         }
 
         /// <summary>L'occupation que le noyau prête à l'acteur (<c>null</c> : aucune).</summary>
@@ -139,7 +141,6 @@ namespace Mika.World.Engine
                     if (Engaged) return Mode.DeskRest;
                     if (_activity == "work" && Find(KeyboardKeys, 1.6f) != null) return Mode.DeskType;
                     if (_activity == "draw") return Mode.DeskWrite;
-                    if (_activity == "read" && Find(BookKeys, 1.4f) != null) return Mode.DeskWrite;
                     return Desk() != null && _variant == 2 && !Engaged ? Mode.DeskLean : Mode.DeskRest;
                 case Posture.Lie:
                     return Mode.Lying;
@@ -155,8 +156,8 @@ namespace Mika.World.Engine
         }
 
         /// <summary>
-        /// Pendant un changement de posture au lit : elle ouvre la couette en s'y glissant, la repousse en se
-        /// redressant.
+        /// Pendant un changement de posture au lit : elle ouvre la couette en s'y glissant — la main droite en écarte le
+        /// bord — et la repousse en se redressant (la couette ne bouge jamais sans sa main).
         /// </summary>
         void Choreography()
         {
@@ -164,9 +165,39 @@ namespace Mika.World.Engine
             if (duvet == null) return;
             duvet.lastOccupied = Time.time;
             if (_body.Posture == Posture.Lie && duvet.State == DuvetState.Made && Asleep)
-                duvet.SetState(DuvetState.Open, 1.2f);
+            {
+                duvet.SetState(DuvetState.Open, DuvetHandSeconds);
+                _duvetHandT = 0f;
+            }
             else if (_body.Posture != Posture.Lie && duvet.Covered)
-                duvet.SetState(DuvetState.Open, 1.1f);
+            {
+                duvet.SetState(DuvetState.Open, DuvetHandSeconds);
+                _duvetHandT = 0f;
+            }
+            DuvetHand();
+        }
+
+        // La main qui ouvre la couette ou la repousse : du bord (à la hanche) vers le côté, le temps que la couette bouge.
+        const float DuvetHandSeconds = 1.2f;
+        float _duvetHandT = -1f;
+
+        void DuvetHand()
+        {
+            if (_duvetHandT < 0f) return;
+            _duvetHandT += Time.deltaTime / DuvetHandSeconds;
+            var hips = HipsPos;
+            var right = _body.Posture == Posture.Lie ? _body.LyingRight : Right;
+            var from = hips + right * 0.12f + Vector3.up * 0.12f;
+            var to = hips + right * 0.38f + Vector3.up * 0.08f;
+            var k = Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((_duvetHandT - 0.15f) / 0.7f));
+            var w = Mathf.Sin(Mathf.Clamp01(_duvetHandT) * Mathf.PI);
+            var hand = Vector3.Lerp(from, to, k);
+            _body.Pin(AvatarIKGoal.RightHand, hand, null, hand + right * 0.12f + Vector3.up * 0.15f, w, 0.05f);
+            if (_duvetHandT >= 1f)
+            {
+                _duvetHandT = -1f;
+                _body.Unpin(AvatarIKGoal.RightHand, 0.2f);
+            }
         }
 
         bool Asleep => BodyAnim.HasParameter(_animator, BodyAnim.Asleep) && _animator.GetBool(BodyAnim.Asleep);
@@ -180,7 +211,7 @@ namespace Mika.World.Engine
             Mode.DeskLean => "lean_desk",
             Mode.BedEdge => "mattress",
             Mode.Sill => "sill",
-            Mode.Browse => "none",
+            Mode.Browse => "browse",
             Mode.Pour => "pour",
             _ => "none",
         };
@@ -198,15 +229,12 @@ namespace Mika.World.Engine
             }
             _pageT = -1f;
             _reachT = -1f;
-            if (m == Mode.DeskWrite) PutBack();
-            // Passer d'une occupation du bureau à une autre garde le bureau tel qu'il est ; le quitter le range.
-            if (_clipPose != null && !(next == Mode.DeskType || next == Mode.DeskWrite || next == Mode.DeskRest || next == Mode.DeskLean ||
-                                       (next == Mode.ReadHeld && _body.Posture == Posture.Sit)))
-                LeaveDesk();
+            // Debout : la pose de clip (fenêtre, bibliothèque) s'arrête avec l'occupation.
+            if (_body.Posture != Posture.Sit) _clipPose = null;
             if (m == Mode.Lying)
             {
-                _tidied = false;
                 _pullT = -1f;
+                _duvet = null;
             }
             // Quitter une occupation (pas l'attente pendant un geste) oublie qu'un geste a eu lieu.
             if (m != Mode.None) _sawChoreography = false;
@@ -220,18 +248,16 @@ namespace Mika.World.Engine
                 DeskClip(m, chair);
                 return;
             }
-            if (chair != null && !_body.Choreographing && _body.Seatedness > 0.95f)
+            if (_body.Posture != Posture.Sit) ForgetDesk();
+            if (StandClipped(m))
             {
-                // La chaise : avancée au bureau pour travailler, reculée un peu au repos, tournée vers la personne qui parle.
-                var engaged = Engaged && (m == Mode.DeskRest || m == Mode.DeskLean);
-                var yaw = engaged ? Mathf.Clamp(chair.YawToward(companion.position, SeatHomeRotation()), -125f, 125f) : 0f;
-                // Elle ne pivote pas pour quelques degrés vers quelqu'un : en dessous de 20°, la tête suffit. Vers son
-                // travail (un carnet décalé), si : un léger quart de tour.
-                yaw = Mathf.Abs(yaw) < 20f ? 0f : yaw;
-                if (!engaged && m == Mode.DeskWrite) yaw = _workYaw;
-                chair.SwivelTo(yaw);
-                chair.RollTo(m == Mode.DeskType || m == Mode.DeskWrite || m == Mode.DeskLean ? DeskRoll(_workPoint) : engaged ? -0.05f : 0f);
+                // À la fenêtre, devant la bibliothèque : le clip de l'atelier joue le corps entier (mains sur l'appui,
+                // regard sur les tranches) ; rien à épingler.
+                SetPose(PoseOf(m));
+                _body.SetActivityLook(null);
+                return;
             }
+            if (_clipPose != null && _body.Posture != Posture.Sit) _clipPose = null;
             switch (m)
             {
                 case Mode.DeskType: Type(); break;
@@ -296,7 +322,773 @@ namespace Mika.World.Engine
             return shoulder - Vector3.up * 0.24f + Fwd * forward + Right * (left ? -outward : outward);
         }
 
-        // --- au bureau -----------------------------------------------------------------------------------------
+        // --- au bureau : les clips de l'atelier ----------------------------------------------------------------
+        // Faits contre le vrai bureau (frontend/assets-src/blender/atelier_desk.py, atelier_desk_gestures.py) pour des
+        // positions nommées de la chaise (relevé : ArtSource/atelier/desk_plan.json, repère du siège) :
+        //   - « home » : là où elle s'assoit et se lève, la chaise à sa place ;
+        //   - « type » : la chaise pivotée et avancée qui lui présente le clavier (taper, la souris, boire, prendre son
+        //     stylo, lire, réfléchir, s'étirer) ;
+        //   - « write » : pivotée de 45° vers sa gauche depuis « type », le carnet devant elle ;
+        //   - tournée de ±45° ou ±90° depuis « type » ou « home », vers quelqu'un qui lui parle.
+        // On passe de l'une à l'autre par un geste : se tirer vers le bureau ou s'en repousser, les mains sur son bord
+        // (chair_pull_in, chair_push_out) ; pivoter, les pieds poussant le sol (chair_turn_*). La chaise suit, image par
+        // image, la course du geste (courbes GesteChairYaw, GesteChairRoll) : elle ne bouge jamais sans lui. La tasse
+        // et le stylo restent à leur place sur le bureau (build_desk.py) : la main les y prend et les y repose (courbe
+        // GesteHold) ; la souris suit la paume.
+        enum Stop { Unknown, Home, Type, Write }
+
+        const float TypeYaw = 19.45f, TypeRoll = 0.2549f, WriteTurn = -45f, TurnStep = 45f;
+        const int MaxTurnSteps = 2;             // ±90° depuis « type » ou « home » (les pivots vérifiés dans l'atelier)
+        const float SettleSeconds = 0.5f;       // entre deux gestes, la pose de départ du suivant (le fondu fait 0,45 s)
+        const float EngageLinger = 3f;          // tournée vers quelqu'un, elle le reste un peu après qu'il s'est tu (s)
+        const float CarryHold = 0.25f;          // la courbe « Hold » au-delà de laquelle l'objet est dans la main
+        // Le livre tenu (desk_read) : son centre (à droite, hauteur au-dessus du sol, devant) et sa pente vers elle.
+        static readonly Vector3 BookHeld = new Vector3(0.02f, 0.895f, 0.265f);
+        const float BookTilt = 45f;
+
+        static float BaseYaw(Stop s) => s == Stop.Type ? TypeYaw : s == Stop.Write ? TypeYaw + WriteTurn : 0f;
+        static float BaseRoll(Stop s) => s == Stop.Type || s == Stop.Write ? TypeRoll : 0f;
+
+        /// <summary>Un geste qui déplace la chaise (ou le stylo) : d'où à où, et ce qu'il en a déjà fait.</summary>
+        sealed class Gesture
+        {
+            public string Pose;
+            public float Start, Seconds;
+            public float Yaw0, Roll0, Yaw1, Roll1;
+            public float YawK, RollK;
+            public bool MovesChair, Trust;
+            public Stop To;
+            public int ToSteps;
+        }
+
+        Stop _stop;                 // où est la chaise (Unknown : à relever)
+        int _steps;                 // tournée de tant de pas de 45° depuis _stop (« home » ou « type »)
+        bool _penWriting;           // le stylo dans la main qui écrit (entre desk_write_start et desk_write_end)
+        bool _leaving;              // elle va se lever : la chaise d'abord ramenée à sa place
+        Gesture _gesture;
+        ChairRig _deskChair;
+        float _engagedSeen = -100f;
+        int _wantSteps;
+        string _clipPose;           // la pose de clip jouée (null : aucune, l'IK et le calque de base décident)
+        float _clipStart, _clipUntil;
+        float _workSwitch;
+        bool _onMouse;
+        float _idleActAt;
+        string _idleAct, _requestedAct;
+        readonly Dictionary<string, float> _clipLengths = new Dictionary<string, float>();
+        int _poseLayer = -2;
+
+        int PoseLayer
+        {
+            get
+            {
+                if (_poseLayer == -2) _poseLayer = _animator.GetLayerIndex(BodyAnim.PoseLayer);
+                return _poseLayer;
+            }
+        }
+
+        bool DeskClipsReady => PoseLayer >= 0 && _animator.HasState(PoseLayer, Animator.StringToHash("type")) &&
+                               _animator.HasState(PoseLayer, Animator.StringToHash("pull_in"));
+
+        bool DeskClipped(Mode m, ChairRig chair) =>
+            chair != null && !_body.Choreographing && _body.Posture == Posture.Sit && DeskClipsReady &&
+            (m == Mode.DeskType || m == Mode.DeskWrite || m == Mode.DeskRest || m == Mode.DeskLean || m == Mode.ReadHeld);
+
+        bool StandClipped(Mode m) =>
+            (m == Mode.Sill || m == Mode.Browse) && _body.Posture == Posture.Stand && PoseLayer >= 0 &&
+            _animator.HasState(PoseLayer, Animator.StringToHash(PoseOf(m)));
+
+        void DeskClip(Mode m, ChairRig chair)
+        {
+            var now = Time.time;
+            _body.SetActivityLook(null);
+            _body.Unpin(AvatarIKGoal.LeftHand, 0.3f);
+            _body.Unpin(AvatarIKGoal.RightHand, 0.3f);
+            _deskChair = chair;
+            // Pendant qu'elle finit de s'asseoir : la pose assise du calque de base (celle où finit le clip d'assise).
+            if (_body.Seatedness < 0.95f)
+            {
+                SetPose("none");
+                return;
+            }
+            if (_stop == Stop.Unknown) Survey(chair);
+            if (_gesture != null)
+            {
+                if (now - _gesture.Start >= _gesture.Seconds) Finish(_gesture);
+                return;
+            }
+            // Un geste de la main en cours (boire, prendre son stylo, s'étirer) se finit avant tout le reste.
+            if (_idleAct != null && _idleAct != "think" && now < _clipUntil) return;
+            Want(m, chair, out var target, out var steps, out var pen);
+            var g = Next(target, steps, pen);
+            if (g != null)
+            {
+                Approach(g, now);
+                return;
+            }
+            Occupy(m, now);
+        }
+
+        /// <summary>Où la chaise doit être : vers la personne qui parle, sinon devant le travail.</summary>
+        void Want(Mode m, ChairRig chair, out Stop target, out int steps, out bool pen)
+        {
+            target = Stop.Type;
+            steps = 0;
+            pen = false;
+            if (_leaving)
+            {
+                target = Stop.Home;
+                return;
+            }
+            var now = Time.time;
+            if (Engaged) _engagedSeen = now;
+            if (now - _engagedSeen < EngageLinger && companion != null)
+            {
+                // Pivoter de 45° ou 90° (les pas des pieds) depuis « type » ou « home » : en dessous de 30°, la tête suffit.
+                target = _stop == Stop.Home ? Stop.Home : Stop.Type;
+                var baseYaw = BaseYaw(target);
+                var rel = Mathf.DeltaAngle(baseYaw, chair.YawToward(companion.position, SeatHome()));
+                var current = target == _stop ? _steps : 0;
+                // Garder le pas en cours tant que la personne n'en sort pas franchement.
+                if (Mathf.Abs(rel - current * TurnStep) < TurnStep * 0.78f) steps = current;
+                else steps = Mathf.Abs(rel) < 30f ? 0 : Mathf.Clamp(Mathf.RoundToInt(rel / TurnStep), -MaxTurnSteps, MaxTurnSteps);
+                while (steps != 0 && Mathf.Abs(baseYaw + steps * TurnStep) > chair.maxSwivel) steps -= System.Math.Sign(steps);
+                _wantSteps = steps;
+                return;
+            }
+            if (m == Mode.DeskWrite)
+            {
+                target = Stop.Write;
+                pen = true;
+            }
+        }
+
+        /// <summary>Le prochain geste pour amener la chaise (et le stylo) où elle doit être ; null : elle y est.</summary>
+        Gesture Next(Stop target, int steps, bool pen)
+        {
+            // Le stylo d'abord reposé sur le carnet, avant de faire autre chose qu'écrire.
+            if (_penWriting && !(target == Stop.Write && steps == 0 && pen)) return Stay("write_end", _stop, _steps);
+            if (_steps != 0)
+            {
+                var d = target == _stop ? steps - _steps : -_steps;
+                return d != 0 ? Turn(d) : null;
+            }
+            switch (_stop)
+            {
+                case Stop.Home:
+                    if (target == Stop.Home) return steps != 0 ? Turn(steps) : null;
+                    return Roll("pull_in", Stop.Home, Stop.Type);
+                case Stop.Type:
+                    if (target == Stop.Type) return steps != 0 ? Turn(steps) : null;
+                    if (target == Stop.Write) return Swivel("turn_left_45", Stop.Type, Stop.Write);
+                    return Roll("push_out", Stop.Type, Stop.Home);
+                case Stop.Write:
+                    if (target == Stop.Write) return pen && !_penWriting ? Stay("write_start", Stop.Write, 0) : null;
+                    return Swivel("turn_right_45", Stop.Write, Stop.Type);
+            }
+            return null;
+        }
+
+        Gesture Turn(int d)
+        {
+            var n = Mathf.Clamp(d, -MaxTurnSteps, MaxTurnSteps);
+            var pose = (n > 0 ? "turn_right_" : "turn_left_") + (Mathf.Abs(n) == 1 ? "45" : "90");
+            var y0 = BaseYaw(_stop) + _steps * TurnStep;
+            var r = BaseRoll(_stop);
+            return Make(pose, y0, r, y0 + n * TurnStep, r, _stop, _steps + n);
+        }
+
+        Gesture Swivel(string pose, Stop from, Stop to) => Make(pose, BaseYaw(from), BaseRoll(from), BaseYaw(to), BaseRoll(to), to, 0);
+
+        Gesture Roll(string pose, Stop from, Stop to) => Make(pose, BaseYaw(from), BaseRoll(from), BaseYaw(to), BaseRoll(to), to, 0);
+
+        Gesture Stay(string pose, Stop at, int steps)
+        {
+            var y = BaseYaw(at) + steps * TurnStep;
+            var g = Make(pose, y, BaseRoll(at), y, BaseRoll(at), at, steps);
+            g.MovesChair = false;
+            return g;
+        }
+
+        Gesture Make(string pose, float y0, float r0, float y1, float r1, Stop to, int toSteps) => new Gesture
+        {
+            Pose = pose, Seconds = ClipSeconds(pose), Yaw0 = y0, Roll0 = r0, Yaw1 = y1, Roll1 = r1, To = to, ToSteps = toSteps,
+            MovesChair = true,
+        };
+
+        /// <summary>La pose où commence un geste : on s'y installe avant de le lancer (le geste part d'elle).</summary>
+        static string StartPose(string gesture) => gesture switch
+        {
+            "push_out" => "desk",
+            "write_end" => "write",
+            _ => "lap",
+        };
+
+        /// <summary>
+        /// S'installer dans la pose de départ du geste, puis le lancer. Le stylo n'est reposé qu'en fin de ligne (la
+        /// boucle d'écriture au début d'une de ses deux lignes), la souris lâchée qu'à l'endroit où la main l'a prise.
+        /// </summary>
+        void Approach(Gesture g, float now)
+        {
+            if (_book != null) BookBackInHand();
+            if (_clipPose == "mouse" && !MouseAtGrabPhase()) return;
+            var start = StartPose(g.Pose);
+            if (!PoseLayerHas(g.Pose))
+            {
+                // Un contrôleur sans ce geste (assets incomplets) : la chaise prend sa place d'un coup, signalé une fois.
+                if (!_warnedMissing)
+                {
+                    _warnedMissing = true;
+                    Debug.LogWarning($"[BodyActivity] geste « {g.Pose} » absent du contrôleur : reconstruire les animations du corps.");
+                }
+                Finish(g);
+                return;
+            }
+            if (_clipPose != start || !InPose(start) || now - _clipStart < SettleSeconds)
+            {
+                SetPose(start);
+                return;
+            }
+            if (g.Pose == "write_end" && !LoopAt("write", 0.04f, 0.5f)) return;
+            g.Start = now;
+            // Les courbes d'un état qui n'en a pas valent 0 (par défaut) : on peut les lire dès le fondu d'entrée. Si
+            // elles gardaient la dernière valeur d'un geste précédent, on attend que l'état du geste soit seul.
+            g.Trust = _animator.GetFloat(BodyAnim.ChairYaw) < 0.01f && _animator.GetFloat(BodyAnim.ChairRoll) < 0.01f;
+            _gesture = g;
+            SetPose(g.Pose);
+        }
+
+        bool _warnedMissing;
+
+        void Finish(Gesture g)
+        {
+            if (g.MovesChair && _deskChair != null) _deskChair.Set(g.Yaw1, g.Roll1);
+            _stop = g.To;
+            _steps = g.ToSteps;
+            if (g.Pose == "write_start") _penWriting = true;
+            if (g.Pose == "write_end") _penWriting = false;
+            if (_gesture == g) _gesture = null;
+        }
+
+        /// <summary>
+        /// Arrivée à la place voulue : ce que font ses mains. Tournée vers quelqu'un ou à sa place d'origine, les mains
+        /// sur les cuisses ; devant le carnet, elle écrit ; devant le clavier, l'occupation.
+        /// </summary>
+        void Occupy(Mode m, float now)
+        {
+            if (_stop == Stop.Home || _steps != 0)
+            {
+                SetPose("lap");
+                return;
+            }
+            if (_stop == Stop.Write)
+            {
+                SetPose(_penWriting ? "write" : "lap");
+                return;
+            }
+            var engaged = now - _engagedSeen < EngageLinger;
+            // La souris n'est lâchée qu'au point de sa boucle où la main l'a prise : elle reste là où elle était.
+            var onMouse = m == Mode.DeskType && _onMouse && now < _workSwitch && !engaged;
+            if (_clipPose == "mouse" && !onMouse && !MouseAtGrabPhase()) return;
+            if (engaged)
+            {
+                SetPose("desk");
+                return;
+            }
+            switch (m)
+            {
+                case Mode.DeskType:
+                    if (now >= _workSwitch)
+                    {
+                        _onMouse = !_onMouse && Find(MouseKeys, 1.6f) != null;
+                        _workSwitch = now + (_onMouse ? Random.Range(3f, 7f) : Random.Range(8f, 18f));
+                    }
+                    SetPose(_onMouse ? "mouse" : "type");
+                    break;
+                case Mode.ReadHeld:
+                    SetPose("read");
+                    HoldBook();
+                    break;
+                case Mode.DeskLean:
+                    // Accoudée : la même vie que le repos (boire, prendre son stylo, s'étirer), réfléchir pour attitude.
+                    Idle(now, "lean_desk");
+                    break;
+                default:
+                    Idle(now, "desk");
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Au repos au bureau : les mains posées (<paramref name="rest"/> : « desk », ou accoudée « lean_desk »), et de
+        /// temps en temps réfléchir, s'étirer, boire une gorgée, prendre son stylo — ou le geste demandé.
+        /// </summary>
+        void Idle(float now, string rest)
+        {
+            // Réfléchir s'interrompt pour un geste demandé ; un geste de la main, lui, se finit.
+            if (_idleAct != null && now < _clipUntil && !(_idleAct == "think" && _requestedAct != null)) return;
+            if (_idleAct != null)
+            {
+                _idleAct = null;
+                _idleActAt = now + Random.Range(15f, 35f);
+            }
+            if (_idleActAt <= 0f) _idleActAt = now + Random.Range(8f, 20f);
+            var act = _requestedAct;
+            if (act == null && now >= _idleActAt)
+            {
+                var roll = Random.value;
+                act = roll < 0.45f ? "think" : roll < 0.62f && Mug() != null ? "drink" : roll < 0.8f && Pen() != null ? "take" : "stretch";
+            }
+            // Déjà accoudée, réfléchir n'est pas un geste de plus.
+            if (act == "think" && rest == "lean_desk")
+            {
+                _requestedAct = null;
+                _idleActAt = now + Random.Range(15f, 35f);
+                act = null;
+            }
+            if (act != null)
+            {
+                var pose = act == "think" ? "lean_desk" : act;
+                // Rejouer le même geste : repasser d'abord par les mains posées (un état ne se relance pas sur lui-même).
+                if (_clipPose == pose || AnimatorAt(pose))
+                {
+                    SetPose(rest == pose ? "desk" : rest);
+                    _requestedAct = act;
+                    return;
+                }
+                _requestedAct = null;
+                _idleAct = act;
+                SetPose(pose, true);
+                _clipUntil = now + (act == "think" ? Random.Range(9f, 16f) : ClipSeconds(act));
+                return;
+            }
+            SetPose(rest);
+        }
+
+        /// <summary>
+        /// Joue tout de suite un petit geste du repos au bureau (« think », « drink », « take », « stretch ») au lieu
+        /// d'attendre le tirage : pour le labo d'animation et les démos. Il attend, s'il le faut, que la chaise soit
+        /// devant le clavier.
+        /// </summary>
+        public void PlayDeskGesture(string gesture)
+        {
+            if (gesture == "think" || gesture == "drink" || gesture == "take" || gesture == "stretch") _requestedAct = gesture;
+        }
+
+        /// <summary>Où en est la chaise, pour les démos et les sondes : « type », « write », « home+90 »…</summary>
+        public string ChairStop => _gesture != null ? _gesture.Pose
+            : _stop == Stop.Unknown ? "?" : _stop.ToString().ToLowerInvariant() + (_steps != 0 ? (_steps > 0 ? "+" : "") + (_steps * 45) : "");
+
+        void SetPose(string pose, bool restart = false)
+        {
+            if (_clipPose == pose && !restart) return;
+            _clipPose = pose;
+            _clipStart = Time.time;
+        }
+
+        /// <summary>L'état de la pose est sur le calque (seul, ou en train d'entrer ou de sortir).</summary>
+        bool AnimatorAt(string pose)
+        {
+            if (PoseLayer < 0) return false;
+            var h = Animator.StringToHash(pose);
+            return _animator.GetCurrentAnimatorStateInfo(PoseLayer).shortNameHash == h ||
+                   (_animator.IsInTransition(PoseLayer) && _animator.GetNextAnimatorStateInfo(PoseLayer).shortNameHash == h);
+        }
+
+        bool PoseLayerHas(string pose) => PoseLayer >= 0 && _animator.HasState(PoseLayer, Animator.StringToHash(pose));
+
+        /// <summary>L'état de la pose est seul sur le calque (fondu d'entrée fini).</summary>
+        bool InPose(string pose)
+        {
+            if (PoseLayer < 0) return false;
+            if (pose == "none") return !_animator.IsInTransition(PoseLayer);
+            return !_animator.IsInTransition(PoseLayer) && _animator.GetCurrentAnimatorStateInfo(PoseLayer).shortNameHash == Animator.StringToHash(pose);
+        }
+
+        /// <summary>La boucle de la pose est au début d'un de ses cycles (ou d'une fraction <paramref name="also"/>).</summary>
+        bool LoopAt(string pose, float window, float also = -1f)
+        {
+            if (!InPose(pose)) return true;
+            var f = Mathf.Repeat(_animator.GetCurrentAnimatorStateInfo(PoseLayer).normalizedTime, 1f);
+            return f < window || (also >= 0f && f >= also && f < also + window);
+        }
+
+        float ClipSeconds(string pose)
+        {
+            string clip = null;
+            foreach (var (p, c) in BodyAnim.DeskClips)
+                if (p == pose)
+                    clip = c;
+            if (clip == null) return 3f;
+            if (_clipLengths.Count == 0 && _animator.runtimeAnimatorController != null)
+                foreach (var c in _animator.runtimeAnimatorController.animationClips)
+                    if (c != null)
+                        _clipLengths[c.name] = c.length;
+            return _clipLengths.TryGetValue(clip, out var s) ? s : 3f;
+        }
+
+        /// <summary>
+        /// Relève où est la chaise en arrivant (une position nommée, à peu près) ; ailleurs — un instantané l'a laissée
+        /// n'importe où —, elle est posée à sa place d'origine.
+        /// </summary>
+        void Survey(ChairRig chair)
+        {
+            foreach (var s in new[] { Stop.Home, Stop.Type, Stop.Write })
+                for (var k = -MaxTurnSteps; k <= MaxTurnSteps; k++)
+                {
+                    if (s == Stop.Write && k != 0) continue;
+                    if (Mathf.Abs(Mathf.DeltaAngle(chair.Yaw, BaseYaw(s) + k * TurnStep)) > 2f || Mathf.Abs(chair.Roll - BaseRoll(s)) > 0.01f) continue;
+                    _stop = s;
+                    _steps = k;
+                    return;
+                }
+            chair.Set(0f, 0f);
+            _stop = Stop.Home;
+            _steps = 0;
+        }
+
+        /// <summary>
+        /// Avant de se lever (<see cref="ActorBody.BeforeStanding"/>) : le stylo reposé, la chaise ramenée à sa place par
+        /// ses gestes — tournée vers le bureau, repoussée des mains.
+        /// </summary>
+        IEnumerator LeaveSeat()
+        {
+            var chair = SeatChair();
+            if (chair == null || !DeskClipsReady || !enabled) yield break;
+            if (_stop == Stop.Unknown) Survey(chair);
+            _leaving = true;
+            var deadline = Time.time + 30f;
+            while (Time.time < deadline && _body.Posture == Posture.Sit)
+            {
+                // Arrivée, et un temps posée (les mains sur les cuisses) avant de se lever.
+                if (_gesture == null && !_penWriting && _stop == Stop.Home && _steps == 0 &&
+                    ((_clipPose == "lap" && Time.time - _clipStart > 0.4f) || _clipPose == "none" || _clipPose == null)) break;
+                yield return null;
+            }
+            if (_stop != Stop.Home || _steps != 0)
+            {
+                Debug.LogWarning("[BodyActivity] la chaise n'a pas pu être ramenée par ses gestes : posée à sa place.");
+                chair.Set(0f, 0f);
+                _stop = Stop.Home;
+                _steps = 0;
+            }
+            _leaving = false;
+        }
+
+        /// <summary>Elle n'est plus assise au bureau : ce qu'elle tenait retourne à sa place, l'état est oublié.</summary>
+        void ForgetDesk()
+        {
+            if (_stop == Stop.Unknown && _gesture == null && _carried == null && !_mouseHeld) return;
+            ReleaseCarried();
+            ReleaseMouse();
+            // Partie sans ses gestes (un saut d'état) : la chaise retourne à sa place, où elle se rassiéra.
+            if (_deskChair != null && (_stop != Stop.Home || _steps != 0 || _gesture != null) && !_body.Choreographing)
+                _deskChair.Set(0f, 0f);
+            _stop = Stop.Unknown;
+            _steps = 0;
+            _gesture = null;
+            _penWriting = false;
+            _leaving = false;
+            _clipPose = null;
+            _idleAct = null;
+            _requestedAct = null;
+            _idleActAt = 0f;
+            _onMouse = false;
+        }
+
+        /// <summary>
+        /// Le siège tel qu'il est chaise ni tournée ni avancée : son orientation. Le lieu donne l'orientation du point
+        /// d'approche, qui ne regarde pas forcément dans l'axe de la chaise ; c'est l'assise, ramenée de son pivot, qui
+        /// fait foi.
+        /// </summary>
+        Quaternion SeatHome()
+        {
+            var a = _body.Anchor;
+            if (!a.HasValue) return SeatHomeRotation();
+            var f = Flat(a.Value.rotation * Vector3.forward);
+            if (f.sqrMagnitude < 1e-4f) return SeatHomeRotation();
+            return Quaternion.AngleAxis(-(_chair != null ? _chair.Yaw : 0f), Vector3.up) * Quaternion.LookRotation(f.normalized, Vector3.up);
+        }
+
+        // --- ce que le geste fait bouger (après l'animation) ---------------------------------------------------
+        void LateUpdate()
+        {
+            if (_body == null || _animator == null || _animator.runtimeAnimatorController == null) return;
+            DriveChair();
+            CarryObjects();
+            CarryMouse();
+        }
+
+        /// <summary>La chaise suit la course du geste en cours (courbes de pivot et de roulement, 0 → 1).</summary>
+        void DriveChair()
+        {
+            var g = _gesture;
+            if (g == null || !g.MovesChair || _deskChair == null || PoseLayer < 0) return;
+            var h = Animator.StringToHash(g.Pose);
+            var transition = _animator.IsInTransition(PoseLayer);
+            var current = _animator.GetCurrentAnimatorStateInfo(PoseLayer).shortNameHash == h;
+            var next = transition && _animator.GetNextAnimatorStateInfo(PoseLayer).shortNameHash == h;
+            if (!(current || (next && g.Trust))) return;
+            // La course ne revient jamais en arrière (le fondu de sortie mélange la courbe avec 0).
+            g.YawK = Mathf.Max(g.YawK, Mathf.Clamp01(_animator.GetFloat(BodyAnim.ChairYaw)));
+            if (!Mathf.Approximately(g.Roll0, g.Roll1)) g.RollK = Mathf.Max(g.RollK, Mathf.Clamp01(_animator.GetFloat(BodyAnim.ChairRoll)));
+            _deskChair.Set(Mathf.Lerp(g.Yaw0, g.Yaw1, g.YawK), Mathf.Lerp(g.Roll0, g.Roll1, g.RollK));
+        }
+
+        /// <summary>Un objet pris par la main : d'où il vient (il y retourne), et comment la main l'a pris.</summary>
+        sealed class Carried
+        {
+            public WorldObject Obj;
+            public Transform Hand, RestParent;
+            public Vector3 RestPos, LocalPos;
+            public Quaternion RestRot, LocalRot;
+            public ObjectPhysics Physics;
+            public RigidbodyInterpolation Interpolation;
+        }
+
+        Carried _carried;
+
+        /// <summary>
+        /// Les gestes qui prennent un objet : boire (la tasse, main gauche), prendre son stylo pour le regarder (main
+        /// gauche), écrire (le stylo, main droite). La courbe « Hold » dit quand il est dans la main : 0,5 tenu tel que la
+        /// main l'a pris, 1 tenu pour écrire (entre le pouce et l'index, la pointe vers la page).
+        /// </summary>
+        void CarryObjects()
+        {
+            var pose = CarryPose(out var hold);
+            var obj = pose == null ? null : pose == "drink" ? Mug() : Pen();
+            if (_carried != null && (hold < CarryHold || obj != _carried.Obj)) ReleaseCarried();
+            if (_carried == null && obj != null && hold >= CarryHold)
+            {
+                var hand = _animator.GetBoneTransform(pose == "drink" || pose == "take" ? HumanBodyBones.LeftHand : HumanBodyBones.RightHand);
+                if (hand != null) Grasp(obj, hand);
+            }
+            if (_carried == null) return;
+            var c = _carried;
+            var pos = c.Hand.TransformPoint(c.LocalPos);
+            var rot = c.Hand.rotation * c.LocalRot;
+            if (pose != null && pose.StartsWith("write") && hold > 0.5f && WritingGrip(rot, out var wp, out var wr))
+            {
+                var k = Mathf.Clamp01((hold - 0.5f) / 0.5f);
+                pos = Vector3.Lerp(pos, wp, k);
+                rot = Quaternion.Slerp(rot, wr, k);
+            }
+            c.Obj.transform.SetPositionAndRotation(pos, rot);
+        }
+
+        /// <summary>La pose de prise en cours (état seul, ou celui qui entre) et la valeur de « Hold ».</summary>
+        string CarryPose(out float hold)
+        {
+            hold = 0f;
+            if (PoseLayer < 0 || _body.Posture != Posture.Sit) return null;
+            string found = null;
+            var cur = _animator.GetCurrentAnimatorStateInfo(PoseLayer).shortNameHash;
+            var next = _animator.IsInTransition(PoseLayer) ? _animator.GetNextAnimatorStateInfo(PoseLayer).shortNameHash : 0;
+            foreach (var p in CarryPoses)
+                if (cur == Animator.StringToHash(p) || next == Animator.StringToHash(p))
+                {
+                    found = p;
+                    break;
+                }
+            if (found == null) return null;
+            hold = _animator.GetFloat(BodyAnim.Hold);
+            return found;
+        }
+
+        static readonly string[] CarryPoses = { "write_end", "write", "write_start", "drink", "take" };
+
+        void Grasp(WorldObject o, Transform hand)
+        {
+            var t = o.transform;
+            var rb = o.GetComponent<Rigidbody>();
+            _carried = new Carried
+            {
+                Obj = o, Hand = hand, RestParent = t.parent, RestPos = t.position, RestRot = t.rotation, Physics = o.Physics,
+                Interpolation = rb != null ? rb.interpolation : RigidbodyInterpolation.None,
+            };
+            o.SetPhysics(ObjectPhysics.Held);
+            if (rb != null) rb.interpolation = RigidbodyInterpolation.None;
+            t.SetParent(hand, true);
+            _carried.LocalPos = hand.InverseTransformPoint(t.position);
+            _carried.LocalRot = Quaternion.Inverse(hand.rotation) * t.rotation;
+            _bounds.Remove(o);
+        }
+
+        /// <summary>Reposé là où la main l'a pris (le geste l'y ramène : on efface les millimètres).</summary>
+        void ReleaseCarried()
+        {
+            var c = _carried;
+            _carried = null;
+            if (c == null || c.Obj == null) return;
+            var t = c.Obj.transform;
+            t.SetParent(c.RestParent, true);
+            t.SetPositionAndRotation(c.RestPos, c.RestRot);
+            c.Obj.SetPhysics(c.Physics);
+            var rb = c.Obj.GetComponent<Rigidbody>();
+            if (rb != null) rb.interpolation = c.Interpolation;
+            _bounds.Remove(c.Obj);
+        }
+
+        /// <summary>
+        /// Le stylo tenu pour écrire (comme dans l'atelier, atelier_desk.stylus) : son centre à 2 cm de la prise (entre le
+        /// pouce et l'index) vers la page, son axe vers le papier, à mi-chemin entre l'avant-bras et la verticale.
+        /// </summary>
+        bool WritingGrip(Quaternion held, out Vector3 pos, out Quaternion rot)
+        {
+            pos = Vector3.zero;
+            rot = held;
+            var wrist = _animator.GetBoneTransform(HumanBodyBones.RightHand);
+            var index = _animator.GetBoneTransform(HumanBodyBones.RightIndexDistal);
+            var thumb = _animator.GetBoneTransform(HumanBodyBones.RightThumbDistal);
+            if (wrist == null || index == null || thumb == null || Pen() == null) return false;
+            var grip = (index.position + thumb.position) * 0.5f;
+            var dir = ((grip - wrist.position).normalized * 0.4f + Vector3.down * 0.6f).normalized;
+            var center = grip + dir * 0.02f;
+            var axis = held * _penAxis;
+            var want = Vector3.Dot(axis, -dir) >= 0f ? -dir : dir;
+            rot = Quaternion.FromToRotation(axis, want) * held;
+            pos = center - rot * Vector3.Scale(_penCenter, _pen.transform.lossyScale);
+            return true;
+        }
+
+        // La souris sous la paume (desk_mouse) : elle suit la main, dans le plan du bureau, depuis l'instant où la boucle
+        // est seule ; la main ne la lâche qu'au même point de la boucle, si bien qu'elle reste où elle était.
+        WorldObject _mouse;
+        bool _mouseHeld;
+        Vector3 _mouseFrom, _palmFrom;
+        Quaternion _mouseRot;
+        float _palmYaw, _mousePhase;
+
+        void CarryMouse()
+        {
+            var using_ = _clipPose == "mouse" && _body.Posture == Posture.Sit && InPose("mouse");
+            if (!using_)
+            {
+                ReleaseMouse();
+                return;
+            }
+            var hand = _animator.GetBoneTransform(HumanBodyBones.RightHand);
+            var knuckles = _animator.GetBoneTransform(HumanBodyBones.RightMiddleProximal);
+            if (hand == null || knuckles == null) return;
+            var palm = Vector3.Lerp(hand.position, knuckles.position, 0.6f);
+            var yaw = Mathf.Atan2(knuckles.position.x - hand.position.x, knuckles.position.z - hand.position.z) * Mathf.Rad2Deg;
+            if (!_mouseHeld)
+            {
+                _mouse = Find(MouseKeys, 1.6f);
+                if (_mouse == null) return;
+                _mouseHeld = true;
+                _mouseFrom = _mouse.transform.position;
+                _mouseRot = _mouse.transform.rotation;
+                _palmFrom = palm;
+                _palmYaw = yaw;
+                _mousePhase = Mathf.Repeat(_animator.GetCurrentAnimatorStateInfo(PoseLayer).normalizedTime, 1f);
+            }
+            var turn = Quaternion.AngleAxis(Mathf.DeltaAngle(_palmYaw, yaw), Vector3.up);
+            var p = Flat(palm) + turn * Flat(_mouseFrom - _palmFrom);
+            _mouse.transform.SetPositionAndRotation(new Vector3(p.x, _mouseFrom.y, p.z), turn * _mouseRot);
+            _bounds.Remove(_mouse);
+        }
+
+        /// <summary>La boucle de la souris est revenue où la main l'a prise (on peut la lâcher : elle est à sa place).</summary>
+        bool MouseAtGrabPhase()
+        {
+            if (!_mouseHeld || !InPose("mouse")) return true;
+            var f = Mathf.Repeat(_animator.GetCurrentAnimatorStateInfo(PoseLayer).normalizedTime, 1f);
+            var d = Mathf.Abs(Mathf.DeltaAngle(f * 360f, _mousePhase * 360f)) / 360f;
+            return d < 0.02f;
+        }
+
+        void ReleaseMouse()
+        {
+            if (!_mouseHeld) return;
+            _mouseHeld = false;
+            if (_mouse != null)
+            {
+                _mouse.transform.SetPositionAndRotation(_mouseFrom, _mouseRot);
+                _bounds.Remove(_mouse);
+            }
+            _mouse = null;
+        }
+
+        // --- les objets du bureau ------------------------------------------------------------------------------
+        static readonly string[] MugKeys = { "=mug", "mug", "tasse" };
+        static readonly string[] PenKeys = { "=pen", "=pencil", "stylo", "crayon" };
+        WorldObject _mug, _pen;
+        Vector3 _penAxis = Vector3.forward, _penCenter;
+
+        WorldObject Mug()
+        {
+            if (_carried != null && _carried.Obj != null && Matches(_carried.Obj.id, MugKeys)) return _carried.Obj;
+            if (_mug == null) _mug = Find(MugKeys, 1.6f);
+            return _mug;
+        }
+
+        WorldObject Pen()
+        {
+            if (_carried != null && _carried.Obj != null && Matches(_carried.Obj.id, PenKeys)) return _carried.Obj;
+            if (_pen == null)
+            {
+                _pen = Find(PenKeys, 1.6f);
+                if (_pen != null) PenShape(_pen, out _penAxis, out _penCenter);
+            }
+            return _pen;
+        }
+
+        /// <summary>L'axe long d'un stylo (vers son sommet le plus éloigné du centre) et son centre, dans son repère.</summary>
+        static void PenShape(WorldObject pen, out Vector3 axis, out Vector3 center)
+        {
+            axis = Vector3.forward;
+            center = Vector3.zero;
+            var mf = pen.GetComponentInChildren<MeshFilter>();
+            if (mf == null || mf.sharedMesh == null) return;
+            var mesh = mf.sharedMesh;
+            var c = mesh.bounds.center;
+            center = pen.transform.InverseTransformPoint(mf.transform.TransformPoint(c));
+            if (!mesh.isReadable) return;
+            var best = 0f;
+            var far = Vector3.zero;
+            foreach (var v in mesh.vertices)
+            {
+                var d = (v - c).sqrMagnitude;
+                if (d <= best) continue;
+                best = d;
+                far = v;
+            }
+            if (best <= 1e-8f) return;
+            axis = (pen.transform.InverseTransformPoint(mf.transform.TransformPoint(far)) - center).normalized;
+        }
+
+        /// <summary>Le livre entre ses mains, à la place que lui donne le clip de lecture (desk_read).</summary>
+        void HoldBook()
+        {
+            var book = HeldBook();
+            if (book == null) return;
+            if (_book != book)
+            {
+                _book = book;
+                _bookHand = _body.Held.TryGetValue(book, out var h) ? h : Hand.Right;
+                book.transform.SetParent(_body.transform, true);
+            }
+            var a = _body.Anchor.Value;
+            var fwd = Flat(a.rotation * Vector3.forward).normalized;
+            var right = Vector3.Cross(Vector3.up, fwd);
+            var pos = Flat(a.position) + right * BookHeld.x + fwd * BookHeld.z + Vector3.up * (_body.FloorY + BookHeld.y);
+            // Couché à plat dans son modèle (épaisseur sur Y) : la couverture vers elle, penché de BookTilt.
+            var toEyes = Quaternion.AngleAxis(-BookTilt, right) * Vector3.up;
+            var top = Vector3.Cross(right, toEyes);
+            var k = 1f - Mathf.Exp(-Time.deltaTime * 8f);
+            book.transform.position = Vector3.Lerp(book.transform.position, pos, k);
+            book.transform.rotation = Quaternion.Slerp(book.transform.rotation, Quaternion.LookRotation(-top, toEyes), k);
+        }
+
+        /// <summary>Le livre retourne dans la main qui le tenait (un geste de la chaise, la fin de la lecture).</summary>
+        void BookBackInHand()
+        {
+            if (_book != null && _body.IsHolding(_book)) _body.Hold(_book, _bookHand);
+            _book = null;
+        }
+
+        // --- au bureau, sans clips de l'atelier : l'IK pose les mains sur les objets là où ils sont -------------
         void Type()
         {
             var kb = Find(KeyboardKeys, 1.6f);
@@ -323,7 +1115,6 @@ namespace Mika.World.Engine
 
             // Les poignets en retrait des touches (la cible IK est le poignet : les doigts dépassent devant).
             var home = new Vector3(b.center.x, b.max.y, b.center.z) - fwd * 0.075f + Vector3.up * 0.035f;
-            _workPoint = home;
             Step(_left, typing, now);
             Step(_right, typing && now > _mouseUntil, now);
             var l = home - right * 0.085f + right * _left.Lateral + fwd * _left.Depth - Vector3.up * (0.014f * _left.Dip);
@@ -370,15 +1161,13 @@ namespace Mika.World.Engine
             t.Lateral = Mathf.MoveTowards(t.Lateral, t.LateralTarget, dt * 0.35f);
             t.Depth = Mathf.MoveTowards(t.Depth, t.DepthTarget, dt * 0.3f);
         }
-
         void Write()
         {
-            var pad = _pulled != null ? _pulled : Find(NotebookKeys, 1.4f);
+            var pad = Find(NotebookKeys, 1.4f);
             if (pad == null) pad = Find(BookKeys, 1.4f);
             if (pad == null) pad = Find(KeyboardKeys, 1.6f);
             if (pad == null) return;
-            if (_pulled == null && pad.id != null && !Matches(pad.id, KeyboardKeys)) Pull(pad);
-            var b = BoundsNow(pad);
+            var b = Bounds(pad);
             var home = SeatHomeRotation();
             var fwd = Flat(home * Vector3.forward).normalized;
             var right = Vector3.Cross(Vector3.up, fwd);
@@ -393,7 +1182,6 @@ namespace Mika.World.Engine
             }
             var loops = new Vector3(Mathf.Sin(now * 13f) * 0.006f, Mathf.Max(0f, Mathf.Sin(now * 9f)) * 0.004f, Mathf.Cos(now * 11f) * 0.004f);
             var pen = top - fwd * 0.04f + right * (0.02f + _lineX - 0.05f) - fwd * (_line * 0.012f) + Vector3.up * 0.045f;
-            _workPoint = top - fwd * 0.08f;
             _body.Pin(AvatarIKGoal.RightHand, pen + right * loops.x + Vector3.up * loops.y + fwd * loops.z, Palm(fwd - right * 0.4f, 25f, 15f), Elbow(false, 0.07f), 1f, 0.5f);
             // La gauche tient le carnet à plat, sur le côté.
             var hold = top - right * 0.14f - fwd * 0.02f + Vector3.up * 0.03f;
@@ -434,7 +1222,6 @@ namespace Mika.World.Engine
                 new Vector3(chin.x, top + 0.03f, chin.z) + fwd * 0.12f - right * 0.12f, 1f, 0.8f);
             var flat = HipsPos + fwd * 0.42f + right * 0.12f;
             flat.y = top + 0.03f;
-            _workPoint = Bounds(desk).ClosestPoint(HipsPos) + fwd * 0.12f;
             _body.Pin(AvatarIKGoal.RightHand, flat, Palm(fwd - right * 0.3f, 0f, 5f), Elbow(false, 0.08f), 1f, 0.8f);
             var screen = Find(ScreenKeys, 2f);
             Gaze((screen != null ? Bounds(screen).center : head + fwd * 2f) + Saccade(Time.time, 0.08f), 2f);
@@ -443,728 +1230,6 @@ namespace Mika.World.Engine
         /// <summary>
         /// Ramène un objet de travail (un carnet) devant elle : à droite du clavier, à portée de la main droite, tourné
         /// vers elle. Il retournera à sa place quand elle aura fini.
-        /// </summary>
-        void Pull(WorldObject o)
-        {
-            var a = _body.Anchor;
-            if (!a.HasValue) return;
-            var home = SeatHomeRotation();
-            var fwd = Flat(home * Vector3.forward).normalized;
-            var right = Vector3.Cross(Vector3.up, fwd);
-            var kb = Find(KeyboardKeys, 1.6f);
-            var kbRight = kb != null ? Vector3.Dot(Flat(Bounds(kb).center) - Flat(a.Value.position), right) + Bounds(kb).extents.magnitude * 0.55f : 0.3f;
-            var t = o.transform;
-            _pulled = o;
-            _pulledFrom = t.position;
-            _pulledRot = t.rotation;
-            var target = Flat(a.Value.position) + fwd * 0.52f + right * Mathf.Clamp(kbRight + 0.12f, 0.25f, 0.42f);
-            target.y = t.position.y;
-            var yaw = Quaternion.LookRotation(fwd, Vector3.up) * Quaternion.Euler(0f, -12f, 0f);
-            StartCoroutine(SlideTo(t, target, yaw * Quaternion.Inverse(Quaternion.Euler(0f, home.eulerAngles.y, 0f)) * t.rotation, 0.7f));
-            // La chaise se tourne d'un petit quart vers le carnet.
-            _workYaw = Mathf.Clamp(Vector3.SignedAngle(fwd, Flat(target - a.Value.position), Vector3.up) * 0.5f, -25f, 25f);
-            _bounds.Remove(o);
-        }
-
-        void PutBack()
-        {
-            if (_pulled == null) return;
-            StartCoroutine(SlideTo(_pulled.transform, _pulledFrom, _pulledRot, 0.7f));
-            _bounds.Remove(_pulled);
-            _pulled = null;
-            _workYaw = 0f;
-        }
-
-        static System.Collections.IEnumerator SlideTo(Transform t, Vector3 to, Quaternion rot, float duration)
-        {
-            var from = t.position;
-            var r0 = t.rotation;
-            for (var k = 0f; k < 1f; k += Time.deltaTime / duration)
-            {
-                if (t == null) yield break;
-                var e = Mathf.SmoothStep(0f, 1f, k);
-                t.SetPositionAndRotation(Vector3.Lerp(from, to, e), Quaternion.Slerp(r0, rot, e));
-                yield return null;
-            }
-            if (t != null) t.SetPositionAndRotation(to, rot);
-        }
-
-        /// <summary>La boîte d'un objet qui bouge (pas de cache).</summary>
-        static Bounds BoundsNow(WorldObject o)
-        {
-            var rs = o.GetComponentsInChildren<Renderer>();
-            if (rs.Length == 0) return new Bounds(o.transform.position, Vector3.one * 0.1f);
-            var b = rs[0].bounds;
-            for (var i = 1; i < rs.Length; i++) b.Encapsulate(rs[i].bounds);
-            return b;
-        }
-
-        /// <summary>
-        /// Le roulement de la chaise qui met le point de travail à une distance confortable des hanches : les
-        /// coudes pliés près du corps, pas les bras tendus ni les mains contre la poitrine (34 cm pour sa taille, à l'horizontale).
-        /// </summary>
-        float DeskRoll(Vector3 work)
-        {
-            var a = _body.Anchor;
-            if (!a.HasValue || _chair == null || work == Vector3.zero) return _chair != null ? _chair.Roll : 0f;
-            var reach = Vector3.Dot(Flat(work) - Flat(a.Value.position), Fwd);
-            return Mathf.Clamp(_chair.Roll + reach - 0.34f, 0f, 0.38f);
-        }
-
-        // --- au bureau : les clips de l'atelier ----------------------------------------------------------------
-        // Ils sont faits (frontend/assets-src/blender/atelier_desk.py) dans un repère de travail : l'objet de
-        // l'occupation à une place précise devant elle — le clavier à 8 cm à droite et 39 cm devant les hanches, le
-        // carnet à 40 cm droit devant. Ici la chaise pivote et roule pour présenter le vrai bureau ainsi ; la souris
-        // et la tasse sont rapprochées à leur place (une petite qui tape à un bureau d'adulte les a sous la main).
-        const float TypeLateral = 0.08f, TypeForward = 0.39f, WriteLateral = 0f, WriteForward = 0.40f;
-        static readonly Vector3 MouseSpot = new Vector3(0.36f, 0f, 0.30f);   // (à droite, —, devant), repère de travail : à portée de sa main
-        static readonly Vector3 MugSpot = new Vector3(-0.30f, 0f, 0.33f);   // à gauche du clavier : elle boit de la main gauche
-        static readonly Vector3 WriteMugSpot = new Vector3(-0.28f, 0f, 0.46f);   // pour écrire : à gauche du carnet, loin du bord
-        // Le livre tenu (desk_read) : son centre (à droite, hauteur au-dessus du sol, devant) et sa pente vers elle.
-        static readonly Vector3 BookHeld = new Vector3(0.02f, 0.865f, 0.29f);
-        const float BookTilt = 45f;
-        // Le carnet, tiré pour écrire : à gauche du clavier (repère du siège d'origine), posé tout entier sur le
-        // plateau (le bureau n'est pas forcément d'équerre avec la chaise : son bord fuit d'un côté).
-        const float NotebookLeft = 0.17f;
-        // Les clips joués une fois (s).
-        const float DrinkSeconds = 5f, StretchSeconds = 4.6f, Turn45Seconds = 1.4f, Turn90Seconds = 2f;
-        // Le geste d'une main tenue (desk_drink) : quand la tasse quitte le bureau, quand elle y revient (s).
-        const float DrinkLift = 1.15f, DrinkLand = 4.05f;
-        // Le stylo (desk_write) : la pointe à cette distance de la prise (m, bornes), pris en ce temps (s).
-        const float PenTipMin = 0.015f, PenTipMax = 0.06f, PenTake = 0.4f;
-        // Prendre son stylo pour le regarder (desk_take, main gauche) : où il attend (repère de travail, à gauche du
-        // clavier, comme l'objet du clip), quand la main le prend et le repose (s).
-        static readonly Vector3 PenSpot = new Vector3(-0.20f, 0f, 0.42f);
-        const float TakeSeconds = 5f, TakeGrasp = 1.3f, TakeRelease = 4.2f;
-
-        string _clipPose;           // la pose de clip jouée (null : aucune, l'IK et le calque de base décident)
-        float _clipStart, _clipUntil;
-        float _workSwitch;
-        bool _onMouse;
-        float _idleActAt;
-        string _idleAct;
-        float _wantYaw;             // l'orientation que la chaise doit atteindre (degrés)
-        readonly Dictionary<WorldObject, (Vector3 pos, Quaternion rot)> _moved = new Dictionary<WorldObject, (Vector3, Quaternion)>();
-        WorldObject _mug;
-
-        bool DeskClipsReady
-        {
-            get
-            {
-                var layer = _animator.GetLayerIndex(BodyAnim.PoseLayer);
-                return layer >= 0 && _animator.HasState(layer, Animator.StringToHash("type"));
-            }
-        }
-
-        bool DeskClipped(Mode m, ChairRig chair) =>
-            chair != null && !_body.Choreographing && _body.Posture == Posture.Sit && DeskClipsReady &&
-            (m == Mode.DeskType || m == Mode.DeskWrite || m == Mode.DeskRest || m == Mode.DeskLean || m == Mode.ReadHeld);
-
-        void DeskClip(Mode m, ChairRig chair)
-        {
-            var now = Time.time;
-            _body.SetActivityLook(null);
-            _body.Unpin(AvatarIKGoal.LeftHand, 0.3f);
-            _body.Unpin(AvatarIKGoal.RightHand, 0.3f);
-            if (_body.Seatedness < 0.95f) return;
-
-            // Où la chaise doit être : face à la personne qui parle, sinon présentant le travail. Calculé une fois à
-            // l'entrée dans l'occupation (recalculé à chaque image, la cible bougeait avec le carnet qui glisse et la
-            // chaise qui roule, et le pivot se relançait sans fin) ; vers quelqu'un, repris s'il s'est déplacé.
-            var engaged = Engaged && m != Mode.DeskType && m != Mode.DeskWrite;
-            var retarget = !_targetSet || _targetFor != m || _targetEngaged != engaged;
-            if (engaged && !retarget)
-            {
-                var toward = Mathf.Clamp(chair.YawToward(companion.position, SeatHome()), -125f, 125f);
-                retarget = Mathf.Abs(Mathf.DeltaAngle(toward, _targetYaw)) > 25f;
-            }
-            if (retarget)
-            {
-                Target(m, engaged, chair);
-                _targetFor = m;
-                _targetEngaged = engaged;
-                _targetSet = true;
-                // Pivoter de plus de 20° : la chaise tourne, et elle replace ses pieds en petits pas.
-                var delta = Mathf.DeltaAngle(chair.Yaw, _targetYaw);
-                if (Mathf.Abs(delta) > 20f)
-                {
-                    var big = Mathf.Abs(delta) > 67f;
-                    PlayOnce(delta > 0f ? (big ? "turn_right_90" : "turn_right_45") : (big ? "turn_left_90" : "turn_left_45"), big ? Turn90Seconds : Turn45Seconds);
-                }
-            }
-            chair.SwivelTo(_targetYaw);
-            chair.RollTo(_targetRoll);
-            var turning = _clipPose != null && _clipPose.StartsWith("turn_") && now < _clipUntil;
-            _body.FeetFromClip = turning;
-            if (turning) return;
-
-            // Ce qu'elle fait de ses mains.
-            if (engaged)
-            {
-                SetPose("lap");
-                return;
-            }
-            // Le carnet tiré pour écrire retourne à sa place quand elle fait autre chose (la tasse prend la sienne).
-            if (m != Mode.DeskWrite) PutPadBack();
-            switch (m)
-            {
-                case Mode.DeskType:
-                    PrepareDesk(_targetYaw, _targetRoll, MugSpot, true);
-                    if (now >= _workSwitch)
-                    {
-                        _onMouse = !_onMouse && Find(MouseKeys, 1.6f) != null;
-                        _workSwitch = now + (_onMouse ? Random.Range(3f, 7f) : Random.Range(8f, 18f));
-                    }
-                    SetPose(_onMouse ? "mouse" : "type");
-                    break;
-                case Mode.DeskWrite:
-                    PrepareDesk(_targetYaw, _targetRoll, WriteMugSpot, false);
-                    SetPose("write");
-                    break;
-                case Mode.ReadHeld:
-                    SetPose("read");
-                    HoldBook(chair);
-                    break;
-                default:
-                    PrepareDesk(_targetYaw, _targetRoll, MugSpot, true);
-                    Idle(now);
-                    break;
-            }
-            CarryMug(now);
-            CarryPen(now);
-            CarryMouse(now);
-        }
-
-        bool _targetSet, _targetEngaged;
-        Mode _targetFor;
-        float _targetYaw, _targetRoll;
-
-        /// <summary>La cible de la chaise pour cette occupation (et, pour écrire, le carnet tiré à sa place).</summary>
-        void Target(Mode m, bool engaged, ChairRig chair)
-        {
-            _targetYaw = 0f;
-            _targetRoll = 0f;
-            if (engaged)
-            {
-                _targetYaw = Mathf.Clamp(chair.YawToward(companion.position, SeatHome()), -125f, 125f);
-                return;
-            }
-            if (m == Mode.DeskWrite)
-            {
-                var spot = WritingSpot(out var pad);
-                if (pad != null) WorkFrame(spot, WriteLateral, WriteForward, out _targetYaw, out _targetRoll);
-                return;
-            }
-            var kb = Find(KeyboardKeys, 1.6f);
-            if (kb != null) WorkFrame(Bounds(kb).center, TypeLateral, TypeForward, out _targetYaw, out _targetRoll);
-        }
-
-        /// <summary>
-        /// Le siège tel qu'il est chaise ni tournée ni avancée : son origine (le pied de la chaise est sous le siège)
-        /// et son orientation. Le lieu donne l'orientation du point d'approche, qui ne regarde pas forcément dans
-        /// l'axe de la chaise ; c'est l'assise, ramenée de son pivot, qui fait foi.
-        /// </summary>
-        Quaternion SeatHome()
-        {
-            var a = _body.Anchor;
-            if (!a.HasValue) return SeatHomeRotation();
-            var f = Flat(a.Value.rotation * Vector3.forward);
-            if (f.sqrMagnitude < 1e-4f) return SeatHomeRotation();
-            return Quaternion.AngleAxis(-(_chair != null ? _chair.Yaw : 0f), Vector3.up) * Quaternion.LookRotation(f.normalized, Vector3.up);
-        }
-
-        Vector3 SeatOrigin()
-        {
-            var fwd = SeatHome() * Vector3.forward;
-            return Flat(_body.Anchor.Value.position) - fwd * (_chair != null ? _chair.Roll : 0f);
-        }
-
-        /// <summary>Au repos au bureau : les mains posées, et de temps en temps réfléchir, s'étirer, boire une gorgée.</summary>
-        void Idle(float now)
-        {
-            if (_idleAct != null && now < _clipUntil) return;
-            if (_idleAct == "think" && now < _idleActAt) return;
-            if (_idleAct != null)
-            {
-                _idleAct = null;
-                _idleActAt = now + Random.Range(15f, 35f);
-            }
-            if (_idleActAt <= 0f) _idleActAt = now + Random.Range(8f, 20f);
-            if (now >= _idleActAt)
-            {
-                var roll = Random.value;
-                if (roll < 0.45f)
-                {
-                    _idleAct = "think";
-                    _idleActAt = now + Random.Range(9f, 16f);
-                    SetPose("lean_desk");
-                    _clipUntil = now;
-                    return;
-                }
-                if (roll < 0.62f && _mug != null)
-                {
-                    _idleAct = "drink";
-                    PlayOnce("drink", DrinkSeconds);
-                    return;
-                }
-                if (roll < 0.8f && _pen != null && _penSpot.HasValue)
-                {
-                    _idleAct = "take";
-                    PlayOnce("take", TakeSeconds);
-                    return;
-                }
-                _idleAct = "stretch";
-                PlayOnce("stretch", StretchSeconds);
-                return;
-            }
-            SetPose("desk");
-        }
-
-        /// <summary>
-        /// Joue tout de suite un petit geste du repos au bureau (« think », « drink », « take », « stretch ») au lieu
-        /// d'attendre le tirage : pour le labo d'animation et les démos. Sans effet hors du repos au bureau.
-        /// </summary>
-        public void PlayDeskGesture(string gesture)
-        {
-            var now = Time.time;
-            switch (gesture)
-            {
-                case "think":
-                    _idleAct = "think";
-                    _idleActAt = now + Random.Range(9f, 16f);
-                    SetPose("lean_desk");
-                    _clipUntil = now;
-                    break;
-                case "drink":
-                    _idleAct = "drink";
-                    PlayOnce("drink", DrinkSeconds);
-                    break;
-                case "take":
-                    _idleAct = "take";
-                    PlayOnce("take", TakeSeconds);
-                    break;
-                case "stretch":
-                    _idleAct = "stretch";
-                    PlayOnce("stretch", StretchSeconds);
-                    break;
-            }
-        }
-
-        void SetPose(string pose)
-        {
-            if (_clipPose == pose) return;
-            _clipPose = pose;
-            _clipStart = Time.time;
-        }
-
-        void PlayOnce(string pose, float seconds)
-        {
-            _clipPose = pose;
-            _clipStart = Time.time;
-            _clipUntil = Time.time + seconds;
-        }
-
-        /// <summary>
-        /// Le pivot et le roulement de la chaise qui mettent <paramref name="point"/> à <paramref name="lateral"/> m à
-        /// sa droite et <paramref name="forward"/> m devant ses hanches (la chaise pivote sur son pied, sous le siège,
-        /// et roule le long de son assise d'origine).
-        /// </summary>
-        bool WorkFrame(Vector3 point, float lateral, float forward, out float yaw, out float roll)
-        {
-            yaw = 0f;
-            roll = 0f;
-            if (!_body.Anchor.HasValue || _chair == null) return false;
-            var fwd = SeatHome() * Vector3.forward;
-            var right = Vector3.Cross(Vector3.up, fwd);
-            var k = Flat(point) - SeatOrigin();
-            var kx = Vector3.Dot(k, right);
-            var kz = Vector3.Dot(k, fwd);
-            var need = lateral * lateral + forward * forward - kx * kx;
-            var along = need > 0f ? Mathf.Sqrt(need) : Mathf.Max(0.05f, forward);
-            roll = Mathf.Clamp(kz - along, 0f, 0.38f);
-            yaw = Mathf.Clamp(Mathf.Atan2(kx, kz - roll) * Mathf.Rad2Deg - Mathf.Atan2(lateral, forward) * Mathf.Rad2Deg, -60f, 60f);
-            return true;
-        }
-
-        /// <summary>Un point du repère de travail (à droite, hauteur, devant) pour la chaise tournée de yaw et avancée de roll.</summary>
-        Vector3 WorkPoint(float yaw, float roll, Vector3 local)
-        {
-            var fwd = SeatHome() * Vector3.forward;
-            var origin = SeatOrigin() + fwd * roll;
-            var wf = Quaternion.AngleAxis(yaw, Vector3.up) * fwd;
-            var wr = Vector3.Cross(Vector3.up, wf);
-            return origin + wr * local.x + wf * local.z + Vector3.up * local.y;
-        }
-
-        /// <summary>Le carnet pour écrire : tiré à gauche du clavier, près du bord du bureau ; rend sa place.</summary>
-        Vector3 WritingSpot(out WorldObject pad)
-        {
-            pad = Find(NotebookKeys, 1.4f);
-            if (pad == null || !_body.Anchor.HasValue) return Vector3.zero;
-            var fwd = SeatHome() * Vector3.forward;
-            var right = Vector3.Cross(Vector3.up, fwd);
-            var size = BoundsLocal(pad).size;
-            var spot = OntoDesk(SeatOrigin() - right * NotebookLeft + fwd * 0.3f, fwd, 0.5f * Mathf.Max(size.x, size.z) + 0.02f);
-            spot.y = pad.transform.position.y;
-            if (!_moved.ContainsKey(pad)) Slide(pad, spot, Quaternion.LookRotation(fwd, Vector3.up) * Quaternion.Euler(0f, -8f, 0f));
-            _pad = pad;
-            return spot;
-        }
-
-        /// <summary>
-        /// Au travail, la souris et la tasse viennent à portée (repère de travail de la chaise visée). La tasse change
-        /// de place avec le travail : à gauche du clavier pour taper, à gauche du carnet pour écrire (pas dessus).
-        /// </summary>
-        void PrepareDesk(float yaw, float roll, Vector3 mugSpot, bool mouse)
-        {
-            var ahead = Quaternion.AngleAxis(yaw, Vector3.up) * SeatHome() * Vector3.forward;
-            var m = mouse ? Find(MouseKeys, 1.6f) : null;
-            if (m != null && !_moved.ContainsKey(m))
-            {
-                var p = OntoDesk(WorkPoint(yaw, roll, MouseSpot), ahead, 0.07f);
-                Slide(m, new Vector3(p.x, m.transform.position.y, p.z), Quaternion.AngleAxis(yaw, Vector3.up) * SeatHome());
-            }
-            if (mouse && _penHold == PenHold.None && Pen() != null && !_body.IsHolding(_pen))
-            {
-                var at = OntoDesk(WorkPoint(yaw, roll, PenSpot), ahead, 0.08f);
-                at.y = _pen.transform.position.y;
-                if (!_penSpot.HasValue || (Flat(_penSpot.Value) - Flat(at)).sqrMagnitude > 0.02f * 0.02f)
-                {
-                    _penSpot = at;
-                    Slide(_pen, at, PenFlat(Quaternion.AngleAxis(-25f, Vector3.up) * ahead));
-                }
-            }
-            if (_mug == null)
-            {
-                var mug = Find(new[] { "=mug", "mug", "tasse" }, 1.6f);
-                if (mug == null || _body.IsHolding(mug)) return;
-                _mug = mug;
-                _mugSpot = null;
-            }
-            if (_mugHeld || _body.IsHolding(_mug)) return;
-            var spot = OntoDesk(WorkPoint(yaw, roll, mugSpot), ahead, 0.08f);
-            spot.y = _mug.transform.position.y;
-            if (_mugSpot.HasValue && (Flat(_mugSpot.Value) - Flat(spot)).sqrMagnitude < 0.02f * 0.02f) return;
-            _mugSpot = spot;
-            Slide(_mug, spot, _mug.transform.rotation);
-        }
-
-        Vector3? _mugSpot;          // où la tasse a été mise pour le travail en cours
-        WorldObject _pad;           // le carnet tiré pour écrire
-
-        void PutPadBack()
-        {
-            if (_pad == null) return;
-            if (_moved.TryGetValue(_pad, out var home))
-            {
-                StartCoroutine(SlideTo(_pad.transform, home.pos, home.rot, 0.7f));
-                _moved.Remove(_pad);
-                _bounds.Remove(_pad);
-            }
-            _pad = null;
-        }
-
-        /// <summary>
-        /// Un point du plateau (au sol près) : <paramref name="p"/> s'il est sur le bureau à <paramref name="margin"/>
-        /// m de ses bords, sinon le premier point qui l'est en allant vers <paramref name="dir"/> (on pousse un objet
-        /// vers le fond, jamais vers le vide). Le plateau est la boîte du bureau dans son propre repère : sa boîte
-        /// alignée sur le monde déborde dès qu'il est tourné.
-        /// </summary>
-        Vector3 OntoDesk(Vector3 p, Vector3 dir, float margin)
-        {
-            var desk = Desk();
-            if (desk == null) return p;
-            var box = DeskBox(desk);
-            var t = desk.transform;
-            var m = margin / Mathf.Max(1e-3f, t.lossyScale.x);
-            var step = Flat(dir).normalized * 0.01f;
-            for (var i = 0; i <= 60; i++)
-            {
-                var q = p + step * i;
-                var l = t.InverseTransformPoint(q);
-                if (l.x >= box.min.x + m && l.x <= box.max.x - m && l.z >= box.min.z + m && l.z <= box.max.z - m) return q;
-            }
-            return p;
-        }
-
-        readonly Dictionary<WorldObject, Bounds> _deskBoxes = new Dictionary<WorldObject, Bounds>();
-
-        /// <summary>La boîte d'un meuble dans son propre repère (les rendus de ses parties, ramenés à sa racine).</summary>
-        Bounds DeskBox(WorldObject desk)
-        {
-            if (_deskBoxes.TryGetValue(desk, out var cached)) return cached;
-            var t = desk.transform;
-            var box = new Bounds();
-            var any = false;
-            foreach (var mf in desk.GetComponentsInChildren<MeshFilter>())
-            {
-                if (mf.sharedMesh == null) continue;
-                var b = mf.sharedMesh.bounds;
-                for (var i = 0; i < 8; i++)
-                {
-                    var c = b.center + Vector3.Scale(b.extents, new Vector3((i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
-                    var l = t.InverseTransformPoint(mf.transform.TransformPoint(c));
-                    if (!any) box = new Bounds(l, Vector3.zero);
-                    else box.Encapsulate(l);
-                    any = true;
-                }
-            }
-            if (!any) box = new Bounds(t.InverseTransformPoint(Bounds(desk).center), Bounds(desk).size);
-            _deskBoxes[desk] = box;
-            return box;
-        }
-
-        void Slide(WorldObject o, Vector3 to, Quaternion rot)
-        {
-            if (!_moved.ContainsKey(o)) _moved[o] = (o.transform.position, o.transform.rotation);
-            StartCoroutine(SlideTo(o.transform, to, rot, 0.7f));
-            _bounds.Remove(o);
-        }
-
-        /// <summary>Elle quitte le bureau : la souris, la tasse et le carnet retournent à leur place, la chaise aussi.</summary>
-        void LeaveDesk()
-        {
-            foreach (var kv in _moved)
-                if (kv.Key != null && !_body.IsHolding(kv.Key))
-                {
-                    StartCoroutine(SlideTo(kv.Key.transform, kv.Value.pos, kv.Value.rot, 0.7f));
-                    _bounds.Remove(kv.Key);
-                }
-            _moved.Clear();
-            _mouseInHand = null;
-            _mug = null;
-            _mugSpot = null;
-            _pad = null;
-            _pen = null;
-            _penHold = PenHold.None;
-            _penSpot = null;
-            _clipPose = null;
-            _targetSet = false;
-            _idleAct = null;
-            _idleActAt = 0f;
-            _body.FeetFromClip = false;
-            if (_chair != null)
-            {
-                _chair.SwivelTo(0f);
-                _chair.RollTo(0f);
-            }
-        }
-
-        /// <summary>La tasse dans la main gauche pendant qu'elle boit (entre la prise et la pose du clip).</summary>
-        void CarryMug(float now)
-        {
-            if (_mug == null) return;
-            var t = now - _clipStart;
-            var carried = _clipPose == "drink" && t > DrinkLift && t < DrinkLand;
-            var hand = _animator.GetBoneTransform(HumanBodyBones.LeftHand);
-            var thumb = _animator.GetBoneTransform(HumanBodyBones.LeftThumbDistal);
-            var middle = _animator.GetBoneTransform(HumanBodyBones.LeftMiddleIntermediate);
-            var little = _animator.GetBoneTransform(HumanBodyBones.LeftLittleProximal);
-            if (!carried || hand == null || thumb == null || middle == null || little == null)
-            {
-                if (_mugHeld)
-                {
-                    // Reposée là où le clip la pose : droite, sur le bureau.
-                    _mugHeld = false;
-                    var p = _mug.transform.position;
-                    var surface = Surface(p + Vector3.up * 0.05f, p.y);
-                    _mug.transform.SetPositionAndRotation(new Vector3(p.x, surface, p.z), Quaternion.Euler(0f, _mug.transform.eulerAngles.y, 0f));
-                    _bounds.Remove(_mug);
-                }
-                return;
-            }
-            // Tenue de côté, pouce en haut : au creux de la main ; son origine est au fond, le haut du côté du pouce.
-            _mugHeld = true;
-            var grip = (thumb.position + middle.position) * 0.5f;
-            var fingers = (middle.position - hand.position).normalized;
-            var up = (thumb.position - little.position).normalized;
-            var height = Mathf.Max(0.05f, BoundsLocal(_mug).size.y * _mug.transform.lossyScale.y);
-            _mug.transform.SetPositionAndRotation(grip - up * (height * 0.5f), Quaternion.LookRotation(Vector3.ProjectOnPlane(fingers, up).normalized, up));
-        }
-
-        bool _mugHeld;
-
-        WorldObject _mouseInHand;
-        // Le centre de la souris sous la paume, un peu vers les doigts (desk_mouse, mesuré dans l'atelier).
-        const float MouseUnderPalm = 0.025f;
-
-        /// <summary>
-        /// La souris sous la main pendant qu'elle s'en sert (desk_mouse : la paume sur son dos, de petits déplacements) :
-        /// elle rejoint en douceur le point sous la paume, puis le suit, à plat sur le tapis. (Un écart relevé au début de
-        /// la pose valait n'importe quoi : la souris glissait encore vers sa place de travail.)
-        /// </summary>
-        void CarryMouse(float now)
-        {
-            var using_ = _clipPose == "mouse" && now - _clipStart > 0.3f;
-            if (!using_)
-            {
-                _mouseInHand = null;
-                return;
-            }
-            var hand = _animator.GetBoneTransform(HumanBodyBones.RightHand);
-            var knuckles = _animator.GetBoneTransform(HumanBodyBones.RightMiddleProximal);
-            if (hand == null || knuckles == null) return;
-            if (_mouseInHand == null)
-            {
-                _mouseInHand = Find(MouseKeys, 1.6f);
-                if (_mouseInHand == null) return;
-                if (!_moved.ContainsKey(_mouseInHand)) _moved[_mouseInHand] = (_mouseInHand.transform.position, _mouseInHand.transform.rotation);
-            }
-            var palm = Vector3.Lerp(hand.position, knuckles.position, 0.6f);
-            var fingers = Flat(knuckles.position - hand.position);
-            var target = Flat(palm) + (fingers.sqrMagnitude > 1e-6f ? fingers.normalized * MouseUnderPalm : Vector3.zero);
-            var t = _mouseInHand.transform;
-            var k = 1f - Mathf.Exp(-Time.deltaTime * 12f);
-            var p = Vector3.Lerp(Flat(t.position), target, k);
-            t.position = new Vector3(p.x, t.position.y, p.z);
-            _bounds.Remove(_mouseInHand);
-        }
-
-        static readonly string[] PenKeys = { "=pen", "=pencil", "stylo", "crayon" };
-        enum PenHold { None, Writing, Shown }
-        WorldObject _pen;
-        PenHold _penHold;
-        float _penSince;
-        Vector3? _penSpot;          // où le stylo a été posé pour le travail en cours (à gauche du clavier)
-        Vector3 _penAxis;           // l'axe long du stylo dans son modèle (vers une extrémité), et sa demi-longueur
-        float _penHalf = 0.07f;
-
-        WorldObject Pen()
-        {
-            if (_pen == null)
-            {
-                _pen = Find(PenKeys, 1.6f);
-                if (_pen != null) PenShape(_pen, out _penAxis, out _penHalf);
-            }
-            return _pen;
-        }
-
-        /// <summary>Le stylo couché à plat, son axe long suivant <paramref name="dir"/> (horizontal).</summary>
-        Quaternion PenFlat(Vector3 dir)
-        {
-            var local = Flat(_penAxis).sqrMagnitude > 1e-4f ? Flat(_penAxis).normalized : Vector3.forward;
-            var world = Flat(dir).sqrMagnitude > 1e-4f ? Flat(dir).normalized : Vector3.forward;
-            return Quaternion.LookRotation(world, Vector3.up) * Quaternion.Inverse(Quaternion.LookRotation(local, Vector3.up));
-        }
-
-        /// <summary>
-        /// Le stylo dans ses mains. Pour écrire (desk_write) : dans la droite, entre le pouce et l'index, la pointe sur
-        /// la page (comme le stylo du clip dans l'atelier) ; elle le prend en commençant, et le repose à droite du
-        /// carnet en s'arrêtant. En le prenant pour le regarder (desk_take, au repos) : dans la gauche, en travers de
-        /// la paume, de la prise à la pose du clip, puis reposé à plat là où le clip l'amène.
-        /// </summary>
-        void CarryPen(float now)
-        {
-            var t = now - _clipStart;
-            var want = _clipPose == "write" && t > 0.2f ? PenHold.Writing
-                : _clipPose == "take" && t > TakeGrasp && t < TakeRelease ? PenHold.Shown
-                : PenHold.None;
-            if (want == PenHold.None)
-            {
-                if (_penHold != PenHold.None && _pen != null) PutPenDown(_penHold);
-                _penHold = PenHold.None;
-                return;
-            }
-            if (Pen() == null) return;
-            if (_penHold != want)
-            {
-                if (!_moved.ContainsKey(_pen)) _moved[_pen] = (_pen.transform.position, _pen.transform.rotation);
-                _penHold = want;
-                _penSince = now;
-                _penSpot = null;    // il ne sera plus à sa place de travail
-            }
-            Vector3 pos;
-            Quaternion rot;
-            if (want == PenHold.Writing)
-            {
-                var hand = _animator.GetBoneTransform(HumanBodyBones.RightHand);
-                var thumb = _animator.GetBoneTransform(HumanBodyBones.RightThumbDistal);
-                var index = _animator.GetBoneTransform(HumanBodyBones.RightIndexDistal);
-                if (hand == null || thumb == null || index == null) return;
-                var grip = (thumb.position + index.position) * 0.5f;
-                var dir = ((grip - hand.position).normalized * 0.4f + Vector3.down * 0.6f).normalized;
-                // La pointe sur la page : là où l'axe du stylo, passant par la prise, rencontre le papier.
-                var sheet = Find(NotebookKeys, 1.4f);
-                var paper = sheet != null ? Bounds(sheet).max.y : grip.y - 0.03f;
-                var tip = Mathf.Clamp((grip.y - paper) / Mathf.Max(0.2f, -dir.y), PenTipMin, PenTipMax);
-                pos = grip + dir * (tip - _penHalf);
-                rot = Quaternion.FromToRotation(_pen.transform.rotation * _penAxis, dir) * _pen.transform.rotation;
-            }
-            else
-            {
-                var thumb = _animator.GetBoneTransform(HumanBodyBones.LeftThumbDistal);
-                var middle = _animator.GetBoneTransform(HumanBodyBones.LeftMiddleIntermediate);
-                var index = _animator.GetBoneTransform(HumanBodyBones.LeftIndexProximal);
-                var little = _animator.GetBoneTransform(HumanBodyBones.LeftLittleProximal);
-                if (thumb == null || middle == null || index == null || little == null) return;
-                pos = (thumb.position + middle.position) * 0.5f;
-                var across = (index.position - little.position).normalized;
-                rot = Quaternion.FromToRotation(_pen.transform.rotation * _penAxis, across) * _pen.transform.rotation;
-            }
-            // Pris sur le bureau : il rejoint la main au début du geste, puis la suit exactement.
-            var k = Mathf.Clamp01((now - _penSince) / PenTake);
-            k = k * k * (3f - 2f * k);
-            _pen.transform.SetPositionAndRotation(Vector3.Lerp(_pen.transform.position, pos, k), Quaternion.Slerp(_pen.transform.rotation, rot, k));
-            _bounds.Remove(_pen);
-        }
-
-        void PutPenDown(PenHold was)
-        {
-            var a = _body.Anchor.Value;
-            var fwd = Flat(a.rotation * Vector3.forward).normalized;
-            var right = Vector3.Cross(Vector3.up, fwd);
-            var pad = was == PenHold.Writing ? Find(NotebookKeys, 1.4f) : null;
-            var p = pad != null ? Flat(Bounds(pad).center) + right * 0.17f : Flat(_pen.transform.position);
-            p.y = Surface(p + Vector3.up * 0.05f, _body.FloorY + 0.76f) + 0.005f;
-            var along = was == PenHold.Writing ? fwd : _pen.transform.rotation * _penAxis;
-            StartCoroutine(SlideTo(_pen.transform, p, PenFlat(along), was == PenHold.Writing ? 0.35f : 0.15f));
-            _bounds.Remove(_pen);
-        }
-
-        /// <summary>L'axe long d'un stylo (son sommet le plus éloigné du centre) et sa demi-longueur, dans son modèle.</summary>
-        static void PenShape(WorldObject pen, out Vector3 axis, out float half)
-        {
-            axis = Vector3.forward;
-            half = 0.07f;
-            var mf = pen.GetComponentInChildren<MeshFilter>();
-            if (mf == null || mf.sharedMesh == null || !mf.sharedMesh.isReadable) return;
-            var c = mf.sharedMesh.bounds.center;
-            var best = 0f;
-            foreach (var v in mf.sharedMesh.vertices)
-            {
-                var d = (v - c).sqrMagnitude;
-                if (d <= best) continue;
-                best = d;
-                axis = v - c;
-            }
-            if (best <= 1e-6f) return;
-            // Dans le repère de l'objet (le modèle peut être un enfant tourné).
-            axis = Quaternion.Inverse(pen.transform.rotation) * mf.transform.rotation * axis.normalized;
-            half = Mathf.Sqrt(best) * mf.transform.lossyScale.x;
-        }
-
-        /// <summary>Le livre entre ses mains, à la place que lui donne le clip de lecture.</summary>
-        void HoldBook(ChairRig chair)
-        {
-            var book = HeldBook();
-            if (book == null) return;
-            if (_book != book)
-            {
-                _book = book;
-                _bookHand = _body.Held.TryGetValue(book, out var h) ? h : Hand.Right;
-                book.transform.SetParent(_body.transform, true);
-            }
-            var a = _body.Anchor.Value;
-            var fwd = Flat(a.rotation * Vector3.forward).normalized;
-            var right = Vector3.Cross(Vector3.up, fwd);
-            var pos = Flat(a.position) + right * BookHeld.x + fwd * BookHeld.z + Vector3.up * (_body.FloorY + BookHeld.y);
-            // Couché à plat dans son modèle (épaisseur sur Y) : la couverture vers elle, penché de BookTilt.
-            var toEyes = Quaternion.AngleAxis(-BookTilt, right) * Vector3.up;
-            var top = Vector3.Cross(right, toEyes);
-            var k = 1f - Mathf.Exp(-Time.deltaTime * 8f);
-            book.transform.position = Vector3.Lerp(book.transform.position, pos, k);
-            book.transform.rotation = Quaternion.Slerp(book.transform.rotation, Quaternion.LookRotation(-top, toEyes), k);
-        }
 
         // --- lire un livre tenu --------------------------------------------------------------------------------
         void Read()
@@ -1235,43 +1300,40 @@ namespace Mika.World.Engine
             }
             _body.SetActivityLook(null);
         }
-
         // --- au lit -------------------------------------------------------------------------------------------
         [Tooltip("Endormie, elle se retourne toutes les… (s, entre min et max).")]
         public Vector2 turnEvery = new Vector2(150f, 480f);
         float _nextTurn = -1f;
 
-        /// <summary>
-        /// Allongée : endormie, elle se retourne de temps en temps (dos, gauche, droite) ; éveillée et qu'on lui
-        /// parle, elle se tourne vers la personne ; sinon elle reste comme elle est.
-        /// </summary>
-        bool _tidied;
         bool _sawChoreography;      // la posture vient d'un geste (s'allonger) et pas d'un instantané
         DuvetRig _duvet;
         float _pullT = -1f;         // tirer la couette : 0 → 1
         int _coveredSide = -1;
 
+        /// <summary>
+        /// Allongée : endormie, elle se retourne de temps en temps (dos, gauche, droite) ; éveillée et qu'on lui
+        /// parle, elle se tourne vers la personne ; sinon elle reste comme elle est.
+        /// </summary>
         void Lying()
         {
-            if (!_tidied)
+            if (_duvet == null)
             {
-                _tidied = true;
-                Tidy();
                 _duvet = BedDuvet();
                 _coveredSide = -1;
             }
             if (_duvet != null) Bedding();
             var now = Time.time;
-            var asleep = BodyAnim.HasParameter(_animator, BodyAnim.Asleep) && _animator.GetBool(BodyAnim.Asleep);
             if (_nextTurn < 0f) _nextTurn = now + Random.Range(turnEvery.x, turnEvery.y) * 0.5f;
-            if (!asleep && Engaged && companion != null && _body.Hips != null)
+            // Pas de retournement pendant qu'une main tient la couette.
+            if (_pullT >= 0f || _duvetHandT >= 0f) return;
+            if (!Asleep && Engaged && companion != null && _body.Hips != null)
             {
                 var toward = companion.position - _body.Hips.position;
                 toward.y = 0f;
                 _body.SetLieSide(Vector3.Dot(toward, _body.LyingRight) > 0f ? 2 : 1);
                 _nextTurn = now + Random.Range(turnEvery.x, turnEvery.y);
             }
-            else if (now > _nextTurn && (asleep || Random.value < 0.3f))
+            else if (now > _nextTurn && (Asleep || Random.value < 0.3f))
             {
                 // Se retourner : jamais deux fois la même position de suite, le dos un peu moins souvent.
                 var current = _body.LieSide;
@@ -1295,15 +1357,19 @@ namespace Mika.World.Engine
         }
 
         /// <summary>
-        /// La couette : endormie, elle la tire sur elle (la main droite accompagne le bord, des hanches à la
-        /// poitrine) ; dessous, elle la suit quand elle se retourne. Arrivée déjà couchée (un instantané au démarrage),
-        /// la couette est déjà sur elle.
+        /// La couette : endormie, elle l'ouvre de la main (encore faite, elle s'est couchée dessus) puis la tire sur elle
+        /// (la main droite accompagne le bord, des hanches à la poitrine) ; dessous, elle la suit quand elle se retourne.
+        /// Arrivée déjà couchée (un instantané au démarrage), la couette est déjà sur elle.
         /// </summary>
         void Bedding()
         {
             _duvet.lastOccupied = Time.time;
-            var asleep = BodyAnim.HasParameter(_animator, BodyAnim.Asleep) && _animator.GetBool(BodyAnim.Asleep);
             var side = _body.LieSide;
+            if (_duvetHandT >= 0f)
+            {
+                DuvetHand();
+                return;
+            }
             if (_pullT >= 0f)
             {
                 // La main va chercher le bord vers la hanche, puis le remonte jusqu'à la poitrine.
@@ -1340,7 +1406,7 @@ namespace Mika.World.Engine
                 }
                 return;
             }
-            if (!asleep) return;
+            if (!Asleep) return;
             if (!_sawChoreography)
             {
                 // Déjà couchée et endormie quand on arrive : la couette est déjà sur elle.
@@ -1350,48 +1416,13 @@ namespace Mika.World.Engine
             }
             if (_duvet.State == DuvetState.Made)
             {
-                _duvet.SetState(DuvetState.Open, 0.8f);
+                // Endormie sur la couette faite : la main en écarte le bord avant de la tirer sur elle.
+                _duvet.SetState(DuvetState.Open, DuvetHandSeconds);
+                _duvetHandT = 0f;
+                DuvetHand();
                 return;
             }
             if (!_duvet.Moving) _pullT = 0f;
-        }
-
-        /// <summary>
-        /// Ce qui traîne là où va sa tête (une peluche sur l'oreiller) est poussé sur le côté, vers le mur plutôt
-        /// que vers la chambre — on ne pose pas la tête sur son lapin.
-        /// </summary>
-        void Tidy()
-        {
-            var place = _body.Place;
-            if (place == null || place.Kind != PlaceKind.Bed) return;
-            var lie = place.Lie;
-            var head = lie.position + lie.rotation * Vector3.forward * 0.55f;
-            var right = _body.LyingRight;
-            // Le côté du lit loin du point d'approche (la chambre) : là on ne gêne rien.
-            var side = Vector3.Dot(place.Position - lie.position, right) > 0f ? -right : right;
-            Rescan();
-            foreach (var o in _objects)
-            {
-                if (o == null || o == place.Furniture || _body.IsHolding(o)) continue;
-                var b = Bounds(o);
-                if (b.size.magnitude > 0.8f) continue;
-                var d = Flat(b.center) - Flat(head);
-                if (d.magnitude > 0.42f || Mathf.Abs(b.center.y - head.y) > 0.45f) continue;
-                StartCoroutine(Slide(o.transform, o.transform.position + side * 0.36f, 0.6f));
-                _bounds.Remove(o);
-            }
-        }
-
-        static System.Collections.IEnumerator Slide(Transform t, Vector3 to, float duration)
-        {
-            var from = t.position;
-            for (var k = 0f; k < 1f; k += Time.deltaTime / duration)
-            {
-                if (t == null) yield break;
-                t.position = Vector3.Lerp(from, to, Mathf.SmoothStep(0f, 1f, k));
-                yield return null;
-            }
-            if (t != null) t.position = to;
         }
 
         // --- debout -------------------------------------------------------------------------------------------

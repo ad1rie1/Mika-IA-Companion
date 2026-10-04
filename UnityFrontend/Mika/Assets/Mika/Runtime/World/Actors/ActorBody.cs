@@ -217,6 +217,13 @@ namespace Mika.World.Engine
             var k = 1f - Mathf.Exp(-Time.deltaTime * 8f);
             if (_posture == Posture.Sit && _sit > 0.5f)
             {
+                // Assise sur une chaise que ses gestes déplacent (BodyActivity la mène juste avant) : le corps suit le siège
+                // sans retard — lissé, il glissait sur l'assise pendant qu'elle roulait ou pivotait.
+                if (_anchorLive != null && _seated >= 1f) k = 1f;
+                // Le corps suit le siège qui pivote (tournée vers quelqu'un, vers son carnet) ; d'abord l'orientation,
+                // puis les hanches ramenées sur le siège.
+                if (_anchorLive != null)
+                    transform.rotation = Quaternion.Slerp(transform.rotation, a.rotation, k * _anchorBlend);
                 var delta = a.position - _hips.position;
                 transform.position += delta * k * _anchorBlend;
                 if (_seated >= 1f)
@@ -224,9 +231,6 @@ namespace Mika.World.Engine
                     var above = _hips.position.y - transform.position.y;
                     _seatedHips = _seatedHips > 0f ? Mathf.Lerp(_seatedHips, above, 0.05f) : above;
                 }
-                // Le corps suit le siège qui pivote (une chaise de bureau tournée vers quelqu'un).
-                if (_anchorLive != null)
-                    transform.rotation = Quaternion.Slerp(transform.rotation, a.rotation, k * _anchorBlend);
             }
             else if (_posture == Posture.Lie && _lie > 0.5f)
             {
@@ -377,6 +381,10 @@ namespace Mika.World.Engine
             if (!_procedural && animator != null && animator.runtimeAnimatorController != null)
             {
                 var here = place ?? _place;
+                // Se lever d'une chaise de bureau : elle la ramène d'abord à sa place par ses propres gestes (elle se
+                // tourne vers le bureau, le repousse des mains) — la chaise ne bouge jamais d'elle-même.
+                if (from == Posture.Sit && to != Posture.Sit && BeforeStanding != null)
+                    yield return BeforeStanding();
                 Choreographing = true;
                 try
                 {
@@ -411,6 +419,12 @@ namespace Mika.World.Engine
         public bool Choreographing { get; private set; }
 
         /// <summary>
+        /// Avant de se lever d'un siège : ce que l'occupation doit d'abord défaire (ramener la chaise de bureau à sa
+        /// place, par les gestes qui la déplacent). Posé par <see cref="BodyActivity"/>.
+        /// </summary>
+        public Func<IEnumerator> BeforeStanding { get; set; }
+
+        /// <summary>
         /// Une chorégraphie interrompue (l'action remplacée en cours de route, un saut d'état) : Unity arrête une
         /// coroutine sans passer par ses <c>finally</c>, si bien qu'une assise abandonnée laissait le corps
         /// « chorégraphié » pour de bon — pieds jamais rendus au sol, mouvement de racine du clip toujours appliqué,
@@ -418,6 +432,7 @@ namespace Mika.World.Engine
         /// </summary>
         public void AbandonChoreography()
         {
+            _stepping = false;
             if (!Choreographing && !_rootMotion) return;
             Choreographing = false;
             _rootMotion = false;
@@ -425,34 +440,26 @@ namespace Mika.World.Engine
             ReleaseFeet(0.2f);
         }
 
-        /// <summary>De combien on recule une chaise à roulettes pour s'y asseoir ou en sortir (m).</summary>
-        const float PullOut = 0.28f;
         /// <summary>Où l'on se tient avant de s'asseoir : un peu devant l'assise, dos à elle.</summary>
         const float StandOff = 0.2f;
 
         /// <summary>
-        /// S'asseoir : reculer la chaise s'il y en a une, faire un pas devant l'assise (dos à elle), descendre
-        /// dessus en une seconde — le buste penché, les hanches vers l'arrière —, puis rouler vers le bureau.
+        /// S'asseoir : faire un pas devant l'assise (dos à elle), descendre dessus en une seconde — le buste penché, les
+        /// hanches vers l'arrière. Une chaise de bureau est prise là où elle est (à sa place, où elle l'a laissée en se
+        /// levant) : c'est ensuite l'occupation qui la rapproche du bureau, par ses gestes (<see cref="BodyActivity"/>).
         /// </summary>
         IEnumerator SitDown(PlaceView place)
         {
             var chair = place.Chair;
             var seatT = place.SeatTransform;
-            if (chair != null)
-            {
-                chair.Carry(seatT);
-                chair.SwivelTo(0f);
-                chair.RollTo(-PullOut);
-            }
+            if (chair != null) chair.Carry(seatT);
             _floorY = GroundUnder(transform.position);
             var seat = place.Seat;
             var fwd = FlatDir(seat.rotation * Vector3.forward);
-            // Le clip capturé recule les hanches d'une longueur connue : on se place d'autant devant l'assise
-            // (telle qu'elle sera, chaise reculée), dos à elle.
+            // Le clip capturé recule les hanches d'une longueur connue : on se place d'autant devant l'assise, dos à elle.
             var captured = Captured(clips != null ? clips.sitTravelNorm : 0f);
             var travel = captured ? clips.sitTravelNorm * animator.humanScale : StandOff;
-            var pulled = seat.position - (chair != null ? fwd * PullOut : Vector3.zero);
-            var stand = new Vector3(pulled.x, _floorY, pulled.z) + fwd * travel;
+            var stand = new Vector3(seat.position.x, _floorY, seat.position.z) + fwd * travel;
             yield return Step(stand, Quaternion.LookRotation(fwd), 0.75f);
 
             _place = place;
@@ -462,7 +469,9 @@ namespace Mika.World.Engine
             _sitTarget = 1f;
             _lieTarget = 0f;
             _anchorBlend = 0f;
-            PlantFeet();
+            // Sur un siège à la hauteur des clips (la chaise, le lit), la capture tient ses pieds elle-même ; épinglés
+            // côte à côte sous elle, ils glissaient vers leur place de la capture pendant la descente.
+            if (!SeatFitsClips) PlantFeet();
             ApplyAnimatorPostureNow();
             var start = transform.position;
             var startRot = transform.rotation;
@@ -502,34 +511,25 @@ namespace Mika.World.Engine
             _anchorBlend = 1f;
             // Assise : les pieds passent de leur appui debout à leur place devant le siège.
             ReleaseFeet(0.5f);
-            if (chair != null)
-            {
-                chair.RollTo(0f);
-                yield return new WaitForSeconds(0.55f);
-            }
         }
 
         /// <summary>
-        /// Se lever : reculer la chaise (avec soi), se redresser au-dessus de ses pieds — la capture avance les
-        /// hanches d'une longueur connue —, puis s'écarter vers le point d'approche.
+        /// Se lever : se redresser au-dessus de ses pieds — la capture avance les hanches d'une longueur connue —, puis
+        /// s'écarter vers le point d'approche. La chaise reste là où ses gestes l'ont ramenée (<see cref="BeforeStanding"/>).
         /// </summary>
         IEnumerator StandUp(PlaceView place)
         {
-            var chair = place != null ? place.Chair : null;
-            if (chair != null)
-            {
-                chair.Carry(place.SeatTransform);
-                chair.SwivelTo(0f);
-                chair.RollTo(-PullOut);
-                yield return new WaitForSeconds(0.6f);
-            }
             var a = Anchor ?? new Pose(transform.position, transform.rotation);
             var fwd = FlatDir(a.rotation * Vector3.forward);
             var floor = _floorY != 0f || place == null ? _floorY : GroundUnder(place.Position);
             var captured = Captured(clips != null ? clips.standTravelNorm : 0f);
             var travel = captured ? clips.standTravelNorm * animator.humanScale : StandOff;
             var stand = new Vector3(a.position.x, floor, a.position.z) + fwd * travel;
-            PlantFeet();
+            // Les pieds restent où l'assise les a mis (devant le siège, devant le lit) : la capture se lève au-dessus
+            // d'eux. Sur un siège à la hauteur des clips (la chaise, le lit), le clip les tient lui-même (appuis cuits
+            // dans l'atelier) ; ailleurs on les épingle là où ils sont. Replacés sous le corps, ils partaient sous le lit
+            // pendant qu'elle se levait.
+            if (!SeatFitsClips) PlantFeet(whereTheyAre: true);
             _posture = Posture.Stand;
             _anchor = null;
             _anchorLive = null;
@@ -552,8 +552,9 @@ namespace Mika.World.Engine
                 Vector3 xz;
                 if (captured)
                 {
-                    var pos = transform.position;
-                    xz = Vector3.Lerp(pos, stand, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01((p - 0.75f) / 0.25f)) * 0.3f);
+                    // Le mouvement de racine du clip seul (ses appuis sont cuits dans l'atelier) : tirée vers le point
+                    // calculé en fin de geste, la racine faisait glisser les pieds de 5 cm. Le pas qui suit rejoint le lieu.
+                    xz = transform.position;
                 }
                 else
                 {
@@ -564,9 +565,13 @@ namespace Mika.World.Engine
             }
             _rootMotion = false;
             ReleaseFeet(0.3f);
+            // Debout : les pieds tiennent d'eux-mêmes dès la fin du clip (le fondu vers l'attente déplaçait l'appui de 5 cm).
+            _speed = 0f;
+            _planter.Still();
+            _stepping = true;
             if (place != null && Vector3.Distance(Ground(place.Position), Ground(transform.position)) > 0.12f)
                 yield return Step(new Vector3(place.Position.x, floor, place.Position.z), place.Rotation, 0.75f);
-            if (chair != null) chair.RollTo(0f);
+            _stepping = false;
             EnsureAgent();
             WarpAgent(transform.position);
         }
@@ -633,34 +638,68 @@ namespace Mika.World.Engine
         }
 
         /// <summary>
-        /// Quelques pas courts jusqu'à un point proche (devant une chaise, à côté d'un lit), sans navmesh : la
-        /// marche se joue d'elle-même (la vitesse mesurée l'enclenche). Au-delà de 30 cm on se tourne dans le sens
-        /// de la marche ; en deçà on se décale sans se retourner.
+        /// Quelques pas courts jusqu'à un point proche (devant une chaise, à côté d'un lit), sans navmesh. Au-delà de
+        /// <see cref="ShuffleMax"/>, une vraie marche : se tourner d'abord sur place (les pieds suivent à petits pas), puis
+        /// marcher droit, la vitesse mesurée enclenchant la marche — tourner en avançant faisait glisser les pieds pendant
+        /// que la marche démarrait. En deçà, se décaler sans se retourner, lentement, sous le seuil de la marche : les pieds
+        /// restent plantés et suivent par petits pas (<see cref="FootPlanter"/>) ; à la vitesse d'une marche, la marche
+        /// jouée de face pendant un pas de côté les faisait glisser d'autant.
         /// </summary>
         IEnumerator Step(Vector3 target, Quaternion facing, float speed)
         {
+            _stepping = true;
             var start = transform.position;
             target.y = start.y;
             var delta = Ground(target - start);
             var dist = delta.magnitude;
             if (dist > 0.04f)
             {
-                var walkFacing = dist > 0.3f ? Quaternion.LookRotation(delta.normalized) : transform.rotation;
-                var d = Mathf.Max(0.45f, dist / speed);
+                float d;
+                if (dist > ShuffleMax)
+                {
+                    var walkFacing = Quaternion.LookRotation(delta.normalized);
+                    var turn = Quaternion.Angle(transform.rotation, walkFacing);
+                    if (turn > 10f) yield return TurnTo(walkFacing, Mathf.Clamp(turn / 160f, 0.3f, 1.1f));
+                    d = Mathf.Max(0.45f, dist / speed);
+                }
+                else
+                {
+                    // D'abord immobile un instant (au sortir d'un lever, le corps vient de bouger : le planteur se croirait
+                    // encore en marche et laisserait les pieds au clip), puis le décalage.
+                    for (var w = 0f; w < 1f && _speed > 0.04f; w += Time.deltaTime) yield return null;
+                    yield return new WaitForSeconds(0.5f);
+                    d = dist / ShuffleSpeed;
+                }
                 var t = 0f;
                 while (t < d)
                 {
                     t += Time.deltaTime;
-                    var k = Mathf.SmoothStep(0f, 1f, t / d);
-                    transform.position = Vector3.Lerp(start, target, k);
-                    var want = t > d * 0.75f ? facing : walkFacing;
-                    transform.rotation = Quaternion.RotateTowards(transform.rotation, want, turnSpeedDeg * 0.8f * Time.deltaTime);
+                    transform.position = Vector3.Lerp(start, target, Trapezoid(t / d, 0.2f));
                     yield return null;
                 }
                 transform.position = target;
             }
             if (Quaternion.Angle(transform.rotation, facing) > 2f)
                 yield return TurnTo(facing, Mathf.Clamp(Quaternion.Angle(transform.rotation, facing) / 220f, 0.2f, 0.6f));
+            _stepping = false;
+        }
+
+        /// <summary>Au-delà (m), on marche pour rejoindre un point proche ; en deçà, on se décale à petits pas.</summary>
+        const float ShuffleMax = 0.3f;
+        /// <summary>La vitesse d'un décalage à petits pas (m/s) : au plus haut, sous le seuil où le FootPlanter marche (0,1).</summary>
+        const float ShuffleSpeed = 0.06f;
+
+        /// <summary>
+        /// Une course à vitesse constante, qui démarre et s'arrête en douceur (accélération sur la fraction
+        /// <paramref name="ramp"/> au début et à la fin) : u (0 → 1) → le chemin fait (0 → 1).
+        /// </summary>
+        static float Trapezoid(float u, float ramp)
+        {
+            u = Mathf.Clamp01(u);
+            var v = 1f / (1f - ramp);
+            if (u < ramp) return v * u * u / (2f * ramp);
+            if (u > 1f - ramp) return 1f - v * (1f - u) * (1f - u) / (2f * ramp);
+            return v * (u - ramp * 0.5f);
         }
 
         /// <summary>Une direction ramenée à l'horizontale, normée (devant soi si elle est verticale).</summary>
@@ -825,8 +864,14 @@ namespace Mika.World.Engine
         /// <summary>Pour le labo : la correction du bassin et l'état des pieds (voir <see cref="FootPlanter.Describe"/>).</summary>
         public string FeetState() => $"bassin {_groundOffset:+0.000;-0.000} sol {_floorLeft:0.000}/{_floorRight:0.000} {_planter.Describe()}";
 
-        /// <summary>Debout, rien ne dirige les pieds (ni une chorégraphie, ni l'assise) : ils tiennent au sol d'eux-mêmes.</summary>
-        bool FeetFree => _posture == Posture.Stand && !Choreographing && !_procedural && plantFeet && _seated <= 0f;
+        /// <summary>
+        /// Debout, rien ne dirige les pieds (ni une chorégraphie, ni l'assise) : ils tiennent au sol d'eux-mêmes. Les pas
+        /// d'une chorégraphie (<see cref="Step"/> : s'approcher d'un siège, s'en écarter) aussi — coupé, le planteur
+        /// laissait les pieds suivre la racine et ils glissaient sur le sol pendant le pas.
+        /// </summary>
+        bool FeetFree => _posture == Posture.Stand && (!Choreographing || _stepping) && !_procedural && plantFeet && _seated <= 0f;
+
+        bool _stepping;
 
         /// <summary>
         /// Ancrage au sol (debout, en marchant) : les clips capturés sont ramenés à sa taille par la hauteur des
@@ -938,8 +983,12 @@ namespace Mika.World.Engine
             transform.position += delta;
         }
 
-        /// <summary>Plante les pieds là où ils sont (on s'assoit, on se lève sans qu'ils glissent).</summary>
-        void PlantFeet()
+        /// <summary>
+        /// Plante les pieds (on s'assoit, on se lève sans qu'ils glissent) : côte à côte sous elle avant de s'asseoir —
+        /// pas là où le dernier pas les a laissés (un pied encore en arrière resterait coincé sous la chaise pendant toute
+        /// la descente) —, ou là où ils sont (<paramref name="whereTheyAre"/> : assise, devant le siège, pour se lever).
+        /// </summary>
+        void PlantFeet(bool whereTheyAre = false)
         {
             if (!plantFeet) return;
             for (var s = 0; s < 2; s++)
@@ -949,11 +998,10 @@ namespace Mika.World.Engine
                 if (bone == null) continue;
                 var fwd = FlatDir(transform.forward);
                 var toe = Quaternion.AngleAxis(s == 0 ? -8f : 8f, Vector3.up) * fwd;
-                // Côte à côte sous elle, pas là où le dernier pas les a laissés (un pied encore en arrière resterait
-                // coincé sous la chaise pendant toute la descente).
                 var right = Vector3.Cross(Vector3.up, fwd);
-                var p = transform.position + fwd * 0.04f + right * ((s == 0 ? -1f : 1f) * (_hipHalfWidth + 0.02f));
-                p.y = _floorY + _ankle;
+                var p = whereTheyAre ? bone.position : transform.position + fwd * 0.04f + right * ((s == 0 ? -1f : 1f) * (_hipHalfWidth + 0.02f));
+                if (!whereTheyAre) p.y = _floorY + _ankle;
+                if (whereTheyAre) toe = FlatDir(bone.rotation * _footFrame[s] * Vector3.forward);
                 var l = _limbs[(int)goal];
                 l.Position = p;
                 l.Rotation = Quaternion.LookRotation(toe, Vector3.up);

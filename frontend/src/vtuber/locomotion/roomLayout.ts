@@ -67,8 +67,8 @@ const CHAIR_YAW = 0.3;
 export const PLACES: Record<PlaceId, Place> = {
   // On the rug, facing whoever is in front of her — the conversation spot.
   center: { id: "center", approach: { x: 0, z: -0.5 }, facing: 0, posture: "stand" },
-  // Window on the left wall (sill at x −3.86): she stands close and looks out.
-  window: { id: "window", approach: { x: -3.25, z: -1.2 }, facing: -Math.PI / 2, posture: "stand" },
+  // Window on the left wall (sill at x −3.86): she stands against it, hands on the sill, and looks out.
+  window: { id: "window", approach: { x: -3.62, z: -1.2 }, facing: -Math.PI / 2, posture: "stand" },
   // Desk chair: reached from its right side (+x), pulled back, sat on,
   // rolled in. Seat top 0.51, facing the desk along the chair's own front.
   desk: {
@@ -83,14 +83,14 @@ export const PLACES: Record<PlaceId, Place> = {
   // asleep she lies in it, head on the pillow at the bedside-table end (+Z).
   bed: {
     id: "bed",
-    approach: { x: -2.33, z: 1.3 },
+    approach: { x: -2.4, z: 1.3 },
     facing: Math.PI / 2,
     posture: "sit",
     seat: { x: -2.85, z: 1.3, height: 0.47 },
     lie: { x: -3.32, z: 1.62, height: 0.56, headYaw: 0 },
   },
   // Bookshelf on the right wall: she faces the books.
-  bookshelf: { id: "bookshelf", approach: { x: 3.22, z: -2.2 }, facing: Math.PI / 2, posture: "stand" },
+  bookshelf: { id: "bookshelf", approach: { x: 3.3, z: -2.2 }, facing: Math.PI / 2, posture: "stand" },
   // Front wall door: she stands before it, back to the room's centre.
   door: { id: "door", approach: { x: 1.8, z: 2.75 }, facing: 0, posture: "stand" },
 };
