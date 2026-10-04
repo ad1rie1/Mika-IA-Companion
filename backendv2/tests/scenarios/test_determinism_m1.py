@@ -7,6 +7,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 CODE = """
 import logging, sys, tempfile
 from pathlib import Path
@@ -26,6 +28,7 @@ with tempfile.TemporaryDirectory() as tmp:
 """
 
 
+@pytest.mark.slow
 def test_same_log_under_two_hash_seeds():
     outs = set()
     for hashseed in ("0", "31337"):

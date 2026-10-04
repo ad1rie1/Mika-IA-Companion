@@ -49,6 +49,7 @@ from mika.faculties.projects.faculty import (
     objective_at,
     objective_of,
     params,
+    written,
 )
 from mika.kernel.clock import HOUR
 from mika.kernel.events import Content, Draft
@@ -98,12 +99,6 @@ def caretaker(frame: Frame) -> str:
 
 
 GONE = "Ce projet n'est plus actif (en pause ou archivé) : arrête-toi là."
-
-
-def written(p: Project) -> int:
-    """Le niveau de ce qu'elle écrit pendant une exécution (compte rendu, carnet, décisions, résultat) : elle y
-    voit toute sa mémoire, ce qui en sort est au moins personnel."""
-    return max(p.sensitivity, int(Sensitivity.PERSONAL))
 
 
 def wrap_up(ctx: Any, out: Any) -> Any:

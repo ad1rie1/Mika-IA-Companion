@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Protocol
 
+from mika.kernel.slots import PREEMPTED as PREEMPTED
+
 
 @dataclass(frozen=True, slots=True)
 class ToolCall:
@@ -93,7 +95,6 @@ class LLMResponse:
     truncated_tool_call: bool = False
 
 
-PREEMPTED = "préempté par le premier plan"
 #: ``meta`` d'une requête redemandée après une coupure par ``max_tokens`` : un
 #: fournisseur qui bride sa sortie (un modèle local) lève alors son propre plafond
 RETRY_AFTER_CUT = "retry_after_cut"

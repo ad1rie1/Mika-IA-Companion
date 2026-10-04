@@ -326,3 +326,27 @@ def test_an_archive_whose_link_would_escape_the_folder_is_refused(tmp_path, monk
             backup.restore(forged, victim)
         assert not victim.exists() and not any(outside.iterdir())
 
+
+
+def test_the_files_she_sent_are_archived_and_restored_private(tmp_path, monkeypatch):
+    """ADR 0062 : les octets des fichiers qu'elle a envoyés ne sont pas au journal — ``partages/`` part avec la
+    sauvegarde et revient à la restauration, à elle seule (0700, 0600), lisible par le même port."""
+    import stat
+
+    from mika.adapters.shares import DiskShares
+
+    monkeypatch.delenv("MIKA_SECRET_KEY", raising=False)
+    data, dest, restored = tmp_path / "data", tmp_path / "archives", tmp_path / "restauree"
+    live(data, talk=False)
+    file = "c0ffee" + "0" * 26
+    asyncio.run(DiskShares(data / "partages").put(file, b"- pain\n- lait\n", subjects=("user_2",)))
+    made = backup.backup(data, dest)
+    with tarfile.open(made.archive) as tar:
+        names = tar.getnames()
+    assert f"data/partages/{file}.bin" in names and f"data/partages/{file}.json" in names
+    backup.restore(made.archive, restored)
+    assert stat.S_IMODE((restored / "partages").stat().st_mode) == 0o700
+    assert stat.S_IMODE((restored / "partages" / f"{file}.bin").stat().st_mode) == 0o600
+    again = DiskShares(restored / "partages")
+    assert asyncio.run(again.read(file)) == b"- pain\n- lait\n"
+    assert asyncio.run(again.forget("user_2")) == 1  # ses sujets reviennent avec lui

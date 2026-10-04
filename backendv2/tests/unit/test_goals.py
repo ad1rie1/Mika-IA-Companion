@@ -602,6 +602,7 @@ def test_a_session_that_concludes_does_not_call_the_model_again(tmp_path):
     assert len(steps) == 1, f"une séance qui conclut d'un trait : un appel, pas {len(steps)}"
 
 
+@pytest.mark.slow
 def test_her_daydreams_follow_no_fixed_rotation_and_last_one_session(tmp_path):
     """Sans flux où chercher du neuf, sa curiosité la fait rêvasser : chaque rêverie se vit d'un trait (une
     séance), et ses sujets ne défilent pas dans l'ordre de sa persona, un par jour comme un métronome (sonde réelle

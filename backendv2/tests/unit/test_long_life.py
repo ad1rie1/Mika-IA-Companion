@@ -23,6 +23,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.store_sqlite.store import OUTBOX_DONE_KEPT_US
@@ -393,6 +394,7 @@ def test_who_an_item_concerns_follows_her_memory(tmp_path):
 # ── Les échanges passés ───────────────────────────────────────────────────
 
 
+@pytest.mark.slow
 def test_past_exchanges_are_neither_greetings_nor_twice_the_same(tmp_path):
     """Des semaines de « coucou Mika ! », une histoire de crêperie, et deux fois la même phrase sur le match de
     rugby. Un mois plus tard, à « coucou Mika, ça faisait longtemps… », « VOS ÉCHANGES PASSÉS » ne rappelle aucun

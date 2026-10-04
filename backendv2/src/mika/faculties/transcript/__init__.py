@@ -224,9 +224,12 @@ def _row(e: Any) -> tuple[Any, ...] | None:
                 d.client_msg_id, None, None, None, attachments, typed)
     if e.type.name == rt.UTTERANCE.name and d.visible:
         declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
+        # ce qui est parti avec son message : des identifiants seulement (leur nom, leur taille, leur sort sont à
+        # leur propriétaire — l'écran les lui demande)
+        sent = json.dumps([{"id": a} for a in d.attachments]) if d.attachments else "[]"
         return (e.seq, e.at, "assistant", d.target or "", d.channel, d.room, _source(d.kind), d.kind,
                 strip_prosody(d.text.text or ""), None, d.reply_to,
-                declared.emotion.value if declared else None, declared.intensity if declared else None, "[]", None)
+                declared.emotion.value if declared else None, declared.intensity if declared else None, sent, None)
     return None
 
 

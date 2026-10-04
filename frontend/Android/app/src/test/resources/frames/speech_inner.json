@@ -1,0 +1,4 @@
+{"type": "speech", "text": "hmm, c'est qui ça ?", "emotion": "curious", "emotion_intensity": 0.4,
+ "emotion_state": {}, "emotion_blend": [], "source": "conscience", "person_id": "user_3", "speak": false,
+ "voice_reason": "inner", "voice_persona": "inner", "voice_profile": {"pitch": 0.94, "rate": 0.9, "gain": 0.45},
+ "message_id": null, "user_message_id": null, "client_msg_id": null}

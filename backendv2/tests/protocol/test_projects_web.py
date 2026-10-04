@@ -181,6 +181,7 @@ def test_a_project_is_created_on_its_own_page_and_lands_on_its_fiche(world):  # 
     assert "les jours ouvrés, de 9 h à 18 h" in fiche and "github.com/moi/outils" in fiche
 
 
+@pytest.mark.slow
 def test_the_project_fiche_is_driven_over_http(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)

@@ -10,6 +10,10 @@ ce que le client sait lire) — et dès que sa session est révoquée. Un client
 natif (un moteur de jeu, ADR 0051) n'a ni cookie ni ``Origin`` : il présente un
 jeton de son compte (``Authorization: Bearer mw_…``), accepté **seulement sans**
 ``Origin`` (un navigateur ne peut pas poser cet en-tête sur un WebSocket).
+L'application du téléphone (ADR 0062) obtient le sien par identifiant et mot de
+passe (``POST /auth/token``, refusé à un navigateur), le rend en partant
+(``DELETE /auth/token``), et le présente aussi aux routes HTTP qui lisent un
+compte (``/auth/whoami``, ``/files/…``) — jamais à côté d'une ``Origin``.
 
 Connexion : un seul scrypt par essai, compte connu ou non, et hors de la
 boucle ; étranglement par adresse IP **et** par (IP, nom), mémoire purgée.
@@ -33,6 +37,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import quote
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
@@ -43,13 +48,24 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from mika.adapters.web import protocol
-from mika.adapters.web.accounts import TOKEN_KEY, Account, Accounts, password_problems
+from mika.adapters.web.accounts import (
+    CLIENT_MOBILE,
+    CLIENT_SCREEN,
+    SOURCE_LOGIN,
+    TOKEN_CLIENTS,
+    TOKEN_KEY,
+    Account,
+    Accounts,
+    password_problems,
+)
 from mika.adapters.web.hub import WS_UNAUTHORIZED, Conn, Hub
 from mika.contracts.entry import MindPort
 from mika.contracts.presence import Connected
 from mika.contracts.runtime import AttachmentMeta, PerceptionReceived
 from mika.kernel.events import Content
 from mika.ports.preprocess import Perceived, Preprocessor, Upload, render
+from mika.ports.shares import valid_id
+from mika.vocab import privacy
 from mika.vocab.people import clean_display_name, client_claim_allowed
 
 log = logging.getLogger("mika.web")
@@ -60,6 +76,17 @@ CSRF_COOKIE = "csrftoken"
 DEV_ORIGINS = ("http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:4173", "http://127.0.0.1:4173")
 #: au-delà, des messages attendent déjà leur tour sur cette connexion : refusé (« saturée »)
 MAX_QUEUED_CHATS = 8
+#: les fichiers qu'elle envoie : au plus tant de téléchargements par compte et par minute
+FILES_RATE = (60, 60.0)
+#: les sortes qu'un téléchargement peut annoncer telles quelles ; toute autre (du HTML, du SVG, un script…) part
+#: en ``application/octet-stream`` : rien de ce qu'elle envoie ne s'exécute dans une page
+SAFE_MIMES = frozenset({"text/plain", "text/markdown", "text/csv", "application/json", "image/png", "image/jpeg",
+                        "image/webp", "image/gif", "application/pdf"})
+
+
+def safe_mime(mime: str) -> str:
+    base = str(mime or "").split(";", 1)[0].strip().lower()
+    return base if base in SAFE_MIMES else "application/octet-stream"
 
 
 @dataclass(slots=True)
@@ -133,6 +160,14 @@ def _whoami(account: Account | None, cfg: WebConfig, accounts: Accounts) -> dict
     }
 
 
+def native_token(headers: Any) -> str:
+    """Le jeton porteur d'un client natif : seulement **sans** ``Origin`` (avec une, c'est un navigateur, et seule
+    sa session compte — une page ne peut pas faire valoir un jeton volé à côté de ses cookies)."""
+    if headers.get("origin") is not None:
+        return ""
+    return bearer(headers.get("authorization"))
+
+
 def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | None = None,
                lifespan: Any = None, extra_routes: Sequence[Any] = (),
                preprocess: Preprocessor | None = None, camera: Any = None,
@@ -144,6 +179,12 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
     accounts.on_token_revoke.append(lambda token_id: hub.revoke(session=f"{TOKEN_KEY}{token_id}"))
 
     def account_of(request: Request) -> Account | None:
+        """Le compte d'une requête : son jeton de client natif (sans ``Origin``), sinon sa session. Les routes qui
+        écrivent exigent en plus le jeton CSRF, qu'un client natif n'a pas : rien n'est élargi."""
+        token = native_token(request.headers)
+        if token:
+            found = accounts.token(token)
+            return found[0] if found is not None else None
         return accounts.session(request.cookies.get(SESSION_COOKIE))
 
     def csrf_ok(request: Request) -> bool:
@@ -175,6 +216,14 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         return with_csrf(request, response)
 
     async def whoami(request: Request) -> Response:
+        token = native_token(request.headers)
+        if token:
+            # un client natif : son jeton dit qui il est (rien de planté : il n'a pas de cookies)
+            found = accounts.token(token)
+            report = _whoami(found[0] if found else None, cfg, accounts)
+            if found is not None:
+                report |= {"client": accounts.token_client(found[1]), "token_id": found[1]}
+            return JSONResponse(report, headers={"Cache-Control": "no-store"})
         return with_csrf(request, JSONResponse(_whoami(account_of(request), cfg, accounts)))
 
     async def login(request: Request) -> Response:
@@ -225,6 +274,42 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         response.delete_cookie(SESSION_COOKIE)
         return response
 
+    async def token_login(request: Request) -> Response:
+        """L'application du téléphone se connecte : identifiant et mot de passe contre un jeton de client natif,
+        montré une seule fois. Refusé à un navigateur (il a sa session) ; mêmes étranglements que ``/auth/login``."""
+        if request.headers.get("origin") is not None:
+            return JSONResponse({"error": "Un navigateur se connecte par sa session."}, status_code=403)
+        data = await body(request)
+        username = str(data.get("username") or "").strip()
+        password = str(data.get("password") or "")
+        client = str(data.get("client") or CLIENT_SCREEN)
+        if not username or not password:
+            return JSONResponse({"error": "Nom d'utilisateur et mot de passe requis."}, status_code=400)
+        if client not in TOKEN_CLIENTS:
+            return JSONResponse({"error": "Sorte de client inconnue (screen ou mobile)."}, status_code=400)
+        ip = request.client.host if request.client else "?"
+        keys = (f"ip:{ip}", f"ip:{ip}:nom:{username.lower()}")
+        if by_ip.blocked(keys[0]) or by_name.blocked(keys[1]):
+            return JSONResponse({"error": "Trop de tentatives."}, status_code=429, headers={"Retry-After": "60"})
+        account = await accounts.verify(username, password)
+        if account is None:
+            by_ip.fail(keys[0])
+            by_name.fail(keys[1])
+            return JSONResponse({"error": "Identifiants invalides."}, status_code=401)
+        label = str(data.get("label") or "")
+        info, raw = await accounts.create_token(account.id, label, client=client, source=SOURCE_LOGIN)
+        await accounts.prune_login_tokens(account.id)
+        report = _whoami(account, cfg, accounts) | {"token": raw, "token_id": info.id, "client": info.client}
+        return JSONResponse(report, headers={"Cache-Control": "no-store"})
+
+    async def token_logout(request: Request) -> Response:
+        """L'application rend son jeton en se déconnectant : il ne vaut plus rien, ses connexions se ferment."""
+        found = accounts.token(native_token(request.headers))
+        if found is None:
+            return JSONResponse({"error": "Jeton invalide."}, status_code=401)
+        await accounts.revoke_token(found[1])
+        return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+
     async def health(request: Request) -> Response:
         """Une sonde : 200 quand elle peut répondre (même moins bien : ``degraded``),
         503 en démarrage ou en arrêt."""
@@ -253,6 +338,34 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
                                           "la console, qui le montre.", "status": status}, status_code=409)
         await hub.refresh_panels()  # chacun voit la file d'approbation à jour
         return JSONResponse({"ok": True, "status": status})
+
+    downloads: dict[int, protocol.RateLimiter] = {}
+
+    async def shared_file(request: Request) -> Response:
+        """Un fichier qu'elle a envoyé (ADR 0062) : à qui il est parti (un jeton de l'application, sans ``Origin`` ;
+        sinon la session du navigateur). Inconnu ou pas à cette personne : le même 404 ; retiré : 410. Jamais
+        rendu dans la page (``attachment``, ``nosniff``, bac à sable), et sous une sorte sûre seulement."""
+        file = request.path_params["file"]
+        if not valid_id(file):
+            return JSONResponse({"error": "Fichier introuvable."}, status_code=404)
+        account = account_of(request)
+        if account is None:
+            return JSONResponse({"error": "Authentification requise."}, status_code=401)
+        limiter = downloads.get(account.id)
+        if limiter is None:
+            limiter = downloads[account.id] = protocol.RateLimiter(*FILES_RATE)
+        if not limiter.allow():
+            return JSONResponse({"error": "Trop de téléchargements."}, status_code=429, headers={"Retry-After": "60"})
+        got = await port.shared_file(file, handle=account.handle)
+        if got is None:
+            return JSONResponse({"error": "Fichier introuvable."}, status_code=404)
+        if got.gone:
+            return JSONResponse({"error": "Ce fichier a été retiré."}, status_code=410)
+        name = "".join(ch for ch in got.name.replace("\\", "/").rsplit("/", 1)[-1] if ch.isprintable())[:200]
+        return Response(got.data, media_type=safe_mime(got.mime), headers={
+            "Content-Disposition": "attachment; filename*=UTF-8''" + quote(name or "fichier", safe=""),
+            "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store",
+            "Content-Security-Policy": "sandbox; default-src 'none'"})
 
     sensed: dict[str, deque[float]] = defaultdict(deque)
 
@@ -303,8 +416,11 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
                 await websocket.close(code=WS_UNAUTHORIZED)
                 return
             native, token_id = found
+            # l'application du téléphone (ADR 0062) : une messagerie ; ouverte en arrière-plan, personne ne regarde
+            channel = privacy.MOBILE if accounts.token_client(token_id) == CLIENT_MOBILE else privacy.WEB
+            away = (websocket.headers.get(protocol.PRESENCE_HEADER) or "").strip().lower() == "away"
             await _Session(websocket, port, hub, native, preprocess, accounts=accounts,
-                           session_key=f"{TOKEN_KEY}{token_id}").run()
+                           session_key=f"{TOKEN_KEY}{token_id}", channel=channel, here=not away).run()
             return
         if not origin or origin not in cfg.origins:
             await websocket.close(code=1008)
@@ -352,9 +468,12 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         Route("/auth/login", login, methods=["POST"]),
         Route("/auth/bootstrap", bootstrap, methods=["POST"]),
         Route("/auth/logout", logout, methods=["GET", "POST"]),
+        Route("/auth/token", token_login, methods=["POST"]),
+        Route("/auth/token", token_logout, methods=["DELETE"]),
         Route("/health", health, methods=["GET"]),
         Route("/api/projects/pending/{action_id:int}/{decision:str}", pending_decision, methods=["POST"]),
         Route("/api/perceptions", perceptions, methods=["POST"]),
+        Route("/files/{file:str}", shared_file, methods=["GET"]),
         WebSocketRoute("/ws", ws),
         *extra_routes,
     ]
@@ -369,7 +488,7 @@ class _Session:
 
     def __init__(self, websocket: WebSocket, port: MindPort, hub: Hub, account: Account | None,
                  preprocess: Preprocessor | None = None, *, accounts: Accounts | None = None,
-                 session_key: str | None = None) -> None:
+                 session_key: str | None = None, channel: str = privacy.WEB, here: bool = True) -> None:
         self.ws = websocket
         self.port = port
         self.preprocess = preprocess
@@ -383,7 +502,9 @@ class _Session:
         self._chats: set[asyncio.Future[Any]] = set()
         self._watchers: set[asyncio.Future[Any]] = set()
         self._closed = False
-        kw: dict[str, Any] = {"session": session_key, "close": self.close}
+        #: le prochain rapprochement de la présence (aller : tout de suite ; partir : après la grâce)
+        self._presence_task: asyncio.Future[Any] | None = None
+        kw: dict[str, Any] = {"session": session_key, "close": self.close, "channel": channel, "here": here}
         if account is not None:
             kw |= {"handle": account.handle, "authenticated": True, "account": account.id,
                    "operator": account.operator, "display_name": account.display_name}
@@ -399,33 +520,97 @@ class _Session:
         async with self._lock:
             await self.ws.close(code=code)
 
-    async def announce(self) -> None:
+    async def _arrive(self) -> None:
+        """Quelqu'un est là, devant cet écran : c'est ce que sa présence (et le journal) en savent."""
         c = self.conn
         await self.port.connected(Connected(
-            handle=c.handle, channel="web", connection=c.id, authenticated=c.authenticated, account=c.account,
+            handle=c.handle, channel=c.channel, connection=c.id, authenticated=c.authenticated, account=c.account,
             operator=c.operator, display_name=c.display_name,
         ))
         c.announced = True
-        await self.send(protocol.history("initial", self.port.recent(c.handle, protocol.HISTORY_INITIAL),
-                                         life=self.hub.life()))
-        await self.hub.push_face(c.handle, force=True)
+
+    async def _depart(self) -> None:
+        c = self.conn
+        c.announced = False
+        await self.port.disconnected(c.handle, c.id)
+
+    async def _refresh(self) -> None:
         # l'état intérieur tout de suite (sommeil, énergie, et où elle est dans sa chambre) : sans lui, un
         # écran qui s'ouvre la montrait au milieu de la pièce jusqu'au prochain changement d'état
-        await self.hub.refresh_panels([c.handle])
+        await self.hub.push_face(self.conn.handle, force=True)
+        await self.hub.refresh_panels([self.conn.handle])
+
+    async def announce(self) -> None:
+        """Un écran qui s'ouvre : la présence, le fil initial, le visage, le panneau."""
+        c = self.conn
+        await self._arrive()
+        await self.send(self.hub.history("initial", self.port.recent(c.handle, protocol.HISTORY_INITIAL)))
+        await self._refresh()
 
     async def run(self) -> None:
         try:
-            if self.account is not None:
+            if self.account is not None and self.conn.here:
                 await self.announce()
+            # ouverte en arrière-plan (ADR 0062) : rien de non sollicité, le client demande ce qu'il a manqué (sync)
             while not self._closed:
                 raw = await self.ws.receive_text()
                 await self.dispatch(raw)
         except (WebSocketDisconnect, RuntimeError):
             pass  # RuntimeError : la socket fermée par le serveur (révocation) pendant une lecture
         finally:
+            if self._presence_task is not None:
+                self._presence_task.cancel()
             self.hub.detach(self.conn)
             if self.conn.announced:
                 await self.port.disconnected(self.conn.handle, self.conn.id)
+
+    # ── aller et venir (ADR 0062) ──
+    async def presence(self, frame: dict[str, Any]) -> None:
+        """``{"type": "presence", "here": bool}`` : l'application passe au premier plan, ou le quitte. Revenir vaut
+        tout de suite ; partir, après ``AWAY_GRACE_S`` (une photo prise et l'on revient : rien au journal)."""
+        here = frame.get("here")
+        if not isinstance(here, bool) or self.account is None:
+            return
+        c = self.conn
+        was = c.here
+        c.here = here
+        if here:
+            if self._presence_task is not None:
+                self._presence_task.cancel()
+                self._presence_task = None
+            await self._reconcile()
+            if not was:
+                await self._refresh()  # l'écran revient : un visage et un panneau frais
+        else:
+            self._reconcile_after(protocol.AWAY_GRACE_S)
+
+    def _reconcile_after(self, delay: float) -> None:
+        if self._presence_task is not None:
+            self._presence_task.cancel()
+        self._presence_task = asyncio.ensure_future(self._reconcile_later(delay))
+
+    async def _reconcile_later(self, delay: float) -> None:
+        await asyncio.sleep(delay)
+        self._presence_task = None
+        try:
+            await self._reconcile()
+        except (WebSocketDisconnect, RuntimeError, OSError) as exc:
+            log.debug("présence non rapprochée (%s) : %r", self.conn.id, exc)
+
+    async def _reconcile(self) -> None:
+        """Le journal suit ce que veut la connexion (``here``), au plus ``PRESENCE_RATE`` fois : au-delà, l'état
+        voulu s'applique quand la fenêtre le permet — jamais perdu, jamais une rafale."""
+        c = self.conn
+        if self._closed or c.here == c.announced:
+            return
+        if not c.presence.allow(self.hub._monotonic()):
+            n, window = protocol.PRESENCE_RATE
+            self._reconcile_after(window / n)
+            return
+        if c.here:
+            await self._arrive()
+        else:
+            await self._depart()
 
     async def dispatch(self, raw: str) -> None:
         try:
@@ -443,6 +628,8 @@ class _Session:
         elif kind == "sync":
             if self.conn.control.allow():
                 await self.sync(frame)
+        elif kind == "presence":
+            await self.presence(frame)
         elif kind == "chat":
             self.enqueue_chat(frame)
 
@@ -491,7 +678,7 @@ class _Session:
 
     async def sync(self, frame: dict[str, Any]) -> None:
         c = self.conn
-        if not c.announced:
+        if not c.announced and c.here and self.account is None:
             await self.announce()
         try:
             after_id = max(0, int(frame.get("after_id") or 0))
@@ -505,12 +692,12 @@ class _Session:
                 # « rattrapage » vide le laisserait cacher tout ce qui est plus petit que lui — le fil initial
                 # remplace ce que l'écran montre
                 rows = self.port.recent(c.handle, protocol.HISTORY_INITIAL)
-                await self.send(protocol.history("initial", rows, life=life, reset=True))
+                await self.send(self.hub.history("initial", rows, life=life, reset=True))
                 return
             rows, truncated = self.port.after(c.handle, after_id, protocol.HISTORY_MAX)
         else:
             rows, truncated = self.port.recent(c.handle, protocol.HISTORY_INITIAL), False
-        await self.send(protocol.history("catchup", rows, after_id=after_id, truncated=truncated, life=life))
+        await self.send(self.hub.history("catchup", rows, after_id=after_id, truncated=truncated, life=life))
 
     def _session_valid(self) -> bool:
         """Revérifiée à chaque message : une session effacée ailleurs (un autre processus,
@@ -528,7 +715,7 @@ class _Session:
         if not c.chat.allow():
             await self.send(protocol.ack(cid, "rate_limited"))
             return
-        if not c.announced:
+        if not c.announced and c.here and self.account is None:
             await self.announce()
         message = frame.get("message")
         text = message.strip() if isinstance(message, str) else ""
@@ -543,7 +730,7 @@ class _Session:
         seen = await self._perceive(kept)
         body = "\n".join(x for x in [text, render(seen)] if x).strip()
         perception = PerceptionReceived(
-            handle=c.handle, channel="web", text=Content.of(body), authenticated=c.authenticated,
+            handle=c.handle, channel=c.channel, text=Content.of(body), authenticated=c.authenticated,
             client_msg_id=cid or None, display_name=c.display_name,
             # ce qu'elle a tapé est le début du texte ; la suite, ce que ses pièces jointes ont donné à percevoir
             # (pour le prompt) — le fil relu ne montre que le premier, et les fichiers par leur nom (G-6)

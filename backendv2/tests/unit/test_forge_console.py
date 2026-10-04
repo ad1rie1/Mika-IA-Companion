@@ -263,6 +263,7 @@ def view_vivante(api, params):
 '''
 
 
+@pytest.mark.slow
 @needs_bwrap
 def test_a_view_that_fails_is_a_note_never_journaled_nor_counted_against_the_app(tmp_path):
     async def scenario(kernel, forge, store):

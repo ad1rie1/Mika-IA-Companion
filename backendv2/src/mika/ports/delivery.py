@@ -70,6 +70,9 @@ class Delivery:
     #: les messages que cette réponse règle (tout le tour : une rafale reçoit une seule réponse, à son dernier
     #: message, ``reply_to``) — un écran rattache aussi les précédents à leur ligne du fil
     answers: tuple[int, ...] = ()
+    #: ce qui part avec ce message (des identifiants de fichiers qu'elle a préparés pour la personne, opaques ici) :
+    #: le transport demande au port d'entrée ce qu'il peut en montrer (``MindPort.shared``)
+    attachments: tuple[str, ...] = ()
 
 
 class DeliveryPort(Protocol):

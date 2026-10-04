@@ -7,9 +7,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Path | What it is |
 |------|------------|
 | `backendv2/` | The live backend (package `mika`). Start with its `README.md`, then `ARCHITECTURE.md`, `docs/adr/` and `deploy/README.md` |
+| `services/mika-images/` | Local image server (stable-diffusion.cpp `sd-server`, Vulkan, Qwen-Image 2.1), on demand via systemd user units; weights and binary live in `/mnt/games/mika-images`. Mika plugs it as an image provider (ADR 0061) |
 | `frontend/Web/` | Web client (Vite + Three.js + VRM): `src/`, `public/`, `assets-src/` (Blender sources and scripts, shared with Unity), `studio.html` |
 | `frontend/Unity/` | Unity client: `Mika/` (the Unity project), `ArtSource/` (mocap, atelier), `tools/` (`gen_world_protocol.py`) |
-| `frontend/Android/` | Reserved, empty |
+| `frontend/Android/` | Android chat client (Kotlin + Compose, package `fr.qwartz.mika`): login by password → token, background connection + notifications, files both ways. Start with its `README.md`; server side in `backendv2/docs/adr/0062` and `backendv2/docs/protocole-chat.md` |
 | `old/backend/` | Archived v1 Django engine, the subject of most of this file |
 | `docs/`, `scripts/`, `data/` | Audits and notes, tooling, runtime data |
 
@@ -18,6 +19,27 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 removed with the archive. `backendv2/` has its own service unit in `backendv2/deploy/`. One consequence to check
 before reviving v1: `old/backend/config/settings.py` derives `PROJECT_ROOT` as `BASE_DIR.parent`, which is now
 `old/` rather than the repository root, so v1 looks for `.env` and `data/` there.
+
+## Slow tests (backendv2) — 2026-10-04
+
+Long tests are opt-in, to save time and tokens. `tests/conftest.py` deselects every test marked
+`@pytest.mark.slow` unless asked:
+
+- `python -m pytest -q` — the default run, slow tests left out (the summary says how many);
+- `--slow` adds them; `-m slow` runs only them; naming a file (`pytest tests/unit/test_x.py`) runs its slow
+  tests too.
+
+Rules:
+
+1. **Run without `--slow` by default.** Target the files you touched first, then the default suite. Run
+   `--slow` only when the change touches what the slow tests exercise (full simulator scenarios, multi-week
+   lives, performance, crash/replay), or before handing over a large batch — once, never in parallel.
+2. **Mark a test `slow` when it takes more than ~3 s on its own** (`--durations=0 --durations-min=3` to
+   find them): `@pytest.mark.slow` on the test, or `pytestmark = pytest.mark.slow` when the whole file is
+   long. Never mark a fast test slow to hide it, and never delete or skip a slow test to save time.
+   Measured 2026-10-04: the 33 slow tests took ~6 of the full suite's ~10.5 minutes.
+3. Every full run (with or without `--slow`) goes through the memory-bounded wrapper
+   (`~/recup-audit-v2-2026-10-01/outils/borne.sh`), one full suite at a time on the machine.
 
 ## Autonomy contract update — 2026-09-20
 

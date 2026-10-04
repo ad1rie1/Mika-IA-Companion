@@ -385,7 +385,8 @@ def _person_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Bloc
 
 
 #: par où elle lui a parlé (une personne peut avoir plusieurs adresses)
-CHANNEL_FR = {privacy.WEB: "sur le web", privacy.EXTERNAL: "par un compte extérieur"}
+CHANNEL_FR = {privacy.WEB: "sur le web", privacy.MOBILE: "sur son téléphone",
+              privacy.EXTERNAL: "par un compte extérieur"}
 
 
 def _where(frame: Frame, handle: str) -> str:

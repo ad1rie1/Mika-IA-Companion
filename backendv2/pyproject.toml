@@ -115,6 +115,7 @@ modules = [
     "mika.faculties.attention",
     "mika.faculties.goals",
     "mika.faculties.projects",
+    "mika.faculties.shares",
     "mika.faculties.self",
     "mika.faculties.expression",
     "mika.faculties.agency",

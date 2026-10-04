@@ -248,6 +248,7 @@ def test_a_workshop_filled_file_by_file_is_bounded_without_running_anything(tmp_
         go(ws.write(1, "un-de-plus.md", "x"))
 
 
+@pytest.mark.slow
 @needs_bwrap
 def test_a_cancelled_run_kills_what_it_started(tmp_path):
     ws = BwrapWorkshop(tmp_path)

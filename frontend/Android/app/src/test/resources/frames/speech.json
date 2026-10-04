@@ -1,0 +1,6 @@
+{"type": "speech", "text": "Coucou ! [LAUGH] Tu m'as manqué.", "emotion": "happy", "emotion_intensity": 0.72,
+ "emotion_state": {"person": {"emotion": "happy", "intensity": 0.5}},
+ "emotion_blend": [{"emotion": "happy", "weight": 0.8}, {"emotion": "playful", "weight": 0.35}],
+ "source": "reply", "person_id": "user_3", "speak": true, "voice_reason": "screen_ok",
+ "voice_persona": "speaking", "voice_profile": {"pitch": 1.0, "rate": 1.0, "gain": 1.0},
+ "message_id": 42, "user_message_id": 41, "client_msg_id": "cabc-1"}

@@ -1,0 +1,5 @@
+{"type": "speech", "text": "Désolée, je n'arrive pas à te répondre là tout de suite… Réessaie dans un instant ?",
+ "emotion": "neutral", "emotion_intensity": 0.0, "emotion_state": {}, "emotion_blend": [], "source": "error",
+ "person_id": "user_3", "speak": false, "voice_reason": "error_fallback_muted", "voice_persona": "speaking",
+ "voice_profile": {"pitch": 1.0, "rate": 1.0, "gain": 1.0}, "message_id": null, "user_message_id": 12,
+ "client_msg_id": null}

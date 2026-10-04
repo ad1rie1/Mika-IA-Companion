@@ -74,7 +74,7 @@ PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Émotions", ("affect", "needs", "body", "self")),
     ("Esprit", ("attention", "memory", "transcript")),
     ("Relations", ("social", "others", "identity")),
-    ("Action", ("agency", "goals", "projects", "world")),
+    ("Action", ("agency", "goals", "projects", "shares", "world")),
     ("Canaux", ("email", "rss", "camera", "forge")),
     ("Noyau", ("kernel",)),
 )
@@ -85,7 +85,7 @@ FACULTY_LABELS: dict[str, str] = {
     "agency": "Initiatives", "goals": "Buts", "projects": "Projets", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
     "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
-    "world": "Son monde et son corps",
+    "world": "Son monde et son corps", "shares": "Fichiers envoyés",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -114,6 +114,8 @@ SECTION_LABELS: dict[str, str] = {
     "self_said": "Ce qu'elle a déjà dit d'elle-même", "register": "Le ton entre eux (selon leur lien)",
     "world": "Autour d'elle : son corps, ce qu'elle a à portée",
     # ADR 0053
+    # ADR 0062
+    "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)",
     "step_exchange": "L'échange d'où vient sa réflexion", "step_life": "Ce qui se passe dans la vie de la personne "
     "(sa réflexion)",
 }
@@ -159,6 +161,7 @@ PROCESS_LABELS: dict[str, str] = {
     "social.reciprocity": "Remarquer qui écrit en premier",
     "memory.follow": "Remarquer qu'elle a repris un moment de la vie de quelqu'un",
     "world.settle": "Conclure ses gestes dans le monde",
+    "shares.retention": "Retirer les fichiers envoyés trop anciens",
 }
 
 #: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
@@ -215,6 +218,7 @@ EVENT_LABELS: dict[str, str] = {
     "social.one_sided": "C'est presque toujours elle qui écrit",
     "needs.reunited": "Une amie revenue après un moment creux",
     "memory.moment_followed": "Un moment de la vie de quelqu'un, repris",
+    "shares.shared": "Un fichier envoyé", "shares.expired": "Des fichiers envoyés retirés",
 }
 
 #: Tout ce que la console nomme en français, d'un bloc.

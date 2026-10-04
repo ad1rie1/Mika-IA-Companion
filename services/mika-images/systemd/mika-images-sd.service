@@ -1,0 +1,11 @@
+[Unit]
+Description=Mika — sd-server, Qwen-Image 2.1 (arrêté quand le relais n'en a plus besoin)
+StopWhenUnneeded=yes
+
+[Service]
+ExecStart=@HOME@/service/serve.sh
+ExecStartPost=@HOME@/service/wait-ready.sh
+TimeoutStartSec=330
+MemoryMax=@MEMORY_MAX@
+MemorySwapMax=0
+Restart=no

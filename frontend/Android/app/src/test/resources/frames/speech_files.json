@@ -1,0 +1,6 @@
+{"type": "speech", "text": "Voilà ta liste, en fichier.", "emotion": "proud", "emotion_intensity": 0.5,
+ "emotion_blend": [], "source": "reply", "voice_persona": "speaking", "message_id": 88, "user_message_id": 87,
+ "client_msg_id": "cfile-9",
+ "attachments": [{"id": "0123456789abcdef0123456789abcdef", "name": "courses.md", "kind": "file",
+                  "mime": "text/markdown", "size": 312, "url": "/files/0123456789abcdef0123456789abcdef",
+                  "available": true}]}

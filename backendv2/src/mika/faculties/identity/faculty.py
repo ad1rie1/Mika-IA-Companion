@@ -148,8 +148,11 @@ def _seen(s: IdentityState, handle: str, at: int, *, channel: str, authenticated
         current = Handle(channel=privacy.normalize_channel(channel), trust=trust, first_seen=at)
     if _TRUST_ORDER[trust] > _TRUST_ORDER[current.trust]:
         current = replace(current, trust=trust)  # monte, ne descend jamais
-    if privacy.is_messaging(channel) and not public and not current.push:
-        current = replace(current, push=True)  # une conversation privée : on peut lui écrire
+    if privacy.is_messaging(channel) and not public and not authenticated and not current.push:
+        # une conversation privée sur un compte extérieur : on peut lui écrire. Un compte du système, lui, n'est
+        # joignable que par ce que dit ``identity.registered`` (une application qui reçoit hors ligne) : ça se
+        # retire quand l'application part, ce qu'une adresse vue une fois ne dirait jamais
+        current = replace(current, push=True)
     cleaned = clean_display_name(name)
     if authenticated:
         # une session prouve qui écrit : elle parle pour elle-même, jamais pour une autre
@@ -171,11 +174,21 @@ def _connected(s: IdentityState, e, cx) -> IdentityState:
 @IDENTITY.reducer(c.REGISTERED)
 def _registered(s: IdentityState, e, cx) -> IdentityState:
     """Un compte : une personne authentifiée sous son nom. Le nom du compte fait foi (un
-    renommage s'applique) ; un compte désactivé n'est plus opérateur."""
+    renommage s'applique) ; un compte désactivé n'est plus opérateur, ni joignable."""
     d = e.data
     # authentifiée : ``_seen`` prend le nom donné s'il en est un (un renommage s'applique)
-    return _seen(s, d.handle, e.at, channel="web", authenticated=True, public=False, name=d.name,
-                 operator=d.operator and d.active)
+    s = _seen(s, d.handle, e.at, channel=privacy.WEB, authenticated=True, public=False, name=d.name,
+              operator=d.operator and d.active)
+    current = s.handles.get(d.handle)
+    if d.messaging is None or current is None:
+        return s  # un journal d'avant l'application : rien n'est dit de la joignabilité
+    # une application qui reçoit hors ligne (ADR 0062) : on peut lui écrire absente, sur ce canal ; plus
+    # d'application : plus de joignabilité — le canal redevient l'écran
+    reachable = bool(d.messaging) and d.active
+    channel = privacy.normalize_channel(d.messaging) if reachable else privacy.WEB
+    if (current.push, current.channel) == (reachable, channel):
+        return s
+    return _put(s, d.handle, replace(current, push=reachable, channel=channel))
 
 
 @IDENTITY.reducer(rt.PERCEPTION_RECEIVED)

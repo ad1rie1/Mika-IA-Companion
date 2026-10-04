@@ -25,7 +25,7 @@ Trois règles tiennent toute la console :
 | Elle | **Humeur et corps** | « Comment va-t-elle ? » | humeur, postures envers chacun, besoins, rythme et sommeil, estime et récit |
 | Elle | **Pensées et nuits** | « À quoi pense-t-elle ? » | pensées vivantes, ce qu'elle a remarqué, ce qu'elle attend, ses nuits (journal, rêves) |
 | Elle | **Mémoire** | « Que retient-elle ? » | souvenirs, croyances, promesses, relecture (consolidation) |
-| Ses relations | **Personnes** | « Qui connaît-elle ? » | personnes, liens (rythme, manque), présents |
+| Ses relations | **Personnes** | « Qui connaît-elle ? » | personnes, liens (rythme, manque), présents ; sur la fiche, l'onglet « Fichiers » : ce qu'elle lui a envoyé (une page par fichier, téléchargement opérateur — ADR 0062) |
 | Ses relations | **Identités** | « Qui parle derrière chaque adresse ? » | adresses, revendications, politique de confiance |
 | Ses relations | **Conversations** | « Qu'a-t-on dit ? » | messages, questions sans réponse |
 | Son activité | **Décisions** | « Pourquoi parle-t-elle ou se tait-elle ? » | table de l'arbitre maintenant, ce qui tourne en ce moment, budget d'initiatives, ses choix, épisodes, échéances |
@@ -135,7 +135,7 @@ sont dans « Détails techniques ».
 | | Appareils | jeton des appareils |
 | Comportement | Vue d'ensemble | provenance des paramètres, ce que pilote chaque curseur |
 | | une page par faculté | ses paramètres **rangés par groupe** (un groupe = une page), chacun avec sa valeur, sa provenance, ses bornes et son sens ; une surcharge se pose en changeant la valeur |
-| Accès | Comptes | liste paginée, créer, modifier (opérateur, actif, mot de passe) — audité |
+| Accès | Comptes | liste paginée, créer, modifier (opérateur, actif, mot de passe) — audité ; sur la page d'un compte, ses applications connectées (téléphone, moteur : sorte, origine, dernier usage, jamais le secret) et « révoquer » — audité (ADR 0062) |
 | Historique | Journal des modifications | chaque réglage enregistré, chaque rejournalisation des paramètres |
 
 ### Système (sous-menu)

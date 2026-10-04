@@ -25,6 +25,14 @@ diffusion à tout le monde.
   l'apprenne par l'attente de la connexion ou par la file de sortie.
 - Une session révoquée (déconnexion, compte désactivé, mot de passe changé,
   droits retirés) ferme ses WebSockets en 4401.
+- **Une connexion n'est pas une présence** (ADR 0062) : l'application du
+  téléphone garde sa connexion en arrière-plan pour recevoir, sans que personne
+  regarde l'écran (``Conn.here`` faux). Elle reçoit ce qui lui est adressé (sans
+  voix), jamais une pensée à voix haute, ni visage ni panneau (la batterie) ; la
+  voix se choisit parmi les écrans regardés.
+- **Un tour posé d'un autre appareil** : les autres connexions de la personne
+  reçoivent aussi la ligne de la question avant la réponse (sinon leur curseur la
+  dépasse et elles ne la verraient jamais).
 """
 
 from __future__ import annotations
@@ -44,7 +52,7 @@ from mika.contracts import affect as affect_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as runtime_c
-from mika.contracts.entry import MindPort
+from mika.contracts.entry import MindPort, SharedMeta
 from mika.ports import delivery as delivery_p
 from mika.ports.delivery import Delivery
 from mika.vocab import voice
@@ -78,8 +86,14 @@ class Conn:
     close: Close | None = None
     #: dernier message envoyé (horloge monotone) : l'onglet actif est celui qui parle
     active_at: float = 0.0
+    #: quelqu'un regarde cet écran (faux : l'application du téléphone en arrière-plan, qui ne fait que recevoir)
+    here: bool = True
+    #: le canal de cette connexion : l'écran (``web``) ou l'application du téléphone (``mobile``, une messagerie)
+    channel: str = "web"
     chat: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.CHAT_RATE))
     control: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.CONTROL_RATE))
+    #: ce qui s'écrit au journal quand on va et vient (``presence``) : borné, une bascule rapide n'y paraît pas
+    presence: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.PRESENCE_RATE))
 
 
 class Hub:
@@ -116,6 +130,10 @@ class Hub:
 
     def of(self, handle: str) -> list[Conn]:
         return [c for c in self.conns.values() if c.handle == handle]
+
+    def watching(self, handle: str) -> list[Conn]:
+        """Les connexions de cette adresse dont quelqu'un regarde l'écran."""
+        return [c for c in self.of(handle) if c.here]
 
     def operators(self) -> list[Conn]:
         return [c for c in self.conns.values() if c.operator and c.authenticated]
@@ -183,7 +201,8 @@ class Hub:
         inner = d.persona == voice.INNER
         target = None if d.target is None or is_internal(d.target) else d.target
         if inner:
-            targets = self.of(target) if target else self.operators()
+            # une pensée à voix haute ne s'entend que devant un écran regardé : jamais une notification
+            targets = [c for c in (self.of(target) if target else self.operators()) if c.here]
         else:
             targets = self.of(target) if target else []
         if not targets:
@@ -191,13 +210,14 @@ class Hub:
         handles = sorted({c.handle for c in targets})
         if not inner and target:
             await self._bind_turn(target, d)
-        voices = set()  # une voix par personne : l'onglet qui a demandé, sinon le plus récemment actif
+        voices = set()  # une voix par personne : l'onglet regardé qui a demandé, sinon le plus récemment actif
         for h in handles:
-            chosen = self.speaker([c for c in targets if c.handle == h], d)
+            chosen = self.speaker([c for c in targets if c.handle == h and c.here], d)
             if chosen is not None:
                 voices.add(chosen.id)
+        files = self.shared(d.attachments) if not inner else []
         for c in targets:
-            await self._send([c], protocol.speech(d, present=True, voiced=c.id in voices))
+            await self._send([c], protocol.speech(d, present=c.here, voiced=c.id in voices, attachments=files))
         self.delivered.append(d.key)
         if not inner and target and d.emotion.declared:
             self._hold(target, d)
@@ -211,17 +231,45 @@ class Hub:
         initiale elles finissaient épinglées sous tout le fil. Juste avant la trame ``speech``, une trame
         ``history`` (``catchup``) porte leurs lignes : le client les adopte par leur texte (contrat inchangé)."""
         earlier = {a for a in d.answers if a != d.reply_to}
-        if not earlier:
+        # les autres appareils de la personne (le téléphone quand elle écrit du navigateur) n'ont pas la question
+        # elle-même : sans sa ligne, leur curseur la dépasserait avec la réponse, et ils ne la verraient jamais
+        asked = self._asked.get((handle, d.client_msg_id)) if d.client_msg_id else None
+        conns = self.of(handle)
+        asker = [c for c in conns if c.id == asked]
+        others = [c for c in conns if c.id != asked]
+        whole = earlier | ({d.reply_to} if d.reply_to is not None and others else set())
+        if not whole:
             return
         try:
-            rows, _ = self.port.after(handle, min(earlier) - 1, protocol.HISTORY_MAX)
+            rows, _ = self.port.after(handle, min(whole) - 1, protocol.HISTORY_MAX)
         except Exception as exc:  # un fil illisible ne retient pas la réponse : un rattrapage les adoptera
             log.warning("bulles d'une rafale non rattachées (%s) : %r", handle, exc)
             return
-        rows = [r for r in rows if r.id in earlier and r.role == "user"]
-        if rows:
-            await self.send_to(handle, protocol.history("catchup", rows, after_id=min(earlier) - 1,
-                                                        life=self.life()))
+        rows = [r for r in rows if r.id in whole and r.role == "user"]
+        for group, wanted in ((asker, earlier), (others, whole)):
+            mine = [r for r in rows if r.id in wanted]
+            if group and mine:
+                await self._send(group, self.history("catchup", mine, after_id=min(wanted) - 1))
+
+    def shared(self, ids: Any) -> list[SharedMeta]:
+        """Ce qu'on peut montrer des fichiers qu'elle envoie (ADR 0062) ; un port qui ne sait pas le dire, ou qui
+        échoue, n'empêche jamais une livraison : le message part sans eux."""
+        getter = getattr(self.port, "shared", None)
+        wanted = tuple(i for i in (ids or ()) if isinstance(i, str))
+        if getter is None or not wanted:
+            return []
+        try:
+            return list(getter(wanted))
+        except Exception as exc:  # le message part quand même : le fichier se retrouvera par le fil
+            log.warning("fichiers envoyés illisibles (%s) : %r", ", ".join(wanted), exc)
+            return []
+
+    def history(self, mode: str, rows: Any, *, life: str | None = None, **kw: Any) -> dict[str, Any]:
+        """Une trame ``history`` : l'empreinte de sa vie, et ce qu'on peut montrer des fichiers qu'elle a envoyés
+        avec ses messages de ce morceau du fil."""
+        ids = [i for r in rows if r.role == "assistant" for i in protocol.sent_ids(r.attachments)]
+        shared = {m.id: m for m in self.shared(ids)}
+        return protocol.history(mode, rows, life=self.life() if life is None else life, shared=shared, **kw)
 
     def life(self) -> str:
         """L'empreinte de sa vie, jointe à chaque trame ``history`` (vide si le port ne la connaît pas)."""
@@ -271,7 +319,7 @@ class Hub:
         sent = 0
         wanted = sorted({c.handle for c in self.conns.values()}) if handles is None else handles
         for handle in wanted:
-            conns = self.of(handle)
+            conns = self.watching(handle)  # un écran que personne ne regarde n'a pas besoin du panneau
             if conns:
                 sent += await self._send(conns, protocol.inner_state_update(frame, handle, self.panel(handle)))
         return sent
@@ -292,6 +340,8 @@ class Hub:
         return frame.get(affect_c.FACE(frame.get(identity_c.PERSON(handle))))
 
     async def push_face(self, handle: str, *, force: bool = False) -> bool:
+        if not self.watching(handle):
+            return False  # personne ne regarde : le visage partira quand un écran revient (``force``)
         face = self.face(handle)
         sig = protocol.face_signature(face)
         prev = self._sent_face.get(handle)
@@ -306,7 +356,7 @@ class Hub:
                 elif sig[0] != held[0]:
                     return False  # elle vient de dire « triste » : le visage ne passe pas à autre chose
         self._sent_face[handle] = sig
-        await self._send(self.of(handle), protocol.emotion_update(handle, face))
+        await self._send(self.watching(handle), protocol.emotion_update(handle, face))
         return True
 
     def _pending_signature(self, frame: Any) -> tuple[int, ...]:

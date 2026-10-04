@@ -94,6 +94,15 @@ location / {
 Les journaux ne portent aucun secret : un jeton passé en paramètre d'URL et un
 `Bearer` sont masqués ; `httpx` ne parle qu'en avertissement.
 
+L'application Android (ADR 0062) est un client natif : elle n'a pas d'origine à
+déclarer (`--origin` ne la concerne pas), et passe `Authorization: Bearer …` et
+`X-Mika-Presence` à la mise à niveau de `/ws`. Caddy et nginx les transmettent tels
+quels (ne les retire pas). En arrière-plan, elle garde sa WebSocket par des pings
+toutes les 20 s : `proxy_read_timeout` doit rester au-dessus (120 s ci-dessus).
+Les fichiers qu'elle télécharge (`/files/…`) passent par le même mandataire. Ceux que
+Mika envoie sont gardés hors du journal, dans `partages/` du dossier de données
+(droits 0700/0600) : la sauvegarde les emporte et la restauration les remet.
+
 ## Premier démarrage
 
 1. Ouvre la console (`http://localhost:8001/`) ou le frontend : le premier compte créé est opérateur (ou

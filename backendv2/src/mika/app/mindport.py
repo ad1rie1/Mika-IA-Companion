@@ -20,9 +20,9 @@ from mika.contracts import self_ as self_c
 from mika.contracts import sensors as sensors_c
 from mika.contracts import social as social_c
 from mika.contracts import world as w
-from mika.contracts.entry import Admission, HistoryRow
+from mika.contracts.entry import Admission, HistoryRow, SharedDownload, SharedMeta
 from mika.contracts.runtime import PerceptionReceived
-from mika.faculties import transcript
+from mika.faculties import shares, transcript
 from mika.faculties.attention import prompt as attention_prompt
 from mika.faculties.identity import describe
 from mika.faculties.projects import actions as project_actions
@@ -37,6 +37,7 @@ from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Superseded
 from mika.kernel.operate import Preview
 from mika.kernel.state import Root
+from mika.ports.shares import MAX_SHARE_BYTES, valid_id
 from mika.ports.workshop import argv_lines
 from mika.runtime import decisions, health
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
@@ -54,6 +55,9 @@ def _row(r: dict) -> HistoryRow:
     attachments = "[]"
     if typed is not None:
         text = text[:max(0, int(typed))]
+        attachments = r["attachments"] or "[]"
+    elif r["role"] == "assistant":
+        # ce qu'elle a envoyé avec ce message : des identifiants, que l'écran fait décrire (``shared``)
         attachments = r["attachments"] or "[]"
     return HistoryRow(
         id=r["id"], at=r["at"], role=r["role"], text=text, source=r["source"] or "",
@@ -187,6 +191,30 @@ class KernelPort:
 
     def ready(self) -> bool:
         return self.kernel.started
+
+    # ── les fichiers qu'elle envoie (ADR 0062) ──
+    def shared(self, ids: Sequence[str]) -> list[SharedMeta]:
+        return [SharedMeta(id=r.id, name=r.name, kind=r.kind, mime=r.mime, size=r.size, available=not r.gone)
+                for r in shares.rows(self._store, [i for i in ids if valid_id(i)])]
+
+    async def shared_file(self, file: str, *, handle: str) -> SharedDownload | None:
+        """Seulement un fichier parti avec un message du fil que cette adresse peut relire (``THREAD`` : la
+        sienne, celles de sa personne dont la liaison est confirmée) ; ses octets relus doivent être ceux qui sont
+        partis (leur empreinte)."""
+        if not valid_id(file):
+            return None
+        r = shares.row(self._store, file)
+        if r is None or not r.sent:
+            return None
+        if r.person not in self.kernel.mind.frame().get(identity_c.THREAD(handle)):
+            return None
+        if r.gone:
+            return SharedDownload(r.name, r.mime, gone=True)
+        store = self.kernel.ports.get(shares.PORT)
+        data = await store.read(file, MAX_SHARE_BYTES) if store is not None else None
+        if data is None or hashlib.sha256(data).hexdigest() != r.digest:
+            return SharedDownload(r.name, r.mime, gone=True)
+        return SharedDownload(r.name, r.mime, data)
 
     def health(self) -> dict[str, Any]:
         return health.report(self.kernel).public()

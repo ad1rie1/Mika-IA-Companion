@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- app_name vient du type de construction (build.gradle.kts) : « Mika » ou « Mika (dev) ». -->
+    <string name="share_label">Mika</string>
+    <string name="mika">Mika</string>
+    <string name="me">Toi</string>
+    <string name="cancel">Annuler</string>
+
+    <!-- Connexion -->
+    <string name="login_title">Se connecter à Mika</string>
+    <string name="login_subtitle">Avec le compte que tu utilises sur la page web de Mika.</string>
+    <string name="login_server">Adresse du serveur</string>
+    <string name="login_server_hint">LAN, Tailscale ou https://…</string>
+    <string name="login_username">Nom d\'utilisateur</string>
+    <string name="login_password">Mot de passe</string>
+    <string name="login_show_password">Afficher le mot de passe</string>
+    <string name="login_hide_password">Masquer le mot de passe</string>
+    <string name="login_submit">Se connecter</string>
+    <string name="login_submitting">Connexion…</string>
+    <string name="login_retry_in">Réessaie dans %1$d s</string>
+    <string name="login_insecure_warning">Connexion non chiffrée (http) : ton mot de passe et vos messages passent en clair sur le réseau. Préfère https:// hors de chez toi.</string>
+    <string name="login_tailscale_info">Tailscale : le tunnel chiffre déjà la connexion.</string>
+    <string name="login_dev_token">Utiliser un jeton (dev)</string>
+    <string name="login_dev_token_field">Jeton (dev)</string>
+    <!-- Les deux tirets sont ceux d'une option de la ligne de commande, pas un tiret typographique. -->
+    <string name="login_dev_token_hint" tools:ignore="TypographyDashes">mw_… (mika token create … --client mobile)</string>
+
+    <!-- Conversation -->
+    <string name="chat_input_hint">Écris à Mika…</string>
+    <string name="chat_send">Envoyer</string>
+    <string name="chat_retry">Réessayer</string>
+    <string name="chat_copy">Copier</string>
+    <string name="chat_more">Plus d\'options</string>
+    <string name="chat_empty">Dis bonjour à Mika.</string>
+    <string name="chat_typing">Mika écrit…</string>
+    <string name="chat_thought">pensée à voix haute</string>
+    <string name="chat_truncated">Historique plus ancien tronqué : seuls les derniers messages sont affichés ici.</string>
+    <string name="chat_counter">%1$s / %2$s caractères</string>
+    <string name="chat_counter_limit">%1$s / %2$s caractères — c\'est la limite</string>
+    <string name="status_pending">en attente d\'envoi</string>
+    <string name="status_sent">envoyé</string>
+    <string name="status_read">lu</string>
+    <string name="status_failed">refusé — %1$s</string>
+    <string name="status_refused">refusé</string>
+    <string name="status_refused_default">refusé par le serveur</string>
+    <string name="chat_open_mind">Voir ce qu\'elle fait</string>
+    <string name="chat_open_console">ouvrir la console</string>
+    <string name="chat_copied">Copié</string>
+    <string name="chat_attach">Joindre un fichier</string>
+    <string name="chat_remove_file">Retirer %1$s</string>
+    <string name="attach_photos">Photos</string>
+    <string name="attach_camera">Appareil photo</string>
+    <string name="attach_file">Fichier</string>
+    <string name="notif_prompt_title">Savoir quand Mika t\'écrit</string>
+    <string name="notif_prompt_text">Autorise les notifications pour recevoir ses messages quand l\'application est fermée.</string>
+    <string name="notif_prompt_later">Plus tard</string>
+    <string name="notif_prompt_allow">Autoriser</string>
+
+    <!-- Fichiers de Mika -->
+    <string name="file_save">Enregistrer</string>
+    <string name="file_open_with">Ouvrir avec…</string>
+    <string name="file_saved">Enregistré dans %1$s</string>
+    <string name="file_no_app">Aucune application ne sait ouvrir ce fichier.</string>
+    <string name="file_removed">Fichier retiré</string>
+    <string name="file_enlarge">Agrandir</string>
+    <string name="file_image_of_mika">Image de Mika : %1$s</string>
+    <string name="file_image_sent">Ta photo : %1$s</string>
+    <string name="file_image_unavailable">Image indisponible.</string>
+    <string name="banner_refused">Le serveur refuse la connexion</string>
+    <string name="banner_retry">Réessayer</string>
+    <plurals name="chat_new_messages">
+        <item quantity="one">↓ %1$d nouveau</item>
+        <item quantity="many">↓ %1$d nouveaux</item>
+        <item quantity="other">↓ %1$d nouveaux</item>
+    </plurals>
+
+    <!-- Menus -->
+    <string name="menu_status">Ce qu\'elle fait</string>
+    <string name="menu_settings">Paramètres</string>
+    <string name="menu_logout">Se déconnecter</string>
+    <string name="logout_confirm_title">Se déconnecter ?</string>
+    <string name="logout_confirm_text">Les messages enregistrés sur ce téléphone seront effacés.</string>
+    <string name="back">Retour</string>
+
+    <!-- Ce qu'elle fait -->
+    <string name="mind_empty">Rien de connu pour l\'instant : son état arrivera à la prochaine connexion.</string>
+    <string name="mind_mood">Humeur</string>
+    <string name="mind_intensity">Intensité</string>
+    <string name="mind_but_also">mais aussi %1$s (%2$d %%)</string>
+    <string name="mind_body">Corps</string>
+    <string name="mind_energy">Énergie</string>
+    <string name="mind_esteem">Estime de soi</string>
+    <string name="mind_esteem_meter">Confiance en elle</string>
+    <string name="mind_thoughts">Elle repense à…</string>
+    <string name="mind_dream">Rêve de cette nuit</string>
+    <string name="mind_vividness">netteté %1$d %%</string>
+    <string name="mind_dream_recalled">✓ évoqué</string>
+    <string name="mind_with">avec %1$s</string>
+    <string name="mind_narrative">Qui elle est devenue</string>
+    <string name="mind_needs">Besoins</string>
+    <string name="mind_projects">Projets en cours</string>
+    <string name="mind_project_progress">Avancement : %1$d / %2$d</string>
+    <string name="mind_project_next">%1$s · prochaine séance %2$s</string>
+    <plurals name="mind_project_blocked">
+        <item quantity="one">⛔ %1$d tâche bloquée</item>
+        <item quantity="many">⛔ %1$d tâches bloquées</item>
+        <item quantity="other">⛔ %1$d tâches bloquées</item>
+    </plurals>
+
+    <!-- Paramètres -->
+    <string name="settings_account">Compte</string>
+    <string name="settings_background">Arrière-plan</string>
+    <string name="settings_background_title">Rester connectée en arrière-plan</string>
+    <string name="settings_background_summary">Reçois ses messages quand l\'application est fermée. Une notification discrète reste dans le volet ; Mika ne te croit pas devant l\'écran pour autant.</string>
+    <string name="settings_boot_title">Démarrer avec le téléphone</string>
+    <string name="settings_boot_summary">Reprendre la connexion après un redémarrage, sans ouvrir l\'application.</string>
+    <string name="settings_battery_title">Batterie</string>
+    <string name="settings_battery_unrestricted">Mika n\'est pas restreinte par l\'économie de batterie.</string>
+    <string name="settings_battery_restricted">Android peut mettre la connexion en veille : ses messages arriveront alors en retard.</string>
+    <string name="settings_battery_action">Ne pas restreindre Mika</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_notifications_title">Messages de Mika</string>
+    <string name="settings_notifications_on">Autorisées</string>
+    <string name="settings_notifications_off">Désactivées : tu ne seras pas prévenue de ses messages.</string>
+    <string name="settings_appearance">Apparence</string>
+    <string name="settings_theme_system">Thème du système</string>
+    <string name="settings_theme_light">Clair</string>
+    <string name="settings_theme_dark">Sombre</string>
+    <string name="settings_dynamic_color">Couleurs dynamiques</string>
+    <string name="settings_dynamic_color_summary">Suivre les couleurs du fond d\'écran.</string>
+    <string name="settings_data">Données</string>
+    <string name="settings_clear_title">Effacer les messages de ce téléphone</string>
+    <string name="settings_clear_summary">La conversation reste sur le serveur et revient à la prochaine connexion.</string>
+    <string name="settings_clear_action">Effacer</string>
+    <string name="settings_clear_confirm_title">Effacer les messages ?</string>
+    <string name="settings_clear_confirm_text">Les messages enregistrés sur ce téléphone seront effacés. Ils restent sur le serveur.</string>
+
+    <!-- Notifications (canaux, service) -->
+    <string name="channel_messages_name">Messages de Mika</string>
+    <string name="channel_messages_desc">Les messages que Mika t\'envoie.</string>
+    <string name="channel_connection_name">Connexion en arrière-plan</string>
+    <string name="channel_connection_desc">Garde la connexion avec Mika ouverte pour recevoir ses messages quand l\'application est fermée.</string>
+    <string name="connection_online">Connectée à Mika</string>
+    <string name="connection_reconnecting">Reconnexion…</string>
+    <string name="connection_offline">Hors ligne</string>
+    <string name="action_disable">Désactiver</string>
+    <string name="action_reply">Répondre</string>
+    <string name="action_mark_read">Marquer comme lu</string>
+    <string name="notification_public">Nouveau message de Mika</string>
+    <string name="notification_reply_hint">Répondre à Mika</string>
+    <plurals name="notification_more">
+        <item quantity="one">et %1$d autre</item>
+        <item quantity="many">et %1$d autres</item>
+        <item quantity="other">et %1$d autres</item>
+    </plurals>
+
+    <!-- Raccourci de conversation -->
+    <string name="shortcut_short">Mika</string>
+    <string name="shortcut_long">Écrire à Mika</string>
+</resources>

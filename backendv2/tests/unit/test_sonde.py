@@ -4,6 +4,8 @@ qui répond tout de suite — on vérifie la mécanique : la semaine va au bout 
 
 from __future__ import annotations
 
+import pytest
+
 from mika.app import cli
 from mika.app.composition import for_simulation
 from mika.ports.llm import LLMRequest, LLMResponse
@@ -21,6 +23,7 @@ class Fake:
         return LLMResponse("ah d'accord [EMOTION:happy:0.4]", model="faux")
 
 
+@pytest.mark.slow
 def test_the_week_goes_to_the_end_and_is_written_down(tmp_path):
     fake = Fake()
     out = run_probe(for_simulation(), fake, tmp_path / "sonde", log=lambda _line: None)
@@ -37,6 +40,7 @@ def test_without_a_configured_model_the_probe_says_so(tmp_path, capsys):
     assert "mika llm backend" in capsys.readouterr().out
 
 
+@pytest.mark.slow
 def test_the_second_week_goes_to_the_end_with_its_group_and_its_report(tmp_path):
     fake = Fake()
     out = run_probe(for_simulation(), fake, tmp_path / "sonde", log=lambda _line: None, which="2")

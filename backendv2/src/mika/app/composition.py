@@ -31,6 +31,7 @@ from mika.faculties.place import PLACE
 from mika.faculties.presence import PRESENCE
 from mika.faculties.projects import PROJECTS, job_brief, work_brief
 from mika.faculties.self import SELF, load, persona_for
+from mika.faculties.shares import SHARES
 from mika.faculties.social import SOCIAL
 from mika.faculties.transcript import TRANSCRIPT
 from mika.faculties.world import WORLD
@@ -56,7 +57,7 @@ log = logging.getLogger("mika.composition")
 def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, WORLD, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
-            EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, EMAIL, RSS, CAMERA, FORGE, SENSORS]
+            EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, EMAIL, RSS, CAMERA, FORGE, SENSORS]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -96,12 +97,12 @@ def policies() -> dict[str, EpisodePolicy]:
                                   guard=_reply_guard, max_tokens=1024, deadline_s=180.0,
                                   tool_bundles=frozenset({"memory", "identity", "goals", "projects", "email", "rss",
                                                           "camera", "forge", "forge_apps", "self", "attention",
-                                                          "social", "world"}),
+                                                          "social", "world", "shares"}),
                                   core_bundles=REPLY_IN_HAND),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
                                        tool_bundles=frozenset({"memory", "identity", "rss", "forge_apps", "self",
-                                                               "attention", "social", "world"}),
+                                                               "attention", "social", "world", "shares"}),
                                        core_bundles=INITIATIVE_IN_HAND),
         # un pas de travail : sa voix (compacte), pour elle seule — ni fil, ni livraison ; le verdict fait l'affect
         Kind.STEP: EpisodePolicy(kind=Kind.STEP, role=Role.STEP, priority=2, lane="background",

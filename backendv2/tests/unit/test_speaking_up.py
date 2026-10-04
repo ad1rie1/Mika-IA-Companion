@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from mika.app import composition
 from mika.contracts import agency as agency_c
 from mika.contracts import attention as attention_c
@@ -189,6 +191,7 @@ def test_a_friend_who_answers_keeps_getting_initiatives(tmp_path):
     assert len(sent) >= 4, [local(e.at, PARIS).strftime("%a %H:%M") for e in sent]
 
 
+@pytest.mark.slow
 def test_the_rule_vetoes_every_ordinary_reason_and_allows_one_gentle_follow_up(tmp_path):
     """Le filet : quelle que soit la raison (une pensée, un manque…), après une
     initiative sans réponse, plus rien — présente ou non — sauf une relance

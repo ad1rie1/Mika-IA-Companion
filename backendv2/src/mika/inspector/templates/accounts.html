@@ -44,4 +44,26 @@
   </fieldset>
   <div class="form-actions"><button class="btn">Enregistrer</button> <a class="btn quiet" href="{{ action }}">Annuler</a></div>
 </form>
+<div class="card table-block">
+  <div class="block-head"><h3 class="block-title">Applications connectées</h3><span class="block-count">{{ apps|length }} au total</span></div>
+  <p class="muted">Le téléphone et les moteurs de jeu se connectent par un jeton de ce compte. Révoquer ferme ses connexions ; un téléphone révoqué ne reçoit plus rien, et elle ne peut plus écrire à cette personne quand elle est absente. Changer le mot de passe révoque les jetons obtenus par connexion.</p>
+  <div class="table-wrap" tabindex="0" role="region" aria-label="Applications connectées"><table class="tbl">
+    <caption class="sr">Applications connectées</caption>
+    <thead><tr><th scope="col">Nom</th><th scope="col">Sorte</th><th scope="col">Obtenu par</th><th scope="col">Créé</th><th scope="col">Dernier usage</th><th scope="col">État</th><th scope="col" class="fit">Actions</th></tr></thead>
+    <tbody>
+    {% for app in apps %}
+      <tr{% if app.revoked %} class="muted"{% endif %}><td>{{ app.label }}</td><td>{{ app.kind }}</td><td>{{ app.source }}</td><td>{{ app.created }}</td><td>{{ app.last_used }}</td>
+        <td>{% if app.revoked %}<span class="badge muted">révoqué</span>{% else %}<span class="badge ok">actif</span>{% endif %}</td>
+        <td class="row-actions fit">{% if not app.revoked %}
+          <form method="post" action="{{ action }}" class="inline" data-confirm="Révoquer « {{ app.label }} » ? Ses connexions se ferment.">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="revoke_token">
+            <input type="hidden" name="account" value="{{ account.id }}"><input type="hidden" name="token" value="{{ app.id }}">
+            <button class="btn quiet small danger">révoquer</button>
+          </form>{% endif %}</td></tr>
+    {% else %}
+      <tr><td colspan="7" class="empty">Aucune application : le téléphone en ajoute une à sa première connexion.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
 {% endif %}

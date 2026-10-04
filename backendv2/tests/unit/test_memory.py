@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import re
 
+import pytest
+
 from mika.contracts import memory as memory_c
 from mika.kernel.clock import DAY, US
 from mika.sim.clock import run_virtual
@@ -332,6 +334,7 @@ def test_the_vector_index_rebuilds_identically(tmp_path):
     assert rebuilt == count and again == before, "même modèle, mêmes textes : mêmes octets"
 
 
+@pytest.mark.slow
 def test_an_old_trivial_memory_sleeps_but_a_search_finds_it(tmp_path):
     class Searching(Extractions):
         def __call__(self, req):
@@ -363,6 +366,7 @@ def test_an_old_trivial_memory_sleeps_but_a_search_finds_it(tmp_path):
     assert any("parapluie jaune au café" in t for t in tool_results), "une recherche délibérée le retrouve"
 
 
+@pytest.mark.slow
 def test_a_strong_cue_wakes_a_sleeping_memory(tmp_path):
     """On n'oublie pas vraiment : deux mois plus tard, « tu te souviens du
     parapluie jaune ? » le ramène — pas « il pleut »."""

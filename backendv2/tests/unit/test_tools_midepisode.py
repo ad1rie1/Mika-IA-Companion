@@ -13,7 +13,8 @@ from pydantic import BaseModel
 
 from mika.kernel.episode import EpisodePolicy, Outcome
 from mika.kernel.events import Payload
-from mika.kernel.faculty import EffectClass, Faculty
+from mika.kernel.faculty import EffectClass, Faculty, Zone
+from mika.kernel.prompt import ChatTurn, SectionBody
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.runtime.pipeline import EpisodeRequest
 from mika.runtime.tools import ToolResult
@@ -112,3 +113,82 @@ def test_tools_emit_midepisode_timeout_and_dedupe(tmp_path):
     added, ended = run_virtual(k2.deps.clock, read)
     assert len(added) == 2
     assert [e.data.outcome for e in ended] == ["timeout", "timeout"]
+
+
+# ── Ce que ses outils posent part avec le message (ADR 0062) ──────────────
+# Un outil qui réussit peut poser des références opaques (``ToolResult.attach``) : la boucle les recueille (sans
+# doublon, dans l'ordre, jamais celles d'un outil refusé), l'énoncé les porte. Et un message qui emporte un
+# fichier n'est pas une redite, même quand sa phrase redit le dernier message du fil.
+
+LAST = "Je t'ai préparé la liste complète des courses pour samedi midi."
+
+
+@dataclass(frozen=True, slots=True)
+class DeskState:
+    n: int = 0
+
+
+class FileArgs(BaseModel):
+    ref: str
+    ok: bool = True
+
+
+DESK = Faculty("desk", state=DeskState, init=lambda p: DeskState())
+
+
+@DESK.tool("attach_file", description="Joint un fichier.", args=FileArgs, bundle="bureau", episodes=["REPLY"])
+async def attach_file(args: FileArgs, ctx) -> ToolResult:
+    return ToolResult(ok=args.ok, content="joint" if args.ok else "refusé", attach=(args.ref,))
+
+
+@DESK.section("history", zone=Zone.HISTORY, episodes=["REPLY"])
+def _thread(s: DeskState, frame, enrich) -> SectionBody:
+    """Le fil : son dernier message, celui qu'elle s'apprête à redire."""
+    return SectionBody((ChatTurn("user", "tu peux me faire la liste ?", id=1), ChatTurn("assistant", LAST, id=2)),
+                       thread="private:user_1")
+
+
+REPLY_POLICIES = {"REPLY": EpisodePolicy(kind="REPLY", role="reply", priority=0, lane="conversation",
+                                         tool_bundles=frozenset({"bureau"}))}
+
+
+def attaching(calls: list[dict]):
+    """Le modèle appelle ``attach_file`` avec chacun de ``calls`` (un tour), puis redit son dernier message."""
+    def respond(req: LLMRequest) -> LLMResponse:
+        n_tool = sum(1 for m in req.messages if m.role == "tool")
+        if n_tool == 0 and calls:
+            return LLMResponse("", tuple(ToolCall(f"c{i}", "attach_file", a) for i, a in enumerate(calls)),
+                               stop="tool_use")
+        return LLMResponse(LAST)
+    return respond
+
+
+def _reply(tmp_path, calls: list[dict]):
+    kernel, clock, llm = build(tmp_path, [DESK], respond=attaching(calls), policies=REPLY_POLICIES)
+
+    async def main():
+        await kernel.start()
+        report = await kernel.lanes.submit(EpisodeRequest(kind="REPLY", target="user_1", message="re"))
+        uttered = events_of(kernel, "episode.utterance")
+        await kernel.stop()
+        return report, uttered
+
+    return run_virtual(kernel.deps.clock, main)
+
+
+def test_what_her_tools_attach_leaves_with_the_message(tmp_path):
+    report, uttered = _reply(tmp_path, [{"ref": "f1"}, {"ref": "f2"}, {"ref": "f1"}, {"ref": "f3", "ok": False}])
+    assert report.outcome is Outcome.DONE
+    [e] = uttered
+    assert e.data.attachments == ("f1", "f2")  # sans doublon, dans l'ordre ; rien d'un outil refusé
+
+
+def test_a_message_with_a_file_is_not_a_repeat(tmp_path):
+    report, uttered = _reply(tmp_path, [{"ref": "f1"}])
+    assert report.outcome is Outcome.DONE and [e.data.attachments for e in uttered] == [("f1",)]
+
+
+def test_without_a_file_the_same_words_are_still_a_repeat(tmp_path):
+    """Le contre-exemple : la même phrase, sans fichier, ne part pas (ADR 0054)."""
+    report, uttered = _reply(tmp_path, [{"ref": "f9", "ok": False}])
+    assert report.outcome is Outcome.ABSTAINED and uttered == []

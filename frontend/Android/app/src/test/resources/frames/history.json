@@ -1,0 +1,12 @@
+{"type": "history", "mode": "initial",
+ "messages": [
+   {"id": 10, "role": "user", "text": "regarde", "ts": 1759572000000, "source": "web", "emotion": "",
+    "emotion_intensity": 0.0, "attachments": [{"name": "chat.png", "kind": "image"}]},
+   {"id": "pas-un-nombre", "role": "assistant", "text": "ligne cassée", "ts": 1759572001000},
+   {"id": 11, "role": "assistant", "text": "Trop mignon ! [SIGH]", "ts": 1759572002000.5, "source": "reply",
+    "emotion": "amused", "emotion_intensity": 0.6,
+    "attachments": [{"id": "fedcba9876543210fedcba9876543210", "name": "dessin.png", "kind": "image",
+                     "mime": "image/png", "size": 2048, "url": "/files/fedcba9876543210fedcba9876543210",
+                     "available": false}]}
+ ],
+ "last_id": 11, "truncated": true, "life": "a1b2c3d4e5f60708", "reset": false}

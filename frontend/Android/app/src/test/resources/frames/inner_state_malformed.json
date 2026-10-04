@@ -1,0 +1,3 @@
+{"type": "inner_state_update", "inner_state": {"sleep_phase": "deep_sleep", "energy": "beaucoup",
+  "circadian": "le soir", "drives": [1, 2, 3], "ruminations": [{"summary": "ok", "intensity": 0.3, "emotion": "sad"}],
+  "person_scope": true, "self_narrative": {"content": "Toujours là."}}}

@@ -8,7 +8,7 @@ adaptateurs, et il parle la langue des contrats (perceptions, présence).
 
 from __future__ import annotations
 
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -47,6 +47,30 @@ class HistoryRow:
     attachments: str
 
 
+@dataclass(frozen=True, slots=True)
+class SharedMeta:
+    """Un fichier qu'elle a envoyé, tel qu'un écran le montre (ADR 0062) : son nom, sa sorte (``file`` ou
+    ``image``), sa taille ; ``available`` faux une fois retiré (trop vieux, la place dépassée)."""
+
+    id: str
+    name: str
+    kind: str
+    mime: str
+    size: int
+    available: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class SharedDownload:
+    """Ce qu'on rend à qui télécharge un fichier qu'elle lui a envoyé ; ``gone`` : il a été retiré (ou ses octets
+    manquent), ``data`` est alors vide."""
+
+    name: str
+    mime: str
+    data: bytes = b""
+    gone: bool = False
+
+
 class MindPort(Protocol):
     async def perceive(self, p: PerceptionReceived, *, dedupe_key: str | None = None) -> Admission: ...
 
@@ -67,6 +91,17 @@ class MindPort(Protocol):
         ...
 
     def ready(self) -> bool: ...
+
+    def shared(self, ids: Sequence[str]) -> list[SharedMeta]:
+        """Ce qu'on peut montrer des fichiers qui partent avec un message (``Delivery.attachments``, la colonne
+        ``attachments`` d'une ligne du fil), dans l'ordre ; un identifiant inconnu (oublié) n'y est pas."""
+        ...
+
+    async def shared_file(self, file: str, *, handle: str) -> SharedDownload | None:
+        """Un fichier qu'elle a envoyé, pour qui écrit par ``handle`` : seulement s'il est parti avec un message du
+        fil que cette adresse peut relire (la règle du verbatim, ``identity.THREAD``) — ``None`` sinon, la même
+        réponse pour un fichier inconnu et pour un fichier qui n'est pas le sien."""
+        ...
 
     def health(self) -> dict[str, Any]:
         """``{"status", "ready", "checks": {nom: état}}`` : des noms et des états,

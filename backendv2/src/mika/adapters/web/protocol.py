@@ -16,7 +16,7 @@ import json
 import re
 import time
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,7 +26,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import needs as needs_c
 from mika.contracts import place as place_c
 from mika.contracts import self_ as self_c
-from mika.contracts.entry import HistoryRow
+from mika.contracts.entry import HistoryRow, SharedMeta
 from mika.kernel.frame import Frame
 from mika.ports.delivery import TOO_LATE, Delivery
 from mika.vocab import privacy, voice
@@ -42,6 +42,14 @@ HISTORY_INITIAL = 50
 HISTORY_MAX = 200
 CHAT_RATE = (20, 10.0)
 CONTROL_RATE = (12, 10.0)
+#: aller et venir (trame ``presence``) : au plus 6 écritures au journal par minute et par connexion — au-delà,
+#: le dernier état voulu s'applique quand la fenêtre le permet (ADR 0062)
+PRESENCE_RATE = (6, 60.0)
+#: un écran quitté ne compte comme parti qu'après ce délai : passer à l'appareil photo et revenir n'écrit rien
+AWAY_GRACE_S = 20.0
+#: l'en-tête de mise à niveau d'un client natif qui ouvre sa connexion en arrière-plan (``away`` : personne ne
+#: regarde, elle ne fait que recevoir) ; ``here``, ou rien : un écran regardé
+PRESENCE_HEADER = "x-mika-presence"
 MAX_FRAME_BYTES = MAX_ATTACHMENTS * MAX_FILE_BYTES * 4 // 3 + 1024 * 1024
 FILENAME_MAX = 80
 
@@ -140,8 +148,38 @@ def _shown_attachments(raw: str) -> list[dict[str, str]]:
             for a in items if isinstance(a, dict)]
 
 
-def history_item(row: HistoryRow) -> dict[str, Any]:
+#: où se télécharge un fichier qu'elle a envoyé (``GET``, avec le compte de la personne : ADR 0062)
+FILES_PATH = "/files/"
+
+
+def shared_item(meta: SharedMeta) -> dict[str, Any]:
+    """Un fichier qu'elle a envoyé, tel qu'un client le montre et le télécharge."""
+    return {"id": meta.id, "name": sanitize_filename(meta.name), "kind": meta.kind if meta.kind in ("file", "image")
+            else "file", "mime": str(meta.mime or "")[:100], "size": int(meta.size), "url": f"{FILES_PATH}{meta.id}",
+            "available": bool(meta.available)}
+
+
+def sent_ids(raw: str) -> list[str]:
+    """Les identifiants rangés avec l'un de ses messages (``[{"id": …}]``)."""
+    try:
+        items = json.loads(raw) if raw else []
+    except ValueError:
+        return []
+    if not isinstance(items, list):
+        return []
+    return [str(a["id"]) for a in items if isinstance(a, dict) and isinstance(a.get("id"), str)]
+
+
+def history_item(row: HistoryRow, shared: Mapping[str, SharedMeta] | None = None) -> dict[str, Any]:
+    """Une ligne du fil. Ses pièces jointes : pour un message de la personne, un nom et une sorte ; pour un des
+    siens, les fichiers qu'elle a envoyés avec (``shared`` : ce que le port en dit — un fichier oublié n'y est
+    plus, et ne se montre plus)."""
     emotion = emotion_of(row.emotion)
+    if row.role == "assistant":
+        known = shared or {}
+        attachments: list[dict[str, Any]] = [shared_item(known[i]) for i in sent_ids(row.attachments) if i in known]
+    else:
+        attachments = _shown_attachments(row.attachments)
     return {
         "id": row.id,
         "role": row.role,
@@ -150,20 +188,21 @@ def history_item(row: HistoryRow) -> dict[str, Any]:
         "source": row.source,
         "emotion": emotion.value if emotion else "",
         "emotion_intensity": float(row.emotion_intensity or 0.0),
-        "attachments": _shown_attachments(row.attachments),
+        "attachments": attachments,
     }
 
 
 def history(mode: str, rows: Sequence[HistoryRow], *, after_id: int = 0, truncated: bool = False,
-            life: str = "", reset: bool = False) -> dict[str, Any]:
+            life: str = "", reset: bool = False, shared: Mapping[str, SharedMeta] | None = None) -> dict[str, Any]:
     """Un morceau du fil. ``life`` : l'empreinte de sa vie (le même journal depuis sa genèse) — un navigateur qui
     garde le fil d'une autre vie (l'ancien moteur, un autre dossier de données) le vide avant de fusionner.
     ``reset`` : le curseur du client dépassait la tête de ce fil (une vie restaurée plus ancienne, un fil oublié,
-    des identifiants d'ailleurs) ; ce fil initial remplace ce qu'il montre au lieu de s'y ajouter."""
+    des identifiants d'ailleurs) ; ce fil initial remplace ce qu'il montre au lieu de s'y ajouter. ``shared`` :
+    ce qu'on peut montrer des fichiers qu'elle a envoyés avec ses messages, par identifiant."""
     return {
         "type": "history",
         "mode": mode,
-        "messages": [history_item(r) for r in rows],
+        "messages": [history_item(r, shared) for r in rows],
         "last_id": rows[-1].id if rows else after_id,
         "truncated": bool(truncated),
         "life": life,
@@ -184,10 +223,13 @@ def _blend(parts: Sequence[tuple[str, float]]) -> list[dict[str, Any]]:
 OTHER_TAB = "other_tab"
 
 
-def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bool = True) -> dict[str, Any]:
+def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bool = True,
+           attachments: Sequence[SharedMeta] = ()) -> dict[str, Any]:
     """Une parole ou une pensée. Une pensée à voix haute (persona ``inner``) n'est
     pas dans le fil : ``message_id`` nul (le client la range après son curseur et
-    ne l'avance pas). ``voiced`` faux : un autre écran de la même personne parle."""
+    ne l'avance pas). ``voiced`` faux : un autre écran de la même personne parle.
+    ``attachments`` : les fichiers qu'elle envoie avec (toujours un tableau, vide
+    sans fichier ; jamais avec une pensée)."""
     decision = voice.decide(voice.SCREEN, hour=d.local_hour, sleep_phase=d.sleep_phase, present=present,
                             muted=muted, persona=d.persona)
     emotion = emotion_of(d.emotion.emotion) or Emotion.NEUTRAL
@@ -208,6 +250,7 @@ def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bo
         "message_id": None if inner else d.message_id,
         "user_message_id": None if inner else d.reply_to,
         "client_msg_id": None if inner else d.client_msg_id,
+        "attachments": [] if inner else [shared_item(m) for m in attachments],
     }
 
 
@@ -228,7 +271,7 @@ def silence(handle: str, face: affect_c.Face, *, user_message_id: int | None,
         "emotion_blend": blend, "source": "reply", "person_id": handle, "speak": False,
         "voice_reason": reason, "voice_persona": voice.SPEAKING,
         "voice_profile": voice.profile_for(voice.SPEAKING).to_dict(), "message_id": None,
-        "user_message_id": user_message_id, "client_msg_id": client_msg_id,
+        "user_message_id": user_message_id, "client_msg_id": client_msg_id, "attachments": [],
     }
 
 
@@ -386,7 +429,7 @@ def fallback_speech(handle: str, reason: str, *, user_message_id: int | None, cl
         "emotion_intensity": 0.0, "emotion_state": {}, "emotion_blend": [], "source": "error", "person_id": handle,
         "speak": False, "voice_reason": "error_fallback_muted", "voice_persona": voice.SPEAKING,
         "voice_profile": voice.profile_for(voice.SPEAKING).to_dict(), "message_id": None,
-        "user_message_id": user_message_id, "client_msg_id": client_msg_id,
+        "user_message_id": user_message_id, "client_msg_id": client_msg_id, "attachments": [],
     }
 
 

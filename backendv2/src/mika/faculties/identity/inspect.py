@@ -130,10 +130,18 @@ def handle_ref(s: IdentityState, handle: str, tab: str = "") -> Ref:
     return Ref.subject("handle", handle, handle_label(s, handle), tab)
 
 
+def _reach_fr(h: Handle) -> str:
+    """Peut-elle lui écrire d'elle-même, quand la personne n'est pas là ?"""
+    if not h.push:
+        return "non"
+    return "oui (l'application du téléphone)" if h.channel == privacy.MOBILE else "oui (conversation privée)"
+
+
 def kind_of(h: Handle) -> str:
     """Par où, en mots (un compte, un compte extérieur, le web…) : jamais la clé brute."""
     if h.authenticated:
-        return "compte opérateur" if h.operator else "compte"
+        kind = "compte opérateur" if h.operator else "compte"
+        return f"{kind} · téléphone" if h.channel == privacy.MOBILE else kind
     return "compte extérieur" if h.channel == privacy.EXTERNAL else (h.channel or "inconnu")
 
 
@@ -354,7 +362,7 @@ def _handle_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) 
         ("parle pour", person_ref(s, view.person)),
         ("vue pour la première fois", _when(ctx, h.first_seen, "—")),
         ("dernier message reçu", _when(ctx, frame.get(transcript_c.LAST_FROM(handle)))),
-        ("joignable d'elle-même", "oui (conversation privée)" if h.push else "non"),
+        ("joignable d'elle-même", _reach_fr(h)),
     )
     return Head(handle, handle_label(s, handle), subtitle, tuple(badges), facts)
 
@@ -490,7 +498,7 @@ def _handle_fields(s: IdentityState, frame: Frame, handle: str, h: Handle, view:
         ("vue pour la première fois", When(h.first_seen) if h.first_seen else "—"),
         ("connue depuis (toutes adresses)", When(view.first_seen) if view.first_seen else "—"),
         ("compte authentifié", "oui" if h.authenticated else "non"),
-        ("joignable d'elle-même", "oui (conversation privée)" if h.push else "non"),
+        ("joignable d'elle-même", _reach_fr(h)),
         ("parle pour", person_ref(s, view.person)),
         ("droits de propriétaire", _owner_here(s, frame, handle, h, view.person)),
         ("jetable", "non" if is_identifiable(handle) else "oui : aucune mémoire durable ne s'y attache"),

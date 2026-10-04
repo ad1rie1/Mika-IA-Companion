@@ -253,6 +253,7 @@ def started(kernel):
     return [mind.decode(e) for e in mind.store.read() if e.type == rt.EPISODE_STARTED.name]
 
 
+@pytest.mark.slow
 def test_she_misses_a_reachable_friend_but_not_an_acquaintance_nor_someone_unreachable(tmp_path):
     async def scenario(kernel, clock, script):
         await daily(kernel, "ext_1", 5)  # une amie, sur un compte extérieur (joignable)
@@ -268,6 +269,7 @@ def test_she_misses_a_reachable_friend_but_not_an_acquaintance_nor_someone_unrea
     assert outreach == {"ext_1"}, fired
 
 
+@pytest.mark.slow
 def test_she_never_writes_to_an_absent_friend_at_night(tmp_path):
     async def scenario(kernel, clock, script):
         await daily(kernel, "ext_1", 5, start_hour=23)
@@ -447,6 +449,7 @@ def test_a_daily_window_may_cross_midnight(hm, start, end, inside):
     assert within_daily_window(minute, start[0] * 60 + start[1], end[0] * 60 + end[1]) is inside
 
 
+@pytest.mark.slow
 def test_a_night_owl_reaches_out_to_a_friend_late_in_the_evening(tmp_path):
     """Réglée pour écrire de 18 h à 1 h, elle relance une amie absente à 23 h
     (la plage passe minuit) ; réglée de 10 h à 20 h 30, jamais à cette heure-là."""

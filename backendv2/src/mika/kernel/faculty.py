@@ -57,6 +57,9 @@ class ToolResult(BaseModel):
 
     ok: bool = True
     content: str = ""
+    #: des références opaques que le message qui suit emporte (un fichier préparé pour la personne) : la boucle
+    #: les recueille, l'énoncé les porte, le transport les rend — sans qu'aucun d'eux sache ce qu'elles désignent
+    attach: tuple[str, ...] = ()
 
 
 # ── Spécifications de contributions ───────────────────────────────────────

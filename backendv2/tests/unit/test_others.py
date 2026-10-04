@@ -238,6 +238,7 @@ def test_she_checks_on_a_friend_who_did_not_seem_well(tmp_path, last, expected):
 # ── Apprendre de l'expérience ─────────────────────────────────────────────
 
 
+@pytest.mark.slow
 def test_she_learns_that_a_friend_takes_two_hours_and_stops_feeling_ignored(tmp_path):
     """Sur une messagerie (un compte extérieur), une amie qui répond toujours deux heures plus tard : les
     premières fois, l'attente (réglée ici à une heure) est déçue puis rattrapée ;

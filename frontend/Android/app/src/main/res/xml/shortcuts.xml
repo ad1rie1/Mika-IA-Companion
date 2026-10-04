@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- « Partager vers Mika » directement depuis la feuille de partage (raccourci de conversation « mika »). -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="fr.qwartz.mika.share.ShareActivity">
+        <data android:mimeType="image/*" />
+        <data android:mimeType="audio/*" />
+        <data android:mimeType="text/*" />
+        <data android:mimeType="application/pdf" />
+        <data android:mimeType="application/json" />
+        <category android:name="fr.qwartz.mika.category.SHARE_TARGET" />
+    </share-target>
+</shortcuts>

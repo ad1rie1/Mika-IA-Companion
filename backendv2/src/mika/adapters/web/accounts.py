@@ -17,6 +17,14 @@ depuis le navigateur. Il n'est gardé qu'en empreinte (SHA-256 : un jeton tiré 
 hasard sur 256 bits n'a pas besoin d'un hachage lent), montré une seule fois, et
 révocable un par un — un jeton révoqué prévient ``on_token_revoke`` : ses
 connexions se ferment. Un compte désactivé rend tous ses jetons muets.
+
+Un jeton dit aussi **ce qu'il ouvre** (ADR 0062) : ``client`` ``screen`` (un écran, un
+moteur : on n'y lit que si on est là) ou ``mobile`` (l'application du téléphone, qui
+reçoit hors ligne : une messagerie, par où elle peut écrire à quelqu'un d'absent), et
+**d'où il vient** : ``source`` ``cli``, ``console`` ou ``login`` (l'application l'a
+obtenu par identifiant et mot de passe, ``POST /auth/token``). Un jeton obtenu par
+mot de passe suit ce mot de passe : le changer, ou désactiver le compte, le révoque ;
+un jeton donné par un opérateur (ligne de commande, console) reste.
 """
 
 from __future__ import annotations
@@ -37,6 +45,18 @@ TOKEN_PREFIX = "mw_"
 #: la clé de « session » d'une connexion ouverte par un jeton (``token:<id>``) : ce qu'elle revérifie, ce qu'on
 #: révoque ; une clé de session web n'a jamais de deux-points (``token_urlsafe``), les deux ne se confondent pas
 TOKEN_KEY = "token:"
+#: ce qu'ouvre un jeton : un écran (navigateur, moteur de jeu) ou l'application du téléphone (une messagerie)
+CLIENT_SCREEN = "screen"
+CLIENT_MOBILE = "mobile"
+TOKEN_CLIENTS = frozenset({CLIENT_SCREEN, CLIENT_MOBILE})
+#: d'où vient un jeton : la ligne de commande, la console, ou une connexion par mot de passe (l'application)
+SOURCE_CLI = "cli"
+SOURCE_CONSOLE = "console"
+SOURCE_LOGIN = "login"
+TOKEN_SOURCES = frozenset({SOURCE_CLI, SOURCE_CONSOLE, SOURCE_LOGIN})
+#: jetons vivants obtenus par mot de passe gardés par compte : au-delà, les moins récemment utilisés partent
+#: (une application réinstallée dix fois ne laisse pas dix portes ouvertes)
+LOGIN_TOKENS_KEPT = 10
 _N, _R, _P = 2**14, 8, 1
 _COMMON = frozenset({"password", "motdepasse", "azertyuiop", "qwertyuiop", "12345678", "123456789", "iloveyou",
                      "password1", "baseball", "football", "sunshine", "princess", "letmein1", "trustno1"})
@@ -110,6 +130,8 @@ class ClientToken:
     created_at: int
     last_used: int | None
     revoked: bool
+    client: str = CLIENT_SCREEN
+    source: str = SOURCE_CLI
 
     @property
     def key(self) -> str:
@@ -151,6 +173,12 @@ class Accounts:
             sql.execute("CREATE TABLE IF NOT EXISTS client_tokens(id INTEGER PRIMARY KEY, account INTEGER NOT NULL, "
                         "label TEXT NOT NULL DEFAULT '', digest TEXT UNIQUE NOT NULL, created_at INTEGER NOT NULL, "
                         "last_used INTEGER, revoked_at INTEGER)")
+            # ADR 0062 : ce qu'ouvre le jeton et d'où il vient (une table d'avant n'a ni l'un ni l'autre)
+            cols = {r[1] for r in sql.execute("PRAGMA table_info(client_tokens)").fetchall()}
+            if "client" not in cols:
+                sql.execute(f"ALTER TABLE client_tokens ADD COLUMN client TEXT NOT NULL DEFAULT '{CLIENT_SCREEN}'")
+            if "source" not in cols:
+                sql.execute(f"ALTER TABLE client_tokens ADD COLUMN source TEXT NOT NULL DEFAULT '{SOURCE_CLI}'")
 
         await self.store.run_mind(create)
 
@@ -261,6 +289,8 @@ class Accounts:
                 return " ".join(problems)
         hashed = hash_password(password) if password is not None else None
         after_name = target.full_name if full_name is None else " ".join(full_name.split())[:120]
+        now = int(time.time())
+        dropped: list[int] = []
 
         def write(sql: Any) -> None:
             sql.execute("UPDATE accounts SET operator=?, active=?, full_name=? WHERE id=?",
@@ -269,8 +299,17 @@ class Accounts:
                 sql.execute("UPDATE accounts SET password=? WHERE id=?", (hashed, account_id))
             if not after_active or hashed is not None:
                 sql.execute("DELETE FROM sessions WHERE account=?", (account_id,))
+                # un jeton obtenu par ce mot de passe tombe avec lui ; ceux d'un opérateur restent
+                dropped.extend(int(r[0]) for r in sql.execute(
+                    "SELECT id FROM client_tokens WHERE account=? AND source=? AND revoked_at IS NULL",
+                    (account_id, SOURCE_LOGIN)).fetchall())
+                sql.execute("UPDATE client_tokens SET revoked_at=? WHERE account=? AND source=? AND revoked_at IS NULL",
+                            (now, account_id, SOURCE_LOGIN))
 
         await self.store.run_mind(write)
+        for token_id in dropped:
+            for listener in list(self.on_token_revoke):
+                await listener(token_id)
         await self._changed()
         if not after_active or hashed is not None or (target.operator and not after_operator):
             # sessions effacées, ou droits retirés : ses WebSockets ouvertes ne valent plus
@@ -287,9 +326,14 @@ class Accounts:
         return acc if acc is not None and acc.active else None
 
     # ── jetons de client natif ──
-    async def create_token(self, account_id: int, label: str = "") -> tuple[ClientToken, str]:
+    async def create_token(self, account_id: int, label: str = "", *, client: str = CLIENT_SCREEN,
+                           source: str = SOURCE_CLI) -> tuple[ClientToken, str]:
         """Un jeton neuf pour ce compte (actif) : rend sa fiche et le secret, qu'on ne reverra jamais.
-        ``ValueError`` (en français) pour un compte inconnu ou désactivé."""
+        ``ValueError`` (en français) pour un compte inconnu ou désactivé, ou une sorte de client inconnue."""
+        if client not in TOKEN_CLIENTS:
+            raise ValueError(f"Sorte de client inconnue : {client!r} (screen ou mobile).")
+        if source not in TOKEN_SOURCES:
+            raise ValueError(f"Origine de jeton inconnue : {source!r}.")
         account = next((a for a in self.all() if a.id == account_id), None)
         if account is None or not account.active:
             raise ValueError("Compte inconnu ou désactivé : pas de jeton.")
@@ -298,23 +342,49 @@ class Accounts:
         now = int(time.time())
 
         def insert(sql: Any) -> None:
-            sql.execute("INSERT INTO client_tokens(account, label, digest, created_at) VALUES(?,?,?,?)",
-                        (account_id, clean, token_digest(raw), now))
+            sql.execute("INSERT INTO client_tokens(account, label, digest, created_at, client, source) "
+                        "VALUES(?,?,?,?,?,?)", (account_id, clean, token_digest(raw), now, client, source))
 
         await self.store.run_mind(insert)
         rows = self.store.query_mind("SELECT id FROM client_tokens WHERE digest=?", (token_digest(raw),))
-        return ClientToken(int(rows[0][0]), account_id, account.username, clean, now, None, False), raw
+        info = ClientToken(int(rows[0][0]), account_id, account.username, clean, now, None, False, client, source)
+        if client == CLIENT_MOBILE:
+            await self._changed()  # une application qui reçoit hors ligne : on peut désormais lui écrire
+        return info, raw
+
+    async def prune_login_tokens(self, account_id: int, keep: int = LOGIN_TOKENS_KEPT) -> list[int]:
+        """Au-delà de ``keep`` jetons vivants obtenus par mot de passe, révoque les moins récemment utilisés ;
+        rend leurs identifiants."""
+        live = [t for t in self.tokens(account_id) if t.source == SOURCE_LOGIN and not t.revoked]
+        live.sort(key=lambda t: (t.last_used or t.created_at, t.id))
+        doomed = live[:max(0, len(live) - keep)]
+        for t in doomed:
+            await self.revoke_token(t.id)
+        return [t.id for t in doomed]
 
     def tokens(self, account_id: int | None = None) -> list[ClientToken]:
         """Les jetons (révoqués compris), du plus ancien au plus récent — jamais leur secret."""
-        sql = ("SELECT t.id, t.account, COALESCE(a.username, '?'), t.label, t.created_at, t.last_used, t.revoked_at "
-               "FROM client_tokens t LEFT JOIN accounts a ON a.id = t.account")
+        sql = ("SELECT t.id, t.account, COALESCE(a.username, '?'), t.label, t.created_at, t.last_used, t.revoked_at, "
+               "t.client, t.source FROM client_tokens t LEFT JOIN accounts a ON a.id = t.account")
         params: tuple[Any, ...] = ()
         if account_id is not None:
             sql += " WHERE t.account=?"
             params = (account_id,)
         rows = self.store.query_mind(sql + " ORDER BY t.id", params)
-        return [ClientToken(int(r[0]), int(r[1]), r[2], r[3], int(r[4]), r[5], r[6] is not None) for r in rows]
+        return [ClientToken(int(r[0]), int(r[1]), r[2], r[3], int(r[4]), r[5], r[6] is not None,
+                            r[7] or CLIENT_SCREEN, r[8] or SOURCE_CLI) for r in rows]
+
+    def token_client(self, token_id: int) -> str:
+        """Ce qu'ouvre ce jeton (``screen`` pour un jeton inconnu : dans le doute, un écran)."""
+        rows = self.store.query_mind("SELECT client FROM client_tokens WHERE id=?", (token_id,))
+        client = rows[0][0] if rows else None
+        return client if client in TOKEN_CLIENTS else CLIENT_SCREEN
+
+    def has_mobile(self, account_id: int) -> bool:
+        """Ce compte a-t-il une application de téléphone vivante (un jeton ``mobile`` non révoqué) ?"""
+        rows = self.store.query_mind("SELECT 1 FROM client_tokens WHERE account=? AND client=? AND revoked_at IS NULL "
+                                     "LIMIT 1", (account_id, CLIENT_MOBILE))
+        return bool(rows)
 
     def token(self, raw: str | None) -> tuple[Account, int] | None:
         """Le compte (actif) d'un jeton valide, et l'identifiant du jeton ; ``None`` sinon."""
@@ -353,6 +423,8 @@ class Accounts:
             return False
         for listener in list(self.on_token_revoke):
             await listener(token_id)
+        if self.token_client(token_id) == CLIENT_MOBILE:
+            await self._changed()  # plus d'application qui reçoit hors ligne, peut-être : la joignabilité suit
         return True
 
     def credential(self, key: str | None) -> Account | None:

@@ -1,0 +1,3 @@
+{"type": "ack", "client_msg_id": "c43", "status": "no_reply", "reason": "no_model",
+ "detail": "aucun modèle ne sert encore à répondre : déclare un fournisseur dans la console",
+ "href": "/inspecteur/reglages/fournisseurs"}

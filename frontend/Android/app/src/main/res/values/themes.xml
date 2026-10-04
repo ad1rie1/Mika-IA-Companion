@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Pas d'AppCompat : Compose dessine tout, la fenêtre ne fournit que son fond. -->
+    <style name="Base.Theme.Mika" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+    </style>
+
+    <style name="Theme.Mika" parent="Base.Theme.Mika" />
+
+    <!-- « Partager vers Mika » : rien à montrer, l'activité recopie les fichiers et passe la main. -->
+    <style name="Theme.Mika.Translucent" parent="android:Theme.Translucent.NoTitleBar" />
+</resources>

@@ -1,0 +1,5 @@
+{"type": "speech", "text": "", "emotion": "dreamy", "emotion_intensity": 0.3, "emotion_state": {},
+ "emotion_blend": [{"emotion": "dreamy", "weight": 1.0}], "source": "reply", "person_id": "user_3",
+ "speak": false, "voice_reason": "asleep", "voice_persona": "speaking",
+ "voice_profile": {"pitch": 1.0, "rate": 1.0, "gain": 1.0}, "message_id": null,
+ "user_message_id": 57, "client_msg_id": "cnuit-3"}

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Le monogramme « M », centré dans la zone sûre (66 dp) d'une icône adaptative de 108 dp. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M34,72L34,36L42,36L54,54L66,36L74,36L74,72L67,72L67,48L56,64L52,64L41,48L41,72Z" />
+</vector>

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- L'indigo du client web : la couleur de repli quand les couleurs dynamiques manquent. -->
+    <color name="mika_indigo">#FF6366F1</color>
+    <color name="ic_launcher_background">#FF6366F1</color>
+    <color name="window_background">#FFFBF8FF</color>
+</resources>

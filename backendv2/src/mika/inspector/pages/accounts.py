@@ -6,6 +6,11 @@ formulaire de réglages : un mot de passe se vérifie (``password_problems``), o
 ne retire jamais le dernier opérateur actif, un mot de passe ne se réaffiche
 jamais. Chaque création ou modification est auditée (``runtime.operated``, sans
 contenu) et paraît dans le journal des modifications.
+
+La page d'un compte montre aussi ses **applications connectées** (ADR 0062) : les
+jetons de client natif (le téléphone, un moteur de jeu), d'où ils viennent et
+quand ils ont servi — jamais leur secret —, chacun révocable (ses connexions se
+ferment ; un téléphone révoqué ne la laisse plus écrire à la personne absente).
 """
 
 from __future__ import annotations
@@ -18,7 +23,13 @@ from urllib.parse import urlencode
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
-from mika.adapters.web.accounts import password_problems
+from mika.adapters.web.accounts import (
+    CLIENT_MOBILE,
+    SOURCE_CONSOLE,
+    SOURCE_LOGIN,
+    ClientToken,
+    password_problems,
+)
 from mika.inspector.catalog import Panel
 from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX, secure
@@ -27,6 +38,17 @@ from mika.runtime import operations
 
 URL = f"{PREFIX}/reglages/comptes"
 BAD_TOKEN = ("danger", "Jeton de formulaire invalide : recharge la page.")
+US = 1_000_000
+_SOURCES = {SOURCE_LOGIN: "connexion (identifiant et mot de passe)", SOURCE_CONSOLE: "console"}
+
+
+def _app_row(ui: Any, t: ClientToken) -> dict[str, Any]:
+    """Une application connectée telle que la page la montre (jamais le secret)."""
+    return {"id": t.id, "label": t.label or "sans nom",
+            "kind": "Téléphone (reçoit hors ligne)" if t.client == CLIENT_MOBILE else "Écran ou moteur",
+            "source": _SOURCES.get(t.source, "ligne de commande"),
+            "created": ui.when(t.created_at * US), "last_used": ui.when((t.last_used or 0) * US),
+            "revoked": t.revoked}
 
 
 def _account_url(**query: str) -> str:
@@ -56,7 +78,9 @@ async def page(ui: Any, request: Request, state: Mapping[str, Any]) -> dict[str,
             return {"blocks": [], "messages": messages, "crumbs": [("Comptes", URL), (found.username, "")],
                     "panel": Panel("accounts.html", {"mode": "edit", "action": URL, "account": found,
                                                      "page_heading": f"Modifier · {found.username}",
-                                                     "operators": sum(1 for a in accounts if a.operator and a.active)})}
+                                                     "operators": sum(1 for a in accounts if a.operator and a.active),
+                                                     "apps": [_app_row(ui, t) for t in
+                                                              reversed(ui.deps.accounts.tokens(found.id))]})}
         messages.append(("warn", "Ce compte n'existe pas."))
     ctx = ui.inspection.context(query)
     window, pager = paginate(accounts, ctx.pager(size=25))
@@ -104,6 +128,19 @@ async def post(ui: Any, request: Request) -> tuple[Response | None, dict[str, An
         account_id = int(data.get("account", "0"))
     except ValueError:
         account_id = 0
+    if data.get("action") == "revoke_token":
+        try:
+            token_id = int(data.get("token", "0"))
+        except ValueError:
+            token_id = 0
+        owned = next((t for t in deps.accounts.tokens(account_id) if t.id == token_id), None)
+        if owned is None:
+            return None, {"editing": str(account_id), "messages": [("danger", "Ce jeton n'est pas à ce compte.")]}, 400
+        if not await deps.accounts.revoke_token(token_id):
+            return None, {"editing": str(account_id), "messages": [("warn", "Ce jeton était déjà révoqué.")]}, 400
+        await operations.audit(ui.kernel, "console.comptes.revoquer_jeton", by=account.handle, subject_kind="compte",
+                               subject=f"user_{account_id}")
+        return _done(ui, "ok", f"Application révoquée : {owned.label or 'sans nom'}.", compte=str(account_id)), {}, 303
     refused = await deps.accounts.update(account_id, operator=data.get("operator") == "on",
                                          active=data.get("active") == "on", password=data.get("password") or None,
                                          full_name=data.get("full_name") if "full_name" in data else None)
@@ -114,7 +151,7 @@ async def post(ui: Any, request: Request) -> tuple[Response | None, dict[str, An
     return _done(ui, "ok", "Compte modifié."), {}, 303
 
 
-def _done(ui: Any, tone: str, message: str) -> Response:
+def _done(ui: Any, tone: str, message: str, **query: str) -> Response:
     token = _secrets.token_urlsafe(9)
     ui.flash(token, tone, message)
-    return secure(RedirectResponse(f"{URL}?flash={token}", status_code=303))
+    return secure(RedirectResponse(_account_url(**query, flash=token), status_code=303))

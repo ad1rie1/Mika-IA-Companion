@@ -1,0 +1,18 @@
+.gradle/
+.kotlin/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.jks
+*.keystore
+keystore.properties
+# Le .gitignore racine ignore tout dossier « data/ » (les données d'exécution) :
+# ici, c'est un paquet Kotlin, à garder.
+!app/src/**/data/

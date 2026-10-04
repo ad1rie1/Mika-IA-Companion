@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- La photo prise pour Mika, avant d'être réduite et jointe. -->
+    <cache-path name="camera" path="camera/" />
+    <!-- Un fichier de Mika ouvert « avec… » une autre application. -->
+    <cache-path name="shared" path="shared/" />
+</paths>

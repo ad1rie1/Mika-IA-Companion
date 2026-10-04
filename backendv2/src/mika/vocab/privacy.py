@@ -96,9 +96,15 @@ WEB = "web"
 #: un compte sur un réseau extérieur (forum, messagerie, réseau social), adresses ``ext_…`` : un compte
 #: stable, rien ne prouve qui le tient — le nom générique d'un canal non sécurisé
 EXTERNAL = "external"
+#: l'application du téléphone (ADR 0062) : toujours authentifiée (un compte, par son jeton), et une
+#: **messagerie** — elle reçoit hors ligne (une notification), on la lit quand on y pense
+MOBILE = "mobile"
 #: les canaux d'un compte stable en conversation privée. Ce sont aussi des **messageries** : un message s'y
 #: lit quand on y pense (pas quand il arrive), et elle peut y écrire à quelqu'un d'absent
 _ACCOUNT_CHANNELS = frozenset({EXTERNAL, "discord", "signal", "email"})
+#: les messageries : les comptes extérieurs, et l'application du téléphone — qui n'est pas un « compte » au
+#: sens de la confiance (sans session, elle ne prouverait rien : un transport non décrit reste public)
+_MESSAGING = _ACCOUNT_CHANNELS | {MOBILE}
 _INTERNAL_CHANNELS = frozenset({"conscience", "internal", "module", "system"})
 _ALIASES = MappingProxyType({"frontend": "web", "websocket": "web", "ws": "web"})
 
@@ -117,7 +123,7 @@ def channel_of(handle: str) -> str:
 def is_messaging(channel: str | None) -> bool:
     """Une messagerie : on y lit quand on y pense, et elle peut y écrire à quelqu'un d'absent (en privé).
     L'écran (le web) est l'inverse : on y répond en minutes, et seulement si on est là."""
-    return normalize_channel(channel) in _ACCOUNT_CHANNELS
+    return normalize_channel(channel) in _MESSAGING
 
 
 def channel_trust(channel: str | None, *, authenticated: bool = False, public: bool = False) -> ChannelTrust:

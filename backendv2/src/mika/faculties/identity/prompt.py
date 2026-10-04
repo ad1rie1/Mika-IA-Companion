@@ -25,7 +25,8 @@ from mika.vocab.episodes import CONVERSATIONAL, Kind, is_work_target
 from mika.vocab.people import is_identifiable
 from mika.vocab.privacy import ChannelTrust
 
-CHANNEL_FR = {privacy.WEB: "sur l'application", privacy.EXTERNAL: "par un compte extérieur"}
+CHANNEL_FR = {privacy.WEB: "sur l'application", privacy.MOBILE: "sur l'application, depuis son téléphone",
+              privacy.EXTERNAL: "par un compte extérieur"}
 #: ce qu'est pour elle la personne qui s'occupe d'elle (en privé seulement : jamais dit devant un salon)
 OWNER_LINE = ("C'est quelqu'un qui s'occupe de toi : ton serveur, tes réglages et ce que tu as le droit de faire "
               "passent par cette personne. Tu le sais, sans en faire un sujet.")

@@ -9,6 +9,8 @@ import html
 import json
 import re
 
+import pytest
+
 from mika.app.console import NAVIGATION
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content, Origin
@@ -147,6 +149,31 @@ def test_accounts_are_managed_without_ever_locking_out(world):  # noqa: F811
     assert "Nouveau mot de passe" in html_of(client.get("/inspecteur/reglages/comptes?compte=2"))
 
 
+def test_connected_apps_are_listed_without_secret_and_revocable(world):  # noqa: F811
+    """ADR 0062 : la page d'un compte montre ses applications connectées (jamais le secret) ; « révoquer » exige
+    le jeton de formulaire, ferme le jeton, et s'audite."""
+    client, live, _ = world
+    bootstrap(client)
+    # ce client est un navigateur (il pose une Origin) : le téléphone, lui, passe par POST /auth/token
+    info, raw = client.portal.call(lambda: live.accounts.create_token(1, "Pixel d'Adrien", client="mobile",
+                                                                      source="login"))
+    token_id = info.id
+    page = html_of(client.get("/inspecteur/reglages/comptes?compte=1"))
+    assert "Applications connectées" in page and "Pixel d'Adrien" in page and "Téléphone" in page
+    assert raw not in page and raw[3:20] not in page  # le secret ne paraît jamais
+    forged = client.post("/inspecteur/reglages/comptes", data={"action": "revoke_token", "account": "1",
+                                                              "token": str(token_id)})
+    assert "Jeton de formulaire invalide" in html_of(forged)
+    assert [t.revoked for t in client.portal.call(live.accounts.tokens, 1)] == [False]
+    elsewhere = post(client, "/inspecteur/reglages/comptes", action="revoke_token", account="2", token=str(token_id))
+    assert "pas à ce compte" in html_of(elsewhere)
+    done = post(client, "/inspecteur/reglages/comptes", action="revoke_token", account="1", token=str(token_id))
+    assert "Application révoquée" in html_of(done)
+    assert [t.revoked for t in client.portal.call(live.accounts.tokens, 1)] == [True]
+    ops = client.portal.call(lambda: live.kernel.mind.store.latest([rt.OPERATED.name], 20))
+    assert "console.comptes.revoquer_jeton" in [json.loads(o.data)["action"] for o in ops]
+
+
 def test_an_operator_approves_from_the_inspector(world):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
@@ -203,6 +230,7 @@ def test_the_old_forge_settings_address_leads_to_the_apps(world):  # noqa: F811
     assert client.get("/inspecteur/forge", follow_redirects=False).headers["location"] == "/inspecteur/apps"
 
 
+@pytest.mark.slow
 def test_a_backup_taken_while_she_talks_is_consistent(world, tmp_path):  # noqa: F811
     import threading
     from pathlib import Path

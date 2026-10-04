@@ -17,6 +17,7 @@ from typing import Any
 
 from mika.adapters.forge import ForgeHost
 from mika.adapters.llm.gateway import Gateway
+from mika.adapters.shares import MemoryShares
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.adapters.workshop import BwrapWorkshop
@@ -120,6 +121,8 @@ class Driver:
     #: le monde extérieur (il survit aux redémarrages du noyau)
     mail: FakeMail = field(default_factory=FakeMail)
     feeds: FakeFeeds = field(default_factory=FakeFeeds)
+    #: les fichiers qu'elle envoie (leurs octets survivent aux redémarrages du noyau, comme sur le disque)
+    shares: MemoryShares = field(default_factory=MemoryShares)
     #: les plongements de la mémoire (un vrai modèle pour la sonde ; par défaut, le hachage, déterministe et rapide)
     embedder: Any = None
 
@@ -137,7 +140,7 @@ class Driver:
         store = SqliteStore(self.root / "mind.db", self.root / "views.db", threaded=False)
         ports = {"delivery": self.transport, "vectors": SqliteVectorIndex(store, self.embedder or HashEmbedder()),
                  "workshop": BwrapWorkshop(self.root / "ateliers"), "mail": self.mail, "feeds": self.feeds,
-                 "forge": ForgeHost(self.root / "forge")}
+                 "forge": ForgeHost(self.root / "forge"), "shares": self.shares}
         deps = self.composition.deps(store=store, clock=self.clock, ids=SeededIdGen(f"{self.seed}:{self.boots}"),
                                      gateway=gateway, ports=ports, seed=f"{self.seed}:{self.boots}")
         self.kernel = Kernel(deps)

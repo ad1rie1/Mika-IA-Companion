@@ -19,6 +19,7 @@ def _quiet():
     logging.disable(logging.NOTSET)
 
 
+@pytest.mark.slow
 def test_quick_lane_is_green_and_fast(tmp_path):
     t0 = time.perf_counter()
     results = run_lane(for_simulation(), tmp_path)

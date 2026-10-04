@@ -11,9 +11,10 @@
   arrêté ; l'ancien dossier est mis de côté) ;
 - ``llm show|backend|route|remove|context`` : les modèles (clés chiffrées) ;
 - ``account <nom> [<mot de passe>] [--operator]`` : un compte (sans mot de passe : demandé sans écho) ;
-- ``token create <compte> [--label …]`` / ``token list [<compte>]`` / ``token revoke <id>`` : les jetons
-  d'un client natif (un moteur de jeu sur ``/ws/world``, ADR 0051) — montrés une seule fois, gardés en
-  empreinte ; serveur en marche, une révocation ferme ses connexions au plus tard dix secondes après ;
+- ``token create <compte> [--label …] [--client screen|mobile]`` / ``token list [<compte>]`` / ``token revoke <id>`` :
+  les jetons d'un client natif (un moteur de jeu sur ``/ws/world``, ADR 0051 ; l'application du téléphone, ADR
+  0062, qui obtient d'ordinaire le sien par ``POST /auth/token``) — montrés une seule fois, gardés en empreinte ;
+  serveur en marche, une révocation ferme ses connexions au plus tard dix secondes après ;
 - ``serve --origin URL --cookie-secure --behind-proxy`` : derrière un mandataire TLS ;
 - ``console apercu --out DOSSIER`` : chaque page de la console, exportée ;
 - ``identity link|unlink``, ``social closeness`` et ``forge promote|demote`` : ce
@@ -38,10 +39,13 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
+from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError, runtime_dir
 from mika.adapters.llm.config import REPLY, ROLE_LABELS, ROLES, BackendSpec, LLMConfig, build_backend
 from mika.adapters.mail import LEGACY_ACCOUNT
 from mika.adapters.mcp.relay import Relay
+from mika.adapters.shares import DiskShares
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
@@ -56,6 +60,9 @@ from mika.kernel.codec import digest
 from mika.kernel.events import Origin
 from mika.kernel.inspect import Head
 from mika.kernel.registry import Registry
+from mika.ports.imaging import ASPECTS, QUALITIES, ImageRequest
+from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
+from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.ports.llm import LLMRequest, Message
 from mika.runtime import operations
 from mika.runtime.bootstrap import Kernel
@@ -144,6 +151,8 @@ async def _offline(data: Path, *, vectors: bool = False) -> Kernel:
     ports: dict[str, object] = {}
     if vectors:  # le modèle ne se charge qu'à un plongement : jamais ici
         ports["vectors"] = SqliteVectorIndex(store, SentenceEmbedder())
+    # les octets des fichiers qu'elle a envoyés (ADR 0062) : l'oubli d'une personne les efface aussi d'ici
+    ports["shares"] = DiskShares(data / "partages")
     kernel = Kernel(composition.deps(store=store, clock=RealClock(), ids=RandomIdGen(), ports=ports))
     try:
         await kernel.mind.boot(append_boot=False)
@@ -176,7 +185,8 @@ async def forget(data: Path, subject: str) -> dict[str, object]:
     finally:
         await _close(kernel, data)
     return {"sujet": subject, "clés": list(gone.keys), "contenus_effacés": gone.counts.get("contents", 0),
-            "traces_effacées": gone.counts.get("traces", 0), "vecteurs_effacés": gone.counts.get("vectors", 0)}
+            "traces_effacées": gone.counts.get("traces", 0), "vecteurs_effacés": gone.counts.get("vectors", 0),
+            "fichiers_effacés": gone.counts.get("shares", 0)}
 
 
 async def _perform(kernel: Kernel, key: str, subject: str, values: dict[str, str]) -> dict[str, object]:
@@ -322,6 +332,70 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
     return await _with_settings(data, run)
 
 
+async def images_command(data: Path, args: argparse.Namespace) -> dict[str, object]:
+    """Les fournisseurs d'images : montrer, déclarer, router, retirer — ou faire un essai avec la
+    configuration enregistrée (``essai`` n'écrit rien d'autre que l'image demandée)."""
+    async def run(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
+        cfg = settings.imaging()
+        if args.images_cmd == "essai":
+            return await _image_essai(cfg, args)
+        backends = dict(cfg.backends)
+        routes = dict(cfg.routes)
+        if args.images_cmd == "backend":
+            previous = backends.get(args.name)
+
+            def kept(value, attr, default):  # type: ignore[no-untyped-def]
+                return value if value is not None else (getattr(previous, attr) if previous else default)
+
+            backends[args.name] = ImageBackendSpec(
+                kind=args.kind, model=args.model, api_key=kept(args.api_key, "api_key", ""),
+                base_url=kept(args.base_url, "base_url", ""), fallback=kept(args.fallback, "fallback", ""),
+                adult=kept(args.adult, "adult", False), moderation=kept(args.moderation, "moderation", "auto"),
+                slots=kept(args.slots, "slots", 0))
+        elif args.images_cmd == "route":
+            for role in args.roles:
+                routes[role] = args.name
+        elif args.images_cmd == "remove":
+            backends.pop(args.name, None)
+            routes = {r: b for r, b in routes.items() if b != args.name}
+        if args.images_cmd != "show":
+            try:
+                cfg = await settings.save_imaging(ImagingConfig(backends=backends, routes=routes))
+            except ValueError as exc:
+                return {"ok": False, "problems": [p.strip() for p in str(exc).split(";") if p.strip()]}
+        return {"ok": True, "activée": cfg.enabled, "backends": {n: b.redacted() for n, b in cfg.backends.items()},
+                "routes": cfg.routes, "problems": cfg.problems()}
+
+    return await _with_settings(data, run)
+
+
+async def _image_essai(cfg: ImagingConfig, args: argparse.Namespace) -> dict[str, object]:
+    if not cfg.enabled:
+        return {"ok": False, "problems": ["aucun fournisseur d'images : déclare-en un (mika images backend …)"]}
+    gateway = build_image_gateway(cfg, RealClock())
+    try:
+        result = await gateway.generate(ImageRequest(role=args.role, call_id=f"essai-{os.getpid()}",
+                                                     prompt=args.prompt, aspect=args.aspect, quality=args.quality,
+                                                     lane="conversation", priority=0))
+    finally:
+        for backend in gateway.backends.values():
+            close = getattr(backend, "aclose", None)
+            if close is not None:
+                await close()
+    files = []
+    ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
+    for i, picture in enumerate(result.images):
+        out: Path = args.out if args.out.suffix else args.out.with_suffix(ext.get(picture.mime, ".png"))
+        if i:
+            out = out.with_name(f"{out.stem}-{i + 1}{out.suffix}")
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_bytes(picture.data)
+        files.append(str(out))
+    return {"ok": result.ok, "issue": result.outcome, "fournisseur": result.backend, "modèle": result.model,
+            "taille": result.size, "qualité": result.quality, "coût_usd": round(result.cost_usd, 4),
+            "raison": result.reason, "prompt_réécrit": result.revised_prompt, "fichiers": files, "problems": []}
+
+
 async def _claude_code_spec(data: Path, name: str | None) -> BackendSpec:
     """Le fournisseur Claude Code déclaré (le premier, ou celui nommé) ; à défaut, la CLI telle quelle."""
     async def run(settings: Settings, store) -> BackendSpec:  # type: ignore[no-untyped-def]
@@ -397,10 +471,10 @@ async def token_command(data: Path, args: argparse.Namespace) -> dict[str, objec
             if found is None:
                 return {"ok": False, "error": f"Compte inconnu : « {args.username} »."}
             try:
-                info, raw = await accounts.create_token(found[0].id, args.label)
+                info, raw = await accounts.create_token(found[0].id, args.label, client=args.client)
             except ValueError as exc:
                 return {"ok": False, "error": str(exc)}
-            return {"ok": True, "id": info.id, "person_id": found[0].handle, "token": raw,
+            return {"ok": True, "id": info.id, "person_id": found[0].handle, "client": info.client, "token": raw,
                     "usage": "montré une seule fois : hello.token, ou l'en-tête « Authorization: Bearer <jeton> », "
                              "sur /ws/world (et /ws, sans en-tête Origin)"}
         if args.token_cmd == "list":
@@ -411,6 +485,7 @@ async def token_command(data: Path, args: argparse.Namespace) -> dict[str, objec
                     return {"ok": False, "error": f"Compte inconnu : « {args.username} »."}
                 account = found[0].id
             return {"ok": True, "tokens": [{"id": t.id, "account": t.username, "label": t.label,
+                                            "client": t.client, "source": t.source,
                                             "created": _when(t.created_at), "last_used": _when(t.last_used),
                                             "revoked": t.revoked} for t in accounts.tokens(account)]}
         if await accounts.revoke_token(args.id):
@@ -528,6 +603,32 @@ def _run(argv: list[str] | None) -> int:
     lb.add_argument("--claude-bin", default=None, help="claude_code : la commande claude (vide : PATH)")
     lb.add_argument("--config-dir", default=None, help="claude_code : un dossier de CLI à part (vide : l'habituel)")
     lb.add_argument("--fallback", default=None, help="le fournisseur qui prend le relais en cas d'échec")
+    im = sub.add_parser("images", help="fournisseurs d'images et rôles (aucun : elle n'en génère pas)")
+    isub = im.add_subparsers(dest="images_cmd", required=True)
+    isub.add_parser("show")
+    ib = isub.add_parser("backend", help="déclarer ou modifier un fournisseur d'images (le premier sert « draw »)")
+    ib.add_argument("name")
+    ib.add_argument("--kind", required=True, choices=["openai", "sdcpp", "openai_compatible"])
+    ib.add_argument("--model", required=True)
+    ib.add_argument("--api-key", default=None, help="laissé vide : la clé actuelle est gardée")
+    ib.add_argument("--base-url", default=None, help="sdcpp : http://127.0.0.1:8190 ; openai_compatible : jusqu'à /v1")
+    ib.add_argument("--fallback", default=None, help="le fournisseur qui prend le relais d'une panne")
+    ib.add_argument("--adult", action=argparse.BooleanOptionalAction, default=None,
+                    help="sdcpp, openai_compatible : le serveur accepte le contenu pour adultes")
+    ib.add_argument("--moderation", choices=["auto", "low"], default=None, help="openai : sévérité de la modération")
+    ib.add_argument("--slots", type=int, default=None, help="images en même temps (0 : 1 en local, 2 ailleurs)")
+    ir = isub.add_parser("route", help="associer des rôles à un fournisseur d'images",
+                         epilog="Les rôles : " + " ; ".join(f"{r} ({IMAGE_ROLE_LABELS[r]})" for r in IMAGE_ROLES))
+    ir.add_argument("name")
+    ir.add_argument("roles", nargs="+", choices=IMAGE_ROLES, metavar="rôle", help="draw, edit, own")
+    ix = isub.add_parser("remove")
+    ix.add_argument("name")
+    ie = isub.add_parser("essai", help="générer une image avec la configuration enregistrée")
+    ie.add_argument("prompt")
+    ie.add_argument("--out", type=Path, required=True, help="le fichier (l'extension suit le format rendu)")
+    ie.add_argument("--role", default="draw", choices=IMAGE_ROLES)
+    ie.add_argument("--aspect", default="square", choices=list(ASPECTS))
+    ie.add_argument("--quality", default="normal", choices=QUALITIES)
     cc = sub.add_parser("claude-code", help="la CLI Claude Code comme moteur (son login, jamais un jeton)")
     ccsub = cc.add_subparsers(dest="cc_cmd", required=True)
     for name, text in (("check", "un appel d'essai : connectée ? quel modèle ? quel usage de l'abonnement ?"),
@@ -555,6 +656,8 @@ def _run(argv: list[str] | None) -> int:
     tkc = tksub.add_parser("create", help="un jeton neuf pour un compte, montré une seule fois")
     tkc.add_argument("username")
     tkc.add_argument("--label", default="", help="à quoi il sert (« Unity, PC du salon »)")
+    tkc.add_argument("--client", choices=("screen", "mobile"), default="screen",
+                     help="screen : un écran ou un moteur ; mobile : l'application du téléphone (une messagerie)")
     tkl = tksub.add_parser("list", help="les jetons, jamais leur secret")
     tkl.add_argument("username", nargs="?", default=None)
     tkr = tksub.add_parser("revoke", help="révoquer un jeton : il ne vaut plus rien, ses connexions se ferment")
@@ -693,6 +796,10 @@ def _run(argv: list[str] | None) -> int:
         out = asyncio.run(llm_command(args.data, args))
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0 if not out["problems"] else 1
+    if args.cmd == "images":
+        out = asyncio.run(images_command(args.data, args))
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0 if out.get("ok") and not out.get("problems") else 1
     if args.cmd == "claude-code":
         if args.cc_cmd == "login":
             return claude_code_login(args.data, args.name)

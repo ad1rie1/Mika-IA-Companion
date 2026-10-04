@@ -397,6 +397,7 @@ def test_the_murmur_reaches_only_the_screens_of_the_person_she_is_about_to_write
         assert [f["type"] for f in until(adrien, "pong")] == ["pong"]  # l'opératrice n'entend pas ce murmure-là
 
 
+@pytest.mark.slow
 def test_a_murmur_without_target_goes_only_to_operators(make):
     client, live = make(Fake())
     bootstrap(client)

@@ -37,7 +37,8 @@ PLAIN = {
         "legacy_note": "héritage : avant la version 2, la note était en clair",
     },
     "identity.linked": {"handle": "une adresse", "person": "une clé de personne", "by": "qui (code)"},
-    "identity.registered": {"handle": "une adresse", "name": "le nom du compte (un réglage de la console)"},
+    "identity.registered": {"handle": "une adresse", "name": "le nom du compte (un réglage de la console)",
+                            "messaging": "un nom de canal (``mobile``), jamais un texte sur la personne"},
     "identity.name_bound": {"name": "une clé de personne connue de nom (``name:alice``, celle de la mémoire)",
                             "person": "une clé de personne", "by": "qui (code)"},
     "social.profile_revised": {

@@ -18,6 +18,9 @@ from urllib.parse import urlsplit
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError, field_validator
 
+from mika.adapters.imaging.config import ImagingConfig
+from mika.adapters.imaging.models import ListingFailed as ImageListingFailed
+from mika.adapters.imaging.models import list_image_models
 from mika.adapters.llm.config import REPLY, ROLE_LABELS, BackendSpec, LLMConfig
 from mika.adapters.llm.models import ListingFailed, list_models
 from mika.adapters.mail import MailConfig
@@ -28,6 +31,9 @@ from mika.inspector.catalog import Command, SettingsPage, SettingsSection, Setti
 from mika.kernel import forms
 from mika.kernel.forms import Knob
 from mika.kernel.inspect import Badge, Column, Nav, NavItem, Note, Ref, Row, Table, Text, When
+from mika.ports.imaging import DRAW
+from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
+from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.runtime.params import Parameters
 from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, Role
 from mika.vocab.temperament import Temperament
@@ -192,6 +198,60 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                        "comment"), tuple(rows), title="Ce qui sert vraiment chaque rôle",
                       caption="Un rôle sans fournisseur retombe sur son rôle de repli (murmurer → répondre, "
                               "vérifier → retenir → répondre…). Les rôles « voix » reçoivent sa persona.")]
+
+    # ── images ──
+    async def save_images(cfg: ImagingConfig, by: str) -> list[str]:
+        # un fournisseur retiré emporte les rôles qui le visaient (ils retombent sur « dessiner ») et les replis
+        # qui menaient à lui
+        cfg = cfg.model_copy(update={
+            "routes": {r: b for r, b in cfg.routes.items() if b in cfg.backends},
+            "backends": {n: s if not s.fallback or s.fallback in cfg.backends else s.model_copy(update={"fallback": ""})
+                         for n, s in cfg.backends.items()}})
+        previous = settings.imaging()
+        await settings.save_imaging(cfg)  # une configuration qui a un problème est refusée (ValueError), en le disant
+        problems = await live.reload_imaging()
+        if problems:
+            await settings.save_imaging(previous)
+            await live.reload_imaging()
+        return problems
+
+    async def image_models(values: Any) -> list[tuple[str, str]]:
+        data = forms.nest(dict(values))
+        try:
+            names = await list_image_models(str(data.get("kind") or ""), api_key=str(data.get("api_key") or ""),
+                                            base_url=str(data.get("base_url") or ""))
+        except ImageListingFailed as exc:
+            raise ValueError(str(exc)) from None
+        return [(name, name) for name in names]
+
+    def image_routing() -> list[Any]:
+        """Qui sert chaque rôle d'images, et ce que ce fournisseur sait faire."""
+        cfg = settings.imaging()
+        served = live.imaging.resolution()
+        status = {row["name"]: row for row in live.imaging.status()}
+        rows = []
+        for role in IMAGE_ROLES:
+            name = served.get(role, "")
+            spec = cfg.backends.get(name)
+            caps = status.get(name, {})
+            how = "déclaré" if cfg.routes.get(role) == name else "par repli (dessiner)"
+            rows.append(Row((Text(IMAGE_ROLE_LABELS[role]), Text(name or "aucun", "mono" if name else "muted"),
+                             Text(f"{spec.kind} · {spec.model}" if spec else "—", "muted"),
+                             Text(("local" if caps.get("local") else "hébergé") if name else "—", "muted"),
+                             Text(", ".join(w for w, on in (("retouche", caps.get("edit")),
+                                                            ("adulte", caps.get("adult"))) if on) or "—", "muted"),
+                             Badge(how, "ok" if how == "déclaré" else "info") if name
+                             else Badge("désactivé", "muted"))))
+        return [Table((Column("rôle"), "fournisseur qui sert", "type · modèle", Column("où", "fit"), "sait aussi",
+                       "comment"), tuple(rows), title="Ce qui sert chaque rôle",
+                      caption="Sans fournisseur déclaré, elle ne génère pas d'images. Le premier déclaré sert "
+                              "« dessiner » ; les autres rôles y retombent.")]
+
+    def image_facts() -> list[tuple[str, str]]:
+        cfg = settings.imaging()
+        serving = live.imaging.serving(DRAW)
+        return [("Dessiner", f"servi par « {serving} »" if serving else "désactivé : aucun fournisseur"),
+                ("Fournisseurs", str(len(cfg.backends)))]
 
     def llm_facts() -> list[tuple[str, str]]:
         cfg = settings.llm()
@@ -364,6 +424,23 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             SettingsPage("contexte", "Contexte", ("context_tokens",), order=30, facts=False,
                                          description="La place que le prompt peut occuper : plus grande, elle se "
                                                      "souvient de plus de fil et de souvenirs, pour plus cher."),
+                        )),
+        SettingsSection("images", "Images", "intelligence", ImagingConfig, settings.imaging, save_images, order=120,
+                        description="Les fournisseurs qui génèrent ses images, et lequel sert chaque rôle. Aucun "
+                                    "fournisseur : elle n'en génère pas. Les clés sont chiffrées, jamais "
+                                    "réaffichées.", loaders={"image_models": image_models}, facts=image_facts,
+                        pages=(
+                            SettingsPage("images-fournisseurs", "Fournisseurs d'images", ("backends",), order=10,
+                                         description=(
+                                             "OpenAI (son API Images), ou un serveur compatible : le tien, qui "
+                                             "fait tourner un modèle sur ta machine, ou un proxy. Le premier "
+                                             "déclaré sert « dessiner » d'office. Un repli prend le relais "
+                                             "d'une panne, ou de ce que le premier ne sait pas faire ; jamais "
+                                             "d'un refus de modération.")),
+                            SettingsPage("images-roles", "Qui dessine quoi", ("routes",), order=20,
+                                         extra=image_routing, facts=False, description=(
+                                             "Dessiner (une demande), retoucher une image reçue, ses dessins à "
+                                             "elle. Laisse vide : le rôle retombe sur « dessiner ».")),
                         )),
         SettingsSection("personnage", "Personnage", "personnage", PersonaDoc, live.persona, save_persona,
                         description="Qui elle est. Chaque enregistrement journalise une révision de sa persona.",

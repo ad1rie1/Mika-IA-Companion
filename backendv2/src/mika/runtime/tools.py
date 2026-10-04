@@ -146,6 +146,9 @@ class LoopResult:
     records: list[ToolRecord] = field(default_factory=list)
     #: chaque réponse du modèle, avec l'identifiant de l'appel qui l'a produite
     exchanges: list[tuple[str, LLMResponse]] = field(default_factory=list)
+    #: ce que ses outils réussis ont préparé pour partir avec le message (``ToolResult.attach``), sans doublon,
+    #: dans l'ordre — des références opaques
+    attachments: list[str] = field(default_factory=list)
 
     @property
     def call_ids(self) -> list[str]:
@@ -285,6 +288,9 @@ async def _loop(
                 continue
             tr = out if isinstance(out, ToolResult) else ToolResult(content=_as_text(out))
             result.calls.append((call.name, tr.ok))
+            for ref in tr.attach if tr.ok else ():
+                if ref and ref not in result.attachments:
+                    result.attachments.append(ref)
             result.records.append(ToolRecord(call.id, call.name, _args_json(call.args), tr.ok,
                                              _bounded(tr.content), elapsed))
             outputs.append(Message("tool", tr.content, tool_call_id=call.id, name=call.name, is_error=not tr.ok))

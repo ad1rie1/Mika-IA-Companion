@@ -7,10 +7,12 @@ se reconstruit pas :
   les autres bases (caches du courrier et des flux, stockage des apps
   forgées), copiées par l'API de sauvegarde de SQLite : cohérentes même
   serveur en marche, WAL compris ;
-- ses apps forgées (``forge/``, avec leurs versions) et ses ateliers
-  (``ateliers/``, avec leur git) ; un lien symbolique est gardé comme un lien
-  (sa cible, dans le manifeste) et recréé à la restauration : sans lui, le
-  prochain commit de l'atelier enregistrerait sa suppression ;
+- ses apps forgées (``forge/``, avec leurs versions), ses ateliers
+  (``ateliers/``, avec leur git) et les fichiers qu'elle a envoyés
+  (``partages/``, ADR 0062 : leurs octets ne sont pas dans le journal) ; un
+  lien symbolique est gardé comme un lien (sa cible, dans le manifeste) et
+  recréé à la restauration : sans lui, le prochain commit de l'atelier
+  enregistrerait sa suppression ;
 - ``secret.key`` quand la clé de chiffrement vient de ce fichier (sans elle,
   les secrets rangés dans les réglages sont perdus) ;
 - ``MANIFEST.json`` : tête du journal, empreinte de l'état **rejoué depuis la
@@ -345,8 +347,9 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
                 data.rmdir()
             stage.rename(data)
             done = True
-            for sub in ("forge", "ateliers"):
+            for sub in ("forge", "ateliers", "partages"):
                 (data / sub).mkdir(exist_ok=True)
+            (data / "partages").chmod(0o700)  # ce qu'elle a envoyé à chacun : à elle seule
             key = data / "secret.key"
             if key.exists():
                 key.chmod(0o600)

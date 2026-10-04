@@ -132,6 +132,7 @@ def test_a_promise_is_to_a_person_once_and_reads_like_a_sentence(tmp_path):
     assert "memory_promise_done" in tools and "memory_promises" not in tools, "relire la section n'est pas un outil"
 
 
+@pytest.mark.slow
 def test_a_vague_promise_fades_after_its_horizon(tmp_path):
     """« Je te dirai » n'a pas de date : elle reçoit l'horizon d'une promesse
     vague, puis, sans nouvelles, elle laisse filer — rien n'est dû pour toujours."""
@@ -167,6 +168,7 @@ def test_a_vague_promise_fades_after_its_horizon(tmp_path):
     assert resolved and resolved[0].status == "dropped" and resolved[0].by == memory_c.EXPIRED_BY
 
 
+@pytest.mark.slow
 def test_an_old_promise_without_a_date_is_not_owed_forever(tmp_path):
     """Une promesse notée sans échéance avant que les promesses vagues aient un
     horizon (le journal existant) reçoit le même en se rejouant : elle finit

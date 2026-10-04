@@ -1,0 +1,7 @@
+[Unit]
+Description=Mika — relais vers sd-server (s'arrête après @IDLE_STOP@ sans connexion)
+Requires=mika-images-sd.service
+After=mika-images-sd.service
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=@IDLE_STOP@ 127.0.0.1:@SD_PORT@

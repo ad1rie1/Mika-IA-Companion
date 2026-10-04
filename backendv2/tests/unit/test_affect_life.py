@@ -105,6 +105,7 @@ def test_a_little_joy_lifts_her_and_a_little_sadness_lowers_her_alike(tmp_path, 
     assert joy.position[0] > joy.home[0] and sorrow.position[0] < sorrow.home[0]
 
 
+@pytest.mark.slow
 def test_ordinary_warm_evenings_make_a_close_friend(tmp_path):
     """Des soirées d'échanges chaleureux ordinaires installent un regard
     nettement positif et un attachement — assez pour devenir proches avant la
@@ -142,6 +143,7 @@ def test_ordinary_warm_evenings_make_a_close_friend(tmp_path):
 # ── PSY-3 / ajout B : une dispute n'efface pas un mois d'amitié ───────────
 
 
+@pytest.mark.slow
 def test_a_fight_does_not_erase_a_long_friendship(tmp_path):
     """Une amie de trois semaines s'emporte quinze fois : ça se sent, mais ni la
     rancune ni le froid ne s'installent comme envers une inconnue (l'histoire
@@ -197,6 +199,7 @@ def test_consoling_a_close_friend_brings_her_closer(tmp_path):
 # ── PSY-10 : l'affection dure, la rancune envers un troll aussi ───────────
 
 
+@pytest.mark.slow
 def test_warmth_lasts_weeks_and_a_trolls_grudge_lasts_days(tmp_path):
     async def scenario(kernel, script):
         for _ in range(10):

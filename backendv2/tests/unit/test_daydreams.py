@@ -37,6 +37,7 @@ def _musings(r):
     return [e for e in r.of(goals_c.GOAL_CLOSED) if e.data.reason == goals_c.MUSED]
 
 
+@pytest.mark.slow
 def test_a_week_of_daydreams_is_neither_news_nor_pride(tmp_path):
     async def scenario(kernel, llm):
         await kernel.set_params("goals", GoalsParams(seed_curiosity_from=0.0))

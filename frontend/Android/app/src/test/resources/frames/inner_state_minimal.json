@@ -1,0 +1,4 @@
+{"type": "inner_state_update", "inner_state": {"sleep_phase": "rem", "energy": 0.2, "place": "bed",
+  "circadian": {"phase": "night", "hour": 3, "energy": 0.2, "bias_emotion": "dreamy"}, "ruminations": [],
+  "person_scope": false,
+  "drives": {"social": {"tension": 0.1, "last_satisfied": 0}}, "estime": 0.5}}

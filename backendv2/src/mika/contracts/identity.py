@@ -127,6 +127,9 @@ class Registered(Payload):
     name: str
     operator: bool = False
     active: bool = True
+    #: l'application qui reçoit hors ligne (ADR 0062) : ``"mobile"`` quand le compte en a une vivante (on peut
+    #: lui écrire absente), ``""`` quand il n'en a plus, ``None`` quand rien n'est dit (un journal d'avant)
+    messaging: str | None = None
 
 
 CLAIMED = event_type("identity.claimed", OWNER, Claimed, public=True, subjects=("handle",))

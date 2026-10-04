@@ -395,7 +395,9 @@ class EpisodeRunner:
                     else:
                         await self._settle(ep, Outcome.ABSTAINED)
                     return
-                if policy.delivered and repeats_last(text, llm_req):
+                # un message qui emporte un fichier n'est pas une redite, même s'il redit sa phrase (« tiens, la
+                # voilà ») : se taire perdrait le fichier
+                if policy.delivered and not loop.attachments and repeats_last(text, llm_req):
                     await self._settle(ep, Outcome.ABSTAINED, detail="elle allait redire son dernier message")
                     return
                 # le prélude (un murmure) : après le départ gardé, la réponse prête, sous la même garde
@@ -420,6 +422,7 @@ class EpisodeRunner:
                         annotations=tuple(sorted(annotations.items())),
                         tools=tuple(ToolOutcome(name=n, ok=ok) for n, ok in loop.calls),
                         sections=trace.included, provenance=trace.provenance, answers=answers,
+                        attachments=tuple(loop.attachments),
                     )],
                     emitter="runtime", correlation=eid, origin=Origin.KERNEL, basis=basis,
                     guard=guard, holder=eid,

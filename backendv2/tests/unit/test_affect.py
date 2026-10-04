@@ -258,6 +258,7 @@ def test_contagion_zero_means_her_mood_never_moves(tmp_path):
 # ── Une rancune s'émousse ─────────────────────────────────────────────────
 
 
+@pytest.mark.slow
 def test_a_grudge_is_still_there_the_next_day_and_gone_two_weeks_later(tmp_path):
     async def scenario(kernel, script):
         for _ in range(6):

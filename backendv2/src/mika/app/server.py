@@ -32,6 +32,9 @@ from starlette.routing import Mount, Route
 from mika.adapters.camera import CameraBuffer
 from mika.adapters.feeds import HttpFeeds
 from mika.adapters.forge import ForgeHost
+from mika.adapters.imaging.config import LiveImaging
+from mika.adapters.imaging.config import build_gateway as build_image_gateway
+from mika.adapters.imaging.gateway import ImageTrace
 from mika.adapters.llm.calls import CallLog
 from mika.adapters.llm.claude_code import runtime_dir
 from mika.adapters.llm.config import LiveGateway, build_gateway
@@ -40,6 +43,7 @@ from mika.adapters.mail import ImapSmtpMail
 from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.preprocess import LocalPreprocessor, whisper
+from mika.adapters.shares import DiskShares
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
@@ -65,6 +69,7 @@ from mika.inspector.ui import InspectorDeps
 from mika.kernel.events import Origin
 from mika.kernel.prompt import Budget
 from mika.runtime.bootstrap import Kernel
+from mika.vocab import privacy
 from mika.vocab.people import clean_display_name
 
 log = logging.getLogger("mika.server")
@@ -179,11 +184,26 @@ class Live:
     data: Path | None = None
     #: les clients du monde (``/ws/world``, ADR 0051) : moteurs de jeu et écrans
     world: WorldHub | None = None
+    #: la génération d'images (désactivée tant qu'aucun fournisseur n'est branché, ADR 0061)
+    imaging: LiveImaging = field(default_factory=LiveImaging)
+    #: une génération d'images fournie de l'extérieur (tests) n'est pas rechargée
+    imaging_fixed: bool = False
 
     def trace(self, tr: LLMTrace) -> None:
         self.gateway.traces.append(tr)
         if self.calls is not None:
             self.calls.record(tr)
+
+    def trace_image(self, tr: ImageTrace) -> None:
+        """Un appel d'images : gardé en mémoire, et au registre des appels sous le rôle ``image.<rôle>`` — ce
+        qu'il a coûté s'ajoute à celui des modèles."""
+        self.imaging.traces.append(tr)
+        if self.calls is not None:
+            self.calls.record(LLMTrace(
+                at=tr.at, role=f"image.{tr.role}", backend=tr.backend, model=tr.model, lane=tr.lane,
+                priority=tr.priority, latency_us=tr.latency_us, wait_us=tr.wait_us,
+                input_tokens=tr.text_tokens + tr.image_tokens, output_tokens=tr.output_tokens, outcome=tr.outcome,
+                call_id=tr.call_id, cost_usd=tr.cost_usd, correlation=tr.correlation))
 
     def persona(self) -> PersonaDoc:
         """La persona rédigée dans l'inspecteur si elle existe et se lit ; sinon le fichier ; un fichier qui ne
@@ -253,10 +273,22 @@ class Live:
             self.gateway.set(None)
         return problems
 
+    async def reload_imaging(self) -> list[str]:
+        """Rebranche la génération d'images sur ses réglages ; sans fournisseur, elle n'existe pas."""
+        if self.imaging_fixed:
+            return []
+        cfg = self.settings.imaging()
+        problems = cfg.problems()
+        if cfg.backends and not problems:
+            self.imaging.set(build_image_gateway(cfg, self.kernel.deps.clock, on_trace=self.trace_image))
+        else:
+            self.imaging.set(None)
+        return problems
+
 
 def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
           gateway: LiveGateway | None = None, embedder: Any = None, reports: Path | None = None,
-          **deps: Any) -> tuple[Starlette, Live]:
+          imaging: LiveImaging | None = None, **deps: Any) -> tuple[Starlette, Live]:
     """L'application et ce qu'elle fait vivre. Tout est construit ici ; le
     cycle de vie ouvre, démarre et arrête."""
     data.mkdir(parents=True, exist_ok=True)
@@ -265,6 +297,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     clock = RealClock()
     fixed = gateway is not None
     gateway = gateway or LiveGateway()
+    imaging_fixed = imaging is not None
+    imaging = imaging or LiveImaging()
     hub = Hub(port=None)  # type: ignore[arg-type] — relié au port juste après
     vectors = SqliteVectorIndex(store, embedder or SentenceEmbedder())
     camera = CameraBuffer(clock.now)
@@ -274,13 +308,15 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     world = {"mail": ImapSmtpMail(settings.email, data / "mail.db"),
              "feeds": HttpFeeds(settings.feeds, data / "feeds.db"),
              "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git), "camera": camera,
-             "forge": forge, "forge_settings": forge_settings}
+             "forge": forge, "forge_settings": forge_settings, "imaging": imaging}
+    # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
+    world["shares"] = DiskShares(data / "partages")
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": hub, "vectors": vectors, **world}, **deps))
     port = KernelPort(kernel)
     hub.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
-                persona_file=persona, data=data)
+                persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed)
     # le monde (ADR 0051) : chaque lot commité qui change ce que montrent ses écrans leur part, traduit en trames
     world_hub = live.world = WorldHub(port, live.accounts, origins=web.origins, auth_required=web.auth_required)
 
@@ -313,6 +349,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                         "Configuration › Fournisseurs")
         for problem in problems:
             log.warning("configuration des modèles : %s", problem)
+        for problem in await live.reload_imaging():
+            log.warning("configuration des images : %s", problem)
         hub.start()
         world_hub.start()
         await kernel.live()
@@ -322,6 +360,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             await world_hub.stop()
             await hub.stop()
             await gateway.aclose()
+            await imaging.aclose()
             await live.calls.flush()
             await kernel.stop()
             datadir.release(data)
@@ -349,16 +388,22 @@ async def register_accounts(kernel: Kernel, accounts: Accounts) -> int:
     """Chaque compte du système existe comme personne, sous son nom, dès sa création :
     un ``identity.registered`` pour ceux dont l'identité diffère du compte (nouveau, renommé,
     promu, désactivé) — comparer d'abord rend l'appel idempotent, et un renommage aller-retour
-    s'écrit quand même (une clé de dédoublonnage l'aurait avalé). Rend le nombre écrit."""
+    s'écrit quand même (une clé de dédoublonnage l'aurait avalé). Rend le nombre écrit.
+
+    Il dit aussi si la personne a une application qui reçoit hors ligne (un jeton ``mobile`` vivant, ADR 0062) :
+    elle peut alors lui écrire absente ; le jeton révoqué, elle ne le peut plus."""
     frame = kernel.mind.frame()
     drafts = []
     for a in accounts.all():
         view = frame.get(identity_c.IDENTITY(a.handle))
         name = clean_display_name(a.display_name)
         operator = a.operator and a.active
-        if view.known and view.authenticated and view.name == name and view.operator == operator:
+        messaging = privacy.MOBILE if a.active and accounts.has_mobile(a.id) else ""
+        if (view.known and view.authenticated and view.name == name and view.operator == operator
+                and view.push == bool(messaging)):
             continue
-        drafts.append(identity_c.REGISTERED.draft(handle=a.handle, name=name, operator=a.operator, active=a.active))
+        drafts.append(identity_c.REGISTERED.draft(handle=a.handle, name=name, operator=a.operator, active=a.active,
+                                                  messaging=messaging))
     if drafts:
         await kernel.mind.append(drafts, emitter=identity_c.OWNER, correlation="comptes", origin=Origin.EXTERNAL)
     return len(drafts)

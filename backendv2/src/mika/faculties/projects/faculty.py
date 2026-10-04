@@ -41,6 +41,7 @@ from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import PROJECT_KINDS, Kind, project_of
+from mika.vocab.privacy import Sensitivity
 
 NOTES_KEPT = 8
 INSTRUCTIONS_KEPT = 8
@@ -518,6 +519,12 @@ def decision_at(p: Project, key: int | str | None) -> Decision | None:
 def live(p: Project) -> bool:
     """Vivant : actif ou en pause (pas archivé)."""
     return p.status in (c.ACTIVE, c.PAUSED)
+
+
+def written(p: Project) -> int:
+    """Le niveau de ce qu'elle écrit pendant une exécution (compte rendu, carnet, décisions, résultat, les fichiers
+    de l'atelier) : elle y voit toute sa mémoire, ce qui en sort est au moins personnel."""
+    return max(p.sensitivity, int(Sensitivity.PERSONAL))
 
 
 def living(p: Project) -> int:
@@ -1147,7 +1154,7 @@ def view(p: Project) -> c.ProjectView:
         blocked_once=sum(1 for o in once if o.status == c.BLOCKED),
         constants=sum(1 for o in p.objectives if o.kind == c.CONSTANT and o.status == c.OPEN),
         blocked=sum(1 for o in p.objectives if o.status == c.BLOCKED), runs=p.runs, last_run_at=p.last_run_at,
-        last_summary_ref=p.summary_ref)
+        last_summary_ref=p.summary_ref, written=written(p))
 
 
 @PROJECTS.fact(c.LIVE)

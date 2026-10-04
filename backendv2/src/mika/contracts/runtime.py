@@ -76,6 +76,10 @@ class Utterance(Payload):
     #: même adresse et du même salon, jusqu'à ``reply_to`` compris — une rafale reçoit une seule réponse qui les
     #: a tous lus). Vide dans un journal plus ancien : l'énoncé ne réglait alors que ``reply_to``.
     answers: tuple[int, ...] = ()
+    #: ce qui part avec ce message : des références opaques que ses outils ont posées (``ToolResult.attach`` — un
+    #: fichier préparé pour la personne). Le runtime et le transport les portent sans savoir ce qu'elles désignent ;
+    #: leur propriétaire les reconnaît (un fichier « est parti » avec ce message).
+    attachments: tuple[str, ...] = ()
 
     def annotation(self, key: str) -> str | None:
         for k, v in self.annotations:

@@ -325,6 +325,7 @@ def view_vivante(api, params):
 '''
 
 
+@pytest.mark.slow
 @needs_bwrap
 def test_a_slow_huge_or_invalid_view_becomes_a_note_and_the_app_lives_on(tmp_path):
     from mika.kernel.inspect import Note

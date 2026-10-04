@@ -1,0 +1,3 @@
+{"type": "emotion_update", "person_id": "user_3", "emotion": "curious", "emotion_intensity": 0.41,
+ "emotion_blend": [{"emotion": "curious", "weight": 0.7}, {"emotion": "happy", "weight": 0.3}],
+ "emotion_state": {"person": {"emotion": "curious", "intensity": 0.4}}}

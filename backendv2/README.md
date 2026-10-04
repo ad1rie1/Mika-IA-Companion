@@ -62,10 +62,16 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
 ## Et ensuite
 
 - **Lui écrire** se fait par une application dédiée (le frontend web, le client
-  Unity), avec un compte : il n'y a plus de robot Telegram (ADR 0060). Un client
-  natif s'authentifie par un jeton de son compte (`python -m mika token create
-  <compte> --label …`).
+  Unity, l'application Android de `frontend/Android/`), avec un compte : il n'y a
+  plus de robot Telegram (ADR 0060). Un client natif s'authentifie par un jeton de
+  son compte : l'application Android l'obtient elle-même par identifiant et mot de
+  passe (`POST /auth/token`), un moteur de jeu le reçoit en ligne de commande
+  (`python -m mika token create <compte> --label …`). L'application Android est une
+  messagerie : elle reçoit en arrière-plan, et Mika peut y écrire la première ; elle
+  peut aussi y envoyer des fichiers (ADR 0062, `docs/protocole-chat.md`).
 - **Le tableau de bord** (`/inspecteur/`) dit ce qui attend ton attention ;
   « Pourquoi a-t-elle dit ça ? » s'ouvre depuis chacune de ses paroles.
 - **Tout se règle aussi en ligne de commande** : `python -m mika --help`.
-- **Les tests** : `pip install -e ".[dev]"`, puis `python -m pytest -q`.
+- **Les tests** : `pip install -e ".[dev]"`, puis `python -m pytest -q` (les tests longs —
+  scénarios complets, vies de plusieurs semaines, performances — sont écartés par défaut :
+  `--slow` les ajoute, `-m slow` ne lance qu'eux).

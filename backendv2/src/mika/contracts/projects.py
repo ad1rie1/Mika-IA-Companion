@@ -26,6 +26,7 @@ from dataclasses import dataclass
 
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.vocab.privacy import Sensitivity
 
 OWNER = "projects"
 
@@ -170,6 +171,9 @@ class ProjectView:
     runs: int = 0
     last_run_at: int = 0
     last_summary_ref: str = ""
+    #: la sensibilité de ce qu'elle y écrit (comptes rendus, carnet, fichiers de l'atelier) : au moins
+    #: « personnel » — ce qu'il faut pour qu'on puisse l'entendre, le lire ou le recevoir
+    written: int = int(Sensitivity.PERSONAL)
 
 
 #: Les projets vivants (actifs ou en pause, pas archivés), du plus ancien au plus récent.

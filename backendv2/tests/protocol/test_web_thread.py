@@ -106,6 +106,7 @@ def test_a_cursor_beyond_her_thread_gets_the_thread_back_instead_of_hiding_it(wo
         assert frame["mode"] == "catchup" and frame["reset"] is False and [m["id"] for m in frame["messages"]] == [head]
 
 
+@pytest.mark.slow
 def test_a_cursor_on_an_empty_thread_resets_it(world):
     """Un compte neuf dans un navigateur qui gardait un fil d'avant (même adresse ``user_1``) : rien n'est à elle
     au-delà de zéro."""

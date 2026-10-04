@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 import re
 
+import pytest
+
 from mika.contracts import attention as attention_c
 from mika.contracts import memory as memory_c
 from mika.faculties.memory.faculty import MemoryParams
@@ -35,6 +37,7 @@ def _known(prompt: str, needle: str) -> int | None:
     return int(m.group(1)) if m else None
 
 
+@pytest.mark.slow
 def test_what_she_said_she_likes_holds_an_anecdote_fades_and_a_change_of_mind_replaces(tmp_path):
     """Jour 1, Alice : « c'est quoi ton plat préféré ? » — « Les ramen, sans hésiter ! » ; et elle raconte qu'elle
     a ressorti son fer à souder. Jour 20 : « c'était quoi déjà ton plat préféré ? » — les ramen sont sous ses
@@ -94,6 +97,7 @@ def test_what_she_said_she_likes_holds_an_anecdote_fades_and_a_change_of_mind_re
     assert revisions == [], "changer d'avis n'est pas une confusion"
 
 
+@pytest.mark.slow
 def test_an_old_belief_says_since_when_and_the_memory_is_told_to_write_absolute_dates(tmp_path):
     """Trois semaines plus tard, « la sœur d'Alice, Léa, vient le week-end » se lit avec « appris il y a 3
     semaines » : elle ne le croit plus vrai pour ce week-end-ci (audit HUM-13). Contre-exemple : ce qu'elle a

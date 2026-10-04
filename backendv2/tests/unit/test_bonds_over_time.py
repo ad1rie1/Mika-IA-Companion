@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from mika.contracts import affect as affect_c
 from mika.contracts import attention as attention_c
 from mika.contracts import memory as memory_c
@@ -133,6 +135,7 @@ def test_a_silence_is_thought_of_more_and_more_rarely():
     assert missing_tranche(round(30 * DAY), 7.0) == 1, "une amie hebdomadaire : un mois, c'est quatre fois son rythme"
 
 
+@pytest.mark.slow
 def test_a_friend_who_stopped_answering_stays_in_her_thoughts_and_gets_one_gentle_word_after_her_trip(tmp_path):
     """Chloé et Dana, joignables sur un compte extérieur, écrivent six soirs puis plus rien ; Chloé avait annoncé qu'elle
     partait trois semaines. Mika prend de leurs nouvelles, une relance douce, puis ne leur écrit plus (ADR 0033)

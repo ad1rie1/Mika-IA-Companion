@@ -480,4 +480,6 @@ async def _deliver(ev: Any, ports: Mapping[str, Any]) -> None:
         source="reply" if d.kind == Kind.REPLY else "conscience",
         sleep_phase=frame.get(body_c.SLEEP).value, local_hour=frame.local().hour,
         answers=tuple(d.answers) if persona == voice.SPEAKING else (),
+        # ce qui part avec la parole (des références opaques ici) ; jamais avec une pensée à voix haute
+        attachments=tuple(d.attachments) if persona == voice.SPEAKING else (),
     ))

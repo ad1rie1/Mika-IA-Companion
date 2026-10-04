@@ -1,0 +1,8 @@
+[Unit]
+Description=Mika — images locales (à la demande, 127.0.0.1:@PUBLIC_PORT@)
+
+[Socket]
+ListenStream=127.0.0.1:@PUBLIC_PORT@
+
+[Install]
+WantedBy=sockets.target

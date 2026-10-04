@@ -1,0 +1,2 @@
+{"type": "ack", "client_msg_id": "c42", "status": "accepted",
+ "rejected_attachments": [{"name": "gros.png", "reason": "too_large"}, {"name": "6e.pdf", "reason": "too_many"}]}
