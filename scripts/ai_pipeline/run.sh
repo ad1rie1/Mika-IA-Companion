@@ -91,8 +91,8 @@ Usage: $(basename "$0") [options]
   --agent claude|codex     Agent IA à utiliser (défaut: \$AI_PIPELINE_AGENT ou claude)
   --max-tasks N            Limiter à N tâches (0 = illimité)
   --effort LEVEL           Budget de réflexion de l'agent
-                           claude: low|medium|high|xhigh|max  (défaut: xhigh)
-                           codex : minimal|low|medium|high    (défaut: celui du CLI)
+                           claude: low|medium|high|xhigh|max  (défaut: high)
+                           codex : minimal|low|medium|high    (défaut: high)
   --thinking-tokens N      Plafond dur du thinking Claude (MAX_THINKING_TOKENS)
   --dry-run                Simuler sans rien exécuter
 EOF

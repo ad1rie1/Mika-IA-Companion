@@ -95,7 +95,7 @@ AI_RATE_LIMIT_MAX_RETRIES="${AI_RATE_LIMIT_MAX_RETRIES:-12}"     # 12 = jusqu'à
 
 # Durée pendant laquelle une sonde de disponibilité réussie vaut réponse. La
 # sonde est un vrai appel d'agent : elle était refaite avant CHAQUE tâche et
-# chaque PR examinée par le rebase, au niveau d'effort des tâches (xhigh).
+# chaque PR examinée par le rebase, au niveau d'effort des tâches.
 AI_PROBE_TTL="${AI_PROBE_TTL:-600}"
 
 # Claude Code
@@ -128,11 +128,12 @@ CODEX_MODEL="${CODEX_MODEL:-}"                # vide = défaut du CLI
 # serait donc appliquée à chaque tâche sans erreur et sans que personne le voie.
 AI_EFFORT="${AI_PIPELINE_EFFORT:-${AI_EFFORT:-}}"
 
-# Défaut par agent, et pas un défaut commun : `xhigh` n'existe pas côté Codex,
-# dont l'échelle s'arrête à `high`. Claude tourne donc en xhigh sauf demande
-# explicite, Codex garde le défaut de son CLI.
-CLAUDE_EFFORT="${AI_EFFORT:-xhigh}"
-CODEX_EFFORT="$AI_EFFORT"
+# Défaut : `high`, le plus haut niveau commun aux deux échelles (celle de
+# Codex s'arrête là). `xhigh` ou `max` restent possibles pour Claude sur
+# demande (--effort xhigh), au prix d'un quota consommé plus vite.
+AI_EFFORT_DEFAULT="high"
+CLAUDE_EFFORT="${AI_EFFORT:-$AI_EFFORT_DEFAULT}"
+CODEX_EFFORT="${AI_EFFORT:-$AI_EFFORT_DEFAULT}"
 
 if [[ "$AI_AGENT" == "codex" && ( "$CODEX_EFFORT" == "xhigh" || "$CODEX_EFFORT" == "max" ) ]]; then
     echo "[WARN] Effort '${CODEX_EFFORT}' inconnu de Codex (minimal|low|medium|high) - on retombe sur 'high'." >&2
@@ -182,76 +183,73 @@ EMAIL_FROM="ai-pipeline@vtuber.local"
 #                                → la politique de tests interdit d'y écrire
 #   Unity Runtime/Protocol/Generated
 #                                → généré par frontend/Unity/tools/gen_world_protocol.py
-AVAILABLE_MODULES=(
+#
+# Les modules sont rangés en GROUPES : on lance un audit sur un groupe
+# (audit-groupe.sh), et ses issues portent le label `groupe:<nom>` pour les
+# retrouver sur GitHub. AVAILABLE_MODULES est la mise bout à bout des groupes :
+# un module ajouté ou retiré l'est à un seul endroit.
+_V="backendv2/src/mika"
+_ANDROID_PKG="frontend/Android/app/src/main/java/fr/qwartz/mika"
+_UNITY="frontend/Unity/Mika/Assets/Mika"
+
+MODULE_GROUP_ORDER=(
+    noyau exploitation relations vie-interieure parole projets monde canaux
+    web android unity
+)
+
+declare -A MODULE_GROUP_DESCRIPTIONS=(
+    [noyau]="journal, faits, gardes, arbitrage, épisodes : tout le reste en dépend"
+    [exploitation]="serveur, ligne de commande, sauvegarde, console d'opérateur"
+    [relations]="mémoire, identité, liens, ce qu'elle devine des autres"
+    [vie-interieure]="humeur, attention, besoins, soi, corps et sommeil"
+    [parole]="ce qu'elle dit, quand, à qui, et ce qu'elle envoie"
+    [projets]="buts, projets, ateliers et Forge"
+    [monde]="son monde 3D côté noyau"
+    [canaux]="web, modèles, courrier, flux, caméra, images"
+    [web]="client web (Three.js, VRM)"
+    [android]="client Android (Kotlin)"
+    [unity]="client Unity (C#)"
+)
+
+declare -A MODULE_GROUPS=(
     # Noyau et machinerie : un défaut ici touche toutes les facultés.
-    "backendv2/src/mika/kernel"
-    "backendv2/src/mika/runtime"
-    "backendv2/src/mika/app"
-    "backendv2/src/mika/inspector"
+    [noyau]="$_V/kernel $_V/runtime"
+    [exploitation]="$_V/app $_V/inspector"
 
     # Facultés, une par passage.
-    "backendv2/src/mika/faculties/projects"
-    "backendv2/src/mika/faculties/memory"
-    "backendv2/src/mika/faculties/goals"
-    "backendv2/src/mika/faculties/identity"
-    "backendv2/src/mika/faculties/self"
-    "backendv2/src/mika/faculties/attention"
-    "backendv2/src/mika/faculties/social"
-    "backendv2/src/mika/faculties/affect"
-    "backendv2/src/mika/faculties/others"
-    "backendv2/src/mika/faculties/world"
-    "backendv2/src/mika/faculties/body"
-    "backendv2/src/mika/faculties/transcript"
-    "backendv2/src/mika/faculties/needs"
-    "backendv2/src/mika/faculties/agency"
-    "backendv2/src/mika/faculties/expression"
-    "backendv2/src/mika/faculties/shares"
+    [relations]="$_V/faculties/memory $_V/faculties/identity $_V/faculties/social $_V/faculties/others"
+    [vie-interieure]="$_V/faculties/affect $_V/faculties/attention $_V/faculties/needs $_V/faculties/self $_V/faculties/body"
+    [parole]="$_V/faculties/expression $_V/faculties/transcript $_V/faculties/agency $_V/faculties/shares"
+    [projets]="$_V/faculties/goals $_V/faculties/projects $_V/plugins/forge $_V/adapters/forge $_V/adapters/workshop"
+    [monde]="$_V/faculties/world $_V/adapters/world"
 
-    # Plugins : même forme que les facultés, confiance restreinte.
-    "backendv2/src/mika/plugins/email"
-    "backendv2/src/mika/plugins/forge"
-    "backendv2/src/mika/plugins/imaging"
-    "backendv2/src/mika/plugins/rss"
-    "backendv2/src/mika/plugins/camera"
-
-    # Adaptateurs : les gros chacun leur passage, le reste en un lot.
-    "backendv2/src/mika/adapters/llm"
-    "backendv2/src/mika/adapters/mail"
-    "backendv2/src/mika/adapters/web"
-    "backendv2/src/mika/adapters/forge"
-    "backendv2/src/mika/adapters/world"
-    "backendv2/src/mika/adapters/workshop"
-    "backendv2/src/mika/adapters/imaging"
-    "backendv2/src/mika/adapters"
+    # Adaptateurs et plugins (même forme que les facultés, confiance
+    # restreinte) : les gros chacun leur passage, le reste d'adapters/ en un
+    # lot.
+    [canaux]="$_V/adapters/web $_V/adapters/llm $_V/adapters/mail $_V/plugins/email $_V/plugins/rss $_V/plugins/camera $_V/plugins/imaging $_V/adapters/imaging $_V/adapters"
 
     # Client web : l'animation pèse ~7 000 lignes à elle seule ; l'UI et
     # l'audio sont deux métiers distincts ; le reste (scène, réseau, types,
     # main.ts) fait un lot cohérent.
-    "frontend/Web/src/vtuber/animation"
-    "frontend/Web/src/vtuber"
-    "frontend/Web/src/ui"
-    "frontend/Web/src/audio"
-    "frontend/Web/src"
+    [web]="frontend/Web/src/vtuber/animation frontend/Web/src/vtuber frontend/Web/src/ui frontend/Web/src/audio frontend/Web/src"
 
     # Client Android (Kotlin, ~11 500 lignes) : le réseau et la conversation
-    # sont les deux gros morceaux de `data/` ; « app » couvre le reste
-    # (core, share, manifeste, ressources).
-    "frontend/Android/app/src/main/java/fr/qwartz/mika/data/net"
-    "frontend/Android/app/src/main/java/fr/qwartz/mika/data/chat"
-    "frontend/Android/app/src/main/java/fr/qwartz/mika/data"
-    "frontend/Android/app/src/main/java/fr/qwartz/mika/service"
-    "frontend/Android/app/src/main/java/fr/qwartz/mika/ui"
-    "frontend/Android/app"
+    # sont les deux gros morceaux de `data/` ; « app » couvre le reste (core,
+    # share, manifeste, ressources).
+    [android]="$_ANDROID_PKG/data/net $_ANDROID_PKG/data/chat $_ANDROID_PKG/data $_ANDROID_PKG/service $_ANDROID_PKG/ui frontend/Android/app"
 
     # Client Unity (C#, ~22 000 lignes) : les acteurs du monde et l'avatar sont
     # les deux gros morceaux du runtime ; l'éditeur (import, animation, labo)
     # fait un lot.
-    "frontend/Unity/Mika/Assets/Mika/Runtime/World/Actors"
-    "frontend/Unity/Mika/Assets/Mika/Runtime/World"
-    "frontend/Unity/Mika/Assets/Mika/Runtime/Avatar"
-    "frontend/Unity/Mika/Assets/Mika/Runtime"
-    "frontend/Unity/Mika/Assets/Mika/Editor"
+    [unity]="$_UNITY/Runtime/World/Actors $_UNITY/Runtime/World $_UNITY/Runtime/Avatar $_UNITY/Runtime $_UNITY/Editor"
 )
+
+AVAILABLE_MODULES=()
+for _g in "${MODULE_GROUP_ORDER[@]}"; do
+    read -ra _mods <<< "${MODULE_GROUPS[$_g]}"
+    AVAILABLE_MODULES+=("${_mods[@]}")
+done
+unset _g _mods
 
 # Le label GitHub d'un module est `module:<chemin>`, et GitHub refuse un label
 # de plus de 50 caractères : les chemins Android et Unity n'y tiennent pas. Le
@@ -267,8 +265,7 @@ MODULE_LABEL_PREFIXES=(
 # serait audité une fois pour lui-même et une fois dans le balayage de
 # `adapters`, avec deux issues pour un même constat et aucune déduplication
 # possible (elle est indexée par label de module).
-_ANDROID_PKG="frontend/Android/app/src/main/java/fr/qwartz/mika"
-_UNITY_RT="frontend/Unity/Mika/Assets/Mika/Runtime"
+_UNITY_RT="$_UNITY/Runtime"
 declare -A MODULE_SCOPE_EXCLUDES=(
     ["backendv2/src/mika/adapters"]="les sous-dossiers llm/, mail/, web/, forge/, world/, workshop/ et imaging/ de backendv2/src/mika/adapters/"
     ["frontend/Web/src/vtuber"]="frontend/Web/src/vtuber/animation/"
@@ -290,7 +287,33 @@ LOGS_KEEP="${LOGS_KEEP:-200}"                  # journaux run-*.log conservés
 # le label Propose_AI_PR à la main sur l'issue.
 AUDIT_NO_AUTO_PR_PROFILES=(
     "features"
+    "amelioration"
 )
+
+# Gravité minimale d'un constat d'audit (critical | high | medium | low), pour
+# les profils qui signalent des défauts (pas pour features ni amelioration, où
+# « severity » est un impact attendu). Un constat en dessous n'est pas créé.
+# Pour un passage : SEVERITE=high audit_bugs …
+AUDIT_SEVERITE_MIN="${SEVERITE:-${AUDIT_SEVERITE_MIN:-medium}}"
+case "$AUDIT_SEVERITE_MIN" in
+    critical|high|medium|low) ;;
+    *)
+        echo "[WARN] SEVERITE='${AUDIT_SEVERITE_MIN}' inconnue (critical|high|medium|low) - on garde 'medium'." >&2
+        AUDIT_SEVERITE_MIN="medium"
+        ;;
+esac
+
+# -- Doublons ------------------------------------------------------------------
+# Filet appliqué à chaque issue d'audit avant sa création (lib/dedup.py) :
+# ressemblance des titres (0 à 1) et fichiers en commun. Seuils mesurés sur 212
+# issues d'audit passées : au-dessus de 0,8 les 4 paires trouvées étaient des
+# doublons ; entre 0,6 et 0,8 avec un fichier commun, presque toujours le même
+# défaut vu sous un autre profil.
+DEDUP_SKIP="${DEDUP_SKIP:-0.8}"    # proche d'une issue ouverte : pas créée
+DEDUP_FLAG="${DEDUP_FLAG:-0.6}"    # + un fichier commun : créée, « doublon-possible », sans Propose_AI_PR
+# Les issues fermées depuis ce nombre de jours sont montrées à l'agent, avec
+# les ouvertes, pour qu'il ne les re-signale pas.
+DEDUP_CLOSED_DAYS="${DEDUP_CLOSED_DAYS:-90}"
 
 # -- Sécurité -----------------------------------------------------------------
 # Fichiers que l'IA ne doit JAMAIS toucher. Les motifs sont comparés en glob

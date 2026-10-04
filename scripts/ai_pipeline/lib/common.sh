@@ -448,7 +448,7 @@ gh_query() {
 check_prerequisites() {
     local missing=()
     local tool
-    for tool in git gh jq flock timeout; do
+    for tool in git gh jq flock timeout python3; do
         command -v "$tool" >/dev/null || missing+=("$tool")
     done
     check_ai_cli
@@ -490,6 +490,16 @@ module_label() {
     echo "module:${mod}"
 }
 
+# Groupe d'un module (vide s'il n'en a pas).
+module_group() {
+    local g m
+    for g in "${MODULE_GROUP_ORDER[@]}"; do
+        for m in ${MODULE_GROUPS[$g]}; do
+            [[ "$m" == "$1" ]] && { echo "$g"; return 0; }
+        done
+    done
+}
+
 # Le module existe-t-il sur BASE_REF ? C'est l'état que l'agent lit dans le
 # worktree : un dossier présent dans la copie de travail mais pas encore
 # poussé y serait vide, et l'agent aurait audité du vide.
@@ -497,6 +507,38 @@ module_in_base() {
     # (`rev:chemin^{tree}` ne marche pas : `^{tree}` serait lu comme une partie
     # du chemin.)
     [[ "$(git -C "$PROJECT_ROOT" cat-file -t "${BASE_REF}:${1}" 2>/dev/null)" == "tree" ]]
+}
+
+# Un profil d'audit de propositions (features, amelioration) : ses issues
+# attendent un arbitrage humain (pas de Propose_AI_PR), et sa « severity » est
+# un impact attendu, pas une gravité.
+audit_profile_is_proposal() {
+    local p
+    for p in "${AUDIT_NO_AUTO_PR_PROFILES[@]}"; do
+        [[ "$1" == "$p" ]] && return 0
+    done
+    return 1
+}
+
+# Rang d'une gravité (0 si inconnue).
+severity_rank() {
+    case "$1" in
+        critical) echo 4 ;;
+        high)     echo 3 ;;
+        medium)   echo 2 ;;
+        low)      echo 1 ;;
+        *)        echo 0 ;;
+    esac
+}
+
+# Les gravités à partir d'un seuil : « medium » → « critical, high, medium ».
+severities_from() {
+    local min s out=""
+    min=$(severity_rank "$1")
+    for s in critical high medium low; do
+        (( $(severity_rank "$s") >= min )) && out+="${out:+, }${s}"
+    done
+    echo "$out"
 }
 
 # Retranche du périmètre les sous-dossiers qui sont eux-mêmes des modules du

@@ -79,4 +79,4 @@ Ce moteur tourne en permanence, sans surveillance, et son état se reconstruit e
 - Ne signale PAS les cas limites purement théoriques, ni les « améliorations défensives » sur du code qui fonctionne.
 - En cas de doute : NE SIGNALE PAS. Mieux vaut 3 vraies issues que 10 issues dont 7 sont du bruit.
 
-- JE NE VEUX QUE LES BUGS HAUT ET CRITIQUE
+- JE VEUX LES VRAIS BUGS, À PARTIR DU SEUIL DE GRAVITÉ INDIQUÉ PLUS BAS

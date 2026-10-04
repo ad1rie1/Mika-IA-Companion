@@ -131,16 +131,43 @@ pick_module() {
     echo "${available[RANDOM % ${#available[@]}]}"
 }
 
-# Issues d'audit ouvertes pour (profil, module), une ligne « #n - titre ».
-get_existing_issues() {
-    local profile="$1"
-    local module="$2"
-    gh_query gh issue list --state open --limit 1000 \
+# Issues d'audit déjà connues pour un module, montrées à l'agent pour qu'il ne
+# les reprenne pas : TOUS profils (un même défaut revenait en bugs, puis en
+# quality ou security), ouvertes et fermées depuis DEDUP_CLOSED_DAYS jours.
+# Une ligne par issue : « #n [profil] ouverte|fermée le AAAA-MM-JJ - titre ».
+get_known_issues() {
+    local module="$1" json
+    json=$(gh_query gh issue list --state all --limit 1000 \
         --label "ai-audit" \
-        --label "ai-${profile}" \
         --label "$(module_label "$module")" \
-        --json number,title \
-        --template '{{range .}}#{{.number}} - {{.title}}{{"\n"}}{{end}}'
+        --json number,title,state,closedAt,labels) || return 1
+    jq -r --argjson days "${DEDUP_CLOSED_DAYS:-90}" '
+        (now - $days * 86400) as $since
+        | .[]
+        | select(.state == "OPEN"
+                 or ((.closedAt // "1970-01-01T00:00:00Z") | fromdateiso8601) > $since)
+        | ([.labels[].name | select(IN("ai-bugs", "ai-quality", "ai-security", "ai-features"))][0]
+           // "?" | sub("^ai-"; "")) as $profile
+        | "#\(.number) [\($profile)] "
+          + (if .state == "OPEN" then "ouverte" else "fermée le \(.closedAt[0:10])" end)
+          + " - \(.title)"
+    ' <<< "$json"
+}
+
+# Toutes les issues du dépôt (ouvertes et fermées), pour le filet anti-doublons.
+#   fetch_dedup_pool <fichier>
+fetch_dedup_pool() {
+    local out="$1" json
+    json=$(gh_query gh issue list --state all --limit 1000 --json number,title,state,body) || return 1
+    printf '%s' "$json" > "$out"
+}
+
+# Verdict du filet anti-doublons pour une issue à créer (cf. lib/dedup.py) :
+# une ligne TSV « verdict numéro score titre ».
+dedup_check() {
+    local pool="$1" title="$2" files="$3"
+    python3 "${_CONFIG_DIR}/lib/dedup.py" "$pool" --title "$title" --files "$files" \
+        --skip "${DEDUP_SKIP:-0.8}" --flag "${DEDUP_FLAG:-0.6}"
 }
 
 # -- Création PR --------------------------------------------------------------
@@ -216,6 +243,12 @@ PRBODY
     if [[ -n "$MODULES" && "$MODULES" != "all" && "$MODULES" != *" "* ]]; then
         ensure_label "$(module_label "$MODULES")" "bfdadc" "Module ${MODULES}"
         extra_args+=(--label "$(module_label "$MODULES")")
+        local group
+        group=$(module_group "$MODULES")
+        if [[ -n "$group" ]]; then
+            ensure_label "groupe:${group}" "5319e7" "${MODULE_GROUP_DESCRIPTIONS[$group]:-Groupe ${group}}"
+            extra_args+=(--label "groupe:${group}")
+        fi
     fi
     [[ "$PR_DRAFT" == true ]] && extra_args+=(--draft)
     [[ -n "$PR_REVIEWERS" ]] && extra_args+=(--reviewer "$PR_REVIEWERS")
@@ -269,24 +302,35 @@ parse_audit_issues() {
     echo "$tmpdir"
 }
 
-# Crée les issues GitHub d'un audit. Écrit le nombre créé sur stdout.
+# Champ « clé: valeur » d'un bloc d'audit parsé.
+_issue_field() {
+    grep -m1 "^$2:" "$1" | sed "s/^$2: *//"
+}
+
+# Crée les issues GitHub d'un audit, en passant chacune au seuil de gravité
+# (AUDIT_SEVERITE_MIN) puis au filet anti-doublons (lib/dedup.py) contre
+# <pool>, la liste JSON des issues du dépôt. Écrit sur stdout
+# « créées doublons_écartés doublons_signalés sous_le_seuil ».
+#   create_github_issues <dossier> <profil> <module> <pool>
 create_github_issues() {
     local issues_dir="$1"
     local profile="$2"
     local module="$3"
-    local created=0
+    local pool="$4"
+    local created=0 skipped=0 flagged=0 below=0
 
     ensure_label "ai-audit" "1d76db" "Issue créée par AI Pipeline (audit)"
     ensure_label "ai-${profile}" "d73a4a" "Audit IA - ${profile}"
     ensure_label "$(module_label "$module")" "bfdadc" "Module ${module}"
+    local group
+    group=$(module_group "$module")
+    [[ -n "$group" ]] && ensure_label "groupe:${group}" "5319e7" "${MODULE_GROUP_DESCRIPTIONS[$group]:-Groupe ${group}}"
 
     # Propose_AI_PR déclenche la reprise automatique par le worker. Certains
     # profils ne doivent pas l'obtenir : une idée de fonctionnalité se décide
     # avant d'être codée. Le label s'ajoute alors à la main sur l'issue retenue.
-    local auto_pr=true _skip
-    for _skip in "${AUDIT_NO_AUTO_PR_PROFILES[@]}"; do
-        [[ "$profile" == "$_skip" ]] && auto_pr=false && break
-    done
+    local auto_pr=true
+    audit_profile_is_proposal "$profile" && auto_pr=false
     if [[ "$auto_pr" == true ]]; then
         ensure_label "Propose_AI_PR" "5319e7" "Demande de PR automatique par IA"
     else
@@ -299,10 +343,10 @@ create_github_issues() {
         [[ ! -f "$issue_file" ]] && continue
 
         local title severity files description
-        title=$(grep -m1 "^title:" "$issue_file" | sed 's/^title: *//')
+        title=$(_issue_field "$issue_file" title)
         # Premier mot seulement : « high (impact sur chaque tour) » doit donner high.
-        severity=$(grep -m1 "^severity:" "$issue_file" | sed 's/^severity: *//' | awk '{print tolower($1)}')
-        files=$(grep -m1 "^files:" "$issue_file" | sed 's/^files: *//')
+        severity=$(_issue_field "$issue_file" severity | awk '{print tolower($1)}')
+        files=$(_issue_field "$issue_file" files)
         # Le texte peut commencer sur la ligne même de « description: ».
         description=$(sed -n '/^description:/,$ p' "$issue_file" | sed '1s/^description: *//' | sed '1{/^$/d}')
 
@@ -310,6 +354,42 @@ create_github_issues() {
             warn "Issue sans titre dans $issue_file, ignorée" >&2
             continue
         fi
+
+        # Seuil de gravité, pour les profils qui signalent des défauts. Une
+        # gravité illisible passe (elle deviendra « medium » plus bas).
+        if [[ "$auto_pr" == true ]] \
+            && (( $(severity_rank "$severity") > 0 \
+                  && $(severity_rank "$severity") < $(severity_rank "$AUDIT_SEVERITE_MIN") )); then
+            log "Sous le seuil (${severity} < ${AUDIT_SEVERITE_MIN}) - non créée : ${title}" >&2
+            below=$((below + 1))
+            continue
+        fi
+
+        # Filet anti-doublons. Un doublon d'une issue ouverte n'est pas créé ;
+        # un doublon possible l'est, mais sans Propose_AI_PR : le worker
+        # n'y touche pas tant qu'un humain n'a pas tranché.
+        local d_verdict="new" d_number="" d_score="" d_title="" dup_note=""
+        if [[ -n "$pool" ]]; then
+            IFS=$'\t' read -r d_verdict d_number d_score d_title \
+                < <(dedup_check "$pool" "$title" "$files" || echo "new")
+        fi
+        case "$d_verdict" in
+            skip)
+                warn "Doublon de #${d_number} (titres semblables à ${d_score}) - non créée : ${title}" >&2
+                skipped=$((skipped + 1))
+                continue
+                ;;
+            flag)
+                ensure_label "doublon-possible" "fef2c0" "Peut-être déjà signalé : à trancher avant correction"
+                dup_note="> **Doublon possible de #${d_number}** (« ${d_title} » : titres semblables à ${d_score}, un fichier en commun). Si c'en est un, ferme celle-ci ; sinon retire \`doublon-possible\` et ajoute \`Propose_AI_PR\` pour la faire corriger."
+                warn "Doublon possible de #${d_number} (${d_score}) - créée sans Propose_AI_PR : ${title}" >&2
+                flagged=$((flagged + 1))
+                ;;
+            closed)
+                dup_note="> Déjà signalé dans #${d_number}, aujourd'hui fermée (« ${d_title} ») : régression, ou correction incomplète ?"
+                log "Proche de l'issue fermée #${d_number} (${d_score}) - créée avec un renvoi : ${title}" >&2
+                ;;
+        esac
 
         case "$severity" in
             critical|high|medium|low) ;;
@@ -332,7 +412,9 @@ create_github_issues() {
         local issue_body
         issue_body=$(cat <<ISSUEBODY
 ${body_heading}
-
+${dup_note:+
+${dup_note}
+}
 **Profil d'analyse** : \`${profile}\`
 **Module** : \`${module}\`
 ${weight_field} : \`${severity}\`
@@ -353,7 +435,11 @@ ISSUEBODY
             --label "$(module_label "$module")"
             --label "${severity_label}"
         )
-        if [[ "$auto_pr" == true ]]; then
+        [[ -n "$group" ]] && issue_labels+=(--label "groupe:${group}")
+        if [[ "$d_verdict" == "flag" ]]; then
+            issue_labels+=(--label "doublon-possible")
+            [[ "$auto_pr" == true ]] || issue_labels+=(--label "idee")
+        elif [[ "$auto_pr" == true ]]; then
             issue_labels+=(--label "Propose_AI_PR")
         else
             issue_labels+=(--label "idee")
@@ -369,10 +455,21 @@ ISSUEBODY
             continue
         }
 
-        ok "Issue créée: $(tail -n 1 <<< "$issue_url")" >&2
+        issue_url=$(tail -n 1 <<< "$issue_url")
+        ok "Issue créée: ${issue_url}" >&2
         created=$((created + 1))
+
+        # Une issue créée rejoint le pool : deux constats jumeaux du même
+        # audit ne passent pas tous les deux.
+        if [[ -n "$pool" ]]; then
+            local number="${issue_url##*/}"
+            [[ "$number" =~ ^[0-9]+$ ]] || number=0
+            jq --argjson n "$number" --arg t "[AI][${profile}] ${title}" --arg b "$issue_body" \
+                '. + [{number: $n, title: $t, state: "OPEN", body: $b}]' "$pool" > "${pool}.tmp" \
+                && mv "${pool}.tmp" "$pool"
+        fi
     done
 
     rm -rf "$issues_dir"
-    echo "$created"
+    echo "$created $skipped $flagged $below"
 }

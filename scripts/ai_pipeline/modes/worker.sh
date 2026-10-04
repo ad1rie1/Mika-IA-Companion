@@ -40,13 +40,16 @@ _worker_process_issue() {
 
     header "Traitement issue #${issue_number}: ${issue_title}"
 
-    # Déterminer le type depuis les labels (pour le préfixe de commit)
-    local profile="bugs"
-    if [[ "$issue_labels" == *"security"* ]]; then
-        profile="security"
-    elif [[ "$issue_labels" == *"quality"* ]]; then
-        profile="quality"
-    fi
+    # Déterminer le type depuis le label de profil `ai-<profil>` (préfixe de
+    # commit, titre de la PR). Une proposition (features, amelioration)
+    # validée à la main arrive ici comme les autres.
+    local profile="bugs" candidate
+    for candidate in security quality amelioration features bugs; do
+        if [[ ",${issue_labels}," == *",ai-${candidate},"* ]]; then
+            profile="$candidate"
+            break
+        fi
+    done
     log "Type déduit: $profile"
     PROFILE="$profile"
     ISSUE_NUMBER="$issue_number"

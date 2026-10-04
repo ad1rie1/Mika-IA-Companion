@@ -23,7 +23,17 @@ scripts/ai_pipeline/orchestrator.sh --worker  # issues Propose_AI_PR → PR
 scripts/ai_pipeline/orchestrator.sh --issue 42
 scripts/ai_pipeline/orchestrator.sh --rebase  # PR en conflit → rebase ; PR obsolètes → fermées
 scripts/ai_pipeline/triggers/manual.sh        # menu interactif
+
+scripts/ai_pipeline/audit-groupe.sh --liste                  # les groupes de modules
+scripts/ai_pipeline/audit-groupe.sh bugs noyau relations     # un passage par module, puis un bilan
+scripts/ai_pipeline/audit-groupe.sh amelioration vie-interieure --apercu
+scripts/ai_pipeline/audit-groupe.sh bugs tout
 ```
+
+Les modules sont rangés en **groupes** (`MODULE_GROUPS` dans `config.sh`) :
+`noyau`, `exploitation`, `relations`, `vie-interieure`, `parole`, `projets`,
+`monde`, `canaux`, `web`, `android`, `unity`. Chaque issue et chaque PR porte
+le label `groupe:<nom>`, pour filtrer sur GitHub.
 
 Prérequis : `git`, `gh` authentifié, `jq`, `flock`, `timeout`, et le CLI de
 l'agent. Le dépôt GitHub est déduit du remote `origin`.
@@ -48,6 +58,41 @@ les tests de l'agent porteraient sur ta copie au lieu de son travail.
 
 Un seul pipeline à la fois : l'orchestrateur prend un verrou
 (`.git/ai-pipeline.lock`) ; une seconde instance s'arrête aussitôt (code 75).
+
+## Profils d'audit
+
+| Profil | Cherche | Issues |
+|---|---|---|
+| `bugs`, `quality`, `security` | des défauts | taguées `Propose_AI_PR` : le worker les corrige |
+| `features` | de nouvelles fonctionnalités | `idee`, à arbitrer |
+| `amelioration` | comment rendre Mika plus humaine ou plus fonctionnelle, à partir de l'existant | `idee`, à arbitrer |
+
+Pour une issue `idee` que tu veux faire réaliser, ajoute `Propose_AI_PR` à la
+main. Les profils `bugs`, `quality` et `security` ne retiennent que les
+constats de gravité `medium` ou plus (`AUDIT_SEVERITE_MIN`, ou `SEVERITE=high`
+pour un passage). Chaque audit se termine par les pistes que l'agent a
+examinées puis écartées, affichées dans le terminal : un audit vide se juge
+sur elles.
+
+## Doublons
+
+Deux protections avant qu'une issue d'audit soit créée :
+
+1. **L'agent voit ce qui est déjà connu** sur son module : toutes les issues
+   d'audit, tous profils confondus, ouvertes et fermées depuis
+   `DEDUP_CLOSED_DAYS` jours (90).
+2. **Un filet compare chaque constat** au titre et aux fichiers de toutes les
+   issues du dépôt (`lib/dedup.py`) :
+
+| Proche de… | Ressemblance des titres | Ce qui se passe |
+|---|---|---|
+| une issue ouverte | ≥ 0,8 (`DEDUP_SKIP`) | pas créée, « doublon de #N » au journal |
+| une issue ouverte, avec un fichier en commun | ≥ 0,6 (`DEDUP_FLAG`) | créée avec `doublon-possible`, **sans** `Propose_AI_PR` : à trancher |
+| une issue fermée | ≥ 0,8, ou ≥ 0,6 avec un fichier en commun | créée normalement, avec « déjà signalé dans #N : régression ? » |
+
+Deux constats jumeaux d'un même audit ne passent pas tous les deux. Les seuils
+ont été mesurés sur 212 issues d'audit passées. Avec `--no-create`, l'aperçu
+affiche le verdict de chaque constat.
 
 ## Codes de sortie de l'orchestrateur
 

@@ -236,8 +236,10 @@ check_ai_commits() {
         if [[ -n "$(git status --porcelain)" ]]; then
             warn "L'IA a modifié des fichiers sans commit - commit de rattrapage" >&2
             local prefix="bug"
-            [[ "$PROFILE" == "security" ]] && prefix="security"
-            [[ "$PROFILE" == "quality" ]] && prefix="feat"
+            case "$PROFILE" in
+                security) prefix="security" ;;
+                quality|features|amelioration) prefix="feat" ;;
+            esac
             # `add -A` est sûr ici : le worktree est celui du pipeline, et les
             # dépendances liées sont exclues.
             if git add -A >> "$LOG_FILE" 2>&1 && \
