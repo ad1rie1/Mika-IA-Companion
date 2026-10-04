@@ -41,6 +41,7 @@
 .chat-line { white-space: normal; background-color: var(--panel); border-radius: 8px; padding: 5px 10px; margin-top: 4px; }
 .chat-line.mika { border-left-width: 3px; border-left-color: var(--accent); }
 .chat-line.me { color: var(--ink-dim); }
+.chat-line.refused { color: var(--warn); }
 
 /* La fenêtre de saisie (Entrée / T) : le champ par défaut de UI Toolkit est blanc, le texte aussi — on le
    remplace par du verre fumé translucide, le texte clair reste lisible et la pièce se voit derrière. */

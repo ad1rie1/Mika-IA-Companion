@@ -36,6 +36,8 @@ namespace Mika.UI
         bool _chatOpen;
         // Les messages déjà montrés (par identifiant du journal) : un rattrapage ne les remontre pas.
         readonly System.Collections.Generic.HashSet<long> _shown = new System.Collections.Generic.HashSet<long>();
+        // Les bulles de la joueuse qui attendent leur accusé (par identifiant client) : un refus s'y lit.
+        readonly Dictionary<string, Label> _unacked = new Dictionary<string, Label>();
         bool _interactorBound;
 
         /// <summary>Les réglages de connexion ont changé (adresse, jeton, hôte) : l'application se reconnecte.</summary>
@@ -55,6 +57,10 @@ namespace Mika.UI
             chat.StateChanged += _ => RefreshStatus();
             chat.Speech += OnSpeech;
             chat.History += OnHistory;
+            chat.Ack += OnAck;
+            // Une nouvelle session ne renverra pas ce que l'ancienne gardait : ces bulles ne partiront plus.
+            foreach (var line in _unacked.Values) MarkRefused(line, "connexion changée");
+            _unacked.Clear();
             if (interactor != null && !_interactorBound)
             {
                 _interactorBound = true;
@@ -315,8 +321,11 @@ namespace Mika.UI
                 var text = _chatInput.value.Trim();
                 if (text.Length > 0 && _chat != null)
                 {
-                    _chat.Send(text);
-                    AddLine(text, mika: false);
+                    var id = _chat.Send(text);
+                    var line = AddLine(text, mika: false);
+                    if (line != null) _unacked[id] = line;
+                    if (_chat.State != LinkState.Online && _chat.State != LinkState.Refused)
+                        Toast("Conversation hors ligne : le message partira à la reconnexion.");
                 }
                 CloseChat();
                 e.StopPropagation();
@@ -341,14 +350,49 @@ namespace Mika.UI
                     AddLine(StripCues(m.Text), mika: m.Role == "assistant");
         }
 
-        void AddLine(string text, bool mika)
+        /// <summary>
+        /// Le sort d'un message de la joueuse (<c>backendv2/docs/protocole-chat.md</c>) : <c>accepted</c> le dit reçu,
+        /// <c>no_reply</c> dit qu'une question reçue restera sans réponse, tout autre statut est un refus.
+        /// </summary>
+        void OnAck(AckFrame a)
         {
-            if (_chatLog == null || string.IsNullOrEmpty(text)) return;
+            if (a.Status == "no_reply")
+            {
+                Toast("Mika n'a pas pu répondre — réessaie.");
+                return;
+            }
+            if (a.ClientMsgId == null || !_unacked.TryGetValue(a.ClientMsgId, out var line)) return;
+            _unacked.Remove(a.ClientMsgId);
+            if (a.Status == "accepted") return;
+            var why = a.Status switch
+            {
+                "rate_limited" => "trop vite",
+                "overloaded" => "trop de messages en attente",
+                "too_long" => "trop long",
+                "empty" => "message vide",
+                "attachments_rejected" => "pièces jointes refusées",
+                "unauthorized" => "connexion refusée",
+                _ => "refusé",
+            };
+            MarkRefused(line, why);
+            Toast($"Message non envoyé : {why}.");
+        }
+
+        static void MarkRefused(Label line, string why)
+        {
+            line.text += $"  — non envoyé ({why})";
+            line.AddToClassList("refused");
+        }
+
+        Label AddLine(string text, bool mika)
+        {
+            if (_chatLog == null || string.IsNullOrEmpty(text)) return null;
             var line = new Label(mika ? $"Mika : {text}" : text);
             line.AddToClassList("chat-line");
             line.AddToClassList(mika ? "mika" : "me");
             _chatLog.Add(line);
             while (_chatLog.childCount > 8) _chatLog.RemoveAt(0);
+            return line;
         }
 
         /// <summary>Les repères prosodiques ([SIGH], [PAUSE:300]…) sont pour la voix, pas pour la lecture.</summary>
