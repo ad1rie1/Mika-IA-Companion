@@ -68,6 +68,7 @@ def test_imap_hands_each_mail_once_as_plain_text_and_never_marks_it_read(tmp_pat
     assert coucou.address == "alice@exemple.fr" and coucou.subject == "Coucou" and "samedi" in coucou.body
     assert coucou.account == "perso" and coucou.folder == "INBOX" and not coucou.seen
     assert not coucou.bulk and lettre.bulk and coucou.date > 0
+    box.ack([m.ref for m in first])
     assert go(box.fetch_new(10)) == []  # déjà rendus
     Imap.boxes["INBOX"].add(raw_mail(9, "En HTML", "", html=True))
     [html] = go(box.fetch_new(10))
@@ -90,7 +91,7 @@ def test_two_accounts_on_the_same_uids_never_collide(tmp_path, servers):
 
 def test_a_mail_read_elsewhere_is_known_and_a_new_uidvalidity_hands_nothing_twice(tmp_path, servers):
     box = box_for(tmp_path, ("perso", account(*servers)))
-    go(box.fetch_new(10))
+    box.ack([m.ref for m in go(box.fetch_new(10))])
     Imap.boxes["INBOX"].mails[3][0].add("\\Seen")  # lu dans un autre client
     assert go(box.fetch_new(10)) == [] and box.seen_elsewhere() == ["perso:<mail-3@exemple.fr>"]
     assert box.seen_elsewhere() == []  # vidé à la lecture
@@ -105,7 +106,7 @@ def test_a_mail_read_elsewhere_is_known_and_a_new_uidvalidity_hands_nothing_twic
 
 def test_folders_their_roles_and_what_the_console_does_on_the_server(tmp_path, servers):
     box = box_for(tmp_path, ("perso", account(*servers)))
-    go(box.fetch_new(10))
+    box.ack([m.ref for m in go(box.fetch_new(10))])
     folders = {f.name: f for f in box.folders("perso")}
     assert {n: f.role for n, f in folders.items()} == {"INBOX": "inbox", "Envoyés": "sent", "Archives": "archive",
                                                      "Corbeille": "trash", "Indésirables": "junk"}
@@ -272,7 +273,7 @@ def test_manual_refresh_recovers_html_for_preexisting_messages_without_marking_r
 
     Imap.boxes["INBOX"].add(raw_mail(9, "En HTML", "", html=True))
     box = box_for(tmp_path, ("perso", account(*servers)))
-    go(box.fetch_new(10))
+    box.ack([m.ref for m in go(box.fetch_new(10))])
     rich = next(m for m in box.cached(10) if m.has_html)
     assert "Bonjour <b>Mika</b>" in rich.html
     located = box._cache.located(rich.ref)

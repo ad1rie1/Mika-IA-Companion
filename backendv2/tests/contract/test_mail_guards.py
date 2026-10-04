@@ -93,6 +93,7 @@ def test_an_unreadable_mail_does_not_come_back_at_every_poll(tmp_path, servers, 
     box = box_for(tmp_path, account(*servers))
     first = go(box.fetch_new(10))
     assert [m.subject for m in first] == ["Coucou", "(un mail illisible)", "Normal"]  # rangé, dit, et le reste passe
+    box.ack([m.ref for m in first])
     fetched = sum(1 for c in Imap.commands if "FETCH" in c and "BODY.PEEK" in c)
     assert go(box.fetch_new(10)) == []
     assert sum(1 for c in Imap.commands if "FETCH" in c and "BODY.PEEK" in c) == fetched  # rien n'est relu
@@ -117,6 +118,7 @@ def test_a_mail_reusing_another_ones_message_id_never_takes_its_place(tmp_path, 
     Imap.reset({3: legit})
     box = box_for(tmp_path, account(*servers))
     [first] = go(box.fetch_new(10))
+    box.ack([first.ref])
     Imap.boxes["INBOX"].add(spoof, uid=4)
     [second] = go(box.fetch_new(10))  # le faux est remarqué (il n'est pas avalé par le vrai)…
     assert first.ref == "perso:<CAF-facture-42@banque.example>"  # la forme historique : les journaux restent valables
@@ -153,7 +155,9 @@ def test_the_same_mail_in_two_folders_keeps_one_reference_and_a_copy_of_her_sent
 
 def test_refreshing_a_polled_folder_from_the_console_does_not_hide_new_mail_from_her(tmp_path, servers):
     box = box_for(tmp_path, account(*servers))
-    assert [m.subject for m in go(box.fetch_new(10))] == ["Coucou"]
+    first = go(box.fetch_new(10))
+    assert [m.subject for m in first] == ["Coucou"]
+    box.ack([m.ref for m in first])
     Imap.boxes["INBOX"].add(raw_mail(9, "URGENT : rappelle-moi", "Appelle avant 18h ?"))
     assert go(box.sync_folder("perso", "INBOX", 50)) == 1  # l'opérateur le voit tout de suite…
     assert [m.subject for m in go(box.fetch_new(10))] == ["URGENT : rappelle-moi"]  # … et elle le remarque

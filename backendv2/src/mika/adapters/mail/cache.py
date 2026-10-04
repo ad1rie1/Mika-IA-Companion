@@ -1,5 +1,6 @@
 """Le cache du courrier (``mail.db``) : ce qui est arrivé, par compte et par
-dossier ; les dossiers et leur curseur IMAP ; ce qui a déjà été rendu ; les
+dossier ; les dossiers et leur curseur IMAP ; ce qui a déjà été rendu (et ce
+qui l'a été sans être encore accusé) ; les
 brouillons ; ce qui est parti ; l'état de chaque compte.
 
 Une ligne par (compte, dossier, UID) : les UID ne valent que dans leur
@@ -66,6 +67,7 @@ CREATE TABLE IF NOT EXISTS folders(
   account TEXT NOT NULL, name TEXT NOT NULL, role TEXT, uidvalidity INTEGER, uidnext INTEGER,
   total INTEGER, unseen INTEGER, last_sync INTEGER, PRIMARY KEY(account, name));
 CREATE TABLE IF NOT EXISTS handed(account TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY(account, message_id));
+CREATE TABLE IF NOT EXISTS offered(account TEXT NOT NULL, ref TEXT NOT NULL, PRIMARY KEY(account, ref));
 CREATE TABLE IF NOT EXISTS drafts(
   id TEXT PRIMARY KEY, account TEXT, dest TEXT, cc TEXT, subject TEXT, body TEXT, reply_to TEXT, quote INTEGER,
   author TEXT, created INTEGER, updated INTEGER, state TEXT, sent_id TEXT, edited_by TEXT);
@@ -394,6 +396,39 @@ class MailCache:
     def hand(self, account: str, message_id: str) -> None:
         with self._lock:
             self._db.execute("INSERT OR IGNORE INTO handed VALUES(?,?)", (account, message_id))
+            self._db.commit()
+
+    def offer(self, account: str, ref: str) -> None:
+        """Rendu par un relevé, pas encore accusé : chaque relevé le rend encore tant qu'il ne l'est pas
+        (le curseur IMAP, lui, est déjà passé)."""
+        with self._lock:
+            self._db.execute("INSERT OR IGNORE INTO offered VALUES(?,?)", (account, ref))
+            self._db.commit()
+
+    def offered(self, account: str, limit: int) -> list[Mail]:
+        """Les mails rendus et pas encore accusés de ce compte, les plus anciens d'abord ; un mail sorti du
+        cache entre-temps (supprimé, rangé ailleurs par un autre client) n'est plus à rendre."""
+        out: list[Mail] = []
+        with self._lock:
+            refs = self._db.execute("SELECT ref FROM offered WHERE account=? ORDER BY rowid", (account,)).fetchall()
+            for (ref,) in refs:
+                if len(out) >= limit:
+                    break
+                mail = self.one(ref)
+                if mail is None:
+                    self._db.execute("DELETE FROM offered WHERE account=? AND ref=?", (account, ref))
+                else:
+                    out.append(mail)
+            self._db.commit()
+        return out
+
+    def ack(self, refs: Iterable[str]) -> None:
+        """Ces mails ont été remarqués : rendus pour de bon, plus jamais rendus."""
+        with self._lock:
+            for ref in refs:
+                account, local = split_ref(ref)
+                self._db.execute("INSERT OR IGNORE INTO handed VALUES(?,?)", (account, local))
+                self._db.execute("DELETE FROM offered WHERE account=? AND ref=?", (account, ref))
             self._db.commit()
 
     # ── dossiers ──
