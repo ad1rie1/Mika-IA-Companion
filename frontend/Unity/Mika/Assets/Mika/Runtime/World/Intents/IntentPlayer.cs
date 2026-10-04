@@ -39,6 +39,9 @@ namespace Mika.World.Engine
 
         public string Current => _intent?.Id;
 
+        /// <summary>Un réflexe est en train de se jouer (le coucher quand elle s'endort) : pas encore arrivée.</summary>
+        public bool PlayingReflex => _run != null && _intent?.Cause?.Source == Source.Reflex;
+
         public void Init(ActorBody body, WorldStage stage)
         {
             _body = body;

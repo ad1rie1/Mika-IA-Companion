@@ -4,6 +4,7 @@ using Mika.Avatar;
 using Mika.Chat;
 using Mika.Player;
 using Mika.World.Engine;
+using Mika.World.Protocol;
 using UnityEngine;
 
 namespace Mika.App
@@ -27,9 +28,12 @@ namespace Mika.App
         MikaFace _face;
         BodyExpression _expression;
         BodyActivity _activity;
+        IntentPlayer _intents;
         // Le dernier état intérieur reçu : il peut arriver avant que la scène ait fait apparaître le corps.
         string _sleepPhase;
         float? _energy;
+        // La phase que montrent son visage et ses gestes : « awake » tant qu'elle marche encore vers son lit.
+        string _shownPhase;
 
         void OnEnable()
         {
@@ -59,6 +63,8 @@ namespace Mika.App
             _face = body != null ? body.GetComponentInChildren<MikaFace>() : null;
             _expression = body != null ? body.GetComponent<BodyExpression>() : null;
             _activity = body != null ? body.GetComponent<BodyActivity>() : null;
+            _intents = body != null ? body.GetComponent<IntentPlayer>() : null;
+            _shownPhase = null;
             if (_activity != null && player != null && player.view != null) _activity.companion = player.view.transform;
             if (_face != null)
             {
@@ -79,7 +85,9 @@ namespace Mika.App
 
         void Update()
         {
-            if (!Bind() || _face == null) return;
+            if (!Bind()) return;
+            ShowSleep();
+            if (_face == null) return;
             _face.Walking = _body.Speed > 0.15f;
             // La tête suit l'attention : vers la personne quand elle la regarde, devant elle sinon (les yeux, eux,
             // vont où l'attention les mène — MikaFace s'en charge).
@@ -126,11 +134,28 @@ namespace Mika.App
         void ApplyInnerState()
         {
             if (_body == null) return;
+            // Le corps reçoit le sommeil tout de suite : c'est lui qui ouvre la couette en s'allongeant.
             if (_sleepPhase != null) _body.SetAsleep(_sleepPhase != "awake");
-            if (_sleepPhase != null && _expression != null) _expression.SetAsleep(_sleepPhase != "awake");
+            ShowSleep();
             if (_face == null) return;
-            if (_sleepPhase != null) _face.SetSleepPhase(_sleepPhase);
             if (_energy.HasValue) _face.SetEnergy(_energy.Value);
+        }
+
+        /// <summary>
+        /// Elle s'endort une fois couchée : tant que le réflexe du coucher la mène à son lit, ses yeux restent
+        /// ouverts et ses gestes éveillés (ADR 0050) ; la phase reçue s'applique quand elle est allongée ou
+        /// quand l'action s'achève.
+        /// </summary>
+        void ShowSleep()
+        {
+            if (_sleepPhase == null) return;
+            var onHerWayToBed = _sleepPhase != "awake" && _intents != null && _intents.PlayingReflex
+                                && _body.Posture != Posture.Lie;
+            var phase = onHerWayToBed ? "awake" : _sleepPhase;
+            if (phase == _shownPhase) return;
+            _shownPhase = phase;
+            if (_expression != null) _expression.SetAsleep(phase != "awake");
+            if (_face != null) _face.SetSleepPhase(phase);
         }
 
         void OnAck(AckFrame a)
