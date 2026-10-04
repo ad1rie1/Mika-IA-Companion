@@ -29,8 +29,18 @@ namespace Mika.Chat
     /// </summary>
     public sealed class ChatSession : IDisposable
     {
+        /// <summary>Au-delà, le plus ancien message en attente est abandonné (et dit refusé, jamais perdu en silence).</summary>
+        const int OutboxMax = 50;
+
         readonly WsChannel _channel = new WsChannel();
         readonly string _prefix = Guid.NewGuid().ToString("N").Substring(0, 6);
+        // Les messages pas encore accusés, dans l'ordre d'écriture : renvoyés à chaque ouverture (le serveur
+        // dédoublonne par l'identifiant client), oubliés à leur accusé. Sans elle, un message tapé pendant une
+        // coupure s'affichait envoyé sans avoir jamais quitté le poste.
+        readonly List<KeyValuePair<string, string>> _outbox = new List<KeyValuePair<string, string>>();
+        // Les refus décidés ici (connexion refusée, file pleine) : rendus par Tick comme un accusé du serveur,
+        // jamais pendant Send — l'appelant n'a pas encore l'identifiant qu'il devra reconnaître.
+        readonly Queue<AckFrame> _localAcks = new Queue<AckFrame>();
         long _counter;
         double _now, _lastReceived, _lastPing, _retryAt, _backoff = 1;
 
@@ -73,10 +83,24 @@ namespace Mika.Chat
             _ = _channel.OpenAsync(Options.ChatUri(), headers);
         }
 
-        /// <summary>Envoie un message ; rend son identifiant client (pour relier l'accusé et la réponse).</summary>
+        /// <summary>
+        /// Envoie un message ; rend son identifiant client (pour relier l'accusé et la réponse). Hors ligne, il
+        /// attend la prochaine ouverture ; chaque message reçoit un accusé (<see cref="Ack"/>), du serveur ou d'ici.
+        /// </summary>
         public string Send(string text)
         {
             var id = $"u-{_prefix}-{++_counter}";
+            if (State == LinkState.Refused)
+            {
+                _localAcks.Enqueue(new AckFrame { ClientMsgId = id, Status = "unauthorized" });
+                return id;
+            }
+            if (_outbox.Count >= OutboxMax)
+            {
+                _localAcks.Enqueue(new AckFrame { ClientMsgId = _outbox[0].Key, Status = "overloaded" });
+                _outbox.RemoveAt(0);
+            }
+            _outbox.Add(new KeyValuePair<string, string>(id, text));
             if (State == LinkState.Online)
                 _ = _channel.SendAsync(ChatJson.Chat(text, id));
             return id;
@@ -85,6 +109,8 @@ namespace Mika.Chat
         public void Tick(double nowSeconds)
         {
             _now = nowSeconds;
+            while (_localAcks.Count > 0)
+                Ack?.Invoke(_localAcks.Dequeue());
             while (_channel.TryDequeue(out var e))
             {
                 switch (e.Kind)
@@ -97,6 +123,8 @@ namespace Mika.Chat
                         // Le serveur envoie de lui-même le début du fil à la connexion ; après une coupure, on
                         // redemande seulement ce qui a suivi le dernier message montré.
                         if (Cursor > 0) _ = _channel.SendAsync(ChatJson.Sync(Cursor));
+                        foreach (var m in _outbox)
+                            _ = _channel.SendAsync(ChatJson.Chat(m.Value, m.Key));
                         break;
                     case WsEventKind.Message:
                         _lastReceived = _now;
@@ -107,6 +135,10 @@ namespace Mika.Chat
                         {
                             Log($"conversation : connexion refusée ({e.CloseCode}) — vérifie le jeton");
                             Set(LinkState.Refused);
+                            // Plus rien ne partira sur cette session : ce qui attendait est refusé, et le dit.
+                            foreach (var m in _outbox)
+                                _localAcks.Enqueue(new AckFrame { ClientMsgId = m.Key, Status = "unauthorized" });
+                            _outbox.Clear();
                         }
                         else
                         {
@@ -162,6 +194,7 @@ namespace Mika.Chat
                     EmotionUpdate?.Invoke(u);
                     break;
                 case AckFrame a:
+                    _outbox.RemoveAll(m => m.Key == a.ClientMsgId);
                     Ack?.Invoke(a);
                     break;
                 case HistoryFrame h:
