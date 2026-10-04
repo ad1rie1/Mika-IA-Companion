@@ -157,6 +157,9 @@ class EpisodeRequest:
     subject: str | None = None
     #: le ``seq`` de l'événement ``kernel.selected`` qui l'a choisi (journalisé dans ``episode.started``)
     selected_seq: int | None = None
+    #: les personnes que son énoncé peut nommer sans les viser (``Utterance.about``) : la cible de
+    #: l'épisode qu'un prélude précède
+    about: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -433,7 +436,7 @@ class EpisodeRunner:
                         annotations=tuple(sorted(annotations.items())),
                         tools=tuple(ToolOutcome(name=n, ok=ok) for n, ok in loop.calls),
                         sections=trace.included, provenance=trace.provenance, answers=answers,
-                        attachments=tuple(loop.attachments),
+                        attachments=tuple(loop.attachments), about=req.about,
                     )],
                     emitter="runtime", correlation=eid, origin=Origin.KERNEL, basis=basis,
                     guard=guard, holder=eid,
@@ -558,7 +561,8 @@ class EpisodeRunner:
         for pre in preludes:
             sub = EpisodeRequest(kind=pre.kind, message=pre.message, reason=pre.reason,
                                  trigger=f"prélude:{req.trigger}", priority=req.priority,
-                                 extra_guard=_follows(ep, guard))
+                                 extra_guard=_follows(ep, guard),
+                                 about=(req.target,) if req.target else ())
             task = asyncio.ensure_future(self.run(sub, parent=ep.id))
             try:
                 await task

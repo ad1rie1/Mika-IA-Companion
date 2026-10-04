@@ -84,6 +84,9 @@ class Utterance(Payload):
     #: fichier préparé pour la personne). Le runtime et le transport les portent sans savoir ce qu'elles désignent ;
     #: leur propriétaire les reconnaît (un fichier « est parti » avec ce message).
     attachments: tuple[str, ...] = ()
+    #: les personnes que le texte peut nommer quand ``target`` n'en désigne aucune (un murmure qui pense à
+    #: celle à qui elle va écrire) : l'oubli l'atteint. Vide dans un journal plus ancien.
+    about: tuple[str, ...] = ()
 
     def annotation(self, key: str) -> str | None:
         for k, v in self.annotations:
@@ -160,7 +163,8 @@ PERCEPTION_RECEIVED = event_type(
 )
 EPISODE_STARTED = event_type("episode.started", OWNER, EpisodeStarted, public=True)
 UTTERANCE = event_type(
-    "episode.utterance", OWNER, Utterance, public=True, content=("text",), subjects=("target",), authored=True
+    "episode.utterance", OWNER, Utterance, public=True, content=("text",), subjects=("target", "about"),
+    authored=True
 )
 EPISODE_ENDED = event_type("episode.ended", OWNER, EpisodeEnded, public=True)
 PROCESS_FAILED = event_type("runtime.process_failed", OWNER, ProcessFailed, public=True)
