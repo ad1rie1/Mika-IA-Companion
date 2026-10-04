@@ -239,7 +239,7 @@ def salience(defn: w.WorldDef, obj: str) -> float:
     return a.salience if a is not None else 0.5
 
 
-def usable(defn: w.WorldDef, actors: Actors, objects: Objects, actor: str) -> list[str]:
+def usable(defn: w.WorldDef, actors: Actors, objects: Objects, actor: str, now: int | None = None) -> list[str]:
     """Ce dont un acteur peut se servir dans sa pièce (au moins une action possible), du plus saillant au moins."""
     me = actors.get(actor)
     if me is None:
@@ -247,7 +247,7 @@ def usable(defn: w.WorldDef, actors: Actors, objects: Objects, actor: str) -> li
     out = []
     for oid in objects:
         anchor = anchor_of(defn, actors, objects, oid)
-        if anchor is not None and anchor[0] == me.room and actions_of(defn, objects, me, oid):
+        if anchor is not None and anchor[0] == me.room and actions_of(defn, objects, me, oid, now):
             out.append(oid)
     return sorted(out, key=lambda o: (-salience(defn, o), o))
 
@@ -352,7 +352,16 @@ def _hand_for(defn: w.WorldDef, objects: Objects, me: w.ActorState, size: w.Size
     return w.Hand.LEFT if w.Hand.RIGHT in used else w.Hand.RIGHT
 
 
-def actions_of(defn: w.WorldDef, objects: Objects, me: w.ActorState, obj: str) -> list[tuple[str, str]]:
+def _doing(me: w.ActorState, activity: str | None, obj: str, now: int | None) -> bool:
+    """Elle est en train de faire cette occupation avec cet objet : une occupation échue ne compte plus (la règle
+    d'``around``). Sans heure (``now`` vide), toute occupation inscrite compte."""
+    cur = me.activity
+    return cur is not None and cur.name == activity and cur.object == obj and (
+        now is None or cur.until is None or cur.until > now)
+
+
+def actions_of(defn: w.WorldDef, objects: Objects, me: w.ActorState, obj: str,
+               now: int | None = None) -> list[tuple[str, str]]:
     """Ce qu'elle peut faire de cet objet, maintenant : ``(identifiant, nom)``."""
     o = defn.object(obj)
     cur = objects.get(obj)
@@ -369,7 +378,7 @@ def actions_of(defn: w.WorldDef, objects: Objects, me: w.ActorState, obj: str) -
     for aff in a.affordances:
         if aff.requires_state and cur.state not in aff.requires_state:
             continue
-        if me.activity is not None and me.activity.name == aff.activity and me.activity.object == obj:
+        if _doing(me, aff.activity, obj, now):
             continue
         out.append((aff.id, aff.label))
     return out
@@ -429,7 +438,7 @@ def _approach(defn: w.WorldDef, t: Timing, actors: Actors, actor: str, anchor: t
 
 
 def plan_interact(defn: w.WorldDef, t: Timing, actors: Actors, objects: Objects, actor: str, obj: str, action: str,
-                  target: str | None = None) -> list[w.Step]:
+                  target: str | None = None, now: int | None = None) -> list[w.Step]:
     """Agir sur un objet : y aller s'il le faut, le prendre d'abord s'il faut le tenir, puis agir."""
     me = actors[actor]
     o = defn.object(obj)
@@ -462,12 +471,12 @@ def plan_interact(defn: w.WorldDef, t: Timing, actors: Actors, objects: Objects,
                 w.Step(kind="act", object=obj, action=action, target=loc, duration_us=t.hand_us)]
     aff = next((x for x in a.affordances if x.id == action), None)
     if aff is None:
-        can = ", ".join(f"« {i} » ({label})" for i, label in actions_of(defn, objects, me, obj)) or "rien, pour l'instant"
+        can = ", ".join(f"« {i} » ({label})" for i, label in actions_of(defn, objects, me, obj, now)) or \
+            "rien, pour l'instant"
         raise Refused(w.Refusal.UNKNOWN, f"On ne peut pas faire « {action} » avec {what}. Ce qui se peut : {can}.")
     if aff.requires_state and cur.state not in aff.requires_state:
         raise Refused(w.Refusal.WRONG_STATE, f"{what} est {state_label(defn, obj, cur.state)}.")
-    if aff.effect is w.Effect.ACTIVITY and me.activity is not None and me.activity.name == aff.activity \
-            and me.activity.object == obj:
+    if aff.effect is w.Effect.ACTIVITY and _doing(me, aff.activity, obj, now):
         raise Refused(w.Refusal.WRONG_STATE, f"Tu es déjà en train de {aff.label}.")
     steps: list[w.Step] = []
     lasting = aff.effect is w.Effect.ACTIVITY
