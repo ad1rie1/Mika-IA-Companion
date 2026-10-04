@@ -1,0 +1,20 @@
+{"type": "approvals", "items": [
+  {"id": 905, "title": "Appeler « prevision » (meteo) : {\"ville\": \"Lyon\"}",
+   "text": "Service : meteo\nOutil : prevision\nCe qui partira :\n{\n \"ville\": \"Lyon\"\n}",
+   "digest": "3f9c0a7e", "blocked": "", "expires_at": 1790602215002},
+  {"id": 906, "title": "Écrire à Adrien", "text": "Service : courrier\nOutil : envoyer",
+   "digest": "ab12", "blocked": "l'outil a changé depuis la demande", "expires_at": null},
+  {"id": 912, "title": "Sans texte ni empreinte"},
+  {"id": 0, "title": "identifiant nul", "text": "x", "digest": "ab"},
+  {"id": -3, "title": "identifiant négatif", "text": "x", "digest": "ab"},
+  {"id": "907", "title": "identifiant en chaîne", "text": "x", "digest": "ab"},
+  {"id": 907.5, "title": "identifiant à virgule", "text": "x", "digest": "ab"},
+  {"title": "sans identifiant", "text": "x", "digest": "ab"},
+  {"id": 908, "title": "empreinte en majuscules", "text": "x", "digest": "AB12"},
+  {"id": 909, "title": "empreinte qui n'en est pas une", "text": "x", "digest": "<script>"},
+  {"id": 910, "title": "texte en objet", "text": {"a": 1}, "digest": "ab"},
+  {"id": 911, "title": "échéance en mots", "text": "x", "digest": "ab", "expires_at": "demain"},
+  {"id": 913, "title": "blocage en liste", "text": "x", "digest": "ab", "blocked": ["non"]},
+  "pas une carte",
+  {"id": 905, "title": "doublon", "text": "autre chose", "digest": "ff"}
+]}

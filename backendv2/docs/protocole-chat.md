@@ -90,6 +90,7 @@ Une connexion silencieuse peut être morte sans le dire (un portable en veille, 
 | `sync` | `after_id` | le plus grand identifiant de message **affiché** ; `0` = rien de fiable → les 50 derniers |
 | `chat` | `message`, `client_msg_id`, `attachments?` | voir ci-dessous |
 | `presence` | `here` (booléen) | l'application passe au premier plan (`true`) ou le quitte (`false`) |
+| `approval` | `id`, `decision` (`accept` \| `refuse`), `digest` | décider d'une carte d'accord (§4, `approvals`) ; authentifié seulement |
 
 `chat` :
 
@@ -112,6 +113,9 @@ après 20 s (prendre une photo et revenir n'écrit rien). 6 écritures au journa
 au-delà, le dernier état voulu s'applique dès que la fenêtre le permet. Sans effet sur une connexion anonyme.
 
 `identify` ne sert plus : une connexion authentifiée l'ignore, l'identité vient de la session ou du jeton.
+
+`approval` (ADR 0064) : `digest` est **celui de la carte affichée** — le serveur refuse un accord sur autre chose que
+ce qui a été montré (`changed`). Refuser n'exige pas d'empreinte. Compte dans le débit de `sync` (12 par 10 s).
 
 ## 4. Ce que le serveur envoie
 
@@ -176,6 +180,28 @@ répondre — réessaie ».
 - `truncated` : le rattrapage ne porte que les 200 derniers ; dis-le plutôt que de laisser croire qu'il ne manque
   rien.
 - Le curseur est le plus grand `id` **affiché** ; on ordonne par `id`, jamais par `ts`.
+
+**`approvals`** — les cartes d'accord de la personne (ADR 0064) : un appel qu'elle veut faire à un service
+extérieur et qui attend **son** accord. La liste entière à chaque changement (et après chaque décision) ; à
+l'ouverture, seulement s'il y en a — **pars d'une liste vide à chaque connexion**. Montre exactement la dernière
+liste reçue (une carte absente n'attend plus rien) :
+
+```json
+{"type": "approvals", "items": [{"id": 905, "title": "Appeler « prevision » (meteo) : {\"ville\": \"Lyon\"}",
+  "text": "Service : meteo\nOutil : prevision\nCe qui partira :\n{\n \"ville\": \"Lyon\"\n}",
+  "digest": "3f9c…", "blocked": "", "expires_at": 1790602215002}]}
+```
+
+- `text` : exactement ce qui partira (à montrer tel quel, en texte brut, jamais interprété).
+- `blocked` non vide : ça ne peut pas partir tel quel (l'outil a changé, n'est plus servi, la carte a expiré) — ne
+  propose que « refuser ».
+- `expires_at` (ms, ou `null`) : passé ce moment, la carte ne vaut plus (le serveur la refuse au nom du délai).
+- Une carte n'arrive qu'aux connexions **authentifiées** de la personne qu'elle concerne. Pas de notification
+  système pour elle : la parole de Mika qui l'accompagne en fait une.
+
+**`approval_result`** — le sort d'une décision : `{"type": "approval_result", "id": 905, "status": "approved"}` ;
+`status` : `approved`, `rejected`, `unknown` (déjà décidée, ou inconnue), `changed` (ce qui partirait a changé :
+relis la carte), `blocked`, `expired`, `forbidden` (pas à toi de décider). Une liste `approvals` à jour suit.
 
 **`emotion_update`** (son visage entre deux tours, seulement vers un écran regardé), **`inner_state_update`**
 (`{"inner_state": {…}}` : sommeil `sleep_phase`, `energy`, lieu `place`, `circadian`, besoins `drives`, `estime`,

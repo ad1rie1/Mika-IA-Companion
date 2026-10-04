@@ -14,6 +14,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 
 /**
@@ -40,6 +41,8 @@ object FrameCodec {
                     json.decodeFromJsonElement(ServerFrame.EmotionUpdate.serializer(), obj)
                 MikaProtocol.TYPE_INNER_STATE_UPDATE -> ServerFrame.InnerStateUpdate(decodeInnerState(obj["inner_state"]))
                 MikaProtocol.TYPE_PONG -> ServerFrame.Pong((obj["t"] as? JsonPrimitive)?.doubleOrNull)
+                MikaProtocol.TYPE_APPROVALS -> decodeApprovals(obj)
+                MikaProtocol.TYPE_APPROVAL_RESULT -> decodeApprovalResult(obj)
                 else -> ServerFrame.Unknown(type)
             }
         } catch (_: IllegalArgumentException) {
@@ -68,6 +71,80 @@ object FrameCodec {
         }
         return ServerFrame.History(head.mode, entries, head.lastId, head.truncated, head.life, head.reset)
     }
+
+    /**
+     * La liste entière des cartes d'accord. Sans `items` lisible, la trame est inconnue (la liste
+     * affichée ne se vide pas sur une trame cassée) ; une carte mal formée est écartée seule, un
+     * identifiant répété ne compte qu'une fois.
+     */
+    private fun decodeApprovals(obj: JsonObject): ServerFrame {
+        val items = obj["items"] as? JsonArray ?: return ServerFrame.Unknown(MikaProtocol.TYPE_APPROVALS)
+        val seen = HashSet<Long>()
+        val cards = ArrayList<ApprovalCard>()
+        for (item in items) {
+            if (cards.size >= MikaProtocol.MAX_APPROVAL_CARDS) break
+            val card = approvalCard(item) ?: continue
+            if (seen.add(card.id)) cards += card
+        }
+        return ServerFrame.Approvals(cards)
+    }
+
+    /**
+     * Une carte, ou `null` si elle est mal formée : identifiant entier positif, empreinte hexadécimale
+     * (128 au plus), titre, texte et raison de blocage en chaînes (absents : vides), échéance en
+     * millisecondes ou `null`. Le titre et la raison trop longs sont coupés ; le texte aussi, mais la
+     * carte est alors marquée incomplète (elle ne pourra qu'être refusée).
+     */
+    fun approvalCard(element: JsonElement): ApprovalCard? {
+        val o = element as? JsonObject ?: return null
+        val id = positiveLong(o["id"]) ?: return null
+        val digest = stringField(o["digest"]) ?: return null
+        if (!MikaProtocol.APPROVAL_DIGEST.matches(digest)) return null
+        val title = stringField(o["title"]) ?: return null
+        val text = stringField(o["text"]) ?: return null
+        val blocked = stringField(o["blocked"]) ?: return null
+        val expiresAt = when (val raw = o["expires_at"]) {
+            null, JsonNull -> null
+            else -> timestampMs(raw) ?: return null
+        }
+        val complete = text.length <= MikaProtocol.MAX_APPROVAL_TEXT_CHARS
+        return ApprovalCard(
+            id = id,
+            title = clip(title, MikaProtocol.MAX_APPROVAL_TITLE_CHARS),
+            text = if (complete) text else text.take(MikaProtocol.MAX_APPROVAL_TEXT_CHARS),
+            digest = digest,
+            blocked = clip(blocked, MikaProtocol.MAX_APPROVAL_BLOCKED_CHARS),
+            expiresAt = expiresAt,
+            complete = complete,
+        )
+    }
+
+    private fun decodeApprovalResult(obj: JsonObject): ServerFrame {
+        val unknown = ServerFrame.Unknown(MikaProtocol.TYPE_APPROVAL_RESULT)
+        val id = positiveLong(obj["id"]) ?: return unknown
+        val status = (obj["status"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return unknown
+        return ServerFrame.ApprovalResult(id, status.take(MAX_STATUS_CHARS))
+    }
+
+    /** Un entier JSON strictement positif (jamais une chaîne, jamais un nombre à virgule). */
+    private fun positiveLong(element: JsonElement?): Long? =
+        (element as? JsonPrimitive)?.takeIf { !it.isString }?.longOrNull?.takeIf { it > 0 }
+
+    /** Une heure en millisecondes : un entier, ou un nombre à virgule fini ; positive. */
+    private fun timestampMs(element: JsonElement): Long? {
+        val p = (element as? JsonPrimitive)?.takeIf { !it.isString } ?: return null
+        val ms = p.longOrNull ?: p.doubleOrNull?.takeIf { it.isFinite() }?.toLong() ?: return null
+        return ms.takeIf { it > 0 }
+    }
+
+    /** Absent ou `null` : vide ; une chaîne : elle ; autre chose : `null` (ce qui la porte est écarté). */
+    private fun stringField(element: JsonElement?): String? = when {
+        element == null || element is JsonNull -> ""
+        element is JsonPrimitive && element.isString -> element.content
+        else -> null
+    }
+
+    private fun clip(text: String, max: Int): String = if (text.length <= max) text else text.take(max - 1) + "…"
 
     /** Section par section : une section illisible est notée, jamais fatale au panneau. */
     fun decodeInnerState(element: JsonElement?): InnerState {
@@ -121,6 +198,16 @@ object FrameCodec {
         put("type", MikaProtocol.TYPE_PRESENCE)
         put("here", here)
     }.toString()
+
+    /** Une décision sur une carte d'accord, avec l'empreinte de la carte telle qu'elle était montrée. */
+    fun approval(id: Long, decision: ApprovalDecision, digest: String): String = buildJsonObject {
+        put("type", MikaProtocol.TYPE_APPROVAL)
+        put("id", id)
+        put("decision", decision.wire)
+        put("digest", digest)
+    }.toString()
+
+    private const val MAX_STATUS_CHARS = 64
 
     const val K_SLEEP_PHASE = "sleep_phase"
     const val K_ENERGY = "energy"

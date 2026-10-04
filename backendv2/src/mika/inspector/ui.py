@@ -103,6 +103,8 @@ class InspectorDeps:
     faculty_labels: Mapping[str, str] = field(default_factory=dict)
     #: les noms en français de ce que déclarent les facultés (sections, raisons, vetos, processus…)
     labels: Labels | None = None
+    #: le relais MCP du moteur Claude Code (« Ce que Mika expose » : ses sessions ouvertes)
+    relay: Any = None
 
 
 env = Environment(loader=FileSystemLoader(TEMPLATES), autoescape=select_autoescape(default=True),

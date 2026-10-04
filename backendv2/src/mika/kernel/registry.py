@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import heapq
 import json
+import re
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -45,11 +46,17 @@ from mika.kernel.faculty import (
     SectionSpec,
     SeriesSpec,
     SubjectSpec,
+    ToolSourceSpec,
     ToolSpec,
     VitalSpec,
     Zone,
 )
 from mika.kernel.state import FrozenDict, Root
+
+#: le nom d'une famille d'outils dynamiques (``mcp``)
+TOOL_FAMILY = re.compile(r"[a-z][a-z0-9_]{0,31}")
+#: le nom d'un outil que d'autres ont nommé : ce qu'acceptent les fournisseurs (Claude, OpenAI, Ollama)
+TOOL_NAME = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 
 class CompositionError(Exception):
@@ -222,6 +229,22 @@ class Registry:
                 if name in self.bundles:
                     problems.append(f"lot d'outils décrit deux fois : {name}")
                 self.bundles[name] = text
+        # les outils dynamiques (ADR 0064) : une famille de lots par source ; ``tools`` et ``bundles`` restent des
+        # dictionnaires ordinaires, remplacés d'un bloc à chaque ``set_dynamic`` (un lecteur garde celui qu'il a)
+        self._static_tools: dict[str, ToolSpec] = dict(self.tools)
+        self._static_bundles: dict[str, str] = dict(self.bundles)
+        self._dynamic: dict[str, tuple[dict[str, ToolSpec], dict[str, str]]] = {}
+        self.tool_sources: dict[str, ToolSourceSpec] = {}
+        code_bundles = set(self.bundles) | {t.bundle for t in self.tools.values()}
+        for src in (x for f in facs for x in f.tool_sources):
+            if not TOOL_FAMILY.fullmatch(src.family):
+                problems.append(f"famille d'outils {src.family!r} ({src.owner}) : des minuscules, chiffres et _")
+            elif src.family in self.tool_sources:
+                problems.append(f"famille d'outils déclarée deux fois : {src.family}")
+            elif any(b == src.family or b.startswith(src.family + ".") for b in code_bundles):
+                problems.append(f"famille d'outils {src.family} : un lot du code porte déjà ce nom")
+            else:
+                self.tool_sources[src.family] = src
         self.projectors: dict[str, ProjectorSpec] = {}
         for s in (s for f in facs for s in f.projectors):
             if s.name in self.projectors:
@@ -269,6 +292,54 @@ class Registry:
         self._adapters: dict[str, TypeAdapter[Any]] = {}
 
     # ── états ──
+    # ── outils dynamiques ──
+    def is_dynamic(self, name: str) -> bool:
+        """Cet outil vient-il d'une source dynamique (et non du code) ?"""
+        return name in self.tools and name not in self._static_tools
+
+    def dynamic_owner(self, name: str) -> str | None:
+        for owner, (tools, _bundles) in self._dynamic.items():
+            if name in tools:
+                return owner
+        return None
+
+    def set_dynamic(self, owner: str, tools: Iterable[ToolSpec], bundles: Mapping[str, str]) -> list[str]:
+        """Remplace d'un bloc les outils dynamiques d'une faculté. Ce qui ne passe pas est écarté et dit (un nom
+        déjà pris, hors de sa famille, mal formé) ; un outil du code n'est jamais remplacé."""
+        problems: list[str] = []
+        family = next((f for f, src in self.tool_sources.items() if src.owner == owner), None)
+        if family is None:
+            return [f"{owner} ne déclare aucune famille d'outils"]
+        prefix = family + "."
+        others = {n for o, (t, _b) in self._dynamic.items() if o != owner for n in t}
+        kept: dict[str, ToolSpec] = {}
+        for spec in tools:
+            if spec.owner != owner:
+                problems.append(f"outil {spec.name} : il appartient à {spec.owner}, pas à {owner}")
+            elif not TOOL_NAME.fullmatch(spec.name):
+                problems.append(f"outil {spec.name!r} : des lettres, chiffres, _ et -, 64 au plus")
+            elif spec.name in self._static_tools or spec.name in others or spec.name in kept:
+                problems.append(f"outil {spec.name} : ce nom est déjà pris")
+            elif not spec.bundle.startswith(prefix):
+                problems.append(f"outil {spec.name} : son lot {spec.bundle} n'est pas de la famille {family}")
+            else:
+                kept[spec.name] = spec
+        described = {}
+        for name, text in bundles.items():
+            if not name.startswith(prefix):
+                problems.append(f"lot {name} : hors de la famille {family}")
+            else:
+                described[name] = str(text)
+        self._dynamic[owner] = (kept, described)
+        merged_tools = dict(self._static_tools)
+        merged_bundles = dict(self._static_bundles)
+        for t, b in self._dynamic.values():
+            merged_tools.update(t)
+            merged_bundles.update(b)
+        self.tools = merged_tools
+        self.bundles = merged_bundles
+        return problems
+
     def owners(self) -> list[str]:
         return sorted(self.faculties)
 

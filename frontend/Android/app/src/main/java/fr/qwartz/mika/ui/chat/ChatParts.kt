@@ -33,6 +33,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -73,6 +74,8 @@ import fr.qwartz.mika.data.files.AttachmentPolicy
 import fr.qwartz.mika.data.files.MikaFileRefs
 import fr.qwartz.mika.ui.components.InlineMarkup
 import fr.qwartz.mika.ui.components.InlineMarkupText
+import fr.qwartz.mika.ui.avatar.AvatarFace
+import fr.qwartz.mika.ui.avatar.LoadedPortrait
 import fr.qwartz.mika.ui.components.MikaAvatar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -94,10 +97,23 @@ class ChatActions(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun ChatTopBar(status: String, onOpenMind: () -> Unit, onOpenSettings: () -> Unit) {
+internal fun ChatTopBar(
+    status: String,
+    onOpenMind: () -> Unit,
+    onOpenSettings: () -> Unit,
+    face: LoadedPortrait? = null,
+    faceTint: Color = MaterialTheme.colorScheme.primaryContainer,
+    transparent: Boolean = false,
+) {
     var menu by remember { mutableStateOf(false) }
     val openMindLabel = stringResource(R.string.chat_open_mind)
     TopAppBar(
+        // Sur son portrait, la barre laisse passer la lumière du fond.
+        colors = if (transparent) {
+            TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent, scrolledContainerColor = Color.Transparent)
+        } else {
+            TopAppBarDefaults.topAppBarColors()
+        },
         title = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -105,7 +121,7 @@ internal fun ChatTopBar(status: String, onOpenMind: () -> Unit, onOpenSettings: 
                     .heightIn(min = 48.dp)
                     .clickable(onClickLabel = openMindLabel, onClick = onOpenMind),
             ) {
-                MikaAvatar()
+                if (face != null) AvatarFace(face, faceTint) else MikaAvatar()
                 Column(Modifier.padding(start = 12.dp)) {
                     Text(
                         stringResource(R.string.mika),
@@ -193,10 +209,18 @@ internal fun ChatConversation(
     busyFileId: String?,
     actions: ChatActions,
     modifier: Modifier = Modifier,
+    /** Le fil passe sur son portrait : ce qui n'est pas une bulle prend un fond, pour rester lisible. */
+    overPortrait: Boolean = false,
 ) {
     if (items.isEmpty()) {
-        Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Text(stringResource(R.string.chat_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // Sur son portrait, l'invitation se met sous elle plutôt qu'en travers.
+        Box(
+            modifier.fillMaxWidth().padding(bottom = if (overPortrait) 24.dp else 0.dp),
+            contentAlignment = if (overPortrait) Alignment.BottomCenter else Alignment.Center,
+        ) {
+            Backed(overPortrait) {
+                Text(stringResource(R.string.chat_empty), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         return
     }
@@ -226,18 +250,22 @@ internal fun ChatConversation(
         ) {
             items(reversed, key = { it.key }) { item ->
                 when (item) {
-                    is ChatItem.DateSeparator -> Centered(item.label, heading = true)
-                    ChatItem.TruncatedNote -> Centered(stringResource(R.string.chat_truncated))
+                    is ChatItem.DateSeparator -> Centered(item.label, overPortrait, heading = true)
+                    ChatItem.TruncatedNote -> Centered(stringResource(R.string.chat_truncated), overPortrait)
                     is ChatItem.Bubble -> Bubble(item, zone, busyFileId, actions)
-                    is ChatItem.Note -> Note(item, operator, actions)
-                    is ChatItem.Thought -> Thought(item.message)
-                    is ChatItem.SystemNote -> Centered(item.text)
-                    ChatItem.Typing -> Text(
-                        stringResource(R.string.chat_typing),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(8.dp).semantics { liveRegion = LiveRegionMode.Polite },
-                    )
+                    is ChatItem.Note -> Backed(overPortrait) { Note(item, operator, actions) }
+                    is ChatItem.Thought -> Backed(overPortrait) { Thought(item.message) }
+                    is ChatItem.SystemNote -> Centered(item.text, overPortrait)
+                    ChatItem.Typing -> Box(Modifier.padding(vertical = 4.dp)) {
+                        Backed(overPortrait) {
+                            Text(
+                                stringResource(R.string.chat_typing),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -259,15 +287,29 @@ internal fun ChatConversation(
 }
 
 @Composable
-private fun Centered(text: String, heading: Boolean = false) {
+private fun Centered(text: String, overPortrait: Boolean, heading: Boolean = false) {
     Box(Modifier.fillMaxWidth().padding(vertical = 6.dp), contentAlignment = Alignment.Center) {
-        Text(
-            text,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = if (heading) Modifier.semantics { heading() } else Modifier,
-        )
+        Backed(overPortrait) {
+            Text(
+                text,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .padding(horizontal = if (overPortrait) 10.dp else 0.dp, vertical = if (overPortrait) 3.dp else 0.dp)
+                    .then(if (heading) Modifier.semantics { heading() } else Modifier),
+            )
+        }
     }
+}
+
+/** Sur son portrait, un fond voilé derrière le texte libre du fil ; sinon rien. */
+@Composable
+private fun Backed(on: Boolean, content: @Composable () -> Unit) {
+    if (!on) return content()
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.82f),
+    ) { content() }
 }
 
 @Composable

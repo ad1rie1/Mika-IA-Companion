@@ -65,6 +65,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from mika.adapters import cage
 from mika.ports.workshop import Commit, OutsideWorkshop, RunResult, WorkshopFull
 
 #: ce qu'on peut lancer sans réseau. Ce n'est **pas** une barrière (``sh`` et ``python`` font tout) : c'est la
@@ -82,16 +83,10 @@ NOISE = (".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache",
 #: un parcours d'arbre sans git s'arrête après tant d'entrées vues
 WALK_MAX = 20_000
 SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
-_SYSTEM_DIRS = ("/usr", "/bin", "/sbin", "/lib", "/lib64")
-_SYSTEM_FILES = ("/etc/passwd", "/etc/group", "/etc/nsswitch.conf", "/etc/ld.so.cache", "/etc/localtime")
-_NETWORK_FILES = ("/etc/hosts", "/etc/ssl", "/etc/pki", "/etc/ca-certificates")
-#: le réseau à part : une adresse, une passerelle et un résolveur qui n'existent nulle part (TEST-NET-1, RFC 5737)
-NET_ADDRESS, NET_GATEWAY, NET_DNS = "192.0.2.2", "192.0.2.1", "192.0.2.3"
-#: ce que le réseau à part ne joint jamais : le réseau local, l'opérateur, les métadonnées d'un nuage, le réservé
-#: (la boucle locale de la cage est la sienne : rien de l'hôte n'y est relayé)
-UNREACHABLE = ("0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16", "172.16.0.0/12", "192.0.0.0/24",
-               "192.168.0.0/16", "198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4",
-               "240.0.0.0/4")
+# la cage est commune (``adapters/cage.py``) : l'atelier et les serveurs MCP lancés ici voient le même système
+_SYSTEM_DIRS = cage.SYSTEM_DIRS
+NET_ADDRESS, NET_GATEWAY, NET_DNS = cage.NET_ADDRESS, cage.NET_GATEWAY, cage.NET_DNS
+UNREACHABLE = cage.UNREACHABLE
 _GIT = ("-c", "user.name=Mika", "-c", "user.email=mika@atelier.local", "-c", "commit.gpgsign=false",
         "-c", "core.hooksPath=/dev/null", "-c", "init.defaultBranch=main")
 #: un identifiant de commit (abrégé ou complet), une branche
@@ -420,33 +415,13 @@ class BwrapWorkshop:
 
     def _resolver(self) -> Path:
         """Le résolveur que voit le réseau à part (celui que relaie pasta), jamais celui de l'hôte."""
-        d = self.root / ".reseau"
-        d.mkdir(parents=True, exist_ok=True)
-        conf = d / "resolv.conf"
-        wanted = f"nameserver {NET_DNS}\noptions timeout:3 attempts:2\n"
-        if not conf.exists() or conf.read_text(encoding="utf-8") != wanted:
-            conf.write_text(wanted, encoding="utf-8")
-        return conf
+        return cage.resolver(self.root / ".reseau")
 
     def _sandbox(self, root: Path, argv: list[str], network: str, protect_git: bool = False) -> list[str]:
         """La cage bubblewrap. ``network`` : ``""`` (aucun), ``"isolated"`` (le réseau à part de pasta, posé
         autour), ``"host"`` (celui de l'hôte : les git de l'atelier seulement, faute de pasta)."""
         assert self.bwrap is not None
-        args = [self.bwrap, "--die-with-parent", "--new-session", "--unshare-all", "--cap-drop", "ALL"]
-        if network:
-            args.append("--share-net")
-        if network == "isolated":  # dans l'espace de pasta, on est « root » : la cage reprend son utilisateur
-            args += ["--uid", str(os.getuid()), "--gid", str(os.getgid())]
-        for d in _SYSTEM_DIRS:
-            p = Path(d)
-            if p.is_symlink():
-                args += ["--symlink", os.readlink(p), d]
-            elif p.is_dir():
-                args += ["--ro-bind", d, d]
-        args += ["--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp"]
-        for f in _SYSTEM_FILES + (_NETWORK_FILES if network else ()):
-            if Path(f).exists():
-                args += ["--ro-bind", f, f]
+        args = [*cage.head(self.bwrap, network), *cage.system(network)]
         if network == "isolated":
             args += ["--ro-bind", str(self._resolver()), "/etc/resolv.conf"]
         elif network == "host" and Path("/etc/resolv.conf").exists():
@@ -465,31 +440,11 @@ class BwrapWorkshop:
         n'est pas l'hôte, et des routes « unreachable » vers tout ce qui n'est pas Internet (et vers les adresses de
         la machine) — posées avant d'entrer dans la cage, qui n'a ensuite plus aucune capacité pour les retirer."""
         assert self.pasta and self.ip
-        routes = list(UNREACHABLE)
-        nets = [ipaddress.ip_network(r) for r in UNREACHABLE]
-        for addr in self._host_addresses():
-            if not any(addr in n for n in nets):
-                routes.append(f"{addr}/32")
-        script = "; ".join(f"{self.ip} route add unreachable {r} || exit 97" for r in dict.fromkeys(routes))
-        return [self.pasta, "--config-net", "--quiet", "-4", "-a", NET_ADDRESS, "-n", "24", "-g", NET_GATEWAY,
-                "--no-map-gw", "--dns-forward", NET_DNS, "-t", "none", "-u", "none", "-T", "none", "-U", "none",
-                "--", self.sh, "-c", script + '; exec "$0" "$@"', *inner]
+        return cage.isolated(inner, pasta=self.pasta, ip=self.ip, sh=self.sh, addresses=self._host_addresses())
 
     def _host_addresses(self) -> list[ipaddress.IPv4Address]:
-        """Les adresses IPv4 de la machine elle-même (l'adresse publique d'un serveur joindrait ses propres
-        services) ; au mieux : sans réponse, la liste est vide."""
-        try:
-            r = subprocess.run([str(self.ip), "-o", "-4", "addr", "show"], capture_output=True, text=True,
-                               timeout=5, check=False)
-        except (OSError, subprocess.SubprocessError):
-            return []
-        out = []
-        for m in re.finditer(r"\binet (\d+\.\d+\.\d+\.\d+)", r.stdout):
-            try:
-                out.append(ipaddress.IPv4Address(m.group(1)))
-            except ValueError:
-                continue
-        return out
+        """Les adresses IPv4 de la machine elle-même (``cage.host_addresses``)."""
+        return cage.host_addresses(str(self.ip))
 
     def _env(self, root: Path, extra: Mapping[str, str] | None = None) -> dict[str, str]:
         """Construit, jamais hérité : aucune variable du serveur n'entre (seulement ``extra``, que

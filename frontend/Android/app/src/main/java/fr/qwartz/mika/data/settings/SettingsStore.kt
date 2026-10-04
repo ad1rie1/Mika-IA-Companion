@@ -27,6 +27,8 @@ data class Settings(
     val theme: ThemeMode = ThemeMode.SYSTEM,
     /** « Couleurs dynamiques » (Android 12 et plus). */
     val dynamicColor: Boolean = true,
+    /** « Mika en fond » : son portrait, qui suit son humeur, derrière la conversation. */
+    val avatar: Boolean = true,
     /** La permission de notifier a été demandée une fois (accordée ou non) : on ne la redemande pas d'office. */
     val notificationsAsked: Boolean = false,
 )
@@ -42,6 +44,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
             startOnBoot = p[START_ON_BOOT] ?: false,
             theme = p[THEME]?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() } ?: ThemeMode.SYSTEM,
             dynamicColor = p[DYNAMIC_COLOR] ?: true,
+            avatar = p[AVATAR] ?: true,
             notificationsAsked = p[NOTIFICATIONS_ASKED] ?: false,
         )
     }
@@ -61,6 +64,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
     suspend fun setStartOnBoot(on: Boolean) = store.edit { it[START_ON_BOOT] = on }
     suspend fun setTheme(mode: ThemeMode) = store.edit { it[THEME] = mode.name }
     suspend fun setDynamicColor(on: Boolean) = store.edit { it[DYNAMIC_COLOR] = on }
+    suspend fun setAvatar(on: Boolean) = store.edit { it[AVATAR] = on }
     suspend fun setNotificationsAsked() = store.edit { it[NOTIFICATIONS_ASKED] = true }
 
     private fun decodeProfile(raw: String): Profile? = try {
@@ -77,6 +81,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
         val START_ON_BOOT = booleanPreferencesKey("start_on_boot")
         val THEME = stringPreferencesKey("theme")
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
+        val AVATAR = booleanPreferencesKey("avatar")
         val NOTIFICATIONS_ASKED = booleanPreferencesKey("notifications_asked")
     }
 }

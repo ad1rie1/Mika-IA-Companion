@@ -24,6 +24,7 @@ from mika.adapters.imaging.models import list_image_models
 from mika.adapters.llm.config import REPLY, ROLE_LABELS, BackendSpec, LLMConfig
 from mika.adapters.llm.models import ListingFailed, list_models
 from mika.adapters.mail import MailConfig
+from mika.adapters.mcp.config import McpConfig
 from mika.app import persona as persona_file
 from mika.contracts import self_ as self_c
 from mika.contracts.self_ import PersonaDoc
@@ -360,6 +361,18 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return [("Comptes", f"{len(accounts)} ({ready} prêt(s) à relever)" if accounts else "aucun"),
                 ("Lire et envoyer", "Courrier › Réception")]
 
+    async def save_mcp(cfg: McpConfig, by: str) -> list[str]:
+        await settings.save_mcp(cfg)
+        if live.mcp is not None:  # les sessions dont la connexion a changé sont fermées, les serveurs actifs rejoints
+            await live.mcp.reconfigure()
+        return []
+
+    def mcp_facts() -> list[tuple[str, str]]:
+        servers = settings.mcp().servers
+        ready = sum(1 for x in servers.values() if x.enabled and x.ready)
+        return [("Serveurs", f"{len(servers)} ({ready} actif(s) et prêt(s))" if servers else "aucun"),
+                ("État et outils", "Ses outils › Serveurs extérieurs")]
+
     async def save_feeds(cfg: FeedsSettings, by: str) -> list[str]:
         await settings.save_feeds(list(cfg.urls))
         return []
@@ -388,6 +401,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         rows = (
             ("Courrier", "Boîtes, serveurs, identifiants et façon d'écrire", "boites", "email", "courrier/reception"),
             ("Flux RSS", "Adresses des flux suivis", "flux", "rss", "sens/flux"),
+            ("Outils extérieurs", "Serveurs MCP : à quoi ils servent pour elle, où les joindre, pour qui",
+             "serveurs-mcp", "", "outils/serveurs"),
             ("Caméra", "Fréquence des regards et durée des observations", "comportement-camera", "", "sens/camera"),
             ("Dessins", "Ses fournisseurs d'images ; sa qualité par défaut, ses quotas", "images-fournisseurs",
              "imaging", "sens/dessins"),
@@ -496,6 +511,15 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         pages=(SettingsPage("boites", "Boîtes aux lettres", ("accounts",), description=(
                             "Chaque boîte a sa page : lire (IMAP), envoyer (SMTP), sa voix dans cette boîte et ce "
                             "qu'elle y prépare d'elle-même. Ce qui s'y passe se lit dans Courrier.")),)),
+        SettingsSection("mcp", "Outils extérieurs", "sens", McpConfig, settings.mcp, save_mcp, order=15,
+                        description="Les serveurs MCP dont elle peut utiliser les outils (ADR 0064). Jetons et "
+                                    "variables secrètes chiffrés, jamais réaffichés.", facts=mcp_facts,
+                        fixed_names=("servers",),
+                        pages=(SettingsPage("serveurs-mcp", "Outils extérieurs (MCP)", ("servers",), description=(
+                            "Chaque serveur a sa page : d'abord à quoi il sert, pour elle — la ligne de son "
+                            "catalogue —, puis où le joindre (une adresse, ou une commande lancée ici, isolée), pour "
+                            "qui et quand. Ses outils ne lui sont servis qu'une fois approuvés, un par un, sur la "
+                            "fiche du serveur (Ses outils › Serveurs extérieurs).")),)),
         SettingsSection("flux", "Flux", "sens", FeedsSettings, lambda: FeedsSettings(urls=tuple(settings.feeds())),
                         save_feeds, description="Ce qu'elle lit du monde.", order=20,
                         pages=(SettingsPage("flux", "Flux RSS", description=(

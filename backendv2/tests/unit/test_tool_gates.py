@@ -8,10 +8,18 @@
 - un outil ne peut proposer que les capacités de sa propre faculté ;
 - en conversation, le socle (mémoire, identité, buts) est en main ; le reste est
   à la demande, et le prompt stable dit, lot par lot, ce qu'elle peut aller
-  chercher — le contrat v1 des capacités chargées paresseusement.
+  chercher — le contrat v1 des capacités chargées paresseusement ; un fournisseur
+  qui ne sait pas différer (Ollama) les reçoit tous et n'entend parler d'aucune
+  recherche, y compris à travers la passerelle en service ;
+- quand elle parle, ses outils sont ses mains : faire avant d'annoncer, ne rien
+  raconter qu'un outil ne lui a pas rendu, et ne la renvoyer à la Forge que si
+  elle lui est offerte ; sans flux suivi, ses flux ne disent pas « rien de neuf ».
 """
 
 from __future__ import annotations
+
+import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -22,7 +30,7 @@ from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.runtime.effects import with_content
-from mika.runtime.tools import CATALOGUE_HEADER, ToolContext, run_tool_loop
+from mika.runtime.tools import ACTING, CATALOGUE_HEADER, ToolContext, acting, run_tool_loop
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind, project_target
 from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
@@ -204,6 +212,97 @@ def test_a_provider_that_cannot_defer_tools_gets_them_all_and_no_catalogue(tmp_p
     req = seen[0]
     assert not any(t.deferred for t in req.tools) and {"forge_write", "memory_search"} <= {t.name for t in req.tools}
     assert CATALOGUE_HEADER not in req.system_stable
+
+
+class _Silent:
+    """Un fournisseur qui ne dit rien de ce qu'il sait différer."""
+
+    name = "muet"
+
+    async def complete(self, req: LLMRequest) -> LLMResponse:
+        return LLMResponse("")
+
+
+def test_the_gateway_in_service_says_whether_its_provider_can_defer_tools():
+    """Le test précédent pose ``defers_tools`` sur la passerelle factice ; en service, le pipeline parle à
+    ``LiveGateway``, qui ne relayait pas la question : il concluait « oui », et nemotron (Ollama) recevait ses
+    32 outils *et* « ils ne sont pas chargés d'emblée, cherche-les » (2026-10-04)."""
+    from mika.adapters.llm.config import LiveGateway
+    from mika.adapters.llm.gateway import Gateway
+    from mika.adapters.llm.ollama import OllamaBackend
+    from mika.adapters.system import RealClock
+    from mika.runtime.pipeline import _defers
+
+    def live(backend):
+        return LiveGateway(Gateway({"m": backend}, {"reply": "m"}, clock=RealClock()))
+
+    assert _defers(live(OllamaBackend("nemotron-3-super", client=object())), "reply") is False
+    assert _defers(live(_Silent()), "reply") is True  # qui n'en dit rien sait différer (la déclaration le dit)
+    assert _defers(LiveGateway(), "reply") is True  # sans configuration, l'appel échouera de toute façon
+
+
+def test_when_she_speaks_her_tools_are_her_hands(tmp_path):
+    """« Peux-tu regarder les nouvelles ? » — « je vais regarder », aucun appel, puis quatre tours d'actualité
+    inventée (2026-10-04). Quand elle parle, le prompt stable lui dit de faire avant d'annoncer, de ne rien
+    raconter qu'un outil ne lui a pas rendu, et — seulement si elle en a l'outil — qu'elle peut s'en donner les
+    moyens dans sa Forge."""
+    stable: dict[str, str] = {}
+
+    def respond(req: LLMRequest) -> LLMResponse:
+        target = req.meta.get("target")
+        if target:
+            stable[target] = req.system_stable
+        return LLMResponse("D'accord. [EMOTION:neutral:0.3]")
+
+    kernel, clock, _, _ = build(tmp_path, respond, start=at_paris(2026, 9, 28, 15, 0))
+
+    async def main():
+        await boot(kernel)
+        try:
+            await connect(kernel, "user_5", "Inconnue")
+            await (await kernel.perceive(said("user_5", "Tu peux regarder les nouvelles ?"))).reply
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            await (await kernel.perceive(said("user_1", "Tu peux regarder les nouvelles ?"))).reply
+            await kernel.lanes.join()
+        finally:
+            await kernel.stop()
+
+    run_virtual(clock, main)
+    stranger, owner = stable["user_5"], stable["user_1"]
+    assert ACTING in stranger and ACTING in owner
+
+    def rule(text: str) -> str:
+        return text.split(ACTING, 1)[1].split("\n", 1)[0]
+
+    assert "ta Forge" in rule(owner)
+    assert "Forge" not in rule(stranger)  # la Forge ne lui est pas offerte : elle n'y est pas renvoyée
+
+
+def test_the_rule_of_her_hands_names_only_the_means_she_is_given():
+    assert acting([]) == ""  # une parole sans outil n'a rien à en dire
+
+    def spec(name: str) -> SimpleNamespace:
+        return SimpleNamespace(name=name)
+
+    assert acting([spec("memory_search")]) == ACTING
+    both = acting([spec("forge_write"), spec("start_project")])
+    assert both.startswith(ACTING) and "ta Forge" in both and "un projet à toi" in both
+
+
+def test_with_no_feed_followed_she_is_not_told_there_is_nothing_new():
+    """« Rien de neuf dans tes flux » quand elle n'en suit aucun lui laissait croire qu'elle en suivait."""
+    from mika.plugins.rss import ListArgs, rss_list
+    from mika.sim.outside import FakeFeeds
+
+    class NoFeed(FakeFeeds):
+        def configured(self) -> bool:
+            return False
+
+    async def listed(port) -> str:
+        return await rss_list(ListArgs(), SimpleNamespace(ports={"feeds": port}))
+
+    assert "aucun flux" in asyncio.run(listed(NoFeed()))
+    assert asyncio.run(listed(FakeFeeds())) == "Rien de neuf dans tes flux."
 
 
 # ── Relire ce qui n'était que poussé : même porte que la section ──────────

@@ -177,6 +177,28 @@ class ToolSpec:
     #: une fois réussi, il clôt la boucle d'outils : le modèle n'est pas rappelé pour écrire une conclusion que
     #: personne ne lit (conclure une séance de travail : ``report_step``)
     ends_loop: bool = False
+    #: ce que le gestionnaire revérifie à l'exécution au-delà de l'offre, en une phrase (la console le dit : sans
+    #: elle, « offert » laisserait croire qu'il servira)
+    rule: str = ""
+    #: le schéma de ses arguments tel que d'autres l'ont écrit (un outil venu d'ailleurs, ADR 0064) : déclaré tel
+    #: quel au modèle et vérifié par ``kernel.schema`` ; ``None`` : celui de ``args``
+    schema: Mapping[str, Any] | None = None
+    #: en main quand il est offert, même si son lot n'est pas dans les lots en main de l'épisode
+    in_hand: bool = False
+    #: ce qu'elle met dans ses arguments part de la machine, ce qu'il rend vient d'ailleurs (la règle de ses mains
+    #: le lui dit)
+    outside: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ToolSourceSpec:
+    """Une famille d'outils qui ne sont pas dans le code : ``fn(ports) -> (outils, lots)``, appelée par le
+    noyau au démarrage et quand ce qui la nourrit change (``Kernel.refresh_tools``). Ses lots s'appellent
+    ``<family>.<nom>`` ; ses outils appartiennent à la faculté (ADR 0064)."""
+
+    owner: str
+    family: str
+    fn: Callable[..., Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,6 +428,7 @@ class Faculty(Generic[S, Pm]):
     #: une ligne par lot d'outils : ce qu'il permet (le catalogue de ce qu'elle
     #: peut aller chercher quand le lot n'est pas en main)
     bundles: dict[str, str] = field(default_factory=dict)
+    tool_sources: list[ToolSourceSpec] = field(default_factory=list)
     projectors: list[ProjectorSpec] = field(default_factory=list)
     effects: list[EffectSpec] = field(default_factory=list)
     inspectors: list[InspectSpec] = field(default_factory=list)
@@ -599,12 +622,14 @@ class Faculty(Generic[S, Pm]):
         owner_only: bool = False,
         when: Callable[[Any], bool] | None = None,
         ends_loop: bool = False,
+        rule: str = "",
     ):
         def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
             self.tools.append(
                 ToolSpec(
                     self.name, name, description, args, fn, bundle or self.name,
                     frozenset(episodes), min_level, effect, max_calls_per_episode, owner_only, when, ends_loop,
+                    rule,
                 )
             )
             return fn
@@ -614,6 +639,15 @@ class Faculty(Generic[S, Pm]):
     def bundle(self, name: str, description: str) -> None:
         """Décrire un lot d'outils en une ligne (« lire et écrire des mails »)."""
         self.bundles[name] = description
+
+    def tool_source(self, family: str):
+        """Une famille d'outils dynamiques (voir ``ToolSourceSpec``) : ``fn(ports) -> (outils, lots)``."""
+
+        def deco(fn: Callable[..., Any]) -> Callable[..., Any]:
+            self.tool_sources.append(ToolSourceSpec(self.name, family, fn))
+            return fn
+
+        return deco
 
     # ── E/S ──
     def projector(self, name: str, *, version: int, tier: Tier, types: Iterable[EventType[Any] | str]):

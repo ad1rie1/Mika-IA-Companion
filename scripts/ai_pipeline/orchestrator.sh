@@ -99,6 +99,8 @@ OPTIONS:
                         audit : $(ls "${PROFILES_DIR}/audit" | sed 's/\.md$//' | tr '\n' ' ')
                         fix   : $(ls "${PROFILES_DIR}/small_fix" | sed 's/\.md$//' | tr '\n' ' ')
   --modules MODULES     Modules ciblés (virgules) ou "all" (défaut: auto)
+  --group GROUPE        Avec --audit : tout le groupe en un seul passage
+                        (${MODULE_GROUP_ORDER[*]})
   --no-create           Ne rien créer sur GitHub (test local)
   --dry-run             Afficher ce qui serait fait sans rien exécuter
   --branch NAME         Nom de branche custom
@@ -127,6 +129,7 @@ PROFILE=""
 MODULES="all"
 ISSUE_NUMBER=""
 AUDIT_MODE=false
+AUDIT_GROUP=""
 WORKER_MODE=false
 REBASE_MODE=false
 NO_CREATE=false
@@ -142,6 +145,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --profile)    _need_value "$@"; PROFILE="$2"; shift 2 ;;
         --modules)    _need_value "$@"; MODULES="$2"; shift 2 ;;
+        --group)      _need_value "$@"; AUDIT_GROUP="$2"; shift 2 ;;
         --issue)      _need_value "$@"; ISSUE_NUMBER="$2"; shift 2 ;;
         --audit)      AUDIT_MODE=true; shift ;;
         --worker)     WORKER_MODE=true; shift ;;
@@ -166,6 +170,16 @@ done
 if [[ -n "$ISSUE_NUMBER" && ! "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
     err "--issue attend un numéro (reçu: '${ISSUE_NUMBER}')"
     exit "$EXIT_FAIL"
+fi
+if [[ -n "$AUDIT_GROUP" ]]; then
+    if [[ "$AUDIT_MODE" != true ]]; then
+        err "--group ne s'emploie qu'avec --audit"
+        exit "$EXIT_FAIL"
+    fi
+    if [[ -z "${MODULE_GROUPS[$AUDIT_GROUP]+x}" ]]; then
+        err "Groupe inconnu: ${AUDIT_GROUP} (disponibles: ${MODULE_GROUP_ORDER[*]})"
+        exit "$EXIT_FAIL"
+    fi
 fi
 if [[ -n "$CUSTOM_BRANCH" && "$CUSTOM_BRANCH" != "${BRANCH_PREFIX}/"* ]]; then
     # Le nettoyage d'interruption ne referme que les branches du pipeline.

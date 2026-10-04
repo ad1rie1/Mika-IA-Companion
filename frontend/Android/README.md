@@ -16,6 +16,15 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
 - **La conversation** : bulles, heures, séparateurs de date, état de chaque message (en attente, envoyé, lu,
   refusé + « Réessayer »), gras et code mis en forme, « Mika écrit… ». Un message tapé hors ligne part tout seul
   au retour du réseau, même si l'application a été tuée entre-temps.
+- **Les cartes d'accord** (ADR 0064) : quand Mika veut appeler un service extérieur et que c'est à toi d'en
+  décider, une carte apparaît au-dessus de la barre de saisie — ce qu'elle veut faire, **exactement ce qui partira**
+  (en texte brut, à chasse fixe, jamais interprété), le compte à rebours (« expire dans 4 min ») et deux boutons,
+  « Accepter » et « Refuser ». Seul le bouton décide : un « oui » tapé dans la conversation ne vaut jamais accord.
+  « Accepter » s'éteint quand la carte est bloquée (la raison est dite), expirée, incomplète, hors ligne, ou quand
+  une décision est déjà partie ; hors ligne, rien n'est mis en file. Le sort de la décision s'affiche un instant
+  (« Refusé : rien ne partira. »). Trames : `approvals` (la liste entière, qui remplace la précédente ; chaque
+  connexion repart d'une liste vide, le serveur n'envoie la liste à l'ouverture que si elle n'est pas vide),
+  `approval_result` (le sort), et côté app `approval` (`id`, `decision`, l'empreinte `digest` de la carte montrée).
 - **Envoyer des fichiers** : Photos, Appareil photo, Fichier (images, audio, texte, CSV, Markdown, JSON, PDF),
   jusqu'à 5 fichiers de 5 Mo par message (11 Mo au total). Les photos trop lourdes sont réduites en JPEG (côté
   long ≤ 2 048 px), ce qui retire aussi l'EXIF et la position GPS. Le brouillon (texte et fichiers) survit à la
@@ -27,11 +36,17 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
 - **« Ce qu'elle fait »** : humeur, corps (sommeil, énergie, où elle est, moment de la journée), estime de soi,
   ce à quoi elle repense, le rêve de la nuit, son dernier journal, qui elle est devenue, ses besoins, et ses
   projets en cours si tu es propriétaire. Une carte sans données n'apparaît pas.
+- **Mika en fond** : derrière la conversation, son portrait du moment, dans une lumière qui suit son humeur. Il
+  change avec ce qu'elle ressent (une pose et un visage par émotion), respire, cligne des yeux, porte la main au
+  menton pendant « Mika écrit… », fait coucou quand on la retrouve, bâille quand elle est fatiguée et s'endort la
+  nuit (lumière bleue, étoiles en thème sombre). Son visage, découpé du même portrait, remplace le « M » de la barre
+  du haut. Désactivable (Paramètres › Apparence) ; immobile quand Android supprime les animations. Voir
+  [Mika en fond](#mika-en-fond-les-portraits).
 - **Paramètres** : compte et déconnexion, connexion en arrière-plan, démarrage avec le téléphone, batterie,
   notifications, thème (système / clair / sombre, couleurs dynamiques), « Effacer les messages de ce téléphone ».
 
-Hors périmètre : la voix (ni messages vocaux, ni lecture à voix haute) et l'avatar 3D (ce sont le client web et le
-client Unity).
+Hors périmètre : la voix (ni messages vocaux, ni lecture à voix haute) et l'avatar 3D animé (ce sont le client web
+et le client Unity) — l'app montre des portraits pré-rendus de ce même avatar.
 
 ## Construire
 
@@ -51,6 +66,36 @@ version minifiée, signée avec la clé de débogage (rien n'est publié sur un 
 
 > La machine est partagée : une construction complète prend ~2 Gio de mémoire. Lance-la seule, sans démon
 > (`--no-daemon`), et de préférence à travers `~/recup-audit-v2-2026-10-01/outils/borne.sh`.
+
+## Mika en fond (les portraits)
+
+L'app n'a pas de moteur 3D : elle montre des **portraits pré-rendus** du VRM, un par émotion (les 29) plus
+« coucou », « fatiguée » et « endormie », chacun avec ses yeux fermés à poser le temps d'un clignement. Ils sont
+rendus dans Blender par `frontend/Web/assets-src/blender/portraits.py`, qui reprend à l'identique le visage du
+client web (`EmotionController`, `faceRig`, `FacePhysiology`, `HeadEmotionOverlay`) et pose le corps sur une image
+choisie des mouvements de l'atelier (`frontend/Unity/ArtSource/atelier/motions`). Décision : ADR 0065.
+
+Le modèle est sous licence de l'acheteur : **les portraits ne sont pas versionnés**. Ils s'écrivent dans
+`app/src/main/assets/avatar/` (ignoré par git), environ 4 Mo pour 32 portraits en 1080×1440 :
+
+```bash
+# la scène de l'atelier (non versionnée, voir frontend/Web/assets-src/blender/atelier_lib.py), ~1 min 30
+blender -b frontend/Unity/ArtSource/atelier/mika_rig.blend --python frontend/Web/assets-src/blender/portraits.py
+# un seul portrait, ou une planche d'un mouvement pour choisir une pose
+blender -b … --python …/portraits.py -- --only sad
+blender -b … --python …/portraits.py -- --sheet idle_sad
+```
+
+Une app construite sans eux n'affiche pas d'avatar, et l'interrupteur des paramètres n'apparaît pas. Le choix du
+portrait est une fonction pure (`data/avatar/AvatarDirector.kt`, testée) : endormie → « endormie » ; retrouvée après
+20 min → « coucou » ; elle écrit → la pose de réflexion ; sinon son émotion si elle est assez marquée (intensité ≥
+0,25 ; une humeur légère cède à la fatigue sous 0,3 d'énergie), le visage au repos sinon.
+
+En version de débogage, **le studio** montre la conversation sur chaque portrait, sans serveur ni compte :
+
+```bash
+adb shell am start -n fr.qwartz.mika.debug/fr.qwartz.mika.studio.AvatarStudioActivity --es portrait sad --ez dark true
+```
 
 ## Installer
 
@@ -120,7 +165,8 @@ mets Mika à jour. En version de débogage, le lien « Utiliser un jeton (dev) �
 ```
 
 Les tests JVM n'ont besoin d'aucun émulateur : le moteur (protocole, fusion du fil, socket, décisions de
-notification, réduction des images, partage, navigation, cartes de « Ce qu'elle fait ») est du Kotlin pur. Les
+notification, réduction des images, partage, navigation, cartes de « Ce qu'elle fait », choix du portrait, cartes
+d'accord) est du Kotlin pur. Les
 tests instrumentés (`app/src/androidTest`) éprouvent Room en mémoire (`ChatStoreTest`) et les écrans Compose
 (`ChatScreenTest`, `LoginScreenTest`, `MindScreenTest`).
 
@@ -133,8 +179,11 @@ tests instrumentés (`app/src/androidTest`) éprouvent Room en mémoire (`ChatSt
 | `data/db` | Room : messages, file d'envoi, petites valeurs |
 | `data/chat` | `ChatSync` (fusion du fil, portage du client web), `ChatEngine`, `ChatRepository` |
 | `data/mind` | l'état de Mika, ses libellés, la ligne d'état |
+| `data/approvals` | les cartes d'accord : leurs règles (`Approvals`, testées) et la liste en cours |
+| `data/avatar` | ses portraits : le manifeste, le choix du portrait, le rythme des clignements |
 | `data/auth` | jeton chiffré (Keystore), connexion, erreurs en français |
 | `data/files` | pièces jointes (préparation, réduction), brouillon, partages reçus, fichiers de Mika |
 | `service` | connexion voulue, service au premier plan, notifications, réponse depuis une notification, démarrage |
 | `share` | « Partager vers Mika », raccourci de conversation |
 | `ui` | écrans Compose : connexion, conversation, « Ce qu'elle fait », paramètres, visionneuse |
+| `ui/avatar` | Mika en fond : chargement des portraits, l'aura, le souffle, les clignements, le sommeil, son visage dans la barre |

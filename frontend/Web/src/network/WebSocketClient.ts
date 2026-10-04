@@ -1,4 +1,4 @@
-import type { ServerMessageMap } from "../types";
+import type { ApprovalFrame, ServerMessageMap } from "../types";
 
 export type MessageHandler = (data: any) => void;
 
@@ -600,6 +600,19 @@ export class WebSocketClient {
         client_msg_id: clientMsgId,
       })
     );
+  }
+
+  /**
+   * Une carte d'accord décidée (backendv2, ADR 0064) : envoyée si la
+   * connexion est ouverte, **jamais mise en file**. Une décision vaut pour ce
+   * que l'écran montre maintenant ; rejouée à une reconnexion, peut-être des
+   * minutes plus tard, elle parlerait d'une carte que la liste neuve a pu
+   * effacer — ou que la personne a eu le temps de reconsidérer.
+   *
+   * Returns false when nothing left the browser.
+   */
+  sendApproval(frame: ApprovalFrame): boolean {
+    return this.sendNow(frame);
   }
 
   on<K extends keyof ServerMessageMap>(

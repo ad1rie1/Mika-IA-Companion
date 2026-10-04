@@ -571,6 +571,20 @@ class MikaSocketTest {
         assertEquals(listOf("sync"), last().types())
     }
 
+    @Test fun `une décision d'accord part maintenant ou pas du tout — jamais en file`() = test {
+        connect()
+        // En cours d'ouverture : rien ne part, et rien n'attendra la socket.
+        assertFalse(socket.sendApproval(905, ApprovalDecision.ACCEPT, "3f9c"))
+        last().open()
+        assertTrue(socket.sendApproval(905, ApprovalDecision.ACCEPT, "3f9c"))
+        assertEquals("""{"type":"approval","id":905,"decision":"accept","digest":"3f9c"}""", last().sent.last())
+        last().fail()
+        assertFalse(socket.sendApproval(905, ApprovalDecision.REFUSE, "3f9c"))
+        advance(1000)
+        last().open()
+        assertEquals(listOf("sync"), last().types())
+    }
+
     // ── Diffusion ────────────────────────────────────────────────────────────────────────
 
     @Test fun `un abonné qui lève n'empêche ni les trames suivantes ni la relance`() = test {

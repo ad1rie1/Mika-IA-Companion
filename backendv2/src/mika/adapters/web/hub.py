@@ -324,6 +324,28 @@ class Hub:
                 sent += await self._send(conns, protocol.inner_state_update(frame, handle, self.panel(handle)))
         return sent
 
+    async def push_approvals(self, handles: list[str] | None = None, *, if_any: bool = False) -> int:
+        """Les cartes d'accord de chaque adresse (ADR 0064) : la liste entière, à chaque changement — un client
+        montre exactement celle-là (une carte absente n'attend plus rien). ``if_any`` (une connexion qui s'ouvre,
+        partie d'une liste vide) : rien quand il n'y en a pas."""
+        getter = getattr(self.port, "approval_cards", None)
+        if getter is None:
+            return 0
+        sent = 0
+        wanted = sorted({c.handle for c in self.conns.values()}) if handles is None else handles
+        for handle in wanted:
+            conns = [c for c in self.of(handle) if c.authenticated]
+            if not conns:
+                continue
+            try:
+                cards = await getter(handle)
+            except Exception as exc:  # une carte illisible ne fait pas tomber la synchro
+                log.debug("cartes d'accord illisibles : %r", exc)
+                continue
+            if cards or not if_any:
+                sent += await self._send(conns, {"type": "approvals", "items": cards})
+        return sent
+
     def panel(self, handle: str) -> dict[str, Any] | None:
         getter = getattr(self.port, "person_panel", None)
         if getter is None:
@@ -380,6 +402,7 @@ class Hub:
         self._sent_phase, self._sent_pending = phase, pending
         if self.conns and changed:
             await self.refresh_panels()
+            await self.push_approvals()
         return pushed
 
     async def run_sync(self, interval_s: float = SYNC_INTERVAL_S) -> None:

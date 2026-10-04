@@ -46,6 +46,9 @@ NAVIGATION: tuple[NavGroup, ...] = (
         Destination("projets", "Projets", "▦", "Ses projets : des espaces de travail qu'on pilote — objectifs, "
                     "exécutions, décisions techniques, fichiers, dépôt git, mode et outils.",
                     subjects=("project",)),
+        Destination("outils", "Ses outils", "✋", "Tout ce qu'elle peut faire : ses outils à elle (lus ici, définis "
+                    "dans le code), ceux de ses apps et des services extérieurs — pour qui, quand, et ce qu'elle en lit.",
+                    builtin=("outils.tous", "outils.qui", "outils.texte", "outils.expose"), subjects=("serveur",)),
         Destination("approbations", "Approbations", "✓", "Ce qu'elle voudrait faire sortir de la machine, et ce "
                     "qui en a été décidé.", builtin=("approbations.en_attente", "approbations.historique")),
     )),
@@ -86,6 +89,7 @@ FACULTY_LABELS: dict[str, str] = {
     "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "imaging": "Dessins",
+    "mcp": "Outils extérieurs",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -116,6 +120,7 @@ SECTION_LABELS: dict[str, str] = {
     # ADR 0053
     # ADR 0062
     "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)", "dessins": "Ses dessins pour la personne",
+    "services": "Ce que ses services extérieurs lui ont rendu",
     "step_exchange": "L'échange d'où vient sa réflexion", "step_life": "Ce qui se passe dans la vie de la personne "
     "(sa réflexion)",
 }
@@ -128,6 +133,7 @@ REASON_LABELS: dict[str, str] = {
     "comfort": "Réconforter", "recontact": "Reprendre contact après un silence", "work": "Avancer sur un but",
     "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
     "drawing_ready": "Montrer un dessin prêt", "drawing_failed": "Dire qu'un dessin n'a pas pu se faire",
+    "service_answered": "Dire ce qu'un service extérieur a rendu",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
     "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet",
@@ -156,13 +162,14 @@ PROCESS_LABELS: dict[str, str] = {
     "self.journal": "Tenir son journal", "self.dream": "Rêver", "social.profile": "Comprendre les gens",
     "goals.seed": "Se proposer des buts", "goals.tend": "Suivre ses buts", "projects.tend": "Suivre ses projets",
     "projects.remote": "Pousser et récupérer les dépôts", "email.poll": "Relever le courrier",
-    "rss.poll": "Relever les flux", "camera.look": "Regarder par la caméra", "forge.tick": "Faire tourner les apps",
+    "rss.poll": "Relever les flux", "mcp.watch": "Rejoindre les serveurs d'outils extérieurs", "camera.look": "Regarder par la caméra", "forge.tick": "Faire tourner les apps",
     "forge.events": "Transmettre les événements aux apps", "forge.discover": "Découvrir les apps",
     "memory.promises": "Tenir ou laisser filer ses promesses", "self.wake": "Se réveiller avec sa nuit",
     "social.reciprocity": "Remarquer qui écrit en premier",
     "memory.follow": "Remarquer qu'elle a repris un moment de la vie de quelqu'un",
     "world.settle": "Conclure ses gestes dans le monde",
     "shares.retention": "Retirer les fichiers envoyés trop anciens", "imaging.draw": "Dessiner",
+    "mcp.expire": "Refuser les accords restés sans réponse",
 }
 
 #: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
@@ -209,6 +216,7 @@ EVENT_LABELS: dict[str, str] = {
     "email.draft_asked": "Une réponse à un mail demandée", "email.noticed": "Un mail remarqué",
     "email.poll_asked": "Une relève demandée", "email.read": "Un mail lu", "email.sent": "Un mail envoyé",
     "rss.noticed": "Un article remarqué", "camera.seen": "Ce que la caméra a vu",
+    "mcp.status": "L'état de ses serveurs extérieurs", "mcp.answered": "Ce qu'un service extérieur a rendu",
     "forge.emitted": "Une app a signalé", "forge.handled": "Une app a traité un événement",
     "forge.signaled": "Une app l'a interpellée", "forge.switched": "Une app allumée ou éteinte",
     "forge.ticked": "Une app a tourné", "forge.written": "Une app écrite", "sensors.sensed": "Un appareil a signalé",

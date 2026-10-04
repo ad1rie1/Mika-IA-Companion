@@ -3,10 +3,12 @@ package fr.qwartz.mika.service
 import fr.qwartz.mika.core.Clock
 import fr.qwartz.mika.core.Logger
 import fr.qwartz.mika.core.NetworkStatus
+import fr.qwartz.mika.data.approvals.ApprovalsRepository
 import fr.qwartz.mika.data.auth.AuthRepository
 import fr.qwartz.mika.data.auth.Session
 import fr.qwartz.mika.data.chat.ChatEngine
 import fr.qwartz.mika.data.mind.MindStateRepository
+import fr.qwartz.mika.data.net.ApprovalDecision
 import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.data.net.MikaSocket
 import fr.qwartz.mika.data.net.ServerFrame
@@ -32,6 +34,8 @@ import kotlinx.coroutines.withContext
  * une app qui garde sa socket en arrière-plan ne fait pas croire à Mika qu'on est devant l'écran.
  *
  * Les trames reçues sont traitées une à une, jusqu'au bout (base écrite), dans le contexte sérialisé.
+ * L'ouverture d'une socket passe par la même file : ce qui dépend de la socket (les cartes d'accord)
+ * repart de zéro après les trames de la précédente, avant celles de la nouvelle.
  */
 class ConnectionManager(
     private val scope: CoroutineScope,
@@ -39,6 +43,7 @@ class ConnectionManager(
     private val auth: AuthRepository,
     private val chat: ChatEngine,
     private val mind: MindStateRepository,
+    private val approvals: ApprovalsRepository,
     private val foreground: StateFlow<Boolean>,
     private val network: StateFlow<NetworkStatus>,
     clock: Clock,
@@ -59,7 +64,8 @@ class ConnectionManager(
     private var lastNetworkId: Long? = null
     private var networkSeen = false
 
-    private class Tagged(val epoch: Int, val frame: ServerFrame)
+    /** Une trame, ou `null` : une socket vient de s'ouvrir. */
+    private class Tagged(val epoch: Int, val frame: ServerFrame?)
 
     private val frames = Channel<Tagged>(Channel.UNLIMITED)
     private val frameLock = Mutex()
@@ -71,7 +77,10 @@ class ConnectionManager(
         scope.launch {
             for (t in frames) {
                 frameLock.withLock {
-                    if (t.epoch == epoch) route(t.frame)
+                    if (t.epoch == epoch) {
+                        val frame = t.frame
+                        if (frame == null) approvals.onOpened() else route(frame)
+                    }
                 }
             }
         }
@@ -103,6 +112,16 @@ class ConnectionManager(
         scope.launch { socket.retry() }
     }
 
+    /**
+     * Décider d'une carte d'accord, maintenant ou pas du tout : `false` si la socket n'est pas ouverte
+     * (rien ne part, rien n'est mis en file). Partie, la décision attend sa réponse (`approval_result`).
+     */
+    suspend fun decide(id: Long, decision: ApprovalDecision, digest: String): Boolean = withContext(engineContext) {
+        val sent = socket.sendApproval(id, decision, digest)
+        if (sent) approvals.onSent(id, decision)
+        sent
+    }
+
     /** Fin de session : plus rien ne part ni n'arrive, et une trame en cours de traitement finit d'abord. */
     suspend fun shutdown() = withContext(engineContext) {
         epoch++
@@ -110,6 +129,7 @@ class ConnectionManager(
         frameLock.withLock { }
         chat.reset()
         mind.reset()
+        approvals.reset()
     }
 
     /**
@@ -182,6 +202,9 @@ class ConnectionManager(
     }
 
     override fun onStatus(status: MikaSocket.ConnectionStatus) {
+        // Le serveur n'envoie les cartes d'accord à l'ouverture que s'il y en a : la nouvelle socket
+        // part d'une liste vide, dans l'ordre des trames.
+        if (status is MikaSocket.ConnectionStatus.Connected) frames.trySend(Tagged(epoch, null))
         if (status is MikaSocket.ConnectionStatus.Unauthorized) scope.launch { verifySession() }
     }
 
@@ -208,6 +231,8 @@ class ConnectionManager(
                 is ServerFrame.Ack -> chat.onAck(frame)
                 is ServerFrame.EmotionUpdate -> mind.onEmotion(frame)
                 is ServerFrame.InnerStateUpdate -> mind.onInnerState(frame.state)
+                is ServerFrame.Approvals -> approvals.onApprovals(frame)
+                is ServerFrame.ApprovalResult -> approvals.onResult(frame)
                 is ServerFrame.Pong, is ServerFrame.Unknown -> Unit
             }
         } catch (e: CancellationException) {

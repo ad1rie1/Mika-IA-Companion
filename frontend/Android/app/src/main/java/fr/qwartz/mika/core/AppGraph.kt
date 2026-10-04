@@ -11,6 +11,7 @@ import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
 import fr.qwartz.mika.BuildConfig
+import fr.qwartz.mika.data.approvals.ApprovalsRepository
 import fr.qwartz.mika.data.auth.AndroidKeystoreCipher
 import fr.qwartz.mika.data.auth.AuthApi
 import fr.qwartz.mika.data.auth.AuthRepository
@@ -36,6 +37,7 @@ import fr.qwartz.mika.service.MessageNotifier
 import fr.qwartz.mika.service.ReplySender
 import fr.qwartz.mika.service.ServiceController
 import fr.qwartz.mika.share.Shortcuts
+import fr.qwartz.mika.ui.avatar.AvatarAssets
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -107,6 +109,11 @@ class AppGraph(context: Context) {
 
     val chatEngine = ChatEngine(store, files, clock, scope, logger)
     val mind = MindStateRepository(store, clock)
+    /** Les cartes d'accord (ADR 0064) : en mémoire, le temps de la socket qui les a reçues. */
+    val approvals = ApprovalsRepository(clock)
+
+    /** Ses portraits, s'ils ont été rendus dans les assets (`portraits.py`). */
+    val avatar = AvatarAssets(this.context, logger)
 
     /** Ce qu'il faut encore effacer à la déconnexion (caches d'images, notifications…). */
     val onWipe: MutableList<suspend () -> Unit> = mutableListOf()
@@ -141,6 +148,7 @@ class AppGraph(context: Context) {
         auth = auth,
         chat = chatEngine,
         mind = mind,
+        approvals = approvals,
         foreground = foreground.visible,
         network = network.status,
         clock = clock,

@@ -3,6 +3,16 @@
 # AI Pipeline - Mode AUDIT (analyse en profondeur, crée des issues GitHub)
 # ============================================================================
 
+# Note de périmètre : les exclusions d'un module, ou, pour un passage par
+# groupe, la consigne de traiter le groupe comme un tout.
+audit_scope_note() {
+    if [[ -n "${AUDIT_GROUP:-}" ]]; then
+        echo "Ces modules forment le groupe « ${AUDIT_GROUP} » (${MODULE_GROUP_DESCRIPTIONS[$AUDIT_GROUP]:-}). Analyse-les ensemble, dans un seul passage : l'intérêt est de suivre ce qui circule entre eux, pas de les survoler un par un. Le code généré (Protocol/Generated) ne s'audite pas."
+    else
+        module_scope_note "$1"
+    fi
+}
+
 build_audit_prompt() {
     local module_paths="$1"
     local existing_issues="$2"
@@ -70,7 +80,7 @@ Tu dois UNIQUEMENT analyser le code et lister les ${objets} que tu retiens.
 
 Concentre ton analyse sur les modules suivants : ${module_paths}
 Tu peux lire n'importe quel fichier du projet si nécessaire (contrats, faits, événements des autres facultés, frontend…).
-$(module_scope_note "$module_paths")
+$(audit_scope_note "$module_paths")
 
 ${existing_section}
 ${threshold_section}
@@ -90,7 +100,7 @@ Pour chaque ${objet}, utilise EXACTEMENT ce format (un bloc par ${objet}, marque
 ISSUE_START
 title: Titre court et clair en français
 ${severity_line}
-files: fichier1.py, fichier2.py
+files: chemins depuis la racine du dépôt (ex. backendv2/src/mika/kernel/events.py)
 description:
 Description détaillée en français.
 Inclure :
@@ -119,8 +129,24 @@ main_audit() {
     check_prerequisites
 
     # 2. Résoudre les modules
-    local module_paths
-    if [[ "$MODULES" == "all" ]]; then
+    local module_paths known_label
+    if [[ -n "${AUDIT_GROUP:-}" ]]; then
+        # Un seul passage sur tous les modules du groupe présents sur BASE_REF.
+        local -a present=()
+        local m
+        for m in ${MODULE_GROUPS[$AUDIT_GROUP]}; do
+            module_in_base "$m" && present+=("$m")
+        done
+        if [[ ${#present[@]} -eq 0 ]]; then
+            ok "Aucun module du groupe '${AUDIT_GROUP}' sur ${BASE_REF} (pas encore poussé ?). Rien à faire."
+            exit "$EXIT_NOTHING"
+        fi
+        module_paths="${present[*]}"
+        MODULES="groupe:${AUDIT_GROUP}"
+        known_label="groupe:${AUDIT_GROUP}"
+        report_set module "groupe:${AUDIT_GROUP}"
+        log "Groupe ciblé: ${AUDIT_GROUP} (${#present[@]} module(s) en un passage)"
+    elif [[ "$MODULES" == "all" ]]; then
         local picked
         picked=$(pick_module audit "$PROFILE")
         if [[ -z "$picked" ]]; then
@@ -133,22 +159,25 @@ main_audit() {
     else
         module_paths=$(resolve_modules "$MODULES") || exit "$EXIT_FAIL"
     fi
-    report_set module "$module_paths"
-    log "Module ciblé: $module_paths"
+    if [[ -z "${AUDIT_GROUP:-}" ]]; then
+        known_label=$(module_label "$module_paths")
+        report_set module "$module_paths"
+    fi
+    log "Module(s) ciblé(s): $module_paths"
 
     # 3. Récupérer les issues connues pour éviter les doublons. Une requête
     #    en échec ne vaut pas « aucune issue » : l'audit recréerait tout.
     local existing_issues
-    if ! existing_issues=$(get_known_issues "$module_paths"); then
+    if ! existing_issues=$(get_known_issues "$known_label"); then
         err "Impossible de lister les issues existantes - audit annulé pour ne pas créer de doublons"
         exit "$EXIT_FAIL"
     fi
     if [[ -n "$existing_issues" ]]; then
-        log "Issues connues pour ${module_paths} (tous profils):"
+        log "Issues connues pour ${known_label#*:} (tous profils):"
         local line
         while IFS= read -r line; do log "  $line"; done <<< "$existing_issues"
     else
-        log "Aucune issue connue pour ce module"
+        log "Aucune issue connue pour ${known_label#*:}"
     fi
 
     # 4. Construire et lancer le prompt IA (lecture seule)
@@ -255,7 +284,11 @@ main_audit() {
 
     header "Création des issues GitHub"
     local counts created skipped flagged below
-    counts=$(create_github_issues "$issues_dir" "$PROFILE" "$module_paths" "$pool")
+    if [[ -n "${AUDIT_GROUP:-}" ]]; then
+        counts=$(create_github_issues "$issues_dir" "$PROFILE" "" "$pool" "$AUDIT_GROUP")
+    else
+        counts=$(create_github_issues "$issues_dir" "$PROFILE" "$module_paths" "$pool")
+    fi
     rm -f "$pool"
     read -r created skipped flagged below <<< "$counts"
     report_set issues "$created"

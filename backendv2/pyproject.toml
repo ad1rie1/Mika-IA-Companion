@@ -126,6 +126,7 @@ modules = [
     "mika.plugins.forge",
     "mika.plugins.sensors",
     "mika.plugins.imaging",
+    "mika.plugins.mcp",
 ]
 
 [[tool.importlinter.contracts]]

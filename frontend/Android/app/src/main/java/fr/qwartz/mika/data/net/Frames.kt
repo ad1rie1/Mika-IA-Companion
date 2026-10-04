@@ -72,6 +72,15 @@ sealed interface ServerFrame {
 
     data class Pong(val t: Double? = null) : ServerFrame
 
+    /**
+     * Les cartes d'accord de la personne (ADR 0064) : la liste entière, qui remplace la précédente —
+     * une carte absente n'attend plus rien. Les cartes illisibles sont écartées une à une.
+     */
+    data class Approvals(val items: List<ApprovalCard>) : ServerFrame
+
+    /** Le sort d'une décision (`approved`, `rejected`, `unknown`…) ; une liste `approvals` à jour suit. */
+    data class ApprovalResult(val id: Long, val status: String) : ServerFrame
+
     /** Un type que cette version ne connaît pas, ou une trame illisible : ignorée, jamais fatale. */
     data class Unknown(val type: String) : ServerFrame
 }
@@ -94,6 +103,32 @@ data class AttachmentRef(
     val url: String? = null,
     val available: Boolean? = null,
 )
+
+/**
+ * Une carte d'accord : un appel que Mika veut faire à un service extérieur et qui attend l'accord de
+ * la personne. Lue à la main par `FrameCodec` (pas de défauts : une carte à laquelle il manque l'essentiel
+ * est écartée, jamais complétée).
+ */
+data class ApprovalCard(
+    val id: Long,
+    val title: String,
+    /** Exactement ce qui partira : montré tel quel, en texte brut, jamais interprété. */
+    val text: String,
+    /** L'empreinte de [text] : renvoyée avec la décision, le serveur refuse un accord sur autre chose. */
+    val digest: String,
+    /** Non vide : ça ne peut pas partir tel quel, seul le refus est possible. */
+    val blocked: String = "",
+    /** Époque en millisecondes ; `null` : pas d'échéance. */
+    val expiresAt: Long? = null,
+    /** Faux quand [text] a été coupé à la lecture : on n'accepte pas ce qu'on n'a pas lu en entier. */
+    val complete: Boolean = true,
+)
+
+/** Ce que la personne décide d'une carte, tel que la trame `approval` l'écrit. */
+enum class ApprovalDecision(val wire: String) {
+    ACCEPT(MikaProtocol.DECISION_ACCEPT),
+    REFUSE(MikaProtocol.DECISION_REFUSE),
+}
 
 @Serializable
 data class RejectedAttachment(

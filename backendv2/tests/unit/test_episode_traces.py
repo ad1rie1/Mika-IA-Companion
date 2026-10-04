@@ -227,6 +227,45 @@ async def test_forget_clears_every_trace_and_in_flight_episodes_stay_forgotten(t
     await store.close()
 
 
+async def test_each_tool_call_is_counted_without_reading_the_traces_back(tmp_path):
+    """« Ses outils » compte les appels de chaque outil (ADR 0064) : une ligne par appel dans ``tool_uses``,
+    remplacée avec la trace, élaguée et oubliée avec elle — jamais ses arguments."""
+    store, traces = await opened(tmp_path, keep_days=14, max_rows=10)
+
+    def with_tools(*calls):
+        return {**data("persona"), "tool_calls": [{"name": n, "ok": ok, "executed": ex, "args": '{"secret": "x"}'}
+                                                  for n, ok, ex in calls]}
+
+    now = 100 * DAY
+    traces.record("e1", now - 2 * HOUR, "REPLY", "user_1", with_tools(("memory_search", True, True),
+                                                                      ("outil_imaginaire", False, False)))
+    traces.record("e2", now - HOUR, "STEP", None, with_tools(("memory_search", False, True)))
+    traces.record("old", now - 20 * DAY, "REPLY", "user_1", with_tools(("memory_search", True, True)))
+    await traces.flush()
+    usage = traces.tool_usage(now - 14 * DAY)
+    assert usage["memory_search"].calls == 2 and usage["memory_search"].failures == 1
+    assert usage["memory_search"].last_at == now - HOUR
+    assert usage["outil_imaginaire"].failures == 1
+    uses = traces.tool_uses("memory_search")
+    assert [(u.correlation, u.kind, u.ok) for u in uses] == [("e2", "STEP", False), ("e1", "REPLY", True),
+                                                             ("old", "REPLY", True)]
+    assert not traces.tool_uses("outil_imaginaire")[0].executed
+    # le règlement remplace la trace : ses appels aussi, sans doublon
+    traces.record("e1", now - 2 * HOUR, "REPLY", "user_1", with_tools(("memory_search", True, True)))
+    await traces.flush()
+    assert traces.tool_usage(now - 14 * DAY)["memory_search"].calls == 2
+    assert "outil_imaginaire" not in traces.tool_usage(0)
+    # rien des arguments n'est rangé à part
+    columns = [r[1] for r in store.query_views("PRAGMA table_info(tool_uses)")]
+    assert "args" not in columns
+    # élaguées avec leur trace, oubliées avec tout
+    await traces.prune(now)
+    assert [u.correlation for u in traces.tool_uses("memory_search")] == ["e2", "e1"]
+    await traces.forget("user_1")
+    assert traces.tool_usage(0) == {}
+    await store.close()
+
+
 async def test_oversized_content_is_truncated_with_an_explicit_mark(tmp_path):
     store, traces = await opened(tmp_path)
     huge_system = "S" * (MAX_TEXT + 5000)

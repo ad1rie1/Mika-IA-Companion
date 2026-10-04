@@ -20,6 +20,7 @@ suite, puis avec un recul si elle n'arrive pas à partir ; et jamais au-delà de
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -59,6 +60,8 @@ from mika.runtime.scheduler import Scheduler
 from mika.runtime.series import Sampler, SeriesStore, sampler_spec
 from mika.runtime.state import MAX_REPLY_ATTEMPTS, RETRY_NOW, RUNTIME, turn_of, turn_upto, unanswered_at_end
 from mika.runtime.traces import EpisodeTraces
+
+log = logging.getLogger("mika.kernel")
 
 #: le recul entre deux reprises d'une réponse qui n'arrive pas à partir
 RETRY_BASE_S = 0.5
@@ -218,12 +221,29 @@ class Kernel:
         await self.traces.open()
         await self.series.open()
         await self.traces.prune(self.mind.clock.now())
+        self.refresh_tools()
         await self.mind.append([BOOT.draft(code=self.deps.code)], emitter="kernel", origin=Origin.KERNEL,
                                correlation="boot")
         if configure is not None:
             await configure(self)
         self.booted = True
         return report
+
+    def refresh_tools(self) -> list[str]:
+        """Recalculer les outils dynamiques (ADR 0064) : chaque source les rend d'après ses ports, le registre les
+        range. Au démarrage, et quand un port signale que son offre a changé. Rend les problèmes (dits au journal)."""
+        problems: list[str] = []
+        for src in self.registry.tool_sources.values():
+            got = call(src.fn, self.ports, label=f"source d'outils {src.family}")
+            if isinstance(got, Failed) or not isinstance(got, tuple) or len(got) != 2:
+                problems.append(f"source d'outils {src.family} : illisible")
+                tools, bundles = (), {}
+            else:
+                tools, bundles = got
+            problems += self.registry.set_dynamic(src.owner, tools, bundles)
+        for problem in problems:
+            log.warning("outils : %s", problem)
+        return problems
 
     async def live(self) -> None:
         """Second temps, une fois l'hôte branché (passerelle, budget, écrans, canaux) : les voies, la reprise

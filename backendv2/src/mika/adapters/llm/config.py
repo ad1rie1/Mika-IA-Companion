@@ -314,6 +314,12 @@ class LiveGateway:
     def is_voice(self, role: str) -> bool:
         return role in {str(r) for r in VOICE_ROLES}
 
+    def defers_tools(self, role: str) -> bool:
+        """Le fournisseur de ce rôle sait-il différer des outils (``Gateway.defers_tools``) ? Sans configuration :
+        oui (l'appel échouera de toute façon). Sans ce relais, le pipeline n'avait rien à demander et concluait
+        « oui » : Ollama recevait tous ses outils *et* « ils ne sont pas chargés, cherche-les » (2026-10-04)."""
+        return self._inner.defers_tools(role) if self._inner is not None else True
+
     async def call(self, req: LLMRequest) -> LLMResponse:
         if self.is_voice(req.role) and req.persona is None:
             raise MissingPersona(f"le rôle voix « {req.role} » exige une persona")

@@ -44,6 +44,7 @@ from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError, runtime_dir
 from mika.adapters.llm.config import REPLY, ROLE_LABELS, ROLES, BackendSpec, LLMConfig, build_backend
 from mika.adapters.mail import LEGACY_ACCOUNT
+from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.shares import DiskShares
 from mika.adapters.store_sqlite import SqliteStore
@@ -253,6 +254,30 @@ async def identity_command(data: Path, cmd: str, handle: str, person: str | None
         return await _perform(kernel, "identity.delier", handle, {})
     finally:
         await _close(kernel, data)
+
+
+async def mcp_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
+    """``mika mcp serveurs`` / ``mika mcp essai <serveur>`` : ce qui est branché, et ce qu'un serveur propose
+    maintenant (avec, pour chaque outil, ce que l'opérateur en a décidé). Aucun secret n'est rendu."""
+    hub = McpHub(settings.mcp, settings.mcp_tools, settings.save_mcp_tools, local_root=args.data / "mcp")
+    try:
+        if args.mcp_cmd == "serveurs":
+            return {"ok": True, "serveurs": [
+                {"nom": n, "ou": s.transport, "actif": s.enabled, "a_quoi": s.purpose,
+                 "adresse": s.url if not s.local else s.command, "pour": s.audience, "manque": s.problems()}
+                for n, s in sorted(settings.mcp().servers.items())]}
+        ok, message = await hub.test(args.serveur)
+        status = hub.status(args.serveur)
+        tools = []
+        for t in status.live if status is not None else ():
+            review = status.reviews.get(t.remote) if status is not None else None
+            state = ("à regarder" if review is None else "suspendu (changé)" if review.enabled
+                     and review.fingerprint != t.fingerprint else "approuvé" if review.enabled else "désactivé")
+            tools.append({"outil": t.remote, "description": t.description, "lecture_seule": t.read_only_hint,
+                          "etat": state})
+        return {"ok": ok, "message": message, "outils": tools}
+    finally:
+        await hub.aclose()
 
 
 async def _with_settings(data: Path, fn):  # type: ignore[no-untyped-def]
@@ -710,6 +735,9 @@ def _run(argv: list[str] | None) -> int:
     mc = sub.add_parser("mcp", help="lire Mika depuis ton Claude Code (point /mcp/console, lecture seule)")
     mcsub = mc.add_subparsers(dest="mcp_cmd", required=True)
     mcsub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
+    mcsub.add_parser("serveurs", help="les serveurs MCP branchés (ADR 0064) et leurs réglages, sans secret")
+    mce = mcsub.add_parser("essai", help="joindre un serveur MCP branché et lister ses outils (rien n'est approuvé)")
+    mce.add_argument("serveur")
     se = sub.add_parser("sensors", help="le jeton des appareils (POST /api/perceptions)")
     sesub = se.add_subparsers(dest="sensors_cmd", required=True)
     sesub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
@@ -820,6 +848,10 @@ def _run(argv: list[str] | None) -> int:
         out = asyncio.run(token_command(args.data, args))
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0 if out["ok"] else 1
+    if args.cmd == "mcp" and args.mcp_cmd in ("serveurs", "essai"):
+        out = asyncio.run(_with_settings(args.data, lambda settings, _store: mcp_command(settings, args)))
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0 if out.get("ok", True) else 1
     if args.cmd == "mcp":
         async def mcp_token(settings: Settings, store) -> dict[str, object]:  # type: ignore[no-untyped-def]
             token = await settings.new_console_mcp_token()

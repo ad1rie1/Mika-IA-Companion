@@ -346,6 +346,33 @@ def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return blocks
 
 
+@FORGE.inspect("outils_apps", title="Outils de ses apps", section="outils", order=50,
+               description="Les outils que ses apps déclarent : elle les appelle par forge_call. Ils se règlent dans "
+                           "la Forge (l'app, sa promotion), pas ici.")
+def _inspect_app_tools(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    port = ctx.ports.get("forge")
+    if port is None:
+        return [Note("Forge non configurée : aucune app ne peut servir.", tone="muted")]
+    rows = []
+    for info in sorted(port.apps(), key=lambda i: i.name):
+        app = s.apps.get(info.name)
+        if not info.tools:
+            continue
+        if app is None or not app.enabled or app.broken:
+            state, tone = ("en panne", "danger") if app is not None and app.broken else ("arrêtée", "muted")
+        elif app.promoted:
+            state, tone = "sert partout où forge_call est offert", "ok"
+        else:
+            state, tone = "sert seulement quand elle travaille", "info"
+        for tool in info.tools:
+            rows.append(Row((_fiche(info.name), Text(tool.name, "mono"), Text(_clip(tool.description, 300)),
+                             Badge(state, tone)), href=_fiche(info.name) if APP_NAME.match(info.name) else None))
+    return [Table(("app", Column("outil", "fit"), "ce qu'il fait", "quand il sert"), tuple(rows),
+                  title="Les outils de ses apps", empty="Aucune de ses apps ne déclare d'outil.",
+                  caption="Une app non promue ne sert que pendant son travail ; l'opérateur la promeut depuis sa "
+                          "fiche.")]
+
+
 @FORGE.inspect("app", title="App forgée", hidden=True, params=[("app", "app")])
 def _inspect_app(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     """L'ancienne page d'une app (les liens anciens y mènent encore) : tout d'un coup, sans rien exécuter."""

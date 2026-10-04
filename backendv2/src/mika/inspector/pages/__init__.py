@@ -8,6 +8,7 @@ from mika.inspector.pages import (  # noqa: F401 — enregistrement
     home,
     reglages,
     system,
+    tools,
 )
 from mika.inspector.pages.tabs import TABS
 

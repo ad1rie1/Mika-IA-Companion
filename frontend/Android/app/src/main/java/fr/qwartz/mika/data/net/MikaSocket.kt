@@ -210,6 +210,14 @@ class MikaSocket(
     }
 
     /**
+     * Décider d'une carte d'accord : une trame de contrôle, partie maintenant ou pas du tout — jamais
+     * en file (un accord rejoué après une coupure vaudrait pour une carte qui a pu changer). `false` :
+     * la socket n'est pas ouverte, rien n'est parti.
+     */
+    fun sendApproval(id: Long, decision: ApprovalDecision, digest: String): Boolean =
+        sendNow(FrameCodec.approval(id, decision, digest))
+
+    /**
      * Envoyer un message. `true` : la socket est ouverte, il part maintenant ; `false` : il attend
      * une connexion, ou il est refusé (un accusé synthétique le dit).
      */
@@ -464,7 +472,7 @@ class MikaSocket(
 
     /**
      * Envoyer si la socket est ouverte, sinon rien — jamais en file. Pour les trames de contrôle
-     * (`sync`, `ping`, `presence`) dont toute la valeur est d'être actuelles.
+     * (`sync`, `ping`, `presence`, `approval`) dont toute la valeur est d'être actuelles.
      */
     private fun sendNow(text: String): Boolean {
         val s = socket ?: return false

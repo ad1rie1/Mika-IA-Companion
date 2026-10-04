@@ -21,6 +21,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
+from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 
 log = logging.getLogger("mika.settings")
@@ -41,6 +42,9 @@ CONSOLE_MCP_KEY = "console_mcp"
 PERSONA_KEY = "persona"
 OVERRIDES_KEY = "overrides"
 FORGE_CONFIG_KEY = "forge_config"
+#: les serveurs MCP branchés (ADR 0064 ; jeton et variables secrètes scellés) et les décisions sur leurs outils
+MCP_KEY = "mcp"
+MCP_TOOLS_KEY = "mcp_tools"
 #: les réglages d'un canal retiré (Telegram, ADR 0060) : effacés à l'ouverture — un jeton scellé que plus
 #: rien ne lit ne reste pas dans ``mind.db`` ni dans ses sauvegardes
 RETIRED_KEYS = ("telegram",)
@@ -207,6 +211,54 @@ class Settings:
         current.update({k: v for k, v in fields.items() if v is not None})
         account = MailAccount.model_validate(current)
         return await self.save_email(MailConfig(accounts={**cfg.accounts, name: account}))
+
+    # ── Outils extérieurs (MCP, ADR 0064) ──
+    #: les secrets d'un serveur MCP (scellés à part)
+    MCP_SECRETS = ("token", "secret_env")
+
+    def mcp(self) -> McpConfig:
+        """Les serveurs MCP (secrets déchiffrés) ; un serveur illisible est écarté, jamais bloquant."""
+        servers = {}
+        for name, spec in dict(dict(self._get(MCP_KEY) or {}).get("servers") or {}).items():
+            spec = dict(spec)
+            for k in self.MCP_SECRETS:
+                spec[k] = self.box.open(spec.pop(f"{k}_sealed", ""))
+            try:
+                servers[name] = McpServer.model_validate(spec)
+            except ValueError:
+                log.warning("mcp : le serveur « %s » est illisible, il est ignoré", str(name)[:40])
+        try:
+            return McpConfig(servers=servers)
+        except ValueError:
+            return McpConfig()
+
+    async def save_mcp(self, cfg: McpConfig) -> McpConfig:
+        cfg = McpConfig.model_validate({"servers": dict(cfg.servers)})
+        servers = {}
+        for name, server in cfg.servers.items():
+            spec = server.model_dump(mode="json")
+            for k in self.MCP_SECRETS:
+                spec[f"{k}_sealed"] = self.box.seal(spec.pop(k))
+            servers[name] = spec
+        await self._put(MCP_KEY, {"servers": servers})
+        return cfg
+
+    def mcp_tools(self) -> dict[str, dict[str, StoredReview]]:
+        """Les décisions de l'opérateur sur les outils des serveurs : serveur → outil → décision."""
+        out: dict[str, dict[str, StoredReview]] = {}
+        for server, tools in dict(self._get(MCP_TOOLS_KEY) or {}).items():
+            kept = {}
+            for remote, raw in dict(tools or {}).items():
+                try:
+                    kept[str(remote)] = StoredReview.model_validate(raw)
+                except ValueError:
+                    continue
+            out[str(server)] = kept
+        return out
+
+    async def save_mcp_tools(self, reviews: dict[str, dict[str, StoredReview]]) -> None:
+        await self._put(MCP_TOOLS_KEY, {s: {r: v.model_dump(mode="json", by_alias=True) for r, v in tools.items()}
+                                        for s, tools in reviews.items()})
 
     def feeds(self) -> list[str]:
         return [str(u) for u in (self._get(FEEDS_KEY) or [])]

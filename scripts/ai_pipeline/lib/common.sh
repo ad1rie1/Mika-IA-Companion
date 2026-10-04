@@ -500,6 +500,31 @@ module_group() {
     done
 }
 
+# Module le plus précis qui contient un chemin (vide si aucun).
+module_for_path() {
+    local path="${1#./}" best="" m
+    for m in "${AVAILABLE_MODULES[@]}"; do
+        if [[ "$path" == "$m" || "$path" == "$m/"* ]] && (( ${#m} > ${#best} )); then
+            best="$m"
+        fi
+    done
+    echo "$best"
+}
+
+# Module du premier fichier d'une liste « a.py, b/c.py » qui en a un. Les
+# suffixes « :42 » ou « (fonction) » et les accents graves sont ignorés.
+module_for_files() {
+    local -a list=()
+    local f m
+    IFS=',' read -ra list <<< "$1"
+    for f in "${list[@]}"; do
+        f=$(sed 's/^[[:space:]`]*//; s/[[:space:]`]*$//' <<< "$f")
+        f="${f%%[ :(]*}"
+        m=$(module_for_path "$f")
+        [[ -n "$m" ]] && { echo "$m"; return 0; }
+    done
+}
+
 # Le module existe-t-il sur BASE_REF ? C'est l'état que l'agent lit dans le
 # worktree : un dossier présent dans la copie de travail mais pas encore
 # poussé y serait vide, et l'agent aurait audité du vide.

@@ -539,6 +539,7 @@ class _Session:
         # écran qui s'ouvre la montrait au milieu de la pièce jusqu'au prochain changement d'état
         await self.hub.push_face(self.conn.handle, force=True)
         await self.hub.refresh_panels([self.conn.handle])
+        await self.hub.push_approvals([self.conn.handle], if_any=True)
 
     async def announce(self) -> None:
         """Un écran qui s'ouvre : la présence, le fil initial, le visage, le panneau."""
@@ -630,8 +631,31 @@ class _Session:
                 await self.sync(frame)
         elif kind == "presence":
             await self.presence(frame)
+        elif kind == "approval":
+            if self.conn.control.allow():
+                await self.approval(frame)
         elif kind == "chat":
             self.enqueue_chat(frame)
+
+    async def approval(self, frame: dict[str, Any]) -> None:
+        """Une carte d'accord décidée (ADR 0064) : par la personne à qui elle est adressée, connectée et
+        authentifiée, telle qu'elle était montrée (``digest``). La réponse dit le sort ; la liste suit."""
+        try:
+            proposal = int(frame.get("id"))
+        except (TypeError, ValueError):
+            return
+        decision = frame.get("decision")
+        if decision not in ("accept", "refuse"):
+            return
+        if not self.conn.authenticated or self.account is None or not self._session_valid():
+            await self.send({"type": "approval_result", "id": proposal, "status": "forbidden"})
+            return
+        decide = getattr(self.port, "decide_card", None)
+        status = await decide(self.conn.handle, proposal, decision == "accept", str(frame.get("digest") or "")[:128]) \
+            if decide is not None else "unknown"
+        await self.send({"type": "approval_result", "id": proposal, "status": status})
+        await self.hub.push_approvals([self.conn.handle])
+        await self.hub.refresh_panels()
 
     def enqueue_chat(self, frame: dict[str, Any]) -> None:
         """Le chat avance dans sa propre tâche : la lecture des trames continue pendant

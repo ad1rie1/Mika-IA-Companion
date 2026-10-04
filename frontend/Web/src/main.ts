@@ -289,6 +289,11 @@ async function init() {
   ws.on("inner_state_update", (data) => presenter.handleInnerStateUpdate(data));
   ws.on("emotion_update", (data) => presenter.handleEmotionUpdate(data));
   ws.on("ack", (data) => presenter.handleAck(data));
+  // Les cartes d'accord (backendv2, ADR 0064) : un appel à un service
+  // extérieur attend la décision de la personne. La liste entière à chaque
+  // changement, puis le sort de chaque décision ; seuls les boutons décident.
+  ws.on("approvals", (data) => chatOverlay.setApprovals(data.items));
+  ws.on("approval_result", (data) => chatOverlay.showApprovalResult(data));
   // Pas de trame `project_report` : le serveur v2 n'en émet pas. Ce qu'elle
   // raconte d'un projet arrive comme une parole (`speech`), dans le fil.
 

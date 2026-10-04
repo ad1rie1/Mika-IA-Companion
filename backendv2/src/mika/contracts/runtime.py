@@ -8,6 +8,10 @@ from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
 from mika.kernel.facts import FactFamily, FactKey
 
 OWNER = "runtime"
+#: dans les arguments d'un effet proposé (ADR 0064) : l'adresse de la personne qui en décide **dans le chat** (une
+#: carte d'accord, à elle seule), et l'instant (µs) au-delà duquel la carte ne vaut plus
+DECIDER = "_decider"
+EXPIRES = "_expires"
 NAMESPACES = ("perception", "episode", "effect", "runtime")
 
 

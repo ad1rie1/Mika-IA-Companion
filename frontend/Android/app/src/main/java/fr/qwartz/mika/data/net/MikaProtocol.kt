@@ -78,10 +78,13 @@ object MikaProtocol {
     const val TYPE_EMOTION_UPDATE = "emotion_update"
     const val TYPE_INNER_STATE_UPDATE = "inner_state_update"
     const val TYPE_PONG = "pong"
+    const val TYPE_APPROVALS = "approvals"
+    const val TYPE_APPROVAL_RESULT = "approval_result"
     const val TYPE_CHAT = "chat"
     const val TYPE_SYNC = "sync"
     const val TYPE_PING = "ping"
     const val TYPE_PRESENCE = "presence"
+    const val TYPE_APPROVAL = "approval"
 
     const val MODE_INITIAL = "initial"
     const val MODE_CATCHUP = "catchup"
@@ -96,6 +99,28 @@ object MikaProtocol {
     /** Propres à l'app : la connexion refusée (1008/403) et des fichiers disparus du téléphone. */
     const val ACK_CONNECTION_REFUSED = "connection_refused"
     const val ACK_FILES_MISSING = "files_missing"
+
+    // ── Cartes d'accord (ADR 0064 ; app/mindport.py::approval_cards, adapters/web/app.py::approval) ──
+    const val DECISION_ACCEPT = "accept"
+    const val DECISION_REFUSE = "refuse"
+    const val APPROVAL_APPROVED = "approved"
+    const val APPROVAL_REJECTED = "rejected"
+    const val APPROVAL_UNKNOWN = "unknown"
+    const val APPROVAL_CHANGED = "changed"
+    const val APPROVAL_BLOCKED = "blocked"
+    const val APPROVAL_EXPIRED = "expired"
+    const val APPROVAL_FORBIDDEN = "forbidden"
+    /** L'empreinte de ce qui partirait : hexadécimale, tronquée à 128 par le serveur. */
+    val APPROVAL_DIGEST = Regex("[0-9a-f]{0,128}")
+    /**
+     * Bornes de lecture, au-dessus de celles du serveur (titre 400, texte 4 000) : un titre ou une raison
+     * plus longs sont coupés à l'affichage ; un texte plus long est coupé aussi, et la carte ne peut plus
+     * qu'être refusée — on n'accepte pas ce qu'on n'a pas pu lire en entier.
+     */
+    const val MAX_APPROVAL_TITLE_CHARS = 1_000
+    const val MAX_APPROVAL_TEXT_CHARS = 16_000
+    const val MAX_APPROVAL_BLOCKED_CHARS = 1_000
+    const val MAX_APPROVAL_CARDS = 50
 
     // ── Voix et sources (protocol.py) ──
     const val VOICE_REASON_ASLEEP = "asleep"

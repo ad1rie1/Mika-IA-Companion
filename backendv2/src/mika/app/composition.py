@@ -45,6 +45,7 @@ from mika.plugins.camera import CAMERA
 from mika.plugins.email import EMAIL
 from mika.plugins.forge import FORGE
 from mika.plugins.imaging import IMAGING
+from mika.plugins.mcp import MCP
 from mika.plugins.rss import RSS
 from mika.plugins.sensors import SENSORS
 from mika.runtime import params
@@ -58,7 +59,8 @@ log = logging.getLogger("mika.composition")
 def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, WORLD, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
-            EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, EMAIL, RSS, CAMERA, FORGE, SENSORS, IMAGING]
+            EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, EMAIL, RSS, CAMERA, FORGE, SENSORS, IMAGING,
+            MCP]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -75,8 +77,12 @@ def _reply_wait(frame: Frame, seq: int) -> int | None:
     return frame.get(body_c.REPLY_WAIT(seq))
 
 
+#: les lots des outils venus d'ailleurs (ADR 0064) : une famille, ``mcp.<serveur>`` — chaque serveur dit lui-même
+#: dans quelles sortes d'épisodes il sert ; un but ou un projet ne s'en sert que s'il a pris son lot
+EXTERNAL = "mcp.*"
 #: les lots qu'un projet peut avoir (chaque projet choisit les siens parmi eux)
-PROJECT_TOOLS = frozenset({"projects", "workshop", "memory", "email", "rss", "camera", "forge", "forge_apps"})
+PROJECT_TOOLS = frozenset({"projects", "workshop", "memory", "email", "rss", "camera", "forge", "forge_apps",
+                           EXTERNAL})
 
 # Les lots « en main » de chaque sorte d'épisode : ce qu'une conversation ordinaire sert vraiment — chercher
 # dans sa mémoire, dire qu'une promesse est tenue, poser un rappel. Le reste (l'identité, les projets, le
@@ -101,20 +107,20 @@ def policies() -> dict[str, EpisodePolicy]:
                                   guard=_reply_guard, max_tokens=1024, deadline_s=180.0,
                                   tool_bundles=frozenset({"memory", "identity", "goals", "projects", "email", "rss",
                                                           "camera", "forge", "forge_apps", "self", "attention",
-                                                          "social", "world", "shares", "imaging"}),
+                                                          "social", "world", "shares", "imaging", EXTERNAL}),
                                   core_bundles=REPLY_IN_HAND),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
                                        tool_bundles=frozenset({"memory", "identity", "rss", "forge_apps", "self",
                                                                "attention", "social", "world", "shares",
-                                                               "imaging"}),
+                                                               "imaging", EXTERNAL}),
                                        core_bundles=INITIATIVE_IN_HAND),
         # un pas de travail : sa voix (compacte), pour elle seule — ni fil, ni livraison ; le verdict fait l'affect
         Kind.STEP: EpisodePolicy(kind=Kind.STEP, role=Role.STEP, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=step_brief,
                                  max_tool_turns=12, max_tokens=2048, deadline_s=300.0,
                                  tool_bundles=frozenset({"goals", "memory", "projects", "email", "rss",
-                                                         "camera", "forge", "forge_apps"}),
+                                                         "camera", "forge", "forge_apps", EXTERNAL}),
                                  core_bundles=STEP_IN_HAND),
         # une exécution sur un projet, dans son mode à elle : sa voix (compacte), son humeur, ses avis — pour
         # elle seule, ni fil ni livraison ; ses outils, ceux du projet (``bundles`` du candidat)

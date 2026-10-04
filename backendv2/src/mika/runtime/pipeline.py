@@ -56,7 +56,16 @@ from mika.kernel.state import FrozenDict
 from mika.ports.llm import PREEMPTED, LLMGateway, LLMRequest, Message, PersonaRender, ToolDecl
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.state import RUNTIME, turn_upto, unanswered_at_end
-from mika.runtime.tools import LoopResult, ToolContext, catalogue, declare, run_tool_loop
+from mika.runtime.tools import (
+    LoopResult,
+    ToolContext,
+    acting,
+    catalogue,
+    declare,
+    defers_tools,
+    offer,
+    run_tool_loop,
+)
 from mika.runtime.traces import STABLE_KEY, EpisodeTraces
 
 if TYPE_CHECKING:
@@ -337,7 +346,9 @@ class EpisodeRunner:
                 if core is not None and policy.role is not None and not _defers(self.gateway, policy.role):
                     # un fournisseur sans recherche d'outils reçoit tout : le prompt ne parle pas d'outils à chercher
                     core = None
-                more = catalogue(offered, core, mind.registry.bundles)
+                # une parole que quelqu'un lira : ses outils sont ses mains (faire, pas annoncer ni inventer)
+                more = "\n\n".join(filter(None, (acting(offered) if policy.visible else "",
+                                                 catalogue(offered, core, mind.registry.bundles))))
                 declared = declare(offered, core)
                 prompt, trace = self.composer.compose(
                     blocks, kind=req.kind, audience_level=audience.level, witness_level=audience.witness_level,
@@ -594,25 +605,8 @@ class EpisodeRunner:
         return out
 
     def _tools(self, policy: EpisodePolicy, kind: str, audience: Audience, only: Any = None) -> dict[str, Any]:
-        """Les outils offerts : les lots de la politique — restreints, quand le
-        candidat le dit (``bundles`` : « goals,workshop »), à ceux-là seuls. Un
-        lot est offert entier ou pas du tout, moins les outils réservés à ses
-        propriétaires quand quelqu'un d'autre écoute (``owner_only``)."""
-        bundles = policy.tool_bundles
-        if only:
-            bundles = bundles & frozenset(b.strip() for b in str(only).split(",") if b.strip())
-        out = {}
-        for name, spec in self.mind.registry.tools.items():
-            if kind not in spec.episodes or spec.bundle not in bundles:
-                continue
-            if spec.min_level is not None and audience.level < spec.min_level:
-                continue
-            if spec.owner_only and not audience.owner:
-                continue
-            if spec.when is not None and call(spec.when, audience, label=f"offre de {name}") is not True:
-                continue
-            out[name] = spec
-        return out
+        """Les outils offerts (``tools.offer``, la seule porte)."""
+        return offer(self.mind.registry.tools, policy, kind, audience, only)
 
     def _parse(self, text: str) -> tuple[str, dict[str, str]]:
         annotations: dict[str, str] = {}
@@ -696,12 +690,8 @@ def _scope(root: Any, req: EpisodeRequest, eid: str) -> str:
 
 
 def _defers(gateway: LLMGateway | None, role: str) -> bool:
-    """Le fournisseur de ce rôle sait-il différer des outils ? Sans réponse (ou en panne) : oui."""
-    ask = getattr(gateway, "defers_tools", None)
-    if ask is None:
-        return True
-    got = call(ask, role, label="outils différables")
-    return True if isinstance(got, Failed) else bool(got)
+    """Le fournisseur de ce rôle sait-il différer des outils ? (``tools.defers_tools``)"""
+    return defers_tools(gateway, role)
 
 
 def _in_hand(policy: EpisodePolicy, req: EpisodeRequest) -> frozenset[str] | None:

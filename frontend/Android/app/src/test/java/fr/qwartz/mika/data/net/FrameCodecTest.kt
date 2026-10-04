@@ -176,4 +176,98 @@ class FrameCodecTest {
         assertEquals("""{"type":"presence","here":true}""", FrameCodec.presence(true))
         assertEquals("""{"type":"presence","here":false}""", FrameCodec.presence(false))
     }
+
+    // ── Cartes d'accord (ADR 0064) ───────────────────────────────────────────────────────
+
+    @Test fun `des cartes d'accord — les lisibles passent, les mal formées sont écartées une à une`() {
+        val a = decode<ServerFrame.Approvals>("approvals.json")
+        assertEquals(listOf(905L, 906L, 912L), a.items.map { it.id })
+
+        val first = a.items[0]
+        assertEquals("Appeler « prevision » (meteo) : {\"ville\": \"Lyon\"}", first.title)
+        assertEquals("Service : meteo\nOutil : prevision\nCe qui partira :\n{\n \"ville\": \"Lyon\"\n}", first.text)
+        assertEquals("3f9c0a7e", first.digest)
+        assertEquals("", first.blocked)
+        assertEquals(1_790_602_215_002L, first.expiresAt)
+        assertTrue(first.complete)
+
+        // Le doublon de 905 ne remplace pas la première.
+        assertEquals("3f9c0a7e", a.items.single { it.id == 905L }.digest)
+
+        val blocked = a.items[1]
+        assertEquals("l'outil a changé depuis la demande", blocked.blocked)
+        assertNull(blocked.expiresAt)
+
+        // Rien d'autre que l'identifiant : lisible, vide (elle ne pourra qu'être refusée).
+        val bare = a.items[2]
+        assertEquals("", bare.text)
+        assertEquals("", bare.digest)
+        assertEquals("", bare.blocked)
+    }
+
+    @Test fun `une liste vide est une liste — elle efface ce qui était montré`() {
+        assertEquals(ServerFrame.Approvals(emptyList()), FrameCodec.decode("""{"type":"approvals","items":[]}"""))
+    }
+
+    @Test fun `sans items lisible, la trame est ignorée plutôt que de vider la liste`() {
+        assertEquals(ServerFrame.Unknown("approvals"), FrameCodec.decode("""{"type":"approvals"}"""))
+        assertEquals(ServerFrame.Unknown("approvals"), FrameCodec.decode("""{"type":"approvals","items":null}"""))
+        assertEquals(ServerFrame.Unknown("approvals"), FrameCodec.decode("""{"type":"approvals","items":{"id":1}}"""))
+    }
+
+    @Test fun `une empreinte de plus de 128 caractères est écartée`() {
+        val ok = "a".repeat(128)
+        val tooLong = "a".repeat(129)
+        val a = FrameCodec.decode(
+            """{"type":"approvals","items":[{"id":1,"text":"x","digest":"$ok"},{"id":2,"text":"x","digest":"$tooLong"}]}""",
+        ) as ServerFrame.Approvals
+        assertEquals(listOf(1L), a.items.map { it.id })
+    }
+
+    @Test fun `un texte trop long est coupé et la carte marquée incomplète, un titre trop long est coupé`() {
+        val text = "x".repeat(MikaProtocol.MAX_APPROVAL_TEXT_CHARS + 10)
+        val title = "t".repeat(MikaProtocol.MAX_APPROVAL_TITLE_CHARS + 10)
+        val a = FrameCodec.decode(
+            """{"type":"approvals","items":[{"id":3,"title":"$title","text":"$text","digest":"ab"}]}""",
+        ) as ServerFrame.Approvals
+        val card = a.items.single()
+        assertFalse(card.complete)
+        assertEquals(MikaProtocol.MAX_APPROVAL_TEXT_CHARS, card.text.length)
+        assertEquals(MikaProtocol.MAX_APPROVAL_TITLE_CHARS, card.title.length)
+        assertTrue(card.title.endsWith("…"))
+    }
+
+    @Test fun `une échéance à virgule est lue, une échéance nulle ou négative écarte la carte`() {
+        val a = FrameCodec.decode(
+            """{"type":"approvals","items":[{"id":1,"digest":"ab","expires_at":1790602215002.0},""" +
+                """{"id":2,"digest":"ab","expires_at":0},{"id":3,"digest":"ab","expires_at":-5}]}""",
+        ) as ServerFrame.Approvals
+        assertEquals(listOf(1L), a.items.map { it.id })
+        assertEquals(1_790_602_215_002L, a.items.single().expiresAt)
+    }
+
+    @Test fun `le sort d'une décision`() {
+        assertEquals(
+            ServerFrame.ApprovalResult(905, "approved"),
+            FrameCodec.decode("""{"type":"approval_result","id":905,"status":"approved"}"""),
+        )
+        assertEquals(
+            ServerFrame.ApprovalResult(905, "quelque chose de nouveau"),
+            FrameCodec.decode("""{"type":"approval_result","id":905,"status":"quelque chose de nouveau"}"""),
+        )
+        assertEquals(ServerFrame.Unknown("approval_result"), FrameCodec.decode("""{"type":"approval_result","id":"905","status":"approved"}"""))
+        assertEquals(ServerFrame.Unknown("approval_result"), FrameCodec.decode("""{"type":"approval_result","id":905}"""))
+        assertEquals(ServerFrame.Unknown("approval_result"), FrameCodec.decode("""{"type":"approval_result","id":0,"status":"approved"}"""))
+    }
+
+    @Test fun `une décision d'accord, au JSON exact`() {
+        assertEquals(
+            """{"type":"approval","id":905,"decision":"accept","digest":"3f9c"}""",
+            FrameCodec.approval(905, ApprovalDecision.ACCEPT, "3f9c"),
+        )
+        assertEquals(
+            """{"type":"approval","id":7,"decision":"refuse","digest":""}""",
+            FrameCodec.approval(7, ApprovalDecision.REFUSE, ""),
+        )
+    }
 }

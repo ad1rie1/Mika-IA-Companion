@@ -9,12 +9,24 @@
 # notifications contenait trois lignes de décor.
 
 # Crée un label GitHub s'il n'existe pas (silencieux : il est appelé dans des
-# fonctions dont la sortie est capturée).
+# fonctions dont la sortie est capturée). Un label déjà assuré dans ce
+# processus ne coûte plus d'appel.
+declare -A _ENSURED_LABELS=()
 ensure_label() {
     local name="$1"
     local color="${2:-bfdadc}"
     local desc="${3:-}"
+    [[ -n "${_ENSURED_LABELS[$name]:-}" ]] && return 0
     gh label create "$name" --color "$color" --description "$desc" >/dev/null 2>&1 || true
+    _ENSURED_LABELS[$name]=1
+}
+
+# Labels de module et de groupe d'une issue.
+ensure_module_labels() {
+    local module="$1" group="$2"
+    [[ -n "$module" ]] && ensure_label "$(module_label "$module")" "bfdadc" "Module ${module}"
+    [[ -n "$group" ]] && ensure_label "groupe:${group}" "5319e7" "${MODULE_GROUP_DESCRIPTIONS[$group]:-Groupe ${group}}"
+    return 0
 }
 
 ai_agent_pr_label() {
@@ -131,15 +143,16 @@ pick_module() {
     echo "${available[RANDOM % ${#available[@]}]}"
 }
 
-# Issues d'audit déjà connues pour un module, montrées à l'agent pour qu'il ne
-# les reprenne pas : TOUS profils (un même défaut revenait en bugs, puis en
-# quality ou security), ouvertes et fermées depuis DEDUP_CLOSED_DAYS jours.
+# Issues d'audit déjà connues pour un module ou un groupe (son label :
+# `module:…` ou `groupe:…`), montrées à l'agent pour qu'il ne les reprenne
+# pas : TOUS profils (un même défaut revenait en bugs, puis en quality ou
+# security), ouvertes et fermées depuis DEDUP_CLOSED_DAYS jours.
 # Une ligne par issue : « #n [profil] ouverte|fermée le AAAA-MM-JJ - titre ».
 get_known_issues() {
-    local module="$1" json
+    local label="$1" json
     json=$(gh_query gh issue list --state all --limit 1000 \
         --label "ai-audit" \
-        --label "$(module_label "$module")" \
+        --label "$label" \
         --json number,title,state,closedAt,labels) || return 1
     jq -r --argjson days "${DEDUP_CLOSED_DAYS:-90}" '
         (now - $days * 86400) as $since
@@ -311,20 +324,22 @@ _issue_field() {
 # (AUDIT_SEVERITE_MIN) puis au filet anti-doublons (lib/dedup.py) contre
 # <pool>, la liste JSON des issues du dépôt. Écrit sur stdout
 # « créées doublons_écartés doublons_signalés sous_le_seuil ».
-#   create_github_issues <dossier> <profil> <module> <pool>
+#
+# En passage par groupe, <module> est vide : chaque issue retrouve son module
+# d'après ses fichiers (et garde ainsi un label de module précis), à défaut
+# elle ne porte que le label du groupe.
+#   create_github_issues <dossier> <profil> <module|""> <pool> [groupe]
 create_github_issues() {
     local issues_dir="$1"
     local profile="$2"
     local module="$3"
     local pool="$4"
+    local group="${5:-}"
     local created=0 skipped=0 flagged=0 below=0
 
     ensure_label "ai-audit" "1d76db" "Issue créée par AI Pipeline (audit)"
     ensure_label "ai-${profile}" "d73a4a" "Audit IA - ${profile}"
-    ensure_label "$(module_label "$module")" "bfdadc" "Module ${module}"
-    local group
-    group=$(module_group "$module")
-    [[ -n "$group" ]] && ensure_label "groupe:${group}" "5319e7" "${MODULE_GROUP_DESCRIPTIONS[$group]:-Groupe ${group}}"
+    [[ -n "$module" ]] && group=$(module_group "$module")
 
     # Propose_AI_PR déclenche la reprise automatique par le worker. Certains
     # profils ne doivent pas l'obtenir : une idée de fonctionnalité se décide
@@ -395,6 +410,14 @@ create_github_issues() {
             critical|high|medium|low) ;;
             *) severity="medium" ;;
         esac
+
+        local issue_module="$module" issue_group="$group"
+        if [[ -z "$issue_module" ]]; then
+            issue_module=$(module_for_files "$files")
+            [[ -n "$issue_module" ]] && issue_group=$(module_group "$issue_module")
+            issue_group="${issue_group:-$group}"
+        fi
+        ensure_module_labels "$issue_module" "$issue_group"
         local severity_label="severity:${severity}"
         ensure_label "${severity_label}" "fbca04" "Sévérité ${severity}"
 
@@ -416,7 +439,7 @@ ${dup_note:+
 ${dup_note}
 }
 **Profil d'analyse** : \`${profile}\`
-**Module** : \`${module}\`
+**Module** : \`${issue_module:-groupe ${issue_group}}\`
 ${weight_field} : \`${severity}\`
 **Fichiers concernés** : \`${files}\`
 
@@ -432,10 +455,10 @@ ISSUEBODY
         local -a issue_labels=(
             --label "ai-audit"
             --label "ai-${profile}"
-            --label "$(module_label "$module")"
             --label "${severity_label}"
         )
-        [[ -n "$group" ]] && issue_labels+=(--label "groupe:${group}")
+        [[ -n "$issue_module" ]] && issue_labels+=(--label "$(module_label "$issue_module")")
+        [[ -n "$issue_group" ]] && issue_labels+=(--label "groupe:${issue_group}")
         if [[ "$d_verdict" == "flag" ]]; then
             issue_labels+=(--label "doublon-possible")
             [[ "$auto_pr" == true ]] || issue_labels+=(--label "idee")

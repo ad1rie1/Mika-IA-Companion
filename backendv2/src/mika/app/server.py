@@ -40,6 +40,7 @@ from mika.adapters.llm.claude_code import runtime_dir
 from mika.adapters.llm.config import LiveGateway, build_gateway
 from mika.adapters.llm.gateway import LLMTrace
 from mika.adapters.mail import ImapSmtpMail
+from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.preprocess import LocalPreprocessor, whisper
@@ -188,6 +189,8 @@ class Live:
     imaging: LiveImaging = field(default_factory=LiveImaging)
     #: une génération d'images fournie de l'extérieur (tests) n'est pas rechargée
     imaging_fixed: bool = False
+    #: les serveurs MCP branchés (ADR 0064), le port ``mcp``
+    mcp: McpHub | None = None
 
     def trace(self, tr: LLMTrace) -> None:
         self.gateway.traces.append(tr)
@@ -311,12 +314,14 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
              "forge": forge, "forge_settings": forge_settings, "imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
     world["shares"] = DiskShares(data / "partages")
+    # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi
+    mcp = world["mcp"] = McpHub(settings.mcp, settings.mcp_tools, settings.save_mcp_tools, local_root=data / "mcp")
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
                                      ports={"delivery": hub, "vectors": vectors, **world}, **deps))
     port = KernelPort(kernel)
     hub.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
-                persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed)
+                persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp)
     # le monde (ADR 0051) : chaque lot commité qui change ce que montrent ses écrans leur part, traduit en trames
     world_hub = live.world = WorldHub(port, live.accounts, origins=web.origins, auth_required=web.auth_required)
 
@@ -351,6 +356,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             log.warning("configuration des modèles : %s", problem)
         for problem in await live.reload_imaging():
             log.warning("configuration des images : %s", problem)
+        mcp.on_change(kernel.refresh_tools)  # son offre change : ses outils aussi (ADR 0064)
+        mcp.start()  # chaque serveur actif est joint en tâche de fond
         hub.start()
         world_hub.start()
         await kernel.live()
@@ -359,6 +366,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         finally:
             await world_hub.stop()
             await hub.stop()
+            await mcp.aclose()
             await gateway.aclose()
             await imaging.aclose()
             await live.calls.flush()
@@ -372,7 +380,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                      sections=reglages.sections(live), settings_tabs=reglages.TABS,
                                      parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
                                      faculty_labels=FACULTY_LABELS, labels=LABELS,
-                                     backups=lambda: backup.overview(data)),
+                                     backups=lambda: backup.overview(data), relay=live.relay),
                        cookie_secure=web.cookie_secure)
     preprocess = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     live.preprocess = preprocess

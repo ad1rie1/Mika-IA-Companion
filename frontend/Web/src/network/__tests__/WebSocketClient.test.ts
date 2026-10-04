@@ -487,3 +487,31 @@ describe("WebSocketClient — diffusion", () => {
     expect(sockets()).toHaveLength(1);
   });
 });
+
+describe("WebSocketClient — décisions d'accord (ADR 0064)", () => {
+  const frame = { type: "approval" as const, id: 905, decision: "accept" as const, digest: "3f9c" };
+
+  it("connexion ouverte : la décision part telle quelle", () => {
+    installDom();
+    const { ws } = client();
+    ws.connect();
+    last().open();
+    expect(ws.sendApproval(frame)).toBe(true);
+    const sent = last().frames();
+    expect(sent[sent.length - 1]).toEqual(frame);
+  });
+
+  it("connexion fermée : rien ne part, et rien n'est rejoué à la reconnexion", () => {
+    installDom();
+    const { ws } = client();
+    ws.connect();
+    expect(ws.sendApproval(frame)).toBe(false);
+    last().open();
+    expect(last().types()).not.toContain("approval");
+    last().fail();
+    expect(ws.sendApproval(frame)).toBe(false);
+    vi.advanceTimersByTime(1000);
+    last().open();
+    expect(last().types()).not.toContain("approval");
+  });
+});

@@ -186,6 +186,24 @@ def _config(kernel: Kernel) -> Check:
     return Check("config", OK, "paramètres et fuseau lisibles")
 
 
+def _ports(kernel: Kernel) -> Check:
+    """Ses branchements (ADR 0064) : un port qui sait dire ce qui est en panne chez lui (``failing()`` → des noms)
+    — un serveur d'outils extérieurs coupé par son disjoncteur, par exemple. Le noyau n'en nomme aucun."""
+    problems: list[str] = []
+    for name, port in sorted(kernel.deps.ports.items()):
+        failing = getattr(port, "failing", None)
+        if not callable(failing):
+            continue
+        got = call(failing, label=f"santé du port {name}")
+        if isinstance(got, Failed):
+            problems.append(f"{name} : ne dit pas son état ({describe_error(got.error)})")
+        elif isinstance(got, (list, tuple)) and got:
+            problems.append(f"{name} : en panne — {', '.join(str(x)[:40] for x in got[:5])}")
+    if problems:
+        return Check("ports", DEGRADED, problems[0][:200], tuple(problems))
+    return Check("ports", OK, "branchements en état")
+
+
 def _lanes(kernel: Kernel) -> Check:
     lanes = kernel.lanes
     counts = {lane: lanes.pending(lane) for lane in lanes.capacities}
@@ -200,5 +218,5 @@ def report(kernel: Kernel) -> Health:
     if kernel.phase != "ready":
         return Health(kernel.phase, ())
     checks = (_journal(kernel), _slices(kernel), _loops(kernel), _projections(kernel), _processes(kernel),
-              _outbox(kernel), _llm(kernel), _lanes(kernel), _config(kernel))
+              _outbox(kernel), _llm(kernel), _lanes(kernel), _config(kernel), _ports(kernel))
     return Health(kernel.phase, checks)

@@ -39,6 +39,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -166,6 +167,16 @@ fun SettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                 ThemeRow(R.string.settings_theme_dark, settings.theme == ThemeMode.DARK) {
                     scope.launch { graph.settings.setTheme(ThemeMode.DARK) }
                 }
+            }
+            // Sans portraits dans cette version de l'app, l'interrupteur dirait une chose qu'il ne peut pas faire.
+            val portraits by produceState(false) { value = graph.avatar.manifest() != null }
+            if (portraits) {
+                SwitchRow(
+                    title = stringResource(R.string.settings_avatar),
+                    summary = stringResource(R.string.settings_avatar_summary),
+                    checked = settings.avatar,
+                    onChange = { on -> scope.launch { graph.settings.setAvatar(on) } },
+                )
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 SwitchRow(

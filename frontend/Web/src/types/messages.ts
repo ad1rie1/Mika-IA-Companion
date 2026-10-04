@@ -376,6 +376,75 @@ export interface AvatarStateMessage {
   state: AvatarStateSnapshot;
 }
 
+/**
+ * Une carte d'accord (backendv2, ADR 0064 ; `docs/protocole-chat.md` §4) :
+ * un appel qu'elle veut faire à un service extérieur et qui attend l'accord
+ * de la personne à qui elle parle. Seul le bouton compte — un « oui » tapé
+ * dans le chat n'est jamais un accord.
+ *
+ * Validée à l'entrée par `ui/approvals.ts::approvalCards` : le type dit ce
+ * que le serveur promet, pas ce que la trame contient.
+ */
+export interface ApprovalCard {
+  /** Identifiant de la proposition, entier > 0. */
+  id: number;
+  /** Une ligne : quel outil, quel service, avec quoi. */
+  title: string;
+  /** Exactement ce qui partira — montré en texte brut, jamais interprété. */
+  text: string;
+  /** L'empreinte de ce qui est montré : un accord la renvoie telle quelle. */
+  digest: string;
+  /** Non vide : ça ne peut pas partir tel quel, seul le refus est possible. */
+  blocked: string;
+  /** Millisecondes Unix au-delà desquelles la carte ne vaut plus ; `null` : sans échéance. */
+  expires_at: number | null;
+}
+
+/**
+ * La liste **entière** des cartes de la personne, à chaque changement (et
+ * après chaque décision). À l'ouverture d'une connexion, le serveur ne
+ * l'envoie que s'il y a au moins une carte : le client repart donc d'une
+ * liste vide à chaque connexion.
+ */
+export interface ApprovalsMessage {
+  type: "approvals";
+  items?: ApprovalCard[];
+}
+
+/**
+ * Ce qu'est devenue une décision. Un statut absent de cette liste est lu
+ * comme un refus (jamais comme un succès) ; une liste `approvals` à jour
+ * suit toujours.
+ */
+export type ApprovalStatus =
+  | "approved"
+  | "rejected"
+  // déjà décidée, ou inconnue
+  | "unknown"
+  // ce qui partirait a changé depuis l'affichage : relire la carte
+  | "changed"
+  | "blocked"
+  | "expired"
+  // pas à cette personne de décider
+  | "forbidden";
+
+export interface ApprovalResultMessage {
+  type: "approval_result";
+  id: number;
+  status: ApprovalStatus;
+}
+
+export type ApprovalDecision = "accept" | "refuse";
+
+/** Client → serveur : une carte décidée, telle qu'elle était affichée. */
+export interface ApprovalFrame {
+  type: "approval";
+  id: number;
+  decision: ApprovalDecision;
+  /** L'empreinte de la carte affichée — le serveur refuse un accord sur autre chose (`changed`). */
+  digest: string;
+}
+
 /** Synthetic local event emitted by WebSocketClient (not from the wire). */
 export interface ConnectionEvent {
   /** "unauthorized" is terminal: the socket was refused (4401) and no
@@ -392,5 +461,7 @@ export interface ServerMessageMap {
   inner_state_update: InnerStateUpdateMessage;
   emotion_update: EmotionUpdateMessage;
   avatar_state: AvatarStateMessage;
+  approvals: ApprovalsMessage;
+  approval_result: ApprovalResultMessage;
   connection: ConnectionEvent;
 }

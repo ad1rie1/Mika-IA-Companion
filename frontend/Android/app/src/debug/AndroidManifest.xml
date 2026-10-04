@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Version de débogage seulement : le studio de l'avatar (le pendant de frontend/Web/studio.html). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <activity
+            android:name=".studio.AvatarStudioActivity"
+            android:exported="true"
+            android:label="Studio de Mika"
+            android:theme="@style/Theme.Mika" />
+    </application>
+</manifest>

@@ -31,6 +31,7 @@ Trois règles tiennent toute la console :
 | Son activité | **Décisions** | « Pourquoi parle-t-elle ou se tait-elle ? » | table de l'arbitre maintenant, ce qui tourne en ce moment, budget d'initiatives, ses choix, épisodes, échéances |
 | Son activité | **Buts** | « Que se propose-t-elle de faire ensuite ? » | buts vivants (rappels, explorations), buts clos |
 | Son activité | **Projets** | « Que mène-t-elle comme travail ? » | ses projets (cartes et liste), toutes les exécutions, toutes les décisions techniques ; une fiche par projet |
+| Son activité | **Ses outils** | « Que peut-elle faire, pour qui, et qu'en lit-elle ? » | tous ses outils (internes en lecture seule, extérieurs), qui reçoit quoi, ce qu'elle lit, outils de ses apps, serveurs extérieurs, ce que Mika expose (ADR 0064) |
 | Son activité | **Approbations** | « Que veut-elle faire sortir ? » | en attente (décider), historique |
 | Ses canaux | **Courrier** | « Lire et traiter les messages de quelle boîte ? » | comptes et dossiers en navigation, réception, brouillons de Mika, envoyés, contacts ; gestion des comptes dans Configuration |
 | Ses canaux | **Flux et capteurs** | « Ce qu'elle perçoit du monde » | flux RSS, caméra, appareils |
@@ -109,6 +110,22 @@ sont dans « Détails techniques ».
 - **Ses choix**, **Épisodes** (filtres sorte/issue/cible, pagination juste),
   **Échéances**.
 
+### Ses outils (ADR 0064)
+- **Tous ses outils** : une ligne par outil du registre (origine interne ou
+  extérieure, lot et sa phrase, ce qu'il fait, à qui il est offert, appels des
+  14 derniers jours) ; `?outil=<nom>` ouvre sa fiche (arguments lus du schéma,
+  condition d'offre, règle vérifiée à l'exécution, qui le reçoit et pourquoi
+  pas, derniers appels vers leur épisode). Un outil défini dans le code ne se
+  règle pas ici : aucun formulaire.
+- **Qui reçoit quoi** : lots × situations types (propriétaire, compte,
+  inconnue, salon, initiative, pas, projet, tâche) — en main, à la demande, pas
+  offert —, calculé par la porte d'offre du pipeline (`runtime.tools.offer`).
+- **Ce qu'elle lit** : le texte exact de la règle de ses mains et du catalogue
+  pour une situation, et ses outils en main / à la demande.
+- **Ce que Mika expose** : le relais MCP du moteur Claude Code et la console en
+  MCP (ses outils, son jeton).
+- Ajoutés par les plugins : **Outils de ses apps** (Forge) ; **Serveurs extérieurs** (MCP : état, servis / proposés, à revoir — badge et vitale), et la fiche d'un serveur : *État* (ce qui a été déclaré, ce qu'il répond, ce qu'il dit de lui-même — jamais lu par elle —, « Tester la connexion »), *Ses outils* (ce qu'il propose, ce que l'opérateur en a décidé, « Régler l'outil » : activé, nature, accord, ce qu'elle lit ; un outil changé est suspendu), *Appels*.
+
 ### Approbations
 - **En attente** : une carte par demande (ce qui partira, contexte, arguments),
   approuver / refuser.
@@ -130,6 +147,7 @@ sont dans « Détails techniques ».
 | Canaux | Dépôts git | le jeton avec lequel ses projets poussent vers leur dépôt distant (jamais réaffiché, jamais dans le journal) |
 | Plugins | Vue d’ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d’utilisation ; les réglages des apps restent dans la Forge |
 | | Boîtes aux lettres | liste ; chaque boîte a sa page (lire, envoyer, sa voix, initiative) |
+| | Outils extérieurs (MCP) | liste ; chaque serveur a sa page : **à quoi il sert, pour elle** (obligatoire), quand s'en servir, actif ; à une adresse (URL, jeton scellé, autorité) ou sur cette machine (commande, arguments, variables, variables secrètes scellées, réseau, dossiers partagés) ; pour qui, quand, en main ; bornes. Nom fixe (il entre dans le nom de ses outils). ADR 0064 |
 | | Flux RSS | adresses suivies |
 | | Transcription | service, modèle, clé |
 | | Appareils | jeton des appareils |

@@ -1,7 +1,33 @@
 import { renderInline } from "./inlineMarkup";
 import { WebSocketClient } from "../network/WebSocketClient";
 import { API_BASE } from "../network/api";
-import type { AckMessage, HistoryMessage, RejectedAttachment, SentFile } from "../types";
+import type {
+  AckMessage,
+  ApprovalCard,
+  ApprovalDecision,
+  HistoryMessage,
+  RejectedAttachment,
+  SentFile,
+} from "../types";
+import {
+  acceptRefusal,
+  approvalResult,
+  cardControls,
+  decisionFrame,
+  EMPTY_APPROVALS,
+  expiryLabel,
+  isDecisionTaken,
+  isExpired,
+  canAccept,
+  nextRefreshDelay,
+  resultMessage,
+  sameCard,
+  withApprovals,
+  withConnection,
+  withDecisionSent,
+  withResult,
+} from "./approvals";
+import type { ApprovalsState } from "./approvals";
 import {
   applyAck,
   ASLEEP_NOTE,
@@ -71,6 +97,21 @@ const LEGACY_HISTORY_KEY = "vtuber_chat_history";
 // AI_CALL_TIMEOUT that is no longer 60s) the indicator vanished while the
 // answer was still coming, which reads as "she gave up".
 const TYPING_TIMEOUT_MS = 300000;
+/** Le sort d'une décision d'accord reste lisible ce temps-là, puis s'efface. */
+const APPROVAL_NOTE_MS = 6000;
+const OFFLINE_NOT_SENT =
+  "Hors ligne : ta décision n'est pas partie. Réessaie à la reconnexion.";
+
+/** Une carte d'accord peinte, et les éléments qu'un rafraîchissement touche. */
+interface ApprovalView {
+  card: ApprovalCard;
+  root: HTMLElement;
+  refusal: HTMLElement;
+  expiry: HTMLElement;
+  accept: HTMLButtonElement;
+  refuse: HTMLButtonElement;
+  state: HTMLElement;
+}
 
 function fileIcon(type: string): string {
   if (type.startsWith("image/")) return "🖼️";
@@ -135,6 +176,22 @@ export class ChatOverlay {
   private truncated = false;
   /** Cache key for *this* identity's thread — see HISTORY_KEY_PREFIX. */
   private historyKey: string;
+  /**
+   * La bande des cartes d'accord (voir approvals.ts), épinglée au-dessus de la
+   * saisie plutôt que dans le fil : ce n'est pas une parole, et une demande qui
+   * défilerait vers le haut serait une décision qu'on ne voit plus.
+   */
+  private approvalsEl: HTMLElement;
+  private approvalsHeadEl: HTMLElement;
+  private approvalsHintEl: HTMLElement;
+  private approvalsListEl: HTMLElement;
+  private approvalNoteEl: HTMLElement;
+  private approvals: ApprovalsState = EMPTY_APPROVALS;
+  /** Par identifiant, dans l'ordre de la liste. */
+  private approvalViews = new Map<number, ApprovalView>();
+  /** Un seul minuteur pour les échéances, réarmé à chaque peinture. */
+  private approvalTimer: number | null = null;
+  private approvalNoteTimer: number | null = null;
 
   constructor(ws: WebSocketClient, personId: string = "") {
     this.ws = ws;
@@ -154,6 +211,28 @@ export class ChatOverlay {
     this.counterEl.className = "chat-note chat-counter";
     this.counterEl.hidden = true;
     this.previewsEl.after(this.counterEl);
+
+    this.approvalsEl = document.createElement("section");
+    this.approvalsEl.className = "chat-approvals";
+    this.approvalsEl.setAttribute("aria-label", "Demandes d'accord");
+    this.approvalsEl.hidden = true;
+    this.approvalsHeadEl = document.createElement("div");
+    this.approvalsHeadEl.className = "approvals-head";
+    this.approvalsHeadEl.textContent = "Mika attend ton accord";
+    this.approvalsHintEl = document.createElement("div");
+    this.approvalsHintEl.className = "approvals-hint";
+    this.approvalsHintEl.textContent = "Hors ligne — tu pourras décider à la reconnexion.";
+    this.approvalsHintEl.hidden = true;
+    this.approvalsListEl = document.createElement("div");
+    this.approvalsListEl.className = "approvals-list";
+    this.approvalNoteEl = document.createElement("div");
+    this.approvalNoteEl.className = "chat-note approval-note";
+    this.approvalNoteEl.setAttribute("role", "status");
+    this.approvalNoteEl.hidden = true;
+    this.approvalsEl.append(
+      this.approvalsHeadEl, this.approvalsHintEl, this.approvalsListEl, this.approvalNoteEl,
+    );
+    this.messagesEl.after(this.approvalsEl);
 
     // Hidden file input
     this.fileInput = document.createElement("input");
@@ -362,6 +441,11 @@ export class ChatOverlay {
     // Leaving those bubbles "en attente d'envoi" reads as "still on its
     // way", which is the one thing it is not.
     this.ws.on("connection", (data) => {
+      // Les cartes d'accord repartent de zéro à chaque ouverture (le serveur
+      // ne renvoie la liste que si elle n'est pas vide) ; coupée, les
+      // boutons s'éteignent.
+      this.approvals = withConnection(this.approvals, data.status);
+      this.renderApprovals();
       if (data.status !== "unauthorized") return;
       this.failPending("session expirée — reconnecte-toi");
     });
@@ -472,6 +556,153 @@ export class ChatOverlay {
     this.repaint({ animate: false });
     // Anything the server has answered is no longer being awaited.
     if (result.sawReply) this.hideTyping();
+  }
+
+  // ── Cartes d'accord (backendv2, ADR 0064) ─────────────────────────
+
+  /**
+   * La liste entière des cartes (trame `approvals`), montrée telle quelle :
+   * une carte absente n'attend plus rien. Seuls les boutons décident — un
+   * « oui » tapé dans le chat n'est jamais un accord.
+   */
+  setApprovals(items: unknown) {
+    this.approvals = withApprovals(this.approvals, items);
+    this.renderApprovals();
+  }
+
+  /** Le sort d'une décision (`approval_result`), dit brièvement ; la liste à jour suit. */
+  showApprovalResult(data: unknown) {
+    const result = approvalResult(data);
+    if (!result) return;
+    this.approvals = withResult(this.approvals, result.id);
+    this.showApprovalNote(resultMessage(result.status), isDecisionTaken(result.status));
+    this.refreshApprovals();
+  }
+
+  /**
+   * Réconcilie les cartes peintes avec la liste : une carte inchangée garde
+   * sa vue (le défilement de son texte, le bouton sous le pointeur), une
+   * carte changée en reçoit une neuve — son empreinte n'est plus la même.
+   */
+  private renderApprovals() {
+    const views = new Map<number, ApprovalView>();
+    for (const card of this.approvals.cards) {
+      const old = this.approvalViews.get(card.id);
+      views.set(card.id, old && sameCard(old.card, card) ? old : this.buildApprovalCard(card));
+    }
+    for (const [id, view] of this.approvalViews) {
+      if (views.get(id) !== view) view.root.remove();
+    }
+    this.approvalViews = views;
+    // dans l'ordre du serveur : `append` déplace un nœud déjà en place
+    for (const view of views.values()) this.approvalsListEl.append(view.root);
+    this.refreshApprovals();
+  }
+
+  /** Boutons, échéances et motifs, recalculés à l'instant ; réarme le minuteur. */
+  private refreshApprovals() {
+    const now = Date.now();
+    for (const view of this.approvalViews.values()) {
+      const controls = cardControls(this.approvals, view.card, now);
+      const refusal = acceptRefusal(view.card, now);
+      view.accept.disabled = !controls.accept;
+      view.refuse.disabled = !controls.refuse;
+      view.accept.title = controls.accept ? "" : refusal;
+      view.state.hidden = !controls.sending;
+      view.refusal.textContent = refusal;
+      view.refusal.hidden = !refusal;
+      // une carte expirée le dit dans son motif ; l'échéance ne se répète pas
+      const expiry = isExpired(view.card, now) ? "" : expiryLabel(view.card, now);
+      view.expiry.textContent = expiry;
+      view.expiry.hidden = !expiry;
+      view.root.classList.toggle("blocked", !canAccept(view.card, now));
+    }
+    const count = this.approvals.cards.length;
+    this.approvalsHeadEl.hidden = count === 0;
+    this.approvalsHintEl.hidden = count === 0 || this.approvals.connected;
+    this.approvalsEl.hidden = count === 0 && this.approvalNoteEl.hidden;
+
+    if (this.approvalTimer !== null) {
+      window.clearTimeout(this.approvalTimer);
+      this.approvalTimer = null;
+    }
+    const delay = nextRefreshDelay(this.approvals.cards, now);
+    if (delay !== null) {
+      this.approvalTimer = window.setTimeout(() => {
+        this.approvalTimer = null;
+        this.refreshApprovals();
+      }, delay);
+    }
+  }
+
+  private buildApprovalCard(card: ApprovalCard): ApprovalView {
+    const root = document.createElement("div");
+    root.className = "approval-card";
+    const title = document.createElement("div");
+    title.className = "approval-title";
+    title.textContent = card.title;
+    // Exactement ce qui partira : du texte brut, jamais interprété.
+    const text = document.createElement("pre");
+    text.className = "approval-text";
+    text.textContent = card.text;
+    const refusal = document.createElement("div");
+    refusal.className = "approval-refusal";
+    const expiry = document.createElement("div");
+    expiry.className = "approval-expiry";
+    const actions = document.createElement("div");
+    actions.className = "approval-actions";
+    const accept = document.createElement("button");
+    accept.type = "button";
+    accept.className = "approval-btn approval-accept";
+    accept.textContent = "Accepter";
+    accept.addEventListener("click", () => this.decideApproval(card.id, "accept"));
+    const refuse = document.createElement("button");
+    refuse.type = "button";
+    refuse.className = "approval-btn approval-refuse";
+    refuse.textContent = "Refuser";
+    refuse.addEventListener("click", () => this.decideApproval(card.id, "refuse"));
+    const state = document.createElement("span");
+    state.className = "approval-state";
+    state.textContent = "envoyé…";
+    state.hidden = true;
+    actions.append(accept, refuse, state);
+    root.append(title, text, refusal, expiry, actions);
+    return { card, root, refusal, expiry, accept, refuse, state };
+  }
+
+  /**
+   * Un clic. La trame porte l'empreinte de la carte affichée ; elle ne part
+   * que si la connexion est ouverte (jamais mise en file), et les deux
+   * boutons s'éteignent jusqu'à la réponse ou la liste suivante.
+   */
+  private decideApproval(id: number, decision: ApprovalDecision) {
+    const frame = decisionFrame(this.approvals, id, decision, Date.now());
+    if (!frame) {
+      // un bouton que le minuteur n'avait pas encore éteint : repeindre suffit
+      this.refreshApprovals();
+      return;
+    }
+    if (!this.ws.sendApproval(frame)) {
+      this.showApprovalNote(OFFLINE_NOT_SENT, false);
+      this.refreshApprovals();
+      return;
+    }
+    this.approvals = withDecisionSent(this.approvals, id);
+    this.refreshApprovals();
+  }
+
+  /** Une note sous les cartes, qui s'efface d'elle-même. */
+  private showApprovalNote(text: string, taken: boolean) {
+    if (this.approvalNoteTimer !== null) window.clearTimeout(this.approvalNoteTimer);
+    this.approvalNoteEl.textContent = text;
+    this.approvalNoteEl.classList.toggle("ok", taken);
+    this.approvalNoteEl.hidden = false;
+    this.approvalsEl.hidden = false;
+    this.approvalNoteTimer = window.setTimeout(() => {
+      this.approvalNoteTimer = null;
+      this.approvalNoteEl.hidden = true;
+      this.refreshApprovals();
+    }, APPROVAL_NOTE_MS);
   }
 
   private trimHistory() {

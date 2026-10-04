@@ -9,11 +9,15 @@ import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -28,6 +32,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
@@ -46,6 +52,9 @@ import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.auth.Session
 import fr.qwartz.mika.data.chat.MessageAttachment
 import fr.qwartz.mika.data.net.LinkState
+import fr.qwartz.mika.ui.avatar.AvatarBackdrop
+import fr.qwartz.mika.ui.avatar.auraColor
+import fr.qwartz.mika.ui.avatar.rememberPortrait
 import fr.qwartz.mika.ui.components.rememberFileActions
 import kotlinx.coroutines.launch
 
@@ -75,6 +84,7 @@ fun ChatScreen(
     val link by vm.link.collectAsStateWithLifecycle()
     val operator by vm.operator.collectAsStateWithLifecycle()
     val asked by vm.notificationsAsked.collectAsStateWithLifecycle()
+    val approvals by vm.approvals.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
     val files = rememberFileActions(graph, snackbar)
@@ -90,8 +100,21 @@ fun ChatScreen(
         if (lifecycle.isAtLeast(Lifecycle.State.RESUMED)) vm.markRead()
     }
 
+    // Le sort d'une décision sur une carte d'accord, dit une fois.
+    LaunchedEffect(vm) { vm.approvalMessages.collect { snackbar.showSnackbar(it) } }
+
     var notificationsGranted by remember { mutableStateOf(notificationsAllowed(context)) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { notificationsGranted = notificationsAllowed(context) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        notificationsGranted = notificationsAllowed(context)
+        vm.onShown()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { vm.onHidden() }
+
+    // Mika en fond : son portrait du moment, et son visage dans la barre du haut.
+    val avatar by vm.avatar.collectAsStateWithLifecycle()
+    val portrait by rememberPortrait(graph.avatar, avatar?.portrait)
+    val scheme = MaterialTheme.colorScheme
+    val faceTint = avatar?.let { auraColor(it.aura, scheme.surface.luminance() < 0.5f, scheme.primaryContainer) }
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         notificationsGranted = granted
         vm.notificationsAsked()
@@ -137,42 +160,63 @@ fun ChatScreen(
         )
     }
 
-    Scaffold(
-        topBar = { ChatTopBar(status, onOpenMind, onOpenSettings) },
-        snackbarHost = { SnackbarHost(snackbar) },
-        bottomBar = {
-            Composer(
-                input = vm.input,
-                onInput = vm::onInput,
-                attachments = vm.attachments,
-                notices = vm.notices,
-                staging = vm.staging,
-                canSend = vm.canSend,
-                onRemove = vm::remove,
-                onAttach = { sheet = true },
-                onSend = vm::send,
-            )
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            if (link is LinkState.Refused) {
-                RefusedBanner(onRetry = vm::retryConnection, onLogout = { confirmLogout = true })
-            }
-            val needsPrompt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !asked && !notificationsGranted
-            if (needsPrompt) {
-                NotificationPrompt(
-                    onAllow = { askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) },
-                    onLater = vm::notificationsAsked,
+    val scene = avatar
+    Box(Modifier.fillMaxSize()) {
+        if (scene != null) AvatarBackdrop(scene, portrait)
+        Scaffold(
+            // Sur son portrait, l'écran laisse passer le fond ; la barre de saisie, elle, reste pleine.
+            containerColor = if (scene != null) Color.Transparent else MaterialTheme.colorScheme.background,
+            topBar = {
+                ChatTopBar(
+                    status,
+                    onOpenMind,
+                    onOpenSettings,
+                    face = portrait.takeIf { scene != null },
+                    faceTint = faceTint ?: MaterialTheme.colorScheme.primaryContainer,
+                    transparent = scene != null,
                 )
+            },
+            snackbarHost = { SnackbarHost(snackbar) },
+            bottomBar = {
+                Composer(
+                    input = vm.input,
+                    onInput = vm::onInput,
+                    attachments = vm.attachments,
+                    notices = vm.notices,
+                    staging = vm.staging,
+                    canSend = vm.canSend,
+                    onRemove = vm::remove,
+                    onAttach = { sheet = true },
+                    onSend = vm::send,
+                )
+            },
+        ) { padding ->
+            BoxWithConstraints(Modifier.fillMaxSize().padding(padding)) {
+                // Les cartes d'accord, au-dessus de la barre de saisie : la moitié de la place au plus.
+                val trayMax = maxHeight * 0.5f
+                Column(Modifier.fillMaxSize()) {
+                    if (link is LinkState.Refused) {
+                        RefusedBanner(onRetry = vm::retryConnection, onLogout = { confirmLogout = true })
+                    }
+                    val needsPrompt = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !asked && !notificationsGranted
+                    if (needsPrompt) {
+                        NotificationPrompt(
+                            onAllow = { askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) },
+                            onLater = vm::notificationsAsked,
+                        )
+                    }
+                    ChatConversation(
+                        items = items,
+                        zone = vm.zone,
+                        operator = operator,
+                        busyFileId = files.busy,
+                        actions = actions,
+                        overPortrait = scene != null,
+                        modifier = Modifier.weight(1f),
+                    )
+                    ApprovalTray(approvals, onDecide = vm::decide, modifier = Modifier.heightIn(max = trayMax))
+                }
             }
-            ChatConversation(
-                items = items,
-                zone = vm.zone,
-                operator = operator,
-                busyFileId = files.busy,
-                actions = actions,
-                modifier = Modifier.weight(1f),
-            )
         }
     }
 

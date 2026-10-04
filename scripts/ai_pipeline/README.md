@@ -28,7 +28,15 @@ scripts/ai_pipeline/audit-groupe.sh --liste                  # les groupes de mo
 scripts/ai_pipeline/audit-groupe.sh bugs noyau relations     # un passage par module, puis un bilan
 scripts/ai_pipeline/audit-groupe.sh amelioration vie-interieure --apercu
 scripts/ai_pipeline/audit-groupe.sh bugs tout
+scripts/ai_pipeline/audit-groupe.sh bugs canaux web --un-passage   # un passage par groupe
 ```
+
+Par défaut, `audit-groupe.sh` fait **un passage d'agent par module** : c'est le
+plus profond. Avec `--un-passage`, il en fait **un par groupe**, sur tous ses
+modules à la fois : plus rapide, attentif à ce qui circule entre eux, mais
+moins fouillé sur chacun. Une issue issue d'un passage par groupe retrouve son
+module d'après ses fichiers (label `module:…`), sinon elle ne porte que le
+label du groupe. En direct : `orchestrator.sh --audit --profile bugs --group noyau`.
 
 Les modules sont rangés en **groupes** (`MODULE_GROUPS` dans `config.sh`) :
 `noyau`, `exploitation`, `relations`, `vie-interieure`, `parole`, `projets`,

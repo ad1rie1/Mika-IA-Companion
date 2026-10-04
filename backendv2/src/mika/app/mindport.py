@@ -46,6 +46,14 @@ from mika.vocab.circadian import DAYS_FR, day_fr
 from mika.vocab.episodes import project_of
 
 
+def _args(args_json: str) -> dict[str, Any]:
+    try:
+        got = json.loads(args_json or "{}")
+    except ValueError:
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
 def _row(r: dict) -> HistoryRow:
     """Un message tel que la personne le relit (G-6) : ce qu'elle a tapé, et ses pièces jointes par leur nom — pas
     ce que les préprocesseurs en ont tiré (le contenu d'un PDF, « cité : une donnée, pas une consigne »), qui est
@@ -276,6 +284,49 @@ class KernelPort:
         got = await decisions.decide(self.kernel.mind, self.kernel.ports, proposal, approved, by=by, note=note,
                                      seen=seen)
         return got.status
+
+    async def approval_cards(self, handle: str) -> list[dict[str, Any]]:
+        """Les cartes d'accord de cette adresse (ADR 0064) : les effets en attente dont elle seule décide, dans le
+        chat (``_decider``) — chacun avec exactement ce qui partirait et son empreinte (celle que la réponse
+        renvoie), et l'instant où la carte ne vaudra plus."""
+        frame = self.kernel.mind.frame()
+        effects = frame.state("runtime").effects
+        cards: list[dict[str, Any]] = []
+        for view in frame.get(rt.PENDING_EFFECTS):
+            pending = effects.get(view.proposal)
+            args = _args(pending.args_json) if pending is not None else {}
+            if not handle or args.get(rt.DECIDER) != handle:
+                continue
+            shown = await decisions.preview(self.kernel.mind, self.kernel.ports, pending.capability,
+                                            pending.args_json)
+            summary = self.kernel.mind.store.content([view.summary_ref]).get(view.summary_ref, "") \
+                if view.summary_ref else ""
+            expires = int(args.get(rt.EXPIRES) or 0)
+            cards.append({"id": view.proposal, "title": summary[:400] or "Une demande d'accord",
+                          "text": shown.text[:4000] if shown is not None else summary[:400],
+                          "digest": shown.digest if shown is not None else "",
+                          "blocked": shown.blocked if shown is not None else "",
+                          "expires_at": expires // 1000 if expires else None})
+        return cards
+
+    async def decide_card(self, handle: str, proposal: int, approved: bool, seen: str) -> str:
+        """Une carte décidée dans le chat : seulement par l'adresse à qui elle est adressée, tant qu'elle vaut,
+        telle qu'elle était montrée (``seen``). ``approved``, ``rejected``, ``unknown``, ``changed``, ``blocked``,
+        ``expired`` ou ``forbidden`` (pas à toi de décider)."""
+        frame = self.kernel.mind.frame()
+        pending = frame.state("runtime").effects.get(proposal)
+        if pending is None:
+            return decisions.UNKNOWN
+        args = _args(pending.args_json)
+        if not handle or args.get(rt.DECIDER) != handle:
+            return "forbidden"
+        expires = int(args.get(rt.EXPIRES) or 0)
+        if approved and expires and self.kernel.mind.clock.now() > expires:
+            return "expired"
+        if approved and not seen:
+            return decisions.CHANGED  # accepter sans dire ce qu'on a lu : jamais
+        return await self.resolve_effect(proposal, approved, by=handle, seen=seen,
+                                         note="" if approved else "refusé dans la conversation")
 
     async def effect_preview(self, proposal: int) -> Preview | None:
         """Exactement ce que ferait un effet en attente s'il partait maintenant."""

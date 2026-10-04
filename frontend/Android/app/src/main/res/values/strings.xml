@@ -56,6 +56,11 @@
     <string name="notif_prompt_later">Plus tard</string>
     <string name="notif_prompt_allow">Autoriser</string>
 
+    <!-- Cartes d'accord (ADR 0064) : seul le bouton décide, jamais un « oui » tapé -->
+    <string name="approval_heading">Mika demande ton accord</string>
+    <string name="approval_accept">Accepter</string>
+    <string name="approval_refuse">Refuser</string>
+
     <!-- Fichiers de Mika -->
     <string name="file_save">Enregistrer</string>
     <string name="file_open_with">Ouvrir avec…</string>
@@ -126,6 +131,8 @@
     <string name="settings_theme_system">Thème du système</string>
     <string name="settings_theme_light">Clair</string>
     <string name="settings_theme_dark">Sombre</string>
+    <string name="settings_avatar">Mika en fond</string>
+    <string name="settings_avatar_summary">Son portrait derrière la conversation : il suit son humeur, cligne des yeux, s\'endort la nuit.</string>
     <string name="settings_dynamic_color">Couleurs dynamiques</string>
     <string name="settings_dynamic_color_summary">Suivre les couleurs du fond d\'écran.</string>
     <string name="settings_data">Données</string>

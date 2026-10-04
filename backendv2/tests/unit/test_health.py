@@ -94,3 +94,24 @@ def test_health_names_what_goes_wrong_and_recovers(tmp_path):
     assert set(public) == {"status", "ready", "checks"}
     assert set(public["checks"].values()) <= {"ok", "degraded", "ko"}  # des états, jamais un résumé
     assert "la page a changé" not in str(public)  # le détail n'est jamais public
+
+
+def test_a_port_that_says_it_is_failing_degrades_health():
+    """Un branchement qui sait dire ce qui est en panne chez lui (un serveur d'outils extérieurs coupé par son
+    disjoncteur, ADR 0064) dégrade la santé ; un port qui ne dit rien, ou qui va bien, ne compte pas."""
+    from types import SimpleNamespace
+
+    class Hub:
+        def __init__(self, failing):
+            self._failing = failing
+
+        def failing(self):
+            return self._failing
+
+    def kernel(**ports):
+        return SimpleNamespace(deps=SimpleNamespace(ports=ports))
+
+    assert health._ports(kernel(mcp=Hub([]), store=object())).state == "ok"
+    down = health._ports(kernel(mcp=Hub(["meteo"])))
+    assert down.state == "degraded" and "meteo" in down.summary and "mcp" in down.summary
+    assert health._ports(kernel()).state == "ok"

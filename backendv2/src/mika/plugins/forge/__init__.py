@@ -745,7 +745,8 @@ async def forge_command(args: CommandArgs, ctx: Any) -> Any:
 
 @FORGE.tool("forge_call", description="Utiliser un outil d'une de tes apps.", args=CallArgs, bundle=APPS_BUNDLE,
             episodes=[Kind.REPLY, Kind.INITIATIVE, *WORKING], max_calls_per_episode=3,
-            owner_only=True)
+            owner_only=True, rule="seulement une app active et en bon état ; une app que l'opérateur n'a pas "
+                                  "promue ne sert que quand elle travaille")
 async def forge_call(args: CallArgs, ctx: Any) -> Any:
     port = _port(ctx)
     app = ctx.frame.state("forge").apps.get(args.app)

@@ -11,18 +11,25 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.data.approvals.Approvals
+import fr.qwartz.mika.data.approvals.ApprovalView
 import fr.qwartz.mika.data.auth.Session
+import fr.qwartz.mika.data.avatar.AvatarDirector
 import fr.qwartz.mika.data.chat.ChatRepository
 import fr.qwartz.mika.data.chat.MessageAttachment
 import fr.qwartz.mika.data.db.Kv
 import fr.qwartz.mika.data.files.ComposerDraft
 import fr.qwartz.mika.data.files.StagedFile
 import fr.qwartz.mika.data.mind.StatusLine
+import fr.qwartz.mika.data.net.ApprovalDecision
 import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.data.net.MikaProtocol
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -30,6 +37,7 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -76,6 +84,47 @@ class ChatViewModel(private val graph: AppGraph, private val saved: SavedStateHa
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
     val link: StateFlow<LinkState> = graph.connection.link
+
+    /**
+     * Les cartes d'accord à dessiner ([Approvals.view]), recalculées quand le temps change ce qu'elles
+     * disent : le compte à rebours (toutes les 30 s, et à l'échéance), une décision restée sans réponse.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val approvals: StateFlow<List<ApprovalView>> = combine(graph.approvals.state, graph.connection.link) { state, link ->
+        state to (link == LinkState.Online)
+    }.flatMapLatest { (state, online) ->
+        flow {
+            while (true) {
+                val wall = graph.clock.wallMs()
+                val elapsed = graph.clock.elapsedMs()
+                emit(Approvals.views(state, online, wall, elapsed))
+                if (state.cards.isEmpty()) break
+                delay(Approvals.nextTickMs(state, wall, elapsed))
+            }
+        }
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Le sort d'une décision, à dire une fois (un Snackbar). */
+    val approvalMessages: SharedFlow<String> = graph.approvals.messages
+
+    /** Le salut de retrouvailles, le temps d'un geste (voir [onShown]). */
+    private val greeting = MutableStateFlow(false)
+    /** Quand on l'a quittée (ou vue arriver, la première fois) : l'horloge des retrouvailles. */
+    private var lastSeenMs: Long? = null
+
+    /**
+     * Son portrait du moment ([AvatarDirector]) : `null` quand l'avatar est coupé dans les paramètres
+     * ou que l'app a été construite sans portraits.
+     */
+    val avatar: StateFlow<AvatarDirector.Scene?> = combine(
+        graph.settings.settings.map { it.avatar }.distinctUntilChanged(),
+        flow { emit(graph.avatar.manifest()?.ids) },
+        graph.mind.state,
+        graph.chatEngine.typing,
+        greeting,
+    ) { on, ids, mind, typing, greet ->
+        if (!on || ids == null) null else AvatarDirector.scene(mind, typing, greet, ids)
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /** Une opératrice voit le lien « ouvrir la console » sous une réponse ratée. */
     val operator: StateFlow<Boolean> = graph.auth.session
@@ -242,6 +291,39 @@ class ChatViewModel(private val graph: AppGraph, private val saved: SavedStateHa
         viewModelScope.launch { graph.chat.retry(localId) }
     }
 
+    /**
+     * « Accepter » ou « Refuser » une carte, avec l'empreinte de la carte telle qu'elle est montrée.
+     * Seul ce bouton décide : un « oui » tapé dans la conversation n'est jamais un accord.
+     */
+    fun decide(card: ApprovalView, decision: ApprovalDecision) {
+        val allowed = if (decision == ApprovalDecision.ACCEPT) card.canAccept else card.canRefuse
+        if (!allowed) return
+        viewModelScope.launch {
+            if (!graph.connection.decide(card.id, decision, card.digest)) graph.approvals.say(Approvals.NOT_SENT)
+        }
+    }
+
+    /**
+     * L'écran revient au premier plan : quand on la retrouve après un moment (ou pour la première fois
+     * depuis le lancement), elle fait coucou de la main, le temps d'un geste.
+     */
+    fun onShown() {
+        val now = graph.clock.elapsedMs()
+        val last = lastSeenMs
+        lastSeenMs = now
+        if (last != null && now - last < GREETING_GAP_MS) return
+        greeting.value = true
+        viewModelScope.launch {
+            delay(GREETING_MS)
+            greeting.value = false
+        }
+    }
+
+    /** L'écran passe à l'arrière-plan : c'est de là que se compte l'absence. */
+    fun onHidden() {
+        lastSeenMs = graph.clock.elapsedMs()
+    }
+
     /** La conversation est à l'écran : tout est lu, et la notification n'a plus rien à dire. */
     fun markRead() {
         viewModelScope.launch {
@@ -270,6 +352,9 @@ class ChatViewModel(private val graph: AppGraph, private val saved: SavedStateHa
     private companion object {
         const val KEY_CAMERA = "camera_path"
         const val DRAFT_DEBOUNCE_MS = 400L
+        const val GREETING_MS = 2_600L
+        /** Revenir sur l'écran plus tôt n'est pas « se retrouver » : pas de nouveau salut. */
+        const val GREETING_GAP_MS = 20 * 60_000L
         val PHOTO_NAME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.ROOT)
     }
 }

@@ -17,6 +17,10 @@ modèle. De quoi répondre après coup à « pourquoi a-t-elle dit ça ? ».
   octets, avec une marque explicite ; ``keep_days`` jours et ``max_rows`` lignes.
 - L'oubli efface **toutes** les traces : un prompt mêle les personnes (le fil
   partagé, les souvenirs d'autrui), l'oubli est rare et ces données jetables.
+- Chaque appel d'outil d'une trace a aussi sa ligne dans ``tool_uses`` (nom,
+  réussi, exécuté, quand, épisode — jamais ses arguments) : de quoi compter les
+  appels d'un outil sans décompresser les traces. Remplacées avec la trace,
+  élaguées et oubliées avec elle.
 
 Les écritures partent en tâches depuis du code synchrone (le pipeline n'attend
 jamais sa trace) ; ``flush`` les attend.
@@ -41,6 +45,7 @@ log = logging.getLogger("mika.traces")
 
 TABLE = "episode_traces"
 BLOBS = "prompt_blobs"
+USES = "tool_uses"
 KEEP_DAYS = 14
 MAX_ROWS = 3000
 #: un texte (message, préfixe stable, réponse) au-delà : coupé
@@ -67,6 +72,26 @@ class TraceHead:
     target: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class ToolUsage:
+    """Ce qu'un outil a servi depuis un instant : appels, échecs, le dernier."""
+
+    calls: int
+    failures: int
+    last_at: int
+
+
+@dataclass(frozen=True, slots=True)
+class ToolUse:
+    """Un appel d'outil, sans ses arguments : l'épisode où le relire."""
+
+    correlation: str
+    at: int
+    kind: str
+    ok: bool
+    executed: bool
+
+
 class EpisodeTraces:
     def __init__(self, store: EventStore, *, keep_days: int = KEEP_DAYS, max_rows: int = MAX_ROWS) -> None:
         self.store = store
@@ -85,6 +110,10 @@ class EpisodeTraces:
                         f"kind TEXT, target TEXT, stable TEXT, blob BLOB)")
             sql.execute(f"CREATE INDEX IF NOT EXISTS {TABLE}_at ON {TABLE}(at)")
             sql.execute(f"CREATE TABLE IF NOT EXISTS {BLOBS}(hash TEXT PRIMARY KEY, text BLOB)")
+            sql.execute(f"CREATE TABLE IF NOT EXISTS {USES}(correlation TEXT, at INTEGER, kind TEXT, name TEXT, "
+                        f"ok INTEGER, executed INTEGER)")
+            sql.execute(f"CREATE INDEX IF NOT EXISTS {USES}_name ON {USES}(name, at)")
+            sql.execute(f"CREATE INDEX IF NOT EXISTS {USES}_corr ON {USES}(correlation)")
 
         await self.store.run_views(create)
         self._ready = True
@@ -122,6 +151,14 @@ class EpisodeTraces:
                             (key, zlib.compress(stable.encode())))
             sql.execute(f"INSERT OR REPLACE INTO {TABLE}(correlation, at, kind, target, stable, blob) "
                         f"VALUES(?, ?, ?, ?, ?, ?)", (correlation, at, kind, target, key, blob))
+            if isinstance(body.get("tool_calls"), list):
+                sql.execute(f"DELETE FROM {USES} WHERE correlation=?", (correlation,))
+                for t in body["tool_calls"]:
+                    if isinstance(t, Mapping) and t.get("name"):
+                        sql.execute(f"INSERT INTO {USES}(correlation, at, kind, name, ok, executed) "
+                                    f"VALUES(?, ?, ?, ?, ?, ?)",
+                                    (correlation, at, kind, str(t["name"])[:200], int(bool(t.get("ok"))),
+                                     int(bool(t.get("executed", True)))))
             if prune:
                 _prune(sql, at - keep_us, max_rows)
 
@@ -162,6 +199,7 @@ class EpisodeTraces:
             n = int(sql.query(f"SELECT COUNT(*) FROM {TABLE}")[0][0])
             sql.execute(f"DELETE FROM {TABLE}")
             sql.execute(f"DELETE FROM {BLOBS}")
+            sql.execute(f"DELETE FROM {USES}")
             return n
 
         return int(await self.store.run_views(clear))
@@ -216,6 +254,25 @@ class EpisodeTraces:
             return 0
         return int(self.store.query_views(f"SELECT COUNT(*) FROM {TABLE}")[0][0])
 
+    def tool_usage(self, since: int) -> dict[str, ToolUsage]:
+        """Par outil, ses appels depuis ``since`` (ceux qu'un refus a arrêtés avant le gestionnaire compris :
+        ce sont des échecs)."""
+        if not self._ready:
+            return {}
+        rows = self.store.query_views(
+            f"SELECT name, COUNT(*), SUM(CASE WHEN ok THEN 0 ELSE 1 END), MAX(at) FROM {USES} WHERE at >= ? "
+            f"GROUP BY name", (since,))
+        return {str(n): ToolUsage(int(c), int(f or 0), int(a)) for n, c, f, a in rows}
+
+    def tool_uses(self, name: str, limit: int = 20) -> list[ToolUse]:
+        """Les derniers appels d'un outil, les plus récents d'abord."""
+        if not self._ready:
+            return []
+        rows = self.store.query_views(
+            f"SELECT correlation, at, kind, ok, executed FROM {USES} WHERE name=? ORDER BY at DESC, rowid DESC "
+            f"LIMIT ?", (name, max(1, min(limit, 500))))
+        return [ToolUse(str(c), int(a), str(k), bool(o), bool(e)) for c, a, k, o, e in rows]
+
 
 # ── bornes ──
 def _prune(sql: Sql, before: int, max_rows: int) -> int:
@@ -224,6 +281,7 @@ def _prune(sql: Sql, before: int, max_rows: int) -> int:
         f"DELETE FROM {TABLE} WHERE correlation IN (SELECT correlation FROM {TABLE} "
         f"ORDER BY at DESC, correlation DESC LIMIT -1 OFFSET ?)", (max_rows,)).rowcount or 0)
     sql.execute(f"DELETE FROM {BLOBS} WHERE hash NOT IN (SELECT stable FROM {TABLE} WHERE stable IS NOT NULL)")
+    sql.execute(f"DELETE FROM {USES} WHERE correlation NOT IN (SELECT correlation FROM {TABLE})")
     return removed
 
 
