@@ -51,6 +51,10 @@ MOUSE = dict(center=Vector((-0.36, -0.30, 0.747)), size=(0.06, 0.10, 0.04))
 MONITOR = dict(center=Vector((-0.067, -0.74, 1.186)), size=(0.66, 0.03, 0.39))
 # Le carnet, le stylo et la tasse : pris sur la vraie pièce (atelier_desk_gestures.Geo, atelier_decor.features).
 BOOK = dict(size=(0.25, 0.19, 0.028))   # les livres du bureau (fermés : Unity les tient tels quels)
+# Le livre lu (desk_read), repère du clip : son centre (sa gauche, devant = −Y, hauteur) et sa pente vers ses yeux (°).
+# Unity (BodyActivity.BookHeld) le tient au même endroit : (−x, z + FLOOR_DROP, −y).
+READ_CENTER = (-0.02, -0.29, 0.83)
+READ_TILT = 45.0
 
 
 # --- outils de pose ------------------------------------------------------------------------------------------------
@@ -429,29 +433,44 @@ def stylus(desk, f):
     return Matrix.Translation(grip + pen_dir * 0.02) @ rot
 
 
+def ease01(x):
+    """Un fondu doux de 0 à 1 (smoothstep)."""
+    x = max(0.0, min(1.0, x))
+    return x * x * (3.0 - 2.0 * x)
+
+
 def desk_read(desk, t, period):
-    """Lire un livre tenu à deux mains, coudes sur le bureau ; une page tournée par boucle ; les yeux suivent les lignes."""
+    """Lire un livre tenu à deux mains, coudes près du bureau ; une page tournée par boucle ; les yeux suivent les lignes."""
     f = copy(desk.seated)
     breathe = math.sin(TAU * 2 * t / period)
     lean(f, 12.0 + 0.6 * breathe, turn_deg=1.0 * noise(t, period, 51))
-    # Le livre un peu haut et près d'elle : ses avant-bras passent au-dessus du clavier (la chaise reste où elle tape).
-    center = Vector((-0.02, -0.265, 0.875)) + Vector((0.005 * noise(t, period, 53), 0.004 * noise(t, period, 55), 0.004 * noise(t, period, 57)))
-    tilt = math.radians(45.0)        # le livre incliné vers elle
-    rot = Matrix.Rotation(tilt, 4, "X")
+    # Le livre un peu haut et devant elle : ses avant-bras passent au-dessus du clavier (la chaise reste où elle tape).
+    center = Vector(READ_CENTER) + Vector((0.005 * noise(t, period, 53), 0.004 * noise(t, period, 55), 0.004 * noise(t, period, 57)))
+    # Penché vers ses yeux : le haut du livre (−Y du livre) s'éloigne et monte, sa face (+Z) la regarde. Penché dans
+    # l'autre sens, le haut du livre lui venait contre le nez et elle lisait le dos de la couverture.
+    rot = Matrix.Rotation(-math.radians(READ_TILT), 4, "X")
     half = BOOK["size"][0] / 2       # tenu par ses bords
     book = Matrix.Translation(center) @ rot
     page = bump(t, 6.0, 1.3)
+    down = (book.to_3x3() @ Vector((0.0, 1.0, 0.0))).normalized()     # vers le bas de la page (vers elle, plus bas)
+    face = (book.to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized()     # la face qu'elle lit
     for side, sx in (("left", 1.0), ("right", -1.0)):
-        edge = book @ Vector((sx * (half - 0.02), -0.03, -0.01))
+        # La prise : le bord du livre un peu sous le milieu, les doigts derrière, le pouce devant.
+        edge = book @ Vector((sx * (half - 0.02), 0.03, -0.01))
         if side == "right" and page > 0:
-            # Tourner la page : la main droite passe au milieu et revient.
-            edge = edge.lerp(book @ Vector((0.0, 0.0, 0.02)), page)
-        up = (book.to_3x3() @ Vector((0.0, 1.0, 0.0))).normalized()
+            # Tourner la page : la main droite passe au milieu, devant la page, et revient.
+            edge = edge.lerp(book @ Vector((0.0, 0.0, 0.03)), page)
         out = (book.to_3x3() @ Vector((sx, 0.0, 0.0))).normalized()
-        arm_ik(desk, f, side, edge - up * 0.05 + out * 0.01, Vector((sx * 0.16, -0.14, 0.74)), up + out * 0.2, -out * 0.8 + Vector((0, 0.2, 0)))
+        arm_ik(desk, f, side, edge + down * 0.05 + out * 0.01, Vector((sx * 0.16, -0.14, 0.74)), -down + out * 0.2,
+               -out * 0.8 + face * 0.3)
         curl(desk, f, side, {"Index": (35, 40, 20), "Middle": (35, 40, 20), "Ring": (40, 42, 20), "Little": (45, 45, 20)},
              thumb=(5.0, 5.0, 5.0), spread=2.0)
-    line = book @ Vector((0.06 * math.sin(TAU * 4 * t / period), 0.05 - 0.1 * ((t % (period / 2)) / (period / 2)), 0.01))
+    # Les lignes, de haut en bas, une page par demi-boucle ; le regard remonte en haut de la page en un tiers de seconde
+    # (d'un coup, la tête sautait de 27°).
+    u = (t % (period / 2)) / (period / 2)
+    back = 0.35 / (period / 2)
+    y = -0.05 + 0.1 * (u / (1.0 - back)) if u < 1.0 - back else 0.05 - 0.1 * ease01((u - (1.0 - back)) / back)
+    line = book @ Vector((0.06 * math.sin(TAU * 4 * t / period), y, 0.01))
     look(desk, f, line, neck_share=0.45)
     return f, {"Livre": book}
 

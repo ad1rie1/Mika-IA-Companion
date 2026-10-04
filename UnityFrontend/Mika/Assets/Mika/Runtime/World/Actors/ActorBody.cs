@@ -460,6 +460,9 @@ namespace Mika.World.Engine
             var captured = Captured(clips != null ? clips.sitTravelNorm : 0f);
             var travel = captured ? clips.sitTravelNorm * animator.humanScale : StandOff;
             var stand = new Vector3(seat.position.x, _floorY, seat.position.z) + fwd * travel;
+            // À une chaise à accoudoirs, elle passe à côté d'elle puis entre devant le siège (ligne droite : à travers l'accoudoir).
+            if (chair != null && AroundChair(seat, stand, transform.position, out var corner))
+                yield return Step(corner, Quaternion.LookRotation(FlatDir(stand - corner)), 0.75f);
             yield return Step(stand, Quaternion.LookRotation(fwd), 0.75f);
 
             _place = place;
@@ -570,7 +573,13 @@ namespace Mika.World.Engine
             _planter.Still();
             _stepping = true;
             if (place != null && Vector3.Distance(Ground(place.Position), Ground(transform.position)) > 0.12f)
-                yield return Step(new Vector3(place.Position.x, floor, place.Position.z), place.Rotation, 0.75f);
+            {
+                // De devant le siège, elle ressort par le côté de la chaise (pas à travers l'accoudoir).
+                var approach = new Vector3(place.Position.x, floor, place.Position.z);
+                if (place.Chair != null && AroundChair(a, transform.position, approach, out var corner))
+                    yield return Step(new Vector3(corner.x, floor, corner.z), Quaternion.LookRotation(FlatDir(approach - corner)), 0.75f);
+                yield return Step(approach, place.Rotation, 0.75f);
+            }
             _stepping = false;
             EnsureAgent();
             WarpAgent(transform.position);
@@ -683,6 +692,29 @@ namespace Mika.World.Engine
                 yield return TurnTo(facing, Mathf.Clamp(Quaternion.Angle(transform.rotation, facing) / 220f, 0.2f, 0.6f));
             _stepping = false;
         }
+
+        /// <summary>
+        /// Entre le point devant le siège (<paramref name="front"/>) et un point à côté de la chaise (<paramref name="side"/>),
+        /// le coin par où passer : à côté de l'accoudoir, à la hauteur du point devant le siège. Faux si le point est
+        /// devant ou derrière la chaise (la ligne droite ne la traverse pas).
+        /// </summary>
+        static bool AroundChair(Pose seat, Vector3 front, Vector3 side, out Vector3 corner)
+        {
+            var fwd = FlatDir(seat.rotation * Vector3.forward);
+            var right = Vector3.Cross(Vector3.up, fwd);
+            var lateral = Vector3.Dot(Ground(side - seat.position), right);
+            corner = front;
+            if (Mathf.Abs(lateral) < ChairClear) return false;
+            corner = front + right * (Mathf.Sign(lateral) * ChairClear);
+            corner.y = front.y;
+            return true;
+        }
+
+        /// <summary>
+        /// À quelle distance du milieu du siège elle passe à côté de la chaise (m) : l'accoudoir s'étend à 0,34 m, son
+        /// corps à 0,14 m de part et d'autre.
+        /// </summary>
+        const float ChairClear = 0.48f;
 
         /// <summary>Au-delà (m), on marche pour rejoindre un point proche ; en deçà, on se décale à petits pas.</summary>
         const float ShuffleMax = 0.3f;

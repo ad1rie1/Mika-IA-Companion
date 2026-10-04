@@ -342,8 +342,9 @@ namespace Mika.World.Engine
         const float SettleSeconds = 0.5f;       // entre deux gestes, la pose de départ du suivant (le fondu fait 0,45 s)
         const float EngageLinger = 3f;          // tournée vers quelqu'un, elle le reste un peu après qu'il s'est tu (s)
         const float CarryHold = 0.25f;          // la courbe « Hold » au-delà de laquelle l'objet est dans la main
-        // Le livre tenu (desk_read) : son centre (à droite, hauteur au-dessus du sol, devant) et sa pente vers elle.
-        static readonly Vector3 BookHeld = new Vector3(0.02f, 0.895f, 0.265f);
+        // Le livre tenu (desk_read, atelier_desk.READ_CENTER/READ_TILT) : son centre (à droite, hauteur au-dessus du sol,
+        // devant) et sa pente — le haut s'éloigne, la face regarde ses yeux.
+        static readonly Vector3 BookHeld = new Vector3(0.02f, 0.85f, 0.29f);
         const float BookTilt = 45f;
 
         static float BaseYaw(Stop s) => s == Stop.Type ? TypeYaw : s == Stop.Write ? TypeYaw + WriteTurn : 0f;
@@ -951,13 +952,18 @@ namespace Mika.World.Engine
             return true;
         }
 
-        // La souris sous la paume (desk_mouse) : elle suit la main, dans le plan du bureau, depuis l'instant où la boucle
-        // est seule ; la main ne la lâche qu'au même point de la boucle, si bien qu'elle reste où elle était.
+        // La souris sous la paume (desk_mouse) : pendant que la main s'en sert, son centre suit le point sous la paume (un
+        // peu vers les doigts) et son grand axe le sens des doigts — comme la main la tient. Sa place de repos est ce
+        // point même au moment où la main la prend (build_desk.py, à 1,5 cm près) : elle n'y fait pas de saut. Si la main
+        // la quitte (un geste du haut du corps par-dessus), elle reste où elle est.
         WorldObject _mouse;
         bool _mouseHeld;
-        Vector3 _mouseFrom, _palmFrom;
-        Quaternion _mouseRot;
-        float _palmYaw, _mousePhase;
+        Vector3 _mouseFrom;
+        float _mousePhase, _mouseT;
+        RigidbodyInterpolation _mouseInterp;
+        Vector3 _mouseAxis = Vector3.forward;
+        const float MouseUnderPalm = 0.025f;    // le centre de la souris, vers les doigts depuis la paume (m)
+        const float MouseLetGo = 0.08f;         // la paume plus haut que ça au-dessus de la souris : la main l'a quittée (m)
 
         void CarryMouse()
         {
@@ -970,23 +976,72 @@ namespace Mika.World.Engine
             var hand = _animator.GetBoneTransform(HumanBodyBones.RightHand);
             var knuckles = _animator.GetBoneTransform(HumanBodyBones.RightMiddleProximal);
             if (hand == null || knuckles == null) return;
-            var palm = Vector3.Lerp(hand.position, knuckles.position, 0.6f);
-            var yaw = Mathf.Atan2(knuckles.position.x - hand.position.x, knuckles.position.z - hand.position.z) * Mathf.Rad2Deg;
             if (!_mouseHeld)
             {
                 _mouse = Find(MouseKeys, 1.6f);
                 if (_mouse == null) return;
                 _mouseHeld = true;
+                _mouseT = 0f;
                 _mouseFrom = _mouse.transform.position;
-                _mouseRot = _mouse.transform.rotation;
-                _palmFrom = palm;
-                _palmYaw = yaw;
+                _mouseAxis = LongAxis(_mouse);
+                // Menée image par image : sans l'interpolation du corps physique, qui la ferait traîner d'un pas.
+                var rb = _mouse.GetComponent<Rigidbody>();
+                if (rb != null)
+                {
+                    _mouseInterp = rb.interpolation;
+                    rb.interpolation = RigidbodyInterpolation.None;
+                }
                 _mousePhase = Mathf.Repeat(_animator.GetCurrentAnimatorStateInfo(PoseLayer).normalizedTime, 1f);
             }
-            var turn = Quaternion.AngleAxis(Mathf.DeltaAngle(_palmYaw, yaw), Vector3.up);
-            var p = Flat(palm) + turn * Flat(_mouseFrom - _palmFrom);
-            _mouse.transform.SetPositionAndRotation(new Vector3(p.x, _mouseFrom.y, p.z), turn * _mouseRot);
+            var t = _mouse.transform;
+            var palm = Vector3.Lerp(hand.position, knuckles.position, 0.6f);
+            if (palm.y - _mouse.Bounds().max.y > MouseLetGo) return;
+            var fingers = Flat(knuckles.position - hand.position);
+            if (fingers.sqrMagnitude < 1e-6f) return;
+            fingers.Normalize();
+            var target = Flat(palm) + fingers * MouseUnderPalm;
+            // Le centre visé est celui du modèle : on déplace son origine d'autant.
+            var center = Flat(_mouse.Bounds().center);
+            var rot = AlongFingers(t.rotation, fingers);
+            // La main s'y pose : un quart de seconde pour rejoindre la paume (au plus 1,5 cm), puis elle la suit.
+            _mouseT += Time.deltaTime;
+            var k = _mouseT < 0.25f ? 1f - Mathf.Exp(-Time.deltaTime * 12f) : 1f;
+            var move = (target - center) * k;
+            t.SetPositionAndRotation(new Vector3(t.position.x + move.x, _mouseFrom.y, t.position.z + move.z), Quaternion.Slerp(t.rotation, rot, k));
             _bounds.Remove(_mouse);
+        }
+
+        /// <summary>L'orientation qui met le grand axe de la souris dans le sens des doigts (à plat ; le plus proche des deux sens).</summary>
+        Quaternion AlongFingers(Quaternion now, Vector3 fingers)
+        {
+            var axisNow = Flat(now * _mouseAxis);
+            if (axisNow.sqrMagnitude < 1e-6f) return now;
+            axisNow.Normalize();
+            var turn = Vector3.SignedAngle(axisNow, fingers, Vector3.up);
+            if (turn > 90f) turn -= 180f;
+            if (turn < -90f) turn += 180f;
+            return Quaternion.AngleAxis(turn, Vector3.up) * now;
+        }
+
+        /// <summary>Le grand axe (horizontal) d'un objet ovale dans son repère : vers son sommet le plus éloigné du centre.</summary>
+        static Vector3 LongAxis(WorldObject o)
+        {
+            var mf = o.GetComponentInChildren<MeshFilter>();
+            if (mf == null || mf.sharedMesh == null || !mf.sharedMesh.isReadable) return Vector3.forward;
+            var c = mf.sharedMesh.bounds.center;
+            var best = 0f;
+            var far = c;
+            foreach (var v in mf.sharedMesh.vertices)
+            {
+                var d = new Vector2(v.x - c.x, v.z - c.z).sqrMagnitude;
+                if (d <= best) continue;
+                best = d;
+                far = v;
+            }
+            var w = mf.transform.TransformDirection(far - c);
+            var local = o.transform.InverseTransformDirection(w);
+            local.y = 0f;
+            return local.sqrMagnitude > 1e-8f ? local.normalized : Vector3.forward;
         }
 
         /// <summary>La boucle de la souris est revenue où la main l'a prise (on peut la lâcher : elle est à sa place).</summary>
@@ -1002,10 +1057,12 @@ namespace Mika.World.Engine
         {
             if (!_mouseHeld) return;
             _mouseHeld = false;
+            // Lâchée au point de sa boucle où la main l'a prise : elle est là où elle était (rien à corriger).
             if (_mouse != null)
             {
-                _mouse.transform.SetPositionAndRotation(_mouseFrom, _mouseRot);
                 _bounds.Remove(_mouse);
+                var rb = _mouse.GetComponent<Rigidbody>();
+                if (rb != null) rb.interpolation = _mouseInterp;
             }
             _mouse = null;
         }
@@ -1058,7 +1115,10 @@ namespace Mika.World.Engine
             axis = (pen.transform.InverseTransformPoint(mf.transform.TransformPoint(far)) - center).normalized;
         }
 
-        /// <summary>Le livre entre ses mains, à la place que lui donne le clip de lecture (desk_read).</summary>
+        /// <summary>
+        /// Le livre entre ses mains, à la place que lui donne le clip de lecture (desk_read) : son centre devant elle, sa
+        /// grande dimension d'une main à l'autre (elle le tient par ces bords), sa face penchée vers ses yeux.
+        /// </summary>
         void HoldBook()
         {
             var book = HeldBook();
@@ -1068,17 +1128,50 @@ namespace Mika.World.Engine
                 _book = book;
                 _bookHand = _body.Held.TryGetValue(book, out var h) ? h : Hand.Right;
                 book.transform.SetParent(_body.transform, true);
+                BookShape(book, out _bookAcross, out _bookFace, out _bookCenter);
             }
             var a = _body.Anchor.Value;
             var fwd = Flat(a.rotation * Vector3.forward).normalized;
             var right = Vector3.Cross(Vector3.up, fwd);
-            var pos = Flat(a.position) + right * BookHeld.x + fwd * BookHeld.z + Vector3.up * (_body.FloorY + BookHeld.y);
-            // Couché à plat dans son modèle (épaisseur sur Y) : la couverture vers elle, penché de BookTilt.
-            var toEyes = Quaternion.AngleAxis(-BookTilt, right) * Vector3.up;
-            var top = Vector3.Cross(right, toEyes);
+            var center = Flat(a.position) + right * BookHeld.x + fwd * BookHeld.z + Vector3.up * (_body.FloorY + BookHeld.y);
+            var tilt = BookTilt * Mathf.Deg2Rad;
+            var face = Vector3.up * Mathf.Sin(tilt) - fwd * Mathf.Cos(tilt);
+            // La rotation qui envoie l'axe « d'une main à l'autre » du modèle sur sa droite et son épaisseur sur la face.
+            var model = Quaternion.LookRotation(_bookAcross, _bookFace);
+            var world = Quaternion.LookRotation(right, face);
+            var rot = world * Quaternion.Inverse(model);
+            var pos = center - rot * Vector3.Scale(_bookCenter, book.transform.lossyScale);
             var k = 1f - Mathf.Exp(-Time.deltaTime * 8f);
-            book.transform.position = Vector3.Lerp(book.transform.position, pos, k);
-            book.transform.rotation = Quaternion.Slerp(book.transform.rotation, Quaternion.LookRotation(-top, toEyes), k);
+            book.transform.SetPositionAndRotation(Vector3.Lerp(book.transform.position, pos, k), Quaternion.Slerp(book.transform.rotation, rot, k));
+        }
+
+        Vector3 _bookAcross = Vector3.forward, _bookFace = Vector3.up, _bookCenter;
+
+        /// <summary>
+        /// Les axes d'un livre fermé dans son repère : sa plus petite étendue est son épaisseur (la face), sa plus grande
+        /// à plat celle qui va d'une main à l'autre ; et son centre.
+        /// </summary>
+        static void BookShape(WorldObject book, out Vector3 across, out Vector3 face, out Vector3 center)
+        {
+            across = Vector3.forward;
+            face = Vector3.up;
+            center = Vector3.zero;
+            var mf = book.GetComponentInChildren<MeshFilter>();
+            if (mf == null || mf.sharedMesh == null) return;
+            var b = mf.sharedMesh.bounds;
+            center = book.transform.InverseTransformPoint(mf.transform.TransformPoint(b.center));
+            var axes = new[] { Vector3.right, Vector3.up, Vector3.forward };
+            var sizes = new float[3];
+            for (var i = 0; i < 3; i++)
+                sizes[i] = book.transform.InverseTransformVector(mf.transform.TransformVector(Vector3.Scale(b.size, axes[i]))).magnitude;
+            var thin = 0;
+            for (var i = 1; i < 3; i++)
+                if (sizes[i] < sizes[thin]) thin = i;
+            var wide = thin == 0 ? 1 : 0;
+            for (var i = 0; i < 3; i++)
+                if (i != thin && sizes[i] > sizes[wide]) wide = i;
+            face = axes[thin];
+            across = axes[wide];
         }
 
         /// <summary>Le livre retourne dans la main qui le tenait (un geste de la chaise, la fin de la lecture).</summary>

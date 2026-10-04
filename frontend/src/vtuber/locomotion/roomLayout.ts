@@ -69,11 +69,12 @@ export const PLACES: Record<PlaceId, Place> = {
   center: { id: "center", approach: { x: 0, z: -0.5 }, facing: 0, posture: "stand" },
   // Window on the left wall (sill at x −3.86): she stands against it, hands on the sill, and looks out.
   window: { id: "window", approach: { x: -3.62, z: -1.2 }, facing: -Math.PI / 2, posture: "stand" },
-  // Desk chair: reached from its right side (+x), pulled back, sat on,
-  // rolled in. Seat top 0.51, facing the desk along the chair's own front.
+  // Desk chair: reached from its left side (−x) — on the right, the drawer
+  // block leaves no room in front of the seat —, then a step in front of the
+  // seat and down onto it. Seat top 0.51, facing the desk along the chair's front.
   desk: {
     id: "desk",
-    approach: { x: -0.7, z: -3.3 },
+    approach: { x: -1.98, z: -2.9 },
     facing: -Math.PI + CHAIR_YAW,
     posture: "sit",
     seat: { x: -1.4, z: -3.3, height: 0.51 },

@@ -414,7 +414,7 @@ namespace Mika.Editor.Dev
                     act.Set("read", book.id);
                     yield return Until("read", 20f);
                     yield return new WaitForSeconds(0.5f);
-                    yield return AnimLab.Burst(name + "_lire", 6, 20, Seat(new Vector3(0.55f, 1.15f, 0.95f), new Vector3(0.05f, 0.88f, 0.3f)), 640, 480, 35f);
+                    yield return AnimLab.Burst(name + "_lire", 6, 20, Seat(new Vector3(1.2f, 0.95f, 0.25f), new Vector3(0f, 0.86f, 0.25f)), 640, 480, 30f);
                     act.Set(null, null);
                     yield return new WaitForSeconds(0.6f);
                     b.Release(book);
