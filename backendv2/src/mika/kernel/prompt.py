@@ -17,7 +17,8 @@ avant/après, rang de coupe, plancher, étiquettes) ; le composeur, générique 
    d'outils) est réservé ; coupe par rang croissant jusqu'aux planchers ;
    l'historique est coupé avec hystérésis (jusqu'à un niveau bas), mémorisée
    par fil, pour que le préfixe en cache ne bouge pas à chaque tour ; un tour
-   épinglé (le résumé du début du fil) n'est jamais coupé ;
+   épinglé (le résumé du début du fil) n'est jamais coupé ; le message en
+   cours qui déborde est coupé (ce que ses pièces jointes ont donné d'abord) ;
 5. rend un ``ChatPrompt`` : préfixe stable, historique en vrais tours (avec
    leurs repères de temps et, dans un salon, qui parle), bloc volatile en tête
    du dernier tour utilisateur.
@@ -267,10 +268,13 @@ class Composer:
         witness_level: int | None = None,
         reserved: int = 0,
         tied_level: int | None = None,
+        typed_chars: int | None = None,
     ) -> tuple[ChatPrompt, ComposeTrace]:
         """``reserved`` : les caractères qui partiront au modèle hors du composeur
         (persona, catalogue, déclarations d'outils) ; ``thread_key`` : la clé de
-        coupe de l'historique quand la section d'historique ne déclare pas son fil."""
+        coupe de l'historique quand la section d'historique ne déclare pas son fil ;
+        ``typed_chars`` : combien de caractères, au début du message, la personne a
+        tapés (la suite vient de ses pièces jointes, coupée d'abord faute de place)."""
         kept: list[_Block] = []
         dropped: list[tuple[str, str]] = []
         for spec, body in blocks:
@@ -303,14 +307,19 @@ class Composer:
         history = [b for b in kept if b.spec.zone is Zone.HISTORY]
 
         current = next((b.body.current for b in history if b.body.current is not None), None)
-        message = neutral(message)
-        if current is not None:
-            message = label(_defused(current)) + message
+        prefix = label(_defused(current)) if current is not None else ""
         stable_text = "\n\n".join(self.render_block(b.spec, b.body, b.text) for b in stable)
-        limit = budget.max_chars - len(message)
-        if len(stable_text) > limit:
-            raise PromptBudgetError(f"la zone stable ({len(stable_text)} car.) dépasse le budget ({limit})")
-        room_all = max(0, limit - max(0, reserved) - len(stable_text))
+        spare = budget.max_chars - max(0, reserved) - len(stable_text)
+        if spare <= len(prefix):
+            raise PromptBudgetError(
+                f"la zone stable ({len(stable_text)} car.) et ce qui part hors du composeur ({max(0, reserved)} car.) "
+                f"remplissent le budget ({budget.max_chars} car.) : plus de place pour le message")
+        body = neutral(message)
+        if len(prefix) + len(body) > spare:
+            # le message déborde : ce que ses fichiers ont donné est coupé d'abord, ce qu'elle a tapé ensuite
+            body = _fit(message, typed_chars, spare - len(prefix))
+        message = prefix + body
+        room_all = max(0, spare - len(message))
 
         # Historique : coupe avec hystérésis, repérée par identifiant de message
         # (la fenêtre du fil glisse ; un index ne serait pas stable), mémorisée par fil.
@@ -417,6 +426,18 @@ def _open(turns: Sequence[ChatTurn]) -> tuple[ChatTurn, ...]:
                 out[i] = replace(t, mark=t.opening)
             break
     return tuple(out)
+
+
+def _fit(message: str, typed_chars: int | None, room: int) -> str:
+    """Le message (neutralisé) borné à ``room`` caractères : la partie venue des
+    pièces jointes (au-delà de ``typed_chars``) est coupée d'abord ; ce que la
+    personne a tapé ne l'est que si cela ne suffit pas."""
+    typed = len(message) if typed_chars is None else max(0, min(len(message), typed_chars))
+    head, tail = neutral(message[:typed]), neutral(message[typed:])
+    keep = room - len(head) - len(TRIM_MARK)
+    if keep > 0:
+        return head + tail[:keep].rstrip() + TRIM_MARK
+    return head[:max(0, room - len(TRIM_MARK))].rstrip() + TRIM_MARK
 
 
 def _turn_chars(turns: Sequence[ChatTurn]) -> int:
