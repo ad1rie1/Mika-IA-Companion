@@ -81,7 +81,8 @@ async def memory_promise_done(args: PromiseArgs, ctx: Any) -> str:
     promise = state.promises.get(args.promise)
     ep = ctx.frame.episode
     person = ctx.frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
-    if promise is None or (person is not None and promise.to != person):
+    # une promesse faite à une adresse reliée depuis à cette personne lui a été faite
+    if promise is None or (person is not None and (ctx.frame.get(identity_c.PERSON(promise.to)) or promise.to) != person):
         return "Je ne trouve pas cette promesse (déjà réglée, ou faite à quelqu'un d'autre)."
     await ctx.emit(c.PROMISE_RESOLVED.draft(promise=args.promise, status=args.status, by="tool"))
     return "C'est noté." if args.status == c.HONORED else "D'accord, tu l'as laissée tomber."
