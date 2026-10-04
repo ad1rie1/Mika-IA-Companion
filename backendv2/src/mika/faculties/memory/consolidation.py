@@ -126,7 +126,7 @@ class Consolidate:
         for n, conv in enumerate(conversations):
             people = x.People.of(conv.speakers, directory)
             known = await self._known_beliefs(store, vectors, conv, people, directory)
-            promises = self._promises(store, state, conv)
+            promises = self._promises(frame, store, state, conv)
             cached = self.extracted.get((conv.key, conv.seqs))
             if cached is None:
                 labels = {s.person: s.label for s in conv.speakers}
@@ -255,17 +255,20 @@ class Consolidate:
             out.append((int(i), t))
         return out[:KNOWN_SHOWN]
 
-    def _promises(self, store: Any, state: MemoryState, conv: x.Conversation) -> list[tuple[int, str, str]]:
+    def _promises(self, frame: Frame, store: Any, state: MemoryState,
+                  conv: x.Conversation) -> list[tuple[int, str, str]]:
         """Les promesses en cours envers les personnes de cette conversation
-        (des clés de personne : toutes leurs adresses comptent)."""
+        (des clés de personne : toutes leurs adresses comptent — une adresse
+        reliée depuis à quelqu'un parle pour lui)."""
         persons = set(conv.persons)
-        pending = [pr for pr in state.promises.values() if pr.to in persons]
+        pending = [(pr, frame.get(identity_c.PERSON(pr.to)) or pr.to) for pr in state.promises.values()]
+        pending = [(pr, to) for pr, to in pending if to in persons]
         if not pending:
             return []
-        ids = [pr.id for pr in pending]
+        ids = [pr.id for pr, _ in pending]
         marks = ",".join("?" * len(ids))
         texts = dict(store.query_mind(f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE id IN ({marks})", tuple(ids)))
-        return [(pr.id, pr.to, texts.get(pr.id, "")) for pr in pending if texts.get(pr.id)]
+        return [(pr.id, to, texts.get(pr.id, "")) for pr, to in pending if texts.get(pr.id)]
 
     # ── ce qu'on en garde ──
     async def _drafts(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
@@ -751,7 +754,7 @@ class LetGo:
         return sorted((pr.due + grace, pr.id) for pr in state.promises.values() if pr.due is not None)
 
     def _fresh_reminders(self, state: MemoryState, frame: Frame) -> bool:
-        owners = {pr.to for pr in state.promises.values()}
+        owners = {frame.get(identity_c.PERSON(pr.to)) or pr.to for pr in state.promises.values()}
         return any(g.kind == goals_c.REMINDER and g.owner in owners and g.id not in self.seen
                    for g in frame.get(goals_c.LIVE))
 
@@ -790,7 +793,7 @@ class LetGo:
         texts = dict(store.query_mind(f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE id IN ({marks})",
                                       tuple(pr.id for pr in pending)))
         return sorted(pr.id for pr in pending if any(
-            r.owner == pr.to and r.opened_at >= pr.at and same_task(texts.get(pr.id) or "", r.title)
+            r.owner == (frame.get(identity_c.PERSON(pr.to)) or pr.to) and r.opened_at >= pr.at and same_task(texts.get(pr.id) or "", r.title)
             and same_day(frame, None if pr.implicit_due else pr.due, r.due) for r in reminders))
 
 
