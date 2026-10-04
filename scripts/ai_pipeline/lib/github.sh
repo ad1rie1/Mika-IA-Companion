@@ -80,7 +80,7 @@ _module_is_covered() {
     [[ "$kind" == "audit" ]] && query=(gh issue list --state open --limit 1 --label "ai-audit")
     if ! count=$(gh_query "${query[@]}" \
         --label "ai-${profile}" \
-        --label "module:${mod}" \
+        --label "$(module_label "$mod")" \
         --json number --jq 'length'); then
         warn "Dédup impossible pour ${profile}/${mod} - module sauté par précaution" >&2
         return 0
@@ -103,12 +103,14 @@ pick_module() {
     local -a available=()
     local mod skipped is_skipped
     for mod in "${AVAILABLE_MODULES[@]}"; do
-        [[ -d "${PROJECT_ROOT}/${mod}" ]] || continue
+        module_in_base "$mod" || continue
 
         # GitHub refuse un label de plus de 50 caractères, et ensure_label
         # échoue en silence : toutes les issues du module partaient en erreur.
-        if (( ${#mod} + 7 > 50 )); then
-            warn "Module ignoré, label trop long pour GitHub (> 50) : module:${mod}" >&2
+        local label
+        label=$(module_label "$mod")
+        if (( ${#label} > 50 )); then
+            warn "Module ignoré, label trop long pour GitHub (> 50) : ${label} - l'abréger dans MODULE_LABEL_PREFIXES" >&2
             continue
         fi
 
@@ -136,7 +138,7 @@ get_existing_issues() {
     gh_query gh issue list --state open --limit 1000 \
         --label "ai-audit" \
         --label "ai-${profile}" \
-        --label "module:${module}" \
+        --label "$(module_label "$module")" \
         --json number,title \
         --template '{{range .}}#{{.number}} - {{.title}}{{"\n"}}{{end}}'
 }
@@ -212,8 +214,8 @@ PRBODY
         extra_args+=(--label "ai-${PROFILE}")
     fi
     if [[ -n "$MODULES" && "$MODULES" != "all" && "$MODULES" != *" "* ]]; then
-        ensure_label "module:${MODULES}" "bfdadc" "Module ${MODULES}"
-        extra_args+=(--label "module:${MODULES}")
+        ensure_label "$(module_label "$MODULES")" "bfdadc" "Module ${MODULES}"
+        extra_args+=(--label "$(module_label "$MODULES")")
     fi
     [[ "$PR_DRAFT" == true ]] && extra_args+=(--draft)
     [[ -n "$PR_REVIEWERS" ]] && extra_args+=(--reviewer "$PR_REVIEWERS")
@@ -276,7 +278,7 @@ create_github_issues() {
 
     ensure_label "ai-audit" "1d76db" "Issue créée par AI Pipeline (audit)"
     ensure_label "ai-${profile}" "d73a4a" "Audit IA - ${profile}"
-    ensure_label "module:${module}" "bfdadc" "Module ${module}"
+    ensure_label "$(module_label "$module")" "bfdadc" "Module ${module}"
 
     # Propose_AI_PR déclenche la reprise automatique par le worker. Certains
     # profils ne doivent pas l'obtenir : une idée de fonctionnalité se décide
@@ -348,7 +350,7 @@ ISSUEBODY
         local -a issue_labels=(
             --label "ai-audit"
             --label "ai-${profile}"
-            --label "module:${module}"
+            --label "$(module_label "$module")"
             --label "${severity_label}"
         )
         if [[ "$auto_pr" == true ]]; then

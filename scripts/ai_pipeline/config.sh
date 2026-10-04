@@ -41,11 +41,12 @@ export GH_REPO
 # le pipeline s'y range sous un nom fixe.
 WORK_ROOT="${AI_PIPELINE_WORKTREE:-${PROJECT_ROOT}/.claude/worktrees/ai-pipeline}"
 
-# Dépendances NON suivies par git dont l'agent a besoin pour vérifier son
-# travail (`npx tsc`) : liées depuis la copie principale plutôt que
-# réinstallées à chaque tâche.
+# Fichiers NON suivis par git dont l'agent a besoin pour vérifier son travail
+# (`npx tsc`, `./gradlew`) : liés depuis la copie principale plutôt que
+# réinstallés à chaque tâche. `local.properties` dit à Gradle où est le SDK.
 WORKSPACE_SHARED_PATHS=(
     "frontend/Web/node_modules"
+    "frontend/Android/local.properties"
 )
 
 # Environnement Python du backend v2. Le paquet `mika` y est installé en mode
@@ -53,6 +54,16 @@ WORKSPACE_SHARED_PATHS=(
 # faut `PYTHONPATH=src`, sinon pytest et lint-imports vérifient le code de la
 # copie principale au lieu de celui que l'agent vient d'écrire.
 V2_VENV="${AI_PIPELINE_V2_VENV:-${PROJECT_ROOT}/backendv2/.venv}"
+
+# Construction Android (cf. frontend/Android/README.md).
+ANDROID_JAVA_HOME="${AI_PIPELINE_JAVA_HOME:-/usr/lib/jvm/java-25-openjdk}"
+ANDROID_SDK="${ANDROID_HOME:-${HOME}/Android/Sdk}"
+
+# Garde-fou mémoire des commandes lourdes (une construction Gradle prend
+# ~2 Gio) : plafond sans swap, seule la commande est tuée au-delà. Vide si
+# l'outil n'existe pas sur la machine.
+MEMORY_GUARD="${AI_PIPELINE_MEMORY_GUARD:-${HOME}/recup-audit-v2-2026-10-01/outils/borne.sh}"
+[[ -x "$MEMORY_GUARD" ]] || MEMORY_GUARD=""
 
 # -- Agent IA -----------------------------------------------------------------
 # Choix possibles: "claude" ou "codex"
@@ -152,22 +163,25 @@ EMAIL_FROM="ai-pipeline@vtuber.local"
 
 # -- Modules ciblables --------------------------------------------------------
 # Un module = une unité d'audit/correction, traitée par une tâche IA complète.
-# Chemins relatifs à la racine du dépôt (le pipeline n'en garde que les
-# existants). Le label GitHub d'un module est `module:<chemin>` : GitHub limite
-# un label à 50 caractères, un chemin ne doit donc pas dépasser 43.
+# Chemins relatifs à la racine du dépôt. Un module n'est retenu que s'il existe
+# sur BASE_REF : c'est cet état-là que l'agent lit dans le worktree, et un
+# dossier pas encore poussé y serait vide.
 #
-# La cible est le moteur VIVANT : backendv2/ et le client web. Volontairement
-# absents :
+# La cible est le code VIVANT : backendv2/ et les trois clients (web, Android,
+# Unity). Volontairement absents :
 #   old/                         → v1 archivée, on ne la modifie plus
 #   backendv2/src/mika/contracts,
 #   ports, vocab                 → sans logique ; lus comme contexte par les
 #                                  passages des facultés qui s'en servent
-#   faculties/presence, place    → quelques dizaines de lignes, lues avec
-#                                  world et identity
+#   faculties/presence, place,
+#   plugins/sensors              → quelques dizaines de lignes, lues avec
+#                                  leurs voisins
 #   backendv2/src/mika/sim       → l'outil de validation : le « corriger » pour
 #                                  qu'un scénario passe est la pente à éviter
-#   backendv2/tests              → la politique de tests interdit d'y écrire
-#   frontend/Unity               → aucun correctif vérifiable hors de l'éditeur
+#   tests (backendv2/tests, Android app/src/test, Unity Assets/Mika/Tests)
+#                                → la politique de tests interdit d'y écrire
+#   Unity Runtime/Protocol/Generated
+#                                → généré par frontend/Unity/tools/gen_world_protocol.py
 AVAILABLE_MODULES=(
     # Noyau et machinerie : un défaut ici touche toutes les facultés.
     "backendv2/src/mika/kernel"
@@ -191,10 +205,12 @@ AVAILABLE_MODULES=(
     "backendv2/src/mika/faculties/needs"
     "backendv2/src/mika/faculties/agency"
     "backendv2/src/mika/faculties/expression"
+    "backendv2/src/mika/faculties/shares"
 
     # Plugins : même forme que les facultés, confiance restreinte.
     "backendv2/src/mika/plugins/email"
     "backendv2/src/mika/plugins/forge"
+    "backendv2/src/mika/plugins/imaging"
     "backendv2/src/mika/plugins/rss"
     "backendv2/src/mika/plugins/camera"
 
@@ -205,7 +221,7 @@ AVAILABLE_MODULES=(
     "backendv2/src/mika/adapters/forge"
     "backendv2/src/mika/adapters/world"
     "backendv2/src/mika/adapters/workshop"
-    "backendv2/src/mika/adapters/telegram"
+    "backendv2/src/mika/adapters/imaging"
     "backendv2/src/mika/adapters"
 
     # Client web : l'animation pèse ~7 000 lignes à elle seule ; l'UI et
@@ -216,6 +232,34 @@ AVAILABLE_MODULES=(
     "frontend/Web/src/ui"
     "frontend/Web/src/audio"
     "frontend/Web/src"
+
+    # Client Android (Kotlin, ~11 500 lignes) : le réseau et la conversation
+    # sont les deux gros morceaux de `data/` ; « app » couvre le reste
+    # (core, share, manifeste, ressources).
+    "frontend/Android/app/src/main/java/fr/qwartz/mika/data/net"
+    "frontend/Android/app/src/main/java/fr/qwartz/mika/data/chat"
+    "frontend/Android/app/src/main/java/fr/qwartz/mika/data"
+    "frontend/Android/app/src/main/java/fr/qwartz/mika/service"
+    "frontend/Android/app/src/main/java/fr/qwartz/mika/ui"
+    "frontend/Android/app"
+
+    # Client Unity (C#, ~22 000 lignes) : les acteurs du monde et l'avatar sont
+    # les deux gros morceaux du runtime ; l'éditeur (import, animation, labo)
+    # fait un lot.
+    "frontend/Unity/Mika/Assets/Mika/Runtime/World/Actors"
+    "frontend/Unity/Mika/Assets/Mika/Runtime/World"
+    "frontend/Unity/Mika/Assets/Mika/Runtime/Avatar"
+    "frontend/Unity/Mika/Assets/Mika/Runtime"
+    "frontend/Unity/Mika/Assets/Mika/Editor"
+)
+
+# Le label GitHub d'un module est `module:<chemin>`, et GitHub refuse un label
+# de plus de 50 caractères : les chemins Android et Unity n'y tiennent pas. Le
+# premier préfixe qui correspond est remplacé par son abrégé (`ancien=nouveau`).
+MODULE_LABEL_PREFIXES=(
+    "frontend/Android/app/src/main/java/fr/qwartz/mika/=android/"
+    "frontend/Android/=android/"
+    "frontend/Unity/Mika/Assets/Mika/=unity/"
 )
 
 # Périmètres à retrancher d'un module, quand un sous-dossier est lui-même un
@@ -223,10 +267,16 @@ AVAILABLE_MODULES=(
 # serait audité une fois pour lui-même et une fois dans le balayage de
 # `adapters`, avec deux issues pour un même constat et aucune déduplication
 # possible (elle est indexée par label de module).
+_ANDROID_PKG="frontend/Android/app/src/main/java/fr/qwartz/mika"
+_UNITY_RT="frontend/Unity/Mika/Assets/Mika/Runtime"
 declare -A MODULE_SCOPE_EXCLUDES=(
-    ["backendv2/src/mika/adapters"]="les sous-dossiers llm/, mail/, web/, forge/, world/, workshop/ et telegram/ de backendv2/src/mika/adapters/"
+    ["backendv2/src/mika/adapters"]="les sous-dossiers llm/, mail/, web/, forge/, world/, workshop/ et imaging/ de backendv2/src/mika/adapters/"
     ["frontend/Web/src/vtuber"]="frontend/Web/src/vtuber/animation/"
     ["frontend/Web/src"]="frontend/Web/src/vtuber/, frontend/Web/src/ui/ et frontend/Web/src/audio/"
+    ["${_ANDROID_PKG}/data"]="${_ANDROID_PKG}/data/net/ et ${_ANDROID_PKG}/data/chat/"
+    ["frontend/Android/app"]="${_ANDROID_PKG}/data/, ${_ANDROID_PKG}/service/, ${_ANDROID_PKG}/ui/ et les tests (app/src/test, app/src/androidTest)"
+    ["${_UNITY_RT}/World"]="${_UNITY_RT}/World/Actors/"
+    ["${_UNITY_RT}"]="${_UNITY_RT}/World/, ${_UNITY_RT}/Avatar/ et ${_UNITY_RT}/Protocol/Generated/ (généré : un défaut s'y corrige dans frontend/Unity/tools/gen_world_protocol.py ou le schéma du noyau)"
 )
 
 # -- Profils d'analyse --------------------------------------------------------
@@ -275,6 +325,36 @@ FORBIDDEN_PATTERNS=(
     "frontend/Web/package-lock.json"
     "frontend/Web/tsconfig*.json"
 
+    # Android : construction, dépendances, minification, signature, et les
+    # schémas Room exportés (le compilateur les écrit ; une base qui change de
+    # forme demande une migration, pas un schéma retouché).
+    "frontend/Android/*.gradle.kts"
+    "frontend/Android/gradle.properties"
+    "frontend/Android/gradle/*"
+    "frontend/Android/gradlew*"
+    "frontend/Android/app/proguard-rules.pro"
+    "frontend/Android/app/schemas/*"
+    "*.jks"
+    "*.keystore"
+
+    # Unity : réglages et paquets du projet, types de protocole générés, et
+    # tout ce que l'éditeur sérialise. Un `.meta` porte l'identifiant (GUID)
+    # par lequel scènes et prefabs référencent un fichier : retouché à la main,
+    # les références cassent en silence. Scènes, prefabs, matériaux et clips
+    # s'éditent dans Unity, pas en YAML.
+    "frontend/Unity/Mika/ProjectSettings/*"
+    "frontend/Unity/Mika/Packages/*"
+    "*/Protocol/Generated/*"
+    "*.meta"
+    "*.unity"
+    "*.prefab"
+    "*.asset"
+    "*.mat"
+    "*.anim"
+    "*.controller"
+    "frontend/Unity/Mika/Assets/Mika/Art/*"
+    "frontend/Unity/ArtSource/*"
+
     # Exploitation et outillage : un agent ne réécrit pas les règles qui le
     # surveillent, ni la CI, ni ses propres réglages.
     "backendv2/deploy/*"
@@ -282,9 +362,10 @@ FORBIDDEN_PATTERNS=(
     ".claude/*"
     ".github/*"
 
-    # Données d'exécution
+    # Données d'exécution. Pas de `*/data/*` : il interdisait aussi le paquet
+    # Kotlin `fr/qwartz/mika/data/`, la moitié de l'application Android.
     "data/*"
-    "*/data/*"
+    "backendv2/data/*"
     "uploads/*"
     "*.db"
     "*.sqlite3"
@@ -294,5 +375,7 @@ FORBIDDEN_PATTERNS=(
     "*.fbx"
     "*.glb"
     "*.blend"
+    "*.png"
+    "*.jpg"
     "*.zip"
 )

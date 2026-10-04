@@ -7,7 +7,7 @@ Analyse les fichiers fournis pour identifier et corriger les vulnérabilités de
 
 ## Modèle de menace
 
-Moteur personnel servi sur loopback, opératrice propriétaire. Ce qui a de la valeur : le journal de sa vie et ce qu'elle sait des personnes (confidences, secrets), les identifiants (clés LLM, jetons git, boîtes mail), et les capacités (mail, push git, ateliers, Forge, monde 3D). Les attaquants réalistes sont, dans l'ordre : une page web tierce visitée pendant la session, du contenu hostile entrant par un canal (mail, RSS, Telegram, pièce jointe, sortie d'app forgée, capteur), un autre poste du LAN si l'écoute n'est pas sur loopback.
+Moteur personnel servi sur loopback, opératrice propriétaire. Ce qui a de la valeur : le journal de sa vie et ce qu'elle sait des personnes (confidences, secrets), les identifiants (clés LLM, jetons git, boîtes mail, jetons des clients Android et Unity), et les capacités (mail, push git, ateliers, Forge, monde 3D). Les attaquants réalistes sont, dans l'ordre : une page web tierce visitée pendant la session, du contenu hostile entrant par un canal (mail, RSS, pièce jointe, fichier partagé vers l'appli, sortie d'app forgée, capteur), un autre poste du LAN si l'écoute n'est pas sur loopback, une autre application sur le téléphone.
 
 ## Catégories à vérifier
 
@@ -18,8 +18,9 @@ Moteur personnel servi sur loopback, opératrice propriétaire. Ce qui a de la v
 5. **WebSocket** - Validation d'origine absente (le CORS ne s'y applique pas), authentification manquante à la connexion, identité acceptée dans une trame ordinaire
 6. **Contrôle d'accès** - Vue ou action de console sans garde, divulgation d'une confidence à la mauvaise audience, propriété reconnue en salon public
 7. **Confinement** - Exécution hors bubblewrap, réseau ouvert sans capacité, échappement par chemin ou lien symbolique, secrets du serveur hérités par un processus enfant
-8. **Secrets** - Secret remontant en clair dans une lecture, un log, une trace LLM, le journal ou une page de réglages
-9. **Classiques** - SQL brut concaténé, path traversal, SSRF, `pickle`/`yaml.load` sans SafeLoader, injection de commande
+8. **Secrets** - Secret remontant en clair dans une lecture, un log, une trace LLM, le journal ou une page de réglages ; jeton de client Android gardé hors du Keystore ou journalisé
+9. **Android** - Composant exporté qui agit sur une intention étrangère, `FileProvider` trop large, trafic en clair vers un serveur hors loopback
+10. **Classiques** - SQL brut concaténé, path traversal, SSRF, `pickle`/`yaml.load` sans SafeLoader, injection de commande
 
 ## Règles
 

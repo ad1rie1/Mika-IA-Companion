@@ -27,7 +27,7 @@ Qu'est-ce qu'il calcule, publie, décide ? Qui le consomme ? Quelque chose est-i
 - Un état qui augmente et n'a pas de chemin de retour.
 - Une écriture sans lecture, une lecture sans affichage.
 - Une décision automatique dont personne ne voit jamais la raison.
-- Une chose vraie pour un canal (le web) et pas pour un autre (Telegram, le monde 3D), sans raison de fond.
+- Une chose vraie pour un client (le web) et pas pour un autre (Android, le monde Unity), sans raison de fond.
 
 ### 3. Cherche le presque-fait
 Un `TODO`, un paramètre accepté et ignoré, un champ rempli et jamais lu, un « restes connus » dans un ADR. Finir coûte toujours moins cher que commencer.

@@ -283,9 +283,17 @@ Mika : un personnage d'IA compagne, présent en continu, avec un avatar 3D.
   → `runtime` → `inspector`/`sim` → `app`), facultés (`memory`, `affect`,
   `identity`, `social`, `others`, `goals`, `projects`, `world`…), plugins
   (`email`, `forge`, `rss`, `camera`), console d'opérateur (`inspector`).
-- `frontend/Web/` — client Vite + TypeScript + Three.js + VRM : rendu 3D,
-  animation, TTS navigateur, lip-sync. Son protocole avec le backend est lu
-  dans son propre code.
+- Trois clients, chacun avec un compte :
+  - `frontend/Web/` — Vite + TypeScript + Three.js + VRM : rendu 3D, animation,
+    TTS navigateur, lip-sync. Protocole : `backendv2/src/mika/adapters/web/protocol.py`.
+  - `frontend/Android/` — Kotlin, Jetpack Compose, Room : une messagerie avec
+    Mika, ses fichiers, « ce qu'elle fait », des notifications quand l'appli
+    est fermée (ADR 0062, protocole `backendv2/docs/protocole-chat.md`). Lis
+    `frontend/Android/README.md`.
+  - `frontend/Unity/Mika/` — Unity 6, C# : le monde 3D et son corps dedans
+    (protocole `mika.world/1`, `backendv2/docs/protocole-monde.md`, ADR 0050–0051).
+    Couches en assemblies (`Protocol` généré → `Model` sans Unity → `Net` →
+    `Chat`, `World`, `Avatar`, `Player`, `UI` → `App`).
 - `old/` — la v1 (Django) ARCHIVÉE. On ne la modifie pas, on ne la prend pas
   pour référence : son comportement n'est pas un oracle.
 - Langues : identifiants de code en anglais ; prompts, interface, commentaires
@@ -321,9 +329,10 @@ vérifiées par `lint-imports` et `ruff` ; les contourner est une régression :
 - **Les garde-fous de la personne sont gradués, pas binaires** (divulgation,
   confidences, affect, fatigue) : remplacer une gradation par un interdit est
   une régression. La certitude sur *qui parle*, elle, reste mécanique.
-- **Telegram fermé par défaut**, atelier et Forge sous bubblewrap **sans
-  repli**, fournisseur Claude Code par **la CLI et son propre login** (jamais
-  un jeton OAuth extrait) : délibérés.
+- Atelier et Forge sous bubblewrap **sans repli**, fournisseur Claude Code
+  par **la CLI et son propre login** (jamais un jeton OAuth extrait), plus de
+  Telegram (ADR 0060 : on écrit à Mika par une application dédiée, avec un
+  compte) : délibérés.
 - Un comportement se valide par une **cible d'intention** (ce qu'une personne
   ferait), jamais par parité avec la v1.
 
@@ -374,13 +383,18 @@ seulement ce que tu as touché.
     - `"@V2_VENV@/bin/ruff" check <fichiers modifiés>`
     - `PYTHONPATH=src "@V2_VENV@/bin/lint-imports"` (contrats de couches, rapide)
     - AU PLUS DEUX fichiers de test ciblés qui couvrent la zone touchée : `PYTHONPATH=src "@V2_VENV@/bin/python" -m pytest tests/unit/test_<zone>.py -x -q`
-  - frontend, depuis `frontend/Web/` : `npx tsc --noEmit` (garde-fou dur, ne le saute pas si tu as modifié `frontend/Web/src/`), puis au plus un fichier ciblé : `npx vitest run <chemin/du/test>`.
+  - client web, depuis `frontend/Web/` : `npx tsc --noEmit` (garde-fou dur, ne le saute pas si tu as modifié `frontend/Web/src/`), puis au plus un fichier ciblé : `npx vitest run <chemin/du/test>`.
+  - client Android, depuis `frontend/Android/`, si tu as modifié du Kotlin : `@GRADLE@ :app:compileDebugKotlin` (une construction prend ~2 Gio de mémoire : une seule, à la fin), puis au plus une classe de test JVM : `@GRADLE@ :app:testDebugUnitTest --tests 'fr.qwartz.mika.<paquet>.<Classe>'`. Jamais `connectedAndroidTest` ni `assemble*` (il faudrait un téléphone, ou c'est inutilement lourd).
+  - client Unity : AUCUNE compilation n'est possible depuis ici (il faudrait l'éditeur Unity). Ne modifie donc que du C# existant, avec des API déjà employées dans le projet ; ne crée, ne supprime ni ne renomme aucun fichier (chacun a un `.meta` que seul Unity écrit) ; et termine ton résumé par « Unity : non compilé, à ouvrir dans l'éditeur avant de fusionner ».
 - Si un test ciblé échoue à cause de ta modification, corrige ta modification. S'il échouait déjà avant, ne le touche pas et signale-le dans ton résumé.
 
 Exception unique : si l'issue traitée demande EXPLICITEMENT d'ajouter ou de corriger un test, fais uniquement ce qui est demandé.
 POLICY
 )
-    printf '%s\n' "${policy//@V2_VENV@/$V2_VENV}"
+    local gradle="env JAVA_HOME=\"${ANDROID_JAVA_HOME}\" ANDROID_HOME=\"${ANDROID_SDK}\" ./gradlew --no-daemon -q"
+    [[ -n "${MEMORY_GUARD:-}" ]] && gradle="\"${MEMORY_GUARD}\" ${gradle}"
+    policy="${policy//@V2_VENV@/$V2_VENV}"
+    printf '%s\n' "${policy//@GRADLE@/$gradle}"
 }
 
 # Contraintes communes à tout mode qui modifie le code (fix, worker). La liste
@@ -454,7 +468,35 @@ check_prerequisites() {
         exit "$EXIT_FAIL"
     fi
 
+    # Le choix d'un module se fait sur BASE_REF : qu'il soit à jour.
+    git -C "$PROJECT_ROOT" fetch --quiet "$REPO_REMOTE" "$BASE_BRANCH" >> "$LOG_FILE" 2>&1 \
+        || warn "git fetch ${REPO_REMOTE} ${BASE_BRANCH} a échoué - modules choisis sur l'état connu"
+
     ok "Prérequis validés (dépôt ${GH_REPO})"
+}
+
+# Label GitHub d'un module : `module:<chemin>`, abrégé par
+# MODULE_LABEL_PREFIXES pour tenir dans les 50 caractères de GitHub.
+module_label() {
+    local mod="$1" pair from to
+    for pair in "${MODULE_LABEL_PREFIXES[@]}"; do
+        from="${pair%%=*}"
+        to="${pair#*=}"
+        if [[ "$mod" == "$from"* ]]; then
+            echo "module:${to}${mod#"$from"}"
+            return 0
+        fi
+    done
+    echo "module:${mod}"
+}
+
+# Le module existe-t-il sur BASE_REF ? C'est l'état que l'agent lit dans le
+# worktree : un dossier présent dans la copie de travail mais pas encore
+# poussé y serait vide, et l'agent aurait audité du vide.
+module_in_base() {
+    # (`rev:chemin^{tree}` ne marche pas : `^{tree}` serait lu comme une partie
+    # du chemin.)
+    [[ "$(git -C "$PROJECT_ROOT" cat-file -t "${BASE_REF}:${1}" 2>/dev/null)" == "tree" ]]
 }
 
 # Retranche du périmètre les sous-dossiers qui sont eux-mêmes des modules du
@@ -476,7 +518,7 @@ resolve_modules() {
 
     if [[ "$modules_arg" == "all" ]]; then
         for mod in "${AVAILABLE_MODULES[@]}"; do
-            [[ -d "${PROJECT_ROOT}/${mod}" ]] && paths+=("$mod")
+            module_in_base "$mod" && paths+=("$mod")
         done
     else
         local -a mod_list=()
@@ -484,8 +526,10 @@ resolve_modules() {
         for mod in "${mod_list[@]}"; do
             mod=$(echo "$mod" | xargs)
             mod="${mod%/}"
-            if [[ -d "${PROJECT_ROOT}/${mod}" ]]; then
+            if module_in_base "$mod"; then
                 paths+=("$mod")
+            elif [[ -d "${PROJECT_ROOT}/${mod}" ]]; then
+                warn "Module absent de ${BASE_REF} (pas encore poussé ?) : $mod (ignoré)" >&2
             else
                 warn "Module introuvable: $mod (ignoré)" >&2
             fi

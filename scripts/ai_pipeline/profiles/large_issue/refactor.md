@@ -31,6 +31,21 @@ Corrige le problème décrit dans l'issue GitHub ci-dessous. L'issue peut venir 
 - Les couches d'animation écrivent sur des ensembles disjoints — n'en fais pas se chevaucher deux.
 - Le protocole avec le backend est celui de `backendv2/src/mika/adapters/web/protocol.py` : un champ changé d'un côté se change de l'autre.
 
+### Client Android (`frontend/Android/`, Kotlin)
+- Lis `frontend/Android/README.md` et l'ADR 0062 ; le protocole est `backendv2/docs/protocole-chat.md`.
+- Coroutines dans la portée de leur propriétaire (`viewModelScope`, portée du service), jamais `GlobalScope` ; rien de bloquant sur le fil principal.
+- Une entité Room qui change de forme demande une migration (et une version de base), jamais un schéma exporté retouché à la main.
+- Le jeton reste dans le Keystore ; aucune valeur secrète dans un log.
+- Vérifie avec `:app:compileDebugKotlin` (cf. politique de tests) : sans compilation, pas de commit.
+
+### Client Unity (`frontend/Unity/Mika/`, C#)
+- Respecte les couches en assemblies : `Protocol` (généré) → `Model` (sans Unity) → `Net` → `Chat`, `World`, `Avatar`, `Player`, `UI` → `App`.
+- `Protocol/Generated` ne s'édite jamais : un changement de contrat se fait côté noyau puis se régénère avec `frontend/Unity/tools/gen_world_protocol.py`.
+- Jamais `?.`, `??` ni `GetComponent<T>() ?? …` sur un objet Unity (faux null) : `TryGetComponent`. Une `MonoBehaviour` par fichier. API Unity sur le fil principal seulement.
+- Un abonnement se retire dans `OnDisable` / `OnDestroy` ; un état statique se remet à zéro par `[InitializeOnEnterPlayMode]` (pas de rechargement de domaine en mode jeu).
+- Nombres formatés et lus en `CultureInfo.InvariantCulture` ; toute conversion de coordonnées passe par `RoomSpace`.
+- Pas de compilation possible depuis ici : modifie seulement du C# existant, sans créer, supprimer ni renommer de fichier, et dis-le dans ton résumé.
+
 ### Prompt
 - Une section ajoutée est renvoyée à chaque épisode : elle se justifie par son coût en tokens, et se range dans la bonne zone (stable / historique / volatile) pour ne pas casser le cache.
 - Une refactorisation du prompt doit produire une sortie identique octet pour octet, sauf si l'issue demande le contraire.
@@ -58,8 +73,8 @@ Après tes modifications, affiche OBLIGATOIREMENT un bloc délimité exactement 
 
 ```
 CONSEQUENCES_START
-- **Impacts directs** : quels autres fichiers, facultés, vues de console ou écrans du frontend utilisent le code modifié ?
-- **Effets de bord** : la modification peut-elle casser un comportement ailleurs ? (faits lus par d'autres facultés, contrat d'import, sections et zones du prompt, trames WebSocket lues par le frontend, cibles d'intention d'un ADR, etc.)
+- **Impacts directs** : quels autres fichiers, facultés, vues de console ou écrans des clients (web, Android, Unity) utilisent le code modifié ?
+- **Effets de bord** : la modification peut-elle casser un comportement ailleurs ? (faits lus par d'autres facultés, contrat d'import, sections et zones du prompt, trames lues par les clients web, Android et Unity, cibles d'intention d'un ADR, etc.)
 - **Journal et rejeu** : nouvel événement ? charge utile modifiée (upcaster) ? projection ou tranche à reconstruire ? le rejeu d'un journal existant donne-t-il toujours le même état ?
 - **Tests** : quels tests existants pourraient être impactés ? (simple signalement pour le reviewer — tu n'écris aucun test et ne lances pas la suite complète)
 - **Verdict** : "Aucun impact collatéral identifié" OU liste précise des points à vérifier par le reviewer

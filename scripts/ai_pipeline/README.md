@@ -2,8 +2,14 @@
 
 Des agents (Claude Code ou Codex) auditent le dépôt, ouvrent des issues, les
 corrigent en PR, et tiennent ces PR à jour. Cible : le moteur vivant
-(`backendv2/`) et le client web (`frontend/Web/`) ; la v1 archivée (`old/`)
-n'est jamais touchée.
+(`backendv2/`) et ses trois clients (`frontend/Web/`, `frontend/Android/`,
+`frontend/Unity/Mika/`) ; la v1 archivée (`old/`) n'est jamais touchée.
+
+Un **module** est un dossier qu'un agent traite en un passage
+(`AVAILABLE_MODULES` dans `config.sh`). Il n'est retenu que s'il existe sur
+`origin/main` : c'est cet état que l'agent lit, un dossier pas encore poussé
+serait vide pour lui. Son label GitHub est `module:<chemin>`, abrégé pour
+Android (`module:android/…`) et Unity (`module:unity/…`).
 
 ## Lancer
 
@@ -31,7 +37,11 @@ dépôt : elle peut rester sale, et on peut y travailler pendant qu'il tourne.
 Ce qu'un agent laisse non commité est sauvegardé en patch dans `logs/`
 (`leftover-*.patch`) avant chaque remise à zéro.
 
-`frontend/Web/node_modules` est lié depuis la copie principale. Le Python est
+`frontend/Web/node_modules` et `frontend/Android/local.properties` sont liés
+depuis la copie principale. Android se vérifie par `:app:compileDebugKotlin`,
+sous le garde-fou mémoire `borne.sh` s'il existe. Unity ne peut pas être
+compilé hors de l'éditeur : l'agent ne touche qu'au C# existant et le dit
+dans la PR. Le Python est
 celui de `backendv2/.venv`, appelé avec `PYTHONPATH=src` : son paquet `mika`
 est installé en mode éditable sur la copie principale, et sans cette variable
 les tests de l'agent porteraient sur ta copie au lieu de son travail.

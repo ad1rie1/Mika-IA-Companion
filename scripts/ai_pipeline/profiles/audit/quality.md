@@ -37,10 +37,10 @@ Trois ressources sont rares ici, et aucune n'est le CPU : **les tokens** (chaque
 ### 5. Console d'opérateur
 - Une vue non paginée sur une collection qui grandit ; une action sans garde ni audit ; un libellé qui n'est pas déclaré dans `app/console.py` (ADR 0042).
 
-### 6. Frontend
-- Travail refait à chaque frame qui pourrait être mis en cache ou déclenché par un événement.
-- Chargement d'assets non parallélisé ou sans dégradation si un fichier manque.
-- Type dupliqué au lieu d'être importé de `src/types/`.
+### 6. Clients
+- Web : travail refait à chaque frame qui pourrait être mis en cache ou déclenché par un événement ; chargement d'assets non parallélisé ou sans dégradation si un fichier manque ; type dupliqué au lieu d'être importé de `src/types/`.
+- Android : recompositions inutiles (état instable passé à un composable), requêtes Room sans index sur une table qui grandit, interrogation périodique là où le WebSocket pousse déjà, cache de fichiers sans borne.
+- Unity : allocation ou `GetComponent` / `Find*` à chaque `Update`, travail par image qui pourrait suivre un événement, couche `Model` qui dépend d'Unity alors qu'elle est faite pour s'en passer.
 
 ## Règles
 
