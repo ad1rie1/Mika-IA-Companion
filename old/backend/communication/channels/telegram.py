@@ -1,0 +1,566 @@
+"""Telegram channel — direct ``communication`` app citizen.
+
+Telegram is not a plugin. It is one of the ways Mika can be reached,
+on the same footing as the WebSocket frontend. The channel is started
+and stopped by the ASGI lifespan alongside memory, emotion, and the
+plugin bus.
+
+Incoming Telegram messages are lifted into a ``Perception`` and handed to
+``pipeline.turns.turn_queue`` — identical flow to the web frontend
+channel, down to the queue that keeps turns ordered and off the read loop.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+
+from telegram import Update
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
+
+from old.backend.config.personality import personality
+from old.backend.configs.runtime import cfg_float, cfg_int
+from old.backend.pipeline.voice import VoiceSink
+from old.backend.utils.degradation import degradations
+
+logger = logging.getLogger(__name__)
+
+# Mêmes bornes que le consumer web (``communication/channels/web_frontend.py``),
+# volontairement : c'est le même coût de l'autre côté. La différence est la
+# clé — le web compte par *connexion*, ici il n'y en a pas, alors on compte
+# par compte Telegram.
+#
+# Deux clés distinctes malgré cette égalité (``telegram.*`` et ``comm.web.*``) :
+# les deux canaux n'ont ni la même exposition ni le même public, et les fondre
+# en une seule interdirait de border l'un sans border l'autre. Corollaire à
+# retenir en réglant l'une : l'égalité de départ était voulue, et la bouger
+# ici ne bouge PAS le web.
+RATE_LIMIT_MAX_MESSAGES = 20
+RATE_LIMIT_WINDOW_SECONDS = 10.0
+
+# Au-delà, on oublie les expéditeurs dont la fenêtre est vide. Le compteur est
+# indexé par compte, et un compte n'a aucun coût à créer : sans purge, un flot
+# d'inconnus ferait grossir le dictionnaire pour la durée du processus.
+_RATE_MAX_TRACKED = 500
+
+# person_id -> horodatages (monotones) des messages reçus dans la fenêtre.
+_msg_timestamps: dict[str, list[float]] = {}
+
+
+def _is_rate_limited(person_id: str) -> bool:
+    """Fenêtre glissante par expéditeur.
+
+    Le chemin Telegram n'avait aucune borne alors que le chemin web en a
+    trois, et c'est celui des deux qu'un tiers peut atteindre sans rien
+    connaître de l'installation : chaque message reçu déclenche un tour de
+    pipeline complet.
+    """
+    now = time.monotonic()
+    window_start = now - cfg_float(
+        "telegram.rate_limit_window_seconds", RATE_LIMIT_WINDOW_SECONDS, mini=0.0,
+    )
+    stamps = [t for t in _msg_timestamps.get(person_id, ()) if t >= window_start]
+    _msg_timestamps[person_id] = stamps
+    if len(stamps) >= cfg_int(
+        "telegram.rate_limit_max_messages", RATE_LIMIT_MAX_MESSAGES, mini=1,
+    ):
+        return True
+    stamps.append(now)
+    _prune_rate_window(window_start)
+    return False
+
+
+def _mo(octets: int) -> str:
+    """Un nombre d'octets, dit comme un humain le dirait (« 5 », « 7,5 »)."""
+    valeur = octets / (1024 * 1024)
+    if abs(valeur - round(valeur)) < 0.05:
+        return str(int(round(valeur)))
+    return f"{valeur:.1f}".replace(".", ",")
+
+
+def _prune_rate_window(window_start: float) -> None:
+    if len(_msg_timestamps) <= _RATE_MAX_TRACKED:
+        return
+    for person_id, stamps in list(_msg_timestamps.items()):
+        if not stamps or stamps[-1] < window_start:
+            _msg_timestamps.pop(person_id, None)
+
+
+def _allowed_senders() -> set[str]:
+    """Liste blanche des comptes et salons autorisés — vide = aucun filtre.
+
+    Relue à chaque message plutôt que mise en cache : le réglage est
+    ``hot_reload``, et on ferme la porte au moment où on s'aperçoit qu'elle
+    était ouverte, pas au prochain redémarrage. Une configuration illisible
+    rend un ensemble vide, donc le comportement d'avant ce réglage : la
+    borne qui reste alors est la fenêtre glissante, et couper la
+    conversation de l'unique personne légitime parce que la base est
+    verrouillée coûterait plus que ça ne protège.
+    """
+    from old.backend.configs.service import config_service
+
+    try:
+        raw = config_service.get("telegram.allowed_chats") or []
+    except Exception as exc:
+        degradations.record("communication.channels.telegram._allowed_senders", exc)
+        return set()
+    if isinstance(raw, str):
+        raw = raw.split(",")
+    return {str(value).strip() for value in raw if str(value).strip()}
+
+
+class TelegramChannel:
+    """Bot lifecycle + message-to-perception bridge."""
+
+    # Telegram voice notes are played on the recipient's terms, so the time
+    # of day doesn't gate them (see pipeline/voice.py). Delivery still falls
+    # back to text whenever no synthesizer is installed.
+    VOICE_SINK = VoiceSink.MESSAGE
+
+    def __init__(self) -> None:
+        self._app: Application | None = None
+        self._running: bool = False
+
+    # ── Availability ────────────────────────────────────────────
+
+    @staticmethod
+    def is_available() -> bool:
+        from old.backend.configs.service import config_service
+        return bool(config_service.get("telegram.token", default=""))
+
+    @property
+    def is_running(self) -> bool:
+        return self._running
+
+    # ── Lifecycle ───────────────────────────────────────────────
+
+    async def start(self) -> None:
+        if self._running:
+            return
+        if not self.is_available():
+            logger.info("Telegram channel skipped: no token configured")
+            return
+
+        from old.backend.configs.service import config_service
+        token = config_service.get("telegram.token", default="")
+
+        self._app = Application.builder().token(token).build()
+        self._app.add_handler(CommandHandler("start", self._handle_start))
+        self._app.add_handler(
+            MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
+        )
+        # Inbound media: photos → vision caption, voice/audio → transcript,
+        # documents → text extraction. The pipeline's preprocessors do the
+        # heavy lifting; this handler only downloads + lifts to a Perception.
+        self._app.add_handler(
+            MessageHandler(
+                filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL,
+                self._handle_media,
+            )
+        )
+
+        await self._app.initialize()
+        await self._app.start()
+        await self._app.updater.start_polling()
+        self._running = True
+        # Declare ourselves as the deliverer for presence targets tagged
+        # "telegram" — we are a channel, not a module, so module_manager
+        # cannot resolve us.
+        from old.backend.communication.delivery import register_channel
+        register_channel("telegram", self)
+        logger.info("Telegram bot started")
+
+    async def stop(self) -> None:
+        if not self._app:
+            return
+        try:
+            await self._app.updater.stop()
+            await self._app.stop()
+            await self._app.shutdown()
+        finally:
+            self._app = None
+            self._running = False
+            from old.backend.communication.delivery import unregister_channel
+            unregister_channel("telegram")
+            logger.info("Telegram bot stopped")
+
+    # ── Handlers ────────────────────────────────────────────────
+
+    async def _handle_start(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        if not update.message:
+            return
+        if not await self._accepts(update.message):
+            return
+        await update.message.reply_text(personality.greeting)
+
+    @staticmethod
+    def _is_public_chat(message) -> bool:
+        """True when the message came from a group / channel, not a DM.
+
+        This is the "média public" case: in a room where anyone can type,
+        a Telegram account id still identifies the *account*, but the
+        conversation around it is not private, so Mika must not read out
+        someone's personal history on the strength of a display name.
+        """
+        chat_type = getattr(getattr(message, "chat", None), "type", "") or ""
+        return chat_type in ("group", "supergroup", "channel")
+
+    @staticmethod
+    def _is_authorized(message) -> bool:
+        """Cet expéditeur a-t-il le droit de faire parler Mika ?
+
+        Le compte ET le salon sont comparés à la liste : autoriser un groupe
+        entier est une décision légitime (« ce salon me parle »), autoriser
+        un compte aussi (« Thomas me parle, d'où qu'il écrive »).
+        """
+        allowed = _allowed_senders()
+        if not allowed:
+            return True
+        user_id = str(getattr(getattr(message, "from_user", None), "id", "") or "")
+        chat_id = str(getattr(message, "chat_id", "") or "")
+        return user_id in allowed or chat_id in allowed
+
+    async def _accepts(self, message) -> bool:
+        """Les deux bornes d'entrée du canal, dans cet ordre.
+
+        Le débit passe avant l'autorisation pour que le refus poli ne
+        devienne pas lui-même un écho automatique à un flot de messages :
+        au-delà de la fenêtre, on ne répond plus rien du tout.
+        """
+        person_id = f"tg_{getattr(getattr(message, 'from_user', None), 'id', '')}"
+        if _is_rate_limited(person_id):
+            logger.warning(
+                "Débit Telegram dépassé pour %s — message ignoré", person_id,
+            )
+            return False
+        if not self._is_authorized(message):
+            logger.info(
+                "Message Telegram refusé: %s hors liste blanche", person_id,
+            )
+            await self._refuse(message)
+            return False
+        return True
+
+    async def _refuse(self, message) -> None:
+        """Refuser à voix haute, avant d'avoir rien enregistré.
+
+        Le contrôle passe *avant* ``_register_interlocutor`` : un inconnu ne
+        doit laisser derrière lui ni entrée de présence, ni
+        ``IdentityHandle``, ni ligne ``Message``. Et un silence se lit comme
+        une panne — l'expéditeur réessaie, donc recompte.
+        """
+        try:
+            await message.reply_text(
+                "Désolée, je ne suis pas configurée pour discuter avec ce compte."
+            )
+        except Exception as exc:
+            degradations.record("communication.channels.telegram._refuse", exc)
+
+    async def _register_interlocutor(self, message) -> tuple[str, bool]:
+        """Register presence + identity for the sender.
+
+        Returns ``(person_id, is_public)``. Registering is what makes the
+        reply findable: ``broadcast_to_websocket`` resolves this entry and
+        delivers through ``deliver()`` — reactive turn included, since the
+        handler no longer echoes anything itself. It also makes this user
+        PROACTIVELY reachable later (the external API is push-capable any
+        time we hold the chat_id), and stops a telegram turn from leaking to
+        the global websocket broadcast.
+
+        Trust is the platform account, never more: ``tg_<id>`` proves the
+        same account came back, not who is holding it. In a group it drops
+        to public. Either way Mika has to be convinced before she treats
+        this person as someone she knows.
+        """
+        person_id = f"tg_{message.from_user.id}"
+        chat_id = message.chat_id
+        display_name = message.from_user.full_name or ""
+        is_public = self._is_public_chat(message)
+
+        # L'adresse mémorisée ici sert aux envois PROACTIFS (la conscience
+        # qui écrit la première) : seul un salon privé peut la devenir. Un
+        # groupe laissé là en ferait la destination par défaut d'une parole
+        # composée pour la personne — son fichier lu à voix haute devant
+        # tout le monde. La chaîne vide ne remplace pas une adresse déjà
+        # connue (registre et handle gardent l'existante). La réponse
+        # RÉACTIVE, elle, ne passe pas par cette adresse : elle repart vers
+        # le salon d'où la question est venue (``reply_ref`` du tour).
+        stored_ref = "" if is_public else str(chat_id)
+
+        from old.backend.communication.presence import presence_registry
+
+        presence_registry.register(
+            person_id=person_id,
+            channel="telegram",
+            kind="module",
+            delivery_ref=stored_ref,
+            display_name=display_name,
+        )
+        from old.backend.identity.resolver import identity_resolver
+        from old.backend.identity.trust import ChannelTrust
+
+        identity = await identity_resolver.link_handle(
+            person_id=person_id,
+            channel="telegram",
+            kind="module",
+            delivery_ref=stored_ref,
+            display_name=display_name,
+            trust=ChannelTrust.PUBLIC if is_public else ChannelTrust.ACCOUNT,
+        )
+        # Sans handle, rien ne rattache ce compte a une Identity : la
+        # deliberation ne pourra jamais le lier a une Entity memoire et la
+        # personne restera indiscernable d'un inconnu, tour apres tour.
+        if identity is None:
+            logger.warning(
+                "Handle non enregistre pour %s@telegram — la personne restera "
+                "anonyme pour la memoire par personne",
+                person_id,
+            )
+        return person_id, is_public
+
+    @staticmethod
+    def _turn_metadata(message, is_public: bool) -> dict:
+        """Ce que le transport prouve pour ce tour, et d'où il vient.
+
+        ``reply_ref`` est le salon qui a posé la question. La réponse était
+        routée par l'adresse mémorisée dans le registre de présence — « le
+        dernier salon où ce compte a été vu » : une question posée en privé,
+        mise en attente derrière l'unique worker, puis un message du même
+        compte dans un groupe, et la réponse privée, composée avec tout son
+        contexte, partait dans le groupe. Le tour emporte donc son propre
+        salon, et la diffusion le préfère à l'adresse mémorisée.
+        """
+        return {
+            "authenticated": False,
+            "is_public": is_public,
+            "reply_ref": str(getattr(message, "chat_id", "") or ""),
+        }
+
+    async def _handle_message(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        if not update.message or not update.message.text:
+            return
+
+        if not await self._accepts(update.message):
+            return
+
+        person_id, is_public = await self._register_interlocutor(update.message)
+
+        from old.backend.pipeline.perception import Perception
+
+        perception = Perception.from_text(
+            update.message.text,
+            source="telegram",
+            person_id=person_id,
+            metadata=self._turn_metadata(update.message, is_public),
+        )
+        await self._submit(perception, update.message)
+
+    async def _handle_media(
+        self, update: Update, context: ContextTypes.DEFAULT_TYPE
+    ):
+        """Photos, voice notes, audio files, documents — with optional caption.
+
+        Downloads the payload, wraps it as a MediaAttachment, and routes a
+        MIXED Perception. The preprocessors turn it into text (caption /
+        transcript / extraction) before the AI sees it — same path as a
+        frontend upload.
+        """
+        message = update.message
+        if not message:
+            return
+
+        if not await self._accepts(message):
+            return
+
+        person_id, is_public = await self._register_interlocutor(message)
+
+        attachment = await self._download_media(message)
+        if attachment is None:
+            return
+
+        from old.backend.pipeline.perception import Perception
+
+        perception = Perception.from_mixed(
+            text=message.caption or "",
+            attachments=[attachment],
+            source="telegram",
+            person_id=person_id,
+            metadata=self._turn_metadata(message, is_public),
+        )
+        await self._submit(perception, message)
+
+    async def _submit(self, perception, message) -> None:
+        """Confier le tour à la file plutôt que l'attendre ici.
+
+        ``python-telegram-bot`` dépile les updates en série : awaiter le
+        pipeline dans le handler rendait le bot muet pour toute la durée du
+        tour — jusqu'à ``ai.call_timeout_seconds``, et sur un modèle local
+        souvent la totalité — ``/start`` compris. Et ça court-circuitait
+        ``turn_queue`` : un message Telegram et un message web partaient en
+        parallèle, deux appels LLM concurrents contre un serveur local qui
+        n'a qu'un créneau. Telegram est un canal de conversation au même
+        titre que le frontend ; il passe par la même file.
+
+        La réponse n'a plus besoin d'être renvoyée d'ici : elle est adressée
+        à ``tg_<id>``, que ``broadcast_to_websocket`` résout dans le registre
+        de présence et livre par ``deliver()`` — le chemin déjà utilisé
+        quand Mika écrit la première.
+        """
+        from old.backend.pipeline.turns import turn_queue
+
+        if turn_queue.submit(perception):
+            return
+        # File pleine : dit à voix haute, comme l'``ack: overloaded`` du
+        # frontend. Un message avalé en silence laisse quelqu'un attendre
+        # une réponse qui n'arrivera jamais.
+        try:
+            await message.reply_text(
+                "Je suis débordée là — redemande-moi dans un instant."
+            )
+        except Exception as exc:
+            degradations.record("communication.channels.telegram._submit", exc)
+
+    async def _download_media(self, message):
+        """Pick the richest media on the message and download it.
+
+        Returns a validated ``MediaAttachment`` or None (unsupported type,
+        oversized payload, or download failure — all logged, none fatal).
+        """
+        from old.backend.pipeline.media import (
+            MAX_FILE_SIZE_BYTES, MediaAttachment, _categorize, sanitize_filename,
+        )
+
+        # Le plafond est un réglage côté ``pipeline.media`` : le lire par son
+        # accesseur, la constante étant figée à l'import. L'import est gardé
+        # pour que ce canal continue de fonctionner devant une version de
+        # ``pipeline.media`` qui ne l'expose pas encore.
+        try:
+            from old.backend.pipeline.media import max_file_size_bytes
+
+            taille_max = int(max_file_size_bytes())
+        except Exception:
+            taille_max = MAX_FILE_SIZE_BYTES
+
+        if message.voice:
+            media = message.voice
+            name = "note_vocale.ogg"
+            mime = media.mime_type or "audio/ogg"
+        elif message.audio:
+            media = message.audio
+            # ``file_name`` est choisi par l'expéditeur : borné ici comme un
+            # nom venu du WebSocket, avant le journal et la Perception.
+            name = sanitize_filename(media.file_name or "audio.mp3")
+            mime = media.mime_type or "audio/mpeg"
+        elif message.photo:
+            media = message.photo[-1]  # largest resolution
+            name = "photo.jpg"
+            mime = "image/jpeg"
+        elif message.document:
+            media = message.document
+            name = sanitize_filename(media.file_name or "document")
+            mime = media.mime_type or "application/octet-stream"
+        else:
+            return None
+
+        size = getattr(media, "file_size", None)
+        if size and size > taille_max:
+            logger.info(
+                "Telegram media ignoré (trop grand): %s (%d o)", name, size
+            )
+            try:
+                # Le chiffre annoncé est DÉRIVÉ du plafond appliqué : écrire
+                # « 5 Mo » en dur, c'était promettre à l'expéditeur une limite
+                # qui cessait d'être vraie dès que le réglage bougeait.
+                await message.reply_text(
+                    f"(fichier trop lourd pour moi — {_mo(taille_max)} Mo max)"
+                )
+            except Exception as exc:
+                degradations.record("communication.channels.telegram._download_media", exc)
+            return None
+
+        try:
+            import base64
+
+            tg_file = await media.get_file()
+            data = bytes(await tg_file.download_as_bytearray())
+        except Exception:
+            logger.exception("Téléchargement du média Telegram échoué (%s)", name)
+            return None
+
+        mime = mime.lower().split(";")[0].strip()
+        return MediaAttachment(
+            name=name,
+            media_type=mime,
+            data=base64.b64encode(data).decode("ascii"),
+            category=_categorize(mime),
+        )
+
+    # ── Outbound delivery (proactive push) ────────────────────────
+
+    async def deliver_voice(self, clip, output, interlocutor) -> bool:
+        """Send the reply as a Telegram voice note, captioned with the text.
+
+        Telegram wants OGG/Opus for a true voice bubble; anything else is
+        sent as an audio document. Falling back to ``False`` puts the caller
+        back on the text path.
+        """
+        if not self._app or not self.is_running:
+            return False
+        chat_id = interlocutor.delivery_ref
+        if not chat_id:
+            return False
+        try:
+            if clip.mime_type in ("audio/ogg", "audio/opus"):
+                from old.backend.emotion.types import strip_prosody
+
+                await self._app.bot.send_voice(
+                    chat_id=int(chat_id), voice=clip.data,
+                    caption=strip_prosody(output.text)[:1024],
+                )
+            else:
+                await self._app.bot.send_audio(
+                    chat_id=int(chat_id), audio=clip.data,
+                    caption=output.text[:1024],
+                )
+            return True
+        except Exception:
+            logger.exception(
+                "Telegram voice delivery failed for %s", interlocutor.person_id
+            )
+            return False
+
+    async def deliver(self, output, interlocutor) -> bool:
+        """Send a message to a Telegram user via the bot API (chat_id)."""
+        if not self._app or not self.is_running:
+            return False
+        chat_id = interlocutor.delivery_ref
+        if not chat_id:
+            return False
+        try:
+            # Telegram n'a pas de voix de synthèse : les jetons prosodiques y
+            # arrivaient en clair (« Ah... [PAUSE] ouais. [SIGH] Désolée. »).
+            # Ils sont destinés au seul frontend, qui les cale sur l'audio.
+            from old.backend.emotion.types import strip_prosody
+
+            await self._app.bot.send_message(
+                chat_id=int(chat_id), text=strip_prosody(output.text),
+            )
+            return True
+        except Exception:
+            logger.exception(
+                "Telegram deliver failed for %s", interlocutor.person_id
+            )
+            return False
+
+
+telegram_channel = TelegramChannel()

@@ -1,0 +1,482 @@
+"""ConfigService — the runtime accessor.
+
+Read path:
+    get(key) → user override in ConfigValue → schema default
+
+Write path:
+    set(key, value) → validate → encrypt if sensitive → persist → audit → notify
+
+Record-list CRUD:
+    list_rows / add_row / update_row / delete_row / reorder
+
+Subscribers:
+    Engines register ``on_change(key_prefix, callback)`` to get notified
+    when a relevant key changes, enabling hot-reload without a restart.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable
+
+from old.backend.configs import secrets
+from old.backend.configs.registry import registry
+from old.backend.configs.types import ConfigItem, choice_values
+from old.backend.utils.degradation import degradations
+
+logger = logging.getLogger(__name__)
+
+Subscriber = Callable[[str, Any], None]
+_UNSET = object()
+# « Base illisible » n'est pas « aucune ligne » : le premier est transitoire,
+# le second est une réponse. Les confondre revenait à mémoïser un défaut de
+# schéma pour la durée du processus au premier OperationalError venu.
+_UNREADABLE = object()
+
+
+class ValidationError(ValueError):
+    pass
+
+
+# Un champ vide n'est pas une valeur pour ces types. ``_coerce`` le rendait
+# ``None``, ``_validate`` laissait passer ``None``, et la base retenait NULL —
+# sous le ``min`` déclaré, hors des ``choices``, et servi tel quel par
+# ``get()`` à tout appelant direct (``int(None)`` au fond d'une boucle sans
+# superviseur). Revenir au défaut a déjà son geste : ``unset``.
+_TYPES_SANS_VIDE = ("int", "float", "select")
+
+
+# ── Async-context safety ────────────────────────────────────────
+#
+# Config reads are synchronous *by design*: they happen in provider
+# constructors, in engine ``__init__``s, in prompt builders — call sites
+# that cannot become coroutines without turning the whole tree async. But
+# half of them run under the ASGI loop, where Django refuses ORM access on
+# the loop thread, and both failure modes were silent-ish:
+#
+#   - ``list_rows()`` had no cache at all, so ``ai.models`` was read on
+#     *every* AI call and raised SynchronousOnlyOperation mid-conversation
+#     ("Oups, j'ai eu un petit bug..." on every turn).
+#   - ``get()`` swallowed the very same exception in ``_resolve``'s
+#     ``except Exception`` and returned the schema default, so a provider
+#     key configured in the dashboard read back as *absent*.
+#
+# The query is therefore handed to a dedicated worker thread and waited on.
+# It blocks the loop for the duration of one indexed row read on a WAL
+# database — microseconds — which is the price of keeping the read
+# synchronous at ~200 call sites. A single worker is deliberate: it mirrors
+# ``sync_to_async(thread_sensitive=True)``, keeps one long-lived SQLite
+# connection, and serialises config reads the way they already were.
+_db_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="config-db")
+
+
+def in_async_context() -> bool:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
+
+
+def db_read(fn: Callable, *args, **kwargs):
+    """Run a synchronous ORM query, whatever context the caller is in.
+
+    Inline when called from a sync context (the vast majority: startup,
+    dashboard views, management commands); off-loop otherwise.
+    """
+    if not in_async_context():
+        return fn(*args, **kwargs)
+
+    def _call():
+        from django.db import close_old_connections
+        # The worker owns its own thread-local connection; drop it if it
+        # went stale (CONN_MAX_AGE, health check) rather than reusing a
+        # dead handle for the lifetime of the process.
+        close_old_connections()
+        return fn(*args, **kwargs)
+
+    return _db_pool.submit(_call).result()
+
+
+class ConfigService:
+    """Singleton. Lazy-imports models to stay importable before Django apps load."""
+
+    def __init__(self) -> None:
+        self._cache: dict[str, Any] = {}
+        self._cache_lock = threading.RLock()
+        self._subscribers: list[tuple[str, Subscriber]] = []
+
+    # ── Read ────────────────────────────────────────────────────
+
+    def get(self, key: str, *, default: Any = _UNSET) -> Any:
+        """Effective value. Order: DB override → schema default → provided default."""
+        with self._cache_lock:
+            if key in self._cache:
+                return self._cache[key]
+
+        item = registry.get(key)
+        if item is None and default is _UNSET:
+            raise KeyError(f"Unknown config key: {key}")
+
+        value, readable = self._resolve(key, item)
+        if value is _UNSET:
+            if default is not _UNSET:
+                return default
+            return None
+
+        # Un repli sur le défaut de schéma parce que la base était illisible
+        # n'est pas une réponse : le mémoïser fige un échec transitoire
+        # jusqu'au redémarrage (une clé de provider pourtant configurée lue
+        # comme absente à chaque tour). On sert le repli, on ne le retient
+        # pas — la lecture suivante réessaiera.
+        if readable:
+            with self._cache_lock:
+                self._cache[key] = value
+        return value
+
+    def _resolve(self, key: str, item: ConfigItem | None) -> tuple[Any, bool]:
+        """Valeur effective, et si la base était lisible pour l'obtenir."""
+        # 1. DB value — written by the dashboard, never seeded from ``.env``.
+        row = db_read(_fetch_value_row, key)
+        readable = row is not _UNREADABLE
+        if readable and row is not None:
+            raw = row.value_json
+            if row.encrypted and raw is not None:
+                raw = secrets.decrypt(raw)
+            return raw, True
+
+        # 2. schema default — the only other source. A fresh clone runs on
+        # these until someone edits the setting in the dashboard.
+        if item is not None:
+            return item.default, readable
+        return _UNSET, readable
+
+    def snapshot(self) -> dict[str, Any]:
+        """Effective value for every declared key (scalars only)."""
+        out = {}
+        for item in registry.all_items():
+            if item.type == "record_list":
+                continue
+            try:
+                out[item.key] = self.get(item.key)
+            except Exception:
+                out[item.key] = None
+        return out
+
+    def snapshot_redacted(self) -> dict[str, Any]:
+        """Like ``snapshot()`` but secrets are returned as preview dicts."""
+        out = {}
+        for item in registry.all_items():
+            if item.type == "record_list":
+                continue
+            try:
+                val = self.get(item.key)
+            except Exception:
+                val = None
+            if item.sensitive:
+                out[item.key] = secrets.redact(val)
+            else:
+                out[item.key] = val
+        return out
+
+    # ── Write ───────────────────────────────────────────────────
+
+    def set(self, key: str, value: Any, *, actor: str = "") -> Any:
+        item = registry.get(key)
+        if item is None:
+            raise KeyError(f"Unknown config key: {key}")
+        if item.readonly:
+            raise ValidationError("Cette clé est en lecture seule")
+
+        coerced = _coerce(item, value)
+        if coerced is None and item.type in _TYPES_SANS_VIDE:
+            raise ValidationError(
+                "Valeur vide refusée : pour revenir au défaut, "
+                "utilisez « réinitialiser »"
+            )
+        _validate(item, coerced)
+
+        from old.backend.configs.models import ConfigValue, ConfigChangeLog
+        before, _ = self._resolve(key, item)
+
+        stored = coerced
+        encrypted = False
+        if item.sensitive:
+            # Do not re-encrypt if the UI omitted the value (caller should
+            # use a sentinel; we interpret "" / None as "unchanged" here).
+            if stored in (None, ""):
+                # Return a redacted marker, not `before`: this is a no-op, and
+                # handing the *decrypted* current secret back to a caller that
+                # merely submitted a blank field is a leak waiting for the one
+                # caller that doesn't redact its own response.
+                return secrets.redact(before) if before else before
+            stored = secrets.encrypt(str(stored))
+            encrypted = True
+
+        ConfigValue.objects.update_or_create(
+            key=key,
+            defaults={
+                "value_json": stored,
+                "encrypted": encrypted,
+                "updated_by": actor,
+            },
+        )
+        ConfigChangeLog.objects.create(
+            key=key, action="set",
+            before=_scrub_for_log(item, before),
+            after=_scrub_for_log(item, coerced),
+            actor=actor,
+        )
+        self._invalidate(key)
+        self._notify(key, coerced)
+        return coerced
+
+    def unset(self, key: str, *, actor: str = "") -> None:
+        """Remove the DB override — falls back to env/default."""
+        from old.backend.configs.models import ConfigValue, ConfigChangeLog
+        item = registry.get(key)
+        before, _ = self._resolve(key, item)
+        deleted, _ = ConfigValue.objects.filter(key=key).delete()
+        if deleted:
+            ConfigChangeLog.objects.create(
+                key=key, action="unset",
+                before=_scrub_for_log(item, before),
+                after=None, actor=actor,
+            )
+        self._invalidate(key)
+        self._notify(key, self.get(key, default=None))
+
+    # ── Record-list CRUD (delegates to pluggable backend) ───────
+
+    def list_rows(self, parent_key: str, *, decrypt_secrets: bool = False) -> list[dict]:
+        from old.backend.configs import backends
+        item = self._require_record_list(parent_key)
+        backend = backends.resolve(parent_key)
+        return db_read(backend.list_rows, item, decrypt_secrets=decrypt_secrets)
+
+    def add_row(self, parent_key: str, payload: dict, *, actor: str = "") -> dict:
+        from old.backend.configs import backends
+        from old.backend.configs.models import ConfigChangeLog
+        item = self._require_record_list(parent_key)
+        if item.max_items is not None:
+            existing = backends.resolve(parent_key).list_rows(item)
+            if len(existing) >= item.max_items:
+                raise ValidationError(f"Limite atteinte ({item.max_items} éléments)")
+        result = backends.resolve(parent_key).add_row(item, payload)
+        ConfigChangeLog.objects.create(
+            key=parent_key, row_id=_row_uuid(result.get("row_id")), action="row_add",
+            before=None, after=_scrub_record(item.record, result.get("payload") or {}),
+            actor=actor,
+        )
+        # Invalidate BEFORE notifying: a subscriber that reacts by calling
+        # get() must not read the pre-change cached value.
+        self._invalidate(parent_key)
+        self._notify(parent_key, None)
+        return result
+
+    def update_row(self, parent_key: str, row_id: str, payload: dict, *, actor: str = "") -> dict:
+        from old.backend.configs import backends
+        from old.backend.configs.models import ConfigChangeLog
+        item = self._require_record_list(parent_key)
+        backend = backends.resolve(parent_key)
+        before = _instantane_de_ligne(backend, item, row_id)
+        result = backend.update_row(item, row_id, payload)
+        ConfigChangeLog.objects.create(
+            key=parent_key, row_id=_row_uuid(row_id), action="row_update",
+            before=before, after=_scrub_record(item.record, result.get("payload") or {}),
+            actor=actor,
+        )
+        # Invalidate BEFORE notifying: a subscriber that reacts by calling
+        # get() must not read the pre-change cached value.
+        self._invalidate(parent_key)
+        self._notify(parent_key, None)
+        return result
+
+    def delete_row(self, parent_key: str, row_id: str, *, actor: str = "") -> None:
+        from old.backend.configs import backends
+        from old.backend.configs.models import ConfigChangeLog
+        item = self._require_record_list(parent_key)
+        backend = backends.resolve(parent_key)
+        # Lu AVANT la suppression : après, il n'y a plus rien à journaliser.
+        before = _instantane_de_ligne(backend, item, row_id)
+        backend.delete_row(item, row_id)
+        ConfigChangeLog.objects.create(
+            key=parent_key, row_id=_row_uuid(row_id), action="row_delete",
+            before=before, after=None, actor=actor,
+        )
+        # Invalidate BEFORE notifying: a subscriber that reacts by calling
+        # get() must not read the pre-change cached value.
+        self._invalidate(parent_key)
+        self._notify(parent_key, None)
+
+    def _require_record_list(self, parent_key: str) -> ConfigItem:
+        item = registry.get(parent_key)
+        if item is None or item.type != "record_list" or item.record is None:
+            raise KeyError(f"{parent_key} is not a record_list")
+        return item
+
+    # ── Subscriptions ───────────────────────────────────────────
+
+    def on_change(self, key_prefix: str, callback: Subscriber) -> None:
+        """Call ``callback(key, new_value)`` when any key matching
+        ``key_prefix`` changes. Prefix match — pass empty string to catch all."""
+        self._subscribers.append((key_prefix, callback))
+
+    def _notify(self, key: str, new_value: Any) -> None:
+        for prefix, cb in self._subscribers:
+            if key.startswith(prefix):
+                try:
+                    cb(key, new_value)
+                except Exception:
+                    logger.exception("Subscriber %r failed on %s", cb, key)
+
+    # ── Cache ───────────────────────────────────────────────────
+
+    def invalidate_cache(self, key: str | None = None) -> None:
+        """Purge le cache de valeurs (tout, ou une clé).
+
+        Utile aux déclarants dynamiques (forge) après un
+        ``registry.register_replace`` qui change des défauts.
+        """
+        self._invalidate(key)
+
+    def _invalidate(self, key: str | None = None) -> None:
+        with self._cache_lock:
+            if key is None:
+                self._cache.clear()
+            else:
+                self._cache.pop(key, None)
+
+
+# ── Helpers ─────────────────────────────────────────────────────
+
+def _fetch_value_row(key: str):
+    """The one ConfigValue read behind ``get()``.
+
+    Returns the row, ``None`` when there is no override, and ``_UNREADABLE``
+    when the query failed — trois réponses distinctes, parce que l'appelant
+    en fait trois choses différentes. « Pas de ligne » est une réponse et se
+    met en cache ; « illisible » est un accident et ne doit surtout pas y
+    entrer, sinon un ``OperationalError`` d'une milliseconde fige le défaut
+    de schéma jusqu'au redémarrage.
+
+    "Unreadable" stays broad on purpose — a config read legitimately
+    precedes a usable database (module imports run before ``migrate``, and
+    the test suite blocks DB access at collection time), and falling back to
+    the schema default is the right answer there. L'échec est compté plutôt
+    que seulement journalisé en DEBUG : la production tourne en INFO, donc
+    le ``logger.debug`` d'origine n'avait aucun témoin.
+
+    ``SynchronousOnlyOperation`` is the one exception that must *not* be
+    absorbed: it says the caller is on the event loop, not that the database
+    is unreachable. Swallowed, it handed back the schema default for a key
+    that *was* configured — a dashboard-set provider token reading as
+    absent, with nothing logged. ``db_read`` above means it can no longer be
+    raised here; this re-raise is what stops it becoming silent again.
+    """
+    from django.core.exceptions import SynchronousOnlyOperation
+
+    try:
+        from old.backend.configs.models import ConfigValue
+        return ConfigValue.objects.filter(key=key).first()
+    except SynchronousOnlyOperation:
+        raise
+    except Exception as exc:
+        degradations.record("configs.service._fetch_value_row", exc)
+        return _UNREADABLE
+
+
+def _coerce(item: ConfigItem, value):
+    t = item.type
+    if value is None or value == "":
+        return None if t not in ("str", "text", "secret") else value
+    try:
+        if t == "int":    return int(value)
+        if t == "float":  return float(value)
+        if t == "bool":   return bool(value) if not isinstance(value, str) else value.lower() in ("1", "true", "yes", "on")
+        if t in ("str", "text", "secret"): return str(value)
+        if t in ("select",):
+            allowed = choice_values(item.choices)
+            if allowed and value not in allowed:
+                raise ValidationError(f"Valeur hors choix: {value!r}")
+            return value
+        if t in ("multiselect", "list"):
+            if isinstance(value, str):
+                return [v.strip() for v in value.split(",") if v.strip()]
+            return list(value)
+        if t == "lines":
+            # Une valeur par ligne, jamais par virgule : ces listes portent des
+            # phrases. Les lignes vides sont écartées — un formulaire en rend
+            # toujours au moins une, et une trace vide dans un bloc de prompt
+            # se lit comme un tiret orphelin.
+            if isinstance(value, str):
+                return [v.strip() for v in value.splitlines() if v.strip()]
+            return [str(v) for v in value]
+    except (TypeError, ValueError) as e:
+        raise ValidationError(f"Type invalide pour {item.key}: {e}")
+    return value
+
+
+def _validate(item: ConfigItem, value) -> None:
+    if value is None:
+        return
+    if item.min is not None and isinstance(value, (int, float)) and value < item.min:
+        raise ValidationError(f"{item.key} doit être ≥ {item.min}")
+    if item.max is not None and isinstance(value, (int, float)) and value > item.max:
+        raise ValidationError(f"{item.key} doit être ≤ {item.max}")
+    for v in item.validators or ():
+        msg = v(value)
+        if msg:
+            raise ValidationError(msg)
+
+
+def _scrub_for_log(item: ConfigItem | None, value):
+    if item and item.sensitive and value not in (None, ""):
+        return "***redacted***"
+    return value
+
+
+def _scrub_record(record, payload: dict) -> dict:
+    if record is None:
+        return payload
+    out = dict(payload)
+    for f in record.fields:
+        if f.sensitive and out.get(f.key) not in (None, ""):
+            out[f.key] = "***redacted***"
+    return out
+
+
+def _row_uuid(row_id) -> uuid.UUID | None:
+    """L'identifiant de ligne tel que le journal peut le porter.
+
+    La colonne est un UUID — celui de ``ConfigRecordItem``. Un backend qui
+    identifie ses lignes autrement (les comptes d'accès, par clé primaire)
+    laisse la colonne vide : sa charge ``before``/``after`` nomme la ligne.
+    """
+    try:
+        return uuid.UUID(str(row_id))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _instantane_de_ligne(backend, item: ConfigItem, row_id) -> dict | None:
+    """La charge d'une ligne AVANT qu'on y touche, épurée pour le journal.
+
+    Le journal notait une suppression sans dire quoi (``before=None``) et une
+    modification sans dire depuis quoi : une piste d'audit qui ne permet pas
+    de retrouver ce qui a été effacé n'en est pas une. Les secrets arrivent
+    déjà masqués de ``list_rows`` et ``_scrub_record`` repasse derrière.
+    """
+    try:
+        for row in backend.list_rows(item):
+            if str(row.get("row_id")) == str(row_id):
+                return _scrub_record(item.record, dict(row.get("payload") or {}))
+    except Exception as exc:  # noqa: BLE001 — le journal ne bloque pas l'écriture
+        degradations.record("configs.service._instantane_de_ligne", exc)
+    return None
+
+
+config_service = ConfigService()
