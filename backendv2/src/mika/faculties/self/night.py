@@ -484,12 +484,12 @@ def told_day(frame: Frame, store: Any, state: SelfState, day: date) -> str:
     avec ses mots quand on le lui demande."""
     tz = frame.env.tz_of(frame.root)
     start, end = d_.day_window(day, tz, _starts(frame))
-    rows = store.query_mind(f"SELECT at, person, role, emotion, emotion_intensity FROM {transcript_c.THREAD_TABLE} "
-                            "WHERE at >= ? AND at < ? ORDER BY id", (start, end))
+    rows = store.query_mind(f"SELECT at, person, role, kind, emotion, emotion_intensity "
+                            f"FROM {transcript_c.THREAD_TABLE} WHERE at >= ? AND at < ? ORDER BY id", (start, end))
     heard: dict[str, list[int]] = {}
     reached: dict[str, list[int]] = {}
     felt: list[tuple[str, float]] = []
-    for at, handle, role, emotion, intensity in rows:
+    for at, handle, role, kind, emotion, intensity in rows:
         person = frame.get(identity_c.PERSON(handle)) if handle else ""
         if role == "user":
             if person:
@@ -497,8 +497,14 @@ def told_day(frame: Frame, store: Any, state: SelfState, day: date) -> str:
             continue
         if emotion:
             felt.append((str(emotion), float(intensity) if intensity is not None else 0.5))
-        if person:
+        if not person:
+            continue
+        # seule une initiative peut rester sans réponse ; une réponse (au matin, à un message de la nuit, d'avant le
+        # début de cette journée vécue) est une discussion avec la personne — comme le range ``notes_of``
+        if kind == Kind.INITIATIVE:
             reached.setdefault(person, []).append(int(at))
+        else:
+            heard.setdefault(person, []).append(int(at))
     lines: list[str] = []
     if heard:
         times = [t for p in heard for t in (*heard[p], *reached.get(p, ()))]
