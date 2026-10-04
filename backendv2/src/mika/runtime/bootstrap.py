@@ -351,7 +351,8 @@ class Kernel:
         dans le fil, et son énoncé les règle tous."""
         return EpisodeRequest(
             kind=self.deps.reply_kind, target=data.handle, trigger=trigger, reply_to=seq,
-            message=data.text.text or "", priority=0, channel=data.channel, room=data.room,
+            message=data.text.text or "", typed_chars=data.typed_chars, priority=0, channel=data.channel,
+            room=data.room,
         )
 
     async def _interpret(self, seq: int, correlation: str) -> None:
