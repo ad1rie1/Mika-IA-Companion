@@ -74,7 +74,7 @@ PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Émotions", ("affect", "needs", "body", "self")),
     ("Esprit", ("attention", "memory", "transcript")),
     ("Relations", ("social", "others", "identity")),
-    ("Action", ("agency", "goals", "projects", "shares", "world")),
+    ("Action", ("agency", "goals", "projects", "shares", "imaging", "world")),
     ("Canaux", ("email", "rss", "camera", "forge")),
     ("Noyau", ("kernel",)),
 )
@@ -85,7 +85,7 @@ FACULTY_LABELS: dict[str, str] = {
     "agency": "Initiatives", "goals": "Buts", "projects": "Projets", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
     "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
-    "world": "Son monde et son corps", "shares": "Fichiers envoyés",
+    "world": "Son monde et son corps", "shares": "Fichiers envoyés", "imaging": "Dessins",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -115,7 +115,7 @@ SECTION_LABELS: dict[str, str] = {
     "world": "Autour d'elle : son corps, ce qu'elle a à portée",
     # ADR 0053
     # ADR 0062
-    "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)",
+    "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)", "dessins": "Ses dessins pour la personne",
     "step_exchange": "L'échange d'où vient sa réflexion", "step_life": "Ce qui se passe dans la vie de la personne "
     "(sa réflexion)",
 }
@@ -127,6 +127,7 @@ REASON_LABELS: dict[str, str] = {
     "greeting": "Saluer", "present": "Quelqu'un de présent", "chat": "Envie de bavarder",
     "comfort": "Réconforter", "recontact": "Reprendre contact après un silence", "work": "Avancer sur un but",
     "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
+    "drawing_ready": "Montrer un dessin prêt", "drawing_failed": "Dire qu'un dessin n'a pas pu se faire",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
     "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet",
@@ -161,7 +162,7 @@ PROCESS_LABELS: dict[str, str] = {
     "social.reciprocity": "Remarquer qui écrit en premier",
     "memory.follow": "Remarquer qu'elle a repris un moment de la vie de quelqu'un",
     "world.settle": "Conclure ses gestes dans le monde",
-    "shares.retention": "Retirer les fichiers envoyés trop anciens",
+    "shares.retention": "Retirer les fichiers envoyés trop anciens", "imaging.draw": "Dessiner",
 }
 
 #: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
@@ -219,6 +220,8 @@ EVENT_LABELS: dict[str, str] = {
     "needs.reunited": "Une amie revenue après un moment creux",
     "memory.moment_followed": "Un moment de la vie de quelqu'un, repris",
     "shares.shared": "Un fichier envoyé", "shares.expired": "Des fichiers envoyés retirés",
+    "imaging.requested": "Un dessin demandé", "imaging.drawn": "Un dessin prêt",
+    "imaging.failed": "Un dessin qui n'a pas pu se faire",
 }
 
 #: Tout ce que la console nomme en français, d'un bloc.

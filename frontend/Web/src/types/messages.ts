@@ -186,6 +186,28 @@ export interface SpeechMessage {
   user_message_id?: number | null;
   /** Echo of the id the browser attached to its own optimistic bubble. */
   client_msg_id?: string | null;
+  /**
+   * Les fichiers qu'elle envoie avec ce message (un texte écrit, un dessin —
+   * backendv2, ADR 0062 et 0063) ; `[]` quand il n'y en a pas.
+   */
+  attachments?: SentFile[];
+}
+
+/**
+ * Un fichier qu'elle a envoyé avec un message (`docs/protocole-chat.md` §6
+ * de backendv2) : il se télécharge par `url` (`/files/<id>`, relatif au
+ * serveur), avec la session du navigateur, seulement par le compte dont le
+ * fil le porte. `available` faux : retiré par la rétention.
+ */
+export interface SentFile {
+  id: string;
+  name: string;
+  /** `image` | `file` */
+  kind: string;
+  mime?: string;
+  size?: number;
+  url: string;
+  available?: boolean;
 }
 
 /** Une pièce jointe d'un message relu : son nom et sa sorte, jamais ce
@@ -194,6 +216,12 @@ export interface HistoryAttachment {
   name: string;
   /** `image` | `audio` | `file` */
   kind: string;
+  /** Sur un message de Mika : un fichier qu'elle a envoyé (voir `SentFile`). */
+  id?: string;
+  url?: string;
+  mime?: string;
+  size?: number;
+  available?: boolean;
 }
 
 /** One persisted message as the history frame carries it. */

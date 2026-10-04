@@ -33,10 +33,17 @@ Les poids :
 
 | Fichier | Rôle | Taille | Source |
 |---|---|---|---|
-| `qwen-image-2.1-UC-Q4_K_M.gguf` | le modèle de diffusion (7B) | 4,6 Go | `abenzerps/Qwen-Image-2.1-Uncensored-GGUF` |
+| `qwen-image-2.1-UC-Q8_0.gguf` | le modèle de diffusion (7B) — **défaut** | 7,6 Go | `abenzerps/Qwen-Image-2.1-Uncensored-GGUF` |
 | `qwen_image_2.1_vae_bf16.safetensors` | le VAE | 0,7 Go | même dépôt (`vae/`) |
-| `Qwen3VL-8B-Instruct-Q4_K_M.gguf` | l'encodeur du prompt | 5,0 Go | `Qwen/Qwen3-VL-8B-Instruct-GGUF` |
+| `Qwen3VL-8B-Instruct-Q8_0.gguf` | l'encodeur du prompt — **défaut** | 8,7 Go | `Qwen/Qwen3-VL-8B-Instruct-GGUF` |
 | `mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf` | la vision (retoucher une image) | 0,75 Go | même dépôt |
+| `…-Q4_K_M.gguf` (diffusion 4,6 Go, encodeur 5,0 Go) | variantes plus rapides, un peu moins nettes | | mêmes dépôts |
+| `texture_fix_vae_for_qwen_image_2.1_bf16.safetensors` | un VAE réentraîné (décodeur) | 0,7 Go | `madebyollin/texture-fix-vae-for-qwen-image-2.1` |
+
+Pour revenir au Q4 : `DIFFUSION_FILE=qwen-image-2.1-UC-Q4_K_M.gguf LLM_FILE=Qwen3VL-8B-Instruct-Q4_K_M.gguf` dans
+`mika-images.conf`, puis `./install.sh`. Pour le VAE texture-fix : `VAE_REPO=madebyollin/texture-fix-vae-for-qwen-image-2.1`
+et `VAE_FILE=texture_fix_vae_for_qwen_image_2.1_bf16.safetensors` (même espace latent : il marche avec le modèle
+« UC », qui n'est que Qwen-Image 2.1 avec une LoRA fusionnée).
 
 Licence du modèle : *Qwen Research License* (à relire avant tout usage commercial, un stream monétisé compris).
 
@@ -72,9 +79,9 @@ cd backendv2
 ```
 
 Le type `sdcpp` passe par l'API native : une tâche suivie jusqu'à son terme (annulée côté serveur si Mika n'en veut
-plus et qu'elle attend encore), les pas selon la qualité (brouillon 12, normale 20, haute 30 — réglables), prompt
+plus et qu'elle attend encore), les pas selon la qualité (brouillon 16, normale 25, haute 40 — réglables), prompt
 négatif, graine, images de référence, aucune métadonnée dans le PNG. Le type *Compatible OpenAI*
-(`http://127.0.0.1:8190/v1`) marche aussi, avec les réglages par défaut du serveur. L'adresse est locale : Mika lui
+(`http://127.0.0.1:8190/v1`) marche aussi, avec les réglages par défaut du serveur (40 pas). L'adresse est locale : Mika lui
 donne un seul créneau et ne compte aucun coût. `--adult` déclare que ce serveur accepte ce contenu (aucun service
 hébergé ne l'est) ; qui peut le demander est une règle de Mika, pas de ce serveur. Un autre fournisseur (OpenAI) peut
 servir de repli, ou l'inverse.
@@ -105,7 +112,9 @@ disque (`--mmap` : ≈ 0,6 Go de RAM propre au processus, le reste est du cache 
 | Par Mika, normale portrait 832×1280, 20 pas | 129 s | 7,8 Go |
 | Par la socket systemd, à froid, 768×512 | 39 s, démarrage compris | — |
 | Paysage 1536×864, 30 pas, easycache, prompt négatif | 220 s | — |
-| 1024², 25 pas, ordonnanceur `simple`, easycache (**défaut**) | 137 s — sans grille | 6,6 Go |
+| 1024², 25 pas, ordonnanceur `simple`, easycache | 137 s — sans grille | 6,6 Go |
+| **Q8**, 1536×864, 40 pas, `simple`, sans cache (**défaut**) | 593 s (14 s le pas) — plus net (arbres) | 10,5 Go |
+| même chose avec le VAE texture-fix (même graine) | 588 s — écart moyen 2,3/255, aucun gain visible | 10,1 Go |
 
 **Les rayures.** Avec l'ordonnanceur que stable-diffusion.cpp choisit pour Qwen-Image 2.1, l'image porte une
 grille fine de 8 px (et 4 px), et des bandes tous les ≈ 128 px — un défaut connu
@@ -115,12 +124,14 @@ voisines ; 1 à 10 : pas de grille) :
 
 | Réglage | 4 px | 8 px | 128 px |
 |---|---|---|---|
-| ordonnanceur par défaut, 20 pas, easycache | 5,8 | 10,3 | 7,1 |
+| ordonnanceur par défaut, 20 pas, easycache (Q4) | 5,8 | 10,3 | 7,1 |
 | `--offload-to-cpu` (même image : ce n'était pas le décodage en tuiles) | 5,8 | 10,3 | 7,1 |
 | `simple`, 20 pas | 5,9 | 3,0 | 6,2 |
 | `simple`, 25 pas (**défaut**) | 3,2 | 1,5 | 2,4 |
 
-Moins de 25 pas, la grille revient : Mika demande 16 / 25 / 32 pas selon la qualité.
+Moins de 25 pas, la grille revient : Mika demande 16 / 25 / 40 pas selon la qualité. Il reste, agrandie, une texture
+fine sur l'eau calme : la même avec les deux VAE, en Q4 comme en Q8, avec ou sans cache — elle est dans ce que dessine
+le modèle de diffusion, pas dans le décodage.
 
 Contrairement à ce que dit la documentation de stable-diffusion.cpp (l'attention optimisée ralentit hors CUDA),
 `--fa` accélère ici : la RTX expose les cœurs matriciels à Vulkan (`KHR_coopmat`). Une génération commencée ne

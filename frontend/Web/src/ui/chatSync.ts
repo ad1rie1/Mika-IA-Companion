@@ -15,7 +15,7 @@
  * while the database held both.
  */
 
-import type { AckMessage, HistoryAttachment, HistoryEntry, RejectedAttachment } from "../types";
+import type { AckMessage, HistoryAttachment, HistoryEntry, RejectedAttachment, SentFile } from "../types";
 
 /**
  * What happened to a message the user sent.
@@ -94,6 +94,11 @@ export interface StoredMessage {
    * depuis — voir `asleepNoteShown`.
    */
   waiting?: "asleep";
+  /**
+   * Les fichiers qu'elle a envoyés avec ce message (un dessin s'affiche en
+   * vignette, un autre fichier en lien) — validés par `sentFiles`.
+   */
+  files?: SentFile[];
 }
 
 /**
@@ -369,6 +374,33 @@ export function withAttachments(text: string, names: string[]): string {
   return text ? `${text} [${label}]` : `[${label}]`;
 }
 
+const FILE_ID = /^[0-9a-f]{32}$/;
+
+/**
+ * Les fichiers d'un message de Mika, tels qu'on peut les afficher sans
+ * danger : un identifiant de 32 caractères hexadécimaux, et une adresse qui
+ * est exactement `/files/<id>` (jamais une autre page, jamais un autre hôte).
+ * Ce qui ne passe pas est ignoré.
+ */
+export function sentFiles(raw: unknown): SentFile[] {
+  if (!Array.isArray(raw)) return [];
+  const out: SentFile[] = [];
+  for (const a of raw as Array<Partial<SentFile> | null>) {
+    if (!a || typeof a.id !== "string" || !FILE_ID.test(a.id)) continue;
+    if (a.url !== `/files/${a.id}`) continue;
+    out.push({
+      id: a.id,
+      name: typeof a.name === "string" && a.name ? a.name : "fichier",
+      kind: a.kind === "image" ? "image" : "file",
+      mime: typeof a.mime === "string" ? a.mime : undefined,
+      size: typeof a.size === "number" ? a.size : undefined,
+      url: a.url,
+      available: a.available !== false,
+    });
+  }
+  return out;
+}
+
 function attachmentNames(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -451,9 +483,11 @@ export function mergeHistory(
     const mine = history.find(
       (m) => m.id === undefined && m.sender === sender && matches(m, text, typed)
     );
+    const files = sender === "vtuber" ? sentFiles(entry.attachments) : [];
     if (mine) {
       mine.id = entry.id;
       mine.ts = entry.ts ?? mine.ts;
+      if (files.length && !mine.files?.length) mine.files = files;
       if (sender === "user") {
         mine.status = "sent";
         mine.reason = undefined;
@@ -466,6 +500,7 @@ export function mergeHistory(
         ts: entry.ts ?? Date.now(),
         id: entry.id,
         status: sender === "user" ? "sent" : undefined,
+        ...(files.length ? { files } : {}),
       });
       added += 1;
     }

@@ -5,6 +5,11 @@ Un fichier part **avec un message** : l'outil écrit ses octets (port ``shares``
 le numéro de ce message. Une réponse supplantée ou tue après l'outil laisse un fichier qui n'est jamais parti :
 la console le dit, la rétention le retire.
 
+Un fichier peut venir d'ailleurs (ADR 0063) : un dessin, déposé dans le même port par le plugin ``imaging``, dont
+l'événement public ``imaging.drawn`` dérive de ``ProducedFile`` — rangé comme les autres (même ligne, même départ,
+même oubli), sans compter dans le quota du jour (les dessins ont le leur). Un fichier qui n'est jamais parti est
+retiré au bout de ``unsent_days`` : un dessin que personne n'a vu ne garde pas sa place un an.
+
 La tranche garde, par adresse, les fichiers encore gardés (pour la rétention, le quota du jour, la section du
 prompt) ; la projection T0 ``shared_files`` en garde une ligne chacun — nom, taille, sort — que lisent l'écran
 (``MindPort.shared``), le téléchargement et la console. Oublier une personne efface ses lignes, son nom (un
@@ -19,6 +24,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from mika.contracts import imaging as imaging_c
 from mika.contracts import runtime as rt
 from mika.contracts import shares as c
 from mika.kernel.clock import DAY
@@ -60,6 +66,10 @@ class SharesParams(BaseModel):
     per_person_mb: Annotated[int, Knob(
         label="Place par personne (Mio)", group="Garder", lo=10, hi=10_000,
         help="Quand les fichiers gardés pour une personne dépassent cette place, les plus anciens sont retirés.")] = 200
+    unsent_days: Annotated[int, Knob(
+        label="Garder un fichier jamais parti (jours)", group="Garder", lo=1, hi=3650,
+        help="Un fichier préparé qu'aucun message n'a emporté (une réponse supplantée, un dessin jamais montré) est "
+             "retiré au bout de ce temps.")] = 7
 
 
 def params(p: SharesParams | None) -> SharesParams:
@@ -92,6 +102,21 @@ def _shared(s: SharesState, e: Any, cx: Any) -> SharesState:
                       project=d.project)
     stamps = (*s.stamps.get(d.target, ()), e.at)[-STAMPS_KEPT:]
     return replace(s, sent=s.sent.set(d.target, (*kept, view)), stamps=s.stamps.set(d.target, stamps))
+
+
+#: les fichiers produits ailleurs que ``shares`` range comme les siens (``ProducedFile``)
+PRODUCED = (imaging_c.DRAWN,)
+
+
+@SHARES.reducer(*PRODUCED)
+def _produced(s: SharesState, e: Any, cx: Any) -> SharesState:
+    """Un fichier préparé ailleurs (un dessin) : gardé comme les autres, hors du quota du jour."""
+    d = e.data
+    kept = s.sent.get(d.target, ())
+    if any(v.file == d.file for v in kept):
+        return s
+    view = c.SentView(file=d.file, at=e.at, size=d.size, name_ref=d.name.ref or "", kind=d.kind, origin=d.origin)
+    return replace(s, sent=s.sent.set(d.target, (*kept, view)))
 
 
 @SHARES.reducer(c.EXPIRED)
@@ -167,7 +192,14 @@ class SharedFiles:
         for e in items:
             d = e.data
             name = e.type.name
-            if name == c.SHARED.name:
+            if name in _PRODUCED_NAMES:
+                if _forgotten(d.name):
+                    continue  # comme un fichier partagé : un nom oublié ne revient pas à la reconstruction
+                marks = ",".join("?" * len(_COLUMNS))
+                sql.execute(f"INSERT OR IGNORE INTO {table}({','.join(_COLUMNS)}) VALUES({marks})", (
+                    d.file, e.at, d.target, _subjects(d.target, d.about), d.name.text or "", None, d.mime, d.size,
+                    d.digest, d.kind, d.origin, None, None, None, None))
+            elif name == c.SHARED.name:
                 if _forgotten(d.name) or _forgotten(d.path):
                     # une reconstruction relit tout le journal : un fichier dont le nom a été oublié ne revient pas
                     continue
@@ -190,7 +222,9 @@ class SharedFiles:
                     (subject, f"|{subject}|"))
 
 
-SHARES.projector(c.TABLE, version=1, tier=Tier.T0, types=[c.SHARED, c.EXPIRED, rt.UTTERANCE])(SharedFiles)
+_PRODUCED_NAMES = frozenset(t.name for t in PRODUCED)
+# version 2 : les fichiers produits ailleurs (les dessins) y entrent aussi
+SHARES.projector(c.TABLE, version=2, tier=Tier.T0, types=[c.SHARED, *PRODUCED, c.EXPIRED, rt.UTTERANCE])(SharedFiles)
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,12 +306,17 @@ def _over(files: Sequence[c.SentView], budget: int) -> list[str]:
     return out
 
 
+def _expires_at(v: c.SentView, p: SharesParams) -> int:
+    """Quand un fichier a fait son temps : ``keep_days`` ; ``unsent_days`` s'il n'est jamais parti."""
+    return v.at + (p.keep_days if v.message else min(p.keep_days, p.unsent_days)) * DAY
+
+
 def due_expiries(state: SharesState, now: int, p: SharesParams) -> list[tuple[str, str, tuple[str, ...]]]:
-    """(adresse, raison, fichiers) à retirer maintenant : trop vieux, puis la place dépassée."""
-    keep, budget = p.keep_days * DAY, p.per_person_mb * MIB
+    """(adresse, raison, fichiers) à retirer maintenant : trop vieux (ou jamais partis), puis la place dépassée."""
+    budget = p.per_person_mb * MIB
     out = []
     for target, files in state.sent.items():
-        old = tuple(v.file for v in files if v.at + keep <= now)
+        old = tuple(v.file for v in files if _expires_at(v, p) <= now)
         if old:
             out.append((target, c.RETENTION, old))
         over = tuple(_over([v for v in files if v.file not in old], budget))
@@ -286,7 +325,8 @@ def due_expiries(state: SharesState, now: int, p: SharesParams) -> list[tuple[st
     return out
 
 
-@SHARES.process("shares.retention", wake_on=[c.SHARED, c.EXPIRED], lane="background", catch_up=CatchUp.ONCE,
+@SHARES.process("shares.retention", wake_on=[c.SHARED, *PRODUCED, c.EXPIRED, rt.UTTERANCE], lane="background",
+                catch_up=CatchUp.ONCE,
                 max_quantum_s=600)
 class Retention:
     """Retirer ce qui a fait son temps : un fichier plus vieux que ``keep_days``, ou les plus anciens quand la place
@@ -301,7 +341,7 @@ class Retention:
                 continue
             if _over(files, budget):
                 return frame.now
-            due = files[0].at + p.keep_days * DAY
+            due = min(_expires_at(v, p) for v in files)
             earliest = due if earliest is None else min(earliest, due)
         return None if earliest is None else max(frame.now, earliest)
 

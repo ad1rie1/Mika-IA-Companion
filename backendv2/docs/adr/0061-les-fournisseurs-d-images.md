@@ -19,8 +19,8 @@ l'autre par une adresse qui expire. Sans abstraction, chaque fournisseur aurait 
 2. *Une passerelle, `adapters/imaging/`, sur le modèle de `adapters/llm/`* : fournisseurs déclarés, rôles routés,
    repli de fournisseur en fournisseur (une chaîne, sans boucle, quatre au plus), créneaux à priorité — désormais
    partagés dans `kernel/slots.py` (`PrioritySlots`, `PREEMPTED`), un réservé au premier plan dès deux ; à un seul
-   (un serveur local), la conversation interrompt un dessin de fond —, délai par voie (conversation 300 s, fond
-   900 s, attente comprise), une trace par appel. Trois règles que le texte n'a pas :
+   (un serveur local), la conversation interrompt un dessin de fond —, délai par voie (conversation 900 s, fond
+   1800 s, attente comprise : une image soignée prend dix minutes sur le serveur local), une trace par appel. Trois règles que le texte n'a pas :
    - **les capacités d'abord** : seuls les candidats qui savent servir la demande sont appelés ; aucun ne le sait,
      `unsupported`, sans appel. Une demande pour adultes ne va qu'à un fournisseur qui l'accepte (`ImageCaps.adult`,
      déclaré seulement pour un serveur compatible : OpenAI ne l'est jamais) ;
@@ -41,20 +41,23 @@ l'autre par une adresse qui expire. Sans abstraction, chaque fournisseur aurait 
    (`clean_prompt`), sinon un prompt influencé par quelqu'un pourrait épuiser la machine.
    Un troisième type, **stable-diffusion.cpp** (`sdcpp.py`), parle l'API native de `sd-server` : une tâche suivie
    jusqu'à son terme, annulée côté serveur quand Mika n'en veut plus (seulement si elle attend encore : une
-   génération commencée va au bout), des pas par qualité (16 / 25 / 32, réglables : en dessous de 25, la grille
+   génération commencée va au bout), des pas par qualité (16 / 25 / 40, réglables : en dessous de 25, la grille
    fine de Qwen-Image 2.1 sous stable-diffusion.cpp revient), prompt négatif, graine, images
    de référence (retouche, quatre au plus), aucune métadonnée dans le PNG, un fond transparent demandé dans la forme
    que recommande Qwen-Image 2.1. D'autres (Gemini) s'ajoutent par un adaptateur chacun.
 6. *Le serveur local est un paquet autonome hors de backendv2* (`services/mika-images/`, sans Python) :
    `sd-server` de stable-diffusion.cpp en construction Vulkan épinglée (aucune compilation, ni CUDA ni torch), les
-   poids de Qwen-Image 2.1 Q4_K_M, de son encodeur Qwen3-VL 8B et de son VAE vérifiés par empreinte, tout sur
+   poids de Qwen-Image 2.1 et de son encodeur Qwen3-VL 8B en Q8_0 (Q4_K_M en variante plus rapide) et de son VAE
+   vérifiés par empreinte, tout sur
    `/mnt/games/mika-images` ; une socket systemd utilisateur le démarre à la première demande et un relais
    (`systemd-socket-proxyd --exit-idle-time`) l'arrête après 10 minutes sans connexion — RAM et VRAM rendues. La
    RTX est choisie par son nom (ggml compte aussi le GPU intégré, et pas dans l'ordre de `vulkaninfo`). Mesuré sur
    une RTX 3060 : 137 s pour 1024² en 25 pas avec `easycache` (245 s en 20 pas sans), 57 s pour un brouillon par
    Mika. L'ordonnanceur `simple` est le défaut du serveur : avec celui que stable-diffusion.cpp choisit pour ce
    modèle, l'image porte une grille fine de 8 px et des bandes de 128 px (issue sd.cpp #2041 ; score mesuré à
-   graine fixe 10,3 → 1,5).
+   graine fixe 10,3 → 1,5). Le défaut privilégie la qualité : Q8, 40 pas, sans cache — 593 s en 1536×864. Le VAE
+   « texture-fix » (décodeur réentraîné, même espace latent) n'a rien changé de visible à graine égale (écart moyen
+   2,3/255) : il reste une option.
 4. *Désactivée tant que rien n'est branché.* Sans fournisseur, la génération d'images n'existe pas
    (`LiveImaging.configured` faux, toute demande `unconfigured`). Le premier fournisseur déclaré sert `draw`
    d'office, comme « répondre » pour les modèles. Configuration › Intelligence › Images (fournisseurs, « Qui dessine

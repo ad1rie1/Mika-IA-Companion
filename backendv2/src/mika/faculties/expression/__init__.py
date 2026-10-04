@@ -28,6 +28,7 @@ from mika.contracts import email as email_c
 from mika.contracts import expression as c
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
+from mika.contracts import imaging as imaging_c
 from mika.contracts import memory as memory_c
 from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
@@ -343,6 +344,8 @@ WHY: Mapping[str, str] = {
     projects_c.SHARE: "lui parler de ton projet",
     projects_c.NEED: "lui demander un coup de main pour ton projet",
     email_c.MENTION: "lui parler d'un mail",
+    imaging_c.DELIVER: "lui montrer le dessin que tu viens de finir",
+    imaging_c.COULD_NOT: "lui dire que son dessin n'a pas pu se faire",
     affect_c.MOOD_OVERFLOW: "lui dire ce que tu ressens en ce moment",
     social_c.CHAT: "discuter un peu",
     needs_c.NEED_SOCIAL: "avoir un peu de compagnie",

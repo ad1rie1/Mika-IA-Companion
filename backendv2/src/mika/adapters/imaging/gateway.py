@@ -52,8 +52,9 @@ from mika.ports.imaging import (
 )
 
 #: le délai d'un appel par voie (secondes, attente d'un créneau comprise) : une image prend de l'ordre de la
-#: minute, davantage sur un serveur local qui doit d'abord charger son modèle
-DEFAULT_DEADLINES: Mapping[str, float] = {"conversation": 300.0, "background": 900.0}
+#: minute chez un service hébergé, jusqu'à dix sur un serveur local soigné (Q8, 40 pas, sans cache : ≈ 10 min en
+#: 1536×864 sur une RTX 3060), et elle peut attendre qu'un dessin de fond se termine
+DEFAULT_DEADLINES: Mapping[str, float] = {"conversation": 900.0, "background": 1800.0}
 #: la part du délai que le premier candidat peut consommer quand un autre l'attend
 PRIMARY_SHARE = 2 / 3
 #: en dessous, un repli ne vaut pas la peine d'être tenté (secondes)

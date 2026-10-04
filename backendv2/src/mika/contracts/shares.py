@@ -10,6 +10,11 @@ l'emporte (``Utterance.attachments``, des références opaques pour le reste du 
   « n'est pas parti » (une réponse supplantée, une abstention) ; la rétention finit par le retirer.
 - ``shares.expired`` : des fichiers retirés (trop vieux, ou la place d'une personne dépassée) ; leurs octets sont
   effacés après le commit. La ligne reste, « retiré ».
+
+Un fichier peut aussi venir d'ailleurs (ADR 0061) : un propriétaire qui produit un fichier pour quelqu'un (un dessin,
+qui prend des minutes) en dépose les octets dans le même port et lève **son** événement public, dont la charge utile
+dérive de ``ProducedFile`` ; ``shares`` le traite comme les siens — même ligne, même départ avec un message, même
+rétention, même oubli. Le message qui l'emporte, c'est l'outil du producteur qui le joint (``ToolResult.attach``).
 """
 
 from __future__ import annotations
@@ -26,8 +31,8 @@ TABLE = "shared_files"
 # sortes et origines
 FILE, IMAGE = "file", "image"
 KINDS = (FILE, IMAGE)
-WRITTEN, PROJECT = "written", "project"
-ORIGINS = (WRITTEN, PROJECT)
+WRITTEN, PROJECT, DRAWN = "written", "project", "drawn"
+ORIGINS = (WRITTEN, PROJECT, DRAWN)
 # raisons d'un retrait
 RETENTION, BUDGET = "retention", "budget"
 REASONS = (RETENTION, BUDGET)
@@ -49,6 +54,22 @@ class Shared(Payload):
     project: int | None = None
     path: Content | None = None
     #: les personnes qu'il concerne (celle à qui il part, celles du projet) : l'oubli les atteint
+    about: tuple[str, ...] = ()
+
+
+class ProducedFile(Payload):
+    """La forme d'un fichier produit ailleurs pour une personne (voir l'en-tête) : ses octets sont déjà dans le
+    port ``shares`` sous ``file``, avec ``target`` et ``about`` pour sujets. Le producteur déclare son événement
+    public avec ``content=("name", …)`` et ``subjects=("target", "about")``."""
+
+    file: str
+    target: str
+    name: Content
+    mime: str
+    size: int
+    digest: str
+    kind: str = FILE
+    origin: str = DRAWN
     about: tuple[str, ...] = ()
 
 

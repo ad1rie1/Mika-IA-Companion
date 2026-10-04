@@ -1,7 +1,7 @@
 import { renderInline } from "./inlineMarkup";
 import { WebSocketClient } from "../network/WebSocketClient";
 import { API_BASE } from "../network/api";
-import type { AckMessage, HistoryMessage, RejectedAttachment } from "../types";
+import type { AckMessage, HistoryMessage, RejectedAttachment, SentFile } from "../types";
 import {
   applyAck,
   ASLEEP_NOTE,
@@ -19,6 +19,7 @@ import {
   stripProsody,
   withAttachments,
   writeCache,
+  sentFiles,
 } from "./chatSync";
 import type { MessageStatus, StoredMessage } from "./chatSync";
 
@@ -348,6 +349,7 @@ export class ChatOverlay {
           id: data.message_id ?? undefined,
           localOnly: inner && data.message_id == null,
           inner,
+          files: sentFiles(data.attachments),
         });
       }
     });
@@ -675,6 +677,8 @@ export class ChatOverlay {
       localOnly?: boolean;
       /** Pensée murmurée — voir StoredMessage.inner. */
       inner?: boolean;
+      /** Ce qu'elle envoie avec ce message — voir StoredMessage.files. */
+      files?: SentFile[];
     } = {}
   ) {
     const display = sender === "vtuber" ? stripProsody(text) : text;
@@ -699,6 +703,7 @@ export class ChatOverlay {
       matchText: opts.matchText,
       after: opts.localOnly ? this.cursor() : undefined,
       inner: opts.inner || undefined,
+      ...(opts.files?.length ? { files: opts.files } : {}),
     });
     this.trimHistory();
     this.persistHistory();
@@ -781,6 +786,7 @@ export class ChatOverlay {
     }
     if (msg.sender === "vtuber") renderInline(bubble, msg.text);
     else bubble.textContent = msg.text;
+    for (const file of msg.files ?? []) bubble.append(this.buildFile(file));
 
     const parts: string[] = [];
     if (msg.inner) parts.push("pensée à voix haute");
@@ -804,5 +810,43 @@ export class ChatOverlay {
     if (parts.length) bubble.title = parts.join(" · ");
 
     return bubble;
+  }
+
+  /**
+   * Un fichier qu'elle a envoyé, sous son texte : un dessin en vignette (un clic
+   * l'ouvre), un autre fichier en lien. Il se charge avec la session du
+   * navigateur ; seul le compte dont le fil le porte peut le lire. Retiré par la
+   * rétention : son nom, barré d'un mot.
+   */
+  private buildFile(file: SentFile): HTMLElement {
+    const box = document.createElement("div");
+    box.className = "chat-file";
+    if (file.available === false) {
+      box.textContent = `${file.name} (plus disponible)`;
+      box.classList.add("gone");
+      return box;
+    }
+    const link = document.createElement("a");
+    link.href = `${API_BASE}${file.url}`;
+    link.target = "_blank";
+    link.rel = "noopener";
+    if (file.kind === "image") {
+      const img = document.createElement("img");
+      img.className = "chat-image";
+      img.src = link.href;
+      img.alt = file.name;
+      img.loading = "lazy";
+      // la vignette n'a pas pu se charger (retirée, session expirée) : le lien reste
+      img.addEventListener("error", () => {
+        img.remove();
+        link.textContent = file.name;
+      });
+      link.append(img);
+    } else {
+      link.textContent = `📎 ${file.name}`;
+      link.download = file.name;
+    }
+    box.append(link);
+    return box;
   }
 }

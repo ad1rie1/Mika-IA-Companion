@@ -389,6 +389,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             ("Courrier", "Boîtes, serveurs, identifiants et façon d'écrire", "boites", "email", "courrier/reception"),
             ("Flux RSS", "Adresses des flux suivis", "flux", "rss", "sens/flux"),
             ("Caméra", "Fréquence des regards et durée des observations", "comportement-camera", "", "sens/camera"),
+            ("Dessins", "Ses fournisseurs d'images ; sa qualité par défaut, ses quotas", "images-fournisseurs",
+             "imaging", "sens/dessins"),
             ("Appareils", "Jeton d'accès des capteurs", "appareils", "", "sens/appareils"),
             ("Forge", "Comportement du moteur qui exécute les apps", "comportement-forge", "", "apps"),
         )

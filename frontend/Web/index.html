@@ -335,6 +335,20 @@
 
       /* Said out loud rather than hidden: the catch-up dropped its oldest
          part, so the thread above this line is not continuous. */
+      .chat-file {
+        margin-top: 6px;
+      }
+      .chat-file .chat-image {
+        display: block;
+        max-width: 100%;
+        max-height: 260px;
+        border-radius: 8px;
+        cursor: zoom-in;
+      }
+      .chat-file.gone {
+        opacity: 0.6;
+        font-style: italic;
+      }
       .chat-note {
         align-self: center;
         max-width: 85%;
