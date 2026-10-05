@@ -414,12 +414,13 @@ async def interact(args: InteractArgs, ctx: Any) -> ToolResult:
     t = timing(frame.env.params_of("world", frame.root))
     try:
         steps = plan.plan_interact(s.definition, t, s.actors, s.objects, w.MIKA, args.object, args.action,
-                                   args.target)
+                                   args.target, now=frame.now)
     except plan.Refused as r:
         return ToolResult(ok=False, content=r.message)
     await _start_intent(ctx, steps)
     what = plan.label_of(s.definition, args.object)
-    verb = dict(plan.actions_of(s.definition, s.objects, s.actors[w.MIKA], args.object)).get(args.action, args.action)
+    verb = dict(plan.actions_of(s.definition, s.objects, s.actors[w.MIKA], args.object, frame.now)).get(
+        args.action, args.action)
     return ToolResult(content=f"C'est parti : {verb} — {what}. On te voit le faire.")
 
 
@@ -445,11 +446,11 @@ def around(s: WorldState, now: int, p: WorldParams) -> str:
         lines.append(f"Tu es en train de {plan.affordance_label(defn, me.activity)}.")
     budget = p.shown_objects
     if me.holding:
-        lines.append("Tu tiens " + ", ".join(_thing(s, me, o) for o in me.holding) + ".")
+        lines.append("Tu tiens " + ", ".join(_thing(s, me, o, now) for o in me.holding) + ".")
         budget -= len(me.holding)
     reach = [o for o in plan.reachable(defn, s.actors, s.objects, w.MIKA) if o not in me.holding]
     if reach and budget > 0:
-        lines.append("À portée de main : " + " ; ".join(_thing(s, me, o) for o in reach[:budget]) + ".")
+        lines.append("À portée de main : " + " ; ".join(_thing(s, me, o, now) for o in reach[:budget]) + ".")
         budget -= len(reach[:budget])
     # où aller, puis de quoi se servir : deux listes, jamais « sur ton lit : ta plante » (qui se lit « la plante
     # est sur le lit ») — ``interact`` y va de lui-même, l'endroit d'un objet n'a pas à se dire
@@ -459,19 +460,19 @@ def around(s: WorldState, now: int, p: WorldParams) -> str:
         places.append(f"{pl.label} (`{pl.id}`" + (f", dans {room.label}" if room is not None else "") + ")")
     if places:
         lines.append("Tu peux aller " + " ; ".join(places) + ".")
-    usable = [o for o in plan.usable(defn, s.actors, s.objects, w.MIKA)
+    usable = [o for o in plan.usable(defn, s.actors, s.objects, w.MIKA, now)
               if o not in reach and o not in me.holding][:max(0, budget)]
     if usable:
-        lines.append("Dans la pièce, de quoi te servir : " + " ; ".join(_thing(s, me, o) for o in usable) + ".")
+        lines.append("Dans la pièce, de quoi te servir : " + " ; ".join(_thing(s, me, o, now) for o in usable) + ".")
     return "\n".join(lines)
 
 
-def _thing(s: WorldState, me: w.ActorState, oid: str) -> str:
+def _thing(s: WorldState, me: w.ActorState, oid: str, now: int) -> str:
     """Un objet tel qu'elle le lit : son nom, son identifiant et son état, puis ce qu'elle peut en faire (les
     identifiants qu'attend ``interact``)."""
     defn = s.definition
     state = plan.state_label(defn, oid, s.objects[oid].state)
-    acts = ", ".join(i for i, _ in plan.actions_of(defn, s.objects, me, oid))
+    acts = ", ".join(i for i, _ in plan.actions_of(defn, s.objects, me, oid, now))
     return f"{plan.label_of(defn, oid)} (`{oid}`" + (f", {state}" if state else "") + ")" + (
         f" : {acts}" if acts else "")
 
