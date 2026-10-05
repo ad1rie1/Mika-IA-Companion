@@ -7,15 +7,21 @@
   nom (« Sent », « Envoyés », « [Gmail]/Corbeille »…).
 - Déplacer : ``MOVE`` si le serveur l'annonce, sinon ``COPY`` + ``\\Deleted`` +
   ``EXPUNGE`` (``UID EXPUNGE`` avec UIDPLUS).
+- Les erreurs d'``imaplib`` sont traduites **au bord** : une réponse ``BAD`` lève
+  ``IMAP4.error``, une connexion coupée en cours de commande ``IMAP4.abort`` —
+  ni l'une ni l'autre n'est une ``OSError``. Hors de cette session, une panne IMAP
+  est toujours une ``OSError`` ou une ``ImapError``.
 """
 
 from __future__ import annotations
 
+import functools
 import imaplib
 import re
 import ssl
+from collections.abc import Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from mika.adapters.mail import utf7
 from mika.adapters.mail.config import MailAccount
@@ -41,6 +47,26 @@ _NAMES = {
 
 class ImapError(RuntimeError):
     """Une réponse du serveur qui n'est pas « OK » (dite en français)."""
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _said(exc: imaplib.IMAP4.error) -> ImapError:
+    if isinstance(exc, imaplib.IMAP4.abort):
+        return ImapError(f"la connexion au serveur a été coupée : {exc}"[:300])
+    return ImapError(f"le serveur a refusé la commande : {exc}"[:300])
+
+
+def _translated(method: _F) -> _F:
+    """Une commande dont l'erreur d'``imaplib`` (``BAD``, connexion coupée) devient une ``ImapError``."""
+    @functools.wraps(method)
+    def run(*args: Any, **kwargs: Any) -> Any:
+        try:
+            return method(*args, **kwargs)
+        except imaplib.IMAP4.error as exc:
+            raise _said(exc) from None
+    return run  # type: ignore[return-value]
 
 
 def since(when: datetime) -> str:
@@ -73,11 +99,15 @@ def quoted(name: str) -> str:
 
 class Session:
     def __init__(self, account: MailAccount, *, timeout: float = TIMEOUT) -> None:
-        if account.imap_ssl:
-            self.box: imaplib.IMAP4 = imaplib.IMAP4_SSL(account.imap_host, account.imap_port,
-                                                        ssl_context=ssl.create_default_context(), timeout=timeout)
-        else:
-            self.box = imaplib.IMAP4(account.imap_host, account.imap_port, timeout=timeout)
+        try:  # un accueil refusé ou coupé lève une erreur d'imaplib, pas une OSError
+            if account.imap_ssl:
+                self.box: imaplib.IMAP4 = imaplib.IMAP4_SSL(account.imap_host, account.imap_port,
+                                                            ssl_context=ssl.create_default_context(), timeout=timeout)
+            else:
+                self.box = imaplib.IMAP4(account.imap_host, account.imap_port, timeout=timeout)
+        except imaplib.IMAP4.error as exc:
+            raise _said(exc) from None
+        if not account.imap_ssl:
             # sans SSL d'emblée : chiffrer avant d'envoyer le mot de passe, si le serveur le propose
             if "STARTTLS" in {str(c).upper() for c in getattr(self.box, "capabilities", ())}:
                 try:
@@ -115,6 +145,7 @@ class Session:
         return data
 
     # ── dossiers ──
+    @_translated
     def folders(self) -> list[tuple[str, frozenset[str]]]:
         """``(nom décodé, attributs)`` de chaque dossier sélectionnable."""
         data = self._ok(self.box.list(), "liste des dossiers illisible")
@@ -132,6 +163,7 @@ class Session:
             out.append((utf7.decode(_unquote(found.group("name"))), flags))
         return out
 
+    @_translated
     def select(self, name: str, *, write: bool = False) -> tuple[int, int, int]:
         """Ouvre un dossier ; rend ``(nombre, UIDVALIDITY, UIDNEXT)`` (0 : inconnu)."""
         if self.selected == name and (self.writable or not write):
@@ -161,10 +193,12 @@ class Session:
         return self._counts
 
     # ── lire ──
+    @_translated
     def search(self, criteria: str) -> list[int]:
         data = self._ok(self.box.uid("SEARCH", None, criteria), "recherche refusée")
         return sorted({int(u) for u in (data[0] or b"").split() if u.isdigit()}) if data else []
 
+    @_translated
     def fetch(self, uids: list[int]) -> list[tuple[int, frozenset[str], bytes]]:
         """``(uid, drapeaux, mail brut)`` — sans poser ``\\Seen``."""
         out = []
@@ -179,6 +213,7 @@ class Session:
                     out.append((int(uid.group(1)), _flags(item[0]), bytes(item[1])))
         return out
 
+    @_translated
     def flags(self, uids: list[int]) -> dict[int, frozenset[str]]:
         out: dict[int, frozenset[str]] = {}
         for i in range(0, len(uids), 200):
@@ -194,15 +229,18 @@ class Session:
         return out
 
     # ── ranger ──
+    @_translated
     def store(self, uid: int, flag: str, on: bool) -> None:
         self._ok(self.box.uid("STORE", str(uid), "+FLAGS" if on else "-FLAGS", f"({flag})"), "drapeau refusé")
 
+    @_translated
     def store_many(self, uids: list[int], flag: str, on: bool) -> None:
         """Un drapeau posé (ou retiré) sur plusieurs mails du dossier ouvert, en une commande."""
         if uids:
             self._ok(self.box.uid("STORE", ",".join(str(u) for u in uids), "+FLAGS" if on else "-FLAGS",
                                   f"({flag})"), "drapeau refusé")
 
+    @_translated
     def move(self, uid: int, dest: str) -> int | None:
         """Déplace (dans le dossier ouvert) ; rend l'UID d'arrivée s'il est dit."""
         if "MOVE" in self.caps:
@@ -220,12 +258,14 @@ class Session:
         found = _COPYUID.search(text)
         return int(found.group(1)) if found else None
 
+    @_translated
     def expunge(self, uid: int) -> None:
         if "UIDPLUS" in self.caps:
             self._ok(self.box.uid("EXPUNGE", str(uid)), "suppression refusée")
         else:
             self._ok(self.box.expunge(), "suppression refusée")
 
+    @_translated
     def append(self, folder: str, raw: bytes, *, seen: bool = True) -> None:
         self._ok(self.box.append(utf7.encode(folder), "(\\Seen)" if seen else None, None, raw),
                  f"copie dans « {folder} » refusée")

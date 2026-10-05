@@ -20,6 +20,7 @@ standard, dans un fil), un cache SQLite à part pour ce qui est arrivé.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 import smtplib
@@ -582,13 +583,19 @@ class ImapSmtpMail:
             msg.add_attachment(file.data, maintype=maintype or "application", subtype=subtype or "octet-stream", filename=file.name)
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._smtp_sync, acc, msg)
-        self._cache.remember_sent(Sent(message_id, shown.to[:300], shown.subject[:300], shown.text, self._at(),
-                                       reply_to, by[:100], key, draft_id, shown.cc[:300],
-                                       tuple(Attachment(f.name, f.mime, len(f.data)) for f in files)), msg.as_bytes())
+        # le mail est parti : plus rien ne doit le dire échoué (on le renverrait, et il arriverait deux fois)
+        try:
+            self._cache.remember_sent(Sent(message_id, shown.to[:300], shown.subject[:300], shown.text, self._at(),
+                                           reply_to, by[:100], key, draft_id, shown.cc[:300],
+                                           tuple(Attachment(f.name, f.mime, len(f.data)) for f in files)),
+                                      msg.as_bytes())
+        except Exception as exc:
+            log.warning("courrier : envoi parti mais non retenu (%s)", type(exc).__name__)
         try:  # ranger une copie, marquer « répondu » : jamais au prix de l'envoi
             await self._in_thread(key, self._after_send_sync, key, acc, msg, parent)
-        except (OSError, ImapError, ValueError, EOFError) as exc:
-            self._cache.note(key, at=self._at(), error=f"envoi parti, mais copie non rangée : {_why(exc)}")
+        except Exception as exc:
+            with contextlib.suppress(Exception):  # un cache qui ne note pas ne change rien à ce qui est parti
+                self._cache.note(key, at=self._at(), error=f"envoi parti, mais copie non rangée : {_why(exc)}")
         return message_id
 
     def _after_send_sync(self, key: str, acc: MailAccount, msg: EmailMessage, parent: Mail | None) -> None:
