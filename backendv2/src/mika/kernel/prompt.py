@@ -14,7 +14,9 @@ avant/après, rang de coupe, plancher, étiquettes) ; le composeur, générique 
    message, un tel marqueur est désamorcé (``neutral``) ; la zone stable,
    écrite par ses facultés, peut les nommer pour les expliquer ;
 4. budgète — ce qui part hors du composeur (persona, catalogue, déclarations
-   d'outils) est réservé ; coupe par rang croissant jusqu'aux planchers ;
+   d'outils) est réservé ; coupe par rang croissant jusqu'aux planchers,
+   toujours après une ligne, une phrase ou un mot entiers (un élément qui ne
+   tient pas est retiré, jamais laissé à moitié) ;
    l'historique est coupé avec hystérésis (jusqu'à un niveau bas), mémorisée
    par fil, pour que le préfixe en cache ne bouge pas à chaque tour ; un tour
    épinglé (le résumé du début du fil) n'est jamais coupé ; le message en
@@ -62,6 +64,10 @@ _DASH_RUN = re.compile(f"[{re.escape(_DASHES)}](?:[ \\t\u00a0]*[{re.escape(_DASH
 #: « ETAT INTERNE » (et « FIN ETAT INTERNE ») : toute casse, accent précomposé
 #: ou combinant, blancs quelconques entre les mots
 _STATE = re.compile(r"(?:\bfin[\s_]+)?\b[eé]\u0301?tat[\s_]+interne\b", re.IGNORECASE)
+#: les espaces insécables : on ne coupe pas entre « 12 » et « h », ni avant « ? »
+_NO_BREAK = "\u00a0\u2007\u202f"
+#: une fin de phrase : sa ponctuation, ce qui la ferme (guillemet, parenthèse), puis un blanc où couper
+_SENTENCE_END = re.compile(f"[.!?…](?:[ {_NO_BREAK}]?[»\"”)\\]])*(?=[^\\S{_NO_BREAK}])")
 
 
 def neutral(text: str) -> str:
@@ -344,11 +350,15 @@ class Composer:
                     break
                 floor = b.spec.floor_chars
                 target = max(floor, len(b.text) - excess - len(TRIM_MARK))
-                if target <= 0 and floor == 0:
+                if target >= len(b.text):
+                    continue
+                kept = _trim_at_boundary(b.text, target, floor)
+                # une citation réduite à son avertissement ne dit plus rien
+                if not kept or (b.spec.untrusted and kept == UNTRUSTED_NOTE):
                     dropped.append((b.spec.key, "hors budget"))
                     b.text = ""
-                elif target < len(b.text):
-                    b.text = b.text[:target].rstrip() + TRIM_MARK
+                else:
+                    b.text = kept + TRIM_MARK
                     b.trimmed = True
                     trimmed.append(b.spec.key)
             volatile = [b for b in volatile if b.text]
@@ -436,8 +446,38 @@ def _fit(message: str, typed_chars: int | None, room: int) -> str:
     head, tail = neutral(message[:typed]), neutral(message[typed:])
     keep = room - len(head) - len(TRIM_MARK)
     if keep > 0:
-        return head + tail[:keep].rstrip() + TRIM_MARK
+        return head + _trim_at_boundary(tail, keep) + TRIM_MARK
     return head[:max(0, room - len(TRIM_MARK))].rstrip() + TRIM_MARK
+
+
+def _trim_at_boundary(text: str, target: int, floor: int = 0) -> str:
+    """Le début de ``text`` qui tient en ``target`` caractères, arrêté après un
+    élément entier : la dernière fin de ligne, sinon de phrase, sinon le dernier
+    blanc — jamais au milieu d'un mot, d'un nom ou d'une date (le modèle
+    compléterait le demi-fait). Un élément qui ne tient pas est retiré en
+    entier : rien, si aucun ne tient. Jamais sous ``floor`` : sans frontière
+    entre le plancher et la cible, le mot qui les chevauche est gardé en entier
+    (coupé à la cible s'il ne finit jamais)."""
+    if len(text) <= target:
+        return text
+    if target <= 0:
+        return ""
+    floor = max(0, min(floor, target))
+    line = text.rfind("\n", floor, target + 1)
+    sentence = max((m.end() for m in _SENTENCE_END.finditer(text, 0, target + 1) if m.end() >= floor), default=-1)
+    blank = next((i for i in range(target, floor - 1, -1) if _breaks(text[i])), -1)
+    for cut in (line, sentence, blank):
+        kept = text[:cut].rstrip() if cut >= 0 else ""
+        if kept:
+            return kept
+    if not floor:
+        return ""
+    end = next((i for i in range(target, len(text)) if _breaks(text[i])), target)
+    return text[:end].rstrip()
+
+
+def _breaks(char: str) -> bool:
+    return char.isspace() and char not in _NO_BREAK
 
 
 def _turn_chars(turns: Sequence[ChatTurn]) -> int:
