@@ -35,6 +35,7 @@ from mika.faculties.attention.faculty import (
     Heard,
     Pending,
     awaiting,
+    due_at,
     habituation,
     params,
 )
@@ -232,7 +233,9 @@ class Watch:
         p = params(frame.env.params_of("attention", frame.root))
         if state.signals or met(state, frame) or any(ripe(q, frame, p) <= frame.now for q in state.pending):
             return frame.now
-        times = [x.deadline for x in state.expectations.values() if x.deadline is not None]
+        # une initiative pas encore lue attend la lecture (``presence.read`` réveille la veille), au plus sa retenue
+        times = [t for x in state.expectations.values()
+                 if (t := due_at(x, state.exchanges.get(x.person), p)) is not None]
         times += [ripe(q, frame, p) for q in state.pending]
         if frame.get(body_c.SLEEP) is body_c.SleepPhase.AWAKE:
             thoughts = frame.get(c.THOUGHTS)
@@ -265,7 +268,7 @@ class Watch:
                 absence = absence_of(x, frame) if x.kind == c.RETURN else None
                 drafts.append(c.EXPECTATION_MET.draft(kind=x.kind, person=x.person, since=x.since, ref=x.ref,
                                                       absence=absence, dedupe_key=mark))
-            elif x.deadline is not None and x.deadline <= frame.now:
+            elif (when := due_at(x, state.exchanges.get(x.person), p)) is not None and when <= frame.now:
                 drafts.append(c.EXPECTATION_MISSED.draft(kind=x.kind, person=x.person, since=x.since, ref=x.ref,
                                                          dedupe_key=mark))
         awake = frame.get(body_c.SLEEP) is body_c.SleepPhase.AWAKE

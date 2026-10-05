@@ -31,6 +31,12 @@
   fois le délai attendu (ADR 0033) — par messagerie, dans les jours qui
   suivent. Le délai court sur les heures où la personne écrit d'habitude
   (``others.hours``) : la nuit de l'autre n'est pas un silence.
+- **Pas encore lu** : par messagerie, quand l'application de la personne dit
+  ce qu'elle a lu (``presence.read``), une initiative qu'elle n'a pas encore
+  vue ne compte pas comme ignorée — un téléphone qui dort n'ignore personne —,
+  au plus ``unseen_hold_us`` ; vue, le délai attendu court à partir de la
+  lecture. Un écran ouvert qui se tait sur ce qu'on y lit (le web) : on ne
+  sait pas, et tout se passe comme sans lecture.
 - **Une conversation qui se clôt** (« bonne nuit », « à demain », ou la
   personne qui s'en va juste après sa réponse) ne laisse rien « sans
   réponse » : on s'est quittées, on ne l'ignore pas.
@@ -66,6 +72,7 @@ from mika.contracts import presence as presence_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
+from mika.kernel.builtin import BOOT
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
@@ -206,6 +213,12 @@ class AttentionParams(BaseModel):
         help="Le délai de réponse ne court que pendant les heures où la personne écrit d'habitude (apprises, sinon "
              "hors d'une nuit supposée) : un message de 21 h 30 à quelqu'un qui écrit le matin attend le matin. Les "
              "heures creuses ne l'allongent jamais de plus que ça.")] = DAY
+    unseen_hold_us: Annotated[int, Knob(
+        label="Pas encore lu : attendre au plus", group="Attentes", lo=HOUR, hi=14 * DAY,
+        help="Par messagerie, quand l'application de la personne dit ce qu'elle a lu : une initiative qu'elle n'a pas "
+             "encore vue ne compte pas comme ignorée (un téléphone qui dort, oublié dans un sac), et le délai attendu "
+             "court à partir de la lecture. Sans lecture au bout de cette durée (un compte délaissé, un réglage "
+             "coupé), l'attente compte quand même.")] = 3 * DAY
     closing_left_us: Annotated[int, Knob(
         label="Partie juste après sa réponse", group="Attentes", lo=0, hi=2 * HOUR,
         help="Quand la personne quitte l'application dans ce délai après sa réponse, la conversation s'est close : "
@@ -388,6 +401,10 @@ class Expectation:
     #: née — c'est à eux que se mesure son absence quand elle revient (un long silence ne change pas ce rythme-là)
     last_in: int = 0
     rhythm_days: float = 0.0
+    #: une initiative (``REPLY``) dont on saura si elle est lue : son numéro dans le fil (0 : on ne le saura pas) ;
+    #: et quand la personne l'a lue (0 : pas encore, ou on ne le sait pas)
+    seq: int = 0
+    seen_at: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -408,6 +425,13 @@ class Exchange:
     closing: bool = False
     #: quand la conversation s'est close (« bonne nuit » lu, sa réponse, ou la personne partie juste après)
     closed_at: int = 0
+    #: sa dernière initiative par messagerie dont on saura si elle est lue (son numéro dans le fil) ; 0 : aucune, ou
+    #: un écran ouvert qui se tait sur ce qu'on y lit (elle a pu l'y lire)
+    initiative_seq: int = 0
+    #: jusqu'où la personne dit avoir lu depuis son dernier message (``presence.read``) ; 0 : rien n'en est dit
+    seen_upto: int = 0
+    #: quand elle a lu cette initiative (0 : pas encore, ou on ne le sait pas)
+    seen_at: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -445,6 +469,9 @@ class AttentionState:
     glad: FrozenDict[str, tuple[int, int]] = field(default_factory=FrozenDict)
     #: la dernière pensée de manque pour chacun (personne → quand) : la suivante attend que son silence ait doublé
     missing: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: les écrans ouverts qui se taisent sur ce qu'on y lit (connexion → personne : le web, un moteur de jeu) — ce
+    #: qu'elle écrit pendant ce temps a pu y être lu
+    screens: FrozenDict[str, str] = field(default_factory=FrozenDict)
 
 
 #: v5 : une conversation close (« bonne nuit ») n'est pas « sans réponse » ; le délai de réponse court sur les
@@ -453,10 +480,14 @@ class AttentionState:
 #: v7 : un message qui clôt (« bonne nuit ») close la conversation dès sa lecture, même si elle se tait.
 #: v8 : une simple envie de discuter n'attend pas de retour, seulement une réponse ; une attente de retour retient le
 #: dernier message de la personne et le rythme de leur relation (la joie du retour se mesure à l'absence).
+#: v9 : ce que la personne a lu (``presence.read``) : une initiative pas encore vue n'est pas ignorée ; les écrans
+#: qui se taisent sur ce qu'on y lit.
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    state_version=8)
+                    state_version=9)
 #: les manques dont on retient la dernière pensée (les plus récents)
 MISSING_KEPT = 64
+#: les écrans ouverts retenus au plus (des connexions jamais fermées : un transport qui ne le dit pas)
+SCREENS_KEPT = 64
 
 #: Les pensées nées d'une relation : une par personne à la fois, trois au plus.
 RELATIONAL = (c.EXCHANGE, c.CONCERN)
@@ -544,7 +575,8 @@ def owed(reasons: Any) -> bool:
 
 
 def _wrote_to(s: AttentionState, person: str, at: int, *, asked: bool, due: bool, ordinary: bool,
-              reply: bool = False) -> AttentionState:
+              reply: bool = False, seq: int = 0) -> AttentionState:
+    """``seq`` : le numéro d'une initiative dont on saura si elle est lue (0 : on ne le saura pas)."""
     ex = s.exchanges.get(person) or Exchange()
     # répondre à « bonne nuit » ne laisse rien en suspens : la conversation s'est close
     closed = reply and ex.closing and ex.last_in > ex.last_out
@@ -552,7 +584,14 @@ def _wrote_to(s: AttentionState, person: str, at: int, *, asked: bool, due: bool
                  initiatives=ex.initiatives + (1 if ordinary else 0),
                  last_initiative_at=at if ordinary else ex.last_initiative_at, unanswered=not closed,
                  closed_at=at if closed else 0)
+    if ordinary:  # une nouvelle initiative : pas encore lue
+        ex = replace(ex, initiative_seq=seq, seen_at=0)
     return replace(s, exchanges=s.exchanges.set(person, ex))
+
+
+def watching(s: AttentionState, person: str) -> bool:
+    """Un écran ouvert devant cette personne qui se tait sur ce qu'on y lit : ce qu'elle lui écrit a pu y être lu."""
+    return person in s.screens.values()
 
 
 #: ce qu'elle déclare quand elle est dure avec quelqu'un
@@ -591,6 +630,7 @@ def _uttered(s: AttentionState, e, cx) -> AttentionState:
         thoughts = thoughts.set(t.id, replace(t, intensity=current(t, e.at, p) / 2, touched_at=e.at))
     s = replace(s, thoughts=thoughts)
     due = False
+    tracked = 0
     if d.kind == Kind.INITIATIVE:
         reasons = s.openings.get(e.correlation, "").split(",")
         s = replace(s, openings=s.openings.delete(e.correlation))
@@ -598,11 +638,16 @@ def _uttered(s: AttentionState, e, cx) -> AttentionState:
         due = owed(reasons) or bool(others_c.WELL_WISHES & set(reasons))
         if not due:
             deadline = reply_deadline(cx, person, d.channel or "", e.at, p)
+            # par messagerie, en privé, à quelqu'un devant aucun écran qui se tait sur ce qu'on y lit : si son
+            # application dit ce qu'elle a lu, on saura quand elle l'aura vue
+            if privacy.is_messaging(d.channel) and d.room is None and not watching(s, person):
+                tracked = e.seq
             s = replace(s, expectations=s.expectations.set(
-                expectation_key(c.REPLY, person), Expectation(c.REPLY, person, e.at, deadline, channel=d.channel or "")))
+                expectation_key(c.REPLY, person), Expectation(c.REPLY, person, e.at, deadline, channel=d.channel or "",
+                                                              seq=tracked)))
     if d.room is None:  # le fil privé avec la personne (un salon n'est pas une conversation à deux)
         s = _wrote_to(s, person, e.at, asked=d.annotation(expression_c.QUESTION_ANNOTATION) is not None, due=due,
-                      ordinary=d.kind == Kind.INITIATIVE and not due, reply=d.kind == Kind.REPLY)
+                      ordinary=d.kind == Kind.INITIATIVE and not due, reply=d.kind == Kind.REPLY, seq=tracked)
     if s.glad.get(person, (0, e.at))[1] < e.at - p.exchange_spacing_us:
         s = replace(s, glad=s.glad.delete(person))  # elle lui a reparlé depuis : l'envie s'est dite, ou est passée
     declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
@@ -656,6 +701,70 @@ def reply_deadline(cx: Any, person: str, channel: str, since: int, p: AttentionP
                            since + window + p.reply_quiet_extra_us)
 
 
+def unseen(x: Expectation, ex: Exchange | None) -> bool:
+    """Une initiative par messagerie que la personne n'a pas encore vue, alors que son application dit ce qu'elle a
+    lu depuis son dernier message : son attente ne court pas encore."""
+    return (x.kind == c.REPLY and x.seq > 0 and ex is not None and ex.initiative_seq == x.seq
+            and 0 < ex.seen_upto < x.seq)
+
+
+def due_at(x: Expectation, ex: Exchange | None, p: AttentionParams) -> int | None:
+    """Quand une attente se constate : à son échéance — sauf une initiative pas encore vue, qui attend d'être lue,
+    au plus ``unseen_hold_us`` après avoir été écrite (un compte délaissé, un réglage coupé : elle finit par
+    compter)."""
+    if x.deadline is None or not unseen(x, ex):
+        return x.deadline
+    return max(x.deadline, x.since + p.unseen_hold_us)
+
+
+@ATTENTION.reducer(presence_c.READ, reads=[identity_c.PERSON, others_c.REPLY_DELAY, others_c.HOURS])
+def _read(s: AttentionState, e, cx) -> AttentionState:
+    """La personne a lu jusqu'à ce message (son application le dit, si elle l'a permis). Sa dernière initiative
+    vue : le délai de réponse attendu court à partir de la lecture — avant, il ne courait pas (``due_at``)."""
+    d = e.data
+    if not is_identifiable(d.handle):
+        return s
+    person = cx.facts.get(identity_c.PERSON(d.handle)) or d.handle
+    ex = s.exchanges.get(person)
+    if ex is None or d.up_to <= ex.seen_upto:
+        return s
+    newly = bool(ex.initiative_seq) and not ex.seen_at and d.up_to >= ex.initiative_seq
+    s = replace(s, exchanges=s.exchanges.set(person, replace(ex, seen_upto=d.up_to,
+                                                              seen_at=e.at if newly else ex.seen_at)))
+    key = expectation_key(c.REPLY, person)
+    x = s.expectations.get(key)
+    if not newly or x is None or x.seq != ex.initiative_seq or x.deadline is None:
+        return s
+    deadline = max(x.deadline, reply_deadline(cx, person, x.channel, e.at, params(cx.params)))
+    return replace(s, expectations=s.expectations.set(key, replace(x, deadline=deadline, seen_at=e.at)))
+
+
+@ATTENTION.reducer(presence_c.CONNECTED, reads=[identity_c.PERSON])
+def _screen(s: AttentionState, e, cx) -> AttentionState:
+    """Un écran s'ouvre qui se tait sur ce qu'on y lit (le web, un moteur de jeu — pas l'application du téléphone,
+    une messagerie) : ce qu'elle a écrit d'elle-même a pu y être lu. On ne sait plus si c'est vu : rien ne se
+    retient ni ne se dit au nom d'un message « pas encore lu »."""
+    d = e.data
+    if privacy.is_messaging(d.channel) or not is_identifiable(d.handle):
+        return s
+    person = cx.facts.get(identity_c.PERSON(d.handle)) or d.handle
+    screens = s.screens.set(d.connection, person)
+    if len(screens) > SCREENS_KEPT:
+        screens = FrozenDict(sorted(screens.items())[-SCREENS_KEPT:])
+    s = replace(s, screens=screens)
+    ex = s.exchanges.get(person)
+    if ex is None or not ex.initiative_seq or ex.seen_at:
+        return s
+    return replace(s, exchanges=s.exchanges.set(person, replace(ex, initiative_seq=0)))
+
+
+@ATTENTION.reducer(BOOT)
+def _rebooted(s: AttentionState, e, cx) -> AttentionState:
+    """Elle redémarre : les écrans d'avant sont tombés avec elle (sans un mot, si elle s'est arrêtée
+    brutalement)."""
+    return replace(s, screens=FrozenDict()) if s.screens else s
+
+
 @ATTENTION.reducer(rt.PERCEPTION_RECEIVED, reads=[identity_c.PERSON])
 def _heard_from(s: AttentionState, e, cx) -> AttentionState:
     """La personne écrit : le fil repart de zéro (elle n'attend plus rien
@@ -682,7 +791,9 @@ def _heard_from(s: AttentionState, e, cx) -> AttentionState:
 @ATTENTION.reducer(presence_c.DISCONNECTED, reads=[identity_c.PERSON])
 def _left(s: AttentionState, e, cx) -> AttentionState:
     """La personne s'en va juste après sa réponse : la conversation s'est close, son dernier message n'attend
-    plus rien (on se reparlera) — comme après « bonne nuit »."""
+    plus rien (on se reparlera) — comme après « bonne nuit ». Un écran qui se ferme ne la regarde plus."""
+    if e.data.connection in s.screens:
+        s = replace(s, screens=s.screens.delete(e.data.connection))
     person = cx.facts.get(identity_c.PERSON(e.data.handle)) or e.data.handle
     ex = s.exchanges.get(person)
     if ex is None or not ex.unanswered or ex.initiatives or ex.last_out <= ex.last_in:
@@ -907,14 +1018,23 @@ def _missed(s: AttentionState, e, cx) -> AttentionState:
                                                        p.promise_intensity, e.at)))
     if d.kind != c.REPLY:
         return s
-    # une réponse tardive compte encore, mais pas indéfiniment : trois fois le délai attendu — par messagerie, on
-    # répond quand on y pense : dans les jours qui suivent
-    window = (expected.deadline - expected.since) if expected is not None and expected.deadline else p.reply_window_us
+    ex = s.exchanges.get(d.person) or Exchange()
+    # jamais lue au bout de la retenue : elle ne compte qu'à partir de maintenant
+    held = expected is not None and unseen(expected, ex)
+    # une réponse tardive compte encore, mais pas indéfiniment : trois fois le délai attendu (depuis la lecture,
+    # quand on la sait) — par messagerie, on répond quand on y pense : dans les jours qui suivent
+    start = expected.seen_at if expected is not None and expected.seen_at else d.since
+    window = (expected.deadline - start) if expected is not None and expected.deadline else p.reply_window_us
+    if held:
+        start = e.at - window
     until = round(window * p.late_reply_factor)
     if expected is not None and privacy.is_messaging(expected.channel):
         until = max(until, p.late_reply_message_us)
-    late = Late(d.since, d.since + until)
-    ex = s.exchanges.get(d.person) or Exchange()
+    late = Late(d.since, start + until)
+    if held:
+        # rien de lu pendant tout ce temps alors que son application le disait : un téléphone délaissé, ou le
+        # réglage coupé — on ne sait plus ce qu'elle lit
+        ex = replace(ex, initiative_seq=0, seen_upto=0)
     s = replace(s, ignored=s.ignored + 1, late=s.late.set(d.person, late),
                 exchanges=s.exchanges.set(d.person, replace(ex, ignored=ex.ignored + 1)))
     return _felt_ignored(s, d.person, e.seq, e.at, p)
@@ -957,7 +1077,8 @@ def _ignored(s: AttentionState, cx) -> int:
 def awaiting(s: AttentionState, person: str) -> c.AwaitingReading:
     ex = s.exchanges.get(person) or Exchange()
     return c.AwaitingReading(person, ex.last_in, ex.last_out, ex.asked, ex.owed, ex.initiatives,
-                             ex.last_initiative_at, ex.ignored, ex.unanswered, ex.closed_at)
+                             ex.last_initiative_at, ex.ignored, ex.unanswered, ex.closed_at, seen_at=ex.seen_at,
+                             unseen=0 < ex.seen_upto < ex.initiative_seq)
 
 
 @ATTENTION.fact(c.AWAITING)
