@@ -101,7 +101,9 @@ Une connexion silencieuse peut être morte sans le dire (un portable en veille, 
 
 - `message` : 2 000 caractères au plus (`too_long` au-delà : jamais coupé en silence).
 - `client_msg_id` : 64 caractères au plus ; le serveur dédoublonne par lui (un renvoi après une coupure rend
-  `accepted` et ne produit pas de seconde réponse). Renvoie tout message non accusé à la reconnexion.
+  `accepted` et ne produit pas de seconde réponse). Renvoie tout message non accusé à la reconnexion, sans en garder
+  plus de 4 en vol sans accusé (chaque accusé fait partir le suivant) : une file vidée d'un bloc dépasse la limite
+  ci-dessous.
 - `attachments` (clé absente s'il n'y en a pas) : 5 au plus, 5 Mio chacun ; `data` en base64 **sans retour à la
   ligne** (le serveur décode strictement ; un préfixe `data:…;base64,` est toléré). Les images sont décrites, l'audio
   transcrit, les documents lus ; les octets ne sont jamais gardés. Une trame entière ne dépasse pas ~34 Mio (et

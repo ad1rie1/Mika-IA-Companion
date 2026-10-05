@@ -29,6 +29,12 @@ object MikaProtocol {
     const val MAX_OUTBOX = 20
     const val MAX_OUTBOX_BYTES = 48L * 1024 * 1024
     const val MAX_OUTBOX_ATTEMPTS = 5
+    /**
+     * Au plus tant de messages partis sans accusé : le serveur refuse (`overloaded`) au-delà de 8 en
+     * attente sur une connexion (adapters/web/app.py `MAX_QUEUED_CHATS`), et une file rejouée d'un
+     * bloc au retour du réseau les dépassait. Chaque accusé fait partir le suivant.
+     */
+    const val MAX_IN_FLIGHT = 4
 
     // ── Maintien de connexion (WebSocketClient.ts) ──
     const val HEARTBEAT_INTERVAL_MS = 20_000L
