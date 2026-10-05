@@ -78,6 +78,13 @@ def _waiting_count(s: EmailState, frame: Frame) -> tuple[int, str]:
     return len(frame.get(c.DRAFTS)), "brouillon(s) d'elle à décider"
 
 
+def _note(d: DraftSeen, ctx: InspectContext) -> str:
+    """La note de qui a décidé : gardée à part (« (oublié) » une fois oubliée), en clair pour un journal ancien."""
+    if not d.note_ref:
+        return d.note
+    return ctx.store.content([d.note_ref]).get(d.note_ref, "(oublié)")
+
+
 def _seen_for(s: EmailState, draft_id: str) -> DraftSeen | None:
     found = [d for d in s.drafts.values() if d.draft == draft_id]
     return max(found, key=lambda d: d.proposal) if found else None
@@ -198,8 +205,8 @@ def _tab_draft(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     elif seen is not None:
         said = {GONE: "Il est parti.", REFUSED: "Il a été refusé.", FAILED: f"Il n'a pas pu partir : {seen.result}.",
                 APPROVED: "Approuvé : il part dans un instant."}.get(seen.state, "")
-        if seen.note:
-            said += f" Note : « {seen.note} »."
+        if note := _note(seen, ctx):
+            said += f" Note : « {note} »."
         blocks.append(Note(said or f"État : {draft_state(seen.state)[0]}.", tone="info"))
     return blocks
 
@@ -248,7 +255,7 @@ def _tab_history(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
         entries.append(Entry(d.at, "proposé", text=f"n° {d.proposal}", href=Ref("event", str(d.proposal), "")))
         if d.decided_at:
             entries.append(Entry(d.decided_at, "approuvé" if d.state in (APPROVED, GONE, FAILED) else "refusé",
-                                 text=f"par {d.by}" + (f" — « {d.note} »" if d.note else ""),
+                                 text=f"par {d.by}" + (f" — « {note} »" if (note := _note(d, ctx)) else ""),
                                  tone="ok" if d.state != REFUSED else "muted"))
         if d.state in (GONE, FAILED):
             entries.append(Entry(d.decided_at or d.at, "parti" if d.state == GONE else "échec", text=d.result,

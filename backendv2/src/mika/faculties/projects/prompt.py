@@ -73,8 +73,9 @@ def _refs(p: Project) -> list[str]:
     objectives = [r for o in p.objectives for r in (o.text_ref, o.note_ref, o.result_ref, o.need_ref)]
     decisions = [r for d in p.decisions for r in (d.title_ref, d.choice_ref, d.reason_ref, d.context_ref)]
     deposits = [note for _, _, note in p.deposits]
+    refusals = [note for _, note in p.refusals]
     return [r for r in (p.title_ref, p.description_ref, p.summary_ref, *p.notes, *p.instructions, *objectives,
-                        *decisions, *deposits) if r]
+                        *decisions, *deposits, *refusals) if r]
 
 
 def _talk_refs(p: Project) -> list[str]:
@@ -232,8 +233,10 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
             f"- {name} ({size} o)" + (f" — {texts[note]}" if note and texts.get(note) else "")
             for name, size, note in p.deposits[-3:]))
     if p.effects:  # leur état seulement : ce que le réseau a rendu est cité à part
-        lines.append("Ce que sont devenues tes demandes (ce qui sort de la machine) :\n"
-                     + "\n".join(f"- {e}" for e in p.effects[-3:]))
+        refused = {f"#{n}": texts.get(ref) for n, ref in p.refusals}
+        lines.append("Ce que sont devenues tes demandes (ce qui sort de la machine) :\n" + "\n".join(
+            f"- {e}" + (f" : « {why[:200]} »" if (why := refused.get(e.split(' ', 1)[0])) else "")
+            for e in p.effects[-3:]))
     if p.remote:
         lines.append(f"Dépôt distant : {p.remote} (branche {p.branch})"
                      + (" — envoyé après chaque exécution qui enregistre quelque chose." if p.auto_push else

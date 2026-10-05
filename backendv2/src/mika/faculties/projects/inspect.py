@@ -1228,7 +1228,7 @@ def _effect_state(proposal: Event[Any], pending: bool, outcomes: Sequence[Event[
     if executed is not None:
         return (Badge("fait", "ok") if executed.data.ok else Badge("échoué", "danger")), executed.data.result
     if resolved is not None and not resolved.data.approved:
-        note = f" : « {resolved.data.note} »" if resolved.data.note else ""
+        note = f" : « {said} »" if (said := resolved.data.said()) else ""
         return Badge("refusé", "muted"), f"par {resolved.data.by or 'un opérateur'}{note}"
     if resolved is not None or not proposal.data.approval:
         return Badge("en cours", "info"), ""

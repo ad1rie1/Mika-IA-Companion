@@ -89,5 +89,5 @@ def _detail(ui: Any, e: Any) -> str:
     d = e.data
     if e.type.name == rt.EFFECT_RESOLVED.name:
         verdict = "approuvé" if d.approved else "refusé"
-        return f"{verdict} par {ui.names.who(d.by) if d.by else '?'}" + (f" — {d.note}" if d.note else "")
+        return f"{verdict} par {ui.names.who(d.by) if d.by else '?'}" + (f" — {note}" if (note := d.said()) else "")
     return ("réussi" if d.ok else "échec") + (f" — {names.detail(d.result)}" if d.result else "")

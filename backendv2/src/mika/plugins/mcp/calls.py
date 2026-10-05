@@ -98,9 +98,9 @@ class Expire:
         now = ctx.frame.now
         for r in [r for r in ctx.state.requests.values() if r.status == WAITING and r.expires and r.expires <= now]:
             draft = rt.EFFECT_RESOLVED.draft(
-                proposal=r.proposal, approved=False, by=EXPIRER, note="pas d'accord dans le délai",
+                proposal=r.proposal, approved=False, by=EXPIRER, note=Content.of("pas d'accord dans le délai"),
                 capability=c.CALL, owner=c.OWNER, args_json=r.args_json, context=r.context,
-                dedupe_key=f"décision:{r.proposal}")
+                about=(r.target,) if r.target else (), dedupe_key=f"décision:{r.proposal}")
             try:
                 await ctx.emit(draft, guard=_still_pending(r.proposal), emitter=rt.OWNER)
             except Exception:  # noqa: BLE001 — décidée entre-temps : rien à faire

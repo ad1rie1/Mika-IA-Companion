@@ -372,7 +372,7 @@ def test_deciding_from_the_fiche_is_the_approvals_decision_once(tmp_path):
                                    by="user_1", subject=pid, nonce="n"),
                "offered": offered(kernel, kernel.registry.actions["projects.approuver"], pid)}
         await kernel.lanes.join()
-        out["resolved"] = [(e.data.proposal, e.data.approved, e.data.by, e.data.note)
+        out["resolved"] = [(e.data.proposal, e.data.approved, e.data.by, e.data.said())
                            for e in events(kernel, rt.EFFECT_RESOLVED)]
         out["ids"] = (yes, no)
         out["carnet"] = await tab(kernel, "carnet", pid)

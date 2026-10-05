@@ -174,6 +174,7 @@ async def _gather(s: EmailState, frame: Frame, ports: Mapping[str, Any]) -> dict
     refs = [m.summary_ref for m in _shown_unread(frame) if m.summary_ref]
     refs += [m.summary_ref for m in _announced_unread(frame) if m.summary_ref]
     refs += [m.summary_ref for _, m in _recent_sent(s, frame) if m.summary_ref]
+    refs += [d.note_ref for d in _outcomes(s, frame) if d.note_ref]
     mail = task_mail(frame)
     ask = s.asked.get(mail) if mail else None
     if ask is not None and ask.instruction_ref:
@@ -254,7 +255,7 @@ def _mails(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
                untrusted=True)
 def _drafts(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
-    known = got.get("drafts") or {}
+    known, texts = got.get("drafts") or {}, got.get("texts") or {}
     if not for_owner(frame):
         return None
     lines = []
@@ -266,7 +267,8 @@ def _drafts(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
         elif d.state == GONE:
             lines.append(f"{what} est parti.")
         elif d.state == REFUSED:
-            note = f" : « {inert(d.note, 300)} »" if d.note else ""
+            said = texts.get(d.note_ref, "") if d.note_ref else d.note
+            note = f" : « {inert(said, 300)} »" if said else ""
             lines.append(f"{what} a été refusé par {keeper_name(frame, d.by)}{note}.")
         elif d.state == FAILED:
             lines.append(f"{what} n'a pas pu partir ({inert(d.result, 200) or 'une erreur'}).")

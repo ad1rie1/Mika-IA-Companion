@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
 from mika.kernel.facts import FactFamily, FactKey
@@ -125,15 +126,35 @@ class EffectProposed(Payload):
 
 
 class EffectResolved(Payload):
+    """Un accord ou un refus. La note de qui décide est un texte gardé à part : l'oubli l'atteint par les
+    personnes de la proposition (``about``)."""
+
     proposal: int
     approved: bool
-    note: str = ""
+    note: Content | None = None
     by: str = ""
     #: recopiés de la proposition : l'exécuteur n'a pas à relire le journal
     capability: str = ""
     owner: str = ""
     args_json: str = "{}"
     context: str = ""
+    #: les personnes de la proposition (``EffectProposed.about``), que la note peut citer
+    about: tuple[str, ...] = ()
+    #: avant la version 2, la note était gardée en clair (journal ancien)
+    legacy_note: str = ""
+
+    def said(self) -> str:
+        """La note relue au journal : son texte, « (oublié) » une fois oubliée, en clair pour un journal ancien."""
+        if self.note is None:
+            return self.legacy_note
+        return self.note.text if self.note.text is not None else "(oublié)"
+
+
+def _resolved_v1(raw: dict[str, Any]) -> dict[str, Any]:
+    """v1 → v2 : la note passe en clair dans le champ d'héritage ; rien d'autre ne change."""
+    raw = dict(raw)
+    raw["legacy_note"] = str(raw.pop("note", "") or "")
+    return raw
 
 
 class EffectExecuted(Payload):
@@ -166,7 +187,8 @@ EPISODE_ENDED = event_type("episode.ended", OWNER, EpisodeEnded, public=True)
 PROCESS_FAILED = event_type("runtime.process_failed", OWNER, ProcessFailed, public=True)
 EFFECT_PROPOSED = event_type("effect.proposed", OWNER, EffectProposed, public=True, content=("summary",),
                              subjects=("about",))
-EFFECT_RESOLVED = event_type("effect.resolved", OWNER, EffectResolved, public=True)
+EFFECT_RESOLVED = event_type("effect.resolved", OWNER, EffectResolved, version=2, public=True,
+                             upcasters={1: _resolved_v1}, content=("note",), subjects=("about",))
 EFFECT_EXECUTED = event_type("effect.executed", OWNER, EffectExecuted, public=True)
 
 OPERATED = event_type("runtime.operated", OWNER, Operated, public=True)
