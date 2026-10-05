@@ -165,6 +165,56 @@ fun AvatarBackdrop(
     }
 }
 
+/**
+ * La même scène que [AvatarBackdrop] — la lumière de l'humeur, la nuit, les « z » — autour d'un autre contenu :
+ * Mika en 3D native ([fr.qwartz.mika.avatar3d.Avatar3D]), qui porte elle-même son souffle et ses gestes. Le cadre
+ * est celui des portraits (3:4, la tête juste sous la barre), le bas du corps fondu dans le fond, une ombre bleue
+ * sur elle la nuit.
+ */
+@Composable
+fun AvatarStage(
+    aura: Aura,
+    asleep: Boolean,
+    modifier: Modifier = Modifier,
+    faceX: Float = 0.5f,
+    faceY: Float = 0.25f,
+    content: @Composable () -> Unit,
+) {
+    val motion = !rememberReducedMotion()
+    val scheme = MaterialTheme.colorScheme
+    val dark = scheme.surface.luminance() < 0.5f
+    val tint by animateColorAsState(auraColor(aura, dark, scheme.primaryContainer), tween(if (motion) 1_200 else 0), label = "aura")
+    val night by animateFloatAsState(if (asleep) 1f else 0f, tween(if (motion) 1_800 else 0), label = "night")
+    val density = LocalDensity.current
+    val statusTop = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
+
+    BoxWithConstraints(modifier.fillMaxSize().background(scheme.surface).clearAndSetSemantics { }) {
+        val ratio = 4f / 3f
+        val width = min(min(maxWidth, MAX_PORTRAIT_WIDTH), maxHeight * 0.95f / ratio)
+        val height = width * ratio
+        val left = (maxWidth - width) / 2
+        val top = statusTop + TOP_BAR_HEIGHT - height * HEADROOM
+        val face = with(density) { Offset((left + width * faceX).toPx(), (top + height * faceY).toPx()) }
+        Aura(tint, face, with(density) { width.toPx() }, night, dark, motion)
+        Box(
+            Modifier
+                .offset(left, top)
+                .size(width, height)
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawContent()
+                    if (night > 0f) drawRect(Color(0xFF141B3D).copy(alpha = 0.32f * night), blendMode = BlendMode.SrcAtop)
+                    drawRect(Brush.verticalGradient(FADE_FROM to Color.Black, 0.97f to Color.Transparent), blendMode = BlendMode.DstIn)
+                },
+        ) {
+            content()
+        }
+        if (asleep && motion) {
+            Box(Modifier.offset(left, top).size(width, height)) { SleepZ(faceX, faceY, dark) }
+        }
+    }
+}
+
 /** Le fond : sa surface, une lumière ronde derrière son visage, et la nuit quand elle dort. */
 @Composable
 private fun Aura(tint: Color, face: Offset, portraitWidth: Float, night: Float, dark: Boolean, motion: Boolean) {

@@ -36,17 +36,15 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
 - **« Ce qu'elle fait »** : humeur, corps (sommeil, énergie, où elle est, moment de la journée), estime de soi,
   ce à quoi elle repense, le rêve de la nuit, son dernier journal, qui elle est devenue, ses besoins, et ses
   projets en cours si tu es propriétaire. Une carte sans données n'apparaît pas.
-- **Mika en fond** : derrière la conversation, son portrait du moment, dans une lumière qui suit son humeur. Il
-  change avec ce qu'elle ressent (une pose et un visage par émotion), respire, cligne des yeux, porte la main au
-  menton pendant « Mika écrit… », fait coucou quand on la retrouve, bâille quand elle est fatiguée et s'endort la
-  nuit (lumière bleue, étoiles en thème sombre). Son visage, découpé du même portrait, remplace le « M » de la barre
-  du haut. Désactivable (Paramètres › Apparence) ; immobile quand Android supprime les animations. Voir
-  [Mika en fond](#mika-en-fond-les-portraits).
+- **Mika en fond** : derrière la conversation, Mika en 3D native, dans une lumière qui suit son humeur. Elle vit
+  (souffle, gestes, regard, clignements, cheveux), fait coucou quand on la retrouve et s'endort la nuit (lumière
+  bleue, étoiles en thème sombre). Désactivable (Paramètres › Apparence). Voir
+  [Mika en fond](#mika-en-fond-3d-native).
 - **Paramètres** : compte et déconnexion, connexion en arrière-plan, démarrage avec le téléphone, batterie,
   notifications, thème (système / clair / sombre, couleurs dynamiques), « Effacer les messages de ce téléphone ».
 
-Hors périmètre : la voix (ni messages vocaux, ni lecture à voix haute) et l'avatar 3D animé (ce sont le client web
-et le client Unity) — l'app montre des portraits pré-rendus de ce même avatar.
+Hors périmètre : la voix (ni messages vocaux, ni lecture à voix haute) et le monde 3D (la chambre, les déplacements :
+c'est le client Unity).
 
 ## Construire
 
@@ -67,34 +65,35 @@ version minifiée, signée avec la clé de débogage (rien n'est publié sur un 
 > La machine est partagée : une construction complète prend ~2 Gio de mémoire. Lance-la seule, sans démon
 > (`--no-daemon`), et de préférence à travers `~/recup-audit-v2-2026-10-01/outils/borne.sh`.
 
-## Mika en fond (les portraits)
+## Mika en fond (3D native)
 
-L'app n'a pas de moteur 3D : elle montre des **portraits pré-rendus** du VRM, un par émotion (les 29) plus
-« coucou », « fatiguée » et « endormie », chacun avec ses yeux fermés à poser le temps d'un clignement. Ils sont
-rendus dans Blender par `frontend/Web/assets-src/blender/portraits.py`, qui reprend à l'identique le visage du
-client web (`EmotionController`, `faceRig`, `FacePhysiology`, `HeadEmotionOverlay`) et pose le corps sur une image
-choisie des mouvements de l'atelier (`frontend/Unity/ArtSource/atelier/motions`). Décision : ADR 0065.
+Derrière la conversation, Mika est rendue **en 3D native avec Filament** (le moteur 3D de Google), dans la lumière
+de son humeur. Elle respire et bouge, joue les mouvements de l'atelier, fait des gestes quand elle répond, cligne des
+yeux, te regarde, pose son regard sur toi quand tu écris et regarde ailleurs quand elle compose sa réponse. Ses
+cheveux et ses vêtements suivent ses mouvements, et elle bâille quand elle est fatiguée, puis s'endort la nuit.
+Le comportement est celui du client web, porté en Kotlin pur et testé sur la JVM (`avatar3d/`). Décision : ADR 0067.
 
-Le modèle est sous licence de l'acheteur : **les portraits ne sont pas versionnés**. Ils s'écrivent dans
-`app/src/main/assets/avatar/` (ignoré par git), environ 4 Mo pour 32 portraits en 1080×1440 :
+- **Le modèle** n'est pas versionné : il est sous licence de l'acheteur. On le prépare pour le téléphone depuis le
+  VRM du client web, sans perte de qualité : textures en pleine résolution, morphoses inutilisées retirées (Filament
+  en accepte 256 au plus), maillage du visage découpé par matériau pour un chargement rapide. Il fait ~30 Mo :
+
+  ```bash
+  python3 frontend/Android/tools/vrm_mobile.py   # → app/src/main/assets/avatar3d/mika.glb (ignoré par git)
+  ```
+
+- **Les animations** sont les mouvements de l'atelier (`frontend/Unity/ArtSource/atelier/motions`, ceux qu'Unity
+  importe) et le manifeste du client web (`frontend/Web/public/animations/manifest.json`). Ils sont copiés dans
+  l'APK à chaque construction : il n'y a qu'une seule source.
+- **Repli.** Sans le modèle préparé, l'app montre les portraits pré-rendus de l'ADR 0065
+  (`frontend/Web/assets-src/blender/portraits.py`, ignorés par git eux aussi). Sans portraits non plus, pas d'avatar,
+  et l'interrupteur « Mika en fond » (Paramètres › Apparence) n'apparaît pas.
+- **Batterie.** Elle n'est dessinée que quand l'écran est visible, à 60 images/s au plus, même sur un écran à 120 Hz.
+
+En version de débogage, **le studio 3D** montre Mika sans serveur ni compte. On y règle chaque émotion « dite »
+(geste permis) ou « en dérive » (posture seulement), le sommeil et la fatigue :
 
 ```bash
-# la scène de l'atelier (non versionnée, voir frontend/Web/assets-src/blender/atelier_lib.py), ~1 min 30
-blender -b frontend/Unity/ArtSource/atelier/mika_rig.blend --python frontend/Web/assets-src/blender/portraits.py
-# un seul portrait, ou une planche d'un mouvement pour choisir une pose
-blender -b … --python …/portraits.py -- --only sad
-blender -b … --python …/portraits.py -- --sheet idle_sad
-```
-
-Une app construite sans eux n'affiche pas d'avatar, et l'interrupteur des paramètres n'apparaît pas. Le choix du
-portrait est une fonction pure (`data/avatar/AvatarDirector.kt`, testée) : endormie → « endormie » ; retrouvée après
-20 min → « coucou » ; elle écrit → la pose de réflexion ; sinon son émotion si elle est assez marquée (intensité ≥
-0,25 ; une humeur légère cède à la fatigue sous 0,3 d'énergie), le visage au repos sinon.
-
-En version de débogage, **le studio** montre la conversation sur chaque portrait, sans serveur ni compte :
-
-```bash
-adb shell am start -n fr.qwartz.mika.debug/fr.qwartz.mika.studio.AvatarStudioActivity --es portrait sad --ez dark true
+adb shell am start -n fr.qwartz.mika.debug/fr.qwartz.mika.studio.Avatar3DStudioActivity [--ez dark true]
 ```
 
 ## Installer
@@ -180,7 +179,8 @@ tests instrumentés (`app/src/androidTest`) éprouvent Room en mémoire (`ChatSt
 | `data/chat` | `ChatSync` (fusion du fil, portage du client web), `ChatEngine`, `ChatRepository` |
 | `data/mind` | l'état de Mika, ses libellés, la ligne d'état |
 | `data/approvals` | les cartes d'accord : leurs règles (`Approvals`, testées) et la liste en cours |
-| `data/avatar` | ses portraits : le manifeste, le choix du portrait, le rythme des clignements |
+| `avatar3d` | Mika en 3D native : VRM, squelette, mouvements, machine à états, couches du corps, visage, ressorts, rendu Filament |
+| `data/avatar` | ses portraits (repli) : le manifeste, le choix du portrait, le rythme des clignements |
 | `data/auth` | jeton chiffré (Keystore), connexion, erreurs en français |
 | `data/files` | pièces jointes (préparation, réduction), brouillon, partages reçus, fichiers de Mika |
 | `service` | connexion voulue, service au premier plan, notifications, réponse depuis une notification, démarrage |

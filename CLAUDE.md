@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | `services/mika-images/` | Local image server (stable-diffusion.cpp `sd-server`, Vulkan, Qwen-Image 2.1), on demand via systemd user units; weights and binary live in `/mnt/games/mika-images`. Mika plugs it as an image provider (ADR 0061) |
 | `frontend/Web/` | Web client (Vite + Three.js + VRM): `src/`, `public/`, `assets-src/` (Blender sources and scripts, shared with Unity), `studio.html` |
 | `frontend/Unity/` | Unity client: `Mika/` (the Unity project), `ArtSource/` (mocap, atelier), `tools/` (`gen_world_protocol.py`) |
-| `frontend/Android/` | Android chat client (Kotlin + Compose, package `fr.qwartz.mika`): login by password → token, background connection + notifications, files both ways, Mika in the background as pre-rendered portraits (`frontend/Web/assets-src/blender/portraits.py`, not versioned, ADR 0065). Start with its `README.md`; server side in `backendv2/docs/adr/0062` and `backendv2/docs/protocole-chat.md` |
+| `frontend/Android/` | Android chat client (Kotlin + Compose, package `fr.qwartz.mika`): login by password → token, background connection + notifications, files both ways, Mika in the background in native 3D (Filament; VRM prepared by `frontend/Android/tools/vrm_mobile.py`, not versioned; atelier motions + web manifest bundled at build; web behaviour ported to Kotlin in `avatar3d/`, ADR 0067), pre-rendered portraits as fallback (ADR 0065). Start with its `README.md`; server side in `backendv2/docs/adr/0062` and `backendv2/docs/protocole-chat.md` |
 | `old/backend/` | Archived v1 Django engine, the subject of most of this file |
 | `docs/`, `scripts/`, `data/` | Audits and notes, tooling, runtime data |
 

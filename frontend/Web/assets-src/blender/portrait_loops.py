@@ -33,27 +33,26 @@ OUT = al.REPO / "frontend/Android/avatar-lab/out"
 SIZE = (720, 960)
 QUALITY = 80
 
-# Les clips. kind : loop (un idle entier, en boucle), segment (des images d'un mouvement, de start à end), hold (la
-# pose `frame` d'un geste animée par l'idle `idle`), settle (de la pose `frame` vers le repos, par interpolation).
-# step : une image sur `step` du mouvement (30 i/s) ; fps : la cadence de lecture ; ramp : in, out, inout.
+# Les clips. kind : breathe (une pose — l'image `frame` d'un mouvement — animée par une respiration et un balancement
+# calmes, en boucle exacte de `count` images), loop (un idle de l'atelier, amorti par `damp`), segment (les images d'un
+# mouvement, de start à end), settle (de la pose `frame` vers le repos, par interpolation). Tout à 30 images/s : à 10 ou
+# 15, même fondues, les images se voyaient. ramp : in, out, inout (le visage arrive ou repart avec le geste).
+FPS = 30
 CLIPS = {
-    "neutral.loop": dict(kind="loop", motion="idle_breathing", step=3, fps=10, face="neutral", blinks=[14, 47, 81]),
-    "happy.loop": dict(kind="loop", motion="idle_happy", step=3, fps=10, face="happy", blinks=[11]),
-    "sad.loop": dict(kind="loop", motion="idle_sad", step=3, fps=10, face="sad", follow=0.5, blinks=[19]),
-    "thinking.enter": dict(kind="segment", motion="gesture_think", start=0, end=81, step=2, fps=15, face="thinking", ramp="in"),
-    "thinking.loop": dict(kind="hold", motion="gesture_think", frame=81, idle="idle_breathing", step=3, fps=10,
-                          face="thinking", blinks=[22, 70]),
-    "thinking.exit": dict(kind="segment", motion="gesture_think", start=81, end=127, step=2, fps=15, face="thinking", ramp="out"),
-    "angry.enter": dict(kind="segment", motion="gesture_angry", start=0, end=90, step=2, fps=15, face="angry", ramp="in"),
-    "angry.loop": dict(kind="hold", motion="gesture_angry", frame=90, idle="idle_breathing", step=3, fps=10,
-                       face="angry", blinks=[30, 77]),
-    "angry.exit": dict(kind="settle", motion="gesture_angry", frame=90, count=14, fps=15, face="angry", ramp="out"),
-    "surprised.once": dict(kind="segment", motion="gesture_surprised", start=0, end=120, step=2, fps=15, face="surprised",
-                           ramp="inout"),
-    "wave.once": dict(kind="segment", motion="gesture_wave", start=0, end=142, step=2, fps=15, face="happy", ramp="inout",
+    "neutral.loop": dict(kind="breathe", motion="idle_breathing", frame=0, count=120, face="neutral", blinks=[18, 86]),
+    "happy.loop": dict(kind="loop", motion="idle_happy", damp=0.55, face="happy", blinks=[40]),
+    "sad.loop": dict(kind="loop", motion="idle_sad", damp=0.55, face="sad", follow=0.5, blinks=[30]),
+    "thinking.enter": dict(kind="segment", motion="gesture_think", start=0, end=81, face="thinking", ramp="in"),
+    "thinking.loop": dict(kind="breathe", motion="gesture_think", frame=81, count=120, face="thinking", blinks=[50]),
+    "thinking.exit": dict(kind="segment", motion="gesture_think", start=81, end=127, face="thinking", ramp="out"),
+    "angry.enter": dict(kind="segment", motion="gesture_angry", start=0, end=90, face="angry", ramp="in"),
+    "angry.loop": dict(kind="breathe", motion="gesture_angry", frame=90, count=120, face="angry", blinks=[64]),
+    "angry.exit": dict(kind="settle", motion="gesture_angry", frame=90, count=24, face="angry", ramp="out"),
+    "surprised.once": dict(kind="segment", motion="gesture_surprised", start=0, end=120, face="surprised", ramp="inout"),
+    "wave.once": dict(kind="segment", motion="gesture_wave", start=0, end=142, face="happy", ramp="inout",
                       intensity=0.85),
-    "sleep.loop": dict(kind="loop", motion="idle_breathing", step=3, fps=10, face="neutral", intensity=0.0, tired=0.6,
-                       blink=1.0, follow=0.0, head=(0.12, 0.16, 0.0)),
+    "sleep.loop": dict(kind="breathe", motion="idle_breathing", frame=0, count=150, amp=1.6, face="neutral", intensity=0.0,
+                       tired=0.6, blink=1.0, follow=0.0, head=(0.12, 0.16, 0.0)),
 }
 
 # Les états, ce que le lecteur demande : une boucle, et pour un geste son entrée et sa sortie ; un geste ponctuel
@@ -68,6 +67,18 @@ STATES = {
     "wave": {"once": "wave.once"},
     "sleep": {"loop": "sleep.loop"},
 }
+
+# Le repos calme, en degrés (et mètres) : le souffle lève la poitrine, le corps se balance à peine d'un appui sur
+# l'autre, la tête penche un peu et revient. Une seule période par boucle : elle se referme exactement.
+BREATH_SPINE = 0.5
+BREATH_CHEST = 1.1
+BREATH_LIFT = 0.0015
+SWAY_HIPS = 0.45
+SWAY_SHIFT = 0.004
+HEAD_TILT = 1.0
+HEAD_NOD = 0.5
+# Les clignements : fermeture sur deux images, fermés une, réouverture sur deux.
+BLINK_SHAPE = (0.45, 1.0, 1.0, 0.6, 0.2)
 
 DRIVERS = ("head", "neck", "chest", "spine", "hips")
 

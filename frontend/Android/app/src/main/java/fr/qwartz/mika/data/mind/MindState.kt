@@ -19,6 +19,13 @@ data class Mood(
     val emotion: String = "neutral",
     val intensity: Double = 0.0,
     val blend: List<BlendPart> = emptyList(),
+    /**
+     * L'émotion d'une parole (vrai) ou une dérive de l'humeur entre deux tours (faux) : son avatar fait un geste
+     * pour ce qu'elle vient de dire, jamais pour une humeur qui glisse (le client web pose la même différence).
+     */
+    val reply: Boolean = false,
+    /** Quand cette humeur est arrivée (horloge murale, ms) : deux paroles à la même émotion sont deux gestes. */
+    val atMs: Long = 0,
 )
 
 /**
@@ -109,8 +116,15 @@ object InnerStateReducer {
     }
 
     /** L'humeur d'un `emotion_update` ou d'une parole : une émotion vide ne dit rien, l'humeur reste. */
-    fun applyMood(prev: MindState, emotion: String, intensity: Double, blend: List<BlendPart>, nowMs: Long): MindState {
+    fun applyMood(
+        prev: MindState,
+        emotion: String,
+        intensity: Double,
+        blend: List<BlendPart>,
+        nowMs: Long,
+        reply: Boolean = false,
+    ): MindState {
         if (emotion.isBlank()) return prev
-        return prev.copy(mood = Mood(emotion, intensity.coerceIn(0.0, 1.0), blend), updatedAtMs = nowMs)
+        return prev.copy(mood = Mood(emotion, intensity.coerceIn(0.0, 1.0), blend, reply, nowMs), updatedAtMs = nowMs)
     }
 }

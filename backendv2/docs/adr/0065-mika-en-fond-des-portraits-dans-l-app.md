@@ -1,5 +1,7 @@
 # 0065 — Mika en fond : des portraits pré-rendus dans l'application mobile
 
+> Remplacée par l'ADR 0067 (Mika en 3D native) : les portraits ne restent qu'un repli.
+
 **Contexte.** L'application Android (ADR 0062) est une messagerie : l'avatar 3D y était hors périmètre, laissé au
 client web et au client Unity. Elle reçoit pourtant déjà tout ce qu'il faut pour montrer Mika vivante : l'émotion
 de chaque parole (`speech`), la dérive de son humeur entre deux tours (`emotion_update`, envoyée seulement à un écran

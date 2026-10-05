@@ -7,5 +7,10 @@
             android:exported="true"
             android:label="Studio de Mika"
             android:theme="@style/Theme.Mika" />
+        <activity
+            android:name=".studio.Avatar3DStudioActivity"
+            android:exported="true"
+            android:label="Studio 3D de Mika"
+            android:theme="@style/Theme.Mika" />
     </application>
 </manifest>

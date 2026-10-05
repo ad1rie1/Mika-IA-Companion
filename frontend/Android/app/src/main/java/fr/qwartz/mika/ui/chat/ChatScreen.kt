@@ -26,6 +26,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,7 +53,10 @@ import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.auth.Session
 import fr.qwartz.mika.data.chat.MessageAttachment
 import fr.qwartz.mika.data.net.LinkState
+import fr.qwartz.mika.avatar3d.LiveAvatar3D
+import fr.qwartz.mika.data.avatar.AvatarDirector
 import fr.qwartz.mika.ui.avatar.AvatarBackdrop
+import fr.qwartz.mika.ui.avatar.AvatarStage
 import fr.qwartz.mika.ui.avatar.auraColor
 import fr.qwartz.mika.ui.avatar.rememberPortrait
 import fr.qwartz.mika.ui.components.rememberFileActions
@@ -161,8 +165,25 @@ fun ChatScreen(
     }
 
     val scene = avatar
+    val state3d by vm.avatar3d.collectAsStateWithLifecycle()
+    var keystrokes by remember { mutableIntStateOf(0) }
+    LaunchedEffect(vm.input) { if (vm.input.isNotEmpty()) keystrokes++ }
     Box(Modifier.fillMaxSize()) {
-        if (scene != null) AvatarBackdrop(scene, portrait)
+        if (scene != null) {
+            if (vm.has3d) {
+                // Mika en 3D native ; le coucou de retrouvailles devient son vrai geste.
+                AvatarStage(scene.aura, scene.asleep) {
+                    LiveAvatar3D(
+                        state3d,
+                        wave = scene.portrait == AvatarDirector.WAVE,
+                        userTyping = keystrokes,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                }
+            } else {
+                AvatarBackdrop(scene, portrait)
+            }
+        }
         Scaffold(
             // Sur son portrait, l'écran laisse passer le fond ; la barre de saisie, elle, reste pleine.
             containerColor = if (scene != null) Color.Transparent else MaterialTheme.colorScheme.background,

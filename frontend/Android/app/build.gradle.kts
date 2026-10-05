@@ -17,6 +17,9 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Filament (le rendu natif de Mika) embarque ses bibliothèques par architecture : les téléphones
+        // (arm64) et l'émulateur (x86_64) suffisent, les deux autres doubleraient la taille pour rien.
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     buildTypes {
@@ -61,6 +64,21 @@ room {
     schemaDirectory("$projectDir/schemas")
 }
 
+// Les mouvements de l'atelier (os seuls, versionnés : la source commune avec Unity) et le manifeste des animations
+// du client web, copiés dans les assets de l'app à chaque construction — jamais une seconde copie à tenir à jour.
+val avatarMotions = layout.buildDirectory.dir("generated/avatarMotions")
+val copyAvatarMotions by tasks.registering(Copy::class) {
+    into(avatarMotions.map { it.dir("avatar3d") })
+    from(rootProject.file("../Unity/ArtSource/atelier/motions")) {
+        include("*.json.gz")
+        into("motions")
+    }
+    // Le manifeste des animations du client web : poids, durées, humeur des clips — une seule source.
+    from(rootProject.file("../Web/public/animations/manifest.json"))
+}
+android.sourceSets.getByName("main").assets.srcDir(avatarMotions.get().asFile)
+tasks.named("preBuild") { dependsOn(copyAvatarMotions) }
+
 dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
@@ -76,6 +94,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
+    implementation(libs.filament.android)
+    implementation(libs.filament.gltfio)
+    implementation(libs.filament.utils)
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)

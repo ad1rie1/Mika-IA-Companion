@@ -38,7 +38,7 @@ class MindStateRepository(private val store: ThreadStore, private val clock: Clo
     /** Une parole porte aussi son émotion ; une pensée à voix haute, celle d'un instant, non. */
     suspend fun onSpeech(f: ServerFrame.Speech) {
         if (f.isInner || f.text.isEmpty()) return
-        save(InnerStateReducer.applyMood(_state.value ?: MindState(), f.emotion, f.emotionIntensity, f.emotionBlend, clock.wallMs()))
+        save(InnerStateReducer.applyMood(_state.value ?: MindState(), f.emotion, f.emotionIntensity, f.emotionBlend, clock.wallMs(), reply = true))
     }
 
     fun reset() {

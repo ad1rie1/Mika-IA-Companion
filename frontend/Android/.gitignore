@@ -21,3 +21,5 @@ keystore.properties
 app/src/main/assets/avatar/
 # Les clips du labo de l'avatar (frontend/Web/assets-src/blender/portrait_loops.py), même licence.
 avatar-lab/out/
+# Le VRM de Mika préparé pour l'app (frontend/Android/tools/vrm_mobile.py), même licence.
+app/src/main/assets/avatar3d/

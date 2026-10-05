@@ -8,6 +8,8 @@ import fr.qwartz.mika.data.net.Journal
 import fr.qwartz.mika.data.net.Rumination
 import fr.qwartz.mika.data.net.SelfNarrative
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -63,8 +65,15 @@ class InnerStateReducerTest {
 
     @Test fun `l'humeur suit les émotions, une émotion vide ne dit rien`() {
         val moody = InnerStateReducer.applyMood(known, "curious", 0.5, listOf(BlendPart("curious", 1.0)), 3)
-        assertEquals(Mood("curious", 0.5, listOf(BlendPart("curious", 1.0))), moody.mood)
+        assertEquals(Mood("curious", 0.5, listOf(BlendPart("curious", 1.0)), reply = false, atMs = 3), moody.mood)
         assertEquals(moody, InnerStateReducer.applyMood(moody, "", 0.9, emptyList(), 4))
         assertEquals(1.0, InnerStateReducer.applyMood(known, "happy", 3.0, emptyList(), 5).mood!!.intensity, 0.0)
+    }
+
+    @Test fun `l'humeur dit si elle vient d'une parole, et quand`() {
+        val said = InnerStateReducer.applyMood(known, "happy", 0.8, emptyList(), 7, reply = true).mood!!
+        assertTrue(said.reply)
+        assertEquals(7L, said.atMs)
+        assertFalse(InnerStateReducer.applyMood(known, "happy", 0.8, emptyList(), 8).mood!!.reply)
     }
 }

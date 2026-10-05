@@ -14,6 +14,7 @@ import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.approvals.Approvals
 import fr.qwartz.mika.data.approvals.ApprovalView
 import fr.qwartz.mika.data.auth.Session
+import fr.qwartz.mika.avatar3d.Avatar3DState
 import fr.qwartz.mika.data.avatar.AvatarDirector
 import fr.qwartz.mika.data.chat.ChatRepository
 import fr.qwartz.mika.data.chat.MessageAttachment
@@ -123,8 +124,17 @@ class ChatViewModel(private val graph: AppGraph, private val saved: SavedStateHa
         graph.chatEngine.typing,
         greeting,
     ) { on, ids, mind, typing, greet ->
-        if (!on || ids == null) null else AvatarDirector.scene(mind, typing, greet, ids)
+        // La 3D native n'a pas besoin des portraits ; la scène porte alors seulement la lumière et le sommeil.
+        if (!on || (ids == null && !has3d)) null else AvatarDirector.scene(mind, typing, greet, ids.orEmpty())
     }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /** L'app a-t-elle Mika en 3D native (le VRM préparé dans ses assets) ? */
+    val has3d: Boolean = Avatar3DState.available(graph.context)
+
+    /** Ce que l'avatar 3D doit savoir d'elle. */
+    val avatar3d: StateFlow<Avatar3DState> = combine(graph.mind.state, graph.chatEngine.typing) { mind, typing ->
+        Avatar3DState.of(mind, typing)
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Avatar3DState())
 
     /** Une opératrice voit le lien « ouvrir la console » sous une réponse ratée. */
     val operator: StateFlow<Boolean> = graph.auth.session
