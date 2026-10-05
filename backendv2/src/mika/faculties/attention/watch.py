@@ -31,6 +31,7 @@ from mika.faculties.attention.faculty import (
     ATTENTION,
     RELATIONAL,
     AttentionState,
+    Expectation,
     Heard,
     Pending,
     awaiting,
@@ -136,6 +137,16 @@ def met(state: AttentionState, frame: Frame) -> list[str]:
     out += [f"late:{person}" for person, late in state.late.items()
             if late.since < _last_from(frame, person) <= late.until]
     return out
+
+
+def absence_of(x: Expectation, frame: Frame) -> float | None:
+    """Ce qu'a duré l'absence de quelqu'un qui revient, en multiples du rythme de leur relation : de son dernier
+    message quand l'attente est née à celui qui la ramène — constaté au moment où elle revient. ``None`` quand on
+    ne le sait pas (elle n'avait jamais écrit)."""
+    back = _last_from(frame, x.person)
+    if not x.last_in or x.rhythm_days <= 0 or back <= x.last_in:
+        return None
+    return round((back - x.last_in) / (max(0.5, x.rhythm_days) * DAY), 3)
 
 
 def here(frame: Frame) -> dict[str, int]:
@@ -251,8 +262,9 @@ class Watch:
         for key, x in sorted(state.expectations.items()):
             mark = f"attente:{x.kind}:{x.person}:{x.since}" + (f":{x.ref}" if x.ref is not None else "")
             if key in met_keys:
+                absence = absence_of(x, frame) if x.kind == c.RETURN else None
                 drafts.append(c.EXPECTATION_MET.draft(kind=x.kind, person=x.person, since=x.since, ref=x.ref,
-                                                      dedupe_key=mark))
+                                                      absence=absence, dedupe_key=mark))
             elif x.deadline is not None and x.deadline <= frame.now:
                 drafts.append(c.EXPECTATION_MISSED.draft(kind=x.kind, person=x.person, since=x.since, ref=x.ref,
                                                          dedupe_key=mark))

@@ -12,8 +12,10 @@
 - **Attentes** : écrire d'elle-même à quelqu'un fait attendre sa réponse
   (vingt minutes sur l'application, une heure par message — plus, quand elle
   a appris que cette personne met plus longtemps : ``others``) ; quelqu'un
-  qui lui manque fait attendre son retour ; une promesse datée fait attendre
-  d'elle-même qu'elle la tienne.
+  qui lui manque fait attendre son retour, qui la réjouit à la mesure de ce
+  qu'a duré l'absence au regard de leur rythme (une simple envie de discuter
+  n'attend que la réponse) ; une promesse datée fait attendre d'elle-même
+  qu'elle la tienne.
 - **Inquiétude** : quelqu'un qui compte et qui n'avait pas l'air comme
   d'habitude (``others``) laisse une pensée — la même règle qu'un échange qui
   marque : une par personne à la fois.
@@ -47,6 +49,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
 
@@ -381,6 +384,10 @@ class Expectation:
     deadline: int | None
     ref: int | None = None  # la promesse (``PROMISE``)
     channel: str = ""  # le canal de l'initiative (``REPLY``) : une messagerie se lit quand on y pense
+    #: un retour (``RETURN``) : le dernier message de la personne et le rythme de leur relation quand l'attente est
+    #: née — c'est à eux que se mesure son absence quand elle revient (un long silence ne change pas ce rythme-là)
+    last_in: int = 0
+    rhythm_days: float = 0.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -444,8 +451,10 @@ class AttentionState:
 #: heures de la personne (le canal est retenu avec l'attente) ; un bel échange reste en tête.
 #: v6 : la dernière pensée de manque de chacun (un manque qui dure revient de plus en plus rarement, ADR 0058).
 #: v7 : un message qui clôt (« bonne nuit ») close la conversation dès sa lecture, même si elle se tait.
+#: v8 : une simple envie de discuter n'attend pas de retour, seulement une réponse ; une attente de retour retient le
+#: dernier message de la personne et le rythme de leur relation (la joie du retour se mesure à l'absence).
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    state_version=7)
+                    state_version=8)
 #: les manques dont on retient la dernière pensée (les plus récents)
 MISSING_KEPT = 64
 
@@ -488,6 +497,13 @@ def _expect(s: AttentionState, kind: str, person: str, since: int, deadline: int
             ref: int | None = None) -> AttentionState:
     return replace(s, expectations=s.expectations.set(expectation_key(kind, person, ref),
                                                       Expectation(kind, person, since, deadline, ref)))
+
+
+def _expect_return(s: AttentionState, person: str, since: int, cx: Any) -> AttentionState:
+    """Attendre le retour de quelqu'un, en retenant son dernier message et le rythme de leur relation d'alors."""
+    ct = cx.facts.get(social_c.CONTACT(person))
+    return replace(s, expectations=s.expectations.set(expectation_key(c.RETURN, person), Expectation(
+        c.RETURN, person, since, None, last_in=ct.last_in, rhythm_days=ct.usual_days or ct.rhythm_days)))
 
 
 def _relational(s: AttentionState, person: str, emotion: str, intensity: float, source: int, origin: str, at: int,
@@ -768,10 +784,12 @@ def _project_blocked(s: AttentionState, e, cx) -> AttentionState:
     return replace(s, pending=(*s.pending, pending))
 
 
-@ATTENTION.reducer(rt.EPISODE_STARTED, reads=[identity_c.PERSON])
+@ATTENTION.reducer(rt.EPISODE_STARTED, reads=[identity_c.PERSON, social_c.CONTACT])
 def _reaching_out(s: AttentionState, e, cx) -> AttentionState:
     """Prendre la parole d'elle-même : on retient pourquoi (une salutation
-    n'attend pas de réponse) ; relancer quelqu'un qui manque : on attend son retour."""
+    n'attend pas de réponse) ; relancer quelqu'un qui manque : on attend son retour.
+    Une simple envie de discuter (``CHAT``) n'attend que sa réponse : une amie
+    à qui l'on a parlé ce matin ne « revient » pas."""
     d = e.data
     if d.kind != Kind.INITIATIVE or not d.target:
         return s
@@ -779,12 +797,12 @@ def _reaching_out(s: AttentionState, e, cx) -> AttentionState:
     if len(openings) > 16:  # des épisodes qui n'ont jamais parlé (abstention, supplantés)
         openings = FrozenDict(sorted(openings.items())[-16:])  # les identifiants d'épisode sont chronologiques
     s = replace(s, openings=openings)
-    if not {social_c.RECONTACT, social_c.CHAT, social_c.REKINDLE} & set(d.reason.split(",")):
+    if not {social_c.RECONTACT, social_c.REKINDLE} & set(d.reason.split(",")):
         return s
-    return _expect(s, c.RETURN, cx.facts.get(identity_c.PERSON(d.target)), e.at, None)
+    return _expect_return(s, cx.facts.get(identity_c.PERSON(d.target)), e.at, cx)
 
 
-@ATTENTION.reducer(c.THOUGHT_BORN)
+@ATTENTION.reducer(c.THOUGHT_BORN, reads=[social_c.CONTACT])
 def _born(s: AttentionState, e, cx) -> AttentionState:
     d = e.data
     p = params(cx.params)
@@ -793,7 +811,7 @@ def _born(s: AttentionState, e, cx) -> AttentionState:
     s = replace(s, thoughts=_alive(replace(s, thoughts=s.thoughts.set(e.seq, thought)), e.at, p),
                 pending=tuple(q for q in s.pending if q.source != d.source or q.origin != d.origin))
     if d.origin == c.MISSING and d.about:
-        s = _expect(s, c.RETURN, d.about[0], e.at, None)
+        s = _expect_return(s, d.about[0], e.at, cx)
         missing = s.missing.set(d.about[0], e.at)
         if len(missing) > MISSING_KEPT:
             missing = FrozenDict(sorted(missing.items(), key=lambda kv: (kv[1], kv[0]))[-MISSING_KEPT:])
@@ -987,12 +1005,35 @@ def _dwell_felt(e, cx) -> Appraisal | None:
                      relational=e.data.origin == c.EXCHANGE)
 
 
-@ATTENTION.appraisal(c.EXPECTATION_MET)
+#: la joie d'un retour, selon ce qu'a duré l'absence en multiples du rythme de la relation : à peine quelque chose à
+#: son rythme, un peu plus à chaque doublement (≈ 0,2 au double), une vraie joie après des mois
+RETURN_JOY_FLOOR, RETURN_JOY_PER_DOUBLING, RETURN_JOY_CEILING = 0.1, 0.12, 0.5
+#: un retour dont l'absence n'a pas été mesurée (un journal d'avant) : la joie d'alors
+RETURN_JOY_UNMEASURED = 0.4
+#: la part de cette joie tournée vers la personne revenue, selon ce qu'elle est pour elle
+RETURN_TOWARD = {social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, social_c.FRIEND: 0.8, social_c.CLOSE: 1.0}
+
+
+def return_joy(absence: float) -> float:
+    """La joie d'un retour, à la mesure de l'absence : une amie revenue au double de son rythme réjouit un peu, une
+    amie revenue après des mois réjouit vraiment."""
+    doublings = math.log2(absence) if absence > 1.0 else 0.0
+    return round(min(RETURN_JOY_CEILING, RETURN_JOY_FLOOR + RETURN_JOY_PER_DOUBLING * doublings), 3)
+
+
+@ATTENTION.appraisal(c.EXPECTATION_MET, reads=[social_c.CLOSENESS])
 def _met_felt(e, cx) -> list[Appraisal]:
-    if e.data.kind == c.RETURN:
-        # enfin : de la joie, pour elle et envers la personne revenue
-        return [Appraisal(Emotion.HAPPY, 0.4, reason="retour"),
-                Appraisal(Emotion.HAPPY, 0.4, toward=e.data.person, reason="retour")]
+    d = e.data
+    if d.kind == c.RETURN:
+        # enfin : de la joie, pour elle et envers la personne revenue — à la mesure de son absence, et de ce
+        # qu'elle est pour elle
+        if d.absence is None:
+            return [Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, reason="retour"),
+                    Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, toward=d.person, reason="retour")]
+        joy = return_joy(d.absence)
+        toward = RETURN_TOWARD.get(cx.facts.get(social_c.CLOSENESS(d.person)), 0.0)
+        return [Appraisal(Emotion.HAPPY, joy, reason="retour"),
+                Appraisal(Emotion.HAPPY, round(joy * toward, 3), toward=d.person, reason="retour")]
     return [Appraisal(Emotion.RELIEVED, 0.25, reason="réponse")]
 
 

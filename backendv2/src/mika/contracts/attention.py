@@ -6,7 +6,8 @@
   ADR 0058), ou d'avoir été dure avec une amie ; elle s'estompe (demi-vie),
   revient par moments, et s'allège quand elle en parle ;
 - une **attente** naît quand elle écrit d'elle-même à quelqu'un (une
-  réponse), quand quelqu'un lui manque (un retour), ou quand elle promet
+  réponse), quand quelqu'un lui manque (un retour, qui la réjouit à la mesure
+  de ce qu'a duré l'absence au regard de leur rythme), ou quand elle promet
   quelque chose pour une date (sa parole : une attente envers elle-même) :
   elle se comble ou se dément, et chacun en tire ce qui le concerne
   (l'humeur, l'estime, la retenue). Une promesse qui passe son échéance sans
@@ -23,6 +24,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
@@ -104,6 +106,16 @@ class ExpectationMet(Payload):
     person: str
     since: int
     ref: int | None = None  # la promesse, pour ``PROMISE``
+    #: un retour (``RETURN``) : ce qu'a duré son absence, en multiples du rythme de leur relation (de son dernier
+    #: message d'avant à celui qui la ramène) — sa joie s'y mesure ; ``None`` : pas mesurée
+    absence: float | None = None
+
+
+def _met_v1(raw: dict[str, Any]) -> dict[str, Any]:
+    """v1 → v2 : l'absence n'était pas mesurée ; le retour se ressent comme alors."""
+    raw = dict(raw)
+    raw["absence"] = None
+    return raw
 
 
 class ExpectationMissed(Payload):
@@ -143,7 +155,8 @@ class Digested(Payload):
 THOUGHT_BORN = event_type("attention.thought_born", OWNER, ThoughtBorn, public=True, content=("text",),
                           subjects=("about",))
 DWELT = event_type("attention.dwelt", OWNER, Dwelt, public=True)
-EXPECTATION_MET = event_type("attention.expectation_met", OWNER, ExpectationMet, public=True, subjects=("person",))
+EXPECTATION_MET = event_type("attention.expectation_met", OWNER, ExpectationMet, version=2, public=True,
+                             upcasters={1: _met_v1}, subjects=("person",))
 EXPECTATION_MISSED = event_type("attention.expectation_missed", OWNER, ExpectationMissed, public=True,
                                 subjects=("person",))
 DIGESTED = event_type("attention.digested", OWNER, Digested, public=True)
