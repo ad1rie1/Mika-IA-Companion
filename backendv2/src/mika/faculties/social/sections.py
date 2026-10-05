@@ -28,7 +28,7 @@ from pydantic import BaseModel
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import social as c
-from mika.faculties.social.faculty import SOCIAL, Profile, SocialState
+from mika.faculties.social.faculty import SOCIAL, THEM, Profile, SocialState, contact_of, params
 from mika.faculties.social.profile import describe_level, lines_of, register
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
@@ -53,9 +53,21 @@ def refs_of(profile: Profile) -> list[str]:
     return [r for r in (profile.summary_ref, profile.tone_ref, profile.interests_ref, profile.sensitive_ref) if r]
 
 
+def _they_opened(s: SocialState, frame: Frame, person: str) -> bool:
+    """La conversation en cours, c'est la personne qui l'a ouverte (la dernière ouverture comptée est la sienne, le
+    jour où elle a commencé) : lui souffler que ça lui pèse, c'est l'accueillir d'un reproche au moment même où elle
+    fait le pas."""
+    gap = params(frame.env.params_of("social", frame.root)).conversation_gap_us
+    ct = contact_of(s, person, frame.get(identity_c.HANDLES(person)))
+    if ct is None or not ct.starts or frame.now - ct.last_activity >= gap:
+        return False  # pas de conversation en cours : ce qu'elle va écrire en ouvrira une
+    return ct.starts[-1] == (frame.local(ct.since).date().toordinal(), THEM)
+
+
 @SOCIAL.section("about_person", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["who"], before=["stance"],
                 trim_rank=65, title="CE QUE TU SAIS DE CETTE PERSONNE",
-                reads=[identity_c.PERSON, identity_c.IDENTITY, c.CONTACT, c.CLOSENESS])
+                reads=[identity_c.PERSON, identity_c.IDENTITY, identity_c.HANDLES, c.CONTACT, c.CLOSENESS,
+                       memory_c.HARD_TIMES])
 def _about(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     aud, ep = frame.audience, frame.episode
     if aud is None or ep is None or not ep.target or not aud.private_ok:
@@ -80,7 +92,8 @@ def _about(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
     if reading.days >= 3 and reading.measured:
         n = round(reading.rhythm_days)
         lines.append(f"Vous vous parlez à peu près {'tous les jours' if n <= 1 else f'tous les {n} jours'}.")
-    if reading.one_sided:
+    # ni pendant ses jours durs (on ne tient pas de comptes), ni quand la personne vient d'écrire la première
+    if reading.one_sided and not frame.get(memory_c.HARD_TIMES(person)) and not _they_opened(s, frame, person):
         lines.append("Ces derniers temps, c'est presque toujours toi qui écris la première ; ça te pèse un peu.")
     if len(lines) == 1 and level == c.STRANGER:
         return None
