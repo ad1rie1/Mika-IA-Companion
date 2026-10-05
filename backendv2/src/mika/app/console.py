@@ -227,6 +227,7 @@ EVENT_LABELS: dict[str, str] = {
     "social.one_sided": "C'est presque toujours elle qui écrit",
     "needs.reunited": "Une amie revenue après un moment creux",
     "memory.moment_followed": "Un moment de la vie de quelqu'un, repris",
+    "memory.situation_ended": "Une situation de la vie de quelqu'un, finie",
     "shares.shared": "Un fichier envoyé", "shares.expired": "Des fichiers envoyés retirés",
     "imaging.requested": "Un dessin demandé", "imaging.drawn": "Un dessin prêt",
     "imaging.failed": "Un dessin qui n'a pas pu se faire",

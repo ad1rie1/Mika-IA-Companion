@@ -757,18 +757,27 @@ def followed_lately(ev: c.LifeEvent, now: int) -> bool:
     return bool(ev.followed_at) and now - ev.followed_at < FOLLOWED_KEEP_US
 
 
+def ended_lately(ev: c.LifeEvent, now: int) -> bool:
+    """La personne vient de dire que cette situation est finie : elle reste sous ses yeux le temps de la
+    conversation, au passé — plus jamais « en ce moment »."""
+    return bool(ev.ended_at) and now - ev.ended_at < FOLLOWED_KEEP_US
+
+
 def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryParams,
              memo: dict[str, str], *, hard: bool = False) -> list[Moment]:
     """Ce qui se passe dans sa vie : à venir bientôt, tout juste passé et dont
     elles n'ont pas encore reparlé (en mots : pas seulement montré ; ce que la
     personne en a raconté le jour même compte), une situation qui dure — et ce
-    dont elles viennent de reparler, le temps de la conversation. Quand quelque
-    chose de grave la touche ces jours-ci, le banal (ni important, ni à fêter)
-    se tait."""
+    dont elles viennent de reparler, le temps de la conversation. Une situation
+    que la personne a dite finie ne revient que le temps de la conversation, au
+    passé. Quand quelque chose de grave la touche ces jours-ci, le banal (ni
+    important, ni à fêter) se tait."""
     now = frame.now
     shown: list[tuple[c.LifeEvent, Verdict]] = []
     for ev in frame.get(c.LIFE_EVENTS(person)):
-        if ev.ongoing:
+        if ev.ongoing and ev.ended_at:
+            keep = ended_lately(ev, now)  # finie : ni redemandée, ni « en ce moment »
+        elif ev.ongoing:
             current = ev.when <= now <= ev.when + round(p.situation_days * DAY)
             keep = current and (not ev.followed_at or followed_lately(ev, now)
                                 or now - ev.followed_at >= round(p.situation_reask_days * DAY))
@@ -956,8 +965,11 @@ def _life(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
 def _moment_line(m: Moment, frame: Frame, close: bool, hard: bool = False) -> str:
     """Un moment, dit comme on y pense : à venir ; le jour d'une fête, ses vœux ; passé — envers une amie, si ça
     compte, c'est la première chose qu'elle demanderait (après des nouvelles d'elle, quand quelque chose de grave
-    la touche) ; sinon, si ça vient ; une situation qui dure ; ce dont vous venez de reparler."""
+    la touche) ; sinon, si ça vient ; une situation qui dure, ou qu'on vient de lui dire finie ; ce dont vous venez
+    de reparler."""
     ev = m.event
+    if ev.ongoing and ev.ended_at:
+        return f"- {m.label} — c'est fini, vous en avez parlé tout à l'heure : n'en parle plus au présent."
     if ev.ongoing:
         since = when_words(ev.when, frame)
         head = "- en ce moment" + ("" if since == "aujourd'hui" else f" (depuis {since})") + f" : {m.label}"

@@ -13,7 +13,8 @@ l'identifiant (stable, référencé par la provenance des énoncés) :
   arriver (« un entretien chez Ubisoft jeudi »), pour qu'elle y pense au bon
   moment — et lui en demande des nouvelles après ; ou une **situation en
   cours** (« son chat Moustache est malade », ``ongoing``), dont on prend des
-  nouvelles tant qu'elle dure.
+  nouvelles tant qu'elle dure — et qui **prend fin** quand la personne dit
+  qu'elle est finie (``situation_ended`` : « on a fini le déménagement »).
 
 Qu'un moment ait été **repris** (``moment_followed``) est un jugement
 enregistré : ce qu'elle a dit, ou ce que la personne lui en a dit elle-même,
@@ -210,6 +211,15 @@ class MomentFollowed(Payload):
     by: str = ""
 
 
+class SituationEnded(Payload):
+    """Une situation qui durait dans la vie de quelqu'un (``event_noted``, ``ongoing``) est finie, de la bouche de
+    la personne : « on a fini le déménagement », « on a dû l'endormir ce matin ». Le jugement de la relecture (comme
+    une croyance qu'elle remplace), jamais des mots-clés : elle n'en parle plus au présent."""
+
+    event: int
+    call_id: str = ""
+
+
 class Consolidated(Payload):
     """Le point de contrôle : tout ce qui précède ``upto`` a été relu."""
 
@@ -240,10 +250,11 @@ PROMISE_NOTICED = event_type("memory.promise_noticed", OWNER, PromiseNoticed, pu
 PROMISE_RESOLVED = event_type("memory.promise_resolved", OWNER, PromiseResolved, public=True)
 EVENT_NOTED = event_type("memory.event_noted", OWNER, EventNoted, public=True, content=("text",), subjects=_SUBJECTS)
 MOMENT_FOLLOWED = event_type("memory.moment_followed", OWNER, MomentFollowed, public=True, subjects=("by",))
+SITUATION_ENDED = event_type("memory.situation_ended", OWNER, SituationEnded, public=True)
 CONSOLIDATED = event_type("memory.consolidated", OWNER, Consolidated, public=True)
 NIGHT_SORTED = event_type("memory.night_sorted", OWNER, NightSorted, public=True)
-ALL = (REMEMBERED, BELIEVED, REINFORCED, PROMISE_NOTICED, PROMISE_RESOLVED, EVENT_NOTED, MOMENT_FOLLOWED, CONSOLIDATED,
-       NIGHT_SORTED)
+ALL = (REMEMBERED, BELIEVED, REINFORCED, PROMISE_NOTICED, PROMISE_RESOLVED, EVENT_NOTED, MOMENT_FOLLOWED, SITUATION_ENDED,
+       CONSOLIDATED, NIGHT_SORTED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -263,7 +274,8 @@ class LifeEvent:
     texte (un contenu, effaçable) ; ``followed_at`` : la dernière fois qu'il a
     été repris en mots, une fois passé — elle lui en a demandé des nouvelles,
     ou la personne lui en a parlé (0 : jamais). ``ongoing`` : une situation qui
-    dure (``when`` : depuis quand)."""
+    dure (``when`` : depuis quand) ; ``ended_at`` : quand la personne a dit
+    qu'elle était finie (0 : elle dure encore)."""
 
     id: int
     about: tuple[str, ...]
@@ -278,6 +290,8 @@ class LifeEvent:
     #: ce qu'il pèse (``IMPORTANT_MOMENT`` et plus : il compte) ; un moment qui se fête (souhaité le jour même)
     importance: float = 0.7
     festive: bool = False
+    #: une situation finie, de la bouche de la personne : elle n'est plus « en ce moment », ni à redemander
+    ended_at: int = 0
 
 
 #: Le dernier message relu par la consolidation.
@@ -285,8 +299,8 @@ CHECKPOINT = FactKey("memory.checkpoint", type=int)
 #: Les promesses en cours envers une personne.
 PROMISES_TO = FactFamily("memory.promises_to", arg=str, type=tuple)
 #: Les moments de la vie d'une personne qu'elle a notés — à venir, et passés
-#: depuis peu (quelques jours) ; les situations en cours (deux semaines) —,
-#: triés par date (``LifeEvent``). Forme close :
+#: depuis peu (quelques jours) ; les situations en cours (deux semaines, une
+#: situation finie gardée avec ``ended_at``) —, triés par date (``LifeEvent``). Forme close :
 #: c'est au lecteur de comparer ``when`` à son instant (« c'était hier : et
 #: alors, cet entretien ? »). Ce qui la concerne seulement : un moment qu'un
 #: tiers a raconté porte ce tiers dans ``told_by``, à respecter avant d'en parler.

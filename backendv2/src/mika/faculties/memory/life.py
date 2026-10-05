@@ -113,9 +113,9 @@ def opens_at(ev: c.LifeEvent, frame: Frame, *, theirs: bool) -> int:
 
 def open_moment(ev: c.LifeEvent, now: int, p: MemoryParams, opens: int | None = None) -> bool:
     """Un moment dont on peut encore reparler : ouvert (``opens``, son heure par défaut), passé depuis peu et pas
-    encore repris ; une situation en cours, pas reprise ces derniers jours."""
+    encore repris ; une situation en cours, que la personne n'a pas dite finie, pas reprise ces derniers jours."""
     if ev.ongoing:
-        if not ev.when <= now <= ev.when + round(p.situation_days * DAY):
+        if ev.ended_at or not ev.when <= now <= ev.when + round(p.situation_days * DAY):
             return False
         return not ev.followed_at or now - ev.followed_at >= round(p.situation_reask_days * DAY)
     start = ev.when if opens is None else opens

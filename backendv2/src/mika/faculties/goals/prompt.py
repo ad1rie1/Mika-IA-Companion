@@ -290,7 +290,10 @@ def life_of(store: Any, frame: Frame, person: str) -> list[tuple[str, int]]:
         text = texts.get(m.text_ref)
         if not text:
             continue
-        when = "en ce moment" if m.ongoing else when_fr(m.when, frame.now, tz) if m.when <= frame.now else "à venir"
+        if m.ongoing:
+            when = "c'est fini" if m.ended_at else "en ce moment"  # finie : la personne l'a dit, plus au présent
+        else:
+            when = when_fr(m.when, frame.now, tz) if m.when <= frame.now else "à venir"
         told = [t for t in m.told_by if t != person]
         heard = f", c'est {_names(frame, told)} qui te l'a dit" if told else ""
         out.append((f"{text} ({when}{heard})", int(m.sensitivity)))

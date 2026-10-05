@@ -462,11 +462,13 @@ def _for(person: str, about: tuple[str, ...], sensitivity: int) -> bool:
 
 def _their_moment(m: Any, person: str, now: int, p: NeedsParams) -> bool:
     """Un moment de sa vie qu'elle lui a annoncé elle-même (jamais ce qu'un tiers en a dit : le demander
-    trahirait le tiers), pas un secret, bientôt ou tout juste passé."""
+    trahirait le tiers), pas un secret, bientôt ou tout juste passé — pas une situation qu'elle a dite finie."""
     if tuple(m.about) != (person,) or m.secret or not m.text_ref or set(m.told_by) - {person}:
         return False
     if getattr(m, "followed_at", 0):
         return False  # elles en ont déjà reparlé (ce que la personne en raconte le jour même compte : ADR 0052)
+    if getattr(m, "ended_at", 0):
+        return False  # une situation que la personne a dite finie : plus rien à en demander
     return -p.matter_moment_ahead_us <= now - m.when <= p.matter_told_us
 
 
