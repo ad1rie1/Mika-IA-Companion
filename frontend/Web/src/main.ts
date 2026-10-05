@@ -216,6 +216,8 @@ async function init() {
     setEnergy: (energy: number) => {
       fatigue = Math.max(0, Math.min(1, (0.55 - energy) / 0.4));
       emotionController.setEnergy(energy);
+      // The same tiredness slows and lowers the voice a little.
+      tts.setFatigue(fatigue);
     },
   };
   const presenter = new SpeechPresenter({

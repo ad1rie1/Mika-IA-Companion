@@ -154,19 +154,29 @@ const EMOTION_VOICE: Record<
  */
 export const VOICE_INTENSITY_FLOOR = 0.1;
 
-/** Hauteur et débit d'une émotion à son intensité, avant l'identité vocale
- * (`VoiceProfile`). Intensité 1 : la table telle quelle — le comportement
- * d'un appel qui n'en donne pas. */
+/** Ce que la fatigue (0…1) retire au débit et à la hauteur : épuisée, elle
+ * parle plus lentement et un peu plus bas — comme sa bouche s'entrouvre à
+ * peine (`articulationFor`) et ses paupières tombent. À 23 h, elle ne parle
+ * plus au débit de 15 h. */
+export const FATIGUE_RATE_DROP = 0.08;
+export const FATIGUE_PITCH_DROP = 0.04;
+
+/** Hauteur et débit d'une émotion à son intensité, puis de la fatigue,
+ * avant l'identité vocale (`VoiceProfile`). Intensité 1 et fatigue 0 : la
+ * table telle quelle — le comportement d'un appel qui ne donne ni l'une ni
+ * l'autre. */
 export function voiceModFor(
   emotion: EmotionName,
-  intensity = 1
+  intensity = 1,
+  fatigue = 0
 ): { pitch: number; rate: number } {
   const target = EMOTION_VOICE[emotion] || EMOTION_VOICE.neutral;
   const s = Math.max(0, Math.min(1, intensity));
   const g = VOICE_INTENSITY_FLOOR + (1 - VOICE_INTENSITY_FLOOR) * s;
+  const f = Math.max(0, Math.min(1, fatigue));
   return {
-    pitch: 1 + (target.pitch - 1) * g,
-    rate: 1 + (target.rate - 1) * g,
+    pitch: (1 + (target.pitch - 1) * g) * (1 - FATIGUE_PITCH_DROP * f),
+    rate: (1 + (target.rate - 1) * g) * (1 - FATIGUE_RATE_DROP * f),
   };
 }
 
@@ -196,6 +206,11 @@ export class TTSService {
   // Intensité de l'émotion de ce même énoncé, posée au même endroit et pour
   // la même raison : chaque segment la lit sans qu'on la fasse descendre.
   private activeIntensity = 1;
+  // Fatigue courante (`setFatigue`), et celle de l'énoncé en cours, figée à
+  // son départ : le débit annoncé au lip-sync (`onUtteranceStart`) reste
+  // celui de chaque segment, même si l'énergie change au milieu de la phrase.
+  private fatigue = 0;
+  private activeFatigue = 0;
   /**
    * Le morceau que la synthèse joue en ce moment, réduit à ce qui permet de
    * le clore de l'extérieur. `stop()` et `setMuted(true)` s'en servent :
@@ -212,6 +227,12 @@ export class TTSService {
   /** Queue a one-shot delay before the next speech utterance. */
   requestWakeUpDelay(ms: number): void {
     this.nextPreDelayMs = Math.max(this.nextPreDelayMs, Math.floor(ms));
+  }
+
+  /** Fatigue 0…1 (celle qui alourdit déjà les paupières et la bouche) :
+   * vaut pour les énoncés qui commencent ensuite. */
+  setFatigue(fatigue: number): void {
+    this.fatigue = Number.isFinite(fatigue) ? Math.max(0, Math.min(1, fatigue)) : 0;
   }
 
   /**
@@ -580,15 +601,17 @@ export class TTSService {
     for (const item of dropped) item.settle("skipped");
   }
 
-  /** Débit effectif d'un énoncé : modulation d'émotion à son intensité ×
-   * identité vocale, borné comme `utterance.rate` l'est. Même formule que
-   * `speakTextChunk`, pour que le lip-sync lise le débit de la voix. */
+  /** Débit effectif d'un énoncé : modulation d'émotion à son intensité et
+   * de la fatigue × identité vocale, borné comme `utterance.rate` l'est.
+   * Même formule que `speakTextChunk`, pour que le lip-sync lise le débit de
+   * la voix. */
   effectiveRate(
     emotion: EmotionName,
     profile: VoiceProfile = NEUTRAL_PROFILE,
-    intensity = 1
+    intensity = 1,
+    fatigue = this.fatigue
   ): number {
-    return clampRate(voiceModFor(emotion, intensity).rate * profile.rate);
+    return clampRate(voiceModFor(emotion, intensity, fatigue).rate * profile.rate);
   }
 
   private async speakImmediate(
@@ -600,6 +623,7 @@ export class TTSService {
   ): Promise<SpeakOutcome> {
     this.activeProfile = profile;
     this.activeIntensity = intensity;
+    this.activeFatigue = this.fatigue;
     // Consume any pending wake-up delay before the actual utterance.
     // Drained here (not in processQueue) so back-to-back speeches within
     // a single response don't keep re-delaying.
@@ -616,7 +640,10 @@ export class TTSService {
     // en file, ni pendant le silence du réveil ci-dessus. C'est le signal
     // sur lequel le lip-sync et le visage doivent se caler.
     hooks?.onStart?.();
-    this.events.onUtteranceStart?.(text, this.effectiveRate(emotion, profile, intensity));
+    this.events.onUtteranceStart?.(
+      text,
+      this.effectiveRate(emotion, profile, intensity, this.activeFatigue)
+    );
 
     // Parse non-verbal tokens and handle the segmented path if any are
     // present. Fall through to the single-utterance path when the text
@@ -727,7 +754,7 @@ export class TTSService {
       // Apply emotion modulation
       // Emotion modulation first, then the voice identity on top of it:
       // an excited *thought* is still quieter than an excited sentence.
-      const voiceMod = voiceModFor(emotion, this.activeIntensity);
+      const voiceMod = voiceModFor(emotion, this.activeIntensity, this.activeFatigue);
       const profile = this.activeProfile;
       utterance.pitch = clampPitch(voiceMod.pitch * profile.pitch);
       utterance.rate = clampRate(voiceMod.rate * profile.rate);
