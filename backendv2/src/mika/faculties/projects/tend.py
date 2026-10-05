@@ -8,6 +8,10 @@ projet **à elle** qui n'a plus rien d'ouvert depuis quelques jours, elle le
 clôt (soulagée s'il a abouti, un peu mélancolique sinon) : il ne reste pas
 « en cours » pour toujours.
 
+**Reprendre** : une demande d'aide dite (« j'ai besoin de toi pour… ») attend
+la réponse de la personne à qui elle l'a dite ; dès qu'elle écrit, l'objectif
+n'attend plus — sans attendre l'échéance de son « wait ».
+
 **Ce qui sort** (``projects.remote``) : ce qu'un opérateur demande depuis la
 console (pousser, récupérer) devient une proposition d'effet, exécutée tout de
 suite par le runtime (c'est lui qui l'a demandé) ; une commande réseau qu'elle a
@@ -20,10 +24,13 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.contracts import transcript as transcript_c
 from mika.faculties.projects.atelier import network_proposal, remote_proposal
 from mika.faculties.projects.faculty import (
+    ANSWERED,
     ARCHIVED,
     NETWORK_QUEUED,
     OBJECTIVE_CHANGED,
@@ -87,11 +94,29 @@ def broken(s: ProjectsState, frame: Frame) -> list[Project]:
             if p.status == c.ACTIVE and not busy(s, p.id) and p.failures >= pm.failures_before_pause]
 
 
-@PROJECTS.process("projects.tend", wake_on=[*c.ALL, rt.EPISODE_STARTED, rt.EPISODE_ENDED], lane="background",
+def replied(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective]]:
+    """Les objectifs ouverts dont la personne à qui elle a dit son besoin a écrit depuis — elle seule (une autre
+    personne ne lève rien), après la demande (pas avant). Pas pendant une exécution : celle-ci ne verrait pas la
+    réponse, et le « wait » qu'elle conclurait reposerait l'attente ; elle tombera à la fin."""
+    out = []
+    for p in sorted(s.projects.values(), key=lambda p: p.id):
+        if p.status != c.ACTIVE or busy(s, p.id):
+            continue
+        for o in p.objectives:
+            if o.status != c.OPEN or not o.asked or not o.asked_to or not o.need_ref or o.answered_at >= o.asked_at:
+                continue
+            handles = frame.get(identity_c.HANDLES(o.asked_to)) or (o.asked_to,)
+            if max(frame.get(transcript_c.LAST_FROM(h)) for h in handles) > o.asked_at:
+                out.append((p, o))
+    return out
+
+
+@PROJECTS.process("projects.tend", wake_on=[*c.ALL, rt.EPISODE_STARTED, rt.EPISODE_ENDED, rt.PERCEPTION_RECEIVED],
+                  lane="background",
                   catch_up=CatchUp.ONCE, max_quantum_s=3600, priority=40)
 class Tend:
     def next_due(self, s: ProjectsState, frame: Frame, last_run: int | None) -> int | None:
-        if not (closures(s, frame) or broken(s, frame) or finished(s, frame)):
+        if not (closures(s, frame) or broken(s, frame) or finished(s, frame) or replied(s, frame)):
             pm = params(frame.env.params_of("projects", frame.root))
             later = [at for p in s.projects.values() if (at := finished_at(p, pm)) is not None]
             return min(later) if later else None
@@ -102,6 +127,12 @@ class Tend:
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame
         s: ProjectsState = ctx.state
+        released = [ANSWERED.draft(project=p.id, objective=o.id, person=o.asked_to, owner=p.owner, about=p.about,
+                                   dedupe_key=f"réponse:{p.id}:{o.id}:{o.asked_at}") for p, o in replied(s, frame)]
+        if released:
+            await ctx.emit(*released)
+            frame = ctx.frame
+            s = frame.state("projects")
         drafts: list[Any] = []
         closing_now = closures(s, frame)
         for p, o, why in closing_now:

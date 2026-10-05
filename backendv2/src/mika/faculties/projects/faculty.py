@@ -17,6 +17,9 @@ ses événements font ressentir (ADR 0031).
 - **Le mode** décide de ce qu'elle en ressent : en mode ``persona``, un
   ponctuel abouti rend fière, un ponctuel bloqué frustre ; en mode ``plain``,
   rien.
+- **Une demande d'aide dite attend sa personne** : dès que celle à qui elle l'a
+  dite écrit, l'objectif n'attend plus (``projects.answered``, ``tend.py``) ;
+  personne d'autre ne lève l'attente.
 """
 
 from __future__ import annotations
@@ -31,6 +34,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import agency as agency_c
+from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.kernel import schedule
@@ -202,6 +206,11 @@ class Objective:
     need_ref: str = ""
     asked: bool = False
     ask_attempts: int = 0
+    #: …quand elle l'a dit, et à qui (la personne) : seule sa réponse, après ce moment, lève l'attente ; et quand
+    #: cette réponse est arrivée (l'exécution suivante l'a sous les yeux, citée)
+    asked_at: int = 0
+    asked_to: str = ""
+    answered_at: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,6 +307,8 @@ class Run:
     started: int = 0
     previous: int = 0
     previous_objective: int = 0
+    #: un récit, une demande d'aide : l'adresse à qui elle parle
+    address: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,8 +325,9 @@ class ProjectsState:
 
 #: v3 : un récit, un appel à l'aide devancés, interrompus ou dont elle s'est ravisée ne comptent plus comme essais.
 #: v4 : un récit fait le point — il couvre tout ce qu'elle a mené à bout avant son départ, pas un seul objectif.
+#: v5 : une demande d'aide dite attend la réponse de sa personne (``asked_at``, ``asked_to``, ``answered_at``).
 PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
-                   state_version=4)
+                   state_version=5)
 PROJECTS.declare(*c.ALL)
 
 
@@ -467,6 +479,17 @@ class NetworkQueued(Payload):
     about: tuple[str, ...] = ()
 
 
+class Answered(Payload):
+    """La personne à qui elle a dit son besoin (« j'ai besoin de toi pour… ») a écrit depuis : l'objectif n'attend
+    plus, l'exécution suivante a sa réponse sous les yeux."""
+
+    project: int
+    objective: int
+    person: str
+    owner: str | None = None
+    about: tuple[str, ...] = ()
+
+
 class RemoteRequested(Payload):
     """L'opérateur demande de pousser (``push``) ou de récupérer (``pull``) maintenant."""
 
@@ -496,6 +519,7 @@ AMENDED = PROJECTS.event("amended", Amended, content=("instruction",), subjects=
 DEPOSITED = PROJECTS.event("deposited", Deposited, content=("note",), subjects=("owner", "about", "by"))
 REMOTE_REQUESTED = PROJECTS.event("remote_requested", RemoteRequested, subjects=("owner", "about"))
 NETWORK_QUEUED = PROJECTS.event("network_queued", NetworkQueued, content=("why",), subjects=("owner", "about"))
+ANSWERED = PROJECTS.event("answered", Answered, subjects=("owner", "about", "person"))
 #: ce qu'un opérateur (ou elle) fait d'un projet — la chronologie du carnet
 OPERATIONS = (REFRAMED, PAUSED, RESUMED, ARCHIVED, RESTORED, NUDGED, OBJECTIVE_ADDED, OBJECTIVE_CHANGED,
               DECISION_CHANGED, DEPOSITED, REMOTE_REQUESTED)
@@ -734,7 +758,8 @@ def _objective_changed(s: ProjectsState, e, cx) -> ProjectsState:
         changes["status"] = d.status
         if d.status == c.OPEN:  # rouvert : il repart de rien (ni dette, ni preuve, ni résultat d'avant)
             changes.update(silent=0, unproven=0, waiting_until=0, closed_at=0, runs=0, evidence=0, notable=0.0,
-                           result_ref="", shared=False, share_attempts=0, need_ref="", asked=False, ask_attempts=0)
+                           result_ref="", shared=False, share_attempts=0, need_ref="", asked=False, ask_attempts=0,
+                           asked_at=0, asked_to="", answered_at=0)
         else:
             changes["closed_at"] = e.at
             if d.status == c.DONE:  # coché par quelqu'un d'autre : ce n'est pas elle qui l'a mené à bout
@@ -947,8 +972,8 @@ def _started(s: ProjectsState, e, cx) -> ProjectsState:
     if d.kind != Kind.INITIATIVE or got is None or got[0] not in s.projects:
         return s
     purpose = "share" if c.SHARE in reasons else "need" if c.NEED in reasons else ""
-    return replace(s, running=s.running.set(e.correlation, Run(got[0], got[1], purpose, started=e.at))) \
-        if purpose else s
+    run = Run(got[0], got[1], purpose, started=e.at, address=d.target or "")
+    return replace(s, running=s.running.set(e.correlation, run)) if purpose else s
 
 
 def _story(p: Project, run: Run) -> frozenset[int]:
@@ -959,7 +984,7 @@ def _story(p: Project, run: Run) -> frozenset[int]:
                                         and not o.shared and o.closed_at <= run.started})
 
 
-@PROJECTS.reducer(rt.UTTERANCE)
+@PROJECTS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON])
 def _uttered(s: ProjectsState, e, cx) -> ProjectsState:
     run = s.running.get(e.correlation)
     if run is None or run.purpose not in ("share", "need") or run.project not in s.projects:
@@ -969,10 +994,28 @@ def _uttered(s: ProjectsState, e, cx) -> ProjectsState:
     if o is None:
         return s
     if run.purpose == "need":
-        return _set(s, _objective(p, replace(o, asked=True)))
+        # « j'ai besoin de toi pour… » est dit : elle attend la réponse de cette personne-là, à partir de maintenant
+        person = (cx.facts.get(identity_c.PERSON(run.address)) or run.address) if run.address else ""
+        return _set(s, _objective(p, replace(o, asked=True, asked_at=e.at, asked_to=person)))
     story = _story(p, run)
     return _set(s, replace(p, objectives=tuple(replace(x, shared=True) if x.id in story else x
                                                for x in p.objectives)))
+
+
+@PROJECTS.reducer(ANSWERED)
+def _answered(s: ProjectsState, e, cx) -> ProjectsState:
+    d = e.data
+    p = s.projects.get(d.project)
+    o = objective_at(p, d.objective) if p is not None else None
+    if p is None or o is None or o.status != c.OPEN:
+        return s
+    # sa réponse est là : l'objectif n'attend plus (l'exécution suivante part dans l'espacement normal)
+    return _set(s, _objective(p, replace(o, waiting_until=0, answered_at=e.at)))
+
+
+def answered(o: Objective) -> bool:
+    """La personne à qui elle a dit son besoin a répondu depuis."""
+    return o.answered_at > o.asked_at > 0
 
 
 #: Ce qui ne dit rien de l'exécution : elle n'a pas eu lieu, son crédit est rendu.

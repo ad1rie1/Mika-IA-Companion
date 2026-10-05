@@ -6,7 +6,9 @@
   ses demandes (leur état seulement), l'atelier (son arbre, ce qui n'y est pas
   enregistré : une exécution interrompue y a laissé son travail) et son dépôt
   distant ; ce qu'une commande réseau a rendu, **cité** (une donnée d'Internet,
-  jamais une consigne) ; le budget de l'exécution (ses tours, son temps).
+  jamais une consigne) ; ce que la personne à qui elle a demandé un coup de
+  main lui a écrit en privé depuis, **cité** ; le budget de l'exécution (ses
+  tours, son temps).
 - **Un récit, une demande d'aide** : ce qu'elle a mené à bout (tout ce qui
   l'a été depuis le récit précédent), ou ce qui la bloque, à la mesure du lien.
 - **En conversation** : ses projets (« tu travailles sur quoi ? » est une
@@ -23,6 +25,7 @@ from typing import Any
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.contracts import transcript as transcript_c
 from mika.faculties.projects.faculty import (
     EFFECT_WORDS,
     ON_DEMAND,
@@ -31,6 +34,7 @@ from mika.faculties.projects.faculty import (
     Objective,
     Project,
     ProjectsState,
+    answered,
     cadence,
     live,
     objective_of,
@@ -124,6 +128,33 @@ async def _tree(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dic
     return out
 
 
+#: ce qu'on cite de sa réponse : ses premiers messages privés depuis la demande, chacun coupé
+ANSWER_LINES, ANSWER_CLIP = 10, 400
+
+
+@PROJECTS.enricher("projects_answer", episodes=RUNS, deadline_ms=1500, reads=[identity_c.HANDLES])
+async def _answer(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Ce que la personne à qui elle a demandé un coup de main lui a écrit depuis, en privé : ses messages à elle
+    seule (pas un salon, pas le fil d'une autre), après la demande."""
+    store = ports.get("store")
+    got = _project(s, frame)
+    o = got[1] if got is not None else None
+    if store is None or o is None or not o.asked_to or not answered(o):
+        return None
+    handles = tuple(frame.get(identity_c.HANDLES(o.asked_to)) or (o.asked_to,))
+    marks = ",".join("?" * len(handles))
+    rows = store.query_mind(
+        f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE person IN ({marks}) AND role='user' AND room IS NULL "
+        "AND at > ? ORDER BY id LIMIT ?", (*handles, o.asked_at, ANSWER_LINES))
+    lines = [_clip(str(text), ANSWER_CLIP) for (text,) in rows if str(text or "").strip()]
+    return {"lines": lines} if lines else None
+
+
+def _clip(text: str, n: int) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= n else text[: n - 1].rstrip() + "…"
+
+
 def _recent(s: ProjectsState) -> list[Project]:
     return sorted((p for p in s.projects.values() if live(p)), key=lambda p: p.id)
 
@@ -212,7 +243,10 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
         if target.note_ref and texts.get(target.note_ref):
             lines.append(f"Où tu en étais sur cet objectif : {texts[target.note_ref]}")
         if target.need_ref and texts.get(target.need_ref):
-            lines.append(f"Ce que tu attendais de qui t'a confié le projet : {texts[target.need_ref]}")
+            # sa réponse est arrivée : elle l'a sous les yeux, elle n'a ni à l'attendre ni à la redemander
+            reply = " — sa réponse est arrivée (ses mots sont cités plus bas)" \
+                if (enrich.get("projects_answer") or {}).get("lines") else ""
+            lines.append(f"Ce que tu attendais de qui t'a confié le projet : {texts[target.need_ref]}{reply}")
     others = [o for o in p.objectives if target is None or o.id != target.id]
     if others:
         lines.append("Les autres objectifs du projet :\n" + "\n".join(
@@ -280,6 +314,25 @@ def _network_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) 
     p = got[0]
     return SectionBody(f"Ta dernière commande avec le réseau, il y a {ago(frame.now - p.network_out_at)} :\n"
                        f"{p.network_out}", level=0, provenance=(f"project:{p.id}",))
+
+
+#: sa réponse est ce qui débloque l'objectif : citée (ses mots, une donnée), coupée tôt, jamais au point de disparaître
+ANSWER_FLOOR = 500
+
+
+@PROJECTS.section("project_answer", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=5, untrusted=True,
+                  floor_chars=ANSWER_FLOOR, title="CE QU'ON T'A RÉPONDU", reads=[identity_c.IDENTITY])
+def _answer_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Ce que la personne à qui elle a demandé un coup de main lui a écrit depuis, en privé : cité, pour que
+    l'exécution reparte avec la réponse sous les yeux plutôt que de deviner ou de redemander."""
+    got = _project(s, frame)
+    lines = (enrich.get("projects_answer") or {}).get("lines") or []
+    if got is None or got[1] is None or not lines:
+        return None
+    p, o = got
+    body = (f"Ce que {_who(frame, o.asked_to)} t'a écrit depuis que tu lui as demandé un coup de main (il y a "
+            f"{ago(frame.now - o.asked_at)}) :\n" + "\n".join(f"- {line}" for line in lines))
+    return SectionBody(body, level=written(p), provenance=(f"project:{p.id}",))
 
 
 @PROJECTS.section("project_share", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], trim_rank=90,
