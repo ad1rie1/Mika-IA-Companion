@@ -88,6 +88,7 @@
   <form method="post" action="{{ action }}" class="form">
     <button type="submit" class="default-submit" hidden tabindex="-1">Enregistrer</button>
     <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
+    {% if s.form.stash %}<input type="hidden" name="_reserve" value="{{ s.form.stash }}">{% endif %}
     {% for e in s.form.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
     {{ fields_block(s.form) }}
     <div class="form-actions"><button class="btn">Enregistrer</button></div>

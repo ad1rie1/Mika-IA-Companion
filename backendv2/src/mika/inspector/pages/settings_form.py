@@ -123,6 +123,17 @@ def _defaults(fields: Sequence[forms.FormField]) -> dict[str, Any]:
     return {f.path: f.default for f in fields if f.kind != "group" and f.default is not None}
 
 
+def _with_kept(fields: Sequence[forms.FormField], lists: Mapping[str, list[str]],
+               kept: Mapping[str, str]) -> dict[str, list[str]]:
+    """La soumission, où un secret gardé dans la réserve (tapé avant de charger une liste, ou lors d'un envoi
+    refusé) remplace le même secret laissé vide."""
+    out = dict(lists)
+    for f in fields:
+        if f.secret and f.path in kept and not "".join(out.get(f.path) or []).strip():
+            out[f.path] = [kept[f.path]]
+    return out
+
+
 def _view(f: forms.FormField, value: Any, error: str, prefix: str,
           loaded: Sequence[tuple[str, str]] | None = None) -> dict[str, Any] | None:
     if f.loader and not f.choices:
@@ -329,13 +340,15 @@ class SettingsForms:
                 f = _with_choices(f, s.choices[f.path](), given.get(f.path))
             view = _view(f, given.get(f.path), _error_for(f.path, state.errors), prefix)
             if view is not None:
+                if f.secret and f.path in state.stashed:
+                    view["has_value"] = True  # tapé, gardé côté serveur : vide = le garder
                 view["hidden"] = bool(f.only or f.only_any) and not forms.visible(f, given)
                 placed.append((f, view))
         if placed:
             groups, advanced = _grouped(placed)
             out["form"] = {"groups": groups, "advanced": advanced,
                            "open": any(v.get("error") for f, v in placed if f.advanced),
-                           "general": _placed([f.path for f in fields], state.errors)}
+                           "general": _placed([f.path for f in fields], state.errors), "stash": state.stash}
         if pg.yaml and s.yaml:
             text = state.yaml_text
             if text is None and isinstance(current, BaseModel):
@@ -475,6 +488,9 @@ class SettingsForms:
             return None, {s.key: State(messages=[("danger", "Rien à enregistrer sur cette page.")])}, 400
         fields = self._fields(s, pg)
         flat = forms.flatten(current)
+        token = data.get(STASH, "")
+        now = ui.now()
+        lists = _with_kept(fields, lists, self._stash_get(token, now))
         values, errors = forms.parse(fields, lists, current=flat, load=_yaml_load)
         errors = {**errors, **forms.within(fields, values)}
         new = None
@@ -483,12 +499,18 @@ class SettingsForms:
         if new is not None and not errors:
             errors = _choice_errors(s, current, new)
         if errors or new is None:
-            return None, {s.key: State(values=values, errors=errors, messages=[
-                ("danger", "Rien n'a été enregistré : corrige les champs signalés.")])}, 400
+            return None, {s.key: self._hold(State(values=values, errors=errors, messages=[
+                ("danger", "Rien n'a été enregistré : corrige les champs signalés.")]), fields, token, now)}, 400
         if new == current:
+            self._stash.pop(token, None)
             return self._done(ui, page, "info", "Rien n'a changé."), {}, 303
-        return await self._commit(ui, s, new, by, page, s.key, State(values=values),
-                                  f"{pg.title} : enregistré." if s.pages else "")
+        response, states, status = await self._commit(ui, s, new, by, page, s.key, State(values=values),
+                                                      f"{pg.title} : enregistré." if s.pages else "")
+        if response is None:
+            self._hold(states[s.key], fields, token, now)
+        else:
+            self._stash.pop(token, None)
+        return response, states, status
 
     async def _commit(self, ui: Any, s: SettingsSection, new: Any, by: str, page: str, subject: str,
                       state: State, message: str = "", back: str = "") -> tuple[Response | None, dict[str, State], int]:
@@ -517,11 +539,7 @@ class SettingsForms:
         flat = forms.flatten(entry) if entry is not None else _defaults(fields)
         token = data.get(STASH, "")
         now = ui.now()
-        kept = self._stash_get(token, now)
-        lists = dict(lists)
-        for f in fields:  # un secret tapé avant de charger la liste, laissé vide ensuite : celui gardé
-            if f.secret and f.path in kept and not "".join(lists.get(f.path) or []).strip():
-                lists[f.path] = [kept[f.path]]
+        lists = _with_kept(fields, lists, self._stash_get(token, now))
         values, errors = forms.parse(fields, lists, current=flat, load=_yaml_load)
         wanted = data.get(LOAD, "")
         if wanted:
@@ -546,7 +564,7 @@ class SettingsForms:
                       back=back_to(data.get(BACK, "")))
         if errors or record is None:
             state.messages = [("danger", "Rien n'a été enregistré : corrige les champs signalés.")]
-            return None, {s.key: state}, 400
+            return None, {s.key: self._hold(state, fields, token, now)}, 400
         section_flat = forms.flatten(current)
         plain = section_flat[path]
         if keyed:
@@ -572,7 +590,7 @@ class SettingsForms:
         if new is None:
             state.record_errors = errors
             state.messages = [("danger", " ; ".join(errors.values()) or "Refusé.")]
-            return None, {s.key: state}, 400
+            return None, {s.key: self._hold(state, fields, token, now)}, 400
         subject = f"{s.key}/{path}/{name}"
         message = f"« {name} » enregistré." if keyed else "Enregistré."
         if renamed:
@@ -581,7 +599,9 @@ class SettingsForms:
                 " ; rien d'autre ne le désignait.")
         response, states, status = await self._commit(ui, s, new, by, page, subject, state, message,
                                                       back_to(data.get(BACK, "")))
-        if response is not None:
+        if response is None:
+            self._hold(states[s.key], fields, token, now)
+        else:
             self._stash.pop(token, None)
         return response, states, status
 
@@ -627,6 +647,19 @@ class SettingsForms:
         if got is None or got[0] <= now:
             return {}
         return dict(got[1])
+
+    def _hold(self, state: State, fields: Sequence[forms.FormField], token: str, now: int) -> State:
+        """Un envoi refusé : les secrets tapés passent dans la réserve, sous un nouveau jeton, et sortent des
+        valeurs remontrées (un secret ne redescend jamais dans la page). Renvoyer le formulaire corrigé, le
+        secret laissé vide, reprend celui tapé — sans quoi « vide : inchangé » garderait l'ancien."""
+        values = state.values if state.record is None else state.record_values
+        typed = {f.path: str(values[f.path]) for f in fields if f.secret and values.get(f.path)}
+        self._stash.pop(token, None)
+        for path in typed:
+            del values[path]
+        state.stash = self._stash_put(typed, now) if typed else ""
+        state.stashed = tuple(typed)
+        return state
 
     async def _delete(self, ui: Any, s: SettingsSection, current: Any, path: str, key: str, by: str,
                       page: str) -> tuple[Response | None, dict[str, State], int]:
