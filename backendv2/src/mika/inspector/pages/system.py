@@ -692,7 +692,8 @@ def backup_blocks(ui: Any) -> list[Any]:
         Stat("Depuis", f"{since} événement(s)" if last else "—", "écrits depuis, pas encore sauvegardés",
              "warn" if last and since > 0 and tone == "warn" else ""),
         Stat("Dernière vérification", When(int(check["at"])) if check else "jamais",
-             ("réussie" if check.get("ok") else f"échec : {check.get('erreur', '?')}")[:120] if check else
+             ("réussie" + "".join(f" — {r}" for r in check.get("remarques") or []) if check.get("ok")
+              else f"échec : {check.get('erreur', '?')}")[:120] if check else
              "« mika verify ARCHIVE » rejoue une archive sans rien toucher",
              "" if not check else "ok" if check.get("ok") else "danger"),
         Stat("Archives gardées", len(archives), _bytes(sum(int(a.get("octets") or 0) for a in archives))

@@ -16,13 +16,18 @@ se reconstruit pas :
 - ``secret.key`` quand la clé de chiffrement vient de ce fichier (sans elle,
   les secrets rangés dans les réglages sont perdus) ;
 - ``MANIFEST.json`` : tête du journal, empreinte de l'état **rejoué depuis la
-  copie**, somme SHA-256 de chaque fichier.
+  copie**, empreinte du code qui l'a rejouée, somme SHA-256 de chaque fichier.
 
 ``views.db`` n'y est pas : projections et vecteurs se reconstruisent depuis
 le journal au démarrage suivant.
 
 Restaurer vérifie les sommes, rejoue la copie et compare son empreinte au
-manifeste **avant** de toucher au dossier de données ; l'ancien dossier est
+manifeste **avant** de toucher au dossier de données. L'empreinte de l'état
+dépend du code autant que des données (un champ de tranche, un réducteur
+corrigé, un upcaster la changent) : elle ne se compare que sous le code qui a
+écrit l'archive. Sous un autre (une mise à jour depuis), la copie est rejouée
+depuis la genèse et doit retomber sur la même tête sans qu'aucun réducteur ne
+lève ; c'est dit dans les remarques. L'ancien dossier est
 mis de côté, jamais effacé. Restaurer prend le verrou du dossier
 (``datadir``) : sous un serveur en marche, c'est refusé — il écrirait encore,
 par ses descripteurs ouverts, dans le dossier mis de côté.
@@ -111,22 +116,72 @@ def _copy_sqlite(src: Path, dst: Path) -> None:
         source.close()
 
 
+def code_fingerprint() -> str:
+    """Empreinte du code qui rejoue : les sources du paquet ``mika``. Deux empreintes d'état ne se
+    comparent que sous la même : l'état rejoué en dépend autant que des données."""
+    root = Path(__file__).resolve().parent.parent
+    h = hashlib.blake2b(digest_size=16)
+    for path in sorted(root.rglob("*.py")):
+        h.update(path.relative_to(root).as_posix().encode("utf-8") + b"\x00")
+        h.update(path.read_bytes() + b"\x00")
+    return h.hexdigest()
+
+
 def state_of(mind_db: Path) -> tuple[int, str]:
     """(tête, empreinte de l'état persisté) d'une copie de ``mind.db``, rejouée
     dans un dossier jetable (la copie n'est jamais modifiée)."""
+    head, state, _ = _replay(mind_db)
+    return head, state
+
+
+def _replay(mind_db: Path, *, genesis: bool = False) -> tuple[int, str, list[str]]:
+    """(tête, empreinte, tranches dont un réducteur a levé) d'une copie de ``mind.db`` rejouée dans un
+    dossier jetable. ``genesis`` : sans ses instantanés (écrits par le code d'alors), tout le journal
+    repasse par les réducteurs d'aujourd'hui."""
     with tempfile.TemporaryDirectory(prefix="mika-verif-") as tmp:
         work = Path(tmp)
         shutil.copy2(mind_db, work / "mind.db")
+        if genesis:
+            db = sqlite3.connect(str(work / "mind.db"))
+            try:
+                with db:
+                    db.execute("DELETE FROM snapshots")
+            finally:
+                db.close()
 
-        async def replay() -> tuple[int, str]:
+        async def replay() -> tuple[int, str, list[str]]:
             store = SqliteStore(work / "mind.db", work / "views.db", threaded=False)
             mind = Mind(Registry([RUNTIME, *faculties()]), store, RealClock(), RandomIdGen())
             report = await mind.boot(append_boot=False)
             state = digest({o: mind.root.slices[o] for o in mind.registry.persisted_owners()})
+            tainted = sorted(mind.root.tainted.keys())
             await mind.close()
-            return report.head, state
+            return report.head, state, tainted
 
         return asyncio.run(replay())
+
+
+def _check(manifest: dict[str, Any], mind_db: Path) -> tuple[int, str, list[str]]:
+    """Confronte la copie à son manifeste ; rend (tête, empreinte, remarques).
+
+    Sous le code qui a écrit l'archive, l'état rejoué doit être celui du manifeste. Sous un autre (une
+    mise à jour depuis, ou une archive d'avant l'empreinte du code), l'empreinte ne se compare pas :
+    des données intactes y rejouent autrement. La copie repasse alors depuis la genèse par le code
+    courant et doit retomber sur la même tête sans tranche en échec."""
+    if manifest.get("code") == code_fingerprint():
+        head, state = state_of(mind_db)
+        if (head, state) != (manifest["head"], manifest["state"]):
+            raise BackupError("la copie ne rejoue pas à l'état enregistré dans le manifeste")
+        return head, state, []
+    head, state, tainted = _replay(mind_db, genesis=True)
+    if head != manifest["head"]:
+        raise BackupError("la copie ne rejoue pas à la tête enregistrée dans le manifeste")
+    if tainted:
+        raise BackupError(f"archive écrite par une autre version du code : la copie ne se rejoue pas avec "
+                          f"celle-ci (tranche(s) en échec : {', '.join(tainted)}) ; relance avec la version "
+                          f"qui l'a écrite")
+    return head, state, ["archive écrite par une autre version du code : état non comparé, "
+                         "copie rejouée depuis la genèse sans erreur"]
 
 
 def _walk(data: Path) -> tuple[list[Path], list[Path]]:
@@ -212,8 +267,8 @@ def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None
                 shutil.copy2(src, dst)
             files[rel.as_posix()] = _sha256(dst)
         head, state = state_of(stage / "mind.db")
-        manifest = {"format": FORMAT, "created": stamp, "head": head, "state": state, "files": files,
-                    "links": links}
+        manifest = {"format": FORMAT, "created": stamp, "head": head, "state": state, "code": code_fingerprint(),
+                    "files": files, "links": links}
         (stage / MANIFEST).write_text(json.dumps(manifest, indent=1, ensure_ascii=False), encoding="utf-8")
         partial = archive.with_suffix(".partial")
         with tarfile.open(partial, "w:gz") as tar:
@@ -297,21 +352,20 @@ def _extract(archive: Path, into: Path) -> dict[str, Any]:
 
 
 def verify(archive: Path, *, record: Path | None = None, now: datetime | None = None) -> Summary:
-    """Vérifie une archive sans rien restaurer : sommes, rejeu, empreinte. ``record`` : le dossier de
-    données où noter le résultat (réussi ou non) pour la console."""
+    """Vérifie une archive sans rien restaurer : sommes, rejeu, empreinte (``_check``). ``record`` : le
+    dossier de données où noter le résultat (réussi ou non) pour la console."""
     try:
         with tempfile.TemporaryDirectory(prefix="mika-verif-") as tmp:
             manifest = _extract(archive, Path(tmp))
-            head, state = state_of(Path(tmp) / "data" / "mind.db")
-        if (head, state) != (manifest["head"], manifest["state"]):
-            raise BackupError("la copie ne rejoue pas à l'état enregistré dans le manifeste")
+            head, state, warnings = _check(manifest, Path(tmp) / "data" / "mind.db")
     except BackupError as exc:
         if record is not None:
             note(record, "verification", {"at": _us(now), "archive": str(archive), "ok": False, "erreur": str(exc)})
         raise
     if record is not None:
-        note(record, "verification", {"at": _us(now), "archive": str(archive), "ok": True, "tete": head})
-    return Summary(archive, head, state, len(manifest["files"]), archive.stat().st_size)
+        note(record, "verification", {"at": _us(now), "archive": str(archive), "ok": True, "tete": head,
+                                      "remarques": warnings})
+    return Summary(archive, head, state, len(manifest["files"]), archive.stat().st_size, tuple(warnings))
 
 
 def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | None = None) -> Summary:
@@ -333,11 +387,11 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
         try:
             manifest = _extract(archive, stage_root)
             stage = stage_root / "data"
-            head, state = state_of(stage / "mind.db")
-            if (head, state) != (manifest["head"], manifest["state"]):
-                raise BackupError("la copie ne rejoue pas à l'état enregistré dans le manifeste : rien n'est touché")
+            try:
+                head, state, warnings = _check(manifest, stage / "mind.db")
+            except BackupError as exc:
+                raise BackupError(f"{exc} : rien n'est touché") from exc
             (stage / MANIFEST).unlink()
-            warnings = []
             lock.replace(stage / datadir.LOCK_NAME)  # le verrou (son inode, tenu) suit le dossier restauré
             if any(data.iterdir()):
                 aside = data.parent / f"{data.name}.avant-restauration-{stamp}"
