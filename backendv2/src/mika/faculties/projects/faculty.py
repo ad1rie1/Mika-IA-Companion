@@ -141,6 +141,11 @@ class ProjectsParams(BaseModel):
     share_attempts: Annotated[int, Knob(
         label="Tentatives de raconter", group="Raconter", lo=1, hi=10,
         help="Après autant de tentatives qui n'ont pas abouti, elle n'essaie plus.")] = 2
+    share_settle_us: Annotated[int, Knob(
+        label="Attendre que le travail se pose", group="Raconter", lo=MINUTE, hi=12 * HOUR,
+        help="Elle fait le point d'un projet quand le travail s'est posé : aucune exécution en cours, et aucune due "
+             "avant ce délai — ou le dernier objectif fini attend déjà depuis lui. Le récit dit alors, en une fois, "
+             "tout ce qu'elle a mené à bout depuis le précédent.")] = 45 * MINUTE
     self_done_after_us: Annotated[int, Knob(
         label="Clore ses projets finis après", group="Ses projets à elle", lo=HOUR, hi=60 * DAY,
         help="Un projet à elle qui n'a plus aucun objectif ouvert depuis ce délai, elle le clôt d'elle-même (un "
@@ -308,8 +313,9 @@ class ProjectsState:
 
 
 #: v3 : un récit, un appel à l'aide devancés, interrompus ou dont elle s'est ravisée ne comptent plus comme essais.
+#: v4 : un récit fait le point — il couvre tout ce qu'elle a mené à bout avant son départ, pas un seul objectif.
 PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
-                   state_version=3)
+                   state_version=4)
 PROJECTS.declare(*c.ALL)
 
 
@@ -945,6 +951,14 @@ def _started(s: ProjectsState, e, cx) -> ProjectsState:
         if purpose else s
 
 
+def _story(p: Project, run: Run) -> frozenset[int]:
+    """Ce qu'un récit couvre : l'objectif qu'il vise et tout ce qu'elle a mené à bout avant son départ sans l'avoir
+    encore raconté — un récit fait le point, il ne s'en dit pas un par objectif (ce qui n'était pas assez notable
+    pour y figurer passe avec lui)."""
+    return frozenset({run.objective} | {o.id for o in p.objectives if o.kind == c.ONCE and o.status == c.DONE
+                                        and not o.shared and o.closed_at <= run.started})
+
+
 @PROJECTS.reducer(rt.UTTERANCE)
 def _uttered(s: ProjectsState, e, cx) -> ProjectsState:
     run = s.running.get(e.correlation)
@@ -954,7 +968,11 @@ def _uttered(s: ProjectsState, e, cx) -> ProjectsState:
     o = objective_at(p, run.objective)
     if o is None:
         return s
-    return _set(s, _objective(p, replace(o, shared=True) if run.purpose == "share" else replace(o, asked=True)))
+    if run.purpose == "need":
+        return _set(s, _objective(p, replace(o, asked=True)))
+    story = _story(p, run)
+    return _set(s, replace(p, objectives=tuple(replace(x, shared=True) if x.id in story else x
+                                               for x in p.objectives)))
 
 
 #: Ce qui ne dit rien de l'exécution : elle n'a pas eu lieu, son crédit est rendu.
@@ -978,8 +996,10 @@ def _ended(s: ProjectsState, e, cx) -> ProjectsState:
         renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
         if o is None or not agency_c.tried(e.data.outcome, run.started, renounced):
             return _set(s, p)
-        if run.purpose == "share" and not o.shared:
-            p = _objective(p, replace(o, share_attempts=o.share_attempts + 1))
+        if run.purpose == "share" and not o.shared:  # un essai pour tout ce que le récit couvrait
+            story = _story(p, run)
+            p = replace(p, objectives=tuple(replace(x, share_attempts=x.share_attempts + 1) if x.id in story else x
+                                            for x in p.objectives))
         elif run.purpose == "need" and not o.asked:
             p = _objective(p, replace(o, ask_attempts=o.ask_attempts + 1))
         return _set(s, p)
