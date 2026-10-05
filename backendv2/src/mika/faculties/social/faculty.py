@@ -376,8 +376,10 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
 #: (ADR 0033) ; d'anciens réglages qui le portent se relisent sans lui.
 #: v3 : qui était là, et quand chacun est parti (une reconnexion, un redémarrage d'elle ne sont pas des arrivées).
 #: v4 : qui a un lien avec qui, et les prises de nouvelles longtemps après (ADR 0058).
+#: v5 : une ouverture qui ne regarde que la personne (``agency.FOR_THEM`` : s'inquiéter d'elle, lui souhaiter, lui
+#: demander comment ça s'est passé) n'est plus comptée comme « elle a écrit la première » — ``starts`` se recalcule.
 SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive,
-                 state_version=4, retired_params=("ignored_shift",))
+                 state_version=5, retired_params=("ignored_shift",))
 SOCIAL.declare(*c.ALL)
 
 
@@ -421,6 +423,19 @@ def _opened(ct: Contact, day: int, who: str) -> Contact:
     return replace(ct, starts=(*ct.starts, (day, who))[-STARTS_KEPT:])
 
 
+#: Des raisons sans preuve, qui ne portent qu'une garde (la personne est là, elle peut se raviser) : ce ne sont pas
+#: des raisons de lui écrire.
+_CARRIERS = frozenset({c.PRESENT_PERSON, agency_c.SECOND_THOUGHTS})
+
+
+def _for_them(reasons: Any) -> bool:
+    """Une initiative qui ne regarde que la personne (``agency.FOR_THEM``) : s'inquiéter d'elle, l'encourager, lui
+    souhaiter son anniversaire, lui demander comment ça s'est passé. On ne tient pas ses comptes quand on prend soin
+    de quelqu'un : elle n'entre pas dans « qui écrit la première »."""
+    motives = set(reasons) - _CARRIERS - {""}
+    return bool(motives) and motives <= agency_c.FOR_THEM
+
+
 @SOCIAL.reducer(rt.PERCEPTION_RECEIVED, reads=[identity_c.PERSON])
 def _received(s: SocialState, e, cx) -> SocialState:
     d = e.data
@@ -459,8 +474,9 @@ def _uttered(s: SocialState, e, cx) -> SocialState:
     speaking_up = d.kind == Kind.INITIATIVE and not agency_c.NOT_SPEAKING_UP & set(reasons)
     initiative = d.kind == Kind.INITIATIVE
     ct, opens = _active(ct, e.at, p.conversation_gap_us)
-    if speaking_up and opens:
-        ct = _opened(ct, cx.local(e.at).date().toordinal(), HER)  # c'est elle qui écrit la première
+    if speaking_up and opens and not _for_them(reasons):
+        # c'est elle qui écrit la première — sauf pour prendre soin de la personne, qui ne se compte pas
+        ct = _opened(ct, cx.local(e.at).date().toordinal(), HER)
     ct = replace(ct, last_out=e.at, unanswered=ct.unanswered + (1 if speaking_up else 0))
     if initiative and c.REKINDLE in reasons:
         s = replace(s, rekindled=s.rekindled.set(person, e.at))  # une fois par silence

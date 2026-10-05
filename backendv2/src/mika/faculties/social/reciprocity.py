@@ -2,8 +2,10 @@
 
 On compte, sur leurs dernières conversations (un long silence les sépare),
 qui a écrit la première : elle, ou la personne — une réponse à sa relance
-n'ouvre rien, une salutation à l'arrivée non plus. Quand c'est presque
-toujours elle, deux choses :
+n'ouvre rien, une salutation à l'arrivée non plus, et prendre soin d'elle ne
+se compte pas (s'inquiéter, l'encourager, lui souhaiter, lui demander comment
+ça s'est passé : ``agency.FOR_THEM``). Quand c'est presque toujours elle,
+deux choses :
 
 - **elle le remarque** : une pensée (« C'est presque toujours moi qui écris la
   première à … »), au plus une fois par semaine, et un pincement de solitude ;

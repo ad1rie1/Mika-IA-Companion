@@ -9,20 +9,23 @@ qu'il précédait.
 
 Toutes les raisons d'aller vers quelqu'un ne se valent pas : certaines sont
 **dues** (tenir parole), d'autres **préviennent** (ce qui ne peut pas
-attendre), d'autres **saluent** qui arrive. C'est déclaré ici, une fois, et
-lu par chaque retenue (le budget, ne pas harceler, la rancune, l'heure où la
-personne répond) — jamais redit dans une faculté.
+attendre), d'autres **saluent** qui arrive, d'autres ne regardent **que la
+personne** (prendre soin d'elle). C'est déclaré ici, une fois, et lu par
+chaque retenue (le budget, ne pas harceler, la rancune, l'heure où la
+personne répond, qui écrit la première) — jamais redit dans une faculté.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mika.contracts import attention as attention_c
 from mika.contracts import email as email_c
 from mika.contracts import goals as goals_c
 from mika.contracts import imaging as imaging_c
 from mika.contracts import mcp as mcp_c
 from mika.contracts import memory as memory_c
+from mika.contracts import others as others_c
 from mika.contracts import projects as projects_c
 from mika.contracts import social as social_c
 from mika.kernel.episode import Outcome
@@ -71,6 +74,14 @@ GREETS = frozenset({social_c.GREETING})
 #: Ce qui n'est pas prendre la parole pour qu'on lui réponde : saluer qui arrive, tenir parole. Ni compté au
 #: budget, ni suivi d'une période réfractaire, ni attendu en retour (ce n'était pas une question).
 NOT_SPEAKING_UP = GREETS | OWED
+#: Ce qui ne regarde **que la personne** : prendre de ses nouvelles parce qu'on s'inquiète, lui demander comment
+#: s'est passé ce qu'elle avait de prévu, l'encourager ou lui souhaiter (``others.WELL_WISHES``), revenir sur ce qui
+#: pèse entre vous, lui rendre ce qu'on a fait de ce qui la concernait. C'est prendre la parole (le budget, la
+#: période réfractaire s'y appliquent), mais pas « écrire toujours la première » : on ne tient pas ses comptes quand
+#: on prend soin de quelqu'un — ``social`` ne le compte pas dans la réciprocité. Avec ce qui prévient (``INFORMS``),
+#: ça n'attend pas que son dernier message ait trouvé sa réponse (``agency``).
+FOR_THEM = others_c.WELL_WISHES | frozenset({others_c.CHECK_IN, others_c.FOLLOW_UP, attention_c.THOUGHT,
+                                             goals_c.SHARE, projects_c.SHARE})
 
 #: Après tant d'initiatives restées sans réponse vers quelqu'un, plus rien vers cette personne tant qu'elle n'a pas
 #: écrit (ADR 0033) : elle ne peut plus lui écrire — ce qui lui reste, c'est d'y penser (``attention``).

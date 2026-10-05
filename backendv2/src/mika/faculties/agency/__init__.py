@@ -40,12 +40,10 @@ from mika.contracts import affect as affect_c
 from mika.contracts import agency as c
 from mika.contracts import attention as attention_c
 from mika.contracts import expression as expression_c
-from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
 from mika.contracts import presence as presence_c
-from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
@@ -72,9 +70,8 @@ REFRACTORY_SPAN = 3
 #: qu'elle avait de prévu, revenir sur ce qui pèse entre vous, lui rendre ce qu'on a fait de ce qui la concernait —
 #: et tout ce qui la prévient (``c.INFORMS``) : ça n'attend pas que son dernier message ait trouvé sa réponse (mais
 #: une initiative restée sans réponse, si — sauf pour prévenir). Ce qui vient de Mika (l'envie de parler, son
-#: humeur, le manque) attend.
-ABOUT_THEM = c.INFORMS | others_c.WELL_WISHES | frozenset({others_c.CHECK_IN, others_c.FOLLOW_UP,
-                                                            attention_c.THOUGHT, goals_c.SHARE, projects_c.SHARE})
+#: humeur, le manque) attend. Déclaré dans le contrat (``c.FOR_THEM``) : ``social`` le lit aussi.
+ABOUT_THEM = c.INFORMS | c.FOR_THEM
 #: ce qui ne relance pas même quelqu'un qui ne répond plus : lui souhaiter son anniversaire le jour même (un vœu
 #: n'attend pas de réponse, et ne pas le faire se remarque plus que de le faire)
 NOT_A_NUDGE = frozenset({others_c.CELEBRATE})
