@@ -394,11 +394,15 @@ class WorldHub:
         return WebSocketRoute(p.PATH, self.endpoint)
 
     def overview(self) -> dict[str, Any]:
-        """Ce qu'un opérateur voudrait savoir : qui est connecté, qui joue, ce qui manque au moteur."""
-        return {"sessions": [{"session": s.id, "actor": s.actor, "client": _client_name(s.client),
-                              "roles": [r.value for r in _ROLE_ORDER if r in s.roles]}
+        """Ce qu'un opérateur voudrait savoir : qui est connecté, qui joue (et qui attend le bail), la révision
+        en vigueur (``rev``), ce qui manque au moteur."""
+        definition, _ = self.port.world_view()
+        return {"sessions": [{"session": s.id, "actor": s.actor, "handle": s.handle, "client": _client_name(s.client),
+                              "roles": [r.value for r in _ROLE_ORDER if r in s.roles],
+                              "waiting_host": s.id in self._candidates}
                              for s in self.sessions.values()],
                 "host": self.host,
+                "rev": definition.rev,
                 "loaded": [{"session": r.session, "client": r.client, "rev": r.rev, "at": r.at,
                             "missing_assets": list(r.missing_assets), "missing_anchors": list(r.missing_anchors)}
                            for r in reversed(self.loaded.values())]}
