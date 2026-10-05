@@ -20,7 +20,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 
 /**
- * Le fil vu de l'écran : l'observer, envoyer, réessayer, effacer. Un envoi écrit la bulle et sa
+ * Le fil vu de l'écran : l'observer, envoyer, réessayer, redemander, effacer. Un envoi écrit la bulle et sa
  * ligne de file d'envoi dans une seule transaction, puis la confie à la socket : tapé hors ligne, un
  * message survit à la mort du processus et part à la prochaine connexion.
  */
@@ -88,36 +88,66 @@ class ChatRepository(
     suspend fun retry(localId: Long): SendResult? {
         val failed = store.message(localId) ?: return null
         if (failed.sender != Sender.USER || failed.status != MessageStatus.FAILED) return null
-        val typed = if (failed.attachments.isEmpty()) failed.text else failed.matchText.orEmpty()
+        val again = prepareAgain(failed)
+        val refusal = again.refusal
+        if (refusal != null) {
+            store.mutate { thread.firstOrNull { it.localId == localId }?.reason = refusal }
+            return SendResult.Rejected(refusal)
+        }
         val cid = failed.cid
+        store.mutate {
+            thread.removeAll { it.localId == localId }
+            if (cid != null) outboxDelete(cid)
+        }
+        if (cid != null) withContext(io) { files.forget(cid) }
+        return send(again.typed, again.staged)
+    }
+
+    /**
+     * « Le lui redemander » sous une réponse qui n'est pas venue (`no_reply`, `too_late`) : le même
+     * texte et les mêmes fichiers repartent comme un nouveau message. La bulle d'origine reste, avec
+     * sa note et ses fichiers : le serveur l'a bien reçue, et son fil la garde. Mêmes refus que
+     * [retry], rien n'est envoyé à moitié.
+     */
+    suspend fun resend(localId: Long): SendResult? {
+        val original = store.message(localId) ?: return null
+        if (original.sender != Sender.USER || original.status != MessageStatus.SENT || original.replyNote == null) {
+            return null
+        }
+        val again = prepareAgain(original)
+        again.refusal?.let { return SendResult.Rejected(it) }
+        return send(again.typed, again.staged)
+    }
+
+    /**
+     * Ce qui avait été tapé, et ses fichiers repassés en préparation depuis le dossier du message. Un
+     * fichier que le budget de `sent/` a emporté, ou un envoi que [AttachmentPolicy.checkSend] refuse,
+     * donne la raison de ne pas repartir — et rien ne reste alors dans la préparation.
+     */
+    private suspend fun prepareAgain(m: StoredMessage): Again {
+        val typed = if (m.attachments.isEmpty()) m.text else m.matchText.orEmpty()
+        val cid = m.cid
         val staged = if (cid == null) {
             emptyList()
         } else {
             withContext(io) {
                 files.restage(
                     cid,
-                    failed.attachments.mapNotNull { a -> a.local?.let { a.name to it } },
-                ) { name -> failed.attachments.firstOrNull { it.name == name }?.mime ?: "application/octet-stream" }
+                    m.attachments.mapNotNull { a -> a.local?.let { a.name to it } },
+                ) { name -> m.attachments.firstOrNull { it.name == name }?.mime ?: "application/octet-stream" }
             }
         }
         // Repartir sans un fichier, ce serait faire croire qu'on l'a renvoyé.
-        val refusal = if (staged.size < failed.attachments.size) {
+        val refusal = if (staged.size < m.attachments.size) {
             RETRY_FILES_GONE
         } else {
             AttachmentPolicy.checkSend(typed.trim(), staged)
         }
-        if (refusal != null) {
-            withContext(io) { staged.forEach { files.discardStaged(it.path) } }
-            store.mutate { thread.firstOrNull { it.localId == localId }?.reason = refusal }
-            return SendResult.Rejected(refusal)
-        }
-        store.mutate {
-            thread.removeAll { it.localId == localId }
-            if (cid != null) outboxDelete(cid)
-        }
-        if (cid != null) withContext(io) { files.forget(cid) }
-        return send(typed, staged)
+        if (refusal != null) withContext(io) { staged.forEach { files.discardStaged(it.path) } }
+        return Again(typed, staged, refusal)
     }
+
+    private class Again(val typed: String, val staged: List<StagedFile>, val refusal: String?)
 
     /**
      * Au démarrage : ce qui a encore sa ligne de file d'envoi repart ; une bulle « en attente » sans
