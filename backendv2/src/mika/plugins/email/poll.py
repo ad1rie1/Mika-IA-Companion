@@ -131,6 +131,11 @@ class Poll:
                 sender=m.sender[:200], address=m.address, importance=triage["importance"],
                 needs_reply=bool(triage["reponse"]) and not m.bulk, account=m.account, folder=m.folder,
                 about=tuple(h for h in (c.address_handle(m.address),) if h), dedupe_key=f"mail:{m.ref}"))
+            # déjà lu (ou répondu) ailleurs avant ce relevé : elle sait qu'il est arrivé, mais il n'est ni
+            # à annoncer, ni à préparer, ni à montrer comme non lu
+            if m.seen or m.answered:
+                drafts.append(READ.draft(mail=m.ref, how="répondu" if m.answered else "ailleurs",
+                                         dedupe_key=f"lu-ailleurs:{m.ref}"))
         # ce qui a été lu ailleurs (dans un autre client) : elle n'en parlera plus
         for ref in port.seen_elsewhere():
             seen = known.get(ref)
