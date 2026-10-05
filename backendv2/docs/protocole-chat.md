@@ -106,7 +106,8 @@ Une connexion silencieuse peut être morte sans le dire (un portable en veille, 
   ligne** (le serveur décode strictement ; un préfixe `data:…;base64,` est toléré). Les images sont décrites, l'audio
   transcrit, les documents lus ; les octets ne sont jamais gardés. Une trame entière ne dépasse pas ~34 Mio (et
   OkHttp n'en envoie pas plus de 16 Mio d'un coup).
-- Débit : 20 `chat` par 10 s ; `sync` et `identify` 12 par 10 s (au-delà, ignorés).
+- Débit : 20 `chat` par 10 s ; `sync` et `identify` 12 par 10 s (au-delà, ignorés). Au plus 8 `chat` en attente
+  sur une connexion, comptés à la réception : au-delà, `overloaded` — les derniers d'une rafale, jamais les premiers.
 
 `presence` : revenir vaut tout de suite (la personne est là ; un visage et un panneau frais suivent) ; partir vaut
 après 20 s (prendre une photo et revenir n'écrit rien). 6 écritures au journal par minute et par connexion au plus ;

@@ -659,14 +659,18 @@ class _Session:
 
     def enqueue_chat(self, frame: dict[str, Any]) -> None:
         """Le chat avance dans sa propre tâche : la lecture des trames continue pendant
-        qu'une pièce jointe se décrit (le client, sans pong, se reconnecterait)."""
-        task = asyncio.ensure_future(self._chat_in_turn(frame))
+        qu'une pièce jointe se décrit (le client, sans pong, se reconnecterait). Ce qui attend
+        devant lui se compte ici, à la réception : une rafale lue d'un trait crée toutes ses
+        tâches avant qu'aucune ne démarre, et chacune, comptée à son premier pas, voyait la
+        rafale entière — tous refusés, pas seulement les derniers."""
+        ahead = len(self._chats)
+        task = asyncio.ensure_future(self._chat_in_turn(frame, ahead))
         self._chats.add(task)
         task.add_done_callback(self._chats.discard)
 
-    async def _chat_in_turn(self, frame: dict[str, Any]) -> None:
+    async def _chat_in_turn(self, frame: dict[str, Any], ahead: int) -> None:
         cid = str(frame.get("client_msg_id") or "")[: protocol.MAX_CLIENT_MSG_ID]
-        if len(self._chats) > MAX_QUEUED_CHATS:
+        if ahead >= MAX_QUEUED_CHATS:
             await self._safe_send(protocol.ack(cid, "overloaded"))
             return
         async with self._chat_lock:
