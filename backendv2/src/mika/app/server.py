@@ -366,11 +366,16 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         finally:
             await world_hub.stop()
             await hub.stop()
-            await mcp.aclose()
-            await gateway.aclose()
-            await imaging.aclose()
-            await live.calls.flush()
-            await kernel.stop()
+
+            async def release() -> None:
+                # les épisodes déjà annulés (une réponse en cours reste à reprendre) : seulement
+                # alors les fournisseurs se ferment, et le registre des appels se vide magasin ouvert
+                await mcp.aclose()
+                await gateway.aclose()
+                await imaging.aclose()
+                await live.calls.flush()
+
+            await kernel.stop(release)
             datadir.release(data)
 
     inspector = routes(InspectorDeps(kernel, live.accounts, live.settings, live.reload_llm, gateway.traces,

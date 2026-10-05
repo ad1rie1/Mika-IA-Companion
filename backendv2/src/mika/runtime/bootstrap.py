@@ -268,7 +268,10 @@ class Kernel:
             if hook is not None:
                 call(hook, label="arrêt d'un port")
 
-    async def stop(self) -> None:
+    async def stop(self, release: Callable[[], Awaitable[Any]] | None = None) -> None:
+        """``release`` ferme ce qui sert les épisodes (fournisseurs, outils) : appelé une fois
+        les épisodes annulés — fermé avant, un appel en vol se réglait en échec au lieu de
+        rester à reprendre — et avant le magasin, où ses dernières écritures vont encore."""
         self.started = False
         self.phase = "stopping"
         for t in list(self._retries):
@@ -283,6 +286,8 @@ class Kernel:
             t.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
+        if release is not None:
+            await release()
         self._shutdown_ports()
         await self.traces.flush()  # les épisodes annulés ci-dessus ont écrit leur règlement
         await self.mind.close()
