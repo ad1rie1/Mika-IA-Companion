@@ -413,6 +413,16 @@ def _worked(s: NeedsState, e, cx) -> NeedsState:
     return replace(s, working=s.working.delete(e.correlation), idle_since=max(s.idle_since, e.at))
 
 
+@NEEDS.reducer(body_c.WOKE)
+def _woke(s: NeedsState, e, cx) -> NeedsState:
+    """Le vide ne se ressent qu'éveillée : au réveil, il recommence à compter
+    (la nuit n'a pas creusé de vide). ``felt_at`` ne bouge pas : un réveil n'est
+    pas un vide ressenti, il ne prépare pas de retrouvailles."""
+    if not s.idle_since:
+        return s
+    return replace(s, idle_since=max(s.idle_since, e.data.at))
+
+
 @NEEDS.reducer(c.FELT)
 def _felt(s: NeedsState, e, cx) -> NeedsState:
     return replace(s, felt_at=e.at, felt=e.data.feeling, felt_level=e.data.intensity)
