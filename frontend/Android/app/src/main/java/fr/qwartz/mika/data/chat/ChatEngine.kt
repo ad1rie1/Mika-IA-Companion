@@ -101,6 +101,10 @@ class ChatEngine(
                 if (f.text.isEmpty() && f.voiceReason == MikaProtocol.VOICE_REASON_ASLEEP) {
                     ChatSync.markAsleep(thread, cid)
                 }
+                // Elle l'a lu et s'est tue : un « vu », pas une coche seule qui ferait douter de la livraison.
+                if (f.text.isEmpty() && f.voiceReason == MikaProtocol.VOICE_REASON_SILENCE) {
+                    ChatSync.markSeen(thread, cid)
+                }
             }
             if (text.isEmpty() || f.isInner || systemNote) return@mutate null
             // Une réponse peut arriver deux fois : en direct, puis dans un rattrapage qui croise le même tour.

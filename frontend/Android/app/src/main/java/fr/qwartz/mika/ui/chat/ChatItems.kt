@@ -21,7 +21,10 @@ sealed interface ChatItem {
         override val key = "truncated"
     }
 
-    /** Une bulle. [read] : un message envoyé auquel Mika a répondu depuis (double coche). */
+    /**
+     * Une bulle. [read] : un message envoyé que Mika a lu — elle a répondu depuis, ou choisi de se
+     * taire (double coche).
+     */
     data class Bubble(override val key: String, val message: StoredMessage, val read: Boolean) : ChatItem
 
     /**
@@ -67,7 +70,7 @@ object ChatItems {
         val out = ArrayList<ChatItem>(all.size * 2 + 2)
         if (truncated) out += ChatItem.TruncatedNote
 
-        // « lu » : une parole de Mika (pas un murmure) vient après ce message.
+        // « lu » : une parole de Mika (pas un murmure) vient après ce message — ou elle s'est tue (`seen`).
         val answeredAfter = BooleanArray(all.size)
         var seenReply = false
         for (i in all.indices.reversed()) {
@@ -94,7 +97,8 @@ object ChatItems {
                 else -> out += ChatItem.Bubble(
                     key,
                     m,
-                    read = m.sender == Sender.USER && m.status == MessageStatus.SENT && answeredAfter[i],
+                    read = m.sender == Sender.USER && m.status == MessageStatus.SENT &&
+                        (answeredAfter[i] || m.waiting == ChatSync.SEEN),
                 )
             }
             m.note?.let { out += ChatItem.Note("n$key", it) }

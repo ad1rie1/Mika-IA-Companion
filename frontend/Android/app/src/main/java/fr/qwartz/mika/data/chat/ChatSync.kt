@@ -70,7 +70,7 @@ data class StoredMessage(
     /** La réponse ne viendra pas (`no_reply`) : dit sous la bulle, le message restant envoyé. */
     var replyNote: String? = null,
     var replyHref: String? = null,
-    /** `asleep` : elle dort, la réponse attend son réveil. */
+    /** `asleep` : elle dort, la réponse attend son réveil. `seen` : elle l'a lu et a choisi de se taire. */
     var waiting: String? = null,
     // ── Propres à l'app ──
     /** La clé locale (Room) ; 0 tant que le message n'est pas écrit. */
@@ -259,6 +259,20 @@ object ChatSync {
         val msg = history.firstOrNull { it.cid == cid } ?: return false
         if (msg.waiting == ASLEEP) return false
         msg.waiting = ASLEEP
+        return true
+    }
+
+    const val SEEN = "seen"
+
+    /**
+     * Une trame `speech` sans texte, `voice_reason: "silence"` : elle l'a lu et n'a rien ajouté — la
+     * bulle se voit « lu », comme dans une messagerie. Si c'était une panne, l'accusé `no_reply` qui
+     * suit l'efface ([applyAck]) : une réponse impossible n'est pas une lecture.
+     */
+    fun markSeen(history: List<StoredMessage>, cid: String): Boolean {
+        val msg = history.firstOrNull { it.cid == cid } ?: return false
+        if (msg.waiting == SEEN) return false
+        msg.waiting = SEEN
         return true
     }
 
