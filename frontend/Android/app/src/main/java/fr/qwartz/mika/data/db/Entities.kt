@@ -32,7 +32,7 @@ data class MessageEntity(
     val note: String?,
     @ColumnInfo(name = "reply_note") val replyNote: String?,
     @ColumnInfo(name = "reply_href") val replyHref: String?,
-    /** `asleep` : sa réponse attend son réveil. */
+    /** `asleep` : sa réponse attend son réveil. `seen` : elle l'a lu et s'est tue. */
     val waiting: String?,
     @ColumnInfo(name = "after_cursor") val afterCursor: Long?,
     val source: String?,

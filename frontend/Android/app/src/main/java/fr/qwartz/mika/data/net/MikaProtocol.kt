@@ -124,6 +124,8 @@ object MikaProtocol {
 
     // ── Voix et sources (protocol.py) ──
     const val VOICE_REASON_ASLEEP = "asleep"
+    /** Une trame sans texte : elle a lu et choisi de se taire (ou, suivie d'un `no_reply`, elle n'a pas pu répondre). */
+    const val VOICE_REASON_SILENCE = "silence"
     const val PERSONA_INNER = "inner"
     const val PERSONA_SPEAKING = "speaking"
     const val SOURCE_ERROR = "error"
