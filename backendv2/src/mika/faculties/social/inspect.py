@@ -2,16 +2,34 @@
 l'onglet « Lien » de la fiche d'une personne.
 
 Lecture seule. La proximité et le rythme sont ceux que la faculté lit (faits
-``CLOSENESS`` et ``CONTACT``) ; un profil dont le texte a été oublié
-s'affiche comme oublié. La seule écriture — fixer la proximité — est une
-action d'opérateur (``actions.py``), posée en place sur l'onglet.
+``CLOSENESS`` et ``CONTACT``) ; « Pourquoi ce niveau » déroule la trace du
+calcul même qui fait la proximité (``closeness_trace``), jamais un calcul à
+part. Un profil dont le texte a été oublié s'affiche comme oublié. La seule
+écriture — fixer la proximité — est une action d'opérateur (``actions.py``),
+posée en place sur l'onglet.
 """
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from mika.contracts import identity as identity_c
 from mika.contracts import social as c
-from mika.faculties.social.faculty import SOCIAL, SocialParams, SocialState, params
+from mika.faculties.social.faculty import (
+    BOND,
+    DAYS,
+    GRUDGE,
+    HISTORY,
+    MESSAGES,
+    REGARD,
+    SOCIAL,
+    ClosenessTrace,
+    Criterion,
+    SocialParams,
+    SocialState,
+    closeness_trace,
+    params,
+)
 from mika.faculties.social.profile import lines_of
 from mika.faculties.social.sections import refs_of
 from mika.kernel.frame import Frame
@@ -49,6 +67,11 @@ CLOSENESS_FR = {c.STRANGER: "pas encore de lien", c.ACQUAINTANCE: "connaissance"
                 c.CLOSE: "proche"}
 CLOSENESS_TONE = {c.STRANGER: "muted", c.ACQUAINTANCE: "", c.FRIEND: "info", c.CLOSE: "ok"}
 FORGOTTEN = "(oublié)"
+#: les critères d'un niveau, en mots ; ceux que l'affect décide (non lus sans l'histoire d'une amie)
+CRITERION_FR = {DAYS: "jours de contact", MESSAGES: "messages reçus", HISTORY: "histoire vécue (jours)",
+                REGARD: "chaleur", BOND: "attachement", GRUDGE: "hostilité"}
+_COUNTED = frozenset({DAYS, MESSAGES, HISTORY})
+_AFFECT = frozenset({REGARD, BOND, GRUDGE})
 
 
 def _known(s: SocialState) -> set[str]:
@@ -96,6 +119,120 @@ def _silence(reading: c.ContactReading, p: SocialParams) -> Cell:
     missed = reading.silence_ratio >= p.recontact_factor
     return Meter(min(1.0, reading.silence_ratio / full) if full > 0 else 0.0, f"×{_ratio(reading.silence_ratio)}",
                  "warn" if missed else "")
+
+
+def _number(value: float) -> str:
+    return f"{value:.2f}".replace(".", ",")
+
+
+def _amount(key: str, value: float) -> str:
+    return str(round(value)) if key in _COUNTED else _number(value)
+
+
+def _criterion(cr: Criterion, days: int, settled: bool, p: SocialParams) -> str:
+    """Un critère tel que le calcul l'a lu : la valeur, le seuil, ✓ ou ✗ (``days`` : ses jours de contact)."""
+    label, value, bar = CRITERION_FR.get(cr.key, cr.key), _amount(cr.key, cr.value), _amount(cr.key, cr.threshold)
+    if cr.key == GRUDGE:
+        if cr.held:
+            return f"sans rancune : {label} {value} < {bar} ✓" + (" (amitié installée)" if settled else "")
+        return (f"rancune : {label} {value} ≥ {bar} ✗"
+                + (" (assez lourde pour défaire une amitié installée)" if settled else
+                   " (une amitié naissante ne la passe pas)"))
+    if cr.key == BOND and not cr.held and cr.value <= 0.0:
+        text = f"{label} nul ✗ (il en faut un)"
+    else:
+        text = f"{label} {value} {'≥' if cr.held else '<'} {bar} {'✓' if cr.held else '✗'}"
+    if cr.key == BOND and p.close_long_bond < p.close_bond:
+        if days >= p.close_long_days:
+            text += f" (longue histoire : {days} jours de contact)"
+        elif not cr.held:
+            text += f" ({_number(p.close_long_bond)} suffirait après {p.close_long_days} jours de contact : {days})"
+    return text
+
+
+def _criteria(level: tuple[Criterion, ...], days: int, settled: bool, affect: bool, p: SocialParams) -> str:
+    """Les critères d'un niveau : « ; » entre ceux qu'il faut tous, « ou » devant celui qui suffit à la place."""
+    parts: list[str] = []
+    for cr in level:
+        if not affect and cr.key in _AFFECT:
+            continue  # pas lu : il n'y changerait rien
+        text = _criterion(cr, days, settled, p)
+        if cr.either and parts:
+            parts[-1] = f"{parts[-1]} ou {text}"
+        else:
+            parts.append(text)
+    return " ; ".join(parts)
+
+
+def _steps(trace: ClosenessTrace, p: SocialParams) -> list[tuple[str, str, str]]:
+    """Ce que le calcul de la proximité vécue a lu et tranché, dans l'ordre : les critères du niveau atteint et du
+    suivant (sur la fenêtre), le silence, le plancher d'histoire, celui de la propriétaire."""
+    steps: list[tuple[str, str, str]] = []
+    window, everything = trace.window, trace.everything
+    if window is None or everything is None:
+        steps.append(("leur histoire", "aucune", "cette personne ne lui a jamais écrit"))
+    else:
+        settled = everything.days >= p.friendship_settled_days
+        if not trace.affect:
+            steps.append(("affect", "pas lu",
+                          f"pas l'histoire d'une amie ({everything.days} jours de contact pour {p.friend_days}, "
+                          f"{everything.messages} messages pour {p.friend_messages}) : ni la chaleur, ni "
+                          "l'attachement, ni la rancune n'y changeraient rien"))
+        for rank in (window.rank, window.rank + 1):
+            if 0 < rank < len(c.CLOSENESS_LEVELS):
+                steps.append((CLOSENESS_FR[c.CLOSENESS_LEVELS[rank]],
+                              "atteint ✓" if rank <= window.rank else "pas atteint ✗",
+                              _criteria(window.criteria[rank], window.days, settled, trace.affect, p)))
+        ratio = trace.silent / trace.rhythm_days if trace.rhythm_days > 0 else 0.0
+        lost = ("un cran perdu" if window.rank > 0 else "rien à perdre") if trace.lost else "aucun cran perdu"
+        steps.append(("silence", lost,
+                      f"{trace.silent} jour(s) depuis leur dernier jour de contact, ×{_ratio(ratio)} le rythme "
+                      f"qu'elles avaient ({_ratio(trace.rhythm_days)} j) ; un cran se perd à "
+                      f"{_ratio(trace.silence_bar)} j (×{_ratio(p.closeness_silence_factor)} son rythme, jamais "
+                      f"avant {p.closeness_silence_min_days} j)"))
+        if trace.floor > 0:
+            was = CLOSENESS_FR[c.CLOSENESS_LEVELS[everything.rank]]
+            why = (f"un cran sous ce qu'elles ont été sur toute leur histoire : {was} ({everything.days} jours de "
+                   f"contact, {everything.messages} messages)")
+            if trace.short and everything.rank - 1 > trace.floor:
+                why = (f"une histoire courte ({everything.days} jours de contact, moins de {p.lasting_days}) que "
+                       f"son silence a dépassée ({trace.silent} j de silence pour {trace.history} j vécus "
+                       "ensemble) : connaissance au plus")
+            elif everything.days >= p.lasting_days:
+                why += (f" — une longue amitié ({p.lasting_days} jours de contact ou plus) le garde, quel que soit "
+                        "le silence")
+            if trace.floor > window.rank - (1 if trace.lost else 0):
+                why += " ; c'est lui qui tient le niveau"
+            steps.append(("plancher d'histoire", CLOSENESS_FR[c.CLOSENESS_LEVELS[trace.floor]], why))
+    if trace.owner:
+        if trace.level != trace.lived_level:
+            steps.append(("plancher de la propriétaire", CLOSENESS_FR.get(trace.level, trace.level),
+                          f"sa propriétaire reconnue : au moins {CLOSENESS_FR.get(p.owner_floor, p.owner_floor)} "
+                          "d'office — jamais « proche » : ça se vit"))
+        else:
+            steps.append(("plancher de la propriétaire", "levé",
+                          f"une rancune lourde (hostilité {_number(trace.hostility)} ≥ {_number(p.grudge_demote)}) "
+                          "le lève, comme elle défait une amitié installée"))
+    return steps
+
+
+def _why(trace: ClosenessTrace, lived: ClosenessTrace, p: SocialParams) -> Table:
+    """Pourquoi ce niveau : la trace du calcul même qui fait la proximité (``lived`` : sans la déclaration)."""
+    steps: list[tuple[str, str, str]] = []
+    if trace.declared:
+        steps.append(("déclarée", CLOSENESS_FR.get(trace.level, trace.level),
+                      "fixée par un opérateur : elle l'emporte ; ce qui suit est ce que leur histoire en ferait"))
+    steps += _steps(lived, p)
+    if trace.declared:
+        steps.append(("vécue, elle serait", CLOSENESS_FR.get(lived.level, lived.level),
+                      "sans la déclaration (« automatique »)"))
+    steps.append(("niveau retenu", CLOSENESS_FR.get(trace.level, trace.level), "celui que lit la faculté"))
+    window = lived.window
+    caption = (f"Jours de contact et messages : ceux des {p.closeness_window_days} derniers jours ({window.days} "
+               f"jours de contact, {window.messages} messages reçus) ; l'histoire vécue va de leur premier à leur "
+               "dernier jour de contact ; l'histoire plus ancienne fait le plancher."
+               if window is not None else "")
+    return Table(("étape", "valeur", "pourquoi"), tuple(steps), title="Pourquoi ce niveau", caption=caption)
 
 
 def _texts(s: SocialState, people: list[str], ctx: InspectContext) -> dict[str, str] | None:
@@ -151,6 +288,13 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str, *, o
     profile = s.profiles.get(person)
     texts = _texts(s, [person], ctx)
     missed = dict(frame.get(c.MISSED))
+    today = frame.local().date().toordinal()
+    trace = closeness_trace(s, person, p, today, frame.get)
+    # déclarée : ce que leur histoire en ferait, par le même calcul sans la déclaration
+    lived = (closeness_trace(replace(s, declared=s.declared.delete(person)), person, p, today, frame.get)
+             if trace.declared else trace)
+    window = lived.window
+    recent = f" sur les {p.closeness_window_days} derniers jours"
     blocks: list[Block] = [
         Stats((Stat("proximité", _closeness(s, frame, person),
                     "déclarée par un opérateur" if person in s.declared else "née de leur histoire"),
@@ -161,7 +305,8 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str, *, o
                Stat("ses initiatives sans réponse", reading.unanswered))),
         Fields((
             *((() if on_fiche else (("personne", _ref(frame, person)),))),  # sur sa fiche : pas de lien vers elle-même
-            ("jours de contact", reading.days), ("messages reçus", reading.inbound),
+            ("jours de contact", f"{reading.days} en tout, {window.days}{recent}" if window else reading.days),
+            ("messages reçus", f"{reading.inbound} en tout, {window.messages}{recent}" if window else reading.inbound),
             ("qui ouvre leurs conversations",
              f"elle {reading.her_starts} fois, la personne {reading.their_starts} fois"
              + (" — c'est presque toujours elle" if reading.one_sided else "")),
@@ -171,6 +316,7 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str, *, o
             ("éléments de mémoire la concernant", s.mentions.get(person, 0)),
             ("dernier réconfort cherché (auprès de quiconque)", _when(s.comforted_at)),
         ), title="Le lien", columns=2),
+        _why(trace, lived, p),
     ]
     if person in missed:
         blocks.append(Note(f"Elle lui manque : un silence de ×{_ratio(missed[person])} son rythme habituel.",
@@ -190,7 +336,7 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str, *, o
 
 
 @SOCIAL.inspect("lien", title="Lien", subject="person", order=30,
-                description="Leur proximité, le rythme de leurs échanges, ce qu'elle en pense.")
+                description="Leur proximité et pourquoi ce niveau, le rythme de leurs échanges, ce qu'elle en pense.")
 def _link(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
     person = ctx.subject
     if not person:

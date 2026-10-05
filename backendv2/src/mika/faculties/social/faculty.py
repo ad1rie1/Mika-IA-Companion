@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import statistics
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
 
@@ -602,17 +603,68 @@ def estranged(hostility: float, p: SocialParams, settled: bool = False) -> bool:
     return hostility > 0.0 and hostility >= (p.grudge_demote if settled else p.grudge)
 
 
-def _level(days: int, messages: int, history: int, regard: float, p: SocialParams, friendly: bool,
-           bond: float = 0.0) -> int:
-    attached = bond > 0.0 and (bond >= p.close_bond or (days >= p.close_long_days and bond >= p.close_long_bond))
-    if friendly and days >= p.close_days and messages >= p.close_messages and history >= p.close_history_days \
-            and (regard >= p.close_regard or attached):
-        return _RANK[c.CLOSE]
-    if friendly and days >= p.friend_days and messages >= p.friend_messages:
-        return _RANK[c.FRIEND]
-    if days >= p.acquaintance_days or messages >= p.acquaintance_messages:
-        return _RANK[c.ACQUAINTANCE]
-    return _RANK[c.STRANGER]
+#: les critères d'un niveau de proximité (``Criterion.key``)
+DAYS, MESSAGES, HISTORY, REGARD, BOND, GRUDGE = "days", "messages", "history", "regard", "bond", "grudge"
+
+
+@dataclass(frozen=True, slots=True)
+class Criterion:
+    """Un critère d'un niveau de proximité, tel que le calcul l'a lu : la valeur, le seuil, s'il est tenu.
+    ``either`` : il suffit à la place du critère précédent (« ou »). L'hostilité (``GRUDGE``) se tient sous son
+    seuil ; les autres, au seuil ou au-dessus."""
+
+    key: str
+    value: float
+    threshold: float
+    held: bool
+    either: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class LevelTrace:
+    """Le rang qu'atteint une histoire (``days`` jours de contact, ``messages`` messages reçus), et les critères de
+    chaque niveau, par rang (une inconnue n'en a aucun) : le rang est le plus haut dont les critères tiennent."""
+
+    rank: int
+    days: int
+    messages: int
+    criteria: tuple[tuple[Criterion, ...], ...]
+
+
+def _holds(criteria: tuple[Criterion, ...]) -> bool:
+    """Tous les critères, chacun ou celui qui suffit à sa place (``either``)."""
+    groups: list[bool] = []
+    for cr in criteria:
+        if cr.either and groups:
+            groups[-1] = groups[-1] or cr.held
+        else:
+            groups.append(cr.held)
+    return all(groups)
+
+
+def _friendly(hostility: float, p: SocialParams, settled: bool) -> Criterion:
+    """Sans rancune (``estranged``) : sous le seuil ordinaire, ou sous celui, plus lourd, d'une amitié installée."""
+    return Criterion(GRUDGE, hostility, p.grudge_demote if settled else p.grudge, not estranged(hostility, p, settled))
+
+
+def _level(days: int, messages: int, history: int, regard: float, p: SocialParams, friendly: Criterion,
+           bond: float = 0.0) -> LevelTrace:
+    # l'attachement suffisant : plus modeste après une longue histoire, jamais nul (il en faut un)
+    bar = min(p.close_bond, p.close_long_bond) if days >= p.close_long_days else p.close_bond
+    criteria = (
+        (),
+        (Criterion(DAYS, days, p.acquaintance_days, days >= p.acquaintance_days),
+         Criterion(MESSAGES, messages, p.acquaintance_messages, messages >= p.acquaintance_messages, either=True)),
+        (friendly, Criterion(DAYS, days, p.friend_days, days >= p.friend_days),
+         Criterion(MESSAGES, messages, p.friend_messages, messages >= p.friend_messages)),
+        (friendly, Criterion(DAYS, days, p.close_days, days >= p.close_days),
+         Criterion(MESSAGES, messages, p.close_messages, messages >= p.close_messages),
+         Criterion(HISTORY, history, p.close_history_days, history >= p.close_history_days),
+         Criterion(REGARD, regard, p.close_regard, regard >= p.close_regard),
+         Criterion(BOND, bond, bar, bond > 0.0 and bond >= bar, either=True)),
+    )
+    rank = max(i for i, level in enumerate(criteria) if _holds(level))
+    return LevelTrace(rank, days, messages, criteria)
 
 
 def _counts(ct: Contact) -> tuple[int, ...]:
@@ -633,8 +685,65 @@ def known(ct: Contact | None, regard: float, p: SocialParams, hostility: float =
     if ct is None or not ct.days:
         return c.STRANGER
     total = max(ct.total_days, len(ct.days))
-    friendly = not estranged(hostility, p, total >= p.friendship_settled_days)
-    return c.CLOSENESS_LEVELS[_level(total, ct.inbound, span(ct), regard, p, friendly, bond)]
+    friendly = _friendly(hostility, p, total >= p.friendship_settled_days)
+    return c.CLOSENESS_LEVELS[_level(total, ct.inbound, span(ct), regard, p, friendly, bond).rank]
+
+
+@dataclass(frozen=True, slots=True)
+class ClosenessTrace:
+    """Pourquoi ce niveau : le calcul de la proximité pas à pas (``lived``, puis le fait ``CLOSENESS``). Le niveau
+    est celui de la trace — le fait le rend, la console l'explique : l'un ne peut pas contredire l'autre."""
+
+    level: str
+    #: fixée par un opérateur : elle l'emporte, rien d'autre n'est calculé
+    declared: bool = False
+    #: sur la fenêtre glissante (ce que le calcul lit) et sur toute leur histoire (d'où vient le plancher)
+    window: LevelTrace | None = None
+    everything: LevelTrace | None = None
+    #: le temps vécu ensemble ; les jours depuis leur dernier jour de contact ; le rythme qu'elles avaient ; le
+    #: silence qui fait perdre un cran, et s'il est atteint
+    history: int = 0
+    silent: int = 0
+    rhythm_days: float = 0.0
+    silence_bar: float = 0.0
+    lost: bool = False
+    #: le plancher d'histoire (un rang) ; une amitié courte que son silence a dépassée (connaissance au plus)
+    floor: int = 0
+    short: bool = False
+    #: le niveau vécu, avant le plancher de la propriétaire ; l'hostilité lue
+    lived_level: str = c.STRANGER
+    hostility: float = 0.0
+    #: l'affect a été lu (pas pour qui n'a pas l'histoire d'une amie : il n'y changerait rien)
+    affect: bool = True
+    #: une propriétaire sous son plancher (``owner_floored`` a tranché)
+    owner: bool = False
+
+
+def lived_trace(ct: Contact | None, regard: float, p: SocialParams, hostility: float = 0.0,
+                now_day: int | None = None, bond: float = 0.0) -> ClosenessTrace:
+    """``lived``, pas à pas."""
+    if ct is None or not ct.days:
+        return ClosenessTrace(c.STRANGER, hostility=hostility)
+    last = ct.days[-1]
+    today = last if now_day is None else max(now_day, last)
+    total = max(ct.total_days, len(ct.days))
+    friendly = _friendly(hostility, p, total >= p.friendship_settled_days)
+    history = span(ct)
+    everything = _level(total, ct.inbound, history, regard, p, friendly, bond)
+    recent = [(day, n) for day, n in zip(ct.days, _counts(ct), strict=True) if today - day < p.closeness_window_days]
+    window = _level(len(recent), sum(n for _d, n in recent), history, regard, p, friendly, bond)
+    rhythm_days, _measured = rhythm(ct, last, c.CLOSENESS_LEVELS[everything.rank], p)  # le rythme qu'elles avaient
+    silent = today - last
+    bar = max(p.closeness_silence_min_days, p.closeness_silence_factor * rhythm_days)
+    lost = silent >= bar
+    floor = everything.rank - 1
+    short = silent > history and total < p.lasting_days
+    if short:
+        floor = min(floor, _RANK[c.ACQUAINTANCE])  # une amitié plus courte que son silence
+    level = c.CLOSENESS_LEVELS[max(_RANK[c.STRANGER], window.rank - (1 if lost else 0), floor)]
+    return ClosenessTrace(level, window=window, everything=everything, history=history, silent=silent,
+                          rhythm_days=rhythm_days, silence_bar=bar, lost=lost, floor=floor, short=short,
+                          lived_level=level, hostility=hostility)
 
 
 def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float = 0.0,
@@ -654,25 +763,8 @@ def lived(ct: Contact | None, regard: float, p: SocialParams, hostility: float =
     cran sous ce qu'elle a été — une amitié courte que le silence a dépassée
     (il dure plus que toute leur histoire) redevient une connaissance. Une
     dispute ne défait pas une amitié : seule une rancune lourde
-    (``grudge_demote``) le fait (ADR 0058)."""
-    if ct is None or not ct.days:
-        return c.STRANGER
-    last = ct.days[-1]
-    today = last if now_day is None else max(now_day, last)
-    total = max(ct.total_days, len(ct.days))
-    friendly = not estranged(hostility, p, total >= p.friendship_settled_days)
-    history = span(ct)
-    everything = _level(total, ct.inbound, history, regard, p, friendly, bond)
-    recent = [(day, n) for day, n in zip(ct.days, _counts(ct), strict=True) if today - day < p.closeness_window_days]
-    window = _level(len(recent), sum(n for _d, n in recent), history, regard, p, friendly, bond)
-    rhythm_days, _measured = rhythm(ct, last, c.CLOSENESS_LEVELS[everything], p)  # le rythme qu'elles avaient
-    silent = today - last
-    if silent >= max(p.closeness_silence_min_days, p.closeness_silence_factor * rhythm_days):
-        window -= 1
-    floor = everything - 1
-    if silent > history and total < p.lasting_days:
-        floor = min(floor, _RANK[c.ACQUAINTANCE])  # une amitié plus courte que son silence
-    return c.CLOSENESS_LEVELS[max(_RANK[c.STRANGER], window, floor)]
+    (``grudge_demote``) le fait (ADR 0058). Le calcul pas à pas : ``lived_trace``."""
+    return lived_trace(ct, regard, p, hostility, now_day, bond).level
 
 
 #: au plus l'amitié d'office : « proche » se vit
@@ -790,29 +882,35 @@ def _could_be_friends(ct: Contact, p: SocialParams) -> bool:
     return max(ct.total_days, len(ct.days)) >= p.friend_days and ct.inbound >= p.friend_messages
 
 
-@SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD, affect_c.HOSTILITY, affect_c.BOND, identity_c.IS_OWNER,
-                                  identity_c.HANDLES])
-def _closeness(s: SocialState, cx, person: str) -> str:
-    """Déclarée, sinon vécue ; le plancher d'une propriétaire. Ce qui coûte (l'affect, la propriété) ne se lit
-    que quand ça peut changer quelque chose : une inconnue sans histoire n'a ni chaleur ni rancune à peser."""
+def closeness_trace(s: SocialState, person: str, p: SocialParams, today: int,
+                    get: Callable[[Any], Any]) -> ClosenessTrace:
+    """Déclarée, sinon vécue ; le plancher d'une propriétaire — pas à pas. ``get`` lit les faits (``cx.facts.get``
+    pour le fait, ``frame.get`` pour la console). Ce qui coûte (l'affect, la propriété) ne se lit que quand ça peut
+    changer quelque chose : une inconnue sans histoire n'a ni chaleur ni rancune à peser."""
     declared = s.declared.get(person)
     if declared is not None:
-        return declared
-    p = params(cx.params)
-    ct = contact_of(s, person, cx.facts.get(identity_c.HANDLES(person)))  # une adresse reliée apporte son histoire
+        return ClosenessTrace(declared, declared=True)
+    ct = contact_of(s, person, get(identity_c.HANDLES(person)))  # une adresse reliée apporte son histoire
     floor = p.owner_floor if p.owner_floor in _OWNER_FLOORS else c.STRANGER
     if ct is None or not ct.days or not _could_be_friends(ct, p):
         # une connaissance au plus : ni la chaleur, ni l'attachement, ni la rancune n'y changent rien
-        level = lived(ct, 0.0, p, 0.0, cx.local(cx.now).date().toordinal())
-        if _RANK[level] >= _RANK[floor] or not cx.facts.get(identity_c.IS_OWNER(person)):
-            return level
-        return owner_floored(level, p, cx.facts.get(affect_c.HOSTILITY(person)))
-    hostility = cx.facts.get(affect_c.HOSTILITY(person))
-    level = lived(ct, cx.facts.get(affect_c.REGARD(person)), p, hostility, cx.local(cx.now).date().toordinal(),
-                  cx.facts.get(affect_c.BOND(person)))
-    if _RANK[level] < _RANK[floor] and cx.facts.get(identity_c.IS_OWNER(person)):
-        return owner_floored(level, p, hostility)
-    return level
+        trace = replace(lived_trace(ct, 0.0, p, 0.0, today), affect=False)
+        if _RANK[trace.level] >= _RANK[floor] or not get(identity_c.IS_OWNER(person)):
+            return trace
+        hostility = get(affect_c.HOSTILITY(person))
+        return replace(trace, level=owner_floored(trace.level, p, hostility), hostility=hostility, owner=True)
+    hostility = get(affect_c.HOSTILITY(person))
+    trace = lived_trace(ct, get(affect_c.REGARD(person)), p, hostility, today, get(affect_c.BOND(person)))
+    if _RANK[trace.level] < _RANK[floor] and get(identity_c.IS_OWNER(person)):
+        return replace(trace, level=owner_floored(trace.level, p, hostility), owner=True)
+    return trace
+
+
+@SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD, affect_c.HOSTILITY, affect_c.BOND, identity_c.IS_OWNER,
+                                  identity_c.HANDLES])
+def _closeness(s: SocialState, cx, person: str) -> str:
+    """Déclarée, sinon vécue ; le plancher d'une propriétaire (``closeness_trace``, que la console déroule)."""
+    return closeness_trace(s, person, params(cx.params), cx.local(cx.now).date().toordinal(), cx.facts.get).level
 
 
 @SOCIAL.fact(c.CONTACT, reads=[c.CLOSENESS, identity_c.HANDLES])
