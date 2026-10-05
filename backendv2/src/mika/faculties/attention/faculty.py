@@ -444,8 +444,9 @@ class AttentionState:
 #: heures de la personne (le canal est retenu avec l'attente) ; un bel échange reste en tête.
 #: v6 : la dernière pensée de manque de chacun (un manque qui dure revient de plus en plus rarement, ADR 0058).
 #: v7 : un message qui clôt (« bonne nuit ») close la conversation dès sa lecture, même si elle se tait.
+#: v8 : une simple envie de discuter n'attend pas de retour, seulement une réponse.
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    state_version=7)
+                    state_version=8)
 #: les manques dont on retient la dernière pensée (les plus récents)
 MISSING_KEPT = 64
 
@@ -771,7 +772,9 @@ def _project_blocked(s: AttentionState, e, cx) -> AttentionState:
 @ATTENTION.reducer(rt.EPISODE_STARTED, reads=[identity_c.PERSON])
 def _reaching_out(s: AttentionState, e, cx) -> AttentionState:
     """Prendre la parole d'elle-même : on retient pourquoi (une salutation
-    n'attend pas de réponse) ; relancer quelqu'un qui manque : on attend son retour."""
+    n'attend pas de réponse) ; relancer quelqu'un qui manque : on attend son retour.
+    Une simple envie de discuter (``CHAT``) n'attend que sa réponse : une amie
+    à qui l'on a parlé ce matin ne « revient » pas."""
     d = e.data
     if d.kind != Kind.INITIATIVE or not d.target:
         return s
@@ -779,7 +782,7 @@ def _reaching_out(s: AttentionState, e, cx) -> AttentionState:
     if len(openings) > 16:  # des épisodes qui n'ont jamais parlé (abstention, supplantés)
         openings = FrozenDict(sorted(openings.items())[-16:])  # les identifiants d'épisode sont chronologiques
     s = replace(s, openings=openings)
-    if not {social_c.RECONTACT, social_c.CHAT, social_c.REKINDLE} & set(d.reason.split(",")):
+    if not {social_c.RECONTACT, social_c.REKINDLE} & set(d.reason.split(",")):
         return s
     return _expect(s, c.RETURN, cx.facts.get(identity_c.PERSON(d.target)), e.at, None)
 
