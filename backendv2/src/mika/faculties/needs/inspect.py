@@ -34,7 +34,7 @@ from mika.kernel.inspect import (
 #: son nom en français, et ce qui le comble
 NAMES = {c.SOCIAL: "compagnie", c.EXPRESSION: "s'exprimer", c.CURIOSITY: "apprendre"}
 RELIEF = {
-    c.SOCIAL: "un message qu'on lui adresse, parler à quelqu'un",
+    c.SOCIAL: "un message qu'on lui adresse, parler à quelqu'un — pleinement avec une amie, peu avec une inconnue",
     c.EXPRESSION: "répondre, et plus encore prendre la parole d'elle-même ; travailler, un peu",
     c.CURIOSITY: "un message, une croyance nouvelle, un pas d'exploration",
 }
