@@ -326,12 +326,43 @@ def _where_phrase(defn: w.WorldDef, place: str | None, posture: w.Posture) -> st
     return f"{plan.POSTURE_FR[posture]} {p.label}"
 
 
+#: Ses outils qui mettent son corps en action.
+_BODY_TOOLS = frozenset({"go_to", "interact"})
+
+
+def _running(s: WorldState) -> w.Intent | None:
+    """L'action qu'elle a en cours, s'il y en a une."""
+    return next((i for i in s.intents.values() if i.actor == w.MIKA), None)
+
+
+def _busy(s: WorldState, ctx: Any) -> ToolResult | None:
+    """Une action lancée plus tôt dans cette même réponse n'est pas finie : la suivante la remplacerait, et
+    elle croirait avoir fait les deux. Une à la fois — la suivante, à sa prochaine réplique."""
+    running = _running(s)
+    if running is None or not any(ok for name, ok in ctx.calls if name in _BODY_TOOLS):
+        return None
+    me = s.actors[w.MIKA]
+    last = next((st.posture for st in reversed(running.steps) if st.kind == "posture" and st.posture), None)
+    where = _where_phrase(s.definition, me.moving.to_place if me.moving is not None else me.place,
+                          last or me.posture)
+    return ToolResult(ok=False, content=f"Tu es déjà en train de faire autre chose (tu seras {where}) : une chose "
+                      "à la fois. Celle-ci n'est pas faite ; tu pourras la faire une fois l'autre finie, à ta "
+                      "prochaine réplique.")
+
+
+def _interrupted(intent: w.Intent) -> Any:
+    """La fin d'une action qu'une autre remplace : les écrans l'apprennent (``intent_end``), rien n'a changé."""
+    return w.ENDED.draft(intent=intent.id, actor=intent.actor, outcome=w.Outcome.INTERRUPTED,
+                         dedupe_key=f"fin:{intent.id}")
+
+
 async def _start_intent(ctx: Any, steps: list[w.Step]) -> w.Intent:
     frame: Frame = ctx.frame
     t = timing(frame.env.params_of("world", frame.root))
     intent = plan.intent_of(w.MIKA, steps, frame.now, t, w.Cause(source=w.Source.MIKA, actor=w.MIKA),
                             f"mika:{frame.now}")
-    await ctx.emit(w.INTENDED.draft(intent=intent))
+    running = _running(ctx.state)
+    await ctx.emit(*([_interrupted(running)] if running is not None else []), w.INTENDED.draft(intent=intent))
     return intent
 
 
@@ -352,12 +383,17 @@ async def go_to(args: GoArgs, ctx: Any) -> ToolResult:
     want = args.posture or plan.default_posture(target)
     if me.moving is not None and me.moving.to_place == target.id and (args.posture is None or me.posture == want):
         return ToolResult(content=f"Tu y vas déjà : tu seras {_where_phrase(s.definition, target.id, want)}.")
+    if (busy := _busy(s, ctx)) is not None:
+        return busy
     t = timing(frame.env.params_of("world", frame.root))
     try:
         steps = plan.plan_go(s.definition, t, s.actors, w.MIKA, target.id, args.posture)
     except plan.Refused as r:
         return ToolResult(ok=False, content=r.message)
     if not steps:
+        if (running := _running(s)) is not None:  # elle allait ailleurs : elle s'arrête et reste là
+            await ctx.emit(_interrupted(running))
+            return ToolResult(content=f"Tu t'arrêtes : tu restes {_where_phrase(s.definition, target.id, me.posture)}.")
         return ToolResult(content=f"Tu y es déjà : tu es {_where_phrase(s.definition, target.id, me.posture)}.")
     await _start_intent(ctx, steps)
     return ToolResult(content=f"Tu y vas : tu seras {_where_phrase(s.definition, target.id, want)}.")
@@ -373,6 +409,8 @@ async def interact(args: InteractArgs, ctx: Any) -> ToolResult:
     s: WorldState = ctx.state
     if not _awake(frame):
         return ToolResult(ok=False, content="Tu dors : ton corps ne bouge pas.")
+    if (busy := _busy(s, ctx)) is not None:
+        return busy
     t = timing(frame.env.params_of("world", frame.root))
     try:
         steps = plan.plan_interact(s.definition, t, s.actors, s.objects, w.MIKA, args.object, args.action,
