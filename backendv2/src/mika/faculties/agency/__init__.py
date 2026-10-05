@@ -300,7 +300,8 @@ def follow_up_after(frame: Frame, person: str, p: AgencyParams) -> int:
 def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str | None:
     """Ne pas harceler (ADR 0033) : après une initiative restée sans réponse,
     plus d'initiative ordinaire vers la personne tant qu'elle n'a pas écrit —
-    sauf une relance douce, après un long délai, vers une amie ou une proche ;
+    sauf une relance douce, après un long délai (compté depuis la lecture quand
+    son application la dit ; jamais avant qu'elle l'ait lue), vers une amie ou une proche ;
     après deux, plus rien — sinon, des mois plus tard, prendre de ses nouvelles
     une seule fois (``ONCE_MORE``, ADR 0058). Si son dernier message (réponse comprise) attend
     encore, quelques heures de retenue — davantage s'il posait une question ;
@@ -317,8 +318,11 @@ def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str |
     if mine.initiatives >= c.GIVE_UP_AFTER:
         return c.UNANSWERED
     if mine.initiatives == 1:
+        if mine.unseen:
+            return c.UNANSWERED  # elle ne l'a pas encore lu (son application le dit) : on ne relance pas
         friendly = frame.get(social_c.CLOSENESS(person)) in (social_c.FRIEND, social_c.CLOSE)
-        if friendly and frame.now - mine.last_initiative_at >= follow_up_after(frame, person, p):
+        # le délai d'une relance se compte depuis la lecture, quand on la sait
+        if friendly and frame.now - max(mine.last_initiative_at, mine.seen_at) >= follow_up_after(frame, person, p):
             return None  # la relance douce (la consigne le lui dit)
         return c.UNANSWERED
     if mine.closed_at and frame.now - mine.closed_at < p.farewell_quiet_us:

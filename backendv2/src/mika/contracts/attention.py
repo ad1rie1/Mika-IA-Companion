@@ -12,7 +12,10 @@
   elle se comble ou se dément, et chacun en tire ce qui le concerne
   (l'humeur, l'estime, la retenue). Une promesse qui passe son échéance sans
   être tenue ne s'oublie pas en silence : elle le sait, et ça la travaille.
-  Une réponse tardive ne compte que dans trois fois le délai attendu ;
+  Une réponse tardive ne compte que dans trois fois le délai attendu. Par
+  messagerie, quand l'application de la personne dit ce qu'elle a lu
+  (``presence.read``), un message pas encore vu n'attend rien encore (trois
+  jours au plus) et le délai court à partir de la lecture ;
 - le **fil avec chacun** (``AWAITING``) : ses initiatives restées sans réponse
   et si son dernier message attend encore — par personne ; la retenue
   d'``agency`` s'en sert (ADR 0033). Une conversation close (« bonne nuit »,
@@ -197,6 +200,12 @@ class AwaitingReading:
     unanswered: bool = False
     #: quand la conversation s'est close ainsi (0 : elle ne l'est pas) — on s'est quittées, on ne l'ignore pas
     closed_at: int = 0
+    #: quand la personne a lu sa dernière initiative (son application le dit, si elle l'a permis) ; 0 : pas encore,
+    #: ou on ne le sait pas (un journal ancien, un client qui n'en dit rien, un écran qui se tait sur ce qu'on y lit).
+    #: Ça reste vrai quand elle écrit : jusqu'à la prochaine initiative
+    seen_at: int = 0
+    #: … elle ne l'a pas encore lue : son application dit ce qu'elle a lu depuis, et ce n'est pas encore ça
+    unseen: bool = False
 
 
 #: Les pensées vivantes, la plus forte d'abord.

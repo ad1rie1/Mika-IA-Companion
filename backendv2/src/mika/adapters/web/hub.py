@@ -94,6 +94,10 @@ class Conn:
     control: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.CONTROL_RATE))
     #: ce qui s'écrit au journal quand on va et vient (``presence``) : borné, une bascule rapide n'y paraît pas
     presence: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.PRESENCE_RATE))
+    #: jusqu'où la personne dit avoir lu (``read``) : la dernière valeur voulue, écrite au journal au plus
+    #: ``PRESENCE_RATE`` fois — jamais une rafale
+    read_up_to: int = 0
+    reads: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.PRESENCE_RATE))
 
 
 class Hub:
@@ -113,6 +117,8 @@ class Hub:
         #: les questions dont le sort (abstention, échec) a déjà été dit
         self._settled: OrderedDict[tuple[str, int | str], None] = OrderedDict()
         self.delivered: deque[str] = deque(maxlen=REMEMBERED)
+        #: le dernier « lu jusqu'ici » écrit au journal, par adresse : ce qui ne l'avance pas n'écrit rien
+        self.read_up_to: dict[str, int] = {}
 
     # ── connexions ──
     def attach(self, send: Send, *, handle: str | None = None, **kw: Any) -> Conn:

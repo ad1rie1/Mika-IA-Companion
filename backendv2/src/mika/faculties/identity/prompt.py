@@ -110,7 +110,9 @@ def last_talk(frame: Frame, person: str, kind: str, name: str = "") -> list[str]
     pour ce qui attend vraiment une réponse : une initiative d'elle restée lettre
     morte, une question laissée en suspens — jamais sa réponse à « bonne nuit »,
     ni une conversation que l'autre a close en partant (``attention.awaiting``) :
-    on s'est quittées, on ne l'ignore pas."""
+    on s'est quittées, on ne l'ignore pas. Quand l'application de la personne dit
+    ce qu'elle a lu, si elle a vu cette initiative — un constat, jamais un
+    reproche ; sinon, rien de plus qu'avant."""
     reading = frame.get(social_c.CONTACT(person))
     who = f"« {name} »" if name else "cette personne"
     if kind == Kind.REPLY:
@@ -119,7 +121,11 @@ def last_talk(frame: Frame, person: str, kind: str, name: str = "") -> list[str]
             out.append(f"Avant cette conversation, {who} t'avait écrit pour la dernière fois "
                        f"{calendar_words(reading.previous, frame)}.")
         if reading.previous < reading.last_out < reading.since:
-            out.append(f"Tu lui avais écrit depuis, {calendar_words(reading.last_out, frame)}.")
+            wrote = f"Tu lui avais écrit depuis, {calendar_words(reading.last_out, frame)}"
+            # lu après qu'elle l'a écrit : c'est bien ce message-là (son application le dit)
+            seen = frame.get(attention_c.AWAITING(person)).seen_at
+            out.append(f"{wrote} ; {who} l'avait lu {calendar_words(seen, frame)}." if seen >= reading.last_out
+                       else f"{wrote}.")
         return out
     out = []
     if reading.last_in:
@@ -127,8 +133,14 @@ def last_talk(frame: Frame, person: str, kind: str, name: str = "") -> list[str]
                    f"{calendar_words(reading.last_in, frame)}.")
     mine = frame.get(attention_c.AWAITING(person))
     if mine.initiatives:
-        out.append(f"Tu lui as écrit depuis, {calendar_words(mine.last_initiative_at, frame)}, sans réponse pour "
-                   "l'instant.")
+        wrote = calendar_words(mine.last_initiative_at, frame)
+        if mine.seen_at:
+            out.append(f"Tu lui as écrit depuis, {wrote} ; {who} l'a lu {calendar_words(mine.seen_at, frame)}, sans "
+                       "répondre pour l'instant.")
+        elif mine.unseen:
+            out.append(f"Tu lui as écrit depuis, {wrote} ; {who} ne l'a pas encore lu.")
+        else:
+            out.append(f"Tu lui as écrit depuis, {wrote}, sans réponse pour l'instant.")
     elif mine.unanswered and mine.asked and not mine.owed and mine.last_out > mine.last_in:
         out.append(f"Ta dernière question, {calendar_words(mine.last_out, frame)}, attend encore sa réponse.")
     return out

@@ -504,6 +504,8 @@ class _Session:
         self._closed = False
         #: le prochain rapprochement de la présence (aller : tout de suite ; partir : après la grâce)
         self._presence_task: asyncio.Future[Any] | None = None
+        #: la prochaine écriture de ce qu'elle a lu, quand la fenêtre de ``PRESENCE_RATE`` est pleine
+        self._read_task: asyncio.Future[Any] | None = None
         kw: dict[str, Any] = {"session": session_key, "close": self.close, "channel": channel, "here": here}
         if account is not None:
             kw |= {"handle": account.handle, "authenticated": True, "account": account.id,
@@ -561,6 +563,8 @@ class _Session:
         finally:
             if self._presence_task is not None:
                 self._presence_task.cancel()
+            if self._read_task is not None:
+                self._read_task.cancel()  # le client redit ce qu'il a lu à sa prochaine connexion
             self.hub.detach(self.conn)
             if self.conn.announced:
                 await self.port.disconnected(self.conn.handle, self.conn.id)
@@ -613,6 +617,49 @@ class _Session:
         else:
             await self._depart()
 
+    # ── ce qu'elle a lu (« Lui dire quand j'ai lu ») ──
+    async def read(self, frame: dict[str, Any]) -> None:
+        """``{"type": "read", "up_to": n}`` : la personne a lu son fil jusqu'au message ``n`` (son application le
+        dit, si elle l'a permis). Une connexion authentifiée seulement ; un numéro qui n'est pas dans son fil, ou
+        qui n'avance pas ce qu'on sait déjà de cette adresse, est ignoré. Seule la dernière valeur compte."""
+        up_to = frame.get("up_to")
+        c = self.conn
+        if self.account is None or not c.authenticated or isinstance(up_to, bool) or not isinstance(up_to, int):
+            return
+        if up_to <= max(c.read_up_to, self.hub.read_up_to.get(c.handle, 0)):
+            return
+        head = self.port.recent(c.handle, 1)
+        if not head or up_to > head[-1].id:
+            return  # pas un message de son fil (un curseur d'une autre vie, un numéro inventé)
+        c.read_up_to = up_to
+        await self._write_read()
+
+    def _write_read_after(self, delay: float) -> None:
+        if self._read_task is not None:
+            self._read_task.cancel()
+        self._read_task = asyncio.ensure_future(self._write_read_later(delay))
+
+    async def _write_read_later(self, delay: float) -> None:
+        await asyncio.sleep(delay)
+        self._read_task = None
+        try:
+            await self._write_read()
+        except (WebSocketDisconnect, RuntimeError, OSError) as exc:
+            log.debug("lecture non écrite (%s) : %r", self.conn.id, exc)
+
+    async def _write_read(self) -> None:
+        """Au journal, au plus ``PRESENCE_RATE`` fois : au-delà, la dernière valeur voulue s'écrit quand la
+        fenêtre le permet — jamais une rafale."""
+        c = self.conn
+        if self._closed or c.read_up_to <= self.hub.read_up_to.get(c.handle, 0):
+            return
+        if not c.reads.allow(self.hub._monotonic()):
+            n, window = protocol.PRESENCE_RATE
+            self._write_read_after(window / n)
+            return
+        self.hub.read_up_to[c.handle] = c.read_up_to
+        await self.port.read(c.handle, c.read_up_to)
+
     async def dispatch(self, raw: str) -> None:
         try:
             frame = json.loads(raw)
@@ -631,6 +678,9 @@ class _Session:
                 await self.sync(frame)
         elif kind == "presence":
             await self.presence(frame)
+        elif kind == "read":
+            if self.conn.control.allow():
+                await self.read(frame)
         elif kind == "approval":
             if self.conn.control.allow():
                 await self.approval(frame)

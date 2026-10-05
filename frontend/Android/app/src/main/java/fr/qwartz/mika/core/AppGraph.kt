@@ -44,6 +44,8 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -147,6 +149,8 @@ class AppGraph(context: Context) {
 
     val auth: AuthRepository = AuthRepository(authApi, tokenVault, settings, hooks, clock, deviceLabel)
 
+    val chat: ChatRepository = ChatRepository(store, files, clock, engine, { connection.socket })
+
     val connection: ConnectionManager = ConnectionManager(
         scope = scope,
         engineContext = engine,
@@ -160,9 +164,11 @@ class AppGraph(context: Context) {
         transport = OkHttpWsTransport(wsHttp),
         userAgent = userAgent,
         logger = logger,
+        // « Lui dire quand j'ai lu » : le fil à l'écran, « Marquer comme lu » — seulement si elle le permet
+        reads = combine(settings.settings.map { it.shareReads }, chat.observeLastReadId()) { on, id ->
+            id.takeIf { on }
+        },
     )
-
-    val chat: ChatRepository = ChatRepository(store, files, clock, engine, { connection.socket })
 
     /** Le client HTTP des fichiers de Mika : le jeton seulement vers son serveur. */
     val filesHttp: OkHttpClient by lazy {

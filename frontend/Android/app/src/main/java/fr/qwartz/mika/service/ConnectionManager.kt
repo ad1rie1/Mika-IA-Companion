@@ -19,7 +19,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -31,7 +33,8 @@ import kotlinx.coroutines.withContext
  * en arrière-plan ([Holder.SERVICE]), ou une réponse partie d'une notification ([Holder.REPLY]).
  *
  * La présence suit le premier plan : en-tête à la connexion, puis trame `presence` à chaque passage —
- * une app qui garde sa socket en arrière-plan ne fait pas croire à Mika qu'on est devant l'écran.
+ * une app qui garde sa socket en arrière-plan ne fait pas croire à Mika qu'on est devant l'écran. Ce qui
+ * a été lu suit [reads] (trame `read`), seulement si la personne le permet.
  *
  * Les trames reçues sont traitées une à une, jusqu'au bout (base écrite), dans le contexte sérialisé.
  * L'ouverture d'une socket passe par la même file : ce qui dépend de la socket (les cartes d'accord)
@@ -50,6 +53,8 @@ class ConnectionManager(
     transport: WsTransport,
     private val userAgent: String,
     private val logger: Logger = Logger.NONE,
+    /** Jusqu'où la personne a lu, si elle permet de le dire (« Lui dire quand j'ai lu ») ; `null` : rien ne part. */
+    private val reads: Flow<Long?> = emptyFlow(),
 ) : MikaSocket.Listener {
 
     enum class Holder { UI, SERVICE, REPLY }
@@ -86,6 +91,7 @@ class ConnectionManager(
         }
         scope.launch { foreground.collect { onForeground(it) } }
         scope.launch { network.collect { onNetwork(it) } }
+        scope.launch { reads.collect { socket.setReadUpTo(it) } }
         scope.launch { auth.session.collect { reconcile() } }
     }
 

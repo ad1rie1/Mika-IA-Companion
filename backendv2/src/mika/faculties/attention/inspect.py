@@ -14,7 +14,7 @@ from typing import Any
 
 from mika.contracts import attention as c
 from mika.contracts import identity as identity_c
-from mika.faculties.attention.faculty import ATTENTION, AttentionState, habituation, params
+from mika.faculties.attention.faculty import ATTENTION, AttentionState, due_at, habituation, params, unseen
 from mika.faculties.attention.watch import met
 from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.frame import Frame
@@ -273,17 +273,21 @@ def _inspect_noticed(s: AttentionState, frame: Frame, ctx: InspectContext) -> li
 
 def _expectation_rows(s: AttentionState, frame: Frame, keep: set[str] | None = None) -> tuple[tuple[Cell, ...], ...]:
     done = set(met(s, frame))
+    p = _p(frame)
     rows: list[tuple[Cell, ...]] = []
     ordered = sorted(s.expectations.items(), key=lambda kv: (kv[1].since, kv[0]))
     for key, x in [kv for kv in ordered if keep is None or kv[1].person in keep]:
+        when = due_at(x, s.exchanges.get(x.person), p)
         if key in done:
             status = Badge("comblée (pas encore constatée)", "ok")
-        elif x.deadline is not None and x.deadline <= frame.now:
+        elif when is not None and when <= frame.now:
             status = Badge("échue (pas encore constatée)", "warn")
+        elif unseen(x, s.exchanges.get(x.person)):
+            status = Badge("pas encore lue : l'attente ne court pas", "info")
         else:
             status = Badge("en cours", "info")
         rows.append((EXPECTED_FR.get(x.kind, x.kind), person_ref(frame, x.person), When(x.since),
-                     When(x.deadline) if x.deadline is not None else Text("sans échéance", kind="muted"), status))
+                     When(when) if when is not None else Text("sans échéance", kind="muted"), status))
     late = sorted(s.late.items(), key=lambda kv: (kv[1].since, kv[0]))
     for person, x in [kv for kv in late if keep is None or kv[0] in keep]:
         if f"late:{person}" in done:
@@ -342,6 +346,12 @@ def _thread(s: AttentionState, frame: Frame, key: str) -> Fields | None:
     if ex is None:
         return None
     waiting = ("oui, une question" if ex.asked else "oui") if ex.unanswered else "non"
+    if ex.seen_at:
+        seen: Cell = When(ex.seen_at)
+    elif 0 < ex.seen_upto < ex.initiative_seq:
+        seen = "pas encore"
+    else:
+        seen = Text("on ne le sait pas", kind="muted")
     return Fields((
         ("la personne lui a écrit", When(ex.last_in) if ex.last_in else Text("pas encore", kind="muted")),
         ("elle lui a écrit", When(ex.last_out) if ex.last_out else Text("pas encore", kind="muted")),
@@ -349,9 +359,12 @@ def _thread(s: AttentionState, frame: Frame, key: str) -> Fields | None:
         ("ses initiatives depuis, sans réponse", str(ex.initiatives)),
         ("dont le délai attendu est passé", str(ex.ignored)),
         ("elle a ressenti ce silence", "oui" if ex.felt else "non"),
+        ("la personne a lu sa dernière initiative", seen),
     ), title="Le fil avec cette personne", columns=2,
         hints=(("ses initiatives depuis, sans réponse", "Après une, plus d'initiative ordinaire tant que la personne "
-                "n'a pas écrit — sauf une relance douce, bien plus tard, vers une personne amie ou proche ; après deux, plus rien."),))
+                "n'a pas écrit — sauf une relance douce, bien plus tard, vers une personne amie ou proche ; après deux, plus rien."),
+               ("la personne a lu sa dernière initiative", "Ce que dit son application (« Lui dire quand j'ai lu »), "
+                "par messagerie : pas encore lue, elle ne compte pas comme ignorée.")))
 
 #: le type d'objet « personne » (déclaré par l'identité) : l'onglet se range sur sa fiche
 PERSON_KIND = "person"

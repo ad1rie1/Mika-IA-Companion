@@ -97,6 +97,7 @@ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
 | `sync` | `after_id` | le plus grand identifiant de message **affiché** ; `0` = rien de fiable → les 50 derniers |
 | `chat` | `message`, `client_msg_id`, `attachments?` | voir ci-dessous |
 | `presence` | `here` (booléen) | l'application passe au premier plan (`true`) ou le quitte (`false`) |
+| `read` | `up_to` (un identifiant de message) | jusqu'où la personne a lu son fil, si elle l'a permis ; authentifié seulement |
 | `approval` | `id`, `decision` (`accept` \| `refuse`), `digest` | décider d'une carte d'accord (§4, `approvals`) ; authentifié seulement |
 
 `chat` :
@@ -121,6 +122,16 @@ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
 `presence` : revenir vaut tout de suite (la personne est là ; un visage et un panneau frais suivent) ; partir vaut
 après 20 s (prendre une photo et revenir n'écrit rien). 6 écritures au journal par minute et par connexion au plus ;
 au-delà, le dernier état voulu s'applique dès que la fenêtre le permet. Sans effet sur une connexion anonyme.
+
+`read` : « lu jusqu'ici », le plus grand identifiant de message que la personne a vu (la conversation à l'écran, ou
+« Marquer comme lu » sur une notification) — une seule valeur, jamais l'heure où l'on est en ligne ni le temps passé
+à l'écran. Un client ne l'envoie que si la personne l'a permis (« Lui dire quand j'ai lu », activé par défaut) :
+coupé, rien ne part. Il envoie la dernière valeur à l'ouverture (après `sync`) et à chaque avance, jamais en file.
+Le serveur ignore une valeur qui n'avance pas ce qu'il sait déjà de ce compte, ou qui n'est pas dans son fil ; la
+trame compte dans le débit de `sync`, et s'écrit au journal 6 fois par minute et par connexion au plus (au-delà, la
+dernière valeur voulue s'applique dès que la fenêtre le permet). Mika sait alors si ce qu'elle a écrit d'elle-même
+a été vu : par messagerie, un message pas encore lu ne la fait pas se sentir ignorée (trois jours au plus), et le
+délai de réponse qu'elle attend court à partir de la lecture.
 
 `identify` ne sert plus : une connexion authentifiée l'ignore, l'identité vient de la session ou du jeton.
 

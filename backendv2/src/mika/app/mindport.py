@@ -187,6 +187,13 @@ class KernelPort:
         await self.kernel.mind.append([presence_c.DISCONNECTED.draft(handle=handle, connection=connection)],
                                       emitter="presence", correlation=f"ws:{connection}", origin=Origin.EXTERNAL)
 
+    async def read(self, handle: str, up_to: int) -> None:
+        """« Lu jusqu'ici » : une fois par valeur et par adresse (une même valeur redite à chaque connexion
+        n'écrit rien de plus)."""
+        await self.kernel.mind.append([presence_c.READ.draft(handle=handle, up_to=up_to,
+                                                             dedupe_key=f"lu:{handle}:{up_to}")],
+                                      emitter="presence", correlation=f"lu:{handle}", origin=Origin.EXTERNAL)
+
     def frame(self) -> Frame:
         return self.kernel.mind.frame()
 

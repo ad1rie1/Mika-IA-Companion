@@ -155,6 +155,12 @@ fun SettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                     if (canAsk) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) else openNotificationSettings(context)
                 },
             )
+            SwitchRow(
+                title = stringResource(R.string.settings_reads_title),
+                summary = stringResource(R.string.settings_reads_summary),
+                checked = settings.shareReads,
+                onChange = { on -> scope.launch { graph.settings.setShareReads(on) } },
+            )
 
             Section(stringResource(R.string.settings_appearance))
             Column(Modifier.selectableGroup()) {
