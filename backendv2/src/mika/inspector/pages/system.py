@@ -610,6 +610,79 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
     ]
 
 
+#: les rôles d'un client du monde (``adapters/world/protocol.Role``), en mots
+WORLD_ROLES = {"viewer": "écran", "host": "hôte", "creator": "créateur"}
+
+
+@TABS.tab("systeme.monde", title="Le monde, côté écrans", group="Surveillance",
+          badge=lambda ui: len(_world_warnings(ui.deps.world.overview())) if ui.deps.world is not None else 0,
+          description="Les clients du monde (/ws/world) : qui est connecté, avec quel moteur et quels rôles, qui "
+                      "tient le bail d'hôte (le moteur qui joue ses actions), et ce que chaque hôte a dit lui manquer "
+                      "en chargeant le monde.")
+async def monde(ui: Any, request: Request) -> list[Any]:
+    hub = ui.deps.world
+    if hub is None:
+        return [Note("Le monde n'est pas branché sur ce serveur : aucun moteur de jeu ne peut s'y connecter.", "muted")]
+    view = hub.overview()
+    sessions, host, rev = view["sessions"], view["host"], view["rev"]
+    connected = {s["session"]: s for s in sessions}
+    holder = connected.get(host) if host else None
+    warnings = _world_warnings(view)
+    out: list[Any] = [Stats((
+        Stat("Connexions", len(sessions), "" if sessions else "aucun client du monde"),
+        Stat("Hôte", holder["client"] if holder else "aucun",
+             "joue ses actions dans le monde" if holder else "personne ne joue ses actions"),
+        Stat("Révision en vigueur", rev, "de la définition du monde"),
+        Stat("À signaler", len(warnings), "hôtes connectés à qui il manque quelque chose",
+             "warn" if warnings else ""),
+    ))]
+    out.extend(Note(f"{r['client']}{' (tient le bail)' if r['session'] == host else ''} : {' ; '.join(lacks)}."
+                    [:400], "warn") for r, lacks in warnings)
+    if holder is not None and not any(r["session"] == host for r in view["loaded"]):
+        out.append(Note(f"{holder['client']} tient le bail mais n'a pas encore dit ce qu'il a chargé.", "info"))
+    out.append(Table(("client", "qui", "rôles", "bail", Column("acteur", detail=True),
+                      Column("connexion", detail=True)), tuple(
+        Row((s["client"], Text("anonyme", "muted", hint=s["handle"]) if s["handle"].startswith("anon_")
+             else ui.names.who_cell(s["handle"]),
+             ", ".join(WORLD_ROLES.get(r, r) for r in s["roles"]) or "—",
+             Badge("le tient", "ok") if s["session"] == host
+             else Badge("l'attend", "info") if s["waiting_host"] else Text("—", "muted"),
+             Text(s["actor"], "mono"), Text(s["session"], "mono"))) for s in sessions),
+        title="Connexions", empty="Aucun client du monde connecté.",
+        caption="Le bail d'hôte : un seul moteur joue ses actions et constate ce qui s'y passe ; il le garde tant "
+                "qu'il parle, puis il passe à celui qui l'attend."))
+    rows = []
+    for r in view["loaded"]:
+        lacks, here = _world_lacks(r, rev), r["session"] in connected
+        rows.append(Row((When(r["at"]), r["client"], r["rev"],
+                         Text(" ; ".join(lacks), clamp=300) if lacks else Text("rien", "muted"),
+                         Badge("connecté", "ok") if here else Text("parti", "muted")),
+                        tone="warn" if lacks and here else ""))
+    out.append(Table((Column("quand", "fit"), "client", Column("révision", "num"), "ce qui lui manque", "connexion"),
+                     tuple(rows), title="Ce que chaque hôte a chargé", empty="Aucun hôte n'a encore chargé le monde.",
+                     caption="Le dernier chargement de chaque hôte, du plus récent, depuis le démarrage : une ancre ou "
+                             "un asset manquant, c'est un lieu ou un objet que le moteur ne sait pas montrer."))
+    return out
+
+
+def _world_lacks(report: dict[str, Any], rev: int) -> list[str]:
+    """Ce qui ne va pas dans le dernier chargement d'un hôte : ce qui lui manque, une révision dépassée."""
+    lacks = []
+    if report["missing_anchors"]:
+        lacks.append("ancres manquantes : " + ", ".join(report["missing_anchors"]))
+    if report["missing_assets"]:
+        lacks.append("assets manquants : " + ", ".join(report["missing_assets"]))
+    if report["rev"] != rev:
+        lacks.append(f"révision {report['rev']} chargée, {rev} en vigueur")
+    return lacks
+
+
+def _world_warnings(view: dict[str, Any]) -> list[tuple[dict[str, Any], list[str]]]:
+    """Les hôtes encore connectés dont le dernier chargement dit un manque (un hôte parti ne compte plus)."""
+    connected = {s["session"] for s in view["sessions"]}
+    return [(r, lacks) for r in view["loaded"] if r["session"] in connected and (lacks := _world_lacks(r, view["rev"]))]
+
+
 @TABS.tab("systeme.stockage", title="Stockage", group="Surveillance",
           description="Ses bases (sa vie dans mind.db, les projections jetables dans views.db), le dernier instantané "
                       "et ce que garde le journal. Les sauvegardes se font par « mika backup ».")

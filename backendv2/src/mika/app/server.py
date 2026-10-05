@@ -408,7 +408,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                                      sections=reglages.sections(live), settings_tabs=reglages.TABS,
                                      parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
                                      faculty_labels=FACULTY_LABELS, labels=LABELS,
-                                     backups=lambda: backup.overview(data), relay=live.relay),
+                                     backups=lambda: backup.overview(data), relay=live.relay, world=world_hub),
                        cookie_secure=web.cookie_secure)
     preprocess = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     live.preprocess = preprocess

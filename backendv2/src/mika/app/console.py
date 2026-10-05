@@ -62,10 +62,11 @@ NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("Exploitation", (
         Destination("reglages", "Configuration", "⚙", "Ce qu'un opérateur décide. Chaque page ne règle qu'un "
                     "sujet ; chaque champ dit ce qu'il fait.", layout="menu", dynamic=True),
-        Destination("systeme", "Système", "▣", "La machine : santé, processus, anomalies, sorties, modèles, coûts, "
-                    "stockage, journaux, anatomie.", layout="menu",
+        Destination("systeme", "Système", "▣", "La machine : santé, processus, anomalies, sorties, modèles, écrans "
+                    "du monde, coûts, stockage, journaux, anatomie.", layout="menu",
                     builtin=("systeme.sante", "systeme.processus", "systeme.anomalies", "systeme.sorties",
-                             "systeme.passerelle", "systeme.appels", "systeme.stockage", "systeme.chronologie",
+                             "systeme.passerelle", "systeme.monde", "systeme.appels", "systeme.stockage",
+                             "systeme.chronologie",
                              "systeme.operations", "systeme.etat", "systeme.contributions", "systeme.vues",
                              "systeme.simulations")),
     )),

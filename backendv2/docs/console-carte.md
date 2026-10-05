@@ -171,6 +171,7 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 | | Anomalies *(nouveau)* | échecs d'évaluation, traces du journal (supplanté, oubli…), échecs de processus gardés au journal |
 | | Sorties *(nouveau)* | la file de sortie : en attente, échouées, orphelines, essais, dernière erreur |
 | | Modèles en service *(nouveau)* | par fournisseur : créneaux occupés / total, repli ; par rôle : qui sert vraiment |
+| | Le monde, côté écrans *(nouveau)* | les clients de `/ws/world` (client, moteur, qui, rôles), qui tient le bail d'hôte et qui l'attend ; par hôte, la révision chargée et ce qui lui manque (ancres, assets, révision dépassée), en avertissement tant qu'il est connecté. ADR 0051 |
 | | Coûts et appels | par jour, rôle, fournisseur, **modèle** ; derniers appels paginés |
 | | Stockage *(nouveau)* | taille des bases, dernier instantané ; la dernière sauvegarde (ce qui s'est écrit depuis), la dernière vérification, les archives gardées |
 | Journaux | Chronologie | le journal, filtrable, paginé dans les deux sens |

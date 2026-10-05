@@ -70,8 +70,8 @@ réveil de `body.woke`).
 - Ce que le noyau ne sait pas encore faire répond `unsupported` (les actes des personnes, l'édition : P4, P5),
   et la `presence` à l'entrée attend P4 (aucun `world.joined` n'est écrit ici : sans corps dans l'état, une
   présence annoncerait quelqu'un que le monde ne contient pas).
-- La console ne montre pas encore les clients du monde ni ce qui manque au moteur : `WorldHub.overview()` le
-  sait, une vue de console reste à brancher.
+- La console montre les clients du monde, qui tient le bail d'hôte et ce qui manque au moteur (Système › Le
+  monde, côté écrans), lus à chaque rendu dans `WorldHub.overview()` : aucun événement, aucune faculté nommée.
 - Un seul hôte pour tout le monde (ADR 0050) : plusieurs hôtes, un par pièce, seraient une révision.
 
 Tests : `tests/unit/test_world_server.py` (chaque événement donne sa trame et son `seq` ; ce qui ne regarde
