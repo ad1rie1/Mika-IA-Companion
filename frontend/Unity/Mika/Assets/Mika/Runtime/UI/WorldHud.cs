@@ -39,6 +39,18 @@ namespace Mika.UI
         // Les bulles de la joueuse qui attendent leur accusé (par identifiant client) : un refus s'y lit.
         readonly Dictionary<string, Label> _unacked = new Dictionary<string, Label>();
         bool _interactorBound;
+        // Sous le fil, ce qui se passe de son côté (comme le web et Android) : « Mika réfléchit… » entre l'accusé et
+        // sa réponse, plafonné ; ou sa note de sommeil, jusqu'à ce qu'elle reparle.
+        Label _waiting;
+        float _waitingUntil;
+        bool _asleep;
+
+        const string ThinkingText = "Mika réfléchit…";
+        const string AsleepNote = "Mika dort — elle te répondra à son réveil.";
+        /// <summary>La raison d'une trame sans texte quand elle dort (<c>protocol.ASLEEP</c>).</summary>
+        const string AsleepReason = "asleep";
+        // Le plafond du web (TYPING_TIMEOUT_MS) : l'attente entière, file d'attente et fournisseur lent compris.
+        const float ThinkingMaxSeconds = 300f;
 
         /// <summary>Les réglages de connexion ont changé (adresse, jeton, hôte) : l'application se reconnecte.</summary>
         public event Action<string, string, bool> SettingsApplied;
@@ -61,6 +73,8 @@ namespace Mika.UI
             // Une nouvelle session ne renverra pas ce que l'ancienne gardait : ces bulles ne partiront plus.
             foreach (var line in _unacked.Values) MarkRefused(line, "connexion changée");
             _unacked.Clear();
+            // … ni la réponse que l'ancienne attendait.
+            HideWaiting();
             if (interactor != null && !_interactorBound)
             {
                 _interactorBound = true;
@@ -117,6 +131,12 @@ namespace Mika.UI
 
             _chatBox = Add(hud, "chat");
             _chatLog = Add(_chatBox, "chat-log");
+            // Hors du fil (il ne garde que huit lignes) : toujours en bas, jamais poussée dehors.
+            _waiting = new Label();
+            _waiting.AddToClassList("chat-line");
+            _waiting.AddToClassList("waiting");
+            _waiting.AddToClassList("hidden");
+            _chatBox.Add(_waiting);
             _chatInput = new TextField { maxLength = 2000 };
             _chatInput.textEdition.placeholder = "Écris à Mika…  (Entrée : envoyer · Échap : fermer)";
             _chatInput.textEdition.hidePlaceholderOnFocus = false;
@@ -169,6 +189,8 @@ namespace Mika.UI
                 _subtitleUntil = 0;
                 _subtitleBox.AddToClassList("hidden");
             }
+            if (_waitingUntil > 0 && Time.unscaledTime > _waitingUntil)
+                HideWaiting();
         }
 
         // --- état ----------------------------------------------------------------------------------------------
@@ -334,7 +356,15 @@ namespace Mika.UI
 
         void OnSpeech(SpeechFrame s)
         {
-            if (string.IsNullOrEmpty(s.Text)) return;
+            // Toute trame de parole clôt « Mika réfléchit… », un silence aussi : se taire est une issue valide. La
+            // note de sommeil, elle, survit à un murmure à elle-même — ce n'est pas encore sa réponse.
+            if (!s.Inner || !_asleep) HideWaiting();
+            if (string.IsNullOrEmpty(s.Text))
+            {
+                // Elle dort : la réponse attend son réveil (backendv2/docs/protocole-chat.md).
+                if (s.VoiceReason == AsleepReason) ShowWaiting(asleep: true);
+                return;
+            }
             var text = StripCues(s.Text);
             if (s.MessageId is long id && !_shown.Add(id)) return;
             AddLine(s.Inner ? $"({text})" : text, mika: true);
@@ -347,23 +377,35 @@ namespace Mika.UI
         {
             foreach (var m in h.Messages.Skip(Math.Max(0, h.Messages.Count - 8)))
                 if (_shown.Add(m.Id))
+                {
                     AddLine(StripCues(m.Text), mika: m.Role == "assistant");
+                    // Sa parole au réveil, arrivée par un rattrapage, rend la note de sommeil caduque. « Réfléchit… »,
+                    // lui, attend sa trame : un rattrapage peut précéder la réponse.
+                    if (_asleep && m.Role == "assistant") HideWaiting();
+                }
         }
 
         /// <summary>
-        /// Le sort d'un message de la joueuse (<c>backendv2/docs/protocole-chat.md</c>) : <c>accepted</c> le dit reçu,
-        /// <c>no_reply</c> dit qu'une question reçue restera sans réponse, tout autre statut est un refus.
+        /// Le sort d'un message de la joueuse (<c>backendv2/docs/protocole-chat.md</c>) : <c>accepted</c> le dit reçu
+        /// (« Mika réfléchit… » jusqu'à sa réponse), <c>no_reply</c> dit qu'une question reçue restera sans réponse,
+        /// tout autre statut est un refus.
         /// </summary>
         void OnAck(AckFrame a)
         {
             if (a.Status == "no_reply")
             {
+                // La réponse ne viendra pas : ni « réfléchit… », ni la promesse d'une réponse au réveil.
+                HideWaiting();
                 Toast("Mika n'a pas pu répondre — réessaie.");
                 return;
             }
             if (a.ClientMsgId == null || !_unacked.TryGetValue(a.ClientMsgId, out var line)) return;
             _unacked.Remove(a.ClientMsgId);
-            if (a.Status == "accepted") return;
+            if (a.Status == "accepted")
+            {
+                ShowWaiting(asleep: false);
+                return;
+            }
             var why = a.Status switch
             {
                 "rate_limited" => "trop vite",
@@ -382,6 +424,23 @@ namespace Mika.UI
         {
             line.text += $"  — non envoyé ({why})";
             line.AddToClassList("refused");
+        }
+
+        /// <summary>Sous le fil : « Mika réfléchit… » (plafonné), ou sa note de sommeil (jusqu'à ce qu'elle reparle).</summary>
+        void ShowWaiting(bool asleep)
+        {
+            if (_waiting == null) return;
+            _asleep = asleep;
+            _waiting.text = asleep ? AsleepNote : ThinkingText;
+            _waitingUntil = asleep ? 0f : Time.unscaledTime + ThinkingMaxSeconds;
+            _waiting.RemoveFromClassList("hidden");
+        }
+
+        void HideWaiting()
+        {
+            _asleep = false;
+            _waitingUntil = 0f;
+            _waiting?.AddToClassList("hidden");
         }
 
         Label AddLine(string text, bool mika)

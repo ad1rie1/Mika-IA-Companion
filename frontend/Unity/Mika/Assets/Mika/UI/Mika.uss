@@ -42,6 +42,8 @@
 .chat-line.mika { border-left-width: 3px; border-left-color: var(--accent); }
 .chat-line.me { color: var(--ink-dim); }
 .chat-line.refused { color: var(--warn); }
+/* « Mika réfléchit… », « Mika dort… » : une note de la machine sous le fil, pas une parole d'elle. */
+.chat-line.waiting { color: var(--ink-dim); -unity-font-style: italic; }
 
 /* La fenêtre de saisie (Entrée / T) : le champ par défaut de UI Toolkit est blanc, le texte aussi — on le
    remplace par du verre fumé translucide, le texte clair reste lisible et la pièce se voit derrière. */
