@@ -225,6 +225,7 @@ EVENT_LABELS: dict[str, str] = {
     "body.waited": "Un message attend son réveil", "attention.touched": "Une pensée effleurée par un message",
     "self.woke_with": "Ce qu'elle emporte de sa nuit", "self.touched": "Touchée par ce qu'on lui a dit",
     "projects.network_queued": "Une commande réseau mise en file (après l'exécution)",
+    "projects.answered": "Une réponse à sa demande d'aide sur un projet",
     "social.one_sided": "C'est presque toujours elle qui écrit",
     "needs.reunited": "Une amie revenue après un moment creux",
     "memory.moment_followed": "Un moment de la vie de quelqu'un, repris",
