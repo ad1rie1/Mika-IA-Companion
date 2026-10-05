@@ -263,10 +263,11 @@ class Mind:
             shadow = self._apply(shadow, self.decode(stored), only=closure, live=False)
         slices = root.slices
         changed = root.changed
+        tainted = _retainted(root.tainted, shadow.tainted, owners)
         for owner in owners:
             slices = slices.set(owner, shadow.slices[owner])
             changed = changed.set(owner, shadow.changed.get(owner, 0))
-        return replace(root, slices=slices, changed=changed)
+        return replace(root, slices=slices, changed=changed, tainted=tainted)
 
     # ── application ────────────────────────────────────────────────────────
     def _apply(
@@ -593,10 +594,11 @@ class Mind:
                 if digest(shadow.slices[owner]) != digest(live.slices[owner]):
                     mismatches.append(owner)
             slices, changed = live.slices, live.changed
+            tainted = _retainted(live.tainted, shadow.tainted, owners)
             for owner in owners:
                 slices = slices.set(owner, shadow.slices[owner])
                 changed = changed.set(owner, shadow.changed.get(owner, 0))
-            self._root = replace(live, slices=slices, changed=changed)
+            self._root = replace(live, slices=slices, changed=changed, tainted=tainted)
             self.registry = new_reg
             if mismatches:
                 self.trace("rebuild_mismatch", owners=mismatches)
@@ -611,6 +613,16 @@ class Mind:
 
 def event_type_names(types: Iterable[EventType[Any]]) -> set[str]:
     return {t.name for t in types}
+
+
+def _retainted(current: FrozenDict[str, int], shadow: FrozenDict[str, int],
+               owners: Iterable[str]) -> FrozenDict[str, int]:
+    """La marque d'une tranche reconstruite est celle de sa reconstruction : effacée si le rejeu est passé,
+    posée s'il a levé — jamais l'ancienne gardée, ni une erreur du rejeu perdue."""
+    for owner in owners:
+        seq = shadow.get(owner)
+        current = current.delete(owner) if seq is None else current.set(owner, seq)
+    return current
 
 
 def _jsonable(data: Any) -> Any:
