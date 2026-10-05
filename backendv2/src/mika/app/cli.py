@@ -329,14 +329,20 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
         context = cfg.context_tokens
         if args.llm_cmd == "backend":
             previous = backends.get(args.name)
-            key = args.api_key if args.api_key is not None else (previous.api_key if previous else "")
 
             def kept(value, attr, default):  # type: ignore[no-untyped-def]
                 return value if value is not None else (getattr(previous, attr) if previous else default)
 
+            # une option omise garde la valeur déclarée, l'adresse comprise : la remettre à vide en gardant
+            # la clé enverrait celle-ci à l'hôte par défaut, chez un tiers qui ne l'a pas émise
             backends[args.name] = BackendSpec(
-                kind=args.kind, model=args.model, api_key=key, base_url=args.base_url or "", host=args.host or "",
-                slots=args.slots, temperature=args.temperature, think=args.think,
+                kind=args.kind, model=args.model, api_key=kept(args.api_key, "api_key", ""),
+                base_url=kept(args.base_url, "base_url", ""), host=kept(args.host, "host", ""),
+                slots=kept(args.slots, "slots", 0), temperature=kept(args.temperature, "temperature", None),
+                think=kept(args.think, "think", False),
+                cache_ttl=previous.cache_ttl if previous else "5m",
+                max_reply_tokens=previous.max_reply_tokens if previous else 0,
+                quota_ceiling=previous.quota_ceiling if previous else 0.8,
                 auth=kept(args.auth, "auth", "abonnement"), claude_bin=kept(args.claude_bin, "claude_bin", ""),
                 config_dir=kept(args.config_dir, "config_dir", ""), fallback=kept(args.fallback, "fallback", ""),
             )
@@ -623,11 +629,12 @@ def _run(argv: list[str] | None) -> int:
     lb.add_argument("--kind", required=True, choices=["claude", "claude_code", "openai", "ollama", "ollama_cloud"])
     lb.add_argument("--model", required=True)
     lb.add_argument("--api-key", default=None, help="laissé vide : la clé actuelle est gardée")
-    lb.add_argument("--base-url", default="")
-    lb.add_argument("--host", default="")
-    lb.add_argument("--slots", type=int, default=0)
-    lb.add_argument("--temperature", type=float, default=None)
-    lb.add_argument("--think", action="store_true")
+    lb.add_argument("--base-url", default=None, help="openai : un serveur compatible (omis : l'adresse actuelle)")
+    lb.add_argument("--host", default=None, help="ollama : l'hôte (omis : l'hôte actuel)")
+    lb.add_argument("--slots", type=int, default=None, help="appels simultanés (omis : la valeur actuelle)")
+    lb.add_argument("--temperature", type=float, default=None, help="omise : la valeur actuelle")
+    lb.add_argument("--think", action=argparse.BooleanOptionalAction, default=None,
+                    help="ollama : laisser réfléchir (omis : la valeur actuelle)")
     lb.add_argument("--auth", choices=["abonnement", "cle_api"], default=None,
                     help="claude_code : le login de la CLI (défaut) ou une clé d'API")
     lb.add_argument("--claude-bin", default=None, help="claude_code : la commande claude (vide : PATH)")
