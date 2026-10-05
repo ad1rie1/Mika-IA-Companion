@@ -91,6 +91,7 @@ object MikaProtocol {
     const val TYPE_PING = "ping"
     const val TYPE_PRESENCE = "presence"
     const val TYPE_APPROVAL = "approval"
+    const val TYPE_READ = "read"
 
     const val MODE_INITIAL = "initial"
     const val MODE_CATCHUP = "catchup"

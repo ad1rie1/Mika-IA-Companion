@@ -199,6 +199,12 @@ object FrameCodec {
         put("here", here)
     }.toString()
 
+    /** « Lu jusqu'ici » : le plus grand identifiant de message que la personne a vu. */
+    fun read(upTo: Long): String = buildJsonObject {
+        put("type", MikaProtocol.TYPE_READ)
+        put("up_to", upTo)
+    }.toString()
+
     /** Une décision sur une carte d'accord, avec l'empreinte de la carte telle qu'elle était montrée. */
     fun approval(id: Long, decision: ApprovalDecision, digest: String): String = buildJsonObject {
         put("type", MikaProtocol.TYPE_APPROVAL)

@@ -90,6 +90,10 @@ class MikaSocket(
     private var headerHere = false
     private var announcedHere = false
 
+    /** Jusqu'où la personne a lu, si elle permet de le dire (`null` : rien ne part), et ce qu'en sait la socket en cours. */
+    private var readUpTo: Long? = null
+    private var sentReadUpTo = 0L
+
     private var socket: WsSocket? = null
     private var generation = 0
     private var open = false
@@ -148,6 +152,7 @@ class MikaSocket(
         outboxBytes = 0
         unacked.clear()
         unackedBytes = 0
+        readUpTo = null
         teardown(graceful = true)
         endpoint = null
         stopped = false
@@ -168,6 +173,18 @@ class MikaSocket(
         if (this.here == here) return
         this.here = here
         if (open) sendPresence()
+    }
+
+    /**
+     * Jusqu'où la personne a lu (« Lui dire quand j'ai lu ») ; `null` quand elle ne le permet pas : rien ne
+     * part. Envoyé tout de suite si la socket est ouverte, puis à chaque ouverture — jamais en file : seule la
+     * dernière valeur compte.
+     */
+    fun setReadUpTo(upTo: Long?) {
+        val wanted = upTo?.takeIf { it > 0 }
+        if (wanted == readUpTo) return
+        readUpTo = wanted
+        if (open) sendRead()
     }
 
     /**
@@ -296,6 +313,9 @@ class MikaSocket(
         // Le trou d'abord, la file ensuite : un message rejoué avant le `sync` reviendrait dans le même
         // rattrapage. Une connexion « absente » ne reçoit pas le fil initial : elle demande toujours.
         if (!headerHere || cursor() > 0) requestSync()
+        // Ce qui a été lu, redit à chaque socket : le serveur ignore ce qui n'avance pas.
+        sentReadUpTo = 0L
+        sendRead()
         flushOutbox()
         startHeartbeat()
         emit(ConnectionStatus.Connected)
@@ -494,9 +514,15 @@ class MikaSocket(
         if (sendNow(FrameCodec.presence(here))) announcedHere = here
     }
 
+    private fun sendRead() {
+        val upTo = readUpTo ?: return
+        if (upTo <= sentReadUpTo) return
+        if (sendNow(FrameCodec.read(upTo))) sentReadUpTo = upTo
+    }
+
     /**
      * Envoyer si la socket est ouverte, sinon rien — jamais en file. Pour les trames de contrôle
-     * (`sync`, `ping`, `presence`, `approval`) dont toute la valeur est d'être actuelles.
+     * (`sync`, `ping`, `presence`, `read`, `approval`) dont toute la valeur est d'être actuelles.
      */
     private fun sendNow(text: String): Boolean {
         val s = socket ?: return false

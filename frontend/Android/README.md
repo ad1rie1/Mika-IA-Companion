@@ -151,6 +151,10 @@ mets Mika à jour. En version de débogage, le lien « Utiliser un jeton (dev) �
   quand l'application est à l'écran, ni pour ses pensées à voix haute, ni pour les réponses à une question posée
   depuis un autre appareil, ni pour l'historique reçu à la toute première connexion. Ouvrir la conversation
   efface la notification.
+- **« Lui dire quand j'ai lu »** (Notifications, activé par défaut) : l'app dit au serveur jusqu'à quel message
+  tu as lu (la conversation à l'écran, ou « Marquer comme lu »), trame `read` — une seule valeur, ni l'heure où tu
+  es en ligne, ni le temps passé à l'écran. Mika sait alors si ce qu'elle t'a écrit a été vu : un téléphone qui
+  dort ne la fait pas se sentir ignorée. Coupé, rien ne part.
 - **« Démarrer avec le téléphone »** : relance la connexion après un redémarrage sans ouvrir l'app.
 - **Batterie** : certains fabricants endorment les services en arrière-plan. Le bouton « Ne pas restreindre
   Mika » (Paramètres › Batterie) demande l'exemption ; l'app ne la demande jamais d'elle-même.

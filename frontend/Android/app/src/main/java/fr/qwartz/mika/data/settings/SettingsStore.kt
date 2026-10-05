@@ -31,6 +31,8 @@ data class Settings(
     val avatar: Boolean = true,
     /** La permission de notifier a été demandée une fois (accordée ou non) : on ne la redemande pas d'office. */
     val notificationsAsked: Boolean = false,
+    /** « Lui dire quand j'ai lu » : jusqu'où la conversation a été lue part au serveur ; coupé, rien ne part. */
+    val shareReads: Boolean = true,
 )
 
 class SettingsStore(private val store: DataStore<Preferences>) {
@@ -46,6 +48,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
             dynamicColor = p[DYNAMIC_COLOR] ?: true,
             avatar = p[AVATAR] ?: true,
             notificationsAsked = p[NOTIFICATIONS_ASKED] ?: false,
+            shareReads = p[SHARE_READS] ?: true,
         )
     }
 
@@ -66,6 +69,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
     suspend fun setDynamicColor(on: Boolean) = store.edit { it[DYNAMIC_COLOR] = on }
     suspend fun setAvatar(on: Boolean) = store.edit { it[AVATAR] = on }
     suspend fun setNotificationsAsked() = store.edit { it[NOTIFICATIONS_ASKED] = true }
+    suspend fun setShareReads(on: Boolean) = store.edit { it[SHARE_READS] = on }
 
     private fun decodeProfile(raw: String): Profile? = try {
         MikaJson.decodeFromString(Profile.serializer(), raw)
@@ -83,5 +87,6 @@ class SettingsStore(private val store: DataStore<Preferences>) {
         val DYNAMIC_COLOR = booleanPreferencesKey("dynamic_color")
         val AVATAR = booleanPreferencesKey("avatar")
         val NOTIFICATIONS_ASKED = booleanPreferencesKey("notifications_asked")
+        val SHARE_READS = booleanPreferencesKey("share_reads")
     }
 }

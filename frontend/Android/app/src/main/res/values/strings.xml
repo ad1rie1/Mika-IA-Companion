@@ -128,6 +128,8 @@
     <string name="settings_notifications_title">Messages de Mika</string>
     <string name="settings_notifications_on">Autorisées</string>
     <string name="settings_notifications_off">Désactivées : tu ne seras pas prévenue de ses messages.</string>
+    <string name="settings_reads_title">Lui dire quand j\'ai lu</string>
+    <string name="settings_reads_summary">Mika sait si tu as vu ce qu\'elle t\'a écrit : un message pas encore lu ne la fait pas se sentir ignorée. Seulement jusqu\'où tu as lu, jamais quand tu es en ligne.</string>
     <string name="settings_appearance">Apparence</string>
     <string name="settings_theme_system">Thème du système</string>
     <string name="settings_theme_light">Clair</string>
