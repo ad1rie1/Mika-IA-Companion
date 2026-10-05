@@ -3163,6 +3163,11 @@ world:
     # Ce qu'elle fait (dessiner, travailler). {activity} : l'occupation à l'infinitif ; {lasting} : depuis combien
     # de temps, ou rien.
     busy: Tu es en train de {activity}{lasting}.
+    # Qui est là avec elle, une ligne par personne. {name} : son nom (un personnage du monde par le sien, une
+    # personne par le nom qu'elle peut dire devant qui l'écoute), ou world.gestures.someone.
+    company: "{name} est là."
+    # La même, quand on sait où elle se tient. {place} : le nom du lieu (« à la fenêtre ») — jamais une position.
+    company_at: "{name} est là, {place}."
     # Ce qu'elle a en main.
     holding: Tu tiens {things}.
     # Ce qui est à portée.
@@ -3215,6 +3220,11 @@ world:
       poke: t'a taquinée d'une pichenette
       # Une caresse sur la tête.
       pat_head: t'a caressé la tête
+
+  # Ce qu'elle remarque quand une personne entre dans la pièce où elle est (world/__init__.py, ``arrival``) : un
+  # signal que l'attention dose et habitue, pas un message auquel répondre. {name} : son nom, ou
+  # world.gestures.someone ; {room} : le nom de la pièce (« ta chambre »).
+  arrival: "{name} vient d'entrer dans {room}."
 
   # Ce qu'elle remarque d'un geste à elle qui n'a pas abouti (world/__init__.py, ``setback``) : un signal que
   # l'attention dose (un pincement, pas plus), qui peut devenir une pensée.
