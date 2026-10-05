@@ -53,9 +53,14 @@ import java.util.Locale
 /**
  * La conversation vue de l'écran : le fil, la ligne d'état, la barre de saisie et ses pièces jointes
  * (brouillon gardé en base), l'appareil photo (son fichier noté dans le [SavedStateHandle] : l'app
- * peut mourir pendant la prise de vue), les partages reçus.
+ * peut mourir pendant la prise de vue), les partages reçus. Un modèle par compte ([owner], voir
+ * [chatOwner]) : seul celui de la session ouverte tient la barre de saisie.
  */
-class ChatViewModel(private val graph: AppGraph, private val saved: SavedStateHandle) : ViewModel() {
+class ChatViewModel(
+    private val graph: AppGraph,
+    private val saved: SavedStateHandle,
+    private val owner: String,
+) : ViewModel() {
     val zone: ZoneId = ZoneId.systemDefault()
 
     val items: StateFlow<List<ChatItem>> = combine(
@@ -161,10 +166,12 @@ class ChatViewModel(private val graph: AppGraph, private val saved: SavedStateHa
     init {
         // Ce modèle appartient à l'activité et survit à l'écran : session fermée, il oublie ce qui était
         // tapé et ne prend plus rien (un partage fait ensuite est pour la session suivante) ; rouverte
-        // sur le même compte, il reprend le brouillon gardé.
+        // sur le même compte, il reprend le brouillon gardé. Ouverte sur un autre compte, ce n'est pas
+        // la sienne : le modèle de ce compte-là s'en charge, celui-ci reste fermé (deux barres vivantes
+        // se disputeraient les partages, le brouillon et le ménage de la préparation).
         viewModelScope.launch {
             graph.auth.session
-                .map { it is Session.LoggedIn }
+                .map { it is Session.LoggedIn && chatOwner(it) == owner }
                 .distinctUntilChanged()
                 .collectLatest { open -> if (open) runComposer() else closeComposer() }
         }
@@ -368,3 +375,7 @@ class ChatViewModel(private val graph: AppGraph, private val saved: SavedStateHa
         val PHOTO_NAME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.ROOT)
     }
 }
+
+/** À qui appartient une conversation : le compte et son serveur, vide hors session. */
+fun chatOwner(session: Session): String =
+    (session as? Session.LoggedIn)?.let { "${it.base}|${it.profile.personId}" }.orEmpty()

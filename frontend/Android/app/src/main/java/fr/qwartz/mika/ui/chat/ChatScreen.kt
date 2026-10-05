@@ -50,7 +50,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.createSavedStateHandle
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
-import fr.qwartz.mika.data.auth.Session
 import fr.qwartz.mika.data.chat.MessageAttachment
 import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.avatar3d.LiveAvatar3D
@@ -81,8 +80,8 @@ fun ChatScreen(
 ) {
     val session by graph.auth.session.collectAsStateWithLifecycle()
     // Une conversation par compte : le brouillon d'une session ne passe pas à la suivante.
-    val owner = (session as? Session.LoggedIn)?.let { "${it.base}|${it.profile.personId}" }.orEmpty()
-    val vm: ChatViewModel = viewModel(key = "chat:$owner") { ChatViewModel(graph, createSavedStateHandle()) }
+    val owner = chatOwner(session)
+    val vm: ChatViewModel = viewModel(key = "chat:$owner") { ChatViewModel(graph, createSavedStateHandle(), owner) }
     val items by vm.items.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val link by vm.link.collectAsStateWithLifecycle()
