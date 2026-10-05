@@ -102,6 +102,17 @@ namespace Mika.World.Engine
             _body?.PlayGesture(g);
         }
 
+        /// <summary>
+        /// Un geste qu'on lui fait (<see cref="GestureRules.TouchGesture"/>) : son corps réagit tout de suite, même
+        /// pendant le délai entre deux gestes — jamais dans son sommeil. De la micro-vie : rien n'en est journalisé.
+        /// </summary>
+        public void Touched(string gesture)
+        {
+            var g = GestureRules.TouchGesture(gesture);
+            if (g == null || _asleep || (clips != null && !clips.HasGesture(g))) return;
+            if (_body != null) _body.PlayGesture(g);
+        }
+
         void Update()
         {
             if (_animator == null || _animator.runtimeAnimatorController == null || clips == null) return;

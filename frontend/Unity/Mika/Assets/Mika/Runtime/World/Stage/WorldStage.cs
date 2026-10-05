@@ -60,6 +60,8 @@ namespace Mika.World.Engine
         public event Action<WorldIndex> Built;
         /// <summary>Un acteur vient d'apparaître (pour que l'avatar s'y greffe : visage, voix).</summary>
         public event Action<string, ActorBody> ActorSpawned;
+        /// <summary>Un geste vient d'être montré (pour que l'avatar de celle qui le reçoit s'y tourne).</summary>
+        public event Action<GestureOut> GestureShown;
 
         public RoomView Room(string id) => id != null && _rooms.TryGetValue(id, out var r) ? r : null;
         public PlaceView Place(string id) => id != null && _places.TryGetValue(id, out var p) ? p : null;
@@ -532,11 +534,19 @@ namespace Mika.World.Engine
 
         void OnGesture(GestureOut g)
         {
+            var gesture = WireJson.Name(g.Gesture);
             var body = Actor(g.Actor);
-            if (body == null) return;
             var target = Actor(g.ToActor);
-            if (target != null) body.LookAt(target.Head.position);
-            body.PlayGesture(WireJson.Name(g.Gesture));
+            // La joueuse de ce poste n'a pas de corps ici : son geste ne se joue pas, mais il est fait.
+            if (body != null)
+            {
+                if (target != null) body.LookAt(target.Head.position);
+                body.PlayGesture(gesture);
+            }
+            // Celle qui le reçoit réagit tout de suite dans son corps (une caresse, une pichenette) ; ce qu'elle en
+            // ressent revient ensuite par la dérive de son humeur.
+            if (target != null && target.TryGetComponent<BodyExpression>(out var expression)) expression.Touched(gesture);
+            GestureShown?.Invoke(g);
         }
 
         // --- lectures pour les joueurs d'actions ------------------------------------------------------------------

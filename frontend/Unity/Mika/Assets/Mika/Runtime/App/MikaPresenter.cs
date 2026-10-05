@@ -60,6 +60,7 @@ namespace Mika.App
 
         void OnEnable()
         {
+            if (stage != null) stage.GestureShown += OnGesture;
             if (app == null) return;
             app.MikaSpoke += OnSpeech;
             app.MikaMoodDrifted += OnDrift;
@@ -72,6 +73,7 @@ namespace Mika.App
         {
             _pending.Clear();
             _driftAfterQueue = null;
+            if (stage != null) stage.GestureShown -= OnGesture;
             if (app == null) return;
             app.MikaSpoke -= OnSpeech;
             app.MikaMoodDrifted -= OnDrift;
@@ -252,6 +254,17 @@ namespace Mika.App
             if (!Bind()) return;
             if (_face != null) _face.NoteUserTyping();
             if (_activity != null) _activity.Engage(8f);
+        }
+
+        /// <summary>
+        /// La joueuse de ce poste lui fait un geste (un coucou, une caresse) : elle se tourne vers elle et la regarde,
+        /// comme quand elle lui écrit — un réflexe du corps, sans appel de modèle ; ce qu'elle en ressent revient
+        /// ensuite par la dérive (<see cref="OnDrift"/>).
+        /// </summary>
+        void OnGesture(GestureOut g)
+        {
+            if (g.ToActor != mikaActor || stage == null || g.Actor != stage.localActor) return;
+            NoteUserTyping();
         }
 
         /// <summary>L'humeur du tour dans le corps : l'attente et le tempo qu'elle choisit, le geste qu'elle déclenche.</summary>

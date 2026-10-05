@@ -337,6 +337,11 @@ fait (une tape sur la tête d'une proche ou d'une inconnue) :
 {"type": "gesture", "seq": 1549, "actor": "player:user_1", "gesture": "wave", "to_actor": "mika"}
 ```
 
+Il faut être dans le monde (sinon `unknown`) et dans la même pièce que celle qu'on vise (sinon `unreachable`).
+Un geste n'est pas un message : il ne lui fait jamais répondre à lui seul ; « AUTOUR DE TOI » le lui dit quelques
+minutes, et ce qu'elle en ressent revient aux écrans par la dérive de son humeur (la trame `emotion_update` du
+protocole de conversation).
+
 **Une demande** attend l'accord de l'autre : tendre un objet (`offer`, ou `act` `give`), en demander un
 (`ask`), un câlin, un « tope là », prendre la main, inviter à un lieu (`invite`) :
 

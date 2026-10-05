@@ -15,8 +15,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from mika.contracts import body as body_c
+from mika.contracts import identity as identity_c
+from mika.contracts import social as social_c
 from mika.contracts import world as w
-from mika.faculties.world import WorldState, plan, setback
+from mika.faculties.world import WorldState, felt, plan, setback
 from mika.kernel.events import Draft
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
@@ -55,8 +58,37 @@ def handle(frame: Frame, command: Any, *, actor: str, handle: str | None, operat
             return _finished(s, body)
         if isinstance(body, w.Progress | w.Loaded):
             return Verdict()  # rien à écrire : le progrès ne décide rien, ce qui manque se lit dans la console
+    if isinstance(command, w.Address) and command.gesture is not None and command.request is None:
+        return _gesture(frame, s, command, command.gesture, actor=actor, handle=handle)
+    # le reste n'est pas encore là : une demande (elle attend sa réponse, par un outil à venir), un acte, l'édition
     return _refused(w.Refusal.UNSUPPORTED, "Ce noyau ne sait pas encore faire ça (ADR 0050 : les personnes dans le "
                                            "monde et l'édition arrivent ensuite).")
+
+
+def _gesture(frame: Frame, s: WorldState, a: w.Address, gesture: w.Gesture, *, actor: str,
+             handle: str | None) -> Verdict:
+    """Un geste vers quelqu'un de la même pièce : il se fait sans accord (le contrat ``Gesture``) — et, quand il
+    est pour elle et qu'elle est éveillée, elle le ressent selon qui le fait (``felt`` : la proximité gradue, rien
+    n'est interdit). Le corps réagit tout de suite sur les écrans ; le ressenti passe par son attention."""
+    me, to = s.actors.get(actor), s.actors.get(a.to)
+    if me is None:
+        return _refused(w.Refusal.UNKNOWN, "Tu n'es pas dans le monde : entre d'abord dans sa chambre.")
+    if to is None:
+        return _refused(w.Refusal.UNKNOWN, "Il n'y a personne de ce nom dans le monde.")
+    if to.room != me.room:
+        return _refused(w.Refusal.UNREACHABLE, "Vous n'êtes pas dans la même pièce.")
+    if a.object is not None and a.object not in s.objects:
+        return _refused(w.Refusal.UNKNOWN, "Cet objet n'est pas dans le monde.")
+    gestured = w.GESTURED.draft(actor=actor, gesture=gesture, to_actor=a.to, object=a.object, by=handle)
+    noticed = None
+    if a.to == w.MIKA and frame.get(body_c.SLEEP) is body_c.SleepPhase.AWAKE:
+        person = frame.get(identity_c.PERSON(handle)) if handle else None
+        name = frame.get(identity_c.IDENTITY(handle)).name if handle else ""
+        closeness = frame.get(social_c.CLOSENESS(person)) if person else None
+        noticed = felt(actor, gesture, closeness, name or "Quelqu'un", person)
+    # ce qu'elle en sent avant le geste lui-même : l'accusé porte le ``seq`` du dernier brouillon, celui de la trame
+    # qui montre le geste
+    return Verdict(drafts=(gestured,) if noticed is None else (noticed, gestured), guard=UNCHANGED)
 
 
 def _finished(s: WorldState, f: w.Finished) -> Verdict:
