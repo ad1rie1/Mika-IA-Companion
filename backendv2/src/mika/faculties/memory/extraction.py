@@ -186,8 +186,10 @@ class Extraction(_Lenient):
                                                                                              "événements"))
     confidentiel: list[int] = Field(default_factory=list, description="les numéros des croyances déjà connues "
                                     "que la personne vient de demander de garder pour soi")
+    situations_finies: list[int] = Field(default_factory=list, description="les numéros des situations en cours "
+                                         "que la personne dit finies")
 
-    @field_validator("confidentiel", mode="before")
+    @field_validator("confidentiel", "situations_finies", mode="before")
     @classmethod
     def lenient_ids(cls, v: Any) -> list[int]:
         return _ints(v)
@@ -245,7 +247,9 @@ et qui lui arrive à elle ou lui : pas une chose à faire, ni ce qu'on lui a dem
 prendre rendez-vous chez le dentiste » : prendre rendez-vous est une promesse, pas un rendez-vous dont on prendra \
 des nouvelles). Ou une situation qui dure dans sa vie et dont on prend des nouvelles (son chat malade, un \
 déménagement en cours, un proche à l'hôpital) : « en_cours » vrai, et dans « quand » le jour où ça a commencé \
-(aujourd'hui si on ne sait pas).
+(aujourd'hui si on ne sait pas). Si la personne dit qu'une des situations en cours est finie — bien ou mal (« on a \
+fini le déménagement », « il est sorti de l'hôpital », « on a dû l'endormir ») —, donne son numéro dans \
+« situations_finies » et ne la renote pas.
 
 Pour chaque élément :
 - « personnes » : qui il concerne — le jeton pour quelqu'un de la conversation ([P1]), le prénom pour quelqu'un \
@@ -316,9 +320,10 @@ def day_words(d: date) -> str:
 
 
 def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, str]],
-           promises: Sequence[tuple[int, str, str]]) -> str:
+           promises: Sequence[tuple[int, str, str]], situations: Sequence[tuple[int, str, str]] = ()) -> str:
     """Le message d'une conversation : la date, qui parle, ce qui est déjà
-    su, les promesses en cours, puis les messages (avec la date dès qu'elle change)."""
+    su, les promesses en cours, les situations en cours de ses personnes, puis
+    les messages (avec la date dès qu'elle change)."""
     out = [f"Aujourd'hui : {day_words(now.date())} {now.year}, {now:%H h %M}."]
     who = ", ".join(s.label for s in conv.speakers)
     if conv.room:
@@ -329,6 +334,8 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
         out += ["", "Croyances déjà connues :"] + [f"[#{i}] {text}" for i, text in beliefs]
     if promises:
         out += ["", "Promesses en cours :"] + [f"[#{i}] (à {whom}) {text}" for i, whom, text in promises]
+    if situations:
+        out += ["", "Situations en cours :"] + [f"[#{i}] ({whom}) {text}" for i, whom, text in situations]
     out += ["", "Les messages :"]
     day: date | None = None
     for ln in conv.lines:
@@ -380,6 +387,7 @@ def parse(resp: LLMResponse) -> Extraction | None:
                 continue
         setattr(out, key, kept)
     out.confidentiel = _ints(raw.get("confidentiel"))
+    out.situations_finies = _ints(raw.get("situations_finies"))
     return out
 
 

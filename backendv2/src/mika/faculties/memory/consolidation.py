@@ -14,7 +14,9 @@ secret. Ce qui ressemble de très près à ce qu'elle sait déjà le **renforce*
 corroborée que par quelqu'un qui ne l'avait pas encore dite. Une réplique
 recopiée n'est pas un souvenir (la sienne jamais ; celle de la personne, citée
 en disant qui parle), une banalité ne se garde pas, et comment la personne
-l'appelle se retient même quand le modèle l'oublie (ADR 0055). Tout part en un
+l'appelle se retient même quand le modèle l'oublie (ADR 0055). La relecture
+voit les situations en cours de ses personnes, avec leur numéro : une situation
+que la personne dit finie (« on a fini le déménagement ») prend fin. Tout part en un
 seul ajout gardé par le point de contrôle, qui n'avance que sur un succès —
 ou, après plusieurs échecs sur la même fenêtre, en le disant (``failed``).
 
@@ -132,18 +134,19 @@ class Consolidate:
         # si un appel lève, on ne réessaie pas avant le délai (aucune rafale)
         self.retry_at = frame.now + p.retry_us
         done: list[tuple[x.Conversation, x.People, list[tuple[int, str]], list[tuple[int, str, str]],
-                         x.Extraction, str]] = []
+                         list[tuple[int, str, str]], x.Extraction, str]] = []
         failures, model, last_call = 0, "", f"{ctx.run_id}#0"
         for n, conv in enumerate(conversations):
             people = x.People.of(conv.speakers, directory)
             known = await self._known_beliefs(store, vectors, conv, people, directory)
             promises = self._promises(frame, store, state, conv)
+            labels = {s.person: s.label for s in conv.speakers}
+            situations = self._situations(frame, store, state, conv, p, labels)
             cached = self.extracted.get((conv.key, conv.seqs))
             if cached is None:
-                labels = {s.person: s.label for s in conv.speakers}
                 prompt = x.render(conv, now=frame.local(), beliefs=known,
                                   promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
-                                            for i, to, t in promises])
+                                            for i, to, t in promises], situations=situations)
                 request = LLMRequest(role="extract", call_id=f"{ctx.run_id}#{n}", system_stable=x.SYSTEM,
                                      messages=(Message("user", prompt),), tools=(x.tool(),), max_tokens=2500,
                                      lane="background", priority=2,
@@ -155,7 +158,7 @@ class Consolidate:
                     continue
                 cached = self.extracted[(conv.key, conv.seqs)] = (extraction, response.model, request.call_id)
             extraction, model, last_call = cached
-            done.append((conv, people, known, promises, extraction, last_call))
+            done.append((conv, people, known, promises, situations, extraction, last_call))
         if failures:
             # les essais se comptent par point de départ : la fin de la fenêtre bouge avec les messages
             start = state.checkpoint
@@ -165,9 +168,10 @@ class Consolidate:
         else:
             self.retry_at = 0
         drafts: list[Draft[Any]] = []
-        for conv, people, known, promises, extraction, call_id in done:
+        for conv, people, known, promises, situations, extraction, call_id in done:
             drafts += await self._drafts(extraction, frame, state, store, conv, people, known, promises, vectors,
                                          p, call_id)
+            drafts += self._ended(extraction, situations, call_id)
         drafts.append(c.CONSOLIDATED.draft(upto=upto, produced=len(drafts), failed=bool(failures),
                                            call_id=last_call, model=model))
         self.attempts.pop(state.checkpoint, None)
@@ -280,6 +284,31 @@ class Consolidate:
         marks = ",".join("?" * len(ids))
         texts = dict(store.query_mind(f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE id IN ({marks})", tuple(ids)))
         return [(pr.id, to, texts.get(pr.id, "")) for pr, to in pending if texts.get(pr.id)]
+
+    @staticmethod
+    def _situations(frame: Frame, store: Any, state: MemoryState, conv: x.Conversation, p: MemoryParams,
+                    labels: dict[str, str]) -> list[tuple[int, str, str]]:
+        """Les situations en cours des personnes de cette conversation (numéro, qui, texte) : la relecture peut dire
+        lesquelles la personne dit finies. Comme les croyances connues, jamais ce qu'un autre a confié au-delà de
+        l'anodin, et dans un salon l'anodin seulement (le modèle pourrait le recopier ici)."""
+        persons = set(conv.persons)
+        live: list[tuple[c.LifeEvent, str]] = []
+        for ev in sorted(state.events.values(), key=lambda ev: ev.id):
+            if not ev.ongoing or ev.ended_at or not ev.text_ref \
+                    or not ev.when <= frame.now <= ev.when + round(p.situation_days * DAY):
+                continue
+            whom = next((k for k in (frame.get(identity_c.PERSON(a)) or a for a in ev.about) if k in persons), None)
+            if whom is None:
+                continue
+            tellers = {frame.get(identity_c.PERSON(t)) or t for t in ev.told_by}
+            anodyne = ev.sensitivity <= Sensitivity.ANODYNE and not ev.secret
+            if not (anodyne or (tellers <= persons and not conv.room)):
+                continue
+            live.append((ev, whom))
+        if not live:
+            return []
+        texts = store.content([ev.text_ref for ev, _ in live])
+        return [(ev.id, labels.get(whom, whom), texts[ev.text_ref]) for ev, whom in live if texts.get(ev.text_ref)]
 
     # ── ce qu'on en garde ──
     async def _drafts(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
@@ -438,6 +467,14 @@ class Consolidate:
         drafts += await self._events(ex, frame, state, store, conv, people, vectors, p, provenance, concerned,
                                      secret_of, heard, fresh, call_id)
         return drafts
+
+    @staticmethod
+    def _ended(ex: x.Extraction, situations: list[tuple[int, str, str]], call_id: str) -> list[Draft[Any]]:
+        """Les situations que la personne dit finies, parmi celles montrées à la relecture : un numéro qu'elle n'a
+        pas vu ne finit rien."""
+        shown = {i for i, _, _ in situations}
+        return [c.SITUATION_ENDED.draft(event=i, call_id=call_id, dedupe_key=f"situation-finie:{i}")
+                for i in dict.fromkeys(ex.situations_finies) if i in shown]
 
     @staticmethod
     def _heard_nicknames(conv: x.Conversation, her: str) -> dict[str, list[int]]:
