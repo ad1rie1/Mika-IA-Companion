@@ -103,6 +103,15 @@ export class WebSocketClient {
   // Keepalive state.
   private heartbeatTimer: number | null = null;
   private lastFrameAt = 0;
+  /**
+   * Dernier `bufferedAmount` relevé, et l'instant où on l'a vu baisser.
+   * Un envoi lourd occupe le tampon pendant des dizaines de secondes, et les
+   * `ping` attendent derrière lui : le serveur ne peut pas répondre avant de
+   * l'avoir reçu en entier. Des octets qui sortent prouvent que le socket vit
+   * aussi bien qu'une trame reçue (cf. `silentPastTimeout`).
+   */
+  private lastBuffered = 0;
+  private lastDrainAt = 0;
   private reconnectTimer: number | null = null;
   /** Terminal refusal (4401) — retrying cannot change the answer. */
   private stopped = false;
@@ -185,10 +194,7 @@ export class WebSocketClient {
       // Without an outstanding frame the same silence proves nothing (a
       // healthy idle socket receives nothing between two pings), so we poke
       // it and let the watchdog judge, as before.
-      if (
-        this.unacked.size &&
-        Date.now() - this.lastFrameAt > HEARTBEAT_TIMEOUT_MS
-      ) {
+      if (this.unacked.size && this.silentPastTimeout(this.ws)) {
         console.warn("WebSocket silent with a message in flight — reconnecting");
         this.reconnectNow();
         return;
@@ -218,6 +224,9 @@ export class WebSocketClient {
         console.log("WebSocket connected");
         this.currentDelay = this.reconnectDelay;
         this.lastFrameAt = Date.now();
+        // Le tampon relevé appartenait à l'ancien socket : celui-ci part vide.
+        this.lastBuffered = 0;
+        this.lastDrainAt = 0;
 
         // Handshake: tell the backend who we are so the greeting and every
         // subsequent turn can be attached to a stable person_id.
@@ -378,13 +387,39 @@ export class WebSocketClient {
     this.stopHeartbeat();
     this.heartbeatTimer = window.setInterval(() => {
       if (this.ws?.readyState !== WebSocket.OPEN) return;
-      if (Date.now() - this.lastFrameAt > HEARTBEAT_TIMEOUT_MS) {
+      if (this.silentPastTimeout(this.ws)) {
         console.warn("WebSocket silent past timeout — forcing reconnect");
         this.reconnectNow();
         return;
       }
       this.ping();
     }, HEARTBEAT_INTERVAL_MS);
+  }
+
+  /**
+   * Le socket s'est-il tu au-delà du délai ?
+   *
+   * Le silence ne se compte pas seulement depuis la dernière trame reçue.
+   * Les messages d'un WebSocket partent dans l'ordre : derrière une photo de
+   * plusieurs Mo sur une liaison montante lente, les `ping` attendent leur
+   * tour et aucun `pong` ne peut revenir avant que tout soit passé. Compté
+   * depuis `lastFrameAt`, ce silence-là coupait l'envoi en plein vol au bout
+   * d'une minute, puis le renvoyait depuis zéro sur le socket suivant, qui
+   * mourait de la même façon.
+   *
+   * Un tampon qui baisse depuis le relevé précédent prouve que des octets
+   * sortent, donc que le socket vit. Le relevé où il atteint zéro compte
+   * aussi : c'est là que le `ping` resté derrière est enfin parti, et le
+   * délai de son `pong` se mesure à partir de là. Un socket mort, lui, ne
+   * vide plus rien : son tampon stagne ou grossit des `ping` qu'on y ajoute,
+   * et le silence reprend son cours depuis la dernière preuve de vie.
+   */
+  private silentPastTimeout(ws: WebSocket): boolean {
+    const now = Date.now();
+    const buffered = ws.bufferedAmount;
+    if (buffered < this.lastBuffered) this.lastDrainAt = now;
+    this.lastBuffered = buffered;
+    return now - Math.max(this.lastFrameAt, this.lastDrainAt) > HEARTBEAT_TIMEOUT_MS;
   }
 
   private stopHeartbeat() {
