@@ -37,6 +37,11 @@ const SFX_DURATION_MS: Record<ProsodicCue, number> = {
   breath: 350,
 };
 
+// Attente maximale d'un `resume()` du contexte WebAudio avant un effet. Un
+// contexte autorisé se réveille en quelques millisecondes ; au-delà, c'est la
+// politique d'autoplay qui le retient, et l'effet est sauté.
+const SFX_RESUME_WAIT_MS = 150;
+
 /**
  * Échéance d'un énoncé : le temps que la voix devrait mettre à le dire,
  * doublé, plus un forfait. La Web Speech API ne garantit ni `onend` ni
@@ -260,13 +265,22 @@ export class TTSService {
       // awaits this promise — a silent resume() left Mika mute for the rest
       // of the session if her first reply contained a prosodic token before
       // the user had interacted with the page.
-      try {
-        await ctx.resume();
-      } catch {
-        // Autoplay policy still blocking (no user gesture yet): skip the
-        // effect rather than hanging the speech queue on it.
-        return false;
-      }
+      //
+      // Mais borné : sans geste utilisateur, la politique d'autoplay ne
+      // rejette pas `resume()`, elle le laisse en attente jusqu'au premier
+      // clic — des heures parfois. Attendu nu, il figeait la file vocale
+      // (fin de phrase jamais dite, `onSpeakEnd` jamais émis, arriéré relu
+      // d'un coup au premier geste). Faute de pouvoir soupirer, elle
+      // continue sa phrase sans le soupir ; le `resume()` resté en vol
+      // réveillera le contexte pour les effets suivants.
+      const resumed = ctx.resume().catch(() => {});
+      await Promise.race([
+        resumed,
+        new Promise<void>((r) => setTimeout(r, SFX_RESUME_WAIT_MS)),
+      ]);
+      // `state` a changé pendant l'attente : le rétrécissement de TypeScript
+      // le croit encore "suspended".
+      if ((ctx.state as AudioContextState) !== "running") return false;
     }
     const now = ctx.currentTime;
 
