@@ -244,8 +244,11 @@ class KernelPort:
                                "intensity": round(t.intensity, 2), "emotion": t.emotion}
                               for t in thoughts if texts.get(t.text_ref)]
         yesterday, dream = frame.get(self_c.YESTERDAY), frame.get(self_c.DREAM_RESIDUE)
-        if yesterday is not None and night.hearable(yesterday.about, 2, person, audience):
-            text = self._store.content([yesterday.text_ref]).get(yesterday.text_ref)
+        # la même version que celle qu'elle a en tête devant cette personne (ADR 0043) : l'intime à qui en est le
+        # seul concerné, en privé ; sinon la partageable ; sinon rien
+        ref = night.journal_ref(yesterday, person, audience.private_ok) if yesterday is not None else ""
+        if yesterday is not None and ref:
+            text = self._store.content([ref]).get(ref)
             if text:
                 # le journal d'une journée passée (il s'écrit la nuit) : son titre le dit, le panneau ne l'invente pas
                 out["today_journal"] = {"date": yesterday.day, "title": journal_title(yesterday.day,
