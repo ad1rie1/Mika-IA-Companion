@@ -832,17 +832,24 @@ def _when_written(frame: Frame, day: str) -> str | None:
     return None
 
 
+def journal_ref(reading: c.JournalReading, person: str | None, private: bool) -> str:
+    """Quelle version du journal peut se montrer à cette personne (``""`` : aucune). Son journal intime parle de
+    tout le monde, et ce qu'on lui a dit ou confié y est mêlé : il ne se montre qu'en privé à qui en est le seul
+    concerné (ou quand il ne parle de personne). Devant les autres, c'est sa journée à elle, sans personne d'autre
+    — masquer des prénoms ne protège rien (« il m'a demandé de ne rien dire à Chloé », lu à Chloé) ; un journal
+    ancien sans version partageable ne se montre à personne d'autre. Une seule règle, pour le prompt et le
+    panneau de la personne."""
+    if not reading.about or (person is not None and private and set(reading.about) <= {person}):
+        return reading.text_ref
+    return reading.shareable_ref
+
+
 def _journal_text(frame: Frame, reading: c.JournalReading, texts: Mapping[str, str]) -> str | None:
-    """Le journal tel qu'elle peut l'avoir en tête devant cette audience. Son journal intime parle de tout le
-    monde, et ce qu'on lui a dit ou confié y est mêlé : il ne se montre qu'en privé à qui en est le seul concerné
-    (ou quand il ne parle de personne). Devant les autres, elle a en tête sa journée à elle, sans personne d'autre
-    — masquer des prénoms ne protège rien (« il m'a demandé de ne rien dire à Chloé », lu à Chloé)."""
+    """Le journal tel qu'elle peut l'avoir en tête devant cette audience (``journal_ref``)."""
     ep, aud = frame.episode, frame.audience
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
-    private = aud is not None and aud.private_ok
-    if not reading.about or (person is not None and private and set(reading.about) <= {person}):
-        return texts.get(reading.text_ref)
-    return texts.get(reading.shareable_ref) if reading.shareable_ref else None
+    ref = journal_ref(reading, person, aud is not None and aud.private_ok)
+    return texts.get(ref) if ref else None
 
 
 @SELF.section("yesterday", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=35, title="TON FIL D'HIER",
