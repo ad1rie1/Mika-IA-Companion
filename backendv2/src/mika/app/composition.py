@@ -101,6 +101,11 @@ INITIATIVE_IN_HAND = frozenset({"memory", "world"})
 STEP_IN_HAND = frozenset({"goals", "memory"})
 PROJECT_IN_HAND = frozenset({"projects", "workshop", "memory"})
 
+#: les ouvriers de chaque voie d'épisodes : trois réponses à des personnes différentes se composent en même temps
+#: — Bob qui écrit « coucou » n'attend pas la fin d'une recherche faite pour Alice — ; une seule par personne, une
+#: seule initiative à la fois (``runtime/lanes.py``). La passerelle ordonne déjà leurs appels de modèle (ADR 0038).
+LANES = {"conversation": 3, "background": 2}
+
 
 def policies() -> dict[str, EpisodePolicy]:
     return {
@@ -172,6 +177,7 @@ def deps(**kw: Any) -> KernelDeps:
         "parsers": [parse_reply],
         "reply_kind": Kind.REPLY,
         "reply_wait": _reply_wait,
+        "lanes": LANES,
     }
     base.update(kw)
     return KernelDeps(**base)

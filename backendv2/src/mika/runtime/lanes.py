@@ -1,7 +1,15 @@
-"""Les voies d'épisodes : une file à priorité et une capacité par voie.
+"""Les voies d'épisodes : une file à priorité et des ouvriers par voie.
 
-La voie ``conversation`` a une capacité de 1 — une seule voix à la fois — et
-fait passer le premier plan (répondre à quelqu'un) devant les initiatives.
+La voie ``conversation`` fait passer le premier plan (répondre à quelqu'un)
+devant les initiatives. Elle peut avoir plusieurs ouvriers
+(``app/composition.py``) : des réponses à des personnes différentes se
+composent alors en même temps — quelqu'un qui écrit « coucou » n'attend pas
+qu'une longue recherche faite pour une autre soit finie. Mais **une seule
+réponse à la fois par personne** (rien ne commence vers quelqu'un à qui elle est
+en train de répondre), et au plus ``secondary_caps`` épisodes qui ne sont pas du
+premier plan en cours dans la voie (une initiative, un murmure : un à la fois).
+Ce qui ne peut pas encore commencer attend sans tenir d'ouvrier ; la fin d'un
+épisode de la voie le remet en file, à sa place.
 Au-delà de ``max_pending`` demandes en attente, une nouvelle demande est
 refusée à voix haute (``overloaded``), jamais oubliée.
 
@@ -11,9 +19,10 @@ répond désormais au dernier message (et le modèle verra les précédents dans
 le fil) ; chacun de ceux qui attendaient reçoit ce même compte rendu.
 
 **Une réponse n'attend pas.** Quand une demande de premier plan arrive dans
-une voie pleine d'épisodes moins prioritaires (une initiative en train de se
-composer, qui attend peut-être elle-même un modèle tenu par le fond), l'un
-d'eux est interrompu (``preempted``) : l'arbitre le reproposera plus tard.
+une voie pleine, ou qu'un épisode moins prioritaire y est en cours (une
+initiative en train de se composer, qui attend peut-être elle-même un modèle
+tenu par le fond), l'un d'eux est interrompu (``preempted``) — comme avec un
+seul ouvrier : l'arbitre le reproposera plus tard.
 """
 
 from __future__ import annotations
@@ -46,10 +55,15 @@ class Lanes:
         runner: EpisodeRunner,
         *,
         capacities: Mapping[str, int] | None = None,
+        secondary_caps: Mapping[str, int] | None = None,
         max_pending: int = 100,
     ) -> None:
         self.runner = runner
+        #: les ouvriers de chaque voie
         self.capacities = dict(capacities or {"conversation": 1, "background": 2})
+        #: au plus combien d'épisodes qui ne sont pas du premier plan (priorité > 0) en cours, par voie ; une
+        #: voie absente n'a que ses ouvriers pour borne
+        self.secondary_caps = {name: max(1, n) for name, n in (secondary_caps or {"conversation": 1}).items()}
         self.max_pending = max_pending
         self._queues: dict[str, asyncio.PriorityQueue[Any]] = {
             name: asyncio.PriorityQueue() for name in self.capacities
@@ -60,6 +74,12 @@ class Lanes:
         self._waiting: dict[tuple[str, str, str | None], _Slot] = {}
         #: les épisodes en cours par voie
         self._busy: dict[str, int] = dict.fromkeys(self.capacities, 0)
+        #: ceux d'entre eux qui ne sont pas du premier plan
+        self._secondary: dict[str, int] = dict.fromkeys(self.capacities, 0)
+        #: les réponses en cours, par (voie, adresse) : une seule à la fois par personne
+        self._answering: dict[tuple[str, str], int] = {}
+        #: les demandes tirées de la file qui ne pouvaient pas encore commencer, par voie
+        self._parked: dict[str, list[tuple[int, int, _Slot]]] = {name: [] for name in self.capacities}
         self._stopping = False
         #: les derniers comptes rendus d'épisode (bornés : le détail durable est
         #: dans le journal et les traces d'épisode)
@@ -70,11 +90,11 @@ class Lanes:
         return policy.lane if policy.lane in self._queues else "background"
 
     def pending(self, lane: str) -> int:
-        return self._queues[lane].qsize()
+        return self._queues[lane].qsize() + len(self._parked[lane])
 
     def full(self, kind: str) -> bool:
         """Une demande de ce type serait-elle refusée faute de place ?"""
-        return self._queues[self.lane_of(kind)].qsize() >= self.max_pending
+        return self.pending(self.lane_of(kind)) >= self.max_pending
 
     def submit(self, req: EpisodeRequest) -> asyncio.Future[EpisodeReport] | None:
         lane = self.lane_of(req.kind)
@@ -87,17 +107,20 @@ class Lanes:
                 slot.req = replace(req, priority=min(req.priority, slot.req.priority))
             slot.futures.append(fut)
             return fut
-        q = self._queues[lane]
-        if q.qsize() >= self.max_pending:
+        if self.pending(lane) >= self.max_pending:
             return None
         slot = _Slot(req, [fut], key)
         if key is not None:
             self._waiting[key] = slot
-        q.put_nowait((req.priority, next(self._counter), slot))
-        if req.priority == 0 and self._busy.get(lane, 0) >= self.capacities.get(lane, 1):
+        self._queues[lane].put_nowait((req.priority, next(self._counter), slot))
+        workers = self.capacities.get(lane, 1)
+        # une réponse ne passe pas derrière une initiative : plus d'ouvrier libre, ou la voie a son compte
+        # d'épisodes secondaires (l'initiative en cours cède, comme avec un seul ouvrier)
+        if req.priority == 0 and (self._busy.get(lane, 0) >= workers
+                                  or self._secondary.get(lane, 0) >= self.secondary_caps.get(lane, workers)):
             preempt = getattr(self.runner, "preempt", None)
             if preempt is not None:
-                preempt(lane)  # une réponse ne passe pas derrière une initiative
+                preempt(lane)
         return fut
 
     def start(self) -> None:
@@ -108,13 +131,25 @@ class Lanes:
     async def _worker(self, lane: str) -> None:
         q = self._queues[lane]
         while True:
-            _prio, _n, slot = await q.get()
+            item = await q.get()
+            slot = item[2]
+            if not self._may_start(lane, slot.req):
+                # elle attend sans tenir l'ouvrier (et son tour peut encore se mettre à jour) ; la fin d'un
+                # épisode de la voie la remet en file
+                self._parked[lane].append(item)
+                continue
             if slot.key is not None and self._waiting.get(slot.key) is slot:
                 del self._waiting[slot.key]  # il commence : un nouveau message le supplantera
+            req = slot.req
+            answering = (lane, req.target) if req.priority == 0 and req.target else None
             self._busy[lane] = self._busy.get(lane, 0) + 1
+            if req.priority > 0:
+                self._secondary[lane] = self._secondary.get(lane, 0) + 1
+            if answering is not None:
+                self._answering[answering] = self._answering.get(answering, 0) + 1
             try:
                 try:
-                    out = await acall(self.runner.run, slot.req, label=f"épisode {slot.req.kind}")
+                    out = await acall(self.runner.run, req, label=f"épisode {req.kind}")
                 except asyncio.CancelledError:
                     if self._stopping:
                         raise
@@ -135,7 +170,39 @@ class Lanes:
                             fut.set_result(out)
             finally:
                 self._busy[lane] -= 1
+                if req.priority > 0:
+                    self._secondary[lane] -= 1
+                if answering is not None:
+                    left = self._answering.pop(answering) - 1
+                    if left > 0:
+                        self._answering[answering] = left
+                self._unpark(lane)
                 q.task_done()
+
+    def _may_start(self, lane: str, req: EpisodeRequest) -> bool:
+        """Peut-elle commencer maintenant ? Pas tant qu'une réponse à sa personne est en cours (une seule voix
+        à la fois pour quelqu'un : la demande attend son tour, et un nouveau message s'y fond encore), ni,
+        si elle n'est pas du premier plan, tant que la voie a déjà son compte d'épisodes secondaires."""
+        if req.target and self._answering.get((lane, req.target), 0) > 0:
+            return False
+        cap = self.secondary_caps.get(lane)
+        return req.priority == 0 or cap is None or self._secondary.get(lane, 0) < cap
+
+    def _unpark(self, lane: str) -> None:
+        """Ce qui attendait et peut maintenant commencer repart dans la file, à sa place (même priorité, même
+        rang). Remis en file avant d'être compté comme traité : ``join`` ne voit jamais la voie vide entre deux."""
+        parked = self._parked[lane]
+        if not parked:
+            return
+        q = self._queues[lane]
+        kept = []
+        for item in parked:
+            if self._may_start(lane, item[2].req):
+                q.put_nowait(item)
+                q.task_done()
+            else:
+                kept.append(item)
+        self._parked[lane] = kept
 
     async def join(self) -> None:
         for q in self._queues.values():
