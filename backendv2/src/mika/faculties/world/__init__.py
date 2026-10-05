@@ -32,7 +32,7 @@ from mika.contracts import body as body_c
 from mika.contracts import place as place_c
 from mika.contracts import world as w
 from mika.faculties.world import plan
-from mika.kernel.clock import DAY, MINUTE, US
+from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.forms import Knob
@@ -434,6 +434,20 @@ async def interact(args: InteractArgs, ctx: Any) -> ToolResult:
 # ── Le prompt ─────────────────────────────────────────────────────────────
 
 
+#: depuis combien de temps elle est là, ou à ce qu'elle fait, en mots (jamais un chiffre) : du plus long au plus
+#: court ; en deçà, rien
+FOR_A_WHILE = ((3 * HOUR, "depuis longtemps"), (45 * MINUTE, "depuis un bon moment"),
+               (20 * MINUTE, "depuis un moment"))
+
+
+def _for_a_while(since: int, now: int) -> str:
+    """« depuis un bon moment » : la durée telle qu'elle la sent. ``since`` nul (le monde vient d'être créé) : on
+    ne sait pas, rien."""
+    if since <= 0:
+        return ""
+    return next((f" {words}" for span, words in FOR_A_WHILE if now - since >= span), "")
+
+
 def around(s: WorldState, now: int, p: WorldParams) -> str:
     """Ce qu'elle sait de là où elle est : son corps, ce qu'elle tient, ce qui est à portée, où elle peut aller."""
     defn = s.definition
@@ -442,15 +456,19 @@ def around(s: WorldState, now: int, p: WorldParams) -> str:
     several = len(defn.rooms) > 1
     room = defn.room(me.room)
     in_room = f", dans {room.label}" if several and room is not None else ""
+    busy = me.activity is not None and (me.activity.until is None or me.activity.until > now)
     if me.moving is not None and me.moving.eta > now:
         intent = s.intents.get(me.moving.intent)
         last = next((st.posture for st in reversed(intent.steps) if st.kind == "posture" and st.posture), None) \
             if intent is not None else None
         lines.append(f"Tu es en chemin : tu seras {_where_phrase(defn, me.moving.to_place, last or me.posture)}.")
     else:
-        lines.append(f"Tu es {_where_phrase(defn, me.place, me.posture)}{in_room}.")
-    if me.activity is not None and (me.activity.until is None or me.activity.until > now):
-        lines.append(f"Tu es en train de {plan.affordance_label(defn, me.activity)}.")
+        # occupée, c'est l'occupation qui dit sa durée (une fois suffit)
+        lasting = "" if busy else _for_a_while(me.since, now)
+        lines.append(f"Tu es {_where_phrase(defn, me.place, me.posture)}{lasting}{in_room}.")
+    if busy and me.activity is not None:
+        lines.append(f"Tu es en train de {plan.affordance_label(defn, me.activity)}"
+                     f"{_for_a_while(me.activity.since, now)}.")
     budget = p.shown_objects
     if me.holding:
         lines.append("Tu tiens " + ", ".join(_thing(s, me, o, now) for o in me.holding) + ".")
