@@ -1,4 +1,4 @@
-import type { ClipManifestEntry, EmotionName } from "../../types";
+import type { ClipManifestEntry, EmotionName, EmotionReading } from "../../types";
 
 /**
  * Valence (pleasure) and arousal of the 29 emotions — the P and A columns of
@@ -43,21 +43,63 @@ export const AFFINITY_MAX = 2.5;
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /**
+ * Part du fond — son humeur du jour, `emotion_state.global` — dans l'affect
+ * que porte le corps ; le reste est le moment, la balise de sa réplique.
+ * Le visage, la tête, le regard et les gestes restent sur le moment seul :
+ * elle rit à la blague, mais un soir las garde les épaules basses, la
+ * respiration lente et les postures longues.
+ *
+ * Le fond l'emporte d'un cheveu, et c'est voulu : à parts égales, un
+ * `amused 0,8` sur un fond `melancholic 0,6` donnait encore un arousal
+ * positif (+0,01, tempo 1,001) — le soir las s'effaçait au premier rire.
+ * À 0,6 il reste las (−0,05, tempo 0,994, tenue 1,02), et un matin
+ * `happy 0,6` sous une réplique `frustrated 0,8` garde une valence positive.
+ */
+export const MOOD_BODY_SHARE = 0.6;
+
+/** Ce que porte le corps : arousal et valence signés, déjà dosés par
+ * l'intensité, −1…1. */
+export interface BodyAffect {
+  arousal: number;
+  valence: number;
+}
+
+/**
+ * L'affect du corps : le moment et le fond mêlés (`MOOD_BODY_SHARE`). Sans
+ * fond (`null` : un serveur plus ancien, le studio), le moment seul —
+ * exactement ce que le corps lisait avant que le fond n'arrive ici.
+ */
+export function bodyAffect(moment: EmotionReading, mood: EmotionReading | null = null): BodyAffect {
+  const s = clamp(moment.intensity, 0, 1);
+  const arousal = EMOTION_AROUSAL[moment.emotion] * s;
+  const valence = EMOTION_VALENCE[moment.emotion] * s;
+  if (mood === null) return { arousal, valence };
+  const m = clamp(mood.intensity, 0, 1);
+  const w = MOOD_BODY_SHARE;
+  return {
+    arousal: (1 - w) * arousal + w * EMOTION_AROUSAL[mood.emotion] * m,
+    valence: (1 - w) * valence + w * EMOTION_VALENCE[mood.emotion] * m,
+  };
+}
+
+/**
  * Multiplier on a base clip's pick weight, from the affect it declares
- * (`arousal` / `valence` in the manifest, −1…1) against the current emotion.
+ * (`arousal` / `valence` in the manifest, −1…1) against the current emotion
+ * — mêlée au fond quand il est connu (`bodyAffect`).
  * A clip declaring nothing keeps its weight — the affect layer is opt-in per
  * clip, and a manifest without it is byte-identical to before.
  */
 export function clipAffinity(
   entry: Pick<ClipManifestEntry, "arousal" | "valence">,
   emotion: EmotionName,
-  intensity: number
+  intensity: number,
+  mood: EmotionReading | null = null
 ): number {
   const a = entry.arousal ?? 0;
   const v = entry.valence ?? 0;
   if (a === 0 && v === 0) return 1;
-  const s = clamp(intensity, 0, 1);
-  const match = a * EMOTION_AROUSAL[emotion] * s + v * EMOTION_VALENCE[emotion] * s;
+  const body = bodyAffect({ emotion, intensity }, mood);
+  const match = a * body.arousal + v * body.valence;
   return clamp(1 + AFFINITY_GAIN * match, AFFINITY_MIN, AFFINITY_MAX);
 }
 
@@ -77,9 +119,13 @@ export const TEMPO_GAIN = 0.12;
 export const TEMPO_MIN = 0.85;
 export const TEMPO_MAX = 1.15;
 
-export function affectTimeScale(emotion: EmotionName, intensity: number): number {
-  const s = clamp(intensity, 0, 1);
-  return clamp(1 + TEMPO_GAIN * EMOTION_AROUSAL[emotion] * s, TEMPO_MIN, TEMPO_MAX);
+export function affectTimeScale(
+  emotion: EmotionName,
+  intensity: number,
+  mood: EmotionReading | null = null
+): number {
+  const arousal = bodyAffect({ emotion, intensity }, mood).arousal;
+  return clamp(1 + TEMPO_GAIN * arousal, TEMPO_MIN, TEMPO_MAX);
 }
 
 /** Hold multiplier before a pool rotation: an agitated body changes stance
@@ -88,7 +134,11 @@ export const HOLD_GAIN = 0.35;
 export const HOLD_MIN = 0.6;
 export const HOLD_MAX = 1.4;
 
-export function affectHoldScale(emotion: EmotionName, intensity: number): number {
-  const s = clamp(intensity, 0, 1);
-  return clamp(1 - HOLD_GAIN * EMOTION_AROUSAL[emotion] * s, HOLD_MIN, HOLD_MAX);
+export function affectHoldScale(
+  emotion: EmotionName,
+  intensity: number,
+  mood: EmotionReading | null = null
+): number {
+  const arousal = bodyAffect({ emotion, intensity }, mood).arousal;
+  return clamp(1 - HOLD_GAIN * arousal, HOLD_MIN, HOLD_MAX);
 }

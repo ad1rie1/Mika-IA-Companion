@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type {
   AnimationStateName,
   EmotionName,
+  EmotionReading,
   HandShapeName,
   SleepPhase,
 } from "../../types";
@@ -82,7 +83,9 @@ export interface StateMachineHooks {
  * The pools are affect-aware: a clip's declared arousal/valence weighs
  * its pick against the current emotion (`affect.ts`), and the base clip's
  * tempo and hold follow the emotion's arousal — a heated argument clip
- * for an angry reply, slow and long-held stances for a low mood.
+ * for an angry reply, slow and long-held stances for a low mood. Quand le
+ * fond de sa journée est connu, c'est le mélange moment + fond qui compte
+ * (`bodyAffect`) : le corps porte l'humeur du jour, le visage le moment.
  */
 export class AnimationStateMachine {
   private mixer: THREE.AnimationMixer;
@@ -128,6 +131,8 @@ export class AnimationStateMachine {
   /** Affect feeding pool weights, tempo and hold. */
   private affectEmotion: EmotionName = "neutral";
   private affectIntensity = 0.5;
+  /** Son humeur du jour, mêlée au moment ; null = le moment seul. */
+  private affectMood: EmotionReading | null = null;
   private tempoTarget = 1;
   private tempo = 1;
   /** This pick's playback jitter (see BASE_TEMPO_JITTER). */
@@ -372,11 +377,14 @@ export class AnimationStateMachine {
   }
 
   /** Current affect: weighs pool picks, retunes tempo and hold. Never
-   * triggers a transition by itself — the running clip just changes pace. */
-  setAffect(emotion: EmotionName, intensity: number): void {
+   * triggers a transition by itself — the running clip just changes pace.
+   * `mood` : le fond de sa journée, mêlé au moment (`bodyAffect`) ; null,
+   * le moment seul. */
+  setAffect(emotion: EmotionName, intensity: number, mood: EmotionReading | null = null): void {
     this.affectEmotion = emotion;
     this.affectIntensity = Math.max(0, Math.min(1, intensity));
-    this.tempoTarget = affectTimeScale(emotion, this.affectIntensity);
+    this.affectMood = mood;
+    this.tempoTarget = affectTimeScale(emotion, this.affectIntensity, mood);
   }
 
   /** Play a one-shot (or briefly-held looping) gesture clip. Returns
@@ -541,7 +549,7 @@ export class AnimationStateMachine {
     this.holdTimer = 0;
     this.holdDuration =
       this.sample(loaded.meta.hold ?? DEFAULT_HOLD[state]) *
-      affectHoldScale(this.affectEmotion, this.affectIntensity);
+      affectHoldScale(this.affectEmotion, this.affectIntensity, this.affectMood);
   }
 
   private enterSleeping(fade: number): void {
@@ -563,7 +571,7 @@ export class AnimationStateMachine {
   poolWeight(loaded: LoadedClip): number {
     return (
       (loaded.meta.weight ?? 1) *
-      clipAffinity(loaded.meta, this.affectEmotion, this.affectIntensity)
+      clipAffinity(loaded.meta, this.affectEmotion, this.affectIntensity, this.affectMood)
     );
   }
 

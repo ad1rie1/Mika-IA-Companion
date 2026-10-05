@@ -1,10 +1,10 @@
 import * as THREE from "three";
 import { VRM } from "@pixiv/three-vrm";
 import type { VRMHumanBoneName } from "@pixiv/three-vrm";
-import type { EmotionName, SleepPhase, VoicePersona } from "../../../types";
+import type { EmotionName, EmotionReading, SleepPhase, VoicePersona } from "../../../types";
 import { forwardSign } from "../../vrmVersion";
 import type { GazeIntent } from "../attention";
-import { EMOTION_AROUSAL } from "../affect";
+import { bodyAffect } from "../affect";
 
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -26,6 +26,9 @@ export class OverlayContext {
   sleepPhase: SleepPhase = "awake";
   emotion: EmotionName = "neutral";
   intensity = 0.5;
+  /** Le fond de sa journée (`AnimationSystem.setMood`) ; null tant
+   * qu'aucun n'est arrivé — le corps suit alors le moment seul. */
+  mood: EmotionReading | null = null;
   speaking = false;
   /** Voice of the reply being spoken; `inner` = murmuring to herself. */
   persona: VoicePersona | undefined = undefined;
@@ -73,10 +76,13 @@ export class OverlayContext {
     this.sign = forwardSign(vrm);
   }
 
-  /** Signed arousal of the current emotion scaled by its intensity,
-   * −1 (drained) … 1 (wired) — how much the body moves. */
+  /** Signed arousal the BODY carries, −1 (drained) … 1 (wired) — how much
+   * it moves: the current emotion scaled by its intensity, mêlée au fond
+   * quand il est connu (`bodyAffect`). Respiration, micro-mouvements et
+   * battements de la parole le lisent ; la tête et le visage lisent
+   * `emotion` / `intensity`, le moment seul. */
   get arousal(): number {
-    return EMOTION_AROUSAL[this.emotion] * this.intensity;
+    return bodyAffect({ emotion: this.emotion, intensity: this.intensity }, this.mood).arousal;
   }
 
   /** Post-multiply a small Euler delta (VRM 1.0 convention) in the bone's
