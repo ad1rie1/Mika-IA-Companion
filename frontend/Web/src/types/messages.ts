@@ -18,6 +18,26 @@ export interface VoiceProfile {
 
 export type EmotionBlend = Array<{ emotion: string; weight: number }>;
 
+/** Une échelle de l'affect telle que le serveur l'envoie. Du JSON jamais
+ * vérifié : `emotion` passe par `isEmotionName` avant tout usage. */
+export interface AffectScale {
+  emotion: string;
+  intensity: number;
+}
+
+/**
+ * L'affect sur ses trois échelles (ADR 0032 ; `protocol.py::face_state`) :
+ * `message` le moment — ce que montre le visage —, `global` son humeur à
+ * elle, le fond de la journée que porte le corps, `person` sa posture
+ * envers la personne. Vide (`{}`) sur une trame d'erreur, absente d'un
+ * serveur plus ancien : le corps suit alors le moment seul.
+ */
+export interface EmotionState {
+  person?: AffectScale;
+  global?: AffectScale;
+  message?: AffectScale & { blend?: EmotionBlend };
+}
+
 export interface ProjectSummary {
   id: number;
   title: string;
@@ -167,7 +187,7 @@ export interface SpeechMessage {
   emotion?: string;
   emotion_intensity?: number;
   emotion_blend?: EmotionBlend;
-  emotion_state?: Record<string, unknown>;
+  emotion_state?: EmotionState;
   source?: string;
   person_id?: string;
   inner_state?: InnerState;
@@ -362,7 +382,7 @@ export interface EmotionUpdateMessage {
   emotion?: string;
   emotion_intensity?: number;
   emotion_blend?: EmotionBlend;
-  emotion_state?: Record<string, unknown>;
+  emotion_state?: EmotionState;
 }
 
 /**

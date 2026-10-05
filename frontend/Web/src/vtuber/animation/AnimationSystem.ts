@@ -4,6 +4,7 @@ import type {
   AvatarStateSnapshot,
   EmotionBlend,
   EmotionName,
+  EmotionReading,
   ProsodicCue,
   SleepPhase,
   VoicePersona,
@@ -109,6 +110,8 @@ export class AnimationSystem {
   /** Seconds until a tired, idle Mika yawns (null = not tired enough). */
   private yawnIn: number | null = null;
   private lastPersona: VoicePersona | undefined;
+  /** Le fond de sa journée (setMood), gardé aussi avant l'init. */
+  private mood: EmotionReading | null = null;
   private _ready = false;
 
   get ready(): boolean {
@@ -152,6 +155,7 @@ export class AnimationSystem {
     this.ctx.speaking = this.speaking;
     this.ctx.persona = this.lastPersona;
     this.ctx.fatigue = this.fatigue;
+    this.ctx.mood = this.mood;
     this.ctx.camera = this.camera;
     this.overlays = [
       new BreathingOverlay(),
@@ -170,7 +174,7 @@ export class AnimationSystem {
     // Re-apply signals that may have arrived before init.
     this.machine.setSpeaking(this.speaking);
     this.machine.setSleepPhase(this.sleepPhase);
-    this.machine.setAffect(this.ctx.emotion, this.ctx.intensity);
+    this.machine.setAffect(this.ctx.emotion, this.ctx.intensity, this.mood);
     this.machine.start();
     if (this.root) this.initLocomotion(vrm, this.root);
     this.vrm = vrm; // update() starts animating from this point on
@@ -347,7 +351,9 @@ export class AnimationSystem {
     this.hands.setEmotion(emotion, clamped);
 
     if (!this.machine) return;
-    this.machine.setAffect(emotion, clamped);
+    // Le corps porte le moment mêlé au fond ; les gestes, eux, répondent
+    // au moment seul (decideGesture ci-dessous).
+    this.machine.setAffect(emotion, clamped, this.mood);
     const decision = decideGesture({
       emotion,
       intensity: clamped,
@@ -381,6 +387,21 @@ export class AnimationSystem {
         this.lastOneshotAt = performance.now();
       }
     }
+  }
+
+  /**
+   * Le fond de sa journée — son humeur à elle (`emotion_state.global`,
+   * ADR 0032). Le corps le porte, mêlé au moment (`bodyAffect`) : choix
+   * des clips, tempo, tenue des postures, respiration, micro-mouvements.
+   * Le visage, la tête, le regard, les mains et les gestes restent sur ce
+   * qu'elle vient de dire. `null` l'oublie : le corps suit le moment seul.
+   */
+  setMood(emotion: EmotionName | null, intensity: number): void {
+    const mood = emotion === null ? null : { emotion, intensity: Math.max(0, Math.min(1, intensity)) };
+    this.mood = mood;
+    if (!this.ctx) return;
+    this.ctx.mood = mood;
+    this.machine?.setAffect(this.ctx.emotion, this.ctx.intensity, mood);
   }
 
   setSleepPhase(phase: SleepPhase): void {
@@ -554,6 +575,8 @@ export class AnimationSystem {
     sleepPhase: SleepPhase;
     emotion: EmotionName;
     intensity: number;
+    /** Le fond que porte le corps (null : le moment seul). */
+    mood: EmotionReading | null;
     speaking: boolean;
     clipCount: number;
     attention: AttentionState;
@@ -570,6 +593,7 @@ export class AnimationSystem {
       sleepPhase: this.sleepPhase,
       emotion: this.ctx?.emotion ?? "neutral",
       intensity: this.ctx?.intensity ?? 0,
+      mood: this.mood,
       speaking: this.speaking,
       clipCount: this.library.listNames().length,
       attention: this.director.currentState,

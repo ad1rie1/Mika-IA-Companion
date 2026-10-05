@@ -4,6 +4,8 @@ import {
   type AckMessage,
   type EmotionBlend,
   type EmotionName,
+  type EmotionReading,
+  type EmotionState,
   type EmotionUpdateMessage,
   type InnerState,
   type InnerStateUpdateMessage,
@@ -59,6 +61,9 @@ export interface BodyPort {
   setSleepPhase(phase: SleepPhase): void;
   /** Énergie 0…1 : respiration, agitation, clignements, bâillements. */
   setEnergy?(energy: number): void;
+  /** Le fond de sa journée (`emotion_state.global`) : le corps le porte,
+   * mêlé au moment — le visage non. Optionnel. */
+  setMood?(emotion: EmotionName, intensity: number): void;
   /** Où l'IA l'a mise dans sa chambre (un état, pas un ordre). */
   setPlace?(place: unknown): void;
 }
@@ -111,6 +116,20 @@ interface Drift {
   emotion: EmotionName;
   intensity: number;
   blend: EmotionBlend;
+}
+
+/**
+ * Le fond de sa journée dans une trame (`emotion_state.global`, son humeur
+ * à elle — ADR 0032), validé à l'entrée : du JSON jamais vérifié, comme
+ * l'émotion. Null quand il manque ou ne se lit pas (un serveur plus ancien,
+ * une trame d'erreur) : le corps garde alors le fond qu'il avait.
+ */
+function moodOf(state: EmotionState | undefined): EmotionReading | null {
+  const global = state?.global;
+  if (!global || !isEmotionName(global.emotion)) return null;
+  const intensity = global.intensity;
+  if (typeof intensity !== "number" || !Number.isFinite(intensity)) return null;
+  return { emotion: global.emotion, intensity };
 }
 
 /**
@@ -173,6 +192,7 @@ export class SpeechPresenter {
     this.readouts.setEmotionBlend(blend, intensity);
     this.readouts.applyInnerState(data.inner_state);
     this.applyBodyState(data.inner_state);
+    this.applyMood(data.emotion_state);
     // Quoi qu'elle composait, c'est ceci : le regard « je réfléchis » cesse
     // quand le texte arrive, la voix suit.
     this.body.setReplyPending(false);
@@ -254,6 +274,16 @@ export class SpeechPresenter {
   }
 
   /**
+   * Le fond passe au corps dès la trame, jamais retenu derrière la voix :
+   * ce n'est pas un visage volé à la réplique en vol, c'est la posture de
+   * la journée, et le visage reste sur le moment.
+   */
+  private applyMood(state: EmotionState | undefined): void {
+    const mood = moodOf(state);
+    if (mood) this.body.setMood?.(mood.emotion, mood.intensity);
+  }
+
+  /**
    * La dérive entre deux tours : les oscillateurs bougent pendant qu'elle
    * se tait, et c'est la seule trame qui le porte. Appliquée par le MÊME
    * chemin qu'une réponse avec `ambient: true` — expression, regard, mains
@@ -266,6 +296,7 @@ export class SpeechPresenter {
     const blend = data.emotion_blend ?? [];
     this.readouts.setEmotion(data.emotion, intensity);
     this.readouts.setEmotionBlend(blend, intensity);
+    this.applyMood(data.emotion_state);
     if (this.voiceOwnsFace()) {
       // Retenue jusqu'à la fin de la voix — la plus récente gagne.
       this.pendingDrift = { emotion: data.emotion, intensity, blend };
