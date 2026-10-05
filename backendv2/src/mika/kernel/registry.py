@@ -366,7 +366,30 @@ class Registry:
         rec = ks.params.get(owner)
         if rec is None:
             return _default_params(f)
-        return _decode_params(f.params, rec.data, f.retired_params)
+        try:
+            return _decode_params(f.params, rec.data, f.retired_params)
+        except ValueError:
+            # des paramètres journalisés que le code d'aujourd'hui ne relit plus (un champ supprimé sans
+            # ``retired_params``, une valeur retirée d'un choix, un type changé) : elle vit sur ses valeurs par
+            # défaut, la santé le dit (``params_problem``) et la prochaine configuration réécrit des paramètres
+            # valides — jamais un rejeu interrompu ni un démarrage impossible
+            return _default_params(f)
+
+    def params_problem(self, owner: str, root: Root) -> ValueError | None:
+        """Pourquoi les paramètres journalisés de ``owner`` ne se relisent pas (``None`` s'ils se relisent, ou
+        s'il n'y en a pas) : ``params_of`` retombe alors sur les valeurs par défaut."""
+        f = self.faculties[owner]
+        if f.params is None:
+            return None
+        ks: KernelState = root.slices["kernel"]
+        rec = ks.params.get(owner)
+        if rec is None:
+            return None
+        try:
+            _decode_params(f.params, rec.data, f.retired_params)
+        except ValueError as exc:
+            return exc
+        return None
 
     def tz_of(self, root: Root) -> ZoneInfo:
         params: KernelParams = self.params_of("kernel", root)
