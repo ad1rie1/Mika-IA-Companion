@@ -3,13 +3,16 @@
 - **Réfléchir** : une pensée restée forte, digérée pendant la nuit, devient un
   souvenir (« Après y avoir repensé cette nuit : … ») — une fois.
 - **Trier** : après trois heures de sommeil, une fois par nuit, un souvenir du
-  jour presque identique à un souvenir plus ancien s'y fond (sans modèle) :
-  un seul souvenir, qui garde la plus haute des deux importances et des deux
-  sensibilités, et les personnes de l'un et de l'autre (la projection).
+  jour presque identique à un souvenir plus ancien **des mêmes personnes,
+  confié et entendu par les mêmes**, s'y fond (sans modèle) : un seul
+  souvenir, qui garde la plus haute des deux importances et des deux
+  sensibilités (la projection).
 """
 
 from __future__ import annotations
 
+import json
+from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta
 from typing import Any
 
@@ -87,19 +90,37 @@ class Sort:
         day = date.fromisoformat(night)
         start = instant(datetime.combine(day, time(5), tzinfo=tz))
         end = instant(datetime.combine(day + timedelta(days=1), time(5), tzinfo=tz))
-        rows = store.query_mind(f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE kind=? AND status='active' AND "
-                                "born_at >= ? AND born_at < ? ORDER BY id DESC", (c.SOUVENIR, start, end))
+        rows = store.query_mind(f"SELECT id, text, about, told_by, heard_by FROM {c.ITEMS_TABLE} WHERE kind=? AND "
+                                "status='active' AND born_at >= ? AND born_at < ? ORDER BY id DESC",
+                                (c.SOUVENIR, start, end))
         merged: set[int] = set()
         out: list[tuple[int, int]] = []
-        for item_id, text in rows:
+        for item_id, text, *people in rows:
             if len(out) >= p.night_max_merges or item_id in merged:
                 continue
             for hit, sim in await vectors.search(text, 4, kinds={c.SOUVENIR}):
                 if hit == item_id or hit in merged or sim < p.night_merge_similarity or hit > item_id:
                     continue
-                alive = store.query_mind(f"SELECT status FROM {c.ITEMS_TABLE} WHERE id=?", (hit,))
-                if alive and alive[0][0] == "active":
+                alive = store.query_mind(f"SELECT status, about, told_by, heard_by FROM {c.ITEMS_TABLE} WHERE id=?",
+                                         (hit,))
+                # la fusion unit les personnes, confidents et témoins : « Bob m'a dit que son père est hospitalisé »
+                # fondu dans la confidence d'Alice la rendrait « ses propres mots » pour Bob, et l'oubli de Bob
+                # l'effacerait — seuls deux souvenirs des mêmes personnes, confiés et entendus par les mêmes, se fondent
+                if alive and alive[0][0] == "active" and _same_people(alive[0][1:], people):
                     out.append((hit, item_id))
                     merged |= {hit, item_id}
                     break
         return out
+
+
+def _people(raw: Any) -> frozenset[str]:
+    try:
+        got = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return frozenset()
+    return frozenset(str(k) for k in got) if isinstance(got, list) else frozenset()
+
+
+def _same_people(a: Sequence[Any], b: Sequence[Any]) -> bool:
+    """Mêmes personnes concernées, mêmes confidents, mêmes témoins (``about``, ``told_by``, ``heard_by``)."""
+    return all(_people(x) == _people(y) for x, y in zip(a, b, strict=True))
