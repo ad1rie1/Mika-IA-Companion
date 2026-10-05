@@ -170,19 +170,24 @@ def in_her_night(s: BodyState, now: int, p: BodyParams, tz: Any) -> bool:
 #: Des mots qui disent l'urgence (repliés, sans accents ni ponctuation).
 _URGENT = ("urgent", "urgence", "au secours", "a l aide", "aide moi", "aidez moi", "sos", "help",
            "c est grave", "reveille toi", "besoin de toi", "hopital", "accident", "reponds moi", "repond moi")
-_NEGATIONS = frozenset({"pas", "rien", "aucune", "aucun", "jamais"})
+_NEGATIONS = frozenset({"pas", "rien", "aucune", "aucun", "jamais", "sans"})
+#: Combien de mots avant l'indice peuvent le nier : « rien de super urgent », « pas du tout urgent ».
+_NEGATION_REACH = 3
+#: Ce qui ferme une proposition : une négation ne la traverse pas (« j'ai pas dormi, c'est urgent »).
+_CLAUSE = re.compile(r"[.,;:!?\n]+")
 _PUNCT = re.compile(r"[^a-z0-9]+")
 
 
 def urgent(text: str) -> bool:
     """Un message qui dit l'urgence (« c'est urgent », « au secours »…) — pas
-    « rien d'urgent » ni « c'est pas grave »."""
-    low = " " + _PUNCT.sub(" ", fold(text)).strip() + " "
-    for cue in _URGENT:
-        for m in re.finditer(rf" {re.escape(cue)} ", low):
-            before = low[: m.start()].split()[-2:]
-            if not _NEGATIONS & set(before):
-                return True
+    « rien d'urgent », « sans urgence » ni « c'est pas grave »."""
+    for clause in _CLAUSE.split(fold(text)):
+        low = " " + _PUNCT.sub(" ", clause).strip() + " "
+        for cue in _URGENT:
+            for m in re.finditer(rf" {re.escape(cue)} ", low):
+                before = low[: m.start()].split()[-_NEGATION_REACH:]
+                if not _NEGATIONS & set(before):
+                    return True
     return False
 
 
