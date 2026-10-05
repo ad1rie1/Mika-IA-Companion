@@ -467,7 +467,8 @@ def _inspect(s: RssState, frame: Frame, ctx: InspectContext) -> list[Block]:
              sub=f"{broken} en erreur" if broken else "tous répondent" if health else "",
              tone="danger" if broken else ""),
         Stat("laissés passer", passed,
-             sub="relevés sans la toucher (elle ne marque pas ses lectures)"),
+             sub="relevés sans la toucher, sur l'horizon du cache (il oublie les vieux articles ; elle ne "
+                 "marque pas ses lectures)"),
         Stat("remarqués aujourd'hui", sum(1 for e in window if e.at >= today)),
         Stat("dernier titre remarqué", When(last) if last else "jamais"),
     ))
