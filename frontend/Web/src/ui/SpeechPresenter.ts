@@ -173,6 +173,13 @@ export class SpeechPresenter {
     // Quoi qu'elle composait, c'est ceci : le regard « je réfléchis » cesse
     // quand le texte arrive, la voix suit.
     this.body.setReplyPending(false);
+
+    // Une trame sans texte n'est pas une réplique : elle s'est tue, ou la
+    // réponse ne viendra pas (`protocol.py::silence`). Le visage garde ce
+    // qu'il montrait — pas de one-shot du corps, pas de visage volé à une
+    // voix encore en vol, ni persona ni dérive en attente touchés.
+    if (typeof data.text !== "string" || data.text.length === 0) return;
+
     // Une réponse supplante toute dérive qui attendait la fin de la voix.
     this.pendingDrift = null;
 
@@ -188,11 +195,7 @@ export class SpeechPresenter {
 
     // Le backend décide si ce tour est vocalisé (old/backend/pipeline/voice.py).
     // `speak: false` montre le texte et anime l'avatar, sans un son.
-    const willSpeak =
-      data.speak !== false &&
-      typeof data.text === "string" &&
-      data.text.length > 0 &&
-      !this.voice.isMuted;
+    const willSpeak = data.speak !== false && !this.voice.isMuted;
     if (!willSpeak) {
       showReply();
       return;
