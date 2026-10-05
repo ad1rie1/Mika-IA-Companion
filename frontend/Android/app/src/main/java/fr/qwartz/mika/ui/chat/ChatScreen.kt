@@ -140,6 +140,7 @@ fun ChatScreen(
     val actions = remember(vm, files) {
         ChatActions(
             retry = vm::retry,
+            resend = vm::resend,
             copy = { text ->
                 scope.launch {
                     clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Mika", text)))

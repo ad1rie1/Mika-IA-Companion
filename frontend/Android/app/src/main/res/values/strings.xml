@@ -29,6 +29,7 @@
     <string name="chat_input_hint">Écris à Mika…</string>
     <string name="chat_send">Envoyer</string>
     <string name="chat_retry">Réessayer</string>
+    <string name="chat_resend">Le lui redemander</string>
     <string name="chat_copy">Copier</string>
     <string name="chat_more">Plus d\'options</string>
     <string name="chat_empty">Dis bonjour à Mika.</string>

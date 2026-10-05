@@ -311,6 +311,22 @@ class ChatViewModel(
         }
     }
 
+    /** Les bulles en train d'être redemandées : un double appui ne pose pas la question deux fois. */
+    private val resending = HashSet<Long>()
+
+    /** « Le lui redemander » : la même question part comme un nouveau message ; un refus se dit dans la barre. */
+    fun resend(localId: Long) {
+        if (!resending.add(localId)) return
+        viewModelScope.launch {
+            try {
+                val result = graph.chat.resend(localId)
+                if (result is ChatRepository.SendResult.Rejected) notices = listOf(result.reason)
+            } finally {
+                resending.remove(localId)
+            }
+        }
+    }
+
     /**
      * « Accepter » ou « Refuser » une carte, avec l'empreinte de la carte telle qu'elle est montrée.
      * Seul ce bouton décide : un « oui » tapé dans la conversation n'est jamais un accord.

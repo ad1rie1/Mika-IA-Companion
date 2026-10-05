@@ -24,8 +24,16 @@ sealed interface ChatItem {
     /** Une bulle. [read] : un message envoyé auquel Mika a répondu depuis (double coche). */
     data class Bubble(override val key: String, val message: StoredMessage, val read: Boolean) : ChatItem
 
-    /** Une note de la machine sous une bulle — jamais une parole de Mika. */
-    data class Note(override val key: String, val text: String, val href: String? = null) : ChatItem
+    /**
+     * Une note de la machine sous une bulle — jamais une parole de Mika. [resendLocalId] : sous une
+     * réponse qui n'est pas venue, la bulle à redemander (« Le lui redemander »).
+     */
+    data class Note(
+        override val key: String,
+        val text: String,
+        val href: String? = null,
+        val resendLocalId: Long? = null,
+    ) : ChatItem
 
     /** Une pensée à voix haute : éphémère, en italique. */
     data class Thought(override val key: String, val message: StoredMessage) : ChatItem
@@ -92,7 +100,9 @@ object ChatItems {
             m.note?.let { out += ChatItem.Note("n$key", it) }
             val replyNote = m.replyNote
             if (replyNote != null) {
-                out += ChatItem.Note("r$key", replyNote, ChatSync.consoleHref(m.replyHref))
+                // Une bulle encore à écrire (sans clé locale) n'a rien à redemander.
+                val resend = m.localId.takeIf { it > 0L && m.sender == Sender.USER && m.status == MessageStatus.SENT }
+                out += ChatItem.Note("r$key", replyNote, ChatSync.consoleHref(m.replyHref), resend)
             } else if (ChatSync.asleepNoteShown(all, i)) {
                 out += ChatItem.Note("s$key", ChatSync.ASLEEP_NOTE)
             }

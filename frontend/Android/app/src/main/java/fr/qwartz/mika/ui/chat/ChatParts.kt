@@ -87,6 +87,7 @@ import java.time.ZoneId
 /** Ce que le fil sait faire ; des défauts muets pour les tests d'écran. */
 class ChatActions(
     val retry: (Long) -> Unit = {},
+    val resend: (Long) -> Unit = {},
     val copy: (String) -> Unit = {},
     val openImage: (MessageAttachment) -> Unit = {},
     val save: (MessageAttachment) -> Unit = {},
@@ -317,8 +318,25 @@ private fun Backed(on: Boolean, content: @Composable () -> Unit) {
 
 @Composable
 private fun Note(item: ChatItem.Note, operator: Boolean, actions: ChatActions) {
+    val resendLabel = stringResource(R.string.chat_resend)
+    val resend = item.resendLocalId
     Column(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-        Text(item.text, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            item.text,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // La note dit « réessaie » : le lecteur d'écran trouve le geste sur elle aussi.
+            modifier = if (resend != null) {
+                Modifier.semantics {
+                    customActions = listOf(CustomAccessibilityAction(resendLabel) { actions.resend(resend); true })
+                }
+            } else {
+                Modifier
+            },
+        )
+        if (resend != null) {
+            TextButton(onClick = { actions.resend(resend) }) { Text(resendLabel) }
+        }
         val href = item.href
         if (operator && href != null) {
             TextButton(onClick = { actions.openConsole(href) }) { Text(stringResource(R.string.chat_open_console)) }

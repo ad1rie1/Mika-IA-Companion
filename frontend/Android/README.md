@@ -15,7 +15,9 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
   Android. La session dure jusqu'à ce que tu te déconnectes, ou qu'un opérateur révoque le téléphone.
 - **La conversation** : bulles, heures, séparateurs de date, état de chaque message (en attente, envoyé, lu,
   refusé + « Réessayer »), gras et code mis en forme, « Mika écrit… ». Un message tapé hors ligne part tout seul
-  au retour du réseau, même si l'application a été tuée entre-temps.
+  au retour du réseau, même si l'application a été tuée entre-temps. Sous une réponse qui n'est pas venue
+  (`no_reply`, `too_late`), « Le lui redemander » renvoie le même texte et les mêmes fichiers comme un nouveau
+  message ; la bulle d'origine reste.
 - **Les cartes d'accord** (ADR 0064) : quand Mika veut appeler un service extérieur et que c'est à toi d'en
   décider, une carte apparaît au-dessus de la barre de saisie — ce qu'elle veut faire, **exactement ce qui partira**
   (en texte brut, à chasse fixe, jamais interprété), le compte à rebours (« expire dans 4 min ») et deux boutons,
