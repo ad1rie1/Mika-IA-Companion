@@ -133,6 +133,11 @@ namespace Mika.Editor.Creator
                 }
                 EditorUtility.SetDirty(oa);
             }
+            // Le meuble d'un lieu (la chaise du bureau, le cadre du lit) : relié une fois les objets posés, les lieux
+            // passant avant eux. Même règle que les sorties : ce que la définition ne nomme pas n'est plus relié.
+            foreach (var p in def.Places)
+                if (places.TryGetValue(p.Id, out var pa))
+                    pa.ofObject = p.OfObject != null && objects.TryGetValue(p.OfObject, out var furniture) ? furniture : null;
 
             var actors = root.GetComponentsInChildren<ActorAuthoring>(true).ToDictionary(a => a.id);
             foreach (var a in def.Actors)
