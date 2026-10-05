@@ -6,9 +6,9 @@
   et habitue. Le monde (les mails) reste dans le cache de l'adaptateur ; le
   journal ne garde que ce qu'elle en a remarqué. Un mail lu ailleurs (dans un
   autre client) ne lui sera plus signalé.
-- **Dire** à sa propriétaire, si elle est là (l'adresse qui parle en a les
-  droits), qu'un mail important est arrivé (une preuve, jamais une parole
-  forcée). Le mail annoncé est l'objet de l'initiative : il a sa section, et
+- **Dire** à sa propriétaire, là où elle est, sinon sur sa messagerie
+  (l'adresse en a les droits), qu'un mail important est arrivé (une preuve,
+  jamais une parole forcée). Le mail annoncé est l'objet de l'initiative : il a sa section, et
   il n'est « signalé » qu'une fois **dit** — un silence, une initiative
   devancée, un « finalement non » le laissent à dire (ADR 0033, 0044).
 - **Lire** (outils) : lister, chercher, ouvrir — réservé à ses propriétaires **en
@@ -94,11 +94,11 @@ class EmailParams(BaseModel):
     mention_from: Annotated[float, Knob(
         label="Important à partir de", group="Le dire", lo=0.0, hi=1.0, step=0.05,
         help="Un mail non lu dont l'importance atteint ce seuil est « important » : elle peut en parler d'elle-même "
-             "à une propriétaire présente.")] = 0.8
+             "à une propriétaire, là où elle est, sinon sur sa messagerie.")] = 0.8
     mention_evidence: Annotated[float, Knob(
         label="Envie de le dire", group="Le dire", lo=0.0, hi=8.0, step=0.5,
-        help="La preuve (log-odds) qu'un mail important apporte à une initiative envers une propriétaire présente, "
-             "face au seuil d'initiative (9) ; l'arbitrage la plafonne à 8.")] = 8.0
+        help="La preuve (log-odds) qu'un mail important apporte à une initiative envers une propriétaire (présente, "
+             "sinon sur sa messagerie), face au seuil d'initiative (9) ; l'arbitrage la plafonne à 8.")] = 8.0
     mention_within_us: Annotated[int, Knob(
         label="Le dire dans les", group="Le dire", lo=10 * MINUTE, hi=2 * DAY,
         help="Passé ce délai après son arrivée, un mail important ne se signale plus de lui-même.")] = 6 * HOUR
