@@ -1,4 +1,4 @@
-import type { ApprovalFrame, ServerMessageMap } from "../types";
+import type { ApprovalFrame, PresenceFrame, ServerMessageMap } from "../types";
 
 export type MessageHandler = (data: any) => void;
 
@@ -144,6 +144,9 @@ export class WebSocketClient {
   private installWakeListeners() {
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", () => {
+        // D'abord dire si l'on regarde : un retour qui trouve le socket mort
+        // le redira à l'ouverture du suivant.
+        this.sendPresence();
         if (!document.hidden) this.ensureAlive();
       });
     }
@@ -151,6 +154,24 @@ export class WebSocketClient {
       window.addEventListener("online", () => this.ensureAlive());
       window.addEventListener("focus", () => this.ensureAlive());
     }
+  }
+
+  /**
+   * Dire au serveur si quelqu'un regarde cet écran (ADR 0062 §3) : l'onglet
+   * visible ou non, rien d'autre — ni clavier ni souris, comme sur Android.
+   * Un onglet en arrière-plan reste connecté et reçoit ce qui lui est
+   * adressé, mais ne compte plus comme une présence : la voix, les pensées à
+   * voix haute, le visage et le panneau vont aux écrans regardés, et un
+   * retour se remarque. Le serveur ne tient un départ pour acquis qu'après
+   * sa grâce (20 s) : un aller-retour vers un autre onglet n'écrit rien.
+   *
+   * Jamais mise en file : elle ne vaut que pour l'instant où elle part, et
+   * chaque ouverture redit une absence (la présence est le défaut du serveur).
+   */
+  private sendPresence() {
+    if (typeof document === "undefined") return;
+    const frame: PresenceFrame = { type: "presence", here: !document.hidden };
+    this.sendNow(frame);
   }
 
   /** Reconnect immediately if the socket isn't demonstrably usable. */
@@ -206,6 +227,13 @@ export class WebSocketClient {
             person_id: this.personId,
             display_name: this.displayName,
           });
+        }
+
+        // Un onglet ouvert — ou restauré — en arrière-plan : une connexion à
+        // cookie compte comme regardée tant qu'on ne dit pas le contraire, et
+        // redire « là » à un serveur qui le tient déjà ne changerait rien.
+        if (typeof document !== "undefined" && document.hidden) {
+          this.sendPresence();
         }
 
         // Ask for the gap BEFORE replaying the outbox. The server answers a
@@ -507,10 +535,11 @@ export class WebSocketClient {
   /**
    * Send if the socket is open, drop otherwise — never queue.
    *
-   * For control frames (identify, sync, ping) whose value is entirely in
-   * being current. Replaying a stale `sync` after a reconnect would ask for
-   * a gap that the fresh `sync` has already closed, and a queued `ping`
-   * would answer a liveness question about a socket that no longer exists.
+   * For control frames (identify, sync, ping, presence) whose value is
+   * entirely in being current. Replaying a stale `sync` after a reconnect
+   * would ask for a gap that the fresh `sync` has already closed, and a
+   * queued `ping` would answer a liveness question about a socket that no
+   * longer exists.
    */
   private sendNow(data: object): boolean {
     if (this.ws?.readyState !== WebSocket.OPEN) return false;
