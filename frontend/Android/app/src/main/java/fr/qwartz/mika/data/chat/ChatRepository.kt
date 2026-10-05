@@ -80,7 +80,11 @@ class ChatRepository(
         return SendResult.Queued(cid)
     }
 
-    /** Renvoyer une bulle refusée : elle disparaît, un nouveau message part avec ses fichiers encore là. */
+    /**
+     * Renvoyer une bulle refusée : elle disparaît, un nouveau message part avec les mêmes fichiers.
+     * Tout se vérifie avant de toucher à la bulle : un fichier que le budget de `sent/` a emporté, ou
+     * un envoi que [AttachmentPolicy.checkSend] refuse, la laisse en échec, avec sa raison.
+     */
     suspend fun retry(localId: Long): SendResult? {
         val failed = store.message(localId) ?: return null
         if (failed.sender != Sender.USER || failed.status != MessageStatus.FAILED) return null
@@ -95,6 +99,17 @@ class ChatRepository(
                     failed.attachments.mapNotNull { a -> a.local?.let { a.name to it } },
                 ) { name -> failed.attachments.firstOrNull { it.name == name }?.mime ?: "application/octet-stream" }
             }
+        }
+        // Repartir sans un fichier, ce serait faire croire qu'on l'a renvoyé.
+        val refusal = if (staged.size < failed.attachments.size) {
+            RETRY_FILES_GONE
+        } else {
+            AttachmentPolicy.checkSend(typed.trim(), staged)
+        }
+        if (refusal != null) {
+            withContext(io) { staged.forEach { files.discardStaged(it.path) } }
+            store.mutate { thread.firstOrNull { it.localId == localId }?.reason = refusal }
+            return SendResult.Rejected(refusal)
         }
         store.mutate {
             thread.removeAll { it.localId == localId }
@@ -160,5 +175,6 @@ class ChatRepository(
 
     private companion object {
         val OUTBOX_FILES = ListSerializer(OutboxFile.serializer())
+        const val RETRY_FILES_GONE = "Fichiers plus disponibles sur ce téléphone : rien n'a été renvoyé."
     }
 }
