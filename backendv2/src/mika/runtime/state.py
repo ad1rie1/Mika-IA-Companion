@@ -279,23 +279,27 @@ async def _no_reply(ev: Any, ports: Mapping[str, Any]) -> None:
     échoué, expiré, ses tentatives sont épuisées, une reprise au démarrage arrive trop tard ; ``text`` porte
     le détail technique, jamais montré tel quel). Une livraison par tour, pour son dernier message : les
     précédents étaient lus avec lui (le web passe sa bulle en échec et éteint « Mika écrit… » ; une
-    messagerie ne l'écrit qu'une fois). Personne ne reste devant « Mika écrit… », même pour une réponse reprise que
-    personne n'attend plus. Un transport qui ne peut pas la prendre rend ``False`` : la file de sortie
-    réessaiera."""
+    messagerie ne l'écrit qu'une fois). Elle porte le tour entier (``answers``), comme une parole : un écran
+    rattache aussi les bulles d'avant à leur ligne du fil. Personne ne reste devant « Mika écrit… », même pour
+    une réponse reprise que personne n'attend plus. Un transport qui ne peut pas la prendre rend ``False`` : la
+    file de sortie réessaiera."""
     d = ev.data
     port, store = ports.get("delivery"), ports.get("store")
     if not d.unanswered or port is None or store is None:
         return
     last: dict[tuple[str, str | None], tuple[int, rt.PerceptionReceived]] = {}
+    turns: dict[tuple[str, str | None], list[int]] = {}
     for stored in store.get_events(sorted(d.unanswered)):
         if stored.type != rt.PERCEPTION_RECEIVED.name:
             continue
         p = rt.PerceptionReceived.model_validate_json(stored.data)
         last[(p.handle, p.room)] = (stored.seq, p)
+        turns.setdefault((p.handle, p.room), []).append(stored.seq)
     abstained = d.outcome == "abstained"
     for seq, p in sorted(last.values(), key=lambda x: x[0]):
         await port.deliver(Delivery(
             key=f"{ev.id}:{seq}", target=p.handle, channel=p.channel, room=p.room,
             text="" if abstained else (d.detail or d.outcome), persona=voice.SPEAKING,
             emotion=EmotionView("neutral", 0.0), message_id=0, reply_to=seq, client_msg_id=p.client_msg_id,
-            source=d.outcome, kind=REPLY_ABSTAINED if abstained else REPLY_FAILED))
+            source=d.outcome, kind=REPLY_ABSTAINED if abstained else REPLY_FAILED,
+            answers=tuple(turns[(p.handle, p.room)])))

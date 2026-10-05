@@ -195,6 +195,9 @@ class Hub:
             return True
         if d.kind in delivery_p.REPLY_OUTCOMES:
             if d.target:
+                if self.of(d.target):
+                    # sans parole, la rafale se rattache quand même : sinon ses bulles d'avant restent épinglées
+                    await self._bind_turn(d.target, d)
                 outcome = "failed" if d.kind == delivery_p.REPLY_FAILED else protocol.ABSTAINED_OUTCOME
                 await self.settle_reply(d.target, d.reply_to, d.client_msg_id, outcome, d.text)
             return True
@@ -228,8 +231,9 @@ class Hub:
         """Une réponse qui règle une rafale (« salut », « t'as vu le match ? », « allo ? ») ne lie par sa trame
         ``speech`` que son dernier message (``user_message_id``, ``client_msg_id``). Les bulles d'avant restaient
         sans identifiant : le curseur passait au-delà, aucun ``sync`` ne les renvoyait, et sorties de la fenêtre
-        initiale elles finissaient épinglées sous tout le fil. Juste avant la trame ``speech``, une trame
-        ``history`` (``catchup``) porte leurs lignes : le client les adopte par leur texte (contrat inchangé)."""
+        initiale elles finissaient épinglées sous tout le fil. Juste avant la trame ``speech`` (ou ``silence`` /
+        échec, quand elle se tait ou ne peut pas répondre), une trame ``history`` (``catchup``) porte leurs
+        lignes : le client les adopte par leur texte (contrat inchangé)."""
         earlier = {a for a in d.answers if a != d.reply_to}
         # les autres appareils de la personne (le téléphone quand elle écrit du navigateur) n'ont pas la question
         # elle-même : sans sa ligne, leur curseur la dépasserait avec la réponse, et ils ne la verraient jamais
