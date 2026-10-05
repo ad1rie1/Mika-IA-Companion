@@ -169,7 +169,7 @@ class Session:
         if self.selected == name and (self.writable or not write):
             return self._counts
         try:
-            data = self._ok(self.box.select(utf7.encode(name), readonly=not write), f"dossier « {name} » introuvable")
+            data = self._ok(self.box.select(quoted(name), readonly=not write), f"dossier « {name} » introuvable")
         except imaplib.IMAP4.readonly:
             raise ImapError(f"le dossier « {name} » est en lecture seule") from None
         responses = getattr(self.box, "untagged_responses", {})
@@ -247,7 +247,7 @@ class Session:
             typ, data = self.box.uid("MOVE", str(uid), quoted(dest))
             self._ok((typ, data), f"déplacement vers « {dest} » refusé")
         else:
-            typ, data = self.box.uid("COPY", str(uid), utf7.encode(dest))
+            typ, data = self.box.uid("COPY", str(uid), quoted(dest))
             self._ok((typ, data), f"copie vers « {dest} » refusée")
             self.store(uid, "\\Deleted", True)
             self.expunge(uid)
@@ -267,7 +267,7 @@ class Session:
 
     @_translated
     def append(self, folder: str, raw: bytes, *, seen: bool = True) -> None:
-        self._ok(self.box.append(utf7.encode(folder), "(\\Seen)" if seen else None, None, raw),
+        self._ok(self.box.append(quoted(folder), "(\\Seen)" if seen else None, None, raw),
                  f"copie dans « {folder} » refusée")
 
 
