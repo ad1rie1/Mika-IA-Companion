@@ -2,8 +2,8 @@
 
 Elle a un corps dans un monde de pièces, de lieux et d'objets (le frontend la montre ; un moteur de jeu le
 fera bientôt). Ce qu'elle y fait est **son** choix, pris par le modèle avec deux outils en main (``go_to``,
-``interact``) ; ce que son corps fait de lui-même (aller se coucher quand elle s'endort) est un réflexe, sans
-modèle. Le noyau est le monde : il valide, planifie en pas, et conclut chaque action à son échéance — un
+``interact``) ; ce que son corps fait de lui-même (aller se coucher quand elle s'endort, s'arrêter de dessiner
+au bout d'un moment) est un réflexe, sans modèle. Le noyau est le monde : il valide, planifie en pas, et conclut chaque action à son échéance — un
 moteur hôte pourra la jouer et dire qu'il n'y arrive pas, jamais décider seul (P2).
 
 Écrit pour être piloté par un modèle :
@@ -32,7 +32,7 @@ from mika.contracts import body as body_c
 from mika.contracts import place as place_c
 from mika.contracts import world as w
 from mika.faculties.world import plan
-from mika.kernel.clock import DAY, US
+from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.forms import Knob
@@ -68,6 +68,10 @@ class WorldParams(BaseModel):
     doorway_s: Annotated[float, Knob(
         label="Passer une porte (s)", group="Corps", lo=0.5, hi=10, step=0.5,
         help="Le temps de passer d'une pièce à l'autre.")] = 2.0
+    open_activity_min: Annotated[int, Knob(
+        label="Une occupation sans fin prévue s'arrête d'elle-même après (min)", group="Corps", lo=15, hi=480,
+        step=5, help="Dessiner, travailler à son bureau : sans autre geste de sa part, elle s'arrête au bout de ce "
+                     "temps et reste où elle est (on ne dessine pas treize heures d'affilée).")] = 90
     grace_s: Annotated[float, Knob(
         label="Marge avant de conclure (s)", group="Synchronisation", lo=0, hi=30, step=0.5,
         help="Sans nouvelle d'un moteur, une action se termine comme prévue après sa durée plus cette marge.")] = 2.0
@@ -430,6 +434,20 @@ async def interact(args: InteractArgs, ctx: Any) -> ToolResult:
 # ── Le prompt ─────────────────────────────────────────────────────────────
 
 
+#: depuis combien de temps elle est là, ou à ce qu'elle fait, en mots (jamais un chiffre) : du plus long au plus
+#: court ; en deçà, rien
+FOR_A_WHILE = ((3 * HOUR, "depuis longtemps"), (45 * MINUTE, "depuis un bon moment"),
+               (20 * MINUTE, "depuis un moment"))
+
+
+def _for_a_while(since: int, now: int) -> str:
+    """« depuis un bon moment » : la durée telle qu'elle la sent. ``since`` nul (le monde vient d'être créé) : on
+    ne sait pas, rien."""
+    if since <= 0:
+        return ""
+    return next((f" {words}" for span, words in FOR_A_WHILE if now - since >= span), "")
+
+
 def around(s: WorldState, now: int, p: WorldParams) -> str:
     """Ce qu'elle sait de là où elle est : son corps, ce qu'elle tient, ce qui est à portée, où elle peut aller."""
     defn = s.definition
@@ -438,15 +456,19 @@ def around(s: WorldState, now: int, p: WorldParams) -> str:
     several = len(defn.rooms) > 1
     room = defn.room(me.room)
     in_room = f", dans {room.label}" if several and room is not None else ""
+    busy = me.activity is not None and (me.activity.until is None or me.activity.until > now)
     if me.moving is not None and me.moving.eta > now:
         intent = s.intents.get(me.moving.intent)
         last = next((st.posture for st in reversed(intent.steps) if st.kind == "posture" and st.posture), None) \
             if intent is not None else None
         lines.append(f"Tu es en chemin : tu seras {_where_phrase(defn, me.moving.to_place, last or me.posture)}.")
     else:
-        lines.append(f"Tu es {_where_phrase(defn, me.place, me.posture)}{in_room}.")
-    if me.activity is not None and (me.activity.until is None or me.activity.until > now):
-        lines.append(f"Tu es en train de {plan.affordance_label(defn, me.activity)}.")
+        # occupée, c'est l'occupation qui dit sa durée (une fois suffit)
+        lasting = "" if busy else _for_a_while(me.since, now)
+        lines.append(f"Tu es {_where_phrase(defn, me.place, me.posture)}{lasting}{in_room}.")
+    if busy and me.activity is not None:
+        lines.append(f"Tu es en train de {plan.affordance_label(defn, me.activity)}"
+                     f"{_for_a_while(me.activity.since, now)}.")
     budget = p.shown_objects
     if me.holding:
         lines.append("Tu tiens " + ", ".join(_thing(s, me, o, now) for o in me.holding) + ".")
@@ -551,14 +573,29 @@ def setback(s: WorldState, intent: w.Intent, outcome: w.Outcome, reason: w.Refus
 # ── Conclure sans moteur ──────────────────────────────────────────────────
 
 
+def wears_off(s: WorldState, p: WorldParams) -> int | None:
+    """Quand son occupation sans fin prévue (dessiner, travailler) s'arrête d'elle-même : une personne dessine une
+    heure ou deux, puis s'arrête. ``None`` : rien de tel en cours."""
+    me = s.actors.get(w.MIKA)
+    a = me.activity if me is not None else None
+    if a is None or a.until is not None:
+        return None
+    return a.since + p.open_activity_min * MINUTE
+
+
 @WORLD.process("world.settle", wake_on=[w.INTENDED, body_c.FELL_ASLEEP, w.AUTHORED], lane="background",
                catch_up=CatchUp.ONCE, max_quantum_s=60)
 class Settle:
     """Une action arrivée à son échéance se termine comme prévu — revalidée sur l'état d'alors (un moteur hôte,
-    quand il y en aura un, pourra la terminer plus tôt ou dire qu'il n'y arrive pas)."""
+    quand il y en aura un, pourra la terminer plus tôt ou dire qu'il n'y arrive pas). Et une occupation sans fin
+    prévue s'arrête d'elle-même au bout d'un temps naturel (un réflexe) : son corps reste où il est, assise à son
+    bureau, simplement sans plus dessiner — elle ne se lève pas et ne va nulle part à sa place."""
 
     def next_due(self, state: WorldState, frame: Frame, last_run: int | None) -> int | None:
-        return min((i.deadline for i in state.intents.values()), default=None)
+        due = [i.deadline for i in state.intents.values()]
+        if (tired := wears_off(state, params(frame.env.params_of("world", frame.root)))) is not None:
+            due.append(tired)
+        return min(due, default=None)
 
     async def run(self, ctx: Any) -> None:
         s: WorldState = ctx.state
@@ -572,6 +609,13 @@ class Settle:
             await ctx.emit(w.ENDED.draft(intent=intent.id, actor=intent.actor, outcome=outcome, reason=reason,
                                          changes=tuple(changes), dedupe_key=f"fin:{intent.id}"),
                            *([noticed] if noticed is not None else []))
+        s = ctx.state
+        me = s.actors.get(w.MIKA)
+        tired = wears_off(s, params(ctx.frame.env.params_of("world", ctx.frame.root)))
+        if me is not None and me.activity is not None and tired is not None and tired <= now:
+            await ctx.emit(w.CHANGED.draft(cause=w.Cause(source=w.Source.REFLEX, actor=w.MIKA),
+                                           changes=(w.ActorBusy(actor=w.MIKA, activity=None),),
+                                           dedupe_key=f"lasse:{me.activity.since}"))
 
 
 # ── Vers les écrans ───────────────────────────────────────────────────────
