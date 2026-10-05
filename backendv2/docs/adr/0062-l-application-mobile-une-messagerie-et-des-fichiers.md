@@ -118,5 +118,6 @@ Tests : `tests/protocol/test_mobile_auth.py`, `tests/unit/test_client_tokens.py`
 
 **Reste.** Une application en arrière-plan sous Doze perd sa connexion jusqu'à la fenêtre de maintenance suivante :
 le rattrapage par `sync` la rend juste, pas instantanée (une notification poussée — UnifiedPush — le serait).
-L'application web pourrait envoyer `presence` sur `visibilitychange`. La voix n'est pas sur le téléphone (la synthèse
+L'application web envoie désormais `presence` sur `visibilitychange`, et `here: false` à l'ouverture d'un onglet
+caché (issue #456) : un onglet que personne ne regarde n'est plus une présence. La voix n'est pas sur le téléphone (la synthèse
 reste dans le navigateur, ADR 0050).

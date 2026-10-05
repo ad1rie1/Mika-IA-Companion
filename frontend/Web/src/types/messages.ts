@@ -445,6 +445,17 @@ export interface ApprovalFrame {
   digest: string;
 }
 
+/**
+ * Client → serveur : quelqu'un regarde cet écran (`true`), ou plus personne
+ * (`false` : l'onglet est passé en arrière-plan) — ADR 0062 §3. Revenir vaut
+ * tout de suite ; partir, après la grâce du serveur. Sans effet sur une
+ * connexion anonyme.
+ */
+export interface PresenceFrame {
+  type: "presence";
+  here: boolean;
+}
+
 /** Synthetic local event emitted by WebSocketClient (not from the wire). */
 export interface ConnectionEvent {
   /** "unauthorized" is terminal: the socket was refused (4401) and no
