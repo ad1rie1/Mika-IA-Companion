@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from mika.contracts import world as w
-from mika.faculties.world import WorldState, plan
+from mika.faculties.world import WorldState, plan, setback
 from mika.kernel.events import Draft
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
@@ -80,4 +80,7 @@ def _finished(s: WorldState, f: w.Finished) -> Verdict:
             changes = [f.at]
     draft = w.ENDED.draft(intent=intent.id, actor=intent.actor, outcome=outcome, reason=reason,
                           changes=tuple(changes), dedupe_key=f"fin:{intent.id}")
-    return Verdict(drafts=(draft,), guard=UNCHANGED)
+    noticed = setback(s, intent, outcome, reason)
+    # ce qu'elle en remarque avant la fin elle-même : l'accusé de l'hôte porte le ``seq`` du dernier brouillon,
+    # celui de la trame qui applique sa commande
+    return Verdict(drafts=(draft,) if noticed is None else (noticed, draft), guard=UNCHANGED)

@@ -33,12 +33,15 @@ from mika.contracts import place as place_c
 from mika.contracts import world as w
 from mika.faculties.world import plan
 from mika.kernel.clock import DAY, US
+from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
+from mika.vocab.affect import Emotion
 from mika.vocab.episodes import CONVERSATIONAL
+from mika.vocab.privacy import Sensitivity
 
 #: Le monde qu'elle habite au premier démarrage : sa chambre, telle que l'écran la montre.
 DEFAULT_WORLD = w.WorldDef.model_validate_json((Path(__file__).parent / "chambre.json").read_text(encoding="utf-8"))
@@ -485,6 +488,66 @@ def _around(s: WorldState, frame: Frame, enrich: Any) -> str | None:
     return around(s, frame.now, params(frame.env.params_of("world", frame.root)))
 
 
+# ── Ce qu'elle n'a pas pu faire ───────────────────────────────────────────
+
+#: Un geste à elle qui n'aboutit pas : remarqué juste assez pour lui rester en tête (le seuil d'une pensée de
+#: l'attention, au premier échec — les suivants, habitués, à peine), et une contrariété légère, dosée par
+#: l'attention comme pour tout signal (la pensée qui naît en ajoute un peu : elle reste un pincement).
+SETBACK_PERTINENCE = 0.6
+SETBACK_FRUSTRATION = 0.1
+#: Pourquoi, comme elle se le dit (les codes qu'un geste rencontre ; les autres ne se disent pas).
+SETBACK_WHY: dict[w.Refusal, str] = {
+    w.Refusal.UNREACHABLE: "le chemin était bloqué",
+    w.Refusal.OCCUPIED: "la place était prise",
+    w.Refusal.HANDS_FULL: "tes mains étaient prises",
+    w.Refusal.HELD_BY_OTHER: "quelqu'un d'autre l'avait déjà",
+    w.Refusal.NOT_HOLDING: "tu ne l'avais plus en main",
+    w.Refusal.WRONG_STATE: "ce n'était plus possible",
+    w.Refusal.UNKNOWN: "ce n'était plus là",
+}
+_HAND_FR = {w.Builtin.TAKE.value: plan.TAKE_FR, w.Builtin.PUT.value: plan.PUT_FR, w.Builtin.DROP.value: plan.DROP_FR}
+_POSTURE_VERB = {w.Posture.STAND: "te lever", w.Posture.SIT: "t'asseoir", w.Posture.LIE: "t'allonger"}
+
+
+def _attempted(defn: w.WorldDef, intent: w.Intent) -> str:
+    """Ce qu'elle tentait, à l'infinitif : son dernier geste sur un objet (une occupation se dit seule, « dessiner »),
+    sinon l'endroit où elle allait, sinon la posture qu'elle prenait."""
+    act = next((st for st in reversed(intent.steps) if st.kind == "act" and st.object and st.action), None)
+    if act is not None and act.object and act.action:
+        what = plan.label_of(defn, act.object)
+        if act.action in _HAND_FR:
+            return f"{_HAND_FR[act.action]} {what}"
+        o = defn.object(act.object)
+        a = defn.archetype(o.archetype) if o is not None else None
+        aff = next((x for x in (a.affordances if a is not None else ()) if x.id == act.action), None)
+        if aff is None:
+            return f"{act.action} {what}"
+        return aff.label if aff.effect is w.Effect.ACTIVITY else f"{aff.label} {what}"
+    walk = next((st for st in reversed(intent.steps) if st.kind == "walk" and st.to_place), None)
+    place = defn.place(walk.to_place) if walk is not None and walk.to_place else None
+    if place is not None:
+        return f"aller {place.label}"
+    pose = next((st.posture for st in reversed(intent.steps) if st.kind == "posture" and st.posture), None)
+    return _POSTURE_VERB[pose] if pose is not None else "faire ce que tu voulais"
+
+
+def setback(s: WorldState, intent: w.Intent, outcome: w.Outcome, reason: w.Refusal | None) -> Draft[Any] | None:
+    """Ce qu'elle remarque d'une action **qu'elle a décidée** et qui n'a pas abouti (ADR 0050 §7) : « tu n'as pas
+    pu… », un signal que l'attention dose et habitue — sans section ni consigne. Rien pour une action remplacée
+    (c'est elle qui a changé d'avis) ni pour un réflexe (le coucher) ; un seul signal par échec, que l'hôte ou
+    l'échéance conclue (la clé ``echec:<intent>``)."""
+    if outcome is not w.Outcome.FAILED or intent.actor != w.MIKA or intent.cause.source is not w.Source.MIKA:
+        return None
+    why = SETBACK_WHY.get(reason) if reason is not None else None
+    text = f"Tu n'as pas pu {_attempted(s.definition, intent)}" + (f" : {why}" if why else "") + "."
+    obj = next((st.object for st in reversed(intent.steps) if st.kind == "act" and st.object), None)
+    return w.NOTICED.draft(
+        source="world", kind="setback", summary=Content.of(text, level=int(Sensitivity.NONE)),
+        pertinence=SETBACK_PERTINENCE, emotion=Emotion.FRUSTRATED.value, intensity=SETBACK_FRUSTRATION,
+        sensitivity=int(Sensitivity.NONE), bundle="world", actor=intent.actor, object=obj,
+        dedupe_key=f"echec:{intent.id}")
+
+
 # ── Conclure sans moteur ──────────────────────────────────────────────────
 
 
@@ -505,8 +568,10 @@ class Settle:
                 continue
             s = ctx.state
             outcome, reason, changes = plan.conclude(s.definition, s.actors, s.objects, intent)
+            noticed = setback(s, intent, outcome, reason)
             await ctx.emit(w.ENDED.draft(intent=intent.id, actor=intent.actor, outcome=outcome, reason=reason,
-                                         changes=tuple(changes), dedupe_key=f"fin:{intent.id}"))
+                                         changes=tuple(changes), dedupe_key=f"fin:{intent.id}"),
+                           *([noticed] if noticed is not None else []))
 
 
 # ── Vers les écrans ───────────────────────────────────────────────────────
