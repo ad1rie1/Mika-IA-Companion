@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Mika.Net;
 using Mika.World.Engine;
 using Mika.World.Engine.Authoring;
@@ -262,11 +263,18 @@ namespace Mika.Editor.Creator
             _newArchetypeId = EditorGUILayout.TextField("Identifiant", _newArchetypeId);
             _newArchetypeLabel = EditorGUILayout.TextField("Nom (ce qu'elle lit)", _newArchetypeLabel);
             _newArchetypeSize = (Size)EditorGUILayout.EnumPopup("Taille", _newArchetypeSize);
-            using (new EditorGUI.DisabledScope(Selection.activeGameObject == null || string.IsNullOrEmpty(_newArchetypeId)))
+            var newId = _newArchetypeId.Trim();
+            var idProblem = newId.Length == 0 ? null : ArchetypeIdProblem(newId, root.catalog);
+            if (idProblem != null) EditorGUILayout.HelpBox(idProblem, MessageType.Warning);
+            using (new EditorGUI.DisabledScope(Selection.activeGameObject == null || newId.Length == 0 || idProblem != null))
                 if (GUILayout.Button("Créer l'archétype (prefab + asset) et l'ajouter au catalogue"))
                 {
-                    var a = CreateArchetype(Selection.activeGameObject, _newArchetypeId.Trim(), _newArchetypeLabel.Trim(), _newArchetypeSize, root.catalog);
-                    Selection.activeObject = a;
+                    var a = CreateArchetype(Selection.activeGameObject, newId, _newArchetypeLabel.Trim(), _newArchetypeSize, root.catalog);
+                    if (a != null)
+                    {
+                        Selection.activeObject = a;
+                        _status = $"Archétype « {newId} » créé et ajouté au catalogue.";
+                    }
                 }
             EditorGUILayout.HelpBox("Les états, les actions (allumer, lire…) et les places de surface se règlent ensuite dans l'inspecteur de l'archétype. Le prefab reçoit un « Objet du monde (rendu) » : ajoutez-y ses places (SurfaceSlot) et ses visuels d'état (charnière, lumière, afficher/masquer).", MessageType.None);
 
@@ -287,19 +295,47 @@ namespace Mika.Editor.Creator
             }
         }
 
+        const string ArchetypeDir = "Assets/Mika/Content/Archetypes";
+        const string ArchetypePrefabDir = "Assets/Mika/Content/Prefabs";
+
+        // La règle d'identifiant que l'export applique (WorldDefExporter) : vérifiée avant de servir de nom de fichier.
+        static readonly Regex ArchetypeIdPattern = new Regex("^[a-z][a-z0-9_]{0,47}$");
+
+        /// <summary>
+        /// Ce qui empêche de créer un archétype sous cet identifiant, ou <c>null</c>. Un archétype en place n'est
+        /// jamais écrasé : <c>CreateAsset</c> supprimerait l'asset (nouveau GUID), les objets qui l'utilisent
+        /// perdraient leur archétype, l'export les sauterait et un envoi les retirerait du monde. Il se modifie
+        /// dans son inspecteur.
+        /// </summary>
+        static string ArchetypeIdProblem(string id, AssetCatalog catalog)
+        {
+            if (string.IsNullOrEmpty(id) || !ArchetypeIdPattern.IsMatch(id))
+                return $"« {id} » : identifiant invalide ([a-z][a-z0-9_]*, 48 caractères au plus).";
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>($"{ArchetypeDir}/{id}.asset") != null
+                || (catalog != null && catalog.archetypes.Any(a => a != null && a.id == id)))
+                return $"L'archétype « {id} » existe déjà : ouvrez-le pour le modifier, ou choisissez un autre identifiant.";
+            if (AssetDatabase.LoadAssetAtPath<UnityEngine.Object>($"{ArchetypePrefabDir}/{id}.prefab") != null)
+                return $"Un prefab « {id} » existe déjà dans {ArchetypePrefabDir} : choisissez un autre identifiant.";
+            return null;
+        }
+
         public static ArchetypeAsset CreateArchetype(GameObject source, string id, string label, Size size, AssetCatalog catalog)
         {
-            const string dir = "Assets/Mika/Content/Archetypes";
-            const string prefabDir = "Assets/Mika/Content/Prefabs";
-            Import.RoomImporter.Ensure(dir);
-            Import.RoomImporter.Ensure(prefabDir);
+            var problem = ArchetypeIdProblem(id, catalog);
+            if (problem != null)
+            {
+                Debug.LogWarning("[Mika] archétype non créé : " + problem);
+                return null;
+            }
+            Import.RoomImporter.Ensure(ArchetypeDir);
+            Import.RoomImporter.Ensure(ArchetypePrefabDir);
             var copy = Instantiate(source);
             copy.name = id;
             copy.transform.SetPositionAndRotation(Vector3.zero, Quaternion.identity);
             foreach (var oa in copy.GetComponentsInChildren<ObjectAuthoring>(true)) DestroyImmediate(oa);
             var wo = copy.GetOrAdd<WorldObject>();
             wo.id = "";
-            var prefab = PrefabUtility.SaveAsPrefabAsset(copy, $"{prefabDir}/{id}.prefab");
+            var prefab = PrefabUtility.SaveAsPrefabAsset(copy, $"{ArchetypePrefabDir}/{id}.prefab");
             DestroyImmediate(copy);
             var asset = CreateInstance<ArchetypeAsset>();
             asset.id = id;
@@ -307,7 +343,7 @@ namespace Mika.Editor.Creator
             asset.size = size;
             asset.assetKey = (size == Size.Fixed ? "furniture/" : "props/") + id;
             asset.prefab = prefab;
-            AssetDatabase.CreateAsset(asset, $"{dir}/{id}.asset");
+            AssetDatabase.CreateAsset(asset, $"{ArchetypeDir}/{id}.asset");
             if (catalog != null)
             {
                 catalog.archetypes.Add(asset);
