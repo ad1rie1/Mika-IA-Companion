@@ -105,6 +105,9 @@ class InspectorDeps:
     labels: Labels | None = None
     #: le relais MCP du moteur Claude Code (« Ce que Mika expose » : ses sessions ouvertes)
     relay: Any = None
+    #: les clients du monde (``/ws/world``, ADR 0051) : ``overview()`` dit qui est connecté, qui tient le bail
+    #: d'hôte, ce qui manque au moteur (Système › Le monde, côté écrans)
+    world: Any = None
 
 
 env = Environment(loader=FileSystemLoader(TEMPLATES), autoescape=select_autoescape(default=True),
