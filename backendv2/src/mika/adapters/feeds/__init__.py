@@ -20,6 +20,12 @@ standard, un cache SQLite à part.
 - La liste des flux est relue à chaque relevé.
 - Chaque relevé d'un flux se note (tentative, succès, erreur, articles lus,
   nouveaux) : la console dit quel flux ne répond plus, et pourquoi.
+- **Le cache tient un horizon**, pas tout ce qui a paru depuis l'installation
+  (comme celui des mails) : un article déjà rendu s'efface quand son flux ne
+  le liste plus depuis deux mois, ou au-delà des derniers de son flux. Jamais
+  un article pas encore rendu, ni un que son flux liste encore (effacé, il
+  reviendrait comme neuf) ; un flux qui revient après plus longtemps en
+  panne n'hérite pas de ses archives.
 """
 
 from __future__ import annotations
@@ -41,6 +47,7 @@ from xml.etree import ElementTree
 
 import httpx
 
+from mika.kernel.clock import DAY
 from mika.ports.feeds import Entry, shown
 from mika.ports.paging import Page, fold_text
 from mika.ports.preprocess import HTML_SKIPPED, html_text
@@ -61,6 +68,11 @@ ARTICLE_SKIPPED = HTML_SKIPPED | frozenset({"nav", "footer", "aside"})
 #: ce qu'un relevé note de chaque flux (ajouté à un cache plus ancien)
 HEALTH_COLUMNS = (("attempted_at", "INTEGER DEFAULT 0"), ("ok_at", "INTEGER DEFAULT 0"), ("error", "TEXT DEFAULT ''"),
                   ("failures", "INTEGER DEFAULT 0"), ("items", "INTEGER DEFAULT 0"), ("added", "INTEGER DEFAULT 0"))
+#: un article déjà rendu que son flux ne liste plus depuis ce délai quitte le cache…
+KEPT_US = 60 * DAY
+#: … comme au-delà de tant d'articles par flux (le garde-fou d'un flux qui déborde : un flux d'actualité
+#: ordinaire, quelques dizaines d'articles par jour, n'y arrive pas avant le délai)
+KEEP_PER_FEED = 5000
 
 #: une résolution de nom : ``(hôte, port)`` → les adresses IP
 Resolver = Callable[[str, int], Awaitable[Sequence[str]]]
@@ -187,23 +199,35 @@ def _origin(url: str) -> tuple[str, int]:
 class HttpFeeds:
     def __init__(self, feeds: Callable[[], Sequence[str]], cache: Path, *, client: httpx.AsyncClient | None = None,
                  timeout_s: float = 20.0, poll_total_s: float = POLL_TOTAL_S,
-                 resolve: Resolver | None = None) -> None:
+                 resolve: Resolver | None = None, kept_us: int = KEPT_US,
+                 keep_per_feed: int = KEEP_PER_FEED) -> None:
         self._feeds = feeds
         self._client = client
         self._timeout = timeout_s
         self._poll_total = poll_total_s
         self._resolve = resolve or system_resolve
+        self._kept = kept_us
+        self._keep_per_feed = keep_per_feed
         cache.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(cache), check_same_thread=False)
         self._db.create_function("fold", 1, lambda s: fold_text(s or ""), deterministic=True)
         self._db.executescript(
             "CREATE TABLE IF NOT EXISTS entries(id TEXT PRIMARY KEY, feed_url TEXT, feed TEXT, title TEXT,"
-            " link TEXT, summary TEXT, published INTEGER, handed INTEGER DEFAULT 0, n INTEGER);"
-            "CREATE TABLE IF NOT EXISTS feeds(url TEXT PRIMARY KEY, polled INTEGER DEFAULT 0);")
+            " link TEXT, summary TEXT, published INTEGER, handed INTEGER DEFAULT 0, n INTEGER,"
+            " seen_at INTEGER DEFAULT 0);"
+            "CREATE TABLE IF NOT EXISTS feeds(url TEXT PRIMARY KEY, polled INTEGER DEFAULT 0);"
+            # le relevé (ce qui reste à rendre) et la console (les plus récents) sans parcourir tout le cache
+            "CREATE INDEX IF NOT EXISTS entries_to_hand ON entries(handed, published);"
+            "CREATE INDEX IF NOT EXISTS entries_published ON entries(published);")
         known = {r[1] for r in self._db.execute("PRAGMA table_info(feeds)")}
         for column, kind in HEALTH_COLUMNS:  # un cache d'avant la santé des flux : on complète la table
             if column not in known:
                 self._db.execute(f"ALTER TABLE feeds ADD COLUMN {column} {kind}")
+        if "seen_at" not in {r[1] for r in self._db.execute("PRAGMA table_info(entries)")}:
+            # un cache d'avant l'horizon : ses articles comptent comme vus aujourd'hui (rien ne s'efface d'un
+            # coup, et un titre remarqué la veille reste lisible)
+            self._db.execute("ALTER TABLE entries ADD COLUMN seen_at INTEGER DEFAULT 0")
+            self._db.execute("UPDATE entries SET seen_at=?", (int(time.time() * 1_000_000),))
         self._db.commit()
 
     def configured(self) -> bool:
@@ -284,6 +308,7 @@ class HttpFeeds:
         urls = list(self._feeds())
         loop = asyncio.get_running_loop()
         stop = loop.time() + self._poll_total
+        start = int(time.time() * 1_000_000)
         for url in urls:
             now = int(time.time() * 1_000_000)
             left = stop - loop.time()
@@ -300,23 +325,41 @@ class HttpFeeds:
                 self._note(url, now, error=_why(exc))
                 continue
             title, items = await asyncio.to_thread(parse, raw)  # hors de la boucle : un gros flux ne la fige pas
-            first = not self._db.execute("SELECT polled FROM feeds WHERE url=? AND polled=1", (url,)).fetchone()
+            last = self._db.execute("SELECT ok_at FROM feeds WHERE url=? AND polled=1", (url,)).fetchone()
+            # le premier relevé n'hérite pas des archives ; ni celui d'un flux revenu après plus longtemps en panne
+            # que le cache ne garde ses articles (ils reviendraient comme neufs)
+            first = last is None or 0 < (last[0] or 0) < now - self._kept
             ordered = sorted(items, key=lambda it: -it[4])
             added = 0
             for i, (uid, t, link, summary, date) in enumerate(ordered):
                 n += 1
-                handed = 1 if first and i >= FIRST_POLL else 0  # le premier relevé n'hérite pas des archives
+                handed = 1 if first and i >= FIRST_POLL else 0
+                key = _key(url, uid)
                 # un flux sans titre est nommé par son adresse montrable (jamais son jeton)
-                added += self._db.execute("INSERT OR IGNORE INTO entries VALUES(?,?,?,?,?,?,?,?,?)",
-                                          (_key(url, uid), url, title or shown(url), t, link, summary, date, handed,
-                                           n)).rowcount
+                inserted = self._db.execute(
+                    "INSERT OR IGNORE INTO entries(id, feed_url, feed, title, link, summary, published, handed, n,"
+                    " seen_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (key, url, title or shown(url), t, link, summary, date, handed, n, now)).rowcount
+                if not inserted:  # son flux le liste encore : il reste dans le cache
+                    self._db.execute("UPDATE entries SET seen_at=? WHERE id=?", (now, key))
+                added += inserted
             self._note(url, now, ok=True, items=len(items), added=added,
                        error="" if items or title else "rien de lisible (ni RSS, ni Atom)")
         rows = self._db.execute("SELECT id, feed, title, link, summary, published FROM entries WHERE handed=0 "
                                 "ORDER BY published DESC, n LIMIT ?", (limit,)).fetchall()
         self._db.executemany("UPDATE entries SET handed=1 WHERE id=?", [(r[0],) for r in rows])
+        self._prune(start)
         self._db.commit()
         return [Entry(*r) for r in rows]
+
+    def _prune(self, start: int) -> None:
+        """Ce que le cache oublie : un article déjà rendu que son flux ne liste plus depuis ``kept_us``, ou
+        au-delà des ``keep_per_feed`` derniers vus de son flux. Jamais un article pas encore rendu, ni un que ce
+        relevé vient de voir dans son flux : effacé, il reviendrait comme neuf au relevé suivant."""
+        self._db.execute(
+            "DELETE FROM entries WHERE handed=1 AND seen_at<? AND (seen_at<? OR rowid IN (SELECT rowid FROM"
+            " (SELECT rowid, ROW_NUMBER() OVER(PARTITION BY feed_url ORDER BY seen_at DESC, n DESC) AS rank"
+            " FROM entries) WHERE rank>?))", (start, start - self._kept, self._keep_per_feed))
 
     async def entry(self, entry_id: str) -> Entry | None:
         rows = self._db.execute("SELECT id, feed, title, link, summary, published FROM entries WHERE id=?",
