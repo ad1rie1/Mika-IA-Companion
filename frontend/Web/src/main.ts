@@ -191,6 +191,13 @@ async function init() {
       // cursor reaches each beat (see animation/speechBeats.ts).
       animationSystem.beginUtterance(text, msPerChar);
     },
+    // L'énoncé est clos, qu'il ait sonné ou non (mute pendant la latence de
+    // synthèse, synthèse refusée…) : `onSpeakEnd` ne vient que si la voix a
+    // démarré, et la bouche articulait sinon la phrase en silence. Arrêter
+    // le plan éteint aussi les battements de parole (curseur à −1).
+    onUtteranceEnd: () => {
+      lipSyncController.stop();
+    },
     // La synthèse dit où en est la voix (début réel, puis chaque mot là où
     // le navigateur le donne) : la bouche s'y recale au lieu de courir sur
     // une estimation qui finissait avant ou après l'audio.

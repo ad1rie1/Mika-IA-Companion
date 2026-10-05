@@ -88,6 +88,15 @@ export interface TTSEvents {
    */
   onUtteranceStart?: (text: string, rate: number) => void;
   /**
+   * Pendant de `onUtteranceStart`, émis exactement une fois après lui quand
+   * l'énoncé est clos, quelle que soit la sortie : fin normale, mute, stop,
+   * synthèse refusée, échéance sans `onstart`, boucle segmentée sans segment
+   * sonore. `onSpeakEnd` ne couvre que la voix qui a vraiment démarré : sans
+   * cette clôture, un plan de lip-sync lancé au début restait à articuler en
+   * silence une réplique que personne n'entendrait.
+   */
+  onUtteranceEnd?: () => void;
+  /**
    * « La voix en est à ce caractère du texte de la réponse. » Émis à
    * `utterance.onstart` (index du début du morceau qui sonne) et, là où le
    * navigateur les fournit, à chaque frontière de mot (`onboundary`). Le
@@ -565,9 +574,16 @@ export class TTSService {
     // present. Fall through to the single-utterance path when the text
     // is clean speech (common case — avoids adding latency to every reply).
     const hasTokens = /\[(PAUSE(?::\d+)?|SIGH|LAUGH|BREATH)\]/i.test(text);
-    const sounded = hasTokens
-      ? await this.speakSegmented(text, emotion)
-      : await this.speakTextChunk(text, emotion);
+    let sounded = false;
+    try {
+      sounded = hasTokens
+        ? await this.speakSegmented(text, emotion)
+        : await this.speakTextChunk(text, emotion);
+    } finally {
+      // Toute ouverture a sa clôture : la bouche s'arrête avec l'énoncé,
+      // même quand la voix n'a jamais commencé.
+      this.events.onUtteranceEnd?.();
+    }
     // « Joué » dès que la voix a commencé, même coupée en route ; un énoncé
     // clos avant son premier son (mute, stop, moteur muet) n'a pas joué.
     return sounded ? "played" : "skipped";

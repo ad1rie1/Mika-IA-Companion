@@ -63,6 +63,7 @@ async function boot() {
       lipSync.startFromPlan(tts.lipSyncPlan(text), msPerChar);
       animationSystem.beginUtterance(text, msPerChar);
     },
+    onUtteranceEnd: () => lipSync.stop(),
     onSpeechProgress: (charIndex) => lipSync.seekToChar(charIndex),
   });
   const face = {
