@@ -181,18 +181,37 @@ def in_night(t: int, tz: ZoneInfo, night: tuple[int, int] | None) -> bool:
     return minute >= start or minute < end if start > end else start <= minute < end
 
 
+def _night_of(t: int, tz: ZoneInfo, night: tuple[int, int] | None) -> date | None:
+    """La date du soir où commence la nuit qui contient ``t`` (``None`` : hors de sa nuit)."""
+    if night is None or not in_night(t, tz, night):
+        return None
+    dt = local(t, tz)
+    start, end = night
+    if start > end and dt.hour * 60 + dt.minute < end:
+        return dt.date() - timedelta(days=1)
+    return dt.date()
+
+
+def same_night(a: int, b: int, tz: ZoneInfo, night: tuple[int, int] | None) -> bool:
+    """``a`` et ``b`` tombent-ils dans la même nuit ? Un réveil par message ne
+    vaut que pour la nuit où il a eu lieu : tirée du sommeil à 6 h 40 et restée
+    debout, elle n'est pas « réveillée en pleine nuit » le soir venu."""
+    n = _night_of(a, tz, night)
+    return n is not None and n == _night_of(b, tz, night)
+
+
 def next_transition(s: Sleep, t0: int, p: SleepParams, tz: ZoneInfo, shift: int = 0,
                     night: tuple[int, int] | None = None) -> int | None:
     """Le prochain instant ≥ ``t0`` où elle s'endort (ou se réveille).
 
     Réveillée par un message au milieu de sa nuit, elle se rendort après un
-    quart d'heure de calme tant que c'est encore la nuit — quelle que soit
-    la pression (le modèle à deux processus seul la laisserait éveillée
+    quart d'heure de calme tant que c'est encore cette nuit-là — quelle que
+    soit la pression (le modèle à deux processus seul la laisserait éveillée
     jusqu'au lendemain soir)."""
     start = t0
     if not s.asleep and s.active_at:
         start = max(start, s.active_at + p.settle_us)
-    if not s.asleep and s.woken_by_message and in_night(start, tz, night):
+    if not s.asleep and s.woken_by_message and same_night(s.since, start, tz, night):
         return start
     if _gap(s, start, p, tz, shift) >= 0:
         return start

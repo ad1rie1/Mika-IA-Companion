@@ -156,8 +156,10 @@ def rhythm(p: BodyParams | None) -> circadian.Profile:
 
 
 def night_waking(s: BodyState, now: int, p: BodyParams, tz: Any) -> bool:
-    """Tirée du sommeil par un message au milieu de sa nuit : elle va se rendormir."""
-    return not s.sleep.asleep and s.sleep.woken_by_message and sl.in_night(now, tz, night(p))
+    """Tirée du sommeil par un message au milieu de cette nuit-ci : elle va se
+    rendormir. Un réveil d'une nuit passée (un message à 6 h 40, puis debout
+    toute la journée) ne compte plus le soir venu."""
+    return not s.sleep.asleep and s.sleep.woken_by_message and sl.same_night(s.sleep.since, now, tz, night(p))
 
 
 def in_her_night(s: BodyState, now: int, p: BodyParams, tz: Any) -> bool:
