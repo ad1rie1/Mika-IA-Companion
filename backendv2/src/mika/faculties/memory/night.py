@@ -1,7 +1,9 @@
 """La nuit de la mémoire.
 
 - **Réfléchir** : une pensée restée forte, digérée pendant la nuit, devient un
-  souvenir (« Après y avoir repensé cette nuit : … ») — une fois.
+  souvenir (« Après y avoir repensé cette nuit : … ») — une fois. Ce qu'on lui
+  a demandé de taire, ou ce qui laisse deviner un secret qu'elle garde déjà,
+  reste un secret : la nuit ne le blanchit pas.
 - **Trier** : après trois heures de sommeil, une fois par nuit, un souvenir du
   jour presque identique à un souvenir plus ancien **des mêmes personnes,
   confié et entendu par les mêmes**, s'y fond (sans modèle) : un seul
@@ -18,12 +20,16 @@ from typing import Any
 
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
+from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
-from mika.faculties.memory.faculty import MEMORY, MemoryState, params
+from mika.faculties.memory import extraction as x
+from mika.faculties.memory.consolidation import kept_secrets
+from mika.faculties.memory.faculty import MEMORY, MemoryState, Reflection, params
 from mika.kernel.clock import instant, local_date_of_night
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
+from mika.vocab.words import stems
 
 
 @MEMORY.process("memory.reflect", wake_on=[attention_c.DIGESTED, c.REMEMBERED], lane="background",
@@ -53,9 +59,19 @@ class Reflect:
             drafts.append(c.REMEMBERED.draft(
                 text=Content.of(f"Après y avoir repensé cette nuit : {text}", level=r.sensitivity), about=r.about,
                 sensitivity=r.sensitivity, importance=0.5, emotion=r.emotion, call_id=mark, dedupe_key=mark,
-                told_by=r.about, heard_by=r.about))
+                told_by=r.about, heard_by=r.about, secret=self._secret(ctx.frame, store, r, text)))
         if drafts:
             await ctx.emit(*drafts)
+
+    @staticmethod
+    def _secret(frame: Frame, store: Any, r: Reflection, text: str) -> bool:
+        """Comme à la consolidation : la pensée cite qu'on lui a demandé de le taire, ou laisse deviner un secret
+        qu'elle garde déjà sur ces personnes (une confidence du soir cite le message même que la consolidation a
+        rangé en secret — repensée la nuit, elle ne doit pas devenir un souvenir dicible aux amies)."""
+        if x.says_secret([text]):
+            return True
+        names = {st for person in r.about for st in stems(frame.get(identity_c.IDENTITY(person)).name or "")}
+        return x.echoes(text, kept_secrets(store, r.about), names | {"mika"})
 
 
 @MEMORY.process("memory.night", wake_on=[*body_c.ALL], lane="night", catch_up=CatchUp.ONCE, max_quantum_s=3600)

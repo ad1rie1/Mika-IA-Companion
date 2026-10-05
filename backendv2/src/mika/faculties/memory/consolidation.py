@@ -67,6 +67,17 @@ def _rows(store: Any, sql: str, params_: tuple[Any, ...], columns: tuple[str, ..
     return [dict(zip(columns, r, strict=True)) for r in store.query_mind(sql, params_)]
 
 
+def kept_secrets(store: Any, persons: Sequence[str]) -> list[str]:
+    """Les secrets qu'elle garde déjà sur ces personnes : ce qui les concerne, ou ce qu'elles lui ont confié."""
+    out: list[str] = []
+    for person in persons:
+        like = f'%"{person}"%'
+        out += [str(t) for (t,) in store.query_mind(
+            f"SELECT text FROM {c.ITEMS_TABLE} WHERE secret=1 AND status='active' AND (id IN (SELECT item FROM "
+            f"{c.ABOUT_TABLE} WHERE person=?) OR told_by LIKE ?) ORDER BY id DESC LIMIT 50", (person, like))]
+    return out
+
+
 def _keys(raw: Any) -> list[str]:
     try:
         got = json.loads(raw or "[]")
@@ -471,13 +482,7 @@ class Consolidate:
     @staticmethod
     def _secrets(store: Any, conv: x.Conversation) -> list[str]:
         """Les secrets qu'elle garde déjà sur les personnes de cette conversation."""
-        out: list[str] = []
-        for person in conv.persons:
-            like = f'%"{person}"%'
-            out += [str(t) for (t,) in store.query_mind(
-                f"SELECT text FROM {c.ITEMS_TABLE} WHERE secret=1 AND status='active' AND (id IN (SELECT item FROM "
-                f"{c.ABOUT_TABLE} WHERE person=?) OR told_by LIKE ?) ORDER BY id DESC LIMIT 50", (person, like))]
-        return out
+        return kept_secrets(store, conv.persons)
 
     async def _about_self(self, b: x.XSouvenir | x.XCroyance, store: Any, vectors: Any, p: MemoryParams,
                           provenance: Any, call_id: str, known_ids: set[int]) -> list[Draft[Any]]:
