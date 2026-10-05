@@ -275,17 +275,20 @@ def thread_of(store: Any, person: str, limit: int, before: int | None = None, af
 
 
 def oldest_after(store: Any, person: str, after: int, limit: int) -> list[dict[str, Any]]:
-    """Les ``limit`` plus anciens messages du fil d'une adresse après ``after``,
-    dans l'ordre : ce qu'un résumé replie en premier."""
+    """Les ``limit`` plus anciens messages du fil privé d'une adresse après
+    ``after``, dans l'ordre : ce qu'un résumé replie en premier (il n'est relu
+    qu'en privé, un salon n'a rien à y faire)."""
     rows = store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person=? AND id>? ORDER BY id LIMIT ?",
+        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person=? AND room IS NULL AND id>? "
+        "ORDER BY id LIMIT ?",
         (person, after, limit),
     )
     return [dict(zip(_COLUMNS, r, strict=True)) for r in rows]
 
 
 def count_after(store: Any, person: str, after: int) -> int:
-    rows = store.query_mind(f"SELECT COUNT(*) FROM {c.THREAD_TABLE} WHERE person=? AND id>?", (person, after))
+    rows = store.query_mind(f"SELECT COUNT(*) FROM {c.THREAD_TABLE} WHERE person=? AND room IS NULL AND id>?",
+                            (person, after))
     return int(rows[0][0]) if rows else 0
 
 
