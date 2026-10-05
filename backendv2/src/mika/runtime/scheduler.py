@@ -6,7 +6,10 @@ attend la plus proche échéance — ou un réveil — puis lance les processus 
 un seul à la fois par processus.
 
 Après un arrêt ou un saut d'horloge, une échéance très en retard donne **une**
-exécution, avec ``missed=(échéance, maintenant)`` : pas de rafale. Un quantum
+exécution, avec ``missed=(échéance, maintenant)`` : pas de rafale. Avec
+``CatchUp.SKIP``, elle est sautée une fois ; si ``next_due`` la redonne telle
+quelle (une échéance qui ne lit pas ``last_run``), le processus fait un passage
+ordinaire, sans ``missed``, au lieu de rester figé. Un quantum
 borne l'attente pour réévaluer les échéances qui dépendent du temps.
 
 **Boucles sûres par construction.** Un processus qui échoue n'est pas relancé
@@ -163,6 +166,8 @@ class Scheduler:
         self._lanes = {name: asyncio.Semaphore(max(1, n)) for name, n in caps.items()}
         self.llm = _BoundedLLM(llm, self._lanes[MODEL_LANE]) if llm is not None else None
         self._last_run: dict[str, int] = {}
+        #: l'échéance en retard sautée (``CatchUp.SKIP``) : si elle revient telle quelle, le processus tourne
+        self._skipped: dict[str, int] = {}
         self._running: dict[str, asyncio.Task[None]] = {}
         self._wake = asyncio.Event()
         self._stopping = False
@@ -232,9 +237,15 @@ class Scheduler:
                     timer = wake_at if timer is None else min(timer, wake_at)
             for nd, spec in sorted(due, key=lambda x: (x[0], x[1].priority, x[1].name)):
                 missed = (nd, now) if spec.max_quantum_us > 0 and now - nd > spec.max_quantum_us else None
+                skipped = self._skipped.pop(spec.name, None)
                 if missed and spec.catch_up is CatchUp.SKIP:
-                    self._last_run[spec.name] = now
-                    continue
+                    if skipped is None or nd > skipped:
+                        self._skipped[spec.name] = nd
+                        self._last_run[spec.name] = now
+                        continue
+                    # la même échéance revient : son ``next_due`` ne lit pas ``last_run``. Sauter voulait dire ne
+                    # pas rattraper l'occurrence manquée, pas ne plus jamais tourner : un passage ordinaire.
+                    missed = None
                 self._start(spec, frame, missed)
             if self._stopping:
                 break
