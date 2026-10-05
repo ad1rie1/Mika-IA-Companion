@@ -55,7 +55,7 @@ def refs_of(profile: Profile) -> list[str]:
 
 @SOCIAL.section("about_person", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["who"], before=["stance"],
                 trim_rank=65, title="CE QUE TU SAIS DE CETTE PERSONNE",
-                reads=[identity_c.PERSON, identity_c.IDENTITY, c.CONTACT, c.CLOSENESS])
+                reads=[identity_c.PERSON, identity_c.IDENTITY, c.CONTACT, c.CLOSENESS, memory_c.HARD_TIMES])
 def _about(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     aud, ep = frame.audience, frame.episode
     if aud is None or ep is None or not ep.target or not aud.private_ok:
@@ -80,7 +80,7 @@ def _about(s: SocialState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
     if reading.days >= 3 and reading.measured:
         n = round(reading.rhythm_days)
         lines.append(f"Vous vous parlez à peu près {'tous les jours' if n <= 1 else f'tous les {n} jours'}.")
-    if reading.one_sided:
+    if reading.one_sided and not frame.get(memory_c.HARD_TIMES(person)):  # ses jours durs : pas de comptes
         lines.append("Ces derniers temps, c'est presque toujours toi qui écris la première ; ça te pèse un peu.")
     if len(lines) == 1 and level == c.STRANGER:
         return None

@@ -12,6 +12,10 @@ deux choses :
 - **ses relances s'espacent** : envies de relancer, de discuter, pensées qui
   insistent vers cette personne deviennent moins probables. Un rappel promis,
   une prise de nouvelles inquiète ou un réconfort cherché n'en dépendent pas.
+
+Quand quelque chose de grave touche la personne ces jours-ci
+(``memory.HARD_TIMES``), elle ne le remarque pas : on ne compte pas qui écrit
+à quelqu'un qui traverse ça.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from typing import Any
 
 from mika.contracts import attention as attention_c
 from mika.contracts import identity as identity_c
+from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as c
 from mika.faculties.social.faculty import SOCIAL, SocialState, params, reciprocity
@@ -40,33 +45,35 @@ LONELINESS = 0.1
 PERTINENCE = 0.7
 
 
-def _due(s: SocialState, now: int, p: Any) -> list[str]:
+def _due(s: SocialState, frame: Frame, p: Any) -> list[str]:
     out = []
     for person, ct in sorted(s.contacts.items()):
         if not is_identifiable(person) or person.startswith("name:"):
             continue
         if not reciprocity(ct, p)[2]:
             continue
-        if now - s.noticed.get(person, -p.one_sided_spacing_us) < p.one_sided_spacing_us:
+        if frame.now - s.noticed.get(person, -p.one_sided_spacing_us) < p.one_sided_spacing_us:
             continue
+        if frame.get(memory_c.HARD_TIMES(person)) > 0:
+            continue  # ses jours durs : on ne tient pas de comptes
         out.append(person)
     return out
 
 
 @SOCIAL.process("social.reciprocity", wake_on=[rt.UTTERANCE], lane="background", catch_up=CatchUp.ONCE,
-                max_quantum_s=3600)
+                max_quantum_s=3600, reads=[memory_c.HARD_TIMES])
 class Notice:
     """Elle remarque que c'est toujours elle qui écrit (une pensée, par l'attention)."""
 
     def next_due(self, state: SocialState, frame: Frame, last_run: int | None) -> int | None:
         p = params(frame.env.params_of("social", frame.root))
-        return frame.now if _due(state, frame.now, p) else None
+        return frame.now if _due(state, frame, p) else None
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame
         state: SocialState = ctx.state
         p = params(frame.env.params_of("social", frame.root))
-        for person in _due(state, frame.now, p)[:3]:
+        for person in _due(state, frame, p)[:3]:
             name = frame.get(identity_c.IDENTITY(person)).name or "cette personne"
             text = f"C'est presque toujours moi qui écris la première à {name}."
             her, _them, _ = reciprocity(state.contacts[person], p)
