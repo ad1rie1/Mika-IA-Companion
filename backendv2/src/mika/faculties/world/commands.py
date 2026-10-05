@@ -7,7 +7,10 @@ règle du monde est ici.
 
 Ce qu'un hôte constate n'est jamais cru sur parole : une action qu'il dit terminée est conclue par le noyau, sur
 l'état d'alors (comme à son échéance) ; une action qu'il dit ratée ne change que ce qui est vrai — où est
-l'acteur, si c'est un endroit qui existe.
+l'acteur, si c'est un endroit qui existe. Une personne qui dit où elle est arrivée (``moved``) passe la même règle.
+
+Entrer dans le monde et en sortir n'est pas une commande du client, c'est sa connexion (``presence``) :
+l'adaptateur le dit au port d'entrée, qui demande ici le verdict.
 
 Une édition d'une opératrice (le créateur) passe en entier ou pas du tout, sur la révision qu'elle a lue (ADR 0050
 §10). Ce premier éditeur ne touche ni aux pièces, ni à l'existence des lieux, ni aux personnages : les lieux sont
@@ -17,6 +20,7 @@ P5) ; les personnages arrivent avec P4.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
@@ -26,7 +30,7 @@ from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import social as social_c
 from mika.contracts import world as w
-from mika.faculties.world import WorldState, felt, plan, setback
+from mika.faculties.world import WorldState, arrival, felt, plan, setback
 from mika.kernel.events import Draft
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
@@ -57,6 +61,8 @@ UNCHANGED = Guard("monde inchangé", reads=(w.STATE,))
 def handle(frame: Frame, command: Any, *, actor: str, handle: str | None, operator: bool) -> Verdict:
     """Le verdict du noyau sur une commande (``w.Command``) d'un client, pour l'acteur qu'il incarne."""
     s: WorldState = frame.state("world")
+    if isinstance(command, w.Moved):
+        return _moved(s, frame, command, actor)
     if isinstance(command, w.Report):
         if not operator:
             return _refused(w.Refusal.NOT_HOST, "Seul un moteur hôte, sur un compte opérateur, constate le monde.")
@@ -73,8 +79,8 @@ def handle(frame: Frame, command: Any, *, actor: str, handle: str | None, operat
         return _edit(s, command, by=(handle or actor)[:96])
     # le reste n'est pas encore là : une demande (elle attend sa réponse, par un outil à venir), un acte, la prose
     # du créateur
-    return _refused(w.Refusal.UNSUPPORTED, "Ce noyau ne sait pas encore faire ça (ADR 0050 : les personnes dans le "
-                                           "monde et la prose du créateur arrivent ensuite).")
+    return _refused(w.Refusal.UNSUPPORTED, "Ce noyau ne sait pas encore faire ça (ADR 0050 : les demandes, les actes "
+                                           "des personnes dans le monde et la prose du créateur arrivent ensuite).")
 
 
 #: Ce qu'un lieu qui existe laisse éditer (ADR 0050 §10) : sa position et son orientation — son nom, sa sorte, sa
@@ -129,6 +135,76 @@ def _why(exc: ValueError) -> str:
     if isinstance(exc, ValidationError):
         return " ; ".join(str(err.get("ctx", {}).get("error", err["msg"])) for err in exc.errors())
     return str(exc)
+
+
+def presence(frame: Frame, *, actor: str, handle: str, joined: bool, asset: str | None = None) -> Verdict:
+    """Une personne entre dans le monde (son client s'y connecte) ou en sort (il s'est déconnecté, ou tu) : ce
+    n'est pas une commande, c'est sa connexion. Elle entre debout au lieu ``spawn`` de la pièce où est Mika, à
+    défaut au premier lieu ``spawn`` (s'il est pris, dans la pièce sans lieu) ; si c'est la pièce de Mika, elle le
+    remarque. Ce qui est déjà vrai (dedans, dehors) ne s'écrit pas : l'adaptateur peut redire l'état voulu."""
+    s: WorldState = frame.state("world")
+    if w.handle_of(actor) != handle:
+        return _refused(w.Refusal.IMPLAUSIBLE, "Une personne entre dans le monde sous sa propre adresse.")
+    here = actor in s.actors
+    if not joined:
+        return Verdict(drafts=(w.LEFT.draft(actor=actor, handle=handle),)) if here else Verdict()
+    if here:
+        return Verdict()  # déjà là : une autre de ses connexions
+    me = s.actors.get(w.MIKA)
+    spawns = s.definition.tagged("spawn")
+    door = next((p for p in spawns if me is not None and p.room == me.room), None) or next(iter(spawns), None)
+    if door is None:
+        return _refused(w.Refusal.UNREACHABLE, "Ce monde n'a pas d'entrée (aucun lieu « spawn »).")
+    taken = sum(1 for a in s.actors.values() if a.place == door.id) >= door.capacity
+    joined_draft = w.JOINED.draft(actor=actor, handle=handle, room=door.room, place=None if taken else door.id,
+                                  asset=asset)
+    noticed = arrival(s, frame, actor, door.room)
+    return Verdict(drafts=(joined_draft,) if noticed is None else (joined_draft, noticed))
+
+
+def _connected(defn: w.WorldDef, start: str, goal: str) -> bool:
+    """On passe d'une pièce à l'autre par des passages (pas à travers un mur)."""
+    seen, queue = {start}, deque([start])
+    while queue:
+        here = queue.popleft()
+        if here == goal:
+            return True
+        room = defn.room(here)
+        for x in room.exits if room is not None else ():
+            if x.to not in seen:
+                seen.add(x.to)
+                queue.append(x.to)
+    return False
+
+
+def _where(actor: str, room: str, rev: int) -> Guard:
+    """Une arrivée est jugée sur là où était la personne, dans ce monde-là : si elle a été déplacée ou si le monde
+    a été édité entre-temps, rien n'est écrit (``stale``) — le reste du monde peut bouger."""
+    def still(view: Any) -> bool:
+        state = view.get(w.STATE)
+        return state.rev == rev and any(a.id == actor and a.room == room for a in state.actors)
+    return Guard("sa place inchangée", predicate=still)
+
+
+def _moved(s: WorldState, frame: Frame, m: w.Moved, actor: str) -> Verdict:
+    """Le corps d'une personne est arrivé quelque part (son client la déplace librement) : validé comme un constat
+    de l'hôte — une pièce qui existe, un lieu de cette pièce, pas de mur traversé sans passage. Elle s'y tient
+    debout (s'asseoir est une action). Entrer ainsi dans la pièce de Mika, elle le remarque."""
+    me = s.actors.get(actor)
+    if me is None or w.handle_of(actor) is None:
+        return _refused(w.Refusal.UNKNOWN, "Ton corps n'est pas (ou plus) dans le monde : reconnecte-toi.")
+    place = s.definition.place(m.near) if m.near else None
+    if s.definition.room(m.room) is None or (m.near is not None and (place is None or place.room != m.room)):
+        return _refused(w.Refusal.IMPLAUSIBLE, "Cet endroit n'existe pas dans le monde.")
+    if not _connected(s.definition, me.room, m.room):
+        return _refused(w.Refusal.IMPLAUSIBLE, "Il n'y a pas de passage jusque-là depuis où tu es.")
+    if me.room == m.room and me.place == m.near and me.posture is w.Posture.STAND:
+        return Verdict()  # rien de neuf
+    draft = w.CHANGED.draft(cause=w.Cause(source=w.Source.PLAYER, actor=actor, handle=w.handle_of(actor)),
+                            changes=(w.ActorMoved(actor=actor, room=m.room, place=m.near),), by=w.handle_of(actor))
+    noticed = arrival(s, frame, actor, m.room) if m.room != me.room else None
+    return Verdict(drafts=(draft,) if noticed is None else (draft, noticed),
+                   guard=_where(actor, me.room, s.definition.rev))
 
 
 def _gesture(frame: Frame, s: WorldState, a: w.Address, gesture: w.Gesture, *, actor: str,
