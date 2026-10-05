@@ -81,6 +81,17 @@ namespace Mika.World.Engine
             _ => null,
         };
 
+        /// <summary>
+        /// Un geste qu'on lui fait et la réaction brève de son corps : une caresse sur la tête lui fait baisser un
+        /// peu la tête, une pichenette la fait sursauter. Ce qu'elle en ressent revient ensuite par la dérive d'humeur.
+        /// </summary>
+        public static string TouchGesture(string gesture) => gesture switch
+        {
+            "pat_head" => "bashful",
+            "poke" => "surprised",
+            _ => null,
+        };
+
         /// <param name="ambient">Dérive d'humeur entre deux répliques : les postures suivent, les gestes non.</param>
         /// <param name="activeVariant">La posture déjà tenue (clip), pour l'hystérésis.</param>
         public static GestureDecision Decide(string emotion, float intensity, float firstWeight, float secondWeight,
