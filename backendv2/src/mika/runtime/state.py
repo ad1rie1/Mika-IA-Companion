@@ -103,11 +103,16 @@ def unanswered_at_end(s: RuntimeState, reply_to: int | None, outcome: str) -> tu
     """Ce qu'une fin d'épisode laisse sans réponse pour de bon : le tour jusqu'à
     ``reply_to`` quand l'issue le règle (elle s'est tue, la réponse a échoué ou
     expiré) ou quand ses tentatives sont épuisées ; rien quand la question
-    attend encore (une supplantation, une préemption, un arrêt)."""
+    attend encore (une supplantation, une préemption, un arrêt). Une issue qui
+    ne règle pas ne règle rien non plus quand ``reply_to`` n'est plus le dernier
+    message de son tour : le plus récent porte la suite, et ses propres
+    tentatives — sa réponse lira celui-ci."""
     if reply_to is None or reply_to not in s.pending:
         return ()
-    if outcome in UNSETTLED and s.pending[reply_to].attempts < MAX_REPLY_ATTEMPTS:
-        return ()
+    if outcome in UNSETTLED:
+        p = s.pending[reply_to]
+        if p.attempts < MAX_REPLY_ATTEMPTS or turn_of(s, p.handle, p.room)[-1] != reply_to:
+            return ()
     return turn_upto(s, reply_to)
 
 
