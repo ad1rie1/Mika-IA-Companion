@@ -105,8 +105,10 @@ NAMED = "name:"
 #: v3 : les noms reliés (ADR 0048).
 #: v4 : l'index personne → adresses (``by_person``) et les sessions d'opérateur (``operators``), ADR 0059 —
 #: reconstruits depuis la genèse.
+#: v5 : ``first_seen`` date la première fois qu'elle a été vue (connexion, message), plus la création d'un
+#: compte ni une liaison d'opérateur — reconstruit depuis la genèse.
 IDENTITY = Faculty("identity", state=IdentityState, init=lambda p: IdentityState(), params=IdentityParams,
-                   state_version=4)
+                   state_version=5)
 IDENTITY.declare(*c.ALL)
 
 
@@ -138,6 +140,8 @@ def _put(s: IdentityState, handle: str, h: Handle) -> IdentityState:
 
 def _seen(s: IdentityState, handle: str, at: int, *, channel: str, authenticated: bool, public: bool,
           name: str, operator: bool | None) -> IdentityState:
+    """``at`` à 0 : l'adresse existe sans avoir été vue (un compte créé) — ``first_seen`` attend sa
+    première connexion ou son premier message, sinon elle « se connaîtraient » depuis la création du compte."""
     if not handle or is_internal(handle):
         return s
     # ce que prouve le transport, indépendamment de l'auditoire : un compte
@@ -146,6 +150,8 @@ def _seen(s: IdentityState, handle: str, at: int, *, channel: str, authenticated
     current = s.handles.get(handle)
     if current is None:
         current = Handle(channel=privacy.normalize_channel(channel), trust=trust, first_seen=at)
+    elif not current.first_seen and at:
+        current = replace(current, first_seen=at)
     if _TRUST_ORDER[trust] > _TRUST_ORDER[current.trust]:
         current = replace(current, trust=trust)  # monte, ne descend jamais
     if privacy.is_messaging(channel) and not public and not authenticated and not current.push:
@@ -176,8 +182,9 @@ def _registered(s: IdentityState, e, cx) -> IdentityState:
     """Un compte : une personne authentifiée sous son nom. Le nom du compte fait foi (un
     renommage s'applique) ; un compte désactivé n'est plus opérateur, ni joignable."""
     d = e.data
-    # authentifiée : ``_seen`` prend le nom donné s'il en est un (un renommage s'applique)
-    s = _seen(s, d.handle, e.at, channel=privacy.WEB, authenticated=True, public=False, name=d.name,
+    # authentifiée : ``_seen`` prend le nom donné s'il en est un (un renommage s'applique). Un compte existe,
+    # il n'est pas vu pour autant : ``first_seen`` attend sa première connexion
+    s = _seen(s, d.handle, 0, channel=privacy.WEB, authenticated=True, public=False, name=d.name,
               operator=d.operator and d.active)
     current = s.handles.get(d.handle)
     if d.messaging is None or current is None:
@@ -340,9 +347,9 @@ def _linked(s: IdentityState, e, cx) -> IdentityState:
         return s
     h = s.handles.get(d.handle)
     if h is None:
-        # l'opérateur peut relier une adresse avant qu'elle ait écrit
+        # l'opérateur peut relier une adresse avant qu'elle ait écrit : pas encore vue
         channel = privacy.channel_of(d.handle)
-        h = Handle(channel=channel, trust=privacy.channel_trust(channel), first_seen=e.at)
+        h = Handle(channel=channel, trust=privacy.channel_trust(channel), first_seen=0)
     if h.authenticated:
         return s  # une session parle pour elle-même : on ne la relie à personne
     if d.person is None or d.person == d.handle:
@@ -401,7 +408,9 @@ def thread_of(s: IdentityState, handle: str) -> tuple[str, ...]:
 
 
 def _first_seen(s: IdentityState, person: str, fallback: int) -> int:
-    seen = [s.handles[k].first_seen for k in handles_of(s, person) if k in s.handles]
+    """La première fois qu'elle a été vue, toutes adresses ; 0 : jamais encore (un compte créé, une adresse
+    reliée avant d'avoir écrit)."""
+    seen = [s.handles[k].first_seen for k in handles_of(s, person) if k in s.handles and s.handles[k].first_seen]
     return min(seen) if seen else fallback
 
 
