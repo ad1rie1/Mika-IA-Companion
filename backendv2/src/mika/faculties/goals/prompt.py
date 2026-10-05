@@ -427,6 +427,12 @@ def _subject_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> 
     return SectionBody(body, level=got[0], witness=got[1], title=heading, provenance=(f"goal:{g.id}",))
 
 
+#: une ligne, seulement en réponse et quand l'interlocuteur a un rappel en cours : « oublie-le », « décale-le à
+#: 19 h » se font avec l'outil, pas en en promettant un second (deux rappels partaient, à 18 h et à 19 h)
+REMIND_CHANGE_HINT = ("(Si la personne n'a plus besoin de son rappel, ou le veut à une autre heure : "
+                      "goal_remind_change — pas un second rappel.)")
+
+
 @GOALS.section("goals", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["thoughts"], trim_rank=45,
                title="CE QUE TU AS EN TRAIN", reads=[identity_c.PERSON])
 def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
@@ -436,7 +442,7 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
         return None
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     initiative = ep is not None and ep.kind == Kind.INITIATIVE
-    lines, level, witness = [], 0, False
+    lines, level, witness, theirs = [], 0, False, False
     tz = frame.env.tz_of(frame.root)
     for g in _recent(s, frame.now)[-SHOWN * 2:]:
         title = titled(g, texts)[0]
@@ -461,6 +467,7 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
         elif g.kind == c.REMINDER:
             when = f"{local(g.due, tz):%d/%m à %H:%M}" if g.due else "bientôt"
             lines.append(f"- un rappel promis à {_who(frame, g.address)} pour le {when} : {title}")
+            theirs = theirs or (person is not None and g.owner == person and not g.delivered)
         else:
             waiting = ""
             if g.status == c.WAITING:
@@ -474,6 +481,8 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
             break
     if not lines:
         return None
+    if theirs and ep is not None and ep.kind == Kind.REPLY:  # l'outil ne sert qu'en réponse
+        lines.append(REMIND_CHANGE_HINT)
     return SectionBody("\n".join(lines), level=level, witness=witness)
 
 
