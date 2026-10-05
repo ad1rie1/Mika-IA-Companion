@@ -43,6 +43,16 @@ export function isEmotionName(value: unknown): value is EmotionName {
   return typeof value === "string" && EMOTION_SET.has(value);
 }
 
+/**
+ * Une émotion et sa force (0…1), validées : ce que lit une échelle de
+ * l'affect côté client — le moment (la balise de sa réplique) ou le fond
+ * (son humeur du jour, `emotion_state.global`).
+ */
+export interface EmotionReading {
+  emotion: EmotionName;
+  intensity: number;
+}
+
 export type EmotionCategory = "neutral" | "positive" | "negative" | "complex";
 
 export interface EmotionMeta {
