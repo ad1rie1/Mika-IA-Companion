@@ -85,9 +85,9 @@ def test_the_same_way_of_coming_to_someone_is_heard_across_conversations():
     une conversation entière — seul le relevé de ses initiatives le voit. Contre-exemple : des façons variées."""
     same = ["Yooo, Adrien ! Te voilà ~", "Yooo, Adrien ! Contente de te voir", "Yooo, Adrien ! Te revoilà"]
     found = repeats([(0, "ah ok"), (M, "haha")], 2 * M, same)
-    assert any("Yooo, Adrien" in f and "quand c'est toi qui viens" in f for f in found)
+    assert any("Yooo, Adrien" in f and "quand vous vous retrouvez" in f for f in found)
     varied = ["Yooo, Adrien !", "Hey toi, ça va ?", "Coucou Adrien"]
-    assert not any("quand c'est toi qui viens" in f for f in repeats([(0, "ah ok")], M, varied))
+    assert not any("quand vous vous retrouvez" in f for f in repeats([(0, "ah ok")], M, varied))
     # deux sur trois, même séparées (sonde : « Yooo, te revoilà », « Hey Adrien », « Yooo, te revoilà »)
     apart = ["Yooo, te revoilà !", "Hey Adrien ~", "Yooo, te revoilà ~"]
     assert any("« Yooo, te »" in f for f in repeats([(0, "ah ok")], M, apart))

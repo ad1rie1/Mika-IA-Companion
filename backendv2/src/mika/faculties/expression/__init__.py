@@ -74,6 +74,12 @@ class ExpressionParams(BaseModel):
     murmur_spacing_us: Annotated[int, Knob(
         label="Murmures espacés d'au moins", group="Le murmure", lo=5 * MINUTE, hi=12 * HOUR,
         help="Pas deux murmures plus rapprochés : une voix intérieure qui commente tout lasse.")] = HOUR
+    opening_gap_us: Annotated[int, Knob(
+        label="Une conversation commence après un silence de", group="Ce qu'elle se répète", lo=30 * MINUTE,
+        hi=48 * HOUR,
+        help="Son premier message après un tel silence (qu'elle vienne d'elle-même ou qu'elle réponde) est une entrée "
+             "en matière : comparée aux précédentes avec la même personne, pour qu'elle ne commence pas chaque "
+             "retrouvaille par la même formule.")] = 3 * HOUR
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,14 +199,15 @@ def repeats(said: Sequence[tuple[int, str]], now: int, opened: Sequence[str] = (
             continue
         out.append(f"« {shown[g]}… » revient dans plusieurs de tes messages")
         break
-    # d'une conversation à l'autre : ses premiers mots quand c'est elle qui vient (sonde finale : « Yooo, Adrien ! »
-    # en tête de six initiatives, une par soir — le fil des six derniers messages ne les voyait jamais deux fois)
+    # d'une conversation à l'autre : ses premiers mots quand vous vous retrouvez, qu'elle vienne ou qu'on vienne à elle
+    # (sonde finale : « Yooo, Adrien ! » en tête de six initiatives, une par soir — le fil des six derniers messages
+    # ne les voyait jamais deux fois ; et « Heeey Adrien ! » chaque soir où c'est lui qui écrit le premier)
     starts = [_opener(t) for t in opened if t and t.strip()][-3:]
     start_keys = [k for _raw, k in starts if len(k.split()) == 2]
     twice = next((k for k in reversed(start_keys) if start_keys.count(k) >= 2 and k != seen_opener), None)
     if twice is not None:
         raw = next(r for r, k in reversed(starts) if k == twice)
-        out.append(f"quand c'est toi qui viens lui parler, tu commences souvent par « {raw} »")
+        out.append(f"quand vous vous retrouvez, tu commences souvent par « {raw} »")
     # trois longs messages d'affilée : un monologue, pas une conversation (sonde : quatre à six phrases à chaque fois)
     if len(msgs) >= 3 and all(len(A.strip_prosody(t)) >= LONG_MESSAGE for t in msgs[-3:]):
         out.append("tes derniers messages sont longs : fais court cette fois, comme on parle — sauf si on te demande "
@@ -221,18 +228,43 @@ async def _own_words(s: ExpressionState, frame: Frame, ports: Mapping[str, Any])
     return tuple((int(r[0]), str(r[1] or "")) for r in reversed(rows))
 
 
+#: au plus tant de messages du fil relus pour y retrouver ses entrées en matière (trois conversations, largement)
+OPENINGS_SCAN = 500
+
+
+@dataclass(frozen=True, slots=True)
+class Openings:
+    #: ses dernières entrées en matière (au plus trois), du plus ancien au plus récent
+    said: tuple[str, ...] = ()
+    #: la conversation en cours a commencé après un silence et elle n'y a encore rien dit : sa réponse l'ouvre
+    opens: bool = False
+
+
 @EXPRESSION.enricher("own_openings", episodes=CONVERSATIONAL, deadline_ms=300)
-async def _own_openings(s: ExpressionState, frame: Frame, ports: Mapping[str, Any]) -> tuple[str, ...] | None:
-    """Ses trois dernières initiatives vers cette personne (ou dans ce salon), du plus ancien au plus récent :
-    comment elle l'aborde quand c'est elle qui vient, d'une conversation à l'autre."""
+async def _own_openings(s: ExpressionState, frame: Frame, ports: Mapping[str, Any]) -> Openings | None:
+    """Ses trois dernières entrées en matière avec cette personne (ou dans ce salon) : son premier message après un
+    silence, qu'elle soit venue d'elle-même ou qu'elle réponde — comment elle commence quand vous vous retrouvez,
+    d'une conversation à l'autre. Et si la conversation en cours attend encore son premier mot à elle."""
     store, ep = ports.get("store"), frame.episode
     if store is None or ep is None or not ep.target:
         return None
     room = ep.attrs.get("room")
     where, arg = ("room=?", room) if room else ("person=? AND room IS NULL", ep.target)
-    rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE role='assistant' AND kind=? AND "
-                            f"{where} ORDER BY id DESC LIMIT 3", (Kind.INITIATIVE, arg))
-    return tuple(str(r[0] or "") for r in reversed(rows))
+    gap = params(frame.env.params_of("expression", frame.root)).opening_gap_us
+    # chaque silence d'au moins ``gap`` ouvre une conversation (numérotée dans l'ordre), le tout début du fil aussi
+    # quand on l'a relu en entier ; sinon, ce qui précède le premier silence relu a commencé avant la fenêtre et ne
+    # compte pas. De chaque conversation, son premier message à elle — aucun dans la dernière : elle n'y a encore
+    # rien dit
+    rows = store.query_mind(
+        f"WITH w AS (SELECT id, at, role FROM {transcript_c.THREAD_TABLE} WHERE {where} ORDER BY id DESC LIMIT ?), "
+        "s AS (SELECT id, role, SUM(CASE WHEN gap >= ? OR gap IS NULL AND (SELECT COUNT(*) FROM w) < ? THEN 1 "
+        "ELSE 0 END) OVER (ORDER BY id) AS conv FROM (SELECT id, role, at - LAG(at) OVER (ORDER BY id) AS gap FROM w)), "
+        "c AS (SELECT conv, MIN(CASE WHEN role='assistant' THEN id END) AS first FROM s WHERE conv > 0 GROUP BY conv) "
+        f"SELECT c.conv, t.text FROM c LEFT JOIN {transcript_c.THREAD_TABLE} t ON t.id = c.first "
+        "WHERE c.first IS NOT NULL OR c.conv = (SELECT MAX(conv) FROM s) ORDER BY c.conv DESC LIMIT 4",
+        (arg, OPENINGS_SCAN, gap, OPENINGS_SCAN))
+    said = tuple(str(r[1]) for r in reversed(rows) if r[1] is not None)[-3:]
+    return Openings(said=said, opens=bool(rows) and rows[0][1] is None)
 
 
 @EXPRESSION.enricher("last_heard", episodes=[Kind.REPLY], deadline_ms=300)
@@ -272,7 +304,11 @@ def pending_question(said: Sequence[tuple[int, str]], heard: str, now: int) -> s
                     title="CE QUE TU TE RÉPÈTES")
 def _habits(s: ExpressionState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
     ep = frame.episode
-    opened = enrich.get("own_openings") or () if ep is not None and ep.kind == Kind.INITIATIVE else ()
+    # ses entrées en matière, seulement quand ce tour en est une : elle vient d'elle-même, ou elle répond au premier
+    # message après un silence (au milieu d'une conversation lancée, la section ne grossit pas)
+    openings = enrich.get("own_openings") or Openings()
+    opening = ep is not None and (ep.kind == Kind.INITIATIVE or (ep.kind == Kind.REPLY and openings.opens))
+    opened = openings.said if opening else ()
     said = enrich.get("own_words") or ()
     found = repeats(said, frame.now, opened)
     asked = pending_question(said, enrich.get("last_heard") or "", frame.now) \
