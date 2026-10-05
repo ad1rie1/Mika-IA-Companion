@@ -217,7 +217,7 @@ class AppGraph(context: Context) {
      */
     suspend fun clearLocalMessages() {
         connection.clearThread {
-            chat.wipe(keepKeys = DRAFT_KEYS + setOf(Kv.OWNER, Kv.MIND_STATE), keepStaging = true)
+            chat.wipe(keepKeys = DRAFT_KEYS + setOf(Kv.OWNER, Kv.MIND_STATE, Kv.LAST_SEEN_WALL), keepStaging = true)
             notifier.wipe()
         }
     }

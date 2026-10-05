@@ -115,8 +115,12 @@ class ChatViewModel(
 
     /** Le salut de retrouvailles, le temps d'un geste (voir [onShown]). */
     private val greeting = MutableStateFlow(false)
-    /** Quand on l'a quittée (ou vue arriver, la première fois) : l'horloge des retrouvailles. */
-    private var lastSeenMs: Long? = null
+    /**
+     * Quand on l'a quittée (ou vue arriver, la première fois), en heure murale : l'horloge des retrouvailles.
+     * Gardée aussi en base ([Kv.LAST_SEEN_WALL]) : Android tue souvent le processus d'une app laissée en
+     * arrière-plan, et la rouvrir deux minutes après n'est pas se retrouver.
+     */
+    private var lastSeenWallMs: Long? = null
 
     /**
      * Son portrait du moment ([AvatarDirector]) : `null` quand l'avatar est coupé dans les paramètres
@@ -328,20 +332,25 @@ class ChatViewModel(
      * depuis le lancement), elle fait coucou de la main, le temps d'un geste.
      */
     fun onShown() {
-        val now = graph.clock.elapsedMs()
-        val last = lastSeenMs
-        lastSeenMs = now
-        if (last != null && now - last < GREETING_GAP_MS) return
-        greeting.value = true
+        val now = graph.clock.wallMs()
+        val known = lastSeenWallMs
+        lastSeenWallMs = now
         viewModelScope.launch {
+            // Un processus neuf ne se souvient de rien : la base, elle, sait quand on l'a quittée.
+            val last = known ?: graph.store.kvGet(Kv.LAST_SEEN_WALL)?.toLongOrNull()
+            if (last != null && now - last < GREETING_GAP_MS) return@launch
+            greeting.value = true
             delay(GREETING_MS)
             greeting.value = false
         }
     }
 
-    /** L'écran passe à l'arrière-plan : c'est de là que se compte l'absence. */
+    /** L'écran passe à l'arrière-plan : c'est de là que se compte l'absence, gardée pour un processus tué. */
     fun onHidden() {
-        lastSeenMs = graph.clock.elapsedMs()
+        val now = graph.clock.wallMs()
+        lastSeenWallMs = now
+        // Hors de la portée du modèle : quitter l'app depuis les récentes le détruit juste après.
+        graph.scope.launch { graph.store.kvPut(Kv.LAST_SEEN_WALL, now.toString()) }
     }
 
     /** La conversation est à l'écran : tout est lu, et la notification n'a plus rien à dire. */

@@ -38,4 +38,6 @@ object Kv {
     const val SHARED_INBOX = "shared_inbox"
     /** Les lignes de la notification de messages (JSON), pour qu'un processus tué ne la vide pas. */
     const val NOTIFIED_LINES = "notified_lines"
+    /** Quand on a quitté la conversation pour la dernière fois (heure murale, ms) : l'horloge des retrouvailles. */
+    const val LAST_SEEN_WALL = "last_seen_wall"
 }
