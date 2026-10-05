@@ -78,6 +78,12 @@ from mika.vocab.people import clean_display_name
 
 log = logging.getLogger("mika.server")
 
+#: ce qu'uvicorn laisse au pong de son ping avant de fermer la connexion (1011). Un client n'intercale pas de pong
+#: au milieu d'une trame qu'il envoie : le défaut (20 s) coupait toute montée plus longue — une trame de chat et ses
+#: fichiers sur des données mobiles —, que le client renvoyait aussitôt. Couvre la plus grande trame admise montée à
+#: 1 Mbit/s, plus un intervalle de ping ; une connexion morte est toujours fermée, seulement plus tard.
+WS_PING_TIMEOUT_S = protocol.MAX_FRAME_BYTES * 8 / 1_000_000 + 20.0
+
 #: ce qu'un journal ne doit jamais montrer
 _SECRETS = (
     (re.compile(r"([?&](?:token|key|api[_-]?key|access_token|secret|password|passwd|auth|sig|signature)=)"
@@ -500,5 +506,5 @@ def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/
     # mandataire ne sont crus que derrière un mandataire déclaré (local) ; ailleurs, l'adresse vue fait foi.
     # ``log_config=None`` : les journaux d'uvicorn passent par les nôtres (et leur masque des secrets).
     uvicorn.run(app, host=host, port=port, ws_max_size=protocol.MAX_FRAME_BYTES, log_level="info",
-                timeout_graceful_shutdown=20, log_config=None, proxy_headers=behind_proxy,
-                forwarded_allow_ips="127.0.0.1,::1" if behind_proxy else None)
+                ws_ping_timeout=WS_PING_TIMEOUT_S, timeout_graceful_shutdown=20, log_config=None,
+                proxy_headers=behind_proxy, forwarded_allow_ips="127.0.0.1,::1" if behind_proxy else None)

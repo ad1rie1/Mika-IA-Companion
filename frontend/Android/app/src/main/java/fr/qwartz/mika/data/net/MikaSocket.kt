@@ -94,6 +94,8 @@ class MikaSocket(
     private var generation = 0
     private var open = false
     private var lastFrameAt = 0L
+    /** Le dernier regard qui a trouvé des octets à monter dans la file d'OkHttp ([lastSignOfLife]). */
+    private var uploadSeenAt = 0L
     private var currentDelay = MikaProtocol.RECONNECT_DELAY_MS.toDouble()
 
     private var reconnectJob: Job? = null
@@ -141,11 +143,12 @@ class MikaSocket(
     /** Déconnexion de la session : tout est oublié, rien n'est annoncé. */
     fun reset() {
         wanted = false
-        teardown(graceful = true)
+        // Oublié avant la fermeture : rien n'est remis en file, donc rien n'est refusé à voix haute.
         outbox.clear()
         outboxBytes = 0
         unacked.clear()
         unackedBytes = 0
+        teardown(graceful = true)
         endpoint = null
         stopped = false
         terminalState = null
@@ -170,13 +173,15 @@ class MikaSocket(
     /**
      * Le retour au premier plan : reconnecter tout de suite si la socket n'est pas manifestement
      * utilisable. Silencieuse avec un message sans accusé : c'est un cadavre. Silencieuse sans rien en
-     * vol : rien n'est prouvé, on pingue et le battement jugera.
+     * vol : rien n'est prouvé, on pingue et le battement jugera. Le silence se compte comme au battement :
+     * une trame encore en montée n'en est pas un ([lastSignOfLife]).
      */
     fun ensureAlive() {
         if (stopped || !wanted) return
         val s = socket
         if (s != null && open) {
-            if (unacked.isNotEmpty() && clock.elapsedMs() - lastFrameAt > MikaProtocol.HEARTBEAT_TIMEOUT_MS) {
+            val now = clock.elapsedMs()
+            if (unacked.isNotEmpty() && now - lastSignOfLife(s, now) > MikaProtocol.HEARTBEAT_TIMEOUT_MS) {
                 logger.w(TAG, "silencieuse avec un message en vol — reconnexion")
                 reconnectNow()
                 return
@@ -429,7 +434,8 @@ class MikaSocket(
                     pingThenJudge()
                     continue
                 }
-                if (now - lastFrameAt > MikaProtocol.HEARTBEAT_TIMEOUT_MS) {
+                val s = socket ?: continue
+                if (now - lastSignOfLife(s, now) > MikaProtocol.HEARTBEAT_TIMEOUT_MS) {
                     logger.w(TAG, "silencieuse au-delà du délai — reconnexion")
                     reconnectNow()
                     return@launch
@@ -444,6 +450,8 @@ class MikaSocket(
 
     private fun pingThenJudge() {
         val pingAt = clock.elapsedMs()
+        // Regardée avant le ping : ses propres octets ne sont pas une montée.
+        socket?.let { lastSignOfLife(it, pingAt) }
         if (!ping()) {
             reconnectNow()
             return
@@ -453,8 +461,21 @@ class MikaSocket(
         judgeJob = scope.launch {
             delay(MikaProtocol.LATE_TICK_JUDGE_MS)
             judgeJob = null
-            if (gen == generation && open && lastFrameAt < pingAt) reconnectNow()
+            val s = socket
+            if (gen == generation && open && s != null && lastSignOfLife(s, clock.elapsedMs()) < pingAt) reconnectNow()
         }
+    }
+
+    /**
+     * Le dernier signe de vie de la socket : une trame reçue, ou une montée encore en cours. Un `pong` ne
+     * double pas une trame qui monte — OkHttp écrit un message d'un seul tenant et ne le retire de sa file
+     * qu'une fois parti en entier. Tant que cette file porte des octets, le silence ne prouve donc rien
+     * (une montée vraiment bloquée, c'est le délai d'écriture d'OkHttp qui la ferme) : il ne se compte
+     * qu'à partir du dernier regard qui y a trouvé des octets.
+     */
+    private fun lastSignOfLife(s: WsSocket, now: Long): Long {
+        if (s.queueSize() > 0) uploadSeenAt = now
+        return maxOf(lastFrameAt, uploadSeenAt)
     }
 
     private fun stopHeartbeat() {
@@ -592,7 +613,9 @@ class MikaSocket(
     /**
      * Remettre en tête ce qui est parti sans accusé, devant ce qui a été tapé depuis. Un message reçu
      * dont l'accusé est mort avec la socket reviendra deux fois : un doublon se voit, une question
-     * disparue non.
+     * disparue non. Chaque retour compte une tentative, comme dans [keepForNextOpen] : une trame que
+     * chaque socket emporte avec elle sans accusé ne partira pas, et la renvoyer sans fin la laisserait
+     * « en attente » en remontant ses octets à chaque fois.
      */
     private fun requeueUnacked() {
         if (unacked.isEmpty()) return
@@ -602,7 +625,15 @@ class MikaSocket(
         val queued = outbox.toList()
         outbox.clear()
         outboxBytes = 0
-        for (entry in pending + queued) enqueue(entry)
+        for (entry in pending) {
+            entry.attempts += 1
+            if (entry.attempts > MikaProtocol.MAX_OUTBOX_ATTEMPTS) {
+                refuse(entry.chat.clientMsgId, MikaProtocol.ACK_SEND_ABANDONED)
+                continue
+            }
+            enqueue(entry)
+        }
+        for (entry in queued) enqueue(entry)
     }
 
     private fun refuseAll(status: String) {

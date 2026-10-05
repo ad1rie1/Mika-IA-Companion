@@ -85,9 +85,14 @@ class AppGraph(context: Context) {
         .callTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    /** La socket : pas de délai de lecture (le battement applicatif juge du silence). */
+    /**
+     * La socket : pas de délai de lecture (le battement applicatif juge du silence), mais un délai
+     * d'écriture, par tranche de 64 Kio — c'est lui qui ferme une montée bloquée, que le battement ne
+     * juge pas tant que la file d'OkHttp porte des octets (`MikaSocket.lastSignOfLife`).
+     */
     private val wsHttp: OkHttpClient = http.newBuilder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
         .callTimeout(0, TimeUnit.MILLISECONDS)
         .build()
 
