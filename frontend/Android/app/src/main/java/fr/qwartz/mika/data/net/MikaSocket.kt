@@ -143,11 +143,12 @@ class MikaSocket(
     /** Déconnexion de la session : tout est oublié, rien n'est annoncé. */
     fun reset() {
         wanted = false
-        teardown(graceful = true)
+        // Oublié avant la fermeture : rien n'est remis en file, donc rien n'est refusé à voix haute.
         outbox.clear()
         outboxBytes = 0
         unacked.clear()
         unackedBytes = 0
+        teardown(graceful = true)
         endpoint = null
         stopped = false
         terminalState = null
@@ -612,7 +613,9 @@ class MikaSocket(
     /**
      * Remettre en tête ce qui est parti sans accusé, devant ce qui a été tapé depuis. Un message reçu
      * dont l'accusé est mort avec la socket reviendra deux fois : un doublon se voit, une question
-     * disparue non.
+     * disparue non. Chaque retour compte une tentative, comme dans [keepForNextOpen] : une trame que
+     * chaque socket emporte avec elle sans accusé ne partira pas, et la renvoyer sans fin la laisserait
+     * « en attente » en remontant ses octets à chaque fois.
      */
     private fun requeueUnacked() {
         if (unacked.isEmpty()) return
@@ -622,7 +625,15 @@ class MikaSocket(
         val queued = outbox.toList()
         outbox.clear()
         outboxBytes = 0
-        for (entry in pending + queued) enqueue(entry)
+        for (entry in pending) {
+            entry.attempts += 1
+            if (entry.attempts > MikaProtocol.MAX_OUTBOX_ATTEMPTS) {
+                refuse(entry.chat.clientMsgId, MikaProtocol.ACK_SEND_ABANDONED)
+                continue
+            }
+            enqueue(entry)
+        }
+        for (entry in queued) enqueue(entry)
     }
 
     private fun refuseAll(status: String) {
