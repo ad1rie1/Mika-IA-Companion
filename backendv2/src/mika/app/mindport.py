@@ -504,6 +504,23 @@ class KernelPort:
             return w.CommandResult(status=w.CommandStatus.REFUSED, code=w.Refusal.STALE, message=_STALE)
         return w.CommandResult(status=w.CommandStatus.ACCEPTED, seq=commit.seqs[-1] if commit.seqs else None)
 
+    async def world_presence(self, actor: str, handle: str, joined: bool, *,
+                             asset: str | None = None) -> w.CommandResult:
+        """Entrer ou sortir, sur une seule racine comme une commande : la faculté rend son verdict (rien quand c'est
+        déjà vrai), l'écriture se fait sur la même base."""
+        frame = self.kernel.mind.frame()
+        verdict = world_commands.presence(frame, actor=actor, handle=handle, joined=joined, asset=asset)
+        if not verdict.ok:
+            return w.CommandResult(status=w.CommandStatus.REFUSED, code=verdict.code, message=verdict.message[:300])
+        if not verdict.drafts:
+            return w.CommandResult(status=w.CommandStatus.ACCEPTED)
+        try:
+            commit = await self.kernel.mind.append(list(verdict.drafts), emitter=w.OWNER, correlation=f"monde:{actor}",
+                                                   origin=Origin.EXTERNAL, basis=frame.root, guard=verdict.guard)
+        except Superseded:
+            return w.CommandResult(status=w.CommandStatus.REFUSED, code=w.Refusal.STALE, message=_STALE)
+        return w.CommandResult(status=w.CommandStatus.ACCEPTED, seq=commit.seqs[-1] if commit.seqs else None)
+
     def _screen_types(self) -> frozenset[str]:
         """Les types qui changent ce que montrent les écrans du monde : ceux que la faculté ``world`` réduit (lus
         dans la composition, pas recopiés : un réflexe de plus s'y ajoute seul) et ceux qu'elle diffuse."""

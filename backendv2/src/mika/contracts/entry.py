@@ -150,6 +150,13 @@ class MindPort(Protocol):
         dédoublonnage au journal, ``<session>:<cmd>``)."""
         ...
 
+    async def world_presence(self, actor: str, handle: str, joined: bool, *,
+                             asset: str | None = None) -> w.CommandResult:
+        """Une personne entre dans le monde (``joined``) ou en sort : sa connexion, pas une commande. L'adaptateur
+        redit l'état voulu ; le noyau n'écrit que ce qui change (déjà dedans, déjà dehors : accepté, rien
+        d'écrit). ``asset`` : l'apparence qu'elle a choisie."""
+        ...
+
     def world_events(self, after: int, *, limit: int) -> list[Event[Any]] | None:
         """Ce qui a changé ce que montrent les écrans du monde après ``after``, jusqu'à la tête publiée : les
         événements que le monde réduit (les siens et ceux d'autres facultés, comme l'endormissement) et ceux
