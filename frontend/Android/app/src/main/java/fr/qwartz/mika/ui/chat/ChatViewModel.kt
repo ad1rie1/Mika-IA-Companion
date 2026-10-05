@@ -114,7 +114,7 @@ class ChatViewModel(
     val approvalMessages: SharedFlow<String> = graph.approvals.messages
 
     /** Le salut de retrouvailles, le temps d'un geste (voir [onShown]). */
-    private val greeting = MutableStateFlow(false)
+    private val greeting = MutableStateFlow(AvatarDirector.Greeting.NONE)
     /**
      * Quand on l'a quittée (ou vue arriver, la première fois), en heure murale : l'horloge des retrouvailles.
      * Gardée aussi en base ([Kv.LAST_SEEN_WALL]) : Android tue souvent le processus d'une app laissée en
@@ -328,8 +328,10 @@ class ChatViewModel(
     }
 
     /**
-     * L'écran revient au premier plan : quand on la retrouve après un moment (ou pour la première fois
-     * depuis le lancement), elle fait coucou de la main, le temps d'un geste.
+     * L'écran revient au premier plan : des retrouvailles à la mesure de l'absence
+     * ([AvatarDirector.greeting]) — rien après un instant, un hochement après un moment, un coucou de
+     * la main après sa nuit ou une longue absence —, le temps d'un geste. Son humeur peut encore
+     * adoucir le coucou ([AvatarDirector.scene]).
      */
     fun onShown() {
         val now = graph.clock.wallMs()
@@ -338,10 +340,11 @@ class ChatViewModel(
         viewModelScope.launch {
             // Un processus neuf ne se souvient de rien : la base, elle, sait quand on l'a quittée.
             val last = known ?: graph.store.kvGet(Kv.LAST_SEEN_WALL)?.toLongOrNull()
-            if (last != null && now - last < GREETING_GAP_MS) return@launch
-            greeting.value = true
+            val level = AvatarDirector.greeting(last, now, zone)
+            if (level == AvatarDirector.Greeting.NONE) return@launch
+            greeting.value = level
             delay(GREETING_MS)
-            greeting.value = false
+            greeting.value = AvatarDirector.Greeting.NONE
         }
     }
 
@@ -382,8 +385,6 @@ class ChatViewModel(
         const val KEY_CAMERA = "camera_path"
         const val DRAFT_DEBOUNCE_MS = 400L
         const val GREETING_MS = 2_600L
-        /** Revenir sur l'écran plus tôt n'est pas « se retrouver » : pas de nouveau salut. */
-        const val GREETING_GAP_MS = 20 * 60_000L
         val PHOTO_NAME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss", Locale.ROOT)
     }
 }

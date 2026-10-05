@@ -19,7 +19,7 @@ class AvatarDirectorTest {
         MindState(sleepPhase = sleep, energy = energy, mood = emotion?.let { Mood(it, intensity) })
 
     private fun scene(mind: MindState?, typing: Boolean = false, greeting: Boolean = false, available: Set<String> = all) =
-        AvatarDirector.scene(mind, typing, greeting, available)
+        AvatarDirector.scene(mind, typing, if (greeting) AvatarDirector.Greeting.WAVE else AvatarDirector.Greeting.NONE, available)
 
     @Test fun `chaque émotion a son portrait et sa lumière`() {
         for ((name, meta) in MindLabels.EMOTIONS) {
@@ -44,7 +44,7 @@ class AvatarDirectorTest {
     }
 
     @Test fun `le salut passe avant ce qu'elle écrit, qui passe avant son humeur`() {
-        assertEquals(AvatarDirector.WAVE, scene(mind("sad"), typing = true, greeting = true).portrait)
+        assertEquals(AvatarDirector.WAVE, scene(mind("happy"), typing = true, greeting = true).portrait)
         assertEquals(AvatarDirector.THINKING, scene(mind("sad"), typing = true).portrait)
         assertEquals("sad", scene(mind("sad")).portrait)
     }
