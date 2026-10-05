@@ -367,7 +367,18 @@ namespace Mika.UI
             }
             var text = StripCues(s.Text);
             if (s.MessageId is long id && !_shown.Add(id)) return;
+            // Le fil se lit tout de suite ; le sous-titre, lui, attend que sa bouche dise la réplique.
             AddLine(s.Inner ? $"({text})" : text, mika: true);
+        }
+
+        /// <summary>
+        /// Le sous-titre d'une réplique, à son début réel (appelé par la présentation de Mika) : une réplique qui
+        /// attend qu'elle finisse la précédente laisse celle-ci affichée jusque-là.
+        /// </summary>
+        public void ShowSubtitle(SpeechFrame s)
+        {
+            if (_subtitle == null || string.IsNullOrEmpty(s.Text)) return;
+            var text = StripCues(s.Text);
             _subtitle.text = s.Inner ? $"« {text} »" : text;
             _subtitleBox.RemoveFromClassList("hidden");
             _subtitleUntil = Time.unscaledTime + Mathf.Clamp(text.Length * 0.065f, 3f, 14f);
