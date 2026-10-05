@@ -7,8 +7,8 @@
   enregistré : une exécution interrompue y a laissé son travail) et son dépôt
   distant ; ce qu'une commande réseau a rendu, **cité** (une donnée d'Internet,
   jamais une consigne) ; le budget de l'exécution (ses tours, son temps).
-- **Un récit, une demande d'aide** : ce qu'elle a mené à bout, ou ce qui la
-  bloque, à la mesure du lien.
+- **Un récit, une demande d'aide** : ce qu'elle a mené à bout (tout ce qui
+  l'a été depuis le récit précédent), ou ce qui la bloque, à la mesure du lien.
 - **En conversation** : ses projets (« tu travailles sur quoi ? » est une
   question sur sa vie) — où chacun en est, sa dernière exécution, ce qui vient
   ou ce qui bloque, et pour qui s'occupe d'elle ce qui attend son accord ;
@@ -38,7 +38,7 @@ from mika.faculties.projects.faculty import (
     pick,
 )
 from mika.faculties.projects.tools import RUNS, written
-from mika.faculties.projects.work import FULL, MENTION
+from mika.faculties.projects.work import FULL, MENTION, untold
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
@@ -52,6 +52,8 @@ INSTRUCTIONS_SHOWN = 3
 DECISIONS_SHOWN = 12
 TREE_SHOWN = 60
 PENDING_SHOWN = 20
+#: les objectifs qu'un récit nomme (les plus récents) ; ceux d'avant sont comptés
+TOLD_SHOWN = 8
 
 
 def _project(s: ProjectsState, frame: Frame) -> tuple[Project, Objective | None] | None:
@@ -283,8 +285,8 @@ def _network_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) 
 @PROJECTS.section("project_share", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], trim_rank=90,
                   title="CE QUE TU AS MENÉ À BOUT")
 def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
-    """Ce qu'elle a mené à bout dans un projet — à la mesure du lien avec qui l'écoute ; ou, quand elle a besoin
-    de qui le lui a confié, ce qui la bloque."""
+    """Ce qu'elle a mené à bout dans un projet depuis son dernier récit — à la mesure du lien avec qui l'écoute ;
+    ou, quand elle a besoin de qui le lui a confié, ce qui la bloque."""
     ep = frame.episode
     got = objective_of(ep.attrs.get("subject")) if ep is not None else None
     p = s.projects.get(got[0]) if got is not None else None
@@ -309,6 +311,21 @@ def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
         if need:
             body += f"\nCe qu'il te faudrait : {need}"
         return SectionBody(body, level=level, title="CE QUI TE BLOQUE", provenance=(f"project:{p.id}",))
+    pm = params(frame.env.params_of("projects", frame.root))
+    told = [x for x in untold(p, frame.now, pm) if x.id != o.id] + [o]
+    if len(told) > 1:  # un point : tout ce qu'elle a mené à bout depuis le précédent, le plus récent en dernier
+        lines = [f"Dans ton projet « {title} », tu as mené à bout :"]
+        if len(told) > TOLD_SHOWN:
+            lines.append(f"- … et {len(told) - TOLD_SHOWN} autre(s) avant")
+        for x in told[-TOLD_SHOWN:]:
+            result = store.get(x.result_ref, "")
+            line = f"- {store.get(x.text_ref) or 'un objectif'}"
+            if share == FULL and result:
+                line += f"\n  ce que tu en as tiré : {result}"
+            elif result:
+                line += f" — en bref : {result.split('. ')[0].strip()}"
+            lines.append(line)
+        return SectionBody("\n".join(lines), level=level, provenance=(f"project:{p.id}",))
     result = store.get(o.result_ref, "")
     body = f"Dans ton projet « {title} » : {objective or 'un objectif'}"
     if share == FULL and result:
