@@ -4,8 +4,10 @@ standard, dans un fil), un cache SQLite à part pour ce qui est arrivé.
 - **Plusieurs comptes**, chacun avec ses dossiers relevés ; une panne sur un
   compte n'empêche pas de relever les autres (elle est notée : la console la
   montre).
-- **Chaque mail n'est rendu qu'une fois** (``fetch_new``), même s'il change de
-  dossier ; au premier relevé d'un dossier, on ne remonte que quelques jours.
+- **Chaque mail est rendu jusqu'à son accusé** (``fetch_new`` puis ``ack``),
+  puis plus jamais, même s'il change de dossier : un relevé interrompu avant
+  d'avoir remarqué ses mails les retrouve au suivant ; au premier relevé d'un
+  dossier, on ne remonte que quelques jours.
 - **Un client complet** : lu/non lu, suivi, déplacer, archiver, corbeille —
   sur le serveur, et le cache suit.
 - **Ce qui part** est mis en forme par ``compose`` (l'expéditeur selon la voix
@@ -116,13 +118,17 @@ class ImapSmtpMail:
             if len(out) >= limit:
                 break
             try:
-                got = await self._in_thread(key, self._poll_sync, key, account, share)
+                await self._in_thread(key, self._poll_sync, key, account, share)
             except (OSError, ImapError, ValueError, EOFError) as exc:
                 self._cache.note(key, at=self._at(), error=_why(exc), polled=True)
                 log.warning("courrier : relevé de %s impossible (%s)", key, type(exc).__name__)
-                continue
-            out.extend(got)
+            # ce qui attend son accusé : ce relevé-ci (même si un dossier suivant a échoué), ou un passage
+            # interrompu avant d'avoir remarqué ce qu'on lui avait rendu
+            out.extend(self._cache.offered(key, share))
         return out[:limit]
+
+    def ack(self, refs: Sequence[str]) -> None:
+        self._cache.ack(refs)
 
     def seen_elsewhere(self) -> list[str]:
         out, self._seen_elsewhere = self._seen_elsewhere, []
@@ -183,7 +189,7 @@ class ImapSmtpMail:
             stored = self._cache.store(self._read(raw, uid, key, folder, flags), uid)
             local = split_ref(stored.ref)[1]
             if hand and not self._cache.handed(key, local):
-                self._cache.hand(key, local)
+                self._cache.offer(key, stored.ref)  # rendu pour de bon à l'accusé (``ack``), pas avant
                 out.append(stored)
             if owns_cursor:
                 self._cache.save_folder(key, folder, uidvalidity=validity or None, uidnext=uid + 1)

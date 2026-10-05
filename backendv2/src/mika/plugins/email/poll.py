@@ -97,7 +97,8 @@ class Poll:
             return
         p = params_of(frame)
         known = ctx.state.mails
-        mails = [m for m in await port.fetch_new(p.per_poll) if m.ref not in known]
+        fetched = await port.fetch_new(p.per_poll)
+        mails = [m for m in fetched if m.ref not in known]
         labels = {a.key: a.name for a in port.accounts()}
         several = len(labels) > 1
         drafts: list[Any] = []
@@ -137,6 +138,9 @@ class Poll:
                 drafts.append(READ.draft(mail=ref, how="ailleurs", dedupe_key=f"lu-ailleurs:{ref}"))
         if drafts:
             await ctx.emit(*drafts)
+        # remarqués (ou déjà connus) : le relevé ne les rendra plus ; un passage interrompu avant ce point
+        # (préempté, échu) les retrouve au relevé suivant
+        port.ack([m.ref for m in fetched])
 
 
 @EMAIL.propose(kinds=[Kind.INITIATIVE], reasons={c.MENTION: (0.0, 8.0)},

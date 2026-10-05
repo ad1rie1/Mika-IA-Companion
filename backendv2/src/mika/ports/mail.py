@@ -392,8 +392,15 @@ class MailPort(Protocol):
     def account(self, key: str) -> AccountInfo | None: ...
 
     async def fetch_new(self, limit: int) -> list[Mail]:
-        """Les mails arrivés depuis la dernière fois dans les dossiers relevés de
-        chaque compte (chacun rendu une seule fois, même s'il change de dossier)."""
+        """Les mails arrivés dans les dossiers relevés de chaque compte et pas encore
+        accusés (``ack``) : rendus à chaque relevé jusqu'à l'accusé, puis plus jamais,
+        même s'ils changent de dossier."""
+        ...
+
+    def ack(self, refs: Sequence[str]) -> None:
+        """Accuse ces mails rendus par ``fetch_new`` : ils sont remarqués (écrits au
+        journal), le relevé ne les rendra plus. Un passage interrompu avant l'accusé
+        les retrouve au relevé suivant."""
         ...
 
     def seen_elsewhere(self) -> list[str]:

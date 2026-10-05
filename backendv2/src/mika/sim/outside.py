@@ -6,7 +6,7 @@ et le monde y dépose ce qui arrive (un mail, un article) à l'instant voulu.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field, replace
 from email.message import EmailMessage
 
@@ -102,8 +102,10 @@ class FakeMail:
         polled = {a.key: set(a.folders) for a in self.accounts() if a.ready}
         fresh = [m for m in self.inbox if m.account in polled and m.folder in polled[m.account]
                  and m.ref not in self.handed][:limit]
-        self.handed |= {m.ref for m in fresh}
         return fresh
+
+    def ack(self, refs: Sequence[str]) -> None:
+        self.handed |= set(refs)
 
     def seen_elsewhere(self) -> list[str]:
         out, self.read_elsewhere = self.read_elsewhere, []
