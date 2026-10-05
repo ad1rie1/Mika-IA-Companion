@@ -178,6 +178,9 @@ def _config(kernel: Kernel) -> Check:
         got = call(registry.params_of, name, root, label=f"paramètres de {name}")
         if isinstance(got, Failed):
             problems.append(f"les paramètres de « {name} » ne se relisent pas : {describe_error(got.error)}")
+        elif (bad := registry.params_problem(name, root)) is not None:
+            problems.append(f"les paramètres de « {name} » ne se relisent pas : {describe_error(bad)} — elle vit "
+                            "sur leurs valeurs par défaut jusqu'à ce qu'on les règle de nouveau")
         elif name == "kernel" and got is not None and not zone_known(str(getattr(got, "tz", "UTC"))):
             problems.append(f"fuseau horaire inconnu « {str(got.tz)[:60]} » : elle vit en UTC — corrige-le dans "
                             "Configuration › Personnage › Identité")
