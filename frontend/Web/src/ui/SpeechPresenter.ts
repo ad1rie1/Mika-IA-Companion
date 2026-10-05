@@ -21,11 +21,14 @@ export interface VoicePort {
   readonly isMuted: boolean;
   /** Répliques encore en file derrière celle qui joue. */
   readonly queuedCount: number;
+  /** `intensity` (0…1) dose l'inflexion de la voix, comme elle dose déjà
+   * le visage, la bouche et le tempo du corps. */
   speak(
     text: string,
     emotion: EmotionName,
     profile: VoiceProfile | undefined,
-    hooks: { onStart?: () => void }
+    hooks: { onStart?: () => void },
+    intensity?: number
   ): Promise<"played" | "skipped">;
   requestWakeUpDelay(ms: number): void;
 }
@@ -208,12 +211,18 @@ export class SpeechPresenter {
     this.noteVoicedEnqueued();
     let shown = false;
     void this.voice
-      .speak(data.text as string, emotion, data.voice_profile, {
-        onStart: () => {
-          shown = true;
-          showReply();
+      .speak(
+        data.text as string,
+        emotion,
+        data.voice_profile,
+        {
+          onStart: () => {
+            shown = true;
+            showReply();
+          },
         },
-      })
+        intensity
+      )
       .then(() => {
         // Jamais jouée (muet ou stop avant son tour) : le texte est à
         // l'écran quand même, le visage doit le dire.

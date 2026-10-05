@@ -142,6 +142,34 @@ const EMOTION_VOICE: Record<
   melancholic: { pitch: 0.85, rate: 0.8 },
 };
 
+/**
+ * Part de l'écart de `EMOTION_VOICE` qu'une intensité applique :
+ * `mod = 1 + (cible − 1) × g(intensité)`, g croissante de ce plancher (une
+ * émotion nommée teinte toujours un peu la voix) jusqu'à 1 (la valeur pleine
+ * de la table). Sans elle, `sad` à 0,2 sonnait comme `sad` à 0,95 — une
+ * teinte passagère avec la voix d'un deuil — alors que la bouche
+ * (`articulationFor`) et le tempo des clips (`affectTimeScale`) suivaient
+ * déjà l'intensité. Plancher bas : à 0,2, la voix reste à moins de 5 % du
+ * neutre.
+ */
+export const VOICE_INTENSITY_FLOOR = 0.1;
+
+/** Hauteur et débit d'une émotion à son intensité, avant l'identité vocale
+ * (`VoiceProfile`). Intensité 1 : la table telle quelle — le comportement
+ * d'un appel qui n'en donne pas. */
+export function voiceModFor(
+  emotion: EmotionName,
+  intensity = 1
+): { pitch: number; rate: number } {
+  const target = EMOTION_VOICE[emotion] || EMOTION_VOICE.neutral;
+  const s = Math.max(0, Math.min(1, intensity));
+  const g = VOICE_INTENSITY_FLOOR + (1 - VOICE_INTENSITY_FLOOR) * s;
+  return {
+    pitch: 1 + (target.pitch - 1) * g,
+    rate: 1 + (target.rate - 1) * g,
+  };
+}
+
 export class TTSService {
   private audioContext: AudioContext | null = null;
   private events: TTSEvents;
@@ -152,6 +180,7 @@ export class TTSService {
     emotion: EmotionName;
     profile: VoiceProfile;
     hooks: SpeakHooks | undefined;
+    intensity: number;
     settle: (outcome: SpeakOutcome) => void;
   }> = [];
   private processing = false;
@@ -164,6 +193,9 @@ export class TTSService {
   // speakImmediate so the deeper utterance construction can read it
   // without threading the profile through every segment helper.
   private activeProfile: VoiceProfile = NEUTRAL_PROFILE;
+  // Intensité de l'émotion de ce même énoncé, posée au même endroit et pour
+  // la même raison : chaque segment la lit sans qu'on la fasse descendre.
+  private activeIntensity = 1;
   /**
    * Le morceau que la synthèse joue en ce moment, réduit à ce qui permet de
    * le clore de l'extérieur. `stop()` et `setMuted(true)` s'en servent :
@@ -500,16 +532,20 @@ export class TTSService {
    * jouer (ou dès qu'il est certain qu'il ne jouera pas) : c'est ce qui
    * permet à l'appelant de savoir qu'une réplique vocale est encore en vol
    * — et donc que le visage lui appartient.
+   *
+   * `intensity` (0…1) dose la modulation de l'émotion (`voiceModFor`) ;
+   * omise, la table s'applique pleinement.
    */
   speak(
     text: string,
     emotion: EmotionName = "neutral",
     profile: VoiceProfile = NEUTRAL_PROFILE,
-    hooks?: SpeakHooks
+    hooks?: SpeakHooks,
+    intensity = 1
   ): Promise<SpeakOutcome> {
     if (this.muted) return Promise.resolve("skipped");
     return new Promise<SpeakOutcome>((settle) => {
-      this.speechQueue.push({ text, emotion, profile, hooks, settle });
+      this.speechQueue.push({ text, emotion, profile, hooks, intensity, settle });
       if (!this.processing) {
         this.processQueue();
       }
@@ -523,7 +559,13 @@ export class TTSService {
       const item = this.speechQueue.shift()!;
       let outcome: SpeakOutcome = "skipped";
       try {
-        outcome = await this.speakImmediate(item.text, item.emotion, item.profile, item.hooks);
+        outcome = await this.speakImmediate(
+          item.text,
+          item.emotion,
+          item.profile,
+          item.hooks,
+          item.intensity
+        );
       } finally {
         item.settle(outcome);
       }
@@ -538,20 +580,26 @@ export class TTSService {
     for (const item of dropped) item.settle("skipped");
   }
 
-  /** Débit effectif d'un énoncé : modulation d'émotion × identité vocale,
-   * borné comme `utterance.rate` l'est. */
-  effectiveRate(emotion: EmotionName, profile: VoiceProfile = NEUTRAL_PROFILE): number {
-    const voiceMod = EMOTION_VOICE[emotion] || EMOTION_VOICE.neutral;
-    return clampRate(voiceMod.rate * profile.rate);
+  /** Débit effectif d'un énoncé : modulation d'émotion à son intensité ×
+   * identité vocale, borné comme `utterance.rate` l'est. Même formule que
+   * `speakTextChunk`, pour que le lip-sync lise le débit de la voix. */
+  effectiveRate(
+    emotion: EmotionName,
+    profile: VoiceProfile = NEUTRAL_PROFILE,
+    intensity = 1
+  ): number {
+    return clampRate(voiceModFor(emotion, intensity).rate * profile.rate);
   }
 
   private async speakImmediate(
     text: string,
     emotion: EmotionName,
     profile: VoiceProfile = NEUTRAL_PROFILE,
-    hooks?: SpeakHooks
+    hooks?: SpeakHooks,
+    intensity = 1
   ): Promise<SpeakOutcome> {
     this.activeProfile = profile;
+    this.activeIntensity = intensity;
     // Consume any pending wake-up delay before the actual utterance.
     // Drained here (not in processQueue) so back-to-back speeches within
     // a single response don't keep re-delaying.
@@ -568,7 +616,7 @@ export class TTSService {
     // en file, ni pendant le silence du réveil ci-dessus. C'est le signal
     // sur lequel le lip-sync et le visage doivent se caler.
     hooks?.onStart?.();
-    this.events.onUtteranceStart?.(text, this.effectiveRate(emotion, profile));
+    this.events.onUtteranceStart?.(text, this.effectiveRate(emotion, profile, intensity));
 
     // Parse non-verbal tokens and handle the segmented path if any are
     // present. Fall through to the single-utterance path when the text
@@ -679,7 +727,7 @@ export class TTSService {
       // Apply emotion modulation
       // Emotion modulation first, then the voice identity on top of it:
       // an excited *thought* is still quieter than an excited sentence.
-      const voiceMod = EMOTION_VOICE[emotion] || EMOTION_VOICE.neutral;
+      const voiceMod = voiceModFor(emotion, this.activeIntensity);
       const profile = this.activeProfile;
       utterance.pitch = clampPitch(voiceMod.pitch * profile.pitch);
       utterance.rate = clampRate(voiceMod.rate * profile.rate);
