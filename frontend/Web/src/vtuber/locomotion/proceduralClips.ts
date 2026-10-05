@@ -82,6 +82,30 @@ export function standingHipsHeight(vrm: VRM): number {
   return restHipsY(vrm);
 }
 
+/** Amplitude (rad) of the sway given to a track the sample left constant —
+ * far below anything visible, far above float rounding. */
+const STILL_SWAY = 1e-4;
+
+/**
+ * A constant quaternion track gets an imperceptible sway about the bone's
+ * own X: the mixer only writes a bone whose value changed since the last
+ * frame, and AnimationSystem resets the pose before every mixer pass, so a
+ * still track would be written once and then left at rest (see the
+ * postures below). One full sway per loop, so the seam stays continuous;
+ * `k` staggers the tracks.
+ */
+function keepWritten(values: number[], times: number[], duration: number, k: number): number[] {
+  const first = values.slice(0, 4);
+  if (duration <= 0 || values.some((v, i) => v !== first[i % 4])) return values;
+  const q = new THREE.Quaternion(first[0], first[1], first[2], first[3]);
+  const out: number[] = [];
+  for (const t of times) {
+    const s = q.clone().multiply(euler(STILL_SWAY * Math.sin((2 * Math.PI * t) / duration + k), 0, 0));
+    out.push(s.x, s.y, s.z, s.w);
+  }
+  return out;
+}
+
 /** `hips` in a sample is an OFFSET from the rig's rest hips, authored in
  * the 1.0 convention; the rest position itself is the rig's own and is
  * never conjugated. */
@@ -111,7 +135,8 @@ function buildClip(
   for (const [bone, values] of rot) {
     const node = humanoid?.getNormalizedBoneNode(bone);
     if (!node || values.length !== times.length * 4) continue;
-    tracks.push(new THREE.QuaternionKeyframeTrack(`${node.name}.quaternion`, times, values));
+    const kept = keepWritten(values, times, duration, tracks.length);
+    tracks.push(new THREE.QuaternionKeyframeTrack(`${node.name}.quaternion`, times, kept));
   }
   const hipsNode = humanoid?.getNormalizedBoneNode("hips");
   if (hipsNode && pos.length === times.length * 3) {
@@ -169,7 +194,8 @@ export function buildWalkClip(vrm: VRM): THREE.AnimationClip {
  * every mixer pass — a perfectly still clip is written once, wiped by the
  * next reset, and never written again (she stood straight inside the
  * chair). A slow, small motion keeps every bone written, and is what a
- * body at rest does anyway.
+ * body at rest does anyway; a bone the pose below holds still (hips,
+ * forearms, a resting leg) gets the imperceptible sway of `keepWritten`.
  */
 const SIT_PERIOD = 4.6;
 const LIE_PERIOD = 6.2;
