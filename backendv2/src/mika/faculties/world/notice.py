@@ -133,12 +133,16 @@ def merge(pending: tuple[Remark, ...], fresh: Iterable[Remark]) -> tuple[Remark,
     return tuple(sorted(by.values(), key=lambda r: (-pertinence(r), r.object))[:KEPT])
 
 
-def _text(r: Remark, kind: str) -> str:
+def sentence(r: Remark) -> str:
+    """Ce qu'elle remarque, comme elle se le dit (vide : rien)."""
+    kind = change(r)
     if kind == APPEARED:
         return f"Il y a quelque chose de nouveau{' ' + r.where if r.where else ''} : {r.label}."
     if kind == GONE:
         return f"Quelque chose a disparu{' ' + r.was if r.was else ''} : {r.label}."
-    return f"Quelque chose a changé de place : {r.label}" + (f", maintenant {r.where}." if r.where else ".")
+    if kind == MOVED:
+        return f"Quelque chose a changé de place : {r.label}" + (f", maintenant {r.where}." if r.where else ".")
+    return ""
 
 
 def signal(r: Remark) -> Draft[Any] | None:
@@ -151,6 +155,6 @@ def signal(r: Remark) -> Draft[Any] | None:
     level = int(Sensitivity.PERSONAL if about else Sensitivity.NONE)
     factor = 1.0 if r.mine else NOT_MINE
     return w.NOTICED.draft(
-        source="world", kind=KIND, summary=Content.of(_text(r, kind), level=level), pertinence=pertinence(r),
+        source="world", kind=KIND, summary=Content.of(sentence(r), level=level), pertinence=pertinence(r),
         emotion=CHANGE_EMOTION[kind].value, intensity=round(CHANGE_INTENSITY * factor, 4), about=about,
         sensitivity=level, bundle="world", object=r.object, dedupe_key=f"remarque:{r.seq}:{r.object}")
