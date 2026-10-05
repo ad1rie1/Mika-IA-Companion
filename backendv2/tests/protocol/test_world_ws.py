@@ -104,9 +104,13 @@ def hello(ws, *, roles=("viewer",), rev=None, after=None, token=None) -> None:
 
 
 def recv(ws) -> dict:
-    frame = ws.receive_json()
-    p.server_frame(json.dumps(frame))  # chaque trame reçue respecte le protocole publié
-    return frame
+    """La trame suivante, hors ``presence`` : les personnes entrent et sortent avec leurs connexions, ce dont ces
+    essais ne parlent pas."""
+    while True:
+        frame = ws.receive_json()
+        p.server_frame(json.dumps(frame))  # chaque trame reçue respecte le protocole publié
+        if frame["type"] != "presence":
+            return frame
 
 
 def until(ws, kind: str, limit: int = 30, **match: Any) -> tuple[dict, list[dict]]:
@@ -397,5 +401,7 @@ def test_la_pose_va_aux_autres_jamais_a_soi_ni_au_journal(ctx) -> None:
         assert recv(b) == {**pose, "actor": "player:user_1"}
         assert ping(ctx, a, 9) == []  # rien n'est revenu à qui l'a envoyée
     store = ctx.live.kernel.mind.store
-    assert ctx.call(lambda: [e.type for e in store.read(after=head) if e.type.startswith("world.")]) == []
+    entering = {w.JOINED.name, w.LEFT.name, w.NOTICED.name}  # entrer, sortir, le remarquer : la connexion
+    assert ctx.call(lambda: [e.type for e in store.read(after=head)
+                             if e.type.startswith("world.") and e.type not in entering]) == []
     # jamais journalisée
