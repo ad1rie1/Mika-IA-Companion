@@ -354,6 +354,21 @@ class Retention:
             await ctx.emit(*drafts)
 
 
+#: un texte relu et coupé le dit
+CUT_MARK = "\n… (la suite dans le fichier)"
+
+
+async def reread(port: Any, file: str, limit: int) -> str | None:
+    """Ce qu'elle a écrit dans un fichier envoyé, au plus ``limit`` caractères (coupé, il le dit) ; ``None`` quand
+    ses octets ne sont plus là (retiré, oublié)."""
+    # un caractère tient en quatre octets au plus : un octet de plus suffit à savoir qu'il y a une suite
+    data = await port.read(file, limit * 4 + 1) if port is not None else None
+    if data is None:
+        return None
+    text = data.decode("utf-8", errors="replace")
+    return text if len(text) <= limit else text[:limit].rstrip() + CUT_MARK
+
+
 @SHARES.effect(c.EXPIRED, deadline_s=60.0)
 async def _erase(ev: Any, ports: Mapping[str, Any]) -> None:
     """Après le commit : les octets des fichiers retirés s'effacent (idempotent, rejouable)."""

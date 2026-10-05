@@ -7,7 +7,10 @@ par personne ; le résultat lui dit d'annoncer en une phrase ce qu'elle envoie, 
 - ``share_text`` : un texte qu'elle écrit maintenant (une liste, une note, du code, un tableau) ;
 - ``project_files`` : ce qu'elle peut envoyer de ses projets (les numéros ne se disent jamais en conversation) ;
 - ``share_project_file`` : un fichier de l'atelier d'un projet — seulement si la personne en a les droits (elle
-  parle en propriétaire, ou c'est elle qui l'a confié) et peut entendre ce dont il parle.
+  parle en propriétaire, ou c'est elle qui l'a confié) et peut entendre ce dont il parle ;
+- ``reread_sent_file`` : relire un texte qu'elle a écrit et envoyé à cette adresse (parti, encore gardé), avant
+  d'en reparler ou de le renvoyer corrigé — sans lui, la liste quittait sa tête avec l'épisode et elle la
+  recomposait de mémoire, autrement.
 
 Le fichier a un identifiant **déterministe** (la portée de ses écritures, l'appel, la personne) : une réponse
 supplantée puis recomposée qui refait le même appel retombe sur le même fichier, sans doublon.
@@ -25,7 +28,7 @@ from pydantic import BaseModel, Field
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as projects_c
 from mika.contracts import shares as c
-from mika.faculties.shares.faculty import MIB, PORT, SHARES, params_of
+from mika.faculties.shares.faculty import MIB, PORT, SHARES, params_of, reread
 from mika.kernel.codec import digest
 from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult
@@ -33,16 +36,20 @@ from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Superseded
 from mika.kernel.inspect import num_fr
 from mika.ports.workshop import OutsideWorkshop
+from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, is_work_target
 from mika.vocab.privacy import ChannelTrust, Sensitivity, hearable
 
 BUNDLE = "shares"
 SHARE_TEXT, PROJECT_FILES, SHARE_PROJECT_FILE = "share_text", "project_files", "share_project_file"
+REREAD_SENT_FILE = "reread_sent_file"
 SENDING = frozenset({SHARE_TEXT, SHARE_PROJECT_FILE})
 #: au plus tant de fichiers par épisode (les deux outils ensemble)
 PER_EPISODE = 3
 #: un texte qu'elle écrit, une fois encodé
 TEXT_MAX_BYTES = 512 * 1024
+#: un texte relu : au plus tant de caractères (la suite reste dans le fichier)
+REREAD_MAX_CHARS = 20_000
 NAME_MAX = 80
 #: une arborescence montrée : au plus tant d'entrées
 TREE_SHOWN = 60
@@ -76,10 +83,11 @@ NOT_HERE = ("Tu ne peux envoyer un fichier qu'en tête-à-tête, à quelqu'un qu
             "message.")
 NO_STORE = "Tu ne peux pas envoyer de fichier ici (rien pour les garder)."
 NO_PROJECT = "Ce projet n'est pas à partager avec cette personne."
+NOT_SENT = "Tu ne lui as pas envoyé de texte de ce nom, ou il n'est plus disponible."
 SUGGEST = "choisis .md, .txt, .csv, .json…"
 
 SHARES.bundle(BUNDLE, "envoyer un fichier à la personne : un texte que tu écris (liste, note, code, tableau) ou un "
-                      "fichier d'un de tes projets")
+                      "fichier d'un de tes projets ; relire un texte que tu lui as envoyé")
 
 
 def offered(audience: Any) -> bool:
@@ -357,3 +365,41 @@ async def share_project_file(args: ProjectFileArgs, ctx: Any) -> Any:
     name, mime, kind = project_name(parts[-1])
     return await _send(ctx, target, person, name=name, mime=mime, data=data, kind=kind, origin=c.PROJECT,
                        level=v.written, project=v.id, path="/".join(parts), about=v.about)
+
+
+# ── Relire ce qu'elle a envoyé ────────────────────────────────────────────
+
+
+class RereadArgs(BaseModel):
+    name: str = Field(description="Le nom du fichier que tu lui as envoyé (comme dans « ce que tu lui as déjà "
+                                  "envoyé ») : courses.md, notes.txt…")
+
+
+def _named(raw: Any, name: str) -> bool:
+    """Le nom demandé est-il celui-ci ? Sans égard à la casse, avec ou sans son extension."""
+    wanted = clean_name(raw).casefold()
+    return bool(wanted) and wanted in (name.casefold(), name.rpartition(".")[0].casefold())
+
+
+@SHARES.tool(REREAD_SENT_FILE, description="Relire un texte que tu as écrit et envoyé à la personne en pièce jointe "
+             "(une liste, une note, du code), par son nom : avant d'en reparler, ou de le lui renvoyer corrigé avec "
+             "share_text, pour ne pas le refaire de mémoire.",
+             args=RereadArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4, when=offered)
+async def reread_sent_file(args: RereadArgs, ctx: Any) -> Any:
+    who = _recipient(ctx)
+    if isinstance(who, ToolResult):
+        return who
+    target, _person = who
+    store = ctx.ports.get("store")
+    # ce qu'elle a écrit, parti avec un message à cette adresse et encore gardé (un retiré n'est plus dans la tranche)
+    written = [v for v in ctx.state.sent.get(target, ()) if v.message and v.origin == c.WRITTEN and v.name_ref]
+    names = store.content([v.name_ref for v in written]) if store is not None and written else {}
+    # un nom oublié ne se dit plus ; deux envois du même nom : le dernier
+    v = next((v for v in reversed(written) if names.get(v.name_ref) and _named(args.name, names[v.name_ref])), None)
+    text = await reread(ctx.ports.get(PORT), v.file, REREAD_MAX_CHARS) if v is not None else None
+    if v is None or text is None:
+        return ToolResult(ok=False, content=NOT_SENT)
+    tz = ctx.frame.env.tz_of(ctx.frame.root)
+    return ToolResult(content=(
+        f"« {names[v.name_ref]} », que tu lui as envoyé {when_fr(v.at, ctx.frame.now, tz)} — ce que tu y as écrit :\n"
+        f"{text}\n(Pour le changer, renvoie-le corrigé avec share_text : garde tel quel ce qui ne bouge pas.)"))
