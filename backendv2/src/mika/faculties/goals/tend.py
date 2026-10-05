@@ -530,7 +530,11 @@ class Tend:
         if not todo:
             return
         drafts = [closing(ctx, g, status, reason=reason) for g, status, reason in todo]
-        drafts = [replace(d, dedupe_key=f"clôture:{d.data.goal}") for d in drafts]
+        # une clé par état du but : rouvert puis reclos, il a changé depuis (la réouverture repose l'ancre de
+        # l'envie, puis les séances avancent) ; la même clé serait dédoublonnée, rien ne s'écrirait, et le but
+        # resterait vivant pour toujours sans plus aucune séance possible
+        drafts = [replace(d, dedupe_key=f"clôture:{g.id}:{g.steps}:{g.silent}:{g.failures}:{g.desire_at}")
+                  for d, (g, _, _) in zip(drafts, todo, strict=True)]
         # un ancien projet se clôt même suspendu ; les autres, tant qu'ils sont actifs ou en attente
         live_now = tuple((g.id, c.LIVE_STATUSES if g.kind == c.PROJECT else (c.ACTIVE, c.WAITING))
                          for g, _, _ in todo)
