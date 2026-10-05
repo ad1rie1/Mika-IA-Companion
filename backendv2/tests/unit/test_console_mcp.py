@@ -56,7 +56,7 @@ def test_the_console_reads_views_searches_and_fiches(tmp_path):
 
 def test_the_console_endpoint_is_read_only():
     assert all(t.read_only for t in TOOLS)
-    assert {t.name for t in TOOLS} == {"lister_vues", "vue", "chercher", "fiche"}
+    assert {t.name for t in TOOLS} == {"lister_vues", "vue", "pourquoi", "chercher", "fiche"}
 
 
 async def _post(app, *, token: str = "", client: str = "127.0.0.1") -> tuple[int, Any]:
