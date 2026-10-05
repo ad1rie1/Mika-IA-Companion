@@ -39,7 +39,7 @@ from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.forms import Knob
-from mika.kernel.frame import Frame
+from mika.kernel.frame import CLOSED, Frame
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
@@ -239,6 +239,36 @@ def _noticed(s: WorldState, e: Any, cx: Any) -> WorldState:
         return s
     kept = tuple(r for r in s.unnoticed if r.object != d.object or r.seq > e.basis)
     return s if len(kept) == len(s.unnoticed) else replace(s, unnoticed=kept)
+
+
+@WORLD.reducer(w.JOINED)
+def _joined(s: WorldState, e: Any, cx: Any) -> WorldState:
+    """Une personne entre dans le monde (son client s'y connecte) : son corps apparaît, debout, là où elle entre.
+    Déjà là (une autre de ses connexions), rien ne bouge ; une pièce qui n'existe plus (une édition entre-temps),
+    elle n'entre pas, un lieu qui n'y est plus, elle entre dans la pièce."""
+    d = e.data
+    if d.actor in s.actors or w.handle_of(d.actor) is None or s.definition.room(d.room) is None:
+        return s
+    place = s.definition.place(d.place) if d.place else None
+    actors = dict(s.actors)
+    actors[d.actor] = w.ActorState(id=d.actor, room=d.room, since=e.at,
+                                   place=place.id if place is not None and place.room == d.room else None)
+    return _lived(s, actors, s.objects, e.seq, e.at)
+
+
+@WORLD.reducer(w.LEFT)
+def _left(s: WorldState, e: Any, cx: Any) -> WorldState:
+    """Une personne sort du monde : son corps disparaît ; ce qu'elle tenait reste là où elle était, ce qu'elle
+    faisait ou demandait s'arrête."""
+    gone = s.actors.get(e.data.actor)
+    if gone is None or w.handle_of(gone.id) is None:
+        return s
+    actors = {k: v for k, v in s.actors.items() if k != gone.id}
+    objects = {k: v.model_copy(update={"location": w.InRoom(room=gone.room, near=gone.place), "since": e.at})
+               if isinstance(v.location, w.Held) and v.location.actor == gone.id else v for k, v in s.objects.items()}
+    intents = {k: v for k, v in s.intents.items() if v.actor != gone.id}
+    requests = {k: v for k, v in s.requests.items() if gone.id not in (v.from_actor, v.to_actor)}
+    return _lived(s, actors, objects, e.seq, e.at, intents=FrozenDict(intents), requests=FrozenDict(requests))
 
 
 @WORLD.reducer(place_c.MOVED)
@@ -494,8 +524,9 @@ def _for_a_while(since: int, now: int) -> str:
     return next((f" {words[key]}" for span, key in FOR_A_WHILE if now - since >= span), "")
 
 
-def around(s: WorldState, now: int, p: WorldParams) -> str:
-    """Ce qu'elle sait de là où elle est : son corps, ce qu'elle tient, ce qui est à portée, où elle peut aller."""
+def around(s: WorldState, now: int, p: WorldParams, who: Mapping[str, str] | None = None) -> str:
+    """Ce qu'elle sait de là où elle est : son corps, qui est là avec elle, ce qu'elle tient, ce qui est à portée,
+    où elle peut aller. ``who`` : comment elle nomme les personnes du monde (``player:…``), « quelqu'un » sinon."""
     defn = s.definition
     me = s.actors[w.MIKA]
     lines: list[str] = []
@@ -516,6 +547,7 @@ def around(s: WorldState, now: int, p: WorldParams) -> str:
     if busy and me.activity is not None:
         lines.append(phrase("world.around.busy", activity=plan.affordance_label(defn, me.activity),
                             lasting=_for_a_while(me.activity.since, now)))
+    lines += _company(s, who or {})
     budget = p.shown_objects
     if me.holding:
         lines.append(phrase("world.around.holding", things=", ".join(_thing(s, me, o, now) for o in me.holding)))
@@ -540,6 +572,37 @@ def around(s: WorldState, now: int, p: WorldParams) -> str:
     return "\n".join(lines)
 
 
+def _company(s: WorldState, who: Mapping[str, str]) -> list[str]:
+    """Qui est là avec elle, et où — le lieu par son libellé, jamais une position : « Adrien est là, à la
+    fenêtre. » Un personnage du monde par son nom ; une personne comme ``who`` la nomme."""
+    out: list[str] = []
+    for aid in plan.present(s.actors, w.MIKA):
+        a = s.actors[aid]
+        d = s.definition.actor(aid)
+        name = d.label if d is not None else (who.get(aid) or phrase("world.gestures.someone"))
+        place = s.definition.place(a.place) if a.place else None
+        out.append(phrase("world.around.company_at", name=name, place=place.label) if place is not None
+                   else phrase("world.around.company", name=name))
+    return out
+
+
+def _who(s: WorldState, frame: Frame) -> dict[str, str]:
+    """Comment elle nomme les personnes autour d'elle devant qui l'écoute : par leur nom à la personne elle-même, et
+    devant qui peut entendre l'anodin sur autrui ; sinon « quelqu'un » — elle sait qu'il y a du monde, pas
+    forcément devant qui le nommer."""
+    audience = frame.audience or CLOSED
+    hearing = {frame.get(identity_c.PERSON(h)) for h in audience.persons}
+    out: dict[str, str] = {}
+    for aid in plan.present(s.actors, w.MIKA):
+        handle = w.handle_of(aid)
+        if handle is None:
+            continue
+        name = frame.get(identity_c.IDENTITY(handle)).name
+        if name and (audience.level >= Sensitivity.ANODYNE or frame.get(identity_c.PERSON(handle)) in hearing):
+            out[aid] = name
+    return out
+
+
 def _thing(s: WorldState, me: w.ActorState, oid: str, now: int) -> str:
     """Un objet tel qu'elle le lit : son nom, son identifiant et son état, puis ce qu'elle peut en faire (les
     identifiants qu'attend ``interact``)."""
@@ -555,7 +618,7 @@ def _thing(s: WorldState, me: w.ActorState, oid: str, now: int) -> str:
 def _around(s: WorldState, frame: Frame, enrich: Any) -> str | SectionBody | None:
     if not _awake(frame):
         return None  # elle dort, dans son lit : rien à dire à qui la réveille qu'il ne voie
-    text = around(s, frame.now, params(frame.env.params_of("world", frame.root)))
+    text = around(s, frame.now, params(frame.env.params_of("world", frame.root)), _who(s, frame))
     touched = _gestures_line(s, frame)
     if touched is None:
         return text
@@ -693,6 +756,32 @@ def _gestures_line(s: WorldState, frame: Frame) -> tuple[str, int] | None:
     if not parts:
         return None
     return phrase("world.gestures.line", gestures=" ; ".join(parts)), level
+
+
+# ── Quelqu'un entre ───────────────────────────────────────────────────────
+
+#: Quelqu'un entre dans sa pièce : remarqué juste assez pour lui rester en tête la première fois (le seuil d'une
+#: pensée de l'attention — les suivantes, habituées, à peine), sans émotion décrétée : ce qu'elle en ressent tient
+#: à qui c'est, et c'est l'affaire de ce qu'elle en pense.
+ARRIVAL_PERTINENCE = 0.6
+
+
+def arrival(s: WorldState, frame: Frame, actor: str, room: str) -> Draft[Any] | None:
+    """Ce qu'elle remarque quand une personne entre dans la pièce où elle est (ADR 0050 §7) : « Adrien vient
+    d'entrer dans ta chambre », un signal que l'attention dose et habitue — pas un message auquel répondre. Rien
+    si elle dort, si elle est ailleurs, ou pour qui n'est pas une personne."""
+    me = s.actors.get(w.MIKA)
+    handle = w.handle_of(actor)
+    where = s.definition.room(room)
+    if handle is None or me is None or where is None or me.room != room or not _awake(frame):
+        return None
+    who = frame.get(identity_c.IDENTITY(handle)).name or phrase("world.gestures.someone")
+    level = int(Sensitivity.ANODYNE)
+    return w.NOTICED.draft(
+        source="world", kind="arrival",
+        summary=Content.of(phrase("world.arrival", name=who, room=where.label), level=level),
+        pertinence=ARRIVAL_PERTINENCE, sensitivity=level, about=(frame.get(identity_c.PERSON(handle)),),
+        bundle="world", actor=actor)
 
 
 # ── Conclure sans moteur ──────────────────────────────────────────────────
