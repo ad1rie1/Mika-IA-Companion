@@ -20,6 +20,21 @@ const HEARTBEAT_INTERVAL_MS = 20000;
 const HEARTBEAT_TIMEOUT_MS = 50000;
 
 /**
+ * Âge au-delà duquel un ping resté sans réponse condamne le socket.
+ *
+ * Le chien de garde juge sur le ping, pas sur le silence. Un onglet caché
+ * depuis plus de 5 min ne voit plus ses minuteries réveillées qu'une fois par
+ * minute (Chrome), et un onglet que personne ne regarde ne reçoit plus rien
+ * de lui-même : son seul trafic entrant est le `pong`. Mesuré depuis la
+ * dernière trame, chaque tick y trouvait ~60 s de silence et coupait un
+ * socket sain, toutes les 2 à 3 minutes — et chaque réouverture redevenait
+ * une présence côté serveur. Au premier plan rien ne change : le premier ping
+ * sans réponse part au plus un intervalle après la dernière trame, donc
+ * 30 s sans pong valent les 50 s de silence ci-dessus, deux pongs manqués.
+ */
+const PING_TIMEOUT_MS = HEARTBEAT_TIMEOUT_MS - HEARTBEAT_INTERVAL_MS;
+
+/**
  * Taille sérialisée maximale d'un frame sortant.
  *
  * Au-delà, c'est le *transport* qui refuse : uvicorn ferme la connexion en
@@ -109,10 +124,16 @@ export class WebSocketClient {
    * Un envoi lourd occupe le tampon pendant des dizaines de secondes, et les
    * `ping` attendent derrière lui : le serveur ne peut pas répondre avant de
    * l'avoir reçu en entier. Des octets qui sortent prouvent que le socket vit
-   * aussi bien qu'une trame reçue (cf. `silentPastTimeout`).
+   * aussi bien qu'une trame reçue (cf. `lastDrain`).
    */
   private lastBuffered = 0;
   private lastDrainAt = 0;
+  /**
+   * Départ du plus ancien ping qu'aucune trame n'a suivi, `null` sinon. Le
+   * plus ancien et non le dernier : chaque tick repingue, et un horodatage
+   * réécrit à chaque ping n'aurait jamais plus d'un intervalle d'âge.
+   */
+  private pingSentAt: number | null = null;
   private reconnectTimer: number | null = null;
   /** Terminal refusal (4401) — retrying cannot change the answer. */
   private stopped = false;
@@ -228,6 +249,8 @@ export class WebSocketClient {
         // Le tampon relevé appartenait à l'ancien socket : celui-ci part vide.
         this.lastBuffered = 0;
         this.lastDrainAt = 0;
+        // Un ping laissé sur le socket précédent ne dit rien de celui-ci.
+        this.pingSentAt = null;
 
         // Handshake: tell the backend who we are so the greeting and every
         // subsequent turn can be attached to a stable person_id.
@@ -262,6 +285,7 @@ export class WebSocketClient {
       this.ws.onmessage = (event) => {
         // Any frame is proof of life, including one we fail to parse.
         this.lastFrameAt = Date.now();
+        this.pingSentAt = null;
         // Le `try` ne couvre que le décodage : une exception applicative n'a
         // rien d'un défaut de transport, et la journaliser comme tel désigne
         // le mauvais coupable. La diffusion, elle, ne lève pas (cf. `emit`).
@@ -388,8 +412,8 @@ export class WebSocketClient {
     this.stopHeartbeat();
     this.heartbeatTimer = window.setInterval(() => {
       if (this.ws?.readyState !== WebSocket.OPEN) return;
-      if (this.silentPastTimeout(this.ws)) {
-        console.warn("WebSocket silent past timeout — forcing reconnect");
+      if (this.pingUnansweredPastTimeout(this.ws)) {
+        console.warn("WebSocket ping unanswered past timeout — forcing reconnect");
         this.reconnectNow();
         return;
       }
@@ -398,29 +422,53 @@ export class WebSocketClient {
   }
 
   /**
-   * Le socket s'est-il tu au-delà du délai ?
+   * Relève le tampon et rend l'instant de la dernière preuve de vie qu'il a
+   * donnée.
    *
-   * Le silence ne se compte pas seulement depuis la dernière trame reçue.
    * Les messages d'un WebSocket partent dans l'ordre : derrière une photo de
    * plusieurs Mo sur une liaison montante lente, les `ping` attendent leur
-   * tour et aucun `pong` ne peut revenir avant que tout soit passé. Compté
-   * depuis `lastFrameAt`, ce silence-là coupait l'envoi en plein vol au bout
-   * d'une minute, puis le renvoyait depuis zéro sur le socket suivant, qui
-   * mourait de la même façon.
+   * tour et aucun `pong` ne peut revenir avant que tout soit passé. Jugé sans
+   * le tampon, ce silence-là coupait l'envoi en plein vol au bout d'une
+   * minute, puis le renvoyait depuis zéro sur le socket suivant, qui mourait
+   * de la même façon.
    *
    * Un tampon qui baisse depuis le relevé précédent prouve que des octets
    * sortent, donc que le socket vit. Le relevé où il atteint zéro compte
    * aussi : c'est là que le `ping` resté derrière est enfin parti, et le
    * délai de son `pong` se mesure à partir de là. Un socket mort, lui, ne
    * vide plus rien : son tampon stagne ou grossit des `ping` qu'on y ajoute,
-   * et le silence reprend son cours depuis la dernière preuve de vie.
+   * et le délai reprend son cours depuis la dernière preuve de vie.
+   */
+  private lastDrain(ws: WebSocket): number {
+    const buffered = ws.bufferedAmount;
+    if (buffered < this.lastBuffered) this.lastDrainAt = Date.now();
+    this.lastBuffered = buffered;
+    return this.lastDrainAt;
+  }
+
+  /**
+   * Le plus ancien ping sans réponse a-t-il dépassé son délai ?
+   *
+   * Le délai se compte depuis son départ, ou depuis le dernier relevé où le
+   * tampon s'est vidé s'il est plus récent : un ping coincé derrière un envoi
+   * lourd n'est vraiment parti qu'à ce moment-là (cf. `lastDrain`). Le tampon
+   * se relève à chaque tick, ping en attente ou non, pour que ce relevé reste
+   * à jour.
+   */
+  private pingUnansweredPastTimeout(ws: WebSocket): boolean {
+    const drainedAt = this.lastDrain(ws);
+    if (this.pingSentAt === null) return false;
+    return Date.now() - Math.max(this.pingSentAt, drainedAt) > PING_TIMEOUT_MS;
+  }
+
+  /**
+   * Le socket s'est-il tu au-delà du délai, depuis la dernière trame reçue ou
+   * le dernier tampon vidé ? Sert au réveil (`ensureAlive`), qui juge sur le
+   * silence quand un message attend son `ack`.
    */
   private silentPastTimeout(ws: WebSocket): boolean {
-    const now = Date.now();
-    const buffered = ws.bufferedAmount;
-    if (buffered < this.lastBuffered) this.lastDrainAt = now;
-    this.lastBuffered = buffered;
-    return now - Math.max(this.lastFrameAt, this.lastDrainAt) > HEARTBEAT_TIMEOUT_MS;
+    const drainedAt = this.lastDrain(ws);
+    return Date.now() - Math.max(this.lastFrameAt, drainedAt) > HEARTBEAT_TIMEOUT_MS;
   }
 
   private stopHeartbeat() {
@@ -431,7 +479,10 @@ export class WebSocketClient {
   }
 
   private ping() {
-    this.sendNow({ type: "ping", t: Date.now() });
+    const now = Date.now();
+    if (this.sendNow({ type: "ping", t: now }) && this.pingSentAt === null) {
+      this.pingSentAt = now;
+    }
   }
 
   /** Returns false when the frame was queued instead of sent. */

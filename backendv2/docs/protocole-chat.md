@@ -80,10 +80,14 @@ Fermetures :
 | autre | réseau | se reconnecter (attente 1 s × 1,5, plafonnée à 30 s, remise à zéro à l'ouverture) |
 
 Une connexion silencieuse peut être morte sans le dire (un portable en veille, un mandataire) : le client envoie
-`ping` toutes les 20 s et se reconnecte après 50 s sans **aucune** trame reçue. Un `pong` ne double pas une trame
-en cours de montée (un `chat` et ses fichiers, sur des données mobiles) : tant qu'il reste des octets à envoyer, ce
-silence ne prouve rien, et l'application Android ne le compte qu'une fois sa montée achevée. Le serveur laisse de même
-environ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
+`ping` toutes les 20 s et se reconnecte quand ses pings restent sans réponse — deux pongs manqués, soit 50 s sans
+**aucune** trame reçue au premier plan. Le client web juge sur le ping et non sur le silence (un ping parti depuis
+plus de 30 s sans qu'aucune trame l'ait suivi) : un onglet caché, que le navigateur ne réveille plus qu'une fois par
+minute et à qui rien n'arrive de lui-même, reçoit son `pong` et n'est pas coupé pour son seul silence. Un `pong` ne
+double pas une trame en cours de montée (un `chat` et ses fichiers, sur des données mobiles) : tant qu'il reste des
+octets à envoyer, ce silence ne prouve rien — le client web compte le délai du ping depuis le moment où son tampon
+s'est vidé, et l'application Android ne le compte qu'une fois sa montée achevée. Le serveur laisse de même environ
+cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
 
 ## 3. Ce que le client envoie
 
