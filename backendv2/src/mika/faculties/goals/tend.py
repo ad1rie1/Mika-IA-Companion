@@ -113,6 +113,9 @@ _TALK_WORD = re.compile(r"[\wÀ-ÿ']+")
 #: d'un opérateur) — jamais un outil qui envoie (un brouillon de mail, les outils d'une app qui appellent ses
 #: domaines)
 READ_ONLY_SOURCES = frozenset({"rss", "camera", "forge"})
+#: ce qui arrive à son corps dans sa chambre (un geste qui n'a pas abouti, ``world``) se ressent et se dit, ça ne
+#: s'explore pas : il n'y a rien à lire ailleurs sur une fenêtre qui ne s'est pas ouverte
+UNEXPLORED_SOURCES = frozenset({"world"})
 #: où elle peut aller chercher du neuf sur un de ses centres d'intérêt
 INTEREST_SOURCES = ("rss",)
 ORIGINS = {attention_c.EXCHANGE: c.FROM_EXCHANGE, attention_c.REVISION: c.FROM_REVISION,
@@ -210,6 +213,7 @@ class Seed:
         busy = _live_sources(s, frame.now)
         return [t for t in frame.get(attention_c.THOUGHTS)
                 if t.origin in SEEDING_ORIGINS and t.emotion in SEEDING_EMOTIONS and t.intensity >= p.seed_thought_from
+                and not (t.origin == attention_c.SIGNAL and t.bundle in UNEXPLORED_SOURCES)
                 and not {f"thought:{t.id}", subject_key(f"thought:{t.id}", t.about)} & busy
                 and not _recently_closed(s, subject_key(f"thought:{t.id}", t.about), frame.now, p)]
 
