@@ -148,13 +148,36 @@ class Poll:
         port.ack([m.ref for m in fetched])
 
 
+def _owner_addresses(frame: Frame) -> list[str]:
+    """Où annoncer : à chacune de ses propriétaires, l'adresse où elle est ; si aucune n'est là, celle où l'on
+    peut lui écrire absente (sa messagerie : l'application de son téléphone). Une adresse par personne (deux
+    écrans ne font pas deux annonces), et seulement une adresse qui parle en propriétaire (``SPEAKS_AS_OWNER``,
+    comme le contenu qu'elle verra) : jamais une adresse reliée par simple recoupement. Une propriétaire présente
+    l'entend : on ne fait pas sonner le téléphone d'une autre."""
+    here = frame.get(presence_c.PRESENT)
+    present: list[str] = []
+    away: list[str] = []
+    for person in frame.get(identity_c.OWNERS):
+        handles = frame.get(identity_c.HANDLES(person)) or (person,)
+        found = [h for h in here if h in handles and frame.get(identity_c.SPEAKS_AS_OWNER(h))]
+        if found:
+            present.append(found[0])
+            continue
+        found = [h for h in frame.get(identity_c.REACHABLE(person)) if frame.get(identity_c.SPEAKS_AS_OWNER(h))]
+        if found:
+            away.append(found[0])
+    return present or away
+
+
 @EMAIL.propose(kinds=[Kind.INITIATIVE], reasons={c.MENTION: (0.0, 8.0)},
-               reads=[presence_c.PRESENT, identity_c.SPEAKS_AS_OWNER])
+               reads=[presence_c.PRESENT, identity_c.OWNERS, identity_c.HANDLES, identity_c.REACHABLE,
+                      identity_c.SPEAKS_AS_OWNER])
 def _mention(s: EmailState, frame: Frame) -> list[Candidate]:
-    """Un mail important arrivé depuis peu, pas encore dit : elle a envie de le dire à sa propriétaire, si elle
-    est là. Les droits tiennent à l'adresse qui parle (``SPEAKS_AS_OWNER``, comme le contenu qu'elle verra) : une
-    adresse reliée à sa propriétaire par simple recoupement ne reçoit pas l'annonce. L'initiative porte les mails
-    qu'elle annonce : ce sont eux, et eux seuls, qui seront signalés une fois dits."""
+    """Un mail important arrivé depuis peu, pas encore dit : elle a envie de le dire à sa propriétaire, là où elle
+    est, sinon sur sa messagerie (prévenir, comme un rappel échu, va où la personne peut le lire). Les droits
+    tiennent à l'adresse qui parle (``SPEAKS_AS_OWNER``, comme le contenu qu'elle verra) : une adresse reliée à sa
+    propriétaire par simple recoupement ne reçoit pas l'annonce. L'initiative porte les mails qu'elle annonce : ce
+    sont eux, et eux seuls, qui seront signalés une fois dits."""
     p = params_of(frame)
     fresh = announceable(s, frame.now, p)
     if not fresh:
@@ -164,10 +187,6 @@ def _mention(s: EmailState, frame: Frame) -> list[Candidate]:
              f"vien{'nent' if several else 't'} d'arriver dans ta boîte (plus haut, « {MENTION_TITLE} ») : "
              "dis-le simplement, sans le lire en entier.")
     args = FrozenDict({"brief:email": brief, MENTION_ARG: "\n".join(fresh)})
-    out = []
-    for handle in frame.get(presence_c.PRESENT):
-        if not frame.get(identity_c.SPEAKS_AS_OWNER(handle)):
-            continue
-        out.append(Candidate(Kind.INITIATIVE, handle, c.MENTION, p.mention_evidence,
-                             resources=frozenset({floor(handle)}), args=args))
-    return out
+    return [Candidate(Kind.INITIATIVE, handle, c.MENTION, p.mention_evidence,
+                      resources=frozenset({floor(handle)}), args=args)
+            for handle in _owner_addresses(frame)]
