@@ -96,7 +96,7 @@ class InspectorDeps:
     settings_tabs: Sequence[SettingsTab] = field(default_factory=tuple)
     #: les paramètres internes des facultés (``runtime/params.Parameters``)
     parameters: Any = None
-    #: les sauvegardes : ``fn() -> {sauvegarde, verification, archives}`` (``app/backup.overview``)
+    #: les sauvegardes : ``fn() -> {sauvegarde, tentative, verification, archives}`` (``app/backup.overview``)
     backups: Callable[[], Mapping[str, Any]] | None = None
     #: Configuration › Comportement : (famille, facultés) et le nom lisible de chacune
     param_families: Sequence[tuple[str, Sequence[str]]] = field(default_factory=tuple)
