@@ -43,11 +43,12 @@ import {
   readCache,
   restoredStatus,
   stripProsody,
+  timeMarkers,
   withAttachments,
   writeCache,
   sentFiles,
 } from "./chatSync";
-import type { MessageStatus, StoredMessage } from "./chatSync";
+import type { MessageStatus, StoredMessage, TimeMarker } from "./chatSync";
 
 // Re-exported: it was defined here before the synchronisation rules were
 // pulled out, and callers should not have to know which file they moved to.
@@ -963,7 +964,12 @@ export class ChatOverlay {
       this.insertBeforeTyping(note);
     }
 
+    // Le jour qui commence, l'heure d'une reprise : recalculés à chaque rendu
+    // (« Aujourd'hui » devient « Hier » après minuit), jamais stockés.
+    const markers = timeMarkers(this.history, Date.now());
     this.history.forEach((msg, index) => {
+      const marker = markers[index];
+      if (marker) this.insertBeforeTyping(this.buildMarker(marker));
       this.insertBeforeTyping(this.buildBubble(msg, opts.animate));
       // Ce que le serveur a écarté de cet envoi. Sous la bulle plutôt que
       // dans son infobulle : l'envoi a été *accepté*, donc rien dans son
@@ -996,6 +1002,14 @@ export class ChatOverlay {
       note.append(" ", link);
     }
     return note;
+  }
+
+  /** Un repère de temps entre deux bulles : une ligne discrète, pas une note. */
+  private buildMarker(marker: TimeMarker): HTMLElement {
+    const el = document.createElement("div");
+    el.className = `chat-note chat-marker ${marker.kind}`;
+    el.textContent = marker.label;
+    return el;
   }
 
   private insertBeforeTyping(el: HTMLElement) {
