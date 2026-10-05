@@ -282,6 +282,9 @@ async function init() {
   // Approving a project action needs an operator account (the server answers
   // 403 otherwise). With auth disabled server-side nothing is gated.
   innerLifePanel.setCanApprove(!auth.authenticated || auth.operator === true);
+  // Une opératrice lit sous chaque parole où elle s'explique (la console, qui
+  // garde sa propre porte) ; un compte ordinaire ne voit rien de plus.
+  chatOverlay.setOperator(auth.operator === true);
   // The identity bar lets an anonymous visitor pick a name. Authenticated
   // users have one already, and letting them edit it here would suggest they
   // can change who Mika thinks they are — which is exactly what the session
