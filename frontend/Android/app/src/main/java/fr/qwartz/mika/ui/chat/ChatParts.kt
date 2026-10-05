@@ -83,6 +83,32 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.ZoneId
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import fr.qwartz.mika.avatar3d.Utterance
+import fr.qwartz.mika.ui.avatar.rememberReducedMotion
+import kotlin.math.PI
+import kotlin.math.sin
 
 /** Ce que le fil sait faire ; des défauts muets pour les tests d'écran. */
 class ChatActions(
@@ -199,9 +225,25 @@ internal fun NotificationPrompt(onAllow: () -> Unit, onLater: () -> Unit) {
 }
 
 /**
+ * Ce que le fil sait de Mika quand elle se tient derrière lui : où commence son visage, ce qu'elle est en train de
+ * dire, et à qui signaler qu'on relit l'historique (elle s'efface alors).
+ */
+class StageLink(
+    /** Depuis le haut de l'écran, la place que demande son visage : les bulles s'effacent avant. */
+    val faceClearance: Dp,
+    /** Ce qu'elle dit (la 3D seulement : un portrait n'a pas de bouche qui bouge). */
+    val track: SpeechTrack?,
+    val onReadingHistory: (Boolean) -> Unit,
+)
+
+/**
  * Le fil, du plus ancien (en haut) au plus récent (en bas). Une liste à l'envers : l'arrivée d'un
  * message reste collée en bas ; remontée dans l'historique, une puce « ↓ N nouveaux » compte ce qui
  * arrive et y ramène.
+ *
+ * Avec Mika derrière ([stage]), le fil et elle se partagent l'écran : au repos, les derniers messages tiennent dans
+ * une bande en bas et s'effacent en montant, avant son visage ; remonter dans l'historique rend tout l'écran au texte,
+ * et elle se met en retrait.
  */
 @Composable
 internal fun ChatConversation(
@@ -213,6 +255,7 @@ internal fun ChatConversation(
     modifier: Modifier = Modifier,
     /** Le fil passe sur son portrait : ce qui n'est pas une bulle prend un fond, pour rester lisible. */
     overPortrait: Boolean = false,
+    stage: StageLink? = null,
 ) {
     if (items.isEmpty()) {
         // Sur son portrait, l'invitation se met sous elle plutôt qu'en travers.
@@ -228,8 +271,17 @@ internal fun ChatConversation(
     }
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
     val reversed = remember(items) { items.asReversed() }
     val atBottom by remember { derivedStateOf { listState.firstVisibleItemIndex <= 1 } }
+    // Relire l'historique : quitter vraiment le bas du fil, pas l'effleurer.
+    val readingHistory by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex > 0 ||
+                listState.firstVisibleItemScrollOffset > with(density) { HISTORY_THRESHOLD.toPx() }
+        }
+    }
+    LaunchedEffect(readingHistory, stage) { stage?.onReadingHistory?.invoke(readingHistory) }
     var unseen by remember { mutableIntStateOf(0) }
     val newest = items.lastOrNull { it is ChatItem.Bubble } as ChatItem.Bubble?
     LaunchedEffect(newest?.key) {
@@ -242,33 +294,52 @@ internal fun ChatConversation(
     }
     LaunchedEffect(atBottom) { if (atBottom) unseen = 0 }
 
-    Box(modifier.fillMaxWidth()) {
+    var ownTop by remember { mutableFloatStateOf(Float.NaN) }
+    BoxWithConstraints(modifier.fillMaxWidth().onGloballyPositioned { ownTop = it.positionInRoot().y }) {
+        // La bande du fil quand elle est là : sous son visage, au moins MIN_BAND, environ deux cinquièmes de la place.
+        val inset = if (stage == null || ownTop.isNaN()) {
+            0.dp
+        } else {
+            val top = with(density) { ownTop.toDp() }
+            val bottom = top + maxHeight
+            val band = maxOf(MIN_BAND, maxHeight * BAND_SHARE)
+            val boundary = minOf(maxOf(stage.faceClearance, bottom - band), bottom - MIN_BAND)
+            (boundary - FADE_HEIGHT - top).coerceAtLeast(0.dp)
+        }
+        val topInset by animateDpAsState(
+            if (readingHistory) 0.dp else inset,
+            spring(stiffness = Spring.StiffnessMediumLow),
+            label = "band",
+        )
         LazyColumn(
             state = listState,
             reverseLayout = true,
             verticalArrangement = Arrangement.spacedBy(4.dp),
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = if (stage != null) FADE_HEIGHT else 8.dp, bottom = 8.dp),
             // Toute la hauteur : un fil court part du bas, comme dans une messagerie (sinon il se colle en
             // haut — sur son visage quand elle est en fond).
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = topInset)
+                .then(if (stage != null) Modifier.fadeTop(FADE_HEIGHT) else Modifier),
         ) {
             items(reversed, key = { it.key }) { item ->
-                when (item) {
-                    is ChatItem.DateSeparator -> Centered(item.label, overPortrait, heading = true)
-                    ChatItem.TruncatedNote -> Centered(stringResource(R.string.chat_truncated), overPortrait)
-                    is ChatItem.Bubble -> Bubble(item, zone, busyFileId, actions)
-                    is ChatItem.Note -> Backed(overPortrait) { Note(item, operator, actions) }
-                    is ChatItem.Thought -> Backed(overPortrait) { Thought(item.message) }
-                    is ChatItem.SystemNote -> Centered(item.text, overPortrait)
-                    ChatItem.Typing -> Box(Modifier.padding(vertical = 4.dp)) {
-                        Backed(overPortrait) {
-                            Text(
-                                stringResource(R.string.chat_typing),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(8.dp).semantics { liveRegion = LiveRegionMode.Polite },
-                            )
-                        }
+                Box(Modifier.animateItem(fadeInSpec = tween(220), fadeOutSpec = tween(160))) {
+                    when (item) {
+                        is ChatItem.DateSeparator -> Centered(item.label, overPortrait, heading = true)
+                        ChatItem.TruncatedNote -> Centered(stringResource(R.string.chat_truncated), overPortrait)
+                        is ChatItem.Bubble -> Bubble(
+                            item,
+                            zone,
+                            busyFileId,
+                            actions,
+                            utterance = stage?.track?.of(item.key),
+                            onSkip = { stage?.track?.skip(item.key) },
+                        )
+                        is ChatItem.Note -> Backed(overPortrait) { Note(item, operator, actions) }
+                        is ChatItem.Thought -> Backed(overPortrait) { Thought(item.message) }
+                        is ChatItem.SystemNote -> Centered(item.text, overPortrait)
+                        ChatItem.Typing -> TypingBubble()
                     }
                 }
             }
@@ -286,6 +357,75 @@ internal fun ChatConversation(
                     modifier = Modifier.padding(horizontal = 12.dp),
                 )
             }
+        }
+    }
+}
+
+/** Au-delà de ce défilement depuis le bas, on relit l'historique. */
+private val HISTORY_THRESHOLD = 24.dp
+
+/** La bande du fil, quand elle est là : jamais moins, quoi que demande son visage. */
+private val MIN_BAND = 168.dp
+
+/** …et sinon cette part de la hauteur du fil : assez pour quelques bulles, assez peu pour la voir jusqu'aux mains. */
+private const val BAND_SHARE = 0.42f
+
+/** Le haut de la bande, où les bulles s'effacent en montant vers elle. */
+private val FADE_HEIGHT = 40.dp
+
+/** Le haut du contenu s'efface sur `height` : une bulle qui monte vers son visage se dissout au lieu d'être coupée. */
+private fun Modifier.fadeTop(height: Dp): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        drawRect(
+            Brush.verticalGradient(listOf(Color.Transparent, Color.Black), startY = 0f, endY = height.toPx()),
+            blendMode = BlendMode.DstIn,
+        )
+    }
+
+/**
+ * « Mika écrit… » : une bulle à elle, aux trois points qui respirent, là où sa réponse va s'écrire. Le lecteur
+ * d'écran entend la phrase, une fois.
+ */
+@Composable
+private fun TypingBubble() {
+    val label = stringResource(R.string.chat_typing)
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Surface(
+            shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp),
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            modifier = Modifier.semantics {
+                contentDescription = label
+                liveRegion = LiveRegionMode.Polite
+            },
+        ) {
+            TypingDots(MaterialTheme.colorScheme.onSecondaryContainer, Modifier.padding(horizontal = 14.dp, vertical = 12.dp))
+        }
+    }
+}
+
+/** Trois points qui montent et descendent l'un après l'autre (immobiles si l'on a coupé les animations). */
+@Composable
+private fun TypingDots(color: Color, modifier: Modifier = Modifier) {
+    val motion = !rememberReducedMotion()
+    val phase = if (motion) {
+        rememberInfiniteTransition(label = "dots").animateFloat(
+            0f, 1f, infiniteRepeatable(tween(1_100, easing = LinearEasing)), label = "dotsPhase",
+        )
+    } else {
+        remember { mutableFloatStateOf(0f) }
+    }
+    Canvas(modifier.size(width = 34.dp, height = 10.dp).clearAndSetSemantics { }) {
+        val r = size.height * 0.32f
+        for (i in 0 until 3) {
+            val t = ((phase.value - i * 0.18f) % 1f + 1f) % 1f
+            val lift = if (t < 0.5f) sin(t * 2 * PI).toFloat() else 0f
+            drawCircle(
+                color.copy(alpha = 0.45f + 0.45f * lift),
+                radius = r,
+                center = Offset(r + i * (size.width - 2 * r) / 2, size.height / 2 - lift * size.height * 0.3f),
+            )
         }
     }
 }
@@ -359,8 +499,17 @@ private fun Thought(m: StoredMessage) {
 }
 
 @Composable
-private fun Bubble(item: ChatItem.Bubble, zone: ZoneId, busyFileId: String?, actions: ChatActions) {
+private fun Bubble(
+    item: ChatItem.Bubble,
+    zone: ZoneId,
+    busyFileId: String?,
+    actions: ChatActions,
+    /** Sa réplique, si elle est en train de la dire : le texte s'écrit à son rythme. */
+    utterance: Utterance? = null,
+    onSkip: () -> Unit = {},
+) {
     val m = item.message
+    val reveal = utterance?.let { rememberReveal(it) }
     val mine = m.sender == Sender.USER
     val container = if (mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer
     val content = if (mine) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer
@@ -388,9 +537,16 @@ private fun Bubble(item: ChatItem.Bubble, zone: ZoneId, busyFileId: String?, act
                     }
                     // Un nœud pour le lecteur d'écran : qui, quand, l'état, le texte ; copier et réessayer
                     // en actions. Les pièces jointes, au-dessus, restent chacune atteignable.
+                    val revealing = reveal != null
                     Column(
                         Modifier
-                            .pointerInput(copyText) { detectTapGestures(onLongPress = { actions.copy(copyText) }) }
+                            .pointerInput(copyText, revealing) {
+                                // Toucher une réponse qui s'écrit : tout s'affiche, elle se tait.
+                                detectTapGestures(
+                                    onTap = if (revealing) ({ _ -> onSkip() }) else null,
+                                    onLongPress = { actions.copy(copyText) },
+                                )
+                            }
                             .clearAndSetSemantics {
                                 contentDescription = description
                                 customActions = buildList {
@@ -399,7 +555,13 @@ private fun Bubble(item: ChatItem.Bubble, zone: ZoneId, busyFileId: String?, act
                                 }
                             },
                     ) {
-                        if (body.isNotEmpty()) InlineMarkupText(body, content)
+                        if (body.isNotEmpty()) {
+                            Box {
+                                InlineMarkupText(body, content, reveal = reveal)
+                                // Une réplique qui attend son tour derrière la précédente : les trois points, à sa place.
+                                if (reveal != null && reveal <= 0f) TypingDots(content, Modifier.padding(top = 6.dp))
+                            }
+                        }
                         Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
                             Text(
                                 BubbleContent.time(m.ts, zone),
@@ -421,6 +583,28 @@ private fun Bubble(item: ChatItem.Bubble, zone: ZoneId, busyFileId: String?, act
             }
         }
     }
+}
+
+/**
+ * Combien de caractères de sa réplique sont dits, image par image, sur l'horloge qu'elle partage avec la bouche de
+ * l'avatar ; null une fois tout dit (la bulle redevient un texte ordinaire). Sans animations : tout, tout de suite.
+ */
+@Composable
+private fun rememberReveal(u: Utterance): Float? {
+    val motion = !rememberReducedMotion()
+    val initial = System.nanoTime().let { now -> if (motion && !u.finished(now)) u.revealAt(now) else null }
+    val reveal by produceState(initial, u, motion) {
+        if (initial == null) return@produceState
+        while (true) {
+            val now = withFrameNanos { it }
+            if (u.finished(now)) {
+                value = null
+                break
+            }
+            value = u.revealAt(now)
+        }
+    }
+    return reveal
 }
 
 @Composable

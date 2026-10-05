@@ -7,6 +7,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
 import kotlin.math.acos
+import kotlin.math.asin
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.hypot
@@ -483,9 +484,11 @@ class BodyLayersTest {
         sleepPhase: String = BodyContext.AWAKE,
         reachable: Boolean = true,
         walking: Boolean = false,
+        reading: Boolean = false,
     ) = AttentionInput(
         speaking = speaking, replyPending = replyPending, listening = listening, persona = persona, emotion = emotion,
         intensity = 0.5f, sleepPhase = sleepPhase, reachable = reachable, viewerAngle = 0.3f, walking = walking,
+        reading = reading,
     )
 
     /** Une source constante : chaque tirage tombe à `value` de son intervalle. */
@@ -836,6 +839,400 @@ class BodyLayersTest {
         val layers = BodyLayers(rig, constant(0.99f))
         live(layers, rig, ctx, 0.5f)
         assertEquals(AttentionState.CONTACT, layers.attentionState)
+    }
+
+    // ── Les temps forts de la parole ────────────────────────────────────
+
+    /** Combien la tête plonge (rad, > 0 vers le bas), par la géométrie : l'avant de la tête sous l'horizontale. */
+    private fun dip(p: Pose): Float = -asin(forward(p, "head").y.coerceIn(-1f, 1f))
+
+    /**
+     * Une réplique en cours sur la couche de parole seule — et un témoin identique dont le curseur ne bouge jamais :
+     * même mouvement continu de parole, aucun temps fort. La différence isole les hochements.
+     */
+    private inner class Talk(text: String, random: () -> Float = constant(0.3f), setup: (BodyContext) -> Unit = {}) {
+        val rig = newRig()
+        val ctx = BodyContext().also(setup)
+        val overlay = SpeechBodyOverlay(random).also { it.begin(text) }
+        private val witnessCtx = BodyContext().also(setup)
+        private val witness = SpeechBodyOverlay(random).also { it.begin(text) }
+        var pose: Pose = rest(rig)
+        var witnessPose: Pose = rest(rig)
+
+        /** Joue `seconds` à curseur fixe ; rend la plus forte plongée due aux temps forts. */
+        fun run(seconds: Float, cursor: Int = overlay.cursor): Float = advance(cursor, cursor, seconds)
+
+        /** Le curseur va de `from` à `to` à `cps` caractères par seconde, puis reste `hold` s ; la plus forte plongée. */
+        fun advance(from: Int, to: Int, hold: Float = 0f, cps: Float = 20f): Float {
+            var max = Float.NEGATIVE_INFINITY
+            val frames = ((to - from) / cps * 60).toInt() + (hold * 60).toInt()
+            repeat(frames) { i ->
+                overlay.cursor = minOf(to, from + (i * cps / 60).toInt())
+                pose = rest(rig)
+                overlay.update(dt, ctx, rig, pose)
+                witnessPose = rest(rig)
+                witness.update(dt, witnessCtx, rig, witnessPose)
+                max = maxOf(max, dip(pose) - dip(witnessPose))
+            }
+            return max
+        }
+    }
+
+    @Test fun `elle hoche quand le curseur atteint le mot appuyé, pas avant`() {
+        val text = "Je pense que tu as raison."
+        val t = Talk(text)
+        assertTrue(t.run(0.4f, 2) < 0.01f)
+        val nod = t.run(0.4f, text.indexOf("raison"))
+        assertTrue("$nod", nod > 0.025f)
+        // Un hochement, pas un geste : quelques degrés.
+        assertTrue("$nod", nod < 0.08f)
+    }
+
+    @Test fun `le hochement baisse le visage`() {
+        val t = Talk("Vraiment.")
+        t.overlay.cursor = 0
+        var lowest = 0f
+        repeat(20) {
+            val p = rest(t.rig)
+            t.overlay.update(dt, t.ctx, t.rig, p)
+            lowest = minOf(lowest, forward(p, "head").y)
+        }
+        assertTrue("$lowest", lowest < -0.02f)
+    }
+
+    @Test fun `une question lève le menton, penche la tête et tient les sourcils levés`() {
+        val text = "Tu viens ce soir ?"
+        val t = Talk(text)
+        t.run(0.6f, text.indexOf("soir"))
+        assertTrue("menton levé", dip(t.pose) - dip(t.witnessPose) < -0.015f)
+        val tilt = t.pose["head"]!!.rotate(CharacterFrame.UP).x - t.witnessPose["head"]!!.rotate(CharacterFrame.UP).x
+        assertTrue("penchée : $tilt", abs(tilt) > 0.02f)
+        assertTrue(t.ctx.speechQuestion > 0.5f)
+        // La tenue passée, les sourcils retombent.
+        t.run(3f)
+        assertTrue(t.ctx.speechQuestion < 0.1f)
+    }
+
+    @Test fun `une emphase fait sauter les sourcils, et l'éclair retombe`() {
+        val text = "C'est vraiment bien."
+        val t = Talk(text)
+        t.run(0.05f, text.indexOf("vraiment"))
+        assertTrue("${t.ctx.speechEmphasis}", t.ctx.speechEmphasis > 0.5f)
+        t.run(2f)
+        assertTrue("${t.ctx.speechEmphasis}", t.ctx.speechEmphasis < 0.1f)
+    }
+
+    private val longReply = "Alors voilà, hier soir je suis allée voir le concert dont je te parlais, et c'était vraiment magnifique."
+
+    @Test fun `lue au fil de l'affichage, une longue réplique hoche plusieurs fois`() {
+        val t = Talk(longReply)
+        var nods = 0
+        var wasDown = false
+        repeat(longReply.length) { c ->
+            val d = t.advance(c, c + 1, cps = 20f)
+            if (d > 0.02f && !wasDown) nods++
+            wasDown = d > 0.01f
+        }
+        assertTrue("$nods", nods >= 3)
+    }
+
+    @Test fun `tout afficher d'un coup ne déclenche pas la rafale des temps forts sautés`() {
+        // Au-delà de la fin (un recalage), comme sur le web.
+        assertTrue(Talk(longReply).run(0.5f, longReply.length + 15) < 0.005f)
+        // Jusqu'à la fin pile, dès la première image : rien non plus, ni hochement ni sourcils ni souffle.
+        val t = Talk(longReply)
+        assertTrue(t.run(0.5f, longReply.length) < 0.005f)
+        assertEquals(0f, t.ctx.speechEmphasis)
+        assertNull(t.ctx.breathRequest)
+        // Au milieu de la lecture : le début a hoché, le bond vers la fin n'ajoute rien.
+        val u = Talk(longReply)
+        u.advance(0, 12, hold = 1.5f)
+        assertTrue(u.run(0.6f, longReply.length) < 0.005f)
+    }
+
+    @Test fun `un retour en arrière du curseur réarme les temps forts`() {
+        val text = "Je pense que tu as raison."
+        val t = Talk(text)
+        val at = text.indexOf("raison")
+        assertTrue(t.run(0.5f, at) > 0.025f)
+        t.run(1.5f, 0)
+        assertTrue("le même mot hoche de nouveau", t.run(0.5f, at) > 0.025f)
+    }
+
+    @Test fun `sans réplique ouverte ou endormie, la couche ne touche à rien - un murmure bouge à peine`() {
+        val rig = newRig()
+        fun still(overlay: SpeechBodyOverlay, ctx: BodyContext) {
+            repeat(30) {
+                val p = rest(rig)
+                overlay.update(dt, ctx, rig, p)
+                for (bone in p.bones) assertEquals(bone, rest(rig)[bone], p[bone])
+            }
+        }
+        still(SpeechBodyOverlay().also { it.cursor = 0 }, BodyContext())
+        still(SpeechBodyOverlay().also { it.begin("Vraiment."); it.end(); it.cursor = 0 }, BodyContext())
+        still(SpeechBodyOverlay().also { it.begin("Vraiment."); it.cursor = 0 }, BodyContext(sleepPhase = BodyContext.REM))
+
+        val loud = Talk("Vraiment.").run(0.4f, 0)
+        val inner = Talk("Vraiment.") { it.persona = AttentionDirector.INNER_PERSONA }.run(0.4f, 0)
+        assertTrue("$inner vs $loud", inner < loud * 0.5f)
+    }
+
+    @Test fun `une prise d'air au début de la réplique et à chaque pause de proposition`() {
+        val text = "Bon, on y va."
+        val ctx = BodyContext()
+        val rig = newRig()
+        val overlay = SpeechBodyOverlay(constant(0.3f))
+        overlay.begin(text)
+        overlay.cursor = 0
+        overlay.update(dt, ctx, rig, rest(rig))
+        assertEquals(BreathRequest.CATCH, ctx.breathRequest)
+        ctx.breathRequest = null
+        overlay.cursor = text.indexOf(",")
+        overlay.update(dt, ctx, rig, rest(rig))
+        assertEquals(BreathRequest.CATCH, ctx.breathRequest)
+        // On ne commence pas à parler les poumons vides, même sur un premier temps fort qui n'en demande pas.
+        val first = BodyContext()
+        SpeechBodyOverlay(constant(0.3f)).also { it.begin("Vraiment."); it.cursor = 0 }.update(dt, first, rig, rest(rig))
+        assertEquals(BreathRequest.CATCH, first.breathRequest)
+    }
+
+    @Test fun `un SIGH atteint demande un soupir - pas dans un murmure`() {
+        val rig = newRig()
+        val ctx = BodyContext()
+        val overlay = SpeechBodyOverlay(constant(0.3f)).also { it.begin("[SIGH] Bon. On y va.") }
+        overlay.cursor = 0
+        overlay.update(dt, ctx, rig, rest(rig))
+        assertEquals(BreathRequest.SIGH, ctx.breathRequest)
+        // La prise d'air du premier mot n'écrase pas le soupir.
+        overlay.cursor = 7
+        overlay.update(dt, ctx, rig, rest(rig))
+        assertEquals(BreathRequest.SIGH, ctx.breathRequest)
+
+        val murmur = BodyContext(persona = AttentionDirector.INNER_PERSONA)
+        SpeechBodyOverlay().also { it.begin("[SIGH] Bon."); it.cursor = 0 }.update(dt, murmur, rig, rest(rig))
+        assertNull(murmur.breathRequest)
+    }
+
+    @Test fun `le hochement « j'ai lu » plonge, lève les sourcils, puis le ressort revient au repos`() {
+        val rig = newRig()
+        val ctx = BodyContext()
+        val overlay = SpeechBodyOverlay()
+        overlay.acknowledge()
+        var deepest = 0f
+        var brows = 0f
+        repeat(30) {
+            val p = rest(rig)
+            overlay.update(dt, ctx, rig, p)
+            deepest = maxOf(deepest, dip(p))
+            brows = maxOf(brows, ctx.speechEmphasis)
+        }
+        assertTrue("$deepest", deepest > 0.02f)
+        assertTrue("$brows", brows > 0.3f)
+        val p = runOverlay(rig, 120) { overlay.update(dt, ctx, rig, it) }
+        assertTrue(angleOf(p["neck"]!!) < 1e-3f)
+        assertTrue(angleOf(p["neck"]!!.inverse() * p["head"]!!) < 1e-3f)
+        assertTrue(ctx.speechEmphasis < 0.05f)
+    }
+
+    @Test fun `après la réplique, les ressorts se posent`() {
+        val t = Talk("Je pense que tu as raison.")
+        assertTrue(t.run(0.4f, "Je pense que tu as ".length) > 0.025f)
+        t.overlay.end()
+        val p = runOverlay(t.rig, 180) { t.overlay.update(dt, t.ctx, t.rig, it) }
+        assertTrue(angleOf(p["neck"]!!) < 2e-3f)
+        assertTrue(angleOf(p["neck"]!!.inverse() * p["head"]!!) < 2e-3f)
+    }
+
+    @Test fun `endormie, « j'ai lu » ne hoche pas - ni sur le moment, ni au réveil`() {
+        val rig = newRig()
+        val ctx = BodyContext(sleepPhase = BodyContext.DEEP_SLEEP)
+        val overlay = SpeechBodyOverlay()
+        overlay.acknowledge()
+        overlay.update(dt, ctx, rig, rest(rig))
+        ctx.sleepPhase = BodyContext.AWAKE
+        val p = runOverlay(rig, 30) { overlay.update(dt, ctx, rig, it) }
+        assertEquals(rest(rig)["head"], p["head"])
+        assertEquals(0f, ctx.speechEmphasis)
+    }
+
+    @Test fun `à travers les couches - les yeux tiennent le contact pendant les hochements, les sourcils sont publiés`() {
+        val rig = newRig()
+        val viewer = restEyes() + Vec3(0f, 0f, -1.5f)
+        val ctx = BodyContext(viewer = viewer)
+        val layers = BodyLayers(rig, constant(0.99f))
+        live(layers, rig, ctx, 1f)
+        val text = "Franchement, je pense que tu as vraiment raison."
+        layers.beginUtterance(text)
+        var deepest = 0f
+        var errorAtDeepest = 0f
+        var brows = 0f
+        var worstContact = 1f
+        repeat(text.length * 3) { i ->
+            layers.setSpeechCursor(i / 3)
+            val p = rest(rig)
+            layers.update(dt, p, ctx)
+            if (dip(p) > deepest) {
+                deepest = dip(p)
+                // L'écart VERTICAL : le hochement est vertical, et l'écart horizontal de l'œil gauche est la parallaxe
+                // (le regard est visé depuis le milieu des yeux).
+                val eye = forward(p, "leftEye")
+                val toViewer = dirTo(rig, p, "leftEye", viewer)
+                errorAtDeepest = abs(asin(toViewer.y.coerceIn(-1f, 1f)) - asin(eye.y.coerceIn(-1f, 1f)))
+            }
+            brows = maxOf(brows, ctx.speechEmphasis)
+            worstContact = minOf(worstContact, eyeContact(rig, p, viewer))
+        }
+        layers.endUtterance()
+        assertTrue("$deepest", deepest > 0.025f)
+        assertTrue("$brows", brows > 0.5f)
+        assertTrue("contact $worstContact", worstContact > 0.995f)
+        // Au creux du hochement, la tête est immobile un instant : les yeux ont rattrapé — si la couche passait après
+        // eux, ils plongeraient avec la tête, de tout le hochement.
+        assertTrue("écart $errorAtDeepest pour un hochement de $deepest", errorAtDeepest < deepest * 0.25f)
+    }
+
+    // ── La lecture ──────────────────────────────────────────────────────
+
+    @Test fun `elle lit - le regard baisse sous le spectateur, le contact est partiel`() {
+        val g = advance(AttentionDirector(constant(0.5f)), base(reading = true), 0.5f)
+        assertEquals(AttentionState.READING, g.state)
+        assertTrue(g.contact > AttentionDirector.THINKING_CONTACT && g.contact < 1f)
+        assertTrue("vers le bas : ${g.offset.pitch}", g.offset.pitch > 0.15f)
+    }
+
+    @Test fun `en lisant, ses yeux regardent plus bas que le contact - entre 0,2 et 0,3 rad sous le spectateur`() {
+        val rig = newRig()
+        val viewer = restEyes() + Vec3(0f, 0f, -1.5f)
+        val ctx = BodyContext(viewer = viewer)
+        val layers = BodyLayers(rig, constant(0.5f))
+        // L'angle vertical entre l'avant de l'œil et la direction du spectateur (> 0 : sous lui).
+        fun below(p: Pose): Float {
+            val eye = forward(p, "leftEye")
+            val toViewer = dirTo(rig, p, "leftEye", viewer)
+            return asin(toViewer.y.coerceIn(-1f, 1f)) - asin(eye.y.coerceIn(-1f, 1f))
+        }
+        val contactPose = live(layers, rig, ctx, 1.5f)
+        assertEquals(AttentionState.CONTACT, layers.attentionState)
+        val inContact = below(contactPose)
+        ctx.reading = true
+        val readingPose = live(layers, rig, ctx, 1.5f)
+        assertEquals(AttentionState.READING, layers.attentionState)
+        val reading = below(readingPose)
+        assertTrue("contact $inContact", abs(inContact) < 0.05f)
+        assertTrue("lecture $reading", reading in 0.2f..0.3f)
+        // La tête accompagne un peu : on baisse aussi la tête pour lire.
+        assertTrue(forward(readingPose, "head").y < forward(contactPose, "head").y - 0.05f)
+    }
+
+    /** La saccade de lecture image par image (1/60 s) pendant `seconds`. */
+    private fun scan(d: AttentionDirector, seconds: Float): List<GazeIntent> =
+        (0 until (seconds * 60).toInt()).map { d.update(dt, base(reading = true)) }
+
+    @Test fun `elle balaie de la gauche de l'écran vers sa droite, par sauts, avec des retours à la ligne`() {
+        val frames = scan(AttentionDirector(lcg(3)), 3.5f)
+        // Les changements de fixation : là où la saccade change, et seulement là.
+        val changes = (1 until frames.size).filter { frames[it].saccade != frames[it - 1].saccade }
+        var forwardSteps = 0
+        var returnSweeps = 0
+        for (i in changes) {
+            val a = frames[i - 1].saccade
+            val b = frames[i].saccade
+            val dy = b.yaw - a.yaw
+            // Un saut, rendu en entier dans shift (pour les clignements), à l'image même.
+            assertEquals(hypot(b.pitch - a.pitch, dy), frames[i].shift, 1e-5f)
+            if (dy > 0f) {
+                // Vers SA gauche, c'est-à-dire vers la droite de l'écran pour qui la regarde ; de petits sauts.
+                val step = AttentionDirector.READING_STEP
+                assertTrue("$dy", dy > step.start - 1e-5f && dy < step.endInclusive + 1e-5f)
+                assertEquals("le long de la ligne", a.pitch, b.pitch)
+                forwardSteps++
+            } else {
+                // Le retour au début de la ligne, à la gauche de l'écran : un saut plus grand que tout pas de lecture.
+                assertTrue("retour : $dy", -dy > AttentionDirector.READING_STEP.endInclusive)
+                assertTrue(b.yaw < 0f)
+                assertTrue("une ligne plus bas, ou la même", b.pitch >= a.pitch)
+                returnSweeps++
+            }
+            assertTrue(abs(b.yaw) <= AttentionDirector.READING_SPAN.endInclusive + 1e-6f)
+        }
+        // Des fixations de ~¼ s : entre deux sauts, l'œil se tient (à une image près).
+        for ((a, b) in changes.zipWithNext()) {
+            assertTrue("fixation de ${b - a} images", (b - a) in 11..18)
+        }
+        assertTrue("$forwardSteps", forwardSteps >= 6)
+        assertTrue("$returnSweeps", returnSweeps >= 2)
+        assertTrue(frames.all { it.state == AttentionState.READING && it.contact == AttentionDirector.READING_CONTACT })
+    }
+
+    @Test fun `de temps en temps, une ligne plus bas`() {
+        // Aléa 0 : chaque retour à la ligne descend, jusqu'à la dernière ligne de la bulle.
+        val frames = scan(AttentionDirector(constant(0f)), 6f)
+        val pitches = frames.map { it.saccade.pitch }.distinct()
+        assertEquals(AttentionDirector.READING_MAX_LINES, pitches.size)
+        assertEquals((AttentionDirector.READING_MAX_LINES - 1) * AttentionDirector.READING_LINE_STEP, pitches.max(), 1e-6f)
+        // Aléa haut : on ne descend jamais, on relit la même ligne.
+        assertEquals(listOf(0f), scan(AttentionDirector(constant(0.99f)), 4f).map { it.saccade.pitch }.distinct())
+    }
+
+    @Test fun `entrer en lecture est un saut, et en sortir aussi - le regard revient sur la personne`() {
+        val d = AttentionDirector(constant(0.99f))
+        advance(d, base(), 1f)
+        val enter = d.update(dt, base(reading = true))
+        assertTrue("${enter.shift}", enter.shift > 0.15f)
+        advance(d, base(reading = true), 1.5f)
+        val back = d.update(dt, base())
+        assertEquals(AttentionState.CONTACT, back.state)
+        assertEquals(1f, back.contact)
+        assertEquals(GazeAngles.ZERO, back.offset)
+        assertEquals("plus de reste de balayage", GazeAngles.ZERO, back.saccade)
+        assertTrue("${back.shift}", back.shift > 0.15f)
+    }
+
+    @Test fun `priorités - marcher puis se murmurer passent avant lire, lire avant composer et avant la conversation`() {
+        fun state(input: AttentionInput) = AttentionDirector(constant(0.99f)).update(0.05f, input).state
+        assertEquals(AttentionState.WALKING, state(base(reading = true, walking = true)))
+        assertEquals(AttentionState.INNER, state(base(reading = true, speaking = true, persona = "inner")))
+        assertEquals(AttentionState.READING, state(base(reading = true, replyPending = true)))
+        assertEquals(AttentionState.READING, state(base(reading = true, speaking = true)))
+        assertEquals(AttentionState.READING, state(base(reading = true, listening = true)))
+        assertEquals(AttentionState.ASLEEP, state(base(reading = true, sleepPhase = BodyContext.LIGHT_SLEEP)))
+        // Lu, le message laisse place à la réflexion sur la réponse.
+        val d = AttentionDirector(constant(0.99f))
+        advance(d, base(reading = true, replyPending = true), 2f)
+        assertEquals(AttentionState.THINKING, d.update(0.05f, base(replyPending = true)).state)
+    }
+
+    @Test fun `hors de portée, elle lit encore - les yeux baissés par rapport à son avant`() {
+        val g = AttentionDirector(constant(0.5f)).update(0.05f, base(reading = true, reachable = false))
+        assertEquals(AttentionState.READING, g.state)
+        assertEquals(0f, g.contact)
+        assertTrue(g.offset.pitch > 0.15f)
+    }
+
+    @Test fun `lire n'est jamais errer, et remet l'horloge de l'errance à zéro`() {
+        val d = AttentionDirector(lcg(7))
+        assertEquals(0f, share(d, AttentionDirector.WANDER_AFTER_S - 2, alone, AttentionState.WANDER))
+        assertEquals(0f, share(d, 30f, alone.copy(reading = true), AttentionState.WANDER))
+        // L'horloge est repartie de zéro : il faudrait de nouveau WANDER_AFTER_S de solitude.
+        assertEquals(0f, share(d, AttentionDirector.WANDER_AFTER_S - 2, alone, AttentionState.WANDER))
+    }
+
+    @Test fun `un message qui arrive pendant qu'elle erre - elle le lit aussitôt`() {
+        val d = AttentionDirector(lcg(11))
+        var wandered = false
+        for (i in 0 until 300 * 30) {
+            if (d.update(1f / 30f, alone).state == AttentionState.WANDER) {
+                wandered = true
+                break
+            }
+        }
+        assertTrue(wandered)
+        val reading = d.update(1f / 30f, alone.copy(reading = true))
+        assertEquals(AttentionState.READING, reading.state)
+        assertTrue(reading.shift > 0.1f)
+        // Le message lu, elle revient sur la personne, pas sur la pièce.
+        advance(d, alone.copy(reading = true), 2f)
+        assertEquals(AttentionState.CONTACT, d.update(1f / 30f, alone).state)
     }
 
     companion object {

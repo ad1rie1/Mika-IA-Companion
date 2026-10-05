@@ -34,6 +34,22 @@ ouverte longtemps, et demandé le meilleur de deux voies natives, sans craindre 
    d'où elle vient (`Mood.reply`).
 5. *Cheveux et vêtements simulés* comme three-vrm le fait (les ressorts du VRM 0.x, 198 articulations). Les
    réglages par famille sont ceux qu'Unity leur a rendus, puisque le modèle les livre sans gravité.
+6. *Elle vit la conversation, côté app seulement* (ajout du 2026-10-05, à la demande de la propriétaire ; aucune
+   trame nouvelle côté serveur).
+   - L'écran se partage. Au repos, les derniers messages tiennent dans une bande en bas, à peu près deux
+     cinquièmes de la hauteur. Ils s'effacent en montant, avant son menton : on la voit jusqu'aux hanches et le fil
+     ne la recouvre plus. Remonter dans l'historique rend tout l'écran au texte ; elle se met alors en retrait
+     (pâlie, à 30 images/s).
+   - Sa réponse s'écrit dans la bulle pendant qu'elle la dit. Il n'y a pas de voix, alors une seule horloge
+     (`Utterance`) donne à la fois le texte affiché et le curseur de sa bouche : visèmes français portés du web,
+     corps qui parle, hochements sur les mots appuyés, sourcils sur une question. La bulle a d'emblée sa taille
+     finale (le texte à venir est là, invisible), donc rien ne saute dans le fil. Toucher la bulle affiche tout et
+     la fait taire. Deux bulles coup sur coup se disent l'une après l'autre.
+   - Un message qu'on envoie, elle le lit : les yeux sur la bulle, des saccades de lecture, puis un hochement.
+     « Mika écrit… » devient une bulle à elle, et son regard est celui de quelqu'un qui compose.
+   - Seul ce qui arrive sous les yeux compte. Le fil vu à l'ouverture, un rattrapage, plusieurs bulles d'un coup :
+     elle ne récite rien. Sans animations (réglage d'Android), le texte s'affiche tout de suite. Un lecteur
+     d'écran a toujours le texte entier.
 
 **Conséquences.** Les portraits de l'ADR 0065 deviennent un repli : une app construite sans le VRM préparé les
 montre encore, et sans rien du tout il n'y a pas d'avatar. L'APK grossit d'environ 30 Mo (le modèle), plus

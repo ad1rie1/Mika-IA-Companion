@@ -76,6 +76,15 @@ yeux, te regarde, pose son regard sur toi quand tu écris et regarde ailleurs qu
 cheveux et ses vêtements suivent ses mouvements, et elle bâille quand elle est fatiguée, puis s'endort la nuit.
 Le comportement est celui du client web, porté en Kotlin pur et testé sur la JVM (`avatar3d/`). Décision : ADR 0067.
 
+Elle vit la conversation (ADR 0067, point 6) :
+- les derniers messages tiennent dans une bande en bas et s'effacent avant son visage ;
+- remonter dans l'historique la met en retrait ;
+- sa réponse s'écrit dans la bulle au rythme de sa bouche, sur une seule horloge (`avatar3d/Utterance`), et toucher
+  la bulle affiche tout ;
+- un message qu'on envoie, elle le lit, puis hoche la tête.
+
+Ces signaux viennent de `ui/chat/ConversationCues.kt` (`ConversationCues`, `SpeechTrack`).
+
 - **Le modèle** n'est pas versionné : il est sous licence de l'acheteur. On le prépare pour le téléphone depuis le
   VRM du client web, sans perte de qualité : textures en pleine résolution, morphoses inutilisées retirées (Filament
   en accepte 256 au plus), maillage du visage découpé par matériau pour un chargement rapide. Il fait ~30 Mo :

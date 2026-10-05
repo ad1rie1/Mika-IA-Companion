@@ -489,6 +489,195 @@ class FaceDriverTest {
         assertEquals(0.28f, oa.w("ark:BrowInnerUp") - ob.w("ark:BrowInnerUp"), 1e-4f)
     }
 
+    // --- Parole ---
+
+    /** Les morphoses de visèmes du modèle de Mika : ni `vrc.v_sil` ni `vrc.v_pp` (vide sur le modèle d'origine). */
+    private val mikaVisemes = LipSync.VRC_VISEME_MORPHS.filter { it != "vrc.v_pp" }.toSet()
+
+    private fun Map<String, Float>.visemes() = filterKeys { it.startsWith("vrc.v_") }
+    private fun Map<String, Float>.visemeSum() = visemes().values.sum()
+
+    @Test fun `elle dit sa réponse sur les visèmes du modèle`() {
+        val d = FaceDriver(model(withIdle = false), Random(1), mikaVisemes)
+        d.startSpeech("papa", 60f)
+        assertTrue(d.isSpeechPlaying)
+        var aa = 0f
+        var sum = 0f
+        d.runFor(0.4f) { out ->
+            aa = maxOf(aa, out.w("vrc.v_aa"))
+            sum = maxOf(sum, out.visemeSum())
+            assertFalse(out.containsKey("vrc.v_pp")) // absent du modèle : jamais écrit
+        }
+        assertTrue(aa > 0.6f)
+        assertTrue(sum <= 1f + 1e-6f)
+        assertFalse(d.isSpeechPlaying)
+        // Puis la bouche revient au repos et les visèmes sortent de la sortie.
+        assertTrue(d.runFor(1f).visemes().isEmpty())
+    }
+
+    @Test fun `la bouche n'écrit que ses visèmes - les autres couches sont inchangées`() {
+        // Deux visages identiques (même hasard, mêmes entrées, tous deux « en train de parler ») ; l'un dit une phrase.
+        val a = FaceDriver(model(), Random(9), mikaVisemes)
+        val b = FaceDriver(model(), Random(9), mikaVisemes)
+        for (d in listOf(a, b)) {
+            d.setEmotion("happy", 0.8f)
+            d.setSpeaking(true)
+        }
+        a.startSpeech("Bonjour ! [SIGH] Je suis *vraiment* contente de te voir.", 40f)
+        var spoke = false
+        repeat(240) {
+            val oa = a.update(1f / 60)
+            val ob = b.update(1f / 60)
+            if (oa.visemeSum() > 0.3f) spoke = true
+            assertTrue(ob.visemes().isEmpty())
+            val others = oa.filterKeys { !it.startsWith("vrc.v_") }
+            assertEquals(ob, others)
+        }
+        assertTrue(spoke)
+    }
+
+    @Test fun `parler fait parler le reste du visage`() {
+        // Sans setSpeaking, une réponse qui se dit suffit à la cadence des clignements et aux fossettes de la parole.
+        val a = FaceDriver(model(), Random(4), mikaVisemes)
+        val b = FaceDriver(model(), Random(4), mikaVisemes)
+        a.startSpeech("Je te raconte tout ça demain, d'accord ? On verra bien ce que ça donne.", 40f)
+        var differs = false
+        repeat(120) {
+            if (a.update(1f / 60).w("ark:MouthDimpleLeft") != b.update(1f / 60).w("ark:MouthDimpleLeft")) differs = true
+        }
+        assertTrue(differs)
+    }
+
+    @Test fun `les jetons de prosodie se taisent, le Markdown ne se dit pas`() {
+        val d = FaceDriver(model(withIdle = false), Random(1), mikaVisemes)
+        d.startSpeech("[SIGH] *papa*", 60f)
+        // Le soupir : 600 ms bouche fermée.
+        d.runFor(0.55f) { out -> assertTrue(out.visemes().isEmpty()) }
+        var aa = 0f
+        d.runFor(0.6f) { out -> aa = maxOf(aa, out.w("vrc.v_aa")) }
+        assertTrue(aa > 0.6f)
+    }
+
+    /** Le modèle de test, avec des groupes d'émotion qui touchent aussi la bouche (comme ceux de Perula). */
+    private fun mouthModel(): Map<String, VrmDocument.Expression> {
+        val m = model(withIdle = false).toMutableMap()
+        m["Shocked"] = expr("Shocked", "g:Shocked" to 1f, "MouthBigOpen" to 1f)
+        m["Smile1"] = expr("Smile1", "g:Smile1" to 1f, "MouthSmile2" to 1f)
+        return m
+    }
+
+    private fun FaceDriver.speakPeak(text: String = "papa"): Float {
+        startSpeech(text, 60f)
+        var peak = 0f
+        runFor(0.4f) { out -> peak = maxOf(peak, out.visemeSum()) }
+        return peak
+    }
+
+    @Test fun `la bouche laisse la place à celle que l'émotion dessine déjà`() {
+        val calm = FaceDriver(mouthModel(), Random(1), mikaVisemes)
+        assertTrue(calm.speakPeak() > 0.8f)
+
+        // Une surprise grande ouverte : la parole n'a plus que son plancher.
+        val shocked = FaceDriver(mouthModel(), Random(1), mikaVisemes)
+        shocked.setEmotion("surprised", 1f)
+        shocked.runFor(2f)
+        val peak = shocked.speakPeak()
+        assertTrue("$peak", peak <= LipSync.MIN_VISEME_ALLOWANCE + 1e-4f && peak > 0.3f)
+
+        // Un sourire n'ouvre pas la bouche : il ne coûte presque rien à la parole.
+        val smiling = FaceDriver(mouthModel(), Random(1), mikaVisemes)
+        smiling.setEmotion("happy", 1f)
+        smiling.runFor(2f)
+        assertTrue(smiling.speakPeak() > 0.8f)
+    }
+
+    @Test fun `elle articule à la mesure de ce qu'elle ressent`() {
+        // Des « é » (poids 0,8) : un « a » plein sature déjà la bouche et cacherait une articulation plus grande.
+        fun peakE(setup: (FaceDriver) -> Unit): Float {
+            val d = FaceDriver(model(withIdle = false), Random(1), mikaVisemes)
+            setup(d)
+            d.startSpeech("été, été", 60f)
+            var e = 0f
+            d.runFor(0.6f) { out -> e = maxOf(e, out.w("vrc.v_e")) }
+            return e
+        }
+        val neutral = peakE {}
+        val excited = peakE { it.setEmotion("excited", 1f) }
+        val bored = peakE { it.setEmotion("bored", 1f) }
+        val tired = peakE { it.setEnergy(0.1f) }
+        assertTrue("$excited / $neutral", excited > neutral * 1.08f)
+        assertTrue("$bored / $neutral", bored < neutral * 0.9f)
+        assertTrue("$tired / $neutral", tired < neutral * 0.85f)
+    }
+
+    @Test fun `un modèle sans visèmes parle sur ses préréglages a, i, u, e, o`() {
+        val m = model(withIdle = false).toMutableMap()
+        m["a"] = expr("A", "あ" to 0.829f, preset = "a")
+        m["i"] = expr("I", "い" to 1f, preset = "i")
+        m["u"] = expr("U", "う" to 1f, preset = "u")
+        m["e"] = expr("E", "え" to 1f, preset = "e")
+        m["o"] = expr("O", "お" to 1f, preset = "o")
+        val d = FaceDriver(m, Random(1), morphNames = setOf("あ", "い", "う", "え", "お", "MouthSmile2"))
+        d.startSpeech("bonjour Mika", 60f)
+        val peak = HashMap<String, Float>()
+        d.runFor(0.8f) { out ->
+            assertTrue(out.visemes().isEmpty())
+            for (k in listOf("あ", "い", "う", "お")) peak[k] = maxOf(peak[k] ?: 0f, out.w(k))
+        }
+        for (k in listOf("あ", "い", "う", "お")) assertTrue("$k = ${peak[k]}", peak.getValue(k) > 0.2f)
+    }
+
+    @Test fun `recalée à chaque image sur l'affichage, puis tout affiché d'un coup - elle se tait proprement`() {
+        val text = "Bonjour ! Je suis contente de te voir, tu sais. Aujourd'hui j'ai beaucoup réfléchi."
+        val cps = 25f
+        val d = FaceDriver(model(withIdle = false), Random(1), mikaVisemes)
+        d.startSpeech(text, 1000f / cps)
+        var t = 0f
+        var spoke = 0f
+        while (t < 1.2f) {
+            d.seekSpeech((t * cps).toInt())
+            spoke = maxOf(spoke, d.update(1f / 60).visemeSum())
+            t += 1f / 60
+        }
+        assertTrue(spoke > 0.6f)
+        assertTrue(d.isSpeechPlaying)
+        // On touche la bulle : tout le texte est là.
+        var previous = d.update(1f / 60).visemes()
+        repeat(40) {
+            d.seekSpeech(text.length)
+            val now = d.update(1f / 60).visemes()
+            for ((m, v) in now) assertTrue("$m remonte", v <= (previous[m] ?: 0f) + 1e-6f)
+            previous = now
+        }
+        assertFalse(d.isSpeechPlaying)
+        assertTrue(previous.values.sum() < 0.01f)
+    }
+
+    @Test fun `stopSpeech referme la bouche en douceur`() {
+        val d = FaceDriver(model(withIdle = false), Random(1), mikaVisemes)
+        d.startSpeech("aaaa", 60f)
+        val open = d.runFor(0.1f).w("vrc.v_aa")
+        assertTrue(open > 0.5f)
+        d.stopSpeech()
+        val after = d.update(1f / 60).w("vrc.v_aa")
+        assertTrue("$open → $after", after > open * 0.6f && after < open)
+        assertTrue(d.runFor(1f).visemes().isEmpty())
+        assertFalse(d.isSpeechPlaying)
+        // Recaler une parole arrêtée ne fait rien.
+        d.seekSpeech(2)
+        assertTrue(d.update(1f / 60).visemes().isEmpty())
+    }
+
+    @Test fun `une cadence invalide retombe sur la cadence par défaut`() {
+        val d = FaceDriver(model(withIdle = false), Random(1), mikaVisemes)
+        d.startSpeech("papa", Float.NaN)
+        assertTrue(d.isSpeechPlaying)
+        d.runFor(0.2f)
+        assertTrue(d.isSpeechPlaying) // 4 × 60 ms : pas fini en 200 ms
+        d.runFor(0.1f)
+        assertFalse(d.isSpeechPlaying)
+    }
+
     @Test fun `un pas invalide ne casse rien`() {
         val d = driver(withIdle = true)
         d.setEmotion("happy", 1f)

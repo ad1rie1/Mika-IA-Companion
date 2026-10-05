@@ -12,5 +12,11 @@
             android:exported="true"
             android:label="Studio 3D de Mika"
             android:theme="@style/Theme.Mika" />
+        <activity
+            android:name=".studio.ChatStudioActivity"
+            android:exported="true"
+            android:label="Studio de conversation"
+            android:theme="@style/Theme.Mika"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>

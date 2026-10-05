@@ -86,6 +86,30 @@ private const val HEADROOM = 0.045f
 private const val FADE_FROM = 0.58f
 
 /**
+ * Son menton, en fraction de la hauteur du cadre : 0,347 avec le cadrage de la 3D (les yeux à 1,19 m, le menton vers
+ * 1,10 m, vus par l'objectif d'[fr.qwartz.mika.avatar3d.AvatarSurface.frame]) — et les portraits ont le même.
+ */
+private const val CHIN = 0.347f
+
+/** Sous le menton, ce qu'on laisse encore à son visage avant qu'une bulle n'arrive pleinement. */
+private val CHIN_MARGIN = 22.dp
+
+/** Le cadre où elle se tient (gauche, haut, largeur, hauteur) : la tête juste sous la barre du haut. */
+data class StageFrame(val left: Dp, val top: Dp, val width: Dp, val height: Dp)
+
+fun stageFrame(maxWidth: Dp, maxHeight: Dp, statusTop: Dp, ratio: Float = 4f / 3f): StageFrame {
+    val width = min(min(maxWidth, MAX_PORTRAIT_WIDTH), maxHeight * 0.95f / ratio)
+    val height = width * ratio
+    return StageFrame((maxWidth - width) / 2, statusTop + TOP_BAR_HEIGHT - height * HEADROOM, width, height)
+}
+
+/** Jusqu'où, en partant du haut de l'écran, son visage a besoin de place : le fil s'efface avant. */
+fun faceClearance(maxWidth: Dp, maxHeight: Dp, statusTop: Dp): Dp {
+    val frame = stageFrame(maxWidth, maxHeight, statusTop)
+    return frame.top + frame.height * CHIN + CHIN_MARGIN
+}
+
+/**
  * Le portrait que l'écran attend, chargé hors du fil principal. Tant que le suivant n'est pas prêt,
  * le précédent reste : jamais de trou entre deux humeurs.
  */
@@ -139,10 +163,7 @@ fun AvatarBackdrop(
 
     BoxWithConstraints(modifier.fillMaxSize().background(scheme.surface).clearAndSetSemantics { }) {
         val ratio = portrait?.let { it.height.toFloat() / it.width } ?: (4f / 3f)
-        val width = min(min(maxWidth, MAX_PORTRAIT_WIDTH), maxHeight * 0.95f / ratio)
-        val height = width * ratio
-        val left = (maxWidth - width) / 2
-        val top = statusTop + TOP_BAR_HEIGHT - height * HEADROOM
+        val (left, top, width, height) = stageFrame(maxWidth, maxHeight, statusTop, ratio)
         val faceX = portrait?.entry?.faceX ?: 0.5f
         val faceY = portrait?.entry?.faceY ?: 0.25f
         val face = with(density) { Offset((left + width * faceX).toPx(), (top + height * faceY).toPx()) }
@@ -178,6 +199,8 @@ fun AvatarStage(
     modifier: Modifier = Modifier,
     faceX: Float = 0.5f,
     faceY: Float = 0.25f,
+    /** 1 : elle est là, au premier plan ; vers 0 : elle s'efface derrière le fil qu'on relit. */
+    presence: Float = 1f,
     content: @Composable () -> Unit,
 ) {
     val motion = !rememberReducedMotion()
@@ -188,19 +211,27 @@ fun AvatarStage(
     val density = LocalDensity.current
     val statusTop = with(density) { WindowInsets.statusBars.getTop(this).toDp() }
 
+    val shown by animateFloatAsState(presence, tween(if (motion) 650 else 0), label = "presence")
+
     BoxWithConstraints(modifier.fillMaxSize().background(scheme.surface).clearAndSetSemantics { }) {
-        val ratio = 4f / 3f
-        val width = min(min(maxWidth, MAX_PORTRAIT_WIDTH), maxHeight * 0.95f / ratio)
-        val height = width * ratio
-        val left = (maxWidth - width) / 2
-        val top = statusTop + TOP_BAR_HEIGHT - height * HEADROOM
+        val (left, top, width, height) = stageFrame(maxWidth, maxHeight, statusTop)
         val face = with(density) { Offset((left + width * faceX).toPx(), (top + height * faceY).toPx()) }
-        Aura(tint, face, with(density) { width.toPx() }, night, dark, motion)
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = 0.45f + 0.55f * shown }) {
+            Aura(tint, face, with(density) { width.toPx() }, night, dark, motion)
+        }
         Box(
             Modifier
                 .offset(left, top)
                 .size(width, height)
-                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .graphicsLayer {
+                    compositingStrategy = CompositingStrategy.Offscreen
+                    // En retrait pendant qu'on relit le fil : là, mais derrière le texte.
+                    alpha = shown
+                    val s = 0.96f + 0.04f * shown
+                    scaleX = s
+                    scaleY = s
+                    transformOrigin = TransformOrigin(0.5f, 0.25f)
+                }
                 .drawWithContent {
                     drawContent()
                     if (night > 0f) drawRect(Color(0xFF141B3D).copy(alpha = 0.32f * night), blendMode = BlendMode.SrcAtop)

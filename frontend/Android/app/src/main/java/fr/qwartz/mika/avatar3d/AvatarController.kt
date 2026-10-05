@@ -21,7 +21,7 @@ class AvatarController(
     val animator = AvatarAnimator(rig)
     val machine = BodyStateMachine(manifest, { clips[it] }, animator, random)
     val springs = SpringBones(rig.doc, rig)
-    val face = FaceDriver(rig.doc.expressions, random)
+    val face = FaceDriver(rig.doc.expressions, random, rig.doc.morphNames.values.flatten().toSet())
     val layers = BodyLayers(rig, { random.nextFloat() })
     private val ctx = BodyContext()
     private var lastTypingAt = Float.NEGATIVE_INFINITY
@@ -121,9 +121,101 @@ class AvatarController(
         if (fatigue < YAWN_MIN_FATIGUE) yawnIn = null else if (yawnIn == null) yawnIn = sampleYawnDelay()
     }
 
-    /** Une image : avance tout de `dt` secondes et rend la pose à poser. */
-    fun frame(dt: Float): Pose {
+    // ── La conversation ──────────────────────────────────────────────────────
+
+    private var utterances: List<Utterance> = emptyList()
+    /** La réplique qu'elle dit en ce moment (sa dernière version : la personne a pu tout afficher). */
+    private var spoken: Utterance? = null
+    private var readingLeft = 0f
+
+    /** Les répliques qu'elle dit, sur l'horloge des bulles ([Utterance]) : la bouche suit le texte qui s'écrit. */
+    fun setUtterances(list: List<Utterance>) {
+        utterances = list
+    }
+
+    /**
+     * La personne vient d'envoyer un message : elle le lit `seconds`, puis hoche la tête. Ce qu'elle disait encore
+     * s'est déjà affiché d'un coup (la bulle l'a sautée) : elle se tait pour lire.
+     */
+    fun noteUserMessage(seconds: Float) {
+        if (sleepPhase != "awake") return
+        readingLeft = seconds.coerceAtLeast(0f)
+    }
+
+    /** Les rires écrits dans la réplique en cours (`[LAUGH]`) : le corps rit quand le texte y arrive. */
+    private var laughs: List<SpeechCue> = emptyList()
+    private var lastCursor = -1
+
+    /** Lit l'horloge des répliques : commence, suit et termine ce qu'elle dit. */
+    private fun updateSpeech(now: Long) {
+        val active = utterances.firstOrNull { it.started(now) && !it.finished(now) }
+        val current = spoken
+        if (active?.key != current?.key) {
+            if (current != null) endSpeech()
+            if (active != null) beginSpeech(active)
+        } else if (active != null) {
+            spoken = active
+        }
+        val u = spoken ?: return
+        val cursor = u.cursorAt(now)
+        // La bouche et le corps suivent le texte qui s'écrit : le même curseur, à la même image.
+        face.seekSpeech(cursor)
+        layers.setSpeechCursor(cursor)
+        // Un rire franchi pas à pas (pas sauté parce que la personne a tout affiché d'un coup).
+        if (cursor - lastCursor in 1..MAX_CUE_STEP) {
+            if (laughs.any { it.at in (lastCursor + 1)..cursor }) machine.requestGesture(LAUGH_CLIP)
+        }
+        lastCursor = cursor
+    }
+
+    private fun beginSpeech(u: Utterance) {
+        spoken = u
+        lastCursor = -1
+        laughs = SpeechBeats.cues(u.text).filter { it.kind == SpeechCueKind.LAUGH }
+        // Elle se taisait pour lire : sa réponse arrive, elle relève les yeux.
+        readingLeft = 0f
+        ctx.reading = false
+        machine.setSpeaking(true)
+        face.setSpeaking(true)
+        face.startSpeech(u.text, msPerChar = 1000f / u.charsPerSecond)
+        layers.beginUtterance(u.text)
+        ctx.speaking = true
+        ctx.persona = "speaking"
+    }
+
+    private fun endSpeech() {
+        spoken = null
+        laughs = emptyList()
+        lastCursor = -1
+        face.stopSpeech()
+        layers.setSpeechCursor(-1)
+        layers.endUtterance()
+        machine.setSpeaking(false)
+        face.setSpeaking(false)
+        ctx.speaking = false
+        ctx.persona = null
+    }
+
+    /** Elle lit le message qu'on vient d'envoyer ; à la fin, un petit hochement : « j'ai lu ». */
+    private fun updateReading(dt: Float) {
+        if (readingLeft <= 0f) {
+            ctx.reading = false
+            return
+        }
+        ctx.reading = sleepPhase == "awake"
+        readingLeft -= dt
+        if (readingLeft <= 0f) {
+            readingLeft = 0f
+            ctx.reading = false
+            layers.acknowledge()
+        }
+    }
+
+    /** Une image : avance tout de `dt` secondes et rend la pose à poser. `now` : l'horloge des répliques. */
+    fun frame(dt: Float, now: Long = System.nanoTime()): Pose {
         clock += dt
+        updateSpeech(now)
+        updateReading(dt)
         updateYawn(dt)
         machine.update(dt)
         // Le clip réécrit toute la pose ; les couches (souffle, vie, port de tête, attention, regard) s'y ajoutent.
@@ -131,6 +223,8 @@ class AvatarController(
         ctx.listening = clock - lastTypingAt < BodyContext.LISTENING_HOLD_S
         val gazeShift = layers.update(dt, pose, ctx)
         face.noteGazeShift(gazeShift)
+        // Les mots appuyés lèvent les sourcils, une question les tient levés.
+        face.setSpeechBeat(ctx.speechEmphasis, ctx.speechQuestion)
         rig.solve(pose)
         springs.update(dt)
         morphs = face.update(dt)
@@ -155,6 +249,10 @@ class AvatarController(
     }
 
     companion object {
+        const val LAUGH_CLIP = "gesture_laugh"
+
+        /** Au-delà, le curseur a sauté (tout affiché d'un coup) : les rires franchis ne partent pas. */
+        const val MAX_CUE_STEP = 20
         const val YAWN_MIN_FATIGUE = 0.55f
         const val WAVE_CLIP = "gesture_wave"
         const val NOD_CLIP = "gesture_nod"

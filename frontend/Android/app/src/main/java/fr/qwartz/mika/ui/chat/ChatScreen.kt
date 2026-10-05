@@ -59,6 +59,10 @@ import fr.qwartz.mika.ui.avatar.AvatarStage
 import fr.qwartz.mika.ui.avatar.auraColor
 import fr.qwartz.mika.ui.avatar.rememberPortrait
 import fr.qwartz.mika.ui.components.rememberFileActions
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.ui.platform.LocalDensity
+import fr.qwartz.mika.ui.avatar.faceClearance
 import kotlinx.coroutines.launch
 
 /** Les types que le sélecteur de fichiers propose : la liste du client web (`ChatOverlay.ts`). */
@@ -168,16 +172,35 @@ fun ChatScreen(
     val state3d by vm.avatar3d.collectAsStateWithLifecycle()
     var keystrokes by remember { mutableIntStateOf(0) }
     LaunchedEffect(vm.input) { if (vm.input.isNotEmpty()) keystrokes++ }
-    Box(Modifier.fillMaxSize()) {
+
+    // Ce que le fil lui dit : sa réponse qui arrive, elle la dit ; un message qui part, elle le lit.
+    val talk = rememberConversationStage(
+        items,
+        watching = lifecycle.isAtLeast(Lifecycle.State.RESUMED),
+        speaks = vm.has3d,
+        key = owner,
+    )
+    val statusTop = with(LocalDensity.current) { WindowInsets.statusBars.getTop(this).toDp() }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val stage = scene?.let {
+            StageLink(
+                faceClearance = faceClearance(maxWidth, maxHeight, statusTop),
+                track = talk.track.takeIf { vm.has3d },
+                onReadingHistory = { talk.readingHistory = it },
+            )
+        }
         if (scene != null) {
             if (vm.has3d) {
                 // Mika en 3D native ; le salut de retrouvailles devient son vrai geste (coucou ou hochement).
-                AvatarStage(scene.aura, scene.asleep) {
+                AvatarStage(scene.aura, scene.asleep, presence = if (talk.readingHistory) 0.3f else 1f) {
                     LiveAvatar3D(
                         state3d,
                         wave = scene.greeting == AvatarDirector.Greeting.WAVE,
                         nod = scene.greeting == AvatarDirector.Greeting.NOD,
                         userTyping = keystrokes,
+                        speech = talk.track.utterances,
+                        reading = talk.reading,
+                        dimmed = talk.readingHistory,
                         modifier = Modifier.fillMaxSize(),
                     )
                 }
@@ -234,6 +257,7 @@ fun ChatScreen(
                         busyFileId = files.busy,
                         actions = actions,
                         overPortrait = scene != null,
+                        stage = stage,
                         modifier = Modifier.weight(1f),
                     )
                     ApprovalTray(approvals, onDecide = vm::decide, modifier = Modifier.heightIn(max = trayMax))

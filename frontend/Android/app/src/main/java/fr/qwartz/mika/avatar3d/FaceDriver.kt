@@ -20,7 +20,10 @@ import kotlin.random.Random
  *  - le clignement (`BlinkController.ts`) : cadence irrégulière modulée par l'émotion, la parole et la fatigue,
  *    clignements évoqués par un saut du regard, yeux fermés pendant le sommeil et frémissement du sommeil paradoxal ;
  *  - les micro-mouvements (`FaceIdleController.ts`) : dérive continue et asymétrique des formes ARKit du modèle,
- *    accents par émotion, sourcils levés par les temps forts de la parole.
+ *    accents par émotion, sourcils levés par les temps forts de la parole ;
+ *  - la bouche qui parle (`LipSyncController.ts`, voir [LipSync]) : les visèmes `vrc.v_*` du texte de sa réponse,
+ *    au rythme où la bulle l'affiche ([startSpeech], [seekSpeech]), sous un plafond qui laisse la place à la bouche
+ *    que l'émotion dessine déjà.
  *
  * Sort des poids par NOM de morphose (le moteur les retrouve dans chaque maillage : le visage est découpé par
  * matériau). Comme three-vrm, chaque groupe est d'abord borné à 0…1 puis ses liens s'additionnent (`+=`) ; la somme
@@ -32,13 +35,24 @@ import kotlin.random.Random
  * Ce qui n'est pas porté : la table de repli sur les préréglages standard (`STANDARD_EMOTION_MAP`, pour un modèle
  * sans les groupes de Perula — une recette incomplète ne montre ici rien, comme `neutral`), et la source des temps
  * forts de la parole (`SpeechBodyOverlay`, qui suit le curseur du lip-sync) : [setSpeechBeat] en attend la valeur.
+ *
+ * `morphNames` : les morphoses que porte le modèle (`VrmDocument.morphNames`), pour que la bouche se replie sur les
+ * préréglages a/i/u/e/o d'un modèle sans visèmes VRChat. Sans elles, les visèmes sont supposés présents — c'est le
+ * cas du modèle de Mika ; un nom absent du maillage serait de toute façon ignoré par [AvatarSurface.setMorphs].
  */
 class FaceDriver(
     expressions: Map<String, VrmDocument.Expression>,
     private val random: Random = Random.Default,
+    morphNames: Set<String>? = null,
 ) {
-    /** Un groupe résolu en ses liens ; un groupe binaire est tout ou rien, comme `VRMExpression.outputWeight`. */
-    private class Group(val binds: List<VrmDocument.Bind>, val binary: Boolean)
+    /**
+     * Un groupe résolu en ses liens ; un groupe binaire est tout ou rien, comme `VRMExpression.outputWeight`.
+     * `mouth` : ce qu'il fait à la bouche quand il est plein ([LipSync.mouthInvolvement]) — la parole lui laisse la
+     * place.
+     */
+    private class Group(val binds: List<VrmDocument.Bind>, val binary: Boolean) {
+        val mouth: Float = LipSync.mouthInvolvement(binds)
+    }
 
     /** Les groupes des recettes et de la fatigue, sans symboles ni regard (les copies `clean:` du web). */
     private val cleanGroups: Map<String, Group>
@@ -49,6 +63,10 @@ class FaceDriver(
     private val blinkGroup: Group?
     /** Les formes ARKit que le modèle expose, telles quelles (le web ne les nettoie pas). */
     private val idleGroups: Map<String, Group>
+    /** La bouche qui parle : ses propres morphoses (`vrc.v_*`), qu'aucune autre couche n'écrit. */
+    private val lip = LipSync(morphNames)
+    /** Les préréglages de bouche du repli, par nom three-vrm (`aa`…) : un VRM 0.x les range sous a, i, u, e, o. */
+    private val presetGroups: Map<String, Group>
 
     init {
         val wanted = LinkedHashSet<String>()
@@ -71,6 +89,10 @@ class FaceDriver(
         idleNames.addAll(SPEECH_BROWS.keys)
         EMOTION_ACCENT.values.forEach { idleNames.addAll(it.keys) }
         idleGroups = idleNames.mapNotNull { name -> expressions[name]?.let { name to Group(it.binds, it.binary) } }.toMap()
+        presetGroups = LipSync.MOUTH_PRESETS.mapNotNull { preset ->
+            (expressions[preset] ?: expressions[VRM0_MOUTH_PRESET.getValue(preset)])
+                ?.let { preset to Group(it.binds, it.binary) }
+        }.toMap()
     }
 
     // --- Entrées ---
@@ -89,6 +111,12 @@ class FaceDriver(
 
     /** Une horloge en double : des heures de session en `Float` hacheraient les sinus de la respiration. */
     private var time = 0.0
+    /** Ce que les expressions écrites cette image laissent de la bouche intacte (« ou » probabiliste de leurs
+     * charges : deux demi-sourires ne comptent pas double). */
+    private var mouthUntouched = 1f
+
+    /** Elle parle : l'appelant le dit ([setSpeaking]), ou sa bouche joue le texte d'une réponse. */
+    private val talking: Boolean get() = speaking || lip.isSpeaking
 
     // --- Émotion ---
 
@@ -148,6 +176,10 @@ class FaceDriver(
         this.intensity = clamped
         blendKey = key
 
+        // La bouche articule à la mesure de ce qu'elle ressent (`affect.articulationFor`), comme le web l'applique à
+        // chaque émotion que le visage reçoit.
+        lip.setArticulation(LipSync.articulationFor(name, clamped, fatigue))
+
         // La secondaire se montre à une part de son poids et fait de la place dans la principale.
         val primaryScale = if (secondary != null) 1f - 0.25f * secondary.ratio else 1f
         targetWeights.clear()
@@ -166,6 +198,9 @@ class FaceDriver(
         if (energy.isNaN()) return
         fatigue = ((0.55f - energy) / 0.4f).coerceIn(0f, 1f)
         tiredTarget = TIRED_MAX * fatigue
+        // Le web ne relit la fatigue qu'à l'émotion suivante ; ici elle compte tout de suite — une bouche lasse ne
+        // l'est pas qu'à partir de la prochaine réplique.
+        lip.setArticulation(LipSync.articulationFor(emotion, intensity, fatigue))
     }
 
     /** « awake », « light_sleep », « rem », « deep_sleep » ; une phase inconnue vaut l'éveil (`resolveSleepPhase`). */
@@ -184,11 +219,40 @@ class FaceDriver(
     }
 
     /** Les temps forts de la parole, 0…1 et décroissants : un mot appuyé fait lever les sourcils, une question les
-     * tient levés. Zéro tant que la couche qui les produit (`SpeechBodyOverlay` du web) n'est pas portée. */
+     * tient levés. Publiés par la couche de parole du corps (`SpeechBodyOverlay`, dans [BodyLayers]). */
     fun setSpeechBeat(emphasis: Float, question: Float) {
         speechEmphasis = if (emphasis.isNaN()) 0f else emphasis.coerceIn(0f, 1f)
         speechQuestion = if (question.isNaN()) 0f else question.coerceIn(0f, 1f)
     }
+
+    /**
+     * Elle commence à dire `text` — sa réponse telle qu'elle s'affiche, Markdown léger et jetons de prosodie compris :
+     * `[PAUSE:ms]`, `[SIGH]`, `[LAUGH]`, `[BREATH]` sont des silences de leur durée (la bouche se ferme), un `*` ne
+     * se dit pas (la bouche glisse dessus comme sur un blanc). `msPerChar` : la cadence d'affichage, en ms par
+     * caractère. Un nouveau texte remplace le précédent sans que la bouche saute : elle part de sa forme du moment.
+     */
+    fun startSpeech(text: String, msPerChar: Float) {
+        val ms = if (msPerChar.isFinite() && msPerChar > 0f) msPerChar.toDouble() else LipSync.DEFAULT_MS_PER_CHAR
+        lip.startFromPlan(LipSync.speechPlan(text), ms)
+    }
+
+    /**
+     * Où en est l'affichage : `charIndex` est l'indice, dans le texte passé à [startSpeech], du caractère qui apparaît
+     * (le nombre de caractères déjà affichés). Fait pour être appelé à CHAQUE image : tant que la bouche suit le
+     * texte, la lecture n'est pas touchée ; si elle s'en écarte, elle rattrape en douceur ; un vrai saut (toute la
+     * réponse affichée d'un coup) la fait taire proprement ([LipSync.trackChar]).
+     */
+    fun seekSpeech(charIndex: Int) {
+        lip.trackChar(charIndex)
+    }
+
+    /** Elle se tait : la bouche se referme en douceur, à la vitesse d'une bouche qui se détend. */
+    fun stopSpeech() {
+        lip.stop()
+    }
+
+    /** Sa bouche joue encore le texte d'une réponse. */
+    val isSpeechPlaying: Boolean get() = lip.isSpeaking
 
     /** Avance de `dt` secondes ; rend le poids (0…1) de chaque morphose pilotée cette image. */
     fun update(dt: Float): Map<String, Float> {
@@ -196,12 +260,14 @@ class FaceDriver(
         val step = if (dt > 0f && dt.isFinite()) dt else 0f
         time += step
         val out = HashMap<String, Float>()
+        mouthUntouched = 1f
         updateEmotion(step, out)
         updatePhysiology(step, out)
         updateBlink(step)
         gazeShift = 0f
         blinkGroup?.let { addGroup(it, blinkWeight, out) }
         updateIdle(step, out)
+        updateSpeech(step, out)
         val entries = out.entries.iterator()
         while (entries.hasNext()) {
             val e = entries.next()
@@ -371,7 +437,7 @@ class FaceDriver(
         var base = 2.5f + random.nextFloat() * 3f
         if (emotion in RESTLESS) base *= 0.65f else if (emotion in HEAVY) base *= 1.3f
         base *= 1f + 0.3f * fatigue // des paupières fatiguées clignent plus lentement et plus longtemps
-        if (speaking) base *= 0.85f // on cligne davantage en parlant
+        if (talking) base *= 0.85f // on cligne davantage en parlant
         return base
     }
 
@@ -399,7 +465,7 @@ class FaceDriver(
         val microScale = if (asleep) SLEEP_MICRO_SCALE else 1f
         for (c in MICRO_CHANNELS) {
             if (c.name !in idleGroups) continue
-            val boost = if (speaking && c.talkBoost != null) c.talkBoost else 1f
+            val boost = if (talking && c.talkBoost != null) c.talkBoost else 1f
             values[c.name] = (c.bias + noise(time * c.rate, c.seed) * c.amp * boost) * microScale
         }
         for ((name, w) in accent) {
@@ -417,13 +483,31 @@ class FaceDriver(
         for ((name, v) in values) addGroup(idleGroups.getValue(name), v, out)
     }
 
+    // --- Parole ---
+
+    /**
+     * Les visèmes, écrits en dernier comme sur le web (le lip-sync y lit les poids de cette image des autres
+     * couches) : ses morphoses `vrc.v_*` ne sont écrites par personne d'autre, et leur somme cède la place à la
+     * bouche que l'émotion et les micro-mouvements dessinent déjà. Sur un modèle sans visèmes, ce sont les
+     * préréglages a/i/u/e/o — qui ne comptent pas dans la charge : c'est la parole elle-même.
+     */
+    private fun updateSpeech(dt: Float, out: MutableMap<String, Float>) {
+        lip.update(dt)
+        val load = 1f - mouthUntouched
+        lip.forEachOutput(load) { name, w ->
+            val preset = presetGroups[name]
+            if (preset != null) addGroup(preset, w, out, countsForMouth = false) else addRaw(name, w, out)
+        }
+    }
+
     // --- Composition ---
 
-    private fun addGroup(group: Group, weight: Float, out: MutableMap<String, Float>) {
+    private fun addGroup(group: Group, weight: Float, out: MutableMap<String, Float>, countsForMouth: Boolean = true) {
         var w = weight.coerceIn(0f, 1f)
         if (group.binary) w = if (w > 0.5f) 1f else 0f
         if (!(w > 0f)) return
         for (b in group.binds) out[b.name] = (out[b.name] ?: 0f) + b.weight * w
+        if (countsForMouth && group.mouth > 0f && w > 0.001f) mouthUntouched *= 1f - min(1f, w * group.mouth)
     }
 
     private fun addRaw(morph: String, weight: Float, out: MutableMap<String, Float>) {
@@ -802,5 +886,12 @@ class FaceDriver(
         const val ACCENT_EASE = 2.5f
         /** Amplitude de dérive gardée en dormant — un visage endormi respire encore. */
         const val SLEEP_MICRO_SCALE = 0.18f
+
+        // --- Parole (LipSyncController.ts) ---
+
+        /** Les préréglages de bouche sous leur nom VRM 0.x : `VrmDocument` range un préréglage sous son nom, et un
+         * VRM 0.x appelle a, i, u, e, o ce que three-vrm nomme aa, ih, ou, ee, oh. */
+        private val VRM0_MOUTH_PRESET: Map<String, String> =
+            mapOf("aa" to "a", "ih" to "i", "ou" to "u", "ee" to "e", "oh" to "o")
     }
 }

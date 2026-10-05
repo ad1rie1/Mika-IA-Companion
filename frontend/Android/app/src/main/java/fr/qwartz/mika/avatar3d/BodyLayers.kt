@@ -10,8 +10,9 @@ enum class BreathRequest { CATCH, SIGH }
 
 /**
  * Ce que les couches du corps lisent et publient à chaque image — l'`OverlayContext` du web, sans le VRM : l'humeur,
- * le sommeil, la parole, la conversation, la fatigue, où est le spectateur ; puis ce que les couches laissent pour
- * les suivantes (le souffle, l'intention de regard, le spectateur mesuré dans la tête, le saut de regard).
+ * le sommeil, la parole, la conversation, la lecture, la fatigue, où est le spectateur ; puis ce que les couches
+ * laissent pour les suivantes ou pour le visage (le souffle, l'intention de regard, le spectateur mesuré dans la tête,
+ * le saut de regard, les sourcils des temps forts de la parole).
  *
  * Les phases de sommeil et les émotions sont les chaînes du serveur (`"awake"`, `"rem"`, `"sad"`…) : le reste de
  * l'app les porte ainsi, et une table indexée par chaîne reste une copie lisible de celle du web.
@@ -28,6 +29,11 @@ class BodyContext(
      * le regard se pose sur elle et se détourne moins.
      */
     var listening: Boolean = false,
+    /**
+     * Elle lit le message qu'on vient de lui envoyer — la bulle, sous son visage, entre elle et la personne : le
+     * regard s'abaisse et balaie les lignes ([AttentionState.READING]). À tenir vrai le temps de la lecture.
+     */
+    var reading: Boolean = false,
     /** La voix de la réponse en cours : `"speaking"`, `"inner"` (elle se murmure à elle-même), ou rien. */
     var persona: String? = null,
     /** La fatigue, 0 (fraîche) … 1 (épuisée) : un souffle plus lent, un corps plus immobile. */
@@ -84,6 +90,17 @@ class BodyContext(
 
     /** Le saut de regard de l'image (rad), pour les clignements qu'il entraîne. */
     var gazeShift: Float = 0f
+        internal set
+
+    /**
+     * L'éclair de sourcils du temps fort qui vient de partir, 0…1, décroissant — publié par [SpeechBodyOverlay],
+     * pour le visage (`FaceDriver.setSpeechBeat`). Le « j'ai lu » le lève aussi.
+     */
+    var speechEmphasis: Float = 0f
+        internal set
+
+    /** Une question est posée : les sourcils tenus levés, 0…1, qui retombent une fois la tenue passée. */
+    var speechQuestion: Float = 0f
         internal set
 
     companion object {
@@ -182,11 +199,16 @@ object BodyMath {
  *   4. [SleepOverlay]          la tête qui tombe en dormant ;
  *   5. [HeadEmotionOverlay]    le port de tête de l'émotion ;
  *   6. [HeadAttentionOverlay]  la part de la tête dans un regard, mesurée dans la tête telle que 2–5 l'ont posée ;
- *   7. [GazeController]        les yeux, absolus, APRÈS toutes les têtes : ils visent le reste (le réflexe
- *                              vestibulo-oculaire — le clip tourne la tête, les yeux contre-tournent, le contact tient).
+ *   7. [SpeechBodyOverlay]     les temps forts de la parole — hochements sur les mots appuyés, menton levé sur une
+ *                              question, sourcils publiés pour le visage. APRÈS le tour de tête de l'attention : un
+ *                              hochement est un geste, pas un changement de ce qu'elle regarde ;
+ *   8. [GazeController]        les yeux, absolus, APRÈS toutes les têtes : ils visent le reste (le réflexe
+ *                              vestibulo-oculaire — le clip tourne la tête, les yeux contre-tournent, le contact tient
+ *                              à travers les hochements).
  *
- * Les battements de la parole (`SpeechBodyOverlay` du web : hochements sur les mots appuyés, menton levé sur une
- * question) ne sont pas portés ici : ils suivent le curseur de la synthèse vocale, que l'app n'a pas encore.
+ * L'app n'a pas de voix : sa réponse s'affiche progressivement dans la bulle, et le curseur des temps forts suit cet
+ * affichage ([beginUtterance], [setSpeechCursor] à chaque image, [endUtterance]) — là où le web suit le curseur du
+ * lip-sync de sa synthèse vocale.
  *
  * Contrat : [update] AJOUTE à la pose — elle doit être réécrite à chaque image (le clip échantillonné, chaque os
  * écrit), sinon les couches s'accumulent d'une image à l'autre. Les mesures résolvent le squelette ([AvatarRig.solve]) ;
@@ -204,9 +226,31 @@ class BodyLayers(
     val sleep = SleepOverlay()
     val headEmotion = HeadEmotionOverlay()
     val headAttention = HeadAttentionOverlay()
+    val speechBody = SpeechBodyOverlay(random)
     val gaze = GazeController(eyeRange)
 
     val attentionState: AttentionState get() = director.currentState
+
+    /**
+     * Elle commence une réplique : `text` est le texte de la bulle, tel quel (`*mots*` et jetons `[SIGH]`,
+     * `[PAUSE:ms]`… compris — ils sont lus comme le web les lit). Ses temps forts remplacent ceux de la précédente.
+     */
+    fun beginUtterance(text: String) = speechBody.begin(text)
+
+    /**
+     * Où en est l'affichage, à chaque image : l'indice du caractère atteint dans le texte de [beginUtterance]. Un
+     * temps fort part quand le curseur l'atteint ; un bond (tout affiché d'un coup) ne fait partir aucun de ceux qu'il
+     * franchit ; un retour en arrière les réarme.
+     */
+    fun setSpeechCursor(charIndex: Int) {
+        speechBody.cursor = charIndex
+    }
+
+    /** La réplique est entièrement dite (ou abandonnée) : plus aucun temps fort ne part, la tête se pose. */
+    fun endUtterance() = speechBody.end()
+
+    /** Le petit hochement « j'ai lu » — après la lecture d'un message, avant d'y répondre. Rien en dormant. */
+    fun acknowledge() = speechBody.acknowledge()
 
     /**
      * Une image : pose les couches sur `pose` (déjà écrite par le clip) et rend le saut de regard de l'image (rad),
@@ -221,6 +265,7 @@ class BodyLayers(
             speaking = ctx.speaking,
             replyPending = ctx.replyPending,
             listening = ctx.listening,
+            reading = ctx.reading,
             persona = ctx.persona,
             emotion = ctx.emotion,
             intensity = ctx.intensity,
@@ -238,6 +283,8 @@ class BodyLayers(
         sleep.update(step, ctx, rig, pose)
         headEmotion.update(step, ctx, rig, pose)
         headAttention.update(step, ctx, rig, pose)
+        // Les temps forts après le tour de tête : les yeux, qui passent ensuite, tiennent le contact à travers eux.
+        speechBody.update(step, ctx, rig, pose)
         gaze.update(step, ctx, rig, pose, intent)
         ctx.gazeShift = intent.shift
         return intent.shift

@@ -40,6 +40,12 @@ enum class AttentionState {
     /** Une réponse se compose : absorbée, en haut et de côté. */
     THINKING,
 
+    /**
+     * Elle lit le message qu'on vient de lui envoyer (propre à l'app) : les yeux baissés sur la bulle, des saccades
+     * de lecture le long des lignes.
+     */
+    READING,
+
     /** Elle se murmure quelque chose : pas à vous. */
     INNER,
 
@@ -69,6 +75,8 @@ data class AttentionInput(
     /** Distance angulaire au spectateur (rad) : la taille du saut quand le contact bascule, pour les clignements. */
     val viewerAngle: Float = 0f,
     val walking: Boolean = false,
+    /** Elle lit le message qu'on vient de lui envoyer, dans la bulle sous son visage. */
+    val reading: Boolean = false,
 )
 
 /** L'intention de regard de l'image. */
@@ -94,6 +102,10 @@ data class GazeIntent(
  * dire) et revient vers la fin ; qui cherche une pensée regarde en haut et de côté, avec de brefs retours ; la honte,
  * la tristesse et l'anxiété détournent vers le bas, l'amour et la gratitude presque jamais. Et qui se murmure quelque
  * chose ne vous regarde pas.
+ *
+ * L'app ajoute un mode que le web n'a pas : la lecture. La personne écrit sur son téléphone, et sa bulle s'affiche
+ * sous le visage de Mika ; elle la lit — les yeux baissés sur le texte, qui avancent par petits sauts le long des
+ * lignes. Priorités : marcher > se murmurer quelque chose > lire > composer une réponse > la conversation ordinaire.
  *
  * Chaque CHANGEMENT de regard est ici un saut, jamais un glissement : les mouvements des yeux sont des saccades —
  * un bond balistique puis une fixation — et un œil qui glisse vers sa cible a l'air ivre. La tête, qui elle bouge
@@ -125,6 +137,13 @@ class AttentionDirector(private val random: () -> Float = { Random.nextFloat() }
     private var checkinRemaining = 0f
 
     private var innerSide = 1f
+
+    // La lecture : la demi-largeur de la ligne en cours, son rang, et l'horloge de la fixation. Tirés en entrant en
+    // lecture, jamais à la construction — la suite d'aléa du constructeur reste celle du web.
+    private var readingSpan = 0f
+    private var readingLine = 0
+    private var fixationTimer = 0f
+    private var fixationFor = 0f
 
     private var wasSpeaking = false
     private var wasPending = false
@@ -164,7 +183,8 @@ class AttentionDirector(private val random: () -> Float = { Random.nextFloat() }
             checkinRemaining = 0f
         }
         thinkingElapsed = if (input.replyPending) thinkingElapsed + dt else 0f
-        val engaged = input.speaking || input.replyPending || input.listening
+        // Lire ce qu'on vient de lui écrire, c'est être en conversation : pas d'errance, et l'horloge repart.
+        val engaged = input.speaking || input.replyPending || input.listening || input.reading
         idleFor = if (engaged) 0f else idleFor + dt
         if (engaged && wandering) {
             // Quelqu'un est de nouveau là : le regard ailleurs s'arrête maintenant, pas à son terme — et le prochain
@@ -180,6 +200,9 @@ class AttentionDirector(private val random: () -> Float = { Random.nextFloat() }
         var mode = when {
             input.walking -> AttentionState.WALKING
             input.persona == INNER_PERSONA && input.speaking -> AttentionState.INNER
+            // Lire passe avant de composer : on lit le message avant d'y réfléchir — et avant ce qu'elle disait
+            // encore, puisque c'est la personne qui vient de parler.
+            input.reading -> AttentionState.READING
             // Un message en attente pendant qu'elle dit encore la réponse précédente n'emporte pas son regard : on
             // finit sa phrase d'abord.
             input.replyPending && !input.speaking && thinkingElapsed <= THINKING_MAX_S -> AttentionState.THINKING
@@ -201,6 +224,15 @@ class AttentionDirector(private val random: () -> Float = { Random.nextFloat() }
                 contact = INNER_CONTACT
                 offPitch = INNER_OFFSET.pitch
                 offYaw = INNER_OFFSET.yaw * innerSide
+            }
+            AttentionState.READING -> {
+                // Les yeux sur la bulle : vers la personne (la bulle est entre elles deux, sur l'écran), mais plus bas.
+                // Le contact reste partiel — elle regarde le texte, pas vous — et le balayage des lignes passe par
+                // les saccades, que la tête ne suit pas.
+                aversionRemaining = 0f
+                contact = READING_CONTACT
+                offPitch = READING_OFFSET.pitch
+                offYaw = READING_OFFSET.yaw
             }
             AttentionState.THINKING -> {
                 aversionRemaining = 0f
@@ -236,7 +268,11 @@ class AttentionDirector(private val random: () -> Float = { Random.nextFloat() }
             if (mode == AttentionState.CONTACT || mode == AttentionState.AVERT) mode = AttentionState.AWAY
         }
 
-        val saccadeJump = updateSaccade(dt, input, mode)
+        val saccadeJump = when {
+            mode == AttentionState.READING -> readingScan(dt, entering = currentState != AttentionState.READING)
+            currentState == AttentionState.READING -> endReading()
+            else -> updateSaccade(dt, input, mode)
+        }
         currentState = mode
 
         val offsetJump = hypot(offPitch - prevPitch, offYaw - prevYaw)
@@ -246,7 +282,9 @@ class AttentionDirector(private val random: () -> Float = { Random.nextFloat() }
 
     /** Le cas ordinaire : contact, détournements de conversation, et regard qui erre quand elle est seule. */
     private fun conversation(dt: Float, input: AttentionInput, speakingStarted: Boolean): AttentionState {
-        if (currentState == AttentionState.THINKING || currentState == AttentionState.INNER) {
+        if (currentState == AttentionState.THINKING || currentState == AttentionState.INNER ||
+            currentState == AttentionState.READING
+        ) {
             // Retour vers vous : l'horloge des détournements repart, pour que le retour ne soit pas aussitôt suivi
             // d'un regard ailleurs.
             aversionTimer = 0f
@@ -359,6 +397,52 @@ class AttentionDirector(private val random: () -> Float = { Random.nextFloat() }
         return jump
     }
 
+    /**
+     * Les saccades de lecture : des fixations de ~¼ s, chacune un petit saut le long de la ligne, puis un grand saut
+     * de retour au début de la suivante — et de temps en temps une ligne plus bas. L'amplitude du saut, rendue.
+     *
+     * Le sens : elle suit le texte tel que la personne le voit, de la gauche de l'écran vers sa droite. Face à la
+     * caméra, la gauche de l'écran est SA droite : le lacet sémantique (> 0 vers sa gauche) va donc du négatif au
+     * positif. Lire la bulle « de son côté », en miroir, serait juste et se lirait à l'envers.
+     */
+    private fun readingScan(dt: Float, entering: Boolean): Float {
+        if (entering) {
+            readingLine = 0
+            readingSpan = sample(READING_SPAN)
+            fixationTimer = 0f
+            fixationFor = sample(READING_FIXATION)
+            return jumpTo(0f, -readingSpan)
+        }
+        fixationTimer += dt
+        if (fixationTimer < fixationFor) return 0f
+        fixationTimer = 0f
+        fixationFor = sample(READING_FIXATION)
+        val next = sacYaw + sample(READING_STEP)
+        if (next <= readingSpan) return jumpTo(sacPitch, next)
+        // Le retour à la ligne : un seul grand saut vers le début. Une ligne plus bas, souvent ; au bas d'une bulle
+        // courte, elle reste sur la dernière (elle relit la fin).
+        if (readingLine < READING_MAX_LINES - 1 && random() < READING_LINE_DROP_P) readingLine++
+        readingSpan = sample(READING_SPAN)
+        return jumpTo(readingLine * READING_LINE_STEP, -readingSpan)
+    }
+
+    /**
+     * La lecture finie, les yeux quittent la ligne d'un saut — un reste de balayage tenu des secondes pendant le
+     * contact se lirait comme un regard de travers — et l'horloge des saccades ordinaires repart de zéro.
+     */
+    private fun endReading(): Float {
+        saccadeTimer = 0f
+        nextSaccadeAt = sample(SACCADE_INTERVAL)
+        return jumpTo(0f, 0f)
+    }
+
+    private fun jumpTo(pitch: Float, yaw: Float): Float {
+        val jump = hypot(pitch - sacPitch, yaw - sacYaw)
+        sacPitch = pitch
+        sacYaw = yaw
+        return jump
+    }
+
     private fun sample(range: ClosedFloatingPointRange<Float>): Float =
         range.start + random() * max(0f, range.endInclusive - range.start)
 
@@ -422,6 +506,30 @@ class AttentionDirector(private val random: () -> Float = { Random.nextFloat() }
         const val THINKING_MAX_S = 90f
         const val INNER_CONTACT = 0.1f
         val INNER_OFFSET = GazeAngles(0.14f, 0.12f)
+
+        /**
+         * La lecture (propre à l'app). La bulle s'affiche sous son visage, entre elle et la personne : vue de ses
+         * yeux, elle est dans la direction de la caméra, plus bas. D'où un contact partiel — l'ancrage sur la
+         * personne, qui suit la caméra quand on tourne autour d'elle — plus un tangage vers le bas : 0,22 rad, dont
+         * la tête prend sa part ([HeadAttentionOverlay.HEAD_OFFSET_SHARE]) et les yeux le reste, soit ~0,25 rad sous
+         * le spectateur une fois la tête posée, sans sortir de la course de l'œil (10° sur ce modèle).
+         */
+        const val READING_CONTACT = 0.8f
+        val READING_OFFSET = GazeAngles(0.22f, 0f)
+
+        /** La demi-largeur d'une ligne (rad) : la bulle est petite à cette distance, le balayage aussi. */
+        val READING_SPAN = 0.05f..0.07f
+
+        /** Un saut le long de la ligne (rad) : quatre ou cinq fixations par ligne. */
+        val READING_STEP = 0.022f..0.034f
+
+        /** Une fixation de lecture (s), la durée que la littérature donne (~200–280 ms). */
+        val READING_FIXATION = 0.2f..0.28f
+
+        /** Une ligne plus bas (rad) ; la chance de descendre à chaque retour à la ligne, et combien de lignes au plus. */
+        const val READING_LINE_STEP = 0.018f
+        const val READING_LINE_DROP_P = 0.6f
+        const val READING_MAX_LINES = 3
         val SACCADE_INTERVAL = 1.8f..4.5f
 
         /** En contact, les yeux parcourent le visage (yeux ↔ bouche, 1–4°) ; hors du spectateur, ils errent plus large. */

@@ -3,6 +3,7 @@ package fr.qwartz.mika.avatar3d
 import fr.qwartz.mika.avatar3d.BodyMath.addRotation
 import fr.qwartz.mika.avatar3d.BodyMath.smooth
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.exp
 import kotlin.math.min
 import kotlin.math.sign
@@ -542,5 +543,304 @@ class HeadAttentionOverlay {
             if (mag < HEAD_DEAD_ZONE) return 0f
             return sign(angle) * (mag - HEAD_DEAD_ZONE) * HEAD_FOLLOW
         }
+    }
+}
+
+/**
+ * Un ressort amorti sur un axe — un peu sous-amorti : une vraie nuque dépasse d'un cheveu, puis se pose. Euler
+ * semi-implicite en sous-pas de 1/120 s : stable à toute durée d'image qu'on lui donne.
+ */
+internal class DampedSpring(private val omega: Float, private val zeta: Float) {
+    var x = 0f
+        private set
+    var v = 0f
+        private set
+
+    fun step(dt: Float, target: Float): Float {
+        val n = maxOf(1, ceil(dt / SUBSTEP).toInt())
+        val h = dt / n
+        repeat(n) {
+            val a = -omega * omega * (x - target) - 2 * zeta * omega * v
+            v += a * h
+            x += v * h
+        }
+        return x
+    }
+
+    /** Une impulsion de vitesse dimensionnée pour que la réponse libre culmine à ≈ `peak`. */
+    fun kick(peak: Float) {
+        v += peak * omega * 1.7f
+    }
+
+    private companion object {
+        const val SUBSTEP = 1f / 120f
+    }
+}
+
+/**
+ * La tête et les sourcils qui ponctuent la parole (`SpeechBodyOverlay.ts`).
+ *
+ * Les clips de parole tournent toutes les quelques secondes, mais rien en eux ne sait ce qui se dit : la tête d'un
+ * clip enregistré hoche à son propre rythme. Cette couche part sur les temps forts de la réplique en cours
+ * ([SpeechBeats]), quand le curseur les atteint :
+ *
+ *   STRESS        un petit hochement sur le mot ;
+ *   EMPHASIS      un hochement plus franc, un léger tour, les sourcils qui sautent ;
+ *   QUESTION      le menton levé et la tête penchée sur le dernier mot, les sourcils tenus levés ;
+ *   FINAL         le hochement qui ferme une affirmation ;
+ *   PAUSE         la tête se réoriente un peu ; une prise d'air ;
+ *   TRAIL         une inclinaison douce, la phrase qui traîne ;
+ *   PHRASE_START  la tête se relève d'un rien sur une prise d'air.
+ *
+ * Chaque axe est un ressort amorti, frappé par les temps forts et tiré vers des cibles tenues (l'inclinaison d'une
+ * question). S'y ajoute, tant qu'elle parle, un mouvement continu au rythme de la parole — une tête n'est jamais
+ * immobile chez quelqu'un qui parle.
+ *
+ * Elle passe APRÈS le tour de tête de l'attention : un hochement est un geste, pas un changement de ce qu'elle
+ * regarde — le regard ([GazeController], après toutes les têtes) garde les yeux sur le spectateur à travers lui.
+ *
+ * Ce qui diffère du web, et pourquoi :
+ *  - l'app n'a pas de voix : sa réponse s'écrit progressivement dans la bulle, et c'est l'énoncé ouvert
+ *    ([begin] → [end]) qui tient lieu de voix — les temps forts partent même si l'appelant ne lève pas
+ *    [BodyContext.speaking] ;
+ *  - un bond du curseur (la personne touche la bulle et tout s'affiche) ne déclenche RIEN : le web ne sautait que
+ *    les temps forts à plus de [STALE_CHARS] derrière le curseur, si bien qu'un bond jusqu'à la fin faisait encore
+ *    partir ensemble ceux des derniers mots ;
+ *  - les jetons `[SIGH]` / `[BREATH]` demandent leur souffle quand le curseur les atteint — la moitié de `playCue`
+ *    du web qui revient au corps (le rire, un clip, revient à la machine à états) ;
+ *  - le hochement « j'ai lu » ([acknowledge]) attend l'image suivante et tombe en dormant, au lieu de compter sur
+ *    l'appelant pour vérifier l'éveil.
+ */
+class SpeechBodyOverlay(private val random: () -> Float = { Random.nextFloat() }) {
+    private var beats: List<SpeechBeat> = emptyList()
+    private var cues: List<SpeechCue> = emptyList()
+    private var nextBeat = 0
+    private var nextCue = 0
+    private var lastCursor = -1
+    private var open = false
+    private var ackPending = false
+
+    /** On ne commence pas à parler les poumons vides : le premier temps fort d'un énoncé prend une inspiration, quel qu'il soit. */
+    private var firstBreath = false
+
+    /** Le caractère atteint dans le texte de la réplique (celui que la bulle affiche) ; −1 : aucun. */
+    var cursor: Int = -1
+
+    /** Un énoncé est en cours : entre [begin] et [end]. */
+    val uttering: Boolean get() = open
+
+    private val pitch = DampedSpring(11f, 0.5f)
+    private val yaw = DampedSpring(8f, 0.6f)
+    private val roll = DampedSpring(5f, 0.75f)
+    private var pitchHold = 0f
+    private var yawHold = 0f
+    private var rollHold = 0f
+    private var holdRemaining = 0f
+    private var holdKind: BeatKind? = null
+    private var questionSide = 1f
+
+    private var emphasis = 0f
+    private var question = 0f
+
+    /** Le temps du bruit de parole, en Double comme celui de [LifeOverlay]. */
+    private var time = 0.0
+    private var talk = 0f
+
+    /** Un nouvel énoncé commence : ses temps forts remplacent ce qui restait du précédent. */
+    fun begin(text: String) {
+        beats = SpeechBeats.plan(text)
+        cues = SpeechBeats.cues(text)
+        nextBeat = 0
+        nextCue = 0
+        lastCursor = -1
+        cursor = -1
+        firstBreath = true
+        open = true
+    }
+
+    /**
+     * L'énoncé est fini (ou abandonné) : plus rien ne part. Les ressorts se posent d'eux-mêmes, et une question
+     * garde son menton levé le temps de sa tenue — elle attend la réponse, la bulle finie.
+     */
+    fun end() {
+        open = false
+        beats = emptyList()
+        cues = emptyList()
+        cursor = -1
+        lastCursor = -1
+    }
+
+    /**
+     * « Bien reçu » : le petit hochement, les sourcils qui se lèvent, de qui reçoit un message auquel il va répondre.
+     * Pas un temps fort de la parole — il part en silence, à l'image suivante, et jamais en dormant.
+     */
+    fun acknowledge() {
+        ackPending = true
+    }
+
+    fun update(dt: Float, ctx: BodyContext, rig: AvatarRig, pose: Pose) {
+        time += dt
+        val awake = ctx.awake
+        val voiced = awake && (open || ctx.speaking)
+        val inner = ctx.persona == AttentionDirector.INNER_PERSONA
+        // Un murmure à elle-même ne s'adresse à personne : à peine un battement.
+        val scale = (if (inner) 0.35f else 1f) * (1 + 0.45f * ctx.arousal).coerceIn(0.55f, 1.4f)
+
+        if (ackPending) {
+            ackPending = false
+            if (awake) {
+                pitch.kick(ACK_NOD)
+                emphasis = maxOf(emphasis, ACK_BROW)
+            }
+        }
+        if (voiced && open) consume(ctx, scale, inner)
+
+        if (holdRemaining > 0f) {
+            holdRemaining -= dt
+            if (holdRemaining <= 0f) {
+                pitchHold = 0f
+                rollHold = 0f
+                yawHold *= 0.5f
+                holdKind = null
+            }
+        }
+        if (!voiced) yawHold += (0 - yawHold) * min(1f, dt * 0.8f)
+
+        talk += ((if (voiced) 1f else 0f) - talk) * min(1f, dt * 3)
+        val p0 = pitch.step(dt, pitchHold)
+        val y0 = yaw.step(dt, yawHold)
+        val r0 = roll.step(dt, rollHold)
+
+        // Le mouvement continu de la parole : plus rapide et plus petit que la dérive de la couche de vie, seulement
+        // tant qu'elle parle.
+        val k = talk * scale
+        val p = p0 + LifeOverlay.lifeNoise(time * 0.9, 31).toFloat() * 0.012f * k
+        val y = y0 + LifeOverlay.lifeNoise(time * 0.7, 37).toFloat() * 0.016f * k
+        val r = r0 + LifeOverlay.lifeNoise(time * 0.6, 41).toFloat() * 0.01f * k
+        // Comme [HeadAttentionOverlay] : sans nuque (facultative dans la norme VRM), la tête porte tout le geste.
+        val neckShare = if (pose["neck"] != null) NECK_SHARE else 0f
+        if (neckShare > 0f) addRotation(rig, pose, "neck", p * neckShare, y * neckShare, r * neckShare)
+        addRotation(rig, pose, "head", p * (1 - neckShare), y * (1 - neckShare), r * (1 - neckShare))
+
+        val questionTarget = if (holdKind == BeatKind.QUESTION) 1f else 0f
+        question += (questionTarget - question) * min(1f, dt * 5)
+        emphasis = maxOf(0f, emphasis - dt * BROW_DECAY * maxOf(0.2f, emphasis))
+        ctx.speechEmphasis = emphasis
+        ctx.speechQuestion = question
+    }
+
+    private fun consume(ctx: BodyContext, scale: Float, inner: Boolean) {
+        val c = cursor
+        if (c < 0) return
+        val rewound = c < lastCursor - REWIND_CHARS
+        if (rewound) {
+            // Le curseur est revenu en arrière : on réarme à partir de là.
+            nextBeat = beats.indexOfFirst { it.at >= c }.let { if (it < 0) beats.size else it }
+            nextCue = cues.indexOfFirst { it.at >= c }.let { if (it < 0) cues.size else it }
+        }
+        // Un bond en avant n'est pas de la parole : la personne a tout affiché d'un coup. Ce qui a été sauté est
+        // consommé sans partir — une rafale de hochements sur un texte qu'elle n'a pas « dit » se lirait comme un tic.
+        val leapt = !rewound && c - lastCursor > LEAP_CHARS
+        lastCursor = c
+        while (nextBeat < beats.size && beats[nextBeat].at <= c) {
+            val beat = beats[nextBeat++]
+            if (!leapt && c - beat.at <= STALE_CHARS) fire(beat, ctx, scale)
+        }
+        while (nextCue < cues.size && cues[nextCue].at <= c) {
+            val cue = cues[nextCue++]
+            if (!leapt && !inner && c - cue.at <= STALE_CHARS) play(cue, ctx)
+        }
+    }
+
+    private fun fire(beat: SpeechBeat, ctx: BodyContext, scale: Float) {
+        val s = beat.strength * scale
+        pitch.kick(NOD.getValue(beat.kind) * s)
+        emphasis = minOf(1f, maxOf(emphasis, (BROW[beat.kind] ?: 0f) * s))
+        if ((beat.kind in CATCH || firstBreath) && ctx.breathRequest == null) ctx.breathRequest = BreathRequest.CATCH
+        firstBreath = false
+
+        when (beat.kind) {
+            BeatKind.EMPHASIS -> yaw.kick((if (random() < 0.5f) -1f else 1f) * 0.02f * s)
+            // Entre deux idées, on réoriente un peu la tête.
+            BeatKind.PAUSE -> yawHold = (random() * 2 - 1) * 0.03f * scale
+            BeatKind.QUESTION -> {
+                questionSide = if (random() < 0.7f) questionSide else -questionSide
+                rollHold = questionSide * QUESTION_TILT * s
+                pitchHold = QUESTION_LIFT * s
+                holdRemaining = QUESTION_HOLD_S
+                holdKind = BeatKind.QUESTION
+            }
+            BeatKind.TRAIL -> {
+                rollHold = (if (random() < 0.5f) -1f else 1f) * TRAIL_TILT * s
+                pitchHold = 0.015f * s
+                holdRemaining = TRAIL_HOLD_S
+                holdKind = BeatKind.TRAIL
+            }
+            BeatKind.FINAL -> {
+                pitchHold = 0f
+                rollHold = 0f
+                holdKind = null
+            }
+            BeatKind.STRESS, BeatKind.PHRASE_START -> Unit
+        }
+    }
+
+    /** Le souffle d'un jeton de prosodie : un soupir l'emporte sur tout, une inspiration n'écrase pas un soupir. */
+    private fun play(cue: SpeechCue, ctx: BodyContext) {
+        when (cue.kind) {
+            SpeechCueKind.SIGH -> ctx.breathRequest = BreathRequest.SIGH
+            SpeechCueKind.BREATH -> if (ctx.breathRequest != BreathRequest.SIGH) ctx.breathRequest = BreathRequest.CATCH
+            SpeechCueKind.LAUGH -> Unit
+        }
+    }
+
+    companion object {
+        /** Le pic du hochement par temps fort (rad, > 0 = tête en bas). */
+        val NOD: Map<BeatKind, Float> = mapOf(
+            BeatKind.PHRASE_START to -0.025f,
+            BeatKind.STRESS to 0.045f,
+            BeatKind.EMPHASIS to 0.075f,
+            BeatKind.PAUSE to 0.02f,
+            BeatKind.TRAIL to 0.016f,
+            BeatKind.QUESTION to 0f,
+            BeatKind.FINAL to 0.055f,
+        )
+
+        /** L'éclair de sourcils par temps fort, 0…1. */
+        val BROW: Map<BeatKind, Float> = mapOf(
+            BeatKind.PHRASE_START to 0.3f,
+            BeatKind.STRESS to 0.35f,
+            BeatKind.EMPHASIS to 1f,
+            BeatKind.QUESTION to 0.6f,
+            BeatKind.TRAIL to 0.25f,
+        )
+
+        /** Les temps forts qui viennent avec une prise d'air. */
+        val CATCH: Set<BeatKind> = setOf(BeatKind.PHRASE_START, BeatKind.PAUSE)
+
+        const val QUESTION_TILT = 0.075f
+        const val QUESTION_LIFT = -0.035f
+        const val QUESTION_HOLD_S = 1.3f
+        const val TRAIL_TILT = 0.04f
+        const val TRAIL_HOLD_S = 1.2f
+
+        /** Un temps fort que le curseur a dépassé de plus de tant de caractères est sauté, pas lancé en retard. */
+        const val STALE_CHARS = 12
+
+        /**
+         * Au-delà de tant de caractères d'un coup, le curseur a bondi (tout affiché) : rien de ce qu'il franchit ne
+         * part. La bulle avance de 16 à 34 caractères par seconde : même un accroc d'un tiers de seconde reste loin
+         * en dessous, et un affichage mot par mot aussi.
+         */
+        const val LEAP_CHARS = 20
+
+        /** Un recul de quelques caractères est du bruit ; au-delà, le curseur est vraiment revenu en arrière. */
+        const val REWIND_CHARS = 3
+        const val BROW_DECAY = 3.2f
+        const val NECK_SHARE = 0.4f
+
+        /** Le hochement « j'ai lu » et ses sourcils. */
+        const val ACK_NOD = 0.04f
+        const val ACK_BROW = 0.35f
     }
 }

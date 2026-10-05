@@ -65,10 +65,16 @@ fun Avatar3D(modifier: Modifier = Modifier, onSurface: (AvatarSurface) -> Unit =
     }
 }
 
+/** La personne vient d'envoyer un message : elle le lit, `seconds` le temps qu'il faut, puis hoche la tête. */
+data class ReadingCue(val key: String, val seconds: Float)
+
 /**
  * Mika vivante : la vue 3D, ses mouvements chargés une fois, et ce qu'elle ressent appliqué à chaque changement de
  * [state]. Une nouvelle parole (même à la même émotion) peut déclencher un geste ; une humeur qui dérive ne change
  * que la posture. `wave` / `nod` : le salut de retrouvailles. `userTyping` augmente à chaque frappe de la personne.
+ * `speech` : les répliques qu'elle dit (le texte de ses bulles qui s'écrit) ; `reading` : le dernier message qu'elle
+ * lit ; `dimmed` : elle est en retrait derrière le fil qu'on relit — moins d'images par seconde, personne ne la
+ * regarde vraiment.
  */
 @Composable
 fun LiveAvatar3D(
@@ -76,13 +82,18 @@ fun LiveAvatar3D(
     wave: Boolean = false,
     nod: Boolean = false,
     userTyping: Int = 0,
+    speech: List<Utterance> = emptyList(),
+    reading: ReadingCue? = null,
+    dimmed: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val library = remember { MotionLibrary(context) }
     var controller by remember { mutableStateOf<AvatarController?>(null) }
     val scope = rememberCoroutineScope()
+    var surfaceRef by remember { mutableStateOf<AvatarSurface?>(null) }
     Avatar3D(modifier) { surface ->
+        surfaceRef = surface
         surface.onReady = {
             scope.launch {
                 val manifest = library.manifest() ?: return@launch
@@ -94,7 +105,7 @@ fun LiveAvatar3D(
                     val dt = if (last == 0L) 0f else ((now - last) / 1e9f).coerceIn(0f, 0.1f)
                     last = now
                     c.setViewer(surface.cameraPosition())
-                    c.frame(dt)
+                    c.frame(dt, now)
                     surface.applyLocals(c.rigLocals())
                     c.springs.forEachLocal { n, t, r -> surface.applyNode(n, t, r) }
                     surface.setMorphs(c.morphs())
@@ -115,4 +126,10 @@ fun LiveAvatar3D(
     LaunchedEffect(c, wave || nod) { if (wave) c?.wave() else if (nod) c?.nod() }
     // Chaque frappe dans la barre de saisie : elle se sait écoutée, son regard se pose sur la personne.
     LaunchedEffect(c, userTyping) { if (userTyping > 0) c?.noteUserTyping() }
+    LaunchedEffect(c, speech) { c?.setUtterances(speech) }
+    LaunchedEffect(c, reading) { reading?.let { c?.noteUserMessage(it.seconds) } }
+    LaunchedEffect(surfaceRef, dimmed) { surfaceRef?.maxFps = if (dimmed) DIMMED_FPS else 60 }
 }
+
+/** En retrait, elle respire encore, mais à la moitié des images : la batterie d'une app qu'on garde ouverte. */
+private const val DIMMED_FPS = 30
