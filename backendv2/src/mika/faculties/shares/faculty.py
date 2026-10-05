@@ -59,6 +59,11 @@ class SharesParams(BaseModel):
     project_max_mb: Annotated[int, Knob(
         label="Taille d'un fichier de projet envoyé (Mio)", group="Envoyer", lo=1, hi=MAX_SHARE_BYTES // MIB,
         help="Un fichier de l'atelier d'un projet plus gros que cela n'est pas envoyé (elle le dit).")] = 10
+    reread_hours: Annotated[int, Knob(
+        label="Garder en tête le dernier texte envoyé (heures)", group="Envoyer", lo=0, hi=72,
+        help="Pendant tant d'heures, le début du dernier texte qu'elle a écrit pour la personne (une liste, une "
+             "note) reste sous ses yeux : elle le retouche sans le contredire. Au-delà, elle le relit avec un "
+             "outil. 0 : seulement par l'outil.")] = 6
     keep_days: Annotated[int, Knob(
         label="Garder un fichier envoyé (jours)", group="Garder", lo=1, hi=3650,
         help="Au-delà, un fichier envoyé est retiré : ses octets sont effacés, son message dit qu'il n'est plus "
@@ -352,6 +357,21 @@ class Retention:
                   for target, reason, files in due_expiries(ctx.state, frame.now, params_of(frame))]
         if drafts:
             await ctx.emit(*drafts)
+
+
+#: un texte relu et coupé le dit
+CUT_MARK = "\n… (la suite dans le fichier)"
+
+
+async def reread(port: Any, file: str, limit: int) -> str | None:
+    """Ce qu'elle a écrit dans un fichier envoyé, au plus ``limit`` caractères (coupé, il le dit) ; ``None`` quand
+    ses octets ne sont plus là (retiré, oublié)."""
+    # un caractère tient en quatre octets au plus : un octet de plus suffit à savoir qu'il y a une suite
+    data = await port.read(file, limit * 4 + 1) if port is not None else None
+    if data is None:
+        return None
+    text = data.decode("utf-8", errors="replace")
+    return text if len(text) <= limit else text[:limit].rstrip() + CUT_MARK
 
 
 @SHARES.effect(c.EXPIRED, deadline_s=60.0)

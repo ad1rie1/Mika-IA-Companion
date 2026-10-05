@@ -3,6 +3,11 @@
 Sans cette section, elle renvoyait la même liste à chaque « tu peux me la redonner ? » sans savoir qu'elle l'avait
 déjà fait, ou proposait un fichier qu'elle venait d'envoyer. Les noms se lisent dans leurs contenus (un nom oublié
 ne se dit plus) ; seulement en tête-à-tête, et seulement ce qui est réellement parti.
+
+Le dernier texte qu'elle a écrit pour cette adresse, parti depuis moins de ``reread_hours``, s'y relit aussi (son
+début, borné) : « rajoute du pain et enlève le vin » se fait sur la liste envoyée, pas sur une liste refaite de
+mémoire. Ses octets se lisent dans le port : retiré ou oublié, il n'y a plus rien à lire. Plus ancien, il se relit
+avec ``reread_sent_file``.
 """
 
 from __future__ import annotations
@@ -10,8 +15,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from mika.faculties.shares.faculty import SHARES, SharesState
-from mika.kernel.clock import DAY
+from mika.contracts import shares as c
+from mika.faculties.shares.faculty import PORT, SHARES, SharesState, params_of, reread
+from mika.kernel.clock import DAY, HOUR
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
@@ -21,6 +27,12 @@ from mika.vocab.episodes import CONVERSATIONAL
 #: les derniers fichiers partis, au plus tant, sur tant de jours
 SHOWN = 3
 SHOWN_DAYS = 30
+#: le dernier texte écrit, relu dans la section : au plus tant de caractères
+REREAD_SHOWN_CHARS = 1_500
+
+SENT_NOTE = "(Partis avec tes messages : ne les renvoie pas, sauf si on te le redemande.)"
+WRITTEN_NOTE = ("(Partis avec tes messages : ne les renvoie pas, sauf si on te le redemande. Un texte que tu as "
+                "écrit se relit avec reread_sent_file ; pour le changer, renvoie-le corrigé avec share_text.)")
 
 
 def _target(frame: Frame) -> str | None:
@@ -34,10 +46,21 @@ async def _names(s: SharesState, frame: Frame, ports: Mapping[str, Any]) -> dict
     store = ports.get("store")
     if not target or store is None:
         return None
-    files = [v for v in s.sent.get(target, ()) if v.message and frame.now - v.at <= SHOWN_DAYS * DAY][-SHOWN:]
+    sent = [v for v in s.sent.get(target, ()) if v.message]
+    files = [v for v in sent if frame.now - v.at <= SHOWN_DAYS * DAY][-SHOWN:]
     if not files:
         return None
-    return {"files": files, "names": store.content([v.name_ref for v in files if v.name_ref])}
+    fresh, text = None, None
+    aud = frame.audience
+    if aud is not None and not aud.public:  # lu seulement là où il peut se montrer
+        window = params_of(frame).reread_hours * HOUR
+        fresh = next((v for v in reversed(sent) if v.origin == c.WRITTEN and frame.now - v.at < window), None)
+        text = await reread(ports.get(PORT), fresh.file, REREAD_SHOWN_CHARS) if fresh is not None else None
+    if not text:
+        fresh = None
+    named = [*files, fresh] if fresh is not None else files
+    return {"files": files, "names": store.content([v.name_ref for v in named if v.name_ref]), "fresh": fresh,
+            "text": text}
 
 
 @SHARES.section("sent_files", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=35,
@@ -49,9 +72,15 @@ def _sent_section(s: SharesState, frame: Frame, enrich: Mapping[str, Any]) -> Se
         return None
     names: Mapping[str, str] = got.get("names") or {}
     tz = frame.env.tz_of(frame.root)
-    lines = [f"- « {names[v.name_ref]} », {when_fr(v.at, frame.now, tz)}" for v in reversed(got["files"])
-             if names.get(v.name_ref)]
-    if not lines:
+    shown = [v for v in reversed(got["files"]) if names.get(v.name_ref)]
+    if not shown:
         return None
-    return SectionBody("\n".join(lines) + "\n(Partis avec tes messages : ne les renvoie pas, sauf si on te le "
-                       "redemande.)", level=0)
+    lines = [f"- « {names[v.name_ref]} », {when_fr(v.at, frame.now, tz)}" for v in shown]
+    fresh = got.get("fresh")
+    fresh_name = names.get(fresh.name_ref) if fresh is not None else None
+    written = bool(fresh_name) or any(v.origin == c.WRITTEN for v in shown)
+    body = "\n".join(lines) + "\n" + (WRITTEN_NOTE if written else SENT_NOTE)
+    if fresh_name:
+        # ce qu'elle a écrit elle-même, à la fin : faute de place, c'est ce qui se coupe d'abord
+        body += f"\nCe que tu as écrit dans « {fresh_name} » :\n{got['text']}"
+    return SectionBody(body, level=0)
