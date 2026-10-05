@@ -715,6 +715,58 @@ def reciprocity(ct: Contact, p: SocialParams) -> tuple[int, int, bool]:
     return her, them, total >= p.reciprocity_min_starts and her / total >= p.one_sided_share
 
 
+def _union(parts: list[Contact]) -> Contact:
+    """Une histoire vécue sous plusieurs adresses d'une même personne, réunie : ses jours de contact (et les
+    messages de chacun), ses premiers et derniers échanges, qui a ouvert leurs conversations."""
+    if len(parts) == 1:
+        return parts[0]
+    per_day: dict[int, int] = {}
+    for ct in parts:
+        for day, n in zip(ct.days, _counts(ct), strict=True):
+            per_day[day] = per_day.get(day, 0) + n
+    days = sorted(per_day)[-KEEP_DAYS:]
+    shared = sum(len(ct.days) for ct in parts) - len(per_day)  # des jours vécus sous deux adresses à la fois
+    last_in = max(ct.last_in for ct in parts)
+    latest = max(parts, key=lambda ct: (ct.last_activity, ct.last_in, ct.since, ct.previous))
+    return Contact(
+        days=tuple(days), counts=tuple(per_day[d] for d in days), inbound=sum(ct.inbound for ct in parts),
+        first_in=min((ct.first_in for ct in parts if ct.first_in), default=0), last_in=last_in,
+        last_out=max(ct.last_out for ct in parts),
+        # ses initiatives restées sans réponse depuis le dernier message de la personne, par quelque adresse
+        unanswered=sum(ct.unanswered for ct in parts if ct.last_out > last_in),
+        total_days=sum(max(ct.total_days, len(ct.days)) for ct in parts) - shared,
+        first_day=min((ct.first_day or ct.days[0] for ct in parts if ct.days), default=0),
+        last_activity=latest.last_activity, since=latest.since, previous=latest.previous,
+        starts=tuple(sorted({st for ct in parts for st in ct.starts}))[-STARTS_KEPT:],
+    )
+
+
+def contact_of(s: SocialState, person: str, handles: Any) -> Contact | None:
+    """Leur histoire, sous toutes les adresses de la personne (``identity.HANDLES``)."""
+    parts = [s.contacts[k] for k in sorted({person, *handles}) if k in s.contacts]
+    return _union(parts) if parts else None
+
+
+def gathered(s: SocialState, person: str, handles: Any) -> SocialState:
+    """La tranche vue depuis une personne : ce qu'elle a vécu sous ses autres adresses — reliées depuis à elle, par
+    un opérateur ou un recoupement — se réunit sous sa clé. Les réducteurs rangent l'histoire sous la personne que
+    l'adresse désignait au moment de l'événement ; une liaison ne la déplace pas, la lecture la rassemble (délier
+    rend à chaque adresse la sienne). Sans autre adresse vécue, la tranche telle quelle."""
+    others = sorted(k for k in set(handles) - {person}
+                    if k in s.contacts or k in s.greeted or k in s.rekindled or k in s.noticed)
+    if not others:
+        return s
+
+    def latest(d: FrozenDict[str, int]) -> FrozenDict[str, int]:
+        at = max((d[k] for k in (person, *others) if k in d), default=None)
+        return d if at is None else d.set(person, at)
+
+    ct = contact_of(s, person, others)
+    contacts = s.contacts if ct is None else s.contacts.set(person, ct)
+    return replace(s, contacts=contacts, greeted=latest(s.greeted), rekindled=latest(s.rekindled),
+                   noticed=latest(s.noticed))
+
+
 def contact_reading(s: SocialState, person: str, now: int, now_day: int, level: str,
                     p: SocialParams) -> c.ContactReading:
     ct = s.contacts.get(person) or Contact()
@@ -727,9 +779,9 @@ def contact_reading(s: SocialState, person: str, now: int, now_day: int, level: 
                             since=ct.since, her_starts=her, their_starts=them, one_sided=one_sided, usual_days=usual)
 
 
-@SOCIAL.fact(c.GREETED)
+@SOCIAL.fact(c.GREETED, reads=[identity_c.HANDLES])
 def _greeted(s: SocialState, cx, person: str) -> int:
-    return s.greeted.get(person, 0)
+    return gathered(s, person, cx.facts.get(identity_c.HANDLES(person))).greeted.get(person, 0)
 
 
 def _could_be_friends(ct: Contact, p: SocialParams) -> bool:
@@ -738,7 +790,8 @@ def _could_be_friends(ct: Contact, p: SocialParams) -> bool:
     return max(ct.total_days, len(ct.days)) >= p.friend_days and ct.inbound >= p.friend_messages
 
 
-@SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD, affect_c.HOSTILITY, affect_c.BOND, identity_c.IS_OWNER])
+@SOCIAL.fact(c.CLOSENESS, reads=[affect_c.REGARD, affect_c.HOSTILITY, affect_c.BOND, identity_c.IS_OWNER,
+                                  identity_c.HANDLES])
 def _closeness(s: SocialState, cx, person: str) -> str:
     """Déclarée, sinon vécue ; le plancher d'une propriétaire. Ce qui coûte (l'affect, la propriété) ne se lit
     que quand ça peut changer quelque chose : une inconnue sans histoire n'a ni chaleur ni rancune à peser."""
@@ -746,7 +799,7 @@ def _closeness(s: SocialState, cx, person: str) -> str:
     if declared is not None:
         return declared
     p = params(cx.params)
-    ct = s.contacts.get(person)
+    ct = contact_of(s, person, cx.facts.get(identity_c.HANDLES(person)))  # une adresse reliée apporte son histoire
     floor = p.owner_floor if p.owner_floor in _OWNER_FLOORS else c.STRANGER
     if ct is None or not ct.days or not _could_be_friends(ct, p):
         # une connaissance au plus : ni la chaleur, ni l'attachement, ni la rancune n'y changent rien
@@ -762,21 +815,31 @@ def _closeness(s: SocialState, cx, person: str) -> str:
     return level
 
 
-@SOCIAL.fact(c.CONTACT, reads=[c.CLOSENESS])
+@SOCIAL.fact(c.CONTACT, reads=[c.CLOSENESS, identity_c.HANDLES])
 def _contact(s: SocialState, cx, person: str) -> c.ContactReading:
-    return contact_reading(s, person, cx.now, cx.local(cx.now).date().toordinal(), cx.facts.get(c.CLOSENESS(person)),
+    return contact_reading(gathered(s, person, cx.facts.get(identity_c.HANDLES(person))), person, cx.now, cx.local(cx.now).date().toordinal(), cx.facts.get(c.CLOSENESS(person)),
                            params(cx.params))
 
 
-@SOCIAL.fact(c.CIRCLE, reads=[identity_c.OWNERS])
+@SOCIAL.fact(c.CIRCLE, reads=[identity_c.OWNERS, identity_c.PERSON])
 def _circle(s: SocialState, cx) -> tuple[str, ...]:
     """Celles qui sont — ou ont pu être — des amies ou des proches : un tri bon marché, sans affect ni calcul de
     proximité, pour que ce qui ne regarde que les amies ne pèse pas le prix de toutes les inconnues de passage
     (une amie a eu assez de jours de contact et de messages ; une proximité déclarée ; une propriétaire, amie
-    d'office). Toute amie ou proche d'aujourd'hui en est (``CLOSENESS`` ne dépasse jamais l'histoire)."""
+    d'office). Toute amie ou proche d'aujourd'hui en est (``CLOSENESS`` ne dépasse jamais l'histoire). Des
+    personnes telles qu'elles valent maintenant : une adresse reliée depuis à quelqu'un n'y figure plus pour
+    elle-même, son histoire compte pour la personne (elle ne lui manque pas pendant qu'elle écrit par une autre)."""
     p = params(cx.params)
-    out = {person for person, level in s.declared.items() if level in (c.FRIEND, c.CLOSE)}
-    out |= {person for person, ct in s.contacts.items() if person not in s.declared and _could_be_friends(ct, p)}
+
+    def person_of(key: str) -> str:
+        return cx.facts.get(identity_c.PERSON(key)) or key
+
+    out = {person_of(person) for person, level in s.declared.items() if level in (c.FRIEND, c.CLOSE)}
+    lived_by: dict[str, list[Contact]] = {}
+    for key, ct in sorted(s.contacts.items()):
+        lived_by.setdefault(person_of(key), []).append(ct)
+    out |= {person for person, parts in lived_by.items()
+            if person not in s.declared and _could_be_friends(_union(parts), p)}
     if p.owner_floor == c.FRIEND:
         out |= {o for o in cx.facts.get(identity_c.OWNERS) if o not in s.declared}
     return tuple(sorted(out))
@@ -817,19 +880,22 @@ def _sensitive_ref(s: SocialState, cx, person: str) -> str:
     return profile.sensitive_ref if profile else ""
 
 
-@SOCIAL.fact(c.MISSED, reads=[c.CIRCLE, c.CONTACT, affect_c.HOSTILITY, identity_c.IS_OWNER])
+@SOCIAL.fact(c.MISSED, reads=[c.CIRCLE, c.CONTACT, affect_c.HOSTILITY, identity_c.IS_OWNER, identity_c.HANDLES])
 def _missed(s: SocialState, cx) -> tuple[tuple[str, float], ...]:
     """Celles qui lui manquent : des amies ou des proches — d'aujourd'hui ou d'avant, une amie partie sans plus
     donner de nouvelles manque encore (ADR 0058) — dont le silence dépasse son seuil."""
     p = params(cx.params)
     out = []
     for person in cx.facts.get(c.CIRCLE):
-        if not is_identifiable(person) or person.startswith("name:") or person not in s.contacts:
+        if not is_identifiable(person) or person.startswith("name:"):
+            continue
+        view = gathered(s, person, cx.facts.get(identity_c.HANDLES(person)))
+        if person not in view.contacts:
             continue
         ratio = cx.facts.get(c.CONTACT(person)).silence_ratio
         if ratio < p.recontact_factor:
             continue
         hostility = cx.facts.get(affect_c.HOSTILITY(person))
-        if been_friends(s, person, p, hostility, bool(cx.facts.get(identity_c.IS_OWNER(person)))):
+        if been_friends(view, person, p, hostility, bool(cx.facts.get(identity_c.IS_OWNER(person)))):
             out.append((person, round(ratio, 3)))
     return tuple(sorted(out, key=lambda x: (-x[1], x[0])))

@@ -396,6 +396,22 @@ def learn(m: Model, valence: float, arousal: float, message: int, cues: tuple[st
     )
 
 
+def model_of(s: OthersState, person: str, handles: Any) -> Model | None:
+    """Ce qu'elle devine de son ton, appris sous toutes les adresses de la personne (``identity.HANDLES``) : une
+    adresse reliée depuis à elle n'emporte pas ce qu'elle en avait appris. L'habituel se réunit au poids des messages
+    lus ; l'état du moment est celui du dernier message, par quelque adresse qu'il soit arrivé."""
+    parts = [s.people[k] for k in sorted({person, *handles}) if k in s.people]
+    if len(parts) <= 1:
+        return parts[0] if parts else None
+    observed = sum(m.observed for m in parts)
+    latest = max(parts, key=lambda m: (m.last_at, m.last_message))
+    if not observed:
+        return latest
+    return replace(latest, observed=observed,
+                   usual_valence=round(sum(m.usual_valence * m.observed for m in parts) / observed, 5),
+                   usual_arousal=round(sum(m.usual_arousal * m.observed for m in parts) / observed, 5))
+
+
 def reading(s: OthersState, person: str, now: int, p: OthersParams,
             closeness: str = social_c.ACQUAINTANCE) -> c.MindReading:
     m = s.people.get(person) or Model()
@@ -647,8 +663,11 @@ def _outcome(s: OthersState, e, cx) -> OthersState:
 # ── Faits ─────────────────────────────────────────────────────────────────
 
 
-@OTHERS.fact(c.MIND, reads=[social_c.CLOSENESS])
+@OTHERS.fact(c.MIND, reads=[social_c.CLOSENESS, identity_c.HANDLES])
 def _mind(s: OthersState, cx, person: str) -> c.MindReading:
+    m = model_of(s, person, cx.facts.get(identity_c.HANDLES(person)))  # une adresse reliée apporte ce qu'elle a appris
+    if m is not None and m is not s.people.get(person):
+        s = replace(s, people=s.people.set(person, m))
     return reading(s, person, cx.now, params(cx.params), cx.facts.get(social_c.CLOSENESS(person)))
 
 

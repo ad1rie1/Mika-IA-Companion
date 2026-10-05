@@ -35,7 +35,16 @@ from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.social.faculty import SOCIAL, SocialParams, SocialState, been_friends, grudging, params
+from mika.faculties.social.faculty import (
+    SOCIAL,
+    SocialParams,
+    SocialState,
+    been_friends,
+    contact_of,
+    gathered,
+    grudging,
+    params,
+)
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.clock import DAY, HOUR, MINUTE, within_daily_window
 from mika.kernel.frame import Frame
@@ -90,7 +99,7 @@ def _guard(frame: Frame, person: str) -> Guard:
 
 @SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.GREETING: (0.0, GREETING_EVIDENCE), c.PRESENT_PERSON: (0.0, 0.0)},
                 reads=[presence_c.PRESENT, presence_c.SINCE, identity_c.PERSON, identity_c.IDENTITY,
-                       transcript_c.LAST_FROM, transcript_c.LAST_TO, affect_c.HOSTILITY])
+                       identity_c.HANDLES, transcript_c.LAST_FROM, transcript_c.LAST_TO, affect_c.HOSTILITY])
 def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
     out: list[Candidate] = []
     now = frame.now
@@ -112,7 +121,8 @@ def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
         if left and since - left < p.away_us:
             continue  # elle n'était pas partie : un onglet rechargé, une coupure, un redémarrage d'elle
         person = frame.get(identity_c.PERSON(handle))
-        if now - s.greeted.get(person, -GREETING_SPACING) < GREETING_SPACING:
+        if now - gathered(s, person, frame.get(identity_c.HANDLES(person))).greeted.get(person, -GREETING_SPACING) \
+                < GREETING_SPACING:
             continue
         if grudging(frame.get(affect_c.HOSTILITY(person)), p):
             continue  # pas même une salutation (la retenue le dit aussi : son veto reste sur la ligne)
@@ -141,7 +151,8 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
     distressed = (A.valence(mood.felt) <= p.distress_valence and mood.felt_intensity >= p.distress_intensity
                   and frame.now - s.comforted_at >= p.comfort_spacing_us)
     for person in frame.get(c.CIRCLE):  # ses amies et proches seulement : les inconnues ne coûtent rien ici
-        if not is_identifiable(person) or person.startswith("name:") or person not in s.contacts:
+        if not is_identifiable(person) or person.startswith("name:") \
+                or contact_of(s, person, frame.get(identity_c.HANDLES(person))) is None:
             continue
         level = frame.get(c.CLOSENESS(person))
         if _RANK[level] < _RANK[c.FRIEND]:
@@ -229,12 +240,15 @@ def _rekindle(s: SocialState, frame: Frame) -> list[Candidate]:
         return []
     out: list[Candidate] = []
     for person in frame.get(c.CIRCLE):
-        if not is_identifiable(person) or person.startswith("name:") or person not in s.contacts:
+        if not is_identifiable(person) or person.startswith("name:"):
             continue
-        due = rekindle_due(s, frame, person, p)
+        view = gathered(s, person, frame.get(identity_c.HANDLES(person)))  # ses adresses reliées depuis comprises
+        if person not in view.contacts:
+            continue
+        due = rekindle_due(view, frame, person, p)
         if due is None or frame.now < due:
             continue
-        if not been_friends(s, person, p, frame.get(affect_c.HOSTILITY(person)),
+        if not been_friends(view, person, p, frame.get(affect_c.HOSTILITY(person)),
                             bool(frame.get(identity_c.IS_OWNER(person)))):
             continue
         address = _address(frame, person)
