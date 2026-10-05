@@ -7,9 +7,10 @@ using UnityEngine;
 namespace Mika.Player
 {
     /// <summary>
-    /// La joueuse dans le monde vu du noyau : sa pose continue est relayée aux autres écrans (jamais au journal),
-    /// et ses arrivées — quand elle s'arrête près d'un lieu — sont dites au noyau (<c>moved</c>), qui seul les
-    /// retient. Les poses des autres personnes arrivent ici et font marcher leur corps.
+    /// La joueuse dans le monde vu du noyau : elle y entre quand le noyau l'annonce (<c>presence</c>, au lieu
+    /// <c>spawn</c>), sa pose continue est relayée aux autres écrans (jamais au journal), et ses arrivées — quand
+    /// elle s'arrête près d'un lieu — sont dites au noyau (<c>moved</c>), qui seul les retient. Les poses des
+    /// autres personnes arrivent ici et font marcher leur corps.
     /// </summary>
     [AddComponentMenu("Mika/Joueuse/Présence")]
     public sealed class PlayerPresence : MonoBehaviour
@@ -28,6 +29,8 @@ namespace Mika.Player
         float _stillSince = -1;
         string _reportedPlace;
         bool _spawned;
+        // Le noyau a annoncé son entrée depuis l'accueil : une annonce suivante est un retour après un silence.
+        bool _entered;
         readonly Dictionary<string, RemoteBody> _remote = new Dictionary<string, RemoteBody>();
 
         sealed class RemoteBody
@@ -39,10 +42,39 @@ namespace Mika.Player
 
         public void Bind(WorldSession session, WorldStage stage)
         {
+            Unbind();
             _session = session;
             _stage = stage;
-            session.Welcomed += _ => _spawned = false;
+            session.Welcomed += _ =>
+            {
+                _spawned = false;
+                _entered = false;
+            };
             session.PoseReceived += OnPose;
+            session.Mirror.PresenceChanged += OnPresence;
+        }
+
+        void OnDestroy() => Unbind();
+
+        void Unbind()
+        {
+            if (_session == null) return;
+            _session.PoseReceived -= OnPose;
+            _session.Mirror.PresenceChanged -= OnPresence;
+        }
+
+        /// <summary>
+        /// Le noyau la fait entrer : son corps va au lieu qu'il lui a donné (celui de la pièce où est Mika). Revenue
+        /// après un silence, elle n'a pas bougé pour autant : elle redit seulement où elle est.
+        /// </summary>
+        void OnPresence(Presence p)
+        {
+            if (!p.Joined || _session == null || p.Actor != _session.Actor) return;
+            if (_entered)
+                _reportedPlace = null;
+            else
+                _spawned = false;
+            _entered = true;
         }
 
         void Update()
