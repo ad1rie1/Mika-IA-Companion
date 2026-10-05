@@ -132,7 +132,12 @@ namespace Mika.World.Model
                 case IntentStart start:
                     Seq = start.Seq;
                     _intents[start.Intent.Id] = start.Intent;
+                    // Comme le noyau : une action qui commence arrache l'acteur à ce qu'il faisait, sans changement
+                    // dans la trame (ni l'intent ni sa fin ne portent d'occupation remise à rien).
+                    var interrupted = _actors.TryGetValue(start.Intent.Actor, out var starter) && starter.Activity != null;
+                    if (interrupted) starter.Activity = null;
                     IntentStarted?.Invoke(start.Intent);
+                    if (interrupted) ActorChanged?.Invoke(start.Intent.Actor);
                     break;
                 case IntentEnd end:
                     Seq = end.Seq;

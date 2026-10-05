@@ -41,6 +41,8 @@ namespace Mika.World.Engine
         readonly HashSet<string> _missingAssets = new HashSet<string>();
         readonly HashSet<string> _missingAnchors = new HashSet<string>();
         readonly HashSet<WorldObject> _spawned = new HashSet<WorldObject>();
+        // Les occupations montrées qui ont une échéance : à quitter quand elle passe (aucune trame ne le dira).
+        readonly Dictionary<string, Activity> _bounded = new Dictionary<string, Activity>();
 
         WorldMirror _mirror;
         KernelClock _clock;
@@ -321,9 +323,10 @@ namespace Mika.World.Engine
                 var visitor = _mirror.Visitors.TryGetValue(state.Id, out var v) ? v : null;
                 body = EnsureActor(state.Id, visitor?.Asset ?? "avatars/default", visitor?.Label);
             }
-            body.SetActivity(state.Activity?.Name);
-            if (body.TryGetComponent<BodyActivity>(out var activity))
-                activity.Set(state.Activity?.Name, state.Activity?.Object);
+            var live = Expired(state.Activity) ? null : state.Activity;
+            if (live?.Until != null) _bounded[state.Id] = live;
+            else _bounded.Remove(state.Id);
+            ShowActivity(body, live);
             var player = body.GetComponent<IntentPlayer>();
             if (player != null && player.Current != null && !instant) return; // l'action en cours amène le corps
             var place = Place(state.Place);
@@ -335,6 +338,34 @@ namespace Mika.World.Engine
             }
             if (instant || Vector3.Distance(body.transform.position, place.Position) > 2.5f || body.Posture != state.Posture)
                 body.Snap(place.Position, place.Rotation, state.Posture, place);
+        }
+
+        static void ShowActivity(ActorBody body, Activity activity)
+        {
+            body.SetActivity(activity?.Name);
+            if (body.TryGetComponent<BodyActivity>(out var shown))
+                shown.Set(activity?.Name, activity?.Object);
+        }
+
+        /// <summary>
+        /// Une occupation bornée a passé son échéance : le noyau ne la prête plus (il compare <c>until</c> à
+        /// maintenant, sans événement), le corps la quitte. Sans horloge recalée, on ne sait pas : elle reste.
+        /// </summary>
+        bool Expired(Activity activity) =>
+            activity?.Until is long until && _clock != null && _clock.Synced && until <= _clock.NowUs;
+
+        void Update()
+        {
+            if (_bounded.Count == 0 || _clock == null || !_clock.Synced) return;
+            List<string> due = null;
+            foreach (var kv in _bounded)
+                if (Expired(kv.Value)) (due ??= new List<string>()).Add(kv.Key);
+            if (due == null) return;
+            foreach (var id in due)
+            {
+                _bounded.Remove(id);
+                if (_actors.TryGetValue(id, out var body) && body != null) ShowActivity(body, null);
+            }
         }
 
         void OnObjectChanged(string id)
