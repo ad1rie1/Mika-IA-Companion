@@ -44,6 +44,7 @@ import {
   restoredStatus,
   stripProsody,
   timeMarkers,
+  whyLink,
   withAttachments,
   writeCache,
   sentFiles,
@@ -177,6 +178,11 @@ export class ChatOverlay {
   private truncated = false;
   /** Cache key for *this* identity's thread — see HISTORY_KEY_PREFIX. */
   private historyKey: string;
+  /**
+   * Compte opératrice : chaque parole porte au survol « pourquoi ? », vers sa
+   * page dans la console (voir chatSync.whyLink). Faux pour tout autre compte.
+   */
+  private operator = false;
   /**
    * La bande des cartes d'accord (voir approvals.ts), épinglée au-dessus de la
    * saisie plutôt que dans le fil : ce n'est pas une parole, et une demande qui
@@ -323,6 +329,16 @@ export class ChatOverlay {
     } catch {
       // Quota exceeded / private mode — history is best-effort only.
     }
+  }
+
+  /**
+   * Une connexion opératrice voit sous ses paroles où elles s'expliquent. Le
+   * fil restauré est déjà peint : il se repeint pour porter (ou perdre) les liens.
+   */
+  setOperator(operator: boolean) {
+    if (operator === this.operator) return;
+    this.operator = operator;
+    this.repaint({ animate: false });
   }
 
   /** Wipe the displayed messages + persisted history (typing bubble kept). */
@@ -1032,6 +1048,21 @@ export class ChatOverlay {
     if (msg.sender === "vtuber") renderInline(bubble, msg.text);
     else bubble.textContent = msg.text;
     for (const file of msg.files ?? []) bubble.append(this.buildFile(file));
+    // Pour une opératrice : où cette parole (ou ce silence) s'explique. Le
+    // rendu est rejoué à chaque fusion, donc le lien vient dès que la bulle
+    // reçoit son identifiant serveur.
+    const why = this.operator ? whyLink(msg) : undefined;
+    if (why) {
+      const link = document.createElement("a");
+      link.className = "chat-why";
+      link.href = `${API_BASE}${why.href}`;
+      link.target = "_blank";
+      link.rel = "noopener";
+      link.textContent = why.label;
+      link.title = "L'explication dans la console";
+      bubble.classList.add("with-why");
+      bubble.append(link);
+    }
 
     const parts: string[] = [];
     if (msg.inner) parts.push("pensée à voix haute");

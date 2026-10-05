@@ -278,6 +278,27 @@ export function consoleHref(href: unknown): string | undefined {
     : undefined;
 }
 
+/**
+ * « Pourquoi a-t-elle dit ça ? », pour une opératrice : la page de la console
+ * qui explique une bulle (`/inspecteur/parole/<seq>`), ou `undefined`.
+ *
+ * L'identifiant serveur d'une bulle est le `seq` du journal, celui que la
+ * console sait expliquer. Une de ses paroles (réponse ou initiative) y mène ;
+ * une pensée murmurée n'en a pas (pas dans le fil). Un message de la personne
+ * n'y mène que quand sa réponse ne viendra pas (`replyNote`) : la même page dit
+ * alors pourquoi elle n'a pas répondu. Le lien n'ouvre aucun droit — la console
+ * garde sa propre porte d'opératrice.
+ */
+export function whyLink(msg: StoredMessage): { href: string; label: string } | undefined {
+  if (typeof msg.id !== "number" || !Number.isInteger(msg.id) || msg.id <= 0) return undefined;
+  let label: string;
+  if (msg.sender === "vtuber" && !msg.inner) label = "pourquoi ?";
+  else if (msg.sender === "user" && msg.replyNote) label = "pourquoi pas de réponse ?";
+  else return undefined;
+  const href = consoleHref(`/inspecteur/parole/${msg.id}`);
+  return href ? { href, label } : undefined;
+}
+
 /** Record what the server said became of a message we sent.
  *
  * `failed` : the message was refused (it never reached her). `settled` : no

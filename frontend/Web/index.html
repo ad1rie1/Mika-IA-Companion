@@ -332,6 +332,41 @@
         text-decoration: line-through;
         text-decoration-color: rgba(248, 113, 113, 0.6);
       }
+      /* « pourquoi ? » d'une opératrice (chatSync.whyLink) : la page de la
+         console qui explique cette parole, ou ce silence. Posé sur le bord
+         haut de la bulle, du côté où elle s'aligne : il ne déborde pas du fil
+         et ne pousse aucune bulle. Il s'allume au survol ou au focus clavier ;
+         sans survol (écran tactile), il reste visible dans la bulle. */
+      .chat-bubble.with-why { position: relative; }
+      .chat-why {
+        position: absolute;
+        top: -8px;
+        padding: 1px 8px;
+        border-radius: 8px;
+        font-size: 11px;
+        font-style: italic;
+        white-space: nowrap;
+        color: rgba(255, 255, 255, 0.85);
+        background: rgba(26, 26, 46, 0.9);
+        text-decoration: none;
+        opacity: 0;
+        transition: opacity 0.15s;
+      }
+      .chat-bubble.vtuber .chat-why { left: 8px; }
+      .chat-bubble.user .chat-why { right: 8px; }
+      .chat-bubble:hover .chat-why,
+      .chat-why:focus-visible { opacity: 1; }
+      .chat-why:hover { text-decoration: underline; }
+      @media (hover: none) {
+        .chat-why {
+          position: static;
+          display: block;
+          margin-top: 4px;
+          padding: 0;
+          background: none;
+          opacity: 0.7;
+        }
+      }
 
       /* Said out loud rather than hidden: the catch-up dropped its oldest
          part, so the thread above this line is not continuous. */
