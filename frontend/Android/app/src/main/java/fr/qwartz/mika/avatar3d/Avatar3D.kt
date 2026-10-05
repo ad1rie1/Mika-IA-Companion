@@ -68,10 +68,16 @@ fun Avatar3D(modifier: Modifier = Modifier, onSurface: (AvatarSurface) -> Unit =
 /**
  * Mika vivante : la vue 3D, ses mouvements chargés une fois, et ce qu'elle ressent appliqué à chaque changement de
  * [state]. Une nouvelle parole (même à la même émotion) peut déclencher un geste ; une humeur qui dérive ne change
- * que la posture. `userTyping` augmente à chaque frappe de la personne.
+ * que la posture. `wave` / `nod` : le salut de retrouvailles. `userTyping` augmente à chaque frappe de la personne.
  */
 @Composable
-fun LiveAvatar3D(state: Avatar3DState, wave: Boolean = false, userTyping: Int = 0, modifier: Modifier = Modifier) {
+fun LiveAvatar3D(
+    state: Avatar3DState,
+    wave: Boolean = false,
+    nod: Boolean = false,
+    userTyping: Int = 0,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val library = remember { MotionLibrary(context) }
     var controller by remember { mutableStateOf<AvatarController?>(null) }
@@ -104,7 +110,9 @@ fun LiveAvatar3D(state: Avatar3DState, wave: Boolean = false, userTyping: Int = 
     LaunchedEffect(c, state.sleepPhase) { c?.setSleepPhase(state.sleepPhase) }
     LaunchedEffect(c, state.energy) { c?.setEnergy(state.energy) }
     LaunchedEffect(c, state.replyPending) { c?.setReplyPending(state.replyPending) }
-    LaunchedEffect(c, wave) { if (wave) c?.wave() }
+    // Un seul geste par retrouvailles, celui du moment où elles commencent : une humeur fraîche arrivée pendant le
+    // salut change son visage, pas son geste.
+    LaunchedEffect(c, wave || nod) { if (wave) c?.wave() else if (nod) c?.nod() }
     // Chaque frappe dans la barre de saisie : elle se sait écoutée, son regard se pose sur la personne.
     LaunchedEffect(c, userTyping) { if (userTyping > 0) c?.noteUserTyping() }
 }

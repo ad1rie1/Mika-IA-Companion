@@ -171,11 +171,12 @@ fun ChatScreen(
     Box(Modifier.fillMaxSize()) {
         if (scene != null) {
             if (vm.has3d) {
-                // Mika en 3D native ; le coucou de retrouvailles devient son vrai geste.
+                // Mika en 3D native ; le salut de retrouvailles devient son vrai geste (coucou ou hochement).
                 AvatarStage(scene.aura, scene.asleep) {
                     LiveAvatar3D(
                         state3d,
-                        wave = scene.portrait == AvatarDirector.WAVE,
+                        wave = scene.greeting == AvatarDirector.Greeting.WAVE,
+                        nod = scene.greeting == AvatarDirector.Greeting.NOD,
                         userTyping = keystrokes,
                         modifier = Modifier.fillMaxSize(),
                     )

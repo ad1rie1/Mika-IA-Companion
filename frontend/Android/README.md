@@ -39,7 +39,8 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
   ce à quoi elle repense, le rêve de la nuit, son dernier journal, qui elle est devenue, ses besoins, et ses
   projets en cours si tu es propriétaire. Une carte sans données n'apparaît pas.
 - **Mika en fond** : derrière la conversation, Mika en 3D native, dans une lumière qui suit son humeur. Elle vit
-  (souffle, gestes, regard, clignements, cheveux), fait coucou quand on la retrouve et s'endort la nuit (lumière
+  (souffle, gestes, regard, clignements, cheveux), te salue à la mesure de ton absence (un hochement après un
+  moment, un coucou après sa nuit, jamais joyeux si elle est fâchée) et s'endort la nuit (lumière
   bleue, étoiles en thème sombre). Désactivable (Paramètres › Apparence). Voir
   [Mika en fond](#mika-en-fond-3d-native).
 - **Paramètres** : compte et déconnexion, connexion en arrière-plan, démarrage avec le téléphone, batterie,

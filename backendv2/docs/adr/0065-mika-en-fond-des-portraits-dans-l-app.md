@@ -26,9 +26,14 @@ coûterait mémoire et batterie à un écran dont le sujet reste la conversation
    portraits ne sont pas dans le dépôt. Ils s'écrivent dans les assets de l'app (dossier ignoré). Une app construite
    sans eux n'a pas d'avatar et ne propose pas l'interrupteur.
 4. *Le choix est une fonction pure de ce que l'app sait déjà* (`AvatarDirector`) : endormie d'abord (rien ne la
-   réveille à l'écran), puis le salut quand on la retrouve après 20 minutes, puis la réflexion pendant « Mika
-   écrit… », puis son émotion si elle est assez marquée (intensité ≥ 0,25 ; une humeur légère cède à la fatigue sous
-   0,3 d'énergie), le visage au repos sinon. Aucune trame ni aucun champ nouveau côté serveur.
+   réveille à l'écran), puis le salut quand on la retrouve, puis la réflexion pendant « Mika écrit… », puis son
+   émotion si elle est assez marquée (intensité ≥ 0,25 ; une humeur légère cède à la fatigue sous 0,3 d'énergie), le
+   visage au repos sinon. Aucune trame ni aucun champ nouveau côté serveur. *Amendé (2026-10-05)* : le salut se
+   gradue selon l'absence, comptée en heure murale et gardée en base pour survivre à la mort du processus. Moins de
+   20 minutes : rien. Moins de 6 heures, ou dans la même demi-journée : un regard et un hochement, le portrait reste
+   le sien. Au-delà, après sa nuit (avant 5 h, la nuit compte avec la veille) ou une longue absence : le coucou, au
+   plus un par demi-journée. Son humeur le tempère : une émotion négative d'au moins 0,4, ou la fatigue, réduit le
+   coucou au hochement, sous la lumière de son émotion.
 5. *Vivante sans changer d'image* : un souffle (le haut du corps monte d'un ou deux pixels), des clignements
    irréguliers et parfois doubles, un fondu et un petit élan à chaque changement de pose, une lumière qui suit la
    famille de l'émotion, et la nuit (ombre bleue, étoiles en thème sombre, « z » qui montent). Tout s'arrête quand

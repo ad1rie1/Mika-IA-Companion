@@ -77,9 +77,14 @@ class AvatarController(
         }
     }
 
-    /** Coucou de la main, quand on la retrouve. */
+    /** Coucou de la main, quand on la retrouve après une vraie absence. */
     fun wave() {
         machine.requestGesture(WAVE_CLIP)
+    }
+
+    /** Un hochement de tête, quand on revient après un moment : elle lève les yeux, sans grand salut. */
+    fun nod() {
+        machine.requestGesture(NOD_CLIP)
     }
 
     /** Elle compose sa réponse (« Mika écrit… ») : le regard d'une réflexion — porté par les couches du corps. */
@@ -152,6 +157,7 @@ class AvatarController(
     companion object {
         const val YAWN_MIN_FATIGUE = 0.55f
         const val WAVE_CLIP = "gesture_wave"
+        const val NOD_CLIP = "gesture_nod"
         val YAWN_INTERVAL_S = 120f to 300f
     }
 }
