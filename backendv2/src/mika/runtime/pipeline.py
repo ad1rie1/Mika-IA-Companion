@@ -143,6 +143,9 @@ class EpisodeRequest:
     trigger: str = ""
     reply_to: int | None = None
     message: str = ""
+    #: combien de caractères, au début de ``message``, la personne a tapés (la suite vient de ses pièces
+    #: jointes) : le composeur coupe la suite d'abord ; ``None`` : rien à séparer
+    typed_chars: int | None = None
     selected: Row | None = None
     reason: str = ""
     priority: int = 1
@@ -357,6 +360,7 @@ class EpisodeRunner:
                     blocks, kind=req.kind, audience_level=audience.level, witness_level=audience.witness_level,
                     tied_level=audience.tied_level, muted_tags=policy.muted_tags, message=message, budget=self.budget,
                     reserved=_reserved(persona, more, declared) if policy.role is not None else 0,
+                    typed_chars=req.typed_chars if message == req.message else None,
                 )
                 report.trace = trace
                 ep.seen.update(_composition(req, audience, policy.role, message, trace, enrich),
