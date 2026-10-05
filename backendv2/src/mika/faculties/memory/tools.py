@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.faculties.memory.faculty import MEMORY, params
+from mika.faculties.memory.life import kept_too_early
 from mika.faculties.memory.recall import (
     about_us,
     between_us,
@@ -22,6 +23,7 @@ from mika.faculties.memory.recall import (
     relevance,
     topic,
     verdict_of,
+    when_words,
 )
 from mika.faculties.memory.salience import age_words, tag
 from mika.vocab.episodes import CONVERSATIONAL, WORKING
@@ -83,5 +85,8 @@ async def memory_promise_done(args: PromiseArgs, ctx: Any) -> str:
     person = ctx.frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     if promise is None or (person is not None and promise.to != person):
         return "Je ne trouve pas cette promesse (déjà réglée, ou faite à quelqu'un d'autre)."
+    if args.status == c.HONORED and promise.due is not None and kept_too_early(promise, ctx.frame.now, ctx.frame):
+        # la règle de la consolidation (ADR 0052) : la veille, « je te le rappellerai » n'est pas la tenir
+        return f"C'est pour {when_words(promise.due, ctx.frame)} : tu la tiendras ce jour-là."
     await ctx.emit(c.PROMISE_RESOLVED.draft(promise=args.promise, status=args.status, by="tool"))
     return "C'est noté." if args.status == c.HONORED else "D'accord, tu l'as laissée tomber."
