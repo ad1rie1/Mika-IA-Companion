@@ -9,7 +9,9 @@
   prend d'elle-même la parole ou qu'elle travaille — jamais en réponse à ce
   qu'on vient de lui dire ; ce qui l'a vraiment touchée est déjà devenu une
   pensée, et ``rss_list`` est là si on le lui demande. Il ne s'y montre que
-  tant que c'est une nouvelle (``fresh_for_us``, sur son horloge).
+  tant que c'est une nouvelle (``fresh_for_us``, sur son horloge) ; un titre
+  qu'une initiative visible a eu sous les yeux (``rss:<article>``) est dit à
+  sa cible et ne revient plus dans ses initiatives vers elle.
 - **Lire** (outils) : lister, lire un article — par son identifiant, jamais
   une adresse qu'un texte aurait soufflée ; lire va sur le réseau (vers une
   machine publique seulement, vérifié par l'adaptateur) : réservé à ses
@@ -33,7 +35,9 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field
 
 from mika.contracts import body as body_c
+from mika.contracts import identity as identity_c
 from mika.contracts import rss as c
+from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant
 from mika.kernel.events import Content
@@ -73,6 +77,8 @@ from mika.vocab.episodes import WORKING, Kind
 
 KEEP = 50
 BUNDLE = "rss"
+#: la provenance d'un titre montré dans une initiative (``rss:<article>``) : dit à sa cible, il ne lui revient pas
+TOLD_PROVENANCE = "rss:"
 STOP = frozenset({"surtout", "mais", "sans", "avec", "pour", "dans", "tout", "tous", "toute", "toutes", "elle",
                   "joue", "grosse", "petite", "beaucoup", "assume", "resultats", "variables", "amateur", "etre",
                   "cette", "plus", "moins", "comme", "leur", "leurs", "notre", "votre", "seul", "sujet", "devient",
@@ -117,9 +123,13 @@ class Seen:
 @dataclass(frozen=True, slots=True)
 class RssState:
     noticed: FrozenDict[str, Seen] = field(default_factory=FrozenDict)
+    #: les titres qu'elle a déjà dits d'elle-même : article → personne → instant (élagués avec ``noticed``)
+    told: FrozenDict[str, FrozenDict[str, int]] = field(default_factory=FrozenDict)
 
 
-RSS = Faculty("rss", state=RssState, init=lambda p: RssState(), params=RssParams)
+#: v2 : ce qu'elle a déjà dit d'un titre, et à qui (``told``) — sans perte : les énoncés d'avant ne portaient
+#: aucune provenance ``rss:``
+RSS = Faculty("rss", state=RssState, init=lambda p: RssState(), params=RssParams, state_version=2)
 RSS.bundle(BUNDLE, "les flux d'actualité : les derniers titres, lire un article")
 RSS.declare(*c.ALL)
 
@@ -132,11 +142,30 @@ def params(p: RssParams | None) -> RssParams:
 def _noticed(s: RssState, e, cx) -> RssState:
     d = e.data
     noticed = s.noticed.set(d.entry, Seen(e.seq, d.feed, d.pertinence, e.at, d.summary.ref or ""))
+    told = s.told
     if len(noticed) > KEEP:
         for k, _ in sorted(noticed.items(), key=lambda kv: kv[1].seq)[: len(noticed) - KEEP]:
             noticed = noticed.delete(k)
-    return replace(s, noticed=noticed)
+            told = told.delete(k)
+    return replace(s, noticed=noticed, told=told)
 
+
+@RSS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON])
+def _told(s: RssState, e, cx) -> RssState:
+    """Une initiative visible qui avait ces titres sous les yeux (``rss:<article>``) : à la personne visée, ils
+    sont dits — ils ne lui reviendront pas comme des nouvelles. À une autre, si."""
+    d = e.data
+    if not d.visible or not d.target or d.kind != Kind.INITIATIVE:
+        return s
+    shown = [k for k in (p[len(TOLD_PROVENANCE):] for p in d.provenance if p.startswith(TOLD_PROVENANCE))
+             if k in s.noticed]
+    if not shown:
+        return s
+    person = cx.facts.get(identity_c.PERSON(d.target))
+    told = s.told
+    for k in shown:
+        told = told.set(k, told.get(k, FrozenDict()).set(person, e.at))
+    return replace(s, told=told)
 
 
 @RSS.fact(c.HEADLINES)
@@ -216,9 +245,15 @@ BACKGROUND = [Kind.INITIATIVE, Kind.STEP]
 
 def _shown(s: RssState, frame: Frame) -> list[c.Headline]:
     """Les titres « dans ses flux » : ceux qu'elle a remarqués récemment, sur son horloge — un titre de lundi
-    n'est plus une nouvelle le vendredi, même si rien de neuf n'est venu depuis."""
+    n'est plus une nouvelle le vendredi, même si rien de neuf n'est venu depuis. Quand elle écrit d'elle-même à
+    quelqu'un, pas ceux qu'elle lui a déjà dits : on ne ressort pas à une amie la nouvelle qu'on lui a apprise.
+    Au travail, seule l'ancienneté compte (explorer ce qu'elle a déjà raconté reste légitime)."""
     p = params(frame.env.params_of("rss", frame.root))
-    return [h for h in frame.get(c.HEADLINES) if frame.now - h.at <= p.fresh_for_us][:3]
+    ep = frame.episode
+    person = (frame.get(identity_c.PERSON(ep.target))
+              if ep is not None and ep.kind == Kind.INITIATIVE and ep.target else None)
+    return [h for h in frame.get(c.HEADLINES) if frame.now - h.at <= p.fresh_for_us
+            and (person is None or person not in s.told.get(h.entry, FrozenDict()))][:3]
 
 
 @RSS.enricher("headlines", episodes=BACKGROUND, deadline_ms=300)
@@ -231,12 +266,15 @@ async def _texts(s: RssState, frame: Frame, ports: Mapping[str, Any]) -> dict[st
 
 
 @RSS.section("headlines", zone=Zone.VOLATILE, episodes=BACKGROUND, trim_rank=10,
-             title="DANS TES FLUX", untrusted=True, reads=[c.HEADLINES])
+             title="DANS TES FLUX", untrusted=True, reads=[c.HEADLINES, identity_c.PERSON])
 def _section(s: RssState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     texts = enrich.get("headlines") or {}
-    lines = [f"[{h.entry}] {inert(tokenless(texts[h.summary_ref]))}" for h in _shown(s, frame)
-             if texts.get(h.summary_ref)]
-    return SectionBody("\n".join(lines)) if lines else None
+    shown = [h for h in _shown(s, frame) if texts.get(h.summary_ref)]
+    if not shown:
+        return None
+    lines = [f"[{h.entry}] {inert(tokenless(texts[h.summary_ref]))}" for h in shown]
+    # provenance voyage dans l'énoncé (dit à sa cible, un titre ne lui revient pas)
+    return SectionBody("\n".join(lines), provenance=tuple(f"{TOLD_PROVENANCE}{h.entry}" for h in shown))
 
 
 class ListArgs(BaseModel):
