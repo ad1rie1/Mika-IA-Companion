@@ -454,14 +454,22 @@ class ForgeHost:
                  "--ro-bind", str(WORKER.resolve()), "/runner/worker.py", "--chdir", "/tmp"]
         return [*args, "--", self.python, "-I", "-S", "/runner/worker.py"]
 
-    def _start(self, app: str, version: int) -> _Worker | str:
+    def _start(self, app: str, info: AppInfo, call: _Call) -> _Worker | str:
         env = {"PATH": "/usr/bin:/bin", "HOME": "/tmp", "LANG": "C.UTF-8", "PYTHONIOENCODING": "utf-8",
                "PYTHONDONTWRITEBYTECODE": "1"}
         proc = subprocess.Popen(self._command(app), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, env=env, start_new_session=True,
                                 preexec_fn=self._limits)  # noqa: PLW1509 — les limites du processus fils
-        worker = _Worker(proc, version)
-        hello = self._read(worker, time.monotonic() + self.limits.load_timeout_s)
+        worker = _Worker(proc, info.version)
+        deadline = call.deadline = time.monotonic() + self.limits.load_timeout_s
+        hello = self._read(worker, deadline)
+        # un ``print`` ou un ``api.*`` au niveau du module demande un service avant de se dire chargé
+        while isinstance(hello, dict) and "host" in hello:
+            reply = self._serve(app, info, str(hello.get("host")), hello.get("params") or {}, call)
+            if not self._send(worker, reply):
+                hello = "le processus de l'app ne répond plus"
+                break
+            hello = self._read(worker, deadline)
         if not isinstance(hello, dict) or not hello.get("loaded"):
             self._kill(worker)
             reason = hello.get("error") if isinstance(hello, dict) else hello
@@ -587,7 +595,7 @@ class ForgeHost:
         if w is None or w.version != info.version or w.proc.poll() is not None:
             if w is not None:
                 self._stop(app)
-            got = self._start(app, info.version)
+            got = self._start(app, info, call)
             if isinstance(got, str):
                 self._log(app, got)
                 return done(False, error=got, killed=True)
