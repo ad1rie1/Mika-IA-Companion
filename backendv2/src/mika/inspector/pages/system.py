@@ -652,12 +652,22 @@ async def stockage(ui: Any, request: Request) -> list[Any]:
         *backup_blocks(ui),
         Note("Sauvegarder : « mika --data DOSSIER backup ARCHIVES --keep 14 » (sans risque serveur en marche) ; "
              "vérifier : « mika --data DOSSIER verify ARCHIVE » ; restaurer (serveur arrêté) : « mika restore "
-             "ARCHIVE ». Chaque sauvegarde et chaque vérification se notent ici.", "muted"),
+             "ARCHIVE ». Chaque sauvegarde (réussie ou non) et chaque vérification se notent ici.", "muted"),
     ]
 
 
 #: au-delà, une sauvegarde est « ancienne » (le tableau de bord le signale)
 BACKUP_LATE_DAYS = 2
+
+
+def _failed_attempt(got: Any) -> dict[str, Any]:
+    """La dernière tentative de sauvegarde si elle a échoué après la dernière réussite (vide sinon : une
+    réussite ultérieure éteint l'alerte d'elle-même ; une installation qui n'a rien noté n'en a pas)."""
+    attempt = got.get("tentative") or {}
+    last = got.get("sauvegarde") or {}
+    if attempt and not attempt.get("ok") and int(attempt.get("at") or 0) > int(last.get("at") or 0):
+        return attempt
+    return {}
 
 
 def backup_state(ui: Any) -> tuple[str, str]:
@@ -667,6 +677,9 @@ def backup_state(ui: Any) -> tuple[str, str]:
         return "", ""
     got = fn() or {}
     last = got.get("sauvegarde") or {}
+    failed = _failed_attempt(got)
+    if failed:
+        return "danger", f"la dernière tentative a échoué : {failed.get('erreur', '?')}"[:160]
     if not last:
         return "warn", "aucune sauvegarde notée : « mika backup »"
     age = (ui.now() - int(last.get("at") or 0)) / DAY
@@ -684,13 +697,16 @@ def backup_blocks(ui: Any) -> list[Any]:
         return []
     got = fn() or {}
     last, check, archives = got.get("sauvegarde") or {}, got.get("verification") or {}, got.get("archives") or []
+    failed = _failed_attempt(got)
     head = ui.kernel.mind.head
     tone, text = backup_state(ui)
     since = head - int(last.get("tete") or 0) if last else 0
     out: list[Any] = [Stats((
         Stat("Dernière sauvegarde", When(int(last["at"])) if last else "jamais", text, tone),
+        *([Stat("Dernière tentative", When(int(failed.get("at") or 0)), f"échec : {failed.get('erreur', '?')}"[:120],
+                "danger")] if failed else []),
         Stat("Depuis", f"{since} événement(s)" if last else "—", "écrits depuis, pas encore sauvegardés",
-             "warn" if last and since > 0 and tone == "warn" else ""),
+             "warn" if last and since > 0 and (tone == "warn" or failed) else ""),
         Stat("Dernière vérification", When(int(check["at"])) if check else "jamais",
              ("réussie" + "".join(f" — {r}" for r in check.get("remarques") or []) if check.get("ok")
               else f"échec : {check.get('erreur', '?')}")[:120] if check else
