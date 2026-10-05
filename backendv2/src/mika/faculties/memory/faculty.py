@@ -2,7 +2,8 @@
 
 La tranche ne garde que des résumés (point de contrôle, messages pas encore
 relus, promesses en cours et ce qu'elle a fait pour les tenir, moments de la
-vie des autres à venir ou tout juste passés, situations en cours, la dernière
+vie des autres à venir ou tout juste passés, situations en cours (et quand la
+personne a dit qu'elles étaient finies), la dernière
 fois que quelque chose de grave a touché chacun) ; les
 éléments retenus vivent dans la projection T0 ``memory_items`` et leurs
 vecteurs dans l'index (un cache).
@@ -325,7 +326,8 @@ class MemoryState:
 #: v4 : un moment repris est un jugement enregistré (``moment_followed``), plus « elle l'avait sous les yeux » ;
 #: les situations en cours ; tenir une promesse au moment dit.
 #: v5 : l'importance d'un moment, ce qui se fête, et ce qui touche gravement quelqu'un (ADR 0052).
-MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=5)
+#: v6 : une situation en cours prend fin quand la personne dit qu'elle est finie (``situation_ended``).
+MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=6)
 MEMORY.declare(*c.ALL)
 
 
@@ -423,6 +425,16 @@ def _followed(s: MemoryState, e, cx) -> MemoryState:
     return replace(s, events=s.events.set(ev.id, replace(ev, followed_at=e.at))) if ev is not None else s
 
 
+@MEMORY.reducer(c.SITUATION_ENDED)
+def _situation_ended(s: MemoryState, e, cx) -> MemoryState:
+    """Une situation qui durait est finie, de la bouche de la personne (« on a fini le déménagement », « on a dû
+    l'endormir ») : elle reste notée, mais n'est plus « en ce moment ». La première fin dite compte."""
+    ev = s.events.get(e.data.event)
+    if ev is None or not ev.ongoing or ev.ended_at:
+        return s
+    return replace(s, events=s.events.set(ev.id, replace(ev, ended_at=e.at)))
+
+
 @MEMORY.reducer(c.CONSOLIDATED)
 def _consolidated(s: MemoryState, e, cx) -> MemoryState:
     upto = max(s.checkpoint, e.data.upto)
@@ -437,17 +449,19 @@ def _noted(s: MemoryState, e, cx) -> MemoryState:
     depuis peu ; une situation en cours, quelques semaines ; les plus anciens
     partent d'abord. Le même moment renoté à la même date (la personne l'a dit
     elle-même après un tiers) reste repris s'il l'était ; une date qui change
-    repart de zéro."""
+    repart de zéro. Une situation finie, renotée, reste finie."""
     d = e.data
     p = params(cx.params)
     keep_until = e.at - round(p.event_recent_days * DAY)
     keep_ongoing = e.at - round(p.situation_days * DAY)
     old = s.events.get(d.replaces) if d.replaces is not None else None
     followed = old.followed_at if old is not None and old.when == d.when else 0
+    ended = old.ended_at if old is not None and old.ongoing and d.ongoing else 0
     events = s.events.delete(d.replaces) if d.replaces is not None else s.events
     events = events.set(e.seq, c.LifeEvent(e.seq, tuple(d.about), d.when, d.all_day, d.sensitivity,
                                            tuple(d.told_by), d.text.ref or "", d.secret, followed_at=followed,
-                                           ongoing=d.ongoing, importance=d.importance, festive=d.festive))
+                                           ongoing=d.ongoing, importance=d.importance, festive=d.festive,
+                                           ended_at=ended))
     stale = [ev.id for ev in events.values() if ev.when < (keep_ongoing if ev.ongoing else keep_until)]
     for i in stale:
         events = events.delete(i)
