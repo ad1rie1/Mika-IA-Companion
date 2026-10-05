@@ -259,8 +259,8 @@ def _last_from(frame: Frame, person: str) -> int:
 
 
 @MEMORY.propose(kinds=[Kind.INITIATIVE], reasons={c.KEEP_PROMISE: (0.0, 12.0)},
-                reads=[identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY, presence_c.PRESENT,
-                       transcript_c.LAST_FROM])
+                reads=[identity_c.PERSON, identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY,
+                       presence_c.PRESENT, transcript_c.LAST_FROM])
 def _keep(s: MemoryState, frame: Frame) -> list[Candidate]:
     """Une promesse datée, au moment dit : elle la tient d'elle-même. Pas si elles se sont parlé depuis le début
     de la fenêtre (la conversation en était l'occasion), ni après trop d'essais."""
@@ -275,19 +275,20 @@ def _keep(s: MemoryState, frame: Frame) -> list[Candidate]:
         tries = s.tries.get(pr.id) or Keeping()
         if not start <= now <= end or tries.retry_at > now or tries.attempts >= p.keep_attempts:
             continue
-        if _last_from(frame, pr.to) >= max(start, pr.at):
+        to = frame.get(identity_c.PERSON(pr.to)) or pr.to  # une adresse reliée depuis à quelqu'un parle pour lui
+        if _last_from(frame, to) >= max(start, pr.at):
             continue  # elles se sont parlé depuis : c'était l'occasion, le prompt le lui montrait
-        address = _address(frame, pr.to)
+        address = _address(frame, to)
         if address is None:
             continue
         ramp = min(1.0, max(0.0, (now - start) / (full - start)))
         evidence = KEEP_EVIDENCE_START + (p.keep_evidence - KEEP_EVIDENCE_START) * ramp
-        name = frame.get(identity_c.IDENTITY(pr.to)).name or frame.get(identity_c.IDENTITY(address)).name
+        name = frame.get(identity_c.IDENTITY(to)).name or frame.get(identity_c.IDENTITY(address)).name
         who = f"« {name} »" if name else "cette personne"
         when = "aujourd'hui" if pr.all_day else "maintenant"
         brief = (f"Tu avais promis à {who} quelque chose pour {when} — c'est dans « CE QUE TU LUI AS PROMIS » "
                  f"(n° {pr.id}) : c'est le moment de le faire. Fais-le simplement, comme quelqu'un qui tient parole.")
-        handles = frame.get(identity_c.HANDLES(pr.to)) or (pr.to,)
+        handles = frame.get(identity_c.HANDLES(to)) or (to,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         out.append(Candidate(Kind.INITIATIVE, address, c.KEEP_PROMISE, round(evidence, 3),
                              resources=frozenset({floor(address)}), guards=(guard,),

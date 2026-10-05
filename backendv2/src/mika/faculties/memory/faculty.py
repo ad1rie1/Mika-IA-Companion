@@ -13,6 +13,7 @@ yeux : c'est un jugement enregistré (``moment_followed``, ``life.py``).
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from typing import Annotated
 
@@ -503,22 +504,30 @@ def _checkpoint(s: MemoryState, cx) -> int:
     return s.checkpoint
 
 
-@MEMORY.fact(c.PROMISES_TO)
+def _speaks_for(cx, key: str, person: str) -> bool:
+    """Une clé notée alors (une adresse, ``name:…``) désigne cette personne maintenant : une adresse reliée depuis à
+    quelqu'un, un nom qu'un opérateur a relié à une personne parlent pour elle (ADR 0035, 0048)."""
+    return key == person or (cx.facts.get(identity_c.PERSON(key)) or key) == person
+
+
+@MEMORY.fact(c.PROMISES_TO, reads=[identity_c.PERSON])
 def _promises_to(s: MemoryState, cx, person: str) -> tuple[c.PendingPromise, ...]:
-    return tuple(p for p in s.promises.values() if p.to == person)
+    return tuple(p for p in s.promises.values() if _speaks_for(cx, p.to, person))
 
 
-@MEMORY.fact(c.LIFE_EVENTS)
+@MEMORY.fact(c.LIFE_EVENTS, reads=[identity_c.PERSON])
 def _life_events(s: MemoryState, cx, person: str) -> tuple[c.LifeEvent, ...]:
-    return tuple(sorted((ev for ev in s.events.values() if person in ev.about), key=lambda ev: (ev.when, ev.id)))
+    events = (ev for ev in s.events.values() if any(_speaks_for(cx, k, person) for k in ev.about))
+    return tuple(sorted(events, key=lambda ev: (ev.when, ev.id)))
 
 
-def hard_since(s: MemoryState, person: str, now: int, p: MemoryParams) -> int:
-    """Quand quelque chose de grave a touché cette personne, s'il y a moins de ``hard_days`` ; 0 sinon."""
-    at = s.hard.get(person, 0)
+def hard_since(s: MemoryState, keys: Collection[str], now: int, p: MemoryParams) -> int:
+    """Quand quelque chose de grave a touché cette personne (l'une des clés qui la désignent), s'il y a moins de
+    ``hard_days`` ; 0 sinon."""
+    at = max((s.hard.get(k, 0) for k in keys), default=0)
     return at if at and 0 <= now - at <= round(p.hard_days * DAY) else 0
 
 
-@MEMORY.fact(c.HARD_TIMES)
+@MEMORY.fact(c.HARD_TIMES, reads=[identity_c.PERSON])
 def _hard_times(s: MemoryState, cx, person: str) -> int:
-    return hard_since(s, person, cx.now, params(cx.params))
+    return hard_since(s, [k for k in s.hard if _speaks_for(cx, k, person)], cx.now, params(cx.params))
