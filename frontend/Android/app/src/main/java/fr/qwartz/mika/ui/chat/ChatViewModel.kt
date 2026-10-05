@@ -298,7 +298,10 @@ class ChatViewModel(private val graph: AppGraph, private val saved: SavedStateHa
     }
 
     fun retry(localId: Long) {
-        viewModelScope.launch { graph.chat.retry(localId) }
+        viewModelScope.launch {
+            val result = graph.chat.retry(localId)
+            if (result is ChatRepository.SendResult.Rejected) notices = listOf(result.reason)
+        }
     }
 
     /**
