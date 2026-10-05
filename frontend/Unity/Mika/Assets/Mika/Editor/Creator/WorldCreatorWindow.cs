@@ -433,6 +433,17 @@ namespace Mika.Editor.Creator
                     EditorUtility.SetDirty(root);
                 }
             }
+            else if (result.Code == Refusal.Stale && _link.Mirror.World != null)
+            {
+                // Le monde du noyau a bougé depuis la comparaison : on recompare sur ce qu'il tient maintenant, à
+                // relire avant de renvoyer.
+                var root = Root;
+                if (root != null)
+                {
+                    Compare(root);
+                    _linkStatus = $"Le monde du noyau a changé entre-temps : comparaison relancée sur la révision {_link.Mirror.World.Rev}. Relisez les changements, puis renvoyez.";
+                }
+            }
             Repaint();
         }
 
