@@ -223,8 +223,9 @@ class MikaSocket(
         sendNow(FrameCodec.approval(id, decision, digest))
 
     /**
-     * Envoyer un message. `true` : la socket est ouverte, il part maintenant ; `false` : il attend
-     * une connexion, ou il est refusé (un accusé synthétique le dit).
+     * Envoyer un message. `true` : la socket est ouverte, il part maintenant (ou dès qu'un accusé
+     * libère une place parmi les envois en vol) ; `false` : il attend une connexion, ou il est
+     * refusé (un accusé synthétique le dit).
      */
     fun offer(chat: OutboundChat): Boolean {
         // Une trame que le transport refusera ne se met pas en file : chaque rejeu refermerait la socket.
@@ -308,6 +309,8 @@ class MikaSocket(
         // Le reçu : purgé avant les abonnés, pour qu'un abonné qui lève ne fasse jamais renvoyer.
         if (frame is ServerFrame.Ack && frame.clientMsgId.isNotEmpty()) forgetUnacked(frame.clientMsgId)
         deliver(frame)
+        // Un accusé libère une place parmi les envois en vol : la file reprend.
+        if (frame is ServerFrame.Ack && open) flushOutbox()
     }
 
     private fun handleGone(closeCode: Int?, httpCode: Int?) {
@@ -516,6 +519,10 @@ class MikaSocket(
     private suspend fun drain(gen: Int) {
         while (gen == generation) {
             val entry = outbox.firstOrNull() ?: return
+            // Au plus MAX_IN_FLIGHT partis sans accusé, et jamais au point d'évincer du suivi un
+            // message encore en vol : le suivant attend un accusé (handleMessage reprend le vidage).
+            val inFlight = unacked.values.map { it.bytes }
+            if (OutboxPolicy.evictions(inFlight, entry.bytes, maxCount = MikaProtocol.MAX_IN_FLIGHT) > 0) return
             val sock = socket
             if (sock == null || !open) {
                 keepForNextOpen()

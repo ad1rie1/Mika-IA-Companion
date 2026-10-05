@@ -331,6 +331,8 @@ class MikaSocketTest {
         assertEquals(listOf(ack("c1", "send_abandoned")), acks)
         connect()
         last().open()
+        // Quatre en vol au plus : chaque accusé fait partir le suivant.
+        for (i in 2..21) last().receive("""{"type":"ack","client_msg_id":"c$i","status":"accepted"}""")
         val sent = last().frames().filter { it["type"]!!.jsonPrimitive.content == "chat" }
             .map { it["client_msg_id"]!!.jsonPrimitive.content }
         assertEquals(20, sent.size)
