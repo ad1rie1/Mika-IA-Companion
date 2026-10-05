@@ -235,6 +235,14 @@ namespace Mika.Avatar
         /// <summary>Elle marche (fourni par la couche de locomotion) : les yeux regardent le chemin.</summary>
         public bool Walking { get; set; }
 
+        /// <summary>Elle est à une occupation (fourni par la couche du corps) : seule, ses yeux y retournent entre
+        /// deux coups d'œil vers l'interlocuteur, de plus en plus longtemps.</summary>
+        public bool Occupied { get; set; }
+
+        /// <summary>L'interlocuteur bouge nettement à cette image (fourni par qui connaît son corps) : elle lève
+        /// les yeux vers lui, et son absorption repart de zéro.</summary>
+        public bool ViewerMoved { get; set; }
+
         /// <summary>Une vraie voix pilote la bouche (voir le champ de l'inspecteur).</summary>
         public bool ExternalVoice
         {
@@ -421,6 +429,8 @@ namespace Mika.Avatar
                 Reachable = reachable,
                 ViewerAngle = viewer.HasValue ? Mathf.Sqrt(viewer.Value.Pitch * viewer.Value.Pitch + viewer.Value.Yaw * viewer.Value.Yaw) : 0f,
                 Walking = Walking,
+                Occupied = Occupied,
+                ViewerMoved = ViewerMoved,
             });
             var eyes = _gaze.Step(dt, _intent, _emotion, _intensity, asleep, reachable ? viewer : null);
             ApplyEyes(runtime, eyes);

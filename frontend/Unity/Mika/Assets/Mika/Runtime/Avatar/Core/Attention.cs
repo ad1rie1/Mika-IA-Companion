@@ -53,6 +53,12 @@ namespace Mika.Avatar
         /// <summary>Distance angulaire à l'interlocuteur (rad) : dimensionne le saut quand le contact bascule.</summary>
         public float ViewerAngle;
         public bool Walking;
+        /// <summary>Elle est à une occupation (lire, taper, regarder dehors…) : seule, ses yeux y retournent entre
+        /// deux coups d'œil vers l'interlocuteur, et y restent de plus en plus longtemps.</summary>
+        public bool Occupied;
+        /// <summary>L'interlocuteur bouge nettement à cette image (il se déplace) : on lève les yeux vers qui bouge
+        /// près de soi.</summary>
+        public bool ViewerMoved;
     }
 
     public struct GazeIntent
@@ -153,6 +159,17 @@ namespace Mika.Avatar
         public const float WanderP = 0.75f;
         public static readonly (float lo, float hi) WanderDuration = (2.5f, 7f);
         public static readonly (float lo, float hi) WanderInterval = (2f, 6f);
+        /// <summary>
+        /// Seule, elle revient vers l'interlocuteur de moins en moins souvent : une pente, pas un seuil. La rêverie
+        /// (le temps passé ailleurs entre deux coups d'œil) est multipliée par une échelle qui monte de 1 à son
+        /// plafond en <see cref="AbsorptionRampS"/> de solitude tranquille. Occupée (un livre, l'écran), elle
+        /// s'absorbe nettement : 2,5–7 s au début, 20–56 s après dix minutes. Sans rien à faire, la seule personne
+        /// présente reste ce qu'il y a de plus intéressant à regarder : la pente est plus douce. Une parole, une
+        /// frappe, ou l'interlocuteur qui bouge la remettent à zéro.
+        /// </summary>
+        public const float AbsorptionRampS = 600f;
+        public const float AbsorbedMaxScale = 8f;
+        public const float IdleAbsorbedMaxScale = 3f;
 
         /// <summary>
         /// Points d'intérêt dans son repère sémantique, relatifs à SON devant (la porte, le lit, le sol, ses
@@ -190,6 +207,8 @@ namespace Mika.Avatar
         bool _wasPending;
         float _idleFor;
         bool _wandering;
+        bool _wasViewerMoving;
+        float _absorbedFor;
 
         public AttentionDirector(Func<float> random = null)
         {
@@ -211,8 +230,10 @@ namespace Mika.Avatar
 
             bool speakingStarted = input.Speaking && !_wasSpeaking;
             bool pendingStarted = input.ReplyPending && !_wasPending;
+            bool viewerStirred = input.ViewerMoved && !_wasViewerMoving;
             _wasSpeaking = input.Speaking;
             _wasPending = input.ReplyPending;
+            _wasViewerMoving = input.ViewerMoved;
 
             if (input.SleepPhase != SleepPhase.Awake)
             {
@@ -237,6 +258,7 @@ namespace Mika.Avatar
             _thinkingElapsed = input.ReplyPending ? _thinkingElapsed + dt : 0f;
             bool engaged = input.Speaking || input.ReplyPending || input.Listening;
             _idleFor = engaged ? 0f : _idleFor + dt;
+            _absorbedFor = engaged || input.ViewerMoved || _idleFor < WanderAfterS ? 0f : _absorbedFor + dt;
             if (engaged && _wandering)
             {
                 // Quelqu'un est là de nouveau : le regard ailleurs finit maintenant, pas quand il devait finir.
@@ -319,6 +341,16 @@ namespace Mika.Avatar
                     _offset = G(PlanningOffset.Pitch, PlanningOffset.Yaw * side);
                 }
                 bool alone = _idleFor >= WanderAfterS;
+                if (alone && viewerStirred && _aversionRemaining > 0f)
+                {
+                    // Il se lève, traverse la pièce, s'approche : on lève les yeux vers qui bouge près de soi —
+                    // maintenant, pas à la fin de la rêverie.
+                    _aversionRemaining = 0f;
+                    _wandering = false;
+                    _offset = default;
+                    _aversionTimer = 0f;
+                    _nextAversionAt = Sample(WanderInterval);
+                }
                 if (_aversionRemaining > 0f)
                 {
                     _aversionRemaining -= dt;
@@ -342,8 +374,13 @@ namespace Mika.Avatar
                         if (_random() < WanderP)
                         {
                             _wandering = true;
-                            _aversionRemaining = Sample(WanderDuration);
-                            _offset = WanderPoints[Math.Min(WanderPoints.Length - 1, (int)(_random() * WanderPoints.Length))];
+                            _aversionRemaining = Sample(WanderDuration) * AbsorptionScale(input.Occupied);
+                            // Occupée, ses yeux retournent à ce qu'elle fait (la tête y est déjà, portée par son
+                            // occupation) : une longue rêverie n'est pas un regard fixé sur la porte. Sans rien à
+                            // faire, ils parcourent la pièce.
+                            _offset = input.Occupied
+                                ? GazeAngles.Zero
+                                : WanderPoints[Math.Min(WanderPoints.Length - 1, (int)(_random() * WanderPoints.Length))];
                         }
                     }
                 }
@@ -403,6 +440,12 @@ namespace Mika.Avatar
             input.Listening ? AversionPListening : input.Speaking ? AversionPSpeaking : AversionPIdle;
 
         static float IntervalScale(AttentionInput input) => input.Listening ? 1.8f : input.Speaking ? 0.8f : 1f;
+
+        float AbsorptionScale(bool occupied)
+        {
+            float max = occupied ? AbsorbedMaxScale : IdleAbsorbedMaxScale;
+            return 1f + (max - 1f) * Math.Min(1f, _absorbedFor / AbsorptionRampS);
+        }
 
         float UpdateSaccade(float dt, AttentionInput input, AttentionState mode)
         {

@@ -30,7 +30,8 @@ event Action<string> ProsodicCue;             // "sigh" | "laugh" | "breath"
 
 En plus, facultatif : `event Action<SpeechBeat> BeatReached` (accent, insistance, question… au bon mot,
 pour que le corps hoche la tête), `SetReplyPending(bool)` (regard « je réfléchis »), `NoteUserTyping()`
-(regard d'écoute), `InnerVoice` (murmure à elle-même), `Walking`, `ExternalVoice`, et en lecture
+(regard d'écoute), `InnerVoice` (murmure à elle-même), `Walking`, `Occupied` et `ViewerMoved` (voir
+plus bas), `ExternalVoice`, et en lecture
 `Attention`, `EyeAngles`, `SpeechCursor`, `SpeechEmphasis`, `LipSyncMode`, `RichEmotionCount`,
 `ExpressionNames`, `IsReady`.
 
@@ -53,6 +54,11 @@ Règles à connaître :
 - **Une vraie voix** : cocher `ExternalVoice`, appeler `SeekSpeech` à chaque position rapportée (début
   d'énoncé, frontières de mot), puis `StopSpeaking` à la fin. L'estimation court entre deux recalages ; sa
   fin ne coupe plus la parole.
+- **Seule, elle s'absorbe** (Unity seulement, le web n'a pas ces entrées) : après 25 s sans parole ni
+  frappe, ses coups d'œil vers l'interlocuteur s'espacent avec la durée du silence — la rêverie entre deux
+  retours passe de ×1 à ×8 en dix minutes si `Occupied` (ses yeux restent alors sur ce qu'elle fait), à ×3
+  sinon. `ViewerMoved` (l'interlocuteur se déplace) coupe la rêverie en cours et remet la pente à zéro ;
+  une parole ou une frappe aussi.
 
 Le composant **possède le visage** : il écrit chaque image les poids de toutes ses expressions dans
 `Vrm10RuntimeExpression` (ordre d'exécution 10500, avant le `Vrm10Instance` à 11000 qui les applique), et
