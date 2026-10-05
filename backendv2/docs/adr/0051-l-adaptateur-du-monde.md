@@ -67,7 +67,8 @@ réveil de `body.woke`).
   perte par un écart, il n'en subit pas sur une connexion ouverte, et rattrape par `hello.after` en revenant.
 - Un `snapshot` peut arriver sans qu'on l'ait demandé (le réveil, une édition) : un client le pose comme à
   l'accueil.
-- Ce que le noyau ne sait pas encore faire répond `unsupported` (les actes des personnes, l'édition : P4, P5),
+- Ce que le noyau ne sait pas encore faire répond `unsupported` (les actes des personnes, la prose et ce
+  qu'un premier éditeur ne change pas encore — pièces, lieux, personnages : P4, P5 ; ADR 0050 §11),
   et la `presence` à l'entrée attend P4 (aucun `world.joined` n'est écrit ici : sans corps dans l'état, une
   présence annoncerait quelqu'un que le monde ne contient pas).
 - La console montre les clients du monde, qui tient le bail d'hôte et ce qui manque au moteur (Système › Le
