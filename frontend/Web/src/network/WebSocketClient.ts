@@ -83,7 +83,8 @@ export class WebSocketClient {
   /** Cumul de `chars` sur la file, tenu à jour à chaque entrée/sortie. */
   private outboxChars = 0;
   /**
-   * Réouvertures qu'un frame en file peut traverser sans réussir à partir.
+   * Réouvertures qu'un frame en file peut traverser sans réussir à partir —
+   * ou sans que son `ack` revienne avant l'abandon du socket qui le portait.
    * Au-delà il est abandonné et signalé : le remettre en file indéfiniment
    * garde une bulle « en attente d'envoi » que plus rien ne fera avancer.
    */
@@ -516,6 +517,14 @@ export class WebSocketClient {
    * l'annonce des évictions : ce qui revient est de la file d'attente comme
    * le reste, et l'ordre — en vol d'abord, tapé ensuite — décide seulement
    * de qui est évincé en premier si le budget ne suffit pas.
+   *
+   * Chaque socket abandonné avant l'accusé compte une tentative, comme une
+   * réouverture qui n'a pas réussi à faire partir le frame : sans cela un
+   * envoi qui meurt toujours en vol (un mandataire qui coupe les envois
+   * longs) repartait indéfiniment depuis zéro, des dizaines de Mo à chaque
+   * fois, et MAX_OUTBOX_ATTEMPTS ne bornait rien. Si le serveur l'avait reçu
+   * malgré tout, le fil rattrapé à l'ouverture suivante réadopte la bulle et
+   * la repasse « envoyée » : le refus annoncé ici se corrige de lui-même.
    */
   private requeueUnacked() {
     if (!this.unacked.size) return;
@@ -525,7 +534,13 @@ export class WebSocketClient {
     const queued = this.outbox;
     this.outbox = [];
     this.outboxChars = 0;
-    for (const entry of [...pending, ...queued]) {
+    const retried = pending.filter((entry) => {
+      entry.attempts += 1;
+      if (entry.attempts <= WebSocketClient.MAX_OUTBOX_ATTEMPTS) return true;
+      this.refuseFrame(entry.frame, "send_abandoned");
+      return false;
+    });
+    for (const entry of [...retried, ...queued]) {
       this.enqueue(entry);
     }
   }
