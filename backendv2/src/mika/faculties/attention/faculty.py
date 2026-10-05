@@ -399,7 +399,7 @@ class Exchange:
     felt: bool = False
     #: le dernier message de la personne clôt la conversation (« bonne nuit ») : y répondre n'attend rien
     closing: bool = False
-    #: quand la conversation s'est close (sa réponse à « bonne nuit », ou la personne partie juste après)
+    #: quand la conversation s'est close (« bonne nuit » lu, sa réponse, ou la personne partie juste après)
     closed_at: int = 0
 
 
@@ -443,8 +443,9 @@ class AttentionState:
 #: v5 : une conversation close (« bonne nuit ») n'est pas « sans réponse » ; le délai de réponse court sur les
 #: heures de la personne (le canal est retenu avec l'attente) ; un bel échange reste en tête.
 #: v6 : la dernière pensée de manque de chacun (un manque qui dure revient de plus en plus rarement, ADR 0058).
+#: v7 : un message qui clôt (« bonne nuit ») close la conversation dès sa lecture, même si elle se tait.
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    state_version=6)
+                    state_version=7)
 #: les manques dont on retient la dernière pensée (les plus récents)
 MISSING_KEPT = 64
 
@@ -689,8 +690,10 @@ def _worried(s: AttentionState, e, cx) -> AttentionState:
     permettra, en lui répondant, d'alléger ce qui la concerne."""
     d = e.data
     if d.closing and d.person in s.exchanges:
-        # « bonne nuit », « à demain » : la conversation se clôt ; y répondre n'attendra rien
-        s = replace(s, exchanges=s.exchanges.set(d.person, replace(s.exchanges[d.person], closing=True)))
+        # « bonne nuit », « à demain » : la conversation se clôt ; y répondre n'attendra rien — et la clôture vaut
+        # dès maintenant, même si elle ne répond pas (« [SILENCE] » après avoir déjà dit bonne nuit)
+        s = replace(s, exchanges=s.exchanges.set(d.person, replace(s.exchanges[d.person], closing=True,
+                                                                   closed_at=e.at)))
     if not d.concern:
         if d.valence >= 0 and d.valence >= d.expected - TONE_BACK and SHORT_CUE not in d.cues:
             return replace(s, eased=s.eased.set(d.person, e.at))
