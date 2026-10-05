@@ -29,6 +29,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from mika.contracts import body as body_c
+from mika.contracts import identity as identity_c
 from mika.contracts import place as place_c
 from mika.contracts import world as w
 from mika.faculties.world import plan
@@ -37,11 +38,12 @@ from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
+from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab.affect import Emotion
 from mika.vocab.episodes import CONVERSATIONAL
-from mika.vocab.privacy import Sensitivity
+from mika.vocab.privacy import Sensitivity, closeness_rank, hearable
 
 #: Le monde qu'elle habite au premier démarrage : sa chambre, telle que l'écran la montre.
 DEFAULT_WORLD = w.WorldDef.model_validate_json((Path(__file__).parent / "chambre.json").read_text(encoding="utf-8"))
@@ -96,6 +98,15 @@ def timing(p: WorldParams | None) -> plan.Timing:
 
 
 @dataclass(frozen=True, slots=True)
+class Felt:
+    """Un geste qu'on vient de lui faire : qui (son acteur), lequel, quand."""
+
+    actor: str
+    gesture: w.Gesture
+    at: int
+
+
+@dataclass(frozen=True, slots=True)
 class WorldState:
     definition: w.WorldDef
     actors: FrozenDict[str, w.ActorState] = field(default_factory=FrozenDict)
@@ -106,6 +117,8 @@ class WorldState:
     seq: int = 0
     #: ses occupations terminées des derniers jours (``world.lived`` y ajoute celle en cours)
     lived: tuple[w.Lived, ...] = ()
+    #: les gestes qu'on lui a faits ces dernières minutes (« AUTOUR DE TOI » les dit)
+    gestures: tuple[Felt, ...] = ()
 
 
 def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
@@ -113,11 +126,14 @@ def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
     return WorldState(definition=defn, actors=FrozenDict(actors), objects=FrozenDict(objects))
 
 
-WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=2)
+WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=3)
 
 #: Ce qu'on garde de ses occupations passées : trois jours, soixante au plus.
 LIVED_KEPT_US = 3 * DAY
 LIVED_KEPT = 60
+#: Ce qu'on garde des gestes qu'on lui a faits : quelques minutes, seize au plus.
+GESTURES_KEPT_US = 5 * MINUTE
+GESTURES_KEPT = 16
 WORLD.declare(*w.ALL)
 
 
@@ -177,6 +193,16 @@ def _ended(s: WorldState, e: Any, cx: Any) -> WorldState:
 def _changed(s: WorldState, e: Any, cx: Any) -> WorldState:
     actors, objects = plan.apply(s.actors, s.objects, e.data.changes, e.at)
     return _lived(s, actors, objects, e.seq, e.at)
+
+
+@WORLD.reducer(w.GESTURED)
+def _gestured(s: WorldState, e: Any, cx: Any) -> WorldState:
+    """Un geste vers quelqu'un : rien ne change dans le monde ; un geste qu'on lui fait, elle le garde quelques
+    minutes en tête (sa réplique suivante peut en parler)."""
+    if e.data.to_actor != w.MIKA:
+        return replace(s, seq=e.seq)
+    kept = tuple(x for x in s.gestures if x.at >= e.at - GESTURES_KEPT_US)[-(GESTURES_KEPT - 1):]
+    return replace(s, seq=e.seq, gestures=(*kept, Felt(actor=e.data.actor, gesture=e.data.gesture, at=e.at)))
 
 
 @WORLD.reducer(w.AUTHORED)
@@ -503,11 +529,15 @@ def _thing(s: WorldState, me: w.ActorState, oid: str, now: int) -> str:
 
 
 @WORLD.section("world", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["rhythm"], trim_rank=70,
-               title="AUTOUR DE TOI", reads=[body_c.SLEEP])
-def _around(s: WorldState, frame: Frame, enrich: Any) -> str | None:
+               title="AUTOUR DE TOI", reads=[body_c.SLEEP, identity_c.PERSON, identity_c.IDENTITY])
+def _around(s: WorldState, frame: Frame, enrich: Any) -> str | SectionBody | None:
     if not _awake(frame):
         return None  # elle dort, dans son lit : rien à dire à qui la réveille qu'il ne voie
-    return around(s, frame.now, params(frame.env.params_of("world", frame.root)))
+    text = around(s, frame.now, params(frame.env.params_of("world", frame.root)))
+    touched = _gestures_line(s, frame)
+    if touched is None:
+        return text
+    return SectionBody(f"{text}\n{touched[0]}", level=touched[1])
 
 
 # ── Ce qu'elle n'a pas pu faire ───────────────────────────────────────────
@@ -568,6 +598,89 @@ def setback(s: WorldState, intent: w.Intent, outcome: w.Outcome, reason: w.Refus
         pertinence=SETBACK_PERTINENCE, emotion=Emotion.FRUSTRATED.value, intensity=SETBACK_FRUSTRATION,
         sensitivity=int(Sensitivity.NONE), bundle="world", actor=intent.actor, object=obj,
         dedupe_key=f"echec:{intent.id}")
+
+
+# ── Ce qu'on lui fait ─────────────────────────────────────────────────────
+
+#: Un geste qu'on lui fait se remarque sans lui rester en tête : sous le seuil d'une pensée de l'attention, il ne
+#: fait naître ni pensée ni épisode — aucun appel de modèle à lui seul (ADR 0050 §6) ; « AUTOUR DE TOI » le dit à sa
+#: réplique suivante.
+GESTURE_PERTINENCE = 0.3
+#: Ce qu'un geste lui fait selon qui le fait (ADR 0013 : la proximité gradue, rien n'est interdit) — l'émotion et son
+#: intensité pour une inconnue, une connaissance, une amie, une proche, avant que l'attention ne la dose et ne
+#: l'habitue (le dixième coucou d'affilée ne lui fait presque plus rien). Un geste absent ne se ressent pas.
+GESTURE_FELT: dict[w.Gesture, tuple[tuple[Emotion, float], ...]] = {
+    w.Gesture.PAT_HEAD: ((Emotion.EMBARRASSED, 0.3), (Emotion.EMBARRASSED, 0.2), (Emotion.LOVE, 0.2),
+                         (Emotion.LOVE, 0.3)),
+    w.Gesture.POKE: ((Emotion.CONFUSED, 0.2), (Emotion.CONFUSED, 0.12), (Emotion.PLAYFUL, 0.15),
+                     (Emotion.PLAYFUL, 0.2)),
+    w.Gesture.WAVE: ((Emotion.HAPPY, 0.05), (Emotion.HAPPY, 0.07), (Emotion.HAPPY, 0.1), (Emotion.HAPPY, 0.12)),
+    w.Gesture.CLAP: ((Emotion.PROUD, 0.08), (Emotion.PROUD, 0.08), (Emotion.PROUD, 0.1), (Emotion.PROUD, 0.1)),
+    w.Gesture.NOD: ((Emotion.HAPPY, 0.03),) * 4,
+    w.Gesture.BOW: ((Emotion.HAPPY, 0.03),) * 4,
+}
+#: Un geste qu'on lui a fait, comme elle se le dit (après le nom de qui l'a fait).
+GESTURE_FR: dict[w.Gesture, str] = {
+    w.Gesture.WAVE: "t'a fait coucou",
+    w.Gesture.POINT: "t'a montrée du doigt",
+    w.Gesture.NOD: "t'a fait un signe de tête",
+    w.Gesture.SHAKE_HEAD: "a secoué la tête en te regardant",
+    w.Gesture.BOW: "t'a fait une révérence",
+    w.Gesture.CLAP: "t'a applaudie",
+    w.Gesture.POKE: "t'a taquinée d'une pichenette",
+    w.Gesture.PAT_HEAD: "t'a caressé la tête",
+}
+
+
+def felt(actor: str, gesture: w.Gesture, closeness: str | None, name: str, person: str | None) -> Draft[Any] | None:
+    """Ce qu'elle sent d'un geste qu'on lui fait, selon la proximité de qui le fait (``social.closeness``, lue par
+    l'appelant) : une caresse d'une proche l'attendrit, la même d'une inconnue la gêne. Un signal que l'attention
+    dose et habitue, qui dit qui il concerne ; ``None`` pour un geste qui ne se ressent pas."""
+    row = GESTURE_FELT.get(gesture)
+    if row is None:
+        return None
+    emotion, intensity = row[min(closeness_rank(closeness), len(row) - 1)]
+    about = (person,) if person else ()
+    level = int(Sensitivity.ANODYNE if about else Sensitivity.NONE)
+    return w.NOTICED.draft(
+        source="world", kind="gesture", summary=Content.of(f"{name} {GESTURE_FR[gesture]}.", level=level),
+        pertinence=GESTURE_PERTINENCE, emotion=emotion.value, intensity=intensity, about=about, sensitivity=level,
+        bundle="world", actor=actor)
+
+
+def _gestures_line(s: WorldState, frame: Frame) -> tuple[str, int] | None:
+    """Les gestes qu'on vient de lui faire, du plus récent au plus ancien, chacun une fois (« plusieurs fois » s'il
+    s'est répété) — et le niveau de ce que la ligne dit d'autrui. Ce qu'une autre que l'interlocuteur lui a fait ne
+    se dit que si l'audience peut l'entendre (anodin) ; sans audience, rien."""
+    recent = [x for x in s.gestures if frame.now - x.at < GESTURES_KEPT_US]
+    aud, ep = frame.audience, frame.episode
+    if not recent or aud is None:
+        return None
+    person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
+    seen: dict[tuple[str, w.Gesture], int] = {}
+    for x in recent:
+        seen[(x.actor, x.gesture)] = seen.get((x.actor, x.gesture), 0) + 1
+    parts: list[str] = []
+    level = 0
+    for x in reversed(recent):
+        n = seen.pop((x.actor, x.gesture), 0)
+        if not n:
+            continue
+        handle = w.handle_of(x.actor)
+        if handle is None:
+            npc = s.definition.actor(x.actor)
+            who, name = None, npc.label if npc is not None else ""
+        else:
+            who, name = frame.get(identity_c.PERSON(handle)), frame.get(identity_c.IDENTITY(handle)).name
+        if who is not None and who != person:
+            if not hearable((who,), int(Sensitivity.ANODYNE), person, aud.level, aud.witness_level, aud.private_ok):
+                continue
+            level = int(Sensitivity.ANODYNE)
+        name = name or "Quelqu'un"
+        parts.append(f"{name} {GESTURE_FR[x.gesture]}" + (" (plusieurs fois)" if n > 1 else ""))
+    if not parts:
+        return None
+    return "Ce qu'on vient de te faire : " + " ; ".join(parts) + ".", level
 
 
 # ── Conclure sans moteur ──────────────────────────────────────────────────
