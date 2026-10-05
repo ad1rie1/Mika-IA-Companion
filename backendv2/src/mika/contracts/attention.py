@@ -201,7 +201,8 @@ class AwaitingReading:
     #: quand la conversation s'est close ainsi (0 : elle ne l'est pas) — on s'est quittées, on ne l'ignore pas
     closed_at: int = 0
     #: quand la personne a lu sa dernière initiative (son application le dit, si elle l'a permis) ; 0 : pas encore,
-    #: ou on ne le sait pas (un journal ancien, un client qui n'en dit rien, un écran qui se tait sur ce qu'on y lit)
+    #: ou on ne le sait pas (un journal ancien, un client qui n'en dit rien, un écran qui se tait sur ce qu'on y lit).
+    #: Ça reste vrai quand elle écrit : jusqu'à la prochaine initiative
     seen_at: int = 0
     #: … elle ne l'a pas encore lue : son application dit ce qu'elle a lu depuis, et ce n'est pas encore ça
     unseen: bool = False

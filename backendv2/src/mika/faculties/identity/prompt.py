@@ -121,7 +121,11 @@ def last_talk(frame: Frame, person: str, kind: str, name: str = "") -> list[str]
             out.append(f"Avant cette conversation, {who} t'avait écrit pour la dernière fois "
                        f"{calendar_words(reading.previous, frame)}.")
         if reading.previous < reading.last_out < reading.since:
-            out.append(f"Tu lui avais écrit depuis, {calendar_words(reading.last_out, frame)}.")
+            wrote = f"Tu lui avais écrit depuis, {calendar_words(reading.last_out, frame)}"
+            # lu après qu'elle l'a écrit : c'est bien ce message-là (son application le dit)
+            seen = frame.get(attention_c.AWAITING(person)).seen_at
+            out.append(f"{wrote} ; {who} l'avait lu {calendar_words(seen, frame)}." if seen >= reading.last_out
+                       else f"{wrote}.")
         return out
     out = []
     if reading.last_in:

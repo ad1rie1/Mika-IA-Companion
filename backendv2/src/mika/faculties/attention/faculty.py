@@ -783,7 +783,9 @@ def _heard_from(s: AttentionState, e, cx) -> AttentionState:
     stale = late.get(person)
     if stale is not None and e.at > stale.until:
         late = late.delete(person)  # elle écrit, mais ce n'est plus une réponse à son initiative
-    return replace(s, exchanges=s.exchanges.set(person, Exchange(last_in=e.at, last_out=before.last_out)),
+    # qu'elle avait lu sa dernière initiative reste vrai : la conversation qui s'ouvre le sait
+    fresh = Exchange(last_in=e.at, last_out=before.last_out, seen_at=before.seen_at)
+    return replace(s, exchanges=s.exchanges.set(person, fresh),
                    thoughts=thoughts, late=late, last_contact=e.at, glad=s.glad.delete(person),
                    pending=tuple(q for q in s.pending if not (q.origin == c.UNANSWERED and q.person == person)))
 
