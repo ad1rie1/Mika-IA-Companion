@@ -12,7 +12,7 @@ from mika.contracts import email as c
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.kernel.arbitration import Candidate
-from mika.kernel.clock import HOUR
+from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
@@ -45,6 +45,8 @@ importance : 0.1 pour une publicité ou une notification automatique, 0.5 pour u
 
 _JSON = re.compile(r"\{.*\}", re.S)
 EMOTIONS = frozenset({"curious", "happy", "surprised", "anxious", "sad", "thinking", ""})
+#: au-delà, un mail qu'elle annonce ne « vient » plus d'arriver : elle dit l'heure où il est arrivé
+FRESH_FOR = 30 * MINUTE
 
 
 def heuristic(m: Any) -> dict[str, Any]:
@@ -169,6 +171,14 @@ def _owner_addresses(frame: Frame) -> list[str]:
     return present or away
 
 
+def _arrived(frame: Frame, at: int) -> str:
+    """Quand un mail est arrivé, comme elle le dirait (« à 10 h », « hier à 22 h 30 »)."""
+    then = frame.local(at)
+    days = (frame.local().date() - then.date()).days
+    day = {0: "", 1: "hier "}.get(days, "avant-hier ")
+    return f"{day}à {then.hour} h" + (f" {then.minute:02d}" if then.minute else "")
+
+
 @EMAIL.propose(kinds=[Kind.INITIATIVE], reasons={c.MENTION: (0.0, 8.0)},
                reads=[presence_c.PRESENT, identity_c.OWNERS, identity_c.HANDLES, identity_c.REACHABLE,
                       identity_c.SPEAKS_AS_OWNER])
@@ -183,9 +193,14 @@ def _mention(s: EmailState, frame: Frame) -> list[Candidate]:
     if not fresh:
         return []
     several = len(fresh) > 1
+    arrived = min(s.mails[k].at for k in fresh)
+    if frame.now - arrived <= FRESH_FOR:
+        when = f"vien{'nent' if several else 't'} d'arriver dans ta boîte"
+    else:  # elle n'a pas pu le dire tout de suite : elle ne fait pas comme s'il arrivait
+        when = (f"sont arrivés dans ta boîte, le premier {_arrived(frame, arrived)}" if several
+                else f"est arrivé dans ta boîte {_arrived(frame, arrived)}")
     brief = (f"{'Des mails qui ont' if several else 'Un mail qui a'} l'air important{'s' if several else ''} "
-             f"vien{'nent' if several else 't'} d'arriver dans ta boîte (plus haut, « {MENTION_TITLE} ») : "
-             "dis-le simplement, sans le lire en entier.")
+             f"{when} (plus haut, « {MENTION_TITLE} ») : dis-le simplement, sans le lire en entier.")
     args = FrozenDict({"brief:email": brief, MENTION_ARG: "\n".join(fresh)})
     return [Candidate(Kind.INITIATIVE, handle, c.MENTION, p.mention_evidence,
                       resources=frozenset({floor(handle)}), args=args)
