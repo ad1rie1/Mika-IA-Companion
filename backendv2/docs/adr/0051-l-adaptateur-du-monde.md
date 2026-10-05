@@ -70,7 +70,8 @@ réveil de `body.woke`).
 - Ce que le noyau ne sait pas encore faire répond `unsupported` (les actes des personnes, la prose et ce
   qu'un premier éditeur ne change pas encore — pièces, lieux, personnages : P4, P5 ; ADR 0050 §11),
   et la `presence` à l'entrée attend P4 (aucun `world.joined` n'est écrit ici : sans corps dans l'état, une
-  présence annoncerait quelqu'un que le monde ne contient pas).
+  présence annoncerait quelqu'un que le monde ne contient pas). Fait depuis : la faculté réduit l'entrée et la
+  sortie, l'adaptateur les demande au port (ADR 0050, § 11, P4).
 - La console montre les clients du monde, qui tient le bail d'hôte et ce qui manque au moteur (Système › Le
   monde, côté écrans), lus à chaque rendu dans `WorldHub.overview()` : aucun événement, aucune faculté nommée.
 - Un seul hôte pour tout le monde (ADR 0050) : plusieurs hôtes, un par pièce, seraient une révision.
