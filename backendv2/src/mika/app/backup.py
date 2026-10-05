@@ -36,6 +36,8 @@ par ses descripteurs ouverts, dans le dossier mis de côté.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import errno
 import hashlib
 import json
 import os
@@ -53,6 +55,7 @@ from mika.adapters.system import RandomIdGen, RealClock
 from mika.app import datadir
 from mika.app.composition import faculties
 from mika.kernel.codec import digest
+from mika.kernel.inspect import describe_error
 from mika.kernel.registry import Registry
 from mika.runtime.mind import Mind
 from mika.runtime.state import RUNTIME
@@ -240,15 +243,49 @@ def _relink(root: Path, links: object) -> None:
 
 
 def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None) -> Summary:
-    """Écrit une archive dans ``dest`` ; garde les ``keep`` plus récentes (0 : toutes)."""
+    """Écrit une archive dans ``dest`` ; garde les ``keep`` plus récentes (0 : toutes).
+
+    Une tentative qui échoue (disque plein, dossier des archives devenu illisible…) se note avec sa
+    cause en mots (``tentative``, lue par la console) et ne laisse pas d'archive partielle derrière
+    elle ; l'erreur sort en ``BackupError``."""
     data, dest = data.resolve(), dest.resolve()
     if not (data / "mind.db").exists():
         raise BackupError(f"pas de mind.db dans {data}")
+    stamp = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%S")
+    archive = dest / f"{ARCHIVE_PREFIX}{stamp}.tar.gz"
+    try:
+        done = _write(data, dest, archive, stamp, keep)
+    except (BackupError, OSError, sqlite3.Error, tarfile.TarError) as exc:
+        why = str(exc) if isinstance(exc, BackupError) else _why(exc, dest)
+        with contextlib.suppress(OSError):  # la cause à noter est l'échec, pas ce nettoyage
+            archive.with_suffix(".partial").unlink(missing_ok=True)
+        note(data, "tentative", {"at": _us(now), "dossier": str(dest), "ok": False, "erreur": why})
+        if isinstance(exc, BackupError):
+            raise
+        raise BackupError(why) from exc
+    note(data, "sauvegarde", {"at": _us(now), "archive": str(archive), "dossier": str(dest),
+                              "tete": done.head, "fichiers": done.files, "octets": done.size, "garde": keep,
+                              "remarques": list(done.warnings)})
+    return done
+
+
+def _why(exc: BaseException, dest: Path) -> str:
+    """La cause d'un échec d'écriture, en mots : un disque plein le dit tel quel (le système le dit en
+    anglais, SQLite aussi) et nomme le dossier des archives plutôt que le fichier de travail qui y
+    était écrit ; le reste passe par ``describe_error``."""
+    if isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+        where = Path(str(exc.filename2 or exc.filename or dest))
+        return f"plus de place sur le disque : {dest if where.is_relative_to(dest) else where}"
+    if isinstance(exc, sqlite3.Error) and exc.sqlite_errorcode & 0xFF == sqlite3.SQLITE_FULL:
+        return f"plus de place sur le disque : {dest}"
+    return describe_error(exc)
+
+
+def _write(data: Path, dest: Path, archive: Path, stamp: str, keep: int) -> Summary:
+    """L'archive elle-même (``backup`` note ce qu'elle a donné)."""
     if dest == data or data in dest.parents:
         raise BackupError("la destination ne peut pas être dans le dossier de données")
     dest.mkdir(parents=True, exist_ok=True)
-    stamp = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%S")
-    archive = dest / f"{ARCHIVE_PREFIX}{stamp}.tar.gz"
     warnings = []
     if os.environ.get("MIKA_SECRET_KEY", "").strip():
         warnings.append("la clé de chiffrement vient de MIKA_SECRET_KEY : sauvegarde-la à part")
@@ -277,11 +314,7 @@ def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None
     if keep > 0:
         for old in sorted(dest.glob(f"{ARCHIVE_PREFIX}*.tar.gz"))[:-keep]:
             old.unlink()
-    done = Summary(archive, head, state, len(files), archive.stat().st_size, tuple(warnings))
-    note(data, "sauvegarde", {"at": _us(now), "archive": str(archive), "dossier": str(dest), "tete": head,
-                              "fichiers": len(files), "octets": done.size, "garde": keep,
-                              "remarques": list(warnings)})
-    return done
+    return Summary(archive, head, state, len(files), archive.stat().st_size, tuple(warnings))
 
 
 def _us(now: datetime | None) -> int:
