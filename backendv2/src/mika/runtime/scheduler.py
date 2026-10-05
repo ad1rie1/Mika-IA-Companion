@@ -39,7 +39,7 @@ from __future__ import annotations
 import asyncio
 from collections import deque
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from mika.contracts.runtime import PROCESS_FAILED
@@ -48,8 +48,9 @@ from mika.kernel.faculty import CatchUp, ProcessSpec
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, combine
 from mika.kernel.state import Root
+from mika.ports.llm import RETRY_AFTER_CUT
 from mika.runtime.boundary import Failed, acall, call
-from mika.runtime.tools import release
+from mika.runtime.tools import TOOL_CALL_CAP_CEILING, release
 
 if TYPE_CHECKING:
     from mika.runtime.mind import Commit, Mind
@@ -122,7 +123,9 @@ class ProcessContext:
 class _BoundedLLM:
     """La passerelle vue d'un processus : chaque appel tient une place de la voie ``model`` le temps de
     l'appel, et seulement lui. Un processus ne mène pas de boucle d'outils (il lit une sortie structurée, au
-    besoin sur un appel d'outil) : chaque appel est relâché dès qu'il revient (``release(call_id)``)."""
+    besoin sur un appel d'outil) : chaque appel est relâché dès qu'il revient (``release(call_id)``). Cette
+    sortie lue sur un appel d'outil, coupée par son plafond, personne d'autre ne la redemande (la passerelle
+    laisse ce rejeu à la boucle d'outils des épisodes) : elle l'est ici, une fois, au plafond doublé."""
 
     __slots__ = ("_llm", "_sem")
 
@@ -133,7 +136,12 @@ class _BoundedLLM:
     async def call(self, request: Any) -> Any:
         try:
             async with self._sem:
-                return await self._llm.call(request)
+                resp = await self._llm.call(request)
+                if getattr(resp, "truncated_tool_call", False) and request.max_tokens < TOOL_CALL_CAP_CEILING:
+                    resp = await self._llm.call(replace(
+                        request, max_tokens=min(TOOL_CALL_CAP_CEILING, request.max_tokens * 2),
+                        meta={**dict(request.meta), RETRY_AFTER_CUT: True}))
+                return resp
         finally:
             release(self._llm, str(getattr(request, "call_id", "")))
 
