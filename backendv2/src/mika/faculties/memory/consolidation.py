@@ -610,7 +610,20 @@ class Consolidate:
             twin = await self._same_event(store, state, vectors, ev.texte, about, p, frame=frame, at=at,
                                           names=names)
             if twin is not None and (ev.en_cours or abs(twin.when - at) < DAY // 2):
-                continue  # déjà noté (une situation redite dure toujours : rien à changer)
+                if not (told_by and set(told_by) <= set(about) and not set(twin.told_by) <= set(twin.about)):
+                    continue  # déjà noté (une situation redite dure toujours : rien à changer)
+                # un tiers l'avait annoncé, la personne le lui dit elle-même : le même moment, de première main
+                # (ses vœux, son encouragement, « alors ? » ne se font jamais sur la foi d'un tiers)
+                noted.append((ev.texte, twin.when, about))
+                drafts.append(c.EVENT_NOTED.draft(
+                    text=Content.of(ev.texte, level=max(sens, twin.sensitivity)), when=twin.when,
+                    about=tuple(dict.fromkeys((*about, *twin.about))),
+                    all_day=twin.all_day, sensitivity=max(sens, twin.sensitivity), sources=sources, told_by=told_by,
+                    heard_by=heard, secret=twin.secret or secret_of(ev.secret, cited, sens, ev.texte),
+                    replaces=twin.id, call_id=call_id, ongoing=twin.ongoing,
+                    importance=max(twin.importance, x.moment_importance(ev)),
+                    festive=twin.festive or (not twin.ongoing and x.festive(ev))))
+                continue
             noted.append((ev.texte, at, about))
             drafts.append(c.EVENT_NOTED.draft(
                 text=Content.of(ev.texte, level=sens), when=at, about=about, all_day=all_day, sensitivity=sens,

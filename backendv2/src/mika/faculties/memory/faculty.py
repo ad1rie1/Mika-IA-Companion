@@ -435,15 +435,19 @@ def _consolidated(s: MemoryState, e, cx) -> MemoryState:
 def _noted(s: MemoryState, e, cx) -> MemoryState:
     """Un moment de la vie de quelqu'un : gardé tant qu'il est à venir ou passé
     depuis peu ; une situation en cours, quelques semaines ; les plus anciens
-    partent d'abord."""
+    partent d'abord. Le même moment renoté à la même date (la personne l'a dit
+    elle-même après un tiers) reste repris s'il l'était ; une date qui change
+    repart de zéro."""
     d = e.data
     p = params(cx.params)
     keep_until = e.at - round(p.event_recent_days * DAY)
     keep_ongoing = e.at - round(p.situation_days * DAY)
+    old = s.events.get(d.replaces) if d.replaces is not None else None
+    followed = old.followed_at if old is not None and old.when == d.when else 0
     events = s.events.delete(d.replaces) if d.replaces is not None else s.events
     events = events.set(e.seq, c.LifeEvent(e.seq, tuple(d.about), d.when, d.all_day, d.sensitivity,
-                                           tuple(d.told_by), d.text.ref or "", d.secret, ongoing=d.ongoing,
-                                           importance=d.importance, festive=d.festive))
+                                           tuple(d.told_by), d.text.ref or "", d.secret, followed_at=followed,
+                                           ongoing=d.ongoing, importance=d.importance, festive=d.festive))
     stale = [ev.id for ev in events.values() if ev.when < (keep_ongoing if ev.ongoing else keep_until)]
     for i in stale:
         events = events.delete(i)

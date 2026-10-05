@@ -185,7 +185,8 @@ class EventNoted(Payload):
     told_by: tuple[str, ...] = ()
     heard_by: tuple[str, ...] = ()
     secret: bool = False
-    #: un événement noté plus tôt dont la date a changé
+    #: un événement noté plus tôt dont la date a changé — ou, à la même date, qu'un tiers avait annoncé et que la
+    #: personne a dit elle-même
     replaces: int | None = None
     call_id: str = ""
     #: une situation qui dure (un chat malade, un déménagement), pas un moment daté
