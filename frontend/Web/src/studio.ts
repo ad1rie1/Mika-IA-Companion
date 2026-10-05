@@ -114,11 +114,21 @@ async function boot() {
   const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const emo = $<HTMLSelectElement>("emo");
   const emo2 = $<HTMLSelectElement>("emo2");
+  const mood = $<HTMLSelectElement>("mood");
+  const moodInt = $<HTMLInputElement>("mood-int");
   for (const name of EMOTION_NAMES) {
     emo.add(new Option(name, name));
     emo2.add(new Option(name, name));
+    mood.add(new Option(name, name));
   }
   emo.value = "happy";
+
+  // Le fond de sa journée : le corps le porte (tempo, tenue, respiration),
+  // le visage reste sur l'émotion jouée. « — » : le corps suit le moment seul.
+  const applyMood = () =>
+    animationSystem.setMood(isEmotionName(mood.value) ? mood.value : null, Number(moodInt.value));
+  mood.onchange = applyMood;
+  moodInt.oninput = applyMood;
 
   const readEmotion = (): { emotion: EmotionName; intensity: number; blend: EmotionBlend } => {
     const emotion = isEmotionName(emo.value) ? emo.value : "neutral";
@@ -255,6 +265,7 @@ async function boot() {
     state.textContent =
       `état ${s.state}  clip ${s.clip ?? "—"}\n` +
       `émotion ${s.emotion} ${s.intensity.toFixed(2)}  tempo ${s.tempo.toFixed(2)}\n` +
+      `fond ${s.mood ? `${s.mood.emotion} ${s.mood.intensity.toFixed(2)}` : "—"}\n` +
       `attention ${s.attention}  clips ${s.clipCount}\n` +
       `lieu ${animationSystem.place.place ?? "—"}  posture ${animationSystem.place.posture}` +
       (animationSystem.place.moving ? "  (en route)" : "");
