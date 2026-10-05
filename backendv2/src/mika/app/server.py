@@ -64,7 +64,7 @@ from mika.app.paths import PERSONA
 from mika.app.settings import SecretBox, Settings
 from mika.contracts import identity as identity_c
 from mika.contracts.self_ import PersonaDoc
-from mika.inspector.app import routes
+from mika.inspector.app import assemble
 from mika.inspector.mcp import PREFIX as CONSOLE_MCP_PREFIX
 from mika.inspector.mcp import console_app
 from mika.inspector.ui import PREFIX as CONSOLE_PREFIX
@@ -401,19 +401,21 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             await kernel.stop(release)
             datadir.release(data)
 
-    inspector = routes(InspectorDeps(kernel, live.accounts, live.settings, live.reload_llm, gateway.traces,
-                                     port=port, calls=live.calls, reconfigure=live.reconfigure,
-                                     after_decision=hub.refresh_panels,
-                                     reports=reports, navigation=NAVIGATION,
-                                     sections=reglages.sections(live), settings_tabs=reglages.TABS,
-                                     parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
-                                     faculty_labels=FACULTY_LABELS, labels=LABELS,
-                                     backups=lambda: backup.overview(data), relay=live.relay, world=world_hub),
-                       cookie_secure=web.cookie_secure)
+    # la console, et ses pages sans requête : la console en MCP lit les mêmes (santé, épisodes, « pourquoi »…)
+    inspector, console_pages = assemble(
+        InspectorDeps(kernel, live.accounts, live.settings, live.reload_llm, gateway.traces,
+                      port=port, calls=live.calls, reconfigure=live.reconfigure,
+                      after_decision=hub.refresh_panels,
+                      reports=reports, navigation=NAVIGATION,
+                      sections=reglages.sections(live), settings_tabs=reglages.TABS,
+                      parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
+                      faculty_labels=FACULTY_LABELS, labels=LABELS,
+                      backups=lambda: backup.overview(data), relay=live.relay, world=world_hub),
+        cookie_secure=web.cookie_secure)
     preprocess = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     live.preprocess = preprocess
     relay = Mount(RELAY_PREFIX, app=live.relay.app)
-    console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token))
+    console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token, console_pages))
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *inspector, relay, console_mcp,
                                     world_hub.route()],
