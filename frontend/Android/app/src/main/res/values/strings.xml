@@ -103,6 +103,17 @@
     <string name="mind_dream_recalled">✓ évoqué</string>
     <string name="mind_with">avec %1$s</string>
     <string name="mind_narrative">Qui elle est devenue</string>
+    <string name="mind_bond">Ce qu\'elle sait de toi</string>
+    <string name="mind_bond_closeness">Où vous en êtes : %1$s</string>
+    <string name="mind_bond_tone">Le ton qu\'elle prend avec toi : %1$s</string>
+    <string name="mind_bond_interests">Ce qui t\'intéresse, d\'après elle : %1$s</string>
+    <string name="mind_bond_careful">Elle fait attention à : %1$s</string>
+    <plurals name="mind_bond_exchanges">
+        <item quantity="one">%1$d échange entre vous</item>
+        <item quantity="many">%1$d échanges entre vous</item>
+        <item quantity="other">%1$d échanges entre vous</item>
+    </plurals>
+    <string name="mind_promises">Ce qu\'elle t\'a promis</string>
     <string name="mind_needs">Besoins</string>
     <string name="mind_projects">Projets en cours</string>
     <string name="mind_project_progress">Avancement : %1$d / %2$d</string>

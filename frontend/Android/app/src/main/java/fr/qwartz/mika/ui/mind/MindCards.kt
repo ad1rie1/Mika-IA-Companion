@@ -52,6 +52,24 @@ sealed interface MindCard {
     /** « Qui elle est devenue » : son récit d'elle-même. */
     data class Narrative(val text: String) : MindCard
 
+    /**
+     * « Ce qu'elle sait de toi » : sous quel nom elle te reconnaît, dans ses mots à elle (jamais un pourcentage),
+     * puis — seulement quand le serveur t'ouvre ta fiche — où vous en êtes, le ton qu'elle prend avec toi, ce
+     * qui t'intéresse, ce à quoi elle fait attention et combien d'échanges vous avez eus.
+     */
+    data class Bond(
+        val knownAs: String?,
+        val level: String?,
+        val closeness: String? = null,
+        val tone: String? = null,
+        val interests: List<String> = emptyList(),
+        val careful: List<String> = emptyList(),
+        val exchanges: Int? = null,
+    ) : MindCard
+
+    /** « Ce qu'elle t'a promis » : ses engagements envers toi, pas encore tenus. */
+    data class Promises(val items: List<String>) : MindCard
+
     /** Ses besoins (Compagnie, S'exprimer, Apprendre), en tension de 0 à 100. */
     data class Needs(val items: List<Need>) : MindCard
     data class Need(val label: String, val pct: Int)
@@ -109,6 +127,9 @@ object MindCards {
             )
         }
         state.selfNarrative?.takeIf { it.isNotBlank() }?.let { out += MindCard.Narrative(it.trim()) }
+        bond(state)?.let(out::add)
+        val promises = state.pendingCommitments.map(String::trim).filter(String::isNotEmpty)
+        if (promises.isNotEmpty()) out += MindCard.Promises(promises)
         needs(state)?.let(out::add)
         if (state.projects.isNotEmpty()) {
             out += MindCard.Projects(
@@ -157,6 +178,27 @@ object MindCards {
             energyPct = energy?.let(::pct),
             place = place,
             moment = moment,
+        )
+    }
+
+    /**
+     * L'identité se montre seule quand ta fiche est fermée : c'est quand elle n'est pas sûre de qui tu es
+     * qu'elle compte le plus (InnerLifePanel.ts::renderProfile). Le profil ne s'y ajoute que s'il est arrivé.
+     */
+    private fun bond(state: MindState): MindCard.Bond? {
+        val identity = state.identity ?: return null
+        val profile = state.personProfile
+        val knownAs = identity.knownAs.trim().takeIf(String::isNotEmpty)
+        val level = identity.level.trim().takeIf(String::isNotEmpty)
+        if (knownAs == null && level == null && profile == null) return null
+        return MindCard.Bond(
+            knownAs = knownAs,
+            level = level,
+            closeness = profile?.closeness?.takeIf(String::isNotBlank)?.let(MindLabels::closeness),
+            tone = profile?.preferredTone?.takeIf { it.isNotBlank() && it != "unknown" }?.let(MindLabels::tone),
+            interests = profile?.topicsOfInterest.orEmpty().map(String::trim).filter(String::isNotEmpty),
+            careful = profile?.sensitiveTopics.orEmpty().map(String::trim).filter(String::isNotEmpty),
+            exchanges = profile?.interactionCount?.takeIf { it > 0 },
         )
     }
 

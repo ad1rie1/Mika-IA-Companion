@@ -163,6 +163,35 @@ private fun MindCardView(card: MindCard) {
             }
         }
         is MindCard.Narrative -> TitledCard(stringResource(R.string.mind_narrative)) { Text(card.text) }
+        is MindCard.Bond -> TitledCard(stringResource(R.string.mind_bond)) {
+            card.knownAs?.let { Text(it, style = MaterialTheme.typography.titleSmall) }
+            card.level?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            card.closeness?.let { Text(stringResource(R.string.mind_bond_closeness, it)) }
+            card.tone?.let { Text(stringResource(R.string.mind_bond_tone, it)) }
+            if (card.interests.isNotEmpty()) {
+                Text(stringResource(R.string.mind_bond_interests, card.interests.joinToString(", ")))
+            }
+            if (card.careful.isNotEmpty()) {
+                Text(stringResource(R.string.mind_bond_careful, card.careful.joinToString(", ")))
+            }
+            card.exchanges?.let {
+                Text(
+                    pluralStringResource(R.plurals.mind_bond_exchanges, it, it),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        is MindCard.Promises -> TitledCard(stringResource(R.string.mind_promises)) {
+            for (promise in card.items) {
+                Row(verticalAlignment = Alignment.Top, modifier = Modifier.clearAndSetSemantics {
+                    contentDescription = promise
+                }) {
+                    Text("•", modifier = Modifier.padding(end = 8.dp))
+                    Text(promise, modifier = Modifier.weight(1f))
+                }
+            }
+        }
         is MindCard.Needs -> TitledCard(stringResource(R.string.mind_needs)) {
             for (need in card.items) Meter(need.pct, need.label)
         }

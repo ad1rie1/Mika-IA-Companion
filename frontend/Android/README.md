@@ -36,8 +36,10 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
 - **Ses fichiers à elle** : vignette pour une image (touchée, elle s'agrandit), puce avec nom et taille sinon ;
   « Enregistrer » (dans Téléchargements/Mika) ou « Ouvrir avec… ».
 - **« Ce qu'elle fait »** : humeur, corps (sommeil, énergie, où elle est, moment de la journée), estime de soi,
-  ce à quoi elle repense, le rêve de la nuit, son dernier journal, qui elle est devenue, ses besoins, et ses
-  projets en cours si tu es propriétaire. Une carte sans données n'apparaît pas.
+  ce à quoi elle repense, le rêve de la nuit, son dernier journal, qui elle est devenue, ce qu'elle sait de toi
+  (sous quel nom elle te reconnaît et, si ta fiche t'est ouverte, où vous en êtes, son ton, tes intérêts, ce à
+  quoi elle fait attention), ce qu'elle t'a promis, ses besoins, et ses projets en cours si tu es propriétaire.
+  Une carte sans données n'apparaît pas.
 - **Mika en fond** : derrière la conversation, Mika en 3D native, dans une lumière qui suit son humeur. Elle vit
   (souffle, gestes, regard, clignements, cheveux), te salue à la mesure de ton absence (un hochement après un
   moment, un coucou après sa nuit, jamais joyeux si elle est fâchée) et s'endort la nuit (lumière
