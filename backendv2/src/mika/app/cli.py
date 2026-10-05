@@ -141,6 +141,11 @@ async def rebuild(data: Path, owners: list[str]) -> dict[str, object]:
     mind = _mind(data)
     await mind.boot(append_boot=False)
     report = await mind.rebuild(owners)
+    # sans instantané, le prochain démarrage relirait l'ancien : la reconstruction ne durerait pas
+    root = mind.root
+    data_json = mind.snapshot_data(root)
+    await mind.store.run_mind(lambda sql: sql.execute(
+        "INSERT OR REPLACE INTO snapshots(seq, at, data) VALUES(?,?,?)", (root.seq, root.at, data_json)))
     await mind.close()
     return report
 
