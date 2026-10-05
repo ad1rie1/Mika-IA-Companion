@@ -418,7 +418,8 @@ namespace Mika.World.Engine
                 case Held held:
                 {
                     var body = Actor(held.Actor);
-                    if (body != null && !body.IsHolding(view)) body.Hold(view, held.Hand);
+                    // Déjà tenu mais dans l'autre main (l'animation a deviné) : la main du monde fait foi.
+                    if (body != null && (!body.Held.TryGetValue(view, out var hand) || hand != held.Hand)) body.Hold(view, held.Hand);
                     break;
                 }
                 case On on when instant && IsAuthoredHome(view, location):

@@ -153,9 +153,12 @@ namespace Mika.World.Engine
             switch (step.Action)
             {
                 case "take":
+                {
                     if (obj == null) break;
-                    yield return _body.Reach(obj.GripPoint, duration, () => _body.Hold(obj, Hand.Right));
+                    var hand = FreeHand(obj);
+                    yield return _body.Reach(obj.GripPoint, duration, () => _body.Hold(obj, hand));
                     break;
+                }
                 case "put":
                 {
                     if (obj == null) break;
@@ -222,9 +225,19 @@ namespace Mika.World.Engine
                     break;
                 case StepKind.Act when step.Action == "take":
                     var o = _stage.Object(step.Object);
-                    if (o != null) _body.Hold(o, Hand.Right);
+                    if (o != null) _body.Hold(o, FreeHand(o));
                     break;
             }
+        }
+
+        /// <summary>
+        /// La main que le noyau donnera à l'objet (<c>plan._hand_for</c>) : les deux pour un objet qui se porte à
+        /// bras, la gauche si la droite tient déjà quelque chose, la droite sinon.
+        /// </summary>
+        Hand FreeHand(WorldObject obj)
+        {
+            if (_stage.Mirror?.World?.ArchetypeOf(obj.id)?.Size == Size.Arms) return Hand.Both;
+            return _body.Held.Values.Contains(Hand.Right) ? Hand.Left : Hand.Right;
         }
 
         /// <summary>Où est vraiment l'acteur (pour un échec) : sa pièce, le lieu le plus proche, sa posture.</summary>
