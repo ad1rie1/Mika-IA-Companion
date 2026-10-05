@@ -8,7 +8,8 @@
   (« dans tes flux », cité : un titre n'est jamais une consigne) quand elle
   prend d'elle-même la parole ou qu'elle travaille — jamais en réponse à ce
   qu'on vient de lui dire ; ce qui l'a vraiment touchée est déjà devenu une
-  pensée, et ``rss_list`` est là si on le lui demande.
+  pensée, et ``rss_list`` est là si on le lui demande. Il ne s'y montre que
+  tant que c'est une nouvelle (``fresh_for_us``, sur son horloge).
 - **Lire** (outils) : lister, lire un article — par son identifiant, jamais
   une adresse qu'un texte aurait soufflée ; lire va sur le réseau (vers une
   machine publique seulement, vérifié par l'adaptateur) : réservé à ses
@@ -97,6 +98,11 @@ class RssParams(BaseModel):
         label="Pertinence minimale", group="Relevé", lo=0.0, hi=1.0, step=0.05,
         help="Un article sans aucun mot de ses centres d'intérêt vaut 0,1, avec un mot 0,6, puis 0,25 de plus par "
              "mot : sous ce seuil, elle ne le remarque pas.")] = 0.3
+    fresh_for_us: Annotated[int, Knob(
+        label="Un titre reste une nouvelle pendant", group="En parler", lo=2 * HOUR, hi=7 * DAY,
+        help="Ce qu'elle a remarqué n'est « dans ses flux » (sous ses yeux quand elle prend d'elle-même la parole "
+             "ou qu'elle travaille) que ce temps-là, même si rien de neuf n'est venu depuis : passé, ce n'est plus "
+             "une nouvelle. Elle le retrouve dans ses flux si on le lui demande.")] = 36 * HOUR
 
 
 @dataclass(frozen=True, slots=True)
@@ -208,10 +214,17 @@ class Poll:
 BACKGROUND = [Kind.INITIATIVE, Kind.STEP]
 
 
+def _shown(s: RssState, frame: Frame) -> list[c.Headline]:
+    """Les titres « dans ses flux » : ceux qu'elle a remarqués récemment, sur son horloge — un titre de lundi
+    n'est plus une nouvelle le vendredi, même si rien de neuf n'est venu depuis."""
+    p = params(frame.env.params_of("rss", frame.root))
+    return [h for h in frame.get(c.HEADLINES) if frame.now - h.at <= p.fresh_for_us][:3]
+
+
 @RSS.enricher("headlines", episodes=BACKGROUND, deadline_ms=300)
 async def _texts(s: RssState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, str] | None:
     store = ports.get("store")
-    lines = frame.get(c.HEADLINES)[:3]
+    lines = _shown(s, frame)
     if store is None or not lines:
         return None
     return store.content([h.summary_ref for h in lines if h.summary_ref])
@@ -221,7 +234,7 @@ async def _texts(s: RssState, frame: Frame, ports: Mapping[str, Any]) -> dict[st
              title="DANS TES FLUX", untrusted=True, reads=[c.HEADLINES])
 def _section(s: RssState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     texts = enrich.get("headlines") or {}
-    lines = [f"[{h.entry}] {inert(tokenless(texts[h.summary_ref]))}" for h in frame.get(c.HEADLINES)[:3]
+    lines = [f"[{h.entry}] {inert(tokenless(texts[h.summary_ref]))}" for h in _shown(s, frame)
              if texts.get(h.summary_ref)]
     return SectionBody("\n".join(lines)) if lines else None
 
