@@ -909,7 +909,8 @@ def _resolved(s: GoalsState, e, cx) -> GoalsState:
     if gid is None or gid not in s.goals or e.data.approved:
         return s
     g = s.goals[gid]
-    note = f" : « {e.data.note[:200]} »" if e.data.note else ""
+    # la note de qui refuse est gardée à part (l'oubli l'atteint) : seule celle d'un journal ancien est en clair
+    note = f" : « {e.data.legacy_note[:200]} »" if e.data.legacy_note else ""
     line = f"#{e.data.proposal} refusé{note}"
     return _set(s, replace(g, effects=(*g.effects, line)[-NOTES_KEPT:]))
 

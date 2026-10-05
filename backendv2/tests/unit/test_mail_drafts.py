@@ -275,6 +275,7 @@ def test_a_reply_you_ask_for_goes_first_and_redoing_it_is_learnt(tmp_path):
         await (await kernel.perceive(said("user_1", "alors, ce mail ?"))).reply
         out["reply"] = [c for c in llm.calls if c.role == "reply"][-1]
         out["state"] = kernel.mind.frame().state("email")
+        out["notes"] = kernel.mind.store.content([d.note_ref for d in out["state"].drafts.values()])
         out["first"], out["second"] = box.draft(first.id), box.draft(second.id)
         return out
 
@@ -288,7 +289,8 @@ def test_a_reply_you_ask_for_goes_first_and_redoing_it_is_learnt(tmp_path):
     assert out["redo"].ok and out["refuse"].ok
     drafts = sorted(out["state"].drafts.values(), key=lambda d: d.proposal)
     assert [d.state for d in drafts] == ["refuse", "refuse"] and all(d.asked for d in drafts)
-    assert drafts[0].note.startswith("à reprendre : Plus court") and drafts[1].note == "finalement non"
+    notes = out["notes"]
+    assert notes[drafts[0].note_ref].startswith("à reprendre : Plus court") and notes[drafts[1].note_ref] == "finalement non"
     assert out["first"].state == "abandonne" and out["second"].state == "abandonne"
     reply = prompt_text(out["reply"])
     assert "a été refusé" in reply and "finalement non" in reply

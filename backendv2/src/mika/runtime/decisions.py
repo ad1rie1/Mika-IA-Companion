@@ -20,10 +20,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from mika.contracts import runtime as rt
-from mika.kernel.events import Draft, Origin
+from mika.kernel.events import Content, Draft, Origin
 from mika.kernel.guards import Guard, Superseded
 from mika.kernel.operate import Preview
 from mika.runtime.boundary import Failed, acall, call
+from mika.vocab.privacy import Sensitivity
 
 if TYPE_CHECKING:
     from mika.runtime.mind import Mind
@@ -82,10 +83,19 @@ async def prepare(mind: Mind, ports: Mapping[str, Any], proposal: int, approved:
                 return Resolution(CHANGED, message=MESSAGES[CHANGED])
             args[SEEN_KEY] = shown.digest
             args_json = json.dumps(args, ensure_ascii=False, sort_keys=True)
+    text = note[:500].strip()
     draft = rt.EFFECT_RESOLVED.draft(
-        proposal=proposal, approved=approved, note=note[:500], by=by, capability=pending.capability,
-        owner=pending.owner, args_json=args_json, context=pending.context, dedupe_key=f"décision:{proposal}")
+        proposal=proposal, approved=approved, by=by, capability=pending.capability, owner=pending.owner,
+        note=Content.of(text, level=int(Sensitivity.PERSONAL)) if text else None, about=_about(mind, proposal),
+        args_json=args_json, context=pending.context, dedupe_key=f"décision:{proposal}")
     return Resolution(APPROVED if approved else REJECTED, draft)
+
+
+def _about(mind: Mind, proposal: int) -> tuple[str, ...]:
+    """Les personnes de la proposition : la note de qui décide peut les citer, l'oubli doit l'atteindre."""
+    stored = mind.store.get_events([proposal])
+    data = mind.decode(stored[0]).data if stored else None
+    return data.about if isinstance(data, rt.EffectProposed) else ()
 
 
 def still_pending(proposal: int) -> Guard:

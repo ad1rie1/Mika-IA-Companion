@@ -193,9 +193,12 @@ class DraftSeen:
     at: int
     state: str = WAITING
     by: str = ""
+    #: la note de qui a décidé, en clair : un journal d'avant qu'elle soit gardée à part (``note_ref``)
     note: str = ""
     result: str = ""
     decided_at: int = 0
+    #: la note de qui a décidé, gardée à part (l'oubli l'atteint)
+    note_ref: str = ""
     #: écrit parce qu'un opérateur l'a demandé (hors plafond du jour)
     asked: bool = False
 
@@ -404,8 +407,8 @@ def _resolved(s: EmailState, e, cx) -> EmailState:
     found = s.drafts.get(d.proposal)
     if found is None:
         return s
-    decided = replace(found, state=APPROVED if d.approved else REFUSED, by=d.by, note=d.note[:300],
-                      decided_at=e.at)
+    decided = replace(found, state=APPROVED if d.approved else REFUSED, by=d.by, note=d.legacy_note[:300],
+                      note_ref=d.note.ref or "" if d.note is not None else "", decided_at=e.at)
     return replace(s, drafts=s.drafts.set(d.proposal, decided))
 
 

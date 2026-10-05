@@ -253,6 +253,8 @@ class Project:
     instructions: tuple[str, ...] = ()
     deposits: tuple[tuple[str, int, str], ...] = ()
     effects: tuple[str, ...] = ()
+    #: les refus accompagnés d'une note de qui a refusé : (proposition, réf. de la note — l'oubli l'atteint)
+    refusals: tuple[tuple[int, str], ...] = ()
     runs: int = 0
     #: les exécutions des dernières 24 h (le plafond du jour)
     runs_at: tuple[int, ...] = ()
@@ -1096,7 +1098,10 @@ def _resolved(s: ProjectsState, e, cx) -> ProjectsState:
     p = s.projects[got[0]]
     if e.data.approved:  # elle part : l'atelier est occupé jusqu'à ce qu'elle revienne
         return _set(s, replace(p, outgoing=(*p.outgoing, (e.data.proposal, e.at))[-8:]))
-    note = f" : « {e.data.note[:200]} »" if e.data.note else ""
+    # la note de qui refuse est gardée à part (l'oubli l'atteint) : seule celle d'un journal ancien est en clair
+    note = f" : « {e.data.legacy_note[:200]} »" if e.data.legacy_note else ""
+    if e.data.note is not None and e.data.note.ref:
+        p = replace(p, refusals=(*p.refusals, (e.data.proposal, e.data.note.ref))[-EFFECTS_KEPT:])
     return _set(s, _effect_line(p, f"#{e.data.proposal} refusé{note}"))
 
 
