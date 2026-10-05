@@ -325,9 +325,13 @@ def route(defn: w.WorldDef, t: Timing, room: str, place: str | None, to: w.Place
     return steps
 
 
-def _occupants(actors: Actors, place: str, but: str) -> int:
-    return sum(1 for a in actors.values() if a.id != but and (a.place == place or (
-        a.moving is not None and a.moving.to_place == place)))
+def _occupants(actors: Actors, place: w.PlaceDef, but: str) -> int:
+    """Qui tient un lieu, ou s'y rend. Une assise ou un lit ne se prend qu'assis ou allongé : quelqu'un debout à
+    côté du bureau (une personne qui s'y est arrêtée) ne prend pas la chaise."""
+    seat = place.place_kind is not w.PlaceKind.SPOT
+    return sum(1 for a in actors.values() if a.id != but and (
+        (a.place == place.id and not (seat and a.posture is w.Posture.STAND))
+        or (a.moving is not None and a.moving.to_place == place.id)))
 
 
 def plan_go(defn: w.WorldDef, t: Timing, actors: Actors, actor: str, place_id: str,
@@ -344,7 +348,7 @@ def plan_go(defn: w.WorldDef, t: Timing, actors: Actors, actor: str, place_id: s
     here = me.place == place.id and me.room == place.room
     if here and me.posture == want:
         return []
-    if not here and _occupants(actors, place.id, actor) >= place.capacity:
+    if not here and _occupants(actors, place, actor) >= place.capacity:
         raise Refused(w.Refusal.OCCUPIED, phrase("world.refusals.no_room_at", place=place.label))
     steps: list[w.Step] = []
     if not here:
