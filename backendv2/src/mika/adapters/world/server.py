@@ -9,7 +9,10 @@ Il fait le bord, et seulement le bord :
   seul opérateur à la fois, par bail (renouvelé par ``ping``, perdu au silence, passé au suivant qui attend) ;
 - **combien** : les débits par connexion (``protocol.RATES``), le dédoublonnage des commandes par ``cmd`` ;
 - **ce qu'on lui dit** : le journal traduit en trames (``translate``), chacune avec le ``seq`` de l'événement
-  qui la porte ; un instantané quand le retard est trop grand ou que l'état a changé sans action à rejouer.
+  qui la porte ; un instantané quand le retard est trop grand ou que l'état a changé sans action à rejouer ;
+- **qui est là** : une personne entre dans le monde quand un ``viewer`` de son compte est accueilli, et en sort
+  quand le dernier se déconnecte ou se tait (``PRESENCE_SILENCE_S``) — elle revient à sa trame suivante ; au
+  démarrage, qui était resté dans le monde sans connexion en sort (``MindPort.world_presence``).
 
 Il ne valide **rien** du monde : chaque commande passe au port d'entrée (``MindPort.world_command``), qui la
 donne à la faculté ``world`` ; ce qu'il diffuse, il le lit dans le journal (``Mind.subscribe`` en direct,
@@ -75,6 +78,9 @@ ERRORS_PER_S = 5
 LOADED_KEPT = 8
 #: le temps laissé à une connexion pour recevoir sa trame de fermeture
 DRAIN_S = 2.0
+#: une connexion qui ne dit plus rien (pas même un ``ping``) depuis ce temps ne fait plus être sa personne dans le
+#: monde ; elle y revient à sa trame suivante
+PRESENCE_SILENCE_S = 60.0
 
 CLOSE_GOING_AWAY = 1001
 CLOSE_UNSUPPORTED = 1003  # ce n'est pas du JSON texte
@@ -256,6 +262,12 @@ class WorldSession:
         self.roles: set[p.Role] = set()
         #: un opérateur qui a demandé le rôle d'hôte (il l'obtient dès que le bail est libre)
         self.wants_host = False
+        #: l'apparence que la personne a choisie (``hello.avatar``)
+        self.avatar: str | None = None
+        #: cette connexion fait être sa personne dans le monde (un ``viewer`` accueilli, qui ne s'est pas tu)
+        self.inside = False
+        #: la dernière trame reçue, sur l'horloge du concentrateur
+        self.heard = monotonic()
         self.closing = False
         self.commands: asyncio.Queue[Any] = asyncio.Queue()
         self.results: OrderedDict[str, p.Result] = OrderedDict()
@@ -375,6 +387,11 @@ class WorldHub:
         self._task: asyncio.Task[None] | None = None
         self._checked_at = 0.0
         self._stopping = False
+        #: une entrée ou une sortie à la fois par personne (deux de ses connexions qui se croisent ne laissent pas
+        #: un corps sans connexion)
+        self._presence: dict[str, asyncio.Lock] = {}
+        #: ceux qui étaient restés dans le monde au démarrage en sont sortis
+        self._evicted = False
         accounts.on_revoke.append(lambda account_id: self.revoke(account=account_id))
         accounts.on_token_revoke.append(lambda token_id: self.revoke(token=token_id))
 
@@ -468,10 +485,14 @@ class WorldHub:
         session.start(self._work)
         try:
             self._welcome(session, hello)
+            if session.inside:
+                await self._settle(session.handle, session.actor, session.avatar)  # puis sa ``presence``, à tous
             await self._serve(session)
         finally:
             self._forget(session)
             await session.stop()
+            if p.Role.VIEWER in session.roles:
+                await self._settle(session.handle, session.actor)  # sa dernière connexion partie : elle sort
 
     async def _hello(self, websocket: WebSocket) -> p.Hello | None:
         """La première trame, ``hello`` — sinon une erreur fatale, et la connexion se ferme."""
@@ -519,12 +540,15 @@ class WorldHub:
     def _welcome(self, s: WorldSession, hello: p.Hello) -> None:
         """L'accueil, d'un seul tenant (sans attente : aucun commit ne s'intercale entre ce qu'on lit et le
         moment où la connexion se met à recevoir les diffusions) — ``welcome``, puis ``definition`` si sa
-        révision n'est pas la bonne, puis l'instantané ou le rattrapage, puis ``host`` s'il l'a demandé."""
+        révision n'est pas la bonne, puis l'instantané ou le rattrapage, puis ``host`` s'il l'a demandé. Un
+        ``viewer`` fait entrer sa personne dans le monde : sa ``presence`` suit, diffusée à tous."""
         self._expire()
         definition, state = self.port.world_view()
         asked = set(hello.roles)
+        s.avatar = hello.avatar
         if p.Role.VIEWER in asked:
             s.roles.add(p.Role.VIEWER)
+            s.inside = True
         if p.Role.CREATOR in asked and s.operator:
             s.roles.add(p.Role.CREATOR)
         host: p.HostLease | None = None
@@ -584,6 +608,10 @@ class WorldHub:
 
     async def _dispatch(self, s: WorldSession, text: str) -> None:
         self._expire()
+        s.heard = self.monotonic()
+        if not s.inside and p.Role.VIEWER in s.roles and not s.closing:
+            s.inside = True  # elle s'était tue, elle se manifeste : elle revient dans le monde
+            await self._settle(s.handle, s.actor, s.avatar)
         raw = _object(text)
         if raw is None:
             s.close(CLOSE_UNSUPPORTED, p.Failure(code="bad_frame", message="Une trame est un objet JSON, en texte.",
@@ -769,14 +797,46 @@ class WorldHub:
         while True:
             await asyncio.sleep(TICK_S)
             try:
+                if not self._evicted:
+                    self._evicted = True
+                    await self._evict()
                 self._expire()
                 now = self.monotonic()
                 if now - self._checked_at >= CREDENTIAL_CHECK_S:
                     self._checked_at = now
                     for s in list(self.sessions.values()):
                         self._still_valid(s)
+                for s in list(self.sessions.values()):
+                    if s.inside and now - s.heard > PRESENCE_SILENCE_S:
+                        s.inside = False  # elle ne se manifeste plus : elle sort, et reviendra à sa trame suivante
+                        await self._settle(s.handle, s.actor)
             except Exception as exc:  # l'entretien ne tombe jamais
                 log.warning("entretien du monde : %r", exc)
+
+    # ── qui est dans le monde ──
+    async def _settle(self, handle: str, actor: str, asset: str | None = None) -> None:
+        """Le corps d'une personne dans le monde tel que ses connexions le veulent : dedans tant que l'une d'elles y
+        est, dehors sinon — redit au noyau, qui n'écrit que ce qui change. Une personne à la fois."""
+        lock = self._presence.setdefault(handle, asyncio.Lock())
+        async with lock:
+            inside = any(o.inside for o in self.sessions.values() if o.handle == handle)
+            try:
+                got = await self.port.world_presence(actor, handle, inside, asset=asset)
+            except Exception as exc:  # le noyau a levé : la connexion n'en meurt pas
+                log.warning("le noyau n'a pas fait %s %s du monde : %r", "entrer" if inside else "sortir", handle,
+                            exc)
+                return
+            if got.status is w.CommandStatus.REFUSED:
+                log.info("%s n'entre pas dans le monde : %s", handle, got.message)
+
+    async def _evict(self) -> None:
+        """Au démarrage : qui était resté dans le monde (le noyau s'est arrêté sans le voir partir) en sort, sauf si
+        une connexion l'y a déjà fait entrer — au rejeu, une personne entrée hier n'est plus dans la pièce."""
+        _, state = self.port.world_view()
+        for a in state.actors:
+            handle = w.handle_of(a.id)
+            if handle is not None:
+                await self._settle(handle, a.id)
 
     def _labels(self) -> dict[str, str]:
         return {s.handle: s.label for s in self.sessions.values() if s.label}
