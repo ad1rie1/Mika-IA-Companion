@@ -583,3 +583,126 @@ export function keepAcrossLives(history: StoredMessage[]): StoredMessage[] {
     (m) => m.sender === "user" && m.id === undefined && m.status === "pending"
   );
 }
+
+// ── Repères de temps dans le fil ──────────────────────────────────────
+
+/**
+ * Un repère posé avant une bulle : le jour qui commence (« Aujourd'hui »,
+ * « Hier », « lundi 28 septembre »), ou l'heure d'une reprise après un long
+ * silence dans la même journée (« 18 h 05 »).
+ *
+ * Mika raisonne sur le temps vécu (ADR 0041) — « comme tu me disais hier
+ * soir », « ça faisait une semaine » — alors que le fil empilait cinquante
+ * bulles sur plusieurs jours sans rien entre elles, et que l'heure d'un
+ * message ne se lisait qu'au survol.
+ */
+export interface TimeMarker {
+  kind: "day" | "resume";
+  label: string;
+}
+
+/** Au-delà de ce silence dans une même journée, la reprise dit son heure. */
+export const RESUME_GAP_MS = 3 * 60 * 60 * 1000;
+
+/**
+ * En deçà de cet écart, deux messages se suivent, même de part et d'autre de
+ * minuit : une bulle optimiste porte l'heure du navigateur, sa réponse
+ * relue celle du serveur, et quelques secondes de désaccord entre les deux
+ * horloges ne doivent pas glisser un jour entre une question et sa réponse.
+ * Un échange qui enjambe minuit reste sous le jour où il a commencé jusqu'à
+ * sa première pause.
+ */
+export const CLOCK_SKEW_MS = 5 * 60 * 1000;
+
+const WEEKDAYS = ["dimanche", "lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi"];
+const MONTHS = [
+  "janvier", "février", "mars", "avril", "mai", "juin",
+  "juillet", "août", "septembre", "octobre", "novembre", "décembre",
+];
+
+/** Le jour local du navigateur, comparable par égalité. */
+function localDayKey(d: Date): number {
+  return d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
+}
+
+/** « Aujourd'hui », « Hier », sinon « lundi 28 septembre » (l'année si ce n'est pas celle-ci). */
+function dayLabel(t: number, now: number): string {
+  const d = new Date(t);
+  const today = new Date(now);
+  const key = localDayKey(d);
+  if (key === localDayKey(today)) return "Aujourd'hui";
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (key === localDayKey(yesterday)) return "Hier";
+  const date = d.getDate() === 1 ? "1er" : String(d.getDate());
+  const label = `${WEEKDAYS[d.getDay()]} ${date} ${MONTHS[d.getMonth()]}`;
+  return d.getFullYear() === today.getFullYear() ? label : `${label} ${d.getFullYear()}`;
+}
+
+/** « 18 h 05 ». */
+function hourLabel(t: number): string {
+  const d = new Date(t);
+  return `${d.getHours()} h ${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+/**
+ * Les repères à poser avant chaque message du fil, dans l'ordre affiché :
+ * `markers[i]` précède `history[i]`, `null` quand il n'y a rien à dire.
+ *
+ * Calculés à chaque rendu à partir de `ts`, jamais stockés : ni le cache ni
+ * le curseur n'en savent rien, et « Aujourd'hui » devient « Hier » au premier
+ * rendu après minuit. Trois précautions, parce que tous les `ts` ne se valent
+ * pas :
+ *  - l'heure ne recule jamais : un message rangé plus bas (par son
+ *    identifiant) mais horodaté plus tôt par une autre horloge reste dans le
+ *    jour de ce qui le précède ;
+ *  - un message rangé par `after` (pensée murmurée, rapport de projet) est
+ *    placé par le curseur, pas par l'heure : il ne dépasse pas l'heure du
+ *    message qui le suit, sans quoi une pensée arrivée après minuit, rangée
+ *    avant une réponse relue de la veille, faisait naître un jour fantôme ;
+ *  - un écart de moins de `CLOCK_SKEW_MS` ne change jamais de jour.
+ */
+export function timeMarkers(history: StoredMessage[], now: number): Array<TimeMarker | null> {
+  // L'heure retenue pour chacun, de la fin vers le début : un message rangé
+  // par `after` est borné par le suivant ; un `ts` illisible (un cache
+  // d'avant) n'en a pas.
+  const times: Array<number | undefined> = new Array(history.length);
+  let next: number | undefined;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const m = history[i];
+    const own = Number.isFinite(m.ts) && m.ts > 0 ? m.ts : undefined;
+    if (m.id === undefined && m.after !== undefined) {
+      const bound = Math.min(own ?? Infinity, next ?? Infinity);
+      times[i] = Number.isFinite(bound) ? bound : undefined;
+    } else {
+      times[i] = own;
+      if (own !== undefined) next = own;
+    }
+  }
+
+  const markers: Array<TimeMarker | null> = [];
+  let previous: number | undefined;
+  let day: number | undefined;
+  for (const t of times) {
+    if (t === undefined) {
+      markers.push(null);
+      continue;
+    }
+    const at = previous === undefined ? t : Math.max(previous, t);
+    const key = localDayKey(new Date(at));
+    let marker: TimeMarker | null = null;
+    if (previous === undefined) {
+      marker = { kind: "day", label: dayLabel(at, now) };
+      day = key;
+    } else if (key !== day) {
+      if (at - previous >= CLOCK_SKEW_MS) {
+        marker = { kind: "day", label: dayLabel(at, now) };
+        day = key;
+      }
+    } else if (at - previous >= RESUME_GAP_MS) {
+      marker = { kind: "resume", label: hourLabel(at) };
+    }
+    markers.push(marker);
+    previous = at;
+  }
+  return markers;
+}

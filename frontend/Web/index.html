@@ -359,6 +359,21 @@
         color: rgba(255, 255, 255, 0.6);
         background: rgba(255, 255, 255, 0.08);
       }
+      /* Repères de temps du fil (chatSync.timeMarkers) : le jour qui
+         commence, l'heure d'une reprise après un long silence. Une ligne
+         discrète entre les bulles, pas une note de la machine : ni italique
+         ni fond. */
+      .chat-note.chat-marker {
+        font-style: normal;
+        background: none;
+        padding: 2px 10px;
+        color: rgba(255, 255, 255, 0.45);
+      }
+      .chat-note.chat-marker.day {
+        margin-top: 6px;
+        font-weight: 600;
+        color: rgba(255, 255, 255, 0.6);
+      }
 
       /* Cartes d'accord (backendv2, ADR 0064) : un appel à un service
          extérieur attend la décision de la personne. Épinglées au-dessus de
