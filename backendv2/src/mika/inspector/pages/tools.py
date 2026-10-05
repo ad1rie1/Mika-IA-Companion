@@ -433,7 +433,10 @@ async def exposed(ui: Any, request: Request) -> list[Any]:
         ), title="Le relais (moteur Claude Code)"),
         Fields((
             ("adresse", Text("/mcp/console", "mono")),
-            ("ce qu'il sert", "la console en lecture seule : ses vues, ses fiches, la recherche — aucune action"),
+            ("ce qu'il sert", "la console en lecture seule : ses vues, ses fiches, la recherche, « pourquoi a-t-elle "
+                              "dit ça ? », et des pages de la console (santé, processus, anomalies, sorties, coûts, "
+                              "chronologie, épisodes, ses choix, « que ferait-elle ? », « à traiter ») — aucune "
+                              "action, aucune page à formulaires"),
             ("à qui", "un agent de sa propriétaire (son Claude Code, par exemple)"),
             ("accès", "cette machine seulement, derrière un jeton d'opérateur"),
             ("jeton", Badge("défini", "ok") if token else Badge("absent — « mika mcp token » en crée un", "muted")),
