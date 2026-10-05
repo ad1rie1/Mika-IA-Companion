@@ -99,6 +99,13 @@ l'arbitre pas à pas) ; les sections de son prompt, nommées ; ce dont elle s'es
 souvenue, avec le texte ; ses outils et leurs résultats. Les clés techniques
 sont dans « Détails techniques ».
 
+La même adresse, avec le numéro d'un message reçu resté sans réponse, répond à
+« Pourquoi n'a-t-elle pas répondu ? » : la fin d'épisode qui l'a réglé et sa
+cause en mots (un silence choisi, ce qui l'a fait taire, trop tard, une panne),
+puis ce qu'elle avait sous les yeux et ses outils, ou l'appel de modèle en
+échec. Dans le fil, la colonne « réponse » dit cette cause (« sans réponse :
+s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
+
 ### Décisions
 - **Maintenant** : la table de l'arbitre (preuves → score → taux), la politique.
 - **Que ferait-elle ?** *(nouveau)* : pour une personne, ses lignes, ce qui la

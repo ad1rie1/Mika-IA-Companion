@@ -19,7 +19,7 @@ from mika.inspector.pages import accounts, reglages
 from mika.inspector.pages.journal import EPISODE_TABS, episode_head, episode_tab, event_blocks
 from mika.inspector.pages.subjects import Subjects
 from mika.inspector.pages.system import outbox_post
-from mika.inspector.pages.why import why_page
+from mika.inspector.pages.why import silence_page, why_page
 from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, secure
 from mika.kernel.faculty import InspectSpec
 from mika.kernel.forms import RENDERED, describe
@@ -341,18 +341,21 @@ class Pages:
         return await outbox_post(self.ui, request)
 
     async def why(self, request: Request) -> Response:
-        """« Pourquoi a-t-elle dit ça ? » : une de ses paroles, expliquée."""
+        """« Pourquoi a-t-elle dit ça ? » : une de ses paroles, expliquée — et, pour un message reçu resté sans
+        réponse, « Pourquoi n'a-t-elle pas répondu ? »."""
         seq = int_query(request.path_params["seq"], 0)
-        got = why_page(self.ui, seq) if seq > 0 else None
+        got = (why_page(self.ui, seq) or silence_page(self.ui, seq)) if seq > 0 else None
         if got is None:
             return self.render_page(request, title="Parole introuvable", active="fil", status=404,
-                                    blocks=[Note("Ce numéro n'est pas une de ses paroles.", "warn")])
+                                    blocks=[Note("Ce numéro n'est ni une de ses paroles, ni un message resté sans "
+                                                 "réponse.", "warn")])
         env = self.ui.env()
         facts = [{"label": k, "cell": render.cell(v, env)} for k, v in got["facts"]]
+        crumbs = [("Conversations", f"{PREFIX}/fil")]
+        if got["correlation"]:
+            crumbs.append(("Son épisode", f"{PREFIX}/episode/{quote(got['correlation'], safe='')}"))
         return self.render_page(request, title=got["title"], heading=got["title"], subtitle=got["subtitle"],
-                                active="fil", facts=facts, blocks=got["blocks"],
-                                crumbs=[("Conversations", f"{PREFIX}/fil"),
-                                        ("Son épisode", f"{PREFIX}/episode/{quote(got['correlation'], safe='')}")])
+                                active="fil", facts=facts, blocks=got["blocks"], crumbs=crumbs)
 
     async def event(self, request: Request) -> Response:
         seq = int_query(request.path_params["seq"], 0)

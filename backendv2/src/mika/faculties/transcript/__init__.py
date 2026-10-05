@@ -57,10 +57,12 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    describe_error,
     paginate,
 )
 from mika.kernel.prompt import ChatTurn, SectionBody
 from mika.kernel.state import FrozenDict
+from mika.ports.delivery import TOO_LATE
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.store import Sql
 from mika.vocab.affect import Declared, emotion_cell, strip_prosody
@@ -724,8 +726,8 @@ MESSAGE_COLUMNS = (Column("n°", "fit", detail=True), Column("quand", "fit"), "q
 
 def _answers(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[int, int]:
     """Pour chaque message reçu de la page, la parole qui l'a réglé (son n°) : celle qui y répond, ou celle qui
-    répond au dernier message de sa rafale et l'a lu avec (``Utterance.answers``). Absent : sans réponse (elle
-    s'est tue, la réponse a échoué) ou encore en attente."""
+    répond au dernier message de sa rafale et l'a lu avec (``Utterance.answers``). Absent : encore en attente, ou
+    réglé sans parole (``_silences`` dit pourquoi)."""
     store = ctx.store
     asked = [r for r in rows if r["role"] == "user" and not _internal(r)]
     if store is None or not asked:
@@ -752,8 +754,73 @@ def _answers(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[int
     return out
 
 
-def _answer_cell(r: Mapping[str, Any], pending: set[int], answers: Mapping[int, int]) -> Cell:
-    """La colonne « réponse » d'un message reçu : en attente, la parole qui l'a réglé, ou sans réponse."""
+#: une rafale dont le dernier message est sur une autre page : sa fin se cherche parmi tant de messages suivants
+BURST_LOOKUP = 5
+#: comment se dit une fin qui laisse un message sans réponse (le détail d'une panne suit)
+SILENCES = {"abstained": "s'est tue", "failed": "panne", "timeout": "panne : délai dépassé",
+            "interrupted": "interrompue par un arrêt", "superseded": "supplantée", "preempted": "a cédé la place",
+            "cancelled": "annulée"}
+#: une cause tient en tant de caractères dans la colonne « réponse » (sa page la dit en entier)
+CAUSE_CHARS = 80
+
+
+def _ended_leaving(ctx: InspectContext, reply_to: int, q: int) -> Any | None:
+    """La dernière fin d'épisode qui répondait à ``reply_to``, si elle laisse le message ``q`` sans réponse."""
+    found = ctx.events((rt.EPISODE_ENDED,), 1, where=("reply_to", reply_to))
+    return found[0] if found and found[0].data.leaves_unanswered(q) else None
+
+
+def _silences(ctx: InspectContext, rows: Sequence[Mapping[str, Any]], pending: set[int],
+              answers: Mapping[int, int]) -> dict[int, Any]:
+    """Pour chaque message reçu de la page réglé sans parole, la fin d'épisode qui l'a laissé sans réponse
+    (``EpisodeEnded.leaves_unanswered``) ; ``None`` : il ne lui était pas adressé (dans un salon, elle entend tout
+    mais ne répond qu'à ce qui lui parle). Les plus récents d'abord : la fin d'une rafale porte sur son dernier
+    message et règle aussi ceux d'avant. Absent : sa fin n'est pas retrouvée."""
+    store = ctx.store
+    out: dict[int, Any] = {}
+    asked = [r for r in rows if r["role"] == "user" and not _internal(r)
+             and int(r["id"]) not in pending and int(r["id"]) not in answers]
+    for r in sorted(asked, key=lambda r: int(r["id"]), reverse=True):
+        q = int(r["id"])
+        if q in out:
+            continue
+        got = ctx.events((rt.PERCEPTION_RECEIVED,), 1, before=q + 1)
+        if got and got[0].seq == q and not got[0].data.addressed:
+            out[q] = None
+            continue
+        ended = _ended_leaving(ctx, q, q)
+        if ended is None and store is not None:
+            # une rafale dont la fin porte sur un message d'après, de la même adresse au même endroit
+            for (later,) in store.query_mind(
+                    f"SELECT id FROM {c.THREAD_TABLE} WHERE person=? AND role='user' AND id>? "
+                    "AND COALESCE(room, '')=? ORDER BY id LIMIT ?", (r["person"], q, r["room"] or "", BURST_LOOKUP)):
+                ended = _ended_leaving(ctx, int(later), q)
+                if ended is not None:
+                    break
+        if ended is not None:
+            for seq in ended.data.unanswered or (q,):
+                out.setdefault(int(seq), ended)
+    return out
+
+
+def _cause(outcome: str, detail: str) -> str:
+    """Pourquoi un message est resté sans réponse, en quelques mots : un silence (« s'est tue », ou ce qui l'a fait
+    taire — « s'est ravisée », « allait redire son dernier message »), « trop tard », une panne et son détail
+    (« panne : délai dépassé »)."""
+    detail = " ".join((detail or "").split())
+    if detail.startswith(TOO_LATE):
+        return "trop tard"
+    if outcome == "abstained" and detail:
+        # un silence que le modèle n'a pas rendu se dit en une phrase sur elle (« elle s'est ravisée »)
+        return _clip(detail.removeprefix("elle "), CAUSE_CHARS)
+    head = SILENCES.get(outcome, outcome or "fin inconnue")
+    return _clip(f"{head} : {describe_error(detail)}", CAUSE_CHARS) if detail else head
+
+
+def _answer_cell(r: Mapping[str, Any], pending: set[int], answers: Mapping[int, int],
+                 silences: Mapping[int, Any]) -> Cell:
+    """La colonne « réponse » d'un message reçu : en attente, la parole qui l'a réglé, ou sans réponse — et
+    pourquoi, en mots, avec un lien vers l'explication (« Pourquoi n'a-t-elle pas répondu ? »)."""
     if r["role"] != "user" or _internal(r):
         return ""
     q = int(r["id"])
@@ -761,24 +828,32 @@ def _answer_cell(r: Mapping[str, Any], pending: set[int], answers: Mapping[int, 
         return Badge("en attente", "warn")
     if q in answers:
         return Ref.why(answers[q], f"répondue → n° {answers[q]}")
-    return Text("sans réponse", "muted")
+    if q not in silences:
+        return Text("sans réponse", "muted")
+    ended = silences[q]
+    if ended is None:
+        return Text("sans réponse : ne lui était pas adressé", "muted")
+    return Ref.why(q, f"sans réponse : {_cause(ended.data.outcome, ended.data.detail)}")
 
 
 def _messages(frame: Frame, ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> tuple[Row, ...]:
     pending = {int(x) for x in frame.get(rt.AWAITING)}
     episodes = _episodes(ctx, rows)
     answers = _answers(ctx, rows)
+    silences = _silences(ctx, rows, pending, answers)
     out = []
     for r in rows:
         mine = r["role"] == "assistant"
         corr = episodes.get(int(r["id"]))
+        if corr is None and silences.get(int(r["id"])) is not None:
+            corr = silences[int(r["id"])].correlation  # l'épisode qui l'a laissé sans réponse
         out.append(Row((
             Ref("event", str(r["id"]), str(r["id"])), When(r["at"]),
             Badge("elle", "info") if mine else Badge("la personne"), _who(frame, r["person"]),
             f"salon « {r['room']} »" if r["room"] else "en privé",
             Text((r["text"] or "")[:TEXT_CAP], clamp=INSPECT_CHARS),
             emotion_cell(r["emotion"], r["emotion_intensity"]) if mine and r["emotion"] else "",
-            _answer_cell(r, pending, answers),
+            _answer_cell(r, pending, answers, silences),
             Ref("episode", corr, "épisode") if corr else "—",
         ), tone="muted" if _internal(r) else "", href=Ref.why(int(r["id"])) if mine and corr else None,
             detail=(Prose(r["text"] or FORGOTTEN, title="Message", reading=True),)))

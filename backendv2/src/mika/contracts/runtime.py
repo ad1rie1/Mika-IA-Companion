@@ -111,6 +111,14 @@ class EpisodeEnded(Payload):
     #: tue, ``reply_failed`` sinon, pour le dernier message du tour).
     unanswered: tuple[int, ...] | None = None
 
+    def leaves_unanswered(self, seq: int) -> bool:
+        """Cette fin laisse-t-elle le message ``seq`` sans réponse pour de bon ? Dans un journal plus ancien
+        (``unanswered`` absent) : si elle y répondait (``reply_to``) et l'a réglé sans parole — elle s'est tue, la
+        réponse a échoué ou a pris trop longtemps."""
+        if self.unanswered is not None:
+            return seq in self.unanswered
+        return self.reply_to == seq and self.outcome in ("abstained", "failed", "timeout")
+
 
 class ProcessFailed(Payload):
     process: str

@@ -17,6 +17,12 @@ Elle se lit dans le journal (l'énoncé, le début d'épisode, le choix de
 l'arbitre) et dans la trace de l'épisode (``runtime/traces.py``, 14 jours) ;
 quand la trace n'existe plus, la page le dit et montre ce que le journal
 garde. Les identifiants techniques restent dans « Détails techniques ».
+
+La question inverse a la même adresse : le numéro d'un message reçu resté
+sans réponse mène à « Pourquoi n'a-t-elle pas répondu ? » (``silence_page``) —
+la fin d'épisode qui l'a réglé (``EpisodeEnded.unanswered``), sa cause en mots
+(un silence choisi, ce qui l'a fait taire, trop tard, une panne), et selon le
+cas ce qu'elle avait sous les yeux, ses outils, ou l'appel de modèle en échec.
 """
 
 from __future__ import annotations
@@ -47,12 +53,17 @@ from mika.kernel.inspect import (
     When,
     num_fr,
 )
+from mika.ports.delivery import TOO_LATE
 from mika.runtime.boundary import Failed, call
 
 #: au-delà, l'arbitre a pu choisir plus tôt : le choix d'un départ se cherche dans ces événements-ci
 SELECTION_LOOKUP = 50
 #: une provenance montre au plus tant de souvenirs (une parole en cite rarement plus)
 RECALL_MAX = 60
+#: la fin qui a laissé un message sans réponse se cherche parmi tant de fins d'épisode qui le suivent
+SILENCE_LOOKUP = 500
+#: une panne montre au plus tant d'appels de modèle de son épisode
+CALLS_MAX = 20
 
 
 def _decoded(ui: Any, seq: int) -> Any | None:
@@ -332,3 +343,125 @@ def why_page(ui: Any, seq: int) -> dict[str, Any] | None:
     ]
     return {"title": "Pourquoi a-t-elle dit ça ?", "subtitle": f"« {(text or '(oublié)')[:160]} »",
             "facts": facts, "blocks": blocks, "correlation": corr}
+
+
+# ── « Pourquoi n'a-t-elle pas répondu ? » ─────────────────────────────────
+
+
+def silence_of(ui: Any, seq: int) -> Any | None:
+    """La fin d'épisode qui a laissé le message ``seq`` sans réponse (``EpisodeEnded.leaves_unanswered``) : la
+    première qui le suit et le dit — celle d'une rafale porte sur son dernier message et règle ceux d'avant.
+    ``None`` : pas retrouvée (il a reçu sa réponse, ou sa fin est trop loin)."""
+    store = ui.kernel.mind.store
+    seqs = [int(r[0]) for r in store.query_mind(
+        "SELECT seq FROM events WHERE type=? AND seq>? ORDER BY seq LIMIT ?",
+        (rt.EPISODE_ENDED.name, seq, SILENCE_LOOKUP))]
+    for stored in store.get_events(seqs):  # dans l'ordre du journal
+        e = ui.decode(stored)
+        if e.data.leaves_unanswered(seq):
+            return e
+    return None
+
+
+def _silence_note(e: Any) -> Note:
+    """Ce qui l'a laissé sans réponse, en mots : un silence (choisi par le modèle, ou ce qui l'a fait taire), trop
+    tard, une panne, des tentatives épuisées."""
+    detail = names.detail(e.detail)
+    if e.detail.startswith(TOO_LATE):
+        return Note("Trop tard : la question a attendu au-delà du délai de réponse (un arrêt, son sommeil) — elle ne "
+                    "répond pas en retard à une question dépassée.", "warn", title="Trop tard")
+    if e.outcome == "abstained":
+        if e.detail:
+            return Note(f"Elle s'est tue : {detail}. Ce n'est pas une panne.", "info", title="Un silence")
+        return Note("Elle a choisi de se taire : le modèle a lu ce qui suit et n'a rien répondu. Ce n'est pas une "
+                    "panne.", "info", title="Un silence choisi")
+    if e.outcome in ("failed", "timeout"):
+        cause = detail or ("délai dépassé" if e.outcome == "timeout" else "échec sans détail")
+        return Note(f"Une panne : {cause}. Ce n'est pas un choix : elle n'a pas pu répondre.", "danger",
+                    title="Une panne")
+    return Note(f"{names.outcome(e.outcome)[0].capitalize()}, et ses tentatives de réponse étaient épuisées : la "
+                "question n'a pas été reprise.", "warn", title="Abandonnée")
+
+
+def calls_blocks(ui: Any, corr: str) -> list[Any]:
+    """Les appels de modèle d'un épisode : lequel a échoué, chez quel fournisseur."""
+    calls = ui.deps.calls
+    if calls is not None and hasattr(calls, "for_correlation"):
+        traces = calls.for_correlation(corr, limit=CALLS_MAX)
+    else:
+        traces = [t for t in list(ui.deps.traces) if str(getattr(t, "call_id", "")).startswith(corr)][:CALLS_MAX]
+    if not traces:
+        return [Note("Aucun appel de modèle retrouvé : la panne est arrivée avant l'appel (aucun modèle configuré, "
+                     "une erreur en préparant le prompt), ou le registre des appels a été vidé.", "muted")]
+    return [Table(("rôle", "fournisseur", "modèle", Column("durée", "num"), "issue"), tuple(
+        Row((names.role(t.role), t.backend or "—", Text(t.model or "—", "mono"), f"{num_fr(t.latency_us / 1e6, 1)} s",
+             Badge("réussi", "ok") if t.outcome == "ok" else Badge(names.detail(t.outcome), "danger")),
+            tone="" if t.outcome == "ok" else "danger") for t in traces), title="Ses appels au modèle"),
+            Fields((("le détail", Ref("episode", corr, "attente, jetons et coût de chaque appel",
+                                      (("onglet", "appels"),))),))]
+
+
+def silence_page(ui: Any, seq: int) -> dict[str, Any] | None:
+    """« Pourquoi n'a-t-elle pas répondu ? » : la page d'un message reçu resté sans réponse (ou qui l'attend
+    encore), ou ``None`` si ce numéro n'en est pas un (une de ses paroles, un message auquel elle a répondu)."""
+    asked = _decoded(ui, seq)
+    if asked is None or asked.type.name != rt.PERCEPTION_RECEIVED.name:
+        return None
+    d = asked.data
+    text = d.text.text
+    page: dict[str, Any] = {"title": "Pourquoi n'a-t-elle pas répondu ?",
+                            "subtitle": f"« {(text or '(oublié)')[:160]} »", "correlation": ""}
+    facts: list[tuple[str, Any]] = [("de", ui.names.who_cell(d.handle)), ("reçu", When(asked.at)),
+                                    ("où", f"salon « {d.room} »" if d.room else "en privé")]
+    blocks: list[Any] = [Prose(text or "(oublié : le texte a été effacé)", "Ce qu'on lui a écrit", reading=True)]
+    if not d.addressed:
+        blocks.append(Note("Ce message ne lui était pas adressé : dans un salon, elle entend tout mais ne répond qu'à "
+                           "ce qui lui parle (son nom, une réponse à l'un de ses messages).", "info",
+                           title="Pas pour elle"))
+        return {**page, "facts": facts, "blocks": blocks}
+    if seq in ui.names.frame().get(rt.AWAITING):
+        blocks.append(Note("Sa réponse est en attente : elle y travaille, ou elle dort et y répondra à son réveil.",
+                           "warn", title="En attente"))
+        return {**page, "facts": [*facts, ("issue", Badge("en attente", "warn"))], "blocks": blocks}
+    ended = silence_of(ui, seq)
+    if ended is None:
+        return None
+    e, corr = ended.data, ended.correlation
+    # une fin écrite sans épisode (une question abandonnée, trop vieille ou sans place) n'a ni prompt ni appel
+    started, _end = episode_events(ui, corr)
+    trace = trace_of(ui, corr)
+    facts.append(("issue", Badge(*names.outcome(e.outcome, e.kind))))
+    if started is not None:
+        facts.append(("épisode", Ref("episode", corr, names.kind(e.kind))))
+    cause: list[Any] = [_silence_note(e)]
+    if e.reply_to is not None and e.reply_to != seq:
+        cause.append(Note(f"Ce message faisait partie d'une rafale : la fin porte sur le dernier (n° {e.reply_to}), "
+                          "qu'elle aurait lu avec celui-ci.", "muted"))
+    cause.append(Fields((("la fin", Ref("event", str(ended.seq), f"événement n° {ended.seq}")),
+                         ("réglé", When(ended.at)),
+                         ("elle s'y est mise", When(started.at) if started is not None else "—"))))
+    blocks.append(Section("Pourquoi elle n'a pas répondu", tuple(cause)))
+    if started is not None:
+        if e.outcome in ("failed", "timeout"):
+            blocks.append(Section("L'appel au modèle", tuple(calls_blocks(ui, corr))))
+        if (trace or {}).get("compose"):
+            seen = [*prompt_blocks(ui, trace, ()), Fields((("le prompt exact", Ref(
+                "episode", corr, "le voir en entier, tel qu'envoyé au modèle", (("onglet", "prompt"),))),))]
+        else:
+            seen = [Note("Son prompt n'est pas gardé : elle n'est pas allée jusqu'à le composer (elle s'est ravisée, "
+                         "une panne avant l'appel), ou sa trace a expiré (14 jours) ou a été oubliée.", "muted")]
+        blocks.append(Section("Ce qu'elle avait sous les yeux", tuple(seen)))
+        if any(isinstance(t, dict) for t in (trace or {}).get("tool_calls") or ()):
+            did = tools_blocks(ui, trace, None)
+        elif (trace or {}).get("compose"):
+            did = [Note("Elle n'a appelé aucun outil.", "muted")]
+        else:
+            did = [Note("La trace n'est pas gardée : on ne sait pas quels outils elle a appelés.", "muted")]
+        blocks.append(Section("Ce qu'elle a fait", tuple(did)))
+    blocks.append(Disclosure("Détails techniques", (Fields((
+        ("message", Text(f"événement n° {seq}", "mono")), ("fin", Text(f"événement n° {ended.seq}", "mono")),
+        ("épisode", Text(corr, "mono")),
+        ("déclencheur", Text(str(started.data.trigger) if started is not None else "—", "mono")),
+        ("issue", Text(e.outcome, "mono")), ("détail", Text(e.detail or "—", "mono")),
+    )), Code(json.dumps(json.loads(e.model_dump_json()), ensure_ascii=False, indent=1), "La fin d'épisode au journal"))))
+    return {**page, "facts": facts, "blocks": blocks, "correlation": corr if started is not None else ""}
