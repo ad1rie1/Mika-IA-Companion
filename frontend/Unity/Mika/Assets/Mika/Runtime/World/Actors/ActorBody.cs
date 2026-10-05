@@ -433,6 +433,15 @@ namespace Mika.World.Engine
         public void AbandonChoreography()
         {
             _stepping = false;
+            // Une main tendue coupée en route (Reach) : sans cela le bras restait tendu vers l'ancien point, et
+            // l'épingle de cette main (clavier, arrosoir, couette…) était sautée pour de bon par OnIK.
+            if (_ikPoint.HasValue)
+            {
+                if (_look == _ikPoint) _look = null;
+                _ikPoint = null;
+            }
+            _ikWeightTarget = 0f;
+            _reachTarget = 0f;
             if (!Choreographing && !_rootMotion) return;
             Choreographing = false;
             _rootMotion = false;
