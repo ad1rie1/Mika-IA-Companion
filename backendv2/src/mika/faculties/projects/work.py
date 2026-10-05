@@ -8,7 +8,9 @@ due, et raconter ce qu'elle a mené à bout (mode Mika seulement).
   et la plage, jamais les plafonds. En mode Mika, son corps la retient
   pendant qu'elle dort (``body``) ; en mode impersonnel, non.
 - **Raconter** : à qui lui a confié le projet (ou à une propriétaire), à la
-  mesure du lien — jamais d'un appel au modèle.
+  mesure du lien — jamais d'un appel au modèle. Un point quand le travail
+  s'est posé (rien en cours, rien de dû avant un moment), qui dit d'une fois
+  tout ce qui a été mené à bout depuis le précédent.
 """
 
 from __future__ import annotations
@@ -205,6 +207,24 @@ def _shareable(o: Objective, p: Project, now: int, pm) -> bool:
             and now - o.closed_at <= pm.share_within_us)
 
 
+def untold(p: Project, now: int, pm: Any) -> list[Objective]:
+    """Ce qu'elle a mené à bout dans ce projet sans l'avoir encore raconté, du plus ancien au plus récent : ce
+    qu'un récit dit d'une fois."""
+    return sorted((o for o in p.objectives if _shareable(o, p, now, pm)), key=lambda o: (o.closed_at, o.id))
+
+
+def _settled(p: Project, s: ProjectsState, frame: Frame, last: Objective, pm: Any) -> bool:
+    """Le travail s'est-il posé ? Rien ne tourne ni ne sort de l'atelier, et aucune exécution n'est due avant un
+    moment — ou le dernier objectif fini attend déjà depuis ce moment (une exécution due que rien ne lance ne
+    retient pas le récit)."""
+    if busy(s, p.id) or outgoing(p, frame.now):
+        return False
+    if frame.now - last.closed_at >= pm.share_settle_us:
+        return True
+    at = next_run_at(p, s, frame)
+    return at is None or at - frame.now >= pm.share_settle_us
+
+
 def _reader(p: Project, frame: Frame) -> tuple[str, str] | None:
     """À qui rendre compte d'un projet impersonnel, ou dire qu'on a besoin d'aide : qui l'a confié (s'il s'occupe
     d'elle), sinon quelqu'un qui s'occupe d'elle — jamais une amie : c'est un travail."""
@@ -230,8 +250,8 @@ SHARE_BRIEFS = {
     MENTION: "Tu as fini quelque chose dans un de tes projets : tu peux le mentionner à {who} en passant, sans "
              "entrer dans le détail.",
 }
-REPORT_BRIEF = ("Un objectif d'un projet qu'on t'a confié est atteint : fais-en un compte rendu factuel à {who}, en une "
-                "ou deux phrases — c'est un travail, pas une fierté.")
+REPORT_BRIEF = ("Un projet qu'on t'a confié a avancé : fais-en un compte rendu factuel à {who}, en une ou deux phrases "
+                "— c'est un travail, pas une fierté.")
 NEED_BRIEF = ("Un projet qu'on t'a confié n'avance plus sans un coup de main de {who} : dis-le-lui simplement — ce qui "
               "bloque, et ce qu'il te faudrait.")
 
@@ -241,32 +261,32 @@ NEED_BRIEF = ("Un projet qu'on t'a confié n'avance plus sans un coup de main de
                          identity_c.REACHABLE, presence_c.PRESENT, identity_c.IDENTITY])
 def _share(s: ProjectsState, frame: Frame) -> list[Candidate]:
     """Raconter ce qu'elle a mené à bout (mode Mika, à la mesure du lien) ; en mode impersonnel, un compte rendu
-    factuel à qui l'a confié."""
+    factuel à qui l'a confié. Un point quand le travail se pose, pas un message par objectif coché : le récit dit
+    tout ce qui a été mené à bout depuis le précédent, sous le sujet du dernier fini."""
     pm = params(frame.env.params_of("projects", frame.root))
     out = []
     for p in sorted(s.projects.values(), key=lambda p: p.id):
         if p.status != c.ACTIVE:  # en pause ou archivé : on n'en parle plus de soi-même
             continue
-        for o in p.objectives:
-            if not _shareable(o, p, frame.now, pm):
+        told = untold(p, frame.now, pm)
+        if not told or not _settled(p, s, frame, told[-1], pm):
+            continue
+        if p.mode == c.PERSONA:
+            chosen = confidant(p, frame)
+            if chosen is None:
                 continue
-            if p.mode == c.PERSONA:
-                chosen = confidant(p, frame)
-                if chosen is None:
-                    continue
-                person, address, level = chosen
-                brief = SHARE_BRIEFS[level].format(who=_who_words(frame, person, address))
-            else:
-                reader = _reader(p, frame)
-                if reader is None:
-                    continue
-                person, address = reader
-                level = FULL
-                brief = REPORT_BRIEF.format(who=_who_words(frame, person, address))
-            out.append(Candidate(
-                Kind.INITIATIVE, address, c.SHARE, pm.share_evidence, resources=frozenset({floor(address)}),
-                args=FrozenDict({"brief:projects": brief, "subject": subject_of(p.id, o.id), "share": level})))
-            break  # un récit à la fois par projet
+            person, address, level = chosen
+            brief = SHARE_BRIEFS[level].format(who=_who_words(frame, person, address))
+        else:
+            reader = _reader(p, frame)
+            if reader is None:
+                continue
+            person, address = reader
+            level = FULL
+            brief = REPORT_BRIEF.format(who=_who_words(frame, person, address))
+        out.append(Candidate(
+            Kind.INITIATIVE, address, c.SHARE, pm.share_evidence, resources=frozenset({floor(address)}),
+            args=FrozenDict({"brief:projects": brief, "subject": subject_of(p.id, told[-1].id), "share": level})))
     return out
 
 
