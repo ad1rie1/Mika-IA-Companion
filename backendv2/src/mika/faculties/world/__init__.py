@@ -207,14 +207,15 @@ def _gestured(s: WorldState, e: Any, cx: Any) -> WorldState:
 
 @WORLD.reducer(w.AUTHORED)
 def _authored(s: WorldState, e: Any, cx: Any) -> WorldState:
-    """Une édition validée à l'émission ; au rejeu, une édition qui ne s'applique plus ne change rien."""
+    """Une édition validée à l'émission ; au rejeu, une édition qui ne s'applique plus ne change rien. Ce qui était
+    à sa place suit sa place ; ce qui n'a plus de sens rentre chez soi."""
     if e.data.base_rev != s.definition.rev:
         return s
     try:
         defn = w.apply_changes(s.definition, e.data.changes)
     except ValueError:
         return s
-    actors, objects = plan.reconcile(defn, s.actors, s.objects)
+    actors, objects = plan.reconcile(defn, s.actors, plan.rehome(s.definition, defn, s.objects, e.at))
     intents = {k: v for k, v in s.intents.items() if v.actor in actors}
     return _lived(replace(s, definition=defn), actors, objects, e.seq, e.at, intents=FrozenDict(intents))
 
