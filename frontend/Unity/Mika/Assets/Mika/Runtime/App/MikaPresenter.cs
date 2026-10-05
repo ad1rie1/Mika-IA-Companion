@@ -24,6 +24,10 @@ namespace Mika.App
         public PlayerController player;
         public string mikaActor = "mika";
 
+        /// <summary>Au-delà (m/s), la joueuse se déplace — elle marche à 1,6 m/s : un mouvement net, pas un
+        /// tremblement du contrôleur.</summary>
+        const float ViewerMovedSpeed = 0.5f;
+
         ActorBody _body;
         MikaFace _face;
         BodyExpression _expression;
@@ -89,6 +93,9 @@ namespace Mika.App
             ShowSleep();
             if (_face == null) return;
             _face.Walking = _body.Speed > 0.15f;
+            // Seule et occupée, elle s'absorbe dans ce qu'elle fait ; la joueuse qui se déplace lui fait lever les yeux.
+            _face.Occupied = _activity != null && _activity.Activity != null;
+            _face.ViewerMoved = player != null && HorizontalSpeed(player.Velocity) > ViewerMovedSpeed;
             // La tête suit l'attention : vers la personne quand elle la regarde, devant elle sinon (les yeux, eux,
             // vont où l'attention les mène — MikaFace s'en charge).
             var lookingAtYou = _face.Attention == AttentionState.Contact || _face.Attention == AttentionState.Avert;
@@ -183,6 +190,8 @@ namespace Mika.App
             var second = parts.Count > 1 ? parts[1].Weight : 0f;
             _expression.React(emotion, intensity, first, second, inner, ambient);
         }
+
+        static float HorizontalSpeed(Vector3 velocity) => new Vector2(velocity.x, velocity.z).magnitude;
 
         static IReadOnlyList<KeyValuePair<string, float>> Blend(List<BlendPart> parts) =>
             (parts ?? new List<BlendPart>())
