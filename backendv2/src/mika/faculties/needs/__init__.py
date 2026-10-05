@@ -6,6 +6,11 @@ un message reçu comble le besoin de compagnie ; parler, celui de
 s'exprimer (prendre la parole d'elle-même bien plus qu'une réponse) ;
 apprendre quelque chose de neuf, la curiosité.
 
+**La compagnie dépend de qui la donne** : un échange avec une amie ou une
+proche la comble pleinement, avec une connaissance d'une part, avec une
+inconnue peu, avec qui elle garde une hostilité installée presque pas — un
+après-midi à se faire chahuter par un inconnu ne remplace pas une amie.
+
 Ils poussent à prendre la parole (preuves vers quiconque est là), se disent
 dans le prompt (« tu as envie de parler à quelqu'un »), et quand plus rien ne
 se passe depuis deux heures, elle ressent un vide — de l'ennui, ou de la
@@ -39,6 +44,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
+from mika.contracts import affect as affect_c
 from mika.contracts import agency as agency_c
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
@@ -94,6 +100,24 @@ class NeedsParams(BaseModel):
         label="Parler à quelqu'un → compagnie", group="Ce qui comble", lo=0, hi=1, step=0.05,
         help="Chaque parole adressée à quelqu'un (réponse ou initiative) multiplie son besoin de compagnie par "
              "ce facteur.")] = 0.7
+    # qui comble la compagnie : une amie ou une proche pleinement, les autres d'une part seulement (le facteur
+    # effectif est ``1 − (1 − facteur) × part``)
+    acquaintance_company: Annotated[float, Knob(
+        label="Compagnie d'une connaissance", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="La part de ce que comble un échange (message reçu, parole dite) quand c'est avec quelqu'un qu'elle "
+             "connaît un peu. Une amie ou une proche comble pleinement.")] = 0.6
+    stranger_company: Annotated[float, Knob(
+        label="Compagnie d'une inconnue", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="La même part, avec quelqu'un qu'elle ne connaît pas : un après-midi avec des inconnus ne remplace "
+             "pas une amie.")] = 0.3
+    hostile_company: Annotated[float, Knob(
+        label="Compagnie de qui elle en veut", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="La même part, au plus, avec quelqu'un envers qui elle garde une hostilité installée (seuil "
+             "ci-dessous) : se faire chahuter ne tient pas compagnie.")] = 0.1
+    hostile_from: Annotated[float, Knob(
+        label="Hostilité qui ne tient plus compagnie", group="Ce qui comble", lo=0.05, hi=1, step=0.05,
+        help="À partir de cette hostilité installée envers la personne (affect, du même ordre que le seuil de "
+             "rancune), ses échanges ne comblent plus que la part ci-dessus.")] = 0.2
     reply_expression: Annotated[float, Knob(
         label="Répondre → expression", group="Ce qui comble", lo=0, hi=1, step=0.05,
         help="Une réponse multiplie son besoin de s'exprimer par ce facteur.")] = 0.6
@@ -254,9 +278,10 @@ class NeedsState:
 
 
 #: v3 : ce qu'on lui a raconté se classe par importance (plusieurs par personne), les matières déjà dites, qui lui
-#: a parlé en dernier et le vide ressenti (retrouver quelqu'un) ; une rêverie n'est plus une matière
+#: a parlé en dernier et le vide ressenti (retrouver quelqu'un) ; une rêverie n'est plus une matière.
+#: v4 : la compagnie qui comble dépend de qui la donne (une règle, pas une forme : reconstruite depuis la genèse)
 NEEDS = Faculty("needs", state=NeedsState, init=lambda p: NeedsState(), params=NeedsParams, derive=derive,
-                state_version=3)
+                state_version=4)
 NEEDS.declare(*c.ALL)
 
 #: les séances où elle travaille dans son mode à elle (une exécution impersonnelle n'est pas elle)
@@ -300,13 +325,38 @@ def _concerned(owner: str | None, about: Any) -> tuple[str, ...]:
     return tuple(sorted({*(about or ()), *((owner,) if owner else ())}))
 
 
-@NEEDS.reducer(rt.PERCEPTION_RECEIVED)
+def _company(cx: Any, handle: str, p: NeedsParams) -> float:
+    """La part de compagnie qu'apporte un échange avec cette adresse : pleine avec une amie ou une proche, une
+    part avec une connaissance, peu avec une inconnue (une adresse jetable en est une), presque rien avec qui
+    elle garde une hostilité installée — un après-midi à se faire chahuter par un inconnu ne remplace pas une
+    amie, le soir."""
+    if not is_identifiable(handle):
+        return p.stranger_company
+    person = cx.facts.get(identity_c.PERSON(handle))
+    closeness = cx.facts.get(social_c.CLOSENESS(person))
+    share = 1.0 if closeness in REUNITING else (
+        p.acquaintance_company if closeness == social_c.ACQUAINTANCE else p.stranger_company)
+    if cx.facts.get(affect_c.HOSTILITY(person)) >= p.hostile_from:
+        share = min(share, p.hostile_company)
+    return share
+
+
+def _shared(factor: float, share: float) -> float:
+    """Le facteur d'un échange qui ne comble qu'une part : ``1`` ne comble rien, ``factor`` comble tout."""
+    return 1.0 - (1.0 - factor) * share
+
+
+@NEEDS.reducer(rt.PERCEPTION_RECEIVED, reads=[identity_c.PERSON, social_c.CLOSENESS, affect_c.HOSTILITY])
 def _received(s: NeedsState, e, cx) -> NeedsState:
+    """Un message adressé : la compagnie, selon qui l'écrit ; la curiosité, de
+    n'importe qui. Le vide, lui, est rompu par n'importe quel message
+    (« personne ne m'a parlé » cesse d'être vrai)."""
     if not e.data.addressed or not is_identifiable(e.data.handle):
         return s
     p = params(cx.params)
     s = _touch(s, e.at, p)
-    s = _relieve(_relieve(s, c.SOCIAL, p.received_social, e.at, p), c.CURIOSITY, p.received_curiosity, e.at, p)
+    social = _shared(p.received_social, _company(cx, e.data.handle, p))
+    s = _relieve(_relieve(s, c.SOCIAL, social, e.at, p), c.CURIOSITY, p.received_curiosity, e.at, p)
     return replace(s, idle_since=e.at, heard_at=e.at, heard_before=s.heard_at)
 
 
@@ -367,7 +417,7 @@ def _learned_a_belief(s: NeedsState, e, cx) -> NeedsState:
     return _relieve(_touch(s, e.at, p), c.CURIOSITY, p.learned_curiosity, e.at, p)
 
 
-@NEEDS.reducer(rt.UTTERANCE)
+@NEEDS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, social_c.CLOSENESS, affect_c.HOSTILITY])
 def _said(s: NeedsState, e, cx) -> NeedsState:
     d = e.data
     p = params(cx.params)
@@ -388,7 +438,7 @@ def _said(s: NeedsState, e, cx) -> NeedsState:
                 used = FrozenDict(sorted(used.items(), key=lambda kv: (kv[1], kv[0]))[-USED_KEPT:])
             s = replace(s, used=used)
     s = _touch(s, e.at, p)
-    s = _relieve(s, c.SOCIAL, p.said_social, e.at, p)
+    s = _relieve(s, c.SOCIAL, _shared(p.said_social, _company(cx, d.target, p)), e.at, p)
     s = _relieve(s, c.EXPRESSION, p.initiative_expression if d.kind == Kind.INITIATIVE else p.reply_expression,
                  e.at, p)
     return replace(s, idle_since=e.at)

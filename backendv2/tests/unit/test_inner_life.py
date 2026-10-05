@@ -142,6 +142,7 @@ def test_no_initiative_while_she_sleeps(tmp_path):
 
 def test_needs_rise_with_time_and_fall_when_met(tmp_path):
     async def scenario(kernel, script, out):
+        await befriend(kernel, "user_1")  # une amie : sa compagnie comble pleinement (celle d'une inconnue, peu)
         p = await kernel.perceive(said("user_1", "coucou"))
         await p.reply
         after = kernel.mind.frame().get(needs_c.NEEDS)
