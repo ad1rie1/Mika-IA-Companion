@@ -153,7 +153,7 @@ async function boot() {
   const simulate = (text: string) => {
     const { emotion, intensity, blend } = readEmotion();
     presenter.showEmotion(emotion, intensity, blend);
-    const rate = tts.effectiveRate(emotion);
+    const rate = tts.effectiveRate(emotion, undefined, intensity);
     const msPerChar = msPerCharForRate(rate);
     const plan = tts.lipSyncPlan(text);
     const ms = plan.reduce(
