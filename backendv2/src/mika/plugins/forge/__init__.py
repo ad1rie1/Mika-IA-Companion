@@ -734,6 +734,9 @@ async def forge_command(args: CommandArgs, ctx: Any) -> Any:
             await ctx.emit(_written_of(port.info(args.app), args.app, version))
             return f"Revenue à la version précédente (désormais version {version})."
         if args.command == "erase":
+            if app is not None and app.held:
+                # effacer emporterait `held` avec la tranche : réécrite, l'app repartirait d'elle-même
+                return ToolResult(ok=False, content="Un opérateur l'a arrêtée : c'est à lui de l'effacer.")
             await port.erase(args.app)
             await ctx.emit(SWITCHED.draft(app=args.app, state="erased"))
             return "Mise à la corbeille."
