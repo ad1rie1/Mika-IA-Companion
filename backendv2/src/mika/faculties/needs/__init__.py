@@ -15,7 +15,8 @@ Ils poussent à prendre la parole (preuves vers quiconque est là), se disent
 dans le prompt (« tu as envie de parler à quelqu'un »), et quand plus rien ne
 se passe depuis deux heures, elle ressent un vide — de l'ennui, ou de la
 solitude quand c'est de compagnie qu'elle manque ; un vide qui se creuse
-avec la durée (ADR 0033).
+avec la durée (ADR 0033). Le temps où son serveur était arrêté ne compte
+pas : au retour, ses besoins reprennent où elle les avait laissés.
 
 **Travailler l'occupe** : pendant une séance sur un but ou une exécution de
 projet dans son mode à elle, il n'y a pas de vide, et ce qu'elle y fait
@@ -56,6 +57,7 @@ from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
+from mika.kernel.builtin import BOOT
 from mika.kernel.clock import DAY, HOUR, MINUTE, local
 from mika.kernel.faculty import CatchUp, Faculty, Zone
 from mika.kernel.forms import Knob
@@ -210,6 +212,10 @@ class NeedsParams(BaseModel):
         help="Un moment de sa vie qu'une personne lui a annoncé (un entretien, un départ) devient une matière "
              "pour lui écrire (un mot d'encouragement) dans cette durée avant qu'il arrive — et jusqu'à « ce "
              "qu'on lui a raconté, pendant » après. Jamais ce qu'un tiers lui en a dit.")] = 2 * DAY
+    absence_paused: Annotated[bool, Knob(
+        label="Ses absences ne creusent rien", group="Le vide",
+        help="Le temps où son serveur était arrêté ne fait monter ni ses besoins ni le vide : à son retour, elle "
+             "les retrouve là où elle les avait laissés. Décoché : ce silence compte comme vécu.")] = True
 
 
 def derive(t: Temperament, overrides: Any = None) -> NeedsParams:
@@ -473,6 +479,23 @@ def _woke(s: NeedsState, e, cx) -> NeedsState:
     if not s.idle_since:
         return s
     return replace(s, idle_since=max(s.idle_since, e.data.at))
+
+
+@NEEDS.reducer(BOOT)
+def _back(s: NeedsState, e, cx) -> NeedsState:
+    """Elle revient d'un arrêt : le temps où elle n'était pas là n'a rien creusé. Ses besoins reprennent au
+    niveau de son dernier instant vécu (``Boot.last_at``), et l'inactivité qui mène au vide ne compte pas
+    l'absence — on revient d'une anesthésie avec un blanc, pas avec trois jours de solitude."""
+    p = params(cx.params)
+    last = e.data.last_at
+    if not p.absence_paused or not last or e.at <= last:
+        return s
+    levels = s.levels
+    for kind, level in s.levels.items():
+        if level.at:
+            levels = levels.set(kind, Level(tension(s, kind, last, p), e.at))
+    idle_since = s.idle_since + (e.at - last) if 0 < s.idle_since <= last else s.idle_since
+    return replace(s, levels=levels, idle_since=idle_since)
 
 
 @NEEDS.reducer(c.FELT)

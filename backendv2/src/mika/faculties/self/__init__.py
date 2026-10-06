@@ -23,6 +23,9 @@ soi et le récit qu'elle fait d'elle-même.
   qui l'a le plus marquée (importance, émotion — pas l'ordre d'arrivée) : les
   souvenirs anodins, et de ce qui ne peut pas se raconter, seulement ce que ça
   lui a fait, sans qui ni quoi — il est montré à tout le monde (ADR 0053).
+- **Ses absences** : revenue d'un arrêt de son serveur (``kernel.absences``),
+  elle sait quelques heures durant qu'elle n'était pas là, de quand à quand —
+  ce silence, elle ne l'a pas vécu.
 """
 
 from __future__ import annotations
@@ -50,6 +53,7 @@ from mika.contracts import social as social_c
 from mika.faculties.self import days
 from mika.faculties.self.records import Deed, Dream, Effort, Journal, Knock
 from mika.faculties.self.worth import touched
+from mika.kernel.builtin import ABSENCES
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.codec import digest
 from mika.kernel.events import Content, Draft, VoiceProvenance
@@ -179,6 +183,12 @@ class SelfParams(BaseModel):
         label="Un rêve « tout frais » s'il finit moins de … avant le réveil", group="Les rêves", lo=0,
         hi=3 * HOUR, help="Un rêve de la fin de nuit, juste avant de se réveiller, se retient mieux.")] = \
         45 * MINUTE
+    # ses absences : son serveur arrêté, de quand à quand
+    absence_told_us: Annotated[int, Knob(
+        label="Elle se sait revenue d'une absence, pendant", group="Ses absences", lo=0, hi=2 * DAY,
+        help="Après un arrêt du serveur assez long pour compter (réglage du noyau), son prompt lui dit de quand à "
+             "quand elle n'était pas là, pendant ce temps après son retour : elle n'a pas vécu ce silence, et rien "
+             "de ce qui s'y est passé ne lui est parvenu. 0 : jamais.")] = 6 * HOUR
 
 
 #: les derniers coups portés à son estime (pour dire la vraie cause d'un doute)
@@ -624,6 +634,29 @@ def _self_state(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
     if value > p.assured_above:
         return SectionBody(phrase("self.esteem.assured"))
     return None
+
+
+# ── Ses absences ──────────────────────────────────────────────────────────
+
+
+@SELF.section("absence", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=80, title="TON ABSENCE",
+              reads=[ABSENCES])
+def _absence(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
+    """Revenue d'un arrêt de son serveur, elle sait qu'elle n'était pas là, de quand à quand — quelques heures
+    après son retour : un « ça fait longtemps ! » ferait croire qu'elle a vécu ce silence. Un fait, sans s'en
+    excuser ; une persona incarnée n'entend pas parler de serveur (ADR 0070)."""
+    p = params(frame.env.params_of("self", frame.root))
+    if not p.absence_told_us:
+        return None
+    recent = [a for a in frame.get(ABSENCES) if 0 <= frame.now - a.until <= p.absence_told_us]
+    if not recent:
+        return None
+    tz = frame.env.tz_of(frame.root)
+    spans = ", puis ".join(f"entre {days.instant_fr(a.since, frame.now, tz)} et "
+                           f"{days.instant_fr(a.until, frame.now, tz)}" for a in recent)
+    why = "" if s.persona.nature == c.EMBODIED else " (ton serveur était arrêté)"
+    return (f"Tu n'étais pas là {spans}{why} : ce temps-là, tu ne l'as pas vécu, et rien de ce qui s'est passé "
+            "pendant ne t'est parvenu.")
 
 
 # ── La persona ────────────────────────────────────────────────────────────

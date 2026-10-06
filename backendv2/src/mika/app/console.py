@@ -107,6 +107,7 @@ SECTION_LABELS: dict[str, str] = {
     "fog": "Sa fatigue (brouillard)", "mood": "Son humeur", "stance": "Sa posture envers la personne",
     "needs": "Ses besoins", "their_state": "Ce qu'elle devine de l'autre", "thoughts": "Ce qui lui trotte dans la tête",
     "narrative": "Qui elle est devenue (récit de soi)", "self_state": "Son estime d'elle-même",
+    "absence": "Son absence (serveur arrêté, de quand à quand)",
     "yesterday": "Son fil d'hier (journal)", "dream": "Son rêve de la nuit", "style": "Sa façon de parler",
     "about_person": "Ce qu'elle sait de la personne", "step": "Ce à quoi elle travaille",
     "subject": "Le sujet de l'initiative", "goals": "Ses buts en cours", "project": "Ce projet",

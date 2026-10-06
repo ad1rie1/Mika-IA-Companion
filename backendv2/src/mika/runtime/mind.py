@@ -178,7 +178,8 @@ class Mind:
             log.warning("types d'événements retirés (relus sans effet) : %s", ", ".join(sorted(self.retired)))
             self.trace("retired", types=sorted(self.retired))
         if append_boot:
-            await self.append([BOOT.draft(code=self.code)], emitter="kernel", origin=Origin.KERNEL, correlation="boot")
+            await self.append([BOOT.draft(code=self.code, last_at=root.at)], emitter="kernel", origin=Origin.KERNEL,
+                              correlation="boot")
         return BootReport(snap.seq if snap else 0, replayed, tuple(sorted(stale)), self.head)
 
     def _check_round_trip(self) -> None:

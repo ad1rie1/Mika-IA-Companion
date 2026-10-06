@@ -42,3 +42,19 @@ def day_window(day: date, tz: Any, starts: int) -> tuple[int, int]:
 def moment(t: int, tz: Any, profile: circadian.Profile | None) -> str:
     """« le matin », « l'après-midi »… selon son rythme."""
     return circadian.MOMENT_FR[circadian.phase_of(local(t, tz), profile or circadian.DEFAULT)]
+
+
+def instant_fr(t: int, now: int, tz: Any) -> str:
+    """Un instant passé, au jour du calendrier et à la minute : « aujourd'hui 9h02 », « hier 23h47 », « mardi
+    23h47 » dans la semaine, « mardi 28 septembre 23h47 » au-delà."""
+    then = local(t, tz)
+    days = (local(now, tz).date() - then.date()).days
+    if days <= 0:
+        day = "aujourd'hui"
+    elif days == 1:
+        day = "hier"
+    elif days < 7:
+        day = circadian.DAYS_FR[then.weekday()]
+    else:
+        day = circadian.day_fr(then.date())
+    return f"{day} {then.hour}h{then.minute:02d}"

@@ -44,7 +44,7 @@ LANES: dict[str, str] = {"conversation": "conversation", "background": "fond", "
                          "arbitre": "arbitre"}
 #: les événements du noyau et du runtime (ceux des facultés : ``Labels.events``)
 EVENTS: dict[str, str] = {
-    "kernel.boot": "Démarrage", "kernel.lease_acquired": "Bail pris", "kernel.lease_released": "Bail rendu",
+    "kernel.boot": "Démarrage", "kernel.stopped": "Arrêt", "kernel.lease_acquired": "Bail pris", "kernel.lease_released": "Bail rendu",
     "kernel.params_changed": "Paramètres journalisés", "kernel.selected": "Choix de l'arbitre",
     "perception.received": "Message ou signal reçu", "episode.started": "Début d'épisode",
     "episode.utterance": "Parole", "episode.ended": "Fin d'épisode", "effect.proposed": "Demande pour sortir",
