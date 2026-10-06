@@ -161,6 +161,9 @@ data class InnerState(
     val sleepPhase: String? = null,
     val energy: Double? = null,
     val place: String? = null,
+    val activity: Doing? = null,
+    /** La clé `activity` est dans la trame : `null` y dit qu'elle ne fait rien (absente : un serveur plus ancien). */
+    val hasActivity: Boolean = false,
     val circadian: Circadian? = null,
     val drives: Map<String, Drive>? = null,
     val estime: Double? = null,
@@ -174,6 +177,19 @@ data class InnerState(
     val personProfile: PersonProfile? = null,
     val pendingCommitments: List<String>? = null,
     val malformed: Set<String> = emptySet(),
+)
+
+/**
+ * Ce qu'elle fait dans sa chambre (`adapters/web/protocol.py::activity`, le fait `world.doing`) : le nom, le
+ * libellé tel qu'elle le dit (« regarder dehors »), son début et sa fin prévue en millisecondes (`until` nul :
+ * jusqu'à ce qu'elle s'arrête ; une occupation minutée finit sans trame du serveur).
+ */
+@Serializable
+data class Doing(
+    val name: String = "",
+    val label: String = "",
+    val since: Long = 0,
+    val until: Long? = null,
 )
 
 @Serializable

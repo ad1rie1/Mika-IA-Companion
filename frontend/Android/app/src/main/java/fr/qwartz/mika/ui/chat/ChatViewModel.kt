@@ -87,7 +87,7 @@ class ChatViewModel(
         graph.mind.state,
         tick,
     ) { link, typing, mind, _ ->
-        StatusLine.of(link, typing, mind, graph.clock.elapsedMs())
+        StatusLine.of(link, typing, mind, graph.clock.elapsedMs(), graph.clock.wallMs())
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), "")
 
     val link: StateFlow<LinkState> = graph.connection.link
