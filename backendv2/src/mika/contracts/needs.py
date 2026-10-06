@@ -73,6 +73,7 @@ DONE_MATTER = "done"  # ce qu'elle a fini récemment (un but, un objectif de pro
 WORKING_MATTER = "working"  # ce sur quoi elle est en ce moment (un but en cours, un projet)
 TOLD_MATTER = "told"  # ce que la personne lui a raconté récemment
 MOMENT_MATTER = "moment"  # ce qui se passe dans sa vie (un moment qu'elle lui a annoncé, à venir ou tout juste passé)
+DREAM_MATTER = "dream"  # un rêve d'elle, cette nuit, dont elle s'est souvenue au réveil
 
 
 @dataclass(frozen=True, slots=True)

@@ -824,6 +824,8 @@ needs:
     thought: "Quelque chose te trotte dans la tête"
     done: "Ce que tu as fini, {when}"
     working: "Ce sur quoi tu es en ce moment"
+    # un rêve d'elle cette nuit, dont elle s'est souvenue au réveil, où seule la personne en face figure
+    dream: "Tu as rêvé de {name} cette nuit — tu peux le lui raconter, si ça te dit"
     # un moment de sa vie qui dure encore. {since} : « 4 jours », « hier soir »
     ongoing: "Ce {que_name} vit en ce moment, depuis {since} — {name} te l'avait raconté (prends de ses nouvelles)"
     # un moment à venir. {when} : « demain », « jeudi » (days_ahead)
