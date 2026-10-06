@@ -49,7 +49,7 @@ from mika.ports.paging import fold_text
 
 #: limite d'une purge de maintenance explicite ; la synchronisation ne purge pas l'historique
 KEEP_PER_FOLDER = 2000
-SCHEMA = 5
+SCHEMA = 6
 LEGACY_ACCOUNT = "principal"
 
 _SCHEMA = """
@@ -80,7 +80,7 @@ _COLUMNS = ("account", "folder", "uid", "message_id", "sender", "address", "repl
             "complete", "ref", "twin")
 _SENT_COLUMNS = ("message_id", "dest", "subject", "body", "date", "in_reply_to", "by", "account", "draft", "cc", "attachments")
 _DRAFT_COLUMNS = ("id", "account", "dest", "cc", "subject", "body", "reply_to", "quote", "author", "created",
-                  "updated", "state", "sent_id", "edited_by")
+                  "updated", "state", "sent_id", "edited_by", "original_body")
 
 
 def _like(text: str) -> str:
@@ -121,6 +121,9 @@ class MailCache:
         for col in ("account", "draft", "cc"):
             if col not in sent_cols:
                 self._db.execute(f"ALTER TABLE envoyes ADD COLUMN {col} TEXT DEFAULT ''")
+        draft_cols = {r[1] for r in self._db.execute("PRAGMA table_info(drafts)")}
+        if "original_body" not in draft_cols:  # sa version, gardée à la première retouche
+            self._db.execute("ALTER TABLE drafts ADD COLUMN original_body TEXT NOT NULL DEFAULT ''")
         tables = {r[0] for r in self._db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         if "mails" in tables:  # le cache d'avant les comptes : sous « principal », dans INBOX
             rows = self._db.execute("SELECT message_id, uid, sender, address, subject, date, body, dest, in_reply_to,"
@@ -537,14 +540,15 @@ class MailCache:
         return Draft(id=d["id"], account=d["account"] or "", to=d["dest"] or "", subject=d["subject"] or "",
                      body=d["body"] or "", cc=d["cc"] or "", reply_to=d["reply_to"] or "", quote=bool(d["quote"]),
                      author=d["author"] or "", created=d["created"] or 0, updated=d["updated"] or 0,
-                     state=d["state"] or "brouillon", sent_id=d["sent_id"] or "", edited_by=d["edited_by"] or "")
+                     state=d["state"] or "brouillon", sent_id=d["sent_id"] or "", edited_by=d["edited_by"] or "",
+                     original_body=d["original_body"] or "")
 
     def save_draft(self, d: Draft) -> Draft:
         with self._lock:
             self._db.execute(f"INSERT OR REPLACE INTO drafts({', '.join(_DRAFT_COLUMNS)}) "
                              f"VALUES({', '.join('?' * len(_DRAFT_COLUMNS))})",
                              (d.id, d.account, d.to, d.cc, d.subject, d.body, d.reply_to, int(d.quote), d.author,
-                              d.created, d.updated, d.state, d.sent_id, d.edited_by))
+                              d.created, d.updated, d.state, d.sent_id, d.edited_by, d.original_body))
             self._db.commit()
         return d
 
@@ -559,6 +563,14 @@ class MailCache:
         with self._lock:
             rows = self._db.execute(f"SELECT {', '.join(_DRAFT_COLUMNS)} FROM drafts {clause} "
                                     "ORDER BY updated DESC, rowid DESC LIMIT ?", (*args, max(0, limit))).fetchall()
+        return [self._draft(r) for r in rows]
+
+    def recent_edits(self, account: str, limit: int) -> list[Draft]:
+        """Ses brouillons de ce compte partis après une retouche, le plus récent d'abord."""
+        with self._lock:
+            rows = self._db.execute(f"SELECT {', '.join(_DRAFT_COLUMNS)} FROM drafts WHERE account=? AND "
+                                    "state='envoye' AND sent_id!='' AND edited_by!='' AND original_body!='' "
+                                    "ORDER BY updated DESC, rowid DESC LIMIT ?", (account, max(0, limit))).fetchall()
         return [self._draft(r) for r in rows]
 
     def mark_draft(self, draft_id: str, *, state: str, sent_id: str = "") -> None:

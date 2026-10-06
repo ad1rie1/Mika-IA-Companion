@@ -657,6 +657,9 @@ class ImapSmtpMail:
     def drafts(self, limit: int, *, state: str = "") -> list[Draft]:
         return self._cache.drafts(limit, state=state)
 
+    def recent_edits(self, account: str, limit: int) -> list[Draft]:
+        return self._cache.recent_edits(account, limit)
+
     def discard_draft(self, draft_id: str) -> None:
         found = self._cache.draft(draft_id)
         if found is not None and found.state == "brouillon":

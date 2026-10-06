@@ -313,15 +313,18 @@ def _send(s: EmailState, frame: Frame, args: SendArgs, ctx: Any) -> Done:
 
 
 @EMAIL.action("retoucher", title="Retoucher ce brouillon", args=RetouchArgs, emits=[],
-              description="Ta version remplace la sienne ; relis-la, puis envoie-la.")
+              description="Ta version remplace la sienne (gardée à côté : elle apprendra ce que tu as changé) ; "
+                          "relis-la, puis envoie-la.")
 def _retouch(s: EmailState, frame: Frame, args: RetouchArgs, ctx: Any) -> Done:
     _waiting(s, args.draft)
     port = ctx.ports.get("mail")
     got = port.draft(args.draft) if port is not None else None
     if got is None or got.state != "brouillon":
         raise Refused("Ce brouillon n'est plus modifiable.")
+    # sa version est gardée à la première retouche, jamais réécrite : elle apprendra ce qui a changé
     port.save_draft(replace(got, to=args.to, cc=args.cc, subject=args.subject, body=args.body,
-                            quote=args.quote and bool(got.reply_to), edited_by=ctx.by))
+                            quote=args.quote and bool(got.reply_to), edited_by=ctx.by,
+                            original_body=got.original_body or got.body))
     return Done(message="Retouché : relis ce qui partira, puis envoie-le.", go=Ref.subject("brouillon", got.id, ""))
 
 

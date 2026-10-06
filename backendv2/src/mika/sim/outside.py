@@ -349,6 +349,11 @@ class FakeMail:
         kept = [d for d in self.kept_drafts.values() if not state or d.state == state]
         return sorted(kept, key=lambda d: (-d.updated, d.id))[:limit]
 
+    def recent_edits(self, account: str, limit: int) -> list[Draft]:
+        kept = [d for d in self.kept_drafts.values() if d.account == account and d.state == "envoye" and d.sent_id
+                and d.edited_by and d.original_body]
+        return sorted(kept, key=lambda d: (-d.updated, d.id))[:max(0, limit)]
+
     def discard_draft(self, draft_id: str) -> None:
         found = self.kept_drafts.get(draft_id)
         if found is not None and found.state == "brouillon":
