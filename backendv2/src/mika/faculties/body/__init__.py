@@ -199,7 +199,9 @@ def urgent(text: str) -> bool:
 def _rouse_or_wait(s: BodyState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]:
     """Un message pendant sa nuit : il la réveille (une amie, une proche, en
     privé ; ou quelque chose d'urgent, d'où qu'il vienne) — ou il attend son
-    réveil. Un jugement enregistré : le rejeu retombe sur le même sommeil."""
+    réveil. Tirée du sommeil par quelqu'un, elle est éveillée pour lui : la
+    suite de sa conversation n'attend pas. Un jugement enregistré : le rejeu
+    retombe sur le même sommeil."""
     d = ev.data
     if not d.addressed:
         return []
@@ -207,6 +209,8 @@ def _rouse_or_wait(s: BodyState, frame: Frame, ev: Any, ports: Any) -> list[Draf
     tz = frame.env.tz_of(frame.root)
     if not in_her_night(s, ev.at, p, tz):
         return []
+    if not s.sleep.asleep and s.roused_handle and d.handle == s.roused_handle:
+        return []  # celui qui vient de la réveiller : elle lui répond
     person = frame.get(identity_c.PERSON(d.handle)) if is_identifiable(d.handle) else ""
     close = bool(person) and not d.room and frame.get(social_c.CLOSENESS(person)) in p.woken_by
     reason = c.URGENT if urgent(d.text.text or "") else c.CLOSE_ONE if close else ""
