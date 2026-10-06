@@ -118,6 +118,16 @@ class NameBound(Payload):
     by: str = "operator"
 
 
+class NameDismissed(Payload):
+    """Un opérateur écarte une suggestion de la console : la personne dont on lui a parlé sous ce nom
+    (``name:carol``) n'est pas cette personne-là. Rien n'est relié ni délié — seul ``NameBound`` relie — : la
+    console ne repropose plus ce couple."""
+
+    name: str
+    person: str
+    by: str = "operator"
+
+
 class Registered(Payload):
     """Un compte du système (web, console) tel qu'il est : il existe comme personne,
     authentifiée, sous son nom (nom complet, sinon identifiant), dès sa création — sans
@@ -138,7 +148,8 @@ EVIDENCE = event_type("identity.evidence", OWNER, Evidence, version=2, public=Tr
 LINKED = event_type("identity.linked", OWNER, Linked, public=True, subjects=("handle",))
 REGISTERED = event_type("identity.registered", OWNER, Registered, public=True, subjects=("handle",))
 NAME_BOUND = event_type("identity.name_bound", OWNER, NameBound, public=True, subjects=("name",))
-ALL = (CLAIMED, EVIDENCE, LINKED, REGISTERED, NAME_BOUND)
+NAME_DISMISSED = event_type("identity.name_dismissed", OWNER, NameDismissed, subjects=("name", "person"))
+ALL = (CLAIMED, EVIDENCE, LINKED, REGISTERED, NAME_BOUND, NAME_DISMISSED)
 
 
 @dataclass(frozen=True, slots=True)

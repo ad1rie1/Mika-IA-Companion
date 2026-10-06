@@ -214,6 +214,7 @@ EVENT_LABELS: dict[str, str] = {
     "identity.claimed": "Un nom revendiqué", "identity.evidence": "Une preuve d'identité",
     "identity.linked": "Une adresse reliée", "identity.registered": "Un compte enregistré",
     "identity.name_bound": "Un nom relié à une personne (« celle dont on lui a parlé »)",
+    "identity.name_dismissed": "Un nom écarté pour une personne (« ce n'est pas elle »)",
     "transcript.compacted": "Un fil replié en résumé",
     "memory.believed": "Une croyance retenue", "memory.consolidated": "Une relecture de la mémoire",
     "memory.night_sorted": "La mémoire triée la nuit", "memory.promise_noticed": "Une promesse remarquée",

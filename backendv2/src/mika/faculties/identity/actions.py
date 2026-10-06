@@ -1,6 +1,7 @@
 """Ce qu'un opérateur peut faire des identités depuis la console : relier une
 adresse à une personne, confirmer une liaison par recoupement, la délier,
-verser une preuve au registre.
+verser une preuve au registre, relier un nom dont on lui a parlé (ou écarter
+la suggestion de la console).
 
 Chaque action rend des brouillons d'événements d'``identity`` (le moteur les
 journalise comme venant de l'extérieur, avec l'audit qui nomme l'opérateur),
@@ -392,4 +393,30 @@ def _unbind_name(s: IdentityState, frame: Frame, args: UnnameArgs, ctx: ActionCo
         raise Refused("Nom inconnu.", {"name": f"Noms reliés à cette personne : {bound}."})
     return Done(drafts=(c.NAME_BOUND.draft(name=key, person=None, by="operator"),),
                 message=f"« {args.name} » ne désigne plus {known_as(s, ctx.subject)}.",
+                guard=Guard("nom inchangé", reads=(c.PERSON(key),)))
+
+
+class DismissArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: Annotated[str, Knob(label="Nom", widget="hidden")] = Field(min_length=len("name:") + 1, max_length=80)
+    person: Annotated[str, Knob(label="Personne", widget="hidden")] = Field(min_length=1, max_length=80)
+
+
+@IDENTITY.action("ecarter_nom", title="Ce n'est pas elle", args=DismissArgs, emits=[c.NAME_DISMISSED],
+                 section="identites", order=45,
+                 description="La console proposait de relier un nom dont on lui a parlé à cette personne : ce n'est "
+                             "pas elle. Rien n'est relié ni délié ; ce couple ne sera plus proposé.",
+                 confirm="Ne plus proposer ce nom pour cette personne ?")
+def _dismiss_name(s: IdentityState, frame: Frame, args: DismissArgs, ctx: ActionContext) -> Done:
+    key, person = args.name.strip(), args.person.strip()
+    if not key.startswith("name:") or person not in s.by_person or not _can_name(s, frame, person):
+        raise Refused("Suggestion inconnue : ni ce nom ni cette personne ne se proposent ici.")
+    if s.names.get(key) == person:
+        raise Refused(f"« {known_as(s, key)} » désigne déjà {known_as(s, person)} : « Détacher un nom », sur sa "
+                      "fiche, défait la liaison.")
+    if person in s.dismissed.get(key, ()):
+        raise Refused(f"Déjà écartée : « {known_as(s, key)} » n'est plus proposé pour {known_as(s, person)}.")
+    return Done(drafts=(c.NAME_DISMISSED.draft(name=key, person=person, by="operator"),),
+                message=f"« {known_as(s, key)} » n'est plus proposé pour {known_as(s, person)}.",
                 guard=Guard("nom inchangé", reads=(c.PERSON(key),)))

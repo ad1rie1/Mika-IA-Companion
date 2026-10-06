@@ -96,6 +96,9 @@ class IdentityState:
     #: les adresses d'une session d'opérateur (triées), tenues de même : « qui sont ses propriétaires ? » ne
     #: parcourt pas toutes les adresses à chaque passage de l'ordonnanceur (ADR 0059)
     operators: tuple[str, ...] = ()
+    #: les suggestions qu'un opérateur a écartées (``name:carol`` → les personnes, triées) : « ce n'est pas
+    #: elle », la console ne repropose plus ce couple (rien n'est relié ni délié)
+    dismissed: FrozenDict[str, tuple[str, ...]] = field(default_factory=FrozenDict)
 
 
 #: une personne connue seulement de nom (une clé de la mémoire)
@@ -107,8 +110,9 @@ NAMED = "name:"
 #: reconstruits depuis la genèse.
 #: v5 : ``first_seen`` date la première fois qu'elle a été vue (connexion, message), plus la création d'un
 #: compte ni une liaison d'opérateur — reconstruit depuis la genèse.
+#: v6 : les suggestions de noms écartées par un opérateur (``dismissed``).
 IDENTITY = Faculty("identity", state=IdentityState, init=lambda p: IdentityState(), params=IdentityParams,
-                   state_version=5)
+                   state_version=6)
 IDENTITY.declare(*c.ALL)
 
 
@@ -373,6 +377,21 @@ def _name_bound(s: IdentityState, e, cx) -> IdentityState:
     if person.startswith(NAMED) or is_internal(person):
         return s
     return replace(s, names=s.names.set(d.name, person))
+
+
+@IDENTITY.reducer(c.NAME_DISMISSED)
+def _name_dismissed(s: IdentityState, e, cx) -> IdentityState:
+    """« Ce n'est pas elle » : la console ne repropose plus ce couple. Rien n'est relié ni délié."""
+    d = e.data
+    if not d.name.startswith(NAMED) or not d.person:
+        return s
+    person = _root(s, d.person)
+    if person.startswith(NAMED) or is_internal(person):
+        return s
+    gone = s.dismissed.get(d.name, ())
+    if person in gone:
+        return s
+    return replace(s, dismissed=s.dismissed.set(d.name, tuple(sorted({*gone, person}))))
 
 
 # ── Lectures ──────────────────────────────────────────────────────────────
