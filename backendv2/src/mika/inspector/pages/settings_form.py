@@ -18,7 +18,10 @@ un réglage en particulier :
   que la section fournit (``choices`` : les fuseaux) sont posés au rendu ;
 - une soumission refusée remontre la page avec les valeurs tapées et une erreur
   à côté de chaque champ (400) ; acceptée, elle est auditée (``runtime.operated``,
-  sans contenu) et la page revient avec un message.
+  sans contenu) et la page revient avec un message ;
+- une section qui le déclare (``preview``) a un bouton « Voir l'effet » : la
+  soumission, relue et validée comme pour l'enregistrer, revient avec ce qu'elle
+  changerait — rien n'est enregistré ni audité.
 """
 
 from __future__ import annotations
@@ -56,6 +59,8 @@ DELETE = "_supprimer"
 COMMAND = "_commande"
 YAML = "_yaml"
 YAML_TEXT = "_texte"
+#: « Voir l'effet » : le formulaire relu et validé, montré avec ce qu'il changerait, rien d'écrit
+PREVIEW = "_apercu"
 BAD_TOKEN = "Jeton de formulaire invalide : recharge la page."
 #: les entrées d'une liste par page
 RECORDS_PAGE = 25
@@ -88,6 +93,8 @@ class State:
     loaded: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
     stash: str = ""
     stashed: tuple[str, ...] = ()
+    #: « Voir l'effet » : ce que changeraient les valeurs tapées (des blocs)
+    preview: list[Any] = field(default_factory=list)
 
 
 def page_url(page: str, **query: str) -> str:
@@ -314,7 +321,8 @@ class SettingsForms:
                                              "danger": c.danger} for c in s.commands] if pg.commands else [],
                                "facts": list(s.facts()) if s.facts and pg.facts else [], "yaml": None,
                                "blocks": render.blocks([*(s.blocks() if s.blocks and pg.blocks else ()),
-                                                        *(pg.extra() if pg.extra else ())], env, query)}
+                                                        *(pg.extra() if pg.extra else ())], env, query),
+                               "preview": render.blocks(state.preview, env, query) if state.preview else []}
         if s.model is None:
             return out
         fields = self._fields(s, pg) if pg.form else []
@@ -348,7 +356,8 @@ class SettingsForms:
             groups, advanced = _grouped(placed)
             out["form"] = {"groups": groups, "advanced": advanced,
                            "open": any(v.get("error") for f, v in placed if f.advanced),
-                           "general": _placed([f.path for f in fields], state.errors), "stash": state.stash}
+                           "general": _placed([f.path for f in fields], state.errors), "stash": state.stash,
+                           "preview": s.preview is not None}
         if pg.yaml and s.yaml:
             text = state.yaml_text
             if text is None and isinstance(current, BaseModel):
@@ -506,6 +515,9 @@ class SettingsForms:
         if errors or new is None:
             return None, {s.key: self._hold(State(values=values, errors=errors, messages=[
                 ("danger", "Rien n'a été enregistré : corrige les champs signalés.")]), fields, token, now)}, 400
+        if data.get(PREVIEW) and s.preview is not None:
+            return None, {s.key: self._hold(State(values=values, preview=list(s.preview(ui, new))), fields, token,
+                                            now)}, 200
         if new == current:
             self._stash.pop(token, None)
             return self._done(ui, page, "info", "Rien n'a changé."), {}, 303

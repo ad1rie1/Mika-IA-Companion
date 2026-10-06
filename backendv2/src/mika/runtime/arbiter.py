@@ -81,7 +81,10 @@ class Arbiter:
                 self.queued.discard(f"{e.data.kind}:{e.data.target or 'none'}")
 
     # ── lignes ──
-    def rows(self, frame: Frame) -> list[Row]:
+    def rows(self, frame: Frame, *, record: bool = True) -> list[Row]:
+        """La table de l'arbitre dans ce cadre. ``record=False`` : une lecture seule (« Voir l'effet » d'un
+        réglage, lu sous d'autres paramètres) — l'âge des lignes, la dernière table et les anomalies ne
+        bougent pas, l'âge d'une ligne qui n'existe pas encore vaut zéro."""
         reg = self._registry_of()
         proposals: list[tuple[str, Candidate]] = []
         for spec in reg.proposers:
@@ -91,7 +94,8 @@ class Arbiter:
             for c in got:
                 rng = spec.reasons.get(c.reason)
                 if rng is None or c.kind not in spec.kinds:
-                    self.anomalies.append(f"{spec.owner} : raison ou type non déclaré ({c.kind}/{c.reason})")
+                    if record:
+                        self.anomalies.append(f"{spec.owner} : raison ou type non déclaré ({c.kind}/{c.reason})")
                     continue
                 lo, hi = rng
                 clamped = min(hi, max(lo, c.evidence))
@@ -111,15 +115,20 @@ class Arbiter:
 
         now = frame.now
         keys = {f"{c.kind}:{c.target}" for _, c in proposals}
-        for k in list(self.first_seen):
-            if k not in keys:
-                del self.first_seen[k]
-        for k in keys:
-            self.first_seen.setdefault(k, now)
-        ages = {k: (now - t) / 1_000_000 for k, t in self.first_seen.items()}
+        if record:
+            for k in list(self.first_seen):
+                if k not in keys:
+                    del self.first_seen[k]
+            for k in keys:
+                self.first_seen.setdefault(k, now)
+            seen = self.first_seen
+        else:
+            seen = {k: self.first_seen.get(k, now) for k in keys}
+        ages = {k: (now - t) / 1_000_000 for k, t in seen.items()}
         rows = [r for r in pool(proposals, reg.arbitration, modulate, ages) if r.key not in self.queued]
-        self.last_rows = rows[:LAST_ROWS_KEPT]
-        self.last_at, self.last_seq = now, frame.seq
+        if record:
+            self.last_rows = rows[:LAST_ROWS_KEPT]
+            self.last_at, self.last_seq = now, frame.seq
         return rows
 
     def _rng(self, frame: Frame, salt: str) -> random.Random:

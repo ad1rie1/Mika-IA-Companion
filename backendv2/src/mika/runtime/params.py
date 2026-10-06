@@ -14,7 +14,8 @@ journalise ; la console le lit pour montrer la provenance et l'influence de
 chaque curseur, et le recalcule avant d'enregistrer une surcharge (une valeur
 refusée ne s'enregistre jamais). Les bornes de la console (``Knob``) ne
 s'appliquent qu'à l'écriture : un plan rejoué relit les surcharges passées
-telles quelles.
+telles quelles. « Voir l'effet » lit l'instant sous un plan qui n'est pas
+journalisé (``ParamsOverlay``) : rien n'est écrit.
 
 Rien ici ne nomme une faculté.
 """
@@ -35,7 +36,11 @@ from mika.kernel.registry import drop_retired
 from mika.vocab.temperament import Temperament
 
 if TYPE_CHECKING:
+    from zoneinfo import ZoneInfo
+
+    from mika.kernel.facts import FactEnv, FactSpec
     from mika.kernel.faculty import Faculty
+    from mika.kernel.state import Root
     from mika.runtime.bootstrap import Kernel
 
 log = logging.getLogger("mika.params")
@@ -179,6 +184,26 @@ def to_journal(kernel: Kernel, planned_: Mapping[str, Planned], overrides: Mappi
     return out
 
 
+@dataclass(frozen=True, slots=True)
+class ParamsOverlay:
+    """Un environnement de faits où les propriétaires de ``planned`` lisent leurs paramètres prévus à la
+    place des journalisés (« Voir l'effet ») ; le reste vient de ``env`` (le registre). Un cadre bâti dessus
+    sur la même racine et au même instant ne diffère du cadre vivant que par ces paramètres."""
+
+    env: FactEnv
+    planned: Mapping[str, Planned]
+
+    def fact_spec(self, name: str) -> FactSpec:
+        return self.env.fact_spec(name)
+
+    def params_of(self, owner: str, root: Root) -> Any:
+        p = self.planned.get(owner)
+        return p.value if p is not None else self.env.params_of(owner, root)
+
+    def tz_of(self, root: Root) -> ZoneInfo:
+        return self.env.tz_of(root)
+
+
 # ── La console : lire, changer ────────────────────────────────────────────
 
 
@@ -240,15 +265,34 @@ class Parameters:
     async def change(self, owner: str, form: Mapping[str, Sequence[str]]) -> tuple[bool, dict[str, str]]:
         """Relit le formulaire avancé d'une faculté : une valeur égale à la valeur
         naturelle retire la surcharge, une autre la pose. Rend (changé ?, erreurs)."""
+        got = self._proposed(owner, form)
+        if isinstance(got, dict):
+            return False, got
+        return await self._store(owner, got[0]), {}
+
+    def preview(self, owner: str, form: Mapping[str, Sequence[str]]) -> tuple[Planned | None, dict[str, str]]:
+        """Ce que « Enregistrer » journaliserait pour ce formulaire, sans rien écrire (« Voir l'effet ») :
+        (le plan, ``{}``) ou (``None``, les erreurs) — les mêmes que ``change``."""
+        got = self._proposed(owner, form)
+        return (None, got) if isinstance(got, dict) else (got[1], {})
+
+    def preview_temperament(self, temperament: Temperament) -> dict[str, Planned]:
+        """Les paramètres de chaque faculté sous ce tempérament, surcharges et réglages gardés, sans rien
+        écrire (« Voir l'effet » du tempérament)."""
+        return plan(self.faculties(), temperament, self.overrides(), self.inputs())
+
+    def _proposed(self, owner: str, form: Mapping[str, Sequence[str]]
+                  ) -> tuple[dict[str, Any], Planned] | dict[str, str]:
+        """Les surcharges que poserait ce formulaire et le plan qui en sortirait, ou les erreurs."""
         p = self.plan(owner)
         if p is None:
-            return False, {"": "Faculté inconnue."}
+            return {"": "Faculté inconnue."}
         fields = self.fields(owner)
         current = forms.flatten(p.value)
         values, errors = forms.parse(fields, {k: list(v) for k, v in form.items()}, current=current)
         errors = {**errors, **forms.within(fields, values)}
         if errors:
-            return False, errors
+            return errors
         natural = forms.flatten(p.natural)
         layer = dict(self.overrides().get(owner) or {})
         for path, value in values.items():
@@ -261,8 +305,8 @@ class Parameters:
         fac = self.kernel.registry.faculties[owner]
         check = planned(fac, self.temperament(), layer, self.inputs().get(owner))
         if check is None or check.refused:
-            return False, dict(check.refused) if check is not None else {"": "refusé"}
-        return await self._store(owner, layer), {}
+            return dict(check.refused) if check is not None else {"": "refusé"}
+        return layer, check
 
     async def reset(self, owner: str, path: str = "") -> bool:
         """Retire une surcharge (ou toutes celles de la faculté)."""

@@ -266,13 +266,10 @@ async def etat(ui: Any, request: Request) -> list[Any]:
     kernel = ui.kernel
     frame = kernel.mind.frame()
     root = kernel.mind.root
+    values = fact_values(kernel, frame)
     rows = []
     for name, spec in sorted(kernel.registry.providers.items()):
-        if isinstance(spec.key, FactKey):
-            got = call(frame.get, spec.key, label=f"fait {name}")
-            value = f"(erreur : {describe_error(got.error)})" if isinstance(got, Failed) else repr(got)
-        else:
-            value = "famille : dépend de son argument"
+        value = values.get(name, "famille : dépend de son argument")
         rows.append((Text(name, "mono"), spec.owner, Text(getattr(spec.key, "doc", ""), "muted"),
                      Text(value[:600], "mono", clamp=200)))
     tainted = dict(root.tainted.items())
@@ -285,6 +282,31 @@ async def etat(ui: Any, request: Request) -> list[Any]:
         Disclosure(f"{owner} · modifiée au seq {root.changed.get(owner, 0)}", (Code(repr(root.slices[owner])[:8000]),))
         for owner in root.slices)))
     return out
+
+
+def fact_values(kernel: Any, frame: Any) -> dict[str, str]:
+    """Les faits non familiaux lus dans ce cadre, en texte (une erreur dite comme telle) ; une famille dépend
+    de son argument et ne se lit pas seule."""
+    out = {}
+    for name, spec in sorted(kernel.registry.providers.items()):
+        if isinstance(spec.key, FactKey):
+            got = call(frame.get, spec.key, label=f"fait {name}")
+            out[name] = f"(erreur : {describe_error(got.error)})" if isinstance(got, Failed) else repr(got)
+    return out
+
+
+def facts_diff(kernel: Any, before: Any, after: Any) -> Table:
+    """Les faits non familiaux dont la valeur change d'un cadre à l'autre (la lecture d'« État et faits », en
+    différence) : deux cadres du même instant, l'un avec les paramètres en vigueur, l'autre avec d'autres."""
+    old, new = fact_values(kernel, before), fact_values(kernel, after)
+    providers = kernel.registry.providers
+    rows = tuple((Text(name, "mono"), providers[name].owner, Text(getattr(providers[name].key, "doc", ""), "muted"),
+                  Text(old[name][:600], "mono", clamp=200), Text(new.get(name, "—")[:600], "mono", clamp=200))
+                 for name in old if old[name] != new.get(name))
+    return Table(("fait", "fourni par", Column("sens", detail=True), "avant", "après"), rows,
+                 title="Ce qu'elle se dirait", empty="Aucun fait partagé entre ses facultés ne change à cet instant.",
+                 caption="Les faits que ses facultés se partagent (Système › État et faits), lus au même instant "
+                         "avec les paramètres en vigueur, puis avec les valeurs tapées.")
 
 
 @TABS.tab("systeme.contributions", title="Contributions", group="Anatomie",

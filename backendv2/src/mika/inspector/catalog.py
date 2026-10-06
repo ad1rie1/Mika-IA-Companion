@@ -114,7 +114,9 @@ class SettingsSection:
     choix à la demande (``fn(valeurs) -> [(valeur, libellé)]``, qui lève
     ``ValueError`` avec un message) ; ``commands`` sont des boutons ;
     ``facts()`` et ``blocks()`` ajoutent ce qu'il faut savoir (l'état du robot, ce
-    que pilote chaque curseur). Plusieurs sections peuvent partager un onglet."""
+    que pilote chaque curseur) ; ``preview(ui, valeur)`` rend ce que changerait une
+    valeur tapée, sans l'enregistrer (un bouton « Voir l'effet »). Plusieurs
+    sections peuvent partager un onglet."""
 
     key: str
     label: str
@@ -142,6 +144,8 @@ class SettingsSection:
     #: les listes dont le nom d'une entrée ne change plus une fois créée (ailleurs, des données le
     #: portent : les mails rangés d'une boîte) — renommer est refusé, en le disant
     fixed_names: tuple[str, ...] = ()
+    #: « Voir l'effet » : ``preview(ui, valeur validée)`` → des blocs, rien d'écrit (absent : pas de bouton)
+    preview: Callable[[Any, Any], Sequence[Any]] | None = None
 
 
 @dataclass(frozen=True, slots=True)

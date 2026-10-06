@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
@@ -113,6 +114,50 @@ def arbiter_rows(ui: Any, rows: Any, *, fired: frozenset[str] = frozenset()) -> 
 ARBITER_COLUMNS = ("ligne", Column("ce qui pousse", hint="les preuves, en points (log-odds) par raison"),
                    Column("score", "num"), Column("fois / h", "num", hint="le taux qui sort du score"),
                    "ce qui l'empêche")
+
+
+def _possible(r: Any | None) -> str:
+    """Ce qu'une ligne lui permet, en mots : son taux, ou ce qui l'en empêche."""
+    if r is None:
+        return "aucune ligne"
+    if r.vetoes:
+        return "bloqué"
+    return f"{_rate(r.hazard)} fois / h"
+
+
+def arbiter_diff(ui: Any, before: Sequence[Any], after: Sequence[Any]) -> Table:
+    """Deux tables de l'arbitre du même instant (avec les paramètres en vigueur, avec d'autres) : les lignes
+    dont le score, le taux ou les vetos changent à l'affichage, avant → après — une ligne qui naît ou
+    disparaît comprise —, le plus grand écart de taux d'abord ; le calcul pas à pas de chaque côté."""
+    old, new = {r.key: r for r in before}, {r.key: r for r in after}
+    changed = []
+    for key in old.keys() | new.keys():
+        a, b = old.get(key), new.get(key)
+        if a is not None and b is not None and _signed(a.score) == _signed(b.score) \
+                and _rate(a.hazard) == _rate(b.hazard) and a.vetoes == b.vetoes:
+            continue
+        gap = abs((b.hazard if b is not None else 0.0) - (a.hazard if a is not None else 0.0))
+        changed.append((-gap, key))
+    rows = []
+    for _gap, key in sorted(changed):
+        a, b = old.get(key), new.get(key)
+        r = b if b is not None else a
+        detail = tuple(waterfall(ui, x, title=title) for x, title in ((b, "Après : du signal au score"),
+                                                                       (a, "Avant : du signal au score"))
+                       if x is not None)
+        rows.append(Row((ui.names.arbiter_row(r.kind, r.target),
+                         Text(f"{_signed(a.score) if a is not None else '—'} → "
+                              f"{_signed(b.score) if b is not None else '—'}", "num"),
+                         Text(f"{_possible(a)} → {_possible(b)}", "num"),
+                         Badge(vetoes_text(ui, b), "danger") if b is not None and b.vetoes else "—"),
+                        detail=detail))
+    return Table(("ligne", Column("score", "num", hint="avant → après"),
+                  Column("elle ferait", "num", hint="avant → après : le taux qui sort du score, ou « bloqué »"),
+                  Column("ce qui l'empêche, après")), tuple(rows), title="Ce qu'elle ferait",
+                 empty="Aucune ligne de l'arbitre ne change : à cet instant, elle ferait la même chose.",
+                 caption="Avant : les paramètres en vigueur ; après : les valeurs tapées. Le taux est un nombre de "
+                         "fois par heure au plus (un tirage au hasard décide) ; ouvre une ligne pour le calcul pas "
+                         "à pas.")
 
 
 @TABS.tab("decisions.en_cours", title="En cours",
