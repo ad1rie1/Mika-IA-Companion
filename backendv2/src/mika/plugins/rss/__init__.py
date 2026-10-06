@@ -42,15 +42,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
+from mika.contracts import needs as needs_c
+from mika.contracts import others as others_c
+from mika.contracts import presence as presence_c
 from mika.contracts import rss as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
+from mika.contracts import transcript as transcript_c
+from mika.kernel.arbitration import Candidate
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
+from mika.kernel.guards import Guard, floor
 from mika.kernel.inspect import (
     Badge,
     Block,
@@ -118,6 +124,17 @@ class RssParams(BaseModel):
         help="Ce qu'elle a remarqué n'est « dans ses flux » (sous ses yeux quand elle prend d'elle-même la parole "
              "ou qu'elle travaille) que ce temps-là, même si rien de neuf n'est venu depuis : passé, ce n'est plus "
              "une nouvelle. Elle le retrouve dans ses flux si on le lui demande.")] = 36 * HOUR
+    friend_evidence: Annotated[float, Knob(
+        label="Envie de le lui montrer", group="Penser à ses amies", lo=0.0, hi=3.0, step=0.5,
+        help="La preuve (log-odds) qu'un titre qui lui a fait penser à une amie apporte à une initiative vers elle "
+             "(là où elle est, sinon sur sa messagerie à une heure où elle écrit d'habitude), face au seuil "
+             "d'initiative (9) : seule, presque rien — elle penche une initiative que l'envie de compagnie pousse "
+             "déjà. L'arbitrage la plafonne à 3.")] = 2.0
+    friend_social_from: Annotated[float, Knob(
+        label="Seulement quand l'envie de compagnie atteint", group="Penser à ses amies", lo=0.0, hi=1.0,
+        step=0.05,
+        help="En dessous de ce besoin de compagnie, un titre pensé pour une amie ne lui donne aucune envie de lui "
+             "écrire (il passe tout de même en tête de ses flux quand elle lui écrit pour autre chose).")] = 0.35
 
 
 @dataclass(frozen=True, slots=True)
@@ -371,6 +388,44 @@ def _section(s: RssState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
              for h, mine in shown]
     # provenance voyage dans l'énoncé (dit à sa cible, un titre ne lui revient pas)
     return SectionBody("\n".join(lines), provenance=tuple(f"{TOLD_PROVENANCE}{h.entry}" for h, _mine in shown))
+
+
+def _address(frame: Frame, person: str) -> str | None:
+    """Où le lui montrer : là où elle est, sinon sur sa messagerie — à une heure où elle écrit d'habitude (pour un
+    titre, on ne fait pas sonner le téléphone de quelqu'un qui dort)."""
+    handles = frame.get(identity_c.HANDLES(person)) or (person,)
+    present = [h for h in frame.get(presence_c.PRESENT) if h in handles]
+    if present:
+        return present[0]
+    if not frame.get(others_c.HOURS(person)).active[frame.local().hour]:
+        return None
+    reachable = frame.get(identity_c.REACHABLE(person))
+    return reachable[0] if reachable else None
+
+
+@RSS.propose(kinds=[Kind.INITIATIVE], reasons={c.FOR_FRIEND: (0.0, 3.0)},
+             reads=[c.FOR_PERSON, needs_c.NEEDS, others_c.HOURS, identity_c.HANDLES, identity_c.REACHABLE,
+                    presence_c.PRESENT, transcript_c.LAST_FROM])
+def _to_show(s: RssState, frame: Frame) -> list[Candidate]:
+    """Un titre qui lui a fait penser à une amie, encore une nouvelle et pas encore dit : une petite envie de le lui
+    montrer, seulement quand l'envie de compagnie est déjà là — seule, elle ne la fait pas écrire. Si la personne
+    écrit entre-temps, on lui répond : l'initiative est devancée."""
+    p = params(frame.env.params_of("rss", frame.root))
+    if not s.thought_of or p.friend_evidence <= 0 or frame.get(needs_c.NEEDS).social < p.friend_social_from:
+        return []
+    out: list[Candidate] = []
+    for person in sorted({who for by in s.thought_of.values() for who in by}):
+        if not any(frame.now - h.at <= p.fresh_for_us and person not in s.told.get(h.entry, FrozenDict())
+                   for h in frame.get(c.FOR_PERSON(person))):
+            continue
+        address = _address(frame, person)
+        if address is None:
+            continue
+        handles = frame.get(identity_c.HANDLES(person)) or (person,)
+        guard = Guard("silence", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
+        out.append(Candidate(Kind.INITIATIVE, address, c.FOR_FRIEND, p.friend_evidence,
+                             resources=frozenset({floor(address)}), guards=(guard,)))
+    return out
 
 
 class ListArgs(BaseModel):

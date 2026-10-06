@@ -22,6 +22,9 @@ from mika.kernel.facts import FactFamily, FactKey
 
 OWNER = "rss"
 ENTRY = "entry"
+#: Raison de preuve d'initiative : un titre qui lui a fait penser à cette personne (une petite envie de le lui
+#: montrer, seulement quand l'envie de compagnie est déjà là).
+FOR_FRIEND = "rss_for"
 
 
 class EntryNoticed(Signal):

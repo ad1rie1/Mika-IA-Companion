@@ -145,6 +145,7 @@ REASON_LABELS: dict[str, str] = {
     "service_answered": "Dire ce qu'un service extérieur a rendu",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
+    "rss_for": "Montrer à une amie un titre qui lui a fait penser à elle",
     "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet",
     "keep_promise": "Tenir une promesse au moment dit", "cheer": "Encourager avant un moment important",
     "celebrate": "Souhaiter ce qui se fête (un anniversaire), le jour même",
