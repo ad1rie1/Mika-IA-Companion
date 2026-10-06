@@ -178,9 +178,11 @@ def _head(s: TranscriptState, cx) -> int:
 # ── Le fil matérialisé ────────────────────────────────────────────────────
 
 #: ``typed`` : avec des pièces jointes, combien de caractères du début de ``text`` la personne a tapés (le reste
-#: est ce qu'elle en a perçu, pour le prompt) ; nul quand il n'y a rien à séparer (version 2 de la table)
+#: est ce qu'elle en a perçu, pour le prompt) ; nul quand il n'y a rien à séparer (version 2 de la table).
+#: ``unanswered`` : pourquoi un message reçu est resté sans réponse pour de bon (``c.UNANSWERED_*``), posé par la
+#: fin d'épisode qui l'a réglé ; nul sinon (version 3)
 _COLUMNS = ("id", "at", "role", "person", "channel", "room", "source", "kind", "text", "client_msg_id",
-            "reply_to", "emotion", "emotion_intensity", "attachments", "typed")
+            "reply_to", "emotion", "emotion_intensity", "attachments", "typed", "unanswered")
 
 
 class Thread:
@@ -191,7 +193,8 @@ class Thread:
             f"CREATE TABLE IF NOT EXISTS {c.THREAD_TABLE}{sfx}("
             "id INTEGER PRIMARY KEY, at INTEGER NOT NULL, role TEXT NOT NULL, person TEXT NOT NULL, "
             "channel TEXT, room TEXT, source TEXT, kind TEXT, text TEXT NOT NULL, client_msg_id TEXT, "
-            "reply_to INTEGER, emotion TEXT, emotion_intensity REAL, attachments TEXT, typed INTEGER)"
+            "reply_to INTEGER, emotion TEXT, emotion_intensity REAL, attachments TEXT, typed INTEGER, "
+            "unanswered TEXT)"
         )
         sql.execute(f"CREATE INDEX IF NOT EXISTS {c.THREAD_TABLE}{sfx}_person ON {c.THREAD_TABLE}{sfx}(person, id)")
 
@@ -203,6 +206,10 @@ class Thread:
         if rows:
             marks = ",".join("?" * len(_COLUMNS))
             sql.executemany(f"INSERT OR REPLACE INTO {c.THREAD_TABLE}{sfx}({','.join(_COLUMNS)}) VALUES({marks})", rows)
+        # après les lignes : une fin ne laisse sans réponse que des messages reçus avant elle
+        left = [pair for e in events if e.type.name == rt.EPISODE_ENDED.name for pair in _left(e.data)]
+        if left:
+            sql.executemany(f"UPDATE {c.THREAD_TABLE}{sfx} SET unanswered=? WHERE id=? AND role='user'", left)
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> None:
         sql.execute(f"DELETE FROM {c.THREAD_TABLE}{sfx} WHERE person=?", (subject,))
@@ -224,7 +231,7 @@ def _row(e: Any) -> tuple[Any, ...] | None:
         text = d.text.text or ""
         typed = None if d.typed_chars is None else max(0, min(len(text), d.typed_chars))
         return (e.seq, e.at, "user", d.handle, d.channel, d.room, d.channel, "message", text,
-                d.client_msg_id, None, None, None, attachments, typed)
+                d.client_msg_id, None, None, None, attachments, typed, None)
     if e.type.name == rt.UTTERANCE.name and d.visible:
         declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
         # ce qui est parti avec son message : des identifiants seulement (leur nom, leur taille, leur sort sont à
@@ -232,7 +239,8 @@ def _row(e: Any) -> tuple[Any, ...] | None:
         sent = json.dumps([{"id": a} for a in d.attachments]) if d.attachments else "[]"
         return (e.seq, e.at, "assistant", d.target or "", d.channel, d.room, _source(d.kind), d.kind,
                 strip_prosody(d.text.text or ""), None, d.reply_to,
-                declared.emotion.value if declared else None, declared.intensity if declared else None, sent, None)
+                declared.emotion.value if declared else None, declared.intensity if declared else None, sent, None,
+                None)
     return None
 
 
@@ -240,9 +248,37 @@ def _source(kind: str) -> str:
     return "conscience" if kind != Kind.REPLY else "reply"
 
 
-#: version 2 : la colonne ``typed`` (ce que la personne a tapé, à part de ce que ses pièces jointes ont donné) —
-#: la table se reconstruit depuis le journal au premier démarrage
-TRANSCRIPT.projector(c.THREAD_TABLE, version=2, tier=Tier.T0, types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE])(Thread)
+#: comment une fin d'épisode qui laisse un message sans réponse se dit dans le fil (toute autre fin — un échec,
+#: des tentatives épuisées, une file pleine, un arrêt — est une panne)
+_ISSUES = {"abstained": c.UNANSWERED_ABSTAINED, "timeout": c.UNANSWERED_TIMEOUT}
+
+
+def _issue(outcome: str, detail: str) -> str:
+    """Pourquoi un message est resté sans réponse, en un mot : lu trop tard (repris au-delà du délai de réponse),
+    elle s'est tue, un délai dépassé, une panne — jamais la cause technique, que seule la console détaille."""
+    if detail.startswith(TOO_LATE):
+        return c.UNANSWERED_LATE
+    return _ISSUES.get(outcome, c.UNANSWERED_FAILED)
+
+
+def _left(d: rt.EpisodeEnded) -> list[tuple[str, int]]:
+    """Les messages qu'une fin laisse sans réponse pour de bon, chacun avec pourquoi — dans un journal plus ancien
+    (``unanswered`` absent), ce que ``leaves_unanswered`` dit de ``reply_to``."""
+    if d.unanswered is not None:
+        seqs: tuple[int, ...] = d.unanswered
+    elif d.reply_to is not None and d.leaves_unanswered(d.reply_to):
+        seqs = (d.reply_to,)
+    else:
+        return []
+    issue = _issue(d.outcome, d.detail)
+    return [(issue, int(seq)) for seq in seqs]
+
+
+#: version 3 : la colonne ``unanswered`` (pourquoi un message reçu est resté sans réponse), d'où les fins
+#: d'épisode ; version 2 : la colonne ``typed`` (ce que la personne a tapé, à part de ce que ses pièces jointes ont
+#: donné) — la table se reconstruit depuis le journal au premier démarrage
+TRANSCRIPT.projector(c.THREAD_TABLE, version=3, tier=Tier.T0,
+                     types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_ENDED])(Thread)
 
 
 def recent(store: Any, person: str, limit: int) -> list[dict[str, Any]]:
