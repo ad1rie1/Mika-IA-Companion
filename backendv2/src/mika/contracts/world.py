@@ -627,6 +627,18 @@ class Lived(Payload):
     until: int | None = None
 
 
+class Doing(Payload):
+    """Ce qu'elle est en train de faire, tel que les écrans le montrent : le nom de l'occupation (``draw``,
+    ``look_outside`` — un écran qui ne le connaît pas n'en montre rien), comment elle le dit (« regarder dehors »,
+    comme « AUTOUR DE TOI »), l'objet, depuis quand et la fin prévue (``None`` : jusqu'à ce qu'elle s'arrête)."""
+
+    name: Ident
+    label: str = Field(max_length=60)
+    object: Ident | None = None
+    since: int
+    until: int | None = None
+
+
 class Movement(Payload):
     """Un acteur en chemin : un écran qui s'ouvre en route le place sur le trajet d'après ``started``/``eta``."""
 
@@ -1034,5 +1046,8 @@ REACH = FactFamily("world.reach", arg=str, type=tuple, doc="ce qu'un acteur a à
 #: Ce qu'elle a fait de ses derniers jours (ses occupations, de la plus ancienne à celle en cours) : la matière
 #: d'un journal qui raconte sa journée sans l'inventer.
 LIVED = FactKey("world.lived", type=tuple, time_varying=True, doc="ses occupations, avec leur début et leur fin")
+#: Son occupation du moment (``Doing``), ``None`` quand elle ne fait rien ou que sa fin prévue est passée : ce que
+#: les écrans reçoivent dans l'état intérieur (l'adaptateur ne lit pas la faculté, il lit ce fait).
+DOING = FactKey("world.doing", type=object, time_varying=True, doc="ce qu'elle est en train de faire")
 #: Les demandes qui attendent la réponse de cet acteur.
 PENDING = FactFamily("world.pending", arg=str, type=tuple, doc="ce qu'on lui demande et qui attend")

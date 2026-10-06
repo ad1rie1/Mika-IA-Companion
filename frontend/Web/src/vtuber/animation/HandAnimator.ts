@@ -102,6 +102,9 @@ const SHAPES: Record<HandShapeName, HandShape> = {
   loose: { curl: 0.38, spread: 0.05, thumbCurl: 0.3 },
   // Hands clasped: half-holding the other hand.
   clasp: { curl: 0.42, spread: 0.0, thumbCurl: 0.35 },
+  // Holding a pencil or a book (activity.ts): fingers closed on it, the
+  // thumb pressed against them.
+  grip: { curl: 0.5, spread: 0.05, thumbCurl: 0.55 },
 };
 
 // How emotions shade the hands. curl is an offset on the shape's curl,
@@ -172,6 +175,17 @@ export class HandAnimator {
 
   private mood: HandMood = { ...NEUTRAL_MOOD };
 
+  /** What the clip asks (manifest `hands`), kept while an activity holds
+   * the hands its own way. */
+  private clipShape: Record<Side, HandShapeName> = {
+    left: "relaxed",
+    right: "relaxed",
+  };
+  /** What she is doing (activity.ts): a pencil, a book. Null = the clip's. */
+  private activityShape: readonly [HandShapeName, HandShapeName] | null = null;
+  /** Multiplies the fidget while she does it: a drawing hand keeps moving. */
+  private activityMotion = 1;
+
   // One spring per (side, finger) on the curl scalar; thumbs get their
   // own; spread is a single eased value per side.
   private springs = new Map<string, FingerSpring>();
@@ -197,16 +211,30 @@ export class HandAnimator {
   /** Called by the state machine when the base clip changes (manifest
    * `hands` metadata). */
   setPoseShape(left: HandShapeName, right: HandShapeName): void {
-    if (left !== this.shapeTarget.left) {
-      this.prevShape.left = this.shapeTarget.left;
-      this.shapeTarget.left = left;
-      this.shapeChangedAt.left = this.time;
-    }
-    if (right !== this.shapeTarget.right) {
-      this.prevShape.right = this.shapeTarget.right;
-      this.shapeTarget.right = right;
-      this.shapeChangedAt.right = this.time;
-    }
+    this.clipShape.left = left;
+    this.clipShape.right = right;
+    this.retarget();
+  }
+
+  /** The hands of what she is doing (activity.ts) — they win over the
+   * clip's until null gives the hands back to it. */
+  setActivity(hands: readonly [HandShapeName, HandShapeName] | null, motion = 1): void {
+    this.activityShape = hands;
+    this.activityMotion = motion;
+    this.retarget();
+  }
+
+  private retarget(): void {
+    const [left, right] = this.activityShape ?? [this.clipShape.left, this.clipShape.right];
+    this.setShape("left", left);
+    this.setShape("right", right);
+  }
+
+  private setShape(side: Side, shape: HandShapeName): void {
+    if (shape === this.shapeTarget[side]) return;
+    this.prevShape[side] = this.shapeTarget[side];
+    this.shapeTarget[side] = shape;
+    this.shapeChangedAt[side] = this.time;
   }
 
   setEmotion(emotion: EmotionName, intensity: number): void {
@@ -240,7 +268,7 @@ export class HandAnimator {
     }
 
     const microAmp =
-      (asleep ? 0.006 : 0.035 * this.mood.micro) *
+      (asleep ? 0.006 : 0.035 * this.mood.micro * this.activityMotion) *
       (this.isSpeaking ? 1.5 : 1);
 
     for (const side of SIDES) {

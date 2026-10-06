@@ -30,6 +30,7 @@ export type AttentionState =
   | "wander" // alone with her thoughts: looking around the room
   | "walking" // crossing the room: eyes on the way, a glance now and then
   | "thinking" // a reply is being composed: absorbed, up-and-to-the-side
+  | "absorbed" // busy in her room (drawing, looking outside): eyes on it
   | "inner" // murmuring to herself: not to you
   | "away" // the viewer is out of reach (behind her): forward gaze
   | "asleep";
@@ -53,6 +54,15 @@ export interface AttentionInput {
   viewerAngle: number;
   /** Crossing the room: she looks where she goes. */
   walking?: boolean;
+  /** What she is busy with in her room (activity.ts), null = nothing. */
+  focus?: AttentionFocus | null;
+}
+
+/** Something she is doing (activity.ts): where her eyes rest on it, and
+ * how much of the viewer is left in them. */
+export interface AttentionFocus {
+  gaze: GazeAngles;
+  contact: number;
 }
 
 export interface GazeIntent {
@@ -160,6 +170,14 @@ export const WANDER_POINTS: GazeAngles[] = [
   { pitch: 0.02, yaw: -0.38 }, // the plant by the bed
 ];
 
+/**
+ * Busy with something (drawing, looking outside), she does not wander: her
+ * eyes are on what she does. A sign of the person — typing, a message, her
+ * own reply — interrupts her like anyone absorbed: she looks up at once,
+ * and goes back to it this long after the exchange has gone quiet.
+ */
+export const ABSORBED_RETURN_S = 2.5;
+
 const AVERSION_DIRS: GazeAngles[] = [
   { pitch: 0.14, yaw: 0.16 },
   { pitch: 0.14, yaw: -0.16 },
@@ -259,6 +277,11 @@ export class AttentionDirector {
       this.nextAversionAt = this.sample(AVERSION_INTERVAL);
     }
 
+    // Absorbed in what she does once the exchange has gone quiet a moment —
+    // it replaces wandering around the room, never a conversation.
+    const focus =
+      input.focus && !engaged && this.idleFor >= ABSORBED_RETURN_S ? input.focus : null;
+
     let mode: AttentionState;
     if (input.walking) {
       mode = "walking";
@@ -272,6 +295,8 @@ export class AttentionDirector {
       // A message pending while she is still voicing the previous reply
       // does not pull her gaze away: one finishes one's sentence first.
       mode = "thinking";
+    } else if (focus) {
+      mode = "absorbed";
     } else {
       mode = "contact";
     }
@@ -310,8 +335,16 @@ export class AttentionDirector {
           this.offset.yaw = THINKING_OFFSET.yaw * this.thinkingSide;
         }
       }
+    } else if (mode === "absorbed" && focus) {
+      // Eyes on what she does, the viewer barely in them: no conversational
+      // aversion, no look around the room.
+      this.aversionRemaining = 0;
+      this.wandering = false;
+      this.contact = focus.contact;
+      this.offset.pitch = focus.gaze.pitch;
+      this.offset.yaw = focus.gaze.yaw;
     } else {
-      if (this.state === "thinking" || this.state === "inner") {
+      if (this.state === "thinking" || this.state === "inner" || this.state === "absorbed") {
         // Coming back to you: restart the aversion clock so the return
         // is not immediately followed by a look-away.
         this.aversionTimer = 0;

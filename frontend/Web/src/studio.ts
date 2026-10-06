@@ -10,6 +10,7 @@ import { TTSService } from "./audio/TTSService";
 import { SpeechPresenter } from "./ui/SpeechPresenter";
 import { articulationFor } from "./vtuber/animation/affect";
 import { PLACE_IDS } from "./vtuber/locomotion/roomLayout";
+import { ACTIVITY_NAMES } from "./vtuber/animation/activity";
 import {
   EMOTION_NAMES,
   isEmotionName,
@@ -223,6 +224,16 @@ async function boot() {
     b.textContent = place;
     b.onclick = () => animationSystem.setPlace(place);
     placeRow.appendChild(b);
+  }
+
+  // What she does there: her gaze and hands absorbed in it (activity.ts) —
+  // pair it with its place (draw/work: desk, look_outside: window…).
+  const activityRow = $("activity-row");
+  for (const activity of [...ACTIVITY_NAMES, null]) {
+    const b = document.createElement("button");
+    b.textContent = activity ?? "rien";
+    b.onclick = () => animationSystem.setActivity(activity);
+    activityRow.appendChild(b);
   }
 
   const fillGestures = () => {

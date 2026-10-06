@@ -312,6 +312,15 @@ def _lived_fact(s: WorldState, cx: Any) -> tuple[w.Lived, ...]:
     return (*s.lived, current)
 
 
+@WORLD.fact(w.DOING)
+def _doing(s: WorldState, cx: Any) -> w.Doing | None:
+    a = s.actors[w.MIKA].activity
+    if a is None or (a.until is not None and a.until <= cx.now):
+        return None
+    return w.Doing(name=a.name, label=plan.affordance_label(s.definition, a)[:60], object=a.object, since=a.since,
+                   until=a.until)
+
+
 @WORLD.fact(w.PENDING)
 def _pending(s: WorldState, cx: Any, actor: str) -> tuple[w.Request, ...]:
     return tuple(r for r in s.requests.values() if r.to_actor == actor)
@@ -734,8 +743,14 @@ class Settle:
 # ── Vers les écrans ───────────────────────────────────────────────────────
 
 
+def _busy_changed(changes: tuple[w.StateChange, ...]) -> bool:
+    """Le changement touche son occupation : elle s'y met (une action qui aboutit) ou s'arrête (la lassitude)."""
+    return any(isinstance(c, w.ActorBusy) and c.actor == w.MIKA for c in changes)
+
+
 async def _show(ev: Any, ports: Mapping[str, Any]) -> None:
-    """Son corps change de destination : les écrans reçoivent l'état (sans parole), le corps marche."""
+    """Son corps change de destination ou d'occupation : les écrans reçoivent l'état (sans parole), le corps
+    marche, s'absorbe dans ce qu'elle fait ou en revient."""
     port = ports.get("delivery")
     if port is None:
         return
@@ -748,7 +763,9 @@ async def _show(ev: Any, ports: Mapping[str, Any]) -> None:
 
 WORLD.effect(w.INTENDED, when=lambda d: d.intent.actor == w.MIKA and d.intent.cause.source is not w.Source.REFLEX)(
     _show)
-WORLD.effect(w.ENDED, when=lambda d: d.actor == w.MIKA and d.outcome is not w.Outcome.DONE)(_show)
+WORLD.effect(w.ENDED, when=lambda d: d.actor == w.MIKA and (d.outcome is not w.Outcome.DONE
+                                                             or _busy_changed(d.changes)))(_show)
+WORLD.effect(w.CHANGED, when=lambda d: _busy_changed(d.changes))(_show)
 WORLD.effect(w.AUTHORED)(_show)
 
 
