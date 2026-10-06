@@ -26,8 +26,9 @@ interface ServiceController {
     fun startOneShot(): Boolean = false
 
     /**
-     * La réponse est accusée : le service d'un coup s'arrête (pas celui de l'arrière-plan). Il
-     * s'arrête lui-même, sur commande : jamais avant son `startForeground`.
+     * La dernière réponse en vol est accusée, l'arrière-plan toujours coupé : le service d'un coup
+     * s'arrête (pas s'il tient l'arrière-plan). Il s'arrête lui-même, sur commande : jamais avant son
+     * `startForeground`.
      */
     fun endOneShot() {}
 

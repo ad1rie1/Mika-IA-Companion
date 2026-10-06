@@ -69,12 +69,8 @@ class AndroidServiceController(
 
     override fun startOneShot(): Boolean = start(MikaConnectionService.ACTION_ONE_SHOT)
 
-    override fun endOneShot() {
-        scope.launch {
-            // L'arrière-plan a pu être activé entre-temps : ce service-là reste.
-            if (!settings.current().background) sendEndOneShot()
-        }
-    }
+    /** Sans attendre : l'ordre des commandes est celui des appels ([ReplySender] les sérialise). */
+    override fun endOneShot() = sendEndOneShot()
 
     /**
      * Une commande au service, pas un `stopService` : démarré par `startForegroundService`, il serait
