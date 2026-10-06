@@ -994,6 +994,12 @@ def _sensitive_ref(s: SocialState, cx, person: str) -> str:
     return profile.sensitive_ref if profile else ""
 
 
+@SOCIAL.fact(c.INTERESTS_REF)
+def _interests_ref(s: SocialState, cx, person: str) -> str:
+    profile = s.profiles.get(person)
+    return profile.interests_ref if profile else ""
+
+
 @SOCIAL.fact(c.MISSED, reads=[c.CIRCLE, c.CONTACT, affect_c.HOSTILITY, identity_c.IS_OWNER, identity_c.HANDLES])
 def _missed(s: SocialState, cx) -> tuple[tuple[str, float], ...]:
     """Celles qui lui manquent : des amies ou des proches — d'aujourd'hui ou d'avant, une amie partie sans plus

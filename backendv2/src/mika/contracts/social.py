@@ -146,6 +146,9 @@ SENSITIVE = FactFamily("social.sensitive", arg=str, type=tuple)
 #: La référence du contenu de ses sujets délicats (un par ligne, à lire dans le
 #: magasin ; vide : aucun). Oubliée, la personne n'en a plus.
 SENSITIVE_REF = FactFamily("social.sensitive_ref", arg=str, type=str)
+#: La référence du contenu de ce qui l'intéresse, d'après ce qu'elle a dit elle-même (un intérêt par ligne, à lire
+#: dans le magasin ; vide : aucun). Oubliée, la personne n'en a plus. Ses intérêts ne servent qu'avec elle.
+INTERESTS_REF = FactFamily("social.interests_ref", arg=str, type=str)
 
 #: Les amies et proches — d'aujourd'hui ou d'avant : une amie partie sans plus donner de nouvelles manque encore —
 #: dont le silence dépasse une fois et demie leur rythme : ``(personne, silence ÷ rythme)``, du plus long au plus

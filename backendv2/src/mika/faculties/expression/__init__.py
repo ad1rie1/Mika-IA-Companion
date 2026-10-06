@@ -35,6 +35,7 @@ from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
 from mika.contracts import presence as presence_c
 from mika.contracts import projects as projects_c
+from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
@@ -382,6 +383,7 @@ WHY: Mapping[str, str] = {
     projects_c.SHARE: "lui parler de ton projet",
     projects_c.NEED: "lui demander un coup de main pour ton projet",
     email_c.MENTION: "lui parler d'un mail",
+    rss_c.FOR_FRIEND: "lui montrer quelque chose que tu as lu et qui pourrait lui plaire",
     imaging_c.DELIVER: "lui montrer le dessin que tu viens de finir",
     imaging_c.COULD_NOT: "lui dire que son dessin n'a pas pu se faire",
     mcp_c.ANSWERED_REASON: "lui dire ce qu'un de tes services t'a rendu",
