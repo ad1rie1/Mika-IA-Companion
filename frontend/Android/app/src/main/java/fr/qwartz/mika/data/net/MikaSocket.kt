@@ -187,6 +187,8 @@ class MikaSocket(
         val wanted = upTo?.takeIf { it > 0 }
         if (wanted == readUpTo) return
         readUpTo = wanted
+        // Une valeur qui redescend vient du fil d'une autre vie (ADR 0056) : ce qu'en savait la socket ne vaut plus.
+        if (wanted != null && wanted < sentReadUpTo) sentReadUpTo = 0L
         if (open) sendRead()
     }
 

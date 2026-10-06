@@ -41,6 +41,11 @@ sealed interface ChatEvent {
          * question, nouvelle elle aussi, n'est pas une des nôtres). Elles ne se notifient pas.
          */
         val answeredElsewhere: Set<Long> = emptySet(),
+        /**
+         * La trame vient d'une autre vie du serveur (ADR 0056) : la notification d'avant parle d'un fil
+         * qui n'est plus. Annoncée même sans parole nouvelle.
+         */
+        val anotherLife: Boolean = false,
     ) : ChatEvent
 }
 
@@ -157,17 +162,28 @@ class ChatEngine(
 
     suspend fun onHistory(f: ServerFrame.History) {
         val cursorBefore = cursor
+        var anotherLife = false
         val result = store.mutate {
             val cachedLife = kvGet(Kv.LIFE).orEmpty()
             var truncated = kvGet(Kv.TRUNCATED) == "1"
-            if (ChatSync.fromAnotherLife(cachedLife, f.life, f.reset)) {
+            anotherLife = ChatSync.fromAnotherLife(cachedLife, f.life, f.reset)
+            if (anotherLife) {
                 // Un fil d'une autre vie : ses identifiants ne veulent rien dire ici.
                 thread = ChatSync.keepAcrossLives(thread)
                 truncated = false
+                // Son curseur non plus : rien ne se marque « lu » avec lui en attendant la relecture.
+                cursor = 0
             }
             if (!f.life.isNullOrEmpty()) kvPut(Kv.LIFE, f.life)
             val merge = ChatSync.mergeHistory(thread, f.messages, MikaProtocol.MAX_LOCAL_MESSAGES, clock.wallMs())
             thread = merge.history
+            if (anotherLife) {
+                // Les marqueurs de l'ancien fil ne font que monter : gardés, ils tairaient le nouveau. Sa
+                // fenêtre n'est pas du courrier, rien n'y est encore lu, la notification d'avant n'a plus de lignes.
+                kvPut(Kv.LAST_NOTIFIED_ID, ChatSync.cursorOf(thread).takeIf { it > 0 }?.toString())
+                kvPut(Kv.LAST_READ_ID, null)
+                kvPut(Kv.NOTIFIED_LINES, null)
+            }
             // Un fil initial est une fenêtre entière : il tranche la question du trou ; un rattrapage l'ajoute.
             truncated = if (f.isInitial) f.truncated else truncated || f.truncated
             kvPut(Kv.TRUNCATED, if (truncated) "1" else null)
@@ -180,11 +196,13 @@ class ChatEngine(
         refreshCursor()
         // Tout ce à quoi le serveur a répondu n'est plus attendu.
         if (result.first.sawReply) setTyping(false)
-        if (result.second.isNotEmpty()) {
+        if (result.second.isNotEmpty() || anotherLife) {
             _events.tryEmit(
                 ChatEvent.MikaSpoke(
-                    result.second, live = false, replyToClientMsgId = null, cursorBefore = cursorBefore,
-                    answeredElsewhere = result.third,
+                    result.second, live = false, replyToClientMsgId = null,
+                    // Le premier fil d'une autre vie : une première synchronisation, rien n'y est nouveau.
+                    cursorBefore = if (anotherLife) 0L else cursorBefore,
+                    answeredElsewhere = result.third, anotherLife = anotherLife,
                 ),
             )
         }
