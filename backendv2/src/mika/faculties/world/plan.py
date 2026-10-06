@@ -1,8 +1,8 @@
 """Ce qu'une action devient : valider, planifier, conclure — sans rien lire d'autre que le monde (ADR 0050).
 
 Pur : la définition, l'état vécu, des durées et un instant entrent ; des pas, des changements ou un refus
-sortent. Le même code sert à ses outils (planifier ce qu'elle décide), aux réflexes (le coucher, dans un
-réducteur) et à la fin d'une action (le processus qui conclut sans moteur, et revalide au moment de conclure :
+sortent. Le même code sert à ses outils (planifier ce qu'elle décide), aux réflexes (le coucher, le bureau, dans
+un réducteur) et à la fin d'une action (le processus qui conclut sans moteur, et revalide au moment de conclure :
 ce qui était vrai au départ ne l'est peut-être plus).
 """
 
@@ -33,6 +33,8 @@ POSTURE_FR = {p: posture_words(p) for p in w.Posture}
 HAND_ACTIONS = frozenset({w.Builtin.TAKE, w.Builtin.PUT, w.Builtin.DROP, w.Builtin.GIVE})
 #: au-delà, un trajet est trop long pour une seule action
 MAX_STEPS = 8
+#: le tag d'un lieu où l'on travaille, et le nom de l'occupation qu'on y a (ADR 0050 §6)
+WORK = "work"
 
 
 class Refused(Exception):
@@ -519,6 +521,21 @@ def plan_interact(defn: w.WorldDef, t: Timing, actors: Actors, objects: Objects,
     if len(steps) > MAX_STEPS:
         raise Refused(w.Refusal.UNREACHABLE, phrase("world.refusals.too_far_act", action=aff.label, what=what))
     return steps
+
+
+def work_desk(defn: w.WorldDef, actors: Actors, objects: Objects) -> tuple[str, str] | None:
+    """Où elle se met au travail : le premier objet posé à un lieu ``work`` qui offre de quoi travailler (une
+    occupation ``work``), et l'action qui l'y met. ``None`` : ce monde n'en a pas."""
+    for place in defn.tagged(WORK):
+        for o in defn.objects:
+            anchor = anchor_of(defn, actors, objects, o.id)
+            a = defn.archetype(o.archetype)
+            if anchor is None or anchor[1] != place.id or a is None:
+                continue
+            aff = next((x for x in a.affordances if x.effect is w.Effect.ACTIVITY and x.activity == WORK), None)
+            if aff is not None:
+                return o.id, aff.id
+    return None
 
 
 def _check_take(defn: w.WorldDef, objects: Objects, me: w.ActorState, obj: str, a: w.ArchetypeDef) -> None:

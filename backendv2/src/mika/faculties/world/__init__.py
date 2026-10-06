@@ -2,9 +2,10 @@
 
 Elle a un corps dans un monde de pièces, de lieux et d'objets (le frontend la montre ; un moteur de jeu le
 fera bientôt). Ce qu'elle y fait est **son** choix, pris par le modèle avec deux outils en main (``go_to``,
-``interact``) ; ce que son corps fait de lui-même (aller se coucher quand elle s'endort, s'arrêter de dessiner
-au bout d'un moment) est un réflexe, sans modèle. Le noyau est le monde : il valide, planifie en pas, et conclut chaque action à son échéance — un
-moteur hôte pourra la jouer et dire qu'il n'y arrive pas, jamais décider seul (P2).
+``interact``) ; ce que son corps fait de lui-même (aller se coucher quand elle s'endort, s'installer à son bureau
+quand elle se met au travail, s'arrêter de dessiner au bout d'un moment) est un réflexe, sans modèle. Le noyau est
+le monde : il valide, planifie en pas, et conclut chaque action à son échéance — un moteur hôte pourra la jouer et
+dire qu'il n'y arrive pas, jamais décider seul (P2).
 
 Écrit pour être piloté par un modèle :
 
@@ -13,7 +14,8 @@ moteur hôte pourra la jouer et dire qu'il n'y arrive pas, jamais décider seul 
   qui dit ce qui se peut, rien n'est écrit ;
 - un état, pas un ordre : aller là où elle est déjà n'écrit rien ; un déplacement par épisode au plus ;
 - le coucher est un **réducteur** de ``body.fell_asleep`` : l'intention naît dans la même transaction que
-  l'endormissement (les écrans reçoivent les deux ensemble, elle marche jusqu'au lit les yeux ouverts) ;
+  l'endormissement (les écrans reçoivent les deux ensemble, elle marche jusqu'au lit les yeux ouverts) ; le bureau,
+  un réducteur du début d'une séance de travail (un pas sur un but, une exécution de projet dans son mode à elle) ;
 - reprend ``place`` (ADR 0049) : les ``place.moved`` déjà au journal sont relus comme ses déplacements, et
   ``place.current`` (que lisent les écrans) se déduit d'ici ;
 - ce qu'une opératrice change chez elle, elle le remarque (``notice.py``) : un signal par objet apparu, disparu ou
@@ -33,6 +35,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import place as place_c
+from mika.contracts import runtime as rt
 from mika.contracts import world as w
 from mika.faculties.world import notice, plan
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
@@ -44,7 +47,7 @@ from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab.affect import Emotion
-from mika.vocab.episodes import CONVERSATIONAL
+from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity, closeness_rank, hearable
 
@@ -77,6 +80,11 @@ class WorldParams(BaseModel):
         label="Une occupation sans fin prévue s'arrête d'elle-même après (min)", group="Corps", lo=15, hi=480,
         step=5, help="Dessiner, travailler à son bureau : sans autre geste de sa part, elle s'arrête au bout de ce "
                      "temps et reste où elle est (on ne dessine pas treize heures d'affilée).")] = 90
+    work_after_talk_min: Annotated[int, Knob(
+        label="Pas de bureau juste après avoir parlé à quelqu'un (min)", group="Corps", lo=0, hi=60, step=1,
+        help="Quand elle se met au travail (un pas sur un but, un projet), elle va d'elle-même s'installer à son "
+             "bureau — sauf dans ce temps après sa dernière réplique à quelqu'un : on ne se lève pas au milieu "
+             "d'une conversation.")] = 10
     grace_s: Annotated[float, Knob(
         label="Marge avant de conclure (s)", group="Synchronisation", lo=0, hi=30, step=0.5,
         help="Sans nouvelle d'un moteur, une action se termine comme prévue après sa durée plus cette marge.")] = 2.0
@@ -124,6 +132,8 @@ class WorldState:
     gestures: tuple[Felt, ...] = ()
     #: ce qu'une édition a changé chez elle et qu'elle n'a pas encore remarqué (elle dormait, ou c'est l'instant)
     unnoticed: tuple[notice.Remark, ...] = ()
+    #: quand elle a parlé à quelqu'un pour la dernière fois (le bureau attend que la conversation se pose)
+    talked_at: int = 0
 
 
 def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
@@ -133,7 +143,8 @@ def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
 
 #: v5 : ses occupations disent ce qu'elles nourrissent (``nourishes``, déclaré dans ``chambre.json``) — la genèse
 #: change : reconstruite depuis elle, sinon un instantané garderait une définition sans
-WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=5)
+#: v6 : elle s'installe à son bureau quand elle se met au travail (une règle de plus : reconstruite depuis la genèse)
+WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=6)
 
 #: Ce qu'on garde de ses occupations passées : trois jours, soixante au plus.
 LIVED_KEPT_US = 3 * DAY
@@ -289,6 +300,51 @@ def _woke(s: WorldState, e: Any, cx: Any) -> WorldState:
                                            "moving": None, "since": me.since if me.place == bed.id else e.at})
     intents = {k: v for k, v in s.intents.items() if v.actor != w.MIKA}
     return _lived(s, actors, s.objects, e.seq, e.at, intents=FrozenDict(intents))
+
+
+#: Les séances qui l'installent à son bureau : un pas sur un but, une exécution de projet dans son mode à elle (une
+#: exécution impersonnelle n'est pas elle).
+WORKING_KINDS = frozenset({Kind.STEP, Kind.WORK})
+
+
+@WORLD.reducer(rt.UTTERANCE)
+def _talked(s: WorldState, e: Any, cx: Any) -> WorldState:
+    """Elle vient de parler à quelqu'un : le monde n'en retient que l'heure (rien ne change à l'écran)."""
+    if e.data.kind not in CONVERSATIONAL or not e.data.visible:
+        return s
+    return replace(s, talked_at=e.at)
+
+
+@WORLD.reducer(rt.EPISODE_STARTED, reads=[body_c.SLEEP])
+def _to_work(s: WorldState, e: Any, cx: Any) -> WorldState:
+    """Elle se met au travail : elle va à son bureau, s'assied et s'y met (ADR 0050 §6). Comme le coucher,
+    l'intention naît avec le début de la séance (son identifiant en dérive) ; elle rend visible une décision déjà
+    prise et n'en prend aucune à sa place. Rien quand elle dort ou est allongée, quand une action est en cours
+    (la sienne, le coucher), quand une occupation à elle n'est pas finie (elle dessine : elle continue ; elle
+    travaille déjà : elle y est), ni juste après une réplique à quelqu'un (on ne se lève pas au milieu d'une
+    conversation pour aller à son bureau)."""
+    if e.data.kind not in WORKING_KINDS:
+        return s
+    me = s.actors.get(w.MIKA)
+    if me is None or me.posture is w.Posture.LIE or _running(s) is not None:
+        return s
+    if cx.facts.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE:
+        return s
+    if me.activity is not None and (me.activity.until is None or me.activity.until > e.at):
+        return s
+    p = params(cx.params)
+    if s.talked_at and e.at - s.talked_at < p.work_after_talk_min * MINUTE:
+        return s
+    desk = plan.work_desk(s.definition, s.actors, s.objects)
+    if desk is None:
+        return s
+    t = timing(cx.params)
+    try:
+        steps = plan.plan_interact(s.definition, t, s.actors, s.objects, w.MIKA, desk[0], desk[1], now=e.at)
+    except plan.Refused:
+        return s
+    intent = plan.intent_of(w.MIKA, steps, e.at, t, w.Cause(source=w.Source.REFLEX, actor=w.MIKA), f"travail:{e.id}")
+    return _start(s, intent, e.seq)
 
 
 # ── Faits ─────────────────────────────────────────────────────────────────
@@ -708,8 +764,8 @@ def wears_off(s: WorldState, p: WorldParams) -> int | None:
     return a.since + p.open_activity_min * MINUTE
 
 
-@WORLD.process("world.settle", wake_on=[w.INTENDED, body_c.FELL_ASLEEP, w.AUTHORED], lane="background",
-               catch_up=CatchUp.ONCE, max_quantum_s=60)
+@WORLD.process("world.settle", wake_on=[w.INTENDED, body_c.FELL_ASLEEP, rt.EPISODE_STARTED, w.AUTHORED],
+               lane="background", catch_up=CatchUp.ONCE, max_quantum_s=60)
 class Settle:
     """Une action arrivée à son échéance se termine comme prévu — revalidée sur l'état d'alors (un moteur hôte,
     quand il y en aura un, pourra la terminer plus tôt ou dire qu'il n'y arrive pas). Et une occupation sans fin
@@ -785,8 +841,17 @@ async def _show(ev: Any, ports: Mapping[str, Any]) -> None:
         local_hour=frame.local().hour, kind="state"))
 
 
+async def _show_work(ev: Any, ports: Mapping[str, Any]) -> None:
+    """Une séance de travail commence : si son corps s'est mis en route vers son bureau (le réflexe, né dans la
+    même transaction, a changé le monde), les écrans l'apprennent ; s'il s'est abstenu, rien ne part."""
+    frame: Frame = ports["frame"]()
+    if frame.get(w.STATE).seq >= ev.seq:
+        await _show(ev, ports)
+
+
 WORLD.effect(w.INTENDED, when=lambda d: d.intent.actor == w.MIKA and d.intent.cause.source is not w.Source.REFLEX)(
     _show)
+WORLD.effect(rt.EPISODE_STARTED, when=lambda d: d.kind in WORKING_KINDS)(_show_work)
 WORLD.effect(w.ENDED, when=lambda d: d.actor == w.MIKA and (d.outcome is not w.Outcome.DONE
                                                              or _busy_changed(d.changes)))(_show)
 WORLD.effect(w.CHANGED, when=lambda d: _busy_changed(d.changes))(_show)

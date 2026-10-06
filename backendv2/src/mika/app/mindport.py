@@ -147,8 +147,9 @@ def _proposal_text(summary: str, capability: str, effect: Any) -> str:
 
 
 #: ce que les écrans du monde ne reçoivent jamais, même quand le monde le réduit : ce qu'elle remarque et la prose
-#: ne regardent qu'elle
-_WORLD_UNSHOWN = frozenset({w.NOTICED.name, w.DESCRIBED.name})
+#: ne regardent qu'elle ; de ses répliques, le monde ne retient que l'heure (rien ne change à l'écran, et un
+#: rattrapage qui en croiserait une rendrait un instantané pour rien)
+_WORLD_UNSHOWN = frozenset({w.NOTICED.name, w.DESCRIBED.name, rt.UTTERANCE.name})
 #: ce que les écrans du monde reçoivent sans que le monde le réduise : les gestes, les présences, les demandes
 _WORLD_SHOWN = frozenset(t.name for t in w.ALL) - _WORLD_UNSHOWN
 #: ce qu'un client lit quand l'état a bougé entre la décision et l'écriture
