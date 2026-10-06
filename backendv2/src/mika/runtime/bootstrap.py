@@ -29,7 +29,7 @@ from pydantic import BaseModel
 
 from mika.contracts.runtime import EPISODE_ENDED, PERCEPTION_RECEIVED, PerceptionReceived
 from mika.kernel.arbitration import Row
-from mika.kernel.builtin import BOOT, PARAMS_CHANGED
+from mika.kernel.builtin import BOOT, PARAMS_CHANGED, STOPPED
 from mika.kernel.clock import Clock
 from mika.kernel.codec import canonical_json
 from mika.kernel.episode import EpisodePolicy
@@ -222,8 +222,9 @@ class Kernel:
         await self.series.open()
         await self.traces.prune(self.mind.clock.now())
         self.refresh_tools()
-        await self.mind.append([BOOT.draft(code=self.deps.code)], emitter="kernel", origin=Origin.KERNEL,
-                               correlation="boot")
+        # le dernier instant vécu avant ce démarrage : son absence, s'il y en a une, va de là à maintenant
+        await self.mind.append([BOOT.draft(code=self.deps.code, last_at=self.mind.root.at)], emitter="kernel",
+                               origin=Origin.KERNEL, correlation="boot")
         if configure is not None:
             await configure(self)
         self.booted = True
@@ -271,7 +272,8 @@ class Kernel:
     async def stop(self, release: Callable[[], Awaitable[Any]] | None = None) -> None:
         """``release`` ferme ce qui sert les épisodes (fournisseurs, outils) : appelé une fois
         les épisodes annulés — fermé avant, un appel en vol se réglait en échec au lieu de
-        rester à reprendre — et avant le magasin, où ses dernières écritures vont encore."""
+        rester à reprendre — et avant le magasin, où ses dernières écritures vont encore.
+        Le dernier événement est ``kernel.stopped`` : son absence commence là."""
         self.started = False
         self.phase = "stopping"
         for t in list(self._retries):
@@ -290,6 +292,9 @@ class Kernel:
             await release()
         self._shutdown_ports()
         await self.traces.flush()  # les épisodes annulés ci-dessus ont écrit leur règlement
+        if self.booted:
+            await acall(lambda: self.mind.append([STOPPED.draft()], emitter="kernel", origin=Origin.KERNEL,
+                                                 correlation="stop"), label="arrêt journalisé")
         await self.mind.close()
         self.started = False
         self.booted = False

@@ -1,8 +1,15 @@
-"""La faculté du noyau : démarrages, baux, paramètres journalisés, sélections.
+"""La faculté du noyau : démarrages, arrêts, baux, paramètres journalisés, sélections.
 
 Les paramètres d'une faculté sont des événements (``kernel.params_changed``) :
 un réducteur reçoit toujours les paramètres *en vigueur à l'instant de
 l'événement*, rejeu compris.
+
+**Ses absences** : un démarrage relève l'instant du dernier événement du journal
+(``Boot.last_at``) — après un arrêt propre, ``kernel.stopped`` ; après un arrêt
+brutal, la dernière chose vécue. De là à son retour, elle n'était pas là : le
+noyau garde les dernières de ces absences (``kernel.absences``), à partir d'une
+durée qui écarte les redémarrages de quelques secondes. Chaque faculté décide de
+ce qu'elle en fait.
 """
 
 from __future__ import annotations
@@ -12,6 +19,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict
 
+from mika.kernel.clock import DAY, MINUTE
 from mika.kernel.events import Payload
 from mika.kernel.facts import FactFamily, FactKey
 from mika.kernel.faculty import Faculty
@@ -25,6 +33,10 @@ class KernelParams(BaseModel):
     tz: Annotated[str, Knob(label="Fuseau horaire", help="Celui de sa persona (un réglage, jamais une surcharge) : "
                                                          "ses heures, ses nuits, ses rappels se lisent dans ce "
                                                          "fuseau.")] = "UTC"
+    absence_min_us: Annotated[int, Knob(
+        label="Une absence à partir de", lo=MINUTE, hi=DAY,
+        help="Un arrêt du serveur au moins aussi long compte comme une absence : elle sait qu'elle n'était pas là, "
+             "de quand à quand. Plus court (un redémarrage), il ne laisse aucune trace.")] = 20 * MINUTE
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,15 +52,37 @@ class ParamsRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class Absence:
+    """Un temps où elle n'était pas là : de son dernier instant vécu (``since``) à son retour (``until``)."""
+
+    since: int
+    until: int
+
+
+#: au plus tant d'absences gardées (les plus récentes)
+ABSENCES_KEPT = 8
+
+
+@dataclass(frozen=True, slots=True)
 class KernelState:
     boots: int = 0
     leases: FrozenDict[str, Lease] = field(default_factory=FrozenDict)
     params: FrozenDict[str, ParamsRecord] = field(default_factory=FrozenDict)
     selections: int = 0
+    #: ses dernières absences, de la plus ancienne à la plus récente
+    absences: tuple[Absence, ...] = ()
 
 
 class Boot(Payload):
+    """Un démarrage. Les champs ajoutés après coup ont un défaut : un journal plus ancien se relit tel quel."""
+
     code: str = ""
+    #: l'instant du dernier événement du journal au démarrage (0 : inconnu, ou sa première vie)
+    last_at: int = 0
+
+
+class Stopped(Payload):
+    """Un arrêt propre : son absence commence là (après un arrêt brutal, au dernier événement vécu)."""
 
 
 class LeaseAcquired(Payload):
@@ -111,6 +145,7 @@ KERNEL = Faculty(
 )
 
 BOOT = KERNEL.event("kernel.boot", Boot, public=True)
+STOPPED = KERNEL.event("kernel.stopped", Stopped, public=True)
 LEASE_ACQUIRED = KERNEL.event("kernel.lease_acquired", LeaseAcquired, public=True)
 LEASE_RELEASED = KERNEL.event("kernel.lease_released", LeaseReleased, public=True)
 PARAMS_CHANGED = KERNEL.event("kernel.params_changed", ParamsChanged, public=True)
@@ -121,11 +156,23 @@ LEASE = FactFamily(
     doc="Le bail en cours (non expiré) sur une ressource, ou None.",
 )
 BOOTS = FactKey("kernel.boots", type=int)
+ABSENCES = FactKey(
+    "kernel.absences", type=tuple,
+    doc="Ses dernières absences (``Absence`` : de son dernier instant vécu à son retour), de la plus ancienne à la "
+        "plus récente ; seulement celles d'au moins ``absence_min_us``.",
+)
 
 
 @KERNEL.reducer(BOOT)
 def _boot(s: KernelState, e, cx) -> KernelState:
-    return replace(s, boots=s.boots + 1, leases=FrozenDict())
+    """Un démarrage : les baux d'avant tombent ; s'il revient d'un arrêt assez long (le dernier instant vécu est
+    connu), c'est une absence."""
+    s = replace(s, boots=s.boots + 1, leases=FrozenDict())
+    p: KernelParams = cx.params if cx.params is not None else KernelParams()
+    since = e.data.last_at
+    if not since or e.at - since < p.absence_min_us:
+        return s
+    return replace(s, absences=(*s.absences, Absence(since, e.at))[-ABSENCES_KEPT:])
 
 
 @KERNEL.reducer(LEASE_ACQUIRED)
@@ -167,3 +214,8 @@ def _lease(s: KernelState, cx, resource: str) -> Lease | None:
 @KERNEL.fact(BOOTS)
 def _boots(s: KernelState, cx) -> int:
     return s.boots
+
+
+@KERNEL.fact(ABSENCES)
+def _absences(s: KernelState, cx) -> tuple[Absence, ...]:
+    return s.absences
