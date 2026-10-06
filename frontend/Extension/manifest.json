@@ -1,0 +1,34 @@
+{
+  "manifest_version": 3,
+  "name": "Mika · Teams",
+  "version": "0.1.0",
+  "description": "Fait lire à Mika les messages que reçoit Teams web, en les lui envoyant sur son serveur local.",
+  "minimum_chrome_version": "111",
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://teams.microsoft.com/*",
+    "https://teams.cloud.microsoft/*",
+    "https://teams.live.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "optional_host_permissions": ["http://*/*", "https://*/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://teams.microsoft.com/*", "https://teams.cloud.microsoft/*", "https://teams.live.com/*"],
+      "js": ["lib/extract.js", "page/capture.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": ["https://teams.microsoft.com/*", "https://teams.cloud.microsoft/*", "https://teams.live.com/*"],
+      "js": ["content/relay.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "action": { "default_title": "Mika · Teams", "default_popup": "options.html" },
+  "options_ui": { "page": "options.html", "open_in_tab": true }
+}

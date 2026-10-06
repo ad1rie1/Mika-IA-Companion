@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mika · Teams</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Mika · Teams</h1>
+      <span id="pill" class="pill">…</span>
+    </header>
+
+    <section class="card">
+      <label class="switch">
+        <input type="checkbox" id="paused">
+        <span>En pause — rien de ce qui arrive pendant la pause ne lui sera envoyé, même plus tard</span>
+      </label>
+    </section>
+
+    <section class="card">
+      <h2>Connexion à Mika</h2>
+      <label>Adresse du serveur
+        <input type="url" id="base" placeholder="http://127.0.0.1:8001" spellcheck="false">
+      </label>
+      <label>Jeton des appareils
+        <input type="password" id="token" autocomplete="off" spellcheck="false">
+        <small id="tokenHint">Console › Configuration › Appareils › « Nouveau jeton », ou
+          <code>python -m mika --data data/v2 sensors token</code>.</small>
+      </label>
+      <label>Nom de l'appareil (ce que Mika et la console verront)
+        <input type="text" id="device" maxlength="40" placeholder="Teams">
+      </label>
+      <div class="row">
+        <button id="save" class="primary">Enregistrer</button>
+        <button id="test">Tester</button>
+        <span id="testResult" class="note"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Ce qui part</h2>
+      <label class="check"><input type="checkbox" id="skipOwn"> Ne pas lui envoyer mes propres messages</label>
+      <label>Conversations exclues — un morceau du nom (ou de l'identifiant) par ligne
+        <textarea id="exclude" rows="3" spellcheck="false" placeholder="RH&#10;Médecin"></textarea>
+      </label>
+      <details>
+        <summary>Importance et discrétion</summary>
+        <div class="grid">
+          <label>Tête-à-tête <input type="number" id="p_dm" min="0" max="1" step="0.05"></label>
+          <label>Groupe <input type="number" id="p_group" min="0" max="1" step="0.05"></label>
+          <label>Canal <input type="number" id="p_channel" min="0" max="1" step="0.05"></label>
+          <label>Réunion <input type="number" id="p_meeting" min="0" max="1" step="0.05"></label>
+        </div>
+        <small>La pertinence (0 à 1) dit à son attention combien un message compte ; une mention de toi ajoute 0,2.</small>
+        <label>Discrétion
+          <select id="sensitivity">
+            <option value="1">anodin — elle peut en parler à tout le monde</option>
+            <option value="2">personnel — seulement à qui est assez proche</option>
+            <option value="3">confidence — en tête-à-tête et en grande confiance seulement</option>
+          </select>
+        </label>
+      </details>
+      <div class="row"><button id="save2" class="primary">Enregistrer</button></div>
+    </section>
+
+    <section class="card">
+      <h2>État</h2>
+      <dl id="stats"></dl>
+      <p id="error" class="error" hidden></p>
+      <div class="row">
+        <button id="flush">Envoyer maintenant</button>
+        <button id="diagnose">Diagnostic de l'onglet Teams</button>
+        <button id="rearm" title="Oublie ce qui attend et ne lui envoie que ce qui arrivera désormais">Repartir de maintenant</button>
+      </div>
+      <pre id="diagnostic" hidden></pre>
+    </section>
+
+    <section class="card">
+      <div class="row spread">
+        <h2>Derniers envois</h2>
+        <button id="clearLog" class="small">Effacer</button>
+      </div>
+      <ol id="log" class="log"></ol>
+      <p id="logEmpty" class="note">Rien encore.</p>
+    </section>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>
