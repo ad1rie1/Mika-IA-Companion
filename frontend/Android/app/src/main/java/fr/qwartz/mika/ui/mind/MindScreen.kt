@@ -137,6 +137,23 @@ private fun MindCardView(card: MindCard) {
                 }
             }
         }
+        is MindCard.Doing -> TitledCard(stringResource(R.string.mind_doing)) {
+            for (line in card.items) {
+                Row(verticalAlignment = Alignment.Top, modifier = Modifier.clearAndSetSemantics {
+                    contentDescription = listOfNotNull(line.kind, line.text).joinToString(" : ")
+                }) {
+                    line.kind?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.padding(end = 8.dp),
+                        )
+                    }
+                    Text(line.text, modifier = Modifier.weight(1f))
+                }
+            }
+        }
         is MindCard.Dream -> TitledCard(stringResource(R.string.mind_dream)) {
             val meta = listOfNotNull(
                 card.type,

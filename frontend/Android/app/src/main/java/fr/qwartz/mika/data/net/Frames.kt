@@ -176,6 +176,8 @@ data class InnerState(
     val identity: IdentityView? = null,
     val personProfile: PersonProfile? = null,
     val pendingCommitments: List<String>? = null,
+    val reminders: List<Reminder>? = null,
+    val doing: List<Occupation>? = null,
     val malformed: Set<String> = emptySet(),
 )
 
@@ -190,6 +192,22 @@ data class Doing(
     val label: String = "",
     val since: Long = 0,
     val until: Long? = null,
+)
+
+/** Un rappel qu'elle t'a promis, pas encore dit (`app/mindport.py::_goals`). */
+@Serializable
+data class Reminder(
+    val text: String = "",
+    /** ISO à l'heure locale du serveur ; `null` : sans heure. */
+    val due: String? = null,
+)
+
+/** Ce qu'elle a en train et que tu peux entendre : son titre, dans ses mots à elle. */
+@Serializable
+data class Occupation(
+    val text: String = "",
+    /** `musing` (une rêverie) | `reflection` (elle y repense) | `exploration` (elle va voir ailleurs) */
+    val kind: String = "",
 )
 
 @Serializable

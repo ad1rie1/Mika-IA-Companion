@@ -161,6 +161,17 @@ object MindLabels {
         else -> value.orEmpty()
     }
 
+    /**
+     * Ce qu'elle a en train, en mots (`app/mindport.py::_doing_kind`, InnerLifePanel.ts) : une rêverie n'est pas
+     * une recherche. Une sorte inconnue : pas d'étiquette.
+     */
+    fun doingKind(kind: String?): String? = when (kind) {
+        "musing" -> "rêverie"
+        "reflection" -> "elle y repense"
+        "exploration" -> "elle va voir"
+        else -> null
+    }
+
     /** Le titre que le serveur donne au journal ; jamais « d'aujourd'hui », il s'écrit la nuit. */
     fun journalTitle(title: String?): String = title?.trim()?.takeIf { it.isNotEmpty() } ?: "Son dernier journal"
 }

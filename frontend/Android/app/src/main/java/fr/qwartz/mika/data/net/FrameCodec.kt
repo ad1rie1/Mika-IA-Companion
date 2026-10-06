@@ -180,6 +180,8 @@ object FrameCodec {
             identity = section(K_IDENTITY, IdentityView.serializer()),
             personProfile = section(K_PROFILE, PersonProfile.serializer()),
             pendingCommitments = section(K_COMMITMENTS, ListSerializer(String.serializer())),
+            reminders = section(K_REMINDERS, ListSerializer(Reminder.serializer())),
+            doing = section(K_DOING, ListSerializer(Occupation.serializer())),
             malformed = malformed,
         )
     }
@@ -239,4 +241,6 @@ object FrameCodec {
     const val K_IDENTITY = "identity"
     const val K_PROFILE = "person_profile"
     const val K_COMMITMENTS = "pending_commitments"
+    const val K_REMINDERS = "reminders"
+    const val K_DOING = "doing"
 }
