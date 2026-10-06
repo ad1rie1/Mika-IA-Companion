@@ -70,13 +70,19 @@ class Builtin:
 @dataclass(frozen=True, slots=True)
 class Command:
     """Un bouton d'une section de réglages (« un jeton neuf ») : ``run(opérateur) ->
-    (ton, message)`` ; le message peut montrer une valeur une seule fois."""
+    (ton, message)`` ; le message peut montrer une valeur une seule fois.
+
+    ``argument`` : le bouton porte une valeur (le numéro d'une révision), que
+    ``run(opérateur, valeur)`` reçoit. Il ne figure pas parmi les commandes de la
+    page : les blocs de la section le posent en place, même dans le détail d'une
+    ligne, par ``ActionSlot("<section>.<clé>", initial=((argument, valeur),))``."""
 
     key: str
     title: str
-    run: Callable[[str], Awaitable[tuple[str, str]]]
+    run: Callable[..., Awaitable[tuple[str, str]]]
     confirm: str = ""
     danger: bool = False
+    argument: str = ""
 
 
 @dataclass(frozen=True, slots=True)

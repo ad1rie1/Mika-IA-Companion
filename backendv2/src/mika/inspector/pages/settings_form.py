@@ -16,6 +16,8 @@ un réglage en particulier :
   fournisseur) se chargent d'eux-mêmes sur la page d'une entrée existante, ceux
   d'un autre champ (``choices_from`` : le repli parmi les fournisseurs) et ceux
   que la section fournit (``choices`` : les fuseaux) sont posés au rendu ;
+- une commande qui porte une valeur (``Command.argument`` : revenir à une
+  révision) se pose en place dans les blocs de sa section, avec sa confirmation ;
 - une soumission refusée remontre la page avec les valeurs tapées et une erreur
   à côté de chaque champ (400) ; acceptée, elle est auditée (``runtime.operated``,
   sans contenu) et la page revient avec un message ;
@@ -315,13 +317,15 @@ class SettingsForms:
                       query: Mapping[str, str]) -> dict[str, Any]:
         prefix = f"s-{s.key}"
         current = s.load() if s.model is not None else None
+        blocks = render.blocks([*(s.blocks() if s.blocks and pg.blocks else ()), *(pg.extra() if pg.extra else ())],
+                               env, query)
         out: dict[str, Any] = {"key": s.key, "label": pg.title, "description": "", "csrf": csrf,
                                "messages": list(state.messages), "form": None, "records": [], "record": None,
                                "commands": [{"key": c.key, "title": c.title, "confirm": c.confirm,
-                                             "danger": c.danger} for c in s.commands] if pg.commands else [],
+                                             "danger": c.danger} for c in s.commands
+                                            if not c.argument] if pg.commands else [],
                                "facts": list(s.facts()) if s.facts and pg.facts else [], "yaml": None,
-                               "blocks": render.blocks([*(s.blocks() if s.blocks and pg.blocks else ()),
-                                                        *(pg.extra() if pg.extra else ())], env, query),
+                               "blocks": blocks, "forms": self._command_forms(s, blocks, csrf, page),
                                "preview": render.blocks(state.preview, env, query) if state.preview else []}
         if s.model is None:
             return out
@@ -364,6 +368,36 @@ class SettingsForms:
                 text = yaml.safe_dump(_without_secrets(s.model, current), allow_unicode=True, sort_keys=False,
                                       width=100)
             out["yaml"] = {"text": text or ""}
+        return out
+
+    @staticmethod
+    def _command_forms(s: SettingsSection, blocks: Sequence[Mapping[str, Any]], csrf: str,
+                       page: str) -> dict[str, Any]:
+        """Les boutons qu'une section pose dans ses blocs (``ActionSlot("<section>.<clé>")``, même dans le
+        détail d'une ligne) : une commande qui porte une valeur (``Command.argument``), envoyée à cette page
+        comme les autres commandes, avec sa confirmation."""
+        commands = {f"{s.key}.{c.key}": c for c in s.commands if c.argument}
+        out: dict[str, Any] = {}
+        if not commands:
+            return out
+
+        def walk(items: Sequence[Mapping[str, Any]]) -> None:
+            for b in items:
+                if b["t"] == "action" and b["key"] in commands:
+                    c = commands[b["key"]]
+                    title = b["title"] or c.title
+                    out[b["slot"]] = {
+                        "url": page_url(page), "csrf": csrf, "nonce": "", "back": "", "title": title,
+                        "button": title, "description": "", "fields": [], "retype": False, "subject": "",
+                        "confirm": c.confirm, "danger": c.danger, "errors": {}, "id": f"c-{s.key}-{len(out)}",
+                        "fixed": [(SECTION, s.key), (COMMAND, c.key),
+                                  (c.argument, str(b["initial"].get(c.argument, "")))]}
+                elif b["t"] in ("grid", "section", "disclosure", "workspace", "toolbar"):
+                    walk([*b.get("sidebar", []), *b["items"]])
+                elif b["t"] == "table":
+                    walk([x for r in b["rows"] for x in r["detail"]])
+
+        walk(blocks)
         return out
 
     def _records_view(self, s: SettingsSection, f: forms.FormField, current: Any, page: str,
@@ -488,7 +522,7 @@ class SettingsForms:
         pg = found[1]
         by = account.handle
         if data.get(COMMAND):
-            return await self._command(ui, s, data[COMMAND], by, page)
+            return await self._command(ui, s, data[COMMAND], by, page, data)
         if s.model is None or s.save is None:
             return None, {s.key: State(messages=[("danger", "Rien à enregistrer ici.")])}, 400
         current = s.load()
@@ -723,17 +757,20 @@ class SettingsForms:
             return None, {s.key: state}, 400
         return await self._commit(ui, s, new, by, page, s.key, state, f"{s.label} : importée.")
 
-    async def _command(self, ui: Any, s: SettingsSection, key: str, by: str,
-                       page: str) -> tuple[Response | None, dict[str, State], int]:
+    async def _command(self, ui: Any, s: SettingsSection, key: str, by: str, page: str,
+                       data: Mapping[str, str]) -> tuple[Response | None, dict[str, State], int]:
         command = next((c for c in s.commands if c.key == key), None)
         if command is None:
             return None, {s.key: State(messages=[("danger", "Commande inconnue.")])}, 400
+        value = str(data.get(command.argument, "") or "").strip()[:200] if command.argument else ""
+        if command.argument and not value:
+            return None, {s.key: State(messages=[("danger", "Commande incomplète : recharge la page.")])}, 400
         try:
-            tone, message = await command.run(by)
+            tone, message = await (command.run(by, value) if command.argument else command.run(by))
         except ValueError as exc:
             return None, {s.key: State(messages=[("danger", str(exc))])}, 400
         await operations.audit(ui.kernel, f"console.reglages.{s.key}.{command.key}", by=by,
-                               subject_kind="reglage", subject=s.key)
+                               subject_kind="reglage", subject=f"{s.key}/{value}" if value else s.key)
         return self._done(ui, page, tone, message), {}, 303
 
     def _done(self, ui: Any, page: str, tone: str, message: str, back: str = "") -> Response:
