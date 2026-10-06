@@ -6,7 +6,9 @@ dans ``accounts.py``.)
 Tout se lit : chaque paramètre dit ce qu'il fait, sa valeur, d'où elle vient
 (défaut ← tempérament ← réglage ← surcharge), ses bornes et ce qui le pilote.
 Changer une valeur pose une surcharge, bornée et journalisée avec l'opérateur ;
-une valeur égale à celle du tempérament la retire. Le rangement des facultés en
+une valeur égale à celle du tempérament la retire. « Voir l'effet » montre avant
+d'enregistrer ce que changeraient les valeurs tapées à ce qu'elle ferait et se
+dirait maintenant, sans rien écrire (``effect``). Le rangement des facultés en
 familles et leur nom lisible viennent de la composition (``app/console.py``) :
 la console n'en nomme aucune.
 """
@@ -27,10 +29,13 @@ from starlette.responses import RedirectResponse, Response
 from mika.contracts import runtime as rt
 from mika.inspector.catalog import Builtin, Panel
 from mika.inspector.formview import field_view
+from mika.inspector.pages.decisions import arbiter_diff
+from mika.inspector.pages.system import facts_diff
 from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel import forms
 from mika.kernel.builtin import PARAMS_CHANGED
+from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     INT_MAX,
     Badge,
@@ -46,8 +51,11 @@ from mika.kernel.inspect import (
     Text,
     When,
     cursor_page,
+    describe_error,
 )
 from mika.runtime import operations
+from mika.runtime.boundary import Failed, call
+from mika.runtime.params import ParamsOverlay, Planned
 from mika.runtime.params import shown as params_shown
 
 FACULTY_PAGE = "comportement-"
@@ -60,6 +68,11 @@ SOURCES_FR = {"défaut": "valeur par défaut", "tempérament": "dérivée du tem
 #: au-delà, une faculté se lit un groupe à la fois
 ONE_PAGE_MAX = 12
 COMPORTEMENT_ORDER = 1000
+#: « Voir l'effet » : la limite de l'aperçu, dite à chaque fois
+NOT_REPLAYED = ("Une lecture de l'instant, rien de plus : ce qui s'est accumulé sous les réglages en vigueur (son "
+                "humeur, ses ancres, la proximité, des besoins déjà montés) n'est pas rejoué, seule la lecture de "
+                "maintenant change. Rien n'a été enregistré ni journalisé, aucun modèle n'a été appelé ; "
+                "« Enregistrer » pose ces valeurs.")
 
 
 def faculty_url(owner: str, **more: str) -> str:
@@ -241,6 +254,7 @@ async def faculty_page(ui: Any, request: Request, owner: str, state: Mapping[str
     if p.refused:
         blocks.append(Note("Des surcharges enregistrées sont refusées et ignorées : " + "; ".join(
             f"{k} ({v})" for k, v in p.refused.items()), "danger"))
+    blocks += list(state.get("preview") or ())
     if not one_page:
         current = _slug(shown[0][0])
         blocks.append(Nav(tuple(NavItem(title, Ref("local", faculty_url(owner, groupe=_slug(title)), title),
@@ -296,6 +310,14 @@ async def parametres_post(ui: Any, request: Request) -> tuple[Response | None, d
     group = data.get("_groupe", "")
     if ps.plan(owner) is None:
         return None, {"messages": [("danger", "Faculté inconnue.")]}, 400
+    if data.get("_apercu"):
+        planned_, errors = ps.preview(owner, lists)
+        values, _ = forms.parse(ps.fields(owner), lists, current={})
+        if planned_ is None:
+            return None, {"owner": owner, "group": group, "errors": errors, "values": values,
+                          "messages": [("danger", "Pas d'aperçu : corrige les champs signalés.")]}, 400
+        return None, {"owner": owner, "group": group, "values": values,
+                      "preview": effect(ui, {owner: planned_})}, 200
     try:
         if data.get("_reinitialiser") or data.get("_reinitialiser_chemin"):
             changed = await ps.reset(owner, data.get("_reinitialiser_chemin", "") or data.get("_chemin", ""))
@@ -316,6 +338,32 @@ async def parametres_post(ui: Any, request: Request) -> tuple[Response | None, d
     ui.flash(token, "ok" if changed else "info",
              f"{label} : surcharges enregistrées et journalisées." if changed else "Rien n'a changé.")
     return secure(RedirectResponse(faculty_url(owner, groupe=group, flash=token), status_code=303)), {}, 303
+
+
+def effect(ui: Any, planned: Mapping[str, Planned]) -> list[Any]:
+    """« Voir l'effet » : ce qu'elle ferait et ce qu'elle se dirait à cet instant si ``planned`` était en
+    vigueur. Deux cadres sur la même racine, au même instant — l'un avec les paramètres journalisés, l'autre
+    avec ceux-là à leur place (``ParamsOverlay``) — et leur différence. Rien n'est journalisé, aucun modèle
+    n'est appelé, l'arbitre lit sans rien retenir."""
+    kernel = ui.kernel
+    before = kernel.mind.frame()
+    after = Frame(before.root, before.now, ParamsOverlay(before.env, planned))
+
+    def table(frame: Frame) -> list[Any]:
+        return list(kernel.arbiter.rows(frame, record=False))
+
+    old = call(table, before, label="table de l'arbitre (en vigueur)")
+    new = call(table, after, label="table de l'arbitre (aperçu)")
+    out: list[Any] = [Note(NOT_REPLAYED, "info", title="Aperçu : rien n'est enregistré")]
+    if isinstance(old, Failed):
+        out.append(Note(f"La table de l'arbitre ne se lit pas : {describe_error(old.error)}.", "danger"))
+    elif isinstance(new, Failed):
+        out.append(Note(f"La table de l'arbitre ne se lit pas avec ces valeurs : {describe_error(new.error)}.",
+                        "danger"))
+    else:
+        out.append(arbiter_diff(ui, old, new))
+    out.append(facts_diff(kernel, before, after))
+    return out
 
 
 @TABS.tab("reglages.journal", title="Journal des modifications", group="Historique", order=3000,
