@@ -33,6 +33,7 @@ from mika.contracts import self_ as self_c
 from mika.contracts import wakeup as wakeup_c
 from mika.contracts.self_ import PersonaDoc
 from mika.inspector.catalog import Command, SettingsPage, SettingsSection, SettingsTab
+from mika.inspector.pages.reglages import effect
 from mika.kernel import forms
 from mika.kernel.forms import Knob
 from mika.kernel.inspect import Badge, Column, Nav, NavItem, Note, Ref, Row, Table, Text, When
@@ -294,6 +295,10 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
 
     async def save_temperament(t: Temperament, by: str) -> list[str]:
         return await save_persona(live.persona().model_copy(update={"temperament": t}), by)
+
+    def temperament_effect(ui: Any, t: Temperament) -> list[Any]:
+        """« Voir l'effet » d'un tempérament : chaque faculté rederivée, surcharges et réglages gardés."""
+        return effect(ui, params.preview_temperament(t))
 
     async def back_to_file(by: str) -> tuple[str, str]:
         if settings.persona_yaml() is None:
@@ -575,7 +580,7 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         lambda: live.persona().temperament, save_temperament, order=110,
                         description="Huit curseurs et une humeur de fond : l'entrée principale de son caractère. "
                                     "Chaque faculté en dérive ses paramètres (Comportement).",
-                        blocks=drives,
+                        blocks=drives, preview=temperament_effect,
                         pages=(SettingsPage("temperament", "Tempérament", blocks=True, description=(
                             "Huit curseurs (0,5 = comme la plupart des gens) et une humeur de fond. Chaque "
                             "faculté en dérive ses paramètres ; la table dessous dit ce que pilote chaque "
