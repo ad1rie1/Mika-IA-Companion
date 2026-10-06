@@ -49,6 +49,11 @@ object MikaProtocol {
     const val RECONNECT_DELAY_MS = 1_000L
     const val MAX_RECONNECT_DELAY_MS = 30_000L
     const val RECONNECT_FACTOR = 1.5
+    /**
+     * Sans frappe depuis tant, la personne n'écrit plus (trame `composing`, WebSocketClient.ts
+     * `COMPOSING_IDLE_MS`) : la réponse à son message d'avant n'attend pas une suite qui ne vient pas.
+     */
+    const val COMPOSING_IDLE_MS = 6_000L
 
     // ── Fil (ChatOverlay.ts) ──
     /** « Mika écrit… » doit couvrir toute l'attente : appel au modèle, file d'attente, délai. */
@@ -90,6 +95,7 @@ object MikaProtocol {
     const val TYPE_SYNC = "sync"
     const val TYPE_PING = "ping"
     const val TYPE_PRESENCE = "presence"
+    const val TYPE_COMPOSING = "composing"
     const val TYPE_APPROVAL = "approval"
     const val TYPE_READ = "read"
 

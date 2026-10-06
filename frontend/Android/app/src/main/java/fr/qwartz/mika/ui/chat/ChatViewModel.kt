@@ -28,6 +28,7 @@ import fr.qwartz.mika.data.net.MikaProtocol
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -166,6 +167,8 @@ class ChatViewModel(
     val canSend: Boolean get() = !staging && (input.isNotBlank() || attachments.isNotEmpty())
 
     private var restored = false
+    /** Ce qui clôt la saisie faute de frappe ([MikaProtocol.COMPOSING_IDLE_MS]). */
+    private var composingIdle: Job? = null
 
     init {
         // Ce modèle appartient à l'activité et survit à l'écran : session fermée, il oublie ce qui était
@@ -200,6 +203,8 @@ class ChatViewModel(
 
     private fun closeComposer() {
         restored = false
+        composingIdle?.cancel()
+        composingIdle = null
         input = ""
         attachments.clear()
         notices = emptyList()
@@ -232,6 +237,25 @@ class ChatViewModel(
 
     fun onInput(text: String) {
         input = text.take(MikaProtocol.MAX_MESSAGE_CHARS)
+        composing(input.isNotBlank())
+    }
+
+    /**
+     * Dire au serveur que la personne écrit, ou plus (trame `composing`) — le début et la fin d'une saisie,
+     * jamais une frappe : un champ non vide l'ouvre et relance son délai ; vidé, ou sans frappe depuis
+     * [MikaProtocol.COMPOSING_IDLE_MS], elle se clôt. L'envoi d'un message la clôt de lui-même. Rien ne
+     * s'affiche : c'est pour qu'elle ne réponde pas à la moitié d'une pensée.
+     */
+    private fun composing(on: Boolean) {
+        composingIdle?.cancel()
+        composingIdle = null
+        graph.connection.composing(on)
+        if (!on) return
+        composingIdle = viewModelScope.launch {
+            delay(MikaProtocol.COMPOSING_IDLE_MS)
+            composingIdle = null
+            graph.connection.composing(false)
+        }
     }
 
     fun addUris(uris: List<Uri>) = stage(uris, fromCamera = false, displayName = null)
@@ -293,6 +317,9 @@ class ChatViewModel(
         val text = input.trim()
         val files = attachments.toList()
         if (!canSend) return
+        // le message clôt la saisie de lui-même (la socket le sait) : son délai n'a plus rien à clore
+        composingIdle?.cancel()
+        composingIdle = null
         input = ""
         attachments.clear()
         notices = emptyList()

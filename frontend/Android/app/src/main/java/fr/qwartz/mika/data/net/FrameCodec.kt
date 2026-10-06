@@ -199,6 +199,12 @@ object FrameCodec {
         put("here", here)
     }.toString()
 
+    /** La personne commence à écrire un message, ou cesse : le début et la fin d'une saisie, jamais une frappe. */
+    fun composing(on: Boolean): String = buildJsonObject {
+        put("type", MikaProtocol.TYPE_COMPOSING)
+        put("on", on)
+    }.toString()
+
     /** « Lu jusqu'ici » : le plus grand identifiant de message que la personne a vu. */
     fun read(upTo: Long): String = buildJsonObject {
         put("type", MikaProtocol.TYPE_READ)

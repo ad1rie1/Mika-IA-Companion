@@ -94,6 +94,9 @@ class MikaSocket(
     private var readUpTo: Long? = null
     private var sentReadUpTo = 0L
 
+    /** La saisie dite à la socket en cours (trame `composing`) : une socket neuve n'en sait rien. */
+    private var composing = false
+
     private var socket: WsSocket? = null
     private var generation = 0
     private var open = false
@@ -188,6 +191,17 @@ class MikaSocket(
     }
 
     /**
+     * La personne écrit un message, ou plus : dit à la socket ouverte sur une transition seulement, jamais
+     * en file (une saisie ne vaut que pour l'instant où elle part). L'envoi d'un message la clôt de
+     * lui-même ([offer]) ; tant qu'un message n'est pas parti, elle ne se rouvre pas — dite avant lui, son
+     * arrivée la clôturerait aussitôt : la frappe suivante la redira.
+     */
+    fun setComposing(on: Boolean) {
+        if (!open || on == composing || (on && outbox.isNotEmpty())) return
+        if (sendNow(FrameCodec.composing(on))) composing = on
+    }
+
+    /**
      * Le retour au premier plan : reconnecter tout de suite si la socket n'est pas manifestement
      * utilisable. Silencieuse avec un message sans accusé : c'est un cadavre. Silencieuse sans rien en
      * vol : rien n'est prouvé, on pingue et le battement jugera. Le silence se compte comme au battement :
@@ -255,6 +269,7 @@ class MikaSocket(
             refuse(chat.clientMsgId, terminalAck)
             return false
         }
+        composing = false // le message clôt la saisie de lui-même, côté serveur
         enqueue(Entry(chat))
         if (!open) return false
         flushOutbox()
@@ -316,6 +331,8 @@ class MikaSocket(
         // Ce qui a été lu, redit à chaque socket : le serveur ignore ce qui n'avance pas.
         sentReadUpTo = 0L
         sendRead()
+        // Une saisie dite à la précédente : sa fermeture l'a close ; la frappe suivante la redira.
+        composing = false
         flushOutbox()
         startHeartbeat()
         emit(ConnectionStatus.Connected)
@@ -522,7 +539,7 @@ class MikaSocket(
 
     /**
      * Envoyer si la socket est ouverte, sinon rien — jamais en file. Pour les trames de contrôle
-     * (`sync`, `ping`, `presence`, `read`, `approval`) dont toute la valeur est d'être actuelles.
+     * (`sync`, `ping`, `presence`, `composing`, `read`, `approval`) dont toute la valeur est d'être actuelles.
      */
     private fun sendNow(text: String): Boolean {
         val s = socket ?: return false
