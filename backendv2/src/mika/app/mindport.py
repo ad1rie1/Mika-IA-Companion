@@ -11,6 +11,7 @@ from typing import Any
 
 from mika.app.console import FACULTY_LABELS
 from mika.contracts import attention as attention_c
+from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
@@ -186,7 +187,15 @@ class KernelPort:
         if got.overloaded:
             return Admission("overloaded")
         return Admission("accepted", got.seq, duplicate=bool(got.commit and got.commit.deduped), reply=got.reply,
-                         held=got.held)
+                         held=got.held and not self._awaits_typing(got.seq, p))
+
+    def _awaits_typing(self, seq: int | None, p: PerceptionReceived) -> bool:
+        """La réponse attend seulement que la personne ait fini d'écrire (``composition._reply_wait``), pas son
+        réveil : rien à dire à l'écran — son message suivant, ou la fin de sa saisie, la fera partir."""
+        if seq is None or p.room is not None:
+            return False
+        frame = self.kernel.mind.frame()
+        return frame.get(body_c.REPLY_WAIT(seq)) != 0 and frame.get(presence_c.COMPOSING(p.handle)) is not None
 
     async def connected(self, c: presence_c.Connected) -> None:
         await self.kernel.mind.append([presence_c.CONNECTED.draft(c)], emitter="presence",
