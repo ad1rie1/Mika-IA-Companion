@@ -14,6 +14,7 @@ outre son rythme la tire du sommeil aussi (ADR 0068).
 from __future__ import annotations
 
 import enum
+from dataclasses import dataclass
 
 from mika.kernel.events import Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
@@ -85,6 +86,31 @@ WAITED = event_type("body.waited", OWNER, Waited, public=True, subjects=("person
 ALL = (FELL_ASLEEP, WOKE, ROUSED)
 
 
+@dataclass(frozen=True, slots=True)
+class Rousing:
+    """Une fois où elle a été tirée du sommeil pendant une nuit (``body.roused``) : quand, par quelle adresse,
+    quelle personne (vide : un réveil par API, ou une adresse sans personne) et pourquoi."""
+
+    at: int
+    handle: str
+    person: str
+    reason: str  # CLOSE_ONE | URGENT | CALL
+
+
+@dataclass(frozen=True, slots=True)
+class NightReading:
+    """Sa dernière nuit, finie : de l'endormissement au réveil qui l'a close, ce qu'elle a vraiment dormi (sans
+    les moments où un message l'a tenue éveillée), les fois où on l'a tirée du sommeil, une nuit courte (contre
+    ses nuits d'habitude), coupée, ou commencée tard (une conversation l'a tenue éveillée au-delà de son seuil)."""
+
+    start: int
+    end: int
+    duration_us: int
+    rousings: tuple[Rousing, ...]
+    short: bool
+    broken: bool
+    late: bool
+
 
 RHYTHM = FactKey("body.rhythm", type=Profile, doc="le profil circadien en vigueur")
 PHASE = FactKey("body.phase", type=Phase, time_varying=True)
@@ -102,3 +128,6 @@ NIGHT_WAKING = FactKey("body.night_waking", type=bool, time_varying=True)
 #: ``0`` : elle dort (ou a été tirée du sommeil par quelqu'un d'autre), la réponse attend ; sinon l'instant
 #: d'où la réponse est due (son réveil).
 REPLY_WAIT = FactFamily("body.reply_wait", arg=int, type=object, time_varying=True)
+#: Sa dernière nuit (``NightReading``), du réveil qui l'a close jusqu'au milieu de sa journée ; ``None`` : elle dort
+#: encore, n'est tirée du sommeil que le temps d'un message, ou sa nuit est loin (une nuit blanche n'en a pas).
+LAST_NIGHT = FactKey("body.last_night", type=object, time_varying=True)

@@ -12,14 +12,18 @@
   d'urgent, la réveille** (``body.roused``) ; les autres attendent son réveil
   (``body.waited``) — la réponse part le matin, et elle sait qu'elle dormait ;
 - elle ne prend pas la parole en dormant, et moins quand elle est fatiguée ;
+- ses nuits (les sept dernières) : quand elle s'est endormie et réveillée, ce
+  qu'elle a dormi, qui l'a tirée du sommeil, si elle s'est couchée tard — au
+  réveil, elle sait comment s'est passée sa nuit (``body.last_night``) ;
 - ses sections : son rythme (la date, l'heure, ce qu'elle ressent ; « ce
-  message t'a réveillée »), et le brouillard de la fatigue.
+  message t'a réveillée » ; sa nuit, le matin), et le brouillard de la fatigue.
 """
 
 from __future__ import annotations
 
 import math
 import re
+import statistics
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
@@ -105,6 +109,19 @@ class BodyParams(BaseModel):
         help="Les proximités dont un message privé la réveille la nuit (« friend », « close ») ; les autres "
              "attendent son réveil — sauf quelque chose d'urgent, qui la réveille toujours.")] = \
         (social_c.FRIEND, social_c.CLOSE)
+    #: ses nuits : ce qu'elle en sait au réveil (« bien dormi ? »)
+    usual_night_hours: Annotated[float, Knob(
+        label="Une nuit ordinaire (heures)", group="Ses nuits", lo=4, hi=12, step=0.25,
+        help="Ce qu'elle dort d'habitude, tant qu'elle n'a pas encore trois nuits derrière elle ; ensuite, une nuit "
+             "se juge contre la médiane de ses dernières nuits.")] = 7.75
+    short_night_ratio: Annotated[float, Knob(
+        label="Nuit courte sous (part d'une nuit ordinaire)", group="Ses nuits", lo=0.5, hi=1, step=0.05,
+        help="Une nuit plus courte que cette part de ses nuits d'habitude est « un peu courte » : elle le sait au "
+             "réveil, et peut le dire si on lui demande si elle a bien dormi.")] = 0.9
+    late_hours: Annotated[float, Knob(
+        label="Couchée tard : endormie … heures après son seuil", group="Ses nuits", lo=0.25, hi=6, step=0.25,
+        help="Endormie au moins tant d'heures après le moment où elle se serait endormie seule (une conversation "
+             "l'a tenue éveillée), elle sait au réveil qu'elle a veillé tard.")] = 1.0
 
 
 def derive(t: Temperament, overrides: Mapping[str, Any] | None = None) -> BodyParams:
@@ -121,6 +138,20 @@ class Waiting:
 
 
 @dataclass(frozen=True, slots=True)
+class Night:
+    """Une de ses nuits, de l'endormissement à son dernier réveil (``end`` nul : elle dort dedans). Tirée du
+    sommeil par un message puis rendormie avant la fin de sa nuit, c'est la même nuit qui reprend : le réveil
+    s'ajoute à ``rousings``, le temps passé éveillée à ``awake_us``."""
+
+    start: int
+    end: int = 0
+    rousings: tuple[c.Rousing, ...] = ()
+    #: endormie bien après son seuil : une conversation l'a tenue éveillée
+    late: bool = False
+    awake_us: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class BodyState:
     sleep: sl.Sleep = field(default_factory=sl.Sleep)
     #: le message qui l'a tirée du sommeil en dernier (0 : aucun), et d'où il venait
@@ -128,17 +159,26 @@ class BodyState:
     roused_handle: str = ""
     #: les messages arrivés pendant sa nuit qui ne l'ont pas réveillée, pas encore répondus
     waiting: tuple[Waiting, ...] = ()
+    #: ses dernières nuits, de la plus ancienne à la plus récente
+    nights: tuple[Night, ...] = ()
 
 
 #: un message en attente plus vieux est oublié de la liste (la reprise le juge comme les autres)
 WAITING_KEPT_US = 2 * DAY
 WAITING_MAX = 64
+#: les nuits gardées (une semaine), les réveils gardés par nuit
+NIGHTS_KEPT = 7
+ROUSINGS_MAX = 16
+#: une nuit se juge contre la médiane de ses nuits d'avant dès qu'elle en a autant (avant : la nuit ordinaire)
+USUAL_FROM = 3
+#: ce qu'elle sait de sa nuit vaut du réveil jusqu'au milieu de sa journée — pas une excuse traînée jusqu'au soir
+NIGHT_TOLD_US = 6 * HOUR
 #: les issues d'épisode après lesquelles un message attend encore sa réponse (un arrêt, une
 #: supplantation) ou la trouvera avec un autre (lu avec le suivant : « abstained »)
 _KEPT = frozenset({"interrupted", "cancelled", "superseded", "preempted", "abstained"})
 
 BODY = Faculty("body", state=BodyState, init=lambda p: BodyState(), params=BodyParams, derive=derive,
-               state_version=2, retired_params=("pressure_drag_from", "pressure_drag"))
+               state_version=3, retired_params=("pressure_drag_from", "pressure_drag"))
 BODY.declare(*c.ALL, c.WAITED)
 
 
@@ -230,28 +270,58 @@ def _called(s: BodyState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]
 # ── Réducteurs ────────────────────────────────────────────────────────────
 
 
+def _night_begins(s: BodyState, at: int, p: BodyParams, tz: Any) -> tuple[Night, ...]:
+    """S'endormir ouvre une nuit — ou reprend la même : tirée du sommeil par un message, elle se rendort avant la
+    fin de sa nuit (le temps passé éveillée ne compte pas comme dormi). Endormie bien après le moment où elle se
+    serait endormie seule, elle a veillé tard."""
+    last = s.nights[-1] if s.nights else None
+    if (last is not None and s.sleep.woken_by_message and last.end == s.sleep.since
+            and sl.same_night(s.sleep.since, at, tz, night(p))):
+        return (*s.nights[:-1], replace(last, end=0, awake_us=last.awake_us + max(0, at - last.end)))
+    late = -sl.hours_to_sleep(s.sleep, at, p.sleep, tz, p.shift_minutes) >= p.late_hours
+    return (*s.nights, Night(start=at, late=late))[-NIGHTS_KEPT:]
+
+
+def _night_ends(nights: tuple[Night, ...], at: int) -> tuple[Night, ...]:
+    """Elle se réveille : sa nuit s'arrête là — pour de bon, ou le temps d'un message (elle la reprendra en se
+    rendormant cette nuit-ci)."""
+    if not nights or nights[-1].end:
+        return nights
+    return (*nights[:-1], replace(nights[-1], end=at))
+
+
 @BODY.reducer(c.FELL_ASLEEP)
 def _fell_asleep(s: BodyState, e, cx) -> BodyState:
     if s.sleep.asleep:
         return s
-    return replace(s, sleep=sl.fall_asleep(s.sleep, e.data.at, params(cx.params).sleep, cx.tz))
+    p = params(cx.params)
+    return replace(s, sleep=sl.fall_asleep(s.sleep, e.data.at, p.sleep, cx.tz),
+                   nights=_night_begins(s, e.data.at, p, cx.tz))
 
 
 @BODY.reducer(c.WOKE)
 def _woke(s: BodyState, e, cx) -> BodyState:
     if not s.sleep.asleep:
         return s
-    return replace(s, sleep=sl.wake(s.sleep, e.data.at, params(cx.params).sleep, cx.tz))
+    return replace(s, sleep=sl.wake(s.sleep, e.data.at, params(cx.params).sleep, cx.tz),
+                   nights=_night_ends(s.nights, e.data.at))
 
 
 @BODY.reducer(c.ROUSED)
 def _roused(s: BodyState, e, cx) -> BodyState:
-    """Un message l'a tirée du sommeil : elle émerge pour lui répondre."""
+    """Un message l'a tirée du sommeil : elle émerge pour lui répondre — et sa nuit garde qui l'a réveillée."""
     current = s.sleep
+    nights = s.nights
     if current.asleep:
         current = sl.wake(current, e.at, params(cx.params).sleep, cx.tz, by_message=True)
+        nights = _night_ends(nights, e.at)
+        if nights:
+            d = e.data
+            last = nights[-1]
+            rousing = c.Rousing(at=e.at, handle=d.handle, person=d.person, reason=d.reason)
+            nights = (*nights[:-1], replace(last, rousings=(*last.rousings, rousing)[-ROUSINGS_MAX:]))
     return replace(s, sleep=replace(current, active_at=e.at), roused_by=e.data.message,
-                   roused_handle=e.data.handle)
+                   roused_handle=e.data.handle, nights=nights)
 
 
 @BODY.reducer(c.WAITED)
@@ -284,7 +354,7 @@ def _uttered(s: BodyState, e, cx) -> BodyState:
     current = s.sleep
     if current.asleep:
         current = sl.wake(current, e.at, params(cx.params).sleep, cx.tz, by_message=True)
-        s = replace(s, roused_by=0, roused_handle="")
+        s = replace(s, roused_by=0, roused_handle="", nights=_night_ends(s.nights, e.at))
     answered = d.target if d.target and d.reply_to is not None else None
     waiting = tuple(w for w in s.waiting if w.handle != answered) if answered else s.waiting
     return replace(s, sleep=replace(current, active_at=e.at), waiting=waiting)
@@ -372,6 +442,31 @@ def _reply_wait(s: BodyState, cx, message: int) -> int | None:
     if night_waking(s, cx.now, p, cx.tz) and w.handle != s.roused_handle:
         return 0  # tirée du sommeil par quelqu'un d'autre : elle ne répond qu'à lui
     return max(w.at, s.sleep.since)
+
+
+def _slept(n: Night) -> int:
+    """Ce qu'elle a vraiment dormi cette nuit-là : sans les moments où un message l'a tenue éveillée."""
+    return max(0, n.end - n.start - n.awake_us)
+
+
+def last_night(s: BodyState, now: int, p: BodyParams, tz: Any) -> c.NightReading | None:
+    """Sa dernière nuit, une fois finie, jusqu'au milieu de sa journée (``NIGHT_TOLD_US`` après son réveil). Courte
+    contre la médiane de ses nuits d'avant (dès qu'elle en a ``USUAL_FROM``), sinon contre une nuit ordinaire."""
+    if not s.nights or in_her_night(s, now, p, tz):
+        return None
+    last = s.nights[-1]
+    if not last.end or now - last.end >= NIGHT_TOLD_US:
+        return None
+    slept = _slept(last)
+    before = [_slept(n) for n in s.nights[:-1] if n.end]
+    usual = statistics.median(before) if len(before) >= USUAL_FROM else p.usual_night_hours * HOUR
+    return c.NightReading(start=last.start, end=last.end, duration_us=slept, rousings=last.rousings,
+                          short=slept < p.short_night_ratio * usual, broken=bool(last.rousings), late=last.late)
+
+
+@BODY.fact(c.LAST_NIGHT)
+def _last_night(s: BodyState, cx) -> c.NightReading | None:
+    return last_night(s, cx.now, params(cx.params), cx.tz)
 
 
 # ── Endormissement et réveil ──────────────────────────────────────────────
@@ -525,13 +620,60 @@ def _woke_line(s: BodyState, frame: Frame) -> str:
     return ""
 
 
+#: éveillée au moins autant au milieu de sa nuit avant de se rendormir, elle a mis du temps à retrouver le sommeil
+LONG_AWAKE_US = 45 * MINUTE
+
+
+def _around(at: int, frame: Frame) -> str:
+    """« vers 3 h » : l'heure ronde la plus proche, comme on la dit au réveil."""
+    dt = frame.local(at)
+    hour = (dt.hour + (dt.minute >= 30)) % 24
+    return "vers minuit" if hour == 0 else f"vers {hour} h"
+
+
+def _night_line(s: BodyState, frame: Frame) -> str:
+    """Comment s'est passée sa nuit, dit comme un ressenti, du réveil jusqu'au milieu de sa journée : à « bien
+    dormi ? », elle répond vrai. « Son message » seulement à qui l'a réveillée, en tête-à-tête ; à toute autre
+    personne, « un message » — jamais le nom d'un tiers. Juste tirée du sommeil, la ligne du réveil le dit déjà."""
+    ep = frame.episode
+    if ep is None or ep.kind not in CONVERSATIONAL:
+        return ""
+    if s.sleep.woken_by_message and frame.now - s.sleep.since < WAKING_WINDOW_US:
+        return ""
+    reading: c.NightReading | None = frame.get(c.LAST_NIGHT)
+    if reading is None:
+        return ""
+    private = frame.audience is not None and not frame.audience.public
+    person = frame.get(identity_c.PERSON(ep.target)) if private and ep.target and is_identifiable(ep.target) else ""
+
+    def theirs(r: c.Rousing) -> bool:
+        return private and bool(ep.target) and (r.handle == ep.target or bool(person) and r.person == person)
+
+    parts = []
+    if len(reading.rousings) == 1:
+        r = reading.rousings[0]
+        who = "son message" if theirs(r) else "un réveil par API" if r.reason == c.CALL else "un message"
+        parts.append(f"Cette nuit, {who} t'a tirée du sommeil {_around(r.at, frame)}")
+    elif reading.rousings:
+        mine = next((r for r in reading.rousings if theirs(r)), None)
+        parts.append("Cette nuit, tu as été tirée du sommeil plusieurs fois"
+                     + (f", dont par son message {_around(mine.at, frame)}" if mine is not None else ""))
+    if parts and reading.end - reading.start - reading.duration_us >= LONG_AWAKE_US:
+        parts[-1] += ", et tu as mis du temps à te rendormir"
+    if reading.late:
+        parts.append("Tu as veillé tard à parler" + (", et ta nuit a été un peu courte" if reading.short else ""))
+    elif reading.short:
+        parts.append("Ta nuit a été un peu courte")
+    return ". ".join(parts) + "." if parts else "Tu as bien dormi cette nuit."
+
+
 @BODY.section("rhythm", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.STEP, Kind.WORK, Kind.WAKE],
               trim_rank=40, title=phrase("body.rhythm.title"))
 def _rhythm_section(s: BodyState, frame: Frame, enrich: Any) -> str:
     profile = frame.get(c.RHYTHM)
     text = circadian.describe(frame.local(), profile, frame.get(c.ENERGY))
-    line = _woke_line(s, frame)
-    return f"{text} {line}" if line else text
+    lines = [line for line in (_woke_line(s, frame), _night_line(s, frame)) if line]
+    return " ".join((text, *lines))
 
 
 #: le brouillard de la fatigue : sous tant d'énergie, sa phrase (``body.fog.…`` dans sa voix)
