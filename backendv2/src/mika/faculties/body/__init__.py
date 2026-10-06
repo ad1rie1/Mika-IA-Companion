@@ -628,7 +628,7 @@ def _around(at: int, frame: Frame) -> str:
     """« vers 3 h » : l'heure ronde la plus proche, comme on la dit au réveil."""
     dt = frame.local(at)
     hour = (dt.hour + (dt.minute >= 30)) % 24
-    return "vers minuit" if hour == 0 else f"vers {hour} h"
+    return phrase("body.rhythm.night.midnight") if hour == 0 else phrase("body.rhythm.night.around", hour=hour)
 
 
 def _night_line(s: BodyState, frame: Frame) -> str:
@@ -652,19 +652,21 @@ def _night_line(s: BodyState, frame: Frame) -> str:
     parts = []
     if len(reading.rousings) == 1:
         r = reading.rousings[0]
-        who = "son message" if theirs(r) else "un réveil par API" if r.reason == c.CALL else "un message"
-        parts.append(f"Cette nuit, {who} t'a tirée du sommeil {_around(r.at, frame)}")
+        who = phrase("body.rhythm.night.by_their_message") if theirs(r) else \
+            phrase("body.rhythm.night.by_api") if r.reason == c.CALL else phrase("body.rhythm.night.by_a_message")
+        parts.append(phrase("body.rhythm.night.roused_once", who=who, when=_around(r.at, frame)))
     elif reading.rousings:
         mine = next((r for r in reading.rousings if theirs(r)), None)
-        parts.append("Cette nuit, tu as été tirée du sommeil plusieurs fois"
-                     + (f", dont par son message {_around(mine.at, frame)}" if mine is not None else ""))
+        parts.append(phrase("body.rhythm.night.roused_many") if mine is None else
+                     phrase("body.rhythm.night.roused_many_theirs", when=_around(mine.at, frame)))
     if parts and reading.end - reading.start - reading.duration_us >= LONG_AWAKE_US:
-        parts[-1] += ", et tu as mis du temps à te rendormir"
+        parts[-1] += ", " + phrase("body.rhythm.night.slow_to_sleep")
     if reading.late:
-        parts.append("Tu as veillé tard à parler" + (", et ta nuit a été un peu courte" if reading.short else ""))
+        parts.append(phrase("body.rhythm.night.late_and_short") if reading.short else
+                     phrase("body.rhythm.night.late"))
     elif reading.short:
-        parts.append("Ta nuit a été un peu courte")
-    return ". ".join(parts) + "." if parts else "Tu as bien dormi cette nuit."
+        parts.append(phrase("body.rhythm.night.short"))
+    return ". ".join(parts) + "." if parts else phrase("body.rhythm.night.slept_well")
 
 
 @BODY.section("rhythm", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.STEP, Kind.WORK, Kind.WAKE],

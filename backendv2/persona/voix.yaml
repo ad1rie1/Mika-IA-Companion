@@ -766,6 +766,29 @@ body:
     # {n} : le nombre de minutes
     minute: "{n} minute"
     minutes: "{n} minutes"
+    # sa dernière nuit, du réveil jusqu'au milieu de sa journée (body, _night_line) : à « bien dormi ? », elle répond
+    # vrai. Les morceaux se suivent séparés par un point (le code ajoute « . » et, pour slow_to_sleep, « , »).
+    night:
+      # {hour} : l'heure ronde la plus proche (1 à 23) ; minuit a sa phrase
+      around: "vers {hour} h"
+      midnight: "vers minuit"
+      # tirée du sommeil une fois. {who} : by_their_message (à qui l'a réveillée, en tête-à-tête), by_api ou
+      # by_a_message (jamais le nom d'un tiers) ; {when} : around ou midnight
+      roused_once: "Cette nuit, {who} t'a tirée du sommeil {when}"
+      by_their_message: "son message"
+      by_api: "un réveil par API"
+      by_a_message: "un message"
+      # tirée du sommeil plusieurs fois ; _theirs : dont une fois par la personne à qui elle parle. {when} : around
+      roused_many: "Cette nuit, tu as été tirée du sommeil plusieurs fois"
+      roused_many_theirs: "Cette nuit, tu as été tirée du sommeil plusieurs fois, dont par son message {when}"
+      # ajouté au morceau d'avant quand elle est restée longtemps éveillée avant de se rendormir
+      slow_to_sleep: "et tu as mis du temps à te rendormir"
+      # endormie bien après son seuil (une conversation l'a tenue éveillée) ; _and_short : et la nuit a été courte
+      late: "Tu as veillé tard à parler"
+      late_and_short: "Tu as veillé tard à parler, et ta nuit a été un peu courte"
+      short: "Ta nuit a été un peu courte"
+      # rien de tout cela
+      slept_well: "Tu as bien dormi cette nuit."
 
   # ── Le brouillard de la fatigue ─────────────────────────────────────────────────────────────────────────────
   # « ÉTAT COGNITIF » : dans son prompt quand son énergie est basse (body, _fog) — sous 0,12 (falling_asleep), sous
