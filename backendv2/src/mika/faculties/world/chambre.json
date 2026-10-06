@@ -25,7 +25,8 @@
      "salience": 0.7,
      "affordances": [
        {"id": "travailler", "label": "travailler", "effect": "activity", "activity": "work", "duration_s": null},
-       {"id": "dessiner", "label": "dessiner", "effect": "activity", "activity": "draw", "duration_s": null}
+       {"id": "dessiner", "label": "dessiner", "effect": "activity", "activity": "draw", "duration_s": null,
+        "nourishes": ["expression"]}
      ]},
     {"id": "chair", "label": "chaise de bureau", "asset": "furniture/desk_chair", "size": "fixed", "salience": 0.1},
     {"id": "bed_frame", "label": "lit", "asset": "furniture/bed", "size": "fixed", "salience": 0.4},
@@ -44,7 +45,7 @@
      "surface_slots": 6, "salience": 0.6,
      "affordances": [
        {"id": "bouquiner", "label": "feuilleter un livre", "effect": "activity", "activity": "browse_books",
-        "duration_s": 300.0}
+        "duration_s": 300.0, "nourishes": ["curiosity"]}
      ]},
     {"id": "potted_plant", "label": "plante", "asset": "props/potted_plant", "size": "fixed", "salience": 0.5,
      "affordances": [
@@ -59,7 +60,7 @@
        {"id": "fermer", "label": "fermer", "effect": "state", "requires_state": ["open"], "to_state": "closed",
         "duration_s": 2.0},
        {"id": "regarder_dehors", "label": "regarder dehors", "effect": "activity", "activity": "look_outside",
-        "duration_s": 120.0}
+        "duration_s": 120.0, "nourishes": ["curiosity"]}
      ]},
     {"id": "door", "label": "porte", "asset": "fixtures/door", "size": "fixed",
      "states": ["closed", "open"], "initial_state": "closed", "state_labels": {"closed": "fermée", "open": "ouverte"},

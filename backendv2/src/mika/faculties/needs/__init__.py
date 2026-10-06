@@ -22,6 +22,12 @@ pas : au retour, ses besoins reprennent où elle les avait laissés.
 projet dans son mode à elle, il n'y a pas de vide, et ce qu'elle y fait
 comble un peu l'envie de s'exprimer.
 
+**Ce qu'elle fait de ses mains la nourrit** : une occupation dans sa chambre
+qui nourrit un besoin (le monde le déclare, ``nourishes`` — jamais un nom
+d'activité écrit ici) l'occupe tant qu'elle dure, et sa fin comble un peu ce
+besoin, au prorata du temps passé : une heure de dessin apaise l'envie de
+s'exprimer, deux minutes à la fenêtre la curiosité à peine.
+
 **Retrouver quelqu'un** : après un vide ressenti, le premier message d'une
 amie ou d'une proche lui fait du bien (``needs.reunited``) — une inconnue n'y
 change rien de tel.
@@ -56,6 +62,7 @@ from mika.contracts import needs as c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
+from mika.contracts import world as w
 from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
 from mika.kernel.builtin import BOOT
 from mika.kernel.clock import DAY, HOUR, MINUTE, local
@@ -140,6 +147,19 @@ class NeedsParams(BaseModel):
     explored_curiosity: Annotated[float, Knob(
         label="Exploration aboutie → curiosité", group="Ce qui comble", lo=0, hi=1, step=0.05,
         help="Mener une exploration à bout (but atteint) multiplie sa curiosité par ce facteur.")] = 0.4
+    occupied_expression: Annotated[float, Knob(
+        label="S'occuper → expression", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="Une occupation dans sa chambre qui nourrit l'envie de s'exprimer (dessiner), menée au moins le temps "
+             "ci-dessous, multiplie ce besoin par ce facteur quand elle s'arrête ; plus courte, au prorata du temps "
+             "passé.")] = 0.6
+    occupied_curiosity: Annotated[float, Knob(
+        label="S'occuper → curiosité", group="Ce qui comble", lo=0, hi=1, step=0.05,
+        help="La même chose pour une occupation qui nourrit sa curiosité (feuilleter un livre, regarder dehors) : "
+             "deux minutes à la fenêtre ne la comblent presque pas.")] = 0.8
+    occupied_full_us: Annotated[int, Knob(
+        label="Une occupation comble tout ce qu'elle peut après", group="Ce qui comble", lo=5 * MINUTE, hi=8 * HOUR,
+        help="Le temps passé à une occupation au-delà duquel elle comble pleinement (les deux facteurs ci-dessus) ; "
+             "en deçà, au prorata.")] = HOUR
     # preuves d'initiative (log-odds) : de rien au seuil à tout à ``full``
     social_floor: Annotated[float, Knob(
         label="Envie de compagnie à partir de", group="Envie de prendre la parole", lo=0, hi=1, step=0.05,
@@ -255,6 +275,17 @@ class Told:
     importance: float = 0.5
 
 
+@dataclass(frozen=True, slots=True)
+class Occupation:
+    """Ce qu'elle fait dans sa chambre et qui nourrit un besoin, tel que le monde l'a enregistré quand elle s'y est
+    mise : l'activité, son début, sa fin prévue (``None`` : jusqu'à ce qu'elle s'arrête) et ce qu'elle nourrit."""
+
+    name: str
+    since: int
+    until: int | None = None
+    nourishes: tuple[str, ...] = ()
+
+
 #: au plus tant de choses faites gardées comme matière
 DONE_KEPT = 6
 #: au plus tant de choses racontées gardées par personne (les plus importantes)
@@ -263,6 +294,9 @@ TOLD_KEPT = 4
 USED_KEPT = 64
 #: une séance de travail plus vieille que ça n'occupe plus (un épisode interrompu sans règlement)
 WORK_STALE = HOUR
+#: une occupation sans fin prévue plus vieille que ça ne l'occupe plus (le monde l'arrête bien avant : son réglage
+#: ne la laisse pas dépasser huit heures)
+OCCUPATION_STALE = 8 * HOUR
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,13 +317,19 @@ class NeedsState:
     felt_level: float = 0.0
     #: les matières déjà dites dans une initiative (référence → quand) : elles ne resservent pas
     used: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: ce qu'elle fait de ses mains et qui la nourrit (dessiner, feuilleter un livre) : ça l'occupe, pas de vide
+    occupied: Occupation | None = None
+    #: la dernière occupation qui l'a nourrie, ``until`` à sa fin réelle (la console date le soulagement)
+    nourished: Occupation | None = None
 
 
 #: v3 : ce qu'on lui a raconté se classe par importance (plusieurs par personne), les matières déjà dites, qui lui
 #: a parlé en dernier et le vide ressenti (retrouver quelqu'un) ; une rêverie n'est plus une matière.
 #: v4 : la compagnie qui comble dépend de qui la donne (une règle, pas une forme : reconstruite depuis la genèse)
+#: v5 : ce qu'elle fait de ses mains dans sa chambre l'occupe et la nourrit (les occupations du monde, réduites
+#: désormais : reconstruite depuis la genèse)
 NEEDS = Faculty("needs", state=NeedsState, init=lambda p: NeedsState(), params=NeedsParams, derive=derive,
-                state_version=4)
+                state_version=5)
 NEEDS.declare(*c.ALL)
 
 #: les séances où elle travaille dans son mode à elle (une exécution impersonnelle n'est pas elle)
@@ -518,6 +558,83 @@ def busy(s: NeedsState, now: int) -> bool:
     return any(now - t < WORK_STALE for t in s.working.values())
 
 
+# ── Ce qu'elle fait de ses mains ──────────────────────────────────────────
+
+
+def occupation_end(o: Occupation) -> int:
+    """Quand une occupation s'arrête au plus tard : sa fin prévue, sinon ``OCCUPATION_STALE`` après son début."""
+    return o.until if o.until is not None else o.since + OCCUPATION_STALE
+
+
+def occupied(s: NeedsState, now: int) -> bool:
+    """Elle est à une occupation qui la nourrit (dessiner, feuilleter un livre), pas encore finie."""
+    return s.occupied is not None and now < occupation_end(s.occupied)
+
+
+def idle_from(s: NeedsState) -> int:
+    """Depuis quand rien ne l'occupe : la dernière chose qui s'est passée, ou la fin de son occupation (la fin
+    prévue, tant qu'elle dure)."""
+    if s.occupied is None:
+        return s.idle_since
+    return max(s.idle_since, occupation_end(s.occupied))
+
+
+def _stop(s: NeedsState, t: int, p: NeedsParams) -> NeedsState:
+    """Son occupation s'arrête — à ``t``, ou à sa fin prévue si elle est déjà passée : elle comble ce qu'elle
+    nourrit, au prorata du temps passé (pleinement au bout de ``occupied_full_us``) ; rien ne l'occupe plus depuis
+    sa fin."""
+    o = s.occupied
+    if o is None:
+        return s
+    end = max(o.since, min(t, occupation_end(o)))
+    share = min(1.0, (end - o.since) / max(1, p.occupied_full_us))
+    s = _touch(s, t, p)
+    for kind, factor in ((c.EXPRESSION, p.occupied_expression), (c.CURIOSITY, p.occupied_curiosity)):
+        if kind in o.nourishes:
+            s = _relieve(s, kind, _shared(factor, share), t, p)
+    return replace(s, occupied=None, nourished=replace(o, until=end), idle_since=max(s.idle_since, end))
+
+
+def _occupy(s: NeedsState, a: w.Activity | None, t: int, p: NeedsParams) -> NeedsState:
+    """Ce qu'elle fait de ses mains change : ce qu'elle faisait s'arrête, et une occupation qui nourrit un besoin
+    commence — seule la déclaration du monde (``nourishes``) en fait foi, jamais le nom d'une activité."""
+    o = s.occupied
+    if a is not None and o is not None and (a.name, a.since) == (o.name, o.since):
+        return s  # la même, redite
+    s = _stop(s, t, p)
+    if a is None or not a.nourishes:
+        return s
+    o = Occupation(a.name, a.since, a.until, tuple(str(k) for k in a.nourishes))
+    return replace(_touch(s, t, p), occupied=o, idle_since=t)
+
+
+@NEEDS.reducer(w.ENDED, w.CHANGED)
+def _occupation(s: NeedsState, e, cx) -> NeedsState:
+    """Ce que le monde dit de son occupation (une action qui aboutit, un constat, la lassitude qui l'arrête) :
+    elle s'y met, en change ou s'arrête."""
+    p = params(cx.params)
+    for change in e.data.changes:
+        if isinstance(change, w.ActorBusy) and change.actor == w.MIKA:
+            s = _occupy(s, change.activity, e.at, p)
+    return s
+
+
+@NEEDS.reducer(w.INTENDED)
+def _torn_away(s: NeedsState, e, cx) -> NeedsState:
+    """Une action qu'elle commence l'arrache à ce qu'elle faisait (la règle du monde) : son occupation s'arrête là."""
+    if e.data.intent.actor != w.MIKA or s.occupied is None:
+        return s
+    return _stop(s, e.at, params(cx.params))
+
+
+@NEEDS.reducer(body_c.FELL_ASLEEP)
+def _fell_asleep(s: NeedsState, e, cx) -> NeedsState:
+    """Elle s'endort : elle va se coucher, et ce qu'elle faisait s'arrête."""
+    if s.occupied is None:
+        return s
+    return _stop(s, e.at, params(cx.params))
+
+
 # ── De quoi parler ────────────────────────────────────────────────────────
 
 #: les pensées qui se partagent avec n'importe qui (anodines, sur personne) : un titre lu, un but où elle
@@ -664,17 +781,18 @@ def _matterless(s: NeedsState, frame: Frame, row: RowView) -> Modulation:
 def emptiness(s: NeedsState, now: int, p: NeedsParams) -> float:
     """Ce que pèse le vide maintenant : un peu au début, davantage avec chaque
     heure qui passe, jamais plus que le plafond."""
-    beyond = max(0.0, (now - s.idle_since - p.idle_before_empty_us) / HOUR) if s.idle_since else 0.0
+    beyond = max(0.0, (now - idle_from(s) - p.idle_before_empty_us) / HOUR) if s.idle_since else 0.0
     return round(min(p.empty_max, p.empty_intensity + p.empty_growth_per_h * beyond), 3)
 
 
 @NEEDS.process("needs.empty", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_STARTED, rt.EPISODE_ENDED,
-                                       c.FELT, *body_c.ALL],
+                                       c.FELT, *body_c.ALL, w.INTENDED, w.ENDED, w.CHANGED],
                lane="background", catch_up=CatchUp.SKIP, max_quantum_s=3600)
 class Empty:
     """Deux heures sans rien : un vide ressenti toutes les vingt minutes tant
     qu'il dure (un état tenu, pas une dent de scie), qui se creuse avec la
-    durée. Travailler l'occupe : pas de vide pendant une séance."""
+    durée. Travailler l'occupe : pas de vide pendant une séance ; ce qu'elle
+    fait de ses mains aussi, jusqu'à ce qu'elle s'arrête."""
 
     def next_due(self, state: NeedsState, frame: Frame, last_run: int | None) -> int | None:
         if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE or not state.idle_since:
@@ -682,7 +800,8 @@ class Empty:
         if busy(state, frame.now):
             return None  # elle travaille : la fin de la séance la réveillera
         p = params(frame.env.params_of("needs", frame.root))
-        return max(state.idle_since + p.idle_before_empty_us, state.felt_at + p.empty_every_us)
+        # une occupation sans fin prévue repousse l'échéance loin : le monde qui l'arrête la réveillera
+        return max(idle_from(state) + p.idle_before_empty_us, state.felt_at + p.empty_every_us)
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame
@@ -690,7 +809,7 @@ class Empty:
         if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE or busy(state, frame.now):
             return
         p = params(frame.env.params_of("needs", frame.root))
-        if frame.now - state.idle_since < p.idle_before_empty_us:
+        if frame.now - idle_from(state) < p.idle_before_empty_us:
             return
         r = frame.get(c.NEEDS)
         feeling = c.LONELY if r.social >= p.lonely_from else c.BORED
