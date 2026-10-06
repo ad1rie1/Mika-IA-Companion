@@ -1,5 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Threading.Tasks;
 using Mika.Net;
 using Mika.World.Model;
 
@@ -20,12 +24,30 @@ namespace Mika.Chat
             b.Path = b.Path.TrimEnd('/') + "/ws";
             return b.Uri;
         }
+
+        /// <summary>L'adresse HTTP d'une route sous ce serveur (<c>/files/&lt;id&gt;</c>).</summary>
+        public Uri HttpUri(string route)
+        {
+            var b = new UriBuilder(BaseUrl.TrimEnd('/'));
+            b.Path = b.Path.TrimEnd('/') + route;
+            return b.Uri;
+        }
+    }
+
+    /// <summary>Le sort d'un téléchargement : le fichier sur ce poste, ou pourquoi il n'y est pas (en mots).</summary>
+    public sealed class SharedFileDownload
+    {
+        public string LocalPath;
+        public string Error;
+
+        public bool Ok => LocalPath != null;
     }
 
     /// <summary>
     /// La conversation avec elle (<c>/ws</c>) vue d'un client natif : envoyer un message, recevoir ses paroles,
     /// la dérive de son visage, son état intérieur, et rattraper ce qui a été manqué (curseur sur l'identifiant
-    /// du dernier message montré). Comme <see cref="WorldSession"/> : sans Unity, vidée par <see cref="Tick"/>.
+    /// du dernier message montré) ; télécharger les fichiers qu'elle envoie. Comme <see cref="WorldSession"/> : sans
+    /// Unity, vidée par <see cref="Tick"/>.
     /// </summary>
     public sealed class ChatSession : IDisposable
     {
@@ -41,6 +63,14 @@ namespace Mika.Chat
         // Les refus décidés ici (connexion refusée, file pleine) : rendus par Tick comme un accusé du serveur,
         // jamais pendant Send — l'appelant n'a pas encore l'identifiant qu'il devra reconnaître.
         readonly Queue<AckFrame> _localAcks = new Queue<AckFrame>();
+        // Les fichiers qu'elle envoie (10 Mio au plus) : sans redirection suivie, le jeton ne part que vers son serveur.
+        readonly HttpClient _http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+        {
+            Timeout = TimeSpan.FromSeconds(60),
+        };
+        // Un téléchargement par fichier à la fois (la vignette et « Ouvrir » partagent le même) ; lu et écrit depuis
+        // le fil principal seulement.
+        readonly Dictionary<string, Task<SharedFileDownload>> _downloads = new Dictionary<string, Task<SharedFileDownload>>();
         long _counter;
         double _now, _lastReceived, _lastPing, _retryAt, _backoff = 1;
 
@@ -210,6 +240,82 @@ namespace Mika.Chat
             }
         }
 
+        /// <summary>
+        /// Télécharge un fichier qu'elle a envoyé (<c>GET /files/&lt;id&gt;</c>, avec le jeton du compte) dans
+        /// <paramref name="folder"/>, sous <c>&lt;id&gt;-&lt;nom&gt;</c> ; une copie déjà faite est reprise telle quelle. À
+        /// appeler du fil principal. Un refus du serveur (404, 410, 429…) ou une coupure se dit en mots
+        /// (<see cref="SharedFileDownload.Error"/>), jamais par une exception.
+        /// </summary>
+        public Task<SharedFileDownload> DownloadAsync(SharedFile file, string folder)
+        {
+            var route = file?.Route;
+            if (route == null)
+                return Task.FromResult(new SharedFileDownload { Error = "ce fichier ne vient pas de Mika" });
+            if (!file.Available)
+                return Task.FromResult(new SharedFileDownload { Error = "plus disponible" });
+            var id = file.Id.ToLowerInvariant();
+            if (_downloads.TryGetValue(id, out var running) && !running.IsCompleted)
+                return running;
+            var task = Fetch(route, Path.Combine(folder, id + "-" + file.LocalName));
+            _downloads[id] = task;
+            return task;
+        }
+
+        async Task<SharedFileDownload> Fetch(string route, string target)
+        {
+            if (File.Exists(target) && new FileInfo(target).Length > 0)
+                return new SharedFileDownload { LocalPath = target };
+            // Un nom à part pendant l'écriture : un fichier tronqué ne passe jamais pour complet.
+            var part = target + ".part";
+            try
+            {
+                using (var request = new HttpRequestMessage(HttpMethod.Get, Options.HttpUri(route)))
+                {
+                    if (!string.IsNullOrEmpty(Options.Token))
+                        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", Options.Token);
+                    using (var response = await _http.SendAsync(request).ConfigureAwait(false))
+                    {
+                        if (!response.IsSuccessStatusCode)
+                            return new SharedFileDownload { Error = HttpError((int)response.StatusCode) };
+                        var bytes = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                        Directory.CreateDirectory(Path.GetDirectoryName(target));
+                        File.WriteAllBytes(part, bytes);
+                    }
+                }
+                if (File.Exists(target)) File.Delete(target);
+                File.Move(part, target);
+                return new SharedFileDownload { LocalPath = target };
+            }
+            catch (HttpRequestException)
+            {
+                return new SharedFileDownload { Error = "serveur injoignable" };
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return new SharedFileDownload { Error = "impossible de l'écrire sur ce poste" };
+            }
+            catch (Exception e) when (e is IOException || e is OperationCanceledException || e is ObjectDisposedException)
+            {
+                // Une coupure, le délai dépassé, ou la session refermée (reconnexion) pendant le téléchargement.
+                return new SharedFileDownload { Error = "téléchargement interrompu" };
+            }
+            finally
+            {
+                if (File.Exists(part)) File.Delete(part);
+            }
+        }
+
+        /// <summary>404 : inconnu ou pas à toi (le serveur ne distingue pas) ; 410 : retiré par la rétention.</summary>
+        static string HttpError(int code) => code switch
+        {
+            401 => "connexion refusée (jeton ?)",
+            404 => "fichier introuvable",
+            410 => "plus disponible",
+            429 => "trop de téléchargements — réessaie dans une minute",
+            _ when code >= 500 => $"erreur du serveur ({code})",
+            _ => $"téléchargement refusé ({code})",
+        };
+
         void Set(LinkState s)
         {
             if (State == s) return;
@@ -217,6 +323,10 @@ namespace Mika.Chat
             StateChanged?.Invoke(s);
         }
 
-        public void Dispose() => _channel.Dispose();
+        public void Dispose()
+        {
+            _channel.Dispose();
+            _http.Dispose();
+        }
     }
 }

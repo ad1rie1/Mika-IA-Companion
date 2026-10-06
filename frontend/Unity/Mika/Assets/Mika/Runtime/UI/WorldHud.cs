@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Mika.Chat;
 using Mika.Net;
@@ -14,8 +15,9 @@ namespace Mika.UI
     /// <summary>
     /// L'interface par-dessus le monde (UI Toolkit, construite en code) : l'état des connexions, ce que l'on vise
     /// et ce qu'on peut en faire, le menu des actions, les refus du noyau, les demandes de Mika, la conversation
-    /// et ses sous-titres, et les réglages de connexion. Elle ne parle jamais au noyau elle-même : elle passe par
-    /// l'interacteur (actions) et par les sessions (conversation, réponses aux demandes).
+    /// (et les fichiers qu'elle y envoie) et ses sous-titres, et les réglages de connexion. Elle ne parle jamais au
+    /// noyau elle-même : elle passe par l'interacteur (actions) et par les sessions (conversation, réponses aux
+    /// demandes).
     /// </summary>
     [RequireComponent(typeof(UIDocument))]
     [AddComponentMenu("Mika/Interface/HUD du monde")]
@@ -51,6 +53,17 @@ namespace Mika.UI
         const string AsleepReason = "asleep";
         // Le plafond du web (TYPING_TIMEOUT_MS) : l'attente entière, file d'attente et fournisseur lent compris.
         const float ThinkingMaxSeconds = 300f;
+
+        // Ce qu'elle envoie se range sur ce poste et s'ouvre avec le système — d'un clic seulement sous une sorte que le
+        // serveur sert comme sûre (app.SAFE_MIMES) : un script (.bat, .js, .py…) s'exécuterait. Le reste montre son dossier.
+        static readonly HashSet<string> OpenableExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".txt", ".md", ".csv", ".json", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf",
+        };
+        /// <summary>Le grand côté d'une vignette (px) : le fil ne fait que 260 px de haut.</summary>
+        const float ThumbnailMax = 120f;
+
+        static string SharedFolder => System.IO.Path.Combine(Application.persistentDataPath, "partages");
 
         /// <summary>Les réglages de connexion ont changé (adresse, jeton, hôte) : l'application se reconnecte.</summary>
         public event Action<string, string, bool> SettingsApplied;
@@ -367,8 +380,9 @@ namespace Mika.UI
             }
             var text = StripCues(s.Text);
             if (s.MessageId is long id && !_shown.Add(id)) return;
-            // Le fil se lit tout de suite ; le sous-titre, lui, attend que sa bouche dise la réplique.
-            AddLine(s.Inner ? $"({text})" : text, mika: true);
+            // Le fil se lit tout de suite ; le sous-titre, lui, attend que sa bouche dise la réplique. Une pensée
+            // n'emporte jamais de fichier.
+            AddLine(s.Inner ? $"({text})" : text, mika: true, files: s.Inner ? null : s.Attachments);
         }
 
         /// <summary>
@@ -389,7 +403,8 @@ namespace Mika.UI
             foreach (var m in h.Messages.Skip(Math.Max(0, h.Messages.Count - 8)))
                 if (_shown.Add(m.Id))
                 {
-                    AddLine(StripCues(m.Text), mika: m.Role == "assistant");
+                    // Ses fichiers réapparaissent avec elle (ceux d'un message de la personne n'ont qu'un nom).
+                    AddLine(StripCues(m.Text), mika: m.Role == "assistant", files: m.Role == "assistant" ? m.Attachments : null);
                     // Sa parole au réveil, arrivée par un rattrapage, rend la note de sommeil caduque. « Réfléchit… »,
                     // lui, attend sa trame : un rattrapage peut précéder la réponse.
                     if (_asleep && m.Role == "assistant") HideWaiting();
@@ -454,15 +469,133 @@ namespace Mika.UI
             _waiting?.AddToClassList("hidden");
         }
 
-        Label AddLine(string text, bool mika)
+        Label AddLine(string text, bool mika, IReadOnlyList<SharedFile> files = null)
         {
             if (_chatLog == null || string.IsNullOrEmpty(text)) return null;
             var line = new Label(mika ? $"Mika : {text}" : text);
             line.AddToClassList("chat-line");
             line.AddToClassList(mika ? "mika" : "me");
-            _chatLog.Add(line);
-            while (_chatLog.childCount > 8) _chatLog.RemoveAt(0);
+            var sent = files?.Where(f => f?.Route != null).ToList();
+            if (sent == null || sent.Count == 0)
+                _chatLog.Add(line);
+            else
+            {
+                // Ses fichiers vont sous sa réplique, dans la même entrée du fil : ils en sortent avec elle.
+                var entry = Add(_chatLog, "chat-entry");
+                entry.Add(line);
+                foreach (var f in sent) AddFile(entry, f);
+            }
+            while (_chatLog.childCount > 8) Forget(_chatLog[0]);
             return line;
+        }
+
+        /// <summary>Une entrée sort du fil (il ne garde que huit lignes) : ses vignettes rendent leur texture.</summary>
+        void Forget(VisualElement entry)
+        {
+            entry.Query<Image>().ForEach(i =>
+            {
+                if (i.image != null) Destroy(i.image);
+            });
+            entry.RemoveFromHierarchy();
+        }
+
+        /// <summary>
+        /// Un fichier qu'elle a envoyé, sous sa réplique : « fichier : courses.md (312 o) » et un bouton — Ouvrir, ou
+        /// Voir le dossier pour ce qui ne s'ouvre pas d'un clic ; une image en vignette (un clic l'ouvre). Retiré par la
+        /// rétention : son nom, et « plus disponible ».
+        /// </summary>
+        void AddFile(VisualElement entry, SharedFile f)
+        {
+            var row = Add(entry, "chat-line");
+            row.AddToClassList("mika");
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.flexWrap = Wrap.Wrap;
+            row.style.alignItems = Align.Center;
+            var what = f.IsImage ? "image" : "fichier";
+            if (!f.Available)
+            {
+                row.AddToClassList("refused");
+                row.Add(new Label($"{what} : {FileName(f)} (plus disponible)"));
+                return;
+            }
+            row.Add(new Label($"{what} : {FileName(f)}{SizeText(f.Size)}"));
+            Button open = null;
+            open = Button(Openable(f.LocalName) ? "Ouvrir" : "Voir le dossier", () => Open(f, open));
+            row.Add(open);
+            // Après l'avoir accrochée au fil : une copie déjà sur le poste se montre tout de suite.
+            if (f.IsImage) ShowThumbnail(f, row, open);
+        }
+
+        /// <summary>
+        /// Télécharge (une fois) puis ouvre avec le système ; ce qui ne s'ouvre pas d'un clic montre son dossier. Un
+        /// refus se dit : introuvable, plus disponible, trop de téléchargements…
+        /// </summary>
+        async void Open(SharedFile f, Button button)
+        {
+            if (_chat == null) return;
+            button.SetEnabled(false);
+            var result = await _chat.DownloadAsync(f, SharedFolder);
+            button.SetEnabled(true);
+            if (!result.Ok)
+            {
+                Toast($"{FileName(f)} : {result.Error}.");
+                return;
+            }
+            if (Openable(result.LocalPath))
+            {
+                Application.OpenURL(new Uri(result.LocalPath).AbsoluteUri);
+                return;
+            }
+            Application.OpenURL(new Uri(System.IO.Path.GetDirectoryName(result.LocalPath)).AbsoluteUri);
+            Toast($"{FileName(f)} ne s'ouvre pas d'un clic : le voici dans son dossier.");
+        }
+
+        /// <summary>
+        /// Une image en vignette bornée sous sa ligne (un clic l'ouvre). Unity ne lit que le PNG et le JPEG : un WebP,
+        /// un GIF ou un téléchargement refusé gardent seulement la ligne et son bouton.
+        /// </summary>
+        async void ShowThumbnail(SharedFile f, VisualElement row, Button open)
+        {
+            if (_chat == null) return;
+            var result = await _chat.DownloadAsync(f, SharedFolder);
+            // L'entrée a pu sortir du fil pendant le téléchargement : pas de texture pour un élément détaché.
+            if (!result.Ok || row.panel == null) return;
+            byte[] bytes;
+            try
+            {
+                bytes = System.IO.File.ReadAllBytes(result.LocalPath);
+            }
+            catch (Exception e) when (e is System.IO.IOException || e is UnauthorizedAccessException)
+            {
+                return;
+            }
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+            if (!texture.LoadImage(bytes, true))
+            {
+                Destroy(texture);
+                return;
+            }
+            var scale = Mathf.Min(1f, ThumbnailMax / Mathf.Max(texture.width, texture.height));
+            var image = new Image { image = texture, scaleMode = ScaleMode.ScaleToFit };
+            image.style.width = texture.width * scale;
+            image.style.height = texture.height * scale;
+            image.style.marginTop = 4f;
+            image.RegisterCallback<ClickEvent>(_ => Open(f, open));
+            row.Add(image);
+        }
+
+        static string FileName(SharedFile f) => string.IsNullOrWhiteSpace(f.Name) ? "fichier" : f.Name;
+
+        static bool Openable(string path) => OpenableExtensions.Contains(System.IO.Path.GetExtension(path) ?? "");
+
+        /// <summary>« (312 o) », « (2 Ko) », « (1,4 Mo) » ; rien sans taille.</summary>
+        static string SizeText(long? size)
+        {
+            if (size == null || size < 0) return "";
+            var b = size.Value;
+            if (b < 1024) return $" ({b.ToString(CultureInfo.InvariantCulture)} o)";
+            if (b < 1024 * 1024) return $" ({Math.Round(b / 1024.0).ToString(CultureInfo.InvariantCulture)} Ko)";
+            return $" ({(b / (1024.0 * 1024.0)).ToString("0.#", CultureInfo.InvariantCulture).Replace('.', ',')} Mo)";
         }
 
         /// <summary>Les repères prosodiques ([SIGH], [PAUSE:300]…) sont pour la voix, pas pour la lecture.</summary>
