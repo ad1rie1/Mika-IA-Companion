@@ -26,6 +26,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import needs as needs_c
 from mika.contracts import place as place_c
 from mika.contracts import self_ as self_c
+from mika.contracts import world as world_c
 from mika.contracts.entry import HistoryRow, SharedMeta
 from mika.kernel.frame import Frame
 from mika.ports.delivery import TOO_LATE, Delivery
@@ -299,6 +300,15 @@ def emotion_update(person_id: str, face: affect_c.Face) -> dict[str, Any]:
     }
 
 
+def activity(doing: world_c.Doing | None) -> dict[str, Any] | None:
+    """Ce qu'elle fait, pour l'écran : le nom (sa table de regards et de mains), le libellé (« regarder dehors »),
+    le début et la fin prévue en millisecondes (``until`` nul : jusqu'à ce qu'elle s'arrête) ; ``None`` : rien."""
+    if doing is None:
+        return None
+    return {"name": doing.name, "label": doing.label, "since": doing.since // 1000,
+            "until": doing.until // 1000 if doing.until is not None else None}
+
+
 def inner_state(frame: Frame, handle: str | None, panel: dict[str, Any] | None = None) -> dict[str, Any]:
     """L'état intérieur que montre le panneau ; ``person_scope`` dit si la
     trame concerne quelqu'un (sinon ses clés personnelles ne disent rien)."""
@@ -311,6 +321,8 @@ def inner_state(frame: Frame, handle: str | None, panel: dict[str, Any] | None =
         "energy": round(energy, 3),
         # où elle est dans sa chambre : un état que le corps rejoint en marchant (place)
         "place": frame.get(place_c.PLACE).value,
+        # ce qu'elle y fait (dessiner, regarder dehors) : le corps s'y absorbe ; nul quand elle ne fait rien
+        "activity": activity(frame.get(world_c.DOING)),
         "circadian": {"phase": phase.value, "hour": local.hour, "energy": round(energy, 3),
                       "bias_emotion": rhythm.tints[phase].value},
         "ruminations": [],
