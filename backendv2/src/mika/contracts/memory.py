@@ -28,7 +28,10 @@ demandé existe une fois : programmé (``goals``), il remplace la promesse
 Un moment dit ce qu'il pèse (``importance`` : ``IMPORTANT_MOMENT`` et plus, il
 compte) et s'il se fête (``festive`` : un anniversaire se souhaite le jour
 même). ``HARD_TIMES`` dit quand quelque chose de grave a touché quelqu'un ces
-derniers jours : le banal de sa vie se tait (ADR 0052).
+derniers jours : le banal de sa vie se tait (ADR 0052). Un moment peut revenir
+**chaque année** (``yearly`` : un anniversaire, la date d'un deuil) : elle s'en
+souvient sans qu'on le lui redise, et le jour d'une date lourde
+(``heavy_date``) est un jour difficile.
 
 Chacune porte sa sensibilité (``vocab.privacy.Sensitivity``), les messages
 d'où elle vient, **qui le lui a confié** (``told_by`` : les auteurs de ces
@@ -72,6 +75,10 @@ REMINDER_BY = "rappel"
 #: opération) : envers une amie, c'est la première chose qu'on demande après. En dessous (un rendez-vous de
 #: routine, une sortie), on peut en reparler si ça vient — et, quand quelque chose de grave la touche, ça se tait.
 IMPORTANT_MOMENT = 0.7
+#: Une date qui revient chaque année sans se fêter, et qui pèse au moins autant (la date d'un deuil), est une **date
+#: lourde** : ce jour-là, chaque année, quelque chose de grave la touche (``HARD_TIMES``) — ni fête, ni « comment ça
+#: s'est passé ? ».
+HEAVY_DATE = 0.9
 
 #: Raison de preuve d'initiative : tenir une promesse datée au moment dit (« je te demanderai jeudi soir comment
 #: ça s'est passé » : jeudi soir, elle le demande). C'est **dû** (``agency.OWED``), jamais une relance.
@@ -198,6 +205,10 @@ class EventNoted(Payload):
     #: un moment qui se fête (un anniversaire, un mariage, une crémaillère) : il se souhaite le jour même, sans
     #: « bonne chance » la veille ni « comment ça s'est passé » le lendemain (faux dans un journal plus ancien)
     festive: bool = False
+    #: une date qui revient chaque année (un anniversaire de naissance, de mariage, la date d'un deuil) : ``when`` est
+    #: l'une de ses occurrences, ``LIFE_EVENTS`` rend la prochaine — sans qu'on la lui redise (faux dans un journal
+    #: plus ancien : un moment n'arrivait qu'une fois)
+    yearly: bool = False
 
 
 class MomentFollowed(Payload):
@@ -292,6 +303,15 @@ class LifeEvent:
     festive: bool = False
     #: une situation finie, de la bouche de la personne : elle n'est plus « en ce moment », ni à redemander
     ended_at: int = 0
+    #: une date qui revient chaque année : ``LIFE_EVENTS`` la rend à sa prochaine occurrence (``when``), et
+    #: ``followed_at`` à 0 tant que cette occurrence-là n'a pas été reprise
+    yearly: bool = False
+
+
+def heavy_date(ev: LifeEvent) -> bool:
+    """Une date lourde : elle revient chaque année, ne se fête pas et pèse au moins ``HEAVY_DATE`` (la date d'un
+    deuil)."""
+    return ev.yearly and not ev.festive and ev.importance >= HEAVY_DATE
 
 
 #: Le dernier message relu par la consolidation.
@@ -304,9 +324,13 @@ PROMISES_TO = FactFamily("memory.promises_to", arg=str, type=tuple)
 #: c'est au lecteur de comparer ``when`` à son instant (« c'était hier : et
 #: alors, cet entretien ? »). Ce qui la concerne seulement : un moment qu'un
 #: tiers a raconté porte ce tiers dans ``told_by``, à respecter avant d'en parler.
+#: Une date qui revient chaque année y est toujours, à sa prochaine occurrence
+#: (ou à celle qui vient de passer, quelques jours) : la seule lecture qui
+#: dépende de l'instant.
 LIFE_EVENTS = FactFamily("memory.life_events", arg=str, type=tuple)
 #: Quelque chose de grave l'a touchée ces derniers jours (un deuil, une rupture, une maladie — ce qu'elle a lu de
-#: grave dans ses messages, ou ce qui l'a elle-même profondément attristée pour elle) : l'instant, 0 sinon. Un
+#: grave dans ses messages, ou ce qui l'a elle-même profondément attristée pour elle) — ou c'est aujourd'hui que
+#: revient une date lourde qu'elle a confiée elle-même (``heavy_date``) : l'instant, 0 sinon. Un
 #: moment banal de sa vie se tait alors (ni « comment s'est passé ton dentiste ? » le lendemain d'un deuil, ni
 #: « bonne chance » pour un rendez-vous de routine) ; ce qui compte passe après des nouvelles d'elle.
 HARD_TIMES = FactFamily("memory.hard_times", arg=str, type=int, time_varying=True)
