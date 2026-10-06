@@ -1,4 +1,9 @@
-import type { ApprovalFrame, PresenceFrame, ServerMessageMap } from "../types";
+import type {
+  ApprovalFrame,
+  ComposingFrame,
+  PresenceFrame,
+  ServerMessageMap,
+} from "../types";
 
 export type MessageHandler = (data: any) => void;
 
@@ -65,6 +70,12 @@ const MAX_FRAME_CHARS = 34 * 1024 * 1024;
  * dans une conversation normale, celle-ci ne mord que sur les pièces jointes.
  */
 const MAX_OUTBOX_CHARS = 48 * 1024 * 1024;
+
+/**
+ * Sans frappe depuis tant, la personne n'écrit plus (trame `composing`) :
+ * la réponse à son message d'avant n'attend pas une suite qui ne vient pas.
+ */
+const COMPOSING_IDLE_MS = 6000;
 
 interface OutboxEntry {
   frame: object;
@@ -144,6 +155,13 @@ export class WebSocketClient {
    * a throwing handler would still advance the cursor and be lost forever.
    */
   private cursorProvider: (() => number) | null = null;
+  /**
+   * La saisie dite au socket ouvert (`composing`), et le délai qui la clôt
+   * faute de frappe. Un socket neuf ne sait rien : la prochaine frappe la
+   * redit.
+   */
+  private composing = false;
+  private composingIdle: number | null = null;
 
   constructor(url: string = "ws://localhost:8001/ws") {
     this.url = url;
@@ -205,6 +223,42 @@ export class WebSocketClient {
     this.sendNow(frame);
   }
 
+  /**
+   * La personne écrit dans le champ du chat (`text` : ce qu'il contient). Le
+   * serveur n'apprend que le début et la fin d'une saisie, jamais une frappe :
+   * un champ non vide l'ouvre (une fois) et relance son délai ; vidé, ou
+   * sans frappe depuis COMPOSING_IDLE_MS, elle se clôt. L'envoi d'un message
+   * la clôt de lui-même (`sendChat`). Tant qu'elle écrit, la réponse à son
+   * message d'avant attend la suite — une seule réponse au tour entier.
+   *
+   * Jamais mise en file : une saisie ne vaut que pour l'instant où elle part.
+   */
+  noteComposing(text: string) {
+    if (!text.trim()) {
+      this.stopComposing(true);
+      return;
+    }
+    if (this.composingIdle !== null) window.clearTimeout(this.composingIdle);
+    this.composingIdle = window.setTimeout(() => this.stopComposing(true), COMPOSING_IDLE_MS);
+    if (this.composing) return;
+    const frame: ComposingFrame = { type: "composing", on: true };
+    this.composing = this.sendNow(frame);
+  }
+
+  /** La saisie se clôt ; `tell` : le dire au serveur (un envoi la clôt de lui-même). */
+  private stopComposing(tell: boolean) {
+    if (this.composingIdle !== null) {
+      window.clearTimeout(this.composingIdle);
+      this.composingIdle = null;
+    }
+    if (!this.composing) return;
+    this.composing = false;
+    if (tell) {
+      const frame: ComposingFrame = { type: "composing", on: false };
+      this.sendNow(frame);
+    }
+  }
+
   /** Reconnect immediately if the socket isn't demonstrably usable. */
   private ensureAlive() {
     if (this.stopped) return;
@@ -251,6 +305,8 @@ export class WebSocketClient {
         this.lastDrainAt = 0;
         // Un ping laissé sur le socket précédent ne dit rien de celui-ci.
         this.pingSentAt = null;
+        // Ni une saisie dite à l'ancien : sa fermeture l'a close côté serveur.
+        this.composing = false;
 
         // Handshake: tell the backend who we are so the greeting and every
         // subsequent turn can be attached to a stable person_id.
@@ -695,6 +751,7 @@ export class WebSocketClient {
    * Returns false when the frame was queued because the socket is down.
    */
   sendChat(message: string, clientMsgId?: string): boolean {
+    this.stopComposing(false); // le message clôt la saisie de lui-même
     return this.send(
       this.withIdentity({ type: "chat", message, client_msg_id: clientMsgId })
     );
@@ -718,6 +775,7 @@ export class WebSocketClient {
     attachments: Array<{ name: string; type: string; data: string }>,
     clientMsgId?: string
   ): boolean {
+    this.stopComposing(false);
     return this.send(
       this.withIdentity({
         type: "chat",

@@ -329,8 +329,12 @@ async function init() {
   // Typing anywhere (outside another field) focuses the chat input, so you
   // can just start writing without clicking the box first.
   const chatInput = document.getElementById("chat-input") as HTMLTextAreaElement | null;
-  // Someone typing to her is someone to listen to: eyes on them.
-  chatInput?.addEventListener("input", () => presenter.noteUserTyping());
+  // Someone typing to her is someone to listen to: eyes on them — and, on
+  // the server, the reply to their previous message waits for the rest.
+  chatInput?.addEventListener("input", () => {
+    presenter.noteUserTyping();
+    ws.noteComposing(chatInput.value);
+  });
   document.addEventListener("keydown", (e) => {
     if (!chatInput) return;
     const target = e.target as HTMLElement;

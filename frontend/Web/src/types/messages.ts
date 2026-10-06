@@ -495,6 +495,18 @@ export interface PresenceFrame {
   here: boolean;
 }
 
+/**
+ * Client → serveur : la personne commence à écrire un message (`true`) ou
+ * cesse (`false` : champ vidé, 6 s sans frappe). L'envoi d'un `chat` clôt la
+ * saisie de lui-même. Le début et la fin d'une saisie, jamais une frappe ;
+ * tant qu'elle écrit, la réponse à son message d'avant attend la suite.
+ * Sans effet sur une connexion anonyme.
+ */
+export interface ComposingFrame {
+  type: "composing";
+  on: boolean;
+}
+
 /** Synthetic local event emitted by WebSocketClient (not from the wire). */
 export interface ConnectionEvent {
   /** "unauthorized" is terminal: the socket was refused (4401) and no
