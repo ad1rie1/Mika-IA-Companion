@@ -465,6 +465,8 @@ expression:
       done: "lui raconter ce que tu as fini {when}"
       working: "lui parler de ce sur quoi tu es en ce moment"
       moment: "lui parler de ce qui se passe dans sa vie"
+      # un rêve d'elle cette nuit : c'est sa nuit à elle, pas ce que la personne lui a raconté
+      dream: "lui raconter ton rêve de cette nuit"
       # {que_name} : « que » suivi de son nom, élidé devant une voyelle (« que « Adrien » », « que cette personne »)
       told: "reprendre ce {que_name} t'avait raconté"
     # aucune raison connue
