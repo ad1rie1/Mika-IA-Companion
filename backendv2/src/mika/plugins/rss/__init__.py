@@ -647,6 +647,31 @@ def _noticed(s: RssState, ctx: InspectContext, feed: str) -> Table:
         caption=f"Elle garde les {KEEP} derniers titres remarqués, du plus récent au plus ancien.")
 
 
+def _person(frame: Frame, key: str) -> Any:
+    """Un lien vers la fiche d'une personne qu'elle connaît ; sinon sa clé."""
+    who = frame.get(identity_c.IDENTITY(key))
+    return Ref.subject("person", key, who.name or key) if who.known else Text(who.name or key, kind="muted")
+
+
+def _thoughts(s: RssState, frame: Frame, ctx: InspectContext, feed: str) -> Table:
+    found = sorted(((k, who, v) for k, by in s.thought_of.items() for who, v in by.items() if _matches(feed, v.feed)),
+                   key=lambda r: (-r[2].seq, r[1]))
+    page, pager = paginate(found, ctx.pager("page_amies", size=PAGE))
+    texts = ctx.store.content([v.summary_ref for _k, _who, v in page if v.summary_ref])
+    return Table(
+        (Column("quand", "fit"), "pensé à", "le titre", Column("pertinence", "fit"), Column("dit", "fit"),
+         Column("journal", "fit")),
+        tuple((When(v.at), _person(frame, who), Text(tokenless(texts.get(v.summary_ref, "(oublié)")), clamp=300),
+               Meter(v.pertinence, f"{v.pertinence:.2f}"),
+               Badge("dit", "ok") if who in s.told.get(k, FrozenDict()) else Badge("pas encore", "muted"),
+               Ref("event", str(v.seq), f"#{v.seq}")) for k, who, v in page),
+        title="Ce qui lui a fait penser à ses amies", pager=pager,
+        empty="aucun titre ne lui a fait penser à une amie" if not feed else "rien de ce flux",
+        caption="Un titre qui touche ce qu'une amie ou une proche lui a dit aimer (sa fiche) : il passe en tête de ses "
+                "flux quand elle lui écrit d'elle-même, en privé — jamais devant une autre. « Dit » : elle le lui a "
+                "montré. Oublier la personne efface sa copie du titre.")
+
+
 @RSS.inspect("flux", title="Flux", section="sens", order=20,
              description="Ses flux : ce qui paraît, ce qui la touche, ce qu'elle laisse passer.",
              params=[Param("flux", "Flux", placeholder="titre d'un flux"),
@@ -680,6 +705,7 @@ def _inspect(s: RssState, frame: Frame, ctx: InspectContext) -> list[Block]:
         blocks.append(Disclosure("État des abonnements", (_followed(port, s, health),), open=bool(broken)))
     blocks.append(Disclosure("Activité et articles remarqués", (_chart(frame, days, window, cut, feed),
                                                                _noticed(s, ctx, feed))))
+    blocks.append(Disclosure("Ce qui lui a fait penser à ses amies", (_thoughts(s, frame, ctx, feed),)))
     blocks.append(Disclosure("Ce qui la touche", (Fields((
         ("titres remarqués (gardés)", len(s.noticed)),
         ("les mots qui la touchent", Text(_clip(", ".join(sorted(words)), 600) or "—")),
