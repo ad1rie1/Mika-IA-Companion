@@ -17,6 +17,7 @@ personne répond, qui écrit la première) — jamais redit dans une faculté.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 from mika.contracts import attention as attention_c
@@ -25,6 +26,7 @@ from mika.contracts import goals as goals_c
 from mika.contracts import imaging as imaging_c
 from mika.contracts import mcp as mcp_c
 from mika.contracts import memory as memory_c
+from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
 from mika.contracts import projects as projects_c
 from mika.contracts import social as social_c
@@ -86,6 +88,21 @@ NOT_SPEAKING_UP = GREETS | OWED
 #: ça n'attend pas que son dernier message ait trouvé sa réponse (``agency``).
 FOR_THEM = others_c.WELL_WISHES | frozenset({others_c.CHECK_IN, others_c.FOLLOW_UP, attention_c.THOUGHT,
                                              goals_c.SHARE, projects_c.SHARE})
+#: Pourquoi elle était en train d'écrire à quelqu'un quand son message est arrivé (« j'allais justement
+#: t'écrire ! ») : la réponse qui suit le sait, en ces mots — le premier motif de la table présent parmi les raisons
+#: de l'initiative. Une raison absente de la table est tue : la ligne dit seulement qu'elle allait lui écrire.
+CROSSED_MOTIVES: Mapping[str, str] = {
+    others_c.FOLLOW_UP: "pour lui demander comment ça s'était passé",
+    others_c.CHECK_IN: "pour prendre de ses nouvelles",
+    others_c.CELEBRATE: "pour lui souhaiter ce qui se fête aujourd'hui",
+    others_c.CHEER: "pour l'encourager",
+    attention_c.THOUGHT: "parce que quelque chose à son sujet te trottait dans la tête",
+    social_c.RECONTACT: "pour prendre de ses nouvelles",
+    social_c.REKINDLE: "pour prendre de ses nouvelles",
+    social_c.COMFORT: "parce que tu avais besoin de lui parler",
+    social_c.CHAT: "pour discuter un peu",
+    needs_c.NEED_SOCIAL: "parce que tu avais envie de lui parler",
+}
 
 #: Après tant d'initiatives restées sans réponse vers quelqu'un, plus rien vers cette personne tant qu'elle n'a pas
 #: écrit (ADR 0033) : elle ne peut plus lui écrire — ce qui lui reste, c'est d'y penser (``attention``).
