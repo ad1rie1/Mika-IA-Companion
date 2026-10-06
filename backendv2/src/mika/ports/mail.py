@@ -331,6 +331,8 @@ class Draft:
     sent_id: str = ""
     #: retouché par un opérateur après qu'elle l'a écrit
     edited_by: str = ""
+    #: sa version, gardée à la première retouche et jamais réécrite (vide : jamais retouché)
+    original_body: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -473,6 +475,11 @@ class MailPort(Protocol):
     def draft(self, draft_id: str) -> Draft | None: ...
 
     def drafts(self, limit: int, *, state: str = "") -> list[Draft]: ...
+
+    def recent_edits(self, account: str, limit: int) -> list[Draft]:
+        """Ses brouillons de ce compte partis après une retouche, le plus récent d'abord :
+        ``original_body`` est sa version, ``body`` ce qui est parti (sans signature ni citation)."""
+        ...
 
     def discard_draft(self, draft_id: str) -> None: ...
 

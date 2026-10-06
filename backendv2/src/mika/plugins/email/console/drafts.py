@@ -2,7 +2,8 @@
 
 Sur la fiche d'un brouillon, **exactement ce qui partira** (l'expéditeur selon
 la voix de la boîte, la signature, la citation) ; tu peux l'envoyer tel quel,
-le retoucher (c'est alors ta version qui part : ce que tu as lu), le refuser
+le retoucher (c'est alors ta version qui part : ce que tu as lu ; la sienne
+reste à côté, et elle apprend ce que tu as changé), le refuser
 (elle l'apprend, avec ta note), ou lui demander de le reprendre. Le texte d'un
 brouillon ne quitte jamais l'adaptateur : le journal n'en garde que
 l'identifiant et un résumé.
@@ -28,6 +29,7 @@ from mika.kernel.inspect import (
     Entry,
     Fields,
     Found,
+    Grid,
     Head,
     InspectContext,
     Note,
@@ -260,8 +262,13 @@ def _tab_history(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
         if d.state in (GONE, FAILED):
             entries.append(Entry(d.decided_at or d.at, "parti" if d.state == GONE else "échec", text=d.result,
                                  tone="ok" if d.state == GONE else "danger"))
-    return [Timeline(tuple(sorted(entries, key=lambda e: e.at)), title="Ce qui lui est arrivé",
-                     empty="rien d'enregistré")]
+    blocks: list[Block] = [Timeline(tuple(sorted(entries, key=lambda e: e.at)), title="Ce qui lui est arrivé",
+                                    empty="rien d'enregistré")]
+    if got is not None and got.original_body and got.original_body != got.body:
+        # ce qu'elle apprend de la retouche (« CE QUE … CHANGE À TES BROUILLONS ») : les deux, côte à côte
+        after = "Ce qui est parti (sans signature ni citation)" if got.state == "envoye" else "La version retouchée"
+        blocks.append(Grid((Prose(got.original_body, title="Sa version"), Prose(got.body, title=after))))
+    return blocks
 
 
 # ── Décider ───────────────────────────────────────────────────────────────
@@ -313,15 +320,18 @@ def _send(s: EmailState, frame: Frame, args: SendArgs, ctx: Any) -> Done:
 
 
 @EMAIL.action("retoucher", title="Retoucher ce brouillon", args=RetouchArgs, emits=[],
-              description="Ta version remplace la sienne ; relis-la, puis envoie-la.")
+              description="Ta version remplace la sienne (gardée à côté : elle apprendra ce que tu as changé) ; "
+                          "relis-la, puis envoie-la.")
 def _retouch(s: EmailState, frame: Frame, args: RetouchArgs, ctx: Any) -> Done:
     _waiting(s, args.draft)
     port = ctx.ports.get("mail")
     got = port.draft(args.draft) if port is not None else None
     if got is None or got.state != "brouillon":
         raise Refused("Ce brouillon n'est plus modifiable.")
+    # sa version est gardée à la première retouche, jamais réécrite : elle apprendra ce qui a changé
     port.save_draft(replace(got, to=args.to, cc=args.cc, subject=args.subject, body=args.body,
-                            quote=args.quote and bool(got.reply_to), edited_by=ctx.by))
+                            quote=args.quote and bool(got.reply_to), edited_by=ctx.by,
+                            original_body=got.original_body or got.body))
     return Done(message="Retouché : relis ce qui partira, puis envoie-le.", go=Ref.subject("brouillon", got.id, ""))
 
 
