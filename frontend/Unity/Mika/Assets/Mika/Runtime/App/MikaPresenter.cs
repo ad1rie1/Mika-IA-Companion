@@ -4,6 +4,7 @@ using Mika.Avatar;
 using Mika.Chat;
 using Mika.Player;
 using Mika.World.Engine;
+using Mika.World.Model;
 using Mika.World.Protocol;
 using UnityEngine;
 
@@ -34,6 +35,11 @@ namespace Mika.App
         /// tremblement du contrôleur.</summary>
         const float ViewerMovedSpeed = 0.5f;
 
+        /// <summary>Quelqu'un entre dans sa pièce : le temps de son coup d'œil vers lui (s), et la hauteur des yeux
+        /// de qui se tient là (m) — le lieu, lui, est au sol.</summary>
+        const float GlanceSeconds = 1.8f;
+        const float GlanceHeight = 1.5f;
+
         /// <summary>Une réplique commence pour de vrai — à sa réception, ou à la fin de celle qu'elle attendait :
         /// le sous-titre la suit.</summary>
         public event System.Action<SpeechFrame> UtteranceStarted;
@@ -57,6 +63,11 @@ namespace Mika.App
         float? _energy;
         // La phase que montrent son visage et ses gestes : « awake » tant qu'elle marche encore vers son lit.
         string _shownPhase;
+        // Le monde dont elle voit les entrées (recréé quand l'application se reconnecte).
+        WorldMirror _mirror;
+        // Quelqu'un vient d'entrer : où elle jette un coup d'œil, et jusqu'à quand (0 : pas de coup d'œil).
+        Vector3 _glanceAt;
+        float _glanceUntil;
 
         void OnEnable()
         {
@@ -66,7 +77,9 @@ namespace Mika.App
             app.MikaMoodDrifted += OnDrift;
             app.InnerStateChanged += OnInnerState;
             app.MessageAcknowledged += OnAck;
+            app.Connected += OnConnected;
             if (app.hud != null) UtteranceStarted += app.hud.ShowSubtitle;
+            OnConnected();
         }
 
         void OnDisable()
@@ -74,12 +87,51 @@ namespace Mika.App
             _pending.Clear();
             _driftAfterQueue = null;
             if (stage != null) stage.GestureShown -= OnGesture;
+            BindMirror(null);
             if (app == null) return;
             app.MikaSpoke -= OnSpeech;
             app.MikaMoodDrifted -= OnDrift;
             app.InnerStateChanged -= OnInnerState;
             app.MessageAcknowledged -= OnAck;
+            app.Connected -= OnConnected;
             if (app.hud != null) UtteranceStarted -= app.hud.ShowSubtitle;
+        }
+
+        void OnConnected() => BindMirror(app != null && app.World != null ? app.World.Mirror : null);
+
+        void BindMirror(WorldMirror mirror)
+        {
+            if (mirror == _mirror) return;
+            if (_mirror != null) _mirror.PresenceChanged -= OnPresence;
+            _mirror = mirror;
+            if (_mirror != null) _mirror.PresenceChanged += OnPresence;
+        }
+
+        /// <summary>
+        /// Quelqu'un entre dans la pièce où elle est : elle lève les yeux vers lui, là où il entre — un réflexe du
+        /// corps, sans appel de modèle (ce qu'elle en pense, le noyau le lui fait remarquer) —, puis son attention
+        /// reprend son cours. Endormie, elle ne voit personne entrer.
+        /// </summary>
+        void OnPresence(Presence p)
+        {
+            if (!p.Joined || p.Actor == mikaActor || _mirror == null || stage == null) return;
+            if (_sleepPhase != null && _sleepPhase != "awake") return;
+            var me = _mirror.Actor(mikaActor);
+            var place = stage.Place(p.Place);
+            if (me == null || me.Room != p.Room || place == null) return;
+            _glanceAt = place.Position + Vector3.up * GlanceHeight;
+            _glanceUntil = Time.time + GlanceSeconds;
+            if (_face != null) _face.LookAt(_glanceAt);
+        }
+
+        /// <summary>Le coup d'œil vers qui vient d'entrer dure encore ; fini, ses yeux reviennent à la joueuse.</summary>
+        bool Glancing()
+        {
+            if (_glanceUntil <= 0) return false;
+            if (Time.time < _glanceUntil) return true;
+            _glanceUntil = 0;
+            if (_face != null && player != null && player.view != null) _face.LookAt(player.view.transform);
+            return false;
         }
 
         /// <summary>Le corps de Mika peut être recréé (une nouvelle définition) : on se relie à celui qui est là.</summary>
@@ -125,6 +177,11 @@ namespace Mika.App
             // Seule et occupée, elle s'absorbe dans ce qu'elle fait ; la joueuse qui se déplace lui fait lever les yeux.
             _face.Occupied = _activity != null && _activity.Activity != null;
             _face.ViewerMoved = player != null && HorizontalSpeed(player.Velocity) > ViewerMovedSpeed;
+            if (Glancing())
+            {
+                _body.LookAt(_glanceAt);
+                return;
+            }
             // La tête suit l'attention : vers la personne quand elle la regarde, devant elle sinon (les yeux, eux,
             // vont où l'attention les mène — MikaFace s'en charge).
             var lookingAtYou = _face.Attention == AttentionState.Contact || _face.Attention == AttentionState.Avert;

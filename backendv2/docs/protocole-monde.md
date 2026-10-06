@@ -161,10 +161,11 @@ répond :
 
 puis, dans cet ordre : `definition` si le client n'a pas la révision `rev` (la définition entière) ;
 `snapshot` si `after` est absent ou trop loin (ou si la définition vient de partir : une autre révision, c'est
-un autre état), sinon les trames manquées depuis `after` ; `host` si le client a demandé le rôle d'hôte ; enfin
-`presence` de la personne qui vient d'entrer (son corps apparaît au lieu `spawn` de la pièce où Mika se trouve,
-ou à défaut au premier lieu `spawn` — P4). `welcome.seq` est le dernier événement qui a changé le monde : un
-client à jour (`after` égal) ne reçoit rien de plus.
+un autre état), sinon les trames manquées depuis `after` ; `host` si le client a demandé le rôle d'hôte ; enfin,
+pour un `viewer`, `presence` de la personne qui vient d'entrer (son corps apparaît debout au lieu `spawn` de la
+pièce où Mika se trouve, ou à défaut au premier lieu `spawn` ; s'il est pris, dans la pièce sans lieu), diffusée
+à tous — rien si elle y était déjà par une autre de ses connexions. `welcome.seq` est le dernier événement qui a
+changé le monde : un client à jour (`after` égal) ne reçoit rien de plus que cette `presence`.
 
 **Les rôles.**
 
@@ -212,7 +213,12 @@ trame déjà en route : un client ignore ce dont le `seq` est déjà appliqué.
 - le bail attend : un opérateur qui demande `host` alors qu'il est pris reçoit `host` `granted: false`, puis
   `granted: true` dès que l'hôte le perd (silence, déconnexion) ; un hôte qui a perdu le bail le reprend par
   son prochain `ping`, s'il est libre ;
-- pas encore : la `presence` de la personne qui entre, et son corps dans le monde (P4).
+- la personne est dans le monde tant qu'une de ses connexions `viewer` y est : elle sort quand la dernière se
+  ferme, ou quand aucune ne dit plus rien depuis 60 s (un `ping` suffit à se manifester), et revient à sa trame
+  suivante (une nouvelle `presence`, au lieu `spawn` : son client redit alors où elle est, par `moved`) ; au
+  démarrage du noyau, qui était resté dans le monde sans connexion en sort ;
+- ses gestes (`address` portant un `gesture`) sont acceptés ; pas encore : ses actes sur les objets et ses
+  demandes (`act`, `address` portant une `request`, `answer` répondent `unsupported`, P4).
 
 **Les erreurs de protocole** (`error`) : `bad_frame` (trame illisible : la phrase nomme le champ, et le `cmd`
 s'il y en a un ; non fatale — fatale si ce n'est pas un objet JSON en texte, fermeture 1003), `hello_expected`
@@ -294,6 +300,12 @@ où il **arrive** :
  "yaw": 3.0, "anim": "walk"}
 ```
 
+Une arrivée est validée comme un constat de l'hôte : une pièce qui existe, un lieu de cette pièce, un passage
+depuis la pièce où elle était (sinon `implausible`) ; une personne qui n'est pas dans le monde reçoit `unknown`.
+Acceptée, elle part à tous en `delta` (`cause.source: player`, un `actor_moved` debout : s'asseoir est une
+action) ; redire là où elle est n'écrit rien. Mika le sait sans qu'on le lui dise : « Adrien est là, à la
+fenêtre » — un lieu par son nom, jamais une position. Quelqu'un qui entre dans sa pièce, elle le remarque.
+
 **Agir sur un objet** — la personne doit être arrivée près de lui (`moved`), et l'objet le lui permettre
 (`access`). Ses actions sont instantanées pour le noyau (son client anime) :
 
@@ -368,8 +380,8 @@ Quand c'est **elle** qui demande (elle te tend sa tasse, t'invite à t'asseoir),
 {"type": "answer", "cmd": "y-1", "request": "q-1560", "accept": true}
 ```
 
-**Entrer, sortir.** Une personne entre dans le monde quand son client s'y connecte, et en sort quand il se
-déconnecte (ou ne se manifeste plus pendant 60 s) :
+**Entrer, sortir.** Une personne entre dans le monde quand son client s'y connecte (rôle `viewer`), et en sort
+quand il se déconnecte (ou ne se manifeste plus pendant 60 s) ; ce qu'elle tenait reste là où elle était :
 
 ```json serveur
 {"type": "presence", "seq": 1540, "actor": "player:user_1", "joined": true, "room": "bedroom", "place": "door",

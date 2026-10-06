@@ -137,6 +137,15 @@ appel de modèle (un monde vivant ruinerait le budget et la latence).
       voie se remarque une fois ; un objet offert concerne qui l'a offert (`about`). La console (« Son monde »)
       montre les dernières éditions et ce qu'elle en a remarqué ; le créateur Unity recompare de lui-même un lot
       `stale`.
+    - **P4, les personnes entrent** : un `viewer` accueilli fait entrer sa personne (`world.joined`, au lieu
+      `spawn` de la pièce de Mika, par `MindPort.world_presence` : sa connexion, pas une commande) ; elle sort
+      (`world.left`) quand sa dernière connexion se ferme ou se tait 60 s, et au démarrage personne n'est resté
+      dans la pièce. `moved` est validé comme un constat de l'hôte. « AUTOUR DE TOI » dit qui est là et à quel
+      lieu — le nom à la personne elle-même et devant qui peut entendre l'anodin sur autrui, « quelqu'un »
+      sinon ; quelqu'un qui entre dans sa pièce est un signal (`arrival`), et dans Unity elle lève les yeux vers
+      l'entrée. Une assise ne se prend qu'assis : quelqu'un debout près du bureau ne prend pas sa chaise.
+      Les gestes (`address` portant un `gesture`) sont acceptés ; restent `act`, les demandes (`address` portant
+      une `request`) et `answer`.
 
 12. *La suite.*
     - **P1, la faculté `world`** : tranche, réducteurs, validation des actions, faits, section, outils,
