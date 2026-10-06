@@ -29,6 +29,7 @@ from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.attention.faculty import (
     ATTENTION,
+    DRIFT,
     RELATIONAL,
     AttentionState,
     Expectation,
@@ -488,12 +489,6 @@ def _subject(text: str) -> str:
 
 
 # ── La nuit ───────────────────────────────────────────────────────────────
-
-#: Ce que devient une couleur après une nuit (les autres restent ce qu'elles sont).
-DRIFT = {
-    "frustrated": "relieved", "anxious": "relieved", "scared": "relieved", "angry": "thinking",
-    "disgusted": "thinking", "jealous": "thinking", "sad": "melancholic", "lonely": "melancholic",
-}
 
 
 @ATTENTION.process("attention.digest", wake_on=[*body_c.ALL], lane="night", catch_up=CatchUp.ONCE,
