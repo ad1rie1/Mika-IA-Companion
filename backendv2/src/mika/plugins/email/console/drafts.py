@@ -2,7 +2,8 @@
 
 Sur la fiche d'un brouillon, **exactement ce qui partira** (l'expéditeur selon
 la voix de la boîte, la signature, la citation) ; tu peux l'envoyer tel quel,
-le retoucher (c'est alors ta version qui part : ce que tu as lu), le refuser
+le retoucher (c'est alors ta version qui part : ce que tu as lu ; la sienne
+reste à côté, et elle apprend ce que tu as changé), le refuser
 (elle l'apprend, avec ta note), ou lui demander de le reprendre. Le texte d'un
 brouillon ne quitte jamais l'adaptateur : le journal n'en garde que
 l'identifiant et un résumé.
@@ -28,6 +29,7 @@ from mika.kernel.inspect import (
     Entry,
     Fields,
     Found,
+    Grid,
     Head,
     InspectContext,
     Note,
@@ -260,8 +262,13 @@ def _tab_history(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
         if d.state in (GONE, FAILED):
             entries.append(Entry(d.decided_at or d.at, "parti" if d.state == GONE else "échec", text=d.result,
                                  tone="ok" if d.state == GONE else "danger"))
-    return [Timeline(tuple(sorted(entries, key=lambda e: e.at)), title="Ce qui lui est arrivé",
-                     empty="rien d'enregistré")]
+    blocks: list[Block] = [Timeline(tuple(sorted(entries, key=lambda e: e.at)), title="Ce qui lui est arrivé",
+                                    empty="rien d'enregistré")]
+    if got is not None and got.original_body and got.original_body != got.body:
+        # ce qu'elle apprend de la retouche (« CE QUE … CHANGE À TES BROUILLONS ») : les deux, côte à côte
+        after = "Ce qui est parti (sans signature ni citation)" if got.state == "envoye" else "La version retouchée"
+        blocks.append(Grid((Prose(got.original_body, title="Sa version"), Prose(got.body, title=after))))
+    return blocks
 
 
 # ── Décider ───────────────────────────────────────────────────────────────
