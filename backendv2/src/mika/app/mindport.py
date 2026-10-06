@@ -212,6 +212,11 @@ class KernelPort:
                                                              dedupe_key=f"lu:{handle}:{up_to}")],
                                       emitter="presence", correlation=f"lu:{handle}", origin=Origin.EXTERNAL)
 
+    async def composing(self, handle: str, connection: str, on: bool) -> None:
+        """En train d'écrire, ou plus : le début et la fin d'une saisie (l'adaptateur en borne le débit)."""
+        await self.kernel.mind.append([presence_c.COMPOSE.draft(handle=handle, connection=connection, on=on)],
+                                      emitter="presence", correlation=f"ws:{connection}", origin=Origin.EXTERNAL)
+
     def frame(self) -> Frame:
         return self.kernel.mind.frame()
 
