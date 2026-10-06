@@ -277,15 +277,17 @@ def test_fast_forward_vetoes_every_ordinary_initiative(tmp_path):
 # ── Ce que la relecture du lot a trouvé ───────────────────────────────────
 
 
-def test_a_secret_from_her_own_notes_never_comes_out():
+def test_a_secret_from_her_own_notes_comes_out_only_in_great_confidence():
     """Un secret sans personne (ses propres notes importées) : la règle « personne d'identifié » ne regardait que la
-    sensibilité, et un secret anodin sortait dans un salon public."""
+    sensibilité, et un secret anodin sortait dans un salon public. Il vaut une confidence : gradué, pas interdit."""
     from mika.faculties.memory.salience import admissible  # noqa: PLC0415 — la règle seule
     from mika.kernel.frame import Audience  # noqa: PLC0415
 
     public = Audience(persons=("ext_42",), room="salon", public=True, level=1)
     assert not admissible((), 1, "ext_42", public, secret=True).ok
     assert admissible((), 1, "ext_42", public, secret=False).ok, "contre-épreuve : anodin et pas secret, ça se dit"
+    close = Audience(persons=("user_2",), level=3, witness_level=3, private_ok=True)
+    assert admissible((), 1, "user_2", close, secret=True).ok, "en grande confiance, un secret à elle peut se dire"
 
 
 def test_imported_secrets_and_ties_keep_the_consolidation_s_rules(tmp_path):

@@ -84,8 +84,9 @@ l'appellent encore Mika, suivront dans un lot à part. Les ADR précédentes res
   pour une vie neuve). Omise, la levée effaçait en silence les surcharges de l'opératrice. La couture sert un
   pilote **hors ligne** : sur un serveur, `Live.reconfigure` rejournaliserait la configuration sans le préréglage.
 - **Ce qu'on importe suit les règles de la consolidation.**
-  - Un secret est une confidence, même sans personne. `salience.admissible` ne laisse sortir un secret devant
-    personne : jusque-là, un secret de ses propres notes, sans personne, sortait dans un salon public.
+  - Un secret est une confidence, même sans personne. `salience.admissible` le traite comme tel : un secret de
+    ses propres notes, sans personne, ne se dit qu'en grande confiance (jusque-là, marqué anodin, il sortait dans
+    un salon public). Gradué, pas interdit : l'oracle de `test_memory_privacy` dit la même règle.
   - « Entre vous » exige une personne, se tient de première main (`told_by` ⊆ `about`), est au moins personnel
     et compte (importance ≥ 0,7).
   - Une personne en jeu met la sensibilité au moins à « anodin ».

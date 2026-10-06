@@ -382,11 +382,12 @@ PEOPLE = ["user_1", "user_2", "user_3", "name:julie"]
 
 def oracle(about, told_by, heard_by, secret, sensitivity, me, level, witness_level, private_ok) -> bool:
     """Sa vie et le monde se racontent (au-delà de l'anodin, jusqu'au niveau de
-    l'audience) ; à chacun ce qu'il a confié et ce qui ne concerne que lui
-    (si sa fiche est ouverte) ; un secret, à personne d'autre ; le reste
-    jusqu'au niveau de l'audience — « témoin » s'il était là."""
+    l'audience ; un secret à elle vaut une confidence) ; à chacun ce qu'il a
+    confié et ce qui ne concerne que lui (si sa fiche est ouverte) ; le secret
+    d'un autre, à personne d'autre ; le reste jusqu'au niveau de l'audience —
+    « témoin » s'il était là."""
     if not about and not told_by:
-        return sensitivity <= max(1, level)
+        return (max(sensitivity, 3) if secret else sensitivity) <= max(1, level)
     if set(about) | set(told_by) <= {me} or me in told_by:
         return sensitivity <= 1 or private_ok
     if secret:
