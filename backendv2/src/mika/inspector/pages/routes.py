@@ -16,7 +16,14 @@ from mika.inspector import render
 from mika.inspector.catalog import Builtin, Destination, Panel, builtin_keys, destinations
 from mika.inspector.formview import action_view, visible_fields
 from mika.inspector.pages import accounts, reglages
-from mika.inspector.pages.journal import EPISODE_TABS, episode_head, episode_tab, event_blocks
+from mika.inspector.pages.journal import (
+    EPISODE_TABS,
+    episode_head,
+    episode_tab,
+    event_blocks,
+    replay_blocks,
+    replay_panel,
+)
 from mika.inspector.pages.subjects import Subjects
 from mika.inspector.pages.system import outbox_post
 from mika.inspector.pages.why import silence_page, why_page
@@ -324,6 +331,7 @@ class Pages:
         base = f"{PREFIX}/episode/{quote(corr, safe='')}"
         tabs = [{"title": t, "href": f"{base}?onglet={s}", "on": s == slug, "badge": 0} for s, t in EPISODE_TABS]
         blocks = episode_tab(self.ui, corr, slug, info, request.query_params)
+        panel = replay_panel(self.ui, corr, self.back(request)) if slug == "prompt" else None
         return self.render_page(request, title=f"Épisode · {info['kind']}", heading=f"Un épisode : {info['kind']}",
                                 subtitle=dict(EPISODE_TABS)[slug] + " · " + {
                                     "deroule": "Les événements de cet épisode dans leur ordre d'exécution.",
@@ -334,7 +342,27 @@ class Pages:
                                     "decision": "Le déclencheur de l'épisode et les raisons de la décision.",
                                 }[slug],
                                 active="decisions", crumbs=[("Décisions", f"{PREFIX}/decisions/episodes")],
-                                head_badges=info["badges"], facts=info["facts"], tabs=tabs, blocks=blocks)
+                                head_badges=info["badges"], facts=info["facts"], tabs=tabs, blocks=blocks,
+                                panel=panel)
+
+    async def replay(self, request: Request) -> Response:
+        """« Rejouer avec… » : le prompt gardé d'un épisode envoyé à un autre fournisseur (``journal.replay_blocks``).
+        La réponse se lit sur cette page et n'est gardée nulle part ; un formulaire sans jeton ne part pas."""
+        data = await self.ui.form(request)
+        account = self.ui.operator(request)
+        title = "Rejouer avec un autre modèle"
+        if data is None or account is None:
+            return self.render_page(request, title=title, active="decisions", status=403,
+                                    blocks=[Note("Jeton de formulaire invalide : recharge la page.", "danger")])
+        corr = str(data.get("episode", ""))[:300]
+        backend = str(data.get("fournisseur", ""))[:200]
+        back = safe_back(str(data.get("_retour", "")))
+        blocks, status = await replay_blocks(self.ui, corr, backend, by=account.handle)
+        crumbs = [("Son épisode", f"{PREFIX}/episode/{quote(corr, safe='')}?onglet=prompt"), ("Retour", back)]
+        return self.render_page(request, title=title, heading=title, active="decisions", status=status,
+                                subtitle=f"Le même prompt, envoyé à « {backend} » : ce qu'elle a vraiment dit, et ce "
+                                         "que ce modèle répond.", crumbs=crumbs, blocks=blocks,
+                                panel=replay_panel(self.ui, corr, back) if status == 200 else None)
 
     async def outbox(self, request: Request) -> Response:
         """Système › Sorties : relancer un effet en échec, ou le marquer comme vu."""
@@ -344,7 +372,8 @@ class Pages:
         """« Pourquoi a-t-elle dit ça ? » : une de ses paroles, expliquée — et, pour un message reçu resté sans
         réponse, « Pourquoi n'a-t-elle pas répondu ? »."""
         seq = int_query(request.path_params["seq"], 0)
-        got = (why_page(self.ui, seq) or silence_page(self.ui, seq)) if seq > 0 else None
+        spoken = why_page(self.ui, seq) if seq > 0 else None
+        got = spoken or (silence_page(self.ui, seq) if seq > 0 else None)
         if got is None:
             return self.render_page(request, title="Parole introuvable", active="fil", status=404,
                                     blocks=[Note("Ce numéro n'est ni une de ses paroles, ni un message resté sans "
@@ -354,8 +383,9 @@ class Pages:
         crumbs = [("Conversations", f"{PREFIX}/fil")]
         if got["correlation"]:
             crumbs.append(("Son épisode", f"{PREFIX}/episode/{quote(got['correlation'], safe='')}"))
+        panel = replay_panel(self.ui, got["correlation"], self.back(request)) if spoken and got["correlation"] else None
         return self.render_page(request, title=got["title"], heading=got["title"], subtitle=got["subtitle"],
-                                active="fil", facts=facts, blocks=got["blocks"], crumbs=crumbs)
+                                active="fil", facts=facts, blocks=got["blocks"], crumbs=crumbs, panel=panel)
 
     async def event(self, request: Request) -> Response:
         seq = int_query(request.path_params["seq"], 0)
@@ -557,6 +587,7 @@ class Pages:
             Route(PREFIX + "/action/{key:str}", g(self.act), methods=["POST"]),
             Route(PREFIX + "/action/{key:str}", g(self.action_page), methods=["GET"]),
             Route(PREFIX + "/episode/{corr:str}", g(self.episode)),
+            Route(PREFIX + "/rejouer", g(self.replay), methods=["POST"]),
             Route(PREFIX + "/parole/{seq:str}", g(self.why)),
             Route(PREFIX + "/evenement/{seq:str}", g(self.event)),
             Route(PREFIX + "/systeme/sorties", g(self.outbox), methods=["POST"]),

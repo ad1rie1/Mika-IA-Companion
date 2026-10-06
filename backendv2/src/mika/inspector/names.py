@@ -249,7 +249,8 @@ class Names:
         if key.startswith("console."):
             parts = key.split(".")
             what = {"oublier": "Oublier", "reglages": "Réglages", "parametres": "Paramètres",
-                    "sorties": "File de sortie"}.get(parts[1] if len(parts) > 1 else "", humanize(key))
+                    "sorties": "File de sortie", "rejouer": "Rejouer avec un autre modèle"}.get(
+                parts[1] if len(parts) > 1 else "", humanize(key))
             return f"{what} · {' · '.join(parts[2:])}" if len(parts) > 2 else what
         return humanize(key)
 
