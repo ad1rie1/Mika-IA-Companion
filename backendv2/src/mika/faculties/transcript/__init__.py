@@ -15,7 +15,11 @@ L'historique du prompt est le fil tel qu'on le perçoit (ADR 0041) : un tour
 qui arrive après un silence porte un repère de temps (« [le lendemain, mardi
 14h13] »), calculé en jours vécus et seulement entre deux messages — stable
 d'un prompt à l'autre ; dans un salon chacun parle sous son nom ; ses propres
-tours gardent leur balise d'émotion ; la fenêtre avance par paquets.
+tours gardent leur balise d'émotion ; la fenêtre avance par paquets. Un message
+resté sans réponse le dit dans son repère, en mots et sans détail technique
+(« [mardi 14h13 — tu n'as pas pu lui répondre : une panne] », « [tu avais
+choisi de ne rien répondre] ») : comme la personne, elle sait qu'elle n'a pas
+répondu.
 """
 
 from __future__ import annotations
@@ -524,6 +528,17 @@ SHE_WROTE_FIRST = "c'est toi qui lui as écrit"
 SHE_SPOKE_FIRST = "c'est toi qui as pris la parole"
 
 
+#: ce que dit le repère d'un message resté sans réponse (la colonne ``unanswered``) : un fait, à la deuxième
+#: personne, jamais la cause technique — à « t'es là ? », elle sait qu'elle n'a pas répondu et pourquoi, et ne
+#: s'excuse pas d'une panne quand elle s'est tue exprès ; ce qu'elle en dit, elle le décide
+LEFT_UNANSWERED = {
+    c.UNANSWERED_ABSTAINED: "tu avais choisi de ne rien répondre",
+    c.UNANSWERED_FAILED: "tu n'as pas pu lui répondre : une panne",
+    c.UNANSWERED_TIMEOUT: "tu n'as pas pu lui répondre : une panne",
+    c.UNANSWERED_LATE: "tu ne l'as pas lu à temps",
+}
+
+
 def _first(mark: str, note: str) -> str:
     return f"{mark} — {note}" if mark else note
 
@@ -534,7 +549,9 @@ def thread_turns(rows: Sequence[Mapping[str, Any]], tz: ZoneInfo, now: int, afte
     repère absolu qui le remplace s'il ouvre l'historique) ; dans un salon,
     chacun sous son nom. Un message qu'elle a écrit d'elle-même le dit dans son
     repère (« [jeudi 19h06 — c'est toi qui lui as écrit] ») : personne ne l'avait
-    relancée."""
+    relancée. Un message de la personne resté sans réponse le dit aussi (« [mardi
+    14h13 — tu n'as pas pu lui répondre : une panne] ») : posé par la fin qui l'a
+    réglé, avant le tour suivant — le préfixe en cache ne bouge pas."""
     out: list[ChatTurn] = []
     prev: int | None = None
     for r in rows:
@@ -549,8 +566,10 @@ def thread_turns(rows: Sequence[Mapping[str, Any]], tz: ZoneInfo, now: int, afte
         elif r["role"] == "assistant":
             out.append(ChatTurn("assistant", tagged(r), id=r["id"], mark=mark, opening=opening))
         else:
+            left = LEFT_UNANSWERED.get(r.get("unanswered") or "", "")
             out.append(ChatTurn("user", r["text"] or "", speaker=(names or {}).get(r["person"], ""), id=r["id"],
-                                mark=mark, opening=opening))
+                                mark=_first(mark, left) if left else mark,
+                                opening=_first(opening, left) if left else opening))
     return out
 
 
