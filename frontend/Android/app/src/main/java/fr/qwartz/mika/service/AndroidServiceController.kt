@@ -72,7 +72,23 @@ class AndroidServiceController(
     override fun endOneShot() {
         scope.launch {
             // L'arrière-plan a pu être activé entre-temps : ce service-là reste.
-            if (!settings.current().background) stop()
+            if (!settings.current().background) sendEndOneShot()
+        }
+    }
+
+    /**
+     * Une commande au service, pas un `stopService` : démarré par `startForegroundService`, il serait
+     * arrêté avant son `startForeground` si l'accusé revient vite, et Android abattrait le processus.
+     * Un service déjà démarré reçoit la commande même depuis l'arrière-plan.
+     */
+    private fun sendEndOneShot() {
+        try {
+            context.startService(Intent(context, MikaConnectionService::class.java).setAction(MikaConnectionService.ACTION_END_ONE_SHOT))
+        } catch (e: IllegalStateException) {
+            // Depuis l'arrière-plan : il s'est déjà arrêté de lui-même (60 s), il n'y a plus rien à arrêter.
+            logger.d(TAG, "service d'un coup déjà arrêté")
+        } catch (e: SecurityException) {
+            logger.w(TAG, "fin du service d'un coup non transmise", e)
         }
     }
 
