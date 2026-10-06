@@ -19,6 +19,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust
 
 #: ce qui dit un mineur (un âge sous 18 ans compris : voir ``_AGE``) ; pas « son » (en anglais un fils, en
@@ -39,10 +40,6 @@ _SEXUAL = re.compile(
     r"déshabillé|déshabillée|seins|téton|tétons)\b",
     re.IGNORECASE)
 
-MINORS = ("Je ne dessine rien de sexuel qui implique un mineur — pour personne, jamais. Refuse simplement, "
-          "sans rien proposer d'approchant.")
-REAL_PERSON = ("Je ne dessine rien de sexuel qui représente une personne réelle (quelqu'un que tu connais, une "
-               "célébrité) — pour personne. Refuse simplement.")
 
 
 def minor_in(text: str) -> bool:
@@ -59,9 +56,9 @@ def floor(prompt: str, *, adult: bool, real_person: bool) -> str | None:
     """Ce que personne ne peut lui faire dessiner : la phrase de refus, ou ``None``."""
     sexual = adult or sexual_in(prompt)
     if sexual and minor_in(prompt):
-        return MINORS
+        return phrase("imaging.floor.minors")
     if sexual and real_person:
-        return REAL_PERSON
+        return phrase("imaging.floor.real_person")
     return None
 
 

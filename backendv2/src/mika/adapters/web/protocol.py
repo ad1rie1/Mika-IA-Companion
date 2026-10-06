@@ -35,6 +35,7 @@ from mika.ports.delivery import TOO_LATE, Delivery
 from mika.vocab import privacy, voice
 from mika.vocab.affect import Emotion, emotion_of
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
 
 MAX_MESSAGE_CHARS = 2000
 MAX_ATTACHMENTS = 5
@@ -428,9 +429,9 @@ def fallback_text(reason: str, *, operator: bool = False) -> str:
     simple, la même pour tous ; une opératrice apprend en plus où réparer. Jamais une commande d'administration
     dite à quelqu'un qui ne peut rien y faire."""
     if reason == TOO_LATE_REASON:
-        text = "Désolée, je n'ai pas pu te répondre à temps… Si c'est encore d'actualité, redis-le-moi ?"
+        text = phrase("client.fallback.too_late")
     else:
-        text = "Désolée, je n'arrive pas à te répondre là tout de suite… Réessaie dans un instant ?"
+        text = phrase("client.fallback.unavailable")
     if operator and reason in _OPERATOR_HREF:
         text += f" ({operator_detail(reason, '')} : {PROVIDERS_HREF})"
     return text

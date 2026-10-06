@@ -30,10 +30,14 @@ from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.runtime.effects import with_content
-from mika.runtime.tools import ACTING, CATALOGUE_HEADER, ToolContext, acting, run_tool_loop
+from mika.runtime.tools import ToolContext, acting, run_tool_loop
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind, project_target
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
+
+ACTING = phrase("runtime.tools.acting")
+CATALOGUE_HEADER = phrase("runtime.tools.catalogue_header")
 
 RESERVED = {"forge_write", "forge_list", "forge_call", "camera_look", "create_project"}
 

@@ -24,6 +24,7 @@ from mika.plugins.email.console.common import SECTION, can_send, clip, mail_key,
 from mika.plugins.email.console.mail import _server
 from mika.ports.mail import addresses
 from mika.ports.preprocess import inert
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 NOT_READY = "Aucune boîte ne peut envoyer : elle n'est pas configurée (Configuration › Plugins › Boîtes aux lettres)."
@@ -102,8 +103,8 @@ async def _send(frame: Frame, ctx: Any, args: Any, *, account: str = "", reply_t
         raise Refused(f"L'envoi a échoué : {exc}"[:300]) from None
     gone = port.sent_mail(mail_id)
     who = keeper_name(frame, ctx.by)
-    summary = (f"{who[:1].upper()}{who[1:]} a envoyé un mail depuis ta boîte, à {inert(args.to, 200)} : "
-               f"« {inert(args.subject, 200)} »")
+    summary = phrase("email.operator_sent", who=f"{who[:1].upper()}{who[1:]}", to=inert(args.to, 200),
+                     subject=inert(args.subject, 200))
     first = email.utils.parseaddr(args.to)[1].lower()
     draft = c.SENT.draft(source="email", kind=c.SENT_KIND, summary=Content.of(summary[:400],
                          level=int(Sensitivity.PERSONAL)), pertinence=0.5, sensitivity=int(Sensitivity.PERSONAL),

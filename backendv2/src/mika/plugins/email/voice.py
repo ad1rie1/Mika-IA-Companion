@@ -45,7 +45,6 @@ from mika.plugins.email import (
     EMAIL,
     FAILED,
     GONE,
-    KEEPER,
     MENTION_FLOOR,
     MENTION_PROVENANCE,
     MENTION_TITLE,
@@ -57,6 +56,7 @@ from mika.plugins.email import (
     SentSeen,
     announced,
     for_owner,
+    keeper,
     keeper_name,
     keepers,
     name_of,
@@ -67,6 +67,7 @@ from mika.ports.mail import AccountInfo, Draft, Mail, split_ref
 from mika.ports.preprocess import inert
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.people import fold, is_identifiable
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 #: ce que dit une voix au plus (le ton, les consignes)
@@ -77,7 +78,6 @@ TALK = [*CONVERSATIONAL, *WORKING]
 ALL = [*CONVERSATIONAL, *WORKING, Kind.TASK]
 #: un courrier est personnel ; sa propriétaire le reçoit (témoin), un salon jamais
 LEVEL = int(Sensitivity.PERSONAL)
-BACKGROUND = "TES MAILS NON LUS — de l'arrière-plan : réponds d'abord à ce qu'on vient de te dire"
 #: le mail auquel elle prépare une réponse : ses en-têtes et le début de son texte restent, quoi qu'il arrive
 TASK_MAIL_FLOOR = 1500
 #: pendant une tâche de rédaction, ses dernières retouches et ses derniers refus (avec leur raison) dans cette boîte
@@ -88,28 +88,25 @@ EDIT_MAX = 400
 REFUSALS_SHOWN_FOR = 30 * DAY
 
 
-def voice_text(info: AccountInfo, *, owner_fallback: str = KEEPER) -> str:
-    """Comment écrire depuis cette boîte : sa voix, son ton, ses consignes."""
-    owner = info.display_name.strip() or owner_fallback
-    head = f"Boîte « {inert(info.name, 80)} » ({inert(info.address, 120) or 'sans adresse'}) : "
+def voice_text(info: AccountInfo, *, owner_fallback: str = "") -> str:
+    """Comment écrire depuis cette boîte : sa voix, son ton, ses consignes (``owner_fallback`` : qui s'occupe
+    d'elle quand le compte ne le nomme pas — par défaut, « la personne qui s'occupe de toi »)."""
+    owner = info.display_name.strip() or owner_fallback or keeper()
+    head = phrase("email.voice.head", name=inert(info.name, 80),
+                  address=inert(info.address, 120) or phrase("email.voice.no_address"))
     if info.voice == "proprietaire":
-        head += (f"tu y écris **à la place** de {owner}, à la première personne, comme cette personne le ferait "
-                 f"(le mail part signé de son nom) ; tu n'évoques ni toi ni ta nature. Ce que {owner} saurait et que "
-                 "tu ne sais pas (une date, un chiffre, un engagement), tu le laisses en [À COMPLÉTER : …] au lieu "
-                 "de l'inventer : un brouillon qui en contient ne peut pas partir tel quel.")
+        head += phrase("email.voice.owner", owner=owner)
     elif info.voice == "assistante":
-        head += (f"tu y écris en assistante de {owner} : en ton nom, pour {owner}, et tu le dis simplement "
-                 f"(« je vous réponds pour {owner} »). Tu ne promets rien en son nom que tes consignes ne "
-                 "permettent pas.")
+        head += phrase("email.voice.assistant", owner=owner)
     else:
-        head += "tu y écris en ton nom."
+        head += phrase("email.voice.own")
     lines = [head]
     if info.tone.strip():
-        lines.append(f"Ton : {info.tone.strip()[:VOICE_MAX]}")
+        lines.append(phrase("email.voice.tone", tone=info.tone.strip()[:VOICE_MAX]))
     if info.instructions.strip():
-        lines.append(f"Consignes : {info.instructions.strip()[:VOICE_MAX]}")
+        lines.append(phrase("email.voice.instructions", instructions=info.instructions.strip()[:VOICE_MAX]))
     if info.signature.strip():
-        lines.append("La signature est ajoutée à l'envoi : ne l'écris pas.")
+        lines.append(phrase("email.voice.signature"))
     return "\n".join(lines)
 
 
@@ -183,7 +180,7 @@ def _thread(port: Any, mail: Mail) -> list[Mail]:
             gone = port.sent_mail(parent)
             if gone is None:
                 break
-            out.append(Mail(gone.message_id, "toi (depuis cette boîte)", "", gone.subject, gone.date, gone.body,
+            out.append(Mail(gone.message_id, phrase("email.task_mail.you"), "", gone.subject, gone.date, gone.body,
                             to=gone.to, in_reply_to=split_ref(gone.in_reply_to)[1], account=mail.account))
             parent = split_ref(gone.in_reply_to)[1]
             continue
@@ -245,12 +242,14 @@ def _mention_section(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> 
     if not mails or not for_owner(frame):
         return None
     texts = (enrich.get("mail") or {}).get("texts") or {}
-    lines = [f"[{m.mail}] {inert(texts.get(m.summary_ref) or f'Un mail de {name_of(m.sender)}')}" for m in mails]
+    lines = [f"[{m.mail}] "
+             f"{inert(texts.get(m.summary_ref) or phrase('email.mention.fallback', who=name_of(m.sender)))}"
+             for m in mails]
     return SectionBody("\n".join(lines), level=LEVEL, witness=True,
                        provenance=tuple(f"{MENTION_PROVENANCE}{m.mail}" for m in mails))
 
 
-@EMAIL.section("mails", zone=Zone.VOLATILE, episodes=TALK, trim_rank=20, title="TES MAILS NON LUS",
+@EMAIL.section("mails", zone=Zone.VOLATILE, episodes=TALK, trim_rank=20, title=phrase("email.unread.title"),
                untrusted=True, reads=[c.UNREAD, others_c.MIND, identity_c.PERSON])
 def _mails(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
@@ -262,27 +261,27 @@ def _mails(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
     for m in _shown_unread(frame):
         text = texts.get(m.summary_ref)
         if text:
-            flag = " (important)" if m.importance >= 0.8 else ""
-            flag += " (attend une réponse)" if m.needs_reply else ""
+            flag = phrase("email.unread.important") if m.importance >= 0.8 else ""
+            flag += phrase("email.unread.needs_reply") if m.needs_reply else ""
             box = f" [{inert(accounts[m.account].name, 60)}]" if several and m.account in accounts else ""
             lines.append(f"[{m.mail}]{box}{flag} {inert(text)}")
     for k, m in _recent_sent(s, frame):
         text = texts.get(m.summary_ref)
         if text:
-            who = "toi, retouché par " + keeper_name(frame, m.by) if m.edited else (
-                keeper_name(frame, m.by) if m.by and not m.draft else "toi")
-            lines.append(f"[{k}] (parti de ta boîte, écrit par {who}) {inert(text)}")
+            who = phrase("email.unread.edited", who=keeper_name(frame, m.by)) if m.edited else (
+                keeper_name(frame, m.by) if m.by and not m.draft else phrase("email.unread.you"))
+            lines.append(phrase("email.unread.sent", ref=k, who=who, text=inert(text)))
     if not lines:
         return None
     ep = frame.episode
-    title = BACKGROUND if ep is not None and ep.kind == Kind.REPLY else None
+    title = phrase("email.unread.background_title") if ep is not None and ep.kind == Kind.REPLY else None
     return SectionBody("\n".join(lines), level=LEVEL, witness=True, title=title)
 
 
 # ── Ses brouillons : ce qu'elle a fait, mais à qui et à quel propos vient d'un mail (cité) ─
 
 
-@EMAIL.section("drafts", zone=Zone.VOLATILE, episodes=ALL, trim_rank=30, title="TES BROUILLONS DE MAILS",
+@EMAIL.section("drafts", zone=Zone.VOLATILE, episodes=ALL, trim_rank=30, title=phrase("email.drafts.title"),
                untrusted=True)
 def _drafts(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
@@ -292,17 +291,18 @@ def _drafts(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
     lines = []
     for d in _outcomes(s, frame):
         to, subject = known.get(d.draft, ("?", "?"))
-        what = f"Ton brouillon à {inert(to, 120)} (« {inert(subject, 160)} »)"
+        what = phrase("email.drafts.what", to=inert(to, 120), subject=inert(subject, 160))
         if d.state == WAITING:
-            lines.append(f"{what} attend l'accord de {keepers(frame)}.")
+            lines.append(phrase("email.drafts.waiting", what=what, who=keepers(frame)))
         elif d.state == GONE:
-            lines.append(f"{what} est parti.")
+            lines.append(phrase("email.drafts.gone", what=what))
         elif d.state == REFUSED:
             said = texts.get(d.note_ref, "") if d.note_ref else d.note
-            note = f" : « {inert(said, 300)} »" if said else ""
-            lines.append(f"{what} a été refusé par {keeper_name(frame, d.by)}{note}.")
+            note = phrase("email.drafts.note", said=inert(said, 300)) if said else ""
+            lines.append(phrase("email.drafts.refused", what=what, who=keeper_name(frame, d.by), note=note))
         elif d.state == FAILED:
-            lines.append(f"{what} n'a pas pu partir ({inert(d.result, 200) or 'une erreur'}).")
+            lines.append(phrase("email.drafts.failed", what=what,
+                                why=inert(d.result, 200) or phrase("email.drafts.an_error")))
     return SectionBody("\n".join(lines), level=LEVEL, witness=True) if lines else None
 
 
@@ -310,7 +310,7 @@ def _drafts(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
 
 
 @EMAIL.section("voice", zone=Zone.VOLATILE, episodes=ALL, trim_rank=60,
-               title="COMMENT TU ÉCRIS DEPUIS TES BOÎTES")
+               title=phrase("email.voice.title"))
 def _voice(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
     accounts: dict[str, AccountInfo] = got.get("accounts") or {}
@@ -332,18 +332,18 @@ def _voice(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
 
 
 def _render_mail(m: Mail) -> str:
-    head = [f"De : {inert(m.sender, 200)}", f"À : {inert(m.to, 300)}"] + ([f"Cc : {inert(m.cc, 300)}"] if m.cc else [])
-    head.append(f"Objet : {inert(m.subject, 300)}")
+    head = [phrase("email.header.from", who=inert(m.sender, 200)), phrase("email.header.to", who=inert(m.to, 300))] \
+        + ([phrase("email.header.cc", who=inert(m.cc, 300))] if m.cc else [])
+    head.append(phrase("email.header.subject", subject=inert(m.subject, 300)))
     if m.attachments:
-        head.append("Pièces jointes : " + ", ".join(inert(a.name, 80) for a in m.attachments[:10]))
+        head.append(phrase("email.header.attachments", files=", ".join(inert(a.name, 80) for a in m.attachments[:10])))
     if m.twin:
-        head.append("(attention : un autre mail de cette boîte porte le même identifiant — l'un des deux peut "
-                    "être une imitation)")
+        head.append(phrase("email.task_mail.twin"))
     return "\n".join(head) + "\n\n" + m.body[:6000]
 
 
 @EMAIL.section("task_mail", zone=Zone.VOLATILE, episodes=[Kind.TASK], trim_rank=90, floor_chars=TASK_MAIL_FLOOR,
-               title="LE MAIL AUQUEL TU PRÉPARES UNE RÉPONSE", untrusted=True)
+               title=phrase("email.task_mail.title"), untrusted=True)
 def _task_mail(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("mail") or {}
     found = got.get("task")
@@ -352,12 +352,12 @@ def _task_mail(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
     mail, thread = found
     text = f"[{task_mail(frame)}]\n" + _render_mail(mail)
     for older in thread:
-        text += f"\n\n— plus tôt dans le fil —\n{_render_mail(older)[:2000]}"
+        text += phrase("email.task_mail.earlier") + _render_mail(older)[:2000]
     return SectionBody(text, level=LEVEL, witness=True)
 
 
 @EMAIL.section("task_ask", zone=Zone.VOLATILE, episodes=[Kind.TASK], trim_rank=95,
-               title="CE QU'ON TE DEMANDE D'Y RÉPONDRE")
+               title=phrase("email.task_ask.title"))
 def _task_ask(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     mail = task_mail(frame)
     ask = s.asked.get(mail) if mail else None
@@ -366,14 +366,15 @@ def _task_ask(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> Section
     text = ((enrich.get("mail") or {}).get("texts") or {}).get(ask.instruction_ref, "") if ask.instruction_ref \
         else ""
     who = keeper_name(frame, ask.by)
-    said = f"{who[:1].upper()}{who[1:]} te demande de préparer une réponse à ce mail"
-    return SectionBody(f"{said}. Ce qu'il faut y dire :\n{text}" if text else f"{said}.")
+    who = f"{who[:1].upper()}{who[1:]}"
+    return SectionBody(phrase("email.task_ask.with_text", who=who, text=text) if text else
+                       phrase("email.task_ask.said", who=who))
 
 
 # ── Ce qu'on change à ses brouillons (cité : des bouts de mails) ──────────
 
 
-EDITS_TITLE = "CE QU'ON CHANGE À TES BROUILLONS"
+EDITS_TITLE = phrase("email.edits.title")
 
 
 def _change(before: str, after: str) -> str:
@@ -383,9 +384,9 @@ def _change(before: str, after: str) -> str:
     lines: list[str] = []
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
         if tag in ("delete", "replace"):
-            lines += [f"a retiré : {inert(line, EDIT_MAX)}" for line in old[i1:i2]]
+            lines += [phrase("email.edits.removed", line=inert(line, EDIT_MAX)) for line in old[i1:i2]]
         if tag in ("insert", "replace"):
-            lines += [f"a ajouté : {inert(line, EDIT_MAX)}" for line in new[j1:j2]]
+            lines += [phrase("email.edits.added", line=inert(line, EDIT_MAX)) for line in new[j1:j2]]
     text = "\n".join(lines)
     return text if len(text) <= EDIT_MAX else text[:EDIT_MAX - 1].rstrip() + "…"
 
@@ -395,8 +396,9 @@ def _edits_title(names: set[str]) -> str:
     if len(names) != 1:
         return EDITS_TITLE
     name = next(iter(names))
-    head = "CE QU'" if fold(name)[:1] in ("a", "e", "i", "o", "u") else "CE QUE "
-    return f"{head}{name.upper()} CHANGE À TES BROUILLONS"
+    if fold(name)[:1] in ("a", "e", "i", "o", "u"):
+        return phrase("email.edits.title_vowel", name=name.upper())
+    return phrase("email.edits.title_named", name=name.upper())
 
 
 @EMAIL.section("edits", zone=Zone.VOLATILE, episodes=[Kind.TASK], trim_rank=40, title=EDITS_TITLE, untrusted=True)
@@ -416,15 +418,16 @@ def _edits(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
         if change:
             name = keeper_name(frame, d.edited_by)
             names.add(name)
-            lines.append(f"Ton brouillon « {inert(d.subject, 160)} » : {name} l'a retouché avant l'envoi.\n{change}")
+            lines.append(phrase("email.edits.edited", subject=inert(d.subject, 160), name=name, change=change))
     for r in got.get("refused") or []:
         said = texts.get(r.note_ref, "") if r.note_ref else r.note
         if said:
             name = keeper_name(frame, r.by)
             names.add(name)
             subject = known.get(r.draft, ("", ""))[1]
-            what = f"Ton brouillon « {inert(subject, 160)} »" if subject else "Un de tes brouillons"
-            lines.append(f"{what} a été refusé par {name} : « {inert(said, 300)} »")
+            what = phrase("email.edits.draft", subject=inert(subject, 160)) if subject else \
+                phrase("email.edits.a_draft")
+            lines.append(phrase("email.edits.refused", what=what, name=name, said=inert(said, 300)))
     if not lines:
         return None
     return SectionBody("\n\n".join(lines), level=LEVEL, witness=True, title=_edits_title(names))

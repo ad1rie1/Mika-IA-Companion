@@ -21,6 +21,7 @@ from mika.adapters.mcp.protocol import PROTOCOL_VERSIONS
 from mika.kernel.codec import canonical_json
 from mika.ports.mcp import LiveTool
 from mika.ports.preprocess import inert
+from mika.vocab.phrasebook import phrase
 
 CLIENT_INFO = {"name": "mika", "version": "1"}
 #: une liste d'outils au-delà : coupée (un serveur ne lui offre pas mille outils)
@@ -187,14 +188,15 @@ def outcome(result: Mapping[str, Any]) -> CallOutcome:
         if kind == "text" and isinstance(item.get("text"), str):
             parts.append(item["text"])
         elif kind in ("image", "audio"):
-            what = "une image" if kind == "image" else "un son"
-            parts.append(f"[{what} ({_text(item.get('mimeType'), 40) or '?'}) — non lu]")
+            what = phrase("mcp.content.image") if kind == "image" else phrase("mcp.content.sound")
+            parts.append(phrase("mcp.content.media", what=what, mime=_text(item.get("mimeType"), 40) or "?"))
         elif kind == "resource_link":
-            parts.append(f"[ressource : {_text(item.get('name'), 120)} {_text(item.get('uri'), 300)}]".strip())
+            parts.append(phrase("mcp.content.link", name=_text(item.get("name"), 120),
+                                uri=_text(item.get("uri"), 300)).strip())
         elif kind == "resource" and isinstance(item.get("resource"), Mapping):
             res = item["resource"]
             parts.append(res["text"] if isinstance(res.get("text"), str)
-                         else f"[ressource : {_text(res.get('uri'), 300)} — non lue]")
+                         else phrase("mcp.content.resource", uri=_text(res.get("uri"), 300)))
     structured = result.get("structuredContent")
     if not parts and structured is not None:
         try:

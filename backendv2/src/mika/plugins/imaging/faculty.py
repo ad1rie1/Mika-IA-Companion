@@ -21,6 +21,7 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.vocab.episodes import Kind
+from mika.vocab.phrasebook import phrase
 
 #: les dessins gardés en mémoire (les plus anciens, finis, partent d'abord)
 JOBS_KEPT = 200
@@ -107,7 +108,7 @@ class ImagingState:
 
 IMAGING = Faculty(c.OWNER, state=ImagingState, init=lambda p: ImagingState(), params=ImagingParams)
 IMAGING.declare(*c.ALL)
-IMAGING.bundle(c.BUNDLE, "dessiner pour la personne (une image qui prend quelques minutes), montrer un dessin prêt")
+IMAGING.bundle(c.BUNDLE, phrase("imaging.bundle"))
 
 
 def _set(s: ImagingState, j: Job) -> ImagingState:

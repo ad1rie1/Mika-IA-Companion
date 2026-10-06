@@ -22,10 +22,9 @@ from mika.contracts import runtime as rt
 from mika.kernel.events import Content
 from mika.kernel.guards import Guard
 from mika.kernel.operate import Preview
-from mika.plugins.mcp import ANSWER_KEPT, EXPIRER, MCP, UNAVAILABLE, WAITING, McpState, call_digest
+from mika.plugins.mcp import ANSWER_KEPT, EXPIRER, MCP, WAITING, McpState, call_digest
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
-
-LOST = "(la réponse ne s'est pas retrouvée : le service a sans doute répondu pendant un redémarrage)"
 
 
 def preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview:
@@ -54,7 +53,7 @@ def preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview:
 async def call(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) -> tuple[bool, str]:
     port = ports.get("mcp")
     if port is None:
-        return False, UNAVAILABLE
+        return False, phrase("mcp.unavailable")
     result = await port.call(str(args.get("server") or ""), str(args.get("remote") or ""),
                              dict(args.get("args") or {}))
     port.keep(str(args.get("request") or ""), result.text)
@@ -73,7 +72,7 @@ async def _came_back(ev: Any, ports: Mapping[str, Any]) -> list[Any] | None:
     port = ports.get("mcp")
     text = port.take(req.request) if port is not None else None
     if text is None:
-        text = LOST if ev.data.ok else ev.data.result
+        text = phrase("mcp.lost") if ev.data.ok else ev.data.result
     return [c.ANSWERED.draft(proposal=req.proposal, ok=ev.data.ok,
                              text=Content.of(text[:ANSWER_KEPT], level=int(Sensitivity.PERSONAL)),
                              about=(req.target,) if req.target else (), dedupe_key=f"mcp-rendu:{req.proposal}")]

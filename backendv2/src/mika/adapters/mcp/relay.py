@@ -25,10 +25,15 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mika.adapters.mcp.protocol import Outcome, Tool, asgi, bearer, loopback
+from mika.vocab.phrasebook import phrase
 
 PREFIX = "/mcp/relais"
 PARTS = ("mika", "plus")
-CLOSED = Outcome("l'épisode est fini : cet appel n'a pas été exécuté", is_error=True)
+
+
+def closed() -> Outcome:
+    """La réponse à un appel arrivé après la fin de l'épisode : il n'a pas été exécuté."""
+    return Outcome(phrase("mcp.relay.closed"), is_error=True)
 
 
 @dataclass(slots=True)
@@ -68,9 +73,9 @@ class RelaySession:
 
     async def park(self, name: str, arguments: Mapping[str, Any]) -> Outcome:
         if self.closed:
-            return CLOSED
+            return closed()
         if name not in self._known:
-            return Outcome(f"outil inconnu : {name}", is_error=True)
+            return Outcome(phrase("runtime.tools.refused.unknown", name=name), is_error=True)
         p = Pending(f"{self.id}-{next(self._ids)}", name, dict(arguments),
                     asyncio.get_running_loop().create_future())
         self._pending[p.id] = p
@@ -95,7 +100,7 @@ class RelaySession:
         self.closed = True
         for p in list(self._pending.values()):
             if not p.future.done():
-                p.future.set_result(CLOSED)
+                p.future.set_result(closed())
 
 
 class Relay:

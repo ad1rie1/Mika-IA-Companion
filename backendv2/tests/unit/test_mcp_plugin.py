@@ -16,10 +16,12 @@ from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.ports.mcp import CallResult, OfferedTool
 from mika.runtime.pipeline import EpisodeRequest
-from mika.runtime.tools import OUTSIDE
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import boot, build, connect, said
+
+OUTSIDE = phrase("runtime.tools.outside")
 
 NAME = "mcp_meteo_prevision"
 SCHEMA = {"type": "object", "properties": {"ville": {"type": "string", "description": "la ville"},

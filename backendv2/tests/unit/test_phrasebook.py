@@ -81,3 +81,8 @@ def test_a_missing_file_names_the_file(tmp_path, monkeypatch):
     with pytest.raises(VoiceError, match="introuvable"):
         phrasebook.catalog()
     phrasebook.reset()
+
+
+def test_a_value_holding_a_hole_is_left_as_is(voice):
+    """Un objet de mail qui contient « {tone} » ne se fait pas remplir à son tour."""
+    assert phrase("dream.system", tone="{tone} et {name}") == "Tu rêves. Ton du rêve : {tone} et {name}."

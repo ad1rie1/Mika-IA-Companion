@@ -33,6 +33,7 @@ from typing import Any
 
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
 from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolCall, ToolDecl, Usage
+from mika.vocab.phrasebook import phrase
 
 try:
     import openai
@@ -43,7 +44,6 @@ log = logging.getLogger("mika.llm.openai")
 
 GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4/"
 RAW_ARGS_KEY = "_raw"
-EMPTY_TOOL_RESULT = "(résultat vide)"
 
 _FINISH = {
     "stop": "end",
@@ -121,7 +121,7 @@ def encode_args(args: Mapping[str, Any]) -> str:
 
 def tool_content(m: Message) -> str:
     """Contenu d'un tour ``tool`` : jamais vide ; une erreur voyage comme ``{"error": …}``."""
-    text = m.content if m.content.strip() else EMPTY_TOOL_RESULT
+    text = m.content if m.content.strip() else phrase("llm.empty_tool_result")
     return json.dumps({"error": text}, ensure_ascii=False) if m.is_error else text
 
 

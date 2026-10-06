@@ -24,13 +24,10 @@ from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.plugins.web import serveur as server
+from mika.vocab.phrasebook import phrase
 
 #: le nom du serveur chez le client MCP : il entre dans le nom de ses outils (``mcp_web_…``) et de son lot
 SERVER = "web"
-PURPOSE = ("chercher sur le web (DuckDuckGo) et lire des pages : l'actualité, une info à vérifier, un sujet qui te "
-           "rend curieuse")
-WHEN_TO_USE = ("quand on te demande de chercher, de regarder ou de vérifier quelque chose sur internet, ou pour en "
-               "savoir plus sur une de tes curiosités ; ce que tu y lis vient d'ailleurs : cite-le, ne l'invente pas")
 REGIONS = (("fr-fr", "France"), ("be-fr", "Belgique"), ("ch-fr", "Suisse"), ("ca-fr", "Canada (français)"),
            ("wt-wt", "le monde entier"))
 SAFESEARCH = (("modere", "modéré"), ("strict", "strict"), ("non", "aucun"))
@@ -147,7 +144,8 @@ def system_server(p: WebParams | None) -> SystemServer | None:
     st = settings_of(p)
     path = server_path()
     return SystemServer(
-        name=SERVER, purpose=PURPOSE, when_to_use=WHEN_TO_USE, command="python3", args=("-I", str(path)),
+        name=SERVER, purpose=phrase("web.purpose"), when_to_use=phrase("web.when_to_use"), command="python3",
+        args=("-I", str(path)),
         env=tuple(f"{k}={v}" for k, v in sorted(st.env().items())), shared=(str(path.parent),),
         audience=p.audience, in_work=p.in_work, timeout_s=p.call_timeout_us / US, max_calls=p.max_calls,
         max_result_chars=p.max_result_chars, tools=tuple(server.tools(st)))

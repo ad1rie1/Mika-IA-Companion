@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 from mika.kernel.clock import local, next_local
 from mika.vocab.affect import Emotion, Vec3, to_pad
+from mika.vocab.phrasebook import family, phrase, phrases
 
 
 class Phase(enum.StrEnum):
@@ -40,21 +41,8 @@ PHASE_FR: Mapping[Phase, str] = MappingProxyType({
     Phase.NIGHT: "nuit",
 })
 
-#: « c'est le matin »…
-MOMENT_FR: Mapping[Phase, str] = MappingProxyType({
-    Phase.MORNING: "le matin",
-    Phase.AFTERNOON: "l'après-midi",
-    Phase.EVENING: "le soir",
-    Phase.NIGHT: "la nuit",
-})
-
-#: Une tendance, dite comme une tendance (jamais une consigne).
-_TENDENCY_FR: Mapping[Phase, str] = MappingProxyType({
-    Phase.MORNING: "Le matin, tu es d'ordinaire plutôt d'attaque.",
-    Phase.AFTERNOON: "L'après-midi, tu es souvent en forme, facilement enjouée.",
-    Phase.EVENING: "Le soir, d'habitude, tu te poses et ton ton se fait plus doux.",
-    Phase.NIGHT: "La nuit, tu es souvent plus rêveuse.",
-})
+#: « c'est le matin »… (lu dans sa voix, ``circadian.moment``, par phase)
+MOMENT_FR: Mapping[Phase, str] = MappingProxyType({p: family("circadian.moment")[p.value] for p in Phase})
 
 
 def _default_starts() -> tuple[tuple[Phase, int], ...]:
@@ -168,40 +156,45 @@ def energy_word(value: float) -> str:
     return "très basse"
 
 
-DAYS_FR = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
-MONTHS_FR = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre",
-             "novembre", "décembre")
+#: les jours (du lundi au dimanche) et les mois, comme on les dit (lus dans sa voix : ``circadian.days``,
+#: ``circadian.months``)
+DAYS_FR: tuple[str, ...] = phrases("circadian.days")
+MONTHS_FR: tuple[str, ...] = phrases("circadian.months")
 
 
 def date_fr(dt: date) -> str:
     """« lundi 28 septembre 2026 »."""
-    return f"{day_fr(dt)} {dt.year}"
+    return phrase("circadian.date.full", day=day_fr(dt), year=dt.year)
 
 
 def day_fr(dt: date) -> str:
     """« lundi 28 septembre » (sans l'année, comme on le dit)."""
-    return f"{DAYS_FR[dt.weekday()]} {'1er' if dt.day == 1 else dt.day} {MONTHS_FR[dt.month - 1]}"
+    return phrase("circadian.date.day", weekday=DAYS_FR[dt.weekday()],
+                  day=phrase("circadian.date.first") if dt.day == 1 else dt.day, month=MONTHS_FR[dt.month - 1])
 
 
 def energy_feel(value: float) -> str:
     """Ce que son énergie lui fait, en mots (jamais un nombre) ; vide quand il
     n'y a rien à en dire."""
     if value >= 0.7:
-        return "tu as la pêche"
+        return phrase("circadian.feel.great")
     if value >= 0.5:
-        return "tu es en forme"
+        return phrase("circadian.feel.good")
     if value >= 0.35:
         return ""
     if value >= 0.2:
-        return "tu es fatiguée"
-    return "tu es épuisée"
+        return phrase("circadian.feel.tired")
+    return phrase("circadian.feel.exhausted")
 
 
 def describe(dt: datetime, profile: Profile = DEFAULT, level: float | None = None) -> str:
     """« Nous sommes lundi 28 septembre 2026, il est 23h23 — c'est la nuit, et
     tu es épuisée. La nuit, tu es souvent plus rêveuse. » Ni pourcentage ni
-    jargon : la date, l'heure, le moment, ce qu'elle ressent, une tendance."""
+    jargon : la date, l'heure, le moment, ce qu'elle ressent, une tendance (une tendance, dite comme une
+    tendance : jamais une consigne)."""
     phase = phase_of(dt, profile)
     feel = energy_feel(energy(dt, profile) if level is None else level)
-    moment = f"c'est {MOMENT_FR[phase]}" + (f", et {feel}" if feel else "")
-    return f"Nous sommes {date_fr(dt)}, il est {dt.hour}h{dt.minute:02d} — {moment}. {_TENDENCY_FR[phase]}"
+    moment = phrase("circadian.now_feeling", moment=MOMENT_FR[phase], feel=feel) if feel else \
+        phrase("circadian.now", moment=MOMENT_FR[phase])
+    return phrase("circadian.describe", date=date_fr(dt), hour=dt.hour, minute=f"{dt.minute:02d}", moment=moment,
+                  tendency=family("circadian.tendency")[phase.value])

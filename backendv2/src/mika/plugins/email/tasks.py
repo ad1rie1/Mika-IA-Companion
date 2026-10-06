@@ -20,15 +20,9 @@ from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.plugins.email import EMAIL, WAITING, EmailState, account_of, keeper_name, keepers, params_of
 from mika.vocab.episodes import Kind, task_target
+from mika.vocab.phrasebook import phrase
 
 BUNDLES = "email,memory,identity"
-BRIEF_AUTO = ("Un mail attend une réponse (« LE MAIL AUQUEL TU PRÉPARES UNE RÉPONSE », plus haut). Prépare-la avec "
-              "email_draft (mail=[{ref}]), dans la voix de cette boîte (« COMMENT TU ÉCRIS DEPUIS TES BOÎTES »). "
-              "Elle ne partira qu'avec l'accord de {who}. Si ce mail n'appelle finalement aucune réponse, "
-              "n'écris rien et dis pourquoi en une phrase.")
-BRIEF_ASKED = ("{Who} te demande de préparer une réponse à ce mail (« LE MAIL AUQUEL TU PRÉPARES UNE RÉPONSE » "
-               "et « CE QU'ON TE DEMANDE D'Y RÉPONDRE », plus haut). Écris-la avec email_draft (mail=[{ref}]), "
-               "dans la voix de cette boîte. Elle ne partira qu'avec un accord.")
 
 
 def _skipped(address: str, skip: tuple[str, ...]) -> bool:
@@ -57,7 +51,7 @@ def _prepare(s: EmailState, frame: Frame) -> list[Candidate]:
             continue
         who = keeper_name(frame, ask.by)
         out.append(_candidate(ref, ask.account or account_of(ref), p.asked_evidence,
-                              BRIEF_ASKED.replace("{Who}", who[:1].upper() + who[1:])))
+                              phrase("email.task.asked", who=who[:1].upper() + who[1:], ref=ref)))
     budget = p.drafts_per_day - _today(s, frame.now)
     if budget <= 0 or not p.autodraft:
         return out
@@ -72,7 +66,8 @@ def _prepare(s: EmailState, frame: Frame) -> list[Candidate]:
             continue
         if _pending(s, m.mail) or s.attempts.get(m.mail, 0) >= p.draft_attempts_max:
             continue
-        out.append(_candidate(m.mail, account, p.draft_evidence, BRIEF_AUTO.replace("{who}", keepers(frame))))
+        out.append(_candidate(m.mail, account, p.draft_evidence, phrase("email.task.auto", ref=m.mail,
+                                                                           who=keepers(frame))))
         budget -= 1
     return out
 
@@ -80,5 +75,5 @@ def _prepare(s: EmailState, frame: Frame) -> list[Candidate]:
 def _candidate(ref: str, account: str, evidence: float, brief: str) -> Candidate:
     return Candidate(Kind.TASK, task_target("email", ref), c.DRAFT, evidence,
                      resources=frozenset({f"mailbox:{account}"}),
-                     args=FrozenDict({"bundles": BUNDLES, "brief:email": brief.replace("{ref}", ref), "mail": ref,
+                     args=FrozenDict({"bundles": BUNDLES, "brief:email": brief, "mail": ref,
                                       "account": account}))

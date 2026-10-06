@@ -25,6 +25,7 @@ from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.plugins.imaging.faculty import IMAGING, ImagingState, Job, of_person, params_of, subject_of
 from mika.vocab.episodes import CONVERSATIONAL, Kind
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 #: au plus tant de dessins dans la section
@@ -58,24 +59,26 @@ async def _texts(s: ImagingState, frame: Frame, ports: Mapping[str, Any]) -> dic
 
 def _ago(us: int) -> str:
     minutes = max(1, us // MINUTE)
-    return f"{minutes} min" if minutes < 120 else f"{minutes // 60} h"
+    return phrase("projects.duration.minutes", n=minutes) if minutes < 120 else \
+        phrase("projects.duration.hours", n=minutes // 60)
 
 
 def line(j: Job, texts: Mapping[str, str], now: int) -> str:
     what = texts.get(j.prompt_ref, "")
-    what = f" (« {what[:160]}{'…' if len(what) > 160 else ''} »)" if what else ""
+    what = phrase("imaging.section.quoted", prompt=f"{what[:160]}{'…' if len(what) > 160 else ''}") if what else ""
     if j.status == c.WAITING:
-        return f"- Tu es en train de le dessiner{what}, depuis {_ago(now - j.at)}."
+        return "- " + phrase("imaging.section.drawing", what=what, ago=_ago(now - j.at))
     if j.status == c.READY:
         seen = texts.get(j.caption_ref, "")
-        return (f"- Il est prêt{what}" + (f" — ce que tu y vois : {seen}" if seen else "")
-                + ". Montre-le avec l'outil show_drawing, en une phrase à toi.")
+        return "- " + phrase("imaging.section.ready", what=what,
+                             seen=phrase("imaging.section.seen", caption=seen) if seen else "")
     reason = texts.get(j.reason_ref, "")
-    return (f"- Il n'a pas pu se faire{what}" + (f" : {reason}" if reason else "")
-            + ". Dis-le simplement ; propose de réessayer autrement si ça a du sens.")
+    return "- " + phrase("imaging.section.missed", what=what,
+                         reason=phrase("imaging.section.reason", reason=reason) if reason else "")
 
 
-@IMAGING.section("dessins", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=20, title="TES DESSINS",
+@IMAGING.section("dessins", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=20,
+                 title=phrase("imaging.section.title"),
                  untrusted=True, reads=[identity_c.PERSON, identity_c.HANDLES])
 def _section(s: ImagingState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     jobs = _relevant(s, frame)
@@ -85,7 +88,7 @@ def _section(s: ImagingState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
     lines = [line(j, texts, frame.now) for j in jobs]
     # ce qu'elle a demandé, pour elle-même : témoin (ce qu'on peut entendre de soi), jamais devant un salon (l'outil
     # n'y est pas offert, la section ne vise que la personne de l'épisode)
-    return SectionBody("Ce que tu dessines pour la personne à qui tu parles :\n" + "\n".join(lines),
+    return SectionBody(phrase("imaging.section.head") + "\n" + "\n".join(lines),
                        level=int(Sensitivity.PERSONAL), witness=True)
 
 
@@ -107,7 +110,7 @@ def _address(frame: Frame, j: Job) -> str:
 
 def _who(frame: Frame, j: Job) -> str:
     name = frame.get(identity_c.IDENTITY(j.person)).name if j.person else ""
-    return f"« {name} »" if name else "cette personne"
+    return f"« {name} »" if name else phrase("expression.person.unnamed")
 
 
 @IMAGING.propose(kinds=[Kind.INITIATIVE], reasons={c.DELIVER: (0.0, 17.0), c.COULD_NOT: (0.0, 17.0)},
@@ -121,11 +124,9 @@ def _owed(s: ImagingState, frame: Frame) -> list[Candidate]:
         address = _address(frame, j)
         who = _who(frame, j)
         if j.status == c.READY:
-            reason, brief = c.DELIVER, (f"Le dessin que {who} t'a demandé est prêt : montre-le-lui avec l'outil "
-                                        "show_drawing, et dis-en un mot à ta façon.")
+            reason, brief = c.DELIVER, phrase("imaging.brief.ready", who=who)
         else:
-            reason, brief = c.COULD_NOT, (f"Le dessin que {who} t'a demandé n'a pas pu se faire : dis-le-lui "
-                                          "simplement (la raison est dans ce que tu sais de tes dessins).")
+            reason, brief = c.COULD_NOT, phrase("imaging.brief.missed", who=who)
         out.append(Candidate(
             Kind.INITIATIVE, address, reason, p.deliver_evidence, resources=frozenset({floor(address)}),
             guards=(_still(j.job, j.status),),

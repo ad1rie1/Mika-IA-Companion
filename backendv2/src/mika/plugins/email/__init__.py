@@ -51,6 +51,7 @@ from mika.kernel.state import FrozenDict
 from mika.ports.mail import split_ref
 from mika.vocab.episodes import PROJECT_KINDS, WAKE_KINDS, WORKING, Kind, task_of
 from mika.vocab.people import clean_display_name
+from mika.vocab.phrasebook import phrase
 
 KEEP = 100
 BUNDLE = "email"
@@ -69,7 +70,7 @@ MENTION_PROVENANCE = "mail:"
 #: au plus tant de mails annoncés à la fois (les plus importants)
 MENTION_MAX = 3
 #: le titre de la section qui montre les mails annoncés : la consigne de l'initiative y renvoie
-MENTION_TITLE = "LE MAIL IMPORTANT QUI VIENT D'ARRIVER"
+MENTION_TITLE = phrase("email.mention.title")
 #: ce qui reste au moins de cette section quand la place manque (elle est l'objet de l'initiative)
 MENTION_FLOOR = 500
 #: les initiatives d'annonce en cours dont on retient le départ
@@ -246,8 +247,7 @@ class PollAsked(Payload):
 #: les demandes de rédaction sont élaguées (elles ne l'étaient pas en v3)
 EMAIL = Faculty("email", state=EmailState, init=lambda p: EmailState(), params=EmailParams, state_version=4)
 EMAIL.declare(*c.ALL)
-EMAIL.bundle(BUNDLE, "tes boîtes aux lettres : lister, chercher et lire ce qui est arrivé, préparer une réponse "
-                     "(elle attend l'accord de la personne qui s'occupe de toi)")
+EMAIL.bundle(BUNDLE, phrase("email.bundle"))
 READ = EMAIL.event("read", MailRead)
 POLL_ASKED = EMAIL.event("poll_asked", PollAsked)
 
@@ -464,8 +464,9 @@ def for_owner(frame: Frame) -> bool:
     return bool(audience.owner)
 
 
-#: comment elle dit qui s'occupe d'elle quand elle ne sait pas son prénom (jamais « ton opérateur »)
-KEEPER = "la personne qui s'occupe de toi"
+def keeper() -> str:
+    """Comment elle dit qui s'occupe d'elle quand elle ne sait pas son prénom (jamais « ton opérateur »)."""
+    return phrase("projects.caretaker")
 
 
 def person_name(frame: Frame, handle: str) -> str:
@@ -477,7 +478,7 @@ def person_name(frame: Frame, handle: str) -> str:
 def keeper_name(frame: Frame, handle: str) -> str:
     """Qui a agi depuis sa boîte (écrit, retouché, refusé), dit comme elle le dirait : son prénom,
     sinon « la personne qui s'occupe de toi »."""
-    return person_name(frame, handle) or KEEPER
+    return person_name(frame, handle) or keeper()
 
 
 def keepers(frame: Frame) -> str:
@@ -485,8 +486,8 @@ def keepers(frame: Frame) -> str:
     Bea »), sinon « la personne qui s'occupe de toi »."""
     names = [n for n in dict.fromkeys(person_name(frame, o) for o in frame.get(identity_c.OWNERS)) if n]
     if not names:
-        return KEEPER
-    return names[0] if len(names) == 1 else " ou ".join(names[:3])
+        return keeper()
+    return names[0] if len(names) == 1 else phrase("email.keepers_or").join(names[:3])
 
 
 def operator_label(frame: Frame, handle: str) -> str:

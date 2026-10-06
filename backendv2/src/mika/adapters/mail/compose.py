@@ -19,6 +19,7 @@ from email.message import EmailMessage
 
 from mika.contracts.self_ import DEFAULT_NAME
 from mika.ports.mail import AccountInfo, Draft, Mail, Preview, addresses, to_fill
+from mika.vocab.phrasebook import phrase
 
 
 def sender(account: AccountInfo, her: str = DEFAULT_NAME) -> str:
@@ -29,17 +30,18 @@ def sender(account: AccountInfo, her: str = DEFAULT_NAME) -> str:
     if account.voice == "proprietaire" and owner:
         name = owner
     elif account.voice == "assistante" and owner:
-        name = f"{her} (pour {owner})"
+        name = phrase("mail.sender_for", her=her, owner=owner)
     else:
         name = her
     return email.utils.formataddr((name, account.address))
 
 
-def _when(at: int, tz: tzinfo) -> str:
+def _quote_head(sender: str, at: int, tz: tzinfo) -> str:
+    """L'en-tête de la citation : « Le 30/09/2026 à 15:00, Adrien a écrit : » (sans date : « Adrien a écrit : »)."""
     if not at:
-        return ""
+        return phrase("mail.quote", who=sender)
     dt = datetime.fromtimestamp(at / 1_000_000, tz=UTC).astimezone(tz)
-    return f"le {dt:%d/%m/%Y à %H:%M}"
+    return phrase("mail.quote_dated", date=f"{dt:%d/%m/%Y}", time=f"{dt:%H:%M}", who=sender)
 
 
 def final_text(body: str, account: AccountInfo, parent: Mail | None, *, quote: bool, tz: tzinfo = UTC) -> str:
@@ -49,9 +51,7 @@ def final_text(body: str, account: AccountInfo, parent: Mail | None, *, quote: b
         text += "\n\n-- \n" + signature
     if quote and parent is not None and parent.body.strip():
         cited = "\n".join("> " + line for line in parent.body.splitlines())
-        when = _when(parent.date, tz)
-        head = f"{when[:1].upper()}{when[1:]}, {parent.sender} a écrit :" if when else f"{parent.sender} a écrit :"
-        text += f"\n\n{head}\n{cited}"
+        text += f"\n\n{_quote_head(parent.sender, parent.date, tz)}\n{cited}"
     return text
 
 

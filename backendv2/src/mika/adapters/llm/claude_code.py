@@ -66,6 +66,7 @@ from typing import Any
 from mika.adapters.mcp.protocol import Outcome, Tool
 from mika.adapters.mcp.relay import Pending, Relay, RelaySession
 from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolCall, Usage
+from mika.vocab.phrasebook import phrase
 
 log = logging.getLogger("mika.llm.claude_code")
 
@@ -267,15 +268,16 @@ class ClaudeCodeBackend:
         turns = [m for m in req.messages if m.role in ("user", "assistant") and m.content.strip()]
         last = turns[-1] if turns and turns[-1].role == "user" else None
         history = turns[:-1] if last is not None else turns
-        lines = [f"toi : {m.content.strip()}" if m.role == "assistant" else m.content.strip() for m in history]
+        lines = [phrase("llm.thread.mine", text=m.content.strip()) if m.role == "assistant" else m.content.strip()
+                 for m in history]
         text = last.content if last is not None else ""
         if lines:
-            text = "--- LE FIL JUSQU'ICI (tes répliques marquées « toi ») ---\n" + "\n".join(lines) + \
-                   "\n--- FIN DU FIL ---\n\n" + text
+            text = phrase("llm.thread.header") + "\n" + "\n".join(lines) + "\n" + phrase("llm.thread.footer") \
+                + "\n\n" + text
         content: list[dict[str, Any]] = [
             {"type": "image", "source": {"type": "base64", "media_type": i.mime, "data": i.data}}
             for i in (last.images if last is not None else ())]
-        content.append({"type": "text", "text": text or "(silence)"})
+        content.append({"type": "text", "text": text or phrase("llm.thread.silence")})
         return {"type": "user", "message": {"role": "user", "content": content}}
 
     def mcp_config(self, session: RelaySession, base: str) -> dict[str, Any]:

@@ -36,6 +36,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, Superseded
 from mika.kernel.state import FrozenDict
 from mika.vocab.episodes import PROJECT_KINDS, WAKE_KINDS, Kind
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 #: l'état d'un appel
@@ -414,30 +415,26 @@ class Expire:
 
 class ReportArgs(BaseModel):
     outcome: Literal["fait", "impossible", "pas_fini"] = Field(
-        description="fait : c'est fait ; impossible : tu ne peux pas le faire (consignes, limites, outils) ; "
-                    "pas_fini : tu n'as pas pu aller au bout")
-    summary: str = Field(min_length=1, max_length=SUMMARY_MAX,
-                         description="ce que tu as fait ou trouvé, pour qui lira ce compte rendu")
+        description=phrase("wakeup.tools.report.outcome"))
+    summary: str = Field(min_length=1, max_length=SUMMARY_MAX, description=phrase("wakeup.tools.report.summary"))
 
 
-WAKEUP.bundle("wakeup", "conclure un réveil par API : le compte rendu de ce que l'appel t'a fait faire")
+WAKEUP.bundle("wakeup", phrase("wakeup.bundle"))
 
 
-@WAKEUP.tool(REPORT, description="Conclure ce réveil par API : ce que tu en as fait (« fait », « impossible » ou "
-             "« pas_fini ») et un compte rendu pour qui le lira. C'est la fin du réveil.",
-             args=ReportArgs, bundle="wakeup", episodes=sorted(WAKE_KINDS), max_calls_per_episode=2, ends_loop=True)
+@WAKEUP.tool(REPORT, description=phrase("wakeup.tools.report.description"), args=ReportArgs, bundle="wakeup", episodes=sorted(WAKE_KINDS), max_calls_per_episode=2, ends_loop=True)
 async def report_wake(args: ReportArgs, ctx: Any) -> Any:
     call = current(ctx)
     if call is None:
-        return ToolResult(ok=False, content="Ce réveil n'est plus en cours (expiré ou annulé).")
+        return ToolResult(ok=False, content=phrase("wakeup.tools.report.gone"))
     if any(name == REPORT and ok for name, ok in ctx.calls):
-        return ToolResult(ok=False, content="Tu as déjà conclu ce réveil : arrête-toi là.")
+        return ToolResult(ok=False, content=phrase("wakeup.tools.report.already"))
     summary = args.summary.strip()
     await ctx.emit(REPORTED.draft(call=call.seq, outcome=args.outcome,
                                   summary=Content.of(summary, level=int(Sensitivity.PERSONAL)), about=call.about))
     if call.notify == c.NOBODY:
-        return "C'est noté : ton compte rendu reste dans la console."
-    return "C'est noté : tu le diras à qui ce réveil rend compte."
+        return phrase("wakeup.tools.report.console")
+    return phrase("wakeup.tools.report.told")
 
 
 # ses contributions : son prompt et ses candidats, sa console

@@ -12,10 +12,12 @@ from types import SimpleNamespace
 
 from mika.inspector.mcp import TOOLS as CONSOLE_TOOLS
 from mika.inspector.pages import tools as page
-from mika.runtime.tools import ACTING
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.console_html import ConsoleHTML
 from tests.protocol.test_inspector_pages import every_page, html_of
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
+
+ACTING = phrase("runtime.tools.acting")
 
 BASE = "/inspecteur/outils"
 

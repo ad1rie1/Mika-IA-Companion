@@ -51,6 +51,7 @@ from mika.kernel.clock import DAY
 from mika.ports.feeds import Entry, shown
 from mika.ports.paging import Page, fold_text
 from mika.ports.preprocess import HTML_SKIPPED, html_text
+from mika.vocab.phrasebook import phrase
 
 NS_ATOM = "http://www.w3.org/2005/Atom"
 NS_RSS1 = "http://purl.org/rss/1.0/"
@@ -167,7 +168,7 @@ def parse(raw: bytes) -> tuple[str, list[tuple[str, str, str, str, int]]]:
 
 def _rss(node: Any, ns: str = "") -> tuple[str, str, str, str, int]:
     p = f"{{{ns}}}" if ns else ""
-    title = clean(_text(node, f"{p}title"))[:500] or "(sans titre)"
+    title = clean(_text(node, f"{p}title"))[:500] or phrase("feeds.untitled")
     link = _text(node, f"{p}link").strip()[:2000]
     guid = _text(node, f"{p}guid").strip()[:500]
     summary = clean(_text(node, f"{p}description") or _text(node, f"{{{NS_CONTENT}}}encoded"))
@@ -176,7 +177,7 @@ def _rss(node: Any, ns: str = "") -> tuple[str, str, str, str, int]:
 
 
 def _atom(node: Any) -> tuple[str, str, str, str, int]:
-    title = clean(_text(node, f"{{{NS_ATOM}}}title"))[:500] or "(sans titre)"
+    title = clean(_text(node, f"{{{NS_ATOM}}}title"))[:500] or phrase("feeds.untitled")
     link = ""
     for cand in node.findall(f"{{{NS_ATOM}}}link"):
         if cand.get("rel", "alternate") == "alternate" or not link:

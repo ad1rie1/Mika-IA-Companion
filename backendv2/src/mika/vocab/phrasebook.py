@@ -88,17 +88,7 @@ def _read(path: Path) -> dict[str, Leaf]:
 
 @lru_cache(maxsize=4)
 def _catalog(path: Path) -> Mapping[str, Leaf]:
-    out = _read(path)
-    # MIGRATION (ADR 0071) : pendant qu'on y range les phrases, des fragments ``voix.d/*.yaml`` complètent le
-    # fichier ; ils y sont fusionnés à la fin, et ce dossier disparaît
-    fragments = path.with_suffix(".d")
-    for extra in sorted(fragments.glob("*.yaml")) if fragments.is_dir() else ():
-        more = _read(extra)
-        twice = sorted(set(more) & set(out))
-        if twice:
-            raise VoiceError(f"{extra} : {', '.join(twice[:5])} déjà dit ailleurs")
-        out.update(more)
-    return MappingProxyType(out)
+    return MappingProxyType(_read(path))
 
 
 def catalog() -> Mapping[str, Leaf]:
@@ -133,9 +123,8 @@ def fill(key: str, text: str, fields: Mapping[str, object]) -> str:
         extra = ", ".join(sorted(given - wanted)) or "—"
         raise VoiceError(f"{voice_file()} : la phrase « {key} » a les trous {sorted(wanted)} ; le code donne "
                          f"{sorted(given)} (manquants : {missing} ; en trop : {extra})")
-    for name, value in fields.items():
-        text = text.replace("{" + name + "}", str(value))
-    return text
+    # en une passe : une valeur qui contient elle-même « {trou} » (un objet de mail, du code) reste telle quelle
+    return HOLE.sub(lambda m: str(fields[m.group(1)]), text)
 
 
 def phrase(key: str, /, **fields: object) -> str:

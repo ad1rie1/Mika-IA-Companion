@@ -48,12 +48,12 @@ from mika.ports.mcp import (
     ToolReview,
 )
 from mika.ports.preprocess import inert
+from mika.vocab.phrasebook import phrase
 
 log = logging.getLogger("mika.mcp")
 
 #: les décisions de l'opérateur : serveur → outil → décision
 Reviews = dict[str, dict[str, StoredReview]]
-UNAVAILABLE = "Ce service n'est pas disponible en ce moment."
 KEPT_MAX = 200
 
 
@@ -302,7 +302,7 @@ class McpHub:
         spec = self._safe_config().servers.get(server)
         st = self._servers.get(server)
         if spec is None or not spec.enabled or not spec.ready or st is None or st.broken:
-            return CallResult(False, UNAVAILABLE, reached=False)
+            return CallResult(False, phrase("mcp.unavailable"), reached=False)
         timeout = timeout_s or spec.timeout_s
         st.calls += 1
         for attempt in (0, 1):
@@ -315,20 +315,20 @@ class McpHub:
                     continue  # la requête n'a pas été traitée : une session neuve, une fois
                 self._fail(st, spec, McpError("la session a expiré deux fois"))
                 self._changed()
-                return CallResult(False, UNAVAILABLE, reached=False)
+                return CallResult(False, phrase("mcp.unavailable"), reached=False)
             except McpRemoteError as exc:
                 st.failures += 1
                 st.consecutive, st.last_ok_at = 0, self._now()
-                return CallResult(False, f"Le service a refusé : {_said(exc)}", reached=True)
+                return CallResult(False, phrase("mcp.service.refused", error=_said(exc)), reached=True)
             except (McpError, OSError) as exc:
                 self._fail(st, spec, exc)
                 self._changed()
-                return CallResult(False, f"Le service n'a pas répondu : {_said(exc)}", reached=False)
+                return CallResult(False, phrase("mcp.service.silent", error=_said(exc)), reached=False)
             st.consecutive, st.last_ok_at = 0, self._now()
             if out.is_error:
                 st.failures += 1
             return CallResult(not out.is_error, out.text, reached=True)
-        return CallResult(False, UNAVAILABLE, reached=False)
+        return CallResult(False, phrase("mcp.unavailable"), reached=False)
 
     # ── les décisions de l'opérateur ──
     async def review(self, server: str, remote: str, *, enabled: bool, nature: str, approval: str,

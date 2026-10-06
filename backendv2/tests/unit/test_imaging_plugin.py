@@ -31,16 +31,19 @@ from mika.faculties.identity import audience_for
 from mika.kernel.clock import MINUTE, ManualClock
 from mika.kernel.registry import ArbitrationPolicy
 from mika.plugins.imaging.faculty import ImagingParams
-from mika.plugins.imaging.policy import MINORS, REAL_PERSON, floor, minor_in
+from mika.plugins.imaging.policy import floor, minor_in
 from mika.plugins.imaging.prompt import _owed
-from mika.plugins.imaging.tools import NO_PORT, NOT_HERE
 from mika.ports.imaging import ImageCaps
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.runtime.pipeline import EpisodeRequest
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import boot, build, connect, said
 from tests.unit.test_shares import call, journal
+
+MINORS, REAL_PERSON = phrase("imaging.floor.minors"), phrase("imaging.floor.real_person")
+NO_PORT, NOT_HERE = phrase("imaging.tools.no_port"), phrase("imaging.tools.not_here")
 
 LOCAL = ImageCaps(edit=True, max_refs=4, adult=True, local=True)
 HOSTED = ImageCaps(edit=True, max_refs=16)
