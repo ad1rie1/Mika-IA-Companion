@@ -2805,8 +2805,8 @@ projects:
     run_objective: exécution {run} · objectif n° {objective}
 
   # ── Ses outils de projet ────────────────────────────────────────────────────────────────────────────────────
-  # Pendant une exécution, et en conversation pour en ouvrir, en accepter ou en clore un (projects/tools.py). Le
-  # modèle lit la description de chaque outil et de ses paramètres, puis la réponse de l'outil.
+  # Pendant une exécution, et en conversation pour en ouvrir, en accepter, en piloter ou en clore un
+  # (projects/tools.py). Le modèle lit la description de chaque outil et de ses paramètres, puis la réponse de l'outil.
   tools:
     # la réponse de chaque outil d'exécution quand le projet n'est plus actif
     gone: "Ce projet n'est plus actif (en pause ou archivé) : arrête-toi là."
@@ -2956,6 +2956,73 @@ projects:
       note: "Clos : {why}"
       done: "C'est fait : ce projet est clos."
       dropped: "C'est fait : tu le laisses de côté."
+
+    steer:
+      # L'outil project_steer : piloter un projet de vive voix, en réponse et en privé, avec qui s'occupe d'elle — un
+      # projet qu'elle lui a confié, ou un projet à elle (un objectif de plus, une consigne, s'y mettre maintenant,
+      # la pause, la reprise). Son cadre (titre, mode, outils, accord, dépôt, plage) reste à la console.
+      description: >-
+        Piloter un projet quand la personne qui s'occupe de toi te le demande : lui ajouter un objectif, lui donner
+        une consigne pour la suite, t'y mettre maintenant, le mettre en pause ou le reprendre — un projet qu'elle t'a
+        confié, ou un projet à toi. Son cadre (titre, mode, outils, accord) ne se change pas ici.
+      # ses paramètres (les noms add, instruct, now, pause, resume, once, constant et « text » sont ceux du code : NE
+      # PAS LES TRADUIRE)
+      project: "de quel projet il s'agit : son numéro, ou quelques mots de son titre"
+      what: >-
+        add : lui ajouter un objectif (dans « text ») ; instruct : une consigne pour la suite (dans « text »), relue
+        à chaque exécution ; now : t'y mettre dès que possible ; pause : le mettre en pause ; resume : le reprendre
+      text: "avec add : l'objectif, en une phrase ; avec instruct : la consigne"
+      kind: "avec add — once : à faire une fois ; constant : à entretenir, il revient"
+      cadence_hours: "avec add, un constant : toutes les combien d'heures (0 : la valeur par défaut)"
+      objective: "avec now, facultatif : l'objectif à viser (son numéro, ou quelques mots)"
+      # ses réponses
+      # quelqu'un d'autre, ou pas en privé. {who} : « Adrien », ou projects.caretaker
+      not_owner: "Seul(e) {who} pilote tes projets avec toi : rien n'y a changé, ne promets pas que ce sera fait."
+      none: >-
+        Tu n'as aucun projet en cours à piloter avec cette personne (ni qu'elle t'a confié, ni à toi) : rien n'a
+        changé. Un nouveau travail : create_project.
+      # elle n'a pas su duquel il s'agit. {listed} : les projets (ou les objectifs), un par ligne (item)
+      which_project: "Je ne sais pas de quel projet il s'agit :\n{listed}\nRien n'a changé : demande-lui lequel, puis recommence (son numéro suffit)."
+      which_objective: "Je ne sais pas quel objectif viser :\n{listed}\nRien n'a changé : recommence avec son numéro (ou sans objectif : celui qui vient)."
+      # une ligne de ces listes. {id} : le numéro ; {text} : le titre, l'objectif, ou untitled / forgotten
+      item: "- n° {id} : {text}"
+      untitled: (titre oublié)
+      forgotten: (oublié)
+      # le projet, dans les réponses ci-dessous ({title}) : son titre entre guillemets, sinon son numéro
+      quoted: "« {text} »"
+      numbered: "n° {id}"
+      # le projet a changé entre-temps (un opérateur l'a mis en pause, archivé, ou a retiré l'objectif visé)
+      changed: "Ce projet a changé entre-temps (mis en pause, archivé, ou cet objectif n'est plus ouvert) : rien n'a changé."
+      # pause et reprise
+      already_paused: "Le projet {title} est déjà en pause."
+      paused: "C'est en pause : plus aucune exécution du projet {title} jusqu'à ce qu'on le reprenne."
+      not_paused: "Le projet {title} n'est pas en pause : il avance déjà."
+      resumed: "C'est repris : le projet {title} repart d'où il en était."
+      # add ou instruct sans « text »
+      no_objective: "Dis l'objectif à ajouter (dans « text ») : rien n'a changé."
+      no_instruction: "Dis la consigne (dans « text ») : rien n'a changé."
+      instructed: "Consigne notée pour le projet {title} : tu la liras à ta prochaine exécution (la plus récente prime)."
+      # un objectif au-delà de 500 caractères (la limite est dans le code)
+      too_long: >-
+        Un objectif tient en une phrase (500 caractères au plus) : rien n'a changé. Le détail peut être une consigne
+        (instruct).
+      # {count} : le nombre d'objectifs vivants qu'un projet garde au plus
+      full: "Le projet {title} a déjà {count} objectifs ouverts ou bloqués : rien n'a changé."
+      # {id} : son numéro ; {kind} : projects.tools.objective_add.constant ou once
+      added: "Objectif n° {id} ajouté au projet {title} ({kind}) : tu le verras à ta prochaine exécution."
+      # now : t'y mettre dès que possible (comme « Lancer maintenant » à la console)
+      now_paused: "Le projet {title} est en pause : reprends-le d'abord (resume)."
+      no_open: "Le projet {title} n'a aucun objectif ouvert à viser : rien n'a changé."
+      busy: "Tu travailles déjà sur le projet {title} en ce moment : rien à relancer."
+      already_asked: "C'est déjà demandé : tu te mets au projet {title} dès que possible."
+      outgoing: >-
+        Quelque chose de ce projet est en route hors de la machine (un envoi, une commande réseau) : tu t'y remettras
+        quand ce sera revenu. Rien n'a changé.
+      nothing_open: "Le projet {title} n'a rien d'ouvert à faire pour l'instant : ajoute-lui d'abord un objectif (add)."
+      # {on} : on_objective, ou rien
+      asked: "C'est demandé : tu te mets au projet {title} dès que possible{on}."
+      # {id} : l'objectif visé
+      on_objective: ", sur l'objectif n° {id}"
 
   # ── L'atelier ───────────────────────────────────────────────────────────────────────────────────────────────
   # Les outils de l'atelier d'un projet (lot « workshop », projects/atelier.py) : lire, écrire, lancer des programmes

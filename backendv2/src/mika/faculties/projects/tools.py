@@ -4,9 +4,12 @@ Pendant une exécution (``WORK`` ou ``JOB``) : ``report_run`` (le verdict, qui l
 clôt), ``project_note`` (son carnet), ``project_decide`` (une décision
 technique, qui peut en remplacer une autre), ``project_objective_add`` (un
 objectif de plus). En conversation : ``create_project`` (un projet qu'on lui
-confie — seulement quelqu'un qui s'occupe d'elle) et ``start_project`` (un
+confie — seulement quelqu'un qui s'occupe d'elle), ``start_project`` (un
 projet à elle — aussi pendant une exploration qui s'avère plus grosse qu'une
-envie). Partout : ``project_close`` (clore un projet à elle).
+envie) et ``project_steer`` (le piloter de vive voix avec qui s'occupe d'elle :
+un objectif de plus, une consigne, s'y mettre maintenant, la pause, la
+reprise — jamais son cadre). Partout : ``project_close`` (clore un projet à
+elle).
 
 **« Fait » se prouve** : pour un objectif ponctuel, un commit non vide pendant
 l'objectif (ce qu'elle a écrit dans l'atelier), ou un brouillon de mail, une
@@ -19,6 +22,7 @@ un seul verdict).
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -28,27 +32,35 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects.faculty import (
+    AMENDED,
     ARCHIVED,
     DECIDED,
     DECISIONS_KEPT,
     DEFAULT_BUNDLES,
     NOTED,
+    NUDGED,
     OBJECTIVE_ADDED,
     OBJECTIVES_KEPT,
+    PAUSED,
     PROJECTS,
     PUSH,
+    RESUMED,
     Objective,
     Project,
     ProjectsState,
+    busy,
     cadence,
     check_schedule,
     decision_at,
     in_force,
     live,
     living,
+    nudged,
     objective_at,
     objective_of,
+    outgoing,
     params,
+    pick,
     written,
 )
 from mika.kernel.clock import HOUR
@@ -58,7 +70,8 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, Superseded
 from mika.vocab.episodes import PROJECT_KINDS, Kind, goal_of, project_of, project_target
 from mika.vocab.phrasebook import phrase
-from mika.vocab.privacy import Sensitivity
+from mika.vocab.privacy import Sensitivity, hearable
+from mika.vocab.words import stems
 
 REPORT, NOTE, DECIDE, OBJECTIVE_ADD = "report_run", "project_note", "project_decide", "project_objective_add"
 #: ce qui change quelque chose (le compte rendu le dit) : écrire, modifier, un programme qui a réussi, un
@@ -515,3 +528,186 @@ async def project_close(args: CloseArgs, ctx: Any) -> Any:
                    ARCHIVED.draft(project=p.id, reason=ENDING_REASON[args.ending], by="self", ending=args.ending,
                                   owner=p.owner, about=p.about))
     return phrase("projects.tools.close.done") if args.ending == "done" else phrase("projects.tools.close.dropped")
+
+
+# ── En conversation : piloter un projet ───────────────────────────────────
+
+
+STEER = "project_steer"
+ADD, INSTRUCT, NOW, PAUSE, RESUME = "add", "instruct", "now", "pause", "resume"
+#: un projet qu'on pilote encore (archivé, il ne fait plus rien)
+STEERABLE = (c.ACTIVE, c.PAUSED)
+#: les projets, les objectifs qu'elle énumère quand elle ne sait pas duquel il s'agit
+LISTED = 12
+#: la raison d'une pause demandée en conversation (qui l'a demandée : ``by``, que la console nomme)
+PAUSED_IN_TALK = "mis en pause en conversation"
+
+
+class SteerArgs(BaseModel):
+    project: str = Field(min_length=1, max_length=200, description=phrase("projects.tools.steer.project"))
+    what: Literal["add", "instruct", "now", "pause", "resume"] = Field(
+        description=phrase("projects.tools.steer.what"))
+    text: str = Field(default="", max_length=2000, description=phrase("projects.tools.steer.text"))
+    kind: Literal["once", "constant"] = Field(default="once", description=phrase("projects.tools.steer.kind"))
+    cadence_hours: int = Field(default=0, ge=0, le=24 * 30, description=phrase("projects.tools.steer.cadence_hours"))
+    objective: str = Field(default="", max_length=200, description=phrase("projects.tools.steer.objective"))
+
+
+def steers(p: Project, person: str | None) -> bool:
+    """Cette personne pilote-t-elle ce projet avec elle ? Un projet vivant qu'elle lui a confié, ou un projet à elle
+    (qui s'occupe d'elle le pilote aussi). Qu'elle s'occupe d'elle et parle en privé se juge à part
+    (``audience.owner``)."""
+    return live(p) and bool(person) and (p.owner == person or p.authority == c.SELF)
+
+
+def _contents(ctx: Any, refs: list[str]) -> Mapping[str, str]:
+    store = ctx.ports.get("store")
+    wanted = [r for r in refs if r]
+    return store.content(wanted) if store is not None and wanted else {}
+
+
+def _which(said: str, rows: list[tuple[int, str]]) -> int | None:
+    """Le numéro dont il s'agit : dit tel quel (« 3 », « n° 3 »), sinon le seul qu'il y a, sinon celui qui a le
+    plus de mots en commun avec ce qu'elle en dit — s'il est seul dans ce cas (sinon rien : elle demande lequel)."""
+    raw = said.strip().lower().removeprefix("n°").removeprefix("#").strip()
+    if raw.isdigit():
+        return int(raw) if any(i == int(raw) for i, _ in rows) else None
+    if len(rows) == 1:
+        return rows[0][0]
+    said_stems = stems(said)
+    scored = [(len(said_stems & stems(text)), i) for i, text in rows]
+    best = max((n for n, _ in scored), default=0)
+    top = [i for n, i in scored if n == best]
+    return top[0] if best and len(top) == 1 else None
+
+
+def _listed(rows: list[tuple[int, str]], empty: str) -> str:
+    """Les projets (ou les objectifs) parmi lesquels elle n'a pas su choisir, un par ligne."""
+    return "\n".join(phrase("projects.tools.steer.item", id=i, text=text or empty) for i, text in rows[:LISTED])
+
+
+def _in_state(project: int, wanted: tuple[str, ...]) -> Guard:
+    """Un geste ne vaut que si le projet est toujours dans cet état (un opérateur a pu le mettre en pause ou
+    l'archiver entre-temps)."""
+    return Guard("projet inchangé", predicate=lambda view, k=project: view.get(c.STATUS(k)) in wanted)
+
+
+async def _steered(ctx: Any, draft: Draft[Any], guard: Guard) -> Any:
+    """Écrire un geste sous sa garde ; ``None`` quand c'est elle qui a cédé (le projet a changé entre-temps)."""
+    try:
+        return await ctx.emit(draft, guard=guard)
+    except Superseded:
+        if guard.predicate is not None and guard.predicate(ctx.mind.frame().view):
+            raise  # c'est la garde de la conversation qui a cédé
+        return None
+
+
+def _changed() -> ToolResult:
+    """La réponse d'un geste quand le projet a changé sous elle (une garde a cédé) : rien n'a changé."""
+    return ToolResult(ok=False, content=phrase("projects.tools.steer.changed"))
+
+
+@PROJECTS.tool(STEER, description=phrase("projects.tools.steer.description"), args=SteerArgs, bundle="projects",
+               episodes=[Kind.REPLY], max_calls_per_episode=2, owner_only=True,
+               rule="seulement en privé avec qui s'occupe d'elle, sur un projet vivant qu'elle lui a confié ou un "
+                    "projet à elle")
+async def project_steer(args: SteerArgs, ctx: Any) -> Any:
+    frame: Frame = ctx.frame
+    who = _person(frame)
+    aud = frame.audience
+    if who is None or aud is None or not owner_speaks(frame):
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.not_owner", who=caretaker(frame)))
+    person = who[1]
+    s: ProjectsState = frame.state("projects")
+    # ceux dont le détail peut s'entendre ici (la règle de « TES PROJETS ») : on ne pilote pas à l'aveugle
+    mine = [p for p in sorted(s.projects.values(), key=lambda x: x.id) if steers(p, person)
+            and hearable(p.about, written(p), person, aud.level, aud.witness_level, aud.private_ok)]
+    if not mine:
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.none"))
+    texts = _contents(ctx, [p.title_ref for p in mine])
+    rows = [(p.id, texts.get(p.title_ref, "")) for p in mine]
+    pid = _which(args.project, rows)
+    if pid is None:
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.which_project", listed=_listed(
+            rows, phrase("projects.tools.steer.untitled"))))
+    p = s.projects[pid]
+    title = phrase("projects.tools.steer.quoted", text=texts[p.title_ref]) if texts.get(p.title_ref) else \
+        phrase("projects.tools.steer.numbered", id=p.id)
+    if args.what == NOW:
+        return await _steer_now(args, ctx, s, p, person, title)
+    if args.what == PAUSE:
+        if p.status == c.PAUSED:
+            return phrase("projects.tools.steer.already_paused", title=title)
+        draft = PAUSED.draft(project=p.id, reason=PAUSED_IN_TALK, by=person, owner=p.owner, about=p.about)
+        if await _steered(ctx, draft, _in_state(p.id, (c.ACTIVE,))) is None:
+            return _changed()
+        return phrase("projects.tools.steer.paused", title=title)
+    if args.what == RESUME:
+        if p.status == c.ACTIVE:
+            return phrase("projects.tools.steer.not_paused", title=title)
+        draft = RESUMED.draft(project=p.id, by=person, owner=p.owner, about=p.about)
+        if await _steered(ctx, draft, _in_state(p.id, (c.PAUSED,))) is None:
+            return _changed()
+        return phrase("projects.tools.steer.resumed", title=title)
+    text = args.text.strip()
+    if not text:
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.no_objective") if args.what == ADD
+                          else phrase("projects.tools.steer.no_instruction"))
+    if args.what == INSTRUCT:
+        draft = AMENDED.draft(project=p.id, instruction=Content.of(text, level=p.sensitivity), by=person,
+                              owner=p.owner, about=p.about)
+        if await _steered(ctx, draft, _in_state(p.id, STEERABLE)) is None:
+            return _changed()
+        return phrase("projects.tools.steer.instructed", title=title)
+    if len(text) > 500:
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.too_long"))
+    if living(p) >= OBJECTIVES_KEPT:
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.full", title=title, count=OBJECTIVES_KEPT))
+    number = p.objective_seq + 1
+    commit = await _steered(ctx, OBJECTIVE_ADDED.draft(
+        project=p.id, objective=number, text=Content.of(text, level=written(p)), kind=args.kind,
+        cadence_us=args.cadence_hours * HOUR if args.kind == c.CONSTANT else 0, author="owner", by=person,
+        owner=p.owner, about=p.about), _in_state(p.id, STEERABLE))
+    if commit is None:
+        return _changed()
+    number = _attributed(ctx, p.id, commit, "text", "objectives", number)
+    kind = phrase("projects.tools.objective_add.constant") if args.kind == c.CONSTANT else \
+        phrase("projects.tools.objective_add.once")
+    return phrase("projects.tools.steer.added", id=number, title=title, kind=kind)
+
+
+async def _steer_now(args: SteerArgs, ctx: Any, s: ProjectsState, p: Project, person: str, title: str) -> Any:
+    """« Mets-toi sur ton projet maintenant » : comme « Lancer maintenant » dans la console — sous les plafonds,
+    jamais pendant son sommeil en mode Mika."""
+    frame: Frame = ctx.frame
+    if p.status != c.ACTIVE:
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.now_paused", title=title))
+    o: Objective | None = None
+    if args.objective.strip():
+        opened = [x for x in p.objectives if x.status == c.OPEN]
+        if not opened:
+            return ToolResult(ok=False, content=phrase("projects.tools.steer.no_open", title=title))
+        texts = _contents(ctx, [x.text_ref for x in opened])
+        rows = [(x.id, texts.get(x.text_ref, "")) for x in opened]
+        oid = _which(args.objective, rows)
+        if oid is None:
+            return ToolResult(ok=False, content=phrase("projects.tools.steer.which_objective", listed=_listed(
+                rows, phrase("projects.tools.steer.forgotten"))))
+        o = objective_at(p, oid)
+    if busy(s, p.id):
+        return phrase("projects.tools.steer.busy", title=title)
+    if nudged(p) and (o is None or p.nudged_objective == o.id):
+        return phrase("projects.tools.steer.already_asked", title=title)
+    if outgoing(p, frame.now):
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.outgoing"))
+    pm = params(frame.env.params_of("projects", frame.root))
+    if o is None and pick(p, frame.now, pm) is None \
+            and not any(x.status == c.OPEN and x.kind == c.CONSTANT for x in p.objectives):
+        return ToolResult(ok=False, content=phrase("projects.tools.steer.nothing_open", title=title))
+    guard = _in_state(p.id, (c.ACTIVE,)) if o is None else _in_state(p.id, (c.ACTIVE,)) & still_open(p.id, o.id)
+    draft = NUDGED.draft(project=p.id, objective=o.id if o is not None else 0, by=person, owner=p.owner,
+                         about=p.about)
+    if await _steered(ctx, draft, guard) is None:
+        return _changed()
+    on = phrase("projects.tools.steer.on_objective", id=o.id) if o is not None else ""
+    return phrase("projects.tools.steer.asked", title=title, on=on)

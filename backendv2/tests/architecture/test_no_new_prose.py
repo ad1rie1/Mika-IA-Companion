@@ -38,7 +38,7 @@ CEILING = {
     "faculties/presence/__init__.py": 2,  # panneau de console
     "faculties/projects/atelier.py": 13,  # résumés d'effets que l'opératrice approuve
     "faculties/projects/tend.py": 2,  # raison de pause, gardée au journal
-    "faculties/projects/tools.py": 2,  # raisons de clôture, gardées au journal
+    "faculties/projects/tools.py": 3,  # raisons de clôture, gardées au journal ; règle de project_steer (console)
     "faculties/projects/work.py": 8,  # « pourquoi pas maintenant » (console)
     "faculties/transcript/__init__.py": 10,  # inspection du fil (console)
     "faculties/world/commands.py": 13,  # refus adressés aux clients du monde, pas à elle
