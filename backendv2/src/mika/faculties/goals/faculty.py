@@ -12,6 +12,9 @@
 - **Devenue un projet** (``projects.created`` qui en vient), une exploration se
   clôt sans émotion : elle continue là-bas.
 - **L'envie** d'une exploration s'use (demi-vie de six heures).
+- **Une curiosité** (un centre d'intérêt, un sujet) menée à bout garde ce
+  qu'elle en a retenu — la dernière fois seulement : quand elle y revient,
+  elle repart de là, pas d'une page blanche.
 - **Un rappel** qui n'a pas pu être dit est retenté, espacé (5 min × n), au
   plus trois fois.
 - **Suspendu** par un opérateur (``goals.paused``), un but est figé : aucun
@@ -312,6 +315,10 @@ class GoalsState:
     closed_sources: FrozenDict[str, int] = field(default_factory=FrozenDict)
     #: centre d'intérêt → dernière exploration
     explored: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: curiosité (un centre d'intérêt, un sujet) → ce qu'elle en a retenu la dernière fois : (close le, référence du
+    #: résultat, sensibilité). Seule une exploration menée à bout l'écrit : une rêverie dissipée n'efface pas la
+    #: précédente
+    kept_from: FrozenDict[str, tuple[int, str, int]] = field(default_factory=FrozenDict)
     #: proposition d'effet → but
     proposals: FrozenDict[int, int] = field(default_factory=FrozenDict)
     #: la dernière fois qu'elle a entrepris quelque chose d'elle-même
@@ -342,9 +349,19 @@ def curious_today(s: GoalsState, day: str, local_date: Any) -> int:
                and local_date(at) == day)
 
 
+def kept_before(s: GoalsState, g: Goal) -> tuple[int, str, int] | None:
+    """Ce qu'elle avait retenu la dernière fois qu'elle a exploré la même curiosité que ce but (un centre d'intérêt,
+    un sujet) : (close le, référence, sensibilité). Rien pour un autre but, ni une fois celui-ci clos (ce serait le
+    sien)."""
+    if g.status in c.CLOSED_STATUSES or not g.source.startswith(CURIOSITY_SOURCES):
+        return None
+    return s.kept_from.get(g.source)
+
+
 #: v3 : un rappel, un récit devancés, interrompus ou dont elle s'est ravisée ne comptent plus comme essais.
+#: v4 : ce qu'elle a retenu de sa dernière exploration d'une même curiosité (``kept_from``).
 GOALS = Faculty("goals", state=GoalsState, init=lambda p: GoalsState(), params=GoalsParams, derive=derive,
-                state_version=3,
+                state_version=4,
                 # les réglages des projets, quand ils étaient des buts (ADR 0031) : d'anciens journaux les portent
                 retired_params=("project_spacing_us", "project_steps", "project_evidence"))
 GOALS.declare(*c.ALL)
@@ -598,7 +615,9 @@ def _prune(s: GoalsState, now: int) -> GoalsState:
     # un sujet de conversation passé l'horizon où il peut la faire rêvasser (au plus deux semaines) s'oublie ; ses
     # centres d'intérêt, eux, restent
     explored = FrozenDict({k: v for k, v in s.explored.items() if not k.startswith("talk:") or now - v <= 15 * DAY})
-    return replace(s, goals=goals, closed_sources=sources, proposals=proposals, explored=explored)
+    # ce qu'elle en a retenu suit la même règle
+    kept = FrozenDict({k: v for k, v in s.kept_from.items() if not k.startswith("talk:") or now - v[0] <= 15 * DAY})
+    return replace(s, goals=goals, closed_sources=sources, proposals=proposals, explored=explored, kept_from=kept)
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
@@ -887,6 +906,9 @@ def _closed(s: GoalsState, e, cx) -> GoalsState:
     s = _set(s, g)
     if g.source:
         s = replace(s, closed_sources=s.closed_sources.set(subject_key(g.source, g.about), e.at))
+    if d.status == c.ACHIEVED and g.result_ref and g.source.startswith(CURIOSITY_SOURCES):
+        # la prochaine fois qu'elle y reviendra, elle partira de là
+        s = replace(s, kept_from=s.kept_from.set(g.source, (e.at, g.result_ref, g.sensitivity)))
     if d.status == c.STUCK and g.authority == c.SELF:
         s = replace(s, self_stuck_at=e.at)
     return _prune(s, e.at)

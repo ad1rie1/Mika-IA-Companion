@@ -7,7 +7,9 @@
   lui, un titre d'article : une donnée, jamais une consigne). Une **réflexion**
   sur quelqu'un a sous les yeux l'échange d'où elle vient et ce qui se passe
   dans la vie de la personne — pour n'avoir rien à deviner ni à inventer (ADR
-  0053) ; une rêverie dit « j'aimerais », pas « je fais ».
+  0053) ; une rêverie dit « j'aimerais », pas « je fais ». Une curiosité
+  qu'elle a déjà explorée repart de ce qu'elle en avait retenu la dernière
+  fois (daté, coupé) : ses goûts ont une histoire.
 - **Un rappel, un récit** : le texte du rappel, ou ce qu'elle a mené à bout —
   selon le lien avec qui l'écoute (tout, l'essentiel, ou le titre).
 - **En conversation** : ce qu'elle a en train (« tu fais quoi en ce
@@ -26,7 +28,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, live, musing, status
+from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, kept_before, live, musing, status
 from mika.faculties.goals.tools import date_time, reflective, titled
 from mika.faculties.goals.work import FULL, MENTION, worry_of
 from mika.kernel.clock import DAY, HOUR, MINUTE, local
@@ -43,6 +45,8 @@ SHOWN = 4
 INSTRUCTIONS_SHOWN = 3
 #: ce qu'on cite, au plus, du texte venu d'ailleurs d'où une exploration est née (en conversation)
 ORIGIN_CITED = 300
+#: ce qu'elle avait retenu la dernière fois d'une même curiosité, au plus
+KEPT_SHOWN = 400
 
 
 def _subject(frame: Frame) -> int | None:
@@ -79,6 +83,11 @@ async def _texts(s: GoalsState, frame: Frame, ports: Mapping[str, Any]) -> dict[
     if ep is not None and ep.kind in CONVERSATIONAL:
         ids |= {g.id for g in _recent(s, frame.now)[-SHOWN * 2:]}
     refs = [r for gid in sorted(ids) if gid in s.goals for r in _refs(s.goals[gid])]
+    # une curiosité qu'elle a déjà explorée : ce qu'elle en avait retenu la dernière fois
+    g = s.goals.get(subject) if subject is not None and ep is not None and ep.kind == Kind.STEP else None
+    before = kept_before(s, g) if g is not None else None
+    if before is not None:
+        refs.append(before[1])
     return {"texts": store.content(refs) if refs else {}}
 
 
@@ -133,8 +142,20 @@ def when_words(at: int, now: int, frame: Frame) -> str:
     return phrase("expression.when.days_ago", days=days)
 
 
-def _what(g: Goal, frame: Frame, texts: Mapping[str, str]) -> list[str]:
-    """Ce à quoi elle travaille, en mots à elle : d'où ça vient et ce qu'elle peut en faire."""
+def _last_time(before: tuple[int, str, int] | None, frame: Frame, texts: Mapping[str, str]) -> str:
+    """Ce qu'elle avait retenu la dernière fois qu'elle a exploré la même curiosité : elle repart de là, pas d'une
+    page blanche (vide : jamais, ou oublié avec la personne qu'il concernait)."""
+    text = texts.get(before[1], "") if before is not None else ""
+    if before is None or not text:
+        return ""
+    return phrase("goals.step.last_time", when=when_words(before[0], frame.now, frame),
+                  kept=_clip(text, KEPT_SHOWN))
+
+
+def _what(g: Goal, frame: Frame, texts: Mapping[str, str],
+          before: tuple[int, str, int] | None = None) -> list[str]:
+    """Ce à quoi elle travaille, en mots à elle : d'où ça vient et ce qu'elle peut en faire — et, pour une curiosité
+    qu'elle a déjà explorée, ce qu'elle en avait retenu."""
     title = titled(g, texts)[0] or phrase("goals.step.no_title")
     lines = [phrase("goals.step.goal", title=title)]
     person = g.owner or (g.about[0] if g.about else None)
@@ -164,6 +185,9 @@ def _what(g: Goal, frame: Frame, texts: Mapping[str, str]) -> list[str]:
         lines.append(phrase("goals.step.noticed", when=when))
     elif g.origin == c.FROM_INTEREST:
         lines.append(phrase("goals.step.interest"))
+    last = _last_time(before, frame, texts)
+    if last:
+        lines.append(last)
     return lines
 
 
@@ -176,7 +200,10 @@ def _step(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody
         return None
     data = enrich.get("goals") or {}
     texts: Mapping[str, str] = data.get("texts") or {}
-    lines = _what(g, frame, texts)
+    before = kept_before(s, g)
+    lines = _what(g, frame, texts, before)
+    # ce qu'elle avait retenu la dernière fois a sa propre sensibilité : la section prend la plus haute
+    level = max(g.sensitivity, before[2]) if before is not None and texts.get(before[1]) else g.sensitivity
     if g.kind != c.EXPLORATION and g.details_ref and texts.get(g.details_ref):
         lines.append(phrase("goals.step.frame", details=texts[g.details_ref]))
     instructions = [texts[r] for r in g.instructions if texts.get(r)]
@@ -199,7 +226,7 @@ def _step(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody
     if notes:
         lines.append(phrase("goals.step.notebook") + "\n" + "\n".join(f"- {n}" for n in notes[-3:]))
     lines.append(phrase("goals.step.rules"))
-    return SectionBody("\n".join(lines), level=g.sensitivity, provenance=(f"goal:{g.id}",))
+    return SectionBody("\n".join(lines), level=level, provenance=(f"goal:{g.id}",))
 
 
 #: ce qui a fait naître une exploration est la matière même de la séance : cité, coupé en premier, mais jamais
