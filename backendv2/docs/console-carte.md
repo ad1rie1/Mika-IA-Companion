@@ -100,6 +100,19 @@ l'arbitre pas à pas) ; les sections de son prompt, nommées ; ce dont elle s'es
 souvenue, avec le texte ; ses outils et leurs résultats. Les clés techniques
 sont dans « Détails techniques ».
 
+« Rejouer avec… », sur cette page et dans l'onglet « Prompt » d'un épisode :
+le prompt gardé (la trace, 14 jours) renvoyé tel quel à un fournisseur déclaré,
+par `Gateway.try_on` — un seul appel, derrière tout le fond, sous le rôle à part
+`trial` (Système › Coûts ne le mêle pas à « répondre »). La page montre côte à
+côte ce qu'elle a vraiment dit et ce que l'autre modèle répond, avec durée,
+jetons et coût ; un appel d'outil est affiché, jamais exécuté, et la CLI de
+Claude Code reçoit le prompt sans ses outils (elle le dit). Rien n'est livré,
+rien n'entre au fil ni dans sa mémoire, rien n'est gardé au-delà de la page :
+seule une ligne `runtime.operated` (`console.rejouer`, sujet : l'épisode)
+entre au journal, avant l'envoi. Une trace tronquée ou expirée désactive les
+boutons ; un prompt servi en local qui partirait vers un service hébergé est
+signalé avant l'envoi (il mêle les personnes).
+
 La même adresse, avec le numéro d'un message reçu resté sans réponse, répond à
 « Pourquoi n'a-t-elle pas répondu ? » : la fin d'épisode qui l'a réglé et sa
 cause en mots (un silence choisi, ce qui l'a fait taire, trop tard, une panne),
