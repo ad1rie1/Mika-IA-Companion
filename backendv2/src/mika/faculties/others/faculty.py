@@ -229,7 +229,14 @@ class OthersParams(BaseModel):
         label="Souhaiter ce qui se fête : preuve", group="Demander comment ça s'est passé", lo=0.0, hi=12.0,
         step=0.5, help="Le jour d'un anniversaire, d'un mariage (ce que la personne lui avait annoncé), l'envie de "
                        "le lui souhaiter, une fois, dans ses heures pour prendre des nouvelles : plus forte qu'une "
-                       "question (au-dessus du seuil d'initiative, 9, elle écrit seule).")] = 10.0
+                       "question (au-dessus du seuil d'initiative, 9, elle écrit seule). Chaque année quand la date "
+                       "revient.")] = 10.0
+    remembrance_evidence: Annotated[float, Knob(
+        label="Un jour difficile : preuve", group="Demander comment ça s'est passé", lo=0.0, hi=12.0, step=0.5,
+        help="Le jour où revient une date lourde qu'une proche lui a confiée (la date d'un deuil), l'envie de lui "
+             "écrire un mot doux, une fois, dans ses heures pour prendre des nouvelles — si elles ne se sont pas "
+             "déjà parlé ce jour-là. Seulement une proche ; au-dessus du seuil d'initiative (9), elle écrit "
+             "seule.")] = 10.0
     cheer_evidence: Annotated[float, Knob(
         label="Encourager la veille : preuve", group="Demander comment ça s'est passé", lo=0.0, hi=12.0, step=0.5,
         help="La veille au soir (ou le matin même, pour un moment l'après-midi), l'envie de lui souhaiter bonne "
@@ -803,8 +810,9 @@ def _cheer_window(ev: memory_c.LifeEvent, frame: Frame, p: OthersParams) -> tupl
     soir ; ou le matin même, pour un moment à une heure dite l'après-midi (jusqu'à deux heures avant). Si elles
     se sont parlé depuis midi la veille, la conversation en était l'occasion. ``None`` : pas pour un moment déjà
     là, ni pour une situation, ni pour ce qui se fête (un anniversaire ne se souhaite pas « bonne chance » : il se
-    souhaite le jour même)."""
-    if ev.ongoing or ev.festive or ev.when <= frame.now:
+    souhaite le jour même), ni pour une date qui revient chaque année (pas de « bonne chance » pour la date d'un
+    deuil)."""
+    if ev.ongoing or ev.festive or ev.yearly or ev.when <= frame.now:
         return None
     tz = frame.env.tz_of(frame.root)
     day = frame.local(ev.when).date()
@@ -897,7 +905,8 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
     Gradué (ADR 0052) : ce qui compte (un entretien, un examen) avec insistance ; un moment ordinaire, si elle y
     pense ; quand quelque chose de grave la touche ces jours-ci, l'ordinaire se tait et ce qui compte passe
     après des nouvelles d'elle. Ce qui se fête : pas de « comment ça s'est passé » si elle l'a souhaité le jour
-    même — sinon, le lendemain, un mot même en retard."""
+    même — sinon, le lendemain, un mot même en retard. Une date qui revient chaque année sans se fêter (la date d'un
+    deuil) ne se demande jamais : ce n'est pas quelque chose qui « s'est passé »."""
     p = params(frame.env.params_of("others", frame.root))
     local = frame.local()
     if not within_daily_window(local.hour * 60 + local.minute, p.checkin_day_start_min, p.checkin_day_end_min):
@@ -910,7 +919,7 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
         hard = _hard(frame, person)
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
                if not ev.ongoing and not ev.followed_at and set(ev.told_by) <= {person}
-               and not (hard and _minor(ev))
+               and not (hard and _minor(ev)) and (ev.festive or not ev.yearly)
                and s.spoke.get(ev.id, 0) < (_day_start(ev.when, frame) if ev.festive else ev.when)
                and last <= ev.when and _follow_from(ev, frame, p) <= frame.now <= ev.when + p.followup_until_us]
         address = _address(frame, person) if due else None
@@ -972,6 +981,42 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         out.append(Candidate(Kind.INITIATIVE, address, c.CELEBRATE, p.celebrate_evidence,
+                             resources=frozenset({floor(address)}), guards=(guard,),
+                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.id}"})))
+    return out
+
+
+@OTHERS.propose(kinds=[Kind.INITIATIVE], reasons={c.REMEMBRANCE: (0.0, 12.0)},
+                reads=[identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY, presence_c.PRESENT,
+                       social_c.CIRCLE, social_c.CLOSENESS, transcript_c.LAST_FROM, memory_c.LIFE_EVENTS])
+def _remember(s: OthersState, frame: Frame) -> list[Candidate]:
+    """Le jour où revient une date lourde qu'une proche lui a confiée elle-même (« demain, ça fera un an que mon père
+    est parti ») : un mot doux, d'elle-même, une fois, dans ses heures pour prendre des nouvelles — rien de festif,
+    aucune question. Une proche seulement : une amie, ce jour-là, n'en reçoit rien d'elle-même (si elles se parlent,
+    « CE QUI SE PASSE DANS SA VIE » le lui dit). Si elles se sont déjà parlé aujourd'hui, la conversation en était
+    l'occasion ; ce qu'elle en a repris en mots aussi."""
+    p = params(frame.env.params_of("others", frame.root))
+    local = frame.local()
+    if not within_daily_window(local.hour * 60 + local.minute, p.checkin_day_start_min, p.checkin_day_end_min):
+        return []
+    today = _day_start(frame.now, frame)
+    out: list[Candidate] = []
+    for person in sorted(set(frame.get(social_c.CIRCLE)).intersection(s.people.keys())):  # ses amies (ADR 0058)
+        if frame.get(social_c.CLOSENESS(person)) != social_c.CLOSE or _last_from(frame, person) >= today:
+            continue
+        due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
+               if memory_c.heavy_date(ev) and not ev.followed_at and set(ev.told_by) <= {person}
+               and _day_start(ev.when, frame) == today and s.spoke.get(ev.id, 0) < today]
+        address = _address(frame, person) if due else None
+        if address is None:
+            continue
+        ev = due[0]
+        name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
+        who = f"« {name} »" if name else phrase("others.initiative.someone")
+        brief = phrase("others.initiative.remembrance", who=who)
+        handles = frame.get(identity_c.HANDLES(person)) or (person,)
+        guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
+        out.append(Candidate(Kind.INITIATIVE, address, c.REMEMBRANCE, p.remembrance_evidence,
                              resources=frozenset({floor(address)}), guards=(guard,),
                              args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.id}"})))
     return out

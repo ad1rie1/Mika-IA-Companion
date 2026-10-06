@@ -673,8 +673,9 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
     qu'elle a fini, ce sur quoi elle est (jamais une rêverie : rien de neuf n'est arrivé). Un humain écrit à une
     amie pour elle avant d'écrire pour lui (HUM-10) — et part de ce qui pèse, pas du prochain rendez-vous banal
     (sonde réelle du 2026-10-03 : « un mot pour l'encourager » pour le dentiste, le soir où son chat était au plus
-    mal). Ce qui se fête n'en est pas une (ses vœux, le jour même, sont une raison à part) ; quand quelque chose
-    de grave la touche ces jours-ci (``hard``), un moment ordinaire non plus."""
+    mal). Ce qui se fête n'en est pas une (ses vœux, le jour même, sont une raison à part), ni une date qui revient
+    chaque année (la date d'un deuil ne se met pas sur la table d'elle-même) ; quand quelque chose de grave la touche
+    ces jours-ci (``hard``), un moment ordinaire non plus."""
     used = s.used
     live = [t for t in thoughts if t.intensity >= p.matter_thought_from and t.text_ref and t.text_ref not in used]
     for t in live:
@@ -684,7 +685,8 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
     weighed: list[tuple[tuple[float, int, int, str], c.Matter]] = []
     for m in moments:
         weight = float(getattr(m, "importance", memory_c.IMPORTANT_MOMENT))
-        if getattr(m, "festive", False) or (hard and weight < memory_c.IMPORTANT_MOMENT):
+        if getattr(m, "festive", False) or getattr(m, "yearly", False) \
+                or (hard and weight < memory_c.IMPORTANT_MOMENT):
             continue
         if _their_moment(m, person, now, p) and m.text_ref not in used:
             weighed.append(((-weight, 0, abs(now - m.when), m.text_ref),

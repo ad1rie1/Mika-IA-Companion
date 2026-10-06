@@ -3,7 +3,9 @@
 La tranche ne garde que des résumés (point de contrôle, messages pas encore
 relus, promesses en cours et ce qu'elle a fait pour les tenir, moments de la
 vie des autres à venir ou tout juste passés, situations en cours (et quand la
-personne a dit qu'elles étaient finies), la dernière
+personne a dit qu'elles étaient finies), dates qui reviennent chaque année (jamais
+évincées par l'âge : le fait ``LIFE_EVENTS`` les rend à leur prochaine
+occurrence), la dernière
 fois que quelque chose de grave a touché chacun) ; les
 éléments retenus vivent dans la projection T0 ``memory_items`` et leurs
 vecteurs dans l'index (un cache).
@@ -16,7 +18,9 @@ from __future__ import annotations
 
 from collections.abc import Collection
 from dataclasses import dataclass, field, replace
+from datetime import datetime, time
 from typing import Annotated
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
 
@@ -27,7 +31,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
-from mika.kernel.clock import DAY, HOUR, MINUTE
+from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
@@ -38,6 +42,9 @@ from mika.vocab.people import is_identifiable
 PENDING_CAP = 500
 #: les moments de la vie des autres gardés dans la tranche, au plus
 EVENTS_CAP = 300
+#: … et, à part, les dates qui reviennent chaque année : elles ne vieillissent pas, et les anniversaires de tout son
+#: cercle ne chassent pas l'entretien de jeudi
+YEARLY_CAP = 300
 #: les initiatives en cours qui tiennent une promesse (corrélation → promesse), au plus
 KEEPING_KEPT = 16
 #: le sujet d'une initiative qui tient une promesse : ``promise:<id>``
@@ -327,7 +334,8 @@ class MemoryState:
 #: les situations en cours ; tenir une promesse au moment dit.
 #: v5 : l'importance d'un moment, ce qui se fête, et ce qui touche gravement quelqu'un (ADR 0052).
 #: v6 : une situation en cours prend fin quand la personne dit qu'elle est finie (``situation_ended``).
-MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=6)
+#: v7 : une date qui revient chaque année (``yearly``) n'est jamais évincée par l'âge, et a son propre plafond.
+MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=7)
 MEMORY.declare(*c.ALL)
 
 
@@ -446,10 +454,11 @@ def _consolidated(s: MemoryState, e, cx) -> MemoryState:
 @MEMORY.reducer(c.EVENT_NOTED)
 def _noted(s: MemoryState, e, cx) -> MemoryState:
     """Un moment de la vie de quelqu'un : gardé tant qu'il est à venir ou passé
-    depuis peu ; une situation en cours, quelques semaines ; les plus anciens
-    partent d'abord. Le même moment renoté à la même date (la personne l'a dit
-    elle-même après un tiers) reste repris s'il l'était ; une date qui change
-    repart de zéro. Une situation finie, renotée, reste finie."""
+    depuis peu ; une situation en cours, quelques semaines ; une date qui
+    revient chaque année, toujours ; les plus anciens partent d'abord. Le même
+    moment renoté à la même date (la personne l'a dit elle-même après un tiers)
+    reste repris s'il l'était ; une date qui change repart de zéro. Une
+    situation finie, renotée, reste finie."""
     d = e.data
     p = params(cx.params)
     keep_until = e.at - round(p.event_recent_days * DAY)
@@ -461,12 +470,18 @@ def _noted(s: MemoryState, e, cx) -> MemoryState:
     events = events.set(e.seq, c.LifeEvent(e.seq, tuple(d.about), d.when, d.all_day, d.sensitivity,
                                            tuple(d.told_by), d.text.ref or "", d.secret, followed_at=followed,
                                            ongoing=d.ongoing, importance=d.importance, festive=d.festive,
-                                           ended_at=ended))
-    stale = [ev.id for ev in events.values() if ev.when < (keep_ongoing if ev.ongoing else keep_until)]
+                                           ended_at=ended, yearly=d.yearly and not d.ongoing))
+    stale = [ev.id for ev in events.values()
+             if not ev.yearly and ev.when < (keep_ongoing if ev.ongoing else keep_until)]
     for i in stale:
         events = events.delete(i)
-    if len(events) > EVENTS_CAP:
-        for ev in sorted(events.values(), key=lambda x: (x.when, x.id))[: len(events) - EVENTS_CAP]:
+    once = [ev for ev in events.values() if not ev.yearly]
+    if len(once) > EVENTS_CAP:
+        for ev in sorted(once, key=lambda x: (x.when, x.id))[: len(once) - EVENTS_CAP]:
+            events = events.delete(ev.id)
+    yearly = [ev for ev in events.values() if ev.yearly]
+    if len(yearly) > YEARLY_CAP:  # la date d'une occurrence ne dit pas son âge : les plus anciennement notées partent
+        for ev in sorted(yearly, key=lambda x: x.id)[: len(yearly) - YEARLY_CAP]:
             events = events.delete(ev.id)
     return replace(s, items=s.items + 1, events=events)
 
@@ -533,9 +548,42 @@ def _promises_to(s: MemoryState, cx, person: str) -> tuple[c.PendingPromise, ...
     return tuple(p for p in s.promises.values() if _speaks_for(cx, p.to, person))
 
 
+def day_of(t: int, tz: ZoneInfo) -> int:
+    """Minuit (heure locale) du jour de cet instant."""
+    return instant(datetime.combine(local(t, tz).date(), time(0, 0), tzinfo=tz))
+
+
+def occurrence(ev: c.LifeEvent, now: int, tz: ZoneInfo, p: MemoryParams) -> c.LifeEvent:
+    """Ce moment tel qu'il se présente à ``now`` : lui-même — sauf une date qui revient chaque année, passée depuis
+    plus de ``event_recent_days`` : alors sa prochaine occurrence, le même jour à la même heure (un 29 février, le 28
+    les autres années), jamais avant celle qui a été notée. L'avoir repris l'an dernier, ce n'est pas l'avoir repris
+    cette année : ``followed_at`` d'avant le début de cette occurrence-là repart de zéro."""
+    keep = round(p.event_recent_days * DAY)
+    if not ev.yearly or now <= ev.when + keep:
+        return ev
+    first = local(ev.when, tz)
+    for year in range(local(now, tz).year - 1, local(now, tz).year + 2):
+        try:
+            moment = first.replace(year=year)
+        except ValueError:  # un 29 février, une année qui n'en a pas
+            moment = first.replace(year=year, day=28)
+        at = instant(moment)
+        if at > ev.when and now <= at + keep:
+            return replace(ev, when=at, followed_at=ev.followed_at if ev.followed_at >= day_of(at, tz) else 0)
+    return ev
+
+
+def events_at(s: MemoryState, now: int, tz: ZoneInfo, p: MemoryParams) -> list[c.LifeEvent]:
+    """Les moments notés, tels qu'ils se présentent à ``now`` (une date qui revient chaque année : sa prochaine
+    occurrence)."""
+    return [occurrence(ev, now, tz, p) for ev in s.events.values()]
+
+
 @MEMORY.fact(c.LIFE_EVENTS, reads=[identity_c.PERSON])
 def _life_events(s: MemoryState, cx, person: str) -> tuple[c.LifeEvent, ...]:
-    events = (ev for ev in s.events.values() if any(_speaks_for(cx, k, person) for k in ev.about))
+    p = params(cx.params)
+    events = (occurrence(ev, cx.now, cx.tz, p) for ev in s.events.values()
+              if any(_speaks_for(cx, k, person) for k in ev.about))
     return tuple(sorted(events, key=lambda ev: (ev.when, ev.id)))
 
 
@@ -546,6 +594,23 @@ def hard_since(s: MemoryState, keys: Collection[str], now: int, p: MemoryParams)
     return at if at and 0 <= now - at <= round(p.hard_days * DAY) else 0
 
 
+def heavy_day(s: MemoryState, cx, person: str, p: MemoryParams) -> int:
+    """Le début de la journée, quand c'est aujourd'hui que revient une date lourde de cette personne (la date d'un
+    deuil) qu'elle lui a confiée elle-même ; 0 sinon. Ce qu'un tiers en a dit ne fait pas d'elle quelqu'un de touché
+    aux yeux de Mika."""
+    today = day_of(cx.now, cx.tz)
+    for ev in s.events.values():
+        if not ev.yearly or not ev.told_by or not any(_speaks_for(cx, k, person) for k in ev.about) \
+                or not all(_speaks_for(cx, t, person) for t in ev.told_by):
+            continue
+        this_year = occurrence(ev, cx.now, cx.tz, p)
+        if c.heavy_date(this_year) and day_of(this_year.when, cx.tz) == today:
+            return today
+    return 0
+
+
 @MEMORY.fact(c.HARD_TIMES, reads=[identity_c.PERSON])
 def _hard_times(s: MemoryState, cx, person: str) -> int:
-    return hard_since(s, [k for k in s.hard if _speaks_for(cx, k, person)], cx.now, params(cx.params))
+    p = params(cx.params)
+    return max(hard_since(s, [k for k in s.hard if _speaks_for(cx, k, person)], cx.now, p),
+               heavy_day(s, cx, person, p))

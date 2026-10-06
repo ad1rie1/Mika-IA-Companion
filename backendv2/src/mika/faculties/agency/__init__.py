@@ -89,8 +89,9 @@ REFRACTORY_SPAN = 3
 #: humeur, le manque) attend. Déclaré dans le contrat (``c.FOR_THEM``) : ``social`` le lit aussi.
 ABOUT_THEM = c.INFORMS | c.FOR_THEM
 #: ce qui ne relance pas même quelqu'un qui ne répond plus : lui souhaiter son anniversaire le jour même (un vœu
-#: n'attend pas de réponse, et ne pas le faire se remarque plus que de le faire)
-NOT_A_NUDGE = frozenset({others_c.CELEBRATE})
+#: n'attend pas de réponse, et ne pas le faire se remarque plus que de le faire), un mot doux à une proche le jour
+#: où revient la date d'un deuil
+NOT_A_NUDGE = frozenset({others_c.CELEBRATE, others_c.REMEMBRANCE})
 
 
 class AgencyParams(BaseModel):
@@ -374,7 +375,7 @@ def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str |
     de cette retenue-là ; ce qui vient de Mika (l'envie de parler, son humeur,
     le manque), si. Rend le veto, ou ``None``."""
     if not is_identifiable(target) or (c.INFORMS | NOT_A_NUDGE) & set(reasons):
-        return None  # prévenir n'est pas relancer ; souhaiter un anniversaire non plus
+        return None  # prévenir n'est pas relancer ; souhaiter un anniversaire, un mot doux un jour difficile non plus
     person = frame.get(identity_c.PERSON(target))
     mine = frame.get(attention_c.AWAITING(person))
     if c.ONCE_MORE & set(reasons):

@@ -30,7 +30,8 @@ personne en raconte **ce jour-là** (« le véto dit insuffisance rénale ») le
 reprend déjà — sinon, le lendemain, elle lui demandait comment ça s'était passé
 (sonde réelle du 2026-10-03). Un moment qui se fête (un anniversaire) s'ouvre
 au début de sa journée, pour l'une comme pour l'autre : ses vœux (« joyeux
-anniversaire ! ») le reprennent.
+anniversaire ! ») le reprennent. Une date qui revient chaque année se juge à
+son occurrence de cette année : ses vœux de l'an dernier ne la reprennent pas.
 """
 
 from __future__ import annotations
@@ -46,7 +47,15 @@ from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.memory.faculty import MEMORY, PROMISE_SUBJECT, Keeping, MemoryParams, MemoryState, params
+from mika.faculties.memory.faculty import (
+    MEMORY,
+    PROMISE_SUBJECT,
+    Keeping,
+    MemoryParams,
+    MemoryState,
+    events_at,
+    params,
+)
 from mika.kernel.arbitration import Candidate
 from mika.kernel.clock import DAY, instant
 from mika.kernel.events import Draft
@@ -142,7 +151,8 @@ def _told_about(s: MemoryState, frame: Frame, ev: Any, ports: Any) -> list[Draft
     p = params(frame.env.params_of("memory", frame.root))
     person = frame.get(identity_c.PERSON(d.handle)) or d.handle
     # ce qui se fête n'est « repris » que par ses vœux à elle : « c'est mon anniv aujourd'hui ! » ne le lui souhaite pas
-    mine = [e for e in s.events.values() if person in e.about and e.id < ev.seq and not e.festive
+    mine = [e for e in events_at(s, ev.at, frame.env.tz_of(frame.root), p)
+            if person in e.about and e.id < ev.seq and not e.festive
             and open_moment(e, ev.at, p, opens_at(e, frame, theirs=True))]
     store = ports.get("store") if ports else None
     if not mine or store is None:
@@ -169,7 +179,8 @@ class Follow:
 
     def next_due(self, state: MemoryState, frame: Frame, last_run: int | None) -> int | None:
         p = params(frame.env.params_of("memory", frame.root))
-        if not any(open_moment(e, frame.now, p, opens_at(e, frame, theirs=False)) for e in state.events.values()):
+        if not any(open_moment(e, frame.now, p, opens_at(e, frame, theirs=False))
+                   for e in events_at(state, frame.now, frame.env.tz_of(frame.root), p)):
             return None
         return frame.now if frame.get(transcript_c.HEAD) > self.upto else None
 
@@ -179,8 +190,9 @@ class Follow:
         store = ctx.ports.get("store")
         head = frame.get(transcript_c.HEAD)
         p = params(frame.env.params_of("memory", frame.root))
-        opens = {e.id: opens_at(e, frame, theirs=False) for e in state.events.values()}
-        moments = [e for e in state.events.values() if open_moment(e, frame.now, p, opens[e.id])]
+        events = events_at(state, frame.now, frame.env.tz_of(frame.root), p)
+        opens = {e.id: opens_at(e, frame, theirs=False) for e in events}
+        moments = [e for e in events if open_moment(e, frame.now, p, opens[e.id])]
         if store is None or not moments:
             self.upto = head
             return

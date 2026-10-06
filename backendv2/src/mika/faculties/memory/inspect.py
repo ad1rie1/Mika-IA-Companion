@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
-from mika.faculties.memory.faculty import MEMORY, PENDING_CAP, MemoryParams, MemoryState, params
+from mika.faculties.memory.faculty import MEMORY, PENDING_CAP, MemoryParams, MemoryState, occurrence, params
 from mika.faculties.memory.projections import ITEM_COLUMNS
 from mika.faculties.memory.recall import names_of
 from mika.faculties.memory.salience import Item, dormant, salience
@@ -270,10 +270,16 @@ def _belief(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tu
             _meter(it.importance), origin, _status(it, frame, p), When(it.born_at))
 
 
-def _event(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
+def _event(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams,
+           s: MemoryState | None = None) -> tuple[Cell, ...]:
+    """Un moment ; une date qui revient chaque année (la tranche le sait) se montre à sa prochaine occurrence."""
     it = k.item
+    ev = s.events.get(it.id) if s is not None else None
+    yearly = ev is not None and ev.yearly
+    when = occurrence(ev, frame.now, frame.env.tz_of(frame.root), p).when if ev is not None and yearly else it.due
     return (_n(k), _text(it), _about(frame, it.about, names), _sensitivity(it),
-            When(it.due) if it.due else "—", _status(it, frame, p), When(it.born_at))
+            When(when) if when else "—", Badge("chaque année", "info") if yearly else None,
+            _status(it, frame, p), When(it.born_at))
 
 
 def _promise(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> tuple[Cell, ...]:
@@ -302,8 +308,15 @@ PROMISES = Listing(c.PROMISE, "Ses promesses", "pas encore de promesse",
 EVENTS = Listing(c.EVENT, "Ce qui se passe dans la vie des autres", "pas encore de moment noté",
                  (("active", "à suivre"), ("superseded", "remplacé")),
                  (N, Column("moment"), Column("de qui"), Column("sensibilité", "fit"), Column("quand", "fit"),
+                  Column("chaque année", "fit", hint="une date qui revient chaque année (un anniversaire, la date "
+                                                     "d'un deuil) : « quand » est sa prochaine occurrence"),
                   Column("statut", "fit"), Column("noté", "fit", detail=True)), _event)
 LISTINGS = {x.kind: x for x in (SOUVENIRS, BELIEFS, PROMISES, EVENTS)}
+
+
+def _events_of(s: MemoryState) -> Listing:
+    """La liste des moments, avec ce que la tranche sait de plus que la projection : ce qui revient chaque année."""
+    return replace(EVENTS, cells=lambda k, frame, names, p: _event(k, frame, names, p, s))
 
 
 def _rows(listing: Listing, kept: Sequence[Kept], frame: Frame, ctx: InspectContext) -> tuple[Row, ...]:
@@ -369,9 +382,10 @@ def _promises(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
 
 @MEMORY.inspect("moments", title="La vie des autres", section="memoire", order=35, params=_params(EVENTS),
                 description="Ce qui va arriver aux gens qu'elle connaît (un entretien, un examen, un départ) : elle "
-                            "y pense quand c'est proche, et leur en demande des nouvelles après.")
+                            "y pense quand c'est proche, et leur en demande des nouvelles après. Une date qui revient "
+                            "chaque année (un anniversaire, la date d'un deuil) se montre à sa prochaine fois.")
 def _moments(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
-    return _list(EVENTS, frame, ctx)
+    return _list(_events_of(s), frame, ctx)
 
 
 # ── La relecture ──────────────────────────────────────────────────────────
@@ -489,7 +503,7 @@ def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
         if _told_exists(ctx.store) else 0
     sections: list[Block] = []
     totals: dict[str, int] = {}
-    for listing in (SOUVENIRS, BELIEFS, PROMISES, EVENTS):
+    for listing in (SOUVENIRS, BELIEFS, PROMISES, _events_of(s)):
         where, wargs = [*base, "kind=?"], [*args, listing.kind]
         total = _count(ctx.store, where, wargs)
         totals[listing.kind] = total
