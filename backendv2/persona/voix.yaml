@@ -2275,6 +2275,12 @@ goals:
     interest: >-
       Un de tes centres d'intérêt : va voir s'il y a du neuf (tes flux), lis ce qui t'accroche, et garde ce que tu
       en retiens.
+    # une curiosité qu'elle a déjà explorée (un centre d'intérêt, un sujet de conversation) : ce qu'elle en avait
+    # retenu la dernière fois, d'où elle repart. {when} : « hier soir » (expression.when) ; {kept} : ce qu'elle avait
+    # écrit, coupé
+    last_time: >-
+      La dernière fois que tu y as pensé ({when}), tu avais écrit : « {kept} » — pars de là : va plus loin, change
+      d'avis, ou remarque que ça ne t'attire plus.
     # le cadre d'un rappel ou d'un ancien projet. {details} : le cadre
     frame: "Cadre : {details}"
     # suivi des dernières consignes d'un opérateur, une puce chacune
