@@ -83,7 +83,7 @@ CLI_BY = "ligne de commande"
 
 #: ce que ``mika --help`` dit à qui la lance pour la première fois
 FIRST_STEPS = """Premiers pas :
-  1. mika serve                 lance Mika (http://127.0.0.1:8001), ses données dans ./data/v2
+  1. mika serve                 la lance (http://127.0.0.1:8001), ses données dans ./data/v2
   2. http://127.0.0.1:8001/inspecteur/
                                 la console : crée le compte opérateur (le premier compte l'est)
   3. Configuration › Fournisseurs › Ajouter
@@ -616,7 +616,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run(argv: list[str] | None) -> int:
-    p = argparse.ArgumentParser(prog="mika", description="Mika v2 : le serveur, sa console, et ce qu'un opérateur "
+    p = argparse.ArgumentParser(prog="mika", description="Le serveur, sa console, et ce qu'un opérateur "
                                                          "règle sans elle.",
                                 epilog=FIRST_STEPS, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data", type=Path, default=Path("data/v2"), help="dossier des bases (mind.db, views.db)")
@@ -636,7 +636,7 @@ def _run(argv: list[str] | None) -> int:
     sm.add_argument("--backend", default="", help="sonde : le fournisseur (défaut : celui qui répond, rôle reply)")
     sm.add_argument("--semaine", default="1", choices=["1", "2"],
                     help="sonde : 1 = Adrien, Chloé, Léo ; 2 = Sam (un deuil, un rappel, ses 30 ans), Inès, un salon")
-    sv = sub.add_parser("serve", help="lancer Mika : le serveur du chat et sa console (http://127.0.0.1:8001/"
+    sv = sub.add_parser("serve", help="la lancer : le serveur du chat et sa console (http://127.0.0.1:8001/"
                                       "inspecteur/)")
     sv.add_argument("--port", type=int, default=8001, help="le port (défaut : 8001)")
     sv.add_argument("--host", default="127.0.0.1", help="l'adresse d'écoute (défaut : cette machine seulement)")
@@ -746,7 +746,7 @@ def _run(argv: list[str] | None) -> int:
     sc = ssub.add_parser("closeness")
     sc.add_argument("person")
     sc.add_argument("level", choices=["stranger", "acquaintance", "friend", "close", "auto"])
-    ml = sub.add_parser("mail", help="la boîte aux lettres de Mika (IMAP pour lire, SMTP pour envoyer)")
+    ml = sub.add_parser("mail", help="sa boîte aux lettres (IMAP pour lire, SMTP pour envoyer)")
     msub = ml.add_subparsers(dest="mail_cmd", required=True)
     msub.add_parser("show")
     ms = msub.add_parser("set", help="crée ou modifie un compte")
@@ -779,7 +779,7 @@ def _run(argv: list[str] | None) -> int:
     sts.add_argument("base_url")
     sts.add_argument("api_key")
     sts.add_argument("--model", default="whisper-1")
-    mc = sub.add_parser("mcp", help="lire Mika depuis ton Claude Code (point /mcp/console, lecture seule)")
+    mc = sub.add_parser("mcp", help="la lire depuis ton Claude Code (point /mcp/console, lecture seule)")
     mcsub = mc.add_subparsers(dest="mcp_cmd", required=True)
     mcsub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
     mcsub.add_parser("serveurs", help="les serveurs MCP branchés (ADR 0064) et leurs réglages, sans secret")
@@ -802,9 +802,9 @@ def _run(argv: list[str] | None) -> int:
     wkr.add_argument("name")
     co = sub.add_parser("console", help="la console d'exploitation")
     csub = co.add_subparsers(dest="console_cmd", required=True)
-    cap = csub.add_parser("apercu", help="exporter chaque page (clair et sombre) d'une Mika neuve, sans serveur")
+    cap = csub.add_parser("apercu", help="exporter chaque page (clair et sombre) d'une vie neuve, sans serveur")
     cap.add_argument("--out", type=Path, required=True)
-    fo = sub.add_parser("forge", help="ce qu'un opérateur décide des apps de Mika (serveur arrêté)")
+    fo = sub.add_parser("forge", help="ce qu'un opérateur décide de ses apps (serveur arrêté)")
     fsub = fo.add_subparsers(dest="forge_cmd", required=True)
     for name in ("promote", "demote"):
         f = fsub.add_parser(name, help="offrir (ou retirer) ses outils en conversation")

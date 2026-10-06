@@ -1,7 +1,8 @@
 """Mettre un mail en forme, exactement comme il partira — pur, sans réseau.
 
-- **L'expéditeur** suit la voix du compte : ``Mika <boîte>`` (en son nom),
-  ``Mika (pour Adrien) <boîte>`` (en assistante), ``Adrien <boîte>`` (à sa place).
+- **L'expéditeur** suit la voix du compte : ``Elle <boîte>`` (en son nom : son nom
+  d'expéditrice, sinon celui de sa persona), ``Elle (pour Adrien) <boîte>`` (en
+  assistante), ``Adrien <boîte>`` (à sa place).
 - **Le texte** : ce qui a été écrit, la signature du compte (séparée par
   ``-- ``), puis la citation du mail auquel on répond.
 - **Le fil** : ``In-Reply-To`` et ``References`` chaînées.
@@ -16,13 +17,14 @@ import hashlib
 from datetime import UTC, datetime, tzinfo
 from email.message import EmailMessage
 
+from mika.contracts.self_ import DEFAULT_NAME
 from mika.ports.mail import AccountInfo, Draft, Mail, Preview, addresses, to_fill
 
-HER_NAME = "Mika"
 
-
-def sender(account: AccountInfo) -> str:
-    her = (account.sender_name or HER_NAME).strip()
+def sender(account: AccountInfo, her: str = DEFAULT_NAME) -> str:
+    """L'expéditeur tel qu'il partira ; ``her`` : son nom quand le compte ne lui en donne pas (celui de sa persona,
+    que l'application passe — un adaptateur ne le lit pas lui-même)."""
+    her = (account.sender_name or her).strip()
     owner = account.display_name.strip()
     if account.voice == "proprietaire" and owner:
         name = owner
@@ -75,8 +77,9 @@ def blocked(draft: Draft, account: AccountInfo | None, text: str = "") -> str:
     return ""
 
 
-def preview(draft: Draft, account: AccountInfo | None, parent: Mail | None, *, tz: tzinfo = UTC) -> Preview:
-    who = sender(account) if account is not None else ""
+def preview(draft: Draft, account: AccountInfo | None, parent: Mail | None, *, tz: tzinfo = UTC,
+            her: str = DEFAULT_NAME) -> Preview:
+    who = sender(account, her) if account is not None else ""
     text = final_text(draft.body, account, parent, quote=draft.quote, tz=tz) if account is not None else draft.body
     parent_id = parent.message_id if parent is not None else ""
     return Preview(sender=who, to=draft.to, cc=draft.cc, subject=draft.subject, text=text,

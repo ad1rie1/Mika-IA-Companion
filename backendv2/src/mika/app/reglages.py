@@ -548,9 +548,11 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         commands=(Command("fichier", "Revenir au fichier", back_to_file, danger=True,
                                           confirm="La persona rédigée ici sera oubliée ; le fichier fera foi."),),
                         pages=(
-                            SettingsPage("identite", "Identité", ("name", "description", "language", "timezone"),
-                                         order=10, description="Son nom, qui elle est, sa langue et l'heure qu'elle "
-                                                               "vit (ses nuits, ses salutations en dépendent)."),
+                            SettingsPage("identite", "Identité",
+                                         ("name", "nature", "description", "language", "timezone"), order=10,
+                                         description="Son nom, ce qu'elle est (une IA qui le sait, ou une personne "
+                                                     "incarnée), qui elle est, sa langue et l'heure qu'elle vit "
+                                                     "(ses nuits, ses salutations en dépendent)."),
                             SettingsPage("parole", "Ton et parole", ("tone", "speech", "greetings"), order=20,
                                          facts=False, description="Comment elle parle : son ton général, ses "
                                                                   "tournures, le ton de ses bonjours (des "
@@ -560,9 +562,9 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                          facts=False, description="Ce qui la définit, la touche et la passionne : "
                                                                   "une phrase par ligne."),
                             SettingsPage("vie", "Sa vie", ("life", "tastes", "facts"), order=40, facts=False,
-                                         description="Sa vie d'IA VTuber, rédigée : ce qu'elle fait à sa façon, "
-                                                     "ses goûts et avis tranchés, ce qui est vrai d'elle. Ce "
-                                                     "qu'elle raconte de son quotidien en découle, et elle ne se "
+                                         description="Sa vie, rédigée, à sa façon : ce qu'elle fait de ses "
+                                                     "journées, ses goûts et avis tranchés, ce qui est vrai d'elle. "
+                                                     "Ce qu'elle raconte de son quotidien en découle, et elle ne se "
                                                      "contredit pas d'un jour à l'autre."),
                             SettingsPage("document", "Import / export", order=50, form=False, yaml=True,
                                          commands=True, extra=revisions, description=(

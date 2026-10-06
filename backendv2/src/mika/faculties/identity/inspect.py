@@ -442,7 +442,7 @@ def why_level(certainty: float, trust: ChannelTrust, *, closeness: str, warmth: 
     if certainty >= pol.confidence_threshold and rank >= privacy.CLOSENESS_RANK[social_c.CLOSE]:
         return (f"un lien proche, et une certitude d'au moins {number(pol.confidence_threshold)} ({link}) : le "
                 "personnel sur autrui ; jusqu'aux confidences d'une personne qu'elle connaît (elles se sont parlé "
-                "ensemble, ou cette personne l'a nommée) — être proche de Mika ne suffit pas")
+                "ensemble, ou cette personne l'a nommée) — être proche d'elle ne suffit pas")
     return (f"un lien ({link}) ouvre le personnel ; les confidences demandent un lien proche et une certitude d'au "
             f"moins {number(pol.confidence_threshold)}")
 

@@ -206,7 +206,7 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
     assert [r.cells[2].text for r in objectifs.rows] == ["constant", "ponctuel"]
     assert any(isinstance(b, ActionSlot) and b.action == "projects.objectif_ajouter" for b in nested(tabs["objectifs"]))
     runs = tables(tabs["executions"])["Ses exécutions"]
-    assert runs.rows and runs.rows[-1].cells[1] == "Mika" and runs.rows[-1].cells[4].text == "fait"
+    assert runs.rows and runs.rows[-1].cells[1] == "elle-même" and runs.rows[-1].cells[4].text == "fait"
     assert runs.rows[-1].cells[10].params == (("onglet", "prompt"),)
     decisions = tables(tabs["decisions"])["Ses décisions (1 en vigueur)"]
     assert decisions.rows[0].cells[0] == "D1" and decisions.rows[0].cells[2].text == "Python"

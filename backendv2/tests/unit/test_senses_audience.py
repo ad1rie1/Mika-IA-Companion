@@ -30,6 +30,7 @@ from mika.adapters.preprocess import LocalPreprocessor
 from mika.app import composition
 from mika.contracts import attention as attention_c
 from mika.contracts import email as email_c
+from mika.contracts import self_ as self_c
 from mika.contracts.runtime import PerceptionReceived
 from mika.kernel.clock import MINUTE, US
 from mika.kernel.events import Content
@@ -125,11 +126,11 @@ def test_her_owner_in_a_public_group_hears_neither_her_mail_nor_her_camera_but_i
 
 def tool_ctx(kind=Kind.REPLY, *, public=False, room=None, owner=True, ports=None, now=0, params=None):
     """Le contexte d'un outil : l'audience résolue au bord ; les faits d'identité disent « propriétaire »
-    exactement quand l'audience le dit."""
+    exactement quand l'audience le dit ; sa persona est celle par défaut (son nom vient de là)."""
     audience = Audience(persons=("ext_42",), public=public, room=room, owner=owner, level=3, witness_level=3)
     frame = NS(root=None, now=now, env=NS(params_of=lambda name, root: params), audience=audience,
                episode=EpisodeRef("e", kind, target="ext_42" if kind == Kind.REPLY else "goal:1"),
-               get=lambda ref: owner)
+               get=lambda ref: self_c.PersonaDoc() if ref.name == self_c.PERSONA.name else owner)
     return NS(frame=frame, ports=ports or {}, call_id="c1", emit=None)
 
 

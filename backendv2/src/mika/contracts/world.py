@@ -419,7 +419,7 @@ class ActorDef(Payload):
         if self.id.startswith(PLAYER_PREFIX):
             raise ValueError("une personne ne se déclare pas : elle entre dans le monde en s'y connectant")
         if (self.id == MIKA) != (self.controller is Controller.KERNEL):
-            raise ValueError("c'est le noyau qui fait vivre Mika, et elle seule")
+            raise ValueError(f"c'est le noyau qui la fait vivre (l'acteur « {MIKA} »), et elle seule")
         return self
 
 
@@ -483,7 +483,7 @@ def _incoherences(w: WorldDef) -> Iterable[str]:
     if len(set(actors)) != len(actors):
         yield "un personnage est déclaré deux fois"
     if MIKA not in actors:
-        yield "le monde n'a pas de Mika"
+        yield f"le monde n'a pas d'acteur « {MIKA} » : elle n'y est pas"
     for r in w.rooms:
         for x in r.exits:
             via, arrives = places.get(x.via), places.get(x.arrives)

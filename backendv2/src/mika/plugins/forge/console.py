@@ -428,7 +428,7 @@ def _tab_state(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
         blocks.append(Note(NOT_HERE + " Son code, ses vues et son journal ne sont pas disponibles.", tone="muted"))
     if app is not None and app.broken:
         blocks.append(Note(f"Le disjoncteur l'a arrêtée ({_clip(app.broken, 300)}). « Activer » la relance ; "
-                           "Mika peut aussi la réparer.", tone="danger", title="Cassée"))
+                           "elle peut aussi la réparer.", tone="danger", title="Cassée"))
     if info is not None and info.error:
         blocks.append(Note(f"Son manifeste est invalide : {info.error}", tone="danger", title="Manifeste"))
     if app is not None and info is not None and stale(app, info):
@@ -593,7 +593,7 @@ def _tab_logs(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
 
 
 @FORGE.inspect("vecu", title="Vécu", subject="app", order=60,
-               description="Les exécutions, changements d'état et signaux de cette app conservés dans le journal de Mika.")
+               description="Les exécutions, changements d'état et signaux de cette app conservés dans son journal.")
 def _tab_lived(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     got = _subject(s, ctx)
     if isinstance(got, list):

@@ -238,7 +238,7 @@ def test_the_cli_tells_the_first_steps_and_never_wants_a_password_in_argument(tm
     with pytest.raises(SystemExit):
         cli.main(["--help"])
     text = capsys.readouterr().out
-    assert "Premiers pas" in text and "/inspecteur/" in text and "lancer Mika" in text
+    assert "Premiers pas" in text and "/inspecteur/" in text and "la lancer : le serveur du chat" in text
     asked: list[str] = []
 
     def ask(prompt: str) -> str:

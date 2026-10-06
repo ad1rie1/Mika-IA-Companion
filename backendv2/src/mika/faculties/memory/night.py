@@ -22,6 +22,7 @@ from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
+from mika.contracts import self_ as self_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory.consolidation import kept_secrets
 from mika.faculties.memory.faculty import MEMORY, MemoryState, Reflection, params
@@ -71,7 +72,8 @@ class Reflect:
         if x.says_secret([text]):
             return True
         names = {st for person in r.about for st in stems(frame.get(identity_c.IDENTITY(person)).name or "")}
-        return x.echoes(text, kept_secrets(store, r.about), names | {"mika"})
+        names |= stems(self_c.name_of(frame.get(self_c.PERSONA)))
+        return x.echoes(text, kept_secrets(store, r.about), names)
 
 
 @MEMORY.process("memory.night", wake_on=[*body_c.ALL], lane="night", catch_up=CatchUp.ONCE, max_quantum_s=3600)

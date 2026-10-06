@@ -155,7 +155,7 @@ def why_not_now(p: Project, s: ProjectsState, frame: Frame) -> str:
     if sum(1 for t in s.runs_at if now - t < HOUR) >= pm.runs_per_hour:
         return f"plafond atteint : {pm.runs_per_hour} exécutions par heure, tous projets confondus"
     if p.mode == c.PERSONA and frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE:
-        return "elle dort : en mode Mika, elle y travaille éveillée"
+        return "elle dort : en mode « elle-même », elle y travaille éveillée"
     if not nudged(p) and not in_window(p, now, tz):
         return "hors de sa plage de travail"
     at = next_run_at(p, s, frame)

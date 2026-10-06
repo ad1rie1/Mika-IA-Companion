@@ -271,7 +271,7 @@ def _tab_message(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
         ActionSlot("email.classer" if unread(m, s.mails.get(ref)) else "email.non_lu", presentation="button"),
         ActionSlot("email.ne_plus_suivre" if m.flagged else "email.suivre", presentation="button"),
         ActionSlot("email.deplacer", presentation="button"),
-        ActionSlot("email.rediger", title="Faire préparer une réponse par Mika", presentation="button"),
+        ActionSlot("email.rediger", title="Lui faire préparer une réponse", presentation="button"),
         ActionSlot("email.corbeille", presentation="button"), ActionSlot("email.supprimer", presentation="button"),
     )),)))
     blocks.append(Toolbar(tuple(slots)))
@@ -309,7 +309,7 @@ def _tab_thread(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]
 
 
 @EMAIL.inspect("remarque", title="Ce qu'elle en sait", subject="mail", order=20,
-               description='Ce que Mika a retenu de ce message et les événements associés.')
+               description="Ce qu'elle a retenu de ce message et les événements associés.")
 def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("mail")
     ref, note = _asked(s, ctx, port)
@@ -339,7 +339,7 @@ def _tab_noticed(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block
     if ask is not None and exhausted(s, ref, params_of(frame)):
         blocks.append(Note(f"Tu lui as demandé d'y répondre ({ctx.when(ask.at)}), mais elle n'y est pas arrivée "
                            f"({s.attempts.get(ref, 0)} essais) : la demande est close. Tu peux la relancer "
-                           "(« Faire préparer une réponse par Mika »).", tone="warn"))
+                           "(« Lui faire préparer une réponse »).", tone="warn"))
     elif ask is not None:
         blocks.append(Note(f"Tu lui as demandé d'y répondre ({ctx.when(ask.at)}) : elle le fera à son prochain "
                            "moment de travail (au réveil si elle dort).", tone="info"))

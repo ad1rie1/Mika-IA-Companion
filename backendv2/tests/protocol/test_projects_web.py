@@ -154,7 +154,7 @@ def test_a_project_is_created_on_its_own_page_and_lands_on_its_fiche(world):  # 
     for legend in ("Le projet", "Ses objectifs", "Son mode et ses outils", "Son rythme", "Sa liberté",
                    "Son dépôt distant"):
         assert f"<legend>{legend}</legend>" in page, legend
-    assert "Un par ligne" in page and "Améliorer la sécurité" in page and "Mika : elle y travaille" in page
+    assert "Un par ligne" in page and "Améliorer la sécurité" in page and "Elle-même : elle y travaille" in page
     token = client.cookies.get("csrftoken")
     refused = _create(client, token, "c0", title="Un module", remote="git@github.com:moi/x.git", start="25:00")
     assert refused.status_code == 400

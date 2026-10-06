@@ -346,7 +346,17 @@ _SHOUTED = re.compile(r"[^\W\d_a-zß-ÿ][^\Wa-zß-ÿ]*(?:[ _:.,'’!\-]+[^\Wa-z�
 _PAUSE = re.compile(r"pause\s*(?:[:= ]\s*(\d+(?:[.,]\d+)?)\s*(ms|s|sec|secs|secondes?|seconds?)?)?", re.IGNORECASE)
 _THINKING = re.compile(r"<\s*(thinking|think|reasoning)\b[^>]*>.*?<\s*/\s*\1\s*>", re.IGNORECASE | re.DOTALL)
 _THINKING_END = re.compile(r"^.*?<\s*/\s*(?:thinking|think|reasoning)\s*>", re.IGNORECASE | re.DOTALL)
-_SPEAKER = re.compile(r"^\s*(?:\*\*|__)?(?:Mika|Assistant)(?:\*\*|__)?\s*[:：]\s*", re.IGNORECASE)
+#: un libellé d'orateur recopié en tête de réponse (« Assistant : », « **Léa** : ») — son nom vient de sa persona
+_SPEAKER = r"^\s*(?:\*\*|__)?(?:{names})(?:\*\*|__)?\s*[:：]\s*"
+_ASSISTANT = "Assistant"
+
+
+def _speaker(name: str) -> re.Pattern[str]:
+    """Le libellé à retirer : « Assistant », et son nom à elle quand on le connaît (en entier, ou son prénom)."""
+    names = [_ASSISTANT, *dict.fromkeys(n for n in (" ".join(name.split()), *name.split()[:1]) if n)]
+    return re.compile(_SPEAKER.format(names="|".join(re.escape(n) for n in names)), re.IGNORECASE)
+
+
 _STARRED = re.compile(r"(?<![*\w])(\*{1,2}|_)(?!\s)([^*_\n]{1,60}?)(?<!\s)\1(?![*\w])")
 _PARENS = re.compile(r"\(\s*([^()\n]{1,40}?)\s*\)")
 #: Les émojis (pictogrammes, symboles, drapeaux, sélecteurs de variante, liants) : sa parole est lue à voix haute, et
@@ -590,10 +600,11 @@ def _cut(text: str, spans: list[tuple[int, int]]) -> str:
     return "".join(out)
 
 
-def parse_tag(text: str) -> Tag:
+def parse_tag(text: str, speaker: str = "") -> Tag:
     """Ce qu'elle a déclaré, et le texte prêt à livrer : prosodie dans la
     grammaire du frontend, didascalies et jetons parasites retirés, préfixe
-    « Mika : », guillemets englobants et raisonnement ôtés, ponctuation recollée.
+    « Assistant : » ou « <son nom> : » (``speaker``, celui de sa persona),
+    guillemets englobants et raisonnement ôtés, ponctuation recollée.
 
     Pas de balise → ``declared=None`` (aucune impulsion) ; plusieurs balises →
     la **dernière** (c'est ce qu'elle ressent en finissant d'écrire) ; un nom
@@ -613,7 +624,7 @@ def parse_tag(text: str) -> Tag:
     found.sort()
     clean = _cut(raw, [(s, e) for s, e, *_ in found])
     clean = _EMOJI.sub("", _gestures(_voice(clean)))
-    clean = _unquote(_tidy(_SPEAKER.sub("", _tidy(clean))))
+    clean = _unquote(_tidy(_speaker(speaker).sub("", _tidy(clean))))
     declared: Declared | None = None
     unknown: str | None = None
     for _s, _e, name, value, pct in reversed(found):

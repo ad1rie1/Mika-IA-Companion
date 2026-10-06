@@ -9,6 +9,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from mika.contracts import self_ as self_c
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -148,7 +149,7 @@ def _tab_voice(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
     pairs: list[tuple[str, Any]] = [
         ("elle y écrit", VOICE_LABEL.get(info.voice, info.voice)),
         ("ton nom", info.display_name or "—"),
-        ("son nom d'expéditrice", info.sender_name or "Mika"),
+        ("son nom d'expéditrice", info.sender_name or self_c.name_of(frame.get(self_c.PERSONA))),
         ("réponses préparées d'elle-même", "oui" if info.autodraft else "non"),
         ("jamais pour", ", ".join(info.autodraft_skip) or "—"),
         ("modifier", edit_account(info.key, _fiche(info.key) + "?onglet=voix")),

@@ -13,6 +13,7 @@ from typing import Any
 
 from mika.contracts import attention as attention_c
 from mika.contracts import identity as c
+from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.faculties.identity.faculty import IDENTITY, IdentityState, view_of
 from mika.kernel.faculty import Zone
@@ -30,6 +31,15 @@ CHANNEL_FR = {privacy.WEB: "sur l'application", privacy.MOBILE: "sur l'applicati
 #: ce qu'est pour elle la personne qui s'occupe d'elle (en privé seulement : jamais dit devant un salon)
 OWNER_LINE = ("C'est quelqu'un qui s'occupe de toi : ton serveur, tes réglages et ce que tu as le droit de faire "
               "passent par cette personne. Tu le sais, sans en faire un sujet.")
+#: … et pour une persona incarnée (ADR 0070) : ni serveur ni réglages — quelqu'un sur qui elle peut compter
+EMBODIED_OWNER_LINE = ("C'est quelqu'un qui veille sur toi et sur qui tu peux compter. Tu le sais, sans en faire un "
+                       "sujet.")
+
+
+def owner_line(frame: Frame) -> str:
+    """Ce qu'est pour elle la personne qui s'occupe d'elle, selon sa nature : rien d'une machine si elle est
+    incarnée."""
+    return EMBODIED_OWNER_LINE if frame.get(self_c.PERSONA).nature == self_c.EMBODIED else OWNER_LINE
 WEEKDAYS_FR = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 _KNOWN = (social_c.FRIEND, social_c.CLOSE)
 
@@ -148,7 +158,7 @@ def last_talk(frame: Frame, person: str, kind: str, name: str = "") -> list[str]
 
 @IDENTITY.section("who", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=90, floor_chars=400,
                   title="QUI TU AS EN FACE", reads=[c.IDENTITY, c.PERSON, social_c.CLOSENESS, social_c.CONTACT,
-                                                    attention_c.AWAITING])
+                                                    attention_c.AWAITING, self_c.PERSONA])
 def _who(s: IdentityState, frame: Frame, enrich: Any) -> SectionBody | None:
     aud = frame.audience
     ep = frame.episode
@@ -159,7 +169,7 @@ def _who(s: IdentityState, frame: Frame, enrich: Any) -> SectionBody | None:
     if aud.owner and not aud.public:
         # sans cette ligne, sa propriétaire n'était qu'une « amie » tombée du ciel le premier jour (« c'est la
         # première fois que vous vous parlez » et « fait partie de tes amis », sonde réelle du 2026-10-03)
-        lines.append(OWNER_LINE)
+        lines.append(owner_line(frame))
     if view.known:
         person = frame.get(c.PERSON(ep.target))
         level = frame.get(social_c.CLOSENESS(person)) if is_identifiable(ep.target) else ""

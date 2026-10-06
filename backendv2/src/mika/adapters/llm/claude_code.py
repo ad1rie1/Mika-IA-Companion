@@ -414,7 +414,7 @@ class ClaudeCodeBackend:
         if kind == "exit":
             raise ClaudeCodeError(f"la CLI s'est arrêtée sans réponse (code {value}) : {run.stderr[-300:]}".strip())
         if kind == "mcp":
-            raise ClaudeCodeError(f"la CLI n'a pas pu joindre les outils de Mika ({value}) : elle aurait répondu "
+            raise ClaudeCodeError(f"la CLI n'a pas pu joindre ses outils ({value}) : elle aurait répondu "
                                   "sans ses mains")
         d: Mapping[str, Any] = value
         if d.get("is_error") or d.get("subtype") != "success":

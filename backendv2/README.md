@@ -69,6 +69,9 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
   (`python -m mika token create <compte> --label …`). L'application Android est une
   messagerie : elle reçoit en arrière-plan, et Mika peut y écrire la première ; elle
   peut aussi y envoyer des fichiers (ADR 0062, `docs/protocole-chat.md`).
+- **Lui donner une vie importée** (un rejeu d'archives) : `mika.app.genesis` ajoute souvenirs, croyances et moments
+  à l'instant courant d'un noyau démarré, et coupe sa vie spontanée le temps du rejeu ; sa nature (`nature: incarnee`
+  dans la persona) et son nom ne viennent que de sa persona (ADR 0070).
 - **La faire agir depuis un script** : déclare un réveil (Configuration › Plugins › Réveils par API), génère sa
   clé sur sa fiche, puis `POST /api/wake/<nom>` avec `Authorization: Bearer <clé>` et `{"text": "…"}` (ADR 0068).
 - **Lui faire lire Teams, et y répondre à ta place** : installe l'extension de `frontend/Extension/` dans le

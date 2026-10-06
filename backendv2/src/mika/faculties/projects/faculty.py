@@ -135,7 +135,7 @@ class ProjectsParams(BaseModel):
              "plus).")] = 2
     share_notable_from: Annotated[float, Knob(
         label="Notable à partir de", group="Raconter", lo=0.0, hi=1.0, step=0.05,
-        help="En mode Mika, un objectif mené à bout qu'elle juge au moins aussi notable se raconte à qui lui a "
+        help="En mode « elle-même », un objectif mené à bout qu'elle juge au moins aussi notable se raconte à qui lui a "
              "confié le projet.")] = 0.4
     share_within_us: Annotated[int, Knob(
         label="Raconter dans les", group="Raconter", lo=HOUR, hi=7 * DAY,

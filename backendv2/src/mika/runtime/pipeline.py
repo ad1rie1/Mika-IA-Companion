@@ -82,7 +82,8 @@ _UNFINISHED = frozenset({"max_turns", "truncated"})
 
 PersonaProvider = Callable[[Frame, str], PersonaRender]
 AudienceResolver = Callable[[Frame, "EpisodeRequest"], Audience]
-Parser = Callable[[str], tuple[str, Mapping[str, str]]]
+#: ``(texte, son nom)`` → (texte livrable, annotations) ; son nom vient de la persona rendue (vide : inconnu)
+Parser = Callable[[str, str], tuple[str, Mapping[str, str]]]
 
 
 def is_silence(text: str) -> bool:
@@ -404,7 +405,7 @@ class EpisodeRunner:
                     await self._settle(ep, Outcome.FAILED, detail=_describe(loop.error))
                     return
                 report.tools = loop.calls
-                text, annotations = self._parse(loop.text)
+                text, annotations = self._parse(loop.text, persona.name if persona is not None else "")
                 if not text.strip() or is_silence(text):
                     if loop.stop in _UNFINISHED and not loop.text.strip():
                         # elle n'a pas pu finir (trop d'appels d'outils) : ce n'est pas un silence choisi
@@ -616,10 +617,10 @@ class EpisodeRunner:
         """Les outils offerts (``tools.offer``, la seule porte)."""
         return offer(self.mind.registry.tools, policy, kind, audience, only)
 
-    def _parse(self, text: str) -> tuple[str, dict[str, str]]:
+    def _parse(self, text: str, speaker: str = "") -> tuple[str, dict[str, str]]:
         annotations: dict[str, str] = {}
         for parser in self.parsers:
-            got = call(parser, text, label="analyse de réponse")
+            got = call(parser, text, speaker, label="analyse de réponse")
             if isinstance(got, Failed):
                 continue
             text, extra = got

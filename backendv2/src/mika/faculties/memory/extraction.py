@@ -35,7 +35,8 @@ from mika.vocab.words import WORD, stems, words
 from mika.vocab.words import fold as wfold
 
 TOOL_NAME = "record_memories"
-SELF_NAMES = frozenset({"mika", "moi", "je", "elle-meme", "elle meme", "elle"})
+#: Comment le modèle la désigne quand c'est elle (repliés) ; son nom s'y ajoute, celui de sa persona (``self_names``).
+SELF_NAMES = frozenset({"moi", "je", "elle-meme", "elle meme", "elle"})
 IMPORTANCE = {1: 0.2, 2: 0.45, 3: 0.7, 4: 0.95}
 SENSITIVITY = {"anodin": Sensitivity.ANODYNE, "anodine": Sensitivity.ANODYNE, "anodyne": Sensitivity.ANODYNE,
                "personnel": Sensitivity.PERSONAL, "personnelle": Sensitivity.PERSONAL, "personal": Sensitivity.PERSONAL,
@@ -84,7 +85,7 @@ class _Lenient(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-#: ce que Mika dit d'elle-même : une anecdote s'efface en quelques jours ; un goût, un avis, un fait de sa vie tient
+#: ce qu'elle dit d'elle-même : une anecdote s'efface en quelques jours ; un goût, un avis, un fait de sa vie tient
 SELF_KINDS = {"anecdote": "anecdote", "gout": "gout", "gouts": "gout", "avis": "avis", "opinion": "avis",
               "fait": "fait", "biographie": "fait", "vie": "fait"}
 DURABLE_SELF = frozenset({"gout", "avis", "fait"})
@@ -92,11 +93,12 @@ DURABLE_SELF = frozenset({"gout", "avis", "fait"})
 
 class _Item(_Lenient):
     texte: str = Field(min_length=3, max_length=600, validation_alias=_TEXT)
-    sur_elle: bool = Field(default=False, description="ce que Mika raconte d'elle-même, de sa vie de tous les jours")
-    genre: str | None = Field(default=None, description="pour ce que Mika dit d'elle-même : anecdote (ce qu'elle a "
+    sur_elle: bool = Field(default=False, description="ce qu'elle raconte d'elle-même, de sa vie de tous les jours")
+    genre: str | None = Field(default=None, description="pour ce qu'elle dit d'elle-même : anecdote (ce qu'elle a "
                                                         "fait), gout, avis ou fait (sa vie, son histoire)")
     personnes: list[str] = Field(default_factory=list, description="qui c'est concerne : le jeton ([P1]) pour "
-                                 "quelqu'un de la conversation, le prénom pour quelqu'un d'autre ; jamais Mika")
+                                 "quelqu'un de la conversation, le prénom pour quelqu'un d'autre ; jamais "
+                                 "elle-même")
     sensibilite: str | None = Field(default=None, validation_alias=_SENS,
                                     description="anodin, personnel ou confidence")
     secret: bool = Field(default=False, description="vrai si la personne a demandé de ne pas le répéter, à "
@@ -134,9 +136,9 @@ class XCroyance(_Item):
     importance: int = Field(default=2, ge=1, le=4)
     remplace: int | None = None
     entre_vous: bool = Field(default=False, validation_alias=AliasChoices("entre_vous", "entre_nous", "lien"),
-                             description="ce qui n'appartient qu'à Mika et cette personne : comment elle appelle "
-                                         "Mika (un surnom), le surnom que Mika lui donne, une blague ou une "
-                                         "expression à eux")
+                             description="ce qui n'appartient qu'à elle et à cette personne : comment la "
+                                         "personne l'appelle (un surnom), le surnom qu'elle lui donne, une blague "
+                                         "ou une expression à eux")
 
 
 class XPromesse(_Lenient):
@@ -195,11 +197,26 @@ class Extraction(_Lenient):
         return _ints(v)
 
 
-def tool() -> ToolDecl:
-    return ToolDecl(TOOL_NAME, "Enregistre ce que Mika retient de cette conversation.", Extraction.model_json_schema())
+def tool(name: str) -> ToolDecl:
+    """L'outil de la relecture, au nom de celle dont c'est la mémoire (``name``, celui de sa persona)."""
+    return ToolDecl(TOOL_NAME, f"Enregistre ce que {name} retient de cette conversation.",
+                    Extraction.model_json_schema())
 
 
-SYSTEM = """Tu es la mémoire de Mika. On te montre une de ses conversations — un fil privé avec une personne, ou \
+def self_names(name: str) -> frozenset[str]:
+    """Comment le modèle peut la désigner, elle (repliés) : « moi », « elle »… et son nom, en entier ou son prénom."""
+    folded = " ".join(fold(name).split())
+    return SELF_NAMES | {n for n in (folded, *folded.split()[:1]) if n}
+
+
+def system(name: str) -> str:
+    """La consigne de la relecture, au nom de celle dont c'est la mémoire (celui de sa persona : jamais écrit ici)."""
+    return _SYSTEM.replace(_NAME, name)
+
+
+#: là où son nom s'écrit dans la consigne
+_NAME = "{nom}"
+_SYSTEM = """Tu es la mémoire de {nom}. On te montre une de ses conversations — un fil privé avec une personne, ou \
 un salon où plusieurs personnes parlent ; tu décides ce qu'elle en gardera, comme quelqu'un qui repense à sa \
 journée : pas tout, l'important.
 
@@ -209,7 +226,7 @@ prénom ; le jeton, lui, est unique.
 Ce que tu peux retenir :
 - des souvenirs : ce qu'elle a vécu, raconté avec ses mots à elle, à la première personne (« J'ai consolé Adrien : \
 son chat Pixel est mort ce matin »). Un souvenir se suffit à lui-même : des prénoms, jamais « il », « l'utilisateur » \
-ou « la personne ». Ce n'est jamais une phrase recopiée de la conversation — ni une réplique de Mika, ni un message \
+ou « la personne ». Ce n'est jamais une phrase recopiée de la conversation — ni une réplique de {nom}, ni un message \
 de la personne : si les mots exacts de quelqu'un comptent, cite-les en disant qui parle (« Adrien m'a dit : « j'étais \
 avec lui jusqu'au bout » »).
 - des croyances : des faits sur quelqu'un ou sur le monde, ses goûts compris (« Le chat d'Adrien s'appelait Pixel », \
@@ -220,17 +237,17 @@ pop : c'était une phase ») et donne dans « remplace » le numéro de l'ancien
 connue. Écris toute date en absolu (« le week-end du 3 octobre », « depuis le 27 septembre »), jamais « ce \
 week-end », « dimanche » ou « hier » : relue dans trois semaines, une croyance doit encore être vraie. Ce qui ne vaut \
 qu'un temps est un événement, pas une croyance.
-- ce qui n'appartient qu'à eux : comment la personne appelle Mika (« Adrien m'appelle Mimi »), le surnom que Mika \
+- ce qui n'appartient qu'à eux : comment la personne appelle {nom} (« Adrien m'appelle Mimi »), le surnom que {nom} \
 lui donne, une blague ou une expression qu'ils partagent — une croyance à la première personne, rattachée à la \
 personne, avec « entre_vous » vrai et importance 3 : entre amis, c'est ce qui fait un lien.
 - rien de banal : un au revoir, « je vais dormir », « je retourne bosser », une politesse ne se retiennent pas.
-- ce que Mika raconte d'elle-même : une croyance à la première personne, avec « sur_elle » vrai, sans personne, et \
+- ce que {nom} raconte d'elle-même : une croyance à la première personne, avec « sur_elle » vrai, sans personne, et \
 son « genre » — « anecdote » pour sa petite vie de tous les jours (« J'ai ressorti mon fer à souder pour réparer \
 ma lampe », importance 1 : elle s'en souviendra quelques jours) ; « gout », « avis » ou « fait » pour ce qui la \
 définit (« Mon plat préféré, c'est les ramen », « Je trouve les jeux mobiles sans intérêt », importance 3 : elle \
 s'en souviendra longtemps, pour ne jamais se contredire). Si elle change d'avis, donne dans « remplace » le numéro \
 de ce qu'elle pensait avant.
-- des promesses : ce que Mika elle-même a promis de faire pour quelqu'un — une chose à faire, à l'infinitif (« lui \
+- des promesses : ce que {nom} elle-même a promis de faire pour quelqu'un — une chose à faire, à l'infinitif (« lui \
 demander comment s'est passé son entretien »), pas « garder le secret » (ça, c'est le secret lui-même) —, avec \
 l'échéance si elle a été dite (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « jeudi soir », \
 20:00). Un rappel qu'on lui a demandé et qu'elle a accepté (« rappelle-moi de prendre rendez-vous mercredi » — « ok, \
@@ -253,7 +270,7 @@ fini le déménagement », « il est sorti de l'hôpital », « on a dû l'endor
 
 Pour chaque élément :
 - « personnes » : qui il concerne — le jeton pour quelqu'un de la conversation ([P1]), le prénom pour quelqu'un \
-d'autre ; jamais Mika elle-même ; toujours, même quand c'est évident ;
+d'autre ; jamais {nom} elle-même ; toujours, même quand c'est évident ;
 - « messages » : les numéros des messages d'où tu le tires (#) — c'est ce qui dit qui le lui a confié ;
 - l'importance (1 anodin, 2 notable, 3 important, 4 marquant) ;
 - la sensibilité — anodin (ce qu'on dirait devant n'importe qui : goûts, loisirs, anecdotes ; ce qui a été annoncé \
@@ -283,10 +300,10 @@ class Speaker:
 class Line:
     seq: int
     at: int
-    speaker: str  # le libellé affiché (« Alice [P1] »), ou « Mika »
+    speaker: str  # le libellé affiché (« Alice [P1] »), ou son nom à elle
     text: str
-    person: str | None = None  # la clé de personne de qui parle (``None`` : Mika)
-    aside: bool = False  # dans un salon, pas adressé à Mika
+    person: str | None = None  # la clé de personne de qui parle (``None`` : elle)
+    aside: bool = False  # dans un salon, pas adressé à elle
 
 
 @dataclass(frozen=True, slots=True)
@@ -400,9 +417,12 @@ class People:
     tokens: Mapping[str, str] = field(default_factory=dict)
     local: Mapping[str, str] = field(default_factory=dict)
     directory: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    #: comment le modèle la désigne, elle (``self_names`` : son nom compris)
+    me: frozenset[str] = SELF_NAMES
 
     @classmethod
-    def of(cls, speakers: Sequence[Speaker], directory: Mapping[str, tuple[str, ...]]) -> People:
+    def of(cls, speakers: Sequence[Speaker], directory: Mapping[str, tuple[str, ...]], her: str = "") -> People:
+        """``her`` : son nom (celui de sa persona) — le modèle qui la nomme parle d'elle, pas de quelqu'un."""
         tokens = {s.token.lower(): s.person for s in speakers}
         named: dict[str, set[str]] = {}
         for s in speakers:
@@ -411,7 +431,7 @@ class People:
                 if key:
                     named.setdefault(key, set()).add(s.person)
         local = {k: next(iter(v)) for k, v in named.items() if len(v) == 1}
-        return cls(tokens, local, directory)
+        return cls(tokens, local, directory, self_names(her) if her else SELF_NAMES)
 
     def one(self, raw: str) -> str | None:
         """Une clé, ou ``None`` pour elle-même ou rien."""
@@ -420,7 +440,7 @@ class People:
         if m and f"p{m.group(1)}" in self.tokens:
             return self.tokens[f"p{m.group(1)}"]
         folded = " ".join(fold(TOKEN.sub(" ", text)).split())
-        if not folded or folded in SELF_NAMES:
+        if not folded or folded in self.me:
             return None
         first = folded.split()[0]
         key = self.local.get(folded) or self.local.get(first)

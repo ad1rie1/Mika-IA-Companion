@@ -72,9 +72,9 @@ from mika.ports.workshop import OutsideWorkshop, WorkshopFull
 from mika.vocab.episodes import project_of
 from mika.vocab.privacy import Sensitivity
 
-MODE_CHOICES = ((c.PERSONA, "Mika : elle y travaille avec son humeur et ses avis"),
+MODE_CHOICES = ((c.PERSONA, "Elle-même : elle y travaille avec son humeur et ses avis"),
                 (c.PLAIN, "Impersonnel : un travail factuel, sans persona ni émotion"))
-MODE_HELP = ("En mode Mika, c'est elle qui travaille : sa voix, son humeur, ses avis ; ce qu'elle mène à bout la "
+MODE_HELP = ("En mode « elle-même », c'est elle qui travaille : sa voix, son humeur, ses avis ; ce qu'elle mène à bout la "
              "rend fière, ce qui bloque la frustre, et elle le raconte. En mode impersonnel, le travail est factuel, "
              "sans persona ni émotion, et ne suit pas son sommeil (seulement la plage de travail).")
 PRIORITY_CHOICES = ((c.LOW, "basse"), (c.NORMAL, "normale"), (c.HIGH, "haute"), (c.URGENT, "urgente"))
@@ -573,7 +573,7 @@ def _runnable(s: ProjectsState, frame: Frame, key: str) -> bool:
 @PROJECTS.action("lancer", title="Lancer maintenant", args=NoArgs, emits=[NUDGED], subject="project", order=5,
                  available=_runnable,
                  description="Sa prochaine exécution n'attend ni l'agenda, ni l'espacement, ni la plage de travail ; "
-                             "elle reste sous les plafonds (par heure, par jour) et, en mode Mika, jamais pendant son "
+                             "elle reste sous les plafonds (par heure, par jour) et, en mode « elle-même », jamais pendant son "
                              "sommeil.")
 def _run_now(s: ProjectsState, frame: Frame, args: NoArgs, ctx: ActionContext) -> Done:
     p = _target(s, ctx)

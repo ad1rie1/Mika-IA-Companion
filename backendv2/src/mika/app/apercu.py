@@ -51,7 +51,7 @@ REPLIES = itertools.cycle([
 ])
 CONVERSATIONS = (
     ("adrien", ["salut ! moi c'est Adrien", "je bosse sur un jeu en ce moment", "tu aimes le café ?"]),
-    ("bea", ["coucou Mika, c'est Béa", "je suis un peu fatiguée aujourd'hui", "à demain !"]),
+    ("bea", ["coucou, c'est Béa", "je suis un peu fatiguée aujourd'hui", "à demain !"]),
 )
 
 

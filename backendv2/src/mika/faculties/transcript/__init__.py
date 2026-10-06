@@ -33,6 +33,7 @@ from mika.contracts import expression as expression_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
+from mika.contracts import self_ as self_c
 from mika.contracts import transcript as c
 from mika.kernel.clock import DAY, MINUTE, local, local_date_of_night
 from mika.kernel.events import Content
@@ -567,12 +568,19 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     return ThreadView(key, tuple(turns), ChatTurn("user", "", speaker=who, mark=mark) if (mark or who) else None)
 
 
-COMPACT_SYSTEM = """Tu aides Mika à se souvenir d'une longue conversation. On te donne le début de son fil avec \
+#: là où son nom s'écrit dans la consigne du résumé (celui de sa persona : jamais écrit ici)
+_NAME = "{nom}"
+_COMPACT_SYSTEM = """Tu aides {nom} à se souvenir d'une longue conversation. On te donne le début de son fil avec \
 quelqu'un (et le résumé des échanges encore plus anciens, s'il existe) ; un repère entre crochets dit quand un \
-message a été écrit. Écris un résumé à la première personne, du point de vue de Mika (« On a parlé de… », « Il \
+message a été écrit. Écris un résumé à la première personne, du point de vue de {nom} (« On a parlé de… », « Il \
 m'a dit que… »), en 5 à 10 phrases : les faits, ce qui a été promis, le ton de la relation. Situe ce qui compte \
 par sa date (« le lundi 28 septembre au soir »), jamais par « hier » ou « la semaine dernière » : ce résumé sera \
 relu bien plus tard. N'invente rien. Réponds seulement par le résumé."""
+
+
+def compact_system(name: str) -> str:
+    """La consigne du résumé d'un fil long, au nom de celle qui s'en souviendra."""
+    return _COMPACT_SYSTEM.replace(_NAME, name)
 
 
 def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]], after_us: int) -> str:
@@ -580,13 +588,14 @@ def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]],
     dans l'historique (le premier en absolu)."""
     tz = frame.env.tz_of(frame.root)
     name = clean_display_name(frame.get(identity_c.IDENTITY(person)).name) or "La personne"
+    her = self_c.name_of(frame.get(self_c.PERSONA))
     lines = []
     prev: int | None = None
     for r in rows:
         at = int(r["at"])
         mark = gap_mark(prev, at, tz, after_us) if prev is not None else opening_mark(at, frame.now, tz)
         prev = at
-        who = ("Mika (d'elle-même)" if r.get("kind") == Kind.INITIATIVE else "Mika") if r["role"] == "assistant" \
+        who = (f"{her} (d'elle-même)" if r.get("kind") == Kind.INITIATIVE else her) if r["role"] == "assistant" \
             else name
         lines.append(f"{f'[{mark}] ' if mark else ''}{who} : {r['text']}")
     return "\n".join(lines)
@@ -632,7 +641,8 @@ class Compact:
             lines = _compact_lines(frame, person, folded, p.mark_after_us)
             prompt = (f"Résumé précédent : {previous}\n\n" if previous else "") + f"Suite des échanges :\n{lines}"
             self.retry_at = frame.now + p.compact_retry_us  # si l'appel lève, pas de rafale
-            request = LLMRequest(role="compact", call_id=f"{ctx.run_id}#{person}", system_stable=COMPACT_SYSTEM,
+            request = LLMRequest(role="compact", call_id=f"{ctx.run_id}#{person}",
+                                 system_stable=compact_system(self_c.name_of(frame.get(self_c.PERSONA))),
                                  messages=(Message("user", prompt),), max_tokens=p.compact_max_tokens,
                                  lane="background", priority=3)
             response = await ctx.llm.call(request)

@@ -79,8 +79,8 @@ def test_parse_tag(text, clean, declared):
     ("*soupire* bon d'accord", "[SIGH] bon d'accord"),
     ("(sourit) Coucou !", "Coucou !"),
     ("*hausse les épaules* Bof.", "Bof."),
-    ("Mika : Coucou Adrien !", "Coucou Adrien !"),
-    ("**Mika**: Coucou !", "Coucou !"),
+    ("Assistant : Coucou Adrien !", "Coucou Adrien !"),
+    ("**Assistant**: Coucou !", "Coucou !"),
     ("« Coucou Adrien ! »", "Coucou Adrien !"),
     ('"Coucou Adrien !"', "Coucou Adrien !"),
     ("<thinking>Il a l'air triste.</thinking>Oh… ça va ?", "Oh… ça va ?"),
@@ -124,6 +124,19 @@ def test_silence_is_never_damaged(text, kept):
     assert parse_tag(text).text == kept
 
 
+@pytest.mark.parametrize("text, speaker, clean", [
+    ("Mika : Coucou Adrien !", "Mika", "Coucou Adrien !"),
+    ("**Mika**: Coucou !", "Mika", "Coucou !"),
+    ("Léa : Coucou Adrien !", "Léa Martin", "Coucou Adrien !"),  # son prénom suffit
+    ("**Léa Martin** : Coucou !", "Léa Martin", "Coucou !"),
+    ("Mika : Coucou !", "Léa", "Mika : Coucou !"),  # un autre nom : ce n'est pas elle qui se nomme
+    ("Note : demain", "Léa", "Note : demain"),  # un mot suivi de deux-points n'est pas un orateur
+])
+def test_her_own_name_as_a_speaker_label_is_removed(text, speaker, clean):
+    """Un « Nom : » recopié en tête de réponse se retire — son nom vient de sa persona, jamais du code (ADR 0070)."""
+    assert parse_tag(text, speaker).text == clean
+
+
 def test_cleaning_is_stable():
     """Relu, un texte nettoyé ne change plus, et ne garde jamais une balise."""
     for text in ["Trop bien ! **[EMOTION:excited:0.8]**", "*rit* « Coucou ! » [PAUSE 500] [EMOTION:happy:60%]",
@@ -139,7 +152,7 @@ def test_unknown_name_is_reported_not_declared():
 
 def test_expression_parse_profits_from_it():
     """La faculté ``expression`` appelle ``parse_tag`` : sa sortie est déjà prête."""
-    text, annotations = parse("Mika : « Trop bien ! » **[EMOTION:excited:8]**")
+    text, annotations = parse("Mika : « Trop bien ! » **[EMOTION:excited:8]**", "Mika")
     assert text == "Trop bien !" and annotations == {"emotion": "excited:0.800"}
 
 

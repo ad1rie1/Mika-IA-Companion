@@ -67,8 +67,10 @@ def _local_tz() -> tzinfo:
 class ImapSmtpMail:
     def __init__(self, config: Callable[[], MailConfig], cache: Path, *,
                  now: Callable[[], datetime] = lambda: datetime.now(UTC), tz: tzinfo | None = None,
-                 timeout: float = 30.0) -> None:
+                 timeout: float = 30.0, her: Callable[[], str] | None = None) -> None:
         self._config = config
+        #: son nom d'expéditrice quand un compte n'en dit pas : celui de sa persona, que l'application fournit
+        self._her = her or (lambda: compose.DEFAULT_NAME)
         self._now = now
         self._tz = tz or _local_tz()
         self._timeout = timeout
@@ -270,7 +272,7 @@ class ImapSmtpMail:
         sent = self._cache.sent_one(ref)
         if sent is not None:
             msg = EmailMessage()
-            msg['From'] = compose.sender(self._account(sent.account).info(sent.account))
+            msg['From'] = compose.sender(self._account(sent.account).info(sent.account), self._her())
             msg['To'], msg['Subject'], msg['Message-ID'] = sent.to, sent.subject, split_ref(sent.message_id)[1]
             msg.set_content(sent.body)
             return msg.as_bytes()
@@ -535,7 +537,7 @@ class ImapSmtpMail:
         found = self._accounts().get(draft.account)
         parent = self._cache.one(draft.reply_to) if draft.reply_to else None
         info = found.info(draft.account) if found is not None else None
-        return compose.preview(draft, info, parent, tz=self._tz), parent
+        return compose.preview(draft, info, parent, tz=self._tz, her=self._her()), parent
 
     def preview(self, draft_id: str) -> Preview | None:
         found = self._cache.draft(draft_id)

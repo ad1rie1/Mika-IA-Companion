@@ -109,7 +109,7 @@ DIFF_SHOWN = 40_000
 DOWNLOAD_MAX = 20 * 1024 * 1024
 APPROVALS = Ref("local", "/inspecteur/approbations", "ouvrir les approbations")
 
-MODE_FR = {c.PERSONA: "Mika", c.PLAIN: "impersonnel"}
+MODE_FR = {c.PERSONA: "elle-même", c.PLAIN: "impersonnel"}
 MODE_LONG = dict(MODE_CHOICES)
 MODE_TONE = {c.PERSONA: "info", c.PLAIN: "muted"}
 STATUS_FR = {c.ACTIVE: "actif", c.PAUSED: "en pause", c.ARCHIVED: "archivé"}
@@ -137,7 +137,7 @@ AUTHOR_FR = {"operator": "toi", "owner": "qui le lui a confié", "self": "elle"}
 STATE_PARAM = Param("etat", "État", kind="select", default="vivants",
                     choices=(("vivants", "actifs et en pause"), (c.ACTIVE, "actifs"), (c.PAUSED, "en pause"),
                              (c.ARCHIVED, "archivés"), ("tous", "tous")))
-MODE_PARAM = Param("mode", "Mode", kind="select", choices=((c.PERSONA, "Mika"), (c.PLAIN, "impersonnel")))
+MODE_PARAM = Param("mode", "Mode", kind="select", choices=tuple(MODE_FR.items()))
 PROJECT_PARAM = Param("projet", "Projet n°", kind="int", lo=1)
 VERDICT_PARAM = Param("verdict", "Verdict", kind="select", choices=tuple(VERDICT_FR.items()))
 OBJECTIVE_PARAM = Param("objectifs", "Objectifs", kind="select", default="vivants",
@@ -403,7 +403,7 @@ def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
               empty="aucun projet avec ces filtres" if wanted != "vivants" or mode else
               "aucun projet : « Créer un projet » (en haut) en ouvre un — elle peut aussi en ouvrir d'elle-même.",
               caption="Une exécution vise un objectif : celui que tu demandes, sinon le constant le plus en retard, "
-                      "sinon le premier ponctuel ouvert. Un projet en mode Mika ne travaille pas pendant son sommeil ; "
+                      "sinon le premier ponctuel ouvert. Un projet en mode « elle-même » ne travaille pas pendant son sommeil ; "
                       "un projet impersonnel suit seulement sa plage de travail."),
     ]
 
@@ -787,7 +787,7 @@ def _runs_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block
             if report is not None else "—"
         oid = report.objective if report is not None else _objective_id(e.data.subject)
         rows.append(Row((
-            When(e.at), "Mika" if e.data.kind == Kind.WORK else "impersonnel", _objective_words(p, oid, texts), issue,
+            When(e.at), MODE_FR[c.PERSONA] if e.data.kind == Kind.WORK else MODE_FR[c.PLAIN], _objective_words(p, oid, texts), issue,
             verdict, _proof(report.verdict, report.proven) if report is not None else "—",
             Text(_said(report.summary), clamp=SUMMARY_CLAMP) if report is not None else "—",
             _commit_ref(p, report.commit) if report is not None else "—", duration,
@@ -1261,7 +1261,7 @@ def _person_tab(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Blo
 
 
 #: ce que l'oubli d'une personne n'atteint pas (PRJ-9) : dit sur sa fiche, avant qu'on l'oublie
-FORGET_NOTE = ("Oublier cette personne efface ce que la vie de Mika garde de ces {n} projet(s) — titres, comptes "
+FORGET_NOTE = ("Oublier cette personne efface ce que sa vie garde de ces {n} projet(s) — titres, comptes "
                "rendus, carnets, décisions —, pas leurs ateliers : les fichiers, l'historique git (dont les messages "
                "de commit restent neutres) et ce qui est déjà parti vers un dépôt distant. Ouvre chaque projet pour "
                "faire le ménage dans son atelier, ou archive-le. Le stockage des apps de la Forge n'est pas atteint "

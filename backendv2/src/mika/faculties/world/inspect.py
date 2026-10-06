@@ -22,7 +22,7 @@ def _location(s: WorldState, loc: w.Location) -> str:
         near = defn.place(loc.near) if loc.near else None
         return (room.label if room else loc.room) + (f", {near.label}" if near else "")
     if isinstance(loc, w.Held):
-        return f"dans les mains de {'Mika' if loc.actor == w.MIKA else loc.actor}"
+        return "dans ses mains" if loc.actor == w.MIKA else f"dans les mains de {loc.actor}"
     what = plan.label_of(defn, loc.object)
     return f"sur {what} (place {loc.slot + 1})" if isinstance(loc, w.On) else f"dans {what}"
 

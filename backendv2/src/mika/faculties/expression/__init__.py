@@ -102,9 +102,10 @@ def params(p: ExpressionParams | None) -> ExpressionParams:
     return p if p is not None else ExpressionParams()
 
 
-def parse(text: str) -> tuple[str, dict[str, str]]:
-    """Le texte sans balise, ce qu'elle a déclaré, et si elle a posé une question."""
-    tag = parse_tag(text)
+def parse(text: str, speaker: str = "") -> tuple[str, dict[str, str]]:
+    """Le texte sans balise, ce qu'elle a déclaré, et si elle a posé une question. ``speaker`` : son nom (celui de
+    sa persona) — un « Nom : » recopié en tête de réponse se retire."""
+    tag = parse_tag(text, speaker)
     annotations: dict[str, str] = {}
     if tag.declared is not None:
         annotations[c.EMOTION_ANNOTATION] = tag.declared.encode()

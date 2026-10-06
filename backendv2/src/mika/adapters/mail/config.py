@@ -20,8 +20,6 @@ from mika.ports.mail import ACCOUNT_KEY, VOICES, AccountInfo
 
 #: la clé du compte d'une ancienne configuration (un seul compte, sans nom)
 LEGACY_ACCOUNT = "principal"
-#: son nom d'expéditrice, quand le compte n'en dit pas
-HER_NAME = "Mika"
 
 
 class MailAccount(BaseModel):
@@ -71,13 +69,13 @@ class MailAccount(BaseModel):
              "fait déjà (Gmail).")] = True
     voice: Annotated[Literal["elle", "assistante", "proprietaire"], Knob(
         label="Elle écrit", group="Sa voix", choices=VOICES, advanced=False, order=40,
-        help="En son nom ; en assistante (« Mika, pour … ») ; ou à ta place, à la première personne et signé de "
+        help="En son nom ; en assistante (« son nom, pour … ») ; ou à ta place, à la première personne et signé de "
              "ton nom.")] = "elle"
     display_name: Annotated[str, Knob(
         label="Ton nom", group="Sa voix", advanced=False, order=41,
         help="Pour écrire en assistante ou à ta place : le nom qui signe et qui paraît comme expéditeur.")] = ""
     sender_name: Annotated[str, Knob(label="Son nom d'expéditrice", group="Sa voix", order=42,
-                                     help=f"Quand elle écrit en son nom (vide : {HER_NAME}).")] = ""
+                                     help="Quand elle écrit en son nom (vide : le nom de sa persona).")] = ""
     tone: Annotated[str, Knob(label="Ton", group="Sa voix", widget="textarea", advanced=False, order=43,
                               help="Par exemple : « vouvoiement, sobre et chaleureux ».")] = ""
     instructions: Annotated[str, Knob(

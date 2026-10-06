@@ -129,6 +129,7 @@ class Consolidate:
         self.stuck_at = None
         upto = rows[-1][0]
         directory = self._directory(frame, store)
+        her = self_c.name_of(frame.get(self_c.PERSONA))
         conversations = self._conversations(frame, rows, state, directory)
         vectors = ctx.ports.get("vectors")
         # si un appel lève, on ne réessaie pas avant le délai (aucune rafale)
@@ -137,7 +138,7 @@ class Consolidate:
                          list[tuple[int, str, str]], x.Extraction, str]] = []
         failures, model, last_call = 0, "", f"{ctx.run_id}#0"
         for n, conv in enumerate(conversations):
-            people = x.People.of(conv.speakers, directory)
+            people = x.People.of(conv.speakers, directory, her)
             known = await self._known_beliefs(store, vectors, conv, people, directory)
             promises = self._promises(frame, store, state, conv)
             labels = {s.person: s.label for s in conv.speakers}
@@ -147,8 +148,8 @@ class Consolidate:
                 prompt = x.render(conv, now=frame.local(), beliefs=known,
                                   promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
                                             for i, to, t in promises], situations=situations)
-                request = LLMRequest(role="extract", call_id=f"{ctx.run_id}#{n}", system_stable=x.SYSTEM,
-                                     messages=(Message("user", prompt),), tools=(x.tool(),), max_tokens=2500,
+                request = LLMRequest(role="extract", call_id=f"{ctx.run_id}#{n}", system_stable=x.system(her),
+                                     messages=(Message("user", prompt),), tools=(x.tool(her),), max_tokens=2500,
                                      lane="background", priority=2,
                                      meta={"window": (rows[0][0], upto), "conversation": conv.key})
                 response = await ctx.llm.call(request)
@@ -203,6 +204,7 @@ class Consolidate:
         seul tenant. Dans un salon, ce qui ne lui était pas adressé ne compte
         que s'il nomme quelqu'un qu'elle connaît."""
         aside = set(state.unaddressed)
+        her = self_c.name_of(frame.get(self_c.PERSONA))
         known_names = {k for k in directory if " " not in k and len(k) >= 3}
         person_of: dict[str, str] = {}
         name_of: dict[str, str] = {}
@@ -226,7 +228,7 @@ class Consolidate:
                 if person not in tokens:
                     tokens[person] = x.Speaker(f"P{len(tokens) + 1}", person, name_of[handle])
                 if role == "assistant":
-                    lines.append(x.Line(int(seq), int(at), "Mika", text))
+                    lines.append(x.Line(int(seq), int(at), her, text))
                     continue
                 side = bool(room) and int(seq) in aside
                 if side and not set(WORD.findall(fold(text))) & known_names:
@@ -353,7 +355,8 @@ class Consolidate:
                 [ln.text for ln in conv.lines if ln.person])
 
         # ce qui laisse deviner un secret est secret aussi : les secrets de ce lot, et ceux qu'elle garde déjà
-        names = {st for sp in conv.speakers for st in stems(sp.name)} | {"mika"}
+        her = self_c.name_of(frame.get(self_c.PERSONA))
+        names = {st for sp in conv.speakers for st in stems(sp.name)} | stems(her)
         secrets = self._secrets(store, conv)
         for item in (*ex.souvenirs, *ex.croyances, *ex.evenements):
             cited = provenance(item.messages)[2]
@@ -365,7 +368,6 @@ class Consolidate:
             return asked_silence(flag, cited, sens) or (bool(text) and x.echoes(text, secrets, names))
 
         seen: set[tuple[str, str]] = set()  # le même élément deux fois dans un lot n'en fait qu'un
-        her = frame.get(self_c.PERSONA).name or "Mika"
         said_names = [*(sp.name for sp in conv.speakers), her]
         name_of = {sp.person: sp.name for sp in conv.speakers}
         mine = [ln for ln in conv.lines if ln.person is None]
@@ -622,7 +624,7 @@ class Consolidate:
         tz = frame.env.tz_of(frame.root)
         tasks = self._tasks(ex, frame, conv, people, store)
         # « son anniversaire » et « l'anniversaire de Sam », le même samedi : un seul moment (sonde du 2026-10-03)
-        names = [*(sp.name for sp in conv.speakers), frame.get(self_c.PERSONA).name or "Mika"]
+        names = [*(sp.name for sp in conv.speakers), self_c.name_of(frame.get(self_c.PERSONA))]
         noted: list[tuple[str, int, tuple[str, ...]]] = []
         for ev in ex.evenements:
             got = x.when(ev.quand, tz) or ((frame.now, True) if ev.en_cours else None)

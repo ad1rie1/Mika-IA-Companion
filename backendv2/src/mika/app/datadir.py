@@ -47,7 +47,7 @@ def hold(data: Path) -> None:
     except BlockingIOError:
         other = os.read(fd, 32).decode(errors="replace").strip() or "inconnu"
         os.close(fd)
-        raise DataDirBusy(f"un autre Mika tourne déjà sur ce dossier ({data}) : pid {other}. Arrête-le d'abord, "
+        raise DataDirBusy(f"un autre serveur tourne déjà sur ce dossier ({data}) : pid {other}. Arrête-le d'abord, "
                           "ou lance celui-ci sur un autre dossier (--data).") from None
     os.ftruncate(fd, 0)
     os.write(fd, f"{os.getpid()}\n".encode())

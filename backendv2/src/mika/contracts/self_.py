@@ -19,17 +19,20 @@ jugement lu dans la forme du message, enregistré). Des **excuses** sincères
 y a quelque chose à pardonner) adoucissent ce que ses mots lui avaient fait —
 et ce que la relation en garde (``affect`` les lit).
 
-**Sa vie** est celle d'une IA VTuber, rédigée dans la persona : ce qu'elle
-fait à sa façon (``life``), ses goûts et avis tranchés (``tastes``), ce qui est
-vrai d'elle (``facts``) — pour qu'elle ne se contredise pas d'un jour à
-l'autre ; ses façons de dire bonjour (``greetings``) donnent le ton d'une
-salutation, sans jamais être recopiées.
+**Sa vie** est rédigée dans la persona : ce qu'elle fait à sa façon
+(``life``), ses goûts et avis tranchés (``tastes``), ce qui est vrai d'elle
+(``facts``) — pour qu'elle ne se contredise pas d'un jour à l'autre ; ses
+façons de dire bonjour (``greetings``) donnent le ton d'une salutation, sans
+jamais être recopiées. **Sa nature** (``nature``) dit ce qu'elle est : une IA
+qui le sait (la persona livrée), ou une personne incarnée, dont rien ne parle
+d'IA (ADR 0070). **Son nom** est celui de la persona, partout : aucun prompt ne
+l'écrit en dur (``name_of``).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -46,13 +49,28 @@ def _lines(label: str, help: str, order: int, group: str = "Caractère") -> Knob
     return Knob(label=label, help=help + " Une phrase par ligne.", group=group, advanced=False, order=order)
 
 
+#: Le nom d'une persona qui n'en dit pas : celui de la persona livrée (``persona/mika.yaml``). Le seul endroit du
+#: code où il s'écrit — partout ailleurs, son nom vient de sa persona (``name_of``, ADR 0070).
+DEFAULT_NAME = "Mika"
+
+#: Sa nature : une IA qui le sait (la persona livrée), ou une personne incarnée — rien ne lui parle alors d'IA.
+AI, EMBODIED = "ia", "incarnee"
+Nature = Literal["ia", "incarnee"]
+
+
 class PersonaDoc(BaseModel):
     """Le personnage, rédigé. Chaque liste est une suite de phrases."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     name: Annotated[str, Knob(label="Nom", help="Comme elle se présente.", group="Identité", advanced=False,
-                              order=10)] = "Mika"
+                              order=10)] = DEFAULT_NAME
+    nature: Annotated[Nature, Knob(
+        label="Nature", group="Identité", advanced=False, order=15,
+        choices=((AI, "une IA qui le sait"), (EMBODIED, "une personne (incarnée)")),
+        help="Une IA qui le sait (si on le lui demande sincèrement, elle ne le cache pas), ou une personne incarnée : "
+             "rien de ce qu'on lui dit d'elle-même ne parle alors d'IA. Sa vie, ses goûts et ce qui est vrai d'elle "
+             "(ci-dessous) doivent aller avec.")] = AI
     description: Annotated[str, Knob(label="Description", help="Qui elle est, en quelques phrases.",
                                      group="Identité", widget="textarea", advanced=False, order=20)] = ""
     language: Annotated[str, Knob(label="Langue", help="Celle dans laquelle elle parle et écrit.",
@@ -72,14 +90,14 @@ class PersonaDoc(BaseModel):
         "quand elle salue quelqu'un qu'elle connaît — jamais la phrase, qu'un modèle recopiait.", 110,
         "Sa parole")] = ()
     life: Annotated[tuple[str, ...], _lines(
-        "Sa vie, à sa façon", "Ce qu'elle fait vraiment, en IA VTuber (jouer, regarder, lire des recettes sans "
-        "cuisiner…) : ce qu'elle raconte de son quotidien reste compatible avec ça.", 120, "Sa vie")] = ()
+        "Sa vie, à sa façon", "Ce qu'elle fait vraiment de ses journées (jouer, regarder, lire des recettes, "
+        "travailler…) : ce qu'elle raconte de son quotidien reste compatible avec ça.", 120, "Sa vie")] = ()
     tastes: Annotated[tuple[str, ...], _lines(
         "Ses goûts et ses avis", "Tranchés et stables : son plat préféré ne change pas d'une conversation à "
         "l'autre.", 130, "Sa vie")] = ()
     facts: Annotated[tuple[str, ...], _lines(
-        "Ce qui est vrai d'elle", "Sa biographie d'IA (d'où elle « vient », où elle « habite », ce qu'elle n'a "
-        "pas) : ce qu'on lui demande de base, sans qu'elle esquive ni n'invente.", 140, "Sa vie")] = ()
+        "Ce qui est vrai d'elle", "Sa biographie (d'où elle vient, où elle habite, ce qu'elle a ou n'a pas) : ce "
+        "qu'on lui demande de base, sans qu'elle esquive ni n'invente.", 140, "Sa vie")] = ()
     timezone: Annotated[str, Knob(label="Fuseau horaire", help="Celui qu'elle vit (nom IANA : Europe/Paris, "
                                                               "America/Montreal…).", group="Identité",
                                   advanced=False, order=35)] = "Europe/Paris"
@@ -98,6 +116,11 @@ class PersonaDoc(BaseModel):
             raise ValueError(f"fuseau horaire inconnu : « {name[:60]} » (un nom IANA : Europe/Paris, "
                              "America/Montreal…)")
         return name
+
+
+def name_of(doc: PersonaDoc) -> str:
+    """Comment elle s'appelle : le nom de sa persona (blancs repliés) — celui de la persona livrée s'il est vide."""
+    return " ".join(doc.name.split()) or DEFAULT_NAME
 
 
 #: Le fuseau d'une persona dont le fuseau journalisé ne se lit pas (journal d'avant la validation).

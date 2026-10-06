@@ -46,7 +46,7 @@ PAGES = ("accueil.a_traiter", "systeme.sante", "systeme.processus", "systeme.ano
          "systeme.appels", "systeme.chronologie", "decisions.episodes", "decisions.selections", "decisions.envers")
 
 TOOLS = (
-    Tool("lister_vues", "Les vues de la console de Mika (mémoire, esprit, liens, travail, exploitation…) : leur "
+    Tool("lister_vues", "Les vues de sa console (mémoire, esprit, liens, travail, exploitation…) : leur "
          "clé « propriétaire/nom », leur titre, leurs paramètres ; et les pages de la console servies ici (santé, "
          "processus, sorties, épisodes, « que ferait-elle ? »…), clé « destination/onglet ». Les fiches d'objets "
          "aussi (sortes et onglets).",

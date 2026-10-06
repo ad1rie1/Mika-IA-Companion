@@ -1132,4 +1132,4 @@ def schema(*, limits: Limits = Limits()) -> dict[str, Any]:
     }
     envelope = _obj(_ENVELOPE, {"version": {"const": VERSION}, "blocks": blocks})
     return {"$schema": "https://json-schema.org/draft/2020-12/schema",
-            "title": "Mika — enveloppe des vues d'apps forgées", **envelope, "$defs": defs}
+            "title": "Enveloppe des vues d'apps forgées", **envelope, "$defs": defs}

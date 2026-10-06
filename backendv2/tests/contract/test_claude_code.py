@@ -265,7 +265,7 @@ async def test_a_cli_that_cannot_reach_its_tools_fails_loudly_and_the_gateway_fa
         be = backend(stray, base, cli, tmp_path)
         req = LLMRequest(role="step", call_id="st-1#0", system_stable=scenario(calls=[[["mika", "t", {}]]], say="fini"),
                          messages=(Message("user", "Avance d'un pas."),), tools=(ToolDecl("t", "t", {"type": "object"}),))
-        with pytest.raises(ClaudeCodeError, match="outils de Mika.*mika : failed"):
+        with pytest.raises(ClaudeCodeError, match="joindre ses outils.*mika : failed"):
             await be.complete(req)
         gateway = Gateway({"cc": be, "spare": Spare()}, {"step": "cc"}, clock=ManualClock(0),
                           backend_fallbacks={"cc": "spare"})

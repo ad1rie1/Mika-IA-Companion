@@ -58,7 +58,7 @@ class BackendSpec(BaseModel):
                                               "charge d'elle-même une fois le fournisseur enregistré).",
                                group="Le fournisseur", loader="models", advanced=False, order=20)]
     auth: Annotated[Literal["abonnement", "cle_api"], Knob(
-        label="Connexion", help="Mika ne voit jamais le login : la CLI s'authentifie elle-même. Avec une clé d'API "
+        label="Connexion", help="Le serveur ne voit jamais le login : la CLI s'authentifie elle-même. Avec une clé d'API "
                                 "Console, la clé se déclare juste dessous.", group="Connexion", choices=_AUTHS,
         advanced=False, order=25, only=(("kind", ("claude_code",)),))] = "abonnement"
     api_key: Annotated[str, Knob(label="Clé d'API", help="Chiffrée au repos, jamais réaffichée. Vide : inchangée.",

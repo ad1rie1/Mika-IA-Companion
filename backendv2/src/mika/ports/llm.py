@@ -57,6 +57,8 @@ class PersonaRender:
     text: str
     hash: str
     depth: str
+    #: son nom (celui de sa persona) : un « Nom : » recopié en tête de réponse se retire (ADR 0070)
+    name: str = ""
 
 
 @dataclass(frozen=True, slots=True)

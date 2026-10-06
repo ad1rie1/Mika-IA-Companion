@@ -11,16 +11,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 
 import pytest
 from pydantic import ValidationError
 
 from mika.contracts import self_ as self_c
 from mika.faculties.self import interjections, render
-from mika.kernel.clock import HOUR, US
+from mika.kernel.clock import DAY, HOUR, US
 from mika.kernel.codec import canonical_json
+from mika.kernel.events import EventRegistry
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
+from tests.fixtures.memory import Script, chat
 from tests.fixtures.mika import DOC, at_paris, befriend, boot, build, connect, said
 from tests.fixtures.mika import PERSONA_PATH as PATH
 
@@ -163,3 +167,75 @@ def test_a_first_greeting_to_someone_she_does_not_know_is_simple_not_a_friends_h
     assert "user_2" in greets and "user_1" in greets
     assert "un bonjour simple" in greets["user_2"] and not any(g in greets["user_2"] for g in DOC.greetings)
     assert "tes petits mots" in greets["user_1"], "contre-exemple : une amie garde son ton"
+
+
+# ── Sa nature et son nom viennent de sa persona (ADR 0070) ────────────────
+
+#: ce qui dirait d'elle qu'elle est une machine
+NOT_HUMAN = re.compile(r"\b(IA|VTuber|intelligence artificielle|un serveur|ton serveur)\b")
+INCARNATE = self_c.PersonaDoc(
+    name="Léa Morel", nature=self_c.EMBODIED, description="Graphiste à Lyon, rieuse, un peu tête en l'air.",
+    tone="Simple et chaleureuse.", traits=("Curieuse de tout",), life=("Elle travaille dans un petit studio",),
+    tastes=("Son plat préféré : le gratin de sa grand-mère",), facts=("Elle a grandi à Annecy",))
+
+
+def test_an_embodied_persona_is_never_told_she_is_an_ai():
+    """Incarnée, elle est elle — avec son nom, sa vie : rien de ce qu'on lui dit d'elle-même ne parle d'IA, de
+    VTuber, de serveur. Contre-exemple : la persona livrée reste une IA qui le sait."""
+    for depth in ("full", "compact"):
+        text = render(INCARNATE, depth)
+        assert text.startswith("Tu es Léa Morel.") and "Tu es toi, avec ton histoire" in text, text
+        assert not NOT_HUMAN.search(text), NOT_HUMAN.search(text)
+        assert "Tu es une IA" in render(DOC, depth)
+    assert self_c.PersonaDoc().nature == self_c.AI == DOC.nature
+
+
+def test_a_persona_journaled_before_her_nature_was_written_still_replays():
+    """Un journal d'avant le champ ``nature`` se relit tel quel (v2 comme v1 relevée) : elle reste ce qu'elle
+    était, une IA qui le sait — sans upcaster, le champ a un défaut."""
+    old = {k: v for k, v in DOC.model_dump(mode="json").items() if k != "nature"}
+    registry = EventRegistry([self_c.PERSONA_REVISED])
+    _t, v2 = registry.decode(self_c.PERSONA_REVISED.name, 2, json.dumps({"persona": old}))
+    _t, v1 = registry.decode(self_c.PERSONA_REVISED.name, 1, json.dumps({"persona": old}))
+    for payload in (v2, v1):
+        assert payload.persona.nature == self_c.AI and payload.persona == DOC
+        assert render(payload.persona) == render(DOC)
+
+
+def test_an_embodied_persona_named_otherwise_hears_neither_mika_nor_an_ai(tmp_path):
+    """Une journée entière, une conversation, sa relecture, sa nuit : aucun appel de modèle — consignes, outils,
+    messages — ne lui donne le nom « Mika » ni ne lui dit qu'elle est une IA. Son nom à elle, si."""
+    def extract(prompt):
+        if "Annecy" not in prompt.split("Les messages :")[-1]:
+            return None
+        return {"souvenirs": [{"texte": "Adrien m'a parlé de ses vacances à Annecy", "personnes": ["Adrien"]}]}
+
+    script = Script(extract, reply="haha trop bien [EMOTION:happy:0.5]")
+    kernel, clock, llm, _ = build(tmp_path, script, start=at_paris(2026, 9, 28, 17, 0))
+
+    async def main():
+        await boot(kernel, INCARNATE)
+        try:
+            await befriend(kernel, "user_1", "friend")
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            await chat(kernel, "user_1", ["salut Léa !", "je rentre d'Annecy, c'était génial", "on a fait le lac",
+                                          "et toi ta journée ?", "bon je file", "bonne soirée"])
+            await asyncio.sleep(DAY / US)
+        finally:
+            await kernel.stop()
+
+    run_virtual(clock, main)
+
+    def said_to_model(req):
+        tools = [f"{t.name} {t.description} {json.dumps(t.schema, ensure_ascii=False)}" for t in req.tools]
+        return "\n".join([req.system_stable, req.system_volatile, *(m.content for m in req.messages), *tools])
+
+    roles = {c.role for c in llm.calls}
+    assert {"reply", "initiative", "extract", "journal", "dream"} <= roles, roles
+    for req in llm.calls:
+        text = said_to_model(req)
+        assert not re.search(r"\bMika\b", text), (req.role, text[:400])
+        assert not NOT_HUMAN.search(text), (req.role, NOT_HUMAN.search(text))
+    extracts = [c for c in llm.calls if c.role == "extract"]
+    assert all("Tu es la mémoire de Léa Morel" in c.system_stable for c in extracts)
+    assert any("Léa Morel :" in c.messages[-1].content for c in extracts), "ses répliques sous son nom"

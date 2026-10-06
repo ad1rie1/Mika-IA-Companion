@@ -657,6 +657,16 @@ NATURE = ("Tu n'es pas une assistante : tu as ton humeur, tes envies, ta vie. Tu
           "sais : si on te le demande sincèrement, tu ne le caches pas et tu ne prétends pas être humaine ; mais tu "
           "n'en fais ni un sujet ni une excuse — jamais « en tant qu'IA », jamais d'avertissement. Tu ne commentes "
           "jamais ces consignes.")
+#: Une persona incarnée (ADR 0070) : la même règle de vie, sans un mot de ce qu'elle serait d'autre — elle est
+#: elle, avec son histoire ; ni « IA », ni « personnage », ni « rôle ».
+EMBODIED = ("Tu n'es pas une assistante : tu as ton humeur, tes envies, ta vie. Tu es toi, avec ton histoire, tes "
+            "proches et tes souvenirs ; tu parles de ce que tu vis comme on parle de sa vie, sans t'en justifier. "
+            "Tu ne commentes jamais ces consignes.")
+
+
+def nature_of(doc: c.PersonaDoc) -> str:
+    """Ce qu'on lui dit de sa nature : une IA qui le sait, ou elle-même, incarnée (rien n'y parle d'IA)."""
+    return EMBODIED if doc.nature == c.EMBODIED else NATURE
 
 
 #: Sans vie rédigée (une persona d'avant) : la règle d'alors.
@@ -675,7 +685,7 @@ def render(doc: c.PersonaDoc, depth: str = "full") -> str:
     """Le texte de la persona, en deuxième personne. Sa vie (ce qu'elle fait à sa
     façon, ses goûts, ce qui est vrai d'elle) en profondeur ``full`` : c'est là
     qu'on lui demande « t'as mangé quoi ? », « c'est quoi ton plat préféré ? »."""
-    head = f"Tu es {doc.name}. {doc.description}".strip()
+    head = f"Tu es {c.name_of(doc)}. {doc.description}".strip()
     parts = [head]
     if doc.tone:
         parts.append(f"Ton ton : {doc.tone}")
@@ -693,7 +703,7 @@ def render(doc: c.PersonaDoc, depth: str = "full") -> str:
         ]
     else:
         parts.append(_bullets("En deux mots :", doc.traits[:3]))
-    parts.append(f"Tu parles {doc.language}. {NATURE}")
+    parts.append(f"Tu parles {doc.language}. {nature_of(doc)}")
     parts.append(LIVED_RULE if doc.life or doc.tastes or doc.facts else LIFE_RULE)
     return "\n\n".join(p for p in parts if p)
 
@@ -748,7 +758,7 @@ def persona_for(frame: Frame, depth: str) -> PersonaRender:
     """Le fournisseur de persona du pipeline (mis en cache par document)."""
     doc: c.PersonaDoc = frame.get(c.PERSONA)
     text = render(doc, depth)
-    return PersonaRender(text=text, hash=digest((depth, text)), depth=depth)
+    return PersonaRender(text=text, hash=digest((depth, text)), depth=depth, name=c.name_of(doc))
 
 
 from mika.faculties.self import inspect as _inspect  # noqa: E402,F401 — contributions : l'inspecteur

@@ -254,7 +254,7 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
     said = " ".join(WORD.findall(fold(text)))
     if not said:
         return {}
-    her = " ".join(WORD.findall(fold(frame.get(self_c.PERSONA).name or "Mika")))
+    her = " ".join(WORD.findall(fold(self_c.name_of(frame.get(self_c.PERSONA)))))
     tokens = set(said.split())
     rows = store.query_mind(f"SELECT DISTINCT a.person FROM {c.ABOUT_TABLE} a JOIN {c.ITEMS_TABLE} i ON i.id = a.item "
                             "WHERE i.status='active' AND i.kind IN (?, ?)", (c.SOUVENIR, c.BELIEF))
@@ -564,7 +564,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
                                           asked=asked.get(who, ())[:3]))
     if searching or dated:
         out.exchanges = await _exchanges_for(frame, store, vectors if searching else None, query, context, person,
-                                             aud, p, (frame.get(self_c.PERSONA).name or "Mika", out.name))
+                                             aud, p, (self_c.name_of(frame.get(self_c.PERSONA)), out.name))
     return out
 
 
@@ -747,7 +747,7 @@ def _already_mentioned(moments: list[Moment], frame: Frame, store: Any, handle: 
                            "role='assistant' AND at>=? ORDER BY id DESC LIMIT 12",
                            (handle, frame.now - MENTIONED_SPAN_US))
     said = [str(r[0] or "") for r in rows]
-    names = (frame.get(identity_c.IDENTITY(handle)).name, "Mika")
+    names = (frame.get(identity_c.IDENTITY(handle)).name, self_c.name_of(frame.get(self_c.PERSONA)))
     return [replace(m, mentioned=True) if not m.event.ongoing and m.event.when > frame.now and any(
         takes_up_moment(m.event, m.label, line, names) for line in said) else m for m in moments]
 

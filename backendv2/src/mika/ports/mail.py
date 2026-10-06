@@ -42,8 +42,8 @@ from mika.ports.paging import Page
 #: les trois façons d'écrire depuis une boîte
 Voice = Literal["elle", "assistante", "proprietaire"]
 VOICES: tuple[tuple[str, str], ...] = (
-    ("elle", "en son nom (Mika)"),
-    ("assistante", "en assistante (« Mika, pour … »)"),
+    ("elle", "en son nom"),
+    ("assistante", "en assistante (« son nom, pour … »)"),
     ("proprietaire", "à ta place (en ton nom)"),
 )
 #: ce qu'un brouillon ne peut pas contenir au moment de partir (ce qu'elle n'a pas su) ; reconnu sous

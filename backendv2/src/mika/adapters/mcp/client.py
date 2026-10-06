@@ -88,7 +88,7 @@ class McpSession:
                                                     "clientInfo": CLIENT_INFO}, timeout_s)
         version = str(result.get("protocolVersion") or "")
         if version not in PROTOCOL_VERSIONS:
-            raise McpError(f"le serveur parle une version du protocole que Mika ne connaît pas : « {version[:30]} »")
+            raise McpError(f"le serveur parle une version du protocole que ce client ne connaît pas : « {version[:30]} »")
         self.transport.protocol_version = version
         await self.transport.notify({"jsonrpc": "2.0", "method": "notifications/initialized"})
         info = result.get("serverInfo") if isinstance(result.get("serverInfo"), Mapping) else {}

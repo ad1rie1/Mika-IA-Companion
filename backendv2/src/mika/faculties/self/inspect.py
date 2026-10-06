@@ -203,6 +203,10 @@ def _narrative(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return [facts, Prose(text if text else FORGOTTEN, title="« Je suis quelqu'un qui… »")]
 
 
+#: Sa nature, telle que la console la dit (les choix du champ de la persona).
+NATURE_FR = {c.AI: "une IA qui le sait", c.EMBODIED: "une personne (incarnée)"}
+
+
 def _lines(values: Sequence[str]) -> Cell:
     return Text(" · ".join(values), clamp=CLAMP) if values else Text("—", kind="muted")
 
@@ -212,6 +216,7 @@ def _persona(s: SelfState) -> list[Block]:
     t = doc.temperament
     persona = Fields((
         ("nom", doc.name),
+        ("nature", NATURE_FR.get(doc.nature, doc.nature)),
         ("description", Text(doc.description, clamp=CLAMP) if doc.description else Text("—", kind="muted")),
         ("ton", doc.tone or "—"),
         ("langue", doc.language),

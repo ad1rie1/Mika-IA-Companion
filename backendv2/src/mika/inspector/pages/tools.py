@@ -411,7 +411,7 @@ async def what_she_reads(ui: Any, request: Request) -> Any:
     return {"blocks": blocks, "filters": params}
 
 
-@TABS.tab("outils.expose", title="Ce que Mika expose",
+@TABS.tab("outils.expose", title="Ce qu'elle expose",
           description="Ce qu'elle sert elle-même en MCP : ses outils prêtés à la CLI Claude Code le temps d'un "
                       "épisode, et la console en lecture seule pour un agent de sa propriétaire.")
 async def exposed(ui: Any, request: Request) -> list[Any]:

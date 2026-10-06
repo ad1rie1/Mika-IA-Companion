@@ -290,7 +290,7 @@ class SocialParams(BaseModel):
     profile_max_items: Annotated[int, Knob(
         label="Fiche : éléments relus", group="Fiches", lo=5, hi=200,
         help="Combien de ses souvenirs et croyances sur la personne (les plus importants) le modèle relit — "
-             "seulement ce qu'elle a dit elle-même, ou ce que Mika a vu avec elle.")] = 30
+             "seulement ce que la personne a dit elle-même, ou ce qu'elles ont vécu ensemble.")] = 30
     profile_per_run: Annotated[int, Knob(
         label="Fiches par passage", group="Fiches", lo=1, hi=10,
         help="Combien de fiches au plus une passe relit (les plus en retard d'abord) : les appels restent "

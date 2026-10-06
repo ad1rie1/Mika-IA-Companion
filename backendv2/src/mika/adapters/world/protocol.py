@@ -324,7 +324,7 @@ def json_schema() -> dict[str, Any]:
     """Le schéma JSON du protocole, pour générer les types côté moteur (C#, GDScript, TypeScript)."""
     return {
         "$id": PROTOCOL,
-        "title": "Protocole du monde de Mika",
+        "title": f"Protocole du monde ({PROTOCOL})",
         "client": CLIENT.json_schema(),
         "server": SERVER.json_schema(),
         "world": w.WorldDef.model_json_schema(),

@@ -44,6 +44,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
+from mika.contracts import self_ as self_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory.faculty import MEMORY, PROMISE_SUBJECT, Keeping, MemoryParams, MemoryState, params
 from mika.kernel.arbitration import Candidate
@@ -123,7 +124,7 @@ def open_moment(ev: c.LifeEvent, now: int, p: MemoryParams, opens: int | None = 
 
 
 def _names(frame: Frame, person: str) -> tuple[str, ...]:
-    return (frame.get(identity_c.IDENTITY(person)).name, "Mika")
+    return (frame.get(identity_c.IDENTITY(person)).name, self_c.name_of(frame.get(self_c.PERSONA)))
 
 
 # ── Ce que la personne en dit elle-même : jugé à l'arrivée du message ─────

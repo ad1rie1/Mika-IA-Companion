@@ -55,6 +55,7 @@ def test_un_element_sort_une_fois_dans_la_fenetre_de_son_dernier_ancrage() -> No
     assert w1["souvenirs"][0]["personnes"] == ["Julie Martin [P1]"]
     assert w1["evenements"] == []  # son dernier ancrage est dans la fenêtre suivante
     assert len(w2["evenements"]) == 1 and w2["evenements"][0]["messages"] == [820]
+    assert w2["evenements"][0]["quand"] == "2019-09-30" and not w2["evenements"][0].get("a_feter")
     assert w2["evenements"][0]["secret"] is True
     # quelqu'un qui n'est pas de la conversation : son nom, pas de jeton
     paul = next(c for c in w2["croyances"] if c["texte"].startswith("Paul"))
@@ -70,7 +71,8 @@ def test_plafonds_du_moteur_les_plus_importants_d_abord() -> None:
                                  for i in range(30)]}, [1])
     out = assemble_extraction("Les messages :\n[#5] 10:00 X [P1] : a\n", {5: [1]}, a, {})
     assert len(out["souvenirs"]) == 12
-    assert {s["importance"] for s in out["souvenirs"]} == {4}
+    importances = [s["importance"] for s in out["souvenirs"]]
+    assert importances.count(4) == 7 and set(importances) == {3, 4}  # tous les « marquants », puis les « importants »
 
 
 def test_le_resultat_est_lisible_par_le_moteur() -> None:

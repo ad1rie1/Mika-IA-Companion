@@ -167,7 +167,7 @@ INCOHERENCES: list[tuple[str, Callable[[dict[str, Any]], None], str]] = [
      "un lieu ne bouge pas"),
     ("un monde sans elle",
      lambda r: r.update(actors=[a for a in r["actors"] if a["id"] != "mika"]),
-     "pas de Mika"),
+     "n'a pas d'acteur « mika »"),
     ("un contenant trop plein",
      lambda r: r["objects"].extend(
          {"id": f"cookie_x{i}", "archetype": "cookie", "home": {"kind": "in", "object": "cookie_jar"}}
@@ -228,9 +228,9 @@ class TestLesSortesDObjets:
                                                      requires_state=("eteinte",), to_state="on"),))
 
     def test_c_est_le_noyau_qui_fait_vivre_mika(self) -> None:
-        with pytest.raises(ValidationError, match="Mika"):
+        with pytest.raises(ValidationError, match="le noyau qui la fait vivre"):
             w.ActorDef(id="mika", label="Mika", asset="avatars/mika", home="center")
-        with pytest.raises(ValidationError, match="Mika"):
+        with pytest.raises(ValidationError, match="le noyau qui la fait vivre"):
             w.ActorDef(id="npc:moka", label="Moka", asset="npc/cat", home="sofa", controller=w.Controller.KERNEL)
 
     def test_une_personne_ne_se_declare_pas(self) -> None:

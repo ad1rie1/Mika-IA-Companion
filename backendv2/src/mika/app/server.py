@@ -66,7 +66,7 @@ from mika.app.settings import SecretBox, Settings
 from mika.app.teams import TeamsDesk
 from mika.app.wakeups import WakeupDesk
 from mika.contracts import identity as identity_c
-from mika.contracts.self_ import PersonaDoc
+from mika.contracts.self_ import PersonaDoc, name_of
 from mika.inspector.app import assemble
 from mika.inspector.mcp import PREFIX as CONSOLE_MCP_PREFIX
 from mika.inspector.mcp import console_app
@@ -327,9 +327,14 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     settings = Settings(store, SecretBox.for_data(data))
     forge_settings = ForgeSettingsStore(settings)
     forge = forge_settings.host = ForgeHost(data / "forge", config=forge_settings.values)
-    world = {"mail": ImapSmtpMail(settings.email, data / "mail.db"),
+    def her() -> str:
+        """Son nom, celui de la persona en vigueur (journalisée) : ce que signent ses mails et ses enregistrements
+        d'atelier — un adaptateur ne lit pas sa persona lui-même (ADR 0070)."""
+        return name_of(kernel.mind.root.slices["self"].persona)
+
+    world = {"mail": ImapSmtpMail(settings.email, data / "mail.db", her=her),
              "feeds": HttpFeeds(settings.feeds, data / "feeds.db"),
-             "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git), "camera": camera,
+             "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her), "camera": camera,
              "forge": forge, "forge_settings": forge_settings, "imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
     world["shares"] = DiskShares(data / "partages")

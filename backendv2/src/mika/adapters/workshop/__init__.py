@@ -59,6 +59,7 @@ import stat
 import subprocess
 import threading
 import time
+import unicodedata
 from collections import deque
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -66,6 +67,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from mika.adapters import cage
+from mika.contracts.self_ import DEFAULT_NAME
 from mika.ports.workshop import Commit, OutsideWorkshop, RunResult, WorkshopFull
 
 #: ce qu'on peut lancer sans réseau. Ce n'est **pas** une barrière (``sh`` et ``python`` font tout) : c'est la
@@ -87,8 +89,18 @@ SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
 _SYSTEM_DIRS = cage.SYSTEM_DIRS
 NET_ADDRESS, NET_GATEWAY, NET_DNS = cage.NET_ADDRESS, cage.NET_GATEWAY, cage.NET_DNS
 UNREACHABLE = cage.UNREACHABLE
-_GIT = ("-c", "user.name=Mika", "-c", "user.email=mika@atelier.local", "-c", "commit.gpgsign=false",
-        "-c", "core.hooksPath=/dev/null", "-c", "init.defaultBranch=main")
+_GIT = ("-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null", "-c", "init.defaultBranch=main")
+#: ce qui ne peut pas entrer dans un nom d'auteur git (une fin de ligne, un chevron d'adresse, un contrôle)
+_AUTHOR_UNSAFE = re.compile(r"[\x00-\x1f\x7f<>]")
+
+
+def author_identity(name: str) -> tuple[str, ...]:
+    """Qui signe les enregistrements de l'atelier : son nom (celui de sa persona, que l'application fournit) et une
+    adresse locale qui en dérive (« Léa Martin » → ``lea.martin@atelier.local``) — jamais une vraie boîte."""
+    shown = " ".join(_AUTHOR_UNSAFE.sub(" ", name).split())[:80] or DEFAULT_NAME
+    plain = unicodedata.normalize("NFKD", shown.lower()).encode("ascii", "ignore").decode()
+    local = re.sub(r"[^a-z0-9]+", ".", plain).strip(".") or "atelier"
+    return ("-c", f"user.name={shown}", "-c", f"user.email={local}@atelier.local")
 #: un identifiant de commit (abrégé ou complet), une branche
 _SHA = re.compile(r"^[0-9a-f]{4,40}$")
 _BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
@@ -203,9 +215,11 @@ class BwrapWorkshop:
                  max_output_chars: int = 20_000, max_file_bytes: int = 400_000, max_tree: int = 400,
                  bwrap: str | None = None, which: Callable[[str], str | None] = shutil.which,
                  credentials: Credentials | None = None, limits: Limits = Limits(),
-                 pasta: str | None = None, ip: str | None = None) -> None:
+                 pasta: str | None = None, ip: str | None = None, author: Callable[[], str] | None = None) -> None:
         self.root = Path(root)
         self.credentials = credentials
+        #: qui signe ses enregistrements : son nom, celui de sa persona (relu à chaque fois : elle peut en changer)
+        self.author = author or (lambda: DEFAULT_NAME)
         self.allowed = frozenset(allowed)
         self.network_allowed = self.allowed | (frozenset(NETWORK_ALLOWED) - frozenset(ALLOWED))
         self.timeout_s = timeout_s
@@ -613,8 +627,9 @@ class BwrapWorkshop:
     # ── git ──
     async def _git(self, goal: int, *args: str, network: bool = False, timeout_s: float = 30,
                    extra_env: Mapping[str, str] | None = None, secrets: Sequence[str] = ()) -> RunResult:
-        return await self.run(goal, ["git", *_GIT, *args], timeout_s=timeout_s, check_allowed=False,
-                              network=network, extra_env={**_GIT_ENV, **dict(extra_env or {})}, secrets=secrets)
+        return await self.run(goal, ["git", *author_identity(self.author()), *_GIT, *args], timeout_s=timeout_s,
+                              check_allowed=False, network=network,
+                              extra_env={**_GIT_ENV, **dict(extra_env or {})}, secrets=secrets)
 
     async def _init(self, goal: int) -> bool:
         root = self._open(goal)

@@ -54,18 +54,26 @@ class XProfile(BaseModel):
     sujets_sensibles: list[str] = Field(default_factory=list)
 
 
-def tool() -> ToolDecl:
-    return ToolDecl(TOOL_NAME, "Enregistre ce que Mika pense de cette personne.", XProfile.model_json_schema())
+def tool(name: str) -> ToolDecl:
+    """L'outil de la fiche, au nom de celle qui la tient (celui de sa persona)."""
+    return ToolDecl(TOOL_NAME, f"Enregistre ce que {name} pense de cette personne.", XProfile.model_json_schema())
 
 
-SYSTEM = """Tu aides Mika à se faire une idée de quelqu'un qu'elle connaît, à partir de ce que cette personne lui a \
-dit elle-même et de ce que Mika a vécu avec elle. Écris comme des notes de Mika sur cette personne, sans jamais \
-nommer Mika ni parler d'elle (ni « Mika », ni « elle », ni « moi », ni « me ») : la personne à la troisième \
+def system(name: str) -> str:
+    """La consigne de la fiche, au nom de celle qui la tient (celui de sa persona : jamais écrit ici)."""
+    return _SYSTEM.replace(_NAME, name)
+
+
+#: là où son nom s'écrit dans la consigne
+_NAME = "{nom}"
+_SYSTEM = """Tu aides {nom} à se faire une idée de quelqu'un qu'elle connaît, à partir de ce que cette personne lui a \
+dit elle-même et de ce que {nom} a vécu avec elle. Écris comme des notes de {nom} sur cette personne, sans jamais \
+nommer {nom} ni parler d'elle (ni « {nom} », ni « elle », ni « moi », ni « me ») : la personne à la troisième \
 personne, avec son prénom (« C'est quelqu'un qui… »).
 - resume : qui est cette personne — sa vie, ce qui compte pour elle, son caractère, et les proches qu'elle a nommés \
 (« sa sœur Léa », « son chat Moustache ») — en 2 à 4 phrases ; ne répète pas les détails intimes. N'invente rien : \
 rien de sa situation (en couple ou non, enfants, famille, travail, âge, où et avec qui elle vit) que ces notes ne \
-disent pas. Ni chiffres, ni jugement sur votre lien (« connaissance récente », « ami proche ») : le lien, Mika le \
+disent pas. Ni chiffres, ni jugement sur votre lien (« connaissance récente », « ami proche ») : le lien, {nom} le \
 vit, elle ne le note pas.
 - ton : comment lui parler — une consigne de ton (« direct et taquin, il aime qu'on le charrie »), jamais une \
 phrase à lui dire.
@@ -235,7 +243,8 @@ class Revise:
             only = json.dumps([person], ensure_ascii=False)
             # par importance, sans banalités ni répliques recopiées ; ce qui n'appartient qu'à elles deux (un surnom)
             # vit dans leur registre, pas dans la fiche
-            names = [frame.get(identity_c.IDENTITY(person)).name or "", frame.get(self_c.PERSONA).name or "Mika"]
+            her = self_c.name_of(frame.get(self_c.PERSONA))
+            names = [frame.get(identity_c.IDENTITY(person)).name or "", her]
             rows = store.query_mind(
                 f"SELECT id, text, importance FROM {memory_c.ITEMS_TABLE} WHERE about=? AND told_by IN ('[]', ?) "
                 "AND status='active' AND kind IN (?, ?) AND between_us=0 ORDER BY importance DESC, id DESC LIMIT ?",
@@ -245,8 +254,8 @@ class Revise:
                 continue
             notes = _folded(" ".join(str(t) for _i, t, _imp in items))
             prompt = self._prompt(frame, state, person, items, store, notes)
-            request = LLMRequest(role="profile", call_id=f"{ctx.run_id}#{person}", system_stable=SYSTEM,
-                                 messages=(Message("user", prompt),), tools=(tool(),), max_tokens=900,
+            request = LLMRequest(role="profile", call_id=f"{ctx.run_id}#{person}", system_stable=system(her),
+                                 messages=(Message("user", prompt),), tools=(tool(her),), max_tokens=900,
                                  lane="background", priority=3)
             response = await ctx.llm.call(request)
             got = parse(response)
@@ -279,7 +288,8 @@ class Revise:
             if text:
                 lines.append(f"Ce qu'elle en pensait jusqu'ici : {text}")
         lines.append("")
-        lines.append(f"Ce {elided(name, 'que')} lui a dit, et ce que Mika a vécu avec {name} :")
+        her = self_c.name_of(frame.get(self_c.PERSONA))
+        lines.append(f"Ce {elided(name, 'que')} lui a dit, et ce que {her} a vécu avec {name} :")
         lines += [f"- {text}" for _i, text, _imp in items]
         return "\n".join(lines)
 
