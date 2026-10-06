@@ -123,6 +123,14 @@ export interface InnerState {
     bias_emotion: string;
   };
   sleep_phase?: SleepPhase;
+  /** Sa dernière nuit, du réveil jusqu'au milieu de sa journée (absente
+   * sinon) : heures dormies à la demi-heure, fois où on l'a tirée du sommeil,
+   * nuit courte. Sans personne. */
+  night?: {
+    slept_h: number;
+    broken: number;
+    short: boolean;
+  };
   /**
    * Son dernier journal écrit — celui d'une journée **passée** (il s'écrit la
    * nuit), malgré le nom historique de la clé. `title` le dit (« Son journal
