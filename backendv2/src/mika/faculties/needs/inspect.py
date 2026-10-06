@@ -9,8 +9,8 @@ viennent des séries mesurées toutes les dix minutes (``needs.social``,
 from __future__ import annotations
 
 from mika.contracts import needs as c
-from mika.faculties.needs import NEEDS, NeedsParams, NeedsState, _tau, busy, describe, params
-from mika.kernel.clock import DAY, HOUR
+from mika.faculties.needs import NEEDS, NeedsParams, NeedsState, _tau, busy, describe, occupied, params
+from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Block,
@@ -35,8 +35,9 @@ from mika.kernel.inspect import (
 NAMES = {c.SOCIAL: "compagnie", c.EXPRESSION: "s'exprimer", c.CURIOSITY: "apprendre"}
 RELIEF = {
     c.SOCIAL: "un message qu'on lui adresse, parler à quelqu'un — pleinement avec une amie, peu avec une inconnue",
-    c.EXPRESSION: "répondre, et plus encore prendre la parole d'elle-même ; travailler, un peu",
-    c.CURIOSITY: "un message, une croyance nouvelle, un pas d'exploration",
+    c.EXPRESSION: "répondre, et plus encore prendre la parole d'elle-même ; travailler, un peu ; une occupation "
+                  "qui la nourrit, au prorata du temps passé",
+    c.CURIOSITY: "un message, une croyance nouvelle, un pas d'exploration ; une occupation qui la nourrit",
 }
 #: le vide ressenti, en mots
 FELT_FR = {c.LONELY: "de la solitude", c.BORED: "de l'ennui"}
@@ -60,6 +61,29 @@ def _values(r: c.NeedsReading) -> dict[str, float]:
 
 def _tone(value: float) -> str:
     return "warn" if value >= PRESSING else ""
+
+
+def _lasted(us: int) -> str:
+    return f"{max(1, round(us / MINUTE))} min" if us < HOUR else f"{num_fr(us / HOUR, 1)} h"
+
+
+def _now(s: NeedsState, now: int) -> str:
+    """Ce qui l'occupe en ce moment, s'il y a quelque chose."""
+    if busy(s, now):
+        return "elle travaille (pas de vide)"
+    if occupied(s, now) and s.occupied is not None:
+        return f"elle s'occupe : {s.occupied.name} (pas de vide)"
+    return "—"
+
+
+def _nourished(s: NeedsState, ctx: InspectContext) -> str:
+    """La dernière occupation qui l'a nourrie : laquelle, combien de temps, quel besoin, et quand elle s'est
+    arrêtée (le soulagement date de là)."""
+    o = s.nourished
+    if o is None or o.until is None:
+        return "—"
+    what = ", ".join(NAMES.get(k, k) for k in o.nourishes)
+    return f"{o.name}, {_lasted(o.until - o.since)} → {what}, " + ctx.when(o.until)
 
 
 # ── La barre de vitaux, les séries ────────────────────────────────────────
@@ -128,7 +152,8 @@ def _inspect(s: NeedsState, frame: Frame, ctx: InspectContext) -> list[Block]:
             ("le vide se ressent après", f"{num_fr(p.idle_before_empty_us / HOUR)} h sans rien"),
             ("le vide se creuse", f"de {num_fr(p.empty_intensity)} à {num_fr(p.empty_max)}, {num_fr(p.empty_growth_per_h, signed=True)} par "
                                    "heure"),
-            ("en ce moment", "elle travaille (pas de vide)" if busy(s, frame.now) else "—"),
+            ("en ce moment", _now(s, frame.now)),
+            ("ce qu'elle a fait de ses mains", _nourished(s, ctx)),
             ("solitude plutôt qu'ennui", f"quand la compagnie dépasse {pct_fr(p.lonely_from)}"),
             ("pousse à parler (compagnie)", f"au-delà de {pct_fr(p.social_floor)}"),
             ("pousse à parler (s'exprimer)", f"au-delà de {pct_fr(p.expression_floor)}"),
