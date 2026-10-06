@@ -19,12 +19,12 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from mika.adapters.llm.gateway import TRACES_KEPT, Gateway, LLMTrace, UnconfiguredRole
+from mika.adapters.llm.gateway import TRACES_KEPT, Gateway, LLMTrace, Trial, UnconfiguredRole
 from mika.kernel import forms
 from mika.kernel.clock import Clock
 from mika.kernel.forms import Knob
 from mika.ports.llm import LLMBackend, LLMRequest, LLMResponse, MissingPersona
-from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, Role
+from mika.vocab.episodes import FALLBACKS, TRIAL_ROLE, VOICE_ROLES, Role
 
 #: le seul rôle qu'il faut servir : tout ce qui parle, et les utilitaires, y retombent
 REPLY = str(Role.REPLY)
@@ -126,7 +126,8 @@ ROLE_LABELS = {"reply": "répondre (voix)", "initiative": "prendre la parole (vo
                "narrative": "se raconter (voix)", "extract": "retenir (mémoire)", "validate": "vérifier",
                "profile": "comprendre les gens", "interpret": "interpréter", "triage": "trier le courrier",
                "caption": "décrire une image", "compact": "résumer le fil", "plan": "planifier",
-               "project": "travailler sur un projet (voix)", "job": "exécuter un projet (impersonnel)"}
+               "project": "travailler sur un projet (voix)", "job": "exécuter un projet (impersonnel)",
+               TRIAL_ROLE: "rejouer une parole (essai de la console)"}
 
 
 class LLMConfig(BaseModel):
@@ -326,6 +327,12 @@ class LiveGateway:
         if self._inner is None:
             raise UnconfiguredRole(req.role)
         return await self._inner.call(req)
+
+    async def try_on(self, name: str, req: LLMRequest) -> Trial:
+        """Un essai de la console sur le fournisseur ``name`` (voir ``Gateway.try_on``)."""
+        if self._inner is None:
+            return Trial(name, error="aucun modèle n'est configuré")
+        return await self._inner.try_on(name, req)
 
     def release(self, call_id: str) -> None:
         """La boucle d'outils ``call_id`` est finie (voir ``Gateway.release``)."""

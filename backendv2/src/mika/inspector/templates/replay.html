@@ -1,0 +1,14 @@
+{% if replay %}
+<section class="card stack" aria-label="Rejouer avec un autre modèle">
+  <h3>Rejouer avec…</h3>
+  <p class="muted">Le prompt gardé de cet épisode, renvoyé tel quel à un fournisseur déclaré : un seul appel, derrière tout le reste. Sa réponse se lit à côté de ce qu'elle a vraiment dit ; rien n'est livré, rien n'entre au fil ni dans sa mémoire, et rien n'est gardé au-delà de la page. Un outil demandé est montré, jamais exécuté.</p>
+  {% if replay.blocked %}<div class="note warn" role="note">{{ replay.blocked }}</div>{% elif replay.warning %}<div class="note warn" role="note">{{ replay.warning }}</div>{% endif %}
+  <form method="post" action="{{ PREFIX }}/rejouer" class="inline">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="episode" value="{{ replay.episode }}">
+    <input type="hidden" name="_retour" value="{{ replay.back }}">
+    {% for c in replay.choices %}
+    <button class="btn small" name="fournisseur" value="{{ c.name }}"{% if replay.blocked %} disabled{% elif c.confirm %} data-confirm="{{ c.confirm }}"{% endif %}>{{ c.label }}</button>
+    {% endfor %}
+  </form>
+</section>
+{% endif %}
