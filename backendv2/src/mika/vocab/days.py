@@ -13,6 +13,7 @@ from datetime import datetime, time, timedelta
 from typing import Any
 
 from mika.kernel.clock import HOUR, instant, local
+from mika.vocab.phrasebook import phrase
 
 
 def part_of_day(hour: int) -> str:
@@ -29,27 +30,26 @@ def part_of_day(hour: int) -> str:
     return "nuit"
 
 
-_TODAY = {"matin": "ce matin", "midi": "ce midi", "après-midi": "cet après-midi", "soir": "ce soir",
-          "nuit": "cette nuit"}
-_YESTERDAY = {"matin": "hier matin", "midi": "hier midi", "après-midi": "hier après-midi", "soir": "hier soir",
-              "nuit": "dans la nuit d'hier"}
+#: le moment de la journée → sa clé dans sa voix (``expression.when.today.…``, ``expression.when.yesterday.…``)
+_PART_KEYS = {"matin": "morning", "midi": "noon", "après-midi": "afternoon", "soir": "evening", "nuit": "night"}
 
 
 def when_fr(then: int, now: int, tz: Any) -> str:
-    """« tout à l'heure », « ce matin », « hier soir », « avant-hier », « il y a 4 jours »."""
+    """« tout à l'heure », « ce matin », « hier soir », « avant-hier », « il y a 4 jours » — ``expression.when``
+    dans sa voix."""
     if then <= 0:
-        return "il y a longtemps"
+        return phrase("expression.when.long_ago")
     if now - then < HOUR and now >= then:
-        return "tout à l'heure"
+        return phrase("expression.when.just_now")
     a, b = local(then, tz), local(now, tz)
     days = (b.date() - a.date()).days
     if days <= 0:
-        return _TODAY[part_of_day(a.hour)]
+        return phrase(f"expression.when.today.{_PART_KEYS[part_of_day(a.hour)]}")
     if days == 1:
-        return _YESTERDAY[part_of_day(a.hour)]
+        return phrase(f"expression.when.yesterday.{_PART_KEYS[part_of_day(a.hour)]}")
     if days == 2:
-        return "avant-hier"
-    return f"il y a {days} jours"
+        return phrase("expression.when.day_before")
+    return phrase("expression.when.days_ago", days=days)
 
 
 _WEEKDAYS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")

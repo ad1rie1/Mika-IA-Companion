@@ -49,6 +49,7 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
+from mika.vocab.phrasebook import phrase
 
 #: l'écart minimal entre deux passes de « tenir » qui trouvent encore quelque chose à faire
 RETRY_US = MINUTE
@@ -65,9 +66,9 @@ def closures(s: ProjectsState, frame: Frame) -> list[tuple[Project, Objective, s
             if o.status != c.OPEN:
                 continue
             if o.silent >= pm.silent_before_blocked:
-                out.append((p, o, f"{o.silent} exécutions de suite sans rien conclure"))
+                out.append((p, o, phrase("projects.stuck.silent", n=o.silent)))
             elif o.kind == c.ONCE and o.runs >= pm.once_runs_max:
-                out.append((p, o, f"à bout d'exécutions ({o.runs}) sans en venir à bout"))
+                out.append((p, o, phrase("projects.stuck.spent", n=o.runs)))
     return out
 
 

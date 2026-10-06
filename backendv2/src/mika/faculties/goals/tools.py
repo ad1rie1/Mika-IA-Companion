@@ -54,6 +54,7 @@ from mika.kernel.faculty import ToolResult
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, Superseded
 from mika.vocab.episodes import Kind, goal_of
+from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity, hearable
 from mika.vocab.words import stems
 
@@ -97,10 +98,9 @@ def _goal(ctx: Any) -> Goal | None:
 
 
 #: un ancien journal mettait dans le titre d'une exploration le texte d'où elle venait (« En savoir plus — « Jeux
-#: rétro… » (Le Journal) ») : on en garde ses mots à elle, le reste est une citation
-LEGACY_TITLES = (("En savoir plus — ", "En savoir plus sur ce que j'ai remarqué"),
-                 ("Y voir plus clair — ", "Y voir plus clair sur ce qui me trotte dans la tête"))
-LEGACY_DEFAULT = "Repenser à ce qui me trotte dans la tête"
+#: rétro… » (Le Journal) ») : on en garde ses mots à elle (leur clé dans sa voix), le reste est une citation. Les
+#: débuts reconnaissent un texte déjà écrit au journal : ils restent ici, tels qu'ils y sont.
+LEGACY_NOTICED, LEGACY_CLEARER = "En savoir plus — ", "Y voir plus clair — "
 
 
 def titled(g: Goal, texts: Mapping[str, str]) -> tuple[str, str]:
@@ -115,10 +115,11 @@ def titled(g: Goal, texts: Mapping[str, str]) -> tuple[str, str]:
     if g.origin == c.FROM_SIGNAL:
         return title, texts.get(g.details_ref, "")
     if not g.origin and g.source.startswith("thought:"):
-        for prefix, mine in LEGACY_TITLES:
-            if title.startswith(prefix):
-                return mine, title[len(prefix):].strip()
-        return LEGACY_DEFAULT, title
+        if title.startswith(LEGACY_NOTICED):
+            return phrase("goals.title.noticed"), title[len(LEGACY_NOTICED):].strip()
+        if title.startswith(LEGACY_CLEARER):
+            return phrase("goals.title.legacy_thought"), title[len(LEGACY_CLEARER):].strip()
+        return phrase("goals.title.thought"), title
     return title, ""
 
 
@@ -128,7 +129,7 @@ def title_of(ctx: Any, g: Goal) -> Content:
     store = ctx.ports.get("store")
     texts = store.content([g.title_ref]) if store is not None and g.title_ref else {}
     mine, _ = titled(g, texts)
-    return Content.of(mine or "(un but dont le titre est oublié)", level=g.sensitivity)
+    return Content.of(mine or phrase("goals.title.forgotten"), level=g.sensitivity)
 
 
 def closing(ctx: Any, g: Goal, status: str, *, result: str | None = None, notable: float = 0.0,
@@ -141,29 +142,28 @@ def closing(ctx: Any, g: Goal, status: str, *, result: str | None = None, notabl
 
 class ReportArgs(BaseModel):
     verdict: Literal["continue", "done", "blocked", "wait"] = Field(
-        description="continue : tu reprendras plus tard ; done : c'est fait ; blocked : tu n'y arrives pas ; "
-                    "wait : tu attends quelque chose (dis combien de temps)")
-    summary: str = Field(min_length=1, max_length=1200, description="où tu en es, ou ce que tu as trouvé")
-    notable: float = Field(default=0.5, ge=0.0, le=1.0,
-                           description="à quel point ce résultat compte pour toi (0 : ordinaire, 1 : à raconter)")
+        description=phrase("goals.tools.report.verdict"))
+    summary: str = Field(min_length=1, max_length=1200, description=phrase("goals.tools.report.summary"))
+    notable: float = Field(default=0.5, ge=0.0, le=1.0, description=phrase("goals.tools.report.notable"))
     wait_minutes: int = Field(default=0, ge=0, le=1440)
-    until_they_answer: bool = Field(default=False, description="avec « wait » : tu attends la réponse de la "
-                                                               "personne concernée — tu reprendras dès qu'elle écrit")
+    until_they_answer: bool = Field(default=False, description=phrase("goals.tools.report.until_they_answer"))
 
 
-GOALS.bundle("goals", "tes rappels et tes explorations ; noter et rendre compte d'une séance")
+GOALS.bundle("goals", phrase("goals.bundle"))
 
 
-@GOALS.tool(REPORT, description="Conclure cette séance de travail par un verdict. « done » n'est cru que si tu as "
-            "réellement fait quelque chose pendant ce but (lu, écrit, cherché ailleurs que dans ta mémoire ; pour une "
-            "réflexion, l'avoir écrite avec goal_reflect) ; sinon il est noté, refusé, et tu peux conclure autrement.",
-            args=ReportArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=3, ends_loop=True)
+def _gone() -> ToolResult:
+    """La réponse de chaque outil de séance quand le but s'est clos entre-temps."""
+    return ToolResult(ok=False, content=phrase("goals.tools.gone"))
+
+
+@GOALS.tool(REPORT, description=phrase("goals.tools.report.description"), args=ReportArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=3, ends_loop=True)
 async def report_step(args: ReportArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
-        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
+        return _gone()
     if any(name == REPORT and ok for name, ok in ctx.calls):
-        return ToolResult(ok=False, content="Tu as déjà conclu cette séance : arrête-toi là.")
+        return ToolResult(ok=False, content=phrase("goals.tools.report.already"))
     worked = tuple(sorted({name for name, ok in ctx.calls if ok and (proves(ctx, name) or
                                                                        (name == REFLECT and reflective(g)))}))
     if last_session(g, ctx) and args.verdict in (c.CONTINUE, c.WAIT) and (g.evidence + len(worked)) > 0:
@@ -189,135 +189,117 @@ async def report_step(args: ReportArgs, ctx: Any) -> Any:
     if proven:
         left = [t.id for t in g.tasks if t.status not in (c.TASK_DONE,)]
         if left:
-            return (f"C'est noté : tu l'as mené à bout — mais ton plan avait encore {len(left)} tâche(s) non "
-                    f"cochée(s) ({', '.join(map(str, left[:6]))}).")
-        return "C'est noté : tu l'as mené à bout."
+            return phrase("goals.tools.report.done_with_left", count=len(left),
+                          tasks=", ".join(map(str, left[:6])))
+        return phrase("goals.tools.report.done")
     if args.verdict == c.DONE:  # noté, mais pas un verdict : la séance peut encore conclure
-        how = ("écris ce que ta réflexion t'a apporté (goal_reflect)" if reflective(g) else
-               "va lire, chercher ou faire quelque chose ailleurs que dans ta mémoire")
-        return ToolResult(ok=False, content=(
-            f"Pas encore : rien de concret n'a été fait pour ce but (noter ou fouiller ta mémoire ne suffit pas). "
-            f"Pour en venir à bout, {how} ; sinon dis honnêtement où tu en es (« continue », « blocked », "
-            "« wait »)."))
+        how = phrase("goals.tools.report.how_reflect") if reflective(g) else phrase("goals.tools.report.how_work")
+        return ToolResult(ok=False, content=phrase("goals.tools.report.not_yet", how=how))
     if args.verdict == c.BLOCKED and reflective(g):
-        return "D'accord : tu en restes là pour l'instant."
+        return phrase("goals.tools.report.let_go")
     if args.verdict == c.BLOCKED:
-        return "C'est noté : tu bloques là-dessus."
+        return phrase("goals.tools.report.blocked")
     if args.verdict == c.WAIT:
         if args.until_they_answer and g.owner:
-            return "D'accord : tu reprendras dès que la personne concernée t'aura répondu (ou à l'échéance)."
-        return f"D'accord : tu y reviendras dans {max(10, args.wait_minutes)} minutes au plus tôt."
-    return "C'est noté : tu reprendras plus tard."
+            return phrase("goals.tools.report.wait_answer")
+        return phrase("goals.tools.report.wait", minutes=max(10, args.wait_minutes))
+    return phrase("goals.tools.report.continue")
 
 
 class NoteArgs(BaseModel):
-    text: str = Field(min_length=1, max_length=2000, description="ce que tu veux garder pour la suite")
+    text: str = Field(min_length=1, max_length=2000, description=phrase("goals.tools.note.text"))
 
 
-@GOALS.tool(NOTE, description="Écrire dans le carnet de ce but (ce que tu as trouvé, compris, décidé).",
-            args=NoteArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=4)
+@GOALS.tool(NOTE, description=phrase("goals.tools.note.description"), args=NoteArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=4)
 async def goal_note(args: NoteArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
-        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
+        return _gone()
     await ctx.emit(NOTED.draft(goal=g.id, text=Content.of(args.text.strip(), level=g.sensitivity), owner=g.owner,
                                about=g.about))
-    return "Noté dans ton carnet."
+    return phrase("goals.tools.note.done")
 
 
 class ReflectArgs(BaseModel):
-    text: str = Field(min_length=1, max_length=2000,
-                      description="ce que ta réflexion t'a apporté, en quelques phrases à toi : ce que tu comprends "
-                                  "mieux, ce qui pourrait aider, ce que tu aimerais lui dire ou lui demander")
+    text: str = Field(min_length=1, max_length=2000, description=phrase("goals.tools.reflect.text"))
 
 
 def _words(text: str) -> set[str]:
     return {w.lower().strip("'") for w in _WORD.findall(text) if len(w.strip("'")) > 2}
 
 
-@GOALS.tool(REFLECT, description="Écrire ce qu'une réflexion t'a apporté (seulement quand tu repenses à ce qu'on "
-            "t'a confié, ou à ce que tu croyais) : quelques phrases à toi, pas la redite de ce qu'on t'a dit.",
-            args=ReflectArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=2)
+@GOALS.tool(REFLECT, description=phrase("goals.tools.reflect.description"), args=ReflectArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=2)
 async def goal_reflect(args: ReflectArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
-        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
+        return _gone()
     if not reflective(g):
-        return ToolResult(ok=False, content="Ce but n'est pas une réflexion : avance-le en allant chercher ailleurs "
-                                            "(tes outils), et garde tes notes avec goal_note.")
+        return ToolResult(ok=False, content=phrase("goals.tools.reflect.not_reflection"))
     text = args.text.strip()
     mine = _words(text)
     if len(_WORD.findall(text)) < REFLECT_MIN_WORDS:
-        return ToolResult(ok=False, content="Un peu court pour une réflexion : dis ce que tu en penses vraiment, en "
-                                            "quelques phrases.")
+        return ToolResult(ok=False, content=phrase("goals.tools.reflect.too_short"))
     store = ctx.ports.get("store")
     given = store.content([r for r in (g.title_ref, g.details_ref) if r]) if store is not None else {}
     said = _words(" ".join(given.values()))
     if mine and len(mine & said) / len(mine) > 0.6:
-        return ToolResult(ok=False, content="Tu redis surtout ce qu'on t'a dit : écris ce que toi, tu en penses.")
+        return ToolResult(ok=False, content=phrase("goals.tools.reflect.echo"))
     await ctx.emit(NOTED.draft(goal=g.id, text=Content.of(text, level=g.sensitivity), owner=g.owner, about=g.about))
-    return "Gardé : c'est ta réflexion."
+    return phrase("goals.tools.reflect.done")
 
 
 class TaskAddArgs(BaseModel):
-    text: str = Field(min_length=1, max_length=500, description="une étape à faire, en une phrase")
+    text: str = Field(min_length=1, max_length=500, description=phrase("goals.tools.task_add.text"))
 
 
 class TaskUpdateArgs(BaseModel):
-    task: int = Field(ge=1, description="le numéro de la tâche (dans ton plan de travail)")
+    task: int = Field(ge=1, description=phrase("goals.tools.task_update.task"))
     status: Literal["todo", "doing", "done", "blocked"] = Field(
-        description="todo : à faire ; doing : en cours ; done : faite ; blocked : tu bloques dessus")
-    note: str = Field(default="", max_length=1000, description="son résultat, ou pourquoi tu bloques")
+        description=phrase("goals.tools.task_update.status"))
+    note: str = Field(default="", max_length=1000, description=phrase("goals.tools.task_update.note"))
 
 
-@GOALS.tool(TASK_ADD, description="Ajouter une étape à ton plan de travail pour ce but.", args=TaskAddArgs,
+@GOALS.tool(TASK_ADD, description=phrase("goals.tools.task_add.description"), args=TaskAddArgs,
             bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=5)
 async def goal_task_add(args: TaskAddArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
-        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
+        return _gone()
     if len(g.tasks) >= TASKS_KEPT:
-        return ToolResult(ok=False, content=f"Ton plan a déjà {TASKS_KEPT} tâches : termine ou regroupe-en.")
+        return ToolResult(ok=False, content=phrase("goals.tools.task_add.full", count=TASKS_KEPT))
     number = g.task_seq + 1
     await ctx.emit(TASK_ADDED.draft(goal=g.id, task=number, text=Content.of(args.text.strip(), level=g.sensitivity),
                                     author="self", owner=g.owner, about=g.about))
-    return f"Ajoutée à ton plan : tâche {number}."
+    return phrase("goals.tools.task_add.done", number=number)
 
 
-@GOALS.tool(TASK_UPDATE, description="Mettre à jour une tâche de ton plan de travail (en cours, faite, bloquée…).",
-            args=TaskUpdateArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=8)
+@GOALS.tool(TASK_UPDATE, description=phrase("goals.tools.task_update.description"), args=TaskUpdateArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=8)
 async def goal_task_update(args: TaskUpdateArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
-        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
+        return _gone()
     t = task_at(g, args.task)
     if t is None:
-        return ToolResult(ok=False, content=f"Il n'y a pas de tâche {args.task} dans ton plan.")
+        return ToolResult(ok=False, content=phrase("goals.tools.task_update.unknown", task=args.task))
     note = Content.of(args.note.strip(), level=g.sensitivity) if args.note.strip() else None
     await ctx.emit(TASK_CHANGED.draft(goal=g.id, task=t.id, status=args.status, note=note, author="self",
                                       owner=g.owner, about=g.about))
-    return f"Tâche {t.id} : {TASK_WORDS[args.status]}."
-
-
-TASK_WORDS = {c.TODO: "à faire", c.DOING: "en cours", c.TASK_DONE: "faite", c.TASK_BLOCKED: "bloquée"}
+    return phrase("goals.tools.task_update.done", task=t.id, status=family("goals.task")[args.status])
 
 
 class DropArgs(BaseModel):
-    why: str = Field(min_length=1, max_length=300, description="pourquoi tu y renonces")
+    why: str = Field(min_length=1, max_length=300, description=phrase("goals.tools.drop.why"))
 
 
-@GOALS.tool(DROP, description="Renoncer à ce but (seulement à ce que tu as entrepris de toi-même).",
-            args=DropArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=1)
+@GOALS.tool(DROP, description=phrase("goals.tools.drop.description"), args=DropArgs, bundle="goals", episodes=[Kind.STEP], max_calls_per_episode=1)
 async def goal_drop(args: DropArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
-        return ToolResult(ok=False, content="Ce but n'est plus en cours.")
+        return _gone()
     if g.authority == c.USER:
-        return ToolResult(ok=False, content=(
-            "C'est quelque chose qu'on t'a confié : tu ne peux pas y renoncer de toi-même. Si tu n'y arrives pas, "
-            "dis-le (report_step, « blocked »)."))
+        return ToolResult(ok=False, content=phrase("goals.tools.drop.confided"))
     await ctx.emit(closing(ctx, g, c.ABANDONED, reason=args.why))
-    return "D'accord, tu laisses ça de côté."
+    return phrase("goals.tools.drop.done")
 
 
 # ── En conversation ───────────────────────────────────────────────────────
@@ -337,29 +319,27 @@ def _due(when: str, frame: Frame) -> int | str:
     try:
         dt = datetime.fromisoformat(when.strip())
     except ValueError:
-        return "Je ne lis pas cette date : écris-la AAAA-MM-JJTHH:MM, en heure locale."
+        return phrase("goals.tools.date.unreadable")
     due = instant(dt if dt.tzinfo is not None else dt.replace(tzinfo=tz))
     now = frame.now
     if due <= now + MINUTE // 2:
-        return "Cette heure est déjà passée : donne une date à venir."
+        return phrase("goals.tools.date.past")
     if due > now + 366 * 24 * 60 * MINUTE:
-        return "C'est trop loin : un rappel dans l'année, pas au-delà."
+        return phrase("goals.tools.date.too_far")
     return due
 
 
 class RemindArgs(BaseModel):
-    when: str = Field(description="quand, en heure locale : AAAA-MM-JJTHH:MM (par exemple 2026-09-30T15:00)")
-    what: str = Field(min_length=1, max_length=300, description="ce qu'il faudra rappeler, en quelques mots")
-    urgent: bool = Field(default=False, description="vrai seulement si c'est important à l'heure pile, "
-                                                    "même en pleine nuit")
+    when: str = Field(description=phrase("goals.tools.remind.when"))
+    what: str = Field(min_length=1, max_length=300, description=phrase("goals.tools.remind.what"))
+    urgent: bool = Field(default=False, description=phrase("goals.tools.remind.urgent"))
 
 
-@GOALS.tool("goal_remind", description="Promettre un rappel à la personne à qui tu parles, à une heure dite.",
-            args=RemindArgs, bundle="goals", episodes=[Kind.REPLY], max_calls_per_episode=3)
+@GOALS.tool("goal_remind", description=phrase("goals.tools.remind.description"), args=RemindArgs, bundle="goals", episodes=[Kind.REPLY], max_calls_per_episode=3)
 async def goal_remind(args: RemindArgs, ctx: Any) -> Any:
     who = _person(ctx.frame)
     if who is None:
-        return ToolResult(ok=False, content="Il n'y a personne à qui faire ce rappel.")
+        return ToolResult(ok=False, content=phrase("goals.tools.remind.nobody"))
     handle, person = who
     due = _due(args.when, ctx.frame)
     if isinstance(due, str):
@@ -368,8 +348,9 @@ async def goal_remind(args: RemindArgs, ctx: Any) -> Any:
     await ctx.emit(c.GOAL_OPENED.draft(
         kind=c.REMINDER, authority=c.USER, title=Content.of(args.what.strip(), level=level), owner=person,
         address=handle, about=(person,), due=due, urgent=args.urgent, source="tool", sensitivity=level))
-    when = local(due, ctx.frame.env.tz_of(ctx.frame.root))
-    return f"C'est noté : rappel le {when:%d/%m à %H:%M}" + (" (urgent : même la nuit)." if args.urgent else ".")
+    when = date_time(local(due, ctx.frame.env.tz_of(ctx.frame.root)))
+    return phrase("goals.tools.remind.done_urgent", when=when) if args.urgent else \
+        phrase("goals.tools.remind.done", when=when)
 
 
 CANCEL, MOVE = "cancel", "move"
@@ -380,11 +361,9 @@ _REMINDER_STEMS = frozenset({"rappel", "penser", "oublie", "noubli"})
 
 
 class RemindChangeArgs(BaseModel):
-    what: str = Field(min_length=1, max_length=300, description="de quel rappel il s'agit, en quelques mots")
-    action: Literal["cancel", "move"] = Field(description="cancel : le décommander (il ne sert plus) ; move : le "
-                                                          "déplacer à l'heure donnée dans « when »")
-    when: str = Field(default="", description="avec « move » : la nouvelle heure, en heure locale : "
-                                              "AAAA-MM-JJTHH:MM (par exemple 2026-09-30T19:00)")
+    what: str = Field(min_length=1, max_length=300, description=phrase("goals.tools.remind_change.what"))
+    action: Literal["cancel", "move"] = Field(description=phrase("goals.tools.remind_change.action"))
+    when: str = Field(default="", description=phrase("goals.tools.remind_change.when"))
 
 
 def _reminders(s: GoalsState, person: str, now: int) -> list[Goal]:
@@ -408,44 +387,42 @@ def _which(reminders: list[Goal], what: str, texts: Mapping[str, str]) -> Goal |
 def _shown(g: Goal, texts: Mapping[str, str], frame: Frame, person: str) -> str:
     """Un rappel en mots : son heure, et son texte s'il peut s'entendre ici (la règle de « ce que tu as en
     train »)."""
-    when = f" du {local(g.due, frame.env.tz_of(frame.root)):%d/%m à %H:%M}" if g.due is not None else ""
+    when = phrase("goals.tools.remind_change.of_date", when=date_time(local(g.due, frame.env.tz_of(frame.root)))) \
+        if g.due is not None else ""
     title, aud = texts.get(g.title_ref, ""), frame.audience
     if title and aud is not None and hearable(g.about, g.sensitivity, person, aud.level, aud.witness_level,
                                               aud.private_ok):
-        return f"{when} (« {title} »)"
+        return phrase("goals.tools.remind_change.titled", when=when, title=title)
     return when
 
 
-@GOALS.tool("goal_remind_change", description="Décommander un rappel que la personne à qui tu parles t'a demandé "
-            "(il ne sert plus), ou le déplacer à une autre heure — au lieu d'en promettre un second.",
+@GOALS.tool("goal_remind_change", description=phrase("goals.tools.remind_change.description"),
             args=RemindChangeArgs, bundle="goals", episodes=[Kind.REPLY], max_calls_per_episode=3,
             rule="seulement un rappel encore à dire, demandé par la personne à qui elle parle")
 async def goal_remind_change(args: RemindChangeArgs, ctx: Any) -> Any:
     who = _person(ctx.frame)
     if who is None:
-        return ToolResult(ok=False, content="Il n'y a personne dont changer le rappel.")
+        return ToolResult(ok=False, content=phrase("goals.tools.remind_change.nobody"))
     _handle, person = who
     due = _due(args.when, ctx.frame) if args.action == MOVE else None
     if isinstance(due, str):
         return ToolResult(ok=False, content=due if args.when.strip() else
-                          "Dis à quelle heure le déplacer : AAAA-MM-JJTHH:MM, en heure locale.")
+                          phrase("goals.tools.remind_change.no_time"))
     s: GoalsState = ctx.frame.state("goals")
     reminders = _reminders(s, person, ctx.frame.now)
     if not reminders:
-        return ToolResult(ok=False, content="Cette personne n'a aucun rappel en attente avec toi (déjà dit, ou "
-                                            "jamais promis) : rien n'a changé.")
+        return ToolResult(ok=False, content=phrase("goals.tools.remind_change.none"))
     store = ctx.ports.get("store")
     refs = [g.title_ref for g in reminders if g.title_ref]
     texts = store.content(refs) if store is not None and refs else {}
     g = _which(reminders, args.what, texts)
     if g is None:
-        listed = "\n".join(f"- le rappel{_shown(r, texts, ctx.frame, person)}" for r in reminders)
-        return ToolResult(ok=False, content=(
-            f"Cette personne a plusieurs rappels en attente, et je ne sais pas duquel il s'agit :\n{listed}\n"
-            "Rien n'a changé : demande-lui lequel, puis recommence avec ses mots."))
+        listed = "\n".join(phrase("goals.tools.remind_change.listed", shown=_shown(r, texts, ctx.frame, person))
+                           for r in reminders)
+        return ToolResult(ok=False, content=phrase("goals.tools.remind_change.which", listed=listed))
     shown = _shown(g, texts, ctx.frame, person)
     if due is not None and due == g.due:
-        return f"Le rappel{shown} est déjà prévu à cette heure-là : rien à changer."
+        return phrase("goals.tools.remind_change.same", shown=shown)
     if args.action == CANCEL:
         draft = closing(ctx, g, c.CANCELLED, reason=NO_LONGER_NEEDED)
     else:  # une nouvelle heure : ses tentatives repartent de zéro (le réducteur)
@@ -456,8 +433,13 @@ async def goal_remind_change(args: RemindChangeArgs, ctx: Any) -> Any:
     except Superseded:
         if ctx.mind.frame().get(c.STATUS(g.id)) == c.ACTIVE:
             raise  # c'est la garde de la conversation qui a cédé
-        return ToolResult(ok=False, content="Ce rappel a changé entre-temps (déjà dit, ou clos) : rien n'a changé.")
+        return ToolResult(ok=False, content=phrase("goals.tools.remind_change.changed"))
     if due is None:
-        return f"C'est décommandé : le rappel{shown} ne partira pas."
-    when = local(due, ctx.frame.env.tz_of(ctx.frame.root))
-    return f"C'est noté : le rappel{shown} est déplacé au {when:%d/%m à %H:%M}."
+        return phrase("goals.tools.remind_change.cancelled", shown=shown)
+    when = date_time(local(due, ctx.frame.env.tz_of(ctx.frame.root)))
+    return phrase("goals.tools.remind_change.moved", shown=shown, when=when)
+
+
+def date_time(at: datetime) -> str:
+    """« 30/09 à 15:00 » : le jour et l'heure d'un rappel."""
+    return phrase("goals.date_time", date=f"{at:%d/%m}", time=f"{at:%H:%M}")

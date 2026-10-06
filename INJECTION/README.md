@@ -61,13 +61,14 @@ l'**origine** de l'estimation. Les dossiers aident : `notes/2009/12 mars.txt` es
 | # | Commande | Ce qu'elle fait | État |
 |---|---|---|---|
 | 1 | `jumeau ingerer` | Lit `brut/` dans `travail/corpus.db`. On peut relancer sans risque : un fichier inchangé est sauté, des exports qui se chevauchent ne font pas de doublons. | ✅ |
-| 1 bis | `jumeau dater [--claude]` | Resserre les dates par l'ordre des sources, interpole, signale les conflits. Écrit la revue `travail/dates.yaml`. Avec `--claude`, Claude Code date d'abord par recoupement avec le corpus daté (serveur MCP). | ✅ |
-| 2 | `jumeau personnes` | Regroupe les participants en personnes et la détecte dans chaque canal. Revue : `travail/personnes.yaml` (la main l'emporte). | ✅ |
+| 1 bis | `jumeau dater [--claude]` | Resserre les dates par l'ordre des sources, interpole, signale les conflits. Écrit la revue `travail/dates.yaml`. Une date décidée (à la main, ou par Claude Code) est gardée : elle revient même après la relecture de sa source. Avec `--claude`, Claude Code date d'abord, par recoupement avec le corpus daté (serveur MCP), ce que l'ordre n'a pas su dater. Il travaille sur les séances : le lancer **après** `jumeau planifier`, puis relancer `jumeau planifier --garder-seances`. | ✅ |
+| 2 | `jumeau personnes` | Regroupe les participants en personnes et la détecte dans chaque canal. Revue : `travail/personnes.yaml` (la main l'emporte ; une note prise par Claude Code via le MCP n'est pas écrasée par une revue restée en l'état). Un pseudo MSN commun ou deux numéros réunis par un même nom ne sont que **proposés**. | ✅ |
 | 3 | `jumeau planifier` | Découpe en séances, calcule la signifiance, répartit en paliers A, B, R, C, D et estime le budget (jetons, appels, heures). Curseurs : `travail/plan.yaml`. | ✅ |
-| 4 | `jumeau lire [--essai]` | Annotation par Claude Code (Sonnet) : émotions de chacun de ses messages, souvenirs, croyances, promesses, événements, rêves racontés. Reprenable, quota surveillé. | ✅ |
+| 4 | `jumeau lire [--essai]` | Annotation par Claude Code (Sonnet) : émotions de chacun de ses messages, souvenirs, croyances, promesses, événements, rêves racontés. Reprenable, quota surveillé : un refus pour quota attend la réinitialisation sans compter comme un essai ; un échec repart de plus en plus tard ; un lot qui échoue sans cesse est coupé en deux. `--reprendre-echecs` remet en file ce qui a échoué (aussi pour `dater --claude` et `synthetiser`). | ✅ |
 | 5 | `jumeau synthetiser [--etape X]` | Claude Code (Sonnet) écrit, dans l'ordre : ses mois (et son récit de soi), les chapitres de sa vie, sa persona (`sortie/persona/`, une par chapitre et l'actuelle, nature « incarnée », chronotype calculé sur ses vrais réveils), les profils de ses proches par trimestre, le journal de ses jours forts et deux rêves possibles par nuit. Ses vrais journaux et ses vrais rêves priment. | ✅ |
 | 6 | `jumeau avancer [--preparer] [--jusqu-a D]` | L'avance rapide dans le vrai noyau, sur horloge virtuelle. Le moteur est gelé et la mémoire bornée ; on peut reprendre. Les messages auxquels elle a répondu sont retenus puis libérés à l'heure de sa réponse. Le rejoueur sert à ses facultés ce que Claude Code a lu. Rapport : `sortie/rapport/`. | ✅ |
 | 7 | — | `mika replay --verify`, puis `mika serve --data INJECTION/sortie/vie --port 8001` | à faire sur les vraies données |
+| — | `jumeau oublier <personne>` | Retire quelqu'un du corpus avant l'injection : ses messages, leurs tête-à-tête, ce que les annotations et les synthèses disent d'elle ; ses séances repartent en lecture sans elle. L'oubli est gardé : une source relue ne la fait pas revenir. Ses textes à elle qui la nomment sont listés, pas modifiés. Après l'injection, c'est `mika forget`. | ✅ |
 
 Les paliers :
 - **A** : rejouée et lue à fond ;
@@ -77,6 +78,14 @@ Les paliers :
 - **D** : ignorée.
 
 Ses notes et son journal sont toujours en A.
+
+## Sa voix
+
+Tout ce que le moteur lui fait lire ou dire sans modèle (consignes, sections du prompt, mots des humeurs, ses
+bonjours de secours…) est dans **un seul fichier** : `backendv2/persona/voix.yaml` (documenté en tête). Pour lui
+donner une voix à elle sans toucher au moteur : copier ce fichier en `sortie/voix.yaml` et le retoucher. `jumeau
+avancer` le passe au moteur (`MIKA_VOIX`), et rappelle à l'arrivée de servir sa vie avec la même voix. Le moteur gelé
+copie aussi `backendv2/persona/` : changer la voix du moteur fait un nouveau moteur gelé.
 
 Utile à tout moment : `jumeau etat` (ce que contient le corpus) et `jumeau formats --detail`
 (quel lecteur prendrait quel fichier, sans rien écrire).

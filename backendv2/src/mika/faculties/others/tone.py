@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from mika.vocab.phrasebook import family, phrase
 from mika.vocab.words import SALUTATIONS, fold
 
 #: (mots repliés, valence, agitation) : des mots qui pèsent…
@@ -66,22 +67,25 @@ _NOT_GRAVE = re.compile(
     r"badminton|cyclisme|equitation|golf|ski|boxe|danse)\b|"
     r"\b(?:suis|es|est|signe|ascendant|natif|native)\s+(?:du\s+|de\s+)?cancer\b|"
     r"\brupture\s+conventionnelle\b")
-#: (motif sur le texte replié, valence, étiquette) : les événements graves, qui comptent venant de n'importe qui.
+#: (motif sur le texte replié, valence, sorte) : les événements graves, qui comptent venant de n'importe qui. La
+#: sorte se dit par ``others.grave.<sorte>`` (persona/voix.yaml).
 #: Pas les hyperboles de tous les jours : « mourir de chaud », « j'ai un oral demain, je vais mourir », « hâte
 #: d'en finir avec ce dossier », « ma mère va me tuer », « le suicide de Werther », « un petit accident de café »,
 #: « un accident sur le périph », « rupture de stock ».
+#: des mots de détresse : l'indice les dit tels quels, sans « un événement grave (…) »
+DISTRESS = "distress"
 _GRAVE = (
     (re.compile(r"\b(?:veux|voudrais|envie de|prefererais)\s+(?:mourir|crever|disparaitre)\b(?!\s+d[e'])|"
                 r"\b(?:veux|voudrais|vais|envie d'|besoin d')\s*en\s+finir\b(?!\s+avec)|"
                 r"\b(?:me|je)\s+suicider\b|\bsuicidaire|\btentative de suicide\b|\bidees noires\b|"
                 r"\bplus\s+envie\s+de\s+vivre\b|\b(?:veux|vais|envie de)\s+me\s+tuer\b"),
-     -1.0, "des mots de détresse"),
+     -1.0, DISTRESS),
     (re.compile(r"\b(?:decedee?s?|deces|enterrement|obseques|funerailles)\b|"
                 rf"\b(?:mon|ma|mes|son|sa|ses|notre|nos)\s+{_KIN}\b[^.!?]{{0,30}}?"
                 r"\b(?:est|sont|etait|vient|viennent)\s+(?:de\s+)?(?:mourir|morte?s?)\b|"
                 r"\bmort\s+de\s+(?:mon|ma|mes|son|sa|ses|notre|nos)\b|"
                 rf"\bperdu\s+(?:mon|ma|mes)\s+{_KIN}\b"),
-     -0.9, "un deuil"),
+     -0.9, "mourning"),
     (re.compile(r"\b(?:cancer|tumeur|chimio|chimiotherapie|leucemie|hospitalisee?s?|avc|infarctus|fausse couche)\b|"
                 r"\b(?:a l'hopital|aux urgences)\b|\baccidentee?s?\b|\bcrise cardiaque\b|"
                 # un accident qui arrive à quelqu'un — pas « il y a eu un accident sur le périph »
@@ -89,14 +93,14 @@ _GRAVE = (
                 r"\b(?:grave|terrible|gros|horrible)\s+accident\b|"
                 r"\baccident\s+(?:de|en)\s+(?:voiture|moto|scooter|velo|bus|ski|la route|travail|avion|trottinette|"
                 r"cheval)\b"),
-     -0.85, "une maladie, un accident"),
+     -0.85, "illness"),
     (re.compile(r"\b(?:fait|fais|faire|suis|ete|etre)\s+(?:virer?|viree)\b|\blicencie(?:e|s|es)?\b|"
                 r"\blicenciement\b|\b(?:au|mise? au)\s+chomage\b|"
                 r"\bperdu\s+(?:mon|ma)\s+(?:travail|boulot|job|emploi|taf)\b"),
-     -0.75, "une perte de travail"),
+     -0.75, "job_loss"),
     (re.compile(r"\brupture\b(?!\s+(?:de\s+(?:stock|contrat|charge)|conventionnelle))|\bm'a\s+quittee?\b|\bnous\s+sommes\s+separes?\b|"
                 r"\bon\s+s'est\s+separee?s?\b|\bdivorce\b|\blarguee?\b|\bon\s+se\s+separe\b"),
-     -0.75, "une rupture"),
+     -0.75, "breakup"),
 )
 
 _WARM_EMOJI = frozenset("😀😃😄😁😆😊🙂😍🥰😘❤💕💖✨🎉👍😂🤣")
@@ -133,10 +137,14 @@ def _clamp(x: float, lo: float, hi: float) -> float:
 
 
 def grave(low: str) -> tuple[float, str] | None:
-    """Le plus grave des événements nommés dans le texte replié (valence, étiquette)."""
+    """Le plus grave des événements nommés dans le texte replié : (valence, sorte) ; à valence égale, le premier
+    de la liste."""
     low = _NOT_GRAVE.sub(" ", low)
-    found = [(v, label) for pattern, v, label in _GRAVE if pattern.search(low)]
-    return min(found) if found else None
+    found = [(v, i, kind) for i, (pattern, v, kind) in enumerate(_GRAVE) if pattern.search(low)]
+    if not found:
+        return None
+    value, _i, kind = min(found)
+    return value, kind
 
 
 def measure(text: str) -> Tone:
@@ -148,15 +156,15 @@ def measure(text: str) -> Tone:
     valence, arousal = 0.0, 0.3
     letters = [ch for ch in stripped if ch.isalpha()]
     if len(letters) >= 8 and sum(ch.isupper() for ch in letters) / len(letters) > 0.7:
-        cues.append("écrit en majuscules : la personne s'emballe, ou crie")
+        cues.append(phrase("others.cues.shouting"))
         arousal += 0.4
     if "!!" in stripped:
-        cues.append("beaucoup de points d'exclamation : de l'enthousiasme, ou de l'agacement")
+        cues.append(phrase("others.cues.exclamations"))
         arousal += 0.25
     elif "!" in stripped:
         arousal += 0.1
     if stripped.count("...") + stripped.count("…") >= 2:
-        cues.append("des points de suspension : une hésitation, ou quelque chose de lourd")
+        cues.append(phrase("others.cues.ellipsis"))
         valence -= 0.1
         arousal -= 0.05
     words = stripped.split()
@@ -165,7 +173,7 @@ def measure(text: str) -> Tone:
     # Mikachu » lu comme « un message très court »)
     greeting = bool(tokens) and tokens[0] in SALUTATIONS and len(tokens) <= 3
     if len(words) <= 2 and not stripped.endswith("?") and not greeting:
-        cues.append("un message très court")
+        cues.append(phrase("others.cues.short"))
         arousal -= 0.05
     low = fold(stripped).replace("’", "'")
     happy_tears = bool(_HAPPY_TEARS.search(low))
@@ -180,32 +188,33 @@ def measure(text: str) -> Tone:
     swears, _ = _hits(low, _SWEARS)
     intense, _ = _hits(low, _INTENSIFIERS)
     if serious is not None:
-        value, label = serious
-        cues.append(f"un événement grave ({label})" if label != "des mots de détresse" else label)
+        value, kind = serious
+        label = family("others.grave")[kind]
+        cues.append(phrase("others.cues.grave", label=label) if kind != DISTRESS else label)
         valence = min(valence, value)
         arousal += 0.2
     if heavy:
         # l'émotion heureuse qui accompagne (« pleurer tellement c'était beau ») allège le lourd
-        cues.append("des mots lourds" if not bright else "des mots lourds, mais de l'émotion heureuse avec")
+        cues.append(phrase("others.cues.heavy") if not bright else phrase("others.cues.heavy_but_bright"))
         valence -= (0.5 if not bright else 0.3) * min(2, heavy)
     if tired and not _BEDTIME.search(low) and serious is None:
-        cues.append("de la fatigue")
+        cues.append(phrase("others.cues.tired"))
         valence -= 0.25
     if angry:
-        cues.append("des mots fâchés")
+        cues.append(phrase("others.cues.angry"))
         valence -= 0.45 * min(2, angry)
         arousal += 0.35
     if bright_negated:
-        cues.append("de l'entrain qui manque (« pas… »)")
+        cues.append(phrase("others.cues.bright_negated"))
         valence -= 0.3
     if bright and not angry and serious is None:
-        cues.append("de l'entrain")
+        cues.append(phrase("others.cues.bright"))
         valence += (0.45 if not heavy else 0.3) * min(2, bright)
         arousal += 0.1
     if heavy_negated or angry_negated:
         valence += 0.15  # « pas mal », « pas fâchée » : plutôt bien
     if swears and abs(valence) < 0.05 and serious is None:
-        cues.append("un juron")  # seul, il dit un agacement ; avec autre chose, il l'intensifie
+        cues.append(phrase("others.cues.swear"))  # seul, il dit un agacement ; avec autre chose, il l'intensifie
         valence -= 0.2
         arousal += 0.2
     elif intense and abs(valence) >= 0.05 and serious is None:
@@ -213,14 +222,14 @@ def measure(text: str) -> Tone:
         arousal += 0.1
     chars = set(stripped)
     if chars & _SAD_EMOJI and not happy_tears:
-        cues.append("un émoji triste")
+        cues.append(phrase("others.cues.sad_emoji"))
         valence -= 0.4
     elif chars & _ANGRY_EMOJI:
-        cues.append("un émoji fâché")
+        cues.append(phrase("others.cues.angry_emoji"))
         valence -= 0.45
         arousal += 0.3
     elif chars & _WARM_EMOJI:
-        cues.append("un émoji joyeux")
+        cues.append(phrase("others.cues.warm_emoji"))
         valence += 0.35
     if serious is not None:
         valence = min(valence, serious[0] + 0.1)  # rien n'en fait un message léger

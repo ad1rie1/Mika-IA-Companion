@@ -21,6 +21,7 @@ from mika.faculties.identity.faculty import IDENTITY, view_of
 from mika.faculties.identity.prompt import acquaintance, describe
 from mika.vocab.episodes import CONVERSATIONAL
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust
 
 BUNDLE = "identity"
@@ -33,7 +34,7 @@ class NoArgs(BaseModel):
 
 
 class DoubtArgs(BaseModel):
-    reason: str = Field(default="", max_length=300, description="pourquoi tu doutes, en quelques mots")
+    reason: str = Field(default="", max_length=300, description=phrase("identity.tools.doubt.reason"))
 
 
 def _target(ctx: Any) -> str | None:
@@ -48,16 +49,14 @@ def something_to_doubt(audience: Any) -> bool:
     return getattr(audience, "trust", "") != ChannelTrust.AUTHENTICATED.value
 
 
-IDENTITY.bundle(BUNDLE, "douter d'une identité, défaire un lien")
+IDENTITY.bundle(BUNDLE, phrase("identity.tools.bundle"))
 
 
-@IDENTITY.tool("identity_whoami_with", description="Relire qui t'écrit en ce moment (son nom, à quel point tu en es "
-               "sûre, si cette personne dit être quelqu'un d'autre) — seulement si « QUI TU AS EN FACE » manque à ton "
-               "état : sinon, c'est déjà sous tes yeux.", args=NoArgs, bundle=READ_BUNDLE, episodes=CONVERSATIONAL)
+@IDENTITY.tool("identity_whoami_with", description=phrase("identity.tools.whoami.description"), args=NoArgs, bundle=READ_BUNDLE, episodes=CONVERSATIONAL)
 async def whoami_with(args: NoArgs, ctx: Any) -> str:
     target = _target(ctx)
     if not target:
-        return "Personne en particulier."
+        return phrase("identity.tools.whoami.nobody")
     view = view_of(ctx.frame.state("identity"), target, ctx.frame.now)
     aud = ctx.frame.audience
     lines = describe(view, public=bool(aud and aud.public))
@@ -68,31 +67,29 @@ async def whoami_with(args: NoArgs, ctx: Any) -> str:
     return "\n".join(lines)
 
 
-@IDENTITY.tool("identity_doubt", description="Dire que tu doutes que cette personne soit bien qui elle "
-               "prétend être (ce que tu sais d'elle se referme).", args=DoubtArgs, bundle=BUNDLE,
+@IDENTITY.tool("identity_doubt", description=phrase("identity.tools.doubt.description"), args=DoubtArgs, bundle=BUNDLE,
                episodes=CONVERSATIONAL, max_calls_per_episode=1, when=something_to_doubt)
 async def doubt(args: DoubtArgs, ctx: Any) -> str:
     target = _target(ctx)
     if not target:
-        return "Personne à mettre en doute."
+        return phrase("identity.tools.doubt.nobody")
     view = view_of(ctx.frame.state("identity"), target, ctx.frame.now)
     if not (view.bound or view.claim):
-        return "Rien à mettre en doute : cette personne ne dit être personne d'autre qu'elle-même."
+        return phrase("identity.tools.doubt.nothing")
     about = tuple(p for p in (view.person if view.bound else None, view.claim_target) if p and p != target)
     await ctx.emit(c.EVIDENCE.draft(handle=target, kind=c.CONTRADICTED, by="tool", about=about))
-    return "C'est noté : tu en doutes, et tu restes sur la réserve."
+    return phrase("identity.tools.doubt.done")
 
 
-@IDENTITY.tool("identity_forget_binding", description="Défaire le lien entre ce contact et la personne "
-               "que tu croyais reconnaître (tu t'étais trompée, ou on te l'a demandé).", args=NoArgs,
+@IDENTITY.tool("identity_forget_binding", description=phrase("identity.tools.forget.description"), args=NoArgs,
                bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=1, when=something_to_doubt)
 async def forget_binding(args: NoArgs, ctx: Any) -> str:
     target = _target(ctx)
     if not target:
-        return "Personne à délier."
+        return phrase("identity.tools.forget.nobody")
     view = view_of(ctx.frame.state("identity"), target, ctx.frame.now)
     if not (view.bound or view.claim):
-        return "Ce contact n'est lié à personne d'autre qu'à lui-même."
+        return phrase("identity.tools.forget.nothing")
     await ctx.emit(c.EVIDENCE.draft(handle=target, kind=c.REVOKED, by="tool",
                                    about=tuple(p for p in (view.person,) if p != target)))
-    return "C'est fait : pour toi, ce contact n'est plus que lui-même."
+    return phrase("identity.tools.forget.done")

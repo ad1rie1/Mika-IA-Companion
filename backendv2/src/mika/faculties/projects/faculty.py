@@ -46,6 +46,7 @@ from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import PROJECT_KINDS, Kind, project_of
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 NOTES_KEPT = 8
@@ -1130,8 +1131,8 @@ def _proposed(s: ProjectsState, e, cx) -> ProjectsState:
     if e.data.owner != c.OWNER or pid is None or pid not in s.projects:
         return s
     p = s.projects[pid]
-    line = f"#{e.seq} {EFFECT_WORDS.get(e.data.capability, 'commande avec le réseau')}" + \
-        (" — en attente d'accord" if e.data.approval else "")
+    line = f"#{e.seq} {effect_words(e.data.capability, phrase('projects.effect.networked'))}" + \
+        (phrase("projects.effect.pending") if e.data.approval else "")
     # une demande (de l'opérateur, ou sa commande réseau mise en file), maintenant proposée, n'est plus à proposer
     asked = _request_of(e.data.args_json)
     p = replace(_effect_line(p, line), requests=tuple(r for r in p.requests if r[0] != asked),
@@ -1143,8 +1144,17 @@ def _proposed(s: ProjectsState, e, cx) -> ProjectsState:
 
 
 PUSH, PULL, NETWORKED = f"{c.OWNER}.push", f"{c.OWNER}.pull", f"{c.OWNER}.networked"
-EFFECT_WORDS = {PUSH: "pousser vers le dépôt distant", PULL: "récupérer du dépôt distant",
-                NETWORKED: "commande avec le réseau"}
+
+
+def effect_words(capability: str, default: str) -> str:
+    """Ce qu'est une demande, en mots (« pousser vers le dépôt distant ») — ``default`` pour une autre capacité."""
+    if capability == PUSH:
+        return phrase("projects.effect.push")
+    if capability == PULL:
+        return phrase("projects.effect.pull")
+    if capability == NETWORKED:
+        return phrase("projects.effect.networked")
+    return default
 
 
 def _request_of(args_json: str) -> int:
@@ -1171,7 +1181,7 @@ def _resolved(s: ProjectsState, e, cx) -> ProjectsState:
     note = f" : « {e.data.legacy_note[:200]} »" if e.data.legacy_note else ""
     if e.data.note is not None and e.data.note.ref:
         p = replace(p, refusals=(*p.refusals, (e.data.proposal, e.data.note.ref))[-EFFECTS_KEPT:])
-    return _set(s, _effect_line(p, f"#{e.data.proposal} refusé{note}"))
+    return _set(s, _effect_line(p, f"#{e.data.proposal} {phrase('projects.effect.refused')}{note}"))
 
 
 @PROJECTS.reducer(rt.EFFECT_EXECUTED)
@@ -1183,12 +1193,14 @@ def _executed(s: ProjectsState, e, cx) -> ProjectsState:
     result = e.data.result
     p = replace(p, outgoing=tuple(x for x in p.outgoing if x[0] != e.data.proposal))
     # l'état seulement (fait, échoué, son code) : ce que le réseau a rendu est une donnée, citée à part
-    p = _effect_line(p, f"#{e.data.proposal} {EFFECT_WORDS.get(got[1], 'commande')} — "
-                        f"{'fait' if e.data.ok else 'échoué'}{_code_of(result)}")
+    state = phrase("projects.effect.done") if e.data.ok else phrase("projects.effect.failed")
+    p = _effect_line(p, f"#{e.data.proposal} {effect_words(got[1], phrase('projects.effect.other'))}"
+                        + phrase("projects.effect.result", state=state, code=_code_of(result)))
     if got[1] == NETWORKED:
         p = replace(p, network_out=result[:NETWORK_OUT_KEPT], network_out_at=e.at)
     if got[1] in (PUSH, PULL):
-        p = replace(p, remote_at=e.at, remote_ok=e.data.ok, remote_line=f"{EFFECT_WORDS[got[1]]} : {result[:400]}")
+        p = replace(p, remote_at=e.at, remote_ok=e.data.ok,
+                    remote_line=f"{effect_words(got[1], '')} : {result[:400]}")
     return _set(s, p)
 
 
@@ -1202,11 +1214,11 @@ def _code_of(result: str) -> str:
     head = re.split(r"\n(?:sortie|erreurs) :\n", result, maxsplit=1)[0]
     codes = _CODE.findall(head)
     if codes:
-        return f" (code {codes[-1]})"
+        return phrase("projects.effect.code", code=codes[-1])
     if "délai dépassé" in head:
-        return " (délai dépassé)"
+        return phrase("projects.effect.timeout")
     if head.startswith(("Refusé", "refusé")):
-        return " (refusé)"
+        return phrase("projects.effect.refused_code")
     return ""
 
 

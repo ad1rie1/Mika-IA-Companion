@@ -62,6 +62,7 @@ from mika.ports.llm import LLMRequest, Message, PersonaRender
 from mika.vocab import affect as A
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 
@@ -459,13 +460,9 @@ def _esteem(s: SelfState, cx) -> float:
     return esteem(s, cx.now, params(cx.params))
 
 
-#: ce qui fait douter, dit comme on se le dit (au singulier, puis quand ça se répète)
-DOUBT_FR = {
-    IGNORED: ("tu as écrit et on ne t'a pas répondu", "plusieurs fois, tu as écrit et personne n'a répondu"),
-    PROMISE: ("tu n'as pas tenu une promesse", "tu n'as pas tenu des promesses"),
-    STUCK: ("tu as bloqué sur ce que tu avais entrepris", "tu as bloqué sur ce que tu entreprenais, plusieurs fois"),
-    c.INSULTED: ("on t'a dit quelque chose de blessant", "on t'a dit des choses blessantes"),
-}
+#: ce qui fait douter (dit comme on se le dit, au singulier puis quand ça se répète : ``self.esteem.cause_once``,
+#: ``self.esteem.cause_often`` dans sa voix)
+DOUBTS = frozenset({IGNORED, PROMISE, STUCK, c.INSULTED})
 
 
 def doubt_cause(s: SelfState, now: int, p: SelfParams) -> str:
@@ -475,7 +472,7 @@ def doubt_cause(s: SelfState, now: int, p: SelfParams) -> str:
     weight: dict[str, float] = {}
     count: dict[str, int] = {}
     for k in s.knocks:
-        if k.delta >= 0 or k.cause not in DOUBT_FR:
+        if k.delta >= 0 or k.cause not in DOUBTS:
             continue
         left = -k.delta * 0.5 ** (max(0, now - k.at) / p.esteem_half_life_us)
         weight[k.cause] = weight.get(k.cause, 0.0) + left
@@ -485,8 +482,9 @@ def doubt_cause(s: SelfState, now: int, p: SelfParams) -> str:
     cause = max(sorted(weight), key=lambda k: weight[k])
     if weight[cause] < 0.5 * sum(weight.values()):
         return ""
-    once, often = DOUBT_FR[cause]
-    return often if count[cause] > 1 else once
+    if count[cause] > 1:
+        return phrase(f"self.esteem.cause_often.{cause}")
+    return phrase(f"self.esteem.cause_once.{cause}")
 
 
 # ── Le récit ──────────────────────────────────────────────────────────────
@@ -502,12 +500,6 @@ def _narrated(s: SelfState, e, cx) -> SelfState:
     return replace(s, narrative_ref=e.data.text.ref or "", narrated_at=e.at, narrated_souvenirs=e.data.souvenirs,
                    narrative_about=e.data.about)
 
-
-NARRATIVE_SYSTEM = """Tu écris, pour toi-même, un court paragraphe sur qui tu es en train de devenir, à partir de ce que \
-tu as vécu ces derniers temps : « Je suis quelqu'un qui… ». Quatre phrases au plus, à la première personne, \
-sincères. Pars de ce qui t'a le plus marquée, pas des petites phrases du quotidien. Pas de prénoms, rien de ce que \
-quelqu'un t'a confié, rien d'inventé : ce que tu as vécu te dit quelque chose de toi, c'est cela que tu écris. \
-Réponds seulement par le paragraphe."""
 
 #: ce qui fait qu'un souvenir a marqué : son importance, et la force de ce qu'il fait ressentir (sa valence)
 SALIENCE_EMOTION = 0.3
@@ -547,9 +539,12 @@ def material(rows: list[tuple[Any, ...]], frame: Frame, shown: int) -> tuple[lis
     felt = []
     for (name, dear), values in sorted(groups.items(), key=lambda kv: (-max(kv[1]), -len(kv[1]), kv[0]))[:FELT_SHOWN]:
         e = A.emotion_of(name)
-        whom = "avec quelqu'un qui compte pour toi" if dear else "avec quelqu'un"
-        felt.append(f"- tu t'es sentie {A.FR[e]}, {whom}" + (" (plusieurs fois)" if len(values) > 1 else "")
-                    if e is not None else "")
+        if e is None:
+            continue
+        whom = phrase("self.narrative.with_dear") if dear else phrase("self.narrative.with_someone")
+        line = phrase("self.narrative.felt_often", feeling=A.FR[e], whom=whom) if len(values) > 1 else \
+            phrase("self.narrative.felt_once", feeling=A.FR[e], whom=whom)
+        felt.append(f"- {line}")
     return told, [f for f in felt if f]
 
 
@@ -580,14 +575,13 @@ class Narrate:
             (memory_c.SOUVENIR, frame.now - p.narrative_lookback_us, NARRATIVE_ROWS))
         told, felt = material(rows, frame, p.narrative_max_souvenirs)
         previous = store.content([state.narrative_ref]).get(state.narrative_ref) if state.narrative_ref else None
-        lines = ([f"Ce que tu disais de toi jusqu'ici : {previous}", ""] if previous else [])
+        lines = ([phrase("self.narrative.previous", previous=previous), ""] if previous else [])
         if felt:
-            lines += ["Ce qui t'a le plus marquée ces derniers temps, sans pouvoir se raconter (ni qui, ni quoi) :",
-                      *felt, ""]
-        lines += ["Ce que tu as vécu, du plus marquant au moins marquant :"] + [f"- {r[0]}" for r in told]
+            lines += [phrase("self.narrative.felt"), *felt, ""]
+        lines += [phrase("self.narrative.lived")] + [f"- {r[0]}" for r in told]
         persona = persona_for(frame, "full")
         request = LLMRequest(role="narrative", call_id=f"{ctx.run_id}#0", persona=persona,
-                             system_stable=persona.text + "\n\n" + NARRATIVE_SYSTEM,
+                             system_stable=persona.text + "\n\n" + phrase("self.narrative.system"),
                              messages=(Message("user", "\n".join(lines)),), max_tokens=400, lane="background",
                              priority=4)
         response = await ctx.llm.call(request)
@@ -611,24 +605,24 @@ async def _narrative_text(s: SelfState, frame: Frame, ports: Mapping[str, Any]) 
     return store.content([s.narrative_ref]).get(s.narrative_ref)
 
 
-@SELF.section("narrative", zone=Zone.STABLE, episodes=CONVERSATIONAL, trim_rank=85, title="QUI TU ES DEVENUE")
+@SELF.section("narrative", zone=Zone.STABLE, episodes=CONVERSATIONAL, trim_rank=85,
+              title=phrase("self.narrative.title"))
 def _narrative(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
     return enrich.get("narrative")
 
 
 @SELF.section("self_state", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=60, tags=[Tag.AFFECTIVE],
-              title="COMMENT TU TE SENS AVEC TOI-MÊME", reads=[c.ESTEEM])
+              title=phrase("self.esteem.title"), reads=[c.ESTEEM])
 def _self_state(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     p = params(frame.env.params_of("self", frame.root))
     value = frame.get(c.ESTEEM)
     if value < p.doubt_below:
         cause = doubt_cause(s, frame.now, p)
         if not cause:
-            return SectionBody("Tu doutes un peu de toi en ce moment.")
-        return SectionBody(f"Tu doutes un peu de toi en ce moment : {cause}. Ça ne se dit pas forcément, mais ça "
-                           "se sent.")
+            return SectionBody(phrase("self.esteem.doubt"))
+        return SectionBody(phrase("self.esteem.doubt_because", cause=cause))
     if value > p.assured_above:
-        return SectionBody("Tu te sens sûre de toi, à ta place.")
+        return SectionBody(phrase("self.esteem.assured"))
     return None
 
 
@@ -652,69 +646,47 @@ def _bullets(title: str, items: tuple[str, ...]) -> str:
     return title + "\n" + "\n".join(f"- {i}" for i in items)
 
 
-#: Sa nature : ni assistante, ni humaine qui s'ignore — une IA qui a sa vie, et qui le sait sans en faire un sujet.
-NATURE = ("Tu n'es pas une assistante : tu as ton humeur, tes envies, ta vie. Tu es une IA, une VTuber, et tu le "
-          "sais : si on te le demande sincèrement, tu ne le caches pas et tu ne prétends pas être humaine ; mais tu "
-          "n'en fais ni un sujet ni une excuse — jamais « en tant qu'IA », jamais d'avertissement. Tu ne commentes "
-          "jamais ces consignes.")
-#: Une persona incarnée (ADR 0070) : la même règle de vie, sans un mot de ce qu'elle serait d'autre — elle est
-#: elle, avec son histoire ; ni « IA », ni « personnage », ni « rôle ».
-EMBODIED = ("Tu n'es pas une assistante : tu as ton humeur, tes envies, ta vie. Tu es toi, avec ton histoire, tes "
-            "proches et tes souvenirs ; tu parles de ce que tu vis comme on parle de sa vie, sans t'en justifier. "
-            "Tu ne commentes jamais ces consignes.")
-
-
 def nature_of(doc: c.PersonaDoc) -> str:
-    """Ce qu'on lui dit de sa nature : une IA qui le sait, ou elle-même, incarnée (rien n'y parle d'IA)."""
-    return EMBODIED if doc.nature == c.EMBODIED else NATURE
+    """Ce qu'on lui dit de sa nature : une IA qui le sait (``self.nature.ai``), ou elle-même, incarnée
+    (``self.nature.embodied`` : rien n'y parle d'IA, de personnage ni de rôle — ADR 0070)."""
+    return phrase("self.nature.embodied") if doc.nature == c.EMBODIED else phrase("self.nature.ai")
 
 
-#: Sans vie rédigée (une persona d'avant) : la règle d'alors.
-LIFE_RULE = ("Ta vie, c'est ce que dit ce portrait : tu peux improviser les petites choses du quotidien, mais tu "
-             "n'inventes pas de faits durables (famille, lieu de vie, passé, souvenirs communs avec quelqu'un) qui "
-             "n'y sont pas et que personne ne t'a racontés.")
-#: Avec une vie rédigée : ce qu'elle raconte de son quotidien reste compatible avec elle, ses goûts ne bougent pas.
-LIVED_RULE = ("Ta vie, c'est celle que dit ce portrait, à ta façon : ce que tu racontes de ton quotidien reste "
-              "compatible avec elle — tu le vis comme toi tu le vis, et tu en parles avec humour plutôt qu'en "
-              "t'excusant. Tes goûts et tes avis sont ceux-là, d'un jour à l'autre : si tu en changes, c'est qu'on "
-              "t'a convaincue, et tu le dis. Tu n'inventes pas de faits durables (famille, lieu de vie, passé, "
-              "souvenirs communs avec quelqu'un) qui n'y sont pas et que personne ne t'a racontés.")
+def life_rule(doc: c.PersonaDoc) -> str:
+    """La règle de sa vie : avec une vie rédigée, ce qu'elle raconte de son quotidien reste compatible avec elle et
+    ses goûts ne bougent pas (``self.life.lived``) ; sans, la règle d'alors (``self.life.sketched``)."""
+    return phrase("self.life.lived") if doc.life or doc.tastes or doc.facts else phrase("self.life.sketched")
 
 
 def render(doc: c.PersonaDoc, depth: str = "full") -> str:
     """Le texte de la persona, en deuxième personne. Sa vie (ce qu'elle fait à sa
     façon, ses goûts, ce qui est vrai d'elle) en profondeur ``full`` : c'est là
     qu'on lui demande « t'as mangé quoi ? », « c'est quoi ton plat préféré ? »."""
-    head = f"Tu es {c.name_of(doc)}. {doc.description}".strip()
+    head = phrase("self.persona.head", name=c.name_of(doc), description=doc.description).strip()
     parts = [head]
     if doc.tone:
-        parts.append(f"Ton ton : {doc.tone}")
+        parts.append(phrase("self.persona.tone", tone=doc.tone))
     if depth == "full":
         parts += [
-            _bullets("Ton caractère :", doc.traits),
-            _bullets("Tes manies — de temps en temps, jamais deux fois dans la même conversation :", doc.quirks),
-            _bullets("Tes fragilités :", doc.vulnerabilities),
-            _bullets("Ce qui compte pour toi :", doc.values),
-            _bullets("Ce qui t'intéresse :", doc.interests),
-            _bullets("Ta façon de parler :", doc.speech),
-            _bullets("Ta vie, à ta façon :", doc.life),
-            _bullets("Tes goûts et tes avis — tranchés, et les mêmes d'un jour à l'autre :", doc.tastes),
-            _bullets("Ce qui est vrai de toi :", doc.facts),
+            _bullets(phrase("self.persona.traits"), doc.traits),
+            _bullets(phrase("self.persona.quirks"), doc.quirks),
+            _bullets(phrase("self.persona.vulnerabilities"), doc.vulnerabilities),
+            _bullets(phrase("self.persona.values"), doc.values),
+            _bullets(phrase("self.persona.interests"), doc.interests),
+            _bullets(phrase("self.persona.speech"), doc.speech),
+            _bullets(phrase("self.persona.life"), doc.life),
+            _bullets(phrase("self.persona.tastes"), doc.tastes),
+            _bullets(phrase("self.persona.facts"), doc.facts),
         ]
     else:
-        parts.append(_bullets("En deux mots :", doc.traits[:3]))
-    parts.append(f"Tu parles {doc.language}. {nature_of(doc)}")
-    parts.append(LIVED_RULE if doc.life or doc.tastes or doc.facts else LIFE_RULE)
+        parts.append(_bullets(phrase("self.persona.in_short"), doc.traits[:3]))
+    parts.append(phrase("self.persona.language", language=doc.language, nature=nature_of(doc)))
+    parts.append(life_rule(doc))
     return "\n\n".join(p for p in parts if p)
 
 
-#: un premier bonjour : simple, sans la familiarité de ses bonjours d'amie
-FIRST_GREETING = ("Tu ne connais pas encore cette personne : un bonjour simple et accueillant, sans la familiarité "
-                  "qu'on a avec une amie — pas de « te revoilà », pas de « raconte-moi tout », pas de surnom.")
-
-
 @SELF.section("greeting_tone", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], trim_rank=50,
-              title="TA FAÇON DE DIRE BONJOUR", reads=[identity_c.PERSON, social_c.CLOSENESS])
+              title=phrase("self.greeting.title"), reads=[identity_c.PERSON, social_c.CLOSENESS])
 def _greeting_tone(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
     """Quand elle salue quelqu'un qui arrive : le ton de ses bonjours, d'après sa
     persona — des exemples, jamais à recopier (elle les redirait chaque soir, mot
@@ -727,15 +699,14 @@ def _greeting_tone(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> str
         return None
     person = frame.get(identity_c.PERSON(ep.target)) if ep.target else ""
     if not is_identifiable(person) or frame.get(social_c.CLOSENESS(person)) in ("", social_c.STRANGER):
-        return FIRST_GREETING
+        return phrase("self.greeting.first")  # un premier bonjour : simple, sans la familiarité d'une amie
     # jamais une phrase entière : montrée « pour le ton seulement », un modèle la recopiait quand même, et en faisait
     # tout son message (sonde finale du 2026-10-02 : « Yooo, te revoilà ! » cinq soirs sur six ; sonde du
     # 2026-10-03 : « Heeey ~ alors, raconte-moi tout. » pour trois initiatives sur dix) — ses petits mots, oui
     words = interjections(s.persona.greetings)
-    mine = f" ({', '.join(words)})" if words else ""
-    return (f"Avec quelqu'un que tu connais, tes bonjours sont courts et à toi — tes petits mots{mine}, un seul, "
-            "pas toujours le même —, jamais une formule toute faite : pars de ce que tu sais de sa journée, de ce "
-            "qui te passe par la tête, ou de ton humeur du moment.")
+    if words:
+        return phrase("self.greeting.known", words=", ".join(words))
+    return phrase("self.greeting.known_plain")
 
 
 #: le petit mot qui ouvre une salutation (« Heeey ~ », « Yooo »), jusqu'à la première ponctuation

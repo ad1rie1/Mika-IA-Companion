@@ -7,12 +7,17 @@ source, les entrées d'un journal dans son fichier), applique ``timing.propagate
 ``travail/dates.yaml`` est la revue : ce qui reste sans date ou en plage large, par
 source, et les conflits. On y écrit une date à la main (``date: "mars 2009"``,
 ``"2009-03-12"``, ``"été 2009"``, ``"2008..2010"``) ; le passage suivant l'applique
-(origine ``manuel``) avant de propager. Ce que Claude Code saura dater par le contenu
-et les recoupements viendra ensuite (étape 2, origine ``contenu`` / ``recoupement``).
+(origine ``manuel``) avant de propager. Ce que Claude Code date par le contenu et les
+recoupements (``jumeau dater --claude``, l'outil MCP ``date_fixer``) suit le même chemin.
+
+Une date décidée est **gardée** dans la table ``decisions`` : elle revient à chaque passage, même
+après la relecture de sa source (qui remet les dates à ce que la source dit), et ne s'applique
+que là où elle dit plus que ce qui est déjà su — jamais une année ne remplace un jour.
 """
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,30 +55,43 @@ def parse_manual(text: str, tz: ZoneInfo) -> Temps | None:
     return find_date(text, tz, Origin.MANUAL)
 
 
+DOCUMENT, SOURCE = "date:document", "date:source"
+
+
+def remember_date(db: sqlite3.Connection, kind: str, ref: str, t: Temps) -> None:
+    """Garder une date décidée (``DOCUMENT`` : la clé d'un texte ; ``SOURCE`` : le chemin d'une source)."""
+    db.execute("INSERT INTO decisions (kind, ref, value) VALUES (?, ?, ?) "
+               "ON CONFLICT (kind, ref) DO UPDATE SET value = excluded.value", (kind, ref, json.dumps(t.as_row())))
+
+
 def apply_manual(corpus: Corpus, review_path: Path, tz: ZoneInfo) -> int:
-    if not review_path.is_file():
-        return 0
-    data = yaml.safe_load(review_path.read_text(encoding="utf-8")) or {}
-    n = 0
+    """Les dates écrites dans la revue deviennent des décisions ; toutes les décisions s'appliquent, là où elles
+    disent plus que ce qui est su. Rend le nombre d'éléments redatés."""
+    db = corpus.db
+    data = yaml.safe_load(review_path.read_text(encoding="utf-8")) or {} if review_path.is_file() else {}
     for entry in data.get("a_dater", []) or []:
         when = entry.get("date")
-        if not when:
-            continue
-        t = parse_manual(str(when), tz)
-        if t is None:
-            continue
-        table = "documents" if entry.get("document") else "messages"
-        if table == "documents":
-            rows = corpus.db.execute("SELECT id FROM documents WHERE key = ?", (entry["document"],)).fetchall()
+        t = parse_manual(str(when), tz) if when else None
+        if t is not None:
+            kind, ref = (DOCUMENT, entry["document"]) if entry.get("document") else (SOURCE, entry.get("source", ""))
+            remember_date(db, kind, str(ref), t)
+    n = 0
+    for d in db.execute("SELECT kind, ref, value FROM decisions WHERE kind IN (?, ?)", (DOCUMENT, SOURCE)).fetchall():
+        t = Temps.from_row(*json.loads(d["value"]))
+        if d["kind"] == DOCUMENT:
+            table, rows = "documents", db.execute("SELECT * FROM documents WHERE key = ?", (d["ref"],)).fetchall()
         else:
-            rows = corpus.db.execute(
-                "SELECT m.id FROM messages m JOIN sources s ON s.id = m.source WHERE s.path = ? AND m.t_precision "
-                "NOT IN ('exacte')", (entry.get("source", ""),)).fetchall()
+            table, rows = "messages", db.execute(
+                "SELECT m.* FROM messages m JOIN sources s ON s.id = m.source WHERE s.path = ? AND m.t_precision "
+                "NOT IN ('exacte')", (d["ref"],)).fetchall()
         for r in rows:
-            corpus.db.execute(f"UPDATE {table} SET t_start = ?, t_end = ?, t_point = ?, t_precision = ?, "  # noqa: S608
-                              "t_origin = ? WHERE id = ?", (*t.as_row(), r["id"]))
+            current = corpus.temps_of(r)
+            if current.known and RANK[current.precision] <= RANK[t.precision]:
+                continue  # déjà aussi précis : une année ne remplace pas un jour
+            db.execute(f"UPDATE {table} SET t_start = ?, t_end = ?, t_point = ?, t_precision = ?, "  # noqa: S608
+                       "t_origin = ? WHERE id = ?", (*t.as_row(), r["id"]))
             n += 1
-    corpus.db.commit()
+    db.commit()
     return n
 
 

@@ -19,65 +19,68 @@ from mika.faculties.affect.physics import HOSTILE
 from mika.kernel.clock import HOUR, MINUTE
 from mika.vocab import affect as A
 from mika.vocab.affect import FR, Emotion, intensity_word, partitive
+from mika.vocab.phrasebook import phrase
 
-#: Ce qu'elle se dit de la cause d'une humeur, par code (``Mark.cause``).
-#: Générique : la section se montre à n'importe qui.
+#: La cause d'une humeur, par code (``Mark.cause``) → sa phrase dans sa voix (``affect.cause.…``). Générique : la
+#: section se montre à n'importe qui. Deux codes peuvent dire la même chose (une seule phrase).
 CAUSES: Mapping[str, str] = MappingProxyType({
-    "retour": "Ça vient du retour de quelqu'un qui t'avait manqué.",
-    "réponse": "Ça vient d'une réponse que tu attendais.",
-    "attente comblée": "Ça vient d'une attente enfin comblée.",
-    "digestion": "La nuit a apaisé des choses.",
-    "promesse non tenue": "Ça vient d'une promesse que tu n'as pas tenue à temps.",
-    "sans réponse": "Ça vient d'un message resté sans réponse.",
-    "abouti": "Ça vient de quelque chose que tu as mené à bout.",
-    "bloquée": "Ça vient de quelque chose sur quoi tu bloques.",
-    "abandon": "Ça vient de quelque chose que tu as laissé tomber.",
-    "objectif de projet abouti": "Ça vient d'un objectif de projet que tu as atteint.",
-    "objectif de projet bloqué": "Ça vient d'un objectif de projet qui bloque.",
-    "surprise": "Ça vient de quelqu'un qui t'a surprise.",
-    "inquiétude": "Tu t'inquiètes pour quelqu'un.",
-    "rêve": "Ça vient de ton rêve de cette nuit.",
-    "lonely": "Personne ne t'a parlé depuis un moment.",
-    "bored": "Il ne se passe pas grand-chose.",
-    "elle y repense": "Ça vient d'une pensée qui te revient.",
-    "exchange": "Ça vient de quelque chose qu'on t'a dit.",
-    "revision": "Ça vient de quelque chose que tu croyais, et qui n'est plus vrai.",
-    "missing": "Ça vient de quelqu'un qui te manque.",
-    "concern": "Tu t'inquiètes pour quelqu'un.",
-    "promise": "Ça vient d'une promesse à tenir.",
-    "blocked": "Ça vient de quelque chose sur quoi tu bloques.",
-    "signal": "Ça vient de quelque chose que tu as remarqué.",
-    "email": "Ça vient d'un mail.",
-    "rss": "Ça vient de quelque chose que tu as lu.",
-    "camera": "Ça vient de quelque chose que tu as vu.",
-    "compagnie": "Quelqu'un est venu te parler après un moment creux, et ça te fait du bien.",
-    "une rêverie écrite": "Ça vient d'un moment où tu as laissé ton esprit vagabonder.",
+    "retour": "came_back",
+    "réponse": "answered",
+    "attente comblée": "awaited",
+    "digestion": "digestion",
+    "promesse non tenue": "broken_promise",
+    "sans réponse": "unanswered",
+    "abouti": "achieved",
+    "bloquée": "stuck",
+    "abandon": "gave_up",
+    "objectif de projet abouti": "objective_achieved",
+    "objectif de projet bloqué": "objective_stuck",
+    "surprise": "surprised",
+    "inquiétude": "worried",
+    "rêve": "dream",
+    "lonely": "lonely",
+    "bored": "bored",
+    "elle y repense": "thought_back",
+    "exchange": "exchange",
+    "revision": "revision",
+    "missing": "missing",
+    "concern": "worried",
+    "promise": "promise",
+    "blocked": "stuck",
+    "signal": "signal",
+    "email": "email",
+    "rss": "rss",
+    "camera": "camera",
+    "compagnie": "company",
+    "une rêverie écrite": "daydream",
 })
 #: Une cause qui est un état, dite quand cet état a pris fin (quelqu'un est venu te parler depuis) : au passé, et
-#: ce qui en reste au présent — jamais « personne ne t'a parlé » en pleine conversation (HUM-5).
-CAUSES_OVER: Mapping[str, str] = MappingProxyType({
-    "lonely": "Tu t'es sentie seule une partie de la journée ; il t'en reste un peu.",
-    "bored": "Tu t'es un peu ennuyée tout à l'heure ; il t'en reste un peu.",
-})
+#: ce qui en reste au présent — jamais « personne ne t'a parlé » en pleine conversation (HUM-5) ; ``affect.cause_over``.
+CAUSES_OVER = frozenset({"lonely", "bored"})
 #: Combien de temps elle se dit que quelqu'un s'est excusé (la posture), après.
 APOLOGY_SAID_US = 6 * HOUR
-UNKNOWN_CAUSE = "sans trop savoir pourquoi"
 #: En deçà, sa dernière balise date d'« à l'instant ».
 JUST_NOW_US = 3 * MINUTE
+
+
+def unknown_cause() -> str:
+    """« sans trop savoir pourquoi » (``affect.cause.unknown``)."""
+    return phrase("affect.cause.unknown")
 
 
 def cause_line(cause: str, person: str = "", current: str = "", ended: bool = False) -> str:
     """La cause, dite sans nommer personne : « votre échange » seulement si c'est
     avec la personne à qui elle parle maintenant ; un état qui a pris fin, au passé."""
     if ended and cause in CAUSES_OVER:
-        return CAUSES_OVER[cause]
+        return phrase(f"affect.cause_over.{cause}")
     if cause == "talk":
         if not person:
             return ""
-        return "Ça vient de votre échange." if person == current else "Ça vient d'une autre conversation, tout à l'heure."
+        return phrase("affect.cause.talk_here") if person == current else phrase("affect.cause.talk_elsewhere")
     if cause.startswith("forge:"):
-        return "Ça vient d'une de tes apps."
-    return CAUSES.get(cause, "")
+        return phrase("affect.cause.forge")
+    key = CAUSES.get(cause)
+    return phrase(f"affect.cause.{key}") if key else ""
 
 
 def _under(parts: list[tuple[Emotion, float]], main: Emotion, *, ratio: float = 0.0, floor: float = 0.0) -> str:
@@ -85,7 +88,7 @@ def _under(parts: list[tuple[Emotion, float]], main: Emotion, *, ratio: float = 
     others = [(e, w) for e, w in parts if e is not main]
     if not parts or not others or others[0][1] < floor or others[0][1] < ratio * parts[0][1]:
         return ""
-    return f" Et en dessous, il y a un peu {partitive(others[0][0])}."
+    return " " + phrase("affect.under", what=partitive(others[0][0]))
 
 
 def mood(m: MoodReading, p: AffectParams, current: str = "") -> str:
@@ -96,34 +99,35 @@ def mood(m: MoodReading, p: AffectParams, current: str = "") -> str:
             # le reste d'une journée : trop peu pour la changer, assez pour la colorer
             residue = m.fond_emotion
             if residue is not default and residue is not Emotion.NEUTRAL:
-                return (f"Ton humeur générale est à peu près comme d'habitude ({FR[default]}), avec un petit reste "
-                        f"{partitive(residue)} de tout à l'heure.")
-        return f"Ton humeur générale est {FR[default]}, comme d'habitude."
+                return phrase("affect.mood_line.residue", usual=FR[default], what=partitive(residue))
+        return phrase("affect.mood_line.usual", usual=FR[default])
     word, adj = intensity_word(m.felt_intensity), FR[m.felt]
     cause = cause_line(m.cause, m.cause_person, current, m.cause_over)
     if m.felt is default:
         if m.felt_intensity >= p.marked_intensity:
-            base = f"Ton humeur générale est {adj}, nettement plus que d'habitude."
+            base = phrase("affect.mood_line.marked", feeling=adj)
         else:
-            base = f"Ton humeur générale est {word} {adj}, dans ta pente naturelle."
+            base = phrase("affect.mood_line.slope", intensity=word, feeling=adj)
         cause = ""  # sa pente naturelle n'a pas besoin de cause
     elif cause:
-        base = f"Ton humeur générale en ce moment est {word} {adj}, alors que normalement tu es plutôt {FR[default]}."
+        base = phrase("affect.mood_line.caused", intensity=word, feeling=adj, usual=FR[default])
     else:
-        base = (f"Ton humeur générale en ce moment est {word} {adj}, {UNKNOWN_CAUSE} — normalement tu es plutôt "
-                f"{FR[default]}.")
+        base = phrase("affect.mood_line.unexplained", intensity=word, feeling=adj, unknown=unknown_cause(),
+                      usual=FR[default])
     lingering = A.norm(m.fond) >= 0.6 * gap
-    tail = " Ce n'est pas l'émotion d'un instant : ça traîne depuis un moment." if lingering else ""
+    tail = " " + phrase("affect.mood_line.lingering") if lingering else ""
     under = _under(A.blend(m.position, top_k=2, home=m.home), m.felt, ratio=0.4)
     return base + (f" {cause}" if cause else "") + tail + under
 
 
 def _who(name: str) -> str:
-    return f"« {name} »" if name else "cette personne"
+    return f"« {name} »" if name else phrase("expression.person.unnamed")
 
 
 def _tenderness(regard: float) -> str:
-    return "beaucoup de tendresse" if regard >= 0.5 else "de la tendresse" if regard >= 0.25 else "de la sympathie"
+    if regard >= 0.5:
+        return phrase("affect.stance.tenderness.much")
+    return phrase("affect.stance.tenderness.some") if regard >= 0.25 else phrase("affect.stance.tenderness.little")
 
 
 def fond(s: StanceReading, p: AffectParams, name: str = "") -> str:
@@ -134,13 +138,18 @@ def fond(s: StanceReading, p: AffectParams, name: str = "") -> str:
     if s.anchor is not None:
         label, intensity = A.felt(s.anchor, s.reference)
         if intensity >= p.fond_min and label in HOSTILE:
-            line = f"Envers {who}, au fond, tu restes plutôt {FR[label]} : c'est ce que vos échanges ont installé."
-            return line + (f" Mais tu tiens à {who}." if attached else "")
+            line = phrase("affect.stance.hostile", who=who, feeling=FR[label])
+            return line + (" " + phrase("affect.stance.but_attached", who=who) if attached else "")
         if intensity >= p.fond_min and A.valence(label) > 0 and s.regard > 0:
             if attached:
-                return f"Tu tiens à {who}, et vos échanges ont installé {_tenderness(s.regard)}."
-            return f"Envers {who}, vos échanges ont installé {_tenderness(s.regard)}."
-    return f"Tu tiens à {who}." if attached else ""
+                return phrase("affect.stance.attached_warm", who=who, tenderness=_tenderness(s.regard))
+            return phrase("affect.stance.warm", who=who, tenderness=_tenderness(s.regard))
+    return phrase("affect.stance.attached", who=who) if attached else ""
+
+
+def _capital(text: str) -> str:
+    """En tête de phrase : la première lettre en majuscule (« À l'instant », « Cette personne »)."""
+    return text[:1].upper() + text[1:]
 
 
 def stance(s: StanceReading, p: AffectParams, *, name: str = "", now: int = 0) -> str:
@@ -154,20 +163,23 @@ def stance(s: StanceReading, p: AffectParams, *, name: str = "", now: int = 0) -
     shown: Emotion | None = None
     if s.declared is not None:
         shown = s.declared.emotion
-        how = "en lui répondant" if s.declared_reply else "en lui écrivant"
-        when = "À l'instant" if now and now - s.declared_at < JUST_NOW_US else "Tout à l'heure"
+        how = phrase("affect.stance.replying") if s.declared_reply else phrase("affect.stance.writing")
+        when = phrase("affect.stance.just_now") if now and now - s.declared_at < JUST_NOW_US else \
+            phrase("affect.stance.earlier")
         word = intensity_word(s.declared.intensity)
-        lines.append(f"{when}, {how}, tu étais {word} {FR[shown]}." + _under(under, shown, floor=0.25))
+        lines.append(phrase("affect.stance.declared", when=_capital(when), how=how, intensity=word, feeling=FR[shown])
+                     + _under(under, shown, floor=0.25))
     elif not s.at_rest and s.felt_intensity >= 0.1 and s.felt is not Emotion.NEUTRAL:
         shown = s.felt
-        lines.append(f"Avec {who}, en ce moment, tu te sens {intensity_word(s.felt_intensity)} {FR[shown]}."
-                     + _under(under, shown, ratio=0.4))
+        lines.append(phrase("affect.stance.felt", who=who, intensity=intensity_word(s.felt_intensity),
+                            feeling=FR[shown]) + _under(under, shown, ratio=0.4))
     if s.anchored and shown is not None:
-        lasting = " : ça ne passera pas en deux minutes." if s.lasting else "."
-        lines.append(f"Ça fait plusieurs échanges de suite que tu te sens {FR[shown]} avec {who}{lasting}")
+        lines.append(phrase("affect.stance.lasting", feeling=FR[shown], who=who) if s.lasting else
+                     phrase("affect.stance.repeated", feeling=FR[shown], who=who))
     if s.apologized_at and now and now - s.apologized_at < APOLOGY_SAID_US:
-        when = "à l'instant" if now - s.apologized_at < JUST_NOW_US else "tout à l'heure"
-        lines.append(f"{who[:1].upper()}{who[1:]} t'a présenté ses excuses {when}.")
+        when = phrase("affect.stance.just_now") if now - s.apologized_at < JUST_NOW_US else \
+            phrase("affect.stance.earlier")
+        lines.append(phrase("affect.stance.apologized", who=_capital(who), when=when))
     installed = fond(s, p, name)
     if installed:
         lines.append(installed)

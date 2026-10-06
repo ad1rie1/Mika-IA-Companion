@@ -12,7 +12,7 @@ ils sont lus dans le code, par l'AST, là où une modulation les pose — direct
 (``Modulation(veto=c.GRUDGE)``) ou par une fonction du même module qui rend le veto
 (``veto = harassing(…)`` : ce que ``harassing`` peut rendre).
 
-Le murmure (``expression.WHY``) dit en clair ce qui la pousse à écrire : chaque
+Le murmure (``expression.why()``, ``expression.murmur.why`` dans sa voix) dit en clair ce qui la pousse à écrire : chaque
 raison d'une initiative y a sa phrase, sauf celles qui ne sont pas un motif.
 """
 
@@ -26,7 +26,7 @@ from mika.app import console
 from mika.app.composition import arbitration, faculties
 from mika.contracts import agency as agency_c
 from mika.contracts import social as social_c
-from mika.faculties.expression import WHY
+from mika.faculties.expression import why
 from mika.inspector.names import EVENTS as CONSOLE_EVENTS
 from mika.kernel.registry import Registry
 from mika.runtime.state import RUNTIME
@@ -148,4 +148,5 @@ def test_the_murmur_says_why_for_every_motive_of_an_initiative():
     pour un projet)."""
     motives = _declared()["initiative_reasons"] - NOT_A_MOTIVE
     assert motives, "aucune raison d'initiative lue"
-    assert not sorted(motives - set(WHY)), f"raisons sans phrase dans expression.WHY : {sorted(motives - set(WHY))}"
+    said = set(why())
+    assert not sorted(motives - said), f"raisons sans phrase dans expression.murmur.why : {sorted(motives - said)}"

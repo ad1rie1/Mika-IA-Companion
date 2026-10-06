@@ -15,14 +15,22 @@ from dataclasses import dataclass
 
 from mika.contracts import world as w
 from mika.kernel.clock import US
+from mika.vocab.phrasebook import family, phrase
 
 Actors = Mapping[str, w.ActorState]
 Objects = Mapping[str, w.ObjectState]
 
-POSTURE_FR = {w.Posture.STAND: "debout", w.Posture.SIT: "assise", w.Posture.LIE: "allongée"}
+
+
+def posture_words(posture: w.Posture) -> str:
+    """Sa posture en mots : « debout », « assise », « allongée » (``world.posture``)."""
+    return family("world.posture")[posture.value]
+
+
+#: sa posture en mots, pour qui la lit d'ici (la console)
+POSTURE_FR = {p: posture_words(p) for p in w.Posture}
 #: les actions de base qu'on fait avec les mains, sur un objet (s'asseoir ou s'allonger passe par un lieu)
 HAND_ACTIONS = frozenset({w.Builtin.TAKE, w.Builtin.PUT, w.Builtin.DROP, w.Builtin.GIVE})
-TAKE_FR, PUT_FR, DROP_FR = "prendre", "poser", "lâcher"
 #: au-delà, un trajet est trop long pour une seule action
 MAX_STEPS = 8
 
@@ -297,7 +305,7 @@ def route(defn: w.WorldDef, t: Timing, room: str, place: str | None, to: w.Place
                 prev[x.to] = (r, x)
                 queue.append(x.to)
     if to.room not in prev:
-        raise Refused(w.Refusal.UNREACHABLE, f"Il n'y a pas de passage jusqu'à {to.label}.")
+        raise Refused(w.Refusal.UNREACHABLE, phrase("world.refusals.no_path", place=to.label))
     hops: list[w.Exit] = []
     r = to.room
     while (link := prev[r]) is not None:
@@ -326,15 +334,16 @@ def plan_go(defn: w.WorldDef, t: Timing, actors: Actors, actor: str, place_id: s
     me = actors[actor]
     place = defn.place(place_id)
     if place is None:
-        raise Refused(w.Refusal.UNKNOWN, f"« {place_id} » n'est pas un endroit d'ici.")
+        raise Refused(w.Refusal.UNKNOWN, phrase("world.refusals.not_a_place", place=place_id))
     want = posture or default_posture(place)
     if want not in w.POSTURES[place.place_kind]:
-        raise Refused(w.Refusal.WRONG_POSTURE, f"On ne peut pas être {POSTURE_FR[want]} {place.label}.")
+        raise Refused(w.Refusal.WRONG_POSTURE, phrase("world.refusals.wrong_posture", posture=posture_words(want),
+                                                      place=place.label))
     here = me.place == place.id and me.room == place.room
     if here and me.posture == want:
         return []
     if not here and _occupants(actors, place.id, actor) >= place.capacity:
-        raise Refused(w.Refusal.OCCUPIED, f"Il n'y a plus de place {place.label}.")
+        raise Refused(w.Refusal.OCCUPIED, phrase("world.refusals.no_room_at", place=place.label))
     steps: list[w.Step] = []
     if not here:
         if me.posture is not w.Posture.STAND:
@@ -343,7 +352,7 @@ def plan_go(defn: w.WorldDef, t: Timing, actors: Actors, actor: str, place_id: s
     if want is not w.Posture.STAND or (here and me.posture is not w.Posture.STAND):
         steps.append(w.Step(kind="posture", posture=want, duration_us=t.posture_us(want)))
     if len(steps) > MAX_STEPS:
-        raise Refused(w.Refusal.UNREACHABLE, f"C'est trop loin d'ici pour y aller d'un coup : {place.label}.")
+        raise Refused(w.Refusal.UNREACHABLE, phrase("world.refusals.too_far_go", place=place.label))
     return steps
 
 
@@ -383,9 +392,9 @@ def actions_of(defn: w.WorldDef, objects: Objects, me: w.ActorState, obj: str,
     held_by_me = isinstance(cur.location, w.Held) and cur.location.actor == me.id
     if a.size is not w.Size.FIXED:
         if held_by_me:
-            out += [(w.Builtin.PUT.value, PUT_FR), (w.Builtin.DROP.value, DROP_FR)]
+            out += [(w.Builtin.PUT.value, phrase("world.hands.put")), (w.Builtin.DROP.value, phrase("world.hands.drop"))]
         elif not isinstance(cur.location, w.Held):
-            out.append((w.Builtin.TAKE.value, TAKE_FR))
+            out.append((w.Builtin.TAKE.value, phrase("world.hands.take")))
     for aff in a.affordances:
         if aff.requires_state and cur.state not in aff.requires_state:
             continue
@@ -401,29 +410,29 @@ def _target_location(defn: w.WorldDef, actors: Actors, objects: Objects, obj: st
     lieu. Rend l'emplacement et d'où on l'atteint."""
     what = label_of(defn, obj)
     if not target:
-        raise Refused(w.Refusal.UNKNOWN, f"Où poser {what} ? Dis sur quoi, dans quoi, ou à quel endroit.")
+        raise Refused(w.Refusal.UNKNOWN, phrase("world.refusals.put_where", what=what))
     place = defn.place(target)
     if place is not None:
         return w.InRoom(room=place.room, near=place.id), (place.room, place.id)
     support = defn.object(target)
     a = defn.archetype(support.archetype) if support is not None else None
     if support is None or a is None or target == obj:
-        raise Refused(w.Refusal.UNKNOWN, f"« {target} » n'est ni un endroit ni un meuble d'ici.")
+        raise Refused(w.Refusal.UNKNOWN, phrase("world.refusals.not_a_support", target=target))
     anchor = anchor_of(defn, actors, objects, target)
     if anchor is None:
-        raise Refused(w.Refusal.UNKNOWN, f"On ne trouve plus {label_of(defn, target)}.")
+        raise Refused(w.Refusal.UNKNOWN, phrase("world.refusals.lost", what=label_of(defn, target)))
     if a.surface_slots:
         used = {o.location.slot for o in objects.values() if isinstance(o.location, w.On) and o.location.object == target}
         free = next((i for i in range(a.surface_slots) if i not in used), None)
         if free is None:
-            raise Refused(w.Refusal.OCCUPIED, f"Il n'y a plus de place sur {label_of(defn, target)}.")
+            raise Refused(w.Refusal.OCCUPIED, phrase("world.refusals.no_room_on", what=label_of(defn, target)))
         return w.On(object=target, slot=free), anchor
     if a.container_slots:
         inside = sum(1 for o in objects.values() if isinstance(o.location, w.In) and o.location.object == target)
         if inside >= a.container_slots:
-            raise Refused(w.Refusal.OCCUPIED, f"{label_of(defn, target)} est plein.")
+            raise Refused(w.Refusal.OCCUPIED, phrase("world.refusals.full", what=label_of(defn, target)))
         return w.In(object=target), anchor
-    raise Refused(w.Refusal.WRONG_STATE, f"On ne pose rien sur {label_of(defn, target)}.")
+    raise Refused(w.Refusal.WRONG_STATE, phrase("world.refusals.not_a_surface", what=label_of(defn, target)))
 
 
 def _approach(defn: w.WorldDef, t: Timing, actors: Actors, actor: str, anchor: tuple[str, str | None],
@@ -438,7 +447,7 @@ def _approach(defn: w.WorldDef, t: Timing, actors: Actors, actor: str, anchor: t
         entry = next((p for p in defn.tagged("spawn") if p.room == room), None) or next(
             (p for p in defn.places if p.room == room), None)
         if entry is None:
-            raise Refused(w.Refusal.UNREACHABLE, "Il n'y a pas d'endroit où se tenir dans cette pièce.")
+            raise Refused(w.Refusal.UNREACHABLE, phrase("world.refusals.nowhere_to_stand"))
         return plan_go(defn, t, actors, actor, entry.id, w.Posture.STAND)
     place = defn.place(near)
     assert place is not None
@@ -456,24 +465,23 @@ def plan_interact(defn: w.WorldDef, t: Timing, actors: Actors, objects: Objects,
     cur = objects.get(obj)
     a = defn.archetype(o.archetype) if o is not None else None
     if o is None or a is None or cur is None:
-        raise Refused(w.Refusal.UNKNOWN, f"« {obj} » n'est pas une chose d'ici.")
+        raise Refused(w.Refusal.UNKNOWN, phrase("world.refusals.not_a_thing", object=obj))
     what = label_of(defn, obj)
     held_by_me = isinstance(cur.location, w.Held) and cur.location.actor == actor
     anchor = anchor_of(defn, actors, objects, obj)
     if anchor is None:
-        raise Refused(w.Refusal.UNKNOWN, f"On ne trouve plus {what}.")
+        raise Refused(w.Refusal.UNKNOWN, phrase("world.refusals.lost", what=what))
     if action in {b.value for b in w.Builtin} and action not in HAND_ACTIONS:
-        raise Refused(w.Refusal.UNKNOWN, "S'asseoir, s'allonger ou se relever, c'est aller à un endroit (go_to, avec "
-                                         "la posture).")
+        raise Refused(w.Refusal.UNKNOWN, phrase("world.refusals.posture_is_a_place"))
     if action == w.Builtin.GIVE:
-        raise Refused(w.Refusal.UNKNOWN, f"Il n'y a personne ici à qui donner {what}.")
+        raise Refused(w.Refusal.UNKNOWN, phrase("world.refusals.nobody_to_give", what=what))
     if action == w.Builtin.TAKE:
         _check_take(defn, objects, me, obj, a)
         return [*_approach(defn, t, actors, actor, anchor, False),
                 w.Step(kind="act", object=obj, action=action, duration_us=t.hand_us)]
     if action in (w.Builtin.PUT, w.Builtin.DROP):
         if not held_by_me:
-            raise Refused(w.Refusal.NOT_HOLDING, f"Tu ne tiens pas {what}.")
+            raise Refused(w.Refusal.NOT_HOLDING, phrase("world.refusals.not_holding", what=what))
         if action == w.Builtin.DROP:
             return [w.Step(kind="act", object=obj, action=action,
                            target=w.InRoom(room=me.room, near=me.place), duration_us=t.hand_us)]
@@ -483,12 +491,13 @@ def plan_interact(defn: w.WorldDef, t: Timing, actors: Actors, objects: Objects,
     aff = next((x for x in a.affordances if x.id == action), None)
     if aff is None:
         can = ", ".join(f"« {i} » ({label})" for i, label in actions_of(defn, objects, me, obj, now)) or \
-            "rien, pour l'instant"
-        raise Refused(w.Refusal.UNKNOWN, f"On ne peut pas faire « {action} » avec {what}. Ce qui se peut : {can}.")
+            phrase("world.refusals.nothing_possible")
+        raise Refused(w.Refusal.UNKNOWN, phrase("world.refusals.cannot_do", what=what, can=can, action=action))
     if aff.requires_state and cur.state not in aff.requires_state:
-        raise Refused(w.Refusal.WRONG_STATE, f"{what} est {state_label(defn, obj, cur.state)}.")
+        raise Refused(w.Refusal.WRONG_STATE, phrase("world.refusals.in_state", what=what,
+                                                    state=state_label(defn, obj, cur.state)))
     if aff.effect is w.Effect.ACTIVITY and _doing(me, aff.activity, obj, now):
-        raise Refused(w.Refusal.WRONG_STATE, f"Tu es déjà en train de {aff.label}.")
+        raise Refused(w.Refusal.WRONG_STATE, phrase("world.refusals.already_doing", activity=aff.label))
     steps: list[w.Step] = []
     lasting = aff.effect is w.Effect.ACTIVITY
     if aff.held and not held_by_me:
@@ -508,7 +517,7 @@ def plan_interact(defn: w.WorldDef, t: Timing, actors: Actors, objects: Objects,
     duration = t.settle_us if lasting else int((aff.duration_s or 0.0) * US)
     steps.append(w.Step(kind="act", object=obj, action=aff.id, duration_us=duration))
     if len(steps) > MAX_STEPS:
-        raise Refused(w.Refusal.UNREACHABLE, f"C'est trop loin d'ici pour {aff.label} {what} d'un coup.")
+        raise Refused(w.Refusal.UNREACHABLE, phrase("world.refusals.too_far_act", action=aff.label, what=what))
     return steps
 
 
@@ -516,13 +525,13 @@ def _check_take(defn: w.WorldDef, objects: Objects, me: w.ActorState, obj: str, 
     what = label_of(defn, obj)
     cur = objects[obj]
     if a.size is w.Size.FIXED:
-        raise Refused(w.Refusal.NOT_PORTABLE, f"{what} ne se porte pas.")
+        raise Refused(w.Refusal.NOT_PORTABLE, phrase("world.refusals.not_portable", what=what))
     if isinstance(cur.location, w.Held):
         if cur.location.actor == me.id:
-            raise Refused(w.Refusal.WRONG_STATE, f"Tu tiens déjà {what}.")
-        raise Refused(w.Refusal.HELD_BY_OTHER, f"Quelqu'un tient {what} : on demande, on ne prend pas.")
+            raise Refused(w.Refusal.WRONG_STATE, phrase("world.refusals.already_holding", what=what))
+        raise Refused(w.Refusal.HELD_BY_OTHER, phrase("world.refusals.held_by_other", what=what))
     if _hands_free(defn, objects, me) < (2 if a.size is w.Size.ARMS else 1):
-        raise Refused(w.Refusal.HANDS_FULL, "Tes mains sont prises : pose d'abord ce que tu tiens.")
+        raise Refused(w.Refusal.HANDS_FULL, phrase("world.refusals.hands_full"))
 
 
 def intent_of(actor: str, steps: list[w.Step], started: int, t: Timing, cause: w.Cause, ident: str) -> w.Intent:
@@ -581,32 +590,33 @@ def _act(defn: w.WorldDef, actors: Actors, objects: Objects, actor: str, step: w
     cur = objects.get(obj)
     a = defn.archetype(o.archetype) if o is not None else None
     if o is None or a is None or cur is None:
-        raise Refused(w.Refusal.UNKNOWN, f"« {obj} » n'est plus là.")
+        raise Refused(w.Refusal.UNKNOWN, phrase("world.refusals.gone", object=obj))
     held_by_me = isinstance(cur.location, w.Held) and cur.location.actor == actor
     anchor = anchor_of(defn, actors, objects, obj)
     within = held_by_me or (anchor is not None and anchor[0] == me.room and anchor[1] in (None, me.place))
     if action == w.Builtin.TAKE:
         _check_take(defn, objects, me, obj, a)
         if not within:
-            raise Refused(w.Refusal.UNREACHABLE, f"{label_of(defn, obj)} n'est plus à portée.")
+            raise Refused(w.Refusal.UNREACHABLE, phrase("world.refusals.out_of_reach", what=label_of(defn, obj)))
         return [w.ObjectMoved(object=obj, to=w.Held(actor=actor, hand=_hand_for(defn, objects, me, a.size)))]
     if action in (w.Builtin.PUT, w.Builtin.DROP):
         if not held_by_me or step.target is None:
-            raise Refused(w.Refusal.NOT_HOLDING, f"Tu ne tiens plus {label_of(defn, obj)}.")
+            raise Refused(w.Refusal.NOT_HOLDING, phrase("world.refusals.no_longer_holding", what=label_of(defn, obj)))
         if isinstance(step.target, w.On) and any(
                 isinstance(x.location, w.On) and x.location.object == step.target.object
                 and x.location.slot == step.target.slot for x in objects.values()):
-            raise Refused(w.Refusal.OCCUPIED, "La place a été prise entre-temps.")
+            raise Refused(w.Refusal.OCCUPIED, phrase("world.refusals.taken_meanwhile"))
         return [w.ObjectMoved(object=obj, to=step.target)]
     aff = next((x for x in a.affordances if x.id == action), None)
     if aff is None:
-        raise Refused(w.Refusal.UNKNOWN, f"On ne peut pas faire « {action} » avec {label_of(defn, obj)}.")
+        raise Refused(w.Refusal.UNKNOWN, phrase("world.refusals.cannot", what=label_of(defn, obj), action=action))
     if not within:
-        raise Refused(w.Refusal.UNREACHABLE, f"{label_of(defn, obj)} n'est plus à portée.")
+        raise Refused(w.Refusal.UNREACHABLE, phrase("world.refusals.out_of_reach", what=label_of(defn, obj)))
     if aff.held and not held_by_me:
-        raise Refused(w.Refusal.NOT_HOLDING, f"Il faut tenir {label_of(defn, obj)}.")
+        raise Refused(w.Refusal.NOT_HOLDING, phrase("world.refusals.must_hold", what=label_of(defn, obj)))
     if aff.requires_state and cur.state not in aff.requires_state:
-        raise Refused(w.Refusal.WRONG_STATE, f"{label_of(defn, obj)} est {state_label(defn, obj, cur.state)}.")
+        raise Refused(w.Refusal.WRONG_STATE, phrase("world.refusals.in_state", what=label_of(defn, obj),
+                                                    state=state_label(defn, obj, cur.state)))
     out: list[w.StateChange] = []
     if aff.to_state is not None:
         out.append(w.ObjectSet(object=obj, state=aff.to_state))

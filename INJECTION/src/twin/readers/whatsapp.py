@@ -7,6 +7,10 @@ Formats rencontrés::
     [12/03/2019 14:05:33] Julie: Salut           (iPhone, souvent précédé d'un U+200E)
     3/12/19, 2:05 PM - Julie: Salut              (anglais : mois d'abord, heure à l'américaine)
 
+Sur iPhone, une ligne système porte un **auteur** (le nom du fil) suivi d'une marque
+invisible U+200E (« Julie: ‎Les messages sont chiffrés de bout en bout ») : c'est elle qui
+la distingue d'un vrai message — une pièce jointe la porte aussi, et reste un message.
+
 Les lignes sans date prolongent le message précédent. L'ordre jour/mois se déduit du
 fichier entier (un 13 en première position ⇒ jour d'abord). Les heures sont locales :
 le fuseau de la personne. Le nom du fichier nomme l'autre personne d'une discussion à
@@ -24,7 +28,10 @@ from twin.readers import ReadContext, head, read_text
 from twin.records import WHATSAPP, Attachment, Author, Conversation, Item, Message
 from twin.timing import Origin, Temps
 
-_INVISIBLE = dict.fromkeys(map(ord, "‎‏‪‫‬‭‮﻿"), None)
+_LRM = "\u200e"
+#: les marques de direction : retirées partout, sauf U+200E en tête d'un message (le signe d'une ligne système iOS)
+_INVISIBLE = dict.fromkeys(map(ord, "\u200f\u202a\u202b\u202c\u202d\u202e\ufeff"), None)
+_ALL_INVISIBLE = {**_INVISIBLE, ord(_LRM): None}
 _DATE = r"(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})"
 _TIME = r"(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s?([AaPp])\.?\s?[Mm]\.?)?"
 ANDROID = re.compile(rf"^{_DATE},?(?:\s+à)?\s+{_TIME}\s+[-–]\s+(.*)$")
@@ -59,6 +66,7 @@ def _chat_name(path: Path) -> str:
 
 
 def _parse_line(line: str) -> tuple[tuple[str, ...], str] | None:
+    line = line.lstrip(_LRM)
     m = IOS.match(line) or ANDROID.match(line)
     if not m:
         return None
@@ -68,12 +76,12 @@ def _parse_line(line: str) -> tuple[tuple[str, ...], str] | None:
 class WhatsAppReader:
     name = "whatsapp"
     label = "WhatsApp (export .txt)"
-    version = 1
+    version = 2
 
     def detect(self, path: Path) -> int:
         if path.suffix.lower() != ".txt":
             return 0
-        lines = [ln.translate(_INVISIBLE) for ln in head(path).splitlines()[:30]]
+        lines = [ln.translate(_ALL_INVISIBLE) for ln in head(path).splitlines()[:30]]
         hits = sum(1 for ln in lines if _parse_line(ln))
         if hits >= 3 or (hits >= 1 and _chat_name(path)):
             return 90
@@ -103,9 +111,11 @@ class WhatsAppReader:
             text = "\n".join(body)
             author, sep, msg = text.partition(": ")
             if not sep or "\n" in author or len(author) > 60:
-                rows.append((when, "", text))  # message système (chiffrement, groupe…)
+                rows.append((when, "", text.replace(_LRM, "")))  # message système (chiffrement, groupe…)
+            elif msg.startswith(_LRM) and not _MEDIA.match(msg.replace(_LRM, "").strip()):
+                rows.append((when, "", msg.replace(_LRM, "")))  # ligne système iOS, au nom du fil
             else:
-                rows.append((when, author.strip(), msg))
+                rows.append((when, author.replace(_LRM, "").strip(), msg.replace(_LRM, "")))
 
         authors = sorted({a for _, a, _ in rows if a})
         system_text = " ".join(t.lower() for _, a, t in rows if not a)

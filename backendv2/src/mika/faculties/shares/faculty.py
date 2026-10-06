@@ -35,6 +35,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.shares import MAX_SHARE_BYTES
 from mika.ports.store import Sql
+from mika.vocab.phrasebook import phrase
 
 MIB = 1024 * 1024
 #: le port des octets (``ports/shares.py``)
@@ -359,10 +360,6 @@ class Retention:
             await ctx.emit(*drafts)
 
 
-#: un texte relu et coupé le dit
-CUT_MARK = "\n… (la suite dans le fichier)"
-
-
 async def reread(port: Any, file: str, limit: int) -> str | None:
     """Ce qu'elle a écrit dans un fichier envoyé, au plus ``limit`` caractères (coupé, il le dit) ; ``None`` quand
     ses octets ne sont plus là (retiré, oublié)."""
@@ -371,7 +368,8 @@ async def reread(port: Any, file: str, limit: int) -> str | None:
     if data is None:
         return None
     text = data.decode("utf-8", errors="replace")
-    return text if len(text) <= limit else text[:limit].rstrip() + CUT_MARK
+    # un texte relu et coupé le dit
+    return text if len(text) <= limit else text[:limit].rstrip() + phrase("shares.sent.cut")
 
 
 @SHARES.effect(c.EXPIRED, deadline_s=60.0)

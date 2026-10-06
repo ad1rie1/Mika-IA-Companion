@@ -35,6 +35,7 @@ from mika.kernel.frame import Frame
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 #: Les élans qui s'espacent quand c'est toujours elle qui écrit.
@@ -74,8 +75,8 @@ class Notice:
         state: SocialState = ctx.state
         p = params(frame.env.params_of("social", frame.root))
         for person in _due(state, frame, p)[:3]:
-            name = frame.get(identity_c.IDENTITY(person)).name or "cette personne"
-            text = f"C'est presque toujours moi qui écris la première à {name}."
+            name = frame.get(identity_c.IDENTITY(person)).name or phrase("social.reciprocity.someone")
+            text = phrase("social.reciprocity.thought", name=name)
             her, _them, _ = reciprocity(state.contacts[person], p)
             await ctx.emit(c.ONE_SIDED.draft(
                 source="social", kind="one_sided", summary=Content.of(text, level=int(Sensitivity.PERSONAL)),

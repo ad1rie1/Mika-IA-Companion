@@ -27,7 +27,6 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
 from mika.faculties.projects.faculty import (
-    EFFECT_WORDS,
     ON_DEMAND,
     PROJECTS,
     Decision,
@@ -36,6 +35,7 @@ from mika.faculties.projects.faculty import (
     ProjectsState,
     answered,
     cadence,
+    effect_words,
     live,
     objective_of,
     params,
@@ -48,6 +48,7 @@ from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
 from mika.vocab.episodes import CONVERSATIONAL, Kind, project_of
+from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import hearable
 
 SHOWN = 4
@@ -161,67 +162,50 @@ def _recent(s: ProjectsState) -> list[Project]:
 
 def _who(frame: Frame, key: str | None) -> str:
     name = frame.get(identity_c.IDENTITY(key)).name if key else ""
-    return f"« {name} »" if name else "quelqu'un"
-
-
-KIND_WORDS = {c.ONCE: "ponctuel", c.CONSTANT: "constant"}
-STATUS_WORDS = {c.OPEN: "ouvert", c.DONE: "fait", c.BLOCKED: "bloqué", c.DROPPED: "retiré"}
+    return f"« {name} »" if name else phrase("expression.person.someone")
 
 
 def _objective_line(o: Objective, texts: Mapping[str, str], pm: Any, now: int) -> str:
-    text = texts.get(o.text_ref, "(oublié)")
+    text = texts.get(o.text_ref, phrase("projects.objective.forgotten"))
+    status = family("projects.objective.status").get(o.status, o.status)
     if o.kind == c.CONSTANT and o.status != c.OPEN:
-        state = f"constant, {STATUS_WORDS.get(o.status, o.status)} — mis de côté"
+        state = phrase("projects.objective.aside", status=status)
     elif o.kind == c.CONSTANT:
-        last = f", dernier passage il y a {ago(now - o.passed_at)}" if o.passed_at else ", jamais encore"
-        state = f"constant, revient toutes les {_every(cadence(o, pm))}{last}"
+        last = phrase("projects.objective.last_pass", ago=ago(now - o.passed_at)) if o.passed_at else \
+            phrase("projects.objective.never")
+        state = phrase("projects.objective.constant", every=_every(cadence(o, pm)), last=last)
     else:
-        state = f"ponctuel, {STATUS_WORDS.get(o.status, o.status)}"
-    return f"- n° {o.id} [{state}] {text}"
+        state = phrase("projects.objective.once", status=status)
+    return "- " + phrase("projects.objective.line", id=o.id, state=state, text=text)
 
 
 def ago(us: int) -> str:
     if us < HOUR:
-        return f"{max(1, us // MINUTE)} min"
+        return phrase("projects.duration.minutes", n=max(1, us // MINUTE))
     if us < 2 * DAY:
-        return f"{us // HOUR} h"
-    return f"{us // DAY} jours"
+        return phrase("projects.duration.hours", n=us // HOUR)
+    return phrase("projects.duration.days", n=us // DAY)
 
 
 def _every(us: int) -> str:
-    return f"{us // DAY} jours" if us >= 2 * DAY and us % DAY == 0 else f"{max(1, round(us / HOUR))} h"
+    return phrase("projects.duration.days", n=us // DAY) if us >= 2 * DAY and us % DAY == 0 else \
+        phrase("projects.duration.hours", n=max(1, round(us / HOUR)))
 
 
 def _decision_line(d: Decision, texts: Mapping[str, str]) -> str:
     why = texts.get(d.reason_ref, "") if d.reason_ref else ""
-    return f"- D{d.id} {texts.get(d.title_ref, '(oubliée)')} : {texts.get(d.choice_ref, '(oubliée)')}" + \
-        (f" (parce que : {why})" if why else "")
-
-
-MODE_WORDS = {
-    c.PERSONA: "C'est toi qui y travailles, avec ton humeur et tes avis : tu peux préférer une solution, le dire, "
-               "le consigner dans tes décisions (project_decide) — et dire quand quelque chose ne te plaît pas.",
-    c.PLAIN: "Mode impersonnel : un travail factuel et méthodique, sans avis personnel, sans émotion, sans "
-             "commentaire sur toi-même. Les décisions se justifient par des faits.",
-}
+    forgotten = phrase("projects.decision.forgotten")
+    return "- " + phrase("projects.decision.line", id=d.id, title=texts.get(d.title_ref, forgotten),
+                         choice=texts.get(d.choice_ref, forgotten)) + \
+        (phrase("projects.decision.because", why=why) if why else "")
 
 
 def run_rules(pm: Any) -> str:
     """Comment se conclut une exécution, et ce qu'elle a de tours et de temps (dits, pas devinés)."""
-    minutes = max(1, pm.run_programs_us // MINUTE)
-    return ("Une exécution est courte : une quinzaine d'allers-retours avec tes outils au plus, et tes programmes "
-            f"doivent avoir fini dans les {minutes} minutes. Garde ton dernier tour pour conclure en appelant l'outil "
-            "report_run : « continue » (tu reprendras), « done » (l'objectif visé est fait — pour un ponctuel, "
-            "seulement si quelque chose a été produit pour lui : un fichier écrit dans l'atelier, un brouillon, une "
-            "app ; lancer une commande, lire ou noter ne suffit pas ; pour un constant, ce passage est fait), "
-            "« blocked » (tu n'y arrives pas), ou « wait » (tu attends quelque chose). S'il te faut quelque chose "
-            "de qui t'a confié le projet (une réponse, un accès, une décision), dis-le dans « needs_you » : tu le lui "
-            "demanderas. Tes outils s'appellent, ils ne s'écrivent pas : écrire « report_run » dans ta réponse ne "
-            "fait rien. Une décision technique se consigne (project_decide) ; ne rouvre pas une décision en vigueur "
-            "sans la remplacer.")
+    return phrase("projects.run.rules", minutes=max(1, pm.run_programs_us // MINUTE))
 
 
-@PROJECTS.section("project", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=90, title="CE PROJET")
+@PROJECTS.section("project", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=90, title=phrase("projects.run.title"))
 def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = _project(s, frame)
     if got is None:
@@ -230,57 +214,58 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
     data = enrich.get("projects") or {}
     texts: Mapping[str, str] = data.get("texts") or {}
     pm = params(frame.env.params_of("projects", frame.root))
-    who = "un projet à toi" if p.authority == c.SELF else f"un projet que {_who(frame, p.address or p.owner)} t'a confié"
+    who = phrase("projects.run.own") if p.authority == c.SELF else \
+        phrase("projects.run.confided", who=_who(frame, p.address or p.owner))
     # le mode de cette exécution : celui du projet, ou celui d'un réveil par API qui le lance (ADR 0068)
     mode = c.PLAIN if frame.episode is not None and frame.episode.kind == Kind.JOB else c.PERSONA
-    lines = [f"Projet n° {p.id} : {texts.get(p.title_ref, '(titre oublié)')} — {who}.", MODE_WORDS[mode]]
+    lines = [phrase("projects.run.head", id=p.id, title=texts.get(p.title_ref, phrase("projects.run.no_title")),
+                    who=who), family("projects.run.mode")[mode]]
     if p.description_ref and texts.get(p.description_ref):
-        lines.append(f"Ce que tu veux en faire : {texts[p.description_ref]}" if p.authority == c.SELF
-                     else f"Le cadre (confié, tu ne le changes pas) : {texts[p.description_ref]}")
+        lines.append(phrase("projects.run.own_aim", text=texts[p.description_ref]) if p.authority == c.SELF
+                     else phrase("projects.run.confided_frame", text=texts[p.description_ref]))
     if target is not None:
-        lines.append("L'objectif de cette exécution :\n" + _objective_line(target, texts, pm, frame.now))
+        lines.append(phrase("projects.run.target") + "\n" + _objective_line(target, texts, pm, frame.now))
         if target.kind == c.CONSTANT:
-            lines.append("C'est un objectif constant : il ne finit jamais. Fais un passage utile (une amélioration "
-                         "concrète, vérifiée), puis conclus ce passage par « done ».")
+            lines.append(phrase("projects.run.constant"))
         if target.note_ref and texts.get(target.note_ref):
-            lines.append(f"Où tu en étais sur cet objectif : {texts[target.note_ref]}")
+            lines.append(phrase("projects.run.note", note=texts[target.note_ref]))
         if target.need_ref and texts.get(target.need_ref):
             # sa réponse est arrivée : elle l'a sous les yeux, elle n'a ni à l'attendre ni à la redemander
-            reply = " — sa réponse est arrivée (ses mots sont cités plus bas)" \
-                if (enrich.get("projects_answer") or {}).get("lines") else ""
-            lines.append(f"Ce que tu attendais de qui t'a confié le projet : {texts[target.need_ref]}{reply}")
+            reply = phrase("projects.run.reply") if (enrich.get("projects_answer") or {}).get("lines") else ""
+            lines.append(phrase("projects.run.awaited", need=texts[target.need_ref], reply=reply))
     others = [o for o in p.objectives if target is None or o.id != target.id]
     if others:
         # une exécution sans objectif visé (un réveil par API, ADR 0068) les voit tous
-        heading = "Les autres objectifs du projet" if target is not None else "Les objectifs du projet"
-        lines.append(f"{heading} :\n" + "\n".join(
+        heading = phrase("projects.run.others") if target is not None else phrase("projects.run.all")
+        lines.append(heading + "\n" + "\n".join(
             _objective_line(o, texts, pm, frame.now) for o in others if o.status != c.DROPPED))
     decisions = [d for d in p.decisions if d.status == c.IN_FORCE][-DECISIONS_SHOWN:]
     if decisions:
-        lines.append("Les décisions techniques en vigueur (relis-les avant de choisir) :\n"
+        lines.append(phrase("projects.run.decisions") + "\n"
                      + "\n".join(_decision_line(d, texts) for d in decisions))
     instructions = [texts[r] for r in p.instructions if texts.get(r)]
     if instructions:
-        lines.append("Consignes reçues (à suivre ; la plus récente prime) :\n"
+        lines.append(phrase("projects.run.instructions") + "\n"
                      + "\n".join(f"- {i}" for i in instructions[-INSTRUCTIONS_SHOWN:]))
     if p.summary_ref and texts.get(p.summary_ref):
-        lines.append(f"Le dernier compte rendu du projet : {texts[p.summary_ref]}")
+        lines.append(phrase("projects.run.summary", summary=texts[p.summary_ref]))
     notes = [texts[r] for r in p.notes if texts.get(r)]
     if notes:
-        lines.append("Ton carnet :\n" + "\n".join(f"- {n}" for n in notes[-3:]))
+        lines.append(phrase("projects.run.notebook") + "\n" + "\n".join(f"- {n}" for n in notes[-3:]))
     if p.deposits:
-        lines.append("Déposé dans l'atelier par l'opérateur :\n" + "\n".join(
-            f"- {name} ({size} o)" + (f" — {texts[note]}" if note and texts.get(note) else "")
+        lines.append(phrase("projects.run.deposits") + "\n" + "\n".join(
+            "- " + phrase("projects.run.deposit", name=name, size=size)
+            + (f" — {texts[note]}" if note and texts.get(note) else "")
             for name, size, note in p.deposits[-3:]))
     if p.effects:  # leur état seulement : ce que le réseau a rendu est cité à part
         refused = {f"#{n}": texts.get(ref) for n, ref in p.refusals}
-        lines.append("Ce que sont devenues tes demandes (ce qui sort de la machine) :\n" + "\n".join(
-            f"- {e}" + (f" : « {why[:200]} »" if (why := refused.get(e.split(' ', 1)[0])) else "")
+        lines.append(phrase("projects.run.effects") + "\n" + "\n".join(
+            f"- {e}" + (phrase("projects.run.refused_why", why=why[:200]) if (why := refused.get(e.split(' ', 1)[0]))
+                        else "")
             for e in p.effects[-3:]))
     if p.remote:
-        lines.append(f"Dépôt distant : {p.remote} (branche {p.branch})"
-                     + (" — envoyé après chaque exécution qui enregistre quelque chose." if p.auto_push else
-                        " — project_push propose un envoi."))
+        lines.append(phrase("projects.run.remote_auto", remote=p.remote, branch=p.branch) if p.auto_push else
+                     phrase("projects.run.remote_manual", remote=p.remote, branch=p.branch))
     if "workshop" in p.bundles:
         lines += _atelier_lines(enrich.get("projects_tree") or {})
     lines.append(run_rules(pm))
@@ -291,14 +276,13 @@ def _atelier_lines(tree: Mapping[str, Any]) -> list[str]:
     files = tree.get("tree")
     if files is None:
         why = tree.get("tree_error")
-        return [f"L'atelier (le dossier du projet) : illisible pour l'instant{f' ({why})' if why else ''} — "
-                "ws_list te le montrera."]
-    out = ["L'atelier (le dossier du projet, les plus proches de la racine d'abord) :\n"
-           + ("\n".join(f"- {f}" for f in files[:TREE_SHOWN]) if files else "- (vide pour l'instant)")]
+        return [phrase("projects.run.tree_unreadable_why", why=why) if why else phrase("projects.run.tree_unreadable")]
+    out = [phrase("projects.run.tree") + "\n"
+           + ("\n".join(f"- {f}" for f in files[:TREE_SHOWN]) if files else f"- {phrase('projects.run.tree_empty')}")]
     pending = tree.get("pending") or []
     if pending:
-        out.append("Pas encore enregistré (le travail d'une exécution interrompue, peut-être) : "
-                   + ", ".join(pending[:PENDING_SHOWN]) + (" …" if len(pending) > PENDING_SHOWN else ""))
+        out.append(phrase("projects.run.pending", files=", ".join(pending[:PENDING_SHOWN])
+                          + (" …" if len(pending) > PENDING_SHOWN else "")))
     return out
 
 
@@ -308,7 +292,7 @@ NETWORK_FLOOR = 600
 
 
 @PROJECTS.section("project_network", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=0, untrusted=True,
-                  floor_chars=NETWORK_FLOOR, title="CE QUE LE RÉSEAU A RENDU")
+                  floor_chars=NETWORK_FLOOR, title=phrase("projects.network.title"))
 def _network_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """La sortie de sa dernière commande réseau : une donnée venue d'Internet, citée, coupée en premier — jusqu'à
     son plancher (c'est ce sur quoi elle travaille)."""
@@ -316,8 +300,8 @@ def _network_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) 
     if got is None or not got[0].network_out:
         return None
     p = got[0]
-    return SectionBody(f"Ta dernière commande avec le réseau, il y a {ago(frame.now - p.network_out_at)} :\n"
-                       f"{p.network_out}", level=0, provenance=(f"project:{p.id}",))
+    return SectionBody(phrase("projects.network.head", ago=ago(frame.now - p.network_out_at)) + f"\n{p.network_out}",
+                       level=0, provenance=(f"project:{p.id}",))
 
 
 #: sa réponse est ce qui débloque l'objectif : citée (ses mots, une donnée), coupée tôt, jamais au point de disparaître
@@ -325,7 +309,7 @@ ANSWER_FLOOR = 500
 
 
 @PROJECTS.section("project_answer", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=5, untrusted=True,
-                  floor_chars=ANSWER_FLOOR, title="CE QU'ON T'A RÉPONDU", reads=[identity_c.IDENTITY])
+                  floor_chars=ANSWER_FLOOR, title=phrase("projects.answer.title"), reads=[identity_c.IDENTITY])
 def _answer_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce que la personne à qui elle a demandé un coup de main lui a écrit depuis, en privé : cité, pour que
     l'exécution reparte avec la réponse sous les yeux plutôt que de deviner ou de redemander."""
@@ -334,13 +318,13 @@ def _answer_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -
     if got is None or got[1] is None or not lines:
         return None
     p, o = got
-    body = (f"Ce que {_who(frame, o.asked_to)} t'a écrit depuis que tu lui as demandé un coup de main (il y a "
-            f"{ago(frame.now - o.asked_at)}) :\n" + "\n".join(f"- {line}" for line in lines))
+    body = (phrase("projects.answer.head", who=_who(frame, o.asked_to), ago=ago(frame.now - o.asked_at)) + "\n"
+            + "\n".join(f"- {line}" for line in lines))
     return SectionBody(body, level=written(p), provenance=(f"project:{p.id}",))
 
 
 @PROJECTS.section("project_share", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], trim_rank=90,
-                  title="CE QUE TU AS MENÉ À BOUT")
+                  title=phrase("projects.share.title"))
 def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce qu'elle a mené à bout dans un projet depuis son dernier récit — à la mesure du lien avec qui l'écoute ;
     ou, quand elle a besoin de qui le lui a confié, ce qui la bloque."""
@@ -359,36 +343,37 @@ def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     if aud is None or not hearable(p.about, written(p), person, aud.level, aud.witness_level, aud.private_ok) \
             or (share == MENTION and c.NEED not in reasons) or not title:
-        return SectionBody("quelque chose qui te tenait à cœur, dans un de tes projets", level=0)
+        return SectionBody(phrase("projects.share.something"), level=0)
     level = written(p) if any(a != person for a in p.about) else 0
     if c.NEED in reasons:
         need = store.get(o.need_ref, "") or store.get(o.result_ref, "")
-        state = "bloqué" if o.status == c.BLOCKED else "en attente"
-        body = f"Dans le projet « {title} », l'objectif « {objective or '…'} » est {state}."
+        state = phrase("projects.share.blocked") if o.status == c.BLOCKED else phrase("projects.share.waiting")
+        body = phrase("projects.share.need_head", title=title, objective=objective or "…", state=state)
         if need:
-            body += f"\nCe qu'il te faudrait : {need}"
-        return SectionBody(body, level=level, title="CE QUI TE BLOQUE", provenance=(f"project:{p.id}",))
+            body += "\n" + phrase("projects.share.need", need=need)
+        return SectionBody(body, level=level, title=phrase("projects.share.need_title"),
+                           provenance=(f"project:{p.id}",))
     pm = params(frame.env.params_of("projects", frame.root))
     told = [x for x in untold(p, frame.now, pm) if x.id != o.id] + [o]
     if len(told) > 1:  # un point : tout ce qu'elle a mené à bout depuis le précédent, le plus récent en dernier
-        lines = [f"Dans ton projet « {title} », tu as mené à bout :"]
+        lines = [phrase("projects.share.many", title=title)]
         if len(told) > TOLD_SHOWN:
-            lines.append(f"- … et {len(told) - TOLD_SHOWN} autre(s) avant")
+            lines.append("- " + phrase("projects.share.more", count=len(told) - TOLD_SHOWN))
         for x in told[-TOLD_SHOWN:]:
             result = store.get(x.result_ref, "")
-            line = f"- {store.get(x.text_ref) or 'un objectif'}"
+            line = f"- {store.get(x.text_ref) or phrase('projects.share.an_objective')}"
             if share == FULL and result:
-                line += f"\n  ce que tu en as tiré : {result}"
+                line += "\n  " + phrase("projects.share.drawn_item", result=result)
             elif result:
-                line += f" — en bref : {result.split('. ')[0].strip()}"
+                line += phrase("projects.share.in_short", first=result.split(". ")[0].strip())
             lines.append(line)
         return SectionBody("\n".join(lines), level=level, provenance=(f"project:{p.id}",))
     result = store.get(o.result_ref, "")
-    body = f"Dans ton projet « {title} » : {objective or 'un objectif'}"
+    body = phrase("projects.share.one", title=title, objective=objective or phrase("projects.share.an_objective"))
     if share == FULL and result:
-        body += f"\nCe que tu en as tiré : {result}"
+        body += "\n" + phrase("projects.share.drawn", result=result)
     elif result:
-        body += f" — en bref : {result.split('. ')[0].strip()}"
+        body += phrase("projects.share.in_short", first=result.split(". ")[0].strip())
     return SectionBody(body, level=level, provenance=(f"project:{p.id}",))
 
 
@@ -396,13 +381,13 @@ def _next_words(p: Project, texts: Mapping[str, str], now: int, pm: Any) -> str:
     """Ce qui vient (l'objectif de la prochaine exécution) ou ce qui bloque, en une ligne."""
     blocked = next((o for o in p.objectives if o.status == c.BLOCKED), None)
     if blocked is not None and texts.get(blocked.text_ref):
-        return f"bloqué sur « {texts[blocked.text_ref]} »"
+        return phrase("projects.live.blocked", text=texts[blocked.text_ref])
     waiting = next((o for o in p.objectives if o.status == c.OPEN and o.need_ref), None)
     if waiting is not None and texts.get(waiting.need_ref):
-        return f"il te faudrait : {texts[waiting.need_ref]}"
+        return phrase("projects.live.needs", need=texts[waiting.need_ref])
     nxt = pick(p, now, pm) or next((o for o in p.objectives if o.status == c.OPEN), None)
     if nxt is not None and texts.get(nxt.text_ref):
-        return f"prochain objectif : « {texts[nxt.text_ref]} »"
+        return phrase("projects.live.next", text=texts[nxt.text_ref])
     return ""
 
 
@@ -411,12 +396,12 @@ def _awaiting(frame: Frame, p: Project, person: str) -> str:
     pending = [v for v in frame.get(rt.PENDING_EFFECTS) if v.owner == c.OWNER and project_of(v.context) == p.id]
     if not pending:
         return ""
-    words = sorted({EFFECT_WORDS.get(v.capability, "une demande") for v in pending})
-    return f"attend l'accord de {_who(frame, person)} : {', '.join(words)}"
+    words = sorted({effect_words(v.capability, phrase("projects.effect.request")) for v in pending})
+    return phrase("projects.live.awaiting", who=_who(frame, person), what=", ".join(words))
 
 
 @PROJECTS.section("projects", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["goals"], trim_rank=44,
-                  title="TES PROJETS", reads=[identity_c.PERSON, rt.PENDING_EFFECTS])
+                  title=phrase("projects.live.title"), reads=[identity_c.PERSON, rt.PENDING_EFFECTS])
 def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     texts: Mapping[str, str] = (enrich.get("projects") or {}).get("texts") or {}
     ep, aud = frame.episode, frame.audience
@@ -430,21 +415,24 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
         title = texts.get(p.title_ref)
         if not title or not hearable(p.about, p.sensitivity, person, aud.level, aud.witness_level, aud.private_ok):
             continue
-        whose = "à toi" if p.authority == c.SELF else f"pour {_who(frame, p.address or p.owner)}"
-        how = "" if p.mode == c.PERSONA else ", en mode impersonnel"
+        whose = phrase("projects.live.own") if p.authority == c.SELF else \
+            phrase("projects.live.for", who=_who(frame, p.address or p.owner))
+        how = "" if p.mode == c.PERSONA else phrase("projects.live.plain")
         done = sum(1 for o in p.objectives if o.kind == c.ONCE and o.status == c.DONE)
         total = sum(1 for o in p.objectives if o.kind == c.ONCE and o.status != c.DROPPED)
-        progress = f"{done} objectif(s) sur {total} atteints" if total else "des objectifs à entretenir"
-        state = "en pause" if p.status == c.PAUSED else progress
+        progress = phrase("projects.live.progress", done=done, total=total) if total else \
+            phrase("projects.live.maintain")
+        state = phrase("projects.live.paused") if p.status == c.PAUSED else progress
         if p.schedule == ON_DEMAND and p.status == c.ACTIVE:
-            state += ", il avance quand on le lance"
-        line = f"- {title} ({whose}{how}) : {state}"
+            state += phrase("projects.live.on_demand")
+        line = "- " + phrase("projects.live.line", title=title, whose=whose, how=how, state=state)
         # le détail (son dernier compte rendu, ce qui vient) est au moins personnel : seulement à qui peut l'entendre
         if hearable(p.about, written(p), person, aud.level, aud.witness_level, aud.private_ok):
             if p.last_run_at:
                 summary = texts.get(p.summary_ref, "")
-                line += f"\n  dernière exécution il y a {ago(frame.now - p.last_run_at)}" + \
-                    (f" : {summary[:300]}" if summary else "")
+                since = ago(frame.now - p.last_run_at)
+                line += "\n  " + (phrase("projects.live.last_run_summary", ago=since, summary=summary[:300]) if summary
+                                   else phrase("projects.live.last_run", ago=since))
             nxt = _next_words(p, texts, frame.now, pm)
             if nxt:
                 line += f"\n  {nxt}"
@@ -465,11 +453,8 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
 
 
 def work_brief(frame: Frame, req: Any) -> str:
-    return ("(Personne ne te parle : c'est un moment de travail sur ton projet, pour toi seule — personne ne lit ce "
-            "que tu écris ici ; ni didascalies, ni adresse à quelqu'un.) Avance sur l'objectif de cette exécution en "
-            "appelant tes outils, puis conclus en appelant report_run.")
+    return phrase("projects.run.brief")
 
 
 def job_brief(frame: Frame, req: Any) -> str:
-    return ("Exécution de travail impersonnelle sur ce projet : personne ne lit ce texte. Avance sur l'objectif "
-            "indiqué en appelant les outils, puis conclus en appelant report_run.")
+    return phrase("projects.run.job_brief")

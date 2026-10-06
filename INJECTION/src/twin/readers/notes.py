@@ -22,6 +22,7 @@ import zipfile
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from twin.dates import date_from_header, date_from_path, find_date, is_date_line
 from twin.readers import ReadContext, head, read_text
@@ -30,12 +31,13 @@ from twin.records import ME, NOTES, Author, Document, Item
 from twin.timing import US, Origin, Temps, from_us
 
 TEXT_SUFFIXES = (".txt", ".md", ".markdown", ".text", ".rtf")
+_HALF_YEAR = 183 * 24 * 3600 * US
 
 
 class NotesReader:
     name = "notes"
     label = "Notes et journaux (txt, md, docx, Keep, Evernote)"
-    version = 1
+    version = 2
 
     def detect(self, path: Path) -> int:
         suffix = path.suffix.lower()
@@ -70,19 +72,15 @@ class NotesReader:
         year_hint = from_us(by_path.point, ctx.tz).year if by_path and by_path.point else None
         entries = split_journal(text)
         if len(entries) >= 2:
-            last_month = None
-            for rank, (head_line, body) in enumerate(entries):
-                when = find_date(head_line, ctx.tz, Origin.HEADER, year_hint=year_hint) or Temps.unknown()
-                if when.point is not None:
-                    local = from_us(when.point, ctx.tz)
-                    if year_hint is not None and last_month is not None and local.month < last_month \
-                            and str(local.year) not in head_line:
-                        # « 28 décembre » puis « 2 janvier » sans année : on a changé d'année
-                        year_hint += 1
-                        when = find_date(head_line, ctx.tz, Origin.HEADER, year_hint=year_hint) or when
-                        local = from_us(when.point, ctx.tz) if when.point is not None else local
-                    year_hint, last_month = local.year, local.month
-                yield Document(NOTES, f"{rel}#{rank}", "journal", head_line.strip(), body.strip(), when, rank,
+            heads = [h for h, _ in entries]
+            # un journal tenu du plus récent au plus ancien se lit à rebours : le rang suit toujours le temps
+            order = list(range(len(entries)))
+            if newest_first(heads, ctx.tz, year_hint):
+                order.reverse()
+            dates = journal_dates([heads[i] for i in order], ctx.tz, year_hint)
+            for rank, (i, when) in enumerate(zip(order, dates, strict=True)):
+                head_line, body = entries[i]
+                yield Document(NOTES, f"{rel}#{i}", "journal", head_line.strip(), body.strip(), when, rank,
                                path=rel)
             return
         when = (date_from_header(text, ctx.tz, year_hint=year_hint) or by_path or _mtime_bound(path))
@@ -116,6 +114,34 @@ class NotesReader:
             yield Document(NOTES, f"{rel}#{rank}", "note", title, body.strip(), when, rank, path=rel)
             rank += 1
             el.clear()
+
+
+def newest_first(heads: list[str], tz: ZoneInfo, year_hint: int | None) -> bool:
+    """Les entrées reculent-elles dans le temps plus souvent qu'elles n'avancent ? Un saut de plus de six mois
+    ne compte pas : c'est le plus souvent un changement d'année que les entrées sans année ne disent pas."""
+    points = [t.point for t in (find_date(h, tz, Origin.HEADER, year_hint=year_hint) for h in heads)
+              if t is not None and t.point is not None]
+    pairs = [(a, b) for a, b in zip(points, points[1:], strict=False) if abs(b - a) < _HALF_YEAR]
+    return sum(b < a for a, b in pairs) > sum(b > a for a, b in pairs)
+
+
+def journal_dates(heads: list[str], tz: ZoneInfo, year_hint: int | None) -> list[Temps]:
+    """Les dates d'entrées rangées dans l'ordre du temps ; « 28 décembre » puis « 2 janvier », sans année :
+    on a changé d'année."""
+    out: list[Temps] = []
+    last_month = None
+    for head_line in heads:
+        when = find_date(head_line, tz, Origin.HEADER, year_hint=year_hint) or Temps.unknown()
+        if when.point is not None:
+            local = from_us(when.point, tz)
+            if year_hint is not None and last_month is not None and local.month < last_month \
+                    and str(local.year) not in head_line:
+                year_hint += 1
+                when = find_date(head_line, tz, Origin.HEADER, year_hint=year_hint) or when
+                local = from_us(when.point, tz) if when.point is not None else local
+            year_hint, last_month = local.year, local.month
+        out.append(when)
+    return out
 
 
 def split_journal(text: str) -> list[tuple[str, str]]:

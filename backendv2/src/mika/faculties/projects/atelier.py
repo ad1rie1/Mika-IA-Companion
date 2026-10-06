@@ -33,8 +33,8 @@ from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.faculties.projects.faculty import NETWORK_QUEUED, NETWORKED, PROJECTS, Project, busy, params
 from mika.faculties.projects.tools import (
-    GONE,
     current,
+    gone,
     pending_push,
     pinned,
     propose_push,
@@ -46,6 +46,7 @@ from mika.kernel.faculty import ToolResult
 from mika.kernel.operate import Preview
 from mika.ports.workshop import OutsideWorkshop, WorkshopFull, argv_lines, describe
 from mika.vocab.episodes import PROJECT_KINDS, project_of, project_target
+from mika.vocab.phrasebook import phrase
 
 BUNDLE = "workshop"
 RUNS = list(PROJECT_KINDS)
@@ -58,22 +59,22 @@ SEEN_KEY = "_apercu"
 def _atelier(ctx: Any) -> tuple[Any, Any] | str:
     got = current(ctx)
     if got is None:
-        return GONE
+        return gone()
     port = ctx.ports.get("workshop")
     if port is None:
-        return "L'atelier n'est pas disponible ici."
+        return phrase("projects.workshop.unavailable")
     return got[0], port
 
 
-PROJECTS.bundle(BUNDLE, "l'atelier d'un projet : lire, écrire, lancer des programmes isolés, son dépôt git")
+PROJECTS.bundle(BUNDLE, phrase("projects.workshop.bundle"))
 
 
 class ListArgs(BaseModel):
-    path: str = Field(default="", max_length=300, description="un dossier du projet (vide : tout le projet)")
+    path: str = Field(default="", max_length=300, description=phrase("projects.workshop.list_path"))
 
 
 class ReadArgs(BaseModel):
-    path: str = Field(min_length=1, max_length=300, description="le fichier à lire, relatif au dossier du projet")
+    path: str = Field(min_length=1, max_length=300, description=phrase("projects.workshop.read_path"))
 
 
 class WriteArgs(BaseModel):
@@ -83,21 +84,19 @@ class WriteArgs(BaseModel):
 
 class EditArgs(BaseModel):
     path: str = Field(min_length=1, max_length=300)
-    old: str = Field(min_length=1, max_length=20_000, description="le fragment exact à remplacer (unique)")
+    old: str = Field(min_length=1, max_length=20_000, description=phrase("projects.workshop.edit_old"))
     new: str = Field(max_length=20_000)
 
 
 class RunArgs(BaseModel):
-    argv: list[str] = Field(min_length=1, max_length=40, description="la commande et ses arguments, "
-                                                                      "par exemple [\"python3\", \"test_x.py\"]")
+    argv: list[str] = Field(min_length=1, max_length=40, description=phrase("projects.workshop.run_argv"))
     #: borné en plus par ce qui reste à l'exécution : un programme lent ne la fait jamais expirer
     timeout_s: int = Field(default=60, ge=1, le=300)
 
 
 class NetworkArgs(BaseModel):
-    argv: list[str] = Field(min_length=1, max_length=40, description="la commande et ses arguments (pip, npm, git, "
-                                                                      "curl, wget, python…)")
-    why: str = Field(min_length=1, max_length=400, description="pourquoi il faut le réseau, pour qui l'approuvera")
+    argv: list[str] = Field(min_length=1, max_length=40, description=phrase("projects.workshop.network_argv"))
+    why: str = Field(min_length=1, max_length=400, description=phrase("projects.workshop.network_why"))
 
     @field_validator("argv")
     @classmethod
@@ -108,11 +107,10 @@ class NetworkArgs(BaseModel):
 
 
 class PushArgs(BaseModel):
-    why: str = Field(min_length=1, max_length=400, description="ce que contient cet envoi, pour qui l'approuvera")
+    why: str = Field(min_length=1, max_length=400, description=phrase("projects.workshop.push_why"))
 
 
-@PROJECTS.tool("ws_list", description="Lister les fichiers du projet (ou d'un de ses dossiers), les plus proches de "
-               "la racine d'abord.", args=ListArgs, bundle=BUNDLE, episodes=RUNS)
+@PROJECTS.tool("ws_list", description=phrase("projects.workshop.list"), args=ListArgs, bundle=BUNDLE, episodes=RUNS)
 async def ws_list(args: ListArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -121,11 +119,11 @@ async def ws_list(args: ListArgs, ctx: Any) -> Any:
     try:
         files = await port.tree(p.id, args.path or ".")
     except OutsideWorkshop as exc:
-        return ToolResult(ok=False, content=f"Refusé : {exc}")
-    return wrap_up(ctx, "\n".join(files) if files else "(le dossier est vide)")
+        return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
+    return wrap_up(ctx, "\n".join(files) if files else phrase("projects.workshop.empty"))
 
 
-@PROJECTS.tool("ws_read", description="Lire un fichier du projet.", args=ReadArgs, bundle=BUNDLE, episodes=RUNS)
+@PROJECTS.tool("ws_read", description=phrase("projects.workshop.read"), args=ReadArgs, bundle=BUNDLE, episodes=RUNS)
 async def ws_read(args: ReadArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -134,10 +132,10 @@ async def ws_read(args: ReadArgs, ctx: Any) -> Any:
     try:
         return wrap_up(ctx, await port.read(p.id, args.path))
     except (OutsideWorkshop, FileNotFoundError) as exc:
-        return ToolResult(ok=False, content=f"Refusé : {exc}")
+        return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
 
 
-@PROJECTS.tool("ws_write", description="Écrire (ou remplacer) un fichier du projet.", args=WriteArgs, bundle=BUNDLE,
+@PROJECTS.tool("ws_write", description=phrase("projects.workshop.write"), args=WriteArgs, bundle=BUNDLE,
                episodes=RUNS)
 async def ws_write(args: WriteArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
@@ -147,12 +145,11 @@ async def ws_write(args: WriteArgs, ctx: Any) -> Any:
     try:
         rel = await port.write(p.id, args.path, args.content)
     except (OutsideWorkshop, WorkshopFull) as exc:
-        return ToolResult(ok=False, content=f"Refusé : {exc}")
-    return wrap_up(ctx, f"Écrit : {rel} ({len(args.content)} caractères).")
+        return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
+    return wrap_up(ctx, phrase("projects.workshop.written", path=rel, size=len(args.content)))
 
 
-@PROJECTS.tool("ws_edit", description="Remplacer un fragment exact (et unique) dans un fichier du projet.",
-               args=EditArgs, bundle=BUNDLE, episodes=RUNS)
+@PROJECTS.tool("ws_edit", description=phrase("projects.workshop.edit"), args=EditArgs, bundle=BUNDLE, episodes=RUNS)
 async def ws_edit(args: EditArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -161,8 +158,8 @@ async def ws_edit(args: EditArgs, ctx: Any) -> Any:
     try:
         rel = await port.edit(p.id, args.path, args.old, args.new)
     except (OutsideWorkshop, FileNotFoundError, ValueError) as exc:  # WorkshopFull est une ValueError
-        return ToolResult(ok=False, content=f"Refusé : {exc}")
-    return wrap_up(ctx, f"Modifié : {rel}.")
+        return ToolResult(ok=False, content=phrase("projects.workshop.refused", error=exc))
+    return wrap_up(ctx, phrase("projects.workshop.edited", path=rel))
 
 
 def program_time_left(ctx: Any) -> float:
@@ -176,9 +173,7 @@ def program_time_left(ctx: Any) -> float:
     return max(0.0, (run.started + pm.run_programs_us - ctx.frame.now) / 1_000_000)
 
 
-@PROJECTS.tool("ws_run", description="Lancer une commande dans le dossier du projet (isolée, sans réseau). Le temps "
-               "des programmes d'une exécution est compté : garde de quoi conclure.",
-               args=RunArgs, bundle=BUNDLE, episodes=RUNS, max_calls_per_episode=8)
+@PROJECTS.tool("ws_run", description=phrase("projects.workshop.run"), args=RunArgs, bundle=BUNDLE, episodes=RUNS, max_calls_per_episode=8)
 async def ws_run(args: RunArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -186,15 +181,13 @@ async def ws_run(args: RunArgs, ctx: Any) -> Any:
     p, port = got
     left = program_time_left(ctx)
     if left < 2:
-        return ToolResult(ok=False, content="Plus le temps de lancer un programme dans cette exécution : conclus "
-                                            "par report_run (« continue », tu reprendras à la prochaine).")
+        return ToolResult(ok=False, content=phrase("projects.workshop.no_time"))
     result = await port.run(p.id, args.argv, timeout_s=min(float(args.timeout_s), left))
     # une commande refusée ou en échec n'est pas du travail fait (elle reste une information)
     return wrap_up(ctx, ToolResult(ok=result.ok, content=describe(result)))
 
 
-@PROJECTS.tool("ws_diff", description="Relire ce qui a changé depuis le dernier enregistrement, et l'historique.",
-               args=ListArgs, bundle=BUNDLE, episodes=RUNS)
+@PROJECTS.tool("ws_diff", description=phrase("projects.workshop.diff"), args=ListArgs, bundle=BUNDLE, episodes=RUNS)
 async def ws_diff(args: ListArgs, ctx: Any) -> Any:
     got = _atelier(ctx)
     if isinstance(got, str):
@@ -202,8 +195,8 @@ async def ws_diff(args: ListArgs, ctx: Any) -> Any:
     p, port = got
     diff = await port.diff(p.id)
     history = await port.log(p.id, 8)
-    return wrap_up(ctx, (diff or "(rien de changé depuis le dernier enregistrement)")
-                   + ("\n\nHistorique :\n" + history if history else ""))
+    return wrap_up(ctx, (diff or phrase("projects.workshop.unchanged"))
+                   + ("\n\n" + phrase("projects.workshop.history") + "\n" + history if history else ""))
 
 
 def network_summary(p: Project, argv: list[str] | tuple[str, ...], why: str) -> str:
@@ -231,48 +224,43 @@ def _already(frame: Any, p: Project, argv: list[str]) -> bool:
     return False
 
 
-@PROJECTS.tool("ws_network", description="Proposer une commande qui a besoin du réseau (installer une dépendance, "
-               "télécharger…). Elle ne part pas tout de suite : selon le projet, un opérateur doit l'approuver, sinon "
-               "elle part à la fin de cette exécution.", args=NetworkArgs, bundle=BUNDLE, episodes=RUNS,
+@PROJECTS.tool("ws_network", description=phrase("projects.workshop.network"), args=NetworkArgs, bundle=BUNDLE, episodes=RUNS,
                max_calls_per_episode=2)
 async def ws_network(args: NetworkArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
-        return GONE
+        return gone()
     p, _ = got
     about = tuple(x for x in (p.owner, *p.about) if x)
     if _already(ctx.frame, p, args.argv):  # la même commande ne s'empile pas : elle attend déjà
-        return wrap_up(ctx, ToolResult(ok=False, content="Cette commande attend déjà (un accord, ou la fin de "
-                                                         "l'exécution) : inutile de la redemander."))
+        return wrap_up(ctx, ToolResult(ok=False, content=phrase("projects.workshop.already")))
     if not p.approval:  # sans accord : elle partira quand cette exécution aura fini (l'atelier est à elle d'ici là)
         await ctx.emit(NETWORK_QUEUED.draft(project=p.id, argv=tuple(args.argv),
                                             why=Content.of(args.why.strip(), level=p.sensitivity),
                                             owner=p.owner, about=p.about))
-        return wrap_up(ctx, "Noté : elle partira à la fin de cette exécution ; tu verras son résultat à la "
-                            "suivante.")
+        return wrap_up(ctx, phrase("projects.workshop.queued"))
     await ctx.propose(rt.EFFECT_PROPOSED.draft(
         capability=NETWORKED, owner=PROJECTS.name, args_json=json.dumps({"project": p.id, "argv": args.argv}),
         summary=Content.of(network_summary(p, args.argv, args.why), level=p.sensitivity), approval=True,
         context=project_target(p.id), about=about))
-    return wrap_up(ctx, "Proposé : un opérateur doit l'approuver. Tu verras le résultat à une prochaine exécution.")
+    return wrap_up(ctx, phrase("projects.workshop.proposed"))
 
 
-@PROJECTS.tool("project_push", description="Proposer d'envoyer ce qui est enregistré dans l'atelier vers le dépôt "
-               "distant du projet. Selon le projet, un opérateur doit l'approuver.", args=PushArgs, bundle=BUNDLE,
+@PROJECTS.tool("project_push", description=phrase("projects.workshop.push"), args=PushArgs, bundle=BUNDLE,
                episodes=RUNS, max_calls_per_episode=1)
 async def project_push(args: PushArgs, ctx: Any) -> Any:
     got = current(ctx)
     if got is None:
-        return GONE
+        return gone()
     p, _ = got
     if not p.remote:
-        return ToolResult(ok=False, content="Ce projet n'a pas de dépôt distant (un opérateur le règle).")
+        return ToolResult(ok=False, content=phrase("projects.workshop.no_remote"))
     done = await propose_push(ctx, p, args.why.strip())
     if done == "nothing":
-        return ToolResult(ok=False, content="Rien à envoyer : l'atelier n'a encore aucun enregistrement.")
+        return ToolResult(ok=False, content=phrase("projects.workshop.nothing"))
     if done == "pending":
-        return ToolResult(ok=False, content="Un envoi attend déjà l'accord d'un opérateur : celui-ci suivra.")
-    return "Envoi proposé : un opérateur doit l'approuver." if p.approval else "Envoi lancé."
+        return ToolResult(ok=False, content=phrase("projects.workshop.push_pending"))
+    return phrase("projects.workshop.push_proposed") if p.approval else phrase("projects.workshop.push_sent")
 
 
 def _project_of(args: Mapping[str, Any], context: str) -> int | None:

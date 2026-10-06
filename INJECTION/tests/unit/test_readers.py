@@ -85,6 +85,20 @@ def test_whatsapp_ios_anglais_mois_d_abord(tmp_path: Path) -> None:
     assert m[2].attachments[0].name.startswith("00000012-PHOTO")
 
 
+
+def test_whatsapp_ios_ligne_systeme_au_nom_du_fil(tmp_path: Path) -> None:
+    """iPhone : « Julie: ‎Les messages… chiffrés » est une ligne système, pas un message de Julie."""
+    f = tmp_path / "WhatsApp Chat - Julie" / "_chat.txt"
+    f.parent.mkdir()
+    f.write_text("\u200e[12/03/2019 14:05:33] Julie: \u200eLes messages et les appels sont chiffrés de bout en bout.\n"
+                 "[12/03/2019 14:06:00] Julie: Salut !\n"
+                 "[12/03/2019 14:07:00] Léa: \u200eimage omise\n"
+                 "[12/03/2019 14:08:00] Léa: coucou\n", encoding="utf-8")
+    _, _, m, _ = parts(list(WHATSAPP.read(f, ctx(tmp_path))))
+    assert (m[0].author, m[0].kind) == ("", "systeme") and "\u200e" not in m[0].text
+    assert (m[1].author, m[1].text) == ("Julie", "Salut !")
+    assert m[2].author == "Léa" and m[2].attachments  # une pièce jointe reste un message
+
 def test_whatsapp_groupe_ne_devine_pas_qui_est_elle(tmp_path: Path) -> None:
     f = tmp_path / "Discussion WhatsApp avec Les copines.txt"
     f.write_text("01/02/2020 10:00 - Julie a créé le groupe « Les copines »\n"
@@ -134,6 +148,18 @@ def test_meta_titulaire_lue_dans_le_profil(tmp_path: Path) -> None:
     assert c[0].channel == "instagram" and c[0].group
     assert {x.key: x.me for x in a} == {"Léa": True, "A": False, "B": False}
 
+
+
+def test_meta_chiffre_un_fichier_par_fil_dans_un_meme_dossier(tmp_path: Path) -> None:
+    folder = tmp_path / "messages" / "e2ee"
+    folder.mkdir(parents=True)
+    for name, other in (("julie_10", "Julie"), ("paul_20", "Paul")):
+        (folder / f"{name}.json").write_text(json.dumps({
+            "participants": [other, "Léa"], "threadName": other,
+            "messages": [{"senderName": other, "timestamp": 1552395933000, "text": "coucou", "type": "text"}]}),
+            encoding="utf-8")
+    keys = {x.key for f in folder.iterdir() for x in META.read(f, ctx(tmp_path)) if isinstance(x, Conversation)}
+    assert keys == {"e2ee/julie_10", "e2ee/paul_20"}  # deux fils, pas un seul « e2ee »
 
 def test_mojibake_ne_touche_pas_un_texte_juste() -> None:
     assert fix_mojibake("été 😀") == "été 😀"
@@ -195,6 +221,39 @@ def test_messenger_plus_texte(tmp_path: Path) -> None:
     assert local(m[1].temps.point).day == 13  # passé minuit dans la même session
 
 
+
+def test_messenger_plus_un_ajoute_en_cours_de_session_n_est_pas_elle(tmp_path: Path) -> None:
+    """Paul rejoint la conversation : absent de la liste lui aussi, il ne devient pas « elle »."""
+    f = tmp_path / "julie@hotmail.com.txt"
+    f.write_text(""".--------------------------------------------------------------------.
+| Début de session : jeudi 12 mars 2009                              |
+| Participants :                                                     |
+|    Julie (julie@hotmail.com)                                       |
+.--------------------------------------------------------------------.
+[20:00:00] Léa : coucou
+[20:00:10] Julie : salut
+[20:01:00] Léa : t'as vu Paul ?
+[20:02:00] Paul : je suis là
+[20:03:00] Léa : ah bah voilà
+""", encoding="utf-8")
+    a, _, _, _ = parts(list(MSN.read(f, ctx(tmp_path))))
+    who = {x.key: x.me for x in a}
+    assert who["Léa"] is True and who["Paul"] is not True
+
+
+def test_messenger_plus_a_egalite_on_ne_sait_pas(tmp_path: Path) -> None:
+    f = tmp_path / "julie@hotmail.com.txt"
+    f.write_text(""".--------------------------------------------------------------------.
+| Début de session : jeudi 12 mars 2009                              |
+| Participants :                                                     |
+|    Julie (julie@hotmail.com)                                       |
+.--------------------------------------------------------------------.
+[20:00:00] Léa : coucou
+[20:02:00] Paul : je suis là
+""", encoding="utf-8")
+    a, _, _, _ = parts(list(MSN.read(f, ctx(tmp_path))))
+    assert not any(x.me for x in a)
+
 def test_pseudo_nettoye() -> None:
     assert clean_nick("·$4,2Julie [c=12]☆[/c]") == "Julie ☆"
 
@@ -224,6 +283,62 @@ def test_sms_envoye_vient_d_elle_et_numeros_normalises(tmp_path: Path) -> None:
     assert [x.author for x in m[:2]] == ["+33612345678", ME]  # 06… et +336… : la même conversation
     assert m[2].author == "+33611111111" and m[2].text == "photo du soir"
     assert m[2].attachments[0].name == "IMG_1.jpg"
+
+
+MMS_XML = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<smses count="5">
+  <sms address="0611111111" date="1552395000000" type="1" body="&#55357;&#56832; t'es où &#55357;&#1;?" contact_name="Julie" />
+  <sms address="0611111111" date="1552395100000" type="3" body="brouillon jamais parti" contact_name="Julie" />
+  <mms date="1552395200000" msg_box="2" address="+33611111111" contact_name="Julie">
+    <parts><part ct="text/plain" text="regarde"/></parts>
+    <addrs><addr address="+33699999999" type="137"/><addr address="+33611111111" type="151"/></addrs>
+  </mms>
+  <mms date="1552395300000" msg_box="1" address="+33611111111~+33622222222" contact_name="Julie, Paul">
+    <parts><part ct="text/plain" text="ce soir ?"/></parts>
+    <addrs><addr address="+33622222222" type="137"/><addr address="+33611111111" type="151"/>
+           <addr address="+33699999999" type="151"/></addrs>
+  </mms>
+  <sms address="ORANGE" date="1552395400000" type="1" body="Votre forfait" />
+</smses>
+"""
+
+
+def test_mms_son_numero_n_est_pas_une_correspondante(tmp_path: Path) -> None:
+    f = tmp_path / "sms.xml"
+    f.write_text(MMS_XML, encoding="utf-8")
+    a, c, m, _ = parts(list(SMS.read(f, ctx(tmp_path))))
+    me = next(x for x in a if x.key == ME)
+    assert me.address == "+33699999999"  # l'expéditeur de son MMS envoyé
+    assert all("+33699999999" not in x.members for x in c)
+    # son MMS à Julie tombe dans la conversation de ses SMS avec Julie
+    assert [x.conversation for x in m[:2]] == ["+33611111111", "+33611111111"]
+    group = next(x for x in c if x.group)
+    assert group.key == "+33611111111~+33622222222" and group.title == "Julie, Paul"
+    assert m[2].author == "+33622222222"
+    assert m[3].author == "orange"  # un expéditeur sans numéro garde son nom
+    assert [x.text for x in m].count("brouillon jamais parti") == 0  # un brouillon n'a pas été envoyé
+
+
+def test_sms_emojis_en_demi_caracteres_recomposes(tmp_path: Path) -> None:
+    f = tmp_path / "sms.xml"
+    f.write_text(MMS_XML, encoding="utf-8")
+    m = parts(list(SMS.read(f, ctx(tmp_path))))[2]
+    assert m[0].text == "😀 t'es où �?"  # la paire recomposée, la moitié seule remplacée, le contrôle retiré
+
+
+def test_sms_reparation_au_vol_ne_coupe_pas_une_entite(tmp_path: Path) -> None:
+    from functools import partial
+
+    from twin.readers.sms import _repair, _Repaired
+
+    f = tmp_path / "x.xml"
+    data = ("<a>" + "&#55357;&#56832;x" * 40 + "&#55357;</a>").encode()
+    f.write_bytes(data)
+    for chunk in (3, 7, 16, 33):
+        r = _Repaired(f, chunk=chunk)
+        got = b"".join(iter(partial(r.read, 5), b""))
+        r.close()
+        assert got == _repair(data), chunk
 
 
 # -- Mails ---------------------------------------------------------------------------------------------
@@ -277,6 +392,42 @@ def test_citation_outlook() -> None:
 
 # -- Notes et journaux ---------------------------------------------------------------------------------
 
+
+def test_citation_html_emboitee_retiree_avant_le_reste() -> None:
+    from twin.readers.mail import html_to_text
+
+    got = html_to_text("<div>Oui, carrément !</div><blockquote>Tu viens ?<blockquote>On part samedi"
+                       "</blockquote>Dis-moi vite</blockquote><p>Bises</p>")
+    assert "Tu viens" not in got and "Dis-moi" not in got and "samedi" not in got
+    assert "carrément" in got and "Bises" in got
+
+
+def test_maildir_reconnu_par_ses_drapeaux(tmp_path: Path) -> None:
+    f = tmp_path / ".Sent" / "cur" / "1552395933.M1P2.portable:2,S"
+    f.parent.mkdir(parents=True)
+    f.write_text(EML, encoding="utf-8")
+    assert pick(f, all_readers())[0] is MAIL
+    a, _, m, _ = parts(list(MAIL.read(f, ctx(tmp_path))))
+    assert m[0].text == "Carrément pour l'Italie !"
+    assert {x.key: x.me for x in a}["julie@example.com"] is True  # rangé dans « .Sent »
+
+
+def test_mbox_sans_extension_aux_longs_en_tetes(tmp_path: Path) -> None:
+    f = tmp_path / "Inbox"
+    received = "".join(f"Received: from relais{i}.example.net (relais{i} [10.0.0.{i}]) by mx.example.org;"
+                       f" Thu, 12 Mar 2009 14:05:{i % 60:02d} +0100\n" for i in range(60))
+    f.write_text(f"From julie@example.com Thu Mar 12 14:05:33 2009\n{received}{EML}\n", encoding="utf-8")
+    assert pick(f, all_readers())[0] is MAIL
+    assert parts(list(MAIL.read(f, ctx(tmp_path))))[2][0].text == "Carrément pour l'Italie !"
+
+
+def test_un_debut_de_fichier_coupe_en_plein_caractere_reste_lisible(tmp_path: Path) -> None:
+    from twin.readers import head
+
+    f = tmp_path / "x.txt"
+    f.write_text("é" * 10, encoding="utf-8")
+    assert head(f, 5) == "éé"  # le troisième « é » est coupé : pas de bascule en UTF-16
+
 def test_journal_dans_un_seul_fichier(tmp_path: Path) -> None:
     f = tmp_path / "carnets" / "2009" / "journal.txt"
     f.parent.mkdir(parents=True)
@@ -289,6 +440,18 @@ def test_journal_dans_un_seul_fichier(tmp_path: Path) -> None:
     assert [(x.year, x.month, x.day) for x in dates] == [(2009, 12, 30), (2010, 1, 2), (2010, 1, 5)]
     assert d[2].text == "J'ai rêvé de la mer."
 
+
+
+def test_journal_tenu_du_plus_recent_au_plus_ancien(tmp_path: Path) -> None:
+    f = tmp_path / "carnets" / "2009" / "journal.txt"
+    f.parent.mkdir(parents=True)
+    f.write_text("Le 5 janvier 2010 :\nJ'ai rêvé de la mer.\n\n2 janvier\nNouvelle année.\n\n"
+                 "Mardi 30 décembre\nJournée calme.\n\n12 décembre\nPremière neige.\n", encoding="utf-8")
+    _, _, _, d = parts(list(NOTES.read(f, ctx(tmp_path))))
+    assert [x.rank for x in d] == [0, 1, 2, 3]
+    dates = [local(x.temps.point).date() for x in d]
+    assert [(x.year, x.month, x.day) for x in dates] == [(2009, 12, 12), (2009, 12, 30), (2010, 1, 2), (2010, 1, 5)]
+    assert d[0].text == "Première neige." and d[0].key.endswith("#3")  # la clé garde sa place dans le fichier
 
 def test_note_datee_par_son_dossier_sinon_bornee_par_le_fichier(tmp_path: Path) -> None:
     f = tmp_path / "été 2011" / "idées.md"

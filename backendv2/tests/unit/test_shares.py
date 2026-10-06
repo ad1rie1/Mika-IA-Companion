@@ -27,7 +27,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import shares as c
 from mika.faculties.identity import audience_for
 from mika.faculties.shares.faculty import MIB, SharesParams, due_expiries, params
-from mika.faculties.shares.tools import NO_PROJECT, NOT_HERE, clean_name, may_share, offered, text_name
+from mika.faculties.shares.tools import clean_name, may_share, offered, text_name
 from mika.kernel.clock import DAY, US
 from mika.kernel.events import Origin
 from mika.kernel.frame import Audience, EpisodeRef, Frame
@@ -40,6 +40,7 @@ from mika.runtime.pipeline import EpisodeRequest
 from mika.runtime.tools import ToolContext
 from mika.sim.clock import run_virtual
 from mika.vocab.episodes import Kind
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 from tests.fixtures.atelier import Atelier
 from tests.fixtures.mika import boot, build, connect, said
@@ -203,7 +204,7 @@ def test_never_in_a_room_never_to_someone_without_an_account(tmp_path):
     every = {"share_text", "project_files", "share_project_file"}
     assert offered_tools["privé"] == every and offered_tools["initiative"] == every
     assert offered_tools["salon"] == set() and offered_tools["inconnu"] == set()
-    assert refused.content == NOT_HERE and in_room.content == NOT_HERE and files == []
+    assert refused.content == phrase("shares.tools.not_here") and in_room.content == phrase("shares.tools.not_here") and files == []
     assert not offered(Audience(persons=("user_2",), public=True, trust="authenticated"))
     assert not offered(Audience(persons=(), public=False, trust="authenticated"))
 
@@ -273,7 +274,7 @@ def test_project_files_go_to_who_has_the_right_and_only_them(tmp_path):
     mine, out, listing, tree, other, shared = live(tmp_path, scenario, atelier=atelier)
     assert out["proprio"].ok and out["image"].ok and out["confiante"].ok
     for refused in ("amie", "pas-a-elle", "archive"):
-        assert out[refused].content == NO_PROJECT, refused
+        assert out[refused].content == phrase("shares.tools.project_files.not_shared"), refused
     assert not out["remonte"].ok and not out["cache"].ok and not out["absent"].ok
     assert not out["gros"].ok and "1 Mio" in out["gros"].content
     by_name = {e.data.name.text: e.data for e in shared}

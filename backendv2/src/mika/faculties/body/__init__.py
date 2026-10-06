@@ -44,6 +44,7 @@ from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab import circadian
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
 from mika.vocab.temperament import Temperament
 from mika.vocab.words import fold
 
@@ -491,7 +492,9 @@ WAKING_WINDOW_US = 20 * MINUTE
 
 
 def _minutes(n: int) -> str:
-    return "un instant" if n < 1 else f"{n} minute{'s' if n > 1 else ''}"
+    if n < 1:
+        return phrase("body.rhythm.an_instant")
+    return phrase("body.rhythm.minutes", n=n) if n > 1 else phrase("body.rhythm.minute", n=n)
 
 
 def _woke_line(s: BodyState, frame: Frame) -> str:
@@ -500,33 +503,30 @@ def _woke_line(s: BodyState, frame: Frame) -> str:
     if ep is None or ep.kind not in CONVERSATIONAL:
         return ""
     if s.sleep.asleep:
-        return "Tu dormais : tu te réveilles juste pour ça."
+        return phrase("body.rhythm.asleep")
     reply_to = ep.attrs.get("reply_to") if ep.kind == Kind.REPLY else None
     if reply_to is not None:
         if reply_to == s.roused_by and s.sleep.woken_by_message:
-            return "Tu dormais : ce message vient de te réveiller."
+            return phrase("body.rhythm.roused")
         held = [w for w in s.waiting if w.handle == ep.target]
         if any(w.message == reply_to for w in held):
             first = frame.local(min(w.at for w in held))
-            when = f"vers {first.hour}h{first.minute:02d}"
+            when = phrase("body.rhythm.around", hour=first.hour, minute=f"{first.minute:02d}")
             if len(held) > 1:
-                return (f"Ses messages de la nuit (le premier {when}) sont arrivés pendant que tu dormais : tu les "
-                        "découvres en te levant et tu réponds maintenant, pas comme si tu avais été réveillée à "
-                        "ce moment-là ; tu peux le lui dire.")
-            return (f"Ce message est arrivé {when}, pendant que tu dormais : tu le découvres en te levant et tu "
-                    "réponds maintenant, pas comme si tu avais été réveillée à ce moment-là ; tu peux le lui dire.")
+                return phrase("body.rhythm.waited_many", when=when)
+            return phrase("body.rhythm.waited_one", when=when)
     if s.sleep.woken_by_message and frame.now - s.sleep.since < WAKING_WINDOW_US:
         ago = _minutes(int((frame.now - s.sleep.since) // MINUTE))
         # un réveil par API la tire du sommeil sans adresse (``roused_by`` : l'appel) ; parler en dormant, lui,
         # efface les deux — ce n'est pas un appel qui l'a réveillée
-        who = "Son message" if s.roused_handle and s.roused_handle == ep.target else \
-            "Un réveil par API" if not s.roused_handle and s.roused_by else "Un message"
-        return f"{who} t'a tirée du sommeil il y a {ago} : tu émerges encore."
+        who = phrase("body.rhythm.by_their_message") if s.roused_handle and s.roused_handle == ep.target else \
+            phrase("body.rhythm.by_api") if not s.roused_handle and s.roused_by else phrase("body.rhythm.by_a_message")
+        return phrase("body.rhythm.emerging", who=who, ago=ago)
     return ""
 
 
 @BODY.section("rhythm", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.STEP, Kind.WORK, Kind.WAKE],
-              trim_rank=40, title="TON RYTHME")
+              trim_rank=40, title=phrase("body.rhythm.title"))
 def _rhythm_section(s: BodyState, frame: Frame, enrich: Any) -> str:
     profile = frame.get(c.RHYTHM)
     text = circadian.describe(frame.local(), profile, frame.get(c.ENERGY))
@@ -534,22 +534,27 @@ def _rhythm_section(s: BodyState, frame: Frame, enrich: Any) -> str:
     return f"{text} {line}" if line else text
 
 
+#: le brouillard de la fatigue : sous tant d'énergie, sa phrase (``body.fog.…`` dans sa voix)
 FOG = (
-    (0.12, "Tu tombes de sommeil : tu as du mal à suivre, tes réponses sont très courtes, tu peux le dire."),
-    (0.2, "Tu es très fatiguée : phrases courtes, pas d'élan pour les longues discussions."),
-    (0.3, "Tu es fatiguée : moins de patience, moins d'élan, tes phrases raccourcissent."),
+    (0.12, "falling_asleep"),
+    (0.2, "very_tired"),
+    (0.3, "tired"),
 )
+
+
+def fog(energy: float) -> str | None:
+    """Ce que la fatigue fait à sa façon de parler, à ce niveau d'énergie (``None`` : rien)."""
+    for limit, key in FOG:
+        if energy < limit:
+            return phrase(f"body.fog.{key}")
+    return None
 
 
 @BODY.section("fog", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.STEP, Kind.WORK, Kind.WAKE],
               after=["rhythm"],
-              trim_rank=45, tags=[Tag.AFFECTIVE], title="ÉTAT COGNITIF", reads=[c.ENERGY])
+              trim_rank=45, tags=[Tag.AFFECTIVE], title=phrase("body.fog.title"), reads=[c.ENERGY])
 def _fog(s: BodyState, frame: Frame, enrich: Any) -> str | None:
-    e = frame.get(c.ENERGY)
-    for limit, text in FOG:
-        if e < limit:
-            return text
-    return None
+    return fog(frame.get(c.ENERGY))
 
 
 # ── Inspection ────────────────────────────────────────────────────────────

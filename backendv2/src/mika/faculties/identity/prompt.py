@@ -24,24 +24,22 @@ from mika.vocab import privacy
 from mika.vocab.days import part_of_day
 from mika.vocab.episodes import CONVERSATIONAL, Kind, is_work_target
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import family, phrase, phrases
 from mika.vocab.privacy import ChannelTrust
-
-CHANNEL_FR = {privacy.WEB: "sur l'application", privacy.MOBILE: "sur l'application, depuis son téléphone",
-              privacy.EXTERNAL: "par un compte extérieur"}
-#: ce qu'est pour elle la personne qui s'occupe d'elle (en privé seulement : jamais dit devant un salon)
-OWNER_LINE = ("C'est quelqu'un qui s'occupe de toi : ton serveur, tes réglages et ce que tu as le droit de faire "
-              "passent par cette personne. Tu le sais, sans en faire un sujet.")
-#: … et pour une persona incarnée (ADR 0070) : ni serveur ni réglages — quelqu'un sur qui elle peut compter
-EMBODIED_OWNER_LINE = ("C'est quelqu'un qui veille sur toi et sur qui tu peux compter. Tu le sais, sans en faire un "
-                       "sujet.")
 
 
 def owner_line(frame: Frame) -> str:
-    """Ce qu'est pour elle la personne qui s'occupe d'elle, selon sa nature : rien d'une machine si elle est
-    incarnée."""
-    return EMBODIED_OWNER_LINE if frame.get(self_c.PERSONA).nature == self_c.EMBODIED else OWNER_LINE
-WEEKDAYS_FR = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
+    """Ce qu'est pour elle la personne qui s'occupe d'elle (en privé seulement : jamais dit devant un salon),
+    selon sa nature : rien d'une machine si elle est incarnée (ADR 0070) — ni serveur ni réglages, quelqu'un sur
+    qui elle peut compter."""
+    if frame.get(self_c.PERSONA).nature == self_c.EMBODIED:
+        return phrase("identity.owner.embodied")
+    return phrase("identity.owner.ai")
+
+
 _KNOWN = (social_c.FRIEND, social_c.CLOSE)
+#: le moment de la journée (``vocab.days.part_of_day``) → sa clé dans ``identity.calendar.today`` / ``yesterday``
+_MOMENT = {"nuit": "night", "matin": "morning", "midi": "noon", "après-midi": "afternoon", "soir": "evening"}
 
 
 def describe(view: c.IdentityView, *, public: bool, names: Mapping[str, str] | None = None) -> list[str]:
@@ -49,41 +47,32 @@ def describe(view: c.IdentityView, *, public: bool, names: Mapping[str, str] | N
     des scores à la personne) ; son prénom plutôt que « elle ou lui » ; et
     jamais le mécanisme (« elle s'est connectée avec son compte »)."""
     who = f"« {view.name} »" if view.name else ""
-    where = CHANNEL_FR.get(view.channel, "")
+    where = family("identity.channel").get(view.channel, "")
     lines: list[str] = []
     if view.authenticated:
-        lines.append(f"C'est {who}." if who else "Tu parles à quelqu'un dont tu ne connais pas encore le prénom.")
+        lines.append(phrase("identity.who.authenticated", who=who) if who else
+                     phrase("identity.who.authenticated_unnamed"))
     elif view.bound:
         if view.via == c.VIA_CORROBORATED:
-            lines.append(f"Tu es presque sûre que c'est {who}, qui t'écrit {where} : ce qui a été dit recoupe ce "
-                         f"que tu sais de {who}.")
+            lines.append(phrase("identity.who.corroborated", who=who, where=where))
         else:
-            lines.append(f"C'est {who}, qui t'écrit {where}.")
+            lines.append(phrase("identity.who.bound", who=who, where=where))
     elif view.trust is ChannelTrust.ACCOUNT:
-        lines.append(f"C'est {who}, qui t'écrit {where}." if who else
-                     f"Quelqu'un t'écrit {where} ; tu ne connais pas encore son prénom.")
+        lines.append(phrase("identity.who.bound", who=who, where=where) if who else
+                     phrase("identity.who.account_unnamed", where=where))
     else:
-        lines.append("Tu ne sais pas qui est cette personne : rien ne prouve qui écrit. Reste accueillante mais "
-                     "ne suppose rien d'elle, et ne lui raconte rien de personnel sur qui que ce soit.")
+        lines.append(phrase("identity.who.unknown"))
     if view.claim:
         claimed = f"« {view.claim} »"
         if view.claim_target is None:
-            lines.append(f"Cette personne dit être {claimed}, mais tu connais plusieurs personnes de ce nom : "
-                         "tu ne sais pas de qui il s'agit.")
+            lines.append(phrase("identity.claim.ambiguous", claimed=claimed))
         elif view.claim_target == view.handle:
-            known = f", alors que tu la connais comme {who}" if who else ""
-            lines.append(f"Cette personne dit s'appeler {claimed}{known} : garde le nom que tu lui connais tant "
-                         "que rien ne le confirme.")
+            known = phrase("identity.claim.known_as", who=who) if who else ""
+            lines.append(phrase("identity.claim.renamed", known=known, claimed=claimed))
         else:
-            lines.append(f"Cette personne affirme être {claimed}, que tu connais, mais rien ne le confirme encore. "
-                         f"Joue le jeu poliment en gardant une réserve : ne raconte rien de ce que {claimed} "
-                         "t'a confié tant que tu n'es pas sûre. Si tu doutes vraiment, dis-le, ou utilise "
-                         "identity_doubt.")
+            lines.append(phrase("identity.claim.other", claimed=claimed))
     if public:
-        lines.append("Vous êtes dans un groupe : d'autres lisent. Rien de personnel sur personne — ni sur les "
-                     "autres, ni sur la personne qui te parle. Si on te demande quelque chose de personnel sur "
-                     "quelqu'un, ne fais pas semblant de ne pas le connaître : dis simplement que ce n'est pas à "
-                     "toi d'en parler.")
+        lines.append(phrase("identity.who.public"))
     return lines
 
 
@@ -92,26 +81,25 @@ def calendar_words(then: int, frame: Frame) -> str:
     « il y a 5 jours ») — les jours comptés sur le calendrier, pas en durée."""
     now, past = frame.local(), frame.local(then)
     days = (now.date() - past.date()).days
-    moment = part_of_day(past.hour)
-    precise = f"{WEEKDAYS_FR[past.weekday()]} vers {past.hour} h"
+    moment = _MOMENT[part_of_day(past.hour)]
+    precise = phrase("identity.calendar.precise", weekday=phrases("identity.calendar.weekdays")[past.weekday()],
+                     hour=past.hour)
     if days <= 0:
         if frame.now - then < 3_600_000_000:
-            return "tout à l'heure"
-        return {"nuit": "cette nuit", "matin": "ce matin", "midi": "ce midi", "après-midi": "cet après-midi",
-                "soir": "ce soir"}[moment] + f" (vers {past.hour} h)"
+            return phrase("identity.calendar.just_now")
+        return phrase("identity.calendar.today_at", moment=family("identity.calendar.today")[moment], hour=past.hour)
     if days == 1:
-        label = {"nuit": "la nuit dernière", "matin": "hier matin", "midi": "hier midi",
-                 "après-midi": "hier après-midi", "soir": "hier soir"}[moment]
-        return f"{label} ({precise})"
+        return phrase("identity.calendar.yesterday_at", moment=family("identity.calendar.yesterday")[moment],
+                      precise=precise)
     if days == 2:
-        return f"avant-hier ({precise})"
+        return phrase("identity.calendar.two_days", precise=precise)
     if days < 7:
-        return f"il y a {days} jours ({precise})"
+        return phrase("identity.calendar.days_precise", days=days, precise=precise)
     if days < 14:
-        return f"il y a {days} jours"
+        return phrase("identity.calendar.days", days=days)
     if days < 60:
-        return f"il y a {days // 7} semaines"
-    return f"il y a {days // 30} mois environ"
+        return phrase("identity.calendar.weeks", weeks=days // 7)
+    return phrase("identity.calendar.months", months=days // 30)
 
 
 def last_talk(frame: Frame, person: str, kind: str, name: str = "") -> list[str]:
@@ -124,40 +112,40 @@ def last_talk(frame: Frame, person: str, kind: str, name: str = "") -> list[str]
     ce qu'elle a lu, si elle a vu cette initiative — un constat, jamais un
     reproche ; sinon, rien de plus qu'avant."""
     reading = frame.get(social_c.CONTACT(person))
-    who = f"« {name} »" if name else "cette personne"
+    who = f"« {name} »" if name else phrase("identity.last.someone")
     if kind == Kind.REPLY:
         out = []
         if reading.previous:
-            out.append(f"Avant cette conversation, {who} t'avait écrit pour la dernière fois "
-                       f"{calendar_words(reading.previous, frame)}.")
+            out.append(phrase("identity.last.before_reply", who=who, when=calendar_words(reading.previous, frame)))
         if reading.previous < reading.last_out < reading.since:
-            wrote = f"Tu lui avais écrit depuis, {calendar_words(reading.last_out, frame)}"
+            wrote = calendar_words(reading.last_out, frame)
             # lu après qu'elle l'a écrit : c'est bien ce message-là (son application le dit)
             seen = frame.get(attention_c.AWAITING(person)).seen_at
-            out.append(f"{wrote} ; {who} l'avait lu {calendar_words(seen, frame)}." if seen >= reading.last_out
-                       else f"{wrote}.")
+            out.append(phrase("identity.last.wrote_since_read", when=wrote, who=who,
+                              seen=calendar_words(seen, frame)) if seen >= reading.last_out
+                       else phrase("identity.last.wrote_since", when=wrote))
         return out
     out = []
     if reading.last_in:
-        out.append(f"{who[:1].upper()}{who[1:]} t'a écrit pour la dernière fois "
-                   f"{calendar_words(reading.last_in, frame)}.")
+        out.append(phrase("identity.last.wrote_last", who=f"{who[:1].upper()}{who[1:]}",
+                          when=calendar_words(reading.last_in, frame)))
     mine = frame.get(attention_c.AWAITING(person))
     if mine.initiatives:
         wrote = calendar_words(mine.last_initiative_at, frame)
         if mine.seen_at:
-            out.append(f"Tu lui as écrit depuis, {wrote} ; {who} l'a lu {calendar_words(mine.seen_at, frame)}, sans "
-                       "répondre pour l'instant.")
+            out.append(phrase("identity.last.you_wrote_seen", when=wrote, who=who,
+                              seen=calendar_words(mine.seen_at, frame)))
         elif mine.unseen:
-            out.append(f"Tu lui as écrit depuis, {wrote} ; {who} ne l'a pas encore lu.")
+            out.append(phrase("identity.last.you_wrote_unseen", when=wrote, who=who))
         else:
-            out.append(f"Tu lui as écrit depuis, {wrote}, sans réponse pour l'instant.")
+            out.append(phrase("identity.last.you_wrote", when=wrote))
     elif mine.unanswered and mine.asked and not mine.owed and mine.last_out > mine.last_in:
-        out.append(f"Ta dernière question, {calendar_words(mine.last_out, frame)}, attend encore sa réponse.")
+        out.append(phrase("identity.last.question_waits", when=calendar_words(mine.last_out, frame)))
     return out
 
 
 @IDENTITY.section("who", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=90, floor_chars=400,
-                  title="QUI TU AS EN FACE", reads=[c.IDENTITY, c.PERSON, social_c.CLOSENESS, social_c.CONTACT,
+                  title=phrase("identity.who.title"), reads=[c.IDENTITY, c.PERSON, social_c.CLOSENESS, social_c.CONTACT,
                                                     attention_c.AWAITING, self_c.PERSONA])
 def _who(s: IdentityState, frame: Frame, enrich: Any) -> SectionBody | None:
     aud = frame.audience
@@ -188,20 +176,20 @@ def acquaintance(first_seen: int, frame: Frame, closeness: str = "") -> str:
     days = (frame.local().date() - frame.local(first_seen).date()).days if first_seen else 0
     if closeness in _KNOWN:
         if days <= 0:
-            return "C'est la première fois que vous vous parlez ici."
+            return phrase("identity.known.friend_first_day")
         if days == 1:
-            return "Vous vous parlez ici depuis hier."
+            return phrase("identity.known.friend_since_yesterday")
         if days < 14:
-            return f"Vous vous parlez ici depuis {days} jours."
+            return phrase("identity.known.friend_days", days=days)
     if days <= 0:
-        return "Vous vous connaissez depuis aujourd'hui seulement : vous n'avez pas encore de passé commun."
+        return phrase("identity.known.today")
     if days == 1:
-        return "Vous vous connaissez depuis hier seulement : presque pas de passé commun."
+        return phrase("identity.known.yesterday")
     if days < 14:
-        return f"Vous vous connaissez depuis {days} jours."
+        return phrase("identity.known.days", days=days)
     if days < 60:
-        return f"Vous vous connaissez depuis {days // 7} semaines."
-    return f"Vous vous connaissez depuis {days // 30} mois environ."
+        return phrase("identity.known.weeks", weeks=days // 7)
+    return phrase("identity.known.months", months=days // 30)
 
 
 def audience_for(frame: Frame, req: Any) -> Audience:

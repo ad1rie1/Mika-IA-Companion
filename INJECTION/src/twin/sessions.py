@@ -104,23 +104,43 @@ def _split(rows: list[sqlite3.Row]) -> list[list[sqlite3.Row]]:
     return runs
 
 
+def _run_time(run: list[sqlite3.Row]) -> tuple[Temps, str, str]:
+    """Le temps d'une séance : la plage de ses messages, le point du premier daté."""
+    points = [r["t_point"] for r in run if r["t_point"] is not None]
+    starts = [r["t_start"] for r in run if r["t_start"] is not None]
+    ends = [r["t_end"] for r in run if r["t_end"] is not None]
+    if not points:
+        return Temps.unknown(), Precision.UNKNOWN.value, run[0]["t_origin"]
+    t = Temps.span(min(starts) if starts else None, max(ends) if ends else None, Origin.SOURCE, point=points[0])
+    exact = all(r["t_precision"] == Precision.EXACT.value for r in run)
+    return t, Precision.EXACT.value if exact else t.precision.value, run[0]["t_origin"]
+
+
+def refresh_session_time(db: sqlite3.Connection, session: int) -> None:
+    """Après une datation (Claude Code, MCP) : la séance reprend le temps de ses messages, ou de son texte."""
+    row = db.execute("SELECT document FROM sessions WHERE id = ?", (session,)).fetchone()
+    if row is None:
+        return
+    if row["document"] is not None:
+        db.execute("UPDATE sessions SET t_start = d.t_start, t_end = d.t_end, t_point = d.t_point, "
+                   "t_precision = d.t_precision, t_origin = d.t_origin FROM (SELECT * FROM documents WHERE id = ?) d "
+                   "WHERE sessions.id = ?", (row["document"], session))
+        return
+    run = db.execute("SELECT * FROM messages WHERE session = ? ORDER BY t_point IS NULL, t_point, rank",
+                     (session,)).fetchall()
+    if run:
+        t, precision, origin = _run_time(run)
+        db.execute("UPDATE sessions SET t_start = ?, t_end = ?, t_point = ?, t_precision = ?, t_origin = ? "
+                   "WHERE id = ?", (t.start, t.end, t.point, precision, origin, session))
+
+
 def _store_run(db: sqlite3.Connection, conv: int, group: bool, run: list[sqlite3.Row], person_of: dict[int, int],
                me_id: int, ignored: set[int], weight: dict[int, float]) -> int:
     persons = sorted({person_of[r["author"]] for r in run if r["author"] is not None
                       and person_of.get(r["author"]) not in (None, me_id)})
     n_her = sum(1 for r in run if r["author"] is not None and person_of.get(r["author"]) == me_id)
     chars = sum(len(r["text"]) for r in run)
-    points = [r["t_point"] for r in run if r["t_point"] is not None]
-    starts = [r["t_start"] for r in run if r["t_start"] is not None]
-    ends = [r["t_end"] for r in run if r["t_end"] is not None]
-    if points:
-        t = Temps.span(min(starts) if starts else None, max(ends) if ends else None, Origin.SOURCE,
-                       point=points[0])
-        exact = all(r["t_precision"] == Precision.EXACT.value for r in run)
-        precision = Precision.EXACT.value if exact else t.precision.value
-        origin = run[0]["t_origin"]
-    else:
-        t, precision, origin = Temps.unknown(), Precision.UNKNOWN.value, run[0]["t_origin"]
+    t, precision, origin = _run_time(run)
     if all(r["kind"] in ("masse", "systeme") for r in run) or (persons and set(persons) <= ignored) or chars == 0:
         sig = 0.0
     else:

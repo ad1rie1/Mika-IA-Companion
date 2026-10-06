@@ -82,6 +82,7 @@ from mika.vocab import privacy
 from mika.vocab.affect import Appraisal, Declared, Emotion
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
 
 
 class AttentionParams(BaseModel):
@@ -805,8 +806,6 @@ def _left(s: AttentionState, e, cx) -> AttentionState:
     return replace(s, exchanges=s.exchanges.set(person, replace(ex, unanswered=False, asked=False, closed_at=e.at)))
 
 
-#: l'indice d'un message de deux mots (« ok », « bof ») : il ne dit pas que ça va mieux
-SHORT_CUE = "un message très court"
 #: le ton est revenu quand il ne tombe pas plus bas que ça sous ce qu'elle attendait de la personne
 TONE_BACK = 0.1
 
@@ -824,7 +823,7 @@ def _worried(s: AttentionState, e, cx) -> AttentionState:
         s = replace(s, exchanges=s.exchanges.set(d.person, replace(s.exchanges[d.person], closing=True,
                                                                    closed_at=e.at)))
     if not d.concern:
-        if d.valence >= 0 and d.valence >= d.expected - TONE_BACK and SHORT_CUE not in d.cues:
+        if d.valence >= 0 and d.valence >= d.expected - TONE_BACK and phrase("others.cues.short") not in d.cues:
             return replace(s, eased=s.eased.set(d.person, e.at))
         return s
     p = params(cx.params)

@@ -39,19 +39,37 @@ FROM_HER = ("2", "4", "5", "6")
 MMS_FROM = "137"
 #: un numéro présent dans au moins cette part des MMS : le sien
 OWN_SHARE = 0.6
-_SURROGATES = re.compile(rb"&#(5[5-6]\d{3});&#(5[6-7]\d{3});")
+_PAIRS = re.compile(rb"&#(5[5-6]\d{3});&#(5[6-7]\d{3});")
+_REFS = re.compile(rb"&#(\d{1,8});")
+#: ce dont une entité est faite : la fin d'un morceau qui n'est faite que de cela attend le morceau suivant
+_ENTITY_BYTES = frozenset(b"&#0123456789;")
 
 
-def _join_surrogates(m: re.Match[bytes]) -> bytes:
+def _join_pair(m: re.Match[bytes]) -> bytes:
     hi, lo = int(m.group(1)), int(m.group(2))
     if 0xD800 <= hi <= 0xDBFF and 0xDC00 <= lo <= 0xDFFF:
         return f"&#{0x10000 + ((hi - 0xD800) << 10) + (lo - 0xDC00)};".encode()
     return m.group(0)
 
 
+def _legal(m: re.Match[bytes]) -> bytes:
+    """Ce que XML 1.0 refuse : un demi-caractère seul devient « � », un caractère de contrôle disparaît."""
+    n = int(m.group(1))
+    if 0xD800 <= n <= 0xDFFF or n > 0x10FFFF:
+        return b"&#65533;"
+    if n < 0x20 and n not in (0x9, 0xA, 0xD):
+        return b""
+    return m.group(0)
+
+
+def _repair(data: bytes) -> bytes:
+    return _REFS.sub(_legal, _PAIRS.sub(_join_pair, data))
+
+
 class _Repaired(io.RawIOBase):
-    """Le fichier, lu par morceaux, avec les émojis en demi-caractères recomposés (un morceau garde sa fin pour
-    ne pas couper une entité en deux)."""
+    """Le fichier, lu par morceaux, avec les émojis en demi-caractères recomposés et les caractères que XML refuse
+    retirés. Un morceau garde sa fin si elle n'est faite que d'entités : une entité, ou une paire, n'est jamais
+    coupée en deux."""
 
     def __init__(self, path: Path, chunk: int = 1 << 20) -> None:
         self.f = path.open("rb")
@@ -66,14 +84,16 @@ class _Repaired(io.RawIOBase):
         while len(self.buf) < len(b):
             data = self.f.read(self.chunk)
             if not data:
-                self.buf += _SURROGATES.sub(_join_surrogates, self.carry)
+                self.buf += _repair(self.carry)
                 self.carry = b""
                 break
             data = self.carry + data
-            cut = data.rfind(b"&")
-            keep = data[cut:] if cut != -1 and len(data) - cut < 32 else b""
+            cut = len(data)
+            while cut and data[cut - 1] in _ENTITY_BYTES:  # jamais au milieu d'une entité ni d'une paire
+                cut -= 1
+            keep = data[cut:]
             self.carry = keep
-            self.buf += _SURROGATES.sub(_join_surrogates, data[: len(data) - len(keep)])
+            self.buf += _repair(data[: len(data) - len(keep)])
         n = min(len(b), len(self.buf))
         b[:n] = self.buf[:n]
         self.buf = self.buf[n:]
@@ -84,14 +104,34 @@ class _Repaired(io.RawIOBase):
         super().close()
 
 
-def _parse(path: Path) -> Iterator[tuple[str, ET.Element]]:
+def _address(raw: str, country_code: str) -> str:
+    """Un numéro normalisé ; un expéditeur alphanumérique (« ORANGE », un mail) garde son nom, en minuscules."""
+    raw = raw.strip()
+    if not raw or raw == "insert-address-token":
+        return ""
+    return normalize_phone(raw, country_code) or raw.lower()
+
+
+def _records(path: Path) -> Iterator[ET.Element]:
+    """Chaque ``<sms>`` et ``<mms>``, complet, puis oublié : la racine est vidée après chacun (sinon elle garde
+    un élément vide par message, des centaines de Mo sur dix ans)."""
     with io.BufferedReader(_Repaired(path)) as f:
-        yield from ET.iterparse(f, events=("end",))
+        root: ET.Element | None = None
+        for event, el in ET.iterparse(f, events=("start", "end")):
+            if event == "start":
+                if root is None:
+                    root = el
+                continue
+            if el.tag in ("sms", "mms"):
+                yield el
+                if root is not None:
+                    root.clear()
 
 
 class SmsReader:
     name = "sms"
     label = "SMS / MMS (SMS Backup & Restore, XML)"
+    streams = True  # lu en flux : pas de taille maximale
     version = 2
 
     def detect(self, path: Path) -> int:
@@ -105,31 +145,34 @@ class SmsReader:
         seen_people: set[str] = set()
         seen_convs: set[str] = set()
         yield Author(SMS, ME, name="", address=own or "", me=True, me_reason="messages envoyés depuis son téléphone")
-        for _event, el in _parse(path):
-            if el.tag not in ("sms", "mms"):
-                continue
+        for el in _records(path):
             try:
                 items = list(self._one(el, ctx, own, seen_people, seen_convs))
             except (ValueError, KeyError) as exc:
                 ctx.warn(f"{path.name} : {el.tag} illisible ({exc})")
                 items = []
-            el.clear()
             yield from items
 
     def _own_number(self, path: Path, ctx: ReadContext) -> str | None:
-        """Le numéro présent dans presque tous les MMS : le sien (premier passage, les adresses seulement)."""
-        counts: Counter[str] = Counter()
+        """Son numéro, en un premier passage sur les seules adresses des MMS : l'expéditeur de ce qu'elle a
+        envoyé, sinon le numéro présent dans presque tous (elle est dans chacun)."""
+        sender: Counter[str] = Counter()
+        present: Counter[str] = Counter()
         total = 0
-        for _event, el in _parse(path):
-            if el.tag == "mms":
-                total += 1
-                counts.update({normalize_phone(a.get("address", ""), ctx.country_code) for a in el.iter("addr")})
-                el.clear()
-            elif el.tag == "sms":
-                el.clear()
-        if total < 3 or not counts:
+        for el in _records(path):
+            if el.tag != "mms":
+                continue
+            total += 1
+            addrs = [(_address(a.get("address", ""), ctx.country_code), a.get("type", ""))
+                     for a in el.iter("addr")]
+            present.update({a for a, _ in addrs if a})
+            if el.get("msg_box") in FROM_HER:
+                sender.update(a for a, t in addrs if a and t == MMS_FROM)
+        if sender:
+            return sender.most_common(1)[0][0]
+        if total < 3 or not present:
             return None
-        number, n = counts.most_common(1)[0]
+        number, n = present.most_common(1)[0]
         return number if n >= OWN_SHARE * total else None
 
     def _one(self, el: ET.Element, ctx: ReadContext, own: str | None, people: set[str],
@@ -142,7 +185,7 @@ class SmsReader:
             return  # un brouillon n'a jamais été envoyé
         when = Temps.exact(stamp * (US // 1000), Origin.SOURCE)
         sent = box in FROM_HER
-        raw_addresses = [normalize_phone(a, ctx.country_code) for a in (el.get("address") or "").split("~") if a]
+        raw_addresses = [x for x in (_address(a, ctx.country_code) for a in (el.get("address") or "").split("~")) if x]
         names = [n.strip() for n in (el.get("contact_name") or "").split(",")]
         named = {a: n for a, n in zip(raw_addresses, names, strict=False)
                  if len(names) == len(raw_addresses) and n not in ("", "(Unknown)", "null")}
@@ -152,9 +195,9 @@ class SmsReader:
             text = el.get("body") or ""
             atts: tuple[Attachment, ...] = ()
         else:
-            addrs = [(normalize_phone(a.get("address", ""), ctx.country_code), a.get("type", ""))
+            addrs = [(_address(a.get("address", ""), ctx.country_code), a.get("type", ""))
                      for a in el.iter("addr")]
-            others = sorted({a for a, _ in addrs if a and a != "insert-address-token" and a != own})
+            others = sorted({a for a, _ in addrs if a and a != own})
             sender = ME if sent else next((a for a, t in addrs if t == MMS_FROM and a != own), others[0] if others else "")
             parts = list(el.iter("part"))
             text = "\n".join(p.get("text") or "" for p in parts if (p.get("ct") or "").startswith("text/plain"))
@@ -163,7 +206,7 @@ class SmsReader:
         others = [o for o in others if o and o != own]
         if not others:
             raise ValueError("sans correspondant")
-        conv = "+".join(sorted(others))
+        conv = "~".join(sorted(others))  # comme la sauvegarde : « + » commence déjà chaque numéro
         for addr in others:
             if addr not in people:
                 people.add(addr)

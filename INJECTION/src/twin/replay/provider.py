@@ -31,6 +31,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
+from mika.vocab.phrasebook import family
 
 from twin.corpus import Corpus
 from twin.passes.synth import real_dreams
@@ -44,10 +45,20 @@ CREATE TABLE IF NOT EXISTS replay_archive (archive INTEGER PRIMARY KEY, seq INTE
 CREATE TABLE IF NOT EXISTS replay_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 EXTRACT_TOOL, PROFILE_TOOL = "record_memories", "record_profile"
-#: les tons du moteur (``faculties/self/night.py::TONE_FR``) → ceux des rêves synthétisés
-TONES = {"cauchemar": "cauchemar", "doux, lumineux": "doux", "mélancolique": "melancolique", "étrange": "etrange",
-         "banal": "banal"}
+#: les tons de rêve du moteur (leurs mots sont dans sa voix, ``self.night.dream.tone.<code>``) → ceux des rêves
+#: synthétisés. Le rejoueur reconnaît le ton à ses mots dans la consigne : changer une tournure dans ``voix.yaml``
+#: ne le perd pas.
+TONES = {"nightmare": "cauchemar", "pleasant": "doux", "melancholic": "melancolique", "associative": "etrange",
+         "mundane": "banal"}
 MAX_COMPACT_SENTENCES = 10
+
+
+def dream_tone(system: str) -> str:
+    """Le ton demandé par la consigne du rêve, d'après les mots que la voix du moteur donne à chaque ton (le plus
+    long qui y figure : « un cauchemar, inquiétant » plutôt qu'un mot qu'il contiendrait)."""
+    words = family("self.night.dream.tone")
+    found = sorted(((len(w), code) for code, w in words.items() if w and w in system), reverse=True)
+    return TONES.get(found[0][1], "") if found else ""
 
 
 class ReplayLLM:
@@ -222,7 +233,7 @@ class ReplayLLM:
 
     def _dream(self, req: LLMRequest) -> LLMResponse:
         night, _, cycle = _key_after_hash(req.call_id).partition(":")
-        wanted = next((t for word, t in TONES.items() if word in req.system_stable.split("Ton du rêve :")[-1]), "")
+        wanted = dream_tone(req.system_stable)
         real = self._real_dreams(night)
         index = int(cycle) if cycle.isdigit() else 0
         if index < len(real):

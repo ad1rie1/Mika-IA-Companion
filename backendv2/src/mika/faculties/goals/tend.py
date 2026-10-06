@@ -82,6 +82,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.vocab import affect as A
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 
 SEEDING_ORIGINS = frozenset({attention_c.EXCHANGE, attention_c.REVISION, attention_c.SIGNAL})
@@ -120,8 +121,6 @@ UNEXPLORED_SOURCES = frozenset({"world"})
 INTEREST_SOURCES = ("rss",)
 ORIGINS = {attention_c.EXCHANGE: c.FROM_EXCHANGE, attention_c.REVISION: c.FROM_REVISION,
            attention_c.SIGNAL: c.FROM_SIGNAL}
-WHERE = {"rss": " dans mes flux", "email": " dans mon courrier", "camera": " à la caméra",
-         "forge": " dans une de mes apps"}
 
 
 def _busy(s: GoalsState, g: Goal) -> bool:
@@ -193,12 +192,12 @@ def explored_title(t: attention_c.ThoughtReading, name: str) -> str:
     """Le titre d'une exploration née d'une pensée : **ses** mots, jamais ceux qu'on lui a dits ou qu'elle a lus
     (ceux-là sont gardés à part, et cités)."""
     if t.origin == attention_c.SIGNAL:
-        return "En savoir plus sur ce que j'ai remarqué" + WHERE.get(t.bundle, "")
+        return family("goals.title.noticed_in").get(t.bundle) or phrase("goals.title.noticed")
     if t.origin == attention_c.REVISION:
-        return "Y voir plus clair sur ce que je croyais"
+        return phrase("goals.title.revision")
     if t.about:
-        return f"Repenser à ce que « {name} » m'a confié" if name else "Repenser à ce qu'on m'a confié"
-    return "Repenser à ce qui me trotte dans la tête"
+        return phrase("goals.title.confided", name=name) if name else phrase("goals.title.confided_unnamed")
+    return phrase("goals.title.thought")
 
 
 @GOALS.process("goals.seed", wake_on=[attention_c.THOUGHT_BORN, attention_c.DWELT, needs_c.FELT, *body_c.ALL,
@@ -310,7 +309,8 @@ class Seed:
         # avec ses flux, elle va voir ce qu'il y a de neuf ; sans, elle rêvasse (et rien ne se raconte comme une
         # nouvelle : il n'y a rien de nouveau)
         subject = of_words(lowered(short(interest)))
-        title = f"Fouiller un peu du côté {subject}" if sources else f"Rêvasser un peu autour {subject}"
+        title = phrase("goals.title.interest_search", subject=subject) if sources else \
+            phrase("goals.title.interest_muse", subject=subject)
         await ctx.emit(c.GOAL_OPENED.draft(
             kind=c.EXPLORATION, authority=c.SELF, title=Content.of(title, level=0),
             details=Content.of(interest, level=0),
@@ -394,7 +394,7 @@ def _talk_musing(frame: Frame, talk: Talk, p: Any) -> Any:
     travail) ; ce que la personne a dit la concerne — un message privé est personnel."""
     name = _name(frame, talk.person)
     level = int(Sensitivity.ANODYNE if talk.public else Sensitivity.PERSONAL)
-    title = f"Rêvasser à ce dont « {name} » m'a parlé" if name else "Rêvasser à ce dont on m'a parlé"
+    title = phrase("goals.title.talk", name=name) if name else phrase("goals.title.talk_unnamed")
     return c.GOAL_OPENED.draft(
         kind=c.EXPLORATION, authority=c.SELF, title=Content.of(title, level=level),
         details=Content.of(talk.text[:600], level=level), owner=talk.person, about=(talk.person,),

@@ -38,6 +38,7 @@ from mika.kernel.inspect import num_fr
 from mika.ports.workshop import OutsideWorkshop
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, is_work_target
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust, Sensitivity, hearable
 
 BUNDLE = "shares"
@@ -79,15 +80,7 @@ IMAGES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
 _FORBIDDEN = re.compile(r'[<>:"/\\|?*]')
 _EXTENSION = re.compile(r"^[a-z0-9]{1,8}$")
 
-NOT_HERE = ("Tu ne peux envoyer un fichier qu'en tête-à-tête, à quelqu'un qui a un compte : ici, garde-le pour ton "
-            "message.")
-NO_STORE = "Tu ne peux pas envoyer de fichier ici (rien pour les garder)."
-NO_PROJECT = "Ce projet n'est pas à partager avec cette personne."
-NOT_SENT = "Tu ne lui as pas envoyé de texte de ce nom, ou il n'est plus disponible."
-SUGGEST = "choisis .md, .txt, .csv, .json…"
-
-SHARES.bundle(BUNDLE, "envoyer un fichier à la personne : un texte que tu écris (liste, note, code, tableau) ou un "
-                      "fichier d'un de tes projets ; relire un texte que tu lui as envoyé")
+SHARES.bundle(BUNDLE, phrase("shares.tools.bundle"))
 
 
 def offered(audience: Any) -> bool:
@@ -138,7 +131,11 @@ def project_name(path: str) -> tuple[str, str, str]:
 
 
 def size_words(n: int) -> str:
-    return f"{n} o" if n < 1024 else f"{num_fr(n / 1024, 1)} Ko" if n < MIB else f"{num_fr(n / MIB, 1)} Mo"
+    if n < 1024:
+        return phrase("shares.tools.size.bytes", n=n)
+    if n < MIB:
+        return phrase("shares.tools.size.kilo", n=num_fr(n / 1024, 1))
+    return phrase("shares.tools.size.mega", n=num_fr(n / MIB, 1))
 
 
 # ── Ce qui est permis ─────────────────────────────────────────────────────
@@ -149,7 +146,7 @@ def _recipient(ctx: Any) -> tuple[str, str] | ToolResult:
     ep, aud = ctx.frame.episode, ctx.frame.audience
     target = ep.target if ep is not None else None
     if not target or is_work_target(target) or aud is None or not offered(aud) or target not in aud.persons:
-        return ToolResult(ok=False, content=NOT_HERE)
+        return ToolResult(ok=False, content=phrase("shares.tools.not_here"))
     return target, ctx.frame.get(identity_c.PERSON(target))
 
 
@@ -157,13 +154,12 @@ def _budget(ctx: Any, target: str) -> ToolResult | None:
     """Le plafond de l'épisode, puis celui du jour (par personne)."""
     done = sum(1 for name, ok in ctx.calls if name in SENDING and ok)
     if done >= PER_EPISODE:
-        return ToolResult(ok=False, content=f"Tu as déjà préparé {done} fichiers pour ce message : c'est assez.")
+        return ToolResult(ok=False, content=phrase("shares.tools.per_message", count=done))
     per_day = params_of(ctx.frame).per_day
     today = ctx.frame.get(c.SENT_TODAY(target))
     if today >= per_day:
         return ToolResult(ok=False, content=(
-            f"Tu lui as déjà envoyé {today} fichier(s) aujourd'hui : garde la suite pour ton message, ou pour plus "
-            "tard." if per_day else "Tu n'envoies pas de fichier en ce moment : garde-le pour ton message."))
+            phrase("shares.tools.per_day", count=today) if per_day else phrase("shares.tools.paused")))
     return None
 
 
@@ -199,7 +195,7 @@ async def _send(ctx: Any, target: str, person: str, *, name: str, mime: str, dat
     """Les octets d'abord (hors du journal), puis l'événement ; une écriture supplantée efface ce qu'elle a posé."""
     store = ctx.ports.get(PORT)
     if store is None:
-        return ToolResult(ok=False, content=NO_STORE)
+        return ToolResult(ok=False, content=phrase("shares.tools.no_store"))
     file = _file_id(ctx, target)
     concerned = tuple(dict.fromkeys(a for a in (*about, person) if a and a != target))
     await store.put(file, data, subjects=(target, *concerned))
@@ -214,25 +210,19 @@ async def _send(ctx: Any, target: str, person: str, *, name: str, mime: str, dat
         # rien n'a été écrit (un même fichier déjà journalisé aurait été dédoublonné avant la garde) : ses octets
         # ne restent pas orphelins
         await store.delete((file,))
-        return ToolResult(ok=False, content="La conversation a bougé entre-temps : ce fichier n'est pas parti.")
-    return ToolResult(content=f"Prêt à partir avec ton message : « {name} » ({size_words(len(data))}). Dis en une "
-                              "phrase ce que tu envoies ; ne recopie pas le contenu.", attach=(file,))
+        return ToolResult(ok=False, content=phrase("shares.tools.superseded"))
+    return ToolResult(content=phrase("shares.tools.ready", size=size_words(len(data)), name=name), attach=(file,))
 
 
 # ── Écrire un texte et l'envoyer ──────────────────────────────────────────
 
 
 class TextArgs(BaseModel):
-    name: str = Field(description="Le nom du fichier, avec son extension : courses.md, notes.txt, budget.csv, "
-                                  "script.py… (sans extension : un .txt)")
-    content: str = Field(description="Tout le contenu du fichier, en texte.")
+    name: str = Field(description=phrase("shares.tools.share_text.name"))
+    content: str = Field(description=phrase("shares.tools.share_text.content"))
 
 
-@SHARES.tool(SHARE_TEXT, description="Envoyer à la personne un fichier texte que tu écris maintenant (une liste, une "
-             "note, du code, un tableau) : il part avec ton message, en pièce jointe. Seulement quand un fichier lui "
-             "sert vraiment (quelque chose à garder ou à ouvrir ailleurs, trop long pour un message) : une réponse "
-             "ordinaire reste dans ton message. Dis en une phrase ce que tu envoies.",
-             args=TextArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE, when=offered)
+@SHARES.tool(SHARE_TEXT, description=phrase("shares.tools.share_text.description"), args=TextArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE, when=offered)
 async def share_text(args: TextArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):
@@ -240,22 +230,23 @@ async def share_text(args: TextArgs, ctx: Any) -> Any:
     target, person = who
     named = text_name(args.name)
     if named is None:
-        return ToolResult(ok=False, content=f"Ce n'est pas un nom de fichier texte : {SUGGEST}")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_text.bad_name",
+                                                   suggest=phrase("shares.tools.share_text.suggest")))
     name, mime = named
     p = params_of(ctx.frame)
     content = args.content
     if not content.strip():
-        return ToolResult(ok=False, content="Un fichier vide n'a rien à envoyer.")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_text.empty"))
     if "\x00" in content:
-        return ToolResult(ok=False, content="Ce contenu n'est pas du texte.")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_text.not_text"))
     if len(content) > p.text_max_chars:
-        return ToolResult(ok=False, content=f"Trop long pour un fichier : {p.text_max_chars} caractères au plus.")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_text.too_long", max=p.text_max_chars))
     try:
         data = content.encode("utf-8")
     except UnicodeEncodeError:
-        return ToolResult(ok=False, content="Ce contenu n'est pas du texte lisible.")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_text.unreadable"))
     if len(data) > TEXT_MAX_BYTES:
-        return ToolResult(ok=False, content=f"Trop lourd pour un fichier : {TEXT_MAX_BYTES // 1024} Kio au plus.")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_text.too_heavy", max=TEXT_MAX_BYTES // 1024))
     refused = _budget(ctx, target)
     if refused is not None:
         return refused
@@ -267,9 +258,8 @@ async def share_text(args: TextArgs, ctx: Any) -> Any:
 
 
 class FilesArgs(BaseModel):
-    project: int = Field(0, description="Le numéro du projet (0 : la liste de tes projets dont tu peux envoyer "
-                                        "des fichiers).")
-    path: str = Field("", description="Un dossier du projet (vide : tout le projet).")
+    project: int = Field(0, description=phrase("shares.tools.project_files.project"))
+    path: str = Field("", description=phrase("shares.tools.project_files.path"))
 
 
 def _titles(ctx: Any, views: list[projects_c.ProjectView]) -> dict[str, str]:
@@ -282,9 +272,7 @@ def _entries(tree: list[str]) -> list[str]:
     return [line for line in tree if not line.startswith("[")]
 
 
-@SHARES.tool(PROJECT_FILES, description="Voir ce que tu peux envoyer de tes projets à la personne : sans numéro, "
-             "tes projets (avec leur numéro) ; avec un numéro (et un dossier), leurs fichiers.",
-             args=FilesArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4, when=offered)
+@SHARES.tool(PROJECT_FILES, description=phrase("shares.tools.project_files.description"), args=FilesArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4, when=offered)
 async def project_files(args: FilesArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):
@@ -292,12 +280,12 @@ async def project_files(args: FilesArgs, ctx: Any) -> Any:
     _target, person = who
     atelier = ctx.ports.get("workshop")
     if atelier is None:
-        return ToolResult(ok=False, content="Les ateliers de tes projets ne sont pas disponibles ici.")
+        return ToolResult(ok=False, content=phrase("shares.tools.project_files.no_workshop"))
     visible = _visible(ctx.frame, person)
     titles = _titles(ctx, visible)
     if not args.project:
         if not visible:
-            return ToolResult(content="Aucun de tes projets n'a de fichier à lui envoyer.")
+            return ToolResult(content=phrase("shares.tools.project_files.none"))
         lines = []
         for v in visible:
             count = 0
@@ -306,32 +294,32 @@ async def project_files(args: FilesArgs, ctx: Any) -> Any:
                     count = len(_entries(await atelier.tree(v.id)))
                 except (OutsideWorkshop, OSError, ValueError):
                     count = 0
-            lines.append(f"- n° {v.id} « {titles.get(v.title_ref, '…')} » — {count} fichier(s)")
-        return ToolResult(content="Ses projets dont tu peux lui envoyer des fichiers :\n" + "\n".join(lines))
+            lines.append(phrase("shares.tools.project_files.item", id=v.id, count=count,
+                                title=titles.get(v.title_ref, phrase("shares.tools.project_files.no_title"))))
+        return ToolResult(content=phrase("shares.tools.project_files.list") + "\n" + "\n".join(lines))
     v = next((x for x in visible if x.id == args.project), None)
     if v is None:
-        return ToolResult(ok=False, content=NO_PROJECT)
+        return ToolResult(ok=False, content=phrase("shares.tools.project_files.not_shared"))
+    title = titles.get(v.title_ref, phrase("shares.tools.project_files.no_title"))
     if not atelier.exists(v.id):
-        return ToolResult(content=f"Le projet « {titles.get(v.title_ref, '…')} » n'a encore aucun fichier.")
+        return ToolResult(content=phrase("shares.tools.project_files.empty_project", title=title))
     try:
         tree = _entries(await atelier.tree(v.id, args.path.strip() or "."))
     except (OutsideWorkshop, FileNotFoundError, OSError, ValueError) as exc:
-        return ToolResult(ok=False, content=f"Ce dossier ne se lit pas : {exc}")
+        return ToolResult(ok=False, content=phrase("shares.tools.project_files.unreadable", error=exc))
     shown = tree[:TREE_SHOWN]
-    more = f"\n[… et {len(tree) - len(shown)} de plus : ouvre un sous-dossier]" if len(tree) > len(shown) else ""
-    body = "\n".join(f"- {line}" for line in shown) or "(dossier vide)"
-    return ToolResult(content=f"Projet n° {v.id} « {titles.get(v.title_ref, '…')} » :\n{body}{more}")
+    more = "\n" + phrase("shares.tools.project_files.more", count=len(tree) - len(shown)) \
+        if len(tree) > len(shown) else ""
+    body = "\n".join(f"- {line}" for line in shown) or phrase("shares.tools.project_files.empty_dir")
+    return ToolResult(content=phrase("shares.tools.project_files.tree", id=v.id, title=title) + "\n" + body + more)
 
 
 class ProjectFileArgs(BaseModel):
-    project: int = Field(description="Le numéro du projet (vu avec project_files).")
-    path: str = Field(description="Le chemin du fichier dans le projet (vu avec project_files).")
+    project: int = Field(description=phrase("shares.tools.share_project_file.project"))
+    path: str = Field(description=phrase("shares.tools.share_project_file.path"))
 
 
-@SHARES.tool(SHARE_PROJECT_FILE, description="Envoyer à la personne un fichier de l'atelier d'un de tes projets (son "
-             "numéro et son chemin, vus avec project_files) : il part avec ton message, en pièce jointe. Dis en une "
-             "phrase ce que tu envoies.",
-             args=ProjectFileArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE,
+@SHARES.tool(SHARE_PROJECT_FILE, description=phrase("shares.tools.share_project_file.description"), args=ProjectFileArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=PER_EPISODE,
              when=offered)
 async def share_project_file(args: ProjectFileArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
@@ -341,24 +329,24 @@ async def share_project_file(args: ProjectFileArgs, ctx: Any) -> Any:
     atelier = ctx.ports.get("workshop")
     v = next((x for x in _visible(ctx.frame, person) if x.id == args.project), None)
     if v is None:
-        return ToolResult(ok=False, content=NO_PROJECT)
+        return ToolResult(ok=False, content=phrase("shares.tools.project_files.not_shared"))
     path = args.path.strip().strip("/")
     parts = [x for x in path.split("/") if x]
     if not parts or any(x == ".." for x in parts):
-        return ToolResult(ok=False, content="Donne le chemin d'un fichier du projet (vu avec project_files).")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_project_file.give_path"))
     if any(x.startswith(".") for x in parts):
-        return ToolResult(ok=False, content="Un fichier caché de l'atelier ne s'envoie pas.")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_project_file.hidden"))
     if atelier is None or not atelier.exists(v.id):
-        return ToolResult(ok=False, content="Ce fichier n'est pas dans l'atelier du projet.")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_project_file.missing"))
     limit = params_of(ctx.frame).project_max_mb * MIB
     try:
         data = await atelier.read_bytes(v.id, path, limit + 1)
     except (OutsideWorkshop, FileNotFoundError, IsADirectoryError, OSError, ValueError):
-        return ToolResult(ok=False, content="Ce fichier n'est pas dans l'atelier du projet.")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_project_file.missing"))
     if len(data) > limit:
-        return ToolResult(ok=False, content=f"Trop gros pour être envoyé : {limit // MIB} Mio au plus.")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_project_file.too_big", max=limit // MIB))
     if not data:
-        return ToolResult(ok=False, content="Ce fichier est vide : rien à envoyer.")
+        return ToolResult(ok=False, content=phrase("shares.tools.share_project_file.empty"))
     refused = _budget(ctx, target)
     if refused is not None:
         return refused
@@ -371,8 +359,7 @@ async def share_project_file(args: ProjectFileArgs, ctx: Any) -> Any:
 
 
 class RereadArgs(BaseModel):
-    name: str = Field(description="Le nom du fichier que tu lui as envoyé (comme dans « ce que tu lui as déjà "
-                                  "envoyé ») : courses.md, notes.txt…")
+    name: str = Field(description=phrase("shares.tools.reread.name"))
 
 
 def _named(raw: Any, name: str) -> bool:
@@ -381,10 +368,7 @@ def _named(raw: Any, name: str) -> bool:
     return bool(wanted) and wanted in (name.casefold(), name.rpartition(".")[0].casefold())
 
 
-@SHARES.tool(REREAD_SENT_FILE, description="Relire un texte que tu as écrit et envoyé à la personne en pièce jointe "
-             "(une liste, une note, du code), par son nom : avant d'en reparler, ou de le lui renvoyer corrigé avec "
-             "share_text, pour ne pas le refaire de mémoire.",
-             args=RereadArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4, when=offered)
+@SHARES.tool(REREAD_SENT_FILE, description=phrase("shares.tools.reread.description"), args=RereadArgs, bundle=BUNDLE, episodes=CONVERSATIONAL, max_calls_per_episode=4, when=offered)
 async def reread_sent_file(args: RereadArgs, ctx: Any) -> Any:
     who = _recipient(ctx)
     if isinstance(who, ToolResult):
@@ -398,8 +382,7 @@ async def reread_sent_file(args: RereadArgs, ctx: Any) -> Any:
     v = next((v for v in reversed(written) if names.get(v.name_ref) and _named(args.name, names[v.name_ref])), None)
     text = await reread(ctx.ports.get(PORT), v.file, REREAD_MAX_CHARS) if v is not None else None
     if v is None or text is None:
-        return ToolResult(ok=False, content=NOT_SENT)
+        return ToolResult(ok=False, content=phrase("shares.tools.reread.not_sent"))
     tz = ctx.frame.env.tz_of(ctx.frame.root)
-    return ToolResult(content=(
-        f"« {names[v.name_ref]} », que tu lui as envoyé {when_fr(v.at, ctx.frame.now, tz)} — ce que tu y as écrit :\n"
-        f"{text}\n(Pour le changer, renvoie-le corrigé avec share_text : garde tel quel ce qui ne bouge pas.)"))
+    return ToolResult(content=phrase("shares.tools.reread.text", name=names[v.name_ref],
+                                     when=when_fr(v.at, ctx.frame.now, tz), text=text))

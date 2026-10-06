@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from twin.dates import date_from_header, date_from_path, find_date, is_date_line
-from twin.timing import DAY, HOUR, Origin, Precision, Temps, from_us, precision_for_width, propagate
+from twin.timing import DAY, HOUR, Origin, Precision, Temps, from_us, precision_for_width, propagate, to_us
 
 TZ = ZoneInfo("Europe/Paris")
 
@@ -95,6 +95,27 @@ class TestPropagation:
         assert out[1].point is None
         assert out[1].start == out[0].start and out[1].end is None
 
+    def test_un_point_exclu_par_sa_plage_resserree_repart_au_milieu_pas_sur_la_borne(self) -> None:
+        # une page « 2009 » (point au 1er juillet) avant une page du 3 mars : écrite entre le 1er janvier et le 3 mars
+        annee = Temps.year(2009, TZ, Origin.PATH)
+        mars = Temps.day(date(2009, 3, 3), TZ, Origin.HEADER)
+        out, _ = propagate([annee, mars])
+        assert out[0].start == annee.start and out[0].end == mars.end
+        assert local(out[0].point).month == 1 or local(out[0].point).month == 2  # type: ignore[arg-type]
+        assert out[0].point < mars.start  # type: ignore[operator]  # pas collé au 3 mars
+
+    def test_les_points_estimes_suivent_l_ordre(self) -> None:
+        # deux pages datées par leur dossier (année entière, point en juillet) puis une de mars : l'été ne précède pas
+        # le printemps — et deux estimations dans le même ordre ne se croisent pas
+        sept, octobre = Temps.month(2009, 9, TZ, Origin.CONTENT), Temps.month(2009, 10, TZ, Origin.CONTENT)
+        early = to_us(datetime(2009, 9, 5, 12, tzinfo=TZ))  # dans sa plage, mais avant le point du 15 septembre
+        seq = [sept, Temps.span(sept.start, octobre.end, Origin.CONTENT, point=early), octobre]
+        out, conflicts = propagate(seq)
+        assert not conflicts
+        points = [t.point for t in out]
+        assert points == sorted(points), [local(p) for p in points]  # type: ignore[arg-type,type-var]
+        assert all(t.start <= t.point <= t.end for t in out)  # type: ignore[operator]
+
     def test_une_suite_deja_ordonnee_ne_bouge_pas(self) -> None:
         seq = [at(2009, 1, 1), at(2009, 1, 2), at(2009, 1, 3)]
         assert propagate(seq) == (seq, [])
@@ -143,6 +164,31 @@ class TestDatesEcrites:
         assert t is not None and t.origin == Origin.HEADER
         assert date_from_header("Une longue phrase qui parle de 2009 et de bien d'autres choses encore, "
                                 "beaucoup trop longue pour un en-tête de note.", TZ) is None
+
+    def test_ni_l_espace_ni_deux_separateurs_differents(self) -> None:
+        assert find_date("j'ai eu 12 03 09 au bac blanc", TZ, Origin.HEADER) is None
+        mixed = find_date("12/03-2009", TZ, Origin.HEADER)
+        assert mixed is not None and mixed.precision == Precision.YEAR  # l'année seule, pas un jour
+        assert find_date("12.03.09", TZ, Origin.HEADER) is not None
+
+    def test_une_date_a_venir_n_est_pas_celle_d_un_ecrit(self) -> None:
+        next_year = datetime.now(TZ).year + 1
+        assert find_date(f"rdv le 12/03/{next_year}", TZ, Origin.HEADER) is None
+        assert find_date(f"mars {next_year}", TZ, Origin.HEADER) is None
+        t = find_date("12/03/98", TZ, Origin.HEADER)  # deux chiffres : le siècle qui n'est pas dans l'avenir
+        assert t is not None and local(t.point).year == 1998  # type: ignore[arg-type]
+
+    def test_une_annee_nue_ne_date_qu_une_ligne_qui_n_est_qu_elle(self) -> None:
+        assert date_from_header("Les copains de 2005\n\nOn s'est revus hier.", TZ) is None
+        t = date_from_header("# Journal 2009\n\nOn s'est revus hier.", TZ)
+        assert t is not None and t.precision == Precision.YEAR
+
+    def test_un_dossier_de_sauvegarde_ne_donne_qu_une_borne(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
+        t = date_from_path(tmp_path / "sauvegarde 2019-03-12" / "idées.txt", tmp_path, TZ)
+        assert t is not None and t.start is None and t.point is None
+        assert local(t.end).date() == date(2019, 3, 12)  # type: ignore[arg-type]
+        t = date_from_path(tmp_path / "2019-03-12" / "idées.txt", tmp_path, TZ)  # un dossier par jour : ce jour
+        assert t is not None and t.precision == Precision.DAY
 
     def test_ligne_de_date_de_journal(self) -> None:
         assert is_date_line("Mardi 12 mars 2009 :")

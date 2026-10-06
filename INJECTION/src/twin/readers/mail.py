@@ -37,6 +37,11 @@ _BULK_SENDERS = re.compile(r"(no-?reply|ne-?pas-?repondre|newsletter|notificatio
 _HEADERS = ("from:", "to:", "subject:", "date:", "message-id:", "received:", "return-path:", "mime-version:")
 
 
+def _maildir(path: Path) -> bool:
+    """Un fichier de Maildir : « 1234.M5P6.hote:2,S » (les drapeaux après « :2, »), rangé sous ``cur/`` ou ``new/``."""
+    return bool(re.search(r":2,[A-Za-z]*$", path.name)) or path.parent.name in ("cur", "new")
+
+
 def strip_quotes(body: str) -> str:
     """Le texte écrit dans ce mail-ci, sans ce qu'il cite ni la signature."""
     cut = len(body)
@@ -52,10 +57,17 @@ def strip_quotes(body: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
+_INNER_QUOTE = re.compile(r"(?is)<blockquote\b(?:(?!<blockquote\b).)*?</blockquote>")
+
+
 def html_to_text(text: str) -> str:
     text = re.sub(r"(?is)<(script|style|head)\b.*?</\1>", "", text)
-    text = re.sub(r"(?i)<br\s*/?>|</(p|div|li|tr|h\d|blockquote)>", "\n", text)
-    text = re.sub(r"(?is)<blockquote\b.*?</blockquote>", "\n", text)  # la citation d'un client web
+    # la citation d'un client web, d'abord : de la plus intérieure à l'extérieure (elles s'emboîtent)
+    while True:
+        text, n = _INNER_QUOTE.subn("\n", text)
+        if not n:
+            break
+    text = re.sub(r"(?i)<br\s*/?>|</(p|div|li|tr|h\d)>", "\n", text)
     return html.unescape(re.sub(r"<[^>]+>", "", text))
 
 
@@ -107,17 +119,19 @@ def is_bulk(msg: EmailMessage, sender: str) -> bool:
 class MailReader:
     name = "mail"
     label = "Mails (mbox, .eml, Maildir)"
-    version = 1
+    streams = True  # lu en flux : pas de taille maximale
+    version = 2
 
     def detect(self, path: Path) -> int:
         suffix = path.suffix.lower()
         if suffix in (".mbox", ".mbx"):
             return 90
-        h = head(path, 2048)
-        if h.startswith("From ") and "\nFrom:" in h:
+        h = head(path, 32768)  # une longue chaîne de « Received: » repousse le « From: » loin
+        if h.startswith("From ") and re.search(r"^From:", h, re.M | re.I):
             return 85  # mbox sans extension (Thunderbird)
         low = h.lower()
-        if suffix == ".eml" or (suffix == "" and sum(low.count(k) for k in _HEADERS) >= 3):
+        bare = suffix == "" or _maildir(path)
+        if suffix == ".eml" or (bare and sum(low.count(k) for k in _HEADERS) >= 3):
             return 80 if any(k in low for k in ("from:", "message-id:")) else 0
         return 0
 

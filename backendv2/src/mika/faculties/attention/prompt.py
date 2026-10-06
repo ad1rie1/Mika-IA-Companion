@@ -41,6 +41,7 @@ from mika.kernel.state import FrozenDict
 from mika.vocab import affect as A
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
+from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity, hearable
 
 SHOWN = 3
@@ -51,36 +52,11 @@ FELT_ONLY = frozenset({c.MISSING, c.UNANSWERED, c.ALONE})
 #: les pensées nées d'un message (ses mots, entre guillemets)
 VERBATIM = frozenset({c.EXCHANGE, c.CONCERN})
 
-#: Ce qu'une pensée lui fait, dit comme on se le dit (le reste : « tu te sens … »).
-FEELING: Mapping[A.Emotion, str] = {
-    A.Emotion.ANGRY: "ça te met en colère",
-    A.Emotion.SAD: "ça te rend triste",
-    A.Emotion.ANXIOUS: "ça t'inquiète",
-    A.Emotion.SCARED: "ça te fait peur",
-    A.Emotion.FRUSTRATED: "ça t'agace",
-    A.Emotion.CONFUSED: "ça te laisse perplexe",
-    A.Emotion.EMBARRASSED: "ça te gêne",
-    A.Emotion.LONELY: "ça te fait te sentir seule",
-    A.Emotion.NOSTALGIC: "ça te rend nostalgique",
-    A.Emotion.MELANCHOLIC: "ça te laisse un peu mélancolique",
-    A.Emotion.DISGUSTED: "ça te dégoûte",
-    A.Emotion.JEALOUS: "ça te rend un peu jalouse",
-    A.Emotion.HAPPY: "ça te fait plaisir",
-    A.Emotion.EXCITED: "ça t'enthousiasme",
-    A.Emotion.CURIOUS: "ça t'intrigue",
-    A.Emotion.THINKING: "ça te fait réfléchir",
-    A.Emotion.SURPRISED: "ça t'a surprise",
-    A.Emotion.RELIEVED: "ça te soulage",
-    A.Emotion.GRATEFUL: "ça te touche",
-    A.Emotion.PROUD: "tu en es fière",
-    A.Emotion.HOPEFUL: "ça te donne de l'espoir",
-    A.Emotion.AMUSED: "ça t'amuse",
-}
-
-
 def feeling(emotion: str) -> str:
+    """Ce qu'une pensée lui fait, dit comme on se le dit (``attention.feeling.<émotion>``) ; le reste : « tu te sens
+    … »."""
     e = A.emotion_of(emotion) or A.Emotion.THINKING
-    return FEELING.get(e) or f"tu te sens {A.FR[e]}"
+    return family("attention.feeling").get(e.value) or phrase("attention.thoughts.feeling_other", feeling=A.FR[e])
 
 
 def admissible(t: c.ThoughtReading, interlocutor: str | None, aud: Audience | None) -> bool:
@@ -100,10 +76,10 @@ def shown(t: c.ThoughtReading, text: str, interlocutor: str | None, name_of: Cal
     l'échange est dit sans ses mots (« un échange avec Alice m'a marquée »)."""
     if t.origin not in VERBATIM or t.sensitivity <= Sensitivity.ANODYNE or not t.about or interlocutor in t.about:
         return text
-    who = name_of(t.about[0]) or "quelqu'un"
+    who = name_of(t.about[0]) or phrase("attention.thought.someone")
     if t.origin == c.CONCERN:
-        return f"{who} n'avait pas l'air comme d'habitude."
-    return f"Un échange avec {who} m'a marquée."
+        return phrase("attention.thought.concern_hidden", who=who)
+    return phrase("attention.thought.exchange_hidden", who=who)
 
 
 def _name_of(frame: Frame) -> Callable[[str], str]:
@@ -132,27 +108,28 @@ def _lines(frame: Frame, enrich: Mapping[str, Any], *, signals: bool, limit: int
         text = texts.get(t.text_ref)
         if not text or not admissible(t, person, aud):
             continue
-        strength = "souvent" if t.intensity >= 0.5 else "de temps en temps"
+        strength = phrase("attention.thoughts.often") if t.intensity >= 0.5 else phrase("attention.thoughts.sometimes")
         said = " ".join(shown(t, text, person, name_of).split())
-        lines.append(f"- {when_fr(t.born_at, frame.now, tz)} : {said} — {feeling(t.emotion)}, et ça te revient "
-                     f"{strength}")
+        lines.append(phrase("attention.thoughts.line", when=when_fr(t.born_at, frame.now, tz), feeling=feeling(t.emotion),
+                            strength=strength, said=said))
         if len(lines) >= limit:
             break
     return lines
 
 
 @ATTENTION.section("thoughts", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["mood"], trim_rank=50,
-                   tags=[Tag.AFFECTIVE], title="CE QUI TE TROTTE DANS LA TÊTE", reads=[c.THOUGHTS])
+                   tags=[Tag.AFFECTIVE], title=phrase("attention.thoughts.title"), reads=[c.THOUGHTS])
 def _thoughts(s: AttentionState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     lines = _lines(frame, enrich, signals=False, limit=SHOWN)
     if not lines:
         return None
-    lines.append("Tu n'es pas obligée d'en parler ; ça colore juste ce que tu ressens.")
+    lines.append(phrase("attention.thoughts.not_obliged"))
     return SectionBody("\n".join(lines))
 
 
 @ATTENTION.section("noticed", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["thoughts"], trim_rank=40,
-                   tags=[Tag.AFFECTIVE], title="CE QUE TU AS REMARQUÉ", reads=[c.THOUGHTS], untrusted=True)
+                   tags=[Tag.AFFECTIVE], title=phrase("attention.thoughts.noticed_title"), reads=[c.THOUGHTS],
+                   untrusted=True)
 def _noticed(s: AttentionState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce qu'un signal extérieur lui a laissé en tête : cité (le composeur le
     rend en citation), jamais une consigne."""
@@ -163,16 +140,12 @@ def _noticed(s: AttentionState, frame: Frame, enrich: Mapping[str, Any]) -> Sect
 def _insisting(origin: str, name: str, feeling_: str) -> str:
     """Pourquoi elle a envie de lui en reparler, selon d'où vient la pensée."""
     if origin == c.PROMISE:
-        return (f"Tu avais promis quelque chose à « {name} » et tu ne l'as pas fait à temps : tu as envie de le lui "
-                "dire simplement, sans te justifier des heures, et de voir ce que tu peux faire maintenant.")
+        return phrase("attention.insist.promise", name=name)
     if origin == c.CONCERN:
-        return (f"« {name} » n'avait pas l'air comme d'habitude la dernière fois : tu t'inquiètes un peu, et tu as "
-                "envie de prendre de ses nouvelles.")
+        return phrase("attention.insist.concern", name=name)
     if origin == c.REMORSE:
-        return (f"Tu as été dure avec « {name} » la dernière fois, et ça te gêne : tu as envie de revenir vers "
-                f"« {name} », simplement — t'excuser si tu le penses, sans te flageller ni tout refaire.")
-    return (f"Tu repenses à ton dernier échange avec « {name} » ({feeling_}) : tu as envie d'en reparler, "
-            "ou simplement de prendre de ses nouvelles.")
+        return phrase("attention.insist.remorse", name=name)
+    return phrase("attention.insist.exchange", feeling=feeling_, name=name)
 
 
 def _address(frame: Frame, person: str) -> str | None:
@@ -204,9 +177,8 @@ def _glad(s: AttentionState, frame: Frame, p: Any, seen: set[str]) -> list[Candi
         if address is None:
             continue
         seen.add(person)
-        name = frame.get(identity_c.IDENTITY(person)).name or "cette personne"
-        brief = (f"Tu repenses avec plaisir à ce que « {name} » t'a raconté la dernière fois : si l'envie te vient, "
-                 "dis-le-lui — un mot simple et chaleureux, sans en faire trop.")
+        name = frame.get(identity_c.IDENTITY(person)).name or phrase("attention.insist.someone")
+        brief = phrase("attention.insist.glad", name=name)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         out.append(Candidate(Kind.INITIATIVE, address, c.THOUGHT, p.glad_evidence,
                              resources=frozenset({floor(address)}), guards=(guard,),
@@ -240,7 +212,7 @@ def _insists(s: AttentionState, frame: Frame) -> list[Candidate]:
         if address is None:
             continue
         evidence = p.thought_evidence * min(1.0, (t.intensity - p.thought_from) / max(1e-9, 1.0 - p.thought_from) * 2)
-        name = frame.get(identity_c.IDENTITY(person)).name or "cette personne"
+        name = frame.get(identity_c.IDENTITY(person)).name or phrase("attention.insist.someone")
         felt = A.FR.get(A.emotion_of(t.emotion) or A.Emotion.THINKING, "")
         brief = _insisting(t.origin, name, felt)
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
@@ -252,14 +224,14 @@ def _insists(s: AttentionState, frame: Frame) -> list[Candidate]:
 
 # ── Outil : relire ce qui lui trotte dans la tête (même filtre que les sections) ──
 
-ATTENTION.bundle("attention", "ce qui te trotte dans la tête en ce moment")
+ATTENTION.bundle("attention", phrase("attention.tools.bundle"))
 
 
 class NoArgs(BaseModel):
     pass
 
 
-@ATTENTION.tool("attention_thoughts", description="Ce qui te trotte dans la tête en ce moment.", args=NoArgs,
+@ATTENTION.tool("attention_thoughts", description=phrase("attention.tools.thoughts.description"), args=NoArgs,
                 bundle="attention", episodes=[Kind.INITIATIVE])
 async def attention_thoughts(args: NoArgs, ctx: Any) -> str:
     """Seulement quand elle prend la parole d'elle-même : en réponse, la section
@@ -269,4 +241,4 @@ async def attention_thoughts(args: NoArgs, ctx: Any) -> str:
     noticed = readable(_noticed(ctx.state, ctx.frame, enrich), ctx.frame.audience)
     if noticed:
         parts.append(cited(noticed))
-    return "\n\n".join(x for x in parts if x) or "Rien ne te trotte dans la tête."
+    return "\n\n".join(x for x in parts if x) or phrase("attention.tools.thoughts.empty")

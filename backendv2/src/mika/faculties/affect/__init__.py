@@ -36,6 +36,7 @@ from mika.vocab import affect as A
 from mika.vocab.affect import Declared, Emotion
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,14 +342,15 @@ def _target_person(frame: Frame) -> str:
 # un réveil par API (WAKE, ADR 0068)
 @AFFECT.section("mood", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.WORK, Kind.STEP, Kind.WAKE],
                 tags=[Tag.AFFECTIVE],
-                trim_rank=70, floor_chars=200, title="TON ÉTAT ÉMOTIONNEL ACTUEL", reads=[c.MOOD, identity_c.PERSON])
+                trim_rank=70, floor_chars=200, title=phrase("affect.mood_line.title"),
+                reads=[c.MOOD, identity_c.PERSON])
 def _mood_section(s: AffectState, frame: Frame, enrich: Any) -> str:
     p = _params(frame.env.params_of("affect", frame.root))
     return prose.mood(frame.get(c.MOOD), p, current=_target_person(frame))
 
 
 @AFFECT.section("stance", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, tags=[Tag.AFFECTIVE], after=["who"],
-                trim_rank=75, title="CE QUE TU RESSENS POUR CETTE PERSONNE",
+                trim_rank=75, title=phrase("affect.stance.title"),
                 reads=[c.STANCE, identity_c.PERSON, identity_c.IDENTITY])
 def _stance_section(s: AffectState, frame: Frame, enrich: Any) -> str | None:
     person = _target_person(frame)
@@ -372,7 +374,7 @@ def _overflow(s: AffectState, frame: Frame) -> list[Candidate]:
         return []
     span = max(1e-9, 1.0 - p.overflow_floor)
     evidence = p.overflow_max_evidence * min(1.0, (m.overflow - p.overflow_floor) / span)
-    brief = f"Ton humeur déborde un peu ({A.FR[m.felt]}) : tu as envie d'en parler, ou juste de parler."
+    brief = phrase("affect.overflow.brief", feeling=A.FR[m.felt])
     return [Candidate(Kind.INITIATIVE, Anyone.ANY, c.MOOD_OVERFLOW, evidence,
                       args=FrozenDict({"brief:affect": brief}))]
 

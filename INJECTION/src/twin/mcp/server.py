@@ -29,9 +29,10 @@ from zoneinfo import ZoneInfo
 
 from twin.corpus import Corpus
 from twin.dates import fold
-from twin.dating import describe, parse_manual
+from twin.dating import DOCUMENT, describe, parse_manual, remember_date
 from twin.mcp.protocol import Prompt, Server, Tool, ToolFailure
 from twin.render import render_sessions, when_words
+from twin.sessions import refresh_session_time
 from twin.timing import RANK, Origin, Precision, Temps, from_us
 
 MAX_TOOL_CHARS = 30_000
@@ -184,6 +185,10 @@ class JumeauTools:
         merged = Temps(merged.start, merged.end, merged.point, merged.precision, origin)
         self.db.execute("UPDATE documents SET t_start = ?, t_end = ?, t_point = ?, t_precision = ?, t_origin = ? "
                         "WHERE id = ?", (*merged.as_row(), did))
+        remember_date(self.db, DOCUMENT, row["key"], merged)  # gardée : une relecture de la source ne l'efface pas
+        session = self.db.execute("SELECT id FROM sessions WHERE document = ?", (did,)).fetchone()
+        if session is not None:
+            refresh_session_time(self.db, session["id"])
         self.db.commit()
         return f"{ref} daté : {describe(merged, self.tz)} ({origin.value})"
 

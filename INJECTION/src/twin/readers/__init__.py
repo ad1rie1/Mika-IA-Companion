@@ -10,6 +10,7 @@ Ajouter un format : un module ici qui expose ``READER``, puis l'inscrire dans ``
 
 from __future__ import annotations
 
+import codecs
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,12 +67,15 @@ def head(path: Path, size: int = 8192) -> str:
             raw = f.read(size)
     except OSError:
         return ""
-    for enc in ("utf-8-sig", "utf-16"):
-        try:
-            return raw.decode(enc)
-        except UnicodeDecodeError:
-            continue
-    return raw.decode("latin-1", errors="replace")
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16", errors="replace")
+    if len(raw) >= 16 and raw[1::2].count(0) > len(raw) // 4:  # UTF-16 sans BOM : un octet nul sur deux
+        return raw.decode("utf-16-le", errors="replace")
+    try:
+        # incrémental : un caractère coupé par la limite de lecture n'est pas une erreur d'encodage
+        return codecs.getincrementaldecoder("utf-8-sig")().decode(raw, final=False)
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace")
 
 
 def read_text(path: Path) -> str:

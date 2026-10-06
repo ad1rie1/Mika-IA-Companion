@@ -20,6 +20,7 @@ from zoneinfo import ZoneInfo
 
 from twin.corpus import Corpus
 from twin.dating import describe
+from twin.records import MSN
 from twin.timing import Precision, Temps, from_us
 
 DAYS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
@@ -55,11 +56,19 @@ def when_words(t: Temps, tz: ZoneInfo) -> str:
 
 
 def her_name(corpus: Corpus) -> str:
-    """Son nom tel que ses archives la nomment le plus souvent (« elle » à défaut)."""
-    weights = {r["name"]: r["n"] for r in corpus.db.execute(
-        "SELECT pa.name, COUNT(m.id) n FROM participants pa JOIN persons p ON p.id = pa.person "
-        "LEFT JOIN messages m ON m.author = pa.id WHERE p.is_me = 1 AND pa.name != '' GROUP BY pa.name")}
-    return max(weights, key=lambda k: weights[k]) if weights else "elle"
+    """Son nom : celui que la revue lui donne (``elle.nom``), sinon celui que ses archives disent le plus souvent —
+    un vrai nom (carnet d'adresses, profil, mails) avant un pseudo MSN (« Léa ~ zik » n'est pas un prénom) ;
+    « elle » à défaut."""
+    row = corpus.db.execute("SELECT name FROM persons WHERE is_me = 1").fetchone()
+    if row and row["name"] and row["name"] != "elle":
+        return str(row["name"])
+    weights = {(r["name"], r["channel"] == MSN): r["n"] for r in corpus.db.execute(
+        "SELECT pa.name, pa.channel, COUNT(m.id) n FROM participants pa JOIN persons p ON p.id = pa.person "
+        "LEFT JOIN messages m ON m.author = pa.id WHERE p.is_me = 1 AND pa.name != '' GROUP BY pa.name, pa.channel")}
+    if not weights:
+        return "elle"
+    name, _nick = max(weights, key=lambda k: (not k[1], weights[k]))
+    return str(name)
 
 
 def render_sessions(corpus: Corpus, session_ids: list[int], tz: ZoneInfo) -> Rendered:

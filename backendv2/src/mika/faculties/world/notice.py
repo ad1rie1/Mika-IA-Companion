@@ -20,6 +20,7 @@ from mika.contracts import world as w
 from mika.faculties.world import plan
 from mika.kernel.events import Content, Draft
 from mika.vocab.affect import Emotion
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 #: La sorte de ses signaux de changement (l'attention habitue par source et par sorte).
@@ -82,14 +83,16 @@ def _where(defn: w.WorldDef, loc: w.Location) -> str:
     if isinstance(loc, w.InRoom):
         place = defn.place(loc.near) if loc.near else None
         if place is not None and place.place_kind is not w.PlaceKind.SPOT and place.of_object:
-            return f"près de {plan.label_of(defn, place.of_object)}"
+            return phrase("world.notice.near", object=plan.label_of(defn, place.of_object))
         if place is not None:
             return place.label
         room = defn.room(loc.room)
-        return f"dans {room.label}" if room is not None else ""
+        return phrase("world.notice.in_room", room=room.label) if room is not None else ""
     if isinstance(loc, w.Held):
-        return "dans tes mains" if loc.actor == w.MIKA else ""
-    return f"{'sur' if isinstance(loc, w.On) else 'dans'} {plan.label_of(defn, loc.object)}"
+        return phrase("world.notice.in_hands") if loc.actor == w.MIKA else ""
+    if isinstance(loc, w.On):
+        return phrase("world.notice.on_top", object=plan.label_of(defn, loc.object))
+    return phrase("world.notice.in", object=plan.label_of(defn, loc.object))
 
 
 def changes(before: w.WorldDef, after: w.WorldDef, was: Mapping[str, w.ObjectState],
@@ -137,11 +140,14 @@ def sentence(r: Remark) -> str:
     """Ce qu'elle remarque, comme elle se le dit (vide : rien)."""
     kind = change(r)
     if kind == APPEARED:
-        return f"Il y a quelque chose de nouveau{' ' + r.where if r.where else ''} : {r.label}."
+        return phrase("world.notice.appeared_where", where=r.where, label=r.label) if r.where else \
+            phrase("world.notice.appeared", label=r.label)
     if kind == GONE:
-        return f"Quelque chose a disparu{' ' + r.was if r.was else ''} : {r.label}."
+        return phrase("world.notice.gone_from", was=r.was, label=r.label) if r.was else \
+            phrase("world.notice.gone", label=r.label)
     if kind == MOVED:
-        return f"Quelque chose a changé de place : {r.label}" + (f", maintenant {r.where}." if r.where else ".")
+        return phrase("world.notice.moved_to", label=r.label, where=r.where) if r.where else \
+            phrase("world.notice.moved", label=r.label)
     return ""
 
 

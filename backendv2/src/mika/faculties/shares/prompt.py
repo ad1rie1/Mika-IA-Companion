@@ -23,6 +23,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL
+from mika.vocab.phrasebook import phrase
 
 #: les derniers fichiers partis, au plus tant, sur tant de jours
 SHOWN = 3
@@ -30,9 +31,6 @@ SHOWN_DAYS = 30
 #: le dernier texte écrit, relu dans la section : au plus tant de caractères
 REREAD_SHOWN_CHARS = 1_500
 
-SENT_NOTE = "(Partis avec tes messages : ne les renvoie pas, sauf si on te le redemande.)"
-WRITTEN_NOTE = ("(Partis avec tes messages : ne les renvoie pas, sauf si on te le redemande. Un texte que tu as "
-                "écrit se relit avec reread_sent_file ; pour le changer, renvoie-le corrigé avec share_text.)")
 
 
 def _target(frame: Frame) -> str | None:
@@ -64,7 +62,7 @@ async def _names(s: SharesState, frame: Frame, ports: Mapping[str, Any]) -> dict
 
 
 @SHARES.section("sent_files", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=35,
-                title="CE QUE TU LUI AS DÉJÀ ENVOYÉ")
+                title=phrase("shares.sent.title"))
 def _sent_section(s: SharesState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("sent_files")
     aud = frame.audience
@@ -79,8 +77,8 @@ def _sent_section(s: SharesState, frame: Frame, enrich: Mapping[str, Any]) -> Se
     fresh = got.get("fresh")
     fresh_name = names.get(fresh.name_ref) if fresh is not None else None
     written = bool(fresh_name) or any(v.origin == c.WRITTEN for v in shown)
-    body = "\n".join(lines) + "\n" + (WRITTEN_NOTE if written else SENT_NOTE)
+    body = "\n".join(lines) + "\n" + (phrase("shares.sent.written_note") if written else phrase("shares.sent.note"))
     if fresh_name:
         # ce qu'elle a écrit elle-même, à la fin : faute de place, c'est ce qui se coupe d'abord
-        body += f"\nCe que tu as écrit dans « {fresh_name} » :\n{got['text']}"
+        body += "\n" + phrase("shares.sent.written", name=fresh_name) + "\n" + got["text"]
     return SectionBody(body, level=0)

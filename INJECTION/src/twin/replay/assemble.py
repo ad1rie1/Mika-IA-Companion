@@ -97,7 +97,10 @@ def assemble_extraction(request_text: str, archive_of_seq: Mapping[int, Sequence
 
 
 def _person(ref: str, tokens: Mapping[str, str], display_name: Mapping[str, str]) -> str:
-    """« p12 » → « [P1] » si la personne est dans la conversation, sinon son nom ; un prénom reste un prénom."""
+    """« p12 » → « [P1] » si la personne est dans la conversation, sinon son nom ; un prénom reste un prénom ;
+    un « p99 » inconnu ne devient rien (jamais un numéro dans sa mémoire)."""
+    if re.fullmatch(r"p\d+", ref) and ref not in display_name:
+        return ""
     name = display_name.get(ref, ref)
     token = tokens.get(name)
     return f"{name} [{token}]" if token else name
@@ -110,7 +113,7 @@ def _translate(kind: str, item: dict[str, Any], seq_of_archive: Mapping[int, int
     if kind == "promesses":
         out["envers"] = _person(str(item.get("envers", "")), tokens, display_name)
     else:
-        out["personnes"] = [_person(str(p), tokens, display_name) for p in item.get("personnes", [])]
+        out["personnes"] = [x for p in item.get("personnes", []) if (x := _person(str(p), tokens, display_name))]
     if kind == "evenements":
         when = event_date(str(item.get("quand", "")))
         if when is None:

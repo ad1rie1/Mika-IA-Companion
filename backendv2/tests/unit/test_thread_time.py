@@ -17,8 +17,6 @@ import asyncio
 import pytest
 
 from mika.faculties.transcript import (
-    SHE_SPOKE_FIRST,
-    SHE_WROTE_FIRST,
     gap_mark,
     opening_mark,
     read_late,
@@ -31,6 +29,7 @@ from mika.kernel.prompt import CONTEXT_FOOTER, Budget, ChatPrompt
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from mika.vocab.affect import parse_tag
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, disconnect, said
 
 MON = (2026, 9, 28)  # un lundi
@@ -261,15 +260,15 @@ def test_her_own_initiative_is_never_read_as_an_empty_message_from_the_person():
     turns = thread_turns(rows, PARIS, mon(12, 0, 4), 20 * MINUTE)
     msgs = ChatPrompt("", history=tuple(turns), message="x").chat_messages()
     separator = [m["content"] for m in msgs if m["role"] == "user" and "jeudi 19h06" in m["content"]]
-    assert separator == [f"[trois jours plus tard, jeudi 19h06 — {SHE_WROTE_FIRST}]"]
+    assert separator == [f"[trois jours plus tard, jeudi 19h06 — {phrase('transcript.thread.she_wrote_first')}]"]
     assert any(m["content"] == "[le lendemain, vendredi 9h00]" for m in msgs)  # une réponse : le repère nu
     # elle ouvre l'historique : son repère absolu le dit aussi
     opening = thread_turns(rows[2:3], PARIS, mon(12, 0, 4), 20 * MINUTE)[0]
-    assert opening.opening.endswith(f"— {SHE_WROTE_FIRST}")
+    assert opening.opening.endswith(f"— {phrase('transcript.thread.she_wrote_first')}")
     # une initiative qui suit de près garde la précision (sans repère de temps)
     close = thread_turns([rows[0], _row(9, mon(19, 5), "assistant", "INITIATIVE", "et au fait…")], PARIS,
                          mon(20), 20 * MINUTE)
-    assert close[-1].mark == SHE_WROTE_FIRST
+    assert close[-1].mark == phrase("transcript.thread.she_wrote_first")
     room = thread_turns([_row(7, mon(19), "assistant", "INITIATIVE", "yo tout le monde", room="salon")], PARIS,
                         mon(20), 20 * MINUTE)
-    assert room[0].opening.endswith(SHE_SPOKE_FIRST)
+    assert room[0].opening.endswith(phrase("transcript.thread.she_spoke_first"))

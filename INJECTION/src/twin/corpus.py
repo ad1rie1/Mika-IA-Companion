@@ -78,6 +78,10 @@ CREATE TABLE IF NOT EXISTS conflicts (
     id INTEGER PRIMARY KEY, table_name TEXT NOT NULL, ref INTEGER NOT NULL, reason TEXT NOT NULL,
     resolved INTEGER DEFAULT 0, UNIQUE (table_name, ref)
 );
+-- ce que la main (ou Claude Code par le MCP) a décidé : survit à la relecture d'une source
+CREATE TABLE IF NOT EXISTS decisions (
+    kind TEXT NOT NULL, ref TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (kind, ref)
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS fts_messages USING fts5(
     text, subject, content='messages', content_rowid='id', tokenize='unicode61 remove_diacritics 2'
 );
@@ -85,6 +89,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts_documents USING fts5(
     title, text, content='documents', content_rowid='id', tokenize='unicode61 remove_diacritics 2'
 );
 """
+
+
+def _ref(ref: str) -> tuple[str, str]:
+    """« whatsapp:Julie Martin » → (canal, clé) ; la clé peut contenir des deux-points (« mail:sujet:… »)."""
+    channel, _, key = ref.partition(":")
+    return channel, key
 
 
 def fingerprint(*parts: object) -> str:
@@ -108,6 +118,7 @@ class SourceStats:
     messages: int = 0
     documents: int = 0
     duplicates: int = 0
+    forgotten: int = 0
     warnings: list[str] = field(default_factory=list)
 
 
@@ -189,13 +200,28 @@ class Corpus:
         #: deux « ok » de la même personne dans la même minute sont deux messages : leur rang d'occurrence dans la
         #: source entre dans l'empreinte (deux exports qui se chevauchent les numérotent pareil : ils restent fusionnés)
         self._seen: dict[tuple[int, int | None, object, str], int] = {}
+        # une personne oubliée (``jumeau oublier``) ne revient pas par une source relue : ni elle, ni ses messages,
+        # ni ses tête-à-tête
+        forgotten = self.forgotten()
+        silent = {_ref(r.removeprefix("conversation:")) for r in forgotten if r.startswith("conversation:")}
+        gone = {_ref(r) for r in forgotten if not r.startswith("conversation:")}
         for item in items:
+            if isinstance(item, Author) and (item.channel, item.key) in gone:
+                continue
+            if isinstance(item, Conversation) and not item.group and any((item.channel, k) in gone for k in item.members):
+                silent.add((item.channel, item.key))
+            if isinstance(item, Message) and ((item.channel, item.author) in gone
+                                              or (item.channel, item.conversation) in silent):
+                stats.forgotten += 1
+                continue
             if isinstance(item, Author):
                 authors[(item.channel, item.key)] = self._author(item)
             elif isinstance(item, Conversation):
+                if (item.channel, item.key) in silent:
+                    continue
                 cid = self._conversation(item)
                 convs[(item.channel, item.key)] = cid
-                for key in item.members:
+                for key in (k for k in item.members if (item.channel, k) not in gone):
                     pid = authors.get((item.channel, key)) or self._author(Author(item.channel, key))
                     authors[(item.channel, key)] = pid
                     self.db.execute("INSERT OR IGNORE INTO members VALUES (?, ?)", (cid, pid))
@@ -219,6 +245,10 @@ class Corpus:
                     stats.documents += 1
                 else:
                     stats.duplicates += 1
+
+    def forgotten(self) -> set[str]:
+        """Les références oubliées : « canal:clé » d'un participant, « conversation:canal:clé » d'un tête-à-tête."""
+        return {r["ref"] for r in self.db.execute("SELECT ref FROM decisions WHERE kind = 'oubli'")}
 
     def _author(self, a: Author) -> int:
         row = self.db.execute("SELECT id, name, address, aliases, me_hint FROM participants WHERE channel = ? AND key = ?",

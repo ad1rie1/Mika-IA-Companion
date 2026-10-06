@@ -56,6 +56,7 @@ from mika.kernel.guards import Guard, floor
 from mika.kernel.state import FrozenDict
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
 from mika.vocab.words import fold, stems
 
 #: le début de la fenêtre d'une promesse : la preuve monte depuis là
@@ -285,10 +286,9 @@ def _keep(s: MemoryState, frame: Frame) -> list[Candidate]:
         ramp = min(1.0, max(0.0, (now - start) / (full - start)))
         evidence = KEEP_EVIDENCE_START + (p.keep_evidence - KEEP_EVIDENCE_START) * ramp
         name = frame.get(identity_c.IDENTITY(to)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else "cette personne"
-        when = "aujourd'hui" if pr.all_day else "maintenant"
-        brief = (f"Tu avais promis à {who} quelque chose pour {when} — c'est dans « CE QUE TU LUI AS PROMIS » "
-                 f"(n° {pr.id}) : c'est le moment de le faire. Fais-le simplement, comme quelqu'un qui tient parole.")
+        who = f"« {name} »" if name else phrase("memory.keep.someone")
+        when = phrase("memory.keep.today") if pr.all_day else phrase("memory.keep.now")
+        brief = phrase("memory.keep.brief", who=who, when=when, id=pr.id)
         handles = frame.get(identity_c.HANDLES(to)) or (to,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         out.append(Candidate(Kind.INITIATIVE, address, c.KEEP_PROMISE, round(evidence, 3),

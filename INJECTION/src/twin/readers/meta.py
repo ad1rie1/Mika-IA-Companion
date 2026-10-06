@@ -9,7 +9,9 @@ Deux formes :
   [noms], ``threadName``, ``messages`` [{senderName, timestamp, text, media, type}].
 
 Un fil coupé en ``message_1.json``, ``message_2.json``… garde la même clé (le dossier
-du fil) : la base le recoud. Dans un fil à deux, le titre est le nom de l'autre : le
+du fil) : la base le recoud. L'export chiffré range souvent **tous** les fils dans un même
+dossier, un fichier par fil : la clé est alors le fichier, jamais le dossier seul (sinon toutes
+ses discussions se fondraient en une). Dans un fil à deux, le titre est le nom de l'autre : le
 participant qui ne le porte pas, c'est elle. Le nom de la titulaire de l'export se lit
 aussi dans ``profile_information.json`` quand il est là.
 """
@@ -17,6 +19,7 @@ aussi dans ``profile_information.json`` quand il est là.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterator
 from functools import lru_cache
 from pathlib import Path
@@ -72,10 +75,17 @@ def _owner_name(start: Path) -> str:
     return ""
 
 
+def _conversation_key(path: Path) -> str:
+    """Le dossier pour un fil découpé en ``message_N.json`` ; sinon le fichier lui-même (``dossier/fichier``)."""
+    if re.fullmatch(r"message_\d+", path.stem):
+        return path.parent.name
+    return f"{path.parent.name}/{path.stem}"  # le numéro final d'un nom de fichier chiffré est celui du fil
+
+
 class MetaReader:
     name = "meta"
     label = "Messenger / Instagram (export Meta JSON)"
-    version = 1
+    version = 2
 
     def detect(self, path: Path) -> int:
         if path.suffix.lower() != ".json":
@@ -92,7 +102,7 @@ class MetaReader:
         participants = [p if isinstance(p, str) else p.get("name", "") for p in data.get("participants", [])]
         participants = [p for p in participants if p]
         title = data.get("title") or data.get("threadName") or ""
-        conv_key = str(data.get("thread_path") or path.parent.name)
+        conv_key = str(data.get("thread_path") or _conversation_key(path))
         group = len(participants) > 2 or data.get("thread_type") == "RegularGroup"
         yield Conversation(channel, conv_key, title=title, group=group, members=tuple(participants))
 

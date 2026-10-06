@@ -19,11 +19,14 @@ import enum
 import math
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
 from types import MappingProxyType
 
 from mika.kernel.inspect import Swatch
+from mika.vocab.phrasebook import phrase, voice_file
 
 Vec3 = tuple[float, float, float]
 ORIGIN: Vec3 = (0.0, 0.0, 0.0)
@@ -445,12 +448,13 @@ def emotion_named(name: str | None) -> Emotion | None:
     if not name:
         return None
     key = fold(name)
-    found = _SYNONYMS.get(key)
+    synonyms = _synonyms()
+    found = synonyms.get(key)
     if found is not None or not key:
         return found
     for prefix in _INTENSIFIERS:
         if key.startswith(prefix + "_"):
-            return _SYNONYMS.get(key[len(prefix) + 1:])
+            return synonyms.get(key[len(prefix) + 1:])
     return None
 
 
@@ -648,73 +652,37 @@ def strip_prosody(text: str) -> str:
 
 # ── Français ──────────────────────────────────────────────────────────────
 
-#: L'adjectif qui suit « tu te sens » (au féminin : c'est elle).
-FR: Mapping[Emotion, str] = MappingProxyType({
-    Emotion.NEUTRAL: "neutre",
-    Emotion.HAPPY: "contente",
-    Emotion.EXCITED: "excitée",
-    Emotion.LOVE: "amoureuse",
-    Emotion.PROUD: "fière",
-    Emotion.GRATEFUL: "reconnaissante",
-    Emotion.PLAYFUL: "joueuse",
-    Emotion.AMUSED: "amusée",
-    Emotion.HOPEFUL: "pleine d'espoir",
-    Emotion.RELIEVED: "soulagée",
-    Emotion.SAD: "triste",
-    Emotion.ANGRY: "en colère",
-    Emotion.SCARED: "effrayée",
-    Emotion.DISGUSTED: "dégoûtée",
-    Emotion.FRUSTRATED: "frustrée",
-    Emotion.LONELY: "seule",
-    Emotion.ANXIOUS: "anxieuse",
-    Emotion.BORED: "lasse",
-    Emotion.JEALOUS: "jalouse",
-    Emotion.SURPRISED: "surprise",
-    Emotion.THINKING: "pensive",
-    Emotion.CONFUSED: "confuse",
-    Emotion.EMBARRASSED: "gênée",
-    Emotion.NOSTALGIC: "nostalgique",
-    Emotion.DREAMY: "rêveuse",
-    Emotion.DETERMINED: "déterminée",
-    Emotion.MISCHIEVOUS: "malicieuse",
-    Emotion.CURIOUS: "curieuse",
-    Emotion.MELANCHOLIC: "mélancolique",
-})
+
+class _Words(Mapping[Emotion, str]):
+    """Les mots d'une émotion, lus dans sa voix (``persona/voix.yaml``) au moment de l'usage : une table par
+    émotion, comme un dictionnaire (``FR[Emotion.SAD]``, ``FR["sad"]``, ``FR.get(e, défaut)``)."""
+
+    __slots__ = ("_word",)
+
+    def __init__(self, word: Callable[[Emotion], str]) -> None:
+        self._word = word
+
+    def __getitem__(self, emotion: object) -> str:
+        try:
+            e = Emotion(emotion)
+        except ValueError:
+            raise KeyError(emotion) from None
+        return self._word(e)
+
+    def __iter__(self) -> Iterator[Emotion]:
+        return iter(Emotion)
+
+    def __len__(self) -> int:
+        return len(Emotion)
+
+
+#: L'adjectif qui suit « tu te sens » (au féminin : c'est elle) — ``affect.mood`` dans sa voix.
+FR: Mapping[Emotion, str] = _Words(lambda e: phrase(f"affect.mood.{e.value}"))
 
 
 #: Le nom de l'émotion, pour dire ce qu'il y a « en dessous » : « un peu de
-#: colère », « un peu de soulagement » (voir ``partitive``).
-NOUN: Mapping[Emotion, str] = MappingProxyType({
-    Emotion.NEUTRAL: "calme",
-    Emotion.HAPPY: "joie",
-    Emotion.EXCITED: "excitation",
-    Emotion.LOVE: "tendresse",
-    Emotion.PROUD: "fierté",
-    Emotion.GRATEFUL: "reconnaissance",
-    Emotion.PLAYFUL: "espièglerie",
-    Emotion.AMUSED: "amusement",
-    Emotion.HOPEFUL: "espoir",
-    Emotion.RELIEVED: "soulagement",
-    Emotion.SAD: "tristesse",
-    Emotion.ANGRY: "colère",
-    Emotion.SCARED: "peur",
-    Emotion.DISGUSTED: "dégoût",
-    Emotion.FRUSTRATED: "frustration",
-    Emotion.LONELY: "solitude",
-    Emotion.ANXIOUS: "inquiétude",
-    Emotion.BORED: "lassitude",
-    Emotion.JEALOUS: "jalousie",
-    Emotion.SURPRISED: "surprise",
-    Emotion.THINKING: "réflexion",
-    Emotion.CONFUSED: "confusion",
-    Emotion.EMBARRASSED: "gêne",
-    Emotion.NOSTALGIC: "nostalgie",
-    Emotion.DREAMY: "rêverie",
-    Emotion.DETERMINED: "détermination",
-    Emotion.MISCHIEVOUS: "malice",
-    Emotion.CURIOUS: "curiosité",
-    Emotion.MELANCHOLIC: "mélancolie",
-})
+#: colère », « un peu de soulagement » (voir ``partitive``) — ``affect.noun`` dans sa voix.
+NOUN: Mapping[Emotion, str] = _Words(lambda e: phrase(f"affect.noun.{e.value}"))
 
 
 def partitive(emotion: Emotion) -> str:
@@ -767,7 +735,9 @@ _ALIASES: Mapping[Emotion, tuple[str, ...]] = MappingProxyType({
 })
 
 
-def _synonyms() -> dict[str, Emotion]:
+@lru_cache(maxsize=4)
+def _synonyms_of(voice: Path) -> Mapping[str, Emotion]:
+    """Les noms qu'elle reconnaît, pour une voix : ses adjectifs et ses noms (``FR``, ``NOUN``) et les alias."""
     table: dict[str, Emotion] = {}
     for emotion in Emotion:
         table[emotion.value] = emotion
@@ -776,23 +746,26 @@ def _synonyms() -> dict[str, Emotion]:
     for emotion, words in _ALIASES.items():
         for word in words:
             table.setdefault(fold(word), emotion)
-    return table
+    return MappingProxyType(table)
 
 
-_SYNONYMS: Mapping[str, Emotion] = MappingProxyType(_synonyms())
+def _synonyms() -> Mapping[str, Emotion]:
+    return _synonyms_of(voice_file())
+
 #: Ce qu'un modèle écrit parfois devant le nom (``very_happy``, « un peu triste »).
 _INTENSIFIERS = ("very", "really", "super", "so", "slightly", "a_bit", "a_little", "quite", "tres", "un_peu",
                  "plutot", "assez", "legerement", "vraiment", "trop", "hyper", "un_brin", "un_poil", "bien")
 
 
 def intensity_word(x: float) -> str:
+    """L'intensité en mots, jamais un nombre (« assez », « à peine ») — ``affect.intensity`` dans sa voix."""
     if x >= 0.8:
-        return "très"
+        return phrase("affect.intensity.very")
     if x >= 0.5:
-        return "assez"
+        return phrase("affect.intensity.quite")
     if x >= 0.3:
-        return "légèrement"
-    return "à peine"
+        return phrase("affect.intensity.slightly")
+    return phrase("affect.intensity.barely")
 
 
 @dataclass(frozen=True, slots=True)

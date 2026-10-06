@@ -22,7 +22,7 @@ from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
-from mika.faculties.body import FOG, BodyParams, BodyState, energy
+from mika.faculties.body import FOG, BodyParams, BodyState, energy, fog
 from mika.faculties.body import sleep as sl
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, instant, local
 from mika.kernel.inspect import Timeline
@@ -99,7 +99,7 @@ def test_her_rhythm_says_the_date_and_hour_plainly():
     for text in (late, noon):
         assert "%" not in text and "phase" not in text and "mode" not in text  # ni pourcentage ni jargon
     assert "tu as la pêche" not in noon and "tu es en forme" in noon
-    assert all("gentille" not in text for _, text in FOG)  # fatiguée, elle n'est pas tenue d'être gentille
+    assert all("gentille" not in (fog(limit - 0.01) or "") for limit, _ in FOG)  # fatiguée, elle n'est pas tenue d'être gentille
 
 
 # ── La nuit, de bout en bout ──────────────────────────────────────────────

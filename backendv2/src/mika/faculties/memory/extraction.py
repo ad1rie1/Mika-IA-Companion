@@ -30,6 +30,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError
 from mika.kernel.clock import instant
 from mika.ports.llm import LLMResponse, ToolDecl
 from mika.vocab.people import clean_tokens, fold
+from mika.vocab.phrasebook import phrase, phrases
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import WORD, stems, words
 from mika.vocab.words import fold as wfold
@@ -93,18 +94,13 @@ DURABLE_SELF = frozenset({"gout", "avis", "fait"})
 
 class _Item(_Lenient):
     texte: str = Field(min_length=3, max_length=600, validation_alias=_TEXT)
-    sur_elle: bool = Field(default=False, description="ce qu'elle raconte d'elle-même, de sa vie de tous les jours")
-    genre: str | None = Field(default=None, description="pour ce qu'elle dit d'elle-même : anecdote (ce qu'elle a "
-                                                        "fait), gout, avis ou fait (sa vie, son histoire)")
-    personnes: list[str] = Field(default_factory=list, description="qui c'est concerne : le jeton ([P1]) pour "
-                                 "quelqu'un de la conversation, le prénom pour quelqu'un d'autre ; jamais "
-                                 "elle-même")
+    sur_elle: bool = Field(default=False, description=phrase("memory.extraction.fields.sur_elle"))
+    genre: str | None = Field(default=None, description=phrase("memory.extraction.fields.genre"))
+    personnes: list[str] = Field(default_factory=list, description=phrase("memory.extraction.fields.personnes"))
     sensibilite: str | None = Field(default=None, validation_alias=_SENS,
-                                    description="anodin, personnel ou confidence")
-    secret: bool = Field(default=False, description="vrai si la personne a demandé de ne pas le répéter, à "
-                                                    "personne ou à quelqu'un en particulier ; aussi ce qui laisse "
-                                                    "deviner un secret")
-    messages: list[int] = Field(default_factory=list, description="les numéros (#) des messages d'où tu le tires")
+                                    description=phrase("memory.extraction.fields.sensibilite"))
+    secret: bool = Field(default=False, description=phrase("memory.extraction.fields.secret"))
+    messages: list[int] = Field(default_factory=list, description=phrase("memory.extraction.fields.messages"))
 
     @field_validator("personnes", mode="before")
     @classmethod
@@ -136,17 +132,15 @@ class XCroyance(_Item):
     importance: int = Field(default=2, ge=1, le=4)
     remplace: int | None = None
     entre_vous: bool = Field(default=False, validation_alias=AliasChoices("entre_vous", "entre_nous", "lien"),
-                             description="ce qui n'appartient qu'à elle et à cette personne : comment la "
-                                         "personne l'appelle (un surnom), le surnom qu'elle lui donne, une blague "
-                                         "ou une expression à eux")
+                             description=phrase("memory.extraction.fields.entre_vous"))
 
 
 class XPromesse(_Lenient):
     texte: str = Field(min_length=3, max_length=400, validation_alias=_TEXT,
-                       description="ce qu'elle a promis, à l'infinitif")
+                       description=phrase("memory.extraction.fields.promise_text"))
     envers: str
     echeance: str | None = Field(default=None, validation_alias=AliasChoices("echeance", "échéance"),
-                                 description="AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite")
+                                 description=phrase("memory.extraction.fields.date"))
     messages: list[int] = Field(default_factory=list)
 
     @field_validator("messages", mode="before")
@@ -167,16 +161,12 @@ class XTenue(_Lenient):
 
 class XEvenement(_Item):
     texte: str = Field(min_length=3, max_length=300, validation_alias=_TEXT,
-                       description="ce qui va arriver, en quelques mots (« son entretien chez Ubisoft »)")
-    quand: str = Field(min_length=8, max_length=40, description="AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite")
-    en_cours: bool = Field(default=False, description="une situation qui dure (son chat malade, un déménagement) : "
-                                                      "« quand » est le jour où elle a commencé")
-    importance: int = Field(default=2, ge=1, le=4, description="ce que ça pèse dans sa vie : 2 un rendez-vous "
-                            "ordinaire, une sortie ; 3 un entretien, un examen, une opération, un départ ; 4 un "
-                            "mariage, une naissance, un deuil")
+                       description=phrase("memory.extraction.fields.event_text"))
+    quand: str = Field(min_length=8, max_length=40, description=phrase("memory.extraction.fields.date"))
+    en_cours: bool = Field(default=False, description=phrase("memory.extraction.fields.en_cours"))
+    importance: int = Field(default=2, ge=1, le=4, description=phrase("memory.extraction.fields.event_importance"))
     a_feter: bool = Field(default=False, validation_alias=AliasChoices("a_feter", "à_fêter", "a_fêter", "festif"),
-                          description="un moment qui se fête (un anniversaire, un mariage, une crémaillère) : on le "
-                                      "souhaite le jour même")
+                          description=phrase("memory.extraction.fields.a_feter"))
 
 
 class Extraction(_Lenient):
@@ -186,10 +176,9 @@ class Extraction(_Lenient):
     promesses_tenues: list[XTenue] = Field(default_factory=list)
     evenements: list[XEvenement] = Field(default_factory=list, validation_alias=AliasChoices("evenements",
                                                                                              "événements"))
-    confidentiel: list[int] = Field(default_factory=list, description="les numéros des croyances déjà connues "
-                                    "que la personne vient de demander de garder pour soi")
-    situations_finies: list[int] = Field(default_factory=list, description="les numéros des situations en cours "
-                                         "que la personne dit finies")
+    confidentiel: list[int] = Field(default_factory=list, description=phrase("memory.extraction.fields.confidentiel"))
+    situations_finies: list[int] = Field(default_factory=list,
+                                         description=phrase("memory.extraction.fields.situations_finies"))
 
     @field_validator("confidentiel", "situations_finies", mode="before")
     @classmethod
@@ -199,8 +188,7 @@ class Extraction(_Lenient):
 
 def tool(name: str) -> ToolDecl:
     """L'outil de la relecture, au nom de celle dont c'est la mémoire (``name``, celui de sa persona)."""
-    return ToolDecl(TOOL_NAME, f"Enregistre ce que {name} retient de cette conversation.",
-                    Extraction.model_json_schema())
+    return ToolDecl(TOOL_NAME, phrase("memory.extraction.tool", name=name), Extraction.model_json_schema())
 
 
 def self_names(name: str) -> frozenset[str]:
@@ -211,78 +199,7 @@ def self_names(name: str) -> frozenset[str]:
 
 def system(name: str) -> str:
     """La consigne de la relecture, au nom de celle dont c'est la mémoire (celui de sa persona : jamais écrit ici)."""
-    return _SYSTEM.replace(_NAME, name)
-
-
-#: là où son nom s'écrit dans la consigne
-_NAME = "{nom}"
-_SYSTEM = """Tu es la mémoire de {nom}. On te montre une de ses conversations — un fil privé avec une personne, ou \
-un salon où plusieurs personnes parlent ; tu décides ce qu'elle en gardera, comme quelqu'un qui repense à sa \
-journée : pas tout, l'important.
-
-Chaque personne de la conversation est marquée d'un jeton : « Alice [P1] ». Deux personnes peuvent porter le même \
-prénom ; le jeton, lui, est unique.
-
-Ce que tu peux retenir :
-- des souvenirs : ce qu'elle a vécu, raconté avec ses mots à elle, à la première personne (« J'ai consolé Adrien : \
-son chat Pixel est mort ce matin »). Un souvenir se suffit à lui-même : des prénoms, jamais « il », « l'utilisateur » \
-ou « la personne ». Ce n'est jamais une phrase recopiée de la conversation — ni une réplique de {nom}, ni un message \
-de la personne : si les mots exacts de quelqu'un comptent, cite-les en disant qui parle (« Adrien m'a dit : « j'étais \
-avec lui jusqu'au bout » »).
-- des croyances : des faits sur quelqu'un ou sur le monde, ses goûts compris (« Le chat d'Adrien s'appelait Pixel », \
-« Chloé adore la city pop »), avec qui les a dits (source) et d'où elle le tient (origine : dit, observé ou déduit). \
-Si une croyance déjà connue est contredite, ou si la personne revient sur ce qu'elle avait dit (« oublie ce que je \
-t'ai dit sur la city pop, c'était une phase »), écris ce qui est vrai maintenant (« Chloé n'est plus dans la city \
-pop : c'était une phase ») et donne dans « remplace » le numéro de l'ancienne. Ne répète pas une croyance déjà \
-connue. Écris toute date en absolu (« le week-end du 3 octobre », « depuis le 27 septembre »), jamais « ce \
-week-end », « dimanche » ou « hier » : relue dans trois semaines, une croyance doit encore être vraie. Ce qui ne vaut \
-qu'un temps est un événement, pas une croyance.
-- ce qui n'appartient qu'à eux : comment la personne appelle {nom} (« Adrien m'appelle Mimi »), le surnom que {nom} \
-lui donne, une blague ou une expression qu'ils partagent — une croyance à la première personne, rattachée à la \
-personne, avec « entre_vous » vrai et importance 3 : entre amis, c'est ce qui fait un lien.
-- rien de banal : un au revoir, « je vais dormir », « je retourne bosser », une politesse ne se retiennent pas.
-- ce que {nom} raconte d'elle-même : une croyance à la première personne, avec « sur_elle » vrai, sans personne, et \
-son « genre » — « anecdote » pour sa petite vie de tous les jours (« J'ai ressorti mon fer à souder pour réparer \
-ma lampe », importance 1 : elle s'en souviendra quelques jours) ; « gout », « avis » ou « fait » pour ce qui la \
-définit (« Mon plat préféré, c'est les ramen », « Je trouve les jeux mobiles sans intérêt », importance 3 : elle \
-s'en souviendra longtemps, pour ne jamais se contredire). Si elle change d'avis, donne dans « remplace » le numéro \
-de ce qu'elle pensait avant.
-- des promesses : ce que {nom} elle-même a promis de faire pour quelqu'un — une chose à faire, à l'infinitif (« lui \
-demander comment s'est passé son entretien »), pas « garder le secret » (ça, c'est le secret lui-même) —, avec \
-l'échéance si elle a été dite (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « jeudi soir », \
-20:00). Un rappel qu'on lui a demandé et qu'elle a accepté (« rappelle-moi de prendre rendez-vous mercredi » — « ok, \
-je te le rappelle ») en est une : « lui rappeler de prendre rendez-vous », pour ce jour-là. Si une promesse en cours \
-a été tenue ou abandonnée, indique-la dans promesses_tenues : une promesse datée n'est tenue que le jour dit (la \
-veille, dire « demain je te le rappelle », ce n'est pas la tenir) ; elle est abandonnée si la personne y renonce.
-- des événements : ce qui va arriver dans la vie de quelqu'un et dont on prend des nouvelles après (un entretien, \
-un examen, un rendez-vous médical, un départ, un mariage, un anniversaire), en quelques mots (« son entretien chez \
-Ubisoft »), avec sa date dans « quand » (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « ce \
-midi », 12:00), calculée d'après la date d'aujourd'hui, son importance (2 un rendez-vous ordinaire, une sortie ; 3 \
-un entretien, un examen, une opération, un départ ; 4 un mariage, une naissance, un deuil), et « a_feter » vrai si \
-c'est un moment qui se fête (un anniversaire, un mariage, une crémaillère). Seulement ce qui est à venir et daté, \
-et qui lui arrive à elle ou lui : pas une chose à faire, ni ce qu'on lui a demandé de rappeler (« rappelle-moi de \
-prendre rendez-vous chez le dentiste » : prendre rendez-vous est une promesse, pas un rendez-vous dont on prendra \
-des nouvelles). Ou une situation qui dure dans sa vie et dont on prend des nouvelles (son chat malade, un \
-déménagement en cours, un proche à l'hôpital) : « en_cours » vrai, et dans « quand » le jour où ça a commencé \
-(aujourd'hui si on ne sait pas). Si la personne dit qu'une des situations en cours est finie — bien ou mal (« on a \
-fini le déménagement », « il est sorti de l'hôpital », « on a dû l'endormir ») —, donne son numéro dans \
-« situations_finies » et ne la renote pas.
-
-Pour chaque élément :
-- « personnes » : qui il concerne — le jeton pour quelqu'un de la conversation ([P1]), le prénom pour quelqu'un \
-d'autre ; jamais {nom} elle-même ; toujours, même quand c'est évident ;
-- « messages » : les numéros des messages d'où tu le tires (#) — c'est ce qui dit qui le lui a confié ;
-- l'importance (1 anodin, 2 notable, 3 important, 4 marquant) ;
-- la sensibilité — anodin (ce qu'on dirait devant n'importe qui : goûts, loisirs, anecdotes ; ce qui a été annoncé \
-à tout un groupe), personnel (au moins personnel dès que ça touche la santé, le travail, l'argent, la famille, les \
-amours ou les émotions de quelqu'un), confidence (lourd, intime : ce qu'on ne raconte qu'à des proches). Dans le \
-doute : personnel ;
-- « secret » : vrai si la personne a demandé de ne pas le répéter — à personne (« dis-le à personne », « entre \
-nous », « garde-le pour toi ») ou à quelqu'un en particulier (« ne lui dis pas »). Tout ce qui laisse deviner un \
-secret est secret aussi. Si elle le demande pour une croyance déjà connue, donne son numéro dans « confidentiel ».
-Dans un salon, ce qui est marqué « (entre eux) » ne lui était pas adressé : n'en retiens que ce qui compte.
-N'invente rien. Une conversation sans rien d'important donne des listes vides.
-Réponds uniquement en appelant l'outil record_memories."""
+    return phrase("memory.extraction.system", name=name)
 
 
 @dataclass(frozen=True, slots=True)
@@ -327,13 +244,20 @@ class Conversation:
         return next((ln.person for ln in self.lines if ln.seq == seq), None)
 
 
-DAYS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
-MONTHS = ["janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre",
-          "novembre", "décembre"]
+def weekday_words(d: date) -> str:
+    """Le jour de la semaine : « mardi »."""
+    return phrases("memory.dates.weekdays")[d.weekday()]
+
+
+def date_words(d: date) -> str:
+    """Le jour et le mois : « 6 octobre », « 1er octobre »."""
+    return phrase("memory.dates.date", day=phrase("memory.dates.first") if d.day == 1 else d.day,
+                  month=phrases("memory.dates.months")[d.month - 1])
 
 
 def day_words(d: date) -> str:
-    return f"{DAYS[d.weekday()]} {'1er' if d.day == 1 else d.day} {MONTHS[d.month - 1]}"
+    """« mardi 6 octobre »."""
+    return phrase("memory.dates.day", weekday=weekday_words(d), date=date_words(d))
 
 
 def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, str]],
@@ -341,26 +265,29 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
     """Le message d'une conversation : la date, qui parle, ce qui est déjà
     su, les promesses en cours, les situations en cours de ses personnes, puis
     les messages (avec la date dès qu'elle change)."""
-    out = [f"Aujourd'hui : {day_words(now.date())} {now.year}, {now:%H h %M}."]
+    out = [phrase("memory.extraction.render.today", day=day_words(now.date()), year=now.year, hour=f"{now:%H}",
+                  minute=f"{now:%M}")]
     who = ", ".join(s.label for s in conv.speakers)
     if conv.room:
-        out.append(f"Un salon de groupe (tout le monde y lit tout) : {who}.")
+        out.append(phrase("memory.extraction.render.room", who=who))
     else:
-        out.append(f"Conversation privée avec {who}.")
+        out.append(phrase("memory.extraction.render.private", who=who))
     if beliefs:
-        out += ["", "Croyances déjà connues :"] + [f"[#{i}] {text}" for i, text in beliefs]
+        out += ["", phrase("memory.extraction.render.beliefs")] + [f"[#{i}] {text}" for i, text in beliefs]
     if promises:
-        out += ["", "Promesses en cours :"] + [f"[#{i}] (à {whom}) {text}" for i, whom, text in promises]
+        out += ["", phrase("memory.extraction.render.promises")] + [
+            phrase("memory.extraction.render.promise", id=i, whom=whom, text=text) for i, whom, text in promises]
     if situations:
-        out += ["", "Situations en cours :"] + [f"[#{i}] ({whom}) {text}" for i, whom, text in situations]
-    out += ["", "Les messages :"]
+        out += ["", phrase("memory.extraction.render.situations")] + [
+            f"[#{i}] ({whom}) {text}" for i, whom, text in situations]
+    out += ["", phrase("memory.extraction.render.messages")]
     day: date | None = None
     for ln in conv.lines:
         moment = datetime.fromtimestamp(ln.at / 1e6, now.tzinfo)
         if moment.date() != day:
             day = moment.date()
-            out.append(f"— {day_words(day)} —")
-        aside = " (entre eux)" if ln.aside else ""
+            out.append(phrase("memory.extraction.render.day", day=day_words(day)))
+        aside = phrase("memory.extraction.render.aside") if ln.aside else ""
         out.append(f"[#{ln.seq}] {moment:%H:%M} {ln.speaker}{aside} : {ln.text}")
     return "\n".join(out)
 
@@ -567,7 +494,7 @@ def copy_of(text: str, lines: Sequence[Line]) -> Line | None:
 def quoted(name: str, text: str) -> str:
     """Ce que quelqu'un lui a dit, mot pour mot, en disant qui parle."""
     words_ = " ".join(text.split()).strip().strip("«»\"' ")
-    return f"{name or 'On'} m'a dit : « {words_} »"
+    return phrase("memory.extraction.quoted", name=name or phrase("memory.extraction.someone"), words=words_)
 
 
 #: un mot qui salue, remercie ou prend congé, suivi d'un nom : celui par lequel on s'adresse à elle (« salut

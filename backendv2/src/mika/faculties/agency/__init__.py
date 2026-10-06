@@ -57,6 +57,7 @@ from mika.vocab import affect as A
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable, is_internal
+from mika.vocab.phrasebook import phrase
 
 KEEP = 32
 #: au plus tant d'épisodes en cours retenus (corrélation → raisons)
@@ -395,7 +396,7 @@ def hesitation_span(n: int, p: AgencyParams) -> int:
 
 def _name(frame: Frame, person: str) -> str:
     name = frame.get(identity_c.IDENTITY(person)).name
-    return f"« {name} »" if name else "cette personne"
+    return f"« {name} »" if name else phrase("expression.person.unnamed")
 
 
 def holding_back(frame: Frame, target: str, reasons: Any) -> str | None:
@@ -408,15 +409,12 @@ def holding_back(frame: Frame, target: str, reasons: Any) -> str | None:
     tz = frame.env.tz_of(frame.root)
     who = _name(frame, person)
     if mine.initiatives:
-        when = when_fr(mine.last_initiative_at, frame.now, tz)
-        return (f"Tu as déjà écrit à {who} {when}, et pas de réponse depuis. Si tu lui réécris, que ce soit une "
-                "relance douce : un mot léger, sans reproche, sans redemander ni te justifier — et rien du tout "
-                "si tu n'en as pas vraiment envie.")
+        return phrase("agency.brief.nudge", who=who, when=when_fr(mine.last_initiative_at, frame.now, tz))
     if mine.unanswered:
         when = when_fr(mine.last_out, frame.now, tz)
-        asked = " (tu lui posais une question)" if mine.asked else ""
-        return (f"Ton dernier message à {who}, {when}, est resté sans réponse{asked}. Ne reviens pas dessus et ne "
-                "lui reproche rien : si tu lui écris, pars d'autre chose, simplement.")
+        if mine.asked:
+            return phrase("agency.brief.unanswered_question", who=who, when=when)
+        return phrase("agency.brief.unanswered", who=who, when=when)
     return None
 
 
@@ -426,8 +424,7 @@ def _overflow(frame: Frame, reasons: Any) -> str | None:
     if affect_c.MOOD_OVERFLOW not in reasons:
         return None
     felt = A.FR.get(frame.get(affect_c.MOOD).felt, "")
-    return (f"Ton humeur déborde un peu ({felt}) : tu as envie d'en parler, ou juste de parler." if felt else
-            "Ton humeur déborde un peu : tu as envie d'en parler, ou juste de parler.")
+    return phrase("affect.overflow.brief", feeling=felt) if felt else phrase("affect.overflow.brief_unnamed")
 
 
 def _urge(frame: Frame, target: str | None, reasons: Any) -> str | None:
@@ -435,13 +432,12 @@ def _urge(frame: Frame, target: str | None, reasons: Any) -> str | None:
     if not {needs_c.NEED_SOCIAL, needs_c.NEED_EXPRESSION} & set(reasons):
         return None
     social = needs_c.NEED_SOCIAL in reasons
-    want = "Tu as envie de compagnie, de parler un peu" if social else "Tu as envie de dire quelque chose"
+    want = phrase("agency.brief.want_company") if social else phrase("agency.brief.want_to_say")
     matter = frame.get(needs_c.MATTER(target)) if target else None
     if matter is not None:
-        return (f"{want} : pars de ce dont tu pourrais lui parler (plus haut, sous CE DONT TU POURRAIS PARLER), "
-                "simplement — pas d'un quoi-de-neuf dans le vide.")
-    return (f"{want}, sans rien de précis en tête. Un mot simple suffit, sans forcer — et si rien de vrai ne "
-            "vient, ne dis rien.")
+        # la section où elle la trouve, sous son titre (``needs``)
+        return phrase("agency.brief.from_matter", want=want, section=phrase("needs.matter.title"))
+    return phrase("agency.brief.no_matter", want=want)
 
 
 #: une seconde raison ne se dit (« et aussi ») que si elle pèse au moins cette part de la plus forte
@@ -492,7 +488,8 @@ def motives(frame: Frame, req: Any) -> list[str]:
     rest = [f for f in found if f not in kept]
     if len(kept) == 1 and rest and rest[0][1] >= SECOND_REASON_SHARE * max(kept[0][1], 1e-9):
         kept.append(rest[0])
-    return [text if n == 0 else f"Et aussi : {_continued(text)}" for n, (_f, _w, _i, text) in enumerate(kept)]
+    return [text if n == 0 else phrase("agency.brief.also", motive=_continued(text))
+            for n, (_f, _w, _i, text) in enumerate(kept)]
 
 
 #: les premiers mots qui se mettent en minuscule à la suite d'« Et aussi : » (jamais un nom)
@@ -515,16 +512,14 @@ def brief(frame: Frame, req: Any) -> str:
     target = ep.target if ep is not None else None
     lines = [f"- {m}" for m in motives(frame, req)]
     if not lines:
-        lines.append("- Rien de précis ne te pousse : écris seulement si quelque chose de vrai te vient.")
+        lines.append(f"- {phrase('agency.brief.nothing')}")
     held = holding_back(frame, target, reasons) if target else None
     if held is not None:
         lines.append(f"- {held}")
     why = "\n".join(lines)
-    to = f", et tu écris à {_name(frame, frame.get(identity_c.PERSON(target)))}" \
-        if target and is_identifiable(target) else ""
-    return (f"(Personne ne vient de t'écrire : c'est toi qui prends la parole{to}.)\n"
-            f"Ce qui te pousse à parler :\n{why}\n"
-            "Si finalement tu n'as rien à dire, réponds exactement [SILENCE].")
+    opening = phrase("agency.brief.opening_to", who=_name(frame, frame.get(identity_c.PERSON(target)))) \
+        if target and is_identifiable(target) else phrase("agency.brief.opening")
+    return f"{opening}\n{phrase('agency.brief.pushing')}\n{why}\n{phrase('agency.brief.silence')}"
 
 
 def task_brief(frame: Frame, req: Any) -> str:
@@ -537,10 +532,8 @@ def task_brief(frame: Frame, req: Any) -> str:
         for key, value in args.items():
             if str(key).startswith("brief:") and value:
                 lines.append(f"- {value}")
-    what = "\n".join(lines) if lines else "- Fais ce qu'on attend de toi, avec tes outils."
-    return ("(Personne ne te parle : c'est une tâche, pour toi seule — personne ne lit ce que tu écris ici.)\n"
-            f"Ce que tu as à faire :\n{what}\n"
-            "Quand c'est fait, dis-le en une phrase.")
+    what = "\n".join(lines) if lines else f"- {phrase('agency.task.anything')}"
+    return f"{phrase('agency.task.opening')}\n{phrase('agency.task.todo')}\n{what}\n{phrase('agency.task.done')}"
 
 
 # ── Inspection ────────────────────────────────────────────────────────────

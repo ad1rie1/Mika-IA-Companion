@@ -148,3 +148,20 @@ def test_chronotype_lu_dans_ses_heures(tmp_path: Path) -> None:
     chrono = chronotype_from_activity(c, TZ)
     assert chrono is not None and 0.5 < chrono <= 1.0
     assert json.dumps(chrono)
+
+
+async def test_les_journees_oubliees_par_la_reponse_repartent_seules(tmp_path: Path) -> None:
+    c = corpus(tmp_path)
+    await run_all(c, AnnotatePass(TZ))
+    p = JournalPass(TZ)
+    jobs.enqueue(c, p)
+    row = next(r for r in c.db.execute("SELECT unit, payload FROM jobs WHERE pass = ? ORDER BY id", (p.name,))
+               if len(json.loads(r["payload"])["jours"]) >= 2)
+    payload = json.loads(row["payload"])
+    first = payload["jours"][0]
+    answer = CallResult("", {"jours": [{"jour": first, "texte": "Soirée à réviser avec Julie au téléphone.",
+                                        "emotion": "tired"}]})
+    assert p.accept(c, row["unit"], payload, answer) is None
+    rest = c.db.execute("SELECT payload FROM jobs WHERE unit LIKE ?", (f"{row['unit']}+reste-%",)).fetchone()
+    assert rest is not None and json.loads(rest["payload"])["jours"] == payload["jours"][1:]
+    assert p.accept(c, row["unit"], payload, CallResult("", {"jours": []})) == "aucun journal rendu"

@@ -12,7 +12,11 @@ L'acceptation est prudente :
 - une ancre (``m123``) qui n'existe pas, ou qui n'est pas datée exactement, est écartée.
   Sans ancre valable, l'origine est « contenu », pas « recoupement ».
 
-Après la passe, ``jumeau dater`` repropage par l'ordre ce qui vient d'être fixé.
+Elle travaille sur les **séances** : elle se lance donc après ``jumeau planifier``. Chaque séance
+datée reprend aussitôt le temps de ses messages ; une date de texte est gardée comme décision
+(une relecture de sa source ne l'efface pas). Après la passe, ``jumeau dater`` repropage par
+l'ordre ce qui vient d'être fixé, puis ``jumeau planifier --garder-seances`` refait les paliers
+et le budget avec les nouvelles dates.
 """
 
 from __future__ import annotations
@@ -29,11 +33,12 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict, Field
 
 from twin.corpus import Corpus
-from twin.dating import describe
+from twin.dating import DOCUMENT, describe, remember_date
 from twin.engine.claude import CallResult, CallSpec
 from twin.passes.annotate import prompt_text
 from twin.render import her_name
 from twin.schemas import lenient_list
+from twin.sessions import refresh_session_time
 from twin.timing import RANK, Origin, Precision, Temps
 
 TO_DATE = tuple(p.value for p in Precision if RANK[p] >= RANK[Precision.YEAR])
@@ -152,3 +157,9 @@ class DatePass:
             merged = Temps(merged.start, merged.end, merged.point, merged.precision, origin)
             corpus.db.execute(f"UPDATE {table} SET t_start = ?, t_end = ?, t_point = ?, t_precision = ?, "  # noqa: S608
                               "t_origin = ? WHERE id = ?", (*merged.as_row(), r["id"]))
+            if table == "documents":
+                remember_date(corpus.db, DOCUMENT, r["key"], merged)
+        session = corpus.db.execute("SELECT id FROM sessions WHERE document = ?", (n,)).fetchone() \
+            if item.ref.startswith("d") else {"id": n}
+        if session is not None:
+            refresh_session_time(corpus.db, session["id"])  # ses paliers et son budget se recalculent sur elle

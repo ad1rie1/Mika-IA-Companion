@@ -46,6 +46,7 @@ from mika.kernel.frame import Frame
 from mika.vocab.affect import Emotion
 from mika.vocab.days import when_fr
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import elided, stems
 
@@ -58,7 +59,7 @@ def _clip(text: str, n: int = EXCERPT) -> str:
 
 
 def _name(frame: Frame, person: str) -> str:
-    return frame.get(identity_c.IDENTITY(person)).name or "quelqu'un"
+    return frame.get(identity_c.IDENTITY(person)).name or phrase("attention.thought.someone")
 
 
 #: l'échange d'où naît une pensée : dans les heures qui précèdent, depuis le dernier silence de trois quarts d'heure
@@ -111,7 +112,8 @@ def _also(lines: list[tuple[int, str]]) -> str:
     """Ses autres messages de l'échange, les plus nourris (dans l'ordre où ils sont venus) : la matière autour."""
     fuller = sorted(sorted(lines, key=lambda x: (-len(x[1].split()), x[0]))[:ALSO_SHOWN])
     fuller = [x for x in fuller if len(x[1].split()) > CURT_WORDS]
-    return (" — et aussi : " + ", ".join(f"« {_clip(t, 120)} »" for _i, t in fuller)) if fuller else ""
+    return phrase("attention.thought.also", quotes=", ".join(f"« {_clip(t, 120)} »" for _i, t in fuller)) if fuller \
+        else ""
 
 
 def ripe(q: Pending, frame: Frame, p: Any) -> int:
@@ -297,7 +299,8 @@ class Watch:
             return self._broken_promise(q, frame, store, mark)
         if q.origin == c.BLOCKED:
             title = store.content([q.ref]).get(q.ref) if store is not None and q.ref else None
-            text = f"Je bloque sur : {_clip(title, 200)}" if title else "Je bloque sur quelque chose."
+            text = phrase("attention.thought.blocked", title=_clip(title, 200)) if title else \
+                phrase("attention.thought.blocked_vague")
             return c.THOUGHT_BORN.draft(text=Content.of(text, level=q.sensitivity), emotion=q.emotion,
                                         intensity=q.intensity, origin=q.origin, about=q.about,
                                         sensitivity=q.sensitivity, source=q.source, dedupe_key=mark)
@@ -308,25 +311,25 @@ class Watch:
                                         "WHERE id IN (?, ?)", (q.extra or -1, q.source))
                 texts = {int(i): (t, a, int(sv)) for i, t, a, sv in rows}
             old, new = texts.get(q.extra or -1), texts.get(q.source)
-            text = (f"Je croyais que « {_clip(old[0], 120)} » — apparemment ce n'est plus vrai : "
-                    f"« {_clip(new[0], 120)} »") if old and new else "Je dois réviser quelque chose que je croyais."
+            text = phrase("attention.thought.revision", old=_clip(old[0], 120), new=_clip(new[0], 120)) \
+                if old and new else phrase("attention.thought.revision_vague")
             about: tuple[str, ...] = tuple(sorted(set(_about(old) + _about(new)))) if old and new else ()
             sens = max((x[2] for x in (old, new) if x), default=int(Sensitivity.PERSONAL))
             return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
                                         origin=q.origin, about=about, sensitivity=sens, source=q.source,
                                         dedupe_key=mark)
-        who = _name(frame, q.person) if q.person else "quelqu'un"
+        who = _name(frame, q.person) if q.person else phrase("attention.thought.someone")
         if q.origin == c.REMORSE:
             # être dure avec quelqu'un se regrette ; ça la concerne, sans rien dire de ce qui a été dit
             sens = int(Sensitivity.PERSONAL)
-            return c.THOUGHT_BORN.draft(text=Content.of(f"J'ai été dure avec {who}.", level=sens),
+            return c.THOUGHT_BORN.draft(text=Content.of(phrase("attention.thought.remorse", who=who), level=sens),
                                         emotion=q.emotion, intensity=q.intensity, origin=q.origin,
                                         about=(q.person,) if q.person else (), sensitivity=sens, source=q.source,
                                         dedupe_key=mark)
         if q.origin == c.UNANSWERED:
             # être ignorée se ressent ; ce n'est pas une confidence, mais ça concerne la personne
             sens = int(Sensitivity.PERSONAL)
-            return c.THOUGHT_BORN.draft(text=Content.of(f"{who} ne m'a pas répondu.", level=sens),
+            return c.THOUGHT_BORN.draft(text=Content.of(phrase("attention.thought.unanswered", who=who), level=sens),
                                         emotion=q.emotion, intensity=q.intensity, origin=q.origin,
                                         about=(q.person,) if q.person else (), sensitivity=sens, source=q.source,
                                         dedupe_key=mark)
@@ -336,13 +339,14 @@ class Watch:
             # ce que l'échange voulait dire, pas une réplique isolée (sonde réelle du 2026-10-03 : « Sam m'a dit :
             # « laisse tomber » », d'où une réflexion qui cherchait ce qu'il fallait laisser tomber — il répondait à
             # peine, sans envie de parler)
-            text = f"{who} répondait à peine : " + ", ".join(f"« {_clip(t, 90)} »" for _i, t in theirs[-6:]) + "."
+            text = phrase("attention.thought.curt", who=who,
+                          quotes=", ".join(f"« {_clip(t, 90)} »" for _i, t in theirs[-6:]))
         elif q.origin == c.CONCERN:
-            text = (f"{who} n'avait pas l'air comme d'habitude : « {_clip(said)} »" if said else
-                    f"{who} n'avait pas l'air comme d'habitude.") + _also(lines)
+            text = (phrase("attention.thought.concern", who=who, said=_clip(said)) if said else
+                    phrase("attention.thought.concern_hidden", who=who)) + _also(lines)
         else:
-            text = (f"{who} m'a dit : « {_clip(said)} »" if said else f"Un échange avec {who} m'a marquée.") \
-                + _also(lines)
+            text = (phrase("attention.thought.said", who=who, said=_clip(said)) if said else
+                    phrase("attention.thought.exchange_hidden", who=who)) + _also(lines)
         sens = int(Sensitivity.ANODYNE if q.public else Sensitivity.PERSONAL)
         return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
                                     origin=q.origin, about=(q.person,) if q.person else (), sensitivity=sens,
@@ -353,10 +357,10 @@ class Watch:
         sa sensibilité, celle de la promesse."""
         rows = store.query_mind(f"SELECT text, sensitivity FROM {memory_c.ITEMS_TABLE} WHERE id=?", (q.source,)) \
             if store is not None else []
-        who = _name(frame, q.person) if q.person else "quelqu'un"
+        who = _name(frame, q.person) if q.person else phrase("attention.thought.someone")
         sens = max(int(Sensitivity.ANODYNE), int(rows[0][1])) if rows else int(Sensitivity.PERSONAL)
-        text = (f"J'avais promis à {who} : « {_clip(str(rows[0][0]), 200)} » — et je ne l'ai pas fait à temps."
-                if rows else f"J'avais promis quelque chose à {who}, et je ne l'ai pas fait à temps.")
+        text = (phrase("attention.thought.promise", who=who, text=_clip(str(rows[0][0]), 200))
+                if rows else phrase("attention.thought.promise_vague", who=who))
         return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
                                     origin=q.origin, about=(q.person,) if q.person else (), sensitivity=sens,
                                     source=q.source, dedupe_key=mark)
@@ -408,8 +412,8 @@ class Watch:
                     missing_tranche(before - reading.last_in, reading.usual_days or reading.rhythm_days) >= tranche:
                 continue  # déjà pensé à elle à ce stade de son silence
             name = _name(frame, person)
-            text = (f"Je me demande ce que devient {name}." if tranche >= 2 else
-                    f"J'aimerais bien avoir des nouvelles {elided(name, 'de')}.")
+            text = (phrase("attention.thought.wondering", name=name) if tranche >= 2 else
+                    phrase("attention.thought.missing", of_name=elided(name, "de")))
             intensity = round(max(p.fade_below + 0.05, p.missing_intensity * p.missing_fading ** tranche), 3)
             out.append(c.THOUGHT_BORN.draft(
                 text=Content.of(text, level=int(Sensitivity.ANODYNE)), emotion=Emotion.NOSTALGIC.value,
@@ -436,7 +440,7 @@ class Watch:
         ex = state.exchanges[person]
         sens = int(Sensitivity.PERSONAL)
         return c.THOUGHT_BORN.draft(
-            text=Content.of(f"{_name(frame, person)} n'a pas répondu à ma question.", level=sens),
+            text=Content.of(phrase("attention.thought.unanswered_question", who=_name(frame, person)), level=sens),
             emotion=Emotion.SAD.value, intensity=round(p.unanswered_intensity * 0.8, 3), origin=c.UNANSWERED,
             about=(person,), sensitivity=sens, source=None, dedupe_key=f"question:{person}:{ex.last_out}")
 
@@ -446,7 +450,7 @@ class Watch:
         when = when_fr(state.last_contact, frame.now, frame.env.tz_of(frame.root))
         since = when[len("il y a "):] if when.startswith("il y a ") else when.removeprefix("dans ")
         sens = int(Sensitivity.ANODYNE)
-        return c.THOUGHT_BORN.draft(text=Content.of(f"Personne ne m'a parlé depuis {since}.", level=sens),
+        return c.THOUGHT_BORN.draft(text=Content.of(phrase("attention.thought.alone", since=since), level=sens),
                                     emotion=Emotion.LONELY.value, intensity=p.alone_intensity, origin=c.ALONE,
                                     about=(), sensitivity=sens, source=None,
                                     dedupe_key=f"seule:{state.last_contact}:{max(state.alone_at, state.last_contact)}")

@@ -21,6 +21,7 @@ Tout est rangé dans la table ``syntheses`` (genre, clé, version, données).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 import statistics
@@ -156,6 +157,26 @@ def store(corpus: Corpus, kind: str, key: str, version: int, data: BaseModel | d
     payload = data.model_dump_json() if isinstance(data, BaseModel) else json.dumps(data, ensure_ascii=False)
     corpus.db.execute("INSERT OR REPLACE INTO syntheses (kind, key, version, data, model) VALUES (?, ?, ?, ?, ?)",
                       (kind, key, version, payload, model))
+
+
+def requeue_rest(corpus: Corpus, p: Any, unit: str, payload: dict[str, Any], field: str, missing: list[str]) -> None:
+    """Ce que la réponse a oublié repart seul, en un lot à part (le reste du lot est gardé)."""
+    if missing:
+        corpus.db.execute("INSERT OR IGNORE INTO jobs (pass, unit, version, payload) VALUES (?, ?, ?, ?)",
+                          (p.name, f"{unit}+reste-{missing[0]}", p.version,
+                           json.dumps({**payload, field: missing}, ensure_ascii=False)))
+
+
+def halves(payload: dict[str, Any], field: str) -> list[tuple[str, dict[str, Any]]]:
+    """Un lot qui échoue sans cesse, coupé en deux (``jobs`` l'appelle au dernier essai)."""
+    items = list(payload[field])
+    if len(items) < 2:
+        return []
+    mid = len(items) // 2
+    parts = [{**payload, field: part} for part in (items[:mid], items[mid:])]
+    # le nom d'une moitié dit tout son contenu : deux personnes coupées le même trimestre ne se confondent pas
+    return [(f"moitie-{hashlib.sha1(json.dumps(part, sort_keys=True).encode(), usedforsecurity=False).hexdigest()[:12]}",
+             part) for part in parts]
 
 
 def latest(corpus: Corpus, kind: str) -> dict[str, dict[str, Any]]:
@@ -369,9 +390,9 @@ class PersonaPass:
     def accept(self, corpus: Corpus, unit: str, payload: dict[str, Any], result: CallResult) -> str | None:
         out = _parse(PersonaOut, result.data)
         assert isinstance(out, PersonaOut)
-        doc = persona_document(corpus, out, self.tz, payload["debut"], payload["fin"])
+        doc = validate_persona(persona_document(corpus, out, self.tz, payload["debut"], payload["fin"]))
+        write_persona(self.root, payload["cle"], doc)  # validée d'abord : rien de refusé n'est gardé
         store(corpus, "persona", payload["cle"], self.version, doc, result.model)
-        write_persona(self.root, payload["cle"], doc)
         corpus.db.commit()
         return None
 
@@ -461,6 +482,9 @@ class ProfilePass:
             for i in range(0, len(todo), 8):
                 yield f"p{pid}-{todo[i]}", {"personne": pid, "trimestres": todo[i: i + 8]}
 
+    def split(self, payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+        return halves(payload, "trimestres")
+
     def build(self, corpus: Corpus, payload: dict[str, Any]) -> CallSpec:
         pid = payload["personne"]
         person = corpus.db.execute("SELECT name, relation FROM persons WHERE id = ?", (pid,)).fetchone()
@@ -477,11 +501,15 @@ class ProfilePass:
             return "réponse sans objet JSON"
         profiles, _ = lenient_list(Profile, result.data.get("profils"))
         wanted = set(payload["trimestres"])
+        got = {p.trimestre for p in profiles if p.trimestre in wanted}
+        if not got:
+            return "aucun profil rendu"
         for p in profiles:
             if p.trimestre in wanted:
                 store(corpus, "profil", f"p{payload['personne']}:{p.trimestre}", self.version, p, result.model)
+        requeue_rest(corpus, self, unit, payload, "trimestres", [q for q in payload["trimestres"] if q not in got])
         corpus.db.commit()
-        return None if profiles else "aucun profil rendu"
+        return None
 
 
 # -- 5. les journaux ---------------------------------------------------------------------------------------------
@@ -530,6 +558,9 @@ class JournalPass:
         for week, ds in sorted(weeks.items()):
             yield week, {"jours": ds}
 
+    def split(self, payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+        return halves(payload, "jours")
+
     def build(self, corpus: Corpus, payload: dict[str, Any]) -> CallSpec:
         days = days_material(corpus, self.tz)
         names = dict(corpus.db.execute("SELECT id, name FROM persons").fetchall())
@@ -548,11 +579,15 @@ class JournalPass:
             return "réponse sans objet JSON"
         journals, _ = lenient_list(Journal, result.data.get("jours"))
         wanted = set(payload["jours"])
+        got = {j.jour for j in journals if j.jour in wanted}
+        if not got:
+            return "aucun journal rendu"
         for j in journals:
             if j.jour in wanted:
                 store(corpus, "journal", j.jour, self.version, j, result.model)
+        requeue_rest(corpus, self, unit, payload, "jours", [d for d in payload["jours"] if d not in got])
         corpus.db.commit()
-        return None if journals else "aucun journal rendu"
+        return None
 
 
 # -- 6. les rêves ------------------------------------------------------------------------------------------------
@@ -597,6 +632,9 @@ class DreamPass:
         for week, ds in sorted(weeks.items()):
             yield week, {"soirs": ds}
 
+    def split(self, payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+        return halves(payload, "soirs")
+
     def build(self, corpus: Corpus, payload: dict[str, Any]) -> CallSpec:
         days = days_material(corpus, self.tz)
         names = dict(corpus.db.execute("SELECT id, name FROM persons").fetchall())
@@ -619,9 +657,13 @@ class DreamPass:
             return "réponse sans objet JSON"
         nights, _ = lenient_list(Night, result.data.get("nuits"))
         wanted = set(payload["soirs"])
+        got = {n.soir for n in nights if n.soir in wanted}
+        if not got:
+            return "aucune nuit rendue"
         for n in nights:
             if n.soir in wanted and n.reves:
                 store(corpus, "reve", n.soir, self.version, n, result.model)
+        requeue_rest(corpus, self, unit, payload, "soirs", [d for d in payload["soirs"] if d not in got])
         corpus.db.commit()
-        return None if nights else "aucune nuit rendue"
+        return None
 

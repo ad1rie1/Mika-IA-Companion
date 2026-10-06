@@ -63,10 +63,12 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.kernel.prompt import SectionBody, cited
 from mika.kernel.state import FrozenDict
+from mika.vocab import circadian
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase, phrases
 from mika.vocab.privacy import Sensitivity, hearable
 from mika.vocab.temperament import Temperament, geometric, lerp
 from mika.vocab.words import elided
@@ -718,26 +720,25 @@ def _reunited_felt(e, cx) -> Appraisal:
 def describe(r: c.NeedsReading) -> list[str]:
     lines = []
     if r.social >= 0.75:
-        lines.append("Tu as vraiment envie de parler à quelqu'un, de compagnie.")
+        lines.append(phrase("needs.wants.company_much"))
     elif r.social >= 0.55:
-        lines.append("Un peu de compagnie te ferait plaisir.")
+        lines.append(phrase("needs.wants.company"))
     if r.expression >= 0.75:
-        lines.append("Tu as des choses à dire, envie de t'exprimer.")
+        lines.append(phrase("needs.wants.express"))
     if r.curiosity >= 0.75:
-        lines.append("Tu as envie d'apprendre quelque chose de nouveau, de découvrir.")
+        lines.append(phrase("needs.wants.learn"))
     return lines
 
 
 @NEEDS.section("needs", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["mood"], trim_rank=55,
-               tags=[Tag.AFFECTIVE], title="TES ENVIES", reads=[c.NEEDS])
+               tags=[Tag.AFFECTIVE], title=phrase("needs.wants.title"), reads=[c.NEEDS])
 def _needs_section(s: NeedsState, frame: Frame, enrich: Any) -> str | None:
     r = frame.get(c.NEEDS)
     lines = describe(r)
     if r.social >= 0.55:
         # le manque se sent dans l'envie de parler, il ne se fait pas payer à l'autre (sonde réelle du 2026-10-02 :
         # « je me sentais un peu seule cet après-midi » à qui rentre du travail, « enfin tu es là ! »)
-        lines.append("Ça se sent dans ton envie de parler ; tu ne le fais pas peser sur l'autre — pas de reproche, "
-                     "pas de « enfin tu es là », pas de « je me sentais seule » à qui avait sa journée.")
+        lines.append(phrase("needs.wants.no_reproach"))
     return "\n".join(lines) if lines else None
 
 
@@ -761,44 +762,37 @@ async def _matter_text(s: NeedsState, frame: Frame, ports: Mapping[str, Any]) ->
     return store.content([got.ref])
 
 
-#: un jour à venir, en mots
-_AHEAD = ("aujourd'hui", "demain", "après-demain")
-_WEEKDAYS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
-
-
 def ahead_fr(at: int, now: int, tz: Any) -> str:
     """« aujourd'hui », « demain », « jeudi » — ou, passé, « hier soir », « avant-hier »."""
     if at <= now:
         return when_fr(at, now, tz)
     days = (local(at, tz).date() - local(now, tz).date()).days
-    return _AHEAD[days] if days < len(_AHEAD) else _WEEKDAYS[local(at, tz).weekday()]
+    ahead = phrases("needs.matter.days_ahead")  # un jour à venir, en mots
+    return ahead[days] if days < len(ahead) else circadian.DAYS_FR[local(at, tz).weekday()]
 
 
 def _lead(m: c.Matter, frame: Frame, name: str) -> str:
     tz = frame.env.tz_of(frame.root)
     when = when_fr(m.at, frame.now, tz)
     if m.kind == c.THOUGHT_MATTER:
-        return "Quelque chose te trotte dans la tête"
+        return phrase("needs.matter.thought")
     if m.kind == c.DONE_MATTER:
-        return f"Ce que tu as fini, {when}"
+        return phrase("needs.matter.done", when=when)
     if m.kind == c.WORKING_MATTER:
-        return "Ce sur quoi tu es en ce moment"
+        return phrase("needs.matter.working")
     if m.kind == c.MOMENT_MATTER:
         if m.ongoing:
             # une situation qui dure n'est ni « à venir » ni « passée » : elle la vit encore
             since = when[len("il y a "):] if when.startswith("il y a ") else when  # « depuis 4 jours », « depuis hier »
-            return (f"Ce {elided(name, 'que')} vit en ce moment, depuis {since} — {name} te l'avait raconté (prends de "
-                    "ses nouvelles)")
+            return phrase("needs.matter.ongoing", que_name=elided(name, "que"), since=since, name=name)
         if m.at > frame.now:
-            return (f"Ce qui l'attend, {ahead_fr(m.at, frame.now, tz)} — {name} te l'avait annoncé (un mot pour "
-                    "l'encourager, si tu veux)")
-        return (f"Ce qui lui est arrivé, {ahead_fr(m.at, frame.now, tz)} — {name} te l'avait annoncé (comment ça "
-                "s'est passé ?)")
-    return f"Ce {elided(name, 'que')} t'a dit de sa vie, {when}"
+            return phrase("needs.matter.ahead", when=ahead_fr(m.at, frame.now, tz), name=name)
+        return phrase("needs.matter.past", when=ahead_fr(m.at, frame.now, tz), name=name)
+    return phrase("needs.matter.told", que_name=elided(name, "que"), when=when)
 
 
 @NEEDS.section("matter", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], after=["needs"], trim_rank=60,
-               title="CE DONT TU POURRAIS PARLER", reads=[c.MATTER, identity_c.PERSON, identity_c.IDENTITY])
+               title=phrase("needs.matter.title"), reads=[c.MATTER, identity_c.PERSON, identity_c.IDENTITY])
 def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce dont elle pourrait parler, quand c'est l'envie de compagnie qui la
     pousse : une chose, concrète, jamais inventée. Ce qui vient d'ailleurs est
@@ -813,11 +807,10 @@ def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> S
     if not hearable(m.about, m.sensitivity, person, aud.level, aud.witness_level, aud.private_ok):
         return None
     known = frame.get(identity_c.IDENTITY(person)).name
-    name = f"« {known} »" if known else "cette personne"
+    name = f"« {known} »" if known else phrase("expression.person.unnamed")
     body = " ".join(text.split())
     lines = [f"{_lead(m, frame, name)} :", cited(body, 400) if m.external else body,
-             "Si l'envie te vient de lui écrire, c'est de là que tu peux partir — pas d'un « quoi de neuf » "
-             "dans le vide."]
+             phrase("needs.matter.start_there")]
     # une matière ne concerne que la personne en face, ou personne (anodin) : rien d'autrui à dire ici ; sa
     # provenance voyage dans l'énoncé (dite, elle ne resert pas)
     return SectionBody("\n".join(lines), provenance=(f"{MATTER_PROVENANCE}{m.ref}",))

@@ -27,28 +27,29 @@ from mika.faculties.memory.recall import (
 )
 from mika.faculties.memory.salience import age_words, tag
 from mika.vocab.episodes import CONVERSATIONAL, WORKING
+from mika.vocab.phrasebook import phrase
 
 
 class SearchArgs(BaseModel):
-    query: str = Field(min_length=1, max_length=300, description="ce que tu cherches, en quelques mots")
+    query: str = Field(min_length=1, max_length=300, description=phrase("memory.tools.search.query"))
     limit: int = Field(default=5, ge=1, le=10)
 
 
 class PromiseArgs(BaseModel):
-    promise: int = Field(description="le numéro de la promesse (n° dans « ce que tu lui as promis »)")
-    status: Literal["honored", "dropped"] = Field(description="honored : tenue ; dropped : abandonnée")
+    promise: int = Field(description=phrase("memory.tools.promise_done.promise"))
+    status: Literal["honored", "dropped"] = Field(description=phrase("memory.tools.promise_done.status"))
 
 
-MEMORY.bundle("memory", "fouiller tes souvenirs et ce que tu sais ; dire qu'une promesse est tenue")
+MEMORY.bundle("memory", phrase("memory.tools.bundle"))
 
 
-@MEMORY.tool("memory_search", description="Chercher dans ta mémoire (souvenirs, ce que tu sais), même ce qui ne te "
-             "revient plus tout seul.", args=SearchArgs, bundle="memory", episodes=[*CONVERSATIONAL, *WORKING])
+@MEMORY.tool("memory_search", description=phrase("memory.tools.search.description"), args=SearchArgs, bundle="memory",
+             episodes=[*CONVERSATIONAL, *WORKING])
 async def memory_search(args: SearchArgs, ctx: Any) -> str:
     vectors, store = ctx.ports.get("vectors"), ctx.ports.get("store")
     frame, aud = ctx.frame, ctx.frame.audience
     if vectors is None or store is None or aud is None:
-        return "Ta mémoire ne répond pas pour l'instant."
+        return phrase("memory.tools.search.unavailable")
     p = params(frame.env.params_of("memory", frame.root))
     ep = frame.episode
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
@@ -69,15 +70,13 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
         if len(found) >= args.limit:
             break
     if not found:
-        return "Rien ne te revient là-dessus."
+        return phrase("memory.tools.search.nothing")
     names = names_of(frame, {o for it, v in found for o in (*v.others, *it.about)})
     return "\n".join(f"- {age_words(it.born_at, frame.now)} : {it.text}{tag(v, names)}" for it, v in found)
 
 
-@MEMORY.tool("memory_promise_done", description="Dire qu'une promesse faite à la personne à qui tu parles est "
-             "tenue (tu l'as fait, ou tu viens de le faire) ou abandonnée (vous êtes passés à autre chose) — avec son "
-             "numéro, celui qui suit la promesse dans « ce que tu lui as promis ».",
-             args=PromiseArgs, bundle="memory", episodes=CONVERSATIONAL)
+@MEMORY.tool("memory_promise_done", description=phrase("memory.tools.promise_done.description"), args=PromiseArgs,
+             bundle="memory", episodes=CONVERSATIONAL)
 async def memory_promise_done(args: PromiseArgs, ctx: Any) -> str:
     state = ctx.frame.state("memory")
     promise = state.promises.get(args.promise)
@@ -85,9 +84,11 @@ async def memory_promise_done(args: PromiseArgs, ctx: Any) -> str:
     person = ctx.frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     # une promesse faite à une adresse reliée depuis à cette personne lui a été faite
     if promise is None or (person is not None and (ctx.frame.get(identity_c.PERSON(promise.to)) or promise.to) != person):
-        return "Je ne trouve pas cette promesse (déjà réglée, ou faite à quelqu'un d'autre)."
+        return phrase("memory.tools.promise_done.not_found")
     if args.status == c.HONORED and promise.due is not None and kept_too_early(promise, ctx.frame.now, ctx.frame):
         # la règle de la consolidation (ADR 0052) : la veille, « je te le rappellerai » n'est pas la tenir
-        return f"C'est pour {when_words(promise.due, ctx.frame)} : tu la tiendras ce jour-là."
+        return phrase("memory.tools.promise_done.too_early", when=when_words(promise.due, ctx.frame))
     await ctx.emit(c.PROMISE_RESOLVED.draft(promise=args.promise, status=args.status, by="tool"))
-    return "C'est noté." if args.status == c.HONORED else "D'accord, tu l'as laissée tomber."
+    if args.status == c.HONORED:
+        return phrase("memory.tools.promise_done.honored")
+    return phrase("memory.tools.promise_done.dropped")

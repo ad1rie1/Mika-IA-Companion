@@ -43,6 +43,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, floor, workshop
 from mika.kernel.state import FrozenDict
 from mika.vocab.episodes import Kind, goal_of, goal_target
+from mika.vocab.phrasebook import phrase
 
 #: au-dessus de la barre de réveil : un rappel urgent la réveille
 URGENT_EVIDENCE = body_c.WAKE_BAR + 2.0
@@ -170,8 +171,7 @@ def _remind(s: GoalsState, frame: Frame) -> list[Candidate]:
         if not address:
             continue
         who = _name(frame, g.owner) or _name(frame, address)
-        brief = (f"C'est l'heure du rappel que {f'« {who} »' if who else 'cette personne'} t'a demandé : "
-                 "rappelle-le-lui, simplement, à ta façon.")
+        brief = phrase("goals.brief.remind", who=f"« {who} »" if who else phrase("expression.person.unnamed"))
         out.append(Candidate(
             Kind.INITIATIVE, address, c.REMIND, URGENT_EVIDENCE if g.urgent else p.remind_evidence,
             resources=frozenset({floor(address)}), guards=(_still(g.id, (c.ACTIVE,)),),
@@ -216,17 +216,14 @@ def share_brief(g: Goal, person: str, address: str, level: str, frame: Frame) ->
     résultat à annoncer à cette personne-là (elle prend de ses nouvelles). La consigne ne renvoie à aucune section
     et ne dit rien du contenu (le murmure qui la précède s'entend)."""
     name = _name(frame, person) or _name(frame, address)
-    who = f"« {name} »" if name else "cette personne"
+    who = f"« {name} »" if name else phrase("expression.person.unnamed")
     if worry_of(g, person):
-        return (f"Tu as beaucoup repensé à ce que {who} t'avait confié. Ce n'est pas un résultat à annoncer : prends "
-                "de ses nouvelles, et si ta réflexion t'a apporté quelque chose d'utile, glisse-le simplement.")
-    return {
-        FULL: f"Tu as mené à bout quelque chose qui te tenait à cœur : raconte-le à {who}, simplement.",
-        SUMMARY: f"Tu as mené à bout quelque chose qui te tenait à cœur : dis-le en deux mots à {who}, sans entrer "
-                 "dans tous les détails.",
-        MENTION: f"Tu as fini quelque chose qui te tenait à cœur : tu peux le mentionner à {who} en passant, sans "
-                 "entrer dans le détail.",
-    }[level]
+        return phrase("goals.brief.worry", who=who)
+    if level == FULL:
+        return phrase("goals.brief.share.full", who=who)
+    if level == SUMMARY:
+        return phrase("goals.brief.share.summary", who=who)
+    return phrase("goals.brief.share.mention", who=who)
 
 
 @GOALS.propose(kinds=[Kind.INITIATIVE], reasons={c.SHARE: (0.0, 10.0)},

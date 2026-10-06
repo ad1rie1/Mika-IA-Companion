@@ -72,6 +72,7 @@ async def test_la_cli_ne_recoit_aucun_jeton_et_reste_isolee(tmp_path: Path, monk
     for flag in ("--setting-sources", "--strict-mcp-config", "--no-session-persistence", "--json-schema"):
         assert flag in args
     assert args[args.index("--tools") + 1] == "" and args[args.index("--model") + 1] == "sonnet"
+    assert args[args.index("--setting-sources") + 1] == ""  # aucune source de réglages : ni CLAUDE.md, ni hooks
     assert Path(seen["cwd"]).name.startswith("jumeau-appel-")  # un dossier vide, pas le dépôt
     assert result.quota == [QuotaReading("five_hour", 0.42, 1900000000)]
     assert result.model == "claude-sonnet-x"
@@ -106,8 +107,10 @@ def test_les_emotions_sont_celles_du_moteur() -> None:
 
 # -- la passe d'annotation, avec un faux appelant -----------------------------------------------------------
 
-def corpus_annote(tmp_path: Path) -> Corpus:
+def corpus_annote(tmp_path: Path, *, second_day: bool = False) -> Corpus:
     c = Corpus(tmp_path / "corpus.db")
+    later = [Message(WHATSAPP, "Julie", "Julie", "Tu viens samedi ?", Temps.exact(T0 + 86_400_000_000), 2),
+             Message(WHATSAPP, "Julie", "Léa", "Oui !! je ramène un gâteau", Temps.exact(T0 + 86_460_000_000), 3)]
     items: list[Any] = [
         Author(WHATSAPP, "Julie", name="Julie", me=False), Author(WHATSAPP, "Léa", name="Léa", me=True),
         Conversation(WHATSAPP, "Julie", members=("Julie", "Léa")),
@@ -116,6 +119,7 @@ def corpus_annote(tmp_path: Path) -> Corpus:
         Author(NOTES, "moi", me=True),
         Document(NOTES, "j#0", "journal", "12 mars", "Cette nuit j'ai rêvé que je volais au-dessus de Lyon.",
                  Temps.exact(T0, Origin.HEADER), 0),
+        *(later if second_day else []),
     ]
     with c.transaction():
         sid = c.begin_source("x", "x", "test", 1, 0, "now")
@@ -123,6 +127,9 @@ def corpus_annote(tmp_path: Path) -> Corpus:
     resolve_people(c, tmp_path / "personnes.yaml", TZ)
     build_sessions(c)
     plan(c, tmp_path / "plan.yaml")
+    if second_day:  # les deux journées au même palier : un seul lot de deux séances
+        c.db.execute("UPDATE sessions SET tier = 'A' WHERE document IS NULL")
+        c.db.commit()
     return c
 
 
@@ -142,7 +149,7 @@ def reply_for(spec: CallSpec, *, skip: str = "", bad_id: bool = False) -> CallRe
         if k.startswith("d"):
             s["reves"] = [{"texte": "Je volais au-dessus de Lyon, légère.", "emotion": "dreamy"}]
         else:
-            s["souvenirs"] = [{"texte": "Julie m'a appris qu'elle était enceinte.", "personnes": ["p2"],
+            s["souvenirs"] = [{"texte": "Julie m'a appris qu'elle était enceinte.", "personnes": ["p2", "p999"],
                                "messages": [*ids, 424242], "importance": 4, "sensibilite": "personnel"}]
         seances.append(s)
     return CallResult(text="", data={"seances": seances}, model="fake", usage={"input_tokens": 100,
@@ -167,6 +174,7 @@ async def test_annotation_de_bout_en_bout(tmp_path: Path) -> None:
     conv = next(d for d in rows.values() if d["seance"].startswith("s"))
     assert [e["id"] for e in conv["emotions"]] and all(e["id"] != 99999 for e in conv["emotions"])  # écarté
     assert 424242 not in conv["souvenirs"][0]["messages"]
+    assert "p999" not in conv["souvenirs"][0]["personnes"]  # absente du glossaire : inventée
     doc = next(d for d in rows.values() if d["seance"].startswith("d"))
     assert doc["reves"][0]["texte"].startswith("Je volais")
     assert c.db.execute("SELECT COUNT(*) FROM sessions WHERE status = 'done'").fetchone()[0] == 2
@@ -175,7 +183,7 @@ async def test_annotation_de_bout_en_bout(tmp_path: Path) -> None:
 
 
 async def test_une_seance_oubliee_repart_seule(tmp_path: Path) -> None:
-    c = corpus_annote(tmp_path)
+    c = corpus_annote(tmp_path, second_day=True)
     p = AnnotatePass(TZ, tokens_per_batch=1_000_000)
     jobs.enqueue(c, p)
     calls: list[CallSpec] = []
@@ -191,20 +199,65 @@ async def test_une_seance_oubliee_repart_seule(tmp_path: Path) -> None:
 
     await jobs.run(c, p, caller=caller)
     await jobs.run(c, p, caller=caller)
-    assert c.db.execute("SELECT COUNT(*) FROM annotations").fetchone()[0] == 2
+    assert "," in calls[0].prompt.rsplit("(Séances à rendre : ", 1)[1]  # un lot de plusieurs séances, sinon rien à oublier
+    assert c.db.execute("SELECT COUNT(*) FROM annotations").fetchone()[0] == 3
 
 
-async def test_reponse_invalide_reessayee_puis_echec(tmp_path: Path) -> None:
-    c = corpus_annote(tmp_path)
-    p = AnnotatePass(TZ)
+class FakeTime:
+    def __init__(self) -> None:
+        self.now = 1_000_000.0
+        self.slept: list[float] = []
+
+    def clock(self) -> float:
+        return self.now
+
+    async def sleep(self, s: float) -> None:
+        self.slept.append(s)
+        self.now += s
+
+
+async def test_reponse_invalide_reessayee_de_plus_en_plus_tard_puis_coupee_puis_echec(tmp_path: Path) -> None:
+    c = corpus_annote(tmp_path, second_day=True)
+    p = AnnotatePass(TZ, tokens_per_batch=1_000_000)
     jobs.enqueue(c, p)
+    t = FakeTime()
 
     async def caller(spec: CallSpec) -> CallResult:
         return CallResult(text="désolé", data=None)
 
-    report = await jobs.run(c, p, caller=caller, max_attempts=2)
-    assert report.failed >= 1 and report.done == 0
-    assert set(jobs.counts(c, p)) == {"failed"}
+    report = await jobs.run(c, p, caller=caller, max_attempts=3, workers=1, clock=t.clock, sleep=t.sleep)
+    assert report.done == 0 and report.split >= 1 and report.failed >= 2
+    assert set(jobs.counts(c, p)) == {"failed", "split"}  # le lot de deux séances coupé, chaque moitié échouée
+    assert t.slept[:2] == [pytest.approx(30), pytest.approx(60)]  # le délai double
+    assert jobs.retry_failed(c, p) == report.failed
+    assert jobs.counts(c, p).get("todo") == report.failed
+
+
+async def test_un_refus_pour_quota_n_est_pas_un_essai(tmp_path: Path) -> None:
+    c = corpus_annote(tmp_path)
+    p = AnnotatePass(TZ)
+    jobs.enqueue(c, p)
+    t = FakeTime()
+    refused = [0]
+
+    async def caller(spec: CallSpec) -> CallResult:
+        if refused[0] < 3:
+            refused[0] += 1
+            raise ClaudeError("Claude AI usage limit reached", limited=True, resets_at=int(t.now) + 3600)
+        return reply_for(spec)
+
+    report = await jobs.run(c, p, caller=caller, max_attempts=2, workers=1, clock=t.clock, sleep=t.sleep)
+    assert report.failed == 0 and report.done == jobs.counts(c, p)["done"]
+    assert t.slept[0] == pytest.approx(3660)  # jusqu'à la réinitialisation, plus une minute
+    assert c.db.execute("SELECT MAX(attempts) FROM jobs").fetchone()[0] == 1
+
+
+def test_un_refus_pour_quota_se_reconnait() -> None:
+    from twin.engine.claude import limit_state
+
+    assert limit_state({"status": "rejected", "resetsAt": 1900000000}) == (True, 1900000000)
+    assert limit_state(None, "Claude AI usage limit reached|1900000000") == (True, 1900000000)
+    assert limit_state({"status": "allowed"}, "Not logged in") == (False, 0)
 
 
 async def test_pause_au_plafond_du_quota(tmp_path: Path) -> None:

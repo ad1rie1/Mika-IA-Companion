@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime
@@ -74,6 +76,14 @@ def test_recherche_sans_accents_et_lecture(tmp_path: Path) -> None:
     assert not err and "ELLE" in session and "Julie Martin (p" in session
     _, err = tool(s, "seance_lire", ref="xyz")
     assert err
+    text, err = tool(s, "corpus_chercher", requete='"mariage AND')  # une requête que FTS5 refuserait telle quelle
+    assert not err and (text == "aucun résultat" or isinstance(json.loads(text), list))  # nettoyée
+    def locked(_args: object) -> str:
+        raise sqlite3.OperationalError("database is locked")
+
+    s.tools["corpus_stats"] = dataclasses.replace(s.tools["corpus_stats"], run=locked)
+    text, err = tool(s, "corpus_stats")
+    assert err and "database is locked" in text  # dite à Claude Code ; le serveur reste debout
 
 
 def test_ecriture_seulement_sur_demande_et_jamais_plus_large(tmp_path: Path) -> None:

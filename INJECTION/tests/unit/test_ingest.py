@@ -110,3 +110,43 @@ def test_cli_de_bout_en_bout(tmp_path: Path, capsys) -> None:  # type: ignore[no
     out = capsys.readouterr().out
     assert "messages" in out and "précision des dates" in out
     assert (tmp_path / "travail" / "inconnus.txt").read_text(encoding="utf-8") == "bizarre.dat\n"
+
+
+def test_deux_messages_identiques_dans_la_meme_minute_sont_deux_messages(tmp_path: Path) -> None:
+    root = tmp_path / "brut"
+    root.mkdir()
+    chat = "12/03/2019 à 14:05 - Julie: ok\n12/03/2019 à 14:05 - Julie: ok\n12/03/2019 à 14:06 - Léa: oui ?\n"
+    (root / "Discussion WhatsApp avec Julie.txt").write_text(chat, encoding="utf-8")
+    corpus = Corpus(tmp_path / "corpus.db")
+    ctx = ReadContext(tz=TZ, root=root)
+    assert ingest(corpus, root, ctx).messages == 3
+    # le même export, une seconde fois sous un autre nom : rien de neuf, les deux « ok » compris
+    (root / "Discussion WhatsApp avec Julie (2).txt").write_text(chat, encoding="utf-8")
+    again = ingest(corpus, root, ctx)
+    assert again.messages == 0 and again.duplicates == 3
+
+
+def test_un_fichier_qui_plante_n_arrete_pas_les_autres(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import twin.ingest as ingest_mod
+    from twin.readers import all_readers
+
+    class Boom:
+        name, label, version = "boom", "plante", 1
+
+        def detect(self, path: Path) -> int:
+            return 99 if path.suffix == ".boom" else 0
+
+        def read(self, path: Path, ctx: ReadContext):  # type: ignore[no-untyped-def]
+            raise RuntimeError("format inattendu")
+            yield
+
+    root = brut(tmp_path)
+    (root / "x.boom").write_text("?", encoding="utf-8")
+    (root / "notes" / "gros.txt").write_text("Une très longue note.\n" * 100, encoding="utf-8")
+    monkeypatch.setattr(ingest_mod, "MAX_WHOLE_FILE", 1000)  # la grosse note dépasse : refusée, pas lue d'un bloc
+    corpus = Corpus(tmp_path / "corpus.db")
+    r = ingest(corpus, root, ReadContext(tz=TZ, root=root), readers=[Boom(), *all_readers()])
+    failed = dict(r.failed)
+    assert "RuntimeError: format inattendu" in failed["x.boom"]
+    assert "trop gros" in failed["notes/gros.txt"]
+    assert r.read.get("whatsapp") == 1  # les autres sont lus

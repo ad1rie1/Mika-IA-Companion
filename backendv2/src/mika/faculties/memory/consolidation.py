@@ -55,6 +55,7 @@ from mika.ports.llm import LLMRequest, Message
 from mika.ports.vectors import VectorItem
 from mika.vocab.affect import emotion_of
 from mika.vocab.people import clean_display_name, fold, is_identifiable
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import WORD, banal, stems
 
@@ -516,7 +517,8 @@ class Consolidate:
                 continue
             sens = int(Sensitivity.PERSONAL)
             drafts.append(c.BELIEVED.draft(
-                text=Content.of(f"{name or 'On'} m'appelle « {nick} »", level=sens), about=(person,),
+                text=Content.of(phrase("memory.extraction.nickname", name=name or phrase("memory.extraction.someone"),
+                                       nick=nick), level=sens), about=(person,),
                 sensitivity=sens, importance=x.IMPORTANCE[3], confidence=0.9, origin=c.OBSERVED, source=person,
                 sources=tuple(seqs), call_id=call_id, told_by=(person,), heard_by=conv.persons, between_us=True))
         return drafts
@@ -772,7 +774,9 @@ def _whom(frame: Frame, state: MemoryState, promise: int, label: str) -> str:
     if pr is None or pr.due is None or pr.implicit_due:
         return label
     due = frame.local(pr.due)
-    return f"{label}, pour {x.day_words(due.date())}" + ("" if pr.all_day else f" à {due:%H:%M}")
+    if pr.all_day:
+        return phrase("memory.extraction.due_day", label=label, day=x.day_words(due.date()))
+    return phrase("memory.extraction.due_time", label=label, day=x.day_words(due.date()), time=f"{due:%H:%M}")
 
 
 def same_day(frame: Frame, a: int | None, b: int | None) -> bool:

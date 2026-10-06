@@ -44,6 +44,7 @@ from mika.faculties.memory.faculty import MemoryParams
 from mika.kernel.clock import DAY
 from mika.kernel.frame import Audience
 from mika.vocab.affect import emotion_of, valence
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity, tied_to
 from mika.vocab.words import elided, fold, stems
 
@@ -172,8 +173,8 @@ def _names(keys: Sequence[str], names: dict[str, str]) -> tuple[str, bool]:
     """« Alice », « Alice et Bob », « Alice, Bob et Carol » ; et si c'est un pluriel."""
     shown = [names.get(k, k) for k in keys]
     if len(shown) <= 1:
-        return (shown[0] if shown else "quelqu'un"), False
-    return f"{', '.join(shown[:-1])} et {shown[-1]}", True
+        return (shown[0] if shown else phrase("memory.names.someone")), False
+    return phrase("memory.names.and", others=", ".join(shown[:-1]), last=shown[-1]), True
 
 
 def tag(verdict: Verdict, names: dict[str, str]) -> str:
@@ -184,13 +185,12 @@ def tag(verdict: Verdict, names: dict[str, str]) -> str:
     if verdict.tellers:
         who, many = _names(verdict.tellers, names)
         if verdict.level >= Sensitivity.CONFIDENCE:
-            return (f" ({who} te l'{'ont' if many else 'a'} confié ; ne le répète pas sauf si "
-                    f"{who} t'y {'ont' if many else 'a'} autorisée)")
-        return f" ({who} te l'{'ont' if many else 'a'} dit en privé)"
+            return phrase("memory.tag.confided_many", who=who) if many else phrase("memory.tag.confided_one", who=who)
+        return phrase("memory.tag.private_many", who=who) if many else phrase("memory.tag.private_one", who=who)
     who, _many = _names(verdict.others, names)
     if verdict.level >= Sensitivity.CONFIDENCE:
-        return f" (ça touche {who} de près : ne le répète pas)"
-    return f" (ça touche {who} : à toi de juger si ça se dit ici)"
+        return phrase("memory.tag.touches_close", who=who)
+    return phrase("memory.tag.touches", who=who)
 
 
 def unsaid(verdict: Verdict, about: Sequence[str], told_by: Sequence[str], interlocutor: str | None) -> tuple[str, ...]:
@@ -225,14 +225,13 @@ def unsaid_line(person: str, names: dict[str, str], *, heavy: bool, close: bool,
     le modèle ne fait pas le lien, et ment : « non, il ne m'a rien dit »)."""
     who = names.get(person, person)
     if heavy and close:
-        return f"- {who} t'a confié traverser un moment difficile : ce n'est pas à toi d'en dire plus."
+        return phrase("memory.unsaid.heavy", who=who)
     known = {fold(n) for n in names.values() if n}
     asked = tuple(w for w in asked if fold(w) not in known)  # un prénom n'est pas un sujet
     if asked:
         words = ", ".join(f"« {w} »" for w in asked)
-        return (f"- {who} t'a confié des choses en privé, et ce dont on te parle là ({words}) en fait partie : "
-                "ce n'est pas à toi d'en parler ici.")
-    return f"- {who} t'a confié des choses en privé : ce n'est pas à toi d'en parler ici."
+        return phrase("memory.unsaid.asked", who=who, words=words)
+    return phrase("memory.unsaid.private", who=who)
 
 
 def unsaid_public_line(person: str, names: dict[str, str], when: str = "") -> str:
@@ -244,11 +243,8 @@ def unsaid_public_line(person: str, names: dict[str, str], when: str = "") -> st
     if when:
         # quand elles se sont parlé n'est pas ce qu'elle lui a dit : sans ce repère, même avec la consigne, un modèle
         # répondait encore « j'ai pas eu de nouvelles non plus » (sonde du 2026-10-03)
-        return (f"- Tu as parlé avec {who} {when}. Ce {elided(who, 'que')} t'a dit ne se raconte pas ici : si on te "
-                "demande de ses nouvelles, ne dis surtout pas que tu n'en as pas — dis que vous vous êtes parlé et que "
-                f"c'est à {who} de raconter.")
-    return (f"- Ce {elided(who, 'que')} t'a dit en privé ne se raconte pas ici : si on te demande de ses nouvelles, "
-            f"ne prétends pas ne rien savoir — c'est à {who} de raconter, renvoie vers lui ou elle.")
+        return phrase("memory.unsaid.public_when", when=when, who=who, that_who=elided(who, "que"))
+    return phrase("memory.unsaid.public", who=who, that_who=elided(who, "que"))
 
 
 def valence_sign(emotion: str | None) -> int:
@@ -283,13 +279,13 @@ def rank(item: Item, similarity: float, now: int, p: MemoryParams, *, interlocut
 def age_words(then: int, now: int) -> str:
     days = (now - then) / DAY
     if days < 1 / 24:
-        return "à l'instant"
+        return phrase("memory.age.now")
     if days < 1:
-        return f"il y a {max(1, round(days * 24))} h"
+        return phrase("memory.age.hours", hours=max(1, round(days * 24)))
     if days < 2:
-        return "hier"
+        return phrase("memory.age.yesterday")
     if days < 14:
-        return f"il y a {math.floor(days)} jours"
+        return phrase("memory.age.days", days=math.floor(days))
     if days < 60:
-        return f"il y a {round(days / 7)} semaines"
-    return f"il y a {round(days / 30)} mois"
+        return phrase("memory.age.weeks", weeks=round(days / 7))
+    return phrase("memory.age.months", months=round(days / 30))

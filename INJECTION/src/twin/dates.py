@@ -4,17 +4,22 @@ Tout ce qui est lu ici est en heure **locale** (le fuseau de la personne) et ren
 ``Temps`` avec sa précision : « 2009 » est une année, « mars 2009 » un mois,
 « été 2009 » une saison, « 12/03/2009 » un jour. L'ordre jour/mois est français par
 défaut (12/03 = 12 mars) ; une source anglaise se lit avec ``month_first=True``.
+
+Une date **à venir** n'est pas celle d'un écrit : elle est ignorée (« rdv le 12/03/2031 »).
+Une année nue (« 2009 ») ne date un en-tête que si la ligne n'est que cette année ; un dossier
+qui porte un jour **parmi d'autres mots** (« sauvegarde 2019-03-12 ») ne donne qu'une borne :
+ce qu'il contient a été écrit au plus tard ce jour-là.
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from twin.timing import Origin, Temps, from_us
+from twin.timing import Origin, Precision, Temps, from_us, to_us
 
 MONTHS = {
     # français
@@ -31,8 +36,8 @@ SEASON_WORDS = {"hiver": "hiver", "printemps": "printemps", "ete": "ete", "autom
 WEEKDAYS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche", "monday", "tuesday",
             "wednesday", "thursday", "friday", "saturday", "sunday")
 
-#: années plausibles pour une archive personnelle
-YEAR_MIN, YEAR_MAX = 1980, 2035
+#: la plus ancienne année plausible pour une archive personnelle (la plus récente : l'année en cours)
+YEAR_MIN = 1980
 
 
 def fold(text: str) -> str:
@@ -42,9 +47,10 @@ def fold(text: str) -> str:
 
 
 def _year(y: int) -> int | None:
-    if y < 100:  # 09 → 2009, 98 → 1998
-        y += 2000 if y < 50 else 1900
-    return y if YEAR_MIN <= y <= YEAR_MAX else None
+    this_year = datetime.now().astimezone().year
+    if y < 100:  # 09 → 2009, 98 → 1998 : un siècle qui ne tombe pas dans l'avenir
+        y += 2000 if y <= this_year % 100 else 1900
+    return y if YEAR_MIN <= y <= this_year else None
 
 
 def _day(y: int, m: int, d: int) -> date | None:
@@ -61,8 +67,8 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("ymd", re.compile(rf"(?<!\d)((?:19|20)\d\d){_SEP}(0?[1-9]|1[0-2]){_SEP}(0?[1-9]|[12]\d|3[01])(?!\d)")),
     # 20090312 (huit chiffres collés)
     ("ymd8", re.compile(r"(?<!\d)((?:19|20)\d\d)(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])(?!\d)")),
-    # 12/03/2009, 12-03-09
-    ("dmy", re.compile(rf"(?<!\d)(0?[1-9]|[12]\d|3[01]){_SEP}(0?[1-9]|1[0-2]){_SEP}((?:19|20)?\d\d)(?!\d)")),
+    # 12/03/2009, 12-03-09 : un même séparateur, jamais l'espace (« j'ai 12 03 de moyenne »)
+    ("dmy", re.compile(r"(?<!\d)(0?[1-9]|[12]\d|3[01])([-_./])(0?[1-9]|1[0-2])\2((?:19|20)?\d\d)(?!\d)")),
     # 12 mars 2009, 1er mars 2009, mardi 12 mars 2009
     ("d_month_y", re.compile(rf"(?<!\d)(0?[1-9]|[12]\d|3[01])(?:er)?\s+({_MONTH_WORDS})\.?\s+((?:19|20)\d\d)(?!\d)")),
     # March 12, 2009
@@ -80,14 +86,22 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
+_PATTERNS_BY_KIND = dict(_PATTERNS)
+
+
 def find_date(text: str, tz: ZoneInfo, origin: Origin, *, year_hint: int | None = None,
-              month_first: bool = False) -> Temps | None:
-    """La date la plus précise écrite dans ``text`` (une seule ; la première trouvée à précision égale)."""
+              month_first: bool = False, bare_year: bool = True) -> Temps | None:
+    """La date la plus précise écrite dans ``text`` (une seule ; la première trouvée à précision égale).
+
+    Une date qui commence dans l'avenir est ignorée ; ``bare_year=False`` refuse une année seule."""
     s = fold(text)
+    now = to_us(datetime.now(tz))
     for kind, pat in _PATTERNS:
+        if kind == "y" and not bare_year:
+            continue
         for m in pat.finditer(s):
             t = _build(kind, m.groups(), tz, origin, year_hint, month_first)
-            if t is not None:
+            if t is not None and (t.start is None or t.start <= now):
                 return t
     return None
 
@@ -99,7 +113,7 @@ def _build(kind: str, g: tuple[str, ...], tz: ZoneInfo, origin: Origin, year_hin
         d = y and _day(y, int(g[1]), int(g[2]))
         return Temps.day(d, tz, origin) if d else None
     if kind == "dmy":
-        a, b, y = int(g[0]), int(g[1]), _year(int(g[2]))
+        a, b, y = int(g[0]), int(g[2]), _year(int(g[3]))
         if y is None:
             return None
         day, month = (b, a) if month_first else (a, b)
@@ -135,7 +149,9 @@ def date_from_path(path: Path, root: Path | None, tz: ZoneInfo) -> Temps | None:
     """La date d'un fichier d'après son nom puis ses dossiers (sous ``root``).
 
     Le nom du fichier gagne ; « 12 mars » sans année se complète par l'année d'un dossier
-    parent (``2009/12 mars.txt``) ; un dossier seul donne au mieux son mois ou son année.
+    parent (``2009/12 mars.txt``) ; un dossier seul donne au mieux son mois ou son année. Un
+    dossier qui porte un jour parmi d'autres mots (« sauvegarde 2019-03-12 ») est le jour où on
+    a rangé, pas celui où on a écrit : il ne donne qu'une borne (au plus tard ce jour-là).
     """
     parts = list(path.relative_to(root).parts if root and path.is_relative_to(root) else path.parts[-3:])
     if not parts:
@@ -153,9 +169,26 @@ def date_from_path(path: Path, root: Path | None, tz: ZoneInfo) -> Temps | None:
         return t
     for p in reversed(parents):
         t = find_date(p, tz, Origin.PATH)
-        if t is not None:
-            return t
+        if t is None:
+            continue
+        if t.precision == Precision.DAY and not _only_a_date(p):
+            return Temps(None, t.end, None, Precision.UNKNOWN, Origin.PATH)
+        return t
     return None
+
+
+def _only_a_date(text: str) -> bool:
+    """« 2009-03-12 », « 12 mars 2009 », « Mardi 12/03/09 » : rien d'autre qu'une date (et ses séparateurs)."""
+    rest = fold(text)
+    for pat in (_PATTERNS_BY_KIND[k] for k in ("ymd", "ymd8", "dmy", "d_month_y", "month_d_y")):
+        rest = pat.sub(" ", rest)
+    rest = re.sub(rf"\b(?:{'|'.join(WEEKDAYS)}|le)\b", " ", rest)
+    return not re.search(r"[a-z0-9]", rest)
+
+
+def _only_a_year(line: str) -> bool:
+    """« 2009 », « # Année 2009 », « Journal 2009 : » : une ligne qui n'est qu'une année."""
+    return bool(re.fullmatch(r"\W*(?:(?:annee|year|journal|carnet)\W+)?(?:19|20)\d\d\W*", fold(line)))
 
 
 def date_from_header(text: str, tz: ZoneInfo, *, year_hint: int | None = None, lines: int = 3) -> Temps | None:
@@ -164,7 +197,7 @@ def date_from_header(text: str, tz: ZoneInfo, *, year_hint: int | None = None, l
     for ln in head:
         if len(ln) > 80:  # une phrase, pas un en-tête
             continue
-        t = find_date(ln, tz, Origin.HEADER, year_hint=year_hint)
+        t = find_date(ln, tz, Origin.HEADER, year_hint=year_hint, bare_year=_only_a_year(ln))
         if t is not None:
             return t
     return None

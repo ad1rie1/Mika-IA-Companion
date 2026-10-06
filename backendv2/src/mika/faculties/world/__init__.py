@@ -45,6 +45,7 @@ from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab.affect import Emotion
 from mika.vocab.episodes import CONVERSATIONAL
+from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity, closeness_rank, hearable
 
 #: Le monde qu'elle habite au premier démarrage : sa chambre, telle que l'écran la montre.
@@ -357,23 +358,17 @@ def _places_help() -> str:
 
 
 class GoArgs(BaseModel):
-    place: Where = Field(description=f"Où aller — {_places_help()}.")  # type: ignore[valid-type]
-    posture: w.Posture | None = Field(default=None, description=(
-        "Comment t'y tenir (facultatif) : stand (debout), sit (assise), lie (allongée, sur un lit). Sans rien : "
-        "debout à un endroit où l'on se tient, assise sur une chaise ou au bord du lit."))
+    place: Where = Field(description=phrase("world.tools.go_to.place", places=_places_help()))  # type: ignore[valid-type]
+    posture: w.Posture | None = Field(default=None, description=phrase("world.tools.go_to.posture"))
 
 
 class InteractArgs(BaseModel):
-    object: str = Field(max_length=48, description="L'identifiant de l'objet, tel que « AUTOUR DE TOI » le donne "
-                        "(entre ` `).")
-    action: str = Field(max_length=48, description="Ce que tu en fais, tel que « AUTOUR DE TOI » le donne : take "
-                        "(prendre), put (poser), drop (lâcher), ou une action propre à l'objet (ouvrir, "
-                        "regarder_dehors…).")
-    target: str | None = Field(default=None, max_length=48, description="Pour put : sur quoi, dans quoi ou à quel "
-                               "endroit le poser (un identifiant).")
+    object: str = Field(max_length=48, description=phrase("world.tools.interact.object"))
+    action: str = Field(max_length=48, description=phrase("world.tools.interact.action"))
+    target: str | None = Field(default=None, max_length=48, description=phrase("world.tools.interact.target"))
 
 
-WORLD.bundle("world", "te déplacer et faire des choses dans ta chambre (on te voit le faire)")
+WORLD.bundle("world", phrase("world.tools.bundle"))
 
 
 def _awake(frame: Frame) -> bool:
@@ -383,8 +378,8 @@ def _awake(frame: Frame) -> bool:
 def _where_phrase(defn: w.WorldDef, place: str | None, posture: w.Posture) -> str:
     p = defn.place(place) if place else None
     if p is None:
-        return f"{plan.POSTURE_FR[posture]} dans la pièce"
-    return f"{plan.POSTURE_FR[posture]} {p.label}"
+        return phrase("world.around.where_room", posture=plan.posture_words(posture))
+    return phrase("world.around.where_place", posture=plan.posture_words(posture), place=p.label)
 
 
 #: Ses outils qui mettent son corps en action.
@@ -406,9 +401,7 @@ def _busy(s: WorldState, ctx: Any) -> ToolResult | None:
     last = next((st.posture for st in reversed(running.steps) if st.kind == "posture" and st.posture), None)
     where = _where_phrase(s.definition, me.moving.to_place if me.moving is not None else me.place,
                           last or me.posture)
-    return ToolResult(ok=False, content=f"Tu es déjà en train de faire autre chose (tu seras {where}) : une chose "
-                      "à la fois. Celle-ci n'est pas faite ; tu pourras la faire une fois l'autre finie, à ta "
-                      "prochaine réplique.")
+    return ToolResult(ok=False, content=phrase("world.tools.busy", where=where))
 
 
 def _interrupted(intent: w.Intent) -> Any:
@@ -427,23 +420,21 @@ async def _start_intent(ctx: Any, steps: list[w.Step]) -> w.Intent:
     return intent
 
 
-@WORLD.tool("go_to", description="Aller ailleurs dans ta chambre : t'asseoir à ton bureau ou sur ton lit, aller à "
-            "la fenêtre, devant ta bibliothèque, à la porte, ou revenir au milieu. On te voit marcher jusque-là. "
-            "Seulement quand l'envie ou la conversation t'y pousse (« attends, je vais voir dehors »), pas à chaque "
-            "réplique ; ne le raconte pas entre crochets, fais-le.", args=GoArgs, bundle="world",
+@WORLD.tool("go_to", description=phrase("world.tools.go_to.description"), args=GoArgs, bundle="world",
             episodes=CONVERSATIONAL, max_calls_per_episode=1)
 async def go_to(args: GoArgs, ctx: Any) -> ToolResult:
     frame: Frame = ctx.frame
     s: WorldState = ctx.state
     if not _awake(frame):
-        return ToolResult(ok=False, content="Tu dors : ton corps ne bouge pas.")
+        return ToolResult(ok=False, content=phrase("world.tools.asleep"))
     me = s.actors[w.MIKA]
     target = s.definition.place(args.place.value)
     if target is None:
-        return ToolResult(ok=False, content=f"« {args.place.value} » n'est plus un endroit d'ici.")
+        return ToolResult(ok=False, content=phrase("world.tools.go_to.gone", place=args.place.value))
     want = args.posture or plan.default_posture(target)
     if me.moving is not None and me.moving.to_place == target.id and (args.posture is None or me.posture == want):
-        return ToolResult(content=f"Tu y vas déjà : tu seras {_where_phrase(s.definition, target.id, want)}.")
+        return ToolResult(content=phrase("world.tools.go_to.already_going",
+                                         where=_where_phrase(s.definition, target.id, want)))
     if (busy := _busy(s, ctx)) is not None:
         return busy
     t = timing(frame.env.params_of("world", frame.root))
@@ -454,22 +445,21 @@ async def go_to(args: GoArgs, ctx: Any) -> ToolResult:
     if not steps:
         if (running := _running(s)) is not None:  # elle allait ailleurs : elle s'arrête et reste là
             await ctx.emit(_interrupted(running))
-            return ToolResult(content=f"Tu t'arrêtes : tu restes {_where_phrase(s.definition, target.id, me.posture)}.")
-        return ToolResult(content=f"Tu y es déjà : tu es {_where_phrase(s.definition, target.id, me.posture)}.")
+            return ToolResult(content=phrase("world.tools.go_to.stop",
+                                             where=_where_phrase(s.definition, target.id, me.posture)))
+        return ToolResult(content=phrase("world.tools.go_to.already_there",
+                                         where=_where_phrase(s.definition, target.id, me.posture)))
     await _start_intent(ctx, steps)
-    return ToolResult(content=f"Tu y vas : tu seras {_where_phrase(s.definition, target.id, want)}.")
+    return ToolResult(content=phrase("world.tools.go_to.going", where=_where_phrase(s.definition, target.id, want)))
 
 
-@WORLD.tool("interact", description="Faire quelque chose avec un objet autour de toi : ouvrir ta fenêtre, regarder "
-            "dehors, arroser ta plante, te mettre à dessiner à ton bureau, prendre ou poser quelque chose. Tu y vas "
-            "d'abord s'il le faut. Les objets et ce qu'on peut en faire sont dans « AUTOUR DE TOI ». Seulement quand "
-            "tu en as envie ou qu'on te le demande ; ne le raconte pas entre crochets, fais-le.",
-            args=InteractArgs, bundle="world", episodes=CONVERSATIONAL, max_calls_per_episode=3)
+@WORLD.tool("interact", description=phrase("world.tools.interact.description"), args=InteractArgs, bundle="world",
+            episodes=CONVERSATIONAL, max_calls_per_episode=3)
 async def interact(args: InteractArgs, ctx: Any) -> ToolResult:
     frame: Frame = ctx.frame
     s: WorldState = ctx.state
     if not _awake(frame):
-        return ToolResult(ok=False, content="Tu dors : ton corps ne bouge pas.")
+        return ToolResult(ok=False, content=phrase("world.tools.asleep"))
     if (busy := _busy(s, ctx)) is not None:
         return busy
     t = timing(frame.env.params_of("world", frame.root))
@@ -482,16 +472,15 @@ async def interact(args: InteractArgs, ctx: Any) -> ToolResult:
     what = plan.label_of(s.definition, args.object)
     verb = dict(plan.actions_of(s.definition, s.objects, s.actors[w.MIKA], args.object, frame.now)).get(
         args.action, args.action)
-    return ToolResult(content=f"C'est parti : {verb} — {what}. On te voit le faire.")
+    return ToolResult(content=phrase("world.tools.interact.done", verb=verb, what=what))
 
 
 # ── Le prompt ─────────────────────────────────────────────────────────────
 
 
-#: depuis combien de temps elle est là, ou à ce qu'elle fait, en mots (jamais un chiffre) : du plus long au plus
-#: court ; en deçà, rien
-FOR_A_WHILE = ((3 * HOUR, "depuis longtemps"), (45 * MINUTE, "depuis un bon moment"),
-               (20 * MINUTE, "depuis un moment"))
+#: depuis combien de temps elle est là, ou à ce qu'elle fait, en mots (jamais un chiffre : ``world.around.
+#: for_a_while``) : du plus long au plus court ; en deçà, rien
+FOR_A_WHILE = ((3 * HOUR, "long"), (45 * MINUTE, "good_while"), (20 * MINUTE, "while"))
 
 
 def _for_a_while(since: int, now: int) -> str:
@@ -499,7 +488,8 @@ def _for_a_while(since: int, now: int) -> str:
     ne sait pas, rien."""
     if since <= 0:
         return ""
-    return next((f" {words}" for span, words in FOR_A_WHILE if now - since >= span), "")
+    words = family("world.around.for_a_while")
+    return next((f" {words[key]}" for span, key in FOR_A_WHILE if now - since >= span), "")
 
 
 def around(s: WorldState, now: int, p: WorldParams) -> str:
@@ -509,40 +499,42 @@ def around(s: WorldState, now: int, p: WorldParams) -> str:
     lines: list[str] = []
     several = len(defn.rooms) > 1
     room = defn.room(me.room)
-    in_room = f", dans {room.label}" if several and room is not None else ""
+    in_room = phrase("world.around.in_room", room=room.label) if several and room is not None else ""
     busy = me.activity is not None and (me.activity.until is None or me.activity.until > now)
     if me.moving is not None and me.moving.eta > now:
         intent = s.intents.get(me.moving.intent)
         last = next((st.posture for st in reversed(intent.steps) if st.kind == "posture" and st.posture), None) \
             if intent is not None else None
-        lines.append(f"Tu es en chemin : tu seras {_where_phrase(defn, me.moving.to_place, last or me.posture)}.")
+        lines.append(phrase("world.around.on_the_way", where=_where_phrase(defn, me.moving.to_place, last or me.posture)))
     else:
         # occupée, c'est l'occupation qui dit sa durée (une fois suffit)
         lasting = "" if busy else _for_a_while(me.since, now)
-        lines.append(f"Tu es {_where_phrase(defn, me.place, me.posture)}{lasting}{in_room}.")
+        lines.append(phrase("world.around.here", where=_where_phrase(defn, me.place, me.posture), lasting=lasting,
+                            in_room=in_room))
     if busy and me.activity is not None:
-        lines.append(f"Tu es en train de {plan.affordance_label(defn, me.activity)}"
-                     f"{_for_a_while(me.activity.since, now)}.")
+        lines.append(phrase("world.around.busy", activity=plan.affordance_label(defn, me.activity),
+                            lasting=_for_a_while(me.activity.since, now)))
     budget = p.shown_objects
     if me.holding:
-        lines.append("Tu tiens " + ", ".join(_thing(s, me, o, now) for o in me.holding) + ".")
+        lines.append(phrase("world.around.holding", things=", ".join(_thing(s, me, o, now) for o in me.holding)))
         budget -= len(me.holding)
     reach = [o for o in plan.reachable(defn, s.actors, s.objects, w.MIKA) if o not in me.holding]
     if reach and budget > 0:
-        lines.append("À portée de main : " + " ; ".join(_thing(s, me, o, now) for o in reach[:budget]) + ".")
+        lines.append(phrase("world.around.reach", things=" ; ".join(_thing(s, me, o, now) for o in reach[:budget])))
         budget -= len(reach[:budget])
     # où aller, puis de quoi se servir : deux listes, jamais « sur ton lit : ta plante » (qui se lit « la plante
     # est sur le lit ») — ``interact`` y va de lui-même, l'endroit d'un objet n'a pas à se dire
     places = []
     for pl in [pl for pl in defn.places if pl.id != me.place][:p.shown_places]:
         room = defn.room(pl.room) if pl.room != me.room else None
-        places.append(f"{pl.label} (`{pl.id}`" + (f", dans {room.label}" if room is not None else "") + ")")
+        places.append(f"{pl.label} (`{pl.id}`" + (phrase("world.around.in_room", room=room.label)
+                                                    if room is not None else "") + ")")
     if places:
-        lines.append("Tu peux aller " + " ; ".join(places) + ".")
+        lines.append(phrase("world.around.places", places=" ; ".join(places)))
     usable = [o for o in plan.usable(defn, s.actors, s.objects, w.MIKA, now)
               if o not in reach and o not in me.holding][:max(0, budget)]
     if usable:
-        lines.append("Dans la pièce, de quoi te servir : " + " ; ".join(_thing(s, me, o, now) for o in usable) + ".")
+        lines.append(phrase("world.around.usable", things=" ; ".join(_thing(s, me, o, now) for o in usable)))
     return "\n".join(lines)
 
 
@@ -557,7 +549,7 @@ def _thing(s: WorldState, me: w.ActorState, oid: str, now: int) -> str:
 
 
 @WORLD.section("world", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["rhythm"], trim_rank=70,
-               title="AUTOUR DE TOI", reads=[body_c.SLEEP, identity_c.PERSON, identity_c.IDENTITY])
+               title=phrase("world.around.title"), reads=[body_c.SLEEP, identity_c.PERSON, identity_c.IDENTITY])
 def _around(s: WorldState, frame: Frame, enrich: Any) -> str | SectionBody | None:
     if not _awake(frame):
         return None  # elle dort, dans son lit : rien à dire à qui la réveille qu'il ne voie
@@ -575,18 +567,10 @@ def _around(s: WorldState, frame: Frame, enrich: Any) -> str | SectionBody | Non
 #: l'attention comme pour tout signal (la pensée qui naît en ajoute un peu : elle reste un pincement).
 SETBACK_PERTINENCE = 0.6
 SETBACK_FRUSTRATION = 0.1
-#: Pourquoi, comme elle se le dit (les codes qu'un geste rencontre ; les autres ne se disent pas).
-SETBACK_WHY: dict[w.Refusal, str] = {
-    w.Refusal.UNREACHABLE: "le chemin était bloqué",
-    w.Refusal.OCCUPIED: "la place était prise",
-    w.Refusal.HANDS_FULL: "tes mains étaient prises",
-    w.Refusal.HELD_BY_OTHER: "quelqu'un d'autre l'avait déjà",
-    w.Refusal.NOT_HOLDING: "tu ne l'avais plus en main",
-    w.Refusal.WRONG_STATE: "ce n'était plus possible",
-    w.Refusal.UNKNOWN: "ce n'était plus là",
-}
-_HAND_FR = {w.Builtin.TAKE.value: plan.TAKE_FR, w.Builtin.PUT.value: plan.PUT_FR, w.Builtin.DROP.value: plan.DROP_FR}
-_POSTURE_VERB = {w.Posture.STAND: "te lever", w.Posture.SIT: "t'asseoir", w.Posture.LIE: "t'allonger"}
+#: Pourquoi, comme elle se le dit : ``world.setback.why.<code>`` (les codes qu'un geste rencontre ; les autres ne
+#: se disent pas). Ce qu'elle tentait : ``world.hands`` pour un geste de la main, ``world.setback.posture`` pour
+#: une posture.
+_HANDS = frozenset({w.Builtin.TAKE.value, w.Builtin.PUT.value, w.Builtin.DROP.value})
 
 
 def _attempted(defn: w.WorldDef, intent: w.Intent) -> str:
@@ -595,8 +579,8 @@ def _attempted(defn: w.WorldDef, intent: w.Intent) -> str:
     act = next((st for st in reversed(intent.steps) if st.kind == "act" and st.object and st.action), None)
     if act is not None and act.object and act.action:
         what = plan.label_of(defn, act.object)
-        if act.action in _HAND_FR:
-            return f"{_HAND_FR[act.action]} {what}"
+        if act.action in _HANDS:
+            return f"{family('world.hands')[act.action]} {what}"
         o = defn.object(act.object)
         a = defn.archetype(o.archetype) if o is not None else None
         aff = next((x for x in (a.affordances if a is not None else ()) if x.id == act.action), None)
@@ -606,9 +590,9 @@ def _attempted(defn: w.WorldDef, intent: w.Intent) -> str:
     walk = next((st for st in reversed(intent.steps) if st.kind == "walk" and st.to_place), None)
     place = defn.place(walk.to_place) if walk is not None and walk.to_place else None
     if place is not None:
-        return f"aller {place.label}"
+        return phrase("world.setback.go", place=place.label)
     pose = next((st.posture for st in reversed(intent.steps) if st.kind == "posture" and st.posture), None)
-    return _POSTURE_VERB[pose] if pose is not None else "faire ce que tu voulais"
+    return family("world.setback.posture")[pose.value] if pose is not None else phrase("world.setback.something")
 
 
 def setback(s: WorldState, intent: w.Intent, outcome: w.Outcome, reason: w.Refusal | None) -> Draft[Any] | None:
@@ -618,8 +602,10 @@ def setback(s: WorldState, intent: w.Intent, outcome: w.Outcome, reason: w.Refus
     l'échéance conclue (la clé ``echec:<intent>``)."""
     if outcome is not w.Outcome.FAILED or intent.actor != w.MIKA or intent.cause.source is not w.Source.MIKA:
         return None
-    why = SETBACK_WHY.get(reason) if reason is not None else None
-    text = f"Tu n'as pas pu {_attempted(s.definition, intent)}" + (f" : {why}" if why else "") + "."
+    why = family("world.setback.why").get(reason.value) if reason is not None else None
+    attempted = _attempted(s.definition, intent)
+    text = phrase("world.setback.text_why", attempted=attempted, why=why) if why else \
+        phrase("world.setback.text", attempted=attempted)
     obj = next((st.object for st in reversed(intent.steps) if st.kind == "act" and st.object), None)
     return w.NOTICED.draft(
         source="world", kind="setback", summary=Content.of(text, level=int(Sensitivity.NONE)),
@@ -647,17 +633,11 @@ GESTURE_FELT: dict[w.Gesture, tuple[tuple[Emotion, float], ...]] = {
     w.Gesture.NOD: ((Emotion.HAPPY, 0.03),) * 4,
     w.Gesture.BOW: ((Emotion.HAPPY, 0.03),) * 4,
 }
-#: Un geste qu'on lui a fait, comme elle se le dit (après le nom de qui l'a fait).
-GESTURE_FR: dict[w.Gesture, str] = {
-    w.Gesture.WAVE: "t'a fait coucou",
-    w.Gesture.POINT: "t'a montrée du doigt",
-    w.Gesture.NOD: "t'a fait un signe de tête",
-    w.Gesture.SHAKE_HEAD: "a secoué la tête en te regardant",
-    w.Gesture.BOW: "t'a fait une révérence",
-    w.Gesture.CLAP: "t'a applaudie",
-    w.Gesture.POKE: "t'a taquinée d'une pichenette",
-    w.Gesture.PAT_HEAD: "t'a caressé la tête",
-}
+
+
+def gesture_words(gesture: w.Gesture) -> str:
+    """Un geste qu'on lui a fait, comme elle se le dit (après le nom de qui l'a fait) : « t'a fait coucou »."""
+    return family("world.gestures.done")[gesture.value]
 
 
 def felt(actor: str, gesture: w.Gesture, closeness: str | None, name: str, person: str | None) -> Draft[Any] | None:
@@ -671,7 +651,8 @@ def felt(actor: str, gesture: w.Gesture, closeness: str | None, name: str, perso
     about = (person,) if person else ()
     level = int(Sensitivity.ANODYNE if about else Sensitivity.NONE)
     return w.NOTICED.draft(
-        source="world", kind="gesture", summary=Content.of(f"{name} {GESTURE_FR[gesture]}.", level=level),
+        source="world", kind="gesture", summary=Content.of(phrase("world.gestures.felt", name=name,
+                                                                 gesture=gesture_words(gesture)), level=level),
         pertinence=GESTURE_PERTINENCE, emotion=emotion.value, intensity=intensity, about=about, sensitivity=level,
         bundle="world", actor=actor)
 
@@ -704,11 +685,12 @@ def _gestures_line(s: WorldState, frame: Frame) -> tuple[str, int] | None:
             if not hearable((who,), int(Sensitivity.ANODYNE), person, aud.level, aud.witness_level, aud.private_ok):
                 continue
             level = int(Sensitivity.ANODYNE)
-        name = name or "Quelqu'un"
-        parts.append(f"{name} {GESTURE_FR[x.gesture]}" + (" (plusieurs fois)" if n > 1 else ""))
+        name = name or phrase("world.gestures.someone")
+        parts.append(phrase("world.gestures.item", name=name, gesture=gesture_words(x.gesture))
+                     + (phrase("world.gestures.again") if n > 1 else ""))
     if not parts:
         return None
-    return "Ce qu'on vient de te faire : " + " ; ".join(parts) + ".", level
+    return phrase("world.gestures.line", gestures=" ; ".join(parts)), level
 
 
 # ── Conclure sans moteur ──────────────────────────────────────────────────

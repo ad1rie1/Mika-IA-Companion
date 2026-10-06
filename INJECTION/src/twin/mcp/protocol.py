@@ -9,6 +9,7 @@ un message par ligne, une réponse par requête, rien pour une notification.
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -90,6 +91,8 @@ class Server:
                 text, is_error = str(exc), True
             except (KeyError, ValueError, TypeError) as exc:
                 text, is_error = f"arguments invalides : {exc}", True
+            except sqlite3.Error as exc:  # une recherche mal formée, une base occupée : l'outil le dit, le serveur reste
+                text, is_error = f"la base n'a pas pu répondre ({exc}) : reformuler ou réessayer", True
             return _result(mid, {"content": [{"type": "text", "text": text}], "isError": is_error})
         if method == "prompts/list":
             return _result(mid, {"prompts": [{

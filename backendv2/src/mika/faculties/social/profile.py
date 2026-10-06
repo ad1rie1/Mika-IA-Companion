@@ -39,6 +39,7 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolDecl
+from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import banal, elided, fold
 
@@ -56,31 +57,12 @@ class XProfile(BaseModel):
 
 def tool(name: str) -> ToolDecl:
     """L'outil de la fiche, au nom de celle qui la tient (celui de sa persona)."""
-    return ToolDecl(TOOL_NAME, f"Enregistre ce que {name} pense de cette personne.", XProfile.model_json_schema())
+    return ToolDecl(TOOL_NAME, phrase("social.profile.tool", name=name), XProfile.model_json_schema())
 
 
 def system(name: str) -> str:
     """La consigne de la fiche, au nom de celle qui la tient (celui de sa persona : jamais écrit ici)."""
-    return _SYSTEM.replace(_NAME, name)
-
-
-#: là où son nom s'écrit dans la consigne
-_NAME = "{nom}"
-_SYSTEM = """Tu aides {nom} à se faire une idée de quelqu'un qu'elle connaît, à partir de ce que cette personne lui a \
-dit elle-même et de ce que {nom} a vécu avec elle. Écris comme des notes de {nom} sur cette personne, sans jamais \
-nommer {nom} ni parler d'elle (ni « {nom} », ni « elle », ni « moi », ni « me ») : la personne à la troisième \
-personne, avec son prénom (« C'est quelqu'un qui… »).
-- resume : qui est cette personne — sa vie, ce qui compte pour elle, son caractère, et les proches qu'elle a nommés \
-(« sa sœur Léa », « son chat Moustache ») — en 2 à 4 phrases ; ne répète pas les détails intimes. N'invente rien : \
-rien de sa situation (en couple ou non, enfants, famille, travail, âge, où et avec qui elle vit) que ces notes ne \
-disent pas. Ni chiffres, ni jugement sur votre lien (« connaissance récente », « ami proche ») : le lien, {nom} le \
-vit, elle ne le note pas.
-- ton : comment lui parler — une consigne de ton (« direct et taquin, il aime qu'on le charrie »), jamais une \
-phrase à lui dire.
-- interets : ses goûts et ses passions — ce qu'elle aime faire, regarder, écouter, lire (quelques mots chacun, au \
-plus 6) ; jamais ses soucis du moment, sa santé, ses rendez-vous ni ce qui lui arrive ; aucun si rien ne le dit.
-- sujets_sensibles : les sujets délicats avec cette personne (au plus 6), sinon une liste vide.
-Réponds uniquement en appelant l'outil record_profile."""
+    return phrase("social.profile.system", name=name)
 
 
 def parse(resp: LLMResponse) -> XProfile | None:
@@ -275,52 +257,42 @@ class Revise:
     def _prompt(self, frame: Frame, state: SocialState, person: str, items: list[tuple[Any, ...]], store: Any,
                 notes: str = "") -> str:
         view = frame.get(identity_c.IDENTITY(person))
-        name = view.name or "cette personne"
+        name = view.name or phrase("social.profile.someone")
         # ni comptes ni ressenti : un modèle qui voit « 15 messages » ou « de la sympathie » les recopie dans la
         # fiche (sonde du 2026-10-02 : « une connaissance récente de Mika, avec qui elle échange depuis 1 jour et
         # 15 messages », sous « fait partie de tes amis ») — la proximité se vit ailleurs (``faculty.lived``)
-        lines = [f"Personne : {view.name or 'sans nom connu'}."]
+        lines = [phrase("social.profile.person", name=view.name or phrase("social.profile.no_name"))]
         previous = state.profiles.get(person)
         if previous is not None:
             text = store.content([previous.summary_ref]).get(previous.summary_ref) if previous.summary_ref else None
             # ce qu'une fiche d'avant avait inventé ne se redonne pas à recopier (« célibataire »)
             text = grounded(text, notes) if text and notes else text
             if text:
-                lines.append(f"Ce qu'elle en pensait jusqu'ici : {text}")
+                lines.append(phrase("social.profile.previous", text=text))
         lines.append("")
         her = self_c.name_of(frame.get(self_c.PERSONA))
-        lines.append(f"Ce {elided(name, 'que')} lui a dit, et ce que {her} a vécu avec {name} :")
+        lines.append(phrase("social.profile.material", her=her, name=name, that_name=elided(name, "que")))
         lines += [f"- {text}" for _i, text, _imp in items]
         return "\n".join(lines)
 
 
-#: Le registre de chaque lien (audit HUM-15) : rien ne traduisait la proximité en manière d'être — taquiner une
-#: inconnue dès son premier message, ou parler à une proche comme à une cliente.
-REGISTER = {
-    c.STRANGER: "Tu ne la connais pas encore : reste accueillante et chaleureuse, mais ne la taquine pas et ne la "
-                "charrie pas — la complicité viendra si vous apprenez à vous connaître.",
-    c.ACQUAINTANCE: "Vous vous connaissez un peu : tu peux plaisanter gentiment, sans familiarité ni taquinerie "
-                    "appuyée.",
-    c.FRIEND: "Entre amis, vous pouvez vous charrier gentiment, plaisanter librement.",
-    c.CLOSE: "Vous êtes proches : de la complicité, vos blagues à vous, tu peux la taquiner — et tu peux aussi être "
-             "vraie avec elle quand ça ne va pas.",
-}
-
-
 def register(level: str) -> str:
-    """Comment être avec elle, selon ce qui vous lie (jamais un nombre)."""
-    return REGISTER.get(level, REGISTER[c.STRANGER])
+    """Comment être avec elle, selon ce qui vous lie (jamais un nombre) — le registre de chaque lien (audit
+    HUM-15) : rien ne traduisait la proximité en manière d'être, taquiner une inconnue dès son premier message, ou
+    parler à une proche comme à une cliente. Un lien inconnu : celui d'une inconnue."""
+    registers = family("social.register.levels")
+    return registers.get(level) or registers[c.STRANGER]
 
 
 def describe_level(level: str, name: str = "") -> str:
     """Ce qu'est la personne pour elle, en français, sans genre imposé : son prénom plutôt que « elle ou lui »."""
-    who = f"« {name} »" if name else "Cette personne"
+    who = f"« {name} »" if name else phrase("social.level.someone")
     if level == c.CLOSE:
-        return f"{who} compte parmi tes proches."
+        return phrase("social.level.close", who=who)
     if level == c.FRIEND:
-        return f"{who} fait partie de tes amis."
+        return phrase("social.level.friend", who=who)
     if level == c.ACQUAINTANCE:
-        return f"{who} est une connaissance."
+        return phrase("social.level.acquaintance", who=who)
     if name:
-        return f"Tu ne connais pas encore vraiment « {name} »."
-    return "Pour toi, c'est quelqu'un que tu ne connais pas encore."
+        return phrase("social.level.stranger_named", name=name)
+    return phrase("social.level.stranger")

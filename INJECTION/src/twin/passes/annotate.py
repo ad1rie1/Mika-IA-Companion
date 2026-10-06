@@ -15,6 +15,7 @@ La séance passe alors à ``done``.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Iterable
 from importlib import resources
 from typing import Any
@@ -100,6 +101,15 @@ class AnnotatePass:
         return CallSpec(prompt=prompt, system=system, schema=schema, model=self.model,
                         max_output_tokens=32_000 if full else 16_000)
 
+    def split(self, payload: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+        """Un lot qui échoue sans cesse (une réponse trop longue, coupée) : deux moitiés, essayées chacune."""
+        sessions = list(payload["sessions"])
+        if len(sessions) < 2:
+            return []
+        half = len(sessions) // 2
+        return [(f"{payload['tier']}-moitie-{part[0]}-{len(part)}", {**payload, "sessions": part})
+                for part in (sessions[:half], sessions[half:])]
+
     # -- la réponse -----------------------------------------------------------------------------------
 
     def accept(self, corpus: Corpus, unit: str, payload: dict[str, Any], result: CallResult) -> str | None:
@@ -113,7 +123,7 @@ class AnnotatePass:
         if len(missing) > MAX_MISSING_SHARE * len(rendered.sessions):
             return f"{len(missing)} séances sur {len(rendered.sessions)} absentes de la réponse"
         for key in present:
-            clean = _clean(by_key[key], rendered.her_messages[key], rendered.all_messages[key])
+            clean = _clean(by_key[key], rendered.her_messages[key], rendered.all_messages[key], rendered.persons)
             sid = _session_id(key, corpus)
             corpus.db.execute("INSERT OR REPLACE INTO annotations (session, version, tier, data, model) "
                               "VALUES (?, ?, ?, ?, ?)",
@@ -137,8 +147,10 @@ def _session_id(key: str, corpus: Corpus) -> int:
     return int(key[1:])
 
 
-def _clean(s: SessionLight, hers: list[int], allowed: set[int]) -> SessionLight:
-    """Écarte ce qui ne tient pas à la séance : numéros étrangers, émotions sur les messages des autres."""
+def _clean(s: SessionLight, hers: list[int], allowed: set[int], persons: set[int]) -> SessionLight:
+    """Écarte ce qui ne tient pas à la séance : numéros de messages étrangers, émotions sur les messages des autres,
+    personnes (``p12``) absentes du glossaire rendu — le modèle n'invente pas quelqu'un."""
+    known = {f"p{pid}" for pid in persons}
     mine = set(hers)
     s.emotions = [e for e in s.emotions if e.id in mine]
     seen: set[int] = set()
@@ -150,5 +162,11 @@ def _clean(s: SessionLight, hers: list[int], allowed: set[int]) -> SessionLight:
     s.emotions = unique
     for field in ("souvenirs", "croyances", "promesses", "evenements", "reves"):
         for item in getattr(s, field, []):
-            item.messages = [m for m in item.messages if m in allowed]
+            if hasattr(item, "messages"):
+                item.messages = [m for m in item.messages if m in allowed]
+            if hasattr(item, "personnes"):
+                item.personnes = [p for p in item.personnes if p in known]
+    for promise in getattr(s, "promesses", []):
+        if re.fullmatch(r"p\d+", promise.envers.strip()) and promise.envers.strip() not in known:
+            promise.envers = ""  # un numéro inventé ; un prénom, lui, reste
     return s

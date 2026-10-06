@@ -21,6 +21,9 @@ SKIP_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".mp4", ".mo
                  ".opus", ".wav", ".pdf", ".zip", ".7z", ".rar", ".exe", ".dll", ".db-wal", ".db-shm", ".ds_store",
                  ".ini", ".xsl", ".css", ".js", ".ico", ".lnk", ".tmp"}
 SKIP_NAMES = {"LISEZMOI.md", ".gitkeep", "Thumbs.db", "desktop.ini"}
+#: au-delà, un lecteur qui charge tout le fichier en mémoire le refuse (ceux qui lisent en flux — ``streams`` —
+#: le prennent) : un fichier de plusieurs Go ne fait pas tomber l'ingestion entière
+MAX_WHOLE_FILE = 256 * 1024 * 1024
 
 
 @dataclass
@@ -67,13 +70,18 @@ def ingest(corpus: Corpus, root: Path, ctx: ReadContext, *, readers: list[Reader
             # déjà lue par Claude Code : la relire effacerait ses messages, leurs séances et ce qui y renvoie
             report.locked.append(rel)
             continue
+        size = path.stat().st_size
+        if size > MAX_WHOLE_FILE and not getattr(reader, "streams", False):
+            report.failed.append((rel, f"{size // 2**20} Mo : trop gros pour le lecteur {reader.name}, qui lit d'un "
+                                       f"bloc (au plus {MAX_WHOLE_FILE // 2**20} Mo) — le découper"))
+            continue
         if progress:
             progress(f"{reader.name:>9} · {rel}")
         stats = SourceStats()
         ctx.warnings = stats.warnings
         try:
             with corpus.transaction():
-                source = corpus.begin_source(rel, sha, reader.name, reader.version, path.stat().st_size,
+                source = corpus.begin_source(rel, sha, reader.name, reader.version, size,
                                              clock().isoformat(timespec="seconds"))
                 corpus.add_items(source, reader.read(path, ctx), stats)
                 corpus.end_source(source, stats)

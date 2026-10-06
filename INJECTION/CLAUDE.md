@@ -28,7 +28,12 @@ est dans `~/.claude/plans/stateful-imagining-turing.md`, le mode d'emploi dans `
   `version`, `detect(path) -> 0..100`, `read(path, ctx) -> Iterator[Item]`), inscrit dans
   `all_readers()`. Il dit ce que la source dit et ce qu'elle laisse deviner (`Author.me`,
   avec sa raison). Il ne décide rien d'autre. Changer la façon de lire un format = augmenter
-  `version` (les sources déjà lues seront relues).
+  `version` (les sources déjà lues seront relues — sauf celles dont Claude Code a déjà lu les
+  séances : laissées telles quelles, et dites). Un lecteur qui lit en flux le déclare
+  (`streams = True`) ; les autres refusent un fichier de plus de 256 Mo.
 - Tests : `.venv/bin/python -m pytest -q`, puis `.venv/bin/ruff check src tests`.
+- Les mots que le moteur lui fait lire sont dans `backendv2/persona/voix.yaml` (ADR 0071) : le rejoueur ne
+  reconnaît jamais une consigne à une phrase écrite en dur, il lit la même voix (`mika.vocab.phrasebook`). Une voix
+  à elle : `sortie/voix.yaml`, passée au moteur par `MIKA_VOIX`.
 - Ce qui parle au moteur importe le paquet `mika` (`uv pip install -e ../backendv2`). On
   respecte ses contrats : on ne contourne pas ses facultés, on leur sert des réponses.

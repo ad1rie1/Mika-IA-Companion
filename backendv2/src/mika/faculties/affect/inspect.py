@@ -247,7 +247,7 @@ def _mood_view(s: AffectState, frame: Frame, ctx: InspectContext) -> list[Block]
             ("ressentie (écart au repos)", "au repos" if rest else _feeling(m.felt, m.felt_intensity)),
             ("émotion du moment (ce qui déborde)", pct_fr(m.overflow)),
             ("fond de la journée", _vec(m.fond) if A.norm(m.fond) > 1e-3 else "aucun"),
-            ("cause", prose.cause_line(m.cause, m.cause_person, ended=m.cause_over) or prose.UNKNOWN_CAUSE),
+            ("cause", prose.cause_line(m.cause, m.cause_person, ended=m.cause_over) or prose.unknown_cause()),
             ("lecture absolue (le visage)", _feeling(m.label, m.intensity)),
             ("position", _vec(m.position)),
             ("repos à cette heure", _vec(m.home)),

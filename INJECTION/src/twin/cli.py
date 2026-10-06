@@ -28,6 +28,7 @@ from zoneinfo import ZoneInfo
 from twin.corpus import Corpus
 from twin.dating import date_corpus, describe
 from twin.engine import jobs
+from twin.forget import forget_person
 from twin.ingest import ingest, walk
 from twin.passes.annotate import AnnotatePass
 from twin.passes.date import DatePass
@@ -107,7 +108,8 @@ def cmd_ingerer(args: argparse.Namespace) -> int:
     if report.unknown:
         print(f"{len(report.unknown)} fichiers sans lecteur → travail/inconnus.txt")
     for rel in report.locked:
-        print(f"inchangé (déjà lu par Claude Code, modifié depuis : non relu) : {rel}", file=sys.stderr)
+        print(f"laissé tel quel (déjà lu par Claude Code ; le fichier ou son lecteur a changé depuis) : {rel}",
+              file=sys.stderr)
     for rel, err in report.failed:
         print(f"ÉCHEC {rel} : {err}", file=sys.stderr)
     if report.warnings and not args.silence:
@@ -124,6 +126,7 @@ def cmd_dater(args: argparse.Namespace) -> int:
     review = root / "travail" / "dates.yaml"
     if args.claude:
         p = DatePass(root, ZoneInfo(args.fuseau), model=args.modele)
+        _retry(corpus, p, args)
         print(f"Datation par recoupement : {jobs.enqueue(corpus, p)} lots nouveaux · {jobs.counts(corpus, p)}")
         rep = asyncio.run(jobs.run(corpus, p, workers=args.ouvriers, limit=args.max_lots, progress=print))
         print(f"{rep.done} lots datés · {rep.failed} en échec")
@@ -131,6 +134,30 @@ def cmd_dater(args: argparse.Namespace) -> int:
     print(f"{r.sequences} suites ordonnées · {r.narrowed} plages resserrées · {r.interpolated} dates interpolées · "
           f"{r.manual} corrections manuelles appliquées · {r.conflicts} conflits")
     print(f"À revoir dans {review} : {r.to_review or 'rien'}")
+    corpus.close()
+    return 0
+
+
+def cmd_oublier(args: argparse.Namespace) -> int:
+    root: Path = args.racine
+    corpus = _corpus(root)
+    try:
+        r = forget_person(corpus, args.personne)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
+        corpus.close()
+        return 2
+    print(f"{r.name} ({r.handle}) oubliée : {r.participants} comptes, {r.conversations} tête-à-tête, "
+          f"{r.messages} messages, {r.annotation_items} éléments d'annotation retirés ; {r.sessions_reread} séances "
+          f"à relire sans elle (`jumeau lire`), {r.syntheses} synthèses à refaire (`jumeau synthetiser`).")
+    print("L'oubli est gardé : une source relue ne la fera pas revenir.")
+    if r.documents_naming:
+        print(f"Ses textes à elle qui la nomment encore ({len(r.documents_naming)}, à relire à la main) :")
+        for key in r.documents_naming[:30]:
+            print(f"  · {key}")
+    if (root / "sortie" / "vie" / "mind.db").is_file():
+        print("Une vie est déjà vécue dans sortie/vie : l'oublier là aussi, serveur arrêté :\n"
+              f"  backendv2/.venv/bin/python -m mika --data {root / 'sortie' / 'vie'} forget {r.handle}")
     corpus.close()
     return 0
 
@@ -185,6 +212,7 @@ def cmd_lire(args: argparse.Namespace) -> int:
     corpus = _corpus(root)
     knobs = load_knobs(root / "travail" / "plan.yaml")
     p = AnnotatePass(ZoneInfo(args.fuseau), int(knobs["lecture"]["jetons_par_lot"]), model=args.modele)
+    _retry(corpus, p, args)
     added = jobs.enqueue(corpus, p)
     state = jobs.counts(corpus, p)
     print(f"Lots : {added} nouveaux · {state}")
@@ -199,12 +227,18 @@ def cmd_lire(args: argparse.Namespace) -> int:
         return 0
     report = asyncio.run(jobs.run(corpus, p, workers=args.ouvriers, limit=args.max_lots,
                                   quota_ceiling=args.quota, progress=print))
-    print(f"\n{report.done} lots lus · {report.retried} à refaire · {report.failed} en échec · "
+    print(f"\n{report.done} lots lus · {report.retried} à refaire · {report.split} coupés en deux · "
+          f"{report.failed} en échec · "
           f"{report.input_tokens:,} jetons lus, {report.output_tokens:,} écrits".replace(",", " "))
     for e in report.errors[:5]:
         print(f"  échec : {e[:200]}", file=sys.stderr)
     corpus.close()
     return 1 if report.failed else 0
+
+
+def _retry(corpus: Corpus, p: jobs.Pass, args: argparse.Namespace) -> None:
+    if getattr(args, "reprendre_echecs", False):
+        print(f"{jobs.retry_failed(corpus, p)} lots en échec remis en file ({p.name})")
 
 
 SYNTH_STEPS = ("mois", "chapitres", "persona", "profils", "journaux", "reves")
@@ -221,6 +255,7 @@ def cmd_synthetiser(args: argparse.Namespace) -> int:
     failed = 0
     for step in steps:
         p = passes[step]
+        _retry(corpus, p, args)
         added = jobs.enqueue(corpus, p)
         print(f"— {step} : {added} lots nouveaux · {jobs.counts(corpus, p)}")
         if args.essai:
@@ -294,7 +329,11 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument("--ouvriers", type=int, default=2)
     d.add_argument("--max-lots", type=int, default=None)
     d.add_argument("--modele", default="sonnet")
+    d.add_argument("--reprendre-echecs", action="store_true", help="remettre en file les lots en échec")
     d.set_defaults(fn=cmd_dater)
+    ob = sub.add_parser("oublier", help="retirer quelqu'un du corpus et de ce qui en a été tiré (gardé)")
+    ob.add_argument("personne", help="p12, ext_julie-martin ou son nom")
+    ob.set_defaults(fn=cmd_oublier)
     sub.add_parser("personnes", help="regrouper les participants en personnes, la reconnaître").set_defaults(
         fn=cmd_personnes)
     pl = sub.add_parser("planifier", help="séances, paliers et budget")
@@ -306,6 +345,7 @@ def build_parser() -> argparse.ArgumentParser:
     lr.add_argument("--modele", default="sonnet")
     lr.add_argument("--quota", type=float, default=0.8, help="pause au-delà de cette part de l'abonnement")
     lr.add_argument("--essai", action="store_true", help="préparer les lots sans rien envoyer")
+    lr.add_argument("--reprendre-echecs", action="store_true", help="remettre en file les lots en échec")
     lr.set_defaults(fn=cmd_lire)
     sy = sub.add_parser("synthetiser", help="mois, chapitres, persona, profils, journaux, rêves")
     sy.add_argument("--etape", choices=("tout", *SYNTH_STEPS), default="tout")
@@ -313,6 +353,7 @@ def build_parser() -> argparse.ArgumentParser:
     sy.add_argument("--max-lots", type=int, default=None)
     sy.add_argument("--modele", default="sonnet")
     sy.add_argument("--essai", action="store_true", help="compter les lots sans rien envoyer")
+    sy.add_argument("--reprendre-echecs", action="store_true", help="remettre en file les lots en échec")
     sy.set_defaults(fn=cmd_synthetiser)
     av = sub.add_parser("avancer", help="l'avance rapide dans le vrai noyau (reprenable)")
     av.add_argument("--preparer", action="store_true", help="écrire le script seulement")

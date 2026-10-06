@@ -12,12 +12,16 @@ ADR 0026) :
 - la **sortie structurée** passe par ``--json-schema`` ; à défaut, on prend le premier
   objet JSON du texte. Le schéma Pydantic de l'appelant valide dans les deux cas ;
 - l'**usage de l'abonnement** (``rate_limit_event``) est relevé à chaque appel. Le
-  pilote des lots s'en sert pour faire une pause avant le plafond.
+  pilote des lots s'en sert pour faire une pause avant le plafond ; un appel **refusé
+  pour quota** le dit (``ClaudeError.limited``, avec l'heure de réinitialisation) ;
+- la CLI **meurt avec son parent** : un processus tué par ``borne.sh`` ne laisse pas de
+  ``claude`` orphelins consommer l'abonnement.
 """
 
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import json
 import os
 import re
@@ -39,7 +43,17 @@ STDERR_KEPT = 4000
 
 
 class ClaudeError(RuntimeError):
-    """La CLI n'a pas rendu de réponse utilisable (non connectée, plantée, refus, délai)."""
+    """La CLI n'a pas rendu de réponse utilisable (non connectée, plantée, refus, délai).
+
+    ``limited`` : refusée parce que le quota de l'abonnement est atteint ; ``resets_at`` (epoch, 0 si
+    inconnu) dit quand réessayer. ``quota`` : les dernières lectures d'usage, s'il y en a eu."""
+
+    def __init__(self, message: str, *, limited: bool = False, resets_at: int = 0,
+                 quota: list[QuotaReading] | None = None) -> None:
+        super().__init__(message)
+        self.limited = limited
+        self.resets_at = resets_at
+        self.quota = quota or []
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,6 +134,24 @@ def first_json_object(text: str) -> dict[str, Any] | None:
     return None
 
 
+_LIMIT_WORDS = re.compile(r"usage limit|rate limit|limit reached|quota|too many requests|overloaded", re.I)
+
+
+def limit_state(info: Mapping[str, Any] | None, detail: str = "") -> tuple[bool, int]:
+    """(refusé pour quota ?, réinitialisation en epoch) d'après le dernier ``rate_limit_info`` et le texte
+    d'erreur (« Claude AI usage limit reached|1760000000 »)."""
+    limited, resets = False, 0
+    if info:
+        limited = str(info.get("status") or "").lower() == "rejected"
+        r = info.get("resetsAt")
+        resets = int(r) if isinstance(r, int | float) else 0
+    if _LIMIT_WORDS.search(detail):
+        limited = True
+        m = re.search(r"\|(\d{9,11})\b", detail)
+        resets = resets or (int(m.group(1)) if m else 0)
+    return limited, resets
+
+
 def parse_quota(info: Mapping[str, Any]) -> list[QuotaReading]:
     """Les fenêtres d'usage de l'abonnement (un objet par fenêtre, ou une liste)."""
     windows = info.get("unifiedWindows")
@@ -147,21 +179,24 @@ async def call(spec: CallSpec, *, binary: str | None = None) -> CallResult:
         proc = await asyncio.create_subprocess_exec(
             *build_argv(spec, workdir, binary), cwd=workdir, env=build_env(spec),
             stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            limit=READ_LIMIT, start_new_session=True)
+            limit=READ_LIMIT, start_new_session=True, preexec_fn=_die_with_parent)
         try:
             out, err = await asyncio.wait_for(_communicate(proc, spec.prompt), timeout=spec.timeout_s)
         except (TimeoutError, asyncio.CancelledError):
             _kill(proc)
             await proc.wait()
             raise
-        result, texts, model, quota = _read_stream(out)
+        result, texts, model, quota, limit_info = _read_stream(out)
     elapsed = time.monotonic() - started
     if result is None:
-        raise ClaudeError(f"la CLI s'est arrêtée sans résultat (code {proc.returncode}) : "
-                          f"{err.decode(errors='replace')[-STDERR_KEPT:].strip()}")
+        stderr = err.decode(errors="replace")[-STDERR_KEPT:].strip()
+        limited, resets = limit_state(limit_info, stderr)
+        raise ClaudeError(f"la CLI s'est arrêtée sans résultat (code {proc.returncode}) : {stderr}",
+                          limited=limited, resets_at=resets, quota=quota)
     if result.get("is_error") or result.get("subtype") != "success":
-        detail = result.get("result") or ", ".join(map(str, result.get("errors") or ())) or result.get("subtype")
-        raise ClaudeError(f"la CLI a échoué : {detail}")
+        detail = str(result.get("result") or ", ".join(map(str, result.get("errors") or ())) or result.get("subtype"))
+        limited, resets = limit_state(limit_info, detail)
+        raise ClaudeError(f"la CLI a échoué : {detail}", limited=limited, resets_at=resets, quota=quota)
     text = str(result.get("result") or "".join(texts))
     data = result.get("structured_output")
     if not isinstance(data, dict):
@@ -174,6 +209,24 @@ async def _communicate(proc: asyncio.subprocess.Process, prompt: str) -> tuple[b
     return await proc.communicate(prompt.encode("utf-8"))
 
 
+def _load_prctl() -> Any:
+    try:
+        return ctypes.CDLL(None, use_errno=True).prctl
+    except (OSError, AttributeError):
+        return None  # ailleurs que sous Linux : le groupe de processus reste le seul filet
+
+
+#: chargé dans le parent : l'enfant, entre ``fork`` et ``exec``, ne fait qu'un appel système
+_PRCTL = _load_prctl()
+_PR_SET_PDEATHSIG = 1
+
+
+def _die_with_parent() -> None:
+    """Dans l'enfant, avant ``exec`` : recevoir SIGKILL si le parent meurt."""
+    if _PRCTL is not None:
+        _PRCTL(_PR_SET_PDEATHSIG, int(signal.SIGKILL), 0, 0, 0)
+
+
 def _kill(proc: asyncio.subprocess.Process) -> None:
     """Arrête tout le groupe de processus (la CLI et ce qu'elle a lancé)."""
     try:
@@ -182,11 +235,13 @@ def _kill(proc: asyncio.subprocess.Process) -> None:
         pass
 
 
-def _read_stream(out: bytes) -> tuple[dict[str, Any] | None, list[str], str, list[QuotaReading]]:
+def _read_stream(out: bytes) -> tuple[dict[str, Any] | None, list[str], str, list[QuotaReading],
+                                      Mapping[str, Any] | None]:
     result: dict[str, Any] | None = None
     texts: list[str] = []
     model = ""
     quota: list[QuotaReading] = []
+    limit_info: Mapping[str, Any] | None = None
     for line in out.splitlines():
         try:
             d = json.loads(line)
@@ -202,7 +257,8 @@ def _read_stream(out: bytes) -> tuple[dict[str, Any] | None, list[str], str, lis
                 if isinstance(block, Mapping) and block.get("type") == "text" and block.get("text"):
                     texts.append(str(block["text"]))
         elif kind == "rate_limit_event" and isinstance(d.get("rate_limit_info"), Mapping):
-            quota = parse_quota(d["rate_limit_info"]) or quota
+            limit_info = d["rate_limit_info"]
+            quota = parse_quota(limit_info) or quota
         elif kind == "result":
             result = d
-    return result, texts, model, quota
+    return result, texts, model, quota, limit_info

@@ -30,6 +30,7 @@ from mika.kernel.clock import instant, local_date_of_night
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
+from mika.vocab.phrasebook import phrase
 from mika.vocab.words import stems
 
 
@@ -58,7 +59,7 @@ class Reflect:
             mark = f"réflexion:{r.thought}"
             # une pensée sur quelqu'un vient de ce qu'il ou elle lui a dit : c'est son confident, pas un autre
             drafts.append(c.REMEMBERED.draft(
-                text=Content.of(f"Après y avoir repensé cette nuit : {text}", level=r.sensitivity), about=r.about,
+                text=Content.of(phrase("memory.night.reflection", text=text), level=r.sensitivity), about=r.about,
                 sensitivity=r.sensitivity, importance=0.5, emotion=r.emotion, call_id=mark, dedupe_key=mark,
                 told_by=r.about, heard_by=r.about, secret=self._secret(ctx.frame, store, r, text)))
         if drafts:

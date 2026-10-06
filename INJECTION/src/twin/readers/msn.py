@@ -51,7 +51,7 @@ def clean_nick(nick: str) -> str:
 class MsnReader:
     name = "msn"
     label = "MSN Messenger (historique XML, Messenger Plus!)"
-    version = 1
+    version = 2
 
     def detect(self, path: Path) -> int:
         suffix = path.suffix.lower()
@@ -168,16 +168,29 @@ class MsnReader:
         group = len(listed) > 1
         yield Conversation(MSN, conv_key, title=", ".join(sorted(listed)) or conv_key, group=group,
                            members=tuple(names))
+        holder = _holder([a for _, a, _ in rows if a not in listed]) if listed else None
         for n in names:
             if n in listed:
                 yield Author(MSN, n, name=n, address=participants[n], me=False,
                              me_reason="listée parmi les participants de la session")
-            elif listed:
-                yield Author(MSN, n, name=n, me=True, me_reason="absente de la liste des participants : la titulaire")
+            elif n == holder:
+                yield Author(MSN, n, name=n, me=True,
+                             me_reason="seul pseudo absent de la liste des participants qui parle vraiment : la titulaire")
             else:
-                yield Author(MSN, n, name=n)
+                yield Author(MSN, n, name=n)  # un ajouté en cours de session, ou un autre de ses pseudos : à trancher
         for rank, (when, who, body) in enumerate(rows):
             yield Message(MSN, conv_key, who, body, when, rank)
+
+
+def _holder(unlisted: list[str]) -> str | None:
+    """La titulaire du journal : le pseudo absent de la liste qui parle nettement le plus (au moins deux fois plus
+    que le suivant). Un ajouté en cours de session est absent de la liste lui aussi : à égalité, on ne sait pas."""
+    counts = Counter(unlisted).most_common(2)
+    if not counts:
+        return None
+    if len(counts) == 1 or counts[0][1] >= 2 * counts[1][1]:
+        return counts[0][0]
+    return None
 
 
 def _parse_xml(text: str, path: Path, ctx: ReadContext) -> ET.Element | None:

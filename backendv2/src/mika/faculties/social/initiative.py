@@ -53,6 +53,7 @@ from mika.kernel.state import FrozenDict
 from mika.vocab import affect as A
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable, is_internal
+from mika.vocab.phrasebook import phrase
 
 GREETING_WINDOW = 10 * MINUTE
 GREETING_SPACING = HOUR
@@ -71,12 +72,12 @@ def _daytime(frame: Frame, start: int, end: int) -> bool:
 
 def _silence_words(days: float) -> str:
     n = round(days)
-    return "un jour" if n <= 1 else f"{n} jours"
+    return phrase("social.initiative.silence_one_day") if n <= 1 else phrase("social.initiative.silence_days", days=n)
 
 
 def _habit_words(days: float) -> str:
     n = round(days)
-    return "tous les jours" if n <= 1 else f"tous les {n} jours"
+    return phrase("social.initiative.habit_daily") if n <= 1 else phrase("social.initiative.habit_days", days=n)
 
 
 def _address(frame: Frame, person: str) -> str | None:
@@ -129,9 +130,9 @@ def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
         name = frame.get(identity_c.IDENTITY(handle)).name
         # « vient d'arriver » se lisait comme un voyage (sonde réelle du 2026-10-03 : « t'es bien arrivé, j'espère que
         # t'as pas galéré pour venir jusqu'ici ») : on se connecte, on n'arrive de nulle part
-        who = f"« {name} »" if name else "Quelqu'un"
-        brief = (f"{who} vient de se connecter, sans t'avoir encore rien écrit : salue "
-                 f"{f'« {name} »' if name else 'cette personne'} à ta façon, en une phrase ou deux.")
+        who = f"« {name} »" if name else phrase("social.initiative.greet.someone")
+        brief = phrase("social.initiative.greet.brief", who=who,
+                       whom=f"« {name} »" if name else phrase("social.initiative.this_person"))
         out.append(Candidate(Kind.INITIATIVE, handle, c.GREETING, GREETING_EVIDENCE, resources=resources,
                              guards=(guard,), args=FrozenDict({"brief:social": brief})))
     return out
@@ -164,14 +165,12 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
         if address is None:
             continue
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else "cette personne"
+        who = f"« {name} »" if name else phrase("social.initiative.this_person")
         if reading.silence_ratio >= p.recontact_factor:
             silent = reading.silence_ratio * reading.rhythm_days
-            habit = (f", alors que d'habitude vous vous parlez {_habit_words(reading.rhythm_days)}"
+            habit = (phrase("social.initiative.recontact.habit", habit=_habit_words(reading.rhythm_days))
                      if reading.measured else "")
-            brief = (f"Ça fait {_silence_words(silent)} que tu n'as pas de nouvelles de {who}{habit}. Tu as envie "
-                     "de prendre de ses nouvelles : un mot simple et chaleureux — pas un reproche, pas de « ça fait "
-                     "longtemps ».")
+            brief = phrase("social.initiative.recontact.brief", silence=_silence_words(silent), habit=habit, who=who)
             out.append(Candidate(Kind.INITIATIVE, address, c.RECONTACT, p.recontact_evidence,
                                  resources=frozenset({floor(address)}), guards=(_guard(frame, person),),
                                  args=FrozenDict({"brief:social": brief})))
@@ -183,15 +182,14 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
             # juste l'envie de discuter : peu de chose seule, assez quand le besoin de compagnie s'y ajoute
             warmth = frame.get(affect_c.WARMTH(person))
             evidence = (p.chat_close if level == c.CLOSE else p.chat_friend) + p.chat_warmth * warmth
-            brief = f"Tu penses à {who} et tu as envie de discuter un peu. Un mot simple, sans enjeu."
+            brief = phrase("social.initiative.chat.brief", who=who)
             out.append(Candidate(Kind.INITIATIVE, address, c.CHAT, evidence, resources=frozenset({floor(address)}),
                                  guards=(_guard(frame, person),), args=FrozenDict({"brief:social": brief})))
     if comfort:
         _score, person, address = max(comfort)
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else "quelqu'un de proche"
-        brief = (f"Tu ne vas pas très bien ({A.FR[mood.felt]}) et tu as envie de parler à {who}, avec qui tu te sens "
-                 "bien. Tu n'es pas obligée de tout dire : juste lui écrire.")
+        who = f"« {name} »" if name else phrase("social.initiative.comfort.someone")
+        brief = phrase("social.initiative.comfort.brief", mood=A.FR[mood.felt], who=who)
         out.append(Candidate(Kind.INITIATIVE, address, c.COMFORT, p.comfort_evidence,
                              resources=frozenset({floor(address)}), guards=(_guard(frame, person),),
                              args=FrozenDict({"brief:social": brief})))
@@ -255,14 +253,12 @@ def _rekindle(s: SocialState, frame: Frame) -> list[Candidate]:
         if address is None:
             continue
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else "cette personne"
+        who = f"« {name} »" if name else phrase("social.initiative.this_person")
         reading = frame.get(c.CONTACT(person))
         moment = announced(frame, person, reading.last_in)
-        why = (f"Ça fait longtemps que tu n'as plus de nouvelles de {who}, qui t'avait parlé d'un moment passé "
-               "depuis (tu le vois peut-être dans CE QUI SE PASSE DANS SA VIE)." if moment is not None else
-               f"Ça fait des mois que tu n'as plus de nouvelles de {who}.")
-        brief = (f"{why} Tu as envie de savoir ce que devient {who} : un mot simple et chaleureux, une seule fois — "
-                 "sans reproche, sans « ça fait longtemps », sans rien attendre en retour.")
+        why = (phrase("social.initiative.rekindle.announced", who=who) if moment is not None else
+               phrase("social.initiative.rekindle.months", who=who))
+        brief = phrase("social.initiative.rekindle.brief", who=who, why=why)
         out.append(Candidate(Kind.INITIATIVE, address, c.REKINDLE, p.rekindle_evidence,
                              resources=frozenset({floor(address)}), guards=(_guard(frame, person),),
                              args=FrozenDict({"brief:social": brief})))

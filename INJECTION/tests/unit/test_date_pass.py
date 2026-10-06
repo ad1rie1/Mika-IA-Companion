@@ -62,6 +62,10 @@ def test_un_recoupement_resserre_et_garde_ses_ancres(tmp_path: Path) -> None:
     r = doc(c, "Rentrée")
     assert (r["t_precision"], r["t_origin"]) == ("mois", "recoupement")
     assert from_us(r["t_point"], TZ).day == 15
+    session = c.db.execute("SELECT t_precision, t_point FROM sessions WHERE document = ?", (r["id"],)).fetchone()
+    assert (session["t_precision"], session["t_point"]) == ("mois", r["t_point"])  # la séance suit son texte
+    decided = c.db.execute("SELECT ref FROM decisions WHERE kind = 'date:document'").fetchall()
+    assert [d["ref"] for d in decided] == ["n#0"]  # gardée : une relecture de la source ne l'effacera pas
     v = doc(c, "Vieux")
     assert v["t_precision"] == "annee"  # pas écrasé
     assert c.db.execute("SELECT COUNT(*) FROM conflicts WHERE ref = ?", (v["id"],)).fetchone()[0] == 1

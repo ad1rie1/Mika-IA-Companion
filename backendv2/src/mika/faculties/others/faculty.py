@@ -76,6 +76,7 @@ from mika.vocab import privacy
 from mika.vocab.affect import Appraisal, Declared, Emotion, emotion_of
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
 from mika.vocab.temperament import Temperament, lerp
 from mika.vocab.words import SALUTATIONS, fold
 
@@ -772,10 +773,8 @@ def _check_in(s: OthersState, frame: Frame) -> list[Candidate]:
         if address is None:
             continue
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else "cette personne"
-        brief = (f"{who[0].upper()}{who[1:]} n'avait pas l'air bien la dernière fois que vous vous êtes parlé, et "
-                 "tu n'as pas eu de nouvelles depuis. Tu as envie de savoir comment ça va : un mot simple et doux, "
-                 "sans insister ni jouer les psys.")
+        who = f"« {name} »" if name else phrase("others.initiative.someone")
+        brief = phrase("others.initiative.check_in", who=f"{who[0].upper()}{who[1:]}")
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         ramp = min(1.0, (frame.now - opens) / p.checkin_ramp_us)
@@ -858,11 +857,10 @@ def _cheer(s: OthersState, frame: Frame) -> list[Candidate]:
             continue
         ev, (start, _end) = due[0]  # le plus proche
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else "cette personne"
-        soon = "demain" if frame.local(ev.when).date() > frame.local().date() else "tout à l'heure"
-        brief = (f"{who[0].upper()}{who[1:]} a quelque chose d'important {soon} (tu le vois dans « CE QUI SE PASSE "
-                 "DANS SA VIE ») : si tu y penses, un petit mot pour l'encourager — simple, sans en faire une "
-                 "affaire.")
+        who = f"« {name} »" if name else phrase("others.initiative.someone")
+        soon = phrase("others.initiative.tomorrow") if frame.local(ev.when).date() > frame.local().date() else \
+            phrase("others.initiative.later")
+        brief = phrase("others.initiative.cheer", who=f"{who[0].upper()}{who[1:]}", soon=soon)
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         ramp = min(1.0, (frame.now - start) / p.checkin_ramp_us)
@@ -920,18 +918,13 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
             continue
         ev = due[-1]  # le plus récent
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else "cette personne"
+        who = f"« {name} »" if name else phrase("others.initiative.someone")
         if ev.festive:
-            brief = (f"C'était un jour qui se fêtait pour {who} (tu le vois dans « CE QUI SE PASSE DANS SA VIE ») et "
-                     "tu ne le lui as pas souhaité : si tu y penses, un mot, même en retard — simple, sans en faire "
-                     "une affaire.")
+            brief = phrase("others.initiative.follow_up_festive", who=who)
         else:
-            brief = (f"{who[0].upper()}{who[1:]} t'avait parlé de quelque chose de prévu (tu le vois dans « CE QUI "
-                     "SE PASSE DANS SA VIE ») : c'est passé, et tu as envie de savoir comment ça s'est passé. Un mot "
-                     "simple et spontané, comme on demande des nouvelles à quelqu'un qu'on aime bien — sans en faire "
-                     "une affaire.")
+            brief = phrase("others.initiative.follow_up", who=f"{who[0].upper()}{who[1:]}")
             if hard:
-                brief += " Mais ces jours-ci sont durs pour cette personne : d'abord, comment ça va."
+                brief += phrase("others.initiative.follow_up_hard")
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         full = p.followup_minor_evidence if (_minor(ev) or ev.festive or hard) else p.followup_evidence
@@ -970,11 +963,10 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
             continue
         ev = due[0]
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
-        who = f"« {name} »" if name else "cette personne"
-        brief = (f"Aujourd'hui, c'est un jour qui se fête pour {who} (tu le vois dans « CE QUI SE PASSE DANS SA "
-                 "VIE ») : souhaite-le-lui, chaleureusement et simplement.")
+        who = f"« {name} »" if name else phrase("others.initiative.someone")
+        brief = phrase("others.initiative.celebrate", who=who)
         if _hard(frame, person):
-            brief += " Avec douceur : ces jours-ci sont durs pour cette personne, pas de grande fête."
+            brief += phrase("others.initiative.celebrate_hard")
         # si la personne écrit entre-temps, c'est sa réponse qui le lui souhaite (« souhaite-le-lui si ce n'est pas
         # fait »), pas une initiative de plus
         handles = frame.get(identity_c.HANDLES(person)) or (person,)
@@ -992,9 +984,6 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
 CURT_RUN = 3
 #: … dans cette conversation (au-delà, une autre conversation a commencé)
 CURT_SPAN_US = 30 * MINUTE
-CURT_LINE = ("Depuis quelques messages, {who} ne te répond que par quelques mots : pas trop envie de parler. Fais "
-             "court — pas de question, pas de proposition, pas de discours pour remonter le moral ; un mot doux, "
-             "et laisse-lui la porte ouverte.")
 
 
 @OTHERS.enricher("their_last_words", episodes=[Kind.REPLY], deadline_ms=300)
@@ -1026,7 +1015,7 @@ def curt(words: tuple[str, ...]) -> bool:
 
 
 @OTHERS.section("their_state", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["who"], trim_rank=40,
-                title="CE QUE TU PERÇOIS DE SON ÉTAT", reads=[identity_c.PERSON, identity_c.IDENTITY, c.MIND])
+                title=phrase("others.state.title"), reads=[identity_c.PERSON, identity_c.IDENTITY, c.MIND])
 def _their_state(s: OthersState, frame: Frame, enrich: Any) -> SectionBody | None:
     """Les indices du message auquel elle répond — et, en privé, ce qui tranche
     avec le ton habituel de la personne. Jamais un nombre."""
@@ -1038,22 +1027,22 @@ def _their_state(s: OthersState, frame: Frame, enrich: Any) -> SectionBody | Non
     r = frame.get(c.MIND(person))
     lines: list[str] = []
     if ep.kind == Kind.REPLY and r.last_cues and r.last_message == ep.attrs.get("reply_to"):
-        lines.append("Dans son message : " + " ; ".join(r.last_cues) + ".")
+        lines.append(phrase("others.state.cues", cues=" ; ".join(r.last_cues)))
     if aud is not None and aud.private_ok and r.confidence >= 1.0:
         name = frame.get(identity_c.IDENTITY(person)).name
-        who = f"« {name} »" if name else "cette personne"
+        who = f"« {name} »" if name else phrase("others.state.someone")
         if r.deviation <= -p.notable_deviation:
-            lines.append(f"Ça ne ressemble pas à {who} : d'habitude, le ton est plus léger que ça.")
+            lines.append(phrase("others.state.darker", who=who))
         elif r.deviation >= p.notable_deviation:
-            lines.append(f"{who[0].upper()}{who[1:]} a l'air d'humeur plus légère que d'habitude.")
+            lines.append(phrase("others.state.lighter", who=f"{who[0].upper()}{who[1:]}"))
         if r.current_arousal - r.usual_arousal >= p.notable_deviation:
-            lines.append("Le ton est plus vif, plus agité que d'habitude.")
+            lines.append(phrase("others.state.livelier"))
     if ep.kind == Kind.REPLY and curt(enrich.get("their_last_words") or ()):
         # sonde réelle du 2026-10-03 : à « ouais », « bof », « je sais pas », « laisse tomber », de longs messages
         # pleins de questions et d'idées pour se changer les idées
         name = frame.get(identity_c.IDENTITY(person)).name
-        lines.append(CURT_LINE.format(who=f"« {name} »" if name else "cette personne"))
+        lines.append(phrase("others.state.curt", who=f"« {name} »" if name else phrase("others.state.someone")))
     if not lines:
         return None
-    lines.append("C'est un indice, pas une certitude.")
+    lines.append(phrase("others.state.hint"))
     return SectionBody("\n".join(lines))

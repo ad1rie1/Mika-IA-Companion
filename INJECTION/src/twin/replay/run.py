@@ -34,19 +34,22 @@ BORNE = Path.home() / "recup-audit-v2-2026-10-01" / "outils" / "borne.sh"
 
 
 def frozen_engine(root: Path) -> Path:
-    """Une copie de ``backendv2/src`` (et de sa persona) sous ``travail/moteur-gele/<empreinte>`` : la même
-    tant que le moteur ne change pas, une nouvelle s'il a changé."""
+    """Une copie de ``backendv2/src`` et de ``backendv2/persona`` (dont sa voix, ``voix.yaml``) sous
+    ``travail/moteur-gele/<empreinte>`` : la même tant que ni le code ni la voix ne changent, une nouvelle sinon.
+    La voix gelée est celle que lit le moteur gelé (``MIKA_VOIX`` la remplace, dans l'environnement)."""
     src = root.parent / "backendv2" / "src"
+    persona = root.parent / "backendv2" / "persona"
     h = hashlib.sha256()
-    for f in sorted(src.rglob("*.py")):
-        h.update(str(f.relative_to(src)).encode())
+    files = sorted(src.rglob("*.py")) + (sorted(p for p in persona.rglob("*") if p.is_file()) if persona.is_dir()
+                                         else [])
+    for f in files:
+        h.update(str(f.relative_to(root.parent)).encode())
         h.update(f.read_bytes())
     target = root / "travail" / "moteur-gele" / h.hexdigest()[:12]
     if not (target / "src" / "mika").is_dir():
         tmp = target.with_suffix(".tmp")
         shutil.rmtree(tmp, ignore_errors=True)
         shutil.copytree(src, tmp / "src", ignore=shutil.ignore_patterns("__pycache__", "*.egg-info"))
-        persona = root.parent / "backendv2" / "persona"
         if persona.is_dir():
             shutil.copytree(persona, tmp / "persona")
         tmp.rename(target)
@@ -59,6 +62,10 @@ def launch(root: Path, tz: str, until: str | None, mem: str = "3G", hours: int =
     env = {**os.environ, "PYTHONPATH": f"{frozen / 'src'}{os.pathsep}{root / 'src'}",
            "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
            "BORNE_MEM": mem, "BORNE_TEMPS": str(hours * 3600)}
+    voice = twin_voice(root)
+    if voice is not None:
+        env["MIKA_VOIX"] = str(voice)
+        print(f"Sa voix : {voice}")
     cmd = [sys.executable, "-m", "twin.replay.run", "--racine", str(root), "--fuseau", tz]
     if until:
         cmd += ["--jusqu-a", until]
@@ -66,6 +73,13 @@ def launch(root: Path, tz: str, until: str | None, mem: str = "3G", hours: int =
         cmd = [str(BORNE), *cmd]
     print(f"Moteur gelé : {frozen}")
     os.execvpe(cmd[0], cmd, env)  # le processus devient l'avance : Ctrl+C l'arrête proprement, on reprendra
+
+
+def twin_voice(root: Path) -> Path | None:
+    """``sortie/voix.yaml`` : une voix à elle (une copie de ``backendv2/persona/voix.yaml`` retouchée — tournures,
+    règles de vie), si on en a écrit une ; sinon le moteur parle avec la sienne."""
+    path = root / "sortie" / "voix.yaml"
+    return path if path.is_file() else None
 
 
 def persona_docs(root: Path, corpus: Corpus) -> dict[str, dict]:  # type: ignore[type-arg]
@@ -128,9 +142,11 @@ def main(argv: list[str] | None = None) -> int:
     path = write_report(args.racine, dict(report.stats), report.gaps, began)
     print(f"Rapport : {path}")
     if "arrivée" in report.stats:
-        print("Arrivée : sa vie est vécue. Vérifier puis servir :\n"
-              f"  backendv2/.venv/bin/python -m mika --data {args.racine / 'sortie' / 'vie'} replay --verify\n"
-              f"  backendv2/.venv/bin/python -m mika --data {args.racine / 'sortie' / 'vie'} serve --port 8001")
+        voice = twin_voice(args.racine)
+        env = f"MIKA_VOIX={voice} " if voice else ""
+        print("Arrivée : sa vie est vécue. Vérifier puis servir (avec la même voix) :\n"
+              f"  {env}backendv2/.venv/bin/python -m mika --data {args.racine / 'sortie' / 'vie'} replay --verify\n"
+              f"  {env}backendv2/.venv/bin/python -m mika --data {args.racine / 'sortie' / 'vie'} serve --port 8001")
     corpus.close()
     return 0
 

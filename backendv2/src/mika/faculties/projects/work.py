@@ -48,6 +48,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, floor
 from mika.kernel.state import FrozenDict
 from mika.vocab.episodes import Kind, project_of, project_target
+from mika.vocab.phrasebook import phrase
 
 FULL, SUMMARY, MENTION = "full", "summary", "mention"
 _RANK = {level: i for i, level in enumerate(social_c.CLOSENESS_LEVELS)}
@@ -240,20 +241,16 @@ def _reader(p: Project, frame: Frame) -> tuple[str, str] | None:
 
 def _who_words(frame: Frame, person: str, address: str) -> str:
     name = _name(frame, person) or _name(frame, address)
-    return f"« {name} »" if name else "cette personne"
+    return f"« {name} »" if name else phrase("expression.person.unnamed")
 
 
-#: ce qu'elle se dit avant de raconter : rien du contenu (le murmure s'entend), aucune référence à une section
-SHARE_BRIEFS = {
-    FULL: "Tu as mené à bout quelque chose dans un de tes projets : raconte-le à {who}, simplement.",
-    SUMMARY: "Tu as fini quelque chose dans un de tes projets : dis-le en deux mots à {who}.",
-    MENTION: "Tu as fini quelque chose dans un de tes projets : tu peux le mentionner à {who} en passant, sans "
-             "entrer dans le détail.",
-}
-REPORT_BRIEF = ("Un projet qu'on t'a confié a avancé : fais-en un compte rendu factuel à {who}, en une ou deux phrases "
-                "— c'est un travail, pas une fierté.")
-NEED_BRIEF = ("Un projet qu'on t'a confié n'avance plus sans un coup de main de {who} : dis-le-lui simplement — ce qui "
-              "bloque, et ce qu'il te faudrait.")
+def share_brief(level: str, who: str) -> str:
+    """Ce qu'elle se dit avant de raconter : rien du contenu (le murmure s'entend), aucune référence à une section."""
+    if level == FULL:
+        return phrase("projects.brief.share.full", who=who)
+    if level == SUMMARY:
+        return phrase("projects.brief.share.summary", who=who)
+    return phrase("projects.brief.share.mention", who=who)
 
 
 @PROJECTS.propose(kinds=[Kind.INITIATIVE], reasons={c.SHARE: (0.0, 10.0)},
@@ -276,14 +273,14 @@ def _share(s: ProjectsState, frame: Frame) -> list[Candidate]:
             if chosen is None:
                 continue
             person, address, level = chosen
-            brief = SHARE_BRIEFS[level].format(who=_who_words(frame, person, address))
+            brief = share_brief(level, _who_words(frame, person, address))
         else:
             reader = _reader(p, frame)
             if reader is None:
                 continue
             person, address = reader
             level = FULL
-            brief = REPORT_BRIEF.format(who=_who_words(frame, person, address))
+            brief = phrase("projects.brief.report", who=_who_words(frame, person, address))
         out.append(Candidate(
             Kind.INITIATIVE, address, c.SHARE, pm.share_evidence, resources=frozenset({floor(address)}),
             args=FrozenDict({"brief:projects": brief, "subject": subject_of(p.id, told[-1].id), "share": level})))
@@ -317,6 +314,6 @@ def _need(s: ProjectsState, frame: Frame) -> list[Candidate]:
         person, address = reader
         out.append(Candidate(
             Kind.INITIATIVE, address, c.NEED, pm.need_evidence, resources=frozenset({floor(address)}),
-            args=FrozenDict({"brief:projects": NEED_BRIEF.format(who=_who_words(frame, person, address)),
+            args=FrozenDict({"brief:projects": phrase("projects.brief.need", who=_who_words(frame, person, address)),
                              "subject": subject_of(p.id, o.id), "share": FULL})))
     return out

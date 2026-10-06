@@ -70,6 +70,7 @@ from mika.vocab.affect import Declared, emotion_cell, strip_prosody
 from mika.vocab.circadian import DAYS_FR, MONTHS_FR
 from mika.vocab.episodes import CONVERSATIONAL, Kind
 from mika.vocab.people import clean_display_name, fold, is_internal
+from mika.vocab.phrasebook import phrase, phrases
 
 #: Messages relus au plus pour composer l'historique (le budget coupe ensuite).
 THREAD_WINDOW = 60
@@ -341,45 +342,55 @@ def _message(store: Any, seq: int) -> dict[str, Any] | None:
 #: Avant cette heure, une heure de la nuit appartient encore à la veille : « le
 #: lendemain » se compte en jours vécus, pas en passages de minuit.
 DAY_STARTS_AT = 5
-_NUMBERS = ("zéro", "un", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix", "onze", "douze",
-            "treize")
+
+
+def _number(n: int) -> str:
+    """Un nombre en lettres (de zéro à treize)."""
+    return phrases("transcript.time.numbers")[n]
 
 
 def _clock(dt: datetime) -> str:
-    return f"{dt.hour}h{dt.minute:02d}"
+    return phrase("transcript.time.clock", hour=dt.hour, minute=f"{dt.minute:02d}")
 
 
 def _about(dt: datetime) -> str:
     """L'heure à la demi-heure près : « vers 17h », « vers 17h30 », « vers minuit »."""
     h, m = divmod(((dt.hour * 60 + dt.minute + 15) // 30 * 30) % (24 * 60), 60)
-    if h in (0, 12):
-        return f"vers {'minuit' if h == 0 else 'midi'}{' et demie' if m else ''}"
-    return f"vers {h}h{'30' if m else ''}"
+    if h == 0:
+        return phrase("transcript.time.about_midnight_half") if m else phrase("transcript.time.about_midnight")
+    if h == 12:
+        return phrase("transcript.time.about_noon_half") if m else phrase("transcript.time.about_noon")
+    return phrase("transcript.time.about_half", hour=h) if m else phrase("transcript.time.about_hour", hour=h)
 
 
 def _lapse(minutes: int) -> str:
     """Un silence de moins de deux heures, dit comme on le dit (à cinq minutes près)."""
     m = max(5, round(minutes / 5) * 5)
     if m == 30:
-        return "une demi-heure plus tard"
+        return phrase("transcript.time.half_hour_later")
     if m == 45:
-        return "trois quarts d'heure plus tard"
+        return phrase("transcript.time.three_quarters_later")
     if m < 55:
-        return f"{m} minutes plus tard"
+        return phrase("transcript.time.minutes_later", minutes=m)
     if m < 75:
-        return "une heure plus tard"
-    return "une heure et demie plus tard" if m < 105 else "presque deux heures plus tard"
+        return phrase("transcript.time.hour_later")
+    return phrase("transcript.time.hour_half_later") if m < 105 else phrase("transcript.time.two_hours_later")
 
 
 def _day(dt: datetime) -> str:
     """Le jour et l'heure ; une heure de la nuit dit de quelle nuit il s'agit."""
     if dt.hour < DAY_STARTS_AT:
-        return f"dans la nuit de {DAYS_FR[(dt.weekday() - 1) % 7]} à {DAYS_FR[dt.weekday()]}, {_clock(dt)}"
-    return f"{DAYS_FR[dt.weekday()]} {_clock(dt)}"
+        return phrase("transcript.time.night_of", eve=DAYS_FR[(dt.weekday() - 1) % 7], weekday=DAYS_FR[dt.weekday()],
+                      clock=_clock(dt))
+    return phrase("transcript.time.day", weekday=DAYS_FR[dt.weekday()], clock=_clock(dt))
 
 
 def _date(dt: datetime, year: bool) -> str:
-    return f"{DAYS_FR[dt.weekday()]} {dt.day} {MONTHS_FR[dt.month - 1]}{f' {dt.year}' if year else ''}, {_clock(dt)}"
+    if year:
+        return phrase("transcript.time.date_year", weekday=DAYS_FR[dt.weekday()], day=dt.day,
+                      month=MONTHS_FR[dt.month - 1], year=dt.year, clock=_clock(dt))
+    return phrase("transcript.time.date", weekday=DAYS_FR[dt.weekday()], day=dt.day, month=MONTHS_FR[dt.month - 1],
+                  clock=_clock(dt))
 
 
 def gap_mark(prev: int, at: int, tz: ZoneInfo, after_us: int = MARK_AFTER) -> str:
@@ -398,26 +409,29 @@ def gap_mark(prev: int, at: int, tz: ZoneInfo, after_us: int = MARK_AFTER) -> st
         minutes = (at - prev) // MINUTE
         if minutes < 110:
             return _lapse(minutes)
-        return f"plus tard{' dans la nuit' if now.hour < DAY_STARTS_AT else ''}, {_about(now)}"
+        if now.hour < DAY_STARTS_AT:
+            return phrase("transcript.time.later_night", about=_about(now))
+        return phrase("transcript.time.later", about=_about(now))
     if days == 1:
-        return f"le lendemain, {_day(now)}"
+        return phrase("transcript.time.next_day", day=_day(now))
     if days == 2:
-        return f"le surlendemain, {_day(now)}"
+        return phrase("transcript.time.day_after", day=_day(now))
     if days < 7:
-        return f"{_NUMBERS[days]} jours plus tard, {_day(now)}"
+        return phrase("transcript.time.days_later_day", days=_number(days), day=_day(now))
     if days == 7:
-        lap = "une semaine plus tard"
+        lap = phrase("transcript.time.week_later")
     elif days < 14:
-        lap = f"{_NUMBERS[days]} jours plus tard"
+        lap = phrase("transcript.time.days_later", days=_number(days))
     elif days < 30:
-        lap = f"{_NUMBERS[days // 7]} semaines plus tard"
+        lap = phrase("transcript.time.weeks_later", weeks=_number(days // 7))
     elif days < 365:
         months = max(1, round(days / 30.44))
-        lap = "un mois plus tard" if months == 1 else f"{_NUMBERS[months]} mois plus tard"
+        lap = phrase("transcript.time.month_later") if months == 1 else \
+            phrase("transcript.time.months_later", months=_number(months))
     else:
         years = days // 365
-        lap = "un an plus tard" if years == 1 else f"{years} ans plus tard"
-    return f"{lap}, {_date(now, now.year != then.year)}"
+        lap = phrase("transcript.time.year_later") if years == 1 else phrase("transcript.time.years_later", years=years)
+    return phrase("transcript.time.lapse_date", lapse=lap, date=_date(now, now.year != then.year))
 
 
 #: au-delà, un message auquel elle répond est un message qu'elle lit en retard (elle dormait, elle était prise)
@@ -432,7 +446,7 @@ def read_late(at: int, now: int, tz: ZoneInfo) -> str:
         return ""
     same = local_date_of_night(at, tz, DAY_STARTS_AT) == local_date_of_night(now, tz, DAY_STARTS_AT)
     when = _about(local(now, tz)) if same else _day(local(now, tz))
-    return f"tu ne le lis que maintenant, {when}"
+    return phrase("transcript.time.read_late", when=when)
 
 
 def opening_mark(at: int, now: int, tz: ZoneInfo) -> str:
@@ -444,9 +458,6 @@ def opening_mark(at: int, now: int, tz: ZoneInfo) -> str:
 
 # ── L'historique du prompt ────────────────────────────────────────────────
 
-#: Comment apparaît, dans le fil d'un salon, quelqu'un dont on ne connaît pas le nom.
-SOMEONE = "Quelqu'un"
-SUMMARY_TURN = "(Plus tôt, entre vous — en résumé : {text})"
 
 
 @dataclass(frozen=True, slots=True)
@@ -466,7 +477,8 @@ def speakers(frame: Frame, handles: Sequence[str]) -> dict[str, str]:
     out: dict[str, str] = {}
     taken: dict[str, int] = {}
     for h in sorted({h for h in handles if not is_internal(h)}):
-        name = clean_display_name(frame.get(identity_c.IDENTITY(h)).name) or SOMEONE
+        # quelqu'un dont on ne connaît pas le nom : « Quelqu'un »
+        name = clean_display_name(frame.get(identity_c.IDENTITY(h)).name) or phrase("transcript.thread.someone")
         n = taken[fold(name)] = taken.get(fold(name), 0) + 1
         out[h] = name if n == 1 else f"{name} ({n})"
     return out
@@ -482,10 +494,6 @@ def tagged(r: Mapping[str, Any]) -> str:
     return f"{text} [EMOTION:{r['emotion']}:{value + '0' if value.endswith('.') else value}]"
 
 
-#: ce que dit le repère d'un message qu'elle a écrit d'elle-même : sans lui, le repère seul (« [jeudi 19h06] »)
-#: se lit comme un message vide de la personne, qui l'aurait relancée (HUM-22)
-SHE_WROTE_FIRST = "c'est toi qui lui as écrit"
-SHE_SPOKE_FIRST = "c'est toi qui as pris la parole"
 
 
 def _first(mark: str, note: str) -> str:
@@ -507,7 +515,10 @@ def thread_turns(rows: Sequence[Mapping[str, Any]], tz: ZoneInfo, now: int, afte
         prev = at
         opening = opening_mark(at, now, tz)
         if r["role"] == "assistant" and r.get("kind") == Kind.INITIATIVE:
-            note = SHE_SPOKE_FIRST if r.get("room") else SHE_WROTE_FIRST
+            # sans lui, le repère seul (« [jeudi 19h06] ») se lit comme un message vide de la personne, qui l'aurait
+            # relancée (HUM-22)
+            note = phrase("transcript.thread.she_spoke_first") if r.get("room") else \
+                phrase("transcript.thread.she_wrote_first")
             out.append(ChatTurn("assistant", tagged(r), id=r["id"], mark=_first(mark, note),
                                 opening=_first(opening, note)))
         elif r["role"] == "assistant":
@@ -556,7 +567,7 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
         rows = private_thread(store, handles, p.window, before=before, after=since, step=p.window_step)
         text = store.content([summary[1]]).get(summary[1]) if summary else None
         if summary and text:
-            pinned.append(ChatTurn("user", SUMMARY_TURN.format(text=text), id=since, pinned=True))
+            pinned.append(ChatTurn("user", phrase("transcript.thread.summary", text=text), id=since, pinned=True))
     turns = pinned + thread_turns(rows, tz, frame.now, p.mark_after_us, names)
     # le message en cours (la question, ou « maintenant » pour une initiative), situé par rapport au dernier tour
     at = int(asked["at"]) if asked else frame.now
@@ -568,26 +579,17 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     return ThreadView(key, tuple(turns), ChatTurn("user", "", speaker=who, mark=mark) if (mark or who) else None)
 
 
-#: là où son nom s'écrit dans la consigne du résumé (celui de sa persona : jamais écrit ici)
-_NAME = "{nom}"
-_COMPACT_SYSTEM = """Tu aides {nom} à se souvenir d'une longue conversation. On te donne le début de son fil avec \
-quelqu'un (et le résumé des échanges encore plus anciens, s'il existe) ; un repère entre crochets dit quand un \
-message a été écrit. Écris un résumé à la première personne, du point de vue de {nom} (« On a parlé de… », « Il \
-m'a dit que… »), en 5 à 10 phrases : les faits, ce qui a été promis, le ton de la relation. Situe ce qui compte \
-par sa date (« le lundi 28 septembre au soir »), jamais par « hier » ou « la semaine dernière » : ce résumé sera \
-relu bien plus tard. N'invente rien. Réponds seulement par le résumé."""
-
-
 def compact_system(name: str) -> str:
-    """La consigne du résumé d'un fil long, au nom de celle qui s'en souviendra."""
-    return _COMPACT_SYSTEM.replace(_NAME, name)
+    """La consigne du résumé d'un fil long, au nom de celle qui s'en souviendra (celui de sa persona : jamais écrit
+    ici)."""
+    return phrase("transcript.compact.system", name=name)
 
 
 def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]], after_us: int) -> str:
     """Les échanges à replier, chacun sous le nom de qui parle et daté comme
     dans l'historique (le premier en absolu)."""
     tz = frame.env.tz_of(frame.root)
-    name = clean_display_name(frame.get(identity_c.IDENTITY(person)).name) or "La personne"
+    name = clean_display_name(frame.get(identity_c.IDENTITY(person)).name) or phrase("transcript.compact.someone")
     her = self_c.name_of(frame.get(self_c.PERSONA))
     lines = []
     prev: int | None = None
@@ -595,8 +597,8 @@ def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]],
         at = int(r["at"])
         mark = gap_mark(prev, at, tz, after_us) if prev is not None else opening_mark(at, frame.now, tz)
         prev = at
-        who = (f"{her} (d'elle-même)" if r.get("kind") == Kind.INITIATIVE else her) if r["role"] == "assistant" \
-            else name
+        who = (phrase("transcript.compact.her_initiative", her=her) if r.get("kind") == Kind.INITIATIVE else her) \
+            if r["role"] == "assistant" else name
         lines.append(f"{f'[{mark}] ' if mark else ''}{who} : {r['text']}")
     return "\n".join(lines)
 
@@ -639,7 +641,8 @@ class Compact:
                 continue
             previous = store.content([summary[1]]).get(summary[1]) if summary else None
             lines = _compact_lines(frame, person, folded, p.mark_after_us)
-            prompt = (f"Résumé précédent : {previous}\n\n" if previous else "") + f"Suite des échanges :\n{lines}"
+            prompt = (phrase("transcript.compact.previous", text=previous) + "\n\n" if previous else "") + \
+                phrase("transcript.compact.next") + "\n" + lines
             self.retry_at = frame.now + p.compact_retry_us  # si l'appel lève, pas de rafale
             request = LLMRequest(role="compact", call_id=f"{ctx.run_id}#{person}",
                                  system_stable=compact_system(self_c.name_of(frame.get(self_c.PERSONA))),

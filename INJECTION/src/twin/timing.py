@@ -232,6 +232,40 @@ def _min(a: int | None, b: int | None) -> int | None:
     return min(a, b)
 
 
+def _inside(v: int, lo: int | None, hi: int | None) -> int:
+    """``v`` s'il est dans la plage ; sinon le milieu de la plage (bornée des deux côtés), à défaut sa borne."""
+    if (lo is None or v >= lo) and (hi is None or v <= hi):
+        return v
+    if lo is not None and hi is not None:
+        return lo + (hi - lo) // 2
+    return _clamp(v, lo, hi)
+
+
+def _order_points(out: list[Temps], flagged: set[int]) -> None:
+    """Les points qui reculent dans l'ordre de la source (deux estimations indépendantes, chacune dans sa plage)
+    sont replacés au rang entre les voisins qui tiennent ensemble. Une date exacte ne bouge jamais : après le
+    resserrement, elle est compatible avec tous les points et fait toujours partie de la suite gardée."""
+    idx = [i for i, t in enumerate(out) if t.point is not None and i not in flagged]
+    if len(idx) < 2:
+        return
+    kept = sorted(_longest_non_decreasing(idx, [out[i].point for i in idx]))  # type: ignore[misc]
+    for i in idx:
+        k = bisect.bisect_left(kept, i)
+        if k < len(kept) and kept[k] == i:
+            continue
+        t = out[i]
+        before = kept[k - 1] if k > 0 else None
+        after = kept[k] if k < len(kept) else None
+        pa = out[before].point if before is not None else None
+        pb = out[after].point if after is not None else None
+        if pa is not None and pb is not None:
+            point = pa + (pb - pa) * (i - before) // (after - before)  # type: ignore[operator]
+        else:
+            point = _inside(pa if pa is not None else pb, t.start, t.end)  # type: ignore[arg-type]
+        out[i] = replace(t, point=_clamp(point, _max(t.start, pa), _min(t.end, pb)))
+        kept.insert(k, i)
+
+
 def _clamp(v: int, lo: int | None, hi: int | None) -> int:
     if lo is not None and v < lo:
         v = lo
@@ -257,6 +291,9 @@ def propagate(items: list[Temps]) -> tuple[list[Temps], list[Conflict]]:
       au rang (origine ``interpolation``).
     - Une date exacte n'est jamais déplacée : si elle contredit l'ordre, c'est un conflit,
       et ses voisins ne sont pas contraints par elle.
+    - Un point estimé que sa plage resserrée exclut repart au **milieu** de la nouvelle plage,
+      pas collé à sa borne (« au plus tard le 3 mars » ne veut pas dire « le 3 mars ») ; et
+      les points estimés **suivent l'ordre** : celui qui recule est replacé entre ses voisins.
     """
     n = len(items)
     out = list(items)
@@ -297,13 +334,16 @@ def propagate(items: list[Temps]) -> tuple[list[Temps], list[Conflict]]:
             continue
         if lo == t.start and hi == t.end:
             continue
-        point = None if t.point is None else _clamp(t.point, lo, hi)
+        point = None if t.point is None else _inside(t.point, lo, hi)
         origin = t.origin if t.known else Origin.INTERPOLATED
         if lo is not None and hi is not None:
             precision = _coarsest_allowed(t.precision if t.known else Precision.RANGE, hi - lo)
         else:
             precision = t.precision
         out[i] = Temps(lo, hi, point, precision, origin)
+
+    # 1 bis. les points estimés suivent l'ordre de la source
+    _order_points(out, flagged)
 
     # 2. un point interpolé au rang pour ce qui n'en a pas, entre deux voisins qui en ont un ;
     #    la plage, elle, reste celle que l'ordre garantit (on ne la resserre pas sur une estimation)
