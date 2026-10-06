@@ -192,6 +192,7 @@ PROCESS_LABELS: dict[str, str] = {
     "forge.events": "Transmettre les événements aux apps", "forge.discover": "Découvrir les apps",
     "memory.promises": "Tenir ou laisser filer ses promesses", "self.wake": "Se réveiller avec sa nuit",
     "social.reciprocity": "Remarquer qui écrit en premier",
+    "social.bonds": "Remarquer qu'un lien a changé",
     "memory.follow": "Remarquer qu'elle a repris un moment de la vie de quelqu'un",
     "world.settle": "Conclure ses gestes dans le monde", "world.notice": "Remarquer ce qu'on a changé chez elle",
     "shares.retention": "Retirer les fichiers envoyés trop anciens", "imaging.draw": "Dessiner",
