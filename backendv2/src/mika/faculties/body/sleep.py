@@ -31,7 +31,7 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import body as c
-from mika.kernel.clock import HOUR, MINUTE, US, local
+from mika.kernel.clock import HOUR, MINUTE, US, local, next_local
 from mika.kernel.codec import h64
 from mika.kernel.forms import Knob
 
@@ -198,6 +198,14 @@ def same_night(a: int, b: int, tz: ZoneInfo, night: tuple[int, int] | None) -> b
     debout, elle n'est pas « réveillée en pleine nuit » le soir venu."""
     n = _night_of(a, tz, night)
     return n is not None and n == _night_of(b, tz, night)
+
+
+def night_end(t: int, tz: ZoneInfo, night: tuple[int, int] | None) -> int | None:
+    """Le matin qui clôt la nuit contenant ``t`` (``None`` : ``t`` est hors de sa nuit). Tirée du sommeil par
+    un message et restée debout jusque-là, c'est son vrai réveil."""
+    if night is None or not in_night(t, tz, night):
+        return None
+    return next_local(t, night[1] // 60, night[1] % 60, tz)
 
 
 def next_transition(s: Sleep, t0: int, p: SleepParams, tz: ZoneInfo, shift: int = 0,

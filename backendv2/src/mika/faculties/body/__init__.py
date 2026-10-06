@@ -436,16 +436,23 @@ def _night_waking(s: BodyState, cx) -> bool:
 @BODY.fact(c.REPLY_WAIT)
 def _reply_wait(s: BodyState, cx, message: int) -> int | None:
     """La réponse à ce message attend-elle son réveil ? ``0`` tant qu'elle est
-    dans sa nuit ; ensuite, l'instant d'où elle est due (son réveil)."""
+    dans sa nuit ; ensuite, l'instant d'où elle est due (son réveil). Tirée du
+    sommeil par un message et restée debout jusqu'au matin, son vrai réveil est
+    la fin de cette nuit-là, pas l'heure où on l'a réveillée : la question
+    compte son âge depuis le matin."""
     w = next((w for w in s.waiting if w.message == message), None)
     if w is None:
         return None
     if s.sleep.asleep:
         return 0
     p = params(cx.params)
-    if night_waking(s, cx.now, p, cx.tz) and w.handle != s.roused_handle:
+    waking = night_waking(s, cx.now, p, cx.tz)
+    if waking and w.handle != s.roused_handle:
         return 0  # tirée du sommeil par quelqu'un d'autre : elle ne répond qu'à lui
-    return max(w.at, s.sleep.since)
+    woke = s.sleep.since
+    if s.sleep.woken_by_message and not waking:
+        woke = sl.night_end(woke, cx.tz, night(p)) or woke
+    return max(w.at, woke)
 
 
 def _slept(n: Night) -> int:
