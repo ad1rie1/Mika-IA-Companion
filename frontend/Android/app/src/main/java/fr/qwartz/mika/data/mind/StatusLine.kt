@@ -11,7 +11,11 @@ object StatusLine {
     /** En dessous, l'émotion n'est pas assez marquée pour être dite. */
     const val EMOTION_MIN_INTENSITY = 0.25
 
-    fun of(link: LinkState, typing: Boolean, mind: MindState?, nowElapsedMs: Long): String {
+    /**
+     * [nowWallMs] (heure murale) éteint une occupation minutée passé sa fin prévue, sans attendre de trame ;
+     * `null` : on s'en tient à ce que dit la dernière trame.
+     */
+    fun of(link: LinkState, typing: Boolean, mind: MindState?, nowElapsedMs: Long, nowWallMs: Long? = null): String {
         linkProblem(link, nowElapsedMs)?.let { return it }
         if (typing) return "en train d'écrire…"
         if (mind == null) return "en ligne"
@@ -21,7 +25,12 @@ object StatusLine {
             SleepPhases.DEEP -> return "dort profondément"
         }
         val parts = mutableListOf("éveillée")
-        MindLabels.place(mind.place)?.let { parts += it }
+        // « dessine à son bureau » : ce qu'elle fait, puis où
+        val doing = mind.activity
+            ?.takeIf { a -> nowWallMs == null || a.until == null || a.until > nowWallMs }
+            ?.let { MindLabels.activity(it.name, it.label) }
+        val where = listOfNotNull(doing, MindLabels.place(mind.place))
+        if (where.isNotEmpty()) parts += where.joinToString(" ")
         val mood = mind.mood
         if (mood != null && mood.emotion != "neutral" && mood.intensity >= EMOTION_MIN_INTENSITY) {
             parts += MindLabels.emotionLower(mood.emotion)

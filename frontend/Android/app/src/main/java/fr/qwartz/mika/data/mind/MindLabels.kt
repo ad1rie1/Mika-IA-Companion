@@ -80,6 +80,26 @@ object MindLabels {
 
     fun place(place: String?): String? = PLACES[place.orEmpty()]
 
+    /** Ce qu'elle fait, conjugué pour la ligne d'état (les occupations de `faculties/world/chambre.json`). */
+    val ACTIVITIES: Map<String, String> = linkedMapOf(
+        "draw" to "dessine",
+        "work" to "travaille",
+        "browse_books" to "feuillette un livre",
+        "water_plant" to "arrose sa plante",
+        "look_outside" to "regarde dehors",
+    )
+
+    /**
+     * « dessine » ; une occupation que l'app ne connaît pas (un objet ajouté à sa chambre) se dit avec le
+     * libellé du serveur, « en train de jongler » ; sans libellé, rien.
+     */
+    fun activity(name: String?, label: String?): String? {
+        ACTIVITIES[name.orEmpty()]?.let { return it }
+        val raw = label.orEmpty().trim().takeIf { it.isNotEmpty() } ?: return null
+        val of = if (raw.first().lowercaseChar() in "aeiouyàâéèêëîïôöùûü") "d'" else "de "
+        return "en train $of$raw"
+    }
+
     /** Le moment de la journée (InnerLifePanel.ts:30-38). */
     fun circadianPhase(phase: String?): String? = when (phase) {
         "morning" -> "Matin"
