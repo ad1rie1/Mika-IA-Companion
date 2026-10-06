@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -28,6 +29,65 @@ namespace Mika.Chat
         [JsonProperty("gain")] public float Gain = 1f;
     }
 
+    /// <summary>
+    /// Un fichier qu'elle envoie avec une parole (<c>protocol.shared_item</c>, <c>backendv2/docs/protocole-chat.md</c> §6) :
+    /// un texte qu'elle a écrit, un fichier d'un projet, un dessin. Il se télécharge avec le jeton du compte
+    /// (<see cref="ChatSession.DownloadAsync"/>). Une ligne de la personne n'en porte que le nom et la sorte.
+    /// </summary>
+    public sealed class SharedFile
+    {
+        static readonly Regex FileId = new Regex(@"\A[0-9a-f]{32}\z");
+        // Ce qui sortirait du dossier, ou que Windows refuse dans un nom ; « # » et « % » casseraient l'adresse
+        // file:// qui l'ouvre.
+        const string ForbiddenInName = "<>:\"/\\|?*#%";
+
+        [JsonProperty("id")] public string Id;
+        [JsonProperty("name")] public string Name;
+        /// <summary><c>image</c> (montrée en vignette) ou <c>file</c>.</summary>
+        [JsonProperty("kind")] public string Kind = "file";
+        [JsonProperty("mime")] public string Mime;
+        /// <summary>En octets.</summary>
+        [JsonProperty("size")] public long? Size;
+        [JsonProperty("url")] public string Url;
+        /// <summary>Faux une fois retiré par la rétention : on le dit, au lieu d'un téléchargement voué au 410.</summary>
+        [JsonProperty("available")] public bool Available = true;
+
+        public bool IsImage => Kind == "image";
+
+        /// <summary>
+        /// Sa route, relative au serveur (<c>/files/&lt;id&gt;</c>), ou <c>null</c> si l'entrée n'en désigne pas une
+        /// qu'on accepte de suivre. Jamais une adresse absolue : le jeton ne part que vers son serveur, et une ligne
+        /// du fil ne choisit pas où.
+        /// </summary>
+        public string Route
+        {
+            get
+            {
+                var id = Id?.ToLowerInvariant();
+                if (id == null || !FileId.IsMatch(id)) return null;
+                var expected = "/files/" + id;
+                return string.IsNullOrEmpty(Url) || Url.Trim().ToLowerInvariant() == expected ? expected : null;
+            }
+        }
+
+        /// <summary>
+        /// Le nom sous lequel le ranger sur ce poste : le sien, sans rien qui sorte du dossier (le serveur n'en retire
+        /// que les caractères de contrôle) ; à défaut, « fichier ».
+        /// </summary>
+        public string LocalName
+        {
+            get
+            {
+                var chars = (Name ?? "").ToCharArray();
+                for (var i = 0; i < chars.Length; i++)
+                    if (char.IsControl(chars[i]) || ForbiddenInName.IndexOf(chars[i]) >= 0) chars[i] = '_';
+                // Windows retire lui-même points et espaces finaux : l'extension lue ici doit être celle du disque.
+                var cleaned = new string(chars).Trim().TrimEnd('.', ' ');
+                return cleaned.Length > 0 ? cleaned : "fichier";
+            }
+        }
+    }
+
     /// <summary>Une parole (ou une pensée à voix haute) : le texte, l'émotion du moment, faut-il la dire.</summary>
     public sealed class SpeechFrame : ChatFrame
     {
@@ -45,6 +105,8 @@ namespace Mika.Chat
         [JsonProperty("message_id")] public long? MessageId;
         [JsonProperty("user_message_id")] public long? UserMessageId;
         [JsonProperty("client_msg_id")] public string ClientMsgId;
+        /// <summary>Les fichiers qu'elle envoie avec (souvent aucun ; jamais avec une pensée).</summary>
+        [JsonProperty("attachments")] public List<SharedFile> Attachments = new List<SharedFile>();
 
         public bool Inner => VoicePersona == "inner";
     }
@@ -74,6 +136,8 @@ namespace Mika.Chat
         [JsonProperty("source")] public string Source;
         [JsonProperty("emotion")] public string Emotion;
         [JsonProperty("emotion_intensity")] public float EmotionIntensity;
+        /// <summary>D'un message de Mika : ses fichiers, comme dans <see cref="SpeechFrame"/> ; de la personne : un nom et une sorte.</summary>
+        [JsonProperty("attachments")] public List<SharedFile> Attachments = new List<SharedFile>();
     }
 
     public sealed class HistoryFrame : ChatFrame
