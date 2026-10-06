@@ -137,6 +137,11 @@ FALLBACKS = {
     Role.EXTRACT: Role.REPLY, Role.CAPTION: Role.REPLY,
 }
 
+#: Le rôle d'un essai de la console (« Rejouer avec… ») : le prompt gardé d'un épisode renvoyé à un fournisseur
+#: nommé. Hors de ``Role`` : il ne se route pas (le fournisseur est choisi à l'appel), ne parle pas en son nom (pas
+#: de persona exigée) et n'a pas de repli ; au registre des appels, ses coûts ne se mêlent pas à « répondre ».
+TRIAL_ROLE = "trial"
+
 
 class Tag(enum.StrEnum):
     #: Coupé en mode travail (un projet confié la veut professionnelle).

@@ -28,6 +28,10 @@
   a tout dépensé avant le premier mot).
 - Chaque appel laisse une trace (rôle, fournisseur, modèle, jetons, cache, coût,
   latence, attente, issue).
+- Un **essai** de la console (``try_on``, « Rejouer avec… ») envoie un prompt
+  gardé à un fournisseur nommé : un seul appel, derrière tout le reste, sans
+  repli ni reprise, sous un rôle à part (``TRIAL_ROLE``) ; un appel d'outil
+  demandé est rendu, jamais exécuté.
 """
 
 from __future__ import annotations
@@ -53,6 +57,7 @@ from mika.ports.llm import (
     MissingPersona,
     Usage,
 )
+from mika.vocab.episodes import TRIAL_ROLE
 
 #: les derniers appels gardés en mémoire
 TRACES_KEPT = 2000
@@ -66,6 +71,8 @@ MIN_RETRY_S = 5.0
 CUT_RETRY_CEILING = 8192
 #: les boucles d'outils dont on retient le fournisseur (collant par ``call_id``)
 STICKY_KEPT = 4096
+#: la priorité d'un essai de la console : derrière tout le fond
+TRIAL_PRIORITY = 9
 
 log = logging.getLogger("mika.llm.gateway")
 
@@ -102,6 +109,20 @@ class LLMTrace:
     #: l'épisode (ou le passage d'un processus) qui a fait l'appel : de quoi
     #: retrouver ses appels après un redémarrage
     correlation: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class Trial:
+    """Ce qu'un essai a donné (``Gateway.try_on``) : la réponse, ou pourquoi il n'y en a pas."""
+
+    backend: str
+    response: LLMResponse | None = None
+    #: la trace de l'appel (durée, attente, jetons, coût) ; ``None`` : il n'est pas parti
+    trace: LLMTrace | None = None
+    #: « NomDeClasse: message », ou une cause en mots ; vide quand il a répondu
+    error: str = ""
+    #: ses outils lui ont été retirés (un fournisseur à session, voir ``try_on``)
+    tools_dropped: bool = False
 
 
 def correlation_of(req: LLMRequest) -> str:
@@ -293,6 +314,41 @@ class Gateway:
             hook = getattr(backend, "release", None)
             if callable(hook):
                 hook(call_id)
+
+    async def try_on(self, name: str, req: LLMRequest) -> Trial:
+        """Un essai de la console (« Rejouer avec… ») : ``req`` envoyée au fournisseur ``name`` par son créneau,
+        derrière tout le fond (voie de fond, ``TRIAL_PRIORITY``), sous le rôle ``TRIAL_ROLE``. Un seul appel :
+        ni repli, ni reprise après coupure, ni fournisseur collant ; un appel d'outil demandé est rendu tel quel,
+        jamais exécuté. Un fournisseur à session (la CLI de Claude Code, qui ne rend un appel d'outil qu'en
+        gardant sa session ouverte dans l'attente d'un résultat) reçoit la requête sans ses outils, et l'essai le
+        dit. Ne lève pas : un échec, un délai, une préemption par une réponse sont rendus (``Trial.error``) ;
+        seule l'annulation de l'essai lui-même remonte."""
+        backend = self.backends.get(name)
+        if backend is None:
+            return Trial(name, error=f"aucun fournisseur « {name} » n'est déclaré")
+        dropped = bool(req.tools) and not getattr(backend, "resumes_tool_loops", True)
+        trial = replace(req, role=TRIAL_ROLE, lane="background", priority=TRIAL_PRIORITY, persona=None,
+                        tools=() if dropped else req.tools, meta={})
+        # une tâche à part : c'est elle que le premier plan interrompt quand il préempte le créneau, pas la
+        # requête de la console qui l'attend
+        task = asyncio.create_task(self._on(name, trial, self.deadline(trial.lane)))
+        resp: LLMResponse | None = None
+        error = ""
+        try:
+            resp = await task
+        except asyncio.CancelledError:
+            me = asyncio.current_task()
+            if me is not None and me.cancelling():
+                raise  # c'est l'essai qu'on arrête (la page fermée, un arrêt du serveur)
+            error = "interrompu : une réponse avait besoin de ce créneau"
+        except Exception as exc:  # un essai qui échoue se montre, il ne casse pas la page
+            error = f"{type(exc).__name__}: {exc}"[:500]
+        finally:
+            hook = getattr(backend, "release", None)
+            if callable(hook):
+                hook(trial.call_id)  # une session restée ouverte sur un appel d'outil
+        found = next((t for t in reversed(self.traces) if t.call_id == trial.call_id), None)
+        return Trial(name, resp, found, error, dropped)
 
     async def _on(self, name: str, req: LLMRequest, budget: float) -> LLMResponse:
         backend = self.backends[name]
