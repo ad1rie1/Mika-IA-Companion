@@ -3,8 +3,8 @@
 Elle a un corps dans un monde de pièces, de lieux et d'objets (le frontend la montre ; un moteur de jeu le
 fera bientôt). Ce qu'elle y fait est **son** choix, pris par le modèle avec deux outils en main (``go_to``,
 ``interact``) ; ce que son corps fait de lui-même (aller se coucher quand elle s'endort, s'installer à son bureau
-quand elle se met au travail, s'arrêter de dessiner au bout d'un moment) est un réflexe, sans modèle. Le noyau est le monde : il valide, planifie en pas, et conclut chaque action à son échéance — un
-moteur hôte pourra la jouer et dire qu'il n'y arrive pas, jamais décider seul (P2).
+quand elle se met au travail, s'arrêter de dessiner au bout d'un moment) est un réflexe, sans modèle. Le noyau est
+le monde : il valide, planifie en pas, et conclut chaque action à son échéance — un moteur hôte pourra la jouer et dire qu'il n'y arrive pas, jamais décider seul (P2).
 
 Écrit pour être piloté par un modèle :
 
@@ -763,8 +763,8 @@ def wears_off(s: WorldState, p: WorldParams) -> int | None:
     return a.since + p.open_activity_min * MINUTE
 
 
-@WORLD.process("world.settle", wake_on=[w.INTENDED, body_c.FELL_ASLEEP, w.AUTHORED], lane="background",
-               catch_up=CatchUp.ONCE, max_quantum_s=60)
+@WORLD.process("world.settle", wake_on=[w.INTENDED, body_c.FELL_ASLEEP, rt.EPISODE_STARTED, w.AUTHORED],
+               lane="background", catch_up=CatchUp.ONCE, max_quantum_s=60)
 class Settle:
     """Une action arrivée à son échéance se termine comme prévu — revalidée sur l'état d'alors (un moteur hôte,
     quand il y en aura un, pourra la terminer plus tôt ou dire qu'il n'y arrive pas). Et une occupation sans fin
