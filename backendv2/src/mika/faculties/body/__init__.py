@@ -220,18 +220,39 @@ _NEGATION_REACH = 3
 #: Ce qui ferme une proposition : une négation ne la traverse pas (« j'ai pas dormi, c'est urgent »).
 _CLAUSE = re.compile(r"[.,;:!?\n]+")
 _PUNCT = re.compile(r"[^a-z0-9]+")
+#: Une réponse demandée…
+_ANSWER = frozenset({"reponds moi", "repond moi"})
+#: … mais remise à plus tard dans la même proposition : « réponds-moi quand tu te réveilles », « … demain ».
+_DEFERRALS = ("quand tu", "quand t", "des que tu", "des que t", "a ton reveil", "au reveil", "demain", "plus tard")
+#: « c'est grave » ne dit la gravité qu'en fermant sa proposition (« c'est grave ! ») ou devant ce qui la
+#: déplie ou en ouvre une autre (« c'est grave ce qui m'arrive », « c'est grave j'ai mal ») : suivi d'un
+#: adjectif ou d'un adverbe, « grave » veut dire « très » (« c'est grave bien », « c'est grave drôle »).
+_GRAVE = "c est grave"
+_GRAVE_THEN = ("ce qui", "ce qu", "je", "j", "il", "elle", "on")
 
 
 def urgent(text: str) -> bool:
     """Un message qui dit l'urgence (« c'est urgent », « au secours »…) — pas
-    « rien d'urgent », « sans urgence » ni « c'est pas grave »."""
+    « rien d'urgent », « sans urgence », « c'est pas grave », « c'est grave
+    bien » ni « réponds-moi quand tu te réveilles »."""
     for clause in _CLAUSE.split(fold(text)):
         low = " " + _PUNCT.sub(" ", clause).strip() + " "
         for cue in _URGENT:
             for m in re.finditer(rf" {re.escape(cue)} ", low):
                 before = low[: m.start()].split()[-_NEGATION_REACH:]
-                if not _NEGATIONS & set(before):
+                if not _NEGATIONS & set(before) and not _played_down(cue, low[m.end() - 1:]):
                     return True
+    return False
+
+
+def _played_down(cue: str, after: str) -> bool:
+    """Ce qui suit l'indice dans sa proposition le dément : une réponse demandée pour plus tard n'est pas une
+    urgence — c'est le message même qui demande d'attendre son réveil — et « grave » suivi d'un adjectif est
+    l'intensif familier."""
+    if cue in _ANSWER:
+        return any(f" {d} " in after for d in _DEFERRALS)
+    if cue == _GRAVE:
+        return bool(after.strip()) and not after.startswith(tuple(f" {w} " for w in _GRAVE_THEN))
     return False
 
 
