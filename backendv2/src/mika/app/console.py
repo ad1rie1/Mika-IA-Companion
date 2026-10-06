@@ -189,6 +189,7 @@ PROCESS_LABELS: dict[str, str] = {
 EVENT_LABELS: dict[str, str] = {
     "presence.connected": "Connexion", "presence.disconnected": "Déconnexion",
     "presence.read": "Lu jusqu'à un message (ce que dit son application)",
+    "presence.composing": "Commence ou cesse d'écrire un message (ce que dit son application)",
     "place.moved": "Elle s'est déplacée dans sa chambre",
     "world.authored": "Le monde édité", "world.described": "Un élément du monde décrit",
     "world.intended": "Un geste commencé dans le monde", "world.ended": "Un geste terminé dans le monde",
