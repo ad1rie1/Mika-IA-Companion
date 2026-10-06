@@ -237,7 +237,10 @@ relis la carte), `blocked`, `expired`, `forbidden` (pas à toi de décider). Une
 **`emotion_update`** (son visage entre deux tours, seulement vers un écran regardé), **`inner_state_update`**
 (`{"inner_state": {…}}` : sommeil `sleep_phase`, `energy`, lieu `place`, ce qu'elle y fait `activity`
 (`{"name": "draw", "label": "dessiner", "since": …, "until": …}` en millisecondes, `until` nul : jusqu'à ce qu'elle
-s'arrête ; `null` : rien ; un client tait un nom qu'il ne connaît pas), `circadian`, besoins `drives`, `estime`,
+s'arrête ; `null` : rien ; un client tait un nom qu'il ne connaît pas), sa dernière nuit `night`
+(`{"slept_h": 7.5, "broken": 1, "short": false}` : heures dormies à la demi-heure, fois où on l'a tirée du sommeil,
+nuit courte ; seulement du réveil jusqu'au milieu de sa journée, absente sinon — sans personne : une ligne sobre,
+« Nuit coupée une fois »), `circadian`, besoins `drives`, `estime`,
 `identity`, ce qui lui trotte dans la tête `ruminations`, `today_journal` (avec son `title`), `last_dream`,
 `self_narrative` ; `projects` pour une propriétaire ; `person_scope: false` = cette trame ne parle de personne, garde
 les sections personnelles), **`pong`**.

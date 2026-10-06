@@ -29,7 +29,7 @@ from mika.contracts import presence as presence_c
 from mika.contracts import self_ as self_c
 from mika.contracts import world as world_c
 from mika.contracts.entry import HistoryRow, SharedMeta
-from mika.kernel.clock import US
+from mika.kernel.clock import HOUR, US
 from mika.kernel.frame import Frame
 from mika.ports.delivery import TOO_LATE, Delivery
 from mika.vocab import privacy, voice
@@ -337,6 +337,11 @@ def inner_state(frame: Frame, handle: str | None, panel: dict[str, Any] | None =
         "ruminations": [],
         "person_scope": bool(handle) and is_identifiable(handle),
     }
+    slept = frame.get(body_c.LAST_NIGHT)
+    if slept is not None:
+        # sa nuit, le matin : des nombres arrondis, sans personne (qui l'a réveillée ne se montre pas)
+        out["night"] = {"slept_h": round(slept.duration_us / HOUR * 2) / 2,
+                        "broken": len(slept.rousings), "short": slept.short}
     needs = frame.get(needs_c.NEEDS)
     out["drives"] = {name: {"tension": round(value, 3), "last_satisfied": 0}
                      for name, value in (("social", needs.social), ("expression", needs.expression),

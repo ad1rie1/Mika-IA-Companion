@@ -1,7 +1,8 @@
 """Ce que le corps montre à un opérateur : le sommeil, le rythme, l'énergie.
 
 Lecture seule : les mêmes fonctions que les faits et le processus de sommeil,
-au même instant ; les dernières transitions viennent du journal ; les courbes
+au même instant ; ses dernières nuits viennent de sa tranche, les dernières
+transitions du journal ; les courbes
 de l'énergie et de la pression de sommeil sont mesurées toutes les dix
 minutes (``body.energie``, ``body.pression``).
 """
@@ -10,9 +11,22 @@ from __future__ import annotations
 
 from mika.contracts import body as c
 from mika.contracts import identity as identity_c
-from mika.faculties.body import BODY, BodyParams, BodyState, energy, fog, gate, night, params, rhythm
+from mika.faculties.body import (
+    BODY,
+    NIGHT_TOLD_US,
+    BodyParams,
+    BodyState,
+    Night,
+    energy,
+    fog,
+    gate,
+    last_night,
+    night,
+    params,
+    rhythm,
+)
 from mika.faculties.body import sleep as sl
-from mika.kernel.clock import DAY
+from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     Block,
@@ -157,6 +171,43 @@ def _transitions(ctx: InspectContext, frame: Frame) -> tuple[tuple[Entry, ...], 
     return tuple(out), Pager(param="avant", size=TRANSITIONS_PAGE, older=older)
 
 
+def _duration(us: int) -> str:
+    minutes = max(0, round(us / MINUTE))
+    return f"{minutes // 60} h {minutes % 60:02d}"
+
+
+def _rousings(frame: Frame, n: Night) -> str:
+    if not n.rousings:
+        return "—"
+    return " ; ".join(f"{frame.local(r.at):%H:%M} — "
+                      + (ROUSED_FR[c.CALL] if r.reason == c.CALL else
+                         f"{_who(frame, r.person, r.handle)} ({ROUSED_FR.get(r.reason, r.reason)})")
+                      for r in n.rousings)
+
+
+def _nights(s: BodyState, frame: Frame) -> Table:
+    """Ses dernières nuits, de la plus récente à la plus ancienne : ce qu'elle a dormi (sans les moments où un
+    message l'a tenue éveillée), qui l'a tirée du sommeil, si elle a veillé tard — et, pour celle qui vient de
+    finir, ce qu'elle en sait (« courte »)."""
+    told = last_night(s, frame.now, _p(frame), frame.env.tz_of(frame.root))
+    rows = []
+    for n in reversed(s.nights):
+        slept = max(0, n.end - n.start - n.awake_us)
+        rows.append((
+            When(n.start, relative=False),
+            When(n.end, relative=False) if n.end else Text("elle dort encore", kind="muted"),
+            _duration(slept) if n.end else "—",
+            _rousings(frame, n),
+            "oui" if n.late else "non",
+            ("courte" if told.short else "ordinaire") if told is not None and n is s.nights[-1] else "",
+        ))
+    return Table(("endormie", "réveillée", "dormi", "tirée du sommeil", "veillé tard", "ce qu'elle en sait ce matin"),
+                 tuple(rows), title="Ses dernières nuits",
+                 empty="aucune nuit encore : la première s'inscrira à son prochain endormissement",
+                 caption=f"Une semaine au plus. Jusqu'à {NIGHT_TOLD_US // HOUR} h après son réveil, elle sait "
+                         "comment s'est passée la dernière (« bien dormi ? »).")
+
+
 @BODY.inspect("rythme", title="Rythme", section="vie", order=40,
               description="Son sommeil, son énergie, sa pression de sommeil et son rythme circadien.")
 def _rhythm_view(s: BodyState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -209,5 +260,6 @@ def _rhythm_view(s: BodyState, frame: Frame, ctx: InspectContext) -> list[Block]
         Table(("phase", "début", "teinte"),
               tuple((circadian.PHASE_FR[ph], _hm(m), emotion_cell(profile.tints[ph])) for ph, m in profile.starts),
               title="Son rythme"),
+        _nights(s, frame),
         Timeline(transitions, title="Dernières transitions", empty="aucune transition encore", pager=pager),
     ]
