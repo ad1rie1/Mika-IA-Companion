@@ -26,11 +26,17 @@
 - **La consigne dit une raison** : la plus forte (d'après les preuves de la
   ligne choisie), et au plus une seconde, « et aussi » — on écrit pour une
   raison, pas pour toutes (HUM-10).
+- **« J'allais justement t'écrire »** : quand le message de quelqu'un arrive
+  pendant qu'une initiative ordinaire vers cette adresse est en cours (partie,
+  pas seulement envisagée), la réponse qui suit le sait, et pour quoi — jusqu'à
+  sa parole suivante vers elle. L'initiative supplantée, elle, ne part jamais
+  après coup (ADR 0040).
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
 
@@ -48,7 +54,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
 from mika.kernel.clock import DAY, HOUR, MINUTE, local
-from mika.kernel.faculty import Faculty
+from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
@@ -59,8 +65,17 @@ from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable, is_internal
 
 KEEP = 32
-#: au plus tant d'épisodes en cours retenus (corrélation → raisons)
+#: au plus tant d'épisodes en cours retenus (corrélation → raisons, adresse visée, départ)
 OPENINGS_KEPT = 16
+#: une initiative partie depuis plus longtemps n'est plus « en cours » (son échéance est de quelques minutes) : une
+#: ouverture jamais réglée — un arrêt brutal pendant qu'elle composait — ne croise pas un message des jours après
+OPEN_FOR = 10 * MINUTE
+#: un message qui a croisé une initiative vers sa personne, la réponse le sait au plus tant de temps après…
+CROSSED_SPAN = 30 * MINUTE
+#: … et pour tant d'adresses au plus
+CROSSED_KEPT = 64
+#: les fins d'une réponse qui règlent son tour : elle a parlé, ou choisi de se taire (une panne la fait reprendre)
+SETTLED = frozenset({"done", "abstained"})
 #: les fins d'épisode qui laissent une hésitation (une abstention, une panne) ; une initiative supplantée —
 #: la personne a écrit entre-temps — n'en laisse pas : c'est la réponse qui parle
 HESITANT = frozenset({"abstained", "failed", "timeout"})
@@ -155,16 +170,22 @@ class AgencyState:
     #: la durée réfractaire tirée à la dernière initiative (avant l'allongement par les ignorées)
     refractory_us: int = 0
     murmured_at: int = 0
-    #: les initiatives et murmures en cours : corrélation → raisons (on compte à l'énoncé, pas au départ)
-    openings: FrozenDict[str, str] = field(default_factory=FrozenDict)
+    #: les initiatives et murmures en cours : corrélation → (raisons, adresse visée par une initiative — vide pour un
+    #: murmure —, départ) ; on compte à l'énoncé, pas au départ
+    openings: FrozenDict[str, tuple[str, str, int]] = field(default_factory=FrozenDict)
     hesitated_at: int = 0
     #: les adresses auxquelles elle allait écrire, puis s'est ravisée (adresse → quand)
     renounced: FrozenDict[str, int] = field(default_factory=FrozenDict)
     #: envers qui elle a hésité d'affilée (une abstention, une panne) : adresse → (quand, combien de fois)
     hesitations: FrozenDict[str, tuple[int, int]] = field(default_factory=FrozenDict)
+    #: qui lui a écrit pendant qu'elle était en train de lui écrire d'elle-même : adresse → (quand son message est
+    #: arrivé, les raisons de l'initiative) — jusqu'à sa parole suivante vers elle, ou ``CROSSED_SPAN``
+    crossed: FrozenDict[str, tuple[int, str]] = field(default_factory=FrozenDict)
 
 
-AGENCY = Faculty("agency", state=AgencyState, init=lambda p: AgencyState(), params=AgencyParams, state_version=3)
+#: v4 : une ouverture garde l'adresse visée et son départ, et un message qui croise une initiative en cours vers sa
+#: personne est retenu (``crossed``) — la tranche se reconstruit depuis la genèse.
+AGENCY = Faculty("agency", state=AgencyState, init=lambda p: AgencyState(), params=AgencyParams, state_version=4)
 #: les adresses dont on garde les hésitations, au plus
 HESITATIONS_KEPT = 64
 
@@ -193,20 +214,47 @@ def _started(s: AgencyState, e, cx) -> AgencyState:
         s = replace(s, murmured_at=e.at)
     elif d.kind != Kind.INITIATIVE:
         return s
-    openings = s.openings.set(e.correlation, d.reason)
+    target = (d.target or "") if d.kind == Kind.INITIATIVE else ""
+    openings = s.openings.set(e.correlation, (d.reason, target, e.at))
     if len(openings) > OPENINGS_KEPT:  # des épisodes jamais réglés : les identifiants sont chronologiques
         openings = FrozenDict(sorted(openings.items())[-OPENINGS_KEPT:])
     return replace(s, openings=openings)
 
 
+@AGENCY.reducer(rt.PERCEPTION_RECEIVED)
+def _heard(s: AgencyState, e, cx) -> AgencyState:
+    """Un message qui lui parle, arrivé pendant qu'une initiative ordinaire vers cette adresse était en cours : leurs
+    messages se sont croisés — la réponse le saura (``crossed``). Saluer qui arrive, tenir parole ne comptent pas :
+    ce n'était pas « prendre la parole »."""
+    d = e.data
+    if not d.addressed:
+        return s
+    held = s.crossed.get(d.handle)
+    if held is not None and e.at - held[0] < CROSSED_SPAN:
+        return s  # une rafale : c'est le premier message qui a croisé le sien
+    found = [(at, reason) for reason, target, at in s.openings.values()
+             if target == d.handle and e.at - at < OPEN_FOR and not _uncounted(reason.split(","))]
+    if not found:
+        return s
+    _at, reason = max(found)
+    fresh = FrozenDict((k, v) for k, v in s.crossed.items() if e.at - v[0] < CROSSED_SPAN)
+    crossed = fresh.set(d.handle, (e.at, reason))
+    if len(crossed) > CROSSED_KEPT:
+        crossed = FrozenDict(sorted(crossed.items(), key=lambda kv: kv[1][0])[-CROSSED_KEPT:])
+    return replace(s, crossed=crossed)
+
+
 @AGENCY.reducer(rt.UTTERANCE)
 def _said(s: AgencyState, e, cx) -> AgencyState:
     """Une initiative dite compte (et ouvre la période réfractaire) ; un murmure
-    sans suite la fait se raviser."""
+    sans suite la fait se raviser. Une parole vers quelqu'un efface le message
+    qui avait croisé son initiative : c'est passé."""
     d = e.data
+    if d.visible and d.target and d.target in s.crossed and d.kind in (Kind.INITIATIVE, Kind.REPLY):
+        s = replace(s, crossed=s.crossed.delete(d.target))
     if d.kind not in (Kind.INITIATIVE, Kind.MURMUR) or e.correlation not in s.openings:
         return s
-    reason = s.openings[e.correlation]
+    reason = s.openings[e.correlation][0]
     s = replace(s, openings=s.openings.delete(e.correlation))
     if d.kind == Kind.MURMUR:
         tag, target = murmur_reason(reason)
@@ -226,10 +274,16 @@ def _said(s: AgencyState, e, cx) -> AgencyState:
 @AGENCY.reducer(rt.EPISODE_ENDED)
 def _ended(s: AgencyState, e, cx) -> AgencyState:
     """Une initiative ordinaire qui finit sans avoir rien dit : rien de consommé ;
-    une abstention ou une panne laisse une courte hésitation."""
-    reason = s.openings.get(e.correlation)
-    if reason is None:
+    une abstention ou une panne laisse une courte hésitation. Une réponse qui
+    règle son tour, même en silence, efface le message qui avait croisé son
+    initiative."""
+    d = e.data
+    if d.kind == Kind.REPLY and d.target and d.target in s.crossed and d.outcome in SETTLED:
+        s = replace(s, crossed=s.crossed.delete(d.target))
+    opened = s.openings.get(e.correlation)
+    if opened is None:
         return s
+    reason = opened[0]
     s = replace(s, openings=s.openings.delete(e.correlation))
     if e.data.kind != Kind.INITIATIVE or _uncounted(reason.split(",")) or e.data.outcome not in HESITANT:
         return s
@@ -388,6 +442,34 @@ def hesitation_span(n: int, p: AgencyParams) -> int:
     if n <= 0 or not p.hesitation_us:
         return 0
     return min(p.hesitation_max_us, p.hesitation_us * 2 ** min(n - 1, 20))
+
+
+# ── Ce qui s'est croisé ───────────────────────────────────────────────────
+
+
+def crossed_motive(reasons: Any) -> str | None:
+    """Pourquoi elle allait lui écrire, en mots : le premier motif de ``c.CROSSED_MOTIVES`` parmi les raisons de
+    l'initiative, ou ``None`` (il est tu)."""
+    for code, words in c.CROSSED_MOTIVES.items():
+        if code in reasons:
+            return words
+    return None
+
+
+@AGENCY.section("crossed", zone=Zone.VOLATILE, episodes=[Kind.REPLY], after=["who"], trim_rank=50)
+def _crossed(s: AgencyState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
+    """« J'allais justement t'écrire » : le message auquel elle répond est arrivé pendant qu'elle était en train
+    d'écrire d'elle-même à cette personne. Un fait, pas une consigne : elle en dispose. Le motif (prendre de ses
+    nouvelles…) ne se dit que là où sa fiche est ouverte ; en salon, seulement qu'elle allait lui écrire."""
+    ep, aud = frame.episode, frame.audience
+    if ep is None or not ep.target:
+        return None
+    got = s.crossed.get(ep.target)
+    if got is None or frame.now - got[0] >= CROSSED_SPAN:
+        return None
+    motive = crossed_motive(got[1].split(",")) if aud is not None and aud.private_ok else None
+    why = f" ({motive})" if motive else ""
+    return f"Tu étais justement en train de lui écrire{why} quand son message est arrivé."
 
 
 # ── La consigne d'une initiative ──────────────────────────────────────────

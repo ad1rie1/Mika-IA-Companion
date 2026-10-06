@@ -141,6 +141,7 @@ SECTION_LABELS: dict[str, str] = {
     "teams_voice": "Comment elle écrit dans Teams (à ta place)",
     "teams_task": "Le message Teams auquel elle prépare une réponse (cité)",
     "teams_ask": "Ce qu'on lui demande d'y répondre (Teams)",
+    "crossed": "Elle allait justement lui écrire (leurs messages se sont croisés)",
 }
 
 #: Les raisons des preuves de l'arbitre : ce qui la pousse à agir.
