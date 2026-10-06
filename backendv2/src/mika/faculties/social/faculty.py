@@ -361,6 +361,10 @@ class SocialState:
     ties: FrozenDict[str, FrozenDict[str, int]] = field(default_factory=FrozenDict)
     #: quand elle a repris des nouvelles de quelqu'un, longtemps après (une fois par silence)
     rekindled: FrozenDict[str, int] = field(default_factory=FrozenDict)
+    #: le dernier cran de chaque lien qu'elle a ressenti ou tenu pour acquis, et quand : personne → (niveau, instant)
+    felt_levels: FrozenDict[str, tuple[str, int]] = field(default_factory=FrozenDict)
+    #: quand elle a relevé ses liens pour la première fois (0 : jamais — le premier passage les relève sans les vivre)
+    bonds_since: int = 0
 
 
 def derive(t: Temperament, overrides: Any = None) -> SocialParams:
@@ -379,8 +383,9 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
 #: v4 : qui a un lien avec qui, et les prises de nouvelles longtemps après (ADR 0058).
 #: v5 : une ouverture qui ne regarde que la personne (``agency.FOR_THEM`` : s'inquiéter d'elle, lui souhaiter, lui
 #: demander comment ça s'est passé) n'est plus comptée comme « elle a écrit la première » — ``starts`` se recalcule.
+#: v6 : le dernier cran ressenti de chaque lien (``bond_shifted``, ``bond_noted``).
 SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive,
-                 state_version=5, retired_params=("ignored_shift",))
+                 state_version=6, retired_params=("ignored_shift",))
 SOCIAL.declare(*c.ALL)
 
 
@@ -599,6 +604,26 @@ def _declared(s: SocialState, e, cx) -> SocialState:
 def _noticed(s: SocialState, e, cx) -> SocialState:
     about = e.data.about
     return replace(s, noticed=s.noticed.set(about[0], e.at)) if about else s
+
+
+def _felt(s: SocialState, person: str, level: str, at: int) -> SocialState:
+    s = replace(s, bonds_since=s.bonds_since or at)
+    if not person or level not in c.CLOSENESS_LEVELS:
+        return s
+    return replace(s, felt_levels=s.felt_levels.set(person, (level, at)))
+
+
+@SOCIAL.reducer(c.BOND_SHIFTED)
+def _shifted(s: SocialState, e, cx) -> SocialState:
+    """Un lien qui a changé de cran, remarqué : c'est ce cran qu'elle ressent désormais."""
+    return _felt(s, e.data.person, e.data.after, e.at)
+
+
+@SOCIAL.reducer(c.BOND_NOTED)
+def _bond_noted(s: SocialState, e, cx) -> SocialState:
+    """Un cran tenu pour acquis sans le vivre (la mise en service, une proximité fixée, le plancher d'une
+    propriétaire) : c'est de lui que se mesurera le prochain changement."""
+    return _felt(s, e.data.person, e.data.level, e.at)
 
 
 # ── Lectures ──────────────────────────────────────────────────────────────
@@ -855,13 +880,20 @@ def contact_of(s: SocialState, person: str, handles: Any) -> Contact | None:
     return _union(parts) if parts else None
 
 
+def felt_of(s: SocialState, person: str, handles: Any) -> tuple[str, int] | None:
+    """Le dernier cran de ce lien qu'elle a ressenti, et quand — sous toutes les adresses de la personne (le plus
+    récent : une adresse reliée apporte son histoire) ; ``None`` : jamais relevé."""
+    found = [(s.felt_levels[k][1], k) for k in sorted({person, *handles}) if k in s.felt_levels]
+    return s.felt_levels[max(found)[1]] if found else None
+
+
 def gathered(s: SocialState, person: str, handles: Any) -> SocialState:
     """La tranche vue depuis une personne : ce qu'elle a vécu sous ses autres adresses — reliées depuis à elle, par
     un opérateur ou un recoupement — se réunit sous sa clé. Les réducteurs rangent l'histoire sous la personne que
     l'adresse désignait au moment de l'événement ; une liaison ne la déplace pas, la lecture la rassemble (délier
     rend à chaque adresse la sienne). Sans autre adresse vécue, la tranche telle quelle."""
     others = sorted(k for k in set(handles) - {person}
-                    if k in s.contacts or k in s.greeted or k in s.rekindled or k in s.noticed)
+                    if k in s.contacts or k in s.greeted or k in s.rekindled or k in s.noticed or k in s.felt_levels)
     if not others:
         return s
 
@@ -871,8 +903,10 @@ def gathered(s: SocialState, person: str, handles: Any) -> SocialState:
 
     ct = contact_of(s, person, others)
     contacts = s.contacts if ct is None else s.contacts.set(person, ct)
+    felt = felt_of(s, person, others)
+    felt_levels = s.felt_levels if felt is None else s.felt_levels.set(person, felt)
     return replace(s, contacts=contacts, greeted=latest(s.greeted), rekindled=latest(s.rekindled),
-                   noticed=latest(s.noticed))
+                   noticed=latest(s.noticed), felt_levels=felt_levels)
 
 
 def contact_reading(s: SocialState, person: str, now: int, now_day: int, level: str,

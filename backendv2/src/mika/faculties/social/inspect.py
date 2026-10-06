@@ -4,14 +4,16 @@ l'onglet « Lien » de la fiche d'une personne.
 Lecture seule. La proximité et le rythme sont ceux que la faculté lit (faits
 ``CLOSENESS`` et ``CONTACT``) ; « Pourquoi ce niveau » déroule la trace du
 calcul même qui fait la proximité (``closeness_trace``), jamais un calcul à
-part. Un profil dont le texte a été oublié s'affiche comme oublié. La seule
-écriture — fixer la proximité — est une action d'opérateur (``actions.py``),
-posée en place sur l'onglet.
+part ; « Son histoire, cran par cran » lit le journal (``bond_shifted``,
+``bond_noted``). Un profil dont le texte a été oublié s'affiche comme oublié.
+La seule écriture — fixer la proximité — est une action d'opérateur
+(``actions.py``), posée en place sur l'onglet.
 """
 
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any
 
 from mika.contracts import identity as identity_c
 from mika.contracts import social as c
@@ -39,6 +41,7 @@ from mika.kernel.inspect import (
     Block,
     Cell,
     Column,
+    Entry,
     Fields,
     InspectContext,
     Meter,
@@ -51,6 +54,7 @@ from mika.kernel.inspect import (
     Stats,
     Table,
     Text,
+    Timeline,
     When,
     paginate,
 )
@@ -72,6 +76,15 @@ CRITERION_FR = {DAYS: "jours de contact", MESSAGES: "messages reçus", HISTORY: 
                 REGARD: "chaleur", BOND: "attachement", GRUDGE: "hostilité"}
 _COUNTED = frozenset({DAYS, MESSAGES, HISTORY})
 _AFFECT = frozenset({REGARD, BOND, GRUDGE})
+#: les crans d'un lien montrés au plus sur sa frise
+SHIFTS_SHOWN = 20
+#: ce qui a fait basculer un cran, en mots : une montée, ce qu'elle a tenu pour acquis sans le vivre…
+CAUSE_FR = {c.BOND_TIME: "le temps vécu ensemble", c.BOND_ATTACHMENT: "l'attachement",
+            c.BOND_REGARD: "la chaleur installée", c.BOND_START: "relevé à la mise en service",
+            c.BOND_DECLARED: "fixé par un opérateur", c.BOND_OWNER: "sa propriétaire, d'office"}
+#: … et un refroidissement
+COOLED_FR = {c.BOND_REGARD: "une froideur installée (la chaleur et l'attachement sont retombés)",
+             c.BOND_GRUDGE: "une rancune"}
 
 
 def _known(s: SocialState) -> set[str]:
@@ -235,6 +248,35 @@ def _why(trace: ClosenessTrace, lived: ClosenessTrace, p: SocialParams) -> Table
     return Table(("étape", "valeur", "pourquoi"), tuple(steps), title="Pourquoi ce niveau", caption=caption)
 
 
+def _rose(before: str, after: str) -> bool:
+    levels = c.CLOSENESS_LEVELS
+    return before in levels and after in levels and levels.index(after) > levels.index(before)
+
+
+def _history(frame: Frame, ctx: InspectContext, person: str) -> Timeline:
+    """La frise de ce lien : chaque cran qu'elle a remarqué et ce qui l'a fait basculer, et ceux qu'elle a tenus
+    pour acquis sans les vivre — sous toutes les adresses de la personne, du plus récent au plus ancien."""
+    found: dict[int, Any] = {}
+    for key in sorted({person, *frame.get(identity_c.HANDLES(person))}):
+        for e in ctx.events([c.BOND_SHIFTED, c.BOND_NOTED], SHIFTS_SHOWN, where=("person", key)):
+            found[e.seq] = e
+    entries: list[Entry] = []
+    for e in sorted(found.values(), key=lambda e: e.seq, reverse=True)[:SHIFTS_SHOWN]:
+        d, href = e.data, Ref("event", str(e.seq), "événement")
+        if isinstance(d, c.BondShifted):
+            rose = _rose(d.before, d.after)
+            cause = (CAUSE_FR if rose else COOLED_FR).get(d.cause, d.cause)
+            entries.append(Entry(e.at, CLOSENESS_FR.get(d.after, d.after),
+                                 f"après « {CLOSENESS_FR.get(d.before, d.before)} » — ce qui l'a fait basculer : "
+                                 f"{cause} ; elle l'a remarqué", tone="ok" if rose else "warn", href=href))
+        else:
+            entries.append(Entry(e.at, CLOSENESS_FR.get(d.level, d.level),
+                                 f"tenu pour acquis sans le vivre : {CAUSE_FR.get(d.cause, d.cause)}", tone="muted",
+                                 href=href))
+    return Timeline(tuple(entries), title="Son histoire, cran par cran",
+                    empty="aucun cran relevé pour l'instant : elle n'a pas encore fait le point sur ce lien")
+
+
 def _texts(s: SocialState, people: list[str], ctx: InspectContext) -> dict[str, str] | None:
     refs = [r for p in people if p in s.profiles for r in refs_of(s.profiles[p])]
     if ctx.store is None:
@@ -336,7 +378,8 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str, *, o
 
 
 @SOCIAL.inspect("lien", title="Lien", subject="person", order=30,
-                description="Leur proximité et pourquoi ce niveau, le rythme de leurs échanges, ce qu'elle en pense.")
+                description="Leur proximité et pourquoi ce niveau, son histoire cran par cran, le rythme de leurs "
+                            "échanges, ce qu'elle en pense.")
 def _link(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
     person = ctx.subject
     if not person:
@@ -346,6 +389,8 @@ def _link(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
     blocks: list[Block] = (_detail(s, frame, ctx, person, on_fiche=True) if person in _known(s) else
                            [Note("Aucun lien pour l'instant : cette personne ne lui a jamais écrit, et rien n'a été "
                                  "déclaré.", tone="muted")])
+    if person in _known(s):
+        blocks.append(_history(frame, ctx, person))
     if settable(frame, person):
         blocks.append(ActionSlot("social.proximite", initial=(("closeness", s.declared.get(person) or AUTO),),
                                  title="Fixer la proximité"))

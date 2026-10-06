@@ -6,6 +6,7 @@ Voir ``contracts/social.py`` pour ce que les autres peuvent lire.
 
 from mika.faculties.social import (  # noqa: F401 — contributions
     actions,
+    bonds,
     initiative,
     inspect,
     profile,

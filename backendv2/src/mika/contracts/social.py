@@ -29,6 +29,15 @@ personne à une proche de Mika (``vocab.privacy``, ADR 0058).
 reprend de ses nouvelles une fois, doucement — des mois plus tard, ou après
 une date que la personne lui avait annoncée ; puis plus rien tant qu'elle
 n'a pas écrit (``agency``).
+
+**Quand un lien change** (``BOND_SHIFTED``) : devenir amies ou proches, ou se
+refroidir par une rancune ou une froideur installée, elle le remarque une
+fois, comme une personne s'en rend compte (une pensée, un peu de joie ou de
+mélancolie) — jamais un niveau ni un nombre, et rien qui la pousse à écrire.
+Le silence qui éloigne, le manque le vit déjà (``MISSED``). Ce qu'elle tient
+pour acquis sans le vivre (les niveaux relevés à la mise en service, une
+proximité fixée par un opérateur, le plancher d'une propriétaire) est relevé
+à part (``BOND_NOTED``).
 """
 
 from __future__ import annotations
@@ -100,12 +109,43 @@ class OneSided(Signal):
     écrit la première à quelqu'un (un signal pour son attention : une pensée)."""
 
 
+#: Ce qui a fait basculer un cran qu'elle remarque : le temps vécu ensemble, l'attachement, la chaleur installée (ou
+#: sa perte : une froideur), une rancune.
+BOND_TIME, BOND_ATTACHMENT, BOND_REGARD, BOND_GRUDGE = "time", "bond", "regard", "grudge"
+#: Ce qu'elle tient pour acquis sans le vivre : les niveaux relevés à la mise en service, une proximité fixée par un
+#: opérateur, le plancher d'une propriétaire.
+BOND_START, BOND_DECLARED, BOND_OWNER = "start", "declared", "owner"
+
+
+class BondShifted(Signal):
+    """Elle remarque qu'un lien a changé de cran (un signal pour son attention : une pensée). Un jugement
+    enregistré : le cran qu'elle avait ressenti, celui d'aujourd'hui, et ce qui l'a fait basculer — lu sur le
+    calcul même de la proximité, jamais un état recalculé."""
+
+    person: str
+    before: str
+    after: str
+    cause: str
+
+
+class BondNoted(Payload):
+    """Un cran qu'elle tient pour acquis sans le remarquer (``BOND_START``, ``BOND_DECLARED``, ``BOND_OWNER``) :
+    à la mise en service, toute la vie passée ne remonte pas d'un coup."""
+
+    person: str
+    level: str
+    cause: str
+
+
 PROFILE_REVISED = event_type("social.profile_revised", OWNER, ProfileRevised, version=2, public=True,
                              upcasters={1: _profile_v1}, content=("summary", "tone", "interests", "sensitive"),
                              subjects=("person",))
 CLOSENESS_SET = event_type("social.closeness_set", OWNER, ClosenessSet, public=True, subjects=("person",))
 ONE_SIDED = event_type("social.one_sided", OWNER, OneSided, public=True, content=("summary",), subjects=("about",))
-ALL = (PROFILE_REVISED, CLOSENESS_SET, ONE_SIDED)
+BOND_SHIFTED = event_type("social.bond_shifted", OWNER, BondShifted, public=True, content=("summary",),
+                          subjects=("about",))
+BOND_NOTED = event_type("social.bond_noted", OWNER, BondNoted, subjects=("person",))
+ALL = (PROFILE_REVISED, CLOSENESS_SET, ONE_SIDED, BOND_SHIFTED, BOND_NOTED)
 
 
 @dataclass(frozen=True, slots=True)
