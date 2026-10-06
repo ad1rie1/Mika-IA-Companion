@@ -217,8 +217,8 @@ trame déjà en route : un client ignore ce dont le `seq` est déjà appliqué.
   ferme, ou quand aucune ne dit plus rien depuis 60 s (un `ping` suffit à se manifester), et revient à sa trame
   suivante (une nouvelle `presence`, au lieu `spawn` : son client redit alors où elle est, par `moved`) ; au
   démarrage du noyau, qui était resté dans le monde sans connexion en sort ;
-- pas encore : ses actes sur les objets, ses gestes et ses demandes (`act`, `address`, `answer` répondent
-  `unsupported`, P4).
+- ses gestes (`address` portant un `gesture`) sont acceptés ; pas encore : ses actes sur les objets et ses
+  demandes (`act`, `address` portant une `request`, `answer` répondent `unsupported`, P4).
 
 **Les erreurs de protocole** (`error`) : `bad_frame` (trame illisible : la phrase nomme le champ, et le `cmd`
 s'il y en a un ; non fatale — fatale si ce n'est pas un objet JSON en texte, fermeture 1003), `hello_expected`
