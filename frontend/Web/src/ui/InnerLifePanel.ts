@@ -5,6 +5,7 @@
  * ``speech`` diffusé par le backend :
  *   - blend émotionnel (ambivalence multi-label)
  *   - ce qu'elle fait dans sa chambre (« en train de dessiner »)
+ *   - ce qu'elle a en train (« En ce moment ») et ses rappels promis
  *   - self-narrative (qui elle pense être devenue)
  *   - besoins (compagnie, s'exprimer, apprendre — les mots de la console)
  *   - ruminations actives
@@ -90,6 +91,25 @@ export function activityLine(label: string, since: number, now: number): string 
   return `En train ${of}${label}${lasting ? `, ${lasting}` : ""}`;
 }
 
+/** Ce qu'elle a en train, en mots (`app/mindport.py::_doing_kind`) : une
+ * rêverie n'est pas une recherche. Une sorte inconnue se montre sans étiquette. */
+const DOING_KIND_LABEL: Record<string, string> = {
+  musing: "rêverie",
+  reflection: "elle y repense",
+  exploration: "elle va voir",
+};
+
+/** L'heure d'un rappel (« jeudi 9 octobre à 09:00 ») ; absente ou illisible :
+ * rien plutôt qu'une date fausse. */
+export function reminderWhen(due: string | null | undefined): string {
+  if (!due) return "";
+  const at = new Date(due);
+  if (Number.isNaN(at.getTime())) return "";
+  const day = at.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  const hour = at.toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" });
+  return `${day} à ${hour}`;
+}
+
 /** Une revendication d'identité en une ligne : la phrase citée seulement
  * quand il y en a une (sinon « — «  » »). */
 export function claimLine(claim: { name: string; evidence?: string }): string {
@@ -152,6 +172,10 @@ export class InnerLifePanel {
   private pendingEl: HTMLElement;
   private activitySectionEl: HTMLElement;
   private activityEl: HTMLElement;
+  private doingSectionEl: HTMLElement;
+  private doingEl: HTMLElement;
+  private remindersSectionEl: HTMLElement;
+  private remindersEl: HTMLElement;
 
   /** Son occupation montrée, relue tant qu'elle dure (ACTIVITY_REFRESH_MS). */
   private activity: InnerStateActivity | null = null;
@@ -195,6 +219,14 @@ export class InnerLifePanel {
         <section class="il-section" id="il-activity" hidden>
           <h4>Ce qu'elle fait</h4>
           <p class="il-activity-body"></p>
+        </section>
+        <section class="il-section" id="il-doing" hidden>
+          <h4>En ce moment</h4>
+          <ul class="il-doing-body"></ul>
+        </section>
+        <section class="il-section" id="il-reminders" hidden>
+          <h4>Ce qu'elle t'a promis</h4>
+          <ul class="il-commitments il-reminders-body"></ul>
         </section>
         <section class="il-section" id="il-dream" hidden>
           <h4>Rêve de cette nuit</h4>
@@ -253,6 +285,10 @@ export class InnerLifePanel {
     this.pendingEl = this.root.querySelector(".il-pending-body")!;
     this.activitySectionEl = this.root.querySelector("#il-activity")!;
     this.activityEl = this.root.querySelector(".il-activity-body")!;
+    this.doingSectionEl = this.root.querySelector("#il-doing")!;
+    this.doingEl = this.root.querySelector(".il-doing-body")!;
+    this.remindersSectionEl = this.root.querySelector("#il-reminders")!;
+    this.remindersEl = this.root.querySelector(".il-reminders-body")!;
 
     // Collapse/expand on header click
     const header = this.root.querySelector(".il-header") as HTMLElement;
@@ -321,6 +357,8 @@ export class InnerLifePanel {
       this.renderProfile(
         state.person_profile, state.pending_commitments, state.identity,
       );
+      this.renderDoing(state.doing);
+      this.renderReminders(state.reminders);
     }
   }
 
@@ -686,6 +724,42 @@ export class InnerLifePanel {
       `;
       this.ruminationsEl.appendChild(li);
     }
+  }
+
+  /** « En ce moment » : ce qu'elle a en train et que tu peux entendre. */
+  private renderDoing(list: InnerState["doing"]) {
+    const items = (list ?? []).filter((d) => d.text?.trim());
+    if (items.length === 0) {
+      this.doingSectionEl.setAttribute("hidden", "");
+      this.doingEl.innerHTML = "";
+      return;
+    }
+    this.doingSectionEl.removeAttribute("hidden");
+    this.doingEl.innerHTML = items
+      .map((d) => {
+        const kind = DOING_KIND_LABEL[d.kind];
+        return `<li>${kind ? `<span class="il-doing-kind">${kind}</span>` : ""}` +
+          `<span class="il-doing-text">${escapeHtml(d.text.trim())}</span></li>`;
+      })
+      .join("");
+  }
+
+  /** « Ce qu'elle t'a promis » : ses rappels encore à dire, avec leur heure. */
+  private renderReminders(list: InnerState["reminders"]) {
+    const items = (list ?? []).filter((r) => r.text?.trim());
+    if (items.length === 0) {
+      this.remindersSectionEl.setAttribute("hidden", "");
+      this.remindersEl.innerHTML = "";
+      return;
+    }
+    this.remindersSectionEl.removeAttribute("hidden");
+    this.remindersEl.innerHTML = items
+      .map((r) => {
+        const when = reminderWhen(r.due);
+        return `<li>${when ? `<strong class="il-reminder-when">${escapeHtml(when)}</strong> : ` : ""}` +
+          `${escapeHtml(r.text.trim())}</li>`;
+      })
+      .join("");
   }
 
   private renderProfile(
