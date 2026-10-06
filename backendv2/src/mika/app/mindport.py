@@ -145,9 +145,11 @@ def _proposal_text(summary: str, capability: str, effect: Any) -> str:
     return summary if exact in summary else f"{summary}\n\nLa commande exacte, un argument par ligne :\n{exact}"
 
 
+#: ce que les écrans du monde ne reçoivent jamais, même quand le monde le réduit : ce qu'elle remarque et la prose
+#: ne regardent qu'elle
+_WORLD_UNSHOWN = frozenset({w.NOTICED.name, w.DESCRIBED.name})
 #: ce que les écrans du monde reçoivent sans que le monde le réduise : les gestes, les présences, les demandes
-#: (ce qu'elle remarque et la prose ne regardent qu'elle)
-_WORLD_SHOWN = frozenset(t.name for t in w.ALL) - {w.NOTICED.name, w.DESCRIBED.name}
+_WORLD_SHOWN = frozenset(t.name for t in w.ALL) - _WORLD_UNSHOWN
 #: ce qu'un client lit quand l'état a bougé entre la décision et l'écriture
 _STALE = "Le monde a changé entre-temps : relis-le, puis recommence."
 
@@ -495,7 +497,7 @@ class KernelPort:
         if self._world_types is None or self._world_types[0] is not registry:
             reduced = {name for name, specs in registry.reducers_by_type.items()
                        if any(spec.owner == w.OWNER for spec in specs)}
-            self._world_types = (registry, frozenset(reduced) | _WORLD_SHOWN)
+            self._world_types = (registry, (frozenset(reduced) | _WORLD_SHOWN) - _WORLD_UNSHOWN)
         return self._world_types[1]
 
     def world_events(self, after: int, *, limit: int) -> list[Event[Any]] | None:
