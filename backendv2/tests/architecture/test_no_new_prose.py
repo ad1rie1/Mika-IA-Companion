@@ -41,7 +41,8 @@ CEILING = {
     "faculties/projects/tools.py": 2,  # raisons de clôture, gardées au journal
     "faculties/projects/work.py": 8,  # « pourquoi pas maintenant » (console)
     "faculties/transcript/__init__.py": 10,  # inspection du fil (console)
-    "faculties/world/commands.py": 13,  # refus adressés aux clients du monde, pas à elle
+    # refus adressés aux clients du monde, pas à elle (+5 en P4 : entrer, sortir, arriver quelque part)
+    "faculties/world/commands.py": 18,
     "plugins/camera/__init__.py": 10,  # panneaux de console
     "plugins/email/tools.py": 2,  # capacité et résumé (console)
     "plugins/forge/__init__.py": 5,  # capacité d'installation (console)
