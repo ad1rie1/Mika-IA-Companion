@@ -1792,6 +1792,13 @@ memory:
     festive_soft: " Avec douceur : ces jours-ci sont durs."
     # Fin : ce qui se fêtait, passé, sans qu'elle l'ait souhaité.
     festive_missed: " — c'est passé, et tu ne le lui as pas souhaité : un mot, même en retard, si ça vient."
+    # Le jour où revient une date lourde (la date d'un deuil) : sa ligne dit ce que la journée est, et remplace
+    # memory.life.hard. {label} : le moment.
+    heavy_today: >-
+      - aujourd'hui : {label} — un jour difficile pour cette personne : de la douceur, rien de festif, pas de
+      question sur ce jour-là ; le reste attend.
+    # Le jour où revient une autre date annuelle qui ne se fête pas. {label} : le moment.
+    yearly_today: "- aujourd'hui : {label}"
 
   # « CE QUE TU AS DÉJÀ DIT DE TOI » (memory/recall.py, ``_self_said_section``) : quand on lui parle d'elle, ses
   # goûts, ses avis, sa vie tels qu'elle les a déjà dits — elle ne se contredit pas.

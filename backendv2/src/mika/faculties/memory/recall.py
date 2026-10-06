@@ -770,8 +770,10 @@ def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryPara
     personne en a raconté le jour même compte), une situation qui dure — et ce
     dont elles viennent de reparler, le temps de la conversation. Une situation
     que la personne a dite finie ne revient que le temps de la conversation, au
-    passé. Quand quelque chose de grave la touche ces jours-ci, le banal (ni
-    important, ni à fêter) se tait."""
+    passé. Une date qui revient chaque année sans se fêter (la date d'un deuil),
+    bientôt ou ce jour-là — passée, elle ne se demande pas. Quand quelque chose
+    de grave la touche ces jours-ci, le banal (ni important, ni à fêter) se
+    tait."""
     now = frame.now
     shown: list[tuple[c.LifeEvent, Verdict]] = []
     for ev in frame.get(c.LIFE_EVENTS(person)):
@@ -786,6 +788,9 @@ def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryPara
         elif ev.followed_at:
             # repris (par elle, ou par ce que la personne en a raconté) : sous ses yeux le temps de la conversation
             keep = followed_lately(ev, now) and now <= ev.when + round(p.event_recent_days * DAY)
+        elif ev.yearly and not ev.festive:
+            # « comment ça s'est passé ? » n'a pas de sens pour la date d'un deuil : bientôt, ou ce jour-là
+            keep = now <= ev.when <= now + round(p.event_ahead_days * DAY) or _today(ev, frame)
         else:
             upcoming = now <= ev.when <= now + round(p.event_ahead_days * DAY)
             recent = ev.when < now <= ev.when + round(p.event_recent_days * DAY)
@@ -953,8 +958,10 @@ def _life(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
         return None
     aud = frame.audience
     lines = []
-    if recall.hard and aud is not None and aud.private_ok:
-        # en privé seulement : un salon n'a pas à deviner ce qui pèse (ADR 0054)
+    heavy = any(c.heavy_date(m.event) and _today(m.event, frame) for m in recall.moments)
+    if recall.hard and aud is not None and aud.private_ok and not heavy:
+        # en privé seulement : un salon n'a pas à deviner ce qui pèse (ADR 0054) ; le jour d'une date lourde, sa
+        # ligne le dit
         lines.append(phrase("memory.life.hard"))
     for m in recall.moments:
         lines.append(_moment_line(m, frame, recall.close, recall.hard))
@@ -963,11 +970,15 @@ def _life(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
                        tied=any(m.verdict.tied for m in recall.moments))
 
 
+def _today(ev: c.LifeEvent, frame: Frame) -> bool:
+    return frame.local(ev.when).date() == frame.local().date()
+
+
 def _moment_line(m: Moment, frame: Frame, close: bool, hard: bool = False) -> str:
-    """Un moment, dit comme on y pense : à venir ; le jour d'une fête, ses vœux ; passé — envers une amie, si ça
-    compte, c'est la première chose qu'elle demanderait (après des nouvelles d'elle, quand quelque chose de grave
-    la touche) ; sinon, si ça vient ; une situation qui dure, ou qu'on vient de lui dire finie ; ce dont vous venez
-    de reparler."""
+    """Un moment, dit comme on y pense : à venir ; le jour d'une fête, ses vœux ; le jour où revient la date d'un
+    deuil, de la douceur ; passé — envers une amie, si ça compte, c'est la première chose qu'elle demanderait (après
+    des nouvelles d'elle, quand quelque chose de grave la touche) ; sinon, si ça vient ; une situation qui dure, ou
+    qu'on vient de lui dire finie ; ce dont vous venez de reparler."""
     ev = m.event
     if ev.ongoing and ev.ended_at:
         return phrase("memory.life.ended", label=m.label)
@@ -986,6 +997,8 @@ def _moment_line(m: Moment, frame: Frame, close: bool, hard: bool = False) -> st
     if ev.followed_at:
         return f"- {when} : {m.label}" + (phrase("memory.life.talked_again") if ev.when > frame.now
                                            else phrase("memory.life.past_talked"))
+    if ev.yearly and _today(ev, frame):
+        return phrase("memory.life.heavy_today" if c.heavy_date(ev) else "memory.life.yearly_today", label=m.label)
     if ev.when > frame.now:
         return f"- {when} : {m.label}" + (phrase("memory.life.already_said") if m.mentioned else "")
     important = ev.importance >= c.IMPORTANT_MOMENT
