@@ -46,6 +46,8 @@ from mika.ports.teams import (
 _NOTHING = hashlib.sha256(b"").hexdigest()
 #: requêtes par minute, au plus (l'extension pousse quand Teams reçoit, relève toutes les 30 s)
 PER_MINUTE = 240
+#: au journal, ce que devient une réponse que l'extension n'a pas pu faire partir (son détail reste dans le cache)
+FAILED_BY_EXTENSION = "l'extension n'a pas pu la faire partir"
 KINDS = frozenset({"dm", "group", "channel", "meeting", "other", "system"})
 #: un identifiant de message tel que Teams les écrit (des chiffres, ou une empreinte) ; on l'assainit quand même
 _MESSAGE_ID = re.compile(r"^[\w.:@=+/-]{1,200}$")
@@ -61,9 +63,10 @@ class _InMessage(BaseModel):
     author: str = Field(default="", max_length=200)
     author_id: str = Field(default="", max_length=200)
     time: int
-    text: str = Field(min_length=1, max_length=4000)
+    text: str = Field(default="", max_length=4000)
     own: bool = False
     mentions_me: bool = False
+    deleted: bool = False
 
 
 class _InConversation(BaseModel):
@@ -80,10 +83,13 @@ class _InSelf(BaseModel):
 
 
 class _Inbox(BaseModel):
+    """L'enveloppe d'un lot ; chaque message et chaque conversation sont lus un à un (un seul illisible n'emporte
+    pas le lot)."""
+
     model_config = ConfigDict(extra="ignore")
     self: _InSelf = Field(default_factory=_InSelf)
-    conversations: list[_InConversation] = Field(default_factory=list, max_length=200)
-    messages: list[_InMessage] = Field(default_factory=list, max_length=200)
+    conversations: list[Any] = Field(default_factory=list, max_length=200)
+    messages: list[Any] = Field(default_factory=list, max_length=200)
 
 
 def digest(key: str) -> str:
@@ -94,33 +100,67 @@ def new_key() -> str:
     return KEY_PREFIX + secrets.token_urlsafe(32)
 
 
+def _clean(text: str) -> str:
+    """Un texte sans octet nul ni demi-caractère (une coupe au milieu d'un emoji laisse un « surrogate » seul)."""
+    return text.replace("\x00", "").encode("utf-8", "replace").decode("utf-8")
+
+
 def _flat(text: str, limit: int) -> str:
     """Un nom ou un titre sur une ligne, sans caractères de contrôle."""
-    return " ".join("".join(ch for ch in text if ch.isprintable() or ch == " ").split())[:limit]
+    return " ".join("".join(ch for ch in _clean(text) if ch.isprintable() or ch == " ").split())[:limit]
 
 
-def batch_of(data: dict[str, Any], now_ms: int) -> InboxBatch:
-    """Le lot, validé : formes, tailles, identifiants de conversation, dates plausibles. Lève ``ValueError``."""
+def _scrub(raw: Any) -> Any:
+    """Les textes d'un élément, réparés avant d'être lus (un demi-caractère ferait refuser l'élément entier)."""
+    return {k: _clean(v) if isinstance(v, str) else v for k, v in raw.items()} if isinstance(raw, dict) else raw
+
+
+def _message(raw: Any, now_ms: int) -> InboxMessage | None:
     try:
-        got = _Inbox.model_validate(data)
+        m = _InMessage.model_validate(_scrub(raw))
+    except ValidationError:
+        return None
+    if not CONVERSATION_ID.fullmatch(m.conv) or not _MESSAGE_ID.fullmatch(m.id):
+        return None
+    if not _EPOCH_2015_MS <= m.time <= now_ms + _DAY_MS:
+        return None  # une date invraisemblable
+    text = _clean(m.text)
+    if not text.strip() and not m.deleted:
+        return None
+    return InboxMessage(m.id, m.conv, _flat(m.author, 120), _flat(m.author_id, 200), m.time, text, m.own,
+                        m.mentions_me, m.deleted)
+
+
+def batch_of(data: dict[str, Any], now_ms: int) -> tuple[InboxBatch, int]:
+    """Le lot, validé — formes, tailles, identifiants, dates plausibles — et combien de ses éléments ont été écartés
+    (un message illisible est laissé de côté, le reste passe). Lève ``ValueError`` si l'enveloppe est illisible."""
+    try:
+        got = _Inbox.model_validate({**data, "self": _scrub(data.get("self") or {})})
     except ValidationError as exc:
         first = exc.errors()[0] if exc.errors() else {}
         where = ".".join(str(x) for x in first.get("loc", ()))
         raise ValueError(f"lot illisible ({where or 'forme'})") from None
+    dropped = 0
     conversations = []
-    for c in got.conversations:
+    for raw in got.conversations:
+        try:
+            c = _InConversation.model_validate(_scrub(raw))
+        except ValidationError:
+            dropped += 1
+            continue
         if not CONVERSATION_ID.fullmatch(c.id):
-            raise ValueError("identifiant de conversation illisible")
+            dropped += 1
+            continue
         conversations.append(InboxConversation(c.id, _flat(c.title, 120), c.kind if c.kind in KINDS else "other"))
     messages = []
-    for m in got.messages:
-        if not CONVERSATION_ID.fullmatch(m.conv) or not _MESSAGE_ID.fullmatch(m.id):
-            raise ValueError("identifiant de message ou de conversation illisible")
-        if not _EPOCH_2015_MS <= m.time <= now_ms + _DAY_MS:
-            raise ValueError("date de message invraisemblable")
-        messages.append(InboxMessage(m.id, m.conv, _flat(m.author, 120), _flat(m.author_id, 200), m.time,
-                                     m.text.replace("\x00", ""), m.own, m.mentions_me))
-    return InboxBatch(_flat(got.self.id, 200), _flat(got.self.name, 120), tuple(conversations), tuple(messages))
+    for raw in got.messages:
+        m = _message(raw, now_ms)
+        if m is None:
+            dropped += 1
+            continue
+        messages.append(m)
+    return (InboxBatch(_flat(got.self.id, 200), _flat(got.self.name, 120), tuple(conversations), tuple(messages)),
+            dropped)
 
 
 class TeamsDesk:
@@ -176,7 +216,7 @@ class TeamsDesk:
             return GateResult(BUSY, "Elle n'est pas prête.", retry_after=10)
         now = self.clock()
         try:
-            batch = batch_of(data if isinstance(data, dict) else {}, now // 1000)
+            batch, dropped = batch_of(data if isinstance(data, dict) else {}, now // 1000)
         except ValueError as exc:
             return GateResult(INVALID, str(exc))
         async with self._lock:
@@ -188,7 +228,7 @@ class TeamsDesk:
             if drafts:
                 await self.port.kernel.mind.append(drafts, emitter="teams", correlation="teams:inbox",
                                                    origin=Origin.EXTERNAL)
-        return GateResult(ACCEPTED, "Reçu.", data={"accepted": stored.new, "known": stored.known})
+        return GateResult(ACCEPTED, "Reçu.", data={"accepted": stored.new, "known": stored.known, "dropped": dropped})
 
     async def outbox(self, key: str) -> GateResult:
         refused = self._admit(key)
@@ -209,14 +249,18 @@ class TeamsDesk:
         data = data if isinstance(data, dict) else {}
         result = str(data.get("result") or "")
         if result not in RESULTS or not re.fullmatch(r"t[0-9a-f]{12}", item or ""):
-            return GateResult(INVALID, "Un accusé : « placed », « sent » ou « failed », sur un élément de la file.")
-        text = str(data.get("text") or "")[:4000].replace("\x00", "")
+            return GateResult(INVALID, "Un accusé : « sending », « placed », « sent » ou « failed », sur un élément de "
+                                       "la file.")
+        text = _clean(str(data.get("text") or "")[:8000])
         reason = _flat(str(data.get("reason") or ""), 200)
         async with self._lock:
             outcome, done = self.store.settle(item, result, now=self.clock(), text=text, reason=reason)
             if done is not None:
+                # la raison que donne l'extension reste dans le cache (la console la montre) : au journal, une
+                # raison écrite par le code, jamais un texte venu d'ailleurs
+                said = FAILED_BY_EXTENSION if result == "failed" else ""
                 await self.port.kernel.mind.append(
-                    [SETTLED.draft(draft=done.draft, state=done.state, edited=done.edited, reason=done.reason,
+                    [SETTLED.draft(draft=done.draft, state=done.state, edited=done.edited, reason=said,
                                    dedupe_key=f"teams-regle:{done.draft}:{done.state}")],
                     emitter="teams", correlation="teams:outbox", origin=Origin.EXTERNAL)
         if outcome == MISSING:

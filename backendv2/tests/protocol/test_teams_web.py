@@ -8,6 +8,7 @@ un accusé impossible est refusé (409), un élément inconnu aussi (404). La cl
 
 from __future__ import annotations
 
+import json
 import time
 
 from mika.adapters.teams import TeamsConfig
@@ -43,7 +44,7 @@ def test_the_extension_gets_in_only_with_its_key_and_from_an_extension(world):  
     key = new_key(client, live)
     ok = client.post("/api/teams/inbox", json=batch(2), headers=headers(key))
     assert ok.status_code == 202 and ok.headers["cache-control"] == "no-store"
-    assert ok.json() == {"ok": True, "accepted": 2, "known": 0}
+    assert ok.json() == {"ok": True, "accepted": 2, "known": 0, "dropped": 0}
     again = client.post("/api/teams/inbox", json=batch(2), headers=headers(key, origin=None))  # aucune origine : passe
     assert again.status_code == 202 and again.json()["known"] == 2
     missing = client.post("/api/teams/inbox", json=batch(), headers={"Origin": EXTENSION})
@@ -66,20 +67,28 @@ def test_a_bad_batch_is_refused_before_anything_is_stored(world):  # noqa: F811
     client, live, _ = world
     key = new_key(client, live)
     store = live.kernel.ports["teams"]
-    bad_conv = batch(conv="<script>")
-    assert client.post("/api/teams/inbox", json=bad_conv, headers=headers(key)).status_code == 400
-    future = batch()
-    future["messages"][0]["time"] = int(time.time() * 1000) + 3 * 86_400_000
-    assert client.post("/api/teams/inbox", json=future, headers=headers(key)).status_code == 400
+    # un message illisible est écarté seul : le reste du lot passe
+    mixed = batch(2)
+    mixed["messages"][0]["conv"] = "<script>"
+    mixed["messages"][1]["time"] = int(time.time() * 1000) + 3 * 86_400_000
+    mixed["messages"].append({**batch()["messages"][0], "id": "77", "text": "un emoji coupé \ud83d"})
+    # un demi-emoji (une coupe au mauvais endroit) : en JSON, un « \\ud83d » seul
+    got = client.post("/api/teams/inbox", content=json.dumps(mixed).encode(),
+                      headers={**headers(key), "Content-Type": "application/json"})
+    assert got.status_code == 202 and got.json()["dropped"] == 2 and got.json()["accepted"] == 1
+    [kept] = client.portal.call(store.thread, DM, 10)
+    assert kept.text.startswith("un emoji coupé") and "\ud83d" not in kept.text
+    # sans clé valable, le corps n'est même pas lu
+    assert client.post("/api/teams/inbox", content=b"x" * (600 * 1024), headers=headers("rien")).status_code == 401
     assert client.post("/api/teams/inbox", content=b"[1, 2]", headers=headers(key)).status_code == 400
     assert client.post("/api/teams/inbox", content=b"{" * 100_000, headers=headers(key)).status_code == 400
     huge = client.post("/api/teams/inbox", content=b" " * (600 * 1024), headers=headers(key))
     assert huge.status_code == 413
-    assert client.portal.call(store.conversations, 10) == [] and not client.portal.call(store.configured)
     # Teams désactivé : refusé (403), rien de rangé
+    before = client.portal.call(store.last_batch)
     client.portal.call(live.settings.save_teams, TeamsConfig(enabled=False))
     assert client.post("/api/teams/inbox", json=batch(), headers=headers(key)).status_code == 403
-    assert not client.portal.call(store.configured)
+    assert client.portal.call(store.last_batch) == before
 
 
 def test_the_outbox_gives_what_must_leave_and_acks_replay_safely(world):  # noqa: F811
@@ -112,3 +121,34 @@ def test_the_outbox_gives_what_must_leave_and_acks_replay_safely(world):  # noqa
                        headers=headers(key)).status_code == 404
     assert client.post(f"/api/teams/outbox/{draft.id}", json={"result": "envoyé"},
                        headers=headers(key)).status_code == 400
+
+
+def test_a_send_is_reserved_once_and_a_late_ack_tells_the_truth(world):  # noqa: F811
+    client, live, _ = world
+    key = new_key(client, live)
+    assert client.post("/api/teams/inbox", json=batch(), headers=headers(key)).status_code == 202
+    store = live.kernel.ports["teams"]
+    now = time.time_ns() // 1000
+
+    def queued(body, mode="send", ttl=3_600_000_000):
+        d = client.portal.call(store.save_draft, Draft(id="", conversation=DM, body=body))
+        shown = client.portal.call(store.preview, d.id)
+        assert client.portal.call(lambda: store.enqueue(d.id, mode=mode, digest=shown.digest, expires_at=now + ttl,
+                                                        now=now)) == ""
+        return d.id
+
+    def ack(item, result, **more):
+        return client.post(f"/api/teams/outbox/{item}", json={"result": result, **more}, headers=headers(key))
+
+    first = queued("Oui.")
+    assert ack(first, "sending").status_code == 200
+    assert ack(first, "sending").status_code == 409  # un second navigateur (ou un second essai) n'enverra pas
+    assert first not in [i["id"] for i in client.get("/api/teams/outbox", headers=headers(key)).json()["items"]]
+    assert ack(first, "sent").status_code == 200
+    # réservé puis jamais confirmé : à l'échéance, un échec incertain (à vérifier dans Teams)
+    second = queued("Peut-être.")
+    assert ack(second, "sending").status_code == 200
+    _, done = client.portal.call(lambda: store.settle(second, "expired", now=now))
+    assert done.state == "echec" and "incertain" in done.reason
+    # un accusé « parti » qui arrive après l'échéance dit la vérité
+    assert ack(second, "sent").status_code == 200 and client.portal.call(store.draft, second).state == "parti"

@@ -5,8 +5,14 @@ notes, journaux) sont lues par Claude Code. Elles sont ensuite **vécues en acc�
 noyau, du premier message à aujourd'hui. À l'arrivée, sa mémoire, ses proches, ses humeurs, ses
 journaux et ses rêves sont ceux d'une vie : on ne les a pas collés, elle les a traversés.
 
-Plan complet : `~/.claude/plans/stateful-imagining-turing.md`. Mesures de l'étape 0 :
-`docs/mesures-etape-0.md`.
+Plan complet : `~/.claude/plans/stateful-imagining-turing.md`. Les mesures de l'étape 0, dans
+`docs/mesures-etape-0.md`, donnent les plafonds et les pièges. On rejoue environ 100 000 messages par heure de calcul,
+et environ 1 million au plus sous la borne de 3 Go. Le reste passe en savoir d'archive.
+
+Côté moteur, la couture est décrite par `backendv2/docs/adr/0070-une-vie-importee.md` :
+- une persona peut être `nature: incarnee`, et son nom vient d'elle partout ;
+- `mika.app.genesis` permet d'importer des souvenirs à la date du rejeu ;
+- le préréglage « avance rapide » coupe sa vie spontanée.
 
 ## Ce qui reste privé
 
@@ -25,7 +31,7 @@ cd INJECTION
 uv venv .venv --python 3.14
 uv pip install --python .venv/bin/python -e . pytest pytest-asyncio ruff
 # pour les étapes qui parlent au moteur (lecture, avance rapide) :
-uv pip install --python .venv/bin/python -e ../backendv2
+uv pip install --python .venv/bin/python -e ../backendv2 numpy
 ```
 
 La commande est `.venv/bin/jumeau` (ou `.venv/bin/python -m twin`).
@@ -59,9 +65,9 @@ l'**origine** de l'estimation. Les dossiers aident : `notes/2009/12 mars.txt` es
 | 2 | `jumeau personnes` | Regroupe les participants en personnes et la détecte dans chaque canal. Revue : `travail/personnes.yaml` (la main l'emporte). | ✅ |
 | 3 | `jumeau planifier` | Découpe en séances, calcule la signifiance, répartit en paliers A, B, R, C, D et estime le budget (jetons, appels, heures). Curseurs : `travail/plan.yaml`. | ✅ |
 | 4 | `jumeau lire [--essai]` | Annotation par Claude Code (Sonnet) : émotions de chacun de ses messages, souvenirs, croyances, promesses, événements, rêves racontés. Reprenable, quota surveillé. | ✅ |
-| 5 | `jumeau synthetiser` | Personnes, chapitres, persona, journaux, rêves, récits, savoir d'archive. | à venir |
-| 6 | `jumeau avancer` | L'avance rapide dans le vrai noyau, sur horloge virtuelle. | à venir |
-| 7 | — | `mika replay --verify`, puis `mika serve --data INJECTION/sortie/vie` | à venir |
+| 5 | `jumeau synthetiser [--etape X]` | Claude Code (Sonnet) écrit, dans l'ordre : ses mois (et son récit de soi), les chapitres de sa vie, sa persona (`sortie/persona/`, une par chapitre et l'actuelle, nature « incarnée », chronotype calculé sur ses vrais réveils), les profils de ses proches par trimestre, le journal de ses jours forts et deux rêves possibles par nuit. Ses vrais journaux et ses vrais rêves priment. | ✅ |
+| 6 | `jumeau avancer [--preparer] [--jusqu-a D]` | L'avance rapide dans le vrai noyau, sur horloge virtuelle. Le moteur est gelé et la mémoire bornée ; on peut reprendre. Les messages auxquels elle a répondu sont retenus puis libérés à l'heure de sa réponse. Le rejoueur sert à ses facultés ce que Claude Code a lu. Rapport : `sortie/rapport/`. | ✅ |
+| 7 | — | `mika replay --verify`, puis `mika serve --data INJECTION/sortie/vie --port 8001` | à faire sur les vraies données |
 
 Les paliers :
 - **A** : rejouée et lue à fond ;
@@ -83,7 +89,9 @@ préparées (`.claude/commands/`) pilotent les étapes :
 - `/jumeau-etat` : où en est-on, que faire ensuite ;
 - `/jumeau-nouveau-format` : écrire un lecteur pour un format inconnu, à partir d'un échantillon ;
 - `/jumeau-personnes` : revoir qui est qui (fusions, « elle », relations). Les propositions sont validées une par une ;
-- `/jumeau-relire` : juger un échantillon d'annotations avant de tout lancer, et améliorer la consigne.
+- `/jumeau-relire` : juger un échantillon d'annotations avant de tout lancer, et améliorer la consigne ;
+- `/jumeau-persona` : relire sa persona champ par champ, preuves à l'appui ;
+- `/jumeau-avancer` : préparer, essayer sur un mois, lancer, puis vérifier l'avance rapide.
 
 Le serveur MCP « jumeau » (`.mcp.json`) donne à Claude Code des outils sur le corpus : recherche plein texte, lecture d'une séance, fiche d'une personne, annotation, dates à revoir. En session, il peut aussi consigner une date retrouvée ou la relation d'une personne. La datation par lots (`jumeau dater --claude`) l'ouvre en lecture seule.
 
@@ -99,3 +107,11 @@ Ordre conseillé avant une grosse dépense :
 ```bash
 .venv/bin/python -m pytest -q && .venv/bin/ruff check src tests
 ```
+
+`tests/integration/` fait vivre de petites archives au vrai noyau :
+- `test_fast_forward.py` vérifie retenir puis libérer, la reprise après arrêt et la mémoire assemblée ;
+- `test_pipeline_cli.py` fait toute la chaîne de `brut/` à une vie vécue, avec un faux `claude`, puis
+  `mika replay --verify`.
+
+La dépendance `numpy` vient du moteur. Une avance réelle passe toujours par `jumeau avancer`, qui gèle le moteur et
+borne la mémoire.

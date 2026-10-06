@@ -59,15 +59,17 @@ DRAFT, SEND = "draft", "send"
 # ── Les états d'un brouillon (dans l'adaptateur) ──
 WRITTEN = "brouillon"  # écrit, pas encore en file (il attend un accord, ou d'être proposé)
 QUEUED = "en_file"  # dans la file : l'extension le relèvera
+SENDING = "envoi"  # réservé par une extension qui l'envoie (validation, autonome) : personne d'autre ne l'enverra
 PLACED = "pose"  # posé dans la zone de saisie de Teams (mode brouillon) : la personne l'enverra, ou pas
 GONE = "parti"
 UNUSED = "inutilise"  # jamais envoyé : la personne a écrit autre chose, ou personne ne l'a envoyé à temps
 FAILED = "echec"
 DISCARDED = "abandonne"  # refusé avant de partir
-OPEN_STATES = frozenset({QUEUED, PLACED})
+OPEN_STATES = frozenset({QUEUED, SENDING, PLACED})
 
 # ── Les accusés de l'extension ──
-RESULTS = ("placed", "sent", "failed")
+#: « sending » réserve un envoi avant de le faire (un seul navigateur l'enverra ; le second reçoit un refus)
+RESULTS = ("sending", "placed", "sent", "failed")
 
 #: ce qu'un brouillon ne peut pas contenir au moment de partir (ce qu'elle n'a pas su), sous toutes ses graphies
 _TO_FILL = re.compile(r"\[\s*(?:a\s*)?(?:completer|remplir|preciser)\b")
@@ -204,6 +206,8 @@ class InboxMessage:
     text: str
     own: bool = False
     mentions_me: bool = False
+    #: supprimé dans Teams : son texte est effacé du cache
+    deleted: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,12 +229,12 @@ class InboxBatch:
 
 @dataclass(frozen=True, slots=True)
 class Stored:
-    """Ce qu'un lot a changé : les messages neufs, ceux déjà connus, les conversations où la personne a écrit, et
-    les brouillons que ses messages ont réglés (parti, inutilisé)."""
+    """Ce qu'un lot a changé : les messages neufs, ceux déjà connus, les conversations où la personne a écrit (avec
+    l'heure Teams, µs, de son dernier message dans chacune), et les brouillons que ses messages ont réglés."""
 
     new: int = 0
     known: int = 0
-    replied: tuple[str, ...] = ()
+    replied: tuple[tuple[str, int], ...] = ()
     settled: tuple[Settled, ...] = ()
 
 
@@ -299,9 +303,11 @@ class TeamsPort(Protocol):
 
     def discard_draft(self, draft_id: str) -> None: ...
 
-    def preview(self, draft_id: str) -> Preview | None: ...
+    def preview(self, draft_id: str, *, her: str = "") -> Preview | None:
+        """Ce qui partirait ; ``her`` : son nom (celui de sa persona), que la signature peut citer."""
+        ...
 
-    def enqueue(self, draft_id: str, *, mode: str, digest: str, expires_at: int, now: int) -> str:
+    def enqueue(self, draft_id: str, *, mode: str, digest: str, expires_at: int, now: int, her: str = "") -> str:
         """Met en file ce qui a été montré : vide si c'est fait (ou l'était déjà), sinon pourquoi pas."""
         ...
 

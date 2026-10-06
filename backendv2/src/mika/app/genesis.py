@@ -37,6 +37,7 @@ from mika.app import composition
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import self_ as self_c
+from mika.faculties.memory.extraction import self_names
 from mika.kernel.events import Content, Draft, Origin
 from mika.runtime import params
 from mika.runtime.bootstrap import Kernel
@@ -53,7 +54,7 @@ NAMED = "name:"
 #: une adresse : ce par quoi quelqu'un lui écrit (``user_7``, ``web_…``, ``ext_…``)
 _HANDLE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,127}$")
 #: les adresses qui se reconnaissent à leur forme, même avant d'avoir écrit : un compte, un compte extérieur
-_ACCOUNT = re.compile(rf"^{ACCOUNT_PREFIX}\d{{1,18}}$")
+_ACCOUNT = re.compile(rf"^{ACCOUNT_PREFIX}(0|[1-9]\d{{0,17}})$")  # ``user_7`` ; ``user_007`` n'est l'alias de personne
 _EXTERNAL = re.compile(rf"^{EXTERNAL_PREFIX}[A-Za-z0-9_.:@+-]{{1,120}}$")
 #: des adresses qui ne sont jamais des personnes (ses modules, sa propre tuyauterie)
 _NOT_PEOPLE = ("module_", "conscience")
@@ -94,7 +95,15 @@ def _people(kernel: Kernel, keys: Iterable[str], what: str) -> tuple[str, ...]:
     if isinstance(keys, str):
         raise NotAPerson(f"{what} : une suite de clés, pas une chaîne (« {keys} »)")
     frame = kernel.mind.frame()
-    return tuple(dict.fromkeys(person_key(k, lambda h: frame.get(identity_c.IDENTITY(h)).known) for k in keys))
+    # elle-même n'est pas une tierce personne : « moi », « elle », son nom ou son prénom (comme la consolidation)
+    mine = {named(n) for n in self_names(self_c.name_of(frame.get(self_c.PERSONA)))}
+    out = []
+    for k in keys:
+        key = person_key(k, lambda h: frame.get(identity_c.IDENTITY(h)).known)
+        if key in mine:
+            raise NotAPerson(f"{what} : « {k} », c'est elle-même — ce qui la concerne seule n'a pas de personne")
+        out.append(key)
+    return tuple(dict.fromkeys(out))
 
 
 def _text(text: str, level: int) -> Content:
@@ -107,11 +116,20 @@ def _text(text: str, level: int) -> Content:
     return Content.of(clean, level=level)
 
 
-def _level(sensitivity: int | None, *, has_person: bool) -> int:
-    """La sensibilité donnée, ou celle de la consolidation : personnel dès qu'une personne est en jeu."""
+def _level(sensitivity: int | None, *, has_person: bool, secret: bool = False, floor: int = 0) -> int:
+    """La sensibilité donnée, ou celle de la consolidation : personnel dès qu'une personne est en jeu, au moins
+    anodin quand quelqu'un est en jeu (jamais « rien »), et confidence pour un secret — même sans personne : un
+    secret de ses propres notes ne sort pas devant n'importe qui (la règle « personne d'identifié » de
+    ``salience.admissible`` ne regarde que la sensibilité)."""
     if sensitivity is None:
-        return int(Sensitivity.PERSONAL if has_person else Sensitivity.ANODYNE)
-    return int(Sensitivity(int(sensitivity)))
+        level = int(Sensitivity.PERSONAL if has_person else Sensitivity.ANODYNE)
+    else:
+        level = int(Sensitivity(int(sensitivity)))
+    if has_person:
+        level = max(level, int(Sensitivity.ANODYNE))
+    if secret:
+        level = max(level, int(Sensitivity.CONFIDENCE))
+    return max(level, int(floor))
 
 
 def _unit(value: float, what: str) -> float:
@@ -155,7 +173,7 @@ async def remember(kernel: Kernel, text: str, about: Iterable[str], *, sensitivi
     ``dedupe_key``)."""
     about_, told = _people(kernel, about, "about"), _people(kernel, told_by, "told_by")
     heard = told if heard_by is None else _people(kernel, heard_by, "heard_by")
-    level = _level(sensitivity, has_person=bool(about_ or told))
+    level = _level(sensitivity, has_person=bool(about_ or told), secret=secret)
     draft = memory_c.REMEMBERED.draft(
         text=_text(text, level), about=about_, sensitivity=level, importance=_unit(importance, "importance"),
         emotion=_emotion(emotion), call_id=ARCHIVE, told_by=told, heard_by=heard, secret=bool(secret),
@@ -175,15 +193,27 @@ async def believe(kernel: Kernel, text: str, about: Iterable[str], *, sensitivit
         raise ValueError(f"origine inconnue : « {origin} » (told, observed ou inferred)")
     about_, told = _people(kernel, about, "about"), _people(kernel, told_by, "told_by")
     mine = about_self or durable
-    if mine and (about_ or told):
-        raise ValueError("ce qu'elle dit d'elle-même ne concerne qu'elle : ni « about », ni « told_by »")
+    if mine and (about_ or told or source is not None or heard_by):
+        raise ValueError("ce qu'elle dit d'elle-même ne concerne qu'elle : ni « about », ni « told_by », ni "
+                         "« source », ni « heard_by »")
+    source_ = _people(kernel, (source,), "source")[0] if source is not None else None
+    if source_ is not None and not told:
+        told = (source_,)  # qui l'a dit le lui a confié : l'oublier efface aussi ce texte (ADR 0024)
+    if between_us:
+        # ce qui n'appartient qu'à elle et à quelqu'un, comme la consolidation le garde : sur cette personne, de
+        # première main, au moins personnel, et qui compte (ADR 0055)
+        if not about_:
+            raise ValueError("« entre vous » sans personne : ce qui n'appartient qu'à eux dit avec qui")
+        if not set(told) <= set(about_):
+            raise ValueError("« entre vous » se tient de première main : « told_by » parmi « about »")
+        importance = max(float(importance), 0.7)
     heard = told if heard_by is None else _people(kernel, heard_by, "heard_by")
-    level = int(Sensitivity.ANODYNE) if mine and sensitivity is None else \
-        _level(sensitivity, has_person=bool(about_ or told))
+    level = int(Sensitivity.ANODYNE) if mine and sensitivity is None and not secret else \
+        _level(sensitivity, has_person=bool(about_ or told), secret=secret,
+               floor=int(Sensitivity.PERSONAL) if between_us else 0)
     draft = memory_c.BELIEVED.draft(
         text=_text(text, level), about=about_, sensitivity=level, importance=_unit(importance, "importance"),
-        confidence=_unit(confidence, "confiance"), origin=origin,
-        source=_people(kernel, (source,), "source")[0] if source is not None else None,
+        confidence=_unit(confidence, "confiance"), origin=origin, source=source_,
         replaces=_replaced(kernel, replaces, memory_c.BELIEF), call_id=ARCHIVE, told_by=told, heard_by=heard,
         secret=bool(secret), about_self=mine, durable=bool(durable), between_us=bool(between_us),
         dedupe_key=dedupe_key)
@@ -204,7 +234,7 @@ async def note_event(kernel: Kernel, text: str, about: Iterable[str], when: int,
     if int(when) <= 0:
         raise ValueError(f"un moment sans date : {when}")
     heard = told if heard_by is None else _people(kernel, heard_by, "heard_by")
-    level = _level(sensitivity, has_person=True)
+    level = _level(sensitivity, has_person=True, secret=secret)
     draft = memory_c.EVENT_NOTED.draft(
         text=_text(text, level), when=int(when), about=about_, all_day=bool(all_day), sensitivity=level,
         told_by=told, heard_by=heard, secret=bool(secret), replaces=_replaced(kernel, replaces, memory_c.EVENT),
@@ -220,8 +250,10 @@ async def note_event(kernel: Kernel, text: str, about: Iterable[str], when: int,
 FAST_FORWARD: Mapping[str, Mapping[str, Any]] = MappingProxyType({
     # aucune initiative ordinaire (prendre la parole, prévenir, relancer, raconter) : un plafond du jour à zéro
     "agency": MappingProxyType({"daily_cap": 0}),
-    # n'entreprendre rien d'elle-même (ni réflexion, ni exploration), aucune rêverie, aucune séance de travail
-    "goals": MappingProxyType({"live_self_max": 0, "musings_per_day": 0, "steps_per_hour": 0}),
+    # n'entreprendre rien d'elle-même (ni réflexion, ni exploration), aucune rêverie, aucune séance de travail, et
+    # ne pas dire un rappel promis (il est dû : le plafond du jour ne l'arrête pas ; l'archive dit si elle l'a dit)
+    "goals": MappingProxyType({"live_self_max": 0, "musings_per_day": 0, "steps_per_hour": 0,
+                               "remind_evidence": 0.0}),
     # n'ouvrir aucun projet à elle (l'outil le refuse)
     "projects": MappingProxyType({"live_self_max": 0}),
     # aucun murmure avant d'écrire
@@ -233,7 +265,14 @@ FAST_FORWARD: Mapping[str, Mapping[str, Any]] = MappingProxyType({
     "social": MappingProxyType({"recontact_evidence": 0.0, "rekindle_evidence": 0.0, "comfort_evidence": 0.0}),
     # tenir une promesse au moment dit est dû (le plafond du jour ne l'arrête pas) : l'archive dit si elle l'a fait
     "memory": MappingProxyType({"keep_evidence": 0.0}),
+    # une amie qui écrit à 2 h ne la tire pas d'un sommeil qu'elle a vraiment dormi : l'archive dit si elle a
+    # répondu la nuit, et sa réponse est alors libérée à son heure (étape 0, INJECTION). Un message urgent
+    # (« au secours », « hôpital »…) la réveille toujours : c'est une constante de ``body``, pas un réglage.
+    "body": MappingProxyType({"woken_by": ()}),
 })
+#: Ce que le préréglage ne peut pas couper, faute de paramètre : un réveil par un message urgent (ci-dessus), et la
+#: salutation à l'arrivée de quelqu'un (``GREETS``) — qui ne part qu'à la connexion d'une personne, ce qu'un rejeu
+#: d'archive ne fait pas (ses correspondants sont des comptes extérieurs, sans présence).
 
 
 def fast_forward_overrides(overrides: Mapping[str, Mapping[str, Any]] | None = None) -> dict[str, dict[str, Any]]:
@@ -250,7 +289,7 @@ def _persona(kernel: Kernel, doc: self_c.PersonaDoc | None) -> self_c.PersonaDoc
 
 
 async def begin_fast_forward(kernel: Kernel, doc: self_c.PersonaDoc | None = None, *,
-                             overrides: Mapping[str, Mapping[str, Any]] | None = None,
+                             overrides: Mapping[str, Mapping[str, Any]] | None,
                              inputs: Mapping[str, Mapping[str, Any]] | None = None) -> bool:
     """Pose le préréglage, journalisé (``kernel.params_changed``) : ``overrides`` et ``inputs`` sont ceux de la
     configuration en cours (ceux que reçoit ``composition.configure``), que le préréglage complète. Une surcharge
@@ -267,8 +306,13 @@ async def begin_fast_forward(kernel: Kernel, doc: self_c.PersonaDoc | None = Non
 
 
 async def end_fast_forward(kernel: Kernel, doc: self_c.PersonaDoc | None = None, *,
-                           overrides: Mapping[str, Mapping[str, Any]] | None = None,
+                           overrides: Mapping[str, Mapping[str, Any]] | None,
                            inputs: Mapping[str, Mapping[str, Any]] | None = None) -> bool:
     """Lève le préréglage : la configuration d'avant (``overrides``, ``inputs``) est rejournalisée, ses valeurs
-    naturelles reviennent. Rend ``True`` si quelque chose a été journalisé."""
+    naturelles reviennent. Rend ``True`` si quelque chose a été journalisé.
+
+    ``overrides`` est **obligatoire** (``None`` : aucune surcharge d'opératrice, une vie neuve) : la levée
+    rejournalise toute la configuration, et l'oublier effacerait en silence les surcharges de l'opératrice. Pour la
+    même raison, la couture sert un **pilote hors ligne** : sur un serveur, un ``Live.reconfigure`` (une sauvegarde
+    dans la console) rejournaliserait la configuration sans le préréglage, qui serait levé sans le dire."""
     return await composition.configure(kernel, _persona(kernel, doc), overrides, inputs)

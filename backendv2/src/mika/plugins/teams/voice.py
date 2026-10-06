@@ -19,6 +19,7 @@ from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
 from mika.plugins.teams import (
+    EXPIRED,
     FAILED,
     GONE,
     KEEPER,
@@ -56,7 +57,8 @@ WHERE = {"dm": "en privé", "group": "dans un groupe", "channel": "dans un canal
 
 def voice_text(voice: Voice, mode: str) -> str:
     """Comment écrire dans Teams : à la place de la personne, son ton, ses consignes, la signature."""
-    name = voice.display_name.strip() or KEEPER
+    # le nom réglé par un opérateur, ou à défaut celui que Teams donne (apporté par l'extension) : inerte
+    name = inert(voice.display_name, 60) or KEEPER
     fill = (f"{name} les remplira avant d'envoyer" if mode == "brouillon"
             else "une réponse qui en contient ne peut pas partir")
     lines = [f"Dans Teams, tu écris **à la place** de {name}, à la première personne, comme cette personne le ferait : "
@@ -90,8 +92,11 @@ def _outcomes(s: TeamsState, frame: Frame) -> list[Any]:
                    or frame.now - (d.decided_at or d.at) <= p.shown_for_us), key=lambda d: -d.proposal)[:OUTCOMES_SHOWN]
 
 
-def _pending_work(s: TeamsState) -> bool:
-    return bool(s.asked) or any(d.state == WAITING for d in s.drafts.values())
+def _pending_work(s: TeamsState, frame: Frame) -> bool:
+    """Elle a de quoi écrire : une demande qui n'a pas épuisé ses essais, une réponse qui attend un accord."""
+    p = params_of(frame)
+    return any(s.attempts.get(ref, 0) < p.draft_attempts_max for ref in s.asked) \
+        or any(d.state == WAITING for d in s.drafts.values())
 
 
 @TEAMS.enricher("teams", episodes=ALL, deadline_ms=500)
@@ -159,6 +164,8 @@ def _drafts(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
             lines.append(f"{what} est partie" + (f", retouchée par {who}." if d.edited else "."))
         elif d.state == UNUSED:
             lines.append(f"{what} n'a pas servi ({inert(d.result, 120) or 'pas envoyée'}).")
+        elif d.state == EXPIRED:
+            lines.append(f"{what} n'a pas reçu l'accord de {who} à temps : elle n'est pas partie.")
         elif d.state == REFUSED:
             said = texts.get(d.note_ref, "") if d.note_ref else d.note
             note = f" : « {inert(said, 300)} »" if said else ""
@@ -172,7 +179,7 @@ def _drafts(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBo
 def _voice(s: TeamsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = enrich.get("teams") or {}
     voice = got.get("voice")
-    if voice is None or not for_owner(frame) or not (task_message(frame) or _pending_work(s)):
+    if voice is None or not for_owner(frame) or not (task_message(frame) or _pending_work(s, frame)):
         return None
     return SectionBody(voice_text(voice, params_of(frame).mode))
 

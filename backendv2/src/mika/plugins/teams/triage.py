@@ -12,7 +12,7 @@ from mika.contracts import teams as c
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
-from mika.plugins.teams import BUNDLE, RECEIVED, TEAMS, TeamsState, params_of
+from mika.plugins.teams import BUNDLE, RECEIVED, TEAMS, TeamsState, her, params_of
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.preprocess import inert
 from mika.ports.teams import person_handle
@@ -78,22 +78,30 @@ class Triage:
     def __init__(self) -> None:
         #: les lots déjà lus (``TeamsState.receipts`` au début du dernier passage ; ``None`` : pas encore passé)
         self.handled: int | None = None
+        #: le dernier passage a lu tout ce qu'il pouvait : il en reste peut-être
+        self.more = False
 
     def next_due(self, s: TeamsState, frame: Frame, last_run: int | None) -> int | None:
         if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE:
             return None  # elle lira au réveil
-        return frame.now if self.handled is None or s.receipts != self.handled else None
+        return frame.now if self.more or self.handled is None or s.receipts != self.handled else None
 
     async def run(self, ctx: Any) -> None:
-        # ce qui arrive pendant ce passage change ``receipts`` : un autre passage suivra
-        self.handled = ctx.state.receipts
+        # les lots lus sont ceux d'avant ce passage (ce qui arrive pendant change ``receipts`` : un autre passage
+        # suivra) ; comptés à la fin seulement : un passage qui échoue est repris (avec le recul de l'ordonnanceur)
+        receipts = ctx.state.receipts
+        self.more = await self._run(ctx)
+        self.handled = receipts
+
+    async def _run(self, ctx: Any) -> bool:
+        """Un passage ; vrai s'il a lu tout ce qu'il pouvait (il en reste peut-être)."""
         port = ctx.ports.get("teams")
         if port is None:
-            return
+            return False
         p = params_of(ctx.frame)
         known = ctx.state.messages
         fetched = await port.fetch_new(p.per_run)
-        owner = port.voice().display_name or "la personne qui s'occupe de Mika"
+        owner = port.voice().display_name or f"la personne qui s'occupe de {her(ctx.frame)}"
         system = TRIAGE.replace("{owner}", inert(owner, 60))
         drafts: list[Any] = []
         asked = 0
@@ -104,6 +112,10 @@ class Triage:
             if kind == "system":
                 continue
             addressed = kind in ADDRESSED or m.mentions_me
+            # une conversation exclue (un morceau de son nom, de son identifiant ou du nom de qui écrit) : elle la
+            # remarque, mais n'y prépare jamais rien d'elle-même — et son nom ne va pas au journal
+            hay = f"{m.conversation}\n{title}\n{m.author}".lower()
+            excluded = any(s in hay for s in p.skip)
             triage = guess = heuristic(m.text, addressed, kind)
             if addressed and asked < p.triage_per_run:
                 asked += 1
@@ -127,12 +139,14 @@ class Triage:
                 source="teams", kind=c.MESSAGE, summary=Content.of(summary[:400], level=int(Sensitivity.PERSONAL)),
                 pertinence=triage["importance"], emotion=emotion,
                 intensity=0.2 * triage["importance"] if emotion else 0.0, sensitivity=int(Sensitivity.PERSONAL),
-                bundle=BUNDLE, message=m.ref, conversation=m.conversation, title=inert(title, 120),
+                bundle=BUNDLE, message=m.ref, conversation=m.conversation,
                 author=inert(m.author, 120), author_id=m.author_id[:200], sent_at=m.at, where=kind,
                 importance=triage["importance"],
-                needs_reply=bool(addressed and triage["question"] and triage["aide"]), mentions_me=m.mentions_me,
+                needs_reply=bool(addressed and triage["question"] and triage["aide"] and not excluded),
+                mentions_me=m.mentions_me,
                 about=tuple(h for h in (person_handle(m.author_id),) if h), dedupe_key=f"teams:{m.ref}"))
         if drafts:
             await ctx.emit(*drafts)
         # remarqués (ou déjà connus, ou des notifications) : le prochain passage ne les rendra plus
         port.ack([m.ref for m in fetched])
+        return len(fetched) >= p.per_run

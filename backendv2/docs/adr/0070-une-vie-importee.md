@@ -73,3 +73,36 @@ plus, rien de faux). Le relais MCP de la CLI Claude Code s'appelle `mika` (ses o
 nom technique que le modèle voit dans les noms d'outils. La console ne dit pas encore la provenance « archive »
 d'un élément (`memory_items` ne garde pas l'origine de l'événement). Les clients web, Unity et Android, qui
 l'appellent encore Mika, suivront dans un lot à part. Les ADR précédentes restent telles qu'elles ont été écrites.
+
+**Après la relecture (même jour).**
+- **Préréglage.** Il coupe aussi les rappels promis (`goals.remind_evidence` = 0 : ils sont dus, comme une promesse
+  tenue). Avec `body.woken_by=()`, une amie qui écrit la nuit ne la réveille plus : l'archive dit si elle a
+  répondu, et le pilote libère alors la réponse à son heure. Deux exceptions restent, faute de paramètre :
+  - un message urgent la réveille toujours (une constante de `body`) ;
+  - la salutation à l'arrivée de quelqu'un, qu'un rejeu de comptes extérieurs sans présence ne déclenche pas.
+- **Levée.** `begin_fast_forward` et `end_fast_forward` exigent `overrides`, la configuration en cours (`None`
+  pour une vie neuve). Omise, la levée effaçait en silence les surcharges de l'opératrice. La couture sert un
+  pilote **hors ligne** : sur un serveur, `Live.reconfigure` rejournaliserait la configuration sans le préréglage.
+- **Ce qu'on importe suit les règles de la consolidation.**
+  - Un secret est une confidence, même sans personne. `salience.admissible` ne laisse sortir un secret devant
+    personne : jusque-là, un secret de ses propres notes, sans personne, sortait dans un salon public.
+  - « Entre vous » exige une personne, se tient de première main (`told_by` ⊆ `about`), est au moins personnel
+    et compte (importance ≥ 0,7).
+  - Une personne en jeu met la sensibilité au moins à « anodin ».
+  - La `source` d'une croyance sans confident devient son confident : l'oublier efface le texte.
+  - Une croyance sur elle refuse `source` et `heard_by`.
+  - Son propre nom, son prénom, « moi » et « elle » ne sont pas des personnes.
+  - `user_007` n'est pas l'alias de `user_7` : il est refusé.
+- **Son prénom.** Son prénom seul la désigne à l'extraction seulement si personne de la conversation ni de
+  l'annuaire ne le porte : une amie qui s'appelle comme elle reste son amie. Le rappel ignore aussi son prénom
+  quand quelqu'un le prononce.
+- **Une persona incarnée a un nom** : vide, elle s'entendrait appeler « Mika ».
+- **`Kernel.release_held()`** relâche les réponses retenues dont le `reply_wait` ne rend plus 0. C'est un pilote
+  qui vient de changer ce que son `reply_wait` répond qui l'appelle. Il n'a pas d'effet tant que le noyau ne vit
+  pas.
+- **Restes acceptés.**
+  - Une croyance d'archive qui redit ce qu'une consolidation vient d'extraire n'est dédoublonnée que par la clé de
+    l'appelant. Le pilote d'INJECTION ne passe par la genèse que pour ce qui n'est pas rejoué, donc ce cas ne se
+    présente pas.
+  - Les épisodes impersonnels (JOB) ne retirent plus un « Mika : » en tête de leur texte, qui n'est ni montré ni
+    livré.

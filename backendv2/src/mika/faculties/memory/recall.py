@@ -255,6 +255,8 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
     if not said:
         return {}
     her = " ".join(WORD.findall(fold(self_c.name_of(frame.get(self_c.PERSONA)))))
+    # son prénom seul aussi : « salut Léa ! » s'adresse à elle, pas à une autre Léa qu'elle connaît
+    her_first = her.split()[0] if " " in her else her
     tokens = set(said.split())
     rows = store.query_mind(f"SELECT DISTINCT a.person FROM {c.ABOUT_TABLE} a JOIN {c.ITEMS_TABLE} i ON i.id = a.item "
                             "WHERE i.status='active' AND i.kind IN (?, ?)", (c.SOUVENIR, c.BELIEF))
@@ -276,7 +278,7 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
         if not hit or len(persons) != 1:
             continue
         person = next(iter(persons))
-        if person != interlocutor and person not in out and n != her:
+        if person != interlocutor and person not in out and n not in (her, her_first):
             out[person] = tuple(sorted(keys_of.get(person, ())))
     return dict(list(out.items())[:_NAMED_PEOPLE])
 

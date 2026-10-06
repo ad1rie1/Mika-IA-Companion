@@ -29,9 +29,11 @@ from mika.plugins.teams import (
     TEAMS,
     decider,
     for_owner,
+    her,
     keepers,
     latest,
     params_of,
+    task_message,
     under_way,
 )
 from mika.plugins.teams.voice import voice_text
@@ -144,11 +146,17 @@ async def teams_draft(args: DraftArgs, ctx: Any) -> Any:
     if m is None:
         return ToolResult(ok=False, content="Je ne trouve pas ce message.")
     frame = ctx.frame
+    if not params_of(frame).enabled:
+        return ToolResult(ok=False, content="Teams est désactivé : rien ne peut y partir.")
+    # dans une tâche, elle ne répond qu'au message qu'on lui a confié (un message cité ne l'envoie pas ailleurs)
+    task = task_message(frame)
+    if task and m.ref != task:
+        return ToolResult(ok=False, content=f"Dans cette tâche, tu ne réponds qu'au message [{task}].")
     if under_way(frame.state("teams"), m.conversation):
         return ToolResult(ok=False, content="Une réponse est déjà en chemin dans cette conversation.")
     p = params_of(frame)
     draft = port.save_draft(Draft(id="", conversation=m.conversation, body=args.body.strip(), reply_to=m.ref))
-    shown = port.preview(draft.id)
+    shown = port.preview(draft.id, her=her(frame))
     # un passage à compléter n'empêche pas de proposer (la personne le remplira) ; tout autre blocage, si
     if shown is None or (shown.blocked and not to_fill(draft.body)):
         port.discard_draft(draft.id)
@@ -189,7 +197,7 @@ def preview(args: Mapping[str, Any], ports: Mapping[str, Any]) -> Preview | None
     port, frame_of = ports.get("teams"), ports.get("frame")
     if port is None:
         return None
-    shown = port.preview(str(args.get("draft") or ""))
+    shown = port.preview(str(args.get("draft") or ""), her=her(frame_of()) if frame_of is not None else "")
     if shown is None:
         return Preview("(cette réponse n'existe plus)", "", blocked="cette réponse n'existe plus")
     blocked = shown.blocked
@@ -207,9 +215,12 @@ async def send(args: Mapping[str, Any], context: str, ports: Mapping[str, Any]) 
         return False, "Teams n'est pas branché"
     frame = frame_of()
     p = params_of(frame)
+    if not p.enabled:
+        return False, "Teams est désactivé"
     mode = str(args.get("mode") or "brouillon")
     why = port.enqueue(str(args.get("draft") or ""), mode=DRAFT if mode == "brouillon" else SEND,
-                       digest=str(args.get("_apercu") or ""), expires_at=frame.now + p.queue_ttl_us, now=frame.now)
+                       digest=str(args.get("_apercu") or ""), expires_at=frame.now + p.queue_ttl_us, now=frame.now,
+                       her=her(frame))
     if why:
         return False, why
     return True, "en file (posée dans Teams)" if mode == "brouillon" else "en file (à envoyer)"

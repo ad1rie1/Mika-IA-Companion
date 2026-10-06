@@ -29,8 +29,6 @@ SENT_KIND = "teams_sent"
 class TeamsNoticed(Signal):
     message: str  # la référence (attribuée par l'adaptateur)
     conversation: str
-    #: le nom de la conversation (un groupe, un canal ; vide pour un tête-à-tête) — choisi par d'autres : inerte
-    title: str
     author: str
     author_id: str
     #: quand il a été écrit (µs, l'horloge de Teams)

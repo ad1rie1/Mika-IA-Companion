@@ -30,6 +30,7 @@ class IngestReport:
     skipped_media: int = 0
     unknown: list[str] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
+    locked: list[str] = field(default_factory=list)  # modifiées depuis, mais déjà lues : laissées telles quelles
     messages: int = 0
     documents: int = 0
     duplicates: int = 0
@@ -50,8 +51,8 @@ def ingest(corpus: Corpus, root: Path, ctx: ReadContext, *, readers: list[Reader
     report = IngestReport()
     clock = now or (lambda: datetime.now().astimezone())
     for path in walk(root):
-        if path.name in SKIP_NAMES or path.suffix.lower() in SKIP_SUFFIXES:
-            report.skipped_media += 1
+        if path.name in SKIP_NAMES or path.suffix.lower() in SKIP_SUFFIXES or path.name.startswith("~$"):
+            report.skipped_media += 1  # ~$… : le fichier verrou d'un document Word ouvert
             continue
         reader, score = pick(path, readers)
         rel = str(path.relative_to(root))
@@ -61,6 +62,10 @@ def ingest(corpus: Corpus, root: Path, ctx: ReadContext, *, readers: list[Reader
         sha = file_sha256(path)
         if corpus.source_unchanged(rel, sha, reader.name, reader.version):
             report.skipped_unchanged += 1
+            continue
+        if corpus.source_read(rel):
+            # déjà lue par Claude Code : la relire effacerait ses messages, leurs séances et ce qui y renvoie
+            report.locked.append(rel)
             continue
         if progress:
             progress(f"{reader.name:>9} · {rel}")
@@ -72,8 +77,8 @@ def ingest(corpus: Corpus, root: Path, ctx: ReadContext, *, readers: list[Reader
                                              clock().isoformat(timespec="seconds"))
                 corpus.add_items(source, reader.read(path, ctx), stats)
                 corpus.end_source(source, stats)
-        except (OSError, ValueError, KeyError, UnicodeError) as exc:
-            report.failed.append((rel, f"{type(exc).__name__}: {exc}"))
+        except Exception as exc:  # noqa: BLE001 — un fichier, quel qu'il soit, n'arrête jamais l'ingestion des autres
+            report.failed.append((rel, f"{type(exc).__name__}: {str(exc)[:300]}"))
             continue
         report.read[reader.name] = report.read.get(reader.name, 0) + 1
         report.messages += stats.messages

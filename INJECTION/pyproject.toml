@@ -14,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # le rejeu et les schémas viennent du moteur : pip install -e ../backendv2
-moteur = ["mika"]
+moteur = ["mika", "numpy"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.6"]
 
 [project.scripts]

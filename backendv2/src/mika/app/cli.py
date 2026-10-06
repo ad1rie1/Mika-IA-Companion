@@ -303,7 +303,7 @@ async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[st
     desk = TeamsDesk(settings, RealClock().now, None)
     if args.teams_cmd == "key":
         return {"ok": True, "key": await desk.new_key("ligne de commande"),
-                "usage": "à coller dans l'extension (Mika · Teams) ; Authorization: Bearer <clé> sur /api/teams/…"}
+                "usage": "à coller dans l'extension de navigateur ; Authorization: Bearer <clé> sur /api/teams/…"}
     if args.teams_cmd == "revoke":
         return {"ok": await desk.revoke_key("ligne de commande")}
     cfg, key = settings.teams(), desk.key_state()

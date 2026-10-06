@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict
 from mika.contracts import identity as identity_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
+from mika.contracts import self_ as self_c
 from mika.contracts import teams as c
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Payload
@@ -47,12 +48,14 @@ BUNDLE = "teams"
 KEEP = 200
 DRAFTS_KEPT = 100
 #: les états d'une réponse proposée
-WAITING, APPROVED, REFUSED = "attend", "approuve", "refuse"
+WAITING, APPROVED, REFUSED, EXPIRED = "attend", "approuve", "refuse", "expire"
 QUEUED, PLACED, GONE, UNUSED, FAILED = "en_file", "pose", "parti", "inutilise", "echec"
 #: une réponse encore en chemin (une autre ne se prépare pas dans la même conversation)
 UNDER_WAY = frozenset({WAITING, APPROVED, QUEUED, PLACED})
 #: ce que l'adaptateur dit d'un brouillon en file → son état ici
 FROM_PORT = {"pose": PLACED, "parti": GONE, "inutilise": UNUSED, "echec": FAILED}
+#: qui refuse au nom du délai (une carte d'accord restée sans réponse)
+EXPIRER = "teams.delai"
 
 
 class TeamsParams(BaseModel):
@@ -68,6 +71,9 @@ class TeamsParams(BaseModel):
     shown_for_us: Annotated[int, Knob(
         label="Montrés pendant", group="Remarquer", lo=HOUR, hi=3 * DAY,
         help="Un message reçu reste sous ses yeux (« TES MESSAGES TEAMS ») au plus ce temps.")] = 12 * HOUR
+    enabled: Annotated[bool, Knob(
+        label="Teams actif", group="Écrire", readonly=True,
+        help="Réglé dans Configuration › Sens › Teams : désactivé, elle ne prépare ni ne propose plus rien.")] = True
     mode: Annotated[Literal["brouillon", "validation", "autonome"], Knob(
         label="Ce qu'elle fait de ses réponses", group="Écrire", choices=MODES, readonly=True,
         help="Réglé dans Configuration › Sens › Teams.")] = "brouillon"
@@ -113,7 +119,6 @@ class Seen:
 
     seq: int
     conversation: str
-    title: str
     author: str
     author_id: str
     where: str
@@ -148,6 +153,9 @@ class DraftSeen:
     expires: int = 0
     #: µs : en file au-delà, elle ne part plus
     queued_until: int = 0
+    #: recopiés de la proposition : refuser au nom du délai sans relire l'état du moteur
+    args_json: str = ""
+    context: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,11 +184,11 @@ class TeamsState:
 
 
 class Received(Payload):
-    """L'extension a poussé des messages : combien de neufs, et les conversations où la personne a écrit (aucun
-    texte : le monde reste dans l'adaptateur)."""
+    """L'extension a poussé des messages : combien de neufs, et les conversations où la personne a écrit, avec
+    l'heure (Teams, µs) de son dernier message dans chacune (aucun texte : le monde reste dans l'adaptateur)."""
 
     new: int
-    replied: tuple[str, ...] = ()
+    replied: tuple[tuple[str, int], ...] = ()
 
 
 class Settled(Payload):
@@ -231,7 +239,7 @@ def draft_args(args_json: str) -> dict[str, Any]:
 def _noticed(s: TeamsState, e, cx) -> TeamsState:
     d = e.data
     at = d.sent_at or e.at
-    seen = Seen(e.seq, d.conversation, d.title, d.author, d.author_id, d.where, d.importance, d.needs_reply,
+    seen = Seen(e.seq, d.conversation, d.author, d.author_id, d.where, d.importance, d.needs_reply,
                 d.mentions_me, at, d.summary.ref or "",
                 answered="toi" if s.replied.get(d.conversation, 0) >= at else "")
     return replace(s, messages=_pruned(s.messages.set(d.message, seen), KEEP, lambda kv: kv[1].seq))
@@ -239,12 +247,14 @@ def _noticed(s: TeamsState, e, cx) -> TeamsState:
 
 @TEAMS.reducer(RECEIVED)
 def _received(s: TeamsState, e, cx) -> TeamsState:
-    """La personne a écrit dans ces conversations : ce qui y attendait une réponse en a une (la sienne)."""
+    """La personne a écrit dans ces conversations : ce qui y attendait une réponse **avant son message** en a une
+    (la sienne). Les heures sont celles de Teams, comme celles des messages : un vieux message à elle qui arrive tard
+    (un rattrapage) ne répond pas à une question posée après."""
     replied, messages = s.replied, s.messages
-    for conv in e.data.replied:
-        replied = replied.set(conv, e.at)
+    for conv, at in e.data.replied:
+        replied = replied.set(conv, max(replied.get(conv, 0), at))
         for ref, m in messages.items():
-            if m.conversation == conv and not m.answered:
+            if m.conversation == conv and not m.answered and m.at <= at:
                 messages = messages.set(ref, replace(m, answered="toi"))
     if len(replied) > KEEP:
         replied = FrozenDict(sorted(replied.items(), key=lambda kv: -kv[1])[:KEEP])
@@ -267,8 +277,10 @@ def _episode(s: TeamsState, e, cx) -> TeamsState:
     found = task_of(d.target) if d.kind == Kind.TASK else None
     if found is None or found[0] != "teams":
         return s
-    return replace(s, attempts=_pruned(s.attempts.set(found[1], s.attempts.get(found[1], 0) + 1), KEEP,
-                                       lambda kv: kv[0]))
+    attempts = s.attempts.set(found[1], s.attempts.get(found[1], 0) + 1)
+    if len(attempts) > KEEP:  # on oublie les essais des messages qu'elle ne garde plus en tête (les plus anciens)
+        attempts = FrozenDict({k: n for k, n in attempts.items() if k in s.messages or k in s.asked})
+    return replace(s, attempts=attempts)
 
 
 @TEAMS.reducer(rt.EFFECT_PROPOSED)
@@ -278,9 +290,14 @@ def _proposed(s: TeamsState, e, cx) -> TeamsState:
         return s
     args = draft_args(d.args_json)
     message = str(args.get("message") or "")
+    try:
+        expires = int(args.get(rt.EXPIRES) or 0)
+    except (TypeError, ValueError):
+        expires = 0
     seen = DraftSeen(e.seq, str(args.get("draft") or ""), str(args.get("conversation") or ""), message, e.at,
                      str(args.get("mode") or ""), WAITING if d.approval else APPROVED,
-                     asked=bool(message) and message in s.asked, expires=int(args.get(rt.EXPIRES) or 0))
+                     asked=bool(message) and message in s.asked, expires=expires,
+                     args_json=d.args_json if d.approval else "", context=d.context)
     drafts = _pruned(s.drafts.set(e.seq, seen), DRAFTS_KEPT, lambda kv: kv[0])
     return replace(s, drafts=drafts, asked=s.asked.delete(message) if message else s.asked)
 
@@ -291,7 +308,8 @@ def _resolved(s: TeamsState, e, cx) -> TeamsState:
     found = s.drafts.get(d.proposal)
     if found is None:
         return s
-    decided = replace(found, state=APPROVED if d.approved else REFUSED, by=d.by, note=d.legacy_note[:300],
+    state = APPROVED if d.approved else EXPIRED if d.by == EXPIRER else REFUSED
+    decided = replace(found, state=state, by=d.by, note=d.legacy_note[:300],
                       note_ref=d.note.ref or "" if d.note is not None else "", decided_at=e.at)
     return replace(s, drafts=s.drafts.set(d.proposal, decided))
 
@@ -301,8 +319,8 @@ def _executed(s: TeamsState, e, cx) -> TeamsState:
     """Mise en file (ou non) : c'est l'extension qui la posera ou l'enverra."""
     d = e.data
     found = s.drafts.get(d.proposal)
-    if found is None:
-        return s
+    if found is None or found.state not in (WAITING, APPROVED):
+        return s  # l'extension a déjà accusé (posée, partie) : ce qui a été journalisé après ne recule pas
     queued = replace(found, state=QUEUED if d.ok else FAILED, result=d.result[:300],
                      queued_until=e.at + params(cx.params).queue_ttl_us if d.ok else 0)
     return replace(s, drafts=s.drafts.set(d.proposal, queued))
@@ -332,6 +350,12 @@ def latest(s: TeamsState, draft_id: str) -> DraftSeen | None:
 def under_way(s: TeamsState, conversation: str) -> bool:
     """Une réponse est déjà en chemin dans cette conversation (en attente d'accord, en file, posée)."""
     return any(d.conversation == conversation and d.state in UNDER_WAY for d in s.drafts.values())
+
+
+def drafted(s: TeamsState, message: str) -> bool:
+    """Une réponse à ce message a déjà été proposée (quel qu'en soit le sort : refusée, partie, laissée) : elle ne la
+    repropose pas d'elle-même — seule une demande la relance."""
+    return any(d.message == message for d in s.drafts.values())
 
 
 # ── Pour qui ──────────────────────────────────────────────────────────────
@@ -378,17 +402,24 @@ def keepers(frame: Frame) -> str:
 
 
 def decider(frame: Frame) -> str:
-    """À qui va la carte d'accord (mode validation) : l'adresse d'une propriétaire qui parle en propriétaire — celle
-    où elle est, sinon celle où l'on peut lui écrire absente, sinon la première. Vide : la console seulement."""
+    """À qui va la carte d'accord (mode validation) : une adresse qui parle en propriétaire — d'abord celle d'une
+    propriétaire présente (n'importe laquelle), sinon une où l'on peut écrire absente, sinon la première. Vide : la
+    console seulement."""
     here = set(frame.get(presence_c.PRESENT))
-    for person in frame.get(identity_c.OWNERS):
-        handles = [h for h in (frame.get(identity_c.HANDLES(person)) or (person,))
-                   if frame.get(identity_c.SPEAKS_AS_OWNER(h))]
-        for pick in ([h for h in handles if h in here],
-                     [h for h in frame.get(identity_c.REACHABLE(person)) if h in handles], handles):
-            if pick:
-                return pick[0]
-    return ""
+    owners = [(person, [h for h in (frame.get(identity_c.HANDLES(person)) or (person,))
+                        if frame.get(identity_c.SPEAKS_AS_OWNER(h))]) for person in frame.get(identity_c.OWNERS)]
+    for _, handles in owners:
+        if found := [h for h in handles if h in here]:
+            return found[0]
+    for person, handles in owners:
+        if found := [h for h in frame.get(identity_c.REACHABLE(person)) if h in handles]:
+            return found[0]
+    return next((handles[0] for _, handles in owners if handles), "")
+
+
+def her(frame: Frame) -> str:
+    """Son nom (celui de sa persona) : la signature peut le citer."""
+    return self_c.name_of(frame.get(self_c.PERSONA))
 
 
 def task_message(frame: Frame) -> str:

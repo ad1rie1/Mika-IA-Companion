@@ -8,10 +8,11 @@
  * de survivre à un déplacement d'API ; la forme d'un message du service de chat, elle, est stable depuis Skype.
  */
 (function (root, factory) {
-  const api = factory();
-  if (typeof module === "object" && module.exports) module.exports = api;
+  const node = typeof module === "object" && module && module.exports && typeof require === "function";
+  const api = factory(node ? require("./text.js") : root.MikaTeamsText);
+  if (node) module.exports = api;
   else root.MikaTeamsExtract = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (T) {
   "use strict";
 
   const MAX_DEPTH = 16;
@@ -26,6 +27,8 @@
   const TYPE_KEYS = ["messagetype", "messageType"];
   const NAME_KEYS = ["imdisplayname", "imDisplayName", "fromDisplayNameInToken", "displayName", "senderDisplayName"];
   const DELETED_KEYS = ["deletetime", "deleteTime", "deletionTime", "deletedTime", "isDeleted"];
+  // la version d'un message : elle avance quand il est modifié (le service de chat la tient en millisecondes)
+  const VERSION_KEYS = ["edittime", "editTime", "lastEditedTime", "version"];
 
   function first(o, keys) {
     for (const k of keys) {
@@ -162,22 +165,29 @@
     return out;
   }
 
-  function isDeleted(o) {
-    if (first(o, DELETED_KEYS)) return true;
-    const props = isObject(o.properties) ? o.properties : null;
-    return Boolean(props && first(props, DELETED_KEYS));
+  /** Une marque de suppression : `true`, ou une date ; « 0 » et `false` n'en sont pas. */
+  function deletionMark(v) {
+    if (v === true) return true;
+    if (v === false || v === undefined || v === null) return false;
+    return !/^0*$/.test(String(v).trim());
   }
 
-  /** Un petit condensé stable, pour dédoublonner un message sans identifiant. */
-  function hash(s) {
-    let h = 5381;
-    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
-    return (h >>> 0).toString(36);
+  function isDeleted(o) {
+    if (deletionMark(first(o, DELETED_KEYS))) return true;
+    const props = isObject(o.properties) ? o.properties : null;
+    return Boolean(props && deletionMark(first(props, DELETED_KEYS)));
+  }
+
+  /** La version d'un message (la date de sa dernière modification), 0 si elle n'est pas dite. */
+  function versionOf(o) {
+    const props = isObject(o.properties) ? o.properties : {};
+    return Math.max(toMillis(first(o, VERSION_KEYS)), toMillis(first(props, VERSION_KEYS)));
   }
 
   /**
    * Un message, ou `null` si l'objet n'en a pas la forme ou n'est pas un message lisible (frappe en cours,
-   * activité du fil, appel, message supprimé…).
+   * activité du fil, appel…). Un message supprimé devient un enregistrement de suppression : même identifiant,
+   * même conversation, même date, `deleted: true` et un texte vide — le serveur efface sa copie.
    */
   function normalizeMessage(o, inheritedConv) {
     if (!isObject(o) || typeof o.content !== "string") return null;
@@ -190,7 +200,15 @@
     conv = typeof conv === "string" && conv ? conv : (inheritedConv || "");
     if (!type && !author && !conv) return null;
     if (type && !/^(text|richtext)(\/|$)/i.test(type)) return null;
-    if (isDeleted(o)) return null;
+    const authorId = authorIdOf(o);
+    let id = first(o, ID_KEYS);
+    id = typeof id === "string" || typeof id === "number" ? String(id) : "";
+    if (isDeleted(o)) {
+      // sans identifiant, on ne saurait pas quel message effacer
+      if (!id) return null;
+      return { id: id, conv: conv, author: author, authorId: authorId, time: time, type: type, text: "",
+        deleted: true, version: versionOf(o), mentions: [] };
+    }
     let text;
     if (/^richtext\/media/i.test(type)) {
       const original = /<OriginalName[^>]*\bv=["']([^"']+)["']/i.exec(o.content);
@@ -201,13 +219,10 @@
       text = htmlToText(o.content);
     }
     if (!text) return null;
-    if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT - 1) + "…";
-    const authorId = authorIdOf(o);
-    let id = first(o, ID_KEYS);
-    id = typeof id === "string" || typeof id === "number" ? String(id) : "";
-    if (!id) id = "h" + hash(conv + "|" + time + "|" + authorId + "|" + text);
+    text = T.clip(text, MAX_TEXT);
+    if (!id) id = "h" + T.hash(conv + "|" + time + "|" + authorId + "|" + text);
     return { id: id, conv: conv, author: author, authorId: authorId, time: time, type: type, text: text,
-      mentions: mentionsOf(o) };
+      version: versionOf(o), mentions: mentionsOf(o) };
   }
 
   /** Une conversation dont on apprend le nom ou la nature (une liste de conversations, une fiche de fil). */
@@ -218,7 +233,7 @@
     if (isObject(o.chatTitle)) title = title || first(o.chatTitle, ["longTitle", "shortTitle"]);
     const threadType = first(props, ["threadType", "productThreadType"]) || first(o, ["threadType", "chatType"]) || "";
     if (!title && !threadType) return null;
-    return { id: o.id, title: typeof title === "string" ? title.trim().slice(0, 120) : "",
+    return { id: o.id, title: typeof title === "string" ? T.cut(title.trim(), 120) : "",
       threadType: String(threadType) };
   }
 

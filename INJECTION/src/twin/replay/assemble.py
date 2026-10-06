@@ -42,11 +42,15 @@ class ArchiveItems:
     by_anchor: dict[int, list[tuple[str, dict[str, Any]]]] = field(default_factory=lambda: defaultdict(list))
 
     def add_session(self, annotation: Mapping[str, Any], session_messages: Sequence[int]) -> None:
-        last = max(session_messages) if session_messages else None
+        """``session_messages`` : les messages **rejoués** de la séance, dans l'ordre du temps. Un élément est rangé
+        sous le dernier de ses ancres ; sans ancre, sous le dernier message rejoué (jamais un média seul, un
+        message système ou supprimé : ils n'ont pas de ``seq``, et l'élément serait perdu)."""
+        order = {m: i for i, m in enumerate(session_messages)}
+        last = session_messages[-1] if session_messages else None
         for kind in ("souvenirs", "croyances", "promesses", "evenements"):
             for item in annotation.get(kind, []) or []:
-                anchors = [m for m in item.get("messages", []) if m in set(session_messages)]
-                anchor = max(anchors) if anchors else last
+                anchors = [m for m in item.get("messages", []) if m in order]
+                anchor = max(anchors, key=order.__getitem__) if anchors else last
                 if anchor is not None:
                     self.by_anchor[anchor].append((kind, dict(item)))
 

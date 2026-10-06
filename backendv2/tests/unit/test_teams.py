@@ -25,11 +25,13 @@ from types import SimpleNamespace
 from mika.adapters.teams import TeamsConfig, TeamsStore
 from mika.app import composition
 from mika.app.mindport import KernelPort
-from mika.app.teams import TeamsDesk, digest
+from mika.app.teams import TeamsDesk, batch_of, digest
 from mika.contracts import attention as attention_c
 from mika.contracts import runtime as rt
 from mika.contracts import teams as teams_c
 from mika.kernel.clock import HOUR, MINUTE, US
+from mika.kernel.events import Origin
+from mika.plugins.teams import RECEIVED
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.ports.teams import message_ref
 from mika.runtime.operations import perform
@@ -113,8 +115,11 @@ def live(tmp_path, model, scenario, *, cfg: TeamsConfig | None = None, inputs: d
     kernel, clock, llm, _ = build(tmp_path, model, clock=clock, ports={"teams": store})
     desk = TeamsDesk(Settings(cfg), clock.now, store)
     desk.port = SimpleNamespace(kernel=kernel)
-    teams_inputs = {"mode": cfg.mode, "autodraft": cfg.enabled and cfg.autodraft,
+    teams_inputs = {"enabled": cfg.enabled, "mode": cfg.mode, "autodraft": cfg.enabled and cfg.autodraft,
                     "skip": cfg.skip, **(inputs or {})}
+
+    # l'envie de rédiger au plus haut : la tâche part en quelques minutes, quel que soit le tirage de l'arbitre
+    overrides = {**(overrides or {}), "teams": {"draft_evidence": 12.0, **(overrides or {}).get("teams", {})}}
 
     async def main():
         await kernel.start(configure=lambda k: composition.configure(k, DOC, overrides, {"teams": teams_inputs}))
@@ -249,7 +254,7 @@ def test_without_an_answer_in_time_the_reply_does_not_leave(tmp_path):
     [r] = resolved
     assert not r.data.approved and r.data.by == "teams.delai"
     assert executed == [] and outbox == []
-    assert [d.state for d in state.drafts.values()] == ["refuse"]
+    assert [d.state for d in state.drafts.values()] == ["expire"]  # pas d'accord à temps (pas « refusée »)
 
 
 # ── Sans accord ; jamais de blanc qui part seul ───────────────────────────
@@ -374,3 +379,89 @@ def test_forgetting_a_colleague_reaches_the_journal_and_the_cache(tmp_path):
     assert "TCP" in next(iter(before.values()))
     assert not any(after.values())
     assert out["teams"] >= 1 and message is None and conversation is None and drafts == []
+
+
+# ── Ce que la relecture a trouvé ──────────────────────────────────────────
+
+
+def test_her_answering_is_judged_on_teams_time_not_on_arrival(tmp_path):
+    """Un vieux message de la personne qui arrive avec une question plus récente (un même lot, un rattrapage) ne
+    répond pas à la question."""
+    async def scenario(kernel, llm, desk, store, clock):
+        await push(desk, msg(clock, 1, "Oui c'est bon.", author="Adrien", author_id=SELF, own=True, ago_us=20 * US),
+                   msg(clock, 2, QUESTION, ago_us=5 * US), conversations=[conv(DM)])
+        await sleep(30 * MINUTE)
+        return [e.data.target for e in events(kernel, rt.EPISODE_STARTED) if e.data.kind == Kind.TASK]
+
+    assert live(tmp_path, Model(), scenario) == [f"task:teams:{message_ref(DM, '1759000000002')}"]
+
+
+def test_a_refused_reply_is_not_proposed_again(tmp_path):
+    async def scenario(kernel, llm, desk, store, clock):
+        await connect(kernel, "user_1", "Adrien", operator=True)
+        await push(desk, msg(clock, 1, QUESTION), conversations=[conv(DM)])
+        await sleep(30 * MINUTE)
+        [card] = await KernelPort(kernel).approval_cards("user_1")
+        await KernelPort(kernel).decide_card("user_1", card["id"], False, "")
+        await sleep(HOUR)
+        return events(kernel, rt.EFFECT_PROPOSED), kernel.mind.frame().state("teams")
+
+    proposed, state = live(tmp_path, Model(), scenario, cfg=TeamsConfig(mode="validation"))
+    assert len(proposed) == 1 and [d.state for d in state.drafts.values()] == ["refuse"]
+
+
+def test_a_large_backlog_is_triaged_to_the_end(tmp_path):
+    async def scenario(kernel, llm, desk, store, clock):
+        await push(desk, *[msg(clock, i, f"Message {i}", conv=GROUP, author="Bob", author_id="8:b")
+                           for i in range(1, 8)], conversations=[conv(GROUP, "Projet", "group")])
+        await sleep(30 * MINUTE)
+        return events(kernel, teams_c.NOTICED)
+
+    noticed = live(tmp_path, Model(), scenario, overrides={"teams": {"per_run": 2}})
+    assert len(noticed) == 7
+
+
+def test_a_task_only_answers_the_message_it_was_given(tmp_path):
+    other = message_ref(CHANNEL, "1759000000009")
+
+    class Elsewhere(Model):
+        def __call__(self, req):
+            if req.role == "step" and not any(m.role == "tool" for m in req.messages) \
+                    and "message=[" in prompt_text(req):
+                return LLMResponse("", tool_calls=(ToolCall(f"{req.call_id}:d", "teams_draft",
+                                                            {"message": other, "body": "Hop."}),), stop="tool_use")
+            return super().__call__(req)
+
+    async def scenario(kernel, llm, desk, store, clock):
+        await push(desk, msg(clock, 1, QUESTION), msg(clock, 9, "salut", conv=CHANNEL, author="Bob", author_id="8:b"),
+                   conversations=[conv(DM), conv(CHANNEL, "Général", "channel")])
+        await sleep(30 * MINUTE)
+        return events(kernel, rt.EFFECT_PROPOSED)
+
+    assert live(tmp_path, Elsewhere(), scenario, cfg=TeamsConfig(mode="autonome")) == []
+
+
+def test_disabled_teams_proposes_nothing(tmp_path):
+    """Désactivé, rien n'est préparé, même avec l'initiative permise (la porte refuse l'extension ; ce qui est déjà
+    reçu reste, sans réponse)."""
+    async def scenario(kernel, llm, desk, store, clock):
+        batch, _ = batch_of({"self": {}, "conversations": [conv(DM)], "messages": [msg(clock, 1, QUESTION)]},
+                            clock.now() // 1000)
+        store.store_batch(batch, clock.now())
+        await kernel.mind.append([RECEIVED.draft(new=1)], emitter="teams", correlation="t", origin=Origin.EXTERNAL)
+        await sleep(HOUR)
+        tasks = [e for e in events(kernel, rt.EPISODE_STARTED) if e.data.kind == Kind.TASK]
+        return events(kernel, teams_c.NOTICED), tasks, events(kernel, rt.EFFECT_PROPOSED)
+
+    noticed, tasks, proposed = live(tmp_path, Model(), scenario, cfg=TeamsConfig(enabled=False),
+                                    inputs={"autodraft": True})
+    assert len(noticed) == 1 and tasks == [] and proposed == []
+
+
+def test_a_message_deleted_in_teams_leaves_the_cache(tmp_path):
+    async def scenario(kernel, llm, desk, store, clock):
+        await push(desk, msg(clock, 1, "Mon code de badge est 4471"), conversations=[conv(DM)])
+        await push(desk, {**msg(clock, 1, ""), "deleted": True})
+        return store.message(message_ref(DM, "1759000000001"))
+
+    assert live(tmp_path, Model(), scenario).text == ""

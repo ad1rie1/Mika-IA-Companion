@@ -16,8 +16,8 @@
     <section class="card">
       <label class="switch">
         <input type="checkbox" id="paused">
-        <span>En pause — rien de ce qui arrive pendant la pause ne lui sera envoyé, même plus tard, et elle n'écrit
-          rien dans Teams</span>
+        <span>En pause — rien de ce qui est écrit pendant la pause ne lui sera envoyé, même plus tard, et elle
+          n'écrit rien dans Teams</span>
       </label>
     </section>
 
@@ -25,6 +25,8 @@
       <h2>Connexion à Mika</h2>
       <label>Adresse du serveur
         <input type="url" id="base" placeholder="http://127.0.0.1:8001" spellcheck="false">
+        <small>En <code>http://</code> seulement sur cette machine (127.0.0.1, localhost) ; ailleurs, une adresse
+          <code>https://</code>.</small>
       </label>
       <label>Clé Teams
         <input type="password" id="key" autocomplete="off" spellcheck="false">
@@ -42,10 +44,12 @@
       <h2>Ce qui part</h2>
       <p class="note">Les messages neufs de tes conversations Teams, les tiens compris : Mika a besoin des deux voix
         d'un fil, et c'est à ton message qu'elle voit qu'une réponse préparée est partie.</p>
-      <label>Conversations exclues — un morceau du nom (ou de l'identifiant) par ligne
-        <textarea id="exclude" rows="3" spellcheck="false" placeholder="RH&#10;Médecin"></textarea>
+      <label>Conversations exclues — un morceau du nom (ou de l'identifiant) par ligne ; pour un tête-à-tête, le
+        nom de la personne
+        <textarea id="exclude" rows="3" spellcheck="false" placeholder="RH&#10;Médecin&#10;Dr Martin"></textarea>
         <small>Une conversation exclue ne quitte jamais le navigateur, ni ses messages ni son nom, et Mika n'y
-          écrit rien.</small>
+          écrit rien. Tant qu'il y a des exclusions, un message dont la conversation n'a pas encore de nom connu
+          attend jusqu'à 2 minutes qu'on l'apprenne.</small>
       </label>
       <div class="row"><button id="save2" class="primary">Enregistrer</button></div>
     </section>
@@ -77,6 +81,8 @@
       <p id="logEmpty" class="note">Rien encore.</p>
     </section>
   </main>
+  <script src="lib/text.js"></script>
+  <script src="lib/signals.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

@@ -59,7 +59,8 @@ def run(tag: str, fmt: str, prompt: str, out: Path, verbose: bool = False) -> di
     argv.append(prompt)
     with tempfile.TemporaryDirectory() as cwd:
         t0 = time.monotonic()
-        p = subprocess.run(argv, cwd=cwd, env=env(), capture_output=True, text=True, timeout=300)
+        p = subprocess.run(argv, cwd=cwd, env=env(), capture_output=True, text=True, timeout=300,
+                           stdin=subprocess.DEVNULL)  # sans quoi la CLI attend 3 s une entrée
         dt = time.monotonic() - t0
     (out / f"{tag}.stdout").write_text(p.stdout)
     (out / f"{tag}.stderr").write_text(p.stderr)

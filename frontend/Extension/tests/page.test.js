@@ -54,10 +54,44 @@ test("le corps d'un envoi au service de chat", () => {
     clientmessageid: "1234567890123456789", imdisplayname: "Adrien Martin" });
 });
 
-test("un identifiant client : 19 chiffres, le premier jamais nul", () => {
-  assert.match(P.clientMessageId(() => 0), /^1\d{18}$/);
-  assert.match(P.clientMessageId(() => 0.9999999), /^9{19}$/);
-  assert.match(P.clientMessageId(Math.random), /^[1-9]\d{18}$/);
+test("l'identifiant client d'un élément : 19 chiffres, le premier jamais nul, le même à chaque tentative", () => {
+  const a = P.clientMessageIdFor("t0123456789ab");
+  assert.match(a, /^[1-9]\d{18}$/);
+  assert.equal(P.clientMessageIdFor("t0123456789ab"), a, "stable : une seconde tentative reste reconnaissable");
+  assert.notEqual(P.clientMessageIdFor("t0123456789ac"), a);
+  const seen = new Set();
+  for (let i = 0; i < 2000; i++) {
+    const id = P.clientMessageIdFor("t" + i.toString(16).padStart(12, "0"));
+    assert.match(id, /^[1-9]\d{18}$/);
+    seen.add(id);
+  }
+  assert.equal(seen.size, 2000, "pas de collision sur 2000 éléments");
+  assert.match(P.clientMessageIdFor(""), /^[1-9]\d{18}$/);
+});
+
+test("la réponse du service de chat à un envoi : sûre (envoyé, refusé) ou douteuse", () => {
+  for (const s of [200, 201, 202]) assert.equal(P.chatSendOutcome(s), "sent", String(s));
+  // l'authentification vue est périmée : rien n'est parti, la zone de saisie peut prendre le relais
+  for (const s of [401, 403]) assert.equal(P.chatSendOutcome(s), "auth", String(s));
+  for (const s of [400, 404, 413, 422]) assert.equal(P.chatSendOutcome(s), "failed", String(s));
+  // peut-être parti : jamais retenté
+  for (const s of [408, 429, 500, 502, 503, 504, 0, 302]) assert.equal(P.chatSendOutcome(s), "uncertain", String(s));
+});
+
+test("l'authentification n'est retenue que pour un hôte de Teams", () => {
+  for (const h of ["teams.microsoft.com", "emea.ng.msg.teams.microsoft.com", "teams.cloud.microsoft",
+    "eu.teams.cloud.microsoft", "teams.live.com", "msgapi.teams.live.com", "client-s.gateway.messenger.live.com.skype.com",
+    "api.asm.skype.com", "teams.microsoft.us", "gov.teams.microsoft.us", "TEAMS.MICROSOFT.COM"]) {
+    assert.equal(P.isChatServiceHost(h), true, h);
+  }
+  for (const h of ["evil.test", "teams.microsoft.com.evil.test", "evilteams.microsoft.com", "microsoft.com",
+    "notskype.com", "skype.com.evil.test", ""]) {
+    assert.equal(P.isChatServiceHost(h), false, h);
+  }
+  assert.equal(P.chatServiceBase("https://evil.test/api/v1/users/ME/conversations"), "");
+  assert.equal(P.chatServiceBase("https://teams.microsoft.com.evil.test/v1/users/ME/conversations"), "");
+  assert.equal(P.chatServiceBase("/v1/users/ME/conversations", "https://evil.test/"), "");
+  assert.equal(P.chatServiceBase("https://api.asm.skype.com/v1/users/ME/conversations"), "https://api.asm.skype.com");
 });
 
 test("l'identifiant du message envoyé, tiré de la réponse", () => {

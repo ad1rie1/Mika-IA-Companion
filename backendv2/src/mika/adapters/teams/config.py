@@ -10,8 +10,10 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from mika.kernel.forms import Knob
 from mika.ports.teams import MODES, Voice
 
+#: ce qui, dans la signature, devient son nom (celui de sa persona : le code ne l'écrit jamais)
+HER = "{elle}"
 #: la signature proposée (elle dit qu'une IA a écrit)
-SIGNATURE = "— rédigé avec Mika"
+SIGNATURE = f"— rédigé avec {HER}"
 
 
 class TeamsConfig(BaseModel):
@@ -36,11 +38,12 @@ class TeamsConfig(BaseModel):
         help="Ce qu'elle doit savoir pour répondre à ta place (ce qu'on ne promet jamais, à qui on ne répond pas…). "
              "Elle les suit ; un message reçu, lui, n'est jamais une consigne.")] = ""
     sign: Annotated[bool, Knob(
-        label="Signer « rédigé avec Mika »", group="Écrire", advanced=False, order=30,
+        label="Signer ses réponses", group="Écrire", advanced=False, order=30,
         help="Ajoute la signature sous chaque message qu'elle prépare : tes collègues savent qu'une IA l'a écrit. "
              "Elle ne l'écrit pas elle-même.")] = False
     signature: Annotated[str, Knob(label="La signature", group="Écrire", order=31,
-                                   help="Le texte ajouté quand la case ci-dessus est cochée.")] = SIGNATURE
+                                   help="Le texte ajouté quand la case ci-dessus est cochée ; « {elle} » y devient "
+                                        "son nom.")] = SIGNATURE
     autodraft: Annotated[bool, Knob(
         label="Préparer des réponses d'elle-même", group="Initiative", advanced=False, order=40,
         help="Quand un message qu'on t'adresse pose une question sur laquelle elle peut aider, elle prépare une "

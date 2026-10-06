@@ -38,6 +38,11 @@ from twin.replay.assemble import ArchiveItems, assemble_extraction
 from twin.timing import from_us, to_us
 
 SILENCE = "[SILENCE]"
+SEQ_SCHEMA = """
+CREATE TABLE IF NOT EXISTS replay_seq (seq INTEGER PRIMARY KEY, archive TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS replay_archive (archive INTEGER PRIMARY KEY, seq INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS replay_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+"""
 EXTRACT_TOOL, PROFILE_TOOL = "record_memories", "record_profile"
 #: les tons du moteur (``faculties/self/night.py::TONE_FR``) → ceux des rêves synthétisés
 TONES = {"cauchemar": "cauchemar", "doux, lumineux": "doux", "mélancolique": "melancolique", "étrange": "etrange",
@@ -60,23 +65,45 @@ class ReplayLLM:
         self.now = now
         #: ce que le pilote a annoncé qu'elle dira, par adresse de la personne visée
         self.expected: dict[str, deque[str]] = defaultdict(deque)
-        #: ``seq`` du journal → messages d'archive qu'il porte (tenu par le pilote)
-        self.archive_of_seq: dict[int, tuple[int, ...]] = {}
+        #: ``seq`` du journal → messages d'archive qu'il porte (tenu par le pilote, dans ``corpus.db`` : un million
+        #: de lignes ne tiennent pas en mémoire à côté du noyau)
+        self.db.executescript(SEQ_SCHEMA)
         self.holes: Counter[str] = Counter()
         self.served: Counter[str] = Counter()
         self._compacted_until: dict[int, int] = {}
         self._told_dreams: dict[str, list[dict[str, Any]]] | None = None
         persons = self.db.execute("SELECT id, handle, name FROM persons").fetchall()
         self.person_of_handle = {r["handle"]: r["id"] for r in persons}
+        self._handle_of = {r["id"]: r["handle"] for r in persons}
         self.display_name = {f"p{r['id']}": r["name"] for r in persons}
 
     # -- ce que le pilote annonce ------------------------------------------------------------------------
 
+    def handle_of(self, person: int) -> str | None:
+        return self._handle_of.get(person)
+
     def expect(self, handle: str, text: str) -> None:
         self.expected[handle].append(text)
 
-    def note_seq(self, seq: int, archive: tuple[int, ...]) -> None:
-        self.archive_of_seq[seq] = archive
+    def note_seq(self, seq: int, archive: tuple[int, ...] | list[int]) -> None:
+        self.db.execute("INSERT OR REPLACE INTO replay_seq (seq, archive) VALUES (?, ?)",
+                        (seq, ",".join(str(a) for a in archive)))
+        self.db.executemany("INSERT OR REPLACE INTO replay_archive (archive, seq) VALUES (?, ?)",
+                            [(int(a), seq) for a in archive])
+
+    def seq_of(self, archive_id: int) -> int | None:
+        """Le ``seq`` du journal qui porte ce message d'archive (``None`` : pas encore vécu)."""
+        row = self.db.execute("SELECT seq FROM replay_archive WHERE archive = ?", (int(archive_id),)).fetchone()
+        return int(row["seq"]) if row else None
+
+    def archive_of(self, seqs: list[int]) -> dict[int, tuple[int, ...]]:
+        out: dict[int, tuple[int, ...]] = {}
+        for i in range(0, len(seqs), 500):
+            chunk = seqs[i: i + 500]
+            for r in self.db.execute(f"SELECT seq, archive FROM replay_seq WHERE seq IN ({','.join('?' * len(chunk))})",  # noqa: S608
+                                     chunk):
+                out[r["seq"]] = tuple(int(a) for a in r["archive"].split(",") if a)
+        return out
 
     # -- le port LLM -------------------------------------------------------------------------------------
 
@@ -106,13 +133,14 @@ class ReplayLLM:
     def _extract(self, req: LLMRequest) -> LLMResponse:
         text = req.messages[-1].content if req.messages else ""
         seqs = [int(x) for x in re.findall(r"^\[#(\d+)\]", text, re.M)]
-        archive = {a for s in seqs for a in self.archive_of_seq.get(s, ())}
+        mapping = self.archive_of(seqs)
+        archive = {a for ids in mapping.values() for a in ids}
         items = ArchiveItems()
         for sid in sorted({self._session_of_message(a) for a in archive} - {None}):
             annotation, messages = self._annotation(sid)  # type: ignore[arg-type]
             if annotation:
                 items.add_session(annotation, messages)
-        args = assemble_extraction(text, self.archive_of_seq, items, self.display_name)
+        args = assemble_extraction(text, mapping, items, self.display_name)
         return LLMResponse("", tool_calls=(ToolCall(f"{req.call_id}:x", EXTRACT_TOOL, args),), stop="tool_use",
                            model=self.model)
 
@@ -125,7 +153,10 @@ class ReplayLLM:
     def _annotation(self, session: int) -> tuple[dict[str, Any] | None, tuple[int, ...]]:
         row = self.db.execute("SELECT data FROM annotations WHERE session = ? ORDER BY version DESC LIMIT 1",
                               (session,)).fetchone()
-        msgs = tuple(r["id"] for r in self.db.execute("SELECT id FROM messages WHERE session = ?", (session,)))
+        # les messages que le script rejoue, dans l'ordre du temps (ni système, ni supprimé, ni vide)
+        msgs = tuple(r["id"] for r in self.db.execute(
+            "SELECT id FROM messages WHERE session = ? AND author IS NOT NULL AND kind NOT IN ('systeme', 'supprime') "
+            "AND TRIM(text) != '' ORDER BY t_point IS NULL, t_point, rank", (session,)))
         return (json.loads(row["data"]) if row else None), msgs
 
     def _profile(self, req: LLMRequest) -> LLMResponse:
@@ -135,7 +166,8 @@ class ReplayLLM:
         if person is not None:
             rows = self.db.execute("SELECT key, data FROM syntheses WHERE kind = 'profil' AND key LIKE ? "
                                    "ORDER BY key DESC", (f"p{person}:%",)).fetchall()
-            data = next((json.loads(r["data"]) for r in rows if r["key"].split(":")[1] <= quarter), None)
+            # un trimestre fini : celui en cours est tiré de semaines qu'elle n'a pas encore vécues
+            data = next((json.loads(r["data"]) for r in rows if r["key"].split(":")[1] < quarter), None)
         if data is None:
             self.holes["profile:sans profil"] += 1
             return LLMResponse(SILENCE, model=self.model)
@@ -146,6 +178,10 @@ class ReplayLLM:
     # -- ses nuits ---------------------------------------------------------------------------------------------
 
     def _journal(self, req: LLMRequest) -> LLMResponse:
+        if req.call_id.count("#") >= 2:
+            # une « nuit coupée » fait réécrire le journal du jour : on garde le premier (l'archive n'en dit pas plus)
+            self.served["journal:révision tue"] += 1
+            return LLMResponse(SILENCE, model=self.model)
         day = _key_after_hash(req.call_id)
         real = self._real_journal(day)
         if real:
@@ -157,7 +193,8 @@ class ReplayLLM:
         resumes = self._day_resumes(day)
         if resumes:
             return LLMResponse(" ".join(resumes[:3]), model=self.model)
-        return LLMResponse("Journée calme, rien de particulier.", model=self.model)
+        self.holes["journal:rien de lu ce jour-là"] += 1
+        return LLMResponse(SILENCE, model=self.model)  # rien n'invente une journée
 
     def _real_journal(self, day: str) -> str:
         try:
@@ -179,7 +216,8 @@ class ReplayLLM:
         end = start + 24 * 3_600_000_000
         rows = self.db.execute(
             "SELECT a.data FROM sessions s JOIN annotations a ON a.session = s.id WHERE s.t_point >= ? "
-            "AND s.t_point < ? ORDER BY s.t_point", (start, end)).fetchall()
+            "AND s.t_point < ? AND a.version = (SELECT MAX(version) FROM annotations WHERE session = s.id) "
+            "ORDER BY s.t_point", (start, end)).fetchall()
         return [json.loads(r["data"]).get("resume", "") for r in rows if r["data"]]
 
     def _dream(self, req: LLMRequest) -> LLMResponse:
@@ -208,7 +246,8 @@ class ReplayLLM:
 
     def _narrative(self, req: LLMRequest) -> LLMResponse:
         month = from_us(self.now(), self.tz).strftime("%Y-%m")
-        row = self.db.execute("SELECT data FROM syntheses WHERE kind = 'mois' AND key <= ? ORDER BY key DESC, "
+        # un mois fini : le récit du mois en cours dirait déjà ce qui arrivera dans trois semaines
+        row = self.db.execute("SELECT data FROM syntheses WHERE kind = 'mois' AND key < ? ORDER BY key DESC, "
                               "version DESC LIMIT 1", (month,)).fetchone()
         if not row:
             self.holes["narrative:sans mois"] += 1
@@ -216,20 +255,32 @@ class ReplayLLM:
         return LLMResponse(json.loads(row["data"])["recit"], model=self.model)
 
     def _compact(self, req: LLMRequest) -> LLMResponse:
+        """Le résumé d'un long fil : le résumé précédent (dans la requête) et ce qui s'est passé depuis, d'après les
+        résumés de séances (la dernière version de chaque annotation), jamais ce qui n'est pas encore arrivé."""
         person = self.person_of_handle.get(req.call_id.rsplit("#", 1)[-1])
         if person is None:
             self.holes["compact:inconnue"] += 1
             return LLMResponse("", model=self.model)
-        since = self._compacted_until.get(person, 0)
+        key = f"compact:{person}"
+        row = self.db.execute("SELECT value FROM replay_state WHERE key = ?", (key,)).fetchone()
+        since = int(json.loads(row["value"])) if row else 0
         now = self.now()
         rows = self.db.execute(
             "SELECT s.t_point, a.data FROM sessions s, json_each(s.persons) j JOIN annotations a ON a.session = s.id "
-            "WHERE j.value = ? AND s.t_point > ? AND s.t_point <= ? ORDER BY s.t_point", (person, since, now)).fetchall()
-        self._compacted_until[person] = now
-        sentences = [json.loads(r["data"]).get("resume", "") for r in rows]
-        text = " ".join(s for s in sentences if s)
-        parts = re.split(r"(?<=[.!?])\s+", text)
-        return LLMResponse(" ".join(parts[:MAX_COMPACT_SENTENCES]), model=self.model)
+            "WHERE j.value = ? AND s.t_point > ? AND s.t_point <= ? AND a.version = (SELECT MAX(version) FROM "
+            "annotations WHERE session = s.id) ORDER BY s.t_point", (person, since, now)).fetchall()
+        self.db.execute("INSERT OR REPLACE INTO replay_state (key, value) VALUES (?, ?)", (key, json.dumps(now)))
+        text = req.messages[-1].content if req.messages else ""
+        previous = text.split("Résumé précédent :", 1)[1].split("\n\n", 1)[0].strip() \
+            if "Résumé précédent :" in text else ""
+        news = " ".join(x for x in (json.loads(r["data"]).get("resume", "") for r in rows) if x)
+        recent = [x for x in re.split(r"(?<=[.!?])\s+", news) if x]
+        before = [x for x in re.split(r"(?<=[.!?])\s+", previous) if x]
+        room = max(3, MAX_COMPACT_SENTENCES - len(before))  # le plus récent d'abord, sans jamais tout perdre
+        return LLMResponse(" ".join([*before, *recent[-room:]]).strip(), model=self.model)
+
+    def _has(self, table: str) -> bool:
+        return self.db.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (table,)).fetchone() is not None
 
 
 def _key_after_hash(call_id: str) -> str:

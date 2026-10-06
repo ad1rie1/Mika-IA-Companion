@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Mika · Teams",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Fait lire à Mika tes conversations Teams web et lui permet d'y répondre, par son serveur local.",
-  "minimum_chrome_version": "111",
+  "minimum_chrome_version": "120",
   "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
-  "permissions": ["storage", "alarms", "notifications"],
+  "permissions": ["storage", "unlimitedStorage", "alarms", "notifications"],
   "host_permissions": [
     "https://teams.microsoft.com/*",
     "https://teams.cloud.microsoft/*",
@@ -18,14 +18,14 @@
   "content_scripts": [
     {
       "matches": ["https://teams.microsoft.com/*", "https://teams.cloud.microsoft/*", "https://teams.live.com/*"],
-      "js": ["lib/extract.js", "lib/page.js", "page/capture.js"],
+      "js": ["lib/text.js", "lib/extract.js", "lib/page.js", "page/capture.js"],
       "run_at": "document_start",
       "world": "MAIN",
       "all_frames": false
     },
     {
       "matches": ["https://teams.microsoft.com/*", "https://teams.cloud.microsoft/*", "https://teams.live.com/*"],
-      "js": ["content/relay.js"],
+      "js": ["lib/text.js", "content/relay.js"],
       "run_at": "document_start",
       "all_frames": false
     }

@@ -32,8 +32,8 @@ import sys
 import time
 from collections import Counter, deque
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -988,11 +988,25 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--nom", default="")
     ap.add_argument("--sans-reveil", action="store_true", help="préréglage + body.woken_by=() (personne ne la réveille)")
     ap.add_argument("--lever", action="store_true", help="débit : lever le préréglage à l'arrivée et le vérifier")
+    ap.add_argument("--profil", action="store_true", help="profiler (cProfile) : out/<nom>/profil.txt")
     args = ap.parse_args(argv)
     if args.sans_reveil:
         FAST_FORWARD["body"] = {"woken_by": []}
     t0 = time.perf_counter()
-    res = SCENARIOS[args.scenario](args)
+    if args.profil:
+        import cProfile  # noqa: PLC0415
+        import io  # noqa: PLC0415
+        import pstats  # noqa: PLC0415
+        prof = cProfile.Profile()
+        res = prof.runcall(SCENARIOS[args.scenario], args)
+        buf = io.StringIO()
+        st = pstats.Stats(prof, stream=buf)
+        st.sort_stats("cumulative").print_stats(60)
+        st.sort_stats("tottime").print_stats(40)
+        name = args.nom or f"{args.scenario}"
+        (OUT / name / "profil.txt").write_text(buf.getvalue())
+    else:
+        res = SCENARIOS[args.scenario](args)
     brief = {k: v for k, v in res.items() if not isinstance(v, (dict, list)) or k in (
         "appels_par_rôle", "pilote", "délai_réponse_s", "tailles_octets", "mémoire")}
     print(json.dumps(brief, ensure_ascii=False, indent=1, default=str)[:6000])

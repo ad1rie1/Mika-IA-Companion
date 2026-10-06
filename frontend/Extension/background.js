@@ -1,19 +1,21 @@
 /*
  * Le service d'arrière-plan, client du plugin Teams de Mika :
- *   - il reçoit ce que les onglets Teams ont capté, décide de ce qui part (nouveau, pas exclu, pas en pause), le
- *     garde en file et l'envoie (`POST /api/teams/inbox`), ses propres messages compris ;
+ *   - il reçoit ce que les onglets Teams ont capté, décide de ce qui part (nouveau, pas exclu, pas écrit pendant une
+ *     pause), le garde en file et l'envoie (`POST /api/teams/inbox`), ses propres messages compris ;
  *   - il relève toutes les 30 s ce qu'elle a écrit (`GET /api/teams/outbox`) : un brouillon est annoncé par une
- *     notification puis placé dans la zone de saisie quand la conversation est ouverte, un message à envoyer part
- *     par un onglet Teams ; chaque issue lui est rendue (`POST /api/teams/outbox/<id>`).
+ *     notification puis placé dans la zone de saisie quand la conversation est ouverte ; un message à envoyer est
+ *     d'abord réclamé auprès du serveur (un seul navigateur l'obtient), puis part par un onglet Teams ; chaque issue
+ *     sûre lui est rendue (`POST /api/teams/outbox/<id>`), une issue douteuse ne l'est jamais.
  *
  * Un service d'extension MV3 peut être arrêté à tout moment : tout l'état vit dans `chrome.storage.local`, et chaque
  * lecture-écriture passe par un même verrou pour que deux événements simultanés ne s'écrasent pas. Les appels
  * réseau et les allers-retours avec les onglets se font hors du verrou ; ce qu'ils changent est réécrit dessous,
  * entrée par entrée.
  */
-/* global importScripts, MikaTeamsExtract, MikaTeamsSignals, MikaTeamsOutbox */
-importScripts("lib/extract.js", "lib/signals.js", "lib/outbox.js");
+/* global importScripts, MikaTeamsText, MikaTeamsExtract, MikaTeamsSignals, MikaTeamsOutbox */
+importScripts("lib/text.js", "lib/extract.js", "lib/signals.js", "lib/outbox.js");
 
+const T = MikaTeamsText;
 const X = MikaTeamsExtract;
 const S = MikaTeamsSignals;
 const O = MikaTeamsOutbox;
@@ -22,7 +24,10 @@ const TEAMS_TABS = ["https://teams.microsoft.com/*", "https://teams.cloud.micros
 const TEAMS_HOME = "https://teams.microsoft.com/";
 const QUEUE_MAX = 1000;
 const TITLES_MAX = 3000;
+const PEOPLE_MAX = 3000; // conversations dont on garde les noms des personnes vues
+const PEOPLE_PER_CONVERSATION = 12;
 const REQUEST_TIMEOUT_MS = 15000;
+const TAB_SEND_TIMEOUT_MS = 45000; // au-delà du relais (30 s) : un onglet figé ne bloque pas la tournée
 const RUNTIME_VERSION = 2;
 const NOTE_PREFIX = "mika-draft:";
 const ICON = "icons/icon-128.png";
@@ -32,9 +37,11 @@ const DEFAULT_SETTINGS = { base: "http://127.0.0.1:8001", key: "", paused: false
 function freshRuntime() {
   return {
     version: RUNTIME_VERSION,
-    armedAt: 0, seen: {}, queue: [], titles: {}, self: "", selfName: "", batchMax: S.LIMITS.maxMessages,
+    armedAt: 0, seen: {}, queue: [], titles: {}, people: {}, pauses: [], self: "", selfName: "",
+    batchMax: S.LIMITS.maxMessages,
     stats: { received: 0, admitted: 0, delivered: 0, own: 0, posts: 0, dropped: {}, bySource: { network: 0, idb: 0 } },
     lastError: "", lastErrorAt: 0, lastOkAt: 0, lastPollAt: 0, retryAt: 0, authFailed: false, failures: 0,
+    ackRetryAt: 0, ackFailures: 0, inboxStrike: null,
     outbox: O.freshBox(),
   };
 }
@@ -65,6 +72,8 @@ async function load() {
   runtime.outbox = Object.assign(O.freshBox(), runtime.outbox || {});
   runtime.outbox.stats = Object.assign(O.freshBox().stats, runtime.outbox.stats || {});
   if (!runtime.armedAt) runtime.armedAt = Date.now();
+  // en pause sans intervalle ouvert (une version d'avant les intervalles) : la pause compte depuis maintenant
+  if (settings.paused && !S.pauseOpen(runtime.pauses)) runtime.pauses = S.notePause(runtime.pauses, true, Date.now());
   return { settings: settings, runtime: runtime };
 }
 
@@ -93,19 +102,49 @@ function ready(state, now) {
   return !state.settings.paused && Boolean(state.settings.key) && !rt.authFailed && rt.retryAt <= now;
 }
 
-// ── Ce qui arrive des onglets ────────────────────────────────────────────────
+/** On peut lui rendre les issues : même en pause, même pendant une attente de la file — pas après une clé refusée. */
+function canAck(state, now) {
+  const rt = state.runtime;
+  return Boolean(state.settings.key) && !rt.authFailed && (rt.ackRetryAt || 0) <= now;
+}
+
+/** On peut écrire dans Teams : pas de pause, une clé acceptée. */
+function canWrite(state) {
+  return !state.settings.paused && Boolean(state.settings.key) && !state.runtime.authFailed;
+}
+
+// ── Ce qu'on sait des conversations ─────────────────────────────────────────
 
 function learnTitles(rt, conversations, now) {
   for (const c of conversations) {
     const prev = rt.titles[c.id] || {};
     rt.titles[c.id] = Object.assign({}, prev,
-      { title: c.title || prev.title || "", kind: X.conversationKind(c.id, c.threadType), at: now });
+      { title: c.title || prev.title || "", kind: X.conversationKind(c.id, c.threadType), at: now, known: true });
   }
   const ids = Object.keys(rt.titles);
   if (ids.length > TITLES_MAX) {
     ids.sort(function (a, b) { return rt.titles[a].at - rt.titles[b].at; });
     for (const id of ids.slice(0, ids.length - TITLES_MAX)) delete rt.titles[id];
   }
+}
+
+/** Une personne vue écrire dans une conversation (pas soi) : c'est par elle qu'on nomme un tête-à-tête. */
+function learnPerson(rt, conv, author, now) {
+  const name = S.clean(author, 120);
+  if (!conv || !name) return;
+  const p = rt.people[conv] || (rt.people[conv] = { names: [], at: now });
+  p.at = now;
+  if (p.names.indexOf(name) < 0) {
+    p.names.push(name);
+    if (p.names.length > PEOPLE_PER_CONVERSATION) p.names.shift();
+  }
+}
+
+function prunePeople(rt) {
+  const ids = Object.keys(rt.people);
+  if (ids.length <= PEOPLE_MAX) return;
+  ids.sort(function (a, b) { return rt.people[a].at - rt.people[b].at; });
+  for (const id of ids.slice(0, ids.length - PEOPLE_MAX)) delete rt.people[id];
 }
 
 function kindOf(rt, conv) {
@@ -118,32 +157,68 @@ function titleOf(rt, conv) {
   return known ? known.title : "";
 }
 
+/** Ce qui nomme une conversation, pour les exclusions et la retenue : `{conv, title, kind, people, known}`. */
+function describe(rt, conv) {
+  const t = rt.titles[conv];
+  return { conv: conv, title: t ? t.title || "" : "", kind: kindOf(rt, conv),
+    people: rt.people[conv] ? rt.people[conv].names : [], known: Boolean(t && (t.known || t.title)) };
+}
+
+/** Un élément de la boîte d'envoi dans une conversation exclue : son nom chez Mika compte aussi. */
+function excludedEntry(state, entry) {
+  const rt = state.runtime;
+  const c = describe(rt, entry.conversation);
+  if (entry.title && c.title.toLowerCase() !== String(entry.title).toLowerCase()) {
+    c.title = [c.title, entry.title].filter(Boolean).join("\n");
+  }
+  if (!rt.titles[entry.conversation] && entry.kind) c.kind = entry.kind;
+  return S.isExcluded(c, S.exclusions(state.settings.exclude));
+}
+
+// ── Ce qui arrive des onglets ────────────────────────────────────────────────
+
 function ingest(state, batch) {
   const rt = state.runtime;
   const settings = state.settings;
   const now = Date.now();
-  if (batch.self) rt.self = String(batch.self).toLowerCase();
-  learnTitles(rt, batch.conversations || [], now);
+  if (S.isSelfId(batch.self)) rt.self = String(batch.self).toLowerCase();
+  // en pause, rien n'est appris des noms de conversation : ils ne partiraient qu'après, avec ce qui a été écrit
+  // pendant (l'onglet les redit à la reprise)
+  if (!settings.paused) learnTitles(rt, batch.conversations || [], now);
+  rt.pauses = S.prunePauses(rt.pauses, now);
   const exclude = S.exclusions(settings.exclude);
   for (const m of batch.messages || []) {
     rt.stats.received++;
     rt.stats.bySource[m.source] = (rt.stats.bySource[m.source] || 0) + 1;
-    // son propre nom, tel que Teams l'affiche : c'est lui qui signe ce que Mika envoie en son nom
+    // son propre nom, tel que Teams l'affiche : c'est lui qui signe ce que Mika envoie en son nom ; les autres
+    // noms, gardés ici, servent seulement aux exclusions (même d'un message qui ne part pas : plus d'exclusion, jamais
+    // moins)
     if (m.author && S.isOwn(m, rt.self)) rt.selfName = S.clean(m.author, 120);
+    else if (m.author) learnPerson(rt, m.conv, m.author, now);
+    const c = describe(rt, m.conv);
     const reason = S.admit(m, {
-      now: now, armedAt: rt.armedAt, seen: rt.seen, paused: settings.paused, title: titleOf(rt, m.conv),
-      kind: kindOf(rt, m.conv), exclude: exclude,
+      now: now, armedAt: rt.armedAt, seen: rt.seen, paused: settings.paused, pauses: rt.pauses, title: c.title,
+      kind: c.kind, people: c.people, exclude: exclude,
     });
     if (reason === "déjà vu") continue;
-    if (reason !== "vide") rt.seen[m.id] = m.time;
+    if (reason !== "vide") rt.seen[T.versionKey(m)] = m.time;
     if (reason) {
       rt.stats.dropped[reason] = (rt.stats.dropped[reason] || 0) + 1;
       continue;
     }
-    rt.queue.push({ id: m.id, conv: m.conv, author: m.author, authorId: m.authorId, time: m.time, text: m.text,
-      mentions: (m.mentions || []).slice(0, 20) });
+    // une version plus récente (modifiée, supprimée) remplace celle qui attend encore
+    rt.queue = rt.queue.filter(function (q) { return q.id !== m.id; });
+    const entry = { id: m.id, conv: m.conv, author: m.author, authorId: m.authorId, time: m.time, text: m.text,
+      mentions: (m.mentions || []).slice(0, 20), at: now };
+    if (m.deleted) {
+      entry.deleted = true;
+      entry.text = "";
+      entry.mentions = [];
+    }
+    rt.queue.push(entry);
     rt.stats.admitted++;
   }
+  prunePeople(rt);
   if (rt.queue.length > QUEUE_MAX) {
     rt.queue.sort(function (a, b) { return a.time - b.time; });
     const over = rt.queue.length - QUEUE_MAX;
@@ -198,10 +273,14 @@ function trouble(rt, result, now) {
   rt.failures++;
   const wait = S.backoffSeconds(rt.failures);
   rt.retryAt = now + wait * 1000;
+  fail(rt, troubleText(result) + " — nouvel essai dans " + wait + " s.");
+}
+
+function troubleText(result) {
   // 403 : Teams désactivé chez Mika, ou l'origine refusée — ce n'est pas la clé
-  fail(rt, (result.status === 404 ? "Pas de plugin Teams à cette adresse (mettre à jour Mika)"
+  return result.status === 404 ? "Pas de plugin Teams à cette adresse (mettre à jour Mika)"
     : result.status === 403 ? "Mika refuse : " + (result.error || "Teams est désactivé chez elle")
-      : result.error || "Mika a répondu " + result.status) + " — nouvel essai dans " + wait + " s.");
+      : result.error || "Mika a répondu " + result.status;
 }
 
 /** Mika a répondu comme prévu : l'attente et l'erreur affichée s'effacent. */
@@ -227,20 +306,28 @@ function markShared(rt, conv, now) {
 function titleUpdates(rt, exclude) {
   return Object.keys(rt.titles).filter(function (id) {
     const t = rt.titles[id];
-    return t.shared && t.sentSig !== signature(rt, id) && t.kind !== "system" && !S.isExcluded(id, t.title, exclude);
+    return t.shared && t.sentSig !== signature(rt, id) && t.kind !== "system"
+      && !S.isExcluded(describe(rt, id), exclude);
   }).slice(0, S.LIMITS.maxConversations);
+}
+
+/** Les messages de la file retenus le temps d'apprendre le nom de leur conversation. */
+function heldMessages(rt, exclude, now) {
+  return rt.queue.filter(function (m) { return S.held(m, describe(rt, m.conv), exclude, now); });
 }
 
 function nextBatch(state) {
   const rt = state.runtime;
+  const now = Date.now();
   // une exclusion ajoutée, ou un nom appris après coup, vaut aussi pour ce qui attend
   const exclude = S.exclusions(state.settings.exclude);
   rt.queue = rt.queue.filter(function (m) {
-    if (!S.isExcluded(m.conv, titleOf(rt, m.conv), exclude)) return true;
+    if (!S.isExcluded(describe(rt, m.conv), exclude)) return true;
     rt.stats.dropped.exclue = (rt.stats.dropped.exclue || 0) + 1;
     return false;
   });
-  const list = S.batches(rt.queue, {
+  const held = new Set(heldMessages(rt, exclude, now));
+  const list = S.batches(rt.queue.filter(function (m) { return !held.has(m); }), {
     info: function (conv) { return { title: titleOf(rt, conv), kind: kindOf(rt, conv) }; },
     self: { id: S.selfMri(rt.self), name: rt.selfName },
     selfId: rt.self,
@@ -261,13 +348,17 @@ function afterInbox(state, batch, result) {
     for (const conv of batch.convs) markShared(rt, conv, now); // ne pas redire sans fin ce qui est refusé
   };
   if (result.status === 202) {
+    // le serveur écarte lui-même un message illisible, le reste du lot passe
+    const refused = Math.max(0, Math.min(batch.ids.length, Number(result.data && result.data.dropped) || 0));
     rt.queue = rt.queue.filter(function (m) { return !ids.has(m.id); });
-    rt.stats.delivered += batch.ids.length;
+    rt.stats.delivered += batch.ids.length - refused;
+    if (refused) rt.stats.dropped["refusé par Mika"] = (rt.stats.dropped["refusé par Mika"] || 0) + refused;
     rt.stats.own += batch.body.messages.filter(function (m) { return m.own; }).length;
     rt.stats.posts++;
     for (const conv of batch.convs) markShared(rt, conv, now);
     rt.batchMax = Math.min(S.LIMITS.maxMessages, (rt.batchMax || 1) * 2);
     rt.lastOkAt = now;
+    rt.inboxStrike = null;
     succeeded(rt);
     return true;
   }
@@ -281,9 +372,23 @@ function afterInbox(state, batch, result) {
     return true;
   }
   if (result.status === 400) {
+    // le corps entier est illisible pour le serveur : le redire n'y changerait rien
     drop("refusé par Mika");
     fail(rt, "Un lot refusé par Mika : " + (result.error || "400"));
     return true;
+  }
+  if (result.status >= 500) {
+    rt.inboxStrike = S.serverStrike(rt.inboxStrike, result.status, batch.ids[0] || batch.convs[0] || "");
+    if (rt.inboxStrike.count >= S.LIMITS.serverErrorsMax) {
+      // le même lot, la même erreur, encore et encore : il bloquerait toute la file
+      drop("erreur de Mika");
+      console.warn("[Mika · Teams] lot écarté après " + rt.inboxStrike.count + " erreurs " + result.status
+        + " de suite (" + batch.ids.length + " message(s))");
+      fail(rt, "Un lot que Mika refusait sans fin (erreur " + result.status + ", " + rt.inboxStrike.count
+        + " fois de suite) a été écarté.");
+      rt.inboxStrike = null;
+      return true;
+    }
   }
   trouble(rt, result, now);
   return false;
@@ -310,6 +415,14 @@ async function flushOnce() {
     if (!go) break;
   }
   if (delivered) schedulePoll(1500); // une réponse de Mika suit souvent ce qu'elle vient de lire
+  // ce qui reste retenu repart dès que sa retenue prend fin (l'alarme de 30 s le rattrape si le service dort)
+  const state = await load();
+  const exclude = S.exclusions(state.settings.exclude);
+  const held = heldMessages(state.runtime, exclude, Date.now());
+  if (held.length && ready(state, Date.now())) {
+    const first = Math.min.apply(null, held.map(function (m) { return Number(m.at) || 0; }));
+    scheduleFlush(Math.max(1000, first + S.LIMITS.holdMs - Date.now() + 500));
+  }
 }
 
 let flushTimer = 0;
@@ -325,19 +438,16 @@ function scheduleFlush(ms) {
 
 function teamsTabs() {
   return chrome.tabs.query({ url: TEAMS_TABS }).then(function (tabs) {
-    return tabs.sort(function (a, b) { return (b.active ? 1 : 0) - (a.active ? 1 : 0) || (b.lastAccessed || 0) - (a.lastAccessed || 0); });
+    // un onglet déchargé ou gelé ne répondrait pas
+    return tabs.filter(function (t) { return !t.discarded && t.frozen !== true; })
+      .sort(function (a, b) { return (b.active ? 1 : 0) - (a.active ? 1 : 0) || (b.lastAccessed || 0) - (a.lastAccessed || 0); });
   });
-}
-
-function isExcludedEntry(settings) {
-  const exclude = S.exclusions(settings.exclude);
-  return function (entry) { return S.isExcluded(entry.conversation, entry.title, exclude); };
 }
 
 /** Les brouillons que les onglets peuvent placer maintenant (aucun en pause ou sans clé). */
 function currentDrafts(state) {
   if (state.settings.paused || !state.settings.key) return [];
-  return O.pendingDrafts(state.runtime.outbox, Date.now(), isExcludedEntry(state.settings));
+  return O.pendingDrafts(state.runtime.outbox, Date.now(), function (e) { return excludedEntry(state, e); });
 }
 
 async function pushDrafts(list) {
@@ -351,6 +461,13 @@ async function refreshDrafts() {
   const list = currentDrafts(state);
   await pushDrafts(list);
   await syncNotifications(list);
+}
+
+/** La pause est levée : les onglets redisent les noms de conversation qu'ils connaissent (non gardés pendant). */
+async function resendTitles() {
+  for (const tab of await teamsTabs()) {
+    chrome.tabs.sendMessage(tab.id, { kind: "resendTitles" }).catch(function () { /* pas de script */ });
+  }
 }
 
 function notify(entry) {
@@ -393,14 +510,18 @@ function deliverAcks() {
   return acking;
 }
 
+/** Rend les issues, la plus ancienne d'abord ; une issue refusée laisse passer les suivantes. */
 async function ackLoop() {
-  for (let i = 0; i < 100; i++) {
+  const tried = new Set();
+  for (let i = 0; i < 200; i++) {
     const job = await mutate(function (state) {
-      if (!ready(state, Date.now())) return null;
-      const list = O.pendingAcks(state.runtime.outbox);
-      return list.length ? { settings: state.settings, ack: list[0] } : null;
+      const now = Date.now();
+      if (!canAck(state, now)) return null;
+      const next = O.pendingAcks(state.runtime.outbox, now).find(function (a) { return !tried.has(a.id); });
+      return next ? { settings: state.settings, ack: next } : null;
     });
     if (!job) return;
+    tried.add(job.ack.id);
     const result = await request(job.settings, "POST", "/api/teams/outbox/" + encodeURIComponent(job.ack.id),
       job.ack.body);
     const go = await mutate(function (state) {
@@ -408,51 +529,131 @@ async function ackLoop() {
       const now = Date.now();
       const verdict = O.ackResponse(rt.outbox, job.ack.id, job.ack.body.result, result.status, now);
       if (verdict === "done" || verdict === "forget") {
-        succeeded(rt);
+        rt.ackFailures = 0;
         return true;
       }
       if (verdict === "refused") {
-        fail(rt, "Mika a refusé une issue (" + (result.error || "400") + ") : élément oublié ici.");
+        fail(rt, "Mika refuse une issue (" + (result.error || result.status) + ") : elle sera redite plus tard.");
         return true;
       }
-      trouble(rt, result, now);
+      if (verdict === "dropped") {
+        console.warn("[Mika · Teams] issue " + job.ack.id + " (" + job.ack.body.result + ") abandonnée après "
+          + O.ACK_REFUSALS_MAX + " refus (" + result.status + ")");
+        fail(rt, "Une issue refusée " + O.ACK_REFUSALS_MAX + " fois par Mika a été abandonnée (voir le journal).");
+        return true;
+      }
+      if (verdict === "auth") {
+        trouble(rt, result, now);
+        return false;
+      }
+      if (verdict === "slow") {
+        rt.ackRetryAt = now + result.retryAfter * 1000;
+        fail(rt, "Mika demande de ralentir : issues redites dans " + result.retryAfter + " s.");
+        return false;
+      }
+      rt.ackFailures = (rt.ackFailures || 0) + 1;
+      const wait = S.backoffSeconds(rt.ackFailures);
+      rt.ackRetryAt = now + wait * 1000;
+      fail(rt, troubleText(result) + " — issues redites dans " + wait + " s.");
       return false;
     });
     if (!go) return;
   }
 }
 
-/** Demande aux onglets Teams d'envoyer : le premier qui y parvient (ou qui échoue pour de bon) arrête la tournée. */
+function withTimeout(promise, ms) {
+  let timer = 0;
+  return Promise.race([promise, new Promise(function (_, reject) {
+    timer = setTimeout(function () { reject(new Error("pas de réponse de l'onglet")); }, ms);
+  })]).finally(function () { clearTimeout(timer); });
+}
+
+/**
+ * Demande aux onglets Teams d'envoyer. Un onglet où rien n'est parti (pas de script, page qui n'a pas commencé, ou
+ * qui dit sûrement que rien n'est parti) passe la main au suivant ; la première issue d'une autre nature arrête la
+ * tournée — même douteuse : on ne tente jamais un second onglet après un envoi peut-être parti.
+ */
 async function sendThroughTabs(item) {
   let last = "aucun onglet Teams ouvert";
   for (const tab of await teamsTabs()) {
     let answer = null;
+    let error = null;
     try {
-      answer = await chrome.tabs.sendMessage(tab.id, { kind: "send", item: item });
-    } catch (_) {
-      last = "onglet Teams sans le script (rechargez-le)";
+      answer = await withTimeout(chrome.tabs.sendMessage(tab.id, { kind: "send", item: item }), TAB_SEND_TIMEOUT_MS);
+    } catch (e) {
+      error = e || new Error("erreur");
+    }
+    const outcome = O.tabOutcome(answer, error);
+    if (outcome.result === "retry") {
+      last = outcome.reason || last;
       continue;
     }
-    if (!answer || answer.result === "retry") {
-      last = (answer && answer.reason) || last;
-      continue;
-    }
-    return answer;
+    return outcome;
   }
   return { result: "retry", reason: last };
 }
 
+/**
+ * Un message à envoyer : d'abord réclamé auprès du serveur (sauf si ce navigateur détient déjà la réclamation), puis
+ * envoyé par un onglet. L'exclusion est revérifiée juste avant chaque geste.
+ */
 async function sendOne(id) {
+  const step = await mutate(function (state) {
+    const rt = state.runtime;
+    const box = rt.outbox;
+    const now = Date.now();
+    const e = box.items[id];
+    if (!e || !canWrite(state)) return null;
+    const p = O.plan(box, id, { now: now, excluded: excludedEntry(state, e) });
+    if (p.do === "fail") {
+      O.fail(box, id, p.reason, now);
+      return { acks: true };
+    }
+    if (p.do !== "send") return null;
+    if (O.isClaimed(box, id)) return { send: true };
+    if (!ready(state, now) || !O.beginClaim(box, id, now)) return null;
+    return { claim: true, settings: state.settings };
+  });
+  if (!step) return;
+  if (step.acks) {
+    await deliverAcks();
+    return;
+  }
+  if (step.claim) {
+    const result = await request(step.settings, "POST", "/api/teams/outbox/" + encodeURIComponent(id),
+      { result: "sending" });
+    const verdict = await mutate(function (state) {
+      const rt = state.runtime;
+      const now = Date.now();
+      const v = O.claimResponse(rt.outbox, id, result.status, now);
+      // rien n'est réclamé : on redemandera, après l'attente qu'impose la panne
+      if (v === "retry") trouble(rt, result, now);
+      return v;
+    });
+    if (verdict !== "claimed") return;
+  }
   const job = await mutate(function (state) {
     const rt = state.runtime;
-    if (!ready(state, Date.now()) || !O.beginSend(rt.outbox, id, Date.now())) return null;
-    const e = rt.outbox.items[id];
-    return { id: e.id, conversation: e.conversation, text: e.text, selfName: rt.selfName };
+    const box = rt.outbox;
+    const now = Date.now();
+    const e = box.items[id];
+    if (!e || !canWrite(state)) return null;
+    // dernier regard avant d'écrire : une exclusion ajoutée entre-temps l'emporte (rien n'est parti : échec sûr)
+    if (excludedEntry(state, e)) {
+      O.fail(box, id, O.REASONS.excluded, now);
+      return { acks: true };
+    }
+    if (!O.beginSend(box, id, now)) return null;
+    return { item: { id: e.id, conversation: e.conversation, text: e.text, selfName: rt.selfName } };
   });
   if (!job) return;
-  const outcome = await sendThroughTabs(job);
+  if (job.acks) {
+    await deliverAcks();
+    return;
+  }
+  const outcome = await sendThroughTabs(job.item);
   await mutate(function (state) { O.sendOutcome(state.runtime.outbox, id, outcome, Date.now()); });
-  if (outcome.result !== "retry") await deliverAcks();
+  if (outcome.result === "sent" || outcome.result === "failed") await deliverAcks();
 }
 
 let polling = null;
@@ -462,6 +663,8 @@ function poll() {
 }
 
 async function pollOnce() {
+  // les issues d'abord : même en pause, même pendant une attente de la file, et avant que la liste ne fasse foi
+  await deliverAcks();
   const state = await load();
   if (!ready(state, Date.now())) {
     if (state.settings.paused || !state.settings.key) await refreshDrafts();
@@ -480,12 +683,12 @@ async function pollOnce() {
     O.reconcile(box, items, now);
     rt.lastPollAt = now;
     succeeded(rt);
-    const excluded = isExcludedEntry(s.settings);
     const out = { notify: [], send: [] };
     for (const id of Object.keys(box.items)) {
       const e = box.items[id];
-      const p = O.plan(box, id, { now: now, excluded: excluded(e) });
+      const p = O.plan(box, id, { now: now, excluded: excludedEntry(s, e) });
       if (p.do === "fail") O.fail(box, id, p.reason, now);
+      else if (p.do === "uncertain") O.sendOutcome(box, id, { result: "uncertain", reason: p.reason }, now);
       else if (p.do === "notify") {
         e.notifiedAt = now;
         out.notify.push({ id: e.id, title: e.title, kind: e.kind });
@@ -537,9 +740,9 @@ async function openDraft(id) {
 function cleanSettings(input, previous) {
   const s = Object.assign({}, previous);
   if (typeof input.base === "string") {
-    const url = new URL(input.base.trim());
-    if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("une adresse http:// ou https://");
-    s.base = url.origin;
+    const address = S.serverAddress(input.base);
+    if (address.error) throw new Error(address.error);
+    s.base = address.origin;
   }
   if (typeof input.key === "string" && input.key.trim()) {
     const key = input.key.trim();
@@ -548,7 +751,7 @@ function cleanSettings(input, previous) {
   }
   if (input.clearKey) s.key = "";
   if (typeof input.paused === "boolean") s.paused = input.paused;
-  if (typeof input.exclude === "string") s.exclude = input.exclude.slice(0, 4000);
+  if (typeof input.exclude === "string") s.exclude = T.cut(input.exclude, 4000);
   return s;
 }
 
@@ -558,7 +761,8 @@ function status(state) {
   const now = Date.now();
   return {
     settings: { base: state.settings.base, paused: state.settings.paused, exclude: state.settings.exclude },
-    keySet: Boolean(state.settings.key), queue: rt.queue.length, stats: rt.stats,
+    keySet: Boolean(state.settings.key), queue: rt.queue.length,
+    held: heldMessages(rt, S.exclusions(state.settings.exclude), now).length, stats: rt.stats,
     lastError: rt.lastError, lastErrorAt: rt.lastErrorAt, lastOkAt: rt.lastOkAt, lastPollAt: rt.lastPollAt,
     retryAt: rt.retryAt, authFailed: rt.authFailed, armedAt: rt.armedAt,
     conversations: Object.keys(rt.titles).length, selfFound: Boolean(rt.self), selfNameFound: Boolean(rt.selfName),
@@ -608,11 +812,12 @@ async function handle(msg) {
     case "pendingDrafts":
       return { items: currentDrafts(await load()) };
     case "claim": {
+      // revérifié ici, juste avant que l'onglet n'écrive : pause, clé, exclusion du moment
       const ok = await mutate(function (state) {
         const box = state.runtime.outbox;
         const entry = box.items[msg.id];
-        if (!entry || state.settings.paused || !state.settings.key) return false;
-        return O.claim(box, msg.id, Date.now(), isExcludedEntry(state.settings)(entry));
+        if (!entry || !canWrite(state)) return false;
+        return O.claim(box, msg.id, Date.now(), excludedEntry(state, entry));
       });
       return { ok: ok };
     }
@@ -630,14 +835,23 @@ async function handle(msg) {
     case "status":
       return status(await load());
     case "save": {
+      let resumed = false;
       const result = await mutate(function (state) {
+        const was = Boolean(state.settings.paused);
         state.settings = cleanSettings(msg.settings || {}, state.settings);
+        if (Boolean(state.settings.paused) !== was) {
+          state.runtime.pauses = S.notePause(state.runtime.pauses, state.settings.paused, Date.now());
+          resumed = was;
+        }
         state.runtime.authFailed = false;
         state.runtime.retryAt = 0;
         state.runtime.failures = 0;
+        state.runtime.ackRetryAt = 0;
+        state.runtime.ackFailures = 0;
         state.runtime.lastError = "";
         return status(state);
       });
+      if (resumed) resendTitles().catch(function () { /* rien */ });
       refreshDrafts().catch(function () { /* rien */ });
       scheduleFlush(500);
       schedulePoll(800);
@@ -651,6 +865,7 @@ async function handle(msg) {
       await mutate(function (state) {
         state.runtime.retryAt = 0;
         state.runtime.failures = 0;
+        state.runtime.ackRetryAt = 0;
       });
       await flush();
       await poll();

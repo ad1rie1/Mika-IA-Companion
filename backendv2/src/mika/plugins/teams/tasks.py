@@ -24,6 +24,7 @@ from mika.plugins.teams import (
     Seen,
     TeamsParams,
     TeamsState,
+    drafted,
     keeper_name,
     keepers,
     params_of,
@@ -50,11 +51,6 @@ def fate(mode: str, who: str) -> str:
     return FATE.get(mode, FATE["brouillon"]).replace("{who}", who)
 
 
-def _skipped(m: Seen, skip: tuple[str, ...]) -> bool:
-    hay = f"{m.conversation}\n{m.title}\n{m.author}".lower()
-    return any(s and s in hay for s in skip)
-
-
 def _today(s: TeamsState, now: int) -> int:
     """Les réponses proposées d'elle-même dans les dernières vingt-quatre heures."""
     return sum(1 for d in s.drafts.values() if now - d.at < DAY and not d.asked)
@@ -77,6 +73,8 @@ def _waiting(s: TeamsState, frame: Frame, p: TeamsParams) -> list[tuple[str, See
 @TEAMS.propose(kinds=[Kind.TASK], reasons={c.DRAFT: (0.0, 14.0)}, reads=[identity_c.OWNERS, identity_c.IDENTITY])
 def _prepare(s: TeamsState, frame: Frame) -> list[Candidate]:
     p = params_of(frame)
+    if not p.enabled:
+        return []
     who = keepers(frame)
     out: list[Candidate] = []
     for ref, ask in sorted(s.asked.items(), key=lambda kv: kv[1].seq):
@@ -91,7 +89,7 @@ def _prepare(s: TeamsState, frame: Frame) -> list[Candidate]:
     for ref, m in _waiting(s, frame, p):
         if budget <= 0:
             break
-        if ref in s.asked or _skipped(m, p.skip) or under_way(s, m.conversation):
+        if ref in s.asked or under_way(s, m.conversation) or drafted(s, ref):
             continue
         if s.attempts.get(ref, 0) >= p.draft_attempts_max:
             continue

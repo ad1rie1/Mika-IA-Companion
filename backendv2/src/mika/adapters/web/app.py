@@ -482,6 +482,9 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             return JSONResponse({"error": "Trop de tentatives."}, status_code=429,
                                 headers={**headers, "Retry-After": "60"})
         key = bearer(request.headers.get("authorization"))
+        if not key.startswith(teams_p.KEY_PREFIX) or len(key) > 200:  # sans clé valable, le corps n'est pas lu
+            teams_failures.fail(f"ip:{ip}")
+            return JSONResponse({"error": "Clé refusée."}, status_code=401, headers=headers)
         data: Any = {}
         if request.method == "POST":
             try:

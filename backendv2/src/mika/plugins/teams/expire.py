@@ -10,10 +10,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import teams as c
 from mika.kernel.events import Content
 from mika.kernel.guards import Guard
-from mika.plugins.teams import FROM_PORT, PLACED, QUEUED, SETTLED, TEAMS, WAITING, TeamsState
-
-#: qui refuse au nom du délai
-EXPIRER = "teams.delai"
+from mika.plugins.teams import EXPIRER, FROM_PORT, PLACED, QUEUED, SETTLED, TEAMS, WAITING, TeamsState
 
 
 def _still_pending(proposal: int) -> Guard:
@@ -35,17 +32,16 @@ class Expire:
         port = ctx.ports.get("teams")
         for d in list(ctx.state.drafts.values()):
             if d.state == WAITING and d.expires and d.expires <= now:
-                pending = ctx.frame.state("runtime").effects.get(d.proposal)
-                if pending is None:
-                    continue
                 draft = rt.EFFECT_RESOLVED.draft(
                     proposal=d.proposal, approved=False, by=EXPIRER, note=Content.of("pas d'accord dans le délai"),
-                    capability=c.SEND, owner=c.OWNER, args_json=pending.args_json, context=pending.context,
+                    capability=c.SEND, owner=c.OWNER, args_json=d.args_json or "{}", context=d.context,
                     dedupe_key=f"décision:{d.proposal}")
                 try:
                     await ctx.emit(draft, guard=_still_pending(d.proposal), emitter=rt.OWNER)
                 except Exception:  # noqa: BLE001 — décidée entre-temps : rien à faire
                     continue
+                if port is not None:
+                    port.discard_draft(d.draft)  # elle ne partira plus : le brouillon est abandonné
             elif d.state in (QUEUED, PLACED) and d.queued_until and d.queued_until <= now:
                 await ctx.emit(_expired(port, d.draft, now))
 

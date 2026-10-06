@@ -150,7 +150,8 @@ def admissible(about: tuple[str, ...], sensitivity: int, interlocutor: str | Non
     tellers = tuple(sorted(set(told_by) - {interlocutor}))
     others = tuple(sorted({*about, *told_by} - {interlocutor}))
     if not about and not told_by:  # personne d'identifié : anodin, ou ce que l'audience peut entendre
-        return Verdict(sensitivity <= max(Sensitivity.ANODYNE, audience.level))
+        # … sauf un secret (de ses propres notes, importées) : il ne sort devant personne
+        return Verdict(not secret and sensitivity <= max(Sensitivity.ANODYNE, audience.level), secret=secret)
     if not others:  # seulement l'interlocuteur
         return Verdict(sensitivity <= Sensitivity.ANODYNE or audience.private_ok)
     if interlocutor is not None and interlocutor in told_by:  # ses propres mots, même sur d'autres : sa fiche

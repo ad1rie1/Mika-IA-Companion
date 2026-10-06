@@ -1,0 +1,64 @@
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+#  SA VOIX — toutes les phrases qui la façonnent, en un seul fichier (ADR 0071)
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+#
+# Sa persona (persona/mika.yaml) dit QUI elle est : son nom, son caractère, ses goûts, sa vie.
+# Ce fichier dit COMMENT on le lui dit, et comment elle se dit les choses : tout ce que le modèle lit quand elle
+# parle, se souvient, rêve ou se raconte — et ce qu'elle produit elle-même sans modèle. Le code n'écrit plus
+# aucune de ces phrases : il les demande ici, par leur clé. Changer une tournure, une règle de vie, la grammaire
+# (les accords au féminin, le tutoiement), une consigne de la nuit : on l'écrit ici, et on redémarre.
+#
+# ── Ce qu'on y trouve, dans l'ordre ───────────────────────────────────────────────────────────────────────────
+#   1. Qui elle est ........... sa nature (une IA qui le sait, ou une personne incarnée), les règles de sa vie
+#   2. Sa parole .............. le style, la balise d'émotion, les murmures, le cadre de chaque épisode
+#                                (répondre, prendre la parole, travailler), les repères de temps du fil
+#   3. Ses émotions ........... les mots de ses humeurs, de sa posture envers chacun, de ce qu'elle ressent
+#   4. Son corps, ses besoins . sommeil, fatigue, manque de compagnie, envie de s'exprimer ou d'apprendre
+#   5. Les autres ............. qui elle a en face, ce qu'elle devine d'eux, ses liens, la confiance
+#   6. Sa mémoire ............. relire une conversation (souvenirs, croyances, promesses), le rappel, les fiches,
+#                                les résumés des longs fils
+#   7. Ses nuits .............. journal intime, rêves, récit de soi, sa journée « à raconter »
+#   8. Son attention .......... ce qu'elle remarque, ses pensées, ce qu'elle attend
+#   9. Ses buts et projets .... rêveries, réflexions, rappels, projets, son monde, ce qu'elle envoie
+#  10. Ses greffons ........... courrier, dessins, caméra, flux, réveils, forge, outils MCP, web
+#  11. Ses outils ............. ce que le modèle lit de chaque outil qu'on lui tend
+#
+# Ce qui n'y est PAS : la console de l'opératrice (fiches, actions, aides des réglages), la ligne de commande, les
+# journaux techniques — rien de tout cela n'est lu par le modèle ni dit par elle.
+#
+# ── Écrire une phrase ─────────────────────────────────────────────────────────────────────────────────────────
+#   • Une clé est un chemin : « self: nature: embodied: » se demande « self.nature.embodied » dans le code.
+#     NE PAS RENOMMER une clé, ni en ajouter ou en retirer : le code les demande par leur nom (un test le vérifie,
+#     et une clé absente au démarrage est refusée en le disant).
+#   • Les TROUS {comme_ceci} sont remplis par le code (un nom, une heure, un ton). Garder exactement les mêmes trous :
+#     on peut les déplacer dans la phrase, pas les renommer, ni en ajouter, ni en retirer. Le commentaire au-dessus
+#     de chaque phrase dit ce que contient chaque trou.
+#   • Une phrase longue s'écrit en bloc :
+#       cle: >-           ← « replié » : les retours à la ligne deviennent des espaces (un paragraphe)
+#         Tu écris ton journal intime…
+#       cle: |-           ← « littéral » : les retours à la ligne sont gardés (une liste, des lignes)
+#         - première ligne
+#         - deuxième ligne
+#     Une phrase courte peut s'écrire sur une ligne ; avec « : » ou « # » dedans, la mettre entre guillemets.
+#   • Une LISTE (« - … » sous une clé) est une suite d'exemples ou de tournures : une entrée par ligne.
+#
+# ── La grammaire ──────────────────────────────────────────────────────────────────────────────────────────────
+#   • On lui parle à la deuxième personne (« tu ») : ce sont des consignes qu'elle lit sur elle-même.
+#   • Elle est accordée au FÉMININ partout (« contente », « fière », « endormie », « une amie »). Pour une autre
+#     voix (un homme, un autre registre), réécrire les accords ICI : c'est le seul endroit.
+#   • Les mots de ses humeurs (section 3) sont des adjectifs accordés : « contente », « en colère ».
+#   • Écrire une TENDANCE, jamais une obligation : « toujours », « à chaque fois » font une caricature (un tic
+#     dans une réponse sur deux). Le modèle prend ces mots au pied de la lettre.
+#   • Ne jamais dicter une phrase qu'elle recopierait : un exemple se donne comme « par exemple », jamais comme
+#     « dis : ».
+#
+# ── Une autre voix ────────────────────────────────────────────────────────────────────────────────────────────
+#   Ce fichier est cherché à côté de la persona ; la variable MIKA_VOIX en désigne un autre (un jumeau numérique
+#   peut avoir le sien : INJECTION/). Rien ne se recharge à chaud : redémarrer après une modification.
+#
+# ── Vérifier après une modification ───────────────────────────────────────────────────────────────────────────
+#   .venv/bin/python -m mika.vocab.phrasebook        → le fichier se lit-il ? combien de phrases ?
+#   .venv/bin/python -m pytest -q tests/architecture/test_phrasebook.py
+#                                                    → chaque clé du code existe, chaque trou correspond,
+#                                                      aucune phrase orpheline
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════

@@ -7,16 +7,20 @@
  * mémoire du script de la page, qui ne les poste ni au relais, ni au service d'arrière-plan, ni à Mika.
  */
 (function (root, factory) {
-  const api = factory();
-  if (typeof module === "object" && module.exports) module.exports = api;
+  const node = typeof module === "object" && module && module.exports && typeof require === "function";
+  const api = factory(node ? require("./text.js") : root.MikaTeamsText);
+  if (node) module.exports = api;
   else root.MikaTeamsPage = api;
-})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+})(typeof globalThis !== "undefined" ? globalThis : this, function (T) {
   "use strict";
 
   const AUTH_HEADERS = ["authentication", "authorization", "x-skypetoken"];
   const CHAT_PATH = /\/v1\/users\/ME\/conversations/i;
   const NAV_KEY = /^tmp\.session\.[0-9a-f-]{36}-mainWindowNavHistory$/i;
   const MAX_HEADER = 16 * 1024;
+  // les domaines où vit le service de chat de Teams : l'authentification n'est jamais renvoyée ailleurs
+  const CHAT_DOMAINS = ["teams.microsoft.com", "teams.cloud.microsoft", "teams.live.com", "skype.com",
+    "teams.microsoft.us"];
 
   function isObject(v) {
     return v !== null && typeof v === "object" && !Array.isArray(v);
@@ -71,9 +75,15 @@
     return CHAT_PATH.test(String(url || ""));
   }
 
+  /** Un hôte de Microsoft où le service de chat peut vivre (le domaine lui-même ou l'un de ses sous-domaines). */
+  function isChatServiceHost(host) {
+    const h = String(host || "").toLowerCase().replace(/\.$/, "");
+    return CHAT_DOMAINS.some(function (d) { return h === d || h.slice(-(d.length + 1)) === "." + d; });
+  }
+
   /**
    * La base du service de chat d'une adresse (tout ce qui précède `/v1/users/ME/conversations`), résolue contre la
-   * page ; « » si elle n'est pas en https ou n'en est pas une.
+   * page ; « » si elle n'est pas en https, pas sur un hôte de Teams, ou n'en est pas une.
    */
   function chatServiceBase(url, pageHref) {
     let absolute;
@@ -82,7 +92,7 @@
     } catch (_) {
       return "";
     }
-    if (absolute.protocol !== "https:") return "";
+    if (absolute.protocol !== "https:" || !isChatServiceHost(absolute.hostname)) return "";
     const full = absolute.origin + absolute.pathname;
     const m = CHAT_PATH.exec(full);
     return m ? full.slice(0, m.index) : "";
@@ -98,11 +108,32 @@
     return escapeHtml(String(text || "")).replace(/\r\n|\r|\n/g, "<br>");
   }
 
-  /** Un identifiant de message côté client : 19 chiffres, le premier non nul. `random()` rend un nombre de [0, 1[. */
-  function clientMessageId(random) {
-    let s = String(1 + Math.floor(random() * 9));
-    while (s.length < 19) s += String(Math.floor(random() * 10) % 10);
-    return s;
+  /**
+   * L'identifiant de message côté client d'un élément de la boîte d'envoi : 19 chiffres, le premier non nul, tirés
+   * d'un condensé (FNV-1a sur 64 bits) de l'identifiant de l'élément — le même à chaque tentative, d'un onglet ou d'un
+   * navigateur à l'autre.
+   */
+  function clientMessageIdFor(itemId) {
+    const s = String(itemId || "");
+    let h = 0xcbf29ce484222325n;
+    for (let i = 0; i < s.length; i++) {
+      h ^= BigInt(s.charCodeAt(i));
+      h = (h * 0x100000001b3n) & 0xffffffffffffffffn;
+    }
+    return (1000000000000000000n + (h % 9000000000000000000n)).toString();
+  }
+
+  /**
+   * Ce que dit le statut de la réponse du service de chat à un envoi : `sent` (2xx), `auth` (401, 403 :
+   * l'authentification vue est périmée, rien n'est parti), `failed` (une autre 4xx, sauf 408 et 429 : refusé, rien
+   * n'est parti) ou `uncertain` (5xx, 408, 429, et tout le reste : peut-être parti).
+   */
+  function chatSendOutcome(status) {
+    const s = Number(status) || 0;
+    if (s >= 200 && s < 300) return "sent";
+    if (s === 401 || s === 403) return "auth";
+    if (s >= 400 && s < 500 && s !== 408 && s !== 429) return "failed";
+    return "uncertain";
   }
 
   /** Le corps d'un envoi au service de chat. */
@@ -116,11 +147,11 @@
     if (isObject(json)) {
       for (const k of ["id", "messageId", "OriginalArrivalTime", "originalArrivalTime"]) {
         const v = json[k];
-        if ((typeof v === "string" && v) || (typeof v === "number" && isFinite(v))) return String(v).slice(0, 200);
+        if ((typeof v === "string" && v) || (typeof v === "number" && isFinite(v))) return T.cut(String(v), 200);
       }
     }
     const m = /\/messages\/([^/?#]+)/.exec(String(location || ""));
-    return m ? m[1].slice(0, 200) : "";
+    return m ? T.cut(m[1], 200) : "";
   }
 
   function firstInt(o, keys) {
@@ -201,8 +232,9 @@
 
   return { NAV_KEY: NAV_KEY, isConversationId: isConversationId, sameConversation: sameConversation,
     headerPairs: headerPairs, isAuthHeader: isAuthHeader, authFromHeaders: authFromHeaders,
-    isChatServiceUrl: isChatServiceUrl, chatServiceBase: chatServiceBase, escapeHtml: escapeHtml,
-    messageContent: messageContent, clientMessageId: clientMessageId, messageBody: messageBody,
+    isChatServiceUrl: isChatServiceUrl, isChatServiceHost: isChatServiceHost, chatServiceBase: chatServiceBase,
+    escapeHtml: escapeHtml, messageContent: messageContent, clientMessageIdFor: clientMessageIdFor,
+    chatSendOutcome: chatSendOutcome, messageBody: messageBody,
     messageIdFrom: messageIdFrom, navEntry: navEntry, activeConversationFromNav: activeConversationFromNav,
     activeConversationFromStorage: activeConversationFromStorage, conversationFromLocation: conversationFromLocation };
 });

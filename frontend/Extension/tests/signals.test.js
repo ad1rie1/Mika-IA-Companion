@@ -189,3 +189,146 @@ test("Retry-After : des secondes, une date HTTP, sinon une minute", () => {
 test("après une panne : 15 s, doublé à chaque échec, 5 min au plus", () => {
   assert.deepEqual([1, 2, 3, 4, 5, 6, 10].map(S.backoffSeconds), [15, 30, 60, 120, 240, 300, 300]);
 });
+
+// ── Soi, exactement ─────────────────────────────────────────────────────────
+
+test("son message se reconnaît à l'identifiant exact, pas à un morceau", () => {
+  assert.equal(S.isOwn(msg({ authorId: "8:orgid:SELF-UUID" }), SELF), true);
+  assert.equal(S.isOwn(msg({ authorId: "https://x/v1/users/ME/contacts/8:orgid:self-uuid" }), SELF), true);
+  assert.equal(S.isOwn(msg({ authorId: "8:orgid:self-uuid-2" }), SELF), false);
+  assert.equal(S.isOwn(msg({ authorId: "28:orgid:self-uuid" }), SELF), false);
+  assert.equal(S.isOwn(msg({ authorId: "8:orgid:self" }), "self-uuid"), false);
+  assert.equal(S.mentionsSelf(msg({ mentions: ["8:orgid:self-uuid-bis"] }), SELF), false);
+  assert.equal(S.isSelfId("0f3c9a1e-1111-2222-3333-444455556666"), true);
+  assert.equal(S.isSelfId("8:orgid:0f3c9a1e-1111-2222-3333-444455556666"), false);
+  assert.equal(S.isSelfId(""), false);
+});
+
+// ── Les pauses ──────────────────────────────────────────────────────────────
+
+test("la pause se juge à l'heure du message : écrit pendant, il ne part jamais, même capté après la reprise", () => {
+  let pauses = S.notePause([], true, NOW - 600000);
+  assert.equal(S.pauseOpen(pauses), true);
+  pauses = S.notePause(pauses, false, NOW - 300000);
+  assert.deepEqual(pauses, [{ start: NOW - 600000, end: NOW - 300000 }]);
+  const during = msg({ time: NOW - 400000 });
+  const before = msg({ id: "m0", time: NOW - 700000 });
+  const after = msg({ id: "m2", time: NOW - 200000 });
+  assert.equal(S.admit(during, ctx({ pauses: pauses })), "en pause", "capté après la reprise, écrit pendant");
+  assert.equal(S.admit(before, ctx({ pauses: pauses })), "");
+  assert.equal(S.admit(after, ctx({ pauses: pauses })), "");
+  // une pause en cours couvre tout ce qui suit son début
+  const open = S.notePause(pauses, true, NOW - 100000);
+  assert.equal(S.inPause(NOW + 5000, open), true);
+  assert.equal(S.inPause(NOW - 200000, open), false);
+  // reprendre deux fois ne rouvre ni ne referme rien
+  assert.deepEqual(S.notePause(pauses, false, NOW), pauses);
+  assert.equal(S.notePause(open, true, NOW).length, 2);
+});
+
+test("les pauses gardées sont bornées : celles hors de la fenêtre partent, 50 au plus", () => {
+  const old = [{ start: NOW - 40 * 3600000, end: NOW - 30 * 3600000 }, { start: NOW - 3600000, end: NOW - 1800000 }];
+  assert.deepEqual(S.prunePauses(old, NOW), [old[1]]);
+  let many = [];
+  for (let i = 0; i < 80; i++) {
+    many = S.notePause(many, true, NOW - 100000 + i * 1000);
+    many = S.notePause(many, false, NOW - 100000 + i * 1000 + 500);
+  }
+  assert.equal(many.length, 50);
+  assert.equal(many[49].start, NOW - 100000 + 79 * 1000, "les plus récentes restent");
+  assert.deepEqual(S.prunePauses("n'importe quoi", NOW), []);
+});
+
+// ── Les exclusions, aussi par les personnes ─────────────────────────────────
+
+test("un tête-à-tête sans nom s'exclut par le nom de la personne qu'on y a vue écrire", () => {
+  const exclude = S.exclusions("Dr Martin");
+  assert.equal(S.admit(msg({ author: "Dr Martin" }), ctx({ exclude: exclude, people: ["Dr Martin"] })), "exclue");
+  // son propre message dans ce tête-à-tête aussi
+  assert.equal(S.admit(msg({ id: "m2", author: "Adrien", authorId: "8:orgid:self-uuid" }),
+    ctx({ exclude: exclude, people: ["Dr Martin"] })), "exclue");
+  // un groupe qui a un nom ne s'exclut pas parce qu'une personne exclue y écrit
+  assert.equal(S.isExcluded({ conv: GROUP, title: "Projet Atlas", kind: "group", people: ["Dr Martin"] }, exclude), false);
+  // un groupe sans sujet se nomme par ses membres
+  assert.equal(S.isExcluded({ conv: GROUP, title: "", kind: "group", people: ["Dr Martin"] }, exclude), true);
+  assert.equal(S.isExcluded({ conv: DM, title: "", kind: "dm", people: ["Alice"] }, exclude), false);
+  assert.equal(S.isExcluded({ conv: DM, kind: "dm", people: ["Alice"] }, []), false);
+});
+
+test("avec des exclusions, un message attend qu'on sache nommer sa conversation, 2 min au plus", () => {
+  const exclude = S.exclusions("RH");
+  const queued = { id: "g1", conv: GROUP, at: NOW - 30000 };
+  const unknown = { conv: GROUP, title: "", kind: "group", people: ["Bob"], known: false };
+  assert.equal(S.held(queued, unknown, exclude, NOW), true);
+  assert.equal(S.held(queued, unknown, exclude, NOW + S.LIMITS.holdMs), false, "passé le délai, on décide");
+  assert.equal(S.held(queued, Object.assign({}, unknown, { known: true }), exclude, NOW), false, "nom appris");
+  assert.equal(S.held(queued, unknown, [], NOW), false, "sans exclusion, rien n'attend");
+  // un tête-à-tête se nomme par la personne d'en face
+  const dm = { id: "d1", conv: DM, at: NOW - 1000 };
+  assert.equal(S.held(dm, { conv: DM, kind: "dm", people: [] }, exclude, NOW), true);
+  assert.equal(S.held(dm, { conv: DM, kind: "dm", people: ["Alice"] }, exclude, NOW), false);
+  // une entrée d'avant cette version (sans date de capture) ne reste pas bloquée
+  assert.equal(S.held({ id: "x", conv: GROUP }, unknown, exclude, NOW), false);
+});
+
+// ── Modifications et suppressions ───────────────────────────────────────────
+
+test("un message modifié repart (même identifiant, autre texte) ; le même texte non", () => {
+  const T = require("../lib/text.js");
+  const original = msg({ text: "on part à 9h" });
+  const seen = { [T.versionKey(original)]: original.time };
+  assert.equal(S.admit(original, ctx({ seen: seen })), "déjà vu");
+  assert.equal(S.admit(msg({ text: "on part à 10h" }), ctx({ seen: seen })), "");
+  // une clé d'avant les versions (l'identifiant seul) vaut pour toutes les versions
+  assert.equal(S.admit(msg({ text: "on part à 10h" }), ctx({ seen: { m1: NOW } })), "déjà vu");
+});
+
+test("une suppression part sans texte ; après elle, aucun texte du message ne repart", () => {
+  const T = require("../lib/text.js");
+  const deletion = msg({ text: "", deleted: true });
+  assert.equal(S.admit(deletion, ctx()), "");
+  const seen = { [T.versionKey(deletion)]: deletion.time };
+  assert.equal(S.admit(deletion, ctx({ seen: seen })), "déjà vu");
+  assert.equal(S.admit(msg({ text: "salut" }), ctx({ seen: seen })), "déjà vu");
+  const wire = S.wireMessage(msg({ text: "", deleted: true, mentions: ["8:orgid:self-uuid"] }), SELF);
+  assert.equal(wire.deleted, true);
+  assert.equal(wire.text, "");
+  assert.equal(wire.mentions_me, false);
+  assert.equal(wire.id, "m1");
+  assert.equal("deleted" in S.wireMessage(msg(), SELF), false, "un message ordinaire n'en porte pas la marque");
+  const out = S.batches([msg({ id: "a", text: "", deleted: true })], { info: info, selfId: SELF });
+  assert.equal(out[0].body.messages[0].deleted, true);
+});
+
+test("ce qui part n'a jamais une moitié d'emoji : texte, auteur, nom de conversation", () => {
+  const lone = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  const wire = S.wireMessage(msg({ text: "x".repeat(3999) + "😀", author: "a".repeat(118) + "🎉🎉" }), SELF);
+  assert.equal(wire.text.length, 3999);
+  assert.ok(!lone.test(wire.text) && !lone.test(wire.author));
+  assert.ok(wire.author.length <= 120);
+  const conv = S.wireConversation(GROUP, { title: "t".repeat(118) + "🚀🚀", kind: "group" });
+  assert.ok(!lone.test(conv.title) && conv.title.length <= 120);
+  assert.equal(S.clean("a".repeat(119) + "🙂", 120), "a".repeat(119) + "…");
+});
+
+// ── Le serveur ──────────────────────────────────────────────────────────────
+
+test("la même erreur 5xx sur le même lot se compte ; une autre erreur ou un autre lot repart de 1", () => {
+  let strike = null;
+  for (let i = 1; i <= S.LIMITS.serverErrorsMax; i++) strike = S.serverStrike(strike, 500, "m1");
+  assert.equal(strike.count, 8);
+  assert.equal(S.serverStrike(strike, 502, "m1").count, 1);
+  assert.equal(S.serverStrike(strike, 500, "m2").count, 1);
+});
+
+test("l'adresse de Mika : http seulement sur cette machine, https ailleurs", () => {
+  assert.deepEqual(S.serverAddress("http://127.0.0.1:8001/api"), { origin: "http://127.0.0.1:8001", local: true });
+  assert.deepEqual(S.serverAddress(" http://localhost:8001 "), { origin: "http://localhost:8001", local: true });
+  assert.deepEqual(S.serverAddress("https://mika.example.org"), { origin: "https://mika.example.org", local: false });
+  assert.deepEqual(S.serverAddress("https://127.0.0.1:8443"), { origin: "https://127.0.0.1:8443", local: true });
+  assert.match(S.serverAddress("http://192.168.1.20:8001").error, /https/);
+  assert.match(S.serverAddress("http://mika.lan").error, /https/);
+  assert.match(S.serverAddress("http://[::1]:8001").error, /https/, "pas de permission d'hôte pour [::1]");
+  assert.ok(S.serverAddress("ftp://127.0.0.1").error);
+  assert.ok(S.serverAddress("pas une adresse").error);
+});

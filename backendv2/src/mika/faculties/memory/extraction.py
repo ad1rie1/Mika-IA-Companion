@@ -419,6 +419,8 @@ class People:
     directory: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     #: comment le modèle la désigne, elle (``self_names`` : son nom compris)
     me: frozenset[str] = SELF_NAMES
+    #: son prénom seul (replié) : elle, sauf si quelqu'un de la conversation ou de l'annuaire le porte aussi
+    first: str = ""
 
     @classmethod
     def of(cls, speakers: Sequence[Speaker], directory: Mapping[str, tuple[str, ...]], her: str = "") -> People:
@@ -431,7 +433,10 @@ class People:
                 if key:
                     named.setdefault(key, set()).add(s.person)
         local = {k: next(iter(v)) for k, v in named.items() if len(v) == 1}
-        return cls(tokens, local, directory, self_names(her) if her else SELF_NAMES)
+        folded_her = " ".join(fold(her).split())
+        first = folded_her.split()[0] if " " in folded_her else ""
+        me = (self_names(her) - {first}) if her else SELF_NAMES
+        return cls(tokens, local, directory, me, first)
 
     def one(self, raw: str) -> str | None:
         """Une clé, ou ``None`` pour elle-même ou rien."""
@@ -447,6 +452,8 @@ class People:
         if key is None:
             found = self.directory.get(folded) or self.directory.get(first) or ()
             key = found[0] if len(found) == 1 else None
+        if key is None and folded == self.first:
+            return None  # son prénom seul, que personne d'autre de connu ne porte : c'est elle
         return key or f"name:{folded}"
 
     def resolve(self, names: Sequence[str]) -> tuple[str, ...]:

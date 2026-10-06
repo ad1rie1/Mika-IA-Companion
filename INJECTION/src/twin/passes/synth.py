@@ -283,8 +283,12 @@ class ChapterPass:
 # -- 3. la persona ------------------------------------------------------------------------------------------------
 
 def chronotype_from_activity(corpus: Corpus, tz: ZoneInfo, start: str = "", end: str = "") -> float | None:
-    """Son chronotype d'après ses vraies heures : 0 lève-tôt, 1 oiseau de nuit (± 2 h autour d'un coucher à 23 h)."""
-    lasts: dict[date, float] = {}
+    """Son chronotype d'après ses vraies heures : 0 lève-tôt, 1 oiseau de nuit.
+
+    Le moteur décale son rythme de ± 2 h autour d'un réveil vers 7 h (``body.shift_minutes``). L'étape 0 a montré
+    que le **réveil** est le repère stable (une conversation qui dure retarde le coucher) : on prend l'heure
+    médiane de sa première activité de la journée. ``(réveil médian − 7 h) / 4 h + 0,5``, borné à [0, 1]."""
+    firsts: dict[date, float] = {}
     for r in corpus.db.execute(
             "SELECT m.t_point FROM messages m JOIN participants pa ON pa.id = m.author JOIN persons p "
             "ON p.id = pa.person WHERE p.is_me = 1 AND m.t_precision = 'exacte'"):
@@ -292,13 +296,13 @@ def chronotype_from_activity(corpus: Corpus, tz: ZoneInfo, start: str = "", end:
         month = local.strftime("%Y-%m")
         if (start and month < start) or (end and month > end):
             continue
-        # une heure du matin appartient encore à la veille
+        # une heure du matin appartient encore à la veille : la journée commence à 5 h
         day = (local - timedelta(hours=5)).date()
         hour = local.hour + local.minute / 60 + (24 if local.hour < 5 else 0)
-        lasts[day] = max(lasts.get(day, 0.0), hour)
-    if len(lasts) < 20:
+        firsts[day] = min(firsts.get(day, 99.0), hour)
+    if len(firsts) < 20:
         return None
-    shift = statistics.median(lasts.values()) - 23.0
+    shift = statistics.median(firsts.values()) - 7.0
     return round(min(1.0, max(0.0, 0.5 + shift / 4)), 2)
 
 

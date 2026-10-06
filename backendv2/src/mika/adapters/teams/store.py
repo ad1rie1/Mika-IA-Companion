@@ -25,7 +25,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
-from mika.adapters.teams.config import TeamsConfig
+from mika.adapters.teams.config import HER, TeamsConfig
 from mika.ports.teams import (
     ACCEPTED,
     CONFLICT,
@@ -38,6 +38,7 @@ from mika.ports.teams import (
     PLACED,
     QUEUED,
     SEND,
+    SENDING,
     UNUSED,
     WRITTEN,
     Conversation,
@@ -62,6 +63,8 @@ KEEP_PER_CONVERSATION = 1000
 CLOCK_SLACK = 120 * 1_000_000
 #: à partir de cette ressemblance, le message de la personne est le brouillon (retouché ou non)
 SIMILAR = 0.5
+#: un message Teams est coupé à cette longueur par l'extension : au-delà, on compare ce qui en reste
+CUT_AT = 3990
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
@@ -89,6 +92,19 @@ def _now_us() -> int:
 
 def _ratio(a: str, b: str) -> float:
     return difflib.SequenceMatcher(None, plain(a), plain(b)).ratio()
+
+
+def _edited(sent: str, d: Draft) -> bool:
+    """Ce qui est parti diffère-t-il de ce qu'elle avait écrit ? (Un message long arrive coupé : on compare ce qui
+    en reste.)"""
+    got = plain(sent)
+    if got in (plain(d.final), plain(d.body)):
+        return False
+    return not (len(sent) >= CUT_AT and (plain(d.final).startswith(got) or plain(d.body).startswith(got)))
+
+
+def _like(text: str) -> str:
+    return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
 class TeamsStore:
@@ -131,7 +147,7 @@ class TeamsStore:
     # ── ce que pousse l'extension ──
     def store_batch(self, batch: InboxBatch, now: int) -> Stored:
         new = known = 0
-        replied: list[str] = []
+        replied: dict[str, int] = {}
         settled: list[Settled] = []
         with self._lock:
             if batch.self_id:
@@ -148,6 +164,11 @@ class TeamsStore:
                 ref = message_ref(m.conversation, m.id)
                 at = m.time_ms * 1000
                 row = self._db.execute("SELECT text FROM messages WHERE ref=?", (ref,)).fetchone()
+                if m.deleted:  # supprimé dans Teams : son texte part du cache (jamais remarqué s'il ne l'était pas)
+                    if row is not None:
+                        known += 1
+                        self._db.execute("UPDATE messages SET text='', acked=1 WHERE ref=?", (ref,))
+                    continue
                 if row is not None:  # déjà connu (rejoué, ou retouché dans Teams : son texte suit)
                     known += 1
                     if row[0] != m.text:
@@ -160,28 +181,27 @@ class TeamsStore:
                 self._db.execute("INSERT OR IGNORE INTO conversations VALUES(?, '', 'other', 0)", (m.conversation,))
                 self._db.execute("UPDATE conversations SET last_at=MAX(last_at, ?) WHERE id=?", (at, m.conversation))
                 if m.own:
-                    if m.conversation not in replied:
-                        replied.append(m.conversation)
+                    replied[m.conversation] = max(replied.get(m.conversation, 0), at)
                     settled.extend(self._answered_by_owner(m.conversation, at, m.text, now))
             if new:
                 self._prune()
             self._db.commit()
-        return Stored(new=new, known=known, replied=tuple(replied), settled=tuple(settled))
+        return Stored(new=new, known=known, replied=tuple(sorted(replied.items())), settled=tuple(settled))
 
     def _answered_by_owner(self, conversation: str, at: int, text: str, now: int) -> list[Settled]:
         """La personne a écrit dans cette conversation : un brouillon posé (ou en file pour être posé) qui ressemble
         à ce qu'elle a écrit est parti ; sinon, il n'a pas servi. Un envoi encore en file (validation, autonome)
         n'est réglé que s'il lui ressemble (l'extension l'a envoyé, et son accusé s'est perdu)."""
         out: list[Settled] = []
-        rows = self._db.execute(f"SELECT {', '.join(_DRAFT)} FROM drafts WHERE conversation=? AND state IN (?, ?)",
-                                (conversation, QUEUED, PLACED)).fetchall()
+        rows = self._db.execute(f"SELECT {', '.join(_DRAFT)} FROM drafts WHERE conversation=? AND state IN (?, ?, ?)",
+                                (conversation, QUEUED, SENDING, PLACED)).fetchall()
         for d in (self._draft(r) for r in rows):
             since = (d.placed_at or d.updated) - CLOCK_SLACK
             if at < since:
                 continue
             similar = max(_ratio(text, d.final), _ratio(text, d.body)) >= SIMILAR
             if similar:
-                edited = plain(text) not in (plain(d.final), plain(d.body))
+                edited = _edited(text, d)
                 self._write(replace(d, state=GONE, sent_at=now, sent_text=text, edited=edited))
                 out.append(Settled(d.id, GONE, edited=edited))
             elif d.mode == DRAFT:
@@ -238,11 +258,11 @@ class TeamsStore:
             if row else None
 
     def conversations(self, limit: int, *, text: str = "") -> list[Conversation]:
-        like = f"%{text.strip().lower()}%" if text.strip() else ""
+        like = _like(text.strip().lower()) if text.strip() else ""
         with self._lock:
             rows = self._db.execute("SELECT c.id, c.title, c.kind, c.last_at, (SELECT COUNT(*) FROM messages m "
                                     "WHERE m.conversation=c.id) FROM conversations c WHERE c.last_at>0 AND "
-                                    "(?='' OR lower(c.title) LIKE ? OR lower(c.id) LIKE ?) "
+                                    "(?='' OR lower(c.title) LIKE ? ESCAPE '\\' OR lower(c.id) LIKE ? ESCAPE '\\') "
                                     "ORDER BY c.last_at DESC LIMIT ?", (like, like, like, max(0, limit))).fetchall()
         return [Conversation(r[0], r[1] or "", r[2] or "other", int(r[3] or 0), int(r[4] or 0)) for r in rows]
 
@@ -302,15 +322,15 @@ class TeamsStore:
                 self._write(replace(found, state=DISCARDED, updated=self._now()))
                 self._db.commit()
 
-    def _final(self, d: Draft) -> str:
-        signature = self.voice().signature
+    def _final(self, d: Draft, her: str) -> str:
+        signature = self.voice().signature.replace(HER, her.strip() or "son IA")
         return f"{d.body.strip()}\n\n{signature}" if signature else d.body.strip()
 
-    def preview(self, draft_id: str) -> Preview | None:
+    def preview(self, draft_id: str, *, her: str = "") -> Preview | None:
         d = self.draft(draft_id)
         if d is None:
             return None
-        text = d.final if d.state != WRITTEN and d.final else self._final(d)
+        text = d.final if d.state != WRITTEN and d.final else self._final(d, her)
         digest = hashlib.sha256(f"{d.conversation}\n{text}".encode()).hexdigest()[:32]
         blocked = ""
         if d.state != WRITTEN:
@@ -322,14 +342,14 @@ class TeamsStore:
         return Preview(d.conversation, self.title(d.conversation), text, digest, blocked)
 
     # ── la file ──
-    def enqueue(self, draft_id: str, *, mode: str, digest: str, expires_at: int, now: int) -> str:
+    def enqueue(self, draft_id: str, *, mode: str, digest: str, expires_at: int, now: int, her: str = "") -> str:
         with self._lock:
             d = self.draft(draft_id)
             if d is None:
                 return "ce brouillon n'existe plus"
             if d.state in (QUEUED, PLACED, GONE) and d.digest == digest:
                 return ""  # déjà fait : rejoué après un arrêt
-            shown = self.preview(draft_id)
+            shown = self.preview(draft_id, her=her)
             if shown is None or d.state != WRITTEN:
                 return "il n'est plus à envoyer"
             if digest and shown.digest != digest:
@@ -343,6 +363,7 @@ class TeamsStore:
 
     def outbox(self, now: int) -> list[OutboxItem]:
         with self._lock:
+            # un envoi réservé n'est plus offert : le navigateur qui l'a réservé l'envoie, aucun autre
             rows = self._db.execute(f"SELECT {', '.join(_DRAFT)} FROM drafts WHERE state IN (?, ?) "
                                     "ORDER BY updated, rowid", (QUEUED, PLACED)).fetchall()
         out = []
@@ -362,6 +383,12 @@ class TeamsStore:
             d = self.draft(draft_id)
             if d is None or (d.state not in (*OPEN_STATES, GONE, FAILED, UNUSED)):
                 return MISSING, None
+            if result == "sending":
+                if d.state != QUEUED or d.mode != SEND:
+                    return CONFLICT, None  # déjà réservé (ailleurs, ou par un essai d'avant), réglé, ou à poser
+                self._write(replace(d, state=SENDING, updated=now))
+                self._db.commit()
+                return ACCEPTED, None
             if result == "placed":
                 if d.state == PLACED:
                     return ACCEPTED, None
@@ -372,9 +399,10 @@ class TeamsStore:
             elif result == "sent":
                 if d.state == GONE:
                     return ACCEPTED, None
-                if d.state not in OPEN_STATES:
+                # un accusé tardif (après l'échéance) dit la vérité : il est parti
+                if d.state not in (*OPEN_STATES, FAILED, UNUSED):
                     return CONFLICT, None
-                edited = bool(text) and plain(text) not in (plain(d.final), plain(d.body))
+                edited = bool(text) and _edited(text, d)
                 done = Settled(d.id, GONE, edited=edited)
                 self._write(replace(d, state=GONE, sent_at=now, sent_text=text or d.final, edited=edited))
             elif result == "failed":
@@ -388,7 +416,11 @@ class TeamsStore:
             elif result == "expired":
                 if d.state not in OPEN_STATES:
                     return ACCEPTED, None
-                if d.mode == SEND:
+                if d.state == SENDING:
+                    done = Settled(d.id, FAILED, reason="incertain : l'envoi a commencé sans qu'on sache s'il est parti "
+                                                         "(à vérifier dans Teams)")
+                    self._write(replace(d, state=FAILED, reason=done.reason))
+                elif d.mode == SEND:
                     done = Settled(d.id, FAILED, reason="jamais envoyé : l'extension ne l'a pas relevé à temps")
                     self._write(replace(d, state=FAILED, reason=done.reason))
                 else:
@@ -410,9 +442,13 @@ class TeamsStore:
             return 0
         with self._lock:
             convs = [r[0] for r in self._db.execute(
-                "SELECT DISTINCT m.conversation FROM messages m JOIN conversations c ON c.id=m.conversation "
-                "WHERE lower(m.author_id)=? AND c.kind='dm'", (author,)).fetchall()]
-            n = self._db.execute("DELETE FROM messages WHERE lower(author_id)=?", (author,)).rowcount
+                "SELECT DISTINCT m.conversation FROM messages m LEFT JOIN conversations c ON c.id=m.conversation "
+                "WHERE lower(m.author_id)=? AND (c.kind='dm' OR m.conversation LIKE '%@unq.gbl.spaces')",
+                (author,)).fetchall()]
+            # les réponses à ses messages, ailleurs (un groupe) : elles citent ce qu'il a écrit
+            n = self._db.execute("DELETE FROM drafts WHERE reply_to IN (SELECT ref FROM messages WHERE "
+                                 "lower(author_id)=?)", (author,)).rowcount
+            n += self._db.execute("DELETE FROM messages WHERE lower(author_id)=?", (author,)).rowcount
             for conv in convs:
                 n += self._db.execute("DELETE FROM messages WHERE conversation=?", (conv,)).rowcount
                 n += self._db.execute("DELETE FROM drafts WHERE conversation=?", (conv,)).rowcount

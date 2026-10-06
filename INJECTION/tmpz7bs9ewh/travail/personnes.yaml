@@ -1,0 +1,27 @@
+# Revue des personnes — corriger puis relancer `jumeau personnes`. La main l'emporte toujours.
+# - fusionner : mettre les « participants » de deux personnes sous une seule (et supprimer l'autre) ;
+# - elle : ses comptes vont sous « elle.participants » ;
+# - relation : mère, père, sœur, conjoint, amie, collègue… ; ignorer : true pour un robot ou un service.
+# « detail » est relu à chaque passage : inutile de le modifier.
+elle:
+  participants:
+  - whatsapp:Léa
+  detail:
+  - ref: whatsapp:Léa
+    nom: Léa
+    messages: 9
+    periode: 2019-03…2019-03
+personnes:
+- id: 2
+  nom: Julie Martin
+  adresse: ext_julie-martin
+  relation: ''
+  ignorer: false
+  a_verifier: ''
+  participants:
+  - whatsapp:Julie
+  detail:
+  - ref: whatsapp:Julie
+    nom: Julie Martin
+    messages: 8
+    periode: 2019-03…2019-03

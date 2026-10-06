@@ -3,7 +3,8 @@
  * ce qu'il range dans sa base locale, et on en tire les messages. Pour les lire, on ne fait aucune requête à
  * Microsoft et on ne touche à rien dans la page.
  *
- * Deux sources, dédoublonnées par l'identifiant du message :
+ * Deux sources, dédoublonnées par version de message (son identifiant et un condensé de son texte : un message
+ * modifié repasse, un message supprimé passe une fois comme suppression) :
  *   - le réseau : les réponses JSON (fetch, XHR) et les trames du WebSocket (l'arrivée d'un message en direct) ;
  *   - la base IndexedDB du client, relue à intervalles : elle rattrape ce que le réseau ne montre pas (une requête
  *     faite par un worker, un message arrivé avant l'ouverture de l'onglet).
@@ -13,7 +14,8 @@
  *     zone est vide et qu'on n'est pas en train d'écrire ailleurs dans Teams ; c'est l'utilisateur qui l'envoie ;
  *   - un message à envoyer part par le service de chat du client, avec l'authentification que le client utilise
  *     lui-même (vue passer, gardée dans la mémoire de ce script seulement : jamais postée ni journalisée), sinon par
- *     la zone de saisie de la conversation ouverte.
+ *     la zone de saisie de la conversation ouverte. Un envoi commencé dans cette page ne l'est jamais deux fois, et
+ *     son issue n'est dite « envoyé » ou « échec » que si elle est sûre ; sinon elle est « incertaine ».
  *
  * Tout passe au script isolé de l'extension par `window.postMessage` ; rien ne doit jamais casser la page : chaque
  * crochet est enveloppé, et une erreur ici n'est qu'un compteur du diagnostic.
@@ -25,11 +27,14 @@
 
   const X = window.MikaTeamsExtract;
   const P = window.MikaTeamsPage;
-  if (!X || !P) return;
+  const T = window.MikaTeamsText;
+  if (!X || !P || !T) return;
 
   const TAG = "mika-teams";
   const URL_OF_INTEREST = /chatsvc|\/conversations|\/messages|msg\.teams|trouter|ic3|\/threads|\/chats?\b/i;
   const MAX_RESPONSE_BYTES = 6 * 1024 * 1024;
+  const MAX_FRAME_CHARS = 2 * 1024 * 1024;
+  const FRAMES_PENDING_MAX = 500;
   const SWEEP_FIRST_MS = 8000;
   const SWEEP_EVERY_MS = 45000;
   const SWEEP_BUDGET_MS = 1500;
@@ -41,6 +46,7 @@
   const ASK_TIMEOUT_MS = 5000;
   const SENT_CHECK_MS = 250;
   const SENT_WAIT_MS = 3000;
+  const CHAT_SEND_TIMEOUT_MS = 20000;
   const EDITORS = ['[data-tid="ckeditor"][contenteditable="true"]', '[data-tid*="ckeditor"][contenteditable="true"]',
     'div[role="textbox"][contenteditable="true"]'];
   const SEND_BUTTONS = ['[data-tid="newMessageCommands-send"]', 'button[name="send"]'];
@@ -53,17 +59,18 @@
       sweeps: 0, lastSweepMs: 0, messages: 0, errors: 0, databases: [] },
     conversations: 0,
     sent: 0,
-    compose: { placed: 0, sentByService: 0, sentByComposeBox: 0, errors: 0 },
+    compose: { placed: 0, sentByService: 0, sentByComposeBox: 0, uncertain: 0, errors: 0 },
   };
 
   // ── Ce qu'on a déjà fait passer (dans cette page) ─────────────────────────
-  const sentIds = new Set();
+  const sentKeys = new Set(); // les versions de message déjà passées
+  const latest = new Map(); // identifiant → dernière version vue
   const titles = new Map();
   let pendingMessages = [];
   let pendingConversations = [];
   let flushTimer = 0;
 
-  function selfId() {
+  function readSelf() {
     try {
       for (let i = 0; i < sessionStorage.length; i++) {
         const m = /^tmp\.session\.([0-9a-f-]{36})-/i.exec(sessionStorage.key(i) || "");
@@ -80,6 +87,13 @@
       }
     } catch (_) { /* format inattendu */ }
     return "";
+  }
+
+  // trouvée une fois dans cette page, l'identité ne change plus (une autre clé de session, plus tard, n'y fait rien)
+  let knownSelf = "";
+  function selfId() {
+    if (!knownSelf) knownSelf = readSelf();
+    return knownSelf;
   }
 
   function post(kind, payload) {
@@ -112,9 +126,11 @@
       }
     }
     for (const m of result.messages) {
-      if (sentIds.has(m.id)) continue;
-      if (sentIds.size >= SENT_IN_PAGE_MAX) sentIds.clear();
-      sentIds.add(m.id);
+      if (sentKeys.size >= SENT_IN_PAGE_MAX) {
+        sentKeys.clear();
+        latest.clear();
+      }
+      if (!T.freshVersion(m, sentKeys, latest)) continue;
       m.source = source;
       pendingMessages.push(m);
       stats[source].messages++;
@@ -133,7 +149,8 @@
   // ── L'authentification du service de chat (mémoire de ce script seulement) ──
   //
   // `chatAuth` : la base du service et les en-têtes d'authentification de la dernière requête du client vers
-  // `…/v1/users/ME/conversations`. Ni posté, ni journalisé, ni montré : le diagnostic ne dit que s'il existe.
+  // `…/v1/users/ME/conversations`, sur un hôte de Teams seulement. Ni posté, ni journalisé, ni montré : le diagnostic
+  // ne dit que s'il existe.
   let chatAuth = null;
 
   function noteAuth(url, headers) {
@@ -237,17 +254,31 @@
     return nativeSend.apply(this, arguments);
   };
 
+  // Les trames sont lues hors de l'événement, après les gestionnaires de Teams : la lecture ne retarde jamais la page.
+  let frames = [];
+  let framesTimer = 0;
+  function readFrames() {
+    framesTimer = 0;
+    const batch = frames;
+    frames = [];
+    for (const data of batch) {
+      stats.network.frames++;
+      inspect(data, "network", "");
+    }
+  }
+
   const NativeWebSocket = window.WebSocket;
   if (typeof NativeWebSocket === "function" && typeof Proxy === "function") {
-    window.WebSocket = new Proxy(NativeWebSocket, {
+    const HookedWebSocket = new Proxy(NativeWebSocket, {
       construct: function (target, args, newTarget) {
         const socket = Reflect.construct(target, args, newTarget);
         try {
           socket.addEventListener("message", function (event) {
             const data = event.data;
-            if (typeof data !== "string" || data.length > MAX_RESPONSE_BYTES || data.indexOf("{") < 0) return;
-            stats.network.frames++;
-            inspect(data, "network", "");
+            if (typeof data !== "string" || data.length > MAX_FRAME_CHARS || data.indexOf("{") < 0) return;
+            if (frames.length >= FRAMES_PENDING_MAX) return;
+            frames.push(data);
+            if (!framesTimer) framesTimer = setTimeout(readFrames, 0);
           });
         } catch (_) {
           stats.network.errors++;
@@ -255,6 +286,17 @@
         return socket;
       },
     });
+    window.WebSocket = HookedWebSocket;
+    // `socket.constructor === WebSocket` doit rester vrai pour le client : le prototype désigne le nouveau constructeur
+    try {
+      const proto = NativeWebSocket.prototype;
+      const desc = Object.getOwnPropertyDescriptor(proto, "constructor");
+      if (desc && desc.writable) proto.constructor = HookedWebSocket;
+      else if (!desc || desc.configurable) {
+        Object.defineProperty(proto, "constructor",
+          { value: HookedWebSocket, writable: true, enumerable: false, configurable: true });
+      }
+    } catch (_) { /* tant pis : seule cette égalité-là en pâtit */ }
   }
 
   // ── La base locale du client ────────────────────────────────────────────────
@@ -452,7 +494,7 @@
   //
   // Le service d'arrière-plan pousse la liste des brouillons à placer ; tant qu'elle n'est pas vide, on regarde toutes
   // les 2 s si la conversation ouverte en a un. Avant d'écrire, on demande le droit de le faire (un seul onglet, une
-  // seule fois) ; ce qui s'est passé est rendu au service, qui le dit à Mika.
+  // seule fois, conversation pas exclue) ; ce qui s'est passé est rendu au service, qui le dit à Mika.
 
   let drafts = [];
   let draftTimer = 0;
@@ -511,38 +553,56 @@
   }
 
   // ── Les messages que Mika envoie ───────────────────────────────────────────
+  //
+  // Une issue n'est « envoyé » ou « échec » que si elle est sûre. `retry` dit que rien n'est parti (on peut
+  // réessayer) ; `uncertain`, que l'envoi a commencé sans réponse qui tranche : ni redit, ni retenté.
 
-  function randomUnit() {
-    try {
-      return crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296;
-    } catch (_) {
-      return Math.random();
-    }
+  const startedSends = new Set(); // les éléments dont l'envoi a commencé dans cette page : jamais une seconde fois
+  const sendingNow = new Set();
+
+  function uncertain(reason) {
+    stats.compose.uncertain++;
+    return { result: "uncertain", reason: reason };
   }
 
   async function sendViaChatService(item) {
     const auth = chatAuth;
     const url = auth.base + "/v1/users/ME/conversations/" + encodeURIComponent(item.conversation) + "/messages";
     const headers = Object.assign({ "content-type": "application/json" }, auth.headers);
-    const body = P.messageBody(item.text, item.selfName, P.clientMessageId(randomUnit));
-    let response;
+    // le même identifiant client à chaque tentative, d'où qu'elle vienne
+    const body = P.messageBody(item.text, item.selfName, P.clientMessageIdFor(item.id));
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = controller ? setTimeout(function () { controller.abort(); }, CHAT_SEND_TIMEOUT_MS) : 0;
     try {
-      // le `fetch` d'origine : notre propre requête n'a rien à faire dans la capture
-      response = await nativeFetch.call(window, url, { method: "POST", headers: headers, body: JSON.stringify(body) });
-    } catch (_) {
-      return { result: "retry", reason: "service de chat injoignable" };
+      let response;
+      startedSends.add(item.id);
+      try {
+        // le `fetch` d'origine : notre propre requête n'a rien à faire dans la capture
+        response = await nativeFetch.call(window, url, { method: "POST", headers: headers, body: JSON.stringify(body),
+          signal: controller ? controller.signal : undefined });
+      } catch (_) {
+        return uncertain("le service de chat n'a pas répondu (coupure ou plus de 20 s)");
+      }
+      const verdict = P.chatSendOutcome(response.status);
+      if (verdict === "auth") {
+        // refusé avant d'être pris : rien n'est parti, la zone de saisie peut prendre le relais
+        if (chatAuth === auth) chatAuth = null; // périmée : la prochaine requête du client en montrera une neuve
+        startedSends.delete(item.id);
+        return { result: "retry", reason: "le service de chat refuse l'authentification vue", authLost: true };
+      }
+      if (verdict === "failed") {
+        return { result: "failed", reason: "le service de chat a refusé le message (" + response.status + ")" };
+      }
+      if (verdict === "uncertain") return uncertain("le service de chat a répondu " + response.status);
+      let json = null;
+      try {
+        json = await response.json();
+      } catch (_) { /* corps vide, ou coupé : le message est parti quand même */ }
+      stats.compose.sentByService++;
+      return { result: "sent", via: "service", message_id: P.messageIdFrom(json, response.headers.get("location")) };
+    } finally {
+      clearTimeout(timer);
     }
-    if (response.status === 401 || response.status === 403) {
-      if (chatAuth === auth) chatAuth = null; // périmée : la prochaine requête du client en montrera une neuve
-      return { result: "retry", reason: "le service de chat refuse l'authentification vue", authLost: true };
-    }
-    if (!response.ok) return { result: "retry", reason: "le service de chat a répondu " + response.status };
-    let json = null;
-    try {
-      json = await response.json();
-    } catch (_) { /* corps vide */ }
-    stats.compose.sentByService++;
-    return { result: "sent", via: "service", message_id: P.messageIdFrom(json, response.headers.get("location")) };
   }
 
   async function sendViaComposeBox(item) {
@@ -553,7 +613,12 @@
     if (!editor) return { result: "retry", reason: "zone de saisie introuvable" };
     if (!isEmpty(editor)) return { result: "retry", reason: "zone de saisie occupée" };
     if (typingElsewhere(editor)) return { result: "retry", reason: "saisie en cours ailleurs dans Teams" };
-    if (!insertText(editor, item.text)) return { result: "retry", reason: "l'éditeur de Teams a refusé le texte" };
+    startedSends.add(item.id);
+    if (!insertText(editor, item.text)) {
+      // la zone est restée vide : rien n'est parti
+      startedSends.delete(item.id);
+      return { result: "retry", reason: "l'éditeur de Teams a refusé le texte" };
+    }
     clickSend(editor);
     for (let waited = 0; waited < SENT_WAIT_MS; waited += SENT_CHECK_MS) {
       await pause(SENT_CHECK_MS);
@@ -562,20 +627,28 @@
         return { result: "sent", via: "zone de saisie" };
       }
     }
-    return { result: "failed", reason: "texte placé dans la zone de saisie, mais Teams ne l'a pas envoyé" };
+    return uncertain("texte dans la zone de saisie, mais Teams ne l'a pas envoyé à temps : à vérifier dans Teams");
   }
 
   async function sendItem(item) {
+    if (startedSends.has(item.id) || sendingNow.has(item.id)) {
+      return uncertain("envoi déjà commencé dans cet onglet");
+    }
+    sendingNow.add(item.id);
     try {
       if (chatAuth) {
         const viaService = await sendViaChatService(item);
-        // un refus d'autre nature que l'authentification peut avoir laissé partir le message : pas de second chemin
-        if (viaService.result !== "retry" || !viaService.authLost) return viaService;
+        // seul un refus d'authentification laisse prendre l'autre chemin : rien n'est parti
+        if (!viaService.authLost) return viaService;
       }
       return await sendViaComposeBox(item);
     } catch (_) {
       stats.compose.errors++;
-      return { result: "retry", reason: "erreur dans la page Teams" };
+      // une erreur après le début de l'envoi laisse l'issue douteuse
+      return startedSends.has(item.id) ? uncertain("erreur dans la page Teams pendant l'envoi")
+        : { result: "retry", reason: "erreur dans la page Teams" };
+    } finally {
+      sendingNow.delete(item.id);
     }
   }
 
@@ -602,11 +675,21 @@
       setDrafts((Array.isArray(data.items) ? data.items : []).filter(function (d) {
         return d && typeof d.id === "string" && typeof d.conversation === "string" && typeof d.text === "string";
       }));
+    } else if (data.kind === "resendTitles") {
+      // la pause est levée : les noms appris pendant qu'elle durait n'avaient pas été gardés, on les redit
+      for (const c of titles.values()) pendingConversations.push(c);
+      if (pendingConversations.length) schedule();
     } else if (data.kind === "answer" && answers.has(data.nonce)) {
       const resolve = answers.get(data.nonce);
       answers.delete(data.nonce);
       resolve({ ok: data.ok === true });
-    } else if (data.kind === "send" && data.item && typeof data.item.text === "string") {
+    } else if (data.kind === "send" && data.item && typeof data.item.text === "string"
+      && typeof data.item.id === "string") {
+      // arrivée après que le relais a cessé de l'attendre : il a déjà dit « rien n'est parti », on ne commence pas
+      if (!(Date.now() <= Number(data.deadline))) {
+        post("sendResult", { nonce: data.nonce, result: { result: "retry", reason: "demande arrivée trop tard" } });
+        return;
+      }
       post("sendStarted", { nonce: data.nonce });
       sendItem(data.item).then(function (result) {
         post("sendResult", { nonce: data.nonce, result: result });

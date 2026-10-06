@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
 from mika.kernel.facts import FactKey
@@ -116,6 +116,15 @@ class PersonaDoc(BaseModel):
             raise ValueError(f"fuseau horaire inconnu : « {name[:60]} » (un nom IANA : Europe/Paris, "
                              "America/Montreal…)")
         return name
+
+    @model_validator(mode="after")
+    def _embodied_has_a_name(self) -> PersonaDoc:
+        """Une persona incarnée a un nom : vide, ``name_of`` lui rendrait celui de la persona livrée, et elle
+        s'entendrait appeler « Mika ». (Seulement pour ``incarnee``, un champ neuf : un journal d'avant, où un nom
+        vide aurait pu passer par fichier, se relit toujours.)"""
+        if self.nature == EMBODIED and not self.name.strip():
+            raise ValueError("une persona incarnée a un nom (« name ») : c'est elle, pas la persona livrée")
+        return self
 
 
 def name_of(doc: PersonaDoc) -> str:

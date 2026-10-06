@@ -7,9 +7,11 @@ Rien n'a été modifié dans `backendv2/`.
 ## En bref
 
 - **Ça marche, et c'est rapide.** Le noyau rejoue de **80 000 à 190 000 messages par heure de calcul**, sur un seul
-  cœur. Le journal pèse environ **3,2 Ko par message** dans `mind.db`. Un million de messages, c'est donc
-  **6 à 10 h** de calcul et **≈ 3,3 Go** de `mind.db`.
-- **Le mur, c'est la mémoire vive.** Elle croît d'environ **2,4 Ko par message**, surtout à cause de l'index des
+  cœur. Une année de 31 000 messages se rejoue en 17 min. Le journal pèse environ **3,1 Ko par message** dans
+  `mind.db`.
+- **Mais le coût monte avec la vie accumulée** : +50 % par message au bout d'un an, avec une hausse qui ralentit.
+  Un million de messages, c'est donc **9 à 22 h** de calcul et **≈ 3,3 Go** de `mind.db`.
+- **Le mur, c'est la mémoire vive.** Elle croît de **2 à 2,7 Ko par message**, en partie à cause de l'index des
   vecteurs gardé en RAM. Sous la borne de 3 Go, on tient vers **1 M de messages**. **5 M ne passent pas** : il faut
   reléguer la masse au palier C.
 - **Le mécanisme de réponse à retenir n'est pas celui du plan.** Le plan prévoyait « `[SILENCE]` puis un épisode
@@ -33,6 +35,18 @@ Rien n'a été modifié dans `backendv2/`.
 | `INJECTION/spike/mesure_noyau.py` | les scénarios `debit`, `episodes`, `nuit`, `spontane`, `passe` ; résultats dans `out/<nom>/resultats.json` (+ `jours.csv`) |
 | `INJECTION/spike/lancer.sh` | lance le script sur un **instantané gelé** de `backendv2` (`git archive HEAD`). Une autre tâche modifiait `backendv2/src` pendant l'essai, et a même laissé une erreur de syntaxe dans `plugins/teams`. Le script passe par `borne.sh`, avec BLAS sur un seul fil |
 | `INJECTION/spike/sonde_cli.py` | les deux appels `claude -p` du point 6 ; sorties brutes dans `out/cli/` |
+
+Pour reproduire (une exécution à la fois ; `GEL=<dossier>` pour réutiliser un instantané) :
+
+```bash
+INJECTION/spike/lancer.sh debit --jours 60 --par-jour 40          # (a) ; --par-jour 400 : (b)
+BORNE_TEMPS=3300 INJECTION/spike/lancer.sh debit --jours 365 --par-jour 100 --lever --nom annee-100   # (c)
+INJECTION/spike/lancer.sh episodes        # point 2
+INJECTION/spike/lancer.sh nuit [--sans-reveil]                    # point 3
+INJECTION/spike/lancer.sh spontane --jours 14                     # point 4
+INJECTION/spike/lancer.sh passe --jours 10                        # point 5
+python3 INJECTION/spike/sonde_cli.py 1 2                          # point 6 (deux appels réels, haiku)
+```
 
 - **Le noyau** : `sim/world.py::Driver` tel quel, avec `SqliteStore` sur disque, `HashEmbedder` (256 dimensions),
   `slots=4` et la composition `app/composition.py`. Deux branchements seulement :
@@ -61,12 +75,12 @@ Rien n'a été modifié dans `backendv2/`.
 Toutes les durées sont mesurées sur un cœur (`OPENBLAS_NUM_THREADS=1`), sauf mention contraire. Les tailles sont
 prises après fermeture : le WAL est vidé.
 
-| Archive (60 jours) | Messages (entrants / ses paroles) | Mur | Débit | Événements (par message) | `mind.db` | `views.db` | Pic RSS |
+| Archive (60 jours sauf (c)) | Messages (entrants / ses paroles) | Mur | Débit | Événements (par message) | `mind.db` | `views.db` | Pic RSS |
 |---|---|---|---|---|---|---|---|
 | quasi vide | 101 (59 / 35) | 26 s | — | 4 193 | 1,9 Mo | 1,8 Mo | 138 Mo |
 | (a) 34 messages par jour | 2 040 (1 253 / 649) | 91 s | 22 msg/s | 12 118 (5,9) | 8,4 Mo | 4,0 Mo | 146 Mo |
 | (b) 320 messages par jour | 19 172 (11 394 / 6 217) | **364 s** (505 s avec BLAS multifil) | 53 msg/s | 82 003 (4,3) | 61,7 Mo | 21,1 Mo | 182 Mo |
-| (c) 1 an, 100 messages par jour | voir « Une année » plus bas | | | | | | |
+| (c) **1 an**, 86 messages par jour | 31 459 (19 208 / 9 793) | **1 023 s** | 31 msg/s | 150 805 (4,8) | 109,6 Mo | 22,6 Mo | 223 Mo (RSS final 200) |
 
 ### Ce qui coûte
 
@@ -99,8 +113,8 @@ prises après fermeture : le WAL est vidé.
 - **`views.db` ≈ 1,0 Ko par message**. Les traces sont bornées : 14 jours et 3 000 lignes, `runtime/traces.py:49-50`.
   Les séries sont bornées à 60 jours. Ce qui croît, ce sont les **vecteurs** : un par croyance, souvenir ou bloc
   d'échange.
-- **RAM ≈ 137 Mo + 2,4 Ko par message.** Une grande part vient de la matrice des vecteurs en `float32` : 18 000
-  vecteurs × 256 dimensions × 4 o pour (b). Avec `SentenceEmbedder` (384 dimensions), compter ×1,5 sur cette
+- **RAM ≈ 137 Mo + 2 à 2,7 Ko par message** (2,4 en (b), 2,0 en RSS sur l'année). Une grande part vient de la
+  matrice des vecteurs en `float32` : 18 000 vecteurs × 256 dimensions × 4 o pour (b). Avec `SentenceEmbedder` (384 dimensions), compter ×1,5 sur cette
   part.
 - **BLAS multifil** : par défaut, numpy lance 11 fils qui tournent à vide (≈ 700 % de CPU). L'essai (b) va
   **28 % plus vite sur un seul fil**, et le journal produit est identique au bit près. Le pilote doit donc exporter
@@ -116,36 +130,75 @@ qui reste.
 
 ### Appels que le rejoueur devra servir (pour 1 000 messages d'archive)
 
-| Rôle | (a) 34 messages par jour | (b) 320 messages par jour | Remarque |
-|---|---|---|---|
-| `reply` | 346 | 353 | dont 19 % de `[SILENCE]` (tours restés sans réponse) |
-| `initiative` | 39 | 40 | ses ouvertures, soumises par le pilote |
-| `extract` | 212 | 121 | une consolidation par conversation apaisée |
-| `profile` | 108 | 19 | ≤ 2 fiches par passage, ≥ 1 jour d'écart |
-| `journal` | 59 (2 par jour) | 35 (**11 par jour**) | voir le piège « nuits coupées » |
-| `dream` | 40 | 0,6 | en (b), réveillée sans cesse la nuit, elle n'atteint presque plus le paradoxal |
-| `narrative` | 29 | 3 | |
-| `compact` | 9 | 13 | |
+| Rôle | (a) 34 messages par jour | (b) 320 messages par jour | (c) 1 an | Remarque |
+|---|---|---|---|---|
+| `reply` | 346 | 353 | 339 | dont 19 % de `[SILENCE]` (tours restés sans réponse) |
+| `initiative` | 39 | 40 | 37 | ses ouvertures, soumises par le pilote |
+| `extract` | 212 | 121 | 187 | une consolidation par conversation apaisée |
+| `profile` | 108 | 19 | 56 | ≤ 2 fiches par passage, ≥ 1 jour d'écart |
+| `journal` | 59 (2 par jour) | 35 (**11 par jour**) | 56 (4,8 par jour) | voir le piège « nuits coupées » |
+| `dream` | 40 | 0,6 | 11 | en (b), réveillée sans cesse la nuit, elle n'atteint presque plus le paradoxal |
+| `narrative` | 29 | 3 | 12 | ≈ 1 par jour |
+| `compact` | 9 | 13 | 13 | |
 
-### Une année
+### Une année (c) : le coût monte avec la vie accumulée
 
-*(à compléter : voir la section « Une année, 100 messages par jour » à la fin du document)*
+Le coût de chaque mois virtuel, à densité constante (≈ 86 messages par jour), extrait de
+`out/annee-100/jours.csv` :
+
+| Mois | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| s de calcul par jour virtuel | 2,10 | 2,56 | 2,59 | 2,71 | 2,81 | 2,91 | 2,85 | 2,95 | 2,89 | 3,10 | 3,09 | 2,99 |
+| RSS (Mo) | 156 | 162 | 166 | 170 | 174 | 179 | 181 | 185 | 189 | 194 | 195 | 200 |
+
+- Le coût par message passe de **0,024 s** (mois 1) à **0,036 s** (mois 12), soit **+50 % en un an**. La hausse
+  ralentit : +13 % du mois 2 au mois 7, +5 % du mois 7 au mois 12. Avec 6 personnes seulement, ce qui dépend du
+  cercle sature. Une vraie archive en compte des centaines.
+- `mind.db` croît de façon parfaitement linéaire : **3,13 Ko par message**, plus 0,03 Mo par jour.
+- La RAM croît d'environ **2 Ko par message** (RSS), avec des pics à 2,7 Ko.
+- Le préréglage **se lève** : `configure(…, overrides=None)` journalise les paramètres et rend les défauts.
+  On retrouve `daily_cap` 0 → 5, `musings_per_day` et `live_self_max` 0 → 2, `murmur_chance` 0 → 0,35,
+  `murmur_charged_chance` 0 → 0,6.
+
+**Où va le temps.** Profil `cProfile` sur 30 jours à 320 messages par jour (`out/profil-400-30/profil.txt`), en
+temps cumulé, sur un total de 417 s (profileur compris) :
+
+| Part | Où | Ce que c'est |
+|---|---|---|
+| 52 % | `runtime/scheduler.py:220` | **les processus de fond**, pas les épisodes |
+| 23 % | `faculties/attention/watch.py:232` → `alone_due` → `expected_back` | « seule depuis… », recalculé pour chaque personne à chaque passage (115 000 passages) |
+| 19 % | `runtime/arbiter.py:84 rows` → `social/faculty.py:901 closeness_trace` / `738 lived_trace`, `others/faculty.py:834 _cheer` | les preuves de l'arbitre : des faits recalculés |
+| 16 % | `faculties/memory/recall.py:460 _recall` → `_exchanges_for` → `same_exchange` | le rappel : 17 ms par réponse, dont une comparaison des blocs deux à deux, en O(n²), et `vocab/words.py:61-73` (`fold` et `stems`, 141 M d'appels) |
+| 11 % | `runtime/pipeline.py:259` | les épisodes eux-mêmes |
+| 6 % | `runtime/tools.py:206 declare` → pydantic `model_json_schema` | le schéma JSON des outils, **régénéré à chaque épisode** (49 000 fois) |
+| 5 % | SQLite (`execute`) | |
+| 3 % | `runtime/mind.py:209 snapshot_data` | |
+
+L'avance n'a pas besoin du prompt, puisque le rejoueur ne le lit pas. Pourtant le noyau le compose quand même,
+rappel compris. Les gains possibles, génériques, relèvent du lot noyau :
+
+- mettre en cache le schéma des outils ;
+- mémoriser `attention.watch.next_due` entre deux ajouts ;
+- borner `same_exchange`.
 
 ### Extrapolation
 
-On prend une vie de 15 ans, soit ≈ 5 500 jours vécus. On applique le modèle ci-dessus, linéaire, en supposant
-que le coût par message ne se dégrade pas. Voir la mise en garde sous le tableau.
+On prend une vie de 15 ans, soit ≈ 5 500 jours vécus.
 
-| | 1 M de messages | 5 M de messages |
+- **Hypothèse basse** : le coût par message cesse de monter après la première année.
+- **Hypothèse haute** : il continue de monter de ≈ 20 % par an de vie accumulée, ce qui fait un facteur moyen de
+  2,5 sur 15 ans.
+
+| | 1 M de messages (≈ 180 par jour) | 5 M de messages (≈ 900 par jour) |
 |---|---|---|
-| Calcul | 0,6 h (jours) + **5 à 9 h** (messages) | 0,6 h + **25 à 45 h** |
+| Calcul | **9 à 22 h** | **2 à 5 jours** |
 | `mind.db` | ≈ 3,3 Go (majorant) | ≈ 16 Go |
-| `views.db` | ≈ 1,1 Go (jetable) | ≈ 5 Go |
-| RAM | ≈ **2,5 Go** (majorant) | ≈ **12 Go** : **impossible** sous `borne.sh` |
-| Événements | ≈ 4,3 à 6 M | ≈ 21 à 30 M |
+| `views.db` | 0,7 à 1 Go (jetable) | 4 à 5 Go |
+| RAM | ≈ **2,2 Go** (pics 2,8 Go, majorant) | ≈ **10 à 14 Go** : **impossible** sous `borne.sh` |
+| Événements | ≈ 4,8 M | ≈ 22 M |
 
-**Mise en garde.** En (b), le coût marginal monte d'environ 8 % entre les jours 10 à 35 et les jours 35 à 60 :
-8,8 puis 9,5 s par jour virtuel. L'année de la section suivante dit si cette dérive continue.
+Les majorants viennent de la doublure `extract`, trop prolixe. Avec des annotations parcimonieuses, `mind.db` et
+la RAM baissent nettement. Il faudra mesurer à nouveau, au lot 3, sur un mois de vraies données.
 
 ## 2. Épisodes soumis à la main
 
@@ -203,7 +256,9 @@ Conclusions :
   En (b), cela a produit 475 réveils, 836 endormissements et 11 journaux par jour, pour presque aucun rêve. La
   surcharge **`body.woken_by=()`** est acceptée (`faculties/body/__init__.py:102`). Un message « urgent »
   (« au secours », « hôpital », « accident »…) réveille quand même, sans réglage possible.
-  Résultat de l'essai avec cette surcharge : *(voir « Nuit sans réveil » à la fin)*.
+  Essai avec cette surcharge (`out/nuit-sans-reveil/`) : le message de Léa à 2 h donne `body.waited`, pas de
+  réveil. Les deux messages retenus partent à son réveil, à 7 h 45, et reçoivent `[SILENCE]` faute de plan, comme
+  il se doit.
 - **Chronotype.** `body.shift_minutes = round((chronotype − 0,5) × 240)`, soit ±2 h
   (`faculties/body/__init__.py:110`). Mesures sur 4 nuits sans personne :
 
@@ -353,12 +408,15 @@ claude -p --model haiku --output-format json --json-schema '<schéma>' --setting
 ## Recommandations chiffrées pour le pilote
 
 1. **Plafonds.**
-   - Débit : **≈ 100 000 messages rejoués par heure de calcul** (de 80 k à 190 k selon la densité), plus
-     **2,5 min par année vécue**.
-   - Taille : **≈ 300 000 messages par Go de `mind.db`** (majorant), plus ≈ 1 Go de `views.db` jetable par
+   - Débit : **≈ 110 000 messages rejoués par heure de calcul la première année** (de 80 k à 190 k selon la
+     densité), plus **2,5 min par année vécue**. Compter 40 000 à 100 000 par heure en régime, au-delà de
+     plusieurs années accumulées.
+   - Taille : **≈ 320 000 messages par Go de `mind.db`** (majorant), plus 0,7 à 1 Go de `views.db` jetable par
      million.
    - RAM : sous `BORNE_MEM=3G`, **≈ 1 M de messages rejouables** en un seul `mind.db`. Viser **≤ 1 M** en paliers
      A et B, et laisser le reste en palier C (savoir d'archive).
+   - Pour `jumeau planifier --budget` (hypothèse haute) : `T ≈ 0,42 s × jours + 0,03 s × messages × (1 + 0,1 ×
+     années couvertes)`. L'hypothèse basse supprime le dernier facteur.
 2. **Une seule règle de réponse, retenir puis libérer**, à la place de « moins de 2 min, sinon `[SILENCE]` puis
    épisode ».
    - Un message auquel elle a répondu avant que la personne ne réécrive, et dans les **2 jours**, est retenu

@@ -38,6 +38,7 @@ from mika.kernel.inspect import (
 from mika.kernel.operate import Decision, Done, Refused
 from mika.plugins.teams import (
     APPROVED,
+    EXPIRED,
     FAILED,
     GONE,
     PLACED,
@@ -48,6 +49,7 @@ from mika.plugins.teams import (
     WAITING,
     DraftSeen,
     TeamsState,
+    her,
     latest,
     params_of,
     under_way,
@@ -60,6 +62,7 @@ PAGE = 25
 NO_PORT = "Teams n'est pas branché ici."
 KIND_LABEL = {"dm": "tête-à-tête", "group": "groupe", "channel": "canal", "meeting": "réunion", "other": "—"}
 STATE_LABEL = {WAITING: ("attend ton accord", "warn"), APPROVED: ("approuvée", "info"), REFUSED: ("refusée", ""),
+               EXPIRED: ("pas d'accord à temps", ""),
                QUEUED: ("en file", "info"), PLACED: ("posée dans Teams", "info"), GONE: ("partie", "ok"),
                UNUSED: ("pas servie", ""), FAILED: ("échec", "danger")}
 MODE_LABEL = dict(MODES)
@@ -208,7 +211,7 @@ def _reply(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if got is None:
         return [Note("Cette réponse n'est plus là.", tone="muted")]
     seen = latest(s, got.id)
-    shown = port.preview(got.id)
+    shown = port.preview(got.id, her=her(frame))
     answered = port.message(got.reply_to) if got.reply_to else None
     pairs: list[tuple[str, Any]] = [
         ("conversation", Ref.subject("conversation_teams", got.conversation, _clip(port.title(got.conversation), 80)
@@ -343,7 +346,8 @@ def _ask(s: TeamsState, frame: Frame, args: AskArgs, ctx: Any) -> Done:
     m = port.message(args.message) if port is not None else None
     if m is None:
         raise Refused("Ce message n'est plus là.")
-    if under_way(s, m.conversation) or m.ref in s.asked:
+    asked_still = m.ref in s.asked and s.attempts.get(m.ref, 0) < params_of(frame).draft_attempts_max
+    if under_way(s, m.conversation) or asked_still:
         raise Refused("Une réponse est déjà en chemin dans cette conversation.")
     instruction = args.instruction.strip()
     asked = c.DRAFT_ASKED.draft(message=m.ref, conversation=m.conversation, by=ctx.by,

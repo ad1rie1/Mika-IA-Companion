@@ -264,7 +264,7 @@ class Live:
             out["email"] = {"autodraft": drafting,
                             "autodraft_skip": tuple(sorted({s for k in drafting for s in accounts[k].autodraft_skip}))}
         teams = self.settings.teams()
-        out["teams"] = {"mode": teams.mode, "autodraft": teams.enabled and teams.autodraft,
+        out["teams"] = {"enabled": teams.enabled, "mode": teams.mode, "autodraft": teams.enabled and teams.autodraft,
                         "skip": teams.skip}
         return out
 

@@ -239,3 +239,15 @@ def test_an_embodied_persona_named_otherwise_hears_neither_mika_nor_an_ai(tmp_pa
     extracts = [c for c in llm.calls if c.role == "extract"]
     assert all("Tu es la mémoire de Léa Morel" in c.system_stable for c in extracts)
     assert any("Léa Morel :" in c.messages[-1].content for c in extracts), "ses répliques sous son nom"
+
+
+def test_an_embodied_persona_without_a_name_is_refused():
+    """Vide, son nom deviendrait celui de la persona livrée : une personne incarnée s'entendrait appeler « Mika »."""
+    import pytest  # noqa: PLC0415
+
+    from mika.contracts.self_ import PersonaDoc  # noqa: PLC0415
+
+    with pytest.raises(ValueError):
+        PersonaDoc(name="  ", nature="incarnee")
+    assert PersonaDoc(name="Léa", nature="incarnee").name == "Léa"
+    assert PersonaDoc(name="", nature="ia").nature == "ia", "contre-épreuve : la règle ne touche que l'incarnée"

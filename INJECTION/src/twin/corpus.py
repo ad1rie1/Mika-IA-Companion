@@ -153,6 +153,18 @@ class Corpus:
         row = self.db.execute("SELECT sha256, reader, reader_version FROM sources WHERE path = ?", (path,)).fetchone()
         return row is not None and (row["sha256"], row["reader"], row["reader_version"]) == (sha, reader, version)
 
+    def source_read(self, path: str) -> bool:
+        """Une séance de cette source a-t-elle déjà été lue (ou planifiée hors « à faire ») ? Alors on ne la relit
+        pas : ses messages perdraient leurs identifiants, leurs séances et les annotations qui y renvoient."""
+        row = self.db.execute("SELECT id FROM sources WHERE path = ?", (path,)).fetchone()
+        if row is None:
+            return False
+        hit = self.db.execute(
+            "SELECT 1 FROM messages m JOIN sessions s ON s.id = m.session WHERE m.source = ? AND s.status != 'todo' "
+            "UNION SELECT 1 FROM documents d JOIN sessions s ON s.document = d.id WHERE d.source = ? "
+            "AND s.status != 'todo' LIMIT 1", (row["id"], row["id"])).fetchone()
+        return hit is not None
+
     def begin_source(self, path: str, sha: str, reader: str, version: int, size: int, now: str) -> int:
         """Ouvre (ou rouvre) une source : ce qu'elle avait apporté est retiré d'abord."""
         old = self.db.execute("SELECT id FROM sources WHERE path = ?", (path,)).fetchone()
@@ -174,6 +186,9 @@ class Corpus:
     def add_items(self, source: int, items: Iterable[Item], stats: SourceStats) -> None:
         authors: dict[tuple[str, str], int] = {}
         convs: dict[tuple[str, str], int] = {}
+        #: deux « ok » de la même personne dans la même minute sont deux messages : leur rang d'occurrence dans la
+        #: source entre dans l'empreinte (deux exports qui se chevauchent les numérotent pareil : ils restent fusionnés)
+        self._seen: dict[tuple[int, int | None, object, str], int] = {}
         for item in items:
             if isinstance(item, Author):
                 authors[(item.channel, item.key)] = self._author(item)
@@ -241,7 +256,10 @@ class Corpus:
         t = m.temps
         # une date exacte identifie le message ; sans elle, son rang dans la source
         where = t.point if t.precision.value == "exacte" else f"rang:{m.rank}"
-        fp = fingerprint(m.native_key or "", author, where, m.text)
+        same = (conv, author, where, m.text)
+        occurrence = self._seen.get(same, 0)
+        self._seen[same] = occurrence + 1
+        fp = fingerprint(m.native_key or "", author, where, m.text, occurrence or "")
         cur = self.db.execute(
             "INSERT OR IGNORE INTO messages (source, conversation, author, rank, native_key, reply_to, kind, subject, "
             "text, attachments, t_start, t_end, t_point, t_precision, t_origin, fingerprint) "

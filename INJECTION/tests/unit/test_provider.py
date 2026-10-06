@@ -92,8 +92,11 @@ async def test_extract_assemble_sur_les_seq_du_journal(tmp_path: Path) -> None:
     assert args["souvenirs"][0]["personnes"] == ["Julie Martin [P1]"]
 
 
-async def test_profil_du_trimestre(tmp_path: Path) -> None:
+async def test_profil_d_un_trimestre_fini_jamais_du_futur(tmp_path: Path) -> None:
     _, llm, ctx = setup(tmp_path)
+    during = await llm.complete(req("profile", call_id=f"run#{ctx['handle']}"))
+    assert during.text == SILENCE  # le profil de 2019T1 est tiré de semaines qu'elle n'a pas encore vécues
+    ctx["now"][0] = to_us(datetime(2019, 4, 2, 10, 0, tzinfo=TZ))
     got = await llm.complete(req("profile", call_id=f"run#{ctx['handle']}"))
     assert got.tool_calls[0].name == "record_profile" and got.tool_calls[0].args["ton"] == "complice"
 
@@ -117,8 +120,10 @@ async def test_reves_vrai_puis_selon_le_ton(tmp_path: Path) -> None:
     assert nothing.text == SILENCE
 
 
-async def test_recit_et_repli(tmp_path: Path) -> None:
+async def test_recit_d_un_mois_fini_et_repli(tmp_path: Path) -> None:
     _, llm, ctx = setup(tmp_path)
+    assert (await llm.complete(req("narrative"))).text == ""  # mars n'est pas fini le 12 mars
+    ctx["now"][0] = to_us(datetime(2019, 4, 2, 10, 0, tzinfo=TZ))
     assert "pleure de joie" in (await llm.complete(req("narrative"))).text
     ctx["now"][0] = to_us(DAY) + 3600 * 1_000_000
     folded = await llm.complete(req("compact", call_id=f"run#{ctx['handle']}"))

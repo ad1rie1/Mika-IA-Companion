@@ -8,6 +8,7 @@
     jumeau planifier                séances, paliers (A B R C D) et budget de lecture ; curseurs dans plan.yaml
     jumeau lire [--essai]           annoter les séances A, B et C avec Claude Code (reprenable, quota surveillé)
     jumeau synthetiser [--etape X]  mois, chapitres, persona (sortie/persona/), profils, journaux, rêves
+    jumeau avancer [--jusqu-a D]    l'avance rapide dans le vrai noyau (moteur gelé, borne mémoire, reprenable)
 
 Les étapes suivantes (personnes, planifier, lire, synthetiser, avancer, oublier) arrivent
 avec leurs lots ; voir README.md.
@@ -18,7 +19,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import shutil
 import sys
+from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -103,6 +106,8 @@ def cmd_ingerer(args: argparse.Namespace) -> int:
     print(f"+{report.messages} messages, +{report.documents} documents, {report.duplicates} doublons écartés")
     if report.unknown:
         print(f"{len(report.unknown)} fichiers sans lecteur → travail/inconnus.txt")
+    for rel in report.locked:
+        print(f"inchangé (déjà lu par Claude Code, modifié depuis : non relu) : {rel}", file=sys.stderr)
     for rel, err in report.failed:
         print(f"ÉCHEC {rel} : {err}", file=sys.stderr)
     if report.warnings and not args.silence:
@@ -233,6 +238,41 @@ def cmd_synthetiser(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def cmd_avancer(args: argparse.Namespace) -> int:
+    from twin.render import her_name  # noqa: PLC0415
+    from twin.replay.run import launch, persona_docs  # noqa: PLC0415
+    from twin.replay.script import build_script  # noqa: PLC0415
+
+    root: Path = args.racine
+    life = root / "sortie" / "vie"
+    corpus = _corpus(root)
+    if args.de_zero:
+        if life.exists():
+            shutil.move(str(life), str(life.with_name(f"vie-{datetime.now().astimezone():%Y%m%d-%H%M%S}")))
+            print("L'ancienne vie est mise de côté (sortie/vie-<date>/).")
+        for table in ("replay_state", "replay_seq"):
+            corpus.db.execute(f"DROP TABLE IF EXISTS {table}")
+        corpus.db.commit()
+    resuming = (life / "mind.db").is_file()
+    if args.preparer or not corpus.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'replay_steps'").fetchone():
+        if resuming:
+            print("Une vie est en cours : le script ne se refait pas sous elle (--de-zero pour repartir).",
+                  file=sys.stderr)
+            return 2
+        name = her_name(corpus)
+        rep = build_script(corpus, her_names=(name, name.split()[0]), personas=persona_docs(root, corpus))
+        print(f"Script : {rep.steps} pas, {rep.chapters} chapitres de persona.")
+        if rep.undated_sessions or rep.knowledge_without_date:
+            print(f"Écartés faute de date : {rep.undated_sessions} séances, {rep.knowledge_without_date} lectures de "
+                  "savoir d'archive (voir travail/dates.yaml)")
+        if args.preparer:
+            return 0
+    corpus.close()
+    print("Reprise de l'avance là où elle s'était arrêtée." if resuming else "Départ de l'avance rapide.")
+    return launch(root, args.fuseau, args.jusqu_a, mem=args.memoire)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="jumeau", description="INJECTION — le jumeau numérique")
     p.add_argument("--racine", type=Path, default=default_root(), help="le dossier INJECTION/")
@@ -260,7 +300,7 @@ def build_parser() -> argparse.ArgumentParser:
     pl = sub.add_parser("planifier", help="séances, paliers et budget")
     pl.add_argument("--garder-seances", action="store_true", help="ne pas recouper les séances")
     pl.set_defaults(fn=cmd_planifier)
-    lr = sub.add_parser("lire", help="annoter les séances A et B avec Claude Code (Sonnet)")
+    lr = sub.add_parser("lire", help="annoter les séances A, B et C avec Claude Code (Sonnet)")
     lr.add_argument("--ouvriers", type=int, default=3, help="appels en parallèle (mémoire : 3 au plus conseillé)")
     lr.add_argument("--max-lots", type=int, default=None, help="s'arrêter après tant de lots")
     lr.add_argument("--modele", default="sonnet")
@@ -274,6 +314,12 @@ def build_parser() -> argparse.ArgumentParser:
     sy.add_argument("--modele", default="sonnet")
     sy.add_argument("--essai", action="store_true", help="compter les lots sans rien envoyer")
     sy.set_defaults(fn=cmd_synthetiser)
+    av = sub.add_parser("avancer", help="l'avance rapide dans le vrai noyau (reprenable)")
+    av.add_argument("--preparer", action="store_true", help="écrire le script seulement")
+    av.add_argument("--jusqu-a", dest="jusqu_a", help="s'arrêter à cette date (AAAA-MM-JJ) ; on reprendra")
+    av.add_argument("--de-zero", action="store_true", help="mettre la vie en cours de côté et repartir")
+    av.add_argument("--memoire", default="3G", help="plafond mémoire du processus (borne.sh)")
+    av.set_defaults(fn=cmd_avancer)
     return p
 
 

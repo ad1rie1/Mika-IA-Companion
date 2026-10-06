@@ -1,5 +1,6 @@
 /* La page de réglages (aussi la fenêtre du bouton de l'extension). Tout passe par le service d'arrière-plan ;
    les textes captés ou écrits par Mika ne sont jamais insérés comme HTML. La clé n'est jamais relue. */
+/* global MikaTeamsSignals */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -7,15 +8,17 @@ const REASONS = {
   "ancien": "trop anciens (plus de 24 h)",
   "avant l'activation": "antérieurs à l'activation",
   "exclue": "conversations exclues",
-  "en pause": "arrivés pendant la pause",
+  "en pause": "écrits pendant une pause",
   "système": "notifications de Teams",
   "sans conversation": "sans conversation connue",
   "identifiant illisible": "à l'identifiant illisible",
   "file pleine": "file pleine",
   "refusé par Mika": "refusés par Mika",
   "trop gros": "trop gros pour Mika",
+  "erreur de Mika": "écartés après des erreurs répétées de Mika",
 };
-const RESULTS = { placed: "brouillon placé", sent: "envoyé", failed: "échec" };
+const RESULTS = { placed: "brouillon placé", sent: "envoyé", failed: "échec", uncertain: "issue incertaine",
+  dropped: "issue non transmise" };
 
 let loaded = false;
 
@@ -41,12 +44,13 @@ function fillStats(status) {
   const dropped = Object.entries(st.dropped || {}).filter(([, n]) => n > 0)
     .map(([reason, n]) => n + " " + (REASONS[reason] || reason)).join(", ");
   const rows = [
-    ["En attente d'envoi", String(status.queue)],
+    ["En attente d'envoi", String(status.queue) + (status.held ? " (dont " + status.held
+      + " retenu(s) le temps d'apprendre le nom de leur conversation)" : "")],
     ["Transmis à Mika", st.delivered + " message(s), dont " + (st.own || 0) + " de toi, en " + (st.posts || 0) + " envoi(s)"],
     ["Dernier envoi", when(status.lastOkAt)],
     ["Dernière relève", when(status.lastPollAt)],
     ["Écrit par Mika", out.placed + " brouillon(s) placé(s), " + out.sent + " message(s) envoyé(s), "
-      + out.failed + " échec(s)"],
+      + out.failed + " échec(s)" + (out.uncertain ? ", " + out.uncertain + " issue(s) incertaine(s)" : "")],
     ["Captés", st.received + " (réseau : " + (st.bySource.network || 0) + ", base locale : " + (st.bySource.idb || 0) + ")"],
     ["Écartés", dropped || "aucun"],
     ["Conversations connues", String(status.conversations)],
@@ -141,26 +145,17 @@ async function refresh() {
   }
 }
 
-function isLocal(base) {
-  try {
-    const host = new URL(base).hostname;
-    return host === "127.0.0.1" || host === "localhost" || host === "[::1]";
-  } catch (_) {
-    return false;
-  }
-}
-
 async function save() {
   const base = $("base").value.trim() || "http://127.0.0.1:8001";
-  if (!isLocal(base)) {
+  // en http seulement sur cette machine ; ailleurs, https (la même règle que le service d'arrière-plan)
+  const address = MikaTeamsSignals.serverAddress(base);
+  if (address.error) {
+    $("testResult").textContent = "Adresse refusée : " + address.error + ".";
+    return;
+  }
+  if (!address.local) {
     // une adresse hors de cette machine demande une permission, accordée par un clic
-    let origin;
-    try {
-      origin = new URL(base).origin + "/*";
-    } catch (_) {
-      $("testResult").textContent = "Adresse illisible.";
-      return;
-    }
+    const origin = address.origin + "/*";
     const granted = await chrome.permissions.request({ origins: [origin] });
     if (!granted) {
       $("testResult").textContent = "Sans permission, l'extension ne peut pas joindre " + base + ".";
@@ -239,7 +234,7 @@ $("diagnose").addEventListener("click", async () => {
     "Brouillons en attente dans cet onglet : " + (c.drafts || 0),
     "Depuis l'ouverture : " + (c.placed || 0) + " brouillon(s) placé(s), " + (c.sentByService || 0)
       + " envoi(s) par le service de chat, " + (c.sentByComposeBox || 0) + " par la zone de saisie, "
-      + (c.errors || 0) + " erreur(s)");
+      + (c.uncertain || 0) + " incertain(s), " + (c.errors || 0) + " erreur(s)");
   out.textContent = lines.join("\n");
 });
 

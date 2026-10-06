@@ -461,6 +461,15 @@ class Kernel:
                    label="attente d'une réponse")
         return None if isinstance(got, Failed) else got
 
+    def release_held(self) -> None:
+        """Relâcher maintenant les réponses retenues dont l'attente est finie — celles pour qui ``reply_wait`` ne
+        rend plus 0 (0 : « retenue ») : ce que fait tout ajout au journal, pour un pilote qui vient de changer ce
+        que son ``reply_wait`` répond (l'avance rapide d'une vie importée, ADR 0070). Sans effet tant que le noyau
+        ne vit pas (avant ``live``, après ``stop`` : la reprise au démarrage les retiendra de nouveau)."""
+        if not self.started:
+            return
+        self._release_held(self.mind.root)
+
     def _release_held(self, root: Any) -> None:
         """Les réponses qui attendaient son réveil partent quand il vient : une par tour (adresse, salon) —
         à son dernier message, qui règle les précédents (ils sont lus avec lui). Si la personne l'a réveillée

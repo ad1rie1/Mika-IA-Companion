@@ -88,10 +88,46 @@ test("un enregistrement de la base locale : la conversation vient de l'enregistr
   assert.equal(messages[0].authorId, "8:orgid:bob-uuid");
 });
 
-test("un message supprimé ou sans date n'est pas un message", () => {
-  const deleted = chatsvcMessage({ properties: { deletetime: "1759737700000" } });
+test("un message supprimé devient une suppression : même identifiant, même conversation, même date, sans texte", () => {
+  const deleted = chatsvcMessage({ content: "", properties: { deletetime: "1759737700000" } });
+  const { messages } = X.extract([deleted]);
+  assert.equal(messages.length, 1);
+  const m = messages[0];
+  assert.equal(m.deleted, true);
+  assert.equal(m.text, "");
+  assert.equal(m.id, "1759737600000");
+  assert.equal(m.conv, DM);
+  assert.equal(m.time, Date.parse("2026-10-06T08:00:00.120Z"));
+  assert.deepEqual(m.mentions, []);
+  // un message ordinaire n'en porte pas la marque
+  assert.equal("deleted" in X.extract(chatsvcMessage()).messages[0], false);
+  // « 0 » ou `false` ne sont pas une suppression
+  assert.equal(X.extract(chatsvcMessage({ properties: { deletetime: "0" } })).messages[0].deleted, undefined);
+  assert.equal(X.extract(chatsvcMessage({ isDeleted: false })).messages[0].deleted, undefined);
+});
+
+test("une suppression sans identifiant, ou un message sans date, ne donnent rien", () => {
+  const anonymous = chatsvcMessage({ id: undefined, clientmessageid: undefined, properties: { deletetime: "1759737700000" } });
   const undated = chatsvcMessage({ composetime: undefined, originalarrivaltime: undefined });
-  assert.equal(X.extract([deleted, undated]).messages.length, 0);
+  assert.equal(X.extract([anonymous, undated]).messages.length, 0);
+});
+
+test("un message modifié garde son identifiant ; sa version avance", () => {
+  const first = X.extract(chatsvcMessage({ content: "on part à 9h" })).messages[0];
+  const edited = X.extract(chatsvcMessage({ content: "on part à 10h", version: "1759737900000",
+    properties: { edittime: "1759737900000" } })).messages[0];
+  assert.equal(edited.id, first.id);
+  assert.equal(first.version, 1759737600000);
+  assert.equal(edited.version, 1759737900000);
+  assert.equal(edited.text, "on part à 10h");
+});
+
+test("un texte trop long est coupé sans casser un emoji", () => {
+  const long = "a".repeat(3998) + "👍👍👍";
+  const m = X.extract(chatsvcMessage({ content: long })).messages[0];
+  assert.ok(m.text.length <= 4000);
+  assert.ok(m.text.endsWith("…"));
+  assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(m.text), "aucune moitié de paire seule");
 });
 
 test("un objet quelconque avec un champ « content » n'est pas pris pour un message", () => {
