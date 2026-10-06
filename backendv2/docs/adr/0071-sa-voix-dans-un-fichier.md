@@ -20,7 +20,9 @@ fourcher le moteur.
 2. *Le code demande une phrase par sa clé.* `mika.vocab.phrasebook` : `phrase("self.night.dream.system",
    tone=…)`, `phrases(clé)` (une liste de tournures), `family(préfixe)` (un groupe choisi à l'exécution : une
    émotion, une raison, un ton). Les **trous** (`{tone}`) sont stricts : le code passe exactement ceux du texte, ni
-   plus ni moins ; un écart lève `VoiceError`, qui nomme le fichier, la clé et le trou. Le fichier se lit une fois,
+   plus ni moins ; un écart lève `VoiceError`, qui nomme le fichier, la clé et le trou. Les trous se remplissent en
+   une passe : une valeur qui contient elle-même « {trou} » (l'objet d'un mail, du code) reste telle quelle. Le
+   fichier se lit une fois,
    au premier besoin ; rien ne se recharge à chaud (ce qu'elle a dit sous une voix reste dit sous elle).
    `mika.vocab` est sous `contracts` : toutes les couches au-dessus de `kernel` peuvent le lire.
 3. *Une autre voix sans fourche.* `MIKA_VOIX` désigne un autre fichier (un jumeau a le sien :
@@ -37,13 +39,25 @@ fourcher le moteur.
      correspondent, aucune phrase du fichier n'est orpheline, une clé construite à l'exécution
      (`phrase(f"affect.mood.{x}")`) n'a pas de trou ;
    - `tests/unit/test_phrasebook.py` : lecture, trous stricts, erreurs qui disent où ;
+   - `tests/architecture/test_no_new_prose.py` : une heuristique (AST) cherche la prose française écrite en dur dans
+     les facultés et les greffons, hors docstrings, journaux techniques, libellés de réglages, raisons d'humeur,
+     expressions régulières et fichiers de console. Ce qui reste a été trié (textes de console, valeurs gardées au
+     journal, listes de mots, le serveur de recherche autonome qui ne peut pas lire la voix) : un plafond par
+     fichier, qui ne peut que baisser. Elle vérifie aussi qu'aucun dossier de fragments ne traîne ;
    - `python -m mika.vocab.phrasebook` : le fichier se lit-il, combien de phrases.
 
-**Comment la migration s'est faite.** Trois zones (elle-même ; les autres et sa mémoire ; ses buts, ses projets, ses
-greffons et le runtime), chacune dans un fragment provisoire, puis fusionnées en un seul fichier. Le repère : un
-instantané de **tout ce que le modèle lit** (et des textes gardés au journal) sur les 22 scénarios de la voie rapide
-du simulateur, pris avant la migration et comparé après chaque zone. Il est resté **identique au caractère près** :
-la migration ne change aucun comportement, seulement d'où vient le texte.
+**Comment la migration s'est faite.** Trois zones, chacune dans un fragment provisoire, puis fusionnées en un seul
+fichier de **1 657 entrées** (dont 603 à trous et 8 listes), rangées en dix sections par propriétaire :
+- elle-même : 344 entrées — `self`, `expression`, `affect`, `body`, `needs`, `agency` ;
+- les autres et sa mémoire : 526 — `identity`, `social`, `others`, `memory`, `transcript`, `attention`, `world`,
+  `shares` ;
+- ses buts, ses projets, ses greffons et ce qu'on lui montre : 787 — `goals`, `projects`, les greffons, `runtime`,
+  les textes des adaptateurs, `circadian`.
+
+Le repère : un instantané de **tout ce que le modèle lit** (et des textes gardés au journal) sur les 22 scénarios de
+la voie rapide du simulateur — 4 611 requêtes —, pris avant la migration et comparé après chaque zone puis après la
+fusion. Il est resté **identique au caractère près** : la migration ne change aucun comportement, seulement d'où
+vient le texte.
 
 **Conséquences.**
 - Changer une tournure : éditer `voix.yaml`, redémarrer. Une clé ou un trou renommé par erreur est refusé au
@@ -53,5 +67,14 @@ la migration ne change aucun comportement, seulement d'où vient le texte.
 - Une phrase nouvelle que le modèle lit s'écrit dans `voix.yaml`, commentée — jamais en dur.
 - Ce qui reconnaît une consigne à ses mots (le rejoueur d'`INJECTION/`) lit la même voix au lieu de les recopier.
 - Relevé pendant la migration, **sans le corriger** (ce serait changer son comportement) : des tournures qui
-  trahissent une IA pour une persona incarnée, et une cause d'humeur au réveil (« le rêve de cette nuit ») qui ne
-  correspond à aucun code de cause. Elles se corrigent maintenant dans le fichier, avec la propriétaire.
+  trahissent une IA pour une persona incarnée (« la machine », « opérateur », « console », « tes apps », « un réveil
+  par API », « Tu n'es pas une assistante », « ce portrait »), des réponses d'outils à la première personne au milieu
+  d'autres qui la tutoient, quelques coquilles, et une cause d'humeur au réveil (« le rêve de cette nuit ») qui ne
+  correspond à aucun code de cause — son humeur du matin se dit alors « sans trop savoir pourquoi ». Elles se
+  corrigent maintenant dans le fichier, avec la propriétaire.
+- Restent hors du fichier, et signalés : le noyau (ses marqueurs de structure) ; le greffon Teams et
+  `adapters/web/app.py` (une autre session y travaillait) ; `ports/preprocess.py` et `ports/workshop.py` (des textes
+  que le modèle lit, mais dans des ports) ; le mode d'emploi de la forge (`forge/guide.py`) ; le serveur de recherche
+  web, qui tourne seul dans sa cage. Quelques couplages au texte sont commentés dans le fichier (un code qui retire
+  « il y a » d'une tournure, un titre de section cité dans un brief) : changer ces phrases demande de relire leur
+  commentaire.
