@@ -74,6 +74,10 @@ class MikaConnectionService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_ONE_SHOT -> if (!holding) armOneShot()
+            // La réponse est accusée. Traité ici, donc après `onCreate` et son `startForeground` : un
+            // `stopService` venu de dehors pouvait les devancer, et Android abat alors le processus.
+            // `startId` : un « d'un coup » demandé entre-temps garde le service.
+            ACTION_END_ONE_SHOT -> if (!holding) stopSelf(startId)
             // Démarrage normal, ou relance par le système après la mort du processus (`intent` nul) :
             // on revérifie que l'arrière-plan est toujours voulu avant de tenir la connexion.
             else -> scope.launch { holdIfWanted() }
@@ -183,6 +187,7 @@ class MikaConnectionService : Service() {
         private const val TAG = "Service"
         const val ACTION_START = "fr.qwartz.mika.service.START"
         const val ACTION_ONE_SHOT = "fr.qwartz.mika.service.ONE_SHOT"
+        const val ACTION_END_ONE_SHOT = "fr.qwartz.mika.service.END_ONE_SHOT"
         const val ACTION_DISABLE = "fr.qwartz.mika.service.DISABLE"
         private const val REQ_OPEN = 20
         private const val REQ_DISABLE = 21
