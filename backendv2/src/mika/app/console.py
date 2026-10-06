@@ -259,6 +259,8 @@ EVENT_LABELS: dict[str, str] = {
     "projects.network_queued": "Une commande réseau mise en file (après l'exécution)",
     "projects.answered": "Une réponse à sa demande d'aide sur un projet",
     "social.one_sided": "C'est presque toujours elle qui écrit",
+    "social.bond_shifted": "Un lien qui a changé (elle l'a remarqué)",
+    "social.bond_noted": "Un lien relevé sans le vivre (mise en service, proximité fixée, propriétaire)",
     "needs.reunited": "Une amie revenue après un moment creux",
     "memory.moment_followed": "Un moment de la vie de quelqu'un, repris",
     "memory.situation_ended": "Une situation de la vie de quelqu'un, finie",
