@@ -21,6 +21,14 @@ HEAD = FactKey("transcript.head", type=int)
 
 THREAD_TABLE = "thread"
 
+#: Pourquoi un message reçu est resté sans réponse pour de bon — la colonne ``unanswered`` du fil, nulle pour un
+#: message répondu, encore en attente ou qui ne lui était pas adressé (``EpisodeEnded.unanswered``) : elle a
+#: choisi de se taire, une panne, un délai dépassé, une question lue trop tard.
+UNANSWERED_ABSTAINED = "abstained"
+UNANSWERED_FAILED = "failed"
+UNANSWERED_TIMEOUT = "timeout"
+UNANSWERED_LATE = "late"
+
 
 class Compacted(Payload):
     """Le début du fil avec une personne, replié en un résumé (les messages
