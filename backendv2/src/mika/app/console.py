@@ -160,6 +160,7 @@ REASON_LABELS: dict[str, str] = {
     "second_thoughts": "Elle s'est ravisée", "project_need": "Demander un coup de main pour un projet",
     "keep_promise": "Tenir une promesse au moment dit", "cheer": "Encourager avant un moment important",
     "celebrate": "Souhaiter ce qui se fête (un anniversaire), le jour même",
+    "remembrance": "Un mot doux à une proche, le jour où revient la date d'un deuil",
     # ADR 0058
     "rekindle": "Reprendre des nouvelles, longtemps après (une fois)",
     # ADR 0068

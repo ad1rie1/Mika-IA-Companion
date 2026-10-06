@@ -29,7 +29,9 @@ de modèle de langage :
   ce qui compte, si elle y pense pour le reste, et rien de banal quand quelque
   chose de grave la touche ces jours-ci ;
 - **ce qui se fête** (un anniversaire, un mariage) : le jour même, ses vœux,
-  une fois ;
+  une fois — et chaque année, quand la date revient ;
+- **une date lourde** (la date d'un deuil, chaque année) : à une proche, un mot
+  doux ce jour-là ;
 - **la contagion** : le ton du moment de quelqu'un la colore un peu, selon
   leur proximité — elle s'allège avec quelqu'un de joyeux, se tend avec
   quelqu'un de stressé.
@@ -63,10 +65,16 @@ CHEER = "cheer"
 #: une fois — plus fort qu'un suivi ; ni « bonne chance » la veille, ni « comment ça s'est passé » le lendemain si
 #: elle l'a souhaité (ADR 0052)
 CELEBRATE = "celebrate"
+#: le jour où revient une date lourde qu'une proche lui a confiée elle-même (la date d'un deuil,
+#: ``memory.heavy_date``) : un mot doux, d'elle-même, une fois — « je pense à toi aujourd'hui », rien de festif,
+#: aucune question. Seulement envers une proche : une amie, ce jour-là, n'en reçoit rien d'elle-même (si elles se
+#: parlent, la conversation le sait)
+REMEMBRANCE = "remembrance"
 #: Un vœu n'attend pas de réponse : ni attente déçue, ni « sans réponse », et un mot pour encourager n'empêche pas
-#: de demander le lendemain comment ça s'est passé (la retenue envers qui ne répond pas ne le compte pas). Il reste
-#: une prise de parole (le budget du jour, la période réfractaire s'y appliquent).
-WELL_WISHES = frozenset({CHEER, CELEBRATE})
+#: de demander le lendemain comment ça s'est passé (la retenue envers qui ne répond pas ne le compte pas). Un mot
+#: doux un jour difficile non plus. Il reste une prise de parole (le budget du jour, la période réfractaire s'y
+#: appliquent).
+WELL_WISHES = frozenset({CHEER, CELEBRATE, REMEMBRANCE})
 
 
 class ToneRead(Payload):

@@ -439,6 +439,7 @@ expression:
       follow_up: "lui demander comment ça s'est passé"
       cheer: "lui souhaiter bonne chance"
       celebrate: "lui faire tes vœux : c'est un jour qui se fête"
+      remembrance: "lui écrire un mot doux : c'est un jour difficile"
       keep_promise: "faire ce que tu lui avais promis"
       comfort: "lui parler, parce que tu ne vas pas très bien"
       thought: "revenir sur quelque chose qui te trotte dans la tête"
@@ -1429,6 +1430,11 @@ others:
       souhaite-le-lui, chaleureusement et simplement.
     # Ajoutée à others.initiative.celebrate (avec son espace de tête) quand quelque chose de grave la touche.
     celebrate_hard: " Avec douceur : ces jours-ci sont durs pour cette personne, pas de grande fête."
+    # Le jour où revient une date lourde (la date d'un deuil) qu'une proche lui a confiée elle-même.
+    remembrance: >-
+      Aujourd'hui, c'est un jour difficile pour {who} (tu le vois dans « CE QUI SE PASSE DANS SA VIE ») : un mot
+      doux, juste pour dire que tu y penses et que tu es là — simple, sans rien de festif, sans question à laquelle
+      il faudrait répondre.
 
 
 # ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
