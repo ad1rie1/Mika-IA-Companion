@@ -3,6 +3,7 @@ package fr.qwartz.mika.service
 import fr.qwartz.mika.core.Logger
 import fr.qwartz.mika.data.chat.ChatRepository
 import fr.qwartz.mika.data.chat.MessageStatus
+import fr.qwartz.mika.data.chat.StoredMessage
 import fr.qwartz.mika.data.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
@@ -42,14 +43,12 @@ class ReplySender(
             return
         }
         notifier.onReplied(text)
-        val oneShot = !settings.current().background && startOneShot()
+        // Déjà accusée (socket ouverte, serveur proche) : rien à garder en vie, pas de service pour rien.
+        val oneShot = !settings.current().background && !isSettled(chat.observe().first(), result.clientMsgId) && startOneShot()
         scope.launch {
             try {
                 val settled = withTimeoutOrNull(ACK_WAIT_MS) {
-                    chat.observe().first { thread ->
-                        val status = thread.firstOrNull { it.cid == result.clientMsgId }?.status
-                        status != MessageStatus.PENDING
-                    }
+                    chat.observe().first { thread -> isSettled(thread, result.clientMsgId) }
                 }
                 if (settled == null) logger.w(TAG, "réponse sans accusé après 60 s : elle repartira à la prochaine connexion")
             } finally {
@@ -57,6 +56,9 @@ class ReplySender(
             }
         }
     }
+
+    private fun isSettled(thread: List<StoredMessage>, clientMsgId: String): Boolean =
+        thread.firstOrNull { it.cid == clientMsgId }?.status != MessageStatus.PENDING
 
     private suspend fun hold() = lock.withLock {
         if (inFlight++ == 0) connection.acquire(ConnectionManager.Holder.REPLY)
