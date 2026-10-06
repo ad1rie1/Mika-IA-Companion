@@ -115,9 +115,17 @@ appel de modèle (un monde vivant ruinerait le budget et la latence).
       fenêtre, regarder dehors, dessiner à son bureau, arroser ses plantes…), **aucun objet portable** tant que
       le client web ne sait pas montrer ce qu'elle tient. `place` devient une vue de compatibilité : le type
       `place.moved` (relu par le monde) et les faits `place.current`/`place.since` (là où elle est, ou va),
-      qu'`inner_state.place` sert toujours. Reportés : le réflexe « elle travaille → au bureau » (P1 bis), les
-      baux de réservation (la revalidation à la conclusion tient lieu de garde tant qu'elle est seule), un schéma
+      qu'`inner_state.place` sert toujours. Reportés : les baux de réservation (la revalidation à la conclusion tient lieu de garde tant qu'elle est seule), un schéma
       de `go_to` par épisode quand le monde sera édité (P5).
+    - **P1 bis, le bureau** : un réducteur de `runtime.episode.started` — un pas sur un but ou une exécution de
+      projet dans son mode à elle (`STEP`, `WORK` ; jamais `JOB`, impersonnel) — la fait aller au lieu `work`,
+      s'asseoir et s'y mettre (le premier objet de ce lieu qui offre l'occupation `work`, `plan.work_desk`), sans
+      modèle et sans événement de plus ; l'identifiant de l'intention dérive de l'événement, comme le coucher.
+      Il rend visible une décision déjà prise et s'abstient quand elle dort ou est allongée, quand une action est
+      en cours (la sienne, le coucher), quand une occupation à elle n'est pas finie (elle dessine : elle
+      continue), et dans les minutes qui suivent sa dernière réplique à quelqu'un (`work_after_talk_min`,
+      10 min). Elle y reste : l'occupation s'arrête d'elle-même après `open_activity_min`. Les écrans du chat
+      reçoivent l'état par un effet sur le début de la séance, quand le monde a changé avec elle.
     - **L'interface de P2** : les commandes d'un client (`act`, `moved`, `address`, `answer`, `report`, `edit`,
       `describe`) sont des types du contrat (`w.Command`, `w.CommandResult`), que `protocol.py` porte tels quels
       sur le fil (le schéma JSON n'a pas changé) ; le port d'entrée les passe à `faculties/world/commands.handle`,
