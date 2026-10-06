@@ -109,7 +109,8 @@ SECTION_LABELS: dict[str, str] = {
     "subject": "Le sujet de l'initiative", "goals": "Ses buts en cours", "project": "Ce projet",
     "project_share": "Un projet à partager", "projects": "Ses projets", "mails": "Ses mails non lus",
     "drafts": "Ses brouillons de mails", "voice": "Sa voix dans cette boîte", "task_mail": "Le mail à traiter",
-    "task_ask": "Ce qu'on lui demande pour ce mail", "headlines": "Les titres de ses flux",
+    "task_ask": "Ce qu'on lui demande pour ce mail", "edits": "Ce qu'on change à ses brouillons (retouches, refus)",
+    "headlines": "Les titres de ses flux",
     "views": "Ce que voit la caméra", "apps": "Ses apps forgées",
     # déclarées par des lots voisins (ADR 0033, 0034, 0036) : nommées d'avance, sans effet tant qu'elles n'existent pas
     "life": "Ce qui se passe dans la vie de la personne", "matter": "Ce dont elle pourrait parler",

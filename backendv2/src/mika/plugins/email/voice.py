@@ -8,7 +8,10 @@
   ajoutée à l'envoi.
 - **Ce qu'elle voit** : ses mails non lus et ce qu'un opérateur a envoyé ;
   ses brouillons et ce qu'ils sont devenus ; pendant une tâche de rédaction,
-  le mail et son fil. **Tout ce qui vient d'un mail est cité** (un objet, un
+  le mail et son fil, et ce qu'on a changé à ses derniers brouillons de cette
+  boîte (les lignes retirées et ajoutées d'une retouche, les raisons d'un
+  refus sur trente jours) : elle apprend d'une correction, pas seulement
+  d'une consigne. **Tout ce qui vient d'un mail est cité** (un objet, un
   expéditeur, des destinataires : l'expéditeur les a choisis) — jamais dans
   une section de confiance. Seule sa voix, réglée par un opérateur, et ce
   qu'un opérateur lui demande d'y répondre le sont.
@@ -27,12 +30,14 @@
 
 from __future__ import annotations
 
+import difflib
 from collections.abc import Mapping
 from typing import Any
 
 from mika.contracts import email as c
 from mika.contracts import identity as identity_c
 from mika.contracts import others as others_c
+from mika.kernel.clock import DAY
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
@@ -47,6 +52,7 @@ from mika.plugins.email import (
     REFUSED,
     SENT_SHOWN_FOR,
     WAITING,
+    DraftSeen,
     EmailState,
     SentSeen,
     announced,
@@ -57,10 +63,10 @@ from mika.plugins.email import (
     params_of,
     task_mail,
 )
-from mika.ports.mail import AccountInfo, Mail, split_ref
+from mika.ports.mail import AccountInfo, Draft, Mail, split_ref
 from mika.ports.preprocess import inert
 from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
-from mika.vocab.people import is_identifiable
+from mika.vocab.people import fold, is_identifiable
 from mika.vocab.privacy import Sensitivity
 
 #: ce que dit une voix au plus (le ton, les consignes)
@@ -74,6 +80,12 @@ LEVEL = int(Sensitivity.PERSONAL)
 BACKGROUND = "TES MAILS NON LUS — de l'arrière-plan : réponds d'abord à ce qu'on vient de te dire"
 #: le mail auquel elle prépare une réponse : ses en-têtes et le début de son texte restent, quoi qu'il arrive
 TASK_MAIL_FLOOR = 1500
+#: pendant une tâche de rédaction, ses dernières retouches et ses derniers refus (avec leur raison) dans cette boîte
+EDITS_SHOWN = 3
+#: ce que dit une retouche au plus (ses lignes retirées puis ajoutées)
+EDIT_MAX = 400
+#: un refus et sa raison lui servent encore à écrire pendant trente jours (« TES BROUILLONS » : deux)
+REFUSALS_SHOWN_FOR = 30 * DAY
 
 
 def voice_text(info: AccountInfo, *, owner_fallback: str = KEEPER) -> str:
@@ -116,6 +128,21 @@ def _outcomes(s: EmailState, frame: Frame) -> list[Any]:
     return sorted((d for d in s.drafts.values() if d.state == WAITING
                    or (d.state in (GONE, REFUSED, FAILED) and frame.now - (d.decided_at or d.at) <= SENT_SHOWN_FOR)),
                   key=lambda d: -d.proposal)[:OUTCOMES_SHOWN]
+
+
+def _refused(s: EmailState, frame: Frame, box: str) -> list[DraftSeen]:
+    """Ses brouillons de cette boîte refusés avec une raison, sur trente jours — sauf ceux que « TES
+    BROUILLONS DE MAILS » montre déjà."""
+    shown = {d.proposal for d in _outcomes(s, frame)}
+    return sorted((d for d in s.drafts.values() if d.state == REFUSED and d.account == box
+                   and (d.note_ref or d.note) and d.proposal not in shown
+                   and frame.now - (d.decided_at or d.at) <= REFUSALS_SHOWN_FOR),
+                  key=lambda d: -d.proposal)[:EDITS_SHOWN]
+
+
+def _task_box(mail: str, found: Mail | None) -> str:
+    """La boîte d'une tâche de rédaction : celle du mail, sinon celle que dit sa référence."""
+    return found.account if found is not None else split_ref(mail)[0]
 
 
 def light(frame: Frame) -> bool:
@@ -170,7 +197,7 @@ async def _gather(s: EmailState, frame: Frame, ports: Mapping[str, Any]) -> dict
     store, port = ports.get("store"), ports.get("mail")
     if store is None or not for_owner(frame):
         return None
-    out: dict[str, Any] = {"texts": {}, "accounts": {}, "drafts": {}, "task": None}
+    out: dict[str, Any] = {"texts": {}, "accounts": {}, "drafts": {}, "task": None, "edits": [], "refused": []}
     refs = [m.summary_ref for m in _shown_unread(frame) if m.summary_ref]
     refs += [m.summary_ref for m in _announced_unread(frame) if m.summary_ref]
     refs += [m.summary_ref for _, m in _recent_sent(s, frame) if m.summary_ref]
@@ -179,16 +206,20 @@ async def _gather(s: EmailState, frame: Frame, ports: Mapping[str, Any]) -> dict
     ask = s.asked.get(mail) if mail else None
     if ask is not None and ask.instruction_ref:
         refs.append(ask.instruction_ref)
+    found = port.cached_one(mail) if port is not None and mail else None
+    if mail:  # ce qu'on a refusé de ses brouillons de cette boîte, et pourquoi
+        out["refused"] = _refused(s, frame, _task_box(mail, found))
+        refs += [d.note_ref for d in out["refused"] if d.note_ref]
     out["texts"] = store.content(refs) if refs else {}
     if port is not None:
         out["accounts"] = {a.key: a for a in port.accounts()}
-        for d in _outcomes(s, frame):
+        for d in [*_outcomes(s, frame), *out["refused"]]:
             got = port.draft(d.draft) if d.draft else None
             if got is not None:
                 out["drafts"][d.draft] = (got.to, got.subject)
         if mail:
-            found = port.cached_one(mail)
             out["task"] = (found, _thread(port, found)) if found is not None else None
+            out["edits"] = port.recent_edits(_task_box(mail, found), EDITS_SHOWN)
     return out
 
 
@@ -287,8 +318,7 @@ def _voice(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
         return None
     mail = task_mail(frame)
     if mail:
-        found = (got.get("task") or (None, ()))[0]
-        key = found.account if found is not None else split_ref(mail)[0]
+        key = _task_box(mail, (got.get("task") or (None, ()))[0])
         chosen = [accounts[key]] if key in accounts else []
     elif _pending_work(s, frame):
         chosen = [a for a in accounts.values() if a.enabled]
@@ -338,3 +368,63 @@ def _task_ask(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> Section
     who = keeper_name(frame, ask.by)
     said = f"{who[:1].upper()}{who[1:]} te demande de préparer une réponse à ce mail"
     return SectionBody(f"{said}. Ce qu'il faut y dire :\n{text}" if text else f"{said}.")
+
+
+# ── Ce qu'on change à ses brouillons (cité : des bouts de mails) ──────────
+
+
+EDITS_TITLE = "CE QU'ON CHANGE À TES BROUILLONS"
+
+
+def _change(before: str, after: str) -> str:
+    """Ce qu'une retouche a changé, en mots : ses lignes retirées puis ajoutées (blancs ignorés), borné."""
+    old = [" ".join(line.split()) for line in before.splitlines() if line.strip()]
+    new = [" ".join(line.split()) for line in after.splitlines() if line.strip()]
+    lines: list[str] = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old, new, autojunk=False).get_opcodes():
+        if tag in ("delete", "replace"):
+            lines += [f"a retiré : {inert(line, EDIT_MAX)}" for line in old[i1:i2]]
+        if tag in ("insert", "replace"):
+            lines += [f"a ajouté : {inert(line, EDIT_MAX)}" for line in new[j1:j2]]
+    text = "\n".join(lines)
+    return text if len(text) <= EDIT_MAX else text[:EDIT_MAX - 1].rstrip() + "…"
+
+
+def _edits_title(names: set[str]) -> str:
+    """« CE QU'ADRIEN CHANGE À TES BROUILLONS » (élidé devant une voyelle) ; plusieurs personnes : « on »."""
+    if len(names) != 1:
+        return EDITS_TITLE
+    name = next(iter(names))
+    head = "CE QU'" if fold(name)[:1] in ("a", "e", "i", "o", "u") else "CE QUE "
+    return f"{head}{name.upper()} CHANGE À TES BROUILLONS"
+
+
+@EMAIL.section("edits", zone=Zone.VOLATILE, episodes=[Kind.TASK], trim_rank=40, title=EDITS_TITLE, untrusted=True)
+def _edits(s: EmailState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Pendant une tâche de rédaction, ce qu'on a changé à ses derniers brouillons de cette boîte : les lignes
+    qu'une retouche a retirées et ajoutées avant l'envoi, la raison d'un refus. Un brouillon parti tel quel
+    n'y figure pas ; une autre boîte ne la change pas."""
+    got = enrich.get("mail") or {}
+    if not task_mail(frame) or not for_owner(frame):
+        return None
+    known, texts = got.get("drafts") or {}, got.get("texts") or {}
+    lines: list[str] = []
+    names: set[str] = set()
+    edits: list[Draft] = got.get("edits") or []
+    for d in edits:
+        change = _change(d.original_body, d.body)
+        if change:
+            name = keeper_name(frame, d.edited_by)
+            names.add(name)
+            lines.append(f"Ton brouillon « {inert(d.subject, 160)} » : {name} l'a retouché avant l'envoi.\n{change}")
+    for r in got.get("refused") or []:
+        said = texts.get(r.note_ref, "") if r.note_ref else r.note
+        if said:
+            name = keeper_name(frame, r.by)
+            names.add(name)
+            subject = known.get(r.draft, ("", ""))[1]
+            what = f"Ton brouillon « {inert(subject, 160)} »" if subject else "Un de tes brouillons"
+            lines.append(f"{what} a été refusé par {name} : « {inert(said, 300)} »")
+    if not lines:
+        return None
+    return SectionBody("\n\n".join(lines), level=LEVEL, witness=True, title=_edits_title(names))
