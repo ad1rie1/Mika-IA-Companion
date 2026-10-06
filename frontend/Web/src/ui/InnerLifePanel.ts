@@ -4,6 +4,7 @@
  * Affiche, à partir du payload ``inner_state`` attaché à chaque événement
  * ``speech`` diffusé par le backend :
  *   - blend émotionnel (ambivalence multi-label)
+ *   - ce qu'elle fait dans sa chambre (« en train de dessiner »)
  *   - self-narrative (qui elle pense être devenue)
  *   - besoins (compagnie, s'exprimer, apprendre — les mots de la console)
  *   - ruminations actives
@@ -20,6 +21,7 @@ import type {
   DreamType,
   EmotionBlend,
   InnerState,
+  InnerStateActivity,
   PendingProjectAction,
   ProjectSummary,
   SleepPhase,
@@ -63,6 +65,29 @@ export const TRUST_LABEL: Record<string, string> = {
 export function journalTitle(journal: { title?: string } | undefined): string {
   const title = journal?.title?.trim();
   return title || "Son dernier journal";
+}
+
+/** Toutes les quinze secondes, la ligne « ce qu'elle fait » se relit : sa
+ * durée grandit, une occupation minutée finit sans trame du serveur. */
+const ACTIVITY_REFRESH_MS = 15_000;
+
+/** Depuis combien de temps, en mots (jamais un chiffre, comme dans son
+ * prompt) : du plus long au plus court ; en deçà, rien. */
+const ACTIVITY_LASTING: Array<[number, string]> = [
+  [90, "depuis un bon moment"],
+  [45, "depuis une heure"],
+  [25, "depuis une demi-heure"],
+  [10, "depuis un quart d'heure"],
+  [2, "depuis quelques minutes"],
+];
+
+/** « En train de regarder dehors, depuis un quart d'heure » : son
+ * occupation telle qu'elle la dit (le libellé du serveur), et sa durée. */
+export function activityLine(label: string, since: number, now: number): string {
+  const minutes = (now - since) / 60_000;
+  const lasting = ACTIVITY_LASTING.find(([min]) => minutes >= min)?.[1];
+  const of = /^[aeiouyàâéèêëîïôöùûü]/i.test(label) ? "d'" : "de ";
+  return `En train ${of}${label}${lasting ? `, ${lasting}` : ""}`;
 }
 
 /** Une revendication d'identité en une ligne : la phrase citée seulement
@@ -125,6 +150,12 @@ export class InnerLifePanel {
   private journalEl: HTMLElement;
   private projectsEl: HTMLElement;
   private pendingEl: HTMLElement;
+  private activitySectionEl: HTMLElement;
+  private activityEl: HTMLElement;
+
+  /** Son occupation montrée, relue tant qu'elle dure (ACTIVITY_REFRESH_MS). */
+  private activity: InnerStateActivity | null = null;
+  private activityTick: number | null = null;
 
   private currentSleepPhase: SleepPhase = "awake";
   private sleepPhaseListeners: Array<(phase: SleepPhase) => void> = [];
@@ -160,6 +191,10 @@ export class InnerLifePanel {
             </span>
             <span class="il-energy-value il-esteem-value">—</span>
           </div>
+        </section>
+        <section class="il-section" id="il-activity" hidden>
+          <h4>Ce qu'elle fait</h4>
+          <p class="il-activity-body"></p>
         </section>
         <section class="il-section" id="il-dream" hidden>
           <h4>Rêve de cette nuit</h4>
@@ -216,6 +251,8 @@ export class InnerLifePanel {
     this.journalEl = this.root.querySelector(".il-journal-body")!;
     this.projectsEl = this.root.querySelector(".il-projects-body")!;
     this.pendingEl = this.root.querySelector(".il-pending-body")!;
+    this.activitySectionEl = this.root.querySelector("#il-activity")!;
+    this.activityEl = this.root.querySelector(".il-activity-body")!;
 
     // Collapse/expand on header click
     const header = this.root.querySelector(".il-header") as HTMLElement;
@@ -262,6 +299,11 @@ export class InnerLifePanel {
     if (!state) return;
     this.renderCircadian(state.circadian, state.energy);
     this.renderEsteem(state.estime);
+    // Absente (un serveur plus ancien) : la ligne garde ce qu'elle montrait.
+    if (state.activity !== undefined) {
+      this.activity = state.activity;
+      this.renderActivity();
+    }
     this.renderSleepPhase(resolveSleepPhase(state.sleep_phase));
     this.renderDream(state.last_dream);
     this.renderJournal(state.today_journal);
@@ -332,6 +374,29 @@ export class InnerLifePanel {
   }
 
   // ── Renderers ───────────────────────────────────────────────
+
+  /** Une ligne tant qu'elle fait quelque chose ; cachée quand elle ne fait
+   * rien ou que la fin prévue est passée. */
+  private renderActivity() {
+    const a = this.activity;
+    const now = Date.now();
+    const ended = typeof a?.until === "number" && a.until <= now;
+    if (!a || typeof a.label !== "string" || !a.label || ended) {
+      this.activity = null;
+      this.activitySectionEl.hidden = true;
+      this.activityEl.textContent = "";
+      if (this.activityTick !== null) {
+        window.clearInterval(this.activityTick);
+        this.activityTick = null;
+      }
+      return;
+    }
+    this.activityEl.textContent = activityLine(a.label, a.since, now);
+    this.activitySectionEl.hidden = false;
+    if (this.activityTick === null) {
+      this.activityTick = window.setInterval(() => this.renderActivity(), ACTIVITY_REFRESH_MS);
+    }
+  }
 
   private renderSleepPhase(resolved: SleepPhase) {
     // Badge in the header (hidden when awake to avoid visual noise).
