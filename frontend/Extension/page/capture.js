@@ -1,12 +1,19 @@
 /*
  * Dans la page Teams (monde « MAIN », chargé avant le client) : on regarde passer ce que le client reçoit déjà et
- * ce qu'il range dans sa base locale, et on en tire les messages. On ne fait aucune requête à Microsoft, on ne
- * clique sur rien, on n'écrit nulle part dans la page.
+ * ce qu'il range dans sa base locale, et on en tire les messages. Pour les lire, on ne fait aucune requête à
+ * Microsoft et on ne touche à rien dans la page.
  *
  * Deux sources, dédoublonnées par l'identifiant du message :
  *   - le réseau : les réponses JSON (fetch, XHR) et les trames du WebSocket (l'arrivée d'un message en direct) ;
  *   - la base IndexedDB du client, relue à intervalles : elle rattrape ce que le réseau ne montre pas (une requête
  *     faite par un worker, un message arrivé avant l'ouverture de l'onglet).
+ *
+ * L'autre sens, ce que Mika écrit, ne passe que par deux gestes :
+ *   - un brouillon se place dans la zone de saisie, et seulement quand la conversation ouverte est la sienne, que la
+ *     zone est vide et qu'on n'est pas en train d'écrire ailleurs dans Teams ; c'est l'utilisateur qui l'envoie ;
+ *   - un message à envoyer part par le service de chat du client, avec l'authentification que le client utilise
+ *     lui-même (vue passer, gardée dans la mémoire de ce script seulement : jamais postée ni journalisée), sinon par
+ *     la zone de saisie de la conversation ouverte.
  *
  * Tout passe au script isolé de l'extension par `window.postMessage` ; rien ne doit jamais casser la page : chaque
  * crochet est enveloppé, et une erreur ici n'est qu'un compteur du diagnostic.
@@ -17,7 +24,8 @@
   window.__mikaTeamsCapture = true;
 
   const X = window.MikaTeamsExtract;
-  if (!X) return;
+  const P = window.MikaTeamsPage;
+  if (!X || !P) return;
 
   const TAG = "mika-teams";
   const URL_OF_INTEREST = /chatsvc|\/conversations|\/messages|msg\.teams|trouter|ic3|\/threads|\/chats?\b/i;
@@ -28,6 +36,15 @@
   const SWEEP_RECORDS_PER_STORE = 4000;
   const DB_OF_INTEREST = /replychain|conversation|message|chat/i;
   const SENT_IN_PAGE_MAX = 20000;
+  const DRAFT_CHECK_MS = 2000;
+  const DRAFT_TRIES = 3;
+  const ASK_TIMEOUT_MS = 5000;
+  const SENT_CHECK_MS = 250;
+  const SENT_WAIT_MS = 3000;
+  const EDITORS = ['[data-tid="ckeditor"][contenteditable="true"]', '[data-tid*="ckeditor"][contenteditable="true"]',
+    'div[role="textbox"][contenteditable="true"]'];
+  const SEND_BUTTONS = ['[data-tid="newMessageCommands-send"]', 'button[name="send"]'];
+  const TYPING_INPUTS = /^(text|search|email|url|tel|password|number|)$/i;
 
   const stats = {
     startedAt: Date.now(),
@@ -36,6 +53,7 @@
       sweeps: 0, lastSweepMs: 0, messages: 0, errors: 0, databases: [] },
     conversations: 0,
     sent: 0,
+    compose: { placed: 0, sentByService: 0, sentByComposeBox: 0, errors: 0 },
   };
 
   // ── Ce qu'on a déjà fait passer (dans cette page) ─────────────────────────
@@ -112,6 +130,23 @@
     }
   }
 
+  // ── L'authentification du service de chat (mémoire de ce script seulement) ──
+  //
+  // `chatAuth` : la base du service et les en-têtes d'authentification de la dernière requête du client vers
+  // `…/v1/users/ME/conversations`. Ni posté, ni journalisé, ni montré : le diagnostic ne dit que s'il existe.
+  let chatAuth = null;
+
+  function noteAuth(url, headers) {
+    try {
+      if (!P.isChatServiceUrl(url)) return;
+      const found = P.authFromHeaders(headers);
+      const base = found ? P.chatServiceBase(url, location.href) : "";
+      if (found && base) chatAuth = { base: base, headers: found };
+    } catch (_) {
+      stats.network.errors++;
+    }
+  }
+
   // ── Le réseau ──────────────────────────────────────────────────────────────
 
   function interesting(url) {
@@ -124,7 +159,12 @@
       const promise = nativeFetch.apply(this, arguments);
       try {
         const input = arguments[0];
-        const url = typeof input === "string" ? input : (input && input.url) || "";
+        const init = arguments[1];
+        const url = typeof input === "string" ? input : (input && input.url) || String(input || "");
+        if (P.isChatServiceUrl(url)) {
+          noteAuth(url, init && init.headers);
+          if (input && typeof input === "object" && input.headers) noteAuth(url, input.headers);
+        }
         if (interesting(url)) {
           promise.then(function (response) {
             try {
@@ -148,15 +188,33 @@
   }
 
   const xhrUrls = new WeakMap();
+  const xhrAuth = new WeakMap();
   const nativeOpen = XMLHttpRequest.prototype.open;
   const nativeSend = XMLHttpRequest.prototype.send;
+  const nativeSetHeader = XMLHttpRequest.prototype.setRequestHeader;
   XMLHttpRequest.prototype.open = function (method, url) {
-    try { xhrUrls.set(this, String(url || "")); } catch (_) { /* rien */ }
+    try {
+      xhrUrls.set(this, String(url || ""));
+      xhrAuth.delete(this);
+    } catch (_) { /* rien */ }
     return nativeOpen.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.setRequestHeader = function (name, value) {
+    try {
+      // seuls les en-têtes d'authentification sont retenus, et seulement le temps de la requête
+      if (P.isAuthHeader(name)) {
+        const held = xhrAuth.get(this) || {};
+        held[String(name)] = String(value);
+        xhrAuth.set(this, held);
+      }
+    } catch (_) { /* rien */ }
+    return nativeSetHeader.apply(this, arguments);
   };
   XMLHttpRequest.prototype.send = function () {
     try {
       const url = xhrUrls.get(this) || "";
+      if (P.isChatServiceUrl(url)) noteAuth(url, xhrAuth.get(this));
+      xhrAuth.delete(this);
       if (interesting(url)) {
         this.addEventListener("load", function () {
           try {
@@ -303,7 +361,225 @@
     sweep().finally(function () { setTimeout(loop, SWEEP_EVERY_MS); });
   }, SWEEP_FIRST_MS);
 
-  // ── Le diagnostic demandé par l'extension ──────────────────────────────────
+  // ── La conversation ouverte et la zone de saisie ────────────────────────────
+
+  /** La conversation ouverte : l'historique de navigation de Teams, sinon l'adresse de la page. */
+  function activeConversation() {
+    const pairs = [];
+    try {
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const key = sessionStorage.key(i) || "";
+        if (P.NAV_KEY.test(key)) pairs.push([key, sessionStorage.getItem(key)]);
+      }
+    } catch (_) { /* stockage refusé */ }
+    return P.activeConversationFromStorage(pairs) || P.conversationFromLocation(location.href);
+  }
+
+  function visible(el) {
+    return Boolean(el && el.isConnected && el.getClientRects().length);
+  }
+
+  function findEditor() {
+    for (const selector of EDITORS) {
+      for (const el of document.querySelectorAll(selector)) {
+        if (visible(el)) return el;
+      }
+    }
+    return null;
+  }
+
+  function isEmpty(editor) {
+    return String(editor.innerText || "").trim() === "";
+  }
+
+  /** On écrit ailleurs dans Teams (la recherche, une autre zone) : ce n'est pas le moment de prendre le focus. */
+  function typingElsewhere(editor) {
+    const active = document.activeElement;
+    if (!active || active === document.body || active === editor || editor.contains(active)) return false;
+    if (active.isContentEditable || active.tagName === "TEXTAREA") return true;
+    return active.tagName === "INPUT" && TYPING_INPUTS.test(active.getAttribute("type") || "");
+  }
+
+  /**
+   * Le texte dans la zone de saisie, comme si on le tapait : `insertText` ligne à ligne, un saut de ligne simple
+   * (Maj+Entrée) entre deux lignes — jamais un paragraphe, qu'un éditeur de Teams peut prendre pour « Envoyer ».
+   * Les Trusted Types de la page interdisent `innerHTML` : rien ici n'en passe par là.
+   */
+  function insertText(editor, text) {
+    editor.focus();
+    const lines = String(text).replace(/\r\n?/g, "\n").split("\n");
+    lines.forEach(function (line, i) {
+      if (i > 0 && !document.execCommand("insertLineBreak")) document.execCommand("insertText", false, "\n");
+      if (line) document.execCommand("insertText", false, line);
+    });
+    return !isEmpty(editor);
+  }
+
+  function clickSend(editor) {
+    for (const selector of SEND_BUTTONS) {
+      const button = document.querySelector(selector);
+      if (visible(button) && !button.disabled && button.getAttribute("aria-disabled") !== "true") {
+        button.click();
+        return;
+      }
+    }
+    editor.dispatchEvent(new KeyboardEvent("keydown",
+      { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true }));
+  }
+
+  function pause(ms) {
+    return new Promise(function (resolve) { setTimeout(resolve, ms); });
+  }
+
+  // ── Demandes au service d'arrière-plan (par le relais) ─────────────────────
+
+  const answers = new Map();
+  function askExtension(kind, payload) {
+    return new Promise(function (resolve) {
+      const nonce = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      answers.set(nonce, resolve);
+      post(kind, Object.assign({ nonce: nonce }, payload));
+      setTimeout(function () {
+        if (answers.has(nonce)) {
+          answers.delete(nonce);
+          resolve(null);
+        }
+      }, ASK_TIMEOUT_MS);
+    });
+  }
+
+  // ── Les brouillons de Mika ──────────────────────────────────────────────────
+  //
+  // Le service d'arrière-plan pousse la liste des brouillons à placer ; tant qu'elle n'est pas vide, on regarde toutes
+  // les 2 s si la conversation ouverte en a un. Avant d'écrire, on demande le droit de le faire (un seul onglet, une
+  // seule fois) ; ce qui s'est passé est rendu au service, qui le dit à Mika.
+
+  let drafts = [];
+  let draftTimer = 0;
+  let placing = false;
+  const tries = new Map();
+
+  function setDrafts(list) {
+    drafts = list.filter(function (d) { return (tries.get(d.id) || 0) < DRAFT_TRIES; });
+    if (drafts.length && !draftTimer) draftTimer = setInterval(watchDrafts, DRAFT_CHECK_MS);
+    else if (!drafts.length && draftTimer) {
+      clearInterval(draftTimer);
+      draftTimer = 0;
+    }
+  }
+
+  function ready(draft) {
+    const editor = findEditor();
+    if (!editor || !isEmpty(editor) || typingElsewhere(editor)) return null;
+    return P.sameConversation(activeConversation(), draft.conversation) ? editor : null;
+  }
+
+  function watchDrafts() {
+    if (placing || !drafts.length || document.visibilityState !== "visible") return;
+    let draft;
+    try {
+      const conv = activeConversation();
+      draft = conv ? drafts.find(function (d) { return P.sameConversation(d.conversation, conv); }) : null;
+      if (!draft || !ready(draft)) return;
+    } catch (_) {
+      stats.compose.errors++;
+      return;
+    }
+    placing = true;
+    askExtension("claim", { id: draft.id }).then(function (answer) {
+      drafts = drafts.filter(function (d) { return d.id !== draft.id; });
+      if (!answer || !answer.ok) return; // déjà placé ailleurs, ou plus à placer : le service renverra la liste
+      tries.set(draft.id, (tries.get(draft.id) || 0) + 1);
+      let ok = false;
+      let reason = "la conversation ou la zone de saisie a changé";
+      try {
+        const editor = ready(draft);
+        if (editor) {
+          ok = insertText(editor, draft.text);
+          reason = ok ? "" : "l'éditeur de Teams a refusé le texte";
+        }
+      } catch (_) {
+        stats.compose.errors++;
+        reason = "erreur pendant l'insertion";
+      }
+      if (ok) stats.compose.placed++;
+      post("placed", { id: draft.id, ok: ok, reason: reason });
+    }).finally(function () {
+      placing = false;
+      setDrafts(drafts);
+    });
+  }
+
+  // ── Les messages que Mika envoie ───────────────────────────────────────────
+
+  function randomUnit() {
+    try {
+      return crypto.getRandomValues(new Uint32Array(1))[0] / 4294967296;
+    } catch (_) {
+      return Math.random();
+    }
+  }
+
+  async function sendViaChatService(item) {
+    const auth = chatAuth;
+    const url = auth.base + "/v1/users/ME/conversations/" + encodeURIComponent(item.conversation) + "/messages";
+    const headers = Object.assign({ "content-type": "application/json" }, auth.headers);
+    const body = P.messageBody(item.text, item.selfName, P.clientMessageId(randomUnit));
+    let response;
+    try {
+      // le `fetch` d'origine : notre propre requête n'a rien à faire dans la capture
+      response = await nativeFetch.call(window, url, { method: "POST", headers: headers, body: JSON.stringify(body) });
+    } catch (_) {
+      return { result: "retry", reason: "service de chat injoignable" };
+    }
+    if (response.status === 401 || response.status === 403) {
+      if (chatAuth === auth) chatAuth = null; // périmée : la prochaine requête du client en montrera une neuve
+      return { result: "retry", reason: "le service de chat refuse l'authentification vue", authLost: true };
+    }
+    if (!response.ok) return { result: "retry", reason: "le service de chat a répondu " + response.status };
+    let json = null;
+    try {
+      json = await response.json();
+    } catch (_) { /* corps vide */ }
+    stats.compose.sentByService++;
+    return { result: "sent", via: "service", message_id: P.messageIdFrom(json, response.headers.get("location")) };
+  }
+
+  async function sendViaComposeBox(item) {
+    if (!P.sameConversation(activeConversation(), item.conversation)) {
+      return { result: "retry", reason: "conversation pas ouverte dans Teams" };
+    }
+    const editor = findEditor();
+    if (!editor) return { result: "retry", reason: "zone de saisie introuvable" };
+    if (!isEmpty(editor)) return { result: "retry", reason: "zone de saisie occupée" };
+    if (typingElsewhere(editor)) return { result: "retry", reason: "saisie en cours ailleurs dans Teams" };
+    if (!insertText(editor, item.text)) return { result: "retry", reason: "l'éditeur de Teams a refusé le texte" };
+    clickSend(editor);
+    for (let waited = 0; waited < SENT_WAIT_MS; waited += SENT_CHECK_MS) {
+      await pause(SENT_CHECK_MS);
+      if (isEmpty(editor)) {
+        stats.compose.sentByComposeBox++;
+        return { result: "sent", via: "zone de saisie" };
+      }
+    }
+    return { result: "failed", reason: "texte placé dans la zone de saisie, mais Teams ne l'a pas envoyé" };
+  }
+
+  async function sendItem(item) {
+    try {
+      if (chatAuth) {
+        const viaService = await sendViaChatService(item);
+        // un refus d'autre nature que l'authentification peut avoir laissé partir le message : pas de second chemin
+        if (viaService.result !== "retry" || !viaService.authLost) return viaService;
+      }
+      return await sendViaComposeBox(item);
+    } catch (_) {
+      stats.compose.errors++;
+      return { result: "retry", reason: "erreur dans la page Teams" };
+    }
+  }
+
+  // ── Ce que demande l'extension ──────────────────────────────────────────────
 
   window.addEventListener("message", function (event) {
     const data = event.data;
@@ -313,7 +589,28 @@
       report.url = location.origin + location.pathname;
       report.selfFound = Boolean(selfId());
       report.conversationTitles = Array.from(titles.values()).filter(function (c) { return c.title; }).length;
+      let editor = null;
+      try { editor = findEditor(); } catch (_) { /* rien */ }
+      report.compose.editorFound = Boolean(editor);
+      report.compose.activeConversationKnown = Boolean(activeConversation());
+      report.compose.chatSendPossible = Boolean(chatAuth); // l'existence de l'en-tête, jamais sa valeur
+      report.compose.drafts = drafts.length;
       post("report", { nonce: data.nonce, report: report });
+    } else if (data.kind === "where") {
+      post("report", { nonce: data.nonce, report: { conversation: activeConversation() } });
+    } else if (data.kind === "drafts") {
+      setDrafts((Array.isArray(data.items) ? data.items : []).filter(function (d) {
+        return d && typeof d.id === "string" && typeof d.conversation === "string" && typeof d.text === "string";
+      }));
+    } else if (data.kind === "answer" && answers.has(data.nonce)) {
+      const resolve = answers.get(data.nonce);
+      answers.delete(data.nonce);
+      resolve({ ok: data.ok === true });
+    } else if (data.kind === "send" && data.item && typeof data.item.text === "string") {
+      post("sendStarted", { nonce: data.nonce });
+      sendItem(data.item).then(function (result) {
+        post("sendResult", { nonce: data.nonce, result: result });
+      });
     }
   });
 })();

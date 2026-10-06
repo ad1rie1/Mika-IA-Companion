@@ -25,6 +25,7 @@ from mika.adapters.llm.config import REPLY, ROLE_LABELS, BackendSpec, LLMConfig
 from mika.adapters.llm.models import ListingFailed, list_models
 from mika.adapters.mail import MailConfig
 from mika.adapters.mcp.config import McpConfig
+from mika.adapters.teams import TeamsConfig
 from mika.app import persona as persona_file
 from mika.app.wakeups import NO_PROJECT, TOOLS, WakeupConfig
 from mika.contracts import projects as projects_c
@@ -400,6 +401,35 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         token = await settings.new_sensors_token()
         return "ok", f"Jeton neuf (l'ancien ne vaut plus ; montré une seule fois) : {token}"
 
+    # ── Teams (ADR 0069) ──
+    async def save_teams(cfg: TeamsConfig, by: str) -> list[str]:
+        await settings.save_teams(cfg)
+        # le mode, l'initiative et les exclusions sont lus par ses proposeurs : un réglage journalisé
+        problems = await live.reconfigure()
+        if problems:
+            log.warning("teams enregistré, paramètres non rejournalisés : %s", "; ".join(problems))
+        return []
+
+    def teams_facts() -> list[tuple[str, str]]:
+        key = live.teams.key_state() if live.teams is not None else None
+        store = live.kernel.ports.get("teams") if live.kernel is not None else None
+        seen = "jamais" if store is None or not store.configured() else "oui"
+        return [("Clé de l'extension", f"définie ({key.hint}…)" if key is not None else "aucune"),
+                ("Reçu de l'extension", seen),
+                ("Conversations et réponses", "Ses canaux › Teams")]
+
+    async def new_teams_key(by: str) -> tuple[str, str]:
+        if live.teams is None:
+            return "warn", "Teams n'est pas branché."
+        key = await live.teams.new_key(by)
+        return "ok", (f"Clé neuve (l'ancienne ne vaut plus ; montrée une seule fois) — colle-la dans l'extension : "
+                      f"{key}")
+
+    async def revoke_teams_key(by: str) -> tuple[str, str]:
+        if live.teams is None or not await live.teams.revoke_key(by):
+            return "warn", "Il n'y avait pas de clé."
+        return "ok", "Clé retirée : l'extension est refusée jusqu'à une clé neuve."
+
     # ── réveils par API (ADR 0068) ──
     def wake_tools() -> list[str]:
         """Les lots qu'un réveil peut avoir : ceux du code, et ceux des serveurs extérieurs branchés."""
@@ -455,6 +485,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             ("Dessins", "Ses fournisseurs d'images ; sa qualité par défaut, ses quotas", "images-fournisseurs",
              "imaging", "sens/dessins"),
             ("Appareils", "Jeton d'accès des capteurs", "appareils", "", "sens/appareils"),
+            ("Teams", "La clé de l'extension, ce qu'elle fait de ses réponses (brouillon, accord, autonome), sa "
+             "signature", "teams", "teams", "teams/conversations"),
             ("Réveils par API", "Ce que chaque réveil lui fait faire, quand, à qui elle en rend compte ; ses clés sur "
              "sa fiche", "reveils", "wakeup", "reveils"),
             ("Forge", "Comportement du moteur qui exécute les apps", "comportement-forge", "", "apps"),
@@ -592,6 +624,21 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         pages=(SettingsPage("transcription", "Transcription vocale", description=(
                             "Le service qui transcrit les messages vocaux qu'on lui envoie (compatible Whisper). "
                             "Sans lui, un vocal lui arrive comme « un message vocal » sans son contenu.")),)),
+        SettingsSection("teams", "Teams", "sens", TeamsConfig, settings.teams, save_teams, order=12,
+                        description="Les conversations Teams que l'extension de navigateur lui apporte (ADR 0069), "
+                                    "et ce qu'elle fait des réponses qu'elle prépare à ta place.",
+                        facts=teams_facts,
+                        commands=(Command("cle", "Nouvelle clé", new_teams_key,
+                                          confirm="L'ancienne clé ne vaudra plus rien : l'extension devra recevoir "
+                                                  "la nouvelle."),
+                                  Command("retirer", "Retirer la clé", revoke_teams_key, danger=True,
+                                          confirm="L'extension sera refusée jusqu'à une clé neuve.")),
+                        pages=(SettingsPage("teams", "Teams", commands=True, description=(
+                            "L'extension (frontend/Extension) lit ce que Teams web reçoit dans ton navigateur et "
+                            "l'apporte ici, avec cette clé (montrée une seule fois). Ce qu'elle fait de ses "
+                            "réponses : un brouillon posé dans Teams (tu l'envoies), un envoi après ton accord, ou "
+                            "un envoi sans te demander — toujours sous ton nom. Les conversations et les réponses "
+                            "se lisent dans Ses canaux › Teams.")),)),
         SettingsSection("appareils", "Appareils", "sens", None, order=40,
                         description="Les appareils envoient leurs signaux à POST /api/perceptions, avec ce jeton.",
                         facts=lambda: [("Jeton", "défini" if settings.sensors_token() else "aucun")],

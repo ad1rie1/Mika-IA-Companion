@@ -49,6 +49,7 @@ from mika.adapters.preprocess import LocalPreprocessor, whisper
 from mika.adapters.shares import DiskShares
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
+from mika.adapters.teams import TeamsStore
 from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
 from mika.adapters.web import protocol
 from mika.adapters.web.accounts import Accounts
@@ -62,6 +63,7 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.settings import SecretBox, Settings
+from mika.app.teams import TeamsDesk
 from mika.app.wakeups import WakeupDesk
 from mika.contracts import identity as identity_c
 from mika.contracts.self_ import PersonaDoc
@@ -203,6 +205,8 @@ class Live:
     mcp: McpHub | None = None
     #: les réveils par API (ADR 0068) : le port ``wakeup`` et la porte de ``POST /api/wake/<nom>``
     wakeups: WakeupDesk | None = None
+    #: Teams (ADR 0069) : la clé de l'extension et la porte de ``/api/teams/…``
+    teams: TeamsDesk | None = None
 
     def trace(self, tr: LLMTrace) -> None:
         self.gateway.traces.append(tr)
@@ -259,6 +263,9 @@ class Live:
         if drafting:
             out["email"] = {"autodraft": drafting,
                             "autodraft_skip": tuple(sorted({s for k in drafting for s in accounts[k].autodraft_skip}))}
+        teams = self.settings.teams()
+        out["teams"] = {"mode": teams.mode, "autodraft": teams.enabled and teams.autodraft,
+                        "skip": teams.skip}
         return out
 
     async def reconfigure(self) -> list[str]:
@@ -328,6 +335,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     world["shares"] = DiskShares(data / "partages")
     # les réveils par API (ADR 0068) : leurs réglages et leurs clés, et la porte qui admet un appel
     wakeups = world["wakeup"] = WakeupDesk(settings, clock.now)
+    # Teams (ADR 0069) : ce que l'extension pousse, ses brouillons et la file (hors du journal), et la porte
+    teams_store = world["teams"] = TeamsStore(settings.teams, data / "teams.db", now=clock.now)
+    teams = TeamsDesk(settings, clock.now, teams_store)
     # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi — plus les
     # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)
     system = SystemServers(lambda: system_mcp.provided(
@@ -355,9 +365,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     port = KernelPort(kernel)
     hub.port = port
     wakeups.port = port
+    teams.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
-                wakeups=wakeups)
+                wakeups=wakeups, teams=teams)
     # le monde (ADR 0051) : chaque lot commité qui change ce que montrent ses écrans leur part, traduit en trames
     world_hub = live.world = WorldHub(port, live.accounts, origins=web.origins, auth_required=web.auth_required)
 
@@ -433,7 +444,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *inspector, relay, console_mcp,
                                     world_hub.route()],
                       preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token,
-                      wakeup=wakeups.call), live
+                      wakeup=wakeups.call, teams=teams), live
 
 
 async def register_accounts(kernel: Kernel, accounts: Accounts) -> int:

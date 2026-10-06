@@ -1,0 +1,19 @@
+# Données privées — la vie d'une personne et de ses correspondants. JAMAIS commitées.
+brut/*
+!brut/LISEZMOI.md
+travail/*
+!travail/LISEZMOI.md
+sortie/*
+!sortie/LISEZMOI.md
+spike/out/
+
+# Outillage
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+*.db
+*.db-shm
+*.db-wal

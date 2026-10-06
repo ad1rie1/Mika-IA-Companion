@@ -22,6 +22,7 @@ from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
 from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
+from mika.adapters.teams import TeamsConfig
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 
@@ -49,6 +50,9 @@ MCP_TOOLS_KEY = "mcp_tools"
 #: les réveils par API (ADR 0068) ; leurs clés à part, dont seule l'empreinte est gardée
 WAKEUP_KEY = "wakeup"
 WAKEUP_KEYS_KEY = "wakeup_keys"
+#: Teams (ADR 0069) : ce qu'un opérateur règle ; la clé de l'extension à part, dont seule l'empreinte est gardée
+TEAMS_KEY = "teams"
+TEAMS_KEYS_KEY = "teams_key"
 #: les réglages d'un canal retiré (Telegram, ADR 0060) : effacés à l'ouverture — un jeton scellé que plus
 #: rien ne lit ne reste pas dans ``mind.db`` ni dans ses sauvegardes
 RETIRED_KEYS = ("telegram",)
@@ -332,6 +336,34 @@ class Settings:
             return False
         del keys[name]
         await self._put(WAKEUP_KEYS_KEY, keys)
+        return True
+
+    # ── Teams (``/api/teams/…``, ADR 0069) ──
+    def teams(self) -> TeamsConfig:
+        """Ce qu'un opérateur a réglé de Teams ; illisible, les valeurs par défaut (jamais bloquant)."""
+        try:
+            return TeamsConfig.model_validate(dict(self._get(TEAMS_KEY) or {}))
+        except ValueError:
+            log.warning("teams : réglages illisibles, valeurs par défaut")
+            return TeamsConfig()
+
+    async def save_teams(self, cfg: TeamsConfig) -> TeamsConfig:
+        cfg = TeamsConfig.model_validate(cfg.model_dump())
+        await self._put(TEAMS_KEY, cfg.model_dump(mode="json"))
+        return cfg
+
+    def teams_key(self) -> dict[str, Any]:
+        """``{digest, hint, created_at, by}`` de la clé de l'extension : jamais la clé elle-même (vide : aucune)."""
+        got = self._get(TEAMS_KEYS_KEY)
+        return dict(got) if isinstance(got, dict) else {}
+
+    async def save_teams_key(self, digest: str, hint: str, created_at: int, by: str) -> None:
+        await self._put(TEAMS_KEYS_KEY, {"digest": digest, "hint": hint, "created_at": int(created_at), "by": by[:80]})
+
+    async def revoke_teams_key(self) -> bool:
+        if not self.teams_key():
+            return False
+        await self._put(TEAMS_KEYS_KEY, {})
         return True
 
     # ── Appareils (``POST /api/perceptions``) ──

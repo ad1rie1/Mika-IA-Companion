@@ -63,6 +63,7 @@ from mika.contracts.entry import MindPort
 from mika.contracts.presence import Connected
 from mika.contracts.runtime import AttachmentMeta, PerceptionReceived
 from mika.kernel.events import Content
+from mika.ports import teams as teams_p
 from mika.ports import wakeup as wakeup_p
 from mika.ports.preprocess import Perceived, Preprocessor, Upload, render
 from mika.ports.shares import valid_id
@@ -89,6 +90,13 @@ WAKE_FAILURES = (20, 60.0)
 #: ce que dit chaque issue d'un appel de réveil, en HTTP
 WAKE_STATUS = {wakeup_p.ACCEPTED: 202, wakeup_p.UNKNOWN: 401, wakeup_p.DISABLED: 403, wakeup_p.INVALID: 400,
                wakeup_p.BUSY: 429, wakeup_p.REFUSED: 409}
+#: l'extension Teams (ADR 0069) : la taille d'un lot au plus, les échecs de clé tolérés par IP, et chaque issue en HTTP
+TEAMS_MAX_BYTES = 512 * 1024
+TEAMS_FAILURES = (20, 60.0)
+TEAMS_STATUS = {teams_p.ACCEPTED: 200, teams_p.UNKNOWN: 401, teams_p.DISABLED: 403, teams_p.INVALID: 400,
+                teams_p.BUSY: 429, teams_p.MISSING: 404, teams_p.CONFLICT: 409}
+#: les origines d'une extension de navigateur : une page web ne peut pas s'en réclamer
+EXTENSION_ORIGINS = ("chrome-extension://", "moz-extension://")
 
 
 def safe_mime(mime: str) -> str:
@@ -178,11 +186,13 @@ def native_token(headers: Any) -> str:
 def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | None = None,
                lifespan: Any = None, extra_routes: Sequence[Any] = (),
                preprocess: Preprocessor | None = None, camera: Any = None,
-               sensor_token: Any = None, wakeup: wakeup_p.WakeGate | None = None) -> Starlette:
+               sensor_token: Any = None, wakeup: wakeup_p.WakeGate | None = None,
+               teams: teams_p.TeamsGate | None = None) -> Starlette:
     cfg = cfg or WebConfig()
     by_name = LoginThrottle(cfg.login_failures, cfg.login_window_s)
     by_ip = LoginThrottle(cfg.login_ip_failures, cfg.login_window_s)
     wake_failures = LoginThrottle(*WAKE_FAILURES)
+    teams_failures = LoginThrottle(*TEAMS_FAILURES)
     accounts.on_revoke.append(lambda account_id: hub.revoke(account=account_id))
     accounts.on_token_revoke.append(lambda token_id: hub.revoke(session=f"{TOKEN_KEY}{token_id}"))
 
@@ -455,6 +465,67 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             return JSONResponse({"ok": True, "call": got.call}, status_code=202, headers=headers)
         return JSONResponse({"error": got.message or "Refusé."}, status_code=status, headers=headers)
 
+    async def teams_call(request: Request, kind: str) -> Response:
+        """L'extension Teams (ADR 0069) : ``POST /api/teams/inbox`` (un lot de messages), ``GET /api/teams/outbox``
+        (ce qui doit repartir), ``POST /api/teams/outbox/<id>`` (un accusé). Sa clé en ``Authorization: Bearer`` ;
+        une origine d'extension, ou aucune (une page web, jamais). Clé absente ou fausse : le même 401 (et trop
+        d'échecs d'une même adresse : 429) ; Teams désactivé : 403 ; requête illisible : 400 ; trop de requêtes :
+        429 ; élément inconnu : 404 ; accusé impossible : 409. Rien n'est rangé avant que la porte l'ait admis."""
+        headers = {"Cache-Control": "no-store"}
+        if teams is None:
+            return JSONResponse({"error": "Teams n'est pas branché."}, status_code=404, headers=headers)
+        origin = request.headers.get("origin")
+        if origin is not None and not origin.startswith(EXTENSION_ORIGINS) and origin not in cfg.origins:
+            return JSONResponse({"error": "Origine refusée."}, status_code=403, headers=headers)
+        ip = request.client.host if request.client else "?"
+        if teams_failures.blocked(f"ip:{ip}"):
+            return JSONResponse({"error": "Trop de tentatives."}, status_code=429,
+                                headers={**headers, "Retry-After": "60"})
+        key = bearer(request.headers.get("authorization"))
+        data: Any = {}
+        if request.method == "POST":
+            try:
+                size = int(request.headers.get("content-length") or 0)
+            except ValueError:
+                size = 0
+            if size > TEAMS_MAX_BYTES:
+                return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
+            raw = b""
+            async for chunk in request.stream():  # borné aussi sans Content-Length (un envoi par morceaux)
+                raw += chunk
+                if len(raw) > TEAMS_MAX_BYTES:
+                    return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
+            try:
+                data = json.loads(raw or b"{}")
+            except (ValueError, RecursionError):  # illisible (et, selon la version de Python, trop imbriqué)
+                data = None
+            if not isinstance(data, dict):
+                return JSONResponse({"error": "Un objet JSON."}, status_code=400, headers=headers)
+        if kind == "inbox":
+            got = await teams.inbox(key, data)
+        elif kind == "outbox":
+            got = await teams.outbox(key)
+        else:
+            got = await teams.ack(key, request.path_params["item"][:40], data)
+        if got.outcome == teams_p.UNKNOWN:
+            teams_failures.fail(f"ip:{ip}")
+        status = TEAMS_STATUS.get(got.outcome, 400)
+        if got.outcome == teams_p.BUSY and got.retry_after:
+            headers["Retry-After"] = str(got.retry_after)
+        if status == 200:
+            return JSONResponse({"ok": True, **got.data}, status_code=202 if kind == "inbox" else 200,
+                                headers=headers)
+        return JSONResponse({"error": got.message or "Refusé."}, status_code=status, headers=headers)
+
+    async def teams_inbox(request: Request) -> Response:
+        return await teams_call(request, "inbox")
+
+    async def teams_outbox(request: Request) -> Response:
+        return await teams_call(request, "outbox")
+
+    async def teams_ack(request: Request) -> Response:
+        return await teams_call(request, "ack")
+
     async def ws(websocket: WebSocket) -> None:
         origin = websocket.headers.get("origin")
         token = bearer(websocket.headers.get("authorization"))
@@ -525,6 +596,9 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         Route("/api/projects/pending/{action_id:int}/{decision:str}", pending_decision, methods=["POST"]),
         Route("/api/perceptions", perceptions, methods=["POST"]),
         Route("/api/wake/{name:str}", wake, methods=["POST"]),
+        Route("/api/teams/inbox", teams_inbox, methods=["POST"]),
+        Route("/api/teams/outbox", teams_outbox, methods=["GET"]),
+        Route("/api/teams/outbox/{item:str}", teams_ack, methods=["POST"]),
         Route("/files/{file:str}", shared_file, methods=["GET"]),
         WebSocketRoute("/ws", ws),
         *extra_routes,

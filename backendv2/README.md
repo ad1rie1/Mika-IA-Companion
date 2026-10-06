@@ -71,6 +71,10 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
   peut aussi y envoyer des fichiers (ADR 0062, `docs/protocole-chat.md`).
 - **La faire agir depuis un script** : déclare un réveil (Configuration › Plugins › Réveils par API), génère sa
   clé sur sa fiche, puis `POST /api/wake/<nom>` avec `Authorization: Bearer <clé>` et `{"text": "…"}` (ADR 0068).
+- **Lui faire lire Teams, et y répondre à ta place** : installe l'extension de `frontend/Extension/` dans le
+  navigateur où tu ouvres Teams, génère sa clé (Configuration › Sens › Teams, ou `python -m mika teams key`) et
+  colle-la dans l'extension. Ses réponses sont posées dans Teams pour que tu les envoies, ou partent après ton accord,
+  ou seules — selon le mode (ADR 0069).
 - **Le tableau de bord** (`/inspecteur/`) dit ce qui attend ton attention ;
   « Pourquoi a-t-elle dit ça ? » s'ouvre depuis chacune de ses paroles.
 - **Tout se règle aussi en ligne de commande** : `python -m mika --help`.

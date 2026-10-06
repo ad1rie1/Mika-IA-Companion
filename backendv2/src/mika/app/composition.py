@@ -50,6 +50,7 @@ from mika.plugins.imaging import IMAGING
 from mika.plugins.mcp import MCP
 from mika.plugins.rss import RSS
 from mika.plugins.sensors import SENSORS
+from mika.plugins.teams import TEAMS
 from mika.plugins.wakeup import WAKEUP
 from mika.plugins.wakeup.prompt import or_wake, wake_brief
 from mika.plugins.web import WEB
@@ -65,7 +66,7 @@ def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, WORLD, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
             EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, EMAIL, RSS, CAMERA, FORGE, SENSORS, IMAGING,
-            MCP, WEB, WAKEUP]
+            MCP, WEB, WAKEUP, TEAMS]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -130,7 +131,7 @@ def policies() -> dict[str, EpisodePolicy]:
                                   guard=_reply_guard, max_tokens=1024, deadline_s=180.0,
                                   tool_bundles=frozenset({"memory", "identity", "goals", "projects", "email", "rss",
                                                           "camera", "forge", "forge_apps", "self", "attention",
-                                                          "social", "world", "shares", "imaging", EXTERNAL}),
+                                                          "social", "world", "shares", "imaging", "teams", EXTERNAL}),
                                   core_bundles=REPLY_IN_HAND),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
@@ -167,11 +168,12 @@ def policies() -> dict[str, EpisodePolicy]:
                                      visible=False, delivered=False, brief=wake_brief, max_tool_turns=16,
                                      max_tokens=4096, deadline_s=600.0, tool_bundles=WAKE_TOOLS,
                                      core_bundles=WAKE_IN_HAND, muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER})),
-        # une tâche qu'une faculté lui confie (préparer un brouillon de réponse) : sa voix, pour elle seule
+        # une tâche qu'une faculté lui confie (préparer un brouillon de réponse) : sa voix, pour elle seule ; ses
+        # outils sont ceux que le candidat choisit parmi ceux-ci (une réponse Teams n'a sa mémoire que si on le permet)
         Kind.TASK: EpisodePolicy(kind=Kind.TASK, role=Role.STEP, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=task_brief,
                                  max_tool_turns=6, max_tokens=2048, deadline_s=240.0,
-                                 tool_bundles=frozenset({"email", "memory", "identity"})),
+                                 tool_bundles=frozenset({"email", "memory", "identity", "teams"})),
         # une pensée à voix haute : sa voix brève, pas dans le fil, à l'écran seulement
         Kind.MURMUR: EpisodePolicy(kind=Kind.MURMUR, role=Role.MURMUR, priority=1, lane="conversation",
                                    persona_depth="compact", visible=False, max_tokens=80, deadline_s=60.0),

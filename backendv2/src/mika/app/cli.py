@@ -55,6 +55,7 @@ from mika.app import backup, composition, datadir
 from mika.app.composition import faculties, for_simulation
 from mika.app.server import serve
 from mika.app.settings import SecretBox, Settings
+from mika.app.teams import TeamsDesk
 from mika.app.wakeups import WakeupDesk
 from mika.contracts import identity as identity_c
 from mika.kernel import forms
@@ -295,6 +296,19 @@ async def _with_settings(data: Path, fn):  # type: ignore[no-untyped-def]
         return await fn(settings, store)
     finally:
         await store.close()
+
+
+async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
+    """Teams (ADR 0069) hors ligne : la clé de l'extension (neuve, montrée une fois ; retirée), et l'état."""
+    desk = TeamsDesk(settings, RealClock().now, None)
+    if args.teams_cmd == "key":
+        return {"ok": True, "key": await desk.new_key("ligne de commande"),
+                "usage": "à coller dans l'extension (Mika · Teams) ; Authorization: Bearer <clé> sur /api/teams/…"}
+    if args.teams_cmd == "revoke":
+        return {"ok": await desk.revoke_key("ligne de commande")}
+    cfg, key = settings.teams(), desk.key_state()
+    return {"ok": True, "enabled": cfg.enabled, "mode": cfg.mode, "sign": cfg.sign, "autodraft": cfg.autodraft,
+            "key": f"{key.hint}…" if key is not None else None}
 
 
 async def wakeup_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
@@ -774,6 +788,11 @@ def _run(argv: list[str] | None) -> int:
     se = sub.add_parser("sensors", help="le jeton des appareils (POST /api/perceptions)")
     sesub = se.add_subparsers(dest="sensors_cmd", required=True)
     sesub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
+    tm = sub.add_parser("teams", help="l'extension Teams (ADR 0069) : sa clé et l'état")
+    tmsub = tm.add_subparsers(dest="teams_cmd", required=True)
+    tmsub.add_parser("key", help="une clé neuve pour l'extension (l'ancienne ne vaut plus), montrée une fois")
+    tmsub.add_parser("revoke", help="retirer la clé de l'extension (plus rien ne passe)")
+    tmsub.add_parser("status", help="l'état de Teams, sans secret")
     wk = sub.add_parser("wakeup", help="les réveils par API (POST /api/wake/<nom>, ADR 0068 ; serveur arrêté)")
     wksub = wk.add_subparsers(dest="wakeup_cmd", required=True)
     wksub.add_parser("list", help="les réveils déclarés et l'état de leur clé, sans secret")
@@ -907,6 +926,10 @@ def _run(argv: list[str] | None) -> int:
 
         print(json.dumps(asyncio.run(_with_settings(args.data, token)), ensure_ascii=False, indent=2))
         return 0
+    if args.cmd == "teams":
+        out = asyncio.run(_with_settings(args.data, lambda settings, _store: teams_command(settings, args)))
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0 if out.get("ok", True) else 1
     if args.cmd == "wakeup":
         out = asyncio.run(_with_settings(args.data, lambda settings, _store: wakeup_command(settings, args)))
         print(json.dumps(out, ensure_ascii=False, indent=2))

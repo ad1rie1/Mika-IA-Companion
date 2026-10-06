@@ -77,7 +77,7 @@ def _row(r: dict) -> HistoryRow:
 
 
 #: ce qu'on voit d'un effet en attente qui n'appartient à aucun projet : son propriétaire, en mots
-_OWNER_WORDS = {"email": "Courrier", "forge": "Forge"}
+_OWNER_WORDS = {"email": "Courrier", "forge": "Forge", "teams": "Teams"}
 
 
 def _owner_words(owner: str) -> str:

@@ -55,6 +55,9 @@ NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("Ses canaux", (
         Destination("courrier", "Courrier", "✉", "Lire les messages, répondre et suivre les brouillons de chaque boîte.",
                     subjects=("mail", "brouillon", "compte"), context=("compte",), automatic_actions=False),
+        Destination("teams", "Teams", "✆", "Les conversations Teams que l'extension lui apporte, et les réponses "
+                    "qu'elle prépare à ta place : posées, à accepter, parties.",
+                    subjects=("conversation_teams", "reponse_teams")),
         Destination("sens", "Flux et capteurs", "◌", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
                     "(caméra), ce que ses appareils lui signalent."),
         Destination("reveils", "Réveils par API", "⏰", "Les réveils que des systèmes extérieurs lui envoient "
@@ -82,7 +85,7 @@ PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Esprit", ("attention", "memory", "transcript")),
     ("Relations", ("social", "others", "identity")),
     ("Action", ("agency", "goals", "projects", "shares", "imaging", "world")),
-    ("Canaux", ("email", "rss", "web", "camera", "forge", "wakeup")),
+    ("Canaux", ("email", "teams", "rss", "web", "camera", "forge", "wakeup")),
     ("Noyau", ("kernel",)),
 )
 FACULTY_LABELS: dict[str, str] = {
@@ -93,7 +96,7 @@ FACULTY_LABELS: dict[str, str] = {
     "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "imaging": "Dessins",
-    "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API",
+    "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API", "teams": "Teams",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -133,6 +136,11 @@ SECTION_LABELS: dict[str, str] = {
     "wake_order": "Ce qu'un réveil par API lui demande (ses consignes)",
     "wake_text": "Ce qu'apporte l'appel d'un réveil par API (cité)",
     "wake_reports": "Ce que ses réveils par API ont donné",
+    # ADR 0069
+    "teams_messages": "Ses messages Teams récents", "teams_drafts": "Ses réponses Teams et ce qu'elles sont devenues",
+    "teams_voice": "Comment elle écrit dans Teams (à ta place)",
+    "teams_task": "Le message Teams auquel elle prépare une réponse (cité)",
+    "teams_ask": "Ce qu'on lui demande d'y répondre (Teams)",
 }
 
 #: Les raisons des preuves de l'arbitre : ce qui la pousse à agir.
@@ -154,6 +162,8 @@ REASON_LABELS: dict[str, str] = {
     "rekindle": "Reprendre des nouvelles, longtemps après (une fois)",
     # ADR 0068
     "wakeup": "Un réveil par API à traiter", "wakeup_done": "Rendre compte de ce qu'un réveil par API a donné",
+    # ADR 0069
+    "teams_draft": "Préparer une réponse à un message Teams",
 }
 
 #: Les vetos : ce qui l'empêche d'agir.
@@ -185,6 +195,8 @@ PROCESS_LABELS: dict[str, str] = {
     "shares.retention": "Retirer les fichiers envoyés trop anciens", "imaging.draw": "Dessiner",
     "mcp.expire": "Refuser les accords restés sans réponse",
     "wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente",
+    "teams.triage": "Trier les messages Teams reçus",
+    "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
 }
 
 #: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
@@ -252,6 +264,9 @@ EVENT_LABELS: dict[str, str] = {
     "imaging.failed": "Un dessin qui n'a pas pu se faire",
     "wakeup.called": "Un réveil par API reçu", "wakeup.reported": "Le compte rendu d'un réveil par API",
     "wakeup.expired": "Un réveil par API expiré sans avoir été traité", "wakeup.cancelled": "Un réveil par API annulé",
+    "teams.noticed": "Un message Teams remarqué", "teams.sent": "Une réponse Teams partie",
+    "teams.draft_asked": "Une réponse Teams demandée", "teams.received": "Des messages Teams reçus de l'extension",
+    "teams.settled": "Une réponse Teams posée, partie ou laissée",
 }
 
 #: Tout ce que la console nomme en français, d'un bloc.

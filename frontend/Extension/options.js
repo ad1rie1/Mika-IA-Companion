@@ -1,19 +1,21 @@
 /* La page de réglages (aussi la fenêtre du bouton de l'extension). Tout passe par le service d'arrière-plan ;
-   les textes captés ne sont jamais insérés comme HTML. */
+   les textes captés ou écrits par Mika ne sont jamais insérés comme HTML. La clé n'est jamais relue. */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
-const KINDS = ["dm", "group", "channel", "meeting"];
 const REASONS = {
   "ancien": "trop anciens (plus de 24 h)",
   "avant l'activation": "antérieurs à l'activation",
   "exclue": "conversations exclues",
-  "moi": "mes propres messages",
   "en pause": "arrivés pendant la pause",
   "système": "notifications de Teams",
+  "sans conversation": "sans conversation connue",
+  "identifiant illisible": "à l'identifiant illisible",
   "file pleine": "file pleine",
   "refusé par Mika": "refusés par Mika",
+  "trop gros": "trop gros pour Mika",
 };
+const RESULTS = { placed: "brouillon placé", sent: "envoyé", failed: "échec" };
 
 let loaded = false;
 
@@ -29,40 +31,27 @@ function when(ms) {
     : d.toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
 }
 
-function fill(status) {
-  const s = status.settings;
-  if (!loaded) {
-    $("base").value = s.base;
-    $("device").value = s.device;
-    $("skipOwn").checked = s.skipOwn;
-    $("exclude").value = s.exclude;
-    $("sensitivity").value = String(s.sensitivity);
-    for (const k of KINDS) $("p_" + k).value = String(s.pertinence[k]);
-    loaded = true;
-  }
-  $("paused").checked = s.paused;
-  $("token").placeholder = status.tokenSet ? "défini — laisser vide pour le garder" : "aucun";
+function yes(v) {
+  return v ? "oui" : "non";
+}
 
-  const pill = $("pill");
-  let label = "actif";
-  let tone = "ok";
-  if (s.paused) { label = "en pause"; tone = "warn"; }
-  else if (!status.tokenSet) { label = "jeton manquant"; tone = "warn"; }
-  else if (status.authFailed) { label = "jeton refusé"; tone = "bad"; }
-  else if (status.lastError) { label = "en difficulté"; tone = "bad"; }
-  pill.textContent = label;
-  pill.className = "pill " + tone;
-
+function fillStats(status) {
   const st = status.stats;
+  const out = status.outbox.stats;
   const dropped = Object.entries(st.dropped || {}).filter(([, n]) => n > 0)
     .map(([reason, n]) => n + " " + (REASONS[reason] || reason)).join(", ");
   const rows = [
-    ["En attente", String(status.queue)],
-    ["Transmis", st.delivered + " message(s) en " + st.signals + " signal(aux)"],
+    ["En attente d'envoi", String(status.queue)],
+    ["Transmis à Mika", st.delivered + " message(s), dont " + (st.own || 0) + " de toi, en " + (st.posts || 0) + " envoi(s)"],
     ["Dernier envoi", when(status.lastOkAt)],
+    ["Dernière relève", when(status.lastPollAt)],
+    ["Écrit par Mika", out.placed + " brouillon(s) placé(s), " + out.sent + " message(s) envoyé(s), "
+      + out.failed + " échec(s)"],
     ["Captés", st.received + " (réseau : " + (st.bySource.network || 0) + ", base locale : " + (st.bySource.idb || 0) + ")"],
     ["Écartés", dropped || "aucun"],
     ["Conversations connues", String(status.conversations)],
+    ["Ton identité Teams", status.selfFound ? (status.selfNameFound ? "connue, avec ton nom" : "connue, nom pas encore vu")
+      : "pas encore trouvée"],
     ["Actif depuis", when(status.armedAt)],
   ];
   if (status.retryAt > Date.now()) rows.splice(1, 0, ["Prochain essai", when(status.retryAt)]);
@@ -75,21 +64,73 @@ function fill(status) {
     dd.textContent = v;
     dl.append(dt, dd);
   }
+}
+
+function fillWaiting(list) {
+  const ul = $("waiting");
+  ul.replaceChildren();
+  for (const item of list) {
+    const li = document.createElement("li");
+    const text = document.createElement("span");
+    const what = item.mode === "send" ? "À envoyer dans " : "Brouillon pour ";
+    let line = what + (item.title || "une conversation");
+    if (item.expires_at) line += " — jusqu'à " + when(item.expires_at);
+    if (item.lastReason) line += " (" + item.lastReason + ")";
+    text.textContent = line;
+    const open = document.createElement("button");
+    open.className = "small";
+    open.textContent = "Ouvrir dans Teams";
+    open.addEventListener("click", () => ask("openDraft", { id: item.id }));
+    li.append(text, open);
+    ul.append(li);
+  }
+  $("waitingEmpty").hidden = Boolean(list.length);
+}
+
+function fillLog(entries) {
+  const log = $("log");
+  log.replaceChildren();
+  for (const entry of entries) {
+    const li = document.createElement("li");
+    const time = document.createElement("time");
+    time.textContent = when(entry.at);
+    const head = document.createElement("strong");
+    head.textContent = (RESULTS[entry.result] || entry.result) + (entry.reason ? " : " + entry.reason : "")
+      + " — " + (entry.title || "une conversation");
+    li.append(time, head);
+    if (entry.text) li.append(document.createElement("br"), document.createTextNode(entry.text));
+    log.append(li);
+  }
+  $("logEmpty").hidden = Boolean(entries.length);
+}
+
+function fill(status) {
+  const s = status.settings;
+  if (!loaded) {
+    $("base").value = s.base;
+    $("exclude").value = s.exclude;
+    loaded = true;
+  }
+  $("paused").checked = s.paused;
+  $("key").placeholder = status.keySet ? "définie — laisser vide pour la garder" : "aucune";
+
+  const pill = $("pill");
+  let label = "actif";
+  let tone = "ok";
+  if (s.paused) { label = "en pause"; tone = "warn"; }
+  else if (!status.keySet) { label = "clé manquante"; tone = "warn"; }
+  else if (status.authFailed) { label = "clé refusée"; tone = "bad"; }
+  else if (status.lastError) { label = "en difficulté"; tone = "bad"; }
+  pill.textContent = label;
+  pill.className = "pill " + tone;
+
+  fillStats(status);
+  fillWaiting(status.outbox.waiting || []);
+  fillLog(status.outbox.log || []);
 
   const err = $("error");
   err.hidden = !status.lastError;
   err.textContent = status.lastError ? status.lastError + " (" + when(status.lastErrorAt) + ")" : "";
-
-  const log = $("log");
-  log.replaceChildren();
-  for (const entry of status.log || []) {
-    const li = document.createElement("li");
-    const time = document.createElement("time");
-    time.textContent = when(entry.at);
-    li.append(time, document.createTextNode(entry.text));
-    log.append(li);
-  }
-  $("logEmpty").hidden = Boolean((status.log || []).length);
 }
 
 async function refresh() {
@@ -126,14 +167,9 @@ async function save() {
       return;
     }
   }
-  const pertinence = {};
-  for (const k of KINDS) pertinence[k] = Number($("p_" + k).value);
-  const result = await ask("save", { settings: {
-    base: base, token: $("token").value, device: $("device").value, skipOwn: $("skipOwn").checked,
-    exclude: $("exclude").value, sensitivity: Number($("sensitivity").value), pertinence: pertinence,
-  } });
+  const result = await ask("save", { settings: { base: base, key: $("key").value, exclude: $("exclude").value } });
   if (result && result.settings) {
-    $("token").value = "";
+    $("key").value = "";
     $("testResult").textContent = "Enregistré.";
     loaded = false;
     fill(result);
@@ -179,10 +215,11 @@ $("diagnose").addEventListener("click", async () => {
     return;
   }
   const r = result.report;
+  const c = r.compose || {};
   const lines = [
     "Onglet : " + (result.tab || r.url),
     "Ouvert depuis : " + when(r.startedAt),
-    "Identité trouvée (pour reconnaître tes messages) : " + (r.selfFound ? "oui" : "non"),
+    "Identité trouvée (pour reconnaître tes messages) : " + yes(r.selfFound),
     "",
     "Réseau : " + r.network.responses + " réponse(s) lue(s), " + r.network.frames + " trame(s), "
       + r.network.messages + " message(s), " + r.network.errors + " erreur(s)",
@@ -194,7 +231,15 @@ $("diagnose").addEventListener("click", async () => {
       + (db.stores.length ? " [" + db.stores.join(", ") + "]" : ""));
   }
   lines.push("", "Conversations dont le nom est connu : " + r.conversationTitles,
-    "Messages passés à l'extension : " + r.sent);
+    "Messages passés à l'extension : " + r.sent,
+    "",
+    "Zone de saisie trouvée : " + yes(c.editorFound),
+    "Conversation active connue : " + yes(c.activeConversationKnown),
+    "Envoi par le service de chat possible : " + yes(c.chatSendPossible),
+    "Brouillons en attente dans cet onglet : " + (c.drafts || 0),
+    "Depuis l'ouverture : " + (c.placed || 0) + " brouillon(s) placé(s), " + (c.sentByService || 0)
+      + " envoi(s) par le service de chat, " + (c.sentByComposeBox || 0) + " par la zone de saisie, "
+      + (c.errors || 0) + " erreur(s)");
   out.textContent = lines.join("\n");
 });
 
