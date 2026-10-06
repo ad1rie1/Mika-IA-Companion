@@ -167,6 +167,9 @@ class XEvenement(_Item):
     importance: int = Field(default=2, ge=1, le=4, description=phrase("memory.extraction.fields.event_importance"))
     a_feter: bool = Field(default=False, validation_alias=AliasChoices("a_feter", "à_fêter", "a_fêter", "festif"),
                           description=phrase("memory.extraction.fields.a_feter"))
+    chaque_annee: bool = Field(default=False, validation_alias=AliasChoices("chaque_annee", "chaque_année",
+                                                                            "annuel", "annuelle"),
+                               description=phrase("memory.extraction.fields.chaque_annee"))
 
 
 class Extraction(_Lenient):
@@ -425,6 +428,12 @@ _FESTIVE = re.compile(r"\b(?:anniv\w*|mariage|noces|fiancailles|cremaillere|bapt
 #: … sauf le souvenir d'un deuil (« l'anniversaire de la mort de son père »)
 _MOURNING = re.compile(r"\b(?:mort|morte|deces|decede\w*|deuil|disparition|obseques|enterrement(?! de vie)|"
                        r"commemoration|hommage)\b")
+#: ce qui revient chaque année, quoi qu'en dise le modèle (replié, sans accents) : « son anniversaire »,
+#: « l'anniversaire de la mort de son père », « ça fera un an que… » — pas « la soirée d'anniversaire de Léa » ni
+#: « l'anniversaire de Léa » où elle va, une fête qui n'a lieu qu'une fois pour qui y va
+_YEARLY = re.compile(r"\b(?:son|sa|ses|leur|mon|ma|ton|ta)\s+anniv\w*|"
+                     r"\bl'anniv\w*\s+de\s+(?:la\s+mort|sa\s+mort|son\s+deces|mariage|leur\s+rencontre)\b|"
+                     r"\bca\s+(?:fera|fait)\s+(?:un|deux|trois|\d+)\s+ans?\s+qu")
 
 
 def task_words(text: str) -> bool:
@@ -434,9 +443,13 @@ def task_words(text: str) -> bool:
 
 def moment_importance(ev: XEvenement) -> float:
     """Ce qu'un moment pèse : ce qu'en dit le modèle, et au moins « important » pour ce qui l'est à coup sûr (un
-    entretien, un examen, une opération, un mariage)."""
+    entretien, un examen, une opération, un mariage) ; « marquant » pour la date d'un deuil qui revient chaque
+    année."""
     rated = IMPORTANCE.get(ev.importance, 0.45)
-    return max(rated, IMPORTANCE[3]) if _IMPORTANT.search(fold(ev.texte)) else rated
+    text = fold(ev.texte)
+    if yearly(ev) and _MOURNING.search(text):
+        return max(rated, IMPORTANCE[4])
+    return max(rated, IMPORTANCE[3]) if _IMPORTANT.search(text) else rated
 
 
 def festive(ev: XEvenement) -> bool:
@@ -444,6 +457,12 @@ def festive(ev: XEvenement) -> bool:
     d'un deuil (« l'anniversaire de la mort de son père »)."""
     text = fold(ev.texte)
     return (ev.a_feter or bool(_FESTIVE.search(text))) and not _MOURNING.search(text)
+
+
+def yearly(ev: XEvenement) -> bool:
+    """Une date qui revient chaque année (un anniversaire, la date d'un deuil) : le modèle le dit, ou ses mots
+    (« son anniversaire », « ça fera un an que… ») — jamais une situation qui dure."""
+    return not ev.en_cours and (ev.chaque_annee or bool(_YEARLY.search(fold(ev.texte))))
 
 
 def echoes(text: str, secrets: Sequence[str], names: set[str]) -> bool:

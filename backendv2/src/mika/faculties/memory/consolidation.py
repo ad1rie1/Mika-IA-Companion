@@ -43,7 +43,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import extraction as x
-from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, params
+from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, occurrence, params
 from mika.faculties.memory.life import kept_too_early, same_task
 from mika.faculties.memory.projections import ITEM_COLUMNS, informants_of
 from mika.kernel.clock import DAY, MINUTE, instant
@@ -618,10 +618,11 @@ class Consolidate:
         """Ce qui va arriver dans la vie de quelqu'un : daté, à venir ; ou une
         situation qui dure (depuis quand). Le même moment redit ne se note pas
         deux fois ; une date qui change remplace. Avec ce qu'il pèse (ce qui
-        compte : un entretien, un examen) et s'il se fête (un anniversaire). Une
-        chose à faire n'en est pas un : « rappelle-moi de prendre rendez-vous
-        chez le dentiste » est une promesse, pas « son rendez-vous chez le
-        dentiste » dont on prendrait des nouvelles."""
+        compte : un entretien, un examen), s'il se fête (un anniversaire) et
+        s'il revient chaque année — alors même passé, il se note (« c'était mon
+        anniv hier »). Une chose à faire n'en est pas un : « rappelle-moi de
+        prendre rendez-vous chez le dentiste » est une promesse, pas « son
+        rendez-vous chez le dentiste » dont on prendrait des nouvelles."""
         drafts: list[Draft[Any]] = []
         tz = frame.env.tz_of(frame.root)
         tasks = self._tasks(ex, frame, conv, people, store)
@@ -633,11 +634,12 @@ class Consolidate:
             if got is None or not fresh(c.EVENT, ev.texte):
                 continue
             at, all_day = got
+            yearly = x.yearly(ev)
             if ev.en_cours:
                 # une situation : depuis quand (jamais dans le futur, jamais plus vieille que ce qu'on suit)
                 at = max(frame.now - round(p.situation_days * DAY) + DAY, min(at, frame.now))
-            elif at < frame.now - DAY:
-                continue  # du passé : ce n'est plus à suivre
+            elif at < frame.now - DAY and not yearly:
+                continue  # du passé : ce n'est plus à suivre (ce qui revient chaque année, si : il reviendra)
             if not ev.en_cours and (x.task_words(ev.texte) or any(
                     (not seqs or not ev.messages or set(seqs) & set(ev.messages)) and same_task(ev.texte, text)
                     and same_day(frame, at, due) for text, seqs, due in tasks)):
@@ -663,14 +665,15 @@ class Consolidate:
                     heard_by=heard, secret=twin.secret or secret_of(ev.secret, cited, sens, ev.texte),
                     replaces=twin.id, call_id=call_id, ongoing=twin.ongoing,
                     importance=max(twin.importance, x.moment_importance(ev)),
-                    festive=twin.festive or (not twin.ongoing and x.festive(ev))))
+                    festive=twin.festive or (not twin.ongoing and x.festive(ev)),
+                    yearly=twin.yearly or (not twin.ongoing and yearly)))
                 continue
             noted.append((ev.texte, at, about))
             drafts.append(c.EVENT_NOTED.draft(
                 text=Content.of(ev.texte, level=sens), when=at, about=about, all_day=all_day, sensitivity=sens,
                 sources=sources, told_by=told_by, heard_by=heard, secret=secret_of(ev.secret, cited, sens, ev.texte),
                 replaces=twin.id if twin is not None else None, call_id=call_id, ongoing=ev.en_cours,
-                importance=x.moment_importance(ev), festive=not ev.en_cours and x.festive(ev)))
+                importance=x.moment_importance(ev), festive=not ev.en_cours and x.festive(ev), yearly=yearly))
         return drafts
 
     @staticmethod
@@ -695,10 +698,12 @@ class Consolidate:
                           names: Sequence[str] = ()) -> c.LifeEvent | None:
         """Le moment déjà noté que ce texte redit : presque les mêmes mots (vecteurs, radicaux) — ou, le même jour
         pour la même personne, les mêmes mots une fois les prénoms ôtés (« son anniversaire » est « l'anniversaire
-        de Sam »)."""
+        de Sam »). Une date qui revient chaque année se compare à son occurrence de ce jour-là."""
         mine = [ev for ev in state.events.values() if set(ev.about) & set(about)]
         if not mine:
             return None
+        if frame is not None and at is not None:
+            mine = [occurrence(ev, at, frame.env.tz_of(frame.root), p) for ev in mine]
         if frame is not None and at is not None:
             day = [ev for ev in mine if not ev.ongoing and same_day(frame, ev.when, at) and ev.text_ref]
             said = store.content([ev.text_ref for ev in day]) if day else {}
@@ -708,7 +713,7 @@ class Consolidate:
         if vectors is not None:
             hits = await vectors.search(text, 1, kinds={c.EVENT}, keys=[ev.id for ev in mine])
             if hits and hits[0][1] >= p.dedup_similarity:
-                return state.events.get(hits[0][0])
+                return next((ev for ev in mine if ev.id == hits[0][0]), None)
         texts = store.content([ev.text_ref for ev in mine if ev.text_ref])
         wanted = stems(text)
         for ev in mine:
