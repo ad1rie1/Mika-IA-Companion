@@ -41,6 +41,8 @@ PLAIN = {
                             "messaging": "un nom de canal (``mobile``), jamais un texte sur la personne"},
     "identity.name_bound": {"name": "une clé de personne connue de nom (``name:alice``, celle de la mémoire)",
                             "person": "une clé de personne", "by": "qui (code)"},
+    "identity.name_dismissed": {"name": "une clé de personne connue de nom (``name:alice``, celle de la mémoire)",
+                                "person": "une clé de personne", "by": "qui (code)"},
     "social.profile_revised": {
         "person": "une clé de personne", "call_id": "un identifiant d'appel", "model": "un nom de modèle",
         "legacy_tone": "héritage : avant la version 2, le ton était en clair",

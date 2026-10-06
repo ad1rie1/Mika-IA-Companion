@@ -258,7 +258,8 @@ class InspectSpec:
     subject: str = ""
     #: l'ancien paramètre qui portait la clé de l'objet (``?handle=``) : redirection
     subject_param: str = ""
-    #: ce qui demande une action : ``fn(tranche, frame) -> int | (int, texte)``
+    #: ce qui demande une action : ``fn(tranche, frame) -> int | (int, texte)`` ; s'il déclare ``ports``, il
+    #: les reçoit en lecture (ce qu'il compte vit hors de la tranche : le magasin)
     badge: Callable[..., Any] | None = None
     description: str = ""
     #: hors de la navigation (joignable par lien seulement)

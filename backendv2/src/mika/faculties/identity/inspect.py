@@ -10,7 +10,10 @@ sans jamais le recalculer autrement.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+import json
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from mika.contracts import affect as affect_c
@@ -24,6 +27,7 @@ from mika.faculties.identity.faculty import (
     Handle,
     IdentityState,
     _first_seen,
+    _name_of,
     _params,
     _root,
     handles_of,
@@ -34,6 +38,7 @@ from mika.faculties.identity.faculty import (
 from mika.kernel.events import Event
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    ActionSlot,
     Badge,
     Block,
     Cell,
@@ -53,6 +58,7 @@ from mika.kernel.inspect import (
     Stats,
     Table,
     Text,
+    Toolbar,
     When,
     paginate,
 )
@@ -246,6 +252,147 @@ def name_aliases(s: IdentityState, person: str) -> tuple[str, ...]:
     # les noms qu'un opérateur lui a reliés (« l'Alice dont Bob parlait », c'était elle) : à elle, sans conteste
     out |= {k for k, p in s.names.items() if p == person}
     return tuple(sorted(out))
+
+
+# ── Les noms qui attendent quelqu'un ──────────────────────────────────────
+
+#: le paramètre de la fiche d'une personne qui y pose le formulaire « C'est la personne dont on lui a parlé »,
+#: pré-rempli de ce nom (``?nom=name:carol``)
+NAMING_PARAM = "nom"
+#: l'action « Ce n'est pas elle » (``actions.py``)
+DISMISS = "identity.ecarter_nom"
+#: la borne haute des clés « connue seulement de nom » : ``name:`` ≤ clé < ``name;`` (l'index par personne de la
+#: mémoire se lit par plage)
+_NAMED_END = "name;"
+#: ce qu'un nom rattache à une personne : souvenirs, croyances, moments de sa vie
+NAMED_KINDS = (memory_c.SOUVENIR, memory_c.BELIEF, memory_c.EVENT)
+_KINDS_FR = {memory_c.SOUVENIR: ("souvenir", "souvenirs"), memory_c.BELIEF: ("croyance", "croyances"),
+             memory_c.EVENT: ("moment de sa vie", "moments de sa vie")}
+_SENSITIVITY_FR = {Sensitivity.NONE: ("sans rien sur autrui", "sans rien sur autrui"),
+                   Sensitivity.ANODYNE: ("anodin", "anodins"), Sensitivity.PERSONAL: ("personnel", "personnels"),
+                   Sensitivity.CONFIDENCE: ("confidence", "confidences")}
+
+
+@dataclass(frozen=True, slots=True)
+class Waiting:
+    """Un nom dont on lui a parlé, encore libre (``name:carol``), et une personne connue qui le porte."""
+
+    name: str
+    person: str
+    #: les autres personnes connues qui le portent aussi
+    homonyms: tuple[str, ...] = ()
+
+
+def _worn(s: IdentityState) -> dict[str, list[tuple[str, tuple[str, ...]]]]:
+    """Les noms que portent les personnes connues (le sien, ceux de ses adresses), repliés comme la mémoire forme
+    ses clés, rangés par premier mot."""
+    out: dict[str, list[tuple[str, tuple[str, ...]]]] = {}
+    for person in s.by_person.keys():
+        if person.startswith(NAMED) or not is_identifiable(person):
+            continue
+        names = {_name_of(s, person)} | {s.handles[k].name for k in handles_of(s, person) if k in s.handles}
+        for words in sorted({tuple(fold(n).split()) for n in names if n}):
+            if words:
+                out.setdefault(words[0], []).append((person, words))
+    return out
+
+
+def bearers(s: IdentityState, key: str,
+            worn: Mapping[str, list[tuple[str, tuple[str, ...]]]] | None = None) -> list[str]:
+    """Les personnes connues qui portent ce nom : le nom complet, ou un prénom seul d'un côté (« Carol » et
+    « Carol Dupont » s'accordent, « Carol Dupont » et « Carol Martin » non). Une suggestion, jamais une liaison :
+    deux Carol ne se confondent pas d'elles-mêmes (ADR 0048)."""
+    said = tuple(key[len(NAMED):].split()) if key.startswith(NAMED) else ()
+    if not said:
+        return []
+    worn = _worn(s) if worn is None else worn
+    return sorted({p for p, words in worn.get(said[0], ()) if words == said or len(words) == 1 or len(said) == 1})
+
+
+def waiting_names(s: IdentityState, store: Any) -> list[Waiting]:
+    """Les noms dont on lui a parlé, encore libres, qu'une personne connue porte : un couple par personne, sauf
+    ceux qu'un opérateur a écartés ; les arrivées les plus récentes d'abord. Lu dans le magasin, en lecture seule
+    (l'index par personne de la mémoire), jamais dans une autre faculté."""
+    rows = store.query_mind(
+        f"SELECT DISTINCT a.person FROM {memory_c.ABOUT_TABLE} a JOIN {memory_c.ITEMS_TABLE} i ON i.id = a.item "
+        "WHERE a.person >= ? AND a.person < ? AND i.status='active' AND i.kind IN (?, ?, ?)",
+        (NAMED, _NAMED_END, *NAMED_KINDS))
+    free = sorted({str(k) for (k,) in rows} - set(s.names))
+    if not free:
+        return []
+    worn = _worn(s)
+    out: list[Waiting] = []
+    for key in free:
+        found = bearers(s, key, worn)
+        gone = s.dismissed.get(key, ())
+        out += [Waiting(key, p, tuple(o for o in found if o != p)) for p in found if p not in gone]
+    out.sort(key=lambda w: (-_first_seen(s, w.person, 0), w.name, w.person))
+    return out
+
+
+def naming_ref(s: IdentityState, name: str, person: str, text: str = "") -> Ref:
+    """La fiche de la personne, le formulaire « C'est la personne dont on lui a parlé » pré-rempli de ce nom."""
+    return Ref("subject", f"person/{person}", text or known_as(s, person),
+               (("onglet", "synthese"), (NAMING_PARAM, name)))
+
+
+def _named_items(store: Any, keys: Sequence[str]) -> dict[str, list[tuple[str, int, bool, tuple[str, ...], int]]]:
+    """Ce que sa mémoire garde sous ces noms, par nom : (sorte, sensibilité, secret, qui le lui a confié, quand)."""
+    if not keys:
+        return {}
+    marks = ",".join("?" * len(keys))
+    rows = store.query_mind(
+        f"SELECT a.person, i.kind, i.sensitivity, i.secret, i.told_by, i.born_at FROM {memory_c.ABOUT_TABLE} a "
+        f"JOIN {memory_c.ITEMS_TABLE} i ON i.id = a.item WHERE a.person IN ({marks}) AND i.status='active' "
+        "AND i.kind IN (?, ?, ?)", (*keys, *NAMED_KINDS))
+    out: dict[str, list[tuple[str, int, bool, tuple[str, ...], int]]] = {}
+    for key, kind, sensitivity, secret, told_by, born_at in rows:
+        try:
+            told = tuple(str(h) for h in json.loads(told_by or "[]") if h)
+        except (TypeError, ValueError):
+            told = ()
+        out.setdefault(str(key), []).append((str(kind), int(sensitivity), bool(secret), told, int(born_at)))
+    return out
+
+
+def _counted(n: int, words: tuple[str, str]) -> str:
+    return f"{n} {words[0] if n == 1 else words[1]}"
+
+
+def _told(s: IdentityState, ctx: InspectContext, items: Sequence[tuple[str, int, bool, tuple[str, ...], int]]) -> str:
+    """Qui lui en a parlé, combien, depuis quand (« Alice, 3 éléments, depuis … »)."""
+    by: dict[str, list[int]] = {}
+    for _kind, _level, _secret, told, at in items:
+        for who in {_root(s, h) for h in told} or {""}:
+            by.setdefault(who, []).append(at)
+    return " ; ".join(
+        f"{known_as(s, who) if who else 'elle-même (vécu, observé)'}, {_counted(len(ats), ('élément', 'éléments'))}, "
+        f"depuis {_when(ctx, min(ats))}" for who, ats in sorted(by.items(), key=lambda kv: (-len(kv[1]), kv[0]))) \
+        or "—"
+
+
+def _what(items: Sequence[tuple[str, int, bool, tuple[str, ...], int]]) -> str:
+    kinds = Counter(item[0] for item in items)
+    return " · ".join(_counted(kinds[k], _KINDS_FR[k]) for k in NAMED_KINDS if kinds[k]) or "—"
+
+
+def _how_sensitive(items: Sequence[tuple[str, int, bool, tuple[str, ...], int]]) -> str:
+    levels = Counter(item[1] for item in items)
+    out = " · ".join(_counted(n, _SENSITIVITY_FR.get(level, (str(level), str(level))))
+                     for level, n in sorted(levels.items()))
+    secrets = sum(1 for item in items if item[2])
+    if secrets:
+        out += f" (dont {_counted(secrets, ('secret', 'secrets'))} : un secret ne quitte jamais son confident)"
+    return out or "—"
+
+
+def _also(s: IdentityState, key: str, others: Sequence[str]) -> str:
+    """Les homonymes, dits pour qu'un opérateur choisisse en connaissance de cause."""
+    gone = s.dismissed.get(key, ())
+    listed = ", ".join(f"{known_as(s, o)} ({_where(s, handles_of(s, o))}{', écartée' if o in gone else ''})"
+                       for o in others[:5])
+    return (f"Une autre personne qu'elle connaît porte aussi ce nom : {listed}. Rien ne dit de laquelle on lui "
+            "parlait : choisis toi-même, sur la fiche de la bonne.")
 
 
 def _closeness_fr(frame: Frame, person: str) -> str:
@@ -660,6 +807,57 @@ def _person_of(s: IdentityState, frame: Frame, ctx: InspectContext) -> tuple[str
     return person, []
 
 
+def _naming(s: IdentityState, ctx: InspectContext, person: str) -> list[Block]:
+    """Venue d'une ligne « Noms qui attendent quelqu'un » (``?nom=name:carol``) : le formulaire « C'est la personne
+    dont on lui a parlé », pré-rempli de ce nom, avec la même confirmation ; « Ce n'est pas elle » à côté."""
+    key = ctx.param(NAMING_PARAM)
+    if not key.startswith(NAMED) or not _named_exists(ctx, key):
+        return []
+    said = known_as(s, key)
+    current = s.names.get(key)
+    if current == person:
+        return [Note(f"« {said} », dont on lui avait parlé, c'est {known_as(s, person)} : ce qu'on lui en a dit s'y "
+                     "rattache.", tone="ok")]
+    items: list[Block] = []
+    if current:
+        items.append(Note(f"« {said} » désigne aujourd'hui {known_as(s, current)} : le relier ici l'en détache.",
+                          tone="warn"))
+    others = [p for p in bearers(s, key) if p != person]
+    if others:
+        items.append(Note(_also(s, key, others), tone="warn"))
+    dismissed = person in s.dismissed.get(key, ())
+    if dismissed:
+        items.append(Note("Un opérateur a dit que ce n'était pas elle : la console ne le propose plus. Le relier "
+                          "reste possible.", tone="muted"))
+    items.append(ActionSlot("identity.nommer", (("name", said),), title="C'est la personne dont on lui a parlé"))
+    if not dismissed:
+        items.append(Toolbar((ActionSlot(DISMISS, (("name", key), ("person", person)), title="Ce n'est pas elle",
+                                         presentation="button"),), title="Sinon"))
+    return [Section(f"« {said} », dont on lui a parlé", tuple(items), description=(
+        f"Quelqu'un lui a parlé d'une « {said} » avant de connaître {known_as(s, person)}. Si c'est elle, ce qu'on lui "
+        "en a dit s'y rattache — chacun garde qui le lui a confié, et ce qui ne se répète pas reste tu. Rien n'est "
+        "relié tant que tu n'as pas confirmé."))]
+
+
+def _bearing(s: IdentityState, key: str) -> list[Block]:
+    """Sur la fiche d'un nom : la personne qu'un opérateur lui a reliée, ou celles qu'elle connaît qui le portent
+    (une suggestion : la fiche de chacune permet de le relier)."""
+    current = s.names.get(key)
+    if current:
+        return [Fields((("c'était", person_ref(s, current)),), title="Relié par un opérateur")]
+    gone = s.dismissed.get(key, ())
+    rows = []
+    for p in bearers(s, key):
+        first = _first_seen(s, p, 0)
+        rows.append(Row((person_ref(s, p), _where(s, handles_of(s, p)), When(first) if first else "—",
+                         Badge("écartée", "muted") if p in gone else Badge("à décider", "warn")),
+                        href=naming_ref(s, key, p)))
+    return [Table(("personne", "par où", "vue pour la première fois", "suggestion"), tuple(rows),
+                  title="Qui porte ce nom", empty="personne qu'elle connaisse ne porte ce nom",
+                  caption="Jamais relié d'une ressemblance de nom : une ligne mène à la fiche de la personne, où un "
+                          "opérateur le relie (ou l'écarte).")]
+
+
 @IDENTITY.inspect("synthese", title="Synthèse", subject="person", order=10,
                   description="Qui c'est, à quel point elle en est sûre, et ce qu'elle peut lui dire.")
 def _synthesis(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -669,7 +867,8 @@ def _synthesis(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Bloc
     if person.startswith(NAMED):
         return [Note("Connue seulement de nom : quelqu'un lui a parlé d'elle, mais elle ne lui a jamais écrit. "
                      "Ce qu'elle en sait est dans sa mémoire.", tone="muted"),
-                Fields((("nom", known_as(s, person)), ("clé", Text(person, "mono"))))]
+                Fields((("nom", known_as(s, person)), ("clé", Text(person, "mono")))), *_bearing(s, person)]
+    blocks += _naming(s, ctx, person)
     handles = handles_of(s, person)
     owner = frame.get(c.IS_OWNER(person))
     why = _why_owner(s, frame, person)
@@ -901,6 +1100,53 @@ def _claims(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
                   empty="aucune revendication en attente"),
             Note(f"Une affirmation seule ne franchit jamais la barre ({number(bar)}) ; une revendication jamais "
                  f"confirmée s'éteint au bout de {privacy.POLICY.pending_claim_ttl_days} jours.", tone="muted")]
+
+
+def _names_badge(s: IdentityState, frame: Frame, ports: Mapping[str, Any]) -> tuple[int, str]:
+    store = ports.get("store")
+    if store is None:
+        return 0, ""
+    return len(waiting_names(s, store)), "nom(s) dont on lui a parlé que porte quelqu'un qu'elle connaît"
+
+
+@IDENTITY.inspect("noms", title="Noms qui attendent quelqu'un", section="identites", order=25, badge=_names_badge,
+                  description="On lui a parlé de quelqu'un avant de le connaître, et une personne qu'elle connaît "
+                              "porte ce nom : à relier ou à écarter depuis la fiche de la personne. Rien n'est relié "
+                              "d'une ressemblance de nom.")
+def _waiting(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    if ctx.store is None:
+        return [Note("Le magasin n'est pas disponible : sa mémoire ne peut pas être relue.", tone="muted")]
+    found = waiting_names(s, ctx.store)
+    page, pager = paginate(found, ctx.pager(size=PAGE))
+    items = _named_items(ctx.store, sorted({w.name for w in page}))
+    rows = []
+    for w in page:
+        said, mine = known_as(s, w.name), items.get(w.name, [])
+        first = _first_seen(s, w.person, 0)
+        detail: list[Block] = [Note(_also(s, w.name, w.homonyms), tone="warn")] if w.homonyms else []
+        detail += [Fields((("relier", naming_ref(s, w.name, w.person, f"la fiche de {known_as(s, w.person)}, le "
+                                                                      "formulaire pré-rempli")),)),
+                   Toolbar((ActionSlot(DISMISS, (("name", w.name), ("person", w.person)), title="Ce n'est pas elle",
+                                       presentation="button"),),
+                           title=f"« {said} » n'est pas {known_as(s, w.person)} ?")]
+        rows.append(Row((
+            f"« {said} »", _told(s, ctx, mine), _what(mine), _how_sensitive(mine), person_ref(s, w.person),
+            _where(s, handles_of(s, w.person)), When(first) if first else "—",
+            Badge("homonyme", "warn") if w.homonyms else "—",
+        ), href=naming_ref(s, w.name, w.person), detail=tuple(detail)))
+    return [
+        Stats((Stat("noms qui attendent", len({w.name for w in found})),
+               Stat("personnes proposées", len(found)),
+               Stat("avec un homonyme", sum(1 for w in found if w.homonyms)))),
+        Table(("nom dont on lui a parlé", "qui lui en a parlé", "ce qui attend", Column("sensibilité", detail=True),
+               "personne qui le porte", Column("par où", detail=True), "vue pour la première fois", "homonyme"),
+              tuple(rows), title="Noms qui attendent quelqu'un", pager=pager,
+              empty="aucun nom dont on lui a parlé n'est porté par quelqu'un qu'elle connaît"),
+        Note("Une ligne ne relie rien : elle mène à la fiche de la personne, où « C'est la personne dont on lui a "
+             "parlé » est pré-rempli et demande ta confirmation. Ce qu'on lui en a dit s'y rattache alors — chacun "
+             "garde qui le lui a confié. « Ce n'est pas elle » ne propose plus ce nom pour cette personne.",
+             tone="muted"),
+    ]
 
 
 def _opens_at_best(trust: ChannelTrust) -> str:
