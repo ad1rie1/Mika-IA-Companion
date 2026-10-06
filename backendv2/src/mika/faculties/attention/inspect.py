@@ -126,6 +126,8 @@ def _thought_rows(s: AttentionState, frame: Frame, ctx: InspectContext,
                 *(("concerne", person_ref(frame, a)) for a in t.about),
                 ("sensibilité", SENSITIVITY_FR.get(t.sensitivity, str(t.sensitivity))),
                 ("intensité à la dernière ravivée", number(kept.intensity) if kept is not None else "—"),
+                *((("apaisée par des excuses", When(kept.forgiven_at)),)
+                  if kept is not None and kept.forgiven_at else ()),
                 ("s'éteint", f"sous {number(p.fade_below)} (demi-vie {num_fr(p.half_life_us / HOUR)} h)"),
                 ("outils qui vont avec", t.bundle or "aucun"),
             ), title="Détail"),
@@ -191,6 +193,8 @@ def _inspect_thoughts(s: AttentionState, frame: Frame, ctx: InspectContext) -> l
         ("demi-vie d'une pensée", f"{num_fr(p.half_life_us / HOUR)} h ; s'éteint sous {number(p.fade_below)}"),
         ("un échange qui marque", f"émotion déclarée ≥ {number(p.marking_intensity)}, ou valence ≤ "
                                   f"{number(p.marking_valence)} ; au plus {p.exchange_cap} à la fois"),
+        ("des excuses", f"ce qu'un échange blessant lui a laissé garde × {number(p.apology_ease)} de sa force, "
+                        "et s'apaise"),
         ("dernière nuit digérée", s.digested_night or "—"),
     ), title="Comment elles vivent")
     return [stats, live, _history(frame, ctx), rules]

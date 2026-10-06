@@ -19,6 +19,11 @@
 - **Inquiétude** : quelqu'un qui compte et qui n'avait pas l'air comme
   d'habitude (``others``) laisse une pensée — la même règle qu'un échange qui
   marque : une par personne à la fois.
+- **Des excuses** sincères (``self.touched``, une fois par jour, quand il y
+  avait de quoi pardonner) : la pensée née d'un échange qui l'a blessée ou mise
+  en colère s'allège aussitôt et s'apaise (la colère devient de la réflexion,
+  l'agacement du soulagement) ; elle ne pousse plus à « en reparler ». Une
+  dispute qui n'avait pas encore fait sa pensée n'en fait qu'une faible.
 - **Une promesse non tenue** à son échéance laisse une pensée (« j'avais
   promis… »), qui pousse à le lui dire ; la tenir, même en retard, l'apaise.
 - **Le fil avec chacun** (``AWAITING``) : ce qu'elle a écrit depuis le
@@ -71,6 +76,7 @@ from mika.contracts import others as others_c
 from mika.contracts import presence as presence_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
+from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.kernel.builtin import BOOT
 from mika.kernel.clock import DAY, HOUR, MINUTE
@@ -127,6 +133,12 @@ class AttentionParams(BaseModel):
         label="Pensées d'échanges à la fois", group="Un échange qui marque", lo=0, hi=10,
         help="Jamais plus de pensées nées d'échanges en même temps (une par personne) : douze insultes ne font "
              "pas douze ruminations.")] = 3
+    apology_ease: Annotated[float, Knob(
+        label="Des excuses : ce qu'il en reste", group="Un échange qui marque", lo=0.0, hi=1.0, step=0.05,
+        help="Quand la personne s'excuse sincèrement (une fois par jour, s'il y avait de quoi pardonner), la pensée "
+             "née d'un échange qui l'a blessée ou mise en colère garde cette part de sa force, et sa couleur s'apaise "
+             "(la colère devient de la réflexion, l'agacement du soulagement) : elle ne pousse plus à en reparler. "
+             "1 : sa force reste entière (sa couleur s'apaise quand même).")] = 0.4
     # une croyance révisée, un manque, un but bloqué
     revision_intensity: Annotated[float, Knob(
         label="Croyance révisée", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
@@ -340,6 +352,7 @@ class Thought:
     sensitivity: int = 2
     bundle: str = ""
     source: int | None = None  # le message, la promesse… d'où elle vient
+    forgiven_at: int = 0  # quand des excuses l'ont apaisée (0 : jamais)
 
 
 @dataclass(frozen=True, slots=True)
@@ -388,6 +401,7 @@ class Pending:
     ref: str = ""  # un texte déjà écrit (le titre d'un but bloqué)
     about: tuple[str, ...] = ()
     sensitivity: int = 2
+    forgiven_at: int = 0  # des excuses l'ont apaisée avant qu'elle naisse (0 : non)
 
 
 @dataclass(frozen=True, slots=True)
@@ -483,8 +497,9 @@ class AttentionState:
 #: dernier message de la personne et le rythme de leur relation (la joie du retour se mesure à l'absence).
 #: v9 : ce que la personne a lu (``presence.read``) : une initiative pas encore vue n'est pas ignorée ; les écrans
 #: qui se taisent sur ce qu'on y lit.
+#: v10 : des excuses sincères (``self.touched``) apaisent la pensée née d'un échange qui l'a blessée.
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    state_version=9)
+                    state_version=10)
 #: les manques dont on retient la dernière pensée (les plus récents)
 MISSING_KEPT = 64
 #: les écrans ouverts retenus au plus (des connexions jamais fermées : un transport qui ne le dit pas)
@@ -918,8 +933,10 @@ def _reaching_out(s: AttentionState, e, cx) -> AttentionState:
 def _born(s: AttentionState, e, cx) -> AttentionState:
     d = e.data
     p = params(cx.params)
+    waited = next((q for q in s.pending if q.source == d.source and q.origin == d.origin), None)
+    forgiven = waited.forgiven_at if waited is not None else 0
     thought = Thought(e.seq, d.text.ref or "", d.emotion, d.intensity, e.at, e.at, d.origin, tuple(d.about),
-                      d.sensitivity, d.bundle, d.source)
+                      d.sensitivity, d.bundle, d.source, forgiven_at=forgiven)
     s = replace(s, thoughts=_alive(replace(s, thoughts=s.thoughts.set(e.seq, thought)), e.at, p),
                 pending=tuple(q for q in s.pending if q.source != d.source or q.origin != d.origin))
     if d.origin == c.MISSING and d.about:
@@ -932,8 +949,9 @@ def _born(s: AttentionState, e, cx) -> AttentionState:
         s = replace(s, alone_at=e.at)
     if d.origin == c.UNANSWERED and d.about and d.about[0] in s.exchanges:
         s = replace(s, exchanges=s.exchanges.set(d.about[0], replace(s.exchanges[d.about[0]], felt=True)))
-    if d.origin == c.EXCHANGE and len(d.about) == 1 and d.emotion in GLAD:
-        # un bel échange : le lendemain, elle pourra avoir envie de lui en reparler (les anciens s'oublient)
+    if d.origin == c.EXCHANGE and len(d.about) == 1 and d.emotion in GLAD and not forgiven:
+        # un bel échange : le lendemain, elle pourra avoir envie de lui en reparler (les anciens s'oublient) — pas
+        # une dispute apaisée par des excuses, dont le soulagement n'a rien d'une bonne nouvelle
         glad = FrozenDict({k: v for k, v in s.glad.items() if e.at - v[1] < p.glad_until_us})
         s = replace(s, glad=glad.set(d.about[0], (e.seq, e.at)))
     return s
@@ -973,6 +991,48 @@ def habituation(s: AttentionState, source: str, kind: str, now: int, p: Attentio
 def _touched(s: AttentionState, e, cx) -> AttentionState:
     """La personne a reparlé de ce qui la concernait : lui répondre l'allègera."""
     return replace(s, eased=s.eased.set(e.data.person, e.at)) if e.data.thoughts else s
+
+
+#: Ce que devient une couleur quand elle s'apaise — après une nuit, après des excuses (les autres restent ce
+#: qu'elles sont).
+DRIFT = {
+    "frustrated": "relieved", "anxious": "relieved", "scared": "relieved", "angry": "thinking",
+    "disgusted": "thinking", "jealous": "thinking", "sad": "melancholic", "lonely": "melancholic",
+}
+
+
+def _forgivable(origin: str, emotion: str) -> bool:
+    """Ce que des excuses apaisent : un échange qui l'a blessée ou mise en colère — une inquiétude ne se pardonne
+    pas, un bel échange n'a rien à pardonner."""
+    return origin == c.EXCHANGE and A.valence(_emotion(emotion)) < 0
+
+
+@ATTENTION.reducer(self_c.TOUCHED)
+def _apologized(s: AttentionState, e, cx) -> AttentionState:
+    """Des excuses sincères (lues par ``self`` dans la forme, une fois par jour et par personne, quand il y avait
+    de quoi pardonner) : ce qui la travaillait de leur échange s'allège aussitôt et s'apaise — il ne pousse plus à
+    « en reparler » comme d'un conflit ouvert ; un échange qui n'avait pas encore fait sa pensée n'en fait qu'une
+    faible. Rien ne s'efface : la nuit la digérera comme les autres, et lui répondre l'allègera encore. « Pardon
+    mdr » n'est pas lu comme des excuses (``self``)."""
+    d = e.data
+    if d.kind != self_c.APOLOGIZED or not d.person:
+        return s
+    p = params(cx.params)
+    hurt = [t for t in s.thoughts.values() if d.person in t.about and _forgivable(t.origin, t.emotion)
+            and current(t, e.at, p) >= p.fade_below]
+    waiting = [q for q in s.pending if q.person == d.person and _forgivable(q.origin, q.emotion)]
+    if not hurt and not waiting:
+        return s
+    thoughts = s.thoughts
+    for t in hurt:
+        # « ravivée » reste l'échange : ce qu'il en reste à l'instant perd la même part, et lui répondre après
+        # l'échange l'allégera encore (``eased``)
+        thoughts = thoughts.set(t.id, replace(t, intensity=round(t.intensity * p.apology_ease, 4),
+                                              emotion=DRIFT.get(t.emotion, t.emotion), forgiven_at=e.at))
+    pending = tuple(replace(q, intensity=round(q.intensity * p.apology_ease, 3),
+                            emotion=DRIFT.get(q.emotion, q.emotion), forgiven_at=e.at)
+                    if any(q is w for w in waiting) else q for q in s.pending)
+    return replace(s, thoughts=thoughts, pending=pending, eased=s.eased.set(d.person, e.at))
 
 
 @ATTENTION.reducer(c.DIGESTED)
