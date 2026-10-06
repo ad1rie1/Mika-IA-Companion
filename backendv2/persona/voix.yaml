@@ -470,6 +470,18 @@ expression:
     # aucune raison connue
     anything: "lui dire un mot"
 
+  # ── Ce qu'elle s'est dit à mi-voix ──────────────────────────────────────────────────────────────────────────
+  # « CE QUE TU T'ES DIT À MI-VOIX » : dans son prompt, en tête-à-tête avec la personne devant qui elle a murmuré il
+  # y a peu (expression, _murmured_section ; murmur_recall_us) — la personne a pu lire ce murmure, elle l'assume si
+  # on lui en parle. Le modèle lit : said (ou said_adrift quand elle s'est ravisée), puis own.
+  murmured:
+    title: "CE QUE TU T'ES DIT À MI-VOIX"
+    # {when} : « Tout à l'heure », « Ce matin » (expression.when, première lettre en majuscule) ; {hour} : l'heure ;
+    # {minute} : les minutes, sur deux chiffres ; {text} : son murmure, tel qu'elle l'a écrit
+    said: "{when} (vers {hour}h{minute}), en pensant à lui écrire, tu t'es dit à mi-voix : « {text} »."
+    said_adrift: "{when} (vers {hour}h{minute}), en pensant à lui écrire, tu t'es dit à mi-voix : « {text} » — puis tu t'es ravisée : tu ne lui as pas écrit à ce moment-là."
+    own: "Ta voix intérieure s'affiche sur l'écran de la personne : elle a pu la lire. Si on t'en parle, c'est vrai : assume-le simplement, sans en dire plus que cette pensée. Sinon, n'en dis rien."
+
   # ── Désigner quelqu'un ──────────────────────────────────────────────────────────────────────────────────────
   # Quand elle ne connaît pas le nom de quelqu'un : dans ses murmures, ses envies, ce qu'elle ressent pour lui, la
   # consigne d'une initiative, ses buts et ses projets (goals/work.py, projects/work.py), la consigne d'un dessin

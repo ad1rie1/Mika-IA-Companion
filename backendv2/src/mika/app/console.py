@@ -119,6 +119,7 @@ SECTION_LABELS: dict[str, str] = {
     # déclarées par des lots voisins (ADR 0033, 0034, 0036) : nommées d'avance, sans effet tant qu'elles n'existent pas
     "life": "Ce qui se passe dans la vie de la personne", "matter": "Ce dont elle pourrait parler",
     "noticed": "Ce qu'elle a remarqué", "habits": "Ce qu'elle s'entend répéter",
+    "murmured": "Ce qu'elle s'est dit à mi-voix devant la personne",
     "mail_mention": "Le mail important qu'elle annonce", "step_origin": "Ce qui a fait naître le but",
     "project_network": "Ce que le réseau a rendu",
     "project_answer": "La réponse à sa demande d'aide (un projet)",

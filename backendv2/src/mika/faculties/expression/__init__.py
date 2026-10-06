@@ -6,7 +6,8 @@
 - la consigne de style (parler comme on parle, une échelle d'intensité, ce
   qu'est le bloc d'état interne : sa tête à elle, jamais citée) ;
 - le murmure : parfois, avant d'écrire à quelqu'un qui la regarde, une
-  pensée à mi-voix — et parfois elle se ravise ;
+  pensée à mi-voix — et parfois elle se ravise ; la personne a pu la lire,
+  elle s'en souvient un moment quand elles se parlent en tête-à-tête ;
 - la livraison : un énoncé commité part vers les transports par la file de
   sortie, avec l'émotion à montrer et la voix à prendre.
 """
@@ -69,6 +70,11 @@ class ExpressionParams(BaseModel):
     murmur_spacing_us: Annotated[int, Knob(
         label="Murmures espacés d'au moins", group="Le murmure", lo=5 * MINUTE, hi=12 * HOUR,
         help="Pas deux murmures plus rapprochés : une voix intérieure qui commente tout lasse.")] = HOUR
+    murmur_recall_us: Annotated[int, Knob(
+        label="Elle se souvient de son murmure pendant", group="Le murmure", lo=10 * MINUTE, hi=12 * HOUR,
+        help="Sa pensée à mi-voix s'est affichée chez la personne à qui elle allait écrire : pendant ce temps, "
+             "quand elles se parlent en tête-à-tête, elle sait ce qu'elle s'est dit (et si elle s'est ravisée) — "
+             "pour l'assumer si on lui en parle, jamais pour le commenter d'elle-même.")] = 2 * HOUR
     opening_gap_us: Annotated[int, Knob(
         label="Une conversation commence après un silence de", group="Ce qu'elle se répète", lo=30 * MINUTE,
         hi=48 * HOUR,
@@ -79,13 +85,16 @@ class ExpressionParams(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class ExpressionState:
-    #: les murmures récents : corrélation de l'épisode → l'adresse de la personne à qui elle allait écrire (le
-    #: murmure se montre sur ses écrans à elle, jamais à tout le monde)
-    murmurs: FrozenDict[str, str] = field(default_factory=FrozenDict)
+    #: les murmures récents : corrélation de l'épisode → (l'adresse de la personne à qui elle allait écrire, s'est-elle
+    #: ravisée) — le murmure se montre sur ses écrans à elle, jamais à tout le monde
+    murmurs: FrozenDict[str, tuple[str, bool]] = field(default_factory=FrozenDict)
+    #: ce que la personne a pu lire d'elle à mi-voix : adresse → (quand, référence du texte, s'est-elle ravisée) — le
+    #: dernier murmure devant ses écrans, le temps de s'en souvenir (le texte reste dans son contenu : l'oubli l'atteint)
+    heard: FrozenDict[str, tuple[int, str, bool]] = field(default_factory=FrozenDict)
 
 
 EXPRESSION = Faculty("expression", state=ExpressionState, init=lambda p: ExpressionState(), params=ExpressionParams,
-                     state_version=2)
+                     state_version=3)
 
 #: au plus tant de murmures retenus (le temps que leur livraison parte)
 MURMURS_KEPT = 8
@@ -441,17 +450,70 @@ def murmur(frame: Frame, req: Any) -> Prelude | None:
 @EXPRESSION.reducer(rt.EPISODE_STARTED)
 def _murmuring(s: ExpressionState, e, cx) -> ExpressionState:
     """Un murmure commence : on retient à qui elle allait écrire (sa livraison ira
-    là, et seulement là)."""
+    là, et seulement là), et si elle s'est ravisée."""
     d = e.data
     if d.kind != Kind.MURMUR:
         return s
     tag, _, target = d.reason.partition(":")
     if tag not in (c.MURMUR, c.MURMUR_ADRIFT) or not target:
         return s
-    murmurs = s.murmurs.set(e.correlation, target)
+    murmurs = s.murmurs.set(e.correlation, (target, tag == c.MURMUR_ADRIFT))
     if len(murmurs) > MURMURS_KEPT:  # les identifiants d'épisode sont chronologiques
         murmurs = FrozenDict(sorted(murmurs.items())[-MURMURS_KEPT:])
     return replace(s, murmurs=murmurs)
+
+
+@EXPRESSION.reducer(rt.UTTERANCE)
+def _murmured(s: ExpressionState, e, cx) -> ExpressionState:
+    """Un murmure dit : il s'affiche chez la personne à qui elle allait écrire, qui a pu le lire — elle s'en
+    souviendra un moment. Seul le dernier par adresse ; ceux dont le souvenir est passé s'en vont."""
+    d = e.data
+    if d.kind != Kind.MURMUR or d.text.ref is None:
+        return s
+    got = s.murmurs.get(e.correlation)
+    if got is None:
+        return s
+    target, adrift = got
+    window = params(cx.params).murmur_recall_us
+    heard = FrozenDict({h: v for h, v in s.heard.items() if h != target and e.at - v[0] < window})
+    return replace(s, heard=heard.set(target, (e.at, d.text.ref, adrift)))
+
+
+@EXPRESSION.enricher("own_murmur", episodes=CONVERSATIONAL, deadline_ms=300)
+async def _own_murmur(s: ExpressionState, frame: Frame, ports: Mapping[str, Any]) -> tuple[int, str, bool] | None:
+    """Ce qu'elle s'est dit à mi-voix devant les écrans de cette personne, il y a peu : (quand, le texte, s'est-elle
+    ravisée). Lu seulement en tête-à-tête ; un texte oublié ne se relit plus."""
+    store, ep, aud = ports.get("store"), frame.episode, frame.audience
+    if store is None or ep is None or not ep.target or aud is None or aud.public or ep.attrs.get("room"):
+        return None
+    got = s.heard.get(ep.target)
+    if got is None:
+        return None
+    at, ref, adrift = got
+    if frame.now - at >= params(frame.env.params_of("expression", frame.root)).murmur_recall_us:
+        return None
+    text = A.strip_prosody(store.content([ref]).get(ref) or "").strip()
+    return (at, text, adrift) if text else None
+
+
+@EXPRESSION.section("murmured", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=25,
+                    title=phrase("expression.murmured.title"))
+def _murmured_section(s: ExpressionState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
+    """Une pensée à voix haute que la personne a pu lire fait partie de ce qui s'est passé entre elles : si on lui en
+    parle (« c'était quoi, ce que tu marmonnais ? »), elle l'assume au lieu de le nier — sans en dire plus que cette
+    pensée, qui ne dit jamais son motif. Sinon, elle n'en dit rien."""
+    got = enrich.get("own_murmur")
+    aud = frame.audience
+    if not got or aud is None or aud.public:
+        return None
+    at, text, adrift = got
+    when, then = when_fr(at, frame.now, frame.env.tz_of(frame.root)), frame.local(at)
+    when, minute = f"{when[:1].upper()}{when[1:]}", f"{then.minute:02d}"
+    if adrift:
+        said = phrase("expression.murmured.said_adrift", when=when, hour=then.hour, minute=minute, text=text)
+    else:
+        said = phrase("expression.murmured.said", when=when, hour=then.hour, minute=minute, text=text)
+    return f"{said} {phrase('expression.murmured.own')}"
 
 
 @EXPRESSION.effect(rt.UTTERANCE)
@@ -468,7 +530,8 @@ async def _deliver(ev: Any, ports: Mapping[str, Any]) -> None:
     if d.kind == Kind.MURMUR:
         # une pensée à mi-voix : sur les écrans de la personne à qui elle allait écrire, voix intérieure — jamais
         # à tout le monde (sans destinataire connu, elle ne part pas)
-        target = frame.state("expression").murmurs.get(ev.correlation)
+        got = frame.state("expression").murmurs.get(ev.correlation)
+        target = got[0] if got else None
         if not target:
             return
     declared = Declared.decode(d.annotation(c.EMOTION_ANNOTATION))
