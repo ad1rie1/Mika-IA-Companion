@@ -36,6 +36,7 @@ import { SleepOverlay } from "./overlays/SleepOverlay";
 import { HeadEmotionOverlay } from "./overlays/HeadEmotionOverlay";
 import { HeadAttentionOverlay, viewerReachable } from "./overlays/HeadAttentionOverlay";
 import { AttentionDirector, type AttentionInput, type AttentionState } from "./attention";
+import { activityFocus, type ActivityFocus } from "./activity";
 import { CUE_GESTURE, decideGesture } from "./gestures";
 
 const DEFAULT_MANIFEST_URL = "/animations/manifest.json";
@@ -100,6 +101,9 @@ export class AnimationSystem {
   private pendingPlace: PlaceId | null = null;
   /** Movable seats handed over before the model loaded. */
   private pendingProps = new Map<PlaceId, THREE.Object3D | null>();
+  /** What she is doing in her room (the backend's name), and how it shows. */
+  private activityName: string | null = null;
+  private focus: ActivityFocus | null = null;
   private speaking = false;
   private replyPending = false;
   /** Internal clock (sum of clamped dt) — the typing memo is stamped on it. */
@@ -238,6 +242,7 @@ export class AnimationSystem {
         ctx.viewerMeasured &&
         viewerReachable(ctx.viewerYaw, ctx.viewerPitch),
       viewerAngle: ctx.viewerMeasured ? Math.hypot(ctx.viewerYaw, ctx.viewerPitch) : 0,
+      focus: this.focus,
     };
     this.updateYawn(dt);
     const intent = this.director.update(dt, input);
@@ -482,6 +487,21 @@ export class AnimationSystem {
       return;
     }
     this.locomotion.setPlace(place, opts);
+  }
+
+  /**
+   * What she is doing in her room (the backend's `activity.name`, a state
+   * like the place): between two exchanges her eyes rest on it and her
+   * hands hold it (activity.ts) — a sign of the person brings her eyes
+   * back at once. Null, or a name the table does not know: nothing.
+   */
+  setActivity(name: unknown): void {
+    const next = typeof name === "string" ? name : null;
+    if (next === this.activityName) return;
+    this.activityName = next;
+    this.focus = activityFocus(next);
+    if (next !== null && !this.focus) console.warn(`AnimationSystem: unknown activity "${next}"`);
+    this.hands.setActivity(this.focus?.hands ?? null, this.focus?.handMotion ?? 1);
   }
 
   /**

@@ -8,6 +8,7 @@ import {
   type EmotionState,
   type EmotionUpdateMessage,
   type InnerState,
+  type InnerStateActivity,
   type InnerStateUpdateMessage,
   type SleepPhase,
   type SpeechMessage,
@@ -66,6 +67,8 @@ export interface BodyPort {
   setMood?(emotion: EmotionName, intensity: number): void;
   /** Où l'IA l'a mise dans sa chambre (un état, pas un ordre). */
   setPlace?(place: unknown): void;
+  /** Ce qu'elle y fait (`activity.name`, null : rien) — un état aussi. */
+  setActivity?(name: unknown): void;
 }
 
 /** La scène (lumières, fond) — ne suit que le sommeil. */
@@ -96,6 +99,9 @@ export interface SpeechPresenterDeps {
   readouts: ReadoutsPort;
   /** Horloge monotone en ms (`performance.now` en prod). */
   now?: () => number;
+  /** Horloge murale en ms (`Date.now` en prod) : la fin prévue d'une
+   * occupation est une date du serveur. */
+  wallNow?: () => number;
   timers?: TimerPort;
 }
 
@@ -155,8 +161,12 @@ export class SpeechPresenter {
   private readonly stage: StagePort;
   private readonly readouts: ReadoutsPort;
   private readonly now: () => number;
+  private readonly wallNow: () => number;
   private readonly timers: TimerPort;
 
+  /** La fin prévue de son occupation (regarder dehors deux minutes) : rien
+   * ne la dit au serveur, l'écran l'arrête lui-même. */
+  private activityEnd: unknown = null;
   /** Répliques vocalisées mises en file et pas encore réglées. */
   private voicedInFlight = 0;
   /** Départ de la première réplique en vol (base de la soupape). */
@@ -172,6 +182,7 @@ export class SpeechPresenter {
     this.stage = deps.stage;
     this.readouts = deps.readouts;
     this.now = deps.now ?? (() => performance.now());
+    this.wallNow = deps.wallNow ?? (() => Date.now());
     this.timers = deps.timers ?? {
       set: (fn, ms) => setTimeout(fn, ms),
       clear: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
@@ -267,10 +278,36 @@ export class SpeechPresenter {
     // Le lieu voyage dans le même état intérieur : un changement se marche,
     // le même lieu renvoyé (reconnexion) ne fait rien.
     if (state?.place !== undefined) this.body.setPlace?.(state.place);
+    // Ce qu'elle y fait aussi ; absent (un serveur plus ancien) : on n'y
+    // touche pas.
+    if (state?.activity !== undefined) this.applyActivity(state.activity);
     const energy = state?.energy;
     if (typeof energy !== "number" || !Number.isFinite(energy)) return;
     this.face.setEnergy?.(energy);
     this.body.setEnergy?.(energy);
+  }
+
+  /** Son occupation au corps, arrêtée à sa fin prévue s'il y en a une : une
+   * occupation minutée finit sans que le serveur ne pousse rien. */
+  private applyActivity(activity: InnerStateActivity | null): void {
+    if (this.activityEnd !== null) {
+      this.timers.clear(this.activityEnd);
+      this.activityEnd = null;
+    }
+    const until = activity?.until;
+    const left =
+      typeof until === "number" && Number.isFinite(until) ? until - this.wallNow() : Infinity;
+    if (!activity || left <= 0) {
+      this.body.setActivity?.(null);
+      return;
+    }
+    this.body.setActivity?.(activity.name);
+    if (Number.isFinite(left)) {
+      this.activityEnd = this.timers.set(() => {
+        this.activityEnd = null;
+        this.body.setActivity?.(null);
+      }, left);
+    }
   }
 
   /**

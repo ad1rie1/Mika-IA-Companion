@@ -89,12 +89,31 @@ export const DREAM_TYPES = [
 ] as const;
 export type DreamType = (typeof DREAM_TYPES)[number];
 
+/**
+ * Ce qu'elle fait dans sa chambre (faculté `world` du serveur,
+ * `adapters/web/protocol.py::activity`) : un état, comme `place`.
+ */
+export interface InnerStateActivity {
+  /** `draw`, `work`, `look_outside`, `browse_books`, `water_plant`… — une
+   * table du client (vtuber/animation/activity.ts) ; un nom inconnu se tait. */
+  name: string;
+  /** Comment elle le dit : « regarder dehors ». */
+  label: string;
+  /** Début, en millisecondes depuis l'époque. */
+  since: number;
+  /** Fin prévue (ms) ; null : jusqu'à ce qu'elle s'arrête (le serveur le dira). */
+  until: number | null;
+}
+
 export interface InnerState {
   drives?: Record<string, { tension: number; last_satisfied: number }>;
   energy?: number;
   /** Where she is in her room — decided by the backend (the AI), one of
    * the places of vtuber/locomotion/roomLayout.ts. */
   place?: string;
+  /** Ce qu'elle y fait ; null : rien ; absent : un serveur plus ancien (on
+   * n'y touche pas). */
+  activity?: InnerStateActivity | null;
   /** Estime de soi ∈ [0,1] — la variable lente ; absente si illisible. */
   estime?: number;
   circadian?: {

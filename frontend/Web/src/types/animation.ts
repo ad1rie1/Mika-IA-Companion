@@ -47,7 +47,7 @@ export interface GestureMapping {
 // ── Hands ───────────────────────────────────────────────────────────
 
 /** Named finger shapes owned by the procedural HandAnimator. */
-export type HandShapeName = "relaxed" | "open" | "tucked" | "loose" | "clasp";
+export type HandShapeName = "relaxed" | "open" | "tucked" | "loose" | "clasp" | "grip";
 
 // ── Clip manifest (public/animations/manifest.json) ─────────────────
 
