@@ -150,7 +150,7 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 | | Ton et parole | ton, façons de parler, salutations (le ton de ses bonjours, jamais recopiées) |
 | | Caractère | traits, manies, fragilités, valeurs, centres d'intérêt |
 | | Sa vie | sa vie d'IA VTuber à sa façon, ses goûts et avis, ce qui est vrai d'elle (ADR 0047) |
-| | Tempérament | les huit curseurs, l'humeur de fond, ce que pilote chaque curseur |
+| | Tempérament | les huit curseurs, l'humeur de fond, ce que pilote chaque curseur ; **Voir l'effet** (comme pour une faculté) |
 | | Import / export | le document YAML, revenir au fichier, l'historique des révisions |
 | Canaux | Dépôts git | le jeton avec lequel ses projets poussent vers leur dépôt distant (jamais réaffiché, jamais dans le journal) |
 | Plugins | Vue d’ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d’utilisation ; les réglages des apps restent dans la Forge |
@@ -161,7 +161,7 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 | | Appareils | jeton des appareils |
 | | Réveils par API | liste ; chaque réveil a sa page : **à quoi il sert** (obligatoire), actif, consignes (elles priment sur le texte d'un appel, cité), projet, impersonnel, outils (lots), ignorer son rythme, à qui rendre compte, bornes. Nom fixe (la fin de son URL). Sa clé se génère sur sa fiche (Ses canaux › Réveils par API), montrée une fois. ADR 0068 |
 | Comportement | Vue d'ensemble | provenance des paramètres, ce que pilote chaque curseur |
-| | une page par faculté | ses paramètres **rangés par groupe** (un groupe = une page), chacun avec sa valeur, sa provenance, ses bornes et son sens ; une surcharge se pose en changeant la valeur |
+| | une page par faculté | ses paramètres **rangés par groupe** (un groupe = une page), chacun avec sa valeur, sa provenance, ses bornes et son sens ; une surcharge se pose en changeant la valeur ; **Voir l'effet** : avant d'enregistrer, les lignes de l'arbitre et les faits partagés qui changeraient maintenant avec les valeurs tapées (avant → après) — rien n'est écrit ni journalisé, ce qui s'est accumulé n'est pas rejoué |
 | Accès | Comptes | liste paginée, créer, modifier (opérateur, actif, mot de passe) — audité ; sur la page d'un compte, ses applications connectées (téléphone, moteur : sorte, origine, dernier usage, jamais le secret) et « révoquer » — audité (ADR 0062) |
 | Historique | Journal des modifications | chaque réglage enregistré, chaque rejournalisation des paramètres |
 
