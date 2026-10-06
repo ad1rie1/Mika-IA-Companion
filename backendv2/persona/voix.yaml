@@ -2776,6 +2776,12 @@ projects:
     next: "prochain objectif : « {text} »"
     # à qui s'occupe d'elle : ce qui attend son accord. {who} : la personne ; {what} : ses demandes (projects.effect)
     awaiting: "attend l'accord de {who} : {what}"
+    # la dernière ligne, seulement en réponse à qui s'occupe d'elle, quand la section montre un projet qu'ils pilotent
+    # ensemble : le geste passe par l'outil (sinon le projet ne l'entend jamais). « project_steer » est le nom de
+    # l'outil : NE PAS LE TRADUIRE
+    steer: >-
+      (Si la personne te demande d'ajouter quelque chose à un projet, de changer de cap, de t'y mettre maintenant, de
+      le mettre en pause ou de le reprendre : project_steer — sinon rien n'y change.)
 
   # ── Les consignes d'une initiative ──────────────────────────────────────────────────────────────────────────
   # Ce qu'elle se dit avant de prendre la parole pour un projet (projects/work.py) — rien du contenu, aucune

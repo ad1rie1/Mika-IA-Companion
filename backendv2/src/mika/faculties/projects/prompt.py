@@ -13,7 +13,8 @@
   l'a été depuis le récit précédent), ou ce qui la bloque, à la mesure du lien.
 - **En conversation** : ses projets (« tu travailles sur quoi ? » est une
   question sur sa vie) — où chacun en est, sa dernière exécution, ce qui vient
-  ou ce qui bloque, et pour qui s'occupe d'elle ce qui attend son accord ;
+  ou ce qui bloque, et pour qui s'occupe d'elle ce qui attend son accord et
+  l'outil pour les piloter ensemble (``project_steer``, en réponse) ;
   filtrés comme la mémoire.
 """
 
@@ -41,7 +42,7 @@ from mika.faculties.projects.faculty import (
     params,
     pick,
 )
-from mika.faculties.projects.tools import RUNS, written
+from mika.faculties.projects.tools import RUNS, steers, written
 from mika.faculties.projects.work import FULL, MENTION, untold
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone
@@ -410,7 +411,7 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
     pm = params(frame.env.params_of("projects", frame.root))
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     owner = bool(person) and aud.owner  # l'adresse qui parle, là où elle parle (jamais un groupe public)
-    lines, level, witness = [], 0, False
+    lines, level, witness, steering = [], 0, False, False
     for p in _recent(s)[-SHOWN * 2:]:
         title = texts.get(p.title_ref)
         if not title or not hearable(p.about, p.sensitivity, person, aud.level, aud.witness_level, aud.private_ok):
@@ -438,6 +439,7 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
                 line += f"\n  {nxt}"
             if any(a != person for a in p.about):
                 level = max(level, written(p))
+            steering = steering or (owner and steers(p, person))
         waiting = _awaiting(frame, p, person) if owner and person else ""
         if waiting:
             line += f"\n  {waiting}"
@@ -449,6 +451,10 @@ def _live_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> 
             break
     if not lines:
         return None
+    # une ligne, seulement en réponse à qui s'occupe d'elle et quand elle voit un projet qu'ils pilotent ensemble :
+    # « ajoute une page contact », « mets-le en pause » se font avec l'outil — sinon le projet ne l'entend jamais
+    if steering and ep is not None and ep.kind == Kind.REPLY:  # l'outil ne sert qu'en réponse
+        lines.append(phrase("projects.live.steer"))
     return SectionBody("\n".join(lines), level=level, witness=witness)
 
 
