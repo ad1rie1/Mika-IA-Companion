@@ -9,6 +9,7 @@ dans « Système ».
 
 from __future__ import annotations
 
+import functools
 import inspect as pyinspect
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -158,7 +159,8 @@ class Inspection:
         return None if isinstance(out, Failed) else out
 
     def badge(self, spec: InspectSpec) -> tuple[int, str] | None:
-        """Ce qui demande une action (mis en cache jusqu'au prochain événement)."""
+        """Ce qui demande une action (mis en cache jusqu'au prochain événement). Un badge qui déclare un
+        paramètre ``ports`` les reçoit, en lecture : ce qu'il compte vit hors de la tranche (le magasin)."""
         if spec.badge is None:
             return None
         key = f"{spec.owner}/{spec.name}"
@@ -167,7 +169,12 @@ class Inspection:
         if cached is not None and cached[0] == head:
             return cached[1]
         frame = self.kernel.mind.frame()
-        out: Any = call(spec.badge, frame.state(spec.owner), frame, label=f"badge {key}")
+        try:
+            wants_ports = "ports" in pyinspect.signature(spec.badge).parameters
+        except (TypeError, ValueError):
+            wants_ports = False
+        fn = functools.partial(spec.badge, ports=self.kernel.ports) if wants_ports else spec.badge
+        out: Any = call(fn, frame.state(spec.owner), frame, label=f"badge {key}")
         value: tuple[int, str] | None
         if isinstance(out, Failed) or out is None:
             value = None
