@@ -112,6 +112,17 @@ def _location_valid(defn: w.WorldDef, loc: w.Location, actors: Actors) -> bool:
     return loc.slot < a.surface_slots if isinstance(loc, w.On) else a.container_slots > 0
 
 
+def rehome(before: w.WorldDef, after: w.WorldDef, objects: Objects, now: int) -> dict[str, w.ObjectState]:
+    """Une édition qui change le foyer d'un objet resté à sa place le déplace : il était chez lui, et c'est chez lui
+    qui a bougé (un meuble que l'opératrice a poussé). Un objet qu'on a mis ailleurs reste où on l'a mis."""
+    out = dict(objects)
+    for o in after.objects:
+        old, cur = before.object(o.id), objects.get(o.id)
+        if old is not None and cur is not None and old.home != o.home and cur.location == old.home:
+            out[o.id] = cur.model_copy(update={"location": o.home, "since": now})
+    return out
+
+
 def reconcile(defn: w.WorldDef, actors: Actors, objects: Objects) -> tuple[dict[str, w.ActorState],
                                                                            dict[str, w.ObjectState]]:
     """Après une édition : ce qui a encore un sens reste où il est, le reste rentre chez soi (un objet retiré

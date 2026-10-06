@@ -429,6 +429,10 @@ par quelqu'un ne se pose pas tout seul, un personnage ne traverse pas un mur san
 Elle **remarque** ce qui change chez elle : une plante qui apparaît, son lit déplacé, sa guitare qui n'est
 plus là — comme elle remarquerait qu'on a touché à ses affaires.
 
+Ce noyau sait éditer les objets, les archétypes, et la position (`pos`) ou l'orientation (`facing`) d'un lieu
+qui existe. Ajouter, retirer ou redéfinir autrement une pièce, un lieu ou un personnage répond `unsupported`
+(ce qu'elle peut nommer avec ses outils ne suit pas encore une édition), et rien ne change.
+
 ## 9. Refus et erreurs
 
 | Code | Sens |

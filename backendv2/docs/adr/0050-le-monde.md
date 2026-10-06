@@ -124,6 +124,19 @@ appel de modèle (un monde vivant ruinerait le budget et la latence).
       qui rend un verdict (brouillons sous garde, ou refus) sans rien écrire. Déjà traité : l'hôte qui termine une
       action plus tôt (conclue par le noyau, pas crue sur parole) ou qui n'y arrive pas (seul ce qui est vrai
       change) ; le reste répond `unsupported` jusqu'à P4 et P5.
+    - **Un premier éditeur** (de P5) : `edit` passe en entier ou pas du tout — une révision dépassée donne `stale`,
+      un lot incohérent `incoherent` (la phrase du validateur), sinon `world.authored` sous la garde du monde
+      inchangé. Il change les objets, les archétypes, la position et l'orientation d'un lieu qui existe ; pas les
+      pièces, ni l'existence ou le reste d'un lieu (l'énumération de `go_to` est tirée du monde par défaut), ni
+      les personnages (`unsupported`, tout dit d'un coup). Un objet resté à sa place suit son foyer édité
+      (`plan.rehome`). Elle **remarque** ce qui a changé (`faculties/world/notice.py`) : un objet apparu, disparu,
+      ou à elle et déplacé — de pièce, de lieu, de meuble, jamais de quelques centimètres ; un signal
+      `world.noticed` (`kind` « change ») par objet, que l'attention dose (la pertinence part du seuil d'une pensée
+      et monte avec la saillance, 0,6 fois pour ce qui n'est pas à elle ; une émotion légère), émis par le processus
+      `world.notice` quand elle est éveillée — endormie, à son réveil. Un objet touché deux fois avant qu'elle le
+      voie se remarque une fois ; un objet offert concerne qui l'a offert (`about`). La console (« Son monde »)
+      montre les dernières éditions et ce qu'elle en a remarqué ; le créateur Unity recompare de lui-même un lot
+      `stale`.
 
 12. *La suite.*
     - **P1, la faculté `world`** : tranche, réducteurs, validation des actions, faits, section, outils,

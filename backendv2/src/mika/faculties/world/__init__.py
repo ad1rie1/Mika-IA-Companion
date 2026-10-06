@@ -15,7 +15,9 @@ moteur hôte pourra la jouer et dire qu'il n'y arrive pas, jamais décider seul 
 - le coucher est un **réducteur** de ``body.fell_asleep`` : l'intention naît dans la même transaction que
   l'endormissement (les écrans reçoivent les deux ensemble, elle marche jusqu'au lit les yeux ouverts) ;
 - reprend ``place`` (ADR 0049) : les ``place.moved`` déjà au journal sont relus comme ses déplacements, et
-  ``place.current`` (que lisent les écrans) se déduit d'ici.
+  ``place.current`` (que lisent les écrans) se déduit d'ici ;
+- ce qu'une opératrice change chez elle, elle le remarque (``notice.py``) : un signal par objet apparu, disparu ou
+  — à elle — déplacé, éveillée ou à son réveil.
 """
 
 from __future__ import annotations
@@ -32,7 +34,7 @@ from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import place as place_c
 from mika.contracts import world as w
-from mika.faculties.world import plan
+from mika.faculties.world import notice, plan
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
@@ -119,6 +121,8 @@ class WorldState:
     lived: tuple[w.Lived, ...] = ()
     #: les gestes qu'on lui a faits ces dernières minutes (« AUTOUR DE TOI » les dit)
     gestures: tuple[Felt, ...] = ()
+    #: ce qu'une édition a changé chez elle et qu'elle n'a pas encore remarqué (elle dormait, ou c'est l'instant)
+    unnoticed: tuple[notice.Remark, ...] = ()
 
 
 def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
@@ -126,7 +130,7 @@ def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
     return WorldState(definition=defn, actors=FrozenDict(actors), objects=FrozenDict(objects))
 
 
-WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=3)
+WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=4)
 
 #: Ce qu'on garde de ses occupations passées : trois jours, soixante au plus.
 LIVED_KEPT_US = 3 * DAY
@@ -207,16 +211,31 @@ def _gestured(s: WorldState, e: Any, cx: Any) -> WorldState:
 
 @WORLD.reducer(w.AUTHORED)
 def _authored(s: WorldState, e: Any, cx: Any) -> WorldState:
-    """Une édition validée à l'émission ; au rejeu, une édition qui ne s'applique plus ne change rien."""
+    """Une édition validée à l'émission ; au rejeu, une édition qui ne s'applique plus ne change rien. Ce qui était
+    à sa place suit sa place ; ce qui n'a plus de sens rentre chez soi."""
     if e.data.base_rev != s.definition.rev:
         return s
     try:
         defn = w.apply_changes(s.definition, e.data.changes)
     except ValueError:
         return s
-    actors, objects = plan.reconcile(defn, s.actors, s.objects)
+    actors, objects = plan.reconcile(defn, s.actors, plan.rehome(s.definition, defn, s.objects, e.at))
     intents = {k: v for k, v in s.intents.items() if v.actor in actors}
-    return _lived(replace(s, definition=defn), actors, objects, e.seq, e.at, intents=FrozenDict(intents))
+    # ce qu'elle en remarquera (``world.notice`` : éveillée, tout de suite ; endormie, à son réveil)
+    unnoticed = notice.merge(s.unnoticed, notice.changes(s.definition, defn, s.objects, objects, e.seq))
+    return _lived(replace(s, definition=defn, unnoticed=unnoticed), actors, objects, e.seq, e.at,
+                  intents=FrozenDict(intents))
+
+
+@WORLD.reducer(w.NOTICED)
+def _noticed(s: WorldState, e: Any, cx: Any) -> WorldState:
+    """Elle a remarqué un changement chez elle : il n'est plus à remarquer — sauf s'il a été retouché par une édition
+    qu'elle n'avait pas encore vue (plus récente que ``basis``), qui se remarquera à son tour."""
+    d = e.data
+    if d.kind != notice.KIND or d.object is None:
+        return s
+    kept = tuple(r for r in s.unnoticed if r.object != d.object or r.seq > e.basis)
+    return s if len(kept) == len(s.unnoticed) else replace(s, unnoticed=kept)
 
 
 @WORLD.reducer(place_c.MOVED)
@@ -738,6 +757,27 @@ class Settle:
             await ctx.emit(w.CHANGED.draft(cause=w.Cause(source=w.Source.REFLEX, actor=w.MIKA),
                                            changes=(w.ActorBusy(actor=w.MIKA, activity=None),),
                                            dedupe_key=f"lasse:{me.activity.since}"))
+
+
+# ── Ce qu'on a changé chez elle ───────────────────────────────────────────
+
+
+@WORLD.process("world.notice", wake_on=[w.AUTHORED, *body_c.ALL], lane="background", catch_up=CatchUp.ONCE)
+class Notice:
+    """Ce qu'une édition a changé chez elle, elle le remarque (ADR 0050 §10) : éveillée, aussitôt ; endormie, rien
+    de la nuit — à son réveil. Un signal par changement, une seule fois (sa clé dit l'édition et l'objet, et sa
+    réduction le retire de ce qui reste à remarquer)."""
+
+    def next_due(self, state: WorldState, frame: Frame, last_run: int | None) -> int | None:
+        return frame.now if state.unnoticed and _awake(frame) else None
+
+    async def run(self, ctx: Any) -> None:
+        s: WorldState = ctx.state
+        if not _awake(ctx.frame):
+            return
+        drafts = [d for r in s.unnoticed if (d := notice.signal(r)) is not None]
+        if drafts:
+            await ctx.emit(*drafts)
 
 
 # ── Vers les écrans ───────────────────────────────────────────────────────

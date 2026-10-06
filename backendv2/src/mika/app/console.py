@@ -179,7 +179,7 @@ PROCESS_LABELS: dict[str, str] = {
     "memory.promises": "Tenir ou laisser filer ses promesses", "self.wake": "Se réveiller avec sa nuit",
     "social.reciprocity": "Remarquer qui écrit en premier",
     "memory.follow": "Remarquer qu'elle a repris un moment de la vie de quelqu'un",
-    "world.settle": "Conclure ses gestes dans le monde",
+    "world.settle": "Conclure ses gestes dans le monde", "world.notice": "Remarquer ce qu'on a changé chez elle",
     "shares.retention": "Retirer les fichiers envoyés trop anciens", "imaging.draw": "Dessiner",
     "mcp.expire": "Refuser les accords restés sans réponse",
     "wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente",
