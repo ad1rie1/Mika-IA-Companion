@@ -239,8 +239,13 @@ relis la carte), `blocked`, `expired`, `forbidden` (pas à toi de décider). Une
 (`{"name": "draw", "label": "dessiner", "since": …, "until": …}` en millisecondes, `until` nul : jusqu'à ce qu'elle
 s'arrête ; `null` : rien ; un client tait un nom qu'il ne connaît pas), `circadian`, besoins `drives`, `estime`,
 `identity`, ce qui lui trotte dans la tête `ruminations`, `today_journal` (avec son `title`), `last_dream`,
-`self_narrative` ; `projects` pour une propriétaire ; `person_scope: false` = cette trame ne parle de personne, garde
-les sections personnelles), **`pong`**.
+`self_narrative` ; ce qu'elle t'a promis `reminders` (`[{"text": "appeler le dentiste", "due":
+"2026-10-08T09:00:00+02:00"}]` : ses rappels encore à dire, du plus proche au plus lointain, `due` en ISO à l'heure
+locale ou `null` ; un rappel dit disparaît) ; ce qu'elle a en train et que tu peux entendre `doing` (au plus deux
+`{"text": …, "kind": …}`, `text` dans ses mots à elle, `kind` : `musing` une rêverie, `reflection` elle repense à
+quelque chose, `exploration` elle va voir ailleurs ; un client montre un `kind` inconnu sans étiquette) — deux clés
+omises quand elles sont vides ; `projects` pour une propriétaire ; `person_scope: false` = cette trame ne parle de
+personne, garde les sections personnelles), **`pong`**.
 
 ## 5. Notifier
 
