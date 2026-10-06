@@ -840,8 +840,17 @@ async def _show(ev: Any, ports: Mapping[str, Any]) -> None:
         local_hour=frame.local().hour, kind="state"))
 
 
+async def _show_work(ev: Any, ports: Mapping[str, Any]) -> None:
+    """Une séance de travail commence : si son corps s'est mis en route vers son bureau (le réflexe, né dans la
+    même transaction, a changé le monde), les écrans l'apprennent ; s'il s'est abstenu, rien ne part."""
+    frame: Frame = ports["frame"]()
+    if frame.get(w.STATE).seq >= ev.seq:
+        await _show(ev, ports)
+
+
 WORLD.effect(w.INTENDED, when=lambda d: d.intent.actor == w.MIKA and d.intent.cause.source is not w.Source.REFLEX)(
     _show)
+WORLD.effect(rt.EPISODE_STARTED, when=lambda d: d.kind in WORKING_KINDS)(_show_work)
 WORLD.effect(w.ENDED, when=lambda d: d.actor == w.MIKA and (d.outcome is not w.Outcome.DONE
                                                              or _busy_changed(d.changes)))(_show)
 WORLD.effect(w.CHANGED, when=lambda d: _busy_changed(d.changes))(_show)
