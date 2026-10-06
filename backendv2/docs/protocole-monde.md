@@ -85,7 +85,7 @@ libre (`allumer`, `arroser`, `lire`), un nom, et un **effet** pris dans une list
 | Effet | Ce qu'il fait | Champs |
 |---|---|---|
 | `state` | l'objet change d'état | `requires_state`, `to_state` |
-| `activity` | l'acteur s'occupe avec l'objet (lire, jouer, regarder dehors) | `activity`, `duration_s` (`null` : jusqu'à ce qu'on l'interrompe) |
+| `activity` | l'acteur s'occupe avec l'objet (lire, jouer, regarder dehors) | `activity`, `duration_s` (`null` : jusqu'à ce qu'on l'interrompe), `nourishes` (les besoins que l'occupation nourrit chez Mika : `expression`, `curiosity` — recopiés dans l'`activity` de l'acteur quand elle commence) |
 | `consume` | l'objet disparaît (manger un biscuit) | |
 
 Communs : `held` (il faut tenir l'objet), `duration_s` (durée nominale), `access` (qui d'autre qu'elle a le

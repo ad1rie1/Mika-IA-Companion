@@ -612,7 +612,8 @@ def _act(defn: w.WorldDef, actors: Actors, objects: Objects, actor: str, step: w
         out.append(w.ObjectSet(object=obj, state=aff.to_state))
     if aff.effect is w.Effect.ACTIVITY and aff.activity is not None:
         until = None if aff.duration_s is None else at + int(aff.duration_s * US)
-        out.append(w.ActorBusy(actor=actor, activity=w.Activity(name=aff.activity, object=obj, since=at, until=until)))
+        out.append(w.ActorBusy(actor=actor, activity=w.Activity(name=aff.activity, object=obj, since=at, until=until,
+                                                                nourishes=aff.nourishes)))
     if aff.effect is w.Effect.CONSUME:
         out.append(w.ObjectGone(object=obj))
     return out

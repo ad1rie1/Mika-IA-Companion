@@ -130,7 +130,9 @@ def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
     return WorldState(definition=defn, actors=FrozenDict(actors), objects=FrozenDict(objects))
 
 
-WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=4)
+#: v5 : ses occupations disent ce qu'elles nourrissent (``nourishes``, déclaré dans ``chambre.json``) — la genèse
+#: change : reconstruite depuis elle, sinon un instantané garderait une définition sans
+WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=5)
 
 #: Ce qu'on garde de ses occupations passées : trois jours, soixante au plus.
 LIVED_KEPT_US = 3 * DAY

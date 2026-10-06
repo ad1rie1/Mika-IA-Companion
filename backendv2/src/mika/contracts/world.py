@@ -269,6 +269,14 @@ class PlaceDef(Payload):
     tags: tuple[Ident, ...] = ()
 
 
+class Nourished(enum.StrEnum):
+    """Les besoins (faculté ``needs``) qu'une occupation peut nourrir : l'envie de s'exprimer (dessiner), la
+    curiosité (feuilleter un livre, regarder dehors). La compagnie ne se trouve pas dans un objet."""
+
+    CURIOSITY = "curiosity"
+    EXPRESSION = "expression"
+
+
 class Affordance(Payload):
     """Une action qu'un archétype permet, au-delà des actions de base (``Builtin``).
 
@@ -276,7 +284,8 @@ class Affordance(Payload):
     ``requires_state`` : les états de l'objet où elle a un sens ; ``to_state`` : l'état qu'elle donne ;
     ``held`` : il faut tenir l'objet (lire un livre) ; ``duration_s`` : la durée nominale (``None`` pour une
     occupation sans fin prévue) ; ``noise`` : jusqu'où ça s'entend (0 : la pièce, 1 : les pièces voisines) ;
-    ``animation`` : la clé d'animation du moteur."""
+    ``animation`` : la clé d'animation du moteur ; ``nourishes`` : pour une occupation, les besoins qu'elle
+    nourrit — le temps qu'elle y passe les comble un peu."""
 
     id: Ident
     label: Label
@@ -289,6 +298,7 @@ class Affordance(Payload):
     access: Access | None = None
     noise: float = Field(default=0.0, ge=0, le=1)
     animation: AssetKey | None = None
+    nourishes: tuple[Nourished, ...] = ()
 
     @model_validator(mode="after")
     def _effect_fields(self) -> Affordance:
@@ -298,6 +308,8 @@ class Affordance(Payload):
             raise ValueError(f"l'affordance « {self.id} » change l'état : il lui faut to_state")
         if self.effect is Effect.ACTIVITY and self.activity is None:
             raise ValueError(f"l'affordance « {self.id} » est une occupation : il lui faut activity")
+        if self.nourishes and self.effect is not Effect.ACTIVITY:
+            raise ValueError(f"l'affordance « {self.id} » n'est pas une occupation : elle ne nourrit rien")
         return self
 
 
@@ -607,12 +619,14 @@ def apply_changes(w: WorldDef, changes: Iterable[DefPut | DefRemove]) -> WorldDe
 
 class Activity(Payload):
     """Ce qu'un acteur est en train de faire (lire, regarder dehors, travailler) ; ``until`` : la fin prévue,
-    ``None`` pour une occupation qu'on interrompra."""
+    ``None`` pour une occupation qu'on interrompra ; ``nourishes`` : les besoins qu'elle nourrit, recopiés de
+    l'affordance quand elle commence (une observation : éditer l'archétype ensuite ne réécrit pas le passé)."""
 
     name: Ident
     object: Ident | None = None
     since: int
     until: int | None = None
+    nourishes: tuple[Nourished, ...] = ()
 
 
 class Lived(Payload):
