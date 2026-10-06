@@ -65,6 +65,11 @@ class MessageNotifier(
     }
 
     suspend fun onSpoke(event: ChatEvent.MikaSpoke) = lock.withLock {
+        // Une autre vie du serveur : la notification parlait d'un fil qui n'est plus.
+        if (event.anotherLife) {
+            writeLines(emptyList())
+            cancel()
+        }
         val lastRead = kvLong(Kv.LAST_READ_ID)
         val lastNotified = kvLong(Kv.LAST_NOTIFIED_ID)
         val ctx = NotificationPolicy.Context(foreground.value, lastRead, lastNotified, event.cursorBefore)
