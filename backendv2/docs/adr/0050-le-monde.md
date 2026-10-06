@@ -144,7 +144,8 @@ appel de modèle (un monde vivant ruinerait le budget et la latence).
       lieu — le nom à la personne elle-même et devant qui peut entendre l'anodin sur autrui, « quelqu'un »
       sinon ; quelqu'un qui entre dans sa pièce est un signal (`arrival`), et dans Unity elle lève les yeux vers
       l'entrée. Une assise ne se prend qu'assis : quelqu'un debout près du bureau ne prend pas sa chaise.
-      Restent `act`, `address`, `answer`.
+      Les gestes (`address` portant un `gesture`) sont acceptés ; restent `act`, les demandes (`address` portant
+      une `request`) et `answer`.
 
 12. *La suite.*
     - **P1, la faculté `world`** : tranche, réducteurs, validation des actions, faits, section, outils,
