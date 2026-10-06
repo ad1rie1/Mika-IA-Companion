@@ -19,6 +19,7 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import sensors as sensors_c
 from mika.contracts import social as social_c
+from mika.contracts import wakeup as wakeup_c
 from mika.contracts import world as w
 from mika.contracts.entry import Admission, HistoryRow, SharedDownload, SharedMeta
 from mika.contracts.runtime import PerceptionReceived
@@ -44,6 +45,7 @@ from mika.runtime.bootstrap import Kernel, ReadOnlyStore
 from mika.vocab.affect import emotion_of
 from mika.vocab.circadian import DAYS_FR, day_fr
 from mika.vocab.episodes import project_of
+from mika.vocab.privacy import Sensitivity
 
 
 def _args(args_json: str) -> dict[str, Any]:
@@ -148,6 +150,11 @@ def _proposal_text(summary: str, capability: str, effect: Any) -> str:
 _WORLD_SHOWN = frozenset(t.name for t in w.ALL) - {w.NOTICED.name, w.DESCRIBED.name}
 #: ce qu'un client lit quand l'état a bougé entre la décision et l'écriture
 _STALE = "Le monde a changé entre-temps : relis-le, puis recommence."
+
+
+def wake_key(endpoint: str, idempotency: str) -> str:
+    """La clé de dédoublonnage d'un appel de réveil : un rejeu sous la même clé d'idempotence est le même appel."""
+    return f"reveil:{endpoint}:{idempotency}"
 
 
 class KernelPort:
@@ -285,6 +292,38 @@ class KernelPort:
         commit = await self.kernel.mind.append([draft], emitter="sensors", correlation=f"appareil:{device}",
                                                origin=Origin.EXTERNAL)
         return commit.seqs[-1] if commit.seqs else None
+
+    def wake_seen(self, endpoint: str, idempotency: str) -> int | None:
+        """Le ``seq`` d'un appel déjà reçu par ce réveil sous cette clé d'idempotence (``None`` : aucun)."""
+        if not idempotency:
+            return None
+        return self.kernel.mind.store.find_dedupe(wakeup_c.CALLED.name, wake_key(endpoint, idempotency))
+
+    async def wake(self, endpoint: str, *, label: str, text: str, instructions: str, plain: bool, project: int,
+                   bundles: Sequence[str], rouse: bool, notify: str, lifetime_us: int,
+                   idempotency: str = "") -> int | None:
+        """Un appel d'un réveil par API (ADR 0068), déjà admis par la porte : journalisé avec le réglage du réveil à
+        cet instant, puis interprété (un réveil qui passe outre son rythme la tire du sommeil). Rend son ``seq`` —
+        celui du premier appel portant la même clé d'idempotence, s'il y en a eu un."""
+        frame = self.kernel.mind.frame()
+        about: tuple[str, ...] = ()
+        if notify not in (wakeup_c.NOBODY, wakeup_c.OWNERS):
+            about = (frame.get(identity_c.PERSON(notify)) or notify,)
+        now = self.kernel.mind.clock.now()
+        draft = wakeup_c.CALLED.draft(
+            endpoint=endpoint, label=label[:300], text=Content.of(text, level=int(Sensitivity.PERSONAL)),
+            instructions=Content.of(instructions) if instructions.strip() else None, plain=plain, project=project,
+            bundles=tuple(bundles), rouse=rouse, notify=notify, expires_at=now + lifetime_us if lifetime_us else 0,
+            about=about, dedupe_key=wake_key(endpoint, idempotency) if idempotency else None)
+        correlation = f"reveil:{endpoint}"
+        commit = await self.kernel.mind.append([draft], emitter=wakeup_c.OWNER, correlation=correlation,
+                                               origin=Origin.EXTERNAL)
+        if not commit.seqs:
+            return None
+        seq = commit.seqs[-1]
+        if not commit.deduped:
+            await self.kernel.interpret(seq, correlation)
+        return seq
 
     async def resolve_effect(self, proposal: int, approved: bool, *, by: str, note: str = "",
                              seen: str = "") -> str:

@@ -113,7 +113,8 @@ def _pressure_series(s: BodyState, frame: Frame) -> float:
 # ── Rythme ────────────────────────────────────────────────────────────────
 
 
-ROUSED_FR = {c.CLOSE_ONE: "quelqu'un de proche", c.URGENT: "quelque chose d'urgent"}
+ROUSED_FR = {c.CLOSE_ONE: "quelqu'un de proche", c.URGENT: "quelque chose d'urgent",
+             c.CALL: "un réveil par API qui passe outre son rythme"}
 
 
 def _who(frame: Frame, person: str, handle: str) -> str:
@@ -134,6 +135,10 @@ def _transitions(ctx: InspectContext, frame: Frame) -> tuple[tuple[Entry, ...], 
     out = []
     for e in page:
         href = Ref("event", str(e.seq), "l'événement")
+        if e.type.name == c.ROUSED.name and e.data.reason == c.CALL:
+            out.append(Entry(e.at, "tirée du sommeil par un réveil par API", ROUSED_FR[c.CALL], tone="warn",
+                             href=href))
+            continue
         if e.type.name == c.ROUSED.name:
             out.append(Entry(e.at, "tirée du sommeil par un message",
                              f"de {_who(frame, e.data.person, e.data.handle)} — "

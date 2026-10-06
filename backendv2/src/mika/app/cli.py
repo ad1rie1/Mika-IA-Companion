@@ -55,6 +55,7 @@ from mika.app import backup, composition, datadir
 from mika.app.composition import faculties, for_simulation
 from mika.app.server import serve
 from mika.app.settings import SecretBox, Settings
+from mika.app.wakeups import WakeupDesk
 from mika.contracts import identity as identity_c
 from mika.kernel import forms
 from mika.kernel.codec import digest
@@ -294,6 +295,26 @@ async def _with_settings(data: Path, fn):  # type: ignore[no-untyped-def]
         return await fn(settings, store)
     finally:
         await store.close()
+
+
+async def wakeup_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
+    """Les réveils par API (ADR 0068) hors ligne : les lister, leur donner une clé (montrée une fois), la retirer."""
+    desk = WakeupDesk(settings, RealClock().now)
+    if args.wakeup_cmd == "list":
+        return {"ok": True, "endpoints": [
+            {"name": ep.name, "label": ep.label, "enabled": ep.enabled, "project": ep.project or None,
+             "plain": ep.plain, "tools": list(ep.bundles), "rouse": ep.rouse, "notify": ep.notify,
+             "key": f"{ep.key.hint}…" if ep.key is not None else None} for ep in desk.endpoints()]}
+    if args.wakeup_cmd == "key":
+        try:
+            key = await desk.new_key(args.name, "ligne de commande")
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+        return {"ok": True, "name": args.name, "key": key,
+                "usage": f"POST /api/wake/{args.name} avec l'en-tête Authorization: Bearer <clé>"}
+    if not await desk.revoke_key(args.name, "ligne de commande"):
+        return {"ok": False, "error": f"« {args.name} » n'a pas de clé."}
+    return {"ok": True, "name": args.name, "revoked": True}
 
 
 def _sonde(data: Path, args: argparse.Namespace) -> int:
@@ -753,6 +774,13 @@ def _run(argv: list[str] | None) -> int:
     se = sub.add_parser("sensors", help="le jeton des appareils (POST /api/perceptions)")
     sesub = se.add_subparsers(dest="sensors_cmd", required=True)
     sesub.add_parser("token", help="un jeton neuf (l'ancien ne vaut plus), montré une fois")
+    wk = sub.add_parser("wakeup", help="les réveils par API (POST /api/wake/<nom>, ADR 0068 ; serveur arrêté)")
+    wksub = wk.add_subparsers(dest="wakeup_cmd", required=True)
+    wksub.add_parser("list", help="les réveils déclarés et l'état de leur clé, sans secret")
+    wkk = wksub.add_parser("key", help="une clé neuve pour un réveil (l'ancienne ne vaut plus), montrée une fois")
+    wkk.add_argument("name")
+    wkr = wksub.add_parser("revoke", help="retirer la clé d'un réveil (plus aucun appel ne passe)")
+    wkr.add_argument("name")
     co = sub.add_parser("console", help="la console d'exploitation")
     csub = co.add_subparsers(dest="console_cmd", required=True)
     cap = csub.add_parser("apercu", help="exporter chaque page (clair et sombre) d'une Mika neuve, sans serveur")
@@ -879,6 +907,10 @@ def _run(argv: list[str] | None) -> int:
 
         print(json.dumps(asyncio.run(_with_settings(args.data, token)), ensure_ascii=False, indent=2))
         return 0
+    if args.cmd == "wakeup":
+        out = asyncio.run(_with_settings(args.data, lambda settings, _store: wakeup_command(settings, args)))
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 0 if out.get("ok", True) else 1
     if args.cmd in ("mail", "rss", "stt"):
         print(json.dumps(asyncio.run(world_command(args.data, args)), ensure_ascii=False, indent=2))
         return 0

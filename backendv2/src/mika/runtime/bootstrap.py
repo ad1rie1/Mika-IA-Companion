@@ -339,7 +339,7 @@ class Kernel:
         if commit.deduped:
             return Perceived(commit, None)
         seq = commit.seqs[-1]
-        await self._interpret(seq, correlation)
+        await self.interpret(seq, correlation)
         if not data.addressed or self.deps.reply_kind not in self.runner.policies:
             return Perceived(commit, None)
         self._retry_counts.pop((data.handle, data.room), None)  # la personne parle : un tour neuf
@@ -360,9 +360,11 @@ class Kernel:
             room=data.room,
         )
 
-    async def _interpret(self, seq: int, correlation: str) -> None:
+    async def interpret(self, seq: int, correlation: str) -> None:
         """Ce que chaque faculté tire du message, journalisé avant la réponse :
-        une réponse composée ensuite voit déjà « elle dit être Alice »."""
+        une réponse composée ensuite voit déjà « elle dit être Alice ». Aussi pour
+        un événement venu d'ailleurs qu'un port journalise lui-même (un réveil par
+        API, ADR 0068) : un ajout seul ne fait jamais tourner les interprètes."""
         stored = self.mind.store.get_events([seq])
         if not stored:
             return
@@ -428,7 +430,7 @@ class Kernel:
             if not seqs:
                 continue
             for seq in seqs:
-                await self._interpret(seq, f"reprise:{seq}")  # un arrêt entre le message et son interprétation
+                await self.interpret(seq, f"reprise:{seq}")  # un arrêt entre le message et son interprétation
             got = await self._answer_turn(seqs[-1], f"reprise:{seqs[-1]}")
             if got in counts:
                 counts[got] += len(seqs) if got == "held" else 1

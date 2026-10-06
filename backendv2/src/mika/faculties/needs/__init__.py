@@ -285,7 +285,7 @@ NEEDS = Faculty("needs", state=NeedsState, init=lambda p: NeedsState(), params=N
 NEEDS.declare(*c.ALL)
 
 #: les séances où elle travaille dans son mode à elle (une exécution impersonnelle n'est pas elle)
-WORKING_KINDS = frozenset({Kind.STEP, Kind.WORK})
+WORKING_KINDS = frozenset({Kind.STEP, Kind.WORK, Kind.WAKE})
 #: ce qu'on dit d'une initiative que seules les envies poussent (pas d'autre raison)
 URGES = frozenset({c.NEED_SOCIAL, c.NEED_EXPRESSION})
 #: des raisons qui ne disent pas de quoi parler (le seul fait que quelqu'un soit là, l'envie de discuter, la garde

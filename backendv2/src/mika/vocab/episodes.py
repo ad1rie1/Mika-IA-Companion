@@ -26,14 +26,20 @@ class Kind(enum.StrEnum):
     WORK = "WORK"
     #: une exécution de travail sur un projet en mode impersonnel (sans persona, sans affect)
     JOB = "JOB"
+    #: un réveil par API (ADR 0068), dans son mode à elle : ce qu'un appel lui demande, pour elle seule
+    WAKE = "WAKE"
+    #: un réveil par API en mode impersonnel (sans persona, sans affect)
+    WAKE_JOB = "WAKE_JOB"
 
 
 #: Les épisodes où elle s'adresse à quelqu'un, dans le fil de conversation.
 CONVERSATIONAL = frozenset({Kind.REPLY, Kind.INITIATIVE})
-#: Les épisodes de travail, que personne n'écoute : une séance sur un but, une exécution sur un projet.
-WORKING = frozenset({Kind.STEP, Kind.WORK, Kind.JOB})
+#: Les épisodes de travail, que personne n'écoute : une séance sur un but, une exécution sur un projet, un réveil.
+WORKING = frozenset({Kind.STEP, Kind.WORK, Kind.JOB, Kind.WAKE, Kind.WAKE_JOB})
 #: Les exécutions d'un projet (ses deux modes).
 PROJECT_KINDS = frozenset({Kind.WORK, Kind.JOB})
+#: Les réveils par API sans projet (ses deux modes, ADR 0068) : leurs outils sont ceux que le réveil a choisis.
+WAKE_KINDS = frozenset({Kind.WAKE, Kind.WAKE_JOB})
 
 #: La cible d'un épisode qui ne s'adresse à personne mais porte sur un but
 #: (un pas de travail) : ``goal:12``. Personne ne l'écoute.

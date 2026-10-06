@@ -48,6 +48,8 @@ from mika.plugins.imaging import IMAGING
 from mika.plugins.mcp import MCP
 from mika.plugins.rss import RSS
 from mika.plugins.sensors import SENSORS
+from mika.plugins.wakeup import WAKEUP
+from mika.plugins.wakeup.prompt import or_wake, wake_brief
 from mika.plugins.web import WEB
 from mika.runtime import params
 from mika.runtime.bootstrap import Kernel, KernelDeps
@@ -61,7 +63,7 @@ def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, WORLD, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
             EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, EMAIL, RSS, CAMERA, FORGE, SENSORS, IMAGING,
-            MCP, WEB]
+            MCP, WEB, WAKEUP]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -84,6 +86,9 @@ EXTERNAL = "mcp.*"
 #: les lots qu'un projet peut avoir (chaque projet choisit les siens parmi eux)
 PROJECT_TOOLS = frozenset({"projects", "workshop", "memory", "email", "rss", "camera", "forge", "forge_apps",
                            EXTERNAL})
+#: les lots qu'un réveil par API sans projet peut avoir (ADR 0068) : chacun choisit les siens parmi eux, et garde de
+#: quoi conclure (``wakeup``)
+WAKE_TOOLS = frozenset({"wakeup", "memory", "email", "rss", "camera", "forge", "forge_apps", EXTERNAL})
 
 # Les lots « en main » de chaque sorte d'épisode : ce qu'une conversation ordinaire sert vraiment — chercher
 # dans sa mémoire, dire qu'une promesse est tenue, poser un rappel. Le reste (l'identité, les projets, le
@@ -100,6 +105,7 @@ REPLY_IN_HAND = frozenset({"memory", "goals", "world"})
 INITIATIVE_IN_HAND = frozenset({"memory", "world"})
 STEP_IN_HAND = frozenset({"goals", "memory"})
 PROJECT_IN_HAND = frozenset({"projects", "workshop", "memory"})
+WAKE_IN_HAND = frozenset({"wakeup"})
 
 #: les ouvriers de chaque voie d'épisodes : trois réponses à des personnes différentes se composent en même temps
 #: — Bob qui écrit « coucou » n'attend pas la fin d'une recherche faite pour Alice — ; une seule par personne, une
@@ -131,14 +137,25 @@ def policies() -> dict[str, EpisodePolicy]:
         # une exécution sur un projet, dans son mode à elle : sa voix (compacte), son humeur, ses avis — pour
         # elle seule, ni fil ni livraison ; ses outils, ceux du projet (``bundles`` du candidat)
         Kind.WORK: EpisodePolicy(kind=Kind.WORK, role=Role.PROJECT, priority=2, lane="background",
-                                 persona_depth="compact", visible=False, delivered=False, brief=work_brief,
+                                 persona_depth="compact", visible=False, delivered=False, brief=or_wake(work_brief),
                                  max_tool_turns=16, max_tokens=4096, deadline_s=600.0, tool_bundles=PROJECT_TOOLS,
                                  core_bundles=PROJECT_IN_HAND),
         # une exécution impersonnelle : aucune persona, aucune section affective
         Kind.JOB: EpisodePolicy(kind=Kind.JOB, role=Role.JOB, voice=False, priority=2, lane="background",
-                                visible=False, delivered=False, brief=job_brief, max_tool_turns=16, max_tokens=4096,
+                                visible=False, delivered=False, brief=or_wake(job_brief), max_tool_turns=16,
+                                max_tokens=4096,
                                 deadline_s=600.0, tool_bundles=PROJECT_TOOLS, core_bundles=PROJECT_IN_HAND,
                                 muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER})),
+        # un réveil par API sans projet (ADR 0068) : ce qu'un appel lui demande, avec les outils du réveil — dans son
+        # mode à elle (sa voix compacte, comme un projet), ou impersonnel ; pour elle seule, ni fil ni livraison
+        Kind.WAKE: EpisodePolicy(kind=Kind.WAKE, role=Role.PROJECT, priority=2, lane="background",
+                                 persona_depth="compact", visible=False, delivered=False, brief=wake_brief,
+                                 max_tool_turns=16, max_tokens=4096, deadline_s=600.0, tool_bundles=WAKE_TOOLS,
+                                 core_bundles=WAKE_IN_HAND),
+        Kind.WAKE_JOB: EpisodePolicy(kind=Kind.WAKE_JOB, role=Role.JOB, voice=False, priority=2, lane="background",
+                                     visible=False, delivered=False, brief=wake_brief, max_tool_turns=16,
+                                     max_tokens=4096, deadline_s=600.0, tool_bundles=WAKE_TOOLS,
+                                     core_bundles=WAKE_IN_HAND, muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER})),
         # une tâche qu'une faculté lui confie (préparer un brouillon de réponse) : sa voix, pour elle seule
         Kind.TASK: EpisodePolicy(kind=Kind.TASK, role=Role.STEP, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=task_brief,
@@ -155,12 +172,14 @@ def arbitration() -> ArbitrationPolicy:
     quelqu'un qui arrive) se déclenche en secondes ; le fond (une présence
     sans raison) presque jamais ; une humeur qui déborde, en minutes. Un pas de
     travail, en quelques minutes quand l'envie est là ; rarement quand elle
-    s'use."""
+    s'use. Un réveil par API, en quelques secondes : quelqu'un l'attend."""
     return ArbitrationPolicy(
-        thresholds={Kind.INITIATIVE: 9.0, Kind.STEP: 8.0, Kind.TASK: 8.0, Kind.WORK: 8.0, Kind.JOB: 8.0},
+        thresholds={Kind.INITIATIVE: 9.0, Kind.STEP: 8.0, Kind.TASK: 8.0, Kind.WORK: 8.0, Kind.JOB: 8.0,
+                    Kind.WAKE: 8.0, Kind.WAKE_JOB: 8.0},
         max_rates={Kind.INITIATIVE: 0.1, Kind.STEP: 1 / 120, Kind.TASK: 1 / 300, Kind.WORK: 1 / 120,
-                   Kind.JOB: 1 / 120},
-        aging_per_hour={Kind.INITIATIVE: 0.0, Kind.STEP: 0.0, Kind.TASK: 0.0, Kind.WORK: 0.0, Kind.JOB: 0.0},
+                   Kind.JOB: 1 / 120, Kind.WAKE: 0.1, Kind.WAKE_JOB: 0.1},
+        aging_per_hour={Kind.INITIATIVE: 0.0, Kind.STEP: 0.0, Kind.TASK: 0.0, Kind.WORK: 0.0, Kind.JOB: 0.0,
+                        Kind.WAKE: 0.0, Kind.WAKE_JOB: 0.0},
     )
 
 

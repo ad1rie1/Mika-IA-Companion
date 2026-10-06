@@ -337,8 +337,10 @@ def _target_person(frame: Frame) -> str:
     return frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else ""
 
 
-# son humeur la suit aussi quand elle travaille, dans son mode à elle : un but (STEP), un projet (WORK, ADR 0031)
-@AFFECT.section("mood", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.WORK, Kind.STEP], tags=[Tag.AFFECTIVE],
+# son humeur la suit aussi quand elle travaille, dans son mode à elle : un but (STEP), un projet (WORK, ADR 0031),
+# un réveil par API (WAKE, ADR 0068)
+@AFFECT.section("mood", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.WORK, Kind.STEP, Kind.WAKE],
+                tags=[Tag.AFFECTIVE],
                 trim_rank=70, floor_chars=200, title="TON ÉTAT ÉMOTIONNEL ACTUEL", reads=[c.MOOD, identity_c.PERSON])
 def _mood_section(s: AffectState, frame: Frame, enrich: Any) -> str:
     p = _params(frame.env.params_of("affect", frame.root))

@@ -26,6 +26,7 @@ from dataclasses import dataclass
 
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.kernel.guards import workshop
 from mika.vocab.privacy import Sensitivity
 
 OWNER = "projects"
@@ -180,6 +181,17 @@ class ProjectView:
 LIVE = FactKey("projects.live", type=tuple, time_varying=True)
 #: Le statut d'un projet (``""`` : inconnu).
 STATUS = FactFamily("projects.status", arg=int, type=str)
+
+
+def run_lease(project: int) -> str:
+    """La ressource que tient une exécution de ce projet (son atelier) : une seule à la fois, d'où qu'elle vienne
+    (son agenda, un réveil par API — ADR 0068)."""
+    return workshop(f"projet-{project}")
+
+#: Quelque chose est-il en route hors de la machine pour ce projet (une commande, un envoi ou une récupération du
+#: dépôt) ? Rien d'autre ne part dans son atelier pendant ce temps — une exécution venue d'un réveil par API non plus
+#: (ADR 0068).
+OUTGOING = FactFamily("projects.outgoing", arg=int, type=bool, time_varying=True)
 #: Le statut d'un objectif, par ``(projet, objectif)`` (``""`` : inconnu) — une clôture n'en vaut que pour
 #: un objectif encore ouvert.
 OBJECTIVE_STATUS = FactFamily("projects.objective_status", arg=tuple, type=str)

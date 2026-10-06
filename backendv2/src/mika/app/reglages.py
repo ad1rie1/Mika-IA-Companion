@@ -26,7 +26,10 @@ from mika.adapters.llm.models import ListingFailed, list_models
 from mika.adapters.mail import MailConfig
 from mika.adapters.mcp.config import McpConfig
 from mika.app import persona as persona_file
+from mika.app.wakeups import NO_PROJECT, TOOLS, WakeupConfig
+from mika.contracts import projects as projects_c
 from mika.contracts import self_ as self_c
+from mika.contracts import wakeup as wakeup_c
 from mika.contracts.self_ import PersonaDoc
 from mika.inspector.catalog import Command, SettingsPage, SettingsSection, SettingsTab
 from mika.kernel import forms
@@ -397,6 +400,51 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         token = await settings.new_sensors_token()
         return "ok", f"Jeton neuf (l'ancien ne vaut plus ; montré une seule fois) : {token}"
 
+    # ── réveils par API (ADR 0068) ──
+    def wake_tools() -> list[str]:
+        """Les lots qu'un réveil peut avoir : ceux du code, et ceux des serveurs extérieurs branchés."""
+        return [*TOOLS, *sorted(b for b in live.kernel.registry.bundles if b.startswith("mcp."))]
+
+    def wake_projects() -> list[tuple[str, str]]:
+        views = list(live.kernel.mind.frame().get(projects_c.LIVE))
+        titles = live.kernel.mind.store.content([v.title_ref for v in views if v.title_ref])
+        return [(NO_PROJECT, "aucun — un travail à part"), *(
+            (str(v.id), f"n° {v.id} — {titles.get(v.title_ref) or '(sans titre)'}"
+             + (" (en pause)" if v.status == projects_c.PAUSED else "")) for v in views)]
+
+    def wake_notify() -> list[tuple[str, str]]:
+        return [(wakeup_c.OWNERS, "ses propriétaires"),
+                (wakeup_c.NOBODY, "personne (le compte rendu reste dans la console)"),
+                *((a.handle, f"{a.display_name} (compte)") for a in live.accounts.all() if a.active)]
+
+    async def save_wakeup(cfg: WakeupConfig, by: str) -> list[str]:
+        """Un projet, une personne, des outils qui existent — sauf ce qui était déjà là (un projet archivé depuis
+        reste affiché, pour qu'on le corrige)."""
+        before = settings.wakeup().endpoints
+        projects, notify, tools = {v for v, _ in wake_projects()}, {v for v, _ in wake_notify()}, set(wake_tools())
+        problems = []
+        for name, ep in cfg.endpoints.items():
+            old = before.get(name)
+            if ep.project not in projects and (old is None or old.project != ep.project):
+                problems.append(f"« {name} » : projet inconnu ou archivé ({ep.project}).")
+            if ep.notify not in notify and (old is None or old.notify != ep.notify):
+                problems.append(f"« {name} » : il rend compte à ses propriétaires, à un compte actif, ou à personne.")
+            bad = [t for t in ep.tools if t not in tools and (old is None or t not in old.tools)]
+            if bad:
+                problems.append(f"« {name} » : lot inconnu ou qu'un réveil ne peut pas avoir : {', '.join(bad)} "
+                                f"(permis : {', '.join(sorted(tools))}).")
+        if problems:
+            return problems
+        await settings.save_wakeup(cfg)
+        return []
+
+    def wakeup_facts() -> list[tuple[str, str]]:
+        endpoints, keys = settings.wakeup().endpoints, settings.wakeup_keys()
+        keyed = sum(1 for n in endpoints if n in keys)
+        return [("Réveils", f"{len(endpoints)} ({keyed} avec une clé)" if endpoints else "aucun"),
+                ("Lots permis", ", ".join(wake_tools())),
+                ("Clés, appels et ce qu'ils ont donné", "Ses canaux › Réveils par API")]
+
     def plugin_settings() -> list[Any]:
         rows = (
             ("Courrier", "Boîtes, serveurs, identifiants et façon d'écrire", "boites", "email", "courrier/reception"),
@@ -407,6 +455,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             ("Dessins", "Ses fournisseurs d'images ; sa qualité par défaut, ses quotas", "images-fournisseurs",
              "imaging", "sens/dessins"),
             ("Appareils", "Jeton d'accès des capteurs", "appareils", "", "sens/appareils"),
+            ("Réveils par API", "Ce que chaque réveil lui fait faire, quand, à qui elle en rend compte ; ses clés sur "
+             "sa fiche", "reveils", "wakeup", "reveils"),
             ("Forge", "Comportement du moteur qui exécute les apps", "comportement-forge", "", "apps"),
         )
         return [Note("Les connexions et le comportement des plugins se règlent ici. Les réglages propres à une "
@@ -520,6 +570,18 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "catalogue —, puis où le joindre (une adresse, ou une commande lancée ici, isolée), pour "
                             "qui et quand. Ses outils ne lui sont servis qu'une fois approuvés, un par un, sur la "
                             "fiche du serveur (Ses outils › Serveurs extérieurs).")),)),
+        SettingsSection("reveils", "Réveils par API", "sens", WakeupConfig, settings.wakeup, save_wakeup, order=45,
+                        description="Les réveils que des systèmes extérieurs appellent (POST /api/wake/<nom>, ADR "
+                                    "0068) : ce qu'ils lui font faire, quand, à qui elle en rend compte. Leurs clés "
+                                    "se génèrent sur leur fiche, montrées une seule fois.",
+                        facts=wakeup_facts, fixed_names=("endpoints",),
+                        choices={"endpoints.project": wake_projects, "endpoints.notify": wake_notify},
+                        pages=(SettingsPage("reveils", "Réveils par API", ("endpoints",), description=(
+                            "Chaque réveil a sa page : à quoi il sert, ses consignes (elles priment sur le texte "
+                            "qu'un appel apporte, qui n'est jamais une consigne), son projet, son mode, ses outils, "
+                            "s'il passe outre son sommeil, à qui elle rend compte, ses bornes. Son nom est la fin de "
+                            "son URL. Sa clé, ses appels et ce qu'ils ont donné : Ses canaux › Réveils par "
+                            "API.")),)),
         SettingsSection("flux", "Flux", "sens", FeedsSettings, lambda: FeedsSettings(urls=tuple(settings.feeds())),
                         save_feeds, description="Ce qu'elle lit du monde.", order=20,
                         pages=(SettingsPage("flux", "Flux RSS", description=(

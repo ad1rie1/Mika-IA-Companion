@@ -22,6 +22,7 @@ from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
 from mika.adapters.mail import MailAccount, MailConfig, from_stored
 from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
+from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 
 log = logging.getLogger("mika.settings")
@@ -45,6 +46,9 @@ FORGE_CONFIG_KEY = "forge_config"
 #: les serveurs MCP branchés (ADR 0064 ; jeton et variables secrètes scellés) et les décisions sur leurs outils
 MCP_KEY = "mcp"
 MCP_TOOLS_KEY = "mcp_tools"
+#: les réveils par API (ADR 0068) ; leurs clés à part, dont seule l'empreinte est gardée
+WAKEUP_KEY = "wakeup"
+WAKEUP_KEYS_KEY = "wakeup_keys"
 #: les réglages d'un canal retiré (Telegram, ADR 0060) : effacés à l'ouverture — un jeton scellé que plus
 #: rien ne lit ne reste pas dans ``mind.db`` ni dans ses sauvegardes
 RETIRED_KEYS = ("telegram",)
@@ -287,6 +291,48 @@ class Settings:
     async def save_git(self, token: str, user: str = "", hosts: list[str] | None = None) -> None:
         clean = sorted({h.strip().lower() for h in (hosts or []) if h.strip()}) or ["github.com"]
         await self._put(GIT_KEY, {"token_sealed": self.box.seal(token.strip()), "user": user.strip(), "hosts": clean})
+
+    # ── Réveils par API (``POST /api/wake/<nom>``, ADR 0068) ──
+    def wakeup(self) -> WakeupConfig:
+        """Les réveils déclarés ; un réveil illisible est écarté, jamais bloquant."""
+        endpoints = {}
+        for name, spec in dict(dict(self._get(WAKEUP_KEY) or {}).get("endpoints") or {}).items():
+            try:
+                endpoints[str(name)] = WakeEndpoint.model_validate(spec)
+            except ValueError:
+                log.warning("réveils : « %s » est illisible, il est ignoré", str(name)[:40])
+        try:
+            return WakeupConfig(endpoints=endpoints)
+        except ValueError:
+            return WakeupConfig()
+
+    async def save_wakeup(self, cfg: WakeupConfig) -> WakeupConfig:
+        """Enregistre les réveils ; la clé d'un réveil retiré part avec lui (un réveil recréé sous ce nom n'en a
+        pas)."""
+        cfg = WakeupConfig.model_validate({"endpoints": dict(cfg.endpoints)})
+        await self._put(WAKEUP_KEY, {"endpoints": {n: ep.model_dump(mode="json") for n, ep in cfg.endpoints.items()}})
+        keys = self.wakeup_keys()
+        kept = {n: k for n, k in keys.items() if n in cfg.endpoints}
+        if kept != keys:
+            await self._put(WAKEUP_KEYS_KEY, kept)
+        return cfg
+
+    def wakeup_keys(self) -> dict[str, dict[str, Any]]:
+        """Réveil → ``{digest, hint, created_at, by}`` : jamais la clé elle-même."""
+        return {str(n): dict(k) for n, k in dict(self._get(WAKEUP_KEYS_KEY) or {}).items() if isinstance(k, dict)}
+
+    async def save_wakeup_key(self, name: str, digest: str, hint: str, created_at: int, by: str) -> None:
+        keys = self.wakeup_keys()
+        keys[name] = {"digest": digest, "hint": hint, "created_at": int(created_at), "by": by[:80]}
+        await self._put(WAKEUP_KEYS_KEY, keys)
+
+    async def revoke_wakeup_key(self, name: str) -> bool:
+        keys = self.wakeup_keys()
+        if name not in keys:
+            return False
+        del keys[name]
+        await self._put(WAKEUP_KEYS_KEY, keys)
+        return True
 
     # ── Appareils (``POST /api/perceptions``) ──
     def sensors_token(self) -> str:

@@ -44,7 +44,7 @@ FAMILY = "mcp"
 EPISODES: Mapping[str, frozenset[str]] = {
     "conversation": frozenset({Kind.REPLY}),
     "initiative": frozenset({Kind.INITIATIVE}),
-    "travail": frozenset({Kind.STEP, Kind.WORK, Kind.JOB}),
+    "travail": frozenset({Kind.STEP, Kind.WORK, Kind.JOB, Kind.WAKE, Kind.WAKE_JOB}),
 }
 #: les serveurs sont rejoints et relistés à ce rythme (ce qu'ils proposent a pu changer)
 WATCH_EVERY = 15 * MINUTE

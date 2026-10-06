@@ -416,6 +416,11 @@ class SettingsForms:
                 others = [(str(k), str(k)) for k in sorted(source) if str(k) != key] if isinstance(source, Mapping) \
                     else []
                 f = _with_choices(f, others, given.get(f.path))
+            qualified = f"{path}.{f.path}"
+            if qualified in s.choices:
+                # des choix connus au rendu pour un champ d'enregistrement (le projet d'un réveil) : un sélecteur ;
+                # la section les vérifie à l'enregistrement
+                f = _with_choices(f, s.choices[qualified](), given.get(f.path))
             view = _view(f, given.get(f.path), _error_for(f.path, state.record_errors), prefix, loaded.get(f.path))
             if view is not None:
                 view["load_button"] = view.get("loader", False)

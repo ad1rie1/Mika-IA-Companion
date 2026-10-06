@@ -63,6 +63,7 @@ from mika.contracts.entry import MindPort
 from mika.contracts.presence import Connected
 from mika.contracts.runtime import AttachmentMeta, PerceptionReceived
 from mika.kernel.events import Content
+from mika.ports import wakeup as wakeup_p
 from mika.ports.preprocess import Perceived, Preprocessor, Upload, render
 from mika.ports.shares import valid_id
 from mika.vocab import privacy
@@ -82,6 +83,12 @@ FILES_RATE = (60, 60.0)
 #: en ``application/octet-stream`` : rien de ce qu'elle envoie ne s'exécute dans une page
 SAFE_MIMES = frozenset({"text/plain", "text/markdown", "text/csv", "application/json", "image/png", "image/jpeg",
                         "image/webp", "image/gif", "application/pdf"})
+#: un réveil par API (ADR 0068) : la taille d'une requête au plus, et les échecs d'authentification tolérés par IP
+WAKE_MAX_BYTES = 64 * 1024
+WAKE_FAILURES = (20, 60.0)
+#: ce que dit chaque issue d'un appel de réveil, en HTTP
+WAKE_STATUS = {wakeup_p.ACCEPTED: 202, wakeup_p.UNKNOWN: 401, wakeup_p.DISABLED: 403, wakeup_p.INVALID: 400,
+               wakeup_p.BUSY: 429, wakeup_p.REFUSED: 409}
 
 
 def safe_mime(mime: str) -> str:
@@ -171,10 +178,11 @@ def native_token(headers: Any) -> str:
 def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | None = None,
                lifespan: Any = None, extra_routes: Sequence[Any] = (),
                preprocess: Preprocessor | None = None, camera: Any = None,
-               sensor_token: Any = None) -> Starlette:
+               sensor_token: Any = None, wakeup: wakeup_p.WakeGate | None = None) -> Starlette:
     cfg = cfg or WebConfig()
     by_name = LoginThrottle(cfg.login_failures, cfg.login_window_s)
     by_ip = LoginThrottle(cfg.login_ip_failures, cfg.login_window_s)
+    wake_failures = LoginThrottle(*WAKE_FAILURES)
     accounts.on_revoke.append(lambda account_id: hub.revoke(account=account_id))
     accounts.on_token_revoke.append(lambda token_id: hub.revoke(session=f"{TOKEN_KEY}{token_id}"))
 
@@ -404,6 +412,49 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
                                sensitivity=sensitivity)
         return JSONResponse({"ok": seq is not None, "seq": seq}, status_code=202)
 
+    async def wake(request: Request) -> Response:
+        """Un réveil par API (ADR 0068) : ``{"text": "…"}``, sa clé en ``Authorization: Bearer``, une clé
+        d'idempotence facultative (``Idempotency-Key``). Réveil inconnu et mauvaise clé : le même 401 (et trop
+        d'échecs d'une même adresse : 429) ; désactivé : 403 ; texte : 400 ; trop d'appels : 429 ; son projet n'est
+        pas actif : 409 ; reçu : 202. Rien n'est journalisé avant que la porte l'ait admis."""
+        headers = {"Cache-Control": "no-store"}
+        if wakeup is None:
+            return JSONResponse({"error": "Les réveils par API ne sont pas branchés."}, status_code=404,
+                                headers=headers)
+        origin = request.headers.get("origin")
+        if origin is not None and origin not in cfg.origins:
+            return JSONResponse({"error": "Origine refusée."}, status_code=403, headers=headers)
+        ip = request.client.host if request.client else "?"
+        if wake_failures.blocked(f"ip:{ip}"):
+            return JSONResponse({"error": "Trop de tentatives."}, status_code=429,
+                                headers={**headers, "Retry-After": "60"})
+        try:
+            size = int(request.headers.get("content-length") or 0)
+        except ValueError:
+            size = 0
+        if size > WAKE_MAX_BYTES:
+            return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
+        raw = b""
+        async for chunk in request.stream():  # borné aussi sans Content-Length (un envoi par morceaux)
+            raw += chunk
+            if len(raw) > WAKE_MAX_BYTES:
+                return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
+        try:
+            data = json.loads(raw or b"{}")
+        except (ValueError, RecursionError):  # illisible (et, selon la version de Python, trop imbriqué)
+            data = {}
+        text = str(data.get("text") or "") if isinstance(data, dict) else ""
+        idem = "".join(ch for ch in (request.headers.get("idempotency-key") or "") if ch.isprintable()).strip()
+        got = await wakeup(request.path_params["name"][:60], bearer(request.headers.get("authorization")), text, idem)
+        if got.outcome == wakeup_p.UNKNOWN:
+            wake_failures.fail(f"ip:{ip}")
+        status = WAKE_STATUS.get(got.outcome, 400)
+        if got.outcome == wakeup_p.BUSY and got.retry_after:
+            headers["Retry-After"] = str(got.retry_after)
+        if status == 202:
+            return JSONResponse({"ok": True, "call": got.call}, status_code=202, headers=headers)
+        return JSONResponse({"error": got.message or "Refusé."}, status_code=status, headers=headers)
+
     async def ws(websocket: WebSocket) -> None:
         origin = websocket.headers.get("origin")
         token = bearer(websocket.headers.get("authorization"))
@@ -473,13 +524,14 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         Route("/health", health, methods=["GET"]),
         Route("/api/projects/pending/{action_id:int}/{decision:str}", pending_decision, methods=["POST"]),
         Route("/api/perceptions", perceptions, methods=["POST"]),
+        Route("/api/wake/{name:str}", wake, methods=["POST"]),
         Route("/files/{file:str}", shared_file, methods=["GET"]),
         WebSocketRoute("/ws", ws),
         *extra_routes,
     ]
     middleware = [Middleware(CORSMiddleware, allow_origins=list(cfg.origins), allow_credentials=True,
                              allow_methods=["GET", "POST"], allow_headers=["content-type", "x-csrftoken",
-                                                                           "authorization"])]
+                                                                           "authorization", "idempotency-key"])]
     return Starlette(routes=routes, middleware=middleware, lifespan=lifespan)
 
 

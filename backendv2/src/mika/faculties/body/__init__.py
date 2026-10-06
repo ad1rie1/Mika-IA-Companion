@@ -30,6 +30,7 @@ from mika.contracts import body as c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
+from mika.contracts import wakeup as wakeup_c
 from mika.faculties.body import sleep as sl
 from mika.kernel.arbitration import Modulation, RowView
 from mika.kernel.clock import DAY, HOUR, MINUTE
@@ -213,6 +214,16 @@ def _rouse_or_wait(s: BodyState, frame: Frame, ev: Any, ports: Any) -> list[Draf
             return []  # déjà tirée du sommeil : elle répond
         return [c.ROUSED.draft(message=ev.seq, handle=d.handle, person=person, reason=reason)]
     return [c.WAITED.draft(message=ev.seq, handle=d.handle, person=person)]
+
+
+@BODY.interpret(wakeup_c.CALLED)
+def _called(s: BodyState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]:
+    """Un réveil par API qui passe outre son rythme la tire du sommeil, comme le message d'une proche : elle
+    émerge pour le traiter, puis se rendort au calme (ADR 0068). Les autres attendent son réveil (leur épisode le
+    dit, pas son corps)."""
+    if not ev.data.rouse or not s.sleep.asleep:
+        return []
+    return [c.ROUSED.draft(message=ev.seq, handle="", person="", reason=c.CALL)]
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
@@ -439,7 +450,8 @@ async def _show(ev: Any, ports: Mapping[str, Any]) -> None:
 # ── Arbitrage ─────────────────────────────────────────────────────────────
 
 
-@BODY.modulate(kinds=[Kind.INITIATIVE, Kind.STEP, Kind.TASK, Kind.WORK], reads=[c.SLEEP, c.ENERGY, c.AWAKE_SINCE])
+@BODY.modulate(kinds=[Kind.INITIATIVE, Kind.STEP, Kind.TASK, Kind.WORK, Kind.WAKE],
+               reads=[c.SLEEP, c.ENERGY, c.AWAKE_SINCE])
 def _night(s: BodyState, frame: Frame, row: RowView) -> Modulation:
     """Elle ne prend pas la parole ni ne travaille en dormant ; tirée du
     sommeil en pleine nuit, pas davantage (elle va se rendormir) ; juste
@@ -505,13 +517,16 @@ def _woke_line(s: BodyState, frame: Frame) -> str:
                     "réponds maintenant, pas comme si tu avais été réveillée à ce moment-là ; tu peux le lui dire.")
     if s.sleep.woken_by_message and frame.now - s.sleep.since < WAKING_WINDOW_US:
         ago = _minutes(int((frame.now - s.sleep.since) // MINUTE))
-        who = "Son message" if s.roused_handle and s.roused_handle == ep.target else "Un message"
+        # un réveil par API la tire du sommeil sans adresse (``roused_by`` : l'appel) ; parler en dormant, lui,
+        # efface les deux — ce n'est pas un appel qui l'a réveillée
+        who = "Son message" if s.roused_handle and s.roused_handle == ep.target else \
+            "Un réveil par API" if not s.roused_handle and s.roused_by else "Un message"
         return f"{who} t'a tirée du sommeil il y a {ago} : tu émerges encore."
     return ""
 
 
-@BODY.section("rhythm", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.STEP, Kind.WORK], trim_rank=40,
-              title="TON RYTHME")
+@BODY.section("rhythm", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.STEP, Kind.WORK, Kind.WAKE],
+              trim_rank=40, title="TON RYTHME")
 def _rhythm_section(s: BodyState, frame: Frame, enrich: Any) -> str:
     profile = frame.get(c.RHYTHM)
     text = circadian.describe(frame.local(), profile, frame.get(c.ENERGY))
@@ -526,7 +541,8 @@ FOG = (
 )
 
 
-@BODY.section("fog", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.STEP, Kind.WORK], after=["rhythm"],
+@BODY.section("fog", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL, Kind.STEP, Kind.WORK, Kind.WAKE],
+              after=["rhythm"],
               trim_rank=45, tags=[Tag.AFFECTIVE], title="ÉTAT COGNITIF", reads=[c.ENERGY])
 def _fog(s: BodyState, frame: Frame, enrich: Any) -> str | None:
     e = frame.get(c.ENERGY)

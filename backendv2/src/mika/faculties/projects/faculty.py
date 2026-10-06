@@ -37,6 +37,7 @@ from mika.contracts import agency as agency_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
+from mika.contracts import wakeup as wakeup_c
 from mika.kernel import schedule
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local
 from mika.kernel.events import Content, Payload
@@ -962,8 +963,11 @@ def _started(s: ProjectsState, e, cx) -> ProjectsState:
                   previous_objective=o.last_run_at if o is not None else 0)
         s = replace(s, running=s.running.set(e.correlation, run),
                     runs_at=tuple(t for t in s.runs_at if e.at - t < HOUR) + (e.at,))
-        p = replace(p, runs=p.runs + 1, last_run_at=e.at, tried_at=e.at,
-                    runs_at=tuple(t for t in p.runs_at if e.at - t < DAY) + (e.at,))
+        p = replace(p, runs=p.runs + 1, runs_at=tuple(t for t in p.runs_at if e.at - t < DAY) + (e.at,))
+        if wakeup_c.call_of(d.subject) is None:
+            # une exécution venue d'un réveil par API (ADR 0068) compte dans les plafonds, mais ne touche ni à
+            # l'agenda ni à l'espacement : elle n'avale pas un « Lancer maintenant » en attente
+            p = replace(p, last_run_at=e.at, tried_at=e.at)
         if o is not None:
             p = _objective(p, replace(o, runs=o.runs + 1, last_run_at=e.at))
         return _set(s, p)
@@ -1236,6 +1240,12 @@ def _live(s: ProjectsState, cx) -> tuple[c.ProjectView, ...]:
 def _status(s: ProjectsState, cx, project: int) -> str:
     p = s.projects.get(project)
     return p.status if p is not None else ""
+
+
+@PROJECTS.fact(c.OUTGOING)
+def _outgoing(s: ProjectsState, cx, project: int) -> bool:
+    p = s.projects.get(project)
+    return p is not None and outgoing(p, cx.now)
 
 
 @PROJECTS.fact(c.OBJECTIVE_STATUS)

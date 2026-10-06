@@ -28,6 +28,7 @@ from mika.contracts import memory as memory_c
 from mika.contracts import others as others_c
 from mika.contracts import projects as projects_c
 from mika.contracts import social as social_c
+from mika.contracts import wakeup as wakeup_c
 from mika.kernel.episode import Outcome
 from mika.kernel.facts import FactFamily, FactKey
 
@@ -56,9 +57,10 @@ SECOND_THOUGHTS = "second_thoughts"
 #: n'est pas « prendre la parole » : ni le plafond du jour, ni la période réfractaire, ni la retenue envers qui
 #: ne répond pas, ni l'heure où la personne répond d'habitude ne s'y appliquent ; une rancune non plus — elle
 #: colore le ton, elle ne reprend pas la promesse. Un dessin promis aussi : le montrer quand il est prêt, ou dire
-#: qu'il n'a pas pu se faire (``imaging``, ADR 0063).
+#: qu'il n'a pas pu se faire (``imaging``, ADR 0063). Rendre compte de ce qu'un réveil par API lui a fait faire, à
+#: qui il le dit (``wakeup``, ADR 0068).
 OWED = frozenset({goals_c.REMIND, memory_c.KEEP_PROMISE, imaging_c.DELIVER, imaging_c.COULD_NOT,
-                  mcp_c.ANSWERED_REASON})
+                  mcp_c.ANSWERED_REASON, wakeup_c.DONE})
 #: Ce qui **prévient** : ce qui ne peut pas attendre et regarde la personne au premier chef — un mail important
 #: arrivé pour sa propriétaire, un projet qu'elle lui a confié qui n'avance plus sans elle. Prévenir n'est pas
 #: relancer : la retenue « ne pas harceler » ne s'y applique pas, une rancune le décale au plus (on prévient

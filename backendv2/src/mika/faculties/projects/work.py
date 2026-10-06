@@ -45,7 +45,7 @@ from mika.kernel import schedule
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.frame import Frame
-from mika.kernel.guards import Guard, floor, workshop
+from mika.kernel.guards import Guard, floor
 from mika.kernel.state import FrozenDict
 from mika.vocab.episodes import Kind, project_of, project_target
 
@@ -113,7 +113,7 @@ def _run(s: ProjectsState, frame: Frame) -> list[Candidate]:
             continue
         evidence = max(0.0, min(12.0, pm.run_evidence + pm.priority_step * rank(p)))
         out.append(Candidate(
-            kind_of(p), project_target(p.id), c.RUN, round(evidence, 4), resources=frozenset({workshop(f"projet-{p.id}")}),
+            kind_of(p), project_target(p.id), c.RUN, round(evidence, 4), resources=frozenset({c.run_lease(p.id)}),
             guards=(_still(p.id),),
             args=FrozenDict({"bundles": ",".join(p.bundles), "subject": subject_of(p.id, target.id)})))
     return out

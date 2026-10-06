@@ -141,6 +141,13 @@ def _proof(ctx: Any, sha: str) -> str:
     return "outil" if any(ok and name in PRODUCING for name, ok in ctx.calls) else ""
 
 
+def _mode(ctx: Any) -> str:
+    """Le mode de cette exécution : celui de son épisode — un réveil impersonnel sur un projet à elle n'est pas son
+    travail à elle (ADR 0068)."""
+    ep = ctx.frame.episode
+    return c.PLAIN if ep is not None and ep.kind == Kind.JOB else c.PERSONA
+
+
 def commit_message(p: Project, o: Objective | None) -> str:
     """Un message de commit neutre : il part peut-être vers un dépôt distant, il ne nomme personne et ne raconte
     rien (le compte rendu, lui, reste dans sa vie, là où l'oubli l'atteint)."""
@@ -176,7 +183,7 @@ async def report_run(args: ReportArgs, ctx: Any) -> Any:
     need = args.needs_you.strip()
     report = c.RUN_REPORTED.draft(
         project=p.id, objective=o.id if o is not None else 0, verdict=args.verdict,
-        summary=Content.of(summary, level=written(p)), notable=args.notable, mode=p.mode, proven=proven,
+        summary=Content.of(summary, level=written(p)), notable=args.notable, mode=_mode(ctx), proven=proven,
         tools=worked, commit=sha, proof=proof, wait_s=args.wait_minutes * 60, owner=p.owner, about=p.about,
         need=Content.of(need, level=written(p)) if need else None)
     if o is not None and not gone and o.kind == c.ONCE and (proven or args.verdict == c.BLOCKED):

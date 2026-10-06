@@ -30,6 +30,7 @@ KINDS: dict[str, str] = {
     Kind.REPLY: "réponse", Kind.INITIATIVE: "initiative", Kind.STEP: "séance de travail", Kind.MURMUR: "murmure",
     Kind.JOURNAL: "journal", Kind.DREAM: "rêve", Kind.NARRATIVE: "récit de soi", Kind.DECISION: "décision",
     Kind.TASK: "tâche silencieuse", Kind.WORK: "travail sur un projet", Kind.JOB: "exécution impersonnelle",
+    Kind.WAKE: "réveil extérieur", Kind.WAKE_JOB: "réveil extérieur impersonnel",
 }
 #: comment un épisode s'est terminé : (libellé, ton)
 OUTCOMES: dict[str, tuple[str, str]] = {

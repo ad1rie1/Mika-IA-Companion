@@ -231,7 +231,9 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
     texts: Mapping[str, str] = data.get("texts") or {}
     pm = params(frame.env.params_of("projects", frame.root))
     who = "un projet à toi" if p.authority == c.SELF else f"un projet que {_who(frame, p.address or p.owner)} t'a confié"
-    lines = [f"Projet n° {p.id} : {texts.get(p.title_ref, '(titre oublié)')} — {who}.", MODE_WORDS[p.mode]]
+    # le mode de cette exécution : celui du projet, ou celui d'un réveil par API qui le lance (ADR 0068)
+    mode = c.PLAIN if frame.episode is not None and frame.episode.kind == Kind.JOB else c.PERSONA
+    lines = [f"Projet n° {p.id} : {texts.get(p.title_ref, '(titre oublié)')} — {who}.", MODE_WORDS[mode]]
     if p.description_ref and texts.get(p.description_ref):
         lines.append(f"Ce que tu veux en faire : {texts[p.description_ref]}" if p.authority == c.SELF
                      else f"Le cadre (confié, tu ne le changes pas) : {texts[p.description_ref]}")
@@ -249,7 +251,9 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
             lines.append(f"Ce que tu attendais de qui t'a confié le projet : {texts[target.need_ref]}{reply}")
     others = [o for o in p.objectives if target is None or o.id != target.id]
     if others:
-        lines.append("Les autres objectifs du projet :\n" + "\n".join(
+        # une exécution sans objectif visé (un réveil par API, ADR 0068) les voit tous
+        heading = "Les autres objectifs du projet" if target is not None else "Les objectifs du projet"
+        lines.append(f"{heading} :\n" + "\n".join(
             _objective_line(o, texts, pm, frame.now) for o in others if o.status != c.DROPPED))
     decisions = [d for d in p.decisions if d.status == c.IN_FORCE][-DECISIONS_SHOWN:]
     if decisions:

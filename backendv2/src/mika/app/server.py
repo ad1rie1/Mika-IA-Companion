@@ -62,6 +62,7 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.settings import SecretBox, Settings
+from mika.app.wakeups import WakeupDesk
 from mika.contracts import identity as identity_c
 from mika.contracts.self_ import PersonaDoc
 from mika.inspector.app import assemble
@@ -200,6 +201,8 @@ class Live:
     imaging_fixed: bool = False
     #: les serveurs MCP branchés (ADR 0064), le port ``mcp``
     mcp: McpHub | None = None
+    #: les réveils par API (ADR 0068) : le port ``wakeup`` et la porte de ``POST /api/wake/<nom>``
+    wakeups: WakeupDesk | None = None
 
     def trace(self, tr: LLMTrace) -> None:
         self.gateway.traces.append(tr)
@@ -323,6 +326,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
              "forge": forge, "forge_settings": forge_settings, "imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
     world["shares"] = DiskShares(data / "partages")
+    # les réveils par API (ADR 0068) : leurs réglages et leurs clés, et la porte qui admet un appel
+    wakeups = world["wakeup"] = WakeupDesk(settings, clock.now)
     # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi — plus les
     # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)
     system = SystemServers(lambda: system_mcp.provided(
@@ -349,8 +354,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     kernel.mind.subscribe(reconfigure_mcp)
     port = KernelPort(kernel)
     hub.port = port
+    wakeups.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
-                persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp)
+                persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
+                wakeups=wakeups)
     # le monde (ADR 0051) : chaque lot commité qui change ce que montrent ses écrans leur part, traduit en trames
     world_hub = live.world = WorldHub(port, live.accounts, origins=web.origins, auth_required=web.auth_required)
 
@@ -425,7 +432,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *inspector, relay, console_mcp,
                                     world_hub.route()],
-                      preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token), live
+                      preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token,
+                      wakeup=wakeups.call), live
 
 
 async def register_accounts(kernel: Kernel, accounts: Accounts) -> int:

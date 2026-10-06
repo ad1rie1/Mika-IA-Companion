@@ -57,6 +57,9 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     subjects=("mail", "brouillon", "compte"), context=("compte",), automatic_actions=False),
         Destination("sens", "Flux et capteurs", "◌", "Ce qu'elle lit du monde (flux RSS), ce qu'elle voit "
                     "(caméra), ce que ses appareils lui signalent."),
+        Destination("reveils", "Réveils par API", "⏰", "Les réveils que des systèmes extérieurs lui envoient "
+                    "(POST /api/wake/<nom>) : les déclarer, leurs clés, leurs appels et ce qu'ils ont donné.",
+                    subjects=("reveil",)),
         Destination("apps", "Apps forgées", "⚒", "Les petites apps qu'elle écrit elle-même.", subjects=("app",)),
     )),
     NavGroup("Exploitation", (
@@ -79,7 +82,7 @@ PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Esprit", ("attention", "memory", "transcript")),
     ("Relations", ("social", "others", "identity")),
     ("Action", ("agency", "goals", "projects", "shares", "imaging", "world")),
-    ("Canaux", ("email", "rss", "web", "camera", "forge")),
+    ("Canaux", ("email", "rss", "web", "camera", "forge", "wakeup")),
     ("Noyau", ("kernel",)),
 )
 FACULTY_LABELS: dict[str, str] = {
@@ -90,7 +93,7 @@ FACULTY_LABELS: dict[str, str] = {
     "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "imaging": "Dessins",
-    "mcp": "Outils extérieurs", "web": "Recherche web",
+    "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -125,6 +128,10 @@ SECTION_LABELS: dict[str, str] = {
     "services": "Ce que ses services extérieurs lui ont rendu",
     "step_exchange": "L'échange d'où vient sa réflexion", "step_life": "Ce qui se passe dans la vie de la personne "
     "(sa réflexion)",
+    # ADR 0068
+    "wake_order": "Ce qu'un réveil par API lui demande (ses consignes)",
+    "wake_text": "Ce qu'apporte l'appel d'un réveil par API (cité)",
+    "wake_reports": "Ce que ses réveils par API ont donné",
 }
 
 #: Les raisons des preuves de l'arbitre : ce qui la pousse à agir.
@@ -143,6 +150,8 @@ REASON_LABELS: dict[str, str] = {
     "celebrate": "Souhaiter ce qui se fête (un anniversaire), le jour même",
     # ADR 0058
     "rekindle": "Reprendre des nouvelles, longtemps après (une fois)",
+    # ADR 0068
+    "wakeup": "Un réveil par API à traiter", "wakeup_done": "Rendre compte de ce qu'un réveil par API a donné",
 }
 
 #: Les vetos : ce qui l'empêche d'agir.
@@ -172,6 +181,7 @@ PROCESS_LABELS: dict[str, str] = {
     "world.settle": "Conclure ses gestes dans le monde",
     "shares.retention": "Retirer les fichiers envoyés trop anciens", "imaging.draw": "Dessiner",
     "mcp.expire": "Refuser les accords restés sans réponse",
+    "wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente",
 }
 
 #: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
@@ -235,6 +245,8 @@ EVENT_LABELS: dict[str, str] = {
     "shares.shared": "Un fichier envoyé", "shares.expired": "Des fichiers envoyés retirés",
     "imaging.requested": "Un dessin demandé", "imaging.drawn": "Un dessin prêt",
     "imaging.failed": "Un dessin qui n'a pas pu se faire",
+    "wakeup.called": "Un réveil par API reçu", "wakeup.reported": "Le compte rendu d'un réveil par API",
+    "wakeup.expired": "Un réveil par API expiré sans avoir été traité", "wakeup.cancelled": "Un réveil par API annulé",
 }
 
 #: Tout ce que la console nomme en français, d'un bloc.

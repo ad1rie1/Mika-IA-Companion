@@ -69,6 +69,8 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
   (`python -m mika token create <compte> --label …`). L'application Android est une
   messagerie : elle reçoit en arrière-plan, et Mika peut y écrire la première ; elle
   peut aussi y envoyer des fichiers (ADR 0062, `docs/protocole-chat.md`).
+- **La faire agir depuis un script** : déclare un réveil (Configuration › Plugins › Réveils par API), génère sa
+  clé sur sa fiche, puis `POST /api/wake/<nom>` avec `Authorization: Bearer <clé>` et `{"text": "…"}` (ADR 0068).
 - **Le tableau de bord** (`/inspecteur/`) dit ce qui attend ton attention ;
   « Pourquoi a-t-elle dit ça ? » s'ouvre depuis chacune de ses paroles.
 - **Tout se règle aussi en ligne de commande** : `python -m mika --help`.

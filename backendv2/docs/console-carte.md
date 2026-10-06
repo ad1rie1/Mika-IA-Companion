@@ -35,6 +35,7 @@ Trois règles tiennent toute la console :
 | Son activité | **Approbations** | « Que veut-elle faire sortir ? » | en attente (décider), historique |
 | Ses canaux | **Courrier** | « Lire et traiter les messages de quelle boîte ? » | comptes et dossiers en navigation, réception, brouillons de Mika, envoyés, contacts ; gestion des comptes dans Configuration |
 | Ses canaux | **Flux et capteurs** | « Ce qu'elle perçoit du monde » | flux RSS, caméra, appareils |
+| Ses canaux | **Réveils par API** | « Qui peut la faire agir de l'extérieur ? » | les réveils, leurs derniers appels ; fiche « réveil » : État (clé, comment l'appeler), Appels (ADR 0068) |
 | Ses canaux | **Apps forgées** | « Ses petites apps » | liste, état, cassées |
 | Exploitation | **Configuration** | « Que décide l'opérateur ? » | sous-menu : Intelligence, Personnage, Canaux, Plugins, Comportement, Accès, Historique |
 | Exploitation | **Système** | « La machine tient-elle ? » | sous-menu : Surveillance, Journaux, Anatomie, Outils |
@@ -158,6 +159,7 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 | | Flux RSS | adresses suivies |
 | | Transcription | service, modèle, clé |
 | | Appareils | jeton des appareils |
+| | Réveils par API | liste ; chaque réveil a sa page : **à quoi il sert** (obligatoire), actif, consignes (elles priment sur le texte d'un appel, cité), projet, impersonnel, outils (lots), ignorer son rythme, à qui rendre compte, bornes. Nom fixe (la fin de son URL). Sa clé se génère sur sa fiche (Ses canaux › Réveils par API), montrée une fois. ADR 0068 |
 | Comportement | Vue d'ensemble | provenance des paramètres, ce que pilote chaque curseur |
 | | une page par faculté | ses paramètres **rangés par groupe** (un groupe = une page), chacun avec sa valeur, sa provenance, ses bornes et son sens ; une surcharge se pose en changeant la valeur |
 | Accès | Comptes | liste paginée, créer, modifier (opérateur, actif, mot de passe) — audité ; sur la page d'un compte, ses applications connectées (téléphone, moteur : sorte, origine, dernier usage, jamais le secret) et « révoquer » — audité (ADR 0062) |

@@ -7,7 +7,8 @@ pression franchit le seuil haut (et que plus personne ne lui parle depuis un
 moment), se réveille quand elle retombe sous le seuil bas — ou quand un
 message la réveille : la nuit, seulement celui d'une amie ou d'une proche, ou
 quelque chose d'urgent (``body.roused``). Les autres messages attendent son
-réveil (``body.waited``) : elle y répond le matin.
+réveil (``body.waited``) : elle y répond le matin. Un réveil par API qui passe
+outre son rythme la tire du sommeil aussi (ADR 0068).
 """
 
 from __future__ import annotations
@@ -54,12 +55,14 @@ class Woke(Payload):
 
 class Roused(Payload):
     """Un message l'a tirée du sommeil : une amie, une proche, ou quelque chose
-    d'urgent. Un jugement enregistré (le rejeu retombe sur le même réveil)."""
+    d'urgent — ou un réveil par API qui passe outre son rythme (``message`` : le
+    ``seq`` de l'appel, sans adresse). Un jugement enregistré (le rejeu retombe
+    sur le même réveil)."""
 
     message: int
     handle: str
     person: str = ""
-    reason: str = ""  # CLOSE_ONE | URGENT
+    reason: str = ""  # CLOSE_ONE | URGENT | CALL
 
 
 class Waited(Payload):
@@ -71,8 +74,8 @@ class Waited(Payload):
     person: str = ""
 
 
-#: Raisons d'un réveil par message.
-CLOSE_ONE, URGENT = "close", "urgent"
+#: Raisons d'un réveil par message (et par un réveil par API, ADR 0068).
+CLOSE_ONE, URGENT, CALL = "close", "urgent", "call"
 
 FELL_ASLEEP = event_type("body.fell_asleep", OWNER, FellAsleep, public=True)
 WOKE = event_type("body.woke", OWNER, Woke, public=True)

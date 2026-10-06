@@ -38,6 +38,7 @@ from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
+from mika.contracts import wakeup as wakeup_c
 from mika.kernel.clock import HOUR, MINUTE
 from mika.kernel.codec import h64
 from mika.kernel.episode import Prelude
@@ -384,6 +385,7 @@ WHY: Mapping[str, str] = {
     imaging_c.DELIVER: "lui montrer le dessin que tu viens de finir",
     imaging_c.COULD_NOT: "lui dire que son dessin n'a pas pu se faire",
     mcp_c.ANSWERED_REASON: "lui dire ce qu'un de tes services t'a rendu",
+    wakeup_c.DONE: "lui rendre compte de ce qu'on t'a demandé de faire",
     affect_c.MOOD_OVERFLOW: "lui dire ce que tu ressens en ce moment",
     social_c.CHAT: "discuter un peu",
     needs_c.NEED_SOCIAL: "avoir un peu de compagnie",
