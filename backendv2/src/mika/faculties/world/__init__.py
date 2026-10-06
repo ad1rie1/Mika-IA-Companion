@@ -4,7 +4,8 @@ Elle a un corps dans un monde de pièces, de lieux et d'objets (le frontend la m
 fera bientôt). Ce qu'elle y fait est **son** choix, pris par le modèle avec deux outils en main (``go_to``,
 ``interact``) ; ce que son corps fait de lui-même (aller se coucher quand elle s'endort, s'installer à son bureau
 quand elle se met au travail, s'arrêter de dessiner au bout d'un moment) est un réflexe, sans modèle. Le noyau est
-le monde : il valide, planifie en pas, et conclut chaque action à son échéance — un moteur hôte pourra la jouer et dire qu'il n'y arrive pas, jamais décider seul (P2).
+le monde : il valide, planifie en pas, et conclut chaque action à son échéance — un moteur hôte pourra la jouer et
+dire qu'il n'y arrive pas, jamais décider seul (P2).
 
 Écrit pour être piloté par un modèle :
 
