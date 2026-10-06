@@ -12,6 +12,12 @@
   tant que c'est une nouvelle (``fresh_for_us``, sur son horloge) ; un titre
   qu'une initiative visible a eu sous les yeux (``rss:<article>``) est dit à
   sa cible et ne revient plus dans ses initiatives vers elle.
+- **Penser à ses amies** : au même relevé, un titre qui touche ce qu'une amie
+  ou une proche lui a dit aimer (sa fiche) lui fait penser à elle — au plus un
+  par personne et par relevé, sans modèle. Quand elle lui écrit d'elle-même,
+  en privé, ce titre passe en tête de ses flux (« tu as pensé à elle en le
+  lisant ») ; à une autre, il ne se montre pas ; en salon, jamais. Les
+  intérêts d'une personne ne servent qu'avec elle.
 - **Lire** (outils) : lister, lire un article — par son identifiant, jamais
   une adresse qu'un texte aurait soufflée ; lire va sur le réseau (vers une
   machine publique seulement, vérifié par l'adaptateur) : réservé à ses
@@ -39,6 +45,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import rss as c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
+from mika.contracts import social as social_c
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
@@ -74,6 +81,8 @@ from mika.kernel.state import FrozenDict
 from mika.ports.feeds import feed_name, tokenless
 from mika.ports.preprocess import cite, inert
 from mika.vocab.episodes import WORKING, Kind
+from mika.vocab.people import is_identifiable
+from mika.vocab.privacy import Sensitivity
 
 KEEP = 50
 BUNDLE = "rss"
@@ -123,13 +132,18 @@ class Seen:
 @dataclass(frozen=True, slots=True)
 class RssState:
     noticed: FrozenDict[str, Seen] = field(default_factory=FrozenDict)
-    #: les titres qu'elle a déjà dits d'elle-même : article → personne → instant (élagués avec ``noticed``)
+    #: les titres qu'elle a déjà dits d'elle-même : article → personne → instant (élagués avec ``noticed`` et
+    #: ``thought_of``)
     told: FrozenDict[str, FrozenDict[str, int]] = field(default_factory=FrozenDict)
+    #: les titres qui lui ont fait penser à une amie : article → personne → la copie gardée pour elle (les ``KEEP``
+    #: plus récents)
+    thought_of: FrozenDict[str, FrozenDict[str, Seen]] = field(default_factory=FrozenDict)
 
 
 #: v2 : ce qu'elle a déjà dit d'un titre, et à qui (``told``) — sans perte : les énoncés d'avant ne portaient
 #: aucune provenance ``rss:``
-RSS = Faculty("rss", state=RssState, init=lambda p: RssState(), params=RssParams, state_version=2)
+#: v3 : les titres qui lui ont fait penser à une amie (``thought_of``) — sans perte : aucun avant
+RSS = Faculty("rss", state=RssState, init=lambda p: RssState(), params=RssParams, state_version=3)
 RSS.bundle(BUNDLE, "les flux d'actualité : les derniers titres, lire un article")
 RSS.declare(*c.ALL)
 
@@ -146,8 +160,25 @@ def _noticed(s: RssState, e, cx) -> RssState:
     if len(noticed) > KEEP:
         for k, _ in sorted(noticed.items(), key=lambda kv: kv[1].seq)[: len(noticed) - KEEP]:
             noticed = noticed.delete(k)
-            told = told.delete(k)
+            if k not in s.thought_of:
+                told = told.delete(k)
     return replace(s, noticed=noticed, told=told)
+
+
+@RSS.reducer(c.THOUGHT_OF)
+def _thought(s: RssState, e, cx) -> RssState:
+    """Un titre lui a fait penser à une amie : gardé pour elle (sa copie, effacée avec elle)."""
+    d = e.data
+    thought_of = s.thought_of.set(d.entry, s.thought_of.get(d.entry, FrozenDict()).set(
+        d.person, Seen(e.seq, d.feed, d.score, e.at, d.summary.ref or "")))
+    told = s.told
+    if len(thought_of) > KEEP:
+        newest = {k: max(v.seq for v in by.values()) for k, by in thought_of.items()}
+        for k, _ in sorted(newest.items(), key=lambda kv: kv[1])[: len(thought_of) - KEEP]:
+            thought_of = thought_of.delete(k)
+            if k not in s.noticed:
+                told = told.delete(k)
+    return replace(s, thought_of=thought_of, told=told)
 
 
 @RSS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON])
@@ -158,7 +189,7 @@ def _told(s: RssState, e, cx) -> RssState:
     if not d.visible or not d.target or d.kind != Kind.INITIATIVE:
         return s
     shown = [k for k in (p[len(TOLD_PROVENANCE):] for p in d.provenance if p.startswith(TOLD_PROVENANCE))
-             if k in s.noticed]
+             if k in s.noticed or k in s.thought_of]
     if not shown:
         return s
     person = cx.facts.get(identity_c.PERSON(d.target))
@@ -171,6 +202,13 @@ def _told(s: RssState, e, cx) -> RssState:
 @RSS.fact(c.HEADLINES)
 def _headlines(s: RssState, cx) -> tuple[c.Headline, ...]:
     out = [c.Headline(k, v.feed, v.pertinence, v.at, v.summary_ref) for k, v in s.noticed.items()]
+    return tuple(sorted(out, key=lambda h: (-h.at, h.entry)))
+
+
+@RSS.fact(c.FOR_PERSON)
+def _for_person(s: RssState, cx, person: str) -> tuple[c.Headline, ...]:
+    out = [c.Headline(k, v.feed, v.pertinence, v.at, v.summary_ref)
+           for k, by in s.thought_of.items() if (v := by.get(person)) is not None]
     return tuple(sorted(out, key=lambda h: (-h.at, h.entry)))
 
 
@@ -193,6 +231,47 @@ def pertinence(title: str, summary: str, words: frozenset[str]) -> float:
     if not found:
         return 0.1
     return round(min(1.0, 0.35 + 0.25 * len(found)), 3)
+
+
+#: à qui elle pense en lisant : ses amies et ses proches (les intérêts d'une inconnue ne la regardent pas)
+FRIENDS = frozenset({social_c.FRIEND, social_c.CLOSE})
+
+
+def _friends_words(frame: Frame, store: Any) -> list[tuple[str, frozenset[str]]]:
+    """Ses amies et ses proches, et les mots de ce qu'elles lui ont dit aimer (leur fiche), repliés comme les siens.
+    Une personne oubliée n'a plus rien à lire."""
+    refs: dict[str, str] = {}
+    for person in frame.get(social_c.CIRCLE):  # un tri bon marché : les inconnues de passage ne coûtent rien
+        if not is_identifiable(person) or person.startswith("name:"):
+            continue
+        ref = frame.get(social_c.INTERESTS_REF(person))
+        if ref and frame.get(social_c.CLOSENESS(person)) in FRIENDS:
+            refs[person] = ref
+    texts = store.content(list(refs.values())) if store is not None and refs else {}
+    out = []
+    for person, ref in sorted(refs.items()):
+        words = keywords(tuple(texts.get(ref, "").splitlines()))
+        if words:
+            out.append((person, words))
+    return out
+
+
+def _thinking_of(frame: Frame, store: Any, entries: list[Any], p: RssParams) -> list[Any]:
+    """Au même relevé, ce qui la fait penser à ses amies : pour chacune, le titre qui touche le plus ce qu'elle aime
+    — au plus un par personne et par relevé, sans modèle. Le titre est gardé pour elle seule."""
+    drafts: list[Any] = []
+    for person, words in _friends_words(frame, store):
+        scored = sorted(((pertinence(e.title, e.summary, words), e) for e in entries),
+                        key=lambda x: (-x[0], -x[1].published, x[1].id))
+        if not scored or scored[0][0] < p.notice_from:
+            continue
+        score, e = scored[0]
+        feed = inert(feed_name(e.feed), 120)
+        summary = f"« {inert(e.title, 250)} » ({feed})"
+        drafts.append(c.THOUGHT_OF.draft(
+            entry=e.id, person=person, score=score, feed=feed[:200],
+            summary=Content.of(summary[:400], level=int(Sensitivity.ANODYNE)), dedupe_key=f"rss-pour:{e.id}:{person}"))
+    return drafts
 
 
 @RSS.process("rss.poll", wake_on=[*body_c.ALL], lane="background", catch_up=CatchUp.ONCE, max_quantum_s=3600,
@@ -231,6 +310,8 @@ class Poll:
                 source="rss", kind=c.ENTRY, summary=Content.of(summary[:400], level=0), pertinence=score,
                 emotion="curious", intensity=round(0.25 * score, 3), sensitivity=0, bundle=BUNDLE, entry=e.id,
                 feed=feed[:200], dedupe_key=f"rss:{e.id}"))
+        # ses amies : un titre qui touche ce qu'elles aiment, même s'il ne la touche pas elle
+        drafts += _thinking_of(frame, ctx.ports.get("store"), entries, p)
         if drafts:
             await ctx.emit(*drafts)
 
@@ -243,17 +324,31 @@ class Poll:
 BACKGROUND = [Kind.INITIATIVE, Kind.STEP]
 
 
-def _shown(s: RssState, frame: Frame) -> list[c.Headline]:
+#: ce que dit la ligne d'un titre qui lui a fait penser à la personne à qui elle écrit (jamais un autre nom)
+THOUGHT_OF_YOU = " (en le lisant, tu as pensé à la personne à qui tu écris : ça pourrait lui plaire)"
+
+
+def _shown(s: RssState, frame: Frame) -> list[tuple[c.Headline, bool]]:
     """Les titres « dans ses flux » : ceux qu'elle a remarqués récemment, sur son horloge — un titre de lundi
     n'est plus une nouvelle le vendredi, même si rien de neuf n'est venu depuis. Quand elle écrit d'elle-même à
     quelqu'un, pas ceux qu'elle lui a déjà dits : on ne ressort pas à une amie la nouvelle qu'on lui a apprise.
-    Au travail, seule l'ancienneté compte (explorer ce qu'elle a déjà raconté reste légitime)."""
+    En privé, quand sa fiche lui est ouverte, ceux qui lui ont fait penser à cette personne passent devant
+    (``True``) ; à une autre, ils ne se montrent pas — en salon, jamais. Au travail, seule l'ancienneté compte
+    (explorer ce qu'elle a déjà raconté reste légitime)."""
     p = params(frame.env.params_of("rss", frame.root))
-    ep = frame.episode
+    ep, aud = frame.episode, frame.audience
     person = (frame.get(identity_c.PERSON(ep.target))
               if ep is not None and ep.kind == Kind.INITIATIVE and ep.target else None)
-    return [h for h in frame.get(c.HEADLINES) if frame.now - h.at <= p.fresh_for_us
-            and (person is None or person not in s.told.get(h.entry, FrozenDict()))][:3]
+
+    def fresh(h: c.Headline) -> bool:
+        return frame.now - h.at <= p.fresh_for_us and (
+            person is None or person not in s.told.get(h.entry, FrozenDict()))
+
+    private = person is not None and aud is not None and aud.private_ok and not aud.public and not aud.room
+    mine = [h for h in frame.get(c.FOR_PERSON(person)) if fresh(h)] if private else []
+    first = {h.entry for h in mine}
+    rest = [h for h in frame.get(c.HEADLINES) if fresh(h) and h.entry not in first]
+    return ([(h, True) for h in mine] + [(h, False) for h in rest])[:3]
 
 
 @RSS.enricher("headlines", episodes=BACKGROUND, deadline_ms=300)
@@ -262,19 +357,20 @@ async def _texts(s: RssState, frame: Frame, ports: Mapping[str, Any]) -> dict[st
     lines = _shown(s, frame)
     if store is None or not lines:
         return None
-    return store.content([h.summary_ref for h in lines if h.summary_ref])
+    return store.content([h.summary_ref for h, _mine in lines if h.summary_ref])
 
 
 @RSS.section("headlines", zone=Zone.VOLATILE, episodes=BACKGROUND, trim_rank=10,
-             title="DANS TES FLUX", untrusted=True, reads=[c.HEADLINES, identity_c.PERSON])
+             title="DANS TES FLUX", untrusted=True, reads=[c.HEADLINES, c.FOR_PERSON, identity_c.PERSON])
 def _section(s: RssState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     texts = enrich.get("headlines") or {}
-    shown = [h for h in _shown(s, frame) if texts.get(h.summary_ref)]
+    shown = [(h, mine) for h, mine in _shown(s, frame) if texts.get(h.summary_ref)]
     if not shown:
         return None
-    lines = [f"[{h.entry}] {inert(tokenless(texts[h.summary_ref]))}" for h in shown]
+    lines = [f"[{h.entry}] {inert(tokenless(texts[h.summary_ref]))}" + (THOUGHT_OF_YOU if mine else "")
+             for h, mine in shown]
     # provenance voyage dans l'énoncé (dit à sa cible, un titre ne lui revient pas)
-    return SectionBody("\n".join(lines), provenance=tuple(f"{TOLD_PROVENANCE}{h.entry}" for h in shown))
+    return SectionBody("\n".join(lines), provenance=tuple(f"{TOLD_PROVENANCE}{h.entry}" for h, _mine in shown))
 
 
 class ListArgs(BaseModel):
