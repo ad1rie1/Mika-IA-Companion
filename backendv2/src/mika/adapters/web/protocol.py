@@ -25,9 +25,11 @@ from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import needs as needs_c
 from mika.contracts import place as place_c
+from mika.contracts import presence as presence_c
 from mika.contracts import self_ as self_c
 from mika.contracts import world as world_c
 from mika.contracts.entry import HistoryRow, SharedMeta
+from mika.kernel.clock import US
 from mika.kernel.frame import Frame
 from mika.ports.delivery import TOO_LATE, Delivery
 from mika.vocab import privacy, voice
@@ -51,6 +53,12 @@ AWAY_GRACE_S = 20.0
 #: l'en-tête de mise à niveau d'un client natif qui ouvre sa connexion en arrière-plan (``away`` : personne ne
 #: regarde, elle ne fait que recevoir) ; ``here``, ou rien : un écran regardé
 PRESENCE_HEADER = "x-mika-presence"
+#: en train d'écrire (trame ``composing``) : le début et la fin d'une saisie, jamais une frappe — au plus 12 écritures
+#: au journal par minute et par connexion (le début et la fin de six messages) ; au-delà, le dernier état voulu
+#: s'écrit quand la fenêtre le permet
+COMPOSING_RATE = (12, 60.0)
+#: une saisie continue ne retient pas la réponse au-delà de ce plafond : l'adaptateur en écrit lui-même la fin
+COMPOSING_MAX_S = presence_c.COMPOSING_MAX_US / US
 MAX_FRAME_BYTES = MAX_ATTACHMENTS * MAX_FILE_BYTES * 4 // 3 + 1024 * 1024
 FILENAME_MAX = 80
 

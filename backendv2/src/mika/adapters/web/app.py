@@ -558,6 +558,9 @@ class _Session:
         self._presence_task: asyncio.Future[Any] | None = None
         #: la prochaine écriture de ce qu'elle a lu, quand la fenêtre de ``PRESENCE_RATE`` est pleine
         self._read_task: asyncio.Future[Any] | None = None
+        #: la prochaine écriture de la saisie, quand la fenêtre de ``COMPOSING_RATE`` est pleine ; et son plafond
+        self._composing_task: asyncio.Future[Any] | None = None
+        self._composing_cap: asyncio.Future[Any] | None = None
         kw: dict[str, Any] = {"session": session_key, "close": self.close, "channel": channel, "here": here}
         if account is not None:
             kw |= {"handle": account.handle, "authenticated": True, "account": account.id,
@@ -586,6 +589,9 @@ class _Session:
     async def _depart(self) -> None:
         c = self.conn
         c.announced = False
+        # partie, elle n'écrit plus : la déconnexion clôt aussi sa saisie au journal (``presence``)
+        c.composing = c.composing_said = False
+        self._uncap_composing()
         await self.port.disconnected(c.handle, c.id)
 
     async def _refresh(self) -> None:
@@ -617,6 +623,9 @@ class _Session:
                 self._presence_task.cancel()
             if self._read_task is not None:
                 self._read_task.cancel()  # le client redit ce qu'il a lu à sa prochaine connexion
+            self._uncap_composing()  # la déconnexion clôt la saisie au journal
+            if self._composing_task is not None:
+                self._composing_task.cancel()
             self.hub.detach(self.conn)
             if self.conn.announced:
                 await self.port.disconnected(self.conn.handle, self.conn.id)
@@ -712,6 +721,66 @@ class _Session:
         self.hub.read_up_to[c.handle] = c.read_up_to
         await self.port.read(c.handle, c.read_up_to)
 
+    # ── en train d'écrire ──
+    async def composing(self, frame: dict[str, Any]) -> None:
+        """``{"type": "composing", "on": bool}`` : la personne commence à écrire un message sur cet écran, ou cesse
+        (tout effacé, quelques secondes sans frappe — l'envoi, lui, la clôt de lui-même). Une connexion authentifiée
+        et présente seulement. Tant qu'elle écrit, la réponse à son message d'avant attend la suite. Au journal, le
+        début et la fin, au plus ``COMPOSING_RATE`` fois ; et jamais au-delà de ``COMPOSING_MAX_S`` de saisie
+        continue : l'adaptateur en écrit lui-même la fin."""
+        on = frame.get("on")
+        c = self.conn
+        if not isinstance(on, bool) or self.account is None or not c.announced:
+            return
+        if on and not c.composing:
+            self._uncap_composing()
+            self._composing_cap = asyncio.ensure_future(self._composing_capped(protocol.COMPOSING_MAX_S))
+        elif not on:
+            self._uncap_composing()
+        c.composing = on
+        await self._write_composing()
+
+    def _uncap_composing(self) -> None:
+        if self._composing_cap is not None:
+            self._composing_cap.cancel()
+            self._composing_cap = None
+
+    async def _composing_capped(self, delay: float) -> None:
+        """Le plafond d'une saisie continue : elle n'attend plus la suite."""
+        await asyncio.sleep(delay)
+        self._composing_cap = None
+        self.conn.composing = False
+        await self._settle_composing()
+
+    def _write_composing_after(self, delay: float) -> None:
+        if self._composing_task is not None:
+            self._composing_task.cancel()
+        self._composing_task = asyncio.ensure_future(self._write_composing_later(delay))
+
+    async def _write_composing_later(self, delay: float) -> None:
+        await asyncio.sleep(delay)
+        self._composing_task = None
+        await self._settle_composing()
+
+    async def _settle_composing(self) -> None:
+        try:
+            await self._write_composing()
+        except (WebSocketDisconnect, RuntimeError, OSError) as exc:
+            log.debug("saisie non écrite (%s) : %r", self.conn.id, exc)
+
+    async def _write_composing(self) -> None:
+        """Le journal suit ce que dit la connexion (``composing``), au plus ``COMPOSING_RATE`` fois : au-delà, l'état
+        voulu s'écrit quand la fenêtre le permet — jamais une rafale."""
+        c = self.conn
+        if self._closed or not c.announced or c.composing == c.composing_said:
+            return
+        if not c.typing.allow(self.hub._monotonic()):
+            n, window = protocol.COMPOSING_RATE
+            self._write_composing_after(window / n)
+            return
+        c.composing_said = c.composing
+        await self.port.composing(c.handle, c.id, c.composing)
+
     async def dispatch(self, raw: str) -> None:
         try:
             frame = json.loads(raw)
@@ -730,6 +799,8 @@ class _Session:
                 await self.sync(frame)
         elif kind == "presence":
             await self.presence(frame)
+        elif kind == "composing":
+            await self.composing(frame)
         elif kind == "read":
             if self.conn.control.allow():
                 await self.read(frame)
@@ -765,6 +836,9 @@ class _Session:
         devant lui se compte ici, à la réception : une rafale lue d'un trait crée toutes ses
         tâches avant qu'aucune ne démarre, et chacune, comptée à son premier pas, voyait la
         rafale entière — tous refusés, pas seulement les derniers."""
+        # le message envoyé clôt la saisie : sa perception la clôt au journal, sans rien écrire de plus
+        self.conn.composing = False
+        self._uncap_composing()
         ahead = len(self._chats)
         task = asyncio.ensure_future(self._chat_in_turn(frame, ahead))
         self._chats.add(task)
@@ -774,12 +848,15 @@ class _Session:
         cid = str(frame.get("client_msg_id") or "")[: protocol.MAX_CLIENT_MSG_ID]
         if ahead >= MAX_QUEUED_CHATS:
             await self._safe_send(protocol.ack(cid, "overloaded"))
+            await self._settle_composing()  # refusé : la fin de sa saisie s'écrit
             return
         async with self._chat_lock:
             try:
                 await self.chat(frame)
             except (WebSocketDisconnect, RuntimeError, OSError) as exc:  # la connexion est partie en route
                 log.debug("message non accusé (%s) : %r", self.conn.id, exc)
+        # refusé, la fin de sa saisie s'écrit ; reçu pendant qu'elle écrivait déjà la suite, son début
+        await self._settle_composing()
 
     async def _safe_send(self, frame: dict[str, Any]) -> None:
         try:
@@ -869,6 +946,8 @@ class _Session:
                                              error=p.error) for a, p in zip(kept, seen, strict=True)),
         )
         admission = await self.port.perceive(perception, dedupe_key=f"{c.handle}:{cid}" if cid else None)
+        if admission.status == "accepted" and not admission.duplicate:
+            c.composing_said = False  # sa perception a clos la saisie au journal (``presence``)
         await self.send(protocol.ack(cid, admission.status, rejected))
         if admission.held:
             # elle dort : la réponse attend son réveil — « Mika écrit… » ne tourne pas pendant sa nuit

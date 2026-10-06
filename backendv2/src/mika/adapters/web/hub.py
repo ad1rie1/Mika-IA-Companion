@@ -98,6 +98,11 @@ class Conn:
     #: ``PRESENCE_RATE`` fois — jamais une rafale
     read_up_to: int = 0
     reads: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.PRESENCE_RATE))
+    #: la personne écrit un message sur cet écran (``composing``) : ce que dit la connexion, et ce qu'en sait le
+    #: journal — le début et la fin d'une saisie, écrits au plus ``COMPOSING_RATE`` fois
+    composing: bool = False
+    composing_said: bool = False
+    typing: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.COMPOSING_RATE))
 
 
 class Hub:

@@ -97,6 +97,7 @@ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
 | `sync` | `after_id` | le plus grand identifiant de message **affiché** ; `0` = rien de fiable → les 50 derniers |
 | `chat` | `message`, `client_msg_id`, `attachments?` | voir ci-dessous |
 | `presence` | `here` (booléen) | l'application passe au premier plan (`true`) ou le quitte (`false`) |
+| `composing` | `on` (booléen) | la personne commence à écrire un message (`true`) ou cesse (`false`) ; authentifié seulement |
 | `read` | `up_to` (un identifiant de message) | jusqu'où la personne a lu son fil, si elle l'a permis ; authentifié seulement |
 | `approval` | `id`, `decision` (`accept` \| `refuse`), `digest` | décider d'une carte d'accord (§4, `approvals`) ; authentifié seulement |
 
@@ -122,6 +123,15 @@ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
 `presence` : revenir vaut tout de suite (la personne est là ; un visage et un panneau frais suivent) ; partir vaut
 après 20 s (prendre une photo et revenir n'écrit rien). 6 écritures au journal par minute et par connexion au plus ;
 au-delà, le dernier état voulu s'applique dès que la fenêtre le permet. Sans effet sur une connexion anonyme.
+
+`composing` : le début et la fin d'une saisie, jamais une frappe. `true` au premier caractère d'un message ;
+`false` quand le champ est vidé ou après 6 s sans frappe. L'envoi (`chat`) clôt la saisie de lui-même : rien à
+envoyer de plus (le prochain caractère redit `true`). Seulement sur une transition, jamais en file ; sans effet sur
+une connexion anonyme ou ouverte en arrière-plan. Tant que la personne écrit, la réponse à son message
+d'avant attend la suite (une seule réponse au tour entier) et Mika ne lui écrit pas d'elle-même — au plus 45 s de
+saisie continue : au-delà, le serveur tient lui-même la saisie pour finie. Aucune trame en retour, et rien ne
+s'affiche (pas de « Mika voit que tu écris »). 12 écritures au journal par minute et par connexion au plus ; au-delà,
+le dernier état voulu s'applique dès que la fenêtre le permet.
 
 `read` : « lu jusqu'ici », le plus grand identifiant de message que la personne a vu (la conversation à l'écran, ou
 « Marquer comme lu » sur une notification) — une seule valeur, jamais l'heure où l'on est en ligne ni le temps passé

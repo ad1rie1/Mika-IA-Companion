@@ -290,6 +290,16 @@ def _budget(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
     return restraint(frame, None if row.target in (Anyone.ANY, Anyone.NONE) else row.target, row.reasons)
 
 
+@AGENCY.modulate(kinds=[Kind.INITIATIVE], reads=[presence_c.COMPOSING])
+def _composing(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
+    """Elle ne prend pas d'elle-même la parole vers quelqu'un qui est en train de lui écrire : elle attend son
+    message, et y répondra. Saluer, tenir parole, prévenir attendent aussi — la saisie est bornée
+    (``presence.COMPOSING_MAX_US``), ce n'est qu'un instant."""
+    if row.target in (Anyone.ANY, Anyone.NONE) or frame.get(presence_c.COMPOSING(row.target)) is None:
+        return Modulation()
+    return Modulation(veto=c.COMPOSING)
+
+
 def follow_up_after(frame: Frame, person: str, p: AgencyParams) -> int:
     """Le délai avant une relance douce : au moins un jour, et au moins deux
     fois le rythme de la relation."""

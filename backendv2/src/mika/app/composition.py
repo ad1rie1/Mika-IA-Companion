@@ -14,6 +14,8 @@ from typing import Any
 from mika.app.paths import PERSONA
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
+from mika.contracts import presence as presence_c
+from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.affect import AFFECT
 from mika.faculties.agency import AGENCY, task_brief
@@ -76,8 +78,17 @@ def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) ->
 
 def _reply_wait(frame: Frame, seq: int) -> int | None:
     """La nuit, la réponse à un message qui ne l'a pas réveillée attend son
-    réveil (``body``) : ``0`` tant qu'elle dort, puis l'instant de son réveil."""
-    return frame.get(body_c.REPLY_WAIT(seq))
+    réveil (``body``) : ``0`` tant qu'elle dort, puis l'instant de son réveil.
+    En privé, elle attend aussi que la personne ait fini d'écrire (``presence``,
+    borné) : ``0`` tant qu'elle écrit encore — on ne répond pas à la moitié
+    d'une pensée ; la fin de la saisie la libère, le message suivant se lit avec."""
+    due = frame.get(body_c.REPLY_WAIT(seq))
+    if due == 0:
+        return 0
+    pending = frame.state(rt.OWNER).pending.get(seq)
+    if pending is not None and pending.room is None and frame.get(presence_c.COMPOSING(pending.handle)) is not None:
+        return 0
+    return due
 
 
 #: les lots des outils venus d'ailleurs (ADR 0064) : une famille, ``mcp.<serveur>`` — chaque serveur dit lui-même

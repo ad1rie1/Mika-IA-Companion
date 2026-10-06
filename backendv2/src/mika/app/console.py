@@ -162,6 +162,7 @@ VETO_LABELS: dict[str, str] = {
     "unanswered": "Sa dernière initiative est restée sans réponse", "run_cap": "Assez d'exécutions pour l'heure",
     "step_cap": "Assez de séances de travail pour l'heure",
     "awaiting_reply": "Elle attend sa réponse (elle a écrit en dernier)", "farewell": "Ils viennent de se dire au revoir", "changed_mind": "Elle s'est ravisée", "hesitating": "Elle hésite encore (ses derniers essais ont fini en silence)",
+    "composing": "La personne est en train de lui écrire",
 }
 
 #: Les processus de fond : ce qu'ils font.
@@ -189,6 +190,7 @@ PROCESS_LABELS: dict[str, str] = {
 EVENT_LABELS: dict[str, str] = {
     "presence.connected": "Connexion", "presence.disconnected": "Déconnexion",
     "presence.read": "Lu jusqu'à un message (ce que dit son application)",
+    "presence.composing": "Commence ou cesse d'écrire un message (ce que dit son application)",
     "place.moved": "Elle s'est déplacée dans sa chambre",
     "world.authored": "Le monde édité", "world.described": "Un élément du monde décrit",
     "world.intended": "Un geste commencé dans le monde", "world.ended": "Un geste terminé dans le monde",

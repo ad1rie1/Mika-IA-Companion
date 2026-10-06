@@ -119,6 +119,14 @@ class ConnectionManager(
     }
 
     /**
+     * La personne écrit un message, ou plus (trame `composing`) : tant qu'elle écrit, la réponse à son message
+     * d'avant attend la suite. La socket ne le dit que sur une transition, et jamais en file.
+     */
+    fun composing(on: Boolean) {
+        scope.launch { socket.setComposing(on) }
+    }
+
+    /**
      * Décider d'une carte d'accord, maintenant ou pas du tout : `false` si la socket n'est pas ouverte
      * (rien ne part, rien n'est mis en file). Partie, la décision attend sa réponse (`approval_result`).
      */

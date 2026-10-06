@@ -49,6 +49,8 @@ CHANGED_MIND = "changed_mind"
 #: Veto : ses dernières envies de lui écrire ont fini en silence (ou en panne), d'affilée — elle laisse passer de
 #: plus en plus de temps avant d'y revenir.
 HESITATING = "hesitating"
+#: Veto : la personne est en train de lui écrire (``presence.COMPOSING``) — elle attend son message, et y répondra.
+COMPOSING = "composing"
 #: Raison (sans preuve) des candidats qui portent la garde « elle s'est ravisée » vers une adresse présente.
 SECOND_THOUGHTS = "second_thoughts"
 
