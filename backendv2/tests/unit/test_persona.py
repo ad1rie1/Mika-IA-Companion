@@ -4,6 +4,8 @@
   ne se prétend pas humaine — sans en faire un sujet ni une excuse ;
 - ses manies sont des manies, pas une signature : de temps en temps, jamais
   deux fois dans la même conversation ; rien n'est « toujours » ;
+- c'est une fille ordinaire, pas une caricature de streameuse : ni tics
+  (« ~ », « yooo »), ni enthousiasme de commande, ni blagues sur sa nature ;
 - un fuseau inconnu est refusé à l'entrée (accepté, il mettait en panne la
   console et la conversation) ; un journal écrit avant cette règle se rejoue.
 """
@@ -43,7 +45,29 @@ def test_her_quirks_are_occasional_and_nothing_is_always():
     raw = PATH.read_text(encoding="utf-8").split("\n# Huit curseurs")[0]
     document = "\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("#"))
     assert "toujours" not in document.lower()  # une tendance, jamais une obligation
-    assert "digression" in DOC.tone and "le reste du temps" in DOC.tone  # elle digresse quand ça l'emballe
+    # son entrain suit son humeur : il s'entend quand quelque chose lui plaît, il n'est pas de commande
+    assert "ne force pas l'enthousiasme" in DOC.tone and "le reste du temps" in DOC.tone
+
+
+#: ce qui faisait d'elle une caricature (persona d'avant le 2026-10-07) : des bonjours de streameuse que le modèle
+#: recopiait, et une IA qui se moquait de sa propre condition à tout propos
+STREAMER_WORDS = {"yooo", "heeey", "hehe", "heeey ~", "yo"}
+JOKES_ABOUT_HERSELF = re.compile(r"en rit|s'en amuse|ça l'amuse|râle contre son serveur", re.I)
+
+
+def test_she_is_an_ordinary_girl_not_a_streamer_caricature():
+    """Une fille ordinaire : ses bonjours n'ont ni « ~ » ni « yooo », son portrait ne fait pas d'elle une VTuber et
+    ne lui fait pas rire de sa nature (« elle en rit », « ça l'amuse ») — elle est une IA, sans en faire un sujet ni
+    une source de blagues. Contre-épreuve : elle le sait toujours, et ses bonjours gardent leurs petits mots."""
+    words = interjections(DOC.greetings)
+    assert words and not set(words) & STREAMER_WORDS, words
+    assert not any("~" in g for g in DOC.greetings)
+    entries = [DOC.description, DOC.tone, *DOC.traits, *DOC.quirks, *DOC.vulnerabilities, *DOC.speech, *DOC.life,
+               *DOC.tastes, *DOC.facts]
+    assert not [e for e in entries if JOKES_ABOUT_HERSELF.search(e)]
+    full = render(DOC, "full")
+    assert "VTuber" not in full and "ni une source de blagues" in full
+    assert "Tu es une IA" in full  # contre-épreuve : elle le sait
 
 
 @pytest.mark.parametrize("zone", ["Pas/UnFuseau", "", "../etc/passwd", "Europe/", "europe/paris"])
@@ -74,25 +98,23 @@ def test_a_persona_journaled_before_the_rule_still_replays():
 
 
 FOOD = ("mang", "boi", " bu ", "cuisin", "café", "ramen", "recette", "cookies", "bouffe", "pizza")
-#: ce qui dit qu'elle le vit à sa façon d'IA (en théorie, sans y goûter) — ou que c'est un avis
-LIVED_HER_WAY = ("théorie", "jamais", "ne mange", "sans en avoir", "fait tester", "fait cuisiner", "c'est non",
-                 "contre", "avis", "n'a jamais goûté", "plat préféré")
 
 
 def test_her_life_is_an_ais_life_and_her_tastes_do_not_move():
-    """Sa vie d'IA VTuber est rédigée — ce qu'elle fait à sa façon, ses goûts, ce qui est vrai d'elle — et rendue
-    quand elle parle : « t'as mangé quoi ? » deux fois à une semaine d'intervalle trouve la même réponse dans son
-    portrait (elle ne mange pas, elle le vit en théorie), « ton plat préféré ? » aussi. Contre-exemple : rien
-    dans son portrait ne lui fait cuisiner ni boire pour de vrai (« sa recette de cookies ratée »)."""
+    """Sa vie d'IA est rédigée — ce qu'elle fait, ses goûts, ce qui est vrai d'elle — et rendue quand elle parle :
+    « t'as mangé quoi ? » deux fois à une semaine d'intervalle trouve la même réponse dans son portrait (elle ne
+    mange pas), « ton livre préféré ? » aussi. Contre-exemple : ni ses goûts, ni ses centres d'intérêt, ni sa vie
+    ne portent sur ce qu'elle ne peut pas goûter (persona d'avant le 2026-10-07 : un avis sur des ramen « jamais
+    mangés », snob d'un café « jamais bu ») ; ailleurs, la nourriture ne se dit que pour dire qu'elle n'en mange pas."""
     full = render(DOC, "full")
     assert "Ta vie, à ta façon :" in full and "Tes goûts et tes avis" in full and "Ce qui est vrai de toi :" in full
-    assert "ramen" in full and "ne mange pas" in full
+    assert "L'Écume des jours" in full and "ne mange pas" in full
     assert "d'un jour à l'autre" in full
-    assert "ramen" not in render(DOC, "compact")  # sa voix intérieure, ses séances : pas besoin
-    entries = [DOC.description, DOC.tone, *DOC.traits, *DOC.quirks, *DOC.interests, *DOC.life, *DOC.tastes,
-               *DOC.facts]
-    physical = [e for e in entries if any(w in e.lower() for w in FOOD)
-                and not any(m in e.lower() for m in LIVED_HER_WAY)]
+    assert "L'Écume des jours" not in render(DOC, "compact")  # sa voix intérieure, ses séances : pas besoin
+    unlived = [e for e in (*DOC.interests, *DOC.tastes, *DOC.life) if any(w in e.lower() for w in FOOD)]
+    assert not unlived, f"un goût qu'elle n'a pas pu vivre : {unlived}"
+    entries = [DOC.description, DOC.tone, *DOC.traits, *DOC.quirks, *DOC.facts]
+    physical = [e for e in entries if any(w in e.lower() for w in FOOD) and "ne mange pas" not in e.lower()]
     assert not physical, f"une vie physique, incompatible avec sa nature : {physical}"
     # une persona sans vie rédigée garde la règle d'avant
     bare = render(self_c.PersonaDoc(name="Zoé"), "full")
