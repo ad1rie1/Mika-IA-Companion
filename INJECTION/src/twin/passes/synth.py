@@ -109,7 +109,8 @@ class PersonaOut(_M):
 
 class Profile(_M):
     trimestre: str = Field(pattern=r"^\d{4}T[1-4]$")
-    resume: str = Field(min_length=10, max_length=1500)
+    # la borne de ``XProfile.resume`` du moteur, qui fait foi (il est facultatif ici : le rejoueur la vérifie)
+    resume: str = Field(min_length=10, max_length=900)
     ton: str = Field(default="", max_length=300)
     interets: list[str] = Field(default_factory=list)
     sujets_sensibles: list[str] = Field(default_factory=list)
