@@ -1,8 +1,9 @@
 # mika-images — générer des images en local
 
 Un serveur d'images autonome pour Mika : **Qwen-Image 2.1** (7B, GGUF) servi par
-**stable-diffusion.cpp** (`sd-server`), sur `127.0.0.1` seulement. Mika s'y branche comme à n'importe quel
-fournisseur d'images (ADR 0061 de backendv2) : type *Compatible OpenAI*, rien de propre à ce serveur dans son code.
+**stable-diffusion.cpp** (`sd-server`), sur `127.0.0.1` seulement. Mika s'y branche comme fournisseur d'images
+(ADR 0061 de backendv2) par le type *stable-diffusion.cpp* (`sdcpp`, l'API native), le type recommandé ; le type
+*Compatible OpenAI* marche aussi, avec moins de réglages (voir « Brancher Mika »).
 
 - **Aucune compilation, ni CUDA ni torch** : la construction Vulkan de stable-diffusion.cpp pour Linux, épinglée et
   vérifiée par empreinte. La RTX est trouvée par son nom (`GPU_MATCH`) : le GPU intégré est aussi un périphérique
@@ -13,7 +14,7 @@ fournisseur d'images (ADR 0061 de backendv2) : type *Compatible OpenAI*, rien de
   attend qu'il soit prêt), et après `IDLE_STOP` (10 min) sans connexion tout s'arrête — RAM et VRAM rendues à Ollama,
   à Kimodo, au reste. Une génération en cours tient sa connexion : elle n'est jamais coupée par l'inactivité.
 - **Tout vit hors du disque système**, dans `MIKA_IMAGES_HOME` (`/mnt/games/mika-images`) : binaire, poids
-  (≈ 11 Go), journaux.
+  (≈ 16 Go en Q8_0, le défaut), journaux.
 
 ## Installer
 
@@ -23,11 +24,12 @@ fournisseur d'images (ADR 0061 de backendv2) : type *Compatible OpenAI*, rien de
 ./install.sh --enable   # … et active la socket : http://127.0.0.1:8190/v1
 ```
 
-Le dossier `local/` du paquet est un lien vers `MIKA_IMAGES_HOME`, ignoré par git : les poids, le binaire et les
-images d'essai s'y voient depuis le projet sans entrer dans le dépôt.
+`install.sh` fait du dossier `local/` du paquet un lien vers `MIKA_IMAGES_HOME`, ignoré par git : les poids, le
+binaire et les images d'essai s'y voient depuis le projet sans entrer dans le dépôt.
 
 Sans systemd, à la main : `serve.sh` (écoute sur `SD_PORT`, 8191). Les réglages sont dans `mika-images.conf`
-(une variable d'environnement l'emporte) : poids, ports, pas (20), CFG (6), échantillonneur, options en plus.
+(une variable d'environnement l'emporte) : poids (Q8_0), ports, pas (40), CFG (6), échantillonneur (`euler`),
+ordonnanceur (`simple`), cache de pas (aucun), options en plus.
 
 Les poids :
 
@@ -54,17 +56,19 @@ systemctl --user start mika-images.socket          # si elle n'est pas activée
 STEPS=30 NEG="blurry, low quality, deformed" ./essai.sh "<prompt>" local/out/essai.png 1536x864
 ```
 
-`essai.sh` passe par l'API native : `STEPS`, `CFG`, `SEED`, `NEG` (prompt négatif), `SCHEDULER` et `CACHE` (`none`
-pour désactiver easycache) se règlent par l'environnement ; la taille (défaut 1536×864) est arrondie au multiple de 32.
+`essai.sh` passe par l'API native : `STEPS`, `CFG`, `SEED`, `NEG` (prompt négatif), `SCHEDULER` et `CACHE`
+(`easycache` pour l'activer, `none` pour l'écarter) se règlent par l'environnement ; la taille (défaut 1536×864) est
+arrondie au multiple de 32.
 
 **Composer.** Un format carré centre un sujet : pour une scène, un format paysage (1536×864, 16:9). Le prompt décrit
 d'abord ce qui doit dominer l'image ; un personnage dans un paysage se dit petit dans le cadre (« small in the lower
 right of the frame, seen from behind »), en plan large. Le modèle suit mieux un prompt long et précis, en anglais.
 
 **La qualité**, du plus rentable au plus coûteux : la taille (le modèle est fait pour le 2K — 2752×1536 en 16:9 —,
-on génère en dessous pour le temps) ; les pas (30–40 ; l'exemple officiel en prend 40) ; un prompt négatif ;
-`CACHE=none` pour une image finale (easycache coûte un peu de détail) ; des poids moins compressés (Q6_K ou Q8_0 pour
-le modèle de diffusion, Q8_0 pour l'encodeur : changer `DIFFUSION_FILE` / `LLM_FILE` et `models.sha256`).
+on génère en dessous pour le temps) ; les pas (30–40 ; l'exemple officiel en prend 40, le défaut du serveur) ; un
+prompt négatif ; aucun cache pour une image finale (le défaut : easycache va deux fois plus vite mais coûte un peu de
+détail) ; des poids moins compressés (Q8_0 par défaut ; les variantes Q4_K_M vont plus vite : changer
+`DIFFUSION_FILE` / `LLM_FILE`).
 
 ## Brancher Mika
 
@@ -91,8 +95,10 @@ servir de repli, ou l'inverse.
 - `sd-server` n'a **aucune authentification** : il n'écoute que sur `127.0.0.1`. Les apps forgées et les ateliers
   de Mika tournent dans un espace réseau à part (bubblewrap) et ne le joignent pas.
 - stable-diffusion.cpp lit des **paramètres cachés dans le prompt** (`<sd_cpp_extra_args>{…}</sd_cpp_extra_args>` :
-  taille, nombre d'images…) : Mika les efface de tout prompt avant de l'envoyer (`clean_prompt`), sinon un prompt
-  influencé par quelqu'un pourrait épuiser la machine.
+  taille, nombre d'images…) sur ses API de compatibilité (OpenAI) ; l'API native ne les lit pas à la version
+  épinglée (`SD_RELEASE`). Mika efface quand même le mot qui les annonce de tout prompt avant de l'envoyer
+  (`clean_prompt`), prompt négatif compris, par les deux types : la garantie ne dépend pas de la version du serveur.
+  Sans cela, un prompt influencé par quelqu'un pourrait épuiser la machine.
 - Le service est plafonné en mémoire (`MemoryMax`, 16 Go, sans swap) : un dépassement tue le serveur, jamais la
   machine.
 
@@ -105,7 +111,7 @@ disque (`--mmap` : ≈ 0,6 Go de RAM propre au processus, le reste est du cache 
 |---|---|---|
 | 1024², 20 pas, `--fa`, sans cache | 245 s (11 s le pas, encodage 6,5 s, décodage 15,6 s) | 6,8 Go |
 | 1024², 20 pas, sans `--fa` | 13,3 s le pas (arrêté) | — |
-| 1024², 20 pas, `--fa` + `easycache` (**défaut**) | 116 s — image presque identique | 7,1 Go |
+| 1024², 20 pas, `--fa` + `easycache` | 116 s — image presque identique | 7,1 Go |
 | 1024², 20 pas, `--fa` + `cache-dit` | 205 s | 7,2 Go |
 | 768², 20 pas, `--fa` (ou sans) | 137 s (6,3 s le pas) | 4,7 Go |
 | Par Mika, brouillon paysage 960×640, 12 pas, premier appel | 57 s | — |
@@ -127,7 +133,7 @@ voisines ; 1 à 10 : pas de grille) :
 | ordonnanceur par défaut, 20 pas, easycache (Q4) | 5,8 | 10,3 | 7,1 |
 | `--offload-to-cpu` (même image : ce n'était pas le décodage en tuiles) | 5,8 | 10,3 | 7,1 |
 | `simple`, 20 pas | 5,9 | 3,0 | 6,2 |
-| `simple`, 25 pas (**défaut**) | 3,2 | 1,5 | 2,4 |
+| `simple`, 25 pas (la qualité normale de Mika) | 3,2 | 1,5 | 2,4 |
 
 Moins de 25 pas, la grille revient : Mika demande 16 / 25 / 40 pas selon la qualité. Il reste, agrandie, une texture
 fine sur l'eau calme : la même avec les deux VAE, en Q4 comme en Q8, avec ou sans cache — elle est dans ce que dessine

@@ -1,12 +1,13 @@
 #!/bin/bash
 # Installe le serveur d'images local dans MIKA_IMAGES_HOME (par défaut /mnt/games/mika-images) :
 #   1. stable-diffusion.cpp (construction Vulkan épinglée, empreinte vérifiée) dans bin/ ;
-#   2. les poids (≈ 11 Go, reprise possible, empreintes de models.sha256) dans models/ ;
+#   2. les poids (≈ 16 Go en Q8_0, reprise possible, empreintes de models.sha256) dans models/ ;
 #   3. serve.sh, wait-ready.sh et la configuration dans service/ (les unités systemd y pointent : pas d'espace
 #      dans le chemin, et le dépôt peut bouger sans casser le service).
+# Le dossier local/ du paquet devient un lien vers MIKA_IMAGES_HOME (ignoré par git), s'il n'est pas déjà autre chose.
 # Options : --units  écrit aussi les unités systemd utilisateur (sans les activer) ;
 #           --enable  les écrit et active la socket (le serveur démarre à la première demande).
-# Rien n'est écrit sur le disque système hors ~/.config/systemd/user (avec --units).
+# Rien n'est écrit sur le disque système hors ~/.config/systemd/user (avec --units) et ce lien.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=mika-images.conf
@@ -14,6 +15,10 @@ source "${MIKA_IMAGES_CONF:-$here/mika-images.conf}"
 H="$MIKA_IMAGES_HOME"
 mkdir -p "$H"/{bin,models,service,tmp,out}
 export TMPDIR="$H/tmp"
+# local/ : les poids, le binaire et les images d'essai vus depuis le paquet (essai.sh … local/out/essai.png)
+if [ -L "$here/local" ] || [ ! -e "$here/local" ]; then
+    ln -sfn "$H" "$here/local"
+fi
 
 # ── 1. le binaire ──
 if [ ! -x "$H/bin/sd-server" ] || [ "$(cat "$H/bin/.release" 2>/dev/null)" != "$SD_RELEASE" ]; then
