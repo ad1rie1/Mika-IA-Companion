@@ -1,5 +1,5 @@
 // Single source of truth for sleep phases, matching backend
-// memory/sleep.py::SleepPhase. Never re-declare SleepPhase elsewhere.
+// backendv2/src/mika/contracts/body.py::SleepPhase. Never re-declare SleepPhase elsewhere.
 export const SLEEP_PHASES = [
   "awake",
   "light_sleep",
