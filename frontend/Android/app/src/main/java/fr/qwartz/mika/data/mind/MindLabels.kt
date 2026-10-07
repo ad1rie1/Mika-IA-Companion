@@ -60,10 +60,13 @@ object MindLabels {
         return meta.label.removeSuffix("...").removeSuffix(" !").trim().lowercase()
     }
 
-    /** InnerLifePanel.ts:93-98. */
+    /**
+     * `InnerLifePanel.ts::SLEEP_PHASE_META`, les mots de la console (`faculties/body/inspect.py::SLEEP_FR`) : le
+     * sommeil léger ouvre chacun de ses cycles de la nuit, il n'écrit pas son journal.
+     */
     fun sleepPhase(phase: String?): String = when (phase) {
-        SleepPhases.LIGHT -> "endormie (journal)"
-        SleepPhases.REM -> "endormie (rêve)"
+        SleepPhases.LIGHT -> "sommeil léger"
+        SleepPhases.REM -> "sommeil paradoxal (elle rêve)"
         SleepPhases.DEEP -> "sommeil profond"
         else -> "éveillée"
     }

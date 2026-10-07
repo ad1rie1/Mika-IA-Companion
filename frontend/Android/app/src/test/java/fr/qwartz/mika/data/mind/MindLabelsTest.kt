@@ -41,7 +41,7 @@ class MindLabelsTest {
 
     @Test fun `sommeil, lieux, moments, rêves et besoins`() {
         assertEquals("éveillée", MindLabels.sleepPhase("awake"))
-        assertEquals("endormie (rêve)", MindLabels.sleepPhase("rem"))
+        assertEquals("sommeil paradoxal (elle rêve)", MindLabels.sleepPhase("rem"))
         assertEquals("à son bureau", MindLabels.place("desk"))
         assertNull(MindLabels.place("cuisine"))
         assertEquals(6, MindLabels.PLACES.size)

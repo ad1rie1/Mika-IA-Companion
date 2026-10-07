@@ -133,7 +133,7 @@ namespace Mika.Avatar
         internal static float Clamp(float v, float lo, float hi) => v < lo ? lo : v > hi ? hi : v;
     }
 
-    /// <summary>Les quatre phases de sommeil du noyau (<c>memory/sleep.py::SleepPhase</c>).</summary>
+    /// <summary>Les quatre phases de sommeil du noyau (<c>backendv2/src/mika/contracts/body.py::SleepPhase</c>).</summary>
     public enum SleepPhase
     {
         Awake,

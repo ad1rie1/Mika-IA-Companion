@@ -8,7 +8,7 @@
 - le fil rechargé montre ce qu'elle a tapé et ses fichiers par leur nom — pas ce
   que les préprocesseurs en ont tiré, qui reste pour le prompt ;
 - le panneau parle français : son agenda, son journal (celui d'hier, dit ainsi),
-  ses besoins avec les mots de la console.
+  ses besoins et son sommeil avec les mots de la console.
 """
 
 from __future__ import annotations
@@ -30,6 +30,7 @@ from mika.adapters.web.app import WebConfig
 from mika.app.mindport import journal_title, schedule_words
 from mika.app.server import build
 from mika.contracts.runtime import AttachmentMeta, PerceptionReceived
+from mika.faculties.body import inspect as body_inspect
 from mika.faculties.needs import inspect as needs_inspect
 from mika.kernel.events import Content
 from mika.kernel.registry import ArbitrationPolicy
@@ -248,3 +249,16 @@ def test_the_panel_names_her_needs_with_the_console_words():
     assert table is not None, "DRIVE_LABELS introuvable"
     labels = dict(re.findall(r'(\w+):\s*\{\s*label:\s*"([^"]+)"', table.group(1)))
     assert {k: v.casefold() for k, v in labels.items()} == {k: v.casefold() for k, v in needs_inspect.NAMES.items()}
+
+
+def test_the_panel_names_her_sleep_with_the_console_words():
+    """Un seul vocabulaire du sommeil : le sommeil léger ouvre chacun de ses cycles de la nuit, il n'écrit pas son
+    journal. Le panneau (``SLEEP_PHASE_META``) disait « endormie (journal) », le sens de la v1, quand la console dit
+    « sommeil léger »."""
+    source = FRONTEND / "ui" / "InnerLifePanel.ts"
+    if not source.exists():
+        pytest.skip("frontend absent")
+    table = re.search(r"SLEEP_PHASE_META[^=]*=\s*\{(.*?)\n\};", source.read_text(encoding="utf-8"), re.S)
+    assert table is not None, "SLEEP_PHASE_META introuvable"
+    labels = dict(re.findall(r'(\w+):\s*\{\s*label:\s*"([^"]+)"', table.group(1)))
+    assert labels == {str(phase): words for phase, words in body_inspect.SLEEP_FR.items()}
