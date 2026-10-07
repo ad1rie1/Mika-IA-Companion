@@ -383,7 +383,12 @@ describe("WebSocketClient — file d'attente (outbox) et accusés", () => {
     expect(acks).toEqual([{ type: "ack", client_msg_id: "c1", status: "send_abandoned" }]);
     ws.connect();
     last().open();
-    const sent = last().frames().filter((f) => f.type === "chat").map((f) => f.client_msg_id);
+    // Quatre en vol au plus : chaque accusé fait partir le suivant.
+    const chats = () => last().frames().filter((f) => f.type === "chat").map((f) => f.client_msg_id);
+    for (let i = 0; i < chats().length; i++) {
+      last().receive({ type: "ack", client_msg_id: chats()[i], status: "accepted" });
+    }
+    const sent = chats();
     expect(sent).toHaveLength(20);
     expect(sent[0]).toBe("c2");
     expect(sent[sent.length - 1]).toBe("c21");
