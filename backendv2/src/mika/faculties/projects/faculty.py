@@ -451,7 +451,8 @@ class Noted(Payload):
 
 
 class Amended(Payload):
-    """Une consigne d'un opérateur : elle la lit à l'exécution suivante (la plus récente prime)."""
+    """Une consigne d'un opérateur, ou de vive voix de qui s'occupe d'elle (``project_steer``) : elle la lit à
+    l'exécution suivante (la plus récente prime)."""
 
     project: int
     instruction: Content
