@@ -38,6 +38,9 @@ namespace Mika.UI
         bool _chatOpen;
         // Les messages déjà montrés (par identifiant du journal) : un rattrapage ne les remontre pas.
         readonly System.Collections.Generic.HashSet<long> _shown = new System.Collections.Generic.HashSet<long>();
+        // L'empreinte de la vie d'où vient ce que montre le fil (vide tant qu'aucun n'est arrivé) : comme le fil, elle
+        // survit à une nouvelle session.
+        string _life = "";
         // Les bulles de la joueuse qui attendent leur accusé (par identifiant client) : un refus s'y lit.
         readonly Dictionary<string, Label> _unacked = new Dictionary<string, Label>();
         bool _interactorBound;
@@ -400,6 +403,9 @@ namespace Mika.UI
 
         void OnHistory(HistoryFrame h)
         {
+            // Un fil d'une autre vie : ce qui est montré s'en va avant de fusionner (backendv2/docs/protocole-chat.md §4).
+            if (h.FromAnotherLife(_life)) ForgetLife();
+            if (!string.IsNullOrEmpty(h.Life)) _life = h.Life;
             foreach (var m in h.Messages.Skip(Math.Max(0, h.Messages.Count - 8)))
                 if (_shown.Add(m.Id))
                 {
@@ -409,6 +415,20 @@ namespace Mika.UI
                     // lui, attend sa trame : un rattrapage peut précéder la réponse.
                     if (_asleep && m.Role == "assistant") HideWaiting();
                 }
+        }
+
+        /// <summary>
+        /// Le fil d'une autre vie (une sauvegarde restaurée, un autre dossier de données, un fil oublié) : ses
+        /// identifiants ne veulent rien dire ici — gardés, ils faisaient jeter ses nouvelles réponses. Tout ce qui est
+        /// montré s'en va, sauf les lignes encore en partance (pas encore accusées) : elles partiront vers la vie qui parle.
+        /// </summary>
+        void ForgetLife()
+        {
+            _shown.Clear();
+            if (_chatLog == null) return;
+            for (var i = _chatLog.childCount - 1; i >= 0; i--)
+                if (!(_chatLog[i] is Label line && _unacked.ContainsValue(line)))
+                    Forget(_chatLog[i]);
         }
 
         /// <summary>

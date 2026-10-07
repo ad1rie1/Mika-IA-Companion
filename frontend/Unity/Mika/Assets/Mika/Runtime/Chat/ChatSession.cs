@@ -80,6 +80,8 @@ namespace Mika.Chat
         public LinkState State { get; private set; } = LinkState.Offline;
         /// <summary>Le plus grand identifiant de message montré : ce que l'on redemande après une coupure.</summary>
         public long Cursor { get; private set; }
+        /// <summary>L'empreinte de la vie d'où vient le curseur (vide tant qu'aucun fil n'est arrivé).</summary>
+        public string Life { get; private set; } = "";
 
         public event Action<LinkState> StateChanged;
         public event Action<SpeechFrame> Speech;
@@ -228,7 +230,12 @@ namespace Mika.Chat
                     Ack?.Invoke(a);
                     break;
                 case HistoryFrame h:
-                    if (h.LastId > Cursor) Cursor = h.LastId;
+                    // Un fil d'une autre vie (une sauvegarde restaurée, un autre dossier de données) : ses identifiants
+                    // ne valent rien ici, le curseur repart du sien. Plus grand que sa tête, il ne redescendait jamais,
+                    // et chaque reconnexion recevait de nouveau un `reset`.
+                    if (h.FromAnotherLife(Life)) Cursor = h.LastId;
+                    else if (h.LastId > Cursor) Cursor = h.LastId;
+                    if (!string.IsNullOrEmpty(h.Life)) Life = h.Life;
                     History?.Invoke(h);
                     break;
                 case InnerStateFrame i:
