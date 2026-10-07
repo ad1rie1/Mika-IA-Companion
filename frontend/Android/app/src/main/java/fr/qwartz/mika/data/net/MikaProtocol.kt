@@ -9,6 +9,11 @@ object MikaProtocol {
     const val MAX_MESSAGE_CHARS = 2000
     const val MAX_ATTACHMENTS = 5
     const val MAX_FILE_BYTES = 5L * 1024 * 1024
+    /**
+     * Au plus, un fichier qu'elle envoie et que `/files/…` sert (ports/shares.py `MAX_SHARE_BYTES`) :
+     * le double de ce qu'on lui envoie. C'est lui que les téléchargements doivent pouvoir porter.
+     */
+    const val MAX_SHARE_BYTES = 10L * 1024 * 1024
     const val MAX_CLIENT_MSG_ID = 64
 
     /** Le compteur de caractères ne se montre qu'à l'approche de la limite (ChatOverlay.ts). */
