@@ -24,7 +24,9 @@ diffusion à tout le monde.
   seules connexions opératrices) — une seule fois par question, qu'on
   l'apprenne par l'attente de la connexion ou par la file de sortie.
 - Une session révoquée (déconnexion, compte désactivé, mot de passe changé,
-  droits retirés) ferme ses WebSockets en 4401.
+  droits retirés) ferme ses WebSockets en 4401. Ce qu'aucun écouteur ne peut
+  dire (un jeton révoqué par un autre processus, une session expirée) se
+  revérifie à chaque ``CREDENTIAL_CHECK_S``, comme sur ``/ws/world``.
 - **Une connexion n'est pas une présence** (ADR 0062) : l'application du
   téléphone garde sa connexion en arrière-plan pour recevoir, sans que personne
   regarde l'écran (``Conn.here`` faux). Elle reçoit ce qui lui est adressé (sans
@@ -48,6 +50,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from mika.adapters.web import protocol
+from mika.adapters.web.accounts import CREDENTIAL_CHECK_S
 from mika.contracts import affect as affect_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
@@ -62,6 +65,7 @@ log = logging.getLogger("mika.web")
 
 Send = Callable[[dict[str, Any]], Awaitable[None]]
 Close = Callable[[int], Awaitable[None]]
+Check = Callable[[], bool]
 SYNC_INTERVAL_S = 3.0
 MIN_INTENSITY_DELTA = 0.04
 #: après une réplique, la synchronisation ne pousse pas une émotion qui la contredit (secondes)
@@ -84,6 +88,8 @@ class Conn:
     #: la session qui l'a ouverte (révoquée : la connexion se ferme)
     session: str | None = None
     close: Close | None = None
+    #: revérifie l'identifiant qui l'a ouverte (faux : il ne vaut plus, elle se ferme) ; ``None`` : rien à revérifier
+    valid: Check | None = None
     #: dernier message envoyé (horloge monotone) : l'onglet actif est celui qui parle
     active_at: float = 0.0
     #: quelqu'un regarde cet écran (faux : l'application du téléphone en arrière-plan, qui ne fait que recevoir)
@@ -117,6 +123,7 @@ class Hub:
         self._sent_pending: tuple[int, ...] | None = None
         self._sync_task: asyncio.Task[None] | None = None
         self._monotonic = monotonic
+        self._checked_at = 0.0
         #: (adresse, client_msg_id) → la connexion qui l'a envoyé (elle parlera la réponse)
         self._asked: OrderedDict[tuple[str, str], str] = OrderedDict()
         #: les questions dont le sort (abstention, échec) a déjà été dit
@@ -196,6 +203,23 @@ class Hub:
                     await c.close(WS_UNAUTHORIZED)
                 except Exception as exc:  # déjà fermée : rien à faire
                     log.debug("fermeture de %s : %r", c.id, exc)
+        return len(doomed)
+
+    async def check_credentials(self) -> int:
+        """Revérifie l'identifiant de chaque connexion (``Conn.valid``) : une session expirée ou effacée ailleurs, un
+        jeton révoqué par un autre processus (``mika token revoke``) — que nul écouteur n'a pu dire — ferment leurs
+        connexions en 4401. Une lecture impossible ne ferme personne : on revérifiera."""
+        doomed: set[str] = set()
+        for c in list(self.conns.values()):
+            if c.valid is None or c.session is None or c.session in doomed:
+                continue
+            try:
+                if not c.valid():
+                    doomed.add(c.session)
+            except Exception as exc:  # une lecture impossible ne ferme personne : on revérifiera
+                log.debug("identifiant de %s illisible : %r", c.id, exc)
+        for session in doomed:
+            await self.revoke(session=session)
         return len(doomed)
 
     # ── livraison (port) ──
@@ -424,6 +448,11 @@ class Hub:
         while True:
             await asyncio.sleep(interval_s)
             try:
+                now = self._monotonic()
+                if now - self._checked_at >= CREDENTIAL_CHECK_S:
+                    # avant la synchro : une connexion qui ne vaut plus ne reçoit pas un visage de plus
+                    self._checked_at = now
+                    await self.check_credentials()
                 await self.sync_once()
             except Exception as exc:  # la synchro ne doit jamais tomber
                 log.warning("synchro d'émotion : %r", exc)
