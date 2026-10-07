@@ -43,6 +43,10 @@ namespace Mika.UI
         string _life = "";
         // Les bulles de la joueuse qui attendent leur accusé (par identifiant client) : un refus s'y lit.
         readonly Dictionary<string, Label> _unacked = new Dictionary<string, Label>();
+        // Les lignes tapées ici (identifiant client → texte) pas encore rattachées à leur identifiant du journal, dans
+        // l'ordre d'écriture : la trame de parole qui y répond (ou se tait) les rattache par son client_msg_id, une ligne
+        // « user » du fil par leur texte. Sans quoi un rattrapage (une rafale, une reconnexion) les remontrait.
+        readonly List<KeyValuePair<string, string>> _unbound = new List<KeyValuePair<string, string>>();
         bool _interactorBound;
         // Sous le fil, ce qui se passe de son côté (comme le web et Android) : « Mika réfléchit… » entre l'accusé et
         // sa réponse, plafonné ; ou sa note de sommeil, jusqu'à ce qu'elle reparle.
@@ -86,8 +90,10 @@ namespace Mika.UI
             chat.Speech += OnSpeech;
             chat.History += OnHistory;
             chat.Ack += OnAck;
-            // Une nouvelle session ne renverra pas ce que l'ancienne gardait : ces bulles ne partiront plus.
+            // Une nouvelle session ne renverra pas ce que l'ancienne gardait : ces bulles ne partiront plus (aucune ligne
+            // du fil ne leur reviendra).
             foreach (var line in _unacked.Values) MarkRefused(line, "connexion changée");
+            _unbound.RemoveAll(m => _unacked.ContainsKey(m.Key));
             _unacked.Clear();
             // … ni la réponse que l'ancienne attendait.
             HideWaiting();
@@ -361,7 +367,11 @@ namespace Mika.UI
                 {
                     var id = _chat.Send(text);
                     var line = AddLine(text, mika: false);
-                    if (line != null) _unacked[id] = line;
+                    if (line != null)
+                    {
+                        _unacked[id] = line;
+                        _unbound.Add(new KeyValuePair<string, string>(id, text));
+                    }
                     if (_chat.State != LinkState.Online && _chat.State != LinkState.Refused)
                         Toast("Conversation hors ligne : le message partira à la reconnexion.");
                 }
@@ -375,6 +385,10 @@ namespace Mika.UI
             // Toute trame de parole clôt « Mika réfléchit… », un silence aussi : se taire est une issue valide. La
             // note de sommeil, elle, survit à un murmure à elle-même — ce n'est pas encore sa réponse.
             if (!s.Inner || !_asleep) HideWaiting();
+            // La question qu'elle règle (une réponse, un silence, son sommeil) reçoit son identifiant : un rattrapage ne
+            // la remontrera pas.
+            if (s.ClientMsgId != null && s.UserMessageId is long asked && _unbound.RemoveAll(m => m.Key == s.ClientMsgId) > 0)
+                _shown.Add(asked);
             if (string.IsNullOrEmpty(s.Text))
             {
                 // Elle dort : la réponse attend son réveil (backendv2/docs/protocole-chat.md).
@@ -407,7 +421,8 @@ namespace Mika.UI
             if (h.FromAnotherLife(_life)) ForgetLife();
             if (!string.IsNullOrEmpty(h.Life)) _life = h.Life;
             foreach (var m in h.Messages.Skip(Math.Max(0, h.Messages.Count - 8)))
-                if (_shown.Add(m.Id))
+                // Une ligne de la joueuse déjà montrée s'adopte au lieu de s'afficher une seconde fois.
+                if (_shown.Add(m.Id) && !Adopt(m))
                 {
                     // Ses fichiers réapparaissent avec elle (ceux d'un message de la personne n'ont qu'un nom).
                     AddLine(StripCues(m.Text), mika: m.Role == "assistant", files: m.Role == "assistant" ? m.Attachments : null);
@@ -418,6 +433,21 @@ namespace Mika.UI
         }
 
         /// <summary>
+        /// Une ligne « user » du fil que la joueuse a tapée ici et qui n'est pas encore rattachée : la plus ancienne au
+        /// même texte reçoit son identifiant au lieu d'être montrée deux fois. Par le texte, comme le web et Android :
+        /// les premiers messages d'une rafale ne se rattachent que par le rattrapage qui précède la réponse
+        /// (<c>backendv2/docs/protocole-chat.md</c> §4).
+        /// </summary>
+        bool Adopt(HistoryItem m)
+        {
+            if (m.Role != "user") return false;
+            var i = _unbound.FindIndex(u => u.Value == m.Text);
+            if (i < 0) return false;
+            _unbound.RemoveAt(i);
+            return true;
+        }
+
+        /// <summary>
         /// Le fil d'une autre vie (une sauvegarde restaurée, un autre dossier de données, un fil oublié) : ses
         /// identifiants ne veulent rien dire ici — gardés, ils faisaient jeter ses nouvelles réponses. Tout ce qui est
         /// montré s'en va, sauf les lignes encore en partance (pas encore accusées) : elles partiront vers la vie qui parle.
@@ -425,6 +455,7 @@ namespace Mika.UI
         void ForgetLife()
         {
             _shown.Clear();
+            _unbound.RemoveAll(m => !_unacked.ContainsKey(m.Key));
             if (_chatLog == null) return;
             for (var i = _chatLog.childCount - 1; i >= 0; i--)
                 if (!(_chatLog[i] is Label line && _unacked.ContainsValue(line)))
@@ -452,6 +483,8 @@ namespace Mika.UI
                 ShowWaiting(asleep: false);
                 return;
             }
+            // Refusée, elle n'a jamais quitté le poste : aucune ligne du fil ne lui reviendra.
+            _unbound.RemoveAll(m => m.Key == a.ClientMsgId);
             var why = a.Status switch
             {
                 "rate_limited" => "trop vite",
