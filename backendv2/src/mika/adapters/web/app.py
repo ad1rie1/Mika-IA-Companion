@@ -638,7 +638,8 @@ class _Session:
         #: la prochaine écriture de la saisie, quand la fenêtre de ``COMPOSING_RATE`` est pleine ; et son plafond
         self._composing_task: asyncio.Future[Any] | None = None
         self._composing_cap: asyncio.Future[Any] | None = None
-        kw: dict[str, Any] = {"session": session_key, "close": self.close, "channel": channel, "here": here}
+        kw: dict[str, Any] = {"session": session_key, "close": self.close, "valid": self._session_valid,
+                              "channel": channel, "here": here}
         if account is not None:
             kw |= {"handle": account.handle, "authenticated": True, "account": account.id,
                    "operator": account.operator, "display_name": account.display_name}
@@ -962,6 +963,9 @@ class _Session:
 
     async def sync(self, frame: dict[str, Any]) -> None:
         c = self.conn
+        if not self._session_valid():  # avant tout historique : un identifiant qui ne vaut plus ne relit pas le fil
+            await self.hub.revoke(session=self.session_key)
+            return
         if not c.announced and c.here and self.account is None:
             await self.announce()
         try:
@@ -984,11 +988,13 @@ class _Session:
         await self.send(self.hub.history("catchup", rows, after_id=after_id, truncated=truncated, life=life))
 
     def _session_valid(self) -> bool:
-        """Revérifiée à chaque message : une session effacée ailleurs (un autre processus,
-        une expiration) ou un jeton révoqué (``mika token revoke``) ne parle plus."""
+        """Revérifiée à chaque message, avant chaque rattrapage, et par le concentrateur à chaque
+        ``CREDENTIAL_CHECK_S`` : une session effacée ailleurs (un autre processus, une expiration), un
+        jeton révoqué (``mika token revoke``) ou des droits changés ne parlent plus, ne relisent plus le
+        fil, ne reçoivent plus rien — la règle de ``/ws/world`` (``Accounts.still_valid``)."""
         if self.session_key is None or self.accounts is None:
             return True
-        return self.accounts.credential(self.session_key) is not None
+        return self.accounts.still_valid(self.session_key, operator=self.conn.operator)
 
     async def chat(self, frame: dict[str, Any]) -> None:
         c = self.conn

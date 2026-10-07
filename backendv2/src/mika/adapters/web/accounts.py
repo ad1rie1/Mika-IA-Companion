@@ -57,6 +57,9 @@ TOKEN_SOURCES = frozenset({SOURCE_CLI, SOURCE_CONSOLE, SOURCE_LOGIN})
 #: jetons vivants obtenus par mot de passe gardés par compte : au-delà, les moins récemment utilisés partent
 #: (une application réinstallée dix fois ne laisse pas dix portes ouvertes)
 LOGIN_TOKENS_KEPT = 10
+#: une connexion ouverte (``/ws``, ``/ws/world``) revérifie son identifiant au moins aussi souvent (secondes) : ce
+#: qu'aucun écouteur n'a pu dire — un jeton révoqué par la ligne de commande, une session expirée
+CREDENTIAL_CHECK_S = 10.0
 _N, _R, _P = 2**14, 8, 1
 _COMMON = frozenset({"password", "motdepasse", "azertyuiop", "qwertyuiop", "12345678", "123456789", "iloveyou",
                      "password1", "baseball", "football", "sunshine", "princess", "letmein1", "trustno1"})
@@ -440,3 +443,10 @@ class Accounts:
             acc = self._account(rows[0]) if rows else None
             return acc if acc is not None and acc.active else None
         return self.session(key)
+
+    def still_valid(self, key: str | None, *, operator: bool) -> bool:
+        """La règle des connexions ouvertes, sur ``/ws`` comme sur ``/ws/world`` : leur identifiant vaut encore
+        (session ni expirée ni effacée, jeton non révoqué — dans ce processus ou un autre —, compte actif) et leurs
+        droits n'ont pas changé. Une lecture impossible lève : l'appelant décide s'il ferme."""
+        account = self.credential(key)
+        return account is not None and account.operator == operator
