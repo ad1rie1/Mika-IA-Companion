@@ -1,5 +1,9 @@
 # Interface de gestion
 
+> **v1 archivée (`old/backend/`).** `/gestion/` était la console Django de l'ancien moteur ; elle n'est
+> plus servie. Le moteur vivant est [`backendv2/`](../backendv2/README.md) : il écoute sur le port 8001
+> et sa console est `/inspecteur/`.
+
 L'interface `/gestion/` utilise les gabarits Django et une amélioration progressive
 JavaScript. Les pages, filtres, détails et formulaires restent utilisables sans JS.
 Le frontend de conversation est une application distincte.

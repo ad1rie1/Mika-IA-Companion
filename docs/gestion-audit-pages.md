@@ -1,5 +1,9 @@
 # Audit des pages de gestion
 
+> **v1 archivée (`old/backend/`).** `/gestion/` était la console Django de l'ancien moteur ; elle n'est
+> plus servie. Le moteur vivant est [`backendv2/`](../backendv2/README.md) : il écoute sur le port 8001
+> et sa console est `/inspecteur/`.
+
 Cet inventaire accompagne la refonte de `/gestion/`. Il distingue les listes qui
 peuvent grandir, les aperçus et les petits référentiels à comparer ensemble.
 Le contrat des panneaux est décrit dans [gestion-interface.md](gestion-interface.md).
