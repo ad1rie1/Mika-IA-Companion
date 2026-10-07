@@ -370,6 +370,8 @@ def _matter_why(frame: Frame, target: str, name: str) -> str | None:
         return phrase("expression.murmur.matter.working")
     if m.kind == needs_c.MOMENT_MATTER:
         return phrase("expression.murmur.matter.moment")
+    if m.kind == needs_c.DREAM_MATTER:
+        return phrase("expression.murmur.matter.dream")
     return phrase("expression.murmur.matter.told", que_name=elided(name, "que"))
 
 

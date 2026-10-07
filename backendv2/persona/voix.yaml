@@ -465,6 +465,8 @@ expression:
       done: "lui raconter ce que tu as fini {when}"
       working: "lui parler de ce sur quoi tu es en ce moment"
       moment: "lui parler de ce qui se passe dans sa vie"
+      # un rêve d'elle cette nuit : c'est sa nuit à elle, pas ce que la personne lui a raconté
+      dream: "lui raconter ton rêve de cette nuit"
       # {que_name} : « que » suivi de son nom, élidé devant une voyelle (« que « Adrien » », « que cette personne »)
       told: "reprendre ce {que_name} t'avait raconté"
     # aucune raison connue
@@ -824,6 +826,8 @@ needs:
     thought: "Quelque chose te trotte dans la tête"
     done: "Ce que tu as fini, {when}"
     working: "Ce sur quoi tu es en ce moment"
+    # un rêve d'elle cette nuit, dont elle s'est souvenue au réveil, où seule la personne en face figure
+    dream: "Tu as rêvé de {name} cette nuit — tu peux le lui raconter, si ça te dit"
     # un moment de sa vie qui dure encore. {since} : « 4 jours », « hier soir »
     ongoing: "Ce {que_name} vit en ce moment, depuis {since} — {name} te l'avait raconté (prends de ses nouvelles)"
     # un moment à venir. {when} : « demain », « jeudi » (days_ahead)

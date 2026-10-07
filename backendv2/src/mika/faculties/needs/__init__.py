@@ -36,10 +36,10 @@ change rien de tel.
 *de quoi* parler. Une initiative qu'elle pousse seule a besoin d'une matière
 concrète, lue dans les faits publics ; ce qui concerne la personne passe
 d'abord (une pensée sur elle, ce qui se passe dans sa vie, ce qu'elle lui a
-raconté de plus important), ses choses à elle ensuite (ce qu'elle a fini, ce
-sur quoi elle est — jamais une rêverie : rien de neuf n'est arrivé). Une
-matière déjà dite dans une initiative ne resert pas. Sans matière, sa preuve
-est nettement plus faible.
+raconté de plus important, un rêve d'elle cette nuit), ses choses à elle
+ensuite (ce qu'elle a fini, ce sur quoi elle est — jamais une rêverie : rien
+de neuf n'est arrivé). Une matière déjà dite dans une initiative ne resert
+pas. Sans matière, sa preuve est nettement plus faible.
 """
 
 from __future__ import annotations
@@ -61,6 +61,7 @@ from mika.contracts import memory as memory_c
 from mika.contracts import needs as c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
+from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts import world as w
 from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
@@ -664,18 +665,27 @@ def _their_moment(m: Any, person: str, now: int, p: NeedsParams) -> bool:
     return -p.matter_moment_ahead_us <= now - m.when <= p.matter_told_us
 
 
+def _their_dream(d: Any, person: str, used: Mapping[str, int]) -> bool:
+    """Un rêve d'elle cette nuit, dont elle s'est souvenue au réveil : elle seule y figure (raconter à l'une un
+    rêve où passe une autre, c'est parler de l'autre), pas un cauchemar (« j'ai rêvé que tu mourais » n'ouvre pas
+    une conversation), pas encore revenu (ni dit dans une initiative, ni repris en parlant)."""
+    return d is not None and tuple(d.about) == (person,) and d.kind != self_c.NIGHTMARE and not d.recalled \
+        and bool(d.text_ref) and d.text_ref not in used
+
+
 def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, goals: Any,
-           projects: Any, moments: Any = (), hard: bool = False) -> c.Matter | None:
+           projects: Any, moments: Any = (), hard: bool = False, dream: Any = None) -> c.Matter | None:
     """Ce dont elle pourrait parler à cette personne — jamais inventé, jamais déjà dit dans une initiative. **Ce
     qui la concerne d'abord** : une pensée sur elle (une inquiétude, ce qu'elles ont vécu), puis **ce qui pèse le
     plus dans sa vie** parmi un moment de sa vie (bientôt, ou tout juste passé) et ce qu'elle lui a raconté — à
-    poids égal, le moment (il a son heure) ; **ses choses à elle ensuite** : une pensée anodine à partager, ce
-    qu'elle a fini, ce sur quoi elle est (jamais une rêverie : rien de neuf n'est arrivé). Un humain écrit à une
-    amie pour elle avant d'écrire pour lui (HUM-10) — et part de ce qui pèse, pas du prochain rendez-vous banal
-    (sonde réelle du 2026-10-03 : « un mot pour l'encourager » pour le dentiste, le soir où son chat était au plus
-    mal). Ce qui se fête n'en est pas une (ses vœux, le jour même, sont une raison à part), ni une date qui revient
-    chaque année (la date d'un deuil ne se met pas sur la table d'elle-même) ; quand quelque chose de grave la touche
-    ces jours-ci (``hard``), un moment ordinaire non plus."""
+    poids égal, le moment (il a son heure) —, puis un rêve d'elle cette nuit (``dream``, ``self.dream_residue``) ;
+    **ses choses à elle ensuite** : une pensée anodine à partager, ce qu'elle a fini, ce sur quoi elle est (jamais
+    une rêverie : rien de neuf n'est arrivé). Un humain écrit à une amie pour elle avant d'écrire pour lui
+    (HUM-10) — et part de ce qui pèse, pas du prochain rendez-vous banal (sonde réelle du 2026-10-03 : « un mot
+    pour l'encourager » pour le dentiste, le soir où son chat était au plus mal). Ce qui se fête n'en est pas une
+    (ses vœux, le jour même, sont une raison à part), ni une date qui revient chaque année (la date d'un deuil ne
+    se met pas sur la table d'elle-même) ; quand quelque chose de grave la touche ces jours-ci (``hard``), un
+    moment ordinaire non plus, ni un rêve."""
     used = s.used
     live = [t for t in thoughts if t.intensity >= p.matter_thought_from and t.text_ref and t.text_ref not in used]
     for t in live:
@@ -698,6 +708,9 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
                             c.Matter(c.TOLD_MATTER, t.ref, t.at, (person,), t.sensitivity)))
     if weighed:
         return min(weighed, key=lambda w: w[0])[1]
+    if not hard and _their_dream(dream, person, used):
+        # sa propre voix, rêvée de ce qu'elle a vécu avec elle : rien à citer ; son heure se dit « cette nuit »
+        return c.Matter(c.DREAM_MATTER, dream.text_ref, now, (person,), dream.sensitivity)
     for t in live:
         if not t.about and t.origin in SHAREABLE and t.sensitivity <= Sensitivity.ANODYNE:
             return c.Matter(c.THOUGHT_MATTER, t.text_ref, t.born_at, (), t.sensitivity,
@@ -720,7 +733,7 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
 
 
 @NEEDS.fact(c.MATTER, reads=[identity_c.PERSON, attention_c.THOUGHTS, goals_c.LIVE, projects_c.LIVE,
-                             memory_c.LIFE_EVENTS, memory_c.HARD_TIMES])
+                             memory_c.LIFE_EVENTS, memory_c.HARD_TIMES, self_c.DREAM_RESIDUE])
 def _matter(s: NeedsState, cx, handle: str) -> c.Matter | None:
     if not is_identifiable(handle):
         return None
@@ -728,7 +741,7 @@ def _matter(s: NeedsState, cx, handle: str) -> c.Matter | None:
     return matter(s, person, cx.now, params(cx.params), cx.facts.get(attention_c.THOUGHTS),
                   cx.facts.get(goals_c.LIVE), cx.facts.get(projects_c.LIVE),
                   cx.facts.get(memory_c.LIFE_EVENTS(person)) or (),
-                  hard=cx.facts.get(memory_c.HARD_TIMES(person)) > 0)
+                  hard=cx.facts.get(memory_c.HARD_TIMES(person)) > 0, dream=cx.facts.get(self_c.DREAM_RESIDUE))
 
 
 # ── Prendre la parole ─────────────────────────────────────────────────────
@@ -924,6 +937,8 @@ def _lead(m: c.Matter, frame: Frame, name: str) -> str:
         return phrase("needs.matter.done", when=when)
     if m.kind == c.WORKING_MATTER:
         return phrase("needs.matter.working")
+    if m.kind == c.DREAM_MATTER:
+        return phrase("needs.matter.dream", name=name)
     if m.kind == c.MOMENT_MATTER:
         if m.ongoing:
             # une situation qui dure n'est ni « à venir » ni « passée » : elle la vit encore
@@ -935,8 +950,13 @@ def _lead(m: c.Matter, frame: Frame, name: str) -> str:
     return phrase("needs.matter.told", que_name=elided(name, "que"), when=when)
 
 
+#: la provenance d'un rêve revenu dans ce qu'elle a dit (``dream:<n°>``) : ``self`` l'efface, il ne revient plus
+DREAM_PROVENANCE = "dream:"
+
+
 @NEEDS.section("matter", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], after=["needs"], trim_rank=60,
-               title=phrase("needs.matter.title"), reads=[c.MATTER, identity_c.PERSON, identity_c.IDENTITY])
+               title=phrase("needs.matter.title"),
+               reads=[c.MATTER, identity_c.PERSON, identity_c.IDENTITY, self_c.DREAM_RESIDUE])
 def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce dont elle pourrait parler, quand c'est l'envie de compagnie qui la
     pousse : une chose, concrète, jamais inventée. Ce qui vient d'ailleurs est
@@ -956,8 +976,13 @@ def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> S
     lines = [f"{_lead(m, frame, name)} :", cited(body, 400) if m.external else body,
              phrase("needs.matter.start_there")]
     # une matière ne concerne que la personne en face, ou personne (anodin) : rien d'autrui à dire ici ; sa
-    # provenance voyage dans l'énoncé (dite, elle ne resert pas)
-    return SectionBody("\n".join(lines), provenance=(f"{MATTER_PROVENANCE}{m.ref}",))
+    # provenance voyage dans l'énoncé (dite, elle ne resert pas) — un rêve dit ne revient pas non plus sous « CE QUE
+    # TU AS RÊVÉ CETTE NUIT »
+    provenance = (f"{MATTER_PROVENANCE}{m.ref}",)
+    dream = frame.get(self_c.DREAM_RESIDUE)
+    if m.kind == c.DREAM_MATTER and dream is not None and dream.text_ref == m.ref:
+        provenance += (f"{DREAM_PROVENANCE}{dream.id}",)
+    return SectionBody("\n".join(lines), provenance=provenance)
 
 
 # ── Inspection ────────────────────────────────────────────────────────────
