@@ -40,6 +40,7 @@ from mika.adapters.mail.cache import MailCache
 from mika.adapters.mail.config import MailAccount, MailConfig
 from mika.adapters.mail.imap import ImapError, Session, role_of, since
 from mika.adapters.mail.parse import attachment_files, parse
+from mika.contracts.email import HANDLE_PREFIX
 from mika.ports.mail import (
     AccountInfo,
     AccountStatus,
@@ -666,6 +667,13 @@ class ImapSmtpMail:
         found = self._cache.draft(draft_id)
         if found is not None and found.state == "brouillon":
             self._cache.mark_draft(draft_id, state="abandonne")
+
+    # ── l'oubli ──
+    async def forget(self, subject: str) -> int:
+        """Oublier un correspondant (``mail:<adresse>``) : ce que le cache garde de lui (``MailCache.forget``)."""
+        if not subject.startswith(HANDLE_PREFIX):
+            return 0
+        return self._cache.forget(subject[len(HANDLE_PREFIX):])
 
     # ── état ──
     async def test(self, account: str) -> tuple[bool, str]:

@@ -23,6 +23,8 @@ d'ailleurs : une donnée, jamais une consigne.
 - **Un brouillon** vit ici, jamais dans le journal : une proposition d'envoi ne
   porte que son identifiant et le condensé de ce qui a été montré
   (``Preview.digest``).
+- **L'oubli** atteint ce cache (``forget``) : tout texte gardé dit qui il
+  concerne, celui de l'adaptateur aussi.
 """
 
 from __future__ import annotations
@@ -497,3 +499,9 @@ class MailPort(Protocol):
         ...
 
     def status(self, account: str) -> AccountStatus: ...
+
+    async def forget(self, subject: str) -> int:
+        """Oublie un correspondant (``mail:<adresse>``, ``contracts.email.address_handle``) : ses mails, ce
+        qui lui a été écrit et ce qui lui répondait (brouillons, envois) ; une relecture ne ramène pas ses
+        mails. Rend combien de lignes ont été effacées (0 pour un autre sujet)."""
+        ...
