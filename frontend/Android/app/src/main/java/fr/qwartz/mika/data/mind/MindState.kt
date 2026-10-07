@@ -9,8 +9,10 @@ import fr.qwartz.mika.data.net.FrameCodec
 import fr.qwartz.mika.data.net.IdentityView
 import fr.qwartz.mika.data.net.InnerState
 import fr.qwartz.mika.data.net.Journal
+import fr.qwartz.mika.data.net.Occupation
 import fr.qwartz.mika.data.net.PersonProfile
 import fr.qwartz.mika.data.net.ProjectSummary
+import fr.qwartz.mika.data.net.Reminder
 import fr.qwartz.mika.data.net.Rumination
 import kotlinx.serialization.Serializable
 
@@ -52,6 +54,10 @@ data class MindState(
     val identity: IdentityView? = null,
     val personProfile: PersonProfile? = null,
     val pendingCommitments: List<String> = emptyList(),
+    /** Ses rappels encore à dire à cette personne : une promesse devenue rappel ne quitte pas l'écran. */
+    val reminders: List<Reminder> = emptyList(),
+    /** Ce qu'elle a en train et que cette personne peut entendre (au plus deux). */
+    val doing: List<Occupation> = emptyList(),
     val mood: Mood? = null,
     val updatedAtMs: Long = 0,
 ) {
@@ -76,7 +82,8 @@ object SleepPhases {
  * Les clés de base (sommeil, énergie, lieu, rythme, besoins, estime) remplacent quand elles sont
  * présentes ; son occupation aussi, et un `null` explicite y dit qu'elle ne fait plus rien (une trame
  * sans la clé, d'un serveur plus ancien, la laisse telle quelle). Les sections du panneau (pensées,
- * journal, rêve, récit, projets, identité, fiche) : quand `person_scope` vaut `false`, la trame ne parle de personne et ne dit rien d'elles — elles
+ * journal, rêve, récit, projets, identité, fiche, rappels, ce qu'elle a en train) : quand `person_scope`
+ * vaut `false`, la trame ne parle de personne et ne dit rien d'elles — elles
  * restent telles quelles ; sinon elles sont remplacées, et une section absente est effacée. Une
  * section malformée garde toujours sa valeur précédente.
  */
@@ -116,6 +123,8 @@ object InnerStateReducer {
             identity = panel(FrameCodec.K_IDENTITY, s.identity, prev.identity),
             personProfile = panel(FrameCodec.K_PROFILE, s.personProfile, prev.personProfile),
             pendingCommitments = panel(FrameCodec.K_COMMITMENTS, s.pendingCommitments.orEmpty(), prev.pendingCommitments),
+            reminders = panel(FrameCodec.K_REMINDERS, s.reminders.orEmpty(), prev.reminders),
+            doing = panel(FrameCodec.K_DOING, s.doing.orEmpty(), prev.doing),
         )
         return next
     }

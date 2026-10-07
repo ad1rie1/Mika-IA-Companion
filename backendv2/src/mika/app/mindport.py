@@ -12,6 +12,7 @@ from typing import Any
 from mika.app.console import FACULTY_LABELS
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
+from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
@@ -26,6 +27,8 @@ from mika.contracts.entry import Admission, HistoryRow, SharedDownload, SharedMe
 from mika.contracts.runtime import PerceptionReceived
 from mika.faculties import shares, transcript
 from mika.faculties.attention import prompt as attention_prompt
+from mika.faculties.goals.faculty import Goal, musing, workable
+from mika.faculties.goals.tools import reflective, titled
 from mika.faculties.identity import describe
 from mika.faculties.projects import actions as project_actions
 from mika.faculties.projects import work as projects_work
@@ -46,7 +49,7 @@ from mika.runtime.bootstrap import Kernel, ReadOnlyStore
 from mika.vocab.affect import emotion_of
 from mika.vocab.circadian import DAYS_FR, day_fr
 from mika.vocab.episodes import project_of
-from mika.vocab.privacy import Sensitivity
+from mika.vocab.privacy import Sensitivity, hearable
 
 
 def _args(args_json: str) -> dict[str, Any]:
@@ -161,6 +164,23 @@ def wake_key(endpoint: str, idempotency: str) -> str:
     return f"reveil:{endpoint}:{idempotency}"
 
 
+def _audience(handle: str, disclosure: Any) -> Audience:
+    """Qui lit le panneau : cette adresse seule, en privé, à la mesure de ce qu'elle peut lui dire."""
+    return Audience(persons=(handle,), channel="web", public=False, level=int(disclosure.level),
+                    witness_level=int(disclosure.witness_level), private_ok=disclosure.own_file)
+
+
+#: ses rappels montrés à la personne (les plus proches), et ce qu'elle a en train (« En ce moment »)
+REMINDERS_SHOWN, DOING_SHOWN = 5, 2
+
+
+def _doing_kind(g: Goal) -> str:
+    """Comment le panneau dit ce qu'elle a en train : une rêverie n'est pas une recherche."""
+    if musing(g):
+        return "musing"
+    return "reflection" if reflective(g) else "exploration"
+
+
 class KernelPort:
     def __init__(self, kernel: Kernel) -> None:
         self.kernel = kernel
@@ -261,8 +281,7 @@ class KernelPort:
     def _inner_life(self, frame: Any, handle: str, disclosure: Any) -> dict[str, Any]:
         """Ses pensées (celles que cette personne peut entendre) et son récit."""
         out: dict[str, Any] = {}
-        audience = Audience(persons=(handle,), channel="web", public=False, level=int(disclosure.level),
-                            witness_level=int(disclosure.witness_level), private_ok=disclosure.own_file)
+        audience = _audience(handle, disclosure)
         person = frame.get(identity_c.PERSON(handle))
         thoughts = [t for t in frame.get(attention_c.THOUGHTS) if attention_prompt.admissible(t, person, audience)][:3]
         texts = self._store.content([t.text_ref for t in thoughts if t.text_ref])
@@ -296,6 +315,35 @@ class KernelPort:
         narrative = self._store.content([ref]).get(ref) if ref else None
         if narrative:
             out["self_narrative"] = {"content": narrative}
+        return out
+
+    def _goals(self, frame: Any, handle: str, disclosure: Any) -> dict[str, Any]:
+        """Ce qu'elle a promis à cette personne (ses rappels encore à dire, à l'heure locale : une promesse devenue
+        rappel ne quitte pas l'écran) et ce qu'elle a en train, filtré comme « CE QUE TU AS EN TRAIN »
+        (``goals/prompt.py``) — son titre, dans ses mots à elle, jamais ce qui vient d'ailleurs."""
+        audience = _audience(handle, disclosure)
+        person = frame.get(identity_c.PERSON(handle))
+        goals = sorted(frame.state("goals").goals.values(), key=lambda g: g.id)
+
+        def heard(g: Goal) -> bool:
+            return hearable(g.about, g.sensitivity, person, audience.level, audience.witness_level,
+                            audience.private_ok)
+
+        reminders = sorted((g for g in goals if g.kind == goals_c.REMINDER and person and g.owner == person
+                            and not g.delivered and workable(g, frame.now) and heard(g)),
+                           key=lambda g: (g.due or 0, g.id))
+        doing = [g for g in reversed(goals) if g.kind == goals_c.EXPLORATION and workable(g, frame.now) and heard(g)]
+        texts = self._store.content([g.title_ref for g in (*reminders, *doing) if g.title_ref])
+        tz = frame.env.tz_of(frame.root)
+        out: dict[str, Any] = {}
+        promised = [{"text": text, "due": local(g.due, tz).isoformat() if g.due else None}
+                    for g in reminders if (text := texts.get(g.title_ref))][:REMINDERS_SHOWN]
+        if promised:
+            out["reminders"] = promised
+        pursuits = [{"text": text, "kind": _doing_kind(g)}
+                    for g in doing if (text := titled(g, texts)[0])][:DOING_SHOWN]
+        if pursuits:
+            out["doing"] = pursuits
         return out
 
     async def sense(self, device: str, text: str, *, pertinence: float = 0.5, emotion: str = "",
@@ -457,6 +505,7 @@ class KernelPort:
         }}
         disclosure = frame.get(identity_c.DISCLOSURE((handle, view.channel or "web", False)))
         out.update(self._inner_life(frame, handle, disclosure))
+        out.update(self._goals(frame, handle, disclosure))
         if frame.get(identity_c.SPEAKS_AS_OWNER(handle)):  # les droits tiennent à l'adresse qui parle
             out.update(self._work(frame))
         if not disclosure.own_file:

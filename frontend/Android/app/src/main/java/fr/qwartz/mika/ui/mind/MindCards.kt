@@ -37,6 +37,10 @@ sealed interface MindCard {
     data class Thoughts(val items: List<Thought>) : MindCard
     data class Thought(val text: String, val pct: Int, val emotion: String?)
 
+    /** « En ce moment » : ce qu'elle a en train et que tu peux entendre, dans ses mots à elle. */
+    data class Doing(val items: List<DoingLine>) : MindCard
+    data class DoingLine(val text: String, val kind: String?)
+
     data class Dream(
         val type: String,
         val emotion: String?,
@@ -67,7 +71,10 @@ sealed interface MindCard {
         val exchanges: Int? = null,
     ) : MindCard
 
-    /** « Ce qu'elle t'a promis » : ses engagements envers toi, pas encore tenus. */
+    /**
+     * « Ce qu'elle t'a promis » : ses engagements envers toi, pas encore tenus — ses rappels d'abord, avec leur
+     * heure (« jeudi 9 octobre à 09:00 : appeler le dentiste »).
+     */
     data class Promises(val items: List<String>) : MindCard
 
     /** Ses besoins (Compagnie, S'exprimer, Apprendre), en tension de 0 à 100. */
@@ -96,6 +103,7 @@ object MindCards {
     const val SECONDARY_MIN_RATIO = 0.4
 
     private val NEXT_RUN = DateTimeFormatter.ofPattern("dd/MM HH:mm", Locale.FRENCH)
+    private val DUE = DateTimeFormatter.ofPattern("EEEE d MMMM 'à' HH:mm", Locale.FRENCH)
 
     fun build(state: MindState?, zone: ZoneId): List<MindCard> {
         if (state == null) return emptyList()
@@ -107,6 +115,10 @@ object MindCards {
             MindCard.Thought(it.summary.trim(), pct(it.intensity), it.emotion.takeIf(String::isNotBlank)?.let(MindLabels::emotion))
         }
         if (thoughts.isNotEmpty()) out += MindCard.Thoughts(thoughts)
+        val doing = state.doing.filter { it.text.isNotBlank() }.map {
+            MindCard.DoingLine(it.text.trim(), MindLabels.doingKind(it.kind))
+        }
+        if (doing.isNotEmpty()) out += MindCard.Doing(doing)
         state.dream?.takeIf { it.content.isNotBlank() }?.let { d ->
             val vividness = d.vividness.coerceIn(0.0, 1.0)
             out += MindCard.Dream(
@@ -128,7 +140,11 @@ object MindCards {
         }
         state.selfNarrative?.takeIf { it.isNotBlank() }?.let { out += MindCard.Narrative(it.trim()) }
         bond(state)?.let(out::add)
-        val promises = state.pendingCommitments.map(String::trim).filter(String::isNotEmpty)
+        val reminders = state.reminders.filter { it.text.isNotBlank() }.map { r ->
+            val text = r.text.trim()
+            formatDue(r.due, zone)?.let { "$it : $text" } ?: text
+        }
+        val promises = reminders + state.pendingCommitments.map(String::trim).filter(String::isNotEmpty)
         if (promises.isNotEmpty()) out += MindCard.Promises(promises)
         needs(state)?.let(out::add)
         if (state.projects.isNotEmpty()) {
@@ -210,9 +226,14 @@ object MindCards {
     }
 
     /** `next_run_at` arrive en ISO (avec ou sans décalage) ; illisible → rien plutôt qu'une date fausse. */
-    fun formatNextRun(raw: String?, zone: ZoneId): String? {
+    fun formatNextRun(raw: String?, zone: ZoneId): String? = instantOf(raw, zone)?.let { NEXT_RUN.format(it.atZone(zone)) }
+
+    /** L'heure d'un rappel (« jeudi 9 octobre à 09:00 »), lue comme `next_run_at` ; illisible → rien. */
+    fun formatDue(raw: String?, zone: ZoneId): String? = instantOf(raw, zone)?.let { DUE.format(it.atZone(zone)) }
+
+    private fun instantOf(raw: String?, zone: ZoneId): Instant? {
         val value = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val instant = try {
+        return try {
             OffsetDateTime.parse(value).toInstant()
         } catch (_: DateTimeParseException) {
             try {
@@ -221,11 +242,10 @@ object MindCards {
                 try {
                     LocalDateTime.parse(value).atZone(zone).toInstant()
                 } catch (_: DateTimeParseException) {
-                    return null
+                    null
                 }
             }
         }
-        return NEXT_RUN.format(instant.atZone(zone))
     }
 
     /** « Mis à jour à l'instant », « … il y a 3 min », « … il y a 2 h », « … il y a 4 j ». */

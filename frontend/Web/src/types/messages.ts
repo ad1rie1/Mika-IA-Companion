@@ -172,9 +172,22 @@ export interface InnerState {
   };
   pending_commitments?: string[];
   /**
+   * Ses rappels encore à dire à cette personne, du plus proche au plus
+   * lointain (`app/mindport.py::_goals`) : une promesse devenue rappel reste
+   * à l'écran, un rappel dit disparaît. `due` : ISO à l'heure locale, ou null.
+   */
+  reminders?: Array<{ text: string; due: string | null }>;
+  /**
+   * Ce qu'elle a en train et que cette personne peut entendre (au plus
+   * deux) : son titre, dans ses mots à elle. `kind` : `musing` (une
+   * rêverie), `reflection` (elle repense à quelque chose), `exploration`
+   * (elle va voir ailleurs) — un autre se montre sans étiquette.
+   */
+  doing?: Array<{ text: string; kind: string }>;
+  /**
    * Whether this payload was collected *for* an identifiable person, and so
-   * whether `identity` / `person_profile` / `pending_commitments` are
-   * authoritative. A section with nothing to report is omitted from the
+   * whether `identity` / `person_profile` / `pending_commitments` /
+   * `reminders` / `doing` are authoritative. A section with nothing to report is omitted from the
    * payload, so without this flag "she knows nothing about you" and "this
    * frame is not about anyone" look the same — and a panel that clears what
    * it is handed nothing for lost the identity block on every sleep-phase

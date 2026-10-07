@@ -98,6 +98,7 @@
     <string name="mind_esteem">Estime de soi</string>
     <string name="mind_esteem_meter">Confiance en elle</string>
     <string name="mind_thoughts">Elle repense à…</string>
+    <string name="mind_doing">En ce moment</string>
     <string name="mind_dream">Rêve de cette nuit</string>
     <string name="mind_vividness">netteté %1$d %%</string>
     <string name="mind_dream_recalled">✓ évoqué</string>
