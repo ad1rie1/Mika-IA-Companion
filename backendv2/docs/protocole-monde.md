@@ -4,8 +4,31 @@ Ce document est pour qui écrit un client du monde : le moteur de jeu (Unity), l
 outil de création. La décision et ses raisons sont dans l'[ADR 0050](adr/0050-le-monde.md) ; les types font foi
 dans [`contracts/world.py`](../src/mika/contracts/world.py) (le monde) et
 [`adapters/world/protocol.py`](../src/mika/adapters/world/protocol.py) (les trames). Chaque exemple JSON de ce
-document est validé par les tests (`tests/protocol/test_world_wire.py`) : il ne peut pas vieillir sans qu'un
-test le dise.
+document est validé par les tests (`tests/protocol/test_world_wire.py`) : sa **forme** ne peut pas vieillir sans
+qu'un test le dise. Ce que le noyau en fait aujourd'hui, c'est la section suivante qui le dit.
+
+## Ce que ce noyau sert aujourd'hui
+
+Ce document décrit le protocole entier ; le noyau le sert par étapes (ADR 0050 § 11 et 12, ADR 0051 : P2
+l'adaptateur, P4 les personnes, P5 le créateur). Toute trame de ce document se lit et respecte le schéma, mais
+ce que ce noyau ne sait pas encore faire répond `unsupported`, et rien ne change :
+
+| Trame du client | Ce que ce noyau en fait |
+|---|---|
+| `hello`, `sync`, `ping`, `pose` | servis (la pose est relayée aux autres clients) |
+| `report` `finished` | servi : le noyau conclut l'action (`done`), ou ne change que ce qui est vrai (`failed`) |
+| `report` `progress`, `loaded` | acceptés, rien d'écrit (le dernier `loaded` de l'hôte est gardé pour la console) |
+| `report` `settled`, `npc`, `sound` | pas encore : `unsupported` — un objet que la physique a déplacé reste, pour le noyau, où il était |
+| `edit` | servi pour les objets, les archétypes, la position et l'orientation d'un lieu qui existe ; le reste `unsupported` (P5, § 8) |
+| `describe` | pas encore (P5) : `unsupported` |
+| `moved`, `act`, `answer`, `address` porteur d'une demande | pas encore (P4) : `unsupported` |
+| `address` porteur d'un geste | validé, mais il faut être dans le monde et personne n'y entre encore : `unknown` (P4) |
+
+Ce noyau n'envoie pas encore `presence`, `request` ni `request_end` (P4). Pas encore non plus : les baux qui
+réservent ce qu'elle va prendre ou occuper (la revalidation à la conclusion en tient lieu), et une action qui
+attend son réveil — endormie, ses outils refusent tout de suite, et le refus `asleep` n'est jamais émis. Les §§ 5
+à 9 le rappellent là où ils le décrivent. Un client peut s'écrire sur le protocole entier, mais il lit le `result`
+de chaque commande et ne compte sur une trame qu'une fois servie : `unsupported` veut dire « pas encore ».
 
 ## 1. Qui fait quoi
 
@@ -161,18 +184,18 @@ répond :
 
 puis, dans cet ordre : `definition` si le client n'a pas la révision `rev` (la définition entière) ;
 `snapshot` si `after` est absent ou trop loin (ou si la définition vient de partir : une autre révision, c'est
-un autre état), sinon les trames manquées depuis `after` ; `host` si le client a demandé le rôle d'hôte ; enfin
-`presence` de la personne qui vient d'entrer (son corps apparaît au lieu `spawn` de la pièce où Mika se trouve,
-ou à défaut au premier lieu `spawn` — P4). `welcome.seq` est le dernier événement qui a changé le monde : un
-client à jour (`after` égal) ne reçoit rien de plus.
+un autre état), sinon les trames manquées depuis `after` ; `host` si le client a demandé le rôle d'hôte ; enfin,
+avec P4 (ce noyau ne l'envoie pas encore), `presence` de la personne qui vient d'entrer (son corps apparaîtra au
+lieu `spawn` de la pièce où Mika se trouve, ou à défaut au premier lieu `spawn`). `welcome.seq` est le dernier
+événement qui a changé le monde : un client à jour (`after` égal) ne reçoit rien de plus.
 
 **Les rôles.**
 
 | Rôle | Qui | Ce qu'il permet |
 |---|---|---|
-| `viewer` | tout compte autorisé à parler avec elle | montrer le monde ; `act`, `moved`, `address`, `answer`, `pose` pour le corps de la personne |
+| `viewer` | tout compte autorisé à parler avec elle | montrer le monde ; `act`, `moved`, `address`, `answer`, `pose` pour le corps de la personne (P4 : seule `pose` est servie) |
 | `host` | un compte opérateur, un seul client à la fois | en plus : jouer les actions (`intent`), constater (`report`) |
-| `creator` | un compte opérateur | `edit`, `describe` |
+| `creator` | un compte opérateur | `edit` (en partie), `describe` (P5) |
 
 **Le bail d'hôte.** Accordé au premier client qui le demande et y a droit, pour `ttl_ms` (15 s), renouvelé
 par chaque `ping` (toutes les 5 s). Un hôte qui se tait perd le bail ; le suivant qui le demande l'obtient.
@@ -226,7 +249,8 @@ l'ouverture (1008).
 
 Elle décide en conversation ou d'elle-même (« attends, je vais chercher mon livre »). Le noyau valide (le livre
 existe, il se porte, elle a une main libre, personne ne le tient), **planifie** les pas (se lever, marcher,
-prendre) avec leurs durées nominales, réserve ce qu'elle va prendre ou occuper, et diffuse :
+prendre) avec leurs durées nominales, et diffuse (réserver ce qu'elle va prendre ou occuper attend les baux,
+pas encore faits : d'ici là, le noyau revalide en concluant) :
 
 ```json serveur
 {"type": "intent", "seq": 1545, "intent": {"id": "i-1545", "actor": "mika",
@@ -267,8 +291,9 @@ prendre) avec leurs durées nominales, réserve ce qu'elle va prendre ou occuper
 ```
 
 - **Sans hôte**, l'action se termine comme prévu à `deadline` (`eta` plus une marge).
-- **Une nouvelle action interrompt la précédente** (`outcome: interrupted`) et repart d'où elle est ; une
-  action demandée pendant qu'elle dort attend son réveil, sauf aller au lit.
+- **Une nouvelle action interrompt la précédente** (`outcome: interrupted`) et repart d'où elle est. Endormie,
+  elle n'agit pas : ses outils refusent tout de suite (qu'une action attende son réveil, avec le refus `asleep`,
+  n'est pas encore fait) ; seul le réflexe du coucher la mène au lit.
 
 Les **réflexes** sont des actions du noyau (`cause.source: reflex`) : elle s'endort → elle va au lieu `sleep`
 et s'allonge ; elle se réveille → elle s'assied au bord ; elle travaille sur un projet → elle va au lieu
@@ -277,6 +302,11 @@ porte le même `seq` que l'endormissement, et un client qui les reçoit ensemble
 les yeux ouverts, puis s'endormir allongée — il ne doit pas l'endormir avant la fin du trajet.
 
 ## 7. Les joueuses agissent
+
+**Pas encore servi (P4).** Ce noyau ne fait entrer personne dans le monde : `moved`, `act`, `answer` et les
+demandes répondent `unsupported`, un geste `unknown` (« Tu n'es pas dans le monde »), et ni `presence`, ni
+`request`, ni `request_end` ne partent. Seule la pose est déjà relayée. Cette section décrit le protocole tel
+qu'il sera servi.
 
 Le corps d'une personne est piloté par son client : il marche librement (et relaie sa pose), et dit au noyau
 où il **arrive** :
@@ -407,6 +437,10 @@ Un constat est validé comme une action : un objet ne « tombe » que dans la pi
 par quelqu'un ne se pose pas tout seul, un personnage ne traverse pas un mur sans passage. Sinon :
 `implausible`, et rien ne change.
 
+Ce noyau ne sert encore que `finished` (§ 6), `progress` et `loaded` : `settled`, `npc` et `sound` répondent
+`unsupported`, et rien ne change — un objet tombé ne rejoint pas l'état du monde, et l'hôte ne doit pas le
+croire.
+
 **Éditer** (créateur). Un lot de changements sur la révision qu'on a lue (`base`) ; tout le lot passe ou rien :
 
 ```json client
@@ -431,7 +465,8 @@ plus là — comme elle remarquerait qu'on a touché à ses affaires.
 
 Ce noyau sait éditer les objets, les archétypes, et la position (`pos`) ou l'orientation (`facing`) d'un lieu
 qui existe. Ajouter, retirer ou redéfinir autrement une pièce, un lieu ou un personnage répond `unsupported`
-(ce qu'elle peut nommer avec ses outils ne suit pas encore une édition), et rien ne change.
+(ce qu'elle peut nommer avec ses outils ne suit pas encore une édition), et rien ne change. La prose
+(`describe`) attend P5 : elle répond `unsupported` elle aussi.
 
 ## 9. Refus et erreurs
 
@@ -444,13 +479,13 @@ qui existe. Ajouter, retirer ou redéfinir autrement une pièce, un lieu ou un p
 | `held_by_other` | quelqu'un d'autre le tient : on demande |
 | `forbidden` | l'accès de l'objet ne le permet pas à cette personne |
 | `wrong_state` / `wrong_posture` | déjà allumée, pas ouverte ; il faut être debout |
-| `asleep` | elle dort : ce qu'on lui demande attend son réveil |
+| `asleep` | elle dort : ce qu'on lui demande attendra son réveil (réservé : pas encore émis) |
 | `stale` | décidé sur un état ou une révision qui a changé depuis |
 | `incoherent` | l'édition rendrait le monde incohérent |
 | `implausible` | un constat que les règles du monde n'admettent pas |
 | `not_host` / `not_creator` | le rôle manque |
 | `rate_limited` | trop de commandes |
-| `unsupported` | ce noyau ne sait pas encore faire ça (une commande d'une version plus récente du protocole) |
+| `unsupported` | ce noyau ne sait pas encore faire ça : une étape du protocole qu'il ne sert pas encore (P4, P5 — voir « Ce que ce noyau sert aujourd'hui ») ; rien n'a changé. Une trame d'un type inconnu, elle, reçoit l'erreur `bad_frame` |
 
 Une trame illisible ou interdite reçoit une erreur de protocole (`fatal` : la connexion se ferme) :
 
@@ -482,7 +517,8 @@ et donne les classes C# (NJsonSchema, quicktype) ou TypeScript.
    l'objet, l'objet va à la main, puis à sa place de surface), `progress` à chaque pas, `finished` à la fin.
 4. Appliquer `delta`, `intent_end`, `request_end` dans l'ordre des `seq` : ils font foi, même s'ils
    contredisent ce que la physique montrait.
-5. Constater (`settled`, `npc`, `sound`) seulement ce qui change l'état discret, jamais une trajectoire.
+5. Constater (`settled`, `npc`, `sound`) seulement ce qui change l'état discret, jamais une trajectoire — et
+   lire le `result` : ce noyau répond encore `unsupported` à ces trois-là.
 6. Renouveler le bail (`ping` toutes les 5 s).
 
 Un écran simple (le client web) n'a que le rôle `viewer` : il montre ce qu'il sait montrer et **ignore sans

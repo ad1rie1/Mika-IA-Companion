@@ -25,6 +25,7 @@ namespace Mika.World.Engine
         readonly Dictionary<WorldObject, float> _restingSince = new Dictionary<WorldObject, float>();
         long _loadedRev = -1;
         bool _builtHooked;
+        bool _settledUnsupported;
 
         public bool Active => _session != null && _session.IsHost;
 
@@ -39,7 +40,9 @@ namespace Mika.World.Engine
             }
             session.HostChanged += host =>
             {
-                if (host) _loadedRev = -1;
+                if (!host) return;
+                _loadedRev = -1;
+                _settledUnsupported = false; // un nouveau bail, peut-être un autre noyau : il peut le servir
             };
         }
 
@@ -86,6 +89,7 @@ namespace Mika.World.Engine
         /// <summary>Un objet libre (tombé, poussé) qui s'arrête près d'un autre lieu : le constater.</summary>
         void WatchFreeObjects()
         {
+            if (_settledUnsupported) return;
             foreach (var kv in stage.Objects)
             {
                 var view = kv.Value;
@@ -106,11 +110,27 @@ namespace Mika.World.Engine
                 var known = state?.Location as InRoom;
                 var place = stage.NearestPlace(view.transform.position, known?.Room);
                 if (place == null || (known != null && known.Near == place.Id)) continue;
-                _ = _session.Command(new Report
-                {
-                    ReportValue = new Settled { Object = kv.Key, To = new InRoom { Room = place.Room.Id, Near = place.Id } },
-                });
+                ReportSettled(kv.Key, new InRoom { Room = place.Room.Id, Near = place.Id });
             }
+        }
+
+        /// <summary>
+        /// Le constat d'un objet posé, et ce qu'en dit le noyau. Tant qu'il ne sert pas <c>settled</c>
+        /// (<c>unsupported</c>, protocole-monde.md), l'objet reste pour lui où il était : le dire une fois, et ne
+        /// plus constater jusqu'au prochain bail.
+        /// </summary>
+        async void ReportSettled(string objectId, InRoom to)
+        {
+            var result = await _session.Command(new Report { ReportValue = new Settled { Object = objectId, To = to } });
+            if (result.Status != Status.Refused) return;
+            if (result.Code == Refusal.Unsupported)
+            {
+                if (_settledUnsupported) return;
+                _settledUnsupported = true;
+                Debug.LogWarning($"[Mika] ce noyau ne sert pas encore « settled » : {objectId} reste pour lui où il était — {result.Message}");
+                return;
+            }
+            Debug.LogWarning($"[Mika] le noyau refuse le constat de {objectId} : {result.Code} — {result.Message}");
         }
     }
 }
