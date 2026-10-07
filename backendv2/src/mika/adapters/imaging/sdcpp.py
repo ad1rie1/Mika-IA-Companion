@@ -13,7 +13,9 @@ d'OpenAI ; l'API native est préférée parce qu'elle dit tout explicitement :
   suit la proportion (multiples de 64) ; prompt négatif, graine et images de
   référence (retouche) passent tels quels ;
 - **aucun paramètre caché** : l'API native ne lit rien dans le prompt (seules
-  les API de compatibilité le font) ; aucune métadonnée dans le PNG
+  les API de compatibilité le font), et le prompt comme le prompt négatif
+  passent quand même par ``clean_prompt`` — la garantie ne dépend pas de la
+  version du serveur ; aucune métadonnée dans le PNG
   (``embed_image_metadata`` faux : le prompt ne voyage pas avec l'image) ;
 - un fond transparent se demande par le prompt, dans la forme que recommande
   Qwen-Image 2.1.
@@ -34,7 +36,7 @@ from typing import Any
 import httpx
 
 from mika.adapters.imaging.errors import ImagingError
-from mika.adapters.imaging.openai_images import is_loopback
+from mika.adapters.imaging.openai_images import clean_prompt, is_loopback
 from mika.adapters.imaging.sizes import dimensions, pixels, sniff
 from mika.ports.imaging import MAX_IMAGE_BYTES, OK, ImageCaps, ImageRequest, ImageResult, Picture
 
@@ -76,8 +78,9 @@ class SdCppBackend:
 
     def body(self, req: ImageRequest) -> dict[str, Any]:
         w, h = pixels(req.aspect, req.quality)
-        prompt = TRANSPARENT.format(prompt=req.prompt.strip().rstrip(".")) if req.transparent else req.prompt
-        return {"prompt": prompt, "negative_prompt": req.negative, "width": w, "height": h,
+        text = clean_prompt(req.prompt)
+        prompt = TRANSPARENT.format(prompt=text.strip().rstrip(".")) if req.transparent else text
+        return {"prompt": prompt, "negative_prompt": clean_prompt(req.negative), "width": w, "height": h,
                 "seed": req.seed if req.seed is not None else -1, "batch_count": 1,
                 "ref_images": [base64.b64encode(p.data).decode() for p in req.refs],
                 "sample_params": {"sample_steps": self.steps.get(req.quality, self.steps["normal"])},

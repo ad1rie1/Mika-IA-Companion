@@ -44,7 +44,9 @@ l'autre par une adresse qui expire. Sans abstraction, chaque fournisseur aurait 
    génération commencée va au bout), des pas par qualité (16 / 25 / 40, réglables : en dessous de 25, la grille
    fine de Qwen-Image 2.1 sous stable-diffusion.cpp revient), prompt négatif, graine, images
    de référence (retouche, quatre au plus), aucune métadonnée dans le PNG, un fond transparent demandé dans la forme
-   que recommande Qwen-Image 2.1. D'autres (Gemini) s'ajoutent par un adaptateur chacun.
+   que recommande Qwen-Image 2.1. L'API native ne lit pas de paramètres cachés, mais le prompt et le prompt négatif
+   passent quand même par `clean_prompt` : la garantie ne dépend pas de la version de `sd-server`. D'autres (Gemini)
+   s'ajoutent par un adaptateur chacun.
 6. *Le serveur local est un paquet autonome hors de backendv2* (`services/mika-images/`, sans Python) :
    `sd-server` de stable-diffusion.cpp en construction Vulkan épinglée (aucune compilation, ni CUDA ni torch), les
    poids de Qwen-Image 2.1 et de son encodeur Qwen3-VL 8B en Q8_0 (Q4_K_M en variante plus rapide) et de son VAE
