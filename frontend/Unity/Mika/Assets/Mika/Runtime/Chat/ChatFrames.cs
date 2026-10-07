@@ -125,6 +125,11 @@ namespace Mika.Chat
     {
         [JsonProperty("client_msg_id")] public string ClientMsgId;
         [JsonProperty("status")] public string Status;
+        /// <summary>
+        /// Pour <c>no_reply</c>, pourquoi la réponse ne viendra pas : <c>no_model</c>, <c>unreachable</c>,
+        /// <c>timeout</c>, <c>too_late</c> ou <c>error</c> (<c>backendv2/docs/protocole-chat.md</c> §4).
+        /// </summary>
+        [JsonProperty("reason")] public string Reason;
     }
 
     public sealed class HistoryItem

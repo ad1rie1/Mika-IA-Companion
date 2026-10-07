@@ -40,6 +40,10 @@ namespace Mika.UI
         readonly System.Collections.Generic.HashSet<long> _shown = new System.Collections.Generic.HashSet<long>();
         // Les bulles de la joueuse qui attendent leur accusé (par identifiant client) : un refus s'y lit.
         readonly Dictionary<string, Label> _unacked = new Dictionary<string, Label>();
+        // Les identifiants de ses propres messages (les derniers seulement) : le serveur annonce le sort d'une question
+        // à toutes les connexions de la personne, et celle posée depuis son téléphone ou le web n'est pas la sienne.
+        readonly List<string> _mine = new List<string>();
+        const int MineMax = 64;
         bool _interactorBound;
         // Sous le fil, ce qui se passe de son côté (comme le web et Android) : « Mika réfléchit… » entre l'accusé et
         // sa réponse, plafonné ; ou sa note de sommeil, jusqu'à ce qu'elle reparle.
@@ -357,6 +361,8 @@ namespace Mika.UI
                 if (text.Length > 0 && _chat != null)
                 {
                     var id = _chat.Send(text);
+                    _mine.Add(id);
+                    if (_mine.Count > MineMax) _mine.RemoveAt(0);
                     var line = AddLine(text, mika: false);
                     if (line != null) _unacked[id] = line;
                     if (_chat.State != LinkState.Online && _chat.State != LinkState.Refused)
@@ -369,6 +375,9 @@ namespace Mika.UI
 
         void OnSpeech(SpeechFrame s)
         {
+            // Une trame sans texte ne parle que du message qu'elle désigne (son silence, son sommeil, le prélude d'une
+            // réponse impossible) : celle d'une question posée depuis un autre appareil ne dit rien de la sienne.
+            if (string.IsNullOrEmpty(s.Text) && s.ClientMsgId != null && !_mine.Contains(s.ClientMsgId)) return;
             // Toute trame de parole clôt « Mika réfléchit… », un silence aussi : se taire est une issue valide. La
             // note de sommeil, elle, survit à un murmure à elle-même — ce n'est pas encore sa réponse.
             if (!s.Inner || !_asleep) HideWaiting();
@@ -414,18 +423,20 @@ namespace Mika.UI
         /// <summary>
         /// Le sort d'un message de la joueuse (<c>backendv2/docs/protocole-chat.md</c>) : <c>accepted</c> le dit reçu
         /// (« Mika réfléchit… » jusqu'à sa réponse), <c>no_reply</c> dit qu'une question reçue restera sans réponse,
-        /// tout autre statut est un refus.
+        /// tout autre statut est un refus. Un accusé se rattache d'abord à son message : celui d'une question posée
+        /// depuis un autre appareil ne dit rien de la sienne.
         /// </summary>
         void OnAck(AckFrame a)
         {
+            if (a.ClientMsgId == null || !_mine.Contains(a.ClientMsgId)) return;
             if (a.Status == "no_reply")
             {
                 // La réponse ne viendra pas : ni « réfléchit… », ni la promesse d'une réponse au réveil.
                 HideWaiting();
-                Toast("Mika n'a pas pu répondre — réessaie.");
+                Toast(NoReplyNote(a.Reason));
                 return;
             }
-            if (a.ClientMsgId == null || !_unacked.TryGetValue(a.ClientMsgId, out var line)) return;
+            if (!_unacked.TryGetValue(a.ClientMsgId, out var line)) return;
             _unacked.Remove(a.ClientMsgId);
             if (a.Status == "accepted")
             {
@@ -451,6 +462,14 @@ namespace Mika.UI
             line.text += $"  — non envoyé ({why})";
             line.AddToClassList("refused");
         }
+
+        /// <summary>
+        /// Pourquoi la réponse ne viendra pas, dans les mots du web et d'Android (<c>noReplyNote</c>) : une question
+        /// reprise trop tard se redit, une panne se réessaie.
+        /// </summary>
+        static string NoReplyNote(string reason) => reason == "too_late"
+            ? "Mika n'a pas pu répondre à temps — redis-le-lui si c'est encore d'actualité."
+            : "Mika n'a pas pu répondre — réessaie.";
 
         /// <summary>Sous le fil : « Mika réfléchit… » (plafonné), ou sa note de sommeil (jusqu'à ce qu'elle reparle).</summary>
         void ShowWaiting(bool asleep)
