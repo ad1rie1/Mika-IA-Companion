@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from twin.replay.assemble import ArchiveItems, assemble_extraction, tokens_of, window_seqs
+pytest.importorskip("mika")  # la requête se lit dans la voix du moteur (``mika.vocab.phrasebook``)
+
+from twin.replay.assemble import ArchiveItems, assemble_extraction, tokens_of, window_seqs  # noqa: E402
 
 WINDOW_1 = """Aujourd'hui : mardi 12 mars 2019, 14 h 30.
 Conversation privée avec Julie Martin [P1].

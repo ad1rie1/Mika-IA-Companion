@@ -25,11 +25,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from mika.vocab.phrasebook import phrase
+
 #: ce que ``mika.faculties.memory.extraction.parse`` garde au plus par appel
 CAPS = {"souvenirs": 12, "croyances": 20, "promesses": 6, "evenements": 8}
 _SEQ = re.compile(r"^\[#(\d+)\]", re.M)
-#: « Conversation privée avec Julie Martin [P1]. » / « Un salon de groupe (…) : A [P1], B [P2]. »
-_HEADER = re.compile(r"^(?:Conversation privée avec |Un salon de groupe[^:]*: )(.+?)\.?$", re.M)
+#: les en-têtes « Conversation privée avec Julie Martin [P1]. » / « Un salon de groupe (…) : A [P1], B [P2]. »,
+#: dans la voix du moteur (``memory.extraction.render.<clé>``, trou ``{who}``)
+_HEADERS = ("private", "room")
 _TOKENED = re.compile(r"^\s*(.+?) \[P(\d+)\]\s*$")
 #: « [#812] 14:06 Julie Martin [P1] : … »
 _LINE = re.compile(r"^\[#\d+\] \d{1,2}:\d{2} (.+?) \[P(\d+)\]", re.M)
@@ -55,21 +58,35 @@ class ArchiveItems:
                     self.by_anchor[anchor].append((kind, dict(item)))
 
 
+def voice_pattern(key: str, hole: str) -> str:
+    """Le motif d'une phrase à un trou de la voix du moteur (``voix.yaml``, ou celle du jumeau par ``MIKA_VOIX``) :
+    sa partie fixe échappée, le trou ``hole`` devenu le groupe ``(.+?)``. La consigne se reconnaît à la voix lue,
+    jamais à une tournure recopiée : la changer dans le fichier ne la perd pas."""
+    mark = "\x00"
+    before, _, after = phrase(key, **{hole: mark}).partition(mark)
+    return f"{re.escape(before)}(.+?){re.escape(after)}"
+
+
 def tokens_of(request_text: str) -> dict[str, str]:
     """Nom affiché → jeton (« Julie Martin » → « P1 ») d'après la conversation montrée."""
     out: dict[str, str] = {}
-    for header in _HEADER.findall(request_text):
-        for part in header.split(", "):
-            m = _TOKENED.match(part)
-            if m:
-                out[m.group(1).strip()] = f"P{m.group(2)}"
+    for key in _HEADERS:
+        header_re = re.compile(f"^{voice_pattern(f'memory.extraction.render.{key}', 'who')}$", re.M)
+        for header in header_re.findall(request_text):
+            for part in header.split(", "):
+                m = _TOKENED.match(part)
+                if m:
+                    out[m.group(1).strip()] = f"P{m.group(2)}"
     for name, n in _LINE.findall(request_text):
         out.setdefault(name.strip(), f"P{n}")
     return out
 
 
 def window_seqs(request_text: str) -> list[int]:
-    return [int(x) for x in _SEQ.findall(request_text.split("Les messages :", 1)[-1])]
+    """Les ``seq`` des messages de la fenêtre : ce qui suit la ligne d'en-tête des messages (jamais les ``[#id]`` des
+    croyances, promesses et situations listées avant)."""
+    messages = re.compile(f"^{re.escape(phrase('memory.extraction.render.messages'))}$", re.M)
+    return [int(x) for x in _SEQ.findall(messages.split(request_text, maxsplit=1)[-1])]
 
 
 def assemble_extraction(request_text: str, archive_of_seq: Mapping[int, Sequence[int]], items: ArchiveItems,
