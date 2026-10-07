@@ -30,8 +30,10 @@ from functools import lru_cache
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from mika.faculties.social.profile import XProfile
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.vocab.phrasebook import family
+from pydantic import ValidationError
 
 from twin.corpus import Corpus
 from twin.passes.synth import real_dreams
@@ -183,6 +185,12 @@ class ReplayLLM:
             self.holes["profile:sans profil"] += 1
             return LLMResponse(SILENCE, model=self.model)
         args = {k: data.get(k) for k in ("resume", "ton", "interets", "sujets_sensibles")}
+        try:
+            XProfile.model_validate(args)
+        except ValidationError:
+            # le moteur la jetterait sans bruit (la fiche d'avant reste) : « refusé » n'est pas « sans profil »
+            self.holes["profile:refusé par le moteur"] += 1
+            return LLMResponse(SILENCE, model=self.model)
         return LLMResponse("", tool_calls=(ToolCall(f"{req.call_id}:p", PROFILE_TOOL, args),), stop="tool_use",
                            model=self.model)
 
