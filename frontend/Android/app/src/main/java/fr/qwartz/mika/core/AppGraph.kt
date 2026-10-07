@@ -170,9 +170,15 @@ class AppGraph(context: Context) {
         },
     )
 
-    /** Le client HTTP des fichiers de Mika : le jeton seulement vers son serveur. */
+    /**
+     * Le client HTTP des fichiers de Mika : le jeton seulement vers son serveur. Pas de délai global :
+     * un fichier va jusqu'à `MikaProtocol.MAX_SHARE_BYTES`, et 60 s n'en portent pas 10 Mio sur une 4G
+     * faible — chaque essai repartait de zéro et échouait pareil. Le délai par lecture (30 s, hérité)
+     * suffit à juger une liaison morte.
+     */
     val filesHttp: OkHttpClient by lazy {
         http.newBuilder()
+            .callTimeout(0, TimeUnit.MILLISECONDS)
             .addInterceptor(BearerInterceptor { auth.credentials()?.let { it.base to it.token } })
             .build()
     }
