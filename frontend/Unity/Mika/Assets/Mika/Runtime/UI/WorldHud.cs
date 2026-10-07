@@ -375,6 +375,9 @@ namespace Mika.UI
 
         void OnSpeech(SpeechFrame s)
         {
+            // Une trame sans texte ne parle que du message qu'elle désigne (son silence, son sommeil, le prélude d'une
+            // réponse impossible) : celle d'une question posée depuis un autre appareil ne dit rien de la sienne.
+            if (string.IsNullOrEmpty(s.Text) && s.ClientMsgId != null && !_mine.Contains(s.ClientMsgId)) return;
             // Toute trame de parole clôt « Mika réfléchit… », un silence aussi : se taire est une issue valide. La
             // note de sommeil, elle, survit à un murmure à elle-même — ce n'est pas encore sa réponse.
             if (!s.Inner || !_asleep) HideWaiting();
