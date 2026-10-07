@@ -3,6 +3,7 @@
 - chaque exemple de la spécification (``docs/protocole-monde.md``) se lit dans son sens, se réécrit à
   l'identique et respecte le schéma JSON publié — celui d'où un moteur génère ses types : la spécification ne
   peut pas vieillir sans qu'un test le dise ;
+- les types C# que Unity en génère (``WorldProtocol.g.cs``) sont à jour ;
 - chaque sorte de trame est illustrée ;
 - une trame inconnue, un champ inconnu, une trame du mauvais sens : refusés ;
 - chaque commande dit les rôles qu'elle exige et son débit ; constater est à l'hôte, éditer au créateur.
@@ -12,6 +13,8 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any, get_args
 
@@ -25,6 +28,7 @@ from mika.contracts import world as w
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = ROOT / "docs" / "protocole-monde.md"
 EXAMPLE = ROOT / "examples" / "monde" / "chambre.json"
+GENERATOR = ROOT.parent / "frontend" / "Unity" / "tools" / "gen_world_protocol.py"
 BLOCK = re.compile(r"```json (client|serveur)\n(.*?)```", re.S)
 SIDES = {"client": p.CLIENT, "serveur": p.SERVER}
 
@@ -57,6 +61,15 @@ def test_chaque_exemple_se_lit_et_se_reecrit(side: str, body: str) -> None:
 def test_chaque_exemple_respecte_le_schema_publie(side: str, body: str) -> None:
     schema = p.json_schema()["client" if side == "client" else "server"]
     jsonschema.validate(json.loads(body), schema)
+
+
+def test_les_types_generes_pour_unity_sont_a_jour() -> None:
+    """Unity lit le fil avec des types générés depuis ce schéma. Un champ du contrat qu'ils ignorent est perdu à
+    la lecture, puis effacé côté noyau au premier ``put`` du créateur, qui remplace l'élément entier."""
+    if not GENERATOR.exists():
+        pytest.skip("client Unity absent")
+    out = subprocess.run([sys.executable, str(GENERATOR), "--check"], capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout + out.stderr
 
 
 def test_chaque_sorte_de_trame_est_illustree() -> None:
