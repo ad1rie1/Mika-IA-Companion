@@ -4,6 +4,10 @@
 `ChatPrompt` (préfixe stable en cache / état volatil dans le dernier tour /
 historique en vrais messages) et les plafonds fixes posés le même jour.*
 
+> **v1 archivée (`old/backend/`).** Les chemins cités plus bas (`memory/`, `pipeline/`, `ai/`) et
+> `manage.py` sont ceux de l'ancien moteur, sous `old/backend/`. Le moteur vivant est
+> [`backendv2/`](../backendv2/README.md), décrit dans [`ARCHITECTURE.md`](../backendv2/ARCHITECTURE.md).
+
 > **État d'implémentation (2026-08-08 soir)** — le plan approuvé (voir
 > CLAUDE.md § Memory pour la carte du code) est implémenté : mémoire à
 > trois étages avec index épisodique (`memory/episodic/`), passe de
