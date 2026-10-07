@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import re
 import zoneinfo
+from collections.abc import Sequence
 from functools import cache
 from typing import TYPE_CHECKING, Annotated, Any
 from urllib.parse import urlsplit
@@ -36,7 +37,20 @@ from mika.inspector.catalog import Command, SettingsPage, SettingsSection, Setti
 from mika.inspector.pages.reglages import effect
 from mika.kernel import forms
 from mika.kernel.forms import Knob
-from mika.kernel.inspect import Badge, Column, Nav, NavItem, Note, Ref, Row, Table, Text, When
+from mika.kernel.inspect import (
+    ActionSlot,
+    Badge,
+    Column,
+    Nav,
+    NavItem,
+    Note,
+    Ref,
+    Row,
+    Table,
+    Text,
+    When,
+    int_query,
+)
 from mika.ports.imaging import DRAW
 from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
 from mika.ports.imaging import ROLES as IMAGE_ROLES
@@ -57,6 +71,10 @@ TABS = (SettingsTab("intelligence", "Intelligence"), SettingsTab("personnage", "
 ROLE_FAMILIES = {**{str(r): "voix" for r in VOICE_ROLES}, "extract": "mémoire", "validate": "mémoire",
                  "compact": "mémoire", "profile": "compréhension", "interpret": "compréhension",
                  "triage": "sens", "caption": "sens", "plan": "travail", "job": "travail"}
+
+#: une valeur d'une révision de sa persona se montre jusqu'à tant de caractères, repliée au-delà de ``REVISION_CLAMP``
+REVISION_VALUE_MAX = 2_000
+REVISION_CLAMP = 300
 
 
 @cache
@@ -317,6 +335,25 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
             raise ValueError("; ".join(problems))
         return "ok", "Retour au fichier : la persona du fichier fait foi (une révision est journalisée)."
 
+    async def back_to_revision(by: str, revision: str) -> tuple[str, str]:
+        """Revenir à une révision journalisée : le document entier, enregistré comme une saisie (validation,
+        reconfiguration, retour arrière si elle échoue). Une nouvelle révision est journalisée ; l'historique
+        ne se réécrit pas."""
+        seq = int_query(revision)
+        found = live.kernel.mind.store.get_events([seq]) if seq else []
+        if not found or found[0].type != self_c.PERSONA_REVISED.name:
+            raise ValueError("Révision introuvable : recharge la page.")
+        doc = live.kernel.mind.decode(found[0]).data.persona
+        if doc == live.persona():
+            return "info", "C'est déjà sa persona : rien n'a changé."
+        from_file = settings.persona_yaml() is None
+        problems = await save_persona(doc, by)
+        if problems:
+            raise ValueError("; ".join(problems))
+        return "ok", ("Sa persona revient à cette version (une nouvelle révision est journalisée, l'historique ne "
+                      "change pas)." + (" Elle vient désormais de la console : « Revenir au fichier » rend la main "
+                                        "au fichier." if from_file else ""))
+
     def persona_facts() -> list[tuple[str, str]]:
         if settings.persona_yaml():
             return [("Source", "la console")]
@@ -327,25 +364,36 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return [("Source", f"le fichier {live.persona_file.name}")]
 
     def revisions() -> list[Any]:
-        """Les révisions de sa persona, de la plus récente, et ce que chacune a changé."""
+        """Les révisions de sa persona, de la plus récente : ce que chacune a changé (champ par champ, avant et
+        après, dans son détail) et de quoi y revenir."""
         kernel = live.kernel
         stored = kernel.mind.store.latest([self_c.PERSONA_REVISED.name], 200)
         events = [kernel.mind.decode(e) for e in stored]
-        labels = {f.path: f.label for f in forms.describe(self_c.PersonaDoc)}
+        described = forms.describe(self_c.PersonaDoc)
+        labels = {f.path: f.label for f in described}
+        current = live.persona()
         rows = []
         for i, e in enumerate(events):
             doc = e.data.persona.model_dump(mode="json")
-            before = events[i + 1].data.persona.model_dump(mode="json") if i + 1 < len(events) else None
+            previous = events[i + 1].data.persona if i + 1 < len(events) else None
+            before = previous.model_dump(mode="json") if previous is not None else None
             if before is None:
                 changed = ["première version"]
             else:
                 changed = [labels.get(k, k) for k in doc if doc[k] != before.get(k)] or ["rien (rejournalisée)"]
+            back = Note("C'est sa persona actuelle.", "muted") if e.data.persona == current else \
+                ActionSlot("personnage.revenir", initial=(("revision", str(e.seq)),), title="Revenir à cette version",
+                           presentation="button")
             rows.append(Row((When(e.at), Text(", ".join(changed), clamp=200), Text(str(e.origin.value), "muted")),
-                            href=None))
+                            href=None, detail=(_revision_diff(described, e.data.persona, previous), back)))
+        from_file = settings.persona_yaml() is None
         return [Table((Column("quand", "fit"), "ce qui a changé", Column("origine", "fit")), tuple(rows),
                       title=f"Révisions de sa persona ({len(rows)})", empty="Aucune révision journalisée.",
                       caption="Chaque enregistrement du personnage (ou du tempérament) journalise une révision "
-                              "complète : l'ancienne se rejoue telle quelle.")]
+                              "complète : son détail montre chaque champ changé, avant et après, et « Revenir à "
+                              "cette version » la reprend entière — une nouvelle révision, l'historique ne change "
+                              "pas." + (" Sa persona vient aujourd'hui du fichier : revenir à une version la fait "
+                                        "venir de la console." if from_file else ""))]
 
     def drives() -> list[Any]:
         labels = params.slider_labels()
@@ -551,7 +599,11 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                         exclude=("temperament",), yaml=True, facts=persona_facts,
                         choices={"timezone": timezones},
                         commands=(Command("fichier", "Revenir au fichier", back_to_file, danger=True,
-                                          confirm="La persona rédigée ici sera oubliée ; le fichier fera foi."),),
+                                          confirm="La persona rédigée ici sera oubliée ; le fichier fera foi."),
+                                  Command("revenir", "Revenir à cette version", back_to_revision, argument="revision",
+                                          confirm="Sa persona reprendra cette version entière ; si elle vient du "
+                                                  "fichier, elle viendra désormais de la console. Une nouvelle "
+                                                  "révision est journalisée, l'historique ne change pas.")),
                         pages=(
                             SettingsPage("identite", "Identité",
                                          ("name", "nature", "description", "language", "timezone"), order=10,
@@ -574,7 +626,8 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             SettingsPage("document", "Import / export", order=50, form=False, yaml=True,
                                          commands=True, extra=revisions, description=(
                                              "Le personnage entier en YAML (pour le garder ou le coller d'un "
-                                             "coup), le retour au fichier, et l'historique de ses révisions.")),
+                                             "coup), le retour au fichier, et l'historique de ses révisions : ce "
+                                             "que chacune a changé, et y revenir.")),
                         )),
         SettingsSection("temperament", "Tempérament", "personnage", Temperament,
                         lambda: live.persona().temperament, save_temperament, order=110,
@@ -671,3 +724,40 @@ def _num(value: Any) -> str:
     if isinstance(value, float):
         return f"{value:.3g}".replace(".", ",")
     return str(value)
+
+
+def _revision_diff(described: Sequence[forms.FormField], doc: PersonaDoc, before: PersonaDoc | None) -> Table:
+    """Ce qu'une révision de sa persona a changé, champ par champ (``described`` : les champs de ``PersonaDoc``) :
+    la valeur d'avant, celle d'après (la plus ancienne gardée : ce qu'elle disait, sans « avant »)."""
+    after = forms.flatten(doc)
+    prior = forms.flatten(before) if before is not None else {}
+    rows = []
+    for f in described:
+        if f.kind == "group" or f.path not in after:
+            continue
+        value = after[f.path]
+        if (before is None and value in ("", ())) or (before is not None and value == prior.get(f.path)):
+            continue
+        label = f"{f.group} · {f.label}" if "." in f.path else f.label
+        rows.append((Text(label), _revision_value(f, prior.get(f.path)) if before is not None
+                     else Text("—", "muted"), _revision_value(f, value)))
+    return Table((Column("champ", "fit"), "avant", "après"), tuple(rows),
+                 title="Ce que cette révision a changé" if before is not None else "Ce que disait cette version",
+                 empty="Rien : la même persona, rejournalisée.")
+
+
+def _revision_value(f: forms.FormField, value: Any) -> Text:
+    """Une valeur d'une révision, lisible dans une cellule : une liste en phrases séparées par « · », un choix par
+    son libellé, un nombre à la française ; coupée au-delà de ``REVISION_VALUE_MAX``."""
+    if value is None or value == "" or value == ():
+        return Text("(vide)", "muted")
+    if isinstance(value, tuple | list):
+        text = " · ".join(str(v) for v in value)
+    elif isinstance(value, float):
+        text = _num(value)
+    else:
+        raw = forms.as_text(f, value)
+        text = next((label for v, label in f.choices if v == raw), raw)
+    if len(text) > REVISION_VALUE_MAX:
+        text = text[:REVISION_VALUE_MAX] + "…"
+    return Text(text, clamp=REVISION_CLAMP)

@@ -126,7 +126,7 @@
   </form>
   {% endif %}
 
-  {% if s.blocks %}<div class="stack">{{ render(s.blocks, {}) }}</div>{% endif %}
+  {% if s.blocks %}<div class="stack">{{ render(s.blocks, s.forms) }}</div>{% endif %}
   {% endif %}
 </section>
 {% endfor %}

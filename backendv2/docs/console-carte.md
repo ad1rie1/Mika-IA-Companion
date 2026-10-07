@@ -164,7 +164,7 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 | | Caractère | traits, manies, fragilités, valeurs, centres d'intérêt |
 | | Sa vie | sa vie d'IA VTuber à sa façon, ses goûts et avis, ce qui est vrai d'elle (ADR 0047) |
 | | Tempérament | les huit curseurs, l'humeur de fond, ce que pilote chaque curseur ; **Voir l'effet** (comme pour une faculté) |
-| | Import / export | le document YAML, revenir au fichier, l'historique des révisions |
+| | Import / export | le document YAML, revenir au fichier, l'historique des révisions (chacune se déplie : champ par champ, avant et après ; « Revenir à cette version » la reprend entière, une révision de plus) |
 | Canaux | Dépôts git | le jeton avec lequel ses projets poussent vers leur dépôt distant (jamais réaffiché, jamais dans le journal) |
 | Plugins | Vue d’ensemble des plugins | accès aux connexions et aux comportements ; lien vers les vues d’utilisation ; les réglages des apps restent dans la Forge |
 | | Boîtes aux lettres | liste ; chaque boîte a sa page (lire, envoyer, sa voix, initiative) |
