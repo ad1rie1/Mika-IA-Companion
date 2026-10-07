@@ -33,6 +33,8 @@ namespace Mika.World.Engine
         [Range(0, 1)] public float noise;
         [Tooltip("Clé d'animation du moteur (état de l'Animator).")]
         public string animation;
+        [Tooltip("Occupation (effet « activity ») : les besoins qu'elle nourrit chez Mika (expression, curiosity).")]
+        public List<Nourished> nourishes = new List<Nourished>();
 
         public Affordance ToDef() => new Affordance
         {
@@ -47,6 +49,7 @@ namespace Mika.World.Engine
             Access = overrideAccess ? access : (Access?)null,
             Noise = Round(noise),
             Animation = NullIfEmpty(animation),
+            Nourishes = effect == Effect.Activity ? nourishes?.ToList() ?? new List<Nourished>() : new List<Nourished>(),
         };
 
         public static AffordanceSpec From(Affordance a) => new AffordanceSpec
@@ -64,6 +67,7 @@ namespace Mika.World.Engine
             access = a.Access ?? Access.Anyone,
             noise = (float)a.Noise,
             animation = a.Animation,
+            nourishes = a.Nourishes?.ToList() ?? new List<Nourished>(),
         };
 
         internal static string NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
