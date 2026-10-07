@@ -31,11 +31,11 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
-from mika.vocab.phrasebook import family
+from mika.vocab.phrasebook import family, phrase
 
 from twin.corpus import Corpus
 from twin.passes.synth import real_dreams
-from twin.replay.assemble import ArchiveItems, assemble_extraction
+from twin.replay.assemble import ArchiveItems, assemble_extraction, voice_pattern
 from twin.timing import from_us, to_us
 
 SILENCE = "[SILENCE]"
@@ -282,8 +282,10 @@ class ReplayLLM:
             "annotations WHERE session = s.id) ORDER BY s.t_point", (person, since, now)).fetchall()
         self.db.execute("INSERT OR REPLACE INTO replay_state (key, value) VALUES (?, ?)", (key, json.dumps(now)))
         text = req.messages[-1].content if req.messages else ""
-        previous = text.split("Résumé précédent :", 1)[1].split("\n\n", 1)[0].strip() \
-            if "Résumé précédent :" in text else ""
+        # le résumé précédent ouvre le message, une ligne vide avant l'en-tête des échanges (dans la voix du moteur)
+        found = re.match(voice_pattern("transcript.compact.previous", "text")
+                         + re.escape("\n\n" + phrase("transcript.compact.next")), text, re.S)
+        previous = found.group(1).strip() if found else ""
         news = " ".join(x for x in (json.loads(r["data"]).get("resume", "") for r in rows) if x)
         recent = [x for x in re.split(r"(?<=[.!?])\s+", news) if x]
         before = [x for x in re.split(r"(?<=[.!?])\s+", previous) if x]
