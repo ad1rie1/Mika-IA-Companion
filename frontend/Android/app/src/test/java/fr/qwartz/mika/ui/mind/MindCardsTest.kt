@@ -44,7 +44,7 @@ class MindCardsTest {
                 circadian = Circadian("night", 2.0, 0.2, ""),
             ),
         ).single() as MindCard.Body
-        assertEquals("endormie (rêve)", body.sleep)
+        assertEquals("sommeil paradoxal (elle rêve)", body.sleep)
         assertTrue(body.asleep)
         assertEquals(20, body.energyPct) // repli sur l'énergie du rythme
         assertEquals("sur son lit", body.place)
