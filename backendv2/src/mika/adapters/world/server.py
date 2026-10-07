@@ -40,7 +40,7 @@ from pydantic import ValidationError
 from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from mika.adapters.web.accounts import TOKEN_KEY, Account, Accounts
+from mika.adapters.web.accounts import CREDENTIAL_CHECK_S, TOKEN_KEY, Account, Accounts
 from mika.adapters.web.app import SESSION_COOKIE, bearer
 from mika.adapters.web.protocol import RateLimiter
 from mika.adapters.world import protocol as p
@@ -65,10 +65,9 @@ COMMANDS_MAX = 128
 RESULTS_KEPT = 512
 #: le délai pour la première trame (``hello``)
 HELLO_TIMEOUT_S = 10.0
-#: l'entretien : bail d'hôte, et identifiants revérifiés (un jeton révoqué par la ligne de commande, un compte
-#: désactivé par un autre processus)
+#: l'entretien : bail d'hôte, et identifiants revérifiés à chaque ``CREDENTIAL_CHECK_S`` (un jeton révoqué par la
+#: ligne de commande, un compte désactivé par un autre processus) — la cadence de ``/ws`` aussi
 TICK_S = 1.0
-CREDENTIAL_CHECK_S = 10.0
 #: les erreurs de protocole dites par seconde ; au-delà, une trame illisible est jetée sans réponse
 ERRORS_PER_S = 5
 #: les constats ``loaded`` gardés pour la console (le dernier de chaque connexion hôte)
@@ -752,15 +751,15 @@ class WorldHub:
 
     def _still_valid(self, s: WorldSession) -> bool:
         """Revérifie l'identifiant de la connexion (un jeton révoqué ailleurs, un compte désactivé ou dont les
-        droits ont changé) ; ferme si besoin."""
+        droits ont changé : la règle de ``Accounts.still_valid``, celle de ``/ws``) ; ferme si besoin."""
         if s.credential is None:
             return True
         try:
-            account = self.accounts.credential(s.credential)
+            valid = self.accounts.still_valid(s.credential, operator=s.operator)
         except Exception as exc:  # une lecture impossible ne ferme personne : on revérifiera
             log.debug("identifiant de %s illisible : %r", s.id, exc)
             return True
-        if account is None or account.operator != s.operator:
+        if not valid:
             self._unauthorized(s, "Accès révoqué, ou tes droits ont changé : reconnecte-toi.")
             return False
         return True
