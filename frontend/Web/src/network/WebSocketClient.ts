@@ -72,6 +72,17 @@ const MAX_FRAME_CHARS = 34 * 1024 * 1024;
 const MAX_OUTBOX_CHARS = 48 * 1024 * 1024;
 
 /**
+ * Au plus tant de messages partis sans accusé (`backendv2/docs/protocole-chat.md`
+ * §3 ; `MikaProtocol.MAX_IN_FLIGHT` côté Android) : le serveur refuse en
+ * `overloaded` au-delà de 8 messages en attente sur une connexion, comptés à
+ * la réception (`MAX_QUEUED_CHATS`, adapters/web/app.py). Une file rejouée
+ * d'un bloc au retour du réseau les dépassait, et les derniers revenaient
+ * refusés alors que personne ne les avait envoyés trop vite. Chaque accusé
+ * fait partir le suivant.
+ */
+const MAX_IN_FLIGHT = 4;
+
+/**
  * Sans frappe depuis tant, la personne n'écrit plus (trame `composing`) :
  * la réponse à son message d'avant n'attend pas une suite qui ne vient pas.
  */
@@ -358,6 +369,8 @@ export class WebSocketClient {
         // can never make us re-send something already delivered.
         if (data.type === "ack" && typeof data.client_msg_id === "string") {
           this.forgetUnacked(data.client_msg_id);
+          // Une place s'est libérée parmi les envois en vol : la file reprend.
+          this.flushOutbox();
         }
         this.emit(data.type, data);
       };
@@ -541,7 +554,11 @@ export class WebSocketClient {
     }
   }
 
-  /** Returns false when the frame was queued instead of sent. */
+  /**
+   * Returns false when the frame was queued instead of sent — le socket
+   * fermé, ou MAX_IN_FLIGHT messages qui attendent déjà leur accusé (il part
+   * alors au premier qui revient, derrière ceux qui attendaient avant lui).
+   */
   send(data: object): boolean {
     const payload = JSON.stringify(data);
     // Un frame que le transport refusera n'est pas un frame à mettre en file :
@@ -564,7 +581,11 @@ export class WebSocketClient {
       attempts: 0,
       chars: payload.length,
     };
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (
+      this.ws?.readyState === WebSocket.OPEN &&
+      !this.outbox.length &&
+      this.unacked.size < MAX_IN_FLIGHT
+    ) {
       this.ws.send(payload);
       this.holdUntilAck(entry);
       return true;
@@ -708,7 +729,11 @@ export class WebSocketClient {
     }
   }
 
-  /** Flush queued frames after the identify handshake. */
+  /**
+   * Flush queued frames after the identify handshake, puis à chaque accusé :
+   * jamais plus de MAX_IN_FLIGHT partis sans accusé, le reste attend son tour
+   * dans l'ordre (cf. MAX_IN_FLIGHT).
+   */
   private flushOutbox() {
     if (!this.outbox.length) return;
     const pending = this.outbox;
@@ -731,6 +756,12 @@ export class WebSocketClient {
         this.outboxChars += entry.chars;
         continue;
       }
+      if (this.unacked.size >= MAX_IN_FLIGHT) {
+        // Il n'a pas tenté de partir : aucune tentative ne lui est comptée.
+        this.outbox.push(entry);
+        this.outboxChars += entry.chars;
+        continue;
+      }
       this.ws.send(JSON.stringify(entry.frame));
       this.holdUntilAck(entry);
     }
@@ -748,7 +779,8 @@ export class WebSocketClient {
    * "queued" to "sent" and recognise its own message when the history
    * comes back — instead of painting it a second time.
    *
-   * Returns false when the frame was queued because the socket is down.
+   * Returns false when the frame was queued because the socket is down, or
+   * behind MAX_IN_FLIGHT messages still waiting for their ack.
    */
   sendChat(message: string, clientMsgId?: string): boolean {
     this.stopComposing(false); // le message clôt la saisie de lui-même

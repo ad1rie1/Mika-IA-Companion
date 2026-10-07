@@ -53,13 +53,24 @@ namespace Mika.Chat
     {
         /// <summary>Au-delà, le plus ancien message en attente est abandonné (et dit refusé, jamais perdu en silence).</summary>
         const int OutboxMax = 50;
+        /// <summary>
+        /// Au plus tant de messages partis sans accusé (<c>backendv2/docs/protocole-chat.md</c> §3 ;
+        /// <c>MikaProtocol.MAX_IN_FLIGHT</c> sur Android, <c>MAX_IN_FLIGHT</c> dans le client web) : le serveur
+        /// refuse (<c>overloaded</c>) au-delà de 8 en attente sur une connexion (adapters/web/app.py
+        /// <c>MAX_QUEUED_CHATS</c>), et une file rejouée d'un bloc à l'ouverture les dépassait. Chaque accusé fait
+        /// partir le suivant.
+        /// </summary>
+        const int MaxInFlight = 4;
 
         readonly WsChannel _channel = new WsChannel();
         readonly string _prefix = Guid.NewGuid().ToString("N").Substring(0, 6);
         // Les messages pas encore accusés, dans l'ordre d'écriture : renvoyés à chaque ouverture (le serveur
-        // dédoublonne par l'identifiant client), oubliés à leur accusé. Sans elle, un message tapé pendant une
-        // coupure s'affichait envoyé sans avoir jamais quitté le poste.
+        // dédoublonne par l'identifiant client), MaxInFlight à la fois, oubliés à leur accusé. Sans elle, un
+        // message tapé pendant une coupure s'affichait envoyé sans avoir jamais quitté le poste.
         readonly List<KeyValuePair<string, string>> _outbox = new List<KeyValuePair<string, string>>();
+        // Ceux que la connexion ouverte a déjà fait partir et dont l'accusé n'est pas revenu ; vidé à chaque
+        // ouverture (une connexion neuve n'a rien porté).
+        readonly HashSet<string> _inFlight = new HashSet<string>();
         // Les refus décidés ici (connexion refusée, file pleine) : rendus par Tick comme un accusé du serveur,
         // jamais pendant Send — l'appelant n'a pas encore l'identifiant qu'il devra reconnaître.
         readonly Queue<AckFrame> _localAcks = new Queue<AckFrame>();
@@ -132,8 +143,22 @@ namespace Mika.Chat
             }
             _outbox.Add(new KeyValuePair<string, string>(id, text));
             if (State == LinkState.Online)
-                _ = _channel.SendAsync(ChatJson.Chat(text, id));
+                FlushOutbox();
             return id;
+        }
+
+        /// <summary>
+        /// Fait partir les messages en attente, dans l'ordre, sans jamais en laisser plus de
+        /// <see cref="MaxInFlight"/> sans accusé : le suivant part à l'accusé d'un précédent.
+        /// </summary>
+        void FlushOutbox()
+        {
+            foreach (var m in _outbox)
+            {
+                if (_inFlight.Count >= MaxInFlight) return;
+                if (_inFlight.Add(m.Key))
+                    _ = _channel.SendAsync(ChatJson.Chat(m.Value, m.Key));
+            }
         }
 
         public void Tick(double nowSeconds)
@@ -153,8 +178,8 @@ namespace Mika.Chat
                         // Le serveur envoie de lui-même le début du fil à la connexion ; après une coupure, on
                         // redemande seulement ce qui a suivi le dernier message montré.
                         if (Cursor > 0) _ = _channel.SendAsync(ChatJson.Sync(Cursor));
-                        foreach (var m in _outbox)
-                            _ = _channel.SendAsync(ChatJson.Chat(m.Value, m.Key));
+                        _inFlight.Clear();
+                        FlushOutbox();
                         break;
                     case WsEventKind.Message:
                         _lastReceived = _now;
@@ -225,6 +250,9 @@ namespace Mika.Chat
                     break;
                 case AckFrame a:
                     _outbox.RemoveAll(m => m.Key == a.ClientMsgId);
+                    // Une place s'est libérée parmi les envois en vol : la file reprend.
+                    if (a.ClientMsgId != null) _inFlight.Remove(a.ClientMsgId);
+                    if (State == LinkState.Online) FlushOutbox();
                     Ack?.Invoke(a);
                     break;
                 case HistoryFrame h:
