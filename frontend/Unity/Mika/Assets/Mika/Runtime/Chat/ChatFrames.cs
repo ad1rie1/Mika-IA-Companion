@@ -146,6 +146,20 @@ namespace Mika.Chat
         [JsonProperty("messages")] public List<HistoryItem> Messages = new List<HistoryItem>();
         [JsonProperty("last_id")] public long LastId;
         [JsonProperty("truncated")] public bool Truncated;
+        /// <summary>L'empreinte de sa vie (le même journal depuis sa genèse) ; vide si le serveur ne la connaît pas.</summary>
+        [JsonProperty("life")] public string Life;
+        /// <summary>
+        /// Le curseur dépassait la tête de ce fil (une vie restaurée plus ancienne, un fil oublié) : ce fil initial
+        /// remplace ce qui est montré au lieu de s'y ajouter.
+        /// </summary>
+        [JsonProperty("reset")] public bool Reset;
+
+        /// <summary>
+        /// Ce fil vient-il d'une autre vie que <paramref name="knownLife"/> (celle de ce que l'on montre, ou d'où vient
+        /// le curseur) ? Oui quand le serveur le dit (<see cref="Reset"/>), ou quand l'empreinte diffère — une empreinte
+        /// encore inconnue comprise. Un serveur qui n'en envoie pas ne fait rien vider (<c>chatSync.ts::fromAnotherLife</c>).
+        /// </summary>
+        public bool FromAnotherLife(string knownLife) => Reset || (!string.IsNullOrEmpty(Life) && Life != knownLife);
     }
 
     /// <summary>L'état intérieur (sommeil, énergie, lieu…) : seules les clés que le moteur montre sont lues.</summary>

@@ -206,8 +206,13 @@ répondre — réessaie ».
 - `ts` en **millisecondes** depuis l'époque Unix.
 - `text` d'un message de la personne : ce qu'elle a tapé ; ses fichiers par leur nom et leur sorte (`image`,
   `audio`, `file`). Un message de Mika : sans jetons de voix ; ses fichiers comme dans `speech`.
+- Une ligne `user` que tu montres déjà — tapée sur cet appareil, pas encore rattachée à un `id` — s'**adopte** au
+  lieu de s'ajouter : la plus ancienne de tes bulles sans identifiant au même texte reçoit l'`id` de la ligne. La
+  `speech` ne rattache que le dernier message d'une rafale (`user_message_id`, `client_msg_id`) : les précédents
+  arrivent dans le `catchup` qui la précède, et une question encore sans réponse revient dans le fil d'une
+  reconnexion. Sans adoption, ils s'affichent deux fois.
 - `life` : l'empreinte de sa vie (le même journal). Si elle change, ou si `reset` est vrai, vide ce que tu montres
-  (sauf tes messages encore en partance) avant de fusionner.
+  (sauf tes messages encore en partance) avant de fusionner, et repars du `last_id` de ce fil pour ton curseur.
 - `truncated` : le rattrapage ne porte que les 200 derniers ; dis-le plutôt que de laisser croire qu'il ne manque
   rien.
 - Le curseur est le plus grand `id` **affiché** ; on ordonne par `id`, jamais par `ts`.
