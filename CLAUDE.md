@@ -20,7 +20,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `frontend/Web/`, but nothing else has changed. The v1 launcher (`run.py`) and its systemd unit (`deploy/`) were
 removed with the archive. `backendv2/` has its own service unit in `backendv2/deploy/`. One consequence to check
 before reviving v1: `old/backend/config/settings.py` derives `PROJECT_ROOT` as `BASE_DIR.parent`, which is now
-`old/` rather than the repository root, so v1 looks for `.env` and `data/` there.
+`old/` rather than the repository root, so v1 looks for `.env` and `data/` there. The root `.env.example` is
+v1's too and neither engine reads it: `backendv2/` reads no `.env` (its encryption key is `MIKA_SECRET_KEY`, else a
+`secret.key` in its data folder, see `backendv2/deploy/README.md`). `docs/gestion-*.md` and
+`docs/evolution-contexte.md` likewise describe v1.
 
 ## Slow tests (backendv2) — 2026-10-04
 
