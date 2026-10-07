@@ -290,6 +290,10 @@ parmi des types sûrs (texte, Markdown, CSV, JSON, PNG, JPEG, WebP, GIF, PDF) ; 
 
 ## 7. Derrière un mandataire
 
-Le mandataire doit laisser passer `Authorization` et `X-Mika-Presence` à la mise à niveau WebSocket, et garder la
-connexion au-delà des pings du client (`proxy_read_timeout 120s` chez nginx) : voir
-[`deploy/README.md`](../deploy/README.md).
+Le mandataire doit laisser passer `Authorization` et `X-Mika-Presence` à la mise à niveau WebSocket. La console
+passe par le même chemin, et ce sont ses bornes qui dimensionnent le mandataire, pas les pings du client (toutes les
+20 s, qu'un délai plus long tient aussi) : un corps de requête au moins égal à `kernel/forms.py::UPLOAD_MAX` (5 Mo, un
+dépôt de fichier) plus la marge du formulaire, et un délai de lecture au-dessus du plus long appel synchrone de la
+console, « Rejouer avec un autre modèle », borné par `adapters/llm/gateway.py::DEFAULT_DEADLINES["background"]`
+(300 s). Chez nginx : `client_max_body_size 6m` et `proxy_read_timeout 330s` ; voir
+[`deploy/README.md`](../deploy/README.md). Une de ces bornes qui change fait changer les deux documents.
