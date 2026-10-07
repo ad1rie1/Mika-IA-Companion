@@ -149,17 +149,21 @@ pick_module() {
 # security), ouvertes et fermées depuis DEDUP_CLOSED_DAYS jours.
 # Une ligne par issue : « #n [profil] ouverte|fermée le AAAA-MM-JJ - titre ».
 get_known_issues() {
-    local label="$1" json
+    local label="$1" json profiles
     json=$(gh_query gh issue list --state all --limit 1000 \
         --label "ai-audit" \
         --label "$label" \
         --json number,title,state,closedAt,labels) || return 1
-    jq -r --argjson days "${DEDUP_CLOSED_DAYS:-90}" '
+    # Les profils sont ceux qui existent sur disque : une liste écrite ici
+    # oubliait amelioration, et aurait oublié le suivant.
+    profiles=$(find "${PROFILES_DIR}/audit" -maxdepth 1 -name '*.md' -printf 'ai-%f\n' \
+        | sed 's/\.md$//' | jq -R . | jq -sc .)
+    jq -r --argjson days "${DEDUP_CLOSED_DAYS:-90}" --argjson profiles "$profiles" '
         (now - $days * 86400) as $since
         | .[]
         | select(.state == "OPEN"
                  or ((.closedAt // "1970-01-01T00:00:00Z") | fromdateiso8601) > $since)
-        | ([.labels[].name | select(IN("ai-bugs", "ai-quality", "ai-security", "ai-features"))][0]
+        | ([.labels[].name | select(IN($profiles[]))][0]
            // "?" | sub("^ai-"; "")) as $profile
         | "#\(.number) [\($profile)] "
           + (if .state == "OPEN" then "ouverte" else "fermée le \(.closedAt[0:10])" end)
@@ -320,26 +324,34 @@ _issue_field() {
     grep -m1 "^$2:" "$1" | sed "s/^$2: *//"
 }
 
+# Un constat de cohérence dont aucun côté ne fait foi (« arbitrage: oui ») :
+# créé sans Propose_AI_PR, un humain décide d'abord quel côté s'aligne.
+issue_needs_arbitration() {
+    [[ "$(_issue_field "$1" arbitrage | awk '{print tolower($1)}')" == oui* ]]
+}
+
 # Crée les issues GitHub d'un audit, en passant chacune au seuil de gravité
 # (AUDIT_SEVERITE_MIN) puis au filet anti-doublons (lib/dedup.py) contre
 # <pool>, la liste JSON des issues du dépôt. Écrit sur stdout
 # « créées doublons_écartés doublons_signalés sous_le_seuil ».
 #
-# En passage par groupe, <module> est vide : chaque issue retrouve son module
-# d'après ses fichiers (et garde ainsi un label de module précis), à défaut
-# elle ne porte que le label du groupe.
-#   create_github_issues <dossier> <profil> <module|""> <pool> [groupe]
+# En passage par groupe ou par axe, <module> est vide : chaque issue retrouve
+# son module d'après ses fichiers (et garde ainsi un label de module précis), à
+# défaut elle ne porte que le label du groupe, ou de l'axe.
+#   create_github_issues <dossier> <profil> <module|""> <pool> [groupe] [axe]
 create_github_issues() {
     local issues_dir="$1"
     local profile="$2"
     local module="$3"
     local pool="$4"
     local group="${5:-}"
+    local axis="${6:-}"
     local created=0 skipped=0 flagged=0 below=0
 
     ensure_label "ai-audit" "1d76db" "Issue créée par AI Pipeline (audit)"
     ensure_label "ai-${profile}" "d73a4a" "Audit IA - ${profile}"
     [[ -n "$module" ]] && group=$(module_group "$module")
+    [[ -n "$axis" ]] && ensure_label "axe:${axis}" "0e8a16" "Cohérence - $(coherence_axis_description "$axis")"
 
     # Propose_AI_PR déclenche la reprise automatique par le worker. Certains
     # profils ne doivent pas l'obtenir : une idée de fonctionnalité se décide
@@ -406,18 +418,64 @@ create_github_issues() {
                 ;;
         esac
 
+        # Une incohérence sans côté qui fasse foi ne part pas en correction
+        # automatique : le worker alignerait au hasard.
+        local arbitrate=false arbitrate_note=""
+        if [[ "$auto_pr" == true && "$profile" == "coherence" ]] && issue_needs_arbitration "$issue_file"; then
+            arbitrate=true
+            ensure_label "a-trancher" "fef2c0" "Incohérence : décider quel côté a raison avant correction"
+            arbitrate_note="> **À trancher** : les pièces citées se contredisent et rien dans le dépôt ne dit laquelle a raison. Décide-le dans un commentaire, puis retire \`a-trancher\` et ajoute \`Propose_AI_PR\` pour la faire corriger."
+            warn "À trancher (aucun côté ne fait foi) - créée sans Propose_AI_PR : ${title}" >&2
+            [[ "$d_verdict" == "flag" ]] || flagged=$((flagged + 1))
+        fi
+
         case "$severity" in
             critical|high|medium|low) ;;
             *) severity="medium" ;;
         esac
 
+        # Où ranger l'issue. Un passage par groupe la range sous le premier
+        # module que touchent ses fichiers ; un axe de cohérence, sous TOUS
+        # ceux qu'elle touche (serveur et client), pour que l'audit de chacun
+        # la retrouve parmi ses issues connues.
         local issue_module="$module" issue_group="$group"
-        if [[ -z "$issue_module" ]]; then
-            issue_module=$(module_for_files "$files")
+        local -a issue_modules=()
+        if [[ -n "$issue_module" ]]; then
+            issue_modules=("$issue_module")
+        else
+            mapfile -t issue_modules < <(modules_for_files "$files")
+            if [[ -z "$axis" && ${#issue_modules[@]} -gt 1 ]]; then
+                # Un seul module : le premier du groupe audité, à défaut le
+                # premier cité.
+                local picked="${issue_modules[0]}" cand
+                for cand in "${issue_modules[@]}"; do
+                    if [[ -n "$group" && "$(module_group "$cand")" == "$group" ]]; then
+                        picked="$cand"
+                        break
+                    fi
+                done
+                issue_modules=("$picked")
+            fi
+            issue_module="${issue_modules[0]:-}"
             [[ -n "$issue_module" ]] && issue_group=$(module_group "$issue_module")
             issue_group="${issue_group:-$group}"
         fi
-        ensure_module_labels "$issue_module" "$issue_group"
+        local -a place_labels=()
+        local -A seen_groups=()
+        local m g
+        for m in "${issue_modules[@]}"; do
+            g=$(module_group "$m")
+            ensure_module_labels "$m" "$g"
+            place_labels+=(--label "$(module_label "$m")")
+            if [[ -n "$g" && -z "${seen_groups[$g]:-}" ]]; then
+                seen_groups[$g]=1
+                place_labels+=(--label "groupe:${g}")
+            fi
+        done
+        if [[ ${#issue_modules[@]} -eq 0 && -n "$issue_group" ]]; then
+            ensure_module_labels "" "$issue_group"
+            place_labels+=(--label "groupe:${issue_group}")
+        fi
         local severity_label="severity:${severity}"
         ensure_label "${severity_label}" "fbca04" "Sévérité ${severity}"
 
@@ -432,14 +490,25 @@ create_github_issues() {
             body_footer="Proposé automatiquement par AI Pipeline ($(ai_agent_label)) - à arbitrer. Pour lancer l'implémentation, ajouter le label \`Propose_AI_PR\`."
         fi
 
+        local module_field
+        module_field=$(printf '%s, ' "${issue_modules[@]}")
+        module_field="${module_field%, }"
+        [[ -z "$module_field" && -n "$issue_group" ]] && module_field="groupe ${issue_group}"
+        module_field="${module_field:-transverse}"
+        local module_heading="Module"
+        (( ${#issue_modules[@]} > 1 )) && module_heading="Modules"
+
         local issue_body
         issue_body=$(cat <<ISSUEBODY
 ${body_heading}
 ${dup_note:+
 ${dup_note}
+}${arbitrate_note:+
+${arbitrate_note}
 }
-**Profil d'analyse** : \`${profile}\`
-**Module** : \`${issue_module:-groupe ${issue_group}}\`
+**Profil d'analyse** : \`${profile}\`${axis:+
+**Axe** : \`${axis}\`}
+**${module_heading}** : \`${module_field}\`
 ${weight_field} : \`${severity}\`
 **Fichiers concernés** : \`${files}\`
 
@@ -457,13 +526,16 @@ ISSUEBODY
             --label "ai-${profile}"
             --label "${severity_label}"
         )
-        [[ -n "$issue_module" ]] && issue_labels+=(--label "$(module_label "$issue_module")")
-        [[ -n "$issue_group" ]] && issue_labels+=(--label "groupe:${issue_group}")
+        issue_labels+=("${place_labels[@]}")
+        [[ -n "$axis" ]] && issue_labels+=(--label "axe:${axis}")
+        [[ "$arbitrate" == true ]] && issue_labels+=(--label "a-trancher")
         if [[ "$d_verdict" == "flag" ]]; then
             issue_labels+=(--label "doublon-possible")
             [[ "$auto_pr" == true ]] || issue_labels+=(--label "idee")
-        elif [[ "$auto_pr" == true ]]; then
+        elif [[ "$auto_pr" == true && "$arbitrate" == false ]]; then
             issue_labels+=(--label "Propose_AI_PR")
+        elif [[ "$auto_pr" == true ]]; then
+            :   # à trancher : ni Propose_AI_PR, ni « idee »
         else
             issue_labels+=(--label "idee")
         fi

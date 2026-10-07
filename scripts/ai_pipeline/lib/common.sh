@@ -511,18 +511,30 @@ module_for_path() {
     echo "$best"
 }
 
-# Module du premier fichier d'une liste « a.py, b/c.py » qui en a un. Les
-# suffixes « :42 » ou « (fonction) » et les accents graves sont ignorés.
-module_for_files() {
+# Les modules d'une liste de fichiers « a.py, b/c.py », un par ligne, sans
+# doublon, dans l'ordre des fichiers. Les suffixes « :42 » ou « (fonction) »
+# et les accents graves sont ignorés.
+modules_for_files() {
     local -a list=()
+    local -A seen=()
     local f m
     IFS=',' read -ra list <<< "$1"
     for f in "${list[@]}"; do
         f=$(sed 's/^[[:space:]`]*//; s/[[:space:]`]*$//' <<< "$f")
         f="${f%%[ :(]*}"
         m=$(module_for_path "$f")
-        [[ -n "$m" ]] && { echo "$m"; return 0; }
+        if [[ -n "$m" && -z "${seen[$m]:-}" ]]; then
+            seen[$m]=1
+            echo "$m"
+        fi
     done
+}
+
+# Module du premier fichier de la liste qui en a un.
+module_for_files() {
+    local all
+    all=$(modules_for_files "$1")
+    echo "${all%%$'\n'*}"
 }
 
 # Le module existe-t-il sur BASE_REF ? C'est l'état que l'agent lit dans le
@@ -543,6 +555,39 @@ audit_profile_is_proposal() {
         [[ "$1" == "$p" ]] && return 0
     done
     return 1
+}
+
+# Le profil « coherence » est transverse : il s'audite par AXE (protocoles,
+# documentation…) plutôt que par module. Les axes sont déclarés dans le profil
+# lui-même, par un marqueur `<!-- AXE:nom | description -->` en tête de leur
+# section : un axe s'ajoute ou se retire à un seul endroit.
+COHERENCE_PROFILE="${PROFILES_DIR}/audit/coherence.md"
+
+# Les axes, dans l'ordre du profil, un par ligne.
+coherence_axes() {
+    sed -n 's/^<!-- AXE:\([a-z-]*\) |.*-->$/\1/p' "$COHERENCE_PROFILE" 2>/dev/null
+}
+
+coherence_axis_description() {
+    local line
+    line=$(grep -m1 "^<!-- AXE:${1} |" "$COHERENCE_PROFILE" 2>/dev/null) || return 0
+    line="${line#*| }"
+    echo "${line% -->}"
+}
+
+coherence_axis_exists() {
+    [[ "$1" =~ ^[a-z-]+$ ]] && coherence_axes | grep -qx -- "$1"
+}
+
+# Le texte d'un profil, restreint à un axe si on en donne un (sinon avec tous
+# ses axes), sans les marqueurs. Un profil sans axe sort tel quel.
+#   profile_for_axis <fichier> [axe]
+profile_for_axis() {
+    awk -v axe="${2:-}" '
+        /^<!-- AXE:/      { inaxe = 1; keep = (axe == "" || index($0, "<!-- AXE:" axe " |") == 1); next }
+        /^<!-- FIN_AXES/  { inaxe = 0; next }
+        !inaxe || keep
+    ' "$1"
 }
 
 # Rang d'une gravité (0 si inconnue).

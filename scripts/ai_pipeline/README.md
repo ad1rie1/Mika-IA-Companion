@@ -24,11 +24,15 @@ scripts/ai_pipeline/orchestrator.sh --issue 42
 scripts/ai_pipeline/orchestrator.sh --rebase  # PR en conflit → rebase ; PR obsolètes → fermées
 scripts/ai_pipeline/triggers/manual.sh        # menu interactif
 
-scripts/ai_pipeline/audit-groupe.sh --liste                  # les groupes de modules
+scripts/ai_pipeline/audit-groupe.sh --liste                  # les groupes de modules et les axes de cohérence
 scripts/ai_pipeline/audit-groupe.sh bugs noyau relations     # un passage par module, puis un bilan
 scripts/ai_pipeline/audit-groupe.sh amelioration vie-interieure --apercu
 scripts/ai_pipeline/audit-groupe.sh bugs tout
 scripts/ai_pipeline/audit-groupe.sh bugs canaux web --un-passage   # un passage par groupe
+
+scripts/ai_pipeline/audit-groupe.sh coherence tout                 # cohérence : un passage par axe, sur tout le dépôt
+scripts/ai_pipeline/audit-groupe.sh coherence protocoles reglages --apercu
+scripts/ai_pipeline/orchestrator.sh --axe documentation
 ```
 
 Par défaut, `audit-groupe.sh` fait **un passage d'agent par module** : c'est le
@@ -74,6 +78,7 @@ Un seul pipeline à la fois : l'orchestrateur prend un verrou
 | `bugs`, `quality`, `security` | des défauts | taguées `Propose_AI_PR` : le worker les corrige |
 | `features` | de nouvelles fonctionnalités | `idee`, à arbitrer |
 | `amelioration` | comment rendre Mika plus humaine ou plus fonctionnelle, à partir de l'existant | `idee`, à arbitrer |
+| `coherence` | deux pièces du dépôt qui ne disent plus la même chose (voir ci-dessous) | `Propose_AI_PR`, sauf `a-trancher` |
 
 Pour une issue `idee` que tu veux faire réaliser, ajoute `Propose_AI_PR` à la
 main. Les profils `bugs`, `quality` et `security` ne retiennent que les
@@ -81,6 +86,43 @@ constats de gravité `medium` ou plus (`AUDIT_SEVERITE_MIN`, ou `SEVERITE=high`
 pour un passage). Chaque audit se termine par les pistes que l'agent a
 examinées puis écartées, affichées dans le terminal : un audit vide se juge
 sur elles.
+
+## Cohérence
+
+Le profil `coherence` ne cherche pas un défaut dans une pièce, mais un écart
+**entre** deux pièces : un champ que le serveur envoie et qu'Android lit sous un
+autre nom, une limite de pièce jointe qui diffère entre le web et le serveur,
+un README qui décrit une commande retirée, une émotion connue du noyau et pas
+d'Unity, un reste de Telegram. Un audit par module ne voit pas ces écarts :
+celui-ci s'audite donc par **axe**, chaque passage lisant tout le dépôt vivant
+(moteur, trois clients, extension, `INJECTION/` hors données privées, docs,
+scripts) :
+
+| Axe | Regarde |
+|---|---|
+| `protocoles` | ce que le serveur envoie et ce que chaque client lit (chat, monde 3D, Teams) |
+| `vocabulaire` | les listes fermées recopiées : émotions, lieux, phases, statuts, libellés, phrases |
+| `documentation` | README, ARCHITECTURE, ADR, `CLAUDE.md` et docs face au code |
+| `reglages` | limites, délais et seuils recopiés d'une pièce à l'autre |
+| `restes` | code mort entre pièces, références à ce qui n'existe plus, fichiers suivis par erreur |
+| `conventions` | une pièce qui fait autrement que ses sœurs, au point que ça casse ou trompe |
+
+Les axes sont déclarés dans `profiles/audit/coherence.md` lui-même (marqueurs
+`<!-- AXE:nom | description -->`) : un axe s'ajoute en y écrivant une section,
+et seul le texte de l'axe demandé est envoyé à l'agent. Lancé sur un module
+(`--profile coherence --modules …`), le profil regarde ce module face à ce
+avec quoi il échange, selon tous les axes.
+
+Chaque constat cite au moins deux pièces et dit laquelle fait foi. Quand rien
+dans le dépôt ne permet de trancher, l'agent écrit `arbitrage: oui` : l'issue
+est créée avec `a-trancher` et **sans** `Propose_AI_PR`. Décide du bon côté
+dans un commentaire, puis remplace `a-trancher` par `Propose_AI_PR`.
+
+Une issue de cohérence porte `axe:<nom>` et le label de **chaque** module
+qu'elle touche (serveur et client), pour que l'audit de chacun la retrouve.
+L'agent voit toutes les issues d'audit du dépôt, pas seulement celles de son
+axe. `run.sh` ne lance pas ce profil dans sa boucle : un passage lit tout le
+dépôt, il se déclenche à la main.
 
 ## Doublons
 

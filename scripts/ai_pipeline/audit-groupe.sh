@@ -4,6 +4,9 @@
 # ============================================================================
 # Un passage d'agent par module du groupe, l'un après l'autre, puis un bilan.
 # Les groupes sont définis dans config.sh (MODULE_GROUPS).
+# Le profil « coherence » se lance plutôt par AXE (protocoles, documentation…) :
+# un passage par axe, à travers tout le dépôt. Les axes sont déclarés dans
+# profiles/audit/coherence.md.
 #
 # Usage:
 #   scripts/ai_pipeline/audit-groupe.sh --liste
@@ -12,6 +15,8 @@
 #   scripts/ai_pipeline/audit-groupe.sh amelioration vie-interieure --apercu
 #   scripts/ai_pipeline/audit-groupe.sh bugs tout
 #   scripts/ai_pipeline/audit-groupe.sh bugs canaux web --un-passage
+#   scripts/ai_pipeline/audit-groupe.sh coherence tout          # tous les axes
+#   scripts/ai_pipeline/audit-groupe.sh coherence protocoles reglages --apercu
 #
 #   --apercu      affiche les constats sans créer d'issues
 #   --un-passage  un seul passage d'agent par groupe, au lieu d'un par module :
@@ -52,6 +57,13 @@ list_groups() {
         printf '  %-15s %2d/%-2d  %s\n' "$g" "$present" "$total" "${MODULE_GROUP_DESCRIPTIONS[$g]:-}"
     done
     echo ""
+    echo "Axes du profil coherence (un passage chacun, sur tout le dépôt) :"
+    echo ""
+    local a
+    while IFS= read -r a; do
+        printf '  %-15s %s\n' "$a" "$(coherence_axis_description "$a")"
+    done < <(coherence_axes)
+    echo ""
     echo "Profils : $(ls "${PROFILES_DIR}/audit" | sed 's/\.md$//' | tr '\n' ' ')"
 }
 
@@ -70,27 +82,53 @@ fi
 
 APERCU=false
 ONE_PASS=false
-declare -a GROUPS_ASKED=()
+declare -a GROUPS_ASKED=() AXES_ASKED=()
 for arg in "$@"; do
     case "$arg" in
         --apercu|--no-create) APERCU=true ;;
         --un-passage) ONE_PASS=true ;;
-        tout|all) GROUPS_ASKED+=("${MODULE_GROUP_ORDER[@]}") ;;
+        tout|all)
+            # Pour la cohérence, « tout », ce sont les axes : elle est
+            # transverse, la découper par module lui ferait manquer les coutures.
+            if [[ "$PROFILE" == "coherence" ]]; then
+                mapfile -t -O "${#AXES_ASKED[@]}" AXES_ASKED < <(coherence_axes)
+            else
+                GROUPS_ASKED+=("${MODULE_GROUP_ORDER[@]}")
+            fi
+            ;;
         *)
-            if [[ -z "${MODULE_GROUPS[$arg]+x}" ]]; then
+            if [[ "$PROFILE" == "coherence" ]] && coherence_axis_exists "$arg"; then
+                AXES_ASKED+=("$arg")
+            elif [[ -n "${MODULE_GROUPS[$arg]+x}" ]]; then
+                GROUPS_ASKED+=("$arg")
+            elif [[ "$PROFILE" == "coherence" ]]; then
+                err "Ni un axe ni un groupe : ${arg} (axes : $(coherence_axes | paste -sd' ' -) tout ; groupes : ${MODULE_GROUP_ORDER[*]})"
+                exit 1
+            else
                 err "Groupe inconnu : ${arg} (disponibles : ${MODULE_GROUP_ORDER[*]} tout)"
                 exit 1
             fi
-            GROUPS_ASKED+=("$arg")
             ;;
     esac
 done
-[[ ${#GROUPS_ASKED[@]} -eq 0 ]] && { err "Aucun groupe demandé"; usage 1; }
+if [[ ${#GROUPS_ASKED[@]} -eq 0 && ${#AXES_ASKED[@]} -eq 0 ]]; then
+    if [[ "$PROFILE" == "coherence" ]]; then
+        err "Aucun axe demandé (axes : $(coherence_axes | paste -sd' ' -) tout)"
+    else
+        err "Aucun groupe demandé"
+    fi
+    usage 1
+fi
 
 # Ce qu'on audite, sans doublon, dans l'ordre des groupes demandés : des
 # modules, ou des groupes entiers (« groupe:<nom> ») en --un-passage.
 declare -a MODULES_TODO=()
 declare -A SEEN=()
+for a in "${AXES_ASKED[@]}"; do
+    [[ -n "${SEEN[axe:$a]:-}" ]] && continue
+    SEEN[axe:$a]=1
+    MODULES_TODO+=("axe:$a")
+done
 for g in "${GROUPS_ASKED[@]}"; do
     if [[ "$ONE_PASS" == true ]]; then
         [[ -n "${SEEN[groupe:$g]:-}" ]] && continue
@@ -108,11 +146,22 @@ done
 git -C "$PROJECT_ROOT" fetch --quiet "$REPO_REMOTE" "$BASE_BRANCH" 2>/dev/null \
     || warn "git fetch impossible - présence des modules jugée sur l'état connu de ${BASE_REF}"
 
-if [[ "$ONE_PASS" == true ]]; then
-    header "Audit ${PROFILE} : ${#MODULES_TODO[@]} groupe(s), un passage chacun$([[ "$APERCU" == true ]] && echo ' - APERÇU')"
-else
-    header "Audit ${PROFILE} : ${GROUPS_ASKED[*]} (${#MODULES_TODO[@]} module(s))$([[ "$APERCU" == true ]] && echo ' - APERÇU')"
+n_axes=0
+for m in "${MODULES_TODO[@]}"; do
+    [[ "$m" == axe:* ]] && n_axes=$((n_axes + 1))
+done
+n_others=$(( ${#MODULES_TODO[@]} - n_axes ))
+declare -a parts=()
+(( n_axes > 0 )) && parts+=("${n_axes} axe(s) sur tout le dépôt")
+if (( n_others > 0 )); then
+    if [[ "$ONE_PASS" == true ]]; then
+        parts+=("${n_others} groupe(s), un passage chacun")
+    else
+        parts+=("${n_others} module(s)")
+    fi
 fi
+title_parts=$(printf '%s + ' "${parts[@]}")
+header "Audit ${PROFILE} : ${AXES_ASKED[*]}${AXES_ASKED[*]:+${GROUPS_ASKED[*]:+ }}${GROUPS_ASKED[*]} (${title_parts% + })$([[ "$APERCU" == true ]] && echo ' - APERÇU')"
 
 # -- Boucle -----------------------------------------------------------------------
 # L'orchestrateur reçoit lui aussi le Ctrl+C et nettoie le worktree ; ici, on
@@ -121,12 +170,17 @@ INTERRUPTED=false
 trap 'INTERRUPTED=true' INT
 
 declare -a ROWS=()
-total_issues=0 total_dup=0 total_flag=0 total_below=0
+total_issues=0 total_dup=0 total_flag=0 total_below=0 failures=0
 i=0
 for m in "${MODULES_TODO[@]}"; do
     i=$((i + 1))
 
-    if [[ "$m" == groupe:* ]]; then
+    if [[ "$m" == axe:* ]]; then
+        group="axe"
+        what="${m#axe:}"
+        log "[${i}/${#MODULES_TODO[@]}] axe ${what} : $(coherence_axis_description "$what")"
+        args=(--audit --axe "$what")
+    elif [[ "$m" == groupe:* ]]; then
         # Un passage pour tout le groupe : on compte ses modules présents.
         group="${m#groupe:}"
         present=0 total=0
@@ -171,7 +225,7 @@ for m in "${MODULES_TODO[@]}"; do
         "$EXIT_NO_RESULT") result="rien de nouveau" ;;
         "$EXIT_BUSY")      result="occupé (autre instance)" ;;
         130)               result="interrompu" ;;
-        *)                 result="échec (code ${rc})" ;;
+        *)                 result="échec (code ${rc})"; failures=$((failures + 1)) ;;
     esac
     ROWS+=("${group}|${what}|${result}|${issues}|${dup}|${flag}|${below}")
     total_issues=$((total_issues + ${issues:-0}))
@@ -199,3 +253,12 @@ done | tee -a "$LOG_FILE"
 echo ""
 log "Total : ${total_issues} issue(s) créée(s), ${total_dup} doublon(s) écarté(s), ${total_flag} à trancher, ${total_below} sous le seuil"
 [[ "$APERCU" == true ]] && log "Aperçu : rien n'a été créé. Les constats sont dans les journaux de ${LOGS_DIR}."
+
+# Le code de sortie ne dépendait que de la dernière ligne (l'aperçu) : une
+# série réussie sortait en 1. Il dit maintenant si un passage a échoué.
+if (( failures > 0 )); then
+    warn "${failures} passage(s) en échec"
+    exit 1
+fi
+[[ "$INTERRUPTED" == true ]] && exit 130
+exit 0

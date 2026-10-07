@@ -3,6 +3,30 @@
 # AI Pipeline - Mode AUDIT (analyse en profondeur, crée des issues GitHub)
 # ============================================================================
 
+# Section « Périmètre » du prompt : un module (avec ses exclusions), un groupe
+# traité comme un tout, ou un axe de cohérence à travers tout le dépôt.
+audit_scope_section() {
+    local module_paths="$1"
+    if [[ -n "${AUDIT_AXIS:-}" ]]; then
+        cat <<SCOPE
+## Périmètre d'analyse
+
+Ce passage est TRANSVERSE : il ne porte pas sur un module mais sur l'axe « ${AUDIT_AXIS} » ($(coherence_axis_description "$AUDIT_AXIS")), à travers tout le dépôt vivant décrit plus haut. Lis les deux côtés de chaque couture. Le code généré (Protocol/Generated) se compare à son schéma et à son générateur ; il ne s'audite pas pour lui-même. Les autres axes de cohérence ont leurs propres passages : ne t'y disperse pas.
+SCOPE
+        return
+    fi
+    cat <<SCOPE
+## Périmètre d'analyse
+
+Concentre ton analyse sur les modules suivants : ${module_paths}
+Tu peux lire n'importe quel fichier du projet si nécessaire (contrats, faits, événements des autres facultés, frontend…).
+$(audit_scope_note "$module_paths")
+SCOPE
+    if [[ "$PROFILE" == "coherence" ]]; then
+        echo "Cohérence vue depuis ce périmètre : cherche les écarts entre lui et les pièces avec lesquelles il échange (autres facultés, clients, docs, outils), selon tous les axes du profil."
+    fi
+}
+
 # Note de périmètre : les exclusions d'un module, ou, pour un passage par
 # groupe, la consigne de traiter le groupe comme un tout.
 audit_scope_note() {
@@ -47,6 +71,18 @@ build_audit_prompt() {
         fi
     fi
 
+    # Une incohérence oppose deux pièces : il faut dire laquelle fait foi, et
+    # pouvoir dire « à trancher » quand rien dans le dépôt ne le permet.
+    local arbitrage_line=""
+    if [[ "$PROFILE" == "coherence" ]]; then
+        arbitrage_line="
+arbitrage: non|oui   (oui = rien dans le dépôt ne dit quel côté a raison : un humain tranchera)"
+        body_hint="- Les deux côtés (ou plus) : pour chacun, le fichier et ce qu'il affirme
+- Le côté qui fait foi, et pourquoi (schéma dont l'autre est généré, code testé, ADR non remplacé…), ou pourquoi rien ne permet de trancher
+- La conséquence concrète de l'écart : situation → ce qui casse, se perd ou trompe
+- La correction : quel côté s'aligne sur lequel, et ce qui empêchera l'écart de revenir (import au lieu d'une copie, test, génération)"
+    fi
+
     # Seuil de gravité : seulement pour les profils qui signalent des défauts.
     local threshold_section=""
     if ! audit_profile_is_proposal "$PROFILE"; then
@@ -56,11 +92,15 @@ Ne retiens que les ${objets} de gravité \`${AUDIT_SEVERITE_MIN}\` ou plus ($(se
 "
     fi
 
-    local existing_section=""
+    local existing_section="" known_scope="pour ce module" known_what="Tous profils confondus (bugs, qualité, sécurité, idées…)"
+    if [[ -n "${AUDIT_AXIS:-}" ]]; then
+        known_scope="dans tout le dépôt"
+        known_what="Toutes les issues d'audit, tous profils et tous modules confondus"
+    fi
     if [[ -n "$existing_issues" ]]; then
-        existing_section="## Issues DÉJÀ connues pour ce module (NE PAS ${verbe}r à nouveau)
+        existing_section="## Issues DÉJÀ connues ${known_scope} (NE PAS ${verbe}r à nouveau)
 
-Tous profils confondus (bugs, qualité, sécurité, idées), ouvertes et fermées depuis ${DEDUP_CLOSED_DAYS:-90} jours. Ne les reprends PAS, même reformulées, même vues sous un autre angle : un défaut déjà signalé en qualité est le même défaut en bug. Une issue fermée a été traitée : ne la re-signale que si tu as vérifié dans le code que le défaut est toujours là, et dis-le dans la description en citant son numéro.
+${known_what}, ouvertes et fermées depuis ${DEDUP_CLOSED_DAYS:-90} jours. Ne les reprends PAS, même reformulées, même vues sous un autre angle : un défaut déjà signalé en qualité est le même défaut en bug. Une issue fermée a été traitée : ne la re-signale que si tu as vérifié dans le code que le défaut est toujours là, et dis-le dans la description en citant son numéro.
 
 ${existing_issues}
 "
@@ -76,11 +116,7 @@ $(ai_project_context)
 Tu es en mode audit. Tu ne dois PAS modifier de fichiers.
 Tu dois UNIQUEMENT analyser le code et lister les ${objets} que tu retiens.
 
-## Périmètre d'analyse
-
-Concentre ton analyse sur les modules suivants : ${module_paths}
-Tu peux lire n'importe quel fichier du projet si nécessaire (contrats, faits, événements des autres facultés, frontend…).
-$(audit_scope_note "$module_paths")
+$(audit_scope_section "$module_paths")
 
 ${existing_section}
 ${threshold_section}
@@ -100,7 +136,7 @@ Pour chaque ${objet}, utilise EXACTEMENT ce format (un bloc par ${objet}, marque
 ISSUE_START
 title: Titre court et clair en français
 ${severity_line}
-files: chemins depuis la racine du dépôt (ex. backendv2/src/mika/kernel/events.py)
+files: chemins depuis la racine du dépôt (ex. backendv2/src/mika/kernel/events.py)${arbitrage_line}
 description:
 Description détaillée en français.
 Inclure :
@@ -113,7 +149,7 @@ ECARTES_START
 - fichier:fonction — ce que tu as soupçonné — pourquoi tu l'as écarté (protégé ailleurs, choix délibéré d'un ADR, sous le seuil, scénario impossible…)
 ECARTES_END
 
-Si tu n'as rien à ${verbe}r sur ce module, n'émets aucun bloc ISSUE et dis-le en une phrase, avant la liste des pistes écartées.
+Si tu n'as rien à ${verbe}r sur ce périmètre, n'émets aucun bloc ISSUE et dis-le en une phrase, avant la liste des pistes écartées.
 Réponds TOUJOURS en français.
 PROMPT
 }
@@ -122,7 +158,11 @@ main_audit() {
     header "AI Pipeline - Mode AUDIT"
     log "Profil: ${PROFILE}"
     audit_profile_is_proposal "$PROFILE" || log "Seuil de gravité: ${AUDIT_SEVERITE_MIN} ($(severities_from "$AUDIT_SEVERITE_MIN"))"
-    log "Modules: $MODULES"
+    if [[ -n "${AUDIT_AXIS:-}" ]]; then
+        log "Axe: ${AUDIT_AXIS} - $(coherence_axis_description "$AUDIT_AXIS")"
+    else
+        log "Modules: $MODULES"
+    fi
     log "Log: $LOG_FILE"
 
     # 1. Prérequis
@@ -130,7 +170,15 @@ main_audit() {
 
     # 2. Résoudre les modules
     local module_paths known_label
-    if [[ -n "${AUDIT_GROUP:-}" ]]; then
+    if [[ -n "${AUDIT_AXIS:-}" ]]; then
+        # Transverse : pas de module. Tout le dépôt est concerné, donc toutes
+        # les issues d'audit lui sont montrées (une incohérence a souvent déjà
+        # été vue, d'un seul côté, par l'audit d'un module).
+        module_paths="axe:${AUDIT_AXIS}"
+        MODULES="axe:${AUDIT_AXIS}"
+        known_label="ai-audit"
+        report_set module "axe:${AUDIT_AXIS}"
+    elif [[ -n "${AUDIT_GROUP:-}" ]]; then
         # Un seul passage sur tous les modules du groupe présents sur BASE_REF.
         local -a present=()
         local m
@@ -159,7 +207,7 @@ main_audit() {
     else
         module_paths=$(resolve_modules "$MODULES") || exit "$EXIT_FAIL"
     fi
-    if [[ -z "${AUDIT_GROUP:-}" ]]; then
+    if [[ -z "${AUDIT_GROUP:-}" && -z "${AUDIT_AXIS:-}" ]]; then
         known_label=$(module_label "$module_paths")
         report_set module "$module_paths"
     fi
@@ -173,9 +221,14 @@ main_audit() {
         exit "$EXIT_FAIL"
     fi
     if [[ -n "$existing_issues" ]]; then
-        log "Issues connues pour ${known_label#*:} (tous profils):"
         local line
-        while IFS= read -r line; do log "  $line"; done <<< "$existing_issues"
+        if [[ -n "${AUDIT_AXIS:-}" ]]; then
+            # Tout le dépôt : le décompte suffit au terminal.
+            log "Issues d'audit connues dans le dépôt : $(wc -l <<< "$existing_issues"), montrées à l'agent"
+        else
+            log "Issues connues pour ${known_label#*:} (tous profils):"
+            while IFS= read -r line; do log "  $line"; done <<< "$existing_issues"
+        fi
     else
         log "Aucune issue connue pour ${known_label#*:}"
     fi
@@ -266,14 +319,20 @@ main_audit() {
             if ! audit_profile_is_proposal "$PROFILE" \
                 && (( $(severity_rank "$sev") > 0 && $(severity_rank "$sev") < $(severity_rank "$AUDIT_SEVERITE_MIN") )); then
                 log "→ sous le seuil (${sev} < ${AUDIT_SEVERITE_MIN}) : ne serait PAS créée"
-            elif [[ -n "$pool" ]]; then
-                IFS=$'\t' read -r verdict number score other \
-                    < <(dedup_check "$pool" "$(_issue_field "$f" title)" "$(_issue_field "$f" files)" || echo "new")
+            else
+                verdict="new"
+                if [[ -n "$pool" ]]; then
+                    IFS=$'\t' read -r verdict number score other \
+                        < <(dedup_check "$pool" "$(_issue_field "$f" title)" "$(_issue_field "$f" files)" || echo "new")
+                fi
                 case "$verdict" in
                     skip)   warn "→ doublon de #${number} (${score}) : ne serait PAS créée — ${other}" ;;
                     flag)   warn "→ doublon possible de #${number} (${score}) : créée sans Propose_AI_PR — ${other}" ;;
                     closed) log  "→ proche de l'issue fermée #${number} (${score}) : créée avec un renvoi — ${other}" ;;
                 esac
+                if [[ "$verdict" != "skip" && "$PROFILE" == "coherence" ]] && issue_needs_arbitration "$f"; then
+                    warn "→ à trancher (aucun côté ne fait foi) : créée sans Propose_AI_PR"
+                fi
             fi
             tee -a "$LOG_FILE" < "$f"
         done
@@ -284,7 +343,9 @@ main_audit() {
 
     header "Création des issues GitHub"
     local counts created skipped flagged below
-    if [[ -n "${AUDIT_GROUP:-}" ]]; then
+    if [[ -n "${AUDIT_AXIS:-}" ]]; then
+        counts=$(create_github_issues "$issues_dir" "$PROFILE" "" "$pool" "" "$AUDIT_AXIS")
+    elif [[ -n "${AUDIT_GROUP:-}" ]]; then
         counts=$(create_github_issues "$issues_dir" "$PROFILE" "" "$pool" "$AUDIT_GROUP")
     else
         counts=$(create_github_issues "$issues_dir" "$PROFILE" "$module_paths" "$pool")
@@ -312,7 +373,7 @@ main_audit() {
 
     header "Audit terminé avec succès"
     log "Module: $module_paths"
-    log "Issues créées: $created (dont ${flagged} doublon(s) possible(s), sans Propose_AI_PR)"
+    log "Issues créées: $created (dont ${flagged} à trancher - doublon possible ou incohérence sans côté qui fasse foi -, sans Propose_AI_PR)"
     log "Doublons écartés: $skipped"
     log "Sous le seuil ${AUDIT_SEVERITE_MIN}: $below"
     log "Log complet: $LOG_FILE"

@@ -7,6 +7,7 @@
 # Usage:
 #   ./orchestrator.sh --audit --profile security --modules backendv2/src/mika/faculties/memory
 #   ./orchestrator.sh --profile bugs --modules backendv2/src/mika/kernel
+#   ./orchestrator.sh --axe protocoles     # audit de cohérence transverse
 #   ./orchestrator.sh --worker
 #   ./orchestrator.sh --issue 42
 #   ./orchestrator.sh --cleanup
@@ -101,6 +102,9 @@ OPTIONS:
   --modules MODULES     Modules ciblés (virgules) ou "all" (défaut: auto)
   --group GROUPE        Avec --audit : tout le groupe en un seul passage
                         (${MODULE_GROUP_ORDER[*]})
+  --axe AXE             Audit de cohérence transverse sur un axe, à travers
+                        tout le dépôt (implique --audit --profile coherence)
+                        ($(coherence_axes | paste -sd' ' -))
   --no-create           Ne rien créer sur GitHub (test local)
   --dry-run             Afficher ce qui serait fait sans rien exécuter
   --branch NAME         Nom de branche custom
@@ -114,6 +118,7 @@ jamais dans la copie de travail du dépôt.
 EXEMPLES:
   $(basename "$0") --audit --profile security
   $(basename "$0") --profile bugs --modules backendv2/src/mika/kernel
+  $(basename "$0") --axe protocoles
   $(basename "$0") --worker
   $(basename "$0") --issue 42
   $(basename "$0") --cleanup
@@ -130,6 +135,7 @@ MODULES="all"
 ISSUE_NUMBER=""
 AUDIT_MODE=false
 AUDIT_GROUP=""
+AUDIT_AXIS=""
 WORKER_MODE=false
 REBASE_MODE=false
 NO_CREATE=false
@@ -146,6 +152,7 @@ while [[ $# -gt 0 ]]; do
         --profile)    _need_value "$@"; PROFILE="$2"; shift 2 ;;
         --modules)    _need_value "$@"; MODULES="$2"; shift 2 ;;
         --group)      _need_value "$@"; AUDIT_GROUP="$2"; shift 2 ;;
+        --axe)        _need_value "$@"; AUDIT_AXIS="$2"; shift 2 ;;
         --issue)      _need_value "$@"; ISSUE_NUMBER="$2"; shift 2 ;;
         --audit)      AUDIT_MODE=true; shift ;;
         --worker)     WORKER_MODE=true; shift ;;
@@ -170,6 +177,24 @@ done
 if [[ -n "$ISSUE_NUMBER" && ! "$ISSUE_NUMBER" =~ ^[0-9]+$ ]]; then
     err "--issue attend un numéro (reçu: '${ISSUE_NUMBER}')"
     exit "$EXIT_FAIL"
+fi
+if [[ -n "$AUDIT_AXIS" ]]; then
+    # Un axe est un audit de cohérence sur tout le dépôt : ni module, ni
+    # groupe, ni autre profil.
+    if ! coherence_axis_exists "$AUDIT_AXIS"; then
+        err "Axe inconnu: ${AUDIT_AXIS} (disponibles: $(coherence_axes | paste -sd' ' -))"
+        exit "$EXIT_FAIL"
+    fi
+    if [[ -n "$PROFILE" && "$PROFILE" != "coherence" ]]; then
+        err "--axe s'emploie avec le profil coherence (reçu: --profile ${PROFILE})"
+        exit "$EXIT_FAIL"
+    fi
+    if [[ -n "$AUDIT_GROUP" || "$MODULES" != "all" || -n "$ISSUE_NUMBER" || "$WORKER_MODE" == true || "$REBASE_MODE" == true ]]; then
+        err "--axe porte sur tout le dépôt : il ne se combine ni avec --group, --modules, --issue, --worker ou --rebase"
+        exit "$EXIT_FAIL"
+    fi
+    AUDIT_MODE=true
+    PROFILE="coherence"
 fi
 if [[ -n "$AUDIT_GROUP" ]]; then
     if [[ "$AUDIT_MODE" != true ]]; then
@@ -229,8 +254,10 @@ if [[ "$WORKER_MODE" != true ]]; then
         # Une issue sans profil partait avec un prompt sans consigne de rôle.
         _profile_path="${PROFILES_DIR}/large_issue/refactor.md"
     fi
-    PROFILE_CONTENT=$(cat "$_profile_path")
-    ok "Profil '${PROFILE:-refactor}' chargé - mode $([[ "$AUDIT_MODE" == true ]] && echo 'audit' || echo 'fix') (${#PROFILE_CONTENT} chars)"
+    # Un profil à axes (coherence) ne garde que la section de l'axe demandé ;
+    # sans axe, il les garde toutes. Les autres profils sortent tels quels.
+    PROFILE_CONTENT=$(profile_for_axis "$_profile_path" "$AUDIT_AXIS")
+    ok "Profil '${PROFILE:-refactor}'${AUDIT_AXIS:+ (axe ${AUDIT_AXIS})} chargé - mode $([[ "$AUDIT_MODE" == true ]] && echo 'audit' || echo 'fix') (${#PROFILE_CONTENT} chars)"
 fi
 
 # ============================================================================

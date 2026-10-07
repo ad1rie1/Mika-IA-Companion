@@ -41,10 +41,11 @@ _worker_process_issue() {
     header "Traitement issue #${issue_number}: ${issue_title}"
 
     # Déterminer le type depuis le label de profil `ai-<profil>` (préfixe de
-    # commit, titre de la PR). Une proposition (features, amelioration)
-    # validée à la main arrive ici comme les autres.
+    # commit, titre de la PR). Une incohérence tranchée à la main, ou une
+    # proposition (features, amelioration) validée à la main, arrive ici
+    # comme les autres.
     local profile="bugs" candidate
-    for candidate in security quality amelioration features bugs; do
+    for candidate in security quality coherence amelioration features bugs; do
         if [[ ",${issue_labels}," == *",ai-${candidate},"* ]]; then
             profile="$candidate"
             break
