@@ -105,8 +105,8 @@ trois questions :
    - Pas d'adresse `ext_…`, qui ouvrirait relances, attentes et initiatives.
    - Une clé de sujet `teams:<identifiant>` dans `about`.
    - L'oubli l'atteint dans le journal *et* dans le cache (hook `forget` : ses messages, ses tête-à-tête entiers, et
-     les réponses à ses messages ailleurs). Le courrier, lui, n'a pas ce hook. Au journal, la raison d'un échec est
-     écrite par le code ; le détail que donne l'extension reste dans le cache.
+     les réponses à ses messages ailleurs). Le courrier a depuis le même hook (ADR 0027). Au journal, la raison d'un
+     échec est écrite par le code ; le détail que donne l'extension reste dans le cache.
 9. **La console.** « Ses canaux › Teams » : conversations (fiche : le fil, « Lui demander une réponse »), réponses
    (badge : à décider ; fiche : exactement ce qui part, et les décisions) et l'extension. Les réglages (Configuration
    › Sens › Teams) portent :

@@ -14,6 +14,10 @@ l'un de ses envois sans être rangé dans « Envoyés » est traité de même. C
 qui a été rendu se retient par référence : un mail qui change de dossier
 n'est pas rendu deux fois, un faux qui imite un vrai l'est (on le remarque).
 
+Oublier un correspondant (``forget``) efface ses mails, ce qui lui a été écrit
+et ce qui lui répondait ; ses mails restent sur le serveur, leur empreinte est
+retenue (``forgotten``) pour qu'une relecture ne les ramène pas.
+
 Le cache d'avant les comptes (une table ``mails``, des ``uids``) est repris
 sous le compte « principal », dossier ``INBOX`` ; celui d'avant les
 références reçoit les siennes (le premier mail de chaque Message-ID garde la
@@ -49,7 +53,7 @@ from mika.ports.paging import fold_text
 
 #: limite d'une purge de maintenance explicite ; la synchronisation ne purge pas l'historique
 KEEP_PER_FOLDER = 2000
-SCHEMA = 6
+SCHEMA = 7
 LEGACY_ACCOUNT = "principal"
 
 _SCHEMA = """
@@ -74,6 +78,7 @@ CREATE TABLE IF NOT EXISTS drafts(
 CREATE TABLE IF NOT EXISTS status(account TEXT PRIMARY KEY, last_poll INTEGER, error TEXT, error_at INTEGER);
 CREATE TABLE IF NOT EXISTS envoyes(message_id TEXT PRIMARY KEY, dest TEXT, subject TEXT, body TEXT, date INTEGER,
   in_reply_to TEXT, by TEXT);
+CREATE TABLE IF NOT EXISTS forgotten(account TEXT NOT NULL, print TEXT NOT NULL, PRIMARY KEY(account, print));
 """
 _COLUMNS = ("account", "folder", "uid", "message_id", "sender", "address", "reply_to", "dest", "cc", "subject",
             "date", "body", "has_html", "attachments", "in_reply_to", "refs", "bulk", "seen", "flagged", "answered", "html",
@@ -219,9 +224,14 @@ class MailCache:
     def store(self, m: Mail, uid: int) -> Mail:
         """Garde un mail à sa place (compte, dossier, UID) et rend ce qui est gardé, avec sa référence :
         celle qu'il avait déjà à cette place (ou à sa place provisoire, s'il vient d'être déplacé),
-        sinon celle que lui attribue ``_assign``."""
+        sinon celle que lui attribue ``_assign``. Un mail oublié (``forget``) n'est pas gardé de nouveau :
+        il est rendu tel quel."""
         files = json.dumps([[a.name, a.mime, a.size] for a in m.attachments], ensure_ascii=False)
+        fingerprint = self._print(m.address, m.subject, m.date, m.body)
         with self._lock:
+            if self._db.execute("SELECT 1 FROM forgotten WHERE account=? AND print=?",
+                                (m.account, fingerprint)).fetchone() is not None:
+                return m  # une relecture du serveur ne ramène pas ce qui a été oublié
             known = self._db.execute(
                 "SELECT ref, twin FROM messages WHERE account=? AND folder=? AND ((uid=? AND message_id=?) OR "
                 "(uid<=0 AND message_id=?)) AND ref!='' ORDER BY uid DESC LIMIT 1",
@@ -234,8 +244,7 @@ class MailCache:
             else:
                 self._db.execute("DELETE FROM messages WHERE account=? AND folder=? AND uid=?",
                                  (m.account, m.folder, uid))  # cette place change d'occupant
-                ref, twin = self._assign(m.account, m.folder, m.message_id,
-                                         self._print(m.address, m.subject, m.date, m.body))
+                ref, twin = self._assign(m.account, m.folder, m.message_id, fingerprint)
             self._db.execute(
                 f"INSERT OR REPLACE INTO messages({', '.join(_COLUMNS)}) VALUES({', '.join('?' * len(_COLUMNS))})",
                 (m.account, m.folder, uid, m.message_id, m.sender, m.address, m.reply_to, m.to, m.cc, m.subject,
@@ -577,6 +586,39 @@ class MailCache:
         found = self.draft(draft_id)
         if found is not None:
             self.save_draft(replace(found, state=state, sent_id=sent_id or found.sent_id))
+
+    # ── l'oubli ──
+    def forget(self, address: str) -> int:
+        """Oublier un correspondant, par son adresse : les mails qu'il a écrits ; ce qui lui a été écrit
+        (brouillons, envois, leurs copies dans « Envoyés ») ; ce qui répondait à ses mails (ça les cite).
+        Ses mails restent sur le serveur : leur empreinte est retenue, pour qu'une relecture ne les
+        ramène pas. Rend combien de lignes ont été effacées."""
+        address = address.strip().lower()
+        if not address:
+            return 0
+        to_them = ("EXISTS(SELECT 1 FROM json_each(mail_addresses(COALESCE(dest,'') || ',' || COALESCE(cc,''))) j "
+                   "WHERE json_extract(j.value,'$[1]')=?)")
+        in_sent = ("(EXISTS(SELECT 1 FROM folders f WHERE f.account=messages.account AND f.name=messages.folder "
+                   "AND f.role='sent') OR lower(folder) IN ('sent','sent items','envoyés'))")
+        with self._lock:
+            rows = self._db.execute(f"SELECT rowid, account, folder, ref, message_id, address, subject, date, body "
+                                    f"FROM messages WHERE address=? OR ({to_them} AND {in_sent})",
+                                    (address, address)).fetchall()
+            # ce qui leur répondait les désigne par référence (ou, dans un ancien cache, par Message-ID)
+            theirs = json.dumps(sorted({k for r in rows if r[5] == address for k in (r[3], r[4]) if k}))
+            n = self._db.execute(f"DELETE FROM drafts WHERE {to_them} OR reply_to IN (SELECT value FROM json_each(?))",
+                                 (address, theirs)).rowcount
+            n += self._db.execute(f"DELETE FROM envoyes WHERE {to_them} OR in_reply_to IN "
+                                  "(SELECT value FROM json_each(?))", (address, theirs)).rowcount
+            for rowid, account, _folder, ref, _mid, sender, subject, date, body in rows:
+                self._db.execute("INSERT OR IGNORE INTO forgotten VALUES(?,?)",
+                                 (account, self._print(sender, subject, date, body)))
+                self._db.execute("DELETE FROM offered WHERE account=? AND ref=?", (account, ref))
+                n += self._db.execute("DELETE FROM messages WHERE rowid=?", (rowid,)).rowcount
+            self._db.commit()
+            for account, folder in sorted({(r[1], r[2]) for r in rows}):
+                self.recount(account, folder)
+        return n
 
     # ── état des comptes ──
     def status(self, account: str) -> AccountStatus:
