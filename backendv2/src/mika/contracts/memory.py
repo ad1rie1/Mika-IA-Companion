@@ -51,6 +51,9 @@ public quand ça s'est dit en privé (ADR 0055).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
+
+from pydantic import model_validator
 
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
@@ -93,8 +96,20 @@ CHUNK = "chunk"
 ROOM_CHUNK = "room_chunk"
 
 
+class Disclosure(Payload):
+    """Une restriction héritée : toutes les sources doivent autoriser la diffusion."""
+
+    about: tuple[str, ...] = ()
+    told_by: tuple[str, ...] = ()
+    heard_by: tuple[str, ...] = ()
+    sensitivity: int = 2
+    secret: bool = False
+
+
 class Remembered(Payload):
     text: Content
+    constraints: tuple[Disclosure, ...] = ()
+    internal_only: bool = False
     about: tuple[str, ...] = ()
     sensitivity: int = 1
     importance: float = 0.5
@@ -107,6 +122,20 @@ class Remembered(Payload):
     heard_by: tuple[str, ...] = ()
     #: « dis-le à personne » : ne ressort que devant qui l'a confié
     secret: bool = False
+
+    @model_validator(mode="after")
+    def _inherited_subjects(self):
+        about = tuple(sorted({*self.about, *(key for rule in self.constraints for key in (*rule.about, *rule.told_by))}))
+        if about != self.about:
+            object.__setattr__(self, "about", about)
+        return self
+
+
+class Relation(Payload):
+    subject: str
+    other: str
+    kind: Literal["friend", "family", "partner", "colleague", "acquaintance", "hostile"]
+    status: Literal["active", "ended", "uncertain"] = "uncertain"
 
 
 class Believed(Payload):
@@ -133,6 +162,19 @@ class Believed(Payload):
     #: ce qui n'appartient qu'à elle et à la personne (``about``) : comment elle l'appelle (« Sam m'appelle
     #: Mikachu »), le surnom qu'elle lui donne, leurs blagues, leurs expressions — de première main (ADR 0055)
     between_us: bool = False
+    #: Une affirmation rapportée n'est pas un fait vérifié ; une opinion appartient à son auteur.
+    knowledge_kind: Literal["claim", "opinion", "preference", "hypothesis"] = "claim"
+    holder: str | None = None
+    relations: tuple[Relation, ...] = ()
+
+    @model_validator(mode="after")
+    def _relation_subjects(self):
+        # Les deux extrémités sont des sujets du contenu, même hors consolidation.
+        about = tuple(sorted({*self.about, *(key for relation in self.relations
+                                             for key in (relation.subject, relation.other))}))
+        if about != self.about:
+            object.__setattr__(self, "about", about)
+        return self
 
 
 class Reinforced(Payload):
@@ -231,8 +273,23 @@ class SituationEnded(Payload):
     call_id: str = ""
 
 
+class ExtractionDeferred(Payload):
+    """Un passage à reprendre ; les données du modèle restent effaçables."""
+
+    key: int
+    messages: tuple[int, ...] = ()
+    #: parmi eux, ce qui ne lui était pas adressé (un salon) : la reprise le relit pareil
+    aside: tuple[int, ...] = ()
+    about: tuple[str, ...] = ()
+    attempts: int = 1
+    retry_at: int = 0
+    status: Literal["queued", "review", "resolved"] = "queued"
+    failure_code: Literal["invalid_output", "invalid_items", "provider_error", "budget_exceeded", "operator_retry"] = "invalid_output"
+    detail: Content
+
+
 class Consolidated(Payload):
-    """Le point de contrôle : tout ce qui précède ``upto`` a été relu."""
+    """Le point de contrôle : tout ce qui précède ``upto`` a été traité ou inscrit dans la file de reprises."""
 
     upto: int
     produced: int = 0
@@ -254,7 +311,7 @@ class NightSorted(Payload):
 _SUBJECTS = ("about", "told_by")
 
 REMEMBERED = event_type("memory.remembered", OWNER, Remembered, public=True, content=("text",), subjects=_SUBJECTS)
-BELIEVED = event_type("memory.believed", OWNER, Believed, public=True, content=("text",), subjects=_SUBJECTS)
+BELIEVED = event_type("memory.believed", OWNER, Believed, public=True, content=("text",), subjects=(*_SUBJECTS, "holder"))
 REINFORCED = event_type("memory.reinforced", OWNER, Reinforced, public=True)
 PROMISE_NOTICED = event_type("memory.promise_noticed", OWNER, PromiseNoticed, public=True, content=("text",),
                              subjects=("to",))
@@ -262,10 +319,12 @@ PROMISE_RESOLVED = event_type("memory.promise_resolved", OWNER, PromiseResolved,
 EVENT_NOTED = event_type("memory.event_noted", OWNER, EventNoted, public=True, content=("text",), subjects=_SUBJECTS)
 MOMENT_FOLLOWED = event_type("memory.moment_followed", OWNER, MomentFollowed, public=True, subjects=("by",))
 SITUATION_ENDED = event_type("memory.situation_ended", OWNER, SituationEnded, public=True)
+EXTRACTION_DEFERRED = event_type("memory.extraction_deferred", OWNER, ExtractionDeferred, public=True,
+                                 content=("detail",), subjects=("about",))
 CONSOLIDATED = event_type("memory.consolidated", OWNER, Consolidated, public=True)
 NIGHT_SORTED = event_type("memory.night_sorted", OWNER, NightSorted, public=True)
 ALL = (REMEMBERED, BELIEVED, REINFORCED, PROMISE_NOTICED, PROMISE_RESOLVED, EVENT_NOTED, MOMENT_FOLLOWED, SITUATION_ENDED,
-       CONSOLIDATED, NIGHT_SORTED)
+       CONSOLIDATED, NIGHT_SORTED, EXTRACTION_DEFERRED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,3 +406,13 @@ FORGETS_TABLE = "memory_forgets"
 #: À qui elle a répété quoi (``item``, ``handle``, ``at``) : d'après la
 #: provenance de ce qu'elle a dit. Ce qu'elle a raconté à Bob, Bob le sait.
 TOLD_TABLE = "memory_told"
+
+
+class LifeRecalled(Payload):
+    items: tuple[LifeEvent, ...] = ()
+    daily: bool = False
+
+
+LIFE_RECALLED = event_type("memory.life_recalled", OWNER, LifeRecalled, public=True)
+ALL = (*ALL, LIFE_RECALLED)
+LIFE_TABLE = "memory_life"

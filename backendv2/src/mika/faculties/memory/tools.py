@@ -19,6 +19,7 @@ from mika.faculties.memory.recall import (
     about_us,
     between_us,
     items_by_id,
+    knowledge_label,
     names_of,
     relevance,
     topic,
@@ -71,8 +72,9 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
             break
     if not found:
         return phrase("memory.tools.search.nothing")
-    names = names_of(frame, {o for it, v in found for o in (*v.others, *it.about)})
-    return "\n".join(f"- {age_words(it.born_at, frame.now)} : {it.text}{tag(v, names)}" for it, v in found)
+    names = names_of(frame, {o for it, v in found for o in (*v.others, *it.about, it.holder) if o})
+    return "\n".join(f"- {age_words(it.born_at, frame.now)} : {it.text}{tag(v, names)}"
+                     + (f" ({knowledge_label(it, names)})" if it.kind == c.BELIEF else "") for it, v in found)
 
 
 @MEMORY.tool("memory_promise_done", description=phrase("memory.tools.promise_done.description"), args=PromiseArgs,

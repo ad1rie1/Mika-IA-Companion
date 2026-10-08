@@ -14,8 +14,10 @@ utilisent leurs propres connexions (WAL).
 from __future__ import annotations
 
 import asyncio
+import json
 import queue
 import re
+import secrets
 import sqlite3
 import threading
 from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
@@ -337,6 +339,45 @@ class SqliteStore:
                 for ref in extra:
                     m.execute("DELETE FROM content WHERE ref=?", (ref,))
                     m.execute("DELETE FROM content_subjects WHERE ref=?", (ref,))
+                if subject.startswith("name:"):
+                    # Ces anciennes clés contiennent le nom en clair. L'oubli conserve des
+                    # enveloppes rejouables, mais remplace cette clé partout par un jeton opaque.
+                    replacement = "forgotten:" + secrets.token_hex(16)
+
+                    def redact(value):
+                        if isinstance(value, str):
+                            if value == subject:
+                                return replacement
+                            if "|" in value:
+                                return "|".join(",".join(replacement if part == subject else part
+                                                       for part in group.split(",")) for group in value.split("|"))
+                            return value
+                        if isinstance(value, list):
+                            return [redact(part) for part in value]
+                        if isinstance(value, dict):
+                            return {redact(key): redact(part) for key, part in value.items()}
+                        return value
+
+                    # Pages bornées : même l'oubli ne charge pas des années de journal en RAM. SQLite écarte
+                    # d'abord les enveloppes qui ne contiennent pas la clé (sous ses deux graphies JSON) :
+                    # seules celles qui la portent sont décodées en Python.
+                    needles = (json.dumps(subject, ensure_ascii=False)[1:-1], json.dumps(subject)[1:-1])
+                    after = 0
+                    while True:
+                        rows = m.execute("SELECT seq,data FROM events WHERE seq>? AND "
+                                         "(instr(data,?)>0 OR instr(data,?)>0) ORDER BY seq LIMIT 256",
+                                         (after, *needles)).fetchall()
+                        if not rows:
+                            break
+                        for seq, raw in rows:
+                            before = json.loads(raw)
+                            clean = redact(before)
+                            if clean != before:
+                                # la forme compacte de ``model_dump_json``, celle de toutes les autres enveloppes
+                                m.execute("UPDATE events SET data=? WHERE seq=?",
+                                          (json.dumps(clean, ensure_ascii=False, separators=(",", ":")), seq))
+                        after = rows[-1][0]
+                    m.execute("DELETE FROM snapshots")
                 return len(refs) + len(extra)
 
             removed = _transaction((m, v), body)

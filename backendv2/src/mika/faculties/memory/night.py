@@ -22,16 +22,20 @@ from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
+from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory.consolidation import kept_secrets
 from mika.faculties.memory.faculty import MEMORY, MemoryState, Reflection, params
+from mika.faculties.memory.projections import ITEM_COLUMNS
+from mika.faculties.memory.salience import Item
 from mika.kernel.clock import instant, local_date_of_night
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.vocab.phrasebook import phrase
-from mika.vocab.words import stems
+from mika.vocab.privacy import Sensitivity
+from mika.vocab.words import same_words, stems
 
 
 @MEMORY.process("memory.reflect", wake_on=[attention_c.DIGESTED, c.REMEMBERED], lane="background",
@@ -45,6 +49,7 @@ class Reflect:
 
     async def run(self, ctx: Any) -> None:
         state: MemoryState = ctx.state
+        frame: Frame = ctx.frame
         store = ctx.ports.get("store")
         if store is None:
             return
@@ -57,11 +62,16 @@ class Reflect:
                 self.skipped.add(r.thought)  # effacée (oubli) : rien à repenser
                 continue
             mark = f"réflexion:{r.thought}"
-            # une pensée sur quelqu'un vient de ce qu'il ou elle lui a dit : c'est son confident, pas un autre
+            constraints, internal = _disclosure(frame, store, r.thought)
+            secret = self._secret(frame, store, r, text) or any(rule.secret for rule in constraints)
+            # L'auteur est Mika ; les restrictions des sources restent des restrictions, pas des auteurs.
+            subjects = tuple(sorted({*r.about, *(who for rule in constraints
+                                                for who in (*rule.about, *rule.told_by))}))
             drafts.append(c.REMEMBERED.draft(
-                text=Content.of(phrase("memory.night.reflection", text=text), level=r.sensitivity), about=r.about,
+                text=Content.of(phrase("memory.night.reflection", text=text), level=r.sensitivity), about=subjects,
                 sensitivity=r.sensitivity, importance=0.5, emotion=r.emotion, call_id=mark, dedupe_key=mark,
-                told_by=r.about, heard_by=r.about, secret=self._secret(ctx.frame, store, r, text)))
+                sources=(r.thought,), told_by=(), heard_by=(), secret=secret,
+                constraints=constraints, internal_only=internal or (secret and not any(rule.secret for rule in constraints))))
         if drafts:
             await ctx.emit(*drafts)
 
@@ -75,6 +85,62 @@ class Reflect:
         names = {st for person in r.about for st in stems(frame.get(identity_c.IDENTITY(person)).name or "")}
         names |= stems(self_c.name_of(frame.get(self_c.PERSONA)))
         return x.echoes(text, kept_secrets(store, r.about), names)
+
+
+def _disclosure(frame: Frame, store: Any, thought: int) -> tuple[tuple[c.Disclosure, ...], bool]:
+    """Remonte les preuves, jamais le contenu voisin ; une origine inconnue reste intérieure."""
+    pending, seen, rules = [thought], set(), []
+    unknown = False
+    while pending and len(seen) < 64:
+        source = pending.pop()
+        if source in seen:
+            continue
+        seen.add(source)
+        rows = store.query_mind(f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE id=?", (source,))
+        if rows:
+            item = Item.of(dict(zip(ITEM_COLUMNS, rows[0], strict=True)))
+            if item.constraints:
+                rules.extend(rule.model_copy(update={"sensitivity": max(rule.sensitivity, item.sensitivity)})
+                             for rule in item.constraints)
+            else:
+                rules.append(c.Disclosure(about=item.about, told_by=item.told_by, heard_by=item.heard_by,
+                                          sensitivity=item.sensitivity, secret=item.secret))
+            unknown |= item.internal_only
+            continue
+        events = store.get_events([source])
+        if not events:
+            unknown = True
+            continue
+        event = events[0]
+        data = json.loads(event.data)
+        if event.type == attention_c.THOUGHT_BORN.name:
+            refs = list(data.get("sources") or ())
+            if data.get("source") is not None:
+                refs.append(data["source"])
+            if not refs and data.get("origin") not in (attention_c.MISSING, attention_c.ALONE):
+                unknown = True
+            pending.extend(refs)
+        elif event.type == rt.PERCEPTION_RECEIVED.name:
+            handle = data["handle"]
+            person = frame.get(identity_c.PERSON(handle)) or handle
+            ref = (data.get("text") or {}).get("ref")
+            text = store.content([ref]).get(ref) if ref else None
+            if text is None:
+                unknown = True
+                continue
+            rules.append(c.Disclosure(about=(person,), told_by=(person,), heard_by=(person,),
+                                      sensitivity=int(Sensitivity.ANODYNE if data.get("public") else Sensitivity.PERSONAL),
+                                      secret=x.says_secret([text])))
+        elif event.type == rt.UTTERANCE.name:
+            refs = [int(p[7:]) for p in data.get("provenance", ()) if p.startswith("memory:") and p[7:].isdigit()]
+            refs += list(data.get("answers") or ())
+            if data.get("reply_to"):
+                refs.append(data["reply_to"])
+            pending.extend(refs)
+            unknown |= not bool(refs)
+        else:
+            unknown = True
+    return tuple(dict.fromkeys(rules)), unknown or bool(pending)
 
 
 @MEMORY.process("memory.night", wake_on=[*body_c.ALL], lane="night", catch_up=CatchUp.ONCE, max_quantum_s=3600)
@@ -120,12 +186,13 @@ class Sort:
             for hit, sim in await vectors.search(text, 4, kinds={c.SOUVENIR}):
                 if hit == item_id or hit in merged or sim < p.night_merge_similarity or hit > item_id:
                     continue
-                alive = store.query_mind(f"SELECT status, about, told_by, heard_by FROM {c.ITEMS_TABLE} WHERE id=?",
+                alive = store.query_mind(f"SELECT status, about, told_by, heard_by, text FROM {c.ITEMS_TABLE} WHERE id=?",
                                          (hit,))
                 # la fusion unit les personnes, confidents et témoins : « Bob m'a dit que son père est hospitalisé »
                 # fondu dans la confidence d'Alice la rendrait « ses propres mots » pour Bob, et l'oubli de Bob
                 # l'effacerait — seuls deux souvenirs des mêmes personnes, confiés et entendus par les mêmes, se fondent
-                if alive and alive[0][0] == "active" and _same_people(alive[0][1:], people):
+                if (alive and alive[0][0] == "active" and _same_people(alive[0][1:4], people)
+                        and same_words(text, alive[0][4])):
                     out.append((hit, item_id))
                     merged |= {hit, item_id}
                     break

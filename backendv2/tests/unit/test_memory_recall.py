@@ -304,8 +304,7 @@ def test_restating_a_belief_while_pointing_at_itself_is_not_a_revision(tmp_path)
 
 
 def test_the_same_informant_repeating_does_not_make_it_surer(tmp_path):
-    """Alice le dit, Carol le confirme (plus sûr), puis Carol le redit : ce
-    n'est pas une troisième source."""
+    """Chaque informatrice conserve son témoignage ; se répéter n'ajoute ni source ni certitude."""
     fact = "Samedi c'est le mariage de Julie, la sœur d'Alice (CANARI-J1)"
 
     def extract(prompt):
@@ -332,9 +331,9 @@ def test_the_same_informant_repeating_does_not_make_it_surer(tmp_path):
 
     rows = run_virtual(clock, main)
     beliefs = [r for r in rows if r["kind"] == "belief"]
-    assert len(beliefs) == 1
-    assert abs(beliefs[0]["confidence"] - 0.8) < 1e-9, "Carol a corroboré une fois ; se répéter n'ajoute rien"
-    assert beliefs[0]["informants"] == ["user_2", "user_4"]
+    assert len(beliefs) == 2
+    assert all(abs(b["confidence"] - 0.7) < 1e-9 for b in beliefs)
+    assert sorted(b["informants"] for b in beliefs) == [["user_2"], ["user_4"]]
 
 
 @pytest.mark.parametrize("a, b, same", [

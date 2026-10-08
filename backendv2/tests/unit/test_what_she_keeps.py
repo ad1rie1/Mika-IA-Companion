@@ -364,8 +364,10 @@ def test_the_pure_rules_of_a_profile():
     notes = "sam a 30 ans et son anniversaire est samedi. le chat de sam s'appelle pixel. sam adore les jeux de rythme"
     assert grounded("Sam a 30 ans, célibataire, vit avec son chat Pixel. Il adore les jeux de rythme.", notes) == \
         "Sam a 30 ans. Il adore les jeux de rythme."
-    assert "célibataire" in grounded("Sam est célibataire depuis l'été.", notes + " sam est celibataire"), \
-        "ce qu'il a dit, si"
+    assert grounded("Sam est célibataire depuis l'été.", notes + " sam est celibataire") == "", \
+        "le statut ne prouve pas la date : ne pas inventer depuis quand"
+    assert "célibataire" in grounded("Sam est célibataire depuis l'été.", notes + " sam est celibataire depuis l'ete"), \
+        "la proposition entièrement étayée se garde"
     assert grounded("Sam a la trentaine.", notes) == "", "un âge que ses notes ne disent pas"
     assert tastes(["son chat Pixel", "sa santé dentaire", "son anniversaire", "les jeux de rythme"]) == \
         ["son chat Pixel", "les jeux de rythme"]

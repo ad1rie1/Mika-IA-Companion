@@ -13,15 +13,20 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
+from mika.faculties.memory.archive import decode
 from mika.faculties.memory.faculty import MEMORY, PENDING_CAP, MemoryParams, MemoryState, occurrence, params
-from mika.faculties.memory.projections import ITEM_COLUMNS
+from mika.faculties.memory.projections import DEFERRED_TABLE, ITEM_COLUMNS
 from mika.faculties.memory.recall import names_of
 from mika.faculties.memory.salience import Item, dormant, salience
 from mika.kernel.clock import MINUTE
+from mika.kernel.events import Content
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
+    ActionSlot,
     Badge,
     Block,
     Cell,
@@ -41,6 +46,7 @@ from mika.kernel.inspect import (
     Text,
     When,
 )
+from mika.kernel.operate import ActionContext, Done, Refused
 from mika.vocab.affect import emotion_cell
 from mika.vocab.people import fold
 from mika.vocab.privacy import Sensitivity
@@ -107,6 +113,7 @@ class Kept:
     item: Item
     sources: tuple[int, ...]
     replaces: int | None
+    life: c.LifeEvent | None = None
 
 
 def _kept(row: Sequence[Any]) -> Kept:
@@ -122,7 +129,11 @@ def _select(store: Any, where: Sequence[str], args: Sequence[Any], limit: int, o
     clause = f" WHERE {' AND '.join(where)}" if where else ""
     rows = store.query_mind(f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE}{clause} ORDER BY id DESC "
                             "LIMIT ? OFFSET ?", (*args, limit, offset))
-    return [_kept(r) for r in rows]
+    kept = [_kept(r) for r in rows]
+    ids = [k.item.id for k in kept if k.item.kind == c.EVENT]
+    archive = {decode(raw).id: decode(raw) for (raw,) in store.query_mind(
+        f"SELECT payload FROM {c.LIFE_TABLE} WHERE id IN ({','.join('?' for _ in ids)})", tuple(ids))} if ids else {}
+    return [replace(k, life=archive.get(k.item.id)) for k in kept]
 
 
 def _count(store: Any, where: Sequence[str], args: Sequence[Any]) -> int:
@@ -274,7 +285,7 @@ def _event(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams,
            s: MemoryState | None = None) -> tuple[Cell, ...]:
     """Un moment ; une date qui revient chaque année (la tranche le sait) se montre à sa prochaine occurrence."""
     it = k.item
-    ev = s.events.get(it.id) if s is not None else None
+    ev = k.life or (s.events.get(it.id) if s is not None else None)
     yearly = ev is not None and ev.yearly
     when = occurrence(ev, frame.now, frame.env.tz_of(frame.root), p).when if ev is not None and yearly else it.due
     return (_n(k), _text(it), _about(frame, it.about, names), _sensitivity(it),
@@ -401,11 +412,11 @@ def _rereading(s: MemoryState, frame: Frame, ctx: InspectContext) -> Fields:
         ("dernier message", When(s.last_message_at) if s.last_message_at else "—"),
         ("dernière relecture", Ref("event", str(s.consolidated_seq), ctx.when(s.consolidated_at))
          if s.consolidated_seq else "jamais"),
-        ("fenêtres abandonnées", s.given_up),
-        ("la dernière abandonnée", Ref("event", str(s.given_up_seq), f"n° {s.given_up_seq}") if s.given_up_seq
+        ("fenêtres avec un passage différé", s.given_up),
+        ("la dernière différée", Ref("event", str(s.given_up_seq), f"n° {s.given_up_seq}") if s.given_up_seq
          else "—"),
         ("règle de relecture", f"{p.min_messages} messages, ou {p.quiet_us // MINUTE} min de calme ; "
-                               f"abandon après {p.max_attempts} échecs sur la même fenêtre"),
+                               "reprises isolées avec délai croissant"),
         ("éléments retenus", s.items),
         ("promesses en cours", len(s.promises)),
         ("réflexions de la nuit à écrire", len(s.reflections)),
@@ -445,7 +456,7 @@ def _runs(ctx: InspectContext) -> Table:
     for e in found:
         d = e.data
         rows.append(Row((When(e.at), Ref("event", str(d.upto), f"n° {d.upto}") if d.upto else "—", d.produced,
-                         Badge("abandonnée", "danger") if d.failed else Badge("faite", "ok"), d.model or "—"),
+                         Badge("partielle / différée", "warn") if d.failed else Badge("faite", "ok"), d.model or "—"),
                         href=Ref("event", str(e.seq), f"n° {e.seq}"), tone="danger" if d.failed else ""))
     return Table((Column("quand", "fit"), Column("relu jusqu'au"), Column("retenus", "num"), Column("issue", "fit"),
                   Column("modèle")), tuple(rows), title="Les dernières relectures",
@@ -474,7 +485,43 @@ def _nights(ctx: InspectContext) -> Table:
                             "où les souvenirs presque identiques se fondent.")
 def _consolidation(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     volumes = _volumes(ctx)
-    return [*([volumes] if volumes else []), _rereading(s, frame, ctx), _runs(ctx), _nights(ctx)]
+    return [*([volumes] if volumes else []), _rereading(s, frame, ctx), _queue(ctx), _runs(ctx), _nights(ctx)]
+
+
+class RetryExtractionArgs(BaseModel):
+    key: int = Field(gt=0)
+
+
+@MEMORY.action("reprendre", title="Reprendre cette extraction", args=RetryExtractionArgs,
+               emits=[c.EXTRACTION_DEFERRED], section="memoire",
+               description="Relit les messages sources avec le fournisseur actuellement configuré.")
+def _retry_extraction(s: MemoryState, frame: Frame, args: RetryExtractionArgs, ctx: ActionContext) -> Done:
+    rows = ctx.store.query_mind(f"SELECT messages,about,attempts,aside FROM {DEFERRED_TABLE} WHERE key=?",
+                                (args.key,))
+    if not rows:
+        raise Refused("Ce passage a déjà été traité ou oublié.")
+    messages, about, attempts, aside = rows[0]
+    draft = c.EXTRACTION_DEFERRED.draft(key=args.key, messages=tuple(json.loads(messages)),
+        aside=tuple(json.loads(aside)), about=tuple(json.loads(about)), attempts=attempts, retry_at=frame.now,
+        status="queued", failure_code="operator_retry", detail=Content.of("Reprise demandée par l'opérateur", level=3))
+    return Done(drafts=(draft,), message="Le passage sera relu.")
+
+
+def _queue(ctx: InspectContext) -> Table | Note:
+    if not ctx.store.query_mind("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (DEFERRED_TABLE,)):
+        return Note("La file de reprises n'existe pas encore.", tone="muted")
+    total = int(ctx.store.query_mind(f"SELECT COUNT(*) FROM {DEFERRED_TABLE}")[0][0])
+    pager = ctx.pager("reprises", size=20, total=total)
+    rows = ctx.store.query_mind(f"SELECT key,attempts,retry_at,status,reason,detail_ref,since FROM {DEFERRED_TABLE} "
+                                "ORDER BY since,key LIMIT ? OFFSET ?", (pager.size, pager.offset))
+    details = ctx.store.content([row[5] for row in rows])
+    return Table((Column("passage"), Column("depuis"), Column("essais"), Column("état"), Column("prochaine reprise")),
+        tuple(Row((Ref("event", str(key), f"message n° {key}"), When(since), attempts,
+                   "à examiner" if status == "review" else reason, When(retry) if retry else "manuelle"),
+                  detail=(Text(details.get(ref, FORGOTTEN), kind="mono"),
+                          ActionSlot("memory.reprendre", (("key", str(key)),))))
+              for key, attempts, retry, status, reason, ref, since in rows),
+        title=f"Passages à reprendre ({total})", empty="aucun passage en attente", pager=pager)
 
 
 # ── La fiche d'une personne ───────────────────────────────────────────────

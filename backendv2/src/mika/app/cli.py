@@ -361,7 +361,6 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
         cfg = settings.llm()
         backends = dict(cfg.backends)
         routes = dict(cfg.routes)
-        context = cfg.context_tokens
         if args.llm_cmd == "backend":
             previous = backends.get(args.name)
 
@@ -377,9 +376,12 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
                 think=kept(args.think, "think", False),
                 cache_ttl=previous.cache_ttl if previous else "5m",
                 max_reply_tokens=previous.max_reply_tokens if previous else 0,
+                context_tokens=kept(getattr(args, "context_tokens", None), "context_tokens", 24_000),
+                max_output_tokens=kept(getattr(args, "max_output_tokens", None), "max_output_tokens", 0),
+                chars_per_token=previous.chars_per_token if previous else 3.6,
                 quota_ceiling=previous.quota_ceiling if previous else 0.8,
                 auth=kept(args.auth, "auth", "abonnement"), claude_bin=kept(args.claude_bin, "claude_bin", ""),
-                config_dir=kept(args.config_dir, "config_dir", ""), fallback=kept(args.fallback, "fallback", ""),
+                config_dir=kept(args.config_dir, "config_dir", ""),
             )
         elif args.llm_cmd == "route":
             for role in args.roles:
@@ -388,16 +390,21 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
             backends.pop(args.name, None)
             routes = {r: b for r, b in routes.items() if b != args.name}
         elif args.llm_cmd == "context":
-            context = args.tokens
+            name = args.name or routes.get(REPLY, "")
+            if name not in backends:
+                return {"ok": False, "problems": ["Déclarer le fournisseur avant de régler son contexte."]}
+            raw = backends[name].model_dump()
+            raw["context_tokens"] = args.tokens
+            backends[name] = BackendSpec.model_validate(raw)
         if args.llm_cmd != "show":
             # ce qui vaut désormais : le premier fournisseur déclaré y sert « répondre » d'office ; une
             # configuration refusée (un fournisseur inconnu) l'est en le disant, rien n'est gardé
             try:
-                cfg = await settings.save_llm(LLMConfig(backends=backends, routes=routes, context_tokens=context))
+                cfg = await settings.save_llm(LLMConfig(backends=backends, routes=routes))
             except ValueError as exc:
                 return {"ok": False, "problems": [p.strip() for p in str(exc).split(";") if p.strip()]}
         return {"backends": {n: b.redacted() for n, b in cfg.backends.items()}, "routes": cfg.routes,
-                "répondre": cfg.routes.get(REPLY, ""), "context_tokens": cfg.context_tokens,
+                "répondre": cfg.routes.get(REPLY, ""),
                 "problems": cfg.problems()}
 
     return await _with_settings(data, run)
@@ -674,7 +681,6 @@ def _run(argv: list[str] | None) -> int:
                     help="claude_code : le login de la CLI (défaut) ou une clé d'API")
     lb.add_argument("--claude-bin", default=None, help="claude_code : la commande claude (vide : PATH)")
     lb.add_argument("--config-dir", default=None, help="claude_code : un dossier de CLI à part (vide : l'habituel)")
-    lb.add_argument("--fallback", default=None, help="le fournisseur qui prend le relais en cas d'échec")
     im = sub.add_parser("images", help="fournisseurs d'images et rôles (aucun : elle n'en génère pas)")
     isub = im.add_subparsers(dest="images_cmd", required=True)
     isub.add_parser("show")
@@ -715,8 +721,11 @@ def _run(argv: list[str] | None) -> int:
     lr.add_argument("roles", nargs="+", choices=ROLES, metavar="rôle", help="reply, initiative, extract…")
     lx = lsub.add_parser("remove")
     lx.add_argument("name")
-    lc = lsub.add_parser("context", help="taille du contexte (jetons)")
+    lb.add_argument("--context-tokens", type=int, default=None, help="fenêtre totale de ce fournisseur")
+    lb.add_argument("--max-output-tokens", type=int, default=None, help="plafond de sortie de ce fournisseur")
+    lc = lsub.add_parser("context", help="taille du contexte d'un fournisseur (jetons)")
     lc.add_argument("tokens", type=int)
+    lc.add_argument("--name", default=None, help="fournisseur ; par défaut celui du rôle reply")
     ac = sub.add_parser("account", help="créer un compte (serveur arrêté)")
     ac.add_argument("username")
     ac.add_argument("password", nargs="?", default=None,

@@ -318,6 +318,7 @@ class Watch:
             sens = max((x[2] for x in (old, new) if x), default=int(Sensitivity.PERSONAL))
             return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
                                         origin=q.origin, about=about, sensitivity=sens, source=q.source,
+                                        sources=tuple(i for i in (q.extra, q.source) if i is not None),
                                         dedupe_key=mark)
         who = _name(frame, q.person) if q.person else phrase("attention.thought.someone")
         if q.origin == c.REMORSE:
@@ -351,7 +352,8 @@ class Watch:
         sens = int(Sensitivity.ANODYNE if q.public else Sensitivity.PERSONAL)
         return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
                                     origin=q.origin, about=(q.person,) if q.person else (), sensitivity=sens,
-                                    source=q.source, dedupe_key=mark)
+                                    source=q.source, sources=tuple(sorted({q.source, *(i for i, _ in theirs)})),
+                                    dedupe_key=mark)
 
     def _broken_promise(self, q: Pending, frame: Frame, store: Any, mark: str) -> Draft[Any]:
         """« J'avais promis à Alice… » : le texte de la promesse, jamais inventé ;

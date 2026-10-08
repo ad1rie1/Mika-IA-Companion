@@ -31,6 +31,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
+from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
@@ -40,11 +41,6 @@ from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
 
 PENDING_CAP = 500
-#: les moments de la vie des autres gardés dans la tranche, au plus
-EVENTS_CAP = 300
-#: … et, à part, les dates qui reviennent chaque année : elles ne vieillissent pas, et les anniversaires de tout son
-#: cercle ne chassent pas l'entretien de jeudi
-YEARLY_CAP = 300
 #: les initiatives en cours qui tiennent une promesse (corrélation → promesse), au plus
 KEEPING_KEPT = 16
 #: le sujet d'une initiative qui tient une promesse : ``promise:<id>``
@@ -81,13 +77,14 @@ class MemoryParams(BaseModel):
         help="Après un appel d'extraction qui échoue (panne, réponse illisible), pas de nouvel essai avant ce "
              "délai : aucune rafale d'appels quand le fournisseur ne répond pas.")] = 10 * MINUTE
     max_attempts: Annotated[int, Knob(
-        label="Essais avant d'abandonner", group="Consolidation", lo=1, hi=10,
-        help="Après autant de réponses illisibles sur la même fenêtre, elle est abandonnée et le point de "
-             "contrôle avance : ces messages ne deviendront jamais des souvenirs.")] = 3
+        label="Essais avant de réduire les lots", group="Consolidation", lo=1, hi=10,
+        help="Après autant de réponses illisibles, les conversations sont relues en lots plus petits. Une panne "
+             "du fournisseur fait attendre la fenêtre au plus autant de passages, puis la met en file. Les passages "
+             "en échec restent dans une file durable, sans bloquer les conversations suivantes.")] = 3
     dedup_similarity: Annotated[float, Knob(
         label="Seuil de doublon", group="Consolidation", lo=0.5, hi=1.0, step=0.01,
-        help="Un souvenir ou une croyance extraits au moins aussi proches (similarité des vecteurs) d'un élément "
-             "existant le renforcent au lieu d'en créer un jumeau. Trop bas : des faits distincts fusionnent.")] = 0.92
+        help="Seuil pour rechercher un doublon candidat. Seuls les mêmes mots, personnes et confidents "
+             "peuvent ensuite se renforcer ; une ressemblance seule ne fusionne rien.")] = 0.92
     # rappel
     recall_k: Annotated[int, Knob(
         label="Candidats cherchés", group="Rappel", lo=5, hi=200,
@@ -303,12 +300,18 @@ class Keeping:
 @dataclass(frozen=True, slots=True)
 class MemoryState:
     checkpoint: int = 0
+    #: le dernier passage inscrit à la file de reprises (``seq``, 0 : jamais) : la consolidation relit la file
+    #: quand il change (une reprise demandée par un opérateur, un passage différé)
+    deferred_seq: int = 0
+    life_seen: bool = False
+    life_refreshed_at: int = 0
     #: messages de personnes pas encore relus (``seq``), les plus récents
     pending: tuple[int, ...] = field(default_factory=tuple)
     #: parmi eux, ceux qui ne lui étaient pas adressés (un salon : on parle entre soi)
     unaddressed: tuple[int, ...] = field(default_factory=tuple)
     last_message_at: int = 0
     items: int = 0
+    index_revision: int = 0
     chunks: int = 0
     promises: FrozenDict[int, c.PendingPromise] = field(default_factory=FrozenDict)
     #: tenir une promesse au moment dit : les initiatives en cours (corrélation → (promesse, départ)), les essais,
@@ -335,7 +338,8 @@ class MemoryState:
 #: v5 : l'importance d'un moment, ce qui se fête, et ce qui touche gravement quelqu'un (ADR 0052).
 #: v6 : une situation en cours prend fin quand la personne dit qu'elle est finie (``situation_ended``).
 #: v7 : une date qui revient chaque année (``yearly``) n'est jamais évincée par l'âge, et a son propre plafond.
-MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=7)
+#: v10 : la file de reprises (``deferred_seq``) ; situations et dates archivées en SQL, la tranche en est le cache.
+MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=10)
 MEMORY.declare(*c.ALL)
 
 
@@ -443,6 +447,11 @@ def _situation_ended(s: MemoryState, e, cx) -> MemoryState:
     return replace(s, events=s.events.set(ev.id, replace(ev, ended_at=e.at)))
 
 
+@MEMORY.reducer(c.EXTRACTION_DEFERRED)
+def _deferred(s: MemoryState, e, cx) -> MemoryState:
+    return replace(s, deferred_seq=e.seq)
+
+
 @MEMORY.reducer(c.CONSOLIDATED)
 def _consolidated(s: MemoryState, e, cx) -> MemoryState:
     upto = max(s.checkpoint, e.data.upto)
@@ -454,15 +463,14 @@ def _consolidated(s: MemoryState, e, cx) -> MemoryState:
 @MEMORY.reducer(c.EVENT_NOTED)
 def _noted(s: MemoryState, e, cx) -> MemoryState:
     """Un moment de la vie de quelqu'un : gardé tant qu'il est à venir ou passé
-    depuis peu ; une situation en cours, quelques semaines ; une date qui
-    revient chaque année, toujours ; les plus anciens partent d'abord. Le même
+    depuis peu ; une situation en cours jusqu'à sa fin explicite ; une date qui
+    revient chaque année, toujours. Le même
     moment renoté à la même date (la personne l'a dit elle-même après un tiers)
     reste repris s'il l'était ; une date qui change repart de zéro. Une
     situation finie, renotée, reste finie."""
     d = e.data
     p = params(cx.params)
     keep_until = e.at - round(p.event_recent_days * DAY)
-    keep_ongoing = e.at - round(p.situation_days * DAY)
     old = s.events.get(d.replaces) if d.replaces is not None else None
     followed = old.followed_at if old is not None and old.when == d.when else 0
     ended = old.ended_at if old is not None and old.ongoing and d.ongoing else 0
@@ -471,19 +479,38 @@ def _noted(s: MemoryState, e, cx) -> MemoryState:
                                            tuple(d.told_by), d.text.ref or "", d.secret, followed_at=followed,
                                            ongoing=d.ongoing, importance=d.importance, festive=d.festive,
                                            ended_at=ended, yearly=d.yearly and not d.ongoing))
-    stale = [ev.id for ev in events.values()
-             if not ev.yearly and ev.when < (keep_ongoing if ev.ongoing else keep_until)]
+    stale = [ev.id for ev in events.values() if not ev.yearly
+             and ((ev.ongoing and ev.ended_at and ev.ended_at < keep_until)
+                  or (not ev.ongoing and ev.when < keep_until))]
     for i in stale:
         events = events.delete(i)
-    once = [ev for ev in events.values() if not ev.yearly]
-    if len(once) > EVENTS_CAP:
-        for ev in sorted(once, key=lambda x: (x.when, x.id))[: len(once) - EVENTS_CAP]:
-            events = events.delete(ev.id)
-    yearly = [ev for ev in events.values() if ev.yearly]
-    if len(yearly) > YEARLY_CAP:  # la date d'une occurrence ne dit pas son âge : les plus anciennement notées partent
-        for ev in sorted(yearly, key=lambda x: x.id)[: len(yearly) - YEARLY_CAP]:
-            events = events.delete(ev.id)
-    return replace(s, items=s.items + 1, events=events)
+    return replace(s, items=s.items + 1, life_seen=True, events=life_cache(events))
+
+
+# L'archive SQL conserve tout ; cette tranche est seulement la mémoire de travail.
+LIFE_CACHE_CAP = 2048
+
+
+def life_cache(events: FrozenDict[int, c.LifeEvent], keep: frozenset[int] = frozenset()) -> FrozenDict[int, c.LifeEvent]:
+    if len(events) <= LIFE_CACHE_CAP:
+        return events
+    return FrozenDict(sorted(events.items(), key=lambda pair: (pair[0] in keep, pair[0]))[-LIFE_CACHE_CAP:])
+
+
+@MEMORY.reducer(SUBJECT_FORGOTTEN)
+def _forget_life(s: MemoryState, e, cx) -> MemoryState:
+    person = e.data.subject
+    return replace(s, events=FrozenDict((i, item) for i, item in s.events.items()
+                                        if person not in (*item.about, *item.told_by)),
+                   reflections=tuple(r for r in s.reflections if person not in r.about))
+
+
+@MEMORY.reducer(c.LIFE_RECALLED)
+def _life_recalled(s: MemoryState, e, cx) -> MemoryState:
+    events = s.events
+    for item in e.data.items:
+        events = events.delete(item.id).set(item.id, item)
+    return replace(s, events=life_cache(events, frozenset(item.id for item in e.data.items)), life_refreshed_at=e.at if e.data.daily else s.life_refreshed_at)
 
 
 @MEMORY.reducer(c.REMEMBERED, c.BELIEVED)
@@ -499,6 +526,11 @@ def _retained(s: MemoryState, e, cx) -> MemoryState:
             for person in d.about:
                 s = _hard(s, person, e.at)
     return s
+
+
+@MEMORY.reducer(c.REINFORCED, c.NIGHT_SORTED, c.PROMISE_RESOLVED, c.SITUATION_ENDED)
+def _index_changed(s: MemoryState, e, cx) -> MemoryState:
+    return replace(s, index_revision=e.seq)
 
 
 @MEMORY.reducer(attention_c.DIGESTED)

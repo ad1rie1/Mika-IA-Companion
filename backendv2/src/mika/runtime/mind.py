@@ -26,7 +26,7 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
-from mika.kernel.builtin import BOOT
+from mika.kernel.builtin import BOOT, SUBJECT_FORGOTTEN
 from mika.kernel.clock import Clock
 from mika.kernel.codec import canonical_json, digest
 from mika.kernel.events import (
@@ -563,9 +563,14 @@ class Mind:
                 extra.extend(str(r) for r in (got or ()) if r)
             return extra
 
+        # Révocation avant purge : même si la purge échoue, aucun lien oublié ne permet de divulgation.
+        await self.append([SUBJECT_FORGOTTEN.draft(subject=subject)], emitter="kernel",
+                          origin=Origin.KERNEL, correlation="forget")
         async with self._lock:
             removed = await self.store.forget_subject(subject, purge)
-        self.trace("forget", subject=subject, contents=removed)
+        if subject.startswith("name:"):
+            await self.rebuild(self.registry.faculties)
+        self.trace("forget", subject="name:(oublié)" if subject.startswith("name:") else subject, contents=removed)
         return removed
 
     # ── reconstruction en ligne ────────────────────────────────────────────

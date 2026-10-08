@@ -296,7 +296,7 @@ class Spare:
         return LLMResponse("réponse de repli", model="spare-1")
 
 
-async def test_a_cli_that_is_not_logged_in_fails_and_the_gateway_falls_back(tmp_path, cli):
+async def test_a_cli_that_is_not_logged_in_fails_and_the_gateway_propagates_the_error(tmp_path, cli):
     relay = Relay()
     async with serving(relay) as base:
         be = backend(relay, base, cli, tmp_path)
@@ -304,14 +304,13 @@ async def test_a_cli_that_is_not_logged_in_fails_and_the_gateway_falls_back(tmp_
                          messages=(Message("user", "x"),))
         with pytest.raises(ClaudeCodeError, match="Not logged in"):
             await be.complete(req)
-        gateway = Gateway({"cc": be, "spare": Spare()}, {"reply": "cc"}, clock=ManualClock(0),
-                          backend_fallbacks={"cc": "spare"})
-        resp = await gateway.call(req)
-    assert resp.text == "réponse de repli"
-    assert [(t.backend, t.outcome) for t in gateway.traces] == [("cc", "error:ClaudeCodeError"), ("spare", "ok")]
+        gateway = Gateway({"cc": be, "spare": Spare()}, {"reply": "cc"}, clock=ManualClock(0))
+        with pytest.raises(ClaudeCodeError):
+            await gateway.call(req)
+    assert [(t.backend, t.outcome) for t in gateway.traces] == [("cc", "error:ClaudeCodeError")]
 
 
-async def test_a_cli_that_cannot_reach_its_tools_fails_loudly_and_the_gateway_falls_back(tmp_path, cli):
+async def test_a_cli_that_cannot_reach_its_tools_fails_loudly_and_the_gateway_propagates_the_error(tmp_path, cli):
     """La vraie CLI continue sans un serveur MCP qui répond 404 : le modèle n'avait plus aucun outil et
     racontait « report_step: continue » au lieu de l'appeler (un pas de projet, sans verdict, qui bloquait le
     projet au troisième). Désormais l'appel échoue — le pas rend son crédit — ou passe au repli."""
@@ -322,10 +321,9 @@ async def test_a_cli_that_cannot_reach_its_tools_fails_loudly_and_the_gateway_fa
                          messages=(Message("user", "Avance d'un pas."),), tools=(ToolDecl("t", "t", {"type": "object"}),))
         with pytest.raises(ClaudeCodeError, match="joindre ses outils.*mika : failed"):
             await be.complete(req)
-        gateway = Gateway({"cc": be, "spare": Spare()}, {"step": "cc"}, clock=ManualClock(0),
-                          backend_fallbacks={"cc": "spare"})
-        resp = await gateway.call(replace(req, call_id="st-2#0"))
-    assert resp.text == "réponse de repli"
+        gateway = Gateway({"cc": be, "spare": Spare()}, {"step": "cc"}, clock=ManualClock(0))
+        with pytest.raises(ClaudeCodeError):
+            await gateway.call(replace(req, call_id="st-2#0"))
     assert len(stray) == 0 and not be._runs  # la session est refermée
 
 
@@ -425,7 +423,7 @@ def test_a_claude_code_backend_is_declared_with_its_fallback_and_costs_nothing_o
                     routes={"reply": "cc"})
     assert cfg.problems() == []
     gateway = build_gateway(cfg, ManualClock(0), relay=Relay(), relay_base=lambda: "http://127.0.0.1:1")
-    assert gateway.backend_fallbacks == {"cc": "api"}
+    assert "fallback" not in cfg.backends["cc"].model_dump()
     assert type(gateway.backends["cc"]).__name__ == "ClaudeCodeBackend"
     kind, ttl = gateway.pricing["cc"]
     assert price_usd("claude-sonnet-5-5", Usage(1_000_000, 1_000_000), provider=kind, cache_ttl=ttl) == 0.0
@@ -433,7 +431,7 @@ def test_a_claude_code_backend_is_declared_with_its_fallback_and_costs_nothing_o
     kind, ttl = build_gateway(keyed, ManualClock(0), relay=Relay()).pricing["cc"]
     assert price_usd("claude-sonnet-5-5", Usage(1_000_000, 0), provider=kind, cache_ttl=ttl) > 0
     broken = LLMConfig(backends={"cc": BackendSpec(kind="claude_code", model="", auth="cle_api", fallback="nulle")})
-    assert len(broken.problems()) == 2
+    assert len(broken.problems()) == 1
 
 
 def test_the_backend_opens_its_sessions_on_the_relay_the_server_mounts():
@@ -506,9 +504,9 @@ async def test_a_tool_loop_begun_elsewhere_is_never_restarted_in_a_fresh_cli(tmp
         with pytest.raises(ClaudeCodeError, match="boucle d'outils"):
             await asyncio.wait_for(be.complete(req), 20)
         # derrière la passerelle, un repli qui sait reprendre un fil d'outils prend la suite
-        gateway = Gateway({"cc": be, "spare": Spare()}, {"reply": "cc"}, clock=ManualClock(0),
-                          backend_fallbacks={"cc": "spare"})
-        assert (await gateway.call(req)).text == "réponse de repli"
+        gateway = Gateway({"cc": be, "spare": Spare()}, {"reply": "cc"}, clock=ManualClock(0))
+        with pytest.raises(ClaudeCodeError):
+            await gateway.call(req)
     assert seen == [] and not be._runs
 
 
@@ -610,9 +608,9 @@ async def test_a_call_folder_held_by_another_account_receives_nothing(tmp_path, 
                          messages=(Message("user", "x"),), tools=(ToolDecl("t", "t", {"type": "object"}),))
         with pytest.raises(ClaudeCodeError, match="autre compte"):
             await asyncio.wait_for(be.complete(req), 20)
-        gateway = Gateway({"cc": be, "spare": Spare()}, {"journal": "cc"}, clock=ManualClock(0),
-                          backend_fallbacks={"cc": "spare"})
-        assert (await gateway.call(replace(req, call_id="sq-2#0"))).text == "réponse de repli"
+        gateway = Gateway({"cc": be, "spare": Spare()}, {"journal": "cc"}, clock=ManualClock(0))
+        with pytest.raises(ClaudeCodeError):
+            await gateway.call(replace(req, call_id="sq-2#0"))
     assert list(squatted.iterdir()) == [] and len(relay) == 0
 
 

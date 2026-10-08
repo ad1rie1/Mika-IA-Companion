@@ -38,7 +38,7 @@ import asyncio
 import difflib
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
 from mika.contracts import runtime as rt
@@ -229,7 +229,7 @@ class EpisodeRunner:
         self.audience_of = audience_of
         self.parsers = list(parsers)
         self.composer = composer or Composer()
-        self.budget = budget or Budget(max_tokens=24_000)
+        self.budget = budget
         self.lease_margin_us = int(lease_margin_s * 1_000_000)
         self._live: dict[str, _Live] = {}
 
@@ -357,10 +357,15 @@ class EpisodeRunner:
                 more = "\n\n".join(filter(None, (acting(offered) if policy.visible else "",
                                                  catalogue(offered, core, mind.registry.bundles))))
                 declared = declare(offered, core)
+                provider_budget = getattr(self.gateway, "budget", None)
+                budget = self.budget or (provider_budget(policy.role, policy.max_tokens) if (
+                    provider_budget is not None and policy.role is not None) else Budget(max_tokens=24_000))
+                budget = replace(budget, message_overhead=round(16 * budget.chars_per_token))
+                envelope = round((64 + 16 * 2) * budget.chars_per_token)
                 prompt, trace = self.composer.compose(
                     blocks, kind=req.kind, audience_level=audience.level, witness_level=audience.witness_level,
-                    tied_level=audience.tied_level, muted_tags=policy.muted_tags, message=message, budget=self.budget,
-                    reserved=_reserved(persona, more, declared) if policy.role is not None else 0,
+                    tied_level=audience.tied_level, muted_tags=policy.muted_tags, message=message, budget=budget,
+                    reserved=_reserved(persona, more, declared) + envelope if policy.role is not None else 0,
                     typed_chars=req.typed_chars if message == req.message else None,
                 )
                 report.trace = trace

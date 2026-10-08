@@ -25,6 +25,7 @@ OWNERS = ("identity", "social", "others")
 
 #: les champs texte en clair permis, par événement, et pourquoi
 PLAIN = {
+    "social.relations_recalled": {"edges": "clés et références du graphe, sans texte libre"},
     "identity.claimed": {
         "handle": "une adresse (une clé)",
         "name": "le nom revendiqué : l'identité en a besoin pour reconnaître (comme le nom d'affichage du transport)",
@@ -54,6 +55,14 @@ PLAIN = {
         "source": "la source (code)", "kind": "une sorte (code)", "emotion": "une émotion (code)",
         "about": "des clés de personnes", "bundle": "un lot d'outils (code)",
     },
+    "social.bond_shifted": {
+        "source": "la source (code)", "kind": "une sorte (code)", "emotion": "une émotion (code)",
+        "about": "des clés de personnes", "bundle": "un lot d'outils (code)", "person": "une clé de personne",
+        "before": "un cran de lien (code)", "after": "un cran de lien (code)",
+        "cause": "ce qui l'a fait basculer (code : ``start``, ``declared``, ``owner``…)",
+    },
+    "social.bond_noted": {"person": "une clé de personne", "level": "un cran de lien (code)",
+                          "cause": "ce qui l'a fait basculer (code)"},
     "others.read": {
         "person": "une clé de personne", "handle": "une adresse",
         "cues": "des indices écrits par le code, jamais le texte du message",

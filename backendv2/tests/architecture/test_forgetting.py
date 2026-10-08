@@ -48,7 +48,7 @@ def test_declared_subjects_are_fields_of_the_payload():
 #: personne, des états, des noms — jamais des mots de quelqu'un (ceux-là sont des ``Content``, qui
 #: déclarent leurs sujets ; un nouveau champ de texte libre doit en être un).
 MEMORY_KEYS = {"origin", "source", "call_id", "status", "by", "model", "night", "to", "emotion", "about", "told_by",
-               "heard_by"}
+               "heard_by", "holder"}
 
 
 def test_memory_keeps_no_free_text_outside_its_contents():

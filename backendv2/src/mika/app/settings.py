@@ -130,14 +130,14 @@ class Settings:
                 _IGNORED_ROLES.add(role)
                 log.warning("modèles : le rôle « %s » n'existe pas, sa route est ignorée", role[:40])
             routes.pop(role)
-        return LLMConfig(backends=backends, routes=routes, context_tokens=data.get("context_tokens") or 24_000)
+        return LLMConfig.model_validate({"backends": backends, "routes": routes,
+            **({"context_tokens": data["context_tokens"]} if "context_tokens" in data else {})})
 
     async def save_llm(self, cfg: LLMConfig) -> LLMConfig:
         """Enregistre la configuration des modèles et rend celle qui vaut désormais : revalidée (une copie
         modifiée, ``model_copy``, ne passe pas par les validateurs) — le premier fournisseur déclaré y sert
         « répondre » d'office."""
-        cfg = LLMConfig.model_validate({"backends": dict(cfg.backends), "routes": dict(cfg.routes),
-                                        "context_tokens": cfg.context_tokens})
+        cfg = LLMConfig.model_validate({"backends": dict(cfg.backends), "routes": dict(cfg.routes)})
         problems = cfg.problems()
         if problems:
             raise ValueError("; ".join(problems))
@@ -146,8 +146,7 @@ class Settings:
             data = spec.model_dump()
             data["api_key_sealed"] = self.box.seal(data.pop("api_key"))
             backends[name] = data
-        await self._put(LLM_KEY, {"backends": backends, "routes": dict(cfg.routes),
-                                  "context_tokens": cfg.context_tokens})
+        await self._put(LLM_KEY, {"backends": backends, "routes": dict(cfg.routes)})
         return cfg
 
     # ── Images ──

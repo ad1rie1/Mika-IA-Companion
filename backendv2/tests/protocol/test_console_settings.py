@@ -46,9 +46,10 @@ def test_models_are_records_with_sealed_keys_roles_and_a_loader_that_degrades(wo
     bootstrap(client)
     url = f"{BASE}/fournisseurs"
     page = html_of(client.get(url))
-    # une sous-page par sujet : les fournisseurs ici, les rôles et le contexte chacun sur la leur
-    assert "Fournisseurs" in page and "répondre (voix)" not in page and "Contexte (jetons)" not in page
-    assert {f"{BASE}/roles", f"{BASE}/contexte", f"{BASE}/identite", f"{BASE}/comptes"} <= links(page, BASE)
+    # Le contexte appartient à chaque fournisseur ; les rôles ont leur propre page.
+    assert "Fournisseurs" in page and "répondre (voix)" not in page and "Contexte (jetons)" in page
+    assert {f"{BASE}/roles", f"{BASE}/identite", f"{BASE}/comptes"} <= links(page, BASE)
+    assert f"{BASE}/contexte" not in links(page, BASE)
     r = post(client, url, backend("claude", kind="claude", model="claude-sonnet-5", api_key=CANARY_KEY))
     assert r.status_code == 200 and "« claude » enregistré" in html_of(r)
     assert CANARY_KEY not in r.text and "défini" in html_of(r)
@@ -68,8 +69,7 @@ def test_models_are_records_with_sealed_keys_roles_and_a_loader_that_degrades(wo
     # et la liste des modèles ne se charge que sur le bouton — afficher la page n'interroge personne (CON-30) ;
     # injoignable : un message, pas une erreur, et rien n'est enregistré
     edit = html_of(client.get(f"{url}?enregistrement=backends&cle=local"))
-    assert re.search(r'<select name="fallback"[^>]*>.*?<option value="claude"', edit, re.S)
-    assert 'value="local"' not in re.search(r'<select name="fallback".*?</select>', edit, re.S).group(0)
+    assert 'name="fallback"' not in edit
     assert 'data-only="kind=claude|openai|ollama_cloud||kind=claude_code;auth=cle_api"' in edit
     assert "Liste indisponible" not in edit and "Charger la liste" in edit and "Options avancées" in edit
     asked = post(client, url, {**backend("local", kind="ollama", model="autre", host="http://127.0.0.1:9"),
@@ -84,11 +84,11 @@ def test_models_are_records_with_sealed_keys_roles_and_a_loader_that_degrades(wo
     assert "Ce qui sert vraiment chaque rôle" in html_of(routed) and "par repli" in html_of(routed)
     unknown = post(client, roles, {"_section": "modeles", "_champs": ["routes"], "routes.reply": "fantome"})
     assert unknown.status_code == 400 and "choix inconnu" in html_of(unknown)
-    ctx = post(client, f"{BASE}/contexte", {"_section": "modeles", "_champs": ["context_tokens"],
-                                            "context_tokens": "32 000"})
-    assert ctx.status_code == 200 and "Contexte : enregistré" in html_of(ctx)
+    ctx = post(client, url, {**backend("claude", context_tokens="32 000"), "_ancienne": "claude"})
+    assert ctx.status_code == 200
     cfg = client.portal.call(live.settings.llm)
-    assert cfg.routes == {"reply": "claude", "extract": "local"} and cfg.context_tokens == 32_000
+    assert cfg.routes == {"reply": "claude", "extract": "local"}
+    assert cfg.backends["claude"].context_tokens == 32_000 and cfg.backends["local"].context_tokens == 24_000
     # retirer un fournisseur emporte les rôles qui le visaient
     gone = post(client, url, {"_section": "modeles", "_supprimer": "backends", "_cle": "local"})
     assert "« local » retiré" in html_of(gone)

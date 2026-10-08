@@ -16,21 +16,17 @@ from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as c
-from mika.kernel.builtin import BOOT
+from mika.kernel.builtin import BOOT, SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
-from mika.vocab import affect as A
 from mika.vocab.affect import Emotion
 from mika.vocab.episodes import Kind
 from mika.vocab.people import fold, is_identifiable
 from mika.vocab.temperament import Temperament, lerp
 
 KEEP_DAYS = 64
-#: les liens retenus par personne (les plus récents), et les personnes dont on retient les liens
-TIES_KEPT = 32
-TIED_PERSONS_KEPT = 512
 #: Les dernières conversations dont on retient qui les a ouvertes.
 STARTS_KEPT = 20
 #: Les initiatives en cours dont on retient la raison (des épisodes qui n'ont jamais parlé s'y oublient).
@@ -183,12 +179,6 @@ class SocialParams(BaseModel):
         lo=0, hi=12, step=0.5,
         help="Preuve d'initiative (log-odds). Au-dessus du seuil (9), elle le fait dans la journée ; plafonnée à "
              "12 par l'arbitrage.")] = 10.0
-    # se connaître : qui a un lien avec qui (ADR 0058)
-    tie_room_max: Annotated[int, Knob(
-        label="Se connaître : une conversation d'au plus", group="Qui se connaît", lo=2, hi=50,
-        help="Deux personnes qui étaient ensemble dans une conversation d'au plus tant de personnes se connaissent "
-             "(un lien) ; au-delà, un grand salon ne fait pas des proches qui se connaissent. Une personne qui en "
-             "nomme une autre lui crée aussi un lien — jamais celle qui prononce seulement un nom.")] = 6
     # chercher du réconfort : une humeur nettement sombre
     comfort_evidence: Annotated[float, Knob(
         label="Preuve d'une recherche de réconfort", group="Réconfort", lo=0, hi=12, step=0.5,
@@ -338,6 +328,21 @@ class Profile:
     sensitive_ref: str = ""
 
 
+KnownRelation = c.KnownRelation
+RELATION_CACHE_CAP = 2048
+
+
+def relation_cache(relations, recalled=frozenset()):
+    if sum(len(edges) for edges in relations.values()) <= RELATION_CACHE_CAP:
+        return relations
+    rows = [(subject, key, edge) for subject, edges in relations.items() for key, edge in edges.items()]
+    rows.sort(key=lambda row: ((row[0], row[1]) in recalled, row[2].at, row[2].item, row[0], row[1]))
+    kept = {}
+    for subject, key, edge in rows[-RELATION_CACHE_CAP:]:
+        kept.setdefault(subject, {})[key] = edge
+    return FrozenDict((subject, FrozenDict(edges)) for subject, edges in kept.items())
+
+
 @dataclass(frozen=True, slots=True)
 class SocialState:
     greeted: FrozenDict[str, int] = field(default_factory=FrozenDict)
@@ -356,9 +361,8 @@ class SocialState:
     #: quand chaque adresse a quitté ses écrans pour la dernière fois (sa dernière connexion fermée) ; à un
     #: redémarrage, qui était là y est compté parti à l'instant où elle revient — ce n'est pas lui qui est parti
     left: FrozenDict[str, int] = field(default_factory=FrozenDict)
-    #: qui a un lien avec qui : personne → {personne avec qui elle a un lien → la dernière fois que ça s'est vu}.
-    #: Ils étaient ensemble dans une petite conversation, ou la seconde a nommé la première (ADR 0058)
-    ties: FrozenDict[str, FrozenDict[str, int]] = field(default_factory=FrozenDict)
+    #: Liens dirigés et attribués : sujet → (autre, sorte, informateur) → dernière preuve.
+    relations: FrozenDict[str, FrozenDict[str, KnownRelation]] = field(default_factory=FrozenDict)
     #: quand elle a repris des nouvelles de quelqu'un, longtemps après (une fois par silence)
     rekindled: FrozenDict[str, int] = field(default_factory=FrozenDict)
     #: le dernier cran de chaque lien qu'elle a ressenti ou tenu pour acquis, et quand : personne → (niveau, instant)
@@ -385,7 +389,7 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
 #: demander comment ça s'est passé) n'est plus comptée comme « elle a écrit la première » — ``starts`` se recalcule.
 #: v6 : le dernier cran ressenti de chaque lien (``bond_shifted``, ``bond_noted``).
 SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive,
-                 state_version=6, retired_params=("ignored_shift",))
+                 state_version=9, retired_params=("ignored_shift", "tie_room_max"))
 SOCIAL.declare(*c.ALL)
 
 
@@ -540,45 +544,48 @@ def _mentioned(s: SocialState, e, cx) -> SocialState:
 _HOSTILE = frozenset({Emotion.ANGRY, Emotion.DISGUSTED, Emotion.FRUSTRATED, Emotion.JEALOUS})
 
 
-def _tie(ties: FrozenDict[str, FrozenDict[str, int]], person: str, other: str,
-         at: int) -> FrozenDict[str, FrozenDict[str, int]]:
-    mine = (ties.get(person) or FrozenDict()).set(other, at)
-    if len(mine) > TIES_KEPT:
-        mine = FrozenDict(sorted(mine.items(), key=lambda kv: (kv[1], kv[0]))[-TIES_KEPT:])
-    ties = ties.set(person, mine)
-    if len(ties) > TIED_PERSONS_KEPT:  # les liens vus le moins récemment s'oublient
-        ties = FrozenDict(sorted(ties.items(), key=lambda kv: (max(kv[1].values()), kv[0]))[-TIED_PERSONS_KEPT:])
-    return ties
-
-
 @SOCIAL.reducer(memory_c.REMEMBERED, memory_c.BELIEVED, memory_c.EVENT_NOTED, memory_c.REINFORCED,
                 reads=[identity_c.PERSON])
 def _knit(s: SocialState, e, cx) -> SocialState:
-    """Qui a un lien avec qui, d'après ce qu'elle retient (ADR 0058) : deux personnes qui étaient ensemble dans
-    une petite conversation (``heard_by``) se connaissent ; une personne qui en nomme une autre en lui racontant sa
-    vie (``told_by`` → ``about``) la compte dans son entourage — l'autre a un lien avec elle. L'inverse, jamais :
-    prononcer le nom de quelqu'un ne crée aucun lien avec lui. Nommée avec colère ou dégoût, non plus."""
+    """Liens explicitement déclarés, orientés et sourcés. Une cooccurrence ne crée aucun lien."""
     d = e.data
-    p = params(cx.params)
+    relations = s.relations
+    replaced = getattr(d, "replaces", None)
+    if replaced is not None:
+        for subject, edges in relations.items():
+            remaining = FrozenDict((k, v) for k, v in edges.items() if v.item != replaced)
+            if len(remaining) != len(edges):
+                relations = relations.set(subject, remaining) if remaining else relations.delete(subject)
+    for relation in getattr(d, "relations", ()):
+        subject, other = relation.subject, relation.other
+        if subject == other or not is_identifiable(subject) or not is_identifiable(other):
+            continue
+        status = "uncertain" if getattr(d, "knowledge_kind", "claim") == "hypothesis" else relation.status
+        subjects = tuple(sorted({*d.about, *([d.holder] if getattr(d, "holder", None) else [])}))
+        edge = KnownRelation(other, relation.kind, status, e.seq, e.at,
+                             tuple(d.told_by), tuple(d.sources), d.secret, subjects)
+        key = f"{other}|{relation.kind}|{','.join(sorted(d.told_by))}"
+        mine = relations.get(subject) or FrozenDict()
+        relations = relations.delete(subject).set(subject, mine.delete(key).set(key, edge))
+    return replace(s, relations=relation_cache(relations))
 
-    def persons(keys: Any) -> set[str]:
-        return {cx.facts.get(identity_c.PERSON(k)) or k for k in keys
-                if is_identifiable(k) and not k.startswith("name:")}
 
-    pairs: set[tuple[str, str]] = set()
-    hostile = A.emotion_of(getattr(d, "emotion", None)) in _HOSTILE
-    if not hostile:
-        about = persons(d.about)
-        pairs |= {(named, teller) for teller in persons(d.told_by) for named in about if named != teller}
-    heard = persons(d.heard_by)
-    if 2 <= len(heard) <= p.tie_room_max:
-        pairs |= {(a, b) for a in heard for b in heard if a != b}
-    if not pairs:
-        return s
-    ties = s.ties
-    for person, other in sorted(pairs):
-        ties = _tie(ties, person, other, e.at)
-    return replace(s, ties=ties)
+@SOCIAL.reducer(c.RELATIONS_RECALLED)
+def _relations_recalled(s: SocialState, e, cx) -> SocialState:
+    relations = s.relations
+    for subject, key, edge in e.data.edges:
+        mine = relations.get(subject) or FrozenDict()
+        relations = relations.delete(subject).set(subject, mine.delete(key).set(key, edge))
+    return replace(s, relations=relation_cache(relations, frozenset((subject, key) for subject, key, _ in e.data.edges)))
+
+
+@SOCIAL.reducer(SUBJECT_FORGOTTEN)
+def _forget_relations(s: SocialState, e, cx) -> SocialState:
+    subject = e.data.subject
+    relations = FrozenDict((who, FrozenDict((key, edge) for key, edge in edges.items()
+                                           if subject not in (edge.other, *edge.about, *edge.told_by)))
+                           for who, edges in s.relations.items() if who != subject)
+    return replace(s, relations=FrozenDict((who, edges) for who, edges in relations.items() if edges))
 
 
 @SOCIAL.reducer(c.PROFILE_REVISED)
@@ -1009,9 +1016,16 @@ def _ties(s: SocialState, cx, person: str) -> tuple[str, ...]:
     """Les personnes avec qui elle a un lien (ADR 0058), telles qu'elles valent maintenant : une adresse reliée
     depuis à quelqu'un, un nom qu'un opérateur a relié à une personne parlent pour elle."""
     out: set[str] = set()
-    for key, others in s.ties.items():
-        if key == person or (cx.facts.get(identity_c.PERSON(key)) or key) == person:
-            out |= {cx.facts.get(identity_c.PERSON(o)) or o for o in others}
+    for key, edges in s.relations.items():
+        subject = cx.facts.get(identity_c.PERSON(key)) or key
+        for edge in edges.values():
+            tellers = {cx.facts.get(identity_c.PERSON(k)) or k for k in edge.told_by}
+            other = cx.facts.get(identity_c.PERSON(edge.other)) or edge.other
+            # Alice nomme Bob comme son ami : Bob est dans l'entourage déclaré d'Alice.
+            # Cela ne prouve pas que Bob lui accorde la même place.
+            if (other == person and edge.status == "active" and edge.kind != "hostile" and not edge.secret
+                    and subject in tellers and not subject.startswith("name:")):
+                out.add(subject)
     out.discard(person)
     return tuple(sorted(out))
 

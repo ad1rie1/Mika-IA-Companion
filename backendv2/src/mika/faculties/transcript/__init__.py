@@ -25,6 +25,8 @@ répondu.
 from __future__ import annotations
 
 import json
+import logging
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
@@ -69,6 +71,7 @@ from mika.kernel.prompt import ChatTurn, SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import TOO_LATE
 from mika.ports.llm import LLMRequest, Message
+from mika.ports.llm_budget import fits_context
 from mika.ports.store import Sql
 from mika.vocab.affect import Declared, emotion_cell, strip_prosody
 from mika.vocab.circadian import DAYS_FR, MONTHS_FR
@@ -77,7 +80,7 @@ from mika.vocab.people import clean_display_name, fold, is_internal
 from mika.vocab.phrasebook import phrase, phrases
 
 #: Messages relus au plus pour composer l'historique (le budget coupe ensuite).
-THREAD_WINDOW = 60
+THREAD_WINDOW = 320
 #: Le début de cette fenêtre avance par paquets de tant de messages.
 WINDOW_STEP = 20
 #: Un message qui arrive après un tel silence porte un repère de temps.
@@ -202,6 +205,7 @@ class Thread:
             "unanswered TEXT)"
         )
         sql.execute(f"CREATE INDEX IF NOT EXISTS {c.THREAD_TABLE}{sfx}_person ON {c.THREAD_TABLE}{sfx}(person, id)")
+        sql.execute(f"CREATE INDEX IF NOT EXISTS {c.THREAD_TABLE}{sfx}_room ON {c.THREAD_TABLE}{sfx}(room, id)")
 
     def drop(self, sql: Sql, sfx: str) -> None:
         sql.execute(f"DROP TABLE IF EXISTS {c.THREAD_TABLE}{sfx}")
@@ -282,7 +286,7 @@ def _left(d: rt.EpisodeEnded) -> list[tuple[str, int]]:
 #: version 3 : la colonne ``unanswered`` (pourquoi un message reçu est resté sans réponse), d'où les fins
 #: d'épisode ; version 2 : la colonne ``typed`` (ce que la personne a tapé, à part de ce que ses pièces jointes ont
 #: donné) — la table se reconstruit depuis le journal au premier démarrage
-TRANSCRIPT.projector(c.THREAD_TABLE, version=3, tier=Tier.T0,
+TRANSCRIPT.projector(c.THREAD_TABLE, version=4, tier=Tier.T0,
                      types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_ENDED])(Thread)
 
 
@@ -347,13 +351,15 @@ def window_start(total: int, window: int, step: int) -> int:
 
 
 def _window(store: Any, where: str, args: Sequence[Any], window: int, step: int) -> list[dict[str, Any]]:
-    total = int(store.query_mind(f"SELECT COUNT(*) FROM {c.THREAD_TABLE} WHERE {where}", tuple(args))[0][0])
-    start = window_start(total, window, step)
+    limit = window
+    if step > 1:
+        total = int(store.query_mind(f"SELECT COUNT(*) FROM {c.THREAD_TABLE} WHERE {where}", tuple(args))[0][0])
+        limit = total - window_start(total, window, step)
     rows = store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE {where} ORDER BY id LIMIT ? OFFSET ?",
-        (*args, total - start, start),
+        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE {where} ORDER BY id DESC LIMIT ?",
+        (*args, limit),
     )
-    return [dict(zip(_COLUMNS, r, strict=True)) for r in rows]
+    return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
 
 
 def private_thread(store: Any, handles: Sequence[str], limit: int, before: int | None = None,
@@ -366,10 +372,11 @@ def private_thread(store: Any, handles: Sequence[str], limit: int, before: int |
                    limit, step)
 
 
-def room_thread(store: Any, room: str, limit: int, before: int | None = None, step: int = 1) -> list[dict[str, Any]]:
+def room_thread(store: Any, room: str, limit: int, before: int | None = None, step: int = 1,
+                after: int = 0) -> list[dict[str, Any]]:
     """Ce qui s'est dit dans un salon (public pour ce salon), tous ensemble."""
     bound = before if before is not None else 2**62
-    return _window(store, "room=? AND id<?", (room, bound), limit, step)
+    return _window(store, "room=? AND id<? AND id>?", (room, bound, after), limit, step)
 
 
 def _message(store: Any, seq: int) -> dict[str, Any] | None:
@@ -598,7 +605,7 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     partagé verbatim ferait lire à Bob ce qu'Alice a écrit en privé). Dans un
     salon, le fil du salon — tout le monde l'a lu —, chacun sous son nom. En
     privé, ses adresses reliées s'ajoutent seulement si sa fiche est ouverte,
-    et le résumé du début du fil est épinglé (jamais coupé faute de place)."""
+    et le résumé du début du fil est prioritaire dans le budget."""
     store = ports.get("store")
     ep = frame.episode
     if store is None or ep is None or not ep.target:
@@ -610,14 +617,30 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
     asked = _message(store, before) if before is not None else None
     names: dict[str, str] = {}
     pinned: list[ChatTurn] = []
+    gap = False
+    # Le brut reste disponible jusqu'au résumé, avec une marge pour son traitement en arrière-plan.
+    limit = p.window
+
+    def summary_for(key: str) -> int:
+        summary = s.summaries.get(key)
+        if summary is None or (before is not None and summary[0] >= before):
+            return 0
+        text = store.content([summary[1]]).get(summary[1])
+        if not text:
+            return 0  # résumé oublié : ne pas masquer le brut
+        pinned.append(ChatTurn("user", phrase("transcript.thread.summary", text=text), id=summary[0], pinned=True))
+        return summary[0]
+
     if room:
-        rows = room_thread(store, room, p.window, before=before, step=p.window_step)
+        since = summary_for(f"room:{room}")
+        rows = room_thread(store, room, limit, before=before, step=p.window_step, after=since)
+        gap = bool(rows and store.query_mind(
+            f"SELECT 1 FROM {c.THREAD_TABLE} WHERE room=? AND id>? AND id<? LIMIT 1",
+            (room, since, rows[0]["id"])))
         names = speakers(frame, [str(r["person"]) for r in rows if r["role"] != "assistant"] +
                          ([str(asked["person"])] if asked else []))
         key = f"room:{room}"
     else:
-        summary = s.summaries.get(ep.target)
-        since = summary[0] if summary else 0
         aud = frame.audience
         handles: tuple[str, ...] = (ep.target,)
         key = f"private:{ep.target}"
@@ -626,10 +649,19 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
             # ses adresses dont la liaison est confirmée (une liaison par simple recoupement : son seul fil)
             handles = tuple(sorted({ep.target, *frame.get(identity_c.THREAD(ep.target))}))
             key = f"private:{person}"
-        rows = private_thread(store, handles, p.window, before=before, after=since, step=p.window_step)
-        text = store.content([summary[1]]).get(summary[1]) if summary else None
-        if summary and text:
-            pinned.append(ChatTurn("user", phrase("transcript.thread.summary", text=text), id=since, pinned=True))
+        # Chaque résumé couvre son adresse seulement. Celui d'Alice sur un écran ne masque pas
+        # des messages plus anciens, jamais résumés, sur son autre adresse confirmée.
+        rows = []
+        for handle in handles:
+            since = summary_for(handle)
+            part = private_thread(store, (handle,), limit, before=before, after=since, step=p.window_step)
+            gap |= bool(part and store.query_mind(
+                f"SELECT 1 FROM {c.THREAD_TABLE} WHERE person=? AND room IS NULL AND id>? AND id<? LIMIT 1",
+                (handle, since, part[0]["id"])))
+            rows += part
+        rows.sort(key=lambda r: r["id"])
+    if gap:
+        pinned.append(ChatTurn("user", phrase("transcript.thread.gap"), pinned=True))
     turns = pinned + thread_turns(rows, tz, frame.now, p.mark_after_us, names)
     # le message en cours (la question, ou « maintenant » pour une initiative), situé par rapport au dernier tour
     at = int(asked["at"]) if asked else frame.now
@@ -660,7 +692,7 @@ def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]],
         mark = gap_mark(prev, at, tz, after_us) if prev is not None else opening_mark(at, frame.now, tz)
         prev = at
         who = (phrase("transcript.compact.her_initiative", her=her) if r.get("kind") == Kind.INITIATIVE else her) \
-            if r["role"] == "assistant" else name
+            if r["role"] == "assistant" else (clean_display_name(frame.get(identity_c.IDENTITY(r["person"])).name) or name)
         lines.append(f"{f'[{mark}] ' if mark else ''}{who} : {r['text']}")
     return "\n".join(lines)
 
@@ -674,10 +706,11 @@ class Compact:
     def __init__(self) -> None:
         self.seen = -1
         self.retry_at = 0
+        self.failures: OrderedDict[str, tuple[int, int, int]] = OrderedDict()
 
     def next_due(self, state: TranscriptState, frame: Frame, last_run: int | None) -> int | None:
         checkpoint = frame.get(memory_c.CHECKPOINT)
-        if checkpoint == self.seen:
+        if checkpoint == self.seen and not self.failures:
             return None
         return max(frame.now, self.retry_at)
 
@@ -690,16 +723,27 @@ class Compact:
             self.seen = checkpoint
             return
         p = _params(frame.env.params_of("transcript", frame.root))
-        for (person,) in store.query_mind(f"SELECT DISTINCT person FROM {c.THREAD_TABLE} ORDER BY person"):
+        topics = [(str(person), None) for (person,) in store.query_mind(
+            f"SELECT DISTINCT person FROM {c.THREAD_TABLE} WHERE room IS NULL ORDER BY person")]
+        topics += [(f"room:{room}", str(room)) for (room,) in store.query_mind(
+            f"SELECT DISTINCT room FROM {c.THREAD_TABLE} WHERE room IS NOT NULL ORDER BY room")]
+        for person, room in topics:
+            failed_at, cap, attempts = self.failures.get(person, (0, p.compact_batch, 0))
+            if failed_at > frame.now:
+                continue
             summary = state.summaries.get(person)
             since = summary[0] if summary else 0
-            total = count_after(store, person, since)
+            where, args = ("room=? AND id>?", (room, since)) if room else (
+                "person=? AND room IS NULL AND id>?", (person, since))
+            total = int(store.query_mind(f"SELECT COUNT(*) FROM {c.THREAD_TABLE} WHERE {where}", args)[0][0])
             if total <= p.compact_after:
                 continue
             # les plus anciens d'abord, par lots : jamais « résumé » ce qui n'a pas été lu
-            folded = [r for r in oldest_after(store, person, since, min(total - p.keep, p.compact_batch))
-                      if r["id"] <= checkpoint]
-            if len(folded) < p.compact_min_fold:
+            got = store.query_mind(f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE {where} "
+                                    "AND id<=? ORDER BY id LIMIT ?",
+                                    (*args, checkpoint, min(total - p.keep, p.compact_batch, cap)))
+            folded = [dict(zip(_COLUMNS, r, strict=True)) for r in got]
+            if not folded or (len(folded) < p.compact_min_fold and not attempts):
                 continue
             previous = store.content([summary[1]]).get(summary[1]) if summary else None
             lines = _compact_lines(frame, person, folded, p.mark_after_us)
@@ -710,16 +754,34 @@ class Compact:
                                  system_stable=compact_system(self_c.name_of(frame.get(self_c.PERSONA))),
                                  messages=(Message("user", prompt),), max_tokens=p.compact_max_tokens,
                                  lane="background", priority=3)
-            response = await ctx.llm.call(request)
-            self.retry_at = 0
-            text = (response.text or "").strip()
+            while len(folded) > 1 and not fits_context(ctx.llm, request):
+                folded = folded[:max(1, len(folded) // 2)]
+                lines = _compact_lines(frame, person, folded, p.mark_after_us)
+                prompt = (phrase("transcript.compact.previous", text=previous) + "\n\n" if previous else "") + \
+                    phrase("transcript.compact.next") + "\n" + lines
+                request = replace(request, messages=(Message("user", prompt),))
+            response, text = None, ""
+            try:
+                response = await ctx.llm.call(request)
+                text = (response.text or "").strip() if response.stop != "max_tokens" else ""
+            except Exception as exc:  # noqa: BLE001 — un fil en panne ne retient pas les autres
+                logging.getLogger(__name__).warning("compactage %s : %s", person, type(exc).__name__)
             if not text:
-                self.seen = checkpoint  # rien d'utilisable : on réessaiera à la prochaine consolidation
-                return
+                retry = frame.now + min(DAY, p.compact_retry_us * 2 ** min(attempts, 16))
+                self.failures[person] = (retry, max(1, len(folded) // 2), attempts + 1)
+                self.failures.move_to_end(person)
+                while len(self.failures) > 256:
+                    self.failures.popitem(last=False)
+                logging.getLogger(__name__).warning("compactage incomplet, lot réduit à %s message(s)",
+                                                    max(1, len(folded) // 2))
+                continue
+            self.failures.pop(person, None)
+            self.retry_at = 0
             await ctx.emit(c.COMPACTED.draft(person=person, upto=folded[-1]["id"], summary=Content.of(text, level=2),
                                              count=len(folded), call_id=request.call_id, model=response.model))
             return  # un fil par passage ; le suivant au prochain réveil
         self.seen = checkpoint
+        self.retry_at = min((v[0] for v in self.failures.values()), default=0)
 
 
 @TRANSCRIPT.section("history", zone=Zone.HISTORY, episodes=CONVERSATIONAL)

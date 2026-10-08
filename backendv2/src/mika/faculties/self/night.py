@@ -82,7 +82,7 @@ from mika.vocab import affect as A
 from mika.vocab import circadian, privacy
 from mika.vocab.affect import Appraisal
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
-from mika.vocab.people import clean_tokens
+from mika.vocab.people import clean_tokens, named_label
 from mika.vocab.phrasebook import family, phrase, phrases
 from mika.vocab.privacy import Sensitivity
 
@@ -273,7 +273,7 @@ def silent(text: str) -> bool:
 def _names(frame: Frame, keys: set[str]) -> dict[str, str]:
     out = {}
     for k in sorted(keys):
-        out[k] = k[5:].title() if k.startswith("name:") else (frame.get(identity_c.IDENTITY(k)).name or "")
+        out[k] = named_label(k).title() if k.startswith("name:") else (frame.get(identity_c.IDENTITY(k)).name or "")
     return out
 
 

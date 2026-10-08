@@ -13,7 +13,7 @@ Trois règles tiennent toute la console :
    réglages est découpée en sous-pages rangées dans un sous-menu ; chaque champ
    dit ce qu'il fait, sous lui (jamais seulement au survol).
 3. **Un champ ne se montre que s'il sert.** Un choix limité est un sélecteur
-   (modèle, repli, rôle) ; un champ qui ne vaut que pour un type de fournisseur
+   (modèle, budgets, rôle) ; un champ qui ne vaut que pour un type de fournisseur
    n'apparaît qu'avec lui ; ce que le SDK ou la CLI sait déjà (URL, hôte,
    commande) est rangé dans « Options avancées ».
 
@@ -156,7 +156,7 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 ### Configuration (sous-menu)
 | Rubrique | Sous-page | Contenu |
 |---|---|---|
-| Intelligence | Fournisseurs | liste paginée ; chaque fournisseur a sa page : type, modèle (**sélecteur** chargé chez le fournisseur, même pour un fournisseur pas encore enregistré), connexion, clé ; options avancées repliées (URL, hôte, commande, créneaux, température…) ; repli = **sélecteur** parmi les autres fournisseurs |
+| Intelligence | Fournisseurs | liste paginée ; chaque fournisseur a sa page : type, modèle (**sélecteur** chargé chez le fournisseur, même pour un fournisseur pas encore enregistré), connexion, clé ; options avancées repliées (URL, hôte, commande, créneaux, température…) ; budgets de contexte et de sortie propres au fournisseur ; échec journalisé sans basculement |
 | | Rôles | un sélecteur par rôle, rangés par famille (voix, compréhension, sens, travail), et ce qui sert **vraiment** chaque rôle après replis |
 | | Contexte | la fenêtre que le prompt peut remplir |
 | Personnage | Identité | nom, description, langue, fuseau |
@@ -185,7 +185,7 @@ s'est tue », « sans réponse : panne : délai dépassé ») et y mène.
 | | Processus | passages, échecs, dernière erreur, en cours |
 | | Anomalies *(nouveau)* | échecs d'évaluation, traces du journal (supplanté, oubli…), échecs de processus gardés au journal |
 | | Sorties *(nouveau)* | la file de sortie : en attente, échouées, orphelines, essais, dernière erreur |
-| | Modèles en service *(nouveau)* | par fournisseur : créneaux occupés / total, repli ; par rôle : qui sert vraiment |
+| | Modèles en service *(nouveau)* | par fournisseur : créneaux occupés / total, quota ; par rôle : qui sert vraiment |
 | | Le monde, côté écrans *(nouveau)* | les clients de `/ws/world` (client, moteur, qui, rôles), qui tient le bail d'hôte et qui l'attend ; par hôte, la révision chargée et ce qui lui manque (ancres, assets, révision dépassée), en avertissement tant qu'il est connecté. ADR 0051 |
 | | Coûts et appels | par jour, rôle, fournisseur, **modèle** ; derniers appels paginés |
 | | Stockage *(nouveau)* | taille des bases, dernier instantané ; la dernière sauvegarde (ce qui s'est écrit depuis), la dernière vérification, les archives gardées |

@@ -9,16 +9,15 @@ un fil privé par personne, un salon d'un seul tenant — et le modèle (rôle
 à ce que Bob dit ailleurs. De chaque élément on sait qui il concerne, **qui
 l'a confié** (les auteurs des messages d'où il vient) et **qui l'a entendu**
 (les personnes de la conversation) ; ce qu'on a demandé de taire est un
-secret. Ce qui ressemble de très près à ce qu'elle sait déjà le **renforce**
-(au plus sensible des deux) au lieu de faire un doublon ; une croyance n'est
-corroborée que par quelqu'un qui ne l'avait pas encore dite. Une réplique
+secret. Les mêmes mots, avec les mêmes personnes et permissions, **renforcent**
+le souvenir existant. Deux informateurs gardent deux témoignages distincts. Une réplique
 recopiée n'est pas un souvenir (la sienne jamais ; celle de la personne, citée
 en disant qui parle), une banalité ne se garde pas, et comment la personne
 l'appelle se retient même quand le modèle l'oublie (ADR 0055). La relecture
 voit les situations en cours de ses personnes, avec leur numéro : une situation
 que la personne dit finie (« on a fini le déménagement ») prend fin. Tout part en un
-seul ajout gardé par le point de contrôle, qui n'avance que sur un succès —
-ou, après plusieurs échecs sur la même fenêtre, en le disant (``failed``).
+seul ajout gardé par le point de contrôle. Les échecs sont inscrits dans une file durable,
+sans retenir les conversations suivantes ; les reprises s'espacent et réduisent leurs lots.
 
 **Indexer.** L'index des vecteurs est un cache : ce processus y ajoute ce
 qui manque (éléments retenus, extraits d'échanges) et retire ce qui a
@@ -31,8 +30,9 @@ s'abandonne : rien ne reste dû pour toujours.
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, time
 from typing import Any
 
@@ -43,21 +43,26 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import extraction as x
+from mika.faculties.memory.archive import for_people
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, occurrence, params
 from mika.faculties.memory.life import kept_too_early, same_task
-from mika.faculties.memory.projections import ITEM_COLUMNS, informants_of
+from mika.faculties.memory.projections import DEFERRED_TABLE, ITEM_COLUMNS, fingerprint, informants_of
 from mika.kernel.clock import DAY, MINUTE, instant
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
+from mika.kernel.prompt import PromptBudgetError
 from mika.ports.llm import LLMRequest, Message
+from mika.ports.llm_budget import fits_context
 from mika.ports.vectors import VectorItem
 from mika.vocab.affect import emotion_of
 from mika.vocab.people import clean_display_name, fold, is_identifiable
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
-from mika.vocab.words import WORD, banal, stems
+from mika.vocab.words import WORD, banal, same_words, stems
+
+log = logging.getLogger(__name__)
 
 BATCH = 64
 #: les croyances déjà connues montrées au modèle, au plus
@@ -89,96 +94,159 @@ def _keys(raw: Any) -> list[str]:
     return [str(k) for k in got] if isinstance(got, list) else []
 
 
-@MEMORY.process("memory.consolidate", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, c.CONSOLIDATED],
+@MEMORY.process("memory.consolidate", wake_on=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, c.CONSOLIDATED,
+                                               c.EXTRACTION_DEFERRED],
                 lane="background", catch_up=CatchUp.ONCE, max_quantum_s=600)
 class Consolidate:
     def __init__(self) -> None:
+        #: pas de nouveau passage avant : une panne passagère, ou une erreur hors des appels (aucune rafale)
         self.retry_at = 0
-        self.attempts: dict[int, int] = {}
         #: rien de consolidable à ce ``seq`` (des questions attendent) : on attend un événement
         self.stuck_at: int | None = None
-        #: ce qu'une conversation a déjà donné pendant une relecture qu'une autre a fait échouer :
-        #: on ne repaie pas l'appel (clé : la conversation et ses messages)
-        self.extracted: dict[tuple[str, tuple[int, ...]], tuple[x.Extraction, str, str]] = {}
+        #: la file de reprises telle que relue au dernier passage (``MemoryState.deferred_seq``) et sa prochaine
+        #: reprise due (``None`` : rien en attente)
+        self.queue_seq = 0
+        self.next_job_at: int | None = None
+        #: passages de suite interrompus par une panne passagère du fournisseur
+        self.outages = 0
+        #: ce qu'une conversation a déjà donné pendant un passage qu'une panne a interrompu : on ne repaie pas
+        #: l'appel (clé : la conversation et ses messages)
+        self.extracted: dict[tuple[str, tuple[int, ...]], tuple[x.Extraction, str, str, str]] = {}
 
     def next_due(self, state: MemoryState, frame: Frame, last_run: int | None) -> int | None:
-        if not state.pending or self.stuck_at == frame.seq:
-            return None
-        if state.pending[0] in set(frame.get(rt.AWAITING)):
-            return None  # la plus ancienne question attend sa réponse : réveil par l'énoncé
-        p = params(frame.env.params_of("memory", frame.root))
         if self.retry_at > frame.now:
             return self.retry_at
-        if len(state.pending) >= p.min_messages:
-            return frame.now
-        return state.last_message_at + p.quiet_us
+        p = params(frame.env.params_of("memory", frame.root))
+        due: list[int] = []
+        # la plus ancienne question attend sa réponse : réveil par l'énoncé
+        if state.pending and self.stuck_at != frame.seq and state.pending[0] not in set(frame.get(rt.AWAITING)):
+            due.append(frame.now if len(state.pending) >= p.min_messages else state.last_message_at + p.quiet_us)
+        if state.deferred_seq > self.queue_seq:
+            due.append(frame.now)  # la file a changé (une reprise demandée, un passage différé) : la relire
+        elif self.next_job_at is not None:
+            due.append(max(frame.now, self.next_job_at))
+        return min(due) if due else None
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame
         state: MemoryState = ctx.state
         store = ctx.ports.get("store")
-        if store is None or ctx.llm is None or not state.pending:
+        if store is None or ctx.llm is None:
             return
         p = params(frame.env.params_of("memory", frame.root))
+        self.retry_at = frame.now + p.retry_us
+        self.queue_seq = state.deferred_seq
         rows = store.query_mind(
             f"SELECT id, at, role, person, text, reply_to, room FROM {transcript_c.THREAD_TABLE} WHERE id>? "
-            "ORDER BY id LIMIT ?", (state.checkpoint, p.max_window))
+            "ORDER BY id LIMIT ?", (state.checkpoint, p.max_window)) if state.pending else []
         rows = window(rows, set(frame.get(rt.AWAITING)))
-        if not rows:
-            self.stuck_at = frame.seq
-            return
-        self.stuck_at = None
-        upto = rows[-1][0]
+        self.stuck_at = None if rows else frame.seq
         directory = self._directory(frame, store)
         her = self_c.name_of(frame.get(self_c.PERSONA))
-        conversations = self._conversations(frame, rows, state, directory)
+        tasks = [(conv, 0) for conv in self._conversations(frame, rows, state, directory)]
+        drafts: list[Draft[Any]] = []
+        # Une reprise par passage : un document illisible ne monopolise pas la mémoire ; la suivante, si elle est
+        # due, au passage d'après, aussitôt.
+        jobs = store.query_mind(f"SELECT key,messages,attempts,about,aside FROM {DEFERRED_TABLE} "
+                                "WHERE status='queued' AND retry_at<=? ORDER BY retry_at,key LIMIT 1", (frame.now,))
+        for key, messages, attempts, about, aside in jobs:
+            ids = json.loads(messages)
+            retry_rows = store.query_mind(
+                f"SELECT id, at, role, person, text, reply_to, room FROM {transcript_c.THREAD_TABLE} "
+                f"WHERE id IN ({','.join('?' for _ in ids)}) ORDER BY id", tuple(ids)) if ids else []
+            drafts.append(c.EXTRACTION_DEFERRED.draft(key=key, status="resolved", attempts=attempts,
+                          about=tuple(json.loads(about)), detail=Content.of("reprise", level=3)))
+            tasks.extend((conv, attempts) for conv in self._conversations(frame, retry_rows, state, directory,
+                                                                           aside=json.loads(aside)))
         vectors = ctx.ports.get("vectors")
-        # si un appel lève, on ne réessaie pas avant le délai (aucune rafale)
-        self.retry_at = frame.now + p.retry_us
-        done: list[tuple[x.Conversation, x.People, list[tuple[int, str]], list[tuple[int, str, str]],
-                         list[tuple[int, str, str]], x.Extraction, str]] = []
-        failures, model, last_call = 0, "", f"{ctx.run_id}#0"
-        for n, conv in enumerate(conversations):
-            people = x.People.of(conv.speakers, directory, her)
+        failed = False
+        model, last_call = "", f"{ctx.run_id}#0"
+        for n, (conv, attempts) in enumerate(tasks):
+            people = x.People.of(conv.speakers, directory, her, scope=conv.key)
             known = await self._known_beliefs(store, vectors, conv, people, directory)
             promises = self._promises(frame, store, state, conv)
-            labels = {s.person: s.label for s in conv.speakers}
+            labels = {speaker.person: speaker.label for speaker in conv.speakers}
             situations = self._situations(frame, store, state, conv, p, labels)
-            cached = self.extracted.get((conv.key, conv.seqs))
-            if cached is None:
+            prompt = x.render(conv, now=frame.local(), beliefs=known,
+                              promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
+                                        for i, to, t in promises], situations=situations)
+            request = LLMRequest(role="extract", call_id=f"{ctx.run_id}#{n}", system_stable=x.system(her),
+                                 messages=(Message("user", prompt),), tools=(x.tool(her),), max_tokens=2500,
+                                 lane="background", priority=2, meta={"conversation": conv.key})
+            # Les souvenirs de contexte sont facultatifs, les messages sources ne le sont pas.
+            # Une ancienne liste de situations ne doit pas rendre une paire courte illisible.
+            while not fits_context(ctx.llm, request) and (known or promises or situations):
+                known, promises, situations = known[:len(known) // 2], promises[:len(promises) // 2], situations[:len(situations) // 2]
                 prompt = x.render(conv, now=frame.local(), beliefs=known,
                                   promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
                                             for i, to, t in promises], situations=situations)
-                request = LLMRequest(role="extract", call_id=f"{ctx.run_id}#{n}", system_stable=x.system(her),
-                                     messages=(Message("user", prompt),), tools=(x.tool(her),), max_tokens=2500,
-                                     lane="background", priority=2,
-                                     meta={"window": (rows[0][0], upto), "conversation": conv.key})
-                response = await ctx.llm.call(request)
-                extraction = x.parse(response)
-                if extraction is None:
-                    failures += 1
+                request = replace(request, messages=(Message("user", prompt),))
+            retry_size = max(2, p.max_window // (2 ** min(8, attempts // max(1, p.max_attempts))))
+            if (not fits_context(ctx.llm, request) or len(conv.lines) > retry_size) and len(conv.lines) > 1:
+                cuts = [i for i in range(1, len(conv.lines)) if conv.lines[i].person is not None
+                        and conv.lines[i - 1].person is None]
+                if cuts:
+                    middle = min(cuts, key=lambda i: abs(i - len(conv.lines) // 2))
+                    tasks.extend([(replace(conv, lines=conv.lines[:middle]), attempts),
+                                  (replace(conv, lines=conv.lines[middle:]), attempts)])
                     continue
-                cached = self.extracted[(conv.key, conv.seqs)] = (extraction, response.model, request.call_id)
-            extraction, model, last_call = cached
-            done.append((conv, people, known, promises, situations, extraction, last_call))
-        if failures:
-            # les essais se comptent par point de départ : la fin de la fenêtre bouge avec les messages
-            start = state.checkpoint
-            self.attempts[start] = self.attempts.get(start, 0) + 1
-            if self.attempts[start] < p.max_attempts:
-                return
-        else:
-            self.retry_at = 0
-        drafts: list[Draft[Any]] = []
-        for conv, people, known, promises, situations, extraction, call_id in done:
-            drafts += await self._drafts(extraction, frame, state, store, conv, people, known, promises, vectors,
-                                         p, call_id)
-            drafts += self._ended(extraction, situations, call_id)
-        drafts.append(c.CONSOLIDATED.draft(upto=upto, produced=len(drafts), failed=bool(failures),
-                                           call_id=last_call, model=model))
-        self.attempts.pop(state.checkpoint, None)
+            extraction, raw, reason = None, "", "invalid_output"
+            cached = self.extracted.get((conv.key, conv.seqs))
+            if cached is not None:
+                extraction, raw, model, last_call = cached
+            else:
+                try:
+                    response = await ctx.llm.call(request)
+                    model, last_call = response.model, request.call_id
+                    raw = json.dumps([dict(call.args) for call in response.tool_calls], ensure_ascii=False) \
+                        if response.tool_calls else response.text
+                    extraction = x.parse(response)
+                except PromptBudgetError:
+                    reason = "PromptBudgetError"  # une paire trop longue : la relire ne la raccourcira pas
+                except Exception as exc:  # noqa: BLE001 — une panne passagère : la fenêtre attend, bornée
+                    reason = type(exc).__name__
+                    if self.outages + 1 < p.max_attempts:
+                        # Rien n'avance, rien n'est mis en file : quand le fournisseur revient, la fenêtre se relit
+                        # d'un seul tenant ; ce qui a déjà réussi dans ce passage est gardé pour ne pas repayer.
+                        self.outages += 1
+                        self.retry_at = frame.now + p.retry_us * 2 ** (self.outages - 1)
+                        log.warning("consolidation : %s, nouvel essai dans %s min", reason,
+                                    (self.retry_at - frame.now) // MINUTE)
+                        return
+                    log.warning("consolidation %s : %s, passage mis en file de reprise", conv.seqs[0], reason)
+                if extraction is not None:
+                    self.extracted[(conv.key, conv.seqs)] = (extraction, raw, model, last_call)
+            if extraction is None or extraction.issues:
+                failed = True
+                attempt = attempts + 1
+                delay = min(DAY, p.retry_us * 2 ** min(attempt - 1, 16))
+                partial = extraction is not None
+                # Une sortie partielle, ou une paire qui ne tiendra jamais dans le contexte, attend un opérateur ;
+                # le reste revient de lui-même, de plus en plus espacé.
+                review = partial or reason == "PromptBudgetError"
+                drafts.append(c.EXTRACTION_DEFERRED.draft(
+                    key=conv.seqs[0], messages=conv.seqs, aside=tuple(ln.seq for ln in conv.lines if ln.aside),
+                    about=tuple(labels), attempts=attempt,
+                    retry_at=0 if review else frame.now + delay, status="review" if review else "queued",
+                    failure_code="invalid_items" if partial else ("invalid_output" if reason == "invalid_output" else
+                        "budget_exceeded" if reason == "PromptBudgetError" else "provider_error"),
+                    detail=Content.of(json.dumps({"issues": extraction.issues if partial else [reason],
+                                                  "output": raw}, ensure_ascii=False), level=3)))
+            if extraction is not None:
+                drafts += await self._drafts(extraction, frame, state, store, conv, people, known, promises, vectors,
+                                             p, last_call)
+                drafts += self._ended(extraction, situations, last_call)
+        if rows:
+            drafts.append(c.CONSOLIDATED.draft(upto=rows[-1][0], produced=sum(
+                d.type.name != c.EXTRACTION_DEFERRED.name for d in drafts), failed=failed,
+                call_id=last_call, model=model))
+        if drafts:
+            await ctx.emit(*drafts, guard=Guard("point de contrôle", reads=(c.CHECKPOINT,)))
         self.extracted.clear()
-        await ctx.emit(*drafts, guard=Guard("point de contrôle", reads=(c.CHECKPOINT,)))
+        self.outages = 0
+        self.retry_at = 0  # un passage mené à bout : le suivant dès qu'il y a de quoi
+        due = store.query_mind(f"SELECT MIN(retry_at) FROM {DEFERRED_TABLE} WHERE status='queued'")
+        self.next_job_at = int(due[0][0]) if due and due[0][0] is not None else None
 
     # ── qui est qui ──
     @staticmethod
@@ -200,11 +268,12 @@ class Consolidate:
         return {k: tuple(sorted(v)) for k, v in found.items()}
 
     def _conversations(self, frame: Frame, rows: list[tuple[Any, ...]], state: MemoryState,
-                       directory: dict[str, tuple[str, ...]]) -> list[x.Conversation]:
+                       directory: dict[str, tuple[str, ...]], aside: Sequence[int] = ()) -> list[x.Conversation]:
         """Un fil privé par personne (toutes ses adresses), un salon d'un
         seul tenant. Dans un salon, ce qui ne lui était pas adressé ne compte
-        que s'il nomme quelqu'un qu'elle connaît."""
-        aside = set(state.unaddressed)
+        que s'il nomme quelqu'un qu'elle connaît. ``aside`` : ce qu'une reprise
+        sait ne pas lui avoir été adressé (la tranche l'a oublié depuis)."""
+        aside = {*state.unaddressed, *aside}
         her = self_c.name_of(frame.get(self_c.PERSONA))
         known_names = {k for k in directory if " " not in k and len(k) >= 3}
         person_of: dict[str, str] = {}
@@ -266,7 +335,7 @@ class Consolidate:
         for i, t, about, told_by, sens, secret in sorted(found, key=lambda r: order[int(r[0])]):
             concerns, tellers = set(_keys(about)), set(_keys(told_by))
             anodyne = int(sens) <= Sensitivity.ANODYNE and not secret
-            if not (anodyne or (tellers <= persons and not conv.room)):
+            if not (anodyne or (bool(tellers) and tellers <= persons and not conv.room)):
                 continue
             if concerns and not concerns & (persons | named):
                 continue
@@ -296,9 +365,9 @@ class Consolidate:
         l'anodin, et dans un salon l'anodin seulement (le modèle pourrait le recopier ici)."""
         persons = set(conv.persons)
         live: list[tuple[c.LifeEvent, str]] = []
-        for ev in sorted(state.events.values(), key=lambda ev: ev.id):
-            if not ev.ongoing or ev.ended_at or not ev.text_ref \
-                    or not ev.when <= frame.now <= ev.when + round(p.situation_days * DAY):
+        archive = {ev.id: ev for ev in for_people(store, tuple(persons))}
+        for ev in sorted({**state.events, **archive}.values(), key=lambda ev: ev.id):
+            if not ev.ongoing or ev.ended_at or not ev.text_ref or ev.when > frame.now:
                 continue
             whom = next((k for k in (frame.get(identity_c.PERSON(a)) or a for a in ev.about) if k in persons), None)
             if whom is None:
@@ -311,7 +380,9 @@ class Consolidate:
         if not live:
             return []
         texts = store.content([ev.text_ref for ev, _ in live])
-        return [(ev.id, labels.get(whom, whom), texts[ev.text_ref]) for ev, whom in live if texts.get(ev.text_ref)]
+        return [(ev.id, labels.get(whom, whom), phrase("memory.extraction.render.situation",
+                 since=frame.local(ev.when).date().isoformat(), text=texts[ev.text_ref]))
+                for ev, whom in live if texts.get(ev.text_ref)]
 
     # ── ce qu'on en garde ──
     async def _drafts(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
@@ -330,7 +401,7 @@ class Consolidate:
             tous ceux qui y ont parlé l'ont confié (dans le doute, on ferme)."""
             seqs = sorted({s for s in cited if s in lines})
             if not seqs:
-                return conv.seqs, speaking, []
+                return conv.seqs, speaking if len(speaking) == 1 else (), []
             persons = sorted({lines[s].person for s in seqs if lines[s].person})
             return tuple(seqs), tuple(str(k) for k in persons), [lines[s].text for s in seqs if lines[s].person]
 
@@ -402,7 +473,7 @@ class Consolidate:
             sources, told_by, cited = provenance(cited_seqs)
             sens = x.sensitivity(s.sensibilite, has_person=bool(about or told_by))
             secret = secret_of(s.secret, cited, sens, text)
-            twin = await self._twin(store, vectors, text, c.SOUVENIR, about, p)
+            twin = await self._twin(store, vectors, text, c.SOUVENIR, about, p, told_by=told_by, heard_by=heard)
             if twin is not None:
                 drafts.append(c.REINFORCED.draft(item=twin, sources=sources, sensitivity=sens, about=about,
                                                  told_by=told_by, heard_by=heard, secret=secret))
@@ -444,10 +515,25 @@ class Consolidate:
             replaces = b.remplace if b.remplace in known_ids else None
             if between:
                 ours.append(fold(b.texte))
-            twin = await self._twin(store, vectors, b.texte, c.BELIEF, about, p)
-            if replaces is not None and same_words(known_texts.get(replaces, ""), b.texte):
-                twin = replaces  # la croyance « remplacée » dit la même chose : c'est elle
-            if twin is not None:
+            nature = {"avis": "opinion", "opinion": "opinion", "gout": "preference", "preference": "preference",
+                      "hypothese": "hypothesis"}.get(fold(b.genre or ""), "claim")
+            if x.ORIGIN.get(fold(b.origine)) == "inferred":
+                nature = "hypothesis"
+            holder = people.one(b.point_de_vue) if b.point_de_vue else source
+            relations = []
+            for relation in b.relations:
+                subject, other = people.one(relation.subject), people.one(relation.other)
+                if subject and other and subject != other and cited:
+                    relations.append(c.Relation(subject=subject, other=other, kind=relation.kind,
+                                                status=relation.status))
+                    about = tuple(sorted({*about, subject, other}))
+            if replaces is not None and not self._can_replace(store, replaces, about, told_by, heard, holder):
+                replaces = None
+            twin = await self._twin(store, vectors, b.texte, c.BELIEF, about, p,
+                                    told_by=told_by, heard_by=heard, knowledge_kind=nature, holder=holder)
+            if replaces is not None and not same_words(known_texts.get(replaces, ""), b.texte):
+                twin = None  # une correction explicite prime sur la proximité vectorielle
+            if twin is not None and not relations:
                 # redire une croyance en la désignant elle-même comme « remplacée » n'est pas la réviser : c'est la
                 # confirmer (sonde réelle du 2026-10-02 : « Je croyais que X — apparemment ce n'est plus vrai : X »)
                 new = set(informants_of(source, told_by))
@@ -460,7 +546,8 @@ class Consolidate:
                 text=Content.of(b.texte, level=sens), about=about, sensitivity=sens,
                 importance=importance, confidence=round(b.confiance, 3),
                 origin=x.ORIGIN.get(fold(b.origine), "told"), source=source, replaces=replaces, sources=sources,
-                call_id=call_id, told_by=told_by, heard_by=heard, secret=secret, between_us=between))
+                call_id=call_id, told_by=told_by, heard_by=heard, secret=secret, between_us=between,
+                knowledge_kind=nature, holder=holder, relations=tuple(relations)))
         drafts += self._called(nicks, ours, store, conv, call_id)
         for item in ex.confidentiel:
             if item in known_ids:
@@ -536,15 +623,20 @@ class Consolidate:
         change d'avis, la nouvelle croyance remplace l'ancienne."""
         sources, _told, _cited = provenance(b.messages)
         durable = x.durable_self(b)
+        nature = {"avis": "opinion", "opinion": "opinion", "gout": "preference", "preference": "preference",
+                  "hypothese": "hypothesis"}.get(fold(b.genre or ""), "claim")
         replaces = getattr(b, "remplace", None)
         replaces = replaces if durable and replaces in known_ids else None
-        twin = await self._twin(store, vectors, b.texte, c.BELIEF, (), p)
+        if replaces is not None and not self._can_replace(store, replaces, (), (), (), None, about_self=True):
+            replaces = None
+        twin = await self._twin(store, vectors, b.texte, c.BELIEF, (), p, knowledge_kind=nature)
         if twin is not None and twin != replaces:
             return [c.REINFORCED.draft(item=twin, sources=sources)]
         return [c.BELIEVED.draft(
             text=Content.of(b.texte, level=int(Sensitivity.ANODYNE)), about=(), sensitivity=int(Sensitivity.ANODYNE),
             importance=x.IMPORTANCE[3 if durable else 1], confidence=round(getattr(b, "confiance", 0.7), 3),
-            origin=c.OBSERVED, sources=sources, replaces=replaces, call_id=call_id, about_self=True, durable=durable)]
+            origin=c.OBSERVED, sources=sources, replaces=replaces, call_id=call_id, about_self=True, durable=durable,
+            knowledge_kind=nature)]
 
     async def _promised(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
                         people: x.People, promises: list[tuple[int, str, str]], vectors: Any, p: MemoryParams,
@@ -636,8 +728,8 @@ class Consolidate:
             at, all_day = got
             yearly = x.yearly(ev)
             if ev.en_cours:
-                # une situation : depuis quand (jamais dans le futur, jamais plus vieille que ce qu'on suit)
-                at = max(frame.now - round(p.situation_days * DAY) + DAY, min(at, frame.now))
+                # Conserver sa véritable ancienneté, même lorsqu'elle n'est plus relancée spontanément.
+                at = min(at, frame.now)
             elif at < frame.now - DAY and not yearly:
                 continue  # du passé : ce n'est plus à suivre (ce qui revient chaque année, si : il reviendra)
             if not ev.en_cours and (x.task_words(ev.texte) or any(
@@ -699,7 +791,8 @@ class Consolidate:
         """Le moment déjà noté que ce texte redit : presque les mêmes mots (vecteurs, radicaux) — ou, le même jour
         pour la même personne, les mêmes mots une fois les prénoms ôtés (« son anniversaire » est « l'anniversaire
         de Sam »). Une date qui revient chaque année se compare à son occurrence de ce jour-là."""
-        mine = [ev for ev in state.events.values() if set(ev.about) & set(about)]
+        archive = {ev.id: ev for ev in for_people(store, about)}
+        mine = [ev for ev in {**state.events, **archive}.values() if set(ev.about) & set(about)]
         if not mine:
             return None
         if frame is not None and at is not None:
@@ -722,26 +815,32 @@ class Consolidate:
         return None
 
     async def _twin(self, store: Any, vectors: Any, text: str, kind: str, about: tuple[str, ...],
-                    p: MemoryParams) -> int | None:
-        """Ce qui est déjà su, presque mot pour mot, **et toujours actif** (une
-        croyance remplacée ne se renforce pas) — et qui concerne au moins une
-        même personne (« Alice habite à Lyon » n'est pas « Bob habite à Lyon »)."""
-        if vectors is None:
-            return None
-        hits = [(k, sim) for k, sim in await vectors.search(text, 5, kinds={kind}) if sim >= p.dedup_similarity]
-        if not hits:
-            return None
-        marks = ",".join("?" * len(hits))
-        rows = {int(i): (st, _keys(a)) for i, st, a in store.query_mind(
-            f"SELECT id, status, about FROM {c.ITEMS_TABLE} WHERE id IN ({marks})", tuple(k for k, _ in hits))}
-        for k, _sim in hits:
-            status, theirs = rows.get(k, ("", []))
-            if status != "active":
+                    p: MemoryParams, *, told_by: tuple[str, ...] = (), heard_by: tuple[str, ...] = (),
+                    knowledge_kind: str = "claim", holder: str | None = None) -> int | None:
+        """Doublon exact indexé, sans dépendre des cinq voisins vectoriels les plus proches."""
+        encoded = tuple(json.dumps(sorted(set(keys)), ensure_ascii=False) for keys in (about, told_by, heard_by))
+        rows = store.query_mind(
+            f"SELECT id, text, knowledge_kind, holder FROM {c.ITEMS_TABLE} WHERE fingerprint=? AND kind=? "
+            "AND status='active' AND about=? AND told_by=? AND heard_by=? ORDER BY id", (fingerprint(text), kind, *encoded))
+        for k, previous, nature, owner in rows:
+            if not same_words(previous, text) or (kind == c.BELIEF and (nature != knowledge_kind or owner != holder)):
                 continue
-            if about and theirs and not set(about) & set(theirs):
-                continue
-            return k
+            return int(k)
         return None
+
+    @staticmethod
+    def _can_replace(store: Any, item: int, about: tuple[str, ...], told_by: tuple[str, ...],
+                     heard_by: tuple[str, ...], holder: str | None, *, about_self: bool = False) -> bool:
+        rows = store.query_mind(f"SELECT about, told_by, heard_by, holder, source, about_self FROM {c.ITEMS_TABLE} "
+                                "WHERE id=? AND kind=? AND status='active'", (item, c.BELIEF))
+        if not rows:
+            return False
+        people, tellers, witnesses, owner, source, self_item = rows[0]
+        authors = _keys(tellers)
+        previous_holder = owner or source or (authors[0] if len(authors) == 1 else None)
+        return (set(_keys(people)) == set(about) and set(_keys(tellers)) == set(told_by)
+                and set(_keys(witnesses)) == set(heard_by) and previous_holder == holder
+                and bool(self_item) == about_self)
 
     @staticmethod
     def _informants(store: Any, item: int) -> list[str]:
@@ -793,12 +892,6 @@ def _at(frame: Frame, t: int, minutes: int) -> int:
     """Ce jour-là (heure locale), à cette heure (minutes depuis minuit)."""
     return instant(datetime.combine(frame.local(t).date(), time(minutes // 60 % 24, minutes % 60),
                                     tzinfo=frame.env.tz_of(frame.root)))
-
-
-def same_words(a: str, b: str) -> bool:
-    """Deux textes qui disent la même chose mot pour mot (casse, accents et ponctuation à part ; pas un mot de
-    moins — « n'habite pas » n'est pas « habite »)."""
-    return bool(a) and WORD.findall(fold(a)) == WORD.findall(fold(b))
 
 
 @MEMORY.process("memory.promises", wake_on=[c.PROMISE_NOTICED, c.PROMISE_RESOLVED, rt.UTTERANCE,
@@ -869,7 +962,10 @@ _CHUNK_COLUMNS = ("id", "person", "user_text", "reply_text", "room")
 
 
 def _item_vector(r: dict[str, Any]) -> VectorItem:
-    return VectorItem(int(r["id"]), r["kind"], r["text"], tuple(sorted({*_keys(r["about"]), *_keys(r["told_by"])})))
+    people = {*_keys(r["about"]), *_keys(r["told_by"])}
+    if r.get("holder"):
+        people.add(r["holder"])
+    return VectorItem(int(r["id"]), r["kind"], r["text"], tuple(sorted(people)))
 
 
 def _chunk_vector(r: dict[str, Any]) -> VectorItem:
@@ -895,7 +991,7 @@ def forgets_of(store: Any) -> int:
     return int(rows[0][0]) if rows else 0
 
 
-@MEMORY.process("memory.index", wake_on=[c.REMEMBERED, c.BELIEVED, c.PROMISE_NOTICED, c.EVENT_NOTED, rt.UTTERANCE],
+@MEMORY.process("memory.index", wake_on=[*c.ALL, rt.UTTERANCE],
                 lane="background", catch_up=CatchUp.ONCE, max_quantum_s=600)
 class Index:
     """L'index des vecteurs (un cache) suit la mémoire : à chaque passage, ce qui est né depuis le précédent
@@ -904,21 +1000,22 @@ class Index:
     mémoire, textes compris, à chaque énoncé coûtait 80 ms à cinquante mille éléments, sur la boucle (ADR 0059)."""
 
     def __init__(self) -> None:
-        self.done: tuple[int, int] | None = None
+        self.done: tuple[int, int, int] | None = None
         self.retry_at = 0
         #: les plus grands identifiants déjà confiés à l'index (éléments, échanges)
         self.upto = (0, 0)
         #: le compte d'oublis vu au dernier rapprochement
         self.forgets = 0
+        self.revision = 0
 
     def next_due(self, state: MemoryState, frame: Frame, last_run: int | None) -> int | None:
-        if (state.items, state.chunks) == self.done:
+        if (state.items, state.chunks, state.index_revision) == self.done:
             return None
         return max(frame.now, self.retry_at)
 
     async def run(self, ctx: Any) -> None:
         state: MemoryState = ctx.state
-        key = (state.items, state.chunks)
+        key = (state.items, state.chunks, state.index_revision)
         vectors, store = ctx.ports.get("vectors"), ctx.ports.get("store")
         if vectors is None or store is None:
             self.done = key
@@ -926,13 +1023,24 @@ class Index:
         # si le plongement lève (modèle absent), pas de nouvel essai avant un moment : aucune rafale
         self.retry_at = ctx.frame.now + INDEX_RETRY_US
         forgets = forgets_of(store)
-        if self.done is None or forgets != self.forgets:
+        first = self.done is None
+        if first or forgets != self.forgets:
             todo, upto = await self._reconcile(vectors, store)
         else:
             todo, upto = self._fresh(store)
+        if first:
+            self.revision = int(store.query_mind("SELECT COALESCE(MAX(seq),0) FROM memory_changes")[0][0])
+        changed = store.query_mind("SELECT item, seq FROM memory_changes WHERE seq>? ORDER BY seq", (self.revision,))
+        if changed:
+            rows = _by_ids(store, c.ITEMS_TABLE, ITEM_COLUMNS, [int(i) for i, _ in changed])
+            active = [r for r in rows if r["status"] in ("active", "pending")]
+            valid = {int(r["id"]) for r in active}
+            await vectors.remove([int(i) for i, _ in changed if int(i) not in valid])
+            todo = list({v.key: v for v in [*todo, *map(_item_vector, active)]}.values())
         for i in range(0, len(todo), BATCH):
             await vectors.upsert(todo[i:i + BATCH])
         self.upto, self.forgets, self.done = upto, forgets, key
+        self.revision = max((int(seq) for _, seq in changed), default=self.revision)
         self.retry_at = 0
 
     def _fresh(self, store: Any) -> tuple[list[VectorItem], tuple[int, int]]:
@@ -943,14 +1051,16 @@ class Index:
                        (self.upto[1],), _CHUNK_COLUMNS)
         upto = (max([self.upto[0], *(int(r["id"]) for r in items)]),
                 max([self.upto[1], *(int(r["id"]) for r in chunks)]))
-        return [*map(_item_vector, items), *map(_chunk_vector, chunks)], upto
+        return [*map(_item_vector, (r for r in items if r["status"] in ("active", "pending"))),
+                *map(_chunk_vector, chunks)], upto
 
     @staticmethod
     async def _reconcile(vectors: Any, store: Any) -> tuple[list[VectorItem], tuple[int, int]]:
         """Toute la mémoire, par ses identifiants : l'oubli efface des lignes, leurs vecteurs partent aussi (l'index
         n'est qu'un cache) ; ce qui manque (un index neuf, jeté) s'ajoute."""
         indexed = vectors.indexed()
-        items = {int(r[0]) for r in store.query_mind(f"SELECT id FROM {c.ITEMS_TABLE}")}
+        items = {int(r[0]) for r in store.query_mind(
+            f"SELECT id FROM {c.ITEMS_TABLE} WHERE status IN ('active','pending')")}
         chunks = {int(r[0]) for r in store.query_mind(f"SELECT id FROM {c.CHUNKS_TABLE}")}
         gone = indexed - items - chunks
         remove = getattr(vectors, "remove", None)

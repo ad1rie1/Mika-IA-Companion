@@ -35,17 +35,20 @@ from mika.contracts import memory as c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory.faculty import MEMORY
+from mika.kernel.codec import digest
 from mika.kernel.faculty import Tier
 from mika.ports.store import Sql
 from mika.vocab.affect import strip_prosody
-from mika.vocab.words import stems
+from mika.vocab.words import WORD, fold, same_words, stems
 
 ITEM_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",
                 "emotion", "born_at", "touched_at", "recalled_at", "recalls", "status", "replaces", "recipient",
-                "due", "sources", "told_by", "heard_by", "secret", "informants", "about_self", "shown_at", "between_us")
+                "due", "sources", "told_by", "heard_by", "secret", "informants", "about_self", "shown_at", "between_us",
+                "knowledge_kind", "holder", "constraints", "internal_only")
 CHUNK_TEXT_MAX = 600
 #: élément → la référence de son texte (``Content.ref``)
 REFS_TABLE = "memory_refs"
+CHANGES_TABLE = "memory_changes"
 #: les événements qui créent un élément (et portent son texte)
 _CREATES = frozenset({c.REMEMBERED.name, c.BELIEVED.name, c.PROMISE_NOTICED.name, c.EVENT_NOTED.name})
 #: deux radicaux en commun entre ce qu'elle a dit et un élément montré : elle s'en est servie
@@ -85,6 +88,10 @@ def used(item_text: str, said: str) -> bool:
     return len(stems(item_text) & stems(said)) >= USED_STEMS
 
 
+def fingerprint(text: str) -> str:
+    return digest(WORD.findall(fold(text)))
+
+
 class Items:
     def create(self, sql: Sql, sfx: str) -> None:
         sql.execute(
@@ -96,20 +103,25 @@ class Items:
             "told_by TEXT NOT NULL DEFAULT '[]', heard_by TEXT NOT NULL DEFAULT '[]', "
             "secret INTEGER NOT NULL DEFAULT 0, informants TEXT NOT NULL DEFAULT '[]', "
             "about_self INTEGER NOT NULL DEFAULT 0, shown_at INTEGER NOT NULL DEFAULT 0, "
-            "between_us INTEGER NOT NULL DEFAULT 0)"
+            "between_us INTEGER NOT NULL DEFAULT 0, knowledge_kind TEXT NOT NULL DEFAULT 'claim', holder TEXT, "
+            "constraints TEXT NOT NULL DEFAULT '[]', internal_only INTEGER NOT NULL DEFAULT 0, fingerprint TEXT NOT NULL DEFAULT '')"
         )
         t, about = f"{c.ITEMS_TABLE}{sfx}", f"{c.ABOUT_TABLE}{sfx}"
         sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_kind ON {t}(kind, status, born_at)")
+        sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_fingerprint ON {t}"
+                    "(fingerprint, kind, status, about, told_by, heard_by)")
         sql.execute(f"CREATE TABLE IF NOT EXISTS {about}(item INTEGER NOT NULL, person TEXT NOT NULL, "
                     "PRIMARY KEY(item, person)) WITHOUT ROWID")
         sql.execute(f"CREATE INDEX IF NOT EXISTS {about}_person ON {about}(person, item)")
         sql.execute(f"CREATE TABLE IF NOT EXISTS {REFS_TABLE}{sfx}(item INTEGER PRIMARY KEY, ref TEXT NOT NULL)")
+        sql.execute(f"CREATE TABLE IF NOT EXISTS {CHANGES_TABLE}{sfx}(item INTEGER PRIMARY KEY, seq INTEGER NOT NULL)")
+        sql.execute(f"CREATE INDEX IF NOT EXISTS {CHANGES_TABLE}{sfx}_seq ON {CHANGES_TABLE}{sfx}(seq)")
         sql.execute(f"CREATE TABLE IF NOT EXISTS {c.FORGETS_TABLE}{sfx}(n INTEGER NOT NULL)")
         if not sql.query(f"SELECT 1 FROM {c.FORGETS_TABLE}{sfx}"):
             sql.execute(f"INSERT INTO {c.FORGETS_TABLE}{sfx}(n) VALUES(0)")
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        for table in (c.ITEMS_TABLE, c.ABOUT_TABLE, c.FORGETS_TABLE, REFS_TABLE):
+        for table in (c.ITEMS_TABLE, c.ABOUT_TABLE, c.FORGETS_TABLE, REFS_TABLE, CHANGES_TABLE):
             sql.execute(f"DROP TABLE IF EXISTS {table}{sfx}")
 
     def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
@@ -121,13 +133,25 @@ class Items:
             full = {"confidence": None, "origin": None, "source": None, "emotion": None, "recalled_at": 0,
                     "recalls": 0, "replaces": None, "recipient": None, "due": None, "told_by": "[]",
                     "heard_by": "[]", "secret": 0, "informants": "[]", "about_self": 0, "shown_at": 0, "between_us": 0,
+                    "knowledge_kind": "claim", "holder": None, "constraints": "[]", "internal_only": 0,
                     **row}
-            sql.execute(f"INSERT OR REPLACE INTO {t}({cols}) VALUES({marks})", tuple(full[k] for k in ITEM_COLUMNS))
+            sql.execute(f"INSERT OR REPLACE INTO {t}({cols},fingerprint) VALUES({marks},?)",
+                        (*[full[k] for k in ITEM_COLUMNS], fingerprint(full["text"])))
             _about_rows(sql, about, int(full["id"]), _loads(full["about"]))
 
         for e in events:
             d = e.data
             name = e.type.name
+            changed = set()
+            if name in _CREATES:
+                changed.add(e.seq)
+            for attr in ("item", "replaces", "promise", "event"):
+                if (item_id := getattr(d, attr, None)) is not None:
+                    changed.add(item_id)
+            if name == c.NIGHT_SORTED.name:
+                changed.update(i for pair in d.merges for i in pair)
+            sql.executemany(f"INSERT OR REPLACE INTO {CHANGES_TABLE}{sfx}(item, seq) VALUES(?,?)",
+                            [(i, e.seq) for i in sorted(changed)])
             if name in _CREATES and forgotten(d.text):
                 continue  # relu après un oubli (une reconstruction) : ce qui a été oublié ne revient pas
             if name in _CREATES and d.text is not None and d.text.ref:
@@ -137,7 +161,9 @@ class Items:
                 insert({"id": e.seq, "kind": c.SOUVENIR, "text": d.text.text or "", "about": _keys(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance, "emotion": d.emotion,
                         "born_at": e.at, "touched_at": e.at, "status": "active", "sources": json.dumps(list(d.sources)),
-                        "told_by": _keys(d.told_by), "heard_by": _keys(d.heard_by), "secret": int(d.secret)})
+                        "told_by": _keys(d.told_by), "heard_by": _keys(d.heard_by), "secret": int(d.secret),
+                        "constraints": json.dumps([rule.model_dump() for rule in d.constraints]),
+                        "internal_only": int(d.internal_only)})
             elif name == c.BELIEVED.name:
                 insert({"id": e.seq, "kind": c.BELIEF, "text": d.text.text or "", "about": _keys(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance, "confidence": d.confidence,
@@ -146,7 +172,8 @@ class Items:
                         "told_by": _keys(d.told_by), "heard_by": _keys(d.heard_by), "secret": int(d.secret),
                         "informants": _keys(informants_of(d.source, d.told_by)),
                         # 1 : ce qu'elle raconte d'elle, qui s'efface ; 2 : ce qui la définit (un goût, un avis), qui tient
-                        "about_self": 2 if d.durable else int(d.about_self), "between_us": int(d.between_us)})
+                        "about_self": 2 if d.durable else int(d.about_self), "between_us": int(d.between_us),
+                        "knowledge_kind": d.knowledge_kind, "holder": d.holder})
                 if d.replaces is not None:
                     sql.execute(f"UPDATE {t} SET status='superseded' WHERE id=?", (d.replaces,))
             elif name == c.PROMISE_NOTICED.name:
@@ -163,6 +190,8 @@ class Items:
                     sql.execute(f"UPDATE {t} SET status='superseded' WHERE id=? AND kind=?", (d.replaces, c.EVENT))
             elif name == c.PROMISE_RESOLVED.name:
                 sql.execute(f"UPDATE {t} SET status=?, touched_at=? WHERE id=?", (d.status, e.at, d.promise))
+            elif name == c.SITUATION_ENDED.name:
+                sql.execute(f"UPDATE {t} SET status='ended', touched_at=? WHERE id=?", (e.at, d.event))
             elif name == c.REINFORCED.name:
                 self._reinforce(sql, t, about, d, e.at)
             elif name == c.NIGHT_SORTED.name:
@@ -173,11 +202,11 @@ class Items:
 
     @staticmethod
     def _row(sql: Sql, t: str, item: int) -> dict[str, Any] | None:
-        got = sql.query(f"SELECT about, told_by, heard_by, informants, sensitivity, secret, importance FROM {t} "
+        got = sql.query(f"SELECT about, told_by, heard_by, informants, sensitivity, secret, importance, sources, text, constraints, internal_only FROM {t} "
                         "WHERE id=?", (item,))
         if not got:
             return None
-        return dict(zip(("about", "told_by", "heard_by", "informants", "sensitivity", "secret", "importance"), got[0],
+        return dict(zip(("about", "told_by", "heard_by", "informants", "sensitivity", "secret", "importance", "sources", "text", "constraints", "internal_only"), got[0],
                         strict=True))
 
     def _reinforce(self, sql: Sql, t: str, about: str, d: Any, at: int) -> None:
@@ -192,9 +221,12 @@ class Items:
             informants = [*informants, *informants_of(d.source, d.told_by)]
         sql.execute(
             f"UPDATE {t} SET touched_at=?, importance=MIN(1.0, importance + 0.05), sensitivity=?, about=?, told_by=?, "
-            "heard_by=?, secret=?, informants=? WHERE id=?",
-            (at, sens, _keys([*_loads(row["about"]), *d.about]), _keys([*_loads(row["told_by"]), *d.told_by]),
-             _keys([*_loads(row["heard_by"]), *d.heard_by]), int(bool(row["secret"]) or d.secret), _keys(informants),
+            "heard_by=?, secret=?, informants=?, sources=? WHERE id=?",
+            # Un ancien renfort peut avoir été fondé sur une simple similarité. En rejouant le journal,
+            # il ne doit pas élargir les permissions du texte conservé.
+            (at, sens, _keys([*_loads(row["about"]), *d.about]), row["told_by"],
+             row["heard_by"], int(bool(row["secret"]) or d.secret), _keys(informants),
+             json.dumps(sorted({*map(int, _loads(row["sources"])), *d.sources})),
              d.item))
         _about_rows(sql, about, d.item, d.about)
         if d.corroborated:
@@ -209,6 +241,10 @@ class Items:
         haut de chaque et l'union des personnes — une confidence fondue dans un
         souvenir anodin reste une confidence."""
         a, b = self._row(sql, t, keep), self._row(sql, t, drop)
+        if a is None or b is None or any(a[k] != b[k] for k in ("about", "told_by", "heard_by", "secret", "constraints", "internal_only")):
+            return  # même lors du rejeu d'un ancien journal, aucune permission ne s'élargit
+        if not same_words(a["text"], b["text"]):
+            return  # une négation ou un détail différent ne disparaît pas dans un quasi-doublon
         if a is not None and b is not None:
             sql.execute(
                 f"UPDATE {t} SET importance=?, sensitivity=?, about=?, told_by=?, heard_by=?, secret=?, touched_at=? "
@@ -241,11 +277,12 @@ class Items:
         like = f'%"{subject}"%'
         doomed = [(int(i),) for (i,) in sql.query(
             f"SELECT id FROM {t} WHERE id IN (SELECT item FROM {about} WHERE person=?) OR told_by LIKE ? "
-            "OR recipient=?", (subject, like, subject))]
+            "OR recipient=? OR holder=?", (subject, like, subject, subject))]
         refs = [str(r) for (i,) in doomed for (r,) in sql.query(f"SELECT ref FROM {REFS_TABLE}{sfx} WHERE item=?", (i,))]
         sql.executemany(f"DELETE FROM {t} WHERE id=?", doomed)
         sql.executemany(f"DELETE FROM {about} WHERE item=?", doomed)
         sql.executemany(f"DELETE FROM {REFS_TABLE}{sfx} WHERE item=?", doomed)
+        sql.executemany(f"DELETE FROM {CHANGES_TABLE}{sfx} WHERE item=?", doomed)
         # l'index des vecteurs saura qu'il a quelque chose à oublier (``memory.index``)
         sql.execute(f"UPDATE {c.FORGETS_TABLE}{sfx} SET n=n+1")
         # qui l'a seulement entendu (un salon) ou appris en passant : son nom s'efface des listes
@@ -338,9 +375,51 @@ class Told:
 # v3 : ce qui n'appartient qu'à elle et à la personne (``between_us`` : un surnom, une blague à elles, ADR 0055)
 # v4 : index (sorte, statut, naissance), ``memory_about``, ``memory_forgets`` ; l'oublié ne revient pas (ADR 0059)
 # v5 : ``memory_refs`` (élément → référence de son texte) : l'oubli d'une personne rattachée par un renfort l'efface
-MEMORY.projector(c.ITEMS_TABLE, version=5, tier=Tier.T0,
+MEMORY.projector(c.ITEMS_TABLE, version=8, tier=Tier.T0,
                  types=[*c.ALL, rt.UTTERANCE])(Items)
 # v3 : l'échange garde tout le tour (``Utterance.answers``), pas seulement le dernier message d'une rafale
 # v4 : index (personne, instant) et (salon, instant) ; l'oublié ne revient pas (ADR 0059)
 MEMORY.projector(c.CHUNKS_TABLE, version=4, tier=Tier.T0, types=[rt.UTTERANCE])(Chunks)
 MEMORY.projector(c.TOLD_TABLE, version=1, tier=Tier.T0, types=[rt.UTTERANCE])(Told)
+
+
+DEFERRED_TABLE = "memory_extraction_queue"
+
+
+class ExtractionQueue:
+    def create(self, sql: Sql, sfx: str) -> None:
+        t = DEFERRED_TABLE + sfx
+        sql.execute(f"CREATE TABLE IF NOT EXISTS {t}(key INTEGER PRIMARY KEY, messages TEXT NOT NULL, "
+                    "about TEXT NOT NULL, attempts INTEGER NOT NULL, retry_at INTEGER NOT NULL, "
+                    "status TEXT NOT NULL, reason TEXT NOT NULL, detail_ref TEXT NOT NULL, since INTEGER NOT NULL, "
+                    "aside TEXT NOT NULL DEFAULT '[]')")
+        sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_due ON {t}(status,retry_at,key)")
+
+    def drop(self, sql: Sql, sfx: str) -> None:
+        sql.execute(f"DROP TABLE IF EXISTS {DEFERRED_TABLE}{sfx}")
+
+    def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
+        t = DEFERRED_TABLE + sfx
+        for e in events:
+            d = e.data
+            if d.status == "resolved" or forgotten(d.detail):
+                sql.execute(f"DELETE FROM {t} WHERE key=?", (d.key,))
+                continue
+            sql.execute(f"INSERT INTO {t}(key,messages,about,attempts,retry_at,status,reason,detail_ref,since,aside) "
+                        "VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                        "messages=excluded.messages,about=excluded.about,attempts=excluded.attempts,"
+                        "retry_at=excluded.retry_at,status=excluded.status,reason=excluded.reason,"
+                        "detail_ref=excluded.detail_ref,aside=excluded.aside",
+                        (d.key, json.dumps(d.messages), _keys(d.about), d.attempts, d.retry_at, d.status,
+                         d.failure_code, d.detail.ref or "", e.at, json.dumps(sorted(d.aside))))
+
+    def forget(self, sql: Sql, subject: str, sfx: str) -> list[str]:
+        t = DEFERRED_TABLE + sfx
+        rows = sql.query(f"SELECT key,detail_ref FROM {t} WHERE EXISTS "
+                         "(SELECT 1 FROM json_each(about) WHERE value=?)", (subject,))
+        sql.executemany(f"DELETE FROM {t} WHERE key=?", [(key,) for key, _ in rows])
+        return [ref for _, ref in rows]
+
+
+# v2 : ``aside`` (ce qui, dans un salon, ne lui était pas adressé), relu tel quel à la reprise
+MEMORY.projector(DEFERRED_TABLE, version=2, tier=Tier.T0, types=[c.EXTRACTION_DEFERRED])(ExtractionQueue)

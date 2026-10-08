@@ -24,6 +24,7 @@ from mika.kernel import forms
 from mika.kernel.clock import Clock
 from mika.kernel.forms import Knob
 from mika.ports.llm import LLMBackend, LLMRequest, LLMResponse, MissingPersona
+from mika.ports.llm_budget import LLMLimits
 from mika.vocab.episodes import FALLBACKS, TRIAL_ROLE, VOICE_ROLES, Role
 
 #: le seul rôle qu'il faut servir : tout ce qui parle, et les utilitaires, y retombent
@@ -45,7 +46,7 @@ class BackendSpec(BaseModel):
 
     Le formulaire ne montre que ce qui sert au type choisi : la clé d'API d'un
     service hébergé (ou de Claude Code sur une clé), le modèle choisi dans la liste
-    du fournisseur, le repli parmi les autres. Ce que le SDK ou la CLI savent déjà
+    du fournisseur. Ce que le SDK ou la CLI savent déjà
     (adresse, hôte, commande, dossier) est rangé dans « Options avancées »."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -57,6 +58,17 @@ class BackendSpec(BaseModel):
     model: Annotated[str, Knob(label="Modèle", help="Choisi dans la liste que propose le fournisseur (elle se "
                                               "charge d'elle-même une fois le fournisseur enregistré).",
                                group="Le fournisseur", loader="models", advanced=False, order=20)]
+    context_tokens: Annotated[int, Knob(label="Contexte (jetons)",
+        help="Fenêtre totale de ce fournisseur : entrée, outils et réserve de sortie.",
+        lo=2_000, hi=1_000_000, step=1_000, group="Budgets", advanced=False, order=21)] = \
+        Field(default=24_000, ge=2_000, le=1_000_000)
+    max_output_tokens: Annotated[int, Knob(label="Sortie max. (jetons)",
+        help="Plafond de chaque réponse, tous rôles confondus. 0 : la limite demandée par le rôle.",
+        lo=0, hi=65_536, group="Budgets", advanced=False, order=22)] = Field(default=0, ge=0, le=65_536)
+    chars_per_token: Annotated[float, Knob(label="Caractères par jeton estimé",
+        help="Estimation du contexte. Réduire cette valeur pour réserver davantage de place.",
+        lo=1.0, hi=4.0, step=0.1, group="Budgets", order=23)] = Field(default=3.6, ge=1.0, le=4.0)
+
     auth: Annotated[Literal["abonnement", "cle_api"], Knob(
         label="Connexion", help="Le serveur ne voit jamais le login : la CLI s'authentifie elle-même. Avec une clé d'API "
                                 "Console, la clé se déclare juste dessous.", group="Connexion", choices=_AUTHS,
@@ -65,9 +77,6 @@ class BackendSpec(BaseModel):
                                  group="Connexion", secret=True, advanced=False, order=30,
                                  only_any=((("kind", ("claude", "openai", "ollama_cloud")),),
                                            (("kind", ("claude_code",)), ("auth", ("cle_api",)))))] = ""
-    fallback: Annotated[str, Knob(label="Repli", help="Le fournisseur qui prend le relais quand celui-ci échoue "
-                                                      "(non connecté, quota, panne). Aucun : l'appel échoue.",
-                                  group="Connexion", choices_from="backends", advanced=False, order=35)] = ""
     base_url: Annotated[str, Knob(label="Adresse du serveur", help="Seulement pour un serveur compatible OpenAI "
                                                                    "qui n'est pas OpenAI. Vide : OpenAI.",
                                   group="Options avancées", order=40, only=(("kind", ("openai",)),))] = ""
@@ -101,11 +110,29 @@ class BackendSpec(BaseModel):
                                                                     "connectes avec « mika claude-code login ».",
                                     group="Options avancées", order=110, only=(("kind", ("claude_code",)),))] = ""
     quota_ceiling: Annotated[float, Knob(label="Réserve d'abonnement", help="Au-delà de cet usage de "
-                                         "l'abonnement, ses appels de fond passent au repli (la conversation "
+                                         "l'abonnement, ses appels de fond sont suspendus (la conversation "
                                          "n'est jamais retenue). 0,8 = 80 % ; 0 : pas de réserve.", lo=0.0,
                                          hi=1.0, step=0.05, group="Options avancées", order=120,
                                          only=(("kind", ("claude_code",)),))] = \
         Field(default=0.8, ge=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _retired_fallback(cls, data: Any) -> Any:
+        # Une ancienne fiche reste lisible ; la prochaine sauvegarde retire l'option.
+        if isinstance(data, Mapping) and "fallback" in data:
+            return {k: v for k, v in data.items() if k != "fallback"}
+        return data
+
+    @model_validator(mode="after")
+    def _output_fits_context(self):
+        if self.max_output_tokens >= self.context_tokens:
+            raise ValueError("la sortie maximale doit être inférieure au contexte du fournisseur")
+        return self
+
+    @property
+    def limits(self) -> LLMLimits:
+        return LLMLimits(self.context_tokens, self.max_output_tokens, self.chars_per_token)
 
     @property
     def local(self) -> bool:
@@ -143,10 +170,20 @@ class LLMConfig(BaseModel):
                              "sans fournisseur retombe sur son rôle de repli.",
         keys=tuple((str(r), ROLE_LABELS.get(str(r), str(r))) for r in Role), choices_from="backends",
         advanced=False, order=20)] = Field(default_factory=dict)
-    context_tokens: Annotated[int, Knob(label="Contexte (jetons)", help="La fenêtre que le prompt peut remplir : "
-                                        "persona, fil, souvenirs. Au-delà, le plus ancien du fil est replié et les "
-                                        "citations extérieures coupées d'abord.", lo=2_000, hi=1_000_000,
-                                        step=1_000, advanced=False, order=30)] = Field(default=24_000, ge=2_000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _provider_budgets(cls, data: Any) -> Any:
+        """Migration de l'ancien budget global ; une valeur explicite du fournisseur est prioritaire."""
+        if not isinstance(data, Mapping) or "context_tokens" not in data:
+            return data
+        data = dict(data)
+        legacy = data.pop("context_tokens")
+        backends = {}
+        for name, spec in (data.get("backends") or {}).items():
+            raw = spec.model_dump(exclude_unset=True) if isinstance(spec, BackendSpec) else dict(spec)
+            backends[name] = {"context_tokens": legacy, **raw}
+        return {**data, "backends": backends}
 
     @model_validator(mode="before")
     @classmethod
@@ -176,10 +213,6 @@ class LLMConfig(BaseModel):
         if self.backends and REPLY not in self.routes:
             out.append(f"aucun fournisseur ne sert « {REPLY} » (répondre) : chaque tour échouerait")
         for name, spec in self.backends.items():
-            if spec.fallback and spec.fallback not in self.backends:
-                out.append(f"le fournisseur « {name} » se replie sur un inconnu : {spec.fallback}")
-            elif spec.fallback == name:
-                out.append(f"le fournisseur « {name} » ne peut pas être son propre repli")
             if spec.kind == "claude_code" and spec.auth == "cle_api" and not spec.api_key:
                 out.append(f"le fournisseur « {name} » (clé d'API) n'a pas de clé")
         return out
@@ -230,11 +263,13 @@ def build_backend(name: str, spec: BackendSpec, *, relay: Any = None, relay_base
         from mika.adapters.llm.ollama import OllamaBackend  # noqa: PLC0415
 
         return OllamaBackend(spec.model, host=spec.host or "http://localhost:11434", think=spec.think,
-                             max_reply_tokens=spec.max_reply_tokens or 768, temperature=spec.temperature, name=name)
+                             max_reply_tokens=spec.max_output_tokens or spec.max_reply_tokens or 768,
+                             temperature=spec.temperature, name=name)
     from mika.adapters.llm.ollama import OllamaCloudBackend  # noqa: PLC0415
 
     return OllamaCloudBackend(spec.model, spec.api_key, host=spec.host or "https://ollama.com", think=spec.think,
-                              max_reply_tokens=spec.max_reply_tokens or 2048, temperature=spec.temperature,
+                              max_reply_tokens=spec.max_output_tokens or spec.max_reply_tokens or 2048,
+                              temperature=spec.temperature,
                               name=name)
 
 
@@ -257,7 +292,7 @@ def build_gateway(cfg: LLMConfig, clock: Clock, *, on_trace: Callable[[LLMTrace]
     return Gateway(backends, dict(cfg.routes), clock=clock, voice_roles=frozenset(str(r) for r in VOICE_ROLES),
                    fallbacks={str(k): str(v) for k, v in FALLBACKS.items()}, slots=slots, preempt=preempt,
                    on_trace=on_trace, pricing={n: (price_kind(s), s.cache_ttl) for n, s in cfg.backends.items()},
-                   backend_fallbacks={n: s.fallback for n, s in cfg.backends.items() if s.fallback})
+                   limits={n: s.limits for n, s in cfg.backends.items()})
 
 
 class LiveGateway:
@@ -270,6 +305,9 @@ class LiveGateway:
 
     def set(self, gateway: Gateway | None) -> None:
         self._inner = gateway
+
+    def budget(self, role: str, max_tokens: int):
+        return self._inner.budget(role, max_tokens) if self._inner is not None else LLMLimits().budget(max_tokens)
 
     @property
     def configured(self) -> bool:

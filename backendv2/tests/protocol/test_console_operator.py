@@ -208,16 +208,16 @@ def test_renaming_a_provider_keeps_its_roles_and_says_so(world):  # noqa: F811
                 "_champs": list(fields), **fields}
 
     post(client, url, backend("a", kind="ollama", model="gemma"))
-    post(client, url, backend("b", kind="ollama", model="gemma", fallback="a"))
+    post(client, url, backend("b", kind="ollama", model="gemma"))
     post(client, f"{BASE}/reglages/roles", {"_section": "modeles", "_champs": ["routes"], "routes.reply": "a",
                                             "routes.murmur": "a"})
     renamed = post(client, url, backend("local", "a", kind="ollama", model="gemma"))
     page = html_of(renamed)
     assert renamed.status_code == 200 and "« a » s'appelle désormais « local »" in page
-    assert "répondre (voix)" in page and "Repli" in page  # ce qui a suivi est nommé
+    assert "répondre (voix)" in page  # ce qui a suivi est nommé
     cfg = client.portal.call(live.settings.llm)
     assert set(cfg.backends) == {"local", "b"} and cfg.routes == {"reply": "local", "murmur": "local"}
-    assert cfg.backends["b"].fallback == "local"
+    assert "fallback" not in cfg.backends["b"].model_dump()
     # un nom hors règle est refusé, rien ne change
     bad = post(client, url, backend("<b>x</b> / ? &", kind="ollama", model="gemma"))
     assert bad.status_code == 400 and "Nom refusé" in html_of(bad)

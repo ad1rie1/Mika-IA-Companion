@@ -101,7 +101,12 @@ def same_name(a: str | None, b: str | None) -> bool:
         return False
     if fa == fb:
         return True
-    return fa.split()[0] == fb.split()[0]
+    return (len(fa.split()) == 1 or len(fb.split()) == 1) and fa.split()[0] == fb.split()[0]
+
+
+def named_label(key: str) -> str:
+    """Le nom lisible d'une mention, ancienne ou contextualisée ; sa portée n'est pas un nom."""
+    return key.removeprefix("name:").split(":", 1)[-1]
 
 
 def clean_tokens(text: str) -> str:

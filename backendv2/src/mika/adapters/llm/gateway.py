@@ -13,14 +13,8 @@
   ne repasse pas derrière le fond qu'il devançait.
 - **Chaque appel a un délai**, par voie (``deadlines``) : l'attente d'un créneau
   comprise. Une réponse n'attend pas dix minutes un fournisseur muet.
-- Un fournisseur peut avoir un repli : s'il échoue (non connecté, quota, délai,
-  panne), l'appel repart une fois sur le repli **avec le temps qui reste** — le
-  principal n'en consomme que ``PRIMARY_SHARE`` quand un repli existe. Deux
-  traces, l'échec puis la reprise. Une annulation n'est jamais reprise ailleurs.
-- **Une boucle d'outils reste sur son fournisseur** (``call_id``) : passée sur le
-  repli, elle y reste ; et elle ne bascule en cours de route que vers un
-  fournisseur qui sait reprendre un fil d'outils déjà commencé — jamais vers la
-  CLI de Claude Code, qui le referait (des outils exécutés deux fois).
+- Une erreur est journalisée et propagée, sans changement de fournisseur.
+- Une boucle d'outils reste sur son fournisseur pendant toute sa durée.
 - Une réponse coupée par son plafond de jetons, sans appel d'outil : une sortie
   structurée (extraction, profil…) est redemandée une fois avec un plafond
   doublé ; une parole (rôle voix) est coupée à sa dernière phrase complète —
@@ -47,6 +41,7 @@ from typing import Any
 
 from mika.adapters.llm.pricing import price_usd
 from mika.kernel.clock import Clock
+from mika.kernel.prompt import Budget
 from mika.kernel.slots import PrioritySlots
 from mika.ports.llm import (
     PREEMPTED,
@@ -57,15 +52,14 @@ from mika.ports.llm import (
     MissingPersona,
     Usage,
 )
+from mika.ports.llm_budget import LLMLimits
 from mika.vocab.episodes import TRIAL_ROLE
 
 #: les derniers appels gardés en mémoire
 TRACES_KEPT = 2000
 #: le délai d'un appel par voie (secondes, attente d'un créneau comprise) ; une voie inconnue prend « background »
 DEFAULT_DEADLINES: Mapping[str, float] = {"conversation": 120.0, "background": 300.0}
-#: la part du délai que le fournisseur principal peut consommer quand un repli existe
-PRIMARY_SHARE = 2 / 3
-#: en dessous, un repli ne vaut pas la peine d'être tenté (secondes)
+#: temps minimal pour redemander une sortie tronquée (secondes)
 MIN_RETRY_S = 5.0
 #: le plafond d'une sortie redemandée après une coupure
 CUT_RETRY_CEILING = 8192
@@ -168,8 +162,8 @@ class Gateway:
         preempt: frozenset[str] = frozenset(),
         on_trace: Callable[[LLMTrace], None] | None = None,
         pricing: Mapping[str, tuple[str, str]] | None = None,
-        backend_fallbacks: Mapping[str, str] | None = None,
         deadlines: Mapping[str, float] | None = None,
+        limits: Mapping[str, LLMLimits] | None = None,
     ) -> None:
         self.backends = dict(backends)
         self.routes = dict(routes)
@@ -184,16 +178,17 @@ class Gateway:
         self._on_trace = on_trace
         #: fournisseur → (type, durée du cache) : de quoi chiffrer un appel
         self.pricing = dict(pricing or {})
-        #: fournisseur → fournisseur de repli quand il échoue
-        self.backend_fallbacks = {k: v for k, v in (backend_fallbacks or {}).items()
-                                  if v in self.backends and v != k}
         #: voie → délai d'un appel (secondes)
         self.deadlines = {**DEFAULT_DEADLINES, **dict(deadlines or {})}
+        self.limits = dict(limits or {})
         #: boucle d'outils (``call_id``) → le fournisseur qui la tient
         self._sticky: OrderedDict[str, str] = OrderedDict()
 
     def is_voice(self, role: str) -> bool:
         return role in self.voice_roles
+
+    def budget(self, role: str, max_tokens: int) -> Budget:
+        return self.limits.get(self.resolve(role), LLMLimits()).budget(max_tokens)
 
     def defers_tools(self, role: str) -> bool:
         """Le fournisseur qui sert ce rôle sait-il différer des outils ? Un fournisseur qui n'en dit rien : oui
@@ -206,7 +201,7 @@ class Gateway:
 
     def status(self) -> list[dict[str, Any]]:
         """L'état vivant de chaque fournisseur : créneaux (total, occupés, en attente),
-        préemption, repli, et ce que le fournisseur dit de lui (le quota d'un abonnement)."""
+        préemption, et ce que le fournisseur dit de lui (le quota d'un abonnement)."""
         out = []
         for name, backend in sorted(self.backends.items()):
             slots = self._slots[name]
@@ -216,7 +211,7 @@ class Gateway:
             except Exception:  # noqa: BLE001 — un état illisible ne casse pas la console
                 extra = {}
             out.append({"name": name, "slots": slots.n, "busy": slots.busy, "waiting": slots.waiting,
-                        "preempt": name in self.preempt, "fallback": self.backend_fallbacks.get(name, ""),
+                        "preempt": name in self.preempt,
                         "extra": extra if isinstance(extra, dict) else {}})
         return out
 
@@ -255,30 +250,9 @@ class Gateway:
         budget = self.deadline(req.lane)
         loop = asyncio.get_running_loop()
         start = loop.time()
-        alt = self._fallback_for(name, req)
-        try:
-            resp = await self._on(name, req, budget * PRIMARY_SHARE if alt is not None else budget)
-        except Exception as exc:
-            remaining = budget - (loop.time() - start)
-            if alt is None or remaining < MIN_RETRY_S:
-                raise
-            log.warning("%s a échoué pour « %s » (%s) : repli sur %s", name, req.role, exc, alt)
-            self._stick(req.call_id, alt)  # la suite de cette boucle reste sur le repli
-            name = alt
-            resp = await self._on(alt, req, remaining)
-        else:
-            self._stick(req.call_id, name)
+        resp = await self._on(name, req, budget)
+        self._stick(req.call_id, name)
         return await self._after_cut(name, req, resp, budget - (loop.time() - start))
-
-    def _fallback_for(self, name: str, req: LLMRequest) -> str | None:
-        """Le repli permis pour cet appel : en cours de boucle d'outils, seulement un
-        fournisseur qui sait reprendre un fil d'outils (sinon des outils rejoués)."""
-        alt = self.backend_fallbacks.get(name)
-        if alt is None:
-            return None
-        if in_tool_loop(req) and not getattr(self.backends[alt], "resumes_tool_loops", True):
-            return None
-        return alt
 
     def _stick(self, call_id: str, name: str) -> None:
         self._sticky[call_id] = name
@@ -293,6 +267,9 @@ class Gateway:
         voice = self.is_voice(req.role)
         if voice and resp.text.strip():
             return replace(resp, text=trim_speech(resp.text))
+        ceiling = self.limits.get(name, LLMLimits()).max_output_tokens
+        if ceiling and req.max_tokens >= ceiling:
+            return resp
         if req.meta.get(RETRY_AFTER_CUT) or req.max_tokens >= CUT_RETRY_CEILING or remaining < MIN_RETRY_S:
             return resp
         retry = replace(req, max_tokens=min(CUT_RETRY_CEILING, req.max_tokens * 2),
@@ -360,18 +337,21 @@ class Gateway:
         resp: LLMResponse | None = None
         try:
             async with asyncio.timeout(max(0.0, budget)):
+                req = self.limits.get(name, LLMLimits()).fit(req)
                 token = await slots.acquire(req.priority, preempt=name in self.preempt)
                 t0 = self.clock.now()
                 resp = await backend.complete(req)
             return resp
         except TimeoutError:
             outcome = "timeout"
+            log.error("appel LLM %s (%s, rôle %s) : délai dépassé", req.call_id, name, req.role)
             raise
         except asyncio.CancelledError as exc:
             outcome = "preempted" if PREEMPTED in exc.args else "cancelled"
             raise
         except Exception as exc:
             outcome = f"error:{type(exc).__name__}"
+            log.error("appel LLM %s (%s, rôle %s) : %s", req.call_id, name, req.role, type(exc).__name__)
             raise
         finally:
             if token is not None:

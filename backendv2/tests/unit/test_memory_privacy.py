@@ -310,6 +310,7 @@ def test_a_secret_never_leaves_its_confidant_even_for_a_close_friend(tmp_path):
             {"texte": "Alice va demander le divorce (CANARI-S1)", "personnes": ["Alice"], "sensibilite": "confidence",
              "secret": True, "messages": seq_of(prompt, "CANARI-S1")},
             {"texte": "Carol est la meilleure amie d'Alice (CANARI-T1)", "personnes": ["Alice", "Carol"],
+             "relations": [{"subject": "Alice", "other": "Carol", "kind": "friend", "status": "active"}],
              "sensibilite": "anodin", "messages": seq_of(prompt, "CANARI-T1")}]}
 
     script = Script(extract)
@@ -541,8 +542,8 @@ def test_what_comes_back_naming_someone_else_concerns_them_too(tmp_path):
         return rows, left
 
     rows, left = run_virtual(clock, main)
-    assert len(rows) == 1 and rows[0]["about"] == ["user_2", "user_3"], "un renfort unit les personnes concernées"
-    assert left == [], "ce qui concerne Bob s'oublie avec lui"
+    assert [r["about"] for r in rows] == [["user_2"], ["user_2", "user_3"]]
+    assert len(left) == 1 and left[0]["about"] == ["user_2"], "seule la preuve concernant Bob s'oublie avec lui"
 
 
 def test_a_confidence_merged_into_an_anecdote_stays_a_confidence(tmp_path):
@@ -571,9 +572,9 @@ def test_a_confidence_merged_into_an_anecdote_stays_a_confidence(tmp_path):
         return rows[keep], rows[drop]
 
     keep, drop = run_virtual(clock, main)
-    assert drop["status"] == "merged"
-    assert keep["sensitivity"] == 3 and keep["secret"], "la confidence fondue reste une confidence, et un secret"
-    assert keep["told_by"] == ["user_2", "user_3"] and keep["heard_by"] == ["user_2", "user_3"]
+    assert drop["status"] == keep["status"] == "active", "deux confidents ne se fondent pas"
+    assert drop["sensitivity"] == 3 and drop["secret"]
+    assert keep["told_by"] == ["user_2"] and drop["told_by"] == ["user_3"]
 
 
 def test_in_a_room_two_alices_are_told_apart_by_their_token(tmp_path):

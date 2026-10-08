@@ -41,6 +41,37 @@ Ouvre `http://127.0.0.1:8001/` (qui mène à `/inspecteur/`).
    trier le courrier…) y retombent. « Qui sert quoi » n'est à toucher que pour
    confier un rôle à un autre fournisseur.
 
+Les budgets se règlent **sur la fiche de chaque fournisseur**, dans « Budgets » :
+contexte total, plafond de sortie et estimation des caractères par jeton. Le contexte
+inclut les messages, les outils et la réserve de réponse. Un appel en échec est journalisé et propagé : aucun basculement automatique vers un autre fournisseur. L'ancien réglage global est repris pour les fournisseurs
+sans valeur explicite, puis enregistré dans leurs fiches à la prochaine sauvegarde. Le comptage reste une
+estimation configurable ; ce n'est pas le tokenizer exact de chaque modèle.
+
+La mémoire distingue les affirmations rapportées, opinions, préférences et hypothèses,
+avec leur auteur, les personnes concernées et leurs sources. Une ressemblance vectorielle
+ne fusionne plus deux confidences. Les liens sociaux doivent être explicites et sourcés ;
+mentionner une personne ou partager un salon ne crée aucun droit supplémentaire.
+Les mentions inconnues sont propres à leur conversation jusqu'à une liaison explicite.
+
+Les projections et états concernés se reconstruisent automatiquement au démarrage.
+Les anciennes fusions qui avaient déjà perdu une formulation ne permettent pas de
+retrouver cette formulation sans relire les messages d'origine. Une extraction invalide est isolée dans une file durable, avec ses messages sources,
+son diagnostic, le nombre de tentatives et la prochaine reprise. Le curseur de parcours
+avance sans la déclarer réussie et sans bloquer les autres conversations. Les éléments
+valides d'une sortie partielle sont conservés ; la sortie rejetée reste consultable et
+reprenable dans Mémoire › Consolidation. Une panne passagère du fournisseur (injoignable, délai,
+réserve d'abonnement) fait attendre la fenêtre d'un seul tenant, au plus « Essais avant de réduire les lots »
+passages espacés, avant de la mettre en file ; une paire trop longue pour le contexte attend un opérateur.
+Les situations et relations sont archivées en SQL ; les caches d'attention sont limités
+à 2 048 entrées chacun, rechargés à la rencontre et, pour les dates, quotidiennement.
+Une situation ancienne sans nouvelle conserve une issue inconnue dans l'archive.
+Les réflexions héritent des restrictions de toutes leurs sources identifiées ; une
+origine indéterminée reste intérieure. Les budgets de tokens restent des limites de fournisseur.
+L'oubli purge aussi les archives et remplace les anciennes clés `name:…` concernées
+par des identifiants opaques dans les enveloppes du journal, puis reconstruit l'état.
+Au-delà de 50 000 vecteurs, la recherche parcourt SQLite par blocs de 1 024 : les lectures et calculs quittent la boucle d’événements et la RAM des
+vecteurs est bornée, mais le coût d'une recherche exacte reste proportionnel au volume.
+
 Tant qu'aucun modèle ne sert « répondre », chaque message reste sans réponse
 et le tableau de bord le dit (« À traiter » › Modèles) ; `/health` aussi.
 

@@ -15,6 +15,7 @@ arrivés : la même mémoire répond la même chose, avant et après un redémar
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from collections.abc import Collection, Sequence
@@ -28,11 +29,25 @@ from mika.ports.vectors import Embedder, VectorItem
 _MIN_CAPACITY = 64
 
 
+async def _compute(fn, *args):
+    """Même annulée, une lecture termine avant de rendre le verrou aux mutations."""
+    task = asyncio.create_task(asyncio.to_thread(fn, *args))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await task
+        raise
+
+
 class SqliteVectorIndex:
-    def __init__(self, store: Any, embedder: Embedder, *, table: str = "memory_vectors") -> None:
+    def __init__(self, store: Any, embedder: Embedder, *, table: str = "memory_vectors",
+                 max_resident_vectors: int = 50_000) -> None:
         self.store = store
         self.embedder = embedder
         self.table = table
+        self.max_resident_vectors = max(1, max_resident_vectors)
+        self._spilled = False
+        self._lock = asyncio.Lock()
         self._reset([])
 
     @property
@@ -47,6 +62,11 @@ class SqliteVectorIndex:
                         "kind TEXT NOT NULL, persons TEXT NOT NULL, vec BLOB NOT NULL, PRIMARY KEY(key, model))")
 
         await self.store.run_views(create)
+        count = self.store.query_views(f"SELECT COUNT(*) FROM {table} WHERE model=?", (self.model,))[0][0]
+        if count > self.max_resident_vectors:
+            self._reset([])
+            self._spilled = True
+            return
         rows = self.store.query_views(f"SELECT key, kind, persons, vec FROM {table} WHERE model=? ORDER BY key",
                                       (self.model,))
         self._reset([(int(k), kind, tuple(json.loads(p)), np.frombuffer(v, dtype=np.float16).astype(np.float32))
@@ -129,6 +149,9 @@ class SqliteVectorIndex:
             self._person_rows.pop(p, None)
 
     def indexed(self) -> set[int]:
+        if self._spilled:
+            return {int(k) for (k,) in self.store.query_views(
+                f"SELECT key FROM {self.table} WHERE model=?", (self.model,))}
         return set(self._pos)
 
     async def upsert(self, items: Sequence[VectorItem]) -> int:
@@ -144,17 +167,28 @@ class SqliteVectorIndex:
         def write(sql: Any) -> None:
             sql.executemany(f"INSERT OR REPLACE INTO {table}(key, model, kind, persons, vec) VALUES(?,?,?,?,?)", rows)
 
-        await self.store.run_views(write)
-        for n, i in enumerate(items):
-            self._append(int(i.key), i.kind, tuple(sorted(i.persons)), half[n].astype(np.float32))
+        async with self._lock:
+            await self.store.run_views(write)
+            if self._spilled or self._n + len({i.key for i in items} - self._pos.keys()) > self.max_resident_vectors:
+                self._reset([])
+                self._spilled = True
+            else:
+                for n, i in enumerate(items):
+                    self._append(int(i.key), i.kind, tuple(sorted(i.persons)), half[n].astype(np.float32))
         return len(items)
 
     async def search(self, query: str, k: int, *, kinds: Collection[str] | None = None,
                      keys: Collection[int] | None = None,
                      persons: Collection[str] | None = None) -> list[tuple[int, float]]:
-        if not self._n or not query.strip() or k <= 0:
+        if (not self._n and not self._spilled) or not query.strip() or k <= 0:
             return []
         q = np.asarray((await self.embedder.embed([query]))[0], dtype=np.float32)
+        async with self._lock:
+            if self._spilled:
+                return await self._search_disk(q, k, kinds, keys, persons)
+            return await _compute(self._search, q, k, kinds, keys, persons)
+
+    def _search(self, q: np.ndarray, k: int, kinds, keys, persons) -> list[tuple[int, float]]:
         # après le plongement (une attente) : la matrice a pu grandir ou se recomposer entre-temps
         n = self._n
         mask = self._mask(kinds, keys, persons)
@@ -162,7 +196,11 @@ class SqliteVectorIndex:
         if not len(idx):
             return []
         # un filtre étroit (une inconnue) : seulement ses lignes ; large : tout, sans copier la matrice
-        sims = self._mat[idx] @ q if 8 * len(idx) < n else (self._mat[:n] @ q)[idx]
+        # Réduction identique quelle que soit la position de la ligne : BLAS peut changer
+        # l'arrondi selon l'alignement après suppression et inverser des ex æquo.
+        sims = (np.einsum("ij,j->i", self._mat[idx], q, dtype=np.float64).astype(np.float32)
+                if 8 * len(idx) < n else
+                np.einsum("ij,j->i", self._mat[:n], q, dtype=np.float64).astype(np.float32)[idx])
         if len(idx) > k:
             # les k meilleures, ex æquo du bord compris : le départage par clé reste exact
             edge = np.partition(sims, len(sims) - k)[len(sims) - k]
@@ -170,6 +208,46 @@ class SqliteVectorIndex:
             idx, sims = idx[near], sims[near]
         order = np.lexsort((self._keys[idx], -sims))[:k]
         return [(int(self._keys[idx[i]]), float(sims[i])) for i in order]
+
+    async def _search_disk(self, q: np.ndarray, k: int, kinds, keys, persons) -> list[tuple[int, float]]:
+        """Au-delà du cache RAM : recherche exacte par blocs, sans charger toute la matrice.
+
+        Le verrou protège la cohérence entre les blocs ; le calcul quitte la boucle d'événements.
+        Le coût CPU reste linéaire, la mémoire de travail est bornée à 1024 vecteurs.
+        """
+        where, args = ["model=?"], [self.model]
+        if kinds is not None:
+            if not kinds:
+                return []
+            where.append(f"kind IN ({','.join('?' for _ in kinds)})")
+            args.extend(sorted(kinds))
+        wanted = set(keys) if keys is not None else None
+        people = set(persons) if persons is not None else None
+        best: list[tuple[int, float]] = []
+        after = -1
+
+        def score(rows):
+            mat = np.asarray([np.frombuffer(blob, dtype=np.float16) for _, _, blob in rows], dtype=np.float32)
+            return np.einsum("ij,j->i", mat, q, dtype=np.float64).astype(np.float32)
+
+        while True:
+            query = (f"SELECT key, persons, vec FROM {self.table} WHERE {' AND '.join(where)} AND key>? "
+                     "ORDER BY key LIMIT 1024")
+            params = (*args, after)
+            # La connexion appartient au worker du magasin, pas au thread de la boucle asyncio.
+            rows = await self.store.run_views(lambda sql, query=query, params=params: sql.query(query, params))
+            if not rows:
+                break
+            after = int(rows[-1][0])
+            eligible = [(key, who, blob) for key, who, blob in rows
+                        if (wanted is None or key in wanted) and (people is None or people.intersection(json.loads(who)))]
+            if eligible:
+                scores = await _compute(score, eligible)
+                best = sorted([*best, *((int(r[0]), float(s)) for r, s in zip(eligible, scores, strict=True))],
+                              key=lambda hit: (-hit[1], hit[0]))[:k]
+            else:
+                await asyncio.sleep(0)
+        return best
 
     def _mask(self, kinds: Collection[str] | None, keys: Collection[int] | None,
               persons: Collection[str] | None) -> np.ndarray | None:
@@ -204,8 +282,9 @@ class SqliteVectorIndex:
             sql.execute(f"DELETE FROM {table} WHERE persons LIKE ?", (like,))
             return len(keys)
 
-        removed = int(await self.store.run_views(delete) or 0)
-        self._drop({int(self._keys[at]) for at in self._by_person.get(subject, ())})
+        async with self._lock:
+            removed = int(await self.store.run_views(delete) or 0)
+            self._drop({int(self._keys[at]) for at in self._by_person.get(subject, ())})
         return removed
 
     async def remove(self, keys: Collection[int]) -> int:
@@ -218,26 +297,61 @@ class SqliteVectorIndex:
         def delete(sql: Any) -> None:
             sql.executemany(f"DELETE FROM {table} WHERE key=?", rows)
 
-        await self.store.run_views(delete)
-        before = len(self._pos)
-        self._drop(doomed)
-        return before - len(self._pos)
+        async with self._lock:
+            before = len(self._pos.keys() & doomed)
+            if self._spilled:
+                ids = sorted(doomed)
+                before = sum(int(self.store.query_views(
+                    f"SELECT COUNT(*) FROM {table} WHERE model=? AND key IN ({','.join('?' for _ in ids[i:i+512])})",
+                    (self.model, *ids[i:i+512]))[0][0]) for i in range(0, len(ids), 512))
+            await self.store.run_views(delete)
+            self._drop(doomed)
+            return before
 
     def _drop(self, doomed: set[int]) -> None:
         """Retire ces clés de la matrice (rare : l'oubli) — elle se recompose, dans l'ordre des clés."""
-        if doomed & set(self._pos):
-            names = self._kind_names
-            keep = [(key, names[int(self._kinds[at])], self._persons[at], self._mat[at].copy())
-                    for key, at in sorted(self._pos.items()) if key not in doomed]
-            self._reset(keep)
+        for key in sorted(doomed):
+            at = self._pos.pop(key, None)
+            if at is None:
+                continue
+            last = self._n - 1
+            for person in self._persons[at]:
+                self._by_person[person].remove(at)
+                self._person_rows.pop(person, None)
+                if not self._by_person[person]:
+                    del self._by_person[person]
+            if at != last:
+                moved = int(self._keys[last])
+                self._mat[at], self._keys[at], self._kinds[at] = self._mat[last], moved, self._kinds[last]
+                self._persons[at] = self._persons[last]
+                self._pos[moved] = at
+                for person in self._persons[last]:
+                    self._by_person[person].remove(last)
+                    self._by_person[person].append(at)
+                    self._person_rows.pop(person, None)
+            self._persons.pop()
+            self._mat[last] = 0
+            self._n -= 1
 
     async def clear(self) -> None:
         table, model = self.table, self.model
-        await self.store.run_views(lambda sql: sql.execute(f"DELETE FROM {table} WHERE model=?", (model,)))
-        self._reset([])
+        async with self._lock:
+            await self.store.run_views(lambda sql: sql.execute(f"DELETE FROM {table} WHERE model=?", (model,)))
+            self._reset([])
+            self._spilled = False
 
     def digest(self) -> str:
         h = hashlib.blake2b(digest_size=16)
+        if self._spilled:
+            after = -1
+            while rows := self.store.query_views(
+                f"SELECT key,vec FROM {self.table} WHERE model=? AND key>? ORDER BY key LIMIT 1024",
+                (self.model, after)):
+                for key, blob in rows:
+                    h.update(str(key).encode())
+                    h.update(blob)
+                after = int(rows[-1][0])
+            return h.hexdigest()
         for key in sorted(self._pos):
             h.update(str(key).encode())
             h.update(self._mat[self._pos[key]].astype(np.float16).tobytes())

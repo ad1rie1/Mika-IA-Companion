@@ -39,7 +39,15 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.kernel.operate import ActionContext, Done, Refused
 from mika.vocab import privacy
-from mika.vocab.people import clean_display_name, fold, is_ephemeral, is_identifiable, is_internal, same_name
+from mika.vocab.people import (
+    clean_display_name,
+    fold,
+    is_ephemeral,
+    is_identifiable,
+    is_internal,
+    named_label,
+    same_name,
+)
 
 #: Les preuves qu'un opérateur peut verser (celles que le réducteur sait peser).
 OPERATOR_EVIDENCE = (
@@ -389,7 +397,7 @@ def _can_unname(s: IdentityState, frame: Frame, key: str) -> bool:
 def _unbind_name(s: IdentityState, frame: Frame, args: UnnameArgs, ctx: ActionContext) -> Done:
     key = _named_key(args.name)
     if s.names.get(key) != ctx.subject:
-        bound = ", ".join(f"« {k[5:]} »" for k, p in sorted(s.names.items()) if p == ctx.subject) or "aucun"
+        bound = ", ".join(f"« {named_label(k)} »" for k, p in sorted(s.names.items()) if p == ctx.subject) or "aucun"
         raise Refused("Nom inconnu.", {"name": f"Noms reliés à cette personne : {bound}."})
     return Done(drafts=(c.NAME_BOUND.draft(name=key, person=None, by="operator"),),
                 message=f"« {args.name} » ne désigne plus {known_as(s, ctx.subject)}.",
@@ -399,7 +407,7 @@ def _unbind_name(s: IdentityState, frame: Frame, args: UnnameArgs, ctx: ActionCo
 class DismissArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: Annotated[str, Knob(label="Nom", widget="hidden")] = Field(min_length=len("name:") + 1, max_length=80)
+    name: Annotated[str, Knob(label="Nom", widget="hidden")] = Field(min_length=len("name:") + 1, max_length=512)
     person: Annotated[str, Knob(label="Personne", widget="hidden")] = Field(min_length=1, max_length=80)
 
 

@@ -141,7 +141,11 @@ def supported(clause: str, notes: str) -> bool:
     for found in _AGE.finditer(said):
         if found.group(0) not in notes:
             return False
-    return all(pattern.search(notes) for pattern in SITUATION.values() if pattern.search(said))
+    # Une même catégorie (« couple ») ne prouve ni le statut ni la polarité. Pour ces données
+    # biographiques, seule une proposition présente dans les preuves est gardée.
+    if any(pattern.search(said) for pattern in SITUATION.values()):
+        return said.rstrip(".!?…") in notes
+    return True
 
 
 def grounded(summary: str, notes: str) -> str:
@@ -229,7 +233,8 @@ class Revise:
             names = [frame.get(identity_c.IDENTITY(person)).name or "", her]
             rows = store.query_mind(
                 f"SELECT id, text, importance FROM {memory_c.ITEMS_TABLE} WHERE about=? AND told_by IN ('[]', ?) "
-                "AND status='active' AND kind IN (?, ?) AND between_us=0 ORDER BY importance DESC, id DESC LIMIT ?",
+                "AND status='active' AND kind IN (?, ?) AND between_us=0 AND secret=0 "
+                "AND knowledge_kind NOT IN ('hypothesis','opinion') ORDER BY importance DESC, id DESC LIMIT ?",
                 (only, only, memory_c.SOUVENIR, memory_c.BELIEF, p.profile_max_items * 2))
             items = [r for r in rows if note_worthy(str(r[1]), names)][: p.profile_max_items]
             if not items:

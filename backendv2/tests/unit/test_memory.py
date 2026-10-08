@@ -194,7 +194,7 @@ def run_windows(tmp_path, windows, turns, *, script=None):
 SIX = ["un", "deux", "trois", "quatre", "cinq", "six"]
 
 
-def test_the_same_fact_again_reinforces_and_only_another_source_corroborates(tmp_path):
+def test_the_same_fact_reinforces_but_another_confidant_keeps_separate_evidence(tmp_path):
     fact = "Samedi c'est le mariage de Julie, la sœur d'Alice, à Lyon"
     rows, kernel, _ = run_windows(tmp_path, [
         {"croyances": [belief(fact, "Alice")]},
@@ -202,10 +202,10 @@ def test_the_same_fact_again_reinforces_and_only_another_source_corroborates(tmp
         {"croyances": [belief(fact, "Alice", source="Bob")]},  # dit par Bob : corroboré
     ], [("user_2", "Alice", SIX), ("user_2", "Alice", SIX), ("user_3", "Bob", SIX)])
     beliefs = [r for r in rows if r[1] == "belief"]
-    assert len(beliefs) == 1, "pas de doublon"
-    assert abs(beliefs[0][3] - 0.8) < 1e-9, "seule la seconde source a augmenté la confiance (0,7 → 0,8)"
+    assert len(beliefs) == 2, "chaque confident garde sa preuve et ses permissions"
+    assert all(abs(b[3] - 0.7) < 1e-9 for b in beliefs)
     reinforced = [e.data for e in events_of(kernel, "memory.reinforced")]
-    assert [r.corroborated for r in reinforced] == [False, True]
+    assert [r.corroborated for r in reinforced] == [False]
 
 
 class Revising(Extractions):
@@ -460,7 +460,7 @@ def test_a_question_is_never_consolidated_without_its_answer(tmp_path):
                 assert answered_after[q] <= upto, f"question {q} relue sans sa réponse (fenêtre jusqu'à {upto})"
 
 
-def test_a_window_that_keeps_failing_is_given_up_out_loud(tmp_path):
+def test_a_window_that_keeps_failing_is_retried_without_losing_its_messages(tmp_path):
     class Garbage(Extractions):
         def __call__(self, req):
             if req.role == "extract":
@@ -481,8 +481,12 @@ def test_a_window_that_keeps_failing_is_given_up_out_loud(tmp_path):
     run_virtual(clock, main)
     attempts = [r for r in script.calls if r.role == "extract"]
     done = [e.data for e in events_of(kernel, "memory.consolidated")]
-    assert len(attempts) == 3, "trois essais espacés, pas une rafale"
-    assert len(done) == 1 and done[0].failed and done[0].upto > 0
+    assert 3 <= len(attempts) <= 12, "chaque passage a son délai de reprise"
+    assert done and all(d.failed for d in done)
+    assert not kernel.mind.root.slices["memory"].pending
+    deferred = events_of(kernel, "memory.extraction_deferred")
+    assert any(e.data.attempts >= 3 for e in deferred)
+    assert all(e.data.messages for e in deferred if e.data.status == "queued")
 
 
 from mika.faculties.memory.consolidation import window  # noqa: E402

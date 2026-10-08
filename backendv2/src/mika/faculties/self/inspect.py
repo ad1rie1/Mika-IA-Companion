@@ -54,6 +54,7 @@ from mika.kernel.inspect import (
     pct_fr,
 )
 from mika.vocab.affect import emotion_cell
+from mika.vocab.people import named_label
 
 FORGOTTEN = "(oublié)"
 CLAMP = 200
@@ -104,7 +105,7 @@ def feeling(name: str) -> str:
 
 
 def names(frame: Frame, keys: Sequence[str]) -> str:
-    out = [k[5:].title() if k.startswith("name:") else (frame.get(identity_c.IDENTITY(k)).name or k) for k in keys]
+    out = [named_label(k).title() if k.startswith("name:") else (frame.get(identity_c.IDENTITY(k)).name or k) for k in keys]
     return ", ".join(out) or "personne"
 
 

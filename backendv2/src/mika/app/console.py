@@ -182,6 +182,7 @@ VETO_LABELS: dict[str, str] = {
 #: Les processus de fond : ce qu'ils font.
 PROCESS_LABELS: dict[str, str] = {
     "transcript.compact": "Replier les longs fils en résumé", "memory.consolidate": "Retenir (souvenirs, croyances)",
+    "memory.calendar": "Se rappeler les dates proches",
     "memory.index": "Indexer la mémoire", "memory.reflect": "Repenser à ce qu'elle sait",
     "memory.night": "Trier la mémoire la nuit", "body.sleep": "S'endormir et se réveiller",
     "needs.empty": "Sentir le vide", "attention.watch": "Remarquer et attendre",

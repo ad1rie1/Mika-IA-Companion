@@ -58,7 +58,7 @@ from mika.kernel.inspect import (
     When,
     paginate,
 )
-from mika.vocab.people import fold, is_identifiable
+from mika.vocab.people import fold, is_identifiable, named_label
 
 #: Au plus tant de personnes par page ; un résumé replié au-delà de tant de caractères.
 PAGE = 50
@@ -93,7 +93,7 @@ def _known(s: SocialState) -> set[str]:
 
 def _name(frame: Frame, person: str) -> str:
     if person.startswith("name:"):
-        return person[5:].title()
+        return named_label(person).title()
     return frame.get(identity_c.IDENTITY(person)).name or person
 
 

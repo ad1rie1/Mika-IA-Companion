@@ -201,3 +201,25 @@ CIRCLE = FactKey("social.circle", type=tuple)
 #: Les personnes avec qui celle-ci a un lien (elles étaient ensemble dans une petite conversation, ou l'une l'a
 #: nommée en lui racontant sa vie), telles qu'elles valent maintenant (ADR 0058).
 TIES = FactFamily("social.ties", arg=str, type=tuple)
+
+
+@dataclass(frozen=True, slots=True)
+class KnownRelation:
+    other: str
+    kind: str
+    status: str
+    item: int
+    at: int
+    told_by: tuple[str, ...] = ()
+    sources: tuple[int, ...] = ()
+    secret: bool = False
+    about: tuple[str, ...] = ()
+
+
+class RelationsRecalled(Payload):
+    edges: tuple[tuple[str, str, KnownRelation], ...] = ()
+
+
+RELATIONS_RECALLED = event_type("social.relations_recalled", OWNER, RelationsRecalled, public=True)
+ALL = (*ALL, RELATIONS_RECALLED)
+RELATIONS_TABLE = "social_relations"

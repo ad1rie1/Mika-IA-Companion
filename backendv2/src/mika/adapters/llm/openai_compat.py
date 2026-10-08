@@ -236,7 +236,7 @@ class OpenAICompatBackend:
     async def complete(self, req: LLMRequest) -> LLMResponse:
         client = self._client
         with_options = getattr(client, "with_options", None)
-        if req.priority == 0 and callable(with_options):  # la passerelle borne l'appel et sait se replier
+        if req.priority == 0 and callable(with_options):  # la passerelle borne l'appel et journalise ses échecs
             client = with_options(max_retries=FOREGROUND_RETRIES)
         return self._read(await self._create(self.payload(req), req.max_tokens, client))
 

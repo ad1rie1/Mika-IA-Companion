@@ -44,7 +44,7 @@ from mika.kernel.codec import digest
 from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.kernel.frame import Audience
 from mika.kernel.inspect import Table
-from mika.ports.llm import LLMResponse
+from mika.ports.llm import LLMResponse, ToolCall
 from mika.runtime.inspection import find, run_view
 from mika.sim.clock import run_virtual
 from mika.vocab import circadian
@@ -58,7 +58,9 @@ class Script:
         self.tag = "[EMOTION:happy:0.5]"
 
     def __call__(self, req):
-        if req.role in ("extract", "profile", "compact"):
+        if req.role == "extract":
+            return LLMResponse("", tool_calls=(ToolCall("empty", "record_memories", {}),), stop="tool_use")
+        if req.role in ("profile", "compact"):
             return LLMResponse("{}")
         if req.role == "journal":
             return LLMResponse(self.journal)
@@ -665,6 +667,5 @@ def test_she_rereads_an_older_journal_on_demand_not_yesterdays(tmp_path):
     assert not offered & {"self_read", "self_yesterday", "self_dream"}  # ils relisaient une section présente
     assert "self : relire ce que tu as écrit dans ton journal un jour passé" in reply.system_stable
     assert "CANARI-LUNDI" in reply.messages[-1].content  # hier, elle l'a déjà en tête
-
 
 

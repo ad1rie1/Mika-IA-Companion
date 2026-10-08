@@ -52,11 +52,11 @@ def test_model_settings_form_needs_its_token_and_never_shows_a_key(world):  # no
         "csrf": token, "_section": "modeles", "_champs": ["routes"], "routes.reply": "claude",
         "routes.murmur": "claude"})
     assert routed.status_code == 200 and "Qui sert quoi : enregistré" in routed.text
-    sized = client.post("/inspecteur/reglages/contexte", data={
-        "csrf": token, "_section": "modeles", "_champs": ["context_tokens"], "context_tokens": "32000"})
-    assert sized.status_code == 200 and "Contexte : enregistré" in sized.text
+    sized = client.post(url, data={"csrf": token, **record, "_ancienne": "claude",
+                                   "_champs": ["context_tokens"], "context_tokens": "32000"})
+    assert sized.status_code == 200
     cfg = client.portal.call(live.settings.llm)  # lu dans la boucle de l'application
-    assert cfg.routes == {"reply": "claude", "murmur": "claude"} and cfg.context_tokens == 32000
+    assert cfg.routes == {"reply": "claude", "murmur": "claude"} and cfg.backends["claude"].context_tokens == 32000
     assert cfg.backends["claude"].api_key == "sk-secret-123"  # déchiffrée à la lecture, jamais affichée
     raw = client.portal.call(live.kernel.mind.store.query_mind, "SELECT value FROM settings")
     assert "sk-secret-123" not in raw[0][0]  # chiffrée au repos

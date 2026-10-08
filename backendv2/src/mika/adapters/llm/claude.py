@@ -25,7 +25,7 @@ Contrat :
   est reprise, au plus ``PAUSE_RESUMES`` fois, en renvoyant le tour tel quel :
   une pause n'est pas une fin ;
 - au premier plan (priorité 0), une seule nouvelle tentative du SDK au lieu de
-  deux : la passerelle borne déjà l'appel et a un repli ;
+  deux : la passerelle borne déjà l'appel et journalise ses échecs ;
 - outils à la demande (``ToolDecl.deferred``) : ``defer_loading`` et l'outil de
   recherche d'outils (BM25) ; le point de cache des outils ne va jamais sur un
   outil différé (400) ; les blocs de la recherche (``server_tool_use``,
@@ -217,7 +217,7 @@ class ClaudeBackend:
         return self._read(parts)
 
     def _client_for(self, req: LLMRequest) -> Any:
-        """Au premier plan, moins de tentatives : la passerelle borne l'appel et sait se replier."""
+        """Au premier plan, moins de tentatives : la passerelle borne l'appel et journalise ses échecs."""
         with_options = getattr(self._client, "with_options", None)
         if req.priority == 0 and callable(with_options):
             return with_options(max_retries=FOREGROUND_RETRIES)

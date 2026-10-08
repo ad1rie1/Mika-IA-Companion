@@ -85,6 +85,12 @@ class Stopped(Payload):
     """Un arrêt propre : son absence commence là (après un arrêt brutal, au dernier événement vécu)."""
 
 
+class SubjectForgotten(Payload):
+    """Retire aussi les associations sans texte des états rejouables."""
+
+    subject: str
+
+
 class LeaseAcquired(Payload):
     resource: str
     holder: str
@@ -146,6 +152,7 @@ KERNEL = Faculty(
 
 BOOT = KERNEL.event("kernel.boot", Boot, public=True)
 STOPPED = KERNEL.event("kernel.stopped", Stopped, public=True)
+SUBJECT_FORGOTTEN = KERNEL.event("kernel.subject_forgotten", SubjectForgotten, public=True)
 LEASE_ACQUIRED = KERNEL.event("kernel.lease_acquired", LeaseAcquired, public=True)
 LEASE_RELEASED = KERNEL.event("kernel.lease_released", LeaseReleased, public=True)
 PARAMS_CHANGED = KERNEL.event("kernel.params_changed", ParamsChanged, public=True)

@@ -86,6 +86,10 @@ class Item:
     durable_self: bool = False
     #: ce qui n'appartient qu'à elle et à la personne : un surnom, une blague à elles (ADR 0055)
     between_us: bool = False
+    knowledge_kind: str = "claim"
+    holder: str | None = None
+    constraints: tuple[c.Disclosure, ...] = ()
+    internal_only: bool = False
 
     @classmethod
     def of(cls, row: dict[str, Any]) -> Item:
@@ -100,6 +104,9 @@ class Item:
             informants=_keys(row.get("informants")), about_self=bool(row.get("about_self")),
             shown_at=int(row.get("shown_at") or 0), durable_self=int(row.get("about_self") or 0) >= 2,
             between_us=bool(row.get("between_us")),
+            knowledge_kind=str(row.get("knowledge_kind") or "claim"), holder=row.get("holder"),
+            constraints=tuple(c.Disclosure.model_validate(v) for v in json.loads(row.get("constraints") or "[]")),
+            internal_only=bool(row.get("internal_only")),
         )
 
 
@@ -113,7 +120,7 @@ def salience(item: Item, now: int, p: MemoryParams, bond: float = 0.0) -> float:
             half = p.self_durable_half_life_days if item.durable_self else p.self_half_life_days
         else:
             half = p.belief_half_life_days
-        return (item.confidence or 0.5) * 0.5 ** (age / half)
+        return (0.5 if item.confidence is None else item.confidence) * 0.5 ** (age / half)
     half_life = (p.base_half_life_days + p.importance_half_life_days * item.importance) * (1 + 0.25 * min(item.recalls, 4))
     half_life *= 1.0 + p.bond_memory_gain * max(0.0, min(1.0, bond))
     value = item.importance * 0.5 ** (age / half_life)

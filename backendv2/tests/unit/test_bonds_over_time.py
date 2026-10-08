@@ -87,23 +87,24 @@ async def genesis(kernel, *drafts, emitter="memory"):
     return await kernel.mind.append(list(drafts), emitter=emitter, correlation="genese", origin=Origin.GENESIS)
 
 
-def belief(text, *, about, told_by=(), heard_by=(), sensitivity=1):
+def belief(text, *, about, told_by=(), heard_by=(), sensitivity=1, relations=()):
     return memory_c.BELIEVED.draft(text=Content.of(text, level=sensitivity), about=about, told_by=told_by,
-                                   heard_by=heard_by, sensitivity=sensitivity)
+                                   heard_by=heard_by, sensitivity=sensitivity, relations=relations)
 
 
 # ── Qui a un lien avec qui ────────────────────────────────────────────────
 
 
-def test_a_tie_is_being_together_or_being_named_never_saying_a_name(tmp_path):
+def test_a_tie_requires_an_explicit_relation_not_a_mention_or_copresence(tmp_path):
     async def scenario(kernel, llm):
         # Alice parle de Carol en lui racontant sa vie : Carol est de son entourage
         await genesis(kernel, belief("Carol est la meilleure amie d'Alice", about=("user_2", "user_4"),
-                                     told_by=("user_2",), heard_by=("user_2",)))
+                                     told_by=("user_2",), heard_by=("user_2",), relations=(memory_c.Relation(
+                                         subject="user_2", other="user_4", kind="friend", status="active"),)))
         # Bruno prononce le nom d'Alice : ça ne lui donne aucun lien avec elle
         await genesis(kernel, belief("Bruno demande des nouvelles d'Alice", about=("user_3", "user_2"),
                                      told_by=("user_3",), heard_by=("user_3",)))
-        # Dave et Eve parlaient ensemble avec elle, dans un petit salon : ils se connaissent
+        # Dave et Eve partageaient un salon : aucune relation explicite n'est établie.
         await genesis(kernel, belief("Dave et Eve préparent un concert", about=("user_5", "user_6"),
                                      told_by=("user_5", "user_6"), heard_by=("user_5", "user_6")))
         # un grand salon ne fait pas des gens qui se connaissent
@@ -119,8 +120,8 @@ def test_a_tie_is_being_together_or_being_named_never_saying_a_name(tmp_path):
     ties = run(tmp_path, scenario)
     assert "user_2" in ties["user_4"], "Alice a nommé Carol : Carol a un lien avec Alice"
     assert "user_2" not in ties["user_3"], "Bruno n'a fait que prononcer son nom"
-    assert "user_3" in ties["user_2"], "… c'est Alice qui entre dans l'entourage de Bruno, pas l'inverse"
-    assert "user_6" in ties["user_5"]
+    assert "user_3" not in ties["user_2"], "une mention ne crée pas non plus le lien inverse"
+    assert "user_6" not in ties["user_5"], "la coprésence ne suffit pas"
     assert ties["ext_10"] == (), "un grand salon"
     assert "user_2" not in ties["user_7"], "nommé avec colère"
 

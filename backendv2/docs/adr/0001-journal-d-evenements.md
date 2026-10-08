@@ -5,3 +5,5 @@
 **Décision.** Tout changement d'état est un événement ajouté à un journal. Chaque faculté possède une tranche immuable, déduite par des réducteurs purs et totaux, en double tampon. Les événements portent des faits et des tirages enregistrés, jamais un état recalculé.
 
 **Conséquences.** Rejeu exact, simulation, chaîne causale ; une faculté ajoutée se reconstruit depuis la genèse. Coût : discipline des charges utiles (upcasters) et instantanés pour des démarrages rapides.
+
+**Révisé par l'ADR 0073** : l'oubli d'une clé `name:…` réécrit les enveloppes qui la portent (un jeton opaque à sa place) ; c'est la seule réécriture du journal.

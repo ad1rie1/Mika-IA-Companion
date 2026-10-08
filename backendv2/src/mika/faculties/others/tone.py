@@ -140,7 +140,23 @@ def grave(low: str) -> tuple[float, str] | None:
     """Le plus grave des événements nommés dans le texte replié : (valence, sorte) ; à valence égale, le premier
     de la liste."""
     low = _NOT_GRAVE.sub(" ", low)
-    found = [(v, i, kind) for i, (pattern, v, kind) in enumerate(_GRAVE) if pattern.search(low)]
+    found = []
+    for sentence in re.split(r"[.!?\n]+", low):
+        if re.search(r"\b(?:roman|film|serie|personnage|fiction|jeu de role|exemple|imaginons)\b", sentence):
+            continue
+        for i, (pattern, value, kind) in enumerate(_GRAVE):
+            for match in pattern.finditer(sentence):
+                before = sentence[:match.start()]
+                near = _WORD.findall(before)[-5:]
+                if any(w in near for w in ("pas", "aucun", "aucune", "sans", "jamais")):
+                    continue
+                if "plus" in near and kind != DISTRESS:
+                    continue
+                # Une maladie racontée à propos d'un tiers ne devient pas celle de l'auteur.
+                personal = re.search(r"\b(?:je|j'|me|m'|mon|ma|mes|nous|notre|nos|on)\b", sentence)
+                if not personal:
+                    continue
+                found.append((value, i, kind))
     if not found:
         return None
     value, _i, kind = min(found)

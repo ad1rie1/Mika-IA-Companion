@@ -353,7 +353,7 @@ def test_after_a_conversation_she_shows_what_she_kept_and_forgetting_shows(tmp_p
     assert column(belief, "sensibilité") == ["personnel"] and isinstance(raw_column(belief, "confiance")[0], Meter)
 
     relecture = fields(before["consolidation"], "La relecture")
-    assert relecture["dernière relecture"] != "jamais" and relecture["fenêtres abandonnées"] == "0"
+    assert relecture["dernière relecture"] != "jamais" and relecture["fenêtres avec un passage différé"] == "0"
     assert relecture["relu jusqu'au message"].startswith("n° ")
     runs = table(before["consolidation"], "Les dernières relectures")
     assert "faite" in column(runs, "issue")

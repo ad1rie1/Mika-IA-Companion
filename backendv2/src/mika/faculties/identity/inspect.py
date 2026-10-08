@@ -63,7 +63,7 @@ from mika.kernel.inspect import (
     paginate,
 )
 from mika.vocab import privacy
-from mika.vocab.people import fold, is_identifiable, is_internal
+from mika.vocab.people import fold, is_identifiable, is_internal, named_label
 from mika.vocab.privacy import ChannelTrust, Disclosure, Sensitivity
 
 #: Au plus tant de lignes au registre des preuves par page, tant de lignes par page d'une liste.
@@ -302,7 +302,7 @@ def bearers(s: IdentityState, key: str,
     """Les personnes connues qui portent ce nom : le nom complet, ou un prénom seul d'un côté (« Carol » et
     « Carol Dupont » s'accordent, « Carol Dupont » et « Carol Martin » non). Une suggestion, jamais une liaison :
     deux Carol ne se confondent pas d'elles-mêmes (ADR 0048)."""
-    said = tuple(key[len(NAMED):].split()) if key.startswith(NAMED) else ()
+    said = tuple(named_label(key).split()) if key.startswith(NAMED) else ()
     if not said:
         return []
     worn = _worn(s) if worn is None else worn

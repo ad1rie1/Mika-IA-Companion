@@ -27,7 +27,9 @@ from zoneinfo import ZoneInfo
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from mika.contracts.memory import Relation
 from mika.kernel.clock import instant
+from mika.kernel.codec import digest
 from mika.ports.llm import LLMResponse, ToolDecl
 from mika.vocab.people import clean_tokens, fold
 from mika.vocab.phrasebook import phrase, phrases
@@ -37,14 +39,13 @@ from mika.vocab.words import fold as wfold
 
 TOOL_NAME = "record_memories"
 #: Comment le modèle la désigne quand c'est elle (repliés) ; son nom s'y ajoute, celui de sa persona (``self_names``).
-SELF_NAMES = frozenset({"moi", "je", "elle-meme", "elle meme", "elle"})
+SELF_NAMES = frozenset({"moi", "je", "elle-meme", "elle meme"})
 IMPORTANCE = {1: 0.2, 2: 0.45, 3: 0.7, 4: 0.95}
 SENSITIVITY = {"anodin": Sensitivity.ANODYNE, "anodine": Sensitivity.ANODYNE, "anodyne": Sensitivity.ANODYNE,
                "personnel": Sensitivity.PERSONAL, "personnelle": Sensitivity.PERSONAL, "personal": Sensitivity.PERSONAL,
                "confidence": Sensitivity.CONFIDENCE, "confidentiel": Sensitivity.CONFIDENCE,
                "confidential": Sensitivity.CONFIDENCE, "intime": Sensitivity.CONFIDENCE}
 ORIGIN = {"dit": "told", "observe": "observed", "observé": "observed", "deduit": "inferred", "déduit": "inferred"}
-MAX_SOUVENIRS, MAX_BELIEFS, MAX_PROMISES, MAX_EVENTS = 12, 20, 6, 8
 #: ce qui, dit par la personne, en fait un secret quoi qu'en dise le modèle (replié, sans accents)
 SECRET_MARKERS = ("dis le a personne", "dis a personne", "le dis a personne", "le repete a personne", "repete pas",
                   "repete a personne", "entre nous", "garde le pour toi", "garde ca pour toi", "c est un secret",
@@ -131,6 +132,8 @@ class XCroyance(_Item):
     confiance: float = Field(default=0.7, ge=0.0, le=1.0)
     importance: int = Field(default=2, ge=1, le=4)
     remplace: int | None = None
+    point_de_vue: str | None = Field(default=None, description=phrase("memory.extraction.fields.point_de_vue"))
+    relations: list[Relation] = Field(default_factory=list, description=phrase("memory.extraction.fields.relations"))
     entre_vous: bool = Field(default=False, validation_alias=AliasChoices("entre_vous", "entre_nous", "lien"),
                              description=phrase("memory.extraction.fields.entre_vous"))
 
@@ -173,6 +176,7 @@ class XEvenement(_Item):
 
 
 class Extraction(_Lenient):
+    issues: list[str] = Field(default_factory=list, exclude=True)
     souvenirs: list[XSouvenir] = Field(default_factory=list)
     croyances: list[XCroyance] = Field(default_factory=list)
     promesses: list[XPromesse] = Field(default_factory=list)
@@ -296,12 +300,13 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
 
 
 def parse(resp: LLMResponse) -> Extraction | None:
-    """L'outil s'il a été appelé, sinon le premier objet JSON du texte ; les
-    éléments illisibles sont écartés un à un."""
+    """L'outil s'il a été appelé, sinon un objet JSON reconnu ; les éléments illisibles sont signalés séparément."""
     raw: Any = None
+    structured = False
     for call in resp.tool_calls:
         if call.name == TOOL_NAME:
             raw = dict(call.args)
+            structured = True
             break
     if raw is None:
         match = re.search(r"\{.*\}", resp.text or "", re.DOTALL)
@@ -314,27 +319,40 @@ def parse(resp: LLMResponse) -> Extraction | None:
     if not isinstance(raw, dict):
         return None
     raw = {fold(str(k)): v for k, v in raw.items()}
+    expected = {"souvenirs", "croyances", "promesses", "promesses_tenues", "evenements", "confidentiel",
+                "situations_finies"}
+    if ((not expected.intersection(raw) and not (structured and not raw))
+            or resp.stop == "max_tokens" or resp.truncated_tool_call):
+        return None
     out = Extraction()
-    for key, model, cap in (("souvenirs", XSouvenir, MAX_SOUVENIRS), ("croyances", XCroyance, MAX_BELIEFS),
-                            ("promesses", XPromesse, MAX_PROMISES), ("promesses_tenues", XTenue, 50),
-                            ("evenements", XEvenement, MAX_EVENTS)):
-        items = raw.get(key) or []
+    for key, model in (("souvenirs", XSouvenir), ("croyances", XCroyance), ("promesses", XPromesse),
+                       ("promesses_tenues", XTenue), ("evenements", XEvenement)):
+        items = raw.get(key, [])
+        if items is None:
+            items = []
         if isinstance(items, str):
             try:
                 items = json.loads(items)  # certains modèles passent la liste en texte
             except ValueError:
-                continue
+                return None
         if not isinstance(items, list):
-            continue
+            return None
         kept = []
-        for item in items[:cap]:
+        # La sortie est bornée par le fournisseur ; aucun élément valide n'est jeté après coup.
+        for position, item in enumerate(items):
             try:
                 kept.append(model.model_validate(item))
-            except ValidationError:
-                continue
+            except ValidationError as exc:
+                kinds = sorted({error["type"] for error in exc.errors()})
+                out.issues.append(f"{key}[{position}]: {', '.join(kinds)}")
         setattr(out, key, kept)
-    out.confidentiel = _ints(raw.get("confidentiel"))
-    out.situations_finies = _ints(raw.get("situations_finies"))
+    for key in ("confidentiel", "situations_finies"):
+        items = raw.get(key, [])
+        if items is None:
+            items = []
+        if not isinstance(items, list) or any(type(i) is not int or i <= 0 for i in items):
+            return None
+        setattr(out, key, items)
     return out
 
 
@@ -351,9 +369,11 @@ class People:
     me: frozenset[str] = SELF_NAMES
     #: son prénom seul (replié) : elle, sauf si quelqu'un de la conversation ou de l'annuaire le porte aussi
     first: str = ""
+    scope: str = ""
 
     @classmethod
-    def of(cls, speakers: Sequence[Speaker], directory: Mapping[str, tuple[str, ...]], her: str = "") -> People:
+    def of(cls, speakers: Sequence[Speaker], directory: Mapping[str, tuple[str, ...]], her: str = "",
+           scope: str = "") -> People:
         """``her`` : son nom (celui de sa persona) — le modèle qui la nomme parle d'elle, pas de quelqu'un."""
         tokens = {s.token.lower(): s.person for s in speakers}
         named: dict[str, set[str]] = {}
@@ -366,7 +386,8 @@ class People:
         folded_her = " ".join(fold(her).split())
         first = folded_her.split()[0] if " " in folded_her else ""
         me = (self_names(her) - {first}) if her else SELF_NAMES
-        return cls(tokens, local, directory, me, first)
+        return cls(tokens, local, directory, me, first,
+                   digest(scope or "|".join(sorted(s.person for s in speakers)))[:16])
 
     def one(self, raw: str) -> str | None:
         """Une clé, ou ``None`` pour elle-même ou rien."""
@@ -377,14 +398,13 @@ class People:
         folded = " ".join(fold(TOKEN.sub(" ", text)).split())
         if not folded or folded in self.me:
             return None
-        first = folded.split()[0]
-        key = self.local.get(folded) or self.local.get(first)
+        key = self.local.get(folded)
         if key is None:
-            found = self.directory.get(folded) or self.directory.get(first) or ()
+            found = self.directory.get(folded) or ()
             key = found[0] if len(found) == 1 else None
         if key is None and folded == self.first:
             return None  # son prénom seul, que personne d'autre de connu ne porte : c'est elle
-        return key or f"name:{folded}"
+        return key or f"name:{self.scope}:{folded}"
 
     def resolve(self, names: Sequence[str]) -> tuple[str, ...]:
         return tuple(sorted({k for n in names if (k := self.one(n)) is not None}))

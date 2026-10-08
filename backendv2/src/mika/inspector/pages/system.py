@@ -596,7 +596,7 @@ async def outbox_post(ui: Any, request: Request) -> Response:
 
 @TABS.tab("systeme.passerelle", title="Modèles en service", group="Surveillance",
           description="La passerelle des modèles telle qu'elle tourne : pour chaque fournisseur, ses créneaux "
-                      "(occupés, en attente), son repli, son quota ; pour chaque rôle, qui le sert vraiment.")
+                      "(occupés, en attente), son quota ; pour chaque rôle, qui le sert vraiment.")
 async def passerelle(ui: Any, request: Request) -> list[Any]:
     gateway = ui.kernel.deps.gateway
     status = list(getattr(gateway, "status", lambda: [])() or [])
@@ -610,7 +610,7 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
         quota_text = " · ".join(f"{k} {pct_fr(v)}" for k, v in quota.items()) if quota else "—"
         rows.append(Row((Text(b["name"], "mono"), Text(f"{b['busy']} / {b['slots']}", "num"), b["waiting"],
                          Badge("oui", "info") if b["preempt"] else Text("non", "muted"),
-                         Text(b["fallback"] or "—", "mono" if b["fallback"] else "muted"), quota_text),
+                         quota_text),
                         tone="warn" if b["waiting"] else ""))
     unserved = [r for r, name in resolution.items() if not name]
     return [
@@ -620,7 +620,7 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
                     "warn" if any(b["waiting"] for b in status) else ""),
                Stat("Rôles sans fournisseur", len(unserved), ", ".join(names.role(r) for r in unserved) or "aucun",
                     "danger" if unserved else ""))),
-        Table(("fournisseur", Column("créneaux", "num"), Column("en attente", "num"), "préempte", "repli",
+        Table(("fournisseur", Column("créneaux", "num"), Column("en attente", "num"), "préempte",
                "quota d'abonnement"), tuple(rows), title="Fournisseurs",
               caption="Un fournisseur à un seul créneau préempte : une réponse interrompt un travail de fond."),
         Table(("rôle", Column("nom technique", "fit"), "servi par"), tuple(

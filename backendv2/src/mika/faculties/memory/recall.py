@@ -79,11 +79,11 @@ from mika.faculties.memory.salience import (
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Audience, Frame
-from mika.kernel.prompt import SectionBody
+from mika.kernel.prompt import Fragment, SectionBody
 from mika.vocab import affect as A
 from mika.vocab.days import when_fr, window_of
 from mika.vocab.episodes import CONVERSATIONAL
-from mika.vocab.people import clean_tokens, is_identifiable
+from mika.vocab.people import clean_tokens, is_identifiable, named_label
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import WORD, fold, stems, words
@@ -134,6 +134,22 @@ class Recalled:
     item: Item
     verdict: Verdict
     label: str  # le texte à montrer, étiquette comprise
+    evidence: tuple[int, ...] = ()
+
+
+def _add_recalled(bucket: list[Recalled], recalled: Recalled, cap: int) -> None:
+    """Présentation commune, après autorisation individuelle ; toutes les preuves restent distinctes."""
+    def key(r):
+        it = r.item
+        return (it.kind, it.text.strip(), tuple(sorted(it.about)), it.knowledge_kind, it.holder,
+                it.born_at // DAY, r.verdict.witness, r.label)
+    for i, prior in enumerate(bucket):
+        if key(prior) == key(recalled):
+            ids = tuple(sorted({*(prior.evidence or (prior.item.id,)), recalled.item.id}))
+            bucket[i] = replace(prior, evidence=ids)
+            return
+    if len(bucket) < cap:
+        bucket.append(recalled)
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,7 +201,7 @@ def names_of(frame: Frame, keys: set[str]) -> dict[str, str]:
     out = {}
     for k in keys:
         if k.startswith("name:"):
-            out[k] = k[5:].title()
+            out[k] = named_label(k).title()
         else:
             out[k] = frame.get(identity_c.IDENTITY(k)).name or k
     return out
@@ -265,7 +281,7 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
     for k in sorted(raw):
         person = canon(frame, (k,), memo)[0]
         keys_of.setdefault(person, set()).add(k)
-        name = k[5:] if k.startswith("name:") else frame.get(identity_c.IDENTITY(k)).name
+        name = named_label(k) if k.startswith("name:") else frame.get(identity_c.IDENTITY(k)).name
         folded = " ".join(WORD.findall(fold(name or "")))
         for n in {folded, *folded.split()[:1]}:
             if len(n) >= 3:
@@ -392,7 +408,25 @@ def verdict_of(frame: Frame, item: Item, person: str | None, aud: Audience, memo
     """Ce qui décide si un élément peut se dire ici : ses personnes, qui l'a
     confié et entendu (telles qu'elles valent maintenant), sa sensibilité
     (sujets délicats des profils compris, gardés à part dans ``store``)."""
-    return admissible(canon(frame, item.about, memo), sensitivity_of(frame, item, person, store), person, aud,
+    if item.internal_only:
+        return Verdict(False, secret=True)
+    inherited_rules = []
+    # les sujets délicats des profils comptent aussi pour ce qu'elle a repensé (``item.about`` porte ses sources)
+    own = sensitivity_of(frame, item, person, store) if item.constraints else item.sensitivity
+    for rule in item.constraints:
+        inherited = admissible(canon(frame, rule.about, memo), max(rule.sensitivity, own), person, aud,
+                               told_by=canon(frame, rule.told_by, memo),
+                               heard_by=canon(frame, rule.heard_by, memo), secret=rule.secret)
+        if not inherited.ok:
+            return inherited
+        inherited_rules.append(inherited)
+    if inherited_rules:
+        return Verdict(True, others=tuple(sorted({p for v in inherited_rules for p in v.others})),
+                       tellers=tuple(sorted({p for v in inherited_rules for p in v.tellers})),
+                       level=max(v.level for v in inherited_rules), secret=any(v.secret for v in inherited_rules),
+                       witness=all(v.witness for v in inherited_rules))
+    subjects = tuple(sorted({*item.about, *([item.holder] if item.holder else [])}))
+    return admissible(canon(frame, subjects, memo), sensitivity_of(frame, item, person, store), person, aud,
                       told_by=canon(frame, item.told_by, memo), heard_by=canon(frame, item.heard_by, memo),
                       secret=item.secret)
 
@@ -556,8 +590,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     out.names = names
     for _score, item, verdict in ranked:
         bucket, cap = (out.souvenirs, p.max_souvenirs) if item.kind == c.SOUVENIR else (out.beliefs, p.max_beliefs)
-        if len(bucket) < cap:
-            bucket.append(Recalled(item, verdict, item.text + tag(verdict, names)))
+        _add_recalled(bucket, Recalled(item, verdict, item.text + tag(verdict, names)), cap)
     if hidden and p.max_unsaid:
         for who in sorted(hidden, key=lambda w: (-max(candidates[i.id] for i in hidden[w]), w))[: p.max_unsaid]:
             out.unsaid.append(unsaid_public_line(who, names, _last_talk(frame, who)) if aud.public else
@@ -616,7 +649,7 @@ def _their_life(out: Recall, frame: Frame, store: Any, person: str, aud: Audienc
     out.names = names
     for _w, item, verdict in picked[: p.max_person_items]:
         bucket = out.souvenirs if item.kind == c.SOUVENIR else out.beliefs
-        bucket.append(Recalled(item, verdict, item.text + tag(verdict, names)))
+        _add_recalled(bucket, Recalled(item, verdict, item.text + tag(verdict, names)), len(bucket) + 1)
 
 
 async def _self_said(vectors: Any, store: Any, query: str, p: MemoryParams) -> list[Item]:
@@ -822,12 +855,20 @@ def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryPara
 # ── Les sections ──────────────────────────────────────────────────────────
 
 
-def _lines(recalled: list[Recalled], now: int, *, beliefs: bool) -> list[str]:
+def knowledge_label(item: Item, names: Mapping[str, str]) -> str:
+    labels = family("memory.recall.nature")
+    nature = labels.get(item.knowledge_kind, labels["claim"])
+    holder = names.get(item.holder or "") or named_label(item.holder or "") or item.holder
+    return phrase("memory.recall.viewpoint", nature=nature, holder=holder) if holder else nature
+
+
+def _lines(recalled: list[Recalled], now: int, *, beliefs: bool, names: Mapping[str, str] | None = None) -> list[str]:
     lines = []
     for r in recalled:
         if beliefs:
             # ce qu'elle devine se dit comme tel ; ce qu'on lui a dit se lit déjà dans le texte
             how = [family("memory.recall.origin").get(r.item.origin or "", "")]
+            how.append(knowledge_label(r.item, names or {}))
             if now - r.item.born_at >= DATED_AFTER_US:
                 # « ma sœur vient ce week-end », relu trois semaines plus tard, n'est plus vrai : elle sait depuis quand
                 how.append(phrase("memory.recall.learned", age=age_words(r.item.born_at, now)))
@@ -844,23 +885,28 @@ def _body(recall: Recall, frame: Frame, *, witness: bool) -> SectionBody | None:
     hidden = recall.unsaid if not witness else []
     if not souvenirs and not beliefs and not hidden:
         return None
-    lines: list[str] = []
-    if souvenirs:
-        lines += [phrase("memory.recall.souvenirs"), *_lines(souvenirs, frame.now, beliefs=False)]
-    if beliefs:
-        lines += [phrase("memory.recall.beliefs"), *_lines(beliefs, frame.now, beliefs=True)]
+    parts: list[Fragment] = []
+    names = names_of(frame, {r.item.holder for r in beliefs if r.item.holder})
+    for bucket, belief, heading in ((souvenirs, False, phrase("memory.recall.souvenirs")),
+                                    (beliefs, True, phrase("memory.recall.beliefs"))):
+        if bucket:
+            parts.append(Fragment(heading))
+            parts.extend(Fragment(line, tuple(f"memory:{i}" for i in (r.evidence or (r.item.id,)))) for r, line in zip(
+                bucket, _lines(bucket, frame.now, beliefs=belief, names=names), strict=True))
     if hidden:
         # sonde réelle du 2026-10-02 : sans cette ligne, interrogée là-dessus, elle mentait (« il ne m'a rien dit »)
-        lines += [phrase("memory.recall.unsaid"), *hidden, phrase("memory.recall.unsaid_advice")]
+        parts.extend(Fragment(line) for line in [phrase("memory.recall.unsaid"), *hidden,
+                                                phrase("memory.recall.unsaid_advice")])
     shown = souvenirs + beliefs
     if shown:
         advice = phrase("memory.recall.advice")
         if any(r.label != r.item.text for r in shown):
             advice += phrase("memory.recall.advice_private")
-        lines.append(advice)
-    return SectionBody("\n".join(lines), level=max((r.verdict.level for r in shown), default=0),
-                       provenance=tuple(f"memory:{r.item.id}" for r in shown), witness=witness,
-                       tied=any(r.verdict.tied for r in shown))
+        parts.append(Fragment(advice))
+    return SectionBody("\n".join(f.text for f in parts), level=max((r.verdict.level for r in shown), default=0),
+                       provenance=tuple(f"memory:{i}" for r in shown for i in (r.evidence or (r.item.id,))), witness=witness,
+                       tied=any(r.verdict.tied for r in shown),
+                       fragments=tuple(parts))
 
 
 @MEMORY.section("memories", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["stance"], trim_rank=30,
@@ -893,10 +939,9 @@ def _exchanges(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> Secti
     recall: Recall | None = enrich.get("recall")
     if not recall or not recall.exchanges:
         return None
-    since = shown_since(enrich)
     # ce qui est déjà dans le fil ne se répète pas — sauf le moment que sa question désigne : au bout d'une semaine de
     # fil, qui a dit quoi lundi matin s'y perd (sonde réelle du 2026-10-03 : elle lui a prêté son propre rêve)
-    exchanges = [e for e in recall.exchanges if e.dated or since is None or (e.question or e.id) < since]
+    exchanges = recall.exchanges
     p = params(frame.env.params_of("memory", frame.root))
     exchanges = exchanges[: p.max_chunks]
     if not exchanges:
@@ -907,7 +952,10 @@ def _exchanges(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> Secti
         who = names.get(e.person) or recall.name or phrase("memory.exchanges.someone")
         lines.append(phrase("memory.exchanges.line", age=age_words(e.at, frame.now), who=who, said=e.user_text[:240],
                             reply=e.reply_text[:240]))
-    return SectionBody("\n".join(lines), provenance=tuple(f"chunk:{e.id}" for e in exchanges))
+    return SectionBody("\n".join(lines), provenance=tuple(f"chunk:{e.id}" for e in exchanges),
+                       fragments=tuple(Fragment(line, (f"chunk:{e.id}",),
+                                                (e.question, e.id) if e.question and not e.dated else ())
+                                       for e, line in zip(exchanges, lines, strict=True)))
 
 
 def when_words(t: int, frame: Frame, *, all_day: bool = True) -> str:

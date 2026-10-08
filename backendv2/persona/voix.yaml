@@ -1565,9 +1565,16 @@ memory:
     fields:
       # Le champ « sur_elle » (souvenirs, croyances, événements).
       sur_elle: ce qu'elle raconte d'elle-même, de sa vie de tous les jours
-      # Le champ « genre » (ce qu'elle dit d'elle-même).
+      # Le champ « genre » (elle-même et les personnes dont elle parle).
       genre: >-
-        pour ce qu'elle dit d'elle-même : anecdote (ce qu'elle a fait), gout, avis ou fait (sa vie, son histoire)
+        fait (affirmation rapportée, pas vérifiée), avis, gout, hypothese ou anecdote.
+        Distinguer ce qu'une personne pense de ce qui lui est arrivé.
+      point_de_vue: >-
+        Qui porte cet avis ou cette hypothèse : jeton de personne, pas le sujet dont on parle.
+      relations: >-
+        Liens explicitement dits, avec subject/other désignés par leurs jetons.
+        Une mention ou une présence commune ne prouve aucun lien.
+        Une rupture est ended, un lien supposé uncertain ; une hostilité est hostile.
       # Le champ « personnes ».
       personnes: >-
         qui c'est concerne : le jeton ([P1]) pour quelqu'un de la conversation, le prénom pour quelqu'un d'autre ;
@@ -1627,7 +1634,8 @@ memory:
       # memory.extraction.due_day / due_time) ; {text} : ce qu'elle a promis.
       promise: "[#{id}] (à {whom}) {text}"
       # L'en-tête des situations en cours dans la vie des personnes (une ligne « [#n°] (qui) texte » chacune).
-      situations: "Situations en cours :"
+      situations: "Situations dont aucune fin n’a été rapportée (leur ancienneté ne prouve pas qu’elles durent encore) :"
+      situation: "Signalé le {since}, issue non confirmée : {text}"
       # L'en-tête des messages.
       messages: "Les messages :"
       # Un changement de jour dans les messages. {day} : memory.dates.day.
@@ -1695,6 +1703,12 @@ memory:
     souvenirs: "Des souvenirs :"
     # L'en-tête de ce qu'elle sait (une ligne « - croyance (comment elle le sait) » chacune).
     beliefs: "Ce que tu sais (tes notes) :"
+    nature:
+      claim: affirmation rapportée
+      opinion: opinion
+      preference: préférence
+      hypothesis: hypothèse
+    viewpoint: "{nature} — point de vue de {holder}"
     # Après une croyance apprise il y a plus d'une semaine (entre parenthèses) : elle sait depuis quand. {age} :
     # memory.age.
     learned: appris {age}
@@ -2052,6 +2066,9 @@ transcript:
     # Le résumé du début d'un long fil, épinglé en tête de l'historique (jamais coupé faute de place). {text} : le
     # résumé (écrit par l'appel « compact »).
     summary: "(Plus tôt, entre vous — en résumé : {text})"
+    gap: >-
+      (Des messages plus anciens ne sont pas dans ce contexte et n'ont pas encore été résumés.
+      Cherche dans l'historique si nécessaire.)
     # Dans le repère d'un message qu'elle a écrit d'elle-même, en privé (« [jeudi 19h06 — c'est toi qui lui as
     # écrit] ») : sans lui, le repère seul se lisait comme un message vide de la personne, qui l'aurait relancée.
     she_wrote_first: c'est toi qui lui as écrit

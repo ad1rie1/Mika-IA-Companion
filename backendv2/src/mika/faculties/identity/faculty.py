@@ -18,7 +18,7 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab import privacy
-from mika.vocab.people import clean_display_name, is_identifiable, is_internal, same_name
+from mika.vocab.people import clean_display_name, is_identifiable, is_internal, named_label, same_name
 from mika.vocab.privacy import ChannelTrust, Disclosure
 
 _TRUST_ORDER = {ChannelTrust.INTERNAL: 0, ChannelTrust.PUBLIC: 1, ChannelTrust.ACCOUNT: 2,
@@ -438,7 +438,7 @@ def _name_of(s: IdentityState, person: str) -> str:
     if h is not None and h.name:
         return h.name
     if person.startswith("name:"):
-        return person[5:].title()
+        return named_label(person).title()
     for k in handles_of(s, person):
         if s.handles[k].name:
             return s.handles[k].name

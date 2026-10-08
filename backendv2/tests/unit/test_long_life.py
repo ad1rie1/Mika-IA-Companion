@@ -388,7 +388,7 @@ def test_who_an_item_concerns_follows_her_memory(tmp_path):
     steps, merged = run(tmp_path, scenario)
     assert all(ok for ok, _ in steps), steps
     assert [n for _, n in steps] == [3, 3, 3, 2]
-    assert merged == {"user_2", "user_3"}, "le souvenir gardé concerne les deux"
+    assert merged == {"user_3"}, "deux soirées avec des personnes différentes restent deux souvenirs"
 
 
 # ── Les échanges passés ───────────────────────────────────────────────────

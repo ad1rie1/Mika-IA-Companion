@@ -172,7 +172,7 @@ def test_units_are_guessed_from_the_name_suffix():
     assert b["reply_tokens"].unit == "tokens"
     # un libellé qui porte déjà son unité ne reçoit pas une seconde unité devinée (« Contexte (jetons) (tokens) ») —
     # sauf une durée, dont l'unité sert à lire la valeur
-    assert b["context_tokens"].unit == "" and fields_by_path(LLMConfig)["context_tokens"].unit == ""
+    assert b["context_tokens"].unit == "" and fields_by_path(BackendSpec)["context_tokens"].unit == ""
     assert b["settle_s"].unit == "s"
 
 
@@ -282,10 +282,11 @@ def test_real_llm_config():
     assert visible(item, {"kind": "claude_code", "auth": "cle_api"})
     # ce que le SDK ou la CLI savent déjà est rangé à part ; le repli se choisit parmi les autres
     assert backends["host"].advanced and backends["base_url"].advanced and backends["claude_bin"].advanced
-    assert backends["fallback"].choices_from == "backends" and not backends["fallback"].advanced
+    assert "fallback" not in backends
     assert all(i.help for i in f["backends"].item), [i.path for i in f["backends"].item if not i.help]
     assert f["routes"].kind == "mapping"
-    assert (f["context_tokens"].lo, f["context_tokens"].hi, f["context_tokens"].readonly) == (2000, 1_000_000, False)
+    assert "context_tokens" not in f
+    assert (backends["context_tokens"].lo, backends["context_tokens"].hi, backends["context_tokens"].readonly) == (2000, 1_000_000, False)
     assert f["routes"].choices_from == "backends" and ("reply", "répondre (voix)") in f["routes"].keys
 
 
@@ -472,7 +473,7 @@ def test_within_checks_bounds_in_french():
         "count": "doit être entre 0 et 10",
         "inner.tau_h": "doit être entre 30 min et 2 j",
     }
-    lone = [f for f in describe(LLMConfig) if f.path == "context_tokens"]
+    lone = [f for f in describe(BackendSpec) if f.path == "context_tokens"]
     assert within(lone, {"context_tokens": 100}) == {"context_tokens": "doit être entre 2000 et 1000000"}
 
 

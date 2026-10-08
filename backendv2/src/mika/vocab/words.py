@@ -14,6 +14,11 @@ from collections.abc import Iterable
 
 WORD = re.compile(r"[a-z0-9]+")
 
+
+def same_words(a: str, b: str) -> bool:
+    """Mêmes mots dans le même ordre, négations comprises ; casse et ponctuation ignorées."""
+    return bool(a) and WORD.findall(fold(a)) == WORD.findall(fold(b))
+
 #: Repliés, sans accents.
 STOPWORDS = frozenset("""
 les des une uns aux que qui quoi dont pour par sur sous dans avec sans chez entre vers mais donc car pas plus moins

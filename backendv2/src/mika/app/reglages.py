@@ -525,9 +525,6 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                              "son fournisseur. Laisse vide : le rôle retombe sur son repli. "
                                              "« Répondre » est toujours servi : sans choix, par le premier "
                                              "fournisseur déclaré.")),
-                            SettingsPage("contexte", "Contexte", ("context_tokens",), order=30, facts=False,
-                                         description="La place que le prompt peut occuper : plus grande, elle se "
-                                                     "souvient de plus de fil et de souvenirs, pour plus cher."),
                         )),
         SettingsSection("images", "Images", "intelligence", ImagingConfig, settings.imaging, save_images, order=120,
                         description="Les fournisseurs qui génèrent ses images, et lequel sert chaque rôle. Aucun "

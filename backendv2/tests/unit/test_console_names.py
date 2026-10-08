@@ -107,14 +107,14 @@ def test_renaming_a_provider_names_everything_that_points_to_it():
                     routes={"reply": "a", "extract": "b", "murmur": "a"})
     flat = forms.flatten(cfg)
     refs = dict(forms.references(LLMConfig, flat, "backends", "a"))
-    assert set(refs) == {"routes.reply", "routes.murmur", "backends.b.fallback"}
+    assert set(refs) == {"routes.reply", "routes.murmur"}
     assert refs["routes.reply"] == "Rôles · répondre (voix)"
     renamed = {k if k != "a" else "local": v for k, v in flat["backends"].items()}
     changes, touched = forms.rename_references(LLMConfig, {**flat, "backends": renamed}, "backends", "a", "local")
     new, errors = forms.validate(LLMConfig, cfg, {"backends": renamed, **changes})
     assert not errors and new is not None
     assert new.routes == {"reply": "local", "extract": "b", "murmur": "local"}
-    assert new.backends["b"].fallback == "local" and len(touched) == 3
+    assert "fallback" not in new.backends["b"].model_dump() and len(touched) == 2
     # contre-exemple : ce qui ne le désignait pas ne bouge pas
     assert dict(forms.references(LLMConfig, flat, "backends", "zzz")) == {}
 

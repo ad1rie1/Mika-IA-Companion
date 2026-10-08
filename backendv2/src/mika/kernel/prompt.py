@@ -19,7 +19,7 @@ avant/après, rang de coupe, plancher, étiquettes) ; le composeur, générique 
    tient pas est retiré, jamais laissé à moitié) ;
    l'historique est coupé avec hystérésis (jusqu'à un niveau bas), mémorisée
    par fil, pour que le préfixe en cache ne bouge pas à chaque tour ; un tour
-   épinglé (le résumé du début du fil) n'est jamais coupé ; le message en
+   épinglé (le résumé du début du fil) est prioritaire sans dépasser le budget ; le message en
    cours qui déborde est coupé (ce que ses pièces jointes ont donné d'abord) ;
 5. rend un ``ChatPrompt`` : préfixe stable, historique en vrais tours (avec
    leurs repères de temps et, dans un salon, qui parle), bloc volatile en tête
@@ -106,13 +106,23 @@ class ChatTurn:
     #: repère absolu (« lundi 28 septembre, 18h02 »), rendu à la place de ``mark``
     #: quand ce tour ouvre l'historique visible (rien avant lui pour comparer)
     opening: str = ""
-    #: jamais coupé faute de place (le résumé du début du fil)
+    #: prioritaire lors de la coupe, sans pouvoir dépasser le budget du fournisseur
     pinned: bool = False
 
 
 def label(turn: ChatTurn) -> str:
     """Ce qui précède le texte d'un tour : son repère de temps, puis qui parle."""
     return (f"[{turn.mark}] " if turn.mark else "") + (f"{turn.speaker} : " if turn.speaker else "")
+
+
+@dataclass(frozen=True, slots=True)
+class Fragment:
+    """Une information indivisible et ses sources : on la montre entière, ou pas du tout."""
+
+    text: str
+    provenance: tuple[str, ...] = ()
+    #: Un rappel d'échange peut être omis seulement si ces tours sont effectivement rendus.
+    covered_by: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +145,8 @@ class SectionBody:
     #: zone historique : comment se présente le message en cours (son repère de
     #: temps, qui parle) ; son texte est le message de l'épisode
     current: ChatTurn | None = None
+    #: découpage explicite des données ; ``content`` reste le rendu complet pour les outils
+    fragments: tuple[Fragment, ...] = ()
 
 
 def audible(body: SectionBody, audience_level: int, witness_level: int | None = None,
@@ -201,6 +213,7 @@ class Budget:
     chars_per_token: float = 3.6
     history_low_ratio: float = 0.5
     history_share: float = 0.6
+    message_overhead: int = 0
 
     @property
     def max_chars(self) -> int:
@@ -331,13 +344,14 @@ class Composer:
         # (la fenêtre du fil glisse ; un index ne serait pas stable), mémorisée par fil.
         key = next((b.body.thread for b in history if b.body.thread), thread_key)
         flat = [t for b in history for t in b.turns]
-        shown = self._cut(flat, key, int(room_all * budget.history_share), budget.history_low_ratio)
+        shown = self._cut(flat, key, int(room_all * budget.history_share), budget.history_low_ratio,
+                          budget.message_overhead)
         turns = tuple(t for i, t in enumerate(flat) if i in shown)
         turns = _open(turns)
 
         # Zone volatile : coupe par rang croissant jusqu'aux planchers.
         trimmed: list[str] = []
-        room = room_all - _turn_chars(turns) - len(CONTEXT_HEADER) - len(CONTEXT_FOOTER) - 4
+        room = room_all - _turn_chars(turns, budget.message_overhead) - len(CONTEXT_HEADER) - len(CONTEXT_FOOTER) - 4
 
         def vol_size() -> int:
             return sum(len(self.render_block(b.spec, b.body, b.text)) + 2 for b in volatile)
@@ -352,7 +366,20 @@ class Composer:
                 target = max(floor, len(b.text) - excess - len(TRIM_MARK))
                 if target >= len(b.text):
                     continue
-                kept = _trim_at_boundary(b.text, target, floor)
+                if b.body.fragments:
+                    parts: list[Fragment] = []
+                    for fragment in b.body.fragments:
+                        candidate = _fragments(b.spec, [*parts, fragment])
+                        if len(candidate) > target:
+                            break
+                        parts.append(fragment)
+                    kept = _fragments(b.spec, parts)
+                    b.body = replace(b.body, provenance=tuple(p for f in parts for p in f.provenance),
+                                     fragments=tuple(parts))
+                else:
+                    kept = _trim_at_boundary(b.text, target, floor)
+                    # Sans correspondance explicite, une coupe ne prouve pas quelles sources sont visibles.
+                    b.body = replace(b.body, provenance=())
                 # une citation réduite à son avertissement ne dit plus rien
                 if not kept or (b.spec.untrusted and kept == UNTRUSTED_NOTE):
                     dropped.append((b.spec.key, "hors budget"))
@@ -365,6 +392,45 @@ class Composer:
 
         volatile_text = "\n\n".join(self.render_block(b.spec, b.body, b.text) for b in volatile)
         prompt = ChatPrompt(stable_text, volatile_text, turns, message)
+        def total_size() -> int:
+            return prompt.chars() + max(0, reserved) + (len(prompt.chat_messages()) - 1) * budget.message_overhead
+        # Les planchers sont des préférences. Les séparateurs, les dates d'ouverture et les résumés
+        # comptent aussi : contrôle final sur le rendu exact, jamais un dépassement silencieux.
+        while total_size() > budget.max_chars and volatile:
+            b = min(volatile, key=lambda b: (not b.spec.untrusted, b.spec.trim_rank, b.spec.key))
+            volatile.remove(b)
+            dropped.append((b.spec.key, "hors budget"))
+            prompt = replace(prompt, system_volatile="\n\n".join(
+                self.render_block(v.spec, v.body, v.text) for v in volatile))
+        if total_size() > budget.max_chars and shown:
+            # Même la coupe de secours laisse de la marge et mémorise sa frontière.
+            target = budget.max_chars - int(_turn_chars(turns, budget.message_overhead) *
+                                            (1 - budget.history_low_ratio))
+            while total_size() > target and shown:
+                drop = next((i for i in sorted(shown) if not flat[i].pinned), min(shown))
+                shown = shown - {drop}
+                turns = _open(tuple(t for i, t in enumerate(flat) if i in shown))
+                prompt = replace(prompt, history=turns)
+            free = [t.id for i, t in enumerate(flat) if i in shown and not t.pinned and t.id]
+            last = max((t.id for t in flat if not t.pinned), default=0)
+            self._remember(key, min(free) if free else last + 1)
+        if total_size() > budget.max_chars:
+            raise PromptBudgetError("le message et la zone stable dépassent le budget du fournisseur")
+
+        visible_ids = {t.id for t in turns if t.id and not t.pinned}
+        for b in volatile:
+            if not b.body.fragments:
+                continue
+            parts = tuple(f for f in b.body.fragments if not f.covered_by or not set(f.covered_by) <= visible_ids)
+            if len(parts) == len(b.body.fragments):
+                continue
+            b.body = replace(b.body, fragments=parts, provenance=tuple(p for f in parts for p in f.provenance))
+            b.text = _fragments(b.spec, parts)
+            if not b.text:
+                dropped.append((b.spec.key, "déjà dans l'historique rendu"))
+        volatile = [b for b in volatile if b.text]
+        prompt = replace(prompt, system_volatile="\n\n".join(
+            self.render_block(b.spec, b.body, b.text) for b in volatile))
 
         # Ce qui a été réellement rendu : un bloc d'historique dont tous les tours
         # ont été coupés, une section tombée hors budget, ne comptent pas.
@@ -389,30 +455,37 @@ class Composer:
             history_turns=len(turns),
             provenance=tuple(p for b in rendered for p in b.body.provenance),
             sizes=tuple(sizes),
-            reserved=max(0, reserved),
+            reserved=max(0, reserved) + (len(prompt.chat_messages()) - 1) * budget.message_overhead,
         )
         return prompt, trace
 
-    def _cut(self, turns: Sequence[ChatTurn], key: str, budget_chars: int, low_ratio: float) -> frozenset[int]:
+    def _cut(self, turns: Sequence[ChatTurn], key: str, budget_chars: int, low_ratio: float,
+             overhead: int = 0) -> frozenset[int]:
         """Les tours gardés (leurs positions) : tous les épinglés, puis les
         derniers à partir de la coupe mémorisée pour ce fil. Quand ils ne
         tiennent plus, la coupe se recalcule jusqu'à un niveau bas — elle ne
         bouge donc qu'une fois de temps en temps, et le préfixe en cache avec elle."""
-        pinned = [i for i, t in enumerate(turns) if t.pinned]
+        pinned = []
+        available = max(0, budget_chars)
+        for i, t in enumerate(turns):
+            size = _turn_chars([t], overhead)
+            if t.pinned and size <= available:
+                pinned.append(i)
+                available -= size
         free = [i for i, t in enumerate(turns) if not t.pinned]
-        room = budget_chars - _turn_chars([turns[i] for i in pinned])
+        room = budget_chars - _turn_chars([turns[i] for i in pinned], overhead)
         first_id = self._history_cut.get(key)
         cut = 0
         if first_id is not None:
             cut = next((n for n, i in enumerate(free) if turns[i].id >= first_id), len(free))
             if cut == len(free):
                 cut = 0  # la coupe mémorisée ne correspond à aucun tour de ce fil : on la recalcule
-        if _turn_chars([turns[i] for i in free[cut:]]) > room:
+        if _turn_chars([turns[i] for i in free[cut:]], overhead) > room:
             low = int(room * low_ratio)
             cut = len(free)
             size = 0
             for n in range(len(free) - 1, -1, -1):
-                size += _turn_chars([turns[free[n]]])
+                size += _turn_chars([turns[free[n]]], overhead)
                 if size > low:
                     break
                 cut = n
@@ -424,6 +497,11 @@ class Composer:
         self._history_cut[key] = first_id
         while len(self._history_cut) > HISTORY_KEYS_MAX:
             self._history_cut.pop(next(iter(self._history_cut)))
+
+
+def _fragments(spec: SectionSpec, parts: Sequence[Fragment]) -> str:
+    text = "\n".join(f.text for f in parts)
+    return (cited(text) if spec.untrusted else neutral(text)) if text else ""
 
 
 def _open(turns: Sequence[ChatTurn]) -> tuple[ChatTurn, ...]:
@@ -442,6 +520,8 @@ def _fit(message: str, typed_chars: int | None, room: int) -> str:
     """Le message (neutralisé) borné à ``room`` caractères : la partie venue des
     pièces jointes (au-delà de ``typed_chars``) est coupée d'abord ; ce que la
     personne a tapé ne l'est que si cela ne suffit pas."""
+    if room <= len(TRIM_MARK):
+        return TRIM_MARK[:max(0, room)]
     typed = len(message) if typed_chars is None else max(0, min(len(message), typed_chars))
     head, tail = neutral(message[:typed]), neutral(message[typed:])
     keep = room - len(head) - len(TRIM_MARK)
@@ -480,5 +560,6 @@ def _breaks(char: str) -> bool:
     return char.isspace() and char not in _NO_BREAK
 
 
-def _turn_chars(turns: Sequence[ChatTurn]) -> int:
-    return sum(len(t.content) + len(label(t)) + 2 for t in turns)
+def _turn_chars(turns: Sequence[ChatTurn], overhead: int = 0) -> int:
+    return sum(len(t.content) + len(label(t)) + 2 + overhead * (2 if t.role == "assistant" and t.mark else 1)
+               for t in turns)

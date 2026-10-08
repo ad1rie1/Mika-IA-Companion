@@ -74,7 +74,6 @@ from mika.inspector.ui import PREFIX as CONSOLE_PREFIX
 from mika.inspector.ui import InspectorDeps
 from mika.kernel.builtin import PARAMS_CHANGED
 from mika.kernel.events import Origin
-from mika.kernel.prompt import Budget
 from mika.runtime.bootstrap import Kernel
 from mika.vocab import privacy
 from mika.vocab.people import clean_display_name
@@ -290,7 +289,6 @@ class Live:
             self.gateway.set(build_gateway(cfg, self.kernel.deps.clock, on_trace=self.trace, relay=self.relay,
                                            relay_base=lambda: self.relay_base,
                                            work_dir=runtime_dir(self.data) if self.data else None))
-            self.kernel.runner.budget = Budget(max_tokens=cfg.context_tokens)
         else:
             self.gateway.set(None)
         return problems

@@ -48,7 +48,7 @@ boucle d'outils de l'épisode (même ``call_id`` d'un tour à l'autre) :
 
 La CLI rend aussi l'usage de l'abonnement (``rate_limit_event``) : au-delà de
 ``quota_ceiling``, les appels de fond sont refusés (``QuotaHeld``) — la
-passerelle bascule alors sur le fournisseur de repli, et la conversation, elle,
+passerelle journalise alors le refus, et la conversation, elle,
 passe toujours. Une lecture dont la fenêtre est déjà réinitialisée
 (``resetsAt`` passé) ne compte plus.
 """
@@ -602,7 +602,7 @@ class ClaudeCodeBackend:
         worst = max(self._live_quota(), key=lambda q: q.utilization, default=None)
         if worst is not None and worst.utilization >= self.quota_ceiling:
             raise QuotaHeld(f"abonnement entamé à {worst.utilization:.0%} ({worst.window}) : "
-                            f"appel de fond laissé au repli")
+                            f"appel de fond refusé pour préserver la réserve")
 
     def status(self) -> dict[str, Any]:
         return {"sessions": len(self._runs),

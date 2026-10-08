@@ -39,6 +39,7 @@ from mika.kernel.inspect import (
     num_fr,
 )
 from mika.vocab.affect import emotion_cell
+from mika.vocab.people import named_label
 from mika.vocab.privacy import Sensitivity
 
 FORGOTTEN = "(oublié)"
@@ -64,7 +65,7 @@ def _p(frame: Frame) -> Any:
 
 
 def _name(frame: Frame, key: str) -> str:
-    return key[5:].title() if key.startswith("name:") else (frame.get(identity_c.IDENTITY(key)).name or key)
+    return named_label(key).title() if key.startswith("name:") else (frame.get(identity_c.IDENTITY(key)).name or key)
 
 
 def person_ref(frame: Frame, key: str, tab: str = "pensees_personne") -> Cell:

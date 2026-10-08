@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
@@ -25,7 +26,6 @@ import pytest
 from anthropic.types import Message as AnthropicMessage
 from pydantic import BaseModel
 
-from mika.adapters.llm import gateway as gateway_mod
 from mika.adapters.llm.claude import ClaudeBackend
 from mika.adapters.llm.config import BackendSpec, LLMConfig, build_gateway
 from mika.adapters.llm.gateway import Gateway, last_sentence, trim_speech
@@ -193,19 +193,15 @@ class Quick:
         return LLMResponse(self.text, model="spare-1")
 
 
-async def test_a_mute_provider_times_out_and_the_fallback_gets_the_time_left(monkeypatch):
-    monkeypatch.setattr(gateway_mod, "MIN_RETRY_S", 0.05)
+async def test_a_mute_provider_times_out_without_calling_another_provider(caplog):
     spare = Quick("spare")
     gw = Gateway({"main": Hang("main"), "spare": spare}, {"reply": "main"}, clock=ManualClock(0),
-                 backend_fallbacks={"main": "spare"}, deadlines={"conversation": 0.6})
-    t0 = time.monotonic()
-    resp = await gw.call(LLMRequest(role="reply", call_id="r#0", system_stable="s", lane="conversation"))
-    assert resp.text == "réponse de repli" and 0.3 < time.monotonic() - t0 < 0.6
-    assert [(t.backend, t.outcome) for t in gw.traces] == [("main", "timeout"), ("spare", "ok")]
-    alone = Gateway({"main": Hang("main")}, {"reply": "main"}, clock=ManualClock(0), deadlines={"conversation": 0.2})
+                 deadlines={"conversation": 0.1})
     with pytest.raises(TimeoutError):
-        await alone.call(LLMRequest(role="reply", call_id="r#0", system_stable="s", lane="conversation"))
-    assert [t.outcome for t in alone.traces] == ["timeout"]
+        await gw.call(LLMRequest(role="reply", call_id="r#0", system_stable="s", lane="conversation"))
+    assert not spare.seen
+    assert [(t.backend, t.outcome) for t in gw.traces] == [("main", "timeout")]
+    assert "r#0" in caplog.text and "délai dépassé" in caplog.text
 
 
 class Flaky:
@@ -228,8 +224,7 @@ MID_LOOP = (Message("user", "note pain"),
 
 async def test_a_tool_loop_never_switches_to_a_provider_that_would_redo_its_tools():
     main, cli = Flaky("main"), Quick("cli", resumes=False)
-    gw = Gateway({"main": main, "cli": cli}, {"reply": "main"}, clock=ManualClock(0),
-                 backend_fallbacks={"main": "cli"})
+    gw = Gateway({"main": main, "cli": cli}, {"reply": "main"}, clock=ManualClock(0))
     first = LLMRequest(role="reply", call_id="ep#0", system_stable="s", messages=MID_LOOP[:1])
     main.fail = False
     await gw.call(first)
@@ -239,17 +234,15 @@ async def test_a_tool_loop_never_switches_to_a_provider_that_would_redo_its_tool
     assert cli.seen == []
 
 
-async def test_a_loop_that_moved_to_the_fallback_stays_there():
+async def test_a_failed_loop_can_resume_on_its_original_provider():
     main, spare = Flaky("main"), Quick("spare")
-    gw = Gateway({"main": main, "spare": spare}, {"reply": "main"}, clock=ManualClock(0),
-                 backend_fallbacks={"main": "spare"})
-    await gw.call(LLMRequest(role="reply", call_id="ep#0", system_stable="s", messages=MID_LOOP[:1]))
-    main.fail = False  # le principal revient : la boucle commencée sur le repli y reste
-    await gw.call(LLMRequest(role="reply", call_id="ep#0", system_stable="s", messages=MID_LOOP))
-    assert len(main.seen) == 1 and len(spare.seen) == 2
-    gw.release("ep#0")
-    await gw.call(LLMRequest(role="reply", call_id="ep#0", system_stable="s", messages=MID_LOOP[:1]))
-    assert len(main.seen) == 2  # boucle finie, oubliée : un nouvel appel repart du principal
+    gw = Gateway({"main": main, "spare": spare}, {"reply": "main"}, clock=ManualClock(0))
+    req = LLMRequest(role="reply", call_id="ep#0", system_stable="s", messages=MID_LOOP[:1])
+    with pytest.raises(ConnectionError):
+        await gw.call(req)
+    main.fail = False
+    await gw.call(replace(req, messages=MID_LOOP))
+    assert len(main.seen) == 2 and not spare.seen
 
 
 # ── Coupé par le plafond ──────────────────────────────────────────────────

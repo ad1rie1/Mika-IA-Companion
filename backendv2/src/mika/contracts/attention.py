@@ -63,6 +63,7 @@ class ThoughtBorn(Payload):
     about: tuple[str, ...] = ()
     sensitivity: int = 2
     source: int | None = None  # le message ou l'élément de mémoire d'où elle vient
+    sources: tuple[int, ...] = ()  # toutes les preuves citées par une pensée composée
     bundle: str = ""  # les outils qui vont avec (une pensée née d'un signal)
 
 

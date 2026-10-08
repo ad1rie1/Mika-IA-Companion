@@ -13,6 +13,7 @@ from mika.app import cli
 from mika.contracts import memory as memory_c
 from mika.runtime.traces import TABLE as TRACES
 from mika.sim.clock import run_virtual
+from mika.vocab.people import named_label
 from tests.fixtures.memory import SIX, Script, chat, seq_of, token
 from tests.fixtures.mika import boot, build, connect
 
@@ -83,7 +84,7 @@ def test_forgetting_whoever_confided_it_forgets_what_they_said(tmp_path):
         return row, stale, pruned, left
 
     row, stale, pruned, left = run_virtual(clock, main)
-    assert json.loads(row[1]) == ["name:carol"] and json.loads(row[2]) == ["user_3"]
+    assert [named_label(k) for k in json.loads(row[1])] == ["carol"] and json.loads(row[2]) == ["user_3"]
     assert left == 0, "ce que Bob a confié s'oublie avec lui"
     assert stale and pruned, "le cache perd ce que la mémoire a perdu"
 
@@ -122,10 +123,8 @@ def test_a_rebuilt_thread_does_not_bring_back_someone_forgotten(tmp_path):
     assert any(r[0] == "user_3" for r in rows), "contre-exemple : le fil de Bob se reconstruit"
 
 
-def test_forgetting_someone_a_memory_was_reinforced_by_erases_its_text_for_good(tmp_path):
-    """Sam lui apprend un fait ; plus tard il le redit en nommant Inès : le souvenir est renforcé, et rattaché à Inès
-    aussi — sans que son texte la nomme. Oublier Inès retirait la ligne, mais pas le texte : une reconstruction le
-    faisait revenir, rattaché à elle (audit du lot L2 du 2026-10-03). Désormais le texte s'efface avec elle."""
+def test_forgetting_a_mentioned_person_erases_their_evidence_without_erasing_others(tmp_path):
+    """La version impliquant Inès s'efface pour de bon. Le témoignage antérieur de Sam seul survit."""
     fact = "Le concert de jazz CANARI-RENFORT est samedi au Pavillon"
 
     def extract(prompt):
@@ -149,7 +148,8 @@ def test_forgetting_someone_a_memory_was_reinforced_by_erases_its_text_for_good(
             await asyncio.sleep(900)
             before = kernel.mind.store.query_mind(f"SELECT id, about FROM {memory_c.ITEMS_TABLE} "
                                                   "WHERE text LIKE '%CANARI-RENFORT%'")
-            await kernel.forget("name:ines")
+            mention = next(k for _, raw in before for k in json.loads(raw) if named_label(k) == "ines")
+            await kernel.forget(mention)
             after = kernel.mind.store.query_mind(f"SELECT COUNT(*) FROM {memory_c.ITEMS_TABLE} "
                                                  "WHERE text LIKE '%CANARI-RENFORT%'")[0][0]
             await kernel.stop()
@@ -158,8 +158,9 @@ def test_forgetting_someone_a_memory_was_reinforced_by_erases_its_text_for_good(
         return run_virtual(clock, main)
 
     before, after = first()
-    assert len(before) == 1 and set(json.loads(before[0][1])) == {"user_1", "name:ines"}, before  # renforcé, rattaché
-    assert after == 0
+    assert len(before) == 2
+    forgotten_id = next(i for i, raw in before if any(named_label(k) == "ines" for k in json.loads(raw)))
+    assert after == 1
     with sqlite3.connect(tmp_path / "mind.db") as db:  # une mise à jour reconstruit la table des souvenirs
         db.execute(f"UPDATE meta SET value='1' WHERE key='t0:{memory_c.ITEMS_TABLE}'")
     kernel, clock, _, _ = build(tmp_path, Script(extract))
@@ -167,8 +168,10 @@ def test_forgetting_someone_a_memory_was_reinforced_by_erases_its_text_for_good(
     async def main():
         await boot(kernel)
         rows = kernel.mind.store.query_mind(f"SELECT id, text, about FROM {memory_c.ITEMS_TABLE} "
-                                            f"WHERE id={before[0][0]}")
+                                            "WHERE text LIKE '%CANARI-RENFORT%'")
         await kernel.stop()
         return rows
 
-    assert run_virtual(clock, main) == [], "le texte oublié ne revient pas à la reconstruction"
+    remaining = run_virtual(clock, main)
+    assert len(remaining) == 1 and remaining[0][0] != forgotten_id
+    assert json.loads(remaining[0][2]) == ["user_1"], "la mention oubliée ne revient pas à la reconstruction"
