@@ -169,7 +169,7 @@ def test_feeds_and_ordinary_mail_stay_in_the_background_of_a_reply(tmp_path):
     async def scenario(kernel, ports):
         t = kernel.mind.clock.now()
         for i in range(3):
-            ports["feeds"].publish(Entry(f"jeu-{i}", "Le Journal", f"Jeux rétro : la sélection n°{i}", "", "", t + i))
+            ports["feeds"].publish(Entry(f"jeu-{i}", "Le Journal", f"Astronomie et physique : la sélection n°{i}", "", "", t + i))
         await asyncio.sleep(40 * MINUTE / US)
         await connect(kernel, "user_1", "Adrien", operator=True)
         await (await kernel.perceive(said("user_1", "coucou, trop bien ta journée ?"))).reply
@@ -177,9 +177,9 @@ def test_feeds_and_ordinary_mail_stay_in_the_background_of_a_reply(tmp_path):
     _, llm, kernel = run(tmp_path, scenario, mail=box, feeds=feeds)
     reply = prompt_of(llm, "user_1")
     outside = _outside_her_own_life(reply.split(CONTEXT_FOOTER)[0])
-    assert "DANS TES FLUX" not in reply and "Jeux rétro" not in outside
+    assert "DANS TES FLUX" not in reply and "Astronomie" not in outside
     assert "rendez-vous" not in outside  # un mail ordinaire ne s'invite pas dans une réponse
-    assert "Jeux rétro" in reply  # contre-épreuve : ce qu'un titre lui a fait penser ou faire, lui, reste
+    assert "Astronomie" in reply  # contre-épreuve : ce qu'un titre lui a fait penser ou faire, lui, reste
 
 
 #: sa vie à elle — ses pensées (ADR 0033 : une pensée née d'un titre y est citée) et ce qu'elle a en train

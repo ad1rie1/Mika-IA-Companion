@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 from mika.contracts import self_ as self_c
 from mika.faculties.self import interjections, render
+from mika.plugins.rss import keywords
 from mika.kernel.clock import DAY, HOUR, US
 from mika.kernel.codec import canonical_json
 from mika.kernel.events import EventRegistry
@@ -98,6 +99,20 @@ def test_a_persona_journaled_before_the_rule_still_replays():
 
 
 FOOD = ("mang", "boi", " bu ", "cuisin", "café", "ramen", "recette", "cookies", "bouffe", "pizza")
+
+
+#: des mots de tous les jours : dans ses centres d'intérêt, ils feraient d'un titre banal un titre qui la touche
+EVERYDAY_WORDS = {"comment", "service", "rendre", "choses", "trouve", "regarde", "simples", "petites", "bureau",
+                  "avoir", "fait", "jamais", "autres", "toujours", "encore", "aussi", "faire"}
+
+
+def test_her_interests_name_subjects_that_pick_her_headlines_not_everyday_words():
+    """Les mots de ses centres d'intérêt décident des titres de ses flux qui la touchent (plugin ``rss``) : ce sont
+    des mots de sujets. Persona du 2026-10-07, première version : « comment », « service », « rendre » — tout titre
+    en « Comment… » l'aurait touchée. Contre-épreuve : ses sujets y sont."""
+    words = keywords(DOC.interests)
+    assert not words & EVERYDAY_WORDS, sorted(words & EVERYDAY_WORDS)
+    assert {"lecture", "dessin", "astronomie", "programmation", "plantes"} <= words
 
 
 def test_her_life_is_an_ais_life_and_her_tastes_do_not_move():

@@ -158,7 +158,7 @@ def test_her_daydreams_are_titled_by_their_subject_in_good_french():
     seul, avec l'article contracté."""
     titles = [f"Rêvasser un peu autour {of_words(lowered(short(i)))}" for i in DOC.interests]
     assert "Rêvasser un peu autour du dessin" in titles and "Rêvasser un peu autour de la lecture" in titles
-    assert "Rêvasser un peu autour des petites apps" in titles
+    assert "Rêvasser un peu autour de la programmation" in titles
     assert not any("hardcore" in t or "théorie" in t or " de le " in t or " de les " in t for t in titles)
     assert of_words("les jeux rétro") == "des jeux rétro" and of_words("Outer Wilds") == "d'Outer Wilds"
     assert of_words("Hollow Knight") == "de Hollow Knight"

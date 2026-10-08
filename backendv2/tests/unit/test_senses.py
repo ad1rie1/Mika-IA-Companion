@@ -297,7 +297,7 @@ def test_she_notices_what_touches_her_and_gets_used_to_a_flood(tmp_path):
         t = kernel.mind.clock.now()
         feeds_.publish(entry(0, "Le cours du pétrole", t))
         for i in range(1, 16):  # un flot de titres qui la touchent, relevés en quelques minutes
-            feeds_.publish(entry(i, f"Jeux rétro : épisode {i}", t + i))
+            feeds_.publish(entry(i, f"Astronomie et physique : épisode {i}", t + i))
         await asyncio.sleep(2 * HOUR / US)
 
     r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0), feeds=feeds)
@@ -317,8 +317,8 @@ def test_a_headline_that_excites_her_becomes_an_exploration_and_she_reads_it(tmp
 
     async def scenario(kernel, llm, mail_, feeds_):
         t = kernel.mind.clock.now()
-        feeds_.publish(entry(1, "Jeux rétro indé : la renaissance du pixel", t),
-                       article="Les studios indépendants remettent le pixel art au goût du jour.")
+        feeds_.publish(entry(1, "Astronomie, physique, sciences : le retour des comètes", t),
+                       article="Une comète visible à l'œil nu reviendra cet hiver, la première depuis vingt ans.")
         await asyncio.sleep(3 * HOUR / US)
 
     r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0), feeds=feeds)

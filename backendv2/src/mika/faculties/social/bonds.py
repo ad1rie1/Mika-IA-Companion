@@ -57,6 +57,7 @@ from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.people import is_identifiable
+from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
 #: La pertinence du signal pour son attention (assez pour qu'une pensée en naisse).
@@ -156,10 +157,10 @@ def shifts(s: SocialState, frame: Frame, p: SocialParams) -> list[Shift]:
 
 def _text(shift: Shift, name: str) -> str:
     if _rank(shift.after) < _rank(shift.before):
-        return f"Ça s'est refroidi entre {name} et moi."
+        return phrase("social.bonds.cooled", name=name)
     if shift.after == c.CLOSE:
-        return f"{name} et moi, je crois qu'on est vraiment proches maintenant."
-    return f"Je crois qu'une vraie amitié est née entre {name} et moi."
+        return phrase("social.bonds.close", name=name)
+    return phrase("social.bonds.friends", name=name)
 
 
 @SOCIAL.process("social.bonds", wake_on=[rt.UTTERANCE, rt.PERCEPTION_RECEIVED], lane="background",
@@ -186,7 +187,7 @@ class Bonds:
                              for x in noted]
         level = int(Sensitivity.PERSONAL)
         for x in felt:
-            name = frame.get(identity_c.IDENTITY(x.person)).name or "cette personne"
+            name = frame.get(identity_c.IDENTITY(x.person)).name or phrase("social.reciprocity.someone")
             drafts.append(c.BOND_SHIFTED.draft(
                 source="social", kind="bond_shifted", summary=Content.of(_text(x, name), level=level),
                 pertinence=PERTINENCE, emotion=Emotion.THINKING.value, intensity=0.0, about=(x.person,),

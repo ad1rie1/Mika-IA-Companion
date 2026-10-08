@@ -17,7 +17,6 @@ personne répond, qui écrit la première) — jamais redit dans une faculté.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass
 
 from mika.contracts import attention as attention_c
@@ -89,20 +88,13 @@ NOT_SPEAKING_UP = GREETS | OWED
 FOR_THEM = others_c.WELL_WISHES | frozenset({others_c.CHECK_IN, others_c.FOLLOW_UP, attention_c.THOUGHT,
                                              goals_c.SHARE, projects_c.SHARE})
 #: Pourquoi elle était en train d'écrire à quelqu'un quand son message est arrivé (« j'allais justement
-#: t'écrire ! ») : la réponse qui suit le sait, en ces mots — le premier motif de la table présent parmi les raisons
-#: de l'initiative. Une raison absente de la table est tue : la ligne dit seulement qu'elle allait lui écrire.
-CROSSED_MOTIVES: Mapping[str, str] = {
-    others_c.FOLLOW_UP: "pour lui demander comment ça s'était passé",
-    others_c.CHECK_IN: "pour prendre de ses nouvelles",
-    others_c.CELEBRATE: "pour lui souhaiter ce qui se fête aujourd'hui",
-    others_c.CHEER: "pour l'encourager",
-    attention_c.THOUGHT: "parce que quelque chose à son sujet te trottait dans la tête",
-    social_c.RECONTACT: "pour prendre de ses nouvelles",
-    social_c.REKINDLE: "pour prendre de ses nouvelles",
-    social_c.COMFORT: "parce que tu avais besoin de lui parler",
-    social_c.CHAT: "pour discuter un peu",
-    needs_c.NEED_SOCIAL: "parce que tu avais envie de lui parler",
-}
+#: t'écrire ! ») : la réponse qui suit le sait — le premier motif de cette liste présent parmi les raisons de
+#: l'initiative, dit avec les mots de ``agency.crossed.motive`` (persona/voix.yaml, ADR 0071). Une raison absente
+#: de la liste est tue : la ligne dit seulement qu'elle allait lui écrire.
+CROSSED_MOTIVES: tuple[str, ...] = (
+    others_c.FOLLOW_UP, others_c.CHECK_IN, others_c.CELEBRATE, others_c.CHEER, attention_c.THOUGHT,
+    social_c.RECONTACT, social_c.REKINDLE, social_c.COMFORT, social_c.CHAT, needs_c.NEED_SOCIAL,
+)
 
 #: Après tant d'initiatives restées sans réponse vers quelqu'un, plus rien vers cette personne tant qu'elle n'a pas
 #: écrit (ADR 0033) : elle ne peut plus lui écrire — ce qui lui reste, c'est d'y penser (``attention``).

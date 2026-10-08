@@ -998,7 +998,9 @@ def _moment_line(m: Moment, frame: Frame, close: bool, hard: bool = False) -> st
         return f"- {when} : {m.label}" + (phrase("memory.life.talked_again") if ev.when > frame.now
                                            else phrase("memory.life.past_talked"))
     if ev.yearly and _today(ev, frame):
-        return phrase("memory.life.heavy_today" if c.heavy_date(ev) else "memory.life.yearly_today", label=m.label)
+        if c.heavy_date(ev):
+            return phrase("memory.life.heavy_today", label=m.label)
+        return phrase("memory.life.yearly_today", label=m.label)
     if ev.when > frame.now:
         return f"- {when} : {m.label}" + (phrase("memory.life.already_said") if m.mentioned else "")
     important = ev.importance >= c.IMPORTANT_MOMENT

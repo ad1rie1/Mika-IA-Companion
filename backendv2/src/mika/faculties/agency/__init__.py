@@ -63,7 +63,7 @@ from mika.vocab import affect as A
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable, is_internal
-from mika.vocab.phrasebook import phrase
+from mika.vocab.phrasebook import family, phrase
 
 KEEP = 32
 #: au plus tant d'épisodes en cours retenus (corrélation → raisons, adresse visée, départ)
@@ -451,10 +451,11 @@ def hesitation_span(n: int, p: AgencyParams) -> int:
 
 def crossed_motive(reasons: Any) -> str | None:
     """Pourquoi elle allait lui écrire, en mots : le premier motif de ``c.CROSSED_MOTIVES`` parmi les raisons de
-    l'initiative, ou ``None`` (il est tu)."""
-    for code, words in c.CROSSED_MOTIVES.items():
+    l'initiative (``agency.crossed.motive``), ou ``None`` (il est tu)."""
+    words = family("agency.crossed.motive")
+    for code in c.CROSSED_MOTIVES:
         if code in reasons:
-            return words
+            return words[code]
     return None
 
 
@@ -470,8 +471,7 @@ def _crossed(s: AgencyState, frame: Frame, enrich: Mapping[str, Any]) -> str | N
     if got is None or frame.now - got[0] >= CROSSED_SPAN:
         return None
     motive = crossed_motive(got[1].split(",")) if aud is not None and aud.private_ok else None
-    why = f" ({motive})" if motive else ""
-    return f"Tu étais justement en train de lui écrire{why} quand son message est arrivé."
+    return phrase("agency.crossed.with_motive", motive=motive) if motive else phrase("agency.crossed.plain")
 
 
 # ── La consigne d'une initiative ──────────────────────────────────────────

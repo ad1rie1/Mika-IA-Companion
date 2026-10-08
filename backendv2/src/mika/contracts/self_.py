@@ -83,7 +83,8 @@ class PersonaDoc(BaseModel):
     values: Annotated[tuple[str, ...], _lines("Valeurs", "Ce à quoi elle tient.", 80)] = ()
     interests: Annotated[tuple[str, ...], _lines(
         "Centres d'intérêt", "Ce qui la passionne. Un sujet court d'abord, puis « — » et le détail (« Le dessin — "
-        "des choses simples, pour le plaisir ») : le sujet seul titre ses explorations.", 90)] = ()
+        "illustration, aquarelle ») : le sujet seul titre ses explorations, et leurs mots décident des titres de ses "
+        "flux qui la touchent.", 90)] = ()
     speech: Annotated[tuple[str, ...], _lines("Façons de parler", "Ses tournures.", 100, "Sa parole")] = ()
     greetings: Annotated[tuple[str, ...], _lines(
         "Salutations", "Des exemples de ses bonjours : seuls leurs premiers mots (« hey », « yooo ») lui sont montrés "

@@ -639,8 +639,8 @@ def _self_state(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> Sectio
 # ── Ses absences ──────────────────────────────────────────────────────────
 
 
-@SELF.section("absence", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=80, title="TON ABSENCE",
-              reads=[ABSENCES])
+@SELF.section("absence", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=80,
+              title=phrase("self.absence.title"), reads=[ABSENCES])
 def _absence(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> str | None:
     """Revenue d'un arrêt de son serveur, elle sait qu'elle n'était pas là, de quand à quand — quelques heures
     après son retour : un « ça fait longtemps ! » ferait croire qu'elle a vécu ce silence. Un fait, sans s'en
@@ -652,11 +652,12 @@ def _absence(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> str | Non
     if not recent:
         return None
     tz = frame.env.tz_of(frame.root)
-    spans = ", puis ".join(f"entre {days.instant_fr(a.since, frame.now, tz)} et "
-                           f"{days.instant_fr(a.until, frame.now, tz)}" for a in recent)
-    why = "" if s.persona.nature == c.EMBODIED else " (ton serveur était arrêté)"
-    return (f"Tu n'étais pas là {spans}{why} : ce temps-là, tu ne l'as pas vécu, et rien de ce qui s'est passé "
-            "pendant ne t'est parvenu.")
+    spans = phrase("self.absence.then").join(
+        phrase("self.absence.span", since=days.instant_fr(a.since, frame.now, tz),
+               until=days.instant_fr(a.until, frame.now, tz)) for a in recent)
+    if s.persona.nature == c.EMBODIED:
+        return phrase("self.absence.embodied", spans=spans)
+    return phrase("self.absence.machine", spans=spans)
 
 
 # ── La persona ────────────────────────────────────────────────────────────

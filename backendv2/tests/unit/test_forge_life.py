@@ -202,14 +202,14 @@ def test_an_app_hears_only_what_is_anodyne(tmp_path):
         await install(kernel, forge, "veille", "title: Veille\nevents: [rss.noticed, email.noticed, forge.signaled, "
                                              "body.*]\n", LISTENER)
         t = kernel.mind.clock.now()
-        feeds.publish(Entry("e1", "Le Journal", "Jeux rétro : la sélection", "", "", t))
+        feeds.publish(Entry("e1", "Le Journal", "Astronomie et physique : la sélection", "", "", t))
         box.deliver(Mail("<m1@x>", "Alice <alice@x.fr>", "alice@x.fr", "Mon secret CANARI-mail", t, "…"))
         await asyncio.sleep(HOUR / US)
         return (await forge.call("veille", "view")).value
 
     seen, evs, _ = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0), world={"feeds": feeds, "mail": box})
     types = [t for t, _ in seen]
-    assert "rss.noticed" in types and any("Jeux rétro" in text for _, text in seen)
+    assert "rss.noticed" in types and any("Astronomie" in text for _, text in seen)
     assert "email.noticed" not in types and "CANARI" not in str(seen)  # un mail n'est jamais pour une app
     assert "forge.signaled" not in types  # jamais ses propres signaux
     assert of(evs, HANDLED)

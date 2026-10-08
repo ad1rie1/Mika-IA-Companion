@@ -538,13 +538,20 @@ def tagged(r: Mapping[str, Any]) -> str:
 
 #: ce que dit le repère d'un message resté sans réponse (la colonne ``unanswered``) : un fait, à la deuxième
 #: personne, jamais la cause technique — à « t'es là ? », elle sait qu'elle n'a pas répondu et pourquoi, et ne
-#: s'excuse pas d'une panne quand elle s'est tue exprès ; ce qu'elle en dit, elle le décide
+#: s'excuse pas d'une panne quand elle s'est tue exprès ; ce qu'elle en dit, elle le décide. Les mots sont sous
+#: ``transcript.thread.unanswered`` (persona/voix.yaml) ; un délai dépassé se dit comme une panne.
 LEFT_UNANSWERED = {
-    c.UNANSWERED_ABSTAINED: "tu avais choisi de ne rien répondre",
-    c.UNANSWERED_FAILED: "tu n'as pas pu lui répondre : une panne",
-    c.UNANSWERED_TIMEOUT: "tu n'as pas pu lui répondre : une panne",
-    c.UNANSWERED_LATE: "tu ne l'as pas lu à temps",
+    c.UNANSWERED_ABSTAINED: "abstained",
+    c.UNANSWERED_FAILED: "failed",
+    c.UNANSWERED_TIMEOUT: "failed",
+    c.UNANSWERED_LATE: "late",
 }
+
+
+def left_unanswered(cause: str | None) -> str:
+    """Le repère d'un message resté sans réponse pour ``cause`` (``""`` : répondu, en attente ou pas pour elle)."""
+    words = LEFT_UNANSWERED.get(cause or "")
+    return phrase(f"transcript.thread.unanswered.{words}") if words else ""
 
 
 def _first(mark: str, note: str) -> str:
@@ -577,7 +584,7 @@ def thread_turns(rows: Sequence[Mapping[str, Any]], tz: ZoneInfo, now: int, afte
         elif r["role"] == "assistant":
             out.append(ChatTurn("assistant", tagged(r), id=r["id"], mark=mark, opening=opening))
         else:
-            left = LEFT_UNANSWERED.get(r.get("unanswered") or "", "")
+            left = left_unanswered(r.get("unanswered"))
             out.append(ChatTurn("user", r["text"] or "", speaker=(names or {}).get(r["person"], ""), id=r["id"],
                                 mark=_first(mark, left) if left else mark,
                                 opening=_first(opening, left) if left else opening))

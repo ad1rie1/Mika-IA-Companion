@@ -448,12 +448,12 @@ def test_the_feeds_view_counts_by_day_filters_by_feed_and_links_articles(tmp_pat
     async def scenario(kernel):
         t = kernel.mind.clock.now()
         feeds.publish(entry(0, "Le cours du pétrole", t))
-        feeds.publish(entry(1, "Jeux rétro indé : la renaissance du pixel", t + 1))
-        feeds.publish(entry(2, "<i>Jeux rétro</i> : un lien piégé", t + 2, feed="Autre Gazette",
+        feeds.publish(entry(1, "Astronomie, physique, sciences : le retour des comètes", t + 1))
+        feeds.publish(entry(2, "<i>Astronomie</i> : un lien piégé", t + 2, feed="Autre Gazette",
                             link="javascript:alert(1)"))
         await asyncio.sleep(HOUR / US)
         await asyncio.sleep(DAY / US)  # le lendemain, à la même heure
-        feeds.publish(entry(3, "Les consoles rétro oubliées", kernel.mind.clock.now()))
+        feeds.publish(entry(3, "Les télescopes d'astronomie oubliés", kernel.mind.clock.now()))
         await asyncio.sleep(HOUR / US)
         return {"flux": view(kernel, "rss", "flux"), "gazette": view(kernel, "rss", "flux", flux="gazette"),
                 "cherche": view(kernel, "rss", "flux", q="PÉTROLE"),
@@ -462,7 +462,7 @@ def test_the_feeds_view_counts_by_day_filters_by_feed_and_links_articles(tmp_pat
     got = live(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0), ports={"feeds": feeds}, persona_llm=False)
     blocks = clean(got["flux"])
     assert [n for n in notes(blocks) if n.tone == "ok" and "Relevés toutes les 30 min" in n.text]
-    assert "retro" in shown(fields(blocks, "")["les mots qui la touchent"])
+    assert "astronomie" in shown(fields(blocks, "")["les mots qui la touchent"])
     tiles = stats(blocks)
     assert tiles["flux suivis"].value == 2 and tiles["remarqués aujourd'hui"].value == 1
     assert tiles["laissés passer"].value == 1  # le pétrole ne la touche pas
@@ -482,18 +482,18 @@ def test_the_feeds_view_counts_by_day_filters_by_feed_and_links_articles(tmp_pat
     assert followed["Le Journal"][1] == Badge("pas encore relevé", "muted")
     # les articles : un lien http(s) devient un lien, jamais un autre schéma
     recent = {shown(r.cells[0]): r for r in table(blocks, "Derniers articles relevés").rows}
-    oil, trap = recent["Le cours du pétrole"], recent["<i>Jeux rétro</i> : un lien piégé"]
+    oil, trap = recent["Le cours du pétrole"], recent["<i>Astronomie</i> : un lien piégé"]
     assert oil.cells[0] == Ref.url("https://exemple.fr/0", "Le cours du pétrole")
     assert isinstance(trap.cells[0], Text) and "javascript" not in text(blocks)
     assert oil.cells[3] == Badge("laissé passer", "muted") and oil.cells[4].text.endswith("(estimée)")
-    retro = recent["Jeux rétro indé : la renaissance du pixel"]
+    retro = recent["Astronomie, physique, sciences : le retour des comètes"]
     assert retro.cells[3] == Badge("remarqué", "ok") and "estimée" not in retro.cells[4].text
     assert retro.cells[2] == When(retro.cells[2].at) and retro.cells[2].at > 0
     noticed = table(blocks, "Ce qu'elle a remarqué").rows
-    assert len(noticed) == 3 and "« Les consoles rétro oubliées » (Le Journal)" in shown(noticed[0][2])
+    assert len(noticed) == 3 and "« Les télescopes d'astronomie oubliés » (Le Journal)" in shown(noticed[0][2])
     assert all(r[-1].kind == "event" for r in noticed)
     page = html(blocks)
-    assert "<i>" not in page and "&lt;i&gt;Jeux rétro&lt;/i&gt;" in page
+    assert "<i>" not in page and "&lt;i&gt;Astronomie&lt;/i&gt;" in page
     # le filtre par flux : les articles, ce qu'elle a remarqué, le graphe
     gazette = clean(got["gazette"])
     assert {shown(r.cells[1]) for r in table(gazette, "Derniers articles relevés").rows} == {"Autre Gazette"}
