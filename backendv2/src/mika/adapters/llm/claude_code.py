@@ -15,6 +15,13 @@ boucle d'outils de l'épisode (même ``call_id`` d'un tour à l'autre) :
   la demande, que la CLI charge par sa recherche d'outils) ;
 - quand la CLI appelle un outil, le relais le met en attente : la réponse est
   ``stop="tool_use"`` et c'est **le runtime** qui l'exécute ;
+- les appels écrits dans un même message du modèle forment **un** lot, comme sur
+  l'API : les outils du relais sont « lecture seule » pour la CLI (sans quoi elle
+  les lance un par un), elle lance chacun dès que son bloc est écrit, et le lot
+  se ferme quand le message est fini (``message_stop``, diffusé grâce à
+  ``--include-partial-messages``) et que chaque appel annoncé est arrivé ; il est
+  rendu dans l'ordre où le modèle les a écrits (ils arrivent au relais dans
+  l'ordre de leurs requêtes HTTP) ;
 - tour suivant (les résultats dans la requête) : ils sont rendus à la CLI, qui
   continue ; son message ``result`` fait la réponse finale. Si le runtime clôt
   la boucle (les résultats suivis d'un dernier mot à elle : « réponds
@@ -76,8 +83,11 @@ INHERITED = ("HOME", "PATH", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "XDG
 #: jamais transmises, même si le processus de Mika les a
 FORBIDDEN = ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN")
 SERVERS = {"mika": "mika", "plus": "mika_plus"}
-#: le temps de regrouper des appels d'outils partis ensemble
+#: le temps de regrouper des appels d'outils partis ensemble, quand la CLI ne diffuse pas son message
+#: (sans ``message_stop``, rien ne dit que le modèle a fini d'écrire ses appels)
 BATCH_WINDOW_S = 0.15
+#: le message du modèle fini, ce qu'on attend encore un appel annoncé qui n'est pas arrivé au relais
+LATE_CALL_S = 2.0
 READ_LIMIT = 16 * 1024 * 1024
 STDERR_KEPT = 4000
 #: le plafond de sortie donné à la CLI ne descend pas sous ceci (un modèle qui réfléchit
@@ -176,6 +186,14 @@ class _Run:
     tasks: list[asyncio.Task[Any]] = field(default_factory=list)
     #: les serveurs MCP donnés à la CLI (``mcp.json``) : chacun doit être connecté
     servers: tuple[str, ...] = ()
+    #: la CLI diffuse son message (``stream_event``) : on sait quand le modèle a fini d'écrire
+    streaming: bool = False
+    #: le modèle est en train d'écrire un message (entre ``message_start`` et ``message_stop``)
+    writing: bool = False
+    #: les appels d'outils du relais que ce message annonce, dans l'ordre écrit : (id, outil, arguments)
+    announced: list[tuple[str, str, Any]] = field(default_factory=list)
+    #: ceux qui n'attendent plus rien de nous : déjà rendus au runtime, ou répondus par la CLI elle-même
+    settled: set[str] = field(default_factory=set)
 
     def on_call(self, p: Pending) -> None:
         self.events.put_nowait(("call", p))
@@ -236,7 +254,9 @@ class ClaudeCodeBackend:
                 "--verbose", "--system-prompt-file", str(workdir / "system.txt"),
                 "--setting-sources", "", "--strict-mcp-config",
                 "--tools", "ToolSearch" if deferred else "",
-                "--permission-mode", "dontAsk", "--no-session-persistence"]
+                "--permission-mode", "dontAsk", "--no-session-persistence",
+                # ``message_stop`` : la fin du message du modèle, qui ferme un lot d'appels d'outils
+                "--include-partial-messages"]
         if mcp:
             args += ["--mcp-config", str(workdir / "mcp.json"),
                      "--allowedTools", ",".join(f"mcp__{s}__*" for s in SERVERS.values())]
@@ -393,23 +413,59 @@ class ClaudeCodeBackend:
                 raise ClaudeCodeError(f"la CLI n'a rien dit en {self.turn_timeout_s:.0f} s") from None
             if kind == "text":
                 texts.append(value)
+            elif kind == "wake":
+                continue
             elif kind == "call":
                 batch = [value]
-                await asyncio.sleep(BATCH_WINDOW_S)
-                while not run.events.empty():
-                    k, v = run.events.get_nowait()
-                    if k == "call":
-                        batch.append(v)
-                    elif k == "text":
-                        texts.append(v)
-                    else:  # la CLI s'est arrêtée pendant qu'on regroupait : c'est l'issue
-                        return self._ended(call_id, run, k, v)
+                ended = await self._gather(run, batch, texts)
+                if ended is not None:  # la CLI s'est arrêtée pendant qu'on complétait le lot : c'est l'issue
+                    return self._ended(call_id, run, *ended)
+                placed = _place(run.announced, run.settled, batch)
+                batch.sort(key=lambda p: placed.get(p.id, len(run.announced)))  # stable : un appel sans bloc en dernier
+                run.settled.update(run.announced[i][0] for i in placed.values())
                 run.handed.update(p.id for p in batch)
                 self._arm_reaper(call_id, run)
                 return LLMResponse("".join(texts), tuple(ToolCall(p.id, p.name, p.args) for p in batch),
                                    stop="tool_use", model=run.model or self.model)
             else:
                 return self._ended(call_id, run, kind, value)
+
+    async def _gather(self, run: _Run, batch: list[Pending], texts: list[str]) -> tuple[str, Any] | None:
+        """Complète le lot que ``batch`` commence : tous les appels d'outils d'un même message du modèle.
+        Rend l'issue de la CLI si elle s'arrête entre-temps.
+
+        La CLI lance un appel dès que son bloc est écrit, pendant que le modèle écrit encore les suivants :
+        le lot est complet quand le message est fini et que ses appels se répondent un à un — chaque appel
+        annoncé est arrivé au relais (ou a reçu sa réponse de la CLI elle-même), chaque appel arrivé a son
+        bloc (sinon la lecture de stdout est en retard sur le relais : deux canaux). Ce qui manque encore est
+        attendu ``LATE_CALL_S`` ; au-delà, un appel en retard ira au tour suivant. Une CLI qui ne diffuse pas
+        son message : la fenêtre d'avant."""
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        late_since: float | None = None
+        while True:
+            now = loop.time()
+            if not run.streaming:
+                wait = start + BATCH_WINDOW_S - now
+            elif run.writing:
+                wait = start + self.turn_timeout_s - now
+            elif not _matched(run.announced, run.settled, batch):
+                late_since = now if late_since is None else late_since
+                wait = late_since + LATE_CALL_S - now
+            else:
+                return None
+            if wait <= 0:
+                return None
+            try:
+                kind, value = await asyncio.wait_for(run.events.get(), wait)
+            except TimeoutError:
+                continue
+            if kind == "call":
+                batch.append(value)
+            elif kind == "text":
+                texts.append(value)
+            elif kind != "wake":
+                return kind, value
 
     def _ended(self, call_id: str, run: _Run, kind: str, value: Any) -> LLMResponse:
         self._schedule_stop(call_id)
@@ -470,13 +526,36 @@ class ClaudeCodeBackend:
                 # la vraie CLI continue sans un serveur MCP qui a échoué : le modèle
                 # n'aurait alors aucun outil et raconterait ses appels au lieu de les faire
                 run.events.put_nowait(("mcp", broken))
+        elif kind == "stream_event":
+            event = d.get("event")
+            phase = event.get("type") if isinstance(event, Mapping) else None
+            if phase in ("message_start", "message_stop") and not d.get("parent_tool_use_id"):
+                run.streaming = True
+                run.writing = phase == "message_start"
+                if run.writing:  # un nouveau message : le lot précédent est clos, la CLI attendait ses résultats
+                    run.announced.clear()
+                    run.settled.clear()
+                run.events.put_nowait(("wake", None))
         elif kind == "assistant":
             message = d.get("message")
             message = message if isinstance(message, Mapping) else {}
             run.model = str(message.get("model") or run.model)
             for block in message.get("content") or ():
-                if isinstance(block, Mapping) and block.get("type") == "text" and block.get("text"):
+                if not isinstance(block, Mapping):
+                    continue
+                if block.get("type") == "text" and block.get("text"):
                     run.events.put_nowait(("text", str(block["text"])))
+                elif block.get("type") == "tool_use" and (tool := _relayed(str(block.get("name") or ""))):
+                    run.announced.append((str(block.get("id") or ""), tool, block.get("input")))
+                    run.events.put_nowait(("wake", None))
+        elif kind == "user":
+            # une réponse d'outil écrite par la CLI : pour un appel qu'elle a refusé elle-même, elle arrive sans
+            # que le relais ait rien vu — on n'attend plus cet appel
+            message = d.get("message")
+            for block in (message.get("content") if isinstance(message, Mapping) else None) or ():
+                if isinstance(block, Mapping) and block.get("type") == "tool_result" and block.get("tool_use_id"):
+                    run.settled.add(str(block["tool_use_id"]))
+                    run.events.put_nowait(("wake", None))
         elif kind == "rate_limit_event":
             info = d.get("rate_limit_info")
             self._note_quota(info if isinstance(info, Mapping) else {})
@@ -575,7 +654,41 @@ class ClaudeCodeBackend:
 
 
 def _tool(t: Any) -> Tool:
-    return Tool(t.name, t.description, t.schema)
+    # « lecture seule » pour la CLI, quel que soit l'outil : sans la marque, elle lance les outils MCP un par un (le
+    # suivant après la réponse du précédent), et N appels écrits ensemble coûtaient N tours de la boucle du runtime.
+    # La marque ne règle que l'envoi : c'est le runtime qui exécute le lot, un appel après l'autre, dans l'ordre écrit.
+    return Tool(t.name, t.description, t.schema, read_only=True)
+
+
+def _relayed(name: str) -> str:
+    """Le nom qu'un outil du relais porte au relais (``mcp__mika__x`` → ``x``) ; vide pour un autre outil
+    (``ToolSearch``, que la CLI exécute elle-même)."""
+    for server in SERVERS.values():
+        prefix = f"mcp__{server}__"
+        if name.startswith(prefix):
+            return name[len(prefix):]
+    return ""
+
+
+def _place(announced: Sequence[tuple[str, str, Any]], settled: set[str], batch: Sequence[Pending]) -> dict[str, int]:
+    """Chaque appel arrivé au relais → l'index du bloc ``tool_use`` qui l'a demandé : même outil et mêmes
+    arguments, à défaut le même outil, le premier libre dans l'ordre écrit. Un appel sans bloc n'est pas placé."""
+    free = [i for i, (tid, _, _) in enumerate(announced) if tid not in settled]
+    placed: dict[str, int] = {}
+    for p in batch:
+        same = [i for i in free if announced[i][1] == p.name]
+        pick = next((i for i in same if announced[i][2] == p.args), same[0] if same else None)
+        if pick is not None:
+            placed[p.id] = pick
+            free.remove(pick)
+    return placed
+
+
+def _matched(announced: Sequence[tuple[str, str, Any]], settled: set[str], batch: Sequence[Pending]) -> bool:
+    """Les appels arrivés et ceux que le message annonce se répondent un à un (les annoncés déjà réglés à part)."""
+    placed = _place(announced, settled, batch)
+    return len(placed) == len(batch) and all(tid in settled or i in placed.values()
+                                             for i, (tid, _, _) in enumerate(announced))
 
 
 def _trailing_results(messages: Sequence[Message]) -> list[Message]:

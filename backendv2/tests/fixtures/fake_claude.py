@@ -3,8 +3,12 @@
 Le scénario voyage dans le prompt système (l'environnement du sous-processus
 est filtré par l'adaptateur) : une ligne ``SCENARIO: {json}``. Clés :
 
-- ``calls`` : liste de lots ; chaque lot, des ``[serveur, outil, arguments]``
-  appelés en parallèle ;
+- ``calls`` : liste de lots ; chaque lot, les ``[serveur, outil, arguments]``
+  qu'un même message du modèle écrit, avec en quatrième place, au besoin,
+  ``{"lag": s}`` (la requête au relais part s secondes après le bloc) ou
+  ``{"local": true}`` (la CLI répond elle-même, en erreur, sans le relais) ;
+- ``gap`` : le temps que le modèle met à écrire chaque bloc d'appel suivant ;
+- ``nostream`` : ne pas diffuser le message (une CLI sans ``stream_event``) ;
 - ``say`` : le texte final (``{results}`` y reçoit les résultats des outils) ;
 - ``fail`` : terminer par un résultat en erreur portant ce texte ;
 - ``sleep`` : rester bloqué N secondes avant de répondre (annulation) ;
@@ -17,21 +21,30 @@ est filtré par l'adaptateur) : une ligne ``SCENARIO: {json}``. Clés :
 - ``report`` : ajouter au texte final ce que la CLI a reçu (argv, clés
   d'environnement, outils de chaque serveur).
 
-Comme la vraie CLI, un serveur MCP injoignable est annoncé « failed » dans
-``init`` (``mcp_servers``) et la session continue sans lui.
+Comme la vraie CLI (2.1.282, mesuré) : un serveur MCP injoignable est annoncé
+« failed » dans ``init`` (``mcp_servers``) et la session continue sans lui ;
+chaque bloc ``tool_use`` sort sur sa propre ligne ``assistant`` ; avec
+``--include-partial-messages``, le message est encadré de ``stream_event``
+(``message_start`` … ``message_stop``) ; un outil marqué ``readOnlyHint`` part
+dès que son bloc est écrit, en parallèle des autres, un outil sans la marque
+attend la réponse du précédent.
 """
 
 import json
 import os
 import sys
+import threading
 import time
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future
+
+_WRITING = threading.Lock()
 
 
 def out(obj):
-    sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
-    sys.stdout.flush()
+    with _WRITING:  # les appels d'outils écrivent leur réponse depuis leur fil
+        sys.stdout.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
 
 
 def arg(name):
@@ -61,14 +74,16 @@ def main():
     servers = {}
     if arg("--mcp-config"):
         servers = json.load(open(arg("--mcp-config"), encoding="utf-8"))["mcpServers"]
-    listed, states = {}, []
+    listed, readonly, states = {}, {}, []
     for name, server in servers.items():
         # comme la vraie CLI : un serveur qu'elle ne joint pas est « failed », et elle continue sans lui
         try:
             rpc(server, "initialize", {"protocolVersion": "2025-06-18", "capabilities": {},
                                        "clientInfo": {"name": "fake", "version": "0"}})
             rpc(server, "notifications/initialized", mid=None)
-            listed[name] = [t["name"] for t in rpc(server, "tools/list")["result"]["tools"]]
+            tools = rpc(server, "tools/list")["result"]["tools"]
+            listed[name] = [t["name"] for t in tools]
+            readonly[name] = [t["name"] for t in tools if (t.get("annotations") or {}).get("readOnlyHint")]
             states.append({"name": name, "status": "connected"})
         except (OSError, ValueError, KeyError):
             states.append({"name": name, "status": "failed"})
@@ -86,27 +101,67 @@ def main():
                                                                   "resetsAt": resets}}}})
     if scenario.get("sleep"):
         time.sleep(scenario["sleep"])
-    results = []
-    for batch in ([] if len(listed) < len(servers) else scenario.get("calls", [])):  # sans ses outils : rien à appeler
-        out({"type": "assistant", "message": {"model": "fake-cc", "content": [{"type": "text", "text": "Je regarde."}]}})
-        with ThreadPoolExecutor(len(batch)) as pool:
-            replies = list(pool.map(
-                lambda c: rpc(servers[c[0]], "tools/call", {"name": c[1], "arguments": c[2]}), batch))
-        for (server, tool, _args), reply in zip(batch, replies):
-            res = reply["result"]
+    stream = "--include-partial-messages" in sys.argv and not scenario.get("nostream")
+
+    def event(kind, **extra):
+        if stream:
+            out({"type": "stream_event", "event": {"type": kind, **extra}, "parent_tool_use_id": None})
+
+    def call(c, tid, after=None):
+        """Un appel parti du bloc ``c`` : au relais (après ``after``, l'appel précédent, s'il n'est pas en
+        lecture seule), ou répondu par la CLI elle-même ; sa réponse sort sur stdout dès qu'elle est là."""
+        done = Future()
+
+        def go():
+            opts = c[3] if len(c) > 3 else {}
+            if after is not None:
+                after.result()
+            if opts.get("local"):
+                res = {"content": [{"type": "text", "text": "refusé par la CLI"}], "isError": True}
+            else:
+                time.sleep(opts.get("lag", 0))
+                res = rpc(servers[c[0]], "tools/call", {"name": c[1], "arguments": c[2]})["result"]
             text = "".join(b.get("text", "") for b in res["content"])
-            results.append(("ERREUR:" if res.get("isError") else "") + f"{tool}={text}")
+            out({"type": "user", "message": {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": tid, "content": text, "is_error": bool(res.get("isError"))}]}})
+            done.set_result(("ERREUR:" if res.get("isError") else "") + f"{c[1]}={text}")
+
+        threading.Thread(target=go, daemon=True).start()
+        return done
+
+    results, n = [], 0
+    for batch in ([] if len(listed) < len(servers) else scenario.get("calls", [])):  # sans ses outils : rien à appeler
+        event("message_start", message={"model": "fake-cc"})
+        out({"type": "assistant", "message": {"model": "fake-cc", "content": [{"type": "text", "text": "Je regarde."}]}})
+        futures, ids, previous = [], [], None
+        for i, c in enumerate(batch):
+            if i and scenario.get("gap"):
+                time.sleep(scenario["gap"])  # le modèle écrit encore le bloc suivant
+            n += 1
+            ids.append(f"toolu_{n}")
+            out({"type": "assistant", "message": {"model": "fake-cc", "content": [
+                {"type": "tool_use", "id": ids[-1], "name": f"mcp__{c[0]}__{c[1]}", "input": c[2]}]}})
+            parallel = c[1] in readonly.get(c[0], ())
+            futures.append(call(c, ids[-1], after=None if parallel else previous))
+            previous = futures[-1]
+        event("message_delta", delta={"stop_reason": "tool_use"})
+        event("message_stop")
+        results += [f.result() for f in futures]
     if scenario.get("fail"):
         out({"type": "result", "subtype": "success", "is_error": True, "result": scenario["fail"]})
         return 1
     text = scenario.get("say", "fini").replace("{results}", " | ".join(results))
     if scenario.get("report"):
         text += "\nREPORT " + json.dumps({"argv": sys.argv[1:], "env": sorted(os.environ), "listed": listed,
+                                         "readonly": readonly,
                                          "user": user["message"]["content"][-1]["text"],
                                          "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
                                          "max_output": os.environ.get("CLAUDE_CODE_MAX_OUTPUT_TOKENS", ""),
                                          "cwd": os.getcwd()})
+    event("message_start", message={"model": "fake-cc"})
     out({"type": "assistant", "message": {"model": "fake-cc", "content": [{"type": "text", "text": text}]}})
+    event("message_delta", delta={"stop_reason": "end_turn"})
+    event("message_stop")
     out({"type": "result", "subtype": "success", "is_error": False, "result": text, "stop_reason": "end_turn",
          "usage": {"input_tokens": 7, "output_tokens": 3, "cache_read_input_tokens": 100,
                    "cache_creation_input_tokens": 20},

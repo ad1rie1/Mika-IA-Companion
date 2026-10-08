@@ -5,7 +5,8 @@ parle stream-json et appelle le relais MCP en HTTP) remplace ``claude -p`` :
 
 - un outil appelé par la CLI est exécuté **par la boucle du runtime** (même
   validation, même plafond, même trace) et son résultat — ou son erreur —
-  revient à la CLI ;
+  revient à la CLI ; les appels qu'un même message écrit font un seul tour,
+  dans l'ordre écrit (ADR 0072) ;
 - en conversation, ce qui est en main va au serveur ``mika``, le reste au
   serveur ``mika_plus`` (à la demande) ;
 - l'isolation se vérifie sur ce que la CLI reçoit vraiment : aucun jeton OAuth,
@@ -124,6 +125,60 @@ async def test_the_cli_calls_a_tool_and_the_runtime_executes_it(tmp_path, cli):
     assert loop.last.usage.cache_read == 100
     assert [t.outcome for t in gateway.traces] == ["ok", "ok"]  # un tour d'outils, puis la réponse
     assert len(relay) == 0 and be.status()["sessions"] == 0
+
+
+async def test_calls_written_together_are_one_batch_even_when_the_model_writes_slowly(tmp_path, cli):
+    """La vraie CLI lance un outil MCP sans ``readOnlyHint`` après la réponse du précédent : deux appels écrits
+    ensemble coûtaient deux tours du runtime. Marqués, ils partent dès leur bloc écrit ; le second, écrit une
+    demi-seconde après le premier (au-delà de l'ancienne fenêtre de 150 ms), rejoint le même lot, que ferme
+    la fin du message du modèle."""
+    relay, seen = Relay(), []
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        steps = [[["mika", "note_add", {"what": "pain"}], ["mika", "note_add", {"what": "lait"}]]]
+        loop, gateway = await loop_through(be, notes(seen), scenario(calls=steps, gap=0.5, report=True))
+    report = _report(loop.text)
+    assert report["readonly"] == {"mika": ["note_add"]} and "--include-partial-messages" in report["argv"]
+    assert seen == ["pain", "lait"]
+    assert [t.outcome for t in gateway.traces] == ["ok", "ok"]  # un seul tour d'outils, puis la réponse
+
+
+async def test_a_batch_reaches_the_runtime_in_the_order_the_model_wrote_it(tmp_path, cli):
+    """Les appels arrivent au relais dans l'ordre de leurs requêtes HTTP ; le runtime les exécute un après
+    l'autre, comme sur l'API : dans l'ordre où le modèle les a écrits."""
+    relay, seen = Relay(), []
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        steps = [[["mika", "note_add", {"what": "pain"}, {"lag": 0.4}], ["mika", "note_add", {"what": "lait"}]]]
+        loop, gateway = await loop_through(be, notes(seen), scenario(calls=steps, say="{results}"))
+    assert seen == ["pain", "lait"]  # « lait » est arrivé le premier au relais
+    assert [t.outcome for t in gateway.traces] == ["ok", "ok"]
+    assert loop.text == "note_add=noté pain | note_add=noté lait"
+
+
+async def test_a_call_the_cli_answers_itself_is_not_awaited(tmp_path, cli, monkeypatch):
+    """Un appel que la CLI refuse elle-même n'arrive jamais au relais : sa réponse écrite par la CLI dit
+    qu'il n'y a plus rien à attendre (sans elle, le lot attendait ``LATE_CALL_S``, ici démesuré)."""
+    from mika.adapters.llm import claude_code as cc
+
+    monkeypatch.setattr(cc, "LATE_CALL_S", 60.0)
+    relay, seen = Relay(), []
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        steps = [[["mika", "note_add", {"what": "pain"}], ["mika", "note_add", {"what": "x"}, {"local": True}]]]
+        loop, _ = await asyncio.wait_for(loop_through(be, notes(seen), scenario(calls=steps, say="{results}")), 20)
+    assert seen == ["pain"]
+    assert "note_add=noté pain" in loop.text and "ERREUR:note_add=refusé par la CLI" in loop.text
+
+
+async def test_a_cli_that_does_not_stream_its_message_batches_by_the_window(tmp_path, cli):
+    relay, seen = Relay(), []
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        steps = [[["mika", "note_add", {"what": "pain"}, {"lag": 0.05}], ["mika", "note_add", {"what": "lait"}]]]
+        loop, gateway = await loop_through(be, notes(seen), scenario(calls=steps, nostream=True, say="{results}"))
+    assert seen == ["pain", "lait"]  # l'ordre écrit tient aussi sans flux : les blocs sortent sur stdout
+    assert [t.outcome for t in gateway.traces] == ["ok", "ok"]
 
 
 async def test_the_runtime_caps_and_errors_reach_the_cli(tmp_path, cli):
