@@ -1,4 +1,4 @@
-"""La configuration des images dans la console (Configuration › Intelligence › Images) :
+"""La configuration des images dans la console (Réglages › Intelligence › Images) :
 
 - rien de branché : la génération d'images est dite désactivée, et le port ``imaging`` du
   noyau est la passerelle vivante, sans fournisseur ;

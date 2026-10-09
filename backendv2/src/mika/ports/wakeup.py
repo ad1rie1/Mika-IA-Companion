@@ -1,6 +1,6 @@
 """Les réveils par API (ADR 0068) : ce que la faculté « wakeup » et le transport web voient des réveils déclarés.
 
-Un réveil est déclaré par l'opérateur (Configuration › Plugins › Réveils par API) ; sa clé est générée ici, montrée
+Un réveil est déclaré par l'opérateur (Réglages › Plugins › Réveils par API) ; sa clé est générée ici, montrée
 une seule fois, et seule son empreinte est gardée. Deux faces :
 
 - *le guichet* (``WakeDesk``, le port ``wakeup``) : la console lit les réveils et l'état de leur clé, en génère une

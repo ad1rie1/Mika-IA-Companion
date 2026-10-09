@@ -24,11 +24,14 @@ from mika.kernel.inspect import (
     Column,
     Disclosure,
     Fields,
+    Nav,
+    NavItem,
     Note,
     Pager,
     Param,
     Ref,
     Row,
+    Section,
     Series,
     Stat,
     Stats,
@@ -161,8 +164,7 @@ def arbiter_diff(ui: Any, before: Sequence[Any], after: Sequence[Any]) -> Table:
 
 
 @TABS.tab("decisions.en_cours", title="En cours",
-          description="Ce qui tourne à cet instant : les épisodes ouverts, les files d'attente, les baux tenus, les "
-                      "questions qui attendent une réponse.")
+          description="Suivre son travail, comprendre ce qu'elle attend et retrouver ses derniers résultats.")
 async def running(ui: Any, request: Request) -> list[Any]:
     kernel = ui.kernel
     frame = kernel.mind.frame()
@@ -176,25 +178,44 @@ async def running(ui: Any, request: Request) -> list[Any]:
         Stat("Épisodes ouverts", len(open_), "en train de se dérouler", "info" if open_ else ""),
         Stat("En file", sum(lanes.pending(x) for x in lanes.capacities),
              " · ".join(f"{names.lane(x)} {lanes.pending(x)}/{c}" for x, c in lanes.capacities.items())),
-        Stat("Processus en cours", len(procs), ", ".join(ui.names.process(p) for p in procs)[:90] or "aucun"),
+        Stat("Processus en cours", len(procs), ", ".join(ui.names.process(p) for p in procs)[:90] or "aucun",
+             href=Ref("local", "/inspecteur/systeme/processus", "processus")),
         Stat("Questions sans réponse", len(rt_state.pending), "attendent qu'elle réponde",
              "warn" if rt_state.pending else "", Ref("local", "/inspecteur/fil/questions", "questions")),
     ))]
-    blocks.append(Table((Column("depuis", "fit"), "épisode", "vers", Column("durée", "num"), "en réponse à"), tuple(
+    blocks.extend((
+        Nav((NavItem("Actualiser cet écran", Ref("local", "/inspecteur/decisions/en_cours", "")),
+             NavItem("Historique des épisodes", Ref("local", "/inspecteur/decisions/episodes", "")),
+             NavItem("Sorties à vérifier", Ref("local", "/inspecteur/systeme/sorties", ""))),
+            title=f"Relevé à {ui.when_long(now)}"),
+    ))
+    blocks.append(Section("Le travail en cours", (Table((Column("Depuis", "fit"), Column("Épisode", role="title"), "Vers", Column("Durée", "num"), "En réponse à", Column("État", role="badge")), tuple(
         Row((When(o.started_at), names.kind(o.kind), ui.names.who_cell(o.target),
              f"{num_fr(max(0, now - o.started_at) / US, 0)} s",
-             Ref("event", str(o.reply_to), f"message n° {o.reply_to}") if o.reply_to else "—"),
+             Ref("event", str(o.reply_to), f"message n° {o.reply_to}") if o.reply_to else "—",
+             Badge("Durée prolongée", "warn") if now - o.started_at > 120 * US else Badge("En cours", "info")),
             href=Ref("episode", corr, ""), tone="warn" if now - o.started_at > 120 * US else "")
-        for corr, o in open_), title="Épisodes ouverts", empty="Aucun épisode en cours."))
-    blocks.append(Table(("voie", Column("capacité", "num"), Column("en attente", "num")), tuple(
+        for corr, o in open_), title="Épisodes ouverts", empty="Aucun épisode en cours.",
+        layout="cards", link_label="Suivre cet épisode"),)))
+    blocks.append(Section("Les attentes", (Table((Column("Voie", role="title"), Column("Capacité", "num"), Column("En attente", "num")), tuple(
         (Text(names.lane(lane), hint=lane), cap, lanes.pending(lane)) for lane, cap in lanes.capacities.items()),
-        title="Files d'attente",
-        caption="Une voie exécute au plus « capacité » épisodes à la fois ; les autres attendent leur tour."))
-    blocks.append(Table(("ce qui est réservé", "par", "jusqu'à"), tuple(
+        title="Files d'attente", layout="cards",
+        caption="Une voie exécute au plus « capacité » épisodes à la fois ; les autres attendent leur tour."),
+        Note("Une question attend une réponse." if len(rt_state.pending) == 1 else
+             f"{len(rt_state.pending)} questions attendent une réponse." if rt_state.pending else "Aucune question en attente.",
+             "warn" if rt_state.pending else "muted"),
+        Nav((NavItem("Ouvrir les questions sans réponse", Ref("local", "/inspecteur/fil/questions", "")),)),
+    )))
+    blocks.append(Disclosure("Ressources réservées pendant le travail", (Table(("ce qui est réservé", "par", "jusqu'à"), tuple(
         (Text(ui.names.resource(res), hint=res), Ref("episode", lease.holder, "l'épisode qui le tient"),
          When(lease.until)) for res, lease in sorted(leases.items())),
         title="Baux tenus", empty="Aucun bail tenu.",
-        caption="Un bail réserve une ressource (la parole avec quelqu'un, un atelier) le temps d'un épisode."))
+        caption="Un bail réserve une ressource (la parole avec quelqu'un, un atelier) le temps d'un épisode."),)))
+    recent = ui.inspection.context(request.query_params).events([rt.EPISODE_ENDED], 6)
+    blocks.append(Section("Les derniers résultats", (Table(
+        (Column("Quand", "fit"), Column("Épisode", role="title"), "Vers", Column("Issue", role="badge"), Column("Détail", role="body")),
+        tuple(episode_row(ui, e) for e in recent), title="Derniers épisodes terminés", layout="list",
+        empty="Aucun épisode terminé pour l’instant.", link_label="Comprendre le résultat"),)))
     return blocks
 
 
@@ -406,9 +427,9 @@ async def episodes(ui: Any, request: Request) -> Any:
         out.append(Note(f"Personne ne s'appelle « {values['cible'][:80]} » : filtre sur cette adresse exacte.", "info"))
     if stopped:
         out.append(Note("La recherche continue dans les épisodes plus anciens : utilise « Plus anciens ».", "info"))
-    out.append(Table((Column("quand", "fit"), "épisode", "vers", "issue", "détail"), rows, title="Épisodes",
+    out.append(Table((Column("Quand", "fit"), Column("Épisode", role="title"), "Vers", Column("Issue", role="badge"), Column("Détail", role="body")), rows, title="Épisodes",
                      empty="Aucun épisode ne correspond." if where or targets else "Aucun épisode encore.",
-                     pager=pager, filters=("sorte", "issue", "cible")))
+                     pager=pager, filters=("sorte", "issue", "cible"), layout="list", link_label="Comprendre le résultat"))
     activity = ([stats] if counts else []) + ([chart] if chart else [])
     if len(sampled) == 1000:
         activity.append(Note("Indicateurs calculés sur les 1 000 derniers épisodes, avec les filtres actuels. "

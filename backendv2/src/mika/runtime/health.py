@@ -149,7 +149,7 @@ def _llm(kernel: Kernel) -> Check:
     configured = getattr(gateway, "configured", gateway is not None)
     if not configured:
         return Check("llm", DEGRADED, "aucun modèle ne sert « répondre » : elle ne peut pas parler — déclare un "
-                                      "fournisseur (Configuration › Fournisseurs)")
+                                      "fournisseur (Réglages › Fournisseurs)")
     failing = getattr(gateway, "failing", None)
     if callable(failing):
         now = kernel.mind.clock.now()
@@ -183,7 +183,7 @@ def _config(kernel: Kernel) -> Check:
                             "sur leurs valeurs par défaut jusqu'à ce qu'on les règle de nouveau")
         elif name == "kernel" and got is not None and not zone_known(str(getattr(got, "tz", "UTC"))):
             problems.append(f"fuseau horaire inconnu « {str(got.tz)[:60]} » : elle vit en UTC — corrige-le dans "
-                            "Configuration › Personnage › Identité")
+                            "Réglages › Personnage › Identité")
     if problems:
         return Check("config", DEGRADED, problems[0][:200], tuple(problems))
     return Check("config", OK, "paramètres et fuseau lisibles")

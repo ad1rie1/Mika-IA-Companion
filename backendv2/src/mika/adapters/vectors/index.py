@@ -27,6 +27,8 @@ from mika.ports.vectors import Embedder, VectorItem
 
 #: la première réservation de la matrice (en lignes) ; elle double ensuite à la demande
 _MIN_CAPACITY = 64
+#: au plus tant de valeurs dans un filtre posé en SQL (la limite de paramètres de SQLite reste loin)
+_SQL_FILTER_MAX = 900
 
 
 async def _compute(fn, *args):
@@ -223,6 +225,17 @@ class SqliteVectorIndex:
             args.extend(sorted(kinds))
         wanted = set(keys) if keys is not None else None
         people = set(persons) if persons is not None else None
+        if (wanted is not None and not wanted) or (people is not None and not people):
+            return []
+        # Les filtres structurés se posent en SQL avant de lire les vecteurs : chercher parmi trois clés ne lit
+        # pas toute la mémoire (audit du 2026-10-08). Au-delà de ``_SQL_FILTER_MAX`` valeurs, le filtre reste en
+        # Python (la limite de paramètres de SQLite) ; il est de toute façon réappliqué ci-dessous.
+        if wanted is not None and len(wanted) <= _SQL_FILTER_MAX:
+            where.append(f"key IN ({','.join('?' for _ in wanted)})")
+            args.extend(sorted(wanted))
+        if people is not None and len(people) <= _SQL_FILTER_MAX:
+            where.append(f"EXISTS(SELECT 1 FROM json_each(persons) WHERE value IN ({','.join('?' for _ in people)}))")
+            args.extend(sorted(people))
         best: list[tuple[int, float]] = []
         after = -1
 

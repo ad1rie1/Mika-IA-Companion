@@ -829,7 +829,8 @@ def _naming(s: IdentityState, ctx: InspectContext, person: str) -> list[Block]:
     if dismissed:
         items.append(Note("Un opérateur a dit que ce n'était pas elle : la console ne le propose plus. Le relier "
                           "reste possible.", tone="muted"))
-    items.append(ActionSlot("identity.nommer", (("name", said),), title="C'est la personne dont on lui a parlé"))
+    items.append(ActionSlot("identity.nommer", (("name", said), ("key", key)),
+                            title="C'est la personne dont on lui a parlé"))
     if not dismissed:
         items.append(Toolbar((ActionSlot(DISMISS, (("name", key), ("person", person)), title="Ce n'est pas elle",
                                          presentation="button"),), title="Sinon"))
@@ -986,7 +987,7 @@ TRUSTS = Param("confiance", "confiance du canal", kind="select",
 
 
 @IDENTITY.inspect("personnes", title="Personnes", section="personnes", order=10, params=[SEARCH],
-                  description="Les gens qu'elle connaît ; une ligne mène à la fiche de la personne.")
+                  description="Retrouver une personne, ses adresses, ses échanges et son lien avec elle.")
 def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
     q = fold(str(ctx.value("q") or ""))
     everyone = people(s, frame)
@@ -1018,9 +1019,9 @@ def _people(s: IdentityState, frame: Frame, ctx: InspectContext) -> list[Block]:
         Stats((Stat("personnes", len(everyone)),
                Stat("propriétaires", len(frame.get(c.OWNERS))),
                Stat("reliées à plusieurs adresses", sum(1 for hs in everyone.values() if len(hs) > 1)))),
-        Table(("personne", Column("adresses", "num"), Column("canal principal", detail=True), Column("certitude", detail=True),
-               "proximité", "propriétaire", "dernier message reçu", Column("vue pour la première fois", detail=True)),
-              tuple(rows), title="Personnes", pager=pager,
+        Table((Column("personne", role="title"), Column("adresses", "num"), Column("canal principal", detail=True), Column("certitude", detail=True),
+               Column("proximité", role="badge"), Column("propriétaire", role="badge"), "dernier message reçu", Column("vue pour la première fois", detail=True)),
+              tuple(rows), title="Personnes", pager=pager, layout="cards",
               filters=("q",),
               empty=f"personne ne correspond à « {ctx.value('q')} »" if q else "personne pour l'instant"),
     ]

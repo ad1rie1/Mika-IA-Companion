@@ -60,6 +60,7 @@ from mika.adapters.world.server import WorldHub
 from mika.app import backup, composition, datadir, reglages, system_mcp
 from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
+from mika.app.console_menu import MENU
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.settings import SecretBox, Settings
@@ -401,7 +402,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             log.warning("aucun modèle ne sert « répondre » : elle ne peut pas parler. Déclare un fournisseur dans "
                         "la console, %s (ou `python -m mika llm backend --help`)",
                         f"{live.console_url}/reglages/fournisseurs" if live.console_url else
-                        "Configuration › Fournisseurs")
+                        "Réglages › Fournisseurs")
         for problem in problems:
             log.warning("configuration des modèles : %s", problem)
         for problem in await live.reload_imaging():
@@ -433,7 +434,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         InspectorDeps(kernel, live.accounts, live.settings, live.reload_llm, gateway.traces,
                       port=port, calls=live.calls, reconfigure=live.reconfigure,
                       after_decision=hub.refresh_panels,
-                      reports=reports, navigation=NAVIGATION,
+                      reports=reports, navigation=NAVIGATION, menu=MENU,
                       sections=reglages.sections(live), settings_tabs=reglages.TABS,
                       parameters=reglages.parameters(live), param_families=PARAM_FAMILIES,
                       faculty_labels=FACULTY_LABELS, labels=LABELS,

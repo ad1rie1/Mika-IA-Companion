@@ -2,6 +2,7 @@
 {% from "_cells.html" import cell %}
 {% from "_forms.html" import field, action_form, action_button %}
 {% from "_navigation.html" import pager, filters_form %}
+{% from "_collections.html" import collection %}
 
 {% macro render(items, forms={}) -%}
 {% for b in items %}{{ one(b, forms) }}{% endfor %}
@@ -10,7 +11,12 @@
 {% macro one(b, forms={}) -%}
 {% if b.t == "table" %}
   <div class="table-block" id="{{ b.id }}">
-  <div class="block-head">{% if b.title %}<h3 class="block-title">{{ b.title }}</h3>{% endif %}<span class="block-count">{% if b.count is not none %}{{ b.count }} au total{% else %}{{ b.shown }} sur cette page{% endif %}</span></div>
+  <div class="block-head">{% if b.title %}<h3 class="block-title">{{ b.title }}</h3>{% endif %}<span class="block-count">{% if b.count is not none %}{{ b.count }} au total{% else %}{{ b.shown }} sur cette page{% endif %}</span>
+    {% if b.modes %}<nav class="view-switch" aria-label="Affichage : {{ b.title or 'collection' }}">{% for mode in b.modes %}<a href="{{ mode.href }}"{{ ' aria-current=page' if mode.on }}>{{ mode.label }}</a>{% endfor %}</nav>{% endif %}
+  </div>
+  {% if b.layout %}
+    {{ collection(b, forms, render) }}
+  {% else %}
   <div class="table-wrap" tabindex="0" role="region" aria-label="{{ b.title or 'Tableau' }}"><table class="tbl">
     <caption class="sr">{{ b.title or 'Résultats' }}</caption>
     <thead><tr>{% for c in b.columns %}<th scope="col"{% if c.align %} class="{{ c.align }}"{% endif %}{% if c.hint %} title="{{ c.hint }}"{% endif %}>{{ c.label }}</th>{% endfor %}</tr></thead>
@@ -25,7 +31,8 @@
     {% endfor %}
     </tbody>
   </table></div>
-  {% if b.caption %}<p class="caption">{{ b.caption }}</p>{% endif %}
+  {% endif %}
+  {% if b.caption %}{% if b.layout %}<details class="collection-help"><summary>Comprendre cette liste</summary><p class="caption">{{ b.caption }}</p></details>{% else %}<p class="caption">{{ b.caption }}</p>{% endif %}{% endif %}
   {{ pager(b.pager) }}
   </div>
 {% elif b.t == "fields" %}
@@ -65,7 +72,10 @@
     {% if b.table %}<details class="chart-values"{{ ' open' if b.table.pager.page > 1 }}><summary>Voir les valeurs</summary>{{ one(b.table, forms) }}</details>{% endif %}
   {% else %}<p class="muted">{{ b.empty }}</p>{% endif %}</div>
 {% elif b.t == "workspace" %}
-  <div class="workspace"><aside class="workspace-sidebar stack" aria-label="Navigation de la vue">{{ render(b.sidebar, forms) }}</aside><div class="workspace-main stack">{{ render(b["items"], forms) }}</div></div>
+  <div class="workspace"><details class="workspace-navigation" data-responsive-menu="(max-width: 1000px)" open>
+    <summary>Parcourir{% for nav in b.sidebar if nav.t == 'nav' %}{% for item in nav['items'] if item.active %}<span>{{ item.text }}</span>{% endfor %}{% endfor %}</summary>
+    <aside class="workspace-sidebar stack" aria-label="Navigation de la vue">{{ render(b.sidebar, forms) }}</aside>
+  </details><div class="workspace-main stack">{{ render(b["items"], forms) }}</div></div>
 {% elif b.t == "toolbar" %}
   <div class="toolbar" role="group" aria-label="{{ b.title }}">{{ render(b["items"], forms) }}</div>
 {% elif b.t == "grid" %}

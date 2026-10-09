@@ -675,7 +675,7 @@ def _policy_blocks(g: Goal, s: GoalsState, frame: Frame, ctx: InspectContext) ->
             ("d'où il vient", g.source or "—"),
         ), title="Pour qui, et ce qu'elle peut en dire", columns=2),
         Note("Les réglages communs à tous les buts (espacement, séances par heure, pannes avant échec…) se changent "
-             "dans Configuration › Comportement › Buts ; ce but-ci se pilote ici et par les actions en haut de sa "
+             "dans Réglages › Comportement › Buts ; ce but-ci se pilote ici et par les actions en haut de sa "
              "fiche (avancer, pause, consigne, rouvrir, clore).", "muted"),
     ]
     return blocks

@@ -311,10 +311,10 @@ def _history(s: SelfState, frame: Frame, ctx: InspectContext) -> Table:
         rows.append(Row(cells, detail=detail))
     pager = Pager(param="avant", size=PAGE, older=(("avant", str(events[-1].seq)),)) if len(found) > PAGE \
         else Pager(param="avant", size=PAGE)
-    return Table((Column("n°", "fit", detail=True), Column("écrit", "fit", detail=True), Column("sorte", "fit"), Column("nuit", "fit"),
-                  Column("texte"), Column("couleur", detail=True), Column("vivacité", detail=True), Column("souvenu au réveil", "fit"),
+    return Table((Column("n°", "fit", detail=True), Column("écrit", "fit", detail=True), Column("sorte", "fit", role="badge"), Column("nuit", "fit"),
+                  Column("texte", role="body"), Column("couleur", detail=True), Column("vivacité", detail=True), Column("souvenu au réveil", "fit"),
                   Column("concerne")), tuple(rows), title="Toutes ses nuits",
-                 empty="plus rien avant" if before else "pas encore de nuit racontée", pager=pager)
+                 empty="plus rien avant" if before else "pas encore de nuit racontée", pager=pager, layout="list")
 
 
 @SELF.inspect("nuits", title="Nuits", section="pensees", order=40,
@@ -331,12 +331,12 @@ def _inspect_nights(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Blo
         return [_history(s, frame, ctx)]
     if journals:
         latest = journals[0]
-        blocks.append(Prose(texts.get(latest.text_ref) or FORGOTTEN, title=f"Journal du {latest.day}, en entier"))
+        blocks.append(Prose(texts.get(latest.text_ref) or FORGOTTEN, title=f"Journal du {latest.day}, en entier", reading=True))
         told = ctx.store.content([latest.shareable_ref]).get(latest.shareable_ref) if latest.shareable_ref else None
         if told:
-            blocks.append(Prose(told, title=f"Ce qu'elle en raconte à n'importe qui ({latest.day})"))
+            blocks.append(Prose(told, title=f"Ce qu'elle en raconte à n'importe qui ({latest.day})", reading=True))
     # ce qu'elle dira de sa journée en cours, d'après les faits (sans modèle) : ce qui sera dit demain
     today = lived_day(frame)
     blocks.append(Prose(told_day(frame, ctx.store, s, today) or "—",
-                        title=f"Sa journée en cours, telle qu'elle pourra la raconter ({today.isoformat()})"))
+                        title=f"Sa journée en cours, telle qu'elle pourra la raconter ({today.isoformat()})", reading=True))
     return [*blocks, _timeline(journals, dreams, frame, texts), _history(s, frame, ctx)]

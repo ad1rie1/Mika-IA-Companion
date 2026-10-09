@@ -109,6 +109,9 @@ def test_forgetting_someone_is_confirmed_by_retyping_the_name_shown(world):  # n
     assert wrong.status_code == 400 and "Retape « adrien »" in html_of(wrong)
     done = post(client, f"{BASE}/oublier/person/user_1", {"_confirmer": "  Adrien "}, follow_redirects=False)
     assert done.status_code == 303
+    # l'accueil, où l'oubli ramène, le confirme (son gabarit ne montrait pas les messages)
+    home = client.get(done.headers["location"])
+    assert home.status_code == 200 and "est oublié·e" in html_of(home)
 
 
 # ── accès ─────────────────────────────────────────────────────────────────
@@ -123,10 +126,12 @@ def test_console_login_cannot_be_guessed_and_says_so(world, caplog):  # noqa: F8
         for _ in range(5):
             r = post(client, f"{BASE}/connexion", {"username": "adrien", "password": "faux"})
             assert r.status_code == 200 and "Identifiants invalides" in html_of(r)
+            assert 'name="username" value="adrien"' in r.text and 'value="faux"' not in r.text
     assert sum("connexion refusée" in m for m in caplog.messages) == 5  # chaque échec est journalisé
     blocked = post(client, f"{BASE}/connexion", {"username": "adrien", "password": "un-mot-de-passe-long"},
                    follow_redirects=False)
     assert blocked.status_code == 429 and "Trop de tentatives" in html_of(blocked)
+    assert 'name="username" value="adrien"' in blocked.text
     # contre-exemple : un autre identifiant depuis la même adresse n'est pas (encore) bloqué
     other = post(client, f"{BASE}/connexion", {"username": "quelquun", "password": "x"})
     assert other.status_code == 200
@@ -193,7 +198,7 @@ def test_an_invented_time_zone_is_refused_and_could_not_break_the_console(world)
     assert config.state == health.DEGRADED and "Pas/UnFuseau" in config.summary
     for url in (f"{BASE}/", f"{BASE}/decisions/episodes", f"{BASE}/systeme/sante", f"{BASE}/fil/messages"):
         assert client.get(url).status_code == 200, url
-    assert "configuration lisible" in html_of(client.get(f"{BASE}/systeme/sante"))
+    assert "Configuration lisible" in html_of(client.get(f"{BASE}/systeme/sante"))
     converse(client)  # la conversation aussi
 
 
@@ -367,3 +372,35 @@ def test_giant_cursors_never_break_a_page(world):  # noqa: F811
                 f"{BASE}/reglages/journal?avant={huge}", f"{BASE}/systeme/appels?page={huge}",
                 f"{BASE}/fil/messages?avant={huge}", f"{BASE}/approbations/historique?avant=-4"):
         assert client.get(url).status_code < 500, url
+
+
+def test_outbox_action_cards_follow_filter_and_paginate_without_deciding(world):  # noqa: F811
+    client, live, _ = world
+    bootstrap(client)
+    with client.websocket_connect(WS) as ws:
+        ws.receive_json(), ws.receive_json()
+        for i in range(10):
+            ws.send_json({'type': 'chat', 'message': f'message de test {i}', 'client_msg_id': f'outbox-page-{i}'})
+            recv_until(ws, 'speech')
+    store = live.kernel.mind.store
+    keys = [k for (k,) in client.portal.call(lambda: store.query_mind('SELECT key FROM outbox ORDER BY seq DESC LIMIT 10'))]
+    assert len(keys) == 10
+    for key in keys[:9]:
+        client.portal.call(store.mark_outbox, key, 'failed', 'échec fictif')
+    client.portal.call(store.mark_outbox, keys[9], 'interrupted', 'arrêt fictif')
+    first = html_of(client.get(f'{BASE}/systeme/sorties?etat=failed'))
+    second = html_of(client.get(f'{BASE}/systeme/sorties?etat=failed&page_problemes=2'))
+    for body in (first, second):
+        ConsoleHTML(body).check()
+        assert body.index('class="outbox-review') < body.index('id="pg1"')
+    def shown(body):
+        return set(re.findall(r'name="cle" value="([^\"]+)"', body))
+    assert len(shown(first)) == 8 and len(shown(second)) == 1
+    assert shown(first) | shown(second) == set(keys[:9])
+    assert not shown(first) & shown(second)
+    interrupted = html_of(client.get(f'{BASE}/systeme/sorties?etat=interrupted'))
+    assert shown(interrupted) == {keys[9]} and '>Relancer</button>' not in interrupted
+    assert 'peut-être déjà eu lieu' in interrupted
+    done = html_of(client.get(f'{BASE}/systeme/sorties?etat=done'))
+    assert not shown(done)
+    assert all(client.portal.call(store.outbox_status, key) == 'failed' for key in keys[:9])

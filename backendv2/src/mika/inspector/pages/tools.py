@@ -10,13 +10,16 @@ pas : aucune action, aucun formulaire.
 from __future__ import annotations
 
 import inspect
+import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlencode
 
 from starlette.requests import Request
 
 from mika.inspector import names
+from mika.inspector.catalog import Panel
 from mika.inspector.mcp import TOOLS as CONSOLE_TOOLS
 from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX
@@ -28,6 +31,7 @@ from mika.kernel.inspect import (
     Badge,
     Code,
     Column,
+    Disclosure,
     Fields,
     Note,
     Param,
@@ -38,6 +42,7 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    is_table_choice,
     num_fr,
     paginate,
     read_params,
@@ -48,8 +53,10 @@ from mika.vocab.privacy import EVERYTHING, ChannelTrust
 
 #: ce qui est compté comme récent (les traces d'épisode ne gardent pas plus)
 USAGE_DAYS = 14
-TOOLS_PAGE = 60
+TOOLS_PAGE = 24
 BASE = f"{PREFIX}/outils"
+#: le contexte du catalogue qu'une fiche garde pour y revenir (plus le choix « Tableau », ``is_table_choice``)
+CATALOG_PARAMS = ("q", "lot", "pour", "origine", "page")
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,26 +171,29 @@ def _kinds(spec: ToolSpec) -> str:
     return ", ".join(names.kind(k) for k in sorted(spec.episodes)) or "—"
 
 
-def _tool_ref(name: str, text: str | None = None) -> Ref:
-    return Ref("local", f"{BASE}/tous", text or name, (("outil", name),))
+def _tool_ref(name: str, text: str | None = None, context: Mapping[str, str] | None = None) -> Ref:
+    kept = tuple((k, v) for k, v in (context or {}).items() if k in CATALOG_PARAMS or is_table_choice(k, v))
+    return Ref("local", f"{BASE}/tous", text or name, (*kept, ("outil", name)))
+
+
+def _fold(text: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", text.casefold()) if not unicodedata.combining(c))
 
 
 def _bundle_choices(ui: Any) -> tuple[tuple[str, str], ...]:
     bundles = sorted({s.bundle for s in ui.kernel.registry.tools.values()})
-    return tuple((b, b) for b in bundles)
+    return tuple((b, ui.names.faculty(b)) for b in bundles)
 
 
 def _params(ui: Any) -> tuple[Param, ...]:
-    return (Param("q", "chercher", "search", placeholder="un nom ou ce qu'il fait"),
-            Param("lot", "lot", "select", _bundle_choices(ui)),
-            Param("pour", "offert à", "select", tuple((s.key, s.label) for s in situations(ui))),
-            Param("origine", "origine", "select", (("interne", "interne"), ("exterieur", "extérieur"))))
+    return (Param("q", "Rechercher", "search", placeholder="un nom ou ce qu'il fait"),
+            Param("lot", "Famille", "select", _bundle_choices(ui)),
+            Param("pour", "Disponible pour", "select", tuple((s.key, s.label) for s in situations(ui))),
+            Param("origine", "Origine", "select", (("interne", "Interne"), ("exterieur", "Extérieur"))))
 
 
 @TABS.tab("outils.tous", title="Tous ses outils",
-          description="Chaque outil qu'elle peut appeler : d'où il vient, son lot et ce qu'il permet, pour qui et "
-                      "dans quelles situations, combien il a servi. Ceux définis dans le code se lisent ici, ils ne "
-                      "se règlent pas.")
+          description="Trouver un outil, comprendre ce qu'il fait et vérifier dans quelles situations elle peut l'utiliser.")
 async def all_tools(ui: Any, request: Request) -> Any:
     name = str(request.query_params.get("outil", "") or "")
     if name:
@@ -193,7 +203,7 @@ async def all_tools(ui: Any, request: Request) -> Any:
     values, notes = read_params(params, request.query_params)
     offers = {s.key: offered_in(ui, s) for s in situations(ui)}
     usage = _usage(ui)
-    query = str(values.get("q") or "").casefold()
+    query = _fold(str(values.get("q") or ""))
     specs = sorted(registry.tools.values(), key=lambda s: (s.bundle, s.name))
     if values.get("lot"):
         specs = [s for s in specs if s.bundle == values["lot"]]
@@ -203,8 +213,8 @@ async def all_tools(ui: Any, request: Request) -> Any:
         dynamic = values["origine"] == "exterieur"
         specs = [s for s in specs if registry.is_dynamic(s.name) == dynamic]
     if query:
-        specs = [s for s in specs if query in f"{s.name} {s.description} {s.bundle} "
-                                              f"{registry.bundles.get(s.bundle, '')}".casefold()]
+        specs = [s for s in specs if all(term in _fold(f"{s.name} {s.description} {s.bundle} "
+                         f"{ui.names.faculty(s.bundle)} {registry.bundles.get(s.bundle, '')}") for term in query.split())]
     ctx = ui.inspection.context(request.query_params)
     page, pager = paginate(specs, ctx.pager(size=TOOLS_PAGE))
     rows = []
@@ -214,23 +224,25 @@ async def all_tools(ui: Any, request: Request) -> Any:
         calls = Text(num_fr(used.calls), "num", "danger" if used.failures * 2 > used.calls else "",
                      hint=f"{used.failures} en échec") if used else Text("0", "num", "muted")
         rows.append(Row((Text(s.name, "mono"), Badge(label, tone),
-                         Text(s.bundle, hint=registry.bundles.get(s.bundle, "")),
-                         Text(s.description, clamp=140), Text(_who(ui, s, offers)), Text(_kinds(s), "muted"),
-                         calls), href=_tool_ref(s.name)))
+                         Text(ui.names.faculty(s.bundle), hint=registry.bundles.get(s.bundle, "")),
+                         Text(s.description, clamp=220), Text(_who(ui, s, offers)), Text(_kinds(s), "muted"),
+                         calls), href=_tool_ref(s.name, context=request.query_params)))
     total = len(registry.tools)
     dynamic = sum(1 for n in registry.tools if registry.is_dynamic(n))
     used_now = sum(1 for n in registry.tools if n in usage)
     failing = sum(u.failures for n, u in usage.items() if n in registry.tools)
     blocks: list[Any] = [
         Stats((Stat("Outils", total, f"{total - dynamic} internes · {dynamic} extérieurs"),
-               Stat("Lots", len({s.bundle for s in registry.tools.values()})),
+               Stat("Familles", len({s.bundle for s in registry.tools.values()})),
                Stat(f"Appelés en {USAGE_DAYS} jours", used_now, "outils différents"),
-               Stat("Appels en échec", failing, f"sur {USAGE_DAYS} jours", "warn" if failing else ""))),
+               Stat("Appels en échec", failing, f"sur {USAGE_DAYS} jours", "warn" if failing else "")),
+              title="Catalogue complet"),
         *[Note(n, "warn") for n in notes],
-        Table((Column("outil", "fit"), Column("origine", "fit"), Column("lot", "fit"), "ce qu'il fait",
-               Column("offert à", hint="les situations où la porte d'offre le lui donne"),
-               Column("épisodes", detail=True), Column(f"appels {USAGE_DAYS} j", "num")),
+        Table((Column("Outil", "fit", role="title"), Column("Origine", "fit", role="badge"), Column("Famille", "fit"), Column("Ce qu'il fait", role="body"),
+               Column("Disponible pour", hint="les situations où la porte d'offre le lui donne", detail=True),
+               Column("Épisodes", detail=True), Column(f"Appels sur {USAGE_DAYS} j", "num")),
               tuple(rows), title="Ses outils", empty="Aucun outil ne correspond.", pager=pager,
+              layout="cards", link_label="Comprendre cet outil",
               caption="Interne : défini dans le code, il se lit ici et ne se règle pas. Extérieur : branché depuis "
                       "un serveur, il se règle sur la fiche de son serveur."),
     ]
@@ -239,7 +251,8 @@ async def all_tools(ui: Any, request: Request) -> Any:
 
 def _fiche(ui: Any, request: Request, name: str) -> Any:
     registry = ui.kernel.registry
-    back = [("Tous ses outils", f"{BASE}/tous")]
+    context = {k: v for k, v in request.query_params.items() if k in CATALOG_PARAMS or is_table_choice(k, v)}
+    back = [("Retour aux outils", f"{BASE}/tous" + ("?" + urlencode(context) if context else ""))]
     spec = registry.tools.get(name)
     if spec is None:
         return {"blocks": [Note(f"Aucun outil ne s'appelle « {name} ».", "warn")], "crumbs": back}
@@ -261,10 +274,10 @@ def _fiche(ui: Any, request: Request, name: str) -> Any:
         ("modifiable", "non — défini dans le code" if not registry.is_dynamic(spec.name)
          else "sur la fiche de son serveur"),
     ]
-    blocks: list[Any] = [Fields(tuple(pairs), title=spec.name)]
-    blocks.append(Table(("argument", Column("type", "fit"), Column("requis", "fit"), "ce que c'est",
+    argument_table = Table(("argument", Column("type", "fit"), Column("requis", "fit"), "ce que c'est",
                          Column("contraintes", "fit")), tuple(arguments(schema_of(spec))),
-                        title="Ses arguments", empty="Aucun argument."))
+                        title="Ses arguments", empty="Aucun argument.")
+    blocks: list[Any] = []
     rows = []
     for s in situations(ui):
         policy = policies[s.kind]
@@ -276,19 +289,25 @@ def _fiche(ui: Any, request: Request, name: str) -> Any:
             hand = core is None or spec.bundle in core or spec.in_hand
             rows.append(Row((s.label, Badge("en main" if hand else "à la demande", "ok" if hand else "info"),
                              "")))
-    blocks.append(Table(("situation", Column("offert", "fit"), "pourquoi pas"), tuple(rows),
+    blocks.append(Table((Column("Situation", role="title"), Column("Disponible", "fit", role="badge"), "Pourquoi pas"), tuple(rows),
                         title="Qui le reçoit",
+                        layout="list",
                         caption="Lu de la porte d'offre du pipeline. Un pas ou une exécution qui a choisi ses lots les "
                                 "a tous en main."))
     traces = getattr(ui.kernel, "traces", None)
     uses = traces.tool_uses(spec.name, 20) if traces is not None else []
+    blocks.append(Disclosure("Arguments et règles d’utilisation", (argument_table, Fields(tuple(pairs), title="Règles et provenance", columns=2))))
     blocks.append(Table((Column("quand", "fit"), Column("épisode", "fit"), Column("issue", "fit"), ""), tuple(
         Row((When(u.at), names.kind(u.kind),
              Badge("réussi" if u.ok else ("refusé" if not u.executed else "échec"),
                    "ok" if u.ok else "warn" if not u.executed else "danger"),
              Ref("episode", u.correlation, "relire", (("onglet", "outils"),))))
         for u in uses), title="Ses derniers appels", empty=f"Aucun appel depuis {USAGE_DAYS} jours."))
-    return {"blocks": blocks, "crumbs": back}
+    return {"blocks": blocks, "crumbs": back, "panel": Panel("tool_intro.html", {
+        "page_heading": spec.name, "page_subtitle": spec.description,
+        "tool_origin": label, "tool_tone": tone, "tool_family": ui.names.faculty(spec.bundle),  # la famille du catalogue (son lot)
+        "tool_reserved": spec.owner_only,
+    })}
 
 
 def schema_of(spec: ToolSpec) -> Mapping[str, Any]:

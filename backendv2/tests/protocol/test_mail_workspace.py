@@ -168,3 +168,23 @@ def test_legacy_cache_is_labelled_and_all_attachment_links_are_paginated(world):
     assert 'ancien cache' in page and 'Charger le message intégral' in page
     assert 'fichier-24.txt' in page and 'fichier-25.txt' not in page
     assert 'fichier-30.txt' in get(client, url + '?pg1=2')
+
+
+def test_inbox_reading_list_and_table_keep_account_filters_and_return_path(world):  # noqa: F811
+    client, box = setup(world)
+    url = '/inspecteur/courrier/reception?compte=perso&q=message&etat=non_lus'
+    listing = get(client, url)
+    assert 'class="collection list"' in listing and 'Lire le message' in listing
+    table = get(client, url + '&vue_pg1=table')
+    assert 'class="collection list"' not in table and 'class="tbl"' in table
+    assert 'name="vue_pg1" value="table"' in table
+    assert 'name="compte" value="perso"' in table
+    assert 'Personnel · message 001' in listing and 'Personnel · message 001' in table
+    assert 'Personnel · message 000' not in listing and 'Maquettes du projet' not in table
+    link = re.search(r'href="([^\"]+/fiche/mail/[^\"]+)"', table).group(1)
+    reader = get(client, link)
+    assert 'retour=' in link and 'vue_pg1%3Dtable' in link
+    assert 'vue_pg1=table' in reader
+    next_page = re.search(r'<a href="([^\"]+)" rel="next">', table).group(1)
+    assert 'vue_pg1=table' in next_page and 'compte=perso' in next_page
+    assert not box.sent and not box.actions

@@ -389,7 +389,7 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
 #: demander comment ça s'est passé) n'est plus comptée comme « elle a écrit la première » — ``starts`` se recalcule.
 #: v6 : le dernier cran ressenti de chaque lien (``bond_shifted``, ``bond_noted``).
 SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive,
-                 state_version=9, retired_params=("ignored_shift", "tie_room_max"))
+                 state_version=10, retired_params=("ignored_shift", "tie_room_max"))
 SOCIAL.declare(*c.ALL)
 
 
@@ -556,6 +556,12 @@ def _knit(s: SocialState, e, cx) -> SocialState:
             remaining = FrozenDict((k, v) for k, v in edges.items() if v.item != replaced)
             if len(remaining) != len(edges):
                 relations = relations.set(subject, remaining) if remaining else relations.delete(subject)
+    if e.type.name == memory_c.REINFORCED.name and d.secret:
+        # la croyance d'où vient le lien devient un secret : un lien secret n'ouvre plus rien (``_ties``)
+        for subject, edges in relations.items():
+            if any(v.item == d.item and not v.secret for v in edges.values()):
+                relations = relations.set(subject, FrozenDict(
+                    (k, replace(v, secret=True) if v.item == d.item else v) for k, v in edges.items()))
     for relation in getattr(d, "relations", ()):
         subject, other = relation.subject, relation.other
         if subject == other or not is_identifiable(subject) or not is_identifiable(other):

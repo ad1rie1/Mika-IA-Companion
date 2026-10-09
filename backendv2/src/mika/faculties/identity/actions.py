@@ -343,11 +343,27 @@ class NameArgs(BaseModel):
         help="Tel qu'on lui en parlait (« Alice », « Alice Martin ») : ce que les autres lui ont dit de « Alice » "
              "est désormais su d'elle — chacun garde qui le lui a confié, et ce qui ne se répète pas reste tu.")]
     confirmed: Annotated[bool, Knob(label="Je confirme", advanced=False, order=20, help=CONFIRM_HELP)] = False
+    #: la mention exacte que la console propose (``name:<portée>:<nom>`` : l'« Alice » d'une conversation
+    #: précise) ; vide, le nom tapé (``name:alice``)
+    key: Annotated[str, Knob(label="Mention", widget="hidden")] = Field(default="", max_length=512)
 
 
 def _named_key(name: str) -> str:
     """La clé « connue seulement de nom », comme la mémoire la forme (``name:alice martin``)."""
     return "name:" + " ".join(fold(clean_display_name(name)).split())
+
+
+def _mention(args: NameArgs) -> str:
+    """La clé à relier : la mention proposée par la console (portée par sa conversation — sans elle, la liaison
+    visait ``name:alice`` et laissait l'« Alice » dont on avait parlé à jamais sans personne, audit du
+    2026-10-08), sinon celle du nom tapé."""
+    typed = _named_key(args.name)
+    if not args.key:
+        return typed
+    key = args.key.strip()
+    if not key.startswith("name:") or named_label(key) != named_label(typed):
+        raise Refused("Mention inconnue.", {"name": f"« {args.name} » n'est pas le nom de cette mention."})
+    return key
 
 
 def _can_name(s: IdentityState, frame: Frame, key: str) -> bool:
@@ -362,7 +378,7 @@ def _can_name(s: IdentityState, frame: Frame, key: str) -> bool:
                  confirm="Relier ce nom à cette personne ?")
 def _bind_name(s: IdentityState, frame: Frame, args: NameArgs, ctx: ActionContext) -> Done:
     person = ctx.subject
-    key = _named_key(args.name)
+    key = _mention(args)
     if key == "name:":
         raise Refused("Nom manquant.", {"name": "Indique le nom sous lequel on lui en a parlé."})
     current = s.names.get(key)
@@ -395,13 +411,15 @@ def _can_unname(s: IdentityState, frame: Frame, key: str) -> bool:
                  description="Ce n'était pas elle : ce qu'on avait dit sous ce nom redevient « quelqu'un dont on lui "
                              "a parlé ».")
 def _unbind_name(s: IdentityState, frame: Frame, args: UnnameArgs, ctx: ActionContext) -> Done:
-    key = _named_key(args.name)
-    if s.names.get(key) != ctx.subject:
+    # toutes les mentions de ce nom reliées à elle : le nom tapé, et celles des conversations où on l'a nommée
+    label = named_label(_named_key(args.name))
+    keys = sorted(k for k, p in s.names.items() if p == ctx.subject and named_label(k) == label)
+    if not keys:
         bound = ", ".join(f"« {named_label(k)} »" for k, p in sorted(s.names.items()) if p == ctx.subject) or "aucun"
         raise Refused("Nom inconnu.", {"name": f"Noms reliés à cette personne : {bound}."})
-    return Done(drafts=(c.NAME_BOUND.draft(name=key, person=None, by="operator"),),
+    return Done(drafts=tuple(c.NAME_BOUND.draft(name=k, person=None, by="operator") for k in keys),
                 message=f"« {args.name} » ne désigne plus {known_as(s, ctx.subject)}.",
-                guard=Guard("nom inchangé", reads=(c.PERSON(key),)))
+                guard=Guard("nom inchangé", reads=tuple(c.PERSON(k) for k in keys)))
 
 
 class DismissArgs(BaseModel):

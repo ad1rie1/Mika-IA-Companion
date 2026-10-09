@@ -21,7 +21,7 @@ il faut coller la clé Teams.
 L'extension parle au plugin `teams` de Mika (`/api/teams/…`). Il lui faut la **clé Teams** (elle commence par
 `mtk_`) :
 
-- dans la console : Configuration › Teams ;
+- dans la console : Réglages › Teams ;
 - ou en ligne de commande : `.venv/bin/python -m mika --data data/v2 teams key` (depuis `backendv2/`).
 
 Dans la fenêtre de l'extension, colle l'adresse (`http://127.0.0.1:8001` par défaut) et la clé, puis

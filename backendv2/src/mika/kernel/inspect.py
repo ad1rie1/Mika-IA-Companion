@@ -142,6 +142,8 @@ class Column:
     hint: str = ""
     #: Information secondaire : conservée dans le détail de chaque ligne.
     detail: bool = False
+    #: Place dans une liste de fiches ou un fil : titre, badge, corps, ou champ ordinaire.
+    role: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,6 +187,10 @@ class Table:
     #: les paramètres de la vue montrés comme filtres au-dessus du tableau
     filters: tuple[str, ...] = ()
     caption: str = ""
+    #: Même collection paginée : tableau (vide), fiches (cards), liste (list), ou fil (feed).
+    layout: str = ""
+    #: Libellé du lien principal d'une ligne, lorsqu'il ne désigne pas une fiche.
+    link_label: str = "Ouvrir la fiche"
 
 
 @dataclass(frozen=True, slots=True)
@@ -403,6 +409,12 @@ PAGE_PARAM = r"page(?:_[a-z][a-z0-9_]{0,39})?"
 def is_page_param(name: str) -> bool:
     """Les pages nommées permettent à plusieurs collections d'une app de coexister."""
     return re.fullmatch(PAGE_PARAM, name) is not None
+
+
+def is_table_choice(name: str, value: str) -> bool:
+    """Le choix « Tableau » d'une collection montrée en fiches (``vue_pg<n>=table``, numérotée au rendu) : une
+    page qui garde son contexte le garde, quel que soit le rang de la collection."""
+    return name.startswith("vue_pg") and name[6:].isdigit() and value == "table"
 
 
 def _fold(text: str) -> str:

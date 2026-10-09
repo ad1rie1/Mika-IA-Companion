@@ -34,7 +34,7 @@ Ouvre `http://127.0.0.1:8001/` (qui mène à `/inspecteur/`).
    le premier compte est opérateur — il ouvre la console et le chat. (En
    ligne de commande, serveur arrêté : `mika account <nom> --operator`, le mot
    de passe est demandé sans écho.)
-2. **Un fournisseur de modèles.** Configuration › Fournisseurs › Ajouter :
+2. **Un fournisseur de modèles.** Réglages › Fournisseurs › Ajouter :
    son type (Claude, Claude Code, compatible OpenAI, Ollama…), le modèle, la
    clé s'il en faut une. **Le premier fournisseur déclaré la fait parler** :
    il sert « répondre » d'office, et tous les autres rôles (rêver, retenir,
@@ -103,10 +103,10 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
 - **Lui donner une vie importée** (un rejeu d'archives) : `mika.app.genesis` ajoute souvenirs, croyances et moments
   à l'instant courant d'un noyau démarré, et coupe sa vie spontanée le temps du rejeu ; sa nature (`nature: incarnee`
   dans la persona) et son nom ne viennent que de sa persona (ADR 0070).
-- **La faire agir depuis un script** : déclare un réveil (Configuration › Plugins › Réveils par API), génère sa
+- **La faire agir depuis un script** : déclare un réveil (Réglages › Plugins › Réveils par API), génère sa
   clé sur sa fiche, puis `POST /api/wake/<nom>` avec `Authorization: Bearer <clé>` et `{"text": "…"}` (ADR 0068).
 - **Lui faire lire Teams, et y répondre à ta place** : installe l'extension de `frontend/Extension/` dans le
-  navigateur où tu ouvres Teams, génère sa clé (Configuration › Sens › Teams, ou `python -m mika teams key`) et
+  navigateur où tu ouvres Teams, génère sa clé (Réglages › Plugins › Teams, ou `python -m mika teams key`) et
   colle-la dans l'extension. Ses réponses sont posées dans Teams pour que tu les envoies, ou partent après ton accord,
   ou seules — selon le mode (ADR 0069).
 - **Le tableau de bord** (`/inspecteur/`) dit ce qui attend ton attention ;

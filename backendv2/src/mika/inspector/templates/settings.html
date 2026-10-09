@@ -1,6 +1,6 @@
 {% from "_forms.html" import field %}
 {% from "_blocks.html" import render %}
-{% from "_navigation.html" import pager %}
+{% from "_settings_records.html" import records %}
 {% macro groups(list) -%}
 {% for g in list %}
 <fieldset class="group">
@@ -59,29 +59,7 @@
 
   {% if not s.record %}
   {% for r in s.records %}
-  <div class="records table-block">
-    <div class="block-head"><h3 class="block-title">{{ r.label }}</h3><span class="block-count">{{ r.total }} au total</span>
-      <a class="btn small" href="{{ r.add }}">＋ Ajouter</a></div>
-    {% if r.help %}<p class="muted">{{ r.help }}</p>{% endif %}
-    <div class="table-wrap" tabindex="0" role="region" aria-label="{{ r.label }}"><table class="tbl">
-      <caption class="sr">{{ r.label }}</caption>
-      <thead><tr>{% if r.keyed %}<th scope="col">Nom</th>{% endif %}{% for c in r.columns %}<th scope="col">{{ c }}</th>{% endfor %}<th scope="col" class="fit">Actions</th></tr></thead>
-      <tbody>
-      {% for row in r.rows %}
-        <tr data-href="{{ row.edit }}">{% if r.keyed %}<td><a href="{{ row.edit }}" class="mono">{{ row.key }}</a></td>{% endif %}{% for c in row.cells %}<td>{{ c }}</td>{% endfor %}
-          <td class="row-actions fit"><a class="btn quiet small" href="{{ row.edit }}">modifier</a>
-            <form method="post" action="{{ action }}" class="inline" data-confirm="{{ row.confirm or ('Retirer « ' ~ row.key ~ ' » ?') }}">
-              <input type="hidden" name="csrf" value="{{ s.csrf }}"><input type="hidden" name="_section" value="{{ s.key }}">
-              <input type="hidden" name="_supprimer" value="{{ r.path }}"><input type="hidden" name="_cle" value="{{ row.key }}">
-              <button class="btn quiet small danger">retirer</button>
-            </form></td></tr>
-      {% else %}
-        <tr><td colspan="{{ r.columns|length + 2 }}" class="empty">Aucune entrée : « Ajouter » pour commencer.</td></tr>
-      {% endfor %}
-      </tbody>
-    </table></div>
-    {{ pager(r.pager) }}
-  </div>
+  {{ records(r, s.csrf, s.key, action) }}
   {% endfor %}
 
   {% if s.form %}
@@ -92,9 +70,9 @@
     {% if s.form.stash %}<input type="hidden" name="_reserve" value="{{ s.form.stash }}">{% endif %}
     {% for e in s.form.general %}<div class="flash danger">{{ e }}</div>{% endfor %}
     {{ fields_block(s.form) }}
+    {% if s.form.preview %}<p class="caption">« Voir l'effet » montre ce qu'elle ferait avec ces valeurs, maintenant, sans rien enregistrer.</p>{% endif %}
     <div class="form-actions"><button class="btn">Enregistrer</button>{% if s.form.preview %}
-      <button class="btn quiet" name="_apercu" value="1">Voir l'effet</button>
-      <span class="muted small">Ce qu'elle ferait avec ces valeurs, maintenant, sans rien enregistrer.</span>{% endif %}</div>
+      <button class="btn quiet" name="_apercu" value="1">Voir l'effet</button>{% endif %}</div>
   </form>
   {% endif %}
 

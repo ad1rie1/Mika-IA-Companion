@@ -29,6 +29,7 @@ from mika.kernel.inspect import (
     Ref,
     Toolbar,
     Workspace,
+    is_table_choice,
 )
 from mika.plugins.email import (
     APPROVED,
@@ -58,7 +59,7 @@ TODAY_MAX = 500
 BATCH = 250
 NO_MAIL = "Aucun mail demandé : choisis-en un dans le courrier."
 UNKNOWN = "Ce mail n'est ni dans la boîte, ni parmi les envoyés, ni dans ce qu'elle a remarqué."
-NOT_CONFIGURED = "Aucune boîte n'est configurée : ajoute un compte dans Configuration › Plugins › Boîtes aux lettres."
+NOT_CONFIGURED = "Aucune boîte n'est configurée : ajoute un compte dans Réglages › Plugins › Boîtes aux lettres."
 NO_PORT = "Courrier non configuré : aucune boîte aux lettres n'est branchée."
 VOICE_LABEL = {"elle": "en son nom", "assistante": "en assistante", "proprietaire": "à ta place"}
 #: où en est un brouillon, en toutes lettres (et son ton) : ce qu'elle en sait (sa proposition)…
@@ -188,7 +189,7 @@ def box_note(port: Any, p: EmailParams) -> Note:
         return Note(NOT_CONFIGURED, tone="warn")
     if not port.configured():
         return Note("Aucun compte n'est prêt à relever (serveur, utilisateur ou compte inactif) : voir Courrier › "
-                    "Configuration › Plugins › Boîtes aux lettres.", tone="warn")
+                    "Réglages › Plugins › Boîtes aux lettres.", tone="warn")
     n = sum(1 for a in port.accounts() if a.ready)
     boxes = "Boîte aux lettres configurée" if n == 1 else f"{n} boîtes aux lettres configurées"
     return Note(f"{boxes} : relevée(s) toutes les {p.poll_every_us // MINUTE} min quand elle est éveillée "
@@ -270,6 +271,7 @@ def workspace(port: Any, ctx: InspectContext, items: list[Block], *, view: str =
     content: list[Block] = [Toolbar(tuple(actions))] if actions else []
     if filters:
         keep = tuple((k, v) for k, v in (("compte", account), ("dossier", ctx.param("dossier") if folders else "")) if v)
+        keep += tuple((k, v) for k, v in ctx.params.items() if is_table_choice(k, v))
         content.append(Filters(filters, tuple(ctx.params.items()), keep=keep, title="Rechercher"))
     if chosen:
         status = port.status(account)

@@ -113,6 +113,13 @@ def test_health_is_public_but_says_only_names_and_states(world):  # noqa: F811
 
 def test_every_form_needs_its_token(world):  # noqa: F811
     client, live, _ = world
+    # Le contrôle porte sur les POST refusés. Une note de lien social créée
+    # en parallèle ne doit pas être prise pour une écriture de formulaire.
+    async def stop_processes():
+        live.kernel.scheduler.stop()
+        await live.kernel.scheduler.cancel_all()
+
+    client.portal.call(stop_processes)
     bootstrap(client)
     head = client.portal.call(lambda: live.kernel.mind.head)
     for path in ("modeles", "personnalite", "parametres", "canaux", "sens", "comptes"):

@@ -412,6 +412,19 @@ class Consolidate:
             seqs = [s for s in cited if s in lines]
             return bool(seqs) and not any(lines[s].person for s in seqs)
 
+        def from_her(cited: Sequence[int]) -> bool:
+            """Ce qu'elle dit d'elle vient de sa bouche : une de ses répliques est citée (la question qu'on lui a posée
+            peut l'être aussi), ou rien ne l'est (le doute d'avant). Ce que seule une autre personne a dit d'elle
+            (« ton code, c'est ORCHIDEE, garde-le pour toi ») lui a été appris : il suit le chemin commun, avec son
+            confident et son secret (audit du 2026-10-08)."""
+            seqs = [s for s in cited if s in lines]
+            return not seqs or any(not lines[s].person for s in seqs)
+
+        def her_words(cited: Sequence[int]) -> list[str]:
+            """Ses répliques citées : « garde ça pour toi », dit par elle, fait un secret même quand le modèle ne le
+            note pas (``provenance`` ne rend que les mots des autres)."""
+            return [lines[s].text for s in cited if s in lines and not lines[s].person]
+
         def concerned(names: list[str]) -> tuple[str, ...]:
             """Dans le doute, on ferme : un élément dont le modèle ne nomme
             personne concerne ceux qui parlent dans cette conversation (le seul
@@ -456,8 +469,9 @@ class Consolidate:
         for s in ex.souvenirs:
             if not fresh(c.SOUVENIR, s.texte):
                 continue
-            if s.sur_elle and not people.resolve(s.personnes):
-                drafts += await self._about_self(s, store, vectors, p, provenance, call_id, known_ids)
+            if s.sur_elle and not people.resolve(s.personnes) and from_her(s.messages):
+                drafts += await self._about_self(s, store, vectors, p, provenance, call_id, known_ids, secret_of,
+                                                 her_words(s.messages))
                 continue
             text, cited_seqs = s.texte, list(s.messages)
             if banal(text, said_names):
@@ -486,11 +500,12 @@ class Consolidate:
         for b in ex.croyances:
             if not fresh(c.BELIEF, b.texte):
                 continue
-            if b.sur_elle and not people.resolve(b.personnes):
+            if b.sur_elle and not people.resolve(b.personnes) and from_her(b.messages):
                 # ce qu'elle dit d'elle seule ; « Mika a dit à Sam : … », lui, nomme quelqu'un : ce n'est pas une
                 # note anodine sur elle (elle sortait telle quelle dans un salon — sonde du 2026-10-03), il suit le
                 # chemin commun (sa réplique n'est pas ce qu'on lui a appris)
-                drafts += await self._about_self(b, store, vectors, p, provenance, call_id, known_ids)
+                drafts += await self._about_self(b, store, vectors, p, provenance, call_id, known_ids, secret_of,
+                                                 her_words(b.messages))
                 continue
             between = b.entre_vous or any(fold(n) in fold(b.texte) for n in nicks)
             if (not between and hers(b.messages)) or banal(b.texte, said_names):
@@ -616,12 +631,21 @@ class Consolidate:
         return kept_secrets(store, conv.persons)
 
     async def _about_self(self, b: x.XSouvenir | x.XCroyance, store: Any, vectors: Any, p: MemoryParams,
-                          provenance: Any, call_id: str, known_ids: set[int]) -> list[Draft[Any]]:
+                          provenance: Any, call_id: str, known_ids: set[int],
+                          secret_of: Any = None, her_lines: Sequence[str] = ()) -> list[Draft[Any]]:
         """Ce qu'elle a raconté d'elle-même : une note anodine, de peu
         d'importance, qui s'efface en quelques jours — sauf ce qui la définit
         (un goût, un avis, un fait de sa vie), qui tient longtemps ; quand elle
-        change d'avis, la nouvelle croyance remplace l'ancienne."""
-        sources, _told, _cited = provenance(b.messages)
+        change d'avis, la nouvelle croyance remplace l'ancienne. Ce qu'elle a
+        demandé de garder pour soi, ou une confidence sur elle, le reste : ça ne
+        se dit qu'en grande confiance (audit du 2026-10-08)."""
+        sources, _told, cited = provenance(b.messages)
+        sens = x.sensitivity(b.sensibilite, has_person=False)
+        asked = bool(b.secret) or x.says_secret(her_lines)  # elle a demandé le silence
+        secret = bool(secret_of(asked, cited, sens, b.texte)) if secret_of is not None else asked
+        # sa vie de tous les jours est à elle, elle la raconte à qui elle veut ; une confidence ou un secret, non
+        sens = max(sens, int(Sensitivity.CONFIDENCE)) if secret else (
+            sens if sens >= Sensitivity.CONFIDENCE else int(Sensitivity.ANODYNE))
         durable = x.durable_self(b)
         nature = {"avis": "opinion", "opinion": "opinion", "gout": "preference", "preference": "preference",
                   "hypothese": "hypothesis"}.get(fold(b.genre or ""), "claim")
@@ -631,12 +655,14 @@ class Consolidate:
             replaces = None
         twin = await self._twin(store, vectors, b.texte, c.BELIEF, (), p, knowledge_kind=nature)
         if twin is not None and twin != replaces:
+            if sens > Sensitivity.ANODYNE or secret:
+                return [c.REINFORCED.draft(item=twin, sources=sources, sensitivity=sens, secret=secret)]
             return [c.REINFORCED.draft(item=twin, sources=sources)]
         return [c.BELIEVED.draft(
-            text=Content.of(b.texte, level=int(Sensitivity.ANODYNE)), about=(), sensitivity=int(Sensitivity.ANODYNE),
+            text=Content.of(b.texte, level=sens), about=(), sensitivity=sens,
             importance=x.IMPORTANCE[3 if durable else 1], confidence=round(getattr(b, "confiance", 0.7), 3),
             origin=c.OBSERVED, sources=sources, replaces=replaces, call_id=call_id, about_self=True, durable=durable,
-            knowledge_kind=nature)]
+            knowledge_kind=nature, secret=secret)]
 
     async def _promised(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
                         people: x.People, promises: list[tuple[int, str, str]], vectors: Any, p: MemoryParams,
@@ -744,6 +770,12 @@ class Consolidate:
                 continue  # dit deux fois dans la même conversation
             twin = await self._same_event(store, state, vectors, ev.texte, about, p, frame=frame, at=at,
                                           names=names)
+            if twin is not None and not ev.en_cours and abs(twin.when - at) >= DAY // 2 and not x.same_moment(
+                    ev.texte, store.content([twin.text_ref]).get(twin.text_ref) or "", names):
+                # à une autre date, une ressemblance ne suffit pas à dire « reporté » : il faut les mêmes mots (« son
+                # examen de maths » n'est pas « son examen de physique », audit du 2026-10-08) — sinon le nouveau
+                # moment effacerait l'autre ; deux moments notés valent mieux qu'un moment perdu
+                twin = None
             if twin is not None and (ev.en_cours or abs(twin.when - at) < DAY // 2):
                 if not (told_by and set(told_by) <= set(about) and not set(twin.told_by) <= set(twin.about)):
                     continue  # déjà noté (une situation redite dure toujours : rien à changer)
@@ -792,7 +824,9 @@ class Consolidate:
         pour la même personne, les mêmes mots une fois les prénoms ôtés (« son anniversaire » est « l'anniversaire
         de Sam »). Une date qui revient chaque année se compare à son occurrence de ce jour-là."""
         archive = {ev.id: ev for ev in for_people(store, about)}
-        mine = [ev for ev in {**state.events, **archive}.values() if set(ev.about) & set(about)]
+        # une situation finie n'est plus à redire : « il est de nouveau malade » en ouvre une autre (une récidive),
+        # qui sinon passait pour déjà notée (audit du 2026-10-08)
+        mine = [ev for ev in {**state.events, **archive}.values() if set(ev.about) & set(about) and not ev.ended_at]
         if not mine:
             return None
         if frame is not None and at is not None:

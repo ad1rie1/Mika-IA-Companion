@@ -46,6 +46,24 @@ class NavGroup:
 
 
 @dataclass(frozen=True, slots=True)
+class MenuLink:
+    """Une entrée visible, vers une page existante (chemin relatif à /inspecteur/)."""
+
+    label: str
+    target: str
+    also: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class MenuGroup:
+    label: str
+    icon: str
+    items: tuple[MenuLink, ...]
+    #: la rubrique porte son nom, lu dans sa persona au rendu (ADR 0070) ; ``label`` n'en est que le repli
+    her: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class Builtin:
     """Un onglet fourni par la console : ``fn(ui, request) -> blocs`` (ou une réponse)."""
 

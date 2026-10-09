@@ -19,6 +19,7 @@ from mika.contracts import runtime as rt
 from mika.inspector import names
 from mika.inspector.catalog import Panel
 from mika.inspector.pages.decisions import selection_detail, waterfall
+from mika.inspector.pages.episode_overview import overview
 from mika.inspector.pages.home import outcome_badge
 from mika.inspector.pages.why import episode_events, prompt_blocks, selection_of, tools_blocks, trace_of
 from mika.kernel.inspect import (
@@ -48,7 +49,7 @@ from mika.runtime.tools import declare
 from mika.runtime.traces import STABLE_KEY, TRUNCATION_MARK
 from mika.vocab.episodes import TRIAL_ROLE
 
-EPISODE_TABS = (("deroule", "Déroulé"), ("dit", "Ce qu'elle a dit"), ("prompt", "Prompt"), ("outils", "Outils"),
+EPISODE_TABS = (("resume", "Résumé"), ("deroule", "Déroulé"), ("dit", "Ce qu'elle a dit"), ("prompt", "Prompt"), ("outils", "Outils"),
                 ("appels", "Appels de modèle"), ("decision", "Décision"))
 _PROVENANCE = ("memory:", "event:", "goal:", "thought:")
 #: une page d'événements d'épisode
@@ -106,6 +107,8 @@ def episode_head(ui: Any, corr: str) -> dict[str, Any] | None:
 
 def episode_tab(ui: Any, corr: str, tab: str, info: dict[str, Any], query=None) -> list[Any]:
     started, ended = info["started"], info["ended"]
+    if tab == "resume":
+        return overview(ui, corr, info)
     if tab == "dit":
         said, pager = _events(ui, corr, query, speeches=True)
         if not said:
@@ -122,9 +125,10 @@ def episode_tab(ui: Any, corr: str, tab: str, info: dict[str, Any], query=None) 
             links = [p for p in (_provenance(x) for x in d.provenance) if isinstance(p, Ref)]
             if links:
                 out.append(Table(("source",), tuple((p,) for p in links), title="Ce qui l'a nourrie"))
-            rows.append(Row((When(u.at), ui.names.who_cell(d.target), Text(d.text.text or "(oublié)", clamp=400),
+            rows.append(Row((When(u.at), Badge("elle", "info"), ui.names.who_cell(d.target), Text(d.text.text or "(oublié)", clamp=400),
                              "visible" if d.visible else "pas dans le fil"), href=Ref.why(u.seq), detail=tuple(out)))
-        return [Table(("Quand", "À", "Parole", "Visibilité"), tuple(rows), title="Paroles de l'épisode", pager=pager,
+        return [Table(("Quand", Column("Qui parle", role="title"), "À", Column("Parole", role="body"), "Visibilité"), tuple(rows),
+                      title="Paroles de l'épisode", pager=pager, layout="feed", link_label="Expliquer cette parole",
                       caption="Chaque parole mène à « Pourquoi a-t-elle dit ça ? ».")]
     if tab == "prompt":
         trace = trace_of(ui, corr)
@@ -196,9 +200,10 @@ def episode_tab(ui: Any, corr: str, tab: str, info: dict[str, Any], query=None) 
     rows = tuple(Row((When(e.at), Text(ui.names.event(e.type.name), hint=e.type.name),
                       Ref.why(e.seq, "pourquoi ?") if e.type.name == rt.UTTERANCE.name else "",
                       Ref("event", str(e.seq), f"n° {e.seq}"), Text(e.type.name, "mono")),
-                     detail=(Code(ui.show(e, 4000), "Données"),)) for e in events)
-    return [Table((Column("quand", "fit"), "ce qui s'est passé", Column("", "fit"), Column("événement", detail=True),
-                   Column("type", detail=True)), rows, title="Déroulé", pager=pager)]
+                     href=Ref("event", str(e.seq), ""), detail=(Code(ui.show(e, 4000), "Données"),)) for e in events)
+    return [Table((Column("Quand", "fit"), Column("Ce qui s’est passé", role="title"), Column("Explication", "fit"),
+                   Column("Événement", detail=True), Column("Type", detail=True)), rows, title="Déroulé", pager=pager,
+                  layout="list", link_label="Ouvrir l’événement")]
 
 
 def names_outcome_call(outcome: str) -> Badge:

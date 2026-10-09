@@ -22,17 +22,17 @@
         {% if it.bounds %}<span>bornes {{ it.bounds }}</span>{% endif %}
         {% if it.natural %}<span>sans surcharge : <b>{{ it.natural }}</b></span>{% endif %}
         {% if it.pending %}<span class="t-warn">en vigueur : {{ it.pending }} (pas encore journalisé)</span>{% endif %}
-        <span class="mono muted">{{ it.path }}</span>
+        <details class="param-origin"><summary>Clé du paramètre</summary><code>{{ it.path }}</code></details>
         {% if it.overridden %}<button class="btn quiet small" form="params-reset-{{ owner }}" name="_reinitialiser_chemin" value="{{ it.path }}">revenir au tempérament</button>{% endif %}
       </div>
     </div>
     {% endfor %}
   </fieldset>
   {% endfor %}
+  <p class="caption">Une valeur changée devient une surcharge (bornée, journalisée avec ton nom) ; une valeur égale à celle du tempérament la retire. « Voir l'effet » montre ce qu'elle ferait avec ces valeurs, maintenant, sans rien enregistrer.</p>
   <div class="form-actions">
     <button class="btn">Enregistrer</button>
     <button class="btn quiet" name="_apercu" value="1">Voir l'effet</button>
-    <span class="muted small">Une valeur changée devient une surcharge (bornée, journalisée avec ton nom) ; une valeur égale à celle du tempérament la retire. « Voir l'effet » montre ce qu'elle ferait avec ces valeurs, maintenant, sans rien enregistrer.</span>
   </div>
 </form>
 {% if overridden %}

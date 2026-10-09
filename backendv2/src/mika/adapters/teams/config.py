@@ -1,4 +1,4 @@
-"""Ce qu'un opérateur règle de Teams (Configuration › Sens › Teams) : s'il est branché, comment elle y écrit, et
+"""Ce qu'un opérateur règle de Teams (Réglages › Plugins › Teams) : s'il est branché, comment elle y écrit, et
 ce qu'elle prépare d'elle-même. La clé de l'extension se génère à part (seule son empreinte est gardée)."""
 
 from __future__ import annotations

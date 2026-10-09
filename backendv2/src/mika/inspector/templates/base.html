@@ -1,3 +1,4 @@
+{% from "_icons.html" import icon %}
 <!doctype html>
 <html lang="fr">
 <head>
@@ -8,28 +9,29 @@
 <link rel="stylesheet" href="{{ PREFIX }}/static/console.css?v={{ ASSET_VERSION }}">
 <script src="{{ PREFIX }}/static/console.js?v={{ ASSET_VERSION }}"></script>
 </head>
-<body>
+<body{% if posted %} data-posted{% endif %}>
 <a class="skip-link" href="#contenu">Aller au contenu</a>
-<input type="checkbox" id="nav-open" class="sr" aria-label="Menu">
+<input type="checkbox" id="nav-open" class="sr" aria-label="Afficher le menu">
 <div class="app">
   <label for="nav-open" class="scrim" aria-hidden="true"></label>
-  <aside class="sidebar" aria-label="Navigation">
-    <div class="brand"><span class="brand-mark">M</span><span><span class="brand-name">Mika</span><br><span class="brand-sub">console</span></span></div>
+  <aside class="sidebar" id="navigation" aria-label="Navigation principale">
+    <div class="brand"><a class="brand-link" href="{{ PREFIX }}/" aria-label="Mika · Accueil"><span class="brand-mark">M</span><span><span class="brand-name">Mika</span><br><span class="brand-sub">Console de pilotage</span></span></a><button type="button" class="nav-close" data-nav-close aria-label="Fermer le menu" hidden>×</button></div>
     <form class="search" method="get" action="{{ PREFIX }}/recherche" role="search">
-      <label class="sr" for="q-global">Chercher une personne, un but, une app…</label>
-      <input id="q-global" name="q" placeholder="Chercher…  ( / )" autocomplete="off" value="{{ search_q or '' }}">
+      <label class="sr" for="q-global">Rechercher une page, une personne, un projet…</label>
+      <input id="q-global" type="search" name="q" placeholder="Rechercher…" autocomplete="off" value="{{ search_q or '' }}"><kbd aria-hidden="true">/</kbd>
     </form>
-    <nav>
+    <nav class="primary-nav{{ ' operator-nav' if operator_menu }}" aria-label="Rubriques">
     {% for g in nav %}
-      <div class="nav-group">
-        {% if g.label %}<div class="nav-group-label">{{ g.label }}</div>{% endif %}
+      {% if g.label %}<details class="nav-group{{ ' active' if g.active }}" data-nav-group="{{ g.label }}"{{ ' open' if g.active }}>
+        <summary class="nav-group-label">{% if operator_menu %}{{ icon(g.icon) }}{% endif %}<span>{{ g.label }}</span>{% if g.badge %}{% if operator_menu %}<span class="nav-attention" role="img" aria-label="Des éléments demandent ton attention" title="Des éléments demandent ton attention"></span>{% else %}<span class="count group-count">{{ g.badge }}</span>{% endif %}{% endif %}</summary>
+      {% else %}<div class="nav-group">{% endif %}
         {% for it in g["items"] %}
         <a class="nav-item{{ ' on' if it.on }}" href="{{ it.href }}"{% if it.on %} aria-current="page"{% endif %}>
-          <span class="nav-icon" aria-hidden="true">{{ it.icon }}</span><span>{{ it.label }}</span>
+          {% if operator_menu %}{% if not g.label %}{{ icon(it.icon) }}{% endif %}{% else %}<span class="nav-icon" aria-hidden="true">{{ it.icon }}&#xfe0e;</span>{% endif %}<span>{{ it.label }}</span>
           {% if it.badge %}<span class="count" title="demande ton attention">{{ it.badge }}</span>{% endif %}
         </a>
         {% endfor %}
-      </div>
+      {% if g.label %}</details>{% else %}</div>{% endif %}
     {% endfor %}
     </nav>
     <div class="sidebar-foot">
@@ -39,19 +41,20 @@
         <button type="button" data-theme-set="dark" aria-pressed="false">Sombre</button>
       </div>
       <div class="who"><span>{{ who }}</span>
-        <form method="post" action="{{ PREFIX }}/deconnexion" class="inline-form"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn quiet small">Sortir</button></form></div>
+        <form method="post" action="{{ PREFIX }}/deconnexion" class="inline-form"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn quiet small">Déconnexion</button></form></div>
     </div>
   </aside>
   <div class="main">
     <header class="vitals" data-vitals="{{ PREFIX }}/_vitals">
-      <label for="nav-open" class="menu-toggle" title="Menu">☰</label>
+      <button type="button" class="menu-toggle" data-nav-toggle aria-controls="navigation" aria-expanded="false" hidden><span aria-hidden="true">☰</span> Menu</button>
+      <noscript><label for="nav-open" class="menu-toggle">☰ Menu</label></noscript>
       <span class="kv-inline" data-vitals-items>{% include "_vitals.html" %}</span>
-      <span class="vitals-live" data-vitals-live aria-live="polite"></span>
+      <span class="vitals-live" data-vitals-live role="status">Actualisation auto</span>
     </header>
     <main class="content" id="contenu" tabindex="-1">
     {% block content %}
       <div class="page-head"><div><h1>{{ heading or title }}</h1>{% if subtitle %}<p>{{ subtitle }}</p>{% endif %}</div></div>
-      {% if tabs %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}">{{ t.title }}</a>{% endfor %}</nav>{% endif %}
+      {% if tabs %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}</a>{% endfor %}</nav>{% endif %}
       {% for m in messages or [] %}<div class="flash {{ {'ko': 'danger', 'ok': 'ok'}.get(m[0], m[0]) }}">{{ m[1] }}</div>{% endfor %}
       {% block body %}{% endblock %}
     {% endblock %}

@@ -12,6 +12,7 @@ qu'on a choisi.
 from __future__ import annotations
 
 import itertools
+import json
 import logging
 import re
 import shutil
@@ -28,9 +29,17 @@ from mika.adapters.llm.gateway import Gateway, LLMTrace
 from mika.adapters.system import RealClock
 from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import WebConfig
+from mika.app.apercu_activity import activity
+from mika.app.apercu_inner import inner
+from mika.app.apercu_mail import mailbox
 from mika.app.console import NAVIGATION
 from mika.app.server import build
+from mika.contracts import runtime as rt
+from mika.inspector.pages.journal import EPISODE_TABS
+from mika.inspector.pages.tools import TOOLS_PAGE
+from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMRequest, LLMResponse, Usage
+from mika.runtime.inspection import Inspection
 from mika.runtime.operations import perform
 from mika.sim.llm.persona import PersonaSimLLM
 from mika.vocab.episodes import FALLBACKS, VOICE_ROLES
@@ -55,17 +64,31 @@ CONVERSATIONS = (
 )
 
 
-async def _project(kernel) -> str:
+async def _project(kernel, *, title: str = "Outils réseau",
+                   description: str = "Un petit outillage d'administration, propre et testé.",
+                   objectives: str = "Créer un module RDP\nÉcrire sa documentation", nonce: str = "apercu-projet") -> str:
     """Un projet fictif, créé comme un opérateur le ferait : des objectifs ponctuels et un constant."""
     got = await perform(kernel, "projects.creer", {
         "_champs": ["title", "description", "objectives", "constants", "mode", "schedule", "days", "start", "end",
                     "cadence_hours", "runs_per_day", "priority", "branch", "tool_memory"],
-        "title": ["Outils réseau"], "description": ["Un petit outillage d'administration, propre et testé."],
-        "objectives": ["Créer un module RDP\nÉcrire sa documentation"], "constants": ["Améliorer la sécurité"],
+        "title": [title], "description": [description],
+        "objectives": [objectives], "constants": ["Relire les résultats avant de les partager"],
         "mode": ["persona"], "schedule": ["manual"], "days": ["weekdays"], "start": ["9:00"], "end": ["18:00"],
         "cadence_hours": ["24"], "runs_per_day": ["0"], "priority": ["normal"], "branch": ["main"],
-        "tool_memory": ["on"]}, by="user_1", nonce="apercu-projet")
+        "tool_memory": ["on"]}, by="user_1", nonce=nonce)
     return got.go.key.split("/", 1)[1] if got.ok and got.go is not None else ""
+
+
+async def _approvals(kernel) -> None:
+    """Deux demandes fictives restent en attente dans le magasin temporaire ; aucun envoi."""
+    await kernel.mind.append([
+        rt.EFFECT_PROPOSED.draft(capability="email.send", owner="email", approval=True,
+            args_json=json.dumps({"draft": "stream", "account": "perso", "mail": "perso:<stream@example.net>"}),
+            summary=Content.of("Partager le programme du prochain stream avec Béa"), context="user_1"),
+        rt.EFFECT_PROPOSED.draft(capability="email.send", owner="email", approval=True,
+            args_json=json.dumps({"draft": "brouillon-demo-supprime", "account": "perso"}),
+            summary=Content.of("Relire une demande dont le brouillon a été supprimé"), context="user_1"),
+    ], emitter="runtime", origin=Origin.EXTERNAL, correlation="apercu-validations")
 
 
 class _Model(PersonaSimLLM):
@@ -154,23 +177,73 @@ def export(out: Path) -> list[str]:
                     elif d.layout == "menu":  # un sous-menu : chacune de ses pages
                         page = client.get(base, follow_redirects=True).text
                         urls += re.findall(rf'class="submenu-item[^"]*" href="({re.escape(base)}/[\w-]+)"', page)
-            for kind in ("person", "handle"):  # la première personne connectée, et son adresse
-                urls += [f"/inspecteur/fiche/{kind}/user_1?onglet={quote(v.name)}"
-                         for v in live.kernel.registry.inspectors if v.subject == kind]
+            inspection = Inspection(live.kernel)
+            for kind in ("person", "handle"):
+                for obj in client.portal.call(lambda k=kind: inspection.search(k, "", 10)):
+                    base = f"/inspecteur/fiche/{kind}/{quote(obj.key, safe='')}"
+                    urls.append(base)
+                    urls += [f"{base}?onglet={quote(v.name)}" for v in live.kernel.registry.inspectors if v.subject == kind]
             project = client.portal.call(lambda: _project(live.kernel))  # un projet, et chaque onglet de sa fiche
-            if project:
-                urls += [f"/inspecteur/fiche/project/{project}?onglet={quote(v.name)}"
-                         for v in live.kernel.registry.inspectors if v.subject == "project"]
-            ended = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.ended"], 1))
-            if ended:
-                corr = quote(ended[0].correlation, safe="")
-                urls += [f"/inspecteur/episode/{corr}?onglet={t}" for t in
-                         ("deroule", "dit", "prompt", "outils", "appels", "decision")]
-            said = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.utterance"], 1))
-            if said:  # « Pourquoi a-t-elle dit ça ? » sur sa dernière parole
-                urls.append(f"/inspecteur/parole/{said[0].seq}")
+            second = client.portal.call(lambda: _project(live.kernel, title="Préparer le prochain stream",
+                description="Un programme clair, des supports prêts et un moment pour les questions du chat.",
+                objectives="Choisir les sujets\nPréparer les supports\nRelire le programme", nonce="apercu-stream"))
+            for key in (project, second):
+                if key:
+                    urls.append(f"/inspecteur/fiche/project/{key}")
+                    urls += [f"/inspecteur/fiche/project/{key}?onglet={quote(v.name)}"
+                             for v in live.kernel.registry.inspectors if v.subject == "project"]
+            demo_mail = mailbox(clock.now)
+            live.kernel.ports["mail"] = demo_mail
+            client.portal.call(lambda: _approvals(live.kernel))
+            for kind, keys in (("mail", [m.ref for m in demo_mail.inbox] + [m.ref for m in demo_mail.outgoing]),
+                               ("brouillon", ["stream", "brouillon-demo-supprime"])):
+                for key in keys:
+                    base = f"/inspecteur/fiche/{kind}/{quote(key, safe='')}"
+                    urls.append(base)
+                    urls += [f"{base}?onglet={quote(v.name)}" for v in live.kernel.registry.inspectors if v.subject == kind]
+            urls += client.portal.call(lambda: activity(live.kernel))
+            client.portal.call(lambda: inner(live.kernel))
+            for account in client.portal.call(live.accounts.all):
+                urls.append(f"/inspecteur/reglages/comptes?compte={account.id}")
+                client.portal.call(lambda a=account: live.accounts.create_token(a.id, "Écran de démonstration"))
+            urls += [f"/inspecteur/outils/tous?outil={quote(name, safe='')}" for name in sorted(live.kernel.registry.tools)]
+            urls += [f"/inspecteur/outils/tous?page={page}" for page in range(2, (len(live.kernel.registry.tools) - 1) // TOOLS_PAGE + 2)]
+            ended = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.ended"], 20))
+            for episode in ended:
+                corr = quote(episode.correlation, safe="")
+                urls.append(f"/inspecteur/episode/{corr}")
+                urls += [f"/inspecteur/episode/{corr}?onglet={t}" for t, _ in EPISODE_TABS]
+            said = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.utterance"], 20))
+            urls += [f"/inspecteur/parole/{utterance.seq}" for utterance in said]
+            # Les liens du résumé et du déroulé doivent aussi pouvoir s'ouvrir dans l'aperçu statique.
+            event_ids = client.portal.call(lambda: live.kernel.mind.store.query_mind("SELECT seq FROM events ORDER BY seq"))
+            urls += [f"/inspecteur/evenement/{seq}" for seq, in event_ids]
             urls.append("/inspecteur/decisions/envers?personne=adrien")
             urls += ["/inspecteur/reglages/fournisseurs?enregistrement=backends&cle=",
+                     "/inspecteur/projets?vue_pg1=table", "/inspecteur/personnes?vue_pg1=table",
+                     "/inspecteur/fil/messages?vue_pg1=table", "/inspecteur/projets?etat=archive",
+                     "/inspecteur/personnes?q=personne-inconnue", "/inspecteur/fil/messages?handle=user_1",
+                     "/inspecteur/courrier/reception?compte=atelier",
+                     "/inspecteur/courrier/reception?compte=atelier&vue_pg1=table",
+                     "/inspecteur/courrier/reception?compte=perso&dossier=Archives",
+                     "/inspecteur/courrier/reception?q=aucun-resultat",
+                     "/inspecteur/reglages/apercu?q=modele", "/inspecteur/reglages/apercu?q=memoire",
+                     "/inspecteur/reglages/apercu?q=aucun-resultat",
+                     "/inspecteur/outils/tous?lot=email", "/inspecteur/outils/tous?lot=email&vue_pg1=table",
+                     "/inspecteur/outils/tous?lot=email&outil=email_read", "/inspecteur/outils/tous?q=aucun-resultat",
+                     "/inspecteur/systeme/sorties?etat=failed", "/inspecteur/systeme/sorties?etat=done",
+                     "/inspecteur/decisions/episodes?issue=failed", "/inspecteur/decisions/episodes?vue_pg1=table",
+                     "/inspecteur/memoire/souvenirs?person=Adrien", "/inspecteur/memoire/souvenirs?person=Adrien&vue_pg1=table",
+                     "/inspecteur/memoire/souvenirs?q=aucun-resultat", "/inspecteur/memoire/croyances?status=superseded",
+                     "/inspecteur/memoire/promesses?status=pending", "/inspecteur/pensees/pensees?vue_pg1=table",
+                     "/inspecteur/memoire/consolidation?vue_pg1=table", "/inspecteur/pensees/attentes?vue_pg1=table",
+                     "/inspecteur/memoire/souvenirs?vue_pg1=table", "/inspecteur/memoire/croyances?vue_pg1=table",
+                     "/inspecteur/memoire/promesses?vue_pg1=table", "/inspecteur/vie/needs?vue_pg1=table",
+                     "/inspecteur/vie/needs?periode=24h&vue_pg1=table", "/inspecteur/vie/needs?periode=24h",
+                     "/inspecteur/pensees/nuits?vue_pg2=table", "/inspecteur/teams/reponses?vue_pg1=table",
+                     "/inspecteur/reglages/comptes?vue_pg1=table", "/inspecteur/systeme/chronologie?vue_pg1=table",
+                     "/inspecteur/systeme/processus?vue_pg1=table", "/inspecteur/systeme/processus?pg1=2",
+                     "/inspecteur/systeme/processus?pg1=2&vue_pg1=table",
                      "/inspecteur/reglages/comportement-affect?groupe=repos-et-ancre",
                      "/inspecteur/reglages/comptes?nouveau=1", "/inspecteur/recherche?q=a",
                      "/inspecteur/action/projects.creer?retour=/inspecteur/projets"]

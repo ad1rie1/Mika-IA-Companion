@@ -894,6 +894,17 @@ def test_schema_is_valid_draft_2020_12():
     js.Draft202012Validator.check_schema(s)
 
 
+@pytest.mark.parametrize("layout", ["cards", "feed", "list"])
+def test_reading_layout_roundtrips_without_losing_cells_or_details(layout):
+    source = Table((Column("Titre", role="title"), Column("Texte", role="body"), Column("ID", detail=True)),
+                   (Row(("Un titre", "Un texte\nà lire", 3), detail=(Prose("Le texte entier"),)),),
+                   layout=layout, link_label="Voir la source")
+    payload = encode([source])
+    assert decode(payload, links=Echo()) == [source]
+    if jsonschema is not None:
+        jsonschema.validate(payload, schema())
+
+
 def test_schema_objects_are_closed():
     """Tout objet décrit est fermé ; seuls les dictionnaires ouverts par nature
     (paramètres, valeurs initiales, cellules par colonne) contraignent leurs

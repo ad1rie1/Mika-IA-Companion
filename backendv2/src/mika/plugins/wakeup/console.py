@@ -1,7 +1,7 @@
 """La console des réveils par API (ADR 0068) : une entrée à elle (« Ses canaux › Réveils par API »), la liste des
 réveils et leurs derniers appels, puis la fiche de chacun — ce qui a été déclaré, sa clé, ses appels et ce qu'ils ont donné.
 
-Un réveil se déclare dans Configuration › Plugins › Réveils par API (un lien y mène, l'enregistrement ramène ici). Sa
+Un réveil se déclare dans Réglages › Plugins › Réveils par API (un lien y mène, l'enregistrement ramène ici). Sa
 clé se génère ici : montrée une seule fois, jamais gardée en clair (le port n'en garde que l'empreinte). Ce qu'un
 appel apporte est une donnée venue d'ailleurs : montrée à l'opérateur, jamais obéie.
 """
@@ -138,7 +138,7 @@ def risks(endpoint: Any) -> list[str]:
 def _list(s: WakeupState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("wakeup")
     blocks: list[Block] = [Fields((("nouveau réveil", add_endpoint()),
-                                   ("tous les réglages", Ref("local", SETTINGS, "Configuration › Réveils par API"))))]
+                                   ("tous les réglages", Ref("local", SETTINGS, "Réglages › Réveils par API"))))]
     if port is None:
         blocks.append(Note(NO_PORT, tone="muted"))
     else:

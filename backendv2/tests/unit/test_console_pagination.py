@@ -18,6 +18,7 @@ from mika.kernel.inspect import (
     Row,
     Series,
     Table,
+    Text,
     Timeline,
 )
 
@@ -46,6 +47,26 @@ def test_a_long_table_without_pager_is_cut_into_pages_and_nothing_is_lost():
     assert texts(render.blocks([t], env(), {"pg1": "99"})[0])[-1] == "ligne 59"  # une page hors bornes est ramenée
 
 
+def test_cards_and_table_keep_the_same_rows_details_and_filtered_pagination():
+    source = Table((Column("clé", detail=True), Column("Titre", role="title"),
+                    Column("Résumé", role="body"), Column("Statut", role="badge"), "Nombre"),
+                   tuple(Row((i, Ref("event", str(i), f"titre {i}"), Text(f"résumé {i}"), "actif", i))
+                         for i in range(31)), layout="cards")
+    query = {"pg1": "2", "q": "un nom & un autre"}
+    cards = render.blocks([source], env(), query)[0]
+    table = render.blocks([source], env(), {**query, "vue_pg1": "table"})[0]
+    assert cards["layout"] == "cards" and table["layout"] == ""
+    assert cards["rows"] == table["rows"] and cards["count"] == 31
+    row = cards["rows"][0]
+    assert row["heading"]["href"] == "/inspecteur/evenement/25"
+    assert row["body"][0]["value"]["text"] == "résumé 25"
+    assert row["fields"][0]["value"]["text"] == "25"
+    assert row["detail"][0]["pairs"][0]["value"]["text"] == "25"
+    assert "q=un+nom+%26+un+autre" in cards["modes"][1]["href"]
+    assert "vue_pg1=table" in table["pager"]["prev"]
+    assert render.blocks([source], env(), {"vue_pg1": "<script>"})[0]["layout"] == "cards"
+
+
 def test_a_short_table_is_left_whole_and_two_tables_page_independently():
     short = Table(("x",), rows(5))
     assert render.blocks([short], env(), {})[0]["pager"]["total"] == 5
@@ -55,6 +76,18 @@ def test_a_short_table_is_left_whole_and_two_tables_page_independently():
     a, b = Table(("x",), rows(30), title="A"), Table(("x",), rows(40), title="B")
     got = render.blocks([a, b], env(), {"pg2": "2"})
     assert texts(got[0])[0] == "ligne 0" and texts(got[1])[0] == "ligne 25"  # seule B a changé de page
+
+
+def test_a_reading_without_a_title_keeps_its_entire_body_in_both_modes():
+    source = Table((Column("texte", role="body"), Column("état", role="badge"), "concerne"),
+                   ((Text("Une pensée sans titre."), "vivante", "Alice"),), layout="cards")
+    card = render.blocks([source], env(), {})[0]
+    row = card["rows"][0]
+    assert row["heading"] is None
+    assert row["body"][0]["value"]["text"] == "Une pensée sans titre."
+    assert row["badges"][0]["text"] == "vivante"
+    assert row["fields"][0]["value"]["text"] == "Alice"
+    assert render.blocks([source], env(), {"vue_pg1": "table"})[0]["rows"] == card["rows"]
 
 
 def test_secondary_columns_keep_their_values_and_links_on_every_page():

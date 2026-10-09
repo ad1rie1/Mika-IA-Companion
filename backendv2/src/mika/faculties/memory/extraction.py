@@ -356,6 +356,21 @@ def parse(resp: LLMResponse) -> Extraction | None:
     return out
 
 
+def mention_scope(conversation: str) -> str:
+    """La portée d'une mention inconnue (``name:<portée>:<nom>``) : la conversation où on l'a nommée."""
+    return digest(conversation)[:16]
+
+
+#: ``name:<portée>:<nom>`` — une mention liée à la conversation où elle a été faite
+_SCOPED = re.compile(r"^name:([0-9a-f]{16}):")
+
+
+def scope_of(key: str) -> str | None:
+    """La portée d'une clé de mention, ``None`` pour une clé d'avant les portées (ou une personne)."""
+    m = _SCOPED.match(key)
+    return m.group(1) if m else None
+
+
 @dataclass(frozen=True, slots=True)
 class People:
     """Comment des noms deviennent des clés : les jetons de la conversation,
@@ -387,7 +402,7 @@ class People:
         first = folded_her.split()[0] if " " in folded_her else ""
         me = (self_names(her) - {first}) if her else SELF_NAMES
         return cls(tokens, local, directory, me, first,
-                   digest(scope or "|".join(sorted(s.person for s in speakers)))[:16])
+                   mention_scope(scope or "|".join(sorted(s.person for s in speakers))))
 
     def one(self, raw: str) -> str | None:
         """Une clé, ou ``None`` pour elle-même ou rien."""

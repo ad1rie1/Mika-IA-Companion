@@ -30,7 +30,7 @@ from mika.contracts import social as social_c
 from mika.faculties.expression import parse
 from mika.kernel.clock import HOUR, MINUTE, US, instant
 from mika.kernel.events import Content, Origin, VoiceProvenance
-from mika.kernel.inspect import Fields, Table, Timeline
+from mika.kernel.inspect import Fields, Table, Timeline, walk_blocks
 from mika.kernel.prompt import CONTEXT_FOOTER, UNTRUSTED_NOTE
 from mika.ports.llm import LLMResponse
 from mika.runtime.inspection import find, run_view
@@ -299,7 +299,8 @@ def test_working_keeps_the_void_away(tmp_path):
 
 
 def _history(blocks) -> Table:
-    return next(b for b in blocks if isinstance(b, Table) and b.title.startswith("Toutes ses pensées"))
+    # rangé dans « Historique des pensées », un bloc dépliable
+    return next(b for b in walk_blocks(blocks) if isinstance(b, Table) and b.title.startswith("Toutes ses pensées"))
 
 
 @pytest.mark.parametrize("n, older", [(25, False), (26, True)])

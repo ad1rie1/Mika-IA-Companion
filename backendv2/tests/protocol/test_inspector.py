@@ -24,7 +24,9 @@ def test_an_operator_follows_a_reply_from_message_to_episode(world):  # noqa: F8
     timeline = client.get("/inspecteur/systeme/chronologie?type=episode.")
     assert "episode.utterance" in timeline.text
     ended = client.portal.call(lambda: list(live.kernel.mind.store.read(types={"episode.ended"})))
-    chain = client.get(f"/inspecteur/episode/{ended[-1].correlation}")
+    summary = client.get(f"/inspecteur/episode/{ended[-1].correlation}")
+    assert "Message déclencheur" in summary.text and "Déroulé" in summary.text
+    chain = client.get(f"/inspecteur/episode/{ended[-1].correlation}?onglet=deroule")
     assert "episode.started" in chain.text and "episode.utterance" in chain.text
     assert client.get("/inspecteur/decisions").status_code == 200
     state = client.get("/inspecteur/systeme/etat")

@@ -15,7 +15,7 @@ from mika.inspector.catalog import Destination, Labels, NavGroup
 
 NAVIGATION: tuple[NavGroup, ...] = (
     NavGroup("", (
-        Destination("accueil", "Tableau de bord", "◉", "Ce qui attend ton attention, son état en ce moment et sa "
+        Destination("accueil", "Accueil", "◉", "Ce qui attend ton attention, son état en ce moment et sa "
                     "journée.",
                     builtin=("accueil.a_traiter", "accueil.maintenant", "accueil.aujourdhui", "accueil.courbes"),
                     layout="stack"),
@@ -66,7 +66,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
         Destination("apps", "Apps forgées", "⚒", "Les petites apps qu'elle écrit elle-même.", subjects=("app",)),
     )),
     NavGroup("Exploitation", (
-        Destination("reglages", "Configuration", "⚙", "Ce qu'un opérateur décide. Chaque page ne règle qu'un "
+        Destination("reglages", "Réglages", "⚙", "Ce qu'un opérateur décide. Chaque page ne règle qu'un "
                     "sujet ; chaque champ dit ce qu'il fait.", layout="menu", dynamic=True),
         Destination("systeme", "Système", "▣", "La machine : santé, processus, anomalies, sorties, modèles, écrans "
                     "du monde, coûts, stockage, journaux, anatomie.", layout="menu",
@@ -78,7 +78,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
     )),
 )
 
-#: Configuration › Comportement : les facultés rangées par famille, et leur nom
+#: Réglages › Comportement : les facultés rangées par famille, et leur nom
 #: pour un opérateur (les autres tombent dans « Autres », sous leur nom technique)
 PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Émotions", ("affect", "needs", "body", "self")),

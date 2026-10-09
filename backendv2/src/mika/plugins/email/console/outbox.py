@@ -76,11 +76,12 @@ def _outbox(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                   Ref.subject("mail", mail_key(answered.ref), clip(answered.subject, 60)) if answered is not None
                   else "—"]
         rows.append(Row(tuple(cells), href=Ref.subject("mail", mail_key(m.ref), clip(m.subject) or "(sans objet)")))
-    columns: list[Any] = ["objet", "à"] + ([Column("boîte", "fit")] if several else [])
-    columns += [Column("parti", "fit"), Column("écrit par", "fit"), "en réponse à"]
+    columns: list[Any] = [Column("Objet", role="title"), "À"] + ([Column("Boîte", "fit")] if several else [])
+    columns += [Column("Envoyé", "fit"), Column("Écrit par", "fit", role="badge"), "En réponse à"]
     blocks.append(Table(tuple(columns), tuple(rows), title="Envoyés", pager=pager,
                         empty="aucun envoi ne correspond" if query else "rien n'est encore parti de sa boîte",
-                        caption="Tous les envois conservés et les messages synchronisés du dossier Envoyés."))
+                        caption="Tous les envois conservés et les messages synchronisés du dossier Envoyés.",
+                        layout="list", link_label="Lire le message"))
     return [workspace(port, ctx, blocks, view="envoyes", filters=(Param("q", "Recherche", placeholder="objet, destinataire, texte"),))]
 
 

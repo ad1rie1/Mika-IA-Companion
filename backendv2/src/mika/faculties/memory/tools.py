@@ -28,7 +28,11 @@ from mika.faculties.memory.recall import (
 )
 from mika.faculties.memory.salience import age_words, tag
 from mika.vocab.episodes import CONVERSATIONAL, WORKING
+from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
+
+#: une recherche délibérée lit d'abord tant de candidats, puis quatre fois plus tant que ce qui peut se dire manque
+SEARCH_FIRST, SEARCH_MAX = 30, 480
 
 
 class SearchArgs(BaseModel):
@@ -54,22 +58,36 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
     p = params(frame.env.params_of("memory", frame.root))
     ep = frame.episode
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
-    hits = dict(await vectors.search(args.query, 30, kinds={c.SOUVENIR, c.BELIEF}))
     wanted = topic(args.query)
-    items = items_by_id(store, list(hits))
-    scores = {i: relevance(hits[i], wanted, it.text) for i, it in items.items()}
     memo: dict[str, str] = {}
     # « comment je t'appelle ? » : ce qui n'appartient qu'à vous, que les vecteurs ne rapprochent pas (ADR 0055)
     found = between_us(frame, store, person, aud, memo) if person and about_us(args.query) else []
-    for item in sorted((it for it in items.values() if scores[it.id] >= p.recall_floor * 0.8),
-                       key=lambda it: (-scores[it.id], it.id)):
-        if item.status != "active" or any(it.id == item.id for it, _v in found):
-            continue
-        verdict = verdict_of(frame, item, person, aud, memo, store)
-        if verdict.ok:
-            found.append((item, verdict))
-        if len(found) >= args.limit:
+    # ce qu'elle a vécu ou appris avec la personne, cherché à part ; et tant que ce qui peut se dire ici manque, plus
+    # loin : trente secrets d'un autre, plus proches de la question, ne font pas « rien trouvé » (audit du 2026-10-08)
+    own = tuple(sorted({person, ep.target, *frame.get(identity_c.HANDLES(person))})) \
+        if person and ep is not None and is_identifiable(person) else ()
+    seen: set[int] = set()
+    k = SEARCH_FIRST
+    while True:
+        hits = dict(await vectors.search(args.query, k, kinds={c.SOUVENIR, c.BELIEF}))
+        if own:
+            for key, sim in await vectors.search(args.query, k, kinds={c.SOUVENIR, c.BELIEF}, persons=own):
+                hits[key] = max(sim, hits.get(key, sim))
+        items = items_by_id(store, [i for i in hits if i not in seen])
+        seen |= set(hits)
+        scores = {i: relevance(hits[i], wanted, it.text) for i, it in items.items()}
+        for item in sorted((it for it in items.values() if scores[it.id] >= p.recall_floor * 0.8),
+                           key=lambda it: (-scores[it.id], it.id)):
+            if item.status != "active" or any(it.id == item.id for it, _v in found):
+                continue
+            verdict = verdict_of(frame, item, person, aud, memo, store)
+            if verdict.ok:
+                found.append((item, verdict))
+            if len(found) >= args.limit:
+                break
+        if len(found) >= args.limit or len(hits) < k or k >= SEARCH_MAX:
             break
+        k *= 4
     if not found:
         return phrase("memory.tools.search.nothing")
     names = names_of(frame, {o for it, v in found for o in (*v.others, *it.about, it.holder) if o})

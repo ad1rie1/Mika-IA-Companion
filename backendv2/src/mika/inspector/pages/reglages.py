@@ -1,5 +1,5 @@
-"""Configuration › Comportement : les paramètres internes des facultés, une page
-par faculté, un groupe à la fois ; et Configuration › Historique, le journal des
+"""Réglages › Comportement : les paramètres internes des facultés, une page
+par faculté, un groupe à la fois ; et Réglages › Historique, le journal des
 modifications. (Les réglages d'une app forgée vivent sur sa fiche ; les comptes,
 dans ``accounts.py``.)
 
@@ -129,7 +129,7 @@ def _label_of(ui: Any, owner: str) -> str:
 
 
 def param_builtins(parameters: Any, families: Any, labels: Mapping[str, str]) -> dict[str, Builtin]:
-    """Une page de Configuration › Comportement par faculté qui a des paramètres,
+    """Une page de Réglages › Comportement par faculté qui a des paramètres,
     rangée par famille (celle que la composition déclare, sinon « Autres »)."""
     if parameters is None:
         return {}

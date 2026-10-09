@@ -1,6 +1,6 @@
 """Le plugin ``wakeup`` : les réveils par API (ADR 0068).
 
-Un opérateur déclare des réveils (Configuration › Plugins › Réveils par API) ; un système extérieur appelle l'un
+Un opérateur déclare des réveils (Réglages › Plugins › Réveils par API) ; un système extérieur appelle l'un
 d'eux (``POST /api/wake/<nom>``, avec sa clé) et lui apporte un texte. Rien ici ne parle au réseau : la porte HTTP
 vérifie la clé et les plafonds, puis journalise ``wakeup.called`` — le réglage du réveil figé à cet instant.
 

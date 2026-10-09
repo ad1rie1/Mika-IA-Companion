@@ -57,7 +57,7 @@ from mika.contracts import memory as c
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.memory.extraction import date_words, same_moment, weekday_words
+from mika.faculties.memory.extraction import date_words, mention_scope, same_moment, scope_of, weekday_words
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, params
 from mika.faculties.memory.life import due_now, kept_too_early, takes_up_moment
 from mika.faculties.memory.projections import ITEM_COLUMNS
@@ -261,11 +261,14 @@ def between_us(frame: Frame, store: Any, person: str, aud: Audience, memo: dict[
 
 
 def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
-                 memo: dict[str, str]) -> dict[str, tuple[str, ...]]:
+                 memo: dict[str, str], scope: str | None = None) -> dict[str, tuple[str, ...]]:
     """Les personnes qu'elle connaît (dont elle sait quelque chose) nommées dans ce texte — par leur nom ou leur
     prénom, quand un seul le porte (deux Alice ne se devinent pas) —, hors l'interlocuteur : la personne (sa clé) →
     les clés sous lesquelles elle est notée. « qq a des nouvelles de Sam ? », puis « toi tu sais comment il va ? »
-    (sonde réelle du 2026-10-03 : rien ne revenait, et elle répondait « j'ai pas de nouvelles non plus »)."""
+    (sonde réelle du 2026-10-03 : rien ne revenait, et elle répondait « j'ai pas de nouvelles non plus »).
+
+    Une « Alice » dont on lui a parlé ailleurs, que personne n'a reliée (``scope`` : la portée de cette
+    conversation-ci), n'est pas celle qu'on nomme ici : elle ne rend pas le prénom ambigu."""
     said = " ".join(WORD.findall(fold(text)))
     if not said:
         return {}
@@ -280,6 +283,8 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
     keys_of: dict[str, set[str]] = {}
     for k in sorted(raw):
         person = canon(frame, (k,), memo)[0]
+        if scope is not None and person == k and scope_of(k) not in (None, scope):
+            continue  # une mention d'une autre conversation, reliée à personne
         keys_of.setdefault(person, set()).add(k)
         name = named_label(k) if k.startswith("name:") else frame.get(identity_c.IDENTITY(k)).name
         folded = " ".join(WORD.findall(fold(name or "")))
@@ -452,6 +457,14 @@ async def search(vectors: Any, query: str, context: str, k: int, **kw: Any) -> t
     return near, wider
 
 
+def _merged(a: dict[int, float], b: dict[int, float]) -> dict[int, float]:
+    """Deux recherches réunies : pour chaque candidat, sa meilleure similarité."""
+    out = dict(a)
+    for key, sim in b.items():
+        out[key] = max(sim, out.get(key, sim))
+    return out
+
+
 def scored(near: dict[int, float], wider: dict[int, float], texts: Mapping[int, str], query: str,
            context: str) -> dict[int, float]:
     """La pertinence de chaque candidat : la meilleure du message seul et de
@@ -531,7 +544,9 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
         out.names = names_of(frame, {o for it, v in mine for o in (*v.others, *it.about)})
         out.beliefs += [Recalled(it, v, it.text + tag(v, out.names)) for it, v in mine]
     # une personne qu'elle connaît, nommée dans le message ou juste avant : elle y pense (ADR 0055)
-    named = named_people(frame, store, f"{context} {query}", person, memo) if is_reply else {}
+    room = ep.attrs.get("room") or aud.room
+    here = mention_scope(f"room:{room}" if room else f"private:{person}")
+    named = named_people(frame, store, f"{context} {query}", person, memo, scope=here) if is_reply else {}
     # « tu te souviens de ce que je t'ai dit hier soir ? » est fait des mots d'une politesse (« hier », « soir »),
     # mais désigne un moment : elle s'en souvient aussi par le temps (ADR 0059)
     dated = is_reply and window_of(query, frame.now, frame.env.tz_of(frame.root)) is not None
@@ -548,10 +563,24 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     wider: dict[int, float] = {}
     if searching:
         if addresses_her(query):
-            out.self_said = await _self_said(vectors, store, query, p)
+            # ce qu'elle a confié d'elle en demandant le silence ne se redit pas à tous (audit du 2026-10-08)
+            out.self_said = [it for it in await _self_said(vectors, store, query, p)
+                             if verdict_of(frame, it, person, aud, memo, store).ok]
         near, wider = await search(vectors, query, context, p.recall_k, kinds={c.SOUVENIR, c.BELIEF})
+        if is_identifiable(person):
+            # ce qu'elle a vécu ou appris avec la personne, cherché à part : des souvenirs que l'audience ne peut pas
+            # entendre, plus proches de la question, ne le chassent pas des candidats (audit du 2026-10-08)
+            own = tuple(sorted({person, ep.target, *frame.get(identity_c.HANDLES(person))}))
+            own_near, own_wider = await search(vectors, query, context, p.recall_k, kinds={c.SOUVENIR, c.BELIEF},
+                                               persons=own)
+            near, wider = _merged(near, own_near), _merged(wider, own_wider)
     found = items_by_id(store, sorted({*near, *wider}))
-    candidates = kept(scored(near, wider, {i: it.text for i, it in found.items()}, query, context), p)
+    sims = scored(near, wider, {i: it.text for i, it in found.items()}, query, context)
+    verdicts = {i: verdict_of(frame, found[i], person, aud, memo, store) for i in sims if i in found}
+    # l'écart au meilleur se mesure parmi ce qui peut se dire ici (et à part, parmi ce qui se tait) : un secret
+    # d'un autre, tout proche de la question, ne relève pas le seuil au-dessus de ce qu'elle peut répondre
+    sayable = {i: v for i, v in sims.items() if i in verdicts and verdicts[i].ok}
+    candidates = {**kept({i: v for i, v in sims.items() if i not in sayable}, p), **kept(sayable, p)}
     for item in about_named(frame, store, named, p):
         found.setdefault(item.id, item)
         candidates[item.id] = max(candidates.get(item.id, 0.0), p.recall_floor)
@@ -570,7 +599,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
         bond = bond_of(frame, canon(frame, item.about, memo), bonds) if item.kind == c.SOUVENIR else 0.0
         if dormant(item, now, p, bond) and candidates[item.id] < p.strong_cue:
             continue  # il dort ; seul un indice fort le réveille
-        verdict = verdict_of(frame, item, person, aud, memo, store)
+        verdict = verdicts.get(item.id) or verdict_of(frame, item, person, aud, memo, store)
         if not verdict.ok:
             # un secret ne laisse même pas deviner qu'il existe : devant les autres, elle n'en sait rien (« aucune
             # idée, demande-lui ») — la ligne vague « il t'a confié des choses » le trahissait à qui on le cachait

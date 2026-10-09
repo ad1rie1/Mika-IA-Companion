@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
@@ -24,6 +24,7 @@ from mika.faculties.memory.recall import names_of
 from mika.faculties.memory.salience import Item, dormant, salience
 from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content
+from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
     ActionSlot,
@@ -31,6 +32,7 @@ from mika.kernel.inspect import (
     Block,
     Cell,
     Column,
+    Disclosure,
     Fields,
     InspectContext,
     Meter,
@@ -53,7 +55,7 @@ from mika.vocab.privacy import Sensitivity
 
 FORGOTTEN = "(oublié)"
 #: au-delà, le texte d'une ligne se replie (« lire la suite »)
-CLAMP = 160
+CLAMP = 360
 #: par page (les listes), par sorte (la fiche d'une personne)
 PAGE = 50
 PER_KIND = 20
@@ -79,6 +81,15 @@ SENSITIVITY_TONE = {int(Sensitivity.NONE): "muted", int(Sensitivity.ANODYNE): ""
 
 SEARCH = Param("q", "recherche", placeholder="un mot du texte")
 PERSON = Param("person", "personne", placeholder="un nom ou une adresse")
+READING_HELP = {
+    c.SOUVENIR: "Un souvenir raconte ce qu’elle a retenu. Sa sensibilité et son état restent visibles ; "
+                "les détails donnent le texte complet et les messages d’origine.",
+    c.BELIEF: "Une croyance est ce qu’elle tient pour vrai, pas une preuve. La confiance est son estimation actuelle ; "
+              "l’origine distingue ce qu’on lui a dit, ce qu’elle a observé et ce qu’elle déduit.",
+    c.PROMISE: "Une promesse peut être en cours, tenue ou abandonnée. Son échéance et les messages d’origine "
+               "permettent de comprendre l’engagement.",
+    c.EVENT: "Les moments à suivre concernent la vie des autres. Une date annuelle indique sa prochaine occurrence.",
+}
 
 
 def number(value: float | None) -> str:
@@ -303,25 +314,25 @@ def _promise(k: Kept, frame: Frame, names: dict[str, str], p: MemoryParams) -> t
 N = Column("n°", "fit", detail=True)
 SOUVENIRS = Listing(c.SOUVENIR, "Ses souvenirs", "pas encore de souvenir",
                     (("active", "actif"), ("merged", "fondu dans un autre")),
-                    (N, Column("souvenir"), Column("concerne"), Column("sensibilité", "fit"), Column("importance", detail=True),
+                    (N, Column("souvenir", role="body"), Column("concerne"), Column("sensibilité", "fit", role="badge"), Column("importance", detail=True),
                      Column("ce qu'il en reste", hint="l'importance, estompée depuis la dernière fois qu'il a été "
                                                       "touché ; sous le seuil, il dort", detail=True),
-                     Column("émotion", detail=True), Column("statut", "fit"), Column("né", "fit")), _souvenir)
+                     Column("émotion", detail=True), Column("statut", "fit", role="badge"), Column("né", "fit")), _souvenir)
 BELIEFS = Listing(c.BELIEF, "Ses croyances", "pas encore de croyance",
                   (("active", "active"), ("superseded", "remplacée")),
-                  (N, Column("croyance"), Column("concerne"), Column("sensibilité", "fit"),
+                  (N, Column("croyance", role="body"), Column("concerne"), Column("sensibilité", "fit", role="badge"),
                    Column("confiance", hint="effective : elle baisse lentement avec le temps"), Column("importance", detail=True),
-                   Column("origine", detail=True), Column("statut", "fit"), Column("née", "fit", detail=True)), _belief)
+                   Column("origine"), Column("statut", "fit", role="badge"), Column("née", "fit", detail=True)), _belief)
 PROMISES = Listing(c.PROMISE, "Ses promesses", "pas encore de promesse",
                    (("pending", "en cours"), (c.HONORED, "tenue"), (c.DROPPED, "abandonnée")),
-                   (N, Column("promesse"), Column("à qui"), Column("sensibilité", "fit"), Column("échéance", "fit"),
-                    Column("statut", "fit"), Column("faite", "fit", detail=True)), _promise)
+                   (N, Column("promesse", role="body"), Column("à qui"), Column("sensibilité", "fit", role="badge"), Column("échéance", "fit"),
+                    Column("statut", "fit", role="badge"), Column("faite", "fit", detail=True)), _promise)
 EVENTS = Listing(c.EVENT, "Ce qui se passe dans la vie des autres", "pas encore de moment noté",
                  (("active", "à suivre"), ("superseded", "remplacé")),
-                 (N, Column("moment"), Column("de qui"), Column("sensibilité", "fit"), Column("quand", "fit"),
+                 (N, Column("moment", role="body"), Column("de qui"), Column("sensibilité", "fit", role="badge"), Column("quand", "fit"),
                   Column("chaque année", "fit", hint="une date qui revient chaque année (un anniversaire, la date "
                                                      "d'un deuil) : « quand » est sa prochaine occurrence"),
-                  Column("statut", "fit"), Column("noté", "fit", detail=True)), _event)
+                  Column("statut", "fit", role="badge"), Column("noté", "fit", detail=True)), _event)
 LISTINGS = {x.kind: x for x in (SOUVENIRS, BELIEFS, PROMISES, EVENTS)}
 
 
@@ -334,7 +345,7 @@ def _rows(listing: Listing, kept: Sequence[Kept], frame: Frame, ctx: InspectCont
     p = _p(frame)
     names = names_of(frame, {a for k in kept for a in (*k.item.about, *k.item.told_by, *k.item.heard_by)}
                      | {k.item.source for k in kept if k.item.source})
-    return tuple(Row(listing.cells(k, frame, names, p), detail=_detail(k, frame, names, ctx),
+    return tuple(Row(listing.cells(k, frame, names, p), detail=_detail(k, frame, names, ctx), href=_n(k),
                      tone="muted" if not k.item.text else "") for k in kept)
 
 
@@ -364,7 +375,8 @@ def _list(listing: Listing, frame: Frame, ctx: InspectContext) -> list[Block]:
     filtered = bool(q or status or person)
     return [*notes, Table(listing.columns, _rows(listing, kept, frame, ctx), title=f"{listing.title} ({total})",
                           empty="aucun résultat pour ces filtres" if filtered else listing.nothing, pager=pager,
-                          filters=("q", "status", "person"))]
+                          filters=("q", "status", "person"), layout="list", link_label="Voir l’origine",
+                          caption=READING_HELP[listing.kind])]
 
 
 def _params(listing: Listing) -> list[Param]:
@@ -373,7 +385,7 @@ def _params(listing: Listing) -> list[Param]:
 
 @MEMORY.inspect("souvenirs", title="Souvenirs", section="memoire", order=10, params=_params(SOUVENIRS),
                 description="Ce qu'elle retient de ses échanges. Cherche un souvenir ou une personne, puis "
-                            "déplie une ligne pour lire le texte entier et retrouver les messages d'origine.")
+                            "ouvre ses détails pour lire le texte entier et retrouver les messages d'origine.")
 def _souvenirs(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return _list(SOUVENIRS, frame, ctx)
 
@@ -485,15 +497,20 @@ def _nights(ctx: InspectContext) -> Table:
                             "où les souvenirs presque identiques se fondent.")
 def _consolidation(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     volumes = _volumes(ctx)
-    return [*([volumes] if volumes else []), _rereading(s, frame, ctx), _queue(ctx), _runs(ctx), _nights(ctx)]
+    return [*([volumes] if volumes else []),
+            Note("Les passages à reprendre n’ont pas pu être entièrement traités. Ouvre leur détail pour comprendre "
+                 "la cause et demander une nouvelle lecture avec le modèle configuré.", "info"),
+            _queue(ctx), Disclosure("État détaillé de la relecture", (_rereading(s, frame, ctx),)),
+            _runs(ctx), Disclosure("Historique des tris de la nuit", (_nights(ctx),))]
 
 
 class RetryExtractionArgs(BaseModel):
-    key: int = Field(gt=0)
+    key: Annotated[int, Knob(widget="hidden")] = Field(gt=0)
 
 
 @MEMORY.action("reprendre", title="Reprendre cette extraction", args=RetryExtractionArgs,
-               emits=[c.EXTRACTION_DEFERRED], section="memoire",
+               emits=[c.EXTRACTION_DEFERRED], section="memoire", inline=True,
+               confirm="Relire ce passage avec le modèle actuellement configuré ?",
                description="Relit les messages sources avec le fournisseur actuellement configuré.")
 def _retry_extraction(s: MemoryState, frame: Frame, args: RetryExtractionArgs, ctx: ActionContext) -> Done:
     rows = ctx.store.query_mind(f"SELECT messages,about,attempts,aside FROM {DEFERRED_TABLE} WHERE key=?",
@@ -507,6 +524,28 @@ def _retry_extraction(s: MemoryState, frame: Frame, args: RetryExtractionArgs, c
     return Done(drafts=(draft,), message="Le passage sera relu.")
 
 
+#: pourquoi un passage attend une reprise, en mots
+DEFERRAL_REASONS = {"invalid_output": "Réponse du modèle illisible", "invalid_items": "Éléments extraits invalides",
+                    "provider_error": "Erreur du fournisseur", "budget_exceeded": "Budget atteint",
+                    "operator_retry": "Reprise demandée"}
+
+
+def _deferred_detail(text: str | None) -> Block:
+    """Le détail d'un passage : une phrase se lit telle quelle ; la trace d'un échec du modèle se lit en deux temps,
+    ce qui n'allait pas, en mots, puis sa réponse brute — un détail technique (« mono »), gardé tel quel
+    (« [EMOTION:happy:0.7] » n'est pas un nombre à traduire)."""
+    try:
+        got = json.loads(text) if text else None
+    except ValueError:
+        got = None
+    if not isinstance(got, dict):
+        return Prose(text or FORGOTTEN, title="Détail du passage", reading=True)
+    issues = ", ".join(DEFERRAL_REASONS.get(str(i), str(i)) for i in got.get("issues") or ()) or "—"
+    return Fields((("ce qui n'allait pas", issues),
+                   ("réponse du modèle", Text(str(got.get("output") or "—"), kind="mono", clamp=CLAMP))),
+                  title="Détail du passage")
+
+
 def _queue(ctx: InspectContext) -> Table | Note:
     if not ctx.store.query_mind("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (DEFERRED_TABLE,)):
         return Note("La file de reprises n'existe pas encore.", tone="muted")
@@ -515,13 +554,16 @@ def _queue(ctx: InspectContext) -> Table | Note:
     rows = ctx.store.query_mind(f"SELECT key,attempts,retry_at,status,reason,detail_ref,since FROM {DEFERRED_TABLE} "
                                 "ORDER BY since,key LIMIT ? OFFSET ?", (pager.size, pager.offset))
     details = ctx.store.content([row[5] for row in rows])
-    return Table((Column("passage"), Column("depuis"), Column("essais"), Column("état"), Column("prochaine reprise")),
+    return Table((Column("passage", role="title"), Column("depuis"), Column("essais"), Column("état", role="badge"),
+                  Column("prochaine reprise"), Column("cause", role="body")),
         tuple(Row((Ref("event", str(key), f"message n° {key}"), When(since), attempts,
-                   "à examiner" if status == "review" else reason, When(retry) if retry else "manuelle"),
-                  detail=(Text(details.get(ref, FORGOTTEN), kind="mono"),
+                   Badge("à examiner" if status == "review" else "reprise prévue", "warn" if status == "review" else "info"),
+                   When(retry) if retry else "manuelle" if status == "review" else "dès que possible",
+                   DEFERRAL_REASONS.get(reason, reason)),
+                  detail=(_deferred_detail(details.get(ref)),
                           ActionSlot("memory.reprendre", (("key", str(key)),))))
               for key, attempts, retry, status, reason, ref, since in rows),
-        title=f"Passages à reprendre ({total})", empty="aucun passage en attente", pager=pager)
+        title=f"Passages à reprendre ({total})", empty="aucun passage en attente", pager=pager, layout="cards")
 
 
 # ── La fiche d'une personne ───────────────────────────────────────────────
@@ -557,7 +599,8 @@ def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
         pager = ctx.pager(f"page_{listing.kind}", size=PER_KIND, total=total)
         kept = _select(ctx.store, where, wargs, pager.size, pager.offset)
         sections.append(Table(listing.columns, _rows(listing, kept, frame, ctx), title=f"{listing.title} ({total})",
-                              empty="aucun résultat pour cette recherche" if q else listing.nothing, pager=pager))
+                              empty="aucun résultat pour cette recherche" if q else listing.nothing, pager=pager,
+                              layout="list", link_label="Voir l’origine", caption=READING_HELP[listing.kind]))
     stats = Stats((
         Stat("Souvenirs", totals[c.SOUVENIR]),
         Stat("Croyances", totals[c.BELIEF]),

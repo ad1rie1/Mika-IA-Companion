@@ -27,7 +27,7 @@ from mika.ports.preprocess import inert
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 
-NOT_READY = "Aucune boîte ne peut envoyer : elle n'est pas configurée (Configuration › Plugins › Boîtes aux lettres)."
+NOT_READY = "Aucune boîte ne peut envoyer : elle n'est pas configurée (Réglages › Plugins › Boîtes aux lettres)."
 
 
 class WriteArgs(BaseModel):
@@ -153,7 +153,7 @@ async def _forward(s: EmailState, frame: Frame, args: ForwardArgs, ctx: Any) -> 
               description="Sans attendre la prochaine relève (même si elle dort).")
 def _poll(s: EmailState, frame: Frame, args: NoArgs, ctx: Any) -> Done:
     if not ready(ctx.ports.get("mail")):
-        raise Refused("Aucune boîte n'est prête à relever : la boîte n'est pas configurée (Configuration › Plugins › Boîtes aux lettres).")
+        raise Refused("Aucune boîte n'est prête à relever : la boîte n'est pas configurée (Réglages › Plugins › Boîtes aux lettres).")
     return Done(drafts=(POLL_ASKED.draft(by=ctx.by),), message="Relève demandée : les nouveaux mails arrivent "
                 "dans quelques secondes.")
 

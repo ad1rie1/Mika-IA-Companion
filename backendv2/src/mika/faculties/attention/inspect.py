@@ -23,6 +23,7 @@ from mika.kernel.inspect import (
     Block,
     Cell,
     Column,
+    Disclosure,
     Fields,
     InspectContext,
     Meter,
@@ -43,7 +44,7 @@ from mika.vocab.people import named_label
 from mika.vocab.privacy import Sensitivity
 
 FORGOTTEN = "(oublié)"
-CLAMP = 160
+CLAMP = 360
 #: une page de l'historique (pensées nées, signaux remarqués, attentes closes)
 HISTORY = 25
 
@@ -132,7 +133,7 @@ def _thought_rows(s: AttentionState, frame: Frame, ctx: InspectContext,
                 ("s'éteint", f"sous {number(p.fade_below)} (demi-vie {num_fr(p.half_life_us / HOUR)} h)"),
                 ("outils qui vont avec", t.bundle or "aucun"),
             ), title="Détail"),
-            Prose(texts.get(t.text_ref) or FORGOTTEN, title="En entier"),
+            Prose(texts.get(t.text_ref) or FORGOTTEN, title="En entier", reading=True),
         ]
         rows.append(Row((
             Ref("event", str(t.id), f"#{t.id}"),
@@ -143,11 +144,11 @@ def _thought_rows(s: AttentionState, frame: Frame, ctx: InspectContext,
             about_cell(frame, t.about),
             When(t.born_at),
             When(kept.touched_at) if kept is not None else None,
-        ), detail=tuple(detail), tone="muted" if t.text_ref not in texts else ""))
+        ), detail=tuple(detail), href=Ref("event", str(t.id), ""), tone="muted" if t.text_ref not in texts else ""))
     return tuple(rows)
 
 
-THOUGHT_COLUMNS = (Column("n°", "fit", detail=True), Column("pensée"), Column("couleur"),
+THOUGHT_COLUMNS = (Column("n°", "fit", detail=True), Column("pensée", role="body"), Column("couleur", role="badge"),
                    Column("intensité", hint="ce qu'il en reste à l'instant (demi-vie)"), Column("née de", detail=True),
                    Column("concerne"), Column("née", "fit"), Column("ravivée", "fit", detail=True))
 
@@ -167,11 +168,13 @@ def _history(frame: Frame, ctx: InspectContext) -> Table:
             about_cell(frame, d.about),
             When(e.at),
             Badge("vivante", "info") if e.seq in alive else Badge("éteinte", "muted"),
-        ), detail=(Prose(text or FORGOTTEN, title="En entier"),) if text and len(text) > CLAMP else ()))
-    return Table((Column("n°", "fit", detail=True), Column("pensée"), Column("couleur à la naissance", detail=True), Column("née de", detail=True),
-                  Column("concerne"), Column("née", "fit"), Column("maintenant", "fit")), tuple(rows),
+        ), href=Ref("event", str(e.seq), ""),
+            detail=(Prose(text or FORGOTTEN, title="En entier", reading=True),) if text and len(text) > CLAMP else ()))
+    return Table((Column("n°", "fit", detail=True), Column("pensée", role="body"), Column("couleur à la naissance", detail=True), Column("née de", detail=True),
+                  Column("concerne"), Column("née", "fit"), Column("maintenant", "fit", role="badge")), tuple(rows),
                  title="Toutes ses pensées, de la plus récente à la plus ancienne",
-                 empty="plus rien avant" if _before(ctx) else "pas encore de pensée", pager=pager)
+                 empty="plus rien avant" if _before(ctx) else "pas encore de pensée", pager=pager,
+                 layout="list", link_label="Voir sa naissance")
 
 
 @ATTENTION.inspect("pensees", title="Pensées", section="pensees", order=10,
@@ -189,7 +192,9 @@ def _inspect_thoughts(s: AttentionState, frame: Frame, ctx: InspectContext) -> l
              f"{p.dwell_every_us // MINUTE} min, dès {number(p.dwell_from)}"),
     ))
     live = Table(THOUGHT_COLUMNS, rows, title="Ce qui lui trotte dans la tête",
-                 empty="rien ne lui trotte dans la tête")
+                 empty="rien ne lui trotte dans la tête", layout="cards", link_label="Voir sa naissance",
+                 caption="L’intensité indique ce qu’il reste de cette pensée maintenant. Une pensée peut s’estomper "
+                         "ou être ravivée ; son état actuel est distinct de l’historique de sa naissance.")
     rules = Fields((
         ("demi-vie d'une pensée", f"{num_fr(p.half_life_us / HOUR)} h ; s'éteint sous {number(p.fade_below)}"),
         ("un échange qui marque", f"émotion déclarée ≥ {number(p.marking_intensity)}, ou valence ≤ "
@@ -198,7 +203,8 @@ def _inspect_thoughts(s: AttentionState, frame: Frame, ctx: InspectContext) -> l
                         "et s'apaise"),
         ("dernière nuit digérée", s.digested_night or "—"),
     ), title="Comment elles vivent")
-    return [stats, live, _history(frame, ctx), rules]
+    return [stats, live, Disclosure("Historique des pensées", (_history(frame, ctx),), open=bool(_before(ctx))),
+            Disclosure("Comprendre leur évolution", (rules,))]
 
 
 # ── Remarqué ──────────────────────────────────────────────────────────────
@@ -223,11 +229,11 @@ def _recent(s: AttentionState, ctx: InspectContext) -> Table:
             Meter(h.pertinence * h.weight, number(h.pertinence * h.weight)),
             _dosed(d.emotion if d is not None else "", h.intensity),
         ))
-    return Table((Column("quand", "fit"), Column("source"), Column("sorte"), Column("pertinence annoncée"),
+    return Table((Column("quand", "fit"), Column("source", role="title"), Column("sorte"), Column("pertinence annoncée", detail=True),
                   Column("poids (habituation)", hint="× facteur par répétition de la même source et sorte, "
-                                                     "jamais sous le plancher"),
+                                                     "jamais sous le plancher", detail=True),
                   Column("pertinence retenue"), Column("émotion dosée")), tuple(rows),
-                 title="Remarqué ces dernières minutes", empty="rien de remarqué ces dernières minutes")
+                 title="Remarqué ces dernières minutes", empty="rien de remarqué ces dernières minutes", layout="list")
 
 
 def _waiting(s: AttentionState, frame: Frame, ctx: InspectContext) -> Table:
@@ -239,9 +245,9 @@ def _waiting(s: AttentionState, frame: Frame, ctx: InspectContext) -> Table:
         rows.append((When(x.at), Ref("event", str(x.seq), x.source), x.kind, _text(texts, x.summary_ref),
                      Meter(x.pertinence, number(x.pertinence)),
                      Meter(x.pertinence * weight, number(x.pertinence * weight))))
-    return Table((Column("signalé", "fit"), Column("source"), Column("sorte"), Column("résumé"),
+    return Table((Column("signalé", "fit"), Column("source", role="title"), Column("sorte"), Column("résumé", role="body"),
                   Column("pertinence annoncée"), Column("retenue si remarqué maintenant")), tuple(rows),
-                 title="Signalé, pas encore remarqué", empty="rien en attente")
+                 title="Signalé, pas encore remarqué", empty="rien en attente", layout="cards")
 
 
 def _noticed_history(ctx: InspectContext) -> Table:
@@ -270,7 +276,8 @@ def _inspect_noticed(s: AttentionState, frame: Frame, ctx: InspectContext) -> li
     blocks: list[Block] = [_recent(s, ctx)]
     if s.signals:
         blocks.append(_waiting(s, frame, ctx))
-    return [*blocks, _noticed_history(ctx), rules]
+    return [*blocks, Disclosure("Historique des signaux remarqués", (_noticed_history(ctx),), open=bool(_before(ctx))),
+            Disclosure("Comprendre ce qui retient son attention", (rules,))]
 
 
 # ── Attentes ──────────────────────────────────────────────────────────────
@@ -305,8 +312,8 @@ def _expectation_rows(s: AttentionState, frame: Frame, keep: set[str] | None = N
     return tuple(rows)
 
 
-EXPECTATION_COLUMNS = (Column("elle attend"), Column("de"), Column("depuis", "fit"), Column("échéance", "fit"),
-                       Column("état"))
+EXPECTATION_COLUMNS = (Column("elle attend", role="title"), Column("de"), Column("depuis", "fit"), Column("échéance", "fit"),
+                       Column("état", role="badge"))
 
 
 def _closed(frame: Frame, ctx: InspectContext, events: Sequence[Any]) -> tuple[tuple[Cell, ...], ...]:
@@ -316,8 +323,8 @@ def _closed(frame: Frame, ctx: InspectContext, events: Sequence[Any]) -> tuple[t
                   Ref("event", str(e.seq), f"n° {e.seq}")) for e in events)
 
 
-CLOSED_COLUMNS = (Column("quand", "fit"), Column("elle attendait"), Column("de"), Column("depuis", "fit"),
-                  Column("issue", "fit"), Column("événement", "fit"))
+CLOSED_COLUMNS = (Column("quand", "fit"), Column("elle attendait", role="title"), Column("de"), Column("depuis", "fit"),
+                  Column("issue", "fit", role="badge"), Column("événement", "fit"))
 
 
 @ATTENTION.inspect("attentes", title="Attentes", section="pensees", order=30,
@@ -335,10 +342,10 @@ def _inspect_expectations(s: AttentionState, frame: Frame, ctx: InspectContext) 
              f"{p.reply_window_message_us // MINUTE} min par message"),
     ))
     events, pager = _page(ctx, [c.EXPECTATION_MET, c.EXPECTATION_MISSED], HISTORY)
-    return [stats, Table(EXPECTATION_COLUMNS, rows, title="Ce qu'elle attend", empty="elle n'attend rien de personne"),
-            Table(CLOSED_COLUMNS, _closed(frame, ctx, events), title="Attentes closes",
+    return [stats, Table(EXPECTATION_COLUMNS, rows, title="Ce qu'elle attend", empty="elle n'attend rien de personne", layout="cards"),
+            Disclosure("Historique des attentes", (Table(CLOSED_COLUMNS, _closed(frame, ctx, events), title="Attentes closes",
                   empty="plus rien avant" if _before(ctx) else "aucune attente close pour l'instant",
-                  pager=pager)]
+                  pager=pager, layout="list"),), open=bool(_before(ctx)))]
 
 
 # ── La fiche d'une personne ───────────────────────────────────────────────
@@ -393,11 +400,11 @@ def _person(s: AttentionState, frame: Frame, ctx: InspectContext) -> list[Block]
     return [
         *((thread,) if thread is not None else ()),
         Table(THOUGHT_COLUMNS, _thought_rows(s, frame, ctx, keys), title="Ce qui lui trotte dans la tête à son sujet",
-              empty="rien ne lui trotte dans la tête à son sujet"),
+              empty="rien ne lui trotte dans la tête à son sujet", layout="cards", link_label="Voir sa naissance"),
         Table(EXPECTATION_COLUMNS, _expectation_rows(s, frame, keys), title="Ce qu'elle en attend",
-              empty="elle n'attend rien de cette personne"),
+              empty="elle n'attend rien de cette personne", layout="cards"),
         Table(CLOSED_COLUMNS, _closed(frame, ctx, closed), title="Attentes closes",
-              empty="plus rien avant" if before else "aucune attente close",
+              empty="plus rien avant" if before else "aucune attente close", layout="list",
               pager=Pager(param="avant", older=(("avant", str(closed[-1].seq)),) if more and closed else ())
               if more or before else None),
     ]

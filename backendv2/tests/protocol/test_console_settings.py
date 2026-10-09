@@ -47,12 +47,13 @@ def test_models_are_records_with_sealed_keys_roles_and_a_loader_that_degrades(wo
     url = f"{BASE}/fournisseurs"
     page = html_of(client.get(url))
     # Le contexte appartient à chaque fournisseur ; les rôles ont leur propre page.
-    assert "Fournisseurs" in page and "répondre (voix)" not in page and "Contexte (jetons)" in page
+    assert "Fournisseurs" in page and "répondre (voix)" not in page and "Aucune entrée configurée" in page
     assert {f"{BASE}/roles", f"{BASE}/identite", f"{BASE}/comptes"} <= links(page, BASE)
     assert f"{BASE}/contexte" not in links(page, BASE)
     r = post(client, url, backend("claude", kind="claude", model="claude-sonnet-5", api_key=CANARY_KEY))
     assert r.status_code == 200 and "« claude » enregistré" in html_of(r)
     assert CANARY_KEY not in r.text and "défini" in html_of(r)
+    assert 'class="settings-record"' in r.text and "Contexte (jetons)" in html_of(r)
     # une borne dépassée : refus au champ, rien n'est gardé
     bad = post(client, url, {**backend("claude", slots="99"), "_ancienne": "claude"})
     assert bad.status_code == 400 and "doit être entre 0 et 32" in html_of(bad)

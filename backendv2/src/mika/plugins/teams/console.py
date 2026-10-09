@@ -94,7 +94,7 @@ def _conversations(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Blo
         return [Note(NO_PORT, tone="muted")]
     if not port.configured():
         return [Note("L'extension n'a encore rien apporté. Installe-la dans le navigateur où tu ouvres Teams, "
-                     "colle sa clé (Configuration › Sens › Teams), et ouvre Teams.", tone="info")]
+                     "colle sa clé (Réglages › Plugins › Teams), et ouvre Teams.", tone="info")]
     found = port.conversations(200)
     page, pager = paginate(found, ctx.pager(size=PAGE))
     rows = tuple(Row((Text(_clip(port.title(conv.id), 80) or "sans nom"), Text(KIND_LABEL.get(conv.kind, "—"), "muted"),
@@ -102,9 +102,9 @@ def _conversations(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Blo
                       When(conv.last_at)),
                      href=Ref.subject("conversation_teams", conv.id, _clip(port.title(conv.id), 60) or "sans nom"))
                  for conv in page)
-    return [Table(("conversation", Column("sorte", "fit"), Column("messages", "num"), Column("", "fit"),
+    return [Table((Column("conversation", role="title"), Column("sorte", "fit"), Column("messages", "num"), Column("questions", "fit", role="badge"),
                    Column("le dernier", "fit")), rows, title=f"Conversations ({len(found)})", pager=pager,
-                  empty="aucune conversation")]
+                  empty="aucune conversation", layout="list", link_label="Lire la conversation")]
 
 
 @TEAMS.inspect("reponses", title="Réponses", section=SECTION, order=20, badge=_waiting_count,
@@ -125,10 +125,11 @@ def _replies(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
                    tone="warn" if d.state == WAITING else "")
 
     mode = params_of(frame).mode
-    return [Note(f"Mode : {MODE_LABEL.get(mode, mode)} (Configuration › Sens › Teams).", tone="info"),
-            Table(("conversation", "réponse", Column("pourquoi", "fit"), Column("proposée", "fit"),
-                   Column("état", "fit"), Column("", "fit")), tuple(row(d) for d in page),
-                  title=f"Réponses ({len(drafts)})", pager=pager, empty="aucune réponse préparée")]
+    return [Note(f"Mode : {MODE_LABEL.get(mode, mode)} (Réglages › Plugins › Teams).", tone="info"),
+            Table((Column("conversation", role="title"), Column("réponse", role="body"), Column("pourquoi", "fit"), Column("proposée", "fit"),
+                   Column("état", "fit", role="badge"), Column("retouche", "fit", role="badge")), tuple(row(d) for d in page),
+                  title=f"Réponses ({len(drafts)})", pager=pager, empty="aucune réponse préparée", layout="cards",
+                  link_label="Examiner la réponse")]
 
 
 @TEAMS.inspect("extension", title="Extension", section=SECTION, order=30,
@@ -142,7 +143,7 @@ def _extension(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
         ("dernier envoi de l'extension", When(port.last_batch()) if port.configured() else "jamais"),
         ("ton nom dans Teams", owner_name or "pas encore vu"), ("ton identifiant Teams", owner_id or "pas encore vu"),
         ("messages remarqués (en tête)", len(s.messages)),
-        ("clé, mode, signature", Ref("local", "/inspecteur/reglages/teams", "Configuration › Sens › Teams")),
+        ("clé, mode, signature", Ref("local", "/inspecteur/reglages/teams", "Réglages › Plugins › Teams")),
     ]
     return [Fields(tuple(pairs), title="L'extension", columns=1),
             Note("L'extension (frontend/Extension) lit ce que Teams web reçoit dans ton navigateur et l'apporte ici ; "
@@ -174,8 +175,8 @@ def _thread(s: TeamsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     rows = tuple(Row((When(m.at), Text("toi" if m.own else _clip(m.author, 60)), Text(m.text, clamp=600),
                       Badge("question", "warn") if (seen := s.messages.get(m.ref)) and seen.needs_reply else "")
                      ) for m in thread)
-    blocks: list[Block] = [Table((Column("quand", "fit"), Column("qui", "fit"), "message", Column("", "fit")), rows,
-                                 title="Le fil", empty="aucun message")]
+    blocks: list[Block] = [Table((Column("quand", "fit"), Column("qui", "fit", role="title"), Column("message", role="body"), Column("question", "fit", role="badge")), rows,
+                                 title="Le fil", empty="aucun message", layout="feed")]
     received = [m for m in thread if not m.own]
     if received and not under_way(s, ctx.subject):
         last = received[-1]

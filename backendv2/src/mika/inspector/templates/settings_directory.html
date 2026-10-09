@@ -1,0 +1,19 @@
+{% macro category(g) -%}
+<section class="settings-category" id="{{ g.id }}" aria-labelledby="{{ g.id }}-titre">
+  <header><h2 id="{{ g.id }}-titre">{{ g.title }}</h2><span class="block-count">{{ g['items']|length }} {{ 'page' if g['items']|length == 1 else 'pages' }}</span></header>
+  <ul>{% for item in g['items'] %}<li><a href="{{ item.href }}"><span class="settings-link-title">{{ item.title }} <span aria-hidden="true">→</span></span>{% if item.description %}<span class="settings-link-description">{{ item.description }}</span>{% endif %}</a></li>{% endfor %}</ul>
+</section>
+{%- endmacro %}
+<div class="settings-directory stack">
+  <div class="directory-summary"><p role="status">{{ settings_count }} {{ 'résultats' if settings_search else 'pages de réglages' }}{% if settings_search %} sur {{ settings_total }}{% endif %}</p>
+  {% if settings_groups %}<nav class="chips" aria-label="Catégories de réglages">{% for g in settings_groups if not g.advanced %}<a class="chip" href="#{{ g.id }}">{{ g.title }}</a>{% endfor %}{% if settings_groups|selectattr('advanced')|list %}<a class="chip" href="#reglages-avances">Paramètres avancés</a>{% endif %}</nav>{% endif %}</div>
+  {% if settings_groups %}
+  <div class="settings-categories">{% for g in settings_groups if not g.advanced %}{{ category(g) }}{% endfor %}</div>
+  {% if settings_groups|selectattr('advanced')|list %}
+  <details class="settings-advanced" id="reglages-avances"{{ ' open' if settings_search }}>
+    <summary><span><b>Paramètres avancés</b><span class="help">Affiner le comportement de chaque faculté et comprendre l’origine des valeurs.</span></span></summary>
+    <div class="settings-categories">{% for g in settings_groups if g.advanced %}{{ category(g) }}{% endfor %}</div>
+  </details>
+  {% endif %}
+  {% else %}<div class="empty-state"><b>Aucun réglage ne correspond.</b>Essaie un terme plus court ou réinitialise la recherche.</div>{% endif %}
+</div>

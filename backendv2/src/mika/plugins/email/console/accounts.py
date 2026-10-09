@@ -1,6 +1,6 @@
 """Ses comptes : l'état de chaque boîte, ses dossiers, et **comment elle y écrit**
 (le texte exact qu'elle lit avant d'écrire). Les réglages eux-mêmes (serveurs,
-mot de passe, voix) se modifient dans Configuration › Plugins › Boîtes aux lettres : un lien y
+mot de passe, voix) se modifient dans Réglages › Plugins › Boîtes aux lettres : un lien y
 mène, et l'enregistrement ramène ici."""
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ def _accounts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
                                    ("réglages", edit_account(a.key)))),)))
     blocks: list[Block] = [Fields((("nouvelle boîte", add_account()),
                                    ("tous les réglages", Ref("local", "/inspecteur/reglages/boites",
-                                                             "Configuration › Plugins › Boîtes aux lettres"))))]
+                                                             "Réglages › Plugins › Boîtes aux lettres"))))]
     blocks.append(Table(("nom", Column("clé", "fit"), "adresse", Column("elle écrit", "fit"), "relevés",
                          Column("état", "fit"), Column("dernier relevé", "fit"), Column("non lus", "num"),
                          Column("réponses préparées", "fit")), tuple(rows), title=f"Comptes ({len(rows)})",

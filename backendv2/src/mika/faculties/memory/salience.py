@@ -161,9 +161,16 @@ def admissible(about: tuple[str, ...], sensitivity: int, interlocutor: str | Non
         # … un secret à elle (ses propres notes, importées) vaut une confidence : il ne se dit qu'en grande confiance
         level = max(sensitivity, Sensitivity.CONFIDENCE) if secret else sensitivity
         return Verdict(level <= max(Sensitivity.ANODYNE, audience.level), secret=secret)
+    # Un secret ne sort que devant qui l'a confié. Répondre à la personne qui l'a confié ne suffit pas : dans un
+    # salon, d'autres l'entendent (audit du 2026-10-08 : « garde-le pour toi », anodin, recopié dans un salon).
+    overheard = secret and audience.public
     if not others:  # seulement l'interlocuteur
+        if overheard:
+            return Verdict(False, secret=True)
         return Verdict(sensitivity <= Sensitivity.ANODYNE or audience.private_ok)
     if interlocutor is not None and interlocutor in told_by:  # ses propres mots, même sur d'autres : sa fiche
+        if overheard:
+            return Verdict(False, others, secret=True)
         return Verdict(sensitivity <= Sensitivity.ANODYNE or audience.private_ok, others, secret=secret)
     witness = interlocutor is not None and (interlocutor in heard_by if known else interlocutor in about)
     if secret:  # « dis-le à personne » : jamais hors de qui l'a confié

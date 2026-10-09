@@ -112,27 +112,28 @@ def _drafts(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
         info = labels.get(d.account)
         box = f"{info.name} · {VOICE_LABEL.get(info.voice, '')}" if info is not None else d.account or "—"
         answered = port.cached_one(d.mail) if d.mail else None
-        return Row((Text(clip(got.subject, 100) if got else "(disparu)"), Text(clip(got.to, 80) if got else "—"),
+        return Row((Text(clip(got.subject, 100) if got else "Brouillon indisponible"), Text(clip(got.to, 80) if got else "—"),
                     Text(box, "muted"),
                     Ref.subject("mail", mail_key(d.mail), clip(answered.subject, 60)) if answered is not None
                     else ("—" if not d.mail else Text("un mail plus dans la boîte", "muted")),
                     Badge("demandé" if d.asked else "d'elle-même", "info" if d.asked else ""), When(d.at),
-                    _badge(d.state), Badge("à compléter", "warn") if got is not None and to_fill(got.body, got.subject) else ""),
+                    Badge("à corriger", "danger") if got is None and d.state == WAITING else _badge(d.state),
+                    Badge("à compléter", "warn") if got is not None and to_fill(got.body, got.subject) else ""),
                    href=Ref.subject("brouillon", d.draft, clip(got.subject if got else d.draft, 60))
                    if d.draft else None, tone="warn" if d.state == WAITING else "")
 
-    columns = ("objet", "à", Column("boîte", "fit"), "en réponse à", Column("pourquoi", "fit"),
-               Column("proposé", "fit"), Column("état", "fit"), Column("", "fit"))
+    columns = (Column("Objet", role="title"), "À", Column("Boîte", "fit"), "En réponse à", Column("Origine", "fit"),
+               Column("Proposé", "fit"), Column("État", "fit", role="badge"), Column("À vérifier", "fit", role="badge"))
     blocks: list[Block] = []
     if waiting:
         blocks.append(Note("Ouvre un brouillon pour lire exactement ce qui partira, le retoucher, l'envoyer ou le "
                            "refuser. Rien ne part sans toi.", tone="info"))
     shown, pending = paginate(waiting, ctx.pager("page_a_decider", size=PAGE))
     blocks.append(Table(columns, tuple(row(d) for d in shown), title=f"À décider ({len(waiting)})", pager=pending,
-                        empty="rien n'attend ton accord"))
+                        empty="rien n'attend ton accord", layout="cards", link_label="Relire le brouillon"))
     page, pager = paginate(done, ctx.pager(size=PAGE))
     blocks.append(Table(columns, tuple(row(d) for d in page), title=f"Déjà décidés ({len(done)})", pager=pager,
-                        empty="aucun encore"))
+                        empty="aucun encore", layout="list", link_label="Voir le brouillon"))
     return [workspace(port, ctx, blocks, view="brouillons")]
 
 

@@ -340,9 +340,9 @@ def _awaiting(s: ProjectsState, frame: Frame) -> tuple[int, str]:
     return n, "attendent ton accord"
 
 
-LIST_COLUMNS = (Column("projet"), Column("mode", "fit"), Column("pour qui"), Column("état", "fit"),
+LIST_COLUMNS = (Column("projet", role="title"), Column("mode", "fit", role="badge"), Column("pour qui"), Column("état", "fit", role="badge"),
                 Column("objectifs"), Column("prochaine exécution"), Column("dernière", "fit"),
-                Column("où il en est"),
+                Column("où il en est", role="body"),
                 Column("priorité", detail=True), Column("plage de travail", detail=True),
                 Column("agenda", detail=True), Column("outils", detail=True), Column("dépôt distant", detail=True),
                 Column("ce qui sort", detail=True))
@@ -360,9 +360,7 @@ def _tools_words(p: Project) -> str:
 
 @PROJECTS.inspect("tous", title="Ses projets", section="projets", order=5, params=[STATE_PARAM, MODE_PARAM],
                   badge=_awaiting,
-                  description="Ses espaces de travail : chacun a son dossier et son dépôt git, ses objectifs "
-                              "(ponctuels ou constants), ses décisions techniques, un mode (elle, ou impersonnel) "
-                              "et ses outils. Une ligne ouvre le projet.")
+                  description="Suivre ses objectifs, repérer ce qui attend ton accord et ouvrir un espace de travail.")
 def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Block]:
     now = frame.now
     pm = params(frame.env.params_of("projects", frame.root))
@@ -399,7 +397,7 @@ def _list_view(s: ProjectsState, frame: Frame, ctx: InspectContext) -> list[Bloc
                  "warn" if waiting else "", APPROVALS),
             Stat("Archivés", sum(1 for p in every if p.status == c.ARCHIVED)),
         )),
-        Table(LIST_COLUMNS, tuple(rows), title="Projets", pager=pager, filters=("etat", "mode"),
+        Table(LIST_COLUMNS, tuple(rows), title="Projets", pager=pager, filters=("etat", "mode"), layout="cards",
               empty="aucun projet avec ces filtres" if wanted != "vivants" or mode else
               "aucun projet : « Créer un projet » (en haut) en ouvre un — elle peut aussi en ouvrir d'elle-même.",
               caption="Une exécution vise un objectif : celui que tu demandes, sinon le constant le plus en retard, "
@@ -1077,7 +1075,7 @@ def _remote_section(p: Project, s: ProjectsState, frame: Frame, ctx: InspectCont
         items.append(Disclosure("Régler le dépôt distant", (
             ActionSlot("projects.depot_distant", title="Enregistrer le dépôt distant", compact=True),),
             open=not p.remote))
-    items.append(Note("Le jeton qui permet de pousser (GitHub ou un autre hôte https) se règle dans Configuration › "
+    items.append(Note("Le jeton qui permet de pousser (GitHub ou un autre hôte https) se règle dans Réglages › "
                       "Canaux › Dépôts git : il n'apparaît jamais dans le journal ni dans ce qu'elle lit.", "muted"))
     return Section("Son dépôt distant", tuple(items),
                    description="Pousser envoie ce qui est enregistré ; récupérer avance l'atelier en ligne droite (un "
@@ -1266,4 +1264,3 @@ FORGET_NOTE = ("Oublier cette personne efface ce que sa vie garde de ces {n} pro
                "de commit restent neutres) et ce qui est déjà parti vers un dépôt distant. Ouvre chaque projet pour "
                "faire le ménage dans son atelier, ou archive-le. Le stockage des apps de la Forge n'est pas atteint "
                "non plus (« Vider le stockage » sur la fiche d'une app).")
-

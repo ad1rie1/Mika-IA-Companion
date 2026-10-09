@@ -70,7 +70,8 @@ def test_an_operator_plugs_tests_approves_and_sees_a_server_change(world):  # no
     assert tested.status_code == 200 and "faux 1.2" in html_of(tested)
     tools_tab = html_of(client.get("/inspecteur/fiche/serveur/meteo", params={"onglet": "outils"}))
     assert "Répète ce qu'on lui donne." in tools_tab and "à regarder" in tools_tab
-    assert not any(live.kernel.registry.is_dynamic(n) for n in live.kernel.registry.tools)
+    # Les services système peuvent déjà avoir publié leurs propres outils.
+    assert not any(n.startswith("mcp_meteo_") for n in live.kernel.registry.tools)
     listing = html_of(client.get("/inspecteur/outils/serveurs"))
     assert "meteo" in listing and "connecté" in listing
     # approuver « echo » sans accord : il devient le sien, et « extérieur » dans Ses outils

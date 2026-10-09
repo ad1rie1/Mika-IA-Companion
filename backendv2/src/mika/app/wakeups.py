@@ -1,6 +1,6 @@
 """Les réveils par API (ADR 0068), côté application : ce que l'opérateur déclare, leurs clés, la porte.
 
-- *Ce que l'opérateur déclare* (Configuration › Plugins › Réveils par API) : un modèle de réglages, un enregistrement
+- *Ce que l'opérateur déclare* (Réglages › Plugins › Réveils par API) : un modèle de réglages, un enregistrement
   par réveil ; le nom est la fin de son URL (``POST /api/wake/<nom>``), il ne change plus une fois créé.
 - *Les clés* : générées ici (``mwk_…``), montrées une seule fois ; seule leur empreinte est gardée (``Settings``).
 - *Le guichet* (le port ``wakeup``) : ce que la console lit et fait (une clé neuve, la retirer).

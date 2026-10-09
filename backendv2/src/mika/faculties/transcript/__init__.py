@@ -856,8 +856,8 @@ def _episodes(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[in
     return out
 
 
-MESSAGE_COLUMNS = (Column("n°", "fit", detail=True), Column("quand", "fit"), "qui parle", "avec",
-                   Column("où", detail=True), "texte", Column("émotion", detail=True),
+MESSAGE_COLUMNS = (Column("n°", "fit", detail=True), Column("quand", "fit"), Column("qui parle", role="title"), "avec",
+                   Column("où", detail=True), Column("texte", role="body"), Column("émotion", detail=True),
                    "réponse", Column("épisode", detail=True))
 
 
@@ -1050,6 +1050,7 @@ def _all_messages(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list
     found = f" contenant « {q} »" if q else ""
     blocks: list[Block] = [
         Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), title=f"Messages{scope}{found}", pager=pager,
+              layout="feed", link_label="Pourquoi cette réponse ?",
               filters=("handle", "q", "role"),
               empty="aucun message ne correspond" if handle or q or role else "aucun message"),
     ]
@@ -1086,7 +1087,8 @@ def _questions(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Bl
             continue
         rows.append(Row((link, When(r[1]), _who(frame, r[2]), Text(_clip(r[3], TEXT_CAP), clamp=INSPECT_CHARS)),
                         href=link))
-    return [Table((Column("n°", "fit"), Column("reçue", "fit"), "de", "texte"), tuple(rows), pager=pager,
+    return [Table((Column("n°", "fit", detail=True), Column("reçue", "fit"), Column("de", role="title"), Column("texte", role="body")), tuple(rows), pager=pager,
+                  layout="feed", link_label="Voir le message source",
                   title="Questions sans réponse", empty="aucune question en attente",
                   caption="Une question reste ici tant qu'aucune réponse ne l'a réglée ; « reçue » dit depuis quand "
                           "elle attend.")]
@@ -1117,6 +1119,7 @@ def _exchanges(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Bl
     rows, pager = _page(store, [f"person IN ({marks})"], handles, ctx.int_param("avant", 0) or None)
     blocks: list[Block] = [_stats(store, handles),
                            Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, title="Échanges",
+                                 layout="feed", link_label="Pourquoi cette réponse ?",
                                  empty="aucun échange pour l'instant")]
     folded = _summaries(store, s, frame, handles)
     if folded is not None:
@@ -1139,6 +1142,7 @@ def _handle_thread(s: TranscriptState, frame: Frame, ctx: InspectContext) -> lis
         return [Note(f"Aucun message avec « {handle} ».", tone="muted")]
     blocks: list[Block] = [_stats(store, [handle]),
                            Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, title="Messages",
+                                 layout="feed", link_label="Pourquoi cette réponse ?",
                                  empty="aucun message")]
     folded = _summaries(store, s, frame, [handle])
     if folded is not None:

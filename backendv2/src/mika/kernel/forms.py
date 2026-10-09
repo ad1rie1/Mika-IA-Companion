@@ -246,6 +246,8 @@ def _scalar(name: str, annotation: Any, knob: Knob, metadata: Sequence[Any], com
         values = tuple((str(m.value), _enum_label(m)) for m in annotation)
         return _make(kind="select", choices=choices or values, **common)
     if annotation in (int, float):
+        if knob.widget == "hidden":
+            return _make(kind="hidden", **common)
         return _number(name, annotation, knob, metadata, common)
     if annotation is str:
         if knob.widget == "hidden":

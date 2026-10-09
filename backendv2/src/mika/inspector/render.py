@@ -296,8 +296,31 @@ def block(b: Any, env: Env, query: Mapping[str, str], depth: int = 0, counter: l
                          "tone": tone(rich.tone), "href": href(rich.href) if rich.href else "",
                          "detail": [block(x, env, query, depth + 1, nested, f"{key}r{index}_") for x in details]})
             rows[-1]["open"] = _active_page(rows[-1]["detail"])
+            if b.layout in ("cards", "feed", "list"):
+                parts = [(columns[i], cell(rich.cells[i], env)) for i in visible if i < len(rich.cells)]
+                # Un contenu de lecture peut n'avoir aucun titre : son texte reste un corps de carte.
+                fallback = -1 if any(c.role == "body" for c, _ in parts) else 0
+                title_index = next((i for i, (c, _) in enumerate(parts) if c.role == "title"), fallback)
+                rows[-1]["heading"] = parts[title_index][1] if parts and title_index >= 0 else None
+                rows[-1]["badges"] = [v for i, (c, v) in enumerate(parts) if i != title_index and c.role == "badge" and v.get("text")]
+                rows[-1]["body"] = [{"label": c.label, "value": v} for i, (c, v) in enumerate(parts) if i != title_index and c.role == "body"]
+                rows[-1]["fields"] = [{"label": c.label, "value": v, "hint": c.hint} for i, (c, v) in enumerate(parts)
+                                     if i != title_index and c.role not in ("badge", "body")
+                                     and (v.get("text") or v.get("secondary") or v["t"] in ("meter", "swatch"))]
+        layout = b.layout if b.layout in ("cards", "feed", "list") else ""
+        modes = []
+        if layout:
+            param = f"vue_{key}"
+            selected = "table" if query.get(param) == "table" else layout
+            for value, label in ((layout, {"cards": "Fiches", "feed": "Fil", "list": "Liste"}[layout]), ("table", "Tableau")):
+                target = {k: v for k, v in query.items() if k not in (param, "flash")}
+                if value == "table":
+                    target[param] = value
+                modes.append({"label": label, "href": "?" + urlencode(target), "on": value == selected})
+            layout = "" if selected == "table" else layout
         title = b.title.removesuffix(f" ({total})") if total is not None else b.title
         return {"t": "table", "id": key, "title": title, "empty": b.empty, "caption": b.caption,
+                "layout": layout, "modes": modes, "link_label": b.link_label,
                 "columns": [{"label": columns[i].label, "align": columns[i].align, "hint": columns[i].hint} for i in visible],
                 "rows": rows, "pager": _pager(pager, query), "detail": any(r["detail"] for r in rows),
                 "count": total, "shown": len(source)}

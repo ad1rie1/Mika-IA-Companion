@@ -134,7 +134,7 @@ def _shape(required: tuple[str, ...], optional: tuple[str, ...] = ()) -> _Shape:
 # Les clés de chaque objet (requises, facultatives). Le décodeur et le schéma
 # lisent les mêmes tables : ils ne peuvent pas diverger.
 _BLOCKS: dict[str, _Shape] = {
-    "table": _shape(("type", "columns", "rows"), ("title", "caption", "empty", "pagination", "filters")),
+    "table": _shape(("type", "columns", "rows"), ("title", "caption", "empty", "pagination", "filters", "layout", "link_label")),
     "fields": _shape(("type", "items"), ("title", "columns")),
     "note": _shape(("type", "text"), ("tone", "title")),
     "prose": _shape(("type", "text"), ("title", "clamp", "reading")),
@@ -163,7 +163,7 @@ _CELLS: dict[str, _Shape] = {
 # un lien en position ``href`` (ligne, statistique, entrée) : texte facultatif
 _HREF = _shape(("kind",), ("text", "view", "params", "url"))
 _ENVELOPE = _shape(("version", "blocks"))
-_COLUMN = _shape(("key", "label"), ("align", "hint", "detail"))
+_COLUMN = _shape(("key", "label"), ("align", "hint", "detail", "role"))
 _ROW = _shape(("cells",), ("tone", "href", "detail"))
 _PAGER = _shape(("page", "total", "per_page"), ("param",))
 _FIELD = _shape(("label", "value"), ("hint",))
@@ -566,7 +566,8 @@ class _Decoder:
                 column = Column(self.string(c["label"], _at(p, "label")),
                                 align=self.choice(c.get("align", ""), _at(p, "align"), _ALIGNS, "alignement inconnu"),
                                 hint=self.string(c.get("hint", ""), _at(p, "hint")),
-                                detail=self.boolean(c.get("detail", False), _at(p, "detail")))
+                                detail=self.boolean(c.get("detail", False), _at(p, "detail")),
+                                role=self.choice(c.get("role", ""), _at(p, "role"), ("", "title", "badge", "body"), "rôle de colonne inconnu"))
             if not key:
                 raise Invalid(p, "clé de colonne vide")
             if key in keys:
@@ -584,6 +585,10 @@ class _Decoder:
             kw["pager"] = self.pager(d["pagination"], _at(path, "pagination"), len(rows))
         if "filters" in d:
             kw["filters"] = self.filters(d["filters"], _at(path, "filters"))
+        if "layout" in d:
+            kw["layout"] = self.choice(d["layout"], _at(path, "layout"), ("", "cards", "feed", "list"), "présentation inconnue")
+        if "link_label" in d:
+            kw["link_label"] = self.string(d["link_label"], _at(path, "link_label"))
         return Table(tuple(columns), rows, **kw)
 
     def row(self, raw: Any, path: str, keys: list[str], depth: int) -> tuple[Any, ...] | Row:
@@ -887,10 +892,10 @@ def _enc_table(t: Table) -> dict[str, Any]:
             key += "_"
         used.add(key)
         col = {"key": key, "label": c.label}
-        _put(col, c, "align", "hint", "detail")
+        _put(col, c, "align", "hint", "detail", "role")
         columns.append(col)
     out: dict[str, Any] = {"type": "table", "columns": columns, "rows": [_enc_row(r) for r in t.rows]}
-    _put(out, t, "title", "caption", "empty")
+    _put(out, t, "title", "caption", "empty", "layout", "link_label")
     if t.pager is not None:
         p = t.pager
         if not is_page_param(p.param) or p.older or p.total is None:
@@ -1063,7 +1068,8 @@ def schema(*, limits: Limits = Limits()) -> dict[str, Any]:
             cells.append(_obj(shape, {**cell_props, "kind": {"const": kind}}))
 
     column = _obj(_COLUMN, {"key": {"type": "string", "minLength": 1, "maxLength": limits.chars}, "label": text,
-                            "align": {"enum": list(_ALIGNS)}, "hint": text, "detail": {"type": "boolean"}})
+                            "align": {"enum": list(_ALIGNS)}, "hint": text, "detail": {"type": "boolean"},
+                            "role": {"enum": ["", "title", "badge", "body"]}})
     cell_list = _array(_ref("cell"), limits.columns)
     cell_map = {"type": "object", "maxProperties": limits.columns,
                 "propertyNames": {"minLength": 1, "maxLength": limits.chars}, "additionalProperties": _ref("cell")}
@@ -1083,7 +1089,7 @@ def schema(*, limits: Limits = Limits()) -> dict[str, Any]:
         "table": {"columns": _array({"oneOf": [{"type": "string", "minLength": 1, "maxLength": limits.chars},
                                                _ref("column")]}, limits.columns),
                   "rows": _array({"oneOf": [cell_list, _ref("row")]}, limits.rows),
-                  "pagination": _ref("pagination"),
+                  "pagination": _ref("pagination"), "layout": {"enum": ["", "cards", "feed", "list"]}, "link_label": text,
                   "filters": {**_array(param_name, limits.items), "uniqueItems": True}},
         "fields": {"items": _array(_obj(_FIELD, {"label": text, "value": _ref("cell"), "hint": text}),
                                    limits.items),

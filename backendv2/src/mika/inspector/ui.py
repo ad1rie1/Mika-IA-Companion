@@ -24,11 +24,13 @@ from starlette.responses import HTMLResponse, RedirectResponse, Response
 from mika.adapters.web.accounts import Account, Accounts
 from mika.adapters.web.app import LoginThrottle
 from mika.contracts import runtime as rt
+from mika.contracts import self_ as self_c
 from mika.inspector import render
 from mika.inspector.catalog import (
     Builtin,
     Destination,
     Labels,
+    MenuGroup,
     NavGroup,
     SettingsSection,
     SettingsTab,
@@ -48,7 +50,7 @@ CSRF_COOKIE = "csrftoken"
 SESSION_COOKIE = "sessionid"
 TEMPLATES = Path(__file__).parent / "templates"
 STATIC = Path(__file__).parent / "static"
-ASSET_VERSION = "7"
+ASSET_VERSION = "16"
 
 log = logging.getLogger("mika.console")
 
@@ -89,6 +91,8 @@ class InspectorDeps:
     reports: Path | None = None
     #: la carte de la console (``app/console.py``)
     navigation: Sequence[NavGroup] = field(default_factory=tuple)
+    #: le menu opérateur (``app/console_menu.py``) ; vide, la console suit la carte ``navigation``
+    menu: Sequence[MenuGroup] = field(default_factory=tuple)
     #: les séries mesurées : ``sampler(clé, depuis, jusqu'à, points)``
     sampler: Callable[..., list[tuple[int, float]]] | None = None
     #: les sections de réglages (``app/reglages.py``) et leurs onglets
@@ -98,7 +102,7 @@ class InspectorDeps:
     parameters: Any = None
     #: les sauvegardes : ``fn() -> {sauvegarde, tentative, verification, archives}`` (``app/backup.overview``)
     backups: Callable[[], Mapping[str, Any]] | None = None
-    #: Configuration › Comportement : (famille, facultés) et le nom lisible de chacune
+    #: Réglages › Comportement : (famille, facultés) et le nom lisible de chacune
     param_families: Sequence[tuple[str, Sequence[str]]] = field(default_factory=tuple)
     faculty_labels: Mapping[str, str] = field(default_factory=dict)
     #: les noms en français de ce que déclarent les facultés (sections, raisons, vetos, processus…)
@@ -226,7 +230,9 @@ class UI:
                                     "hint": got[1] if len(got) > 1 else "", "href": f"{base}/{v.name}"})
         return out
 
-    def nav(self, active: str) -> list[dict[str, Any]]:
+    def nav(self, active: str, path: str = "") -> list[dict[str, Any]]:
+        if self.deps.menu:
+            return self.operator_menu(active, path)
         groups = []
         for g in self.deps.navigation:
             items = []
@@ -234,8 +240,54 @@ class UI:
                 url = f"{PREFIX}/" if d.key == "accueil" else f"{PREFIX}/{d.key}"
                 items.append({"key": d.key, "label": d.label, "icon": d.icon, "href": url, "on": d.key == active,
                               "badge": self.destination_badge(d)})
-            groups.append({"label": g.label, "items": items})
+            groups.append({"label": g.label, "items": items,
+                           "active": any(i["on"] for i in items),
+                           "badge": sum(i["badge"] for i in items)})
         return groups
+
+    def operator_menu(self, active: str, path: str) -> list[dict[str, Any]]:
+        """Résout la rubrique la plus précise, y compris sur les fiches.
+
+        Les nombres restent sur les entrées : deux vues peuvent montrer une
+        même demande. Le groupe signale sa présence sans additionner ces nombres.
+        """
+        links = [(gi, li, link) for gi, group in enumerate(self.deps.menu)
+                 for li, link in enumerate(group.items)]
+
+        def locate(target: str) -> tuple[int, int] | None:
+            matches = [(len(route), gi, li) for gi, li, link in links
+                       for route in (link.target, *link.also)
+                       if target == route or (route and (target.startswith(route + "/")
+                                                         or target.startswith(route + "-")))]
+            if not matches:
+                return None
+            _, gi, li = max(matches)
+            return gi, li
+
+        current = locate(path.split("?", 1)[0].removeprefix(PREFIX).strip("/"))
+        if current is None and active:
+            current = locate("" if active == "accueil" else active)
+        if current is None and active:
+            current = next(((gi, li) for gi, li, link in links if link.target.split("/")[0] == active), None)
+        badges: dict[tuple[int, int], int] = {}
+        for item in self.attention_items():
+            key = locate(item["href"].removeprefix(PREFIX).strip("/"))
+            if key is not None:
+                badges[key] = badges.get(key, 0) + item["count"]
+        groups = []
+        for gi, group in enumerate(self.deps.menu):
+            items = [{"label": link.label, "href": f"{PREFIX}/{link.target}", "icon": group.icon,
+                      "on": current == (gi, li), "badge": badges.get((gi, li), 0)}
+                     for li, link in enumerate(group.items)]
+            groups.append({"label": self.her_name() if group.her else group.label, "icon": group.icon,
+                           "items": items,
+                           "active": current is not None and current[0] == gi,
+                           "badge": any(i["badge"] for i in items)})
+        return groups
+
+    def her_name(self) -> str:
+        """Son nom, celui de sa persona en vigueur : la console ne l'écrit jamais en dur (ADR 0070)."""
+        return self_c.name_of(self.kernel.mind.frame().get(self_c.PERSONA))
 
     def vitals(self) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
@@ -280,8 +332,12 @@ class UI:
              **ctx: Any) -> Response:
         token = self.csrf(request)
         account = self.operator(request)
+        # ``menu_path`` : la page que le menu allume, quand ce n'est pas celle-ci (une fiche ouverte depuis une liste)
+        menu_path = ctx.pop("menu_path", "") or request.url.path
         html = env.get_template(name).render(
-            title=title, csrf=token, nav=self.nav(active), vitals=self.vitals(),
+            title=title, csrf=token, nav=self.nav(active, menu_path), vitals=self.vitals(),
+            operator_menu=bool(self.deps.menu),
+            active_destination=active, her=self.her_name(), posted=request.method == "POST",
             who=account.display_name if account else "", **ctx)
         response = HTMLResponse(html, status_code=status)
         if not request.cookies.get(CSRF_COOKIE):

@@ -1,0 +1,25 @@
+{% from "_navigation.html" import pager %}
+{% macro records(r, csrf, section, action) -%}
+<div class="records table-block">
+  <div class="block-head"><h3 class="block-title">{{ r.label }}</h3><span class="block-count">{{ r.total }} au total</span>
+    <a class="btn small" href="{{ r.add }}">＋ Ajouter</a></div>
+  {% if r.help %}<p class="caption">{{ r.help }}</p>{% endif %}
+  <div class="settings-records" role="list" aria-label="{{ r.label }}">
+  {% for row in r.rows %}
+    <article class="settings-record" role="listitem" data-href="{{ row.edit }}">
+      <h4><a href="{{ row.edit }}">{{ row.key if r.keyed else row.cells|first or 'Entrée ' ~ loop.index }}</a></h4>
+      <dl class="collection-fields">{% for c in row.cells %}<div><dt>{{ r.columns[loop.index0] }}</dt><dd>{{ c }}</dd></div>{% endfor %}</dl>
+      <div class="collection-footer">
+        <a class="btn quiet small" href="{{ row.edit }}">Modifier</a>
+        <form method="post" action="{{ action }}" class="inline" data-confirm="{{ row.confirm or ('Retirer « ' ~ row.key ~ ' » ?') }}">
+          <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="_section" value="{{ section }}">
+          <input type="hidden" name="_supprimer" value="{{ r.path }}"><input type="hidden" name="_cle" value="{{ row.key }}">
+          <button class="btn quiet small danger">retirer</button>
+        </form>
+      </div>
+    </article>
+  {% else %}<div class="empty-state" role="listitem"><b>Aucune entrée configurée.</b>Utilise « Ajouter » pour commencer.</div>{% endfor %}
+  </div>
+  {{ pager(r.pager) }}
+</div>
+{%- endmacro %}

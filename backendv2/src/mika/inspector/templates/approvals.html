@@ -1,17 +1,21 @@
 {% from "_navigation.html" import pager %}
 <div class="stack">
 {% for p in items %}
-<div class="card stack">
-  <div class="page-head"><div><h2>{{ p.summary[:110] or p.capability }}</h2><p class="muted">{{ p.capability }} · {{ p.when }} · <span class="mono">{{ p.capability_key }}</span></p></div></div>
+<article class="approval-card">
+  <header class="approval-heading"><div><span class="eyebrow">{{ p.capability }} · Proposition n° {{ p.proposal }}</span><h2>{{ p.summary[:110] or p.capability }}</h2><p>{{ p.when }}{% if p.context %} · {{ p.context }}{% endif %}</p></div><span class="badge {{ 'danger' if p.blocked else 'warn' }}">{{ 'À corriger' if p.blocked else 'Ton accord est attendu' }}</span></header>
+  <div class="approval-content">
   {% if p.summary|length > 110 %}<div class="prose">{{ p.summary }}</div>{% endif %}
-  {% if p.context %}<p class="muted">{{ p.context }}</p>{% endif %}
+  {% if p.blocked %}<div class="note danger" role="alert"><b>L’action est bloquée</b>{{ p.blocked }}</div>{% endif %}
   {% if p.preview %}
-  <p class="muted"><b>Ce qui partira</b>{% if p.blocked %} — <span class="badge warn">ne peut pas partir tel quel : {{ p.blocked }}</span>{% endif %}</p>
+  <h3>{{ 'Aperçu de la demande' if p.blocked else 'Ce qui partira après ton accord' }}</h3>
   <div class="reading-document"><div class="document-text">{{ p.preview }}</div></div>
-  <details><summary class="muted">arguments</summary><pre class="code">{{ p.args }}</pre></details>
+  <details class="approval-technical"><summary>Détails techniques</summary><p class="mono">{{ p.capability_key }}</p><pre class="code">{{ p.args }}</pre></details>
   {% else %}
+  <h3>Ce qui sera exécuté</h3>
   <pre class="code">{{ p.args }}</pre>
+  <p class="caption">{{ p.capability_key }}</p>
   {% endif %}
+  </div>
   <form method="post" action="{{ PREFIX }}/approbations" class="approve-form">
     {# Entrée dans la note ne décide rien : le bouton par défaut d'un formulaire est son premier, désactivé ici #}
     <button type="submit" class="default-submit" disabled hidden tabindex="-1">Entrée : rien</button>
@@ -21,7 +25,7 @@
     <button class="btn" name="decision" value="approve" data-confirm="Approuver « {{ (p.summary or p.capability)[:90] }} » ? Ce qui est montré partira tel quel."{% if p.blocked %} disabled title="{{ p.blocked }}"{% endif %}>Approuver</button>
     <button class="btn quiet" name="decision" value="reject">Refuser</button>
   </form>
-</div>
+</article>
 {% else %}
 <div class="empty-state"><b>Rien n'attend ton accord.</b>Quand elle voudra envoyer un mail ou lancer une commande avec le réseau, c'est ici que tu décideras.</div>
 {% endfor %}

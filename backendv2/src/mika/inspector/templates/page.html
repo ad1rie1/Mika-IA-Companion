@@ -13,31 +13,33 @@
     {% if head_badges %}<div class="badges">{% for b in head_badges %}<span class="badge {{ b.tone }}">{{ b.text }}</span>{% endfor %}</div>{% endif %}
     {% if facts %}<div class="head-facts">{% for f in facts %}<span><span class="k">{{ f.label }}</span>{% if f.cell %}{{ cell(f.cell) }}{% else %}{{ f.value }}{% endif %}</span>{% endfor %}</div>{% endif %}
   </div>
-</div>
 {% if head_actions %}
 <div class="action-bar" role="group" aria-label="Actions">
   {% for a in head_actions if not a.danger %}
-  {{ action_button(a) }}
+  {{ action_button(a, loop.first) }}
   {% endfor %}
   {% if head_actions|selectattr('danger')|list %}<details class="action-overflow"><summary class="btn quiet">Autres actions</summary><div class="toolbar action-overflow-panel">{% for a in head_actions if a.danger %}{{ action_button(a) }}{% endfor %}</div></details>{% endif %}
 </div>
 {% endif %}
+</div>
 {% for m in messages or [] %}<div class="flash {{ {'ko': 'danger', 'ok': 'ok'}.get(m[0], m[0]) }}" role="status">{{ m[1] }}</div>{% endfor %}
 {% if view_description %}<p class="view-description">{{ view_description }}</p>{% endif %}
 {% if tabs and tabs|length > 1 %}<nav class="tabs" aria-label="Onglets">{% for t in tabs %}<a class="tab{{ ' on' if t.on }}" href="{{ t.href }}"{% if t.on %} aria-current="page"{% endif %}>{{ t.title }}{% if t.badge %}<span class="count">{{ t.badge }}</span>{% endif %}</a>{% endfor %}</nav>{% endif %}
 {{ filters_form(filters or [], keep or [], filtered, reset) }}
-{% if panel and not panel_after %}{% include panel %}{% endif %}
+{% if panel and not panel_after and not panel_after_blocks %}{% include panel %}{% endif %}
 <div class="stack">
-{{ render(blocks or [], forms or {}) }}
+{% for b in blocks or [] %}{{ render([b], forms or {}) }}{% if panel and panel_after_blocks == loop.index %}{% include panel %}{% endif %}{% endfor %}
 {% if panel and panel_after %}{% include panel %}{% endif %}
 {% if not blocks and not panel %}<div class="empty-state"><b>Rien à montrer ici pour l'instant.</b>{{ empty or "Cette page se remplira quand elle aura vécu un peu." }}</div>{% endif %}
 </div>
 {% endmacro %}
 {% block content %}
+<div class="page-view">
 {% if submenu %}
-<div class="with-submenu">
-  <details class="submenu-shell" data-responsive-menu open>
-    <summary class="submenu-toggle">Parcourir cette rubrique</summary>
+<div class="with-submenu{{ ' menu-directory' if operator_menu }}">
+  <details class="submenu-shell"{% if not operator_menu %} data-responsive-menu open{% endif %}>
+    <summary class="submenu-toggle">Changer de page dans {{ 'les réglages' if active_destination == 'reglages' else 'cette rubrique' }} <span class="muted">· {{ heading or title }}</span></summary>
+    <div class="submenu-search" hidden data-menu-search><label class="sr" for="q-menu">Filtrer les pages de cette rubrique</label><input id="q-menu" type="search" placeholder="Trouver une page…" autocomplete="off"></div>
   <nav class="submenu" aria-label="Sous-menu">
     {% for g in submenu %}
     <details class="submenu-group"{{ ' open' if g.open }}>
@@ -46,10 +48,12 @@
     </details>
     {% endfor %}
   </nav>
+  <p class="caption" data-menu-empty role="status" hidden>Aucune page ne correspond.</p>
   </details>
   <div class="submain">{{ head_and_body() }}</div>
 </div>
 {% else %}
 {{ head_and_body() }}
 {% endif %}
+</div>
 {% endblock %}

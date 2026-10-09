@@ -41,6 +41,28 @@ def headers(body):
     return re.findall(r'<th\b[^>]*>([^<]*)</th>', body)
 
 
+def test_connected_apps_are_paged_and_each_revocation_keeps_its_own_token(world):  # noqa: F811
+    client, live, _ = world
+    bootstrap(client)
+    account = client.portal.call(live.accounts.all)[0]
+    async def seed():
+        return [await live.accounts.create_token(account.id, f"Écran {n:02}") for n in range(14)]
+    tokens = client.portal.call(seed)
+    base = f"/inspecteur/reglages/comptes?compte={account.id}"
+    first = page(client, base)
+    assert "14 au total" in first and first.count('name="action" value="revoke_token"') == 12
+    next_url = html.unescape(re.search(r'<a href="([^"]+)" rel="next">', first).group(1))
+    assert f"compte={account.id}" in next_url and "page_apps=2" in next_url
+    last = page(client, "/inspecteur/reglages/comptes" + next_url)
+    assert last.count('name="action" value="revoke_token"') == 2
+    def ids(body):
+        return set(re.findall(r'name="token" value="(\d+)"', body))
+    assert not ids(first) & ids(last)
+    assert ids(first) | ids(last) == {str(t.id) for t, _ in tokens}
+    assert all(secret not in first + last for _, secret in tokens)
+    assert all(not t.revoked for t in client.portal.call(live.accounts.tokens))
+
+
 def test_reading_pages_show_content_keep_details_and_search_names(world, tmp_path):  # noqa: F811
     client, live, _ = world
     bootstrap(client)
@@ -62,7 +84,10 @@ def test_reading_pages_show_content_keep_details_and_search_names(world, tmp_pat
     shutil.copytree(STATIC, out / "static")
     messages = page(client, "/inspecteur/fil/messages?handle=Alice", out)
     assert "alice : un message" in messages and "bob : un message" not in messages
-    assert "épisode" not in headers(messages) and "texte" in headers(messages)
+    assert 'class="collection feed"' in messages and 'class="collection-body"' in messages
+    table = page(client, "/inspecteur/fil/messages?handle=Alice&vue_pg1=table", out)
+    assert "épisode" not in headers(table) and "texte" in headers(table)
+    assert "alice : un message" in table and "bob : un message" not in table
     assert "Informations complémentaires" in messages and "Suite du message" in messages
     next_url = html.unescape(re.search(r'<a href="([^"]+)" rel="next">', messages).group(1))
     tail = page(client, "/inspecteur/fil/messages" + next_url, out)
@@ -150,9 +175,40 @@ def test_large_episode_keeps_its_outcome_and_every_event_accessible(world, tmp_p
     drafts += [rt.EPISODE_ENDED.draft(kind="REPLY", outcome="done", detail="FIN ÉPISODE LONG")]
     append(client, live.kernel, drafts)
     url = '/inspecteur/episode/console-review'
-    first = page(client, url, tmp_path / 'review')
+    summary = page(client, url, tmp_path / 'review')
+    assert 'FIN ÉPISODE LONG' in summary and 'Résultat de l’épisode' in summary
+    first = page(client, url + '?onglet=deroule', tmp_path / 'review')
     assert '552 au total' in first and 'en cours ou interrompu' not in first
     assert 'FIN ÉPISODE LONG' not in first
     tail = page(client, url + '?page=23', tmp_path / 'review')
     assert 'FIN ÉPISODE LONG' in tail and 'Précédente' in tail
     assert 'runtime.episode.ended' in tail or rt.EPISODE_ENDED.name in tail
+
+
+def test_activity_keeps_open_work_pending_question_and_recent_failure_separate(world):  # noqa: F811
+    client, live, _ = world
+    bootstrap(client)
+    kernel = live.kernel
+    async def seed():
+        kernel.scheduler.stop()
+        await kernel.scheduler.cancel_all()
+        question = await kernel.mind.append([rt.PERCEPTION_RECEIVED.draft(handle='user_1', channel='web',
+            text=Content.of('Une question encore en attente'))], emitter='runtime', origin=Origin.EXTERNAL,
+            correlation='activity-pending')
+        await kernel.mind.append([rt.EPISODE_STARTED.draft(kind='REPLY', target='user_1', reply_to=question.seqs[0])],
+            emitter='runtime', origin=Origin.GENESIS, correlation='activity-open')
+        await kernel.mind.append([rt.EPISODE_STARTED.draft(kind='TASK'),
+            rt.EPISODE_ENDED.draft(kind='TASK', outcome='failed', detail='Service momentanément indisponible')],
+            emitter='runtime', origin=Origin.GENESIS, correlation='activity-failed')
+    client.portal.call(seed)
+    before = client.portal.call(lambda: kernel.mind.head)
+    body = page(client, '/inspecteur/decisions/en_cours')
+    assert 'Relevé à' in body and 'Actualiser cet écran' in body
+    assert 'Le travail en cours' in body and 'Les attentes' in body and 'Les derniers résultats' in body
+    assert '/inspecteur/episode/activity-open' in body and '/inspecteur/episode/activity-failed' in body
+    assert 'Une question attend une réponse' in body and 'Service momentanément indisponible' in body
+    assert client.portal.call(lambda: kernel.mind.head) == before
+    history = page(client, '/inspecteur/decisions/episodes?issue=failed')
+    assert 'class="collection list"' in history and 'Service momentanément indisponible' in history
+    table = page(client, '/inspecteur/decisions/episodes?issue=failed&vue_pg1=table')
+    assert 'class="collection list"' not in table and 'Service momentanément indisponible' in table

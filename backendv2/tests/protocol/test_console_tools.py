@@ -30,14 +30,18 @@ def test_every_tool_is_listed_with_its_fiche_and_none_can_be_set_here(world):  #
     client, live, _ = world
     bootstrap(client)
     registry = live.kernel.registry
+    # La découverte MCP peut ajouter des outils pendant la lecture des pages.
+    specs = dict(registry.tools)
+    dynamic = {name for name in specs if registry.is_dynamic(name)}
     listed = every_page(client, f"{BASE}/tous")
-    missing = [n for n in registry.tools if n not in listed]
+    missing = [n for n in specs if n not in listed]
     assert missing == [], missing
     plain = _forms(client.get(f"{BASE}/qui").text)  # une page sans action : ses seuls formulaires sont ceux du cadre
-    for name, spec in registry.tools.items():
+    for name, spec in specs.items():
         r = client.get(f"{BASE}/tous", params={"outil": name})
         text = html_of(r)
-        assert r.status_code == 200 and name in text and "non — défini dans le code" in text, name
+        editable = "sur la fiche de son serveur" if name in dynamic else "non — défini dans le code"
+        assert r.status_code == 200 and name in text and editable in text, name
         assert registry.bundles[spec.bundle] in text, name
         assert _forms(r.text) == plain, f"{name} : un outil du code ne se règle pas ici"
         ConsoleHTML(r.text).check()
@@ -84,3 +88,30 @@ def test_what_mika_serves_is_said(world):  # noqa: F811
     text = html_of(client.get(f"{BASE}/expose"))
     assert all(t.name in text for t in CONSOLE_TOOLS)
     assert "mika mcp token" in text and "/mcp/relais" in text
+
+
+def test_catalogue_cards_and_fiche_preserve_filters_and_table_choice(world):  # noqa: F811
+    import html
+    from urllib.parse import parse_qs, urlsplit
+
+    client, _, _ = world
+    bootstrap(client)
+    response = client.get(f'{BASE}/tous?lot=email&origine=interne')
+    assert response.status_code == 200 and 'class="collection cards"' in response.text
+    link = html.unescape(re.search(r'href="([^\"]*outil=email_read[^\"]*)"', response.text).group(1))
+    assert parse_qs(urlsplit(link).query)['lot'] == ['email']
+    detail = client.get(link)
+    ConsoleHTML(detail.text).check()
+    assert '<h1>email_read</h1>' in detail.text and 'Arguments et règles d’utilisation' in detail.text
+    crumb = re.search(r'<nav class="crumbs".*?</nav>', html.unescape(detail.text), re.S).group()
+    assert f'{BASE}/tous?lot=email&origine=interne' in crumb
+    table = client.get(f'{BASE}/tous?lot=email&origine=interne&vue_pg1=table')
+    assert 'class="collection cards"' not in table.text and 'class="tbl"' in table.text
+    table_link = html.unescape(re.search(r'href="([^\"]*outil=email_read[^\"]*)"', table.text).group(1))
+    assert parse_qs(urlsplit(table_link).query)['vue_pg1'] == ['table']
+    accented = client.get(f'{BASE}/tous?q=écrire').text
+    unaccented = client.get(f'{BASE}/tous?q=ecrire').text
+    def names_in(body):
+        return set(re.findall(r'outil=([a-zA-Z0-9_]+)', body))
+    assert names_in(accented) and names_in(accented) == names_in(unaccented)
+    assert 'Aucun outil ne correspond' in client.get(f'{BASE}/tous?q=aucun-resultat').text

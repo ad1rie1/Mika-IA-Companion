@@ -33,6 +33,7 @@ from mika.kernel.inspect import (
     Badge,
     Block,
     Chart,
+    Disclosure,
     Fields,
     InspectContext,
     Meter,
@@ -123,6 +124,8 @@ def text_of(blocks: list[Any]) -> str:
             out += [b.title, *map(_label, b.columns), *(_cell(c) for r in b.rows for c in _cells(r))]
             out += [] if b.rows else [b.empty]
             out += [text_of(list(r.detail)) for r in b.rows if isinstance(r, Row)]
+        elif isinstance(b, Disclosure):
+            out += [b.title, text_of(list(b.items))]
         elif isinstance(b, Fields):
             out += [b.title, *(f"{k} : {_cell(v)}" for k, v in b.pairs)]
         elif isinstance(b, Prose):
@@ -144,12 +147,19 @@ def warnings(blocks: list[Block]) -> list[str]:
     return [b.text for b in blocks if isinstance(b, Note) and b.tone == "warn"]
 
 
+def unfolded(blocks):
+    for b in blocks:
+        yield b
+        if isinstance(b, Disclosure):
+            yield from unfolded(b.items)
+
+
 def table(blocks: list[Block], title: str) -> Table:
-    return next(b for b in blocks if isinstance(b, Table) and b.title.startswith(title))
+    return next(b for b in unfolded(blocks) if isinstance(b, Table) and b.title.startswith(title))
 
 
 def fields(blocks: list[Block], title: str) -> dict[str, str]:
-    block = next(b for b in blocks if isinstance(b, Fields) and b.title == title)
+    block = next(b for b in unfolded(blocks) if isinstance(b, Fields) and b.title == title)
     return {k: _cell(v) for k, v in block.pairs}
 
 

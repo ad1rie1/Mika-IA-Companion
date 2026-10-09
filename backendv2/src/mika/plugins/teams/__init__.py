@@ -73,17 +73,17 @@ class TeamsParams(BaseModel):
         help="Un message reçu reste sous ses yeux (« TES MESSAGES TEAMS ») au plus ce temps.")] = 12 * HOUR
     enabled: Annotated[bool, Knob(
         label="Teams actif", group="Écrire", readonly=True,
-        help="Réglé dans Configuration › Sens › Teams : désactivé, elle ne prépare ni ne propose plus rien.")] = True
+        help="Réglé dans Réglages › Plugins › Teams : désactivé, elle ne prépare ni ne propose plus rien.")] = True
     mode: Annotated[Literal["brouillon", "validation", "autonome"], Knob(
         label="Ce qu'elle fait de ses réponses", group="Écrire", choices=MODES, readonly=True,
-        help="Réglé dans Configuration › Sens › Teams.")] = "brouillon"
+        help="Réglé dans Réglages › Plugins › Teams.")] = "brouillon"
     autodraft: Annotated[bool, Knob(
         label="Préparer des réponses d'elle-même", group="Brouillons", readonly=True,
-        help="Réglé dans Configuration › Sens › Teams.")] = False
+        help="Réglé dans Réglages › Plugins › Teams.")] = False
     skip: Annotated[tuple[str, ...], Knob(
         label="Jamais pour", group="Brouillons", readonly=True,
         help="Les conversations (un morceau de leur nom ou de leur identifiant) où elle ne prépare jamais de "
-             "réponse d'elle-même (réglé dans Configuration › Sens › Teams).")] = ()
+             "réponse d'elle-même (réglé dans Réglages › Plugins › Teams).")] = ()
     drafts_per_day: Annotated[int, Knob(
         label="Réponses d'elle-même par jour", group="Brouillons", lo=0, hi=50,
         help="Au plus autant de réponses préparées d'elle-même en vingt-quatre heures (chacune coûte un appel au "

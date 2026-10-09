@@ -1,8 +1,10 @@
 # La carte de la console
 
 Ce que chaque menu de `/inspecteur/` montre, et sous quelle forme. Référence de
-la refonte du 30/09/2026 (ADR 0029) ; la carte vit dans `app/console.py`, les
-réglages dans `app/reglages.py`.
+la refonte du 30/09/2026 (ADR 0029). Les destinations (adresses, onglets,
+libellés) vivent dans `app/console.py`, les réglages dans `app/reglages.py` ; le
+menu visible, qui les regroupe autrement, vit dans `app/console_menu.py` depuis
+le 8 octobre (voir « Menu opérateur et accueil »).
 
 Trois règles tiennent toute la console :
 
@@ -18,6 +20,10 @@ Trois règles tiennent toute la console :
    commande) est rangé dans « Options avancées ».
 
 ## Étape 1 — les informations essentielles, par menu
+
+Le tableau décrit les destinations. Leurs groupes d'alors (Elle, Ses relations,
+Son activité, Ses canaux, Exploitation) ne sont plus ceux du menu ; les adresses,
+elles, n'ont pas changé.
 
 | Groupe | Menu | La question de l'opérateur | L'essentiel |
 |---|---|---|---|
@@ -415,3 +421,326 @@ puis découpe ses données. Une deuxième table utilise par exemple
 dans les liens entre vues et réservés à la pagination. Sections, grilles,
 statistiques, courbes, détails de ligne et formulaires continuent de se
 combiner dans la même enveloppe, sans HTML ni JavaScript fournis par l’app.
+
+## Audit transversal et ergonomie — 8 octobre 2026
+
+Périmètre : le frontend de `backendv2`, c'est-à-dire la console `/inspecteur/`
+(Jinja, CSS, JavaScript et recherche de pages). Le client 3D `frontend/Web`
+a un code et des parcours distincts ; il ne fait pas partie de ce passage.
+L'audit utilise une instance fictive et les 174 pages de `mika console apercu`.
+
+Le socle de rendu est déjà réutilisable : blocs déclaratifs, formulaires partagés,
+routes authentifiées, pagination et échappement des textes. Les problèmes constatés
+se concentrent dans la navigation, la cascade CSS et les interactions navigateur.
+Une réécriture avec un autre framework n'est pas nécessaire pour les corriger.
+
+| Priorité | Constat vérifié | Correction |
+|---|---|---|
+| Haute | `console.css` redéfinissait `.btn.quiet` après `.btn.danger` : certains boutons « retirer » avaient un texte blanc sur fond blanc. Les boutons destructifs pleins manquaient aussi de contraste en sombre. | Une définition commune des boutons, variantes explicites, couleur de texte destructive adaptée au thème. Contraste vérifié en clair/sombre et au survol. |
+| Haute | `syncOnly` masquait les champs sans les désactiver : un champ obligatoire invisible pouvait bloquer la validation et ses valeurs restaient envoyées. | Désactivation des contrôles masqués, y compris leur marqueur `_champs`, conservation des valeurs lors du retour et des contrôles initialement désactivés. Un champ invalide ouvre ses détails parents. |
+| Haute | Le menu mobile reposait sur un label et une case cachée ; son état et le focus étaient mal gérés au clavier. | Bouton natif avec état annoncé, fermeture accessible, focus maintenu dans le menu, Échap et retour au bouton, contenu inactif en arrière-plan. Le raccourci `/` ouvre le menu avant de cibler la recherche. |
+| Moyenne | La barre latérale affichait toutes les destinations et repoussait Configuration, Système et la déconnexion sous la ligne de flottaison. | Rubriques repliables, choix conservés pour la session, rubrique courante ouverte, compteurs conservés sur les groupes fermés et pied de navigation séparé de son défilement. |
+| Moyenne | La recherche globale ne retrouvait pas les pages de configuration ni les pages natives. Les longs sous-menus n'avaient aucun filtre. | Résultats « Pages de la console » avec leur rubrique ; recherche insensible aux accents ; filtre local des sous-menus avec état vide et restauration des groupes quand on efface la recherche. |
+| Moyenne | Un changement de liste soumettait immédiatement les filtres malgré la présence d'un bouton « Filtrer ». | Application explicite des filtres : on peut remplir plusieurs critères avant de les envoyer. |
+| Moyenne | Les formulaires de réglages ne signalaient pas qu'on allait perdre une saisie. | Indicateur « Modifications non enregistrées » et protection native du navigateur à la sortie ; retour à l'état initial reconnu, envoi du formulaire autorisé. Les valeurs restent en mémoire de la page, sans stockage local. |
+| Moyenne | Quatre pages débordaient à 390 px : création de projet, comportement d'un projet, paramètres web et Teams. | Largeurs minimales corrigées dans les composants de formulaire, grilles de champs bornées et identifiants longs sécables. Les tables gardent leur propre défilement. |
+| Moyenne | Une session expirée affichait seulement un texte d'erreur ; les redirections suivies par `fetch` n'étaient pas reconnues. | Lien de reconnexion, arrêt des tentatives lorsque la session expire, conservation du dernier état connu et message distinct pour une interruption réseau. |
+| Visuelle | Titres, sections et indicateurs peu hiérarchisés ; grands vides entre les cartes ; règles de boutons en doublon. | Palette claire et espacements harmonisés, titres plus distincts, cartes qui occupent la largeur utile, alertes repérables, barre d'état compacte sur mobile, nettoyage des règles de boutons. |
+
+La connexion possède maintenant un titre principal et ses erreurs sont annoncées.
+Les panneaux d'actions rendent le focus à leur commande avec Échap ; ouvrir une
+action dans « Autres actions » ne referme pas son parent. Les échecs de copie sont
+affichés au lieu de produire une promesse rejetée sans retour utilisateur.
+
+### Points à reprendre dans un travail par parcours
+
+- **Configuration** *(fait)* : les familles « Comportement » ont leur entrée
+  « Paramètres avancés » dans le menu Réglages, et le répertoire des réglages les
+  replie à part ; les URL et les raccourcis existants sont conservés.
+- **Tableau de bord** : les vitaux sont présents dans le bandeau et dans « En ce
+  moment ». Le corps de page et les listes ne se rafraîchissent pas avec le bandeau.
+  Concevoir un rafraîchissement ciblé avec indication de fraîcheur, sans effacer les
+  filtres ni les saisies, serait une amélioration utile.
+- **Parcours métier** : les tables génériques assurent la couverture fonctionnelle,
+  mais une relecture avec des données représentatives de projets longs, de boîtes
+  remplies et d'approbations nombreuses reste nécessaire pour choisir où préférer
+  une liste de lecture ou une fiche. L'absence de débordement ne valide pas ce choix.
+
+### Reproduire les vérifications navigateur
+
+Les tests HTTP existants contrôlent les routes, la sécurité, les formulaires et la
+pagination. `tests/browser/console.cjs` complète ces contrôles avec un vrai navigateur :
+menu au clavier, mode sans JavaScript, recherche des rubriques, champs conditionnels,
+filtres, état des formulaires, panneaux imbriqués, expiration de session, contrastes
+et largeur de chaque page exportée à 390 et 1440 px.
+
+Depuis `backendv2`, avec Playwright disponible pour Node (ou son dossier dans
+`NODE_PATH`) et Chrome installé :
+
+```bash
+.venv/bin/python -m mika console apercu --out /tmp/mika-console-apercu
+MIKA_CONSOLE_PREVIEW=/tmp/mika-console-apercu node --test tests/browser/console.cjs
+```
+
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE` permet de préciser un autre exécutable Chromium.
+Le navigateur emploie un profil temporaire ; les pages et ressources sont servies
+par interception depuis l'export et les fichiers source, et les requêtes vers
+un autre hôte sont bloquées. Aucun compte de l'installation n'est utilisé.
+
+Validation de ce passage : **220 tests Python et 10 tests navigateur réussis** ;
+174 pages parcourues à deux largeurs, captures relues en clair, sombre et mobile.
+Ruff, vérification de syntaxe JavaScript et `git diff --check` passent. Il s'agit
+d'une validation locale sur données fictives, pas d'un déploiement du serveur.
+
+### Menu opérateur et accueil
+
+Le menu visible est maintenant défini dans `app/console_menu.py` : **Accueil,
+À valider, sa rubrique, Relations & échanges, Activité, Outils & connexions,
+Réglages, Système**. Sa rubrique porte son nom, lu dans sa persona au rendu
+(`MenuGroup.her`, ADR 0070) : « Mika » pour la persona livrée. `app/console.py` reste le registre des destinations : les liens
+existants, les fiches, les vues des facultés et les formulaires gardent leurs
+adresses. `InspectorDeps.menu` transmet cette présentation à l'inspecteur.
+
+Chaque entrée peut réunir plusieurs pages liées. La page la plus précise
+allume le bon lien : les dessins sont dans Activité, la caméra dans Outils,
+les brouillons et les identités à confirmer dans À valider. Les compteurs
+restent sur les sous-pages ; la rubrique affiche un point d'attention.
+Elle n'additionne pas des listes qui peuvent contenir la même demande.
+La recherche reconnaît aussi les nouveaux libellés du menu.
+
+L'accueil dispose d'un gabarit dédié : son état, priorités, chiffres du
+jour, épisodes récents puis courbes. Il réemploie les blocs et la pagination
+existants. L'heure du relevé distingue le contenu de page du bandeau de vitaux,
+qui continue à se rafraîchir seul. Le répertoire exhaustif des réglages et du
+système est repliable, au-dessus du contenu ; les pages liées (fournisseurs et
+rôles, pages de personnalité, diagnostic) disposent aussi d'onglets directs.
+
+Les vérifications HTTP contrôlent chaque lien du menu sans accepter de
+redirection silencieuse, ainsi que la rubrique active sur les vues et les
+fiches. L'export demeure complet : 174 pages. L'aperçu utilise les conversations,
+le projet et les mesures fictifs produits par `mika console apercu` ; il ne
+représente pas les données d'une installation en service.
+
+Validation de cette version : **238 tests Python et 10 tests navigateur réussis**,
+Ruff et `git diff --check` passent. Les contrôles des formulaires refusés isolent
+les processus de fond ; le test du catalogue distingue les outils du code des
+outils MCP découverts pendant l'exécution.
+
+### Projets, personnes, conversations et validations
+
+Les projets et les personnes s'ouvrent sur des fiches : titre, état, informations
+utiles et accès direct au détail. Les conversations utilisent un fil avec le
+texte visible, l'interlocuteur, la date et le lien vers l'explication d'une
+réponse. Les informations complémentaires restent accessibles au clavier.
+Le sélecteur Fiches/Fil → Tableau conserve les filtres et la pagination, même
+sans JavaScript ; les deux présentations utilisent les mêmes données.
+
+Cette présentation est déclarée par `Table.layout` et `Column.role` dans les
+vues des facultés. Le rendu commun et `_collections.html` la mettent en forme
+sans introduire de dépendance de l'inspecteur aux facultés. L'enveloppe Forge
+accepte ces champs facultatifs ; les tables existantes gardent leur rendu.
+
+Les validations montrent le contenu exact avant les boutons de décision, avec
+une séparation entre l'aperçu, les arguments techniques et la note facultative.
+Une demande bloquée indique la raison et désactive l'approbation. Les contrôles
+CSRF, la confirmation, l'empreinte du contenu vu et l'absence de décision sur
+Entrée dans la note sont conservés. L'action principale des pages est placée
+près du titre et les chiffres de synthèse occupent moins de place.
+
+L'export fictif comprend deux projets, deux personnes et leurs fiches, douze
+messages, leurs explications, et deux validations dont une bloquée. Il exporte
+aussi les modes Tableau et des états vides. Les captures ont été relues en
+clair, sombre et mobile. L'aperçu est une démonstration en lecture seule.
+
+Validation de ce passage : **372 tests Python et 13 tests navigateur réussis** ;
+251 pages parcourues à 390 et 1440 px. Après extraction du gabarit commun des
+fiches, les 30 tests des parcours, de la navigation et de la pagination passent
+à nouveau. Ruff, la syntaxe JavaScript et `git diff --check` passent également.
+
+### Courrier et entrée des réglages
+
+`/inspecteur/reglages` ouvre maintenant « Tous les réglages ». Le répertoire
+est construit à partir des pages déclarées, sans charger leurs valeurs :
+catégories, descriptions courtes, recherche par plusieurs mots sans distinction
+d'accents. Les paramètres internes restent dans un panneau avancé, ouvert
+lorsqu'une recherche les trouve. Chaque lien mène au formulaire existant.
+Les entrées configurées (fournisseurs, boîtes, etc.) utilisent un gabarit de
+fiches séparé, `_settings_records.html`, avec leurs valeurs non secrètes,
+la modification et le retrait confirmé ; la pagination reste la même.
+
+Le courrier utilise une liste de lecture : objet, extrait, expéditeur, date
+et état. Le mode Tableau reste disponible. Le compte, le dossier, les filtres
+et ce mode d'affichage sont conservés dans la pagination et le retour depuis
+un message. Les brouillons à décider sont des fiches ; un brouillon absent
+est nommé indisponible et signalé à corriger. Consulter n'envoie rien et ne
+marque aucun message comme lu.
+
+Sur mobile, la navigation des espaces de travail est repliable, avec le
+contexte courant dans son titre. Elle reste ouverte et manipulable sans
+JavaScript ; avec JavaScript, son repli tient compte de la largeur et ramène
+le focus au titre si nécessaire. Les formes HTML des messages restent
+assainies par le lecteur existant, avec la version texte accessible.
+
+L'aperçu dispose maintenant de deux boîtes fictives, de messages reçus et
+archivés, d'un envoi conservé et d'un brouillon lisible. Ces données utilisent
+le port simulé `FakeMail`, aucun serveur de courrier. Les fiches et leurs
+onglets sont inclus dans l'export, ainsi que les recherches et états vides
+utiles aux vérifications.
+
+Validation de ce passage : **381 tests Python et 15 tests navigateur réussis** ;
+**295 pages** parcourues à 390 et 1440 px sans débordement horizontal. Captures
+relues en clair, sombre et mobile ; Ruff, syntaxe JavaScript et
+`git diff --check` passent. Aperçu local en lecture seule, sans déploiement.
+
+### Outils, activité et sorties à traiter
+
+Le catalogue des outils utilise des fiches : nom, origine, famille, description
+et usage récent. La recherche accepte plusieurs mots et ignore les accents.
+Les compteurs indiquent explicitement qu'ils portent sur le catalogue complet ;
+la liste affiche le nombre de résultats filtrés. Ouvrir une fiche puis revenir
+conserve la recherche, les filtres, la page et le mode Tableau. La fiche présente
+la disponibilité par situation, les arguments et les règles repliables, puis
+les derniers appels. Ces informations restent issues du registre et de la
+porte d'offre du moteur.
+
+L'activité sépare le travail en cours, les files et questions en attente,
+puis les derniers résultats. Le relevé est daté et dispose d'un lien explicite
+d'actualisation ; le rafraîchissement du bandeau ne prétend pas actualiser cette
+photographie. Les réservations techniques sont repliables. L'historique utilise
+une liste de lecture avec sa vue Tableau et ses filtres existants.
+
+Les sorties à traiter précèdent l'historique. Chaque fiche expose l'erreur,
+l'état, une explication et les actions permises. Le filtre d'état s'applique
+également à ces fiches, avec une pagination indépendante de huit éléments.
+Les sorties interrompues et périmées restent uniquement marquables comme vues ;
+les relances conservent leur confirmation et les formulaires leur contrôle
+CSRF. Consulter ces écrans ne change aucun état.
+
+L'export ajoute des épisodes fictifs réussis, échoués et interrompus, une
+question en cours de réponse et trois états d'envoi à vérifier. Il utilise
+uniquement le magasin temporaire de l'aperçu. Le catalogue complet et toutes
+les fiches d'outils sont inclus dans les captures exportables.
+
+Validation de ce passage : **384 tests Python et 17 tests navigateur réussis** ;
+les 40 tests des parcours modifiés et de la pagination passent également après
+les dernières finitions. **394 pages** parcourues à 390 et 1440 px sans
+débordement horizontal. Captures relues en clair, sombre et mobile ; Ruff,
+syntaxe JavaScript et `git diff --check` passent. Aperçu local en lecture seule.
+
+### Santé et compréhension des épisodes
+
+La santé générale ouvre sur un bilan daté : contrôles sans problème, points à
+examiner, dont les pannes. Les contrôles en panne précèdent les dégradations ;
+chaque fiche garde le constat, le détail et, lorsque pertinent, un lien vers
+son diagnostic. Les contrôles sains sont repliés lorsqu'il y a un problème.
+Les projections, quarantaines, performances et la sonde publique restent
+consultables. Une quarantaine ouvre automatiquement les détails techniques.
+Le démarrage et l'arrêt ne sont pas présentés comme des contrôles réussis.
+Le rendu est isolé dans `pages/diagnostics.py` et `health_summary.html`.
+
+L'ouverture d'un épisode affiche désormais « Résumé » : résultat enregistré,
+durée connue, nombre d'événements et de paroles, message déclencheur et les
+trois dernières paroles. Le résumé lit le journal sans lancer d'action ni de
+modèle ; un début, une fin ou un texte absent est indiqué comme tel. Les
+paroles produites ne sont pas présentées comme une preuve de livraison.
+Leur auteur et leur destinataire sont distingués dans le résumé et dans
+l'onglet des paroles. Le détail de cette vue est dans `episode_overview.py`.
+
+Le déroulé se lit en liste avec accès à l'événement et aux données repliables ;
+le mode Tableau conserve les mêmes informations. Les onglets existants
+restent disponibles. Les anciens liens paginés sans onglet ouvrent toujours
+le déroulé. L'export comprend aussi les événements de la vie fictive pour
+que les liens des résumés et des déroulés soient utilisables dans l'aperçu.
+
+Validation : **390 tests Python et 20 tests navigateur réussis**. Les 38 tests
+des parcours concernés ont été relancés après clarification de l'auteur des
+paroles ; les trois nouveaux parcours navigateur passent aussi après les
+finitions visuelles. **480 pages** vérifiées à 390 et 1440 px sans débordement
+horizontal, captures relues en clair, sombre et mobile. Ruff, syntaxe
+JavaScript et `git diff --check` passent. Aperçu fictif en lecture seule.
+
+### Mémoire, pensées et revue de l’ensemble de la console
+
+Les souvenirs, croyances, promesses et moments se lisent en listes : contenu,
+sensibilité et état visibles, origine accessible, détails conservés. Les
+filtres et les pages restent identiques en mode Tableau. Une collection peut
+maintenant présenter un texte sans inventer de titre. Les pensées vivantes et
+les attentes occupent le premier plan ; les historiques et les règles sont
+repliables. Un lien vers une page ancienne ouvre l’historique concerné.
+Le journal et les récits nocturnes utilisent aussi les documents de lecture.
+
+La consolidation présente d’abord les passages à reprendre, leur état et la
+cause connue. Le détail utilise un vrai bloc de texte (il pouvait auparavant
+produire « Bloc inconnu »). La reprise est liée au passage par un champ caché,
+avec confirmation, CSRF et protection contre le double envoi. Les identifiants
+numériques cachés sont pris en charge par le rendu des formulaires ; leur
+validation typée reste effectuée à l’exécution de l’action.
+
+La revue transversale couvre les destinations du menu, les fiches et les
+formulaires exportés. Les besoins et les réponses Teams utilisent des fiches ;
+les conversations Teams et le journal d’événements des listes de lecture.
+Les processus en échec précèdent les autres, avec un état explicite et la
+dernière erreur au détail. Une page sans anomalie donne un bilan clair ; les
+traces normales restent séparées des incidents. Cette présentation est isolée
+dans `pages/runtime_diagnostics.py`.
+
+Les erreurs de champs ont un résumé navigable au clavier. Aller à un champ
+ouvre ses panneaux repliés et conserve la valeur saisie. Les formulaires
+d’action signalent aussi les modifications non enregistrées. Un curseur en
+lecture seule est désactivé. Sur mobile, l’onglet courant est visible au
+chargement et les longues explications ne gonflent plus la barre fixe des
+boutons. Les clés techniques des paramètres sont repliables. La connexion
+conserve l’identifiant après un refus, sans conserver le mot de passe.
+
+Les comptes se parcourent en liste et leurs applications en fiches paginées,
+douze par page. Chaque révocation garde le bon compte et le bon jeton, sa
+confirmation et son contrôle CSRF. Aucun secret de jeton n’est affiché.
+L’aperçu ajoute des souvenirs, pensées, promesses et reprises fictifs, ainsi
+que les fiches des comptes et des applications créées dans sa base temporaire.
+
+Validation de l’ensemble : **470 tests Python et 26 tests navigateur réussis**.
+Après la dernière finition des formulaires, les 32 tests Python concernés ont
+également été relancés, puis les 15 tests opérateur après la finition de la
+connexion. **526 pages exportées**, vérifiées à 390 et 1440 px ;
+captures de lecture relues en clair, sombre et mobile. Ruff, syntaxe JavaScript
+et `git diff --check` passent. L’aperçu local est en lecture seule (POST refusé),
+avec des données fictives. Ces contrôles ne remplacent pas l’utilisation avec
+les services externes et les données réelles.
+
+### Finalisation du 9 octobre
+
+Une relecture du lot avant son commit a corrigé ce qui suit.
+
+- **Son nom.** Plus aucune chaîne du code console n'écrit « Mika » : sa rubrique,
+  l'accueil (« … en ce moment ») et la santé (« … est arrêtée ») le lisent dans
+  sa persona (`UI.her_name`, variable `her` des gabarits) ; les descriptions
+  disent « elle ». La politique de l'ADR 0070 (`test_her_name_comes_from_her_persona`)
+  le vérifie pour le Python.
+- **Accueil.** Les messages de confirmation s'affichent (l'oubli d'un sujet y
+  redirige), comme les actions d'en-tête s'il y en a. Les panneaux sont placés
+  par le nom de leur onglet (`slots`), non par leur rang : un onglet absent
+  laisse un panneau vide au lieu d'une erreur.
+- **Fiches cliquables.** Une fiche de collection ou de réglage mène à sa page
+  sur toute sa surface, comme une ligne de tableau. Un titre replié (texte long)
+  n'est plus enveloppé dans un lien : le lien « Ouvrir » du pied suffit. Une
+  liste vide annonce son état comme élément de liste.
+- **Menu.** Une fiche ouverte depuis une liste allume l'entrée de cette liste
+  (un brouillon : « À valider › Brouillons de courrier ») plutôt que sa seule
+  rubrique. La préférence d'une rubrique n'est plus écrasée par son ouverture
+  d'office sur sa propre page.
+- **Formulaires.** Après « Voir l'effet » ou une valeur refusée, la page remontre
+  des valeurs que rien n'a enregistrées : le formulaire envoyé reste « non
+  enregistré » et la sortie est protégée. Seuls l'adresse et le rang du dernier
+  formulaire envoyé passent en `sessionStorage`, jamais ses valeurs.
+- **Mode Tableau.** Le choix « Tableau » d'une collection (`vue_pg<n>`) se garde
+  quel que soit son rang (`kernel.inspect.is_table_choice`) : le courrier et le
+  catalogue des outils ne supposent plus que leur table est la première.
+- **Aperçu.** L'export retient les processus au lieu d'arrêter l'ordonnanceur :
+  la santé exportée ne montre plus une boucle « arrêtée » que l'aperçu avait
+  fabriquée.
+- **Libellés.** Les destinations « Tableau de bord » et « Configuration »
+  s'appellent « Accueil » et « Réglages », comme dans le menu : titres, fils
+  d'Ariane, priorités de l'accueil et aides qui disaient « Configuration › … »
+  suivent (les pages de cette carte gardent leurs anciens noms d'étapes).
+- **Test navigateur.** Le parcours courrier vérifie ce qu'il fait : déplier la
+  liste des dossiers au clavier, la replier, puis ouvrir un message.

@@ -1,0 +1,29 @@
+{# Présentations de lecture des tables ; render conserve les détails récursifs. #}
+{% from "_cells.html" import cell %}
+
+{% macro collection(b, forms, render) -%}
+<div class="collection {{ b.layout }}" role="list" aria-label="{{ b.title or 'Résultats' }}">
+{% for r in b.rows %}
+  <article class="collection-item{{ ' t-' ~ r.tone if r.tone }}" role="listitem"{% if r.href %} data-href="{{ r.href }}"{% endif %}>
+    {% if r.heading or r.badges %}<div class="collection-heading">
+      {% if r.heading %}<h4>{% if r.heading.t != 'link' and not r.heading.clamp and b.layout != 'feed' and r.href %}<a href="{{ r.href }}">{{ cell(r.heading) }}</a>{% else %}{{ cell(r.heading) }}{% endif %}</h4>{% endif %}
+      {% if r.badges %}<div class="badges">{% for c in r.badges %}{{ cell(c) }}{% endfor %}</div>{% endif %}
+    </div>{% endif %}
+    {% if b.layout == 'feed' %}{{ record_fields(r.fields) }}{% endif %}
+    {% for part in r.body %}<div class="collection-body"><span class="sr">{{ part.label }}</span>{{ cell(part.value) }}</div>{% endfor %}
+    {% if b.layout != 'feed' %}{{ record_fields(r.fields) }}{% endif %}
+    {% if r.href or r.detail %}<div class="collection-footer">
+      {% if r.href %}<a class="collection-open" href="{{ r.href }}">{{ b.link_label }} →</a>{% endif %}
+      {% if r.detail %}<details class="collection-details"{{ ' open' if r.open }}>
+        <summary>{{ 'Message complet et détails' if b.layout == 'feed' else 'Informations complémentaires' }}</summary>
+        <div class="stack">{{ render(r.detail, forms) }}</div>
+      </details>{% endif %}
+    </div>{% endif %}
+  </article>
+{% else %}<div class="empty-state" role="listitem"><b>Aucun élément à afficher.</b>{{ b.empty }}</div>{% endfor %}
+</div>
+{%- endmacro %}
+
+{% macro record_fields(fields) -%}
+{% if fields %}<dl class="collection-fields">{% for f in fields %}<div><dt{% if f.hint %} title="{{ f.hint }}"{% endif %}>{{ f.label }}</dt><dd>{{ cell(f.value) }}</dd></div>{% endfor %}</dl>{% endif %}
+{%- endmacro %}

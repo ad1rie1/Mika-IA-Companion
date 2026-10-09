@@ -3,7 +3,6 @@ contributions, journal d'exploitation, simulations, toutes les vues."""
 
 from __future__ import annotations
 
-import json
 import re
 import secrets as _secrets
 from collections import defaultdict
@@ -16,8 +15,10 @@ from starlette.responses import RedirectResponse, Response
 
 from mika.adapters.llm.config import ROLE_LABELS
 from mika.contracts import runtime as rt
-from mika.inspector import names
+from mika.inspector import names, render
 from mika.inspector.catalog import Panel
+from mika.inspector.pages.diagnostics import health_page
+from mika.inspector.pages.runtime_diagnostics import anomaly_blocks, process_blocks
 from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel.clock import DAY, US
@@ -54,11 +55,6 @@ from mika.runtime import health
 from mika.runtime import operations as ops
 from mika.runtime.boundary import Failed, call
 
-STATE_TONES = {"ok": "ok", "degraded": "warn", "ko": "danger"}
-STATES_FR = {"ok": "en forme", "degraded": "dégradé", "ko": "en panne"}
-CHECKS_FR = {"journal": "journal", "slices": "tranches", "loops": "boucles", "projections": "projections",
-             "processes": "processus", "outbox": "file de sortie", "llm": "modèles", "lanes": "voies",
-             "config": "configuration lisible"}
 #: les états d'une ligne de la file de sortie (``runtime/effects.py``) ; « seen » : un échec qu'un opérateur a
 #: vu et laissé. « stale » : une parole qui n'a pas pu partir dans les dix minutes (elle ne la dira plus, et
 #: personne n'en a rien su) ; « interrupted » : une action coupée en cours (un arrêt, son délai) dont on ne
@@ -74,6 +70,12 @@ OUTBOX_PROBLEMS = ("failed", "orphan", "stale", "interrupted")
 #: ne part plus), une action interrompue a déjà dit son échec à qui l'avait voulue (la rejouer referait
 #: peut-être ce qui a eu lieu)
 OUTBOX_SEEN_ONLY = ("stale", "interrupted")
+OUTBOX_GUIDANCE = {
+    "failed": "L’action a échoué. Tu peux la relancer ou la marquer comme vue.",
+    "orphan": "Aucun exécuteur ne l’a prise en charge.",
+    "stale": "Cette parole est périmée : elle ne sera plus envoyée.",
+    "interrupted": "Cette action a peut-être déjà eu lieu. Vérifie son résultat avant de la marquer comme vue.",
+}
 #: les pages de Système qui lisent le journal ou une table, par page
 PAGE = 50
 REPORT_NAME = re.compile(r"^[\w.-]{1,120}\.(md|html|json|txt)$")
@@ -84,34 +86,11 @@ def _names(items: Any) -> str:
     return ", ".join(sorted(items)) or "—"
 
 
-@TABS.tab("systeme.sante", title="Santé", group="Surveillance", badge=lambda ui: sum(
+@TABS.tab("systeme.sante", title="Santé générale", group="Surveillance", badge=lambda ui: sum(
     1 for c in health.report(ui.kernel).checks if c.state != health.OK),
-          description="Les contrôles de santé (ce que dit aussi /health), les projections et ce qui en est en "
-                      "quarantaine, les vues lentes.")
-async def sante(ui: Any, request: Request) -> list[Any]:
-    kernel = ui.kernel
-    report = health.report(kernel)
-    checks = Table(("contrôle", "état", "résumé"), tuple(
-        Row((CHECKS_FR.get(c.name, c.name), Badge(STATES_FR.get(c.state, c.state), STATE_TONES.get(c.state, "")),
-             c.summary), tone=STATE_TONES.get(c.state, ""),
-            detail=(Code("\n".join(c.detail)),) if c.detail else ()) for c in report.checks),
-        title=f"État : {STATES_FR.get(report.status, report.status)} (phase {report.phase})")
-    lag = kernel.projections.lag()
-    projs = Table(("projection", "niveau", Column("version", "num"), Column("retard", "num")), tuple(
-        (p.name, str(p.tier), p.version, "dans la transaction" if str(p.tier).endswith("T0") else lag.get(p.name, 0))
-        for p in sorted(kernel.registry.projectors.values(), key=lambda p: p.name)), title="Projections")
-    blocks: list[Any] = [checks, projs]
-    if kernel.projections.quarantined:
-        blocks.append(Table(("projection", "événement", "erreur"), tuple(
-            (name, Ref("event", str(seq), str(seq)), Text(err, "muted", clamp=200))
-            for name, seq, err in reversed(kernel.projections.quarantined)), title="Quarantaine"))
-    slow = ui.inspection.slow()
-    if slow:
-        blocks.append(Table(("vue", Column("passages", "num"), Column("dernière (ms)", "num"),
-                             Column("pire (ms)", "num")), tuple(
-            (k, t.runs, t.last_us // 1000, t.max_us // 1000) for k, t in slow), title="Vues lentes"))
-    blocks.append(Disclosure("Sonde publique (/health)", (Code(json.dumps(report.public(), indent=1)),)))
-    return blocks
+          description="Repérer les problèmes de fonctionnement et retrouver le diagnostic utile pour chacun.")
+async def sante(ui: Any, request: Request) -> Any:
+    return health_page(ui)
 
 
 @TABS.tab("systeme.appels", title="Coûts et appels", group="Surveillance",
@@ -224,10 +203,11 @@ async def chronologie(ui: Any, request: Request) -> Any:
                  for e in events)
     notes = [Note(f"Les événements de « {corr[:80]} » : ce n'est pas un épisode (une action d'opérateur, un effet, "
                   "un processus).", "info")] if corr and corr not in episodes and events else []
-    return {"blocks": [*notes, Table((Column("quand", "fit"), "ce qui s'est passé", "lié à",
+    return {"blocks": [*notes, Table((Column("quand", "fit"), Column("ce qui s'est passé", role="title"), "lié à",
                                       Column("événement", detail=True), Column("type", detail=True),
                                       Column("corrélation", detail=True)), rows,
-                                     title="Le journal", empty="Rien ne correspond.", pager=pager)],
+                                     title="Le journal", empty="Rien ne correspond.", pager=pager,
+                                     layout="list", link_label="Ouvrir l’événement")],
             "filters": TIMELINE_PARAMS, "values": values}
 
 
@@ -419,35 +399,7 @@ async def all_views(ui: Any, request: Request) -> list[Any]:
           description="Ses processus de fond (relire la mémoire, dormir, relever le courrier…) : combien de passages, "
                       "d'échecs, la dernière erreur — et les échecs gardés au journal, qui survivent au redémarrage.")
 async def processus(ui: Any, request: Request) -> list[Any]:
-    kernel = ui.kernel
-    sched = kernel.scheduler
-    running = set(sched.running())
-    failing = [s for s in sched.specs if sched.consecutive.get(s.name, 0) >= 3]
-    procs = Table(("processus", "faculté", "voie", Column("passages", "num"), Column("échecs", "num"),
-                   Column("d'affilée", "num"), "dernier passage", "dernière erreur", Column("nom technique", detail=True)),
-                  tuple(
-        Row((ui.names.process(s.name) + (" · en cours" if s.name in running else ""), ui.names.faculty(s.owner),
-             names.lane(s.lane), sched.runs.get(s.name, 0),
-             sched.failures.get(s.name, 0), sched.consecutive.get(s.name, 0),
-             When(sched.last_run(s.name) or 0) if sched.last_run(s.name) else "—",
-             Text(names.detail(sched.last_error.get(s.name, (0, ""))[1]), "muted", clamp=160),
-             Text(s.name, "mono")),
-            tone="danger" if sched.consecutive.get(s.name, 0) >= 3 else "") for s in sched.specs),
-        title="Depuis le démarrage", caption="Ces compteurs repartent de zéro à chaque démarrage ; les échecs "
-                                             "gardés au journal sont dessous.")
-    ctx = ui.inspection.context(request.query_params)
-    failed, pager = ctx.older([rt.PROCESS_FAILED], PAGE)
-    history = Table((Column("quand", "fit"), "processus", "erreur"), tuple(
-        Row((When(e.at), Text(ui.names.process(e.data.process), hint=e.data.process),
-             Text(names.detail(e.data.error), "muted", clamp=240)),
-            href=Ref("event", str(e.seq), "")) for e in failed), title="Échecs gardés au journal",
-        empty="Aucun échec de processus au journal.", pager=pager)
-    return [Stats((Stat("Processus", len(sched.specs)),
-                   Stat("En cours", len(running), ", ".join(ui.names.process(n) for n in sorted(running))[:90]),
-                   Stat("En échec d'affilée", len(failing), ", ".join(ui.names.process(s.name) for s in failing)[:90],
-                        "danger" if failing else ""),
-                   Stat("Échecs depuis le démarrage", sum(sched.failures.values()), "",
-                        "warn" if any(sched.failures.values()) else ""))), procs, history]
+    return process_blocks(ui, request.query_params)
 
 
 @TABS.tab("systeme.anomalies", title="Anomalies", group="Surveillance",
@@ -456,31 +408,7 @@ async def processus(ui: Any, request: Request) -> list[Any]:
                       "les traces du journal (épisode supplanté, oubli, reconstruction). En mémoire depuis le "
                       "démarrage.")
 async def anomalies(ui: Any, request: Request) -> list[Any]:
-    kernel = ui.kernel
-    mind = kernel.mind
-    items = list(reversed(list(getattr(mind, "anomalies", ()) or ())))
-    arbiter = list(reversed(list(getattr(kernel.arbiter, "anomalies", ()) or ())))
-    traces = list(reversed(list(getattr(mind, "traces", ()) or ())))
-    tainted = dict(mind.root.tainted.items())
-    out: list[Any] = [Stats((
-        Stat("Évaluations et réductions", len(items), "échouées sans corrompre", "warn" if items else ""),
-        Stat("Arbitre", len(arbiter), "anomalies de l'arbitre", "warn" if arbiter else ""),
-        Stat("Traces du journal", len(traces), "supplanté, oubli, reconstruction"),
-        Stat("Tranches corrompues", len(tainted), ", ".join(tainted) or "aucune", "danger" if tainted else ""),
-    ))]
-    if tainted:
-        out.append(Note("Tranches corrompues (leur réducteur a levé) : " + ", ".join(
-            f"{o} (au seq {s})" for o, s in tainted.items()) + ". Leur état est figé jusqu'à reconstruction "
-            "(« mika rebuild »).", "danger"))
-    out.append(Table(("anomalie",), tuple((Text(a, "mono", clamp=300),) for a in items),
-                     title="Évaluations et réductions qui ont échoué", empty="Aucune."))
-    out.append(Table(("anomalie",), tuple((Text(str(a), "mono", clamp=300),) for a in arbiter),
-                     title="Anomalies de l'arbitre", empty="Aucune."))
-    out.append(Table((Column("quand", "fit"), Column("sorte", "fit"), "détail"), tuple(
-        (When(t.at), Badge(t.kind, "muted"), Text(json.dumps(t.detail, ensure_ascii=False, default=str), "mono",
-                                                   clamp=240)) for t in traces),
-        title="Traces du journal", empty="Aucune."))
-    return out
+    return anomaly_blocks(ui)
 
 
 @TABS.tab("systeme.sorties", title="Sorties", group="Surveillance",
@@ -507,14 +435,19 @@ async def sorties(ui: Any, request: Request) -> Any:
                           count=n, active=k == status, tone=tones.get(k, "")) for k, n in sorted(counts.items()))
     back = request.url.path + (f"?{urlencode(_without(request.query_params, 'flash'))}"
                                if _without(request.query_params, "flash") else "")
-    marks = ",".join("?" * len(OUTBOX_PROBLEMS))
+    selected_problems = (status,) if status in OUTBOX_PROBLEMS else OUTBOX_PROBLEMS if not status else ()
+    problem_total = sum(counts.get(st, 0) for st in selected_problems)
+    problem_page = ctx.pager("page_problemes", size=OUTBOX_PROBLEMS_SHOWN, total=problem_total)
+    marks = ",".join("?" * len(selected_problems))
     problems = [{"key": key, "seq": seq, "label": _effect_label(ui, effect), "status": labels.get(st, st),
-                 "error": names.detail(err) if err else "", "retry": st not in OUTBOX_SEEN_ONLY}
+                 "tone": tones.get(st, "warn"), "error": names.detail(err) if err else "", "retry": st not in OUTBOX_SEEN_ONLY,
+                 "hint": OUTBOX_GUIDANCE[st]}
                 for key, seq, effect, st, err in store.query_mind(
                     f"SELECT key, seq, effect, status, last_error FROM outbox WHERE status IN ({marks}) "
-                    f"ORDER BY seq DESC LIMIT {OUTBOX_PROBLEMS_SHOWN}", OUTBOX_PROBLEMS)]
+                    "ORDER BY seq DESC LIMIT ? OFFSET ?", (*selected_problems, problem_page.size, problem_page.offset))] if selected_problems else []
     panel = Panel("outbox.html", {"problems": problems, "back": back,
-                                  "more": max(0, _outbox_problems(ui) - len(problems)), "panel_after": True})
+                                  "problem_total": problem_total, "problem_pager": render._pager(problem_page, request.query_params),
+                                  "panel_after_blocks": 3 if invalid else 2})
     return {"panel": panel, "blocks": [
         *([Note("État inconnu : affichage de tous les effets.", "warn")] if invalid else []),
         Stats(tuple(Stat(labels.get(k, k).capitalize(), n, "", tones.get(k, "") if k not in ("done", "seen") else "")
@@ -540,7 +473,7 @@ async def sorties(ui: Any, request: Request) -> Any:
 
 
 #: les effets en échec montrés avec leurs boutons (les plus récents)
-OUTBOX_PROBLEMS_SHOWN = 50
+OUTBOX_PROBLEMS_SHOWN = 8
 
 
 def _without(query: Any, *keys: str) -> dict[str, str]:
@@ -603,7 +536,7 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
     resolution = dict(getattr(gateway, "resolution", lambda: {})() or {})
     if not getattr(gateway, "configured", gateway is not None):
         return [Note("Aucun modèle n'est configuré : chaque tour échoue proprement. Déclare un fournisseur dans "
-                     "Configuration › Intelligence › Fournisseurs.", "danger")]
+                     "Réglages › Intelligence › Fournisseurs.", "danger")]
     rows = []
     for b in status:
         quota = (b.get("extra") or {}).get("quota") or {}
@@ -628,7 +561,7 @@ async def passerelle(ui: Any, request: Request) -> list[Any]:
                                                              "mono" if n else "muted")), tone="" if n else "danger")
             for r, n in resolution.items()), title="Qui sert quoi, en vrai",
             caption="Replis compris : un rôle sans fournisseur retombe sur un autre rôle (murmurer → répondre). "
-                    "Se règle dans Configuration › Intelligence › Qui sert quoi."),
+                    "Se règle dans Réglages › Intelligence › Qui sert quoi."),
     ]
 
 

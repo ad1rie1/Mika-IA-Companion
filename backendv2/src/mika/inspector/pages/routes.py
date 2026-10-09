@@ -30,7 +30,16 @@ from mika.inspector.pages.why import silence_page, why_page
 from mika.inspector.ui import PREFIX, SESSION_COOKIE, UI, secure
 from mika.kernel.faculty import InspectSpec
 from mika.kernel.forms import RENDERED, describe
-from mika.kernel.inspect import Filters, Note, Param, Section, Workspace, int_query, walk_blocks
+from mika.kernel.inspect import (
+    Filters,
+    Note,
+    Param,
+    Section,
+    Workspace,
+    int_query,
+    is_table_choice,
+    walk_blocks,
+)
 from mika.runtime.operations import dynamic_fields, fixed_values, initial_values, offered, perform
 
 #: les anciennes adresses de l'inspecteur → la console
@@ -201,8 +210,9 @@ class Pages:
 
     def render_page(self, request: Request, *, title: str, active: str, blocks: Sequence[Any],
                     filters: Sequence[Param] = (), panel: Panel | None = None, keep: Sequence[tuple[str, str]] = (),
-                    status: int = 200, subject: str = "", **ctx: Any) -> Response:
+                    status: int = 200, subject: str = "", template: str = "page.html", **ctx: Any) -> Response:
         query = {k: v for k, v in request.query_params.items()}
+        keep = [*keep, *((k, v) for k, v in query.items() if is_table_choice(k, v) and k not in dict(keep))]
         env = self.ui.env()
         fctx, active_filter = render.filters_ctx(filters, query)
         reset = request.url.path + ("?" + urlencode(dict(keep)) if keep else "")
@@ -210,11 +220,13 @@ class Pages:
         if panel_ctx.get("page_heading"):
             ctx["heading"] = panel_ctx.pop("page_heading")
             title = ctx["heading"] + " · " + title
+        if "page_subtitle" in panel_ctx:
+            ctx["subtitle"] = panel_ctx.pop("page_subtitle")
         flash = self.ui.pop_flash(request.query_params.get("flash", ""))
         if flash:
             ctx["messages"] = [flash, *ctx.get("messages", [])]
         rendered = render.blocks(blocks, env, query)
-        return self.ui.page(request, "page.html", title, active=active, status=status,
+        return self.ui.page(request, template, title, active=active, status=status,
                             blocks=rendered, filters=fctx, filtered=active_filter,
                             keep=keep, reset=reset, panel=panel.template if panel else None,
                             forms=self.slot_forms(request, rendered, subject), **panel_ctx, **ctx)
@@ -244,13 +256,17 @@ class Pages:
         tabs = self.tabs_of(d)
         if d.layout == "stack":
             blocks: list[Any] = []
-            for _slug, title, item in tabs:
+            slots: dict[str, int] = {}  # l'onglet → sa section : l'accueil les place par nom, pas par rang
+            for slug, title, item in tabs:
                 got = await self.produce(item, request)
                 if "response" in got:
                     continue
+                slots[slug] = len(blocks)
                 blocks.append(Section(title, tuple(got["blocks"]),
                                       item.description if isinstance(item, Builtin) else ""))
             return self.render_page(request, title=d.label, active=d.key, blocks=blocks, subtitle=d.description,
+                                    template="home.html" if d.key == "accueil" else "page.html",
+                                    snapshot=self.ui.when_long(self.ui.now()), slots=slots,
                                     head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [])
         slug = tab or request.path_params.get("tab", "") or (tabs[0][0] if tabs else "")
         current = next((t for t in tabs if t[0] == slug), None)
@@ -283,8 +299,13 @@ class Pages:
                 g["open"] = not long_menu or any(t["on"] for t in g["items"]) or not g["title"]
             crumbs = [(d.label, dest_url(d.key))] + ([(group, "")] if group else []) + list(got.get("crumbs") or [])
             description = item.description if isinstance(item, Builtin) else getattr(item, "description", "")
+            # Les pages d'un même sujet restent côte à côte (ex. fournisseurs et rôles).
+            # Le répertoire complet demeure disponible dans le sélecteur repliable.
+            family = next(((link.target, *link.also) for group in self.ui.deps.menu for link in group.items
+                           if f"{d.key}/{slug}" in (link.target, *link.also)), ())
+            related = [t for t in tab_list if t["href"].removeprefix(PREFIX + "/") in family]
             return self.render_page(request, title=f"{current[1]} · {d.label}", heading=current[1], active=d.key,
-                                    subtitle=description or "", submenu=submenu, blocks=got["blocks"],
+                                    subtitle=description or "", submenu=submenu, tabs=related, blocks=got["blocks"],
                                     head_actions=self.head_actions(request, section=d.key) if d.automatic_actions else [],
                                     filters=got.get("filters") or (), panel=got.get("panel"),
                                     messages=got.get("messages") or [], crumbs=crumbs, status=status)
@@ -325,15 +346,17 @@ class Pages:
                                         status_code=303)
             return self.render_page(request, title="Épisode inconnu", active="decisions", status=404,
                                     blocks=[Note("Aucun épisode sous ce nom.", "warn")])
-        slug = request.query_params.get("onglet", "deroule")
+        # Les anciens liens paginés sans onglet continuent à ouvrir le journal.
+        slug = request.query_params.get("onglet", "deroule" if "page" in request.query_params else "resume")
         if slug not in dict(EPISODE_TABS):
-            slug = "deroule"
+            slug = "resume"
         base = f"{PREFIX}/episode/{quote(corr, safe='')}"
         tabs = [{"title": t, "href": f"{base}?onglet={s}", "on": s == slug, "badge": 0} for s, t in EPISODE_TABS]
         blocks = episode_tab(self.ui, corr, slug, info, request.query_params)
         panel = replay_panel(self.ui, corr, self.back(request)) if slug == "prompt" else None
         return self.render_page(request, title=f"Épisode · {info['kind']}", heading=f"Un épisode : {info['kind']}",
                                 subtitle=dict(EPISODE_TABS)[slug] + " · " + {
+                                    "resume": "Le résultat, le déclencheur et les paroles produites, en un regard.",
                                     "deroule": "Les événements de cet épisode dans leur ordre d'exécution.",
                                     "dit": "Les paroles produites et ce qui a été montré à la personne.",
                                     "prompt": "Le contexte exact transmis au modèle, avec la provenance de chaque partie.",
@@ -409,7 +432,7 @@ class Pages:
         accounts = self.ui.deps.accounts
         if accounts.count() == 0:
             return await self._bootstrap(request)
-        error = ""
+        error, username = "", ""
         if request.method == "GET":
             current = accounts.session(request.cookies.get(SESSION_COOKIE))
             if current is not None and current.operator:
@@ -425,7 +448,7 @@ class Pages:
                 error = "Jeton de formulaire invalide : recharge la page."
             elif self.ui.login_blocked(ip, username):
                 response = self.ui.bare(request, "login.html", "Connexion", status=429,
-                                        error="Trop de tentatives : réessaie dans une minute.")
+                                        error="Trop de tentatives : réessaie dans une minute.", username=username)
                 response.headers["Retry-After"] = "60"
                 return response
             else:
@@ -439,7 +462,7 @@ class Pages:
                     response.set_cookie(SESSION_COOKIE, key, httponly=True, samesite="lax",
                                         secure=self.ui.cookie_secure)
                     return secure(response)
-        return self.ui.bare(request, "login.html", "Connexion", error=error)
+        return self.ui.bare(request, "login.html", "Connexion", error=error, username=username)
 
     async def _bootstrap(self, request: Request) -> Response:
         """Aucun compte encore : créer le compte opérateur, comme ``/auth/bootstrap`` (``password_problems``,

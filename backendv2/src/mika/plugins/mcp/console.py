@@ -1,7 +1,7 @@
 """La console des serveurs MCP (ADR 0064) : dans « Ses outils », la liste des serveurs branchés, puis la fiche de
 chacun — son état, ce qu'il propose, ce que l'opérateur en a approuvé, ses appels.
 
-Les connexions (adresse, jeton, commande, pour qui, quand) se règlent dans Configuration › Plugins › Outils
+Les connexions (adresse, jeton, commande, pour qui, quand) se règlent dans Réglages › Plugins › Outils
 extérieurs ; un lien y mène et l'enregistrement ramène ici. Ce qui se décide ici, outil par outil : l'activer, sa
 nature, l'accord qu'il demande, la description qu'elle lit. Ce que le serveur dit de lui-même et de ses outils est
 une donnée venue d'ailleurs : montrée à l'opérateur, jamais obéie.
@@ -104,7 +104,7 @@ def _servers(s: McpState, frame: Frame, ctx: InspectContext) -> list[Block]:
                         detail=((Note(st.detail, tone="warn"),) if st.detail else ())
                         + (Fields((("réglages", edit_server(st.name)), ("adresse", Text(st.address or "—", "mono")))),)))
     return [Fields((("nouveau serveur", add_server()),
-                    ("tous les réglages", Ref("local", SETTINGS, "Configuration › Plugins › Outils extérieurs")))),
+                    ("tous les réglages", Ref("local", SETTINGS, "Réglages › Plugins › Outils extérieurs")))),
             Table(("serveur", Column("où", "fit"), "à quoi il sert, pour elle", Column("état", "fit"),
                    Column("servis / proposés", "num"), Column("à revoir", "num"), Column("joint", "fit")),
                   tuple(rows), title="Serveurs", empty="Aucun serveur branché : « Brancher un serveur ».",

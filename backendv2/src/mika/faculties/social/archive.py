@@ -30,6 +30,12 @@ class Relations:
             d = e.data
             if d.replaces is not None:
                 sql.execute(f"DELETE FROM {t} WHERE item=?", (d.replaces,))
+            if e.type.name == memory_c.REINFORCED.name:
+                # la croyance d'où vient le lien devient un secret : le lien aussi (il ouvre les confidences, ADR 0058)
+                if d.secret:
+                    sql.execute(f"UPDATE {t} SET payload=json_set(payload,'$.secret',json('true')) WHERE item=?",
+                                (d.item,))
+                continue
             if not d.text.text:
                 continue
             for relation in d.relations:
@@ -52,7 +58,10 @@ class Relations:
                     (subject, subject, subject, subject))
 
 
-SOCIAL.projector(c.RELATIONS_TABLE, version=1, tier=Tier.T0, types=[memory_c.BELIEVED])(Relations)
+# Un renforcement remplace une croyance ou la rend secrète : l'archive le suit, sinon le lien retiré revient à la
+# rencontre suivante (audit du 2026-10-08)
+SOCIAL.projector(c.RELATIONS_TABLE, version=2, tier=Tier.T0,
+                 types=[memory_c.BELIEVED, memory_c.REINFORCED])(Relations)
 
 
 @SOCIAL.interpret(rt.PERCEPTION_RECEIVED)

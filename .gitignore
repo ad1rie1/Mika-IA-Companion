@@ -13,3 +13,5 @@ data/
 uploads/
 .pytest_cache/
 .env.local
+# Captures et maquettes de travail (aperçus de la console) — jamais versionnées
+/output/

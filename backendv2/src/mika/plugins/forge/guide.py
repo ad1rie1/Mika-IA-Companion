@@ -125,9 +125,12 @@ Blocs ("type") :
   lis params.get("page_releves", 1), borne la page puis renvoie ce nom dans pagination.param.
   Sans pagination explicite, la console découpe automatiquement chaque table, y compris celles des graphiques.
 - fields {items: [{label, value, hint?}], title?, columns? (1 à 3)} ;
-- table {columns, rows, title?, caption?, empty?, pagination?} — columns : ["nom", …] ou
-  [{key, label, align? ("", "num", "fit"), hint?, detail?}] ; detail: true place la colonne
+- table {columns, rows, title?, caption?, empty?, pagination?, layout?, link_label?} — columns : ["nom", …] ou
+  [{key, label, align? ("", "num", "fit"), hint?, detail?, role?}] ; detail: true place la colonne
   dans les informations complémentaires dépliables de la ligne, sans perdre sa valeur.
+  layout ("cards", "list" ou "feed") montre la table en fiches, en liste ou en fil (l'opérateur peut repasser
+  en tableau) ; role ("title", "badge", "body") y place la colonne : titre, pastille ou corps de la fiche ;
+  link_label nomme le lien d'une ligne qui a un href (par défaut « Ouvrir la fiche »).
   Garde les colonnes essentielles à la lecture quotidienne. Une ligne : une liste de cellules, ou
   {cells, tone?, href?, detail?: [blocs]} ; pagination : {page, total, per_page, param?} (la console ajoute
   « page » aux paramètres de ta vue) ;

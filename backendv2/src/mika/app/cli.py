@@ -86,7 +86,7 @@ FIRST_STEPS = """Premiers pas :
   1. mika serve                 la lance (http://127.0.0.1:8001), ses données dans ./data/v2
   2. http://127.0.0.1:8001/inspecteur/
                                 la console : crée le compte opérateur (le premier compte l'est)
-  3. Configuration › Fournisseurs › Ajouter
+  3. Réglages › Fournisseurs › Ajouter
                                 un modèle (Claude, Ollama…) : le premier déclaré la fait parler
   4. le frontend : cd frontend/Web && npm install && npm run dev, puis http://localhost:3000
                                 (il vise :8001 ; VITE_BACKEND_ORIGIN pour une autre adresse)

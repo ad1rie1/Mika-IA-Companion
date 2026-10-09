@@ -133,9 +133,9 @@ def _inspect(s: NeedsState, frame: Frame, ctx: InspectContext) -> list[Block]:
         When(s.levels[k].at) if k in s.levels and s.levels[k].at else Text("—", kind="muted"),
     ) for k in c.KINDS)
     return [
-        Table((Column("besoin"), Column("tension", hint="monte vers 100 % avec le temps, retombe quand il est comblé"),
-               Column("horizon", "num", hint="le temps caractéristique de sa remontée"), Column("ce qui le comble"),
-               Column("dernier relevé", "fit")), rows, title="Ses besoins"),
+        Table((Column("besoin", role="title"), Column("tension", hint="monte vers 100 % avec le temps, retombe quand il est comblé"),
+               Column("horizon", "num", hint="le temps caractéristique de sa remontée"), Column("ce qui le comble", role="body"),
+               Column("dernier relevé", "fit")), rows, title="Ses besoins", layout="cards"),
         Note(" ".join(describe(r)) or "Rien de pressant : aucun besoin ne se dit dans le prompt.",
              title="ce qu'elle en dit"),
         Chart(tuple(Series(NAMES[k], tuple(ctx.series(f"needs.{SERIES[k]}", since, frame.now)), slot=i + 1)

@@ -381,16 +381,17 @@ def test_the_extractor_only_sees_beliefs_that_touch_its_conversation(tmp_path):
 PEOPLE = ["user_1", "user_2", "user_3", "name:julie"]
 
 
-def oracle(about, told_by, heard_by, secret, sensitivity, me, level, witness_level, private_ok) -> bool:
+def oracle(about, told_by, heard_by, secret, sensitivity, me, level, witness_level, private_ok,
+           public=True) -> bool:
     """Sa vie et le monde se racontent (au-delà de l'anodin, jusqu'au niveau de
     l'audience ; un secret à elle vaut une confidence) ; à chacun ce qu'il a
-    confié et ce qui ne concerne que lui (si sa fiche est ouverte) ; le secret
-    d'un autre, à personne d'autre ; le reste jusqu'au niveau de l'audience —
-    « témoin » s'il était là."""
+    confié et ce qui ne concerne que lui (si sa fiche est ouverte) — son secret,
+    jamais devant d'autres (un salon) ; le secret d'un autre, à personne
+    d'autre ; le reste jusqu'au niveau de l'audience — « témoin » s'il était là."""
     if not about and not told_by:
         return (max(sensitivity, 3) if secret else sensitivity) <= max(1, level)
     if set(about) | set(told_by) <= {me} or me in told_by:
-        return sensitivity <= 1 or private_ok
+        return not (secret and public) and (sensitivity <= 1 or private_ok)
     if secret:
         return False
     was_there = (me in heard_by) if (told_by or heard_by) else (me in about)
@@ -400,13 +401,14 @@ def oracle(about, told_by, heard_by, secret, sensitivity, me, level, witness_lev
 @given(st.lists(st.sampled_from(PEOPLE), max_size=3, unique=True), st.lists(st.sampled_from(PEOPLE[:3]), max_size=2,
                                                                           unique=True),
        st.lists(st.sampled_from(PEOPLE[:3]), max_size=3, unique=True), st.booleans(), st.integers(1, 3),
-       st.sampled_from(PEOPLE[:3]), st.integers(0, 3), st.integers(0, 3), st.booleans())
-def test_the_filter_is_the_policy(about, told_by, heard_by, secret, sensitivity, me, level, witness, private_ok):
+       st.sampled_from(PEOPLE[:3]), st.integers(0, 3), st.integers(0, 3), st.booleans(), st.booleans())
+def test_the_filter_is_the_policy(about, told_by, heard_by, secret, sensitivity, me, level, witness, private_ok,
+                                  public):
     witness = max(witness, level)
-    aud = Audience(persons=(me,), level=level, witness_level=witness, private_ok=private_ok)
+    aud = Audience(persons=(me,), public=public, level=level, witness_level=witness, private_ok=private_ok)
     got = admissible(tuple(sorted(about)), sensitivity, me, aud, told_by=tuple(told_by), heard_by=tuple(heard_by),
                      secret=secret).ok
-    assert got == oracle(about, told_by, heard_by, secret, sensitivity, me, level, witness, private_ok)
+    assert got == oracle(about, told_by, heard_by, secret, sensitivity, me, level, witness, private_ok, public)
 
 
 def test_what_bob_told_about_alice_is_someone_elses_for_alice():

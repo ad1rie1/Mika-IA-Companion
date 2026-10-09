@@ -1,3 +1,4 @@
+{% from "_navigation.html" import pager %}
 {% if mode == "create" %}
 <form method="post" action="{{ action }}" class="form card record-form">
   <h3>Créer un compte</h3>
@@ -19,6 +20,7 @@
   <div class="form-actions"><button class="btn">Créer</button> <a class="btn quiet" href="{{ action }}">Annuler</a></div>
 </form>
 {% elif mode == "edit" %}
+<div class="stack">
 <form method="post" action="{{ action }}" class="form card record-form">
   <h3>{{ account.username }} <span class="muted">· {{ account.handle }}</span></h3>
   <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="update">
@@ -44,26 +46,26 @@
   </fieldset>
   <div class="form-actions"><button class="btn">Enregistrer</button> <a class="btn quiet" href="{{ action }}">Annuler</a></div>
 </form>
-<div class="card table-block">
-  <div class="block-head"><h3 class="block-title">Applications connectées</h3><span class="block-count">{{ apps|length }} au total</span></div>
+<section class="table-block">
+  <div class="block-head"><h3 class="block-title">Applications connectées</h3><span class="block-count">{{ apps_total }} au total</span></div>
   <p class="muted">Le téléphone et les moteurs de jeu se connectent par un jeton de ce compte. Révoquer ferme ses connexions ; un téléphone révoqué ne reçoit plus rien, et elle ne peut plus écrire à cette personne quand elle est absente. Changer le mot de passe révoque les jetons obtenus par connexion.</p>
-  <div class="table-wrap" tabindex="0" role="region" aria-label="Applications connectées"><table class="tbl">
-    <caption class="sr">Applications connectées</caption>
-    <thead><tr><th scope="col">Nom</th><th scope="col">Sorte</th><th scope="col">Obtenu par</th><th scope="col">Créé</th><th scope="col">Dernier usage</th><th scope="col">État</th><th scope="col" class="fit">Actions</th></tr></thead>
-    <tbody>
+  <div class="collection cards" role="list" aria-label="Applications connectées">
     {% for app in apps %}
-      <tr{% if app.revoked %} class="muted"{% endif %}><td>{{ app.label }}</td><td>{{ app.kind }}</td><td>{{ app.source }}</td><td>{{ app.created }}</td><td>{{ app.last_used }}</td>
-        <td>{% if app.revoked %}<span class="badge muted">révoqué</span>{% else %}<span class="badge ok">actif</span>{% endif %}</td>
-        <td class="row-actions fit">{% if not app.revoked %}
+      <article class="collection-item" role="listitem"><div class="collection-heading"><h4>{{ app.label }}</h4>
+        {% if app.revoked %}<span class="badge muted">révoqué</span>{% else %}<span class="badge ok">actif</span>{% endif %}</div>
+        <dl class="collection-fields"><div><dt>Sorte</dt><dd>{{ app.kind }}</dd></div><div><dt>Obtenu par</dt><dd>{{ app.source }}</dd></div>
+          <div><dt>Créé</dt><dd>{{ app.created }}</dd></div><div><dt>Dernier usage</dt><dd>{{ app.last_used }}</dd></div></dl>
+        {% if not app.revoked %}<div class="collection-footer">
           <form method="post" action="{{ action }}" class="inline" data-confirm="Révoquer « {{ app.label }} » ? Ses connexions se ferment.">
             <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="revoke_token">
             <input type="hidden" name="account" value="{{ account.id }}"><input type="hidden" name="token" value="{{ app.id }}">
             <button class="btn quiet small danger">révoquer</button>
-          </form>{% endif %}</td></tr>
+          </form></div>{% endif %}</article>
     {% else %}
-      <tr><td colspan="7" class="empty">Aucune application : le téléphone en ajoute une à sa première connexion.</td></tr>
+      <div class="empty-state" role="listitem"><b>Aucune application connectée.</b>Le téléphone en ajoute une à sa première connexion.</div>
     {% endfor %}
-    </tbody>
-  </table></div>
+  </div>
+  {{ pager(apps_pager) }}
+</section>
 </div>
 {% endif %}

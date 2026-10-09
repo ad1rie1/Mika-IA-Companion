@@ -43,7 +43,7 @@ def test_hostile_text_is_escaped_and_no_page_runs_inline_code(world):  # noqa: F
         recv_until(ws, "speech")
     ended = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.ended"], 1))[0]
     urls = pages(client, live) + [f"/inspecteur/episode/{ended.correlation}?onglet={t}"
-                                  for t in ("deroule", "dit", "prompt", "outils", "appels", "decision")]
+                                  for t in ("resume", "deroule", "dit", "prompt", "outils", "appels", "decision")]
     seen_payload = False
     for url in urls:
         r = client.get(url)

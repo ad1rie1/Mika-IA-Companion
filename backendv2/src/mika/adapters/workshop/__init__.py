@@ -148,7 +148,7 @@ def check_remote(url: str) -> str:
     if parts.scheme != "https" or not parts.hostname:
         raise ValueError("une adresse https (https://github.com/compte/depot.git)")
     if parts.username or parts.password or "@" in parts.netloc:
-        raise ValueError("pas d'identifiants dans l'adresse : le jeton se règle dans Configuration › Canaux › "
+        raise ValueError("pas d'identifiants dans l'adresse : le jeton se règle dans Réglages › Canaux › "
                          "Dépôts git")
     if any(ch.isspace() for ch in raw) or raw.startswith("-"):
         raise ValueError("adresse illisible")
@@ -750,14 +750,14 @@ class BwrapWorkshop:
         token = (creds.get("token") or "").strip()
         env = {"GIT_ASKPASS": "/bin/false"}
         if not token:
-            return env, (), "aucun jeton : règle-le dans Configuration › Canaux › Dépôts git"
+            return env, (), "aucun jeton : règle-le dans Réglages › Canaux › Dépôts git"
         hosts = creds.get("hosts") or DEFAULT_HOSTS
         allowed = {h.strip().lower() for h in (hosts.split(",") if isinstance(hosts, str) else hosts) if h.strip()}
         parts = urlsplit(url)
         host = (parts.hostname or "").lower()
         if host not in allowed:
             return env, (), (f"le jeton n'est pas autorisé pour « {host} » (hôtes autorisés : "
-                             f"{', '.join(sorted(allowed)) or 'aucun'} — Configuration › Canaux › Dépôts git)")
+                             f"{', '.join(sorted(allowed)) or 'aucun'} — Réglages › Canaux › Dépôts git)")
         basic = base64.b64encode(f"{creds.get('user') or 'x-access-token'}:{token}".encode()).decode()
         # l'en-tête ne vaut que pour l'adresse de ce dépôt (le chemin compris, et le port s'il y en a un)
         scope = f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}"

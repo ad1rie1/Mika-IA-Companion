@@ -108,7 +108,7 @@ Mika envoie sont gardés hors du journal, dans `partages/` du dossier de donnée
 1. Ouvre la console (`http://localhost:8001/`) ou le frontend : le premier compte créé est opérateur (ou
    `sudo -u mika .venv/bin/python -m mika --data /var/lib/mika account <nom> --operator`, le mot de passe
    demandé sans écho).
-2. `http://localhost:8001/inspecteur/reglages/fournisseurs` (la console, **Configuration ›
+2. `http://localhost:8001/inspecteur/reglages/fournisseurs` (la console, **Réglages ›
    Fournisseurs**) : ajoute un fournisseur (sa clé est chiffrée et jamais réaffichée ;
    « Charger la liste » propose ses modèles). Le premier déclaré sert « répondre » d'office.
    Tant qu'aucun modèle n'est branché, `/health` dit `degraded` et elle ne peut

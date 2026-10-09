@@ -1,4 +1,4 @@
-"""Configuration › Accès › Comptes : qui peut se connecter, et qui administre.
+"""Réglages › Accès › Comptes : qui peut se connecter, et qui administre.
 
 Une liste paginée ; créer un compte et en modifier un se font chacun sur leur
 page (``?nouveau=1``, ``?compte=<id>``). Leurs règles ne sont pas celles d'un
@@ -30,6 +30,7 @@ from mika.adapters.web.accounts import (
     ClientToken,
     password_problems,
 )
+from mika.inspector import render
 from mika.inspector.catalog import Panel
 from mika.inspector.pages.tabs import TABS
 from mika.inspector.ui import PREFIX, secure
@@ -65,6 +66,7 @@ async def comptes(ui: Any, request: Request) -> Any:
 async def page(ui: Any, request: Request, state: Mapping[str, Any]) -> dict[str, Any]:
     accounts = ui.deps.accounts.all()
     query = request.query_params
+    ctx = ui.inspection.context(query)
     editing = str(state.get("editing") or query.get("compte", "") or "")
     creating = bool(state.get("creating")) or query.get("nouveau") == "1"
     messages = list(state.get("messages") or [])
@@ -75,14 +77,15 @@ async def page(ui: Any, request: Request, state: Mapping[str, Any]) -> dict[str,
     if editing:
         found = next((a for a in accounts if str(a.id) == editing), None)
         if found is not None:
+            tokens = list(reversed(ui.deps.accounts.tokens(found.id)))
+            apps, apps_pager = paginate(tokens, ctx.pager("page_apps", size=12))
             return {"blocks": [], "messages": messages, "crumbs": [("Comptes", URL), (found.username, "")],
                     "panel": Panel("accounts.html", {"mode": "edit", "action": URL, "account": found,
                                                      "page_heading": f"Modifier · {found.username}",
                                                      "operators": sum(1 for a in accounts if a.operator and a.active),
-                                                     "apps": [_app_row(ui, t) for t in
-                                                              reversed(ui.deps.accounts.tokens(found.id))]})}
+                                                     "apps": [_app_row(ui, t) for t in apps], "apps_total": len(tokens),
+                                                     "apps_pager": render._pager(apps_pager, query)})}
         messages.append(("warn", "Ce compte n'existe pas."))
-    ctx = ui.inspection.context(query)
     window, pager = paginate(accounts, ctx.pager(size=25))
     rows = tuple(Row((
         Ref("local", _account_url(compte=str(a.id)), a.username), a.full_name or Text("—", "muted"),
@@ -95,8 +98,9 @@ async def page(ui: Any, request: Request, state: Mapping[str, Any]) -> dict[str,
                                                                                if a.operator and a.active)),
                Stat("Désactivés", sum(1 for a in accounts if not a.active)),
                Stat("Créer un compte", "＋", href=Ref("local", _account_url(nouveau="1"), "créer")))),
-        Table((Column("identifiant"), "nom affiché", Column("personne", "fit"), "rôle", "état"), rows,
+        Table((Column("identifiant", role="title"), "nom affiché", Column("personne", "fit"), Column("rôle", role="badge"), Column("état", role="badge")), rows,
               title=f"Comptes ({len(accounts)})", pager=pager, empty="Aucun compte.",
+              layout="list", link_label="Modifier le compte",
               caption="Chaque compte est une personne qu'elle connaît dès sa création, sous son nom affiché ; "
                       "sa fiche réunit tout ce qu'elle en sait.")]}
 

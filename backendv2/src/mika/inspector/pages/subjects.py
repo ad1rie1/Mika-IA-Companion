@@ -6,6 +6,7 @@ l'oubli d'un objet qui est un sujet de contenus."""
 from __future__ import annotations
 
 from typing import Any
+from unicodedata import combining, normalize
 from urllib.parse import quote, urlencode
 
 from starlette.requests import Request
@@ -13,12 +14,18 @@ from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
 
 from mika.inspector import render
+from mika.inspector.catalog import Builtin
 from mika.inspector.ui import PREFIX, secure
 from mika.kernel.inspect import Download, Head, Note, Pager, Ref, Row, Table, Text, is_page_param
 from mika.runtime import operations
 
 #: Une page par type d'objet, sans plafond sur l'ensemble des résultats.
 SEARCH_PAGE = 25
+
+
+def search_text(text: str) -> str:
+    """La navigation se cherche aussi sans les accents affichés dans ses titres."""
+    return "".join(c for c in normalize("NFD", text.casefold()) if not combining(c))
 
 
 def fiche_url(kind: str, key: str, tab: str = "") -> str:
@@ -99,6 +106,8 @@ class Subjects:
             request, title=f"{title} · {spec.label}", heading=title, active=home.key if home else "",
             subtitle=head.subtitle if isinstance(head, Head) else "", head_badges=badges, facts=facts,
             crumbs=crumbs, tabs=tab_list, blocks=blocks,
+            # le menu allume la page d'où l'on vient (un brouillon : « À valider »), pas seulement la rubrique
+            menu_path=crumbs[0][1] if crumbs else "",
             view_description=current.description if current is not None else "",
             filters=current.typed if current is not None else (), head_actions=actions, subject=key,
             keep=(("onglet", current.name),) if current is not None else ())
@@ -136,11 +145,36 @@ class Subjects:
             blocks.append(Table(("vue", "faculté"), tuple((Ref.view(v.owner, v.name, v.title),
                                                           Text(self.ui.names.faculty(v.owner), hint=v.owner))
                                                          for v in views), title="Vues"))
+        if q and not only:
+            # Les réglages et les pages natives doivent se trouver aussi : ils ne sont pas des sujets.
+            matches = []
+            needle = search_text(q)
+            for group in self.ui.deps.menu:
+                for link in group.items:
+                    if needle in search_text(f"{group.label} {link.label}"):
+                        matches.append((Ref("local", f"{PREFIX}/{link.target}", link.label), group.label or "Accueil"))
+            for group in self.ui.deps.navigation:
+                for dest in group.items:
+                    base = f"{PREFIX}/{dest.key}" if dest.key != "accueil" else f"{PREFIX}/"
+                    if needle in search_text(dest.label):
+                        matches.append((Ref("local", base, dest.label), group.label or "Accueil"))
+                    if dest.layout == "stack":
+                        continue
+                    for slug, title, spec in self.pages.tabs_of(dest):
+                        family = spec.group if isinstance(spec, Builtin) else ""
+                        if needle in search_text(f"{dest.label} {family} {title}"):
+                            url = spec.href if isinstance(spec, Builtin) and spec.href else f"{base}/{slug}"
+                            matches.append((Ref("local", url, title), " › ".join(filter(None, (dest.label, family)))))
+            if matches:
+                unique = {}
+                for row in matches:
+                    unique.setdefault(row[0].key, row)
+                blocks.insert(0, Table(("page", "rubrique"), tuple(unique.values()), title="Pages de la console"))
         if not blocks:
             blocks = [Note("Rien ne correspond." if q else "Tape un nom, un numéro d'événement, un titre.", "muted")]
         return self.pages.render_page(request, title="Recherche", heading=f"Recherche : « {q} »" if q else "Recherche",
                                       active="", blocks=blocks, search_q=q,
-                                      subtitle="Trouve une personne, un projet, un message ou une app, puis ouvre sa fiche.")
+                                      subtitle="Retrouve une page, un réglage, une personne, un projet ou un message.")
 
     async def forget(self, request: Request) -> Response:
         kind, key = request.path_params["kind"], request.path_params["key"]

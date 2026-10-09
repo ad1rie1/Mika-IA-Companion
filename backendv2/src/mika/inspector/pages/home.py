@@ -134,6 +134,16 @@ async def attention(ui: Any, request: Request) -> list[Any]:
     return out
 
 
+
+def _short(text: str, width: int = 110) -> str:
+    """Un indice sur une ligne : coupé à un mot, ou dans le mot quand un seul dépasse (``textwrap.shorten`` ne
+    rendait alors que « … »)."""
+    text = " ".join(text.split())
+    if len(text) <= width:
+        return text
+    cut = text[: width - 1]
+    return (cut.rsplit(" ", 1)[0] if " " in cut else cut) + "…"
+
 @TABS.tab("accueil.maintenant", title="En ce moment",
           description="Son état, ce qui tourne et ce qui attend, tels qu'ils sont à cet instant.")
 async def now_tab(ui: Any, request: Request) -> list[Any]:
@@ -141,7 +151,7 @@ async def now_tab(ui: Any, request: Request) -> list[Any]:
     frame = kernel.mind.frame()
     cards = []
     for spec, v in ui.inspection.vitals():
-        cards.append(Stat(spec.label, v.text, v.hint[:90] if v.hint else "", v.tone or "",
+        cards.append(Stat(spec.label, v.text, _short(v.hint) if v.hint else "", v.tone or "",
                           v.href if v.href else None))
     lanes = kernel.lanes
     waiting = {lane: lanes.pending(lane) for lane in lanes.capacities}

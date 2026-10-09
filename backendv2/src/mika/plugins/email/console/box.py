@@ -26,6 +26,7 @@ from mika.kernel.inspect import (
     Table,
     Text,
     When,
+    is_table_choice,
 )
 from mika.plugins.email import EMAIL, EmailParams, EmailState, name_of, params_of
 from mika.plugins.email.console.common import (
@@ -86,6 +87,7 @@ def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account
     pager = Pager(number=result.number, size=result.size, total=result.total)
     context_values = {k: v for k, v in ctx.params.items()
                       if k in ("compte", "dossier", "etat", "de", "q", "page", "taille")}
+    context_values.update((k, v) for k, v in ctx.params.items() if is_table_choice(k, v))
     if "page" in context_values:
         context_values["page"] = str(pager.number)
     context = tuple(context_values.items())
@@ -101,7 +103,7 @@ def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account
                   Text("★ Suivi · " + ("Non lu" if unread(m, seen) else "Lu")) if m.flagged else state_badge(seen, m, p)]
         ref = Ref.subject("mail", mail_key(m.ref), m.subject or "(sans objet)")
         rows.append(Row(tuple(cells), href=Ref(ref.kind, ref.key, ref.text, (*context, ("retour", back)))))
-    columns: list[Any] = ["Message", "Expéditeur", Column("Date", "fit"), Column("État", "fit")]
+    columns: list[Any] = [Column("Message", role="title"), "Expéditeur", Column("Date", "fit"), Column("État", "fit", role="badge")]
     filtered = state or query or sender
     if folder == "*":
         where = "Tous les dossiers"
@@ -112,7 +114,7 @@ def _list(s: EmailState, ctx: InspectContext, p: EmailParams, port: Any, account
     caption = "Messages synchronisés · ouvre un message pour le lire et y répondre."
     return Table(tuple(columns), tuple(rows), title=where, pager=pager,
                  empty="aucun mail ne correspond à ces filtres" if filtered else "rien dans ce dossier",
-                 caption=caption), result.total
+                 caption=caption, layout="list", link_label="Lire le message"), result.total
 
 
 @EMAIL.inspect("reception", title="Réception", section=SECTION, order=10, badge=fresh_important,
@@ -136,5 +138,5 @@ def _box(s: EmailState, frame: Frame, ctx: InspectContext) -> list[Block]:
         return [workspace(port, ctx, [Note("Ce compte n'existe plus. Choisis une boîte dans la liste.", tone="warn")])]
     folder = ctx.param("dossier") or INBOX
     total = _in_box(port, [account] if account else [a.key for a in port.accounts()], folder)
-    table, _ = _list(s, ctx, p, port, account, folder, len(port.accounts()) > 1, total)
+    table, _ = _list(s, ctx, p, port, account, folder, not account and len(port.accounts()) > 1, total)
     return [workspace(port, ctx, [table], filters=filters, folders=True)]

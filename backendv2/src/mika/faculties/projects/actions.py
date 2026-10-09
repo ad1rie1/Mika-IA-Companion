@@ -155,7 +155,7 @@ def check_remote(url: str) -> str:
     if parts.scheme != "https" or not parts.hostname or any(ch.isspace() for ch in raw):
         raise ValueError("une adresse https, comme https://github.com/compte/depot.git")
     if parts.username or parts.password or "@" in parts.netloc:
-        raise ValueError("pas d'identifiants dans l'adresse : le jeton se règle dans Configuration › Canaux › "
+        raise ValueError("pas d'identifiants dans l'adresse : le jeton se règle dans Réglages › Canaux › "
                          "Dépôts git")
     if parts.query or parts.fragment or "?" in raw or "#" in raw:
         raise ValueError("une adresse de dépôt, sans « ? » ni « # » (rien de secret ne va dans l'adresse)")
@@ -221,7 +221,7 @@ class CreateArgs(BaseModel):
     cadence_hours: Annotated[int, Knob(label="Cadence des constants (heures)", group="Ses objectifs",
                                        advanced=False, order=55, lo=0, hi=720,
                                        help="Un objectif constant revient après ce délai une fois son passage fait. "
-                                            "0 : la valeur par défaut (Configuration › Comportement › Projets).")
+                                            "0 : la valeur par défaut (Réglages › Comportement › Projets).")
                          ] = Field(default=0, ge=0, le=720)
     mode: Annotated[str, Knob(label="Mode de travail", choices=MODE_CHOICES, group="Son mode et ses outils",
                               advanced=False, order=60, help=MODE_HELP)] = c.PERSONA
@@ -260,7 +260,7 @@ class CreateArgs(BaseModel):
                                         "ton accord. Dans son atelier, elle travaille librement.")] = True
     remote: Annotated[str, Knob(label="Dépôt distant", group="Son dépôt distant", advanced=False, order=90,
                                 help="Facultatif : une adresse https (https://github.com/compte/depot.git). Le jeton "
-                                     "se règle dans Configuration › Canaux › Dépôts git.")
+                                     "se règle dans Réglages › Canaux › Dépôts git.")
                       ] = Field(default="", max_length=300)
     branch: Annotated[str, Knob(label="Branche", group="Son dépôt distant", advanced=False, order=91)
                       ] = Field(default="main", max_length=100)
@@ -469,7 +469,7 @@ def _tools(s: ProjectsState, frame: Frame, args: ToolsArgs, ctx: ActionContext) 
 class RemoteArgs(BaseModel):
     remote: Annotated[str, Knob(label="Adresse du dépôt distant", advanced=False, order=1,
                                 help="https://github.com/compte/depot.git — vide : aucun. Le jeton se règle dans "
-                                     "Configuration › Canaux › Dépôts git.")] = Field(default="", max_length=300)
+                                     "Réglages › Canaux › Dépôts git.")] = Field(default="", max_length=300)
     branch: Annotated[str, Knob(label="Branche", advanced=False, order=2)] = Field(default="main", max_length=100)
     auto_push: Annotated[bool, Knob(label="Pousser après chaque exécution qui enregistre quelque chose",
                                     advanced=False, order=3,
