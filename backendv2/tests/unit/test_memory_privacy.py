@@ -18,6 +18,7 @@ import re
 from hypothesis import given
 from hypothesis import strategies as st
 
+from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory.salience import admissible, unsaid
@@ -25,8 +26,10 @@ from mika.kernel.clock import DAY, HOUR, US
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience
 from mika.ports.llm import LLMResponse, ToolCall
+from mika.runtime.operations import FIXED_FIELD, forget_subject, perform
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
+from mika.vocab.people import named_label
 from tests.fixtures.memory import SIX, Script, chat, kept, section, seq_of, token
 from tests.fixtures.mika import AFTERNOON, befriend, boot, build, connect, said
 
@@ -162,12 +165,17 @@ def test_what_bob_confides_about_alice_is_not_served_to_alice(tmp_path):
         await chat(kernel, "user_2", ["tu trouves que je bois beaucoup trop ces temps-ci ?"])
         await chat(kernel, "user_3", ["tu te souviens de ce que je t'ai dit sur Alice qui boit trop ?"])
         rows = kept(kernel)
+        frame = kernel.mind.frame()
+        guess = {k: frame.get(identity_c.PRESUMED(k)) for r in rows for k in r["about"] if k.startswith("name:")}
         await kernel.stop()
-        return rows
+        return rows, guess
 
-    rows = run_virtual(clock, main)
+    rows, guess = run_virtual(clock, main)
     item = next(r for r in rows if "CANARI-B1" in r["text"] and r["kind"] == "belief")
-    assert item["about"] == ["user_2"] and item["told_by"] == ["user_3"]
+    # Bob n'a jamais été vu avec Alice : son « Alice » reste une mention, que l'identité présume être Alice (la
+    # seule de ce nom) sans la relier (ADR 0075)
+    assert len(item["about"]) == 1 and named_label(item["about"][0]) == "alice" and item["told_by"] == ["user_3"]
+    assert guess == {item["about"][0]: "user_2"}
     assert not any("CANARI-B1" in p for p in prompts_for(llm, "user_2")), "ni souvenir, ni fiche"
     assert "CANARI-B1" in prompts_for(llm, "user_3")[-1], "contrôle : Bob retrouve ce qu'il a dit"
 
@@ -299,7 +307,9 @@ def test_a_secret_never_leaves_its_confidant_even_for_a_close_friend(tmp_path):
     """Une confidence lourde peut s'ouvrir à une proche **qui connaît Alice** — Alice l'a nommée elle-même en lui
     racontant sa vie — (étiquetée « ne le répète pas sauf si… ») ; un secret explicite, jamais — la proche sait
     seulement qu'Alice traverse quelque chose. Contre-exemple (ADR 0058) : Dave, aussi proche de Mika, ne connaît
-    pas Alice — il a seulement prononcé son nom : ni la confidence, ni le secret, seulement que c'est lourd."""
+    pas Alice — il a seulement prononcé son nom : ni la confidence, ni le secret, seulement que c'est lourd.
+    « Carol », dit par Alice sans qu'elles aient été vues ensemble, n'est d'abord que présumée être Carol : le lien
+    n'ouvre la confidence qu'une fois confirmé par un opérateur (ADR 0075)."""
 
     def extract(prompt):
         if "CANARI-F1" not in prompt:
@@ -318,6 +328,7 @@ def test_a_secret_never_leaves_its_confidant_even_for_a_close_friend(tmp_path):
 
     async def main():
         await boot(kernel)
+        await connect(kernel, "user_1", "Adrien", operator=True)
         await connect(kernel, "user_2", "Alice")
         await connect(kernel, "user_4", "Carol")
         await connect(kernel, "user_5", "Dave")
@@ -327,11 +338,22 @@ def test_a_secret_never_leaves_its_confidant_even_for_a_close_friend(tmp_path):
                                       "CANARI-S1 et je vais demander le divorce, dis-le à personne",
                                       "CANARI-T1 heureusement que Carol est là, c'est ma meilleure amie", *SIX[3:]])
         await asyncio.sleep(10 * 60)
+        # « Carol », dit par Alice, n'est que présumée être Carol (jamais vues ensemble) : le lien n'ouvre rien tant
+        # qu'un opérateur ne l'a pas confirmé (ADR 0075)
+        await chat(kernel, "user_4", ["Alice a l'air triste, tu sais pourquoi ? fausse couche, divorce ?"])
+        before = section(script.replies("user_4")[-1], REVIENT)
+        mention = next(k for r in kept(kernel) if "CANARI-T1" in r["text"] for k in r["about"] if k.startswith("name:"))
+        bound = await perform(kernel, "identity.nommer", {
+            "_champs": ["name", "confirmed"], "name": ["Carol"], "confirmed": ["on"], FIXED_FIELD: ["key"],
+            "key": [mention]}, by="user_1", subject="user_4", nonce="carol")
+        assert bound.ok, bound
         await chat(kernel, "user_4", ["Alice a l'air triste, tu sais pourquoi ? fausse couche, divorce ?"])
         await chat(kernel, "user_5", ["Alice a l'air triste, tu sais pourquoi ? fausse couche, divorce ?"])
         await kernel.stop()
+        return before
 
-    run_virtual(clock, main)
+    before = run_virtual(clock, main)
+    assert "CANARI-F1" not in before, "présumée seulement : la confidence attend la confirmation"
     shown = section(script.replies("user_4")[-1], REVIENT)
     assert "CANARI-F1" in shown and "Alice te l'a confié ; ne le répète pas sauf si Alice t'y a autorisée" in shown
     assert "CANARI-S1" not in "\n".join(script.prompts("user_4")), "le secret ne sort jamais de sa confidente"
@@ -538,13 +560,16 @@ def test_what_comes_back_naming_someone_else_concerns_them_too(tmp_path):
         await chat(kernel, "user_2", ["CANARI-J1 au fait, j'y vais avec Bob", *SIX[1:]])
         await asyncio.sleep(10 * 60)
         rows = [r for r in kept(kernel) if "CANARI-J1" in r["text"]]
-        await kernel.forget("user_3")
+        await forget_subject(kernel, "person", "user_3", by="operateur", action="oublier.person")
         left = [r for r in kept(kernel) if "CANARI-J1" in r["text"]]
         await kernel.stop()
         return rows, left
 
     rows, left = run_virtual(clock, main)
-    assert [r["about"] for r in rows] == [["user_2"], ["user_2", "user_3"]]
+    # « Bob », dit par Alice, est une mention présumée être Bob (ADR 0075) : elle rejoint le souvenir, et l'oubli de
+    # Bob l'emporte comme ses adresses
+    assert [len(r["about"]) for r in rows] == [1, 2] and rows[0]["about"] == ["user_2"]
+    assert "user_2" in rows[1]["about"] and any(named_label(k) == "bob" for k in rows[1]["about"] if k != "user_2")
     assert len(left) == 1 and left[0]["about"] == ["user_2"], "seule la preuve concernant Bob s'oublie avec lui"
 
 

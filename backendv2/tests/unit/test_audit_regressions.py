@@ -32,6 +32,7 @@ from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolCall
 from mika.ports.llm_budget import LLMLimits
 from mika.ports.vectors import VectorItem
 from mika.sim.clock import run_virtual
+from mika.vocab.people import named_label
 from tests.fixtures.memory import Script
 from tests.fixtures.mika import boot, build, connect
 
@@ -230,7 +231,9 @@ def test_legacy_night_merge_cannot_erase_a_negation(db):
 async def test_an_opinion_keeps_its_holder_distinct_from_its_subject(db):
     drafts = await drafts_for(db, "Bob pense qu'Alice devrait quitter son travail", teller="user_3", genre="avis")
     data = drafts[0].data
-    assert data.knowledge_kind == "opinion" and data.holder == "user_3" and data.about == ("user_2",)
+    # Bob, seul avec Mika, nomme « Alice » : une mention (présumée être Alice, ADR 0075), pas Bob lui-même
+    assert data.knowledge_kind == "opinion" and data.holder == "user_3"
+    assert len(data.about) == 1 and named_label(data.about[0]) == "alice"
     Items().apply(db, [event(drafts[0], 1)], "")
     assert db.query("SELECT knowledge_kind,holder FROM memory_items") == [("opinion", "user_3")]
 

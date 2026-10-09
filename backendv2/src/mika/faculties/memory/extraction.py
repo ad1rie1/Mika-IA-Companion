@@ -46,6 +46,16 @@ SENSITIVITY = {"anodin": Sensitivity.ANODYNE, "anodine": Sensitivity.ANODYNE, "a
                "confidence": Sensitivity.CONFIDENCE, "confidentiel": Sensitivity.CONFIDENCE,
                "confidential": Sensitivity.CONFIDENCE, "intime": Sensitivity.CONFIDENCE}
 ORIGIN = {"dit": "told", "observe": "observed", "observé": "observed", "deduit": "inferred", "déduit": "inferred"}
+#: la confiance qu'une croyance peut avoir à sa naissance, selon d'où elle vient (ADR 0075) : ce qu'elle a vu plus que
+#: ce qu'on lui a dit, ce qu'on lui a dit plus que ce qu'elle en déduit. Le modèle qui l'extrait ne la rend pas plus
+#: sûre ; redire n'y ajoute rien — seule une autre personne qui le lui dit aussi (``corroborated``) la fait monter.
+CONFIDENCE_CAP = {"observed": 0.9, "told": 0.8, "inferred": 0.6}
+
+
+def born_confidence(confidence: float, origin: str, kind: str = "claim") -> float:
+    """La confiance d'une croyance qui naît, bornée par sa nature : une hypothèse vaut une déduction."""
+    cap = CONFIDENCE_CAP["inferred"] if kind == "hypothesis" else CONFIDENCE_CAP.get(origin, CONFIDENCE_CAP["told"])
+    return round(min(max(0.0, float(confidence)), cap), 3)
 #: ce qui, dit par la personne, en fait un secret quoi qu'en dise le modèle (replié, sans accents)
 SECRET_MARKERS = ("dis le a personne", "dis a personne", "le dis a personne", "le repete a personne", "repete pas",
                   "repete a personne", "entre nous", "garde le pour toi", "garde ca pour toi", "c est un secret",
@@ -375,7 +385,12 @@ def scope_of(key: str) -> str | None:
 class People:
     """Comment des noms deviennent des clés : les jetons de la conversation,
     puis ses prénoms (s'ils ne sont qu'à une personne), puis l'annuaire de
-    tous ceux qu'elle connaît (s'il n'y en a qu'un de ce nom)."""
+    tous ceux qu'elle connaît — un nom complet qu'une seule porte, ou un
+    prénom qu'une seule porte parmi celles qu'elle a vues dans un salon avec
+    quelqu'un de la conversation (``near``). Un prénom seul, sinon, reste une
+    mention (``name:<portée>:<prénom>``) : la nouvelle collègue « Alice » de Bob
+    n'est pas l'Alice qu'elle connaît. L'identité la *présume* (un fait
+    révisable, jamais une liaison : ADR 0075)."""
 
     tokens: Mapping[str, str] = field(default_factory=dict)
     local: Mapping[str, str] = field(default_factory=dict)
@@ -385,10 +400,12 @@ class People:
     #: son prénom seul (replié) : elle, sauf si quelqu'un de la conversation ou de l'annuaire le porte aussi
     first: str = ""
     scope: str = ""
+    #: celles qu'elle a vues dans un salon avec quelqu'un de la conversation : leur prénom seul les désigne
+    near: frozenset[str] = frozenset()
 
     @classmethod
     def of(cls, speakers: Sequence[Speaker], directory: Mapping[str, tuple[str, ...]], her: str = "",
-           scope: str = "") -> People:
+           scope: str = "", near: Sequence[str] = ()) -> People:
         """``her`` : son nom (celui de sa persona) — le modèle qui la nomme parle d'elle, pas de quelqu'un."""
         tokens = {s.token.lower(): s.person for s in speakers}
         named: dict[str, set[str]] = {}
@@ -402,7 +419,7 @@ class People:
         first = folded_her.split()[0] if " " in folded_her else ""
         me = (self_names(her) - {first}) if her else SELF_NAMES
         return cls(tokens, local, directory, me, first,
-                   mention_scope(scope or "|".join(sorted(s.person for s in speakers))))
+                   mention_scope(scope or "|".join(sorted(s.person for s in speakers))), frozenset(near))
 
     def one(self, raw: str) -> str | None:
         """Une clé, ou ``None`` pour elle-même ou rien."""
@@ -414,10 +431,12 @@ class People:
         if not folded or folded in self.me:
             return None
         key = self.local.get(folded)
+        found: tuple[str, ...] = ()
         if key is None:
             found = self.directory.get(folded) or ()
-            key = found[0] if len(found) == 1 else None
-        if key is None and folded == self.first:
+            if len(found) == 1 and (" " in folded or found[0] in self.near):
+                key = found[0]
+        if key is None and folded == self.first and len(found) != 1:
             return None  # son prénom seul, que personne d'autre de connu ne porte : c'est elle
         return key or f"name:{self.scope}:{folded}"
 

@@ -176,6 +176,11 @@ class IdentityView:
 #: La clé de relation d'une adresse : la personne à laquelle elle est liée,
 #: sinon l'adresse elle-même.
 PERSON = FactFamily("identity.person", arg=str, type=str)
+#: La personne qu'une mention (``name:…``) désigne *présumément* : la seule personne connue qui porte ce nom, que
+#: rien n'a reliée à la mention ni écartée d'elle (ADR 0075). Un indice pour le rappel, jamais une liaison : ni
+#: ``PERSON``, ni la porte d'une fiche, ni un lien (``social.TIES``), ni une confidence ne la suivent. ``""`` : pas
+#: de présomption (aucune ou plusieurs personnes de ce nom, une mention déjà reliée, un couple écarté).
+PRESUMED = FactFamily("identity.presumed", arg=str, type=str)
 IDENTITY = FactFamily("identity.identity", arg=str, type=IdentityView)
 #: Argument : (adresse, canal, public). Toute panne → ``CLOSED``.
 DISCLOSURE = FactFamily("identity.disclosure", arg=tuple, type=Disclosure)

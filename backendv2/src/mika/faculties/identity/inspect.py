@@ -27,13 +27,15 @@ from mika.faculties.identity.faculty import (
     Handle,
     IdentityState,
     _first_seen,
-    _name_of,
     _params,
     _root,
+    bearers,
     handles_of,
     known_as,
+    presumed,
     proves_owner,
     view_of,
+    worn_names,
 )
 from mika.kernel.events import Event
 from mika.kernel.frame import Frame
@@ -63,7 +65,7 @@ from mika.kernel.inspect import (
     paginate,
 )
 from mika.vocab import privacy
-from mika.vocab.people import fold, is_identifiable, is_internal, named_label
+from mika.vocab.people import fold, is_identifiable, is_internal
 from mika.vocab.privacy import ChannelTrust, Disclosure, Sensitivity
 
 #: Au plus tant de lignes au registre des preuves par page, tant de lignes par page d'une liste.
@@ -254,6 +256,18 @@ def name_aliases(s: IdentityState, person: str) -> tuple[str, ...]:
     return tuple(sorted(out))
 
 
+def presumed_mentions(s: IdentityState, store: Any, person: str) -> tuple[str, ...]:
+    """Les mentions (``name:<portée>:<nom>``) que l'identité présume être elle (ADR 0075) : la seule personne
+    connue de ce nom. Oublier la personne les oublie aussi — dans le doute, on oublie plus, jamais moins ; un
+    homonyme connu, et la présomption tombe (on ne sait pas de qui on parlait)."""
+    if store is None:
+        return ()
+    rows = store.query_mind(f"SELECT DISTINCT person FROM {memory_c.ABOUT_TABLE} WHERE person >= ? AND person < ?",
+                            (NAMED, _NAMED_END))
+    worn = worn_names(s)
+    return tuple(sorted(k for (k,) in rows if presumed(s, str(k), worn) == person))
+
+
 # ── Les noms qui attendent quelqu'un ──────────────────────────────────────
 
 #: le paramètre de la fiche d'une personne qui y pose le formulaire « C'est la personne dont on lui a parlé »,
@@ -283,32 +297,6 @@ class Waiting:
     homonyms: tuple[str, ...] = ()
 
 
-def _worn(s: IdentityState) -> dict[str, list[tuple[str, tuple[str, ...]]]]:
-    """Les noms que portent les personnes connues (le sien, ceux de ses adresses), repliés comme la mémoire forme
-    ses clés, rangés par premier mot."""
-    out: dict[str, list[tuple[str, tuple[str, ...]]]] = {}
-    for person in s.by_person.keys():
-        if person.startswith(NAMED) or not is_identifiable(person):
-            continue
-        names = {_name_of(s, person)} | {s.handles[k].name for k in handles_of(s, person) if k in s.handles}
-        for words in sorted({tuple(fold(n).split()) for n in names if n}):
-            if words:
-                out.setdefault(words[0], []).append((person, words))
-    return out
-
-
-def bearers(s: IdentityState, key: str,
-            worn: Mapping[str, list[tuple[str, tuple[str, ...]]]] | None = None) -> list[str]:
-    """Les personnes connues qui portent ce nom : le nom complet, ou un prénom seul d'un côté (« Carol » et
-    « Carol Dupont » s'accordent, « Carol Dupont » et « Carol Martin » non). Une suggestion, jamais une liaison :
-    deux Carol ne se confondent pas d'elles-mêmes (ADR 0048)."""
-    said = tuple(named_label(key).split()) if key.startswith(NAMED) else ()
-    if not said:
-        return []
-    worn = _worn(s) if worn is None else worn
-    return sorted({p for p, words in worn.get(said[0], ()) if words == said or len(words) == 1 or len(said) == 1})
-
-
 def waiting_names(s: IdentityState, store: Any) -> list[Waiting]:
     """Les noms dont on lui a parlé, encore libres, qu'une personne connue porte : un couple par personne, sauf
     ceux qu'un opérateur a écartés ; les arrivées les plus récentes d'abord. Lu dans le magasin, en lecture seule
@@ -320,7 +308,7 @@ def waiting_names(s: IdentityState, store: Any) -> list[Waiting]:
     free = sorted({str(k) for (k,) in rows} - set(s.names))
     if not free:
         return []
-    worn = _worn(s)
+    worn = worn_names(s)
     out: list[Waiting] = []
     for key in free:
         found = bearers(s, key, worn)
@@ -445,7 +433,8 @@ def _person_head(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) 
     facts += [("proximité", relation), ("vue pour la première fois", _when(ctx, first, "—")),
               ("dernier message reçu", _when(ctx, _last_from(frame, handles)))]
     # ses adresses, et les noms qui ne désignent qu'elle : oublier la personne les oublie tous
-    aliases = (*handles, *(n for n in name_aliases(s, person) if n not in handles))
+    aliases = (*handles, *(n for n in (*name_aliases(s, person), *presumed_mentions(s, ctx.store, person))
+                           if n not in handles))
     return Head(person, known_as(s, person), subtitle, tuple(badges), tuple(facts[:6]), aliases)
 
 

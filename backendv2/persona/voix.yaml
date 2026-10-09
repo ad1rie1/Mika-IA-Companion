@@ -1745,6 +1745,9 @@ memory:
     touches_close: " (ça touche {who} de près : ne le répète pas)"
     # Quelque chose de personnel qui concerne d'autres personnes.
     touches: " (ça touche {who} : à toi de juger si ça se dit ici)"
+    # Une personne seulement présumée (ADR 0075) : on lui a parlé d'une « Alice », elle en connaît une, rien ne dit
+    # que ce soit la même.
+    presumed: " (« {name} » ici, c'est ce qu'on t'en a dit : rien ne prouve que ce soit la personne que tu connais sous ce nom)"
 
   # Plusieurs personnes nommées d'un coup (memory/salience.py) : « Alice », « Alice et Bob », « Alice, Bob et
   # Carol ».

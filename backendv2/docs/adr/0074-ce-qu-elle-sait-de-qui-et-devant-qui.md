@@ -47,7 +47,9 @@ aurait multipliés.
 
 **Ce qui n'est pas fait.**
 
-- *Un prénom seul que porte une seule personne connue reste relié à elle* (`People.one`, l'annuaire). L'audit
+- *Un prénom seul que porte une seule personne connue reste relié à elle* (`People.one`, l'annuaire). **Fait
+  depuis par l'ADR 0075** : le prénom reste une mention, que l'identité présume ; le reste de ce point en garde
+  l'historique. L'audit
   montre le risque : la nouvelle collègue « Alice » de Bob devient l'Alice qu'elle connaît. Mais exiger une preuve
   de contexte défaisait l'ADR 0058 dans son cas ordinaire. Alice parle de « Carol » en privé, Carol écrit à Mika de
   son côté, et elles ne sont jamais vues ensemble : le lien qui ouvre les confidences d'Alice à une proche

@@ -18,7 +18,7 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab import privacy
-from mika.vocab.people import clean_display_name, is_identifiable, is_internal, named_label, same_name
+from mika.vocab.people import clean_display_name, fold, is_identifiable, is_internal, named_label, same_name
 from mika.vocab.privacy import ChannelTrust, Disclosure
 
 _TRUST_ORDER = {ChannelTrust.INTERNAL: 0, ChannelTrust.PUBLIC: 1, ChannelTrust.ACCOUNT: 2,
@@ -445,6 +445,42 @@ def _name_of(s: IdentityState, person: str) -> str:
     return ""
 
 
+def worn_names(s: IdentityState) -> dict[str, list[tuple[str, tuple[str, ...]]]]:
+    """Les noms que portent les personnes connues (le sien, ceux de ses adresses), repliés comme la mémoire forme
+    ses clés, rangés par premier mot."""
+    out: dict[str, list[tuple[str, tuple[str, ...]]]] = {}
+    for person in s.by_person.keys():
+        if person.startswith(NAMED) or not is_identifiable(person):
+            continue
+        names = {_name_of(s, person)} | {s.handles[k].name for k in handles_of(s, person) if k in s.handles}
+        for words in sorted({tuple(fold(n).split()) for n in names if n}):
+            if words:
+                out.setdefault(words[0], []).append((person, words))
+    return out
+
+
+def bearers(s: IdentityState, key: str,
+            worn: dict[str, list[tuple[str, tuple[str, ...]]]] | None = None) -> list[str]:
+    """Les personnes connues qui portent ce nom : le nom complet, ou un prénom seul d'un côté (« Carol » et
+    « Carol Dupont » s'accordent, « Carol Dupont » et « Carol Martin » non). Une suggestion, jamais une liaison :
+    deux Carol ne se confondent pas d'elles-mêmes (ADR 0048)."""
+    said = tuple(named_label(key).split()) if key.startswith(NAMED) else ()
+    if not said:
+        return []
+    worn = worn_names(s) if worn is None else worn
+    return sorted({p for p, words in worn.get(said[0], ()) if words == said or len(words) == 1 or len(said) == 1})
+
+
+def presumed(s: IdentityState, key: str, worn: dict[str, list[tuple[str, tuple[str, ...]]]] | None = None) -> str:
+    """La personne qu'une mention désigne présumément (ADR 0075) : la seule connue qui porte ce nom, tant que la
+    mention n'est reliée à personne et qu'un opérateur n'a pas écarté ce couple ; ``""`` sinon. Lue à chaque fois :
+    une seconde Alice connue, et la présomption tombe d'elle-même (deux Alice ne se devinent pas)."""
+    if not key.startswith(NAMED) or key in s.names:
+        return ""
+    found = bearers(s, key, worn)
+    return found[0] if len(found) == 1 and found[0] not in s.dismissed.get(key, ()) else ""
+
+
 def resolve_target(s: IdentityState, handle: str, name: str) -> str | None:
     """Qui « Alice » désigne-t-il ? Une seule personne connue sous ce nom →
     elle ; aucune → l'adresse elle-même (elle se présente) ; plusieurs →
@@ -503,6 +539,11 @@ def view_of(s: IdentityState, handle: str, now: int = 0) -> c.IdentityView:
 @IDENTITY.fact(c.PERSON)
 def _person(s: IdentityState, cx, handle: str) -> str:
     return _root(s, handle) or handle
+
+
+@IDENTITY.fact(c.PRESUMED)
+def _presumed(s: IdentityState, cx, key: str) -> str:
+    return presumed(s, key)
 
 
 @IDENTITY.fact(c.IDENTITY)

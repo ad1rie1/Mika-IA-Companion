@@ -219,6 +219,15 @@ def canon(frame: Frame, keys: Sequence[str], memo: dict[str, str]) -> tuple[str,
     return tuple(sorted(out))
 
 
+def presumed_of(frame: Frame, key: str, memo: dict[str, str]) -> str:
+    """La personne qu'une mention non reliée désigne présumément (ADR 0075), ``""`` sinon : de quoi y penser
+    quand on la nomme, jamais de quoi la traiter comme elle (le verdict ne suit pas une présomption)."""
+    slot = "?" + key  # rangée à côté de ``canon`` sans s'y mêler
+    if slot not in memo:
+        memo[slot] = frame.get(identity_c.PRESUMED(key)) if key.startswith("name:") else ""
+    return memo[slot]
+
+
 def phatic(text: str) -> bool:
     """Une politesse, un acquiescement : rien qui oriente un souvenir."""
     return not [w for w in words(text) if w not in PHATIC]
@@ -268,7 +277,9 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
     (sonde réelle du 2026-10-03 : rien ne revenait, et elle répondait « j'ai pas de nouvelles non plus »).
 
     Une « Alice » dont on lui a parlé ailleurs, que personne n'a reliée (``scope`` : la portée de cette
-    conversation-ci), n'est pas celle qu'on nomme ici : elle ne rend pas le prénom ambigu."""
+    conversation-ci), n'est pas celle qu'on nomme ici : elle ne rend pas le prénom ambigu. Une mention que
+    l'identité présume être une personne connue (la seule de ce nom, ADR 0075) se range sous elle : elle y pense,
+    ce que dit la mention restant marqué d'un doute (``doubted``)."""
     said = " ".join(WORD.findall(fold(text)))
     if not said:
         return {}
@@ -283,6 +294,8 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
     keys_of: dict[str, set[str]] = {}
     for k in sorted(raw):
         person = canon(frame, (k,), memo)[0]
+        if person == k:
+            person = presumed_of(frame, k, memo) or k
         if scope is not None and person == k and scope_of(k) not in (None, scope):
             continue  # une mention d'une autre conversation, reliée à personne
         keys_of.setdefault(person, set()).add(k)
@@ -506,7 +519,8 @@ def bond_of(frame: Frame, keys: Sequence[str], memo: dict[str, float]) -> float:
 
 
 @MEMORY.enricher("recall", episodes=CONVERSATIONAL, deadline_ms=2500,
-                 reads=[identity_c.PERSON, identity_c.IDENTITY, identity_c.HANDLES, c.PROMISES_TO, c.LIFE_EVENTS,
+                 reads=[identity_c.PERSON, identity_c.PRESUMED, identity_c.IDENTITY, identity_c.HANDLES,
+                        c.PROMISES_TO, c.LIFE_EVENTS,
                         c.HARD_TIMES, affect_c.MOOD, affect_c.BOND, social_c.CLOSENESS, social_c.CONTACT])
 async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Recall | None:
     vectors, store = ports.get("vectors"), ports.get("store")
@@ -619,7 +633,8 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     out.names = names
     for _score, item, verdict in ranked:
         bucket, cap = (out.souvenirs, p.max_souvenirs) if item.kind == c.SOUVENIR else (out.beliefs, p.max_beliefs)
-        _add_recalled(bucket, Recalled(item, verdict, item.text + tag(verdict, names)), cap)
+        _add_recalled(bucket, Recalled(item, verdict, item.text + tag(verdict, names) +
+                                       doubted(frame, item, memo)), cap)
     if hidden and p.max_unsaid:
         for who in sorted(hidden, key=lambda w: (-max(candidates[i.id] for i in hidden[w]), w))[: p.max_unsaid]:
             out.unsaid.append(unsaid_public_line(who, names, _last_talk(frame, who)) if aud.public else
@@ -629,6 +644,14 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
         out.exchanges = await _exchanges_for(frame, store, vectors if searching else None, query, context, person,
                                              aud, p, (self_c.name_of(frame.get(self_c.PERSONA)), out.name))
     return out
+
+
+def doubted(frame: Frame, item: Item, memo: dict[str, str]) -> str:
+    """Le doute d'une ligne qui parle d'une personne seulement présumée (ADR 0075) : « Alice », dont Bob lui a
+    parlé, n'est peut-être pas l'Alice qu'elle connaît — qu'elle ne mélange pas les deux, ou qu'elle demande."""
+    presumed = sorted(named_label(k).title() for k in item.about
+                      if k.startswith("name:") and canon(frame, (k,), memo)[0] == k and presumed_of(frame, k, memo))
+    return phrase("memory.tag.presumed", name=presumed[0]) if presumed else ""
 
 
 def _last_talk(frame: Frame, person: str) -> str:

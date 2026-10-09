@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, time
 from typing import Any
@@ -142,6 +142,7 @@ class Consolidate:
         rows = window(rows, set(frame.get(rt.AWAITING)))
         self.stuck_at = None if rows else frame.seq
         directory = self._directory(frame, store)
+        rooms = self._rooms(frame, store)
         her = self_c.name_of(frame.get(self_c.PERSONA))
         tasks = [(conv, 0) for conv in self._conversations(frame, rows, state, directory)]
         drafts: list[Draft[Any]] = []
@@ -162,7 +163,7 @@ class Consolidate:
         failed = False
         model, last_call = "", f"{ctx.run_id}#0"
         for n, (conv, attempts) in enumerate(tasks):
-            people = x.People.of(conv.speakers, directory, her, scope=conv.key)
+            people = x.People.of(conv.speakers, directory, her, scope=conv.key, near=self._near(conv, rooms))
             known = await self._known_beliefs(store, vectors, conv, people, directory)
             promises = self._promises(frame, store, state, conv)
             labels = {speaker.person: speaker.label for speaker in conv.speakers}
@@ -266,6 +267,23 @@ class Consolidate:
             for k in {folded, folded.split()[0]}:
                 found.setdefault(k, set()).add(key)
         return {k: tuple(sorted(v)) for k, v in found.items()}
+
+    @staticmethod
+    def _rooms(frame: Frame, store: Any) -> dict[str, set[str]]:
+        """Les salons où elle a vu chaque personne."""
+        out: dict[str, set[str]] = {}
+        for handle, room in store.query_mind(
+                f"SELECT DISTINCT person, room FROM {transcript_c.THREAD_TABLE} WHERE room IS NOT NULL"):
+            if handle and is_identifiable(handle):
+                out.setdefault(frame.get(identity_c.PERSON(handle)) or handle, set()).add(str(room))
+        return out
+
+    @staticmethod
+    def _near(conv: x.Conversation, rooms: Mapping[str, set[str]]) -> tuple[str, ...]:
+        """Celles qu'elle a vues dans un salon avec quelqu'un de cette conversation : quand on y dit « Inès », c'est
+        l'Inès qu'ils connaissent tous deux, pas une autre qu'elle connaîtrait seule de son côté."""
+        shared = set().union(*(rooms.get(sp.person, set()) for sp in conv.speakers))
+        return tuple(sorted(person for person, seen in rooms.items() if seen & shared))
 
     def _conversations(self, frame: Frame, rows: list[tuple[Any, ...]], state: MemoryState,
                        directory: dict[str, tuple[str, ...]], aside: Sequence[int] = ()) -> list[x.Conversation]:
@@ -557,10 +575,11 @@ class Consolidate:
                     sources=sources, sensitivity=sens, about=about, told_by=told_by, heard_by=heard, secret=secret,
                     replaces=replaces if replaces != twin else None, between_us=between))
                 continue
+            origin = x.ORIGIN.get(fold(b.origine), "told")
             drafts.append(c.BELIEVED.draft(
                 text=Content.of(b.texte, level=sens), about=about, sensitivity=sens,
-                importance=importance, confidence=round(b.confiance, 3),
-                origin=x.ORIGIN.get(fold(b.origine), "told"), source=source, replaces=replaces, sources=sources,
+                importance=importance, confidence=x.born_confidence(b.confiance, origin, nature),
+                origin=origin, source=source, replaces=replaces, sources=sources,
                 call_id=call_id, told_by=told_by, heard_by=heard, secret=secret, between_us=between,
                 knowledge_kind=nature, holder=holder, relations=tuple(relations)))
         drafts += self._called(nicks, ours, store, conv, call_id)
@@ -660,7 +679,8 @@ class Consolidate:
             return [c.REINFORCED.draft(item=twin, sources=sources)]
         return [c.BELIEVED.draft(
             text=Content.of(b.texte, level=sens), about=(), sensitivity=sens,
-            importance=x.IMPORTANCE[3 if durable else 1], confidence=round(getattr(b, "confiance", 0.7), 3),
+            importance=x.IMPORTANCE[3 if durable else 1],
+            confidence=x.born_confidence(getattr(b, "confiance", 0.7), c.OBSERVED, nature),
             origin=c.OBSERVED, sources=sources, replaces=replaces, call_id=call_id, about_self=True, durable=durable,
             knowledge_kind=nature, secret=secret)]
 

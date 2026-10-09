@@ -602,8 +602,9 @@ def test_an_ordinary_hyphenated_name_survives():
 def test_an_operator_says_who_the_alice_bob_talked_about_was_and_forgetting_her_takes_it_too(tmp_path, bound):
     """Bob avait parlé d'« Alice Martin » avant qu'elle n'arrive. Un opérateur dit que c'était cette Alice-là
     (jamais deviné d'une ressemblance de nom) : la clé ``name:alice martin`` la désigne, et « Oublier » Alice
-    efface aussi ce qu'on avait dit d'elle sous ce nom. Contre-exemple : sans la liaison, le nom complet échappait
-    à l'oubli (l'heuristique ne relie que les noms exacts qu'elle porte)."""
+    efface aussi ce qu'on avait dit d'elle sous ce nom. Sans la liaison, la clé reste la sienne (rien n'est relié
+    d'une ressemblance), mais la seule Alice connue est *présumée* être elle : l'oubli d'Alice l'emporte quand même
+    — dans le doute, on oublie plus, jamais moins (ADR 0075)."""
     async def scenario(kernel, llm):
         await connect(kernel, "user_1", "Adrien", operator=True)
         await connect(kernel, "user_2", "Bob")
@@ -629,4 +630,4 @@ def test_an_operator_says_who_the_alice_bob_talked_about_was_and_forgetting_her_
     if bound:
         assert person == "user_3" and left == []
     else:
-        assert person == "name:alice martin" and left
+        assert person == "name:alice martin" and left == []

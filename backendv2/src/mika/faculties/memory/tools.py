@@ -18,6 +18,7 @@ from mika.faculties.memory.life import kept_too_early
 from mika.faculties.memory.recall import (
     about_us,
     between_us,
+    doubted,
     items_by_id,
     knowledge_label,
     names_of,
@@ -91,7 +92,7 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
     if not found:
         return phrase("memory.tools.search.nothing")
     names = names_of(frame, {o for it, v in found for o in (*v.others, *it.about, it.holder) if o})
-    return "\n".join(f"- {age_words(it.born_at, frame.now)} : {it.text}{tag(v, names)}"
+    return "\n".join(f"- {age_words(it.born_at, frame.now)} : {it.text}{tag(v, names)}{doubted(frame, it, memo)}"
                      + (f" ({knowledge_label(it, names)})" if it.kind == c.BELIEF else "") for it, v in found)
 
 
