@@ -36,6 +36,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, time
 from typing import Any
 
+from mika.contracts import expression as expression_c
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
@@ -112,6 +113,10 @@ class Consolidate:
         #: ce qu'une conversation a déjà donné pendant un passage qu'une panne a interrompu : on ne repaie pas
         #: l'appel (clé : la conversation et ses messages)
         self.extracted: dict[tuple[str, tuple[int, ...]], tuple[x.Extraction, str, str, str]] = {}
+        #: les salons où chaque adresse a été vue, et jusqu'où le fil en a été lu : chaque passage ne relit que la
+        #: suite (ADR 0075 ; tout relire parcourait chaque message de salon depuis la genèse)
+        self.seen_rooms: dict[str, set[str]] = {}
+        self.rooms_read = 0
 
     def next_due(self, state: MemoryState, frame: Frame, last_run: int | None) -> int | None:
         if self.retry_at > frame.now:
@@ -142,7 +147,6 @@ class Consolidate:
         rows = window(rows, set(frame.get(rt.AWAITING)))
         self.stuck_at = None if rows else frame.seq
         directory = self._directory(frame, store)
-        rooms = self._rooms(frame, store)
         her = self_c.name_of(frame.get(self_c.PERSONA))
         tasks = [(conv, 0) for conv in self._conversations(frame, rows, state, directory)]
         drafts: list[Draft[Any]] = []
@@ -159,7 +163,9 @@ class Consolidate:
                           about=tuple(json.loads(about)), detail=Content.of("reprise", level=3)))
             tasks.extend((conv, attempts) for conv in self._conversations(frame, retry_rows, state, directory,
                                                                            aside=json.loads(aside)))
+        tasks = [(self._lies(store, conv), attempts) for conv, attempts in tasks]
         vectors = ctx.ports.get("vectors")
+        rooms = self._rooms(frame, store) if tasks else {}
         failed = False
         model, last_call = "", f"{ctx.run_id}#0"
         for n, (conv, attempts) in enumerate(tasks):
@@ -168,19 +174,21 @@ class Consolidate:
             promises = self._promises(frame, store, state, conv)
             labels = {speaker.person: speaker.label for speaker in conv.speakers}
             situations = self._situations(frame, store, state, conv, p, labels)
+            moments, upcoming = self._moments(frame, store, state, conv, labels)
             prompt = x.render(conv, now=frame.local(), beliefs=known,
                               promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
-                                        for i, to, t in promises], situations=situations)
+                                        for i, to, t in promises], situations=situations, moments=moments)
             request = LLMRequest(role="extract", call_id=f"{ctx.run_id}#{n}", system_stable=x.system(her),
                                  messages=(Message("user", prompt),), tools=(x.tool(her),), max_tokens=2500,
                                  lane="background", priority=2, meta={"conversation": conv.key})
             # Les souvenirs de contexte sont facultatifs, les messages sources ne le sont pas.
             # Une ancienne liste de situations ne doit pas rendre une paire courte illisible.
-            while not fits_context(ctx.llm, request) and (known or promises or situations):
+            while not fits_context(ctx.llm, request) and (known or promises or situations or moments):
                 known, promises, situations = known[:len(known) // 2], promises[:len(promises) // 2], situations[:len(situations) // 2]
+                moments = moments[:len(moments) // 2]
                 prompt = x.render(conv, now=frame.local(), beliefs=known,
                                   promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
-                                            for i, to, t in promises], situations=situations)
+                                            for i, to, t in promises], situations=situations, moments=moments)
                 request = replace(request, messages=(Message("user", prompt),))
             retry_size = max(2, p.max_window // (2 ** min(8, attempts // max(1, p.max_attempts))))
             if (not fits_context(ctx.llm, request) or len(conv.lines) > retry_size) and len(conv.lines) > 1:
@@ -234,8 +242,9 @@ class Consolidate:
                     detail=Content.of(json.dumps({"issues": extraction.issues if partial else [reason],
                                                   "output": raw}, ensure_ascii=False), level=3)))
             if extraction is not None:
+                shown = {i for i, _w, _t in moments}
                 drafts += await self._drafts(extraction, frame, state, store, conv, people, known, promises, vectors,
-                                             p, last_call)
+                                             p, last_call, moments={i: ev for i, ev in upcoming.items() if i in shown})
                 drafts += self._ended(extraction, situations, last_call)
         if rows:
             drafts.append(c.CONSOLIDATED.draft(upto=rows[-1][0], produced=sum(
@@ -268,15 +277,33 @@ class Consolidate:
                 found.setdefault(k, set()).add(key)
         return {k: tuple(sorted(v)) for k, v in found.items()}
 
-    @staticmethod
-    def _rooms(frame: Frame, store: Any) -> dict[str, set[str]]:
-        """Les salons où elle a vu chaque personne."""
-        out: dict[str, set[str]] = {}
-        for handle, room in store.query_mind(
-                f"SELECT DISTINCT person, room FROM {transcript_c.THREAD_TABLE} WHERE room IS NOT NULL"):
+    def _rooms(self, frame: Frame, store: Any) -> dict[str, set[str]]:
+        """Les salons où elle a vu chaque personne : les adresses lues jusqu'ici, plus la suite du fil, rangées sous
+        la personne qu'elles désignent maintenant (une adresse reliée depuis parle pour elle)."""
+        for seq, handle, room in store.query_mind(
+                f"SELECT id, person, room FROM {transcript_c.THREAD_TABLE} WHERE id>? AND room IS NOT NULL "
+                "ORDER BY id", (self.rooms_read,)):
+            self.rooms_read = max(self.rooms_read, int(seq))
             if handle and is_identifiable(handle):
-                out.setdefault(frame.get(identity_c.PERSON(handle)) or handle, set()).add(str(room))
+                self.seen_rooms.setdefault(str(handle), set()).add(str(room))
+        out: dict[str, set[str]] = {}
+        for handle, seen in self.seen_rooms.items():
+            out.setdefault(frame.get(identity_c.PERSON(handle)) or handle, set()).update(seen)
         return out
+
+    @staticmethod
+    def _lies(store: Any, conv: x.Conversation) -> x.Conversation:
+        """Ses répliques qu'elle a marquées mensonge (``LIE_ANNOTATION``) : la relecture le sait, et n'en tire rien
+        comme vrai — ni une croyance, ni une note sur elle (« je ne sais rien de ses projets », redit, ne doit pas
+        devenir ce qu'elle croit)."""
+        mine = [ln.seq for ln in conv.lines if ln.person is None]
+        if not mine:
+            return conv
+        lied = {e.seq for e in store.get_events(mine) if e.type == rt.UTTERANCE.name
+                and any(k == expression_c.LIE_ANNOTATION for k, _v in json.loads(e.data).get("annotations") or ())}
+        if not lied:
+            return conv
+        return replace(conv, lines=tuple(replace(ln, lie=True) if ln.seq in lied else ln for ln in conv.lines))
 
     @staticmethod
     def _near(conv: x.Conversation, rooms: Mapping[str, set[str]]) -> tuple[str, ...]:
@@ -355,7 +382,10 @@ class Consolidate:
             anodyne = int(sens) <= Sensitivity.ANODYNE and not secret
             if not (anodyne or (bool(tellers) and tellers <= persons and not conv.room)):
                 continue
-            if concerns and not concerns & (persons | named):
+            # une mention faite dans cette conversation-ci (« ma collègue Alice ») la touche aussi : sans elle, un
+            # « garde-le pour toi » dit après coup ne pouvait plus viser sa croyance (ADR 0075)
+            mentioned = {k for k in concerns if x.scope_of(k) == people.scope}
+            if concerns and not concerns & (persons | named | mentioned):
                 continue
             out.append((int(i), t))
         return out[:KNOWN_SHOWN]
@@ -402,10 +432,41 @@ class Consolidate:
                  since=frame.local(ev.when).date().isoformat(), text=texts[ev.text_ref]))
                 for ev, whom in live if texts.get(ev.text_ref)]
 
+    @staticmethod
+    def _moments(frame: Frame, store: Any, state: MemoryState, conv: x.Conversation,
+                 labels: dict[str, str]) -> tuple[list[tuple[int, str, str]], dict[int, c.LifeEvent]]:
+        """Les moments à venir des personnes de cette conversation (numéro, qui, « le jour : texte ») : la relecture
+        peut dire lequel un nouveau remplace — reporté, avancé, précisé (ADR 0076). Sans eux, « finalement mon
+        entretien est reporté à lundi » notait un second entretien à côté du premier, et l'ancien, resté non secret,
+        trahissait ce que le nouveau gardait (sonde réelle du 2026-10-09). Les mêmes règles que les situations :
+        jamais ce qu'un autre a confié au-delà de l'anodin, et dans un salon l'anodin seulement."""
+        persons = set(conv.persons)
+        archive = {ev.id: ev for ev in for_people(store, tuple(persons))}
+        live: dict[int, tuple[c.LifeEvent, str]] = {}
+        for ev in sorted({**state.events, **archive}.values(), key=lambda ev: ev.id):
+            if ev.ongoing or ev.yearly or not ev.text_ref or ev.when < frame.now - DAY:
+                continue
+            whom = next((k for k in (frame.get(identity_c.PERSON(a)) or a for a in ev.about) if k in persons), None)
+            if whom is None:
+                continue
+            tellers = {frame.get(identity_c.PERSON(t)) or t for t in ev.told_by}
+            anodyne = ev.sensitivity <= Sensitivity.ANODYNE and not ev.secret
+            if anodyne or (tellers <= persons and not conv.room):
+                live[ev.id] = (ev, whom)
+        if not live:
+            return [], {}
+        texts = store.content([ev.text_ref for ev, _ in live.values()])
+        shown = [(i, labels.get(whom, whom), phrase("memory.extraction.render.moment",
+                                                   when=frame.local(ev.when).date().isoformat(),
+                                                   text=texts[ev.text_ref]))
+                 for i, (ev, whom) in live.items() if texts.get(ev.text_ref)]
+        return shown, {i: ev for i, (ev, _w) in live.items()}
+
     # ── ce qu'on en garde ──
     async def _drafts(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
                       people: x.People, known: list[tuple[int, str]], promises: list[tuple[int, str, str]],
-                      vectors: Any, p: MemoryParams, call_id: str) -> list[Draft[Any]]:
+                      vectors: Any, p: MemoryParams, call_id: str,
+                      moments: dict[int, c.LifeEvent] | None = None) -> list[Draft[Any]]:
         drafts: list[Draft[Any]] = []
         known_ids = {i for i, _ in known}
         known_texts = dict(known)
@@ -487,14 +548,15 @@ class Consolidate:
         for s in ex.souvenirs:
             if not fresh(c.SOUVENIR, s.texte):
                 continue
-            if s.sur_elle and not people.resolve(s.personnes) and from_her(s.messages):
+            if s.sur_elle and not people.resolve(s.personnes) and from_her(s.messages) \
+                    and not people.names_someone(s.texte):
                 drafts += await self._about_self(s, store, vectors, p, provenance, call_id, known_ids, secret_of,
                                                  her_words(s.messages))
                 continue
             text, cited_seqs = s.texte, list(s.messages)
             if banal(text, said_names):
                 continue  # « Sam est parti en disant 'allez j'y vais' » : une banalité ne se retient pas
-            line = x.copy_of(text, conv.lines)
+            line = x.copy_of(text, conv.lines) or x.voice_of(text, conv.lines)
             if line is not None:
                 # une réplique recopiée n'est pas un souvenir (sonde réelle du 2026-10-03 : « Dors bien Sam… », « on
                 # l'a endormi ») : la sienne, jamais ; celle de la personne, citée en disant qui parle, si elle compte
@@ -518,7 +580,8 @@ class Consolidate:
         for b in ex.croyances:
             if not fresh(c.BELIEF, b.texte):
                 continue
-            if b.sur_elle and not people.resolve(b.personnes) and from_her(b.messages):
+            if b.sur_elle and not people.resolve(b.personnes) and from_her(b.messages) \
+                    and not people.names_someone(b.texte):
                 # ce qu'elle dit d'elle seule ; « Mika a dit à Sam : … », lui, nomme quelqu'un : ce n'est pas une
                 # note anodine sur elle (elle sortait telle quelle dans un salon — sonde du 2026-10-03), il suit le
                 # chemin commun (sa réplique n'est pas ce qu'on lui a appris)
@@ -589,7 +652,7 @@ class Consolidate:
         drafts += await self._promised(ex, frame, state, store, conv, people, promises, vectors, p, provenance,
                                        fresh, call_id, lambda text: x.echoes(text, secrets, names))
         drafts += await self._events(ex, frame, state, store, conv, people, vectors, p, provenance, concerned,
-                                     secret_of, heard, fresh, call_id)
+                                     secret_of, heard, fresh, call_id, moments or {})
         return drafts
 
     @staticmethod
@@ -752,7 +815,8 @@ class Consolidate:
 
     async def _events(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
                       people: x.People, vectors: Any, p: MemoryParams, provenance: Any, concerned: Any,
-                      secret_of: Any, heard: tuple[str, ...], fresh: Any, call_id: str) -> list[Draft[Any]]:
+                      secret_of: Any, heard: tuple[str, ...], fresh: Any, call_id: str,
+                      moments: dict[int, c.LifeEvent] | None = None) -> list[Draft[Any]]:
         """Ce qui va arriver dans la vie de quelqu'un : daté, à venir ; ou une
         situation qui dure (depuis quand). Le même moment redit ne se note pas
         deux fois ; une date qui change remplace. Avec ce qu'il pèse (ce qui
@@ -788,6 +852,19 @@ class Consolidate:
             if any(set(a) & set(about) and same_day(frame, t, at) and x.same_moment(ev.texte, n, names)
                    for n, t, a in noted):
                 continue  # dit deux fois dans la même conversation
+            moved = (moments or {}).get(ev.remplace) if ev.remplace is not None and not ev.en_cours else None
+            if moved is not None:
+                # la relecture désigne le moment qu'il déplace (ADR 0076) : le même, à sa nouvelle date — il en garde
+                # le secret, la sensibilité et le poids, et l'ancien ne reste pas à côté
+                noted.append((ev.texte, at, about))
+                sens = max(sens, moved.sensitivity)
+                drafts.append(c.EVENT_NOTED.draft(
+                    text=Content.of(ev.texte, level=sens), when=at, about=tuple(dict.fromkeys((*about, *moved.about))),
+                    all_day=all_day, sensitivity=sens, sources=sources, told_by=told_by, heard_by=heard,
+                    secret=moved.secret or secret_of(ev.secret, cited, sens, ev.texte), replaces=moved.id,
+                    call_id=call_id, ongoing=False, importance=max(moved.importance, x.moment_importance(ev)),
+                    festive=moved.festive or x.festive(ev), yearly=yearly))
+                continue
             twin = await self._same_event(store, state, vectors, ev.texte, about, p, frame=frame, at=at,
                                           names=names)
             if twin is not None and not ev.en_cours and abs(twin.when - at) >= DAY // 2 and not x.same_moment(

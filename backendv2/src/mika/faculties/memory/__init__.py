@@ -9,6 +9,7 @@ from mika.faculties.memory import (  # noqa: F401 — contributions
     archive,
     consolidation,
     inspect,
+    lies,
     life,
     night,
     projections,

@@ -552,6 +552,26 @@ async def test_the_cli_output_follows_the_request_budget(tmp_path, cli):
     assert report["max_output"] == "3000"
 
 
+async def test_a_sentence_cut_by_a_tool_search_keeps_its_beginning(tmp_path, cli):
+    """Le modèle écrit « Je ne la connais », cherche un outil (``ToolSearch``, que la CLI exécute elle-même) et
+    reprend « pas, … » dans un second message : ``result`` ne porte que la suite (sonde réelle du 2026-10-09).
+    Contre-exemple : un préambule fini (« Je regarde. ») reste écarté, comme sur l'API."""
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+
+        async def said(call_id: str, **steps: Any) -> str:
+            req = LLMRequest(role="reply", call_id=call_id, system_stable=scenario(**steps),
+                             messages=(Message("user", "tu te souviens d'Alice ?"),))
+            return (await be.complete(req)).text
+
+        cut = await said("cut-1#0", before="Oui, je m'en souviens. Je ne la connais ",
+                         say="pas, et je ne connais pas ton équipe.")
+        preamble = await said("cut-2#0", before="Je regarde.", say="Oui, elle vient d'arriver.")
+    assert cut == "Oui, je m'en souviens. Je ne la connais pas, et je ne connais pas ton équipe."
+    assert preamble == "Oui, elle vient d'arriver."
+
+
 async def test_call_folders_live_outside_the_data_and_are_private(tmp_path, cli, monkeypatch):
     from mika.adapters.llm.claude_code import purge_stale, runtime_dir
 

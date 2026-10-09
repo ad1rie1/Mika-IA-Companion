@@ -445,9 +445,18 @@ def _name_of(s: IdentityState, person: str) -> str:
     return ""
 
 
+#: les dernières tables des noms portés, par état (ses index immuables) : une présomption se lit pour chaque mention
+#: nommée, et rebâtir la table à chaque fois parcourait toutes les personnes connues (ADR 0075)
+_WORN: list[tuple[Any, Any, dict[str, list[tuple[str, tuple[str, ...]]]]]] = []
+_WORN_KEPT = 4
+
+
 def worn_names(s: IdentityState) -> dict[str, list[tuple[str, tuple[str, ...]]]]:
     """Les noms que portent les personnes connues (le sien, ceux de ses adresses), repliés comme la mémoire forme
-    ses clés, rangés par premier mot."""
+    ses clés, rangés par premier mot. Une table par état : à lire, jamais à modifier."""
+    for by_person, handles, worn in _WORN:
+        if by_person is s.by_person and handles is s.handles:
+            return worn
     out: dict[str, list[tuple[str, tuple[str, ...]]]] = {}
     for person in s.by_person.keys():
         if person.startswith(NAMED) or not is_identifiable(person):
@@ -456,6 +465,7 @@ def worn_names(s: IdentityState) -> dict[str, list[tuple[str, tuple[str, ...]]]]
         for words in sorted({tuple(fold(n).split()) for n in names if n}):
             if words:
                 out.setdefault(words[0], []).append((person, words))
+    _WORN[:] = [(s.by_person, s.handles, out), *_WORN[: _WORN_KEPT - 1]]
     return out
 
 

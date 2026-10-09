@@ -87,5 +87,12 @@ class SentenceEmbedder:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self._pool, self.encode, list(texts))
 
+    async def warm(self) -> None:
+        """Charge le modèle maintenant, dans son fil : au démarrage, pendant que le noyau relit sa vie. Sinon le
+        premier tour le chargeait, et le rappel (2,5 s au plus) passait sans mémoire (sonde réelle du 2026-10-09).
+        Une demande arrivée entre-temps attend la fin du chargement dans le même fil, sans le refaire."""
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(self._pool, self._load)
+
     def close(self) -> None:
         self._pool.shutdown(wait=False, cancel_futures=True)

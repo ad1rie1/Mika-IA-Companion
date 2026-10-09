@@ -183,6 +183,8 @@ class XEvenement(_Item):
     chaque_annee: bool = Field(default=False, validation_alias=AliasChoices("chaque_annee", "chaque_année",
                                                                             "annuel", "annuelle"),
                                description=phrase("memory.extraction.fields.chaque_annee"))
+    #: un moment déjà noté (la liste « Moments à venir ») que celui-ci remplace : reporté, avancé, précisé (ADR 0076)
+    remplace: int | None = Field(default=None, description=phrase("memory.extraction.fields.event_remplace"))
 
 
 class Extraction(_Lenient):
@@ -238,6 +240,7 @@ class Line:
     text: str
     person: str | None = None  # la clé de personne de qui parle (``None`` : elle)
     aside: bool = False  # dans un salon, pas adressé à elle
+    lie: bool = False  # une de ses répliques qu'elle a marquée mensonge : elle ne dit pas le vrai
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,10 +281,11 @@ def day_words(d: date) -> str:
 
 
 def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, str]],
-           promises: Sequence[tuple[int, str, str]], situations: Sequence[tuple[int, str, str]] = ()) -> str:
+           promises: Sequence[tuple[int, str, str]], situations: Sequence[tuple[int, str, str]] = (),
+           moments: Sequence[tuple[int, str, str]] = ()) -> str:
     """Le message d'une conversation : la date, qui parle, ce qui est déjà
-    su, les promesses en cours, les situations en cours de ses personnes, puis
-    les messages (avec la date dès qu'elle change)."""
+    su, les promesses en cours, les situations en cours et les moments à venir
+    de ses personnes, puis les messages (avec la date dès qu'elle change)."""
     out = [phrase("memory.extraction.render.today", day=day_words(now.date()), year=now.year, hour=f"{now:%H}",
                   minute=f"{now:%M}")]
     who = ", ".join(s.label for s in conv.speakers)
@@ -297,6 +301,9 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
     if situations:
         out += ["", phrase("memory.extraction.render.situations")] + [
             f"[#{i}] ({whom}) {text}" for i, whom, text in situations]
+    if moments:
+        out += ["", phrase("memory.extraction.render.moments")] + [
+            f"[#{i}] ({whom}) {text}" for i, whom, text in moments]
     out += ["", phrase("memory.extraction.render.messages")]
     day: date | None = None
     for ln in conv.lines:
@@ -305,7 +312,8 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
             day = moment.date()
             out.append(phrase("memory.extraction.render.day", day=day_words(day)))
         aside = phrase("memory.extraction.render.aside") if ln.aside else ""
-        out.append(f"[#{ln.seq}] {moment:%H:%M} {ln.speaker}{aside} : {ln.text}")
+        lie = phrase("memory.extraction.render.lie") if ln.lie else ""
+        out.append(f"[#{ln.seq}] {moment:%H:%M} {ln.speaker}{aside} : {ln.text}{lie}")
     return "\n".join(out)
 
 
@@ -434,7 +442,9 @@ class People:
         found: tuple[str, ...] = ()
         if key is None:
             found = self.directory.get(folded) or ()
-            if len(found) == 1 and (" " in folded or found[0] in self.near):
+            # un nom complet, ou quelqu'un que la conversation connaît : vu en salon avec l'un de ses locuteurs, ou
+            # l'un d'eux sous une autre de ses adresses (« Robert » sur Telegram, « Bob » ici)
+            if len(found) == 1 and (" " in folded or found[0] in self.near or found[0] in self.tokens.values()):
                 key = found[0]
         if key is None and folded == self.first and len(found) != 1:
             return None  # son prénom seul, que personne d'autre de connu ne porte : c'est elle
@@ -442,6 +452,20 @@ class People:
 
     def resolve(self, names: Sequence[str]) -> tuple[str, ...]:
         return tuple(sorted({k for n in names if (k := self.one(n)) is not None}))
+
+    def names_someone(self, text: str) -> bool:
+        """Le texte nomme-t-il quelqu'un d'autre qu'elle : un locuteur de la conversation, ou une personne qu'elle
+        connaît (son nom ou son prénom) ? « Alice est comptable à Lyon », tiré de sa propre réplique (« je sais que tu
+        es comptable à Lyon »), n'est pas une note sur elle : la ranger ainsi la rendait dicible à tous (sonde réelle
+        du 2026-10-09)."""
+        said = " ".join(WORD.findall(fold(TOKEN.sub(" ", str(text)))))
+        if not said:
+            return False
+        for key in (*self.local, *self.directory):
+            if len(key) >= 3 and key not in self.me and key != self.first \
+                    and re.search(rf"(?<!\w){re.escape(key)}(?!\w)", said):
+                return True
+        return False
 
 
 def durable_self(item: _Item) -> bool:
@@ -546,6 +570,32 @@ def copied(text: str, line: str) -> bool:
         return any(theirs[i:i + len(mine)] == mine for i in range(len(theirs) - len(mine) + 1))
     blocks = SequenceMatcher(None, mine, theirs, autojunk=False).get_matching_blocks()
     return sum(b.size for b in blocks) >= COPY_SHARE * len(mine)
+
+
+#: un souvenir à la première personne qui reprend au moins cette part des mots d'une autre parle à sa place
+VOICE_SHARE = 0.6
+#: ce par quoi commence un texte à la première personne (replié)
+_FIRST_PERSON = frozenset({"je", "j", "moi", "mon", "ma", "mes"})
+
+
+def voice_of(text: str, lines: Sequence[Line]) -> Line | None:
+    """La réplique d'une autre personne qu'un souvenir à la première personne reprend à son compte : « J'ai eu une
+    petite fille, Jeanne : je suis épuisée mais tellement heureuse », tiré de Carol (« je viens d'avoir une petite
+    fille, Jeanne, je suis épuisée… »), fait parler Mika à sa place (sonde réelle du 2026-10-09) — reformulé, il
+    échappe à ``copied``. Un souvenir à elle (« J'ai consolé Carol, épuisée mais heureuse ») en reprend trop peu."""
+    mine = WORD.findall(wfold(text))
+    if not mine or mine[0] not in _FIRST_PERSON:
+        return None
+    best: tuple[float, Line] | None = None
+    for ln in lines:
+        if not ln.person:
+            continue
+        theirs = WORD.findall(wfold(ln.text))
+        share = sum(b.size for b in SequenceMatcher(None, mine, theirs, autojunk=False).get_matching_blocks())
+        share /= len(mine)
+        if share >= VOICE_SHARE and (best is None or share > best[0]):
+            best = (share, ln)
+    return best[1] if best else None
 
 
 def copy_of(text: str, lines: Sequence[Line]) -> Line | None:

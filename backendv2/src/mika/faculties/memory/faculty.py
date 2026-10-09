@@ -324,6 +324,8 @@ class MemoryState:
     #: personne → la dernière fois que quelque chose de grave l'a touchée (un deuil, une rupture…)
     hard: FrozenDict[str, int] = field(default_factory=FrozenDict)
     reflections: tuple[Reflection, ...] = ()
+    #: ses mensonges pas encore retenus (le ``seq`` de l'énoncé) : chacun devient un souvenir (``memory.lies``)
+    lies: tuple[int, ...] = ()
     sorted_night: str = ""
     #: la dernière relecture journalisée (``seq``, instant), et les fenêtres
     #: abandonnées après trop d'échecs (combien, la dernière) : pour l'inspecteur
@@ -339,7 +341,8 @@ class MemoryState:
 #: v6 : une situation en cours prend fin quand la personne dit qu'elle est finie (``situation_ended``).
 #: v7 : une date qui revient chaque année (``yearly``) n'est jamais évincée par l'âge, et a son propre plafond.
 #: v10 : la file de reprises (``deferred_seq``) ; situations et dates archivées en SQL, la tranche en est le cache.
-MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=10)
+#: v11 : ses mensonges à retenir (``lies``, ADR 0076).
+MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=11)
 MEMORY.declare(*c.ALL)
 
 
@@ -363,6 +366,10 @@ def _hard(s: MemoryState, person: str, at: int) -> MemoryState:
     return replace(s, hard=hard)
 
 
+#: au plus tant de mensonges en attente d'être retenus ; la marque de leur souvenir (``call_id`` : ``mensonge:<seq>``)
+LIES_KEPT, LIE_MARK = 20, "mensonge"
+
+
 @MEMORY.reducer(rt.UTTERANCE, reads=[identity_c.PERSON])
 def _uttered(s: MemoryState, e, cx) -> MemoryState:
     """Ce qu'elle dit : un échange de plus à indexer — et, quand c'est l'initiative qui tient une promesse, la
@@ -378,6 +385,9 @@ def _uttered(s: MemoryState, e, cx) -> MemoryState:
         s = replace(s, keeping=s.keeping.delete(e.correlation))
         if keeping[0] in s.promises and keeping[0] not in s.kept:
             s = replace(s, kept=(*s.kept, keeping[0]))
+    if d.target and is_identifiable(d.target) and d.annotation(expression_c.LIE_ANNOTATION) is not None \
+            and e.seq not in s.lies:
+        s = replace(s, lies=(*s.lies, e.seq)[-LIES_KEPT:])  # un mensonge : il deviendra un souvenir
     if d.kind == Kind.REPLY and d.target and d.room is None and is_identifiable(d.target):
         declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
         if declared is not None and declared.emotion == Emotion.SAD \
@@ -519,7 +529,8 @@ def _retained(s: MemoryState, e, cx) -> MemoryState:
     quelque chose de grave touche les personnes qu'il concerne."""
     d = e.data
     reflections = tuple(r for r in s.reflections if d.call_id != f"réflexion:{r.thought}")
-    s = replace(s, items=s.items + 1, reflections=reflections)
+    lies = tuple(seq for seq in s.lies if d.call_id != f"{LIE_MARK}:{seq}")
+    s = replace(s, items=s.items + 1, reflections=reflections, lies=lies)
     if e.type.name == c.REMEMBERED.name and d.importance >= params(cx.params).landmark_importance:
         felt = emotion_of(d.emotion)
         if felt is not None and valence(felt) < 0:

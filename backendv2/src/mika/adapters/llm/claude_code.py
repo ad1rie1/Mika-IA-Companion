@@ -78,6 +78,8 @@ from mika.vocab.phrasebook import phrase
 log = logging.getLogger("mika.llm.claude_code")
 
 AUTHS = ("abonnement", "cle_api")
+#: les efforts de réflexion que la CLI accepte (``--effort``) ; vide : le sien par défaut
+EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
 #: les seules variables du parent qui passent (HOME : la CLI y trouve son login)
 INHERITED = ("HOME", "PATH", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR", "XDG_RUNTIME_DIR")
 #: jamais transmises, même si le processus de Mika les a
@@ -220,9 +222,14 @@ class ClaudeCodeBackend:
         quota_ceiling: float = 0.8,
         tool_timeout_s: float = 900.0,
         turn_timeout_s: float = 900.0,
+        effort: str = "",
     ) -> None:
         if auth not in AUTHS:
             raise ValueError(f"mode d'authentification inconnu : {auth!r} (attendu : {' ou '.join(AUTHS)})")
+        if effort not in EFFORTS:
+            raise ValueError(f"effort de réflexion inconnu : {effort!r} (attendu : {', '.join(e for e in EFFORTS if e)})")
+        #: l'effort de réflexion passé à la CLI (``--effort``) ; vide : son défaut
+        self.effort = effort
         self.name = name
         self.model = model
         self.auth = auth
@@ -262,6 +269,8 @@ class ClaudeCodeBackend:
                      "--allowedTools", ",".join(f"mcp__{s}__*" for s in SERVERS.values())]
         if self.model:
             args += ["--model", self.model]
+        if self.effort:
+            args += ["--effort", self.effort]
         return args
 
     def env(self, req: LLMRequest) -> dict[str, str]:
@@ -419,7 +428,7 @@ class ClaudeCodeBackend:
                 batch = [value]
                 ended = await self._gather(run, batch, texts)
                 if ended is not None:  # la CLI s'est arrêtée pendant qu'on complétait le lot : c'est l'issue
-                    return self._ended(call_id, run, *ended)
+                    return self._ended(call_id, run, *ended, texts)
                 placed = _place(run.announced, run.settled, batch)
                 batch.sort(key=lambda p: placed.get(p.id, len(run.announced)))  # stable : un appel sans bloc en dernier
                 run.settled.update(run.announced[i][0] for i in placed.values())
@@ -428,7 +437,7 @@ class ClaudeCodeBackend:
                 return LLMResponse("".join(texts), tuple(ToolCall(p.id, p.name, p.args) for p in batch),
                                    stop="tool_use", model=run.model or self.model)
             else:
-                return self._ended(call_id, run, kind, value)
+                return self._ended(call_id, run, kind, value, texts)
 
     async def _gather(self, run: _Run, batch: list[Pending], texts: list[str]) -> tuple[str, Any] | None:
         """Complète le lot que ``batch`` commence : tous les appels d'outils d'un même message du modèle.
@@ -467,7 +476,7 @@ class ClaudeCodeBackend:
             elif kind != "wake":
                 return kind, value
 
-    def _ended(self, call_id: str, run: _Run, kind: str, value: Any) -> LLMResponse:
+    def _ended(self, call_id: str, run: _Run, kind: str, value: Any, texts: Sequence[str] = ()) -> LLMResponse:
         self._schedule_stop(call_id)
         if kind == "exit":
             raise ClaudeCodeError(f"la CLI s'est arrêtée sans réponse (code {value}) : {run.stderr[-300:]}".strip())
@@ -481,7 +490,8 @@ class ClaudeCodeBackend:
         stop = {"max_tokens": "max_tokens", "refusal": "refusal"}.get(str(d.get("stop_reason") or ""), "end")
         models = list((d.get("modelUsage") or {}).keys())
         model = run.model or (models[0] if models else self.model)
-        return LLMResponse(str(d.get("result") or ""), stop=stop, usage=_usage(d.get("usage")), model=model)
+        return LLMResponse(answer(texts, str(d.get("result") or "")), stop=stop, usage=_usage(d.get("usage")),
+                           model=model)
 
     # ── Lecture de la CLI ────────────────────────────────────────────────
 
@@ -658,6 +668,26 @@ def _tool(t: Any) -> Tool:
     # suivant après la réponse du précédent), et N appels écrits ensemble coûtaient N tours de la boucle du runtime.
     # La marque ne règle que l'envoi : c'est le runtime qui exécute le lot, un appel après l'autre, dans l'ordre écrit.
     return Tool(t.name, t.description, t.schema, read_only=True)
+
+
+#: ce qui clôt une phrase : un texte qui s'arrête là, avant une recherche d'outil, est un préambule fini
+_SENTENCE_END = ".!?…»\")"
+
+
+def answer(texts: Sequence[str], result: str) -> str:
+    """La réponse d'un tour. ``result`` ne porte que le dernier message de la CLI : quand le modèle s'est
+    interrompu au milieu d'une phrase pour chercher un outil (``ToolSearch``, que la CLI exécute elle-même) et
+    l'a reprise dans un second message, le début de la réponse se perdait (sonde réelle du 2026-10-09 :
+    « pas, et je ne connais pas ton équipe… »). Ce qui précède est rendu quand il s'arrête en pleine phrase ; un
+    préambule fini (« je vérifie. ») reste écarté, comme sur l'API."""
+    whole, tail = "".join(texts).rstrip(), result.strip()
+    if not tail or not whole.endswith(tail) or len(whole) == len(tail):
+        return result
+    before = whole[: len(whole) - len(tail)]
+    if not before.strip() or before.rstrip()[-1] in _SENTENCE_END:
+        return result
+    glue = "" if before[-1].isspace() else " "
+    return before + glue + tail
 
 
 def _relayed(name: str) -> str:

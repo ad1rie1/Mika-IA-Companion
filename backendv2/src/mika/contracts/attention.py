@@ -49,6 +49,9 @@ UNANSWERED = "unanswered"
 ALONE = "alone"
 #: elle a répondu fâchée à une amie ou une proche : « J'ai été dure avec Alice » — l'envie de revenir vers elle
 REMORSE = "remorse"
+#: elle a menti à quelqu'un (pour botter en touche, garder ce qu'on lui a confié) : « J'ai menti à Bob » — une gêne
+#: qu'elle porte, jamais une relance
+LIE = "lie"
 REPLY, RETURN = "reply", "return"
 #: une attente envers elle-même : tenir une promesse avant son échéance (clé : ``PROMISE``)
 #: Raison de preuve d'initiative : une pensée qui insiste, vers la personne concernée.

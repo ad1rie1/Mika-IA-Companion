@@ -307,6 +307,18 @@ class Live:
         return problems
 
 
+async def _warm(embedder: object) -> None:
+    """Charge le modèle de plongements s'il sait le faire (``warm``) ; un échec n'empêche rien : le premier rappel
+    le chargera, comme avant."""
+    warm = getattr(embedder, "warm", None)
+    if warm is None:
+        return
+    try:
+        await warm()
+    except Exception:  # noqa: BLE001 — un préchargement manqué ne doit pas faire tomber le démarrage
+        log.exception("préchargement du modèle de plongements : échec (il se chargera au premier rappel)")
+
+
 def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
           gateway: LiveGateway | None = None, embedder: Any = None, reports: Path | None = None,
           imaging: LiveImaging | None = None, **deps: Any) -> tuple[Starlette, Live]:
@@ -387,6 +399,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         datadir.hold(data)  # un seul Mika par dossier : un second processus est refusé, pas mêlé au journal
+        # le modèle de plongements se charge pendant la relecture de sa vie, pas au premier message
+        warming = asyncio.create_task(_warm(vectors.embedder))
         # deux temps : relire sa vie et sa configuration, brancher tout ce qui fait sortir sa parole
         # (passerelle des modèles, budget, écrans), puis seulement la vie (reprises, processus,
         # file de sortie) — sinon une reprise au démarrage partait sans modèle ni canal.
@@ -415,6 +429,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         try:
             yield
         finally:
+            warming.cancel()
             await world_hub.stop()
             await hub.stop()
 

@@ -382,6 +382,7 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
                 quota_ceiling=previous.quota_ceiling if previous else 0.8,
                 auth=kept(args.auth, "auth", "abonnement"), claude_bin=kept(args.claude_bin, "claude_bin", ""),
                 config_dir=kept(args.config_dir, "config_dir", ""),
+                effort=kept(getattr(args, "effort", None), "effort", ""),
             )
         elif args.llm_cmd == "route":
             for role in args.roles:
@@ -681,6 +682,8 @@ def _run(argv: list[str] | None) -> int:
                     help="claude_code : le login de la CLI (défaut) ou une clé d'API")
     lb.add_argument("--claude-bin", default=None, help="claude_code : la commande claude (vide : PATH)")
     lb.add_argument("--config-dir", default=None, help="claude_code : un dossier de CLI à part (vide : l'habituel)")
+    lb.add_argument("--effort", default=None, choices=["", "low", "medium", "high", "xhigh", "max"],
+                    help="claude_code : l'effort de réflexion (vide : le défaut de la CLI ; omis : la valeur actuelle)")
     im = sub.add_parser("images", help="fournisseurs d'images et rôles (aucun : elle n'en génère pas)")
     isub = im.add_subparsers(dest="images_cmd", required=True)
     isub.add_parser("show")

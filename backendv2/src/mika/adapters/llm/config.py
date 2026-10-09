@@ -109,6 +109,11 @@ class BackendSpec(BaseModel):
                                                                     "Rempli : un dossier à part, où tu te "
                                                                     "connectes avec « mika claude-code login ».",
                                     group="Options avancées", order=110, only=(("kind", ("claude_code",)),))] = ""
+    effort: Annotated[str, Knob(label="Effort de réflexion", help="Combien le modèle réfléchit avant de répondre "
+                                "(--effort de la CLI). Vide : le défaut de la CLI.",
+                                choices=(("", "défaut de la CLI"), ("low", "faible"), ("medium", "moyen"),
+                                         ("high", "élevé"), ("xhigh", "très élevé"), ("max", "maximal")),
+                                group="Options avancées", order=115, only=(("kind", ("claude_code",)),))] = ""
     quota_ceiling: Annotated[float, Knob(label="Réserve d'abonnement", help="Au-delà de cet usage de "
                                          "l'abonnement, ses appels de fond sont suspendus (la conversation "
                                          "n'est jamais retenue). 0,8 = 80 % ; 0 : pas de réserve.", lo=0.0,
@@ -248,7 +253,8 @@ def build_backend(name: str, spec: BackendSpec, *, relay: Any = None, relay_base
         return ClaudeCodeBackend(spec.model, relay=relay if relay is not None else Relay(),
                                  relay_base=relay_base, name=name,
                                  auth=spec.auth, api_key=spec.api_key, claude_bin=spec.claude_bin,
-                                 config_dir=spec.config_dir, work_dir=work_dir, quota_ceiling=spec.quota_ceiling)
+                                 config_dir=spec.config_dir, work_dir=work_dir, quota_ceiling=spec.quota_ceiling,
+                                 effort=spec.effort)
     if spec.kind == "claude":
         from mika.adapters.llm.claude import ClaudeBackend  # noqa: PLC0415
 

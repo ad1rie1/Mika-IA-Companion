@@ -35,7 +35,7 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -148,8 +148,10 @@ class Verdict:
 
 
 def admissible(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, audience: Audience, *,
-               told_by: Sequence[str] = (), heard_by: Sequence[str] = (), secret: bool = False) -> Verdict:
-    """Peut-on le dire devant cette audience ? (voir le docstring du module).
+               told_by: Sequence[str] = (), heard_by: Sequence[str] = (), secret: bool = False,
+               presumed: Callable[[str], str] | None = None) -> Verdict:
+    """Peut-on le dire devant cette audience ? (voir le docstring du module). ``presumed`` : la personne qu'une
+    mention désigne présumément (ADR 0075) — un lien est exigé avec elle comme avec une personne reliée.
 
     Un élément d'avant que la mémoire ne sache qui le lui a confié (ni
     confident ni témoin) garde l'ancienne règle : l'interlocuteur qui y figure
@@ -177,7 +179,7 @@ def admissible(about: tuple[str, ...], sensitivity: int, interlocutor: str | Non
         return Verdict(False, others, witness, int(sensitivity), tellers, True)
     limit = audience.witness_level if witness else audience.level
     tied = False
-    if sensitivity > limit and interlocutor is not None and tied_to(others, audience.ties):
+    if sensitivity > limit and interlocutor is not None and tied_to(others, audience.ties, presumed):
         # il a un lien avec chacune (ils se sont parlé ensemble, ou elle l'a nommé elle-même) : une proche peut
         # entendre sa confidence — jamais quelqu'un qui a seulement prononcé son nom (ADR 0058)
         limit, tied = max(limit, audience.tied_level), True

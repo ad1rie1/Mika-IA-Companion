@@ -48,7 +48,7 @@ SHOWN = 3
 #: les pensées nées d'un signal extérieur montrées au plus
 SIGNALS_SHOWN = 2
 #: des pensées qui se ressentent, jamais des raisons de réécrire à quelqu'un
-FELT_ONLY = frozenset({c.MISSING, c.UNANSWERED, c.ALONE})
+FELT_ONLY = frozenset({c.MISSING, c.UNANSWERED, c.ALONE, c.LIE})
 #: les pensées nées d'un message (ses mots, entre guillemets)
 VERBATIM = frozenset({c.EXCHANGE, c.CONCERN})
 
@@ -63,9 +63,13 @@ def admissible(t: c.ThoughtReading, interlocutor: str | None, aud: Audience | No
     """Les règles de la mémoire (``vocab.privacy.hearable``) : ce qui ne concerne personne passe s'il est
     anodin (ou si l'audience peut l'entendre) ; ce qui ne concerne que l'interlocuteur, s'il est anodin ou si sa
     fiche est ouverte ; ce qui concerne d'autres, jusqu'au niveau de l'audience (« lié » quand l'interlocuteur a un
-    lien avec chacune, ADR 0058)."""
+    lien avec chacune, ADR 0058). Un mensonge, seulement devant qui l'a reçu, en privé (ADR 0076)."""
     if aud is None:
         return not t.about and t.sensitivity <= Sensitivity.ANODYNE
+    if t.origin == c.LIE:
+        # un mensonge ne pèse à voix haute que devant qui l'a reçu, en privé : devant une autre, « j'ai menti à
+        # Bob » laisserait deviner ce qu'il couvrait
+        return interlocutor is not None and interlocutor in t.about and aud.private_ok and not aud.public
     return hearable(tuple(t.about), t.sensitivity, interlocutor, aud.level, aud.witness_level, aud.private_ok,
                     tied_level=aud.tied_level, ties=aud.ties)
 

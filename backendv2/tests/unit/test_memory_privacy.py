@@ -108,11 +108,12 @@ def test_what_is_private_but_not_secret_she_knows_she_knows_and_does_not_lie_abo
     to_bob = section(script.replies("user_3")[-1], REVIENT)
     assert "CANARI-P1" not in "\n".join(script.prompts("user_3"))
     assert "Alice t'a confié des choses en privé" in to_bob, "elle sait qu'elle sait"
-    assert "ne mens pas" in to_bob and "Sers-t'en" not in to_bob
+    # la consigne interdit le mensonge (« je n'en sais rien ») sans dicter l'aveu (« je ne peux pas te le dire »)
+    assert "mensonge" in to_bob and "Sers-t'en" not in to_bob
     # … et que la question y touche, avec les mots de Bob (sinon le modèle ne fait pas le lien, et ment)
     assert "« entretien »" in to_bob and "« alice »" not in to_bob.lower()  # un prénom n'est pas un sujet
     to_alice = section(script.replies("user_2")[-1], REVIENT)
-    assert "CANARI-P1" in to_alice and "ne mens pas" not in to_alice
+    assert "CANARI-P1" in to_alice and "mensonge" not in to_alice
 
 
 class Overriding(PersonaSimLLM):

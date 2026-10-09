@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
@@ -292,9 +292,13 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
     raw = {str(k) for (k,) in rows if k}
     by_name: dict[str, set[str]] = {}
     keys_of: dict[str, set[str]] = {}
+    here: dict[str, str] = {}
     for k in sorted(raw):
         person = canon(frame, (k,), memo)[0]
-        if person == k:
+        # une mention faite ici même est ce que ce nom désigne dans cette conversation (la collègue dont Bob parle,
+        # pas l'Alice qu'elle connaît) ; d'ailleurs, présumée, elle rejoint la personne qu'on présume (ADR 0075)
+        local = person == k and scope is not None and scope_of(k) == scope
+        if person == k and not local:
             person = presumed_of(frame, k, memo) or k
         if scope is not None and person == k and scope_of(k) not in (None, scope):
             continue  # une mention d'une autre conversation, reliée à personne
@@ -304,9 +308,11 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
         for n in {folded, *folded.split()[:1]}:
             if len(n) >= 3:
                 by_name.setdefault(n, set()).add(person)
+                if local:
+                    here[n] = person
     out: dict[str, tuple[str, ...]] = {}
     for n in sorted(by_name, key=lambda n: (-len(n), n)):
-        persons = by_name[n]
+        persons = {here[n]} if n in here else by_name[n]
         hit = re.search(rf"(?<!\w){re.escape(n)}(?!\w)", said) if " " in n else n in tokens
         if not hit or len(persons) != 1:
             continue
@@ -401,8 +407,14 @@ def sensitivity_of(frame: Frame, item: Item, interlocutor: str | None, store: An
     délicats d'un profil récent sont gardés à part (``store``)."""
     level = item.sensitivity
     for other in item.about:
-        if other == interlocutor or other.startswith("name:"):
+        if other == interlocutor:
             continue
+        if other.startswith("name:"):
+            # reliée, ou présumée (ADR 0075) : ses sujets délicats comptent — une présomption ne protège pas moins
+            other = frame.get(identity_c.PERSON(other)) or other
+            other = (frame.get(identity_c.PRESUMED(other)) or "") if other.startswith("name:") else other
+            if not other:
+                continue
         topics = tuple(frame.get(social_c.SENSITIVE(other)))
         ref = frame.get(social_c.SENSITIVE_REF(other)) if store is not None else ""
         if ref:
@@ -434,7 +446,8 @@ def verdict_of(frame: Frame, item: Item, person: str | None, aud: Audience, memo
     for rule in item.constraints:
         inherited = admissible(canon(frame, rule.about, memo), max(rule.sensitivity, own), person, aud,
                                told_by=canon(frame, rule.told_by, memo),
-                               heard_by=canon(frame, rule.heard_by, memo), secret=rule.secret)
+                               heard_by=canon(frame, rule.heard_by, memo), secret=rule.secret,
+                               presumed=_presumer(frame, memo))
         if not inherited.ok:
             return inherited
         inherited_rules.append(inherited)
@@ -446,7 +459,12 @@ def verdict_of(frame: Frame, item: Item, person: str | None, aud: Audience, memo
     subjects = tuple(sorted({*item.about, *([item.holder] if item.holder else [])}))
     return admissible(canon(frame, subjects, memo), sensitivity_of(frame, item, person, store), person, aud,
                       told_by=canon(frame, item.told_by, memo), heard_by=canon(frame, item.heard_by, memo),
-                      secret=item.secret)
+                      secret=item.secret, presumed=_presumer(frame, memo))
+
+
+def _presumer(frame: Frame, memo: dict[str, str]) -> Callable[[str], str]:
+    """La présomption d'une mention, telle que le verdict la lit (un lien exigé avec la personne présumée)."""
+    return lambda key: presumed_of(frame, key, memo)
 
 
 def promises_to(frame: Frame, store: Any, person: str) -> list[tuple[int, str, int | None]]:
@@ -619,7 +637,8 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
             # idée, demande-lui ») — la ligne vague « il t'a confié des choses » le trahissait à qui on le cachait
             # (sonde réelle du 2026-10-02 : « dis rien à Chloé », puis devant Chloé). Seule une proche peut sentir
             # qu'un secret lourd pèse (« traverse un moment difficile »), jamais ce qu'il dit.
-            guessable = not item.secret or (close and heavy(item))
+            # … et un mensonge qu'elle a dit ne se devine jamais : « Bob t'a confié… » serait faux, et le trahirait
+            guessable = item.origin != c.LIED and (not item.secret or (close and heavy(item)))
             whom = unsaid(verdict, canon(frame, item.about, memo), canon(frame, item.told_by, memo),
                           person) if guessable else ()
             for who in whom:
@@ -634,7 +653,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     for _score, item, verdict in ranked:
         bucket, cap = (out.souvenirs, p.max_souvenirs) if item.kind == c.SOUVENIR else (out.beliefs, p.max_beliefs)
         _add_recalled(bucket, Recalled(item, verdict, item.text + tag(verdict, names) +
-                                       doubted(frame, item, memo)), cap)
+                                       doubted(frame, item, memo, person)), cap)
     if hidden and p.max_unsaid:
         for who in sorted(hidden, key=lambda w: (-max(candidates[i.id] for i in hidden[w]), w))[: p.max_unsaid]:
             out.unsaid.append(unsaid_public_line(who, names, _last_talk(frame, who)) if aud.public else
@@ -646,12 +665,20 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     return out
 
 
-def doubted(frame: Frame, item: Item, memo: dict[str, str]) -> str:
+def doubted(frame: Frame, item: Item, memo: dict[str, str], interlocutor: str | None = None) -> str:
     """Le doute d'une ligne qui parle d'une personne seulement présumée (ADR 0075) : « Alice », dont Bob lui a
-    parlé, n'est peut-être pas l'Alice qu'elle connaît — qu'elle ne mélange pas les deux, ou qu'elle demande."""
-    presumed = sorted(named_label(k).title() for k in item.about
+    parlé, n'est peut-être pas l'Alice qu'elle connaît — qu'elle ne mélange pas les deux, ou qu'elle demande. Rien
+    devant qui l'a raconté : il sait de qui il parlait (et la ligne lui apprendrait qu'elle connaît une Alice)."""
+    if interlocutor is not None and interlocutor in canon(frame, item.told_by, memo):
+        return ""
+    presumed = sorted(named_label(k).title() for k in (*item.about, *([item.holder] if item.holder else []))
                       if k.startswith("name:") and canon(frame, (k,), memo)[0] == k and presumed_of(frame, k, memo))
-    return phrase("memory.tag.presumed", name=presumed[0]) if presumed else ""
+    if not presumed:
+        return ""
+    tellers = sorted(names_of(frame, set(canon(frame, item.told_by, memo))).values())
+    who = phrase("memory.names.and", others=", ".join(tellers[:-1]), last=tellers[-1]) if len(tellers) > 1 else (
+        tellers[0] if tellers else phrase("memory.names.someone"))
+    return phrase("memory.tag.presumed", name=presumed[0], who=who)
 
 
 def _last_talk(frame: Frame, person: str) -> str:
@@ -687,8 +714,8 @@ def _their_life(out: Recall, frame: Frame, store: Any, person: str, aud: Audienc
     picked: list[tuple[float, Item, Verdict]] = []
     for row in rows:
         item = Item.of(dict(zip(ITEM_COLUMNS, row, strict=True)))
-        if set(canon(frame, item.told_by, memo)) - {person}:
-            continue  # de première main seulement
+        if set(canon(frame, item.told_by, memo)) - {person} or item.origin == c.LIED:
+            continue  # de première main seulement ; un mensonge qu'elle lui a dit n'est pas sa vie à lui
         verdict = verdict_of(frame, item, person, aud, memo, store)
         if not verdict.ok:
             continue
@@ -883,7 +910,8 @@ def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryPara
         if not keep:
             continue
         verdict = admissible(canon(frame, ev.about, memo), ev.sensitivity, person, aud,
-                             told_by=canon(frame, ev.told_by, memo), heard_by=(), secret=ev.secret)
+                             told_by=canon(frame, ev.told_by, memo), heard_by=(), secret=ev.secret,
+                             presumed=_presumer(frame, memo))
         if verdict.ok:
             shown.append((ev, verdict))
     if not shown:

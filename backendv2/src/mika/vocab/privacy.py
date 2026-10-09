@@ -36,7 +36,7 @@ Fonctions pures, sans lecture d'état.
 from __future__ import annotations
 
 import enum
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
@@ -320,12 +320,25 @@ def decide(
     )
 
 
-def tied_to(others: Collection[str], ties: Collection[str]) -> bool:
+def tied_to(others: Collection[str], ties: Collection[str], presumed: Callable[[str], str] | None = None) -> bool:
     """L'interlocuteur a-t-il un lien avec **toutes** les personnes concernées
     (``others`` : celles qui ne sont pas lui) ? Un nom dont on lui a parlé
-    (``name:…``) ne compte pas — c'est un détail de l'histoire de qui le
-    raconte ; il faut au moins une personne identifiée, et un lien avec chacune."""
-    persons = [o for o in others if not o.startswith("name:")]
+    (``name:…``) d'une personne qu'elle ne connaît pas ne compte pas — c'est un
+    détail de l'histoire de qui le raconte ; il faut au moins une personne
+    identifiée, et un lien avec chacune. Une mention que l'identité *présume*
+    être une personne connue (``presumed``, ADR 0075) compte comme elle : un lien
+    avec elle est exigé — une Carol présumée ne protège pas moins qu'une Carol
+    reliée. Sans ``presumed`` (l'appelant ne sait pas la lire), une mention ferme
+    le lien : dans le doute, rien ne s'ouvre."""
+    persons: list[str] = []
+    for o in others:
+        if o.startswith("name:"):
+            if presumed is None:
+                return False
+            o = presumed(o)
+            if not o:
+                continue
+        persons.append(o)
     return bool(persons) and all(o in ties for o in persons)
 
 
@@ -356,7 +369,8 @@ def describe_fr(certainty: float, trust: ChannelTrust, name: str = "") -> str:
 
 
 def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, level: int, witness_level: int,
-             own_file: bool, *, tied_level: int = 0, ties: Collection[str] = ()) -> bool:
+             own_file: bool, *, tied_level: int = 0, ties: Collection[str] = (),
+             presumed: Callable[[str], str] | None = None) -> bool:
     """Ce qu'on peut dire devant une audience : ce qui ne concerne personne
     d'identifié passe s'il est anodin ou si l'audience peut l'entendre (un
     mail reçu n'est pas à tout le monde) ; ce qui ne concerne que
@@ -370,6 +384,6 @@ def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None,
     if not others:
         return sensitivity <= Sensitivity.ANODYNE or own_file
     limit = witness_level if interlocutor in about else level
-    if tied_to(others, ties):
+    if tied_to(others, ties, presumed):
         limit = max(limit, tied_level)
     return sensitivity <= limit

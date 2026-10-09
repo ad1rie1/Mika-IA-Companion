@@ -63,6 +63,8 @@ OWNER = "memory"
 TOLD = "told"  # quelqu'un le lui a dit
 OBSERVED = "observed"  # elle l'a vu, vécu
 INFERRED = "inferred"  # elle en déduit
+#: l'origine d'un souvenir né d'un mensonge qu'elle a dit (colonne ``origin`` des éléments)
+LIED = "lied"
 
 HONORED = "honored"
 DROPPED = "dropped"
@@ -122,6 +124,8 @@ class Remembered(Payload):
     heard_by: tuple[str, ...] = ()
     #: « dis-le à personne » : ne ressort que devant qui l'a confié
     secret: bool = False
+    #: un souvenir né d'un mensonge qu'elle a dit (``LIED``) : ce qu'elle a affirmé de faux, à qui
+    lie: bool = False
 
     @model_validator(mode="after")
     def _inherited_subjects(self):

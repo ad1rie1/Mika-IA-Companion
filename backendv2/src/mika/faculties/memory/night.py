@@ -114,6 +114,11 @@ def _disclosure(frame: Frame, store: Any, thought: int) -> tuple[tuple[c.Disclos
         event = events[0]
         data = json.loads(event.data)
         if event.type == attention_c.THOUGHT_BORN.name:
+            if data.get("origin") == attention_c.LIE:
+                # « J'ai menti à Bob », repensé la nuit, reste à Bob : ailleurs il laisserait deviner ce qu'il couvrait
+                about = tuple(data.get("about") or ())
+                rules.append(c.Disclosure(about=about, heard_by=about, sensitivity=int(data.get("sensitivity") or 2),
+                                          secret=True))
             refs = list(data.get("sources") or ())
             if data.get("source") is not None:
                 refs.append(data["source"])

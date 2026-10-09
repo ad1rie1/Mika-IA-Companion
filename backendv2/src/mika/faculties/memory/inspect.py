@@ -205,6 +205,8 @@ def _text(item: Item) -> Text:
 
 
 def _sensitivity(item: Item) -> Badge:
+    if item.origin == c.LIED:
+        return Badge("mensonge", "danger")  # ce qu'elle a affirmé de faux : il ne ressort que devant la personne
     if item.secret:
         return Badge("secret", "danger")  # on lui a demandé de ne pas le répéter
     return Badge(SENSITIVITY_FR.get(item.sensitivity, str(item.sensitivity)),
@@ -232,7 +234,10 @@ def _detail(k: Kept, frame: Frame, names: dict[str, str], ctx: InspectContext) -
         pairs += [("confié par", _person_ref(frame, a, names)) for a in item.told_by] or [
             ("confié par", Text("personne : elle l'a vécu, vu ou raconté d'elle-même", kind="muted"))]
         pairs += [("entendu par", _person_ref(frame, a, names)) for a in item.heard_by]
-        if item.secret:
+        if item.origin == c.LIED:
+            pairs.append(("mensonge", "ce qu'elle a affirmé de faux à cette personne (sa marque de mensonge) — il "
+                                      "ne ressort que devant elle, en privé, pour ne pas se contredire ou avouer"))
+        elif item.secret:
             pairs.append(("secret", "oui : on lui a demandé de ne pas le répéter (ou ça laisse deviner un secret) — "
                                     "il ne ressort que devant qui l'a confié"))
         if item.about_self:

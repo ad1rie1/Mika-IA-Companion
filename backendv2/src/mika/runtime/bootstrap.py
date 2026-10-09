@@ -122,6 +122,10 @@ class ReadOnlyStore:
     def content(self, refs: Sequence[str]) -> dict[str, str]:
         return self._store.content(list(refs))
 
+    def subjects(self, prefix: str) -> list[str]:
+        """Les sujets des contenus du journal qui commencent par ``prefix`` (``name:`` : toutes les mentions)."""
+        return self._store.subjects(prefix)
+
     def get_events(self, seqs: Sequence[int]) -> list[Any]:
         """Des événements du journal tels qu'écrits (enveloppes, contenus en références)."""
         return self._store.get_events(list(seqs))

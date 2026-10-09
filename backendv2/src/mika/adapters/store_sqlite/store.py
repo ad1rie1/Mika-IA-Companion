@@ -481,6 +481,13 @@ class SqliteStore:
         ).fetchall()
         return {r[0]: r[1] for r in rows}
 
+    def subjects(self, prefix: str) -> list[str]:
+        # l'index par sujet : un parcours d'intervalle, jamais de toute la table
+        end = prefix[:-1] + chr(ord(prefix[-1]) + 1) if prefix else ""
+        sql = "SELECT DISTINCT subject FROM content_subjects" + (" WHERE subject >= ? AND subject < ?" if prefix else "")
+        rows = self._r().execute(sql + " ORDER BY subject", (prefix, end) if prefix else ()).fetchall()
+        return [str(r[0]) for r in rows]
+
     def latest_snapshot(self) -> SnapshotRow | None:
         row = self._r().execute("SELECT seq, at, data FROM snapshots ORDER BY seq DESC LIMIT 1").fetchone()
         return SnapshotRow(int(row[0]), int(row[1]), row[2]) if row else None

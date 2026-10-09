@@ -48,7 +48,7 @@ from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_internal
 from mika.vocab.phrasebook import family, phrase
-from mika.vocab.words import STOPWORDS, elided, fold
+from mika.vocab.words import STOPWORDS, elided, fold, stems
 
 
 class ExpressionParams(BaseModel):
@@ -95,11 +95,34 @@ def params(p: ExpressionParams | None) -> ExpressionParams:
     return p if p is not None else ExpressionParams()
 
 
+#: sa marque d'un mensonge, où qu'elle l'écrive, fermée ou non (une marque coupée en fin de réponse ne doit pas
+#: partir : ce qu'elle y écrit peut dire ce qu'elle cache)
+LIE_MARK = re.compile(r"\[\s*(?:MENSONGE|MENTI|LIE)\b\s*:?([^\]]*)(?:\]|$)", re.IGNORECASE)
+_SENTENCE = re.compile(r"[^.!?…]+[.!?…]*")
+
+
+def lied(text: str, mark: str) -> tuple[int, int]:
+    """Le passage faux de ce qu'elle a dit (``début``, ``fin``) : la phrase qui partage le plus de mots avec sa
+    marque ; toute la réponse quand la marque ne désigne rien. La marque elle-même n'est jamais gardée."""
+    wanted = stems(mark)
+    best, span = 0, (0, len(text))
+    for m in _SENTENCE.finditer(text):
+        shared = len(stems(m.group()) & wanted)
+        if shared > best and m.group().strip():
+            best, span = shared, (m.start() + len(m.group()) - len(m.group().lstrip()), m.end())
+    return span
+
+
 def parse(text: str, speaker: str = "") -> tuple[str, dict[str, str]]:
-    """Le texte sans balise, ce qu'elle a déclaré, et si elle a posé une question. ``speaker`` : son nom (celui de
-    sa persona) — un « Nom : » recopié en tête de réponse se retire."""
-    tag = parse_tag(text, speaker)
+    """Le texte sans balise, ce qu'elle a déclaré, si elle a posé une question, et si elle a menti (sa marque
+    ``[MENSONGE: …]``, retirée : seul le passage faux est désigné). ``speaker`` : son nom (celui de sa persona) —
+    un « Nom : » recopié en tête de réponse se retire."""
+    marks = [m.group(1) or "" for m in LIE_MARK.finditer(text or "")]
+    tag = parse_tag(LIE_MARK.sub("", text or ""), speaker)
     annotations: dict[str, str] = {}
+    if marks and tag.text.strip():
+        start, end = lied(tag.text, " ".join(marks))
+        annotations[c.LIE_ANNOTATION] = f"{start}:{end}"
     if tag.declared is not None:
         annotations[c.EMOTION_ANNOTATION] = tag.declared.encode()
     elif tag.unknown:

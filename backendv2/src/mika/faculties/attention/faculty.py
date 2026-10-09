@@ -261,6 +261,11 @@ class AttentionParams(BaseModel):
     remorse_intensity: Annotated[float, Knob(
         label="Avoir été dure : intensité", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
         help="L'intensité de cette pensée (gênée) à sa naissance.")] = 0.55
+    lie_intensity: Annotated[float, Knob(
+        label="Avoir menti : intensité", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="Quand elle a menti à quelqu'un (sa marque de mensonge), une pensée gênée lui reste (« J'ai menti à "
+             "Bob ») : elle la porte, sans qu'elle la pousse à lui écrire. Une par personne à la fois : un second "
+             "mensonge la ravive. 0 : mentir ne lui pèse pas.")] = 0.45
     concern_intensity: Annotated[float, Knob(
         label="Quelqu'un qui n'avait pas l'air bien", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
         help="L'intensité de la pensée quand une amie ou une proche n'avait pas l'air comme d'habitude (un "
@@ -628,6 +633,20 @@ def _remorse(s: AttentionState, person: str, source: int, at: int, p: AttentionP
                                                    p.remorse_intensity, at)))
 
 
+def _lied(s: AttentionState, person: str, source: int, at: int, p: AttentionParams) -> AttentionState:
+    """Elle a menti à quelqu'un : une pensée gênée (« J'ai menti à Bob »), une seule par personne à la fois — un
+    second mensonge la ravive, il n'en crée pas une seconde."""
+    alive = [t for t in _alive(s, at, p).values() if t.origin == c.LIE and person in t.about]
+    if alive:
+        t = min(alive, key=lambda t: t.id)
+        return replace(s, thoughts=s.thoughts.set(t.id, replace(t, intensity=max(current(t, at, p), p.lie_intensity),
+                                                                touched_at=at)))
+    if p.lie_intensity <= 0 or any(q.origin == c.LIE and q.person == person for q in s.pending):
+        return s
+    return replace(s, pending=(*s.pending, Pending(source, c.LIE, person, Emotion.EMBARRASSED.value,
+                                                   p.lie_intensity, at)))
+
+
 @ATTENTION.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, others_c.REPLY_DELAY, others_c.HOURS, social_c.CLOSENESS])
 def _uttered(s: AttentionState, e, cx) -> AttentionState:
     d = e.data
@@ -671,6 +690,8 @@ def _uttered(s: AttentionState, e, cx) -> AttentionState:
             and declared.intensity >= p.remorse_from \
             and cx.facts.get(social_c.CLOSENESS(person)) in (social_c.FRIEND, social_c.CLOSE):
         s = _remorse(s, person, d.reply_to or e.seq, e.at, p)
+    if d.annotation(expression_c.LIE_ANNOTATION) is not None:
+        s = _lied(s, person or d.target, e.seq, e.at, p)
     if d.kind != Kind.REPLY or declared is None or not _marking(declared, p):
         return s
     # un échange qui marque : une pensée par personne à la fois

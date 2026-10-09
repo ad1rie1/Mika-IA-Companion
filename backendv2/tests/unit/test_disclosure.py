@@ -79,12 +79,18 @@ def test_a_confidence_reaches_only_a_close_friend_who_knows_the_person(certainty
 
 
 def test_a_tie_is_with_every_identified_person_concerned_never_a_bare_name():
-    """Prononcer un nom ne crée aucun lien : ``name:…`` (quelqu'un dont on lui a parlé) ne compte pas, mais il faut
-    au moins une personne identifiée, et un lien avec chacune."""
+    """Prononcer un nom ne crée aucun lien : ``name:…`` (quelqu'un dont on lui a parlé, qu'elle ne connaît pas) ne
+    compte pas, mais il faut au moins une personne identifiée, et un lien avec chacune. Une mention présumée être une
+    personne connue compte comme elle (ADR 0075) ; sans de quoi lire la présomption, rien ne s'ouvre."""
+    unknown = lambda key: ""  # noqa: E731 — personne de ce nom qu'elle connaisse
+    presumed_carol = lambda key: "carol" if key == "name:carol" else ""  # noqa: E731
     assert privacy.tied_to(("alice",), ("alice", "bob"))
-    assert privacy.tied_to(("alice", "name:paul"), ("alice",)), "son frère Paul est dans son histoire à elle"
+    assert privacy.tied_to(("alice", "name:paul"), ("alice",), unknown), "son frère Paul est dans son histoire à elle"
     assert not privacy.tied_to(("alice", "carol"), ("alice",)), "un lien avec chacune"
-    assert not privacy.tied_to(("name:paul",), ("alice",)), "il faut au moins une personne identifiée"
+    assert not privacy.tied_to(("alice", "name:carol"), ("alice",), presumed_carol), "Carol présumée : un lien aussi"
+    assert privacy.tied_to(("alice", "name:carol"), ("alice", "carol"), presumed_carol)
+    assert not privacy.tied_to(("alice", "name:paul"), ("alice",)), "sans lecture de la présomption : fermé"
+    assert not privacy.tied_to(("name:paul",), ("alice",), unknown), "il faut au moins une personne identifiée"
     assert not privacy.tied_to(("alice",), ())
 
 

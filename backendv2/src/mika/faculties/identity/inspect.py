@@ -262,10 +262,10 @@ def presumed_mentions(s: IdentityState, store: Any, person: str) -> tuple[str, .
     homonyme connu, et la présomption tombe (on ne sait pas de qui on parlait)."""
     if store is None:
         return ()
-    rows = store.query_mind(f"SELECT DISTINCT person FROM {memory_c.ABOUT_TABLE} WHERE person >= ? AND person < ?",
-                            (NAMED, _NAMED_END))
+    # l'index des sujets du journal : une mention n'est pas seulement « à propos de » — elle tient une opinion
+    # (``holder``), elle a raconté (``source``, ``told_by``), on lui a promis ; tout ce qui la désigne s'oublie
     worn = worn_names(s)
-    return tuple(sorted(k for (k,) in rows if presumed(s, str(k), worn) == person))
+    return tuple(k for k in store.subjects(NAMED) if presumed(s, k, worn) == person)
 
 
 # ── Les noms qui attendent quelqu'un ──────────────────────────────────────

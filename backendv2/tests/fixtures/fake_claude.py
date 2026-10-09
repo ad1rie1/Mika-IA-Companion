@@ -10,6 +10,8 @@ est filtré par l'adaptateur) : une ligne ``SCENARIO: {json}``. Clés :
 - ``gap`` : le temps que le modèle met à écrire chaque bloc d'appel suivant ;
 - ``nostream`` : ne pas diffuser le message (une CLI sans ``stream_event``) ;
 - ``say`` : le texte final (``{results}`` y reçoit les résultats des outils) ;
+- ``before`` : un texte que le modèle écrit d'abord, avant de chercher un outil (``ToolSearch``, que la CLI
+  exécute elle-même) et de reprendre dans un second message — ``result`` ne porte que ce second message ;
 - ``fail`` : terminer par un résultat en erreur portant ce texte ;
 - ``sleep`` : rester bloqué N secondes avant de répondre (annulation) ;
 - ``quota`` : l'utilisation d'abonnement annoncée (``rate_limit_event``) ;
@@ -150,6 +152,17 @@ def main():
     if scenario.get("fail"):
         out({"type": "result", "subtype": "success", "is_error": True, "result": scenario["fail"]})
         return 1
+    if scenario.get("before"):  # il écrit, cherche un outil (la CLI répond elle-même), puis reprend
+        n += 1
+        event("message_start", message={"model": "fake-cc"})
+        out({"type": "assistant", "message": {"model": "fake-cc", "content": [
+            {"type": "text", "text": scenario["before"]}]}})
+        out({"type": "assistant", "message": {"model": "fake-cc", "content": [
+            {"type": "tool_use", "id": f"toolu_{n}", "name": "ToolSearch", "input": {"query": "souvenirs"}}]}})
+        event("message_delta", delta={"stop_reason": "tool_use"})
+        event("message_stop")
+        out({"type": "user", "message": {"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": f"toolu_{n}", "content": "aucun outil de ce nom"}]}})
     text = scenario.get("say", "fini").replace("{results}", " | ".join(results))
     if scenario.get("report"):
         text += "\nREPORT " + json.dumps({"argv": sys.argv[1:], "env": sorted(os.environ), "listed": listed,

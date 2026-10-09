@@ -184,6 +184,7 @@ PROCESS_LABELS: dict[str, str] = {
     "transcript.compact": "Replier les longs fils en résumé", "memory.consolidate": "Retenir (souvenirs, croyances)",
     "memory.calendar": "Se rappeler les dates proches",
     "memory.index": "Indexer la mémoire", "memory.reflect": "Repenser à ce qu'elle sait",
+    "memory.lies": "Se souvenir de ses mensonges",
     "memory.night": "Trier la mémoire la nuit", "body.sleep": "S'endormir et se réveiller",
     "needs.empty": "Sentir le vide", "attention.watch": "Remarquer et attendre",
     "attention.digest": "Digérer ses pensées la nuit", "self.narrate": "Se raconter",

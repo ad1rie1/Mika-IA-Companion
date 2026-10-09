@@ -328,6 +328,13 @@ class Watch:
                                         emotion=q.emotion, intensity=q.intensity, origin=q.origin,
                                         about=(q.person,) if q.person else (), sensitivity=sens, source=q.source,
                                         dedupe_key=mark)
+        if q.origin == c.LIE:
+            # avoir menti lui pèse ; ça concerne la personne, sans rien dire de ce qu'elle cachait
+            sens = int(Sensitivity.PERSONAL)
+            return c.THOUGHT_BORN.draft(text=Content.of(phrase("attention.thought.lie", who=who), level=sens),
+                                        emotion=q.emotion, intensity=q.intensity, origin=q.origin,
+                                        about=(q.person,) if q.person else (), sensitivity=sens, source=q.source,
+                                        dedupe_key=mark)
         if q.origin == c.UNANSWERED:
             # être ignorée se ressent ; ce n'est pas une confidence, mais ça concerne la personne
             sens = int(Sensitivity.PERSONAL)

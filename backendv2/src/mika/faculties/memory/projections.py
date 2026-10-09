@@ -163,7 +163,7 @@ class Items:
                         "born_at": e.at, "touched_at": e.at, "status": "active", "sources": json.dumps(list(d.sources)),
                         "told_by": _keys(d.told_by), "heard_by": _keys(d.heard_by), "secret": int(d.secret),
                         "constraints": json.dumps([rule.model_dump() for rule in d.constraints]),
-                        "internal_only": int(d.internal_only)})
+                        "internal_only": int(d.internal_only), "origin": c.LIED if d.lie else None})
             elif name == c.BELIEVED.name:
                 insert({"id": e.seq, "kind": c.BELIEF, "text": d.text.text or "", "about": _keys(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance, "confidence": d.confidence,
