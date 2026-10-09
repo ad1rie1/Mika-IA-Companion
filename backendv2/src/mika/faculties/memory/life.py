@@ -159,7 +159,8 @@ def _told_about(s: MemoryState, frame: Frame, ev: Any, ports: Any) -> list[Draft
         return []
     texts = store.content([e.text_ref for e in mine if e.text_ref])
     names = _names(frame, person)
-    return [c.MOMENT_FOLLOWED.draft(event=e.id, by=person, dedupe_key=f"repris:{e.id}:{ev.seq}")
+    return [c.MOMENT_FOLLOWED.draft(event=e.id, by=person, thread=e.key, occurrence=e.when,
+                                    dedupe_key=f"repris:{e.id}:{ev.seq}")
             for e in sorted(mine, key=lambda e: e.id)
             if takes_up_moment(e, texts.get(e.text_ref) or "", text, names)]
 
@@ -210,7 +211,8 @@ class Follow:
                     continue
                 if takes_up_moment(e, texts.get(e.text_ref) or "", str(said or ""), names):
                     done.add(e.id)
-                    drafts.append(c.MOMENT_FOLLOWED.draft(event=e.id, dedupe_key=f"repris:{e.id}:{seq}"))
+                    drafts.append(c.MOMENT_FOLLOWED.draft(event=e.id, thread=e.key, occurrence=e.when,
+                                                          dedupe_key=f"repris:{e.id}:{seq}"))
         self.upto = head
         if drafts:
             await ctx.emit(*drafts)

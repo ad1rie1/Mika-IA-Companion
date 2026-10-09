@@ -1546,18 +1546,20 @@ memory:
 
       Ce que tu peux retenir :
       - des souvenirs : ce qu'elle a vécu, raconté avec ses mots à elle, à la première personne (« J'ai consolé Adrien : son chat Pixel est mort ce matin »). Un souvenir se suffit à lui-même : des prénoms, jamais « il », « l'utilisateur » ou « la personne ». Ce n'est jamais une phrase recopiée de la conversation — ni une réplique de {name}, ni un message de la personne : si les mots exacts de quelqu'un comptent, cite-les en disant qui parle (« Adrien m'a dit : « j'étais avec lui jusqu'au bout » »). À la première personne, c'est toujours {name} qui parle : ce qui arrive à quelqu'un d'autre se raconte comme ce qu'elle en a appris ou vécu avec lui (« Carol m'a annoncé la naissance de sa fille Jeanne : elle est épuisée mais heureuse »), jamais en se mettant à sa place (« J'ai eu une petite fille »).
-      - des croyances : des faits sur quelqu'un ou sur le monde, ses goûts compris (« Le chat d'Adrien s'appelait Pixel », « Chloé adore la city pop »), avec qui les a dits (source) et d'où elle le tient (origine : dit, observé ou déduit). Si une croyance déjà connue est contredite, ou si la personne revient sur ce qu'elle avait dit (« oublie ce que je t'ai dit sur la city pop, c'était une phase »), écris ce qui est vrai maintenant (« Chloé n'est plus dans la city pop : c'était une phase ») et donne dans « remplace » le numéro de l'ancienne. Ne répète pas une croyance déjà connue. Écris toute date en absolu (« le week-end du 3 octobre », « depuis le 27 septembre »), jamais « ce week-end », « dimanche » ou « hier » : relue dans trois semaines, une croyance doit encore être vraie. Ce qui ne vaut qu'un temps est un événement, pas une croyance.
+      - des croyances : des faits sur quelqu'un ou sur le monde, ses goûts compris (« Le chat d'Adrien s'appelait Pixel », « Chloé adore la city pop »), avec qui les a dits (source) et d'où elle le tient (origine : dit, observé ou déduit). Si une croyance déjà connue est contredite, ou si la personne revient sur ce qu'elle avait dit (« oublie ce que je t'ai dit sur la city pop, c'était une phase »), écris ce qui est vrai maintenant (« Chloé n'est plus dans la city pop : c'était une phase ») et donne dans « remplace » le numéro de l'ancienne — même quand c'est quelqu'un d'autre qui la contredit : ce qui est cru ensuite se décide après toi. Dis si la personne parle de sa propre vie ou de ce qu'elle a vu (« de_premiere_main »). Ne répète pas une croyance déjà connue. Écris toute date en absolu (« le week-end du 3 octobre », « depuis le 27 septembre »), jamais « ce week-end », « dimanche » ou « hier » : relue dans trois semaines, une croyance doit encore être vraie. Ce qui ne vaut qu'un temps est un événement, pas une croyance.
       - ce qui n'appartient qu'à eux : comment la personne appelle {name} (« Adrien m'appelle Mimi »), le surnom que {name} lui donne, une blague ou une expression qu'ils partagent — une croyance à la première personne, rattachée à la personne, avec « entre_vous » vrai et importance 3 : entre amis, c'est ce qui fait un lien.
       - rien de banal : un au revoir, « je vais dormir », « je retourne bosser », une politesse ne se retiennent pas.
       - ce que {name} raconte d'elle-même : une croyance à la première personne, avec « sur_elle » vrai, sans personne, et son « genre » — « anecdote » pour sa petite vie de tous les jours (« J'ai ressorti mon fer à souder pour réparer ma lampe », importance 1 : elle s'en souviendra quelques jours) ; « gout », « avis » ou « fait » pour ce qui la définit (« Mon plat préféré, c'est les ramen », « Je trouve les jeux mobiles sans intérêt », importance 3 : elle s'en souviendra longtemps, pour ne jamais se contredire). Si elle change d'avis, donne dans « remplace » le numéro de ce qu'elle pensait avant.
       - des promesses : ce que {name} elle-même a promis de faire pour quelqu'un — une chose à faire, à l'infinitif (« lui demander comment s'est passé son entretien »), pas « garder le secret » (ça, c'est le secret lui-même) —, avec l'échéance si elle a été dite (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « jeudi soir », 20:00). Un rappel qu'on lui a demandé et qu'elle a accepté (« rappelle-moi de prendre rendez-vous mercredi » — « ok, je te le rappelle ») en est une : « lui rappeler de prendre rendez-vous », pour ce jour-là. Si une promesse en cours a été tenue ou abandonnée, indique-la dans promesses_tenues : une promesse datée n'est tenue que le jour dit (la veille, dire « demain je te le rappelle », ce n'est pas la tenir) ; elle est abandonnée si la personne y renonce.
-      - des événements : ce qui va arriver dans la vie de quelqu'un et dont on prend des nouvelles après (un entretien, un examen, un rendez-vous médical, un départ, un mariage, un anniversaire), en quelques mots (« son entretien chez Ubisoft »), avec sa date dans « quand » (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « ce midi », 12:00), calculée d'après la date d'aujourd'hui, son importance (2 un rendez-vous ordinaire, une sortie ; 3 un entretien, un examen, une opération, un départ ; 4 un mariage, une naissance, un deuil), et « a_feter » vrai si c'est un moment qui se fête (un anniversaire, un mariage, une crémaillère). « chaque_annee » vrai pour une date qui revient chaque année (un anniversaire de naissance, de mariage, de rencontre ; la date d'un deuil, importance 4, jamais à fêter : « demain, ça fera un an que mon père est parti ») : donne alors dans « quand » sa prochaine occurrence, même si elle vient de passer (« c'était mon anniv hier » : hier). Seulement ce qui est à venir et daté (ou qui revient chaque année), et qui lui arrive à elle ou lui : pas une chose à faire, ni ce qu'on lui a demandé de rappeler (« rappelle-moi de prendre rendez-vous chez le dentiste » : prendre rendez-vous est une promesse, pas un rendez-vous dont on prendra des nouvelles). Ou une situation qui dure dans sa vie et dont on prend des nouvelles (son chat malade, un déménagement en cours, un proche à l'hôpital) : « en_cours » vrai, et dans « quand » le jour où ça a commencé (aujourd'hui si on ne sait pas). Si la personne dit qu'une des situations en cours est finie — bien ou mal (« on a fini le déménagement », « il est sorti de l'hôpital », « on a dû l'endormir ») —, donne son numéro dans « situations_finies » et ne la renote pas. Si un des moments à venir déjà notés change — reporté, avancé, précisé (« finalement mon entretien est reporté à lundi ») —, note-le avec sa nouvelle date et donne dans « remplace » le numéro de l'ancien : c'est le même moment, déplacé, pas un second. Un report repousse : la nouvelle date vient après l'ancienne (« reporté à lundi », pour un jeudi : le lundi d'après) ; un moment avancé, avant.
+      - des événements : ce qui va arriver dans la vie de quelqu'un et dont on prend des nouvelles après (un entretien, un examen, un rendez-vous médical, un départ, un mariage, un anniversaire), en quelques mots (« son entretien chez Ubisoft »), avec sa date dans « quand » (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « ce midi », 12:00), calculée d'après la date d'aujourd'hui, son importance (2 un rendez-vous ordinaire, une sortie ; 3 un entretien, un examen, une opération, un départ ; 4 un mariage, une naissance, un deuil), et « a_feter » vrai si c'est un moment qui se fête (un anniversaire, un mariage, une crémaillère). « chaque_annee » vrai pour une date qui revient chaque année (un anniversaire de naissance, de mariage, de rencontre ; la date d'un deuil, importance 4, jamais à fêter : « demain, ça fera un an que mon père est parti ») : donne alors dans « quand » sa prochaine occurrence, même si elle vient de passer (« c'était mon anniv hier » : hier). Seulement ce qui est à venir et daté (ou qui revient chaque année), et qui lui arrive à elle ou lui : pas une chose à faire, ni ce qu'on lui a demandé de rappeler (« rappelle-moi de prendre rendez-vous chez le dentiste » : prendre rendez-vous est une promesse, pas un rendez-vous dont on prendra des nouvelles). Ou une situation qui dure dans sa vie et dont on prend des nouvelles (son chat malade, un déménagement en cours, un proche à l'hôpital) : « en_cours » vrai, et dans « quand » le jour où ça a commencé (aujourd'hui si on ne sait pas). Si la personne dit qu'une des situations en cours est finie — bien ou mal (« on a fini le déménagement », « il est sorti de l'hôpital », « on a dû l'endormir ») —, donne son numéro dans « situations_finies » et ne la renote pas. Si une des situations finies depuis peu revient (« il est de nouveau malade », « ça recommence »), note-la de nouveau, « en_cours » vrai, et donne son numéro dans « remplace » : c'est la même situation, une autre fois. Si un des moments à venir déjà notés change — reporté, avancé, précisé (« finalement mon entretien est reporté à lundi ») —, note-le avec sa nouvelle date et donne dans « remplace » le numéro de l'ancien : c'est le même moment, déplacé, pas un second. Un report repousse : la nouvelle date vient après l'ancienne (« reporté à lundi », pour un jeudi : le lundi d'après) ; un moment avancé, avant.
 
       Pour chaque élément :
       - « personnes » : qui il concerne — le jeton pour quelqu'un de la conversation ([P1]), le prénom pour quelqu'un d'autre ; jamais {name} elle-même ; toujours, même quand c'est évident ;
       - « messages » : les numéros des messages d'où tu le tires (#) — c'est ce qui dit qui le lui a confié ;
       - l'importance (1 anodin, 2 notable, 3 important, 4 marquant) ;
       - la sensibilité — anodin (ce qu'on dirait devant n'importe qui : goûts, loisirs, anecdotes ; ce qui a été annoncé à tout un groupe), personnel (au moins personnel dès que ça touche la santé, le travail, l'argent, la famille, les amours ou les émotions de quelqu'un), confidence (lourd, intime : ce qu'on ne raconte qu'à des proches). Dans le doute : personnel ;
+      - « ressenti » : ce que la personne concernée en ressent, d'après ce qu'elle dit et la façon dont elle le dit (« je suis enceinte !!! » : heureuse ; « mon père est à l'hôpital » : inquiète) — en un mot (contente, triste, inquiète, fière, soulagée, en colère…), vide si rien ne le montre ;
+      - « mon_ressenti » : ce que {name} en ressent elle-même — de l'empathie, selon son lien avec la personne et ce qu'elle sait et pense (se réjouir pour une amie, s'inquiéter pour elle ; ou autre chose quand elle voit les choses autrement) — en un mot, vide si rien de particulier ;
       - « secret » : vrai si la personne a demandé de ne pas le répéter — à personne (« dis-le à personne », « entre nous », « garde-le pour toi ») ou à quelqu'un en particulier (« ne lui dis pas »). Tout ce qui laisse deviner un secret est secret aussi. Si elle le demande pour une croyance déjà connue, donne son numéro dans « confidentiel ».
       Dans un salon, ce qui est marqué « (entre eux) » ne lui était pas adressé : n'en retiens que ce qui compte.
       Une réplique de {name} marquée « (un mensonge) » ne dit pas le vrai : n'en tire ni croyance ni note sur elle (elle s'en souvient déjà comme d'un mensonge).
@@ -1581,6 +1583,14 @@ memory:
         Liens explicitement dits, avec subject/other désignés par leurs jetons.
         Une mention ou une présence commune ne prouve aucun lien.
         Une rupture est ended, un lien supposé uncertain ; une hostilité est hostile.
+      # Le champ « ressenti » (souvenirs, croyances, événements) : ce que la personne concernée en ressent (ADR 0083).
+      ressenti: >-
+        ce que la personne concernée en ressent, d'après ce qu'elle dit et comment elle le dit, en un mot (contente,
+        triste, inquiète…) ; vide si rien ne le montre
+      # Le champ « mon_ressenti » : ce qu'elle-même en ressent, de l'empathie (ADR 0083).
+      mon_ressenti: >-
+        ce qu'elle-même en ressent, avec son lien à la personne et ce qu'elle pense, en un mot ; vide si rien de
+        particulier
       # Le champ « personnes ».
       personnes: >-
         qui c'est concerne : le jeton ([P1]) pour quelqu'un de la conversation, le prénom pour quelqu'un d'autre ;
@@ -1593,6 +1603,15 @@ memory:
         laisse deviner un secret
       # Le champ « messages ».
       messages: les numéros (#) des messages d'où tu le tires
+      # Le champ « de_premiere_main » d'une croyance (ADR 0081).
+      de_premiere_main: >-
+        vrai si la personne parle de ce qu'elle vit elle-même, ou de ce qu'elle a vu de ses yeux — pas d'un ouï-dire
+      # Le champ « depuis » d'une croyance.
+      depuis: >-
+        depuis quand c'est vrai, si c'est dit (AAAA-MM-JJ) ; vide sinon
+      # Le champ « jusqua » d'une croyance.
+      jusqua: >-
+        jusqu'à quand c'est vrai, si c'est dit (« jusqu'à la fin du mois » : AAAA-MM-JJ) ; vide sinon
       # Le champ « entre_vous » d'une croyance.
       entre_vous: >-
         ce qui n'appartient qu'à elle et à cette personne : comment la personne l'appelle (un surnom), le surnom
@@ -1622,7 +1641,8 @@ memory:
       situations_finies: les numéros des situations en cours que la personne dit finies
       # Le champ « remplace » d'un événement.
       event_remplace: >-
-        le numéro d'un moment à venir déjà noté que celui-ci remplace (reporté, avancé, précisé) ; vide sinon
+        le numéro d'un moment à venir déjà noté que celui-ci remplace (reporté, avancé, précisé), ou d'une situation
+        finie depuis peu qui revient (« en_cours » vrai) ; vide sinon
 
     # Le message de l'appel « extract » (memory/extraction.py, ``render``) : la date, qui parle, ce qui est déjà su,
     # les promesses et les situations en cours, puis les messages — chacun « [#n°] heure qui : texte », avec la date
@@ -1645,6 +1665,12 @@ memory:
       # L'en-tête des situations en cours dans la vie des personnes (une ligne « [#n°] (qui) texte » chacune).
       situations: "Situations dont aucune fin n’a été rapportée (leur ancienneté ne prouve pas qu’elles durent encore) :"
       situation: "Signalé le {since}, issue non confirmée : {text}"
+      # L'en-tête des situations finies depuis peu (une ligne « [#n°] (qui) texte » chacune) : si l'une revient, la
+      # relecture la renote en cours et donne son numéro dans « remplace » (ADR 0079).
+      ended: "Situations finies depuis peu (si l'une revient, la renoter en cours avec son numéro dans « remplace ») :"
+      # Une situation finie depuis peu. {since} : le jour où elle avait commencé ; {ended} : le jour où elle a fini
+      # (AAAA-MM-JJ) ; {text} : la situation.
+      ended_situation: "du {since} au {ended} : {text}"
       # L'en-tête des moments à venir déjà notés (une ligne « [#n°] (qui) date : texte » chacun).
       moments: "Moments à venir déjà notés :"
       # Un moment à venir. {when} : sa date (AAAA-MM-JJ) ; {text} : ce qui est prévu.
@@ -1727,6 +1753,19 @@ memory:
     # Après une croyance apprise il y a plus d'une semaine (entre parenthèses) : elle sait depuis quand. {age} :
     # memory.age.
     learned: appris {age}
+    # Après une croyance qu'une autre contredit sans la remplacer (ADR 0081) : elle doute, et sait de qui vient
+    # l'autre version — seulement quand les deux peuvent se dire ici. {who} : qui a dit l'autre version ; {other} :
+    # son texte.
+    contested: " (mais {who} t'a dit autre chose : « {other} »)"
+    # Après un souvenir, une croyance ou un moment : ce que la personne concernée en ressent et ce qu'elle-même en
+    # ressent, jugés par la relecture (ADR 0083) — l'empathie.
+    felt:
+      # {who} : la personne concernée ; {what} : le nom de l'émotion (affect.noun).
+      theirs: "{who} le vit avec {what}"
+      # {feeling} : l'adjectif (affect.mood, au féminin : c'est elle).
+      yours: "toi, tu en es {feeling}"
+      # Les deux, entre parenthèses, séparés par « ; ». {what} : ce qui précède.
+      both: " ({what})"
 
     # Comment elle le sait, entre parenthèses après une croyance (rien pour ce qu'on lui a dit).
     origin:
@@ -1786,6 +1825,11 @@ memory:
   unsaid:
     # Devant une amie ou une proche, quand ce qui a été confié pèse (une peine, une peur, une confidence).
     heavy: "- {who} t'a confié traverser un moment difficile : ce n'est pas à toi d'en dire plus."
+    # Devant une amie ou une proche, quand la personne garde encore pour elle une joie (une grossesse, un nouveau
+    # poste) : ce qu'elle en ressent, jugé par la relecture (ADR 0083).
+    joyful: "- {who} t'a confié une bonne nouvelle, pas encore à annoncer : ce n'est pas à toi de le faire."
+    # Devant une amie ou une proche, une confidence dont on ne sait pas ce que la personne ressent.
+    weighty: "- {who} t'a confié quelque chose qui lui tient à cœur : ce n'est pas à toi d'en dire plus."
     # Quand la question en cours y touche (sinon le modèle ne fait pas le lien, et ment). {words} : les mots de la
     # question qui y touchent, chacun entre « », séparés par des virgules.
     asked: >-
@@ -1885,6 +1929,9 @@ memory:
     ongoing: "- en ce moment : {label}"
     # Une situation qui dure, commencée plus tôt. {since} : memory.when.
     ongoing_since: "- en ce moment (depuis {since}) : {label}"
+    # Glissé après une situation qui dure, quand c'est une situation finie qui recommence (« il est de nouveau
+    # malade », ADR 0079).
+    again: " — de nouveau : c'était fini, et ça a recommencé"
     # Fin : elles viennent d'en reparler (une situation, ou un moment à venir).
     talked_again: " — vous en avez reparlé."
     # Fin d'une situation qui dure, chez une amie ou une proche.
@@ -2137,6 +2184,8 @@ transcript:
     previous: "Résumé précédent : {text}"
     # L'en-tête des échanges à replier, chacun « [repère] qui : texte ».
     next: "Suite des échanges :"
+    # À la place d'un message d'un salon d'où vient ce qu'on lui a demandé de garder pour soi (ADR 0082).
+    withheld: "(quelque chose qu'on lui a demandé de garder pour elle)"
     # Qui parle, quand on ne connaît pas le nom de la personne.
     someone: La personne
     # Qui parle, pour un message qu'elle a écrit d'elle-même. {her} : son nom.
@@ -2264,6 +2313,12 @@ attention:
     blocked_vague: Je bloque sur quelque chose.
     # Une croyance révisée. {old} : ce qu'elle croyait ; {new} : ce qu'elle croit maintenant.
     revision: "Je croyais que « {old} » — apparemment ce n'est plus vrai : « {new} »"
+    # Elle change d'avis elle-même, sur ce qui la définit (un goût, une opinion) — ADR 0081. {old}, {new} : avant,
+    # maintenant.
+    changed_mind: "J'ai changé d'avis : avant, « {old} » — maintenant, « {new} »"
+    # Elle revient à ce qu'elle croyait avant qu'on la contredise. {old} : ce qu'elle a cru entre-temps ; {new} : ce
+    # qu'elle croit de nouveau.
+    revision_back: "J'avais fini par croire « {old} » — finalement non : « {new} »"
     # Le même, sans les textes.
     revision_vague: Je dois réviser quelque chose que je croyais.
     # Une amie qui manque, longtemps après (son silence a dépassé plusieurs fois leur rythme).

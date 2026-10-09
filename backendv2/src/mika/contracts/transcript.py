@@ -40,7 +40,20 @@ class Compacted(Payload):
     count: int = 0
     call_id: str = ""
     model: str = ""
+    #: qui parle dans les messages repliés (un salon : tous) : l'oubli de l'un efface le résumé (ADR 0082)
+    speakers: tuple[str, ...] = ()
+    #: les messages tus dans le résumé, sources de ce qu'on lui a demandé de garder pour soi (un salon)
+    withheld: tuple[int, ...] = ()
+
+
+class SummaryReset(Payload):
+    """Le résumé d'un fil est à refaire : un secret dit dans ce salon (déclaré après coup) y était repris. Le fil
+    se replie de nouveau, ce secret tu (ADR 0082)."""
+
+    person: str
+    reason: str = ""
 
 
 COMPACTED = event_type("transcript.compacted", OWNER, Compacted, public=True, content=("summary",),
-                       subjects=("person",))
+                       subjects=("person", "speakers"))
+SUMMARY_RESET = event_type("transcript.summary_reset", OWNER, SummaryReset, public=True)

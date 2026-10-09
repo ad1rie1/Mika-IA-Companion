@@ -39,8 +39,10 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.ports.llm import LLMRequest, LLMResponse, Message, ToolDecl
+from mika.vocab.knowledge import knowns
+from mika.vocab.lineage import admits
 from mika.vocab.phrasebook import family, phrase
-from mika.vocab.privacy import Sensitivity
+from mika.vocab.privacy import Sensitivity, private_to
 from mika.vocab.words import banal, elided, fold
 
 TOOL_NAME = "record_profile"
@@ -185,7 +187,12 @@ def _due(s: SocialState, now: int, p: Any) -> list[tuple[int, str]]:
             continue
         profile = s.profiles.get(person)
         new = count - (profile.mentions_at if profile else 0)
-        if new < p.profile_min_items:
+        if new < p.profile_min_items and not (profile is not None and profile.stale):
+            continue
+        if profile is not None and profile.stale:
+            # un élément repris a changé : la fiche se réécrit sans attendre du nouveau (ADR 0082)
+            if now - profile.revised_at >= p.profile_stale_after_us:
+                out.append((-max(new, 1), person))
             continue
         if profile is not None and now - profile.revised_at < p.profile_interval_us:
             continue
@@ -203,8 +210,13 @@ class Revise:
         self.tried: dict[str, int] = {}
 
     def _todo(self, state: SocialState, now: int, p: Any) -> list[tuple[int, str]]:
-        return [(n, person) for n, person in _due(state, now, p)
-                if self.tried.get(person) != state.mentions.get(person, 0)]
+        return [(n, person) for n, person in _due(state, now, p) if self.tried.get(person) != self._mark(state, person)]
+
+    @staticmethod
+    def _mark(state: SocialState, person: str) -> Any:
+        """Ce qui a changé depuis la dernière tentative : les mentions, ou une fiche devenue périmée."""
+        profile = state.profiles.get(person)
+        return (state.mentions.get(person, 0), profile.revised_at if profile and profile.stale else 0)
 
     def next_due(self, state: SocialState, frame: Frame, last_run: int | None) -> int | None:
         p = params(frame.env.params_of("social", frame.root))
@@ -224,19 +236,23 @@ class Revise:
         p = params(frame.env.params_of("social", frame.root))
         self.retry_at = frame.now + p.profile_retry_us  # si l'appel lève : pas de rafale
         for _neg, person in self._todo(state, frame.now, p)[: p.profile_per_run]:
-            self.tried[person] = state.mentions.get(person, 0)
+            self.tried[person] = self._mark(state, person)
             # ce qu'elle a dit elle-même, ou ce que Mika a vu — jamais ce qu'un autre a confié sur elle
             only = json.dumps([person], ensure_ascii=False)
             # par importance, sans banalités ni répliques recopiées ; ce qui n'appartient qu'à elles deux (un surnom)
             # vit dans leur registre, pas dans la fiche
             her = self_c.name_of(frame.get(self_c.PERSONA))
             names = [frame.get(identity_c.IDENTITY(person)).name or "", her]
-            rows = store.query_mind(
-                f"SELECT id, text, importance FROM {memory_c.ITEMS_TABLE} WHERE about=? AND told_by IN ('[]', ?) "
-                "AND status='active' AND kind IN (?, ?) AND between_us=0 AND secret=0 "
-                "AND knowledge_kind NOT IN ('hypothesis','opinion') ORDER BY importance DESC, id DESC LIMIT ?",
-                (only, only, memory_c.SOUVENIR, memory_c.BELIEF, p.profile_max_items * 2))
-            items = [r for r in rows if note_worthy(str(r[1]), names)][: p.profile_max_items]
+            rows = knowns(store.query_mind(
+                f"{memory_c.SELECT_KNOWN} WHERE about=? AND told_by IN ('[]', ?) AND status='active' "
+                "AND kind IN (?, ?) AND between_us=0 AND secret=0 AND knowledge_kind NOT IN ('hypothesis','opinion') "
+                "ORDER BY importance DESC, id DESC LIMIT ?",
+                (only, only, memory_c.SOUVENIR, memory_c.BELIEF, p.profile_max_items * 2)), memory_c.KNOWN_COLUMNS)
+            # … et ce que la personne peut entendre de sa propre fiche (le verdict de la mémoire : une réflexion de
+            # nuit qui reprend ce qu'un autre a confié n'y entre pas)
+            floor, (resolve, presumed) = private_to(person), identity_c.resolvers(frame.get)
+            items = [(k.id, k.text, k.importance) for k in rows if note_worthy(k.text, names)
+                     and admits(k.lineage, person, floor, resolve=resolve, presumed=presumed).ok][: p.profile_max_items]
             if not items:
                 continue
             notes = _folded(" ".join(str(t) for _i, t, _imp in items))
@@ -256,7 +272,8 @@ class Revise:
                 person=person, summary=Content.of(summary, level=int(Sensitivity.PERSONAL)),
                 tone=Content.of(tone, level=int(Sensitivity.PERSONAL)) if tone else None,
                 interests=_lines(_short(tastes(got.interets))), sensitive=_lines(_short(got.sujets_sensibles)),
-                upto=max(int(i) for i, _t, _imp in items), call_id=request.call_id, model=response.model))
+                upto=max(int(i) for i, _t, _imp in items), call_id=request.call_id, model=response.model,
+                sources=tuple(sorted(int(i) for i, _t, _imp in items))))
         self.retry_at = 0
 
     def _prompt(self, frame: Frame, state: SocialState, person: str, items: list[tuple[Any, ...]], store: Any,
@@ -268,7 +285,7 @@ class Revise:
         # 15 messages », sous « fait partie de tes amis ») — la proximité se vit ailleurs (``faculty.lived``)
         lines = [phrase("social.profile.person", name=view.name or phrase("social.profile.no_name"))]
         previous = state.profiles.get(person)
-        if previous is not None:
+        if previous is not None and not previous.stale:  # ce qu'il reprenait a changé : on ne le recopie pas
             text = store.content([previous.summary_ref]).get(previous.summary_ref) if previous.summary_ref else None
             # ce qu'une fiche d'avant avait inventé ne se redonne pas à recopier (« célibataire »)
             text = grounded(text, notes) if text and notes else text

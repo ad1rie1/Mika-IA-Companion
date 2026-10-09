@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 from mika.kernel.events import Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.vocab.lineage import Lineage
 
 OWNER = "needs"
 
@@ -90,6 +91,11 @@ class Matter:
     external: bool = False
     #: un moment qui dure (une situation : un chat malade, un déménagement) — ``at`` : depuis quand
     ongoing: bool = False
+    #: devant qui ses sources permettent de la dire (``None`` : la règle de ses personnes et de sa sensibilité)
+    lineage: Lineage | None = None
+    #: ce qui la désigne quand elle est dite (``matter:<clé>``) : un moment, son fil (``moment:<fil>``) — reporté,
+    #: il a un autre texte et reste le même ; sinon son texte (``ref``)
+    key: str = ""
 
 
 #: ``MATTER(adresse)`` : ce dont elle pourrait parler à cette adresse (``Matter``), ou ``None`` — sans

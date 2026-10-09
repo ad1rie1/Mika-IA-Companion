@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mika.vocab.lineage import Lineage
+
 
 @dataclass(frozen=True, slots=True)
 class Journal:
@@ -16,6 +18,10 @@ class Journal:
     rev: int = 0
     #: sa journée à elle, sans personne d'autre : ce qui se montre à qui n'est pas le seul concerné
     shareable_ref: str = ""
+    #: devant qui sa version intime peut se montrer (``None`` : un journal d'avant)
+    lineage: Lineage | None = None
+    #: une de ses sources est devenue secrète depuis : seule sa version partageable se montre (ADR 0082)
+    masked: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +39,10 @@ class Dream:
     recalled: bool = False
     #: au réveil, elle s'en est souvenue (un tirage enregistré dans ``self.woke_with``)
     remembered: bool = False
+    #: devant qui il peut se raconter (``None`` : un rêve d'avant)
+    lineage: Lineage | None = None
+    #: une de ses sources est devenue secrète depuis : il ne se raconte plus (ADR 0082)
+    masked: bool = False
 
 
 @dataclass(frozen=True, slots=True)

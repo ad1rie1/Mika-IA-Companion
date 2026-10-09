@@ -22,7 +22,8 @@ class LifeArchive:
         t = c.LIFE_TABLE + sfx
         sql.execute(f"CREATE TABLE IF NOT EXISTS {t}(id INTEGER PRIMARY KEY, payload TEXT NOT NULL, "
                     "when_at INTEGER NOT NULL, yearly INTEGER NOT NULL, ongoing INTEGER NOT NULL, "
-                    "ended_at INTEGER NOT NULL, ordinal INTEGER NOT NULL)")
+                    "ended_at INTEGER NOT NULL, ordinal INTEGER NOT NULL, thread INTEGER NOT NULL DEFAULT 0)")
+        sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_thread ON {t}(thread)")
         sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_due ON {t}(yearly,when_at)")
         sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_year ON {t}(yearly,ordinal)")
 
@@ -36,25 +37,35 @@ class LifeArchive:
             if e.type.name == c.EVENT_NOTED.name:
                 previous = sql.query(f"SELECT payload FROM {t} WHERE id=?", (d.replaces,)) if d.replaces else []
                 old = decode(previous[0][0]) if previous else None
-                if d.replaces:
-                    sql.execute(f"DELETE FROM {t} WHERE id=?", (d.replaces,))
+                origin = d.replaces if d.replaces is not None else d.recurs
+                was = sql.query(f"SELECT payload FROM {t} WHERE id=?", (origin,)) if origin is not None else []
+                thread = (decode(was[0][0]).key if was else origin) if origin is not None else e.seq
+                for gone in (d.replaces, d.recurs):
+                    if gone is not None:
+                        sql.execute(f"DELETE FROM {t} WHERE id=?", (gone,))
                 if not d.text.text:
                     continue
                 item = c.LifeEvent(e.seq, tuple(d.about), d.when, d.all_day, d.sensitivity, tuple(d.told_by),
                     d.text.ref or "", d.secret, followed_at=old.followed_at if old and old.when == d.when else 0,
                     ongoing=d.ongoing, importance=d.importance, festive=d.festive,
-                    ended_at=old.ended_at if old and old.ongoing and d.ongoing else 0, yearly=d.yearly and not d.ongoing)
+                    ended_at=old.ended_at if old and old.ongoing and d.ongoing else 0, yearly=d.yearly and not d.ongoing,
+                    thread=thread, recurs=d.recurs or 0, felt=d.felt or "", emotion=d.emotion or "")
             else:
                 previous = sql.query(f"SELECT payload FROM {t} WHERE id=?", (d.event,))
+                if not previous and e.type.name == c.MOMENT_FOLLOWED.name and d.thread:
+                    # repris sous un numéro remplacé depuis : le moment tel qu'il est noté maintenant, s'il est à la
+                    # même date (ADR 0079)
+                    previous = [r for r in sql.query(f"SELECT payload FROM {t} WHERE thread=?", (d.thread,))
+                                if not d.occurrence or decode(r[0]).when == d.occurrence or decode(r[0]).yearly]
                 if not previous:
                     continue
                 item = decode(previous[0][0])
                 item = replace(item, followed_at=e.at) if e.type.name == c.MOMENT_FOLLOWED.name else \
                     replace(item, ended_at=item.ended_at or e.at)
             sql.execute(f"INSERT OR REPLACE INTO {t} VALUES(?,?,?,?,?,?,"
-                        "CAST(strftime('%j',?/1000000,'unixepoch') AS INTEGER))",
+                        "CAST(strftime('%j',?/1000000,'unixepoch') AS INTEGER),?)",
                         (item.id, json.dumps(asdict(item)), item.when, int(item.yearly), int(item.ongoing),
-                         item.ended_at, item.when))
+                         item.ended_at, item.when, item.key))
 
     def forget(self, sql, subject, sfx):
         t = c.LIFE_TABLE + sfx
@@ -62,7 +73,9 @@ class LifeArchive:
                     "OR EXISTS(SELECT 1 FROM json_each(payload,'$.told_by') WHERE value=?)", (subject, subject))
 
 
-MEMORY.projector(c.LIFE_TABLE, version=1, tier=Tier.T0,
+# v2 : le fil de chaque moment (``thread``) : reporté, redit, revenu, le même ; un suivi sous un ancien numéro
+# retrouve le moment tel qu'il est noté maintenant (ADR 0079)
+MEMORY.projector(c.LIFE_TABLE, version=3, tier=Tier.T0,
                  types=[c.EVENT_NOTED, c.MOMENT_FOLLOWED, c.SITUATION_ENDED])(LifeArchive)
 
 

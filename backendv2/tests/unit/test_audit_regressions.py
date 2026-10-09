@@ -217,7 +217,9 @@ async def test_exact_deduplication_survives_many_confidants_without_vector_candi
         told_by=(f"user_{i}",), heard_by=(f"user_{i}",), holder=f"user_{i}"), i) for i in range(1, 101)], "")
     item = await Consolidate()._twin(db, None, text, mc.BELIEF, ("user_2",), MemoryParams(),
                                    told_by=("user_100",), heard_by=("user_100",), holder="user_100")
-    assert item == 100
+    # la même proposition, quel qu'en soit le témoin (ADR 0080) : la plus ancienne — un fait rapporté n'est à
+    # personne, son porteur d'avant (le témoin) ne la sépare plus
+    assert item == 1
 
 
 def test_legacy_night_merge_cannot_erase_a_negation(db):

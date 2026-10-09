@@ -173,7 +173,11 @@ class Sort:
         merges: list[tuple[int, int]] = []
         if store is not None and vectors is not None:
             merges = await self._merges(store, vectors, frame, night, p)
-        await ctx.emit(c.NIGHT_SORTED.draft(night=night, merges=tuple(merges), dedupe_key=f"tri:{night}"))
+        drafts = [c.NIGHT_SORTED.draft(night=night, merges=tuple(merges), dedupe_key=f"tri:{night}")]
+        pairs = joinable_pairs(store, p) if store is not None else ()
+        if pairs:
+            drafts.append(c.JOINED.draft(night=night, pairs=pairs, dedupe_key=f"jointure:{night}"))
+        await ctx.emit(*drafts)
 
     async def _merges(self, store: Any, vectors: Any, frame: Frame, night: str, p: Any) -> list[tuple[int, int]]:
         tz = frame.env.tz_of(frame.root)
@@ -202,6 +206,33 @@ class Sort:
                     merged |= {hit, item_id}
                     break
         return out
+
+
+def joinable_pairs(store: Any, p: Any) -> tuple[tuple[int, int], ...]:
+    """Les croyances notées deux fois parce que deux personnes les ont dites (d'avant les témoignages, ADR 0080) :
+    les mêmes mots, sur les mêmes personnes, de même nature — un avis ou une hypothèse, du même porteur — et pas un
+    de ses mensonges. La plus ancienne garde ; chaque autre devient un de ses témoignages."""
+    rows = store.query_mind(
+        f"SELECT i.id, i.text, i.about, i.knowledge_kind, i.about_self > 0, i.holder, i.origin FROM {c.ITEMS_TABLE} i "
+        f"JOIN (SELECT fingerprint, about, knowledge_kind, about_self > 0 AS mine FROM {c.ITEMS_TABLE} "
+        "WHERE kind=? AND status='active' GROUP BY fingerprint, about, knowledge_kind, about_self > 0 "
+        "HAVING COUNT(*) > 1) g ON g.fingerprint = i.fingerprint AND g.about = i.about "
+        "AND g.knowledge_kind = i.knowledge_kind AND g.mine = (i.about_self > 0) "
+        "WHERE i.kind=? AND i.status='active' ORDER BY i.id", (c.BELIEF, c.BELIEF))
+    kept: list[tuple[int, str, str, str, int, str | None]] = []
+    out: list[tuple[int, int]] = []
+    for item, text, about, nature, mine, holder, origin in rows:
+        if len(out) >= p.night_max_joins:
+            break
+        if origin == c.LIED:
+            continue
+        keep = next((k for k, t, a, n, m, h in kept if a == about and n == nature and m == mine
+                     and (nature == "claim" or (h or None) == (holder or None)) and same_words(t, text)), None)
+        if keep is None:
+            kept.append((int(item), str(text), str(about), str(nature), int(mine), holder))
+        else:
+            out.append((keep, int(item)))
+    return tuple(out)
 
 
 def _people(raw: Any) -> frozenset[str]:

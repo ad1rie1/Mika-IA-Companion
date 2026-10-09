@@ -82,6 +82,9 @@ class ProfileRevised(Payload):
     upto: int = 0  # le dernier élément de mémoire relu
     call_id: str = ""
     model: str = ""
+    #: les éléments de mémoire relus pour l'écrire : l'un devenu secret, il se tait ; remplacé, il se réécrit
+    #: (ADR 0082)
+    sources: tuple[int, ...] = ()
     #: avant la version 2, ces trois-là étaient gardés en clair (journal ancien)
     legacy_tone: str = ""
     legacy_interests: tuple[str, ...] = ()

@@ -29,8 +29,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from pydantic import model_validator
+
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.vocab.lineage import Lineage, subjects
 
 OWNER = "attention"
 
@@ -68,6 +71,17 @@ class ThoughtBorn(Payload):
     source: int | None = None  # le message ou l'élément de mémoire d'où elle vient
     sources: tuple[int, ...] = ()  # toutes les preuves citées par une pensée composée
     bundle: str = ""  # les outils qui vont avec (une pensée née d'un signal)
+    #: ce qu'elle sait d'où la pensée vient (une croyance révisée : l'ancienne et la nouvelle) et devant qui ses
+    #: sources permettent de la redire ; ``None`` : une pensée d'avant, ou qui ne vient pas de ce qu'elle sait
+    lineage: Lineage | None = None
+
+    @model_validator(mode="after")
+    def _inherited_subjects(self):
+        # qui ses sources concernent, et qui les a confiées : l'oubli de l'un d'eux l'atteint
+        about = tuple(sorted({*self.about, *subjects(self.lineage)}))
+        if self.lineage is not None and about != self.about:
+            object.__setattr__(self, "about", about)
+        return self
 
 
 class Signal(Payload):
@@ -183,6 +197,8 @@ class ThoughtReading:
     sensitivity: int
     born_at: int
     bundle: str = ""
+    #: devant qui ses sources permettent de la redire (``None`` : la règle de ses personnes et de sa sensibilité)
+    lineage: Lineage | None = None
 
 
 @dataclass(frozen=True, slots=True)

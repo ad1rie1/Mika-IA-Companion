@@ -77,6 +77,7 @@ from mika.vocab import circadian
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
+from mika.vocab.lineage import admits
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase, phrases
 from mika.vocab.privacy import Sensitivity, hearable
@@ -274,6 +275,8 @@ class Told:
     at: int
     sensitivity: int = 1
     importance: float = 0.5
+    #: la croyance d'où elle vient : remplacée, ou devenue secrète, elle n'est plus une matière
+    item: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -329,8 +332,10 @@ class NeedsState:
 #: v4 : la compagnie qui comble dépend de qui la donne (une règle, pas une forme : reconstruite depuis la genèse)
 #: v5 : ce qu'elle fait de ses mains dans sa chambre l'occupe et la nourrit (les occupations du monde, réduites
 #: désormais : reconstruite depuis la genèse)
+#: v6 : ce qu'on lui a raconté garde la croyance d'où il vient : remplacée, ou devenue secrète, elle n'est plus une
+#: matière ; ni un secret, ni un avis, ni un surnom n'en deviennent une (ADR 0078)
 NEEDS = Faculty("needs", state=NeedsState, init=lambda p: NeedsState(), params=NeedsParams, derive=derive,
-                state_version=5)
+                state_version=6)
 NEEDS.declare(*c.ALL)
 
 #: les séances où elle travaille dans son mode à elle (une exécution impersonnelle n'est pas elle)
@@ -454,16 +459,48 @@ def _learned_a_belief(s: NeedsState, e, cx) -> NeedsState:
     lui a dit d'elle-même (une croyance qui ne concerne qu'elle, et qu'elle a
     dite) devient une matière avec elle — jamais ce qu'un autre a dit d'elle."""
     d = e.data
-    if len(d.about) == 1 and d.source == d.about[0] and d.text.ref:
+    if d.replaces is not None:
+        s = _unlearned(s, d.replaces)
+    # ce qu'elle tient de sa bouche, sur elle-même : pas un secret (qui ne s'ouvre pas en initiative), ni un avis ou
+    # une hypothèse (ce qu'elle pense, pas ce qui lui arrive), ni ce qui n'appartient qu'à elles deux (un surnom)
+    mine = not d.secret and d.knowledge_kind in ("claim", "preference") and not d.between_us and not d.about_self
+    if mine and len(d.about) == 1 and d.source == d.about[0] and d.text.ref:
         person = d.about[0]
         kept = (*(t for t in s.told.get(person, ()) if t.ref != d.text.ref),
-                Told(d.text.ref, e.at, d.sensitivity, round(d.importance, 4)))
+                Told(d.text.ref, e.at, d.sensitivity, round(d.importance, 4), item=e.seq))
         # les plus importantes, puis les plus récentes : « mon chat est malade » ne cède pas sa place à « j'ai
         # mangé des pâtes »
         kept = tuple(sorted(kept, key=lambda t: (-t.importance, -t.at, t.ref))[:TOLD_KEPT])
         s = replace(s, told=s.told.set(person, kept))
     p = params(cx.params)
     return _relieve(_touch(s, e.at, p), c.CURIOSITY, p.learned_curiosity, e.at, p)
+
+
+def _unlearned(s: NeedsState, item: int) -> NeedsState:
+    """Une croyance remplacée, ou devenue secrète, n'est plus une matière (audit du 2026-10-09)."""
+    if not item:
+        return s
+    out = s.told
+    for person, ts in s.told.items():
+        kept = tuple(t for t in ts if t.item != item)
+        if kept != ts:
+            out = out.set(person, kept) if kept else out.delete(person)
+    return s if out is s.told else replace(s, told=out)
+
+
+@NEEDS.reducer(memory_c.REINFORCED, memory_c.ATTESTED, memory_c.JOINED)
+def _belief_changed(s: NeedsState, e, cx) -> NeedsState:
+    """Ce qu'on lui a demandé de garder pour soi, ou ce qu'une autre croyance remplace : plus une matière. Une
+    croyance jointe la nuit à une autre (ADR 0080) : la matière suit la gardée."""
+    d = e.data
+    if e.type.name == memory_c.JOINED.name:
+        for keep, drop in d.pairs:
+            s = replace(s, told=s.told.update({p: tuple(replace(t, item=keep) if t.item == drop else t for t in ts)
+                                                for p, ts in s.told.items() if any(t.item == drop for t in ts)}))
+        return s
+    if d.secret:
+        s = _unlearned(s, d.item)
+    return _unlearned(s, d.replaces) if d.replaces is not None else s
 
 
 @NEEDS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, social_c.CLOSENESS, affect_c.HOSTILITY])
@@ -691,17 +728,18 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
     for t in live:
         if t.about == (person,) and t.origin in WITH_THEM:
             return c.Matter(c.THOUGHT_MATTER, t.text_ref, t.born_at, tuple(t.about), t.sensitivity,
-                            external=t.origin == attention_c.SIGNAL)
+                            external=t.origin == attention_c.SIGNAL, lineage=getattr(t, "lineage", None))
     weighed: list[tuple[tuple[float, int, int, str], c.Matter]] = []
     for m in moments:
         weight = float(getattr(m, "importance", memory_c.IMPORTANT_MOMENT))
         if getattr(m, "festive", False) or getattr(m, "yearly", False) \
                 or (hard and weight < memory_c.IMPORTANT_MOMENT):
             continue
-        if _their_moment(m, person, now, p) and m.text_ref not in used:
+        thread = f"moment:{getattr(m, 'thread', 0) or m.id}"
+        if _their_moment(m, person, now, p) and m.text_ref not in used and thread not in used:
             weighed.append(((-weight, 0, abs(now - m.when), m.text_ref),
                             c.Matter(c.MOMENT_MATTER, m.text_ref, m.when, (person,), m.sensitivity,
-                                     ongoing=bool(getattr(m, "ongoing", False)))))
+                                     ongoing=bool(getattr(m, "ongoing", False)), key=thread)))
     for t in s.told.get(person, ()):
         if now - t.at <= p.matter_told_us and t.ref not in used:
             weighed.append(((-t.importance, 1, now - t.at, t.ref),
@@ -710,11 +748,12 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
         return min(weighed, key=lambda w: w[0])[1]
     if not hard and _their_dream(dream, person, used):
         # sa propre voix, rêvée de ce qu'elle a vécu avec elle : rien à citer ; son heure se dit « cette nuit »
-        return c.Matter(c.DREAM_MATTER, dream.text_ref, now, (person,), dream.sensitivity)
+        return c.Matter(c.DREAM_MATTER, dream.text_ref, now, (person,), dream.sensitivity,
+                        lineage=getattr(dream, "lineage", None))
     for t in live:
         if not t.about and t.origin in SHAREABLE and t.sensitivity <= Sensitivity.ANODYNE:
             return c.Matter(c.THOUGHT_MATTER, t.text_ref, t.born_at, (), t.sensitivity,
-                            external=t.origin == attention_c.SIGNAL)
+                            external=t.origin == attention_c.SIGNAL, lineage=getattr(t, "lineage", None))
     for d in reversed(s.done):
         if now - d.at <= p.matter_done_us and _for(person, d.about, d.sensitivity) and d.ref not in used:
             return c.Matter(c.DONE_MATTER, d.ref, d.at, d.about, d.sensitivity)
@@ -956,7 +995,7 @@ DREAM_PROVENANCE = "dream:"
 
 @NEEDS.section("matter", zone=Zone.VOLATILE, episodes=[Kind.INITIATIVE], after=["needs"], trim_rank=60,
                title=phrase("needs.matter.title"),
-               reads=[c.MATTER, identity_c.PERSON, identity_c.IDENTITY, self_c.DREAM_RESIDUE])
+               reads=[c.MATTER, identity_c.PERSON, identity_c.PRESUMED, identity_c.IDENTITY, self_c.DREAM_RESIDUE])
 def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce dont elle pourrait parler, quand c'est l'envie de compagnie qui la
     pousse : une chose, concrète, jamais inventée. Ce qui vient d'ailleurs est
@@ -970,6 +1009,10 @@ def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> S
     person = frame.get(identity_c.PERSON(ep.target))
     if not hearable(m.about, m.sensitivity, person, aud.level, aud.witness_level, aud.private_ok):
         return None
+    if m.lineage is not None:
+        resolve, presumed = identity_c.resolvers(frame.get)
+        if not admits(m.lineage, person, aud, resolve=resolve, presumed=presumed).ok:
+            return None  # ses sources ne le permettent pas devant elle (un rêve fait du secret d'un autre)
     known = frame.get(identity_c.IDENTITY(person)).name
     name = f"« {known} »" if known else phrase("expression.person.unnamed")
     body = " ".join(text.split())
@@ -978,7 +1021,7 @@ def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> S
     # une matière ne concerne que la personne en face, ou personne (anodin) : rien d'autrui à dire ici ; sa
     # provenance voyage dans l'énoncé (dite, elle ne resert pas) — un rêve dit ne revient pas non plus sous « CE QUE
     # TU AS RÊVÉ CETTE NUIT »
-    provenance = (f"{MATTER_PROVENANCE}{m.ref}",)
+    provenance = (f"{MATTER_PROVENANCE}{m.ref}",) + ((f"{MATTER_PROVENANCE}{m.key}",) if m.key else ())
     dream = frame.get(self_c.DREAM_RESIDUE)
     if m.kind == c.DREAM_MATTER and dream is not None and dream.text_ref == m.ref:
         provenance += (f"{DREAM_PROVENANCE}{dream.id}",)

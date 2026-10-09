@@ -31,6 +31,7 @@ from mika.contracts.memory import Relation
 from mika.kernel.clock import instant
 from mika.kernel.codec import digest
 from mika.ports.llm import LLMResponse, ToolDecl
+from mika.vocab.affect import Emotion, emotion_named
 from mika.vocab.people import clean_tokens, fold
 from mika.vocab.phrasebook import phrase, phrases
 from mika.vocab.privacy import Sensitivity
@@ -112,6 +113,11 @@ class _Item(_Lenient):
                                     description=phrase("memory.extraction.fields.sensibilite"))
     secret: bool = Field(default=False, description=phrase("memory.extraction.fields.secret"))
     messages: list[int] = Field(default_factory=list, description=phrase("memory.extraction.fields.messages"))
+    #: ce que la personne concernée en ressent, et ce qu'elle-même en ressent : jugés par la relecture, jamais
+    #: devinés d'après les mots (ADR 0083)
+    ressenti: str | None = Field(default=None, description=phrase("memory.extraction.fields.ressenti"))
+    mon_ressenti: str | None = Field(default=None, validation_alias=AliasChoices("mon_ressenti", "emotion"),
+                                     description=phrase("memory.extraction.fields.mon_ressenti"))
 
     @field_validator("personnes", mode="before")
     @classmethod
@@ -132,7 +138,6 @@ class _Item(_Lenient):
 
 
 class XSouvenir(_Item):
-    emotion: str | None = None
     importance: int = Field(default=2, ge=1, le=4)
 
 
@@ -146,6 +151,12 @@ class XCroyance(_Item):
     relations: list[Relation] = Field(default_factory=list, description=phrase("memory.extraction.fields.relations"))
     entre_vous: bool = Field(default=False, validation_alias=AliasChoices("entre_vous", "entre_nous", "lien"),
                              description=phrase("memory.extraction.fields.entre_vous"))
+    de_premiere_main: bool = Field(default=False, validation_alias=AliasChoices("de_premiere_main",
+                                                                                "de_première_main", "premiere_main"),
+                                   description=phrase("memory.extraction.fields.de_premiere_main"))
+    depuis: str | None = Field(default=None, description=phrase("memory.extraction.fields.depuis"))
+    jusqua: str | None = Field(default=None, validation_alias=AliasChoices("jusqua", "jusqu_a", "jusquà"),
+                               description=phrase("memory.extraction.fields.jusqua"))
 
 
 class XPromesse(_Lenient):
@@ -183,7 +194,8 @@ class XEvenement(_Item):
     chaque_annee: bool = Field(default=False, validation_alias=AliasChoices("chaque_annee", "chaque_année",
                                                                             "annuel", "annuelle"),
                                description=phrase("memory.extraction.fields.chaque_annee"))
-    #: un moment déjà noté (la liste « Moments à venir ») que celui-ci remplace : reporté, avancé, précisé (ADR 0076)
+    #: un moment déjà noté (la liste « Moments à venir ») que celui-ci remplace : reporté, avancé, précisé (ADR 0076) ;
+    #: ou, pour une situation en cours, une situation finie depuis peu qui revient (ADR 0079)
     remplace: int | None = Field(default=None, description=phrase("memory.extraction.fields.event_remplace"))
 
 
@@ -203,6 +215,14 @@ class Extraction(_Lenient):
     @classmethod
     def lenient_ids(cls, v: Any) -> list[int]:
         return _ints(v)
+
+
+def feeling(word: str | None) -> str | None:
+    """Un ressenti jugé par la relecture (« heureuse », « inquiète ») rangé parmi les 29 émotions, pour en connaître
+    la tonalité ; rien pour le calme, ni pour un mot qu'elle ne reconnaît pas (ADR 0083). Le jugement est celui du
+    modèle : le code ne le devine jamais d'après les mots de la conversation."""
+    found = emotion_named(word)
+    return found.value if found is not None and found is not Emotion.NEUTRAL else None
 
 
 def tool(name: str) -> ToolDecl:
@@ -282,10 +302,11 @@ def day_words(d: date) -> str:
 
 def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, str]],
            promises: Sequence[tuple[int, str, str]], situations: Sequence[tuple[int, str, str]] = (),
-           moments: Sequence[tuple[int, str, str]] = ()) -> str:
+           moments: Sequence[tuple[int, str, str]] = (), ended: Sequence[tuple[int, str, str]] = ()) -> str:
     """Le message d'une conversation : la date, qui parle, ce qui est déjà
-    su, les promesses en cours, les situations en cours et les moments à venir
-    de ses personnes, puis les messages (avec la date dès qu'elle change)."""
+    su, les promesses en cours, les situations en cours, celles finies depuis
+    peu (qui peuvent revenir) et les moments à venir de ses personnes, puis
+    les messages (avec la date dès qu'elle change)."""
     out = [phrase("memory.extraction.render.today", day=day_words(now.date()), year=now.year, hour=f"{now:%H}",
                   minute=f"{now:%M}")]
     who = ", ".join(s.label for s in conv.speakers)
@@ -301,6 +322,8 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
     if situations:
         out += ["", phrase("memory.extraction.render.situations")] + [
             f"[#{i}] ({whom}) {text}" for i, whom, text in situations]
+    if ended:
+        out += ["", phrase("memory.extraction.render.ended")] + [f"[#{i}] ({whom}) {text}" for i, whom, text in ended]
     if moments:
         out += ["", phrase("memory.extraction.render.moments")] + [
             f"[#{i}] ({whom}) {text}" for i, whom, text in moments]

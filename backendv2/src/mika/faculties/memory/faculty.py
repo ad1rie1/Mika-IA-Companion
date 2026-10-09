@@ -179,6 +179,11 @@ class MemoryParams(BaseModel):
         help="Un moment passé depuis moins de tant de jours, dont elles n'ont pas encore reparlé (ni elle en lui "
              "demandant, ni la personne en le racontant), lui revient pour qu'elle demande comment ça s'est passé ; "
              "au-delà, il n'est plus suivi.")] = 3.0
+    recurrence_days: Annotated[float, Knob(
+        label="Une situation qui recommence (jours)", group="La vie des autres", lo=1, hi=365,
+        help="Une situation finie depuis moins de tant de jours, qui recommence (« il est de nouveau malade »), "
+             "est la même histoire, une autre fois : elle s'en souvient et le dit (« de nouveau »). Au-delà, c'est "
+             "une autre histoire.")] = 60.0
     situation_days: Annotated[float, Knob(
         label="Situations en cours suivies (jours)", group="La vie des autres", lo=1, hi=60,
         help="Une situation qui dure dans la vie de quelqu'un (« mon chat Moustache est malade ») lui revient, "
@@ -273,6 +278,10 @@ class MemoryParams(BaseModel):
         label="Similarité pour fusionner", group="La nuit", lo=0.5, hi=1.0, step=0.01,
         help="Deux souvenirs du jour au moins aussi proches se fusionnent pendant le tri. Trop bas : des "
              "moments distincts se confondent.")] = 0.9
+    night_max_joins: Annotated[int, Knob(
+        label="Croyances réunies par nuit, au plus", group="La nuit", lo=0, hi=500,
+        help="La nuit, la même croyance dite par deux personnes et notée deux fois (avant que chaque façon de "
+             "l'apprendre ne soit un témoignage) se réunit en une seule — au plus autant par nuit.")] = 50
     night_max_merges: Annotated[int, Knob(
         label="Fusions par nuit au plus", group="La nuit", lo=0, hi=200,
         help="Au plus autant de fusions par nuit (0 : aucun tri).")] = 20
@@ -321,6 +330,10 @@ class MemoryState:
     kept: tuple[int, ...] = ()
     #: les moments de la vie des autres, à venir ou passés depuis peu ; les situations en cours
     events: FrozenDict[int, c.LifeEvent] = field(default_factory=FrozenDict)
+    #: le fil de chaque moment qui n'est pas le sien (reporté, redit, revenu : numéro → fil), et le numéro sous
+    #: lequel chaque fil est noté maintenant (fil → numéro) (ADR 0079)
+    threads: FrozenDict[int, int] = field(default_factory=FrozenDict)
+    heads: FrozenDict[int, int] = field(default_factory=FrozenDict)
     #: personne → la dernière fois que quelque chose de grave l'a touchée (un deuil, une rupture…)
     hard: FrozenDict[str, int] = field(default_factory=FrozenDict)
     reflections: tuple[Reflection, ...] = ()
@@ -342,7 +355,8 @@ class MemoryState:
 #: v7 : une date qui revient chaque année (``yearly``) n'est jamais évincée par l'âge, et a son propre plafond.
 #: v10 : la file de reprises (``deferred_seq``) ; situations et dates archivées en SQL, la tranche en est le cache.
 #: v11 : ses mensonges à retenir (``lies``, ADR 0076).
-MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=11)
+#: v12 : les fils des moments (``threads``, ``heads``) : reporté, redit, revenu, un moment reste le même (ADR 0079).
+MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=13)
 MEMORY.declare(*c.ALL)
 
 
@@ -442,9 +456,31 @@ def _ended(s: MemoryState, e, cx) -> MemoryState:
 @MEMORY.reducer(c.MOMENT_FOLLOWED)
 def _followed(s: MemoryState, e, cx) -> MemoryState:
     """Un moment repris en mots, une fois passé : elle lui en a demandé des nouvelles, ou la personne lui en a
-    parlé d'elle-même."""
-    ev = s.events.get(e.data.event)
-    return replace(s, events=s.events.set(ev.id, replace(ev, followed_at=e.at))) if ev is not None else s
+    parlé d'elle-même. Redit entre-temps (le même jour), le moment garde le suivi ; déplacé à une autre date, ce
+    n'est plus l'occurrence reprise (ADR 0079)."""
+    d = e.data
+    ev = s.events.get(d.event)
+    if ev is None:
+        head = s.heads.get(d.thread or thread_of(s, d.event))
+        ev = s.events.get(head) if head is not None else None
+        if ev is None or (d.occurrence and ev.when != d.occurrence and not ev.yearly):
+            return s
+    return replace(s, events=s.events.set(ev.id, replace(ev, followed_at=e.at)))
+
+
+def thread_of(s: MemoryState, item: int) -> int:
+    """Le fil d'un moment, d'après l'un de ses numéros."""
+    ev = s.events.get(item)
+    if ev is not None and ev.thread:
+        return ev.thread
+    return s.threads.get(item, item)
+
+
+def moment_thread(s: MemoryState, cx, item: int) -> int:
+    return thread_of(s, int(item))
+
+
+MEMORY.fact(c.MOMENT_THREAD)(moment_thread)
 
 
 @MEMORY.reducer(c.SITUATION_ENDED)
@@ -485,10 +521,18 @@ def _noted(s: MemoryState, e, cx) -> MemoryState:
     followed = old.followed_at if old is not None and old.when == d.when else 0
     ended = old.ended_at if old is not None and old.ongoing and d.ongoing else 0
     events = s.events.delete(d.replaces) if d.replaces is not None else s.events
+    # le fil : celui de ce qu'il remplace (reporté, redit) ou de la situation qu'il rouvre ; sinon le sien
+    origin = d.replaces if d.replaces is not None else d.recurs
+    thread = thread_of(s, origin) if origin is not None else e.seq
     events = events.set(e.seq, c.LifeEvent(e.seq, tuple(d.about), d.when, d.all_day, d.sensitivity,
                                            tuple(d.told_by), d.text.ref or "", d.secret, followed_at=followed,
                                            ongoing=d.ongoing, importance=d.importance, festive=d.festive,
-                                           ended_at=ended, yearly=d.yearly and not d.ongoing))
+                                           ended_at=ended, yearly=d.yearly and not d.ongoing, thread=thread,
+                                           recurs=d.recurs or 0, felt=d.felt or "", emotion=d.emotion or ""))
+    if d.recurs is not None:
+        events = events.delete(d.recurs)  # la situation finie laisse la place à celle qui recommence
+    threads = s.threads.set(e.seq, thread) if thread != e.seq else s.threads
+    s = replace(s, threads=_newest(threads, THREADS_KEPT), heads=_newest(s.heads.set(thread, e.seq), THREADS_KEPT))
     stale = [ev.id for ev in events.values() if not ev.yearly
              and ((ev.ongoing and ev.ended_at and ev.ended_at < keep_until)
                   or (not ev.ongoing and ev.when < keep_until))]
@@ -499,6 +543,14 @@ def _noted(s: MemoryState, e, cx) -> MemoryState:
 
 # L'archive SQL conserve tout ; cette tranche est seulement la mémoire de travail.
 LIFE_CACHE_CAP = 2048
+#: les fils retenus au plus (les plus récents) : un moment plus ancien est son propre fil, ou l'archive le dit
+THREADS_KEPT = 4096
+
+
+def _newest(table: FrozenDict[int, int], cap: int) -> FrozenDict[int, int]:
+    if len(table) <= cap:
+        return table
+    return FrozenDict(sorted(table.items(), key=lambda kv: (kv[1], kv[0]))[-cap:])
 
 
 def life_cache(events: FrozenDict[int, c.LifeEvent], keep: frozenset[int] = frozenset()) -> FrozenDict[int, c.LifeEvent]:
@@ -520,26 +572,31 @@ def _life_recalled(s: MemoryState, e, cx) -> MemoryState:
     events = s.events
     for item in e.data.items:
         events = events.delete(item.id).set(item.id, item)
+        if item.thread and item.thread != item.id:
+            s = replace(s, threads=s.threads.set(item.id, item.thread), heads=s.heads.set(item.thread, item.id))
     return replace(s, events=life_cache(events, frozenset(item.id for item in e.data.items)), life_refreshed_at=e.at if e.data.daily else s.life_refreshed_at)
 
 
 @MEMORY.reducer(c.REMEMBERED, c.BELIEVED)
 def _retained(s: MemoryState, e, cx) -> MemoryState:
-    """Un élément retenu de plus. Un souvenir marquant et douloureux (un deuil vécu avec quelqu'un) dit aussi que
-    quelque chose de grave touche les personnes qu'il concerne."""
+    """Un élément retenu de plus. Un souvenir ou une croyance marquant et douloureux pour la personne (un deuil vécu
+    avec quelqu'un, un proche à l'hôpital) dit aussi que quelque chose de grave touche les personnes qu'il
+    concerne."""
     d = e.data
     reflections = tuple(r for r in s.reflections if d.call_id != f"réflexion:{r.thought}")
     lies = tuple(seq for seq in s.lies if d.call_id != f"{LIE_MARK}:{seq}")
     s = replace(s, items=s.items + 1, reflections=reflections, lies=lies)
-    if e.type.name == c.REMEMBERED.name and d.importance >= params(cx.params).landmark_importance:
-        felt = emotion_of(d.emotion)
+    if d.importance >= params(cx.params).landmark_importance:
+        # ce que la personne en ressent d'abord (« son père est à l'hôpital » : elle est inquiète), sinon, pour un
+        # souvenir, ce qu'elle-même a ressenti en le vivant (ADR 0083)
+        felt = emotion_of(d.felt) or (emotion_of(d.emotion) if e.type.name == c.REMEMBERED.name else None)
         if felt is not None and valence(felt) < 0:
             for person in d.about:
                 s = _hard(s, person, e.at)
     return s
 
 
-@MEMORY.reducer(c.REINFORCED, c.NIGHT_SORTED, c.PROMISE_RESOLVED, c.SITUATION_ENDED)
+@MEMORY.reducer(c.REINFORCED, c.NIGHT_SORTED, c.PROMISE_RESOLVED, c.SITUATION_ENDED, c.ATTESTED, c.JOINED)
 def _index_changed(s: MemoryState, e, cx) -> MemoryState:
     return replace(s, index_revision=e.seq)
 

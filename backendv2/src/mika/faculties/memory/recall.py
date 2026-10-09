@@ -59,8 +59,15 @@ from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory.extraction import date_words, mention_scope, same_moment, scope_of, weekday_words
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, params
+from mika.faculties.memory.knowledge import Testimony, pooled
 from mika.faculties.memory.life import due_now, kept_too_early, takes_up_moment
-from mika.faculties.memory.projections import ITEM_COLUMNS
+from mika.faculties.memory.projections import (
+    CONTESTS_TABLE,
+    ITEM_COLUMNS,
+    TESTIMONIES_TABLE,
+    TESTIMONY_COLUMNS,
+    testimony_of,
+)
 from mika.faculties.memory.salience import (
     Item,
     Verdict,
@@ -430,7 +437,16 @@ def items_by_id(store: Any, ids: list[int]) -> dict[int, Item]:
     marks = ",".join("?" * len(ids))
     rows = store.query_mind(f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE id IN ({marks})",
                             tuple(ids))
-    return {int(r[0]): Item.of(dict(zip(ITEM_COLUMNS, r, strict=True))) for r in rows}
+    found = {int(r[0]): Item.of(dict(zip(ITEM_COLUMNS, r, strict=True))) for r in rows}
+    beliefs = [i for i, it in found.items() if it.kind == c.BELIEF]
+    if beliefs:
+        said: dict[int, list[Testimony]] = {}
+        marks = ",".join("?" * len(beliefs))
+        for r in store.query_mind(f"SELECT {','.join(TESTIMONY_COLUMNS)} FROM {TESTIMONIES_TABLE} "
+                                  f"WHERE item IN ({marks}) ORDER BY seq", tuple(beliefs)):
+            said.setdefault(int(r[0]), []).append(testimony_of(r))
+        found.update({i: replace(found[i], testimonies=tuple(ts)) for i, ts in said.items()})
+    return found
 
 
 def verdict_of(frame: Frame, item: Item, person: str | None, aud: Audience, memo: dict[str, str],
@@ -457,9 +473,76 @@ def verdict_of(frame: Frame, item: Item, person: str | None, aud: Audience, memo
                        level=max(v.level for v in inherited_rules), secret=any(v.secret for v in inherited_rules),
                        witness=all(v.witness for v in inherited_rules))
     subjects = tuple(sorted({*item.about, *([item.holder] if item.holder else [])}))
+    if item.testimonies:
+        return hearing(frame, item, person, aud, memo, store)[0]
     return admissible(canon(frame, subjects, memo), sensitivity_of(frame, item, person, store), person, aud,
                       told_by=canon(frame, item.told_by, memo), heard_by=canon(frame, item.heard_by, memo),
                       secret=item.secret, presumed=_presumer(frame, memo))
+
+
+def hearing(frame: Frame, item: Item, person: str | None, aud: Audience, memo: dict[str, str],
+            store: Any = None) -> tuple[Verdict, tuple[Testimony, ...]]:
+    """Ce qu'une croyance permet ici, d'après ses témoignages (ADR 0080) : le verdict du témoignage qui la laisse
+    dire — celui de l'interlocuteur d'abord (c'est sa fiche), puis le plus ouvert, puis de première main, puis le
+    plus récent : elle l'attribue à ce témoin, sans laisser deviner les autres —, et tous ceux que cette audience
+    peut entendre (pour la confiance). Aucun ne la laisse dire : le verdict du témoignage de la personne
+    concernée, sinon du premier (ce qu'elle sait savoir, sans un mot)."""
+    subjects = canon(frame, tuple(sorted({*item.about, *([item.holder] if item.holder else [])})), memo)
+    # ce qui touche un sujet délicat du portrait d'une personne concernée est une confidence, quel qu'en soit le témoin
+    delicate = sensitivity_of(frame, item, person, store) > item.sensitivity
+    presumed = _presumer(frame, memo)
+    heard: list[tuple[Testimony, Verdict]] = []
+    refused: list[tuple[Testimony, Verdict]] = []
+    for t in item.testimonies:
+        level = int(Sensitivity.CONFIDENCE) if delicate else t.sensitivity
+        v = admissible(subjects, level, person, aud,
+                       told_by=canon(frame, t.told_by, memo), heard_by=canon(frame, t.heard_by, memo),
+                       secret=t.secret, presumed=presumed)
+        (heard if v.ok else refused).append((t, v))
+    speaking = [(t, v) for t, v in heard if t.speaks]
+    if speaking:
+        mine = [(t, v) for t, v in speaking if person is not None and person in canon(frame, t.told_by, memo)]
+        first_hand = set(subjects)
+        chosen = mine[0] if mine else min(speaking, key=lambda tv: (
+            tv[1].level, tv[1].secret, not (set(tv[0].told_by) <= first_hand), -tv[0].at, tv[0].seq))
+        return chosen[1], tuple(t for t, _v in heard)
+    if not refused:
+        return Verdict(False), ()
+    own = [(t, v) for t, v in refused if t.speaks and set(t.told_by) <= set(subjects)]
+    return (own or refused)[0][1], ()
+
+
+def contested_line(frame: Frame, item: Item, person: str | None, aud: Audience, memo: dict[str, str],
+                   store: Any, names: Mapping[str, str]) -> str:
+    """Le doute d'une croyance qu'une autre contredit sans la remplacer (ADR 0081) : « mais Carol t'a dit autre
+    chose » — seulement quand l'autre version peut se dire ici aussi (sinon le doute la laisserait deviner)."""
+    if item.kind != c.BELIEF or store is None:
+        return ""
+    others = [int(o) for (o,) in store.query_mind(f"SELECT other FROM {CONTESTS_TABLE} WHERE item=? ORDER BY other",
+                                                  (item.id,))]
+    for other in items_by_id(store, others).values():
+        if other.status != "active":
+            continue
+        verdict = verdict_of(frame, other, person, aud, memo, store)
+        if not verdict.ok:
+            continue
+        tellers = verdict.tellers or tuple(k for t in other.testimonies[:1] for k in t.told_by if k != person)
+        who = ", ".join(names.get(k) or named_label(k) or phrase("memory.names.someone") for k in tellers) or \
+            phrase("memory.names.someone")
+        return phrase("memory.recall.contested", who=who, other=other.text)
+    return ""
+
+
+def heard_confidence(frame: Frame, item: Item, person: str | None, aud: Audience, memo: dict[str, str],
+                     store: Any = None) -> float | None:
+    """Sa confiance devant cette audience : mise en commun sur les seuls témoignages qu'elle peut entendre — sinon
+    le secret d'Alice la rendrait plus sûre devant Carol, qui n'en sait rien (ADR 0080)."""
+    if not item.testimonies:
+        return item.confidence
+    verdict, heard = hearing(frame, item, person, aud, memo, store)
+    if not verdict.ok:
+        return item.confidence
+    return pooled(heard) or item.confidence
 
 
 def _presumer(frame: Frame, memo: dict[str, str]) -> Callable[[str], str]:
@@ -628,6 +711,10 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     for item in items.values():
         if item.status != "active" or item.kind not in (c.SOUVENIR, c.BELIEF):
             continue
+        if item.valid_until is not None and item.valid_until < now and candidates[item.id] < p.strong_cue:
+            continue  # ce qui ne valait que jusqu'à une date passée ne revient plus de lui-même (ADR 0081)
+        if item.testimonies:  # sa confiance devant cette audience : ce qu'elle peut en entendre (ADR 0080)
+            item = replace(item, confidence=heard_confidence(frame, item, person, aud, memo, store))
         bond = bond_of(frame, canon(frame, item.about, memo), bonds) if item.kind == c.SOUVENIR else 0.0
         if dormant(item, now, p, bond) and candidates[item.id] < p.strong_cue:
             continue  # il dort ; seul un indice fort le réveille
@@ -638,7 +725,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
             # (sonde réelle du 2026-10-02 : « dis rien à Chloé », puis devant Chloé). Seule une proche peut sentir
             # qu'un secret lourd pèse (« traverse un moment difficile »), jamais ce qu'il dit.
             # … et un mensonge qu'elle a dit ne se devine jamais : « Bob t'a confié… » serait faux, et le trahirait
-            guessable = item.origin != c.LIED and (not item.secret or (close and heavy(item)))
+            guessable = item.origin != c.LIED and (not item.secret or (close and sensed(item)))
             whom = unsaid(verdict, canon(frame, item.about, memo), canon(frame, item.told_by, memo),
                           person) if guessable else ()
             for who in whom:
@@ -652,12 +739,17 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     out.names = names
     for _score, item, verdict in ranked:
         bucket, cap = (out.souvenirs, p.max_souvenirs) if item.kind == c.SOUVENIR else (out.beliefs, p.max_beliefs)
+        # un souvenir se raconte déjà avec ses mots à elle ; une note sur elle n'a personne en face (ADR 0083)
+        own = item.emotion if item.kind == c.BELIEF and not item.about_self else None
         _add_recalled(bucket, Recalled(item, verdict, item.text + tag(verdict, names) +
-                                       doubted(frame, item, memo, person)), cap)
+                                       doubted(frame, item, memo, person, verdict) +
+                                       contested_line(frame, item, person, aud, memo, store, names) +
+                                       feelings(item.felt, own, concerned_name(frame, item.about, names, memo))), cap)
     if hidden and p.max_unsaid:
         for who in sorted(hidden, key=lambda w: (-max(candidates[i.id] for i in hidden[w]), w))[: p.max_unsaid]:
             out.unsaid.append(unsaid_public_line(who, names, _last_talk(frame, who)) if aud.public else
-                              unsaid_line(who, names, heavy=any(heavy(i) for i in hidden[who]), close=close,
+                              unsaid_line(who, names, heavy=any(sensed(i) for i in hidden[who]), close=close,
+                                          tone=mood_of(hidden[who]),
                                           asked=asked.get(who, ())[:3]))
     if searching or dated:
         out.exchanges = await _exchanges_for(frame, store, vectors if searching else None, query, context, person,
@@ -665,17 +757,21 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     return out
 
 
-def doubted(frame: Frame, item: Item, memo: dict[str, str], interlocutor: str | None = None) -> str:
+def doubted(frame: Frame, item: Item, memo: dict[str, str], interlocutor: str | None = None,
+            verdict: Verdict | None = None) -> str:
     """Le doute d'une ligne qui parle d'une personne seulement présumée (ADR 0075) : « Alice », dont Bob lui a
     parlé, n'est peut-être pas l'Alice qu'elle connaît — qu'elle ne mélange pas les deux, ou qu'elle demande. Rien
-    devant qui l'a raconté : il sait de qui il parlait (et la ligne lui apprendrait qu'elle connaît une Alice)."""
-    if interlocutor is not None and interlocutor in canon(frame, item.told_by, memo):
+    devant qui l'a raconté : il sait de qui il parlait (et la ligne lui apprendrait qu'elle connaît une Alice). Une
+    croyance dite par plusieurs nomme le témoin auquel elle l'attribue ici (``verdict``), jamais les autres."""
+    tellers_of = {k for t in item.testimonies for k in t.told_by} if item.testimonies else set(item.told_by)
+    if interlocutor is not None and interlocutor in canon(frame, tuple(tellers_of), memo):
         return ""
     presumed = sorted(named_label(k).title() for k in (*item.about, *([item.holder] if item.holder else []))
                       if k.startswith("name:") and canon(frame, (k,), memo)[0] == k and presumed_of(frame, k, memo))
     if not presumed:
         return ""
-    tellers = sorted(names_of(frame, set(canon(frame, item.told_by, memo))).values())
+    told = verdict.tellers if verdict is not None and item.testimonies else canon(frame, item.told_by, memo)
+    tellers = sorted(names_of(frame, set(told)).values())
     who = phrase("memory.names.and", others=", ".join(tellers[:-1]), last=tellers[-1]) if len(tellers) > 1 else (
         tellers[0] if tellers else phrase("memory.names.someone"))
     return phrase("memory.tag.presumed", name=presumed[0], who=who)
@@ -693,9 +789,44 @@ def _last_talk(frame: Frame, person: str) -> str:
     return when_fr(last, frame.now, frame.env.tz_of(frame.root))
 
 
+def tone(item: Item) -> int:
+    """Ce qu'un élément est pour qui le vit : une peine (−1), une joie (+1), on ne sait pas (0) — ce que la personne
+    concernée en ressent d'abord, sinon ce qu'elle-même en ressentait ; jugés par la relecture (ADR 0083)."""
+    return valence_sign(item.felt) or valence_sign(item.emotion)
+
+
+def feelings(felt: str | None, emotion: str | None, who: str) -> str:
+    """Ce que la personne concernée en ressent (« Inès le vit avec joie ») et ce qu'elle-même en ressent (« toi, tu en
+    es contente ») : l'empathie, en mots, jamais un nombre (ADR 0083). Jugés par la relecture. ``who`` : le nom de
+    la personne concernée — vide, son ressenti à elle ne se dit pas (on ne sait pas de qui)."""
+    theirs, mine = A.emotion_of(felt), A.emotion_of(emotion)
+    parts = [phrase("memory.recall.felt.theirs", who=who, what=A.NOUN[theirs])] if theirs is not None and who else []
+    if mine is not None:
+        parts.append(phrase("memory.recall.felt.yours", feeling=A.FR[mine]))
+    return phrase("memory.recall.felt.both", what=" ; ".join(parts)) if parts else ""
+
+
+def concerned_name(frame: Frame, about: Sequence[str], names: Mapping[str, str], memo: dict[str, str]) -> str:
+    """Le nom de la seule personne qu'un élément concerne ; vide s'il en concerne plusieurs, ou personne."""
+    keys = canon(frame, tuple(about), memo)
+    return (names.get(keys[0]) or names_of(frame, {keys[0]}).get(keys[0], "")) if len(keys) == 1 else ""
+
+
 def heavy(item: Item) -> bool:
     """Ce qui pèse : une peine, une peur, ou une confidence."""
-    return valence_sign(item.emotion) < 0 or item.sensitivity >= Sensitivity.CONFIDENCE
+    return tone(item) < 0 or item.sensitivity >= Sensitivity.CONFIDENCE
+
+
+def sensed(item: Item) -> bool:
+    """Ce qu'une proche peut sentir chez la personne sans rien en savoir : ce qui pèse, ou une joie qu'elle garde
+    encore pour elle (ADR 0083)."""
+    return heavy(item) or tone(item) > 0
+
+
+def mood_of(items: Sequence[Item]) -> int:
+    """Ce que des éléments tus sont, ensemble, pour la personne : une peine l'emporte, puis une joie (ADR 0083)."""
+    tones = [tone(i) for i in items]
+    return -1 if -1 in tones else 1 if 1 in tones else 0
 
 
 def _their_life(out: Recall, frame: Frame, store: Any, person: str, aud: Audience, p: MemoryParams,
@@ -928,7 +1059,8 @@ def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryPara
         if any(m.event.ongoing == ev.ongoing and frame.local(m.event.when).date() == day
                and same_moment(text, m.text, who) for m in out):
             continue  # « son anniversaire » et « l'anniversaire de Sam », le même samedi : un seul moment
-        out.append(Moment(ev, text, verdict, text + tag(verdict, names)))
+        out.append(Moment(ev, text, verdict, text + tag(verdict, names) +
+                          feelings(ev.felt, ev.emotion, concerned_name(frame, ev.about, names, memo))))
     return out
 
 
@@ -949,9 +1081,11 @@ def _lines(recalled: list[Recalled], now: int, *, beliefs: bool, names: Mapping[
             # ce qu'elle devine se dit comme tel ; ce qu'on lui a dit se lit déjà dans le texte
             how = [family("memory.recall.origin").get(r.item.origin or "", "")]
             how.append(knowledge_label(r.item, names or {}))
-            if now - r.item.born_at >= DATED_AFTER_US:
+            since = r.item.as_of or r.item.born_at
+            if now - since >= DATED_AFTER_US:
                 # « ma sœur vient ce week-end », relu trois semaines plus tard, n'est plus vrai : elle sait depuis quand
-                how.append(phrase("memory.recall.learned", age=age_words(r.item.born_at, now)))
+                # (depuis quand c'est vrai, quand on le lui a dit — ADR 0081)
+                how.append(phrase("memory.recall.learned", age=age_words(since, now)))
             told = ", ".join(h for h in how if h)
             lines.append(f"- {clean_tokens(r.label)}" + (f" ({told})" if told else ""))
         else:
@@ -1114,6 +1248,8 @@ def _moment_line(m: Moment, frame: Frame, close: bool, hard: bool = False) -> st
         since = when_words(ev.when, frame)
         head = phrase("memory.life.ongoing", label=m.label) if since == phrase("memory.when.today") else \
             phrase("memory.life.ongoing_since", since=since, label=m.label)
+        if ev.recurs:
+            head += phrase("memory.life.again")  # une situation finie qui recommence (ADR 0079)
         if followed_lately(ev, frame.now):
             return head + phrase("memory.life.talked_again")
         if close:

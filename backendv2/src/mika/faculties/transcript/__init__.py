@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import OrderedDict
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Annotated, Any
@@ -41,6 +41,7 @@ from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import transcript as c
+from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, MINUTE, local, local_date_of_night
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp, Faculty, Tier, Zone
@@ -137,10 +138,16 @@ class TranscriptState:
     last_to: FrozenDict[str, int] = field(default_factory=FrozenDict)
     #: personne → (dernier message résumé, référence du texte du résumé)
     summaries: FrozenDict[str, tuple[int, str]] = field(default_factory=FrozenDict)
+    #: fil → qui parlait dans ce qu'il replie, et les messages qu'il tait (ADR 0082) ; vide : un résumé d'avant
+    speakers: FrozenDict[str, tuple[str, ...]] = field(default_factory=FrozenDict)
+    withheld: FrozenDict[str, tuple[int, ...]] = field(default_factory=FrozenDict)
 
 
-TRANSCRIPT = Faculty("transcript", state=TranscriptState, init=lambda p: TranscriptState(), params=TranscriptParams)
-TRANSCRIPT.declare(c.COMPACTED)
+#: v2 : un résumé sait qui parlait (l'oubli de l'un l'efface) et ce qu'il tait ; un secret déclaré après coup le fait
+#: refaire (ADR 0082)
+TRANSCRIPT = Faculty("transcript", state=TranscriptState, init=lambda p: TranscriptState(), params=TranscriptParams,
+                     state_version=2)
+TRANSCRIPT.declare(c.COMPACTED, c.SUMMARY_RESET)
 
 
 def _params(p: TranscriptParams | None) -> TranscriptParams:
@@ -149,8 +156,33 @@ def _params(p: TranscriptParams | None) -> TranscriptParams:
 
 @TRANSCRIPT.reducer(c.COMPACTED)
 def _compacted(s: TranscriptState, e, cx) -> TranscriptState:
-    ref = e.data.summary.ref or ""
-    return replace(s, summaries=s.summaries.set(e.data.person, (e.data.upto, ref)))
+    d = e.data
+    ref = d.summary.ref or ""
+    withheld = (*s.withheld.get(d.person, ()), *d.withheld)
+    return replace(s, summaries=s.summaries.set(d.person, (d.upto, ref)),
+                   speakers=s.speakers.set(d.person, tuple(sorted({*s.speakers.get(d.person, ()), *d.speakers}))),
+                   withheld=s.withheld.set(d.person, tuple(sorted(set(withheld)))) if withheld else s.withheld)
+
+
+def _without(s: TranscriptState, person: str) -> TranscriptState:
+    return replace(s, summaries=s.summaries.delete(person), speakers=s.speakers.delete(person),
+                   withheld=s.withheld.delete(person))
+
+
+@TRANSCRIPT.reducer(c.SUMMARY_RESET)
+def _reset(s: TranscriptState, e, cx) -> TranscriptState:
+    return _without(s, e.data.person)
+
+
+@TRANSCRIPT.reducer(SUBJECT_FORGOTTEN)
+def _speaker_forgotten(s: TranscriptState, e, cx) -> TranscriptState:
+    """L'oubli de quelqu'un qui parlait dans un salon efface le résumé de ce salon (son texte, déjà, par ses sujets) ;
+    un résumé de salon d'avant, qui ne dit pas qui parlait, aussi — dans le doute (ADR 0082)."""
+    who = e.data.subject
+    for person in [p for p in s.summaries if p.startswith("room:")
+                   and (who in s.speakers.get(p, ()) or not s.speakers.get(p))]:
+        s = _without(s, person)
+    return s
 
 
 @TRANSCRIPT.reducer(rt.PERCEPTION_RECEIVED)
@@ -679,9 +711,11 @@ def compact_system(name: str) -> str:
     return phrase("transcript.compact.system", name=name)
 
 
-def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]], after_us: int) -> str:
+def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]], after_us: int,
+                   withheld: Collection[int] = ()) -> str:
     """Les échanges à replier, chacun sous le nom de qui parle et daté comme
-    dans l'historique (le premier en absolu)."""
+    dans l'historique (le premier en absolu). Ce qu'on lui a demandé de garder pour soi, dit dans un salon, n'y
+    entre pas : le résumé reste devant le salon bien après les messages (``withheld``, ADR 0082)."""
     tz = frame.env.tz_of(frame.root)
     name = clean_display_name(frame.get(identity_c.IDENTITY(person)).name) or phrase("transcript.compact.someone")
     her = self_c.name_of(frame.get(self_c.PERSONA))
@@ -693,8 +727,19 @@ def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]],
         prev = at
         who = (phrase("transcript.compact.her_initiative", her=her) if r.get("kind") == Kind.INITIATIVE else her) \
             if r["role"] == "assistant" else (clean_display_name(frame.get(identity_c.IDENTITY(r["person"])).name) or name)
-        lines.append(f"{f'[{mark}] ' if mark else ''}{who} : {r['text']}")
+        text = phrase("transcript.compact.withheld") if int(r["id"]) in withheld else r["text"]
+        lines.append(f"{f'[{mark}] ' if mark else ''}{who} : {text}")
     return "\n".join(lines)
+
+
+def secret_sources(store: Any, room: str, upto: int) -> set[int]:
+    """Les messages d'un salon (jusqu'à ``upto``) d'où vient ce qu'on lui a demandé de garder pour soi — par la porte
+    de la mémoire (ADR 0078)."""
+    rows = store.query_mind(
+        f"SELECT DISTINCT CAST(j.value AS INTEGER) FROM {memory_c.KNOWLEDGE_VIEW} k, json_each(k.sources) j "
+        f"WHERE k.secret=1 AND CAST(j.value AS INTEGER) IN (SELECT id FROM {c.THREAD_TABLE} WHERE room=? AND id<=?)",
+        (room, upto))
+    return {int(r[0]) for r in rows}
 
 
 @TRANSCRIPT.process("transcript.compact", wake_on=[memory_c.CONSOLIDATED], lane="background",
@@ -732,6 +777,13 @@ class Compact:
             if failed_at > frame.now:
                 continue
             summary = state.summaries.get(person)
+            if room and summary:
+                kept = secret_sources(store, room, summary[0])
+                if kept - set(state.withheld.get(person, ())):
+                    # un secret dit dans ce salon (déclaré après coup) était repris : on le replie de nouveau, tu
+                    await ctx.emit(c.SUMMARY_RESET.draft(person=person, reason="secret",
+                                                         dedupe_key=f"résumé-refait:{person}:{max(kept)}"))
+                    return
             since = summary[0] if summary else 0
             where, args = ("room=? AND id>?", (room, since)) if room else (
                 "person=? AND room IS NULL AND id>?", (person, since))
@@ -746,7 +798,8 @@ class Compact:
             if not folded or (len(folded) < p.compact_min_fold and not attempts):
                 continue
             previous = store.content([summary[1]]).get(summary[1]) if summary else None
-            lines = _compact_lines(frame, person, folded, p.mark_after_us)
+            withheld = secret_sources(store, room, folded[-1]["id"]) & {int(r["id"]) for r in folded} if room else set()
+            lines = _compact_lines(frame, person, folded, p.mark_after_us, withheld)
             prompt = (phrase("transcript.compact.previous", text=previous) + "\n\n" if previous else "") + \
                 phrase("transcript.compact.next") + "\n" + lines
             self.retry_at = frame.now + p.compact_retry_us  # si l'appel lève, pas de rafale
@@ -756,7 +809,7 @@ class Compact:
                                  lane="background", priority=3)
             while len(folded) > 1 and not fits_context(ctx.llm, request):
                 folded = folded[:max(1, len(folded) // 2)]
-                lines = _compact_lines(frame, person, folded, p.mark_after_us)
+                lines = _compact_lines(frame, person, folded, p.mark_after_us, withheld)
                 prompt = (phrase("transcript.compact.previous", text=previous) + "\n\n" if previous else "") + \
                     phrase("transcript.compact.next") + "\n" + lines
                 request = replace(request, messages=(Message("user", prompt),))
@@ -777,8 +830,11 @@ class Compact:
                 continue
             self.failures.pop(person, None)
             self.retry_at = 0
+            speakers = tuple(sorted({str(r["person"]) for r in folded if r["role"] == "user" and r["person"]}))
             await ctx.emit(c.COMPACTED.draft(person=person, upto=folded[-1]["id"], summary=Content.of(text, level=2),
-                                             count=len(folded), call_id=request.call_id, model=response.model))
+                                             count=len(folded), call_id=request.call_id, model=response.model,
+                                             speakers=speakers if room else (),
+                                             withheld=tuple(sorted(withheld & {int(r["id"]) for r in folded}))))
             return  # un fil par passage ; le suivant au prochain réveil
         self.seen = checkpoint
         self.retry_at = min((v[0] for v in self.failures.values()), default=0)

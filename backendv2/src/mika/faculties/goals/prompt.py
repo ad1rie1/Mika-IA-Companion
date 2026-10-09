@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -37,8 +36,10 @@ from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody, cited
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, goal_of
+from mika.vocab.knowledge import knowns, lineage_of
+from mika.vocab.lineage import Lineage, admits
 from mika.vocab.phrasebook import family, phrase
-from mika.vocab.privacy import Sensitivity, hearable
+from mika.vocab.privacy import Sensitivity, hearable, private_to
 
 SHOWN = 4
 #: les dernières consignes d'un opérateur montrées pendant un pas
@@ -281,9 +282,19 @@ def life_of(store: Any, frame: Frame, person: str) -> list[tuple[str, int]]:
     """Ce qu'elle sait de ce que vit cette personne en ce moment : les moments de sa vie qu'elle a notés (une
     situation en cours, ce qui vient de se passer, ce qui approche), puis ce qu'elle a appris d'elle ces deux
     dernières semaines — (texte, sensibilité). Rien d'autre : ce qu'elle ne sait pas, une réflexion ne l'invente
-    pas."""
+    pas. Et rien que la personne ne puisse entendre : ce qu'elle en tire lui revient (audit du 2026-10-09 : le secret
+    que Bob avait confié sur Sam entrait dans la réflexion sur Sam)."""
     tz = frame.env.tz_of(frame.root)
-    moments = sorted(frame.get(memory_c.LIFE_EVENTS(person)) or (), key=lambda m: (-m.when, m.id))[:LIFE_SHOWN]
+    floor = private_to(person)
+    resolve, presumed = identity_c.resolvers(frame.get)
+
+    def hears(lineage: Lineage) -> bool:
+        return admits(lineage, person, floor, resolve=resolve, presumed=presumed).ok
+
+    moments = [m for m in frame.get(memory_c.LIFE_EVENTS(person)) or ()
+               if hears(lineage_of(m.id, tuple(m.about), int(m.sensitivity), told_by=tuple(m.told_by),
+                                   secret=bool(m.secret)))]
+    moments = sorted(moments, key=lambda m: (-m.when, m.id))[:LIFE_SHOWN]
     texts = store.content([m.text_ref for m in moments if m.text_ref])
     out: list[tuple[str, int]] = []
     for m in moments:
@@ -298,20 +309,14 @@ def life_of(store: Any, frame: Frame, person: str) -> list[tuple[str, int]]:
         told = [t for t in m.told_by if t != person]
         heard = phrase("goals.life.heard", names=_names(frame, told)) if told else ""
         out.append((phrase("goals.life.item", text=text, when=when, heard=heard), int(m.sensitivity)))
-    rows = store.query_mind(
-        f"SELECT text, sensitivity, about FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND status='active' AND "
-        "about_self=0 AND born_at >= ? AND about LIKE ? ORDER BY born_at DESC, id DESC LIMIT ?",
-        (memory_c.BELIEF, frame.now - BELIEFS_SINCE, f'%"{person}"%', BELIEFS_SHOWN * 2))
-    beliefs = [(str(t), int(sv)) for t, sv, about in rows if person in _listed(about)][:BELIEFS_SHOWN]
+    handles = tuple(frame.get(identity_c.HANDLES(person)) or (person,))
+    rows = knowns(store.query_mind(
+        f"{memory_c.SELECT_KNOWN} WHERE kind=? AND status='active' AND about_self=0 AND born_at >= ? AND id IN "
+        f"(SELECT item FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} WHERE person IN ({','.join('?' * len(handles))})) "
+        "ORDER BY born_at DESC, id DESC LIMIT ?",
+        (memory_c.BELIEF, frame.now - BELIEFS_SINCE, *handles, BELIEFS_SHOWN * 4)), memory_c.KNOWN_COLUMNS)
+    beliefs = [(k.text, k.sensitivity) for k in rows if hears(k.lineage)][:BELIEFS_SHOWN]
     return out + [b for b in beliefs if b[0] not in {t for t, _ in out}]
-
-
-def _listed(raw: Any) -> list[str]:
-    try:
-        got = json.loads(raw) if isinstance(raw, str) else raw
-    except ValueError:
-        return []
-    return [str(x) for x in got] if isinstance(got, list) else []
 
 
 def _names(frame: Frame, people: list[str]) -> str:
@@ -325,7 +330,8 @@ def _clip(text: str, n: int) -> str:
 
 
 @GOALS.enricher("goals_context", episodes=[Kind.STEP], deadline_ms=1500,
-                reads=[identity_c.HANDLES, identity_c.IDENTITY, memory_c.LIFE_EVENTS])
+                reads=[identity_c.HANDLES, identity_c.IDENTITY, identity_c.PERSON, identity_c.PRESUMED,
+                       memory_c.LIFE_EVENTS])
 async def _context(s: GoalsState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
     """Ce qu'une réflexion sur quelqu'un a sous les yeux : l'échange d'où elle vient, et ce qui se passe dans sa
     vie (sonde réelle du 2026-10-03 : avec « laisse tomber » pour toute matière, elle écrivait « c'est venu comme

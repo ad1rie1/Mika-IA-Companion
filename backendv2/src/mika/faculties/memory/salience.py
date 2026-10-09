@@ -35,17 +35,18 @@ from __future__ import annotations
 import json
 import math
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from mika.contracts import memory as c
 from mika.faculties.memory.faculty import MemoryParams
+from mika.faculties.memory.knowledge import Testimony
 from mika.kernel.clock import DAY
-from mika.kernel.frame import Audience
 from mika.vocab.affect import emotion_of, valence
 from mika.vocab.phrasebook import phrase
-from mika.vocab.privacy import Sensitivity, tied_to
+from mika.vocab.privacy import Sensitivity, Verdict
+from mika.vocab.privacy import admissible as admissible  # le verdict vit dans ``vocab.privacy`` : réexporté
 from mika.vocab.words import elided, fold, stems
 
 
@@ -90,6 +91,14 @@ class Item:
     holder: str | None = None
     constraints: tuple[c.Disclosure, ...] = ()
     internal_only: bool = False
+    #: une croyance : chaque façon dont elle l'a apprise (ADR 0080) — vide pour un souvenir
+    testimonies: tuple[Testimony, ...] = ()
+    #: ce qui l'a remplacée (0 : rien) ; depuis et jusqu'à quand c'est vrai (ADR 0081)
+    superseded_by: int = 0
+    as_of: int = 0
+    valid_until: int | None = None
+    #: ce que la personne concernée en ressent (``emotion`` : ce qu'elle-même en ressent), ADR 0083
+    felt: str | None = None
 
     @classmethod
     def of(cls, row: dict[str, Any]) -> Item:
@@ -106,7 +115,10 @@ class Item:
             between_us=bool(row.get("between_us")),
             knowledge_kind=str(row.get("knowledge_kind") or "claim"), holder=row.get("holder"),
             constraints=tuple(c.Disclosure.model_validate(v) for v in json.loads(row.get("constraints") or "[]")),
-            internal_only=bool(row.get("internal_only")),
+            internal_only=bool(row.get("internal_only")), superseded_by=int(row.get("superseded_by") or 0),
+            as_of=int(row.get("as_of") or row["born_at"]),
+            valid_until=None if row.get("valid_until") is None else int(row["valid_until"]),
+            felt=row.get("felt") or None,
         )
 
 
@@ -133,57 +145,6 @@ def dormant(item: Item, now: int, p: MemoryParams, bond: float = 0.0) -> bool:
     if item.kind == c.BELIEF:
         return salience(item, now, p) < p.min_belief_confidence
     return salience(item, now, p, bond) < p.dormant
-
-
-@dataclass(frozen=True, slots=True)
-class Verdict:
-    ok: bool
-    others: tuple[str, ...] = ()  # les autres personnes concernées, ou qui l'ont confié
-    witness: bool = False  # l'interlocuteur était là quand ça s'est dit
-    level: int = 0  # ce qu'il faut pour l'entendre (sur autrui) : 0 quand c'est sa fiche ou sa vie à elle
-    tellers: tuple[str, ...] = ()  # qui l'a confié, hors l'interlocuteur
-    secret: bool = False
-    #: admis parce que l'interlocuteur a un lien avec les personnes concernées (au niveau « lié », ADR 0058)
-    tied: bool = False
-
-
-def admissible(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, audience: Audience, *,
-               told_by: Sequence[str] = (), heard_by: Sequence[str] = (), secret: bool = False,
-               presumed: Callable[[str], str] | None = None) -> Verdict:
-    """Peut-on le dire devant cette audience ? (voir le docstring du module). ``presumed`` : la personne qu'une
-    mention désigne présumément (ADR 0075) — un lien est exigé avec elle comme avec une personne reliée.
-
-    Un élément d'avant que la mémoire ne sache qui le lui a confié (ni
-    confident ni témoin) garde l'ancienne règle : l'interlocuteur qui y figure
-    est traité en témoin."""
-    known = bool(told_by or heard_by)
-    tellers = tuple(sorted(set(told_by) - {interlocutor}))
-    others = tuple(sorted({*about, *told_by} - {interlocutor}))
-    if not about and not told_by:  # personne d'identifié : anodin, ou ce que l'audience peut entendre
-        # … un secret à elle (ses propres notes, importées) vaut une confidence : il ne se dit qu'en grande confiance
-        level = max(sensitivity, Sensitivity.CONFIDENCE) if secret else sensitivity
-        return Verdict(level <= max(Sensitivity.ANODYNE, audience.level), secret=secret)
-    # Un secret ne sort que devant qui l'a confié. Répondre à la personne qui l'a confié ne suffit pas : dans un
-    # salon, d'autres l'entendent (audit du 2026-10-08 : « garde-le pour toi », anodin, recopié dans un salon).
-    overheard = secret and audience.public
-    if not others:  # seulement l'interlocuteur
-        if overheard:
-            return Verdict(False, secret=True)
-        return Verdict(sensitivity <= Sensitivity.ANODYNE or audience.private_ok)
-    if interlocutor is not None and interlocutor in told_by:  # ses propres mots, même sur d'autres : sa fiche
-        if overheard:
-            return Verdict(False, others, secret=True)
-        return Verdict(sensitivity <= Sensitivity.ANODYNE or audience.private_ok, others, secret=secret)
-    witness = interlocutor is not None and (interlocutor in heard_by if known else interlocutor in about)
-    if secret:  # « dis-le à personne » : jamais hors de qui l'a confié
-        return Verdict(False, others, witness, int(sensitivity), tellers, True)
-    limit = audience.witness_level if witness else audience.level
-    tied = False
-    if sensitivity > limit and interlocutor is not None and tied_to(others, audience.ties, presumed):
-        # il a un lien avec chacune (ils se sont parlé ensemble, ou elle l'a nommé elle-même) : une proche peut
-        # entendre sa confidence — jamais quelqu'un qui a seulement prononcé son nom (ADR 0058)
-        limit, tied = max(limit, audience.tied_level), True
-    return Verdict(sensitivity <= limit, others, witness, int(sensitivity), tellers, tied=tied)
 
 
 def _names(keys: Sequence[str], names: dict[str, str]) -> tuple[str, bool]:
@@ -235,14 +196,22 @@ def touched(query: str, text: str) -> tuple[str, ...]:
 
 
 def unsaid_line(person: str, names: dict[str, str], *, heavy: bool, close: bool,
-                asked: tuple[str, ...] = ()) -> str:
-    """Une ligne qui ne dit rien du contenu. Devant un ami, elle peut savoir
-    que c'est lourd ; devant les autres, seulement que c'est privé. Quand la
-    question en cours y touche, elle le sait, avec les mots de la question (sinon
-    le modèle ne fait pas le lien, et ment : « non, il ne m'a rien dit »)."""
+                asked: tuple[str, ...] = (), tone: int = -1) -> str:
+    """Une ligne qui ne dit rien du contenu. Devant un ami, elle peut sentir
+    ce que ça pèse pour la personne — une peine (``tone`` négatif), une joie
+    qu'elle garde encore (positif), ou seulement que ça compte (0) : ce que la
+    personne en ressent, jugé par la relecture (ADR 0083) ; une grossesse gardée
+    pour soi n'est pas « un moment difficile ». Devant les autres, seulement que
+    c'est privé. Quand la question en cours y touche, elle le sait, avec les mots
+    de la question (sinon le modèle ne fait pas le lien, et ment : « non, il ne
+    m'a rien dit »)."""
     who = names.get(person, person)
     if heavy and close:
-        return phrase("memory.unsaid.heavy", who=who)
+        if tone > 0:
+            return phrase("memory.unsaid.joyful", who=who)
+        if tone < 0:
+            return phrase("memory.unsaid.heavy", who=who)
+        return phrase("memory.unsaid.weighty", who=who)
     known = {fold(n) for n in names.values() if n}
     asked = tuple(w for w in asked if fold(w) not in known)  # un prénom n'est pas un sujet
     if asked:

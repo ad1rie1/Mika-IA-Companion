@@ -6,6 +6,7 @@ from collections import Counter, defaultdict
 from collections.abc import Sequence
 from typing import Any
 
+from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
 from mika.kernel.clock import US
@@ -81,5 +82,5 @@ def duplicate_items(driver: Driver) -> list[tuple[str, str]]:
     entre l'appel du modèle et l'enregistrement ne doit jamais en créer."""
     assert driver.kernel is not None
     rows = driver.kernel.mind.store.query_mind(
-        "SELECT kind, text, COUNT(*) FROM memory_items GROUP BY kind, text HAVING COUNT(*) > 1")
+        f"SELECT kind, text, COUNT(*) FROM {memory_c.LEDGER_VIEW} GROUP BY kind, text HAVING COUNT(*) > 1")
     return [(k, t) for k, t, _n in rows]

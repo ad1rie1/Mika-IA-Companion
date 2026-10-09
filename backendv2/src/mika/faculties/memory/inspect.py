@@ -69,9 +69,9 @@ RUNS_CURSOR = "avant"
 NIGHTS_CURSOR = "avant_nuits"
 
 KIND_FR = {c.SOUVENIR: "souvenir", c.BELIEF: "croyance", c.PROMISE: "promesse", c.EVENT: "moment de sa vie"}
-STATUS_FR = {"active": "actif", "superseded": "remplacée", "merged": "fondu dans un autre", "pending": "en cours",
+STATUS_FR = {"active": "actif", "superseded": "remplacée", "merged": "fondu dans un autre", "joined": "jointe à une autre", "pending": "en cours",
              c.HONORED: "tenue", c.DROPPED: "abandonnée"}
-STATUS_TONE = {"active": "ok", "superseded": "muted", "merged": "muted", "pending": "info", c.HONORED: "ok",
+STATUS_TONE = {"active": "ok", "superseded": "muted", "merged": "muted", "joined": "muted", "pending": "info", c.HONORED: "ok",
                c.DROPPED: "muted"}
 ORIGIN_FR = {c.TOLD: "on le lui a dit", c.OBSERVED: "elle l'a vu", c.INFERRED: "elle le déduit"}
 SENSITIVITY_FR = {int(Sensitivity.NONE): "rien d'autrui", int(Sensitivity.ANODYNE): "anodin",

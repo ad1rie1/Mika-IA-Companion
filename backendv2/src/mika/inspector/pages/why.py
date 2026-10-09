@@ -267,7 +267,7 @@ def _memory_items(ui: Any, ids: Sequence[int]) -> dict[int, tuple[str, str | Non
         return {}
     marks = ",".join("?" * len(ids))
     got = call(ui.kernel.mind.store.query_mind,
-               f"SELECT id, kind, text FROM {memory_c.ITEMS_TABLE} WHERE id IN ({marks})", tuple(ids),
+               f"SELECT id, kind, text FROM {memory_c.LEDGER_VIEW} WHERE id IN ({marks})", tuple(ids),
                label="souvenirs d'une parole")
     return {} if isinstance(got, Failed) else {int(r[0]): (str(r[1]), r[2] or None) for r in got}
 

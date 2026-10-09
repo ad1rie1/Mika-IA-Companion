@@ -36,7 +36,6 @@ en reste.
 
 from __future__ import annotations
 
-import json
 import random
 import re
 from collections import Counter
@@ -82,6 +81,8 @@ from mika.vocab import affect as A
 from mika.vocab import circadian, privacy
 from mika.vocab.affect import Appraisal
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
+from mika.vocab.knowledge import knowns
+from mika.vocab.lineage import Lineage, admits, merged, of_message, requirement
 from mika.vocab.people import clean_tokens, named_label
 from mika.vocab.phrasebook import family, phrase, phrases
 from mika.vocab.privacy import Sensitivity
@@ -119,7 +120,7 @@ def _journaled(s: SelfState, e, cx) -> SelfState:
     rev = s.journals[d.day].rev + 1 if d.day in s.journals else 0
     shareable = d.shareable.ref or "" if d.shareable is not None else ""
     journals = s.journals.set(d.day, Journal(d.day, d.text.ref or "", tuple(d.about), d.dominant, e.at, rev,
-                                             shareable))
+                                             shareable, d.lineage))
     if len(journals) > KEEP_JOURNALS:
         journals = type(journals)(sorted(journals.items())[-KEEP_JOURNALS:])
     return replace(s, journals=journals)
@@ -129,7 +130,7 @@ def _journaled(s: SelfState, e, cx) -> SelfState:
 def _dreamt(s: SelfState, e, cx) -> SelfState:
     d = e.data
     dream = Dream(e.seq, d.night, d.text.ref or "", d.kind, d.vividness, d.emotion, tuple(d.about), d.sensitivity,
-                  e.at)
+                  e.at, lineage=d.lineage)
     return replace(s, dreams=(*s.dreams, dream)[-KEEP_DREAMS:])
 
 
@@ -175,7 +176,7 @@ def _yesterday(s: SelfState, cx) -> c.JournalReading | None:
     if not past:
         return None
     j = s.journals[past[-1]]
-    return c.JournalReading(j.day, j.text_ref, j.about, j.dominant, j.shareable_ref)
+    return c.JournalReading(j.day, j.text_ref, j.about, j.dominant, j.shareable_ref, j.lineage, j.masked)
 
 
 @SELF.fact(c.DREAM_RESIDUE)
@@ -187,7 +188,7 @@ def _residue(s: SelfState, cx) -> c.DreamReading | None:
     if d is None:
         return None
     return c.DreamReading(d.id, d.night, d.text_ref, d.kind, d.vividness, d.emotion, d.about, d.sensitivity,
-                          d.recalled)
+                          d.recalled, d.lineage, d.masked)
 
 
 @SELF.appraisal(c.WOKE_WITH)
@@ -341,7 +342,7 @@ class Write:
         key = f"{day}#{rev}" if rev else day
         self.tries[key] = self.tries.get(key, 0) + 1
         self.retry_at = frame.now + 30 * MINUTE  # un appel qui échoue réessaie plus tard dans la nuit
-        notes, about, dominant, messages = notes_of(frame, store, state, date.fromisoformat(day))
+        notes, about, dominant, messages, lineage = notes_of(frame, store, state, date.fromisoformat(day))
         persona = persona_for(frame, "full")
         request = LLMRequest(role="journal", call_id=f"{ctx.run_id}#{key}", persona=persona,
                              system_stable=persona.text + "\n\n" + phrase("self.night.journal_system"),
@@ -358,25 +359,19 @@ class Write:
         self.retry_at = 0
         await ctx.emit(c.JOURNALED.draft(
             day=day, text=Content.of(text[:2000], level=int(Sensitivity.PERSONAL)), about=about, dominant=dominant,
-            messages=messages, voice=VoiceProvenance(call_id=request.call_id, persona_hash=persona.hash,
-                                                     role="journal", model=response.model),
+            messages=messages, lineage=lineage,
+            voice=VoiceProvenance(call_id=request.call_id, persona_hash=persona.hash, role="journal",
+                                  model=response.model),
             shareable=Content.of(shareable[:1200]) if shareable else None, dedupe_key=f"journal:{key}"))
 
 
-def _listed(raw: Any) -> list[str]:
-    """Une colonne JSON de clés de personnes (« [] » si vide ou illisible)."""
-    try:
-        got = json.loads(raw) if isinstance(raw, str) else raw
-    except ValueError:
-        return []
-    return [str(x) for x in got] if isinstance(got, list) else []
-
-
-def notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> tuple[str, tuple[str, ...], str, int]:
+def notes_of(frame: Frame, store: Any, state: SelfState,
+             day: date) -> tuple[str, tuple[str, ...], str, int, Lineage]:
     """Ses notes de la journée : ce qui s'est passé, sans rien inventer et sans
     rien compter — ce qu'on lui a dit, ce qu'elle a dit, à qui elle a écrit
     d'elle-même et si on lui a répondu, ce qu'elle a fait, promis, retenu, ce
-    qui la travaille, comment son humeur a tourné."""
+    qui la travaille, comment son humeur a tourné. Et leur filiation : son journal intime ne se montre que là où tout
+    ce qu'il reprend peut se dire (une note secrète à elle, sans personne, ne se lit pas dans un salon)."""
     tz = frame.env.tz_of(frame.root)
     start, end = d_.day_window(day, tz, _starts(frame))
     rows = store.query_mind(f"SELECT at, person, role, kind, text, emotion FROM {transcript_c.THREAD_TABLE} "
@@ -431,34 +426,39 @@ def notes_of(frame: Frame, store: Any, state: SelfState, day: date) -> tuple[str
         lines.append(phrase("self.night.notes.wrote_answered", who=who(p), moments=moments) if answered else
                      phrase("self.night.notes.wrote_unanswered", who=who(p), moments=moments))
     lines += _deeds(frame, store, state, start, end) + room_doings(frame, start, end)
-    promised = store.query_mind(
-        f"SELECT text, recipient FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND born_at >= ? AND born_at < ? "
-        "ORDER BY id LIMIT 4", (memory_c.PROMISE, start, end))
+    promised = knowns(store.query_mind(
+        f"{memory_c.SELECT_KNOWN} WHERE kind=? AND born_at >= ? AND born_at < ? ORDER BY id LIMIT 4",
+        (memory_c.PROMISE, start, end)), memory_c.KNOWN_COLUMNS)
     if promised:
         lines.append(phrase("self.night.notes.promised", promises=" ; ".join(
-            f"« {_quote(t, 120)} »" + (" " + phrase("self.night.notes.promised_to", who=who(r)) if r else "")
-            for t, r in promised)))
-        people |= {r for _, r in promised if r}
-        names.update(_names(frame, {r for _, r in promised if r and r not in names}))
-    souvenirs = store.query_mind(
-        f"SELECT text, about, told_by FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND born_at >= ? AND born_at < ? "
-        "AND status='active' ORDER BY importance DESC, id LIMIT 6", (memory_c.SOUVENIR, start, end))
+            f"« {_quote(k.text, 120)} »"
+            + (" " + phrase("self.night.notes.promised_to", who=who(k.recipient)) if k.recipient else "")
+            for k in promised)))
+        people |= {k.recipient for k in promised if k.recipient}
+        names.update(_names(frame, {k.recipient for k in promised if k.recipient and k.recipient not in names}))
+    souvenirs = knowns(store.query_mind(
+        f"{memory_c.SELECT_KNOWN} WHERE kind=? AND born_at >= ? AND born_at < ? AND status='active' "
+        "ORDER BY importance DESC, id LIMIT 6", (memory_c.SOUVENIR, start, end)), memory_c.KNOWN_COLUMNS)
     if souvenirs:
-        lines += [phrase("self.night.notes.kept")] + [f"- {clean_tokens(r[0])}" for r in souvenirs]
+        lines += [phrase("self.night.notes.kept")] + [f"- {clean_tokens(k.text)}" for k in souvenirs]
         # le journal dit qui il concerne : tous ceux dont il parle, pas seulement ceux qui lui ont parlé
-        people |= {p for _t, a, t in souvenirs for p in (*_listed(a), *_listed(t))}
+        people |= {p for k in souvenirs for p in (*k.about, *k.told_by)}
     thoughts = [t for t in frame.get(attention_c.THOUGHTS) if t.intensity >= 0.2][:3]
     thought_texts = store.content([t.text_ref for t in thoughts if t.text_ref])
     if thought_texts:
         lines += [phrase("self.night.notes.thoughts")] + [f"- {t}" for t in thought_texts.values()]
         people |= {p for t in thoughts if t.text_ref in thought_texts for p in t.about}
+    # ce que chacun lui a dit (cité), ce qu'elle a promis, retenu, ce qui la travaille : sa filiation
+    lineage = merged(Lineage(requirements=tuple(of_message(None, p) for p in sorted(told) if p)),
+                     *(k.lineage for k in (*promised, *souvenirs)),
+                     *(_thought_lineage(t) for t in thoughts if t.text_ref in thought_texts))
     mood = _mood_line(frame, felt)
     if mood:
         lines.append(mood)
     counts = Counter(e for _, e in felt)
     dominant = counts.most_common(1)[0][0] if counts else ""
     about = tuple(sorted(p for p in people if p))
-    return "\n".join(lines), about, dominant, sum(len(v) for v in told.values())
+    return "\n".join(lines), about, dominant, sum(len(v) for v in told.values()), lineage
 
 
 #: « un peu lourde » : ce qui a pesé fait au moins la moitié de ce qui a été léger ; « bonne » : le lourd reste sous
@@ -751,23 +751,26 @@ class Dreaming:
             return
         # ce qu'elle a vécu ces derniers jours — né, ou revécu (renforcé, repris en parlant) : une vie routinière
         # rêve encore de ce qui revient (ADR 0058) ; ``touched_at`` vaut au moins ``born_at``
-        rows = store.query_mind(
-            f"SELECT id, text, emotion, about, sensitivity FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND "
-            "status='active' AND touched_at >= ? ORDER BY importance DESC, id DESC LIMIT 8",
-            (memory_c.SOUVENIR, frame.now - DREAM_LOOKBACK))
+        rows = knowns(store.query_mind(
+            f"{memory_c.SELECT_KNOWN} WHERE kind=? AND status='active' AND touched_at >= ? "
+            "ORDER BY importance DESC, id DESC LIMIT 8", (memory_c.SOUVENIR, frame.now - DREAM_LOOKBACK)),
+            memory_c.KNOWN_COLUMNS)
         picked = rng.sample(rows, k=min(3, len(rows))) if rows else []
         thoughts = [t for t in frame.get(attention_c.THOUGHTS) if t.intensity >= 0.3][:1]
         texts = store.content([t.text_ref for t in thoughts if t.text_ref])
         if not picked and not texts:
             return  # rien à rêver
-        emotions = [r[2] for r in picked if r[2]]
+        emotions = [k.emotion for k in picked if k.emotion]
         kind, emotion = classify(emotions, [(t.emotion, t.intensity) for t in thoughts])
         vividness = vividness_of(rng, kind, emotions + [t.emotion for t in thoughts])
         about: set[str] = {a for t in thoughts for a in t.about}
-        sensitivity = max([int(r[4]) for r in picked] + [t.sensitivity for t in thoughts] + [1])
-        for r in picked:
-            about |= set(_about(r[3]))
-        fragments = [f"- {clean_tokens(r[1])}" for r in picked] + \
+        sensitivity = max([k.sensitivity for k in picked] + [t.sensitivity for t in thoughts] + [1])
+        for k in picked:
+            about |= set(k.about)
+        # rêvé de ce qu'elle sait, il n'est pas plus libre que ce qu'elle sait : le secret que Bob a confié sur
+        # Sam ne se raconte pas à Sam parce qu'elle en a rêvé (audit du 2026-10-09)
+        lineage = merged(*(k.lineage for k in picked), *(_thought_lineage(t) for t in thoughts if t.text_ref in texts))
+        fragments = [f"- {clean_tokens(k.text)}" for k in picked] + \
             [f"- {phrase('self.night.dream.worrying', thought=t)}" for t in texts.values()]
         persona = persona_for(frame, "full")
         request = LLMRequest(role="dream", call_id=f"{ctx.run_id}#{night}:{cycle}", persona=persona,
@@ -783,14 +786,33 @@ class Dreaming:
         await ctx.emit(c.DREAMT.draft(
             night=night, text=Content.of(text[:2000], level=sensitivity), kind=kind, vividness=vividness,
             emotion=emotion, about=tuple(sorted(about)), sensitivity=sensitivity,
-            sources=tuple(int(r[0]) for r in picked),
+            sources=tuple(k.id for k in picked), lineage=lineage,
             voice=VoiceProvenance(call_id=request.call_id, persona_hash=persona.hash, role="dream",
                                   model=response.model),
             dedupe_key=f"rêve:{night}:{cycle}"))
 
 
-def _about(raw: str | None) -> list[str]:
-    return list(json.loads(raw or "[]"))
+def _thought_lineage(t: Any) -> Lineage:
+    """Ce qu'exige une pensée : sa filiation si elle en a une, sinon ses personnes et sa sensibilité."""
+    if t.lineage is not None:
+        return t.lineage
+    return Lineage(requirements=(requirement(None, tuple(t.about), int(t.sensitivity)),))
+
+
+def dream_hearable(d: c.DreamReading, person: str | None, aud: Audience | None, frame: Frame) -> bool:
+    """Un rêve peut-il se raconter devant cette audience ? Ce que ses sources permettent ; un rêve d'avant, la règle
+    de ses personnes."""
+    if d.masked:
+        return False  # une de ses sources est devenue secrète depuis (ADR 0082)
+    return hearable(d.about, d.sensitivity, person, aud) if d.lineage is None else says(d.lineage, person, aud, frame)
+
+
+def says(lineage: Lineage, person: str | None, aud: Audience | None, frame: Frame) -> bool:
+    """Ses sources permettent-elles de le dire devant cette audience ?"""
+    if aud is None:
+        return False
+    resolve, presumed = identity_c.resolvers(frame.get)
+    return admits(lineage, person, aud, resolve=resolve, presumed=presumed).ok
 
 
 # ── Ce qui en reste dans le prompt ────────────────────────────────────────
@@ -829,29 +851,34 @@ def _when_written(frame: Frame, day: str) -> tuple[str, str] | None:
     return None
 
 
-def journal_ref(reading: c.JournalReading, person: str | None, private: bool) -> str:
+def journal_ref(reading: c.JournalReading, person: str | None, aud: Audience | None, frame: Frame | None = None) -> str:
     """Quelle version du journal peut se montrer à cette personne (``""`` : aucune). Son journal intime parle de
     tout le monde, et ce qu'on lui a dit ou confié y est mêlé : il ne se montre qu'en privé à qui en est le seul
     concerné (ou quand il ne parle de personne). Devant les autres, c'est sa journée à elle, sans personne d'autre
     — masquer des prénoms ne protège rien (« il m'a demandé de ne rien dire à Chloé », lu à Chloé) ; un journal
     ancien sans version partageable ne se montre à personne d'autre. Une seule règle, pour le prompt et le
-    panneau de la personne."""
-    if not reading.about or (person is not None and private and set(reading.about) <= {person}):
-        return reading.text_ref
-    return reading.shareable_ref
+    panneau de la personne. Un journal qui garde sa filiation ne montre sa version intime que là où tout ce qu'il
+    reprend peut se dire (une note secrète à elle ne parle de personne, et ne se lit pas pour autant dans un
+    salon)."""
+    private = aud is not None and aud.private_ok
+    intimate = not reading.masked and (not reading.about or (person is not None and private
+                                                             and set(reading.about) <= {person}))
+    if intimate and reading.lineage is not None:
+        intimate = frame is not None and says(reading.lineage, person, aud, frame)
+    return reading.text_ref if intimate else reading.shareable_ref
 
 
 def _journal_text(frame: Frame, reading: c.JournalReading, texts: Mapping[str, str]) -> str | None:
     """Le journal tel qu'elle peut l'avoir en tête devant cette audience (``journal_ref``)."""
     ep, aud = frame.episode, frame.audience
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
-    ref = journal_ref(reading, person, aud is not None and aud.private_ok)
+    ref = journal_ref(reading, person, aud, frame)
     return texts.get(ref) if ref else None
 
 
 @SELF.section("yesterday", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=35,
               title=phrase("self.night.yesterday.title"),
-              reads=[c.YESTERDAY, identity_c.PERSON, identity_c.IDENTITY, body_c.RHYTHM])
+              reads=[c.YESTERDAY, identity_c.PERSON, identity_c.PRESUMED, identity_c.IDENTITY, body_c.RHYTHM])
 def _yesterday_section(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     y = frame.get(c.YESTERDAY)
     texts = enrich.get("night") or {}
@@ -866,7 +893,8 @@ def _yesterday_section(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) ->
 
 
 @SELF.section("dream", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=30, tags=[Tag.AFFECTIVE],
-              title=phrase("self.night.residue.title"), reads=[c.DREAM_RESIDUE, identity_c.PERSON])
+              title=phrase("self.night.residue.title"),
+              reads=[c.DREAM_RESIDUE, identity_c.PERSON, identity_c.PRESUMED])
 def _dream_section(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     d = frame.get(c.DREAM_RESIDUE)
     if d is None or d.recalled:
@@ -874,7 +902,7 @@ def _dream_section(s: SelfState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
     text = (enrich.get("night") or {}).get(d.text_ref)
     ep, aud = frame.episode, frame.audience
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
-    if not text or not hearable(d.about, d.sensitivity, person, aud):
+    if not text or not dream_hearable(d, person, aud, frame):
         return None
     word = phrase("self.night.residue.nightmare") if d.kind == c.NIGHTMARE else phrase("self.night.residue.dream")
     return SectionBody(phrase("self.night.residue.text", what=word, text=text), provenance=(f"dream:{d.id}",))

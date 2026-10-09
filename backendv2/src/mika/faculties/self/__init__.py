@@ -30,7 +30,6 @@ soi et le récit qu'elle fait d'elle-même.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -65,9 +64,11 @@ from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMRequest, Message, PersonaRender
 from mika.vocab import affect as A
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
+from mika.vocab.knowledge import Known, knowns
+from mika.vocab.lineage import admits
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
-from mika.vocab.privacy import Sensitivity
+from mika.vocab.privacy import PUBLIC_FLOOR
 
 
 class SelfParams(BaseModel):
@@ -149,6 +150,10 @@ class SelfParams(BaseModel):
         label="Réécrire le récit au plus toutes les", group="Le récit", lo=HOUR, hi=30 * DAY,
         help="Le paragraphe qu'elle écrit sur qui elle devient n'est pas réécrit plus souvent (un appel au "
              "modèle à chaque fois).")] = DAY
+    narrative_stale_after_us: Annotated[int, Knob(
+        label="Récit : réécrire après un changement, au plus tôt", group="Le récit", lo=MINUTE, hi=DAY,
+        help="Quand un souvenir qu'il reprenait devient secret ou est remplacé, le récit se tait ou vieillit, et se "
+             "réécrit sans le reprendre — au plus tôt tant après le précédent.")] = HOUR
     narrative_min_souvenirs: Annotated[int, Knob(
         label="Souvenirs neufs pour réécrire", group="Le récit", lo=1, hi=100,
         help="Il faut avoir vécu au moins autant de nouveaux souvenirs depuis le dernier récit pour le "
@@ -218,6 +223,11 @@ class SelfState:
     narrative_about: tuple[str, ...] = ()
     narrated_at: int = 0
     narrated_souvenirs: int = 0
+    #: les souvenirs relus pour l'écrire ; l'un a changé (il se réécrit) ; l'un est devenu secret (il se tait d'ici
+    #: là) — ADR 0082
+    narrative_sources: tuple[int, ...] = ()
+    narrative_stale: bool = False
+    narrative_masked: bool = False
     journals: FrozenDict[str, Journal] = field(default_factory=FrozenDict)  # par journée vécue
     dreams: tuple[Dream, ...] = ()  # les plus récents
     #: les derniers coups portés à son estime
@@ -246,7 +256,9 @@ class SelfState:
 
 #: v5 : une rêverie n'est ni une réussite (estime) ni « se lancer » (journal), une réussite ne compte son effort
 #: que s'il est prouvé, des excuses adoucissent (ADR 0047)
-SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, state_version=5,
+#: v6 : un rêve et un journal gardent leur filiation — devant qui leurs sources permettent de les redire (ADR 0078)
+#: v7 : le récit, un rêve, un journal suivent leurs sources : devenue secrète, il se tait (ADR 0082)
+SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, state_version=7,
                retired_params=("achieved_knock",))
 SELF.declare(c.PERSONA_REVISED, c.NARRATED, c.JOURNALED, c.DREAMT, c.WOKE_WITH, c.TOUCHED)
 
@@ -508,7 +520,35 @@ def _lived(s: SelfState, e, cx) -> SelfState:
 @SELF.reducer(c.NARRATED)
 def _narrated(s: SelfState, e, cx) -> SelfState:
     return replace(s, narrative_ref=e.data.text.ref or "", narrated_at=e.at, narrated_souvenirs=e.data.souvenirs,
-                   narrative_about=e.data.about)
+                   narrative_about=e.data.about, narrative_sources=e.data.sources, narrative_stale=False,
+                   narrative_masked=False)
+
+
+@SELF.reducer(*memory_c.WITHDRAWING)
+def _sources_withdrawn(s: SelfState, e, cx) -> SelfState:
+    """Ce qu'elle a écrit à partir de ce qu'elle sait suit ses sources (ADR 0082) : un souvenir devenu secret fait
+    taire le récit (jusqu'à sa réécriture), le rêve et la version intime du journal qui le reprenaient ; remplacé,
+    contesté, joint, il fait réécrire le récit — un rêve, une journée écrite, restent ce qu'ils étaient."""
+    gone = memory_c.withdrawals(e.type.name, e.data, e.seq)
+    if not gone:
+        return s
+    private = {w.item for w in gone if w.reason in memory_c.PRIVATE_REASONS}
+    # joint à la même croyance, une situation finie : ce qu'il disait reste vrai
+    every = {w.item for w in gone if w.reason in (memory_c.SECRET, memory_c.SUPERSEDED, memory_c.CONTESTED)}
+    if set(s.narrative_sources) & every:
+        s = replace(s, narrative_stale=True, narrative_masked=s.narrative_masked or bool(set(s.narrative_sources) & private))
+    if not private:
+        return s
+
+    def touched(lineage) -> bool:
+        return lineage is not None and bool(set(lineage.sources) & private)
+
+    dreams = tuple(replace(d, masked=True) if touched(d.lineage) else d for d in s.dreams)
+    journals = s.journals
+    for day, j in s.journals.items():
+        if touched(j.lineage):
+            journals = journals.set(day, replace(j, masked=True))
+    return replace(s, dreams=dreams, journals=journals)
 
 
 #: ce qui fait qu'un souvenir a marqué : son importance, et la force de ce qu'il fait ressentir (sa valence)
@@ -525,27 +565,28 @@ def salience(importance: float | None, emotion: str | None) -> float:
     return float(importance or 0.0) + (SALIENCE_EMOTION * abs(A.valence(e)) if e is not None else 0.0)
 
 
-def material(rows: list[tuple[Any, ...]], frame: Frame, shown: int) -> tuple[list[tuple[Any, ...]], list[str]]:
+def material(rows: list[Known], frame: Frame, shown: int) -> tuple[list[Known], list[str]]:
     """La matière du récit, choisie par saillance et non par ordre d'arrivée (ADR 0053 ; sonde réelle du
     2026-10-03 : « QUI TU ES DEVENUE » réécrit à partir de « allez j'y vais » la semaine où le chat d'un ami est
     mort). Les souvenirs qui peuvent se raconter (anodins, ou qui ne concernent personne), du plus marquant au moins
     marquant ; et ce qui l'a marquée sans pouvoir se raconter (une confidence, la peine de quelqu'un) — seulement ce
     que ça lui a fait, et si c'était avec quelqu'un qui compte : jamais qui, ni quoi (le récit est montré à tout le
-    monde). Une ligne : ``(texte, about, sensibilité, importance, émotion, secret)``."""
+    monde) : ce que le verdict de la mémoire permet de dire n'importe où (``PUBLIC_FLOOR``) — une confidence que Bob
+    lui a faite n'y entre pas parce qu'elle ne nomme personne (audit du 2026-10-09)."""
     told, closed = [], []
-    for r in rows:
-        _text, about, sensitivity, _importance, _emotion, secret = r
-        open_ = not secret and (int(sensitivity) <= Sensitivity.ANODYNE or not json.loads(about or "[]"))
-        (told if open_ else closed).append(r)
-    told = sorted(told, key=lambda r: -salience(r[3], r[4]))[:shown]
+    resolve, presumed = identity_c.resolvers(frame.get)
+    for k in rows:
+        hers = not k.about and not k.told_by and not k.secret and not k.lineage.internal_only and not k.holder
+        open_ = hers or admits(k.lineage, None, PUBLIC_FLOOR, resolve=resolve, presumed=presumed).ok
+        (told if open_ else closed).append(k)
+    told = sorted(told, key=lambda k: -salience(k.importance, k.emotion))[:shown]
     groups: dict[tuple[str, bool], list[float]] = {}
-    for _text, about, _sensitivity, importance, emotion, _secret in closed:
-        e = A.emotion_of(emotion)
+    for k in closed:
+        e = A.emotion_of(k.emotion)
         if e is None or e is A.Emotion.NEUTRAL:
             continue  # ce qui ne lui a rien fait ressentir ne dit rien d'elle sans son contenu
-        dear = any(frame.get(social_c.CLOSENESS(x)) in (social_c.FRIEND, social_c.CLOSE)
-                   for x in json.loads(about or "[]"))
-        groups.setdefault((e.value, dear), []).append(salience(importance, emotion))
+        dear = any(frame.get(social_c.CLOSENESS(x)) in (social_c.FRIEND, social_c.CLOSE) for x in k.about)
+        groups.setdefault((e.value, dear), []).append(salience(k.importance, k.emotion))
     felt = []
     for (name, dear), values in sorted(groups.items(), key=lambda kv: (-max(kv[1]), -len(kv[1]), kv[0]))[:FELT_SHOWN]:
         e = A.emotion_of(name)
@@ -566,6 +607,9 @@ class Narrate:
 
     def next_due(self, state: SelfState, frame: Frame, last_run: int | None) -> int | None:
         p = params(frame.env.params_of("self", frame.root))
+        if state.narrative_stale:
+            # un souvenir qu'il reprenait a changé : il se réécrit, sans attendre de nouveaux souvenirs (ADR 0082)
+            return max(frame.now, state.narrated_at + p.narrative_stale_after_us, self.retry_at)
         if state.souvenirs - state.narrated_souvenirs < p.narrative_min_souvenirs:
             return None
         due = state.narrated_at + p.narrative_every_us if state.narrated_at else frame.now
@@ -579,16 +623,17 @@ class Narrate:
             return
         p = params(frame.env.params_of("self", frame.root))
         self.retry_at = frame.now + HOUR  # si l'appel lève : pas de rafale
-        rows = store.query_mind(
-            f"SELECT text, about, sensitivity, importance, emotion, secret FROM {memory_c.ITEMS_TABLE} WHERE kind=? "
-            "AND status='active' AND born_at >= ? ORDER BY id DESC LIMIT ?",
-            (memory_c.SOUVENIR, frame.now - p.narrative_lookback_us, NARRATIVE_ROWS))
+        rows = knowns(store.query_mind(
+            f"{memory_c.SELECT_KNOWN} WHERE kind=? AND status='active' AND born_at >= ? ORDER BY id DESC LIMIT ?",
+            (memory_c.SOUVENIR, frame.now - p.narrative_lookback_us, NARRATIVE_ROWS)), memory_c.KNOWN_COLUMNS)
         told, felt = material(rows, frame, p.narrative_max_souvenirs)
-        previous = store.content([state.narrative_ref]).get(state.narrative_ref) if state.narrative_ref else None
+        # ce qu'il disait ne se redonne pas à recopier quand un de ses souvenirs a changé (ADR 0082)
+        previous = store.content([state.narrative_ref]).get(state.narrative_ref) \
+            if state.narrative_ref and not state.narrative_stale else None
         lines = ([phrase("self.narrative.previous", previous=previous), ""] if previous else [])
         if felt:
             lines += [phrase("self.narrative.felt"), *felt, ""]
-        lines += [phrase("self.narrative.lived")] + [f"- {r[0]}" for r in told]
+        lines += [phrase("self.narrative.lived")] + [f"- {k.text}" for k in told]
         persona = persona_for(frame, "full")
         request = LLMRequest(role="narrative", call_id=f"{ctx.run_id}#0", persona=persona,
                              system_stable=persona.text + "\n\n" + phrase("self.narrative.system"),
@@ -599,10 +644,11 @@ class Narrate:
         if not text:
             return
         self.retry_at = 0
-        about = sorted({person for r in told for person in json.loads(r[1] or "[]")}
+        about = sorted({person for k in told for person in (*k.about, *k.told_by)}
                        | (set(state.narrative_about) if previous else set()))
         await ctx.emit(c.NARRATED.draft(
             text=Content.of(text[:1200], level=0), souvenirs=state.souvenirs, about=tuple(about),
+            sources=tuple(k.id for k in told),
             voice=VoiceProvenance(call_id=request.call_id, persona_hash=persona.hash, role="narrative",
                                   model=response.model)))
 
@@ -610,8 +656,8 @@ class Narrate:
 @SELF.enricher("narrative", episodes=CONVERSATIONAL, deadline_ms=300)
 async def _narrative_text(s: SelfState, frame: Frame, ports: Mapping[str, Any]) -> str | None:
     store = ports.get("store")
-    if store is None or not s.narrative_ref:
-        return None
+    if store is None or not s.narrative_ref or s.narrative_masked:
+        return None  # un de ses souvenirs est devenu secret : il se tait jusqu'à sa réécriture
     return store.content([s.narrative_ref]).get(s.narrative_ref)
 
 

@@ -199,7 +199,9 @@ def test_only_someone_else_saying_it_too_raises_it_past_its_birth():
     Items().apply(db, [event(mc.BELIEVED.draft(text=Content.of("Alice déménage à Lyon"), about=("user_2",),
                                                confidence=0.8, told_by=("user_2",)), 1)], "")
     Items().apply(db, [event(mc.REINFORCED.draft(item=1, corroborated=True, told_by=("user_3",)), 2)], "")
-    assert db.query("SELECT confidence FROM memory_items") == [(0.9,)]
+    # un ancien renfort corroboré : un témoin de plus, mis en commun (ADR 0080) — plus sûr, borné
+    (confidence,), = db.query("SELECT confidence FROM memory_items")
+    assert 0.85 < confidence <= 0.95
     db.conn.close()
 
 

@@ -36,10 +36,11 @@ Fonctions pures, sans lecture d'état.
 from __future__ import annotations
 
 import enum
-from collections.abc import Callable, Collection, Mapping
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 
+from mika.kernel.frame import Audience
 from mika.vocab.people import EXTERNAL_PREFIX, clean_display_name
 
 
@@ -387,3 +388,75 @@ def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None,
     if tied_to(others, ties, presumed):
         limit = max(limit, tied_level)
     return sensitivity <= limit
+
+
+# ── Ce qui peut se dire, élément par élément (ADR 0077… : la porte de la mémoire) ──
+#
+# Le verdict vivait dans la mémoire (``faculties/memory/salience``) : aucune autre faculté ne pouvait l'appliquer, et
+# chacune qui lisait ce qu'elle sait refaisait son propre filtre — plusieurs fuyaient (un rêve rendait à Sam le secret
+# que Bob avait confié sur lui). Il est ici, pour tous.
+
+
+@dataclass(frozen=True, slots=True)
+class Verdict:
+    ok: bool
+    others: tuple[str, ...] = ()  # les autres personnes concernées, ou qui l'ont confié
+    witness: bool = False  # l'interlocuteur était là quand ça s'est dit
+    level: int = 0  # ce qu'il faut pour l'entendre (sur autrui) : 0 quand c'est sa fiche ou sa vie à elle
+    tellers: tuple[str, ...] = ()  # qui l'a confié, hors l'interlocuteur
+    secret: bool = False
+    #: admis parce que l'interlocuteur a un lien avec les personnes concernées (au niveau « lié », ADR 0058)
+    tied: bool = False
+
+
+def admissible(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, audience: Audience, *,
+               told_by: Sequence[str] = (), heard_by: Sequence[str] = (), secret: bool = False,
+               presumed: Callable[[str], str] | None = None) -> Verdict:
+    """Peut-on le dire devant cette audience ? (les règles : ``faculties/memory/salience``, ADR 0074). ``presumed`` : la personne qu'une
+    mention désigne présumément (ADR 0075) — un lien est exigé avec elle comme avec une personne reliée.
+
+    Un élément d'avant que la mémoire ne sache qui le lui a confié (ni
+    confident ni témoin) garde l'ancienne règle : l'interlocuteur qui y figure
+    est traité en témoin."""
+    known = bool(told_by or heard_by)
+    tellers = tuple(sorted(set(told_by) - {interlocutor}))
+    others = tuple(sorted({*about, *told_by} - {interlocutor}))
+    if not about and not told_by:  # personne d'identifié : anodin, ou ce que l'audience peut entendre
+        # … un secret à elle (ses propres notes, importées) vaut une confidence : il ne se dit qu'en grande confiance
+        level = max(sensitivity, Sensitivity.CONFIDENCE) if secret else sensitivity
+        return Verdict(level <= max(Sensitivity.ANODYNE, audience.level), secret=secret)
+    # Un secret ne sort que devant qui l'a confié. Répondre à la personne qui l'a confié ne suffit pas : dans un
+    # salon, d'autres l'entendent (audit du 2026-10-08 : « garde-le pour toi », anodin, recopié dans un salon).
+    overheard = secret and audience.public
+    if not others:  # seulement l'interlocuteur
+        if overheard:
+            return Verdict(False, secret=True)
+        return Verdict(sensitivity <= Sensitivity.ANODYNE or audience.private_ok)
+    if interlocutor is not None and interlocutor in told_by:  # ses propres mots, même sur d'autres : sa fiche
+        if overheard:
+            return Verdict(False, others, secret=True)
+        return Verdict(sensitivity <= Sensitivity.ANODYNE or audience.private_ok, others, secret=secret)
+    witness = interlocutor is not None and (interlocutor in heard_by if known else interlocutor in about)
+    if secret:  # « dis-le à personne » : jamais hors de qui l'a confié
+        return Verdict(False, others, witness, int(sensitivity), tellers, True)
+    limit = audience.witness_level if witness else audience.level
+    tied = False
+    if sensitivity > limit and interlocutor is not None and tied_to(others, audience.ties, presumed):
+        # il a un lien avec chacune (ils se sont parlé ensemble, ou elle l'a nommé elle-même) : une proche peut
+        # entendre sa confidence — jamais quelqu'un qui a seulement prononcé son nom (ADR 0058)
+        limit, tied = max(limit, audience.tied_level), True
+    return Verdict(sensitivity <= limit, others, witness, int(sensitivity), tellers, tied=tied)
+
+
+def private_to(person: str) -> Audience:
+    """L'audience la plus étroite d'un texte écrit pour une personne, en privé (son portrait, ce qu'elle prépare
+    pour elle) : sa fiche est ouverte, rien d'autrui au-delà de l'anodin, aucun lien."""
+    return Audience(persons=(person,), public=False, level=int(Sensitivity.ANODYNE),
+                    witness_level=int(Sensitivity.ANODYNE), private_ok=True)
+
+
+#: L'audience la plus large : un texte qui peut se montrer n'importe où, salons compris (son récit d'elle-même).
+PUBLIC_FLOOR = Audience(public=True, level=int(Sensitivity.ANODYNE), witness_level=int(Sensitivity.ANODYNE))
+#: Personne n'écoute : elle pense pour elle (une pensée, un rêve, son journal intime au moment de l'écrire).
+INTERNAL = Audience(public=False, level=int(Sensitivity.CONFIDENCE), witness_level=int(Sensitivity.CONFIDENCE),
+                    private_ok=True, tied_level=int(Sensitivity.CONFIDENCE), owner=True)

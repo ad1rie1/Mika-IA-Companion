@@ -25,6 +25,7 @@ sur un tel canal — jamais dans un salon public.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -182,6 +183,20 @@ PERSON = FactFamily("identity.person", arg=str, type=str)
 #: de présomption (aucune ou plusieurs personnes de ce nom, une mention déjà reliée, un couple écarté).
 PRESUMED = FactFamily("identity.presumed", arg=str, type=str)
 IDENTITY = FactFamily("identity.identity", arg=str, type=IdentityView)
+
+
+def resolvers(get: Callable[[Any], Any]) -> tuple[Callable[[str], str], Callable[[str], str]]:
+    """Ce que lit le verdict d'une filiation (``vocab.lineage.admits``) : une clé telle qu'elle vaut maintenant
+    (une adresse reliée depuis à une personne), et la personne qu'une mention désigne présumément (ADR 0075).
+    ``get`` : ``frame.get`` ou ``cx.facts.get`` — qui lit doit déclarer ``PERSON`` et ``PRESUMED``."""
+
+    def resolve(key: str) -> str:
+        return get(PERSON(key)) or key
+
+    def presumed(key: str) -> str:
+        return (get(PRESUMED(key)) or "") if key.startswith("name:") else ""
+
+    return resolve, presumed
 #: Argument : (adresse, canal, public). Toute panne → ``CLOSED``.
 DISCLOSURE = FactFamily("identity.disclosure", arg=tuple, type=Disclosure)
 #: Les adresses qui parlent pour une personne (triées).

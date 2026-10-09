@@ -94,7 +94,8 @@ def test_what_she_said_she_likes_holds_an_anecdote_fades_and_a_change_of_mind_re
     soldering = next(r for r in rows if "fer à souder" in r["text"])
     assert ramen["about_self"] == 2 and soldering["about_self"] == 1
     assert ramen["status"] == "superseded" and lasagnes["status"] == "active" and lasagnes["about_self"] == 2
-    assert revisions == [], "changer d'avis n'est pas une confusion"
+    # changer d'avis sur ce qui la définit se ressent (ADR 0081) — une réflexion, pas une confusion
+    assert revisions and all(e.data.emotion == "thinking" for e in revisions), "changer d'avis n'est pas une confusion"
 
 
 @pytest.mark.slow

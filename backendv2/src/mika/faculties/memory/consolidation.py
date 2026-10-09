@@ -46,8 +46,16 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory.archive import for_people
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, occurrence, params
+from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, Testimony, judge
 from mika.faculties.memory.life import kept_too_early, same_task
-from mika.faculties.memory.projections import DEFERRED_TABLE, ITEM_COLUMNS, fingerprint, informants_of
+from mika.faculties.memory.projections import (
+    DEFERRED_TABLE,
+    ITEM_COLUMNS,
+    TESTIMONIES_TABLE,
+    TESTIMONY_COLUMNS,
+    fingerprint,
+    testimony_of,
+)
 from mika.kernel.clock import DAY, MINUTE, instant
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
@@ -57,7 +65,6 @@ from mika.kernel.prompt import PromptBudgetError
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.llm_budget import fits_context
 from mika.ports.vectors import VectorItem
-from mika.vocab.affect import emotion_of
 from mika.vocab.people import clean_display_name, fold, is_identifiable
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -175,20 +182,23 @@ class Consolidate:
             labels = {speaker.person: speaker.label for speaker in conv.speakers}
             situations = self._situations(frame, store, state, conv, p, labels)
             moments, upcoming = self._moments(frame, store, state, conv, labels)
+            ended, gone = self._ended_situations(frame, store, state, conv, p, labels)
             prompt = x.render(conv, now=frame.local(), beliefs=known,
                               promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
-                                        for i, to, t in promises], situations=situations, moments=moments)
+                                        for i, to, t in promises], situations=situations, moments=moments,
+                              ended=ended)
             request = LLMRequest(role="extract", call_id=f"{ctx.run_id}#{n}", system_stable=x.system(her),
                                  messages=(Message("user", prompt),), tools=(x.tool(her),), max_tokens=2500,
                                  lane="background", priority=2, meta={"conversation": conv.key})
             # Les souvenirs de contexte sont facultatifs, les messages sources ne le sont pas.
             # Une ancienne liste de situations ne doit pas rendre une paire courte illisible.
-            while not fits_context(ctx.llm, request) and (known or promises or situations or moments):
+            while not fits_context(ctx.llm, request) and (known or promises or situations or moments or ended):
                 known, promises, situations = known[:len(known) // 2], promises[:len(promises) // 2], situations[:len(situations) // 2]
-                moments = moments[:len(moments) // 2]
+                moments, ended = moments[:len(moments) // 2], ended[:len(ended) // 2]
                 prompt = x.render(conv, now=frame.local(), beliefs=known,
                                   promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
-                                            for i, to, t in promises], situations=situations, moments=moments)
+                                            for i, to, t in promises], situations=situations, moments=moments,
+                                  ended=ended)
                 request = replace(request, messages=(Message("user", prompt),))
             retry_size = max(2, p.max_window // (2 ** min(8, attempts // max(1, p.max_attempts))))
             if (not fits_context(ctx.llm, request) or len(conv.lines) > retry_size) and len(conv.lines) > 1:
@@ -242,9 +252,10 @@ class Consolidate:
                     detail=Content.of(json.dumps({"issues": extraction.issues if partial else [reason],
                                                   "output": raw}, ensure_ascii=False), level=3)))
             if extraction is not None:
-                shown = {i for i, _w, _t in moments}
+                shown = {i for i, _w, _t in (*moments, *ended)}
+                designable = {i: ev for i, ev in {**upcoming, **gone}.items() if i in shown}
                 drafts += await self._drafts(extraction, frame, state, store, conv, people, known, promises, vectors,
-                                             p, last_call, moments={i: ev for i, ev in upcoming.items() if i in shown})
+                                             p, last_call, moments=designable)
                 drafts += self._ended(extraction, situations, last_call)
         if rows:
             drafts.append(c.CONSOLIDATED.draft(upto=rows[-1][0], produced=sum(
@@ -376,11 +387,20 @@ class Consolidate:
         named = {k for w in set(WORD.findall(fold(text))) for k in directory.get(w, ())
                  if len(directory.get(w, ())) == 1}
         order = {k: n for n, k in enumerate(ids)}
+        # qui l'a dit, témoignage par témoignage (ADR 0080) : ce que les personnes d'ici en ont dit elles-mêmes se
+        # montre, même quand un autre l'avait confié avant
+        tellers_of: dict[int, list[set[str]]] = {}
+        for item, told, speaks in store.query_mind(f"SELECT item, told_by, speaks FROM {TESTIMONIES_TABLE} "
+                                                   f"WHERE item IN ({marks})", tuple(ids)):
+            if speaks:
+                tellers_of.setdefault(int(item), []).append(set(_keys(told)))
         out = []
         for i, t, about, told_by, sens, secret in sorted(found, key=lambda r: order[int(r[0])]):
-            concerns, tellers = set(_keys(about)), set(_keys(told_by))
+            concerns = set(_keys(about))
             anodyne = int(sens) <= Sensitivity.ANODYNE and not secret
-            if not (anodyne or (bool(tellers) and tellers <= persons and not conv.room)):
+            told_here = any(bool(tellers) and tellers <= persons
+                            for tellers in tellers_of.get(int(i), [set(_keys(told_by))]))
+            if not (anodyne or (told_here and not conv.room)):
                 continue
             # une mention faite dans cette conversation-ci (« ma collègue Alice ») la touche aussi : sans elle, un
             # « garde-le pour toi » dit après coup ne pouvait plus viser sa croyance (ADR 0075)
@@ -462,6 +482,41 @@ class Consolidate:
                  for i, (ev, whom) in live.items() if texts.get(ev.text_ref)]
         return shown, {i: ev for i, (ev, _w) in live.items()}
 
+    @staticmethod
+    def _ended_situations(frame: Frame, store: Any, state: MemoryState, conv: x.Conversation, p: MemoryParams,
+                          labels: dict[str, str]) -> tuple[list[tuple[int, str, str]], dict[int, c.LifeEvent]]:
+        """Les situations des personnes de cette conversation finies depuis moins de ``recurrence_days`` (numéro, qui,
+        « du … au … : texte ») : la relecture peut dire laquelle revient (« il est de nouveau malade »), et la
+        reprise garde son fil (ADR 0079). Sans elles, la relecture ne voyait plus une situation finie : à la rechute
+        du chat de Carol, elle n'a noté qu'un souvenir, et Mika ne suivait plus rien (sonde réelle du 2026-10-09).
+        Les mêmes règles que les situations en cours : jamais ce qu'un autre a confié au-delà de l'anodin, et dans
+        un salon l'anodin seulement."""
+        persons = set(conv.persons)
+        archive = {ev.id: ev for ev in for_people(store, tuple(persons))}
+        latest: dict[int, c.LifeEvent] = {}
+        for ev in sorted({**state.events, **archive}.values(), key=lambda ev: ev.id):
+            latest[ev.thread or ev.id] = ev  # d'un fil, la dernière fois seulement
+        live: dict[int, tuple[c.LifeEvent, str]] = {}
+        for ev in latest.values():
+            if not (ev.ongoing and ev.ended_at and ev.text_ref) or frame.now - ev.ended_at > p.recurrence_days * DAY:
+                continue
+            whom = next((k for k in (frame.get(identity_c.PERSON(a)) or a for a in ev.about) if k in persons), None)
+            if whom is None:
+                continue
+            tellers = {frame.get(identity_c.PERSON(t)) or t for t in ev.told_by}
+            anodyne = ev.sensitivity <= Sensitivity.ANODYNE and not ev.secret
+            if anodyne or (tellers <= persons and not conv.room):
+                live[ev.id] = (ev, whom)
+        if not live:
+            return [], {}
+        texts = store.content([ev.text_ref for ev, _ in live.values()])
+        shown = [(i, labels.get(whom, whom), phrase("memory.extraction.render.ended_situation",
+                                                   since=frame.local(ev.when).date().isoformat(),
+                                                   ended=frame.local(ev.ended_at).date().isoformat(),
+                                                   text=texts[ev.text_ref]))
+                 for i, (ev, whom) in live.items() if texts.get(ev.text_ref)]
+        return shown, {i: ev for i, (ev, _w) in live.items()}
+
     # ── ce qu'on en garde ──
     async def _drafts(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
                       people: x.People, known: list[tuple[int, str]], promises: list[tuple[int, str, str]],
@@ -470,6 +525,7 @@ class Consolidate:
         drafts: list[Draft[Any]] = []
         known_ids = {i for i, _ in known}
         known_texts = dict(known)
+        tz = frame.env.tz_of(frame.root)
         heard = conv.persons
         lines = {ln.seq: ln for ln in conv.lines}
         speaking = tuple(sorted({ln.person for ln in conv.lines if ln.person}))
@@ -572,11 +628,11 @@ class Consolidate:
                 drafts.append(c.REINFORCED.draft(item=twin, sources=sources, sensitivity=sens, about=about,
                                                  told_by=told_by, heard_by=heard, secret=secret))
                 continue
-            e = emotion_of(s.emotion)
             drafts.append(c.REMEMBERED.draft(
                 text=Content.of(text, level=sens), about=about, sensitivity=sens,
-                importance=x.IMPORTANCE.get(s.importance, 0.45), emotion=e.value if e else None,
-                sources=sources, call_id=call_id, told_by=told_by, heard_by=heard, secret=secret))
+                importance=x.IMPORTANCE.get(s.importance, 0.45), emotion=x.feeling(s.mon_ressenti),
+                felt=x.feeling(s.ressenti), sources=sources, call_id=call_id, told_by=told_by, heard_by=heard,
+                secret=secret))
         for b in ex.croyances:
             if not fresh(c.BELIEF, b.texte):
                 continue
@@ -615,7 +671,8 @@ class Consolidate:
                       "hypothese": "hypothesis"}.get(fold(b.genre or ""), "claim")
             if x.ORIGIN.get(fold(b.origine)) == "inferred":
                 nature = "hypothesis"
-            holder = people.one(b.point_de_vue) if b.point_de_vue else source
+            # un avis, une hypothèse sont à qui les porte ; un fait rapporté n'est à personne (ses témoins le disent)
+            holder = people.one(b.point_de_vue) if b.point_de_vue else (source if nature != "claim" else None)
             relations = []
             for relation in b.relations:
                 subject, other = people.one(relation.subject), people.one(relation.other)
@@ -623,32 +680,67 @@ class Consolidate:
                     relations.append(c.Relation(subject=subject, other=other, kind=relation.kind,
                                                 status=relation.status))
                     about = tuple(sorted({*about, subject, other}))
-            if replaces is not None and not self._can_replace(store, replaces, about, told_by, heard, holder):
-                replaces = None
+            origin = x.ORIGIN.get(fold(b.origine), "told")
+            # de première main : la personne nommée qui parle d'elle-même, ou un témoin qui l'a vu (ADR 0081)
+            named = set(people.resolve(b.personnes))
+            first_hand = bool(b.de_premiere_main) or (bool(told_by) and bool(named) and set(told_by) <= named)
+            said = Testimony(0, tuple(told_by), tuple(heard), sens, secret, 0.0, origin=origin,
+                             first_hand=first_hand)
+            # la vérité se juge sans l'audience : la croyance désignée est remplacée par une source au moins aussi
+            # sûre, ou le même témoin qui se corrige ; sinon contestée — elle doute (ADR 0081)
+            target = self._target_of(store, replaces, nature, holder)
+            verdict = judge(self._testimonies(store, target), said) if target is not None else None
+            replaces = target if verdict == SUPERSEDE else None
+            contests = target if verdict == CONTEST else None
             twin = await self._twin(store, vectors, b.texte, c.BELIEF, about, p,
                                     told_by=told_by, heard_by=heard, knowledge_kind=nature, holder=holder)
-            if replaces is not None and not same_words(known_texts.get(replaces, ""), b.texte):
+            if target is not None and not same_words(known_texts.get(target, ""), b.texte):
                 twin = None  # une correction explicite prime sur la proximité vectorielle
-            if twin is not None and not relations:
-                # redire une croyance en la désignant elle-même comme « remplacée » n'est pas la réviser : c'est la
-                # confirmer (sonde réelle du 2026-10-02 : « Je croyais que X — apparemment ce n'est plus vrai : X »)
-                new = set(informants_of(source, told_by))
-                drafts.append(c.REINFORCED.draft(
-                    item=twin, corroborated=bool(new - set(self._informants(store, twin))), source=source,
-                    sources=sources, sensitivity=sens, about=about, told_by=told_by, heard_by=heard, secret=secret,
-                    replaces=replaces if replaces != twin else None, between_us=between))
+            former = None
+            if twin is None and target is None:
+                # ce qu'elle a cru, puis cessé de croire, et qu'on lui redit : elle y revient (ou elle doute)
+                former = self._former_twin(store, b.texte, about, nature, holder)
+            if former is not None:
+                head = self._head_of(store, former)
+                again = judge(self._testimonies(store, head), said) if head is not None else None
+                drafts.append(c.ATTESTED.draft(
+                    item=former, told_by=told_by, heard_by=heard, source=source, origin=origin,
+                    confidence=x.born_confidence(b.confiance, origin, nature), sensitivity=sens, secret=secret,
+                    between_us=between, sources=sources, about=about, relations=tuple(relations),
+                    replaces=head if again == SUPERSEDE else None, contests=head if again == CONTEST else None,
+                    first_hand=first_hand, call_id=call_id, felt=x.feeling(b.ressenti)))
                 continue
-            origin = x.ORIGIN.get(fold(b.origine), "told")
+            if twin is not None:
+                # la même proposition : un témoignage de plus, avec ses propres droits (ADR 0080) — redire une
+                # croyance en la désignant elle-même comme « remplacée » n'est pas la réviser : c'est la confirmer
+                # (sonde réelle du 2026-10-02 : « Je croyais que X — apparemment ce n'est plus vrai : X »)
+                drafts.append(c.ATTESTED.draft(
+                    item=twin, told_by=told_by, heard_by=heard, source=source, origin=origin,
+                    confidence=x.born_confidence(b.confiance, origin, nature), sensitivity=sens, secret=secret,
+                    between_us=between, sources=sources, about=about, relations=tuple(relations),
+                    replaces=replaces if replaces != twin else None, contests=contests if contests != twin else None,
+                    first_hand=first_hand, call_id=call_id, felt=x.feeling(b.ressenti)))
+                continue
+            since, until = x.when(b.depuis, tz) if b.depuis else None, x.when(b.jusqua, tz) if b.jusqua else None
             drafts.append(c.BELIEVED.draft(
                 text=Content.of(b.texte, level=sens), about=about, sensitivity=sens,
                 importance=importance, confidence=x.born_confidence(b.confiance, origin, nature),
-                origin=origin, source=source, replaces=replaces, sources=sources,
+                origin=origin, source=source, replaces=replaces, contests=contests, sources=sources,
                 call_id=call_id, told_by=told_by, heard_by=heard, secret=secret, between_us=between,
-                knowledge_kind=nature, holder=holder, relations=tuple(relations)))
+                knowledge_kind=nature, holder=holder, relations=tuple(relations), first_hand=first_hand,
+                as_of=min(since[0], frame.now) if since else None, valid_until=until[0] if until else None,
+                felt=x.feeling(b.ressenti), emotion=x.feeling(b.mon_ressenti)))
         drafts += self._called(nicks, ours, store, conv, call_id)
-        for item in ex.confidentiel:
-            if item in known_ids:
-                drafts.append(c.REINFORCED.draft(item=item, sensitivity=int(Sensitivity.CONFIDENCE), secret=True))
+        closed = [item for item in dict.fromkeys(ex.confidentiel) if item in known_ids]
+        for item in closed:
+            # la discrétion demandée : sur ce que celui qui la demande en a dit — sur tout, quand c'est la
+            # personne concernée elle-même (ADR 0080)
+            concerned_by = set(self._about_of(store, item))
+            drafts.append(c.ATTESTED.draft(item=item, told_by=tuple(conv.persons), heard_by=tuple(conv.persons),
+                                           restricts=True, everyone=bool(concerned_by & set(conv.persons)),
+                                           sensitivity=int(Sensitivity.CONFIDENCE), secret=True,
+                                           call_id=call_id))
+        drafts += self._closed_souvenirs(frame, store, conv, closed)
         drafts += await self._promised(ex, frame, state, store, conv, people, promises, vectors, p, provenance,
                                        fresh, call_id, lambda text: x.echoes(text, secrets, names))
         drafts += await self._events(ex, frame, state, store, conv, people, vectors, p, provenance, concerned,
@@ -697,7 +789,11 @@ class Consolidate:
                 continue
             hit = next((int(i) for i, t in known if folded in fold(str(t))), None)
             if hit is not None:
-                drafts.append(c.REINFORCED.draft(item=hit, sources=tuple(seqs)))
+                # redit par la même personne : la date et les messages, rien de plus sûr
+                drafts.append(c.ATTESTED.draft(item=hit, told_by=(person,), heard_by=conv.persons, source=person,
+                                               origin=c.OBSERVED, confidence=0.9, between_us=True,
+                                               sensitivity=int(Sensitivity.PERSONAL), sources=tuple(seqs),
+                                               about=(person,), call_id=call_id))
                 continue
             sens = int(Sensitivity.PERSONAL)
             drafts.append(c.BELIEVED.draft(
@@ -733,13 +829,14 @@ class Consolidate:
                   "hypothese": "hypothesis"}.get(fold(b.genre or ""), "claim")
         replaces = getattr(b, "remplace", None)
         replaces = replaces if durable and replaces in known_ids else None
-        if replaces is not None and not self._can_replace(store, replaces, (), (), (), None, about_self=True):
-            replaces = None
-        twin = await self._twin(store, vectors, b.texte, c.BELIEF, (), p, knowledge_kind=nature)
+        if replaces is not None and not self._target_of(store, replaces, nature, None, about_self=True):
+            replaces = None  # changer d'avis ne vaut que sur ce qu'elle a dit d'elle-même
+        twin = await self._twin(store, vectors, b.texte, c.BELIEF, (), p, knowledge_kind=nature, about_self=True)
         if twin is not None and twin != replaces:
-            if sens > Sensitivity.ANODYNE or secret:
-                return [c.REINFORCED.draft(item=twin, sources=sources, sensitivity=sens, secret=secret)]
-            return [c.REINFORCED.draft(item=twin, sources=sources)]
+            # ce qu'elle redit d'elle-même : son propre témoignage, redit
+            return [c.ATTESTED.draft(item=twin, sources=sources, sensitivity=sens, secret=secret, origin=c.OBSERVED,
+                                     confidence=x.born_confidence(getattr(b, "confiance", 0.7), c.OBSERVED, nature),
+                                     about_self=True, call_id=call_id)]
         return [c.BELIEVED.draft(
             text=Content.of(b.texte, level=sens), about=(), sensitivity=sens,
             importance=x.IMPORTANCE[3 if durable else 1],
@@ -863,10 +960,31 @@ class Consolidate:
                     all_day=all_day, sensitivity=sens, sources=sources, told_by=told_by, heard_by=heard,
                     secret=moved.secret or secret_of(ev.secret, cited, sens, ev.texte), replaces=moved.id,
                     call_id=call_id, ongoing=False, importance=max(moved.importance, x.moment_importance(ev)),
-                    festive=moved.festive or x.festive(ev), yearly=yearly))
+                    festive=moved.festive or x.festive(ev), yearly=yearly,
+                    felt=x.feeling(ev.ressenti) or moved.felt or None,
+                    emotion=x.feeling(ev.mon_ressenti) or moved.emotion or None))
                 continue
-            twin = await self._same_event(store, state, vectors, ev.texte, about, p, frame=frame, at=at,
-                                          names=names)
+            back = (moments or {}).get(ev.remplace) if ev.remplace is not None and ev.en_cours else None
+            if back is not None and not (back.ongoing and back.ended_at):
+                back = None  # une situation encore en cours, ou un moment à venir : rien ne revient
+            twin = None if back is not None else await self._same_event(store, state, vectors, ev.texte, about, p,
+                                                                         frame=frame, at=at, names=names)
+            # désignée par la relecture (« il est de nouveau malade », parmi les situations finies depuis peu), ou
+            # reconnue à ses mots
+            again = back if back is not None else self._ended_twin(store, state, ev.texte, about, p, frame, names) \
+                if ev.en_cours and twin is None else None
+            if again is not None:
+                # « il est de nouveau malade » : la même situation, une autre fois — le même fil (ADR 0079)
+                noted.append((ev.texte, at, about))
+                sens = max(sens, again.sensitivity)
+                drafts.append(c.EVENT_NOTED.draft(
+                    text=Content.of(ev.texte, level=sens), when=at, about=tuple(dict.fromkeys((*about, *again.about))),
+                    all_day=all_day, sensitivity=sens, sources=sources, told_by=told_by, heard_by=heard,
+                    secret=again.secret or secret_of(ev.secret, cited, sens, ev.texte), recurs=again.id,
+                    call_id=call_id, ongoing=True, importance=max(again.importance, x.moment_importance(ev)),
+                    felt=x.feeling(ev.ressenti) or again.felt or None,
+                    emotion=x.feeling(ev.mon_ressenti) or again.emotion or None))
+                continue
             if twin is not None and not ev.en_cours and abs(twin.when - at) >= DAY // 2 and not x.same_moment(
                     ev.texte, store.content([twin.text_ref]).get(twin.text_ref) or "", names):
                 # à une autre date, une ressemblance ne suffit pas à dire « reporté » : il faut les mêmes mots (« son
@@ -887,14 +1005,17 @@ class Consolidate:
                     replaces=twin.id, call_id=call_id, ongoing=twin.ongoing,
                     importance=max(twin.importance, x.moment_importance(ev)),
                     festive=twin.festive or (not twin.ongoing and x.festive(ev)),
-                    yearly=twin.yearly or (not twin.ongoing and yearly)))
+                    yearly=twin.yearly or (not twin.ongoing and yearly),
+                    felt=x.feeling(ev.ressenti) or twin.felt or None,
+                    emotion=x.feeling(ev.mon_ressenti) or twin.emotion or None))
                 continue
             noted.append((ev.texte, at, about))
             drafts.append(c.EVENT_NOTED.draft(
                 text=Content.of(ev.texte, level=sens), when=at, about=about, all_day=all_day, sensitivity=sens,
                 sources=sources, told_by=told_by, heard_by=heard, secret=secret_of(ev.secret, cited, sens, ev.texte),
                 replaces=twin.id if twin is not None else None, call_id=call_id, ongoing=ev.en_cours,
-                importance=x.moment_importance(ev), festive=not ev.en_cours and x.festive(ev), yearly=yearly))
+                importance=x.moment_importance(ev), festive=not ev.en_cours and x.festive(ev), yearly=yearly,
+                felt=x.feeling(ev.ressenti), emotion=x.feeling(ev.mon_ressenti)))
         return drafts
 
     @staticmethod
@@ -913,6 +1034,26 @@ class Consolidate:
         out += [(r.title, (), r.due) for r in reminders_of(frame, store)
                 if r.owner in persons and start <= r.opened_at <= end]
         return out
+
+    @staticmethod
+    def _ended_twin(store: Any, state: MemoryState, text: str, about: tuple[str, ...], p: MemoryParams,
+                    frame: Frame, names: Sequence[str]) -> c.LifeEvent | None:
+        """Une situation finie depuis peu (``recurrence_days``) que ce texte redit : elle recommence. Les mêmes mots
+        une fois les prénoms ôtés, ou assez de radicaux en commun."""
+        since = frame.now - round(p.recurrence_days * DAY)
+        archive = {ev.id: ev for ev in for_people(store, about)}
+        ended = [ev for ev in {**state.events, **archive}.values()
+                 if ev.ongoing and ev.ended_at and ev.ended_at >= since and set(ev.about) & set(about)]
+        if not ended:
+            return None
+        said = store.content([ev.text_ref for ev in ended if ev.text_ref])
+        wanted = stems(text)
+        for ev in sorted(ended, key=lambda ev: -ev.ended_at):
+            before = said.get(ev.text_ref) or ""
+            if x.same_moment(text, before, names) or \
+                    len(wanted & stems(before)) >= max(2, (len(wanted) + 1) // 2):
+                return ev
+        return None
 
     async def _same_event(self, store: Any, state: MemoryState, vectors: Any, text: str, about: tuple[str, ...],
                           p: MemoryParams, *, frame: Frame | None = None, at: int | None = None,
@@ -947,39 +1088,117 @@ class Consolidate:
 
     async def _twin(self, store: Any, vectors: Any, text: str, kind: str, about: tuple[str, ...],
                     p: MemoryParams, *, told_by: tuple[str, ...] = (), heard_by: tuple[str, ...] = (),
-                    knowledge_kind: str = "claim", holder: str | None = None) -> int | None:
-        """Doublon exact indexé, sans dépendre des cinq voisins vectoriels les plus proches."""
+                    knowledge_kind: str = "claim", holder: str | None = None, about_self: bool = False) -> int | None:
+        """Doublon exact indexé, sans dépendre des cinq voisins vectoriels les plus proches. Un souvenir : le même,
+        confié et entendu par les mêmes. Une croyance : **la même proposition**, quel qu'en soit le témoin — ce
+        qu'un autre lui en dira sera un témoignage de plus (ADR 0080) ; un avis ou une hypothèse restent à qui les
+        porte ; la plus ancienne."""
+        if kind == c.BELIEF:
+            rows = store.query_mind(
+                f"SELECT id, text, knowledge_kind, holder FROM {c.ITEMS_TABLE} WHERE fingerprint=? AND kind=? "
+                "AND status='active' AND about=? AND (about_self > 0) = ? ORDER BY id",
+                (fingerprint(text), kind, json.dumps(sorted(set(about)), ensure_ascii=False), about_self))
+            for k, previous, nature, owner in rows:
+                if same_words(previous, text) and nature == knowledge_kind \
+                        and (knowledge_kind == "claim" or (owner or None) == (holder or None)):
+                    return int(k)
+            return None
         encoded = tuple(json.dumps(sorted(set(keys)), ensure_ascii=False) for keys in (about, told_by, heard_by))
         rows = store.query_mind(
-            f"SELECT id, text, knowledge_kind, holder FROM {c.ITEMS_TABLE} WHERE fingerprint=? AND kind=? "
+            f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE fingerprint=? AND kind=? "
             "AND status='active' AND about=? AND told_by=? AND heard_by=? ORDER BY id", (fingerprint(text), kind, *encoded))
-        for k, previous, nature, owner in rows:
-            if not same_words(previous, text) or (kind == c.BELIEF and (nature != knowledge_kind or owner != holder)):
-                continue
-            return int(k)
+        for k, previous in rows:
+            if same_words(previous, text):
+                return int(k)
         return None
 
     @staticmethod
-    def _can_replace(store: Any, item: int, about: tuple[str, ...], told_by: tuple[str, ...],
-                     heard_by: tuple[str, ...], holder: str | None, *, about_self: bool = False) -> bool:
-        rows = store.query_mind(f"SELECT about, told_by, heard_by, holder, source, about_self FROM {c.ITEMS_TABLE} "
+    def _target_of(store: Any, item: int | None, nature: str, holder: str | None, *,
+                   about_self: bool = False) -> int | None:
+        """La croyance qu'une correction désigne, si elle peut l'être (ADR 0081) : vivante, de même sorte (sur elle,
+        ou pas). L'audience n'y est pour rien — qui l'a entendue ne décide pas de ce qui est vrai. Un avis ou un goût
+        d'un autre porteur ne se corrige pas : deux avis, deux porteurs, aucun n'a tort."""
+        if item is None:
+            return None
+        rows = store.query_mind(f"SELECT knowledge_kind, holder, about_self FROM {c.ITEMS_TABLE} "
                                 "WHERE id=? AND kind=? AND status='active'", (item, c.BELIEF))
         if not rows:
-            return False
-        people, tellers, witnesses, owner, source, self_item = rows[0]
-        authors = _keys(tellers)
-        previous_holder = owner or source or (authors[0] if len(authors) == 1 else None)
-        return (set(_keys(people)) == set(about) and set(_keys(tellers)) == set(told_by)
-                and set(_keys(witnesses)) == set(heard_by) and previous_holder == holder
-                and bool(self_item) == about_self)
+            return None
+        kind, owner, self_item = rows[0]
+        if bool(self_item) != about_self:
+            return None
+        personal = {"opinion", "preference"}
+        if not about_self and (kind in personal or nature in personal) and (owner or None) != (holder or None):
+            return None
+        return item
 
     @staticmethod
-    def _informants(store: Any, item: int) -> list[str]:
-        """Qui le lui a déjà appris (lu par l'identifiant du jumeau, pas dans ce qu'on a montré au modèle)."""
-        rows = store.query_mind(f"SELECT informants, source FROM {c.ITEMS_TABLE} WHERE id=?", (item,))
-        if not rows:
+    def _testimonies(store: Any, item: int | None) -> list[Testimony]:
+        if item is None:
             return []
-        return _keys(rows[0][0]) or ([rows[0][1]] if rows[0][1] else [])
+        return [testimony_of(r) for r in store.query_mind(
+            f"SELECT {','.join(TESTIMONY_COLUMNS)} FROM {TESTIMONIES_TABLE} WHERE item=? ORDER BY seq", (item,))]
+
+    @staticmethod
+    def _former_twin(store: Any, text: str, about: tuple[str, ...], nature: str, holder: str | None) -> int | None:
+        """Une croyance qu'elle a cessé de croire (remplacée), aux mêmes mots : redite, elle revient."""
+        rows = store.query_mind(
+            f"SELECT id, text, knowledge_kind, holder FROM {c.ITEMS_TABLE} WHERE fingerprint=? AND kind=? "
+            "AND status='superseded' AND about=? AND about_self=0 ORDER BY id DESC",
+            (fingerprint(text), c.BELIEF, json.dumps(sorted(set(about)), ensure_ascii=False)))
+        for k, previous, kind, owner in rows:
+            if same_words(previous, text) and kind == nature and (nature == "claim" or (owner or None) == (holder or None)):
+                return int(k)
+        return None
+
+    @staticmethod
+    def _head_of(store: Any, item: int) -> int | None:
+        """Ce qui l'a remplacée, de remplacement en remplacement, jusqu'à ce qu'elle croit maintenant."""
+        seen: set[int] = set()
+        current: int | None = item
+        while current is not None and current not in seen and len(seen) < 16:
+            seen.add(current)
+            rows = store.query_mind(f"SELECT status, superseded_by FROM {c.ITEMS_TABLE} WHERE id=?", (current,))
+            if not rows:
+                return None
+            status, after = rows[0]
+            if status == "active":
+                return current if current != item else None
+            current = after
+        return None
+
+    @staticmethod
+    def _about_of(store: Any, item: int) -> list[str]:
+        """Qui une croyance concerne (lu par son identifiant)."""
+        rows = store.query_mind(f"SELECT about FROM {c.ITEMS_TABLE} WHERE id=?", (item,))
+        return _keys(rows[0][0]) if rows else []
+
+    @staticmethod
+    def _closed_souvenirs(frame: Frame, store: Any, conv: x.Conversation, items: Sequence[int]) -> list[Draft[Any]]:
+        """Ce que la discrétion demandée ferme aussi : les souvenirs nés des mêmes mots de qui la demande. La relecture
+        ne voit que les croyances déjà connues ; le souvenir de la même confidence (« Alice m'a dit qu'elle quittait sa
+        boîte »), noté avant le « garde-le pour toi », restait dicible à toute amie, et nourrissait le portrait (sonde
+        réelle du 2026-10-09). Une autre croyance née du même message ne se ferme pas : la relecture la voit, et la
+        désigne si elle laisse deviner le secret."""
+        if not items:
+            return []
+        marks = ",".join("?" * len(items))
+        cited = {int(m) for (raw,) in store.query_mind(f"SELECT sources FROM {c.ITEMS_TABLE} WHERE id IN ({marks})",
+                                                       tuple(items)) for m in _keys(raw)}
+        if not cited:
+            return []
+        askers = set(conv.persons)
+        marks = ",".join("?" * len(cited))
+        theirs = sorted(int(i) for i, who in store.query_mind(
+            f"SELECT id, person FROM {transcript_c.THREAD_TABLE} WHERE role='user' AND id IN ({marks})",
+            tuple(sorted(cited))) if who and (frame.get(identity_c.PERSON(who)) or who) in askers)
+        if not theirs:
+            return []
+        marks = ",".join("?" * len(theirs))
+        found = store.query_mind(
+            f"SELECT DISTINCT i.id FROM {c.ITEMS_TABLE} i, json_each(i.sources) j WHERE i.kind=? AND "
+            f"i.status='active' AND i.secret=0 AND j.value IN ({marks}) ORDER BY i.id", (c.SOUVENIR, *theirs))
+        return [c.REINFORCED.draft(item=int(i), secret=True, sensitivity=int(Sensitivity.CONFIDENCE)) for (i,) in found]
 
 
 @dataclass(frozen=True, slots=True)
@@ -1093,7 +1312,8 @@ _CHUNK_COLUMNS = ("id", "person", "user_text", "reply_text", "room")
 
 
 def _item_vector(r: dict[str, Any]) -> VectorItem:
-    people = {*_keys(r["about"]), *_keys(r["told_by"])}
+    # qui l'a dit, tous témoins compris (ADR 0080) : ce qu'une personne lui a appris se retrouve avec elle
+    people = {*_keys(r["about"]), *_keys(r["told_by"]), *_keys(r.get("informants"))}
     if r.get("holder"):
         people.add(r["holder"])
     return VectorItem(int(r["id"]), r["kind"], r["text"], tuple(sorted(people)))

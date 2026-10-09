@@ -207,7 +207,7 @@ def _named_exists(ctx: InspectContext, key: str) -> bool:
     """Une personne connue seulement de nom existe si la mémoire en parle."""
     if len(key) <= len(NAMED) or ctx.store is None:
         return False
-    rows = ctx.store.query_mind(f"SELECT 1 FROM {memory_c.ABOUT_TABLE} WHERE person=? LIMIT 1", (key,))
+    rows = ctx.store.query_mind(f"SELECT 1 FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} WHERE person=? LIMIT 1", (key,))
     return bool(rows)
 
 
@@ -302,7 +302,8 @@ def waiting_names(s: IdentityState, store: Any) -> list[Waiting]:
     ceux qu'un opérateur a écartés ; les arrivées les plus récentes d'abord. Lu dans le magasin, en lecture seule
     (l'index par personne de la mémoire), jamais dans une autre faculté."""
     rows = store.query_mind(
-        f"SELECT DISTINCT a.person FROM {memory_c.ABOUT_TABLE} a JOIN {memory_c.ITEMS_TABLE} i ON i.id = a.item "
+        f"SELECT DISTINCT a.person FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} a JOIN {memory_c.KNOWLEDGE_VIEW} i "
+        "ON i.id = a.item "
         "WHERE a.person >= ? AND a.person < ? AND i.status='active' AND i.kind IN (?, ?, ?)",
         (NAMED, _NAMED_END, *NAMED_KINDS))
     free = sorted({str(k) for (k,) in rows} - set(s.names))
@@ -330,8 +331,8 @@ def _named_items(store: Any, keys: Sequence[str]) -> dict[str, list[tuple[str, i
         return {}
     marks = ",".join("?" * len(keys))
     rows = store.query_mind(
-        f"SELECT a.person, i.kind, i.sensitivity, i.secret, i.told_by, i.born_at FROM {memory_c.ABOUT_TABLE} a "
-        f"JOIN {memory_c.ITEMS_TABLE} i ON i.id = a.item WHERE a.person IN ({marks}) AND i.status='active' "
+        f"SELECT a.person, i.kind, i.sensitivity, i.secret, i.told_by, i.born_at FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} "
+        f"a JOIN {memory_c.KNOWLEDGE_VIEW} i ON i.id = a.item WHERE a.person IN ({marks}) AND i.status='active' "
         "AND i.kind IN (?, ?, ?)", (*keys, *NAMED_KINDS))
     out: dict[str, list[tuple[str, int, bool, tuple[str, ...], int]]] = {}
     for key, kind, sensitivity, secret, told_by, born_at in rows:

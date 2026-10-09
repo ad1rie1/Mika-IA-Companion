@@ -264,7 +264,8 @@ class KernelPort:
         audience = Audience(persons=(handle,), channel="web", public=False, level=int(disclosure.level),
                             witness_level=int(disclosure.witness_level), private_ok=disclosure.own_file)
         person = frame.get(identity_c.PERSON(handle))
-        thoughts = [t for t in frame.get(attention_c.THOUGHTS) if attention_prompt.admissible(t, person, audience)][:3]
+        thoughts = [t for t in frame.get(attention_c.THOUGHTS)
+                    if attention_prompt.admissible(t, person, audience, frame)][:3]
         texts = self._store.content([t.text_ref for t in thoughts if t.text_ref])
 
         def name_of(key: str) -> str:
@@ -277,7 +278,7 @@ class KernelPort:
         yesterday, dream = frame.get(self_c.YESTERDAY), frame.get(self_c.DREAM_RESIDUE)
         # la même version que celle qu'elle a en tête devant cette personne (ADR 0043) : l'intime à qui en est le
         # seul concerné, en privé ; sinon la partageable ; sinon rien
-        ref = night.journal_ref(yesterday, person, audience.private_ok) if yesterday is not None else ""
+        ref = night.journal_ref(yesterday, person, audience, frame) if yesterday is not None else ""
         if yesterday is not None and ref:
             text = self._store.content([ref]).get(ref)
             if text:
@@ -286,13 +287,14 @@ class KernelPort:
                                                                                       night.lived_day(frame)),
                                         "narrative": text, "dominant_emotion": yesterday.dominant,
                                         "persons_interacted": []}
-        if dream is not None and night.hearable(dream.about, dream.sensitivity, person, audience):
+        if dream is not None and night.dream_hearable(dream, person, audience, frame):
             text = self._store.content([dream.text_ref]).get(dream.text_ref)
             if text:
                 out["last_dream"] = {"content": text, "dream_type": dream.kind, "vividness": dream.vividness,
                                      "emotion": dream.emotion or "dreamy", "night_of": dream.night,
                                      "recalled": dream.recalled}
-        ref = frame.state("self").narrative_ref
+        me = frame.state("self")
+        ref = me.narrative_ref if not me.narrative_masked else ""  # un souvenir repris est devenu secret (ADR 0082)
         narrative = self._store.content([ref]).get(ref) if ref else None
         if narrative:
             out["self_narrative"] = {"content": narrative}
@@ -464,7 +466,8 @@ class KernelPort:
         person = frame.get(identity_c.PERSON(handle))
         profile = frame.state("social").profiles.get(person)
         contact = frame.get(social_c.CONTACT(person))
-        parts = profile_parts(profile, self._store.content(refs_of(profile))) if profile else (None, "", (), ())
+        shown = profile is not None and not profile.masked  # devenue secrète, une source le fait taire (ADR 0082)
+        parts = profile_parts(profile, self._store.content(refs_of(profile))) if shown else (None, "", (), ())
         out["person_profile"] = {
             "name": view.name, "summary": parts[0] or "", "closeness": frame.get(social_c.CLOSENESS(person)),
             "preferred_tone": parts[1], "topics_of_interest": list(parts[2]), "sensitive_topics": list(parts[3]),
@@ -474,8 +477,8 @@ class KernelPort:
         if promises:
             ids = [pr.id for pr in promises]
             marks = ",".join("?" * len(ids))
-            rows = self._store.query_mind(f"SELECT text FROM {memory_c.ITEMS_TABLE} WHERE id IN ({marks}) ORDER BY id",
-                                          tuple(ids))
+            rows = self._store.query_mind(f"SELECT text FROM {memory_c.KNOWLEDGE_VIEW} WHERE id IN ({marks}) "
+                                          "ORDER BY id", tuple(ids))
             out["pending_commitments"] = [r[0] for r in rows]
         return out
 

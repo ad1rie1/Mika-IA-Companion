@@ -194,18 +194,21 @@ def run_windows(tmp_path, windows, turns, *, script=None):
 SIX = ["un", "deux", "trois", "quatre", "cinq", "six"]
 
 
-def test_the_same_fact_reinforces_but_another_confidant_keeps_separate_evidence(tmp_path):
+def test_the_same_fact_is_one_belief_and_each_confidant_keeps_its_testimony(tmp_path):
+    """Une proposition, des témoignages (ADR 0080, qui remplace « chaque confident garde sa ligne ») : redit par Alice,
+    pas plus sûr ; dit par Bob, un témoignage de plus — avec ses propres permissions — et plus sûr."""
     fact = "Samedi c'est le mariage de Julie, la sœur d'Alice, à Lyon"
     rows, kernel, _ = run_windows(tmp_path, [
         {"croyances": [belief(fact, "Alice")]},
         {"croyances": [belief(fact, "Alice")]},  # redit par Alice : pas plus sûr
-        {"croyances": [belief(fact, "Alice", source="Bob")]},  # dit par Bob : corroboré
+        {"croyances": [belief(fact, "Alice", source="Bob")]},  # Alice le tient de Bob : corroboré
     ], [("user_2", "Alice", SIX), ("user_2", "Alice", SIX), ("user_3", "Bob", SIX)])
     beliefs = [r for r in rows if r[1] == "belief"]
-    assert len(beliefs) == 2, "chaque confident garde sa preuve et ses permissions"
-    assert all(abs(b[3] - 0.7) < 1e-9 for b in beliefs)
-    reinforced = [e.data for e in events_of(kernel, "memory.reinforced")]
-    assert [r.corroborated for r in reinforced] == [False]
+    assert len(beliefs) == 1, "une seule proposition"
+    attested = [e.data for e in events_of(kernel, "memory.attested")]
+    assert [a.item for a in attested] == [beliefs[0][0]] * 2 and all(a.told_by == ("user_2",) for a in attested)
+    assert attested[0].source == "user_2" and "bob" in (attested[1].source or "")  # d'elle-même, puis de Bob
+    assert 0.7 < beliefs[0][3] <= 0.95  # ce qu'elle tient de Bob : plus sûr ; ce qu'elle redit d'elle : rien
 
 
 class Revising(Extractions):

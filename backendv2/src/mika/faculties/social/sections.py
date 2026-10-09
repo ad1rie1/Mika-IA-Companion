@@ -18,7 +18,6 @@ et ce qui tranche avec son ton habituel) est tenu par ``others``.
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Mapping
 from typing import Any
@@ -34,6 +33,8 @@ from mika.kernel.faculty import Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody, readable
 from mika.vocab.episodes import CONVERSATIONAL
+from mika.vocab.knowledge import knowns
+from mika.vocab.lineage import admits
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -140,6 +141,8 @@ async def _profile_text(s: SocialState, frame: Frame, ports: Mapping[str, Any]) 
     if store is None or ep is None or not ep.target or aud is None or not aud.private_ok:
         return None
     profile = s.profiles.get(frame.get(identity_c.PERSON(ep.target)))
+    if profile is not None and profile.masked:
+        return None  # un élément qu'elle reprenait est devenu secret : elle se tait jusqu'à sa réécriture
     refs = refs_of(profile) if profile is not None else []
     return store.content(refs) if refs else None
 
@@ -150,21 +153,25 @@ BETWEEN_SHOWN = 4
 
 def between_us(store: Any, frame: Frame, person: str) -> tuple[tuple[int, str], ...]:
     """Ce qui n'appartient qu'à elle et à cette personne (``memory`` : un surnom, leur blague) — de première main :
-    ce que la personne lui en a dit, ou ce qu'elle-même en a dit, jamais ce qu'un tiers en raconte."""
+    ce que la personne lui en a dit, ou ce qu'elle-même en a dit, jamais ce qu'un tiers en raconte ; seulement ce qui
+    ne concerne qu'elles deux (« Sam et Léa m'appellent Mimi » n'est pas à Sam seul), et ce que le verdict de la
+    mémoire laisse dire ici (audit du 2026-10-09)."""
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
-    where = " OR ".join("about LIKE ?" for _ in handles)
-    rows = store.query_mind(
-        f"SELECT id, text, told_by FROM {memory_c.ITEMS_TABLE} WHERE kind=? AND status='active' AND between_us=1 "
-        f"AND ({where}) ORDER BY importance DESC, id DESC LIMIT ?",
-        (memory_c.BELIEF, *(f'%"{h}"%' for h in handles), BETWEEN_SHOWN * 2))
+    marks = ",".join("?" * len(handles))
+    rows = knowns(store.query_mind(
+        f"{memory_c.SELECT_KNOWN} WHERE kind=? AND status='active' AND between_us=1 AND id IN "
+        f"(SELECT item FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} WHERE person IN ({marks})) "
+        "ORDER BY importance DESC, id DESC LIMIT ?", (memory_c.BELIEF, *handles, BETWEEN_SHOWN * 2)),
+        memory_c.KNOWN_COLUMNS)
+    aud = frame.audience
+    resolve, presumed = identity_c.resolvers(frame.get)
     out = []
-    for i, text, told_by in rows:
-        try:
-            tellers = set(json.loads(told_by or "[]"))
-        except ValueError:
+    for k in rows:
+        if not k.text or not set(k.told_by) <= set(handles) or not set(k.about) <= set(handles):
             continue
-        if text and tellers <= set(handles):
-            out.append((int(i), str(text)))
+        if aud is None or not admits(k.lineage, person, aud, resolve=resolve, presumed=presumed).ok:
+            continue
+        out.append((k.id, k.text))
     return tuple(out[:BETWEEN_SHOWN])
 
 

@@ -41,6 +41,7 @@ from mika.kernel.state import FrozenDict
 from mika.vocab import affect as A
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
+from mika.vocab.lineage import admits
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity, hearable
 
@@ -59,7 +60,8 @@ def feeling(emotion: str) -> str:
     return family("attention.feeling").get(e.value) or phrase("attention.thoughts.feeling_other", feeling=A.FR[e])
 
 
-def admissible(t: c.ThoughtReading, interlocutor: str | None, aud: Audience | None) -> bool:
+def admissible(t: c.ThoughtReading, interlocutor: str | None, aud: Audience | None,
+               frame: Frame | None = None) -> bool:
     """Les règles de la mémoire (``vocab.privacy.hearable``) : ce qui ne concerne personne passe s'il est
     anodin (ou si l'audience peut l'entendre) ; ce qui ne concerne que l'interlocuteur, s'il est anodin ou si sa
     fiche est ouverte ; ce qui concerne d'autres, jusqu'au niveau de l'audience (« lié » quand l'interlocuteur a un
@@ -70,8 +72,17 @@ def admissible(t: c.ThoughtReading, interlocutor: str | None, aud: Audience | No
         # un mensonge ne pèse à voix haute que devant qui l'a reçu, en privé : devant une autre, « j'ai menti à
         # Bob » laisserait deviner ce qu'il couvrait
         return interlocutor is not None and interlocutor in t.about and aud.private_ok and not aud.public
-    return hearable(tuple(t.about), t.sensitivity, interlocutor, aud.level, aud.witness_level, aud.private_ok,
-                    tied_level=aud.tied_level, ties=aud.ties)
+    if not hearable(tuple(t.about), t.sensitivity, interlocutor, aud.level, aud.witness_level, aud.private_ok,
+                    tied_level=aud.tied_level, ties=aud.ties):
+        return False
+    if t.lineage is None:
+        return True
+    if frame is None:
+        return False  # une filiation qu'on ne peut pas lire ne s'ouvre pas
+    # née de ce qu'elle sait (une croyance révisée) : ce que ses sources permettent, chacune (audit du 2026-10-09 :
+    # la révision d'un secret que Bob avait confié sur Sam se racontait à Sam)
+    resolve, presumed = identity_c.resolvers(frame.get)
+    return admits(t.lineage, interlocutor, aud, resolve=resolve, presumed=presumed).ok
 
 
 def shown(t: c.ThoughtReading, text: str, interlocutor: str | None, name_of: Callable[[str], str]) -> str:
@@ -110,7 +121,7 @@ def _lines(frame: Frame, enrich: Mapping[str, Any], *, signals: bool, limit: int
         if (t.origin == c.SIGNAL) != signals:
             continue
         text = texts.get(t.text_ref)
-        if not text or not admissible(t, person, aud):
+        if not text or not admissible(t, person, aud, frame):
             continue
         strength = phrase("attention.thoughts.often") if t.intensity >= 0.5 else phrase("attention.thoughts.sometimes")
         said = " ".join(shown(t, text, person, name_of).split())

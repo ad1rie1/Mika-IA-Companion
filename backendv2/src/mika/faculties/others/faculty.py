@@ -339,14 +339,16 @@ class OthersState:
     hours: FrozenDict[str, tuple[tuple[int, int], ...]] = field(default_factory=FrozenDict)
     #: les initiatives en cours qui portent sur un moment de la vie de quelqu'un (corrélation → moment)
     moments: FrozenDict[str, int] = field(default_factory=FrozenDict)
-    #: moment → quand elle en a parlé d'elle-même (encourager, demander comment ça s'est passé) : une fois chacun
+    #: fil du moment → quand elle en a parlé d'elle-même (encourager, demander comment ça s'est passé) : une fois
+    #: chacun — reporté ou redit, le même moment (ADR 0079)
     spoke: FrozenDict[int, int] = field(default_factory=FrozenDict)
 
 
 #: v2 : ce qui rassure se juge à la lecture ; sa propre réponse peut l'inquiéter ; la contagion.
 #: v3 : les heures où chacun écrit ; encourager la veille, demander après — une fois chacun.
+#: v4 : ce qu'elle a dit d'un moment se range sous son fil (reporté, redit, revenu : le même, ADR 0079).
 OTHERS = Faculty("others", state=OthersState, init=lambda p: OthersState(), params=OthersParams, derive=derive,
-                 state_version=3)
+                 state_version=4)
 OTHERS.declare(*c.ALL)
 
 
@@ -550,7 +552,7 @@ def _learned(s: OthersState, e, cx) -> OthersState:
     return s
 
 
-@OTHERS.reducer(rt.EPISODE_STARTED)
+@OTHERS.reducer(rt.EPISODE_STARTED, reads=[memory_c.MOMENT_THREAD])
 def _reaching_out(s: OthersState, e, cx) -> OthersState:
     d = e.data
     if d.kind != Kind.INITIATIVE or not d.target:
@@ -562,7 +564,8 @@ def _reaching_out(s: OthersState, e, cx) -> OthersState:
     moment = moment_of(d.subject)
     if moment is None:
         return s
-    moments = s.moments.set(e.correlation, moment)
+    # rangé sous le fil du moment : reporté ou redit, c'est le même (un journal d'avant nommait son numéro)
+    moments = s.moments.set(e.correlation, cx.facts.get(memory_c.MOMENT_THREAD(moment)) or moment)
     if len(moments) > OPENINGS_KEPT:
         moments = FrozenDict(sorted(moments.items())[-OPENINGS_KEPT:])
     return replace(s, moments=moments)
@@ -857,8 +860,10 @@ def _cheer(s: OthersState, frame: Frame) -> list[Candidate]:
             continue
         last = _last_from(frame, person)
         hard = _hard(frame, person)
+        # une fois par date : redit le même soir, il est déjà encouragé ; déplacé, il l'est pour la nouvelle veille
         due = [(ev, w) for ev in frame.get(memory_c.LIFE_EVENTS(person))
-               if ev.id not in s.spoke and set(ev.told_by) <= {person} and not (hard and _minor(ev))
+               if set(ev.told_by) <= {person} and not (hard and _minor(ev))
+               and s.spoke.get(ev.key, 0) < _day_start(ev.when, frame) - DAY
                and (w := _cheer_window(ev, frame, p)) is not None and last < w[1]]
         address = _address(frame, person) if due else None
         if address is None:
@@ -875,7 +880,7 @@ def _cheer(s: OthersState, frame: Frame) -> list[Candidate]:
         evidence = p.checkin_evidence_start + (p.cheer_evidence - p.checkin_evidence_start) * ramp
         out.append(Candidate(Kind.INITIATIVE, address, c.CHEER, round(evidence, 3),
                              resources=frozenset({floor(address)}), guards=(guard,),
-                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.id}"})))
+                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
     return out
 
 
@@ -920,7 +925,7 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
                if not ev.ongoing and not ev.followed_at and set(ev.told_by) <= {person}
                and not (hard and _minor(ev)) and (ev.festive or not ev.yearly)
-               and s.spoke.get(ev.id, 0) < (_day_start(ev.when, frame) if ev.festive else ev.when)
+               and s.spoke.get(ev.key, 0) < (_day_start(ev.when, frame) if ev.festive else ev.when)
                and last <= ev.when and _follow_from(ev, frame, p) <= frame.now <= ev.when + p.followup_until_us]
         address = _address(frame, person) if due else None
         if address is None:
@@ -941,7 +946,7 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
         evidence = min(full, p.checkin_evidence_start) + (full - min(full, p.checkin_evidence_start)) * ramp
         out.append(Candidate(Kind.INITIATIVE, address, c.FOLLOW_UP, round(evidence, 3),
                              resources=frozenset({floor(address)}), guards=(guard,),
-                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.id}"})))
+                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
     return out
 
 
@@ -966,7 +971,7 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
             continue
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
                if ev.festive and not ev.ongoing and not ev.followed_at and set(ev.told_by) <= {person}
-               and _day_start(ev.when, frame) == today and s.spoke.get(ev.id, 0) < today]
+               and _day_start(ev.when, frame) == today and s.spoke.get(ev.key, 0) < today]
         address = _address(frame, person) if due else None
         if address is None:
             continue
@@ -982,7 +987,7 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         out.append(Candidate(Kind.INITIATIVE, address, c.CELEBRATE, p.celebrate_evidence,
                              resources=frozenset({floor(address)}), guards=(guard,),
-                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.id}"})))
+                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
     return out
 
 
@@ -1006,7 +1011,7 @@ def _remember(s: OthersState, frame: Frame) -> list[Candidate]:
             continue
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
                if memory_c.heavy_date(ev) and not ev.followed_at and set(ev.told_by) <= {person}
-               and _day_start(ev.when, frame) == today and s.spoke.get(ev.id, 0) < today]
+               and _day_start(ev.when, frame) == today and s.spoke.get(ev.key, 0) < today]
         address = _address(frame, person) if due else None
         if address is None:
             continue
@@ -1018,7 +1023,7 @@ def _remember(s: OthersState, frame: Frame) -> list[Candidate]:
         guard = Guard("pas de nouvelles", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
         out.append(Candidate(Kind.INITIATIVE, address, c.REMEMBRANCE, p.remembrance_evidence,
                              resources=frozenset({floor(address)}), guards=(guard,),
-                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.id}"})))
+                             args=FrozenDict({"brief:others": brief, "subject": f"{MOMENT_SUBJECT}{ev.key}"})))
     return out
 
 

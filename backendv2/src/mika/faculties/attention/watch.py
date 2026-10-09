@@ -11,7 +11,6 @@ personne a dit autour — et, quand elle répondait à peine (« ouais », « bo
 
 from __future__ import annotations
 
-import json
 import math
 from typing import Any
 
@@ -31,6 +30,7 @@ from mika.faculties.attention.faculty import (
     ATTENTION,
     DRIFT,
     RELATIONAL,
+    REVISION_FRESH_US,
     AttentionState,
     Expectation,
     Heard,
@@ -46,12 +46,25 @@ from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.vocab.affect import Emotion
 from mika.vocab.days import when_fr
+from mika.vocab.knowledge import Known, knowns
+from mika.vocab.lineage import merged
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import elided, stems
 
 EXCERPT = 160
+
+
+
+def _known(store: Any, ids: tuple[int, ...]) -> dict[int, Known]:
+    """Ce qu'elle sait, ou a cru (une croyance remplacée), par identifiant — par la porte de la mémoire."""
+    if store is None or not ids:
+        return {}
+    marks = ",".join("?" * len(ids))
+    rows = [*store.query_mind(f"{memory_c.SELECT_KNOWN} WHERE id IN ({marks})", ids),
+            *store.query_mind(f"{memory_c.SELECT_FORMER} WHERE id IN ({marks})", ids)]
+    return {k.id: k for k in knowns(rows, memory_c.KNOWN_COLUMNS)}
 
 
 def _clip(text: str, n: int = EXCERPT) -> str:
@@ -120,9 +133,15 @@ def _also(lines: list[tuple[int, str]]) -> str:
 def ripe(q: Pending, frame: Frame, p: Any) -> int:
     """Quand une pensée en attente peut naître : tout de suite, sauf celle d'un échange — quand la personne n'a plus
     rien écrit depuis ``exchange_settle_us`` (la pensée naît de ce qui a le plus marqué, pas du premier message)."""
+    if q.origin == c.REVISION and frame.now - q.at > REVISION_FRESH_US:
+        return NEVER  # une révision d'il y a longtemps (rejouée par une reconstruction) ne naît plus
     if q.origin != c.EXCHANGE or not q.person:
         return q.at
     return max(q.at, _last_from(frame, q.person)) + p.exchange_settle_us
+
+
+#: jamais (une pensée en attente qui ne naîtra plus)
+NEVER = 2**62
 
 
 def _last_from(frame: Frame, person: str) -> int:
@@ -306,20 +325,26 @@ class Watch:
                                         intensity=q.intensity, origin=q.origin, about=q.about,
                                         sensitivity=q.sensitivity, source=q.source, dedupe_key=mark)
         if q.origin == c.REVISION:
-            texts = {}
-            if store is not None:
-                rows = store.query_mind(f"SELECT id, text, about, sensitivity FROM {memory_c.ITEMS_TABLE} "
-                                        "WHERE id IN (?, ?)", (q.extra or -1, q.source))
-                texts = {int(i): (t, a, int(sv)) for i, t, a, sv in rows}
-            old, new = texts.get(q.extra or -1), texts.get(q.source)
-            text = phrase("attention.thought.revision", old=_clip(old[0], 120), new=_clip(new[0], 120)) \
-                if old and new else phrase("attention.thought.revision_vague")
-            about: tuple[str, ...] = tuple(sorted(set(_about(old) + _about(new)))) if old and new else ()
-            sens = max((x[2] for x in (old, new) if x), default=int(Sensitivity.PERSONAL))
+            known = _known(store, (q.extra or -1, q.source))
+            old, new = known.get(q.extra or -1), known.get(q.source)
+            # changer d'avis elle-même n'est pas une confusion ; revenir à ce qu'elle croyait a ses mots (ADR 0081)
+            if not old or not new:
+                text = phrase("attention.thought.revision_vague")
+            elif new.about_self:
+                text = phrase("attention.thought.changed_mind", old=_clip(old.text, 120), new=_clip(new.text, 120))
+            elif new.id < old.id:
+                text = phrase("attention.thought.revision_back", old=_clip(old.text, 120), new=_clip(new.text, 120))
+            else:
+                text = phrase("attention.thought.revision", old=_clip(old.text, 120), new=_clip(new.text, 120))
+            about: tuple[str, ...] = tuple(sorted({*old.about, *new.about})) if old and new else ()
+            sens = max((x.sensitivity for x in (old, new) if x), default=int(Sensitivity.PERSONAL))
+            # les deux croyances y sont, mot pour mot : elle ne se redit que là où l'une et l'autre peuvent se dire
+            # (audit du 2026-10-09 : la révision d'un secret que Bob avait confié sur Sam se racontait à Sam)
+            lineage = merged(old.lineage, new.lineage) if old and new else None
             return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
                                         origin=q.origin, about=about, sensitivity=sens, source=q.source,
                                         sources=tuple(i for i in (q.extra, q.source) if i is not None),
-                                        dedupe_key=mark)
+                                        lineage=lineage, dedupe_key=mark)
         who = _name(frame, q.person) if q.person else phrase("attention.thought.someone")
         if q.origin == c.REMORSE:
             # être dure avec quelqu'un se regrette ; ça la concerne, sans rien dire de ce qui a été dit
@@ -365,15 +390,14 @@ class Watch:
     def _broken_promise(self, q: Pending, frame: Frame, store: Any, mark: str) -> Draft[Any]:
         """« J'avais promis à Alice… » : le texte de la promesse, jamais inventé ;
         sa sensibilité, celle de la promesse."""
-        rows = store.query_mind(f"SELECT text, sensitivity FROM {memory_c.ITEMS_TABLE} WHERE id=?", (q.source,)) \
-            if store is not None else []
+        promise = _known(store, (q.source,)).get(q.source) if q.source is not None else None
         who = _name(frame, q.person) if q.person else phrase("attention.thought.someone")
-        sens = max(int(Sensitivity.ANODYNE), int(rows[0][1])) if rows else int(Sensitivity.PERSONAL)
-        text = (phrase("attention.thought.promise", who=who, text=_clip(str(rows[0][0]), 200))
-                if rows else phrase("attention.thought.promise_vague", who=who))
+        sens = max(int(Sensitivity.ANODYNE), promise.sensitivity) if promise else int(Sensitivity.PERSONAL)
+        text = (phrase("attention.thought.promise", who=who, text=_clip(promise.text, 200))
+                if promise else phrase("attention.thought.promise_vague", who=who))
         return c.THOUGHT_BORN.draft(text=Content.of(text, level=sens), emotion=q.emotion, intensity=q.intensity,
                                     origin=q.origin, about=(q.person,) if q.person else (), sensitivity=sens,
-                                    source=q.source, dedupe_key=mark)
+                                    source=q.source, lineage=promise.lineage if promise else None, dedupe_key=mark)
 
     def _signals(self, state: AttentionState, frame: Frame, store: Any, p: Any) -> list[Draft[Any]]:
         """Remarquer ce que les sources signalent : l'émotion dosée par source,
@@ -464,10 +488,6 @@ class Watch:
                                     emotion=Emotion.LONELY.value, intensity=p.alone_intensity, origin=c.ALONE,
                                     about=(), sensitivity=sens, source=None,
                                     dedupe_key=f"seule:{state.last_contact}:{max(state.alone_at, state.last_contact)}")
-
-
-def _about(row: tuple[Any, ...] | None) -> tuple[str, ...]:
-    return tuple(json.loads(row[1] or "[]")) if row else ()
 
 
 # ── Ce que la personne écrit recoupe ce qui la concerne ───────────────────

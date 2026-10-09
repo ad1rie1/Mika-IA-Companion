@@ -10,6 +10,8 @@ app) en sont dispensés, chacun avec sa raison.
 
 from __future__ import annotations
 
+from typing import Any, Literal, get_args, get_origin
+
 from mika.app.composition import faculties
 from mika.kernel.registry import Registry
 from mika.runtime.state import RUNTIME
@@ -48,15 +50,31 @@ def test_declared_subjects_are_fields_of_the_payload():
 #: personne, des états, des noms — jamais des mots de quelqu'un (ceux-là sont des ``Content``, qui
 #: déclarent leurs sujets ; un nouveau champ de texte libre doit en être un).
 MEMORY_KEYS = {"origin", "source", "call_id", "status", "by", "model", "night", "to", "emotion", "about", "told_by",
-               "heard_by", "holder"}
+               "heard_by", "holder", "felt"}  # ``felt`` : ce que la personne ressent, un nom d'émotion (ADR 0083)
+
+
+def textual(annotation: Any) -> bool:
+    """Le champ porte-t-il du texte (le type ``str``, seul ou dans un conteneur, une union) ? Pas les valeurs d'un
+    ``Literal`` (des étiquettes écrites par le code), ni un nom de type qui contiendrait « str » (``Restriction``,
+    dont les champs sont des clés de personne : on regardait la sous-chaîne, ADR 0078)."""
+    if annotation is str:
+        return True
+    if get_origin(annotation) is Literal:
+        return False
+    return any(textual(a) for a in get_args(annotation))
 
 
 def test_memory_keeps_no_free_text_outside_its_contents():
     registry = Registry([RUNTIME, *faculties()])
     loose = sorted(f"{t.name}.{name}" for t in registry.events.all() if t.owner == "memory"
                    for name, field in t.payload.model_fields.items()
-                   if name not in t.content_fields and "str" in str(field.annotation) and name not in MEMORY_KEYS)
+                   if name not in t.content_fields and textual(field.annotation) and name not in MEMORY_KEYS)
     assert loose == [], f"du texte hors d'un contenu : {loose}"
+
+
+def test_the_free_text_check_sees_text():
+    assert textual(str) and textual(str | None) and textual(tuple[str, ...]) and textual(dict[str, int])
+    assert not textual(int) and not textual(Literal["claim", "opinion"]) and not textual(tuple[int, ...])
 
 
 def test_what_someone_confided_is_forgotten_with_them():

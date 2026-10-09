@@ -277,6 +277,10 @@ class SocialParams(BaseModel):
     profile_interval_us: Annotated[int, Knob(
         label="Fiche : intervalle minimal", group="Fiches", lo=HOUR, hi=30 * DAY,
         help="Pas deux relectures de la même fiche plus rapprochées.")] = DAY
+    profile_stale_after_us: Annotated[int, Knob(
+        label="Fiche : réécrire après un changement, au plus tôt", group="Fiches", lo=MINUTE, hi=DAY,
+        help="Quand un élément qu'une fiche reprenait devient secret ou est remplacé, la fiche se tait ou vieillit, et "
+             "se réécrit sans le reprendre — au plus tôt tant après la précédente.")] = 10 * MINUTE
     profile_max_items: Annotated[int, Knob(
         label="Fiche : éléments relus", group="Fiches", lo=5, hi=200,
         help="Combien de ses souvenirs et croyances sur la personne (les plus importants) le modèle relit — "
@@ -326,6 +330,11 @@ class Profile:
     tone_ref: str = ""
     interests_ref: str = ""
     sensitive_ref: str = ""
+    #: ce qu'il reprenait (des éléments de mémoire) ; l'un a changé : il se réécrit sans se recopier ; l'un est devenu
+    #: secret : il se tait d'ici là (ADR 0082)
+    sources: tuple[int, ...] = ()
+    stale: bool = False
+    masked: bool = False
 
 
 KnownRelation = c.KnownRelation
@@ -388,8 +397,10 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
 #: v5 : une ouverture qui ne regarde que la personne (``agency.FOR_THEM`` : s'inquiéter d'elle, lui souhaiter, lui
 #: demander comment ça s'est passé) n'est plus comptée comme « elle a écrit la première » — ``starts`` se recalcule.
 #: v6 : le dernier cran ressenti de chaque lien (``bond_shifted``, ``bond_noted``).
+#: v11 : un lien suit chaque témoignage de la croyance d'où il vient, et passe à la gardée d'une jointure (ADR 0080).
+#: v12 : un portrait suit ce qu'il reprenait : devenu secret, il se tait ; changé, il se réécrit (ADR 0082).
 SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive,
-                 state_version=10, retired_params=("ignored_shift", "tie_room_max"))
+                 state_version=12, retired_params=("ignored_shift", "tie_room_max"))
 SOCIAL.declare(*c.ALL)
 
 
@@ -545,11 +556,28 @@ _HOSTILE = frozenset({Emotion.ANGRY, Emotion.DISGUSTED, Emotion.FRUSTRATED, Emot
 
 
 @SOCIAL.reducer(memory_c.REMEMBERED, memory_c.BELIEVED, memory_c.EVENT_NOTED, memory_c.REINFORCED,
-                reads=[identity_c.PERSON])
+                memory_c.ATTESTED, memory_c.JOINED, reads=[identity_c.PERSON])
 def _knit(s: SocialState, e, cx) -> SocialState:
-    """Liens explicitement déclarés, orientés et sourcés. Une cooccurrence ne crée aucun lien."""
+    """Liens explicitement déclarés, orientés et sourcés. Une cooccurrence ne crée aucun lien. Un témoignage de plus
+    (``memory.attested``) ajoute le lien tel que ce témoin l'a dit ; une discrétion demandée rend secret ce qu'en a
+    dit qui la demande (tout, quand c'est la personne concernée) ; une croyance jointe la nuit passe ses liens à la
+    gardée (ADR 0080)."""
     d = e.data
     relations = s.relations
+    if e.type.name == memory_c.JOINED.name:
+        for keep, drop in d.pairs:
+            relations = FrozenDict((subject, FrozenDict((k, replace(v, item=keep) if v.item == drop else v)
+                                                        for k, v in edges.items()))
+                                   for subject, edges in relations.items())
+        return replace(s, relations=relation_cache(relations))
+    if e.type.name == memory_c.ATTESTED.name and d.secret:
+        closed = set(d.told_by)
+        for subject, edges in relations.items():
+            if any(v.item == d.item and not v.secret and (d.everyone or set(v.told_by) & closed)
+                   for v in edges.values()):
+                relations = relations.set(subject, FrozenDict(
+                    (k, replace(v, secret=True) if v.item == d.item and (d.everyone or set(v.told_by) & closed)
+                     else v) for k, v in edges.items()))
     replaced = getattr(d, "replaces", None)
     if replaced is not None:
         for subject, edges in relations.items():
@@ -568,7 +596,9 @@ def _knit(s: SocialState, e, cx) -> SocialState:
             continue
         status = "uncertain" if getattr(d, "knowledge_kind", "claim") == "hypothesis" else relation.status
         subjects = tuple(sorted({*d.about, *([d.holder] if getattr(d, "holder", None) else [])}))
-        edge = KnownRelation(other, relation.kind, status, e.seq, e.at,
+        # la croyance d'où vient le lien : celle qu'un témoignage redit, ou celle qui naît
+        item = d.item if e.type.name == memory_c.ATTESTED.name else e.seq
+        edge = KnownRelation(other, relation.kind, status, item, e.at,
                              tuple(d.told_by), tuple(d.sources), d.secret, subjects)
         key = f"{other}|{relation.kind}|{','.join(sorted(d.told_by))}"
         mine = relations.get(subject) or FrozenDict()
@@ -601,8 +631,25 @@ def _profiled(s: SocialState, e, cx) -> SocialState:
                       sensitive=tuple(d.legacy_sensitive), revised_at=e.at, upto=d.upto,
                       mentions_at=s.mentions.get(d.person, 0), tone_ref=d.tone.ref or "" if d.tone else "",
                       interests_ref=d.interests.ref or "" if d.interests else "",
-                      sensitive_ref=d.sensitive.ref or "" if d.sensitive else "")
+                      sensitive_ref=d.sensitive.ref or "" if d.sensitive else "", sources=tuple(d.sources))
     return replace(s, profiles=s.profiles.set(d.person, profile))
+
+
+@SOCIAL.reducer(*memory_c.WITHDRAWING)
+def _portrait_sources(s: SocialState, e, cx) -> SocialState:
+    """Un portrait suit ce qu'il reprenait (ADR 0082) : un élément devenu secret le fait taire tout de suite (il se
+    réécrit sans lui) ; remplacé, contesté, il se réécrit sans recopier l'ancien."""
+    gone = memory_c.withdrawals(e.type.name, e.data, e.seq)
+    changed = {w.item for w in gone if w.reason in (memory_c.SECRET, memory_c.SUPERSEDED, memory_c.CONTESTED)}
+    private = {w.item for w in gone if w.reason in memory_c.PRIVATE_REASONS}
+    if not changed:
+        return s
+    profiles = s.profiles
+    for person, pr in s.profiles.items():
+        hit = set(pr.sources) & changed
+        if hit:
+            profiles = profiles.set(person, replace(pr, stale=True, masked=pr.masked or bool(hit & private)))
+    return s if profiles is s.profiles else replace(s, profiles=profiles)
 
 
 @SOCIAL.reducer(c.CLOSENESS_SET)
@@ -1051,7 +1098,7 @@ def _sensitive_ref(s: SocialState, cx, person: str) -> str:
 @SOCIAL.fact(c.INTERESTS_REF)
 def _interests_ref(s: SocialState, cx, person: str) -> str:
     profile = s.profiles.get(person)
-    return profile.interests_ref if profile else ""
+    return profile.interests_ref if profile and not profile.masked else ""
 
 
 @SOCIAL.fact(c.MISSED, reads=[c.CIRCLE, c.CONTACT, affect_c.HOSTILITY, identity_c.IS_OWNER, identity_c.HANDLES])

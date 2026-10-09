@@ -51,12 +51,13 @@ public quand ça s'est dit en privé (ADR 0055).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import model_validator
 
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.vocab.lineage import Restriction
 
 OWNER = "memory"
 
@@ -98,14 +99,9 @@ CHUNK = "chunk"
 ROOM_CHUNK = "room_chunk"
 
 
-class Disclosure(Payload):
-    """Une restriction héritée : toutes les sources doivent autoriser la diffusion."""
-
-    about: tuple[str, ...] = ()
-    told_by: tuple[str, ...] = ()
-    heard_by: tuple[str, ...] = ()
-    sensitivity: int = 2
-    secret: bool = False
+#: Une restriction héritée (les sources d'une réflexion de nuit) : toutes doivent autoriser la diffusion. Le type
+#: vit dans ``vocab.lineage`` (``Restriction``), partagé par tous les textes qui dérivent de ce qu'elle sait.
+Disclosure = Restriction
 
 
 class Remembered(Payload):
@@ -126,6 +122,8 @@ class Remembered(Payload):
     secret: bool = False
     #: un souvenir né d'un mensonge qu'elle a dit (``LIED``) : ce qu'elle a affirmé de faux, à qui
     lie: bool = False
+    #: ce que la personne concernée en ressent, jugé par la relecture (ADR 0083) — son émotion à elle, ``emotion``
+    felt: str | None = None
 
     @model_validator(mode="after")
     def _inherited_subjects(self):
@@ -170,6 +168,19 @@ class Believed(Payload):
     knowledge_kind: Literal["claim", "opinion", "preference", "hypothesis"] = "claim"
     holder: str | None = None
     relations: tuple[Relation, ...] = ()
+    #: une croyance qu'elle contredit sans la remplacer (une source moins sûre) : les deux restent, elle doute
+    #: (ADR 0081)
+    contests: int | None = None
+    #: de première main : la personne concernée qui parle d'elle-même, ou un témoin qui l'a vu
+    first_hand: bool = False
+    #: depuis quand c'est vrai (dit par la personne : « depuis lundi ») ; ``None`` : depuis qu'on le lui a dit
+    as_of: int | None = None
+    #: jusqu'à quand c'est vrai, quand c'est dit (« jusqu'à la fin du mois ») ; ``None`` : jusqu'à preuve du contraire
+    valid_until: int | None = None
+    #: ce que la personne concernée en ressent, et ce qu'elle-même en ressent — de l'empathie, selon ce qu'elle
+    #: sait et pense (ADR 0083) ; jugés par la relecture, une des 29 émotions
+    felt: str | None = None
+    emotion: str | None = None
 
     @model_validator(mode="after")
     def _relation_subjects(self):
@@ -201,6 +212,52 @@ class Reinforced(Payload):
     replaces: int | None = None
     #: ce qui revient se révèle n'appartenir qu'à elles deux (un surnom) : ça le reste (ADR 0055)
     between_us: bool = False
+
+
+class Attested(Payload):
+    """Quelqu'un lui redit ce qu'elle croit déjà (ADR 0080) : un **témoignage** de plus sur la même proposition, avec
+    ses propres droits — qui le lui a dit, qui l'a entendu, à quel point c'est sensible, si on lui a demandé de le
+    garder pour soi. Ce que la même personne redit ne la rend pas plus sûre ; une autre, si. Elle peut en parler là
+    où un témoignage le permet, en l'attribuant à ce témoin.
+
+    ``restricts`` : rien de nouveau n'est dit, on lui demande la discrétion (« garde-le pour toi ») — sur le
+    témoignage de qui la demande, ou sur **tous** (``everyone``) quand c'est la personne concernée qui la demande.
+    Contrairement à un ancien renforcement (``reinforced``), un témoignage ouvre la diffusion que ses droits
+    permettent."""
+
+    item: int
+    told_by: tuple[str, ...] = ()
+    heard_by: tuple[str, ...] = ()
+    source: str | None = None
+    origin: str = TOLD
+    confidence: float = 0.8
+    sensitivity: int = 1
+    secret: bool = False
+    between_us: bool = False
+    sources: tuple[int, ...] = ()
+    about: tuple[str, ...] = ()
+    relations: tuple[Relation, ...] = ()
+    #: ce qu'elle redit d'elle-même (une note sur elle)
+    about_self: bool = False
+    restricts: bool = False
+    everyone: bool = False
+    #: une croyance que celle-ci remplace (la confirmer en la désignant comme remplacée la confirme) — ou, dite de
+    #: nouveau après avoir été remplacée, celle qui l'avait remplacée (elle y revient, ADR 0081)
+    replaces: int | None = None
+    #: une croyance que ce témoignage conteste sans la remplacer (ADR 0081)
+    contests: int | None = None
+    first_hand: bool = False
+    call_id: str = ""
+    #: ce que la personne concernée en ressent, quand c'est elle qui le dit (ADR 0083) : son mot l'emporte
+    felt: str | None = None
+
+
+class Joined(Payload):
+    """La nuit, des croyances dites pareil par des personnes différentes (des doublons d'avant les témoignages) se
+    réunissent : ``(gardée, jointe)`` — la jointe devient un témoignage de la gardée."""
+
+    night: str
+    pairs: tuple[tuple[int, int], ...] = ()
 
 
 class PromiseNoticed(Payload):
@@ -255,6 +312,13 @@ class EventNoted(Payload):
     #: l'une de ses occurrences, ``LIFE_EVENTS`` rend la prochaine — sans qu'on la lui redise (faux dans un journal
     #: plus ancien : un moment n'arrivait qu'une fois)
     yearly: bool = False
+    #: une situation finie qui recommence (« il est de nouveau malade ») : celle qu'elle rouvre — le même fil, une
+    #: autre fois (ADR 0079)
+    recurs: int | None = None
+    #: ce que la personne en ressent (l'attendre avec joie, le redouter), et ce qu'elle-même en ressent pour elle
+    #: (ADR 0083)
+    felt: str | None = None
+    emotion: str | None = None
 
 
 class MomentFollowed(Payload):
@@ -266,6 +330,10 @@ class MomentFollowed(Payload):
     event: int
     #: la personne qui en a parlé (sa clé), ou ``""`` quand c'est elle qui l'a repris
     by: str = ""
+    #: le fil du moment (``LifeEvent.thread``) et l'instant de l'occurrence reprise : un moment redit entre-temps
+    #: (la personne l'a dit elle-même) garde le suivi ; déplacé à une autre date, non (0 : un journal d'avant)
+    thread: int = 0
+    occurrence: int = 0
 
 
 class SituationEnded(Payload):
@@ -327,8 +395,10 @@ EXTRACTION_DEFERRED = event_type("memory.extraction_deferred", OWNER, Extraction
                                  content=("detail",), subjects=("about",))
 CONSOLIDATED = event_type("memory.consolidated", OWNER, Consolidated, public=True)
 NIGHT_SORTED = event_type("memory.night_sorted", OWNER, NightSorted, public=True)
+ATTESTED = event_type("memory.attested", OWNER, Attested, public=True, subjects=_SUBJECTS)
+JOINED = event_type("memory.joined", OWNER, Joined, public=True)
 ALL = (REMEMBERED, BELIEVED, REINFORCED, PROMISE_NOTICED, PROMISE_RESOLVED, EVENT_NOTED, MOMENT_FOLLOWED, SITUATION_ENDED,
-       CONSOLIDATED, NIGHT_SORTED, EXTRACTION_DEFERRED)
+       CONSOLIDATED, NIGHT_SORTED, EXTRACTION_DEFERRED, ATTESTED, JOINED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -369,12 +439,84 @@ class LifeEvent:
     #: une date qui revient chaque année : ``LIFE_EVENTS`` la rend à sa prochaine occurrence (``when``), et
     #: ``followed_at`` à 0 tant que cette occurrence-là n'a pas été reprise
     yearly: bool = False
+    #: le fil du moment : le même quand il est reporté, redit, ou qu'une situation finie recommence — le
+    #: premier ``seq`` qui l'a noté (0 : un moment d'avant, son propre ``id``). Ce qu'on en a dit se range sous lui.
+    thread: int = 0
+    #: la situation finie qu'il rouvre (0 : aucune)
+    recurs: int = 0
+    #: ce que la personne en ressent, ce qu'elle-même en ressent (ADR 0083) ; vide : rien de dit
+    felt: str = ""
+    emotion: str = ""
+
+    @property
+    def key(self) -> int:
+        """Le fil du moment (son ``id`` dans un journal d'avant)."""
+        return self.thread or self.id
 
 
 def heavy_date(ev: LifeEvent) -> bool:
     """Une date lourde : elle revient chaque année, ne se fête pas et pèse au moins ``HEAVY_DATE`` (la date d'un
     deuil)."""
     return ev.yearly and not ev.festive and ev.importance >= HEAVY_DATE
+
+
+# ── Ce qui se retire (ADR 0082) ────────────────────────────────────────────
+#
+# Un texte tiré de ce qu'elle sait (un portrait, son récit, une pensée, un rêve, son journal) dépend de ses sources.
+# Quand l'une est remplacée, devient secrète, est contestée, jointe à une autre ou finie, ce qui en dérive le sait :
+# **une seule définition**, lue par chaque faculté sur les événements de la mémoire qu'elle réduit déjà — aucun
+# événement de plus à émettre, et le journal d'avant se rejoue avec.
+
+SUPERSEDED, SECRET, CONTESTED, JOINED_TO, ENDED = "superseded", "secret", "contested", "joined", "ended"
+#: ce qui ne peut plus se dire comme avant : ce qui en dérive se tait tout de suite (puis se réécrit)
+PRIVATE_REASONS = frozenset({SECRET})
+
+
+@dataclass(frozen=True, slots=True)
+class Withdrawal:
+    """Un élément de sa mémoire qui se retire : remplacé (``by`` : par quoi), devenu secret, contesté, joint à un autre
+    (``by`` : le gardé), ou une situation finie."""
+
+    item: int
+    reason: str
+    by: int | None = None
+
+
+def withdrawals(name: str, d: Any, seq: int) -> tuple[Withdrawal, ...]:
+    """Ce qu'un événement de la mémoire retire (vide : rien). Les facultés qui gardent un texte dérivé réduisent
+    ``WITHDRAWING`` et appellent ceci."""
+    out: list[Withdrawal] = []
+    replaces = getattr(d, "replaces", None)
+    if name == ATTESTED.name:
+        if d.secret:
+            out.append(Withdrawal(d.item, SECRET))
+        if replaces is not None and replaces != d.item:
+            out.append(Withdrawal(replaces, SUPERSEDED, d.item))
+        if d.contests is not None:
+            out.append(Withdrawal(d.contests, CONTESTED, d.item))
+    elif name == REINFORCED.name:
+        if d.secret:
+            out.append(Withdrawal(d.item, SECRET))
+        if replaces is not None and replaces != d.item:
+            out.append(Withdrawal(replaces, SUPERSEDED, d.item))
+    elif name in (BELIEVED.name, EVENT_NOTED.name):
+        if replaces is not None:
+            out.append(Withdrawal(replaces, SUPERSEDED, seq))
+        if getattr(d, "contests", None) is not None:
+            out.append(Withdrawal(d.contests, CONTESTED, seq))
+        if getattr(d, "recurs", None) is not None:
+            out.append(Withdrawal(d.recurs, SUPERSEDED, seq))
+    elif name == JOINED.name:
+        out += [Withdrawal(drop, JOINED_TO, keep) for keep, drop in d.pairs]
+    elif name == NIGHT_SORTED.name:
+        out += [Withdrawal(drop, JOINED_TO, keep) for keep, drop in d.merges]
+    elif name == SITUATION_ENDED.name:
+        out.append(Withdrawal(d.event, ENDED))
+    return tuple(out)
+
+
+#: Les événements de la mémoire qui peuvent retirer quelque chose (``withdrawals``).
+WITHDRAWING = (BELIEVED, ATTESTED, REINFORCED, EVENT_NOTED, JOINED, NIGHT_SORTED, SITUATION_ENDED)
 
 
 #: Le dernier message relu par la consolidation.
@@ -391,6 +533,9 @@ PROMISES_TO = FactFamily("memory.promises_to", arg=str, type=tuple)
 #: (ou à celle qui vient de passer, quelques jours) : la seule lecture qui
 #: dépende de l'instant.
 LIFE_EVENTS = FactFamily("memory.life_events", arg=str, type=tuple)
+#: Le fil d'un moment, d'après n'importe lequel de ses numéros (un moment reporté, redit, revenu) — son ``id`` si
+#: aucun autre ne l'a remplacé. Lu par ce qui range ce qu'elle en a dit (``others``).
+MOMENT_THREAD = FactFamily("memory.moment_thread", arg=int, type=int)
 #: Quelque chose de grave l'a touchée ces derniers jours (un deuil, une rupture, une maladie — ce qu'elle a lu de
 #: grave dans ses messages, ou ce qui l'a elle-même profondément attristée pour elle) — ou c'est aujourd'hui que
 #: revient une date lourde qu'elle a confiée elle-même (``heavy_date``) : l'instant, 0 sinon. Un
@@ -410,6 +555,37 @@ FORGETS_TABLE = "memory_forgets"
 #: À qui elle a répété quoi (``item``, ``handle``, ``at``) : d'après la
 #: provenance de ce qu'elle a dit. Ce qu'elle a raconté à Bob, Bob le sait.
 TOLD_TABLE = "memory_told"
+
+# ── La porte (ADR 0077…) : ce que les autres facultés lisent de ce qu'elle sait ──
+#
+# Les tables ci-dessus sont à la mémoire ; ailleurs, on ne lit que ces **vues** (un test d'architecture le vérifie),
+# et on passe chaque ligne par le verdict commun (``vocab.knowledge.known_of`` → ``Known.lineage`` →
+# ``vocab.lineage.admits``) : une faculté qui refait son propre filtre finit par fuir.
+
+#: Ce qu'elle sait et tient encore pour sien : souvenirs, croyances, promesses, moments — ni ce qu'une autre croyance
+#: a remplacé, ni ce que la nuit a fondu dans un autre. Les promesses tenues ou abandonnées, les situations finies y
+#: restent (c'est de l'histoire, toujours vraie). Colonnes : ``KNOWN_COLUMNS``.
+KNOWLEDGE_VIEW = "memory_knowledge"
+#: Qui concerne ce qu'elle sait (``item``, ``person``), indexé par personne — les mêmes lignes que ``KNOWLEDGE_VIEW``.
+KNOWLEDGE_ABOUT_VIEW = "memory_knowledge_about"
+#: Ce qu'elle a cru et ne croit plus (remplacé, fondu), lu par identifiant : « je croyais que… ».
+FORMER_VIEW = "memory_former"
+#: À qui elle a répété quoi (``item``, ``handle``, ``at``).
+RETOLD_VIEW = "memory_retold"
+#: Tout, statut compris, pour la console, le simulateur et l'application — jamais pour une faculté ou un plugin.
+LEDGER_VIEW = "memory_ledger"
+#: Les colonnes de ``KNOWLEDGE_VIEW`` et ``FORMER_VIEW``. ``told_by``, ``heard_by``, ``secret``, ``sensitivity``
+#: disent l'enveloppe la plus stricte de l'élément : on ne décide jamais dessus à la main, on passe par le verdict.
+KNOWN_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",
+                 "emotion", "born_at", "touched_at", "status", "recipient", "due", "sources", "told_by", "heard_by",
+                 "secret", "about_self", "between_us", "knowledge_kind", "holder", "constraints", "internal_only")
+#: Les statuts qui sortent de ce qu'elle sait (``FORMER_VIEW``) : remplacée, fondue la nuit dans un souvenir, jointe
+#: la nuit à la même croyance dite par un autre (ADR 0080).
+FORMER_STATUSES = ("superseded", "merged", "joined")
+#: « SELECT <KNOWN_COLUMNS> FROM <vue> » : à compléter d'un ``WHERE`` ; chaque ligne se lit par
+#: ``vocab.knowledge.knowns(rows, KNOWN_COLUMNS)``.
+SELECT_KNOWN = f"SELECT {', '.join(KNOWN_COLUMNS)} FROM {KNOWLEDGE_VIEW}"
+SELECT_FORMER = f"SELECT {', '.join(KNOWN_COLUMNS)} FROM {FORMER_VIEW}"
 
 
 class LifeRecalled(Payload):

@@ -40,6 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
 from mika.kernel.facts import FactKey
 from mika.kernel.forms import Knob
+from mika.vocab.lineage import Lineage, subjects
 from mika.vocab.temperament import Temperament
 
 OWNER = "self"
@@ -171,6 +172,8 @@ class Narrated(Payload):
     souvenirs: int = 0  # combien de souvenirs elle avait en l'écrivant
     #: les personnes des souvenirs qu'elle a relus : le récit peut les nommer (l'oubli l'atteint)
     about: tuple[str, ...] = ()
+    #: les souvenirs qu'elle a relus pour l'écrire : l'un devenu secret, remplacé, il se réécrit (ADR 0082)
+    sources: tuple[int, ...] = ()
 
 
 class Journaled(Payload):
@@ -185,6 +188,16 @@ class Journaled(Payload):
     #: des notes maigres, qu'elle comblait) ; ``None`` : un journal d'avant, qui ne se montre qu'à qui en est le seul
     #: concerné
     shareable: Content | None = None
+    #: ce qu'elle a relu pour l'écrire (souvenirs, promesses, pensées, ce qu'on lui a dit) et devant qui ses sources
+    #: permettent d'en montrer la version intime ; ``None`` : un journal d'avant, l'ancienne règle
+    lineage: Lineage | None = None
+
+    @model_validator(mode="after")
+    def _inherited_subjects(self):
+        about = tuple(sorted({*self.about, *subjects(self.lineage)}))
+        if self.lineage is not None and about != self.about:
+            object.__setattr__(self, "about", about)
+        return self
 
 
 class Dreamt(Payload):
@@ -197,6 +210,17 @@ class Dreamt(Payload):
     about: tuple[str, ...] = ()
     sensitivity: int = 1
     sources: tuple[int, ...] = ()
+    #: devant qui ses sources (les souvenirs et les pensées rêvés) permettent de le raconter ; ``None`` : un rêve
+    #: d'avant, la règle de ses personnes
+    lineage: Lineage | None = None
+
+    @model_validator(mode="after")
+    def _inherited_subjects(self):
+        # le secret que Bob a confié sur Sam ne fait pas un rêve « sur Sam » seul : Bob y est aussi
+        about = tuple(sorted({*self.about, *subjects(self.lineage)}))
+        if self.lineage is not None and about != self.about:
+            object.__setattr__(self, "about", about)
+        return self
 
 
 class WokeWith(Payload):
@@ -260,6 +284,10 @@ class JournalReading:
     dominant: str
     #: sa journée à elle, sans personne d'autre (vide : un journal d'avant)
     shareable_ref: str = ""
+    #: devant qui sa version intime peut se montrer (``None`` : un journal d'avant, l'ancienne règle)
+    lineage: Lineage | None = None
+    #: une de ses sources est devenue secrète : seule la version partageable se montre (ADR 0082)
+    masked: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +301,10 @@ class DreamReading:
     about: tuple[str, ...]
     sensitivity: int
     recalled: bool
+    #: devant qui il peut se raconter (``None`` : un rêve d'avant, la règle de ses personnes)
+    lineage: Lineage | None = None
+    #: une de ses sources est devenue secrète : il ne se raconte plus (ADR 0082)
+    masked: bool = False
 
 
 #: Le journal de la dernière journée vécue avant aujourd'hui (``None`` s'il n'y en a pas) — pas forcément

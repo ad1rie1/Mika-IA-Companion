@@ -87,6 +87,7 @@ from mika.vocab import affect as A
 from mika.vocab import privacy
 from mika.vocab.affect import Appraisal, Declared, Emotion
 from mika.vocab.episodes import Kind
+from mika.vocab.lineage import Lineage
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
 
@@ -144,6 +145,10 @@ class AttentionParams(BaseModel):
         label="Croyance révisée", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
         help="L'intensité de la pensée de confusion quand une croyance en remplace une autre (« je croyais "
              "que… »).")] = 0.3
+    own_revision_intensity: Annotated[float, Knob(
+        label="Changer d'avis elle-même", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="L'intensité de la pensée quand elle change d'avis sur ce qui la définit (un goût, une opinion) : "
+             "une réflexion, pas une confusion. Une anecdote sur elle qui change ne fait rien.")] = 0.3
     blocked_intensity: Annotated[float, Knob(
         label="But bloqué", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
         help="L'intensité de la pensée de frustration (« je bloque sur… ») quand un de ses buts bloque.")] = 0.35
@@ -358,6 +363,8 @@ class Thought:
     bundle: str = ""
     source: int | None = None  # le message, la promesse… d'où elle vient
     forgiven_at: int = 0  # quand des excuses l'ont apaisée (0 : jamais)
+    #: devant qui ses sources permettent de la redire (``None`` : la règle de ses personnes et de sa sensibilité)
+    lineage: Lineage | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -503,8 +510,11 @@ class AttentionState:
 #: v9 : ce que la personne a lu (``presence.read``) : une initiative pas encore vue n'est pas ignorée ; les écrans
 #: qui se taisent sur ce qu'on y lit.
 #: v10 : des excuses sincères (``self.touched``) apaisent la pensée née d'un échange qui l'a blessée.
+#: v11 : une pensée garde sa filiation (une croyance révisée : devant qui l'ancienne et la nouvelle se disent).
+#: v12 : revenir à ce qu'elle croyait, changer d'avis elle-même (ADR 0081) ; une pensée dont une source devient
+#: secrète s'oublie (ADR 0082).
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    state_version=10)
+                    state_version=12)
 #: les manques dont on retient la dernière pensée (les plus récents)
 MISSING_KEPT = 64
 #: les écrans ouverts retenus au plus (des connexions jamais fermées : un transport qui ne le dit pas)
@@ -890,15 +900,47 @@ def _resolved(s: AttentionState, e, cx) -> AttentionState:
                    pending=tuple(q for q in s.pending if not (q.origin == c.PROMISE and q.source == promise)))
 
 
-@ATTENTION.reducer(memory_c.BELIEVED)
+@ATTENTION.reducer(memory_c.BELIEVED, memory_c.ATTESTED)
 def _revised(s: AttentionState, e, cx) -> AttentionState:
-    """Cesser de croire quelque chose coûte : une pensée de confusion. Changer d'avis elle-même (« au fond, je
-    préfère les lasagnes ») n'est pas une confusion."""
-    if e.data.replaces is None or e.data.about_self:
+    """Cesser de croire quelque chose coûte : une pensée de confusion — y compris revenir à ce qu'elle croyait
+    (``memory.attested`` qui remplace la croyance d'après, ADR 0081). Changer d'avis elle-même sur ce qui la définit
+    (« au fond, je préfère les lasagnes ») se ressent aussi, comme une réflexion ; une anecdote sur elle, rien."""
+    d = e.data
+    if d.replaces is None or (e.type.name == memory_c.ATTESTED.name and d.replaces == d.item):
+        return s
+    own = bool(d.about_self)
+    if own and not getattr(d, "durable", False):
         return s
     p = params(cx.params)
-    return replace(s, pending=(*s.pending, Pending(e.seq, c.REVISION, None, Emotion.CONFUSED.value,
-                                                   p.revision_intensity, e.at, extra=e.data.replaces)))
+    source = d.item if e.type.name == memory_c.ATTESTED.name else e.seq
+    emotion, intensity = (Emotion.THINKING, p.own_revision_intensity) if own else \
+        (Emotion.CONFUSED, p.revision_intensity)
+    # une révision restée en attente plus d'un jour ne naîtra plus (une reconstruction rejoue des révisions anciennes)
+    kept = tuple(q for q in s.pending if not (q.origin == c.REVISION and e.at - q.at > REVISION_FRESH_US))
+    return replace(s, pending=(*kept, Pending(source, c.REVISION, None, emotion.value, intensity, e.at,
+                                              extra=d.replaces)))
+
+
+#: une révision qui n'est pas devenue pensée dans la journée ne le devient plus
+REVISION_FRESH_US = DAY
+
+
+@ATTENTION.reducer(*memory_c.WITHDRAWING)
+def _sources_withdrawn(s: AttentionState, e, cx) -> AttentionState:
+    """Une pensée née de ce qu'elle sait s'oublie quand une de ses sources devient secrète : « je croyais que… »
+    recopiait les deux croyances, et un secret déclaré après coup ne doit plus traîner dans sa tête, prêt à se dire
+    (ADR 0082). Remplacée, contestée, une source laisse la pensée : c'est son histoire."""
+    gone = {w.item for w in memory_c.withdrawals(e.type.name, e.data, e.seq)
+            if w.reason in memory_c.PRIVATE_REASONS}
+    if not gone:
+        return s
+    doomed = [i for i, t in s.thoughts.items() if t.lineage is not None and set(t.lineage.sources) & gone]
+    if not doomed:
+        return s
+    thoughts = s.thoughts
+    for i in doomed:
+        thoughts = thoughts.delete(i)
+    return replace(s, thoughts=thoughts)
 
 
 @ATTENTION.reducer(goals_c.GOAL_CLOSED)
@@ -957,7 +999,7 @@ def _born(s: AttentionState, e, cx) -> AttentionState:
     waited = next((q for q in s.pending if q.source == d.source and q.origin == d.origin), None)
     forgiven = waited.forgiven_at if waited is not None else 0
     thought = Thought(e.seq, d.text.ref or "", d.emotion, d.intensity, e.at, e.at, d.origin, tuple(d.about),
-                      d.sensitivity, d.bundle, d.source, forgiven_at=forgiven)
+                      d.sensitivity, d.bundle, d.source, forgiven_at=forgiven, lineage=d.lineage)
     s = replace(s, thoughts=_alive(replace(s, thoughts=s.thoughts.set(e.seq, thought)), e.at, p),
                 pending=tuple(q for q in s.pending if q.source != d.source or q.origin != d.origin))
     if d.origin == c.MISSING and d.about:
@@ -1141,7 +1183,7 @@ def _felt_ignored(s: AttentionState, person: str, source: int, at: int, p: Atten
 
 def readings(s: AttentionState, now: int, p: AttentionParams) -> tuple[c.ThoughtReading, ...]:
     out = [c.ThoughtReading(t.id, t.text_ref, t.emotion, round(current(t, now, p), 4), t.origin, t.about,
-                            t.sensitivity, t.born_at, t.bundle)
+                            t.sensitivity, t.born_at, t.bundle, t.lineage)
            for t in s.thoughts.values() if current(t, now, p) >= p.fade_below]
     return tuple(sorted(out, key=lambda r: (-r.intensity, r.id)))
 

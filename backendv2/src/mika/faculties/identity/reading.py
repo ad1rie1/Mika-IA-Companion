@@ -45,8 +45,9 @@ def _candidates(store: Any, s: IdentityState, person: str,
     """Ce que seule ``person`` pouvait savoir (voir ``corroboration``)."""
     own = set(handles_of(s, person)) | {person}
     rows = store.query_mind(
-        f"SELECT id, text, sources FROM {memory_c.ITEMS_TABLE} WHERE id IN (SELECT item FROM {memory_c.ABOUT_TABLE} "
-        "WHERE person=?) AND sensitivity >= ? AND status='active' AND kind IN (?, ?) ORDER BY id",
+        f"SELECT id, text, sources FROM {memory_c.KNOWLEDGE_VIEW} WHERE id IN "
+        f"(SELECT item FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} WHERE person=?) AND sensitivity >= ? AND status='active' "
+        "AND kind IN (?, ?) ORDER BY id",
         (person, int(privacy.Sensitivity.PERSONAL), memory_c.SOUVENIR, memory_c.BELIEF))
     rows = [r for r in rows if int(r[0]) not in exclude]
     if not rows:
@@ -62,7 +63,7 @@ def _candidates(store: Any, s: IdentityState, person: str,
             origin[int(mid)] = (who, room)
     ids = [int(i) for i, _t, _s in rows]
     marks = ",".join("?" * len(ids))
-    told = store.query_mind(f"SELECT item, handle FROM {memory_c.TOLD_TABLE} WHERE item IN ({marks})", tuple(ids))
+    told = store.query_mind(f"SELECT item, handle FROM {memory_c.RETOLD_VIEW} WHERE item IN ({marks})", tuple(ids))
     retold = {int(item) for item, handle in told if handle not in own}
     out = []
     for i, text, _src in rows:
@@ -75,7 +76,7 @@ def _candidates(store: Any, s: IdentityState, person: str,
 
 def _corpus(store: Any) -> list[str]:
     """Sa mémoire vivante (les plus récents d'abord, bornée) : la rareté d'un mot s'y mesure."""
-    rows = store.query_mind(f"SELECT text FROM {memory_c.ITEMS_TABLE} WHERE status='active' AND kind IN (?, ?) "
+    rows = store.query_mind(f"SELECT text FROM {memory_c.KNOWLEDGE_VIEW} WHERE status='active' AND kind IN (?, ?) "
                             "ORDER BY id DESC LIMIT ?", (memory_c.SOUVENIR, memory_c.BELIEF, corroboration.CORPUS_MAX))
     return [str(r[0]) for r in rows]
 

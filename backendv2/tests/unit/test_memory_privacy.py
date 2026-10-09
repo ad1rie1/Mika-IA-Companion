@@ -317,9 +317,9 @@ def test_a_secret_never_leaves_its_confidant_even_for_a_close_friend(tmp_path):
             return None
         return {"croyances": [
             {"texte": "Alice a fait une fausse couche le mois dernier (CANARI-F1)", "personnes": ["Alice"],
-             "sensibilite": "confidence", "messages": seq_of(prompt, "CANARI-F1")},
+             "sensibilite": "confidence", "ressenti": "triste", "messages": seq_of(prompt, "CANARI-F1")},
             {"texte": "Alice va demander le divorce (CANARI-S1)", "personnes": ["Alice"], "sensibilite": "confidence",
-             "secret": True, "messages": seq_of(prompt, "CANARI-S1")},
+             "secret": True, "ressenti": "triste", "messages": seq_of(prompt, "CANARI-S1")},
             {"texte": "Carol est la meilleure amie d'Alice (CANARI-T1)", "personnes": ["Alice", "Carol"],
              "relations": [{"subject": "Alice", "other": "Carol", "kind": "friend", "status": "active"}],
              "sensibilite": "anodin", "messages": seq_of(prompt, "CANARI-T1")}]}
