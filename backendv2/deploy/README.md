@@ -97,8 +97,9 @@ Les journaux ne portent aucun secret : un jeton passé en paramètre d'URL et un
 L'application Android (ADR 0062) est un client natif : elle n'a pas d'origine à
 déclarer (`--origin` ne la concerne pas), et passe `Authorization: Bearer …` et
 `X-Mika-Presence` à la mise à niveau de `/ws`. Caddy et nginx les transmettent tels
-quels (ne les retire pas). En arrière-plan, elle garde sa WebSocket par des pings
-toutes les 20 s : `proxy_read_timeout` doit rester au-dessus (120 s ci-dessus).
+quels (ne les retire pas). Ouverte, elle garde sa WebSocket par des pings toutes
+les 20 s : `proxy_read_timeout` doit rester au-dessus (120 s ci-dessus). Fermée, elle
+ne garde rien d'ouvert : ses messages lui arrivent par Firebase (ADR 0077, ci-dessous).
 Les fichiers qu'elle télécharge (`/files/…`) passent par le même mandataire. Ceux que
 Mika envoie sont gardés hors du journal, dans `partages/` du dossier de données
 (droits 0700/0600) : la sauvegarde les emporte et la restauration les remet.
@@ -116,7 +117,8 @@ Mika envoie sont gardés hors du journal, dans `partages/` du dossier de donnée
 3. Le reste se règle dans la console, **Réglages** : personnalité et tempérament
    (avec ce que pilote chaque curseur), paramètres internes (lisibles ; une
    surcharge seulement dans le bloc « avancé », bornée et journalisée), canaux
-   (dépôts git), sens (courrier, flux, transcription, appareils), comptes. Chaque
+   (dépôts git, notifications du téléphone), sens (courrier, flux, transcription,
+   appareils), comptes. Chaque
    enregistrement laisse une ligne dans **Journal de configuration**.
    On lui écrit par une application dédiée (le frontend web, le client Unity),
    avec un compte : il n'y a pas de robot de messagerie (ADR 0060). Un client
@@ -130,6 +132,35 @@ Mika envoie sont gardés hors du journal, dans `partages/` du dossier de donnée
    --smtp-host … --voix proprietaire --nom "Ton Nom"` (`mika mail show`,
    `mika mail remove --compte perso`). Rien de ce qu'elle rédige ne part sans
    ton accord (Courrier › Brouillons).
+
+## Notifications du téléphone (Firebase)
+
+L'application Android fermée ne garde aucune connexion (la batterie) : ce que Mika
+écrit à la personne lui arrive par Firebase Cloud Messaging, **chiffré pour son seul
+téléphone** (Google ne transporte qu'un chiffré, ADR 0077). Sans cette mise en place,
+tout marche, mais l'application ne reçoit que ce qu'elle trouve en s'ouvrant.
+
+1. Dans la [console Firebase](https://console.firebase.google.com/), crée un projet
+   (Google Analytics inutile), puis ajoute-lui une application **Android** par paquet
+   que tu installes : `fr.qwartz.mika` (version « release ») et `fr.qwartz.mika.debug`
+   (version de débogage). Pas besoin d'empreinte SHA.
+2. Télécharge `google-services.json` (il décrit les deux applications) et pose-le dans
+   `frontend/Android/app/` — il n'est jamais versionné. Reconstruis et réinstalle
+   l'application : sans lui, la construction le dit (« Firebase : pas d'identifiants… »).
+3. Paramètres du projet › **Comptes de service** › « Générer une nouvelle clé
+   privée » : un fichier JSON. Colle-le tel quel dans la console de Mika, **Réglages ›
+   Canaux › Notifications du téléphone**. Il est chiffré (`secret.key` ou
+   `MIKA_SECRET_KEY`) et jamais réaffiché ; la page dit le projet, combien de téléphones
+   sont notifiables, ce qui est parti et le dernier échec. Garde le fichier hors du
+   dépôt, ou efface-le une fois collé.
+4. Ouvre l'application une fois **chez toi** (le serveur doit être joignable) : elle
+   dit au serveur où la notifier. Paramètres › Notifications › « Application fermée »
+   dit où elle en est.
+
+Le serveur doit pouvoir joindre `oauth2.googleapis.com` et `fcm.googleapis.com` en
+HTTPS sortant. Hors de chez toi, la notification arrive (elle passe par Google), mais
+répondre demande que le serveur soit joignable : une réponse écrite hors de portée
+attend dans la file d'envoi et part à la prochaine ouverture chez toi.
 
 Pour relire la console sans serveur (après une mise à jour, par exemple) :
 `.venv/bin/python -m mika console apercu --out /tmp/console` exporte chaque

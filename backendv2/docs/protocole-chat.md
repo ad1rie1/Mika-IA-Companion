@@ -3,7 +3,8 @@
 Ce document est pour qui écrit un client de conversation : le frontend web, l'application Android
 (`frontend/Android/`), un client natif quelconque. Les décisions et leurs raisons sont dans les ADR
 [0038](adr/0038-les-bords.md), [0051](adr/0051-l-adaptateur-du-monde.md), [0056](adr/0056-le-fil-le-chat-et-ce-que-voit-la-personne.md)
-et [0062](adr/0062-l-application-mobile-une-messagerie-et-des-fichiers.md) ; le code fait foi dans
+[0062](adr/0062-l-application-mobile-une-messagerie-et-des-fichiers.md) et
+[0077](adr/0077-le-telephone-ferme-ne-garde-rien-d-ouvert.md) ; le code fait foi dans
 [`adapters/web/app.py`](../src/mika/adapters/web/app.py) (routes, session), [`adapters/web/protocol.py`](../src/mika/adapters/web/protocol.py)
 (trames, limites) et [`adapters/web/hub.py`](../src/mika/adapters/web/hub.py) (qui reçoit quoi). Le monde 3D a son
 propre protocole : [`protocole-monde.md`](protocole-monde.md).
@@ -52,6 +53,17 @@ ignoré).
   `mika token revoke <id>`), ou — pour un jeton obtenu par mot de passe — que le mot de passe change ou que le
   compte soit désactivé. Au-delà de dix jetons obtenus par connexion, le moins récemment utilisé est révoqué.
 - `mika token create <compte> --client mobile|screen --label …` en donne un sans mot de passe (serveur arrêté).
+- `POST /auth/push` avec un jeton `mobile` : où notifier le téléphone fermé (§ 5) —
+
+  ```json
+  {"token": "<jeton Firebase du téléphone>", "key": "<32 octets, base64>"}
+  ```
+
+  → `{"ok": true, "available": true|false}` (`available` : le serveur a une clé Firebase ; sinon rien ne partira),
+  `Cache-Control: no-store`. 400 (jeton Firebase manquant ou avec des espaces, clé qui n'est pas 32 octets en
+  base64), 401 (jeton invalide), 403 (une `Origin`, ou un jeton `screen`). Redire la même chose ne coûte rien ; un
+  même jeton Firebase quitte tout autre jeton de l'application. `DELETE /auth/push` retire l'inscription ; rendre ou
+  révoquer le jeton de l'application la retire aussi.
 
 ## 2. Ouvrir la connexion
 
@@ -68,7 +80,10 @@ ignoré).
 
 **Absente** (`away` : l'application en arrière-plan, qui ne fait que recevoir) : personne n'est annoncé, rien n'est
 envoyé de lui-même — ni fil, ni visage, ni panneau. Le client envoie **toujours** `sync` (son curseur, ou `0`). Ce
-qui est adressé à la personne arrive quand même (sa parole, les accusés, les rattrapages), sans voix.
+qui est adressé à la personne arrive quand même (sa parole, les accusés, les rattrapages), sans voix. L'application
+Android n'ouvre plus une telle connexion que le temps d'envoyer une réponse écrite dans une notification : fermée,
+elle ne garde rien d'ouvert et reçoit par Firebase (§ 5, ADR 0077). Garder une connexion ouverte en arrière-plan
+coûte cher en batterie (un ping toutes les 20 s, et des essais sans fin quand le serveur est hors de portée).
 
 Fermetures :
 
@@ -252,15 +267,40 @@ les sections personnelles), **`pong`**.
 
 ## 5. Notifier
 
-Pour une application qui reçoit en arrière-plan : notifie une `speech` (ou une ligne `assistant` d'un rattrapage)
-quand l'application n'est pas au premier plan, que `voice_persona` vaut `speaking`, que `message_id` n'est pas nul,
-que le texte n'est pas vide, que l'identifiant dépasse le dernier lu ou notifié, et qu'elle ne répond pas à une
-question posée **d'un autre appareil** (`client_msg_id` qui n'est pas à toi). Ne notifie pas le tout premier fil
-reçu (curseur à zéro). Un rattrapage = une seule notification groupée.
+**Par la connexion** (l'application ouverte, ou quittée depuis peu) : notifie une `speech` (ou une ligne `assistant`
+d'un rattrapage) quand l'application n'est pas au premier plan, que `voice_persona` vaut `speaking`, que
+`message_id` n'est pas nul, que le texte n'est pas vide, que l'identifiant dépasse le dernier lu ou notifié, et
+qu'elle ne répond pas à une question posée **d'un autre appareil** (`client_msg_id` qui n'est pas à toi). Ne
+notifie pas le tout premier fil reçu (curseur à zéro). Un rattrapage = une seule notification groupée.
+
+**Par Firebase** (l'application fermée, ADR 0077) : le serveur applique la même règle à chaque parole qu'il livre, et
+l'envoie à chaque téléphone inscrit (`POST /auth/push`) du compte qui ne la regarde pas par une connexion vivante
+(à l'écran, `here`, et une trame reçue depuis moins de 45 s) : une connexion « absente » ou muette peut recevoir la
+même parole par les deux chemins — dédoublonne par `id`. Firebase ne garantit pas l'ordre : ne compare pas à un
+« dernier notifié ». La réponse à une question posée d'un navigateur ne part pas ; celle
+posée du téléphone (une réponse depuis la notification, connexion refermée depuis), si. C'est un message Firebase de
+**données**, de priorité haute :
+
+```json
+{"v": "1", "n": "<nonce, base64>", "c": "<chiffré, base64>"}
+```
+
+`c` est le clair chiffré en AES-256-GCM avec la clé du téléphone, le nonce `n` (12 octets) et les données associées
+`fr.qwartz.mika/push/v1` (étiquette de 16 octets à la fin, comme en Java). Le clair :
+
+```json
+{"t": "speech", "id": 4242, "text": "Tu es rentrée ?", "ts": 1791000000000, "files": 0}
+```
+
+`id` : l'identifiant du message dans le fil (comparer au dernier lu et notifié : la connexion a pu l'apporter
+d'abord) ; `text` sans jetons prosodiques, coupé à 2 400 octets (« … ») ; `ts` en ms ; `files` : le nombre de
+fichiers joints, à télécharger une fois connecté. Une autre `v`, un chiffré qui ne s'ouvre pas, un `t` inconnu :
+rien n'est montré. La parole n'est pas dans le fil du téléphone tant qu'il ne s'est pas reconnecté (`sync`) ; ne
+l'y insère pas avec son `id` — ton curseur dépasserait des messages jamais reçus.
 
 Avec un jeton `mobile` vivant, elle peut écrire la première quand tu n'es devant aucun écran (un rappel échu, une
-prise de nouvelles) : la parole arrive à la connexion absente, ou attend dans le fil jusqu'au prochain `sync`. Ses
-retenues valent toujours (pas de harcèlement, pas la nuit hors rappel).
+prise de nouvelles) : la parole part par Firebase si le téléphone est inscrit, et attend dans le fil jusqu'au
+prochain `sync`. Ses retenues valent toujours (pas de harcèlement, pas la nuit hors rappel).
 
 ## 6. Les fichiers qu'elle envoie
 

@@ -25,6 +25,7 @@ from mika.adapters.llm.config import REPLY, ROLE_LABELS, BackendSpec, LLMConfig
 from mika.adapters.llm.models import ListingFailed, list_models
 from mika.adapters.mail import MailConfig
 from mika.adapters.mcp.config import McpConfig
+from mika.adapters.push import parse_service_account
 from mika.adapters.teams import TeamsConfig
 from mika.app import persona as persona_file
 from mika.app.wakeups import NO_PROJECT, TOOLS, WakeupConfig
@@ -138,6 +139,25 @@ class GitSettings(BaseModel):
         if not user or any(c.isspace() or c in ":@/" for c in user):
             raise ValueError("un nom sans espace ni « : @ / » (« x-access-token » pour GitHub)")
         return user
+
+
+class PushSettings(BaseModel):
+    """Les notifications du téléphone (ADR 0077) : la clé avec laquelle le serveur parle à Firebase."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    service_account: Annotated[str, Knob(
+        label="Clé du compte de service", help="Le fichier JSON téléchargé dans la console Firebase (Paramètres du "
+        "projet › Comptes de service › Générer une nouvelle clé privée), collé tel quel. Chiffrée, jamais réaffichée. "
+        "Vide : inchangée ; « effacer » coupe les notifications.", secret=True, advanced=False, order=10)] = ""
+
+    @field_validator("service_account")
+    @classmethod
+    def _key(cls, text: str) -> str:
+        text = text.strip()
+        if text:
+            parse_service_account(text)  # ValueError en français : la page le dit sous le champ
+        return text
 
 
 def _dump(doc: PersonaDoc) -> str:
@@ -402,6 +422,27 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         await settings.save_git(cfg.token, cfg.user, list(cfg.hosts))
         return []
 
+    # ── notifications du téléphone (ADR 0077) ──
+    async def save_push(cfg: PushSettings, by: str) -> list[str]:
+        await settings.save_push(cfg.service_account)
+        return []
+
+    def push_facts() -> list[tuple[str, str]]:
+        key = settings.push()
+        try:
+            project = parse_service_account(key).project_id if key else ""
+        except ValueError:
+            project = ""
+        facts = [("Projet Firebase", project or "aucune clé : rien ne part"),
+                 ("Téléphones notifiables", str(live.accounts.push_count()))]
+        stats = live.hub.push.stats if live.hub.push is not None else None
+        if stats is not None and (stats.sent or stats.failed or stats.gone):
+            facts.append(("Depuis le démarrage", f"{stats.sent} envoyée(s), {stats.failed} en échec, "
+                                                 f"{stats.gone} téléphone(s) oublié(s)"))
+        if stats is not None and stats.last_error:
+            facts.append(("Dernier échec", stats.last_error))
+        return facts
+
     async def new_token(by: str) -> tuple[str, str]:
         token = await settings.new_sensors_token()
         return "ok", f"Jeton neuf (l'ancien ne vaut plus ; montré une seule fois) : {token}"
@@ -582,6 +623,17 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "Huit curseurs (0,5 = comme la plupart des gens) et une humeur de fond. Chaque "
                             "faculté en dérive ses paramètres ; la table dessous dit ce que pilote chaque "
                             "curseur, mesuré en le poussant à ses deux bouts.")),)),
+        SettingsSection("notifications", "Notifications du téléphone", "canaux", PushSettings,
+                        lambda: _tolerant(PushSettings, service_account=settings.push()), save_push, order=20,
+                        description="Ce qu'elle écrit à quelqu'un dont l'application est fermée part par Firebase, "
+                                    "chiffré pour son seul téléphone (ADR 0077).", facts=push_facts,
+                        pages=(SettingsPage("notifications", "Notifications du téléphone", description=(
+                            "L'application Android ne garde aucune connexion ouverte quand elle est fermée : ce "
+                            "qu'elle écrit à la personne lui arrive en notification par Firebase Cloud Messaging, "
+                            "chiffré avec une clé que seul son téléphone connaît (Google ne transporte qu'un "
+                            "chiffré). Il faut un projet Firebase où l'application est déclarée, et ici la clé d'un "
+                            "compte de service de ce projet. Sans elle, l'application ne reçoit que ce qu'elle "
+                            "trouve en s'ouvrant.")),)),
         SettingsSection("depots", "Dépôts git", "canaux", GitSettings, git, save_git,
                         description="Le jeton avec lequel ses projets poussent vers leur dépôt distant.",
                         facts=lambda: [("Jeton", "défini" if settings.git()["token"] else "aucun")],

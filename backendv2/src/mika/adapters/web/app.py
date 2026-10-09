@@ -13,7 +13,9 @@ jeton de son compte (``Authorization: Bearer mw_…``), accepté **seulement san
 L'application du téléphone (ADR 0062) obtient le sien par identifiant et mot de
 passe (``POST /auth/token``, refusé à un navigateur), le rend en partant
 (``DELETE /auth/token``), et le présente aussi aux routes HTTP qui lisent un
-compte (``/auth/whoami``, ``/files/…``) — jamais à côté d'une ``Origin``.
+compte (``/auth/whoami``, ``/files/…``) — jamais à côté d'une ``Origin``. Elle dit
+où la notifier quand elle est fermée (``POST /auth/push`` : son jeton Firebase et la
+clé qui scelle, ADR 0077), et cesse de le vouloir par ``DELETE /auth/push``.
 
 Connexion : un seul scrypt par essai, compte connu ou non, et hors de la
 boucle ; étranglement par adresse IP **et** par (IP, nom), mémoire purgée.
@@ -47,6 +49,8 @@ from starlette.responses import JSONResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from mika.adapters.push import key_from
+from mika.adapters.push.fcm import MAX_DEVICE_TOKEN
 from mika.adapters.web import protocol
 from mika.adapters.web.accounts import (
     CLIENT_MOBILE,
@@ -187,7 +191,7 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
                lifespan: Any = None, extra_routes: Sequence[Any] = (),
                preprocess: Preprocessor | None = None, camera: Any = None,
                sensor_token: Any = None, wakeup: wakeup_p.WakeGate | None = None,
-               teams: teams_p.TeamsGate | None = None) -> Starlette:
+               teams: teams_p.TeamsGate | None = None, push_ready: Callable[[], bool] | None = None) -> Starlette:
     cfg = cfg or WebConfig()
     by_name = LoginThrottle(cfg.login_failures, cfg.login_window_s)
     by_ip = LoginThrottle(cfg.login_ip_failures, cfg.login_window_s)
@@ -326,6 +330,45 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         if found is None:
             return JSONResponse({"error": "Jeton invalide."}, status_code=401)
         await accounts.revoke_token(found[1])
+        return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
+
+    def phone_of(request: Request) -> int | JSONResponse:
+        """Le jeton de l'application du téléphone qui appelle (ADR 0077), sinon le refus à rendre."""
+        if request.headers.get("origin") is not None:
+            return JSONResponse({"error": "Un navigateur ne reçoit pas de notifications."}, status_code=403)
+        found = accounts.token(native_token(request.headers))
+        if found is None:
+            return JSONResponse({"error": "Jeton invalide."}, status_code=401)
+        if accounts.token_client(found[1]) != CLIENT_MOBILE:
+            return JSONResponse({"error": "Seule l'application du téléphone reçoit des notifications."},
+                                status_code=403)
+        return found[1]
+
+    async def push_register(request: Request) -> Response:
+        """L'application dit où la notifier quand elle est fermée : son jeton Firebase et la clé (base64, 32 octets)
+        qui scellera ce qui lui part. ``available`` : le serveur a une clé Firebase (sinon rien ne partira)."""
+        token_id = phone_of(request)
+        if isinstance(token_id, JSONResponse):
+            return token_id
+        data = await body(request)
+        device = str(data.get("token") or "").strip()
+        if not device or len(device) > MAX_DEVICE_TOKEN or any(c.isspace() for c in device):
+            return JSONResponse({"error": "Jeton Firebase manquant ou illisible."}, status_code=400)
+        key = str(data.get("key") or "").strip()
+        try:
+            key_from(key)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        await accounts.set_push(token_id, device, key)
+        available = bool(push_ready()) if push_ready is not None else False
+        return JSONResponse({"ok": True, "available": available}, headers={"Cache-Control": "no-store"})
+
+    async def push_unregister(request: Request) -> Response:
+        """L'application ne veut plus de notifications (ou se déconnecte sans rendre son jeton)."""
+        token_id = phone_of(request)
+        if isinstance(token_id, JSONResponse):
+            return token_id
+        await accounts.clear_push(token_id)
         return JSONResponse({"ok": True}, headers={"Cache-Control": "no-store"})
 
     async def health(request: Request) -> Response:
@@ -595,6 +638,8 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         Route("/auth/logout", logout, methods=["GET", "POST"]),
         Route("/auth/token", token_login, methods=["POST"]),
         Route("/auth/token", token_logout, methods=["DELETE"]),
+        Route("/auth/push", push_register, methods=["POST"]),
+        Route("/auth/push", push_unregister, methods=["DELETE"]),
         Route("/health", health, methods=["GET"]),
         Route("/api/projects/pending/{action_id:int}/{decision:str}", pending_decision, methods=["POST"]),
         Route("/api/perceptions", perceptions, methods=["POST"]),
@@ -860,6 +905,7 @@ class _Session:
         await self.port.composing(c.handle, c.id, c.composing)
 
     async def dispatch(self, raw: str) -> None:
+        self.conn.seen_at = self.hub._monotonic()  # n'importe quelle trame prouve la vie, même illisible
         try:
             frame = json.loads(raw)
         except ValueError:

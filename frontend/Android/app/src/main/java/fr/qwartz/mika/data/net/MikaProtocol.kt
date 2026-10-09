@@ -83,6 +83,8 @@ object MikaProtocol {
     const val PATH_WS = "/ws"
     const val PATH_TOKEN = "/auth/token"
     const val PATH_WHOAMI = "/auth/whoami"
+    /** Où notifier le téléphone fermé (ADR 0077) : `POST` son jeton Firebase et sa clé, `DELETE` pour ne plus l'être. */
+    const val PATH_PUSH = "/auth/push"
     const val PATH_FILES = "/files/"
     /** La nature du client est portée par le jeton : c'est elle qui fait de l'app une messagerie. */
     const val CLIENT_MOBILE = "mobile"

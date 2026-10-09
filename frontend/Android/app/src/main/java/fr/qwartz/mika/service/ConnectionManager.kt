@@ -29,11 +29,13 @@ import kotlinx.coroutines.withContext
 
 /**
  * Qui veut la connexion, et ce qu'elle porte. La socket est voulue quand une session existe et qu'un
- * détenteur la demande : l'écran ([Holder.UI], gardé 30 s après le départ au second plan), le service
- * en arrière-plan ([Holder.SERVICE]), ou une réponse partie d'une notification ([Holder.REPLY]).
+ * détenteur la demande : l'écran ([Holder.UI], gardé 30 s après le départ au second plan) ou une réponse
+ * partie d'une notification ([Holder.REPLY]). App fermée, rien n'est ouvert : ses messages arrivent par
+ * Firebase (ADR 0077) — une socket gardée en arrière-plan vidait la batterie (un battement toutes les 20 s,
+ * et sans fin des essais vers un serveur de la maison injoignable en 4G).
  *
  * La présence suit le premier plan : en-tête à la connexion, puis trame `presence` à chaque passage —
- * une app qui garde sa socket en arrière-plan ne fait pas croire à Mika qu'on est devant l'écran. Ce qui
+ * une app quittée depuis peu ne fait pas croire à Mika qu'on est devant l'écran. Ce qui
  * a été lu suit [reads] (trame `read`), seulement si la personne le permet.
  *
  * Les trames reçues sont traitées une à une, jusqu'au bout (base écrite), dans le contexte sérialisé.
@@ -57,7 +59,7 @@ class ConnectionManager(
     private val reads: Flow<Long?> = emptyFlow(),
 ) : MikaSocket.Listener {
 
-    enum class Holder { UI, SERVICE, REPLY }
+    enum class Holder { UI, REPLY }
 
     val socket = MikaSocket(transport, scope, clock, this, cursor = { chat.cursor }, logger = logger)
 

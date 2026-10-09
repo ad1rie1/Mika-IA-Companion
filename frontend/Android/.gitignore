@@ -23,3 +23,6 @@ app/src/main/assets/avatar/
 avatar-lab/out/
 # Le VRM de Mika préparé pour l'app (frontend/Android/tools/vrm_mobile.py), même licence.
 app/src/main/assets/avatar3d/
+# Les identifiants du projet Firebase des notifications (ADR 0077) : propres à chaque installation, jamais versionnés.
+# Sans eux, l'app se construit sans notifications app fermée.
+app/google-services.json

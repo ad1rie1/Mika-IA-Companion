@@ -25,6 +25,12 @@ reçoit hors ligne : une messagerie, par où elle peut écrire à quelqu'un d'ab
 obtenu par identifiant et mot de passe, ``POST /auth/token``). Un jeton obtenu par
 mot de passe suit ce mot de passe : le changer, ou désactiver le compte, le révoque ;
 un jeton donné par un opérateur (ligne de commande, console) reste.
+
+Un jeton ``mobile`` porte aussi, s'il en a donné un, **où le notifier** (ADR 0077) : le
+jeton Firebase du téléphone et la clé avec laquelle sceller ce qui lui part
+(``POST /auth/push``). Révoqué, il les perd ; un même jeton Firebase ne sert qu'un jeton
+de l'application à la fois (une application réinstallée sans déconnexion ne reçoit pas
+deux fois).
 """
 
 from __future__ import annotations
@@ -135,6 +141,8 @@ class ClientToken:
     revoked: bool
     client: str = CLIENT_SCREEN
     source: str = SOURCE_CLI
+    #: un téléphone qui a dit où le notifier (ADR 0077)
+    push: bool = False
 
     @property
     def key(self) -> str:
@@ -142,8 +150,30 @@ class ClientToken:
         return f"{TOKEN_KEY}{self.id}"
 
 
+@dataclass(frozen=True, slots=True)
+class PushRegistration:
+    """Où notifier un téléphone (ADR 0077) : son jeton Firebase et la clé (base64) qui scelle ce qui lui part."""
+
+    token_id: int
+    device_token: str
+    key: str
+
+    @property
+    def session(self) -> str:
+        """La clé des connexions de ce téléphone (``token:<id>``) : ouvert, il reçoit par sa connexion."""
+        return f"{TOKEN_KEY}{self.token_id}"
+
+
 def token_digest(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def account_of_handle(handle: str | None) -> int | None:
+    """Le compte d'une adresse ``user_<pk>`` ; ``None`` pour toute autre adresse."""
+    if not handle or not handle.startswith("user_"):
+        return None
+    tail = handle[len("user_"):]
+    return int(tail) if tail.isdigit() else None
 
 
 class Accounts:
@@ -182,6 +212,10 @@ class Accounts:
                 sql.execute(f"ALTER TABLE client_tokens ADD COLUMN client TEXT NOT NULL DEFAULT '{CLIENT_SCREEN}'")
             if "source" not in cols:
                 sql.execute(f"ALTER TABLE client_tokens ADD COLUMN source TEXT NOT NULL DEFAULT '{SOURCE_CLI}'")
+            # ADR 0077 : où notifier le téléphone (son jeton Firebase, la clé qui scelle), et depuis quand
+            for col, kind in (("push_token", "TEXT"), ("push_key", "TEXT"), ("push_at", "INTEGER")):
+                if col not in cols:
+                    sql.execute(f"ALTER TABLE client_tokens ADD COLUMN {col} {kind}")
 
         await self.store.run_mind(create)
 
@@ -306,8 +340,8 @@ class Accounts:
                 dropped.extend(int(r[0]) for r in sql.execute(
                     "SELECT id FROM client_tokens WHERE account=? AND source=? AND revoked_at IS NULL",
                     (account_id, SOURCE_LOGIN)).fetchall())
-                sql.execute("UPDATE client_tokens SET revoked_at=? WHERE account=? AND source=? AND revoked_at IS NULL",
-                            (now, account_id, SOURCE_LOGIN))
+                sql.execute("UPDATE client_tokens SET revoked_at=?, push_token=NULL, push_key=NULL WHERE account=? "
+                            "AND source=? AND revoked_at IS NULL", (now, account_id, SOURCE_LOGIN))
 
         await self.store.run_mind(write)
         for token_id in dropped:
@@ -368,14 +402,15 @@ class Accounts:
     def tokens(self, account_id: int | None = None) -> list[ClientToken]:
         """Les jetons (révoqués compris), du plus ancien au plus récent — jamais leur secret."""
         sql = ("SELECT t.id, t.account, COALESCE(a.username, '?'), t.label, t.created_at, t.last_used, t.revoked_at, "
-               "t.client, t.source FROM client_tokens t LEFT JOIN accounts a ON a.id = t.account")
+               "t.client, t.source, t.push_token IS NOT NULL FROM client_tokens t LEFT JOIN accounts a "
+               "ON a.id = t.account")
         params: tuple[Any, ...] = ()
         if account_id is not None:
             sql += " WHERE t.account=?"
             params = (account_id,)
         rows = self.store.query_mind(sql + " ORDER BY t.id", params)
         return [ClientToken(int(r[0]), int(r[1]), r[2], r[3], int(r[4]), r[5], r[6] is not None,
-                            r[7] or CLIENT_SCREEN, r[8] or SOURCE_CLI) for r in rows]
+                            r[7] or CLIENT_SCREEN, r[8] or SOURCE_CLI, bool(r[9])) for r in rows]
 
     def token_client(self, token_id: int) -> str:
         """Ce qu'ouvre ce jeton (``screen`` pour un jeton inconnu : dans le doute, un écran)."""
@@ -417,8 +452,8 @@ class Accounts:
         done: list[bool] = []
 
         def write(sql: Any) -> None:
-            cur = sql.execute("UPDATE client_tokens SET revoked_at=? WHERE id=? AND revoked_at IS NULL",
-                              (now, token_id))
+            cur = sql.execute("UPDATE client_tokens SET revoked_at=?, push_token=NULL, push_key=NULL WHERE id=? "
+                              "AND revoked_at IS NULL", (now, token_id))
             done.append(bool(getattr(cur, "rowcount", 0)))
 
         await self.store.run_mind(write)
@@ -429,6 +464,45 @@ class Accounts:
         if self.token_client(token_id) == CLIENT_MOBILE:
             await self._changed()  # plus d'application qui reçoit hors ligne, peut-être : la joignabilité suit
         return True
+
+    # ── notifications du téléphone (ADR 0077) ──
+    async def set_push(self, token_id: int, device_token: str, key: str) -> None:
+        """Où notifier ce téléphone. Le même jeton Firebase quitte tout autre jeton de l'application : une
+        application réinstallée sans déconnexion laisse l'ancien jeton vivant, il ne recevrait pas en double."""
+        now = int(time.time())
+
+        def write(sql: Any) -> None:
+            sql.execute("UPDATE client_tokens SET push_token=NULL, push_key=NULL WHERE push_token=? AND id<>?",
+                        (device_token, token_id))
+            sql.execute("UPDATE client_tokens SET push_token=?, push_key=?, push_at=? WHERE id=? AND revoked_at IS NULL",
+                        (device_token, key, now, token_id))
+
+        await self.store.run_mind(write)
+
+    async def clear_push(self, token_id: int, device_token: str | None = None) -> None:
+        """Ce téléphone ne veut plus de notifications, ou ``device_token`` (son jeton Firebase) ne vaut plus — et
+        seulement s'il est toujours celui-là : un jeton neuf donné entre-temps reste."""
+        if device_token is None:
+            await self.store.run_mind(lambda sql: sql.execute(
+                "UPDATE client_tokens SET push_token=NULL, push_key=NULL WHERE id=?", (token_id,)))
+            return
+        await self.store.run_mind(lambda sql: sql.execute(
+            "UPDATE client_tokens SET push_token=NULL, push_key=NULL WHERE id=? AND push_token=?",
+            (token_id, device_token)))
+
+    def push_registrations(self, account_id: int) -> list[PushRegistration]:
+        """Les téléphones vivants de ce compte qui ont dit où les notifier."""
+        rows = self.store.query_mind(
+            "SELECT t.id, t.push_token, t.push_key FROM client_tokens t JOIN accounts a ON a.id = t.account "
+            "WHERE t.account=? AND t.client=? AND t.revoked_at IS NULL AND a.active=1 AND t.push_token IS NOT NULL "
+            "AND t.push_key IS NOT NULL ORDER BY t.id", (account_id, CLIENT_MOBILE))
+        return [PushRegistration(int(r[0]), str(r[1]), str(r[2])) for r in rows]
+
+    def push_count(self) -> int:
+        """Combien de téléphones vivants ont dit où les notifier (ce que la console montre)."""
+        rows = self.store.query_mind("SELECT COUNT(*) FROM client_tokens WHERE client=? AND revoked_at IS NULL "
+                                     "AND push_token IS NOT NULL", (CLIENT_MOBILE,))
+        return int(rows[0][0]) if rows else 0
 
     def credential(self, key: str | None) -> Account | None:
         """Ce qu'une connexion ouverte revérifie : sa session web, ou son jeton (``token:<id>``)."""

@@ -109,4 +109,51 @@ class NotificationPolicyTest {
         assertEquals(listOf("m76", "m77", "m78", "m79", "m80"), s.lines)
         assertEquals(NotificationPolicy.MAX_KEPT - 5, s.more)
     }
+
+    // ── ADR 0077 : ce que Firebase apporte, app fermée ──
+
+    private val closed = NotificationPolicy.PushContext(foreground = false, online = false, lastReadId = 10, cursor = 12, pushed = emptySet())
+
+    @Test fun `une parole venue par Firebase - app fermee, ou ouverte sans connexion`() {
+        assertTrue(NotificationPolicy.shouldNotifyPush(13, closed))
+        assertTrue(NotificationPolicy.shouldNotifyPush(13, closed.copy(foreground = true)))  // hors de chez soi, app ouverte
+        assertFalse(NotificationPolicy.shouldNotifyPush(13, closed.copy(foreground = true, online = true)))  // la connexion l'apporte
+    }
+
+    @Test fun `une parole venue par Firebase - jamais lue, deja dans le fil, ni deja notifiee par Firebase`() {
+        assertFalse(NotificationPolicy.shouldNotifyPush(12, closed))  // la connexion l'a apportée
+        assertFalse(NotificationPolicy.shouldNotifyPush(10, closed.copy(cursor = 0)))  // lue
+        assertFalse(NotificationPolicy.shouldNotifyPush(13, closed.copy(pushed = setOf(13))))
+    }
+
+    @Test fun `Firebase dans le desordre - le message d'avant arrive apres, il est notifie quand meme`() {
+        var pushed = emptyList<Long>()
+        for (id in listOf(101L, 100L)) {
+            assertTrue(NotificationPolicy.shouldNotifyPush(id, closed.copy(pushed = pushed.toSet())))
+            pushed = NotificationPolicy.rememberPushed(pushed, id)
+        }
+        assertFalse(NotificationPolicy.shouldNotifyPush(100, closed.copy(pushed = pushed.toSet())))  // un doublon
+        val many = (1L..250L).fold(emptyList<Long>()) { acc, id -> NotificationPolicy.rememberPushed(acc, id) }
+        assertEquals(NotificationPolicy.MAX_PUSHED, many.size)
+        assertEquals(250L, many.last())
+    }
+
+    @Test fun `la conversation ouverte ne garde que ce que le fil n'a pas encore`() {
+        val lines = listOf(NotificationPolicy.Line(20, "vue", 0), NotificationPolicy.Line(21, "pas encore", 0))
+        assertEquals(listOf(21L), NotificationPolicy.unseen(lines, cursor = 20).map { it.id })
+        assertEquals(emptyList<NotificationPolicy.Line>(), NotificationPolicy.unseen(lines, cursor = 30))
+    }
+
+    @Test fun `marquer comme lu va jusqu'a ce que la notification montrait`() {
+        val lines = listOf(NotificationPolicy.Line(25, "venue par Firebase", 0))
+        assertEquals(25L, NotificationPolicy.readUpTo(lines, cursor = 20))
+        assertEquals(30L, NotificationPolicy.readUpTo(lines, cursor = 30))
+        assertEquals(20L, NotificationPolicy.readUpTo(emptyList(), cursor = 20))
+    }
+
+    @Test fun `les lignes venues par Firebase se melangent sans doublon`() {
+        val shown = listOf(NotificationPolicy.Line(13, "a", 1))
+        val merged = NotificationPolicy.mergeLines(shown, listOf(NotificationPolicy.Line(14, "b", 2), NotificationPolicy.Line(13, "a", 1)), lastReadId = 10)
+        assertEquals(listOf(13L, 14L), merged.map { it.id })
+    }
 }

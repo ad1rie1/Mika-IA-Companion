@@ -5,10 +5,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Le service au premier plan ne vit que le temps d'envoyer une réponse depuis une notification (60 s au
+         plus) : l'app ne garde aucune connexion quand elle est fermée, Firebase la réveille (ADR 0077). -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Pas de CAMERA : TakePicture délègue à l'appareil photo, et déclarer la permission
          sans l'avoir accordée le ferait lever une SecurityException. -->
 
@@ -78,14 +78,19 @@
             android:exported="false"
             android:foregroundServiceType="remoteMessaging" />
 
-        <receiver
-            android:name=".service.BootReceiver"
+        <!-- Les messages Firebase (ADR 0077) : scellés par le serveur, ouverts et affichés ici. -->
+        <service
+            android:name=".push.MikaMessagingService"
             android:exported="false">
             <intent-filter>
-                <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
-        </receiver>
+        </service>
+
+        <!-- Pas de jeton Firebase avant une session : il naît à la connexion et meurt à la déconnexion. -->
+        <meta-data
+            android:name="firebase_messaging_auto_init_enabled"
+            android:value="false" />
 
         <receiver
             android:name=".service.NotificationActionReceiver"

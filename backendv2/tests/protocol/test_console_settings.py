@@ -11,7 +11,11 @@ console et dans le journal — ils n'y sont jamais.
 from __future__ import annotations
 
 import html
+import json
 import re
+
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 
 from mika.app.console import NAVIGATION
 from mika.contracts import runtime as rt
@@ -302,3 +306,26 @@ def test_a_new_provider_picks_its_model_from_the_list_before_anything_is_saved(w
     failed = post(client, url, {**backend("local", kind="ollama", model=""), "_charger": "model"})
     assert failed.status_code == 200 and "Liste indisponible" in html_of(failed)
     assert "local" not in client.portal.call(live.settings.llm).backends
+
+
+def test_phone_notifications_take_a_firebase_key_sealed_and_never_shown(world):  # noqa: F811
+    """ADR 0077 : la clé du compte de service Firebase se colle telle quelle, se refuse en français si elle ne se lit
+    pas, n'est jamais réaffichée ; vide, elle reste ; la page dit le projet et les téléphones notifiables."""
+    client, live, _ = world
+    bootstrap(client)
+    url = f"{BASE}/notifications"
+    assert "aucune clé" in html_of(client.get(url))
+    pem = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
+        serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
+    key = json.dumps({"type": "service_account", "project_id": "mika-notif", "client_email": "m@mika-notif.iam",
+                      "private_key": pem})
+    refused = post(client, url, {"_section": "notifications", "_champs": ["service_account"],
+                                 "service_account": '{"type": "authorized_user"}'})
+    assert refused.status_code == 400 and "compte de service" in html_of(refused)
+    saved = post(client, url, {"_section": "notifications", "_champs": ["service_account"], "service_account": key})
+    assert saved.status_code == 200 and "PRIVATE KEY" not in saved.text
+    assert client.portal.call(live.settings.push) == key
+    page = html_of(client.get(url))
+    assert "mika-notif" in page and "PRIVATE KEY" not in page
+    post(client, url, {"_section": "notifications", "_champs": ["service_account"], "service_account": ""})
+    assert client.portal.call(live.settings.push) == key  # vide : inchangée

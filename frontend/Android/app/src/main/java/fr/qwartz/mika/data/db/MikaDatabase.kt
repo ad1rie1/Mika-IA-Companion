@@ -38,6 +38,8 @@ object Kv {
     const val SHARED_INBOX = "shared_inbox"
     /** Les lignes de la notification de messages (JSON), pour qu'un processus tué ne la vide pas. */
     const val NOTIFIED_LINES = "notified_lines"
+    /** Les derniers messages reçus par Firebase et notifiés (JSON) : Firebase n'en garantit pas l'ordre (ADR 0077). */
+    const val PUSHED_IDS = "pushed_ids"
     /** Quand on a quitté la conversation pour la dernière fois (heure murale, ms) : l'horloge des retrouvailles. */
     const val LAST_SEEN_WALL = "last_seen_wall"
 }

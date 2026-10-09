@@ -46,7 +46,8 @@ _SOURCES = {SOURCE_LOGIN: "connexion (identifiant et mot de passe)", SOURCE_CONS
 def _app_row(ui: Any, t: ClientToken) -> dict[str, Any]:
     """Une application connectée telle que la page la montre (jamais le secret)."""
     return {"id": t.id, "label": t.label or "sans nom",
-            "kind": "Téléphone (reçoit hors ligne)" if t.client == CLIENT_MOBILE else "Écran ou moteur",
+            "kind": ("Téléphone (notifié fermé)" if t.push else "Téléphone (sans notifications)")
+            if t.client == CLIENT_MOBILE else "Écran ou moteur",
             "source": _SOURCES.get(t.source, "ligne de commande"),
             "created": ui.when(t.created_at * US), "last_used": ui.when((t.last_used or 0) * US),
             "revoked": t.revoked}

@@ -144,7 +144,7 @@ object FrenchVisemes {
         else -> false
     }
     /** Le `\s` du JavaScript : les blancs Unicode, espace insécable et BOM compris. */
-    private fun isSpace(c: Char): Boolean = c.isWhitespace() || c == '﻿'
+    private fun isSpace(c: Char): Boolean = c.isWhitespace() || c == '\uFEFF'
     private fun isDigit(c: Char): Boolean = c in '0'..'9'
     private fun isJoiner(c: Char): Boolean = JOINERS.indexOf(c) >= 0
     private fun isApostrophe(c: Char): Boolean = APOSTROPHES.indexOf(c) >= 0

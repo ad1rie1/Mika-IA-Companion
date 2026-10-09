@@ -28,10 +28,14 @@ diffusion à tout le monde.
   dire (un jeton révoqué par un autre processus, une session expirée) se
   revérifie à chaque ``CREDENTIAL_CHECK_S``, comme sur ``/ws/world``.
 - **Une connexion n'est pas une présence** (ADR 0062) : l'application du
-  téléphone garde sa connexion en arrière-plan pour recevoir, sans que personne
+  téléphone, quittée depuis peu, garde un moment sa connexion sans que personne
   regarde l'écran (``Conn.here`` faux). Elle reçoit ce qui lui est adressé (sans
   voix), jamais une pensée à voix haute, ni visage ni panneau (la batterie) ; la
   voix se choisit parmi les écrans regardés.
+- **Un téléphone fermé est notifié** (ADR 0077) : l'application ne se connecte
+  qu'ouverte ; ce qui est dit à la personne part par Firebase aux téléphones
+  dont aucune connexion n'est ouverte (``push.MobilePush``), sauf la réponse à
+  une question posée d'un navigateur.
 - **Un tour posé d'un autre appareil** : les autres connexions de la personne
   reçoivent aussi la ligne de la question avant la réponse (sinon leur curseur la
   dépasse et elles ne la verraient jamais).
@@ -51,6 +55,7 @@ from typing import Any
 
 from mika.adapters.web import protocol
 from mika.adapters.web.accounts import CREDENTIAL_CHECK_S
+from mika.adapters.web.push import LIVE_S, MobilePush
 from mika.contracts import affect as affect_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
@@ -92,6 +97,9 @@ class Conn:
     valid: Check | None = None
     #: dernier message envoyé (horloge monotone) : l'onglet actif est celui qui parle
     active_at: float = 0.0
+    #: dernière trame reçue, ping compris (horloge monotone) : une connexion silencieuse est peut-être morte sans
+    #: le dire (un téléphone sorti du Wi-Fi) — il faut ``WS_PING_TIMEOUT_S`` au serveur pour la fermer
+    seen_at: float = 0.0
     #: quelqu'un regarde cet écran (faux : l'application du téléphone en arrière-plan, qui ne fait que recevoir)
     here: bool = True
     #: le canal de cette connexion : l'écran (``web``) ou l'application du téléphone (``mobile``, une messagerie)
@@ -126,6 +134,11 @@ class Hub:
         self._checked_at = 0.0
         #: (adresse, client_msg_id) → la connexion qui l'a envoyé (elle parlera la réponse)
         self._asked: OrderedDict[tuple[str, str], str] = OrderedDict()
+        #: (adresse, client_msg_id) → la clé de session de cette connexion (vide : sans session) — elle survit à la
+        #: connexion : une réponse qui arrive après qu'un téléphone a fermé la sienne lui revient en notification
+        self._asked_from: OrderedDict[tuple[str, str], str] = OrderedDict()
+        #: les notifications du téléphone fermé (ADR 0077) ; ``None`` : rien ne part hors des connexions
+        self.push: MobilePush | None = None
         #: les questions dont le sort (abstention, échec) a déjà été dit
         self._settled: OrderedDict[tuple[str, int | str], None] = OrderedDict()
         self.delivered: deque[str] = deque(maxlen=REMEMBERED)
@@ -136,7 +149,7 @@ class Hub:
     def attach(self, send: Send, *, handle: str | None = None, **kw: Any) -> Conn:
         cid = f"ws{next(self._counter)}-{secrets.token_hex(4)}"
         conn = Conn(cid, send, handle or f"anon_{secrets.token_hex(6)}", **kw)
-        conn.active_at = self._monotonic()  # l'onglet qu'on vient d'ouvrir est celui qu'on regarde
+        conn.active_at = conn.seen_at = self._monotonic()  # l'onglet qu'on vient d'ouvrir est celui qu'on regarde
         self.conns[cid] = conn
         return conn
 
@@ -161,10 +174,11 @@ class Hub:
         conn.active_at = self._monotonic()
         if client_msg_id:
             key = (conn.handle, client_msg_id)
-            self._asked[key] = conn.id
-            self._asked.move_to_end(key)
-            while len(self._asked) > REMEMBERED:
-                self._asked.popitem(last=False)
+            for memo, value in ((self._asked, conn.id), (self._asked_from, conn.session or "")):
+                memo[key] = value
+                memo.move_to_end(key)
+                while len(memo) > REMEMBERED:
+                    memo.popitem(last=False)
 
     def speaker(self, conns: list[Conn], d: Delivery | None = None) -> Conn | None:
         """La connexion qui donne la voix : celle qui a posé la question si elle est là,
@@ -238,6 +252,8 @@ class Hub:
             return True
         inner = d.persona == voice.INNER
         target = None if d.target is None or is_internal(d.target) else d.target
+        if target is not None and not inner:
+            self._notify_closed_phones(target, d)
         if inner:
             # une pensée à voix haute ne s'entend que devant un écran regardé : jamais une notification
             targets = [c for c in (self.of(target) if target else self.operators()) if c.here]
@@ -261,6 +277,21 @@ class Hub:
             self._hold(target, d)
         await self.refresh_panels(handles)
         return True
+
+    def _notify_closed_phones(self, handle: str, d: Delivery) -> None:
+        """Les téléphones de la personne qui ne la regardent pas par une connexion vivante : par Firebase (ADR 0077).
+        Une connexion « absente » (l'application quittée depuis peu, une réponse depuis la notification) ne retient
+        pas la notification — l'application ne notifie pas deux fois le même message ; une connexion muette depuis
+        ``push.LIVE_S`` non plus — elle est peut-être morte sans le dire (un téléphone sorti du Wi-Fi)."""
+        if self.push is None:
+            return
+        asked = self._asked_from.get((handle, d.client_msg_id)) if d.client_msg_id else None
+        now = self._monotonic()
+        watching = [c.session for c in self.of(handle) if c.session and c.here and now - c.seen_at < LIVE_S]
+        try:
+            self.push.schedule(d, open_sessions=watching, asked_session=asked)
+        except Exception as exc:  # une notification ne retient jamais la livraison
+            log.warning("notification non partie : %r", exc)
 
     async def _bind_turn(self, handle: str, d: Delivery) -> None:
         """Une réponse qui règle une rafale (« salut », « t'as vu le match ? », « allo ? ») ne lie par sa trame
@@ -462,6 +493,8 @@ class Hub:
             self._sync_task = asyncio.create_task(self.run_sync(), name="emotion-sync")
 
     async def stop(self) -> None:
+        if self.push is not None:
+            await self.push.stop()
         if self._sync_task is not None:
             self._sync_task.cancel()
             await asyncio.gather(self._sync_task, return_exceptions=True)

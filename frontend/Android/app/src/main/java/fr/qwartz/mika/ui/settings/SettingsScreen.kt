@@ -1,13 +1,11 @@
 package fr.qwartz.mika.ui.settings
 
 import android.Manifest
-import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -54,18 +52,21 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.core.net.toUri
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.data.auth.Session
+import fr.qwartz.mika.data.push.PushState
 import fr.qwartz.mika.data.settings.Settings as AppSettings
 import fr.qwartz.mika.data.settings.ThemeMode
 import kotlinx.coroutines.launch
 
-/** Les paramètres : le compte, l'arrière-plan, la batterie, les notifications, l'apparence, les données. */
+/**
+ * Les paramètres : le compte, les notifications (et si elles arrivent app fermée, par Firebase), l'apparence, les
+ * données. Il n'y a plus de connexion en arrière-plan à régler (ADR 0077) : l'app ne se connecte qu'ouverte.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(graph: AppGraph, onBack: () -> Unit) {
@@ -75,10 +76,9 @@ fun SettingsScreen(graph: AppGraph, onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     var confirmLogout by rememberSaveable { mutableStateOf(false) }
     var confirmClear by rememberSaveable { mutableStateOf(false) }
-    var unrestricted by remember { mutableStateOf(isUnrestricted(context)) }
     var notifications by remember { mutableStateOf(notificationsEnabled(context)) }
+    val push by graph.push.state.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        unrestricted = isUnrestricted(context)
         notifications = notificationsEnabled(context)
     }
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -119,29 +119,6 @@ fun SettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                 }
             }
 
-            Section(stringResource(R.string.settings_background))
-            SwitchRow(
-                title = stringResource(R.string.settings_background_title),
-                summary = stringResource(R.string.settings_background_summary),
-                checked = settings.background,
-                onChange = { on -> scope.launch { graph.settings.setBackground(on) } },
-            )
-            SwitchRow(
-                title = stringResource(R.string.settings_boot_title),
-                summary = stringResource(R.string.settings_boot_summary),
-                checked = settings.startOnBoot && settings.background,
-                enabled = settings.background,
-                onChange = { on -> scope.launch { graph.settings.setStartOnBoot(on) } },
-            )
-            InfoRow(
-                title = stringResource(R.string.settings_battery_title),
-                summary = stringResource(
-                    if (unrestricted) R.string.settings_battery_unrestricted else R.string.settings_battery_restricted,
-                ),
-                action = if (unrestricted) null else stringResource(R.string.settings_battery_action),
-                onAction = { requestUnrestricted(context) },
-            )
-
             Section(stringResource(R.string.settings_notifications))
             InfoRow(
                 title = stringResource(R.string.settings_notifications_title),
@@ -154,6 +131,22 @@ fun SettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                         !settings.notificationsAsked
                     if (canAsk) askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) else openNotificationSettings(context)
                 },
+            )
+            InfoRow(
+                title = stringResource(R.string.settings_push_title),
+                summary = when (val p = push) {
+                    PushState.Active -> stringResource(R.string.settings_push_active)
+                    PushState.Pending -> stringResource(R.string.settings_push_pending)
+                    PushState.ServerWithoutKey -> stringResource(R.string.settings_push_server_without_key)
+                    PushState.Unavailable -> stringResource(R.string.settings_push_unavailable)
+                    PushState.LoggedOut -> stringResource(R.string.settings_push_pending)
+                    is PushState.Failed -> p.reason
+                },
+                action = when (push) {
+                    PushState.Pending, PushState.ServerWithoutKey, is PushState.Failed -> stringResource(R.string.settings_push_retry)
+                    else -> null
+                },
+                onAction = { scope.launch { graph.push.sync(force = true) } },
             )
             SwitchRow(
                 title = stringResource(R.string.settings_reads_title),
@@ -296,9 +289,6 @@ private fun ConfirmDialog(title: String, text: String, confirm: String, onConfir
     )
 }
 
-private fun isUnrestricted(context: Context): Boolean =
-    context.getSystemService(PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
-
 private fun notificationsEnabled(context: Context): Boolean {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
@@ -306,24 +296,6 @@ private fun notificationsEnabled(context: Context): Boolean {
         return false
     }
     return androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
-}
-
-/**
- * « Ne pas restreindre Mika » : la demande directe, que seule une messagerie peut justifier — c'est le
- * cas ici, et elle n'est jamais faite d'office, seulement sur ce bouton. Si le téléphone ne la propose
- * pas, la liste des applications optimisées.
- */
-@SuppressLint("BatteryLife")
-private fun requestUnrestricted(context: Context) {
-    val direct = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, "package:${context.packageName}".toUri())
-    try {
-        context.startActivity(direct)
-    } catch (_: ActivityNotFoundException) {
-        try {
-            context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-        } catch (_: ActivityNotFoundException) {
-        }
-    }
 }
 
 private fun openNotificationSettings(context: Context) {

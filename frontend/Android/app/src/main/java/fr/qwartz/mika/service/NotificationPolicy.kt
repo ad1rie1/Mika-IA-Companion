@@ -88,13 +88,52 @@ object NotificationPolicy {
      * Les lignes de la notification après cet ajout : sans doublon, dans l'ordre du fil, sans ce qui a
      * été lu entre-temps, bornées à [MAX_KEPT].
      */
-    fun merge(shown: List<Line>, added: List<StoredMessage>, lastReadId: Long): List<Line> {
+    fun merge(shown: List<Line>, added: List<StoredMessage>, lastReadId: Long): List<Line> =
+        mergeLines(shown, added.mapNotNull { m -> m.id?.let { Line(it, m.text, m.ts) } }, lastReadId)
+
+    fun mergeLines(shown: List<Line>, added: List<Line>, lastReadId: Long): List<Line> {
         val byId = LinkedHashMap<Long, Line>()
         for (l in shown) byId[l.id] = l
-        for (m in added) {
-            val id = m.id ?: continue
-            byId[id] = Line(id, m.text, m.ts)
-        }
+        for (l in added) byId[l.id] = l
         return byId.values.filter { it.id > lastReadId }.sortedBy { it.id }.takeLast(MAX_KEPT)
     }
+
+    /** Ce que Firebase a déjà fait notifier, au plus (le reste est sous le lu ou dans le fil). */
+    const val MAX_PUSHED = 100
+
+    /** L'état au moment de décider d'une parole venue par Firebase. */
+    data class PushContext(
+        val foreground: Boolean,
+        /** La connexion est ouverte : elle apporte elle-même ce que Mika dit. */
+        val online: Boolean,
+        val lastReadId: Long,
+        /** Le plus haut identifiant du fil : ce que la connexion a déjà apporté. */
+        val cursor: Long,
+        /** Ce que Firebase a déjà fait notifier. */
+        val pushed: Set<Long>,
+    )
+
+    /**
+     * Une parole arrivée par Firebase (ADR 0077) mérite-t-elle la notification ? App fermée, oui ; ouverte, seulement
+     * sans connexion (hors de chez soi : elle ne l'aurait pas autrement) ; jamais ce qui est lu, déjà dans le fil (la
+     * connexion l'a apporté — et notifié s'il le fallait) ou déjà notifié par Firebase. Pas de « dernier notifié »
+     * ici : Firebase ne garantit pas l'ordre, le message 100 peut arriver après le 101.
+     */
+    fun shouldNotifyPush(id: Long, ctx: PushContext): Boolean {
+        if (ctx.foreground && ctx.online) return false
+        if (id <= maxOf(ctx.lastReadId, ctx.cursor)) return false
+        return id !in ctx.pushed
+    }
+
+    /** Ce que Firebase a fait notifier, avec [id], borné à [MAX_PUSHED]. */
+    fun rememberPushed(pushed: List<Long>, id: Long): List<Long> = (pushed - id + id).takeLast(MAX_PUSHED)
+
+    /**
+     * La conversation est sous les yeux : la notification ne garde que ce que le fil n'a pas encore — une parole
+     * reçue par Firebase hors de chez soi n'y entre qu'au retour de la connexion, d'ici là on la lit dans le volet.
+     */
+    fun unseen(lines: List<Line>, cursor: Long): List<Line> = lines.filter { it.id > cursor }
+
+    /** « Marquer comme lu » : jusqu'au fil, et jusqu'à ce que la notification montrait (venu par Firebase). */
+    fun readUpTo(lines: List<Line>, cursor: Long): Long = maxOf(cursor, lines.maxOfOrNull { it.id } ?: 0L)
 }

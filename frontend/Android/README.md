@@ -45,8 +45,8 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
   moment, un coucou après sa nuit, jamais joyeux si elle est fâchée) et s'endort la nuit (lumière
   bleue, étoiles en thème sombre). Désactivable (Paramètres › Apparence). Voir
   [Mika en fond](#mika-en-fond-3d-native).
-- **Paramètres** : compte et déconnexion, connexion en arrière-plan, démarrage avec le téléphone, batterie,
-  notifications, thème (système / clair / sombre, couleurs dynamiques), « Effacer les messages de ce téléphone ».
+- **Paramètres** : compte et déconnexion, notifications (et si elles arrivent application fermée), « Lui dire quand
+  j'ai lu », thème (système / clair / sombre, couleurs dynamiques), « Effacer les messages de ce téléphone ».
 
 Hors périmètre : la voix (ni messages vocaux, ni lecture à voix haute) et le monde 3D (la chambre, les déplacements :
 c'est le client Unity).
@@ -62,6 +62,10 @@ export JAVA_HOME=/usr/lib/jvm/java-25-openjdk
 export ANDROID_HOME=~/Android/Sdk
 ./gradlew assembleDebug
 ```
+
+Pour les notifications application fermée, pose d'abord le `google-services.json` du projet Firebase dans `app/`
+(jamais versionné ; voir [Les notifications et la batterie](#les-notifications-et-la-batterie)). Sans lui, l'app se
+construit et marche, sans notifications application fermée — la construction le dit.
 
 L'APK de débogage est dans `app/build/outputs/apk/debug/app-debug.apk` ; il s'installe à côté d'une version
 « release » (identifiant `fr.qwartz.mika.debug`, nom « Mika (dev) »). `./gradlew assembleRelease` produit une
@@ -139,14 +143,25 @@ Si le serveur répond « ce serveur ne propose pas encore la connexion par jeton
 mets Mika à jour. En version de débogage, le lien « Utiliser un jeton (dev) » accepte un jeton créé à la main
 (serveur arrêté) : `python -m mika token create <compte> --client mobile --label android`.
 
-## La connexion en arrière-plan, les notifications et la batterie
+## Les notifications et la batterie
 
-- **« Rester connectée en arrière-plan »** (activé par défaut) : un service au premier plan garde la connexion
-  ouverte quand l'application est fermée. Une notification discrète (« Connectée à Mika », « Reconnexion… »,
-  « Hors ligne ») l'indique ; son bouton « Désactiver » coupe le réglage. Cette connexion se déclare **absente**
-  au serveur (`X-Mika-Presence: away`) : Mika sait que tu peux recevoir ses messages, pas que tu es devant
-  l'écran. Au retour de l'application au premier plan, l'app annonce ta présence (`presence here`) ; quand tu la
-  quittes, ton absence (le serveur attend 20 s : prendre une photo et revenir ne compte pas).
+- **L'application ne se connecte qu'ouverte** (ADR 0077). Fermée, elle ne garde aucune connexion : ni service en
+  arrière-plan, ni démarrage avec le téléphone. C'est ce qui ménage la batterie — une connexion gardée ouverte se
+  réveillait toutes les 10 à 20 s, et réessayait sans fin quand le serveur de la maison était hors de portée (en 4G).
+  Au premier plan, l'app annonce ta présence (`presence here`) ; quand tu la quittes, ton absence (le serveur
+  attend 20 s : prendre une photo et revenir ne compte pas), et la connexion se ferme 30 s plus tard.
+- **Application fermée, ses messages arrivent par Firebase** (Firebase Cloud Messaging), **chiffrés pour ce
+  téléphone seul** : l'app tire une clé AES à la connexion, gardée par le Keystore, et la donne au serveur avec son
+  jeton Firebase (`POST /auth/push`) ; le serveur scelle chaque message avec elle, Google ne transporte qu'un chiffré.
+  L'app le déchiffre et l'affiche dans la notification de conversation habituelle. Il faut, une fois : un projet
+  Firebase où l'application est déclarée, son `google-services.json` dans `app/` à la construction, et la clé d'un
+  compte de service collée dans la console de Mika (pas à pas : `backendv2/deploy/README.md`, « Notifications du
+  téléphone »). L'app le redit au serveur à chaque ouverture chez toi (au plus tous les quarts d'heure). Paramètres ›
+  Notifications › « Application fermée » dit où elle en est (active, en attente, serveur sans clé, version sans
+  Firebase) avec « Réessayer ».
+- **Hors de chez toi**, la notification arrive (elle passe par Google) mais l'app ne joint pas le serveur : le
+  message n'entre dans le fil qu'à la prochaine connexion. D'ici là, la notification le garde, même app ouverte.
+  Une réponse écrite dans la notification attend dans la file d'envoi et part à la prochaine ouverture chez toi.
 - **Notifications** : l'autorisation est demandée une fois, à la première ouverture de la conversation, avec une
   explication. Une notification par conversation, avec « Répondre » (directement depuis la notification) et
   « Marquer comme lu ». Un rattrapage après une coupure donne une seule notification groupée. Rien n'est notifié
@@ -157,11 +172,9 @@ mets Mika à jour. En version de débogage, le lien « Utiliser un jeton (dev) �
   tu as lu (la conversation à l'écran, ou « Marquer comme lu »), trame `read` — une seule valeur, ni l'heure où tu
   es en ligne, ni le temps passé à l'écran. Mika sait alors si ce qu'elle t'a écrit a été vu : un téléphone qui
   dort ne la fait pas se sentir ignorée. Coupé, rien ne part.
-- **« Démarrer avec le téléphone »** : relance la connexion après un redémarrage sans ouvrir l'app.
-- **Batterie** : certains fabricants endorment les services en arrière-plan. Le bouton « Ne pas restreindre
-  Mika » (Paramètres › Batterie) demande l'exemption ; l'app ne la demande jamais d'elle-même.
-- Sans connexion en arrière-plan, l'app ne reçoit rien une fois fermée : ce qu'elle a dit t'attend à la prochaine
-  ouverture. Une réponse depuis une notification démarre quand même un service le temps de son envoi (60 s au plus).
+- Une réponse depuis une notification démarre un service le temps de son envoi (60 s au plus, notification « Envoi
+  de ta réponse à Mika »). Sans Firebase, l'app ne reçoit rien une fois fermée : ce que Mika a dit t'attend à la
+  prochaine ouverture.
 
 ## Se déconnecter, révoquer un téléphone
 
@@ -183,7 +196,8 @@ mets Mika à jour. En version de débogage, le lien « Utiliser un jeton (dev) �
 
 Les tests JVM n'ont besoin d'aucun émulateur : le moteur (protocole, fusion du fil, socket, décisions de
 notification, réduction des images, partage, navigation, cartes de « Ce qu'elle fait », choix du portrait, cartes
-d'accord) est du Kotlin pur. Les
+d'accord, ouverture d'un message Firebase — `PushPayloadTest` en ouvre un scellé par le serveur —, inscription aux
+notifications) est du Kotlin pur. Les
 tests instrumentés (`app/src/androidTest`) éprouvent Room en mémoire (`ChatStoreTest`) et les écrans Compose
 (`ChatScreenTest`, `LoginScreenTest`, `MindScreenTest`).
 
@@ -201,7 +215,9 @@ tests instrumentés (`app/src/androidTest`) éprouvent Room en mémoire (`ChatSt
 | `data/avatar` | ses portraits (repli) : le manifeste, le choix du portrait, le rythme des clignements |
 | `data/auth` | jeton chiffré (Keystore), connexion, erreurs en français |
 | `data/files` | pièces jointes (préparation, réduction), brouillon, partages reçus, fichiers de Mika |
-| `service` | connexion voulue, service au premier plan, notifications, réponse depuis une notification, démarrage |
+| `service` | connexion voulue, notifications, réponse depuis une notification (et son service de 60 s) |
+| `data/push` | les notifications par Firebase : ouvrir un message scellé (`PushPayload`), dire au serveur où notifier (`PushRegistrar`) |
+| `push` | Firebase lui-même : le jeton (`FirebasePush`) et la réception (`MikaMessagingService`) |
 | `share` | « Partager vers Mika », raccourci de conversation |
 | `ui` | écrans Compose : connexion, conversation, « Ce qu'elle fait », paramètres, visionneuse |
 | `ui/avatar` | Mika en fond : chargement des portraits, l'aura, le souffle, les clignements, le sommeil, son visage dans la barre |

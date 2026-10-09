@@ -46,6 +46,7 @@ from mika.adapters.mcp.relay import PREFIX as RELAY_PREFIX
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.mcp.system import SystemServers
 from mika.adapters.preprocess import LocalPreprocessor, whisper
+from mika.adapters.push import FcmSender
 from mika.adapters.shares import DiskShares
 from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
@@ -55,6 +56,7 @@ from mika.adapters.web import protocol
 from mika.adapters.web.accounts import Accounts
 from mika.adapters.web.app import DEV_ORIGINS, WebConfig, create_app
 from mika.adapters.web.hub import Hub
+from mika.adapters.web.push import MobilePush
 from mika.adapters.workshop import BwrapWorkshop
 from mika.adapters.world.server import WorldHub
 from mika.app import backup, composition, datadir, reglages, system_mcp
@@ -385,6 +387,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
                 wakeups=wakeups, teams=teams)
+    # les notifications du téléphone fermé (ADR 0077) : par Firebase, la clé relue dans les réglages à chaque envoi
+    push_sender = FcmSender(settings.push)
+    hub.push = MobilePush(live.accounts, push_sender)
     # le monde (ADR 0051) : chaque lot commité qui change ce que montrent ses écrans leur part, traduit en trames
     world_hub = live.world = WorldHub(port, live.accounts, origins=web.origins, auth_required=web.auth_required)
 
@@ -439,6 +444,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                 await mcp.aclose()
                 await gateway.aclose()
                 await imaging.aclose()
+                await push_sender.aclose()
                 await live.calls.flush()
 
             await kernel.stop(release)
@@ -463,7 +469,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *inspector, relay, console_mcp,
                                     world_hub.route()],
                       preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token,
-                      wakeup=wakeups.call, teams=teams), live
+                      wakeup=wakeups.call, teams=teams, push_ready=push_sender.configured), live
 
 
 async def register_accounts(kernel: Kernel, accounts: Accounts) -> int:

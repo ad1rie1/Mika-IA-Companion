@@ -98,6 +98,28 @@ class AuthApi(
         return call(request) { MikaJson.decodeFromString(Whoami.serializer(), it) }
     }
 
+    /** Ce que le serveur répond à une inscription aux notifications : [available] faux, il n'a pas de clé Firebase. */
+    @Serializable
+    data class PushReply(val ok: Boolean = false, val available: Boolean = false)
+
+    /**
+     * Dire au serveur où notifier ce téléphone fermé (ADR 0077) : son jeton Firebase et la clé (base64, 32 octets)
+     * qui scellera ce qui lui part. Sous le jeton de l'app, jamais d'`Origin`.
+     */
+    suspend fun registerPush(base: ServerBase, token: String, deviceToken: String, key: String): Result<PushReply> {
+        val body = buildJsonObject {
+            put("token", deviceToken)
+            put("key", key)
+        }.toString()
+        val request = Request.Builder()
+            .url(base.http(MikaProtocol.PATH_PUSH))
+            .header("Accept", "application/json")
+            .header(MikaProtocol.HEADER_AUTHORIZATION, "Bearer $token")
+            .post(body.toRequestBody(JSON))
+            .build()
+        return call(request) { MikaJson.decodeFromString(PushReply.serializer(), it) }
+    }
+
     /** Rendre le jeton (au mieux, 5 s) : ses connexions se ferment côté serveur. */
     suspend fun revoke(base: ServerBase, token: String): Boolean {
         val request = Request.Builder()

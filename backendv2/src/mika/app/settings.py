@@ -38,6 +38,8 @@ FEEDS_KEY = "feeds"
 STT_KEY = "stt"
 #: le jeton des dépôts git distants des projets (GitHub ou un autre hôte https), scellé
 GIT_KEY = "git"
+#: les notifications du téléphone (ADR 0077) : la clé du compte de service Firebase, scellée
+PUSH_KEY = "push"
 SENSORS_KEY = "sensors"
 #: le jeton du point MCP de la console (le Claude Code d'une opératrice), scellé
 CONSOLE_MCP_KEY = "console_mcp"
@@ -283,6 +285,14 @@ class Settings:
     async def save_stt(self, base_url: str, api_key: str, model: str = "whisper-1") -> None:
         await self._put(STT_KEY, {"base_url": base_url.strip(), "model": model,
                                   "api_key_sealed": self.box.seal(api_key.strip())})
+
+    # ── Notifications du téléphone (Firebase, ADR 0077) ──
+    def push(self) -> str:
+        """Le JSON de la clé du compte de service Firebase (déchiffré) ; vide : pas de notifications."""
+        return self.box.open(dict(self._get(PUSH_KEY) or {}).get("service_account_sealed", ""))
+
+    async def save_push(self, service_account: str) -> None:
+        await self._put(PUSH_KEY, {"service_account_sealed": self.box.seal(service_account.strip())})
 
     # ── Dépôts git (ses projets poussent vers un dépôt distant) ──
     def git(self) -> dict[str, str]:

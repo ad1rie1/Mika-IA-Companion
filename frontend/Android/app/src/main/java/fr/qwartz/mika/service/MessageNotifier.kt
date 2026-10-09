@@ -20,6 +20,7 @@ import fr.qwartz.mika.core.MikaJson
 import fr.qwartz.mika.data.chat.ChatEvent
 import fr.qwartz.mika.data.db.ChatStore
 import fr.qwartz.mika.data.db.Kv
+import fr.qwartz.mika.data.push.PushPayload
 import fr.qwartz.mika.share.Shortcuts
 import fr.qwartz.mika.ui.DeepLinks
 import kotlinx.coroutines.CancellationException
@@ -30,6 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 
 /**
  * Les notifications des messages de Mika. Les décisions sont dans [NotificationPolicy] (pur) ; ici on
@@ -37,6 +39,10 @@ import kotlinx.serialization.builtins.ListSerializer
  * notification de conversation (`MessagingStyle`, raccourci `mika`) avec « Répondre » et « Marquer
  * comme lu ». Ses lignes sont gardées en base : un processus tué ne vide pas la notification au
  * message suivant.
+ *
+ * Deux sources : ce que la connexion apporte (app ouverte, ou quittée depuis moins de 30 s) et ce que Firebase
+ * apporte app fermée (ADR 0077, [onPushed]). Une parole venue par Firebase n'est pas encore dans le fil : la
+ * notification la garde jusqu'à ce que le fil l'ait ([NotificationPolicy.unseen]).
  */
 class MessageNotifier(
     private val context: Context,
@@ -77,10 +83,30 @@ class MessageNotifier(
         val own = if (event.live && event.replyToClientMsgId != null) store.ownClientMsgIds() else emptySet()
         val plan = NotificationPolicy.plan(event, ctx) { it in own }
         if (plan.lastNotifiedId > lastNotified) store.kvPut(Kv.LAST_NOTIFIED_ID, plan.lastNotifiedId.toString())
+        // Sous les yeux, le fil vient de rattraper ce que Firebase avait apporté : la notification n'en a plus besoin.
+        if (ctx.foreground) pruneSeen()
         if (plan.notify.isEmpty()) return@withLock
         val lines = NotificationPolicy.merge(readLines(), plan.notify, lastRead)
         writeLines(lines)
         post(lines, alertOnce = plan.alertOnce, reply = null)
+    }
+
+    /**
+     * Une parole de Mika apportée par Firebase, app fermée (ADR 0077). [online] : la connexion est ouverte — elle
+     * l'apporte elle-même, la notification serait un doublon.
+     */
+    suspend fun onPushed(message: PushPayload.Message, online: Boolean) = lock.withLock {
+        val lastRead = kvLong(Kv.LAST_READ_ID)
+        val pushed = readPushed()
+        val ctx = NotificationPolicy.PushContext(foreground.value, online, lastRead, cursor(), pushed.toSet())
+        if (!NotificationPolicy.shouldNotifyPush(message.id, ctx)) return@withLock
+        writePushed(NotificationPolicy.rememberPushed(pushed, message.id))
+        // La connexion qui reviendrait app fermée (une réponse depuis la notification) ne le renotifie pas.
+        if (message.id > kvLong(Kv.LAST_NOTIFIED_ID)) store.kvPut(Kv.LAST_NOTIFIED_ID, message.id.toString())
+        val ts = if (message.ts > 0) message.ts else clock()
+        val lines = NotificationPolicy.mergeLines(readLines(), listOf(NotificationPolicy.Line(message.id, message.text, ts)), lastRead)
+        writeLines(lines)
+        post(lines, alertOnce = false, reply = null)
     }
 
     /** « Marquer comme lu » : tout ce qui est arrivé est lu, la notification part. */
@@ -89,11 +115,11 @@ class MessageNotifier(
         cancel()
     }
 
-    /** La conversation s'ouvre : la notification n'a plus rien à dire. */
-    suspend fun onChatOpened() = lock.withLock {
-        if (readLines().isNotEmpty()) writeLines(emptyList())
-        cancel()
-    }
+    /**
+     * La conversation s'ouvre : la notification n'a plus rien à dire — sauf ce que Firebase a apporté et que le fil
+     * n'a pas encore (hors de chez soi, la connexion ne vient pas) : on le lit encore dans le volet.
+     */
+    suspend fun onChatOpened() = lock.withLock { pruneSeen() }
 
     /** Glissée hors de l'écran : ses lignes sont oubliées (le fil, lui, reste non lu). */
     suspend fun onDismissed() = lock.withLock { writeLines(emptyList()) }
@@ -114,9 +140,22 @@ class MessageNotifier(
     }
 
     private suspend fun markReadLocked() {
-        val c = cursor()
+        val c = NotificationPolicy.readUpTo(readLines(), cursor())
         if (c > kvLong(Kv.LAST_READ_ID)) store.kvPut(Kv.LAST_READ_ID, c.toString())
         writeLines(emptyList())
+    }
+
+    /** Ne garder que ce que le fil n'a pas encore ; sans rien à montrer, la notification part. */
+    private suspend fun pruneSeen() {
+        val lines = readLines()
+        val kept = NotificationPolicy.unseen(lines, cursor())
+        if (kept.isEmpty()) {
+            if (lines.isNotEmpty()) writeLines(emptyList())
+            cancel()
+        } else if (kept.size != lines.size) {
+            writeLines(kept)
+            post(kept, alertOnce = true, reply = null)
+        }
     }
 
     private fun cancel() = NotificationManagerCompat.from(context).cancel(NotificationChannels.ID_MESSAGES)
@@ -207,6 +246,14 @@ class MessageNotifier(
         emptyList()
     }
 
+    private suspend fun readPushed(): List<Long> = try {
+        store.kvGet(Kv.PUSHED_IDS)?.let { MikaJson.decodeFromString(IDS, it) }.orEmpty()
+    } catch (_: IllegalArgumentException) {
+        emptyList()
+    }
+
+    private suspend fun writePushed(ids: List<Long>) = store.kvPut(Kv.PUSHED_IDS, MikaJson.encodeToString(IDS, ids))
+
     private suspend fun writeLines(lines: List<NotificationPolicy.Line>) {
         store.kvPut(Kv.NOTIFIED_LINES, if (lines.isEmpty()) null else MikaJson.encodeToString(LINES, lines))
     }
@@ -218,6 +265,7 @@ class MessageNotifier(
         private const val REQ_MARK_READ = 12
         private const val REQ_REPLY = 13
         private val LINES = ListSerializer(NotificationPolicy.Line.serializer())
+        private val IDS = ListSerializer(Long.serializer())
 
         /**
          * Afficher, seulement si on en a le droit (Android 13 : la permission ; sinon les réglages de

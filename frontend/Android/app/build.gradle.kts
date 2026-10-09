@@ -1,3 +1,6 @@
+import com.android.build.api.variant.ResValue
+import groovy.json.JsonSlurper
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -79,6 +82,47 @@ val copyAvatarMotions by tasks.registering(Copy::class) {
 android.sourceSets.getByName("main").assets.srcDir(avatarMotions.get().asFile)
 tasks.named("preBuild") { dependsOn(copyAvatarMotions) }
 
+// Les notifications app fermée passent par Firebase (ADR 0077). Le fichier google-services.json du projet Firebase
+// (non versionné, à poser dans app/) donne à chaque variante ses identifiants, en ressources que FirebaseInitProvider
+// lit au démarrage — ce que fait le greffon com.google.gms.google-services, sans lui. Sans le fichier, ou sans
+// l'identifiant de la variante (fr.qwartz.mika, fr.qwartz.mika.debug), l'app se construit et marche : elle ne reçoit
+// simplement que ce qu'elle trouve en s'ouvrant, et le dit dans ses paramètres.
+val googleServices: File = file("google-services.json")
+
+@Suppress("UNCHECKED_CAST")
+fun firebaseValues(json: File, applicationId: String): Map<String, String>? {
+    if (!json.isFile) return null
+    val root = JsonSlurper().parse(json) as Map<String, Any?>
+    val project = root["project_info"] as? Map<String, Any?> ?: return null
+    val client = (root["client"] as? List<Map<String, Any?>>).orEmpty().firstOrNull { c ->
+        val info = c["client_info"] as? Map<String, Any?>
+        (info?.get("android_client_info") as? Map<String, Any?>)?.get("package_name") == applicationId
+    } ?: return null
+    val appId = (client["client_info"] as Map<String, Any?>)["mobilesdk_app_id"] as? String ?: return null
+    val apiKey = (client["api_key"] as? List<Map<String, Any?>>)?.firstOrNull()?.get("current_key") as? String
+        ?: return null
+    return listOfNotNull(
+        "google_app_id" to appId,
+        "google_api_key" to apiKey,
+        "gcm_defaultSenderId" to (project["project_number"] as? String ?: return null),
+        "project_id" to (project["project_id"] as? String ?: return null),
+        (project["storage_bucket"] as? String)?.let { "google_storage_bucket" to it },
+    ).toMap()
+}
+
+androidComponents {
+    onVariants { variant ->
+        val values = firebaseValues(googleServices, variant.applicationId.get())
+        if (values == null) {
+            logger.lifecycle("Firebase : pas d'identifiants pour ${variant.applicationId.get()} (app/google-services.json) " +
+                "— construite sans notifications app fermée.")
+        }
+        values?.forEach { (name, value) ->
+            variant.resValues.put(variant.makeResValueKey("string", name), ResValue(value, "Firebase (ADR 0077)"))
+        }
+    }
+}
+
 dependencies {
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
@@ -104,6 +148,9 @@ dependencies {
     // Les vignettes et la visionneuse des images de Mika, avec le client HTTP authentifié de l'app.
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    // Les notifications app fermée (ADR 0077) : des messages de données Firebase, chiffrés par le serveur.
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.messaging)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

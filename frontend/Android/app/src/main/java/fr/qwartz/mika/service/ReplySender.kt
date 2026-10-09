@@ -4,7 +4,6 @@ import fr.qwartz.mika.core.Logger
 import fr.qwartz.mika.data.chat.ChatRepository
 import fr.qwartz.mika.data.chat.MessageStatus
 import fr.qwartz.mika.data.chat.StoredMessage
-import fr.qwartz.mika.data.settings.SettingsStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -15,15 +14,15 @@ import kotlinx.coroutines.withTimeoutOrNull
 /**
  * Répondre depuis la notification, application fermée. La réponse s'écrit comme un message tapé
  * (bulle + file d'envoi, une transaction), la connexion est demandée le temps de son accusé
- * ([ConnectionManager.Holder.REPLY]) ; si l'arrière-plan est coupé, un service d'un coup garde le
- * processus en vie jusque-là (60 s au plus), jusqu'à la dernière réponse accusée s'il y en a plusieurs.
+ * ([ConnectionManager.Holder.REPLY]) ; un service d'un coup garde le processus en vie jusque-là (60 s au
+ * plus), jusqu'à la dernière réponse accusée s'il y en a plusieurs. Serveur hors de portée (en 4G, un
+ * serveur de la maison), la réponse reste dans la file d'envoi et part à la prochaine ouverture.
  */
 class ReplySender(
     private val scope: CoroutineScope,
     private val chat: ChatRepository,
     private val connection: ConnectionManager,
     private val notifier: MessageNotifier,
-    private val settings: SettingsStore,
     private val controller: () -> ServiceController,
     private val logger: Logger = Logger.NONE,
 ) {
@@ -44,7 +43,7 @@ class ReplySender(
         }
         notifier.onReplied(text)
         // Déjà accusée (socket ouverte, serveur proche) : rien à garder en vie, pas de service pour rien.
-        val oneShot = !settings.current().background && !isSettled(chat.observe().first(), result.clientMsgId) && startOneShot()
+        val oneShot = !isSettled(chat.observe().first(), result.clientMsgId) && startOneShot()
         scope.launch {
             try {
                 val settled = withTimeoutOrNull(ACK_WAIT_MS) {
@@ -68,14 +67,10 @@ class ReplySender(
         controller().startOneShot().also { if (it) oneShots++ }
     }
 
-    private suspend fun release(oneShot: Boolean) {
-        // L'arrière-plan a pu être activé entre-temps : ce service-là reste.
-        val background = oneShot && settings.current().background
-        lock.withLock {
-            if (--inFlight == 0) connection.release(ConnectionManager.Holder.REPLY)
-            // Sous le verrou, comme le démarrage : la fin ne double pas un « d'un coup » demandé après elle.
-            if (oneShot && --oneShots == 0 && !background) controller().endOneShot()
-        }
+    private suspend fun release(oneShot: Boolean) = lock.withLock {
+        if (--inFlight == 0) connection.release(ConnectionManager.Holder.REPLY)
+        // Sous le verrou, comme le démarrage : la fin ne double pas un « d'un coup » demandé après elle.
+        if (oneShot && --oneShots == 0) controller().endOneShot()
     }
 
     private companion object {

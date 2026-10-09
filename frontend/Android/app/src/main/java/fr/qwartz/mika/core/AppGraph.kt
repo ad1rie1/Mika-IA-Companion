@@ -15,6 +15,7 @@ import fr.qwartz.mika.data.approvals.ApprovalsRepository
 import fr.qwartz.mika.data.auth.AndroidKeystoreCipher
 import fr.qwartz.mika.data.auth.AuthApi
 import fr.qwartz.mika.data.auth.AuthRepository
+import fr.qwartz.mika.data.auth.Session
 import fr.qwartz.mika.data.auth.SessionHooks
 import fr.qwartz.mika.data.auth.TokenVault
 import fr.qwartz.mika.data.chat.ChatEngine
@@ -29,8 +30,12 @@ import fr.qwartz.mika.data.files.OutboxFiles
 import fr.qwartz.mika.data.files.ShareInbox
 import fr.qwartz.mika.data.mind.MindStateRepository
 import fr.qwartz.mika.data.net.BearerInterceptor
+import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.data.net.OkHttpWsTransport
+import fr.qwartz.mika.data.push.PushPayload
+import fr.qwartz.mika.data.push.PushRegistrar
 import fr.qwartz.mika.data.settings.SettingsStore
+import fr.qwartz.mika.push.FirebasePush
 import fr.qwartz.mika.service.AndroidServiceController
 import fr.qwartz.mika.service.ConnectionManager
 import fr.qwartz.mika.service.MessageNotifier
@@ -38,6 +43,7 @@ import fr.qwartz.mika.service.ReplySender
 import fr.qwartz.mika.service.ServiceController
 import fr.qwartz.mika.share.Shortcuts
 import fr.qwartz.mika.ui.avatar.AvatarAssets
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -45,6 +51,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -72,7 +80,7 @@ class AppGraph(context: Context) {
 
     /**
      * Complété quand la session est restaurée et la file d'envoi relue : un récepteur qui réveille le
-     * processus (réponse depuis une notification, démarrage du téléphone) attend ce moment.
+     * processus (réponse depuis une notification, message Firebase) attend ce moment.
      */
     val ready = CompletableDeferred<Unit>()
 
@@ -129,6 +137,9 @@ class AppGraph(context: Context) {
         override suspend fun beforeSignOut() {
             serviceController.stop()
             connection.shutdown()
+            // Le jeton Firebase et la clé des notifications partent avec la session (le serveur oublie le
+            // téléphone avec son jeton rendu) : plus rien n'arrive ici d'une session close.
+            push.forget()
         }
 
         override suspend fun wipeLocalData(keepDraft: Boolean) {
@@ -187,11 +198,39 @@ class AppGraph(context: Context) {
     val downloads: DownloadStore by lazy { DownloadStore(this.context, filesHttp, { auth.credentials() }, logger) }
     val shareInbox = ShareInbox(store)
 
-    /** Le service au premier plan (`MikaConnectionService`), d'après la session et les réglages. */
-    @Volatile var serviceController: ServiceController = AndroidServiceController(this.context, scope, settings, auth.session, logger)
+    /** Le service au premier plan (`MikaConnectionService`), le temps d'une réponse partie d'une notification. */
+    @Volatile var serviceController: ServiceController = AndroidServiceController(this.context, logger)
 
     val notifier = MessageNotifier(this.context, store, foreground.visible, { chatEngine.cursor }, clock::wallMs, logger)
-    val replies = ReplySender(scope, chat, connection, notifier, settings, { serviceController }, logger)
+    val replies = ReplySender(scope, chat, connection, notifier, { serviceController }, logger)
+
+    /** Les notifications app fermée (ADR 0077) : où les recevoir, dit au serveur, et la clé qui les ouvre. */
+    val push = PushRegistrar(
+        port = FirebasePush(this.context),
+        api = authApi,
+        keys = TokenVault(
+            PreferenceDataStoreFactory.create(produceFile = { this.context.preferencesDataStoreFile("push") }),
+            AndroidKeystoreCipher(),
+            name = TokenVault.PUSH_KEY_NAME,
+            aad = TokenVault.PUSH_KEY_AAD,
+            forgetKeyWhenUnreadable = false,
+        ),
+        settings = settings,
+        credentials = { auth.credentials() },
+        clock = clock,
+        logger = logger,
+    )
+
+    /** Un message Firebase : ouvert avec la clé de ce téléphone, montré comme une parole reçue (hors session : rien). */
+    suspend fun onPushed(data: Map<String, String>) {
+        val key = push.key() ?: return
+        val message = PushPayload.open(key, data)
+        if (message == null) {
+            logger.w(TAG, "message Firebase illisible : ignoré")
+            return
+        }
+        notifier.onPushed(message, online = connection.link.value == LinkState.Online)
+    }
 
     /** Les photos prises pour Mika, avant leur réduction (exposées par le FileProvider). */
     val cameraDir: File get() = File(context.cacheDir, "camera")
@@ -254,7 +293,21 @@ class AppGraph(context: Context) {
             } finally {
                 ready.complete(Unit)
             }
-            (serviceController as? AndroidServiceController)?.watch(foreground.visible)
+            // App ouverte, session ouverte (une connexion, ou le retour à l'écran) : dire au serveur où notifier ce
+            // téléphone fermé, si besoin. Jamais app fermée : en 4G, un serveur de la maison ne répond pas.
+            combine(foreground.visible, auth.session) { visible, session -> visible && session is Session.LoggedIn }
+                .distinctUntilChanged()
+                .filter { it }
+                .collect {
+                    // Une inscription en échec (base des réglages illisible…) n'arrête pas celles des ouvertures suivantes.
+                    try {
+                        push.sync()
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        logger.w(TAG, "inscription aux notifications en échec", e)
+                    }
+                }
         }
         scope.launch(Dispatchers.IO) { Shortcuts.publish(context) }
     }

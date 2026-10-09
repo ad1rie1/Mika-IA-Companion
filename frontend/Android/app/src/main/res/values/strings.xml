@@ -126,19 +126,16 @@
 
     <!-- Paramètres -->
     <string name="settings_account">Compte</string>
-    <string name="settings_background">Arrière-plan</string>
-    <string name="settings_background_title">Rester connectée en arrière-plan</string>
-    <string name="settings_background_summary">Reçois ses messages quand l\'application est fermée. Une notification discrète reste dans le volet ; Mika ne te croit pas devant l\'écran pour autant.</string>
-    <string name="settings_boot_title">Démarrer avec le téléphone</string>
-    <string name="settings_boot_summary">Reprendre la connexion après un redémarrage, sans ouvrir l\'application.</string>
-    <string name="settings_battery_title">Batterie</string>
-    <string name="settings_battery_unrestricted">Mika n\'est pas restreinte par l\'économie de batterie.</string>
-    <string name="settings_battery_restricted">Android peut mettre la connexion en veille : ses messages arriveront alors en retard.</string>
-    <string name="settings_battery_action">Ne pas restreindre Mika</string>
     <string name="settings_notifications">Notifications</string>
     <string name="settings_notifications_title">Messages de Mika</string>
     <string name="settings_notifications_on">Autorisées</string>
     <string name="settings_notifications_off">Désactivées : tu ne seras pas prévenue de ses messages.</string>
+    <string name="settings_push_title">Application fermée</string>
+    <string name="settings_push_active">Ses messages t\'arrivent par Firebase, chiffrés pour ce téléphone seul. Aucune connexion ne reste ouverte : la batterie n\'en souffre pas.</string>
+    <string name="settings_push_pending">Pas encore actives : le serveur n\'était pas joignable. Ce sera fait à la prochaine ouverture, chez toi.</string>
+    <string name="settings_push_server_without_key">Le serveur n\'a pas encore de clé Firebase (console › Réglages › Canaux › Notifications du téléphone) : tu ne reçois ses messages qu\'en ouvrant l\'application.</string>
+    <string name="settings_push_unavailable">Cette version de l\'application est construite sans Firebase : tu ne reçois ses messages qu\'en l\'ouvrant.</string>
+    <string name="settings_push_retry">Réessayer</string>
     <string name="settings_reads_title">Lui dire quand j\'ai lu</string>
     <string name="settings_reads_summary">Mika sait si tu as vu ce qu\'elle t\'a écrit : un message pas encore lu ne la fait pas se sentir ignorée. Seulement jusqu\'où tu as lu, jamais quand tu es en ligne.</string>
     <string name="settings_appearance">Apparence</string>
@@ -159,12 +156,12 @@
     <!-- Notifications (canaux, service) -->
     <string name="channel_messages_name">Messages de Mika</string>
     <string name="channel_messages_desc">Les messages que Mika t\'envoie.</string>
-    <string name="channel_connection_name">Connexion en arrière-plan</string>
-    <string name="channel_connection_desc">Garde la connexion avec Mika ouverte pour recevoir ses messages quand l\'application est fermée.</string>
+    <string name="channel_connection_name">Envoi d\'une réponse</string>
+    <string name="channel_connection_desc">Le temps d\'envoyer une réponse écrite depuis une notification (une minute au plus).</string>
+    <string name="reply_sending">Envoi de ta réponse à Mika</string>
     <string name="connection_online">Connectée à Mika</string>
     <string name="connection_reconnecting">Reconnexion…</string>
     <string name="connection_offline">Hors ligne</string>
-    <string name="action_disable">Désactiver</string>
     <string name="action_reply">Répondre</string>
     <string name="action_mark_read">Marquer comme lu</string>
     <string name="notification_public">Nouveau message de Mika</string>
