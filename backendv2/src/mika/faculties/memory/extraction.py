@@ -31,7 +31,7 @@ from mika.contracts.memory import Relation
 from mika.kernel.clock import instant
 from mika.kernel.codec import digest
 from mika.ports.llm import LLMResponse, ToolDecl
-from mika.vocab.affect import Emotion, emotion_named
+from mika.vocab.affect import facets
 from mika.vocab.people import clean_tokens, fold
 from mika.vocab.phrasebook import phrase, phrases
 from mika.vocab.privacy import Sensitivity
@@ -115,9 +115,17 @@ class _Item(_Lenient):
     messages: list[int] = Field(default_factory=list, description=phrase("memory.extraction.fields.messages"))
     #: ce que la personne concernée en ressent, et ce qu'elle-même en ressent : jugés par la relecture, jamais
     #: devinés d'après les mots (ADR 0083)
-    ressenti: str | None = Field(default=None, description=phrase("memory.extraction.fields.ressenti"))
-    mon_ressenti: str | None = Field(default=None, validation_alias=AliasChoices("mon_ressenti", "emotion"),
-                                     description=phrase("memory.extraction.fields.mon_ressenti"))
+    ressenti: dict[str, float] = Field(default_factory=dict, description=phrase("memory.extraction.fields.ressenti"))
+    mon_ressenti: dict[str, float] = Field(default_factory=dict,
+                                           validation_alias=AliasChoices("mon_ressenti", "emotion"),
+                                           description=phrase("memory.extraction.fields.mon_ressenti"))
+
+    @field_validator("ressenti", "mon_ressenti", mode="before")
+    @classmethod
+    def lenient_feelings(cls, v: Any) -> dict[str, float]:
+        """Un objet, une liste, « colère:0.8, dégoût:0.4 » ou un mot seul : rangé parmi les 29 émotions (ADR 0083),
+        jamais une erreur qui ferait perdre l'élément."""
+        return dict(facets(v))
 
     @field_validator("personnes", mode="before")
     @classmethod
@@ -215,14 +223,6 @@ class Extraction(_Lenient):
     @classmethod
     def lenient_ids(cls, v: Any) -> list[int]:
         return _ints(v)
-
-
-def feeling(word: str | None) -> str | None:
-    """Un ressenti jugé par la relecture (« heureuse », « inquiète ») rangé parmi les 29 émotions, pour en connaître
-    la tonalité ; rien pour le calme, ni pour un mot qu'elle ne reconnaît pas (ADR 0083). Le jugement est celui du
-    modèle : le code ne le devine jamais d'après les mots de la conversation."""
-    found = emotion_named(word)
-    return found.value if found is not None and found is not Emotion.NEUTRAL else None
 
 
 def tool(name: str) -> ToolDecl:

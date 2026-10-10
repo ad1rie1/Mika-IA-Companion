@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from types import MappingProxyType
+from typing import Any
 
 from mika.kernel.inspect import Swatch
 from mika.vocab.phrasebook import phrase, voice_file
@@ -473,6 +474,82 @@ def tag_intensity(raw: str | None, percent: bool = False) -> float:
     elif value > 1.0:
         value = value / 10.0 if value <= 10.0 else value / 100.0
     return max(0.0, min(1.0, value))
+
+
+#: Une facette d'un ressenti (ADR 0083) : une émotion (son nom canonique) et son intensité, de 0 à 1. Un ressenti en a
+#: plusieurs (« colère 0,8, dégoût 0,4 ») : la plus forte d'abord.
+Facet = tuple[str, float]
+#: au plus tant de facettes ; sous ce seuil, une facette ne compte pas ; un mot seul, sans intensité, vaut ceci
+FACETS_MAX = 3
+FACET_FLOOR = 0.1
+FACET_DEFAULT = 0.7
+_FACET_SPLIT = re.compile(r"[,;/|+]|\bet\b|\band\b", re.IGNORECASE)
+_FACET_VALUE = re.compile(r"^(?P<word>.*?)[\s:=(]+(?P<value>\d+(?:[.,]\d+)?)\s*(?P<pct>%)?\)?$")
+
+
+def facets(raw: Any) -> tuple[Facet, ...]:
+    """Un ressenti à plusieurs facettes, d'après ce qu'un modèle en écrit : ``{"colère": 0.8, "dégoût": 0.4}``, une
+    liste (de mots, de paires, d'objets ``{"emotion", "intensite"}``), « colère:0.8, dégoût:0.4 », ou un mot seul
+    (``FACET_DEFAULT``). Rangé parmi les 29 émotions (``emotion_named``) — le calme et un mot inconnu sont laissés —,
+    l'intensité bornée à [0, 1], une émotion redite garde sa plus forte, la plus forte d'abord (à égalité, l'ordre
+    écrit), ``FACETS_MAX`` au plus. Le jugement est celui du modèle : rien ici ne devine une émotion dans un texte."""
+    pairs: list[tuple[Any, Any]] = []
+
+    def take(item: Any, value: Any = None) -> None:
+        if isinstance(item, Mapping):
+            word = item.get("emotion") or item.get("émotion") or item.get("nom") or item.get("name")
+            value = next((item[k] for k in ("intensite", "intensité", "intensity", "valeur", "value") if k in item),
+                         None)
+            if word is not None:
+                pairs.append((word, value))
+        elif isinstance(item, (list, tuple)) and len(item) == 2 and not isinstance(item[0], (list, tuple, Mapping)):
+            pairs.append((item[0], item[1]))
+        elif isinstance(item, str):
+            for part in _FACET_SPLIT.split(item) if value is None else (item,):
+                part = part.strip()
+                got = _FACET_VALUE.match(part) if value is None else None
+                if got:
+                    pairs.append((got["word"], got["value"] + (got["pct"] or "")))
+                elif part:
+                    pairs.append((part, value))
+
+    if isinstance(raw, Mapping) and not any(k in raw for k in ("emotion", "émotion", "nom", "name")):
+        for word, value in raw.items():
+            take(str(word), value if value is not None else FACET_DEFAULT)
+    elif isinstance(raw, (list, tuple)):
+        for item in raw:
+            take(item)
+    elif raw is not None:
+        take(raw)
+    found: dict[str, float] = {}
+    for word, value in pairs:
+        emotion = emotion_named(str(word)) if word is not None else None
+        if emotion is None or emotion is Emotion.NEUTRAL:
+            continue
+        if value is None or value == "":
+            x = FACET_DEFAULT
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            x = max(0.0, min(1.0, float(value))) if math.isfinite(value) else FACET_DEFAULT
+            x = x if float(value) <= 1.0 else tag_intensity(str(value))
+        else:
+            x = tag_intensity(str(value).strip().rstrip("%"), percent=str(value).strip().endswith("%"))
+        if x >= FACET_FLOOR:
+            found[emotion.value] = max(found.get(emotion.value, 0.0), round(x, 2))
+    ranked = sorted(found.items(), key=lambda kv: -kv[1])  # stable : à égalité, l'ordre écrit
+    return tuple(ranked[:FACETS_MAX])
+
+
+def dominant(felt: tuple[Facet, ...]) -> str | None:
+    """La facette la plus forte d'un ressenti (son nom), ou rien."""
+    return felt[0][0] if felt else None
+
+
+def facets_valence(felt: tuple[Facet, ...]) -> float:
+    """La tonalité d'un ressenti : la valence de ses facettes, pondérée par leur intensité (0 : aucune facette)."""
+    total = sum(x for _e, x in felt)
+    if total <= 0:
+        return 0.0
+    return sum(x * valence(Emotion(e)) for e, x in felt if e in Emotion.__members__.values()) / total
 
 
 def _drop_thinking(text: str) -> str:

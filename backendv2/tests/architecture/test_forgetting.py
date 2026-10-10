@@ -50,7 +50,7 @@ def test_declared_subjects_are_fields_of_the_payload():
 #: personne, des états, des noms — jamais des mots de quelqu'un (ceux-là sont des ``Content``, qui
 #: déclarent leurs sujets ; un nouveau champ de texte libre doit en être un).
 MEMORY_KEYS = {"origin", "source", "call_id", "status", "by", "model", "night", "to", "emotion", "about", "told_by",
-               "heard_by", "holder", "felt"}  # ``felt`` : ce que la personne ressent, un nom d'émotion (ADR 0083)
+               "heard_by", "holder", "felt", "empathy"}  # des émotions et leurs intensités, pas des mots (ADR 0083)
 
 
 def textual(annotation: Any) -> bool:

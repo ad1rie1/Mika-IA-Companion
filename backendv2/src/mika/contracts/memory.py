@@ -51,12 +51,13 @@ public quand ça s'est dit en privé (ADR 0055).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import model_validator
+from pydantic import BeforeValidator, model_validator
 
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.vocab.affect import facets
 from mika.vocab.lineage import Restriction
 
 OWNER = "memory"
@@ -104,6 +105,11 @@ ROOM_CHUNK = "room_chunk"
 Disclosure = Restriction
 
 
+#: Un ressenti à plusieurs facettes (ADR 0083) : des émotions parmi les 29 et leur intensité, de 0 à 1, la plus forte
+#: d'abord — « colère 0,8, dégoût 0,4 ». Jugé par la relecture ; un ressenti d'un seul mot se lit comme une facette.
+Feelings = Annotated[tuple[tuple[str, float], ...], BeforeValidator(facets)]
+
+
 class Remembered(Payload):
     text: Content
     constraints: tuple[Disclosure, ...] = ()
@@ -122,8 +128,10 @@ class Remembered(Payload):
     secret: bool = False
     #: un souvenir né d'un mensonge qu'elle a dit (``LIED``) : ce qu'elle a affirmé de faux, à qui
     lie: bool = False
-    #: ce que la personne concernée en ressent, jugé par la relecture (ADR 0083) — son émotion à elle, ``emotion``
-    felt: str | None = None
+    #: ce que la personne concernée en ressent, et ce qu'elle-même en ressent (``emotion`` : sa facette la plus
+    #: forte), jugés par la relecture (ADR 0083)
+    felt: Feelings = ()
+    empathy: Feelings = ()
 
     @model_validator(mode="after")
     def _inherited_subjects(self):
@@ -179,8 +187,8 @@ class Believed(Payload):
     valid_until: int | None = None
     #: ce que la personne concernée en ressent, et ce qu'elle-même en ressent — de l'empathie, selon ce qu'elle
     #: sait et pense (ADR 0083) ; jugés par la relecture, une des 29 émotions
-    felt: str | None = None
-    emotion: str | None = None
+    felt: Feelings = ()
+    empathy: Feelings = ()
 
     @model_validator(mode="after")
     def _relation_subjects(self):
@@ -249,7 +257,7 @@ class Attested(Payload):
     first_hand: bool = False
     call_id: str = ""
     #: ce que la personne concernée en ressent, quand c'est elle qui le dit (ADR 0083) : son mot l'emporte
-    felt: str | None = None
+    felt: Feelings = ()
 
 
 class Joined(Payload):
@@ -317,8 +325,8 @@ class EventNoted(Payload):
     recurs: int | None = None
     #: ce que la personne en ressent (l'attendre avec joie, le redouter), et ce qu'elle-même en ressent pour elle
     #: (ADR 0083)
-    felt: str | None = None
-    emotion: str | None = None
+    felt: Feelings = ()
+    empathy: Feelings = ()
 
 
 class MomentFollowed(Payload):
@@ -445,8 +453,8 @@ class LifeEvent:
     #: la situation finie qu'il rouvre (0 : aucune)
     recurs: int = 0
     #: ce que la personne en ressent, ce qu'elle-même en ressent (ADR 0083) ; vide : rien de dit
-    felt: str = ""
-    emotion: str = ""
+    felt: tuple[tuple[str, float], ...] = ()
+    empathy: tuple[tuple[str, float], ...] = ()
 
     @property
     def key(self) -> int:
@@ -574,6 +582,14 @@ FORMER_VIEW = "memory_former"
 RETOLD_VIEW = "memory_retold"
 #: Tout, statut compris, pour la console, le simulateur et l'application — jamais pour une faculté ou un plugin.
 LEDGER_VIEW = "memory_ledger"
+#: Ce que chaque élément de ``KNOWLEDGE_VIEW`` fait ressentir (``item``, ``whose``, ``emotion``, ``intensity``) :
+#: à la personne concernée (``THEIRS``) ou à elle (``HERS``) — « ce qui t'énerve » se cherche par l'émotion
+#: (ADR 0083). Les mêmes droits que l'élément : on lit l'élément, puis le verdict.
+FEELINGS_VIEW = "memory_knowledge_feelings"
+#: La table qu'elle lit (dans la mémoire seulement) ; qui ressent : la personne concernée, ou elle
+FEELINGS_TABLE = "memory_feelings"
+THEIRS = "theirs"
+HERS = "hers"
 #: Les colonnes de ``KNOWLEDGE_VIEW`` et ``FORMER_VIEW``. ``told_by``, ``heard_by``, ``secret``, ``sensitivity``
 #: disent l'enveloppe la plus stricte de l'élément : on ne décide jamais dessus à la main, on passe par le verdict.
 KNOWN_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",

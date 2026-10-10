@@ -65,6 +65,7 @@ from mika.kernel.prompt import PromptBudgetError
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.llm_budget import fits_context
 from mika.ports.vectors import VectorItem
+from mika.vocab.affect import dominant, facets
 from mika.vocab.people import clean_display_name, fold, is_identifiable
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -630,8 +631,8 @@ class Consolidate:
                 continue
             drafts.append(c.REMEMBERED.draft(
                 text=Content.of(text, level=sens), about=about, sensitivity=sens,
-                importance=x.IMPORTANCE.get(s.importance, 0.45), emotion=x.feeling(s.mon_ressenti),
-                felt=x.feeling(s.ressenti), sources=sources, call_id=call_id, told_by=told_by, heard_by=heard,
+                importance=x.IMPORTANCE.get(s.importance, 0.45), emotion=dominant(facets(s.mon_ressenti)),
+                felt=facets(s.ressenti), empathy=facets(s.mon_ressenti), sources=sources, call_id=call_id, told_by=told_by, heard_by=heard,
                 secret=secret))
         for b in ex.croyances:
             if not fresh(c.BELIEF, b.texte):
@@ -708,7 +709,7 @@ class Consolidate:
                     confidence=x.born_confidence(b.confiance, origin, nature), sensitivity=sens, secret=secret,
                     between_us=between, sources=sources, about=about, relations=tuple(relations),
                     replaces=head if again == SUPERSEDE else None, contests=head if again == CONTEST else None,
-                    first_hand=first_hand, call_id=call_id, felt=x.feeling(b.ressenti)))
+                    first_hand=first_hand, call_id=call_id, felt=facets(b.ressenti)))
                 continue
             if twin is not None:
                 # la même proposition : un témoignage de plus, avec ses propres droits (ADR 0080) — redire une
@@ -719,7 +720,7 @@ class Consolidate:
                     confidence=x.born_confidence(b.confiance, origin, nature), sensitivity=sens, secret=secret,
                     between_us=between, sources=sources, about=about, relations=tuple(relations),
                     replaces=replaces if replaces != twin else None, contests=contests if contests != twin else None,
-                    first_hand=first_hand, call_id=call_id, felt=x.feeling(b.ressenti)))
+                    first_hand=first_hand, call_id=call_id, felt=facets(b.ressenti)))
                 continue
             since, until = x.when(b.depuis, tz) if b.depuis else None, x.when(b.jusqua, tz) if b.jusqua else None
             drafts.append(c.BELIEVED.draft(
@@ -729,7 +730,7 @@ class Consolidate:
                 call_id=call_id, told_by=told_by, heard_by=heard, secret=secret, between_us=between,
                 knowledge_kind=nature, holder=holder, relations=tuple(relations), first_hand=first_hand,
                 as_of=min(since[0], frame.now) if since else None, valid_until=until[0] if until else None,
-                felt=x.feeling(b.ressenti), emotion=x.feeling(b.mon_ressenti)))
+                felt=facets(b.ressenti), empathy=facets(b.mon_ressenti)))
         drafts += self._called(nicks, ours, store, conv, call_id)
         closed = [item for item in dict.fromkeys(ex.confidentiel) if item in known_ids]
         for item in closed:
@@ -961,8 +962,8 @@ class Consolidate:
                     secret=moved.secret or secret_of(ev.secret, cited, sens, ev.texte), replaces=moved.id,
                     call_id=call_id, ongoing=False, importance=max(moved.importance, x.moment_importance(ev)),
                     festive=moved.festive or x.festive(ev), yearly=yearly,
-                    felt=x.feeling(ev.ressenti) or moved.felt or None,
-                    emotion=x.feeling(ev.mon_ressenti) or moved.emotion or None))
+                    felt=facets(ev.ressenti) or moved.felt,
+                    empathy=facets(ev.mon_ressenti) or moved.empathy))
                 continue
             back = (moments or {}).get(ev.remplace) if ev.remplace is not None and ev.en_cours else None
             if back is not None and not (back.ongoing and back.ended_at):
@@ -982,8 +983,8 @@ class Consolidate:
                     all_day=all_day, sensitivity=sens, sources=sources, told_by=told_by, heard_by=heard,
                     secret=again.secret or secret_of(ev.secret, cited, sens, ev.texte), recurs=again.id,
                     call_id=call_id, ongoing=True, importance=max(again.importance, x.moment_importance(ev)),
-                    felt=x.feeling(ev.ressenti) or again.felt or None,
-                    emotion=x.feeling(ev.mon_ressenti) or again.emotion or None))
+                    felt=facets(ev.ressenti) or again.felt,
+                    empathy=facets(ev.mon_ressenti) or again.empathy))
                 continue
             if twin is not None and not ev.en_cours and abs(twin.when - at) >= DAY // 2 and not x.same_moment(
                     ev.texte, store.content([twin.text_ref]).get(twin.text_ref) or "", names):
@@ -1006,8 +1007,8 @@ class Consolidate:
                     importance=max(twin.importance, x.moment_importance(ev)),
                     festive=twin.festive or (not twin.ongoing and x.festive(ev)),
                     yearly=twin.yearly or (not twin.ongoing and yearly),
-                    felt=x.feeling(ev.ressenti) or twin.felt or None,
-                    emotion=x.feeling(ev.mon_ressenti) or twin.emotion or None))
+                    felt=facets(ev.ressenti) or twin.felt,
+                    empathy=facets(ev.mon_ressenti) or twin.empathy))
                 continue
             noted.append((ev.texte, at, about))
             drafts.append(c.EVENT_NOTED.draft(
@@ -1015,7 +1016,7 @@ class Consolidate:
                 sources=sources, told_by=told_by, heard_by=heard, secret=secret_of(ev.secret, cited, sens, ev.texte),
                 replaces=twin.id if twin is not None else None, call_id=call_id, ongoing=ev.en_cours,
                 importance=x.moment_importance(ev), festive=not ev.en_cours and x.festive(ev), yearly=yearly,
-                felt=x.feeling(ev.ressenti), emotion=x.feeling(ev.mon_ressenti)))
+                felt=facets(ev.ressenti), empathy=facets(ev.mon_ressenti)))
         return drafts
 
     @staticmethod

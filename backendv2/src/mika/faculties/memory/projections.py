@@ -40,14 +40,14 @@ from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.codec import digest
 from mika.kernel.faculty import Tier
 from mika.ports.store import Sql
-from mika.vocab.affect import strip_prosody
+from mika.vocab.affect import FACET_DEFAULT, dominant, strip_prosody
 from mika.vocab.words import WORD, fold, same_words, stems
 
 ITEM_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",
                 "emotion", "born_at", "touched_at", "recalled_at", "recalls", "status", "replaces", "recipient",
                 "due", "sources", "told_by", "heard_by", "secret", "informants", "about_self", "shown_at", "between_us",
                 "knowledge_kind", "holder", "constraints", "internal_only", "superseded_by", "as_of", "valid_until",
-                "felt")
+                "felt", "empathy")
 CHUNK_TEXT_MAX = 600
 #: élément → la référence de son texte (``Content.ref``)
 REFS_TABLE = "memory_refs"
@@ -59,6 +59,9 @@ TESTIMONY_COLUMNS = ("item", "seq", "told_by", "informants", "origin", "confiden
 #: (ADR 0081) : elle doute
 CONTESTS_TABLE = "memory_contests"
 CHANGES_TABLE = "memory_changes"
+#: un élément → ses émotions, de qui (``theirs`` : la personne concernée ; ``hers`` : elle) et à quelle intensité
+#: (ADR 0083)
+FEELINGS_TABLE = c.FEELINGS_TABLE
 #: les événements qui créent un élément (et portent son texte)
 _CREATES = frozenset({c.REMEMBERED.name, c.BELIEVED.name, c.PROMISE_NOTICED.name, c.EVENT_NOTED.name})
 #: deux radicaux en commun entre ce qu'elle a dit et un élément montré : elle s'en est servie
@@ -154,7 +157,7 @@ def fingerprint(text: str) -> str:
     return digest(WORD.findall(fold(text)))
 
 
-VIEWS = (c.KNOWLEDGE_VIEW, c.KNOWLEDGE_ABOUT_VIEW, c.FORMER_VIEW, c.RETOLD_VIEW, c.LEDGER_VIEW)
+VIEWS = (c.KNOWLEDGE_VIEW, c.KNOWLEDGE_ABOUT_VIEW, c.FORMER_VIEW, c.RETOLD_VIEW, c.LEDGER_VIEW, c.FEELINGS_VIEW)
 
 
 def create_views(sql: Sql, sfx: str) -> None:
@@ -170,6 +173,23 @@ def create_views(sql: Sql, sfx: str) -> None:
     sql.execute(f"CREATE VIEW IF NOT EXISTS {c.FORMER_VIEW}{sfx} AS SELECT {cols} FROM {t} WHERE status IN ({former})")
     sql.execute(f"CREATE VIEW IF NOT EXISTS {c.RETOLD_VIEW}{sfx} AS SELECT item, handle, at FROM {told}")
     sql.execute(f"CREATE VIEW IF NOT EXISTS {c.LEDGER_VIEW}{sfx} AS SELECT * FROM {t}")
+    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.FEELINGS_VIEW}{sfx} AS SELECT f.item AS item, f.whose AS whose, "
+                f"f.emotion AS emotion, f.intensity AS intensity FROM {c.FEELINGS_TABLE}{sfx} f "
+                f"JOIN {t} i ON i.id = f.item WHERE i.status NOT IN ({former})")
+
+
+def _facets_json(felt: Any) -> str:
+    return json.dumps([[e, x] for e, x in felt])
+
+
+def _feel(sql: Sql, sfx: str, item: int, felt: Any, empathy: Any, emotion: str | None) -> None:
+    """Relie un élément à ses émotions (ADR 0083) : ce que la personne en ressent (``theirs``), ce qu'elle-même en
+    ressent (``hers`` — sa seule émotion pour un souvenir d'avant les facettes)."""
+    t = f"{FEELINGS_TABLE}{sfx}"
+    sql.execute(f"DELETE FROM {t} WHERE item=?", (item,))
+    hers = [tuple(f) for f in empathy] or ([(emotion, FACET_DEFAULT)] if emotion else [])
+    rows = [(item, c.THEIRS, str(e), float(x)) for e, x in felt] + [(item, c.HERS, str(e), float(x)) for e, x in hers]
+    sql.executemany(f"INSERT OR REPLACE INTO {t}(item, whose, emotion, intensity) VALUES(?,?,?,?)", rows)
 
 
 class Items:
@@ -185,7 +205,8 @@ class Items:
             "about_self INTEGER NOT NULL DEFAULT 0, shown_at INTEGER NOT NULL DEFAULT 0, "
             "between_us INTEGER NOT NULL DEFAULT 0, knowledge_kind TEXT NOT NULL DEFAULT 'claim', holder TEXT, "
             "constraints TEXT NOT NULL DEFAULT '[]', internal_only INTEGER NOT NULL DEFAULT 0, fingerprint TEXT NOT NULL DEFAULT '', "
-            "superseded_by INTEGER, superseded_at INTEGER, as_of INTEGER, valid_until INTEGER, felt TEXT)"
+            "superseded_by INTEGER, superseded_at INTEGER, as_of INTEGER, valid_until INTEGER, "
+            "felt TEXT NOT NULL DEFAULT '[]', empathy TEXT NOT NULL DEFAULT '[]')"
         )
         t, about = f"{c.ITEMS_TABLE}{sfx}", f"{c.ABOUT_TABLE}{sfx}"
         sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_kind ON {t}(kind, status, born_at)")
@@ -207,13 +228,18 @@ class Items:
                     "first_hand INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(item, seq))")
         sql.execute(f"CREATE TABLE IF NOT EXISTS {CONTESTS_TABLE}{sfx}(item INTEGER NOT NULL, other INTEGER NOT NULL, "
                     "at INTEGER NOT NULL, PRIMARY KEY(item, other)) WITHOUT ROWID")
+        # chaque élément relié à ses émotions (ADR 0083) : « ce qui t'énerve » se cherche par l'émotion
+        sql.execute(f"CREATE TABLE IF NOT EXISTS {FEELINGS_TABLE}{sfx}(item INTEGER NOT NULL, whose TEXT NOT NULL, "
+                    "emotion TEXT NOT NULL, intensity REAL NOT NULL, PRIMARY KEY(item, whose, emotion)) WITHOUT ROWID")
+        sql.execute(f"CREATE INDEX IF NOT EXISTS {FEELINGS_TABLE}{sfx}_emotion ON {FEELINGS_TABLE}{sfx}"
+                    "(whose, emotion, intensity)")
         create_views(sql, sfx)
 
     def drop(self, sql: Sql, sfx: str) -> None:
         for view in VIEWS:
             sql.execute(f"DROP VIEW IF EXISTS {view}{sfx}")
         for table in (c.ITEMS_TABLE, c.ABOUT_TABLE, c.FORGETS_TABLE, REFS_TABLE, CHANGES_TABLE, TESTIMONIES_TABLE,
-                      CONTESTS_TABLE):
+                      CONTESTS_TABLE, FEELINGS_TABLE):
             sql.execute(f"DROP TABLE IF EXISTS {table}{sfx}")
 
     def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
@@ -226,10 +252,11 @@ class Items:
                     "recalls": 0, "replaces": None, "recipient": None, "due": None, "told_by": "[]",
                     "heard_by": "[]", "secret": 0, "informants": "[]", "about_self": 0, "shown_at": 0, "between_us": 0,
                     "knowledge_kind": "claim", "holder": None, "constraints": "[]", "internal_only": 0,
-                    "superseded_by": None, "as_of": None, "valid_until": None, "felt": None, **row}
+                    "superseded_by": None, "as_of": None, "valid_until": None, "felt": "[]", "empathy": "[]", **row}
             sql.execute(f"INSERT OR REPLACE INTO {t}({cols},fingerprint) VALUES({marks},?)",
                         (*[full[k] for k in ITEM_COLUMNS], fingerprint(full["text"])))
             _about_rows(sql, about, int(full["id"]), _loads(full["about"]))
+            _feel(sql, sfx, int(full["id"]), json.loads(full["felt"]), json.loads(full["empathy"]), full["emotion"])
 
         for e in events:
             d = e.data
@@ -253,12 +280,13 @@ class Items:
                 sql.execute(f"INSERT OR REPLACE INTO {REFS_TABLE}{sfx}(item, ref) VALUES(?,?)", (e.seq, d.text.ref))
             if name == c.REMEMBERED.name:
                 insert({"id": e.seq, "kind": c.SOUVENIR, "text": d.text.text or "", "about": _keys(d.about),
-                        "sensitivity": d.sensitivity, "importance": d.importance, "emotion": d.emotion,
+                        "sensitivity": d.sensitivity, "importance": d.importance,
                         "born_at": e.at, "touched_at": e.at, "status": "active", "sources": json.dumps(list(d.sources)),
                         "told_by": _keys(d.told_by), "heard_by": _keys(d.heard_by), "secret": int(d.secret),
                         "constraints": json.dumps([rule.model_dump() for rule in d.constraints]),
                         "internal_only": int(d.internal_only), "origin": c.LIED if d.lie else None,
-                        "felt": d.felt})
+                        "emotion": d.emotion or dominant(d.empathy), "felt": _facets_json(d.felt),
+                        "empathy": _facets_json(d.empathy)})
             elif name == c.BELIEVED.name:
                 insert({"id": e.seq, "kind": c.BELIEF, "text": d.text.text or "", "about": _keys(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance, "confidence": d.confidence,
@@ -270,7 +298,8 @@ class Items:
                         "about_self": 2 if d.durable else int(d.about_self), "between_us": int(d.between_us),
                         "knowledge_kind": d.knowledge_kind, "holder": d.holder,
                         "as_of": d.as_of if d.as_of is not None else e.at, "valid_until": d.valid_until,
-                        "emotion": d.emotion, "felt": d.felt})
+                        "emotion": dominant(d.empathy), "felt": _facets_json(d.felt),
+                        "empathy": _facets_json(d.empathy)})
                 # le premier témoignage : comment elle l'a appris la première fois (ADR 0080)
                 _testify(sql, sfx, e.seq, e.seq, told_by=d.told_by, informants=informants_of(d.source, d.told_by),
                          origin=d.origin, confidence=d.confidence, heard_by=d.heard_by, sensitivity=d.sensitivity,
@@ -289,8 +318,8 @@ class Items:
                         "sensitivity": d.sensitivity, "importance": d.importance, "born_at": e.at, "touched_at": e.at,
                         "status": "active", "due": d.when, "replaces": d.replaces,
                         "sources": json.dumps(list(d.sources)), "told_by": _keys(d.told_by),
-                        "heard_by": _keys(d.heard_by), "secret": int(d.secret), "emotion": d.emotion,
-                        "felt": d.felt})
+                        "heard_by": _keys(d.heard_by), "secret": int(d.secret), "emotion": dominant(d.empathy),
+                        "felt": _facets_json(d.felt), "empathy": _facets_json(d.empathy)})
                 if d.replaces is not None:
                     sql.execute(f"UPDATE {t} SET status='superseded' WHERE id=? AND kind=?", (d.replaces, c.EVENT))
             elif name == c.PROMISE_RESOLVED.name:
@@ -316,7 +345,7 @@ class Items:
     @staticmethod
     def _row(sql: Sql, t: str, item: int) -> dict[str, Any] | None:
         columns = ("about", "told_by", "heard_by", "informants", "sensitivity", "secret", "importance", "sources", "text",
-                   "constraints", "internal_only", "felt")
+                   "constraints", "internal_only", "felt", "empathy", "emotion")
         got = sql.query(f"SELECT {','.join(columns)} FROM {t} WHERE id=?", (item,))
         if not got:
             return None
@@ -409,9 +438,10 @@ class Items:
                 (at, int(d.sensitivity), int(d.secret), _keys([*_loads(row["about"]), *d.about]),
                  json.dumps(sorted({*map(int, _loads(row["sources"])), *d.sources})), int(d.between_us), d.item))
             _about_rows(sql, about, d.item, d.about)
-            if d.felt and (not row["felt"] or set(d.told_by) & set(_loads(row["about"]))):
+            if d.felt and (not json.loads(row["felt"] or "[]") or set(d.told_by) & set(_loads(row["about"]))):
                 # ce que la personne en ressent : son mot à elle l'emporte sur celui d'un autre (ADR 0083)
-                sql.execute(f"UPDATE {t} SET felt=? WHERE id=?", (d.felt, d.item))
+                sql.execute(f"UPDATE {t} SET felt=? WHERE id=?", (_facets_json(d.felt), d.item))
+                _feel(sql, sfx, d.item, [list(f) for f in d.felt], json.loads(row["empathy"] or "[]"), row["emotion"])
         if d.replaces is not None and d.replaces != d.item:
             # ce qu'elle croyait, redit, revient (ADR 0081) : la croyance qui l'avait remplacée le cède
             sql.execute(f"UPDATE {t} SET status='active', superseded_by=NULL, superseded_at=NULL "
@@ -501,6 +531,7 @@ class Items:
         sql.executemany(f"DELETE FROM {CHANGES_TABLE}{sfx} WHERE item=?", doomed)
         sql.executemany(f"DELETE FROM {TESTIMONIES_TABLE}{sfx} WHERE item=?", doomed)
         sql.executemany(f"DELETE FROM {CONTESTS_TABLE}{sfx} WHERE item=?1 OR other=?1", doomed)
+        sql.executemany(f"DELETE FROM {FEELINGS_TABLE}{sfx} WHERE item=?", doomed)
         self._forget_testimonies(sql, t, sfx, subject)
         # l'index des vecteurs saura qu'il a quelque chose à oublier (``memory.index``)
         sql.execute(f"UPDATE {c.FORGETS_TABLE}{sfx} SET n=n+1")

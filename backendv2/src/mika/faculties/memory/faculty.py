@@ -36,7 +36,7 @@ from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
-from mika.vocab.affect import Declared, Emotion, emotion_of, valence
+from mika.vocab.affect import Declared, Emotion, emotion_of, facets_valence, valence
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
 
@@ -528,7 +528,7 @@ def _noted(s: MemoryState, e, cx) -> MemoryState:
                                            tuple(d.told_by), d.text.ref or "", d.secret, followed_at=followed,
                                            ongoing=d.ongoing, importance=d.importance, festive=d.festive,
                                            ended_at=ended, yearly=d.yearly and not d.ongoing, thread=thread,
-                                           recurs=d.recurs or 0, felt=d.felt or "", emotion=d.emotion or ""))
+                                           recurs=d.recurs or 0, felt=tuple(d.felt), empathy=tuple(d.empathy)))
     if d.recurs is not None:
         events = events.delete(d.recurs)  # la situation finie laisse la place à celle qui recommence
     threads = s.threads.set(e.seq, thread) if thread != e.seq else s.threads
@@ -589,8 +589,9 @@ def _retained(s: MemoryState, e, cx) -> MemoryState:
     if d.importance >= params(cx.params).landmark_importance:
         # ce que la personne en ressent d'abord (« son père est à l'hôpital » : elle est inquiète), sinon, pour un
         # souvenir, ce qu'elle-même a ressenti en le vivant (ADR 0083)
-        felt = emotion_of(d.felt) or (emotion_of(d.emotion) if e.type.name == c.REMEMBERED.name else None)
-        if felt is not None and valence(felt) < 0:
+        mine = emotion_of(d.emotion) if e.type.name == c.REMEMBERED.name else None
+        weight = facets_valence(d.felt) if d.felt else (valence(mine) if mine is not None else 0.0)
+        if weight < 0:
             for person in d.about:
                 s = _hard(s, person, e.at)
     return s

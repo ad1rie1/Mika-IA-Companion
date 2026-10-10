@@ -74,6 +74,7 @@ from mika.faculties.memory.salience import (
     admissible,
     age_words,
     dormant,
+    facets_sign,
     rank,
     salience,
     tag,
@@ -740,7 +741,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     for _score, item, verdict in ranked:
         bucket, cap = (out.souvenirs, p.max_souvenirs) if item.kind == c.SOUVENIR else (out.beliefs, p.max_beliefs)
         # un souvenir se raconte déjà avec ses mots à elle ; une note sur elle n'a personne en face (ADR 0083)
-        own = item.emotion if item.kind == c.BELIEF and not item.about_self else None
+        own = item.empathy if item.kind == c.BELIEF and not item.about_self else ()
         _add_recalled(bucket, Recalled(item, verdict, item.text + tag(verdict, names) +
                                        doubted(frame, item, memo, person, verdict) +
                                        contested_line(frame, item, person, aud, memo, store, names) +
@@ -791,18 +792,36 @@ def _last_talk(frame: Frame, person: str) -> str:
 
 def tone(item: Item) -> int:
     """Ce qu'un élément est pour qui le vit : une peine (−1), une joie (+1), on ne sait pas (0) — ce que la personne
-    concernée en ressent d'abord, sinon ce qu'elle-même en ressentait ; jugés par la relecture (ADR 0083)."""
-    return valence_sign(item.felt) or valence_sign(item.emotion)
+    concernée en ressent d'abord, sinon ce qu'elle-même en ressent ; toutes facettes pesées (ADR 0083)."""
+    return facets_sign(item.felt) or facets_sign(item.empathy) or valence_sign(item.emotion)
 
 
-def feelings(felt: str | None, emotion: str | None, who: str) -> str:
-    """Ce que la personne concernée en ressent (« Inès le vit avec joie ») et ce qu'elle-même en ressent (« toi, tu en
-    es contente ») : l'empathie, en mots, jamais un nombre (ADR 0083). Jugés par la relecture. ``who`` : le nom de
-    la personne concernée — vide, son ressenti à elle ne se dit pas (on ne sait pas de qui)."""
-    theirs, mine = A.emotion_of(felt), A.emotion_of(emotion)
-    parts = [phrase("memory.recall.felt.theirs", who=who, what=A.NOUN[theirs])] if theirs is not None and who else []
-    if mine is not None:
-        parts.append(phrase("memory.recall.felt.yours", feeling=A.FR[mine]))
+#: une facette sous cette intensité se dit « un peu » (« colère et un peu de dégoût »)
+LIGHT_FACET = 0.5
+
+
+def facet_words(felt: Sequence[tuple[str, float]], *, lead: bool = True) -> str:
+    """Les facettes d'un ressenti en mots, jamais un nombre : « colère », « colère et un peu de dégoût »,
+    « amusement, tendresse et joie » (ADR 0083). ``lead`` : la première se dit franchement, quelle que soit son
+    intensité (c'est la plus forte)."""
+    words = [A.NOUN[A.Emotion(e)] if (lead and i == 0) or x >= LIGHT_FACET else
+             phrase("memory.recall.felt.light", what=A.partitive(A.Emotion(e))) for i, (e, x) in enumerate(felt)]
+    if len(words) < 2:
+        return "".join(words)
+    return phrase("memory.recall.felt.and", first=", ".join(words[:-1]), last=words[-1])
+
+
+def feelings(felt: Sequence[tuple[str, float]], empathy: Sequence[tuple[str, float]], who: str) -> str:
+    """Ce que la personne concernée en ressent (« Inès le vit avec colère et un peu de dégoût ») et ce qu'elle-même
+    en ressent (« toi, tu en es triste, avec un peu d'inquiétude ») : l'empathie, en mots (ADR 0083), jugée par la
+    relecture. ``who`` : le nom de la personne concernée — vide, ce qu'elle ressent ne se dit pas (on ne sait pas
+    de qui)."""
+    parts = [phrase("memory.recall.felt.theirs", who=who, what=facet_words(felt))] if felt and who else []
+    if empathy:
+        mine = phrase("memory.recall.felt.yours", feeling=A.FR[A.Emotion(empathy[0][0])])
+        if empathy[1:]:
+            mine += phrase("memory.recall.felt.yours_more", what=facet_words(empathy[1:], lead=False))
+        parts.append(mine)
     return phrase("memory.recall.felt.both", what=" ; ".join(parts)) if parts else ""
 
 
@@ -1060,7 +1079,7 @@ def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryPara
                and same_moment(text, m.text, who) for m in out):
             continue  # « son anniversaire » et « l'anniversaire de Sam », le même samedi : un seul moment
         out.append(Moment(ev, text, verdict, text + tag(verdict, names) +
-                          feelings(ev.felt, ev.emotion, concerned_name(frame, ev.about, names, memo))))
+                          feelings(ev.felt, ev.empathy, concerned_name(frame, ev.about, names, memo))))
     return out
 
 

@@ -43,7 +43,7 @@ from mika.contracts import memory as c
 from mika.faculties.memory.faculty import MemoryParams
 from mika.faculties.memory.knowledge import Testimony
 from mika.kernel.clock import DAY
-from mika.vocab.affect import emotion_of, valence
+from mika.vocab.affect import emotion_of, facets, facets_valence, valence
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity, Verdict
 from mika.vocab.privacy import admissible as admissible  # le verdict vit dans ``vocab.privacy`` : réexporté
@@ -97,8 +97,10 @@ class Item:
     superseded_by: int = 0
     as_of: int = 0
     valid_until: int | None = None
-    #: ce que la personne concernée en ressent (``emotion`` : ce qu'elle-même en ressent), ADR 0083
-    felt: str | None = None
+    #: ce que la personne concernée en ressent, ce qu'elle-même en ressent (``emotion`` : sa facette la plus forte) —
+    #: des émotions et leur intensité, la plus forte d'abord (ADR 0083)
+    felt: tuple[tuple[str, float], ...] = ()
+    empathy: tuple[tuple[str, float], ...] = ()
 
     @classmethod
     def of(cls, row: dict[str, Any]) -> Item:
@@ -118,7 +120,7 @@ class Item:
             internal_only=bool(row.get("internal_only")), superseded_by=int(row.get("superseded_by") or 0),
             as_of=int(row.get("as_of") or row["born_at"]),
             valid_until=None if row.get("valid_until") is None else int(row["valid_until"]),
-            felt=row.get("felt") or None,
+            felt=facets(json.loads(row.get("felt") or "[]")), empathy=facets(json.loads(row.get("empathy") or "[]")),
         )
 
 
@@ -238,6 +240,12 @@ def valence_sign(emotion: str | None) -> int:
     if e is None:
         return 0
     v = valence(e)
+    return 1 if v > 0.15 else -1 if v < -0.15 else 0
+
+
+def facets_sign(felt: tuple[tuple[str, float], ...]) -> int:
+    """La tonalité d'un ressenti à plusieurs facettes (ADR 0083) : sa valence pondérée par les intensités."""
+    v = facets_valence(felt)
     return 1 if v > 0.15 else -1 if v < -0.15 else 0
 
 

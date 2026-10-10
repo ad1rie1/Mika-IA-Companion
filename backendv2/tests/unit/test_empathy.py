@@ -1,10 +1,12 @@
 """L'empathie (ADR 0083) : un souvenir, une croyance, un moment portent ce que la personne concernée en ressent et ce
-qu'elle-même en ressent — jugés par la relecture, jamais devinés d'après les mots.
+qu'elle-même en ressent — plusieurs facettes, chacune d'intensité 0 à 1 (« colère 0,8, dégoût 0,4 »), jugées par la
+relecture, jamais devinées d'après les mots — et chaque élément est relié à ses émotions : « ce qui t'énerve » se
+cherche.
 
 Avant, une croyance confiée n'avait aucune émotion : devant une proche, toute confidence tue se disait « un moment
 difficile », grossesse comprise (sonde réelle du 2026-10-09 : « Inès t'a confié traverser un moment difficile »,
 pour une bonne nouvelle qu'Inès gardait). Rien ne disait non plus, en se souvenant, ce que la personne vivait ni ce
-qu'elle-même en ressentait. Chaque cible échoue sur l'arbre d'avant.
+qu'elle-même en ressentait, ni ne permettait de chercher par émotion. Chaque cible échoue sur l'arbre d'avant.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from mika.contracts import memory as mc
 from mika.faculties.memory.extraction import Extraction, XCroyance, XEvenement, XSouvenir
 from mika.faculties.memory.faculty import MemoryParams, MemoryState, _retained
 from mika.faculties.memory.recall import _body, _recall
+from mika.faculties.memory.tools import SearchArgs, memory_search
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience
 from mika.ports.vectors import VectorItem
@@ -36,13 +39,17 @@ async def test_the_reread_says_what_the_person_feels_and_what_she_feels():
         souvenirs=[XSouvenir(texte="Alice m'a annoncé qu'elle est enceinte", personnes=["P1"], messages=[10000],
                              ressenti="heureuse", mon_ressenti="contente")],
         croyances=[XCroyance(texte="Alice est enceinte", personnes=["P1"], messages=[10000], source="P1",
-                             ressenti="ravie", mon_ressenti="contente")],
+                             ressenti={"joie": 0.9, "excitation": 0.6, "compréhension": 0.3},
+                             mon_ressenti="amusement, amour, joie")],
         evenements=[XEvenement(texte="Son échographie", quand="2026-10-12", personnes=["P1"], messages=[10000],
                                ressenti="inquiète", mon_ressenti="curieuse")])
     out = {d.type.name: d.data for d in await drafts(db, ex, said)}
-    assert (out[mc.REMEMBERED.name].felt, out[mc.REMEMBERED.name].emotion) == ("happy", "happy")
-    assert (out[mc.BELIEVED.name].felt, out[mc.BELIEVED.name].emotion) == ("happy", "happy")
-    assert (out[mc.EVENT_NOTED.name].felt, out[mc.EVENT_NOTED.name].emotion) == ("anxious", "curious")
+    souvenir, belief, moment = out[mc.REMEMBERED.name], out[mc.BELIEVED.name], out[mc.EVENT_NOTED.name]
+    assert (souvenir.felt, souvenir.emotion) == ((("happy", 0.7),), "happy")
+    # plusieurs facettes, la plus forte d'abord ; « compréhension » n'est pas une de ses 29 émotions
+    assert belief.felt == (("happy", 0.9), ("excited", 0.6))
+    assert belief.empathy == (("amused", 0.7), ("love", 0.7), ("happy", 0.7))
+    assert (moment.felt, moment.empathy) == ((("anxious", 0.7),), (("curious", 0.7),))
     db.conn.close()
 
 
@@ -79,18 +86,20 @@ async def test_a_joyful_secret_is_not_a_difficult_moment():
 
 async def test_a_recalled_belief_says_both_feelings_in_words():
     db = Store()
-    text = "Alice est enceinte de trois mois"
+    text = "Bob a encore menti à Alice"
     db.put(mc.BELIEVED.draft(text=Content.of(text), about=(ALICE,), told_by=(ALICE,), heard_by=(ALICE,),
-                             source=ALICE, sensitivity=2, felt="happy", emotion="happy"), 1, FRAME.now)
-    ask(db, "tu te souviens que je suis enceinte de trois mois ?")
+                             source=ALICE, sensitivity=2, felt={"colère": 0.8, "dégoût": 0.4},
+                             empathy={"triste": 0.6, "inquiète": 0.3}), 1, FRAME.now)
+    ask(db, "tu te souviens que Bob a encore menti à Alice ?")
     vectors = await index(db, [VectorItem(1, mc.BELIEF, text, (ALICE,))])
     frame = Frame(CLOSE)
     body = _body(await _recall(MemoryState(), frame, {"store": db, "vectors": vectors}), frame, witness=False)
     db.conn.close()
     assert body is not None
     line = next(ln for ln in body.content.splitlines() if text in ln)
-    assert "Alice le vit avec joie" in line and "tu en es contente" in line
-    assert not any(ch.isdigit() for ch in line.replace("trois", ""))  # des mots, jamais un nombre
+    assert "Alice le vit avec colère et un peu de dégoût" in line
+    assert "toi, tu en es triste, avec un peu d'inquiétude" in line
+    assert not any(ch.isdigit() for ch in line)  # des mots, jamais un nombre
 
 
 # ── Les temps durs : ce que la personne ressent elle-même ───────────────────
@@ -103,5 +112,35 @@ def test_what_the_person_feels_tells_her_hard_times():
         return NS(type=mc.BELIEVED, seq=7, at=FRAME.now, data=mc.BELIEVED.draft(
             text=Content(ref="r"), about=(ALICE,), told_by=(ALICE,), importance=0.95, felt=felt).data)
 
-    assert ALICE in _retained(MemoryState(), believed("anxious"), cx).hard  # son père à l'hôpital : elle s'inquiète
-    assert ALICE not in _retained(MemoryState(), believed("happy"), cx).hard
+    # son père à l'hôpital : elle s'inquiète, malgré un peu de soulagement qu'il soit pris en charge
+    assert ALICE in _retained(MemoryState(), believed({"inquiète": 0.8, "soulagée": 0.3}), cx).hard
+    assert ALICE not in _retained(MemoryState(), believed({"heureuse": 0.8, "inquiète": 0.2}), cx).hard
+    # toutes les facettes comptent, pas seulement la première : un peu inquiète, mais soulagée et heureuse
+    assert ALICE not in _retained(MemoryState(), believed({"inquiète": 0.5, "soulagée": 0.5, "heureuse": 0.5}), cx).hard
+
+
+# ── « Qu'est-ce qui t'énerve ? » : chercher par émotion ─────────────────────
+
+
+async def test_what_angers_her_is_found_by_feeling():
+    db = Store()
+    rows = ((1, "Bob s'est moqué de mon dessin devant tout le monde", mc.REMEMBERED, {}, {"colère": 0.8}),
+            (2, "Carol m'a offert un carnet à dessin", mc.REMEMBERED, {}, {"joie": 0.9}),
+            (3, "Le voisin d'Alice fait du bruit toute la nuit", mc.BELIEVED, {"agacement": 0.9}, {}))
+    for seq, text, kind, felt, empathy in rows:
+        about = (ALICE,) if kind is mc.BELIEVED else ()
+        db.put(kind.draft(text=Content.of(text), about=about, told_by=about, heard_by=about, sensitivity=1,
+                          felt=felt, empathy=empathy), seq, FRAME.now)
+    vectors = await index(db, [VectorItem(seq, mc.SOUVENIR if kind is mc.REMEMBERED else mc.BELIEF, text, ())
+                               for seq, text, kind, _f, _e in rows])
+
+    async def search(**kw):
+        return await memory_search(SearchArgs(query="ce qui m'énerve", **kw),
+                                   NS(ports={"store": db, "vectors": vectors}, frame=Frame(CLOSE)))
+
+    mine = await search(ressenti=["colère", "agacement"])
+    assert "moqué de mon dessin" in mine and "carnet" not in mine and "voisin" not in mine
+    assert "en colère" in mine  # ce qu'elle en a ressenti, en mots
+    theirs = await search(ressenti=["agacement"], de_qui="la_personne")
+    assert "voisin" in theirs and "moqué" not in theirs
+    db.conn.close()

@@ -18,7 +18,9 @@ from mika.faculties.memory.life import kept_too_early
 from mika.faculties.memory.recall import (
     about_us,
     between_us,
+    concerned_name,
     doubted,
+    feelings,
     items_by_id,
     knowledge_label,
     names_of,
@@ -28,6 +30,7 @@ from mika.faculties.memory.recall import (
     when_words,
 )
 from mika.faculties.memory.salience import age_words, tag
+from mika.vocab.affect import facets
 from mika.vocab.episodes import CONVERSATIONAL, WORKING
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
@@ -39,6 +42,10 @@ SEARCH_FIRST, SEARCH_MAX = 30, 480
 class SearchArgs(BaseModel):
     query: str = Field(min_length=1, max_length=300, description=phrase("memory.tools.search.query"))
     limit: int = Field(default=5, ge=1, le=10)
+    #: chercher par ce que ça fait ressentir (ADR 0083) : « ce qui t'énerve » — les émotions, et de qui
+    ressenti: list[str] = Field(default_factory=list, max_length=6, description=phrase("memory.tools.search.ressenti"))
+    de_qui: Literal["moi", "la_personne", "les_deux"] = Field(default="moi",
+                                                              description=phrase("memory.tools.search.de_qui"))
 
 
 class PromiseArgs(BaseModel):
@@ -67,9 +74,12 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
     # loin : trente secrets d'un autre, plus proches de la question, ne font pas « rien trouvé » (audit du 2026-10-08)
     own = tuple(sorted({person, ep.target, *frame.get(identity_c.HANDLES(person))})) \
         if person and ep is not None and is_identifiable(person) else ()
+    emotions = [e for e, _x in facets(args.ressenti)]
+    if emotions:
+        found += await _by_feeling(args, emotions, ctx, person, own, wanted, memo, found)
     seen: set[int] = set()
     k = SEARCH_FIRST
-    while True:
+    while not emotions:
         hits = dict(await vectors.search(args.query, k, kinds={c.SOUVENIR, c.BELIEF}))
         if own:
             for key, sim in await vectors.search(args.query, k, kinds={c.SOUVENIR, c.BELIEF}, persons=own):
@@ -93,7 +103,46 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
         return phrase("memory.tools.search.nothing")
     names = names_of(frame, {o for it, v in found for o in (*v.others, *it.about, it.holder) if o})
     return "\n".join(f"- {age_words(it.born_at, frame.now)} : {it.text}{tag(v, names)}{doubted(frame, it, memo, person, v)}"
-                     + (f" ({knowledge_label(it, names)})" if it.kind == c.BELIEF else "") for it, v in found)
+                     + (f" ({knowledge_label(it, names)})" if it.kind == c.BELIEF else "")
+                     + feelings(it.felt, it.empathy, concerned_name(frame, it.about, names, memo)) for it, v in found)
+
+
+#: par émotion, au plus tant d'éléments relus avant le verdict
+FEELING_CANDIDATES = 200
+
+
+async def _by_feeling(args: SearchArgs, emotions: list[str], ctx: Any, person: str | None, own: tuple[str, ...],
+                      wanted: set[str], memo: dict[str, str], found: list[Any]) -> list[Any]:
+    """Ce qui lui fait (ou fait à la personne concernée) ressentir ces émotions, le plus fort d'abord, la question
+    départageant à intensité proche (ADR 0083) : « qu'est-ce qui t'énerve ? » — c'est le modèle qui choisit de
+    chercher par ressenti, et lesquels ; rien ici ne devine une émotion dans les mots. Le verdict de chaque élément,
+    comme toujours."""
+    vectors, store, frame = ctx.ports.get("vectors"), ctx.ports.get("store"), ctx.frame
+    whose = {"moi": (c.HERS,), "la_personne": (c.THEIRS,)}.get(args.de_qui, (c.HERS, c.THEIRS))
+    marks_w, marks_e = ",".join("?" * len(whose)), ",".join("?" * len(emotions))
+    rows = store.query_mind(
+        f"SELECT f.item, MAX(f.intensity) FROM {c.FEELINGS_TABLE} f JOIN {c.ITEMS_TABLE} i ON i.id = f.item "
+        f"WHERE f.whose IN ({marks_w}) AND f.emotion IN ({marks_e}) AND i.status='active' AND i.kind IN (?, ?) "
+        f"GROUP BY f.item ORDER BY MAX(f.intensity) DESC, f.item LIMIT ?",
+        (*whose, *emotions, c.SOUVENIR, c.BELIEF, FEELING_CANDIDATES))
+    strength = {int(i): float(x) for i, x in rows}
+    if not strength:
+        return []
+    near = dict(await vectors.search(args.query, len(strength), keys=list(strength))) if vectors is not None else {}
+    items = items_by_id(store, list(strength))
+    score = {i: strength[i] + 0.5 * relevance(near.get(i, 0.0), wanted, it.text) for i, it in items.items()}
+    taken = {it.id for it, _v in found}
+    out: list[Any] = []
+    aud = frame.audience
+    for item in sorted(items.values(), key=lambda it: (-score[it.id], it.id)):
+        if item.id in taken:
+            continue
+        verdict = verdict_of(frame, item, person, aud, memo, store)
+        if verdict.ok:
+            out.append((item, verdict))
+        if len(found) + len(out) >= args.limit:
+            break
+    return out
 
 
 @MEMORY.tool("memory_promise_done", description=phrase("memory.tools.promise_done.description"), args=PromiseArgs,

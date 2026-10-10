@@ -10,11 +10,13 @@ from mika.contracts import runtime as rt
 from mika.faculties.memory.faculty import MEMORY
 from mika.kernel.clock import DAY
 from mika.kernel.faculty import CatchUp, Tier
+from mika.vocab.affect import facets
 
 
 def decode(raw: str) -> c.LifeEvent:
     data = json.loads(raw)
-    return c.LifeEvent(**{**data, "about": tuple(data["about"]), "told_by": tuple(data["told_by"])})
+    return c.LifeEvent(**{**data, "about": tuple(data["about"]), "told_by": tuple(data["told_by"]),
+                          "felt": facets(data.get("felt")), "empathy": facets(data.get("empathy"))})
 
 
 class LifeArchive:
@@ -49,7 +51,7 @@ class LifeArchive:
                     d.text.ref or "", d.secret, followed_at=old.followed_at if old and old.when == d.when else 0,
                     ongoing=d.ongoing, importance=d.importance, festive=d.festive,
                     ended_at=old.ended_at if old and old.ongoing and d.ongoing else 0, yearly=d.yearly and not d.ongoing,
-                    thread=thread, recurs=d.recurs or 0, felt=d.felt or "", emotion=d.emotion or "")
+                    thread=thread, recurs=d.recurs or 0, felt=tuple(d.felt), empathy=tuple(d.empathy))
             else:
                 previous = sql.query(f"SELECT payload FROM {t} WHERE id=?", (d.event,))
                 if not previous and e.type.name == c.MOMENT_FOLLOWED.name and d.thread:

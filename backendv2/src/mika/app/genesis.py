@@ -41,7 +41,7 @@ from mika.faculties.memory.extraction import self_names
 from mika.kernel.events import Content, Draft, Origin
 from mika.runtime import params
 from mika.runtime.bootstrap import Kernel
-from mika.vocab.affect import Emotion, emotion_of
+from mika.vocab.affect import Emotion, emotion_of, facets
 from mika.vocab.people import ACCOUNT_PREFIX, EXTERNAL_PREFIX, clean_display_name, fold, is_identifiable
 from mika.vocab.privacy import Sensitivity
 
@@ -138,6 +138,17 @@ def _unit(value: float, what: str) -> float:
     return float(value)
 
 
+def _feelings(raw: object) -> tuple[tuple[str, float], ...]:
+    """Un ressenti à plusieurs facettes (ADR 0083) : ``{"colère": 0.8}``, une liste de paires, ou un nom ; une
+    émotion qu'elle ne connaît pas est une erreur (pas un ressenti perdu en silence)."""
+    if raw is None or raw == "" or raw == {}:
+        return ()
+    found = facets(raw)
+    if not found:
+        raise ValueError(f"ressenti inconnu : « {raw} » (des émotions parmi les 29, d'intensité 0 à 1)")
+    return found
+
+
 def _emotion(name: str | Emotion | None) -> str | None:
     if name is None or name == "":
         return None
@@ -166,7 +177,7 @@ async def _append(kernel: Kernel, draft: Draft[Any], dedupe_key: str | None) -> 
 async def remember(kernel: Kernel, text: str, about: Iterable[str], *, sensitivity: int | None = None,
                    importance: float = 0.5, emotion: str | Emotion | None = None, told_by: Iterable[str] = (),
                    heard_by: Iterable[str] | None = None, secret: bool = False,
-                   felt: str | Emotion | None = None, dedupe_key: str | None = None) -> int:
+                   felt: object = None, empathy: object = None, dedupe_key: str | None = None) -> int:
     """Un souvenir de ses archives, à la première personne, ajouté à l'instant courant. ``about`` : qui il
     concerne (vide : sa vie à elle) ; ``told_by`` : qui le lui a confié (vide : elle l'a vécu) ; ``heard_by`` :
     qui était là (par défaut : qui l'a confié). Rend son numéro (celui de l'élément déjà gardé sous la même
@@ -177,7 +188,7 @@ async def remember(kernel: Kernel, text: str, about: Iterable[str], *, sensitivi
     draft = memory_c.REMEMBERED.draft(
         text=_text(text, level), about=about_, sensitivity=level, importance=_unit(importance, "importance"),
         emotion=_emotion(emotion), call_id=ARCHIVE, told_by=told, heard_by=heard, secret=bool(secret),
-        felt=_emotion(felt), dedupe_key=dedupe_key)
+        felt=_feelings(felt), empathy=_feelings(empathy), dedupe_key=dedupe_key)
     return await _append(kernel, draft, dedupe_key)
 
 
@@ -186,15 +197,15 @@ async def believe(kernel: Kernel, text: str, about: Iterable[str], *, sensitivit
                   source: str | None = None, told_by: Iterable[str] = (), heard_by: Iterable[str] | None = None,
                   secret: bool = False, about_self: bool = False, durable: bool = False, between_us: bool = False,
                   replaces: int | None = None, contests: int | None = None, first_hand: bool = False,
-                  as_of: int | None = None, valid_until: int | None = None, felt: str | Emotion | None = None,
-                  emotion: str | Emotion | None = None, dedupe_key: str | None = None) -> int:
+                  as_of: int | None = None, valid_until: int | None = None, felt: object = None,
+                  empathy: object = None, dedupe_key: str | None = None) -> int:
     """Une croyance de ses archives : un fait sur quelqu'un (``about``), sur le monde (personne), ou sur elle
     (``about_self`` : ce qu'elle raconte d'elle ; ``durable`` : ce qui la définit, un goût, un avis, un fait de
     sa vie — tenu longtemps). ``source`` : qui l'a dit ; ``replaces`` : la croyance qu'elle remplace ;
     ``contests`` : celle qu'elle contredit sans la remplacer (elle doute) ; ``first_hand`` : la personne concernée
     qui parle d'elle-même, ou un témoin ; ``as_of`` / ``valid_until`` : depuis et jusqu'à quand c'est vrai
-    (ADR 0081) ; ``felt`` / ``emotion`` : ce que la personne concernée en ressent, ce qu'elle-même en ressent
-    (ADR 0083)."""
+    (ADR 0081) ; ``felt`` / ``empathy`` : ce que la personne concernée en ressent, ce qu'elle-même en ressent —
+    ``{"colère": 0.8, "dégoût": 0.4}`` (ADR 0083)."""
     if origin not in (memory_c.TOLD, memory_c.OBSERVED, memory_c.INFERRED):
         raise ValueError(f"origine inconnue : « {origin} » (told, observed ou inferred)")
     about_, told = _people(kernel, about, "about"), _people(kernel, told_by, "told_by")
@@ -223,7 +234,7 @@ async def believe(kernel: Kernel, text: str, about: Iterable[str], *, sensitivit
         replaces=_replaced(kernel, replaces, memory_c.BELIEF), call_id=ARCHIVE, told_by=told, heard_by=heard,
         secret=bool(secret), about_self=mine, durable=bool(durable), between_us=bool(between_us),
         contests=_replaced(kernel, contests, memory_c.BELIEF), first_hand=bool(first_hand), as_of=as_of,
-        valid_until=valid_until, felt=_emotion(felt), emotion=_emotion(emotion), dedupe_key=dedupe_key)
+        valid_until=valid_until, felt=_feelings(felt), empathy=_feelings(empathy), dedupe_key=dedupe_key)
     return await _append(kernel, draft, dedupe_key)
 
 
@@ -250,8 +261,8 @@ async def note_event(kernel: Kernel, text: str, about: Iterable[str], when: int,
                      sensitivity: int | None = None, importance: float = memory_c.IMPORTANT_MOMENT,
                      festive: bool = False, ongoing: bool = False, told_by: Iterable[str] = (),
                      heard_by: Iterable[str] | None = None, secret: bool = False, replaces: int | None = None,
-                     recurs: int | None = None, felt: str | Emotion | None = None,
-                     emotion: str | Emotion | None = None, dedupe_key: str | None = None) -> int:
+                     recurs: int | None = None, felt: object = None, empathy: object = None,
+                     dedupe_key: str | None = None) -> int:
     """Un moment de la vie de quelqu'un (``about``, au moins une personne) noté d'après ses archives : à venir
     (``when``, en µs ; le jour seulement si ``all_day``), ou une situation en cours depuis ``when``
     (``ongoing``) — qui peut rouvrir une situation finie (``recurs`` : la même histoire, une autre fois)."""
@@ -266,7 +277,7 @@ async def note_event(kernel: Kernel, text: str, about: Iterable[str], when: int,
         text=_text(text, level), when=int(when), about=about_, all_day=bool(all_day), sensitivity=level,
         told_by=told, heard_by=heard, secret=bool(secret), replaces=_replaced(kernel, replaces, memory_c.EVENT),
         call_id=ARCHIVE, ongoing=bool(ongoing), importance=_unit(importance, "importance"), festive=bool(festive),
-        recurs=_replaced(kernel, recurs, memory_c.EVENT), felt=_emotion(felt), emotion=_emotion(emotion),
+        recurs=_replaced(kernel, recurs, memory_c.EVENT), felt=_feelings(felt), empathy=_feelings(empathy),
         dedupe_key=dedupe_key)
     return await _append(kernel, draft, dedupe_key)
 
