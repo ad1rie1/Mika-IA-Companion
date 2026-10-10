@@ -47,14 +47,12 @@ class LifeArchive:
                         sql.execute(f"DELETE FROM {t} WHERE id=?", (gone,))
                 if not d.text.text:
                     continue
-                item = c.LifeEvent(e.seq, tuple(d.about), d.when, d.all_day, d.sensitivity, tuple(d.told_by),
-                    d.text.ref or "", d.secret, followed_at=old.followed_at if old and old.when == d.when else 0,
-                    ongoing=d.ongoing, importance=d.importance, festive=d.festive,
-                    ended_at=old.ended_at if old and old.ongoing and d.ongoing else 0, yearly=d.yearly and not d.ongoing,
-                    thread=thread, recurs=d.recurs or 0, felt=tuple(d.felt), empathy=tuple(d.empathy))
+                item = c.life_event_of(e.seq, d, followed_at=old.followed_at if old and old.when == d.when else 0,
+                                       ended_at=old.ended_at if old and old.ongoing and d.ongoing else 0,
+                                       thread=thread)
             else:
                 previous = sql.query(f"SELECT payload FROM {t} WHERE id=?", (d.event,))
-                if not previous and e.type.name == c.MOMENT_FOLLOWED.name and d.thread:
+                if not previous and e.type.name in (c.MOMENT_FOLLOWED.name, c.RESOLVED.name) and d.thread:
                     # repris sous un numéro remplacé depuis : le moment tel qu'il est noté maintenant, s'il est à la
                     # même date (ADR 0079)
                     previous = [r for r in sql.query(f"SELECT payload FROM {t} WHERE thread=?", (d.thread,))
@@ -62,11 +60,17 @@ class LifeArchive:
                 if not previous:
                     continue
                 item = decode(previous[0][0])
-                item = replace(item, followed_at=e.at) if e.type.name == c.MOMENT_FOLLOWED.name else \
-                    replace(item, ended_at=item.ended_at or e.at)
+                if e.type.name == c.RESOLVED.name:
+                    if item.outcome:
+                        continue  # tranché une fois pour toutes (ADR 0086)
+                    item = replace(item, outcome=d.outcome, resolved_at=e.at)
+                elif e.type.name == c.MOMENT_FOLLOWED.name:
+                    item = replace(item, followed_at=e.at)
+                else:
+                    item = replace(item, ended_at=item.ended_at or e.at)
             sql.execute(f"INSERT OR REPLACE INTO {t} VALUES(?,?,?,?,?,?,"
                         "CAST(strftime('%j',?/1000000,'unixepoch') AS INTEGER),?)",
-                        (item.id, json.dumps(asdict(item)), item.when, int(item.yearly), int(item.ongoing),
+                        (item.id, json.dumps(asdict(item)), item.ends, int(item.yearly), int(item.ongoing),
                          item.ended_at, item.when, item.key))
 
     def forget(self, sql, subject, sfx):
@@ -76,9 +80,11 @@ class LifeArchive:
 
 
 # v2 : le fil de chaque moment (``thread``) : reporté, redit, revenu, le même ; un suivi sous un ancien numéro
-# retrouve le moment tel qu'il est noté maintenant (ADR 0079)
-MEMORY.projector(c.LIFE_TABLE, version=3, tier=Tier.T0,
-                 types=[c.EVENT_NOTED, c.MOMENT_FOLLOWED, c.SITUATION_ENDED])(LifeArchive)
+# retrouve le moment tel qu'il est noté maintenant (ADR 0079). v3 : ce que chacun en ressent (ADR 0083). v4 : une
+# période (``when_at`` : sa fin, pour que le calendrier la recharge tant qu'elle dure), le monde, le partage, la
+# vraisemblance (ADR 0084). v5 : comment il a tourné (``outcome``, ADR 0086)
+MEMORY.projector(c.LIFE_TABLE, version=5, tier=Tier.T0,
+                 types=[c.EVENT_NOTED, c.MOMENT_FOLLOWED, c.SITUATION_ENDED, c.RESOLVED])(LifeArchive)
 
 
 def for_people(store, people, limit=256):

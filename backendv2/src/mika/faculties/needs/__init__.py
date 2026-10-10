@@ -699,6 +699,8 @@ def _their_moment(m: Any, person: str, now: int, p: NeedsParams) -> bool:
         return False  # elles en ont déjà reparlé (ce que la personne en raconte le jour même compte : ADR 0052)
     if getattr(m, "ended_at", 0):
         return False  # une situation que la personne a dite finie : plus rien à en demander
+    if getattr(m, "vague", False):
+        return False  # une période (« en novembre ») : ni bientôt ni tout juste passé au jour près (ADR 0084)
     return -p.matter_moment_ahead_us <= now - m.when <= p.matter_told_us
 
 

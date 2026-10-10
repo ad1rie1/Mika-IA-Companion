@@ -144,7 +144,8 @@ class McpHub:
                     schema=rv.schema_ or tool.schema, nature=rv.nature, approval=rv.approval,
                     audience=spec.audience, episodes=episodes, in_hand=spec.in_hand, max_calls=spec.max_calls,
                     max_result_chars=spec.max_result_chars, purpose=inert(spec.purpose, 400),
-                    when_to_use=inert(spec.when_to_use, 400), local=spec.local, fingerprint=rv.fingerprint))
+                    when_to_use=inert(spec.when_to_use, 400), local=spec.local, fingerprint=rv.fingerprint,
+                    reads_world=spec.learns and rv.nature == "lecture"))
         return out
 
     def statuses(self) -> list[ServerStatus]:

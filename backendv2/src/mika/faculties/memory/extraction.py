@@ -39,6 +39,10 @@ from mika.vocab.words import WORD, stems, words
 from mika.vocab.words import fold as wfold
 
 TOOL_NAME = "record_memories"
+#: ce qu'une relecture peut écrire au plus (jetons) : chaque élément porte ses facettes de ressenti, ses personnes, ses
+#: messages ; une conversation riche y ajoute prévisions et constats — et, par la CLI, la réflexion du modèle compte
+#: dans ce plafond (sonde réelle du 2026-10-10 : 2 500 ne suffisaient plus pour quatre messages)
+MAX_OUTPUT_TOKENS = 6000
 #: Comment le modèle la désigne quand c'est elle (repliés) ; son nom s'y ajoute, celui de sa persona (``self_names``).
 SELF_NAMES = frozenset({"moi", "je", "elle-meme", "elle meme"})
 IMPORTANCE = {1: 0.2, 2: 0.45, 3: 0.7, 4: 0.95}
@@ -50,7 +54,7 @@ ORIGIN = {"dit": "told", "observe": "observed", "observé": "observed", "deduit"
 #: la confiance qu'une croyance peut avoir à sa naissance, selon d'où elle vient (ADR 0075) : ce qu'elle a vu plus que
 #: ce qu'on lui a dit, ce qu'on lui a dit plus que ce qu'elle en déduit. Le modèle qui l'extrait ne la rend pas plus
 #: sûre ; redire n'y ajoute rien — seule une autre personne qui le lui dit aussi (``corroborated``) la fait monter.
-CONFIDENCE_CAP = {"observed": 0.9, "told": 0.8, "inferred": 0.6}
+CONFIDENCE_CAP = {"observed": 0.9, "told": 0.8, "inferred": 0.6, "read": 0.7}  # lu : comme un témoin qui rapporte (ADR 0085)
 
 
 def born_confidence(confidence: float, origin: str, kind: str = "claim") -> float:
@@ -194,7 +198,7 @@ class XTenue(_Lenient):
 class XEvenement(_Item):
     texte: str = Field(min_length=3, max_length=300, validation_alias=_TEXT,
                        description=phrase("memory.extraction.fields.event_text"))
-    quand: str = Field(min_length=8, max_length=40, description=phrase("memory.extraction.fields.date"))
+    quand: str = Field(min_length=4, max_length=40, description=phrase("memory.extraction.fields.date"))
     en_cours: bool = Field(default=False, description=phrase("memory.extraction.fields.en_cours"))
     importance: int = Field(default=2, ge=1, le=4, description=phrase("memory.extraction.fields.event_importance"))
     a_feter: bool = Field(default=False, validation_alias=AliasChoices("a_feter", "à_fêter", "a_fêter", "festif"),
@@ -205,6 +209,52 @@ class XEvenement(_Item):
     #: un moment déjà noté (la liste « Moments à venir ») que celui-ci remplace : reporté, avancé, précisé (ADR 0076) ;
     #: ou, pour une situation en cours, une situation finie depuis peu qui revient (ADR 0079)
     remplace: int | None = Field(default=None, description=phrase("memory.extraction.fields.event_remplace"))
+    #: ce qui arrive dans le monde (des élections, la sortie d'un film) ; un moment de quelqu'un qu'elle vivra à
+    #: travers lui ; à quel point c'est sûr ; une date publique officielle (ADR 0084)
+    monde: bool = Field(default=False, description=phrase("memory.extraction.fields.monde"))
+    partage: bool = Field(default=False, validation_alias=AliasChoices("partage", "partagé"),
+                          description=phrase("memory.extraction.fields.partage"))
+    probabilite: str | float | None = Field(default=None, validation_alias=AliasChoices("probabilite", "probabilité"),
+                                            description=phrase("memory.extraction.fields.probabilite"))
+    date_officielle: bool = Field(default=False, description=phrase("memory.extraction.fields.date_officielle"))
+
+
+class XPrevision(_Item):
+    """Ce que quelqu'un s'attend à voir arriver (« Léa pense qu'elle sera prise », « les taux vont remonter ») — elle
+    aussi (« sur_elle » : son propre pronostic) : une croyance de la sorte « prévision » (ADR 0084)."""
+
+    quand: str | None = Field(default=None, description=phrase("memory.extraction.fields.prevision_quand"))
+    probabilite: str | float | None = Field(default=None, validation_alias=AliasChoices("probabilite", "probabilité"),
+                                            description=phrase("memory.extraction.fields.probabilite"))
+    point_de_vue: str | None = Field(default=None, description=phrase("memory.extraction.fields.point_de_vue"))
+
+
+class XConstat(_Lenient):
+    """Comment un moment passé a tourné, d'après ce que la personne concernée en dit (ADR 0086)."""
+
+    numero: int = Field(validation_alias=AliasChoices("numero", "numéro", "id", "moment"),
+                        description=phrase("memory.extraction.fields.constat_numero"))
+    issue: str = Field(min_length=2, max_length=40, description=phrase("memory.extraction.fields.constat_issue"))
+    messages: list[int] = Field(default_factory=list, description=phrase("memory.extraction.fields.messages"))
+
+    @field_validator("messages", mode="before")
+    @classmethod
+    def lenient_messages(cls, v: Any) -> list[int]:
+        return _ints(v)
+
+
+#: ce que la relecture écrit dans « issue », rabattu sur une issue (clés : ``fold``) ; l'ordre compte (« pas eu
+#: lieu » avant « eu lieu »)
+_ISSUES = (("annul", "cancelled"), ("pas eu lieu", "cancelled"), ("n'a pas eu lieu", "cancelled"),
+           ("report", "moved"), ("deplac", "moved"), ("decal", "moved"), ("moved", "moved"),
+           ("cancel", "cancelled"), ("eu lieu", "happened"), ("fait", "happened"), ("passe", "happened"),
+           ("happened", "happened"))
+
+
+def outcome_of(issue: str) -> str | None:
+    """L'issue que la relecture a écrite (« a eu lieu », « annulé », « reporté »), ou rien d'interprétable."""
+    text = fold(issue)
+    return next((outcome for word, outcome in _ISSUES if word in text), None)
 
 
 class Extraction(_Lenient):
@@ -215,9 +265,14 @@ class Extraction(_Lenient):
     promesses_tenues: list[XTenue] = Field(default_factory=list)
     evenements: list[XEvenement] = Field(default_factory=list, validation_alias=AliasChoices("evenements",
                                                                                              "événements"))
+    previsions: list[XPrevision] = Field(default_factory=list,
+                                         validation_alias=AliasChoices("previsions", "prévisions"),
+                                         description=phrase("memory.extraction.fields.previsions"))
     confidentiel: list[int] = Field(default_factory=list, description=phrase("memory.extraction.fields.confidentiel"))
     situations_finies: list[int] = Field(default_factory=list,
                                          description=phrase("memory.extraction.fields.situations_finies"))
+    #: comment des moments passés ont tourné, de la bouche de la personne concernée (ADR 0086)
+    constats: list[XConstat] = Field(default_factory=list, description=phrase("memory.extraction.fields.constats"))
 
     @field_validator("confidentiel", "situations_finies", mode="before")
     @classmethod
@@ -302,7 +357,8 @@ def day_words(d: date) -> str:
 
 def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, str]],
            promises: Sequence[tuple[int, str, str]], situations: Sequence[tuple[int, str, str]] = (),
-           moments: Sequence[tuple[int, str, str]] = (), ended: Sequence[tuple[int, str, str]] = ()) -> str:
+           moments: Sequence[tuple[int, str, str]] = (), ended: Sequence[tuple[int, str, str]] = (),
+           passed: Sequence[tuple[int, str, str]] = ()) -> str:
     """Le message d'une conversation : la date, qui parle, ce qui est déjà
     su, les promesses en cours, les situations en cours, celles finies depuis
     peu (qui peuvent revenir) et les moments à venir de ses personnes, puis
@@ -327,6 +383,9 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
     if moments:
         out += ["", phrase("memory.extraction.render.moments")] + [
             f"[#{i}] ({whom}) {text}" for i, whom, text in moments]
+    if passed:
+        out += ["", phrase("memory.extraction.render.passed")] + [
+            f"[#{i}] ({whom}) {text}" for i, whom, text in passed]
     out += ["", phrase("memory.extraction.render.messages")]
     day: date | None = None
     for ln in conv.lines:
@@ -361,13 +420,14 @@ def parse(resp: LLMResponse) -> Extraction | None:
         return None
     raw = {fold(str(k)): v for k, v in raw.items()}
     expected = {"souvenirs", "croyances", "promesses", "promesses_tenues", "evenements", "confidentiel",
-                "situations_finies"}
+                "situations_finies", "previsions", "constats"}
     if ((not expected.intersection(raw) and not (structured and not raw))
             or resp.stop == "max_tokens" or resp.truncated_tool_call):
         return None
     out = Extraction()
     for key, model in (("souvenirs", XSouvenir), ("croyances", XCroyance), ("promesses", XPromesse),
-                       ("promesses_tenues", XTenue), ("evenements", XEvenement)):
+                       ("promesses_tenues", XTenue), ("evenements", XEvenement), ("previsions", XPrevision),
+                       ("constats", XConstat)):
         items = raw.get(key, [])
         if items is None:
             items = []

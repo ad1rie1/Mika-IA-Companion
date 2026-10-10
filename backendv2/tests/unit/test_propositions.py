@@ -121,6 +121,18 @@ def test_the_subject_asking_discretion_closes_every_testimony():
     db.conn.close()
 
 
+def test_the_subjects_discretion_closes_what_others_say_afterwards():
+    """« Garde-le pour toi », demandé par Inès sur ce qu'elle vit : ce que Bob en dira ensuite, ouvertement, ne
+    l'ouvre pas (sonde réelle du 2026-10-09 : la rumeur d'un collègue n'atteignait pas la discrétion demandée)."""
+    db = Store()
+    db.put(believed("Inès quitte la boîte", (INES,), (INES,)), 1)
+    db.put(attested(1, (INES,), restricts=True, secret=True, everyone=True), 2)
+    db.put(attested(1, (BOB,)), 3)  # plus tard, Bob le dit, sans secret
+    assert not verdict_of(FRAME, item(db, 1), CAROL, FRIEND, {}, db).ok
+    assert verdict_of(FRAME, item(db, 1), INES, to(INES), {}, db).ok  # Inès, elle, peut en reparler
+    db.conn.close()
+
+
 async def test_discretion_asked_by_the_person_concerned_is_for_everyone():
     db = Store()
     db.put(believed("Alice quitte la boîte", (ALICE,), (BOB,)), 1)

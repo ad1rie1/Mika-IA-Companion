@@ -815,8 +815,8 @@ def _cheer_window(ev: memory_c.LifeEvent, frame: Frame, p: OthersParams) -> tupl
     là, ni pour une situation, ni pour ce qui se fête (un anniversaire ne se souhaite pas « bonne chance » : il se
     souhaite le jour même), ni pour une date qui revient chaque année (pas de « bonne chance » pour la date d'un
     deuil)."""
-    if ev.ongoing or ev.festive or ev.yearly or ev.when <= frame.now:
-        return None
+    if ev.ongoing or ev.festive or ev.yearly or ev.vague or ev.when <= frame.now or ev.outcome:
+        return None  # une période (« en novembre ») n'a pas de veille (ADR 0084) ; ni ce qui n'aura pas lieu
     tz = frame.env.tz_of(frame.root)
     day = frame.local(ev.when).date()
     eve = date.fromordinal(day.toordinal() - 1)
@@ -923,7 +923,8 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
         last = _last_from(frame, person)
         hard = _hard(frame, person)
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
-               if not ev.ongoing and not ev.followed_at and set(ev.told_by) <= {person}
+               if not ev.ongoing and not ev.vague and not ev.followed_at and set(ev.told_by) <= {person}
+               and ev.outcome not in (memory_c.CANCELLED, memory_c.MOVED)  # annulé : rien à demander (ADR 0086)
                and not (hard and _minor(ev)) and (ev.festive or not ev.yearly)
                and s.spoke.get(ev.key, 0) < (_day_start(ev.when, frame) if ev.festive else ev.when)
                and last <= ev.when and _follow_from(ev, frame, p) <= frame.now <= ev.when + p.followup_until_us]
@@ -970,7 +971,7 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
         if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
             continue
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
-               if ev.festive and not ev.ongoing and not ev.followed_at and set(ev.told_by) <= {person}
+               if ev.festive and not ev.ongoing and not ev.vague and not ev.followed_at and set(ev.told_by) <= {person}
                and _day_start(ev.when, frame) == today and s.spoke.get(ev.key, 0) < today]
         address = _address(frame, person) if due else None
         if address is None:

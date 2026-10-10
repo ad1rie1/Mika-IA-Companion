@@ -173,6 +173,20 @@ class Digested(Payload):
     items: tuple[DigestedThought, ...] = ()
 
 
+class Anticipated(Payload):
+    """Ce qu'elle attend le plus en ce moment (ADR 0086) : un moment de quelqu'un qui compte pour elle, ou du monde
+    qui lui tient à cœur, qui approche — avec espoir (``hopeful``) ou inquiétude (``anxious``), d'autant plus fort
+    qu'il est proche, important, probable, et que la personne lui est chère. Une fois par jour et par moment, le seul
+    qui domine."""
+
+    event: int
+    thread: int = 0
+    emotion: str
+    weight: float
+    about: tuple[str, ...] = ()
+    when: int = 0
+
+
 THOUGHT_BORN = event_type("attention.thought_born", OWNER, ThoughtBorn, public=True, content=("text",),
                           subjects=("about",))
 DWELT = event_type("attention.dwelt", OWNER, Dwelt, public=True)
@@ -183,7 +197,8 @@ EXPECTATION_MISSED = event_type("attention.expectation_missed", OWNER, Expectati
 DIGESTED = event_type("attention.digested", OWNER, Digested, public=True)
 NOTICED = event_type("attention.noticed", OWNER, Noticed, public=True)
 TOUCHED = event_type("attention.touched", OWNER, Touched, subjects=("person",))
-ALL = (THOUGHT_BORN, DWELT, EXPECTATION_MET, EXPECTATION_MISSED, DIGESTED, NOTICED, TOUCHED)
+ANTICIPATED = event_type("attention.anticipated", OWNER, Anticipated, public=True, subjects=("about",))
+ALL = (THOUGHT_BORN, DWELT, EXPECTATION_MET, EXPECTATION_MISSED, DIGESTED, NOTICED, TOUCHED, ANTICIPATED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +245,9 @@ class AwaitingReading:
 
 #: Les pensées vivantes, la plus forte d'abord.
 THOUGHTS = FactKey("attention.thoughts", type=tuple, time_varying=True)
+#: Ce qu'elle attend le plus en ce moment (ADR 0086), s'il y en a un qui domine (``Anticipated``, sinon ``None``) :
+#: le moment qui approche, l'émotion et son poids.
+ANTICIPATION = FactKey("attention.anticipation", type=object, time_varying=True)
 #: Ses initiatives restées sans réponse, d'affilée (toutes personnes).
 IGNORED = FactKey("attention.ignored", type=int)
 #: Le fil avec une personne (``AwaitingReading``) : ses initiatives sans réponse, par personne.

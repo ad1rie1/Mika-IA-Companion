@@ -96,6 +96,9 @@ class OfferedTool:
     local: bool
     #: l'empreinte approuvée (un appel proposé l'épingle : s'il change avant l'accord, l'accord est refusé)
     fingerprint: str = ""
+    #: un outil de lecture d'un serveur dont l'opérateur a dit qu'il lit le monde public (``learns``) : ce qu'elle y lit
+    #: en travaillant se garde comme une lecture (ADR 0085)
+    reads_world: bool = False
 
 
 @dataclass(frozen=True, slots=True)

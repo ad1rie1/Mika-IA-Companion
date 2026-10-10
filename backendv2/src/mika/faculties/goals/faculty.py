@@ -68,6 +68,14 @@ class GoalsParams(BaseModel):
         label="Séances par heure au plus", group="Les séances", lo=0, hi=30,
         help="Tous buts confondus : chaque séance est une boucle d'outils du modèle, silencieuse, hors du budget "
              "d'initiatives (0 : plus aucun travail).")] = 4
+    checks_per_week: Annotated[int, Knob(
+        label="Vérifications par semaine, au plus", group="Entreprendre d'elle-même", lo=0, hi=7,
+        help="Un moment du monde qui lui tient à cœur, passé sans qu'elle sache comment il a tourné (une élection, "
+             "une éclipse), peut lui donner envie d'aller vérifier dans ses lectures — au plus tant de fois sur sept "
+             "jours glissants (ADR 0086). 0 : jamais.")] = 2
+    check_steps: Annotated[int, Knob(
+        label="Séances par vérification", group="Les séances", lo=1, hi=10,
+        help="Le budget de séances d'une vérification : on regarde, on ne fait pas une enquête.")] = 2
     exploration_steps: Annotated[int, Knob(
         label="Séances par exploration", group="Les séances", lo=1, hi=20,
         help="Le budget de séances d'une exploration qu'elle ouvre d'elle-même ; à bout de séances sans conclure, elle "
@@ -340,6 +348,13 @@ def musing(g: Goal) -> bool:
 
 #: les sources d'une curiosité (un centre d'intérêt, un sujet de conversation) : ce qu'elle a déjà exploré
 CURIOSITY_SOURCES = ("interest:", "talk:")
+#: une vérification (ADR 0086) : sa source, « check:<fil du moment> » ; elles se comptent sur sept jours
+CHECK_SOURCE = "check:"
+
+
+def checks_this_week(s: GoalsState, now: int) -> int:
+    """Combien de vérifications elle a ouvertes ces sept derniers jours."""
+    return sum(1 for source, at in s.explored.items() if source.startswith(CHECK_SOURCE) and now - at < 7 * DAY)
 
 
 def curious_today(s: GoalsState, day: str, local_date: Any) -> int:
@@ -615,6 +630,9 @@ def _prune(s: GoalsState, now: int) -> GoalsState:
     # un sujet de conversation passé l'horizon où il peut la faire rêvasser (au plus deux semaines) s'oublie ; ses
     # centres d'intérêt, eux, restent
     explored = FrozenDict({k: v for k, v in s.explored.items() if not k.startswith("talk:") or now - v <= 15 * DAY})
+    # une vérification ne compte que sur sa semaine ; un moment déjà vérifié ne se revérifie pas avant qu'il sorte de
+    # ce qu'elle voudrait vérifier (quelques jours)
+    explored = FrozenDict({k: v for k, v in explored.items() if not k.startswith(CHECK_SOURCE) or now - v <= 14 * DAY})
     # ce qu'elle en a retenu suit la même règle
     kept = FrozenDict({k: v for k, v in s.kept_from.items() if not k.startswith("talk:") or now - v[0] <= 15 * DAY})
     return replace(s, goals=goals, closed_sources=sources, proposals=proposals, explored=explored, kept_from=kept)
@@ -635,7 +653,7 @@ def _opened(s: GoalsState, e, cx) -> GoalsState:
         origin=d.origin, origin_at=d.origin_at,
     )
     s = _set(s, g)
-    if d.source.startswith(CURIOSITY_SOURCES):
+    if d.source.startswith((*CURIOSITY_SOURCES, CHECK_SOURCE)):
         s = replace(s, explored=s.explored.set(d.source, e.at))
     if d.authority == c.SELF:
         s = replace(s, self_opened_at=e.at)

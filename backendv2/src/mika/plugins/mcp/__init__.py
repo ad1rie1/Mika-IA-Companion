@@ -36,7 +36,7 @@ from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.preprocess import cite, inert
-from mika.vocab.episodes import Kind
+from mika.vocab.episodes import WORKING, Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust, Sensitivity
 
@@ -259,15 +259,29 @@ def call_digest(args: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonical_json(pinned).encode()).hexdigest()[:32]
 
 
-def _direct(server: str, remote: str, limit: int) -> Any:
+#: ce qu'une consultation garde de sa réponse, pour la relecture de la nuit (ADR 0085)
+CONSULTED_MAX = 2500
+
+
+def _direct(server: str, remote: str, limit: int, reads_world: bool = False) -> Any:
     async def handler(args: ExternalArgs, ctx: Any) -> ToolResult:
         port = ctx.ports.get("mcp")
         if port is None:
             return ToolResult(ok=False, content=phrase("mcp.unavailable"))
-        result = await port.call(server, remote, args.model_dump())
+        data = args.model_dump()
+        result = await port.call(server, remote, data)
         if not result.ok:
             return ToolResult(ok=False, content=phrase("mcp.tools.failed", server=label(server),
                                                        text=inert(result.text, 600)))
+        ep = ctx.frame.episode
+        if reads_world and ep is not None and ep.kind in WORKING and result.text:
+            # ce qu'elle lit en travaillant (une recherche, une page) se garde comme une lecture, relue la nuit ;
+            # jamais en conversation : ce qu'on cherche pour quelqu'un est à lui (ADR 0085)
+            asked = inert(json.dumps(data, ensure_ascii=False, sort_keys=True), 200)
+            await ctx.emit(c.CONSULTED.draft(
+                source=f"mcp:{server}"[:200], ref=f"{remote}:{call_digest({'server': server, 'remote': remote, 'args': data})}",
+                title=Content.of(inert(f"{remote} {asked}", 250), level=int(Sensitivity.ANODYNE)),
+                excerpt=Content.of(inert(result.text, CONSULTED_MAX), level=int(Sensitivity.ANODYNE)), depth="page"))
         return ToolResult(content=phrase("mcp.tools.answered", server=label(server)) + "\n"
                                   + (cite(result.text, limit) or phrase("mcp.tools.nothing")))
 
@@ -319,7 +333,8 @@ def specs_of(offered: Sequence[Any]) -> tuple[list[ToolSpec], dict[str, str]]:
             continue
         bundle = f"{FAMILY}.{t.server}"
         bundles[bundle] = bundle_line(t)
-        handler = _direct(t.server, t.remote, t.max_result_chars) if t.approval == "aucun" else _asker(t)
+        handler = _direct(t.server, t.remote, t.max_result_chars, getattr(t, "reads_world", False)) \
+            if t.approval == "aucun" else _asker(t)
         rule = RULE if t.approval == "aucun" else (
             f"{RULE} ; l'appel ne part qu'après l'accord "
             + ("de la personne, dans la conversation" if t.approval == "conversation" else "de l'opérateur"))

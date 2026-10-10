@@ -105,3 +105,7 @@ def test_acquaintance_says_how_long_they_have_known_each_other():
     assert "5 jours" in acquaintance(AFTERNOON - 5 * DAY, frame)
     assert "3 semaines" in acquaintance(AFTERNOON - 21 * DAY, frame)
     assert "mois" in acquaintance(AFTERNOON - 90 * DAY, frame)
+    # une amie : jamais vue ici, c'est la première fois ; vue ce matin, elles se parlent depuis aujourd'hui — « la
+    # première fois », lu le soir, lui faisait dire « on ne s'est jamais parlé » (sonde réelle du 2026-10-10)
+    assert "première fois" in acquaintance(0, frame, "friend")
+    assert acquaintance(AFTERNOON - 2 * HOUR, frame, "friend") == "Vous vous parlez ici depuis aujourd'hui."

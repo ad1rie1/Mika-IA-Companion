@@ -318,6 +318,16 @@ class Poll:
         scored = sorted(((pertinence(e.title, e.summary, words), e) for e in entries),
                         key=lambda x: (-x[0], -x[1].published, x[1].id))
         drafts: list[Any] = []
+        top = scored[0] if scored and scored[0][0] >= p.notice_from else None
+        if top is not None and top[1].summary:
+            # le chapeau du titre qui l'a le plus intéressée, déjà là (aucun réseau) : une lecture, relue la nuit
+            # (ADR 0085)
+            e = top[1]
+            drafts.append(c.READ.draft(
+                source=f"rss:{inert(feed_name(e.feed), 120)}"[:200], ref=e.id,
+                title=Content.of(inert(e.title, 250), level=0),
+                excerpt=Content.of(inert(e.summary, HEADLINE_EXCERPT), level=0), depth="headline",
+                dedupe_key=f"rss-lu:{e.id}"))
         for score, e in scored[: p.noticed_per_poll]:
             if score < p.notice_from:
                 break
@@ -335,6 +345,11 @@ class Poll:
 
 
 # ── En conversation ───────────────────────────────────────────────────────
+
+
+#: ce qu'une lecture garde de son texte pour la relecture de la nuit : un article, le chapeau d'un titre (ADR 0085)
+ARTICLE_EXCERPT = 3000
+HEADLINE_EXCERPT = 1200
 
 
 #: ses flux sont de l'arrière-plan : quand elle prend d'elle-même la parole, ou qu'elle travaille — jamais
@@ -469,6 +484,10 @@ async def rss_read(args: ReadArgs, ctx: Any) -> Any:
     text = await port.article(e.id) or e.summary
     if not text:
         return ToolResult(ok=False, content=phrase("rss.tools.read.unreadable"))
+    # ce qu'elle a lu, gardé (borné, inerte) pour que la nuit en garde ce qui compte (ADR 0085)
+    await ctx.emit(c.READ.draft(
+        source=f"rss:{inert(feed_name(e.feed), 120)}"[:200], ref=e.id, title=Content.of(inert(e.title, 250), level=0),
+        excerpt=Content.of(inert(text, ARTICLE_EXCERPT), level=0), depth="article"))
     return (phrase("rss.tools.read.data") + "\n"
             + phrase("rss.headline", title=inert(e.title, 250), feed=inert(feed_name(e.feed), 120))
             + f"\n{cite(text, 6000)}")

@@ -19,6 +19,9 @@ from mika.runtime.state import RUNTIME
 #: du texte qui vient du monde, pas d'une personne — et pourquoi
 WORLD = {
     "rss.noticed": "un titre d'article : public",
+    "rss.read": "un article lu (son titre, son chapeau) : public (ADR 0085)",
+    "mcp.consulted": "une page du monde ouvert lue par un outil en lecture seule, pendant un travail : publique "
+                     "(ADR 0085)",
     "sensors.sensed": "un appareil (une sonnette) : pas une personne identifiée",
     "forge.signaled": "une app forgée : elle ne reçoit jamais une conversation",
     "camera.seen": "une image décrite : personne n'y est identifié ; réservée aux propriétaires",
@@ -50,7 +53,9 @@ def test_declared_subjects_are_fields_of_the_payload():
 #: personne, des états, des noms — jamais des mots de quelqu'un (ceux-là sont des ``Content``, qui
 #: déclarent leurs sujets ; un nouveau champ de texte libre doit en être un).
 MEMORY_KEYS = {"origin", "source", "call_id", "status", "by", "model", "night", "to", "emotion", "about", "told_by",
-               "heard_by", "holder", "felt", "empathy"}  # des émotions et leurs intensités, pas des mots (ADR 0083)
+               "heard_by", "holder", "felt", "empathy",  # des émotions et leurs intensités, pas des mots (ADR 0083)
+               "precision", "expected_precision",  # la précision d'une date : un code (ADR 0084)
+               "nature", "teller"}  # la sorte d'une annonce (un code) et qui l'a faite (une clé, sujet) (ADR 0086)
 
 
 def textual(annotation: Any) -> bool:

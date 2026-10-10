@@ -175,8 +175,10 @@ def acquaintance(first_seen: int, frame: Frame, closeness: str = "") -> str:
     jamais encore vue (un compte créé à l'avance) — pas de passé commun."""
     days = (frame.local().date() - frame.local(first_seen).date()).days if first_seen else 0
     if closeness in _KNOWN:
-        if days <= 0:
+        if not first_seen:
             return phrase("identity.known.friend_first_day")
+        if days <= 0:
+            return phrase("identity.known.friend_today")
         if days == 1:
             return phrase("identity.known.friend_since_yesterday")
         if days < 14:

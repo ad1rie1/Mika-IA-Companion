@@ -41,6 +41,8 @@ FROM_EXCHANGE, FROM_REVISION, FROM_SIGNAL, FROM_INTEREST = "exchange", "revision
 #: un sujet de conversation qui l'a intéressée (ce dont une amie lui a parlé, ce qu'on lui a fait découvrir) :
 #: une rêverie ancrée dans ce qu'on lui a dit, avant ses centres d'intérêt de toujours (ADR 0053)
 FROM_TALK = "talk"
+#: un moment du monde qui lui tient à cœur, passé sans qu'elle sache comment il a tourné : aller vérifier (ADR 0086)
+FROM_CHECK = "check"
 #: ce qui fait une rêverie quand elle n'a nulle part où chercher du neuf : un centre d'intérêt, un sujet de
 #: conversation
 MUSING_ORIGINS = frozenset({FROM_INTEREST, FROM_TALK})

@@ -44,8 +44,9 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import extraction as x
+from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory.archive import for_people
-from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, occurrence, params
+from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, day_of, occurrence, over, params
 from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, Testimony, judge
 from mika.faculties.memory.life import kept_too_early, same_task
 from mika.faculties.memory.projections import (
@@ -65,7 +66,8 @@ from mika.kernel.prompt import PromptBudgetError
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.llm_budget import fits_context
 from mika.ports.vectors import VectorItem
-from mika.vocab.affect import dominant, facets
+from mika.vocab import timespan
+from mika.vocab.affect import Emotion, dominant, facets, facets_valence
 from mika.vocab.people import clean_display_name, fold, is_identifiable
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -93,6 +95,17 @@ def kept_secrets(store: Any, persons: Sequence[str]) -> list[str]:
             f"SELECT text FROM {c.ITEMS_TABLE} WHERE secret=1 AND status='active' AND (id IN (SELECT item FROM "
             f"{c.ABOUT_TABLE} WHERE person=?) OR told_by LIKE ?) ORDER BY id DESC LIMIT 50", (person, like))]
     return out
+
+
+def resolution(ev: c.LifeEvent, outcome: str, by: str, sources: Sequence[int], call_id: str) -> Draft[Any]:
+    """Comment ce moment a tourné, avec ce qu'elle en attendait et de qui elle en apprend (ADR 0086) — une seule
+    façon, pour la consolidation et la relecture de la nuit."""
+    return c.RESOLVED.draft(
+        event=ev.id, thread=ev.key, outcome=outcome, by=by, likelihood=ev.likelihood, importance=ev.importance,
+        surprise=lk.surprise(outcome, ev.likelihood, ev.importance) if outcome != c.UNKNOWN else 0.0,
+        nature=lk.nature_of(ev), teller=ev.told_by[0] if ev.told_by else "", shared=ev.shared,
+        valence=round(facets_valence(ev.empathy or ev.felt), 3), about=ev.about, sources=tuple(sources),
+        call_id=call_id, dedupe_key=f"issue:{ev.key}:{ev.when}")
 
 
 def _keys(raw: Any) -> list[str]:
@@ -184,22 +197,24 @@ class Consolidate:
             situations = self._situations(frame, store, state, conv, p, labels)
             moments, upcoming = self._moments(frame, store, state, conv, labels)
             ended, gone = self._ended_situations(frame, store, state, conv, p, labels)
+            passed, past = self._passed(frame, store, state, conv, p, labels)
             prompt = x.render(conv, now=frame.local(), beliefs=known,
                               promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
                                         for i, to, t in promises], situations=situations, moments=moments,
-                              ended=ended)
+                              ended=ended, passed=passed)
             request = LLMRequest(role="extract", call_id=f"{ctx.run_id}#{n}", system_stable=x.system(her),
-                                 messages=(Message("user", prompt),), tools=(x.tool(her),), max_tokens=2500,
+                                 messages=(Message("user", prompt),), tools=(x.tool(her),), max_tokens=x.MAX_OUTPUT_TOKENS,
                                  lane="background", priority=2, meta={"conversation": conv.key})
             # Les souvenirs de contexte sont facultatifs, les messages sources ne le sont pas.
             # Une ancienne liste de situations ne doit pas rendre une paire courte illisible.
-            while not fits_context(ctx.llm, request) and (known or promises or situations or moments or ended):
+            while not fits_context(ctx.llm, request) and (known or promises or situations or moments or ended
+                                                           or passed):
                 known, promises, situations = known[:len(known) // 2], promises[:len(promises) // 2], situations[:len(situations) // 2]
-                moments, ended = moments[:len(moments) // 2], ended[:len(ended) // 2]
+                moments, ended, passed = moments[:len(moments) // 2], ended[:len(ended) // 2], passed[:len(passed) // 2]
                 prompt = x.render(conv, now=frame.local(), beliefs=known,
                                   promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
                                             for i, to, t in promises], situations=situations, moments=moments,
-                                  ended=ended)
+                                  ended=ended, passed=passed)
                 request = replace(request, messages=(Message("user", prompt),))
             retry_size = max(2, p.max_window // (2 ** min(8, attempts // max(1, p.max_attempts))))
             if (not fits_context(ctx.llm, request) or len(conv.lines) > retry_size) and len(conv.lines) > 1:
@@ -253,10 +268,12 @@ class Consolidate:
                     detail=Content.of(json.dumps({"issues": extraction.issues if partial else [reason],
                                                   "output": raw}, ensure_ascii=False), level=3)))
             if extraction is not None:
-                shown = {i for i, _w, _t in (*moments, *ended)}
-                designable = {i: ev for i, ev in {**upcoming, **gone}.items() if i in shown}
+                shown = {i for i, _w, _t in (*moments, *ended, *passed)}
+                # un moment passé se désigne aussi : reporté après coup (« finalement c'est lundi »), ou constaté
+                designable = {i: ev for i, ev in {**upcoming, **gone, **past}.items() if i in shown}
                 drafts += await self._drafts(extraction, frame, state, store, conv, people, known, promises, vectors,
-                                             p, last_call, moments=designable)
+                                             p, last_call, moments=designable,
+                                             passed={i: ev for i, ev in past.items() if i in shown})
                 drafts += self._ended(extraction, situations, last_call)
         if rows:
             drafts.append(c.CONSOLIDATED.draft(upto=rows[-1][0], produced=sum(
@@ -465,8 +482,8 @@ class Consolidate:
         archive = {ev.id: ev for ev in for_people(store, tuple(persons))}
         live: dict[int, tuple[c.LifeEvent, str]] = {}
         for ev in sorted({**state.events, **archive}.values(), key=lambda ev: ev.id):
-            if ev.ongoing or ev.yearly or not ev.text_ref or ev.when < frame.now - DAY:
-                continue
+            if ev.ongoing or ev.yearly or not ev.text_ref or over(ev) < frame.now or ev.outcome:
+                continue  # passé : il est parmi les moments à constater (ADR 0086)
             whom = next((k for k in (frame.get(identity_c.PERSON(a)) or a for a in ev.about) if k in persons), None)
             if whom is None:
                 continue
@@ -522,7 +539,8 @@ class Consolidate:
     async def _drafts(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
                       people: x.People, known: list[tuple[int, str]], promises: list[tuple[int, str, str]],
                       vectors: Any, p: MemoryParams, call_id: str,
-                      moments: dict[int, c.LifeEvent] | None = None) -> list[Draft[Any]]:
+                      moments: dict[int, c.LifeEvent] | None = None,
+                      passed: dict[int, c.LifeEvent] | None = None) -> list[Draft[Any]]:
         drafts: list[Draft[Any]] = []
         known_ids = {i for i, _ in known}
         known_texts = dict(known)
@@ -731,6 +749,8 @@ class Consolidate:
                 knowledge_kind=nature, holder=holder, relations=tuple(relations), first_hand=first_hand,
                 as_of=min(since[0], frame.now) if since else None, valid_until=until[0] if until else None,
                 felt=facets(b.ressenti), empathy=facets(b.mon_ressenti)))
+        drafts += self._predictions(ex, frame, conv, people, p, call_id, fresh, provenance, concerned, secret_of,
+                                    from_her, heard, tz)
         drafts += self._called(nicks, ours, store, conv, call_id)
         closed = [item for item in dict.fromkeys(ex.confidentiel) if item in known_ids]
         for item in closed:
@@ -746,6 +766,89 @@ class Consolidate:
                                        fresh, call_id, lambda text: x.echoes(text, secrets, names))
         drafts += await self._events(ex, frame, state, store, conv, people, vectors, p, provenance, concerned,
                                      secret_of, heard, fresh, call_id, moments or {})
+        drafts += self._constats(ex, frame, store, conv, passed or {}, p, provenance, call_id,
+                                 upcoming={i: ev for i, ev in (moments or {}).items() if not ev.ongoing})
+        return drafts
+
+    @staticmethod
+    def _moved(old: c.LifeEvent, at: int, frame: Frame, by: Sequence[str], sources: Sequence[int],
+               call_id: str) -> list[Draft[Any]]:
+        """Un moment déplacé à un autre jour — pas précisé dans sa période (« en novembre » → « le 12 ») : comment il
+        a tourné à sa date (``moved``), ce qui apprend un report de plus de qui l'avait annoncé (ADR 0086). À écrire
+        avant le moment à sa nouvelle date, qui reprend son fil."""
+        tz = frame.env.tz_of(frame.root)
+        if old.outcome or old.ongoing or day_of(old.when, tz) <= day_of(at, tz) <= day_of(old.ends, tz):
+            return []
+        return [resolution(old, c.MOVED, by[0] if len(by) == 1 else "", sources, call_id)]
+
+    @staticmethod
+    def _passed(frame: Frame, store: Any, state: MemoryState, conv: x.Conversation, p: MemoryParams,
+                labels: dict[str, str]) -> tuple[list[tuple[int, str, str]], dict[int, c.LifeEvent]]:
+        """Les moments des personnes de cette conversation passés depuis moins de ``resolve_days``, dont elle ne sait
+        pas comment ils ont tourné (numéro, qui, « le jour : texte ») : si la personne le dit, la relecture le constate
+        (ADR 0086). Les mêmes règles que les moments à venir : jamais ce qu'un autre a confié au-delà de l'anodin, et
+        dans un salon l'anodin seulement."""
+        persons = set(conv.persons)
+        archive = {ev.id: ev for ev in for_people(store, tuple(persons))}
+        since = frame.now - round(p.resolve_days * DAY)
+        live: dict[int, tuple[c.LifeEvent, str]] = {}
+        for ev in sorted({**state.events, **archive}.values(), key=lambda ev: ev.id):
+            if ev.ongoing or ev.yearly or ev.outcome or not ev.text_ref or not since <= over(ev) < frame.now:
+                continue
+            whom = next((k for k in (frame.get(identity_c.PERSON(a)) or a for a in ev.about) if k in persons), None)
+            if whom is None:
+                continue
+            tellers = {frame.get(identity_c.PERSON(t)) or t for t in ev.told_by}
+            anodyne = ev.sensitivity <= Sensitivity.ANODYNE and not ev.secret
+            if anodyne or (tellers <= persons and not conv.room):
+                live[ev.id] = (ev, whom)
+        if not live:
+            return [], {}
+        texts = store.content([ev.text_ref for ev, _ in live.values()])
+        shown = [(i, labels.get(whom, whom), phrase("memory.extraction.render.moment",
+                                                   when=frame.local(ev.when).date().isoformat(),
+                                                   text=texts[ev.text_ref]))
+                 for i, (ev, whom) in live.items() if texts.get(ev.text_ref)]
+        return shown, {i: ev for i, (ev, _w) in live.items()}
+
+    @staticmethod
+    def _constats(ex: x.Extraction, frame: Frame, store: Any, conv: x.Conversation, passed: dict[int, c.LifeEvent],
+                  p: MemoryParams, provenance: Any, call_id: str,
+                  upcoming: dict[int, c.LifeEvent] | None = None) -> list[Draft[Any]]:
+        """Comment un moment passé a tourné, de la bouche de la personne concernée — ses messages à elle seulement :
+        ce qu'un autre en dit n'est qu'une rumeur (ADR 0086). Un moment à venir peut être annulé d'avance (« finalement
+        mon IRM de demain est annulée ») ; il n'a pas encore eu lieu. Un moment qu'elle vivait à travers elle (« je te
+        montrerai tout »), qui a eu lieu, devient un souvenir à elle, plus marquant avec sa propriétaire."""
+        drafts: list[Draft[Any]] = []
+        done: set[int] = set()
+        for k in ex.constats:
+            outcome = x.outcome_of(k.issue)
+            ev = passed.get(k.numero)
+            if ev is None and outcome == c.CANCELLED:
+                ev = (upcoming or {}).get(k.numero)
+            if ev is None or outcome is None or ev.id in done:
+                continue
+            sources, told_by, _cited = provenance(k.messages)
+            concerned = {frame.get(identity_c.PERSON(a)) or a for a in ev.about}
+            by = next((t for t in told_by if (frame.get(identity_c.PERSON(t)) or t) in concerned), None)
+            if by is None or not k.messages:
+                continue
+            done.add(ev.id)
+            drafts.append(resolution(ev, outcome, by, sources, call_id))
+            if outcome == c.HAPPENED and ev.shared:
+                text = store.content([ev.text_ref]).get(ev.text_ref)
+                if not text:
+                    continue
+                name = next((sp.name for sp in conv.speakers if sp.person == by), "") or \
+                    frame.get(identity_c.IDENTITY(by)).name or phrase("memory.names.someone")
+                owner = bool(frame.get(identity_c.IS_OWNER(frame.get(identity_c.PERSON(by)) or by)))
+                lived = phrase("memory.lived.souvenir", name=name, text=text)
+                drafts.append(c.REMEMBERED.draft(
+                    text=Content.of(lived, level=ev.sensitivity), about=ev.about, sensitivity=ev.sensitivity,
+                    importance=p.lived_owner_importance if owner else p.lived_importance,
+                    emotion=dominant(ev.empathy) or Emotion.HAPPY.value, sources=sources, call_id=call_id,
+                    told_by=(by,), heard_by=conv.persons, secret=ev.secret, felt=ev.felt, empathy=ev.empathy,
+                    dedupe_key=f"vécu:{ev.key}:{ev.when}"))
         return drafts
 
     @staticmethod
@@ -930,23 +1033,40 @@ class Consolidate:
         names = [*(sp.name for sp in conv.speakers), self_c.name_of(frame.get(self_c.PERSONA))]
         noted: list[tuple[str, int, tuple[str, ...]]] = []
         for ev in ex.evenements:
-            got = x.when(ev.quand, tz) or ((frame.now, True) if ev.en_cours else None)
-            if got is None or not fresh(c.EVENT, ev.texte):
+            # une date floue garde sa précision : « en novembre » n'est pas le 1er novembre (ADR 0084)
+            span = timespan.parse(ev.quand, tz)
+            if (span is None and not ev.en_cours) or not fresh(c.EVENT, ev.texte):
                 continue
-            at, all_day = got
-            yearly = x.yearly(ev)
+            at, all_day = (span.point, span.all_day) if span is not None else (frame.now, True)
+            until, precision = (span.end, span.precision) if span is not None and span.vague else (None, "")
+            yearly = x.yearly(ev) and not precision
             if ev.en_cours:
                 # Conserver sa véritable ancienneté, même lorsqu'elle n'est plus relancée spontanément.
                 at = min(at, frame.now)
-            elif at < frame.now - DAY and not yearly:
+            elif (until or at) < frame.now - DAY and not yearly:
                 continue  # du passé : ce n'est plus à suivre (ce qui revient chaque année, si : il reviendra)
+            if ev.sur_elle and not people.resolve(ev.personnes):
+                # elle n'a pas de corps : « je vais au cinéma samedi », dit par elle, n'est pas un moment de sa vie —
+                # ce qu'elle vit, elle le vit à travers les autres (un moment partagé, ADR 0084)
+                continue
             if not ev.en_cours and (x.task_words(ev.texte) or any(
                     (not seqs or not ev.messages or set(seqs) & set(ev.messages)) and same_task(ev.texte, text)
                     and same_day(frame, at, due) for text, seqs, due in tasks)):
                 continue  # une chose à faire (une promesse, un rappel), pas un moment de sa vie
-            about = concerned(ev.personnes)
             sources, told_by, cited = provenance(ev.messages)
-            sens = max(x.sensitivity(ev.sensibilite, has_person=True), int(Sensitivity.ANODYNE))
+            world = bool(ev.monde)
+            if world and not told_by:
+                continue  # un moment du monde est toujours dit par quelqu'un (on peut l'oublier avec lui)
+            # le monde n'est la vie de personne : un nom qu'on y lit ne devient pas une mention
+            about = () if world else concerned(ev.personnes)
+            sens = max(x.sensitivity(ev.sensibilite, has_person=not world), int(Sensitivity.ANODYNE))
+            nature = (lk.OFFICIAL if ev.date_officielle else
+                      lk.FIRST_HAND if told_by and about and set(told_by) <= set(about) else lk.REPORTED)
+            # ce qu'elle a vu de qui l'annonce : reporté, annulé trop souvent, moins sûr (ADR 0086)
+            track = state.track.get(told_by[0]) if len(told_by) == 1 else None
+            extra = dict(until=until, precision=precision, scope=c.WORLD if world else c.PERSON_SCOPE,
+                         shared=bool(ev.partage or ev.sur_elle) and not world, official=bool(ev.date_officielle),
+                         likelihood=lk.likelihood(nature, ev.probabilite, p, track))
             if any(set(a) & set(about) and same_day(frame, t, at) and x.same_moment(ev.texte, n, names)
                    for n, t, a in noted):
                 continue  # dit deux fois dans la même conversation
@@ -956,6 +1076,7 @@ class Consolidate:
                 # le secret, la sensibilité et le poids, et l'ancien ne reste pas à côté
                 noted.append((ev.texte, at, about))
                 sens = max(sens, moved.sensitivity)
+                drafts += self._moved(moved, at, frame, told_by, sources, call_id)
                 drafts.append(c.EVENT_NOTED.draft(
                     text=Content.of(ev.texte, level=sens), when=at, about=tuple(dict.fromkeys((*about, *moved.about))),
                     all_day=all_day, sensitivity=sens, sources=sources, told_by=told_by, heard_by=heard,
@@ -963,7 +1084,7 @@ class Consolidate:
                     call_id=call_id, ongoing=False, importance=max(moved.importance, x.moment_importance(ev)),
                     festive=moved.festive or x.festive(ev), yearly=yearly,
                     felt=facets(ev.ressenti) or moved.felt,
-                    empathy=facets(ev.mon_ressenti) or moved.empathy))
+                    empathy=facets(ev.mon_ressenti) or moved.empathy, **{**extra, "shared": extra["shared"] or moved.shared}))
                 continue
             back = (moments or {}).get(ev.remplace) if ev.remplace is not None and ev.en_cours else None
             if back is not None and not (back.ongoing and back.ended_at):
@@ -984,7 +1105,7 @@ class Consolidate:
                     secret=again.secret or secret_of(ev.secret, cited, sens, ev.texte), recurs=again.id,
                     call_id=call_id, ongoing=True, importance=max(again.importance, x.moment_importance(ev)),
                     felt=facets(ev.ressenti) or again.felt,
-                    empathy=facets(ev.mon_ressenti) or again.empathy))
+                    empathy=facets(ev.mon_ressenti) or again.empathy, **extra))
                 continue
             if twin is not None and not ev.en_cours and abs(twin.when - at) >= DAY // 2 and not x.same_moment(
                     ev.texte, store.content([twin.text_ref]).get(twin.text_ref) or "", names):
@@ -1008,15 +1129,19 @@ class Consolidate:
                     festive=twin.festive or (not twin.ongoing and x.festive(ev)),
                     yearly=twin.yearly or (not twin.ongoing and yearly),
                     felt=facets(ev.ressenti) or twin.felt,
-                    empathy=facets(ev.mon_ressenti) or twin.empathy))
+                    empathy=facets(ev.mon_ressenti) or twin.empathy,
+                    **{**extra, "until": twin.until or None, "precision": twin.precision,
+                       "shared": extra["shared"] or twin.shared}))
                 continue
             noted.append((ev.texte, at, about))
+            if twin is not None:
+                drafts += self._moved(twin, at, frame, told_by, sources, call_id)
             drafts.append(c.EVENT_NOTED.draft(
                 text=Content.of(ev.texte, level=sens), when=at, about=about, all_day=all_day, sensitivity=sens,
                 sources=sources, told_by=told_by, heard_by=heard, secret=secret_of(ev.secret, cited, sens, ev.texte),
                 replaces=twin.id if twin is not None else None, call_id=call_id, ongoing=ev.en_cours,
                 importance=x.moment_importance(ev), festive=not ev.en_cours and x.festive(ev), yearly=yearly,
-                felt=facets(ev.ressenti), empathy=facets(ev.mon_ressenti)))
+                felt=facets(ev.ressenti), empathy=facets(ev.mon_ressenti), **extra))
         return drafts
 
     @staticmethod
@@ -1167,6 +1292,40 @@ class Consolidate:
                 return current if current != item else None
             current = after
         return None
+
+    @staticmethod
+    def _predictions(ex: x.Extraction, frame: Frame, conv: x.Conversation, people: x.People, p: MemoryParams,
+                     call_id: str, fresh: Any, provenance: Any, concerned: Any, secret_of: Any, from_her: Any,
+                     heard: tuple[str, ...], tz: Any) -> list[Draft[Any]]:
+        """Ce que quelqu'un s'attend à voir arriver (« Léa pense qu'elle sera prise », « les taux vont remonter ») :
+        une croyance de la sorte « prévision », à qui la porte, avec quand c'est attendu et à quel point (ADR 0084) —
+        au plus comme une déduction, quoi qu'en dise qui prévoit. Ses propres pronostics sont à elle (ses avis sont
+        libres, sur tout) ; une prévision ne revient plus d'elle-même une fois sa période passée."""
+        drafts: list[Draft[Any]] = []
+        for pv in ex.previsions:
+            if not fresh(c.BELIEF, pv.texte):
+                continue
+            span = timespan.parse(pv.quand, tz)
+            if span is not None and span.end < frame.now:
+                continue  # déjà passé : ce n'est plus une prévision
+            sources, told_by, cited = provenance(pv.messages)
+            mine = pv.sur_elle and from_her(pv.messages)
+            about = () if mine else concerned(pv.personnes)
+            holder = None if mine else (people.one(pv.point_de_vue) if pv.point_de_vue else
+                                        (told_by[0] if len(told_by) == 1 else None))
+            sens = max(x.sensitivity(pv.sensibilite, has_person=bool(about or told_by)), int(Sensitivity.ANODYNE))
+            secret = secret_of(pv.secret, cited, sens, pv.texte)
+            expected = dict(expected=span.point, expected_until=span.end if span.vague else None,
+                            expected_precision=span.precision) if span is not None else {}
+            drafts.append(c.BELIEVED.draft(
+                text=Content.of(pv.texte, level=sens), about=about, sensitivity=sens, importance=x.IMPORTANCE[2],
+                confidence=x.born_confidence(0.7, c.TOLD if told_by else c.OBSERVED, "prediction"),
+                origin=c.OBSERVED if mine else c.TOLD, source=None if mine else holder, sources=sources,
+                call_id=call_id, told_by=() if mine else told_by, heard_by=heard, secret=secret, about_self=mine,
+                knowledge_kind="prediction", holder=holder, felt=facets(pv.ressenti), empathy=facets(pv.mon_ressenti),
+                likelihood=lk.likelihood(lk.PREDICTION, pv.probabilite, p),
+                valid_until=span.end if span is not None else None, **expected))
+        return drafts
 
     @staticmethod
     def _about_of(store: Any, item: int) -> list[str]:

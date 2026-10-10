@@ -41,6 +41,7 @@ from mika.faculties.memory.extraction import self_names
 from mika.kernel.events import Content, Draft, Origin
 from mika.runtime import params
 from mika.runtime.bootstrap import Kernel
+from mika.vocab import timespan
 from mika.vocab.affect import Emotion, emotion_of, facets
 from mika.vocab.people import ACCOUNT_PREFIX, EXTERNAL_PREFIX, clean_display_name, fold, is_identifiable
 from mika.vocab.privacy import Sensitivity
@@ -262,13 +263,23 @@ async def note_event(kernel: Kernel, text: str, about: Iterable[str], when: int,
                      festive: bool = False, ongoing: bool = False, told_by: Iterable[str] = (),
                      heard_by: Iterable[str] | None = None, secret: bool = False, replaces: int | None = None,
                      recurs: int | None = None, felt: object = None, empathy: object = None,
+                     until: int | None = None, precision: str = "", world: bool = False, shared: bool = False,
+                     official: bool = False, likelihood: float | None = None,
                      dedupe_key: str | None = None) -> int:
     """Un moment de la vie de quelqu'un (``about``, au moins une personne) noté d'après ses archives : à venir
     (``when``, en µs ; le jour seulement si ``all_day``), ou une situation en cours depuis ``when``
-    (``ongoing``) — qui peut rouvrir une situation finie (``recurs`` : la même histoire, une autre fois)."""
+    (``ongoing``) — qui peut rouvrir une situation finie (``recurs`` : la même histoire, une autre fois). Une période
+    (``until``, ``precision`` : ``vocab.timespan``), ce qui arrive dans le monde (``world`` : ``about`` vide, dit par
+    quelqu'un), un moment qu'elle vivra à travers la personne (``shared``), une date officielle, sa vraisemblance
+    (ADR 0084)."""
     about_, told = _people(kernel, about, "about"), _people(kernel, told_by, "told_by")
-    if not about_:
+    if world and (about_ or not told):
+        raise ValueError("un moment du monde n'est la vie de personne (« about » vide) et se dit par quelqu'un "
+                         "(« told_by »)")
+    if not about_ and not world:
         raise NotAPerson("un moment de la vie de quelqu'un dit de qui (« about » vide)")
+    if precision not in timespan.PRECISIONS or (precision and until is None):
+        raise ValueError(f"précision inconnue : « {precision} » (month, season, year, range — avec « until »)")
     if int(when) <= 0:
         raise ValueError(f"un moment sans date : {when}")
     heard = told if heard_by is None else _people(kernel, heard_by, "heard_by")
@@ -278,7 +289,9 @@ async def note_event(kernel: Kernel, text: str, about: Iterable[str], when: int,
         told_by=told, heard_by=heard, secret=bool(secret), replaces=_replaced(kernel, replaces, memory_c.EVENT),
         call_id=ARCHIVE, ongoing=bool(ongoing), importance=_unit(importance, "importance"), festive=bool(festive),
         recurs=_replaced(kernel, recurs, memory_c.EVENT), felt=_feelings(felt), empathy=_feelings(empathy),
-        dedupe_key=dedupe_key)
+        until=until, precision=precision, scope=memory_c.WORLD if world else memory_c.PERSON_SCOPE,
+        shared=bool(shared), official=bool(official),
+        likelihood=None if likelihood is None else _unit(likelihood, "vraisemblance"), dedupe_key=dedupe_key)
     return await _append(kernel, draft, dedupe_key)
 
 

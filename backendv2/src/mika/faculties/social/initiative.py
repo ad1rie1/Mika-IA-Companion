@@ -203,8 +203,8 @@ def announced(frame: Frame, person: str, after: int) -> int | None:
     for ev in frame.get(memory_c.LIFE_EVENTS(person)):
         if ev.ongoing or ev.secret or not set(ev.told_by) <= {person}:
             continue
-        if after < ev.when <= frame.now:
-            return ev.when
+        if after < ev.ends <= frame.now:  # une période (« en mars ») : une fois finie (ADR 0084)
+            return ev.ends
     return None
 
 

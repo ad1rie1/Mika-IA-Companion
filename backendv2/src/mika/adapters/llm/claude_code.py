@@ -61,6 +61,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import tempfile
@@ -158,6 +159,11 @@ def purge_stale(work_dir: Path, *, now: float | None = None) -> int:
             shutil.rmtree(d, ignore_errors=True)
             gone += 1
     return gone
+
+
+#: l'erreur de l'API quand la réponse dépasse ``CLAUDE_CODE_MAX_OUTPUT_TOKENS`` (« Claude's response exceeded the
+#: 2500 output token maximum ») : une sortie tronquée, pas une panne
+OUTPUT_CAPPED = re.compile(r"exceeded the \d+ output token maximum", re.IGNORECASE)
 
 
 class ClaudeCodeError(RuntimeError):
@@ -486,6 +492,12 @@ class ClaudeCodeBackend:
         d: Mapping[str, Any] = value
         if d.get("is_error") or d.get("subtype") != "success":
             detail = d.get("result") or ", ".join(map(str, d.get("errors") or ())) or d.get("subtype")
+            if OUTPUT_CAPPED.search(str(detail)):
+                # la sortie a passé son plafond : une réponse tronquée, comme chez les autres fournisseurs — l'appelant
+                # sait la traiter (la relecture diffère et redécoupe sa fenêtre) ; une panne se réessaierait à
+                # l'identique (sonde réelle du 2026-10-10)
+                return LLMResponse(answer(texts, ""), stop="max_tokens", model=run.model or self.model,
+                                   truncated_tool_call=True)
             raise ClaudeCodeError(f"la CLI a échoué : {detail}")
         stop = {"max_tokens": "max_tokens", "refusal": "refusal"}.get(str(d.get("stop_reason") or ""), "end")
         models = list((d.get("modelUsage") or {}).keys())

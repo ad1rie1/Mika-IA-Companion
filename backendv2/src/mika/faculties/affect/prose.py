@@ -53,6 +53,12 @@ CAUSES: Mapping[str, str] = MappingProxyType({
     "camera": "camera",
     "compagnie": "company",
     "une rêverie écrite": "daydream",
+    # comment un moment a tourné, et ce qu'elle en attendait (ADR 0086)
+    "tournure": "turned_out",
+    "attente déçue": "let_down",
+    "crainte levée": "fear_lifted",
+    "impatience": "looking_forward",
+    "appréhension": "dreading",
 })
 #: Une cause qui est un état, dite quand cet état a pris fin (quelqu'un est venu te parler depuis) : au passé, et
 #: ce qui en reste au présent — jamais « personne ne t'a parlé » en pleine conversation (HUM-5) ; ``affect.cause_over``.

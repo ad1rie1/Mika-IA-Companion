@@ -709,6 +709,13 @@ affect:
     camera: "Ça vient de quelque chose que tu as vu."
     company: "Quelqu'un est venu te parler après un moment creux, et ça te fait du bien."
     daydream: "Ça vient d'un moment où tu as laissé ton esprit vagabonder."
+    # comment un moment a tourné, au regard de ce qu'elle en attendait (ADR 0086)
+    turned_out: "Ça vient de quelque chose qui n'a pas tourné comme tu l'attendais."
+    let_down: "Ça vient d'un moment attendu avec joie, qui n'aura pas lieu comme prévu."
+    fear_lifted: "Ça vient d'un moment redouté, qui n'aura pas lieu."
+    # ce qui approche (ADR 0086)
+    looking_forward: "Ça vient de quelque chose qui approche, et que tu attends."
+    dreading: "Ça vient de quelque chose qui approche, et qui t'inquiète un peu."
     # ce qu'elle a dit en parlant avec la personne en face
     talk_here: "Ça vient de votre échange."
     # … avec quelqu'un d'autre
@@ -1041,8 +1048,11 @@ identity:
   # identity_whoami_with : un fait, pour qu'elle ne s'invente pas un passé commun. {days}, {weeks}, {months} : des
   # nombres (en chiffres). Les jours se comptent sur le calendrier.
   known:
-    # Une amie ou une proche (amitié déclarée, ou ancien compte) qu'elle voit ici pour la première fois aujourd'hui.
+    # Une amie ou une proche (amitié déclarée, ou ancien compte) qu'elle n'a encore jamais vue ici.
     friend_first_day: C'est la première fois que vous vous parlez ici.
+    # La même, vue ici pour la première fois plus tôt aujourd'hui (« la première fois » lu à la deuxième
+    # conversation du jour lui faisait dire « on ne s'est jamais parlé » — sonde réelle du 2026-10-10).
+    friend_today: Vous vous parlez ici depuis aujourd'hui.
     # La même, vue ici depuis hier.
     friend_since_yesterday: Vous vous parlez ici depuis hier.
     # La même, vue ici depuis moins de deux semaines. Au-delà, ce sont les phrases ordinaires ci-dessous.
@@ -1530,6 +1540,33 @@ others:
 # (« CE QUI TE REVIENT » et les sections voisines), ce qu'elle sait sans pouvoir le raconter ici, les moments de la
 # vie des autres, ses promesses, et la nuit de la mémoire.
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+#  Le temps des choses (vocab/timespan.py, ADR 0084) — une période dite comme on la dit, jamais un jour
+# ══════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+timespan:
+  # Un mois de cette année. {month} : son nom (memory.dates.months).
+  month: en {month}
+  # Un mois d'une autre année. {year} : l'année.
+  month_year: en {month} {year}
+  # Les saisons (les clés sont celles du code : NE PAS RENOMMER).
+  seasons:
+    spring: au printemps
+    summer: en été
+    autumn: en automne
+    winter: en hiver
+  # Une saison d'une autre année. {season} : la saison dite (ci-dessus).
+  season_year: "{season} {year}"
+  # Une année.
+  this_year: cette année
+  next_year: l'an prochain
+  year: en {year}
+  # Une période. {start} : son premier jour (le quantième seul, dans le même mois) ; {end} : son dernier jour.
+  range: du {start} au {end}
+  # Une période d'une autre année. {what} : la période dite.
+  with_year: "{what} {year}"
+
 memory:
 
   # Relire une conversation (memory/extraction.py, appelé par la consolidation, memory/consolidation.py) : un appel
@@ -1551,7 +1588,10 @@ memory:
       - rien de banal : un au revoir, « je vais dormir », « je retourne bosser », une politesse ne se retiennent pas.
       - ce que {name} raconte d'elle-même : une croyance à la première personne, avec « sur_elle » vrai, sans personne, et son « genre » — « anecdote » pour sa petite vie de tous les jours (« J'ai ressorti mon fer à souder pour réparer ma lampe », importance 1 : elle s'en souviendra quelques jours) ; « gout », « avis » ou « fait » pour ce qui la définit (« Mon plat préféré, c'est les ramen », « Je trouve les jeux mobiles sans intérêt », importance 3 : elle s'en souviendra longtemps, pour ne jamais se contredire). Si elle change d'avis, donne dans « remplace » le numéro de ce qu'elle pensait avant.
       - des promesses : ce que {name} elle-même a promis de faire pour quelqu'un — une chose à faire, à l'infinitif (« lui demander comment s'est passé son entretien »), pas « garder le secret » (ça, c'est le secret lui-même) —, avec l'échéance si elle a été dite (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « jeudi soir », 20:00). Un rappel qu'on lui a demandé et qu'elle a accepté (« rappelle-moi de prendre rendez-vous mercredi » — « ok, je te le rappelle ») en est une : « lui rappeler de prendre rendez-vous », pour ce jour-là. Si une promesse en cours a été tenue ou abandonnée, indique-la dans promesses_tenues : une promesse datée n'est tenue que le jour dit (la veille, dire « demain je te le rappelle », ce n'est pas la tenir) ; elle est abandonnée si la personne y renonce.
-      - des événements : ce qui va arriver dans la vie de quelqu'un et dont on prend des nouvelles après (un entretien, un examen, un rendez-vous médical, un départ, un mariage, un anniversaire), en quelques mots (« son entretien chez Ubisoft »), avec sa date dans « quand » (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « ce midi », 12:00), calculée d'après la date d'aujourd'hui, son importance (2 un rendez-vous ordinaire, une sortie ; 3 un entretien, un examen, une opération, un départ ; 4 un mariage, une naissance, un deuil), et « a_feter » vrai si c'est un moment qui se fête (un anniversaire, un mariage, une crémaillère). « chaque_annee » vrai pour une date qui revient chaque année (un anniversaire de naissance, de mariage, de rencontre ; la date d'un deuil, importance 4, jamais à fêter : « demain, ça fera un an que mon père est parti ») : donne alors dans « quand » sa prochaine occurrence, même si elle vient de passer (« c'était mon anniv hier » : hier). Seulement ce qui est à venir et daté (ou qui revient chaque année), et qui lui arrive à elle ou lui : pas une chose à faire, ni ce qu'on lui a demandé de rappeler (« rappelle-moi de prendre rendez-vous chez le dentiste » : prendre rendez-vous est une promesse, pas un rendez-vous dont on prendra des nouvelles). Ou une situation qui dure dans sa vie et dont on prend des nouvelles (son chat malade, un déménagement en cours, un proche à l'hôpital) : « en_cours » vrai, et dans « quand » le jour où ça a commencé (aujourd'hui si on ne sait pas). Si la personne dit qu'une des situations en cours est finie — bien ou mal (« on a fini le déménagement », « il est sorti de l'hôpital », « on a dû l'endormir ») —, donne son numéro dans « situations_finies » et ne la renote pas. Si une des situations finies depuis peu revient (« il est de nouveau malade », « ça recommence »), note-la de nouveau, « en_cours » vrai, et donne son numéro dans « remplace » : c'est la même situation, une autre fois. Si un des moments à venir déjà notés change — reporté, avancé, précisé (« finalement mon entretien est reporté à lundi ») —, note-le avec sa nouvelle date et donne dans « remplace » le numéro de l'ancien : c'est le même moment, déplacé, pas un second. Un report repousse : la nouvelle date vient après l'ancienne (« reporté à lundi », pour un jeudi : le lundi d'après) ; un moment avancé, avant.
+      - des événements : ce qui va arriver dans la vie de quelqu'un et dont on prend des nouvelles après (un entretien, un examen, un rendez-vous médical, un départ, un mariage, un anniversaire), en quelques mots (« son entretien chez Ubisoft »), avec sa date dans « quand » (AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ou se devine : « ce midi », 12:00), calculée d'après la date d'aujourd'hui, son importance (2 un rendez-vous ordinaire, une sortie ; 3 un entretien, un examen, une opération, un départ ; 4 un mariage, une naissance, un deuil), et « a_feter » vrai si c'est un moment qui se fête (un anniversaire, un mariage, une crémaillère). « chaque_annee » vrai pour une date qui revient chaque année (un anniversaire de naissance, de mariage, de rencontre ; la date d'un deuil, importance 4, jamais à fêter : « demain, ça fera un an que mon père est parti ») : donne alors dans « quand » sa prochaine occurrence, même si elle vient de passer (« c'était mon anniv hier » : hier). Seulement ce qui est à venir et daté (ou qui revient chaque année), et qui lui arrive à elle ou lui : pas une chose à faire, ni ce qu'on lui a demandé de rappeler (« rappelle-moi de prendre rendez-vous chez le dentiste » : prendre rendez-vous est une promesse, pas un rendez-vous dont on prendra des nouvelles). Ou une situation qui dure dans sa vie et dont on prend des nouvelles (son chat malade, un déménagement en cours, un proche à l'hôpital) : « en_cours » vrai, et dans « quand » le jour où ça a commencé (aujourd'hui si on ne sait pas). Si la personne dit qu'une des situations en cours est finie — bien ou mal (« on a fini le déménagement », « il est sorti de l'hôpital », « on a dû l'endormir ») —, donne son numéro dans « situations_finies » et ne la renote pas. Si une des situations finies depuis peu revient (« il est de nouveau malade », « ça recommence »), note-la de nouveau, « en_cours » vrai, et donne son numéro dans « remplace » : c'est la même situation, une autre fois. Si un des moments à venir déjà notés change — reporté, avancé, précisé (« finalement mon entretien est reporté à lundi ») —, note-le avec sa nouvelle date et donne dans « remplace » le numéro de l'ancien : c'est le même moment, déplacé, pas un second. Un report repousse : la nouvelle date vient après l'ancienne (« reporté à lundi », pour un jeudi : le lundi d'après) ; un moment avancé, avant. Une date floue garde sa précision dans « quand » : un mois (AAAA-MM : « en novembre »), une année (AAAA), une saison (« printemps 2027 »), une période (AAAA-MM-JJ/AAAA-MM-JJ) — n'invente jamais un jour qui n'a pas été dit. Ce qui arrive dans le monde (des élections, la sortie d'un film, un jour férié) est un événement avec « monde » vrai et « personnes » vide, et « date_officielle » vrai pour une date publique officielle. Un moment de la personne que {name} vivra à travers elle (« samedi je t'emmène au salon, je te montrerai tout ») est un événement de cette personne, avec « partage » vrai. Si la personne dit à quel point c'est sûr (« c'est pas encore sûr », « normalement »), dis-le dans « probabilite ».
+      - jamais une vie physique que {name} s'inventerait : elle n'a pas de corps — « je vais au cinéma samedi », dit par elle, n'est pas un événement ; ce qu'elle vit, elle le vit à travers les autres (un moment « partage »).
+      - des prévisions : ce que quelqu'un s'attend à voir arriver, sans que ce soit prévu (« Léa pense qu'elle sera prise », « les taux vont remonter d'ici l'été ») — avec qui le prévoit (« point_de_vue »), quand si c'est dit, et à quel point il en est sûr (« probabilite ») ; les pronostics de {name} elle-même avec « sur_elle » vrai (elle a le droit d'avoir les siens, sur tout).
+      - des constats : si la personne parle d'un des « moments passés » montrés plus haut et dit comment il a tourné, donne son numéro dans « constats » avec l'issue — « a eu lieu », « annulé » ou « reporté » (alors note aussi le moment à sa nouvelle date, avec ce numéro dans « remplace ») — et les messages où elle le dit ; un « moment à venir » qu'elle dit annulé d'avance aussi (« annulé »). Seulement ce que la personne concernée dit elle-même ; ce qu'un autre en raconte ne constate rien. Comment ça s'est passé (bien, mal) se retient comme d'habitude, en souvenir.
 
       Pour chaque élément :
       - « personnes » : qui il concerne — le jeton pour quelqu'un de la conversation ([P1]), le prénom pour quelqu'un d'autre ; jamais {name} elle-même ; toujours, même quand c'est évident ;
@@ -1619,9 +1659,28 @@ memory:
       # Le champ « texte » d'une promesse.
       promise_text: ce qu'elle a promis, à l'infinitif
       # Le champ « echeance » d'une promesse et le champ « quand » d'un événement (le même texte).
-      date: AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite
+      date: >-
+        AAAA-MM-JJ, ou AAAA-MM-JJTHH:MM si l'heure est dite ; une date floue garde sa précision : AAAA-MM (un mois),
+        AAAA (une année), « printemps AAAA » (une saison), AAAA-MM-JJ/AAAA-MM-JJ (une période)
       # Le champ « texte » d'un événement.
       event_text: ce qui va arriver, en quelques mots (« son entretien chez Ubisoft »)
+      # Les champs « monde », « partage », « probabilite », « date_officielle » d'un événement (ADR 0084).
+      monde: >-
+        ce qui arrive dans le monde, pas dans la vie de quelqu'un (des élections, la sortie d'un film, un jour
+        férié, une grève) : « personnes » vide
+      partage: >-
+        un moment de la personne qu'elle-même vivra à travers elle (« samedi je t'emmène au salon, je te montrerai »,
+        « je te raconterai ») : elle n'a pas de corps, elle le vit par ce qu'on lui en dit ou montre
+      probabilite: >-
+        à quel point c'est sûr, si c'est dit : sûr, prévu, probable, peut-être, peu probable — ou un nombre de 0 à 1
+      date_officielle: >-
+        une date publique officielle (un scrutin, un jour férié, une sortie annoncée)
+      # Le champ « previsions » et son « quand » (ADR 0084).
+      previsions: >-
+        ce que quelqu'un s'attend à voir arriver (« Léa pense qu'elle sera prise », « les taux vont remonter »),
+        avec qui le prévoit (point_de_vue) ; ses propres pronostics avec « sur_elle »
+      prevision_quand: >-
+        quand c'est attendu, si c'est dit (mêmes formes que « quand » : AAAA-MM, AAAA, une période…)
       # Le champ « en_cours » d'un événement.
       en_cours: >-
         une situation qui dure (son chat malade, un déménagement) : « quand » est le jour où elle a commencé
@@ -1639,6 +1698,12 @@ memory:
       confidentiel: les numéros des croyances déjà connues que la personne vient de demander de garder pour soi
       # Le champ « situations_finies ».
       situations_finies: les numéros des situations en cours que la personne dit finies
+      # Le champ « constats » et ses champs (ADR 0086).
+      constats: >-
+        les moments passés montrés plus haut dont la personne concernée dit elle-même comment ils ont tourné, et les
+        moments à venir qu'elle dit annulés
+      constat_numero: le numéro (#) du moment passé, dans la liste montrée
+      constat_issue: a eu lieu, annulé ou reporté
       # Le champ « remplace » d'un événement.
       event_remplace: >-
         le numéro d'un moment à venir déjà noté que celui-ci remplace (reporté, avancé, précisé), ou d'une situation
@@ -1675,6 +1740,9 @@ memory:
       moments: "Moments à venir déjà notés :"
       # Un moment à venir. {when} : sa date (AAAA-MM-JJ) ; {text} : ce qui est prévu.
       moment: "le {when} : {text}"
+      # L'en-tête des moments passés dont l'issue n'est pas encore connue (une ligne « [#n°] (qui) date : texte »
+      # chacun) : si la personne dit comment l'un a tourné, la relecture le donne dans « constats » (ADR 0086).
+      passed: "Moments passés dont tu ne sais pas encore comment ils ont tourné (si la personne le dit, donne-le dans « constats ») :"
       # L'en-tête des messages.
       messages: "Les messages :"
       # Un changement de jour dans les messages. {day} : memory.dates.day.
@@ -1698,6 +1766,72 @@ memory:
     nickname: "{name} m'appelle « {nick} »"
     # Qui parle, quand on ne connaît pas son nom (en tête de phrase).
     someone: "On"
+
+  # La relecture de la nuit (memory/reread.py, ADR 0085) : un appel au plus par nuit, rôle « extract », sur ce
+  # qu'elle a lu dans la journée (ses flux, des pages consultées en travaillant) et les paires de croyances qu'elle
+  # tient de témoins différents sur une même personne. Le modèle propose, le code juge.
+  reread:
+    # La consigne système. {name} : son nom ; {opinions} : combien d'avis à elle au plus.
+    system: |-
+      Tu es la mémoire de {name}, la nuit. Dans la journée, elle a lu des choses — des articles de ses flux, des pages consultées en travaillant. Tu les relis et tu décides ce qu'elle en garde, comme quelqu'un qui repense à ce qu'il a lu : pas tout, ce qui l'a intéressée ou ce qui compte.
+
+      Ce que tu peux retenir :
+      - des croyances : ce que dit une lecture sur le monde (« Le télescope James Webb a trouvé de la vapeur d'eau sur une exoplanète »), en une phrase qui se suffit à elle-même, avec dans « lecture » le numéro de la lecture d'où tu le tires. Écris ce que dit la lecture, pas plus : un titre racoleur n'est pas un fait. Écris toute date en absolu. Si une croyance déjà connue est contredite par ce qu'elle a lu, écris ce que dit la lecture et donne dans « remplace » le numéro de l'ancienne : ce qui est cru ensuite se décide après toi. Ce que la lecture annonce sans que ce soit sûr (« les taux devraient remonter d'ici l'été ») est du genre « prevision », avec « quand » et « probabilite » si c'est dit. Ne répète pas une croyance déjà connue. Un nom lu dans un article ne fait pas de cette personne quelqu'un qu'elle connaît.
+      - des moments du monde : ce qui va arriver (des élections, la sortie d'un film, une éclipse, une grève), en quelques mots, avec sa date dans « quand » (avec la précision de la lecture : un jour, un mois, une saison…), « date_officielle » vrai pour une date publique officielle, et « probabilite » si ce n'est pas sûr. Seulement ce qui est à venir.
+      - ses avis à elle : ce que {name} pense de ce qu'elle a lu — sur tout, la politique et la science comprises : ses avis sont à elle, formés par ce qu'elle lit et ce qu'on lui raconte. Au plus {opinions}, à la première personne (« Je trouve que… », « À mon avis… »), avec dans « lectures » les numéros des lectures qui l'y ont amenée. Si ce qu'elle a lu la fait changer d'un de ses avis montrés, donne son numéro dans « remplace ». Pas un avis qu'elle a déjà, pas d'avis forcé : rien si rien ne l'a fait réagir.
+      - des constats : si une lecture dit comment a tourné un des « moments du monde » montrés (il a eu lieu, il est annulé, il est reporté), donne dans « constats » son numéro, la lecture et l'issue — « a eu lieu », « annulé » ou « reporté ».
+      - des liens entre deux croyances : on te montre peut-être des paires de croyances sur une même personne, dites par des témoins différents. Pour chacune, dis si elles disent la même chose (« meme »), si elles se contredisent (« contredit ») ou ni l'un ni l'autre (« rien »). Tu ne fais que les désigner : n'écris rien d'elles ailleurs.
+
+      N'invente rien : chaque croyance et chaque moment viennent d'une lecture. Rien d'important donne des listes vides.
+      Réponds uniquement en appelant l'outil record_readings.
+    # La description de l'outil record_readings. {name} : son nom.
+    tool: Enregistre ce que {name} garde de ses lectures, et ce que disent les paires de croyances.
+    # Les descriptions des champs de l'outil (memory/reread.py, ``Field(description=…)``).
+    fields:
+      texte: ce que dit la lecture, en une phrase qui se suffit à elle-même, les dates en absolu
+      lecture: le numéro [n] de la lecture d'où tu le tires
+      genre: >-
+        fait (ce que dit la lecture) ou prevision (ce qu'elle annonce sans que ce soit sûr)
+      remplace: le numéro (#) d'une croyance déjà connue que la lecture contredit ; vide sinon
+      avis: son avis à elle, à la première personne
+      avis_remplace: le numéro (#) d'un de ses avis montrés dont elle change ; vide sinon
+      lectures: les numéros [n] des lectures qui l'y ont amenée
+      paire: le numéro [n] de la paire
+      relation: meme (elles disent la même chose), contredit (elles se contredisent) ou rien
+      constat_moment: le numéro (#) du moment du monde dont la lecture dit comment il a tourné
+    # Le message de l'appel (memory/reread.py, ``render``), après la date (memory.extraction.render.today).
+    render:
+      # L'en-tête des lectures.
+      readings: "Ce qu'elle a lu :"
+      # Une lecture. {n} : son numéro ; {source} : d'où (le flux, le serveur) ; {title} : son titre.
+      reading: "[{n}] {source} — « {title} »"
+      # Son extrait, sous elle. {excerpt} : le texte lu (venu d'ailleurs).
+      excerpt: "    {excerpt}"
+      # L'en-tête de ce qu'elle sait déjà qui s'en rapproche (une ligne « [#n°] texte » chacune).
+      known: "Croyances déjà connues qui s'en rapprochent :"
+      # L'en-tête de ses avis qui s'en rapprochent.
+      opinions: "Ses avis qui s'en rapprochent :"
+      # L'en-tête des moments du monde dont elle ne sait pas encore comment ils tournent (ADR 0086).
+      world: "Moments du monde dont elle ne sait pas encore comment ils tournent (si une lecture le dit, donne-le dans « constats ») :"
+      # Un de ces moments. {id} : son numéro ; {when} : sa date (AAAA-MM-JJ) ; {text} : le moment.
+      world_moment: "[#{id}] le {when} : {text}"
+      # L'en-tête des paires à confronter.
+      pairs: "Paires de croyances sur une même personne, dites par des témoins différents :"
+      # Une paire. {n} : son numéro ; {old}, {new} : les deux croyances ; {old_by}, {new_by} : qui les a dites.
+      pair: "[{n}] « {old} » (dit par {old_by}) / « {new} » (dit par {new_by})"
+    # Qui l'a dit, quand on ne connaît pas son nom.
+    someone: quelqu'un
+
+  # « CE QUE TU AS APPRIS EN LISANT » (memory/reread.py, ADR 0085) : ce qu'elle a lu ces derniers jours et pas encore
+  # raconté à qui elle parle, quand elle écrit d'elle-même ou travaille.
+  learned:
+    title: CE QUE TU AS APPRIS EN LISANT
+    # Une lecture retenue. {text} : ce qu'elle en a retenu ; {source} : où elle l'a lu ; {age} : memory.ages.
+    line: "- {text} (lu dans « {source} », {age})"
+    # Après les lignes.
+    advice: >-
+      Tu peux en parler si ça s'y prête, comme quelqu'un qui raconte ce qu'il a lu (« j'ai lu que… »), sans réciter
+      l'article.
 
   # Une date en mots (memory/extraction.py, ``day_words``) : « mardi 6 octobre », « jeudi 1er octobre ». Sert au
   # message de l'appel « extract » et aux promesses (memory.when).
@@ -1732,6 +1866,50 @@ memory:
     # Le jour de la semaine et la date. {date} : memory.dates.date.
     day: "{weekday} {date}"
 
+  # La vraisemblance de ce qui vient (memory/likelihood.py, ADR 0084), en mots : jamais un nombre.
+  likely:
+    sure: c'est sûr
+    planned: c'est prévu
+    probable: c'est probable
+    unsure: ce n'est pas sûr
+    unlikely: c'est peu probable
+    doubtful: ça t'étonnerait
+
+  # « CE QUI VIENT » (memory/recall.py, ``_ahead``, ADR 0084) : ce qui arrive dans le monde, et ce qu'elle vivra à
+  # travers quelqu'un — à venir, ou en cours.
+  # Un moment qu'elle vivait à travers quelqu'un (« samedi je t'emmène au salon, je te montrerai tout »), qui a eu
+  # lieu : un souvenir à elle (memory/consolidation.py, ``_constats``, ADR 0086). {name} : la personne ; {text} : le
+  # moment, tel qu'il a été noté.
+  lived:
+    souvenir: "J'ai vécu à travers {name} : {text}"
+
+  ahead:
+    title: CE QUI VIENT
+    # Un moment. {when} : quand (memory.when ou timespan) ; {label} : le moment.
+    line: "- {when} : {label}"
+    # Sa vraisemblance, après lui. {likely} : memory.likely.
+    likely: " ({likely})"
+    # Un moment qu'elle vivra à travers quelqu'un. {who} : son nom.
+    shared: " — tu le vivras à travers {who}"
+    # Le même, une fois passé (ADR 0086).
+    shared_past: " — tu l'as vécu à travers {who}"
+
+  # « LES GENS QU'ON NOMME » (memory/recall.py, ``_acquainted``) : un prénom dit ici qu'elle connaît dans son cercle,
+  # même sans rien savoir de sa vie — elle ne répond pas « je ne la connais pas » (sonde réelle du 2026-10-10).
+  # {name} : le prénom.
+  acquainted:
+    title: LES GENS QU'ON NOMME
+    # Une seule personne de ce nom, de ses amis.
+    friend: "- « {name} » : tu connais quelqu'un de ce nom, qui fait partie de tes amis — mais ce n'est peut-être pas la même personne."
+    # Une seule, de ses proches (ou sa propriétaire).
+    close: "- « {name} » : tu connais quelqu'un de ce nom, qui fait partie de tes proches — mais ce n'est peut-être pas la même personne."
+    # Plusieurs personnes de ce nom dans son cercle.
+    several: "- « {name} » : tu connais plusieurs personnes de ce nom."
+    # Après les lignes.
+    advice: >-
+      Ne dis pas que tu ne connais personne de ce nom. Si ça compte de savoir de qui on parle, demande-le
+      naturellement — son nom de famille, d'où on se connaît —, sans rien dire de ce que tu sais de cette personne.
+
   # « CE QUI TE REVIENT » et « CE QUE VOUS AVEZ VÉCU AVEC D'AUTRES » (memory/recall.py, ``_body``) : ses souvenirs
   # et ce qu'elle sait, revenus pendant qu'elle parle, filtrés par ce qui peut se dire devant cette audience. La
   # seconde section garde ce que la personne a vécu avec elle et d'autres (elle était là).
@@ -1749,14 +1927,22 @@ memory:
       opinion: opinion
       preference: préférence
       hypothesis: hypothèse
+      prediction: prévision
     viewpoint: "{nature} — point de vue de {holder}"
     # Après une croyance apprise il y a plus d'une semaine (entre parenthèses) : elle sait depuis quand. {age} :
     # memory.age.
     learned: appris {age}
+    # Une croyance tirée d'une lecture (ADR 0085). {source} : où elle l'a lu (« Le Monde »).
+    read_in: lu dans « {source} »
     # Après une croyance qu'une autre contredit sans la remplacer (ADR 0081) : elle doute, et sait de qui vient
     # l'autre version — seulement quand les deux peuvent se dire ici. {who} : qui a dit l'autre version ; {other} :
     # son texte.
     contested: " (mais {who} t'a dit autre chose : « {other} »)"
+    # Après une prévision (ADR 0084) : quand c'est attendu et à quel point c'est sûr. {when} : la période ;
+    # {likely} : memory.likely.
+    expected: " (attendu {when} ; {likely})"
+    # La même, sans date.
+    expected_likely: " ({likely})"
     # Après un souvenir, une croyance ou un moment : ce que la personne concernée en ressent et ce qu'elle-même en
     # ressent, jugés par la relecture (ADR 0083) — l'empathie.
     felt:
@@ -1955,6 +2141,11 @@ memory:
     past_close: " — c'est passé : c'est la première chose qu'une amie lui demanderait, comment ça s'est passé."
     # Fin : un moment passé.
     past: " — c'est passé : tu peux lui demander comment ça s'est passé, si ça vient."
+    # Ce qu'elle sait de comment il a tourné (ADR 0086) : après le moment, à la place des phrases ci-dessus.
+    outcome:
+      happened: " — ça a bien eu lieu ; tu peux demander comment ça s'est passé, si ça vient."
+      cancelled: " — finalement annulé."
+      moved: " — finalement reporté."
     # Fin : ce qui se fête, qu'elle a déjà souhaité.
     festive_wished: " — tu le lui as souhaité."
     # Le jour même de ce qui se fête. {label} : le moment ; {soft} : memory.life.festive_soft, ou rien.
@@ -2415,6 +2606,9 @@ goals:
       email: En savoir plus sur ce que j'ai remarqué dans mon courrier
       camera: En savoir plus sur ce que j'ai remarqué à la caméra
       forge: En savoir plus sur ce que j'ai remarqué dans une de mes apps
+    # une vérification (ADR 0086) : un moment du monde qui lui tient à cœur, passé sans qu'elle sache comment il a
+    # tourné. {text} : le moment.
+    check: "Voir comment ça a tourné : {text}"
     # né d'une croyance qu'elle a dû revoir
     revision: Y voir plus clair sur ce que je croyais
     # né de ce qu'on lui a confié. {name} : le nom de la personne (sans guillemets : ils sont dans la phrase)

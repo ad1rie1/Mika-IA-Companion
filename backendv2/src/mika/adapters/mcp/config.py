@@ -107,6 +107,11 @@ class McpServer(BaseModel):
     in_hand: Annotated[bool, Knob(label="En main", group="Qui et quand", order=34,
                                   help="Décoché (conseillé) : ses outils sont à la demande, elle les cherche par ce "
                                        "qu'ils font quand elle en a besoin.")] = False
+    learns: Annotated[bool, Knob(label="Ce qu'elle y lit devient un savoir", group="Qui et quand", order=35,
+                                 help="Pour un serveur qui lit le monde public (une recherche, des pages) : ce que "
+                                      "ses outils de lecture lui rendent quand elle travaille est relu la nuit, et "
+                                      "peut devenir ce qu'elle sait et raconte à tous. Jamais pour un courrier, un "
+                                      "agenda, des notes.")] = False
     timeout_s: Annotated[float, Knob(label="Délai d'un appel", group="Bornes", lo=1, hi=300, unit="s",
                                      order=40)] = 30.0
     max_calls: Annotated[int, Knob(label="Appels par épisode (par outil)", group="Bornes", lo=1, hi=20,

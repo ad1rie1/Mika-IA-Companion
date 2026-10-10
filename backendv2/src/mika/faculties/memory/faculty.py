@@ -28,15 +28,17 @@ from mika.contracts import agency as agency_c
 from mika.contracts import attention as attention_c
 from mika.contracts import expression as expression_c
 from mika.contracts import identity as identity_c
+from mika.contracts import mcp as mcp_c
 from mika.contracts import memory as c
 from mika.contracts import others as others_c
+from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
-from mika.vocab.affect import Declared, Emotion, emotion_of, facets_valence, valence
+from mika.vocab.affect import Appraisal, Declared, Emotion, emotion_of, facets_valence, valence
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
 
@@ -179,6 +181,107 @@ class MemoryParams(BaseModel):
         help="Un moment passé depuis moins de tant de jours, dont elles n'ont pas encore reparlé (ni elle en lui "
              "demandant, ni la personne en le racontant), lui revient pour qu'elle demande comment ça s'est passé ; "
              "au-delà, il n'est plus suivi.")] = 3.0
+    # ce qui vient (ADR 0084)
+    likely_first_hand: Annotated[float, Knob(
+        label="Vraisemblance : de la bouche de la personne", group="Ce qui vient", lo=0.3, hi=1, step=0.01,
+        help="Ce qu'une personne dit de sa propre vie à venir (« jeudi, mon entretien ») : sa vraisemblance quand "
+             "rien d'autre n'en est dit. Ce qu'elle en dit (« c'est pas sûr ») ne peut que l'abaisser.")] = 0.9
+    likely_reported: Annotated[float, Knob(
+        label="Vraisemblance : rapporté par un autre", group="Ce qui vient", lo=0.2, hi=1, step=0.01,
+        help="Ce qu'on lui rapporte d'un autre, ou du monde, sans date officielle.")] = 0.7
+    likely_official: Annotated[float, Knob(
+        label="Vraisemblance : une date officielle", group="Ce qui vient", lo=0.5, hi=1, step=0.01,
+        help="Une date publique officielle (un scrutin, un jour férié) : presque sûre.")] = 0.98
+    likely_prediction: Annotated[float, Knob(
+        label="Vraisemblance : une prévision", group="Ce qui vient", lo=0.1, hi=0.9, step=0.01,
+        help="Ce que quelqu'un s'attend à voir arriver (« Léa pense qu'elle sera prise », « les taux vont "
+             "remonter »), elle comprise : au plus autant qu'une déduction, quoi qu'en dise celui qui prévoit.")] = 0.6
+    # ce qu'elle lit (ADR 0085)
+    reread_max_readings: Annotated[int, Knob(
+        label="Relecture : lectures relues par nuit", group="Ce qu'elle lit", lo=1, hi=100,
+        help="La nuit, elle relit au plus tant de ses lectures (les plus anciennes d'abord) en un seul appel ; le "
+             "reste attend la nuit suivante.")] = 30
+    reread_max_items: Annotated[int, Knob(
+        label="Relecture : ce qu'elle en garde au plus", group="Ce qu'elle lit", lo=1, hi=100,
+        help="Ce qu'une relecture peut faire naître au plus (croyances, moments du monde, prévisions).")] = 30
+    opinions_from_reading: Annotated[int, Knob(
+        label="Relecture : ses avis par nuit", group="Ce qu'elle lit", lo=0, hi=10,
+        help="Combien d'avis à elle (sur tout — politique, science, ce qui va arriver) une nuit de relecture peut "
+             "former ou réviser, au plus. 0 : ce qu'elle lit ne lui forge pas d'avis.")] = 2
+    confront_max_pairs: Annotated[int, Knob(
+        label="La nuit confronte : paires au plus", group="Ce qu'elle lit", lo=0, hi=60,
+        help="La nuit, elle confronte au plus tant de paires de croyances sur la même personne, dites par des "
+             "témoins différents (la même chose dite deux fois ? deux versions qui se contredisent ?). 0 : rien.")] = 12
+    confront_days: Annotated[float, Knob(
+        label="La nuit confronte : depuis combien de jours", group="Ce qu'elle lit", lo=1, hi=60,
+        help="Une croyance née depuis moins de tant de jours est confrontée à ce qu'elle savait déjà de la même "
+             "personne.")] = 7.0
+    learned_fresh_days: Annotated[float, Knob(
+        label="Ce qu'elle a appris en lisant : fraîcheur (jours)", group="Ce qu'elle lit", lo=0.5, hi=14,
+        help="Ce qu'elle a appris en lisant lui revient quand elle prend d'elle-même la parole ou travaille, pendant "
+             "tant de jours — jamais redit à qui l'a déjà entendu.")] = 2.0
+    # voir venir, constater (ADR 0086)
+    resolve_days: Annotated[float, Knob(
+        label="Constater : moments passés montrés (jours)", group="Voir venir, constater", lo=1, hi=60,
+        help="Quand elle relit une conversation, elle voit les moments de ces personnes passés depuis moins de tant "
+             "de jours dont elle ne sait pas comment ils ont tourné : si la personne le dit (« c'était super », « ça a "
+             "été annulé »), c'est constaté.")] = 14.0
+    resolve_grace_days: Annotated[float, Knob(
+        label="Sans nouvelles : on ne saura pas après (jours)", group="Voir venir, constater", lo=1, hi=120,
+        help="Un moment passé depuis plus de tant de jours sans que personne ne dise comment il a tourné : elle ne "
+             "le saura pas — ni surprise, ni leçon.")] = 21.0
+    track_min_cases: Annotated[int, Knob(
+        label="Ce qu'elle apprend de qui annonce : à partir de (cas)", group="Voir venir, constater", lo=1, hi=20,
+        help="Au moins tant de moments annoncés par la même personne, dont on a su comment ils ont tourné, avant "
+             "que ses reports et annulations ne rendent ses prochaines annonces moins sûres.")] = 3
+    track_weight: Annotated[float, Knob(
+        label="Ce qu'elle apprend : poids de l'a priori", group="Voir venir, constater", lo=0.5, hi=20, step=0.5,
+        help="Combien de cas « comme d'habitude » pèse l'a priori face à ce qu'elle a vu d'une personne : plus haut, "
+             "elle change d'avis plus lentement.")] = 2.0
+    surprise_from: Annotated[float, Knob(
+        label="Surprise : à partir de", group="Voir venir, constater", lo=0, hi=1, step=0.01,
+        help="L'écart entre ce qu'elle attendait et ce qui est arrivé, pesé par ce que le moment compte, au-delà "
+             "duquel elle est surprise.")] = 0.2
+    surprise_max: Annotated[float, Knob(
+        label="Surprise : au plus", group="Voir venir, constater", lo=0, hi=1, step=0.01,
+        help="L'intensité la plus forte d'une surprise devant ce qui est arrivé.")] = 0.4
+    disappointment_max: Annotated[float, Knob(
+        label="Espoir déçu, crainte levée : au plus", group="Voir venir, constater", lo=0, hi=1, step=0.01,
+        help="L'intensité la plus forte de la tristesse d'un espoir déçu (un moment qu'elle attendait avec joie, "
+             "annulé), ou du soulagement d'une crainte levée.")] = 0.3
+    calibration_min: Annotated[int, Knob(
+        label="Prudence : à partir de (moments constatés)", group="Voir venir, constater", lo=1, hi=50,
+        help="Au moins tant de moments d'une même sorte (de la bouche de la personne, rapportés, officiels) dont on "
+             "a su l'issue avant de juger si ses attentes tombaient juste.")] = 5
+    calibration_cautious: Annotated[float, Knob(
+        label="Prudence : au-delà de cet écart moyen", group="Voir venir, constater", lo=0, hi=1, step=0.01,
+        help="L'écart quadratique moyen entre ce qu'elle attendait et ce qui est arrivé (score de Brier) au-delà "
+             "duquel elle parle de ce qui vient avec des mots plus prudents. Le chiffre se lit dans la console, "
+             "jamais dans ses phrases.")] = 0.2
+    lived_importance: Annotated[float, Knob(
+        label="Vécu à travers quelqu'un : importance", group="Voir venir, constater", lo=0, hi=1, step=0.05,
+        help="Un moment partagé qui a eu lieu (« je te montrerai tout ») devient un souvenir à elle, de cette "
+             "importance.")] = 0.6
+    lived_owner_importance: Annotated[float, Knob(
+        label="Vécu à travers sa propriétaire : importance", group="Voir venir, constater", lo=0, hi=1, step=0.05,
+        help="Le même, vécu à travers sa propriétaire : plus marquant, comme si elle y était allée.")] = 0.85
+    upcoming_days: Annotated[float, Knob(
+        label="Ce qu'elle attend : jusqu'à combien de jours", group="Voir venir, constater", lo=0.5, hi=14,
+        step=0.5, help="Un moment qui approche, à moins de tant de jours, peut se faire attendre (espoir, "
+                       "inquiétude) ; plus loin, il ne se ressent pas encore.")] = 3.0
+    check_days: Annotated[float, Knob(
+        label="Vérifier : moments du monde passés depuis (jours)", group="Voir venir, constater", lo=0.5, hi=14,
+        step=0.5, help="Un moment du monde qui lui tient à cœur, passé depuis moins de tant de jours sans qu'elle "
+                       "sache comment il a tourné, peut lui donner envie d'aller vérifier.")] = 3.0
+    check_importance: Annotated[float, Knob(
+        label="Vérifier : à partir de cette importance", group="Voir venir, constater", lo=0, hi=1, step=0.05,
+        help="Ce qui lui tient à cœur : un moment au moins aussi important, ou qu'elle attendait avec un "
+             "sentiment.")] = 0.7
+    ahead_days: Annotated[float, Knob(
+        label="Ce qui vient : jusqu'à combien de jours", group="Ce qui vient", lo=1, hi=120,
+        help="Un moment du monde, ou qu'elle vivra à travers quelqu'un, lui revient (« CE QUI VIENT ») quand il "
+             "commence dans moins de tant de jours, ou qu'il dure encore. Une période (« en novembre ») compte "
+             "depuis son début.")] = 21.0
     recurrence_days: Annotated[float, Knob(
         label="Une situation qui recommence (jours)", group="La vie des autres", lo=1, hi=365,
         help="Une situation finie depuis moins de tant de jours, qui recommence (« il est de nouveau malade »), "
@@ -340,6 +443,13 @@ class MemoryState:
     #: ses mensonges pas encore retenus (le ``seq`` de l'énoncé) : chacun devient un souvenir (``memory.lies``)
     lies: tuple[int, ...] = ()
     sorted_night: str = ""
+    #: sa dernière lecture (``seq`` : ``rss.read``, ``mcp.consulted``) et la dernière nuit relue (ADR 0085)
+    readings_upto: int = 0
+    reread_night: str = ""
+    #: ce qu'elle a vu de chacun qui annonce des moments : (tenus, reportés ou annulés) ; et ses attentes par sorte
+    #: d'annonce : (combien, somme des carrés des écarts) — ce qu'elle apprend de ce qui arrive (ADR 0086)
+    track: FrozenDict[str, tuple[int, int]] = field(default_factory=FrozenDict)
+    calibration: FrozenDict[str, tuple[int, float]] = field(default_factory=FrozenDict)
     #: la dernière relecture journalisée (``seq``, instant), et les fenêtres
     #: abandonnées après trop d'échecs (combien, la dernière) : pour l'inspecteur
     consolidated_seq: int = 0
@@ -356,7 +466,9 @@ class MemoryState:
 #: v10 : la file de reprises (``deferred_seq``) ; situations et dates archivées en SQL, la tranche en est le cache.
 #: v11 : ses mensonges à retenir (``lies``, ADR 0076).
 #: v12 : les fils des moments (``threads``, ``heads``) : reporté, redit, revenu, un moment reste le même (ADR 0079).
-MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=13)
+#: v16 : comment un moment a tourné (``outcome``), ce qu'elle apprend de qui annonce (``track``) et de ses attentes
+#: (``calibration``) (ADR 0086).
+MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=16)
 MEMORY.declare(*c.ALL)
 
 
@@ -483,6 +595,55 @@ def moment_thread(s: MemoryState, cx, item: int) -> int:
 MEMORY.fact(c.MOMENT_THREAD)(moment_thread)
 
 
+@MEMORY.reducer(c.RESOLVED)
+def _moment_resolved(s: MemoryState, e, cx) -> MemoryState:
+    """Comment un moment a tourné (ADR 0086) : il le garde ; et elle en apprend — de qui l'avait annoncé (un report,
+    une annulation de plus, ou un moment tenu) et de ce qu'elle en attendait (sa calibration). Un moment dont on n'a
+    jamais su l'issue n'apprend rien ; un moment déjà tranché ne se retranche pas."""
+    d = e.data
+    ev = s.events.get(d.event)
+    if ev is None and d.thread:
+        head = s.heads.get(d.thread)
+        ev = s.events.get(head) if head is not None else None
+    if ev is not None and ev.outcome:
+        return s
+    events = s.events.set(ev.id, replace(ev, outcome=d.outcome, resolved_at=e.at)) if ev is not None else s.events
+    if d.outcome == c.UNKNOWN:
+        return replace(s, events=events)
+    track = s.track
+    if d.teller:
+        kept, missed = track.get(d.teller, (0, 0))
+        track = track.set(d.teller, (kept + 1, missed) if d.outcome == c.HAPPENED else (kept, missed + 1))
+    calibration = s.calibration
+    if d.likelihood is not None and d.nature:
+        n, squares = calibration.get(d.nature, (0, 0.0))
+        happened = 1.0 if d.outcome == c.HAPPENED else 0.0
+        calibration = calibration.set(d.nature, (n + 1, round(squares + (d.likelihood - happened) ** 2, 6)))
+    return replace(s, events=events, track=track, calibration=calibration)
+
+
+@MEMORY.appraisal(c.RESOLVED)
+def _moment_resolved_felt(e, cx) -> list[Appraisal] | None:
+    """Ce que l'issue d'un moment lui fait (ADR 0086) : surprise quand elle s'écarte de ce qu'elle attendait (pesée
+    par ce que le moment compte) ; un espoir déçu attriste, une crainte levée soulage, une attente comblée réjouit
+    un peu. Ne pas savoir ne fait rien."""
+    d = e.data
+    if d.outcome == c.UNKNOWN:
+        return None
+    p = params(cx.params)
+    out: list[Appraisal] = []
+    if d.surprise >= p.surprise_from:
+        out.append(Appraisal(Emotion.SURPRISED, round(min(p.surprise_max, d.surprise), 3), reason="tournure"))
+    weight = round(min(p.disappointment_max, abs(d.valence) * d.importance), 3)
+    if weight > 0 and d.valence > 0 and d.outcome in (c.CANCELLED, c.MOVED):
+        out.append(Appraisal(Emotion.SAD, weight, reason="attente déçue"))
+    elif weight > 0 and d.valence < 0 and d.outcome == c.CANCELLED:
+        out.append(Appraisal(Emotion.RELIEVED, weight, reason="crainte levée"))
+    elif weight > 0 and d.valence > 0 and d.outcome == c.HAPPENED:
+        out.append(Appraisal(Emotion.HAPPY, round(weight / 2, 3), reason="attente comblée"))
+    return out or None
+
+
 @MEMORY.reducer(c.SITUATION_ENDED)
 def _situation_ended(s: MemoryState, e, cx) -> MemoryState:
     """Une situation qui durait est finie, de la bouche de la personne (« on a fini le déménagement », « on a dû
@@ -524,18 +685,14 @@ def _noted(s: MemoryState, e, cx) -> MemoryState:
     # le fil : celui de ce qu'il remplace (reporté, redit) ou de la situation qu'il rouvre ; sinon le sien
     origin = d.replaces if d.replaces is not None else d.recurs
     thread = thread_of(s, origin) if origin is not None else e.seq
-    events = events.set(e.seq, c.LifeEvent(e.seq, tuple(d.about), d.when, d.all_day, d.sensitivity,
-                                           tuple(d.told_by), d.text.ref or "", d.secret, followed_at=followed,
-                                           ongoing=d.ongoing, importance=d.importance, festive=d.festive,
-                                           ended_at=ended, yearly=d.yearly and not d.ongoing, thread=thread,
-                                           recurs=d.recurs or 0, felt=tuple(d.felt), empathy=tuple(d.empathy)))
+    events = events.set(e.seq, c.life_event_of(e.seq, d, followed_at=followed, ended_at=ended, thread=thread))
     if d.recurs is not None:
         events = events.delete(d.recurs)  # la situation finie laisse la place à celle qui recommence
     threads = s.threads.set(e.seq, thread) if thread != e.seq else s.threads
     s = replace(s, threads=_newest(threads, THREADS_KEPT), heads=_newest(s.heads.set(thread, e.seq), THREADS_KEPT))
     stale = [ev.id for ev in events.values() if not ev.yearly
              and ((ev.ongoing and ev.ended_at and ev.ended_at < keep_until)
-                  or (not ev.ongoing and ev.when < keep_until))]
+                  or (not ev.ongoing and ev.ends < keep_until))]  # une période, à sa fin (ADR 0084)
     for i in stale:
         events = events.delete(i)
     return replace(s, items=s.items + 1, life_seen=True, events=life_cache(events))
@@ -564,7 +721,8 @@ def _forget_life(s: MemoryState, e, cx) -> MemoryState:
     person = e.data.subject
     return replace(s, events=FrozenDict((i, item) for i, item in s.events.items()
                                         if person not in (*item.about, *item.told_by)),
-                   reflections=tuple(r for r in s.reflections if person not in r.about))
+                   reflections=tuple(r for r in s.reflections if person not in r.about),
+                   track=s.track.delete(person) if person in s.track else s.track)
 
 
 @MEMORY.reducer(c.LIFE_RECALLED)
@@ -613,6 +771,17 @@ def _digested(s: MemoryState, e, cx) -> MemoryState:
 @MEMORY.reducer(c.NIGHT_SORTED)
 def _sorted(s: MemoryState, e, cx) -> MemoryState:
     return replace(s, sorted_night=e.data.night)
+
+
+@MEMORY.reducer(rss_c.READ, mcp_c.CONSULTED)
+def _read(s: MemoryState, e, cx) -> MemoryState:
+    """Elle a lu quelque chose : la nuit le relira (ADR 0085)."""
+    return replace(s, readings_upto=max(s.readings_upto, e.seq))
+
+
+@MEMORY.reducer(c.REREAD)
+def _reread(s: MemoryState, e, cx) -> MemoryState:
+    return replace(s, reread_night=e.data.night)
 
 
 @MEMORY.reducer(c.PROMISE_NOTICED)
@@ -686,6 +855,47 @@ def _life_events(s: MemoryState, cx, person: str) -> tuple[c.LifeEvent, ...]:
     events = (occurrence(ev, cx.now, cx.tz, p) for ev in s.events.values()
               if any(_speaks_for(cx, k, person) for k in ev.about))
     return tuple(sorted(events, key=lambda ev: (ev.when, ev.id)))
+
+
+@MEMORY.fact(c.AHEAD)
+def _ahead(s: MemoryState, cx) -> tuple[c.LifeEvent, ...]:
+    """Ce qu'elle voit venir (ADR 0084) : les moments du monde et ceux qu'elle vivra à travers quelqu'un, pas finis,
+    jusqu'à la fin de leur jour (ou de leur période)."""
+    p = params(cx.params)
+    ahead = [ev for ev in events_at(s, cx.now, cx.tz, p)
+             if (ev.scope == c.WORLD or ev.shared) and not ev.ended_at and not ev.yearly and over(ev) >= cx.now
+             and ev.outcome not in (c.CANCELLED, c.MOVED)]
+    return tuple(sorted(ahead, key=lambda ev: (ev.when, ev.id)))
+
+
+@MEMORY.fact(c.UPCOMING)
+def _upcoming(s: MemoryState, cx) -> tuple[c.LifeEvent, ...]:
+    """Ce qui approche (ADR 0086) : tout moment daté, pas encore tranché, qui commence d'ici ``upcoming_days`` ou se
+    déroule — de quelqu'un, du monde, partagé."""
+    p = params(cx.params)
+    horizon = cx.now + round(p.upcoming_days * DAY)
+    near = [ev for ev in s.events.values() if not ev.ongoing and not ev.ended_at and not ev.outcome
+            and not ev.yearly and ev.when <= horizon and over(ev) >= cx.now]
+    return tuple(sorted(near, key=lambda ev: (ev.when, ev.id)))
+
+
+@MEMORY.fact(c.TO_CHECK)
+def _to_check(s: MemoryState, cx) -> tuple[c.LifeEvent, ...]:
+    """Ce qu'elle voudrait vérifier (ADR 0086) : un moment du monde passé depuis moins de ``check_days``, dont elle
+    ne sait pas comment il a tourné, et qui lui tient à cœur — important, ou attendu avec un sentiment."""
+    p = params(cx.params)
+    since = cx.now - round(p.check_days * DAY)
+    due = [ev for ev in s.events.values() if ev.scope == c.WORLD and not ev.outcome and not ev.yearly
+           and since <= over(ev) < cx.now and (ev.importance >= p.check_importance or ev.empathy)]
+    return tuple(sorted(due, key=lambda ev: (-ev.importance, -ev.when, ev.id)))
+
+
+def over(ev: c.LifeEvent) -> int:
+    """Quand un moment est passé : la fin de sa période ; la fin de son jour (minuit, pour un jour noté à 18 h) ; son
+    heure, quand elle est dite."""
+    if ev.vague:
+        return ev.ends
+    return ev.when + 6 * HOUR if ev.all_day else ev.when
 
 
 def hard_since(s: MemoryState, keys: Collection[str], now: int, p: MemoryParams) -> int:

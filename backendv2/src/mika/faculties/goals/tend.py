@@ -49,6 +49,7 @@ from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
+from mika.contracts import memory as memory_c
 from mika.contracts import needs as needs_c
 from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
@@ -57,6 +58,7 @@ from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.goals.faculty import (
     AWAITED,
+    CHECK_SOURCE,
     CURIOSITY_SOURCES,
     GOAL_PAUSED,
     GOAL_RESUMED,
@@ -64,6 +66,7 @@ from mika.faculties.goals.faculty import (
     Goal,
     GoalsState,
     budget,
+    checks_this_week,
     curious_today,
     desire,
     live,
@@ -247,11 +250,22 @@ class Seed:
                 return interest
         return options[-1][1]
 
+    def _check(self, s: GoalsState, frame: Frame, p: Any) -> memory_c.LifeEvent | None:
+        """Un moment du monde qui lui tient à cœur, passé sans qu'elle sache comment il a tourné, pas encore vérifié,
+        tant qu'il lui reste des vérifications cette semaine (ADR 0086)."""
+        if p.checks_per_week <= 0 or checks_this_week(s, frame.now) >= p.checks_per_week or not _daytime(frame, p):
+            return None
+        busy = _live_sources(s, frame.now)
+        return next((ev for ev in frame.get(memory_c.TO_CHECK) or ()
+                     if f"{CHECK_SOURCE}{ev.key}" not in s.explored and f"{CHECK_SOURCE}{ev.key}" not in busy), None)
+
     def next_due(self, s: GoalsState, frame: Frame, last_run: int | None) -> int | None:
         p = params(frame.env.params_of("goals", frame.root))
         if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE or _live_self(s, frame.now) >= p.live_self_max:
             return None
         times = [t.born_at + p.seed_thought_age_us for t in self._thoughts(s, frame, p)]
+        if self._check(s, frame, p) is not None:
+            times.append(frame.now)
         if self._curious(s, frame, p, anytime=True):
             if _daytime(frame, p):
                 times.append(max(frame.now, self.idle_until, spaced_until(s, p)))
@@ -289,6 +303,18 @@ class Seed:
                 max_steps=p.reflection_steps if reflecting else p.exploration_steps, source=source,
                 sensitivity=t.sensitivity, desire=round(min(1.0, 0.4 + t.intensity), 4),
                 origin=ORIGINS.get(t.origin, t.origin), origin_at=t.born_at, dedupe_key=f"but:{source}"))
+            return
+        check = self._check(s, frame, p)
+        text = store.content([check.text_ref]).get(check.text_ref) if check is not None and store is not None \
+            and check.text_ref else None
+        if check is not None and text:
+            # aller voir comment ça a tourné, dans ce qu'elle peut lire : ce qu'elle y lira, la nuit le constatera
+            source = f"{CHECK_SOURCE}{check.key}"
+            await ctx.emit(c.GOAL_OPENED.draft(
+                kind=c.EXPLORATION, authority=c.SELF, title=Content.of(phrase("goals.title.check", text=text), level=0),
+                details=Content.of(text, level=0), bundles=tuple(sorted({*EXPLORE_BUNDLES, *_sources(frame)})),
+                max_steps=p.check_steps, source=source, sensitivity=0, origin=c.FROM_CHECK, origin_at=frame.now,
+                desire=round(min(1.0, 0.4 + check.importance / 2), 4), dedupe_key=f"but:{source}"))
             return
         if not self._curious(s, frame, p):
             return

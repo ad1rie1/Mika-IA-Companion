@@ -347,6 +347,36 @@ class AttentionParams(BaseModel):
     glad_evidence: Annotated[float, Knob(
         label="Poids d'un bel échange", group="Relancer", lo=0.0, hi=4.0, step=0.1,
         help="La preuve (log-odds) de cette envie : faible — elle le fait si elle y pense, pas à coup sûr.")] = 2.5
+    # ce qu'elle attend (ADR 0086)
+    anticipation_ramp_us: Annotated[int, Knob(
+        label="Attendre : depuis combien de temps avant", group="Ce qu'elle attend", lo=HOUR, hi=14 * DAY,
+        help="Un moment se fait attendre de plus en plus fort pendant ce temps avant lui : à cette distance, à "
+             "peine ; le jour venu, pleinement.")] = 3 * DAY
+    anticipation_from: Annotated[float, Knob(
+        label="Attendre : à partir de ce poids", group="Ce qu'elle attend", lo=0, hi=1, step=0.01,
+        help="Le poids d'un moment (ce qu'il compte × ce que la personne lui est × sa vraisemblance × sa proximité) "
+             "à partir duquel elle l'attend. Un seul, le plus fort, à la fois.")] = 0.15
+    anticipation_gain: Annotated[float, Knob(
+        label="Attendre : intensité par poids", group="Ce qu'elle attend", lo=0, hi=2, step=0.05,
+        help="L'intensité de l'espoir ou de l'inquiétude, par unité de poids du moment attendu.")] = 0.6
+    anticipation_max: Annotated[float, Knob(
+        label="Attendre : intensité au plus", group="Ce qu'elle attend", lo=0, hi=1, step=0.01,
+        help="L'espoir ou l'inquiétude d'un moment qui approche ne dépasse pas cette intensité : ça colore sa "
+             "journée, sans l'envahir.")] = 0.3
+    anticipation_owner: Annotated[float, Knob(
+        label="Attendre : ce que compte sa propriétaire", group="Ce qu'elle attend", lo=0, hi=1, step=0.05,
+        help="L'attachement d'un moment de sa propriétaire (proche ou non) : comme si elle y allait.")] = 1.0
+    anticipation_close: Annotated[float, Knob(
+        label="Attendre : ce que compte une proche", group="Ce qu'elle attend", lo=0, hi=1, step=0.05,
+        help="L'attachement d'un moment d'une proche.")] = 0.8
+    anticipation_friend: Annotated[float, Knob(
+        label="Attendre : ce que compte une amie", group="Ce qu'elle attend", lo=0, hi=1, step=0.05,
+        help="L'attachement d'un moment d'une amie. Celui d'une connaissance ou d'un inconnu ne se fait pas "
+             "attendre.")] = 0.5
+    anticipation_world: Annotated[float, Knob(
+        label="Attendre : ce que compte le monde", group="Ce qu'elle attend", lo=0, hi=1, step=0.05,
+        help="L'attachement d'un moment du monde qu'elle attend avec un sentiment (une élection, une éclipse) ; "
+             "sans sentiment, il ne se fait pas attendre.")] = 0.3
 
 
 @dataclass(frozen=True, slots=True)
@@ -499,6 +529,8 @@ class AttentionState:
     #: les écrans ouverts qui se taisent sur ce qu'on y lit (connexion → personne : le web, un moteur de jeu) — ce
     #: qu'elle écrit pendant ce temps a pu y être lu
     screens: FrozenDict[str, str] = field(default_factory=FrozenDict)
+    #: ce qu'elle a attendu (fil du moment → le jour, en ordinal local) : une fois par jour et par moment (ADR 0086)
+    anticipated: FrozenDict[int, int] = field(default_factory=FrozenDict)
 
 
 #: v5 : une conversation close (« bonne nuit ») n'est pas « sans réponse » ; le délai de réponse court sur les
@@ -513,8 +545,9 @@ class AttentionState:
 #: v11 : une pensée garde sa filiation (une croyance révisée : devant qui l'ancienne et la nouvelle se disent).
 #: v12 : revenir à ce qu'elle croyait, changer d'avis elle-même (ADR 0081) ; une pensée dont une source devient
 #: secrète s'oublie (ADR 0082).
+#: v13 : ce qu'elle attend (``anticipated``, ADR 0086).
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    state_version=12)
+                    state_version=13)
 #: les manques dont on retient la dernière pensée (les plus récents)
 MISSING_KEPT = 64
 #: les écrans ouverts retenus au plus (des connexions jamais fermées : un transport qui ne le dit pas)

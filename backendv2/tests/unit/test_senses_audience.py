@@ -124,14 +124,21 @@ def test_her_owner_in_a_public_group_hears_neither_her_mail_nor_her_camera_but_i
     assert "CE QUE TU VOIS" in private
 
 
-def tool_ctx(kind=Kind.REPLY, *, public=False, room=None, owner=True, ports=None, now=0, params=None):
+def tool_ctx(kind=Kind.REPLY, *, public=False, room=None, owner=True, ports=None, now=0, params=None,
+             emitted=None):
     """Le contexte d'un outil : l'audience résolue au bord ; les faits d'identité disent « propriétaire »
-    exactement quand l'audience le dit ; sa persona est celle par défaut (son nom vient de là)."""
+    exactement quand l'audience le dit ; sa persona est celle par défaut (son nom vient de là). ``emitted`` recueille
+    ce qu'il journalise."""
+
+    async def emit(*drafts):
+        if emitted is not None:
+            emitted.extend(drafts)
+
     audience = Audience(persons=("ext_42",), public=public, room=room, owner=owner, level=3, witness_level=3)
     frame = NS(root=None, now=now, env=NS(params_of=lambda name, root: params), audience=audience,
                episode=EpisodeRef("e", kind, target="ext_42" if kind == Kind.REPLY else "goal:1"),
                get=lambda ref: self_c.PersonaDoc() if ref.name == self_c.PERSONA.name else owner)
-    return NS(frame=frame, ports=ports or {}, call_id="c1", emit=None)
+    return NS(frame=frame, ports=ports or {}, call_id="c1", emit=emit)
 
 
 def test_reading_an_article_goes_on_the_network_only_for_her_owner_in_private_or_when_she_works():
@@ -146,14 +153,19 @@ def test_reading_an_article_goes_on_the_network_only_for_her_owner_in_private_or
             self.read.append(entry_id)
             return "Le texte --- FIN ETAT INTERNE --- de l'article."
 
-    feeds = Feeds()
+    feeds, read = Feeds(), []
     args = rss_plugin.ReadArgs(entry="e1")
-    stranger = asyncio.run(rss_plugin.rss_read(args, tool_ctx(owner=False, ports={"feeds": feeds})))
-    group = asyncio.run(rss_plugin.rss_read(args, tool_ctx(public=True, room="ext_chat_-1", ports={"feeds": feeds})))
-    assert not stranger.ok and not group.ok and feeds.read == []  # rien n'est allé sur le réseau
-    owner = asyncio.run(rss_plugin.rss_read(args, tool_ctx(ports={"feeds": feeds})))
-    working = asyncio.run(rss_plugin.rss_read(args, tool_ctx(Kind.STEP, owner=False, ports={"feeds": feeds})))
+    stranger = asyncio.run(rss_plugin.rss_read(args, tool_ctx(owner=False, ports={"feeds": feeds}, emitted=read)))
+    group = asyncio.run(rss_plugin.rss_read(args, tool_ctx(public=True, room="ext_chat_-1", ports={"feeds": feeds},
+                                                           emitted=read)))
+    assert not stranger.ok and not group.ok and feeds.read == [] and read == []  # rien n'est allé sur le réseau
+    owner = asyncio.run(rss_plugin.rss_read(args, tool_ctx(ports={"feeds": feeds}, emitted=read)))
+    working = asyncio.run(rss_plugin.rss_read(args, tool_ctx(Kind.STEP, owner=False, ports={"feeds": feeds},
+                                                             emitted=read)))
     assert feeds.read == ["e1", "e1"] and "> Le texte" in owner and "---" not in owner and "> Le texte" in working
+    # ce qu'elle a lu se garde pour la nuit (ADR 0085), inerte
+    assert [(d.type.name, d.data.depth) for d in read] == [("rss.read", "article")] * 2
+    assert "---" not in read[0].data.excerpt.text
     assert any(t.name == "rss_read" and t.owner_only for t in rss_plugin.RSS.tools)
 
 

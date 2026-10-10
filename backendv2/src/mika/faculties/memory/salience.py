@@ -101,6 +101,10 @@ class Item:
     #: des émotions et leur intensité, la plus forte d'abord (ADR 0083)
     felt: tuple[tuple[str, float], ...] = ()
     empathy: tuple[tuple[str, float], ...] = ()
+    #: une période (un moment) ou ce qui est attendu (une prévision : ``due`` son début), et à quel point (ADR 0084)
+    until: int | None = None
+    precision: str = ""
+    likelihood: float | None = None
 
     @classmethod
     def of(cls, row: dict[str, Any]) -> Item:
@@ -121,6 +125,7 @@ class Item:
             as_of=int(row.get("as_of") or row["born_at"]),
             valid_until=None if row.get("valid_until") is None else int(row["valid_until"]),
             felt=facets(json.loads(row.get("felt") or "[]")), empathy=facets(json.loads(row.get("empathy") or "[]")),
+            until=row.get("until"), precision=str(row.get("precision") or ""), likelihood=row.get("likelihood"),
         )
 
 

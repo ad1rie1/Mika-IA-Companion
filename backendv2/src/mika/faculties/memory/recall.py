@@ -58,9 +58,10 @@ from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory.extraction import date_words, mention_scope, same_moment, scope_of, weekday_words
-from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, params
+from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, over, params
 from mika.faculties.memory.knowledge import Testimony, pooled
 from mika.faculties.memory.life import due_now, kept_too_early, takes_up_moment
+from mika.faculties.memory.likelihood import cautious, likely_words, nature_of
 from mika.faculties.memory.projections import (
     CONTESTS_TABLE,
     ITEM_COLUMNS,
@@ -89,9 +90,10 @@ from mika.kernel.faculty import Zone
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.prompt import Fragment, SectionBody
 from mika.vocab import affect as A
+from mika.vocab import timespan
 from mika.vocab.days import when_fr, window_of
-from mika.vocab.episodes import CONVERSATIONAL
-from mika.vocab.people import clean_tokens, is_identifiable, named_label
+from mika.vocab.episodes import CONVERSATIONAL, Kind
+from mika.vocab.people import clean_tokens, is_identifiable, named_label, read_source
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import WORD, fold, stems, words
@@ -195,6 +197,8 @@ class Recall:
     due_now: set[int] = field(default_factory=set)
     unsaid: list[str] = field(default_factory=list)
     moments: list[Moment] = field(default_factory=list)
+    #: ce qu'elle voit venir : le monde, et ce qu'elle vivra à travers quelqu'un (ADR 0084)
+    ahead: list[Moment] = field(default_factory=list)
     names: dict[str, str] = field(default_factory=dict)
     name: str = ""
     #: ce qu'elle a déjà dit d'elle-même (ses goûts, ses avis, sa vie) et qui touche le message
@@ -203,6 +207,46 @@ class Recall:
     close: bool = False
     #: quelque chose de grave la touche ces jours-ci (``memory.hard_times``) : le banal se tait
     hard: bool = False
+    #: les prénoms dits ici qu'elle connaît dans son cercle : (prénom, combien de personnes de ce nom, ce que la seule
+    #: est pour elle — ``social.CLOSE``, ``FRIEND``, ou propriétaire)
+    acquainted: list[tuple[str, int, str]] = field(default_factory=list)
+
+
+#: au plus tant de prénoms connus signalés par réponse
+ACQUAINTED_SHOWN = 3
+#: ce qu'est pour elle une propriétaire, dans ``Recall.acquainted``
+OWNER = "owner"
+
+
+def acquainted(frame: Frame, text: str, interlocutor: str | None) -> list[tuple[str, int, str]]:
+    """Les prénoms dits ici qu'elle connaît : quelqu'un de son cercle (une amie, une proche, sa propriétaire) qui le
+    porte, hors l'interlocuteur. Sans rien sur cette personne : savoir qu'elle la connaît — et que ce n'est peut-être
+    pas la même — suffit à ne pas répondre « je ne la connais pas » (sonde réelle du 2026-10-10 : « Carol, je ne lui
+    ai jamais parlé », d'une amie qui lui avait écrit le matin même)."""
+    said = set(WORD.findall(fold(text)))
+    if not said:
+        return []
+    her = WORD.findall(fold(self_c.name_of(frame.get(self_c.PERSONA))))
+    owners = set(frame.get(identity_c.OWNERS) or ())
+    by_name: dict[str, set[str]] = {}
+    shown: dict[str, str] = {}
+    for person in sorted({*(frame.get(social_c.CIRCLE) or ()), *owners}):
+        if person == interlocutor or not is_identifiable(person):
+            continue
+        name = " ".join(frame.get(identity_c.IDENTITY(person)).name.split())
+        first = next(iter(WORD.findall(fold(name))), "")
+        if len(first) < 3 or first in her:
+            continue
+        by_name.setdefault(first, set()).add(person)
+        shown.setdefault(first, name.split()[0])
+    out: list[tuple[str, int, str]] = []
+    for first, persons in sorted(by_name.items()):
+        if first not in said:
+            continue
+        one = next(iter(persons))
+        relation = OWNER if one in owners else frame.get(social_c.CLOSENESS(one))
+        out.append((shown[first], len(persons), relation if len(persons) == 1 else ""))
+    return out[:ACQUAINTED_SHOWN]
 
 
 def names_of(frame: Frame, keys: set[str]) -> dict[str, str]:
@@ -210,6 +254,8 @@ def names_of(frame: Frame, keys: set[str]) -> dict[str, str]:
     for k in keys:
         if k.startswith("name:"):
             out[k] = named_label(k).title()
+        elif read_source(k):
+            out[k] = read_source(k)  # ce qu'elle a lu : le flux, pas une personne (ADR 0085)
         else:
             out[k] = frame.get(identity_c.IDENTITY(k)).name or k
     return out
@@ -622,7 +668,7 @@ def bond_of(frame: Frame, keys: Sequence[str], memo: dict[str, float]) -> float:
 
 @MEMORY.enricher("recall", episodes=CONVERSATIONAL, deadline_ms=2500,
                  reads=[identity_c.PERSON, identity_c.PRESUMED, identity_c.IDENTITY, identity_c.HANDLES,
-                        c.PROMISES_TO, c.LIFE_EVENTS,
+                        identity_c.OWNERS, social_c.CIRCLE, c.PROMISES_TO, c.LIFE_EVENTS, c.AHEAD,
                         c.HARD_TIMES, affect_c.MOOD, affect_c.BOND, social_c.CLOSENESS, social_c.CONTACT])
 async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Recall | None:
     vectors, store = ports.get("vectors"), ports.get("store")
@@ -650,6 +696,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
         out.due_now &= {pr.id for pr in pending}
     out.moments = _already_mentioned(_moments(frame, store, person, aud, p, memo, hard=out.hard), frame, store,
                                      ep.target)
+    out.ahead = _ahead_moments(frame, store, person, aud, p, memo)
     bonds: dict[str, float] = {}
     is_reply = ep.attrs.get("reply_to") is not None
     query = query_of(frame, store) if is_reply else ""
@@ -663,6 +710,8 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     room = ep.attrs.get("room") or aud.room
     here = mention_scope(f"room:{room}" if room else f"private:{person}")
     named = named_people(frame, store, f"{context} {query}", person, memo, scope=here) if is_reply else {}
+    # quelqu'un de son cercle qu'on nomme, même sans rien savoir de sa vie : elle le connaît
+    out.acquainted = acquainted(frame, query, person) if is_reply else []
     # « tu te souviens de ce que je t'ai dit hier soir ? » est fait des mots d'une politesse (« hier », « soir »),
     # mais désigne un moment : elle s'en souvient aussi par le temps (ADR 0059)
     dated = is_reply and window_of(query, frame.now, frame.env.tz_of(frame.root)) is not None
@@ -745,6 +794,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
         _add_recalled(bucket, Recalled(item, verdict, item.text + tag(verdict, names) +
                                        doubted(frame, item, memo, person, verdict) +
                                        contested_line(frame, item, person, aud, memo, store, names) +
+                                       expected_line(item, frame) +
                                        feelings(item.felt, own, concerned_name(frame, item.about, names, memo))), cap)
     if hidden and p.max_unsaid:
         for who in sorted(hidden, key=lambda w: (-max(candidates[i.id] for i in hidden[w]), w))[: p.max_unsaid]:
@@ -823,6 +873,19 @@ def feelings(felt: Sequence[tuple[str, float]], empathy: Sequence[tuple[str, flo
             mine += phrase("memory.recall.felt.yours_more", what=facet_words(empathy[1:], lead=False))
         parts.append(mine)
     return phrase("memory.recall.felt.both", what=" ; ".join(parts)) if parts else ""
+
+
+def expected_line(item: Item, frame: Frame) -> str:
+    """Après une prévision (ADR 0084) : quand c'est attendu et à quel point c'est sûr, en mots."""
+    if item.knowledge_kind != "prediction":
+        return ""
+    likely = likely_words(item.likelihood)
+    if not item.due:
+        return phrase("memory.recall.expected_likely", likely=likely) if likely else ""
+    tz = frame.env.tz_of(frame.root)
+    when = timespan.period_words(item.due, item.until or item.due, item.precision, frame.now, tz) if item.precision \
+        else when_words(item.due, frame)
+    return phrase("memory.recall.expected", when=when, likely=likely or phrase("memory.likely.unsure"))
 
 
 def concerned_name(frame: Frame, about: Sequence[str], names: Mapping[str, str], memo: dict[str, str]) -> str:
@@ -1053,6 +1116,12 @@ def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryPara
         elif ev.yearly and not ev.festive:
             # « comment ça s'est passé ? » n'a pas de sens pour la date d'un deuil : bientôt, ou ce jour-là
             keep = now <= ev.when <= now + round(p.event_ahead_days * DAY) or _today(ev, frame)
+        elif ev.vague:
+            # une période (« en novembre ») : quand elle approche, tant qu'elle dure (un mois au plus — une année
+            # entière ne se redemande pas chaque jour), puis tout juste finie (ADR 0084)
+            upcoming = now <= ev.when <= now + round(p.event_ahead_days * DAY)
+            current = ev.when <= now <= ev.ends and ev.ends - ev.when <= 31 * DAY
+            keep = upcoming or current or ev.ends < now <= ev.ends + round(p.event_recent_days * DAY)
         else:
             upcoming = now <= ev.when <= now + round(p.event_ahead_days * DAY)
             recent = ev.when < now <= ev.when + round(p.event_recent_days * DAY)
@@ -1078,8 +1147,12 @@ def _moments(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryPara
         if any(m.event.ongoing == ev.ongoing and frame.local(m.event.when).date() == day
                and same_moment(text, m.text, who) for m in out):
             continue  # « son anniversaire » et « l'anniversaire de Sam », le même samedi : un seul moment
-        out.append(Moment(ev, text, verdict, text + tag(verdict, names) +
-                          feelings(ev.felt, ev.empathy, concerned_name(frame, ev.about, names, memo))))
+        concerned = concerned_name(frame, ev.about, names, memo)
+        # vécu à travers la personne : à venir, elle le vivra ; passé, elle l'a vécu (ADR 0086)
+        lived = "" if not (ev.shared and concerned) else phrase("memory.ahead.shared_past", who=concerned) \
+            if over(ev) < frame.now else phrase("memory.ahead.shared", who=concerned)
+        out.append(Moment(ev, text, verdict, text + tag(verdict, names) + feelings(ev.felt, ev.empathy, concerned)
+                          + lived))
     return out
 
 
@@ -1093,6 +1166,14 @@ def knowledge_label(item: Item, names: Mapping[str, str]) -> str:
     return phrase("memory.recall.viewpoint", nature=nature, holder=holder) if holder else nature
 
 
+def read_in(item: Item) -> str:
+    """« lu dans « Le Monde » » : une croyance qu'elle tient d'une lecture (ADR 0085) — une source publique, anodine,
+    qui se nomme partout."""
+    source = next((read_source(k) for t in item.testimonies if t.origin == c.READ for k in t.told_by
+                   if read_source(k)), "")
+    return phrase("memory.recall.read_in", source=source) if source else ""
+
+
 def _lines(recalled: list[Recalled], now: int, *, beliefs: bool, names: Mapping[str, str] | None = None) -> list[str]:
     lines = []
     for r in recalled:
@@ -1100,6 +1181,7 @@ def _lines(recalled: list[Recalled], now: int, *, beliefs: bool, names: Mapping[
             # ce qu'elle devine se dit comme tel ; ce qu'on lui a dit se lit déjà dans le texte
             how = [family("memory.recall.origin").get(r.item.origin or "", "")]
             how.append(knowledge_label(r.item, names or {}))
+            how.append(read_in(r.item))
             since = r.item.as_of or r.item.born_at
             if now - since >= DATED_AFTER_US:
                 # « ma sœur vient ce week-end », relu trois semaines plus tard, n'est plus vrai : elle sait depuis quand
@@ -1140,6 +1222,26 @@ def _body(recall: Recall, frame: Frame, *, witness: bool) -> SectionBody | None:
                        provenance=tuple(f"memory:{i}" for r in shown for i in (r.evidence or (r.item.id,))), witness=witness,
                        tied=any(r.verdict.tied for r in shown),
                        fragments=tuple(parts))
+
+
+@MEMORY.section("acquainted", zone=Zone.VOLATILE, episodes=[Kind.REPLY], after=["stance"], trim_rank=40,
+                title=phrase("memory.acquainted.title"))
+def _acquainted(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """« LES GENS QU'ON NOMME » : un prénom qu'elle connaît dans son cercle — elle le connaît, peut-être pas la même
+    personne ; si ça compte, elle demande de qui on parle, sans rien dire de ce qu'elle en sait."""
+    recall: Recall | None = enrich.get("recall")
+    if not recall or not recall.acquainted:
+        return None
+    lines = []
+    for name, many, relation in recall.acquainted:
+        if many > 1:
+            lines.append(phrase("memory.acquainted.several", name=name))
+        elif relation in (OWNER, social_c.CLOSE):
+            lines.append(phrase("memory.acquainted.close", name=name))
+        else:
+            lines.append(phrase("memory.acquainted.friend", name=name))
+    lines.append(phrase("memory.acquainted.advice"))
+    return SectionBody("\n".join(lines))
 
 
 @MEMORY.section("memories", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["stance"], trim_rank=30,
@@ -1251,6 +1353,67 @@ def _life(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBod
                        tied=any(m.verdict.tied for m in recall.moments))
 
 
+#: au plus tant de moments dans « CE QUI VIENT » (les plus proches)
+AHEAD_SHOWN = 6
+
+
+def moment_when(ev: c.LifeEvent, frame: Frame) -> str:
+    """Quand, comme on le dit : une période (« en novembre », ADR 0084), sinon le jour (« jeudi », « demain »)."""
+    if ev.vague:
+        return timespan.period_words(ev.when, ev.ends, ev.precision, frame.now, frame.env.tz_of(frame.root))
+    return when_words(ev.when, frame, all_day=ev.all_day)
+
+
+def _ahead_moments(frame: Frame, store: Any, person: str | None, aud: Audience, p: MemoryParams,
+                   memo: dict[str, str]) -> list[Moment]:
+    """Ce qu'elle voit venir (ADR 0084) : ce qui arrive dans le monde, et ce qu'elle vivra à travers quelqu'un —
+    commençant dans les ``ahead_days`` qui viennent, ou en cours —, ce que cette audience peut entendre (le monde
+    reste un moment confié : son verdict, comme tout). La vie de la personne en face est dans sa propre section."""
+    now, within = frame.now, round(p.ahead_days * DAY)
+    shown: list[tuple[c.LifeEvent, Verdict]] = []
+    for ev in frame.get(c.AHEAD) or ():
+        about = canon(frame, ev.about, memo)
+        if (person is not None and person in about) or ev.when > now + within:
+            continue
+        verdict = admissible(about, ev.sensitivity, person, aud, told_by=canon(frame, ev.told_by, memo),
+                             heard_by=(), secret=ev.secret, presumed=_presumer(frame, memo))
+        if verdict.ok:
+            shown.append((ev, verdict))
+    shown = shown[:AHEAD_SHOWN]
+    if not shown:
+        return []
+    texts = store.content([ev.text_ref for ev, _ in shown])
+    names = names_of(frame, {o for ev, v in shown for o in (*v.others, *ev.about)})
+    out = []
+    for ev, verdict in shown:
+        text = texts.get(ev.text_ref)
+        if not text:
+            continue  # oublié : rien
+        concerned = concerned_name(frame, ev.about, names, memo)
+        out.append(Moment(ev, text, verdict, text + tag(verdict, names) + feelings(ev.felt, ev.empathy, concerned) +
+                          (phrase("memory.ahead.shared", who=concerned) if ev.shared and concerned else "")))
+    return out
+
+
+@MEMORY.section("ahead", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["life"], trim_rank=50,
+                title=phrase("memory.ahead.title"))
+def _ahead(s: MemoryState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """« CE QUI VIENT » : le monde et ce qu'elle vivra à travers quelqu'un, avec leur vraisemblance en mots."""
+    recall: Recall | None = enrich.get("recall")
+    if not recall or not recall.ahead:
+        return None
+    lines = []
+    for m in recall.ahead:
+        # ses attentes de cette sorte se sont souvent trompées : un cran plus prudente (ADR 0086)
+        careful = cautious(s.calibration.get(nature_of(m.event)), params(frame.env.params_of("memory", frame.root)))
+        likely = likely_words(m.event.likelihood, careful=careful)
+        lines.append(phrase("memory.ahead.line", when=moment_when(m.event, frame), label=m.label) +
+                     (phrase("memory.ahead.likely", likely=likely) if likely else ""))
+    return SectionBody("\n".join(lines), level=max(m.verdict.level for m in recall.ahead),
+                       provenance=tuple(f"memory:{m.event.id}" for m in recall.ahead),
+                       tied=any(m.verdict.tied for m in recall.ahead))
+
+
 def _today(ev: c.LifeEvent, frame: Frame) -> bool:
     return frame.local(ev.when).date() == frame.local().date()
 
@@ -1274,9 +1437,23 @@ def _moment_line(m: Moment, frame: Frame, close: bool, hard: bool = False) -> st
         if close:
             return head + phrase("memory.life.ongoing_close")
         return head + phrase("memory.life.ongoing_ask")
+    if ev.vague:
+        # « en novembre » : ni « jeudi », ni « comment ça s'est passé » tant que la période dure (ADR 0084)
+        when = moment_when(ev, frame)
+        if ev.ends >= frame.now:
+            return f"- {when} : {m.label}" + (phrase("memory.life.already_said") if m.mentioned else "")
+        return f"- {when} : {m.label}" + (phrase("memory.life.past_close") if close and ev.importance >=
+                                           c.IMPORTANT_MOMENT else phrase("memory.life.past"))
     when = when_words(ev.when, frame, all_day=ev.all_day)
+    if ev.outcome in (c.CANCELLED, c.MOVED):
+        # elle sait comment il a tourné (ADR 0086) : ni « alors, ça s'est passé comment ? », ni « bonne chance »
+        outcome = phrase("memory.life.outcome.cancelled") if ev.outcome == c.CANCELLED else \
+            phrase("memory.life.outcome.moved")
+        return f"- {when} : {m.label}" + outcome
     if ev.festive:
         return _festive_line(m, frame, when, hard)
+    if ev.outcome == c.HAPPENED and not ev.followed_at:
+        return f"- {when} : {m.label}" + phrase("memory.life.outcome.happened")
     if ev.followed_at:
         return f"- {when} : {m.label}" + (phrase("memory.life.talked_again") if ev.when > frame.now
                                            else phrase("memory.life.past_talked"))

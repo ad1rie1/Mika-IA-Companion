@@ -65,6 +65,9 @@ OWNER = "memory"
 TOLD = "told"  # quelqu'un le lui a dit
 OBSERVED = "observed"  # elle l'a vu, vécu
 INFERRED = "inferred"  # elle en déduit
+#: elle l'a lu (un article, une page, un titre) : une source comme une autre, au plus comme un témoin qui rapporte
+#: (ADR 0085)
+READ = "read"
 #: l'origine d'un souvenir né d'un mensonge qu'elle a dit (colonne ``origin`` des éléments)
 LIED = "lied"
 
@@ -173,7 +176,7 @@ class Believed(Payload):
     #: Mikachu »), le surnom qu'elle lui donne, leurs blagues, leurs expressions — de première main (ADR 0055)
     between_us: bool = False
     #: Une affirmation rapportée n'est pas un fait vérifié ; une opinion appartient à son auteur.
-    knowledge_kind: Literal["claim", "opinion", "preference", "hypothesis"] = "claim"
+    knowledge_kind: Literal["claim", "opinion", "preference", "hypothesis", "prediction"] = "claim"
     holder: str | None = None
     relations: tuple[Relation, ...] = ()
     #: une croyance qu'elle contredit sans la remplacer (une source moins sûre) : les deux restent, elle doute
@@ -189,6 +192,12 @@ class Believed(Payload):
     #: sait et pense (ADR 0083) ; jugés par la relecture, une des 29 émotions
     felt: Feelings = ()
     empathy: Feelings = ()
+    #: une prévision (``knowledge_kind`` « prediction », ADR 0084) : quand c'est attendu (``expected`` : le début,
+    #: ``expected_until`` : la fin, ``expected_precision`` : ``vocab.timespan``) et à quel point (0 à 1)
+    expected: int | None = None
+    expected_until: int | None = None
+    expected_precision: str = ""
+    likelihood: float | None = None
 
     @model_validator(mode="after")
     def _relation_subjects(self):
@@ -260,12 +269,51 @@ class Attested(Payload):
     felt: Feelings = ()
 
 
+class Reading(Payload):
+    """Ce qu'elle a lu (ADR 0085), d'où que ce soit : ``source`` (« rss:<flux> », « web:<hôte> », « mcp:<serveur> »),
+    ``ref`` (l'article, la page), son titre et un extrait — venus d'ailleurs, donc inertes et bornés —, et jusqu'où
+    elle l'a lu (un titre et son chapeau, un article, une page). Le monde n'est la vie de personne : aucun sujet ;
+    ce qu'elle en garde se décide la nuit (``memory.reread``)."""
+
+    source: str
+    ref: str = ""
+    title: Content
+    excerpt: Content | None = None
+    depth: Literal["headline", "article", "page"] = "headline"
+
+
+class Confronted(Payload):
+    """La nuit, deux croyances sur la même personne, dites par des témoins différents, qui se contredisent (ADR
+    0085) : ``supersedes`` (nouvelle, ancienne) — la plus sûre l'emporte ; ``contests`` — elle doute, les deux
+    restent."""
+
+    night: str
+    supersedes: tuple[tuple[int, int], ...] = ()
+    contests: tuple[tuple[int, int], ...] = ()
+
+
+class Reread(Payload):
+    """La relecture de la nuit est faite (ADR 0085) : ses lectures jusqu'à ``upto`` (le ``seq`` de la dernière),
+    combien de lectures et de paires confrontées ; l'appel au modèle qui l'a faite (aucun : rien à relire)."""
+
+    night: str
+    upto: int = 0
+    readings: int = 0
+    pairs: int = 0
+    call_id: str = ""
+    model: str = ""
+
+
 class Joined(Payload):
     """La nuit, des croyances dites pareil par des personnes différentes (des doublons d'avant les témoignages) se
-    réunissent : ``(gardée, jointe)`` — la jointe devient un témoignage de la gardée."""
+    réunissent : ``(gardée, jointe)`` — la jointe devient un témoignage de la gardée. ``mute`` : jugées « la même
+    chose » sans être les mêmes mots (la relecture, ADR 0085), ses témoignages comptent pour la confiance, jamais pour
+    ce qui peut se dire — un témoin ne parle que pour les mots qu'il a dits (la rumeur de Bob ne laisse pas redire à
+    Bob ce qu'Alice a confié)."""
 
     night: str
     pairs: tuple[tuple[int, int], ...] = ()
+    mute: bool = False
 
 
 class PromiseNoticed(Payload):
@@ -327,6 +375,21 @@ class EventNoted(Payload):
     #: (ADR 0083)
     felt: Feelings = ()
     empathy: Feelings = ()
+    #: une période plutôt qu'un jour (ADR 0084) : sa fin (``when`` : son début) et sa précision (``vocab.timespan`` :
+    #: un mois, une saison, une année, une période ; vide : un jour, comme avant)
+    until: int | None = None
+    precision: str = ""
+    #: ``world`` : ce qui arrive dans le monde (des élections, la sortie d'un film, un jour férié) — la vie de
+    #: personne, ``about`` vide ; toujours dit par quelqu'un (``told_by``), qu'on peut oublier
+    scope: Literal["person", "world"] = "person"
+    #: un moment de quelqu'un qu'elle vivra à travers lui (« samedi Sam m'emmène au salon, il me montrera ») : elle
+    #: n'a pas de corps, elle vit à travers ses relations
+    shared: bool = False
+    #: une date publique officielle (un scrutin, un jour férié)
+    official: bool = False
+    #: sa vraisemblance (0 à 1), d'après d'où elle vient et ce qui en a été dit (``faculties.memory.likelihood``) ;
+    #: ``None`` dans un journal plus ancien : la règle de sa nature
+    likelihood: float | None = None
 
 
 class MomentFollowed(Payload):
@@ -351,6 +414,35 @@ class SituationEnded(Payload):
 
     event: int
     call_id: str = ""
+
+#: comment un moment a tourné (ADR 0086) : il a eu lieu, il est annulé, déplacé, ou personne ne l'a jamais dit
+HAPPENED, CANCELLED, MOVED, UNKNOWN = "happened", "cancelled", "moved", "unknown"
+OUTCOMES = (HAPPENED, CANCELLED, MOVED, UNKNOWN)
+
+
+class Resolved(Payload):
+    """Comment un moment a tourné (ADR 0086), et ce qu'elle en attendait : constaté par la personne concernée
+    (``by``), par ce qu'elle a lu (« rss:… »), ou faute de nouvelles une fois l'échéance passée (``by`` vide,
+    ``unknown``). ``likelihood`` : ce qu'elle en attendait ; ``surprise`` : l'écart à cette attente, pesé par ce que
+    le moment compte (``faculties.memory.likelihood.surprise``) ; ``nature`` et ``teller`` : de quelle sorte était
+    l'annonce et qui l'avait faite — ce qu'elle en apprend ; ``valence`` : comment elle l'attendait (plus de zéro :
+    avec espoir, moins : avec crainte)."""
+
+    event: int
+    thread: int = 0
+    outcome: Literal["happened", "cancelled", "moved", "unknown"]
+    by: str = ""
+    likelihood: float | None = None
+    importance: float = 0.7
+    surprise: float = 0.0
+    nature: str = ""
+    teller: str = ""
+    shared: bool = False
+    valence: float = 0.0
+    about: tuple[str, ...] = ()
+    sources: tuple[int, ...] = ()
+    call_id: str = ""
+
 
 
 class ExtractionDeferred(Payload):
@@ -399,14 +491,17 @@ PROMISE_RESOLVED = event_type("memory.promise_resolved", OWNER, PromiseResolved,
 EVENT_NOTED = event_type("memory.event_noted", OWNER, EventNoted, public=True, content=("text",), subjects=_SUBJECTS)
 MOMENT_FOLLOWED = event_type("memory.moment_followed", OWNER, MomentFollowed, public=True, subjects=("by",))
 SITUATION_ENDED = event_type("memory.situation_ended", OWNER, SituationEnded, public=True)
+RESOLVED = event_type("memory.resolved", OWNER, Resolved, public=True, subjects=("about", "by", "teller"))
 EXTRACTION_DEFERRED = event_type("memory.extraction_deferred", OWNER, ExtractionDeferred, public=True,
                                  content=("detail",), subjects=("about",))
 CONSOLIDATED = event_type("memory.consolidated", OWNER, Consolidated, public=True)
 NIGHT_SORTED = event_type("memory.night_sorted", OWNER, NightSorted, public=True)
 ATTESTED = event_type("memory.attested", OWNER, Attested, public=True, subjects=_SUBJECTS)
 JOINED = event_type("memory.joined", OWNER, Joined, public=True)
+CONFRONTED = event_type("memory.confronted", OWNER, Confronted, public=True)
+REREAD = event_type("memory.reread", OWNER, Reread, public=True)
 ALL = (REMEMBERED, BELIEVED, REINFORCED, PROMISE_NOTICED, PROMISE_RESOLVED, EVENT_NOTED, MOMENT_FOLLOWED, SITUATION_ENDED,
-       CONSOLIDATED, NIGHT_SORTED, EXTRACTION_DEFERRED, ATTESTED, JOINED)
+       CONSOLIDATED, NIGHT_SORTED, EXTRACTION_DEFERRED, ATTESTED, JOINED, CONFRONTED, REREAD, RESOLVED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -455,11 +550,43 @@ class LifeEvent:
     #: ce que la personne en ressent, ce qu'elle-même en ressent (ADR 0083) ; vide : rien de dit
     felt: tuple[tuple[str, float], ...] = ()
     empathy: tuple[tuple[str, float], ...] = ()
+    #: une période (ADR 0084) : sa fin (0 : un jour) et sa précision ; ``world`` : ce qui arrive dans le monde ;
+    #: ``shared`` : un moment de quelqu'un qu'elle vivra à travers lui ; ``official`` : une date publique ;
+    #: ``likelihood`` : sa vraisemblance (``None`` : la règle de sa nature)
+    until: int = 0
+    precision: str = ""
+    scope: str = "person"
+    shared: bool = False
+    official: bool = False
+    likelihood: float | None = None
+    #: comment il a tourné (``HAPPENED``…, vide : pas encore su) et quand on l'a su (ADR 0086)
+    outcome: str = ""
+    resolved_at: int = 0
 
     @property
     def key(self) -> int:
         """Le fil du moment (son ``id`` dans un journal d'avant)."""
         return self.thread or self.id
+
+    @property
+    def vague(self) -> bool:
+        """Plus large qu'un jour (« en novembre ») : ni la veille ni le lendemain n'ont de sens (ADR 0084)."""
+        return bool(self.precision)
+
+    @property
+    def ends(self) -> int:
+        """La fin du moment : celle de sa période, sinon le moment lui-même."""
+        return self.until or self.when
+
+
+def life_event_of(seq: int, d: EventNoted, *, followed_at: int = 0, ended_at: int = 0, thread: int = 0) -> LifeEvent:
+    """Le moment tel qu'il est gardé, d'après ce qui l'a noté — une seule façon, pour la tranche et l'archive."""
+    return LifeEvent(seq, tuple(d.about), d.when, d.all_day, d.sensitivity, tuple(d.told_by), d.text.ref or "",
+                     d.secret, followed_at=followed_at, ongoing=d.ongoing, importance=d.importance,
+                     festive=d.festive, ended_at=ended_at, yearly=d.yearly and not d.ongoing, thread=thread,
+                     recurs=d.recurs or 0, felt=tuple(d.felt), empathy=tuple(d.empathy), until=d.until or 0,
+                     precision=d.precision, scope=d.scope, shared=d.shared, official=d.official,
+                     likelihood=d.likelihood)
 
 
 def heavy_date(ev: LifeEvent) -> bool:
@@ -516,15 +643,22 @@ def withdrawals(name: str, d: Any, seq: int) -> tuple[Withdrawal, ...]:
             out.append(Withdrawal(d.recurs, SUPERSEDED, seq))
     elif name == JOINED.name:
         out += [Withdrawal(drop, JOINED_TO, keep) for keep, drop in d.pairs]
+    elif name == CONFRONTED.name:
+        out += [Withdrawal(old, SUPERSEDED, new) for new, old in d.supersedes]
+        # la nuit les a confrontées : elle doute de l'une comme de l'autre
+        out += [w for a, b in d.contests for w in (Withdrawal(b, CONTESTED, a), Withdrawal(a, CONTESTED, b))]
     elif name == NIGHT_SORTED.name:
         out += [Withdrawal(drop, JOINED_TO, keep) for keep, drop in d.merges]
     elif name == SITUATION_ENDED.name:
         out.append(Withdrawal(d.event, ENDED))
+    elif name == RESOLVED.name and d.outcome in (CANCELLED, MOVED):
+        out.append(Withdrawal(d.event, ENDED))  # « son entretien jeudi » ne tient plus
     return tuple(out)
 
 
 #: Les événements de la mémoire qui peuvent retirer quelque chose (``withdrawals``).
-WITHDRAWING = (BELIEVED, ATTESTED, REINFORCED, EVENT_NOTED, JOINED, NIGHT_SORTED, SITUATION_ENDED)
+WITHDRAWING = (BELIEVED, ATTESTED, REINFORCED, EVENT_NOTED, JOINED, NIGHT_SORTED, SITUATION_ENDED, CONFRONTED,
+               RESOLVED)
 
 
 #: Le dernier message relu par la consolidation.
@@ -541,6 +675,19 @@ PROMISES_TO = FactFamily("memory.promises_to", arg=str, type=tuple)
 #: (ou à celle qui vient de passer, quelques jours) : la seule lecture qui
 #: dépende de l'instant.
 LIFE_EVENTS = FactFamily("memory.life_events", arg=str, type=tuple)
+#: Ce qu'elle voit venir (ADR 0084) : les moments du monde et ceux qu'elle vivra à travers quelqu'un, pas finis, à
+#: venir ou en cours (``LifeEvent``, les plus proches d'abord) — sans verdict : qui le lit le juge pour son audience.
+AHEAD = FactKey("memory.ahead", type=tuple, time_varying=True)
+#: la portée d'un moment : la vie d'une personne, ou le monde (ADR 0084)
+PERSON_SCOPE, WORLD = "person", "world"
+#: Ce qui approche (ADR 0086) : tous les moments — de quelqu'un, du monde, partagés — à venir d'ici quelques jours
+#: (``upcoming_days``), ni finis ni tranchés, les plus proches d'abord : ce qu'elle peut attendre avec espoir ou
+#: crainte (``attention``). Sans verdict : rien ne s'en dit, ça se ressent.
+UPCOMING = FactKey("memory.upcoming", type=tuple, time_varying=True)
+#: Ce qu'elle voudrait vérifier (ADR 0086) : les moments du monde passés depuis peu dont elle ne sait pas comment ils
+#: ont tourné, et qui lui tiennent à cœur (importants, ou qu'elle attendait avec un sentiment) — les plus importants
+#: d'abord. Lu par ``goals`` (une exploration de vérification, bornée par semaine).
+TO_CHECK = FactKey("memory.to_check", type=tuple, time_varying=True)
 #: Le fil d'un moment, d'après n'importe lequel de ses numéros (un moment reporté, redit, revenu) — son ``id`` si
 #: aucun autre ne l'a remplacé. Lu par ce qui range ce qu'elle en a dit (``others``).
 MOMENT_THREAD = FactFamily("memory.moment_thread", arg=int, type=int)

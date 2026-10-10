@@ -310,6 +310,20 @@ async def test_a_cli_that_is_not_logged_in_fails_and_the_gateway_propagates_the_
     assert [(t.backend, t.outcome) for t in gateway.traces] == [("cc", "error:ClaudeCodeError")]
 
 
+async def test_an_answer_past_its_output_cap_is_a_truncated_answer_not_an_outage(tmp_path, cli):
+    """La CLI dit « Claude's response exceeded the 2500 output token maximum » : une réponse tronquée, comme chez les
+    autres fournisseurs — la relecture la diffère et redécoupe sa fenêtre ; une panne la réessayait à l'identique
+    toutes les dix minutes (sonde réelle du 2026-10-10)."""
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        req = LLMRequest(role="extract", call_id="x-9#0", system_stable=scenario(
+            fail="API Error: Claude's response exceeded the 2500 output token maximum. To configure this behavior, "
+                 "set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable."), messages=(Message("user", "x"),))
+        got = await be.complete(req)
+    assert (got.stop, got.truncated_tool_call, got.tool_calls) == ("max_tokens", True, ())
+
+
 async def test_a_cli_that_cannot_reach_its_tools_fails_loudly_and_the_gateway_propagates_the_error(tmp_path, cli):
     """La vraie CLI continue sans un serveur MCP qui répond 404 : le modèle n'avait plus aucun outil et
     racontait « report_step: continue » au lieu de l'appeler (un pas de projet, sans verdict, qui bloquait le

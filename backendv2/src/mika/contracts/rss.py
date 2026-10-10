@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from mika.contracts import memory as memory_c
 from mika.contracts.attention import Signal
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
@@ -45,7 +46,10 @@ class ThoughtOf(Payload):
 
 NOTICED = event_type("rss.noticed", OWNER, EntryNoticed, public=True, content=("summary",))
 THOUGHT_OF = event_type("rss.thought_of", OWNER, ThoughtOf, content=("summary",), subjects=("person",))
-ALL = (NOTICED, THOUGHT_OF)
+#: ce qu'elle a lu d'un flux (ADR 0085) : un article ouvert (``rss_read``), ou le chapeau du titre qui l'a le plus
+#: intéressée à un relevé — la forme commune des lectures (``memory.Reading``) ; la nuit en garde ce qui compte
+READ = event_type("rss.read", OWNER, memory_c.Reading, public=True, content=("title", "excerpt"))
+ALL = (NOTICED, THOUGHT_OF, READ)
 
 
 @dataclass(frozen=True, slots=True)

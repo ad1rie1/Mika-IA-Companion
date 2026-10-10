@@ -14,6 +14,7 @@ from mika.faculties.memory import (  # noqa: F401 — contributions
     night,
     projections,
     recall,
+    reread,
     tools,
 )
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState

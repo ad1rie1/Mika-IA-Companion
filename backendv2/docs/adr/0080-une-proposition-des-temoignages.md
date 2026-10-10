@@ -46,7 +46,7 @@ ferme tout, celle d'un autre ne ferme que ce qu'il en a dit ; les doublons sont 
    discrétion se ferment avec elles (`memory.reinforced` secret, `Consolidate._closed_souvenirs`) — la sonde réelle
    du 2026-10-09 a vu « Alice m'a dit qu'elle allait quitter sa boîte », noté avant le « garde-le pour toi », rester
    dicible à toute amie et revenir dans le portrait d'Alice. Une autre croyance née du même message ne se ferme pas
-   d'elle-même : la relecture la voit et la désigne si elle laisse deviner le secret.
+   d'elle-même : la relecture la voit et la désigne si elle laisse deviner le secret. Et la discrétion de la personne concernée **reste fermée** : un témoignage arrivé après (Bob qui le redit, ou un doublon joint la nuit) est fermé lui aussi (`projections._settle`, ADR 0085).
 6. *Les anciens renforts ne s'ouvrent pas.* Un `memory.reinforced` d'avant reste ce qu'il était : sa discrétion et sa
    sensibilité valent pour tous les témoignages ; corroboré, il compte un témoin de plus pour la confiance, par un
    témoignage **muet** (`speaks` faux) qui reprend les droits du premier — il pouvait reposer sur une ressemblance.

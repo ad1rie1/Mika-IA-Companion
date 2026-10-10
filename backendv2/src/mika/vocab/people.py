@@ -109,6 +109,15 @@ def named_label(key: str) -> str:
     return key.removeprefix("name:").split(":", 1)[-1]
 
 
+#: les sources d'une lecture (ADR 0085) : un flux, un serveur d'outils, une page — des témoins, jamais des personnes
+READ_PREFIXES = ("rss:", "mcp:", "web:")
+
+
+def read_source(key: str) -> str:
+    """« rss:Le Monde » → « Le Monde » ; ``""`` pour ce qui n'est pas une source de lecture."""
+    return key.split(":", 1)[1] if key.startswith(READ_PREFIXES) else ""
+
+
 def clean_tokens(text: str) -> str:
     """Le texte sans les jetons de personnes (« Chloé [P1] » → « Chloé ») : l'extraction s'en sert pour dire qui
     c'est ; ils ne doivent finir ni dans un souvenir, ni dans un rêve."""

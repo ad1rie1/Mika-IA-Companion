@@ -8,6 +8,7 @@ initiative due peut partir (``service_answered``), comme un dessin prêt.
 
 from __future__ import annotations
 
+from mika.contracts import memory as memory_c
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily
 
@@ -30,4 +31,7 @@ class Answered(Payload):
 
 
 ANSWERED = event_type("mcp.answered", OWNER, Answered, content=("text",), subjects=("about",))
-ALL = (ANSWERED,)
+#: ce qu'elle a consulté pendant qu'elle travaillait (ADR 0085) : un outil en lecture seule ouvert sur le monde
+#: (une recherche, une page) — la forme commune des lectures, l'extrait borné et inerte ; jamais en conversation
+CONSULTED = event_type("mcp.consulted", OWNER, memory_c.Reading, public=True, content=("title", "excerpt"))
+ALL = (ANSWERED, CONSULTED)
