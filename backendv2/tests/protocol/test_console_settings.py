@@ -156,7 +156,8 @@ def test_temperament_sliders_rederive_the_parameters(world):  # noqa: F811
     assert doc.temperament.sociability == 0.9 and doc.temperament.background.value == "curious"
     out = post(client, url, {"_section": "temperament", "_champs": fields, **{k: "0.5" for k in fields},
                              "background": "curious", "reactivity": "1,5"})
-    assert out.status_code == 400 and "doit être entre 0 et 1" in html_of(out)
+    # la console s'arrête à 0,1 et 0,9 (ADR 0100) : jamais tout à fait 0 ni 1
+    assert out.status_code == 400 and "doit être entre 0,1 et 0,9" in html_of(out)
 
 
 def test_senses_mail_feeds_transcription_and_a_device_token_shown_once(world):  # noqa: F811

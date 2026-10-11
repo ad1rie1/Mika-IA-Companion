@@ -10,7 +10,7 @@ from typing import Any
 from mika.contracts import body as body_c
 from mika.contracts import self_ as c
 from mika.faculties.self import days
-from mika.faculties.self.knobs import SelfParams
+from mika.faculties.self.knobs import SelfParams, derive
 from mika.faculties.self.records import Deed, Dream, Effort, Interest, Journal, Knock, Lead, Mark
 from mika.kernel.faculty import Faculty
 from mika.kernel.frame import Frame
@@ -88,7 +88,7 @@ class SelfState:
 #: v9 : ses centres d'intérêt vivent, ses pistes, sa réflexion de la nuit (ADR 0089)
 #: v10 : le récit se réécrit quand elle a changé, sur tout ce qu'elle sait d'elle (ADR 0090)
 #: v11 : une réflexion menée au bout n'est pas un exploit : ni estime, ni « elle mène ses buts au bout » (ADR 0096)
-SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, state_version=11,
+SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, derive=derive, state_version=11,
                retired_params=("achieved_knock",))
 SELF.declare(c.PERSONA_REVISED, c.NARRATED, c.JOURNALED, c.DREAMT, c.WOKE_WITH, c.TOUCHED, c.INTEREST_BORN,
              c.REFLECTED)

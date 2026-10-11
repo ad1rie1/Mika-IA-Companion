@@ -134,6 +134,7 @@ def _anticipated_felt(e, cx) -> Appraisal:
     p = params(cx.params)
     d = e.data
     anxious = d.emotion == Emotion.ANXIOUS.value
+    # le moment de quelqu'un (pas du monde) : ce que vivent les autres suit la contagion du tempérament (ADR 0100)
     return Appraisal(Emotion.ANXIOUS if anxious else Emotion.HOPEFUL,
                      round(min(p.anticipation_max, d.weight * p.anticipation_gain), 3),
-                     reason=causes.DREADING if anxious else causes.LOOKING_FORWARD)
+                     reason=causes.DREADING if anxious else causes.LOOKING_FORWARD, relational=bool(d.about))

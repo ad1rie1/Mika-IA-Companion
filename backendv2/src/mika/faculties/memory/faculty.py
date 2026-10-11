@@ -663,16 +663,19 @@ def _moment_resolved_felt(e, cx) -> list[Appraisal] | None:
         return None
     p = params(cx.params)
     out: list[Appraisal] = []
+    # le moment de quelqu'un (pas du monde) : ce que vivent les autres suit la contagion du tempérament (ADR 0100)
+    rel = bool(d.about)
     if d.surprise >= p.surprise_from:
-        out.append(Appraisal(Emotion.SURPRISED, round(min(p.surprise_max, d.surprise), 3), reason=causes.TURNED_OUT))
+        out.append(Appraisal(Emotion.SURPRISED, round(min(p.surprise_max, d.surprise), 3), reason=causes.TURNED_OUT,
+                             relational=rel))
     counts = max((cx.facts.get(social_c.WEIGHT(person)) for person in d.about), default=1.0)
     weight = round(min(p.disappointment_max, abs(d.valence) * d.importance * counts), 3)
     if weight > 0 and d.valence > 0 and d.outcome in (c.CANCELLED, c.MOVED):
-        out.append(Appraisal(Emotion.SAD, weight, reason=causes.LET_DOWN))
+        out.append(Appraisal(Emotion.SAD, weight, reason=causes.LET_DOWN, relational=rel))
     elif weight > 0 and d.valence < 0 and d.outcome == c.CANCELLED:
-        out.append(Appraisal(Emotion.RELIEVED, weight, reason=causes.FEAR_LIFTED))
+        out.append(Appraisal(Emotion.RELIEVED, weight, reason=causes.FEAR_LIFTED, relational=rel))
     elif weight > 0 and d.valence > 0 and d.outcome == c.HAPPENED:
-        out.append(Appraisal(Emotion.HAPPY, round(weight / 2, 3), reason=causes.AWAITED))
+        out.append(Appraisal(Emotion.HAPPY, round(weight / 2, 3), reason=causes.AWAITED, relational=rel))
     return out or None
 
 

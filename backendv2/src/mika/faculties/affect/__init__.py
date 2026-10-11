@@ -53,7 +53,9 @@ AFFECT = Faculty("affect", state=AffectState, init=lambda p: AffectState(), para
                  # ne donnaient plus la même tranche sur une installation existante (audit du lot L2)
                  # 5 : ses balises ont des facettes, qui visent ensemble (ADR 0093) ; ce qu'une personne lui fait
                  # vivre touche sa posture envers elle ; des excuses pardonnent sous chacune de ses adresses (ADR 0094)
-                 state_version=5, retired_params=("declared_window_us",))
+                 # 6 : la matrice de personnalité — tout ce que les autres lui font vivre suit la contagion, le biais
+                 # négatif pèse sur chaque impulsion (ADR 0100)
+                 state_version=6, retired_params=("declared_window_us",))
 
 #: Ni une amie ni une proche : une hostilité forte y laisse de la méfiance.
 _DISTANT = frozenset({social_c.STRANGER, social_c.ACQUAINTANCE})
@@ -82,7 +84,9 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     level = (cx.facts.get(social_c.CLOSENESS(key)) if is_identifiable(d.target) else social_c.STRANGER) \
         if d.target else ""
     mood = ph.advance_mood(s.mood, e.at, p, cw)
-    gain = ph.mood_gain(declared.intensity, p)
+    # le biais négatif (ADR 0100) : le mauvais et le bon ne pèsent pas pareil (au milieu, 1)
+    weight = p.valence_gain(declared.emotion)
+    gain = min(p.mood_gain_cap, ph.mood_gain(declared.intensity, p) * weight)
     if level:
         # ce qu'un inconnu lui fait vivre la touche moins que ce que vit un proche
         gain = min(p.mood_gain_cap, gain * p.bleed(level))
@@ -96,7 +100,7 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     stance = s.stances.get(key) or ph.new_stance(e.at, p, cw)
     stance = ph.advance_stance(stance, e.at, p, cw)
     stance = ph.push_stance(stance, ph.stance_target_of(stance, declared),
-                            ph.resonant_gain(ph.blend(A.ORIGIN, declared.all), p))
+                            ph.resonant_gain(ph.blend(A.ORIGIN, declared.all), p) * weight)
     recent = (*stance.recent, (e.at, declared.emotion.value))[-ph.RECENT_IMPULSES:]
     stance = replace(stance, declared=declared.encode(), declared_at=e.at, declared_reply=d.kind == Kind.REPLY,
                      recent=recent)
@@ -122,7 +126,7 @@ def _feel(s: AffectState, appraisals: tuple[A.Appraisal, ...], e, cx) -> AffectS
             continue
         force = max(0.0, min(1.0, a.intensity * (p.relational_scale if a.relational else 1.0)))
         target = A.ANCHORS[a.emotion]
-        gain = min(0.9, ph.resonant_gain(target, p) * force)
+        gain = min(0.9, ph.resonant_gain(target, p) * force * p.valence_gain(a.emotion))
         if gain <= 0:
             continue
         if a.toward is None:
@@ -348,6 +352,13 @@ def face_reading(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.
     else:
         position, declared = st.position, ph.fresh(st, now, p)
     label, intensity, parts, person_part, mood_part = ph.face(position, m.position, p.background, declared)
+    if p.face_expressiveness != 1.0:
+        # ce que montre son visage de ce qu'elle ressent (l'expressivité, ADR 0100) — jamais au-delà du plein
+        def shown(x: float) -> float:
+            return round(min(1.0, x * p.face_expressiveness), 2)
+
+        intensity, parts = shown(intensity), [(e, shown(w)) for e, w in parts]
+        person_part, mood_part = (person_part[0], shown(person_part[1])), (mood_part[0], shown(mood_part[1]))
     return c.Face(label, intensity, tuple(parts), person_part, mood_part)
 
 

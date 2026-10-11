@@ -42,8 +42,17 @@ from mika.ports.imaging import DRAW
 from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
 from mika.ports.imaging import ROLES as IMAGE_ROLES
 from mika.runtime.params import Parameters
+from mika.vocab.affect import FR
 from mika.vocab.episodes import FALLBACKS, VOICE_ROLES, Role
-from mika.vocab.temperament import Temperament
+from mika.vocab.temperament import (
+    DEFENSES,
+    PERSONALITY,
+    PROFILES,
+    REACTIONS,
+    Temperament,
+    apply_profile,
+    profile_of,
+)
 
 if TYPE_CHECKING:
     from mika.app.server import Live
@@ -158,6 +167,41 @@ class PushSettings(BaseModel):
         if text:
             parse_service_account(text)  # ValueError en français : la page le dit sous le champ
         return text
+
+
+#: les profils que la console propose d'appliquer (ADR 0100) ; « ajusté » : aucun profil exact (on a réglé à la main)
+_PROFILE_CHOICES = (("", "Ajusté à la main (aucun profil exact)"),
+                    *((key, f"{p.label} — {p.summary}") for key, p in PROFILES.items()))
+
+
+class ProfileChoice(BaseModel):
+    """Le profil de personnalité à appliquer : il pose tous les curseurs de caractère d'un coup (son chronotype
+    gardé), qu'on ajuste ensuite dans Tempérament."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    profile: Annotated[str, Knob(
+        label="Profil", help="Un archétype : tous ses curseurs de caractère d'un coup, son humeur de fond, sa réaction "
+        "quand on la blesse et sa défense quand on la touche. Son chronotype ne change pas. Ses règles de conduite non "
+        "plus (discrétion, ne pas harceler, jamais de manipulation) : un profil règle ce qu'elle ressent et comment "
+        "elle l'exprime, jamais ce qu'elle s'autorise.", choices=_PROFILE_CHOICES, advanced=False, order=10)] = ""
+
+
+def _profile_rows() -> tuple[Any, ...]:
+    """Chaque profil : ce qu'il pose (les écarts au milieu, sur 1–9)."""
+    labels = {f.path: f.label for f in forms.describe(Temperament)}
+    reactions, defenses = dict(REACTIONS), dict(DEFENSES)
+    rows = []
+    for p in PROFILES.values():
+        moved = [f"{labels.get(s, s)} {p.values[s]}" for s in PERSONALITY if s in p.values]
+        if p.reaction:
+            moved.append(f"blessée : {reactions[p.reaction]}")
+        if p.defense:
+            moved.append(f"touchée : {defenses[p.defense]}")
+        if p.background is not Temperament().background:
+            moved.append(f"humeur de fond : {FR[p.background]}")
+        rows.append((Text(p.label), Text(p.summary, clamp=300), Text(" · ".join(moved) or "5 partout", clamp=500)))
+    return tuple(rows)
 
 
 def _dump(doc: PersonaDoc) -> str:
@@ -319,6 +363,27 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
     def temperament_effect(ui: Any, t: Temperament) -> list[Any]:
         """« Voir l'effet » d'un tempérament : chaque faculté rederivée, surcharges et réglages gardés."""
         return effect(ui, params.preview_temperament(t))
+
+    async def save_profile(choice: ProfileChoice, by: str) -> list[str]:
+        """Appliquer un profil (ADR 0100) : tous ses curseurs de caractère posés dans le tempérament de sa persona,
+        journalisés comme tout réglage (le passé ne se réécrit pas)."""
+        if not choice.profile:
+            return ["Choisis un profil : « ajusté » veut dire qu'on a réglé ses curseurs à la main (Tempérament)."]
+        return await save_temperament(apply_profile(live.persona().temperament, choice.profile), by)
+
+    def profile_effect(ui: Any, choice: ProfileChoice) -> list[Any]:
+        """« Voir l'effet » d'un profil : le tempérament qu'il poserait, chaque faculté rederivée."""
+        if not choice.profile:
+            return []
+        return effect(ui, params.preview_temperament(apply_profile(live.persona().temperament, choice.profile)))
+
+    def profile_facts() -> list[tuple[str, str]]:
+        key = profile_of(live.persona().temperament)
+        return [("Profil actuel", PROFILES[key].label if key else "ajusté à la main")]
+
+    def profiles_block() -> list[Any]:
+        return [Table((Column("profil", "fit"), Column("en deux mots"), "ce qu'il pose (sur 1–9, 5 au milieu)"),
+                      _profile_rows(), title="Les profils")]
 
     async def back_to_file(by: str) -> tuple[str, str]:
         if settings.persona_yaml() is None:
@@ -614,15 +679,31 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                              "Le personnage entier en YAML (pour le garder ou le coller d'un "
                                              "coup), le retour au fichier, et l'historique de ses révisions.")),
                         )),
+        SettingsSection("profil", "Profil de personnalité", "personnage", ProfileChoice,
+                        lambda: ProfileChoice(profile=profile_of(live.persona().temperament)), save_profile, order=105,
+                        description="Des archétypes préremplis (réfléchie, anxieuse, tsundere…) : chacun pose tous les "
+                                    "curseurs du tempérament d'un coup, qu'on ajuste ensuite (ADR 0100).",
+                        facts=profile_facts, blocks=profiles_block, preview=profile_effect,
+                        pages=(SettingsPage("profil", "Profil", blocks=True, description=(
+                            "Un profil pose tous les curseurs de caractère du tempérament (son chronotype gardé), "
+                            "son humeur de fond, sa réaction quand on la blesse et sa défense quand on la touche. On "
+                            "l'ajuste ensuite curseur par curseur dans Tempérament ; le profil devient alors « ajusté ». "
+                            "La console ne va jamais tout à fait à 0 ni à 1. Ses règles de conduite ne dépendent "
+                            "d'aucun profil.")),)),
         SettingsSection("temperament", "Tempérament", "personnage", Temperament,
                         lambda: live.persona().temperament, save_temperament, order=110,
-                        description="Huit curseurs et une humeur de fond : l'entrée principale de son caractère. "
-                                    "Chaque faculté en dérive ses paramètres (Comportement).",
+                        description="Sa matrice de personnalité : des curseurs rangés en familles, une humeur de "
+                                    "fond, deux choix. L'entrée principale de son caractère ; chaque faculté en dérive "
+                                    "ses paramètres (Comportement), et ce qui s'écarte du milieu se dit au modèle "
+                                    "(ADR 0100).",
                         blocks=drives, preview=temperament_effect,
                         pages=(SettingsPage("temperament", "Tempérament", blocks=True, description=(
-                            "Huit curseurs (0,5 = comme la plupart des gens) et une humeur de fond. Chaque "
-                            "faculté en dérive ses paramètres ; la table dessous dit ce que pilote chaque "
-                            "curseur, mesuré en le poussant à ses deux bouts.")),)),
+                            "Des curseurs (0,5 = comme la plupart des gens ; la console s'arrête à 0,1 et 0,9), "
+                            "une humeur de fond, sa réaction quand on la blesse et sa défense quand on la touche. "
+                            "Chaque faculté en dérive ses paramètres ; la table dessous dit ce que pilote chaque "
+                            "curseur, mesuré en le poussant à ses deux bouts. Un trait à 0,3 ou moins, à 0,7 ou "
+                            "plus, se dit aussi au modèle (« TON TEMPÉRAMENT »). Un profil (Profil de "
+                            "personnalité) les pose tous d'un coup.")),)),
         SettingsSection("notifications", "Notifications du téléphone", "canaux", PushSettings,
                         lambda: _tolerant(PushSettings, service_account=settings.push()), save_push, order=20,
                         description="Ce qu'elle écrit à quelqu'un dont l'application est fermée part par Firebase, "

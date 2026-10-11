@@ -64,6 +64,7 @@ from mika.vocab.days import when_fr
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable, is_internal
 from mika.vocab.phrasebook import family, phrase
+from mika.vocab.temperament import Temperament, around
 
 KEEP = 32
 #: au plus tant d'épisodes en cours retenus (corrélation → raisons, adresse visée, départ)
@@ -187,7 +188,17 @@ class AgencyState:
 
 #: v4 : une ouverture garde l'adresse visée et son départ, et un message qui croise une initiative en cours vers sa
 #: personne est retenu (``crossed``) — la tranche se reconstruit depuis la genèse.
-AGENCY = Faculty("agency", state=AgencyState, init=lambda p: AgencyState(), params=AgencyParams, state_version=4)
+def derive(t: Temperament, overrides: Any = None) -> AgencyParams:
+    """L'impulsivité (ADR 0100) : impulsive, elle reprend la parole plus tôt après une initiative et hésite moins
+    longtemps ; au milieu, les valeurs d'avant (30 min, 10 min)."""
+    values: dict[str, Any] = {"refractory_us": round(around(t.impulsivity, 30 * MINUTE, 0.5)),
+                              "hesitation_us": round(around(t.impulsivity, 10 * MINUTE, 0.5))}
+    values.update(dict(overrides or {}))
+    return AgencyParams(**values)
+
+
+AGENCY = Faculty("agency", state=AgencyState, init=lambda p: AgencyState(), params=AgencyParams, derive=derive,
+                 state_version=4)
 #: les adresses dont on garde les hésitations, au plus
 HESITATIONS_KEPT = 64
 

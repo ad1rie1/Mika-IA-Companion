@@ -67,8 +67,8 @@ IGNORED, HEARD, ACHIEVED, STUCK, PROMISE = "ignored", "heard", "achieved", "stuc
 
 def esteem(s: SelfState, now: int, p: SelfParams) -> float:
     if not s.esteem_at:
-        return s.esteem
-    return 0.5 + (s.esteem - 0.5) * 0.5 ** (max(0, now - s.esteem_at) / p.esteem_half_life_us)
+        return p.esteem_rest  # jamais bousculée : là où elle revient (ADR 0100)
+    return p.esteem_rest + (s.esteem - p.esteem_rest) * 0.5 ** (max(0, now - s.esteem_at) / p.esteem_half_life_us)
 
 
 def _knock(s: SelfState, delta: float, at: int, p: SelfParams, cause: str) -> SelfState:

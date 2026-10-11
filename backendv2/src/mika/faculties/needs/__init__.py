@@ -82,7 +82,7 @@ from mika.vocab.lineage import admits
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase, phrases
 from mika.vocab.privacy import Sensitivity, hearable
-from mika.vocab.temperament import Temperament, geometric, lerp
+from mika.vocab.temperament import Temperament, around, geometric, lerp
 from mika.vocab.words import elided
 
 
@@ -244,10 +244,13 @@ class NeedsParams(BaseModel):
 def derive(t: Temperament, overrides: Any = None) -> NeedsParams:
     """La sociabilité raccourcit l'horizon du besoin de compagnie ; la
     curiosité, celui d'apprendre ; l'optimisme repousse le vide et l'adoucit
-    (au milieu : deux heures, 0,15 au début)."""
+    (au milieu : deux heures, 0,15 au début) ; la timidité (ADR 0100) fait qu'une inconnue, une connaissance la
+    comblent moins (au milieu : 0,3 et 0,6, les valeurs d'avant)."""
     values = {"tau_social_h": 4.0 * (1.5 - t.sociability), "tau_curiosity_h": 8.0 * (1.5 - t.curiosity),
               "idle_before_empty_us": round(geometric(1.0, 4.0, t.optimism) * HOUR),
-              "empty_intensity": round(lerp(0.2, 0.1, t.optimism), 3)}
+              "empty_intensity": round(lerp(0.2, 0.1, t.optimism), 3),
+              "stranger_company": around(t.shyness, 0.3, 0.5),
+              "acquaintance_company": around(t.shyness, 0.6, 1 / 1.4)}
     values.update(dict(overrides or {}))
     return NeedsParams(**values)
 
@@ -969,7 +972,7 @@ def _reunited(s: NeedsState, frame: Frame, ev: Any, ports: Any) -> list[Any]:
 def _reunited_felt(e, cx) -> Appraisal:
     """Après la solitude, un soulagement ; après l'ennui, de la joie : sa compagnie lui fait du bien."""
     emotion = Emotion.RELIEVED if e.data.after == c.LONELY else Emotion.HAPPY
-    return Appraisal(emotion, e.data.intensity, reason=causes.COMPANY)
+    return Appraisal(emotion, e.data.intensity, reason=causes.COMPANY, relational=True)  # suit la contagion (ADR 0100)
 
 
 # ── Prompt ────────────────────────────────────────────────────────────────

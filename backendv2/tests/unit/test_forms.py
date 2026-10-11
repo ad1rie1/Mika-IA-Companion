@@ -31,6 +31,7 @@ from mika.kernel.forms import (
     visible,
     within,
 )
+from mika.vocab import temperament
 from mika.vocab.affect import Emotion
 from mika.vocab.temperament import Temperament
 
@@ -244,21 +245,28 @@ def test_unknown_widget_is_refused():
 
 
 def test_real_temperament():
+    """Sa matrice de personnalité (ADR 0100) : des curseurs que la console arrête à 0,1 et 0,9, rangés en familles,
+    l'humeur de fond et deux choix."""
     f = fields_by_path(Temperament)
-    sliders = [p for p in f if p != "background"]
-    assert len(sliders) == 8
-    assert all((f[p].kind, f[p].lo, f[p].hi, f[p].readonly, f[p].advanced) == ("slider", 0.0, 1.0, False, False)
-               for p in sliders)
+    sliders = [p for p in f if f[p].kind == "slider"]
+    assert sorted(sliders) == sorted(temperament.SLIDERS) and len(sliders) == 28
+    assert all((f[p].lo, f[p].hi, f[p].readonly, f[p].advanced) == (0.1, 0.9, False, False) for p in sliders)
     assert all(f[p].help and f[p].label != p for p in sliders)  # chaque curseur dit ce qu'il pilote
+    families = {temperament.FEEL, temperament.SHOW, temperament.ACT, temperament.OTHERS, temperament.SELF,
+                temperament.BODY, "Ses particularités"}
+    assert f["notes"].kind == "mapping" and dict(f["notes"].keys)["reactivity"] == f["reactivity"].label
+    assert {f[p].group for p in f} <= families
     assert f["background"].kind == "select" and len(f["background"].choices) == 29
     assert ("happy", "contente") in f["background"].choices
+    assert f["reaction"].kind == f["defense"].kind == "select"
+    assert f["reaction"].choices[0][0] == f["defense"].choices[0][0] == ""  # rien de particulier, par défaut
 
 
 def test_real_persona():
     f = fields_by_path(PersonaDoc)
     assert f["traits"].kind == "lines" and f["name"].kind == "text"
     assert f["temperament"].kind == "group"
-    assert f["temperament.reactivity"].group == "Tempérament" and f["temperament.reactivity"].lo == 0.0
+    assert f["temperament.reactivity"].group == temperament.FEEL and f["temperament.reactivity"].lo == 0.1
     assert f["traits"].group == "Caractère" and not f["traits"].advanced
 
 

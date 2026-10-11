@@ -30,6 +30,7 @@ from mika.faculties.self.model import (
 from mika.faculties.self.narrative import changes_since
 from mika.faculties.self.night import lived_day, told_day
 from mika.faculties.self.records import Dream, Journal, Mark
+from mika.kernel import forms
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -57,6 +58,7 @@ from mika.kernel.inspect import (
     num_fr,
     pct_fr,
 )
+from mika.vocab import temperament as T
 from mika.vocab.affect import emotion_cell
 from mika.vocab.interests import ASLEEP, PERSONA, PRESENT, VIVID, subject_of
 from mika.vocab.people import named_label
@@ -244,17 +246,26 @@ def _persona(s: SelfState) -> list[Block]:
         ("ce qui est vrai d'elle", _lines(doc.facts)),
     ), title="La persona", columns=2)
     rows: list[tuple[Cell, ...]] = []
-    for name in type(t).model_fields:
-        if name == "background":
-            continue
-        label, drives = TEMPERAMENT_FR.get(name, (name, "—"))
+    knobs = {f.path: f for f in forms.describe(type(t))}
+    for name in T.SLIDERS:
+        knob = knobs.get(name)
+        label, drives = TEMPERAMENT_FR.get(name, ((knob.label if knob else name).lower(),
+                                                  knob.help if knob else "—"))
         value = float(getattr(t, name))
-        rows.append((label, Meter(value, number(value)), Text(drives, kind="muted")))
+        rows.append((label, Meter(value, number(value)), Text(drives, kind="muted", clamp=CLAMP)))
     rows.append(("humeur de fond", emotion_cell(t.background), Text("l'humeur vers laquelle son repos penche et "
                                                                      "avec laquelle elle résonne", kind="muted")))
+    key = T.profile_of(t)
     temperament = Table((Column("curseur"), Column("valeur"), Column("ce qu'il pilote")), tuple(rows),
-                        title="Le tempérament (0,5 = comme la plupart des gens)")
-    return [persona, temperament]
+                        title="Le tempérament (0,5 = comme la plupart des gens) — profil : "
+                              + (T.PROFILES[key].label if key else "ajusté à la main"))
+    labels = dict(T.NOTE_KEYS)
+    character = Fields((
+        ("quand on la blesse", dict(T.REACTIONS).get(t.reaction, t.reaction) or Text("—", kind="muted")),
+        ("quand on la touche", dict(T.DEFENSES).get(t.defense, t.defense) or Text("—", kind="muted")),
+        *((f"précision · {labels.get(k, k).lower()}", Text(note, clamp=CLAMP)) for k, note in sorted(t.notes.items())),
+    ), title="Son caractère, dit au modèle comme des tendances", columns=2)
+    return [persona, temperament, character]
 
 
 @SELF.inspect("soi", title="Estime et récit", section="vie", order=50,

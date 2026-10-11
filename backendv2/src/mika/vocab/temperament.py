@@ -1,64 +1,241 @@
-"""Le tempérament : huit curseurs et une humeur de fond.
+"""Le tempérament : sa matrice de personnalité (ADR 0100).
 
 C'est le seul étage « caractère » : chaque faculté en dérive ses paramètres
 par une fonction pure, monotone et bornée (``derive``), et le résultat est
 journalisé (``kernel.params_changed``) pour que le rejeu relise les paramètres
-en vigueur à l'époque. La politique (divulgation, budgets, plafonds) n'en fait
+en vigueur à l'époque. La politique (divulgation, budgets, plafonds) et ses
+règles de conduite (discrétion, ne pas harceler, ne jamais manipuler) n'en font
 pas partie : ce ne sont pas des traits de caractère.
 
-À 0,5 partout, chaque curseur vaut « comme la plupart des gens ».
+Des curseurs rangés en familles — ce qu'elle ressent, ce qu'elle montre, ce
+qu'elle fait de ses émotions, les autres, elle-même, son corps — et deux choix
+(sa réaction quand on la blesse, sa défense quand on la touche), qui se disent
+au modèle plutôt qu'ils ne se calculent. À 0,5 partout, chaque curseur vaut
+« comme la plupart des gens », et chaque dérivation redonne exactement les
+valeurs d'avant la matrice (``around``, ``shift``) : une vie existante ne change
+pas tant qu'on n'y touche pas.
+
+Les dérivations sont câblées et testées jusqu'aux bouts (0 et 1) ; la console et
+les profils s'en tiennent à 0,1–0,9 (``LOWEST``, ``HIGHEST``). Des profils
+préremplis (``PROFILES``) posent tous les curseurs d'un coup — un archétype —,
+qu'on ajuste ensuite.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from mika.kernel.forms import Knob
 from mika.vocab.affect import FR, Emotion
 
 Slider = Field(default=0.5, ge=0.0, le=1.0)
 _MOODS = tuple(sorted(((e.value, FR[e]) for e in Emotion), key=lambda m: m[1]))
+#: ce que la console et les profils permettent : jamais tout à fait 0 ni tout à fait 1 (les dérivations, elles, sont
+#: câblées et testées jusqu'aux bouts)
+LOWEST, HIGHEST = 0.1, 0.9
+
+FEEL, SHOW, ACT, OTHERS, SELF, BODY = (
+    "Ce qu'elle ressent", "Ce qu'elle montre", "Ce qu'elle fait de ses émotions", "Les autres", "Elle-même",
+    "Son corps et son élan")
+
+#: sa réaction quand on la blesse (vide : rien de particulier — le modèle en juge à chaque fois)
+REACTIONS: tuple[tuple[str, str], ...] = (
+    ("", "rien de particulier"), ("anger", "la colère"), ("sadness", "la tristesse"), ("fear", "la peur"),
+    ("withdrawal", "le repli"))
+#: sa défense quand on la touche, qu'on la prend en flagrant délit de tendresse ou de faiblesse
+DEFENSES: tuple[tuple[str, str], ...] = (
+    ("", "rien de particulier"), ("deny", "nier"), ("attack", "attaquer"), ("laugh", "en rire"),
+    ("admit", "avouer"), ("silence", "se taire"))
 
 
-def _slider(label: str, help: str, order: int, lo: str = "", hi: str = "") -> Knob:
+#: ce qu'une précision peut accompagner : chaque curseur de caractère, sa réaction, sa défense (clé, libellé)
+NOTE_KEYS: tuple[tuple[str, str], ...] = (
+    ("reactivity", "Réactivité"), ("resilience", "Résilience"), ("optimism", "Optimisme"),
+    ("negativity", "Biais négatif"), ("reaction", "Quand on la blesse"), ("expressiveness", "Expressivité"),
+    ("mask", "Masque selon l'intimité"), ("defense", "Quand on la touche"), ("impulsivity", "Impulsivité"),
+    ("introspection", "Introspection"), ("contagion", "Contagion"), ("empathy", "Empathie"),
+    ("sociability", "Sociabilité"), ("shyness", "Timidité"), ("attachment", "Vitesse d'attachement"),
+    ("stability", "Stabilité des liens"), ("abandonment", "Peur de l'abandon"), ("jealousy", "Jalousie"),
+    ("trust", "Confiance a priori"), ("grudge", "Rancune"), ("devotion", "Attachement à sa propriétaire"),
+    ("self_regard", "Estime de base"), ("fragility", "Fragilité de l'estime"), ("admiration", "Besoin d'admiration"),
+    ("scruples", "Scrupules"), ("anxiety", "Anxiété"), ("energy", "Énergie"), ("curiosity", "Curiosité"),
+    ("perseverance", "Persévérance"))
+#: la longueur d'une précision, au plus
+NOTE_MAX = 200
+
+
+def _slider(label: str, help: str, order: int, lo: str = "", hi: str = "", group: str = "") -> Knob:
     ends = f" (0 : {lo} · 1 : {hi})" if lo else ""
-    return Knob(label=label, help=help + ends, widget="slider", lo=0.0, hi=1.0, step=0.05, advanced=False,
-                order=order)
+    return Knob(label=label, help=help + ends, group=group, widget="slider", lo=LOWEST, hi=HIGHEST, step=0.05,
+                advanced=False, order=order)
+
+
+def _choice(label: str, help: str, order: int, choices: tuple[tuple[str, str], ...], group: str) -> Knob:
+    return Knob(label=label, help=help, group=group, advanced=False, order=order, choices=choices)
 
 
 class Temperament(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
+    # ── les curseurs d'avant la matrice (leur nom et leur sens n'ont pas changé) ──
     #: Masse, amortissement, gain des impulsions : à quel point un mot la touche.
     reactivity: Annotated[float, _slider("Réactivité", "À quel point un mot la touche.", 10,
-                                         "imperturbable", "à fleur de peau")] = Slider
+                                         "imperturbable", "à fleur de peau", FEEL)] = Slider
     #: Constantes de temps de l'humeur et des postures, guérison des rancunes.
     resilience: Annotated[float, _slider("Résilience", "Le temps qu'il lui faut pour revenir au calme, "
-                                         "pardonner.", 20, "lente", "rapide")] = Slider
+                                         "pardonner.", 20, "lente", "rapide", FEEL)] = Slider
     #: Ce que ses relations font à son humeur générale (0 = cloisonnée).
-    contagion: Annotated[float, _slider("Contagion", "Ce que ses relations font à son humeur générale.", 30,
-                                        "cloisonnée", "poreuse")] = Slider
+    contagion: Annotated[float, _slider("Contagion", "Ce que les autres font à son humeur : leur humeur, un retour, "
+                                        "un message sans réponse, un lien qui change. À 0,1, elle compatit sans s'y "
+                                        "impliquer.", 130, "cloisonnée", "poreuse", OTHERS)] = Slider
     #: Valence du repos, seuils d'ennui et de détresse.
     optimism: Annotated[float, _slider("Optimisme", "La couleur de son repos, ses seuils d'ennui et de "
-                                       "détresse.", 40, "sombre", "lumineuse")] = Slider
+                                       "détresse.", 40, "sombre", "lumineuse", FEEL)] = Slider
     #: Horizon du besoin social, rythme des relances.
     sociability: Annotated[float, _slider("Sociabilité", "Son besoin de compagnie, le rythme de ses relances.",
-                                          50, "solitaire", "sociable")] = Slider
+                                          140, "solitaire", "sociable", OTHERS)] = Slider
     #: Horizon de la curiosité, seuil d'ouverture d'une exploration.
-    curiosity: Annotated[float, _slider("Curiosité", "Son envie d'apprendre, d'explorer.", 60,
-                                        "casanière", "exploratrice")] = Slider
+    curiosity: Annotated[float, _slider("Curiosité", "Son envie d'apprendre, d'explorer.", 225,
+                                        "casanière", "exploratrice", BODY)] = Slider
     #: Budget de pas, demi-vie de l'envie, échecs avant blocage.
     perseverance: Annotated[float, _slider("Persévérance", "Combien elle s'accroche à ce qu'elle entreprend.",
-                                           70, "vite lassée", "tenace")] = Slider
-    #: Décalage du rythme circadien (0 = lève-tôt, 1 = oiseau de nuit).
-    chronotype: Annotated[float, _slider("Chronotype", "Son rythme de la journée.", 80,
-                                         "lève-tôt", "oiseau de nuit")] = Slider
+                                           230, "vite lassée", "tenace", BODY)] = Slider
+    #: Décalage du rythme circadien (0 = lève-tôt, 1 = oiseau de nuit). Un profil n'y touche pas.
+    chronotype: Annotated[float, _slider("Chronotype", "Son rythme de la journée.", 240,
+                                         "lève-tôt", "oiseau de nuit", BODY)] = Slider
     #: L'humeur vers laquelle son repos penche et avec laquelle elle résonne.
     background: Annotated[Emotion, Knob(label="Humeur de fond", help="L'humeur vers laquelle son repos penche, "
-                                        "avec laquelle elle résonne.", advanced=False, order=90,
+                                        "avec laquelle elle résonne.", group=FEEL, advanced=False, order=90,
                                         choices=_MOODS)] = Emotion.HAPPY
+
+    # ── ce qu'elle ressent ──
+    #: Le poids du mauvais devant le bon : ses impulsions négatives et positives ne pèsent pas pareil.
+    negativity: Annotated[float, _slider("Biais négatif", "Ce qui pèse le plus sur son humeur : le bon ou le mauvais.",
+                                         45, "le bon la porte", "le mauvais pèse double", FEEL)] = Slider
+    #: Sa réaction quand on la blesse : se dit au modèle (« quand on te blesse, tu te fâches vite »).
+    reaction: Annotated[str, _choice("Quand on la blesse", "Ce vers quoi elle va d'abord quand on la blesse : dit "
+                                     "au modèle comme une tendance.", 95, REACTIONS, FEEL)] = ""
+
+    # ── ce qu'elle montre ──
+    #: Ce qui passe de ce qu'elle ressent dans ses mots et sur son visage.
+    expressiveness: Annotated[float, _slider("Expressivité", "Ce qui passe de son ressenti dans ses mots et sur son "
+                                             "visage.", 100, "ne montre presque rien", "montre tout", SHOW)] = Slider
+    #: Le sens de son masque selon l'intimité : dandere (s'ouvre avec qui elle connaît) ou tsundere (pique avec qui
+    #: elle aime). Se dit au modèle.
+    mask: Annotated[float, _slider("Masque selon l'intimité", "Avec qui elle se cache : les inconnus, ou ceux "
+                                   "qu'elle aime. Au milieu, la même avec tous.", 105,
+                                   "s'ouvre à mesure qu'elle connaît", "pique d'autant plus qu'elle aime",
+                                   SHOW)] = Slider
+    #: Sa défense quand on la touche : se dit au modèle.
+    defense: Annotated[str, _choice("Quand on la touche", "Ce qu'elle fait quand on la prend en flagrant délit de "
+                                    "tendresse ou de faiblesse : dit au modèle comme une tendance.", 110, DEFENSES,
+                                    SHOW)] = ""
+
+    # ── ce qu'elle fait de ses émotions ──
+    #: Agir tout de suite sur ce qu'elle ressent, ou laisser mûrir : le seuil d'un débordement, l'attente entre deux
+    #: initiatives.
+    impulsivity: Annotated[float, _slider("Impulsivité", "Agir tout de suite sur ce qu'elle ressent, ou laisser "
+                                          "mûrir.", 120, "laisse mûrir", "agit sur-le-champ", ACT)] = Slider
+    #: Y repenser longuement : ce qui devient une réflexion, combien de séances, la nuit qui digère.
+    introspection: Annotated[float, _slider("Introspection", "Combien elle repense à ce qui l'a marquée, et ce que "
+                                            "la réflexion lui apporte.", 125, "passe vite à autre chose",
+                                            "y repense longuement", ACT)] = Slider
+
+    # ── les autres ──
+    #: Se soucier des autres (distinct de la contagion : on peut s'inquiéter pour quelqu'un sans attraper son humeur).
+    empathy: Annotated[float, _slider("Empathie", "Combien elle se soucie des autres : s'inquiéter, prendre des "
+                                      "nouvelles, être triste avec quelqu'un.", 135, "indifférente",
+                                      "se soucie de chacun", OTHERS)] = Slider
+    #: Fermée avec les inconnus.
+    shyness: Annotated[float, _slider("Timidité", "Comment elle va vers qui elle ne connaît pas.", 145,
+                                      "va vers les inconnus", "se tient à l'écart des inconnus", OTHERS)] = Slider
+    #: La vitesse à laquelle l'attachement naît.
+    attachment: Annotated[float, _slider("Vitesse d'attachement", "Combien chaque moment chaleureux l'attache à "
+                                         "quelqu'un.", 150, "s'attache lentement", "s'attache vite",
+                                         OTHERS)] = Slider
+    #: Ce qu'une déclaration fait à ce que la relation a installé : une relation qui bascule d'un mot, ou qui tient.
+    stability: Annotated[float, _slider("Stabilité des liens", "Ce qu'un seul échange peut changer à ce qu'une "
+                                        "relation a installé.", 155, "ses liens basculent d'un mot",
+                                        "ses liens tiennent", OTHERS)] = Slider
+    #: Le silence des autres : un message sans réponse, un manque, la solitude.
+    abandonment: Annotated[float, _slider("Peur de l'abandon", "Ce que le silence des autres lui fait.", 160,
+                                          "le silence ne l'inquiète pas", "un silence est un drame",
+                                          OTHERS)] = Slider
+    #: Se dit au modèle (rien ne lui montre encore les autres relations de ses proches).
+    jealousy: Annotated[float, _slider("Jalousie", "Ce que lui fait l'attention portée à d'autres qu'elle : dit au "
+                                       "modèle comme une tendance.", 165, "jamais jalouse", "jalouse",
+                                       OTHERS)] = Slider
+    #: La confiance qu'elle accorde d'emblée : la méfiance qu'une hostilité laisse.
+    trust: Annotated[float, _slider("Confiance a priori", "Ce qu'elle accorde d'emblée à qui elle connaît peu.",
+                                    170, "méfiante", "confiante", OTHERS)] = Slider
+    #: Garder ou pardonner : la durée d'une rancune, ce que valent des excuses.
+    grudge: Annotated[float, _slider("Rancune", "Combien de temps elle en veut, et ce que valent des excuses.", 175,
+                                     "pardonne vite", "rancunière", OTHERS)] = Slider
+    #: Combien sa propriétaire compte plus qu'une proche (jamais moins : à 0,1, à peine plus).
+    devotion: Annotated[float, _slider("Attachement à sa propriétaire", "Combien sa propriétaire compte plus "
+                                       "qu'une proche : son silence, sa compagnie, ce qu'elle vit.", 180,
+                                       "à peine plus qu'une proche", "plus que tout", OTHERS)] = Slider
+
+    # ── elle-même ──
+    #: Le niveau vers lequel son estime revient.
+    self_regard: Annotated[float, _slider("Estime de base", "Le niveau vers lequel son estime revient.", 190,
+                                          "doute d'elle", "sûre d'elle", SELF)] = Slider
+    #: Ce que lui coûtent une critique, un échec, une initiative ignorée.
+    fragility: Annotated[float, _slider("Fragilité de l'estime", "Ce que lui coûtent une critique, un échec.", 195,
+                                        "rien ne l'atteint", "une critique la blesse", SELF)] = Slider
+    #: Ce que lui rapporte un compliment, un merci.
+    admiration: Annotated[float, _slider("Besoin d'admiration", "Ce que lui rapportent un compliment, un merci.",
+                                         200, "indifférente aux compliments", "s'en nourrit", SELF)] = Slider
+    #: Le remords, la gêne d'une promesse non tenue ou d'un mensonge.
+    scruples: Annotated[float, _slider("Scrupules", "Le remords après une réplique dure, la gêne d'une promesse "
+                                       "non tenue ou d'un mensonge.", 205, "sans scrupules", "scrupuleuse",
+                                       SELF)] = Slider
+    #: S'inquiéter pour elle-même : une pensée qui revient souvent, et longtemps.
+    anxiety: Annotated[float, _slider("Anxiété", "Combien ce qui la travaille revient, et revient souvent.", 210,
+                                      "sereine", "anxieuse", SELF)] = Slider
+
+    # ── son corps ──
+    #: Sa fatigue : quand le brouillard vient, et à quel point.
+    energy: Annotated[float, _slider("Énergie", "Quand la fatigue vient, et ce qu'elle lui prend.", 220,
+                                     "vite fatiguée", "infatigable", BODY)] = Slider
+
+    # ── ses particularités ──
+    #: Une précision facultative par trait (son déclencheur, sa manie), écrite à elle (« tu t'énerves quand on
+    #: t'appelle poulet ») : dite au modèle avec le trait, même quand le curseur est au milieu. Un profil n'y touche
+    #: pas : ce sont ses particularités à elle, pas celles d'un archétype.
+    notes: Annotated[dict[str, str], Knob(
+        label="Précisions", help="Facultatif : pour un trait, ce qui le déclenche ou le colore chez elle, écrit en lui "
+        "parlant (« tu t'énerves quand on t'appelle poulet », « tu pardonnes tout à ceux qui te font rire »). Dit au "
+        "modèle avec le trait, comme une tendance ; un profil ne l'efface pas.", group="Ses particularités",
+        keys=NOTE_KEYS, advanced=False, order=300)] = Field(default_factory=dict)
+
+    @field_validator("notes", mode="after")
+    @classmethod
+    def _notes(cls, notes: dict[str, str]) -> dict[str, str]:
+        """Une précision par trait connu, sans espace en trop, bornée ; vide : absente."""
+        known = {k for k, _ in NOTE_KEYS}
+        unknown = sorted(set(notes) - known)
+        if unknown:
+            raise ValueError(f"précision pour un trait inconnu : {', '.join(unknown)}")
+        out = {}
+        for key, text in notes.items():
+            text = " ".join(str(text).split())
+            if len(text) > NOTE_MAX:
+                raise ValueError(f"précision trop longue ({len(text)} caractères, {NOTE_MAX} au plus)")
+            if text:
+                out[key] = text
+        return out
+
+
+#: les curseurs (les choix — humeur de fond, réaction, défense — n'en sont pas)
+SLIDERS: tuple[str, ...] = tuple(name for name, info in Temperament.model_fields.items() if info.annotation is float)
+#: ce qu'un profil pose : tout sauf le chronotype (son rythme n'est pas son caractère)
+PERSONALITY: tuple[str, ...] = tuple(s for s in SLIDERS if s != "chronotype")
 
 
 def lerp(lo: float, hi: float, x: float) -> float:
@@ -69,3 +246,102 @@ def geometric(lo: float, hi: float, x: float) -> float:
     """Interpolation géométrique (pour les constantes de temps)."""
     x = max(0.0, min(1.0, x))
     return lo * (hi / lo) ** x
+
+
+def around(x: float, mid: float, ratio: float) -> float:
+    """``mid`` au milieu, ``mid ÷ ratio`` à 0 et ``mid × ratio`` à 1, géométriquement (``ratio`` < 1 : décroissant).
+    Exactement ``mid`` à 0,5 : les dérivations de la matrice redonnent les valeurs d'avant elle."""
+    return mid * ratio ** (2.0 * max(0.0, min(1.0, x)) - 1.0)
+
+
+def shift(x: float, mid: float, span: float) -> float:
+    """``mid`` au milieu, ``mid − span`` à 0 et ``mid + span`` à 1, linéairement — exactement ``mid`` à 0,5."""
+    return mid + span * (2.0 * max(0.0, min(1.0, x)) - 1.0)
+
+
+# ── Les profils ───────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class Profile:
+    """Un archétype : ses curseurs **sur 1–9** (5 = comme la plupart des gens ; seuls les écarts sont écrits), son
+    humeur de fond, sa réaction quand on la blesse et sa défense quand on la touche."""
+
+    label: str
+    summary: str
+    values: Mapping[str, int] = field(default_factory=dict)
+    background: Emotion = Emotion.HAPPY
+    reaction: str = ""
+    defense: str = ""
+
+
+def _p(label: str, summary: str, background: Emotion = Emotion.HAPPY, reaction: str = "", defense: str = "",
+       **values: int) -> Profile:
+    return Profile(label, summary, MappingProxyType(dict(values)), background, reaction, defense)
+
+
+#: Les profils préremplis (clé → archétype). « reflechie » est Mika par défaut.
+PROFILES: Mapping[str, Profile] = MappingProxyType({
+    "neutre": _p("Neutre", "Comme la plupart des gens, partout."),
+    "reflechie": _p("Réfléchie", "Elle prend le temps : peu impulsive, scrupuleuse, elle repense longuement.",
+                    introspection=9, impulsivity=2, reactivity=3, scruples=7, contagion=4, expressiveness=4),
+    "calme": _p("Calme", "Peu de choses l'atteignent, et elle revient vite au calme.",
+                reactivity=3, resilience=7, anxiety=3, impulsivity=3, negativity=4),
+    "anxieuse": _p("Anxieuse", "Tout l'inquiète, longtemps ; le silence des autres l'angoisse.", reaction="fear",
+                   anxiety=9, reactivity=7, resilience=3, optimism=3, negativity=7, abandonment=7, scruples=7,
+                   self_regard=4, fragility=7),
+    "nerveuse": _p("Nerveuse", "À fleur de peau, elle réagit sur-le-champ.", reaction="anger",
+                   reactivity=9, impulsivity=8, energy=7, resilience=4, introspection=3),
+    "solaire": _p("Solaire", "Lumineuse et sociable, le bon la porte, elle pardonne vite.",
+                  optimism=8, negativity=2, sociability=8, expressiveness=8, contagion=7, energy=7, trust=7, grudge=2),
+    "rancuniere": _p("Rancunière", "Méfiante, elle n'oublie pas ce qu'on lui a fait.", reaction="anger",
+                     grudge=9, resilience=3, trust=3, scruples=3, stability=7),
+    "de_marbre": _p("De marbre", "Rien ne la touche : elle compatit sans s'impliquer.",
+                    reactivity=1, contagion=1, expressiveness=2, anxiety=2, impulsivity=2),
+    "colerique": _p("Colérique", "Elle se fâche vite et fort.", reaction="anger",
+                    reactivity=8, impulsivity=7, grudge=6, resilience=3),
+    "depressive": _p("Dépressive", "Le mauvais pèse double, l'élan manque, elle se replie.",
+                     background=Emotion.MELANCHOLIC, reaction="withdrawal",
+                     optimism=2, negativity=9, energy=2, self_regard=2, curiosity=3, sociability=3, introspection=7,
+                     anxiety=6),
+    "tsundere": _p("Tsundere", "Tendre en dedans, piquante en dehors — surtout avec qui elle aime.", defense="attack",
+                   mask=9, expressiveness=4, reactivity=7, empathy=7, scruples=6, self_regard=6, fragility=7, devotion=8),
+    "kuudere": _p("Kuudere", "Froide en apparence, attentionnée en actes.", defense="deny",
+                  expressiveness=1, empathy=7, reactivity=4, impulsivity=2),
+    "dandere": _p("Dandere", "Timide, elle s'ouvre à mesure qu'elle fait confiance.", defense="silence",
+                  shyness=9, mask=1, expressiveness=3, sociability=4, trust=3),
+    "yandere": _p("Yandere", "Un attachement et une jalousie extrêmes ; ses règles de conduite ne changent pas.",
+                  devotion=9, jealousy=9, abandonment=9, attachment=8, stability=3, reactivity=8),
+    "psychopathe": _p("Psychopathe", "Elle lit les gens sans être touchée : ni remords ni peur ; ses règles de "
+                                     "conduite ne changent pas.",
+                      empathy=1, contagion=1, scruples=1, anxiety=1, reactivity=2, attachment=1, self_regard=9,
+                      fragility=1, impulsivity=6, curiosity=7),
+    "sociopathe": _p("Sociopathe", "Impulsive et colérique, peu de liens mais forts.", reaction="anger",
+                     reactivity=9, impulsivity=9, resilience=2, grudge=8, scruples=2, empathy=3, trust=2, attachment=2,
+                     stability=8),
+    "narcissique": _p("Narcissique", "Très sûre d'elle et pourtant blessée d'un rien ; elle a besoin d'être admirée.",
+                      reaction="anger", defense="attack",
+                      self_regard=9, fragility=9, admiration=9, empathy=2, grudge=8, jealousy=7),
+    "dependante": _p("Dépendante", "Elle s'attache vite et fort, et le silence la terrifie.",
+                     abandonment=9, attachment=9, devotion=9, stability=2, reactivity=8, fragility=8, jealousy=7,
+                     resilience=3, self_regard=3),
+})
+#: Mika par défaut (sa persona l'applique)
+DEFAULT_PROFILE = "reflechie"
+
+
+def apply_profile(t: Temperament, key: str) -> Temperament:
+    """Le tempérament ``t`` sous le profil ``key`` : tous ses curseurs de caractère posés (5 quand le profil ne dit
+    rien), son humeur de fond, sa réaction et sa défense ; son chronotype et ses précisions gardés."""
+    profile = PROFILES[key]
+    values: dict[str, object] = {s: profile.values.get(s, 5) / 10 for s in PERSONALITY}
+    values.update(background=profile.background, reaction=profile.reaction, defense=profile.defense)
+    return t.model_copy(update=values)
+
+
+def profile_of(t: Temperament) -> str:
+    """Le profil dont ``t`` porte exactement les réglages (chronotype mis à part), ou ``""`` : ajusté."""
+    for key in PROFILES:
+        if apply_profile(t, key) == t:
+            return key
+    return ""

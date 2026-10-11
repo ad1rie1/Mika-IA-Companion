@@ -26,10 +26,15 @@ from mika.runtime.bootstrap import Kernel
 from mika.sim.clock import SimClock
 from mika.sim.llm.scripted import ScriptedLLM
 from mika.vocab.episodes import VOICE_ROLES, Role
+from mika.vocab.temperament import Temperament
 
 PARIS = ZoneInfo("Europe/Paris")
 PERSONA_PATH = Path(__file__).resolve().parents[2] / "persona" / "mika.yaml"
-DOC = load(PERSONA_PATH)
+#: sa persona telle qu'elle est livrée — son tempérament est un profil choisi pour elle (« Réfléchie », ADR 0100)
+SHIPPED = load(PERSONA_PATH)
+#: la même au tempérament du milieu : les tests de mécanique mesurent « comme la plupart des gens », pas le caractère
+#: qu'on a choisi pour elle (un profil se teste comme tel, ``tests/unit/test_temperament_matrix.py``)
+DOC = SHIPPED.model_copy(update={"temperament": Temperament()})
 
 
 def at_paris(year: int, month: int, day: int, hour: int, minute: int = 0) -> int:

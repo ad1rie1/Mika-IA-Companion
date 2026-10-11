@@ -49,7 +49,7 @@ from mika.vocab import circadian
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
-from mika.vocab.temperament import Temperament
+from mika.vocab.temperament import Temperament, around, shift
 from mika.vocab.words import fold
 
 
@@ -125,7 +125,13 @@ class BodyParams(BaseModel):
 
 
 def derive(t: Temperament, overrides: Mapping[str, Any] | None = None) -> BodyParams:
-    return BodyParams(shift_minutes=round((t.chronotype - 0.5) * 240), **dict(overrides or {}))
+    """Le chronotype décale son rythme ; l'énergie (ADR 0100) dit quand le brouillard de la fatigue vient et ce que
+    la somnolence lui prend (au milieu : 0,35 et 0,65, les valeurs d'avant)."""
+    values: dict[str, Any] = {"shift_minutes": round((t.chronotype - 0.5) * 240),
+                              "tired_below": shift(t.energy, 0.35, -0.12),
+                              "drowsy_depth": around(t.energy, 0.65, 1 / 1.25)}
+    values.update(dict(overrides or {}))
+    return BodyParams(**values)
 
 
 @dataclass(frozen=True, slots=True)

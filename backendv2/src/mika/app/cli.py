@@ -39,6 +39,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+import yaml
+
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.llm.claude_code import FORBIDDEN, ClaudeCodeBackend, ClaudeCodeError, runtime_dir
@@ -52,12 +54,15 @@ from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
 from mika.adapters.web.accounts import Accounts, password_problems
 from mika.app import backup, composition, datadir
+from mika.app import persona as persona_file
 from mika.app.composition import faculties, for_simulation
+from mika.app.paths import PERSONA
 from mika.app.server import serve
 from mika.app.settings import SecretBox, Settings
 from mika.app.teams import TeamsDesk
 from mika.app.wakeups import WakeupDesk
 from mika.contracts import identity as identity_c
+from mika.contracts.self_ import PersonaDoc
 from mika.kernel import forms
 from mika.kernel.codec import digest
 from mika.kernel.events import Origin
@@ -77,6 +82,7 @@ from mika.sim.report import write as write_report
 from mika.sim.selftest import run as sim_selftest
 from mika.sim.sonde import run_probe
 from mika.vocab.people import is_identifiable
+from mika.vocab.temperament import PROFILES, apply_profile, profile_of
 
 #: qui opère depuis la ligne de commande (l'audit ``runtime.operated`` le dit)
 CLI_BY = "ligne de commande"
@@ -298,6 +304,30 @@ async def _with_settings(data: Path, fn):  # type: ignore[no-untyped-def]
         await store.close()
 
 
+def _sim_persona(profile: str) -> PersonaDoc | None:
+    """La persona du simulateur sous un profil de personnalité (ADR 0100), ou ``None`` : la sienne telle quelle."""
+    if not profile:
+        return None
+    doc = persona_file.read(PERSONA)
+    return doc.model_copy(update={"temperament": apply_profile(doc.temperament, profile)})
+
+
+async def profile_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
+    """Sa matrice de personnalité hors ligne (ADR 0100) : les profils et le sien ; avec un nom, l'appliquer à sa
+    persona (comme la console : la persona rédigée prend le pas sur le fichier), journalisé au prochain démarrage."""
+    text = settings.persona_yaml()
+    doc = PersonaDoc.model_validate(yaml.safe_load(text) or {}) if text else persona_file.read(PERSONA)
+    if not args.nom:
+        return {"ok": True, "le_sien": profile_of(doc.temperament) or "ajusté à la main",
+                "profils": {key: f"{p.label} — {p.summary}" for key, p in PROFILES.items()}}
+    doc = doc.model_copy(update={"temperament": apply_profile(doc.temperament, args.nom)})
+    await settings.save_persona(yaml.safe_dump(doc.model_dump(mode="json"), allow_unicode=True, sort_keys=False,
+                                               width=100))
+    return {"ok": True, "appliqué": args.nom,
+            "note": "ses paramètres se rejournalisent au prochain démarrage ; son chronotype et ses précisions sont "
+                    "gardés"}
+
+
 async def teams_command(settings: Settings, args: argparse.Namespace) -> dict[str, object]:
     """Teams (ADR 0069) hors ligne : la clé de l'extension (neuve, montrée une fois ; retirée), et l'état."""
     desk = TeamsDesk(settings, RealClock().now, None)
@@ -345,7 +375,7 @@ def _sonde(data: Path, args: argparse.Namespace) -> int:
         return 2
     # le vrai modèle de plongements quand il est installé (la mémoire rappelle comme en service), sinon le hachage
     embedder = SentenceEmbedder() if importlib.util.find_spec("sentence_transformers") else None
-    out = run_probe(for_simulation(), build_backend(name, spec), args.out, embedder=embedder,
+    out = run_probe(for_simulation(_sim_persona(args.profil)), build_backend(name, spec), args.out, embedder=embedder,
                     which=args.semaine)
     print((out / "bilan.txt").read_text(), end="")
     print(f"la semaine : {out / 'fil.txt'}")
@@ -644,6 +674,11 @@ def _run(argv: list[str] | None) -> int:
     sm.add_argument("--backend", default="", help="sonde : le fournisseur (défaut : celui qui répond, rôle reply)")
     sm.add_argument("--semaine", default="1", choices=["1", "2"],
                     help="sonde : 1 = Adrien, Chloé, Léo ; 2 = Sam (un deuil, un rappel, ses 30 ans), Inès, un salon")
+    sm.add_argument("--profil", default="", choices=["", *PROFILES],
+                    help="run, sonde : la faire vivre sous ce profil de personnalité (sa persona, autrement)")
+    pf = sub.add_parser("profil", help="sa matrice de personnalité (serveur arrêté) : sans nom, les profils et le "
+                                       "sien ; avec un nom, l'appliquer à sa persona")
+    pf.add_argument("nom", nargs="?", choices=list(PROFILES), help="le profil à appliquer (réfléchie, anxieuse…)")
     sv = sub.add_parser("serve", help="la lancer : le serveur du chat et sa console (http://127.0.0.1:8001/"
                                       "inspecteur/)")
     sv.add_argument("--port", type=int, default=8001, help="le port (défaut : 8001)")
@@ -847,7 +882,7 @@ def _run(argv: list[str] | None) -> int:
         return 0 if out["ok"] else 1
     if args.cmd == "sim" and args.action == "run":
         with tempfile.TemporaryDirectory() as tmp:
-            results = run_lane(for_simulation(), Path(tmp))
+            results = run_lane(for_simulation(_sim_persona(args.profil)), Path(tmp))
         path = write_report(results, args.report)
         for r in results:
             print(f"{'✔' if r.ok else '✘'} {r.name} (graine {r.seed}, {r.seconds:.1f} s)")
@@ -937,6 +972,12 @@ def _run(argv: list[str] | None) -> int:
                     "usage": "Authorization: Bearer <jeton> sur POST /api/perceptions"}
 
         print(json.dumps(asyncio.run(_with_settings(args.data, token)), ensure_ascii=False, indent=2))
+        return 0
+    if args.cmd == "profil":
+        if args.nom:
+            datadir.hold(args.data)  # serveur arrêté : sa persona ne change pas sous ses pieds
+        out = asyncio.run(_with_settings(args.data, lambda settings, _store: profile_command(settings, args)))
+        print(json.dumps(out, ensure_ascii=False, indent=2))
         return 0
     if args.cmd == "teams":
         out = asyncio.run(_with_settings(args.data, lambda settings, _store: teams_command(settings, args)))

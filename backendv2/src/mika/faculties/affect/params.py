@@ -15,8 +15,8 @@ from pydantic import BaseModel, ConfigDict
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.dynamics import Oscillator
 from mika.kernel.forms import Knob
-from mika.vocab.affect import FR, Emotion
-from mika.vocab.temperament import Temperament, geometric, lerp
+from mika.vocab.affect import ANCHORS, FR, Emotion
+from mika.vocab.temperament import Temperament, around, geometric, lerp, shift
 
 _MOODS = tuple(sorted(((e.value, FR[e]) for e in Emotion), key=lambda m: m[1]))
 
@@ -77,6 +77,21 @@ def physics_of(t: Temperament) -> dict[str, Any]:
         "fond_tau_us": round(geometric(8.0, 3.0, t.resilience) * HOUR),
         # l'optimisme colore le repos : un peu plus (ou moins) de plaisir quand rien ne se passe
         "rest_valence": round(lerp(-0.12, 0.12, t.optimism), 4),
+        # la matrice de personnalité (ADR 0100) : chaque dérivation redonne au milieu la valeur d'avant elle
+        "negative_gain": around(t.negativity, 1.0, 1.6),
+        "positive_gain": around(t.negativity, 1.0, 1 / 1.6),
+        "face_expressiveness": around(t.expressiveness, 1.0, 1.6),
+        "overflow_floor": shift(t.impulsivity, 0.45, -0.15),
+        "empathy_tenderness": around(t.empathy, 0.3, 2.0),
+        "bond_step": around(t.attachment, 0.01, 2.5),
+        "anchor_alpha": around(t.stability, 0.15, 1 / 2.5),
+        "anchor_history_days": around(t.stability, 14.0, 2.0),
+        "wary_from": around(t.trust, 0.3, 1.8),
+        "wary_us": round(around(t.trust, 14 * DAY, 0.5)),
+        "hostile_heal_steps": max(1, round(around(t.grudge, 6, 1 / 2.5))),
+        "hostile_heal_max_us": round(around(t.grudge, 21 * DAY, 2.0)),
+        "apology_heal": around(t.grudge, 0.3, 1 / 1.8),
+        "apology_distant": around(t.grudge, 0.3, 1 / 1.8),
     }
 
 
@@ -145,6 +160,26 @@ class AffectParams(BaseModel):
     bleed_close: Annotated[float, Knob(
         label="Débordement : proche", group="Contagion selon la proximité", lo=0, hi=2, step=0.05,
         help="Le même multiplicateur pour un proche (toujours sous le plafond du gain d'humeur).")] = 1.2
+
+    #: le biais négatif (ADR 0100) : ce que pèse une impulsion négative, puis positive, sur son humeur et ses postures
+    negative_gain: Annotated[float, Knob(
+        label="Poids d'une impulsion négative", group="Impulsions", lo=0.3, hi=3.0, step=0.05,
+        help="Multiplie le gain de ce qui la tire vers le bas (tristesse, colère, peur…). Dérivé du biais "
+             "négatif : au milieu, 1.")] = 1.0
+    positive_gain: Annotated[float, Knob(
+        label="Poids d'une impulsion positive", group="Impulsions", lo=0.3, hi=3.0, step=0.05,
+        help="Multiplie le gain de ce qui la porte (joie, tendresse, soulagement…). Dérivé du biais négatif : au "
+             "milieu, 1.")] = 1.0
+    #: l'expressivité (ADR 0100) : ce que son visage montre de ce qu'elle ressent
+    face_expressiveness: Annotated[float, Knob(
+        label="Ce que montre son visage", group="Lecture", lo=0.2, hi=3.0, step=0.05,
+        help="Multiplie l'intensité que montrent son visage et ses trames (jamais au-delà du plein). Dérivé de "
+             "l'expressivité : au milieu, 1.")] = 1.0
+
+    def valence_gain(self, emotion: Emotion) -> float:
+        """Le poids d'une impulsion vers cette émotion : le biais négatif (une émotion sans valence : 1)."""
+        v = ANCHORS[emotion][0]
+        return self.negative_gain if v < 0 else self.positive_gain if v > 0 else 1.0
 
     def bleed(self, closeness: str) -> float:
         return {"stranger": self.bleed_stranger, "acquaintance": self.bleed_acquaintance, "friend": self.bleed_friend,

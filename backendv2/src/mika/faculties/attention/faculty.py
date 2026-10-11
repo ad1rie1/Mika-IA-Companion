@@ -91,6 +91,7 @@ from mika.vocab.episodes import Kind
 from mika.vocab.lineage import Lineage
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
+from mika.vocab.temperament import Temperament, around, shift
 
 
 class AttentionParams(BaseModel):
@@ -226,6 +227,14 @@ class AttentionParams(BaseModel):
         label="Une promesse non tenue", group="Promesses", lo=0.0, hi=1.0, step=0.05,
         help="L'intensité de la pensée (« j'avais promis… ») quand une promesse passe son échéance sans être "
              "tenue ; assez forte, elle pousse à le dire à la personne.")] = 0.55
+    unanswered_felt: Annotated[float, Knob(
+        label="Sans réponse : la peine ressentie", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
+        help="Ce qu'elle ressent (un peu de peine, pour elle et envers la personne) quand une initiative reste sans "
+             "réponse. Dérivé de la peur de l'abandon : au milieu, 0,15.")] = 0.15
+    broken_promise_felt: Annotated[float, Knob(
+        label="Promesse non tenue : la gêne ressentie", group="Promesses", lo=0.0, hi=1.0, step=0.05,
+        help="Ce qu'elle ressent (de la gêne, pour elle et envers la personne) quand une promesse passe son échéance "
+             "sans être tenue. Dérivé des scrupules : au milieu, 0,3.")] = 0.3
     unanswered_intensity: Annotated[float, Knob(
         label="Une initiative restée sans réponse", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
         help="L'intensité de la pensée (« Adrien ne m'a pas répondu ») quand une initiative reste sans réponse : un "
@@ -570,8 +579,32 @@ class AttentionState:
 #: v13 : ce qu'elle attend (``anticipated``, ADR 0086).
 #: v14 : la lecture d'un message suit sa réponse, et l'allège dès qu'elle l'a écrite ; l'au revoir est un événement
 #: (``others.farewell``, ADR 0093) ; les souvenirs qui lui reviennent (``reminisced``, ADR 0098).
+def derive(t: Temperament, overrides: Any = None) -> AttentionParams:
+    """La matrice de personnalité (ADR 0100), au milieu les valeurs d'avant elle : les scrupules règlent le remords,
+    la gêne d'une promesse non tenue et d'un mensonge ; l'anxiété, ce qui lui revient en tête, souvent et longtemps ;
+    la peur de l'abandon, ce que lui fait le silence des autres ; l'introspection, ce que la nuit garde comme
+    réflexion."""
+    values: dict[str, Any] = {
+        "remorse_from": shift(t.scruples, 0.6, -0.25),
+        "remorse_intensity": around(t.scruples, 0.55, 1.6),
+        "lie_intensity": around(t.scruples, 0.45, 1.8),
+        "promise_intensity": around(t.scruples, 0.55, 1.6),
+        "broken_promise_felt": around(t.scruples, 0.3, 1.6),
+        "dwell_every_us": round(around(t.anxiety, 30 * MINUTE, 0.5)),
+        "dwell_factor": around(t.anxiety, 0.3, 1.6),
+        "half_life_us": round(around(t.anxiety, 6 * HOUR, 1.6)),
+        "unanswered_felt": around(t.abandonment, 0.15, 2.0),
+        "unanswered_intensity": around(t.abandonment, 0.25, 2.0),
+        "missing_intensity": around(t.abandonment, 0.3, 1.8),
+        "alone_intensity": around(t.abandonment, 0.35, 1.5),
+        "reflective_from": around(t.introspection, 0.25, 1 / 1.6),
+    }
+    values.update(dict(overrides or {}))
+    return AttentionParams(**values)
+
+
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    state_version=14)
+                    derive=derive, state_version=14)
 #: les manques dont on retient la dernière pensée (les plus récents)
 MISSING_KEPT = 64
 #: les souvenirs revenus retenus (un même souvenir ne revient pas tant qu'il y est)
@@ -1306,6 +1339,9 @@ def _emotion(name: str) -> Emotion:
 #: le vide que ``needs`` lui fait déjà sentir (``needs.felt``, borné) — le ressentir une seconde fois serait compter
 #: deux fois la même solitude (S07, ADR 0058)
 NAMES_A_FEELING = frozenset({c.ALONE})
+#: les pensées nées de ce que les autres lui font vivre (un échange, une inquiétude, un manque, un silence) : elles
+#: suivent la contagion du tempérament — cloisonnée, elle y pense sans s'y impliquer (ADR 0100)
+RELATIONAL_ORIGINS = frozenset({c.EXCHANGE, c.CONCERN, c.MISSING, c.UNANSWERED})
 
 
 @ATTENTION.appraisal(c.THOUGHT_BORN)
@@ -1314,7 +1350,7 @@ def _birth_felt(e, cx) -> Appraisal | None:
         return None
     p = params(cx.params)
     return Appraisal(_emotion(e.data.emotion), e.data.intensity * p.birth_appraisal_factor, reason=e.data.origin,
-                     relational=e.data.origin == c.EXCHANGE)
+                     relational=e.data.origin in RELATIONAL_ORIGINS)
 
 
 @ATTENTION.appraisal(c.NOTICED)
@@ -1332,7 +1368,7 @@ def _dwell_felt(e, cx) -> Appraisal | None:
         return None
     p = params(cx.params)
     return Appraisal(_emotion(e.data.emotion), e.data.intensity * p.dwell_factor, reason=causes.THOUGHT_BACK,
-                     relational=e.data.origin == c.EXCHANGE)
+                     relational=e.data.origin in RELATIONAL_ORIGINS)
 
 
 #: la joie d'un retour, selon ce qu'a duré l'absence en multiples du rythme de la relation : à peine quelque chose à
@@ -1357,14 +1393,17 @@ def _met_felt(e, cx) -> list[Appraisal]:
     if d.kind == c.RETURN:
         # enfin : de la joie, pour elle et envers la personne revenue — à la mesure de son absence, et de ce
         # qu'elle est pour elle (sa propriétaire, davantage : ``social.WEIGHT``)
+        # (ce que les autres lui font vivre suit la contagion du tempérament, ADR 0100)
         if d.absence is None:
-            return [Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, reason=causes.CAME_BACK),
-                    Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, toward=d.person, reason=causes.CAME_BACK)]
+            return [Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, reason=causes.CAME_BACK, relational=True),
+                    Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, toward=d.person, reason=causes.CAME_BACK,
+                              relational=True)]
         joy = round(min(1.0, return_joy(d.absence) * cx.facts.get(social_c.WEIGHT(d.person))), 3)
         toward = RETURN_TOWARD.get(cx.facts.get(social_c.CLOSENESS(d.person)), 0.0)
-        return [Appraisal(Emotion.HAPPY, joy, reason=causes.CAME_BACK),
-                Appraisal(Emotion.HAPPY, round(joy * toward, 3), toward=d.person, reason=causes.CAME_BACK)]
-    return [Appraisal(Emotion.RELIEVED, 0.25, reason=causes.ANSWERED)]
+        return [Appraisal(Emotion.HAPPY, joy, reason=causes.CAME_BACK, relational=True),
+                Appraisal(Emotion.HAPPY, round(joy * toward, 3), toward=d.person, reason=causes.CAME_BACK,
+                          relational=True)]
+    return [Appraisal(Emotion.RELIEVED, 0.25, reason=causes.ANSWERED, relational=True)]
 
 
 # Ce que la digestion a apaisé se ressent au réveil, pas en pleine nuit (une teinte posée à 3 h
@@ -1376,15 +1415,17 @@ def _missed_felt(e, cx) -> list[Appraisal]:
     """Une promesse qu'elle n'a pas tenue : de la gêne, pour elle et envers la personne à qui elle l'avait faite ;
     une réponse qui ne vient pas : un peu de peine, et envers elle aussi."""
     d = e.data
+    p = params(cx.params if cx is not None else None)
     if d.kind == c.PROMISE:
-        felt = (Emotion.EMBARRASSED, 0.3, causes.BROKEN_PROMISE)
+        felt = (Emotion.EMBARRASSED, p.broken_promise_felt, causes.BROKEN_PROMISE, False)
     elif d.kind == c.REPLY:
-        felt = (Emotion.SAD, 0.15, causes.UNANSWERED)
+        # le silence d'un autre : ce que les autres lui font vivre suit la contagion du tempérament (ADR 0100)
+        felt = (Emotion.SAD, p.unanswered_felt, causes.UNANSWERED, True)
     else:
         return []
-    emotion, intensity, reason = felt
-    out = [Appraisal(emotion, intensity, reason=reason)]
+    emotion, intensity, reason, relational = felt
+    out = [Appraisal(emotion, intensity, reason=reason, relational=relational)]
     if d.person:
-        out.append(Appraisal(emotion, intensity, toward=d.person, reason=reason))
+        out.append(Appraisal(emotion, intensity, toward=d.person, reason=reason, relational=relational))
     return out
 

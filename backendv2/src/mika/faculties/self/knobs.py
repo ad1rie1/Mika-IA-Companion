@@ -3,12 +3,13 @@ récit, son journal, ses rêves, ses absences."""
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
 
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.forms import Knob
+from mika.vocab.temperament import Temperament, around, shift
 
 
 class SelfParams(BaseModel):
@@ -19,6 +20,10 @@ class SelfParams(BaseModel):
         label="Demi-vie de l'estime", group="L'estime", lo=6 * HOUR, hi=30 * DAY,
         help="Son estime revient vers 0,5 en perdant la moitié de son écart en ce temps. Plus court : les coups "
              "s'oublient dans la journée ; plus long : un doute s'installe.")] = 72 * HOUR
+    esteem_rest: Annotated[float, Knob(
+        label="Le niveau où revient son estime", group="L'estime", lo=0.2, hi=0.8, step=0.01,
+        help="Le niveau vers lequel son estime revient quand rien ne la bouscule. Dérivé de l'estime de base du "
+             "tempérament : au milieu, 0,5.")] = 0.5
     esteem_min: Annotated[float, Knob(
         label="Estime plancher", group="L'estime", lo=0.0, hi=0.5, step=0.01,
         help="Jamais sous ce plancher, quels que soient les coups : un échec n'est pas une dépression.")] = 0.05
@@ -238,3 +243,19 @@ class SelfParams(BaseModel):
 
 def params(p: SelfParams | None) -> SelfParams:
     return p if p is not None else SelfParams()
+
+
+def derive(t: Temperament, overrides: Any = None) -> SelfParams:
+    """La matrice de personnalité (ADR 0100), au milieu les valeurs d'avant elle : l'estime de base règle le niveau où
+    revient son estime ; la fragilité, ce que lui coûtent une critique, une initiative ignorée, un blocage ; le besoin
+    d'admiration, ce que lui rend un merci ; les scrupules, ce que lui coûte une promesse non tenue."""
+    values: dict[str, Any] = {
+        "esteem_rest": shift(t.self_regard, 0.5, 0.25),
+        "insulted_knock": around(t.fragility, -0.02, 1.8),
+        "ignored_knock": around(t.fragility, -0.03, 1.8),
+        "stuck_knock": around(t.fragility, -0.04, 1.8),
+        "thanked_knock": around(t.admiration, 0.02, 1.8),
+        "broken_promise_knock": around(t.scruples, -0.03, 1.6),
+    }
+    values.update(dict(overrides or {}))
+    return SelfParams(**values)

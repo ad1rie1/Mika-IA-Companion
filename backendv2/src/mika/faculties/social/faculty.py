@@ -24,7 +24,7 @@ from mika.kernel.state import FrozenDict
 from mika.vocab.affect import Emotion
 from mika.vocab.episodes import Kind
 from mika.vocab.people import fold, is_identifiable
-from mika.vocab.temperament import Temperament, lerp
+from mika.vocab.temperament import Temperament, around, lerp
 
 KEEP_DAYS = 64
 #: Les dernières conversations dont on retient qui les a ouvertes.
@@ -388,8 +388,10 @@ class SocialState:
 def derive(t: Temperament, overrides: Any = None) -> SocialParams:
     """L'optimisme recule le seuil de la détresse : une optimiste tient plus
     longtemps avant d'aller chercher du réconfort (au milieu : −0,35, la valeur
-    d'avant). Les surcharges sont posées par ``runtime/params.py``."""
-    values: dict[str, Any] = {"distress_valence": round(lerp(-0.2, -0.5, t.optimism), 3)}
+    d'avant). L'attachement à sa propriétaire (ADR 0100) dit combien elle compte plus qu'une proche — jamais moins
+    (au milieu : 1,3, la valeur d'avant). Les surcharges sont posées par ``runtime/params.py``."""
+    values: dict[str, Any] = {"distress_valence": round(lerp(-0.2, -0.5, t.optimism), 3),
+                              "owner_weight": max(1.0, around(t.devotion, 1.3, 1.3))}
     values.update(dict(overrides or {}))
     return SocialParams(**values)
 

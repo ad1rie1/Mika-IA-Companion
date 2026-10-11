@@ -89,8 +89,9 @@ class Notice:
 def _one_sided_felt(e: Any, cx: Any) -> list[Appraisal]:
     """S'apercevoir qu'on écrit toujours la première : un pincement de solitude — et, envers cette personne, un peu
     de peine, qu'elle sentira encore si elle lui écrit dans la foulée."""
-    out = [Appraisal(Emotion.LONELY, LONELINESS, reason=causes.ONE_SIDED)]
-    out += [Appraisal(Emotion.SAD, LONELINESS, toward=person, reason=causes.ONE_SIDED)
+    # ce que les autres lui font vivre suit la contagion du tempérament (ADR 0100)
+    out = [Appraisal(Emotion.LONELY, LONELINESS, reason=causes.ONE_SIDED, relational=True)]
+    out += [Appraisal(Emotion.SAD, LONELINESS, toward=person, reason=causes.ONE_SIDED, relational=True)
             for person in e.data.about[:1]]
     return out
 

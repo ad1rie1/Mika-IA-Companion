@@ -53,7 +53,8 @@ MENU = (
     MenuGroup("Réglages", "settings", (
         MenuLink("Tous les réglages", "reglages/apercu", ("reglages",)),
         MenuLink("Personnalité", "reglages/identite",
-                 ("reglages/parole", "reglages/caractere", "reglages/vie", "reglages/document", "reglages/temperament")),
+                 ("reglages/parole", "reglages/caractere", "reglages/vie", "reglages/document", "reglages/profil",
+                  "reglages/temperament")),
         MenuLink("Modèles de texte", "reglages/fournisseurs", ("reglages/roles",)),
         MenuLink("Modèles d’image", "reglages/images-fournisseurs", ("reglages/images-roles",)),
         MenuLink("Transcription", "reglages/transcription"),

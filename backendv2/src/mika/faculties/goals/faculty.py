@@ -45,7 +45,7 @@ from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import Kind, goal_of
 from mika.vocab.lineage import Lineage, admits
 from mika.vocab.privacy import hearable
-from mika.vocab.temperament import Temperament
+from mika.vocab.temperament import Temperament, around
 
 KEEP_CLOSED = 32
 NOTES_KEPT = 5
@@ -217,11 +217,14 @@ class GoalsParams(BaseModel):
 
 def derive(t: Temperament, overrides: Any = None) -> GoalsParams:
     """La persévérance donne plus de pas et une envie plus tenace ; la
-    curiosité ouvre une exploration plus tôt."""
+    curiosité ouvre une exploration plus tôt ; l'introspection (ADR 0100) fait d'une pensée plus légère une
+    réflexion, après l'avoir laissée mûrir plus longtemps (au milieu : 0,35 et 30 min, les valeurs d'avant)."""
     values: dict[str, Any] = {
         "exploration_steps": 3 + round(3 * t.perseverance),
         "desire_half_life_us": round((3 + 6 * t.perseverance) * HOUR),
         "seed_curiosity_from": round(0.85 - 0.3 * t.curiosity, 3),
+        "seed_thought_from": around(t.introspection, 0.35, 1 / 1.6),
+        "seed_thought_age_us": round(around(t.introspection, 30 * MINUTE, 2.0)),
     }
     values.update(dict(overrides or {}))
     return GoalsParams(**values)

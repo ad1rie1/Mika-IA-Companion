@@ -79,7 +79,7 @@ from mika.vocab.farewell import closing
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
 from mika.vocab.reading import OTHER, Reading
-from mika.vocab.temperament import Temperament, lerp
+from mika.vocab.temperament import Temperament, around, lerp, shift
 from mika.vocab.words import SALUTATIONS, fold
 
 #: Combien d'initiatives en cours on retient (des épisodes qui n'ont jamais parlé s'y oublient).
@@ -300,8 +300,12 @@ class OthersParams(BaseModel):
 
 
 def derive(t: Temperament, overrides: Any = None) -> OthersParams:
-    """La réactivité règle la force de la surprise (au milieu : 0,5)."""
-    values: dict[str, Any] = {"surprise_gain": round(lerp(0.3, 0.7, t.reactivity), 3)}
+    """La réactivité règle la force de la surprise (au milieu : 0,5) ; l'empathie, combien elle s'inquiète pour une
+    amie et dès quand (ADR 0100 — au milieu, les valeurs d'avant)."""
+    values: dict[str, Any] = {"surprise_gain": round(lerp(0.3, 0.7, t.reactivity), 3),
+                              "worry_intensity": around(t.empathy, 0.2, 2.0),
+                              "concern_drop": around(t.empathy, 0.45, 1 / 1.5),
+                              "declared_concern_from": shift(t.empathy, 0.6, -0.2)}
     values.update(dict(overrides or {}))
     return OthersParams(**values)
 
@@ -796,7 +800,7 @@ def _read_felt(e, cx) -> list[Appraisal]:
     out: list[Appraisal] = []
     if d.surprise >= p.surprise_from:
         out.append(Appraisal(Emotion.SURPRISED, min(p.surprise_max, d.surprise * p.surprise_gain),
-                             reason=causes.SURPRISED))
+                             reason=causes.SURPRISED, relational=True))  # suit la contagion (ADR 0100)
     if d.concern:
         # s'inquiéter pour quelqu'un suit la contagion du tempérament ; c'est pour elle qu'elle s'inquiète : sa
         # posture envers elle le porte aussi

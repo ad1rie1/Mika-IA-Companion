@@ -27,6 +27,7 @@ from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
+from mika.faculties.agency import AgencyParams
 from mika.faculties.attention.faculty import AttentionParams, reply_window
 from mika.faculties.needs import NeedsParams
 from mika.faculties.others.faculty import Model, OthersParams, OthersState, brief, current, learn, receptivity
@@ -372,6 +373,9 @@ def test_she_asks_how_it_went_once_it_is_over_but_never_betrays_who_told_her(tmp
         # aucune autre envie de parler : une initiative ordinaire qui l'aurait eu sous les yeux compterait comme
         # l'occasion d'en reparler (c'est voulu, mais ce n'est pas ce qu'on mesure ici)
         await kernel.set_params("needs", NeedsParams(social_floor=1.0, expression_floor=1.0))
+        # ni un mot sans objet vers qui est là : passé la retenue d'après sa réponse (4 h), le tirage peut en faire
+        # partir un avant 16 h, et la relance attendrait alors une réponse — ce qui la concerne échappe à la retenue
+        await kernel.set_params("agency", AgencyParams(quiet_after_reply_us=12 * HOUR))
         await befriend(kernel, "user_1", social_c.FRIEND)
         await connect(kernel, "user_1", "Adrien")
         await chat(kernel, "user_1", ["salut ! grosse journée aujourd'hui"])
