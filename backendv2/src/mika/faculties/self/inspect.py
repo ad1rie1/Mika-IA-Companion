@@ -10,22 +10,26 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from mika.contracts import identity as identity_c
+from mika.contracts import memory as memory_c
 from mika.contracts import self_ as c
-from mika.faculties.self import (
-    ACHIEVED,
-    HEARD,
-    IGNORED,
-    PROMISE,
-    SELF,
-    STUCK,
-    SelfParams,
-    SelfState,
-    doubt_cause,
-    esteem,
-    params,
+from mika.faculties.self.esteem import ACHIEVED, HEARD, IGNORED, PROMISE, STUCK, doubt_cause, esteem
+from mika.faculties.self.faculty import SELF, SelfState
+from mika.faculties.self.interests import fresh_leads, glow, level
+from mika.faculties.self.knobs import SelfParams, params
+from mika.faculties.self.lines import KNOWN_LINES
+from mika.faculties.self.model import (
+    FINISHED,
+    FINISHING,
+    FORESIGHT,
+    KEPT,
+    PROMISES,
+    SLIPPED,
+    STRUGGLED,
+    knows,
 )
+from mika.faculties.self.narrative import changes_since
 from mika.faculties.self.night import lived_day, told_day
-from mika.faculties.self.records import Dream, Journal
+from mika.faculties.self.records import Dream, Journal, Mark
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -54,6 +58,7 @@ from mika.kernel.inspect import (
     pct_fr,
 )
 from mika.vocab.affect import emotion_cell
+from mika.vocab.interests import ASLEEP, PERSONA, PRESENT, VIVID, subject_of
 from mika.vocab.people import named_label
 
 FORGOTTEN = "(oublié)"
@@ -192,11 +197,16 @@ def _esteem(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
 
 def _narrative(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
     p = _p(frame)
-    lived = s.souvenirs - s.narrated_souvenirs
     facts = Fields((
         ("écrit", When(s.narrated_at) if s.narrated_at else "jamais"),
-        ("souvenirs vécus depuis", f"{lived} (il en faut {p.narrative_min_souvenirs} pour le réécrire, "
-                                   f"au plus une fois toutes les {num_fr(p.narrative_every_us / HOUR)} h)"),
+        ("ce qui a changé depuis", f"{num_fr(changes_since(s, frame, p))} (il en faut {num_fr(p.narrative_min_changes)} "
+                                   f"pour le réécrire, au plus une fois toutes les "
+                                   f"{num_fr(p.narrative_every_us / HOUR)} h)"),
+        ("dont", f"{s.souvenirs - s.narrated_souvenirs} souvenir(s) ({p.narrative_min_souvenirs} valent un "
+                 f"changement), {s.self_beliefs - s.narrated_self_beliefs} note(s) sur elle qui la définissent, "
+                 f"{s.changes - s.narrated_changes} changement(s) d'avis, {s.lived - s.narrated_lived} moment(s) "
+                 "vécu(s) à travers quelqu'un ; ce qu'elle sait d'elle et ce qui la passionne comptent double"),
+        ("en ce moment", "réécriture attendue : une de ses sources a changé" if s.narrative_stale else "à jour"),
     ), title="Son récit d'elle-même")
     if not s.narrative_ref:
         return [facts, Note("Elle ne s'est pas encore racontée.", tone="muted")]
@@ -252,6 +262,106 @@ def _persona(s: SelfState) -> list[Block]:
                           "sa persona et son tempérament.")
 def _inspect_self(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return [*_esteem(s, frame, ctx), *_narrative(s, frame, ctx), *_persona(s)]
+
+
+# ── Qui elle devient (ADR 0088) ───────────────────────────────────────────
+
+#: les sortes de notes sur elle, telles que la console les dit
+SELF_KIND_FR = {"preference": "un goût", "opinion": "un avis", "claim": "un fait de sa vie",
+                "hypothesis": "une hypothèse", "prediction": "un pronostic"}
+SHOWN = 30
+
+
+def _count(marks: Sequence[Mark], domain: str, outcome: str) -> int:
+    return sum(1 for m in marks if m.domain == domain and m.outcome == outcome)
+
+
+def _said(known: Sequence[str], *codes: str) -> Cell:
+    lines = [KNOWN_LINES[k]() for k in codes if k in known]
+    return Text(" ".join(lines)) if lines else Text("rien : pas de tendance nette", kind="muted")
+
+
+def _knowing(s: SelfState, frame: Frame) -> Table:
+    p = _p(frame)
+    recent = [m for m in s.record if m.at >= frame.now - p.know_window_us]
+    seen = [m.value for m in s.record if m.domain == FORESIGHT and m.at >= frame.now - p.foresight_window_us]
+    known = knows(s.record, frame.now, p)
+    days = num_fr(p.know_window_us / DAY)
+    gap = f", écart moyen {number(sum(seen) / len(seen))}" if seen else ""
+    rows = (
+        ("tenir parole", f"{_count(recent, PROMISES, KEPT)} tenue(s), {_count(recent, PROMISES, SLIPPED)} laissée(s) "
+                         f"filer, sur {days} j",
+         Text(f"« tient parole » dès {p.know_kept_from} tenues sans aucune laissée filer ; « laisse filer » dès "
+              f"{p.know_slipped_from}, et plus que de tenues", kind="muted"),
+         _said(known, c.PROMISES_KEPT, c.PROMISES_SLIP)),
+        ("mener au bout", f"{_count(recent, FINISHING, FINISHED)} abouti(s), {_count(recent, FINISHING, STRUGGLED)} "
+                          f"bloqué(s), sur {days} j",
+         Text(f"« mène au bout » dès {p.know_done_from} aboutis pour au plus moitié de blocages ; « bloque » dès "
+              f"{p.know_stuck_from}, et plus que d'aboutis", kind="muted"),
+         _said(known, c.FINISHING_DONE, c.FINISHING_STRUGGLE)),
+        ("voir venir", f"{len(seen)} moment(s){gap}, sur {num_fr(p.foresight_window_us / DAY)} j",
+         Text(f"au moins {p.foresight_min} moments ; « juste » sous {number(p.foresight_right_below)}, « à côté » "
+              f"dès {number(p.foresight_off_above)} (dates officielles et issues inconnues exclues)", kind="muted"),
+         _said(known, c.FORESIGHT_RIGHT, c.FORESIGHT_OFF)),
+    )
+    return Table((Column("ce qu'elle sait d'elle"), Column("ses marques"), Column("les seuils"),
+                  Column("ce que son prompt en dit")), rows,
+                 title="Tenir parole, mener au bout, voir venir (des tendances : son estime n'en dépend pas)")
+
+
+def _changes(frame: Frame, ctx: InspectContext) -> Table:
+    rows = ctx.store.query_mind(
+        f"SELECT was, was_text, text, knowledge_kind, secret, changed_at FROM {memory_c.SELF_CHANGES_VIEW} "
+        f"ORDER BY changed_at DESC LIMIT {SHOWN}")
+    return Table((Column("avant"), Column("maintenant"), Column("sorte"), Column("quand")), tuple(
+        (Text(clip(was_text)), Text(clip(text)) if not secret else Badge("à taire", tone="warn"),
+         SELF_KIND_FR.get(kind, kind), When(at)) for _was, was_text, text, kind, secret, at in rows),
+        title="Ses changements d'avis sur elle-même", empty="Elle n'a pas encore changé d'avis sur elle-même.")
+
+
+def _defining(frame: Frame, ctx: InspectContext) -> Table:
+    rows = ctx.store.query_mind(
+        f"SELECT text, knowledge_kind, born_at, secret FROM {memory_c.KNOWLEDGE_VIEW} "
+        f"WHERE kind=? AND about_self >= 2 ORDER BY born_at DESC LIMIT {SHOWN}", (memory_c.BELIEF,))
+    return Table((Column("ce qui la définit"), Column("sorte"), Column("depuis")), tuple(
+        (Text(clip(text)) if not secret else Badge("à taire", tone="warn"), SELF_KIND_FR.get(kind, kind),
+         When(at)) for text, kind, at, secret in rows),
+        title="Ses goûts, ses avis, ce qui est vrai de sa vie (ce qu'elle a dit d'elle, qui tient des mois)",
+        empty="Elle n'a encore rien dit d'elle qui la définisse.")
+
+
+LEVEL_FR = {VIVID: ("vif", "ok"), PRESENT: ("présent", ""), ASLEEP: ("endormi", "muted")}
+
+
+def _passions(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    p = _p(frame)
+    texts = ctx.store.content([i.label_ref for i in s.interests.values() if i.label_ref])
+    rows: list[tuple[Cell, ...]] = []
+    for i in sorted(s.interests.values(), key=lambda i: (-glow(i, frame.now, p), i.key)):
+        g = glow(i, frame.now, p)
+        word, tone = LEVEL_FR[level(g, p)]
+        label = subject_of(i.line) if i.line else texts.get(i.label_ref) or FORGOTTEN
+        origin = "sa persona" if i.origin == PERSONA else f"née le {frame.local(i.born_at):%d/%m}"
+        rows.append((Text(clip(label)), origin, Badge(word, tone=tone), Meter(g, number(g)),
+                     When(i.fed_at) if i.fed_at else "jamais", str(i.feeds)))
+    table = Table((Column("sujet"), Column("d'où"), Column("niveau"), Column("vivacité"), Column("nourri"),
+                   Column("fois")), tuple(rows), title="Ce qui la passionne",
+                  empty="Aucun centre d'intérêt : sa persona n'en a pas encore.")
+    leads = Fields((
+        ("pistes en attente", f"{len(fresh_leads(s))} (sur {len(s.leads)} gardées ; il en faut {p.birth_min_leads} "
+                              f"neuves sur {p.birth_min_days} journées pour qu'elle y réfléchisse la nuit)"),
+        ("dernière réflexion", s.reflected_night or "jamais"),
+        ("dernière naissance", When(s.last_birth_at) if s.last_birth_at else "jamais"),
+    ), title="Ses pistes")
+    return [table, leads]
+
+
+@SELF.inspect("devenir", title="Qui elle devient", section="vie", order=55,
+              description="Ce qu'elle sait d'elle (tenir parole, mener au bout, voir venir), ce qui la passionne, "
+                          "ses changements d'avis sur elle-même, et ce qu'elle a dit d'elle qui la définit — à côté "
+                          "de sa persona, qui ne bouge pas.")
+def _inspect_becoming(s: SelfState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    return [_knowing(s, frame), *_passions(s, frame, ctx), _changes(frame, ctx), _defining(frame, ctx)]
 
 
 # ── Nuits ─────────────────────────────────────────────────────────────────

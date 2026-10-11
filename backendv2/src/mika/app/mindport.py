@@ -262,7 +262,8 @@ class KernelPort:
         """Ses pensées (celles que cette personne peut entendre) et son récit."""
         out: dict[str, Any] = {}
         audience = Audience(persons=(handle,), channel="web", public=False, level=int(disclosure.level),
-                            witness_level=int(disclosure.witness_level), private_ok=disclosure.own_file)
+                            witness_level=int(disclosure.witness_level), private_ok=disclosure.own_file,
+                            untied_level=int(disclosure.untied_level))
         person = frame.get(identity_c.PERSON(handle))
         thoughts = [t for t in frame.get(attention_c.THOUGHTS)
                     if attention_prompt.admissible(t, person, audience, frame)][:3]
@@ -272,7 +273,8 @@ class KernelPort:
             return frame.get(identity_c.IDENTITY(key)).name
 
         # les mots d'un message privé ne se citent qu'à qui les a écrits (attention)
-        out["ruminations"] = [{"summary": attention_prompt.shown(t, texts[t.text_ref], person, name_of),
+        out["ruminations"] = [{"summary": attention_prompt.shown(t, texts[t.text_ref], person, name_of,
+                                                                name=attention_prompt.named(t, person, audience)),
                                "intensity": round(t.intensity, 2), "emotion": t.emotion}
                               for t in thoughts if texts.get(t.text_ref)]
         yesterday, dream = frame.get(self_c.YESTERDAY), frame.get(self_c.DREAM_RESIDUE)

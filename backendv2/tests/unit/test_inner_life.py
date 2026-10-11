@@ -34,8 +34,14 @@ from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
+from tests.fixtures.reading import Reads
 
 TZ = ZoneInfo("Europe/Paris")
+#: ce que le modèle lit de chaque message (ADR 0093 : c'est lui qui juge)
+READS = Reads({"mon chat est mort ce matin": "sad 0.9 | grave : deuil", "je suis dévastée": "sad 0.9",
+               "je sais pas quoi faire": "sad 0.6, confused 0.4",
+               "merci d'être là, ça va un peu mieux": "relieved 0.5, grateful 0.4 | geste : merci",
+               "oui ça va, et toi ?": "happy 0.4"})
 P = SleepParams()
 
 
@@ -87,7 +93,7 @@ class Script:
             return LLMResponse("tiens, et si je lui écrivais")
         if req.role == "narrative":
             return LLMResponse("Je suis quelqu'un qui aime les petites choses du quotidien.")
-        return LLMResponse(f"d'accord {self.tag}")
+        return LLMResponse(f"d'accord {self.tag}{READS.tag(req) if req.role == 'reply' else ''}")
 
 
 def run(tmp_path, scenario, *, start=at_paris(2026, 9, 28, 14, 0), script=None, with_llm=False):

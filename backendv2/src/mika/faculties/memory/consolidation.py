@@ -197,7 +197,7 @@ class Consolidate:
             situations = self._situations(frame, store, state, conv, p, labels)
             moments, upcoming = self._moments(frame, store, state, conv, labels)
             ended, gone = self._ended_situations(frame, store, state, conv, p, labels)
-            passed, past = self._passed(frame, store, state, conv, p, labels)
+            passed, past, foreseen = self._behind(frame, store, state, conv, p, labels)
             prompt = x.render(conv, now=frame.local(), beliefs=known,
                               promises=[(i, _whom(frame, state, i, labels.get(to, to)), t)
                                         for i, to, t in promises], situations=situations, moments=moments,
@@ -273,7 +273,8 @@ class Consolidate:
                 designable = {i: ev for i, ev in {**upcoming, **gone, **past}.items() if i in shown}
                 drafts += await self._drafts(extraction, frame, state, store, conv, people, known, promises, vectors,
                                              p, last_call, moments=designable,
-                                             passed={i: ev for i, ev in past.items() if i in shown})
+                                             passed={i: ev for i, ev in past.items() if i in shown},
+                                             foreseen={i: f for i, f in foreseen.items() if i in shown})
                 drafts += self._ended(extraction, situations, last_call)
         if rows:
             drafts.append(c.CONSOLIDATED.draft(upto=rows[-1][0], produced=sum(
@@ -324,15 +325,21 @@ class Consolidate:
     def _lies(store: Any, conv: x.Conversation) -> x.Conversation:
         """Ses répliques qu'elle a marquées mensonge (``LIE_ANNOTATION``) : la relecture le sait, et n'en tire rien
         comme vrai — ni une croyance, ni une note sur elle (« je ne sais rien de ses projets », redit, ne doit pas
-        devenir ce qu'elle croit)."""
+        devenir ce qu'elle croit). Et celles qui racontaient sans nom ce qu'elle sait de quelqu'un (``veiled:…`` dans
+        leur provenance, ADR 0091) : la relecture n'en voit pas le texte — rien à en retenir sur qui l'écoutait."""
         mine = [ln.seq for ln in conv.lines if ln.person is None]
         if not mine:
             return conv
-        lied = {e.seq for e in store.get_events(mine) if e.type == rt.UTTERANCE.name
-                and any(k == expression_c.LIE_ANNOTATION for k, _v in json.loads(e.data).get("annotations") or ())}
-        if not lied:
+        said = {e.seq: json.loads(e.data) for e in store.get_events(mine) if e.type == rt.UTTERANCE.name}
+        lied = {seq for seq, d in said.items()
+                if any(k == expression_c.LIE_ANNOTATION for k, _v in d.get("annotations") or ())}
+        # ce qu'elle a raconté sans nommer personne (ADR 0091) : la relecture n'en voit pas le texte
+        veiled = {seq for seq, d in said.items()
+                  if any(str(x).startswith(c.VEILED_PROVENANCE) for x in d.get("provenance") or ())}
+        if not lied and not veiled:
             return conv
-        return replace(conv, lines=tuple(replace(ln, lie=True) if ln.seq in lied else ln for ln in conv.lines))
+        return replace(conv, lines=tuple(replace(ln, lie=ln.seq in lied, veiled=ln.seq in veiled)
+                                         if ln.seq in lied or ln.seq in veiled else ln for ln in conv.lines))
 
     @staticmethod
     def _near(conv: x.Conversation, rooms: Mapping[str, set[str]]) -> tuple[str, ...]:
@@ -540,7 +547,8 @@ class Consolidate:
                       people: x.People, known: list[tuple[int, str]], promises: list[tuple[int, str, str]],
                       vectors: Any, p: MemoryParams, call_id: str,
                       moments: dict[int, c.LifeEvent] | None = None,
-                      passed: dict[int, c.LifeEvent] | None = None) -> list[Draft[Any]]:
+                      passed: dict[int, c.LifeEvent] | None = None,
+                      foreseen: dict[int, Forecast] | None = None) -> list[Draft[Any]]:
         drafts: list[Draft[Any]] = []
         known_ids = {i for i, _ in known}
         known_texts = dict(known)
@@ -548,6 +556,10 @@ class Consolidate:
         heard = conv.persons
         lines = {ln.seq: ln for ln in conv.lines}
         speaking = tuple(sorted({ln.person for ln in conv.lines if ln.person}))
+        # une demande de silence couvre ce qu'elle vise, pas toute la conversation (ADR 0092)
+        lowered = x.scoped_secrets(ex, conv.lines)
+        if lowered:
+            log.info("relecture : %d « secret(s) » hors de la demande de silence, gardé(s) en confidence", len(lowered))
 
         def provenance(cited: Sequence[int]) -> tuple[tuple[int, ...], tuple[str, ...], list[str]]:
             """Les messages d'où vient un élément, qui les a écrits (qui l'a
@@ -573,6 +585,15 @@ class Consolidate:
             confident et son secret (audit du 2026-10-08)."""
             seqs = [s for s in cited if s in lines]
             return not seqs or any(not lines[s].person for s in seqs)
+
+        def lied(cited: Sequence[int]) -> bool:
+            """Ce qu'elle dit d'elle s'appuie sur une de ses répliques marquées mensonge (ADR 0076), ou qui racontait
+            sans nom ce qu'elle sait de quelqu'un (ADR 0091) — ou ne cite rien, dans une conversation où elle a menti :
+            ce n'est pas ce qu'elle est (dans le doute, on ferme ; ADR 0087)."""
+            seqs = [s for s in cited if s in lines]
+            if not seqs:
+                return any(ln.lie for ln in conv.lines)
+            return any((lines[s].lie or lines[s].veiled) and not lines[s].person for s in seqs)
 
         def her_words(cited: Sequence[int]) -> list[str]:
             """Ses répliques citées : « garde ça pour toi », dit par elle, fait un secret même quand le modèle ne le
@@ -625,8 +646,9 @@ class Consolidate:
                 continue
             if s.sur_elle and not people.resolve(s.personnes) and from_her(s.messages) \
                     and not people.names_someone(s.texte):
-                drafts += await self._about_self(s, store, vectors, p, provenance, call_id, known_ids, secret_of,
-                                                 her_words(s.messages))
+                if not lied(s.messages):
+                    drafts += self._about_self(s, store, provenance, call_id, known_ids, secret_of,
+                                               her_words(s.messages))
                 continue
             text, cited_seqs = s.texte, list(s.messages)
             if banal(text, said_names):
@@ -647,11 +669,13 @@ class Consolidate:
                 drafts.append(c.REINFORCED.draft(item=twin, sources=sources, sensitivity=sens, about=about,
                                                  told_by=told_by, heard_by=heard, secret=secret))
                 continue
+            # sans nom : seulement ce qui concerne quelqu'un d'autre, ni secret, ni recopié de sa bouche (ADR 0091)
+            veiled = self._veiled(s.sans_nom, people, s.texte) if about and not secret and text == s.texte else None
             drafts.append(c.REMEMBERED.draft(
                 text=Content.of(text, level=sens), about=about, sensitivity=sens,
                 importance=x.IMPORTANCE.get(s.importance, 0.45), emotion=dominant(facets(s.mon_ressenti)),
                 felt=facets(s.ressenti), empathy=facets(s.mon_ressenti), sources=sources, call_id=call_id, told_by=told_by, heard_by=heard,
-                secret=secret))
+                secret=secret, veiled=Content.of(veiled, level=sens) if veiled else None))
         for b in ex.croyances:
             if not fresh(c.BELIEF, b.texte):
                 continue
@@ -660,8 +684,9 @@ class Consolidate:
                 # ce qu'elle dit d'elle seule ; « Mika a dit à Sam : … », lui, nomme quelqu'un : ce n'est pas une
                 # note anodine sur elle (elle sortait telle quelle dans un salon — sonde du 2026-10-03), il suit le
                 # chemin commun (sa réplique n'est pas ce qu'on lui a appris)
-                drafts += await self._about_self(b, store, vectors, p, provenance, call_id, known_ids, secret_of,
-                                                 her_words(b.messages))
+                if not lied(b.messages):
+                    drafts += self._about_self(b, store, provenance, call_id, known_ids, secret_of,
+                                               her_words(b.messages))
                 continue
             between = b.entre_vous or any(fold(n) in fold(b.texte) for n in nicks)
             if (not between and hers(b.messages)) or banal(b.texte, said_names):
@@ -686,8 +711,7 @@ class Consolidate:
             replaces = b.remplace if b.remplace in known_ids else None
             if between:
                 ours.append(fold(b.texte))
-            nature = {"avis": "opinion", "opinion": "opinion", "gout": "preference", "preference": "preference",
-                      "hypothese": "hypothesis"}.get(fold(b.genre or ""), "claim")
+            nature = x.kind_of_genre(b.genre)
             if x.ORIGIN.get(fold(b.origine)) == "inferred":
                 nature = "hypothesis"
             # un avis, une hypothèse sont à qui les porte ; un fait rapporté n'est à personne (ses témoins le disent)
@@ -741,6 +765,9 @@ class Consolidate:
                     first_hand=first_hand, call_id=call_id, felt=facets(b.ressenti)))
                 continue
             since, until = x.when(b.depuis, tz) if b.depuis else None, x.when(b.jusqua, tz) if b.jusqua else None
+            # sans nom : un fait sur quelqu'un d'autre, ni secret, ni ce qui n'appartient qu'à eux deux (ADR 0091)
+            veiled = self._veiled(b.sans_nom, people, b.texte) \
+                if about and not secret and not between and nature == "claim" else None
             drafts.append(c.BELIEVED.draft(
                 text=Content.of(b.texte, level=sens), about=about, sensitivity=sens,
                 importance=importance, confidence=x.born_confidence(b.confiance, origin, nature),
@@ -748,9 +775,10 @@ class Consolidate:
                 call_id=call_id, told_by=told_by, heard_by=heard, secret=secret, between_us=between,
                 knowledge_kind=nature, holder=holder, relations=tuple(relations), first_hand=first_hand,
                 as_of=min(since[0], frame.now) if since else None, valid_until=until[0] if until else None,
-                felt=facets(b.ressenti), empathy=facets(b.mon_ressenti)))
+                felt=facets(b.ressenti), empathy=facets(b.mon_ressenti),
+                veiled=Content.of(veiled, level=sens) if veiled else None))
         drafts += self._predictions(ex, frame, conv, people, p, call_id, fresh, provenance, concerned, secret_of,
-                                    from_her, heard, tz)
+                                    from_her, lied, heard, tz)
         drafts += self._called(nicks, ours, store, conv, call_id)
         closed = [item for item in dict.fromkeys(ex.confidentiel) if item in known_ids]
         for item in closed:
@@ -766,8 +794,9 @@ class Consolidate:
                                        fresh, call_id, lambda text: x.echoes(text, secrets, names))
         drafts += await self._events(ex, frame, state, store, conv, people, vectors, p, provenance, concerned,
                                      secret_of, heard, fresh, call_id, moments or {})
-        drafts += self._constats(ex, frame, store, conv, passed or {}, p, provenance, call_id,
+        drafts += self._constats(ex, frame, store, conv, people, passed or {}, p, provenance, call_id,
                                  upcoming={i: ev for i, ev in (moments or {}).items() if not ev.ongoing})
+        drafts += self._foreseen(ex, frame, foreseen or {}, provenance, call_id)
         return drafts
 
     @staticmethod
@@ -811,14 +840,80 @@ class Consolidate:
                  for i, (ev, whom) in live.items() if texts.get(ev.text_ref)]
         return shown, {i: ev for i, (ev, _w) in live.items()}
 
+    def _behind(self, frame: Frame, store: Any, state: MemoryState, conv: x.Conversation, p: MemoryParams,
+                labels: dict[str, str]) -> tuple[list[tuple[int, str, str]], dict[int, c.LifeEvent],
+                                                  dict[int, Forecast]]:
+        """Ce qui est passé sans qu'elle sache comment ça a tourné, montré à la relecture : les moments, puis les
+        prévisions (ADR 0086, 0099)."""
+        passed, past = self._passed(frame, store, state, conv, p, labels)
+        forecasts, foreseen = self._forecasts(frame, store, conv, p, labels)
+        return [*passed, *forecasts], past, foreseen
+
     @staticmethod
-    def _constats(ex: x.Extraction, frame: Frame, store: Any, conv: x.Conversation, passed: dict[int, c.LifeEvent],
-                  p: MemoryParams, provenance: Any, call_id: str,
+    def _forecasts(frame: Frame, store: Any, conv: x.Conversation, p: MemoryParams,
+                   labels: dict[str, str]) -> tuple[list[tuple[int, str, str]], dict[int, Forecast]]:
+        """Les prévisions des personnes de cette conversation (« Léa pense qu'elle sera prise ») dont l'échéance est
+        passée depuis moins de ``resolve_days`` et qu'on n'a pas encore constatées : montrées avec les moments passés,
+        pour que la relecture dise si elles se sont réalisées (ADR 0099). Les mêmes règles de discrétion que les
+        moments : dans un salon, l'anodin seulement ; jamais ce qu'un autre a confié au-delà."""
+        persons = set(conv.persons)
+        since = frame.now - round(p.resolve_days * DAY)
+        rows = store.query_mind(
+            f"SELECT id, text, about, holder, told_by, likelihood, importance, due, until, sensitivity, secret, felt, "
+            f"empathy FROM {c.ITEMS_TABLE} WHERE kind=? AND knowledge_kind='prediction' AND status='active' "
+            "AND due IS NOT NULL AND COALESCE(until, due) < ? AND COALESCE(until, due) >= ? ORDER BY id",
+            (c.BELIEF, frame.now, since))
+        shown: list[tuple[int, str, str]] = []
+        found: dict[int, Forecast] = {}
+        for (item, text, about, holder, told_by, likely, importance, due, until, sens, secret, felt,
+             empathy) in rows:
+            concerned = {frame.get(identity_c.PERSON(k)) or k for k in (*_keys(about), *([holder] if holder else []))}
+            whom = next((k for k in sorted(concerned) if k in persons), None)
+            if whom is None or not text:
+                continue
+            tellers = {frame.get(identity_c.PERSON(t)) or t for t in _keys(told_by)}
+            if not (int(sens) <= Sensitivity.ANODYNE and not secret) and (conv.room or not tellers <= persons):
+                continue
+            found[int(item)] = Forecast(int(item), tuple(_keys(about)), holder or "", likely, float(importance or 0.5),
+                                        tuple(concerned), _facets_of(empathy) or _facets_of(felt))
+            shown.append((int(item), labels.get(whom, whom), phrase(
+                "memory.extraction.render.forecast", when=frame.local(int(until or due)).date().isoformat(),
+                text=str(text))))
+        return shown, found
+
+    @staticmethod
+    def _foreseen(ex: x.Extraction, frame: Frame, foreseen: dict[int, Forecast], provenance: Any,
+                  call_id: str) -> list[Draft[Any]]:
+        """Une prévision passée, constatée par une personne qu'elle concerne (« j'ai été prise ! ») : réalisée (« a eu
+        lieu ») ou non (« annulé ») — ce qu'elle apprend de qui l'avait prévu, et de ses propres pronostics (sa
+        calibration, la sorte « prévision »). Ce qu'un autre en dit ne constate rien (ADR 0099)."""
+        drafts: list[Draft[Any]] = []
+        for k in ex.constats:
+            f = foreseen.get(k.numero)
+            outcome = x.outcome_of(k.issue)
+            if f is None or outcome not in (c.HAPPENED, c.CANCELLED) or not k.messages:
+                continue
+            sources, told_by, _cited = provenance(k.messages)
+            by = next((t for t in told_by if (frame.get(identity_c.PERSON(t)) or t) in f.concerned), None)
+            if by is None:
+                continue
+            drafts.append(c.RESOLVED.draft(
+                event=f.item, outcome=outcome, by=by, likelihood=f.likelihood, importance=f.importance,
+                surprise=lk.surprise(outcome, f.likelihood, f.importance), nature=c.PREDICTION, teller=f.holder,
+                valence=round(facets_valence(f.felt), 3), about=f.about, sources=tuple(sources), call_id=call_id,
+                dedupe_key=f"issue:prévision:{f.item}"))
+            foreseen = {i: g for i, g in foreseen.items() if i != f.item}
+        return drafts
+
+    @staticmethod
+    def _constats(ex: x.Extraction, frame: Frame, store: Any, conv: x.Conversation, people: x.People,
+                  passed: dict[int, c.LifeEvent], p: MemoryParams, provenance: Any, call_id: str,
                   upcoming: dict[int, c.LifeEvent] | None = None) -> list[Draft[Any]]:
         """Comment un moment passé a tourné, de la bouche de la personne concernée — ses messages à elle seulement :
         ce qu'un autre en dit n'est qu'une rumeur (ADR 0086). Un moment à venir peut être annulé d'avance (« finalement
         mon IRM de demain est annulée ») ; il n'a pas encore eu lieu. Un moment qu'elle vivait à travers elle (« je te
-        montrerai tout »), qui a eu lieu, devient un souvenir à elle, plus marquant avec sa propriétaire."""
+        montrerai tout »), qui a eu lieu, devient un souvenir à elle, plus marquant avec sa propriétaire — avec, quand
+        rien n'en est secret ni confié, ce que c'était en bref et sans personne (« un concert de jazz », ADR 0087)."""
         drafts: list[Draft[Any]] = []
         done: set[int] = set()
         for k in ex.constats:
@@ -843,11 +938,14 @@ class Consolidate:
                     frame.get(identity_c.IDENTITY(by)).name or phrase("memory.names.someone")
                 owner = bool(frame.get(identity_c.IS_OWNER(frame.get(identity_c.PERSON(by)) or by)))
                 lived = phrase("memory.lived.souvenir", name=name, text=text)
+                gist = x.gist_of(k.en_bref, people) if not ev.secret and ev.sensitivity < Sensitivity.CONFIDENCE \
+                    else None
                 drafts.append(c.REMEMBERED.draft(
                     text=Content.of(lived, level=ev.sensitivity), about=ev.about, sensitivity=ev.sensitivity,
                     importance=p.lived_owner_importance if owner else p.lived_importance,
                     emotion=dominant(ev.empathy) or Emotion.HAPPY.value, sources=sources, call_id=call_id,
                     told_by=(by,), heard_by=conv.persons, secret=ev.secret, felt=ev.felt, empathy=ev.empathy,
+                    gist=Content.of(gist, level=ev.sensitivity) if gist else None,
                     dedupe_key=f"vécu:{ev.key}:{ev.when}"))
         return drafts
 
@@ -908,19 +1006,33 @@ class Consolidate:
         return drafts
 
     @staticmethod
+    def _veiled(proposed: str | None, people: x.People, original: str) -> str | None:
+        """La version sans nom que la relecture propose, si le filet la garde (``original`` : ce qu'elle raconte,
+        nommé) ; sinon, pourquoi (un code, jamais le texte : il pouvait nommer quelqu'un)."""
+        if not proposed:
+            return None
+        why = x.veiled_refusal(proposed, people, original)
+        if why:
+            log.info("relecture : une version sans nom écartée (%s)", why)
+            return None
+        return " ".join(proposed.split())
+
+    @staticmethod
     def _secrets(store: Any, conv: x.Conversation) -> list[str]:
         """Les secrets qu'elle garde déjà sur les personnes de cette conversation."""
         return kept_secrets(store, conv.persons)
 
-    async def _about_self(self, b: x.XSouvenir | x.XCroyance, store: Any, vectors: Any, p: MemoryParams,
-                          provenance: Any, call_id: str, known_ids: set[int],
-                          secret_of: Any = None, her_lines: Sequence[str] = ()) -> list[Draft[Any]]:
+    def _about_self(self, b: x.XSouvenir | x.XCroyance, store: Any, provenance: Any, call_id: str,
+                    known_ids: set[int], secret_of: Any = None, her_lines: Sequence[str] = ()) -> list[Draft[Any]]:
         """Ce qu'elle a raconté d'elle-même : une note anodine, de peu
         d'importance, qui s'efface en quelques jours — sauf ce qui la définit
         (un goût, un avis, un fait de sa vie), qui tient longtemps ; quand elle
         change d'avis, la nouvelle croyance remplace l'ancienne. Ce qu'elle a
         demandé de garder pour soi, ou une confidence sur elle, le reste : ça ne
-        se dit qu'en grande confiance (audit du 2026-10-08)."""
+        se dit qu'en grande confiance (audit du 2026-10-08).
+
+        Les mêmes mots sont la même note, quelle qu'en soit la sorte : une anecdote redite comme un goût le devient,
+        et ce qu'elle pensait avant d'en changer, redit, revient — sa parole sur elle-même tranche (ADR 0087)."""
         sources, _told, cited = provenance(b.messages)
         sens = x.sensitivity(b.sensibilite, has_person=False)
         asked = bool(b.secret) or x.says_secret(her_lines)  # elle a demandé le silence
@@ -929,24 +1041,36 @@ class Consolidate:
         sens = max(sens, int(Sensitivity.CONFIDENCE)) if secret else (
             sens if sens >= Sensitivity.CONFIDENCE else int(Sensitivity.ANODYNE))
         durable = x.durable_self(b)
-        nature = {"avis": "opinion", "opinion": "opinion", "gout": "preference", "preference": "preference",
-                  "hypothese": "hypothesis"}.get(fold(b.genre or ""), "claim")
+        nature = x.kind_of_genre(b.genre)
+        confidence = x.born_confidence(getattr(b, "confiance", 0.7), c.OBSERVED, nature)
         replaces = getattr(b, "remplace", None)
         replaces = replaces if durable and replaces in known_ids else None
         if replaces is not None and not self._target_of(store, replaces, nature, None, about_self=True):
             replaces = None  # changer d'avis ne vaut que sur ce qu'elle a dit d'elle-même
-        twin = await self._twin(store, vectors, b.texte, c.BELIEF, (), p, knowledge_kind=nature, about_self=True)
-        if twin is not None and twin != replaces:
+        twin = self._self_twin(store, b.texte, status="active")
+        former = None if twin is not None else self._self_twin(store, b.texte, status="superseded")
+        head = self._head_of(store, former) if former is not None else None  # ce qu'elle en pense maintenant
+        if (twin is not None and twin != replaces) or head is not None:
             # ce qu'elle redit d'elle-même : son propre témoignage, redit
-            return [c.ATTESTED.draft(item=twin, sources=sources, sensitivity=sens, secret=secret, origin=c.OBSERVED,
-                                     confidence=x.born_confidence(getattr(b, "confiance", 0.7), c.OBSERVED, nature),
-                                     about_self=True, call_id=call_id)]
+            return [c.ATTESTED.draft(item=twin if head is None else former, sources=sources, sensitivity=sens,
+                                     secret=secret, origin=c.OBSERVED, confidence=confidence, about_self=True,
+                                     durable=durable, knowledge_kind=nature if durable else None, replaces=head,
+                                     call_id=call_id)]
         return [c.BELIEVED.draft(
             text=Content.of(b.texte, level=sens), about=(), sensitivity=sens,
-            importance=x.IMPORTANCE[3 if durable else 1],
-            confidence=x.born_confidence(getattr(b, "confiance", 0.7), c.OBSERVED, nature),
+            importance=x.IMPORTANCE[3 if durable else 1], confidence=confidence,
             origin=c.OBSERVED, sources=sources, replaces=replaces, call_id=call_id, about_self=True, durable=durable,
             knowledge_kind=nature, secret=secret)]
+
+    @staticmethod
+    def _self_twin(store: Any, text: str, *, status: str) -> int | None:
+        """Ce qu'elle a déjà dit d'elle-même aux mêmes mots, quelle qu'en soit la sorte : vivante (elle le redit — la
+        plus ancienne), ou remplacée (elle y revient — la dernière qu'elle a quittée)."""
+        order = "id" if status == "active" else "id DESC"
+        rows = store.query_mind(
+            f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE fingerprint=? AND kind=? AND status=? AND about_self > 0 "
+            f"ORDER BY {order}", (fingerprint(text), c.BELIEF, status))
+        return next((int(k) for k, previous in rows if same_words(previous, text)), None)
 
     async def _promised(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
                         people: x.People, promises: list[tuple[int, str, str]], vectors: Any, p: MemoryParams,
@@ -1296,7 +1420,7 @@ class Consolidate:
     @staticmethod
     def _predictions(ex: x.Extraction, frame: Frame, conv: x.Conversation, people: x.People, p: MemoryParams,
                      call_id: str, fresh: Any, provenance: Any, concerned: Any, secret_of: Any, from_her: Any,
-                     heard: tuple[str, ...], tz: Any) -> list[Draft[Any]]:
+                     lied: Any, heard: tuple[str, ...], tz: Any) -> list[Draft[Any]]:
         """Ce que quelqu'un s'attend à voir arriver (« Léa pense qu'elle sera prise », « les taux vont remonter ») :
         une croyance de la sorte « prévision », à qui la porte, avec quand c'est attendu et à quel point (ADR 0084) —
         au plus comme une déduction, quoi qu'en dise qui prévoit. Ses propres pronostics sont à elle (ses avis sont
@@ -1310,6 +1434,8 @@ class Consolidate:
                 continue  # déjà passé : ce n'est plus une prévision
             sources, told_by, cited = provenance(pv.messages)
             mine = pv.sur_elle and from_her(pv.messages)
+            if mine and lied(pv.messages):
+                continue  # un pronostic qu'elle a dit en mentant n'est pas ce qu'elle attend
             about = () if mine else concerned(pv.personnes)
             holder = None if mine else (people.one(pv.point_de_vue) if pv.point_de_vue else
                                         (told_by[0] if len(told_by) == 1 else None))
@@ -1359,6 +1485,28 @@ class Consolidate:
             f"SELECT DISTINCT i.id FROM {c.ITEMS_TABLE} i, json_each(i.sources) j WHERE i.kind=? AND "
             f"i.status='active' AND i.secret=0 AND j.value IN ({marks}) ORDER BY i.id", (c.SOUVENIR, *theirs))
         return [c.REINFORCED.draft(item=int(i), secret=True, sensitivity=int(Sensitivity.CONFIDENCE)) for (i,) in found]
+
+
+@dataclass(frozen=True, slots=True)
+class Forecast:
+    """Une prévision passée qu'on n'a pas encore constatée (ADR 0099) : l'élément, qui elle concerne, qui la portait
+    (vide : la sienne), ce qu'elle en attendait, ce qu'elle compte, qui peut la constater, comment on l'attendait."""
+
+    item: int
+    about: tuple[str, ...]
+    holder: str
+    likelihood: float | None
+    importance: float
+    concerned: tuple[str, ...]
+    felt: tuple[tuple[str, float], ...]
+
+
+def _facets_of(raw: Any) -> tuple[tuple[str, float], ...]:
+    """Des facettes gardées en JSON (« [["sad", 0.6]] ») ; illisibles : aucune."""
+    try:
+        return facets(json.loads(raw or "[]"))
+    except (TypeError, ValueError):
+        return ()
 
 
 @dataclass(frozen=True, slots=True)

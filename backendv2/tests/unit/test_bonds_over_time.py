@@ -218,7 +218,8 @@ def test_what_only_concerns_her_friends_does_not_pay_for_every_stranger(tmp_path
         await asyncio.sleep(MINUTE / US)
         crowd = closeness_reads(kernel)
         frame = kernel.mind.frame()
-        known = (len(frame.state("social").contacts), len(frame.state("others").people),
+        # celles qui lui ont écrit (``others.hours`` : chaque message reçu ; ce qu'elle sent d'elles vient du modèle)
+        known = (len(frame.state("social").contacts), len(frame.state("others").hours),
                  len(frame.state("attention").exchanges))
         return alone, crowd, known
 

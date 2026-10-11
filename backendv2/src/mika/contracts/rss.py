@@ -31,6 +31,8 @@ FOR_FRIEND = "rss_for"
 class EntryNoticed(Signal):
     entry: str
     feed: str
+    #: les centres d'intérêt qu'il touche (leurs clés, ``self.interests``) : ce qu'elle remarque les nourrit (ADR 0089)
+    touches: tuple[str, ...] = ()
 
 
 class ThoughtOf(Payload):

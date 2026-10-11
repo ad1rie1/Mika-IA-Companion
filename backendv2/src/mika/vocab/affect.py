@@ -336,6 +336,12 @@ TEXT_TAG = re.compile(
     r"(?P<pre>" + _MD + r")\b[ÉE]motion\s*:\s*(?P<name>[^\W\d_][\w'’\-]*(?: [^\W\d_][\w'’\-]*)?)\s*"
     r"(?:\(\s*" + _VALUE + r"\s*\))?(?P<post>" + _MD + r")[\s.]*$",
     re.IGNORECASE)
+#: La balise à facettes (ADR 0093) : ``[EMOTION: sad 0.6, anxious 0.3]`` — tout ce que la balise contient, rangé par
+#: ``facets`` ; la forme d'une seule facette (``[EMOTION:sad:0.6]``) y passe aussi.
+FACETS_TAG = re.compile(
+    r"(?P<pre>" + _MD + r")(?:\[\[|\(\(|\{\{|[\[({])\s*[ÉE]MOTIONS?\s*[:=]\s*(?P<body>[^\]\)}\n]{1,160}?)\s*"
+    r"(?:\]\]|\)\)|\}\}|[\])}]|(?=\n|$))(?P<post>" + _MD + r")",
+    re.IGNORECASE)
 #: Ce qui reste d'une balise mal formée (``[EMOTION ?]``) : jamais livré.
 TAG_DEBRIS = re.compile(r"\[\s*[ÉE]MOTIONS?\b[^\]\n]*\]", re.IGNORECASE)
 #: Les jetons prosodiques, dans la grammaire exacte du frontend : pour la voix
@@ -401,27 +407,48 @@ _MANNER = frozenset(("doucement", "nerveusement", "timidement", "tristement", "m
 
 @dataclass(frozen=True, slots=True)
 class Declared:
+    """Ce qu'elle a déclaré ressentir : sa facette la plus forte (``emotion``, ``intensity``) et, quand elle en a dit
+    plusieurs (« triste 0,6, anxieuse 0,3 », ADR 0093), toutes, la plus forte d'abord (``facets``)."""
+
     emotion: Emotion
     intensity: float
+    facets: tuple[tuple[str, float], ...] = ()
+
+    @classmethod
+    def of(cls, felt: tuple[tuple[str, float], ...]) -> Declared | None:
+        """D'après des facettes rangées (``facets``) ; rien sans facette."""
+        if not felt:
+            return None
+        return cls(Emotion(felt[0][0]), felt[0][1], tuple(felt) if len(felt) > 1 else ())
+
+    @property
+    def all(self) -> tuple[tuple[str, float], ...]:
+        """Toutes ses facettes — la seule, quand elle n'en a dit qu'une."""
+        return self.facets or ((self.emotion.value, self.intensity),)
 
     def encode(self) -> str:
-        return f"{self.emotion.value}:{self.intensity:.3f}"
+        return ",".join(f"{e}:{x:.3f}" for e, x in self.all)
 
     @classmethod
     def decode(cls, raw: str | None) -> Declared | None:
+        """``sad:0.600`` (une facette, et le journal d'avant) ou ``sad:0.600,anxious:0.300``."""
         if not raw:
             return None
-        name, _, value = raw.partition(":")
-        emotion = emotion_of(name)
-        if emotion is None:
-            return None
-        try:
-            intensity = float(value) if value else DEFAULT_TAG_INTENSITY
-        except ValueError:
-            return None
-        if not math.isfinite(intensity):
-            return None
-        return cls(emotion, max(0.0, min(1.0, intensity)))
+        found: list[tuple[str, float]] = []
+        for part in raw.split(","):
+            name, _, value = part.partition(":")
+            emotion = emotion_of(name)
+            if emotion is None:
+                return None
+            try:
+                intensity = float(value) if value else DEFAULT_TAG_INTENSITY
+            except ValueError:
+                return None
+            if not math.isfinite(intensity):
+                return None
+            found.append((emotion.value, max(0.0, min(1.0, intensity))))
+        first = Emotion(found[0][0])
+        return cls(first, found[0][1], tuple(found) if len(found) > 1 else ())
 
 
 @dataclass(frozen=True, slots=True)
@@ -542,6 +569,15 @@ def facets(raw: Any) -> tuple[Facet, ...]:
 def dominant(felt: tuple[Facet, ...]) -> str | None:
     """La facette la plus forte d'un ressenti (son nom), ou rien."""
     return felt[0][0] if felt else None
+
+
+def felt_pad(felt: tuple[Facet, ...]) -> tuple[float, float]:
+    """Ce qu'un ressenti pèse et agite, d'après ses facettes et leurs intensités (ADR 0093) : (valence dans [-1, 1],
+    agitation dans [0, 1] — 0,3 au calme). « Triste 0,8 » pèse plus que « triste 0,2 »."""
+    known = [(Emotion(e), x) for e, x in felt if e in Emotion.__members__.values()]
+    v = sum(x * valence(e) for e, x in known)
+    a = sum(x * arousal(e) for e, x in known)
+    return round(max(-1.0, min(1.0, v)), 3), round(max(0.0, min(1.0, 0.3 + 0.7 * a)), 3)
 
 
 def facets_valence(felt: tuple[Facet, ...]) -> float:
@@ -681,6 +717,21 @@ def _cut(text: str, spans: list[tuple[int, int]]) -> str:
     return "".join(out)
 
 
+#: une seule émotion dans une balise, avec ou sans intensité, quel qu'en soit le séparateur (« happy », « sad:0.6 »,
+#: « surprised, 0.6 », « excited 8 ») : la forme d'avant les facettes, lue comme avant
+_ONE = re.compile(r"^\s*(?P<name>[^\W\d_][\w'’ \-]*?)\s*(?:[:,=/|;\s]\s*" + _VALUE + r")?\s*\.?\s*$")
+
+
+def _declared_in(body: str) -> Declared | None:
+    """Ce que dit le contenu d'une balise d'émotion : une émotion (la forme d'avant, son intensité par défaut
+    ``DEFAULT_TAG_INTENSITY``), ses facettes, ou le calme (``neutral``, qui n'est pas une facette mais reste une
+    déclaration)."""
+    one = _ONE.match(body)
+    if one is not None and emotion_named(one["name"]) is not None:
+        return Declared(emotion_named(one["name"]), tag_intensity(one["value"], bool(one["pct"])))  # type: ignore[arg-type]
+    return Declared.of(facets(body))
+
+
 def parse_tag(text: str, speaker: str = "") -> Tag:
     """Ce qu'elle a déclaré, et le texte prêt à livrer : prosodie dans la
     grammaire du frontend, didascalies et jetons parasites retirés, préfixe
@@ -688,33 +739,45 @@ def parse_tag(text: str, speaker: str = "") -> Tag:
     guillemets englobants et raisonnement ôtés, ponctuation recollée.
 
     Pas de balise → ``declared=None`` (aucune impulsion) ; plusieurs balises →
-    la **dernière** (c'est ce qu'elle ressent en finissant d'écrire) ; un nom
-    hors des 29 (et d'aucune table de synonymes) → ``declared=None`` et
+    la **dernière** (c'est ce qu'elle ressent en finissant d'écrire) ; une balise
+    à facettes (« sad 0.6, anxious 0.3 ») les garde toutes, rangées (ADR 0093) ;
+    un nom hors des 29 (et d'aucune table de synonymes) → ``declared=None`` et
     ``unknown`` renseigné. ``neutral`` reste une déclaration : c'est l'affect
     qui décide qu'elle ne fait rien bouger."""
     raw = _drop_thinking(text or "")
-    found = [_found(m) for m in TAG.finditer(raw)]
-    taken = [(s, e) for s, e, *_ in found]
+    felt = [(m.start(), m.end(), got) for m in FACETS_TAG.finditer(raw) if (got := _declared_in(m.group("body")))]
+    found = [f for f in (_found(m) for m in TAG.finditer(raw))
+             if not any(s < f[1] and f[0] < e for s, e, _ in felt)]
+    taken = [(s, e) for s, e, *_ in found] + [(s, e) for s, e, _ in felt]
     for m in SHORT_TAG.finditer(raw):
         if _is_cue(raw, m) and not any(s < m.end() and m.start() < e for s, e in taken):
             found.append(_found(m))
     tail = TEXT_TAG.search(raw)
     if tail is not None and emotion_named(tail.group("name")) is not None and \
-            not any(s < tail.end() and tail.start() < e for s, e, *_ in found):
+            not any(s < tail.end() and tail.start() < e for s, e in taken):
         found.append(_found(tail))
     found.sort()
-    clean = _cut(raw, [(s, e) for s, e, *_ in found])
+    clean = _cut(raw, sorted([(s, e) for s, e, *_ in found] + [(s, e) for s, e, _ in felt]))
     clean = _EMOJI.sub("", _gestures(_voice(clean)))
     clean = _unquote(_tidy(_speaker(speaker).sub("", _tidy(clean))))
     declared: Declared | None = None
     unknown: str | None = None
-    for _s, _e, name, value, pct in reversed(found):
+    last_felt = max(felt, default=None, key=lambda f: f[0])
+    for start, _e, name, value, pct in reversed(found):
+        if last_felt is not None and last_felt[0] > start:
+            break  # la balise à facettes est la dernière
         emotion = emotion_named(name)
         if emotion is not None:
             declared = Declared(emotion, tag_intensity(value, pct))
             break
+    if declared is None and last_felt is not None:
+        declared = last_felt[2]
     if declared is None and found:
         unknown = found[-1][2].lower()
+    elif declared is None:
+        vague = [m.group("body") for m in FACETS_TAG.finditer(raw) if _declared_in(m.group("body")) is None]
+        words = re.findall(r"[^\W\d_][\w'’\-]*", vague[-1]) if vague else []
+        unknown = words[0].lower() if words else None
     return Tag(clean, declared, unknown)
 
 

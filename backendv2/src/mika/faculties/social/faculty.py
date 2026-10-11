@@ -144,6 +144,11 @@ class SocialParams(BaseModel):
         label="Proximité : long silence d'au moins (jours)", group="Proximité vécue", lo=3, hi=365,
         help="En deçà, aucun silence ne fait descendre la proximité, quel que soit le rythme.")] = 21
     # reprendre contact : un silence d'une fois et demie son rythme
+    owner_weight: Annotated[float, Knob(
+        label="Ce que compte sa propriétaire", group="Sa propriétaire", lo=1.0, hi=2.0, step=0.05,
+        help="Sa propriétaire compte pour elle plus que tout autre : son silence lui manque plus tôt (le seuil du "
+             "manque divisé d'autant), sa compagnie la comble davantage, ce qu'elle ressent et ce qu'elle vit la "
+             "touchent davantage. Une tendance, jamais une obligation. 1 : comme une autre proche.")] = 1.3
     recontact_factor: Annotated[float, Knob(
         label="Manque : silence ÷ rythme", group="Reprendre contact", lo=1, hi=10, step=0.1,
         help="Une amie ou un proche lui manque quand son silence dépasse tant de fois son rythme habituel : elle "
@@ -1089,6 +1094,12 @@ def _sensitive(s: SocialState, cx, person: str) -> tuple[str, ...]:
     return tuple(fold(t) for t in profile.sensitive) if profile else ()
 
 
+@SOCIAL.fact(c.DELICATE_PEOPLE)
+def _delicate_people(s: SocialState, cx) -> tuple[str, ...]:
+    return tuple(sorted(person for person, profile in s.profiles.items()
+                        if profile.sensitive or profile.sensitive_ref))
+
+
 @SOCIAL.fact(c.SENSITIVE_REF)
 def _sensitive_ref(s: SocialState, cx, person: str) -> str:
     profile = s.profiles.get(person)
@@ -1101,10 +1112,17 @@ def _interests_ref(s: SocialState, cx, person: str) -> str:
     return profile.interests_ref if profile and not profile.masked else ""
 
 
-@SOCIAL.fact(c.MISSED, reads=[c.CIRCLE, c.CONTACT, affect_c.HOSTILITY, identity_c.IS_OWNER, identity_c.HANDLES])
+@SOCIAL.fact(c.WEIGHT, reads=[identity_c.IS_OWNER])
+def _weight(s: SocialState, cx, person: str) -> float:
+    return params(cx.params).owner_weight if cx.facts.get(identity_c.IS_OWNER(person)) else 1.0
+
+
+@SOCIAL.fact(c.MISSED, reads=[c.CIRCLE, c.CONTACT, c.WEIGHT, affect_c.HOSTILITY, identity_c.IS_OWNER,
+                              identity_c.HANDLES])
 def _missed(s: SocialState, cx) -> tuple[tuple[str, float], ...]:
     """Celles qui lui manquent : des amies ou des proches — d'aujourd'hui ou d'avant, une amie partie sans plus
-    donner de nouvelles manque encore (ADR 0058) — dont le silence dépasse son seuil."""
+    donner de nouvelles manque encore (ADR 0058) — dont le silence dépasse son seuil ; sa propriétaire, plus tôt
+    (``WEIGHT``)."""
     p = params(cx.params)
     out = []
     for person in cx.facts.get(c.CIRCLE):
@@ -1114,7 +1132,7 @@ def _missed(s: SocialState, cx) -> tuple[tuple[str, float], ...]:
         if person not in view.contacts:
             continue
         ratio = cx.facts.get(c.CONTACT(person)).silence_ratio
-        if ratio < p.recontact_factor:
+        if ratio < p.recontact_factor / cx.facts.get(c.WEIGHT(person)):
             continue
         hostility = cx.facts.get(affect_c.HOSTILITY(person))
         if been_friends(view, person, p, hostility, bool(cx.facts.get(identity_c.IS_OWNER(person)))):

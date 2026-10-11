@@ -173,3 +173,42 @@ async def test_the_embedding_model_is_warmed_at_startup_and_a_failure_stops_noth
     with caplog.at_level(logging.ERROR, logger="mika.server"):
         await _warm(Broken())
     assert w.warmed == 1 and "préchargement" in caplog.text
+
+
+def test_her_memory_is_ready_before_her_first_reply():
+    """Le modèle de plongements se charge pendant la relecture de sa vie ; elle ne se met à vivre (reprises, premiers
+    messages) qu'une fois chargé — borné : au-delà de ``WARM_WAIT_S``, elle vit sans, comme avant. Sinon un message
+    qui attendait au démarrage recevait une réponse sans souvenirs (lot I du chantier « émotions, conscience,
+    mémoire »). L'ordre se lit dans le code (l'AST, jamais le texte) : l'attente précède ``kernel.live()``."""
+    import ast
+    import inspect
+
+    from mika.app import server
+
+    tree = ast.parse(inspect.getsource(server))
+    life = next(n for n in ast.walk(tree) if isinstance(n, ast.AsyncFunctionDef) and n.name == "lifespan")
+    calls = [n for n in ast.walk(life) if isinstance(n, ast.Call)]
+    waited = [c.lineno for c in calls if getattr(c.func, "attr", "") == "wait_for"
+              and any(isinstance(a, ast.Name) and a.id == "WARM_WAIT_S" for a in c.args)]
+    live = [c.lineno for c in calls if getattr(c.func, "attr", "") == "live"]
+    assert waited and live and waited[0] < live[0]
+    assert 0 < server.WARM_WAIT_S <= 120
+
+
+def test_a_named_day_is_placed_on_the_calendar_not_guessed():
+    """« Finalement il est reporté à lundi » : la relecture voit chaque jour autour nommé et daté (« lundi 13 octobre
+    »), de la semaine qui précède les messages aux deux semaines qui viennent — elle ne calcule plus « lundi » au jugé
+    (ADR 0099)."""
+    from datetime import date
+
+    from mika.faculties.memory.extraction import CALENDAR_MAX, calendar, day_words
+
+    days = calendar(date(2026, 10, 9), date(2026, 10, 9)).split(", ")  # un vendredi
+    assert day_words(date(2026, 10, 12)) in days  # le lundi qui vient
+    assert day_words(date(2026, 10, 5)) in days  # le lundi d'avant
+    assert days[0] == day_words(date(2026, 10, 2)) and days[-1] == day_words(date(2026, 10, 23))
+    assert len(calendar(date(2026, 1, 1), date(2026, 10, 9)).split(", ")) == CALENDAR_MAX  # une vieille conversation
+    conv = Conversation("private:user_2", ALICE, (alice_says("finalement il est reporté à lundi"),))
+    text = render(conv, now=FRAME.local(), beliefs=(), promises=())
+    assert phrase("memory.extraction.render.calendar", days=calendar(FRAME.local().date(), FRAME.local().date())) \
+        in text

@@ -24,7 +24,8 @@ from mika.contracts import self_ as self_c
 from mika.faculties.goals.prompt import life_of
 from mika.faculties.memory.projections import Items, Told
 from mika.faculties.needs import NeedsState, _belief_changed, _learned_a_belief
-from mika.faculties.self import SelfParams, material
+from mika.faculties.self import SelfParams
+from mika.faculties.self.narrative import material
 from mika.faculties.self.night import journal_ref
 from mika.faculties.social.sections import between_us
 from mika.kernel.clock import DAY, US

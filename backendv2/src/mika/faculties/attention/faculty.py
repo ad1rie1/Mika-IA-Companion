@@ -61,6 +61,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Collection
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
 
@@ -84,7 +85,7 @@ from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
 from mika.vocab import affect as A
-from mika.vocab import privacy
+from mika.vocab import causes, privacy
 from mika.vocab.affect import Appraisal, Declared, Emotion
 from mika.vocab.episodes import Kind
 from mika.vocab.lineage import Lineage
@@ -179,6 +180,25 @@ class AttentionParams(BaseModel):
     birth_appraisal_factor: Annotated[float, Knob(
         label="Émotion quand une pensée naît", group="Y repenser", lo=0.0, hi=1.0, step=0.05,
         help="La fraction de l'intensité d'une pensée qu'elle ressent au moment où elle naît.")] = 0.5
+    # les souvenirs qui reviennent (ADR 0098)
+    reminisce_per_day: Annotated[int, Knob(
+        label="Souvenirs qui reviennent par jour", group="Les souvenirs qui reviennent", lo=0, hi=6,
+        help="Seule et désœuvrée, un souvenir lui revient parfois de lui-même : une date anniversaire, ce qu'elle a "
+             "entre les mains, ou sans raison. Au plus autant par jour (0 : jamais).")] = 2
+    reminisce_spacing_us: Annotated[int, Knob(
+        label="Un souvenir au plus toutes les", group="Les souvenirs qui reviennent", lo=30 * MINUTE, hi=2 * DAY,
+        help="Deux souvenirs qui reviennent s'espacent d'au moins ce délai.")] = 4 * HOUR
+    reminisce_idle_us: Annotated[int, Knob(
+        label="Après un moment sans rien", group="Les souvenirs qui reviennent", lo=10 * MINUTE, hi=DAY,
+        help="Un souvenir ne revient qu'après ce délai sans conversation ni rien qui se passe : en parlant à "
+             "quelqu'un, on pense à ce qu'on se dit.")] = 45 * MINUTE
+    reminisce_min_age_us: Annotated[int, Knob(
+        label="Un souvenir d'au moins", group="Les souvenirs qui reviennent", lo=DAY, hi=365 * DAY,
+        help="Ce qui revient de soi-même est un peu ancien : ce qui date d'hier est encore frais, ce n'est pas un "
+             "souvenir qui remonte.")] = 7 * DAY
+    reminisce_intensity: Annotated[float, Knob(
+        label="Intensité d'un souvenir qui revient", group="Les souvenirs qui reviennent", lo=0.0, hi=1.0, step=0.05,
+        help="Au plus (un souvenir important, une date anniversaire) ; un souvenir mineur, la moitié.")] = 0.4
     # attentes
     reply_window_us: Annotated[int, Knob(
         label="Délai de réponse attendu", group="Attentes", lo=MINUTE, hi=6 * HOUR,
@@ -531,6 +551,8 @@ class AttentionState:
     screens: FrozenDict[str, str] = field(default_factory=FrozenDict)
     #: ce qu'elle a attendu (fil du moment → le jour, en ordinal local) : une fois par jour et par moment (ADR 0086)
     anticipated: FrozenDict[int, int] = field(default_factory=FrozenDict)
+    #: les souvenirs qui lui sont revenus d'eux-mêmes (quand, lequel), les plus récents (ADR 0098)
+    reminisced: tuple[tuple[int, int], ...] = ()
 
 
 #: v5 : une conversation close (« bonne nuit ») n'est pas « sans réponse » ; le délai de réponse court sur les
@@ -546,10 +568,14 @@ class AttentionState:
 #: v12 : revenir à ce qu'elle croyait, changer d'avis elle-même (ADR 0081) ; une pensée dont une source devient
 #: secrète s'oublie (ADR 0082).
 #: v13 : ce qu'elle attend (``anticipated``, ADR 0086).
+#: v14 : la lecture d'un message suit sa réponse, et l'allège dès qu'elle l'a écrite ; l'au revoir est un événement
+#: (``others.farewell``, ADR 0093) ; les souvenirs qui lui reviennent (``reminisced``, ADR 0098).
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    state_version=13)
+                    state_version=14)
 #: les manques dont on retient la dernière pensée (les plus récents)
 MISSING_KEPT = 64
+#: les souvenirs revenus retenus (un même souvenir ne revient pas tant qu'il y est)
+REMINISCED_KEPT = 60
 #: les écrans ouverts retenus au plus (des connexions jamais fermées : un transport qui ne le dit pas)
 SCREENS_KEPT = 64
 
@@ -690,6 +716,23 @@ def _lied(s: AttentionState, person: str, source: int, at: int, p: AttentionPara
                                                    p.lie_intensity, at)))
 
 
+def _ease(s: AttentionState, person: str, at: int, p: AttentionParams,
+          origins: Collection[str] | None = None) -> AttentionState:
+    """Lui répondre allège ce qui la concerne (de moitié) — pas l'échange même qui l'a fait naître ou raviver ; une
+    inquiétude, un échange qui a marqué, seulement si la personne en a reparlé ou a retrouvé son ton (``eased``).
+    ``origins`` : seulement ces pensées-là."""
+    thoughts = s.thoughts
+    for t in s.thoughts.values():
+        if person not in t.about or at - t.touched_at < p.exchange_spacing_us:
+            continue
+        if origins is not None and t.origin not in origins:
+            continue
+        if t.origin in RELATIONAL and s.eased.get(person, 0) <= t.touched_at:
+            continue
+        thoughts = thoughts.set(t.id, replace(t, intensity=current(t, at, p) / 2, touched_at=at))
+    return replace(s, thoughts=thoughts)
+
+
 @ATTENTION.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, others_c.REPLY_DELAY, others_c.HOURS, social_c.CLOSENESS])
 def _uttered(s: AttentionState, e, cx) -> AttentionState:
     d = e.data
@@ -699,14 +742,7 @@ def _uttered(s: AttentionState, e, cx) -> AttentionState:
     person = cx.facts.get(identity_c.PERSON(d.target))
     # y revenir avec la personne soulage — pas l'échange même qui l'a fait naître ou raviver ; une inquiétude,
     # un échange qui a marqué, seulement si la personne en a reparlé ou a retrouvé son ton (« ok » n'apaise rien)
-    thoughts = s.thoughts
-    for t in s.thoughts.values():
-        if person not in t.about or e.at - t.touched_at < p.exchange_spacing_us:
-            continue
-        if t.origin in RELATIONAL and s.eased.get(person, 0) <= t.touched_at:
-            continue
-        thoughts = thoughts.set(t.id, replace(t, intensity=current(t, e.at, p) / 2, touched_at=e.at))
-    s = replace(s, thoughts=thoughts)
+    s = _ease(s, person, e.at, p)
     due = False
     tracked = 0
     if d.kind == Kind.INITIATIVE:
@@ -889,6 +925,19 @@ def _left(s: AttentionState, e, cx) -> AttentionState:
 TONE_BACK = 0.1
 
 
+def _closed(s: AttentionState, person: str, at: int) -> AttentionState:
+    """« Bonne nuit », « à demain » : la conversation se clôt ; y répondre n'attendra rien — et la clôture vaut dès
+    maintenant, même si elle ne répond pas (« [SILENCE] » après avoir déjà dit bonne nuit)."""
+    if person not in s.exchanges:
+        return s
+    return replace(s, exchanges=s.exchanges.set(person, replace(s.exchanges[person], closing=True, closed_at=at)))
+
+
+@ATTENTION.reducer(others_c.FAREWELL)
+def _farewell(s: AttentionState, e, cx) -> AttentionState:
+    return _closed(s, e.data.person, e.at)
+
+
 @ATTENTION.reducer(others_c.READ)
 def _worried(s: AttentionState, e, cx) -> AttentionState:
     """Quelqu'un qui compte n'avait pas l'air comme d'habitude : ça lui reste
@@ -896,14 +945,15 @@ def _worried(s: AttentionState, e, cx) -> AttentionState:
     personne a retrouvé son ton (pas deux mots, pas plus sombre que d'habitude)
     permettra, en lui répondant, d'alléger ce qui la concerne."""
     d = e.data
-    if d.closing and d.person in s.exchanges:
-        # « bonne nuit », « à demain » : la conversation se clôt ; y répondre n'attendra rien — et la clôture vaut
-        # dès maintenant, même si elle ne répond pas (« [SILENCE] » après avoir déjà dit bonne nuit)
-        s = replace(s, exchanges=s.exchanges.set(d.person, replace(s.exchanges[d.person], closing=True,
-                                                                   closed_at=e.at)))
+    if d.closing:  # le journal d'avant l'ADR 0093 portait l'au revoir dans la lecture
+        s = _closed(s, d.person, e.at)
     if not d.concern:
-        if d.valence >= 0 and d.valence >= d.expected - TONE_BACK and phrase("others.cues.short") not in d.cues:
-            return replace(s, eased=s.eased.set(d.person, e.at))
+        short = d.brief or phrase("others.cues.short") in d.cues
+        if d.valence >= 0 and d.valence >= d.expected - TONE_BACK and not short:
+            s = replace(s, eased=s.eased.set(d.person, e.at))
+            if d.after_reply:
+                # lu en lui répondant (ADR 0093) : la réponse qui vient de partir allège ce qui la concerne
+                s = _ease(s, d.person, e.at, params(cx.params), RELATIONAL)
         return s
     p = params(cx.params)
     return _relational(s, d.person, Emotion.ANXIOUS.value, p.concern_intensity, d.message, c.CONCERN, e.at, p,
@@ -1043,6 +1093,8 @@ def _born(s: AttentionState, e, cx) -> AttentionState:
         s = replace(s, missing=missing)
     if d.origin == c.ALONE:
         s = replace(s, alone_at=e.at)
+    if d.origin == c.REMINISCENCE and d.source is not None:
+        s = replace(s, reminisced=(*s.reminisced, (e.at, d.source))[-REMINISCED_KEPT:])
     if d.origin == c.UNANSWERED and d.about and d.about[0] in s.exchanges:
         s = replace(s, exchanges=s.exchanges.set(d.about[0], replace(s.exchanges[d.about[0]], felt=True)))
     if d.origin == c.EXCHANGE and len(d.about) == 1 and d.emotion in GLAD and not forgiven:
@@ -1279,7 +1331,7 @@ def _dwell_felt(e, cx) -> Appraisal | None:
     if e.data.origin in NAMES_A_FEELING:
         return None
     p = params(cx.params)
-    return Appraisal(_emotion(e.data.emotion), e.data.intensity * p.dwell_factor, reason="elle y repense",
+    return Appraisal(_emotion(e.data.emotion), e.data.intensity * p.dwell_factor, reason=causes.THOUGHT_BACK,
                      relational=e.data.origin == c.EXCHANGE)
 
 
@@ -1299,20 +1351,20 @@ def return_joy(absence: float) -> float:
     return round(min(RETURN_JOY_CEILING, RETURN_JOY_FLOOR + RETURN_JOY_PER_DOUBLING * doublings), 3)
 
 
-@ATTENTION.appraisal(c.EXPECTATION_MET, reads=[social_c.CLOSENESS])
+@ATTENTION.appraisal(c.EXPECTATION_MET, reads=[social_c.CLOSENESS, social_c.WEIGHT])
 def _met_felt(e, cx) -> list[Appraisal]:
     d = e.data
     if d.kind == c.RETURN:
         # enfin : de la joie, pour elle et envers la personne revenue — à la mesure de son absence, et de ce
-        # qu'elle est pour elle
+        # qu'elle est pour elle (sa propriétaire, davantage : ``social.WEIGHT``)
         if d.absence is None:
-            return [Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, reason="retour"),
-                    Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, toward=d.person, reason="retour")]
-        joy = return_joy(d.absence)
+            return [Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, reason=causes.CAME_BACK),
+                    Appraisal(Emotion.HAPPY, RETURN_JOY_UNMEASURED, toward=d.person, reason=causes.CAME_BACK)]
+        joy = round(min(1.0, return_joy(d.absence) * cx.facts.get(social_c.WEIGHT(d.person))), 3)
         toward = RETURN_TOWARD.get(cx.facts.get(social_c.CLOSENESS(d.person)), 0.0)
-        return [Appraisal(Emotion.HAPPY, joy, reason="retour"),
-                Appraisal(Emotion.HAPPY, round(joy * toward, 3), toward=d.person, reason="retour")]
-    return [Appraisal(Emotion.RELIEVED, 0.25, reason="réponse")]
+        return [Appraisal(Emotion.HAPPY, joy, reason=causes.CAME_BACK),
+                Appraisal(Emotion.HAPPY, round(joy * toward, 3), toward=d.person, reason=causes.CAME_BACK)]
+    return [Appraisal(Emotion.RELIEVED, 0.25, reason=causes.ANSWERED)]
 
 
 # Ce que la digestion a apaisé se ressent au réveil, pas en pleine nuit (une teinte posée à 3 h
@@ -1320,8 +1372,19 @@ def _met_felt(e, cx) -> list[Appraisal]:
 
 
 @ATTENTION.appraisal(c.EXPECTATION_MISSED)
-def _missed_felt(e, cx) -> Appraisal | None:
-    if e.data.kind == c.PROMISE:
-        return Appraisal(Emotion.EMBARRASSED, 0.3, reason="promesse non tenue")
-    return Appraisal(Emotion.SAD, 0.15, reason="sans réponse") if e.data.kind == c.REPLY else None
+def _missed_felt(e, cx) -> list[Appraisal]:
+    """Une promesse qu'elle n'a pas tenue : de la gêne, pour elle et envers la personne à qui elle l'avait faite ;
+    une réponse qui ne vient pas : un peu de peine, et envers elle aussi."""
+    d = e.data
+    if d.kind == c.PROMISE:
+        felt = (Emotion.EMBARRASSED, 0.3, causes.BROKEN_PROMISE)
+    elif d.kind == c.REPLY:
+        felt = (Emotion.SAD, 0.15, causes.UNANSWERED)
+    else:
+        return []
+    emotion, intensity, reason = felt
+    out = [Appraisal(emotion, intensity, reason=reason)]
+    if d.person:
+        out.append(Appraisal(emotion, intensity, toward=d.person, reason=reason))
+    return out
 

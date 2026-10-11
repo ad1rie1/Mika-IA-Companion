@@ -123,13 +123,15 @@ def _ratio(value: float) -> str:
     return f"{value:.1f}".replace(".", ",")
 
 
-def _silence(reading: c.ContactReading, p: SocialParams) -> Cell:
+def _silence(reading: c.ContactReading, p: SocialParams, weight: float = 1.0) -> Cell:
     """Le silence rapporté à son rythme : la jauge est à moitié pleine au seuil
-    où elle lui manque (une fois et demie son rythme, par défaut)."""
+    où elle lui manque (une fois et demie son rythme, par défaut ; plus tôt
+    pour sa propriétaire, ``weight``)."""
     if not reading.last_in:
         return Text("jamais écrit", "muted")
-    full = 2 * p.recontact_factor
-    missed = reading.silence_ratio >= p.recontact_factor
+    threshold = p.recontact_factor / weight
+    full = 2 * threshold
+    missed = reading.silence_ratio >= threshold
     return Meter(min(1.0, reading.silence_ratio / full) if full > 0 else 0.0, f"×{_ratio(reading.silence_ratio)}",
                  "warn" if missed else "")
 
@@ -341,7 +343,8 @@ def _detail(s: SocialState, frame: Frame, ctx: InspectContext, person: str, *, o
         Stats((Stat("proximité", _closeness(s, frame, person),
                     "déclarée par un opérateur" if person in s.declared else "née de leur histoire"),
                Stat("rythme", _rhythm(reading)),
-               Stat("silence ÷ rythme", _silence(reading, p), f"lui manque au-delà de ×{_ratio(p.recontact_factor)}",
+               Stat("silence ÷ rythme", _silence(reading, p, frame.get(c.WEIGHT(person))),
+                    f"lui manque au-delà de ×{_ratio(p.recontact_factor / frame.get(c.WEIGHT(person)))}",
                     tone="warn" if person in missed else ""),
                Stat("dernier message reçu", _when(reading.last_in)),
                Stat("ses initiatives sans réponse", reading.unanswered))),
@@ -421,8 +424,8 @@ def _links(s: SocialState, frame: Frame, ctx: InspectContext) -> list[Block]:
     rows: list[Row] = []
     for k in page:
         reading = frame.get(c.CONTACT(k))
-        rows.append(Row((_ref(frame, k), _closeness(s, frame, k), _rhythm(reading), _silence(reading, p),
-                         _when(reading.last_in), reading.unanswered,
+        rows.append(Row((_ref(frame, k), _closeness(s, frame, k), _rhythm(reading),
+                         _silence(reading, p, frame.get(c.WEIGHT(k))), _when(reading.last_in), reading.unanswered,
                          Text(_summary(s, k, texts), clamp=SUMMARY_CHARS)), href=_ref(frame, k, "lien")))
     missed = frame.get(c.MISSED)
     return [

@@ -59,6 +59,7 @@ from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import needs as c
+from mika.contracts import presence as presence_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
@@ -73,7 +74,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.kernel.prompt import SectionBody, cited
 from mika.kernel.state import FrozenDict
-from mika.vocab import circadian
+from mika.vocab import causes, circadian
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
@@ -288,6 +289,10 @@ class Occupation:
     since: int
     until: int | None = None
     nourishes: tuple[str, ...] = ()
+    #: depuis quand le vide courait quand elle s'y est mise (0 : un journal d'avant) — s'occuper l'efface au prorata
+    #: de ce que l'occupation a comblé, il ne le remet pas à zéro (ADR 0098) ; et quand ses besoins l'ont appris
+    void_from: int = 0
+    noted: int = 0
 
 
 #: au plus tant de choses faites gardées comme matière
@@ -325,6 +330,11 @@ class NeedsState:
     occupied: Occupation | None = None
     #: la dernière occupation qui l'a nourrie, ``until`` à sa fin réelle (la console date le soulagement)
     nourished: Occupation | None = None
+    #: depuis quand elle est sans personne : le dernier message qu'on lui a adressé, sa dernière parole à quelqu'un,
+    #: son réveil, une séance de travail qui l'absorbe (PSY-18) — ce qu'elle fait de ses mains n'y change rien : ça
+    #: tient l'ennui à distance, pas le manque de quelqu'un (0 : un journal d'avant, ``idle_since`` en tient lieu ;
+    #: ADR 0098)
+    lonely_since: int = 0
 
 
 #: v3 : ce qu'on lui a raconté se classe par importance (plusieurs par personne), les matières déjà dites, qui lui
@@ -334,8 +344,10 @@ class NeedsState:
 #: désormais : reconstruite depuis la genèse)
 #: v6 : ce qu'on lui a raconté garde la croyance d'où il vient : remplacée, ou devenue secrète, elle n'est plus une
 #: matière ; ni un secret, ni un avis, ni un surnom n'en deviennent une (ADR 0078)
+#: v7 : sa propriétaire la comble davantage (``social.WEIGHT``, ADR 0094) ; s'occuper efface le vide au prorata de ce
+#: que l'occupation a comblé, et jamais la solitude (``lonely_since``, ADR 0098)
 NEEDS = Faculty("needs", state=NeedsState, init=lambda p: NeedsState(), params=NeedsParams, derive=derive,
-                state_version=6)
+                state_version=7)
 NEEDS.declare(*c.ALL)
 
 #: les séances où elle travaille dans son mode à elle (une exécution impersonnelle n'est pas elle)
@@ -379,28 +391,29 @@ def _concerned(owner: str | None, about: Any) -> tuple[str, ...]:
     return tuple(sorted({*(about or ()), *((owner,) if owner else ())}))
 
 
-def _company(cx: Any, handle: str, p: NeedsParams) -> float:
+def _company(get: Any, handle: str, p: NeedsParams) -> float:
     """La part de compagnie qu'apporte un échange avec cette adresse : pleine avec une amie ou une proche, une
     part avec une connaissance, peu avec une inconnue (une adresse jetable en est une), presque rien avec qui
     elle garde une hostilité installée — un après-midi à se faire chahuter par un inconnu ne remplace pas une
     amie, le soir."""
     if not is_identifiable(handle):
         return p.stranger_company
-    person = cx.facts.get(identity_c.PERSON(handle))
-    closeness = cx.facts.get(social_c.CLOSENESS(person))
+    person = get(identity_c.PERSON(handle))
+    closeness = get(social_c.CLOSENESS(person))
     share = 1.0 if closeness in REUNITING else (
         p.acquaintance_company if closeness == social_c.ACQUAINTANCE else p.stranger_company)
-    if cx.facts.get(affect_c.HOSTILITY(person)) >= p.hostile_from:
-        share = min(share, p.hostile_company)
-    return share
+    if get(affect_c.HOSTILITY(person)) >= p.hostile_from:
+        return min(share, p.hostile_company)
+    return share * get(social_c.WEIGHT(person))  # sa propriétaire la comble davantage
 
 
 def _shared(factor: float, share: float) -> float:
-    """Le facteur d'un échange qui ne comble qu'une part : ``1`` ne comble rien, ``factor`` comble tout."""
-    return 1.0 - (1.0 - factor) * share
+    """Le facteur d'un échange qui ne comble qu'une part : ``1`` ne comble rien, ``factor`` comble tout (au-delà,
+    sa propriétaire : un peu plus, jamais au-delà de tout)."""
+    return max(0.0, 1.0 - (1.0 - factor) * share)
 
 
-@NEEDS.reducer(rt.PERCEPTION_RECEIVED, reads=[identity_c.PERSON, social_c.CLOSENESS, affect_c.HOSTILITY])
+@NEEDS.reducer(rt.PERCEPTION_RECEIVED, reads=[identity_c.PERSON, social_c.CLOSENESS, social_c.WEIGHT, affect_c.HOSTILITY])
 def _received(s: NeedsState, e, cx) -> NeedsState:
     """Un message adressé : la compagnie, selon qui l'écrit ; la curiosité, de
     n'importe qui. Le vide, lui, est rompu par n'importe quel message
@@ -409,9 +422,9 @@ def _received(s: NeedsState, e, cx) -> NeedsState:
         return s
     p = params(cx.params)
     s = _touch(s, e.at, p)
-    social = _shared(p.received_social, _company(cx, e.data.handle, p))
+    social = _shared(p.received_social, _company(cx.facts.get, e.data.handle, p))
     s = _relieve(_relieve(s, c.SOCIAL, social, e.at, p), c.CURIOSITY, p.received_curiosity, e.at, p)
-    return replace(s, idle_since=e.at, heard_at=e.at, heard_before=s.heard_at)
+    return replace(s, idle_since=e.at, heard_at=e.at, heard_before=s.heard_at, lonely_since=e.at)
 
 
 @NEEDS.reducer(goals_c.STEP_REPORTED)
@@ -503,14 +516,14 @@ def _belief_changed(s: NeedsState, e, cx) -> NeedsState:
     return _unlearned(s, d.replaces) if d.replaces is not None else s
 
 
-@NEEDS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, social_c.CLOSENESS, affect_c.HOSTILITY])
+@NEEDS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, social_c.CLOSENESS, social_c.WEIGHT, affect_c.HOSTILITY])
 def _said(s: NeedsState, e, cx) -> NeedsState:
     d = e.data
     p = params(cx.params)
     if d.kind in WORKING_KINDS:
         # ce qu'elle a fait pendant une séance l'occupe et la dit un peu : pas de vide
         s = _relieve(_touch(s, e.at, p), c.EXPRESSION, p.worked_expression, e.at, p)
-        return replace(s, idle_since=e.at)
+        return replace(s, idle_since=e.at, lonely_since=e.at)
     if not d.visible or not d.target:
         return s
     if d.kind == Kind.INITIATIVE:
@@ -524,10 +537,10 @@ def _said(s: NeedsState, e, cx) -> NeedsState:
                 used = FrozenDict(sorted(used.items(), key=lambda kv: (kv[1], kv[0]))[-USED_KEPT:])
             s = replace(s, used=used)
     s = _touch(s, e.at, p)
-    s = _relieve(s, c.SOCIAL, _shared(p.said_social, _company(cx, d.target, p)), e.at, p)
+    s = _relieve(s, c.SOCIAL, _shared(p.said_social, _company(cx.facts.get, d.target, p)), e.at, p)
     s = _relieve(s, c.EXPRESSION, p.initiative_expression if d.kind == Kind.INITIATIVE else p.reply_expression,
                  e.at, p)
-    return replace(s, idle_since=e.at)
+    return replace(s, idle_since=e.at, lonely_since=e.at)
 
 
 @NEEDS.reducer(rt.EPISODE_STARTED)
@@ -539,14 +552,15 @@ def _working(s: NeedsState, e, cx) -> NeedsState:
     if e.data.kind not in WORKING_KINDS:
         return s
     kept = FrozenDict({k: t for k, t in s.working.items() if e.at - t < WORK_STALE})
-    return replace(s, working=kept.set(e.correlation, e.at), idle_since=e.at)
+    return replace(s, working=kept.set(e.correlation, e.at), idle_since=e.at, lonely_since=e.at)
 
 
 @NEEDS.reducer(rt.EPISODE_ENDED)
 def _worked(s: NeedsState, e, cx) -> NeedsState:
     if e.correlation not in s.working:
         return s
-    return replace(s, working=s.working.delete(e.correlation), idle_since=max(s.idle_since, e.at))
+    return replace(s, working=s.working.delete(e.correlation), idle_since=max(s.idle_since, e.at),
+                   lonely_since=max(s.lonely_since, e.at))
 
 
 @NEEDS.reducer(body_c.WOKE)
@@ -556,7 +570,7 @@ def _woke(s: NeedsState, e, cx) -> NeedsState:
     pas un vide ressenti, il ne prépare pas de retrouvailles."""
     if not s.idle_since:
         return s
-    return replace(s, idle_since=max(s.idle_since, e.data.at))
+    return replace(s, idle_since=max(s.idle_since, e.data.at), lonely_since=max(s.lonely_since, e.data.at))
 
 
 @NEEDS.reducer(BOOT)
@@ -609,12 +623,23 @@ def occupied(s: NeedsState, now: int) -> bool:
     return s.occupied is not None and now < occupation_end(s.occupied)
 
 
-def idle_from(s: NeedsState) -> int:
-    """Depuis quand rien ne l'occupe : la dernière chose qui s'est passée, ou la fin de son occupation (la fin
-    prévue, tant qu'elle dure)."""
+def _void_after(o: Occupation, idle_since: int, end: int, p: NeedsParams) -> int:
+    """Depuis quand le vide court, une fois l'occupation finie à ``end`` : le vide qu'elle avait avant de s'y mettre
+    s'efface au prorata de ce que l'occupation a comblé (pleinement au bout de ``occupied_full_us``) — deux minutes à
+    regarder dehors ne valent pas deux heures de répit, une heure à dessiner, si (ADR 0098) ; ce qui s'est passé
+    entre-temps (un message) compte en entier."""
+    if o.void_from and idle_since <= max(o.since, o.noted):
+        share = min(1.0, (end - o.since) / max(1, p.occupied_full_us))
+        return max(o.void_from, end - round((o.since - o.void_from) * (1.0 - share)))
+    return max(idle_since, end)
+
+
+def idle_from(s: NeedsState, p: NeedsParams) -> int:
+    """Depuis quand rien ne l'occupe : la dernière chose qui s'est passée, ou ce que lui laisse son occupation (à sa
+    fin prévue, tant qu'elle dure — ``Empty`` attend qu'elle soit finie)."""
     if s.occupied is None:
         return s.idle_since
-    return max(s.idle_since, occupation_end(s.occupied))
+    return _void_after(s.occupied, s.idle_since, occupation_end(s.occupied), p)
 
 
 def _stop(s: NeedsState, t: int, p: NeedsParams) -> NeedsState:
@@ -630,7 +655,7 @@ def _stop(s: NeedsState, t: int, p: NeedsParams) -> NeedsState:
     for kind, factor in ((c.EXPRESSION, p.occupied_expression), (c.CURIOSITY, p.occupied_curiosity)):
         if kind in o.nourishes:
             s = _relieve(s, kind, _shared(factor, share), t, p)
-    return replace(s, occupied=None, nourished=replace(o, until=end), idle_since=max(s.idle_since, end))
+    return replace(s, occupied=None, nourished=replace(o, until=end), idle_since=_void_after(o, s.idle_since, end, p))
 
 
 def _occupy(s: NeedsState, a: w.Activity | None, t: int, p: NeedsParams) -> NeedsState:
@@ -642,7 +667,8 @@ def _occupy(s: NeedsState, a: w.Activity | None, t: int, p: NeedsParams) -> Need
     s = _stop(s, t, p)
     if a is None or not a.nourishes:
         return s
-    o = Occupation(a.name, a.since, a.until, tuple(str(k) for k in a.nourishes))
+    o = Occupation(a.name, a.since, a.until, tuple(str(k) for k in a.nourishes), void_from=s.idle_since or t,
+                   noted=t)
     return replace(_touch(s, t, p), occupied=o, idle_since=t)
 
 
@@ -678,8 +704,10 @@ def _fell_asleep(s: NeedsState, e, cx) -> NeedsState:
 #: les pensées qui se partagent avec n'importe qui (anodines, sur personne) : un titre lu, un but où elle
 #: bloque, une croyance révisée
 SHAREABLE = frozenset({attention_c.SIGNAL, attention_c.BLOCKED, attention_c.REVISION})
-#: … et, avec la personne qu'elles concernent, ce qu'elle a vécu avec elle
-WITH_THEM = frozenset({*SHAREABLE, attention_c.EXCHANGE, attention_c.CONCERN, attention_c.MISSING})
+#: … et, avec la personne qu'elles concernent, ce qu'elle a vécu avec elle — un souvenir d'elle qui lui est revenu
+#: compris (« je repensais à… », ADR 0098)
+WITH_THEM = frozenset({*SHAREABLE, attention_c.EXCHANGE, attention_c.CONCERN, attention_c.MISSING,
+                       attention_c.REMINISCENCE})
 #: la provenance d'une matière montrée dans une initiative (``matter:<référence>``) : dite, elle ne resert pas
 MATTER_PROVENANCE = "matter:"
 
@@ -813,6 +841,24 @@ def _urges(s: NeedsState, frame: Frame) -> list[Candidate]:
     return out
 
 
+@NEEDS.modulate(kinds=[Kind.INITIATIVE], reads=[c.NEEDS, presence_c.PRESENT, identity_c.PERSON, social_c.CLOSENESS,
+                                                social_c.WEIGHT, affect_c.HOSTILITY])
+def _toward(s: NeedsState, frame: Frame, row: RowView) -> Modulation:
+    """L'envie de compagnie penche vers qui la comblerait (``_company``) : entre ceux qui sont là, vers sa
+    propriétaire plutôt qu'une amie, vers une amie plutôt qu'une inconnue — une envie « vers n'importe qui » ne se
+    partageait qu'à égalité. Une tendance, jamais un interdit : la part retranchée se mesure à la meilleure compagnie
+    présente (seule avec une inconnue silencieuse, elle finit quand même par lui parler), et sa propriétaire, comblant
+    davantage qu'une amie, l'attire un peu plus même seule."""
+    if row.target in (Anyone.ANY, Anyone.NONE) or c.NEED_SOCIAL not in row.reasons:
+        return Modulation()
+    p = params(frame.env.params_of("needs", frame.root))
+    social, _expression = urges(frame.get(c.NEEDS), p)
+    share = _company(frame.get, row.target, p)
+    best = max([share, *(_company(frame.get, h, p) for h in frame.get(presence_c.PRESENT) if is_identifiable(h))])
+    shift = social * (share - min(1.0, best))
+    return Modulation(shift=shift) if abs(shift) > 1e-9 else Modulation()
+
+
 @NEEDS.modulate(kinds=[Kind.INITIATIVE], reads=[c.NEEDS, c.MATTER])
 def _matterless(s: NeedsState, frame: Frame, row: RowView) -> Modulation:
     """Une initiative que seules les envies poussent, sans rien de concret à
@@ -834,10 +880,17 @@ def _matterless(s: NeedsState, frame: Frame, row: RowView) -> Modulation:
 # ── Le vide ───────────────────────────────────────────────────────────────
 
 
-def emptiness(s: NeedsState, now: int, p: NeedsParams) -> float:
+def empty_since(s: NeedsState, lonely: bool, p: NeedsParams) -> int:
+    """Depuis quand le vide court : pour l'ennui, depuis que rien ne l'occupe (ce qu'elle fait de ses mains
+    l'occupe) ; pour la solitude, depuis que personne ne lui a parlé, qu'elle n'a parlé à personne ni ne s'est
+    absorbée dans son travail — dessiner tient l'ennui à distance, pas le manque de quelqu'un (ADR 0098)."""
+    return (s.lonely_since or s.idle_since) if lonely else idle_from(s, p)
+
+
+def emptiness(s: NeedsState, now: int, p: NeedsParams, lonely: bool = False) -> float:
     """Ce que pèse le vide maintenant : un peu au début, davantage avec chaque
     heure qui passe, jamais plus que le plafond."""
-    beyond = max(0.0, (now - idle_from(s) - p.idle_before_empty_us) / HOUR) if s.idle_since else 0.0
+    beyond = max(0.0, (now - empty_since(s, lonely, p) - p.idle_before_empty_us) / HOUR) if s.idle_since else 0.0
     return round(min(p.empty_max, p.empty_intensity + p.empty_growth_per_h * beyond), 3)
 
 
@@ -848,7 +901,8 @@ class Empty:
     """Deux heures sans rien : un vide ressenti toutes les vingt minutes tant
     qu'il dure (un état tenu, pas une dent de scie), qui se creuse avec la
     durée. Travailler l'occupe : pas de vide pendant une séance ; ce qu'elle
-    fait de ses mains aussi, jusqu'à ce qu'elle s'arrête."""
+    fait de ses mains tient l'ennui à distance jusqu'à ce qu'elle s'arrête —
+    la solitude, non (ADR 0098)."""
 
     def next_due(self, state: NeedsState, frame: Frame, last_run: int | None) -> int | None:
         if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE or not state.idle_since:
@@ -856,8 +910,12 @@ class Empty:
         if busy(state, frame.now):
             return None  # elle travaille : la fin de la séance la réveillera
         p = params(frame.env.params_of("needs", frame.root))
-        # une occupation sans fin prévue repousse l'échéance loin : le monde qui l'arrête la réveillera
-        return max(idle_from(state) + p.idle_before_empty_us, state.felt_at + p.empty_every_us)
+        lonely = frame.get(c.NEEDS).social >= p.lonely_from
+        due = max(empty_since(state, lonely, p) + p.idle_before_empty_us, state.felt_at + p.empty_every_us)
+        if not lonely and occupied(state, frame.now):
+            # occupée, l'ennui attend qu'elle ait fini (une occupation sans fin prévue : le monde qui l'arrête)
+            due = max(due, occupation_end(state.occupied))  # type: ignore[arg-type]
+        return due
 
     async def run(self, ctx: Any) -> None:
         frame: Frame = ctx.frame
@@ -865,11 +923,13 @@ class Empty:
         if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE or busy(state, frame.now):
             return
         p = params(frame.env.params_of("needs", frame.root))
-        if frame.now - idle_from(state) < p.idle_before_empty_us:
+        lonely = frame.get(c.NEEDS).social >= p.lonely_from
+        if frame.now - empty_since(state, lonely, p) < p.idle_before_empty_us:
             return
-        r = frame.get(c.NEEDS)
-        feeling = c.LONELY if r.social >= p.lonely_from else c.BORED
-        await ctx.emit(c.FELT.draft(feeling=feeling, intensity=emptiness(state, frame.now, p)),
+        if not lonely and occupied(state, frame.now):
+            return  # occupée : pas d'ennui (la solitude, si)
+        feeling = c.LONELY if lonely else c.BORED
+        await ctx.emit(c.FELT.draft(feeling=feeling, intensity=emptiness(state, frame.now, p, lonely)),
                        guard=Guard("toujours le vide", reads=(c.NEEDS,)))
 
 
@@ -909,7 +969,7 @@ def _reunited(s: NeedsState, frame: Frame, ev: Any, ports: Any) -> list[Any]:
 def _reunited_felt(e, cx) -> Appraisal:
     """Après la solitude, un soulagement ; après l'ennui, de la joie : sa compagnie lui fait du bien."""
     emotion = Emotion.RELIEVED if e.data.after == c.LONELY else Emotion.HAPPY
-    return Appraisal(emotion, e.data.intensity, reason="compagnie")
+    return Appraisal(emotion, e.data.intensity, reason=causes.COMPANY)
 
 
 # ── Prompt ────────────────────────────────────────────────────────────────
@@ -1009,8 +1069,9 @@ def _matter_section(s: NeedsState, frame: Frame, enrich: Mapping[str, Any]) -> S
     if not text:
         return None
     person = frame.get(identity_c.PERSON(ep.target))
-    if not hearable(m.about, m.sensitivity, person, aud.level, aud.witness_level, aud.private_ok):
-        return None
+    if not hearable(m.about, m.sensitivity, person, aud.level, aud.witness_level, aud.private_ok,
+                    tied_level=aud.tied_level, ties=aud.ties, untied_level=aud.untied):
+        return None  # ce dont elle parlerait touche la vie de quelqu'un : la règle de sa mémoire (ADR 0092)
     if m.lineage is not None:
         resolve, presumed = identity_c.resolvers(frame.get)
         if not admits(m.lineage, person, aud, resolve=resolve, presumed=presumed).ok:

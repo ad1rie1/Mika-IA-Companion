@@ -96,9 +96,13 @@ async def s06(driver: Driver, rng: RngTree, res: Result) -> None:
     night = [t for t in times if _local(t).hour < 7 or _asleep_at(spans, t)]
     explored = [e for e in events if e.type.name == "goals.opened" and e.data.authority == "self"
                 and 8 <= _local(e.at).hour < 22]
+    # désœuvrée, elle s'occupe d'elle-même dans sa chambre (ADR 0098) : une intention née du vide ressenti (son
+    # réducteur la pose, la fin de l'action l'écrit)
+    occupied = [e for e in events if e.type.name == "world.ended" and str(e.data.intent).startswith("occupation:")]
     res.metrics.update({"initiatives": len(said), "gaps_min": [round(g) for g in gaps],
                         "sleep": [(_local(a).strftime("%H:%M"), _local(b).strftime("%H:%M")) for a, b in spans],
-                        "empty_afternoon": round(len(empty) / max(1, len(afternoon)), 2)})
+                        "empty_afternoon": round(len(empty) / max(1, len(afternoon)), 2),
+                        "occupée": [_local(e.at).strftime("%H:%M") for e in occupied]})
     res.checks += [
         expect.band("quelques initiatives dans la journée", len(said),
                     "seule avec quelqu'un qui se tait, elle finit par parler — une fois ou deux, puis elle n'insiste "
@@ -118,6 +122,11 @@ async def s06(driver: Driver, rng: RngTree, res: Result) -> None:
                                                                                      strict=False)),
                          "elle n'entreprend pas deux choses dans la même heure",
                          f"{[_local(e.at).strftime('%H:%M') for e in explored]}"),
+        expect.control("elle s'occupe d'elle-même", bool(occupied),
+                       "désœuvrée, elle prend un livre, dessine, regarde dehors — d'elle-même (ADR 0098)",
+                       f"{res.metrics['occupée']}"),
+        expect.invariant("pas sans cesse", len(occupied) <= 2 * 3,
+                         "quelques fois par jour, pas à chaque ennui", f"{len(occupied)}"),
         expect.control("une activité pour elle-même", bool(explored),
                        "une journée vide, elle finit par s'occuper de ce qui l'intéresse",
                        f"{[e.data.title.text for e in explored]}"),

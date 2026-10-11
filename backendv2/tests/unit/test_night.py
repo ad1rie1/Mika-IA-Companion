@@ -37,6 +37,7 @@ from mika.faculties.goals.faculty import GoalsParams
 from mika.faculties.self import SelfParams, days
 from mika.faculties.self.night import CYCLE, JournalArgs, classify, recall_chance, self_journal, vividness_of
 from mika.faculties.self.records import Dream
+from mika.faculties.world import WorldParams
 from mika.faculties.world import plan as world_plan
 from mika.faculties.world import timing as world_timing
 from mika.kernel.clock import DAY, MINUTE, US, instant
@@ -199,6 +200,7 @@ def test_a_heavy_day_is_told_vaguely_but_truly(tmp_path):
 
     async def scenario(kernel):
         await kernel.set_params("goals", GoalsParams(musings_per_day=0))  # rien d'autre n'arrive de son côté
+        await kernel.set_params("world", WorldParams(occupy_per_day=0))  # ni ne s'occupe d'elle-même (ADR 0098)
         await befriend(kernel, "user_1", "close")
         await connect(kernel, "user_1", "Sam")
         for text in ["Pixel est parti cet après-midi", "on l'a endormi. j'étais avec lui jusqu'au bout",
@@ -280,6 +282,7 @@ def test_her_day_tells_what_she_did_in_her_room(tmp_path):
     dehors ne se raconte pas."""
 
     async def scenario(kernel):
+        await kernel.set_params("world", WorldParams(occupy_per_day=0))  # ce qu'on lui fait faire, rien d'elle-même
         await until(kernel, at_paris(2026, 9, 28, 15, 0))
         await intend(kernel, interacting("writing_desk", "dessiner"))
         await until(kernel, at_paris(2026, 9, 28, 16, 30))

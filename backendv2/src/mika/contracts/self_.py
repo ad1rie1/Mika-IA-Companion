@@ -40,6 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from mika.kernel.events import Content, Payload, VoiceProvenance, event_type
 from mika.kernel.facts import FactKey
 from mika.kernel.forms import Knob
+from mika.vocab import reading
 from mika.vocab.lineage import Lineage, subjects
 from mika.vocab.temperament import Temperament
 
@@ -170,10 +171,13 @@ class Narrated(Payload):
     text: Content
     voice: VoiceProvenance
     souvenirs: int = 0  # combien de souvenirs elle avait en l'écrivant
-    #: les personnes des souvenirs qu'elle a relus : le récit peut les nommer (l'oubli l'atteint)
+    #: les personnes à travers qui elle a vécu ce qu'il reprend (sans les nommer) : l'oubli l'atteint
     about: tuple[str, ...] = ()
     #: les souvenirs qu'elle a relus pour l'écrire : l'un devenu secret, remplacé, il se réécrit (ADR 0082)
     sources: tuple[int, ...] = ()
+    #: ce qu'elle savait d'elle et ses centres d'intérêt (clé, niveau) en l'écrivant : changés, il se réécrit (ADR 0090)
+    knows: tuple[str, ...] = ()
+    interests: tuple[tuple[str, str], ...] = ()
 
 
 class Journaled(Payload):
@@ -251,13 +255,38 @@ class Touched(Payload):
     kind: str  # THANKED | COMPLIMENTED | INSULTED | APOLOGIZED
 
 
+class InterestBorn(Payload):
+    """Un intérêt vécu est né (ADR 0089) : la nuit, elle a vu revenir un sujet dans ce qu'elle a lu, exploré, dans
+    ce dont on lui a parlé, sur plusieurs jours. ``label`` : le sujet, dit par elle, dicible à tous et sans nommer
+    personne ; ``detail`` : ce qu'il est pour elle ; ``about`` : de qui viennent les pistes (l'oubli d'une personne
+    l'efface) ; ``evidence`` : les pistes qui l'ont fait naître."""
+
+    night: str
+    label: Content
+    detail: Content | None = None
+    about: tuple[str, ...] = ()
+    evidence: tuple[int, ...] = ()
+
+
+class Reflected(Payload):
+    """Sa réflexion de la nuit sur ce qui la passionne (ADR 0089) : les pistes relues jusqu'à ``upto``, celles qui
+    nourrissent un intérêt qu'elle a déjà (``attached`` : piste, clé d'intérêt)."""
+
+    night: str
+    upto: int = 0
+    attached: tuple[tuple[int, str], ...] = ()
+    call_id: str = ""
+    model: str = ""
+
+
 NIGHTMARE, PLEASANT, ASSOCIATIVE, MUNDANE = "nightmare", "pleasant", "associative", "mundane"
 #: Un rêve triste, sans peur : ce qui pèse sans menacer.
 MELANCHOLIC = "melancholic"
 DREAM_KINDS = (NIGHTMARE, PLEASANT, MELANCHOLIC, ASSOCIATIVE, MUNDANE)
-THANKED, COMPLIMENTED, INSULTED = "thanked", "complimented", "insulted"
-#: des excuses (« pardon, je le pensais pas ») : une fois par jour et par personne, quand il y a de quoi pardonner
-APOLOGIZED = "apologized"
+#: ce qu'une personne fait envers elle, tel que le modèle qui lui répond le lit (``vocab.reading``, ADR 0093) ;
+#: des excuses comptent une fois par jour et par personne, quand il y a de quoi pardonner
+THANKED, COMPLIMENTED, INSULTED, APOLOGIZED = reading.THANKED, reading.COMPLIMENTED, reading.INSULTED, \
+    reading.APOLOGIZED
 
 PERSONA_REVISED = event_type("self.persona_revised", OWNER, PersonaRevised, public=True, version=2,
                              upcasters={1: _zone_repaired})
@@ -270,10 +299,22 @@ NARRATED = event_type("self.narrated", OWNER, Narrated, public=True, content=("t
                       authored=True)
 WOKE_WITH = event_type("self.woke_with", OWNER, WokeWith, public=True)
 TOUCHED = event_type("self.touched", OWNER, Touched, public=True, subjects=("person",))
+INTEREST_BORN = event_type("self.interest_born", OWNER, InterestBorn, public=True, content=("label", "detail"),
+                           subjects=("about",))
+REFLECTED = event_type("self.reflected", OWNER, Reflected, public=True)
 
 PERSONA = FactKey("self.persona", type=PersonaDoc)
 #: L'estime de soi, dans [0,05 ; 0,95] : lente, revenant vers 0,5 (demi-vie de trois jours).
 ESTEEM = FactKey("self.esteem", type=float, time_varying=True)
+#: Ce qu'elle sait d'elle (ADR 0088) : des tendances tirées de ses réussites et de ses ratés récents — des codes
+#: (``PROMISES_KEPT``…), jamais un nombre. L'estime n'en dépend pas.
+KNOWS = FactKey("self.knows", type=tuple, time_varying=True)
+PROMISES_KEPT, PROMISES_SLIP = "promises_kept", "promises_slip"
+FINISHING_DONE, FINISHING_STRUGGLE = "finishing_done", "finishing_struggle"
+FORESIGHT_RIGHT, FORESIGHT_OFF = "foresight_right", "foresight_off"
+#: Ses centres d'intérêt vivants (ADR 0089), les plus vifs d'abord : des ``vocab.interests.InterestView`` — ceux de
+#: sa persona n'y manquent jamais (endormis peut-être), ceux qu'elle a vécus y naissent et s'en vont.
+INTERESTS = FactKey("self.interests", type=tuple, time_varying=True)
 
 
 @dataclass(frozen=True, slots=True)

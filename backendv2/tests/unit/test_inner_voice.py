@@ -37,6 +37,7 @@ from mika.runtime.inspection import find, run_view
 from mika.sim.clock import run_virtual
 from mika.vocab.days import when_fr
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, said
+from tests.fixtures.reading import Reads
 
 
 class Script:
@@ -50,7 +51,7 @@ class Script:
             return LLMResponse("tiens")
         if req.role in ("narrative", "journal", "dream"):
             return LLMResponse("Une journée.")
-        return LLMResponse(f"d'accord {self.tag}")
+        return LLMResponse(f"d'accord {self.tag}{READS.tag(req) if req.role == 'reply' else ''}")
 
 
 def run(tmp_path, scenario, *, start=at_paris(2026, 9, 28, 14, 0), script=None):
@@ -128,7 +129,8 @@ def test_her_thoughts_say_when_and_what_it_does_to_her(tmp_path):
 
 
 def test_her_words_are_quoted_only_to_her_others_learn_only_that_it_marked_her(tmp_path):
-    """MEM-5 : la phrase d'Alice ne sort pas chez une autre amie, même proche."""
+    """MEM-5 : la phrase d'Alice ne sort pas chez une autre amie, même proche — ni son nom, si cette amie n'a aucun
+    lien avec Alice (ADR 0092 : ce qu'elle raconte sans nom d'Alice ailleurs resterait sans nom)."""
     async def scenario(kernel, script, llm):
         for handle, name in (("user_1", "Alice"), ("user_2", "Bob")):
             await befriend(kernel, handle, social_c.CLOSE)
@@ -143,7 +145,8 @@ def test_her_words_are_quoted_only_to_her_others_learn_only_that_it_marked_her(t
                 section(prompts(llm, "user_1")[-1], "CE QUI TE TROTTE DANS LA TÊTE"))
 
     to_bob, to_alice = run(tmp_path, scenario)
-    assert "Un échange avec Alice m'a marquée." in to_bob and "CANARI-MOTS" not in to_bob
+    assert "Un échange avec quelqu'un m'a marquée." in to_bob and "CANARI-MOTS" not in to_bob
+    assert "Alice" not in to_bob
     assert "CANARI-MOTS" in to_alice  # contrôle : à elle, ses propres mots
 
 
@@ -169,6 +172,13 @@ def test_what_a_signal_left_in_her_head_is_quoted_never_an_instruction(tmp_path)
 
 LIGHT = ["haha trop bien", "super journée, trop cool", "j'ai hâte de te raconter haha", "trop bien ce film !",
          "génial, merci !", "haha j'adore", "c'était trop cool", "super, à demain !", "trop bien haha"]
+
+
+#: ce que le modèle lit de chaque message (ADR 0093 : c'est lui qui juge)
+READS = Reads({**{text: "happy 0.6" for text in LIGHT},
+               "j'ai peur, mon père est à l'hôpital, je suis mal": "scared 0.7, sad 0.5 | grave : maladie",
+               "ça va mieux, merci d'avoir demandé !": "relieved 0.6, grateful 0.4 | geste : merci",
+               "le médecin dit que mon père sort de l'hôpital lundi": "relieved 0.5, hopeful 0.4"})
 
 
 @pytest.mark.parametrize("then, eased", [
@@ -228,7 +238,7 @@ def test_she_knows_her_inner_state_is_hers_and_how_strong_a_tag_is(tmp_path):
     req = run(tmp_path, scenario)
     stable = req.system_stable
     assert "C'est ta tête à toi" in stable and "réponds d'abord à ce qu'on vient de te dire" in stable
-    assert "0.2 à peine, 0.5 nettement, 0.8 fortement (c'est rare)" in stable  # l'échelle (PSY-27, avec WP1)
+    assert "0.2 à peine, 0.5 nettement, 0.8 fortement, c'est rare, 1.0 submergée" in stable  # l'échelle (PSY-27, avec WP1)
     assert "[PAUSE:500] (une durée en millisecondes)" in stable and "[SILENCE]" in stable
 
 

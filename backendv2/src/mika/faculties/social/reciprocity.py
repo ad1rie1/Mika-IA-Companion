@@ -32,6 +32,7 @@ from mika.kernel.arbitration import Modulation, RowView
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
+from mika.vocab import causes
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
@@ -85,9 +86,13 @@ class Notice:
 
 
 @SOCIAL.appraisal(c.ONE_SIDED)
-def _one_sided_felt(e: Any, cx: Any) -> Appraisal:
-    """S'apercevoir qu'on écrit toujours la première : un pincement de solitude."""
-    return Appraisal(Emotion.LONELY, LONELINESS, reason="c'est toujours elle qui écrit")
+def _one_sided_felt(e: Any, cx: Any) -> list[Appraisal]:
+    """S'apercevoir qu'on écrit toujours la première : un pincement de solitude — et, envers cette personne, un peu
+    de peine, qu'elle sentira encore si elle lui écrit dans la foulée."""
+    out = [Appraisal(Emotion.LONELY, LONELINESS, reason=causes.ONE_SIDED)]
+    out += [Appraisal(Emotion.SAD, LONELINESS, toward=person, reason=causes.ONE_SIDED)
+            for person in e.data.about[:1]]
+    return out
 
 
 @SOCIAL.modulate(kinds=[Kind.INITIATIVE], reads=[identity_c.PERSON, c.CONTACT])

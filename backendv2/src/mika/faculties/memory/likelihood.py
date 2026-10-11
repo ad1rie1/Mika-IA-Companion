@@ -16,12 +16,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from mika.contracts.memory import FIRST_HAND, OFFICIAL, OUTCOME_VALUE, PREDICTION, REPORTED
 from mika.faculties.memory.faculty import MemoryParams
 from mika.vocab.affect import tag_intensity
 from mika.vocab.phrasebook import phrase
 from mika.vocab.words import fold
-
-FIRST_HAND, REPORTED, OFFICIAL, PREDICTION = "first_hand", "reported", "official", "prediction"
 
 #: ce qu'écrit la relecture dans « probabilite », rabattu sur une vraisemblance (clés : ``fold``)
 _SAID = {
@@ -88,17 +87,14 @@ def nature_of(ev: Any) -> str:
     return REPORTED
 
 
-#: ce qui est arrivé, au regard d'un moment attendu : il a eu lieu (1), il n'a pas eu lieu (0) ; déplacé, il n'a pas
-#: eu lieu ce jour-là, mais il aura lieu (à moitié)
-_OUTCOME_VALUE = {"happened": 1.0, "cancelled": 0.0, "moved": 0.5}
 
 
 def surprise(outcome: str, likely: float | None, importance: float) -> float:
     """L'écart entre ce qu'elle attendait (``likely``) et ce qui est arrivé, pesé par ce que le moment compte : 0
     quand on ne sait pas comment il a tourné, ni ce qu'elle en attendait."""
-    if outcome not in _OUTCOME_VALUE or likely is None:
+    if outcome not in OUTCOME_VALUE or likely is None:
         return 0.0
-    return round(abs(_OUTCOME_VALUE[outcome] - likely) * max(0.0, min(1.0, importance)), 3)
+    return round(abs(OUTCOME_VALUE[outcome] - likely) * max(0.0, min(1.0, importance)), 3)
 
 
 def brier(calibration: tuple[int, float] | None) -> float | None:

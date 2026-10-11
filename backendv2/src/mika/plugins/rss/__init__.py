@@ -29,8 +29,6 @@
 
 from __future__ import annotations
 
-import re
-import unicodedata
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -87,18 +85,16 @@ from mika.kernel.state import FrozenDict
 from mika.ports.feeds import feed_name, tokenless
 from mika.ports.preprocess import cite, inert
 from mika.vocab.episodes import WORKING, Kind
+from mika.vocab.interests import NOTICE_WEIGHT, matches, pertinence, topic_words
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
+from mika.vocab.words import fold
 
 KEEP = 50
 BUNDLE = "rss"
 #: la provenance d'un titre montré dans une initiative (``rss:<article>``) : dit à sa cible, il ne lui revient pas
 TOLD_PROVENANCE = "rss:"
-STOP = frozenset({"surtout", "mais", "sans", "avec", "pour", "dans", "tout", "tous", "toute", "toutes", "elle",
-                  "joue", "grosse", "petite", "beaucoup", "assume", "resultats", "variables", "amateur", "etre",
-                  "cette", "plus", "moins", "comme", "leur", "leurs", "notre", "votre", "seul", "sujet", "devient",
-                  "google", "hardcore", "consommatrice"})
 
 
 class RssParams(BaseModel):
@@ -233,22 +229,22 @@ def _for_person(s: RssState, cx, person: str) -> tuple[c.Headline, ...]:
 # ── Ce qui la touche ──────────────────────────────────────────────────────
 
 
-def fold(text: str) -> str:
-    return "".join(ch for ch in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(ch))
-
-
-def keywords(interests: tuple[str, ...]) -> frozenset[str]:
-    """Les mots qui comptent dans ses centres d'intérêt (sans les mots vides)."""
-    words = {w for phrase in interests for w in re.findall(r"[a-z]{4,}", fold(phrase))}
-    return frozenset(w for w in words if w not in STOP)
-
-
-def pertinence(title: str, summary: str, words: frozenset[str]) -> float:
-    """Ce qu'un article lui dit : rien sans un de ses mots, davantage avec plusieurs."""
-    found = set(re.findall(r"[a-z]{4,}", fold(f"{title} {summary[:500]}"))) & words
-    if not found:
-        return 0.1
-    return round(min(1.0, 0.35 + 0.25 * len(found)), 3)
+def interest_words(frame: Frame, store: Any) -> tuple[dict[str, float], dict[str, frozenset[str]]]:
+    """Ses mots, chacun de ce que pèse le plus vif des centres d'intérêt d'où il vient — un intérêt endormi la
+    touche moins, un intérêt né de ce qu'elle a vécu ajoute les siens — et les mots de chacun (ADR 0089)."""
+    views = frame.get(self_c.INTERESTS)
+    refs = [i.label_ref for i in views if not i.line and i.label_ref]
+    texts = store.content(refs) if store is not None and refs else {}
+    weights: dict[str, float] = {}
+    by_key: dict[str, frozenset[str]] = {}
+    for i in views:
+        words = topic_words([i.line or texts.get(i.label_ref) or ""])
+        if not words:
+            continue
+        by_key[i.key] = words
+        for w in words:
+            weights[w] = max(weights.get(w, 0.0), NOTICE_WEIGHT[i.level])
+    return weights, by_key
 
 
 #: à qui elle pense en lisant : ses amies et ses proches (les intérêts d'une inconnue ne la regardent pas)
@@ -268,7 +264,7 @@ def _friends_words(frame: Frame, store: Any) -> list[tuple[str, frozenset[str]]]
     texts = store.content(list(refs.values())) if store is not None and refs else {}
     out = []
     for person, ref in sorted(refs.items()):
-        words = keywords(tuple(texts.get(ref, "").splitlines()))
+        words = topic_words(texts.get(ref, "").splitlines())
         if words:
             out.append((person, words))
     return out
@@ -313,7 +309,7 @@ class Poll:
         if self.unconfigured:
             return
         p = params(frame.env.params_of("rss", frame.root))
-        words = keywords(frame.get(self_c.PERSONA).interests)
+        words, by_interest = interest_words(frame, ctx.ports.get("store"))
         entries = [e for e in await port.poll(p.per_poll) if e.id not in ctx.state.noticed]
         scored = sorted(((pertinence(e.title, e.summary, words), e) for e in entries),
                         key=lambda x: (-x[0], -x[1].published, x[1].id))
@@ -337,7 +333,8 @@ class Poll:
             drafts.append(c.NOTICED.draft(
                 source="rss", kind=c.ENTRY, summary=Content.of(summary[:400], level=0), pertinence=score,
                 emotion="curious", intensity=round(0.25 * score, 3), sensitivity=0, bundle=BUNDLE, entry=e.id,
-                feed=feed[:200], dedupe_key=f"rss:{e.id}"))
+                feed=feed[:200], dedupe_key=f"rss:{e.id}",
+                touches=tuple(sorted(k for k, ws in by_interest.items() if matches(e.title, e.summary, ws)))))
         # ses amies : un titre qui touche ce qu'elles aiment, même s'il ne la touche pas elle
         drafts += _thinking_of(frame, ctx.ports.get("store"), entries, p)
         if drafts:
@@ -700,7 +697,7 @@ def _thoughts(s: RssState, frame: Frame, ctx: InspectContext, feed: str) -> Tabl
 def _inspect(s: RssState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("feeds")
     p = params(frame.env.params_of("rss", frame.root))
-    words = keywords(frame.get(self_c.PERSONA).interests)
+    words, _by_interest = interest_words(frame, ctx.store)
     feed = ctx.value("flux") or ""
     days = _days(frame)
     window, cut = _since(ctx, days[0][1], CHART_MAX)

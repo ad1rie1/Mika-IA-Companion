@@ -33,11 +33,13 @@ from mika.contracts import memory as c
 from mika.contracts import others as others_c
 from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
+from mika.contracts import social as social_c
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
+from mika.vocab import causes
 from mika.vocab.affect import Appraisal, Declared, Emotion, emotion_of, facets_valence, valence
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
@@ -388,6 +390,35 @@ class MemoryParams(BaseModel):
     night_max_merges: Annotated[int, Knob(
         label="Fusions par nuit au plus", group="La nuit", lo=0, hi=200,
         help="Au plus autant de fusions par nuit (0 : aucun tri).")] = 20
+    # raconter sans nommer (ADR 0091) : à qui n'a aucun lien connu avec la personne, ce qu'elle ne peut pas dire
+    # nommément ici, dit sans qu'on puisse la reconnaître — jamais un secret
+    veiled_max_shown: Annotated[int, Knob(
+        label="Récits sans nom par réponse, au plus", group="Raconter sans nommer", lo=0, hi=5,
+        help="Ce qu'elle peut raconter d'autres sans dire de qui il s'agit, montré dans une réponse (« une amie "
+             "cherche du travail ») — à qui n'a aucun lien connu avec la personne, gradué par ce qu'elle sait de qui "
+             "l'écoute. 0 : jamais.")] = 2
+    veiled_per_person: Annotated[int, Knob(
+        label="… et par personne, pour un même auditeur", group="Raconter sans nommer", lo=1, hi=10,
+        help="De la même personne, à un même auditeur, au plus autant de récits sans nom sur la période ci-dessous : "
+             "trois anecdotes sans nom sur la même amie finiraient par la dessiner.")] = 2
+    veiled_fresh_days: Annotated[float, Knob(
+        label="« Quoi de neuf ? » : ce qu'elle a appris depuis (jours)", group="Raconter sans nommer", lo=1, hi=60,
+        help="Quand on lui demande des nouvelles, ce qu'elle a appris des autres depuis tant de jours peut se "
+             "raconter sans nom.")] = 14.0
+    veiled_keep_days: Annotated[float, Knob(
+        label="Raconté sans nom, elle le garde sans nom (jours)", group="Raconter sans nommer", lo=1, hi=180,
+        help="Ce qu'elle a raconté sans nom à quelqu'un lui revient comme tel pendant tant de jours : elle ne "
+             "le redit pas comme une nouvelle, et elle ne donne pas le nom ensuite.")] = 30.0
+    veiled_link_depth: Annotated[int, Knob(
+        label="Un lien qui ferme : jusqu'à quel degré", group="Raconter sans nommer", lo=1, hi=2,
+        help="1 : ce qui relie directement qui l'écoute à la personne (un salon, un nom, une relation…). 2 : aussi "
+             "quelqu'un que leurs relations relient aux deux — une amie commune reconnaîtrait l'histoire même sans "
+             "nom.")] = 2
+    veiled_said_share: Annotated[float, Knob(
+        label="Raconté : la part de ses mots qu'elle a vraiment dite", group="Raconter sans nommer", lo=0.1, hi=1.0,
+        help="Ce que son prompt lui montrait n'est pas ce qu'elle a dit : un récit sans nom ne compte comme raconté "
+             "(et gardé sans nom, et dans le budget) que si sa réponse en reprend au moins cette part des mots qui "
+             "le portent. Plus haut : il faut qu'elle l'ait presque redit mot pour mot.")] = 0.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -516,8 +547,8 @@ def _uttered(s: MemoryState, e, cx) -> MemoryState:
         s = replace(s, lies=(*s.lies, e.seq)[-LIES_KEPT:])  # un mensonge : il deviendra un souvenir
     if d.kind == Kind.REPLY and d.target and d.room is None and is_identifiable(d.target):
         declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
-        if declared is not None and declared.emotion == Emotion.SAD \
-                and declared.intensity >= params(cx.params).hard_reply_from:
+        floor = params(cx.params).hard_reply_from
+        if declared is not None and any(e_ == Emotion.SAD.value and x >= floor for e_, x in declared.all):
             s = _hard(s, cx.facts.get(identity_c.PERSON(d.target)) or d.target, e.at)
     return replace(s, last_message_at=e.at, chunks=s.chunks + (1 if d.target and d.reply_to else 0))
 
@@ -622,25 +653,26 @@ def _moment_resolved(s: MemoryState, e, cx) -> MemoryState:
     return replace(s, events=events, track=track, calibration=calibration)
 
 
-@MEMORY.appraisal(c.RESOLVED)
+@MEMORY.appraisal(c.RESOLVED, reads=[social_c.WEIGHT])
 def _moment_resolved_felt(e, cx) -> list[Appraisal] | None:
     """Ce que l'issue d'un moment lui fait (ADR 0086) : surprise quand elle s'écarte de ce qu'elle attendait (pesée
     par ce que le moment compte) ; un espoir déçu attriste, une crainte levée soulage, une attente comblée réjouit
-    un peu. Ne pas savoir ne fait rien."""
+    un peu — davantage quand c'est un moment de sa propriétaire (``social.WEIGHT``). Ne pas savoir ne fait rien."""
     d = e.data
     if d.outcome == c.UNKNOWN:
         return None
     p = params(cx.params)
     out: list[Appraisal] = []
     if d.surprise >= p.surprise_from:
-        out.append(Appraisal(Emotion.SURPRISED, round(min(p.surprise_max, d.surprise), 3), reason="tournure"))
-    weight = round(min(p.disappointment_max, abs(d.valence) * d.importance), 3)
+        out.append(Appraisal(Emotion.SURPRISED, round(min(p.surprise_max, d.surprise), 3), reason=causes.TURNED_OUT))
+    counts = max((cx.facts.get(social_c.WEIGHT(person)) for person in d.about), default=1.0)
+    weight = round(min(p.disappointment_max, abs(d.valence) * d.importance * counts), 3)
     if weight > 0 and d.valence > 0 and d.outcome in (c.CANCELLED, c.MOVED):
-        out.append(Appraisal(Emotion.SAD, weight, reason="attente déçue"))
+        out.append(Appraisal(Emotion.SAD, weight, reason=causes.LET_DOWN))
     elif weight > 0 and d.valence < 0 and d.outcome == c.CANCELLED:
-        out.append(Appraisal(Emotion.RELIEVED, weight, reason="crainte levée"))
+        out.append(Appraisal(Emotion.RELIEVED, weight, reason=causes.FEAR_LIFTED))
     elif weight > 0 and d.valence > 0 and d.outcome == c.HAPPENED:
-        out.append(Appraisal(Emotion.HAPPY, round(weight / 2, 3), reason="attente comblée"))
+        out.append(Appraisal(Emotion.HAPPY, round(weight / 2, 3), reason=causes.AWAITED))
     return out or None
 
 

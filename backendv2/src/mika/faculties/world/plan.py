@@ -523,6 +523,20 @@ def plan_interact(defn: w.WorldDef, t: Timing, actors: Actors, objects: Objects,
     return steps
 
 
+def occupations(defn: w.WorldDef, actors: Actors, objects: Objects) -> list[tuple[str, str, str, tuple[str, ...]]]:
+    """Ce qui peut l'occuper dans ce monde et la nourrir (``nourishes``) : ``(objet, action, occupation, ce qu'elle
+    nourrit)``, pour chaque objet qu'on peut atteindre — dessiner à son bureau, feuilleter un livre, regarder dehors.
+    Dans l'ordre de la définition."""
+    out: list[tuple[str, str, str, tuple[str, ...]]] = []
+    for o in defn.objects:
+        a = defn.archetype(o.archetype)
+        if a is None or anchor_of(defn, actors, objects, o.id) is None:
+            continue
+        out += [(o.id, x.id, x.activity, tuple(n.value for n in x.nourishes)) for x in a.affordances
+                if x.effect is w.Effect.ACTIVITY and x.activity and x.nourishes]
+    return out
+
+
 def work_desk(defn: w.WorldDef, actors: Actors, objects: Objects) -> tuple[str, str] | None:
     """Où elle se met au travail : le premier objet posé à un lieu ``work`` qui offre de quoi travailler (une
     occupation ``work``), et l'action qui l'y met. ``None`` : ce monde n'en a pas."""

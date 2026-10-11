@@ -65,9 +65,12 @@ PLAIN = {
                           "cause": "ce qui l'a fait basculer (code)"},
     "others.read": {
         "person": "une clé de personne", "handle": "une adresse",
-        "cues": "des indices écrits par le code, jamais le texte du message",
+        "cues": "héritage : avant l'ADR 0093, des indices écrits par le code, jamais le texte du message",
         "contagion_emotion": "une émotion (code)",
+        "felt": "des facettes : des émotions (codes) et leurs intensités, jamais le texte du message",
+        "grave_kind": "une sorte d'événement grave (code : deuil, maladie, rupture…)",
     },
+    "others.farewell": {"person": "une clé de personne", "handle": "une adresse"},
 }
 
 

@@ -97,7 +97,7 @@ class Frame:
     env = NS(tz_of=lambda *_: ZoneInfo("UTC"), params_of=lambda *_: MemoryParams())
 
     def __init__(self, audience: Audience | None = None, **attrs):
-        self.episode = NS(target="user_2", attrs={"reply_to": 10000, **attrs})
+        self.episode = NS(target="user_2", kind="REPLY", attrs={"reply_to": 10000, **attrs})
         self.audience = audience or Audience(persons=("user_2",), public=False, level=1, witness_level=2,
                                              private_ok=True)
 

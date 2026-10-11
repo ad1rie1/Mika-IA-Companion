@@ -34,11 +34,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
+from mika.contracts import needs as needs_c
 from mika.contracts import place as place_c
 from mika.contracts import runtime as rt
 from mika.contracts import world as w
 from mika.faculties.world import notice, plan
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
+from mika.kernel.codec import h64
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
 from mika.kernel.forms import Knob
@@ -80,6 +82,14 @@ class WorldParams(BaseModel):
         label="Une occupation sans fin prévue s'arrête d'elle-même après (min)", group="Corps", lo=15, hi=480,
         step=5, help="Dessiner, travailler à son bureau : sans autre geste de sa part, elle s'arrête au bout de ce "
                      "temps et reste où elle est (on ne dessine pas treize heures d'affilée).")] = 90
+    occupy_per_day: Annotated[int, Knob(
+        label="S'occuper d'elle-même, par jour", group="S'occuper seule", lo=0, hi=8,
+        help="Désœuvrée (l'ennui, la solitude que ses besoins lui font sentir), elle s'occupe d'elle-même dans sa "
+             "chambre — dessiner, feuilleter un livre, regarder dehors, selon ce qui lui manque. Au plus autant de "
+             "fois par jour (0 : jamais d'elle-même).")] = 3
+    occupy_spacing_min: Annotated[int, Knob(
+        label="Pas plus souvent que toutes les (min)", group="S'occuper seule", lo=15, hi=720, step=5,
+        help="Deux occupations qu'elle prend d'elle-même s'espacent d'au moins ce temps.")] = 120
     work_after_talk_min: Annotated[int, Knob(
         label="Pas de bureau juste après avoir parlé à quelqu'un (min)", group="Corps", lo=0, hi=60, step=1,
         help="Quand elle se met au travail (un pas sur un but, un projet), elle va d'elle-même s'installer à son "
@@ -134,6 +144,8 @@ class WorldState:
     unnoticed: tuple[notice.Remark, ...] = ()
     #: quand elle a parlé à quelqu'un pour la dernière fois (le bureau attend que la conversation se pose)
     talked_at: int = 0
+    #: quand elle s'est occupée d'elle-même, désœuvrée (les dernières 24 h, ADR 0098)
+    occupied: tuple[int, ...] = ()
 
 
 def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
@@ -144,7 +156,8 @@ def genesis(defn: w.WorldDef = DEFAULT_WORLD) -> WorldState:
 #: v5 : ses occupations disent ce qu'elles nourrissent (``nourishes``, déclaré dans ``chambre.json``) — la genèse
 #: change : reconstruite depuis elle, sinon un instantané garderait une définition sans
 #: v6 : elle s'installe à son bureau quand elle se met au travail (une règle de plus : reconstruite depuis la genèse)
-WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=6)
+#: v7 : désœuvrée, elle s'occupe d'elle-même (``occupied``, ADR 0098)
+WORLD = Faculty("world", state=WorldState, init=lambda p: genesis(), params=WorldParams, state_version=7)
 
 #: Ce qu'on garde de ses occupations passées : trois jours, soixante au plus.
 LIVED_KEPT_US = 3 * DAY
@@ -345,6 +358,48 @@ def _to_work(s: WorldState, e: Any, cx: Any) -> WorldState:
         return s
     intent = plan.intent_of(w.MIKA, steps, e.at, t, w.Cause(source=w.Source.REFLEX, actor=w.MIKA), f"travail:{e.id}")
     return _start(s, intent, e.seq)
+
+
+@WORLD.reducer(needs_c.FELT, reads=[body_c.SLEEP, needs_c.NEEDS])
+def _occupy_herself(s: WorldState, e: Any, cx: Any) -> WorldState:
+    """Désœuvrée — le vide que ses besoins lui font sentir (``needs.felt`` : l'ennui, la solitude) —, elle s'occupe
+    d'elle-même : ce qui nourrit ce qui lui manque le plus (dessiner quand c'est l'envie de dire, feuilleter un livre
+    ou regarder dehors quand c'est la curiosité), jamais deux fois de suite la même chose. Une tendance bornée
+    (``occupy_per_day``, ``occupy_spacing_min``) ; rien en dormant, allongée, en chemin, déjà occupée, ni juste après
+    avoir parlé à quelqu'un. Comme le bureau, l'intention naît de l'événement : un ressenti déjà là, rendu visible —
+    s'occuper, ensuite, la nourrit et tient le vide à distance (``needs``)."""
+    p = params(cx.params)
+    me = s.actors.get(w.MIKA)
+    if p.occupy_per_day <= 0 or me is None or me.posture is w.Posture.LIE or _running(s) is not None:
+        return s
+    if cx.facts.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE:
+        return s
+    if me.activity is not None and (me.activity.until is None or me.activity.until > e.at):
+        return s
+    if s.talked_at and e.at - s.talked_at < p.work_after_talk_min * MINUTE:
+        return s
+    recent = tuple(t for t in s.occupied if e.at - t < DAY)
+    if len(recent) >= p.occupy_per_day or (recent and e.at - max(recent) < p.occupy_spacing_min * MINUTE):
+        return s
+    needs = cx.facts.get(needs_c.NEEDS)
+    lack = {w.Nourished.EXPRESSION.value: needs.expression, w.Nourished.CURIOSITY.value: needs.curiosity}
+    # ce qu'elle a fait en dernier : l'occupation qu'elle a encore (finie à l'heure dite, le monde ne l'a pas encore
+    # close), sinon la dernière de ses journées
+    last = me.activity.name if me.activity is not None else (s.lived[-1].name if s.lived else None)
+    options = [x for x in plan.occupations(s.definition, s.actors, s.objects) if x[2] != last]
+    if not options:
+        return s
+    # ce qui lui manque le plus ; à égalité, au hasard de l'instant (pas toujours le même livre)
+    obj, action, _activity, _nourishes = max(
+        options, key=lambda x: (max(lack.get(n, 0.0) for n in x[3]), h64("occupation", e.seq, x[0], x[1])))
+    t = timing(cx.params)
+    try:
+        steps = plan.plan_interact(s.definition, t, s.actors, s.objects, w.MIKA, obj, action, now=e.at)
+    except plan.Refused:
+        return s
+    intent = plan.intent_of(w.MIKA, steps, e.at, t, w.Cause(source=w.Source.REFLEX, actor=w.MIKA),
+                            f"occupation:{e.id}")
+    return replace(_start(s, intent, e.seq), occupied=(*recent, e.at))
 
 
 # ── Faits ─────────────────────────────────────────────────────────────────

@@ -6,8 +6,6 @@ import json
 from dataclasses import replace
 from types import SimpleNamespace as NS
 
-import pytest
-
 from mika.contracts import attention as ac
 from mika.contracts import memory as mc
 from mika.faculties.memory.archive import LifeArchive, decode, for_people, recall_life
@@ -18,7 +16,6 @@ from mika.faculties.memory.night import Reflect, Reflection
 from mika.faculties.memory.projections import DEFERRED_TABLE, Items
 from mika.faculties.memory.recall import Recalled, _add_recalled, verdict_of
 from mika.faculties.memory.salience import Item, Verdict
-from mika.faculties.others.tone import grave
 from mika.faculties.social.archive import Relations, recall_relations
 from mika.faculties.social.faculty import RELATION_CACHE_CAP, SocialState, _knit, _relations_recalled, _ties
 from mika.kernel.clock import DAY
@@ -28,7 +25,6 @@ from mika.kernel.frame import Audience
 from mika.kernel.prompt import Budget, ChatTurn, Composer, Fragment, SectionBody
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
-from mika.vocab.words import fold
 from tests.fixtures.memory import Script
 from tests.fixtures.mika import boot, build, connect, said
 from tests.unit.test_audit_regressions import DB, event, spec
@@ -42,11 +38,6 @@ def test_invalid_item_keeps_good_evidence_and_reports_the_rejected_item():
     ]})))
     assert [r.texte for r in result.croyances] == ['Alice aime le jardinage']
     assert result.issues and 'croyances[1]' in result.issues[0]
-
-
-@pytest.mark.parametrize('text', ['on se sépare', "on s'est séparés"])
-def test_personal_breakup_with_on_is_still_serious(text):
-    assert grave(fold(text)) == (-0.75, 'breakup')
 
 
 def test_final_history_cut_keeps_a_stable_frontier():

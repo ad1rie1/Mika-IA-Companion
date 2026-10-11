@@ -31,7 +31,6 @@ from mika.contracts import others as others_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
-from mika.faculties.others.tone import read_tone
 from mika.faculties.social.faculty import Contact, SocialParams, lived, owner_floored, rhythm
 from mika.kernel.arbitration import Modulation, RowView
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, local
@@ -178,23 +177,6 @@ def test_the_rhythm_of_a_relationship_is_its_own():
     assert rhythm(rare, 225, "friend", P)[0] <= P.rhythm_max_days
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("JE SUIS TROP CONTENTE", "majuscules"),
-    ("non mais sérieux !!", "exclamation"),
-    ("bon... je sais pas... enfin bref", "suspension"),
-    ("ok", "très court"),
-    ("j'en ai marre, je suis épuisée", "lourds"),
-    ("trop bien, j'ai hâte !", "entrain"),
-    ("ça va 😭", "émoji triste"),
-])
-def test_reading_the_tone_of_a_message(text, expected):
-    assert any(expected in cue for cue in read_tone(text)), read_tone(text)
-
-
-def test_an_ordinary_message_has_no_cue():
-    assert read_tone("On se voit demain à la bibliothèque pour réviser ?") == []
-
-
 # ── De bout en bout ───────────────────────────────────────────────────────
 
 
@@ -334,6 +316,13 @@ def test_a_memory_touching_someones_sensitive_topic_becomes_a_confidence(tmp_pat
         await connect(kernel, "user_2", "Bob")
         await befriend(kernel, "user_2", "friend")
         await _profile(kernel, "user_1", sensitive=("sa santé",))
+        # Alice a elle-même nommé Bob comme son ami : un lien prouvé, sans quoi sa vie ne se dit pas nommément à un
+        # ami de Mika (ADR 0092)
+        await kernel.mind.append([memory_c.BELIEVED.draft(
+            text=Content.of("Alice et Bob sont amis", level=1), about=("user_1", "user_2"), told_by=("user_1",),
+            sensitivity=1, relations=(memory_c.Relation(subject="user_1", other="user_2", kind="friend",
+                                                         status="active"),))],
+            emitter="memory", correlation="genese", origin=Origin.GENESIS)
         for text, sens in (("Alice attend des résultats pour sa santé cette semaine", Sensitivity.PERSONAL),
                            ("Alice prépare un voyage en Islande cette semaine", Sensitivity.PERSONAL)):
             await kernel.mind.append([memory_c.BELIEVED.draft(text=Content.of(text, level=int(sens)),
@@ -345,7 +334,7 @@ def test_a_memory_touching_someones_sensitive_topic_becomes_a_confidence(tmp_pat
 
     _, llm = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0), with_llm=True)
     shown = "\n".join(prompts(llm, "user_2"))
-    assert "Islande" in shown  # contrôle : le personnel sur Alice sort chez un ami
+    assert "Islande" in shown  # contrôle : le personnel sur Alice sort chez un ami qu'elle a nommé
     assert "résultats pour sa santé" not in shown
 
 

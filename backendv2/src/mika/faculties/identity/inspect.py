@@ -604,9 +604,15 @@ def _opens(frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> Table:
         rows.append((label, LEVEL_FR.get(d.level, "?"),
                      why_level(view.certainty, h.trust, closeness=closeness, warmth=warmth, public=audience_public),
                      LEVEL_FR.get(d.witness_level, "?"), LEVEL_FR.get(d.tied_level, "?"),
+                     LEVEL_FR.get(d.untied_level, "?"), LEVEL_FR.get(d.veiled_level, "?"),
                      why_file(view.certainty, h.trust, public=audience_public)))
     return Table(("audience", "sur autrui", "pourquoi", "si la personne est concernée",
-                  "sur quelqu'un qu'elle connaît", "sa propre fiche"), tuple(rows), title="Ce que ça ouvre")
+                  "sur quelqu'un qu'elle connaît",
+                  Column("sa vie, sans lien", hint="ce qu'elle sait de la vie de quelqu'un, dit nommément à qui n'a "
+                                                   "aucun lien prouvé avec lui (ADR 0092) : l'anodin"),
+                  Column("sans nommer personne", hint="à qui n'a aucun lien connu avec la personne (ADR 0091) : "
+                                                     "jamais un secret"),
+                  "sa propre fiche"), tuple(rows), title="Ce que ça ouvre")
 
 
 def _verdict(frame: Frame, handle: str, h: Handle, view: c.IdentityView) -> list[Block]:

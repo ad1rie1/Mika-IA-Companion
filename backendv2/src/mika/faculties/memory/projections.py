@@ -36,6 +36,7 @@ from mika.contracts import memory as c
 from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
+from mika.faculties.memory.extraction import IMPORTANCE
 from mika.faculties.memory.faculty import MEMORY
 from mika.faculties.memory.knowledge import Testimony, pooled
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
@@ -49,7 +50,7 @@ ITEM_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "con
                 "emotion", "born_at", "touched_at", "recalled_at", "recalls", "status", "replaces", "recipient",
                 "due", "sources", "told_by", "heard_by", "secret", "informants", "about_self", "shown_at", "between_us",
                 "knowledge_kind", "holder", "constraints", "internal_only", "superseded_by", "as_of", "valid_until",
-                "felt", "empathy", "until", "precision", "likelihood")
+                "felt", "empathy", "until", "precision", "likelihood", "gist", "veiled")
 CHUNK_TEXT_MAX = 600
 #: élément → la référence de son texte (``Content.ref``)
 REFS_TABLE = "memory_refs"
@@ -167,7 +168,8 @@ def fingerprint(text: str) -> str:
     return digest(WORD.findall(fold(text)))
 
 
-VIEWS = (c.KNOWLEDGE_VIEW, c.KNOWLEDGE_ABOUT_VIEW, c.FORMER_VIEW, c.RETOLD_VIEW, c.LEDGER_VIEW, c.FEELINGS_VIEW)
+VIEWS = (c.KNOWLEDGE_VIEW, c.KNOWLEDGE_ABOUT_VIEW, c.FORMER_VIEW, c.RETOLD_VIEW, c.LEDGER_VIEW, c.FEELINGS_VIEW,
+         c.SELF_CHANGES_VIEW, c.LIVED_VIEW)
 
 
 def create_views(sql: Sql, sfx: str) -> None:
@@ -181,11 +183,19 @@ def create_views(sql: Sql, sfx: str) -> None:
     sql.execute(f"CREATE VIEW IF NOT EXISTS {c.KNOWLEDGE_ABOUT_VIEW}{sfx} AS SELECT a.item AS item, a.person AS person "
                 f"FROM {about} a JOIN {t} i ON i.id = a.item WHERE i.status NOT IN ({former})")
     sql.execute(f"CREATE VIEW IF NOT EXISTS {c.FORMER_VIEW}{sfx} AS SELECT {cols} FROM {t} WHERE status IN ({former})")
-    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.RETOLD_VIEW}{sfx} AS SELECT item, handle, at FROM {told}")
+    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.RETOLD_VIEW}{sfx} AS SELECT item, handle, at, veiled FROM {told}")
     sql.execute(f"CREATE VIEW IF NOT EXISTS {c.LEDGER_VIEW}{sfx} AS SELECT * FROM {t}")
     sql.execute(f"CREATE VIEW IF NOT EXISTS {c.FEELINGS_VIEW}{sfx} AS SELECT f.item AS item, f.whose AS whose, "
                 f"f.emotion AS emotion, f.intensity AS intensity FROM {c.FEELINGS_TABLE}{sfx} f "
                 f"JOIN {t} i ON i.id = f.item WHERE i.status NOT IN ({former})")
+    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.SELF_CHANGES_VIEW}{sfx} AS SELECT o.id AS was, o.text AS was_text, "
+                "n.id AS item, n.text AS text, n.knowledge_kind AS knowledge_kind, "
+                "MAX(o.sensitivity, n.sensitivity) AS sensitivity, MAX(o.secret, n.secret) AS secret, "
+                f"o.superseded_at AS changed_at FROM {t} o JOIN {t} n ON n.id = o.superseded_by "
+                "WHERE o.status = 'superseded' AND o.about_self > 0 AND n.about_self > 0 AND n.status = 'active' "
+                "AND o.internal_only = 0 AND n.internal_only = 0")
+    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.LIVED_VIEW}{sfx} AS SELECT {cols}, gist FROM {t} "
+                f"WHERE kind = '{c.SOUVENIR}' AND gist != '' AND status NOT IN ({former})")
 
 
 def _facets_json(felt: Any) -> str:
@@ -217,7 +227,8 @@ class Items:
             "constraints TEXT NOT NULL DEFAULT '[]', internal_only INTEGER NOT NULL DEFAULT 0, fingerprint TEXT NOT NULL DEFAULT '', "
             "superseded_by INTEGER, superseded_at INTEGER, as_of INTEGER, valid_until INTEGER, "
             "felt TEXT NOT NULL DEFAULT '[]', empathy TEXT NOT NULL DEFAULT '[]', until INTEGER, "
-            "precision TEXT NOT NULL DEFAULT '', likelihood REAL)"
+            "precision TEXT NOT NULL DEFAULT '', likelihood REAL, gist TEXT NOT NULL DEFAULT '', "
+            "veiled TEXT NOT NULL DEFAULT '')"
         )
         t, about = f"{c.ITEMS_TABLE}{sfx}", f"{c.ABOUT_TABLE}{sfx}"
         sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_kind ON {t}(kind, status, born_at)")
@@ -264,7 +275,7 @@ class Items:
                     "heard_by": "[]", "secret": 0, "informants": "[]", "about_self": 0, "shown_at": 0, "between_us": 0,
                     "knowledge_kind": "claim", "holder": None, "constraints": "[]", "internal_only": 0,
                     "superseded_by": None, "as_of": None, "valid_until": None, "felt": "[]", "empathy": "[]", "until": None,
-                    "precision": "", "likelihood": None, **row}
+                    "precision": "", "likelihood": None, "gist": "", "veiled": "", **row}
             sql.execute(f"INSERT OR REPLACE INTO {t}({cols},fingerprint) VALUES({marks},?)",
                         (*[full[k] for k in ITEM_COLUMNS], fingerprint(full["text"])))
             _about_rows(sql, about, int(full["id"]), _loads(full["about"]))
@@ -300,7 +311,8 @@ class Items:
                         "constraints": json.dumps([rule.model_dump() for rule in d.constraints]),
                         "internal_only": int(d.internal_only), "origin": c.LIED if d.lie else None,
                         "emotion": d.emotion or dominant(d.empathy), "felt": _facets_json(d.felt),
-                        "empathy": _facets_json(d.empathy)})
+                        "empathy": _facets_json(d.empathy), "gist": (d.gist.text or "") if d.gist else "",
+                        "veiled": (d.veiled.text or "") if d.veiled else ""})
             elif name == c.BELIEVED.name:
                 insert({"id": e.seq, "kind": c.BELIEF, "text": d.text.text or "", "about": _keys(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance, "confidence": d.confidence,
@@ -314,7 +326,8 @@ class Items:
                         "as_of": d.as_of if d.as_of is not None else e.at, "valid_until": d.valid_until,
                         "emotion": dominant(d.empathy), "felt": _facets_json(d.felt),
                         "empathy": _facets_json(d.empathy), "due": d.expected, "until": d.expected_until,
-                        "precision": d.expected_precision, "likelihood": d.likelihood})
+                        "precision": d.expected_precision, "likelihood": d.likelihood,
+                        "veiled": (d.veiled.text or "") if d.veiled else ""})
                 # le premier témoignage : comment elle l'a appris la première fois (ADR 0080)
                 _testify(sql, sfx, e.seq, e.seq, told_by=d.told_by, informants=informants_of(d.source, d.told_by),
                          origin=d.origin, confidence=d.confidence, heard_by=d.heard_by, sensitivity=d.sensitivity,
@@ -356,6 +369,16 @@ class Items:
                     _supersede(sql, t, sfx, old, new, e.at)
                 for a, b in d.contests:
                     _contest(sql, sfx, a, b, e.at)
+            elif name == c.RESOLVED.name and d.nature == c.PREDICTION:
+                # une prévision constatée (ADR 0099) : de l'histoire — elle ne se montre plus à constater
+                sql.execute(f"UPDATE {t} SET status='resolved', touched_at=? WHERE id=? AND kind=?",
+                            (e.at, d.event, c.BELIEF))
+            elif name == c.DELICATE.name:
+                # un sujet délicat de la personne : une confidence, pour tous ses témoignages (ADR 0099)
+                for item in d.items:
+                    sql.execute(f"UPDATE {t} SET sensitivity=MAX(sensitivity, ?) WHERE id=?", (int(d.level), item))
+                    sql.execute(f"UPDATE {TESTIMONIES_TABLE}{sfx} SET sensitivity=MAX(sensitivity, ?) WHERE item=?",
+                                (int(d.level), item))
             elif name == SUBJECT_FORGOTTEN.name:
                 self._forget_testimonies(sql, t, sfx, d.subject)
             elif name == c.NIGHT_SORTED.name:
@@ -454,6 +477,11 @@ class Items:
             if d.secret:
                 # ce qu'une personne demande de garder pour soi vaut pour tout ce qu'elle en a dit
                 sql.execute(f"UPDATE {tt} SET secret=1 WHERE item=? AND told_by=?", (d.item, mine))
+            if d.about_self and d.durable:
+                # une anecdote redite comme ce qui la définit le devient (ADR 0087)
+                sql.execute(f"UPDATE {t} SET about_self=2, importance=MAX(importance, ?), "
+                            "knowledge_kind=COALESCE(?, knowledge_kind) WHERE id=? AND about_self=1",
+                            (IMPORTANCE[3], d.knowledge_kind, d.item))
             sql.execute(
                 f"UPDATE {t} SET touched_at=?, importance=MIN(1.0, importance + 0.05), sensitivity=MAX(sensitivity, ?), "
                 "secret=MAX(secret, ?), about=?, sources=?, between_us=MAX(between_us, ?) WHERE id=?",
@@ -623,34 +651,58 @@ class Chunks:
 class Told:
     """À qui elle a répété quoi : ce que montrait le prompt d'un énoncé adressé
     à quelqu'un (sa provenance). Ce qu'elle a raconté à Bob, Bob le sait — et,
-    dans le doute, ce qu'on lui a montré pour parler à Bob compte comme dit."""
+    dans le doute, ce qu'on lui a montré pour parler à Bob compte comme dit :
+    c'est la règle de qui ferme (un lien, une preuve d'identité). Pour un récit
+    sans nom, chaque énoncé qui le montrait est gardé (``TOLD_LINES_TABLE``) :
+    ce qu'elle a vraiment dit s'y juge à la lecture, sur sa réponse (ADR 0092)."""
 
     def create(self, sql: Sql, sfx: str) -> None:
         sql.execute(f"CREATE TABLE IF NOT EXISTS {c.TOLD_TABLE}{sfx}(item INTEGER NOT NULL, handle TEXT NOT NULL, "
-                    "at INTEGER NOT NULL, PRIMARY KEY(item, handle))")
+                    "at INTEGER NOT NULL, veiled INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(item, handle))")
+        sql.execute(f"CREATE TABLE IF NOT EXISTS {c.TOLD_LINES_TABLE}{sfx}(item INTEGER NOT NULL, "
+                    "handle TEXT NOT NULL, utterance INTEGER NOT NULL, at INTEGER NOT NULL, "
+                    "PRIMARY KEY(item, handle, utterance))")
+        sql.execute(f"CREATE INDEX IF NOT EXISTS {c.TOLD_LINES_TABLE}{sfx}_handle ON {c.TOLD_LINES_TABLE}{sfx}"
+                    "(handle, at)")
 
     def drop(self, sql: Sql, sfx: str) -> None:
         sql.execute(f"DROP TABLE IF EXISTS {c.TOLD_TABLE}{sfx}")
+        sql.execute(f"DROP TABLE IF EXISTS {c.TOLD_LINES_TABLE}{sfx}")
 
     def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
-        rows = []
+        rows: list[tuple[int, str, int, int]] = []
+        lines: list[tuple[int, str, int, int]] = []
         for e in events:
             d = e.data
             if e.type.name == c.JOINED.name:
                 # ce qu'elle avait raconté de la jointe, elle l'a raconté de la gardée
                 for keep, drop in d.pairs:
-                    sql.execute(f"INSERT OR IGNORE INTO {c.TOLD_TABLE}{sfx}(item, handle, at) "
-                                f"SELECT ?, handle, at FROM {c.TOLD_TABLE}{sfx} WHERE item=?", (keep, drop))
+                    sql.execute(f"INSERT OR IGNORE INTO {c.TOLD_TABLE}{sfx}(item, handle, at, veiled) "
+                                f"SELECT ?, handle, at, veiled FROM {c.TOLD_TABLE}{sfx} WHERE item=?", (keep, drop))
+                    sql.execute(f"INSERT OR IGNORE INTO {c.TOLD_LINES_TABLE}{sfx}(item, handle, utterance, at) "
+                                f"SELECT ?, handle, utterance, at FROM {c.TOLD_LINES_TABLE}{sfx} WHERE item=?",
+                                (keep, drop))
                 continue
             if not d.visible or not d.target:
                 continue
-            rows += [(int(p.split(":", 1)[1]), d.target, e.at) for p in d.provenance
+            rows += [(int(p.split(":", 1)[1]), d.target, e.at, 0) for p in d.provenance
                      if p.startswith("memory:") and p[7:].isdigit()]
+            # raconté sans nommer personne (ADR 0091) : compté à part — une fois nommé, il reste nommé
+            veiled = [(int(p.split(":", 1)[1]), d.target, e.at, 1) for p in d.provenance
+                      if p.startswith(c.VEILED_PROVENANCE) and p[len(c.VEILED_PROVENANCE):].isdigit()]
+            rows += veiled
+            lines += [(item, handle, e.seq, at) for item, handle, at, _ in veiled]
+        if lines:
+            sql.executemany(f"INSERT OR IGNORE INTO {c.TOLD_LINES_TABLE}{sfx}(item, handle, utterance, at) "
+                            "VALUES(?,?,?,?)", lines)
         if rows:
-            sql.executemany(f"INSERT OR REPLACE INTO {c.TOLD_TABLE}{sfx}(item, handle, at) VALUES(?,?,?)", rows)
+            sql.executemany(f"INSERT INTO {c.TOLD_TABLE}{sfx}(item, handle, at, veiled) VALUES(?,?,?,?) "
+                            "ON CONFLICT(item, handle) DO UPDATE SET at=excluded.at, "
+                            "veiled=MIN(veiled, excluded.veiled)", rows)
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> None:
         sql.execute(f"DELETE FROM {c.TOLD_TABLE}{sfx} WHERE handle=?", (subject,))
+        sql.execute(f"DELETE FROM {c.TOLD_LINES_TABLE}{sfx} WHERE handle=?", (subject,))
 
 
 # v3 : ce qui n'appartient qu'à elle et à la personne (``between_us`` : un surnom, une blague à elles, ADR 0055)
@@ -664,13 +716,20 @@ class Told:
 # v13 : la période d'un moment, ce qu'attend une prévision et sa vraisemblance (ADR 0084)
 # v14 : la nuit confronte deux témoins (``memory.confronted``) ; la discrétion de la personne concernée reste fermée
 # pour ce qu'un autre en dira ensuite (ADR 0085)
-MEMORY.projector(c.ITEMS_TABLE, version=14, tier=Tier.T0,
+# v15 : une note sur elle redite comme ce qui la définit le devient (``Attested.durable``) ; un moment vécu à travers
+# quelqu'un garde son « en bref » sans personne (``gist``) ; vues ``memory_self_changes``, ``memory_lived`` (ADR 0087)
+# v16 : la même chose, racontée sans qu'on puisse reconnaître la personne (``veiled``, ADR 0091)
+# v17 : ce qui touche un sujet délicat d'une personne est une confidence, à la porte (``memory.delicate``, ADR 0099)
+# v18 : une prévision constatée (``memory.resolved``, sorte « prévision ») n'est plus à constater (ADR 0099)
+MEMORY.projector(c.ITEMS_TABLE, version=18, tier=Tier.T0,
                  types=[*c.ALL, rt.UTTERANCE, SUBJECT_FORGOTTEN])(Items)
 # v3 : l'échange garde tout le tour (``Utterance.answers``), pas seulement le dernier message d'une rafale
 # v4 : index (personne, instant) et (salon, instant) ; l'oublié ne revient pas (ADR 0059)
 MEMORY.projector(c.CHUNKS_TABLE, version=4, tier=Tier.T0, types=[rt.UTTERANCE])(Chunks)
 # v2 : une croyance jointe la nuit (ADR 0080) : ce qu'elle en avait raconté passe à la gardée
-MEMORY.projector(c.TOLD_TABLE, version=2, tier=Tier.T0, types=[rt.UTTERANCE, c.JOINED])(Told)
+# v3 : ce qu'elle a raconté sans nommer personne (``veiled``, ADR 0091)
+# v4 : chaque énoncé qui lui montrait un récit sans nom (``memory_told_lines``) : raconté se juge sur sa réponse
+MEMORY.projector(c.TOLD_TABLE, version=4, tier=Tier.T0, types=[rt.UTTERANCE, c.JOINED])(Told)
 
 
 DEFERRED_TABLE = "memory_extraction_queue"

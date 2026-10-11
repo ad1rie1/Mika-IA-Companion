@@ -140,7 +140,7 @@ def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
 
 @SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.RECONTACT: (0.0, 12.0), c.COMFORT: (0.0, 12.0),
                                                   c.CHAT: (0.0, 3.5)},
-                reads=[c.CIRCLE, c.CONTACT, c.CLOSENESS, identity_c.HANDLES, identity_c.REACHABLE,
+                reads=[c.CIRCLE, c.CONTACT, c.CLOSENESS, c.WEIGHT, identity_c.HANDLES, identity_c.REACHABLE,
                        identity_c.IDENTITY, presence_c.PRESENT, affect_c.MOOD, affect_c.WARMTH, transcript_c.LAST_FROM])
 def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
     p = params(frame.env.params_of("social", frame.root))
@@ -166,7 +166,7 @@ def _reach_out(s: SocialState, frame: Frame) -> list[Candidate]:
             continue
         name = frame.get(identity_c.IDENTITY(person)).name or frame.get(identity_c.IDENTITY(address)).name
         who = f"« {name} »" if name else phrase("social.initiative.this_person")
-        if reading.silence_ratio >= p.recontact_factor:
+        if reading.silence_ratio >= p.recontact_factor / frame.get(c.WEIGHT(person)):  # sa propriétaire, plus tôt
             silent = reading.silence_ratio * reading.rhythm_days
             habit = (phrase("social.initiative.recontact.habit", habit=_habit_words(reading.rhythm_days))
                      if reading.measured else "")

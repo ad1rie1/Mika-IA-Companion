@@ -5,8 +5,13 @@ from __future__ import annotations
 
 OWNER = "expression"
 
-#: Clé d'annotation d'un énoncé : ``"sad:0.800"`` (``vocab.affect.Declared``).
+#: Clé d'annotation d'un énoncé : ``"sad:0.800"``, ou ses facettes ``"sad:0.600,anxious:0.300"``
+#: (``vocab.affect.Declared``, ADR 0093).
 EMOTION_ANNOTATION = "emotion"
+#: Clé d'annotation d'une réponse : ce que le modèle a lu de la personne qui lui écrit — ses facettes, son geste
+#: envers elle, un événement grave (``vocab.reading.Reading``, sa balise ``[EN_FACE: …]``, ADR 0093). Absente : il
+#: n'a rien déclaré, rien ne se lit.
+READING_ANNOTATION = "their_feeling"
 #: Un nom hors des 29 (compté, jamais une impulsion).
 UNKNOWN_EMOTION_ANNOTATION = "emotion_unknown"
 #: Clé d'annotation d'un énoncé qui pose une question (``"1"``) : on en attend la réponse.

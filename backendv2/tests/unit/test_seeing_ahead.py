@@ -14,6 +14,8 @@ from dataclasses import replace
 from types import SimpleNamespace as NS
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from mika.contracts import memory as mc
 from mika.contracts import social as social_c
 from mika.faculties.attention.anticipation import _anticipated_felt, _anticipation
@@ -47,6 +49,7 @@ from mika.kernel.clock import DAY, HOUR
 from mika.kernel.events import Content
 from mika.kernel.frame import Audience
 from mika.kernel.state import FrozenDict
+from mika.vocab import causes
 from mika.vocab.affect import Emotion
 from mika.vocab.privacy import Sensitivity, Verdict
 from tests.unit.test_audit_regressions import event
@@ -151,7 +154,7 @@ def test_surprise_is_prediction_error():
     assert lk.surprise(mc.HAPPENED, 0.25, 1.0) == 0.75  # elle n'y croyait pas
     assert lk.surprise(mc.UNKNOWN, 0.9, 1.0) == lk.surprise(mc.HAPPENED, None, 1.0) == 0.0
     big = _moment_resolved_felt(resolved(mc.CANCELLED, importance=1.0), CX)
-    assert [(a.emotion, a.reason) for a in big] == [(Emotion.SURPRISED, "tournure")]
+    assert [(a.emotion, a.reason) for a in big] == [(Emotion.SURPRISED, causes.TURNED_OUT)]
     assert _moment_resolved_felt(resolved(mc.HAPPENED), CX) is None  # ce qui arrive comme prévu ne surprend pas
 
 
@@ -257,7 +260,7 @@ def test_one_dominant_anticipation_rises():
     owner = _anticipation(AttentionState(), _cx((interview,), owners=(ALICE,)))
     assert owner.weight > got.weight  # sa propriétaire, comme si elle y allait
     felt = _anticipated_felt(NS(data=worried), NS(params=AttentionParams()))
-    assert (felt.emotion, felt.reason) == (Emotion.ANXIOUS, "appréhension")
+    assert (felt.emotion, felt.reason) == (Emotion.ANXIOUS, causes.DREADING)
     assert felt.intensity <= AttentionParams().anticipation_max
 
 
@@ -266,11 +269,11 @@ def test_one_dominant_anticipation_rises():
 
 def test_hoped_then_cancelled_disappoints():
     hoped = _moment_resolved_felt(resolved(mc.CANCELLED, valence=0.8, likelihood=0.2), CX)
-    assert [(a.emotion, a.reason) for a in hoped] == [(Emotion.SAD, "attente déçue")]
+    assert [(a.emotion, a.reason) for a in hoped] == [(Emotion.SAD, causes.LET_DOWN)]
     dreaded = _moment_resolved_felt(resolved(mc.CANCELLED, valence=-0.8, likelihood=0.2), CX)
-    assert [(a.emotion, a.reason) for a in dreaded] == [(Emotion.RELIEVED, "crainte levée")]
+    assert [(a.emotion, a.reason) for a in dreaded] == [(Emotion.RELIEVED, causes.FEAR_LIFTED)]
     came = _moment_resolved_felt(resolved(mc.HAPPENED, valence=0.8), CX)
-    assert [(a.emotion, a.reason) for a in came] == [(Emotion.HAPPY, "attente comblée")]
+    assert [(a.emotion, a.reason) for a in came] == [(Emotion.HAPPY, causes.AWAITED)]
     assert _moment_resolved_felt(resolved(mc.UNKNOWN, valence=0.8), CX) is None
 
 
@@ -394,4 +397,69 @@ def test_a_shared_moment_once_lived_is_said_in_the_past():
 
     labels = {m.event.id: m.label for m in _moments(Hers(alice), db, ALICE, alice, P, {})}
     assert labels[5].endswith("tu l'as vécu à travers Alice") and labels[6].endswith("tu le vivras à travers Alice")
+    db.conn.close()
+
+
+def test_the_console_shows_what_she_expected_and_who_keeps_their_word():
+    """Ses attentes se lisent dans la console (le réglage le promettait : « le chiffre se lit dans la console, jamais
+    dans ses phrases ») — par sorte d'annonce, l'écart moyen et si elle en parle plus prudemment ; et ce qu'elle
+    apprend de qui annonce (lot I du chantier « émotions, conscience, mémoire »)."""
+    from types import SimpleNamespace as NS
+
+    from mika.faculties.memory.faculty import MemoryParams, MemoryState
+    from mika.faculties.memory.inspect import _seeing_ahead
+    from mika.kernel.inspect import Badge, Meter, Table
+    from mika.kernel.state import FrozenDict
+
+    s = MemoryState(calibration=FrozenDict({mc.FIRST_HAND: (6, 2.4), mc.OFFICIAL: (2, 0.0)}),
+                    track=FrozenDict({"user_2": (1, 4)}))
+    frame = NS(env=NS(params_of=lambda *_: MemoryParams()), root=None,
+               get=lambda key: NS(name="Alice") if key.name == "identity.identity" else ())
+    calibration, tellers = _seeing_ahead(s, frame, None)
+    assert isinstance(calibration, Table) and isinstance(tellers, Table)
+    first = next(r for r in calibration.rows if r.cells[0] == "de la bouche de la personne")
+    assert first.cells[2] == "0,400" and first.cells[3] == Badge("plus prudente", "warn")
+    official = next(r for r in calibration.rows if r.cells[0] == "une date officielle")
+    assert official.cells[3].tone == "muted"  # trop peu de cas pour juger
+    alice = tellers.rows[0]
+    assert alice.cells[:3] == ("Alice", 1, 4) and isinstance(alice.cells[3], Meter) and alice.cells[3].ratio < 0.5
+
+
+# ── Une prévision passée se constate (ADR 0099) ─────────────────────────────
+
+
+async def test_a_forecast_that_came_true_is_constated_and_she_learns_from_it():
+    """« Je pense que je serai prise » (Alice, il y a dix jours, pour hier) : passée, la prévision se montre à la
+    relecture avec les moments passés ; Alice dit « j'ai été prise ! » — constatée, réalisée. Elle en apprend : qui
+    prévoyait (Alice tient ce qu'elle annonce), et ses attentes de la sorte « prévision » (sa calibration). Une
+    rumeur ne constate rien ; constatée, elle ne se montre plus."""
+    db = store()
+    db.put(mc.BELIEVED.draft(text=Content.of("Alice pense qu'elle sera prise chez Ubisoft", level=1), about=(ALICE,),
+                             told_by=(ALICE,), heard_by=(ALICE,), sensitivity=1, knowledge_kind="prediction",
+                             holder=ALICE, likelihood=0.7, expected=NOW - DAY), 7, NOW - 10 * DAY)
+    speakers = (Speaker("P1", ALICE, "Alice"),)
+    conv = Conversation(f"private:{ALICE}", speakers, (alice_says("j'ai été prise !!"),))
+    shown, foreseen = Consolidate._forecasts(FRAME, db, conv, P, {ALICE: "Alice [P1]"})
+    assert [i for i, _w, _t in shown] == [7] and "une prévision" in shown[0][2]
+    behind, _past, _f = Consolidate()._behind(FRAME, db, MemoryState(), conv, P, {ALICE: "Alice [P1]"})
+    assert 7 in [i for i, _w, _t in behind]  # montrée à la relecture, avec les moments passés
+    people = People.of(speakers, {}, "Mika", scope=conv.key)
+    out = await Consolidate()._drafts(Extraction(constats=[XConstat(numero=7, issue="a eu lieu", messages=[10000])]),
+                                      FRAME, MemoryState(), db, conv, people, [], [], None, P, "audit",
+                                      foreseen=foreseen)
+    (r,) = of(out, mc.RESOLVED)
+    assert (r.event, r.outcome, r.by, r.teller, r.nature) == (7, mc.HAPPENED, ALICE, ALICE, mc.PREDICTION)
+    s = _moment_resolved(MemoryState(), NS(data=r, seq=9, at=NOW), CX)
+    assert s.track[ALICE] == (1, 0) and s.calibration[mc.PREDICTION] == (1, pytest.approx(0.09))
+    bob = (Speaker("P1", BOB, "Bob"),)
+    rumor = Conversation(f"private:{BOB}", bob, (Line(10000, NOW, "Bob", "Alice a été prise, il paraît", BOB),))
+    _shown, seen_by_bob = Consolidate._forecasts(FRAME, db, rumor, P, {BOB: "Bob [P1]"})
+    assert seen_by_bob == {}  # pas une personne qu'elle concerne : ni montrée…
+    told = await Consolidate()._drafts(Extraction(constats=[XConstat(numero=7, issue="a eu lieu",
+                                                                     messages=[10000])]),
+                                       FRAME, MemoryState(), db, rumor, People.of(bob, {}, "Mika", scope=rumor.key),
+                                       [], [], None, P, "audit", foreseen=foreseen)
+    assert of(told, mc.RESOLVED) == []  # … ni constatée par ce qu'un autre en dit
+    db.put(mc.RESOLVED.draft(**r.model_dump()), 11, NOW)
+    assert Consolidate._forecasts(FRAME, db, conv, P, {ALICE: "Alice [P1]"}) == ([], {})
     db.conn.close()

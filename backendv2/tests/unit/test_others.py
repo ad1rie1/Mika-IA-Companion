@@ -29,8 +29,7 @@ from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.faculties.attention.faculty import AttentionParams, reply_window
 from mika.faculties.needs import NeedsParams
-from mika.faculties.others.faculty import Model, OthersParams, OthersState, current, learn, receptivity
-from mika.faculties.others.tone import measure
+from mika.faculties.others.faculty import Model, OthersParams, OthersState, brief, current, learn, receptivity
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.codec import digest
 from mika.kernel.events import Content, Origin
@@ -38,6 +37,7 @@ from mika.kernel.state import FrozenDict
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import at_paris, befriend, boot, build, connect, disconnect, said
+from tests.fixtures.reading import Reads
 
 P = OthersParams()
 
@@ -48,9 +48,14 @@ HEAVY = ["j'en ai marre, je suis épuisée", "encore une journée nulle, j'en ai
          "tout est nul, marre", "j'en peux plus, épuisée et triste"]
 
 
+#: ce que le modèle lit de chaque message (ADR 0093 : c'est lui qui juge)
+READS = {**{text: "happy 0.6" for text in LIGHT}, **{text: "sad 0.5, frustrated 0.5" for text in HEAVY}}
+
+
 class Script:
     def __init__(self, tag="[EMOTION:happy:0.5]"):
         self.tag = tag
+        self.reads = Reads(READS)
 
     def __call__(self, req):
         if req.role in ("extract", "profile", "compact"):
@@ -59,7 +64,7 @@ class Script:
             return LLMResponse("tiens, et si je lui écrivais")
         if req.role == "narrative":
             return LLMResponse("Je suis quelqu'un qui aime les petites choses du quotidien.")
-        return LLMResponse(f"d'accord {self.tag}")
+        return LLMResponse(f"d'accord {self.tag}{self.reads.tag(req) if req.role == 'reply' else ''}")
 
 
 def run(tmp_path, scenario, *, start=at_paris(2026, 9, 28, 14, 0), with_llm=False):
@@ -96,23 +101,6 @@ def person_of(kernel, handle):
 # ── Le ton, pur ───────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("text,sign", [
-    ("j'en ai marre, je suis épuisée", -1),
-    ("trop bien, j'ai hâte !", +1),
-    ("je suis pas contente du tout", -1),  # l'entrain nié
-    ("c'est pas mal du tout", +1),  # « pas mal » n'est pas lourd
-    ("ça m'énerve, c'est insupportable", -1),
-    ("On se voit demain à la bibliothèque pour réviser ?", 0),
-])
-def test_the_tone_of_a_message_is_read_in_its_form(text, sign):
-    v = measure(text).valence
-    assert (v > 0.05) - (v < -0.05) == sign, (text, v)
-
-
-def test_anger_is_agitated_sadness_is_not():
-    assert measure("ça m'énerve, c'est insupportable !!").arousal > measure("je suis triste").arousal
-
-
 def test_three_sad_first_messages_do_not_make_a_sad_person():
     """Avant de connaître quelqu'un, elle lui prête de la neutralité : ses
     premiers messages pèsent, sans faire un caractère."""
@@ -138,7 +126,7 @@ def test_the_mood_of_the_moment_fades_back_to_the_usual_tone():
 # ── Surprise et inquiétude, de bout en bout ───────────────────────────────
 
 
-def test_a_heavy_message_from_a_light_friend_surprises_and_worries_her_not_from_a_complainer(tmp_path):
+def test_her_reply_knows_what_sounds_like_the_person(tmp_path):
     async def scenario(kernel, script, out):
         await befriend(kernel, "user_1", social_c.CLOSE)
         await befriend(kernel, "user_2", social_c.FRIEND)
@@ -152,15 +140,15 @@ def test_a_heavy_message_from_a_light_friend_surprises_and_worries_her_not_from_
             await chat(kernel, handle, ["j'en ai marre, je suis épuisée"])
 
     _, llm = run(tmp_path, scenario, with_llm=True)
-    # chaque réponse a vu la lecture de son message (journalisée avant qu'elle réponde)
+    # c'est le modèle qui lit le message auquel il répond (ADR 0093) : sa réponse sait ce qui ressemble à la personne
     replies = [r for r in llm.calls if r.role == "reply"]
     to_alice, to_bea, to_chloe = replies[-3], replies[-2], replies[-1]
     assert to_alice.meta["target"] == "user_1" and to_bea.meta["target"] == "user_2"
     alice_prompt = to_alice.messages[-1].content
-    assert "Ça ne ressemble pas à « Alice »" in alice_prompt, alice_prompt[-1500:]
-    assert "Dans son message : " in alice_prompt
-    assert "Ça ne ressemble pas" not in to_bea.messages[-1].content  # elle râle toujours : rien d'étonnant
-    assert "Ça ne ressemble pas" not in to_chloe.messages[-1].content  # une inconnue : elle ne la connaît pas
+    assert "D'habitude, « Alice » t'écrit sur un ton plutôt léger." in alice_prompt, alice_prompt[-1500:]
+    assert "D'habitude, « Bea » t'écrit sur un ton plutôt lourd" in to_bea.messages[-1].content  # rien d'étonnant
+    assert "D'habitude" not in to_chloe.messages[-1].content  # une inconnue : elle ne la connaît pas
+    assert "Dans son message" not in alice_prompt  # plus d'indices lus dans les mots
 
 
 def test_surprise_and_worry_are_recorded_judgements(tmp_path):
@@ -412,9 +400,9 @@ def test_she_asks_how_it_went_once_it_is_over_but_never_betrays_who_told_her(tmp
     ("ok.", True), ("bof", True), ("laisse tomber", True),  # contre-exemples : là, la brièveté dit quelque chose
 ])
 def test_a_greeting_is_short_by_nature_not_cold(text, short):
-    """« salut ! » n'est pas « un message très court » : l'indice faisait prêter de la froideur à chaque
-    salutation du soir (audit HUM-18)."""
-    assert ("un message très court" in measure(text).cues) is short
+    """« salut ! » n'est pas un message bref : l'indice faisait prêter de la froideur à chaque salutation du soir
+    (audit HUM-18). La brièveté est la forme du message, jamais son sens (ADR 0093)."""
+    assert brief(text) is short
 
 
 def test_three_words_answers_in_a_row_tell_her_to_keep_it_short(tmp_path):

@@ -15,8 +15,9 @@ from mika.contracts import self_ as self_c
 from mika.contracts import social as sc
 from mika.contracts import transcript as tc
 from mika.faculties.attention.faculty import AttentionState, Thought, _sources_withdrawn
-from mika.faculties.self import SelfState, _narrated
-from mika.faculties.self import _sources_withdrawn as self_withdrawn
+from mika.faculties.self import SelfState
+from mika.faculties.self.narrative import _narrated
+from mika.faculties.self.narrative import _sources_withdrawn as self_withdrawn
 from mika.faculties.self.night import dream_hearable, journal_ref
 from mika.faculties.self.records import Dream, Journal
 from mika.faculties.social.faculty import SocialState, _portrait_sources, _profiled

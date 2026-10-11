@@ -135,6 +135,11 @@ class Remembered(Payload):
     #: forte), jugés par la relecture (ADR 0083)
     felt: Feelings = ()
     empathy: Feelings = ()
+    #: un moment vécu à travers quelqu'un (ADR 0086), dit en bref et sans personne — « un concert de jazz » : ni
+    #: prénom, ni lieu ni date précis (ADR 0087)
+    gist: Content | None = None
+    #: la même chose, racontée sans qu'on puisse reconnaître la personne (ADR 0091), comme ``Believed.veiled``
+    veiled: Content | None = None
 
     @model_validator(mode="after")
     def _inherited_subjects(self):
@@ -198,6 +203,9 @@ class Believed(Payload):
     expected_until: int | None = None
     expected_precision: str = ""
     likelihood: float | None = None
+    #: la même chose, racontée sans qu'on puisse reconnaître la personne (ADR 0091) : écrite par la relecture, sans
+    #: prénom, lieu précis, employeur, nom d'animal, date ni nombre — un récit sans nom à qui ne la connaît pas
+    veiled: Content | None = None
 
     @model_validator(mode="after")
     def _relation_subjects(self):
@@ -256,6 +264,10 @@ class Attested(Payload):
     relations: tuple[Relation, ...] = ()
     #: ce qu'elle redit d'elle-même (une note sur elle)
     about_self: bool = False
+    #: une note sur elle redite comme ce qui la définit (un goût, un avis, un fait de sa vie) : elle le devient, de
+    #: cette sorte (``knowledge_kind``), et tient des mois — jamais l'inverse (ADR 0087)
+    durable: bool = False
+    knowledge_kind: Literal["claim", "opinion", "preference", "hypothesis", "prediction"] | None = None
     restricts: bool = False
     everyone: bool = False
     #: une croyance que celle-ci remplace (la confirmer en la désignant comme remplacée la confirme) — ou, dite de
@@ -418,6 +430,12 @@ class SituationEnded(Payload):
 #: comment un moment a tourné (ADR 0086) : il a eu lieu, il est annulé, déplacé, ou personne ne l'a jamais dit
 HAPPENED, CANCELLED, MOVED, UNKNOWN = "happened", "cancelled", "moved", "unknown"
 OUTCOMES = (HAPPENED, CANCELLED, MOVED, UNKNOWN)
+#: ce qui est arrivé, au regard d'un moment attendu : il a eu lieu (1), il n'a pas eu lieu (0) ; déplacé, il n'a pas
+#: eu lieu ce jour-là, mais il aura lieu (à moitié) — ne pas savoir n'a pas de valeur
+OUTCOME_VALUE = {HAPPENED: 1.0, CANCELLED: 0.0, MOVED: 0.5}
+#: de quelle sorte était l'annonce (``Resolved.nature``, ADR 0084) : de la bouche de la personne, rapportée par un
+#: autre ou le monde, une date officielle, une prévision
+FIRST_HAND, REPORTED, OFFICIAL, PREDICTION = "first_hand", "reported", "official", "prediction"
 
 
 class Resolved(Payload):
@@ -482,8 +500,10 @@ class NightSorted(Payload):
 #: un élément retenu se soumet à l'oubli de ceux qu'il concerne et de ceux qui l'ont confié
 _SUBJECTS = ("about", "told_by")
 
-REMEMBERED = event_type("memory.remembered", OWNER, Remembered, public=True, content=("text",), subjects=_SUBJECTS)
-BELIEVED = event_type("memory.believed", OWNER, Believed, public=True, content=("text",), subjects=(*_SUBJECTS, "holder"))
+REMEMBERED = event_type("memory.remembered", OWNER, Remembered, public=True, content=("text", "gist", "veiled"),
+                        subjects=_SUBJECTS)
+BELIEVED = event_type("memory.believed", OWNER, Believed, public=True, content=("text", "veiled"),
+                      subjects=(*_SUBJECTS, "holder"))
 REINFORCED = event_type("memory.reinforced", OWNER, Reinforced, public=True)
 PROMISE_NOTICED = event_type("memory.promise_noticed", OWNER, PromiseNoticed, public=True, content=("text",),
                              subjects=("to",))
@@ -500,8 +520,21 @@ ATTESTED = event_type("memory.attested", OWNER, Attested, public=True, subjects=
 JOINED = event_type("memory.joined", OWNER, Joined, public=True)
 CONFRONTED = event_type("memory.confronted", OWNER, Confronted, public=True)
 REREAD = event_type("memory.reread", OWNER, Reread, public=True)
+
+
+class Delicate(Payload):
+    """Ce qu'elle sait d'une personne et qui touche un de ses sujets délicats (son portrait : ``social.SENSITIVE``) :
+    une confidence, où qu'on le lise — la porte de la mémoire le dit à toutes les facultés (ses pensées, ses buts,
+    son journal), plus seulement au rappel qui le recalculait seul (ADR 0099). Jamais abaissé."""
+
+    person: str
+    items: tuple[int, ...] = ()
+    level: int = 3
+
+
+DELICATE = event_type("memory.delicate", OWNER, Delicate, public=True, subjects=("person",))
 ALL = (REMEMBERED, BELIEVED, REINFORCED, PROMISE_NOTICED, PROMISE_RESOLVED, EVENT_NOTED, MOMENT_FOLLOWED, SITUATION_ENDED,
-       CONSOLIDATED, NIGHT_SORTED, EXTRACTION_DEFERRED, ATTESTED, JOINED, CONFRONTED, REREAD, RESOLVED)
+       CONSOLIDATED, NIGHT_SORTED, EXTRACTION_DEFERRED, ATTESTED, JOINED, CONFRONTED, REREAD, RESOLVED, DELICATE)
 
 
 @dataclass(frozen=True, slots=True)
@@ -710,6 +743,10 @@ FORGETS_TABLE = "memory_forgets"
 #: À qui elle a répété quoi (``item``, ``handle``, ``at``) : d'après la
 #: provenance de ce qu'elle a dit. Ce qu'elle a raconté à Bob, Bob le sait.
 TOLD_TABLE = "memory_told"
+#: Chaque énoncé qui lui montrait un récit sans nom (``item``, ``handle``, ``utterance`` : le numéro de l'énoncé, qui
+#: est aussi la ligne de sa réponse dans le fil, ``at``) : ce qu'elle a vraiment dit se juge à la lecture, sur sa
+#: réponse (ADR 0092) — le prompt montre, il ne dit pas.
+TOLD_LINES_TABLE = "memory_told_lines"
 
 # ── La porte (ADR 0077…) : ce que les autres facultés lisent de ce qu'elle sait ──
 #
@@ -725,8 +762,20 @@ KNOWLEDGE_VIEW = "memory_knowledge"
 KNOWLEDGE_ABOUT_VIEW = "memory_knowledge_about"
 #: Ce qu'elle a cru et ne croit plus (remplacé, fondu), lu par identifiant : « je croyais que… ».
 FORMER_VIEW = "memory_former"
-#: À qui elle a répété quoi (``item``, ``handle``, ``at``).
+#: À qui elle a répété quoi (``item``, ``handle``, ``at``, ``veiled``) — ``veiled`` : seulement sans nommer personne
+#: (ADR 0091) ; la personne ne sait pas de qui il s'agit, mais elle le sait, elle.
 RETOLD_VIEW = "memory_retold"
+#: la provenance d'un élément raconté sans nommer personne (``veiled:<élément>``, ADR 0091) — celle d'un élément
+#: montré nommé est ``memory:<élément>``
+VEILED_PROVENANCE = "veiled:"
+#: Ce qu'elle pensait d'elle-même et dont elle a changé (ADR 0087) : ses notes à elle seulement, de la remplacée
+#: (``was``, ``was_text``) à celle qu'elle tient maintenant (``item``, ``text``, ``knowledge_kind``), avec l'enveloppe
+#: la plus stricte des deux (``sensitivity``, ``secret``) et quand elle a changé (``changed_at``).
+SELF_CHANGES_VIEW = "memory_self_changes"
+SELF_CHANGES_COLUMNS = ("was", "was_text", "item", "text", "knowledge_kind", "sensitivity", "secret", "changed_at")
+#: Ce qu'elle a vécu à travers quelqu'un (ADR 0086) et qui se dit en bref, sans personne (ADR 0087) : les colonnes de
+#: ``KNOWLEDGE_VIEW`` et ``gist`` (« un concert de jazz »). Les mêmes droits que l'élément : on passe par le verdict.
+LIVED_VIEW = "memory_lived"
 #: Tout, statut compris, pour la console, le simulateur et l'application — jamais pour une faculté ou un plugin.
 LEDGER_VIEW = "memory_ledger"
 #: Ce que chaque élément de ``KNOWLEDGE_VIEW`` fait ressentir (``item``, ``whose``, ``emotion``, ``intensity``) :

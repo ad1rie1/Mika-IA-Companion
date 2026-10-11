@@ -107,6 +107,92 @@ def test_decide_gives_the_tied_facet():
     assert not d.admits(C) and d.admits(C, tied=True)
     assert decide(1.0, AUTH, closeness="friend").tied_level is P
     assert privacy.EVERYTHING.tied_level is C and privacy.CLOSED.tied_level is Sensitivity.NONE
+    assert privacy.EVERYTHING.untied_level is C and privacy.CLOSED.untied_level is Sensitivity.NONE
+
+
+# ── La vie d'autrui, nommément (ADR 0092) ──
+#
+# Une amie de Mika n'est pas une amie d'Alice : ce que Mika sait de la vie d'Alice ne se dit nommément, au-delà de
+# l'anodin, qu'à qui a un lien prouvé avec Alice ou était là. Le reste se raconte sans nom (ADR 0091) ou se garde.
+
+UNTIED = [
+    (0.70, ACC, "friend", 0.0, A, "une amie sans lien avec la personne : l'anodin nommé"),
+    (1.0, AUTH, "close", 1.0, A, "proche, connectée, chaleureuse — toujours sans lien"),
+    (0.70, ACC, "acquaintance", 0.5, A, "la chaleur ne prouve aucun lien"),
+    (1.0, PUB, "close", 1.0, A, "en public, jamais plus qu'anodin"),
+    (0.45, ACC, "close", 1.0, A, "sous la barre"),
+    (0.0, INT, "", 0.0, C, "personne n'écoute : toute sa mémoire"),
+]
+
+
+@pytest.mark.parametrize(("certainty", "trust", "closeness", "warmth", "expected", "why"), UNTIED,
+                         ids=[r[-1] for r in UNTIED])
+def test_her_memory_of_someones_life_is_named_only_to_who_knows_them(certainty, trust, closeness, warmth, expected,
+                                                                      why):
+    assert privacy.untied(certainty, trust, closeness=closeness, warmth=warmth) is expected, why
+    assert decide(certainty, trust, closeness=closeness, warmth=warmth).untied_level is expected
+
+
+def test_the_untied_rule_is_a_policy_switch_back_to_a_friend():
+    """``named_needs_tie`` à ``False`` : la règle d'une amie (ADR 0058), rien d'autre ne bouge."""
+    loose = privacy.TrustPolicy(named_needs_tie=False)
+    assert privacy.untied(0.70, ACC, closeness="friend", policy=loose) is P
+    assert decide(1.0, AUTH, closeness="close", policy=loose).untied_level is P
+    assert decide(1.0, AUTH, closeness="close").level is P  # ses projets, ses buts : la règle d'une amie, toujours
+
+
+def _aud(d: Disclosure, *, ties: tuple[str, ...] = ()) -> privacy.Audience:
+    return privacy.Audience(persons=("bob",), public=False, level=int(d.level), witness_level=int(d.witness_level),
+                            private_ok=d.own_file, tied_level=int(d.tied_level), ties=ties,
+                            untied_level=int(d.untied_level))
+
+
+def test_the_door_of_her_memory_wants_a_tie_or_a_witness():
+    """La porte de la mémoire : Alice a confié qu'elle cherche du travail (personnel). Bob, ami de Mika : pas
+    nommément sans lien ; avec un lien prouvé, ou s'il était là, oui."""
+    bob = decide(1.0, AUTH, closeness="friend")
+    about, told = ("alice",), ("alice",)
+    assert not privacy.admissible(about, P, "bob", _aud(bob), told_by=told).ok
+    assert privacy.admissible(about, A, "bob", _aud(bob), told_by=told).ok
+    assert privacy.admissible(about, P, "bob", _aud(bob, ties=("alice",)), told_by=told).ok
+    assert privacy.admissible(about, P, "bob", _aud(bob), told_by=told, heard_by=("alice", "bob")).ok
+    # ce que Carol a dit de Bob lui-même : sa vie à lui, la règle d'une amie
+    assert privacy.admissible(("bob",), P, "bob", _aud(bob), told_by=("carol",)).ok
+    stranger = decide(1.0, AUTH, closeness="stranger")
+    assert not privacy.admissible(("bob",), P, "bob", _aud(stranger), told_by=("carol",)).ok
+
+
+def test_a_thought_about_someone_follows_the_same_door():
+    bob = decide(1.0, AUTH, closeness="friend")
+    common = (int(bob.level), int(bob.witness_level), bob.own_file)
+    assert privacy.hearable(("alice",), P, "bob", *common)  # ses projets : la règle d'une amie
+    assert not privacy.hearable(("alice",), P, "bob", *common, untied_level=int(bob.untied_level))
+    assert privacy.hearable(("alice",), P, "bob", *common, untied_level=int(bob.untied_level),
+                            tied_level=int(bob.tied_level), ties=("alice",))
+
+
+def test_a_thought_says_her_feeling_by_name_never_the_others_content():
+    """Ses pensées : « un échange avec Alice m'a marquée » (les mots d'Alice tus) se dit à une amie de Mika — c'est sa
+    vie à elle ; une pensée qui porte le contenu de la vie d'Alice (« Alice est en arrêt maladie »), seulement à qui a
+    un lien avec Alice (ADR 0092)."""
+    from mika.contracts import attention as attention_c
+    from mika.faculties.attention.prompt import admissible as thought_admissible
+    from mika.faculties.attention.prompt import named, shown
+
+    bob = _aud(decide(1.0, AUTH, closeness="friend"))
+    exchange = attention_c.ThoughtReading(1, "t", "sad", 0.6, attention_c.EXCHANGE, ("alice",), int(P), 0)
+    revision = attention_c.ThoughtReading(2, "t", "sad", 0.6, attention_c.REVISION, ("alice",), int(P), 0)
+    assert thought_admissible(exchange, "bob", bob)
+    assert not thought_admissible(revision, "bob", bob)
+    tied = _aud(decide(1.0, AUTH, closeness="friend"), ties=("alice",))
+    assert thought_admissible(revision, "bob", tied)
+    # et sans son nom, à qui n'a pas de lien avec elle : « un échange avec quelqu'un m'a marquée »
+    def name_of(_key):
+        return "Alice"
+
+    assert shown(exchange, "…", "bob", name_of, name=named(exchange, "bob", bob)) == \
+        "Un échange avec quelqu'un m'a marquée."
+    assert shown(exchange, "…", "bob", name_of, name=named(exchange, "bob", tied)) == "Un échange avec Alice m'a marquée."
 
 
 def test_a_confidence_never_leaves_in_a_public_room():
@@ -157,6 +243,9 @@ def test_more_certainty_never_discloses_less(c1, c2, trust, closeness, warmth, w
     assert disclosable(hi, trust, public=True, **kw) <= A or trust is INT
     # un lien n'ôte jamais rien
     assert disclosable(hi, trust, **{**kw, "tied": False}) <= disclosable(hi, trust, **{**kw, "tied": True})
+    # sans lien, jamais plus que ce que dirait une amie ; et jamais plus qu'avec un lien
+    d = decide(hi, trust, closeness=closeness, warmth=warmth)
+    assert d.untied_level <= d.level <= d.tied_level
 
 
 # ── La garde du composeur ─────────────────────────────────────────────────

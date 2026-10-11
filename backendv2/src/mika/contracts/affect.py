@@ -39,8 +39,8 @@ class MoodReading:
     intensity: float
     #: le fond d'une journée (borné), compris dans ``position``
     fond: Vec3 = ORIGIN
-    #: pourquoi elle se sent ainsi, si elle le sait : un code (``talk``, ``retour``,
-    #: ``rêve``…), jamais un texte libre ; ``""`` : sans trop savoir pourquoi
+    #: pourquoi elle se sent ainsi, si elle le sait : un code (``vocab.causes`` : ``talk``, ``came_back``,
+    #: ``dream``…), jamais un texte libre ; ``""`` : sans trop savoir pourquoi
     cause: str = ""
     #: la personne d'un échange qui l'a mise dans cet état (``cause == "talk"``)
     cause_person: str = ""

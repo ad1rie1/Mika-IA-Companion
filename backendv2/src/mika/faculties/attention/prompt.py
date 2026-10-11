@@ -49,7 +49,7 @@ SHOWN = 3
 #: les pensées nées d'un signal extérieur montrées au plus
 SIGNALS_SHOWN = 2
 #: des pensées qui se ressentent, jamais des raisons de réécrire à quelqu'un
-FELT_ONLY = frozenset({c.MISSING, c.UNANSWERED, c.ALONE, c.LIE})
+FELT_ONLY = frozenset({c.MISSING, c.UNANSWERED, c.ALONE, c.LIE, c.REMINISCENCE})
 #: les pensées nées d'un message (ses mots, entre guillemets)
 VERBATIM = frozenset({c.EXCHANGE, c.CONCERN})
 
@@ -72,8 +72,11 @@ def admissible(t: c.ThoughtReading, interlocutor: str | None, aud: Audience | No
         # un mensonge ne pèse à voix haute que devant qui l'a reçu, en privé : devant une autre, « j'ai menti à
         # Bob » laisserait deviner ce qu'il couvrait
         return interlocutor is not None and interlocutor in t.about and aud.private_ok and not aud.public
+    # sa vie à elle, sans son contenu (« un échange avec quelqu'un m'a marquée ») : la règle d'une amie ; le contenu
+    # de la vie d'autrui, celle de qui a un lien avec elle (ADR 0092)
+    untied = None if hidden(t, interlocutor) else aud.untied
     if not hearable(tuple(t.about), t.sensitivity, interlocutor, aud.level, aud.witness_level, aud.private_ok,
-                    tied_level=aud.tied_level, ties=aud.ties):
+                    tied_level=aud.tied_level, ties=aud.ties, untied_level=untied):
         return False
     if t.lineage is None:
         return True
@@ -85,13 +88,32 @@ def admissible(t: c.ThoughtReading, interlocutor: str | None, aud: Audience | No
     return admits(t.lineage, interlocutor, aud, resolve=resolve, presumed=presumed).ok
 
 
-def shown(t: c.ThoughtReading, text: str, interlocutor: str | None, name_of: Callable[[str], str]) -> str:
+def hidden(t: c.ThoughtReading, interlocutor: str | None) -> bool:
+    """Devant cette personne, la pensée se dit-elle sans ses mots (ceux d'un message privé d'une autre) ?"""
+    return t.origin in VERBATIM and t.sensitivity > Sensitivity.ANODYNE and bool(t.about) \
+        and interlocutor not in t.about
+
+
+def named(t: c.ThoughtReading, interlocutor: str | None, aud: Audience | None) -> bool:
+    """Devant cette personne, une pensée dite sans ses mots peut-elle nommer de qui il s'agit ? Comme si son contenu
+    se disait : à qui a un lien avec la personne, ou était là (ADR 0092) — sinon « quelqu'un », et ce qu'elle raconte
+    sans nom d'elle ailleurs dans le prompt reste sans nom."""
+    if aud is None:
+        return False
+    return hearable(tuple(t.about), t.sensitivity, interlocutor, aud.level, aud.witness_level, aud.private_ok,
+                    tied_level=aud.tied_level, ties=aud.ties, untied_level=aud.untied)
+
+
+def shown(t: c.ThoughtReading, text: str, interlocutor: str | None, name_of: Callable[[str], str], *,
+          name: bool = True) -> str:
     """Le texte d'une pensée tel qu'on peut le dire à cette personne : les mots
     d'un message privé ne se citent qu'à qui les a écrits ; pour les autres,
-    l'échange est dit sans ses mots (« un échange avec Alice m'a marquée »)."""
-    if t.origin not in VERBATIM or t.sensitivity <= Sensitivity.ANODYNE or not t.about or interlocutor in t.about:
+    l'échange est dit sans ses mots (« un échange avec Alice m'a marquée ») —
+    et sans le nom (``name`` faux : « un échange avec quelqu'un… ») à qui n'a
+    aucun lien avec la personne (``named``)."""
+    if not hidden(t, interlocutor):
         return text
-    who = name_of(t.about[0]) or phrase("attention.thought.someone")
+    who = (name_of(t.about[0]) if name else "") or phrase("attention.thought.someone")
     if t.origin == c.CONCERN:
         return phrase("attention.thought.concern_hidden", who=who)
     return phrase("attention.thought.exchange_hidden", who=who)
@@ -124,7 +146,7 @@ def _lines(frame: Frame, enrich: Mapping[str, Any], *, signals: bool, limit: int
         if not text or not admissible(t, person, aud, frame):
             continue
         strength = phrase("attention.thoughts.often") if t.intensity >= 0.5 else phrase("attention.thoughts.sometimes")
-        said = " ".join(shown(t, text, person, name_of).split())
+        said = " ".join(shown(t, text, person, name_of, name=named(t, person, aud)).split())
         lines.append(phrase("attention.thoughts.line", when=when_fr(t.born_at, frame.now, tz), feeling=feeling(t.emotion),
                             strength=strength, said=said))
         if len(lines) >= limit:

@@ -207,7 +207,7 @@ def audience_for(frame: Frame, req: Any) -> Audience:
         d = privacy.EVERYTHING
         return Audience(persons=(), channel="internal", public=False, level=int(d.level),
                         witness_level=int(d.witness_level), private_ok=True, trust=ChannelTrust.INTERNAL.value,
-                        owner=True, tied_level=int(d.tied_level))
+                        owner=True, tied_level=int(d.tied_level), untied_level=int(d.untied_level))
     s: IdentityState = frame.state("identity")
     room = getattr(req, "room", None)
     h = s.handles.get(target)
@@ -218,10 +218,11 @@ def audience_for(frame: Frame, req: Any) -> Audience:
     # avec qui la personne qui écoute a un lien : la confidence d'une autre ne s'ouvre qu'à une proche qui la
     # connaît (ADR 0058) — inutile de le chercher quand rien de plus ne s'ouvrirait
     ties = tuple(frame.get(social_c.TIES(frame.get(c.PERSON(target))))) \
-        if d.tied_level > d.level and is_identifiable(target) else ()
+        if d.tied_level > d.untied_level and is_identifiable(target) else ()
     return Audience(
         persons=(target,), channel=channel, room=room, public=public, level=int(d.level),
         witness_level=int(d.witness_level), private_ok=d.own_file, trust=view.trust.value,
         certainty=view.certainty, name=view.name,
         owner=bool(frame.get(c.SPEAKS_AS_OWNER(target))) and not public, tied_level=int(d.tied_level), ties=ties,
+        veiled_level=int(d.veiled_level), untied_level=int(d.untied_level),
     )

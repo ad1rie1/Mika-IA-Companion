@@ -43,6 +43,15 @@ class Audience:
     owner: bool = False
     tied_level: int = 0
     ties: tuple[str, ...] = ()
+    #: ce qu'elle peut raconter d'autrui sans nommer personne, à qui n'a aucun lien avec la personne (ADR 0091)
+    veiled_level: int = 0
+    #: ce qu'elle peut dire nommément de la vie de quelqu'un à qui n'a ni lien avec lui ni n'était là (ADR 0092) ;
+    #: ``None`` : ``level`` (une audience qui ne le précise pas — toute audience réelle le précise, une garde le vérifie)
+    untied_level: int | None = None
+
+    @property
+    def untied(self) -> int:
+        return self.level if self.untied_level is None else min(self.untied_level, self.level)
 
 
 CLOSED = Audience()

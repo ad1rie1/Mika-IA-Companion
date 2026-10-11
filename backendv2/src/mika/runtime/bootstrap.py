@@ -161,6 +161,7 @@ class Kernel:
             audience_of=deps.audience_of, parsers=deps.parsers, budget=deps.budget, ports=ports,
             traces=self.traces,
         )
+        self.runner.interpret = self.interpret  # une réponse s'interprète aussi : ce que le modèle a lu (ADR 0093)
         self.lanes = Lanes(self.runner, capacities=deps.lanes, max_pending=deps.max_pending)
         self.arbiter = Arbiter(lambda: self.mind.registry, self._submit_selected, seed=deps.seed)
         self.mind.subscribe(self.arbiter.invalidate)
@@ -373,7 +374,9 @@ class Kernel:
         """Ce que chaque faculté tire du message, journalisé avant la réponse :
         une réponse composée ensuite voit déjà « elle dit être Alice ». Aussi pour
         un événement venu d'ailleurs qu'un port journalise lui-même (un réveil par
-        API, ADR 0068) : un ajout seul ne fait jamais tourner les interprètes."""
+        API, ADR 0068), et pour sa réponse, juste après qu'elle s'écrit (ce que le
+        modèle a lu de la personne, ADR 0093) : un ajout seul ne fait jamais tourner
+        les interprètes."""
         stored = self.mind.store.get_events([seq])
         if not stored:
             return

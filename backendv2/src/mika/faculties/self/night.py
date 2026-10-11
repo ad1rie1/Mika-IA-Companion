@@ -55,21 +55,22 @@ from mika.contracts import runtime as rt
 from mika.contracts import self_ as c
 from mika.contracts import transcript as transcript_c
 from mika.contracts import world as world_c
-from mika.faculties.self import (
+from mika.faculties.self import days as d_
+from mika.faculties.self.faculty import SELF, SelfState
+from mika.faculties.self.knobs import params
+from mika.faculties.self.persona import persona_for
+from mika.faculties.self.records import (
     ABANDONED,
     BLOCKED,
     DONE,
     MUSED,
     OPENED,
+    REFLECTED,
     REMINDED,
-    SELF,
     WORKED,
-    SelfState,
-    params,
-    persona_for,
+    Dream,
+    Journal,
 )
-from mika.faculties.self import days as d_
-from mika.faculties.self.records import Dream, Journal
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.codec import h64
 from mika.kernel.events import Content, VoiceProvenance
@@ -78,7 +79,7 @@ from mika.kernel.frame import Audience, Frame
 from mika.kernel.prompt import SectionBody, readable
 from mika.ports.llm import LLMRequest, Message
 from mika.vocab import affect as A
-from mika.vocab import circadian, privacy
+from mika.vocab import causes, circadian, privacy
 from mika.vocab.affect import Appraisal
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.knowledge import knowns
@@ -201,9 +202,9 @@ def _woke_felt(e, cx) -> list[Appraisal] | None:
     emotion = A.emotion_of(d.emotion)
     if d.dream and emotion is not None and d.vividness > 0:
         out.append(Appraisal(emotion, round((0.25 if d.remembered else 0.1) * d.vividness, 4),
-                             reason="le rêve de cette nuit" if d.remembered else "un rêve oublié"))
+                             reason=causes.DREAM if d.remembered else causes.DREAM_FORGOTTEN))
     if d.eased:
-        out.append(Appraisal(A.Emotion.RELIEVED, min(0.3, 0.1 * d.eased), reason="la nuit a apaisé ce qui pesait"))
+        out.append(Appraisal(A.Emotion.RELIEVED, min(0.3, 0.1 * d.eased), reason=causes.DIGESTION))
     return out or None
 
 
@@ -620,7 +621,7 @@ def _deeds(frame: Frame, store: Any, state: SelfState, start: int, end: int, *, 
             continue
         if not title:
             continue
-        verb = verbs.get(x.what) if x.what in (OPENED, DONE, BLOCKED, ABANDONED, REMINDED) else None
+        verb = verbs.get(x.what) if x.what in (OPENED, DONE, BLOCKED, ABANDONED, REMINDED, REFLECTED) else None
         if verb:
             parts.append(f"{verb} « {_quote(title, 100)} »")
     lines = [phrase("self.night.deeds.header", deeds=" ; ".join(parts[:6]))] if parts else []
@@ -823,7 +824,7 @@ def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None,
     if aud is None:
         return not about and sensitivity <= Sensitivity.ANODYNE
     return privacy.hearable(about, sensitivity, interlocutor, aud.level, aud.witness_level, aud.private_ok,
-                            tied_level=aud.tied_level, ties=aud.ties)
+                            tied_level=aud.tied_level, ties=aud.ties, untied_level=aud.untied)
 
 
 @SELF.enricher("night", episodes=CONVERSATIONAL, deadline_ms=400)

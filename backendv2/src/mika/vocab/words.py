@@ -53,6 +53,12 @@ pause faut dois doit devoir disant mentionne raconte souhaite souhaiter annonce 
 """.split())
 
 
+#: les mots courants qu'une phrase met en tête (repliés) : une majuscule de début de phrase sur eux ne dit pas un nom
+OPENERS = frozenset("""
+quelqu une un le la les mon ma mes son sa ses je tu il on
+""".split()) | STOPWORDS | CHATTER | BANAL
+
+
 def banal(text: str, names: Iterable[str] = ()) -> bool:
     """Une banalité : rien d'autre que des noms, des mots vides et ce qui ne dit rien d'une vie (« allez j'y vais »,
     « je vais essayer de dormir », « Sam doit retourner travailler »). « Pixel est parti cet après-midi » n'en est

@@ -52,7 +52,7 @@ ORIGIN_FR = {c.EXCHANGE: "un échange", c.REVISION: "une croyance révisée", c.
              c.BLOCKED: "un but bloqué", c.SIGNAL: "un signal", c.CONCERN: "une inquiétude",
              c.PROMISE: "une promesse non tenue", c.UNANSWERED: "une initiative sans réponse",
              c.ALONE: "personne ne lui écrit", c.REMORSE: "elle a été dure avec quelqu'un",
-             c.LIE: "elle a menti à quelqu'un"}
+             c.LIE: "elle a menti à quelqu'un", c.REMINISCENCE: "un souvenir qui lui revient"}
 EXPECTED_FR = {c.REPLY: "sa réponse", c.RETURN: "son retour", c.PROMISE: "tenir sa promesse"}
 SENSITIVITY_FR = {int(Sensitivity.NONE): "rien d'autrui", int(Sensitivity.ANODYNE): "anodin",
                   int(Sensitivity.PERSONAL): "personnel", int(Sensitivity.CONFIDENCE): "confidence"}

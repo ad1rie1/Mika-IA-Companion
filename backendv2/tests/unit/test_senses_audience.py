@@ -214,13 +214,16 @@ def test_an_important_mail_shows_in_a_light_reply_but_not_to_someone_who_is_hurt
         await (await kernel.perceive(said("user_1", "coucou ! trop bien, super journée :)"))).reply
         await asyncio.sleep(MINUTE / US)
         await (await kernel.perceive(said("user_1", "je suis triste, je pleure, ça va mal 😢"))).reply
+        await asyncio.sleep(MINUTE / US)
+        await (await kernel.perceive(said("user_1", "j'arrive pas à arrêter de pleurer"))).reply
 
     _, llm, _ = run(tmp_path, scenario, mail=box)
     calls = [c for c in llm.calls if c.role == "reply" and c.meta.get("target") == "user_1"]
     light = "\n".join(m.content for m in calls[0].messages)
     heavy = "\n".join(m.content for m in calls[-1].messages)
     assert "TES MAILS NON LUS — de l'arrière-plan" in light and "le toit fuit" in light
-    # à quelqu'un qui va mal, le mail ne s'invite pas : ni sa section, ni hors de ce qu'elle-même en pense
+    # à quelqu'un qui va mal, le mail ne s'invite pas : ni sa section, ni hors de ce qu'elle-même en pense. Ce qu'elle
+    # sent de la personne, c'est le modèle qui le lit en lui répondant (ADR 0093) : dès la réponse suivante
     assert "TES MAILS" not in heavy and "toit" not in _outside_her_own_life(heavy.split(CONTEXT_FOOTER)[0])
 
 

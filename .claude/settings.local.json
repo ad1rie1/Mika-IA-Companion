@@ -42,7 +42,21 @@
       "Skill(claude-api:*)",
       "Bash(python3 -c \"import sys; print\\(sys.version\\)\")",
       "Bash(timeout 300 python3 -m pytest backend/tests/ --collect-only -q)",
-      "ClaudeInChromeDomain(127.0.0.1:8765)"
+      "ClaudeInChromeDomain(127.0.0.1:8765)",
+      "Bash(cd \"/home/Qwartz/Bureau/PROJET IA/vtuber/backendv2/src/mika\" && ls faculties/self/ && wc -l faculties/self/*.py contracts/self_.py && ls contracts/ && ls ../../graphify-out 2>/dev/null | head)",
+      "Read(//home/Qwartz/Bureau/PROJET IA/**)",
+      "Bash(cd \"/home/Qwartz/Bureau/PROJET IA/vtuber/backendv2/src/mika\" && ls && ls faculties && ls faculties/memory faculties/attention faculties/goals faculties/needs vocab contracts 2>/dev/null; ls graphify-out ../../graphify-out 2>/dev/null | head)",
+      "Bash(grep -n \"^self\\\\|^  [a-z_]*:$\" persona/voix.yaml)",
+      "Bash(awk -F: '{print $1}')",
+      "Bash(cd /home/Qwartz/.claude/projects/-home-Qwartz-Bureau-PROJET-IA-vtuber/memory/ && grep -n -i -E \"nature|persona|incarn|récit|narrat|estime|goût|identit|IA |humaine|corps\" injection-jumeau.md voix-yaml.md monde-3d.md audit-memoire-2026-10-08.md audit-v2-vague2.md audit-v2-vague3.md audit-v2-2026-10-01.md refonte-backendv2.md project_proactive_vision.md sonde-modele-reel-ollama.md | cut -c1-400)",
+      "Read(//home/Qwartz/.claude/projects/-home-Qwartz-Bureau-PROJET-IA-vtuber/memory/**)",
+      "Bash(awk '/^\\(async \\)?def test_/{print \"\\\\n## \" NR \": \" $0; c=0} /assert/{ if \\(c<2\\) {print NR\": \"$0; c++} }' unit/test_persona.py unit/test_apologies.py)",
+      "Bash(cd \"/home/Qwartz/Bureau/PROJET IA/vtuber/backendv2\" && git status --short | head -40; ls ~/.claude/plans 2>/dev/null | head)",
+      "Read(//home/Qwartz/.claude/plans/**)",
+      "Bash(awk -F: '{print $1\": \"$3}')",
+      "Bash(cd \"/home/Qwartz/Bureau/PROJET IA/vtuber/backendv2\" && head -60 docs/adr/0086-voir-venir-constater.md; ls ~/recup-audit-v2-2026-10-01/outils/ 2>/dev/null | head -30)",
+      "Read(//home/Qwartz/recup-audit-v2-2026-10-01/outils/**)",
+      "Bash(awk 'NR>=300 && NR<=345' persona/voix.yaml)"
     ]
   }
 }

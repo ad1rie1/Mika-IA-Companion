@@ -20,13 +20,14 @@ import pytest
 from pydantic import ValidationError
 
 from mika.contracts import self_ as self_c
-from mika.faculties.self import interjections, render
-from mika.plugins.rss import keywords
+from mika.faculties.self import render
+from mika.faculties.self.greeting import interjections
 from mika.kernel.clock import DAY, HOUR, US
 from mika.kernel.codec import canonical_json
 from mika.kernel.events import EventRegistry
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
+from mika.vocab.interests import topic_words
 from tests.fixtures.memory import Script, chat
 from tests.fixtures.mika import DOC, at_paris, befriend, boot, build, connect, said
 from tests.fixtures.mika import PERSONA_PATH as PATH
@@ -110,7 +111,7 @@ def test_her_interests_name_subjects_that_pick_her_headlines_not_everyday_words(
     """Les mots de ses centres d'intérêt décident des titres de ses flux qui la touchent (plugin ``rss``) : ce sont
     des mots de sujets. Persona du 2026-10-07, première version : « comment », « service », « rendre » — tout titre
     en « Comment… » l'aurait touchée. Contre-épreuve : ses sujets y sont."""
-    words = keywords(DOC.interests)
+    words = topic_words(DOC.interests)
     assert not words & EVERYDAY_WORDS, sorted(words & EVERYDAY_WORDS)
     assert {"lecture", "dessin", "astronomie", "programmation", "plantes"} <= words
 

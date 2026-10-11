@@ -78,14 +78,16 @@ WELL_WISHES = frozenset({CHEER, CELEBRATE, REMEMBRANCE})
 
 
 class ToneRead(Payload):
-    """Ce qu'elle lit dans la forme d'un message, et ce qu'elle en attendait."""
+    """Ce qu'elle a senti de la personne en lisant son message, et ce qu'elle en attendait. Depuis l'ADR 0093, le
+    jugement est celui du modèle qui lui a répondu (sa balise ``[EN_FACE: …]``) : ses facettes (``felt``), d'où se
+    tirent la valence et l'agitation ; avant, une lecture des mots (``cues``), rejouée telle quelle."""
 
     person: str
     handle: str
     message: int
     valence: float  # [-1, 1] : lourd … léger
     arousal: float  # [0, 1] : posé … agité
-    #: les indices lus (des étiquettes écrites par le code, jamais le texte du message)
+    #: les indices lus dans la forme (journal d'avant l'ADR 0093 : des étiquettes du code, jamais le message)
     cues: tuple[str, ...] = ()
     #: le ton qu'elle attendait de cette personne, avant ce message
     expected: float = 0.0
@@ -106,12 +108,30 @@ class ToneRead(Payload):
     #: temps) : l'émotion et son intensité — jamais un mot du message
     contagion: float = 0.0
     contagion_emotion: str = ""
-    #: elle clôt la conversation (« bonne nuit », « à demain », « je file ») : y répondre n'attend rien en retour
+    #: elle clôt la conversation (journal d'avant l'ADR 0093 ; depuis : ``FAREWELL``, à l'arrivée du message)
     closing: bool = False
+    #: ce que le modèle a lu qu'elle ressent, en facettes (``vocab.affect.Facet``), la plus forte d'abord (ADR 0093)
+    felt: tuple[tuple[str, float], ...] = ()
+    #: la sorte de l'événement grave (``vocab.reading`` : deuil, maladie, rupture, perte de travail, détresse…)
+    grave_kind: str = ""
+    #: un message de quelques mots (sa forme, pas son sens) : « ok » ne dit pas qu'elle va mieux
+    brief: bool = False
+    #: lu par le modèle en lui répondant (ADR 0093) : la réponse est déjà écrite ; le journal d'avant lisait avant elle
+    after_reply: bool = False
+
+
+class Farewell(Payload):
+    """Elle clôt la conversation (« bonne nuit », « à demain », « je file ») : y répondre n'attend rien en retour —
+    reconnu à l'arrivée du message, à sa forme (``vocab.farewell``), ce n'est pas une émotion (ADR 0093)."""
+
+    person: str
+    handle: str
+    message: int
 
 
 READ = event_type("others.read", OWNER, ToneRead, public=True, subjects=("person",))
-ALL = (READ,)
+FAREWELL = event_type("others.farewell", OWNER, Farewell, public=True, subjects=("person",))
+ALL = (READ, FAREWELL)
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +148,8 @@ class MindReading:
     confidence: float
     last_at: int
     last_message: int
-    last_cues: tuple[str, ...]
+    #: ce que le modèle a senti de son dernier message lu, en facettes (ADR 0093)
+    last_felt: tuple[tuple[str, float], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +162,10 @@ class DelayReading:
 
 #: ``MIND(personne)``.
 MIND = FactFamily("others.mind", arg=str, type=MindReading, time_varying=True)
+#: ``CHECK_IN_AT(personne)`` : quand elle s'inquiète pour cette personne, l'instant à partir duquel elle prendra de ses
+#: nouvelles ; 0 sinon. Un autre chemin vers le même geste (raconter à une amie ce qu'elle a pensé de ce qu'elle lui a
+#: confié) l'attend, pour partir avec la prise de nouvelles plutôt qu'avant elle.
+CHECK_IN_AT = FactFamily("others.check_in_at", arg=str, type=int)
 #: ``REPLY_DELAY((personne, canal))`` — le canal tel que le transport le nomme
 #: (« web », « external ») ; la classe (écran, messagerie) est tranchée ici.
 REPLY_DELAY = FactFamily("others.reply_delay", arg=tuple, type=DelayReading)
@@ -157,6 +182,9 @@ class HoursReading:
     active: tuple[bool, ...]  # 24 heures
     learned: bool
     usual: int | None = None
+    #: 24 heures : on peut lui écrire sans la réveiller — sa nuit supposée fermée, sauf les heures où elle a déjà
+    #: écrit (une noctambule) ; ses heures apprises n'ont jamais fermé la journée. Vide : lire ``active``.
+    awake: tuple[bool, ...] = ()
 
 
 #: ``HOURS(personne)`` : les heures où elle écrit — on n'est pas ignorée par quelqu'un qui dort.

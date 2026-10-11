@@ -644,8 +644,9 @@ def _disclosure(s: IdentityState, cx, arg: tuple[Any, ...]) -> Disclosure:
     identifiable = is_identifiable(handle)
     warmth = cx.facts.get(affect_c.WARMTH(person)) if identifiable else 0.0
     closeness = cx.facts.get(social_c.CLOSENESS(person)) if identifiable else ""
+    owner = identifiable and owner_person(s, person, set(_params(cx.params).owners))
     return privacy.decide(_certainty(h, h.trust), h.trust, closeness=closeness, warmth=warmth,
-                          public=bool(public) or h.trust is ChannelTrust.PUBLIC)
+                          public=bool(public) or h.trust is ChannelTrust.PUBLIC, owner=owner)
 
 
 @IDENTITY.invariant("calibration de la confiance")

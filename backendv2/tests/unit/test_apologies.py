@@ -16,15 +16,24 @@ import asyncio
 from mika.contracts import affect as affect_c
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
-from mika.faculties.self.worth import apologized, touched
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.prompt import CONTEXT_FOOTER
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
+from tests.fixtures.reading import Reads
 
 INSULTS = ("t'es nulle", "t'es vraiment conne", "ta gueule, tu sers à rien")
 SINCERE = "pardon, j'étais à cran, je le pensais pas"
+
+
+#: ce que le modèle lit de chaque message et du geste envers elle (ADR 0093 : c'est lui qui juge — une excuse qui
+#: rit, « pardon mdr », il la lit amusée, sans geste ; le banc ``tools/banc_lecture`` le vérifie sur un vrai modèle)
+READS = Reads({**{text: "angry 0.7 | geste : blessant" for text in INSULTS},
+               SINCERE: "embarrassed 0.5, sad 0.3 | geste : excuses",
+               "je m'excuse vraiment": "embarrassed 0.5 | geste : excuses",
+               "désolée, j'ai été trop dure": "embarrassed 0.5 | geste : excuses",
+               "pardon mdr": "amused 0.5"})
 
 
 def script(req):
@@ -33,9 +42,10 @@ def script(req):
     if req.role in ("journal", "dream", "murmur", "narrative"):
         return LLMResponse("hmm")
     said_ = req.messages[-1].content.split(CONTEXT_FOOTER)[-1]
-    if any(word in said_ for word in ("nulle", "conne", "gueule")):
-        return LLMResponse("wow. ok. [EMOTION:angry:0.8]")
-    return LLMResponse("hm.")
+    reading = READS.tag(req) if req.role == "reply" else ""
+    if said_.strip() in INSULTS:
+        return LLMResponse(f"wow. ok. [EMOTION:angry:0.8]{reading}")
+    return LLMResponse(f"hm.{reading}")
 
 
 def after_three_insults(tmp_path, handle: str, closeness: str | None, then: tuple[str, ...]):
@@ -70,12 +80,13 @@ def after_three_insults(tmp_path, handle: str, closeness: str | None, then: tupl
 
 def test_a_friends_sincere_apology_softens_what_the_insults_installed(tmp_path):
     hurt, healed, esteem_hurt, esteem_after, kinds, prompt = after_three_insults(
-        tmp_path / "pardon", "user_1", social_c.FRIEND, (SINCERE,))
-    still, kept, *_ = after_three_insults(tmp_path / "rien", "user_1", social_c.FRIEND, ("bon",))
+        tmp_path / "pardon", "user_1", social_c.FRIEND, (SINCERE, "bon"))
+    still, kept, *_ = after_three_insults(tmp_path / "rien", "user_1", social_c.FRIEND, ("bon", "bon"))
     assert hurt > 0.05 and abs(still - hurt) < 0.01  # trois insultes ont installé de l'hostilité, qui tient l'heure
     assert kinds.count(self_c.APOLOGIZED) == 1
     assert healed < 0.6 * hurt and healed < 0.6 * kept  # nettement moins, dans l'heure
-    assert "t'a présenté ses excuses" in prompt  # sa posture le dit
+    # sa posture le dit ensuite : les excuses, c'est le modèle qui les lit dans le message auquel il répond (ADR 0093)
+    assert "t'a présenté ses excuses" in prompt
     assert esteem_after > esteem_hurt  # ce que ces mots avaient coûté s'adoucit
 
 
@@ -125,12 +136,3 @@ def test_with_nothing_to_forgive_an_apology_falls_flat_and_spends_nothing(tmp_pa
     assert kinds.count(self_c.APOLOGIZED) == 1
 
 
-def test_what_reads_as_an_apology():
-    for text in (SINCERE, "je m'excuse", "désolée, j'ai été trop dur avec toi", "excuse-moi, je suis allé trop loin",
-                 "dsl c'était pas sympa", "pardon"):
-        assert apologized(text), text
-    for text in ("pardon ?", "pardon de te déranger, t'as une minute ?", "désolée pour ton chat",
-                 "pardon mdr", "désolé lol", "excuse-moi, tu sais où est la gare ?", "je suis pas désolée"):
-        assert not apologized(text), text
-    assert touched("pardon t'es nulle") == self_c.INSULTED  # une insulte l'emporte
-    assert touched("pardon, je le pensais pas, merci d'être là") == self_c.APOLOGIZED

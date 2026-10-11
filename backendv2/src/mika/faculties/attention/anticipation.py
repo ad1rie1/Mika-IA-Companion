@@ -23,6 +23,7 @@ from mika.kernel.clock import HOUR, local
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
+from mika.vocab import causes
 from mika.vocab.affect import Appraisal, Emotion, facets_valence
 
 #: la vraisemblance d'un moment noté avant qu'on la garde (ADR 0084)
@@ -135,4 +136,4 @@ def _anticipated_felt(e, cx) -> Appraisal:
     anxious = d.emotion == Emotion.ANXIOUS.value
     return Appraisal(Emotion.ANXIOUS if anxious else Emotion.HOPEFUL,
                      round(min(p.anticipation_max, d.weight * p.anticipation_gain), 3),
-                     reason="appréhension" if anxious else "impatience")
+                     reason=causes.DREADING if anxious else causes.LOOKING_FORWARD)

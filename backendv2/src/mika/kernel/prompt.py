@@ -29,6 +29,7 @@ avant/après, rang de coupe, plancher, étiquettes) ; le composeur, générique 
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -147,18 +148,35 @@ class SectionBody:
     current: ChatTurn | None = None
     #: découpage explicite des données ; ``content`` reste le rendu complet pour les outils
     fragments: tuple[Fragment, ...] = ()
+    #: ce que le bloc raconte d'autrui sans nommer personne (ADR 0091) : les formes du nom qu'il tait. Il se mesure
+    #: au niveau « sans nom » de l'audience, et il est retiré si l'un de ces noms paraît ailleurs dans le prompt
+    veils: tuple[str, ...] = ()
 
 
 def audible(body: SectionBody, audience_level: int, witness_level: int | None = None,
-            tied_level: int | None = None) -> bool:
+            tied_level: int | None = None, veiled_level: int | None = None) -> bool:
     """La seconde barrière de la divulgation : ce qu'un bloc dit d'autrui ne
     dépasse pas ce que l'audience peut entendre (au niveau « témoin » quand
     l'interlocuteur y figure lui-même, au niveau « lié » quand il a un lien avec
-    les personnes concernées)."""
+    les personnes concernées, au niveau « sans nom » quand il ne nomme personne —
+    jamais plus haut sans qu'on le lui ait dit, ADR 0091)."""
+    if body.veils:
+        return veiled_level is not None and body.level <= veiled_level
     limit = witness_level if (body.witness and witness_level is not None) else audience_level
     if body.tied and tied_level is not None:
         limit = max(limit, tied_level)
     return body.level <= limit
+
+
+def unveiled(veils: Sequence[str], elsewhere: str) -> bool:
+    """L'un des noms qu'un bloc tait paraît-il ailleurs (mot entier, casse et accents repliés) ? Alors le récit sans
+    nom désignerait quelqu'un : il se retire."""
+    said = " " + " ".join(re.findall(r"\w+", _fold(elsewhere))) + " "
+    return any(f" {' '.join(re.findall(r'\w+', _fold(v)))} " in said for v in veils if v and len(v) >= 2)
+
+
+def _fold(text: str) -> str:
+    return "".join(ch for ch in unicodedata.normalize("NFKD", text.lower()) if not unicodedata.combining(ch))
 
 
 def readable(body: SectionBody | str | None, audience: Any) -> str | None:
@@ -169,7 +187,7 @@ def readable(body: SectionBody | str | None, audience: Any) -> str | None:
     if isinstance(body, str):
         body = SectionBody(body)
     if audience is None or not audible(body, audience.level, audience.witness_level,
-                                       getattr(audience, "tied_level", None)):
+                                       getattr(audience, "tied_level", None), getattr(audience, "veiled_level", None)):
         return None
     text = body.content if isinstance(body.content, str) else "\n".join(t.content for t in body.content)
     return text.strip() or None
@@ -288,6 +306,7 @@ class Composer:
         reserved: int = 0,
         tied_level: int | None = None,
         typed_chars: int | None = None,
+        veiled_level: int | None = None,
     ) -> tuple[ChatPrompt, ComposeTrace]:
         """``reserved`` : les caractères qui partiront au modèle hors du composeur
         (persona, catalogue, déclarations d'outils) ; ``thread_key`` : la clé de
@@ -302,7 +321,7 @@ class Composer:
             if spec.tags & muted_tags:
                 dropped.append((spec.key, "coupée pour cet épisode"))
                 continue
-            if not audible(body, audience_level, witness_level, tied_level):
+            if not audible(body, audience_level, witness_level, tied_level, veiled_level):
                 dropped.append((spec.key, "trop sensible pour l'audience"))
                 continue
             b = _Block(spec, body)
@@ -319,6 +338,18 @@ class Composer:
                     # bornes de l'état interne) ; ailleurs, un texte peut citer autrui
                     b.text = neutral(b.text)
             kept.append(b)
+
+        if any(b.body.veils for b in kept):
+            # ce qu'elle raconte sans nommer personne ne côtoie jamais le nom qu'il tait : ailleurs dans le prompt (une
+            # autre section, le fil, le message), il désignerait la personne (ADR 0091)
+            def text_of(b: _Block) -> str:
+                return b.text if not b.turns else " ".join(t.content for t in b.turns)
+
+            for b in [b for b in kept if b.body.veils]:
+                elsewhere = " ".join([*(text_of(o) for o in kept if o is not b), message])
+                if unveiled(b.body.veils, elsewhere):
+                    kept.remove(b)
+                    dropped.append((b.spec.key, "le nom qu'elle tait paraît ailleurs"))
 
         stable = [b for b in kept if b.spec.zone is Zone.STABLE]
         # tri stable : l'ordre du registre au sein de chaque bande

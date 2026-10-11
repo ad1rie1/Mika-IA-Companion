@@ -17,22 +17,24 @@ import asyncio
 
 from mika.contracts import goals as goals_c
 from mika.contracts import self_ as self_c
-from mika.faculties.self import (
-    IGNORED,
-    STUCK,
-    SelfParams,
-    SelfState,
-    doubt_cause,
-)
+from mika.faculties.self import SelfParams, SelfState
+from mika.faculties.self.esteem import IGNORED, STUCK, doubt_cause
 from mika.faculties.self.records import Knock
-from mika.faculties.self.worth import touched
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
+from tests.fixtures.reading import Reads
 
 P = SelfParams()
+
+
+#: ce que le modèle lit de chaque message, et du geste envers elle (ADR 0093 : c'est lui qui juge)
+READS = Reads({"merci Mika, t'es géniale": "happy 0.6 | geste : compliment",
+               "ce film est nul, j'ai détesté": "disgusted 0.4",
+               "t'es nulle": "angry 0.6 | geste : blessant",
+               "t'es vraiment nulle, tu sers à rien": "angry 0.7 | geste : blessant"})
 
 
 def script(req):
@@ -40,7 +42,7 @@ def script(req):
         return LLMResponse("{}")
     if req.role in ("journal", "dream", "murmur", "narrative"):
         return LLMResponse("hmm")
-    return LLMResponse("d'accord [EMOTION:happy:0.5]")
+    return LLMResponse(f"d'accord [EMOTION:happy:0.5]{READS.tag(req) if req.role == 'reply' else ''}")
 
 
 def run(tmp_path, scenario, *, start=at_paris(2026, 9, 28, 9, 0)):
@@ -122,18 +124,6 @@ def test_what_people_say_of_her_touches_her_a_little(tmp_path):
     assert stung < thanked
     assert trolled >= thanked - P.social_daily_cap - 1e-3  # un troll qui insiste ne la démolit pas
     assert touches[0] == self_c.COMPLIMENTED and touches.count(self_c.INSULTED) == 16
-
-
-def test_teasing_and_politeness_are_not_insults_or_thanks():
-    assert touched("t'es nulle mdr") is None  # une moquerie qui rit
-    assert touched("t'es pas nulle du tout") is None
-    assert touched("non merci, ça ira") is None
-    assert touched("ce jeu est nul") is None
-    assert touched("je t'aime pas, ce film") is None and touched("je te déteste plus, va") is None  # nié aussitôt
-    assert touched("je te déteste") == self_c.INSULTED and touched("je t'aime") == self_c.COMPLIMENTED  # contrôles
-    assert touched("t'es nulle") == self_c.INSULTED  # contrôle
-    assert touched("merci beaucoup !") == self_c.THANKED
-    assert touched("je t'adore") == self_c.COMPLIMENTED
 
 
 def test_her_doubt_says_its_real_cause():

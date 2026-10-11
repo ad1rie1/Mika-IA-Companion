@@ -23,7 +23,10 @@ proche **qui a un lien avec la personne concernée** (elles se sont parlé
 ensemble, ou la personne concernée l'a nommée elle-même : ``tied``). Être
 proche de Mika ne suffit pas : c'est l'anecdote qui échappe en grande
 confiance, pas la confidence lourde de quelqu'un qu'on ne connaît pas — et
-prononcer un nom ne crée aucun lien (ADR 0058).
+prononcer un nom ne crée aucun lien (ADR 0058). Et la vie d'autrui lue dans
+sa mémoire (ce qu'elle sait, pense ou rêve de quelqu'un) ne se dit nommément,
+au-delà de l'anodin, qu'à qui a ce lien ou était là (``untied``) : une amie de
+Mika sans lien avec Alice l'entend sans nom, ou pas (ADR 0092).
 Ce que quelqu'un a demandé de ne répéter à personne (un secret) ne ressort
 que devant qui l'a confié : ce n'est pas un niveau, c'est la mémoire qui le
 garde (``faculties/memory``). La fiche de l'interlocuteur lui-même est une
@@ -203,6 +206,11 @@ class TrustPolicy:
     confidence_threshold: float = BOUND
     warmth_min: float = 0.3
     pending_claim_ttl_days: int = 7
+    #: la vie d'autrui ne se dit nommément, au-delà de l'anodin, qu'à qui a un lien prouvé avec la personne (une
+    #: relation qu'elle a déclarée elle-même, ``tied``) ou qui était là (``witness``) ; à une amie sans ce lien, elle
+    #: se raconte sans nom (``untied_level``, ADR 0092). ``False`` : la règle d'avant, une amie entendait le
+    #: personnel nommé (ADR 0058). Ses projets, ses buts, ce qui se passe dans son monde gardent la règle d'une amie
+    named_needs_tie: bool = True
     evidence: Mapping[str, float] = field(default_factory=lambda: EVIDENCE)
     counter_evidence: Mapping[str, float] = field(default_factory=lambda: COUNTER_EVIDENCE)
 
@@ -254,7 +262,8 @@ def disclosable(
     ``tied`` : l'interlocuteur a un lien avec la personne concernée (ils se
     sont parlé ensemble devant elle, ou cette personne l'a nommé elle-même) —
     une proche qui a ce lien peut recevoir sa confidence ; une proche sans ce
-    lien, l'anecdote seulement (ADR 0058).
+    lien, l'anecdote seulement (ADR 0058). La vie d'autrui lue dans sa mémoire
+    est plus étroite encore sans ce lien (``untied``, ADR 0092).
     La chaleur seule n'ouvre rien sur autrui à une inconnue : il faut au moins
     la connaître.
     """
@@ -274,16 +283,51 @@ def disclosable(
     return Sensitivity.PERSONAL
 
 
+def untied(certainty: float, trust: ChannelTrust, *, closeness: str = "", warmth: float = 0.0, public: bool = False,
+           policy: TrustPolicy = POLICY) -> Sensitivity:
+    """Ce qu'elle peut dire **nommément** de la vie de quelqu'un à qui n'a aucun lien prouvé avec lui et n'était pas
+    là (ADR 0092) : l'anodin, rien de plus — le reste, elle le raconte sans nom (``veiled``) ou le garde. Une amie de
+    Mika n'est pas une amie d'Alice. ``named_needs_tie`` à ``False`` rend la règle d'une amie (ADR 0058)."""
+    level = disclosable(certainty, trust, closeness=closeness, warmth=warmth, public=public, policy=policy)
+    if trust is ChannelTrust.INTERNAL or not policy.named_needs_tie:
+        return level
+    return min(level, Sensitivity.ANODYNE)
+
+
+def veiled(certainty: float, trust: ChannelTrust, *, closeness: str = "", public: bool = False, owner: bool = False,
+           policy: TrustPolicy = POLICY) -> Sensitivity:
+    """Ce qu'elle peut raconter d'autrui **sans nommer personne** à qui n'a aucun lien connu avec la personne (ADR
+    0091) : rien de plus que l'anodin dans un salon, en public, ou à qui elle n'est pas sûre de connaître ; le
+    personnel à quelqu'un qu'elle connaît ; une confidence à une amie, une proche, sa propriétaire, dont elle est
+    sûre. Jamais un secret — ce n'est pas un niveau : le verdict du récit sans nom l'écarte."""
+    if trust is ChannelTrust.INTERNAL:
+        return Sensitivity.CONFIDENCE
+    if public or trust is ChannelTrust.PUBLIC or certainty < policy.private_threshold:
+        return Sensitivity.ANODYNE
+    rank = CLOSENESS_RANK["close"] if owner else closeness_rank(closeness)
+    if rank >= CLOSENESS_RANK["friend"] and certainty >= policy.confidence_threshold:
+        return Sensitivity.CONFIDENCE
+    if rank >= CLOSENESS_RANK["acquaintance"]:
+        return Sensitivity.PERSONAL
+    return Sensitivity.ANODYNE
+
+
 @dataclass(frozen=True, slots=True)
 class Disclosure:
-    """Le niveau d'un tour, en trois facettes — ce qu'elle peut dire d'autrui ;
-    quand l'interlocuteur était là (témoin) ; quand il a un lien avec la
-    personne concernée (``tied``) —, plus la porte de sa propre fiche."""
+    """Le niveau d'un tour, en cinq facettes — ce qu'elle peut dire d'autrui
+    (ses projets, ses buts, son monde : la règle d'une amie) ; quand
+    l'interlocuteur était là (témoin) ; quand il a un lien avec la personne
+    concernée (``tied``) ; ce qu'elle peut dire nommément de la vie de
+    quelqu'un à qui n'a ni lien avec lui ni n'était là (``untied_level``, ADR
+    0092) ; ce qu'elle peut en raconter sans nommer personne (``veiled_level``,
+    ADR 0091) —, plus la porte de sa propre fiche."""
 
     level: Sensitivity = Sensitivity.NONE
     witness_level: Sensitivity = Sensitivity.NONE
     own_file: bool = False
     tied_level: Sensitivity = Sensitivity.NONE
+    veiled_level: Sensitivity = Sensitivity.NONE
+    untied_level: Sensitivity = Sensitivity.NONE
 
     def admits(self, sensitivity: Sensitivity | int | str, *, witness: bool = False, tied: bool = False) -> bool:
         limit = self.witness_level if witness else self.level
@@ -300,7 +344,8 @@ class Disclosure:
 #: Le repli du bord, sur une panne : rien sur personne d'autre.
 CLOSED = Disclosure()
 #: Un tour interne (personne n'écoute) : toute sa mémoire.
-EVERYTHING = Disclosure(Sensitivity.CONFIDENCE, Sensitivity.CONFIDENCE, True, Sensitivity.CONFIDENCE)
+EVERYTHING = Disclosure(Sensitivity.CONFIDENCE, Sensitivity.CONFIDENCE, True, Sensitivity.CONFIDENCE,
+                        Sensitivity.CONFIDENCE, Sensitivity.CONFIDENCE)
 
 
 def decide(
@@ -310,6 +355,7 @@ def decide(
     closeness: str = "",
     warmth: float = 0.0,
     public: bool = False,
+    owner: bool = False,
     policy: TrustPolicy = POLICY,
 ) -> Disclosure:
     common = {"closeness": closeness, "warmth": warmth, "public": public, "policy": policy}
@@ -318,6 +364,8 @@ def decide(
         witness_level=disclosable(certainty, trust, witness=True, **common),
         own_file=may_disclose_private(certainty, trust, policy) and not public,
         tied_level=disclosable(certainty, trust, tied=True, **common),
+        veiled_level=veiled(certainty, trust, closeness=closeness, public=public, owner=owner, policy=policy),
+        untied_level=untied(certainty, trust, **common),
     )
 
 
@@ -371,20 +419,22 @@ def describe_fr(certainty: float, trust: ChannelTrust, name: str = "") -> str:
 
 def hearable(about: tuple[str, ...], sensitivity: int, interlocutor: str | None, level: int, witness_level: int,
              own_file: bool, *, tied_level: int = 0, ties: Collection[str] = (),
-             presumed: Callable[[str], str] | None = None) -> bool:
+             presumed: Callable[[str], str] | None = None, untied_level: int | None = None) -> bool:
     """Ce qu'on peut dire devant une audience : ce qui ne concerne personne
     d'identifié passe s'il est anodin ou si l'audience peut l'entendre (un
     mail reçu n'est pas à tout le monde) ; ce qui ne concerne que
     l'interlocuteur, s'il est anodin ou si sa fiche est ouverte ; ce qui
     concerne d'autres, jusqu'au niveau de l'audience (le niveau « témoin »
     quand l'interlocuteur en est aussi, le niveau « lié » quand il a un lien
-    avec chacune des autres personnes concernées — ``ties``)."""
+    avec chacune des autres personnes concernées — ``ties``). ``untied_level`` :
+    quand c'est la vie d'autrui qu'on lit (une pensée, un rêve), le niveau de qui
+    n'a aucun lien avec elles (ADR 0092)."""
     if not about:
         return sensitivity <= max(Sensitivity.ANODYNE, level)
     others = [a for a in about if a != interlocutor]
     if not others:
         return sensitivity <= Sensitivity.ANODYNE or own_file
-    limit = witness_level if interlocutor in about else level
+    limit = witness_level if interlocutor in about else (level if untied_level is None else untied_level)
     if tied_to(others, ties, presumed):
         limit = max(limit, tied_level)
     return sensitivity <= limit
@@ -439,7 +489,11 @@ def admissible(about: tuple[str, ...], sensitivity: int, interlocutor: str | Non
     witness = interlocutor is not None and (interlocutor in heard_by if known else interlocutor in about)
     if secret:  # « dis-le à personne » : jamais hors de qui l'a confié
         return Verdict(False, others, witness, int(sensitivity), tellers, True)
-    limit = audience.witness_level if witness else audience.level
+    # la vie d'autrui ne se dit nommément qu'à qui a un lien avec elle ou était là (ADR 0092) ; ce que quelqu'un a dit
+    # de l'interlocuteur lui-même, c'est sa vie à lui : le redire suit la règle d'une amie
+    concerned = any(a != interlocutor and not (presumed is not None and a.startswith("name:")
+                                               and presumed(a) == interlocutor) for a in about)
+    limit = audience.witness_level if witness else audience.untied if concerned else audience.level
     tied = False
     if sensitivity > limit and interlocutor is not None and tied_to(others, audience.ties, presumed):
         # il a un lien avec chacune (ils se sont parlé ensemble, ou elle l'a nommé elle-même) : une proche peut
@@ -452,11 +506,13 @@ def private_to(person: str) -> Audience:
     """L'audience la plus étroite d'un texte écrit pour une personne, en privé (son portrait, ce qu'elle prépare
     pour elle) : sa fiche est ouverte, rien d'autrui au-delà de l'anodin, aucun lien."""
     return Audience(persons=(person,), public=False, level=int(Sensitivity.ANODYNE),
-                    witness_level=int(Sensitivity.ANODYNE), private_ok=True)
+                    witness_level=int(Sensitivity.ANODYNE), private_ok=True, untied_level=int(Sensitivity.ANODYNE))
 
 
 #: L'audience la plus large : un texte qui peut se montrer n'importe où, salons compris (son récit d'elle-même).
-PUBLIC_FLOOR = Audience(public=True, level=int(Sensitivity.ANODYNE), witness_level=int(Sensitivity.ANODYNE))
+PUBLIC_FLOOR = Audience(public=True, level=int(Sensitivity.ANODYNE), witness_level=int(Sensitivity.ANODYNE),
+                        untied_level=int(Sensitivity.ANODYNE))
 #: Personne n'écoute : elle pense pour elle (une pensée, un rêve, son journal intime au moment de l'écrire).
 INTERNAL = Audience(public=False, level=int(Sensitivity.CONFIDENCE), witness_level=int(Sensitivity.CONFIDENCE),
-                    private_ok=True, tied_level=int(Sensitivity.CONFIDENCE), owner=True)
+                    private_ok=True, tied_level=int(Sensitivity.CONFIDENCE), owner=True,
+                    untied_level=int(Sensitivity.CONFIDENCE))

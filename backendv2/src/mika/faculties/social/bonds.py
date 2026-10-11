@@ -55,6 +55,7 @@ from mika.faculties.social.faculty import (
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
+from mika.vocab import causes
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
@@ -198,9 +199,13 @@ class Bonds:
 
 
 @SOCIAL.appraisal(c.BOND_SHIFTED)
-def _bond_felt(e: Any, cx: Any) -> Appraisal:
-    """S'apercevoir qu'un lien s'est approfondi : un peu de joie ; qu'il s'est refroidi : un peu de mélancolie."""
+def _bond_felt(e: Any, cx: Any) -> list[Appraisal]:
+    """S'apercevoir qu'un lien s'est approfondi : un peu de joie ; qu'il s'est refroidi : un peu de mélancolie — pour
+    elle, et envers la personne."""
     d = e.data
     if _rank(d.after) > _rank(d.before):
-        return Appraisal(Emotion.HAPPY, WARMING, reason="un lien qui s'approfondit", relational=True)
-    return Appraisal(Emotion.MELANCHOLIC, COOLING, reason="un lien qui se refroidit", relational=True)
+        emotion, intensity, reason = Emotion.HAPPY, WARMING, causes.BOND_WARMING
+    else:
+        emotion, intensity, reason = Emotion.MELANCHOLIC, COOLING, causes.BOND_COOLING
+    return [Appraisal(emotion, intensity, reason=reason, relational=True),
+            Appraisal(emotion, intensity, toward=d.person, reason=reason, relational=True)]

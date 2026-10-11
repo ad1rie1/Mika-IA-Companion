@@ -105,6 +105,8 @@ class Item:
     until: int | None = None
     precision: str = ""
     likelihood: float | None = None
+    #: la même chose, racontée sans qu'on puisse reconnaître la personne (ADR 0091) ; vide : jamais sans nom
+    veiled: str = ""
 
     @classmethod
     def of(cls, row: dict[str, Any]) -> Item:
@@ -126,6 +128,7 @@ class Item:
             valid_until=None if row.get("valid_until") is None else int(row["valid_until"]),
             felt=facets(json.loads(row.get("felt") or "[]")), empathy=facets(json.loads(row.get("empathy") or "[]")),
             until=row.get("until"), precision=str(row.get("precision") or ""), likelihood=row.get("likelihood"),
+            veiled=str(row.get("veiled") or ""),
         )
 
 

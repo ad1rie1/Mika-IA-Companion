@@ -23,11 +23,14 @@ from __future__ import annotations
 from mika.contracts import body as body_c
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
+from mika.contracts import others as others_c
 from mika.contracts import presence as presence_c
 from mika.contracts import social as social_c
+from mika.contracts import transcript as transcript_c
 from mika.faculties.goals.faculty import (
     GOALS,
     Goal,
+    GoalsParams,
     GoalsState,
     budget,
     desire,
@@ -226,9 +229,22 @@ def share_brief(g: Goal, person: str, address: str, level: str, frame: Frame) ->
     return phrase("goals.brief.share.mention", who=who)
 
 
+def worry_due(g: Goal, person: str, frame: Frame, p: GoalsParams) -> bool:
+    """Ce qu'elle a pensé de ce qu'une amie lui a confié se dit en prenant de ses nouvelles — et prendre de ses
+    nouvelles attend : pas pendant la conversation ni juste après (``share_worry_after_us`` après son dernier
+    message), pas avant la prise de nouvelles si elle s'inquiète pour elle (``others.CHECK_IN_AT`` : les deux
+    partent ensemble, une seule fois), et plus du tout si elle lui a reparlé depuis (elle a eu sa place)."""
+    handles = frame.get(identity_c.HANDLES(person)) or (person,)
+    if max(frame.get(transcript_c.LAST_TO(h)) for h in handles) > g.closed_at:
+        return False
+    heard = max(frame.get(transcript_c.LAST_FROM(h)) for h in handles)
+    return frame.now >= max(heard + p.share_worry_after_us, frame.get(others_c.CHECK_IN_AT(person)))
+
+
 @GOALS.propose(kinds=[Kind.INITIATIVE], reasons={c.SHARE: (0.0, 10.0)},
                reads=[identity_c.OWNERS, identity_c.IS_OWNER, social_c.CLOSENESS, identity_c.HANDLES,
-                      identity_c.REACHABLE, presence_c.PRESENT, identity_c.IDENTITY])
+                      identity_c.REACHABLE, presence_c.PRESENT, identity_c.IDENTITY, transcript_c.LAST_FROM,
+                      transcript_c.LAST_TO, others_c.CHECK_IN_AT])
 def _share(s: GoalsState, frame: Frame) -> list[Candidate]:
     p = params(frame.env.params_of("goals", frame.root))
     out = []
@@ -243,6 +259,8 @@ def _share(s: GoalsState, frame: Frame) -> list[Candidate]:
         if chosen is None:
             continue
         person, address, level = chosen
+        if worry_of(g, person) and not worry_due(g, person, frame, p):
+            continue
         brief = share_brief(g, person, address, level, frame)
         out.append(Candidate(
             Kind.INITIATIVE, address, c.SHARE, p.share_evidence, resources=frozenset({floor(address)}),

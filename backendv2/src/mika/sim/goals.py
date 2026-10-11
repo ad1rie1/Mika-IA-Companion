@@ -1,8 +1,9 @@
 """Les scénarios de M6 : ce qu'elle entreprend (ses projets : ``sim/projects.py``).
 
 - **S09** une exploration : une inquiétude de sa propriétaire devient un but ;
-  elle y avance seule, le mène à bout avec une preuve, en est fière, son
-  estime monte — et elle le lui raconte quand il revient ;
+  elle y avance seule, le mène à bout avec une preuve — une réflexion, qui
+  l'apaise sans être un exploit : son estime ne bouge pas (ADR 0096) — et
+  elle le lui raconte quand il revient ;
 - **S10** un but bloqué : elle prétend avoir fini sans rien faire — aucune
   fierté ; une exploration (ce qu'elle a remarqué dans ses flux) à bout de
   pas bloque (frustration, estime en baisse, « Je bloque sur… ») ; repenser à
@@ -94,9 +95,9 @@ async def s09(driver: Driver, rng: RngTree, res: Result) -> None:
                          and any(r.data.proven and r.data.tools for r in reports),
                          "« fini » ne se croit qu'avec un outil qui a produit quelque chose",
                          f"{[(r.data.verdict, r.data.tools) for r in reports]}"),
-        expect.band("son estime monte", esteem_after - esteem_before,
-                    "mener quelque chose à bout redonne confiance — un peu, pour une seule séance (ADR 0036)",
-                    lo=0.01, hi=0.06),
+        expect.band("son estime ne bouge pas", esteem_after - esteem_before,
+                    "repenser à l'inquiétude de quelqu'un apaise ; ce n'est pas un exploit (ADR 0096)",
+                    lo=-0.005, hi=0.005),
         expect.invariant("raconté à qui ça concerne, quand il revient", bool(to_him) and bool(said)
                          and "Ce que ta réflexion t'a apporté" in to_him[0][1],
                          "son inquiétude à lui : elle prend de ses nouvelles à son retour, avec ce que sa réflexion lui "

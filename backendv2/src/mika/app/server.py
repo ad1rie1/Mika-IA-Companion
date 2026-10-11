@@ -309,6 +309,11 @@ class Live:
         return problems
 
 
+#: Ce qu'on attend au plus le modèle de plongements avant de la faire vivre (``kernel.live`` : reprises, premiers
+#: messages) — au-delà, elle vit sans, et le premier rappel l'attendra comme avant.
+WARM_WAIT_S = 30.0
+
+
 async def _warm(embedder: object) -> None:
     """Charge le modèle de plongements s'il sait le faire (``warm``) ; un échec n'empêche rien : le premier rappel
     le chargera, comme avant."""
@@ -430,6 +435,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         mcp.start()  # chaque serveur actif est joint en tâche de fond
         hub.start()
         world_hub.start()
+        # sa mémoire prête avant sa première réponse : un message qui attendait au démarrage, une reprise, ne passent
+        # pas sans souvenirs parce que le modèle de plongements finissait de se charger (borné : ``WARM_WAIT_S``)
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(warming), WARM_WAIT_S)
         await kernel.live()
         try:
             yield

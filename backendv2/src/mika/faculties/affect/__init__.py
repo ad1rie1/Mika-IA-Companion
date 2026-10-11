@@ -28,11 +28,12 @@ from mika.contracts import social as social_c
 from mika.faculties.affect import physics as ph
 from mika.faculties.affect import prose
 from mika.faculties.affect.params import AffectParams, derive
-from mika.kernel.arbitration import Anyone, Candidate
+from mika.kernel.arbitration import Anyone, Candidate, Modulation, RowView
 from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.vocab import affect as A
+from mika.vocab import causes
 from mika.vocab.affect import Declared, Emotion
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
@@ -50,7 +51,9 @@ class AffectState:
 AFFECT = Faculty("affect", state=AffectState, init=lambda p: AffectState(), params=AffectParams, derive=derive,
                  # 4 : ses réducteurs lisent la proximité, dont la règle a changé (ADR 0058) — instantané et genèse
                  # ne donnaient plus la même tranche sur une installation existante (audit du lot L2)
-                 state_version=4, retired_params=("declared_window_us",))
+                 # 5 : ses balises ont des facettes, qui visent ensemble (ADR 0093) ; ce qu'une personne lui fait
+                 # vivre touche sa posture envers elle ; des excuses pardonnent sous chacune de ses adresses (ADR 0094)
+                 state_version=5, retired_params=("declared_window_us",))
 
 #: Ni une amie ni une proche : une hostilité forte y laisse de la méfiance.
 _DISTANT = frozenset({social_c.STRANGER, social_c.ACQUAINTANCE})
@@ -75,22 +78,25 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     p = _params(cx.params)
     cw = _clockwork(cx)
     key = cx.facts.get(identity_c.PERSON(d.target)) if d.target else ""
-    level = cx.facts.get(social_c.CLOSENESS(key)) if d.target and is_identifiable(d.target) else ""
+    # quelqu'un qu'elle ne peut pas reconnaître (une adresse jetable) la touche comme une inconnue, jamais davantage
+    level = (cx.facts.get(social_c.CLOSENESS(key)) if is_identifiable(d.target) else social_c.STRANGER) \
+        if d.target else ""
     mood = ph.advance_mood(s.mood, e.at, p, cw)
     gain = ph.mood_gain(declared.intensity, p)
     if level:
         # ce qu'un inconnu lui fait vivre la touche moins que ce que vit un proche
         gain = min(p.mood_gain_cap, gain * p.bleed(level))
     if gain > 0:
-        mood = ph.push_mood(mood, ph.mood_target(mood, declared.emotion, declared.intensity, p), gain, p,
+        # toutes ses facettes (« triste 0,6, anxieuse 0,3 »), pas seulement la plus forte (ADR 0093)
+        mood = ph.push_mood(mood, ph.mood_target_of(mood, declared, p), gain, p,
                             ph.Mark(e.at, declared.emotion.value, "talk", key))
     s = replace(s, mood=mood)
     if not d.target:
         return s  # un monologue : seule l'humeur générale bouge
     stance = s.stances.get(key) or ph.new_stance(e.at, p, cw)
     stance = ph.advance_stance(stance, e.at, p, cw)
-    stance = ph.push_stance(stance, ph.stance_target(stance, declared.emotion, declared.intensity),
-                            ph.resonant_gain(A.ANCHORS[declared.emotion], p))
+    stance = ph.push_stance(stance, ph.stance_target_of(stance, declared),
+                            ph.resonant_gain(ph.blend(A.ORIGIN, declared.all), p))
     recent = (*stance.recent, (e.at, declared.emotion.value))[-ph.RECENT_IMPULSES:]
     stance = replace(stance, declared=declared.encode(), declared_at=e.at, declared_reply=d.kind == Kind.REPLY,
                      recent=recent)
@@ -133,7 +139,7 @@ def _feel(s: AffectState, appraisals: tuple[A.Appraisal, ...], e, cx) -> AffectS
 _FORGIVEN_FULLY = frozenset({social_c.FRIEND, social_c.CLOSE})
 
 
-@AFFECT.reducer(self_c.TOUCHED, reads=[body_c.RHYTHM, social_c.CLOSENESS])
+@AFFECT.reducer(self_c.TOUCHED, reads=[body_c.RHYTHM, social_c.CLOSENESS, identity_c.HANDLES])
 def _apologized(s: AffectState, e, cx) -> AffectState:
     """Des excuses (lues par ``self`` dans la forme, une fois par jour et par
     personne, quand il y avait de quoi pardonner) : ce que la relation avait
@@ -143,14 +149,16 @@ def _apologized(s: AffectState, e, cx) -> AffectState:
     d = e.data
     if d.kind != self_c.APOLOGIZED or not d.person:
         return s
-    stored = s.stances.get(d.person)
-    if stored is None:
-        return s
     p = _params(cx.params)
     share = p.apology_heal * (1.0 if cx.facts.get(social_c.CLOSENESS(d.person)) in _FORGIVEN_FULLY
                               else p.apology_distant)
-    stance = ph.forgive(ph.advance_stance(stored, e.at, p, _clockwork(cx)), share, e.at)
-    return replace(s, stances=s.stances.set(d.person, stance))
+    # ce qu'elle lui gardait sous chacune de ses adresses (reliées depuis à elle)
+    for key in sorted({d.person, *_handles(cx, d.person)}):
+        stored = s.stances.get(key)
+        if stored is not None:
+            stance = ph.forgive(ph.advance_stance(stored, e.at, p, _clockwork(cx)), share, e.at)
+            s = replace(s, stances=s.stances.set(key, stance))
+    return s
 
 
 @AFFECT.reducer(body_c.FELL_ASLEEP, reads=[body_c.RHYTHM])
@@ -237,13 +245,25 @@ def mood_reading(s: AffectState, now: int, p: AffectParams, cw: ph.Clockwork, ne
                          _lingering(m, fond, now, p, cw), over(cause, at, needs))
 
 
-def stance_reading(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork) -> c.StanceReading:
-    stored = s.stances.get(person)
+def stored_stances(s: AffectState, person: str, handles: tuple[str, ...] = ()) -> list[ph.Stance]:
+    """Ses postures envers une personne, sous chacune de ses adresses (``identity.HANDLES``) : une adresse reliée
+    depuis à elle garde ce qu'elle avait vécu avec elle (comme ``others.model_of``)."""
+    return [s.stances[k] for k in sorted({person, *handles}) if k in s.stances]
+
+
+def _now_toward(s: AffectState, person: str, handles: tuple[str, ...], now: int, p: AffectParams,
+                cw: ph.Clockwork) -> ph.Stance | None:
+    parts = stored_stances(s, person, handles)
+    return ph.joined([ph.advance_stance(st, now, p, cw) for st in parts]) if parts else None
+
+
+def stance_reading(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork,
+                   handles: tuple[str, ...] = ()) -> c.StanceReading:
     ref = ph.reference(p, cw)
-    if stored is None:
+    st = _now_toward(s, person, handles, now, p, cw)
+    if st is None:
         base = ph.common_home(now, p, cw)
         return c.StanceReading(person, base, base, Emotion.NEUTRAL, 0.0, None, None, True, False, ref)
-    st = ph.advance_stance(stored, now, p, cw)
     rest, position = st.rest.position, st.position
     felt, felt_i = A.felt(position, rest)
     quiet = A.distance(position, rest) < p.rest_tolerance
@@ -265,69 +285,75 @@ def _mood(s: AffectState, cx) -> c.MoodReading:
     return mood_reading(s, cx.now, _params(cx.params), _clockwork(cx), cx.facts.get(needs_c.NEEDS))
 
 
-@AFFECT.fact(c.STANCE, reads=[body_c.RHYTHM])
+def _handles(cx: Any, person: str) -> tuple[str, ...]:
+    return tuple(cx.facts.get(identity_c.HANDLES(person)) or ())
+
+
+@AFFECT.fact(c.STANCE, reads=[body_c.RHYTHM, identity_c.HANDLES])
 def _stance(s: AffectState, cx, person: str) -> c.StanceReading:
-    return stance_reading(s, person, cx.now, _params(cx.params), _clockwork(cx))
+    return stance_reading(s, person, cx.now, _params(cx.params), _clockwork(cx), _handles(cx, person))
 
 
-def regard(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork) -> float:
+def regard(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork,
+           handles: tuple[str, ...] = ()) -> float:
     """Ce que cette personne a installé, signé (voir ``contracts.affect.REGARD``) :
-    mesuré depuis son repos moyen, jamais depuis l'heure qu'il est."""
-    stored = s.stances.get(person)
-    if stored is None:
+    mesuré depuis son repos moyen, jamais depuis l'heure qu'il est — toutes ses adresses réunies."""
+    parts = stored_stances(s, person, handles)
+    if not parts:
         return 0.0
-    anchor, attachment = ph.relation_at(stored, now, p)
+    anchor, attachment, _wary = ph.relation_joined(parts, now, p)
     return ph.regard_of(anchor, attachment, ph.reference(p, cw), p)
 
 
-def hostility(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork) -> float:
-    stored = s.stances.get(person)
-    if stored is None:
+def hostility(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork,
+              handles: tuple[str, ...] = ()) -> float:
+    parts = stored_stances(s, person, handles)
+    if not parts:
         return 0.0
-    anchor, attachment = ph.relation_at(stored, now, p)
-    return ph.hostility_of(anchor, attachment, stored.wary_until, now, ph.reference(p, cw), p)
+    anchor, attachment, wary = ph.relation_joined(parts, now, p)
+    return ph.hostility_of(anchor, attachment, wary, now, ph.reference(p, cw), p)
 
 
-def bond(s: AffectState, person: str, now: int, p: AffectParams) -> float:
-    stored = s.stances.get(person)
-    return 0.0 if stored is None else ph.relation_at(stored, now, p)[1]
+def bond(s: AffectState, person: str, now: int, p: AffectParams, handles: tuple[str, ...] = ()) -> float:
+    parts = stored_stances(s, person, handles)
+    return ph.relation_joined(parts, now, p)[1] if parts else 0.0
 
 
-@AFFECT.fact(c.HOSTILITY, reads=[body_c.RHYTHM])
+@AFFECT.fact(c.HOSTILITY, reads=[body_c.RHYTHM, identity_c.HANDLES])
 def _hostility(s: AffectState, cx, person: str) -> float:
-    return hostility(s, person, cx.now, _params(cx.params), _clockwork(cx))
+    return hostility(s, person, cx.now, _params(cx.params), _clockwork(cx), _handles(cx, person))
 
 
-@AFFECT.fact(c.WARMTH, reads=[body_c.RHYTHM])
+@AFFECT.fact(c.WARMTH, reads=[body_c.RHYTHM, identity_c.HANDLES])
 def _warmth(s: AffectState, cx, person: str) -> float:
-    return max(0.0, regard(s, person, cx.now, _params(cx.params), _clockwork(cx)))
+    return max(0.0, regard(s, person, cx.now, _params(cx.params), _clockwork(cx), _handles(cx, person)))
 
 
-@AFFECT.fact(c.REGARD, reads=[body_c.RHYTHM])
+@AFFECT.fact(c.REGARD, reads=[body_c.RHYTHM, identity_c.HANDLES])
 def _regard(s: AffectState, cx, person: str) -> float:
-    return regard(s, person, cx.now, _params(cx.params), _clockwork(cx))
+    return regard(s, person, cx.now, _params(cx.params), _clockwork(cx), _handles(cx, person))
 
 
-@AFFECT.fact(c.BOND)
+@AFFECT.fact(c.BOND, reads=[identity_c.HANDLES])
 def _bond(s: AffectState, cx, person: str) -> float:
-    return bond(s, person, cx.now, _params(cx.params))
+    return bond(s, person, cx.now, _params(cx.params), _handles(cx, person))
 
 
-def face_reading(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork) -> c.Face:
+def face_reading(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork,
+                 handles: tuple[str, ...] = ()) -> c.Face:
     m = mood_reading(s, now, p, cw)  # le visage ne dit pas de cause
-    stored = s.stances.get(person)
-    if stored is None:
+    st = _now_toward(s, person, handles, now, p, cw)
+    if st is None:
         position, declared = ph.common_home(now, p, cw), None
     else:
-        st = ph.advance_stance(stored, now, p, cw)
         position, declared = st.position, ph.fresh(st, now, p)
     label, intensity, parts, person_part, mood_part = ph.face(position, m.position, p.background, declared)
     return c.Face(label, intensity, tuple(parts), person_part, mood_part)
 
 
-@AFFECT.fact(c.FACE, reads=[body_c.RHYTHM])
+@AFFECT.fact(c.FACE, reads=[body_c.RHYTHM, identity_c.HANDLES])
 def _face(s: AffectState, cx, person: str) -> c.Face:
-    return face_reading(s, person, cx.now, _params(cx.params), _clockwork(cx))
+    return face_reading(s, person, cx.now, _params(cx.params), _clockwork(cx), _handles(cx, person))
 
 
 # ── Prompt ────────────────────────────────────────────────────────────────
@@ -364,19 +390,43 @@ def _stance_section(s: AffectState, frame: Frame, enrich: Any) -> str | None:
 # ── Initiative ────────────────────────────────────────────────────────────
 
 
+def overflow_evidence(m: c.MoodReading, p: AffectParams) -> float:
+    """Ce que pousse à parler une émotion du moment qui déborde (0 : elle ne déborde pas)."""
+    if m.overflow <= p.overflow_floor:
+        return 0.0
+    span = max(1e-9, 1.0 - p.overflow_floor)
+    return p.overflow_max_evidence * min(1.0, (m.overflow - p.overflow_floor) / span)
+
+
 @AFFECT.propose(kinds=[Kind.INITIATIVE], reasons={c.MOOD_OVERFLOW: (0.0, 4.0)}, reads=[c.MOOD])
 def _overflow(s: AffectState, frame: Frame) -> list[Candidate]:
     """Une émotion du moment qui déborde pousse à parler — à qui que ce soit de
     présent. Le fond d'une journée, lui, colore ; il ne pousse pas."""
     p = _params(frame.env.params_of("affect", frame.root))
     m = frame.get(c.MOOD)
-    if m.overflow <= p.overflow_floor:
+    evidence = overflow_evidence(m, p)
+    if evidence <= 0:
         return []
-    span = max(1e-9, 1.0 - p.overflow_floor)
-    evidence = p.overflow_max_evidence * min(1.0, (m.overflow - p.overflow_floor) / span)
     brief = phrase("affect.overflow.brief", feeling=A.FR[m.felt])
     return [Candidate(Kind.INITIATIVE, Anyone.ANY, c.MOOD_OVERFLOW, evidence,
                       args=FrozenDict({"brief:affect": brief}))]
+
+
+@AFFECT.modulate(kinds=[Kind.INITIATIVE], reads=[c.MOOD, identity_c.PERSON])
+def _not_to_whom_upset_her(s: AffectState, frame: Frame, row: RowView) -> Modulation:
+    """Ce qu'un échange avec quelqu'un lui a laissé de sombre (colère, peine) déborde vers qui est là — pas vers
+    cette personne-là : son humeur ne la pousse pas à lui réécrire (la posture envers elle dit déjà ce qu'elle en
+    ressent ; une autre raison de lui écrire, une inquiétude, un rappel, garde son poids). Une joie qu'elle lui doit,
+    elle, peut aller vers elle."""
+    if c.MOOD_OVERFLOW not in row.reasons or row.target in (Anyone.ANY, Anyone.NONE):
+        return Modulation()
+    m = frame.get(c.MOOD)
+    if m.cause != causes.TALK or not m.cause_person or A.valence(m.felt) >= 0:
+        return Modulation()
+    if (frame.get(identity_c.PERSON(row.target)) or row.target) != m.cause_person:
+        return Modulation()
+    cut = overflow_evidence(m, _params(frame.env.params_of("affect", frame.root)))
+    return Modulation(shift=-cut) if cut > 0 else Modulation()
 
 
 # ── Inspection ────────────────────────────────────────────────────────────

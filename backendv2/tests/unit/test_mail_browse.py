@@ -105,8 +105,9 @@ def test_a_sent_message_copied_to_inbox_keeps_its_outgoing_role(archive):
 def test_rss_pages_filter_in_sql_and_keep_counts_consistent(tmp_path):
     feeds = HttpFeeds(lambda: [], tmp_path / "feeds.db")
     try:
-        feeds._db.executemany("INSERT INTO entries VALUES(?,?,?,?,?,?,?,?,?)", [
-            (str(i), "https://example.test/rss", "Création", f"Été {i}", "https://example.test/article", f"Résumé {i}", i, 1, i)
+        feeds._db.executemany("INSERT INTO entries VALUES(?,?,?,?,?,?,?,?,?,?)", [
+            (str(i), "https://example.test/rss", "Création", f"Été {i}", "https://example.test/article", f"Résumé {i}", i, 1, i,
+             0)
             for i in range(555)])
         feeds._db.commit()
         page = feeds.entries_page("creation", "ete", 23)

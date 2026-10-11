@@ -17,19 +17,17 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
-import pytest
-
 from mika.contracts import attention as attention_c
 from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.faculties.others.faculty import OthersParams, _read_felt
-from mika.faculties.others.tone import measure
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.ports.llm import LLMResponse
 from mika.sim.clock import run_virtual
 from mika.vocab.affect import Emotion
 from tests.fixtures.mika import at_paris, befriend, boot, build, said
+from tests.fixtures.reading import Reads
 
 P = OthersParams()
 LIGHT = ["haha trop bien", "super journée, trop cool", "j'ai hâte de te raconter haha", "trop bien ce film !",
@@ -42,66 +40,34 @@ GRUMPY = ["j'en ai marre, je suis épuisée", "encore une journée nulle, j'en a
 # ── Le ton : ce que les mots disent vraiment ──────────────────────────────
 
 
-@pytest.mark.parametrize("text", ["je veux mourir", "ma mère est décédée ce matin", "j'ai un cancer",
-                                  "je me suis fait virer", "il m'a quittée hier soir",
-                                  "mon père est à l'hôpital depuis ce matin"])
-def test_grave_events_read_heavy(text):
-    tone = measure(text)
-    assert tone.grave and tone.valence <= -0.7, (text, tone)
-
-
-@pytest.mark.parametrize("text,lo,hi", [
-    ("je suis fatiguée, bonne nuit", -0.1, 0.1),  # fatiguée au moment de dormir : rien de lourd
-    ("putain c'est trop bien !!", 0.3, 1.0),  # un juron qui intensifie la joie
-    ("ce film m'a fait pleurer tellement il était beau", -0.25, 1.0),  # des larmes heureuses
-    ("j'étais morte de rire hier", 0.1, 1.0),  # « morte de rire » n'est pas un deuil
-    ("j'en ai marre, je suis épuisée", -1.0, -0.5),  # contrôle : ça, c'est lourd
-])
-def test_what_is_not_heavy_is_not_read_heavy(text, lo, hi):
-    tone = measure(text)
-    assert lo <= tone.valence <= hi and not tone.grave, (text, tone)
-
-
-@pytest.mark.parametrize("text", ["c'est mort pour ce soir, désolée", "mon téléphone est mort", "le projet est mort",
-                                  "je vais mourir de chaud", "j'ai hâte d'en finir avec ce dossier",
-                                  "ma mère va me tuer", "le suicide de Werther, quel livre",
-                                  "j'ai eu un petit accident de café sur mon clavier", "rupture de stock de croissants",
-                                  "j'ai un oral demain, je vais mourir",
-                                  "je vais à un enterrement de vie de garçon samedi",
-                                  "je bosse à l'hôpital ce week-end", "je suis infirmière aux urgences cette nuit",
-                                  "je suis licenciée au club de tennis depuis cinq ans", "je suis cancer ascendant lion",
-                                  "il y a eu un accident sur le périph, je suis coincée",
-                                  "rupture conventionnelle signée, je change de boulot"])
-def test_everyday_hyperboles_are_not_grave_events(text):
-    """Une batterie morte ou « mourir de chaud » n'inquiètent personne : pas de prise de nouvelles pour ça."""
-    assert not measure(text).grave, text
-
-
-@pytest.mark.parametrize("text", ["mon chat est mort cette nuit", "mon grand-père vient de mourir",
-                                  "j'ai envie d'en finir", "j'ai eu un accident de voiture",
-                                  "j'ai eu un accident sur l'autoroute", "mon frère a eu un accident",
-                                  "ma grand-mère est à l'hôpital", "on m'a diagnostiqué un cancer",
-                                  "je suis licencié depuis lundi", "l'enterrement de mon oncle est jeudi"])
-def test_the_same_words_said_of_a_life_are_grave(text):
-    """Contrôle : les mêmes mots, quand ils disent une vie, se lisent graves."""
-    assert measure(text).grave, text
-
-
 # ── De bout en bout ───────────────────────────────────────────────────────
 
 
+#: ce que le modèle lit de chaque message (ADR 0093 : c'est lui qui juge, jamais une liste de mots)
+READS = {
+    **{text: "happy 0.6" for text in LIGHT},
+    **{text: "sad 0.5, frustrated 0.5" for text in GRUMPY},
+    "j'en ai marre, je suis épuisée": "frustrated 0.6, sad 0.4",
+    "ma mère est décédée ce matin": "sad 0.9 | grave : deuil",
+    "ça va mieux, merci d'avoir pensé à moi !": "relieved 0.6, grateful 0.4 | geste : merci",
+}
+
+
 class Script:
-    """Sa réponse : une émotion déclarée par personne (par défaut, contente)."""
+    """Sa réponse : une émotion déclarée par personne (par défaut, contente), et ce que le modèle lit du message
+    (``READS``, « rien » sinon)."""
 
     def __init__(self):
         self.tags: dict[str, str] = {}
+        self.reads = Reads(READS)
 
     def __call__(self, req):
         if req.role in ("extract", "profile", "compact", "narrative"):
             return LLMResponse("{}")
         if req.role == "murmur":
             return LLMResponse("tiens")
-        return LLMResponse(f"d'accord {self.tags.get(req.meta.get('target'), '[EMOTION:happy:0.4]')}")
+        mine = self.tags.get(req.meta.get("target"), "[EMOTION:happy:0.4]")
+        return LLMResponse(f"d'accord {mine}{self.reads.tag(req) if req.role == 'reply' else ''}")
 
 
 def run(tmp_path, scenario, *, start=at_paris(2026, 9, 28, 11, 0)):
@@ -161,7 +127,7 @@ def test_a_grave_event_worries_her_even_from_a_friend_who_always_complains(tmp_p
 
 
 def test_her_own_worried_reply_makes_her_check_in_later(tmp_path):
-    """« Ma grand-mère est partie ce matin » : les mots ne disent rien de lourd,
+    """« Ma grand-mère est partie ce matin » : le modèle n'y lit rien de lourd (« rien »),
     mais elle y répond triste. Elle s'inquiète : quelques heures plus tard, elle
     prend de ses nouvelles — une fois (la prise de nouvelles, ou la pensée
     inquiète qui l'y pousse : le premier geste éteint l'inquiétude, l'autre n'en

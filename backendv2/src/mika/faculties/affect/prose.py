@@ -10,56 +10,15 @@ elle est connue, en termes génériques (jamais le nom d'un tiers) ; sinon
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from types import MappingProxyType
-
 from mika.contracts.affect import MoodReading, StanceReading
 from mika.faculties.affect.params import AffectParams
 from mika.faculties.affect.physics import HOSTILE
 from mika.kernel.clock import HOUR, MINUTE
 from mika.vocab import affect as A
+from mika.vocab import causes
 from mika.vocab.affect import FR, Emotion, intensity_word, partitive
-from mika.vocab.phrasebook import phrase
+from mika.vocab.phrasebook import family, phrase
 
-#: La cause d'une humeur, par code (``Mark.cause``) → sa phrase dans sa voix (``affect.cause.…``). Générique : la
-#: section se montre à n'importe qui. Deux codes peuvent dire la même chose (une seule phrase).
-CAUSES: Mapping[str, str] = MappingProxyType({
-    "retour": "came_back",
-    "réponse": "answered",
-    "attente comblée": "awaited",
-    "digestion": "digestion",
-    "promesse non tenue": "broken_promise",
-    "sans réponse": "unanswered",
-    "abouti": "achieved",
-    "bloquée": "stuck",
-    "abandon": "gave_up",
-    "objectif de projet abouti": "objective_achieved",
-    "objectif de projet bloqué": "objective_stuck",
-    "surprise": "surprised",
-    "inquiétude": "worried",
-    "rêve": "dream",
-    "lonely": "lonely",
-    "bored": "bored",
-    "elle y repense": "thought_back",
-    "exchange": "exchange",
-    "revision": "revision",
-    "missing": "missing",
-    "concern": "worried",
-    "promise": "promise",
-    "blocked": "stuck",
-    "signal": "signal",
-    "email": "email",
-    "rss": "rss",
-    "camera": "camera",
-    "compagnie": "company",
-    "une rêverie écrite": "daydream",
-    # comment un moment a tourné, et ce qu'elle en attendait (ADR 0086)
-    "tournure": "turned_out",
-    "attente déçue": "let_down",
-    "crainte levée": "fear_lifted",
-    "impatience": "looking_forward",
-    "appréhension": "dreading",
-})
 #: Une cause qui est un état, dite quand cet état a pris fin (quelqu'un est venu te parler depuis) : au passé, et
 #: ce qui en reste au présent — jamais « personne ne t'a parlé » en pleine conversation (HUM-5) ; ``affect.cause_over``.
 CAUSES_OVER = frozenset({"lonely", "bored"})
@@ -79,14 +38,13 @@ def cause_line(cause: str, person: str = "", current: str = "", ended: bool = Fa
     avec la personne à qui elle parle maintenant ; un état qui a pris fin, au passé."""
     if ended and cause in CAUSES_OVER:
         return phrase(f"affect.cause_over.{cause}")
-    if cause == "talk":
+    if cause == causes.TALK:
         if not person:
             return ""
         return phrase("affect.cause.talk_here") if person == current else phrase("affect.cause.talk_elsewhere")
-    if cause.startswith("forge:"):
-        return phrase("affect.cause.forge")
-    key = CAUSES.get(cause)
-    return phrase(f"affect.cause.{key}") if key else ""
+    key = causes.said_as(cause)
+    # la phrase de la cause (``vocab.causes``) ; une cause qui n'en a pas se tait (``test_causes_are_said``)
+    return "" if key in causes.NOT_CAUSES - {"forge"} else family("affect.cause").get(key, "")
 
 
 def _under(parts: list[tuple[Emotion, float]], main: Emotion, *, ratio: float = 0.0, floor: float = 0.0) -> str:

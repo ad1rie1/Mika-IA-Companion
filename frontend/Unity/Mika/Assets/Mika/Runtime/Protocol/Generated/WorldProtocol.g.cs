@@ -276,6 +276,17 @@ namespace Mika.World.Protocol
         [EnumMember(Value = "both")] Both,
     }
 
+    /// <summary>
+    /// Les besoins (faculté ``needs``) qu'une occupation peut nourrir : l'envie de s'exprimer (dessiner), la
+    /// curiosité (feuilleter un livre, regarder dehors). La compagnie ne se trouve pas dans un objet.
+    /// </summary>
+    [JsonConverter(typeof(StringEnumConverter))]
+    public enum Nourished
+    {
+        [EnumMember(Value = "curiosity")] Curiosity,
+        [EnumMember(Value = "expression")] Expression,
+    }
+
     [JsonConverter(typeof(StringEnumConverter))]
     public enum Outcome
     {
@@ -425,7 +436,8 @@ namespace Mika.World.Protocol
 
     /// <summary>
     /// Ce qu'un acteur est en train de faire (lire, regarder dehors, travailler) ; ``until`` : la fin prévue,
-    /// ``None`` pour une occupation qu'on interrompra.
+    /// ``None`` pour une occupation qu'on interrompra ; ``nourishes`` : les besoins qu'elle nourrit, recopiés de
+    /// l'affordance quand elle commence (une observation : éditer l'archétype ensuite ne réécrit pas le passé).
     /// </summary>
     public sealed partial class Activity
     {
@@ -440,6 +452,9 @@ namespace Mika.World.Protocol
 
         [JsonProperty("until")]
         public long? Until { get; set; }
+
+        [JsonProperty("nourishes")]
+        public List<Nourished> Nourishes { get; set; } = new List<Nourished>();
     }
 
     public sealed partial class ActorBusy : Change
@@ -561,7 +576,8 @@ namespace Mika.World.Protocol
     /// ``requires_state`` : les états de l'objet où elle a un sens ; ``to_state`` : l'état qu'elle donne ;
     /// ``held`` : il faut tenir l'objet (lire un livre) ; ``duration_s`` : la durée nominale (``None`` pour une
     /// occupation sans fin prévue) ; ``noise`` : jusqu'où ça s'entend (0 : la pièce, 1 : les pièces voisines) ;
-    /// ``animation`` : la clé d'animation du moteur.
+    /// ``animation`` : la clé d'animation du moteur ; ``nourishes`` : pour une occupation, les besoins qu'elle
+    /// nourrit — le temps qu'elle y passe les comble un peu.
     /// </summary>
     public sealed partial class Affordance
     {
@@ -597,6 +613,9 @@ namespace Mika.World.Protocol
 
         [JsonProperty("animation")]
         public string Animation { get; set; }
+
+        [JsonProperty("nourishes")]
+        public List<Nourished> Nourishes { get; set; } = new List<Nourished>();
     }
 
     /// <summary>

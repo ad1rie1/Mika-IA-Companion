@@ -52,6 +52,9 @@ CHANGED_MIND = "changed_mind"
 HESITATING = "hesitating"
 #: Veto : la personne est en train de lui écrire (``presence.COMPOSING``) — elle attend son message, et y répondra.
 COMPOSING = "composing"
+#: Veto : la personne n'est pas là et ce n'est pas une heure où elle écrit d'habitude (``others.HOURS`` : apprises,
+#: sinon une nuit supposée) — on n'écrit pas à quelqu'un qui dort ; ce qui est dû ou prévient passe outre.
+NOT_REACHABLE = "not_reachable"
 #: Raison (sans preuve) des candidats qui portent la garde « elle s'est ravisée » vers une adresse présente.
 SECOND_THOUGHTS = "second_thoughts"
 

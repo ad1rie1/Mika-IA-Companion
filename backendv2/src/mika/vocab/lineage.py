@@ -111,6 +111,15 @@ def admits(lineage: Lineage, interlocutor: str | None, audience: Audience, *,
                    tied=any(v.tied for v in kept))
 
 
+def without_whom(lineage: Lineage, ceiling: int) -> bool:
+    """Peut-il se dire sans dire de qui (« un concert de jazz », ADR 0087) ? Rien d'interne, et chaque source apprise
+    au moins une fois hors secret, au plus à ``ceiling`` — qui l'a confié, qui l'a entendu n'y comptent pas, puisque
+    personne n'est nommé. Une source sans façon connue ferme."""
+    if lineage.internal_only:
+        return False
+    return all(any(not r.secret and r.sensitivity <= ceiling for r in req.any_of) for req in lineage.requirements)
+
+
 def requirement(item: int | None, about: Sequence[str], sensitivity: int, *, told_by: Sequence[str] = (),
                 heard_by: Sequence[str] = (), secret: bool = False) -> Requirement:
     """L'exigence d'une source qu'elle a apprise d'une seule façon."""

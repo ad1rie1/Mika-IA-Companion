@@ -39,6 +39,7 @@ from mika.ports.llm import LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
 from tests.fixtures.memory import section, seq_of, token
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, disconnect, said
+from tests.fixtures.reading import Reads
 
 LIFE = "CE QUI SE PASSE DANS SA VIE"
 PROMISED = "CE QUE TU LUI AS PROMIS"
@@ -361,8 +362,10 @@ def test_the_day_after_a_loss_she_checks_in_and_does_not_ask_about_the_dentist(t
 
 
 def test_a_grave_message_touches_her_without_her_being_sad(tmp_path):
-    """« mon père est décédé ce matin » : elle le lit grave, quel que soit le ton de sa réponse. Contre-exemple : une
-    réponse à peine triste à un message ordinaire ne fait pas un deuil."""
+    """« mon père est décédé ce matin » : le modèle le lit grave (sa balise ``[EN_FACE: … | grave : deuil]``, ADR 0093),
+    quel que soit le ton de sa réponse. Contre-exemple : une réponse à peine triste à un message ordinaire ne fait pas
+    un deuil."""
+    reads = Reads({"mon père est décédé ce matin": "sad 0.9 | grave : deuil", "j'ai raté mon bus": "frustrated 0.3"})
 
     async def scenario(kernel):
         await befriend(kernel, "ext_1", social_c.FRIEND)
@@ -372,7 +375,7 @@ def test_a_grave_message_touches_her_without_her_being_sad(tmp_path):
         frame = kernel.mind.frame()
         return frame.get(memory_c.HARD_TIMES("ext_1")), frame.get(memory_c.HARD_TIMES("ext_2"))
 
-    grave, ordinary = run(tmp_path, scenario, Script(lambda m, r: "Oh… [EMOTION:sad:0.5]"))
+    grave, ordinary = run(tmp_path, scenario, Script(lambda m, r: f"Oh… [EMOTION:sad:0.5] [EN_FACE: {reads.of(m)}]"))
     assert grave > 0 and ordinary == 0
 
 

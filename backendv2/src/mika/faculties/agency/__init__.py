@@ -346,6 +346,23 @@ def _budget(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
     return restraint(frame, None if row.target in (Anyone.ANY, Anyone.NONE) else row.target, row.reasons)
 
 
+@AGENCY.modulate(kinds=[Kind.INITIATIVE], reads=[presence_c.PRESENT, identity_c.PERSON, others_c.HOURS])
+def _reachable(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
+    """Joignable maintenant : quelqu'un qui n'est pas là, pendant sa nuit (une nuit supposée, que ses heures apprises
+    ouvrent seulement : une noctambule se lit à 1 h, une amie du soir reste joignable l'après-midi), on ne lui écrit
+    pas — son téléphone sonnerait dans la nuit.
+    Une règle pour toutes les initiatives (une inquiétude, le manque, un moment à encourager, un vœu). Ce qui est dû
+    (un rappel promis, une parole à tenir) ou prévient (un mail important, un projet qui l'attend) passe outre ;
+    quelqu'un de présent est joignable, évidemment."""
+    target = row.target
+    if target in (Anyone.ANY, Anyone.NONE) or not is_identifiable(target) or (c.OWED | c.INFORMS) & set(row.reasons):
+        return Modulation()
+    if target in frame.get(presence_c.PRESENT):
+        return Modulation()
+    hours = frame.get(others_c.HOURS(frame.get(identity_c.PERSON(target))))
+    return Modulation() if (hours.awake or hours.active)[frame.local().hour] else Modulation(veto=c.NOT_REACHABLE)
+
+
 @AGENCY.modulate(kinds=[Kind.INITIATIVE], reads=[presence_c.COMPOSING])
 def _composing(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
     """Elle ne prend pas d'elle-même la parole vers quelqu'un qui est en train de lui écrire : elle attend son

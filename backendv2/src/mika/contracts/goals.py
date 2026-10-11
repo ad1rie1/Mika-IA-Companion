@@ -31,6 +31,7 @@ from dataclasses import dataclass
 
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.vocab.lineage import Lineage
 
 OWNER = "goals"
 
@@ -72,6 +73,15 @@ MUSINGS = frozenset({MUSED, DISSIPATED})
 LET_GO = "réflexion sans suite"
 #: les fins qui ne se ressentent pas et ne se racontent pas : une rêverie dissipée, une réflexion sans suite
 QUIET_ENDS = frozenset({DISSIPATED, LET_GO})
+#: d'où vient une réflexion : repenser à ce qu'on lui a confié, à ce qu'elle croyait (une pensée qui pesait)
+REFLECTIONS = frozenset({FROM_EXCHANGE, FROM_REVISION})
+
+
+def reflective(origin: str, source: str) -> bool:
+    """Une réflexion — repenser à ce qu'une amie lui a confié, à ce qu'elle croyait — et non une chose à accomplir :
+    la mener au bout apaise, ce n'est pas un exploit (ni fierté, ni estime, ni « elle mène ses buts au bout ») ;
+    ADR 0096. Un journal d'avant n'a pas l'origine : née d'une pensée."""
+    return origin in REFLECTIONS or (not origin and source.startswith("thought:"))
 CLOSED_STATUSES = (ACHIEVED, STUCK, ABANDONED, FAILED, CANCELLED)
 
 # priorités (le vocabulaire du panneau du frontend) : elles déplacent la preuve d'un pas
@@ -129,6 +139,9 @@ class GoalOpened(Payload):
     #: une rêverie (un de ses centres d'intérêt, sans endroit où chercher du neuf) : elle s'y laisse aller, rien de
     #: neuf n'arrivera — ce n'est pas « se lancer » dans quelque chose (``False`` dans un journal plus ancien)
     musing: bool = False
+    #: d'où vient ce qu'il sait — la filiation de la pensée d'où il est né (ce qu'on lui a confié, et comment) : y
+    #: repenser ne le rend pas plus dicible (ADR 0097) ; ``None`` : rien de ce qu'elle sait, ou un journal d'avant
+    lineage: Lineage | None = None
 
 
 class StepReported(Payload):
@@ -165,6 +178,8 @@ class GoalClosed(Payload):
     owner: str | None = None
     about: tuple[str, ...] = ()
     sensitivity: int = 1
+    #: d'où il venait (``FROM_*``) ; vide dans un journal d'avant (``reflective`` lit alors la source)
+    origin: str = ""
 
 
 GOAL_OPENED = event_type("goals.opened", OWNER, GoalOpened, public=True, content=("title", "details"),

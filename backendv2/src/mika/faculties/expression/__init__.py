@@ -42,7 +42,7 @@ from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab import affect as A
-from mika.vocab import voice
+from mika.vocab import reading, voice
 from mika.vocab.affect import Declared, Emotion, parse_tag
 from mika.vocab.days import when_fr
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
@@ -114,12 +114,16 @@ def lied(text: str, mark: str) -> tuple[int, int]:
 
 
 def parse(text: str, speaker: str = "") -> tuple[str, dict[str, str]]:
-    """Le texte sans balise, ce qu'elle a déclaré, si elle a posé une question, et si elle a menti (sa marque
-    ``[MENSONGE: …]``, retirée : seul le passage faux est désigné). ``speaker`` : son nom (celui de sa persona) —
-    un « Nom : » recopié en tête de réponse se retire."""
+    """Le texte sans balise, ce qu'elle a déclaré, ce qu'elle a lu de la personne (sa balise ``[EN_FACE: …]``,
+    retirée, ADR 0093), si elle a posé une question, et si elle a menti (sa marque ``[MENSONGE: …]``, retirée : seul
+    le passage faux est désigné). ``speaker`` : son nom (celui de sa persona) — un « Nom : » recopié en tête de
+    réponse se retire."""
     marks = [m.group(1) or "" for m in LIE_MARK.finditer(text or "")]
-    tag = parse_tag(LIE_MARK.sub("", text or ""), speaker)
+    unread, their = reading.read(LIE_MARK.sub("", text or ""))
+    tag = parse_tag(unread, speaker)
     annotations: dict[str, str] = {}
+    if their is not None:
+        annotations[c.READING_ANNOTATION] = their.encode()
     if marks and tag.text.strip():
         start, end = lied(tag.text, " ".join(marks))
         annotations[c.LIE_ANNOTATION] = f"{start}:{end}"
@@ -350,13 +354,17 @@ def _state_dict(face: affect_c.Face) -> dict[str, Any]:
 
 def emotion_view(frame: Frame, target: str | None, declared: Declared | None) -> EmotionView:
     """Ce que la trame montre : la balise déclarée si elle existe (c'est ce
-    qu'elle a voulu dire), sinon le visage (posture et humeur mêlées)."""
+    qu'elle a voulu dire) — ses deux premières facettes quand elle en a dit
+    plusieurs (son ambivalence, jugée par le modèle, ADR 0093) —, sinon le
+    visage (posture et humeur mêlées)."""
     person = frame.get(identity_c.PERSON(target)) if target else "__global__"
     face = frame.get(affect_c.FACE(person))
     blend = tuple((e.value, round(w, 2)) for e, w in face.blend)
     if declared is not None:
         name = declared.emotion.value
-        if not blend or blend[0][0] != name:
+        if declared.facets:
+            blend = tuple((e, round(x, 2)) for e, x in declared.facets[:2])
+        elif not blend or blend[0][0] != name:
             blend = ((name, round(declared.intensity, 2)), *blend)[:2]
         return EmotionView(name, round(declared.intensity, 2), blend, _state_dict(face), True)
     return EmotionView(face.emotion.value, face.intensity, blend, _state_dict(face), False)

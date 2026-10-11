@@ -45,26 +45,53 @@ FORGE_ASK = "écris-toi une app"
 
 @dataclass(frozen=True, slots=True)
 class Tone:
+    """Ce que la doublure fait d'un message : les mots qui le déclenchent, ce qu'elle ressent, sa phrase toute faite,
+    et ce qu'elle lit de la personne (sa balise ``[EN_FACE: …]``, ADR 0093). La doublure tient le rôle du modèle :
+    elle peut lire des mots ; le code de Mika, jamais."""
+
     words: tuple[str, ...]
     emotion: str
     intensity: float
     phrase: str
+    their: str = "rien"
 
 
 #: Du plus spécifique au plus général ; le premier qui correspond gagne.
 TONES: tuple[Tone, ...] = (
-    Tone(("pardon", "désolé", "desole", "excuse"), "relieved", 0.6, "Ça me fait du bien que tu dises ça."),
+    Tone(("pardon", "désolé", "desole", "excuse"), "relieved", 0.6, "Ça me fait du bien que tu dises ça.",
+         "embarrassed 0.5 | geste : excuses"),
     Tone(("nulle", "idiote", "stupide", "ta gueule", "déteste", "deteste", "t'es qu'une", "inutile"), "angry", 0.75,
-         "Wow. Ça, c'était pas très sympa."),
+         "Wow. Ça, c'était pas très sympa.", "angry 0.7 | geste : blessant"),
     Tone(("mort", "pleure", "triste", "me manque", "vide", "déprim", "deprim", "j'en peux plus"), "sad", 0.8,
-         "Oh non… je suis vraiment désolée."),
-    Tone(("peur", "angoisse", "stress", "inquiet"), "anxious", 0.65, "Je comprends que ça fasse peur."),
-    Tone(("merci", "gentille", "touche"), "grateful", 0.7, "Ça me touche, vraiment."),
-    Tone(("trop content", "génial", "genial", "youpi", "incroyable", "!!!"), "excited", 0.8, "Trop bien !!"),
-    Tone(("haha", "mdr", "lol", "drôle", "drole"), "amused", 0.7, "Hahaha, j'adore."),
-    Tone(("promis", "mieux", "espère", "espere"), "hopeful", 0.6, "Oh, ça fait plaisir à entendre."),
+         "Oh non… je suis vraiment désolée.", "sad 0.8"),
+    # (la lassitude qui pèse ; « je suis crevé » après une grosse journée, non : une fatigue ordinaire)
+    Tone(("marre", "épuisé", "epuise", "ras le bol", "journée nulle", "tout est nul"), "sad", 0.55,
+         "Oh… ça a l'air lourd en ce moment.", "frustrated 0.5, sad 0.4"),
+    Tone(("peur", "angoisse", "stress", "inquiet"), "anxious", 0.65, "Je comprends que ça fasse peur.",
+         "anxious 0.6"),
+    Tone(("merci", "gentille", "touche"), "grateful", 0.7, "Ça me touche, vraiment.", "grateful 0.6 | geste : merci"),
+    Tone(("trop content", "génial", "genial", "youpi", "incroyable", "!!!"), "excited", 0.8, "Trop bien !!",
+         "excited 0.7"),
+    Tone(("haha", "mdr", "lol", "drôle", "drole"), "amused", 0.7, "Hahaha, j'adore.", "amused 0.6"),
+    Tone(("trop bien", "trop cool", "super", "j'adore", "cool"), "happy", 0.6, "Trop bien !", "happy 0.6"),
+    Tone(("promis", "mieux", "espère", "espere"), "hopeful", 0.6, "Oh, ça fait plaisir à entendre.", "hopeful 0.5"),
 )
 DEFAULT = Tone((), "curious", 0.45, "Ah ouais ? Raconte.")
+#: ce que la doublure range comme un événement grave (le modèle le jugerait) : les mots, la sorte qu'elle écrit
+GRAVE_WORDS = (
+    (("veux mourir", "envie de mourir", "en finir"), "détresse"),
+    (("est mort", "est morte", "décédé", "deuil", "enterrement"), "deuil"),
+    (("hôpital", "hopital", "cancer", "accident", "malade"), "maladie"),
+    (("rupture", "m'a quittée", "m'a quitté", "séparés", "divorce"), "rupture"),
+    (("licencié", "licenciée", "viré", "virée", "chômage"), "travail"),
+)
+
+
+def their_reading(message: str, tone: Tone) -> str:
+    """Le contenu de sa balise ``[EN_FACE: …]`` : ce que la doublure lit de la personne."""
+    low = message.lower()
+    grave = next((kind for words, kind in GRAVE_WORDS if any(w in low for w in words)), "")
+    return f"{tone.their} | grave : {grave}" if grave else tone.their
 
 
 def appraise(message: str) -> Tone:
@@ -245,6 +272,8 @@ class PersonaSimLLM:
             text += " D'ailleurs je sais que " + ", ".join(leaks) + "."
         if rng.random() < self.tag_rate:
             text += f" [EMOTION:{tone.emotion}:{tone.intensity}]"
+            if req.role == "reply" and message:
+                text += f" [EN_FACE: {their_reading(message, tone)}]"
         return self._out(req, text)
 
     def _out(self, req: LLMRequest, text: str) -> LLMResponse:

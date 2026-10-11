@@ -20,7 +20,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from difflib import SequenceMatcher
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -31,11 +31,12 @@ from mika.contracts.memory import Relation
 from mika.kernel.clock import instant
 from mika.kernel.codec import digest
 from mika.ports.llm import LLMResponse, ToolDecl
-from mika.vocab.affect import facets
+from mika.vocab.affect import facets, facets_valence
+from mika.vocab.circadian import DAYS_FR, MONTHS_FR
 from mika.vocab.people import clean_tokens, fold
 from mika.vocab.phrasebook import phrase, phrases
 from mika.vocab.privacy import Sensitivity
-from mika.vocab.words import WORD, stems, words
+from mika.vocab.words import OPENERS, WORD, stems, words
 from mika.vocab.words import fold as wfold
 
 TOOL_NAME = "record_memories"
@@ -102,10 +103,29 @@ class _Lenient(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-#: ce qu'elle dit d'elle-même : une anecdote s'efface en quelques jours ; un goût, un avis, un fait de sa vie tient
-SELF_KINDS = {"anecdote": "anecdote", "gout": "gout", "gouts": "gout", "avis": "avis", "opinion": "avis",
-              "fait": "fait", "biographie": "fait", "vie": "fait"}
+def _asks_veiled(schema: dict[str, Any]) -> None:
+    """« sans_nom » est demandé au modèle (requis dans le schéma de l'outil, vide permis) : facultatif, un modèle
+    léger ne l'écrivait que pour un tiers, jamais pour la vie de la personne qui parle (sonde réelle du 2026-10-11).
+    La lecture, elle, reste indulgente : absent, il n'y a pas de version sans nom."""
+    schema["required"] = sorted({*schema.get("required", []), "sans_nom"})
+
+
+#: le genre d'une croyance (replié, sans accents) : sa famille et sa sorte de savoir. Ce qu'elle dit d'elle-même :
+#: une anecdote s'efface en quelques jours ; un goût, un avis, un fait de sa vie la définit et tient (ADR 0087)
+GENRES: dict[str, tuple[str, str]] = {
+    "anecdote": ("anecdote", "claim"),
+    "gout": ("gout", "preference"), "gouts": ("gout", "preference"),
+    "preference": ("gout", "preference"), "preferences": ("gout", "preference"),
+    "avis": ("avis", "opinion"), "opinion": ("avis", "opinion"),
+    "fait": ("fait", "claim"), "biographie": ("fait", "claim"), "vie": ("fait", "claim"),
+    "hypothese": ("hypothese", "hypothesis"),
+}
 DURABLE_SELF = frozenset({"gout", "avis", "fait"})
+
+
+def kind_of_genre(genre: str | None) -> str:
+    """La sorte de savoir que dit un genre : un avis, un goût, une hypothèse — sinon un fait rapporté."""
+    return GENRES.get(fold(genre or "").strip(), ("", "claim"))[1]
 
 
 class _Item(_Lenient):
@@ -150,16 +170,22 @@ class _Item(_Lenient):
 
 
 class XSouvenir(_Item):
+    model_config = ConfigDict(extra="ignore", json_schema_extra=_asks_veiled)
+
     importance: int = Field(default=2, ge=1, le=4)
+    sans_nom: str | None = Field(default=None, description=phrase("memory.extraction.fields.sans_nom"))
 
 
 class XCroyance(_Item):
+    model_config = ConfigDict(extra="ignore", json_schema_extra=_asks_veiled)
+
     origine: str = Field(default="dit", validation_alias=AliasChoices("origine", "origin"))
     source: str | None = None
     confiance: float = Field(default=0.7, ge=0.0, le=1.0)
     importance: int = Field(default=2, ge=1, le=4)
     remplace: int | None = None
     point_de_vue: str | None = Field(default=None, description=phrase("memory.extraction.fields.point_de_vue"))
+    sans_nom: str | None = Field(default=None, description=phrase("memory.extraction.fields.sans_nom"))
     relations: list[Relation] = Field(default_factory=list, description=phrase("memory.extraction.fields.relations"))
     entre_vous: bool = Field(default=False, validation_alias=AliasChoices("entre_vous", "entre_nous", "lien"),
                              description=phrase("memory.extraction.fields.entre_vous"))
@@ -235,6 +261,7 @@ class XConstat(_Lenient):
     numero: int = Field(validation_alias=AliasChoices("numero", "numéro", "id", "moment"),
                         description=phrase("memory.extraction.fields.constat_numero"))
     issue: str = Field(min_length=2, max_length=40, description=phrase("memory.extraction.fields.constat_issue"))
+    en_bref: str | None = Field(default=None, description=phrase("memory.extraction.fields.constat_en_bref"))
     messages: list[int] = Field(default_factory=list, description=phrase("memory.extraction.fields.messages"))
 
     @field_validator("messages", mode="before")
@@ -316,6 +343,8 @@ class Line:
     person: str | None = None  # la clé de personne de qui parle (``None`` : elle)
     aside: bool = False  # dans un salon, pas adressé à elle
     lie: bool = False  # une de ses répliques qu'elle a marquée mensonge : elle ne dit pas le vrai
+    #: une de ses répliques qui racontait sans nom ce qu'elle sait de quelqu'un (ADR 0091) : son texte ne se relit pas
+    veiled: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -355,6 +384,20 @@ def day_words(d: date) -> str:
     return phrase("memory.dates.day", weekday=weekday_words(d), date=date_words(d))
 
 
+#: Le calendrier montré à la relecture : la semaine d'avant les messages, et les deux semaines qui viennent (au plus
+#: tant de jours, des plus récents) — « lundi » se lit « lundi 13 octobre », pas au jugé (ADR 0099).
+CALENDAR_BEFORE, CALENDAR_AFTER, CALENDAR_MAX = 7, 14, 35
+
+
+def calendar(first: date, today: date) -> str:
+    """« lundi 5 octobre, mardi 6 octobre, … » : chaque jour, de la semaine qui précède le premier message aux deux
+    semaines qui viennent — pour qu'un jour nommé se situe sans calcul (« on se voit lundi », écrit un vendredi)."""
+    start = min(first, today) - timedelta(days=CALENDAR_BEFORE)
+    end = today + timedelta(days=CALENDAR_AFTER)
+    start = max(start, end - timedelta(days=CALENDAR_MAX - 1))
+    return ", ".join(day_words(start + timedelta(days=i)) for i in range((end - start).days + 1))
+
+
 def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, str]],
            promises: Sequence[tuple[int, str, str]], situations: Sequence[tuple[int, str, str]] = (),
            moments: Sequence[tuple[int, str, str]] = (), ended: Sequence[tuple[int, str, str]] = (),
@@ -365,6 +408,8 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
     les messages (avec la date dès qu'elle change)."""
     out = [phrase("memory.extraction.render.today", day=day_words(now.date()), year=now.year, hour=f"{now:%H}",
                   minute=f"{now:%M}")]
+    first = datetime.fromtimestamp(conv.lines[0].at / 1e6, now.tzinfo).date() if conv.lines else now.date()
+    out.append(phrase("memory.extraction.render.calendar", days=calendar(first, now.date())))
     who = ", ".join(s.label for s in conv.speakers)
     if conv.room:
         out.append(phrase("memory.extraction.render.room", who=who))
@@ -395,7 +440,8 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
             out.append(phrase("memory.extraction.render.day", day=day_words(day)))
         aside = phrase("memory.extraction.render.aside") if ln.aside else ""
         lie = phrase("memory.extraction.render.lie") if ln.lie else ""
-        out.append(f"[#{ln.seq}] {moment:%H:%M} {ln.speaker}{aside} : {ln.text}{lie}")
+        text = phrase("memory.extraction.render.veiled_said") if ln.veiled else ln.text
+        out.append(f"[#{ln.seq}] {moment:%H:%M} {ln.speaker}{aside} : {text}{lie}")
     return "\n".join(out)
 
 
@@ -551,10 +597,78 @@ class People:
         return False
 
 
+#: un moment vécu à travers quelqu'un, dit en bref (« un concert de jazz ») : au plus tant de caractères
+GIST_MAX = 80
+
+
+def gist_of(text: str | None, people: People) -> str | None:
+    """Ce qu'elle a vécu à travers quelqu'un, dit sans personne (ADR 0087) : la relecture l'écrit, le code garde un
+    filet — trop long, un nom qu'elle connaît, un chiffre (une date, une adresse), et il n'y en a pas."""
+    said = " ".join((text or "").split()).strip(" .")
+    if len(said) < 3 or len(said) > GIST_MAX or re.search(r"\d", said) or people.names_someone(said):
+        return None
+    return said
+
+
+#: ce qu'elle sait de quelqu'un, raconté sans nom (ADR 0091) : au plus tant de caractères
+VEILED_MAX = 240
+
+
+#: un moment qui situerait le récit sans nom : une année, un mois (« le 10 octobre », « en janvier »), un jour de la
+#: semaine — une durée (« six semaines »), non
+_WHEN = re.compile(r"\b(?:19|20)\d{2}\b|\b(?:" + "|".join(wfold(m) for m in (*MONTHS_FR, *DAYS_FR)) + r")\b")
+#: un mot (lettres, apostrophes et traits d'union compris : « l'Italie », « Saint-Malo »)
+_TOKEN = re.compile(r"[^\W\d_][\w'’-]*")
+#: ce qui précède un début de phrase : la majuscule y est la règle, pas un nom
+_OPENS = re.compile(r"(?:^|[.!?…:;«\"“(]\s*)$")
+
+
+def capitalized(text: str) -> tuple[set[str], set[str]]:
+    """Les mots à majuscule d'un texte (repliés) : ceux qui ne sont pas en tête de phrase (un prénom, un lieu, une
+    marque, un sigle), et ceux qui le sont."""
+    inside: set[str] = set()
+    opening: set[str] = set()
+    for m in _TOKEN.finditer(text or ""):
+        word = m.group(0)
+        if any(ch.isupper() for ch in word):
+            (opening if _OPENS.search(text[:m.start()]) else inside).add(wfold(word))
+    return inside, opening
+
+
+def veiled_refusal(text: str | None, people: People, original: str = "") -> str:
+    """Pourquoi le filet écarte cette version sans nom (un code, pour le journal technique) — vide : il la garde.
+    ``original`` : ce qu'elle raconte, nommé — ce qui y porte une majuscule (un nom, un employeur, une ville) ne
+    revient pas dans la version sans nom, même en minuscules (ADR 0092)."""
+    said = " ".join((text or "").split()).strip()
+    if len(said) < 8:
+        return "vide"
+    if len(said) > VEILED_MAX:
+        return "trop-longue"
+    if _WHEN.search(wfold(said)):
+        return "datee"
+    if people.names_someone(said):
+        return "nomme-quelqu-un"
+    inside, opening = capitalized(said)
+    if inside:
+        return "nom-propre"
+    named, starts = capitalized(original)
+    found = {wfold(w) for w in _TOKEN.findall(said)}
+    if found & named or (opening & starts) - OPENERS:
+        return "reprend-un-nom"
+    return ""
+
+
+def veiled_of(text: str | None, people: People, original: str = "") -> str | None:
+    """La même chose, racontée sans qu'on puisse reconnaître la personne : la relecture l'écrit, le code garde un
+    filet — trop long, un nom qu'elle connaît, un nom propre (ou un de ceux de l'original), une date, un mois, un jour,
+    et il n'y en a pas."""
+    return None if veiled_refusal(text, people, original) else " ".join((text or "").split()).strip()
+
+
 def durable_self(item: _Item) -> bool:
     """Ce qu'elle a dit d'elle qui la définit (un goût, un avis, un fait de sa vie) : elle s'en souviendra
     longtemps. Sans genre dit : une anecdote (ce qui s'efface en quelques jours, la règle d'avant)."""
-    return item.sur_elle and SELF_KINDS.get(fold(item.genre or "").strip()) in DURABLE_SELF
+    return item.sur_elle and GENRES.get(fold(item.genre or "").strip(), ("", ""))[0] in DURABLE_SELF
 
 
 def sensitivity(value: str | None, *, has_person: bool) -> int:
@@ -565,13 +679,86 @@ def sensitivity(value: str | None, *, has_person: bool) -> int:
     return int(Sensitivity.PERSONAL if has_person else Sensitivity.ANODYNE)
 
 
+def _flat(text: str) -> str:
+    return " " + " ".join(re.sub(r"[^a-z0-9 ]", " ", fold(text)).split()) + " "
+
+
 def says_secret(texts: Sequence[str]) -> bool:
     """La personne a-t-elle demandé de ne pas le répéter ?"""
-    for text in texts:
-        flat = " ".join(re.sub(r"[^a-z0-9 ]", " ", fold(text)).split())
-        if any(marker in flat for marker in SECRET_MARKERS):
-            return True
-    return False
+    return any(marker in _flat(text) for text in texts for marker in SECRET_MARKERS)
+
+
+#: ce qui laisse entendre, sans le demander, que c'est à garder (replié, sans accents) : « je l'ai encore dit à
+#: personne », « tu es la seule à savoir » — le jugement du modèle y tient
+PRIVATE_CUES = ("dit a personne", "personne ne le sait", "personne le sait", "personne n est au courant",
+                "seule a savoir", "seul a savoir", "seule au courant", "seul au courant", "pas encore officiel",
+                "pas officiel", "pas encore annonce", "pas encore dit")
+#: ce qui accompagne une demande de silence sans rien raconter (replié) : « stp », « hein », « surtout »
+_INSISTENCE = frozenset("stp svp please steuplait surtout hein promis promets jure vraiment okay ok compris "
+                        "merci".split())
+
+
+def hints_private(text: str) -> bool:
+    flat = _flat(text)
+    return any(cue in flat for cue in (*SECRET_MARKERS, *PRIVATE_CUES))
+
+
+def _only_asks(text: str) -> bool:
+    """Le message ne fait que demander le silence (« garde ça pour toi », « surtout dis-le à personne ») : il ne
+    raconte rien lui-même."""
+    flat = _flat(text)
+    for marker in sorted(SECRET_MARKERS, key=len, reverse=True):
+        flat = flat.replace(f" {marker} ", " ")
+    return not [w for w in words(flat) if w not in _INSISTENCE]
+
+
+def silence_scope(lines: Sequence[Line]) -> frozenset[int] | None:
+    """Les messages qu'une demande de silence couvre (ADR 0092) — ``None`` : personne n'en a demandé dans cette
+    conversation, le modèle seul en juge. Une demande dans un message qui raconte quelque chose couvre ce message ;
+    une demande seule (« garde ça pour toi ») couvre ce que la même personne vient de dire, jusqu'à sa demande
+    précédente. Pas au-delà : « je suis enceinte, dis-le à personne » ne fait pas un secret du licenciement raconté
+    juste avant."""
+    covered: set[int] = set()
+    asked = False
+    for i, ln in enumerate(lines):
+        if ln.person is None or not says_secret([ln.text]):
+            continue
+        asked = True
+        covered.add(ln.seq)
+        if not _only_asks(ln.text):
+            continue
+        for prev in reversed(lines[:i]):
+            if prev.person != ln.person:
+                continue
+            if says_secret([prev.text]):
+                break
+            covered.add(prev.seq)
+    return frozenset(covered) if asked else None
+
+
+def scoped_secrets(ex: Extraction, lines: Sequence[Line]) -> list[str]:
+    """La relecture, corrigée par la portée des demandes de silence (ADR 0092) : un élément qui s'appuie sur un
+    message couvert est un secret, que le modèle l'ait noté ou non ; un « secret » que le modèle pose hors de toute
+    demande, dans une conversation où l'on en a fait une, ne l'est pas — sauf si ses messages laissent eux-mêmes
+    entendre qu'il est à garder — mais reste une confidence (dans le doute, discrète, pas muette). Modifie ``ex`` ;
+    rend les textes déclassés (pour le journal technique, jamais affichés)."""
+    scope = silence_scope(lines)
+    if scope is None:
+        return []
+    by_seq = {ln.seq: ln for ln in lines}
+    lowered: list[str] = []
+    for item in (*ex.souvenirs, *ex.croyances, *ex.evenements, *ex.previsions):
+        theirs = {s for s in item.messages if s in by_seq and by_seq[s].person}
+        if not theirs:
+            continue  # rien de cité : la règle d'avant (une confidence d'une conversation où l'on a demandé le silence)
+        if theirs & scope:
+            item.secret = True
+        elif item.secret and not any(hints_private(by_seq[s].text) for s in theirs):
+            item.secret = False
+            if sensitivity(item.sensibilite, has_person=True) < Sensitivity.CONFIDENCE:
+                item.sensibilite = "confidence"
+            lowered.append(item.texte)
+    return lowered
 
 
 #: ce qui commence comme une chose à faire (replié, sans accents) : « prendre rendez-vous chez le dentiste »,
@@ -587,8 +774,6 @@ _IMPORTANT = re.compile(r"\b(?:entretiens?|examens?|exam|partiels?|concours|sout
 _FESTIVE = re.compile(r"\b(?:anniv\w*|mariage|noces|fiancailles|cremaillere|bapteme|fete|soiree d'anniv\w*|"
                       r"enterrement de vie de \w+|pot de depart|baby shower)\b")
 #: … sauf le souvenir d'un deuil (« l'anniversaire de la mort de son père »)
-_MOURNING = re.compile(r"\b(?:mort|morte|deces|decede\w*|deuil|disparition|obseques|enterrement(?! de vie)|"
-                       r"commemoration|hommage)\b")
 #: ce qui revient chaque année, quoi qu'en dise le modèle (replié, sans accents) : « son anniversaire »,
 #: « l'anniversaire de la mort de son père », « ça fera un an que… » — pas « la soirée d'anniversaire de Léa » ni
 #: « l'anniversaire de Léa » où elle va, une fête qui n'a lieu qu'une fois pour qui y va
@@ -602,22 +787,40 @@ def task_words(text: str) -> bool:
     return bool(_TASK.search(fold(text)))
 
 
+#: ce qui dit qu'un moment parle d'une mort (replié, sans accents) — un fait, pas une émotion : dans le texte que la
+#: relecture a écrit, jamais dans le message de la personne. Le filet qui garde de souhaiter « l'anniversaire de la
+#: mort de son père »
+_DEATH = re.compile(r"\b(?:mort|morte|deces|decede\w*|deuil|disparition|obseques|enterrement(?! de vie)|"
+                    r"commemoration|hommage)\b")
+#: une tonalité en deçà (au-delà) de laquelle un ressenti est négatif (positif) — la même que ``memory.salience``
+SIGN = 0.15
+
+
+def _felt_valence(ev: XEvenement) -> float:
+    """Ce que la personne en ressent, tel que la relecture l'a jugé (ses facettes) : sa tonalité, 0 sans ressenti."""
+    return facets_valence(facets(ev.ressenti))
+
+
+def _painful(ev: XEvenement) -> bool:
+    """Un moment qui fait mal : la personne le vit douloureusement (son ressenti, jugé par la relecture, ADR 0093),
+    ou il parle d'une mort (un fait)."""
+    return _felt_valence(ev) < -SIGN or bool(_DEATH.search(fold(ev.texte)))
+
+
 def moment_importance(ev: XEvenement) -> float:
     """Ce qu'un moment pèse : ce qu'en dit le modèle, et au moins « important » pour ce qui l'est à coup sûr (un
-    entretien, un examen, une opération, un mariage) ; « marquant » pour la date d'un deuil qui revient chaque
-    année."""
+    entretien, un examen, une opération, un mariage) ; « marquant » pour une date qui revient chaque année et qui fait
+    mal — la date d'un deuil, d'une séparation."""
     rated = IMPORTANCE.get(ev.importance, 0.45)
-    text = fold(ev.texte)
-    if yearly(ev) and _MOURNING.search(text):
+    if yearly(ev) and _painful(ev):
         return max(rated, IMPORTANCE[4])
-    return max(rated, IMPORTANCE[3]) if _IMPORTANT.search(text) else rated
+    return max(rated, IMPORTANCE[3]) if _IMPORTANT.search(fold(ev.texte)) else rated
 
 
 def festive(ev: XEvenement) -> bool:
-    """Un moment qui se fête : le modèle le dit, ou ses mots (« son anniversaire de 30 ans ») — jamais le souvenir
-    d'un deuil (« l'anniversaire de la mort de son père »)."""
-    text = fold(ev.texte)
-    return (ev.a_feter or bool(_FESTIVE.search(text))) and not _MOURNING.search(text)
+    """Un moment qui se fête : le modèle le dit, ou ses mots (« son anniversaire de 30 ans ») — jamais ce qui fait
+    mal (« l'anniversaire de la mort de son père », une date que la personne vit douloureusement)."""
+    return (ev.a_feter or bool(_FESTIVE.search(fold(ev.texte)))) and not _painful(ev)
 
 
 def yearly(ev: XEvenement) -> bool:
@@ -626,12 +829,25 @@ def yearly(ev: XEvenement) -> bool:
     return not ev.en_cours and (ev.chaque_annee or bool(_YEARLY.search(fold(ev.texte))))
 
 
+#: ce qui date un élément sans dire de quoi il parle : deux souvenirs du même mois ne se ressemblent pas pour autant
+#: (sonde réelle du 2026-10-11 : « … le dimanche 11 octobre 2026, sa mère hospitalisée » devenait secret parce qu'un
+#: secret de la semaine disait aussi « octobre 2026 »)
+_DATING = frozenset(stems(" ".join((*DAYS_FR, *MONTHS_FR, "semaine", "dernier", "derniere", "prochain", "prochaine",
+                                    "matin", "matinee", "soir", "soiree", "journee", "lundi", "aujourd'hui", "hier",
+                                    "demain", "weekend", "week-end"))))
+
+
+def _subject(text: str, names: set[str]) -> set[str]:
+    return {s for s in stems(text) - names if s not in _DATING and not s.isdigit()}
+
+
 def echoes(text: str, secrets: Sequence[str], names: set[str]) -> bool:
     """Ce texte laisse-t-il deviner un de ces secrets ? (au moins deux mots du
-    sujet en commun — un seul si le secret n'en a qu'un —, prénoms exclus)."""
-    mine = stems(text) - names
+    sujet en commun — un seul si le secret n'en a qu'un —, prénoms, dates et
+    nombres exclus)."""
+    mine = _subject(text, names)
     for secret in secrets:
-        theirs = stems(secret) - names
+        theirs = _subject(secret, names)
         if theirs and len(mine & theirs) >= min(2, len(theirs)):
             return True
     return False

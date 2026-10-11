@@ -30,6 +30,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
+from mika.faculties.expression import ExpressionParams
 from mika.faculties.goals.faculty import GoalsParams
 from mika.faculties.goals.tend import inherited, jitter_min
 from mika.kernel import schedule
@@ -42,6 +43,7 @@ from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM, _section
 from mika.sim.outside import FakeFeeds
 from mika.vocab.episodes import goal_target
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.endings import ENDINGS, initiative_ends
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, disconnect, said
 from tests.unit.test_projects import llm_call
@@ -129,18 +131,24 @@ def _asleep(evs):
 # ── Une inquiétude devient un but, mené à bout, raconté ───────────────────
 
 
-def test_a_worry_becomes_a_goal_then_pride_then_she_tells_the_person_it_concerns(tmp_path):
+def test_a_worry_becomes_a_reflection_that_soothes_then_she_takes_news_of_the_person(tmp_path):
     async def scenario(kernel, llm):
+        # elle ne se ravise pas au dernier moment (un tirage du murmure) : ce n'est pas ce qu'on regarde ici
+        await kernel.set_params("expression", ExpressionParams(murmur_adrift=0.0))
         await connect(kernel, "user_1", "Adrien", operator=True)
         await (await kernel.perceive(said("user_1", "j'ai peur, je stresse pour mon examen de demain"))).reply
         esteem0 = kernel.mind.frame().get(self_c.ESTEEM)
         assert await when(kernel, closed_now)
         esteem1 = kernel.mind.frame().get(self_c.ESTEEM)
-        await asyncio.sleep(2 * HOUR / US)
+        await asyncio.sleep(4 * HOUR / US)
         return esteem0, esteem1
 
     r = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0))
     esteem0, esteem1 = r.result
+    # prendre de ses nouvelles attend : pas juste après la conversation (``share_worry_after_us``)
+    heard = r.of(rt.PERCEPTION_RECEIVED)[0].at
+    told = [e for e in r.of(rt.EPISODE_STARTED) if goals_c.SHARE in e.data.reason.split(",")]
+    assert told and told[0].at - heard >= GoalsParams().share_worry_after_us
     opened, closed = r.of(goals_c.GOAL_OPENED), r.of(goals_c.GOAL_CLOSED)
     assert len(opened) == 1 and opened[0].data.source.startswith("thought:")
     # le titre est le sien ; ce qu'il lui a dit est gardé à part (et cité au travail), jamais donné comme le but
@@ -151,7 +159,9 @@ def test_a_worry_becomes_a_goal_then_pride_then_she_tells_the_person_it_concerns
     steps = r.of(goals_c.STEP_REPORTED)
     # noter ou fouiller sa mémoire ne prouve rien : c'est la réflexion écrite qui prouve
     assert steps and steps[-1].data.proven and steps[-1].data.tools == ("goal_reflect",)
-    assert esteem1 > esteem0 + 0.01  # elle a mené quelque chose à bout (une séance : un peu, ADR 0036)
+    # repenser à ce qu'il lui a confié n'est pas un exploit : ni fierté, ni estime (ADR 0096) — un apaisement
+    assert esteem1 == pytest.approx(esteem0)
+    assert closed[0].data.origin == goals_c.FROM_EXCHANGE
     # un pas n'est jamais livré à personne, ni écrit dans le fil (une séance qui conclut par report_step ne
     # rappelle même plus le modèle pour une conclusion : souvent, aucun énoncé)
     step_utterances = [e for e in r.of(rt.UTTERANCE) if e.data.kind == "STEP"]
@@ -165,7 +175,8 @@ def test_a_worry_becomes_a_goal_then_pride_then_she_tells_the_person_it_concerns
     # …mais une inquiétude n'est pas une bonne nouvelle : à lui, elle prend de ses nouvelles ; la consigne ne
     # renvoie à aucune section (le murmure qui la précède l'entend aussi)
     assert "prends de ses nouvelles" in shares[0][1] and "bonne nouvelle" not in shares[0][1]
-    assert "« CE QUE TU AS MENÉ À BOUT »" not in shares[0][1] and "plus haut" not in shares[0][1]
+    brief = phrase("goals.brief.worry", who="« Adrien »")  # (d'autres envies du moment ont les leurs, à côté)
+    assert brief in shares[0][1] and "MENÉ À BOUT" not in brief and "plus haut" not in brief
     # au travail : le but dans ses mots, qui le lui a confié et quand — jamais « Sorte : … » ; ses mots à lui, cités
     step = next(c for c in r.llm.calls if c.role == "step")
     work = _section(step, "CE À QUOI TU TRAVAILLES")
@@ -174,6 +185,29 @@ def test_a_worry_becomes_a_goal_then_pride_then_she_tells_the_person_it_concerns
     # la pensée d'où c'était venu s'est apaisée : elle a fait la chose
     source = int(opened[0].data.source.split(":")[1])
     assert source not in {t.id for t in r.frame.get(attention_c.THOUGHTS)}
+
+
+def test_what_she_thought_of_a_confidence_waits_to_be_said_with_the_check_in():
+    """Ce qu'elle a pensé de ce qu'une amie lui a confié, elle le lui dit en prenant de ses nouvelles : jamais
+    quarante minutes après la conversation (S19 : la prise de nouvelles, plus tard, se trouvait bloquée par ce mot
+    resté sans réponse), au plus tôt quelques heures après son dernier message, avec la prise de nouvelles quand elle
+    s'inquiète pour elle — et plus du tout si elle lui a reparlé depuis."""
+    from mika.faculties.goals.work import worry_due
+
+    p = GoalsParams()
+    heard, closed = 10 * HOUR, 10 * HOUR + 30 * MINUTE
+    g = SimpleNamespace(closed_at=closed)
+
+    def due(now, *, check_in=0, last_to=heard + MINUTE):
+        table = {"identity.handles": ("user_2",), "transcript.last_from": heard, "transcript.last_to": last_to,
+                 "others.check_in_at": check_in}
+        return worry_due(g, "user_2", SimpleNamespace(now=now, get=lambda key: table[key.name]), p)
+
+    assert not due(closed + 10 * MINUTE)
+    assert due(heard + p.share_worry_after_us)
+    assert not due(heard + p.share_worry_after_us, check_in=heard + 5 * HOUR)
+    assert due(heard + 5 * HOUR, check_in=heard + 5 * HOUR)
+    assert not due(heard + 5 * HOUR, last_to=closed + HOUR)  # elle lui a reparlé depuis
 
 
 def test_a_friend_hears_a_mention_and_a_stranger_nothing(tmp_path):

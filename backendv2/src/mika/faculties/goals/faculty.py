@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import agency as agency_c
 from mika.contracts import goals as c
+from mika.contracts import identity as identity_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import DAY, HOUR, MINUTE
@@ -39,8 +40,11 @@ from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
+from mika.vocab import causes
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import Kind, goal_of
+from mika.vocab.lineage import Lineage, admits
+from mika.vocab.privacy import hearable
 from mika.vocab.temperament import Temperament
 
 KEEP_CLOSED = 32
@@ -204,6 +208,11 @@ class GoalsParams(BaseModel):
     share_attempts: Annotated[int, Knob(
         label="Tentatives de raconter", group="Raconter", lo=1, hi=10,
         help="Après autant de tentatives qui n'ont pas abouti, elle n'essaie plus.")] = 2
+    share_worry_after_us: Annotated[int, Knob(
+        label="Reprendre des nouvelles après", group="Raconter", lo=30 * MINUTE, hi=2 * DAY,
+        help="Ce qu'elle a pensé de ce qu'une amie lui a confié, elle le lui dit en prenant de ses nouvelles : pas "
+             "pendant la conversation ni juste après — au plus tôt ce délai après son dernier message (et, si elle "
+             "s'inquiète pour elle, avec la prise de nouvelles).")] = 3 * HOUR
 
 
 def derive(t: Temperament, overrides: Any = None) -> GoalsParams:
@@ -301,6 +310,8 @@ class Goal:
     origin_at: int = 0
     #: le projet qu'elle est devenue (0 : aucun)
     became: int = 0
+    #: la filiation de la pensée d'où il est né (``GoalOpened.lineage``) : devant qui il peut se dire
+    lineage: Lineage | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,6 +351,19 @@ class GoalsState:
 INNER_BUNDLES = frozenset({"goals", "memory", "identity", "self", "attention", "social", "projects"})
 
 
+def audible(g: Goal, person: str | None, frame: Any) -> bool:
+    """Ce but peut-il se dire devant l'audience de cet épisode : la règle de ses personnes (``hearable``), et celle
+    de la pensée d'où il est né (sa filiation) — ce qu'une amie lui a confié en secret ne se raconte pas à une autre
+    parce qu'elle y a repensé (ADR 0097)."""
+    aud = frame.audience
+    if aud is None or not hearable(g.about, g.sensitivity, person, aud.level, aud.witness_level, aud.private_ok):
+        return False
+    if g.lineage is None:
+        return True
+    resolve, presumed = identity_c.resolvers(frame.get)
+    return admits(g.lineage, person, aud, resolve=resolve, presumed=presumed).ok
+
+
 def musing(g: Goal) -> bool:
     """Une curiosité sans source où chercher du neuf : une rêverie — autour d'un de ses centres d'intérêt, ou de ce
     dont on lui a parlé et qui lui a plu."""
@@ -375,8 +399,9 @@ def kept_before(s: GoalsState, g: Goal) -> tuple[int, str, int] | None:
 
 #: v3 : un rappel, un récit devancés, interrompus ou dont elle s'est ravisée ne comptent plus comme essais.
 #: v4 : ce qu'elle a retenu de sa dernière exploration d'une même curiosité (``kept_from``).
+#: v5 : un but garde la filiation de la pensée d'où il est né (ADR 0097).
 GOALS = Faculty("goals", state=GoalsState, init=lambda p: GoalsState(), params=GoalsParams, derive=derive,
-                state_version=4,
+                state_version=5,
                 # les réglages des projets, quand ils étaient des buts (ADR 0031) : d'anciens journaux les portent
                 retired_params=("project_spacing_us", "project_steps", "project_evidence"))
 GOALS.declare(*c.ALL)
@@ -650,7 +675,7 @@ def _opened(s: GoalsState, e, cx) -> GoalsState:
         about=tuple(d.about), sensitivity=d.sensitivity, source=d.source, bundles=tuple(d.bundles),
         max_steps=d.max_steps, due=d.due, urgent=d.urgent, schedule=d.schedule, approval=d.approval,
         desire=d.desire, desire_at=e.at, priority=d.priority if d.priority in c.PRIORITIES else c.NORMAL,
-        origin=d.origin, origin_at=d.origin_at,
+        origin=d.origin, origin_at=d.origin_at, lineage=d.lineage,
     )
     s = _set(s, g)
     if d.source.startswith((*CURIOSITY_SOURCES, CHECK_SOURCE)):
@@ -996,24 +1021,29 @@ def _status(s: GoalsState, cx, goal: int) -> str:
 @GOALS.appraisal(AWAITED)
 def _awaited_felt(e, cx) -> Appraisal:
     """Enfin : ce qu'elle attendait est arrivé."""
-    return Appraisal(Emotion.RELIEVED, 0.2, reason="attente comblée")
+    return Appraisal(Emotion.RELIEVED, 0.2, reason=causes.AWAITED)
 
 
 @GOALS.appraisal(c.GOAL_CLOSED)
 def _closed_felt(e, cx) -> Appraisal | None:
     """Mener à bout rend fière ; bloquer frustre ; renoncer d'elle-même laisse
-    une teinte de mélancolie. Un rappel dit n'est pas un exploit."""
+    une teinte de mélancolie. Un rappel dit n'est pas un exploit ; une réflexion
+    menée au bout (repenser à ce qu'une amie lui a confié) apaise, elle ne rend
+    pas fière — et quand elle n'aboutit pas, ça reste un peu lourd, sans frustration."""
     d = e.data
     if d.kind == c.REMINDER:
         return None
     if d.status == c.ACHIEVED and d.reason == c.MUSED:
-        return Appraisal(Emotion.DREAMY, 0.2, reason="une rêverie écrite")
+        return Appraisal(Emotion.DREAMY, 0.2, reason=causes.DAYDREAM)
+    if c.reflective(d.origin, d.source) and d.status in (c.ACHIEVED, c.STUCK):
+        return (Appraisal(Emotion.RELIEVED, 0.2, reason=causes.REFLECTED) if d.status == c.ACHIEVED else
+                Appraisal(Emotion.MELANCHOLIC, 0.2, reason=causes.STUCK))
     if d.status == c.ACHIEVED:
-        return Appraisal(Emotion.PROUD, 0.4, reason="abouti")
+        return Appraisal(Emotion.PROUD, 0.4, reason=causes.ACHIEVED)
     if d.status == c.STUCK:
-        return Appraisal(Emotion.FRUSTRATED, 0.35, reason="bloquée")
+        return Appraisal(Emotion.FRUSTRATED, 0.35, reason=causes.STUCK)
     if d.status == c.ABANDONED and d.reason in c.QUIET_ENDS:
         return None  # une rêverie qui s'efface, une réflexion sans suite : on n'a renoncé à rien
     if d.status == c.ABANDONED:
-        return Appraisal(Emotion.MELANCHOLIC, 0.25, reason="abandon")
+        return Appraisal(Emotion.MELANCHOLIC, 0.25, reason=causes.GAVE_UP)
     return None

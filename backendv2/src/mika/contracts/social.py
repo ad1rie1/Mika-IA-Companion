@@ -189,6 +189,9 @@ SENSITIVE = FactFamily("social.sensitive", arg=str, type=tuple)
 #: La référence du contenu de ses sujets délicats (un par ligne, à lire dans le
 #: magasin ; vide : aucun). Oubliée, la personne n'en a plus.
 SENSITIVE_REF = FactFamily("social.sensitive_ref", arg=str, type=str)
+#: Les personnes dont le portrait dit des sujets délicats (triées) : ce que la mémoire relit quand un portrait change
+#: (``memory.delicate``, ADR 0099).
+DELICATE_PEOPLE = FactKey("social.delicate_people", type=tuple)
 #: La référence du contenu de ce qui l'intéresse, d'après ce qu'elle a dit elle-même (un intérêt par ligne, à lire
 #: dans le magasin ; vide : aucun). Oubliée, la personne n'en a plus. Ses intérêts ne servent qu'avec elle.
 INTERESTS_REF = FactFamily("social.interests_ref", arg=str, type=str)
@@ -204,6 +207,10 @@ CIRCLE = FactKey("social.circle", type=tuple)
 #: Les personnes avec qui celle-ci a un lien (elles étaient ensemble dans une petite conversation, ou l'une l'a
 #: nommée en lui racontant sa vie), telles qu'elles valent maintenant (ADR 0058).
 TIES = FactFamily("social.ties", arg=str, type=tuple)
+#: ``WEIGHT(personne)`` : ce que cette personne compte pour elle au-delà de leur lien — sa propriétaire plus que tout
+#: autre (un réglage, ``owner_weight`` ; 1 pour les autres). Une tendance : le manque vient plus tôt, la compagnie
+#: comble plus, ce qu'elle ressent et ce qu'elle vit la touchent davantage
+WEIGHT = FactFamily("social.weight", arg=str, type=float)
 
 
 @dataclass(frozen=True, slots=True)

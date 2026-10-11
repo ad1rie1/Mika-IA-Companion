@@ -42,6 +42,7 @@ from mika.faculties.goals.faculty import (
     TASKS_KEPT,
     Goal,
     GoalsState,
+    audible,
     budget,
     musing,
     params,
@@ -55,7 +56,7 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, Superseded
 from mika.vocab.episodes import Kind, goal_of
 from mika.vocab.phrasebook import family, phrase
-from mika.vocab.privacy import Sensitivity, hearable
+from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import stems
 
 REPORT, NOTE, DROP, REFLECT = "report_step", "goal_note", "goal_drop", "goal_reflect"
@@ -76,12 +77,10 @@ def proves(ctx: Any, name: str) -> bool:
     return spec is not None and spec.bundle not in INNER_BUNDLES
 
 
-def reflective(g: Goal) -> bool:
-    """Une exploration née de ce qu'on lui a confié, d'une croyance revue, ou une rêverie : son travail, c'est d'y
-    repenser — et de l'écrire."""
-    if g.origin:
-        return g.origin in (c.FROM_EXCHANGE, c.FROM_REVISION) or musing(g)
-    return g.kind == c.EXPLORATION and g.source.startswith("thought:")
+def by_reflecting(g: Goal) -> bool:
+    """Une exploration née de ce qu'on lui a confié, d'une croyance revue (``goals.reflective``), ou une rêverie :
+    son travail, c'est d'y repenser — et de l'écrire."""
+    return c.reflective(g.origin, g.source) or musing(g)
 
 
 def last_session(g: Goal, ctx: Any) -> bool:
@@ -137,7 +136,7 @@ def closing(ctx: Any, g: Goal, status: str, *, result: str | None = None, notabl
     return c.GOAL_CLOSED.draft(
         goal=g.id, status=status, kind=g.kind, authority=g.authority, title=title_of(ctx, g),
         result=Content.of(result, level=g.sensitivity) if result else None, notable=notable, reason=reason[:300],
-        source=g.source, owner=g.owner, about=g.about, sensitivity=g.sensitivity)
+        source=g.source, owner=g.owner, about=g.about, sensitivity=g.sensitivity, origin=g.origin)
 
 
 class ReportArgs(BaseModel):
@@ -165,7 +164,7 @@ async def report_step(args: ReportArgs, ctx: Any) -> Any:
     if any(name == REPORT and ok for name, ok in ctx.calls):
         return ToolResult(ok=False, content=phrase("goals.tools.report.already"))
     worked = tuple(sorted({name for name, ok in ctx.calls if ok and (proves(ctx, name) or
-                                                                       (name == REFLECT and reflective(g)))}))
+                                                                       (name == REFLECT and by_reflecting(g)))}))
     if last_session(g, ctx) and args.verdict in (c.CONTINUE, c.WAIT) and (g.evidence + len(worked)) > 0:
         # sa dernière séance (une réflexion, une rêverie : la seule) : ce qu'elle a écrit la clôt, même si le modèle
         # dit qu'il reprendra — il n'y aura pas d'autre séance (sonde réelle du 2026-10-03 : « continue » après
@@ -180,7 +179,7 @@ async def report_step(args: ReportArgs, ctx: Any) -> Any:
     if proven:
         drafts.append(closing(ctx, g, c.ACHIEVED, result=args.summary.strip(), notable=args.notable,
                               reason=c.MUSED if musing(g) else ""))
-    elif args.verdict == c.BLOCKED and reflective(g):
+    elif args.verdict == c.BLOCKED and by_reflecting(g):
         # rêvasser, repenser à ce qu'on lui a confié : ça ne se rate pas — elle en reste là, sans « je bloque »
         drafts.append(closing(ctx, g, c.ABANDONED, reason=c.DISSIPATED if musing(g) else c.LET_GO))
     elif args.verdict == c.BLOCKED:
@@ -193,9 +192,9 @@ async def report_step(args: ReportArgs, ctx: Any) -> Any:
                           tasks=", ".join(map(str, left[:6])))
         return phrase("goals.tools.report.done")
     if args.verdict == c.DONE:  # noté, mais pas un verdict : la séance peut encore conclure
-        how = phrase("goals.tools.report.how_reflect") if reflective(g) else phrase("goals.tools.report.how_work")
+        how = phrase("goals.tools.report.how_reflect") if by_reflecting(g) else phrase("goals.tools.report.how_work")
         return ToolResult(ok=False, content=phrase("goals.tools.report.not_yet", how=how))
-    if args.verdict == c.BLOCKED and reflective(g):
+    if args.verdict == c.BLOCKED and by_reflecting(g):
         return phrase("goals.tools.report.let_go")
     if args.verdict == c.BLOCKED:
         return phrase("goals.tools.report.blocked")
@@ -233,7 +232,7 @@ async def goal_reflect(args: ReflectArgs, ctx: Any) -> Any:
     g = _goal(ctx)
     if g is None:
         return _gone()
-    if not reflective(g):
+    if not by_reflecting(g):
         return ToolResult(ok=False, content=phrase("goals.tools.reflect.not_reflection"))
     text = args.text.strip()
     mine = _words(text)
@@ -389,9 +388,8 @@ def _shown(g: Goal, texts: Mapping[str, str], frame: Frame, person: str) -> str:
     train »)."""
     when = phrase("goals.tools.remind_change.of_date", when=date_time(local(g.due, frame.env.tz_of(frame.root)))) \
         if g.due is not None else ""
-    title, aud = texts.get(g.title_ref, ""), frame.audience
-    if title and aud is not None and hearable(g.about, g.sensitivity, person, aud.level, aud.witness_level,
-                                              aud.private_ok):
+    title = texts.get(g.title_ref, "")
+    if title and audible(g, person, frame):
         return phrase("goals.tools.remind_change.titled", when=when, title=title)
     return when
 

@@ -20,12 +20,14 @@ from mika.contracts import body as body_c
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
+from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
 from mika.contracts import presence as presence_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
+from mika.contracts import world as world_c
 from mika.faculties.attention.faculty import (
     ATTENTION,
     DRIFT,
@@ -41,6 +43,7 @@ from mika.faculties.attention.faculty import (
     params,
 )
 from mika.kernel.clock import DAY, HOUR, MINUTE, local_date_of_night, next_local
+from mika.kernel.codec import h64
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
@@ -49,7 +52,7 @@ from mika.vocab.days import when_fr
 from mika.vocab.knowledge import Known, knowns
 from mika.vocab.lineage import merged
 from mika.vocab.people import is_identifiable
-from mika.vocab.phrasebook import phrase
+from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import elided, stems
 
@@ -209,15 +212,92 @@ def missing_tranche(silence_us: int, usual_days: float) -> int:
 def expected_back(frame: Frame, person: str, p: Any) -> int | None:
     """Quand une amie ou une proche qui écrit presque chaque jour, à peu près à la même heure, passera sans doute :
     son heure habituelle, le jour d'après son dernier message. ``None`` pour qui n'a pas ce rythme-là."""
-    if not is_identifiable(person) or frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
+    if not is_identifiable(person):
         return None
     ct = frame.get(social_c.CONTACT(person))
     if not ct.last_in or not ct.measured or ct.rhythm_days > p.alone_daily_rhythm_days:
+        return None
+    # la proximité se lit en dernier : son calcul est le plus cher, et la plupart n'ont pas ce rythme-là
+    if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
         return None
     hours = frame.get(others_c.HOURS(person))
     if not hours.learned or hours.usual is None:
         return None
     return next_local(ct.last_in + _EXPECTED_AFTER_US, hours.usual, 0, frame.env.tz_of(frame.root))
+
+
+# ── Les souvenirs qui reviennent (ADR 0098) ─────────────────────────────
+
+#: les souvenirs parmi lesquels l'un peut revenir (les plus importants d'abord)
+REMINISCE_POOL = 200
+#: parmi eux, ceux qui peuvent revenir sans raison (un souvenir mineur et lointain ne revient pas de lui-même)
+REMINISCE_UNCUED = 20
+
+
+def reminisce_due(state: AttentionState, frame: Frame, p: Any, tried_at: int = 0) -> int | None:
+    """Quand un souvenir pourrait lui revenir — éveillée, l'appelant le vérifie : pas plus de ``reminisce_per_day``
+    par jour, espacés, après un moment où rien ne se passe (``needs.idle_since`` : ni message, ni parole) ; une
+    tentative sans souvenir attend l'espacement suivant."""
+    if p.reminisce_per_day <= 0:
+        return None
+    day = [t for t, _item in state.reminisced if frame.now - t < DAY]
+    if len(day) >= p.reminisce_per_day:
+        return min(day) + DAY
+    last = max((t for t, _item in state.reminisced), default=0)
+    return max(last + p.reminisce_spacing_us, tried_at + p.reminisce_spacing_us,
+               frame.get(needs_c.NEEDS).idle_since + p.reminisce_idle_us)
+
+
+def _years_ago(frame: Frame, at: int) -> int:
+    """Combien d'années tout rond depuis ce jour-là (0 : ce n'est pas son anniversaire aujourd'hui)."""
+    then, today = frame.local(at).date(), frame.local().date()
+    return today.year - then.year if (then.month, then.day) == (today.month, today.day) else 0
+
+
+def reminiscence(state: AttentionState, frame: Frame, store: Any, p: Any) -> Draft[Any] | None:
+    """Un souvenir qui lui revient de lui-même : ce qui s'est passé il y a un an jour pour jour d'abord, puis ce que
+    lui rappelle ce qu'elle a entre les mains (« dessiner » et le jour où elle a dessiné pour Alice), sinon l'un de
+    ses souvenirs qui comptent, sans raison. Un peu ancien, jamais un qui vient de revenir. Ses mots à elle, son
+    émotion d'alors (jugée à la relecture, jamais devinée) ; sa filiation le suit : il ne se redit que devant qui ses
+    sources le permettent."""
+    if store is None:
+        return None
+    rows = store.query_mind(f"{memory_c.SELECT_KNOWN} WHERE kind=? AND born_at <= ? "
+                            "ORDER BY importance DESC, id DESC LIMIT ?",
+                            (memory_c.SOUVENIR, frame.now - p.reminisce_min_age_us, REMINISCE_POOL))
+    recent = {item for _t, item in state.reminisced}
+    pool = [k for k in knowns(rows, memory_c.KNOWN_COLUMNS) if k.id not in recent and k.text.strip()]
+    if not pool:
+        return None
+    doing = frame.get(world_c.DOING)
+    cue = stems(doing.label) if doing is not None else set()
+    years = {k.id: _years_ago(frame, k.born_at) for k in pool}
+    if anniversary := [k for k in pool if years[k.id]]:
+        k = anniversary[0]
+        ago = family("attention.thought.reminisce.years")[{1: "one", 2: "two", 3: "three"}.get(years[k.id], "many")]
+        text = phrase("attention.thought.reminisce.anniversary", years=ago, text=_clip(k.text, 200))
+        weight = 1.0
+    elif cued := [k for k in pool if cue & stems(k.text)]:
+        k = cued[0]
+        text = phrase("attention.thought.reminisce.cued", what=doing.label, text=_clip(k.text, 200))
+        weight = 1.0
+    else:
+        options = pool[:REMINISCE_UNCUED]
+        pick = (h64("souvenir", frame.local().date().isoformat(), len(state.reminisced)) % 10_000) / 10_000 * \
+            sum(max(0.05, k.importance) for k in options)
+        k = options[-1]
+        for option in options:
+            pick -= max(0.05, option.importance)
+            if pick <= 0:
+                k = option
+                break
+        text = phrase("attention.thought.reminisce.plain", text=_clip(k.text, 200))
+        weight = 0.5 + 0.5 * min(1.0, max(0.0, k.importance))
+    emotion = Emotion(k.emotion) if k.emotion in {e.value for e in Emotion} else Emotion.THINKING
+    return c.THOUGHT_BORN.draft(text=Content.of(text, level=k.sensitivity), emotion=emotion.value,
+                                intensity=round(p.reminisce_intensity * weight, 3), origin=c.REMINISCENCE,
+                                about=tuple(k.about), sensitivity=k.sensitivity, source=k.id, lineage=k.lineage,
+                                dedupe_key=f"souvenir:{k.id}:{frame.local().date().isoformat()}")
 
 
 def alone_due(state: AttentionState, p: Any, frame: Frame | None = None) -> int | None:
@@ -250,6 +330,8 @@ def alone_due(state: AttentionState, p: Any, frame: Frame | None = None) -> int 
 class Watch:
     def __init__(self) -> None:
         self.missing_at = 0
+        #: la dernière fois qu'elle a laissé venir un souvenir (même sans qu'aucun vienne)
+        self.reminisce_at = 0
 
     def next_due(self, state: AttentionState, frame: Frame, last_run: int | None) -> int | None:
         p = params(frame.env.params_of("attention", frame.root))
@@ -268,6 +350,8 @@ class Watch:
             if alone is not None:
                 times.append(alone)
             times += [t for t, _person in left_hanging(state, p, here(frame))[:1]]
+            if (back := reminisce_due(state, frame, p, self.reminisce_at)) is not None:
+                times.append(back)
         return max(frame.now, min(times)) if times else None
 
     async def run(self, ctx: Any) -> None:
@@ -305,6 +389,11 @@ class Watch:
             for due, person in left_hanging(state, p, here(frame)):
                 if due <= frame.now and person not in pending:
                     drafts.append(self._hanging(state, frame, person, p))
+        back = reminisce_due(state, frame, p, self.reminisce_at) if awake else None
+        if back is not None and back <= frame.now:
+            self.reminisce_at = frame.now
+            if (remembered := reminiscence(state, frame, store, p)) is not None:
+                drafts.append(remembered)
         thoughts = frame.get(c.THOUGHTS)
         if awake and thoughts and thoughts[0].intensity >= p.dwell_from \
                 and frame.now - state.dwelt_at >= p.dwell_every_us:

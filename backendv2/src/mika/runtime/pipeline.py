@@ -37,7 +37,7 @@ from __future__ import annotations
 import asyncio
 import difflib
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -231,6 +231,9 @@ class EpisodeRunner:
         self.composer = composer or Composer()
         self.budget = budget
         self.lease_margin_us = int(lease_margin_s * 1_000_000)
+        #: ce que les facultés tirent d'un énoncé, journalisé juste après lui (``Bootstrap.interpret``) : ce que le
+        #: modèle qui a répondu a lu de la personne (ADR 0093) ; ``None`` : personne n'interprète
+        self.interpret: Callable[[int, str], Awaitable[None]] | None = None
         self._live: dict[str, _Live] = {}
 
     # ── préemption ──
@@ -364,7 +367,8 @@ class EpisodeRunner:
                 envelope = round((64 + 16 * 2) * budget.chars_per_token)
                 prompt, trace = self.composer.compose(
                     blocks, kind=req.kind, audience_level=audience.level, witness_level=audience.witness_level,
-                    tied_level=audience.tied_level, muted_tags=policy.muted_tags, message=message, budget=budget,
+                    tied_level=audience.tied_level, veiled_level=audience.veiled_level, muted_tags=policy.muted_tags,
+                    message=message, budget=budget,
                     reserved=_reserved(persona, more, declared) + envelope if policy.role is not None else 0,
                     typed_chars=req.typed_chars if message == req.message else None,
                 )
@@ -454,6 +458,8 @@ class EpisodeRunner:
                 report.text = text
                 report.utterance_seq = commit.seqs[-1]
                 mind.untrack(eid)
+                if self.interpret is not None:
+                    await self.interpret(commit.seqs[-1], eid)
                 await self._settle(ep, Outcome.DONE)
         except Superseded as failure:
             await self._settle(ep, Outcome.SUPERSEDED, failure)

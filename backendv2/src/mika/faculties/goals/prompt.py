@@ -27,8 +27,8 @@ from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, kept_before, live, musing, status
-from mika.faculties.goals.tools import date_time, reflective, titled
+from mika.faculties.goals.faculty import GOALS, Goal, GoalsState, audible, kept_before, live, musing, status
+from mika.faculties.goals.tools import by_reflecting, date_time, titled
 from mika.faculties.goals.work import FULL, MENTION, worry_of
 from mika.kernel.clock import DAY, HOUR, MINUTE, local
 from mika.kernel.faculty import Zone
@@ -39,7 +39,7 @@ from mika.vocab.episodes import CONVERSATIONAL, Kind, goal_of
 from mika.vocab.knowledge import knowns, lineage_of
 from mika.vocab.lineage import Lineage, admits
 from mika.vocab.phrasebook import family, phrase
-from mika.vocab.privacy import Sensitivity, hearable, private_to
+from mika.vocab.privacy import Sensitivity, private_to
 
 SHOWN = 4
 #: les dernières consignes d'un opérateur montrées pendant un pas
@@ -172,14 +172,14 @@ def _what(g: Goal, frame: Frame, texts: Mapping[str, str],
     elif musing(g):
         lines.append(phrase("goals.step.interest_musing"))
         lines.append(phrase("goals.step.daydream_rule"))
-    elif reflective(g) and name:
+    elif by_reflecting(g) and name:
         lines.append(phrase("goals.step.confided", name=name, when=when, quoted=quoted))
         closeness = family("goals.step.closeness").get(frame.get(social_c.CLOSENESS(person)))
         if closeness:
             lines.append(phrase("goals.step.closeness_line", name=name, closeness=closeness))
         lines.append(phrase("goals.step.reflect_on", name=name))
         lines.append(phrase("goals.step.reflection_rule"))
-    elif reflective(g):
+    elif by_reflecting(g):
         lines.append(phrase("goals.step.came", when=when, quoted=quoted))
         lines.append(phrase("goals.step.reflection_rule"))
     elif g.origin == c.FROM_SIGNAL:
@@ -339,7 +339,7 @@ async def _context(s: GoalsState, frame: Frame, ports: Mapping[str, Any]) -> dic
     store = ports.get("store")
     gid = _subject(frame)
     g = s.goals.get(gid) if gid is not None else None
-    if store is None or g is None or g.kind != c.EXPLORATION or musing(g) or not reflective(g) or not g.owner:
+    if store is None or g is None or g.kind != c.EXPLORATION or musing(g) or not by_reflecting(g) or not g.owner:
         return None
     public = g.sensitivity <= Sensitivity.ANODYNE  # une pensée née dans un salon est anodine (ADR 0034)
     exchange = exchange_of(store, frame, g.owner, g.origin_at, public) \
@@ -395,8 +395,7 @@ def _quoted(g: Goal, texts: Mapping[str, str]) -> str:
 def _levels(g: Goal, person: str | None, frame: Frame) -> tuple[int, bool] | None:
     """(niveau, témoin) d'un contenu du but devant cette audience — ou rien
     s'il ne peut pas s'y dire. Ce qui ne concerne que l'interlocuteur est à lui."""
-    aud = frame.audience
-    if aud is None or not hearable(g.about, g.sensitivity, person, aud.level, aud.witness_level, aud.private_ok):
+    if not audible(g, person, frame):
         return None
     others = [a for a in g.about if a != person]
     return (g.sensitivity, person in g.about) if others else (0, False)
@@ -454,7 +453,7 @@ def _live_section(s: GoalsState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
     tz = frame.env.tz_of(frame.root)
     for g in _recent(s, frame.now)[-SHOWN * 2:]:
         title = titled(g, texts)[0]
-        if not title or not hearable(g.about, g.sensitivity, person, aud.level, aud.witness_level, aud.private_ok):
+        if not title or not audible(g, person, frame):
             continue
         if musing(g):
             # une rêverie n'est ni une nouvelle ni une réussite : rien de neuf n'est arrivé. Elle peut le dire si on

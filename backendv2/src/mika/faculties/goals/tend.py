@@ -76,7 +76,7 @@ from mika.faculties.goals.faculty import (
     subject_key,
     workable,
 )
-from mika.faculties.goals.tools import closing, reflective
+from mika.faculties.goals.tools import by_reflecting, closing
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant, local, within_daily_window
 from mika.kernel.codec import h64
 from mika.kernel.events import Content
@@ -84,6 +84,7 @@ from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
 from mika.vocab import affect as A
+from mika.vocab.interests import EXPLORE_WEIGHT, LIVED, InterestView, subject_of
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
@@ -228,18 +229,19 @@ class Seed:
             return False
         return not capped(s, frame, p) and (anytime or frame.now >= spaced_until(s, p))
 
-    def _interest(self, s: GoalsState, frame: Frame, p: Any) -> str | None:
+    def _interest(self, s: GoalsState, frame: Frame, p: Any) -> InterestView | None:
         busy = _live_sources(s, frame.now)
-        options: list[tuple[float, str]] = []
-        for interest in frame.get(self_c.PERSONA).interests:
-            source = f"interest:{interest}"
+        options: list[tuple[float, InterestView]] = []
+        for interest in frame.get(self_c.INTERESTS):
+            source = f"interest:{interest.key}"
             last = s.explored.get(source, 0)
             if source in busy or (last and frame.now - last < p.interest_rest_us):
                 continue
             # ce qu'elle a délaissé l'attire davantage (jamais exploré : comme une semaine), sans ordre fixe — un
             # tourniquet sur la liste de sa persona, un sujet par jour dans l'ordre, se reconnaît (sonde du 2026-10-02)
+            # ; ce qui la passionne en ce moment, deux fois plus, ce qui s'est endormi, quatre fois moins (ADR 0089)
             idle_days = (frame.now - last) / DAY if last else 7.0
-            options.append((1.0 + min(7.0, idle_days), interest))
+            options.append(((1.0 + min(7.0, idle_days)) * EXPLORE_WEIGHT[interest.level], interest))
         if not options:
             return None
         hour = frame.local().replace(minute=0, second=0, microsecond=0).isoformat()
@@ -302,7 +304,8 @@ class Seed:
                 bundles=REFLECT_BUNDLES if reflecting else inherited(t.bundle),
                 max_steps=p.reflection_steps if reflecting else p.exploration_steps, source=source,
                 sensitivity=t.sensitivity, desire=round(min(1.0, 0.4 + t.intensity), 4),
-                origin=ORIGINS.get(t.origin, t.origin), origin_at=t.born_at, dedupe_key=f"but:{source}"))
+                origin=ORIGINS.get(t.origin, t.origin), origin_at=t.born_at, lineage=t.lineage,
+                dedupe_key=f"but:{source}"))
             return
         check = self._check(s, frame, p)
         text = store.content([check.text_ref]).get(check.text_ref) if check is not None and store is not None \
@@ -325,21 +328,25 @@ class Seed:
         if talk is not None:
             await ctx.emit(_talk_musing(frame, talk, p))
             return
-        interest = self._interest(s, frame, p)
-        if interest is None:
+        view = self._interest(s, frame, p)
+        texts = store.content([r for r in (view.label_ref, view.detail_ref) if r]) \
+            if view is not None and view.origin == LIVED and store is not None else {}
+        # un intérêt vécu se dit par son sujet (le sien, dit par elle) ; oublié, il n'a plus rien à explorer
+        interest = (view.line or texts.get(view.label_ref) or "") if view is not None else ""
+        if not interest:
             self.idle_until = frame.now + HOUR  # rien à rêvasser : elle ne recherche pas à chaque événement
             return
-        source = f"interest:{interest}"
+        source = f"interest:{view.key}"
         day = frame.local().date().isoformat()
         sources = _sources(frame)
         # avec ses flux, elle va voir ce qu'il y a de neuf ; sans, elle rêvasse (et rien ne se raconte comme une
         # nouvelle : il n'y a rien de nouveau)
-        subject = of_words(lowered(short(interest)))
+        subject = of_words(lowered(subject_of(interest)))
         title = phrase("goals.title.interest_search", subject=subject) if sources else \
             phrase("goals.title.interest_muse", subject=subject)
         await ctx.emit(c.GOAL_OPENED.draft(
             kind=c.EXPLORATION, authority=c.SELF, title=Content.of(title, level=0),
-            details=Content.of(interest, level=0),
+            details=Content.of(texts.get(view.detail_ref) or interest, level=0), about=view.about,
             # une rêverie dit « j'aimerais », pas « je fais » : elle ne devient pas un projet
             bundles=tuple(sorted({*EXPLORE_BUNDLES, *sources})) if sources else REFLECT_BUNDLES,
             max_steps=p.exploration_steps if sources else p.musing_steps, source=source, sensitivity=0,
@@ -429,12 +436,6 @@ def _talk_musing(frame: Frame, talk: Talk, p: Any) -> Any:
         desire=round(min(1.0, frame.get(needs_c.NEEDS).curiosity), 4), dedupe_key=f"but:talk:{talk.message}")
 
 
-def short(interest: str) -> str:
-    """Un centre d'intérêt en quelques mots (la persona les rédige en phrases)."""
-    head = re.split(r" \(| — | - |, ", interest.strip(), maxsplit=1)[0].strip()
-    return head[:80] or interest[:80]
-
-
 #: une voyelle élide « de » (pas un h : « de Hollow Knight »)
 _VOWELS = "aeiouàâäéèêëîïôöùûüœæ"
 
@@ -508,7 +509,7 @@ def closures(s: GoalsState, frame: Frame) -> list[tuple[Goal, str, str]]:
             # rêvasser ne se rate pas : une rêverie qui ne donne rien, ou dont l'envie passe, se dissipe — sans
             # « je bloque », sans frustration ni mélancolie
             out.append((g, c.ABANDONED, c.DISSIPATED))
-        elif reflective(g) and (g.silent >= p.silent_before_blocked or g.steps >= budget(g, p)
+        elif by_reflecting(g) and (g.silent >= p.silent_before_blocked or g.steps >= budget(g, p)
                                 or desire(g, now, p) < p.abandon_below):
             # repenser à ce qu'on lui a confié ne se rate pas non plus (ADR 0053) : une réflexion qui n'a rien donné en
             # sa séance en reste là, comme une rêverie qui se dissipe — sans « Je bloque sur : Repenser à ce que Sam

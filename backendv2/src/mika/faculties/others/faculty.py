@@ -43,6 +43,7 @@ enregistrés (``others.read``), le reste des événements publics des autres.
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 import statistics
@@ -62,7 +63,6 @@ from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
-from mika.faculties.others.tone import closing, measure
 from mika.kernel.arbitration import Candidate, Modulation, RowView
 from mika.kernel.clock import DAY, HOUR, MINUTE, instant, within_daily_window
 from mika.kernel.events import Draft
@@ -72,11 +72,13 @@ from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, floor
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
-from mika.vocab import privacy
-from mika.vocab.affect import Appraisal, Declared, Emotion, emotion_of
+from mika.vocab import causes, privacy
+from mika.vocab.affect import Appraisal, Declared, Emotion, emotion_of, felt_pad
 from mika.vocab.episodes import CONVERSATIONAL, Kind
+from mika.vocab.farewell import closing
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
+from mika.vocab.reading import OTHER, Reading
 from mika.vocab.temperament import Temperament, lerp
 from mika.vocab.words import SALUTATIONS, fold
 
@@ -315,7 +317,8 @@ class Model:
     recent_arousal: float = 0.3
     last_at: int = 0
     last_message: int = 0
-    last_cues: tuple[str, ...] = ()
+    #: ce que le modèle a senti de son dernier message lu, en facettes (ADR 0093)
+    last_felt: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,8 +350,11 @@ class OthersState:
 #: v2 : ce qui rassure se juge à la lecture ; sa propre réponse peut l'inquiéter ; la contagion.
 #: v3 : les heures où chacun écrit ; encourager la veille, demander après — une fois chacun.
 #: v4 : ce qu'elle a dit d'un moment se range sous son fil (reporté, redit, revenu : le même, ADR 0079).
+#: v5 : ce qu'elle a senti du dernier message (``last_felt``, ADR 0093) ; les heures apprises sur le message reçu.
+#: v6 : sa peine en répondant au premier message d'une amie n'inquiète pas plus que lui ; son ton se lit sous toutes
+#: ses adresses (ADR 0094).
 OTHERS = Faculty("others", state=OthersState, init=lambda p: OthersState(), params=OthersParams, derive=derive,
-                 state_version=4)
+                 state_version=6)
 OTHERS.declare(*c.ALL)
 
 
@@ -390,7 +396,7 @@ def confidence(m: Model, p: OthersParams, closeness: str = social_c.ACQUAINTANCE
     return min(1.0, m.observed / p.confident_after)
 
 
-def learn(m: Model, valence: float, arousal: float, message: int, cues: tuple[str, ...], at: int,
+def learn(m: Model, valence: float, arousal: float, message: int, felt: tuple[tuple[str, float], ...], at: int,
           p: OthersParams) -> Model:
     """Un message de plus : l'habituel bouge un peu (moyenne qui part d'une
     neutralité supposée), l'état du moment beaucoup."""
@@ -402,8 +408,15 @@ def learn(m: Model, valence: float, arousal: float, message: int, cues: tuple[st
         usual_arousal=round(m.usual_arousal + weight * (arousal - m.usual_arousal), 5),
         recent_valence=round(now_v + p.recent_weight * (valence - now_v), 5),
         recent_arousal=round(now_a + p.recent_weight * (arousal - now_a), 5),
-        last_at=at, last_message=message, last_cues=cues,
+        last_at=at, last_message=message, last_felt=felt,
     )
+
+
+def heard(s: OthersState) -> set[str]:
+    """Celles qui lui ont écrit : chaque message reçu note son heure (``hours``) — et celles dont elle a lu le ton
+    (le journal d'avant l'ADR 0093 ne notait les heures qu'avec la lecture). Ce qu'elle sent de quelqu'un n'est pas
+    une condition pour penser à elle."""
+    return set(s.hours.keys()) | set(s.people.keys())
 
 
 def model_of(s: OthersState, person: str, handles: Any) -> Model | None:
@@ -428,7 +441,7 @@ def reading(s: OthersState, person: str, now: int, p: OthersParams,
     v, a = current(m, now, p)
     return c.MindReading(person, m.observed, round(m.usual_valence, 3), round(m.usual_arousal, 3), round(v, 3),
                          round(a, 3), round(v - m.usual_valence, 3), round(confidence(m, p, closeness), 3),
-                         m.last_at, m.last_message, m.last_cues)
+                         m.last_at, m.last_message, m.last_felt)
 
 
 def _logit(x: float) -> float:
@@ -449,39 +462,77 @@ def receptivity(s: OthersState, person: str, band: str, p: OthersParams) -> tupl
     return answered, missed, estimate, round(max(-bound, min(bound, shift)), 4)
 
 
-# ── Lire un message à son arrivée ─────────────────────────────────────────
+# ── Ce qu'elle a senti de la personne (ADR 0093) ─────────────────────────
 
 
-@OTHERS.interpret(rt.PERCEPTION_RECEIVED)
+def _their_words(ports: Any, d: Any) -> str:
+    """Les messages auxquels elle répond (leur forme compte : « ok » ne rassure pas), lus dans le fil ; vide si on ne
+    peut pas les lire."""
+    store = (ports or {}).get("store")
+    ids = tuple(getattr(d, "answers", ()) or ()) or ((d.reply_to,) if d.reply_to is not None else ())
+    if store is None or not ids:
+        return ""
+    marks = ",".join("?" * len(ids))
+    try:
+        rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id IN ({marks}) ORDER BY id",
+                                ids)
+    except Exception:  # noqa: BLE001 — une lecture manquée : ni « bref », ni rassurant par sa longueur
+        return ""
+    return " ".join(str(r[0] or "") for r in rows)
+
+
+def brief(text: str) -> bool:
+    """Deux mots au plus, ni question ni bonjour : sa forme, pas son sens (« ok », « bof »)."""
+    tokens = re.findall(r"\w+", fold(text))
+    return bool(tokens) and len(tokens) <= 2 and not text.strip().endswith("?") and tokens[0] not in SALUTATIONS
+
+
+@OTHERS.interpret(rt.UTTERANCE)
 def _read(s: OthersState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]:
-    """Ce qu'elle lit dans la forme d'un message, et ce qu'elle en attendait —
-    journalisé avant la réponse : sa réponse voit déjà la surprise. Ce qui la
-    rassure tient compte de ce qu'elle sait de grave dans sa vie
-    (``memory.hard_times``)."""
+    """Ce qu'elle a senti de la personne en lui répondant : le jugement du modèle qui a lu son message (sa balise
+    ``[EN_FACE: …]`` : des facettes, un événement grave) — jamais une lecture des mots par le code (ADR 0093). Ce
+    qu'elle en attendait, la surprise, l'inquiétude pour une amie, la contagion s'en tirent. Sans balise, rien ne se
+    lit. Ce qui la rassure tient compte de ce qu'elle sait de grave dans sa vie (``memory.hard_times``)."""
     d = ev.data
-    text = d.text.text or ""
-    if not d.addressed or not is_identifiable(d.handle) or not text.strip():
+    if d.kind != Kind.REPLY or not d.target or d.reply_to is None or not is_identifiable(d.target):
+        return []
+    their = Reading.decode(d.annotation(expression_c.READING_ANNOTATION))
+    if their is None:
         return []
     p = params(frame.env.params_of("others", frame.root))
-    person = frame.get(identity_c.PERSON(d.handle))
-    tone = measure(text)
-    m = s.people.get(person) or Model()
+    person = frame.get(identity_c.PERSON(d.target))
+    valence, arousal = felt_pad(their.felt)
+    text = _their_words(ports, d)
+    m = model_of(s, person, frame.get(identity_c.HANDLES(person))) or Model()
     expected, _ = current(m, ev.at, p)
     level = frame.get(social_c.CLOSENESS(person))
     known = confidence(m, p, level)
     close = level in (social_c.FRIEND, social_c.CLOSE)
+    grave = bool(their.grave)
     # un événement grave inquiète venant d'une amie, quel que soit son ton habituel ; un message lourd, seulement
     # s'il tranche avec ce qu'elle attendait d'elle
-    concern = close and (tone.grave or (known >= p.concern_confidence and tone.valence <= p.concern_below
-                                        and expected - tone.valence >= p.concern_drop))
-    contagion, emotion = _contagion(s, person, tone, level, ev.at, p)
-    hard = is_identifiable(person) and frame.get(memory_c.HARD_TIMES(person)) > 0
-    return [c.READ.draft(person=person, handle=d.handle, message=ev.seq, valence=tone.valence, arousal=tone.arousal,
-                         cues=tone.cues, expected=round(expected, 3), confidence=round(known, 3),
-                         surprise=round(abs(tone.valence - expected) * known, 3), concern=concern,
-                         public=bool(d.public or d.room), grave=tone.grave,
-                         relief=reassuring(m, tone.valence, text, p, hard=hard), contagion=contagion,
-                         contagion_emotion=emotion, closing=closing(text) and not d.room)]
+    concern = close and (grave or (known >= p.concern_confidence and valence <= p.concern_below
+                                   and expected - valence >= p.concern_drop))
+    contagion, emotion = _contagion(s, person, their.felt, valence, level, ev.at, p,
+                                    frame.get(social_c.WEIGHT(person)))
+    hard = frame.get(memory_c.HARD_TIMES(person)) > 0
+    return [c.READ.draft(person=person, handle=d.target, message=d.reply_to, valence=valence, arousal=arousal,
+                         felt=their.felt, expected=round(expected, 3), confidence=round(known, 3),
+                         surprise=round(abs(valence - expected) * known, 3), concern=concern,
+                         public=bool(getattr(d, "room", None)), grave=grave,
+                         grave_kind=their.grave if their.grave != OTHER else "",
+                         relief=reassuring(m, valence, text, p, hard=hard), contagion=contagion,
+                         contagion_emotion=emotion, brief=brief(text), after_reply=True)]
+
+
+@OTHERS.interpret(rt.PERCEPTION_RECEIVED)
+def _farewell(s: OthersState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]:
+    """« Bonne nuit », « à demain » : elle clôt la conversation — reconnu à l'arrivée du message, à sa forme (ce
+    n'est pas une émotion), pour que la clôture vaille même si elle ne répond pas."""
+    d = ev.data
+    if not d.addressed or d.room or not is_identifiable(d.handle) or not closing(d.text.text or ""):
+        return []
+    return [c.FAREWELL.draft(person=frame.get(identity_c.PERSON(d.handle)), handle=d.handle, message=ev.seq)]
 
 
 def reassuring(m: Model, valence: float, text: str, p: OthersParams, *, hard: bool = False) -> bool:
@@ -505,21 +556,21 @@ CONTAGION_BY_CLOSENESS = {social_c.STRANGER: 0.0, social_c.ACQUAINTANCE: 0.5, so
                           social_c.CLOSE: 1.0}
 
 
-def _contagion(s: OthersState, person: str, tone: Any, level: str, at: int, p: OthersParams) -> tuple[float, str]:
-    """Ce que son ton du moment lui transmet : une émotion (joie, tension, peine)
-    et une petite intensité, proportionnée à leur proximité, plafonnée par fenêtre."""
-    if abs(tone.valence) < p.contagion_from:
+def _contagion(s: OthersState, person: str, felt: tuple[tuple[str, float], ...], valence: float, level: str,
+               at: int, p: OthersParams, weight: float = 1.0) -> tuple[float, str]:
+    """Ce que ce qu'elle ressent lui transmet : sa facette la plus forte, telle que le modèle l'a lue (une amie
+    furieuse contre son patron lui laisse un peu de colère, pas de l'anxiété), à une petite intensité proportionnée
+    à leur proximité (sa propriétaire, davantage : ``weight``), plafonnée par fenêtre."""
+    if not felt or abs(valence) < p.contagion_from:
         return 0.0, ""
-    raw = p.contagion_gain * abs(tone.valence) * CONTAGION_BY_CLOSENESS.get(level, 0.0)
+    raw = p.contagion_gain * abs(valence) * CONTAGION_BY_CLOSENESS.get(level, 0.0) * weight
     start, used = s.contagion.get(person, (at, 0.0))
     if at - start >= p.contagion_window_us:
         used = 0.0
     intensity = round(max(0.0, min(raw, p.contagion_cap - used)), 3)
     if intensity < 0.01:
         return 0.0, ""
-    if tone.valence > 0:
-        return intensity, Emotion.HAPPY.value
-    return intensity, (Emotion.ANXIOUS if tone.arousal >= 0.5 else Emotion.SAD).value
+    return intensity, felt[0][0]
 
 
 # ── Réducteurs ────────────────────────────────────────────────────────────
@@ -529,13 +580,8 @@ def _contagion(s: OthersState, person: str, tone: Any, level: str, at: int, p: O
 def _learned(s: OthersState, e, cx) -> OthersState:
     d = e.data
     p = params(cx.params)
-    m = learn(s.people.get(d.person) or Model(), d.valence, d.arousal, d.message, tuple(d.cues), e.at, p)
+    m = learn(s.people.get(d.person) or Model(), d.valence, d.arousal, d.message, tuple(d.felt), e.at, p)
     s = replace(s, people=s.people.set(d.person, m))
-    moment = cx.local(e.at)
-    seen = (moment.date().toordinal(), moment.hour)
-    pairs = s.hours.get(d.person, ())
-    if seen not in pairs:  # une heure d'un jour compte une fois, quel que soit le nombre de messages
-        s = replace(s, hours=s.hours.set(d.person, (*pairs, seen)[-HOURS_KEPT:]))
     if d.contagion > 0:
         start, used = s.contagion.get(d.person, (e.at, 0.0))
         if e.at - start >= p.contagion_window_us:
@@ -547,7 +593,10 @@ def _learned(s: OthersState, e, cx) -> OthersState:
     # elle va mieux : plus d'inquiétude — un vrai message plus léger, pas un « ok » (lecture d'avant ce
     # jugement : n'importe quel message pas lourd)
     relieved = d.relief if d.relief is not None else d.valence > p.concern_below
-    if d.person in s.concerns and relieved:
+    # lu en lui répondant (ADR 0093) : sa réponse inquiète à ce même message vient d'ouvrir l'inquiétude — la lecture
+    # de ce message ne la referme pas, seul un message d'après le peut
+    opened_here = d.person in s.concerns and s.concerns[d.person][0] == d.message
+    if d.person in s.concerns and relieved and not opened_here:
         return replace(s, concerns=s.concerns.delete(d.person))
     return s
 
@@ -583,14 +632,20 @@ def _worried_reply(s: OthersState, e: Any, cx: Any) -> OthersState:
     d = e.data
     declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
     p = params(cx.params)
-    if declared is None or declared.emotion not in WORRIED or declared.intensity < p.declared_concern_from:
+    # une de ses facettes suffit : « triste 0,5, attendrie 0,3 » s'inquiète aussi (ADR 0093)
+    if declared is None or not any(Emotion(e) in WORRIED and x >= p.declared_concern_from for e, x in declared.all):
         return s
     person = cx.facts.get(identity_c.PERSON(d.target))
     if person in s.concerns or cx.facts.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
         return s
-    m = s.people.get(person)
+    m = model_of(s, person, cx.facts.get(identity_c.HANDLES(person)))
     if m is not None and m.usual_valence <= p.concern_below:
         return s  # elle râle toujours : sa propre peine pour elle ne dit rien de neuf
+    their = Reading.decode(d.annotation(expression_c.READING_ANNOTATION))
+    if m is None and their is not None and felt_pad(their.felt)[0] <= p.concern_below:
+        # son ton encore inconnu, ce message se lit lourd de lui-même : sa lecture en décide (une inquiétude s'il
+        # est grave, ADR 0093) — sa peine ne dit rien de plus que lui
+        return s
     opens = e.at + round(p.checkin_after_us * (1.0 + p.checkin_jitter * cx.rng.random()))
     return replace(s, concerns=s.concerns.set(person, (d.reply_to or e.seq, e.at, opens)))
 
@@ -601,7 +656,7 @@ def _worried_reply(s: OthersState, e: Any, cx: Any) -> OthersState:
 REACHED = frozenset({c.CHECK_IN, attention_c.THOUGHT})
 
 
-@OTHERS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, social_c.CLOSENESS])
+@OTHERS.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, identity_c.HANDLES, social_c.CLOSENESS])
 def _wrote(s: OthersState, e, cx) -> OthersState:
     """Elle écrit d'elle-même à quelqu'un : on mesurera le temps qu'il met à
     répondre (pas à une salutation ni à un rappel : ce n'était pas une
@@ -631,10 +686,16 @@ def _wrote(s: OthersState, e, cx) -> OthersState:
 
 @OTHERS.reducer(rt.PERCEPTION_RECEIVED, reads=[identity_c.PERSON])
 def _answered(s: OthersState, e, cx) -> OthersState:
+    """Un message qui lui est adressé : l'heure où la personne écrit, et le délai de sa réponse à une initiative."""
     d = e.data
     if not d.addressed or not is_identifiable(d.handle):
         return s
     person = cx.facts.get(identity_c.PERSON(d.handle))
+    moment = cx.local(e.at)
+    seen = (moment.date().toordinal(), moment.hour)
+    pairs = s.hours.get(person, ())
+    if seen not in pairs:  # une heure d'un jour compte une fois, quel que soit le nombre de messages
+        s = replace(s, hours=s.hours.set(person, (*pairs, seen)[-HOURS_KEPT:]))
     pending = s.awaiting.get(person)
     if pending is None:
         return s
@@ -689,21 +750,35 @@ def _reply_delay(s: OthersState, cx, arg: tuple[str, str]) -> c.DelayReading:
     return c.DelayReading(len(samples), int(statistics.median(samples)) if samples else 0)
 
 
+@functools.lru_cache(maxsize=16)
+def assumed_night(start_min: int, end_min: int) -> tuple[bool, ...]:
+    """Les 24 heures d'une nuit supposée (vrai : la nuit), d'après ses bornes (minutes depuis minuit)."""
+    return tuple(within_daily_window(h * 60 + 30, start_min, end_min) for h in range(24))
+
+
 def hours_reading(pairs: tuple[tuple[int, int], ...], p: OthersParams) -> c.HoursReading:
     """Les heures où elle écrit : une heure est « à elle » quand elle a écrit à cette heure-là, ou juste à côté,
     un jour au moins ; son heure habituelle, celle où elle a écrit le plus de jours. Tant que trop peu de jours
     sont vus, une nuit ordinaire (supposée) — jamais rien d'appris sur trois messages."""
     days = len({day for day, _h in pairs})
+    night = assumed_night(p.assumed_night_start_min, p.assumed_night_end_min)
     if days < p.hours_min_days:
-        night = tuple(within_daily_window(h * 60 + 30, p.assumed_night_start_min, p.assumed_night_end_min)
-                      for h in range(24))
-        return c.HoursReading(days, tuple(not n for n in night), False, None)
+        day = tuple(not n for n in night)
+        return c.HoursReading(days, day, False, None, day)
     counts = [0] * 24
     for _day, h in set(pairs):
         counts[h % 24] += 1
     active = tuple(counts[(h - 1) % 24] + counts[h] + counts[(h + 1) % 24] > 0 for h in range(24))
     usual = max(range(24), key=lambda h: (counts[h], -h))
-    return c.HoursReading(days, active, True, usual)
+    # quelqu'un qui écrit le soir n'est pas injoignable l'après-midi : ses heures ouvrent sa nuit, jamais ne ferment
+    # la journée
+    return c.HoursReading(days, active, True, usual, tuple(a or not n for a, n in zip(active, night, strict=True)))
+
+
+@OTHERS.fact(c.CHECK_IN_AT)
+def _check_in_at(s: OthersState, cx, person: str) -> int:
+    concern = s.concerns.get(person)
+    return concern[2] if concern is not None else 0
 
 
 @OTHERS.fact(c.HOURS)
@@ -721,14 +796,18 @@ def _read_felt(e, cx) -> list[Appraisal]:
     out: list[Appraisal] = []
     if d.surprise >= p.surprise_from:
         out.append(Appraisal(Emotion.SURPRISED, min(p.surprise_max, d.surprise * p.surprise_gain),
-                             reason="surprise"))
+                             reason=causes.SURPRISED))
     if d.concern:
-        # s'inquiéter pour quelqu'un suit la contagion du tempérament
-        out.append(Appraisal(Emotion.ANXIOUS, p.worry_intensity, reason="inquiétude", relational=True))
+        # s'inquiéter pour quelqu'un suit la contagion du tempérament ; c'est pour elle qu'elle s'inquiète : sa
+        # posture envers elle le porte aussi
+        out.append(Appraisal(Emotion.ANXIOUS, p.worry_intensity, reason=causes.WORRIED, relational=True))
+        out.append(Appraisal(Emotion.ANXIOUS, p.worry_intensity, toward=d.person, reason=causes.WORRIED,
+                             relational=True))
     emotion = emotion_of(d.contagion_emotion) if d.contagion > 0 else None
     if emotion is not None:
-        # son ton du moment la colore un peu : un nombre et une émotion, jamais un mot du message
-        out.append(Appraisal(emotion, d.contagion, reason="contagion", relational=True))
+        # son ton du moment la colore un peu : un nombre et une émotion, jamais un mot du message — son humeur à elle,
+        # pas sa posture envers la personne (une amie furieuse contre son patron ne la met pas en colère contre elle)
+        out.append(Appraisal(emotion, d.contagion, reason=causes.CONTAGION, relational=True))
     return out
 
 
@@ -855,7 +934,7 @@ def _cheer(s: OthersState, frame: Frame) -> list[Candidate]:
     p = params(frame.env.params_of("others", frame.root))
     out: list[Candidate] = []
     circle = set(frame.get(social_c.CIRCLE))
-    for person in sorted(circle.intersection(s.people.keys())):
+    for person in sorted(circle.intersection(heard(s))):
         if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
             continue
         last = _last_from(frame, person)
@@ -917,7 +996,7 @@ def _follow_up(s: OthersState, frame: Frame) -> list[Candidate]:
     if not within_daily_window(local.hour * 60 + local.minute, p.checkin_day_start_min, p.checkin_day_end_min):
         return []
     out: list[Candidate] = []
-    for person in sorted(set(frame.get(social_c.CIRCLE)).intersection(s.people.keys())):  # ses amies (ADR 0058)
+    for person in sorted(set(frame.get(social_c.CIRCLE)).intersection(heard(s))):  # ses amies (ADR 0058)
         if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
             continue
         last = _last_from(frame, person)
@@ -967,7 +1046,7 @@ def _celebrate(s: OthersState, frame: Frame) -> list[Candidate]:
         return []
     today = _day_start(frame.now, frame)
     out: list[Candidate] = []
-    for person in sorted(set(frame.get(social_c.CIRCLE)).intersection(s.people.keys())):  # ses amies (ADR 0058)
+    for person in sorted(set(frame.get(social_c.CIRCLE)).intersection(heard(s))):  # ses amies (ADR 0058)
         if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
             continue
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
@@ -1007,7 +1086,7 @@ def _remember(s: OthersState, frame: Frame) -> list[Candidate]:
         return []
     today = _day_start(frame.now, frame)
     out: list[Candidate] = []
-    for person in sorted(set(frame.get(social_c.CIRCLE)).intersection(s.people.keys())):  # ses amies (ADR 0058)
+    for person in sorted(set(frame.get(social_c.CIRCLE)).intersection(heard(s))):  # ses amies (ADR 0058)
         if frame.get(social_c.CLOSENESS(person)) != social_c.CLOSE or _last_from(frame, person) >= today:
             continue
         due = [ev for ev in frame.get(memory_c.LIFE_EVENTS(person))
@@ -1068,8 +1147,9 @@ def curt(words: tuple[str, ...]) -> bool:
 @OTHERS.section("their_state", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["who"], trim_rank=40,
                 title=phrase("others.state.title"), reads=[identity_c.PERSON, identity_c.IDENTITY, c.MIND])
 def _their_state(s: OthersState, frame: Frame, enrich: Any) -> SectionBody | None:
-    """Les indices du message auquel elle répond — et, en privé, ce qui tranche
-    avec le ton habituel de la personne. Jamais un nombre."""
+    """En privé, ce qui tranche ces derniers temps avec le ton habituel de la personne (ce qu'elle a senti de ses
+    messages d'avant), et des réponses réduites à quelques mots. Le message auquel elle répond, c'est le modèle qui le
+    lit (ADR 0093). Jamais un nombre."""
     ep, aud = frame.episode, frame.audience
     if ep is None or not ep.target or not is_identifiable(ep.target):
         return None
@@ -1077,11 +1157,13 @@ def _their_state(s: OthersState, frame: Frame, enrich: Any) -> SectionBody | Non
     person = frame.get(identity_c.PERSON(ep.target))
     r = frame.get(c.MIND(person))
     lines: list[str] = []
-    if ep.kind == Kind.REPLY and r.last_cues and r.last_message == ep.attrs.get("reply_to"):
-        lines.append(phrase("others.state.cues", cues=" ; ".join(r.last_cues)))
     if aud is not None and aud.private_ok and r.confidence >= 1.0:
         name = frame.get(identity_c.IDENTITY(person)).name
         who = f"« {name} »" if name else phrase("others.state.someone")
+        if r.usual_valence >= p.notable_deviation:
+            lines.append(phrase("others.state.usual_light", who=who))
+        elif r.usual_valence <= -p.notable_deviation:
+            lines.append(phrase("others.state.usual_heavy", who=who))
         if r.deviation <= -p.notable_deviation:
             lines.append(phrase("others.state.darker", who=who))
         elif r.deviation >= p.notable_deviation:

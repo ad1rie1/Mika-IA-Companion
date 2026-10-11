@@ -19,7 +19,6 @@ from mika.faculties.memory.extraction import Conversation, Extraction, Line, Peo
 from mika.faculties.memory.faculty import MemoryParams, MemoryState, _noted
 from mika.faculties.memory.projections import ITEM_COLUMNS, Chunks, Items
 from mika.faculties.memory.salience import Item, admissible
-from mika.faculties.others.tone import measure
 from mika.faculties.social.faculty import SocialState, _knit, _ties
 from mika.faculties.social.profile import grounded
 from mika.faculties.transcript import Thread, TranscriptParams, TranscriptState, _thread
@@ -242,8 +241,8 @@ async def test_an_opinion_keeps_its_holder_distinct_from_its_subject(db):
 
 @pytest.mark.parametrize("genre,nature", [("avis", "opinion"), ("gout", "preference"), ("fait", "claim")])
 async def test_her_own_opinions_are_not_reclassified_as_facts(db, genre, nature):
-    drafts = await Consolidate()._about_self(XCroyance(texte="Mika aime le jazz", genre=genre, sur_elle=True),
-        db, None, MemoryParams(), lambda _: ((1,), (), []), "audit-self", set())
+    drafts = Consolidate()._about_self(XCroyance(texte="Mika aime le jazz", genre=genre, sur_elle=True),
+        db, lambda _: ((1,), (), []), "audit-self", set())
     assert drafts[0].data.knowledge_kind == nature and drafts[0].data.about_self and drafts[0].data.durable
 
 
@@ -348,12 +347,6 @@ def test_forgotten_relations_stay_revoked_after_rebuild_and_restart(tmp_path):
         await kernel.stop()
 
     run_virtual(clock, again)
-
-
-@pytest.mark.parametrize("text", ["Bonne nouvelle, je n'ai pas de cancer.",
-    "Dans mon roman, Alice est hospitalisée.", "Alice est hospitalisée.", "Je ne suis plus hospitalisée."])
-def test_negation_fiction_and_third_parties_do_not_diagnose_the_speaker(text):
-    assert not measure(text).grave
 
 
 def test_growth_does_not_erase_active_relations_or_annual_dates():

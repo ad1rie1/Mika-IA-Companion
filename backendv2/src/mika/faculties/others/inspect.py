@@ -106,8 +106,9 @@ def _guessed(s: OthersState, frame: Frame, ctx: InspectContext) -> list[Block]:
             Stat("la connaît", _ratio(r.confidence), f"{r.observed} message(s) lu(s)"),
             Stat("dernier message lu", When(r.last_at) if r.last_at else Text("—", kind="muted")),
         )))
-        if r.last_cues:
-            blocks.append(Fields((("indices du dernier message", " ; ".join(r.last_cues)),)))
+        if r.last_felt:
+            felt = ", ".join(f"{FR[em]} ({num_fr(x, 1)})" for e, x in r.last_felt if (em := emotion_of(e)))
+            blocks.append(Fields((("ce qu'elle a senti du dernier message", felt),)))
     delays = []
     for klass in (c.SCREEN, c.MESSAGE):
         samples = s.delays.get(f"{person}|{klass}", ())

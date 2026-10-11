@@ -30,6 +30,7 @@ dépend jamais du moment ni du pas de la lecture.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from zoneinfo import ZoneInfo
 
@@ -72,7 +73,7 @@ class Mark:
 
     at: int
     emotion: str
-    cause: str  # un code (``talk``, ``retour``, ``rêve``…), jamais un texte libre
+    cause: str  # un code (``vocab.causes`` : ``talk``, ``came_back``, ``dream``…), jamais un texte libre
     person: str = ""  # la personne d'un échange (``talk``)
 
 
@@ -235,6 +236,22 @@ def mood_target(m: Mood, emotion: Emotion, intensity: float, p: AffectParams) ->
     return A.lerp(A.add(m.rest.position, fond_of(m, p)), A.ANCHORS[emotion], max(0.0, min(1.0, intensity)))
 
 
+def blend(base: Vec3, felt: tuple[tuple[str, float], ...]) -> Vec3:
+    """Le point que visent plusieurs facettes (ADR 0093) : sur le rayon de chacune (de ``base`` vers son ancre, à son
+    intensité), pondéré par ces intensités. Une seule facette : son point, comme une balise d'avant."""
+    known = [(Emotion(e), max(0.0, min(1.0, x))) for e, x in felt if e in Emotion.__members__.values()]
+    total = sum(x for _e, x in known)
+    if total <= 0:
+        return base
+    points = [(A.lerp(base, A.ANCHORS[e], x), x) for e, x in known]
+    return tuple(sum(pt[i] * x for pt, x in points) / total for i in range(3))  # type: ignore[return-value]
+
+
+def mood_target_of(m: Mood, declared: Declared, p: AffectParams) -> Vec3:
+    """Ce que vise ce qu'elle a déclaré, toutes facettes comprises."""
+    return blend(A.add(m.rest.position, fond_of(m, p)), declared.all)
+
+
 def fall_asleep(m: Mood) -> Mood:
     return replace(m, asleep=True)
 
@@ -329,6 +346,11 @@ def stance_target(st: Stance, emotion: Emotion, intensity: float) -> Vec3:
     return A.lerp(st.rest.position, A.ANCHORS[emotion], max(0.0, min(1.0, intensity)))
 
 
+def stance_target_of(st: Stance, declared: Declared) -> Vec3:
+    """Ce que vise ce qu'elle a déclaré envers la personne, toutes facettes comprises."""
+    return blend(st.rest.position, declared.all)
+
+
 def fold_alpha(st: Stance, p: AffectParams) -> float:
     """Ce qu'une déclaration fond dans l'ancre : moins, à mesure que leur
     histoire s'allonge (un mois d'amitié ne se défait pas en sept phrases)."""
@@ -395,6 +417,48 @@ def relation_at(st: Stance, now: int, p: AffectParams) -> tuple[Vec3 | None, flo
     """L'ancre et l'attachement à l'instant (sans propager les oscillateurs)."""
     dt = max(0, now - st.at)
     return heal(st.anchor, st.hostile, dt, p), bond_at(st.bond, dt, p)
+
+
+# ── Une personne, plusieurs adresses ──────────────────────────────────────
+
+
+def joined_anchor(parts: Sequence[tuple[Vec3 | None, int]]) -> Vec3 | None:
+    """Ce que la relation a installé sous chacune de ses adresses, réuni au poids des jours où elle lui a déclaré
+    quelque chose par chacune (une adresse d'un jour pèse peu à côté d'un an de conversations)."""
+    weighted = [(anchor, max(1, days)) for anchor, days in parts if anchor is not None]
+    if not weighted:
+        return None
+    total = sum(w for _a, w in weighted)
+    return (sum(a[0] * w for a, w in weighted) / total, sum(a[1] * w for a, w in weighted) / total,
+            sum(a[2] * w for a, w in weighted) / total)
+
+
+def joined(stances: Sequence[Stance]) -> Stance:
+    """Une même personne parlée sous plusieurs adresses (reliées depuis à elle) : une seule posture — une adresse
+    reliée n'emporte pas ce qu'elle avait vécu avec elle. Toutes avancées au même instant. Le moment (la position, sa
+    dernière balise) est celui de l'adresse à qui elle a déclaré quelque chose en dernier ; ce que la relation a
+    installé se réunit : l'ancre au poids des jours, l'attachement le plus fort, la méfiance qui dure le plus, les
+    excuses les plus récentes."""
+    if len(stances) == 1:
+        return stances[0]
+    latest = max(stances, key=lambda st: (st.declared_at, st.folded_at, st.days))
+    recent = tuple(sorted({x for st in stances for x in st.recent}))[-RECENT_IMPULSES:]
+    return replace(latest, anchor=joined_anchor([(st.anchor, st.days) for st in stances]),
+                   bond=max(st.bond for st in stances), hostile=sum(st.hostile for st in stances),
+                   days=sum(st.days for st in stances), last_day=max(st.last_day for st in stances),
+                   wary_until=max(st.wary_until for st in stances),
+                   apologized_at=max(st.apologized_at for st in stances), recent=recent)
+
+
+def relation_joined(stances: Sequence[Stance], now: int, p: AffectParams) -> tuple[Vec3 | None, float, int]:
+    """L'ancre, l'attachement et la méfiance plancher d'une personne à l'instant, toutes ses adresses réunies
+    (``joined``, sans propager les oscillateurs)."""
+    if len(stances) == 1:  # le cas ordinaire : une seule adresse
+        anchor, bond = relation_at(stances[0], now, p)
+        return anchor, bond, stances[0].wary_until
+    at = [relation_at(st, now, p) for st in stances]
+    anchor = joined_anchor([(a, st.days) for (a, _b), st in zip(at, stances, strict=True)])
+    return anchor, max(b for _a, b in at), max(st.wary_until for st in stances)
 
 
 # ── Impulsions ────────────────────────────────────────────────────────────

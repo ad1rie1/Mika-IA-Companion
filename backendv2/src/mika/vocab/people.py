@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Iterable
 
 #: Pas des personnes : la tuyauterie de Mika elle-même.
 INTERNAL_IDS = frozenset({"conscience_mika", "__global__", "anonymous", ""})
@@ -102,6 +103,16 @@ def same_name(a: str | None, b: str | None) -> bool:
     if fa == fb:
         return True
     return (len(fa.split()) == 1 or len(fb.split()) == 1) and fa.split()[0] == fb.split()[0]
+
+
+def mentions(text: str | None, names: Iterable[str]) -> bool:
+    """Le texte nomme-t-il une de ces personnes (son nom, ou son prénom, en mot entier ; casse et accents repliés) ?"""
+    said = " " + " ".join(re.findall(r"\w+", fold(text or ""))) + " "
+    for name in names:
+        parts = re.findall(r"\w+", fold(name))
+        if parts and len(parts[0]) >= 3 and (f" {parts[0]} " in said or f" {' '.join(parts)} " in said):
+            return True
+    return False
 
 
 def named_label(key: str) -> str:

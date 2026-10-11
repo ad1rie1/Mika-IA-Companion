@@ -76,13 +76,14 @@ def _person(key: str, *, trust: str, owner: bool = False, public: bool = False, 
     level = int(EVERYTHING.level) if owner else 0
     return Audience(persons=(f"situation:{key}",), channel=channel, room=room, public=public, level=level,
                     witness_level=level, private_ok=owner, trust=trust, certainty=1.0 if owner else 0.0,
-                    owner=owner, tied_level=level)
+                    owner=owner, tied_level=level, untied_level=level)
 
 
 #: personne n'écoute (un pas, une exécution, une tâche) : l'audience que le moteur leur donne
 _NOBODY = Audience(persons=(), channel="internal", public=False, level=int(EVERYTHING.level),
                    witness_level=int(EVERYTHING.witness_level), private_ok=True,
-                   trust=ChannelTrust.INTERNAL.value, owner=True, tied_level=int(EVERYTHING.tied_level))
+                   trust=ChannelTrust.INTERNAL.value, owner=True, tied_level=int(EVERYTHING.tied_level),
+                   untied_level=int(EVERYTHING.untied_level))
 
 SITUATIONS: tuple[Situation, ...] = (
     Situation("proprietaire", "propriétaire", "Sa propriétaire, en privé", Kind.REPLY,

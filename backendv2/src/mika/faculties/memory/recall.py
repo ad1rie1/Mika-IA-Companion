@@ -85,6 +85,7 @@ from mika.faculties.memory.salience import (
     unsaid_public_line,
     valence_sign,
 )
+from mika.faculties.memory.veiled import Candidate, Veiled, asks_news, choose
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Audience, Frame
@@ -210,6 +211,8 @@ class Recall:
     #: les prénoms dits ici qu'elle connaît dans son cercle : (prénom, combien de personnes de ce nom, ce que la seule
     #: est pour elle — ``social.CLOSE``, ``FRIEND``, ou propriétaire)
     acquainted: list[tuple[str, int, str]] = field(default_factory=list)
+    #: ce qu'elle peut raconter sans nommer personne à qui l'écoute (ADR 0091)
+    veiled: list[Veiled] = field(default_factory=list)
 
 
 #: au plus tant de prénoms connus signalés par réponse
@@ -455,27 +458,65 @@ def touches(text: str, topics: tuple[str, ...]) -> bool:
     return any(stems(topic) & have for topic in topics)
 
 
+def person_of(frame: Frame, key: str) -> str:
+    """La personne qu'une clé désigne : elle-même, ou une mention reliée, ou présumée (ADR 0075 : une présomption ne
+    protège pas moins) — vide sinon."""
+    if not key.startswith("name:"):
+        return key
+    key = frame.get(identity_c.PERSON(key)) or key
+    return (frame.get(identity_c.PRESUMED(key)) or "") if key.startswith("name:") else key
+
+
+def delicate_topics(frame: Frame, person: str, store: Any = None) -> tuple[str, ...]:
+    """Les sujets délicats d'une personne (son portrait) ; ceux d'un profil récent sont gardés à part (``store``)."""
+    topics = tuple(frame.get(social_c.SENSITIVE(person)))
+    ref = frame.get(social_c.SENSITIVE_REF(person)) if store is not None else ""
+    if ref:
+        topics += tuple(t.strip() for t in (store.content([ref]).get(ref) or "").splitlines() if t.strip())
+    return topics
+
+
 def sensitivity_of(frame: Frame, item: Item, interlocutor: str | None, store: Any = None) -> int:
     """Un souvenir qui touche un sujet délicat d'une autre personne concernée
-    devient une confidence, quoi qu'en ait dit la consolidation. Les sujets
-    délicats d'un profil récent sont gardés à part (``store``)."""
+    devient une confidence, quoi qu'en ait dit la consolidation (la porte le dit aussi aux autres facultés :
+    ``memory.delicate``, ADR 0099). Les sujets délicats d'un profil récent sont gardés à part (``store``)."""
     level = item.sensitivity
     for other in item.about:
         if other == interlocutor:
             continue
-        if other.startswith("name:"):
-            # reliée, ou présumée (ADR 0075) : ses sujets délicats comptent — une présomption ne protège pas moins
-            other = frame.get(identity_c.PERSON(other)) or other
-            other = (frame.get(identity_c.PRESUMED(other)) or "") if other.startswith("name:") else other
-            if not other:
-                continue
-        topics = tuple(frame.get(social_c.SENSITIVE(other)))
-        ref = frame.get(social_c.SENSITIVE_REF(other)) if store is not None else ""
-        if ref:
-            topics += tuple(t.strip() for t in (store.content([ref]).get(ref) or "").splitlines() if t.strip())
-        if touches(item.text, topics):
+        other = person_of(frame, other)
+        if other and touches(item.text, delicate_topics(frame, other, store)):
             return max(level, int(Sensitivity.CONFIDENCE))
     return level
+
+
+def candidate_of(frame: Frame, item: Item, person: str | None, memo: dict[str, str], store: Any) -> Candidate:
+    return Candidate(item, canon(frame, item.about, memo), canon(frame, item.told_by, memo),
+                     canon(frame, item.heard_by, memo), sensitivity_of(frame, item, person, store))
+
+
+def news(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryParams, memo: dict[str, str]) \
+        -> list[Candidate]:
+    """On lui demande des nouvelles : ce qu'elle a appris de récent sur d'autres et qui ne se dit pas nommé ici, le
+    plus important d'abord — de quoi raconter sans nommer personne (ADR 0091)."""
+    since = frame.now - round(p.veiled_fresh_days * DAY)
+    ids = [int(i) for (i,) in store.query_mind(
+        f"SELECT id FROM {c.ITEMS_TABLE} WHERE status='active' AND veiled != '' AND kind IN (?, ?) AND born_at >= ? "
+        "ORDER BY importance DESC, id DESC LIMIT 30", (c.SOUVENIR, c.BELIEF, since))]
+    found = items_by_id(store, ids)
+    return [candidate_of(frame, found[i], person, memo, store) for i in ids
+            if i in found and not verdict_of(frame, found[i], person, aud, memo, store).ok]
+
+
+#: les éléments qui ont une version sans nom parmi lesquels on cherche à part (les plus récents)
+VEILED_POOL = 500
+
+
+def veiled_pool(store: Any) -> tuple[int, ...]:
+    """Les souvenirs et croyances qui ont une version sans nom (ADR 0091), les plus récents d'abord."""
+    return tuple(int(i) for (i,) in store.query_mind(
+        f"SELECT id FROM {c.ITEMS_TABLE} WHERE status='active' AND veiled != '' AND kind IN (?, ?) "
+        "ORDER BY id DESC LIMIT ?", (c.SOUVENIR, c.BELIEF, VEILED_POOL)))
 
 
 def items_by_id(store: Any, ids: list[int]) -> dict[int, Item]:
@@ -715,14 +756,19 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     # « tu te souviens de ce que je t'ai dit hier soir ? » est fait des mots d'une politesse (« hier », « soir »),
     # mais désigne un moment : elle s'en souvient aussi par le temps (ADR 0059)
     dated = is_reply and window_of(query, frame.now, frame.env.tz_of(frame.root)) is not None
+    # « quoi de neuf ? » : ce qu'elle a appris de récent sur d'autres, à raconter sans nommer personne (ADR 0091)
+    told_news = news(frame, store, person, aud, p, memo) if ep.kind == Kind.REPLY and is_reply and asks_news(query) \
+        else []
     if not is_reply or (phatic(query) and not context.strip() and not named):
         # le premier mot d'une conversation (« salut ! »), ou elle qui écrit d'elle-même : ce qui se passe dans sa
         # vie à elle — pas les mots d'une consigne ni d'une politesse, qui ne désignent rien
         _their_life(out, frame, store, person, aud, p, memo, bonds)
+        out.veiled = choose(frame, store, told_news, person, aud, p)
         if not dated:
             return out
     searching = vectors is not None and bool(query.strip()) and not phatic(query)
     if not searching and not named and not dated:
+        out.veiled = choose(frame, store, told_news, person, aud, p)
         return out  # une politesse ne réveille rien
     near: dict[int, float] = {}
     wider: dict[int, float] = {}
@@ -739,6 +785,11 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
             own_near, own_wider = await search(vectors, query, context, p.recall_k, kinds={c.SOUVENIR, c.BELIEF},
                                                persons=own)
             near, wider = _merged(near, own_near), _merged(wider, own_wider)
+        if ep.kind == Kind.REPLY and aud.veiled_level > Sensitivity.ANODYNE and (pool := veiled_pool(store)):
+            # ce qu'elle pourrait raconter sans nommer personne, cherché à part : ce qui peut se dire ici, plus proche
+            # de la question, ne le chasse pas des candidats (ADR 0099)
+            v_near, v_wider = await search(vectors, query, context, p.recall_k, keys=pool)
+            near, wider = _merged(near, v_near), _merged(wider, v_wider)
     found = items_by_id(store, sorted({*near, *wider}))
     sims = scored(near, wider, {i: it.text for i, it in found.items()}, query, context)
     verdicts = {i: verdict_of(frame, found[i], person, aud, memo, store) for i in sims if i in found}
@@ -756,6 +807,7 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
     now = frame.now
     ranked: list[tuple[float, Item, Verdict]] = []
     hidden: dict[str, list[Item]] = {}
+    veil: list[tuple[float, Candidate]] = []
     asked: dict[str, tuple[str, ...]] = {}
     close = aud.level >= Sensitivity.PERSONAL
     for item in items.values():
@@ -769,6 +821,8 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
         if dormant(item, now, p, bond) and candidates[item.id] < p.strong_cue:
             continue  # il dort ; seul un indice fort le réveille
         verdict = verdicts.get(item.id) or verdict_of(frame, item, person, aud, memo, store)
+        if not verdict.ok and item.veiled and ep.kind == Kind.REPLY:
+            veil.append((candidates[item.id], candidate_of(frame, item, person, memo, store)))
         if not verdict.ok:
             # un secret ne laisse même pas deviner qu'il existe : devant les autres, elle n'en sait rien (« aucune
             # idée, demande-lui ») — la ligne vague « il t'a confié des choses » le trahissait à qui on le cachait
@@ -796,6 +850,12 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
                                        contested_line(frame, item, person, aud, memo, store, names) +
                                        expected_line(item, frame) +
                                        feelings(item.felt, own, concerned_name(frame, item.about, names, memo))), cap)
+    relevant = [cand for _score, cand in sorted(veil, key=lambda v: (-v[0], v[1].item.id))]
+    out.veiled = choose(frame, store, [*relevant, *(n for n in told_news if n.item.id not in {r.item.id for r in relevant})],
+                        person, aud, p)
+    # ce qu'elle raconte sans nom ne se double pas d'une ligne qui nomme la personne (« Alice t'a confié… ») : les deux
+    # ensemble la désigneraient
+    hidden = {who: its for who, its in hidden.items() if who not in {v.person for v in out.veiled}}
     if hidden and p.max_unsaid:
         for who in sorted(hidden, key=lambda w: (-max(candidates[i.id] for i in hidden[w]), w))[: p.max_unsaid]:
             out.unsaid.append(unsaid_public_line(who, names, _last_talk(frame, who)) if aud.public else

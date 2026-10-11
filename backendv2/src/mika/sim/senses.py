@@ -74,10 +74,13 @@ async def s17(driver: Driver, rng: RngTree, res: Result) -> None:
         driver.mail.deliver(Mail(f"<promo-{i}@boutique.fr>", "Boutique <noreply@boutique.fr>", "noreply@boutique.fr",
                                  f"Promo n°{i} : -{10 + i} %", t, "Profitez-en !", bulk=True))
     for i in range(12):  # des titres qui la touchent, et d'autres non
-        driver.feeds.publish(Entry(f"jeu-{i}", "Le Journal", f"Jeux rétro : la sélection n°{i}", "", "", t + i))
+        driver.feeds.publish(Entry(f"jeu-{i}", "Le Journal", f"Astronomie et physique : la sélection n°{i}", "", "",
+                                   t + i))
         driver.feeds.publish(Entry(f"eco-{i}", "Le Journal", f"Le cours de l'or, épisode {i}", "", "", t + i))
-    driver.feeds.publish(Entry("pixel", "Le Blog", "Le café et le pixel art : une histoire", "", "", t + 100),
-                         article="Des cafés-jeux rétro ouvrent partout, et le pixel art s'y affiche au mur.")
+    # (ses centres d'intérêt sont ceux de sa persona : le dessin, les plantes, les sciences…)
+    driver.feeds.publish(Entry("pixel", "Le Blog", "Aquarelle et botanique : une histoire", "", "", t + 100),
+                         article="Des ateliers d'aquarelle botanique ouvrent partout, et les croquis de plantes s'y "
+                                 "affichent au mur.")
     await until(driver, day0 + 11 * HOUR)
     driver.mail.deliver(Mail("<alice-1@exemple.fr>", "Alice <alice@exemple.fr>", "alice@exemple.fr",
                              "Urgent : ma soutenance est avancée", driver.clock.now(),

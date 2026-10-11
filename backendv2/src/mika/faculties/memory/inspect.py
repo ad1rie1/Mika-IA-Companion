@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
+from mika.faculties.memory import likelihood as lk
 from mika.faculties.memory.archive import decode
 from mika.faculties.memory.faculty import MEMORY, PENDING_CAP, MemoryParams, MemoryState, occurrence, params
 from mika.faculties.memory.projections import DEFERRED_TABLE, ITEM_COLUMNS
@@ -241,7 +242,8 @@ def _detail(k: Kept, frame: Frame, names: dict[str, str], ctx: InspectContext) -
             pairs.append(("secret", "oui : on lui a demandé de ne pas le répéter (ou ça laisse deviner un secret) — "
                                     "il ne ressort que devant qui l'a confié"))
         if item.about_self:
-            pairs.append(("sur elle", "ce qu'elle a raconté de sa vie : s'efface en quelques jours"))
+            pairs.append(("sur elle", "ce qui la définit (un goût, un avis, un fait de sa vie) : tient des mois"
+                          if item.durable_self else "ce qu'elle a raconté de sa vie : s'efface en quelques jours"))
         if item.between_us:
             pairs.append(("leur lien", "n'appartient qu'à elle et à cette personne (un surnom, une blague) : "
                                        "revient quand on lui en parle et, avec une amie, dans leur ton"))
@@ -509,6 +511,50 @@ def _consolidation(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Bl
             _runs(ctx), Disclosure("Historique des tris de la nuit", (_nights(ctx),))]
 
 
+#: la sorte d'une annonce (``likelihood.nature_of``), en mots
+NATURE_FR = {c.FIRST_HAND: "de la bouche de la personne", c.REPORTED: "rapporté par un autre",
+             c.OFFICIAL: "une date officielle", c.PREDICTION: "une prévision"}
+
+
+def _calibration(s: MemoryState, frame: Frame, p: MemoryParams) -> Table:
+    """Ses attentes, d'une sorte d'annonce à l'autre : combien de moments constatés, l'écart quadratique moyen
+    (Brier : 0, toujours juste ; 0,25, comme à pile ou face), et si elle en parle désormais plus prudemment."""
+    rows = []
+    for nature, cal in sorted(s.calibration.items()):
+        b = lk.brier(cal)
+        rows.append(Row((NATURE_FR.get(nature, nature), cal[0], "—" if b is None else f"{b:.3f}".replace(".", ","),
+                         Badge("plus prudente", "warn") if lk.cautious(cal, p) else
+                         Badge("assez de cas", "ok") if cal[0] >= p.calibration_min else
+                         Badge(f"{cal[0]}/{p.calibration_min} cas", "muted"))))
+    return Table((Column("sorte d'annonce"), Column("constatés", "num"), Column("écart moyen (Brier)", "num"),
+                  Column("ce qu'elle en fait", role="badge")), tuple(rows), title="Ce qu'elle attendait",
+                 empty="aucun moment constaté encore")
+
+
+def _tellers(s: MemoryState, frame: Frame, p: MemoryParams) -> Table:
+    """Ce qu'elle apprend de qui annonce : ses moments tenus, reportés ou annulés, et ce que vaut désormais une de
+    ses annonces (sur sa propre vie), au regard de l'a priori."""
+    prior = lk.prior_of(c.FIRST_HAND, p)
+    names = names_of(frame, set(s.track))
+    rows = []
+    for teller, (kept, missed) in sorted(s.track.items(), key=lambda kv: (-sum(kv[1]), kv[0])):
+        worth = lk.learned(prior, (kept, missed), p)
+        rows.append(Row((names.get(teller) or teller, kept, missed,
+                         Meter(worth, text=f"{worth:.2f} (a priori {prior:.2f})".replace(".", ",")))))
+    return Table((Column("qui annonce"), Column("tenus", "num"), Column("reportés ou annulés", "num"),
+                  Column("ce que vaut son annonce")), tuple(rows), title="Ce qu'elle apprend de qui annonce",
+                 empty="personne encore")
+
+
+@MEMORY.inspect("voir-venir", title="Voir venir", section="memoire", order=38,
+                description="Ce qu'elle attendait des moments annoncés, et ce qu'elle en apprend : ses attentes "
+                            "tombent-elles juste, et qui tient ce qu'il annonce (ADR 0086). Les chiffres se lisent "
+                            "ici, jamais dans ses phrases.")
+def _seeing_ahead(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    p = params(frame.env.params_of("memory", frame.root))
+    return [_calibration(s, frame, p), _tellers(s, frame, p)]
+
+
 class RetryExtractionArgs(BaseModel):
     key: Annotated[int, Knob(widget="hidden")] = Field(gt=0)
 
@@ -611,7 +657,8 @@ def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
         Stat("Croyances", totals[c.BELIEF]),
         Stat("Promesses", totals[c.PROMISE], f"{sum(1 for x in s.promises.values() if x.to in keys)} en cours"),
         Stat("Moments de sa vie", totals[c.EVENT]),
-        Stat("Ce qu'elle lui a raconté", told, "éléments de sa mémoire déjà dits à cette personne"),
+        Stat("Ce qu'elle avait en tête en lui parlant", told,
+             "éléments de sa mémoire que son prompt lui montrait pour parler à cette personne (pas forcément dits)"),
     ))
     return [stats, *sections]
 

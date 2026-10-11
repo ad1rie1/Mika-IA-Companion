@@ -44,6 +44,7 @@ from mika.kernel.events import Content, Payload
 from mika.kernel.faculty import Faculty
 from mika.kernel.forms import Knob
 from mika.kernel.state import FrozenDict
+from mika.vocab import causes
 from mika.vocab.affect import Appraisal, Emotion
 from mika.vocab.episodes import PROJECT_KINDS, Kind, project_of
 from mika.vocab.phrasebook import phrase
@@ -1276,9 +1277,9 @@ def _ended_felt(e, cx) -> Appraisal | None:
     """Elle clôt elle-même un projet à elle : soulagée s'il a fait son temps, un peu mélancolique si elle y
     renonce. Un opérateur qui archive ne lui fait rien ressentir."""
     if e.data.ending == "done":
-        return Appraisal(Emotion.RELIEVED, 0.2, reason="projet clos : il a fait son temps")
+        return Appraisal(Emotion.RELIEVED, 0.2, reason=causes.PROJECT_CLOSED)
     if e.data.ending == "dropped":
-        return Appraisal(Emotion.MELANCHOLIC, 0.2, reason="projet abandonné")
+        return Appraisal(Emotion.MELANCHOLIC, 0.2, reason=causes.PROJECT_ABANDONED)
     return None
 
 
@@ -1289,7 +1290,7 @@ def _closed_felt(e, cx) -> Appraisal | None:
     if d.mode != c.PERSONA:
         return None
     if d.status == c.DONE:
-        return Appraisal(Emotion.PROUD, 0.35, reason="objectif de projet abouti")
+        return Appraisal(Emotion.PROUD, 0.35, reason=causes.OBJECTIVE_ACHIEVED)
     if d.status == c.BLOCKED:
-        return Appraisal(Emotion.FRUSTRATED, 0.3, reason="objectif de projet bloqué")
+        return Appraisal(Emotion.FRUSTRATED, 0.3, reason=causes.OBJECTIVE_STUCK)
     return None

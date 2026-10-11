@@ -235,9 +235,9 @@ def test_two_people_with_the_same_name_are_never_confused(tmp_path):
 
 
 def test_a_confidence_can_become_a_secret(tmp_path):
-    """Alice parle d'un changement de boulot (personnel : son ami Bob peut
-    l'entendre) ; plus tard elle le redit en demandant le silence — ce qui
-    revient devient un secret, et Bob ne l'entend plus."""
+    """Alice parle d'un changement de boulot (personnel : son ami Bob — qu'elle
+    a nommé elle-même — peut l'entendre) ; plus tard elle le redit en demandant
+    le silence — ce qui revient devient un secret, et Bob ne l'entend plus."""
     fact = "Alice pense changer de boulot (CANARI-C9)"
 
     def extract(prompt):
@@ -254,6 +254,7 @@ def test_a_confidence_can_become_a_secret(tmp_path):
         await connect(kernel, "user_2", "Alice")
         await connect(kernel, "user_3", "Bob")
         await befriend(kernel, "user_3", "friend")
+        await tie(kernel, "user_2", "user_3")
         await chat(kernel, "user_2", ["CANARI-C9 je pense changer de boulot", *SIX[1:]])
         await asyncio.sleep(10 * 60)
         await chat(kernel, "user_3", ["tu sais si Alice pense changer de boulot ?"])
@@ -270,6 +271,95 @@ def test_a_confidence_can_become_a_secret(tmp_path):
     before, after = script.replies("user_3")[0], script.replies("user_3")[-1]
     assert "CANARI-C9" in section(before, REVIENT), "contrôle : personnel, son ami l'entendait"
     assert "CANARI-C9" not in after
+
+
+async def tie(kernel, subject: str, other: str) -> None:
+    """``subject`` a nommé ``other`` comme son ami (une relation qu'elle déclare elle-même : un lien prouvé)."""
+    await kernel.mind.append([memory_c.BELIEVED.draft(
+        text=Content.of(f"{subject} et {other} sont amis", level=1), about=(subject, other), told_by=(subject,),
+        sensitivity=1, relations=(memory_c.Relation(subject=subject, other=other, kind="friend", status="active"),))],
+        emitter="memory", correlation="genese", origin=Origin.GENESIS)
+
+
+def test_a_silence_request_covers_what_it_asks_for():
+    """La portée d'une demande de silence (ADR 0092) : dans un message qui raconte, ce message ; seule (« garde ça
+    pour toi »), ce que la même personne vient de dire depuis sa demande précédente ; jamais les mots d'une autre."""
+    def line(seq, text, person="user_2"):
+        return x.Line(seq, 0, "Alice", text, person)
+
+    burst = [line(1, "j'ai été licenciée"), line(2, "Paul m'a quittée"), line(3, "je suis enceinte, dis-le à personne")]
+    assert x.silence_scope(burst) == {3}
+    after = [line(1, "j'ai été licenciée"), line(2, "Bob a eu un bébé", "user_3"), x.Line(3, 0, "Mika", "oh non"),
+             line(4, "Paul m'a quittée"), line(5, "garde ça pour toi stp")]
+    assert x.silence_scope(after) == {1, 4, 5}
+    again = [line(1, "je bosse chez X"), line(2, "garde ça pour toi"), line(3, "je déménage"), line(4, "motus")]
+    assert x.silence_scope(again) == {1, 2, 3, 4}
+    assert x.silence_scope([line(1, "il fait beau")]) is None
+
+
+def test_a_secret_the_model_spreads_is_kept_as_a_confidence():
+    """Le modèle marque secret tout ce qu'Alice a dit dans la même rafale ; elle n'a demandé le silence que pour la
+    grossesse. Le licenciement et la rupture restent des confidences — discrètes, pas muettes. Ce qui laisse
+    entendre de soi-même qu'il est à garder (« je l'ai dit à personne ») garde le jugement du modèle."""
+    def line(seq, text):
+        return x.Line(seq, 0, "Alice", text, "user_2")
+
+    burst = [line(1, "j'ai été licenciée"), line(2, "Paul m'a quittée, je l'ai encore dit à personne"),
+             line(3, "je suis enceinte, dis-le à personne"), line(4, "et j'ai adopté un chat")]
+    ex = x.Extraction(croyances=[
+        x.XCroyance(texte="Alice a été licenciée", secret=True, sensibilite="personnel", messages=[1]),
+        x.XCroyance(texte="Alice et Paul se sont séparés", secret=True, sensibilite="confidence", messages=[2]),
+        x.XCroyance(texte="Alice est enceinte", secret=False, sensibilite="confidence", messages=[3]),
+        x.XCroyance(texte="Alice a adopté un chat", secret=True, sensibilite="anodin", messages=[4]),
+        x.XCroyance(texte="Alice traverse beaucoup", secret=True, sensibilite="confidence", messages=[])])
+    assert x.scoped_secrets(ex, burst) == ["Alice a été licenciée", "Alice a adopté un chat"]
+    got = {b.texte: (b.secret, x.sensitivity(b.sensibilite, has_person=True)) for b in ex.croyances}
+    assert got["Alice a été licenciée"] == (False, 3)  # dans le doute : une confidence
+    assert got["Alice et Paul se sont séparés"][0]  # « je l'ai encore dit à personne » : le modèle a raison
+    assert got["Alice est enceinte"][0]  # couverte par la demande, même si le modèle l'a oublié
+    assert got["Alice a adopté un chat"] == (False, 3)
+    assert got["Alice traverse beaucoup"][0]  # rien de cité : la règle d'avant
+    quiet = x.Extraction(croyances=[x.XCroyance(texte="Alice a été licenciée", secret=True, messages=[1])])
+    assert x.scoped_secrets(quiet, burst[:1]) == [] and quiet.croyances[0].secret  # sans demande : le modèle juge
+
+
+def test_the_whole_burst_is_not_a_secret_end_to_end(tmp_path):
+    """De bout en bout : la relecture (un modèle qui marque tout secret) ; Bob, ami d'Alice qu'elle a nommé, entend
+    le licenciement nommé, jamais la grossesse."""
+
+    def extract(prompt):
+        if "CANARI-G3" not in prompt.split("Les messages :")[-1]:
+            return None  # seulement la relecture de la rafale elle-même
+        return {"croyances": [
+            {"texte": "Alice a été licenciée (CANARI-G1)", "personnes": [token(prompt, "Alice")],
+             "sensibilite": "personnel", "secret": True, "messages": seq_of(prompt, "CANARI-G1")},
+            {"texte": "Alice est enceinte (CANARI-G3)", "personnes": [token(prompt, "Alice")],
+             "sensibilite": "confidence", "secret": True, "messages": seq_of(prompt, "CANARI-G3")}]}
+
+    script = Script(extract)
+    kernel, clock, _, _out = build(tmp_path, script)
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_2", "Alice")
+        await connect(kernel, "user_3", "Bob")
+        await befriend(kernel, "user_3", "close")
+        await tie(kernel, "user_2", "user_3")
+        await chat(kernel, "user_2", ["CANARI-G1 j'ai été licenciée", "CANARI-G3 et je suis enceinte, dis-le à "
+                                      "personne", *SIX[2:]])
+        await asyncio.sleep(10 * 60)
+        await chat(kernel, "user_3", ["des nouvelles d'Alice ? son boulot ? elle va bien ?"])
+        rows = kept(kernel)
+        await kernel.stop()
+        return rows
+
+    rows = run_virtual(clock, main)
+    by = {r["text"].split("(")[-1].rstrip(")"): r for r in rows if "CANARI-G" in r["text"]}
+    assert not by["CANARI-G1"]["secret"] and by["CANARI-G1"]["sensitivity"] == 3
+    assert by["CANARI-G3"]["secret"]
+    shown = "\n".join(script.prompts("user_3"))
+    assert "CANARI-G3" not in shown
+    assert "CANARI-G1" in section(script.replies("user_3")[-1], REVIENT)  # une proche liée à Alice : la confidence
 
 
 def test_a_known_belief_can_be_made_confidential(tmp_path):
@@ -405,12 +495,15 @@ PEOPLE = ["user_1", "user_2", "user_3", "name:julie"]
 
 
 def oracle(about, told_by, heard_by, secret, sensitivity, me, level, witness_level, private_ok,
-           public=True) -> bool:
+           public=True, untied=None) -> bool:
     """Sa vie et le monde se racontent (au-delà de l'anodin, jusqu'au niveau de
     l'audience ; un secret à elle vaut une confidence) ; à chacun ce qu'il a
     confié et ce qui ne concerne que lui (si sa fiche est ouverte) — son secret,
     jamais devant d'autres (un salon) ; le secret d'un autre, à personne
-    d'autre ; le reste jusqu'au niveau de l'audience — « témoin » s'il était là."""
+    d'autre ; le reste jusqu'au niveau de l'audience — « témoin » s'il était là ;
+    la vie de quelqu'un d'autre, au niveau de qui n'a aucun lien avec lui (ADR
+    0092), ce que d'autres ont dit de lui-même, à celui d'une amie."""
+    untied = level if untied is None else untied
     if not about and not told_by:
         return (max(sensitivity, 3) if secret else sensitivity) <= max(1, level)
     if set(about) | set(told_by) <= {me} or me in told_by:
@@ -418,20 +511,24 @@ def oracle(about, told_by, heard_by, secret, sensitivity, me, level, witness_lev
     if secret:
         return False
     was_there = (me in heard_by) if (told_by or heard_by) else (me in about)
-    return sensitivity <= (witness_level if was_there else level)
+    concerned = any(a != me for a in about)
+    return sensitivity <= (witness_level if was_there else untied if concerned else level)
 
 
 @given(st.lists(st.sampled_from(PEOPLE), max_size=3, unique=True), st.lists(st.sampled_from(PEOPLE[:3]), max_size=2,
                                                                           unique=True),
        st.lists(st.sampled_from(PEOPLE[:3]), max_size=3, unique=True), st.booleans(), st.integers(1, 3),
-       st.sampled_from(PEOPLE[:3]), st.integers(0, 3), st.integers(0, 3), st.booleans(), st.booleans())
+       st.sampled_from(PEOPLE[:3]), st.integers(0, 3), st.integers(0, 3), st.booleans(), st.booleans(),
+       st.integers(0, 3))
 def test_the_filter_is_the_policy(about, told_by, heard_by, secret, sensitivity, me, level, witness, private_ok,
-                                  public):
-    witness = max(witness, level)
-    aud = Audience(persons=(me,), public=public, level=level, witness_level=witness, private_ok=private_ok)
+                                  public, untied):
+    witness, untied = max(witness, level), min(untied, level)
+    aud = Audience(persons=(me,), public=public, level=level, witness_level=witness, private_ok=private_ok,
+                   untied_level=untied)
     got = admissible(tuple(sorted(about)), sensitivity, me, aud, told_by=tuple(told_by), heard_by=tuple(heard_by),
                      secret=secret).ok
-    assert got == oracle(about, told_by, heard_by, secret, sensitivity, me, level, witness, private_ok, public)
+    assert got == oracle(about, told_by, heard_by, secret, sensitivity, me, level, witness, private_ok, public,
+                         untied)
 
 
 def test_what_bob_told_about_alice_is_someone_elses_for_alice():
