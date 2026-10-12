@@ -88,7 +88,9 @@ class SelfState:
 #: v9 : ses centres d'intérêt vivent, ses pistes, sa réflexion de la nuit (ADR 0089)
 #: v10 : le récit se réécrit quand elle a changé, sur tout ce qu'elle sait d'elle (ADR 0090)
 #: v11 : une réflexion menée au bout n'est pas un exploit : ni estime, ni « elle mène ses buts au bout » (ADR 0096)
-SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, derive=derive, state_version=11,
+#: v12 : une source devenue une confidence (un sujet délicat, ``memory.delicate``) fait taire le récit, le rêve, le
+#: journal intime qui la reprenaient, comme une source devenue secrète (ADR 0099)
+SELF = Faculty("self", state=SelfState, init=lambda p: SelfState(), params=SelfParams, derive=derive, state_version=12,
                retired_params=("achieved_knock",))
 SELF.declare(c.PERSONA_REVISED, c.NARRATED, c.JOURNALED, c.DREAMT, c.WOKE_WITH, c.TOUCHED, c.INTEREST_BORN,
              c.REFLECTED)

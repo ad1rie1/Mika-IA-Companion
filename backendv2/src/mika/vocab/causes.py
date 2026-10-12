@@ -25,6 +25,7 @@ WORRIED = "worried"  # elle s'inquiète pour quelqu'un
 CONTAGION = "contagion"  # l'humeur de quelqu'un avec qui elle a parlé
 COMPANY = "company"  # quelqu'un est venu lui parler après un moment creux
 ONE_SIDED = "one_sided"  # c'est toujours elle qui écrit la première
+ENVIED = "envied"  # quelqu'un dont elle attend la réponse écrit aux autres (la jalousie, ADR 0100)
 BOND_WARMING = "bond_warming"  # un lien qui s'approfondit
 BOND_COOLING = "bond_cooling"  # un lien qui se refroidit
 #: ce qu'elle a déclaré en parlant : dit selon qu'elle parle à la même personne (``talk_here``, ``talk_elsewhere``)

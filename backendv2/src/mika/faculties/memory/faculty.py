@@ -499,7 +499,9 @@ class MemoryState:
 #: v12 : les fils des moments (``threads``, ``heads``) : reporté, redit, revenu, un moment reste le même (ADR 0079).
 #: v16 : comment un moment a tourné (``outcome``), ce qu'elle apprend de qui annonce (``track``) et de ses attentes
 #: (``calibration``) (ADR 0086).
-MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=16)
+#: v17 : l'oubli d'une personne emporte ce qu'elle lui avait promis et ce qui l'a touchée de grave ; un moment déplacé
+#: compte à moitié dans ses attentes (``OUTCOME_VALUE``), comme dans la surprise.
+MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=17)
 MEMORY.declare(*c.ALL)
 
 
@@ -648,7 +650,8 @@ def _moment_resolved(s: MemoryState, e, cx) -> MemoryState:
     calibration = s.calibration
     if d.likelihood is not None and d.nature:
         n, squares = calibration.get(d.nature, (0, 0.0))
-        happened = 1.0 if d.outcome == c.HAPPENED else 0.0
+        # ce qui est arrivé, comme pour la surprise : déplacé, il aura lieu — à moitié
+        happened = c.OUTCOME_VALUE[d.outcome]
         calibration = calibration.set(d.nature, (n + 1, round(squares + (d.likelihood - happened) ** 2, 6)))
     return replace(s, events=events, track=track, calibration=calibration)
 
@@ -712,7 +715,6 @@ def _noted(s: MemoryState, e, cx) -> MemoryState:
     situation finie, renotée, reste finie."""
     d = e.data
     p = params(cx.params)
-    keep_until = e.at - round(p.event_recent_days * DAY)
     old = s.events.get(d.replaces) if d.replaces is not None else None
     followed = old.followed_at if old is not None and old.when == d.when else 0
     ended = old.ended_at if old is not None and old.ongoing and d.ongoing else 0
@@ -725,12 +727,22 @@ def _noted(s: MemoryState, e, cx) -> MemoryState:
         events = events.delete(d.recurs)  # la situation finie laisse la place à celle qui recommence
     threads = s.threads.set(e.seq, thread) if thread != e.seq else s.threads
     s = replace(s, threads=_newest(threads, THREADS_KEPT), heads=_newest(s.heads.set(thread, e.seq), THREADS_KEPT))
-    stale = [ev.id for ev in events.values() if not ev.yearly
-             and ((ev.ongoing and ev.ended_at and ev.ended_at < keep_until)
-                  or (not ev.ongoing and ev.ends < keep_until))]  # une période, à sa fin (ADR 0084)
-    for i in stale:
+    for i in [ev.id for ev in events.values() if not cached(ev, e.at, p)]:
         events = events.delete(i)
     return replace(s, items=s.items + 1, life_seen=True, events=life_cache(events))
+
+
+def cached(ev: c.LifeEvent, at: int, p: MemoryParams) -> bool:
+    """Ce que la tranche garde d'un moment à l'instant ``at`` : une date qui revient chaque année, toujours ; une
+    situation en cours, ou finie depuis moins de ``event_recent_days`` ; un moment à venir, ou passé depuis moins que
+    ça (une période, à sa fin — ADR 0084). Le reste vit dans l'archive : la relecture de sa vie ne l'y remet pas, ou
+    chaque nouveau moment noté l'en chasserait, et chaque message le ferait revenir dans le journal."""
+    if ev.yearly:
+        return True
+    keep_until = at - round(p.event_recent_days * DAY)
+    if ev.ongoing:
+        return not ev.ended_at or ev.ended_at >= keep_until
+    return ev.ends >= keep_until
 
 
 # L'archive SQL conserve tout ; cette tranche est seulement la mémoire de travail.
@@ -753,11 +765,19 @@ def life_cache(events: FrozenDict[int, c.LifeEvent], keep: frozenset[int] = froz
 
 @MEMORY.reducer(SUBJECT_FORGOTTEN)
 def _forget_life(s: MemoryState, e, cx) -> MemoryState:
+    """Oublier quelqu'un : ses moments, ses réflexions, ce qu'elle a appris de ses annonces — et ce qu'elle lui
+    devait (une promesse dont le texte s'efface ne se tient plus d'elle-même), et ce qui l'a touché de grave."""
     person = e.data.subject
+    gone = {i for i, pr in s.promises.items() if pr.to == person}
     return replace(s, events=FrozenDict((i, item) for i, item in s.events.items()
                                         if person not in (*item.about, *item.told_by)),
                    reflections=tuple(r for r in s.reflections if person not in r.about),
-                   track=s.track.delete(person) if person in s.track else s.track)
+                   track=s.track.delete(person) if person in s.track else s.track,
+                   promises=FrozenDict((i, pr) for i, pr in s.promises.items() if i not in gone),
+                   tries=FrozenDict((i, t) for i, t in s.tries.items() if i not in gone),
+                   kept=tuple(k for k in s.kept if k not in gone),
+                   keeping=FrozenDict((k, v) for k, v in s.keeping.items() if v[0] not in gone),
+                   hard=s.hard.delete(person) if person in s.hard else s.hard)
 
 
 @MEMORY.reducer(c.LIFE_RECALLED)

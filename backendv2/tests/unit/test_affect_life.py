@@ -313,13 +313,48 @@ def test_sleep_freezes_the_fond_and_waking_lightens_it():
     p = DEFAULT
     t = at_paris(2026, 9, 28, 23, 0)
     m = ph.Mood(ph.Osc(ph.common_home(t, p, cw), (0.0, 0.0, 0.0), t), fond=(-0.12, -0.05, -0.08))
-    asleep = ph.fall_asleep(m)
+    asleep = ph.fall_asleep(m, t, cw)
     night = ph.advance_mood(asleep, t + 7 * HOUR, p, cw)
     assert night.fond == m.fond
-    woke = ph.wake(night, p)
+    woke = ph.woke(night, t + 7 * HOUR, p, cw)
     assert A.norm(woke.fond) == pytest.approx((1 - p.sleep_relief) * A.norm(m.fond))
     awake_all_night = ph.advance_mood(m, t + 7 * HOUR, p, cw)  # contre-exemple : éveillée, il aurait décru
     assert A.norm(awake_all_night.fond) < A.norm(m.fond)
+
+
+def test_a_night_cut_by_a_message_wakes_her_mood_and_lightens_it_once():
+    """Tirée du sommeil par un message, elle est éveillée : son fond bouge de nouveau (sans ``body.woke`` derrière —
+    à 6 h 40, une conversation qui dépasse son lever ne la rendort pas). Ce qu'elle a dormi l'a déjà allégé ; rendormie
+    la nuit même, le réveil du matin donne le reste — jamais plus qu'une nuit entière."""
+    cw = ph.Clockwork(PARIS, circadian.DEFAULT)
+    p = DEFAULT
+    t = at_paris(2026, 9, 28, 23, 0)
+    fond = (-0.12, -0.05, -0.08)
+    m = ph.fall_asleep(ph.Mood(ph.Osc(ph.common_home(t, p, cw), (0.0, 0.0, 0.0), t), fond=fond), t, cw)
+    whole = ph.woke(ph.advance_mood(m, t + 7 * HOUR, p, cw), t + 7 * HOUR, p, cw)
+    # 3 h du matin : une amie la réveille, elle se rendort un quart d'heure plus tard, le matin vient
+    roused = ph.roused(ph.advance_mood(m, t + 4 * HOUR, p, cw), t + 4 * HOUR, p, cw)
+    assert not roused.asleep and A.norm(roused.fond) < A.norm(fond)
+    assert A.norm(roused.fond) == pytest.approx(A.norm(fond) * (1 - p.sleep_relief) ** (4 / 7))  # nuit : 23 h → 6 h
+    again = ph.fall_asleep(ph.advance_mood(roused, t + 4 * HOUR + 15 * MINUTE, p, cw), t + 4 * HOUR + 15 * MINUTE, cw)
+    before = ph.advance_mood(again, t + 7 * HOUR, p, cw)
+    morning = ph.woke(before, t + 7 * HOUR, p, cw)
+    # le matin : la part dormie depuis, pas un second allègement entier
+    assert A.norm(morning.fond) == pytest.approx(A.norm(before.fond) * (1 - p.sleep_relief) ** (2.75 / 7))
+    # couchée tôt (22 h) : cinq heures avant le message, deux et quart après — plafonnée à une nuit entière
+    early = ph.fall_asleep(m, t - HOUR, cw)
+    cut = ph.roused(ph.advance_mood(early, t + 4 * HOUR, p, cw), t + 4 * HOUR, p, cw)
+    back = ph.fall_asleep(ph.advance_mood(cut, t + 4 * HOUR + 45 * MINUTE, p, cw), t + 4 * HOUR + 45 * MINUTE, cw)
+    rest = ph.advance_mood(back, t + 7 * HOUR, p, cw)
+    assert A.norm(ph.woke(rest, t + 7 * HOUR, p, cw).fond) == pytest.approx(
+        A.norm(rest.fond) * (1 - p.sleep_relief) ** (1 - 5 / 7))
+    # 6 h 40 : réveillée par un message, debout ensuite — presque toute sa nuit dormie, presque tout l'allègement
+    late = ph.roused(ph.advance_mood(m, t + 7 * HOUR + 40 * MINUTE, p, cw), t + 7 * HOUR + 40 * MINUTE, p, cw)
+    assert not late.asleep and A.norm(late.fond) == pytest.approx(A.norm(whole.fond))
+    # le soir suivant, une nuit neuve : tout l'allègement de nouveau
+    evening = t + DAY
+    fresh = ph.fall_asleep(ph.advance_mood(late, evening, p, cw), evening, cw)
+    assert fresh.roused_at == 0 and fresh.relieved == 0.0
 
 
 # ── PSY-8 / PRM-4 : « installé » seulement quand ça l'est ─────────────────

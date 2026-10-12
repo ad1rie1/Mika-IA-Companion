@@ -352,14 +352,19 @@ def _state_dict(face: affect_c.Face) -> dict[str, Any]:
     }
 
 
-def emotion_view(frame: Frame, target: str | None, declared: Declared | None) -> EmotionView:
+def emotion_view(frame: Frame, target: str | None, declared: Declared | None, *, toward: bool = False
+                 ) -> EmotionView:
     """Ce que la trame montre : la balise déclarée si elle existe (c'est ce
     qu'elle a voulu dire) — ses deux premières facettes quand elle en a dit
     plusieurs (son ambivalence, jugée par le modèle, ADR 0093) —, sinon le
-    visage (posture et humeur mêlées)."""
+    visage (posture et humeur mêlées). Une réplique à quelqu'un (``toward`` : sa balise est déjà dans sa posture
+    envers lui) montre son visage tel qu'elle le laisse voir à cette personne — son expressivité, son masque, sa
+    défense, refermée ou non (ADR 0100) : ce que l'écran garde ensuite pendant qu'elle parle."""
     person = frame.get(identity_c.PERSON(target)) if target else "__global__"
     face = frame.get(affect_c.FACE(person))
     blend = tuple((e.value, round(w, 2)) for e, w in face.blend)
+    if declared is not None and toward and target and declared.emotion is not Emotion.NEUTRAL:
+        return EmotionView(face.emotion.value, face.intensity, blend, _state_dict(face), True)
     if declared is not None:
         name = declared.emotion.value
         if declared.facets:
@@ -508,7 +513,8 @@ async def _deliver(ev: Any, ports: Mapping[str, Any]) -> None:
     persona = voice.SPEAKING if d.target and d.kind in CONVERSATIONAL else voice.INNER
     await port.deliver(Delivery(
         key=ev.id, target=target, channel=d.channel, room=d.room, text=text, persona=persona,
-        emotion=emotion_view(frame, target, declared), message_id=ev.seq, reply_to=d.reply_to,
+        emotion=emotion_view(frame, target, declared, toward=d.kind in CONVERSATIONAL),
+        message_id=ev.seq, reply_to=d.reply_to,
         client_msg_id=_client_msg_id(ports.get("store"), d.reply_to),
         source="reply" if d.kind == Kind.REPLY else "conscience",
         sleep_phase=frame.get(body_c.SLEEP).value, local_hour=frame.local().hour,

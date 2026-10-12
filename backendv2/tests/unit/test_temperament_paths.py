@@ -26,6 +26,7 @@ from mika.contracts import needs as needs_c
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.faculties.affect import overflow_evidence
+from mika.faculties.social.initiative import _arrivals
 from mika.kernel import forms
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.events import Origin
@@ -46,6 +47,7 @@ class Voice:
         self.their = ""
         self.n = 0
         self.prompts: list[str] = []
+        self.delivered: list = []  # ce qui est parti vers les écrans (``Delivery``)
 
     def __call__(self, req: LLMRequest) -> LLMResponse:
         if req.role != "reply":
@@ -57,7 +59,8 @@ class Voice:
 
 def live(tmp: Path, temperament: T.Temperament, scenario, *, start: int = AFTERNOON):  # type: ignore[no-untyped-def]
     voice = Voice()
-    kernel, clock, _llm, _out = build(tmp, voice, start=start)
+    kernel, clock, _llm, out = build(tmp, voice, start=start)
+    voice.delivered = out.items
     doc = DOC.model_copy(update={"temperament": temperament})
 
     async def main():  # type: ignore[no-untyped-def]
@@ -162,8 +165,8 @@ def test_expressiveness_shows_on_her_face(tmp_path):
 
 
 def test_what_she_is_told_of_herself(tmp_path):
-    """Une tsundere avec une précision : le modèle lit son masque, sa défense, sa précision, en mots ; au milieu
-    partout, rien ne s'en dit."""
+    """Une tsundere avec une précision : le modèle lit chacun de ses traits avec sa mesure, sa défense, sa
+    précision ; au milieu partout, chaque trait se dit à 50 %, comme la plupart des gens."""
     tsundere = profile("tsundere").model_copy(update={"notes": {"reactivity": "tu t'énerves quand on t'appelle poulet"}})
 
     async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
@@ -172,10 +175,160 @@ def test_what_she_is_told_of_herself(tmp_path):
 
     got = each(tmp_path, {"tsundere": tsundere, "neutre": T.Temperament()}, scenario)
     title = phrase("self.temperament.title")
-    assert title in got["tsundere"] and title not in got["neutre"]
-    for line in (phrase("self.temperament.trait.mask.high"), phrase("self.temperament.trait.defense.attack"),
+    assert title in got["tsundere"] and title in got["neutre"]
+    mask = phrase("self.temperament.trait.mask.high")
+    for line in (phrase("self.temperament.name.mask") + " : 90 % — " + mask[0].lower() + mask[1:],
+                 phrase("self.temperament.trait.defense.attack"),
                  phrase("self.temperament.precisely", note="tu t'énerves quand on t'appelle poulet")):
         assert line in got["tsundere"]
+    assert phrase("self.temperament.name.mask") + " : 50 % — " + phrase("self.temperament.middle") in got["neutre"]
+
+
+HURT = "[EN_FACE: angry 0.7 | geste : blessant]"
+
+
+def test_reaction_what_a_hurt_turns_into(tmp_path):
+    """Une amie la blesse deux fois ; le modèle la dit triste. Sa réaction fait le reste : la colérique a aussi de la
+    colère, la peureuse se méfie, celle qui se referme ferme son visage et ses initiatives. Et dans tous les cas, être
+    blessée refroidit la relation, jamais ne l'attendrit (constat G4)."""
+    async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
+        await befriend(kernel, "user_1")
+        for _ in range(2):
+            await say(kernel, voice, "user_1", "[EMOTION:sad:0.6]", HURT)
+            await wait(120)
+        st = fact(kernel, affect_c.STANCE("user_1"))
+        return {"facettes": {e for e, _x in st.declared.all} if st.declared else set(),
+                "hostilite": fact(kernel, affect_c.HOSTILITY("user_1")), "regard": st.regard, "lien": st.bond,
+                "refermee": st.withdrawn_until > kernel.mind.clock.now(),
+                "visage": fact(kernel, affect_c.FACE("user_1")).intensity}
+
+    got = each(tmp_path, {r or "rien": T.Temperament(reaction=r) for r in ("", "anger", "fear", "withdrawal")},
+               scenario)
+    assert "angry" in got["anger"]["facettes"] and "angry" not in got["rien"]["facettes"]
+    assert "scared" in got["fear"]["facettes"]
+    assert got["fear"]["hostilite"] > got["rien"]["hostilite"]  # elle se méfie de qui l'a blessée
+    assert got["withdrawal"]["refermee"] and not got["rien"]["refermee"]
+    assert got["withdrawal"]["visage"] < got["rien"]["visage"]
+    for name, r in got.items():
+        assert r["regard"] < 0 and r["lien"] == 0, name  # blessée : ni tendresse ni attachement
+
+
+def test_withdrawn_she_does_not_write_first_to_whoever_hurt_her(tmp_path):
+    """Refermée, ses initiatives vers qui l'a blessée reculent ; sans cette réaction, rien ne recule."""
+    from mika.faculties.affect import _withdrawn
+    from mika.kernel.arbitration import RowView
+
+    async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
+        await befriend(kernel, "user_1")
+        await say(kernel, voice, "user_1", "[EMOTION:sad:0.6]", HURT)
+        frame = kernel.mind.frame()
+        return _withdrawn(frame.state("affect"), frame, RowView("INITIATIVE", "user_1", 9.0, ("chat",))).shift
+
+    got = each(tmp_path, {"refermee": T.Temperament(reaction="withdrawal"), "rien": T.Temperament()}, scenario)
+    assert got["refermee"] < 0 == got["rien"]
+
+
+def test_defense_her_face_when_a_compliment_touches_her(tmp_path):
+    """Un compliment la touche (le modèle la dit tendre) : la tsundere pique, celle qui en rit s'amuse, celle qui nie
+    n'en montre presque rien, celle qui l'avoue le montre franchement."""
+    async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
+        await befriend(kernel, "user_1")
+        await say(kernel, voice, "user_1", "[EMOTION:love:0.6]", "[EN_FACE: happy 0.7 | geste : compliment]")
+        face = fact(kernel, affect_c.FACE("user_1"))
+        return face.emotion.value, face.intensity
+
+    got = each(tmp_path, {d or "rien": T.Temperament(defense=d) for d in ("", "attack", "laugh", "deny", "admit")},
+               scenario)
+    assert got["rien"][0] == "love"
+    assert got["attack"][0] == "frustrated" and got["laugh"][0] == "amused"
+    assert got["deny"][1] < got["rien"][1] < got["admit"][1]
+
+
+def test_what_her_screen_shows_as_she_speaks_is_the_face_she_lets_show(tmp_path):
+    """La trame de sa réplique montre son visage tel qu'elle le laisse voir à cette personne — celui que l'écran
+    garde ensuite pendant qu'elle parle —, pas la balise brute : la tsundere complimentée par une proche pique en
+    rougissant dès sa réplique (« amour » ne passe pas), et sa défense n'est pas cachée une seconde fois par son masque ;
+    son ambivalence déclarée passe encore."""
+    async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
+        await befriend(kernel, "user_1", "close")
+        await say(kernel, voice, "user_1", "[EMOTION:love:0.6]", "[EN_FACE: happy 0.7 | geste : compliment]")
+        touched = voice.delivered[-1].emotion
+        face = fact(kernel, affect_c.FACE("user_1"))
+        await say(kernel, voice, "user_1", "[EMOTION: sad 0.6, anxious 0.3]")
+        return touched, face, voice.delivered[-1].emotion
+
+    got = each(tmp_path, {"milieu": T.Temperament(), "tsundere": T.Temperament(defense="attack", mask=T.HIGHEST),
+                          "pique": T.Temperament(defense="attack")}, scenario)
+    touched, face, mixed = got["tsundere"]
+    assert (touched.emotion, touched.intensity) == (face.emotion.value, face.intensity) == ("frustrated", 0.48)
+    blush = dict(touched.blend)
+    assert blush.get("embarrassed") == dict(got["pique"][0].blend).get("embarrassed") > 0.2  # elle rougit encore
+    assert got["milieu"][0].emotion == "love"  # sans défense : sa tendresse
+    assert [e for e, _w in mixed.blend] == ["sad", "anxious"] and [e for e, _w in got["milieu"][2].blend] == \
+        ["sad", "anxious"]
+
+
+def test_mask_who_sees_her_face(tmp_path):
+    """La même tendresse, à une inconnue et à une proche : la dandere en montre moins à l'inconnue, la tsundere la
+    cache à sa proche ; au milieu, la même avec toutes les deux."""
+    async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
+        await befriend(kernel, "user_1", "close")
+        await say(kernel, voice, "user_1", "[EMOTION:love:0.6]")
+        await say(kernel, voice, "user_9", "[EMOTION:love:0.6]")
+        return fact(kernel, affect_c.FACE("user_9")).intensity, fact(kernel, affect_c.FACE("user_1")).intensity
+
+    got = each(tmp_path, extremes("mask"), scenario)
+    assert got["milieu"][0] == got["milieu"][1]
+    assert got["bas"][0] < got["bas"][1]  # elle s'ouvre à mesure qu'elle connaît
+    assert got["haut"][1] < got["haut"][0]  # elle cache sa tendresse à qui elle aime
+
+
+def test_jealousy_she_waits_for_an_answer_and_they_write_to_others(tmp_path):
+    """Son dernier message à une amie attend la réponse ; l'amie écrit dans un salon, sans s'adresser à elle. La
+    jalouse le ressent (une fois par attente) ; au milieu, rien."""
+    async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
+        await befriend(kernel, "user_1")
+        await say(kernel, voice, "user_1", "[EMOTION:happy:0.4]")
+        waiting = fact(kernel, attention_c.AWAITING("user_1")).unanswered
+        for i in range(2):
+            await kernel.perceive(said("user_1", f"vous faites quoi ce soir {i}", room="salon", addressed=False))
+            await wait(60)
+        envied = [kernel.mind.decode(e).data for e in kernel.mind.store.read() if e.type == attention_c.ENVIED.name]
+        return waiting, envied, fact(kernel, affect_c.STANCE("user_1")).felt
+
+    got = each(tmp_path, {"jalouse": T.Temperament(jealousy=T.HIGHEST), "milieu": T.Temperament(),
+                          "yandere": profile("yandere")}, scenario)
+    assert got["jalouse"][0]
+    assert len(got["jalouse"][1]) == 1 and got["jalouse"][1][0].intensity > 0  # une fois par attente
+    assert len(got["yandere"][1]) == 1
+    assert got["milieu"][1] == []
+
+
+def test_shyness_greeting_a_stranger_who_arrives(tmp_path):
+    """Une inconnue se connecte : l'ouverte a de quoi la saluer, la timide à peine (sous le seuil d'initiative)."""
+    async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
+        await connect(kernel, "user_9")
+        frame = kernel.mind.frame()
+        return [cand.evidence for cand in _arrivals(frame.state("social"), frame) if cand.reason == "greeting"]
+
+    got = each(tmp_path, extremes("shyness"), scenario)
+    assert got["bas"][0] > got["milieu"][0] > 9.0 > got["haut"][0]
+
+
+def test_sociability_perseverance_introspection_what_they_set(tmp_path):
+    """Les réglages qu'ils dérivent, en vigueur : la sociable prend la parole plus souvent et relance plus tôt ; la
+    tenace bloque plus tard ; l'introspective digère davantage la nuit."""
+    async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
+        return (in_force(kernel, "agency").daily_cap, in_force(kernel, "agency").follow_up_min_us,
+                in_force(kernel, "goals").silent_before_blocked, in_force(kernel, "attention").digest_factor)
+
+    social = each(tmp_path / "sociable", extremes("sociability"), scenario)
+    assert social["haut"][0] > social["milieu"][0] > social["bas"][0]
+    assert social["haut"][1] < social["milieu"][1] < social["bas"][1]
+    tenace = each(tmp_path / "tenace", extremes("perseverance"), scenario)
+    assert tenace["haut"][2] > tenace["milieu"][2] > tenace["bas"][2]
+    intro = each(tmp_path / "introspective", extremes("introspection"), scenario)
+    assert intro["haut"][3] < intro["milieu"][3] < intro["bas"][3]
 
 
 # ── ce qu'elle fait de ses émotions ───────────────────────────────────────

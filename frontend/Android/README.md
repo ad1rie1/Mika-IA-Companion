@@ -155,8 +155,8 @@ mets Mika à jour. En version de débogage, le lien « Utiliser un jeton (dev) �
   jeton Firebase (`POST /auth/push`) ; le serveur scelle chaque message avec elle, Google ne transporte qu'un chiffré.
   L'app le déchiffre et l'affiche dans la notification de conversation habituelle. Il faut, une fois : un projet
   Firebase où l'application est déclarée, son `google-services.json` dans `app/` à la construction, et la clé d'un
-  compte de service collée dans la console de Mika (pas à pas : `backendv2/deploy/README.md`, « Notifications du
-  téléphone »). L'app le redit au serveur à chaque ouverture chez toi (au plus tous les quarts d'heure). Paramètres ›
+  compte de service **côté serveur** — `firebase-service-account.json` dans son dossier de données, ou collée dans
+  sa console ; jamais dans l'app (pas à pas : `backendv2/deploy/README.md`, « Notifications du téléphone »). L'app le redit au serveur à chaque ouverture chez toi (au plus tous les quarts d'heure). Paramètres ›
   Notifications › « Application fermée » dit où elle en est (active, en attente, serveur sans clé, version sans
   Firebase) avec « Réessayer ».
 - **Hors de chez toi**, la notification arrive (elle passe par Google) mais l'app ne joint pas le serveur : le

@@ -315,7 +315,7 @@ def test_phone_notifications_take_a_firebase_key_sealed_and_never_shown(world): 
     client, live, _ = world
     bootstrap(client)
     url = f"{BASE}/notifications"
-    assert "aucune clé" in html_of(client.get(url))
+    assert "aucune (colle-la ici, ou pose firebase-service-account.json" in html_of(client.get(url))
     pem = rsa.generate_private_key(public_exponent=65537, key_size=2048).private_bytes(
         serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode()
     key = json.dumps({"type": "service_account", "project_id": "mika-notif", "client_email": "m@mika-notif.iam",
@@ -327,6 +327,6 @@ def test_phone_notifications_take_a_firebase_key_sealed_and_never_shown(world): 
     assert saved.status_code == 200 and "PRIVATE KEY" not in saved.text
     assert client.portal.call(live.settings.push) == key
     page = html_of(client.get(url))
-    assert "mika-notif" in page and "PRIVATE KEY" not in page
+    assert "mika-notif" in page and "collée ici" in page and "PRIVATE KEY" not in page
     post(client, url, {"_section": "notifications", "_champs": ["service_account"], "service_account": ""})
     assert client.portal.call(live.settings.push) == key  # vide : inchangée

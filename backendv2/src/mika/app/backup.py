@@ -14,7 +14,9 @@ se reconstruit pas :
   recréé à la restauration : sans lui, le prochain commit de l'atelier
   enregistrerait sa suppression ;
 - ``secret.key`` quand la clé de chiffrement vient de ce fichier (sans elle,
-  les secrets rangés dans les réglages sont perdus) ;
+  les secrets rangés dans les réglages sont perdus), et la clé Firebase des
+  notifications quand elle est posée en fichier (``firebase-service-account.json``,
+  ADR 0077) ;
 - ``MANIFEST.json`` : tête du journal, empreinte de l'état **rejoué depuis la
   copie**, empreinte du code qui l'a rejouée, somme SHA-256 de chaque fichier.
 
@@ -54,6 +56,7 @@ from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.app import datadir
 from mika.app.composition import faculties
+from mika.app.settings import PUSH_KEY_FILE
 from mika.kernel.codec import digest
 from mika.kernel.inspect import describe_error
 from mika.kernel.registry import Registry
@@ -437,9 +440,10 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
             for sub in ("forge", "ateliers", "partages"):
                 (data / sub).mkdir(exist_ok=True)
             (data / "partages").chmod(0o700)  # ce qu'elle a envoyé à chacun : à elle seule
-            key = data / "secret.key"
-            if key.exists():
-                key.chmod(0o600)
+            for name in ("secret.key", PUSH_KEY_FILE):  # des clés : à leur propriétaire seul
+                key = data / name
+                if key.exists():
+                    key.chmod(0o600)
         finally:
             shutil.rmtree(stage_root, ignore_errors=True)
     finally:

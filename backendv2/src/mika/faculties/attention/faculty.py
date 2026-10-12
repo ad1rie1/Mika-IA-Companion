@@ -231,6 +231,12 @@ class AttentionParams(BaseModel):
         label="Sans réponse : la peine ressentie", group="Révision, manque, blocage", lo=0.0, hi=1.0, step=0.05,
         help="Ce qu'elle ressent (un peu de peine, pour elle et envers la personne) quand une initiative reste sans "
              "réponse. Dérivé de la peur de l'abandon : au milieu, 0,15.")] = 0.15
+    envy_intensity: Annotated[float, Knob(
+        label="Jalousie : quand on l'attend et qu'on écrit aux autres", group="Révision, manque, blocage", lo=0.0,
+        hi=1.0, step=0.05,
+        help="Ce qu'elle ressent (de la jalousie, pour elle et envers la personne) quand une amie ou une proche dont "
+             "elle attend la réponse écrit aux autres sans s'adresser à elle — une fois par attente, davantage pour sa "
+             "propriétaire. Dérivé de la jalousie : 0 au milieu et en dessous.")] = 0.0
     broken_promise_felt: Annotated[float, Knob(
         label="Promesse non tenue : la gêne ressentie", group="Promesses", lo=0.0, hi=1.0, step=0.05,
         help="Ce qu'elle ressent (de la gêne, pour elle et envers la personne) quand une promesse passe son échéance "
@@ -518,6 +524,8 @@ class Exchange:
     seen_upto: int = 0
     #: quand elle a lu cette initiative (0 : pas encore, ou on ne le sait pas)
     seen_at: int = 0
+    #: la dernière fois qu'elle a été jalouse de ce silence-là (la personne écrivait aux autres ; ADR 0100)
+    envied_at: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -582,8 +590,9 @@ class AttentionState:
 def derive(t: Temperament, overrides: Any = None) -> AttentionParams:
     """La matrice de personnalité (ADR 0100), au milieu les valeurs d'avant elle : les scrupules règlent le remords,
     la gêne d'une promesse non tenue et d'un mensonge ; l'anxiété, ce qui lui revient en tête, souvent et longtemps ;
-    la peur de l'abandon, ce que lui fait le silence des autres ; l'introspection, ce que la nuit garde comme
-    réflexion."""
+    la peur de l'abandon, ce que lui fait le silence des autres ; l'introspection, ce que la nuit digère et garde
+    comme réflexion ; la jalousie, ce que lui fait quelqu'un qui écrit aux autres pendant qu'elle attend sa
+    réponse."""
     values: dict[str, Any] = {
         "remorse_from": shift(t.scruples, 0.6, -0.25),
         "remorse_intensity": around(t.scruples, 0.55, 1.6),
@@ -598,13 +607,18 @@ def derive(t: Temperament, overrides: Any = None) -> AttentionParams:
         "missing_intensity": around(t.abandonment, 0.3, 1.8),
         "alone_intensity": around(t.abandonment, 0.35, 1.5),
         "reflective_from": around(t.introspection, 0.25, 1 / 1.6),
+        # y repenser la nuit : une âme introspective digère davantage (au milieu, un tiers reste au matin)
+        "digest_factor": around(t.introspection, 1 / 3, 1 / 1.6),
+        # la jalousie : rien au milieu ni en deçà ; jalouse, un silence qui écrit aux autres la pique
+        "envy_intensity": round(0.6 * max(0.0, 2.0 * t.jealousy - 1.0), 4),
     }
     values.update(dict(overrides or {}))
     return AttentionParams(**values)
 
 
+# 15 : la jalousie d'un silence (``Exchange.envied_at``, ADR 0100)
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    derive=derive, state_version=14)
+                    derive=derive, state_version=15)
 #: les manques dont on retient la dernière pensée (les plus récents)
 MISSING_KEPT = 64
 #: les souvenirs revenus retenus (un même souvenir ne revient pas tant qu'il y est)
@@ -1408,6 +1422,34 @@ def _met_felt(e, cx) -> list[Appraisal]:
 
 # Ce que la digestion a apaisé se ressent au réveil, pas en pleine nuit (une teinte posée à 3 h
 # s'efface avant le matin) : c'est ``self.woke_with`` qui le porte (ADR 0036).
+
+
+@ATTENTION.reducer(c.ENVIED)
+def _envied(s: AttentionState, e, cx) -> AttentionState:
+    """Jalouse de ce silence-là : une fois par attente (la personne lui répond, ça repart de zéro)."""
+    ex = s.exchanges.get(e.data.person)
+    if ex is None:
+        return s
+    return replace(s, exchanges=s.exchanges.set(e.data.person, replace(ex, envied_at=e.at)))
+
+
+@ATTENTION.appraisal(c.ENVIED)
+def _envied_felt(e, cx) -> list[Appraisal]:
+    """De la jalousie, pour elle et envers la personne — ce que les autres lui font vivre : la contagion s'applique."""
+    d = e.data
+    return [Appraisal(Emotion.JEALOUS, d.intensity, reason=causes.ENVIED, relational=True),
+            Appraisal(Emotion.JEALOUS, d.intensity, toward=d.person, reason=causes.ENVIED, relational=True)]
+
+
+def envy(s: AttentionState, person: str, closeness: str, weight: float, p: Any) -> float:
+    """Ce que lui fait une personne qui écrit aux autres sans s'adresser à elle (0 : rien) : seulement une amie ou une
+    proche, dont son dernier message attend encore la réponse, une fois par attente — davantage pour sa propriétaire
+    (``social.WEIGHT``). Au milieu de la jalousie et en deçà : rien."""
+    ex = s.exchanges.get(person)
+    if p.envy_intensity <= 0 or ex is None or not ex.unanswered or ex.envied_at >= ex.last_out \
+            or closeness not in (social_c.FRIEND, social_c.CLOSE):
+        return 0.0
+    return round(min(1.0, p.envy_intensity * weight), 3)
 
 
 @ATTENTION.appraisal(c.EXPECTATION_MISSED)

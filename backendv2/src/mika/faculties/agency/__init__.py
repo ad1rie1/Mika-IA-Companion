@@ -190,9 +190,12 @@ class AgencyState:
 #: personne est retenu (``crossed``) — la tranche se reconstruit depuis la genèse.
 def derive(t: Temperament, overrides: Any = None) -> AgencyParams:
     """L'impulsivité (ADR 0100) : impulsive, elle reprend la parole plus tôt après une initiative et hésite moins
-    longtemps ; au milieu, les valeurs d'avant (30 min, 10 min)."""
+    longtemps ; la sociabilité : sociable, elle prend la parole plus souvent dans la journée et relance plus tôt qui
+    ne répond pas. Au milieu, les valeurs d'avant (30 min, 10 min, 5 par jour, une relance douce après un jour)."""
     values: dict[str, Any] = {"refractory_us": round(around(t.impulsivity, 30 * MINUTE, 0.5)),
-                              "hesitation_us": round(around(t.impulsivity, 10 * MINUTE, 0.5))}
+                              "hesitation_us": round(around(t.impulsivity, 10 * MINUTE, 0.5)),
+                              "daily_cap": max(1, round(around(t.sociability, 5, 1.6))),
+                              "follow_up_min_us": round(around(t.sociability, DAY, 0.5))}
     values.update(dict(overrides or {}))
     return AgencyParams(**values)
 

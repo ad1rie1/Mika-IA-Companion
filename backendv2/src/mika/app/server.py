@@ -65,7 +65,7 @@ from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import MENU
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
-from mika.app.settings import SecretBox, Settings
+from mika.app.settings import SecretBox, Settings, push_key_file
 from mika.app.teams import TeamsDesk
 from mika.app.wakeups import WakeupDesk
 from mika.contracts import identity as identity_c
@@ -392,8 +392,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
                 wakeups=wakeups, teams=teams)
-    # les notifications du téléphone fermé (ADR 0077) : par Firebase, la clé relue dans les réglages à chaque envoi
-    push_sender = FcmSender(settings.push)
+    # les notifications du téléphone fermé (ADR 0077) : par Firebase, la clé relue à chaque envoi — collée dans la
+    # console, sinon le fichier ``firebase-service-account.json`` du dossier de données
+    push_sender = FcmSender(lambda: settings.push() or push_key_file(data))
     hub.push = MobilePush(live.accounts, push_sender)
     # le monde (ADR 0051) : chaque lot commité qui change ce que montrent ses écrans leur part, traduit en trames
     world_hub = live.world = WorldHub(port, live.accounts, origins=web.origins, auth_required=web.auth_required)

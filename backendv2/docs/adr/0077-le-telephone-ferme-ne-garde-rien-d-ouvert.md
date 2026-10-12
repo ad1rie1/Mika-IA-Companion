@@ -67,10 +67,13 @@ l'ouvre ; le message lui-même doit arriver dans la notification, chiffré, pour
 
 5. *Firebase côté serveur.* `adapters/push/fcm.py` : l'API HTTP v1, un jeton d'accès OAuth 2 tiré d'une assertion
    JWT signée RS256 avec la clé d'un compte de service (`cryptography`, `httpx` : rien de neuf à installer), gardé
-   jusqu'à une minute de sa fin, redemandé une fois sur un 401/403. La clé se colle dans la console (Réglages ›
-   Canaux › Notifications du téléphone), refusée en français si elle ne se lit pas, scellée comme les autres secrets,
-   jamais réaffichée ; la page dit le projet, les téléphones notifiables, ce qui est parti et le dernier échec. Sans
-   clé, rien ne part et rien n'est appelé.
+   jusqu'à une minute de sa fin, redemandé une fois sur un 401/403. La clé se pose dans le dossier de données, à
+   côté de `secret.key` (`firebase-service-account.json`, droits 600 — un fichier lisible par d'autres est signalé
+   au journal ; la sauvegarde l'emporte, la restauration lui rend ses droits), ou se colle dans la console
+   (Réglages › Canaux › Notifications du téléphone), refusée en français si elle ne se lit pas, scellée comme les
+   autres secrets, jamais réaffichée — collée, elle passe devant le fichier. Elle est relue à chaque envoi : ni
+   l'une ni l'autre ne demande de redémarrer. La page dit d'où vient la clé, le projet, les téléphones notifiables,
+   ce qui est parti et le dernier échec. Sans clé, rien ne part et rien n'est appelé.
 
 6. *Firebase côté application.* `google-services.json` (non versionné, dans `app/`) est lu par la construction, qui
    en tire les ressources de chaque variante (`fr.qwartz.mika`, `fr.qwartz.mika.debug`) — ce que fait le greffon
@@ -93,7 +96,8 @@ pas notifiées, comme avant. Le ping WebSocket d'uvicorn reste à 20 s : il ne c
 **Conséquences.** Contrats : `adapters/push` (`FcmSender`, `seal`), `adapters/web/push.py` (`MobilePush`, `wanted`,
 `recipients`, `LIVE_S`), `Hub.push`, `Hub._asked_from`, `Conn.seen_at`, `PushRegistration`, `Accounts.set_push` / `clear_push` /
 `push_registrations` / `push_count`, `ClientToken.push`, `account_of_handle`, `create_app(push_ready=)`,
-`Settings.push` / `save_push`, la section de réglages `notifications`. Aucun événement ne change ; un client ancien
+`Settings.push` / `save_push`, `settings.PUSH_KEY_FILE` / `push_key_file`, la section de réglages
+`notifications`. Aucun événement ne change ; un client ancien
 ne s'inscrit pas et n'est pas notifié (il recevait par sa connexion d'arrière-plan, qui marche toujours côté
 serveur). Le protocole : `docs/protocole-chat.md` ; la mise en place : `deploy/README.md` et
 `frontend/Android/README.md`. Tests : `tests/unit/test_push.py`, `tests/protocol/test_mobile_push.py`, la page de

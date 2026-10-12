@@ -40,6 +40,8 @@ STT_KEY = "stt"
 GIT_KEY = "git"
 #: les notifications du téléphone (ADR 0077) : la clé du compte de service Firebase, scellée
 PUSH_KEY = "push"
+#: … ou, à défaut d'une clé collée dans la console, ce fichier du dossier de données (à côté de ``secret.key``)
+PUSH_KEY_FILE = "firebase-service-account.json"
 SENSORS_KEY = "sensors"
 #: le jeton du point MCP de la console (le Claude Code d'une opératrice), scellé
 CONSOLE_MCP_KEY = "console_mcp"
@@ -58,6 +60,27 @@ TEAMS_KEYS_KEY = "teams_key"
 #: les réglages d'un canal retiré (Telegram, ADR 0060) : effacés à l'ouverture — un jeton scellé que plus
 #: rien ne lit ne reste pas dans ``mind.db`` ni dans ses sauvegardes
 RETIRED_KEYS = ("telegram",)
+
+
+_SAID_OPEN: set[str] = set()  # les fichiers de clé déjà signalés lisibles par d'autres
+
+
+def push_key_file(data: Path) -> str:
+    """Le JSON de la clé du compte de service Firebase posée dans le dossier de données
+    (``firebase-service-account.json``) ; vide sans fichier ou illisible. Un fichier lisible par d'autres
+    que son propriétaire est signalé une fois (``chmod 600``) — il sert quand même."""
+    path = data / PUSH_KEY_FILE
+    try:
+        text = path.read_text(encoding="utf-8")
+        if path.stat().st_mode & 0o077 and str(path) not in _SAID_OPEN:
+            _SAID_OPEN.add(str(path))
+            log.warning("notifications : %s est lisible par d'autres que son propriétaire (chmod 600)", path)
+    except FileNotFoundError:
+        return ""
+    except (OSError, UnicodeDecodeError) as exc:
+        log.warning("notifications : %s illisible (%s)", path, exc)
+        return ""
+    return text.strip()
 
 
 class SecretBox:

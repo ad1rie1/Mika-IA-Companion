@@ -117,31 +117,36 @@ class Temperament(BaseModel):
     #: Le poids du mauvais devant le bon : ses impulsions négatives et positives ne pèsent pas pareil.
     negativity: Annotated[float, _slider("Biais négatif", "Ce qui pèse le plus sur son humeur : le bon ou le mauvais.",
                                          45, "le bon la porte", "le mauvais pèse double", FEEL)] = Slider
-    #: Sa réaction quand on la blesse : se dit au modèle (« quand on te blesse, tu te fâches vite »).
-    reaction: Annotated[str, _choice("Quand on la blesse", "Ce vers quoi elle va d'abord quand on la blesse : dit "
-                                     "au modèle comme une tendance.", 95, REACTIONS, FEEL)] = ""
+    #: Sa réaction quand on la blesse (le modèle lit des mots qui la blessent) : sa colère, sa tristesse ou sa peur
+    #: pèsent plus, ou elle se referme (``affect``) — et se dit au modèle (« quand on te blesse, tu te fâches vite »).
+    reaction: Annotated[str, _choice("Quand on la blesse", "Ce vers quoi elle va d'abord quand on la blesse : sa "
+                                     "colère allonge sa rancune, la peur la rend méfiante, se refermer ferme son "
+                                     "visage et ses initiatives envers la personne. Dit aussi au modèle.", 95,
+                                     REACTIONS, FEEL)] = ""
 
     # ── ce qu'elle montre ──
     #: Ce qui passe de ce qu'elle ressent dans ses mots et sur son visage.
     expressiveness: Annotated[float, _slider("Expressivité", "Ce qui passe de son ressenti dans ses mots et sur son "
                                              "visage.", 100, "ne montre presque rien", "montre tout", SHOW)] = Slider
-    #: Le sens de son masque selon l'intimité : dandere (s'ouvre avec qui elle connaît) ou tsundere (pique avec qui
-    #: elle aime). Se dit au modèle.
-    mask: Annotated[float, _slider("Masque selon l'intimité", "Avec qui elle se cache : les inconnus, ou ceux "
-                                   "qu'elle aime. Au milieu, la même avec tous.", 105,
+    #: Le sens de son masque selon l'intimité : dandere (son visage s'ouvre avec qui elle connaît) ou tsundere (il
+    #: cache sa tendresse à qui elle aime) — ``affect.stranger_shown``, ``tender_shown`` ; se dit aussi au modèle.
+    mask: Annotated[float, _slider("Masque selon l'intimité", "Avec qui elle se cache : son visage en montre moins "
+                                   "aux inconnus, ou cache sa tendresse à ceux qu'elle aime. Au milieu, la même avec "
+                                   "tous.", 105,
                                    "s'ouvre à mesure qu'elle connaît", "pique d'autant plus qu'elle aime",
                                    SHOW)] = Slider
-    #: Sa défense quand on la touche : se dit au modèle.
+    #: Sa défense quand on la touche (un compliment, un merci qui la touchent) : ce que montre son visage
+    #: (``affect.defense``) — et se dit au modèle.
     defense: Annotated[str, _choice("Quand on la touche", "Ce qu'elle fait quand on la prend en flagrant délit de "
-                                    "tendresse ou de faiblesse : dit au modèle comme une tendance.", 110, DEFENSES,
-                                    SHOW)] = ""
+                                    "tendresse ou de faiblesse : son visage nie, pique, en rit, se tait ou l'avoue. "
+                                    "Dit aussi au modèle.", 110, DEFENSES, SHOW)] = ""
 
     # ── ce qu'elle fait de ses émotions ──
     #: Agir tout de suite sur ce qu'elle ressent, ou laisser mûrir : le seuil d'un débordement, l'attente entre deux
     #: initiatives.
     impulsivity: Annotated[float, _slider("Impulsivité", "Agir tout de suite sur ce qu'elle ressent, ou laisser "
                                           "mûrir.", 120, "laisse mûrir", "agit sur-le-champ", ACT)] = Slider
-    #: Y repenser longuement : ce qui devient une réflexion, combien de séances, la nuit qui digère.
+    #: Y repenser longuement : ce qui devient une réflexion et quand, ce que la nuit digère et garde.
     introspection: Annotated[float, _slider("Introspection", "Combien elle repense à ce qui l'a marquée, et ce que "
                                             "la réflexion lui apporte.", 125, "passe vite à autre chose",
                                             "y repense longuement", ACT)] = Slider
@@ -151,8 +156,9 @@ class Temperament(BaseModel):
     empathy: Annotated[float, _slider("Empathie", "Combien elle se soucie des autres : s'inquiéter, prendre des "
                                       "nouvelles, être triste avec quelqu'un.", 135, "indifférente",
                                       "se soucie de chacun", OTHERS)] = Slider
-    #: Fermée avec les inconnus.
-    shyness: Annotated[float, _slider("Timidité", "Comment elle va vers qui elle ne connaît pas.", 145,
+    #: Fermée avec les inconnus : ce qu'une inconnue comble de son besoin de compagnie, saluer qui arrive.
+    shyness: Annotated[float, _slider("Timidité", "Comment elle va vers qui elle ne connaît pas : la saluer, ce que "
+                                      "sa compagnie lui apporte.", 145,
                                       "va vers les inconnus", "se tient à l'écart des inconnus", OTHERS)] = Slider
     #: La vitesse à laquelle l'attachement naît.
     attachment: Annotated[float, _slider("Vitesse d'attachement", "Combien chaque moment chaleureux l'attache à "
@@ -166,9 +172,11 @@ class Temperament(BaseModel):
     abandonment: Annotated[float, _slider("Peur de l'abandon", "Ce que le silence des autres lui fait.", 160,
                                           "le silence ne l'inquiète pas", "un silence est un drame",
                                           OTHERS)] = Slider
-    #: Se dit au modèle (rien ne lui montre encore les autres relations de ses proches).
-    jealousy: Annotated[float, _slider("Jalousie", "Ce que lui fait l'attention portée à d'autres qu'elle : dit au "
-                                       "modèle comme une tendance.", 165, "jamais jalouse", "jalouse",
+    #: Ce que pèse la jalousie qu'elle déclare (``affect.jealous_weight``), et ce que lui fait une amie dont elle
+    #: attend la réponse et qui écrit aux autres (``attention.envy_intensity``) ; se dit aussi au modèle.
+    jealousy: Annotated[float, _slider("Jalousie", "Ce que lui fait l'attention portée à d'autres qu'elle : une amie "
+                                       "dont elle attend la réponse et qui écrit aux autres, la jalousie qu'elle "
+                                       "ressent. Dite aussi au modèle.", 165, "jamais jalouse", "jalouse",
                                        OTHERS)] = Slider
     #: La confiance qu'elle accorde d'emblée : la méfiance qu'une hostilité laisse.
     trust: Annotated[float, _slider("Confiance a priori", "Ce qu'elle accorde d'emblée à qui elle connaît peu.",

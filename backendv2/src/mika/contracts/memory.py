@@ -237,6 +237,9 @@ class Reinforced(Payload):
     replaces: int | None = None
     #: ce qui revient se révèle n'appartenir qu'à elles deux (un surnom) : ça le reste (ADR 0055)
     between_us: bool = False
+    #: rien n'est redit, on lui demande la discrétion (« garde-le pour toi ») : l'élément se ferme sans durer
+    #: davantage — ni importance de plus, ni oubli remis à zéro
+    restricts: bool = False
 
 
 class Attested(Payload):
@@ -636,14 +639,17 @@ def heavy_date(ev: LifeEvent) -> bool:
 # événement de plus à émettre, et le journal d'avant se rejoue avec.
 
 SUPERSEDED, SECRET, CONTESTED, JOINED_TO, ENDED = "superseded", "secret", "contested", "joined", "ended"
-#: ce qui ne peut plus se dire comme avant : ce qui en dérive se tait tout de suite (puis se réécrit)
-PRIVATE_REASONS = frozenset({SECRET})
+#: devenu une confidence parce qu'il touche un sujet délicat de la personne (``memory.delicate``, ADR 0099)
+DELICATE_TOPIC = "delicate"
+#: ce qui ne peut plus se dire comme avant : ce qui en dérive se tait tout de suite (puis se réécrit) — un texte
+#: dérivé garde la sensibilité de ses sources telle qu'elle était quand il s'est écrit
+PRIVATE_REASONS = frozenset({SECRET, DELICATE_TOPIC})
 
 
 @dataclass(frozen=True, slots=True)
 class Withdrawal:
-    """Un élément de sa mémoire qui se retire : remplacé (``by`` : par quoi), devenu secret, contesté, joint à un autre
-    (``by`` : le gardé), ou une situation finie."""
+    """Un élément de sa mémoire qui se retire : remplacé (``by`` : par quoi), devenu secret, devenu une confidence (un
+    sujet délicat), contesté, joint à un autre (``by`` : le gardé), ou une situation finie."""
 
     item: int
     reason: str
@@ -686,12 +692,15 @@ def withdrawals(name: str, d: Any, seq: int) -> tuple[Withdrawal, ...]:
         out.append(Withdrawal(d.event, ENDED))
     elif name == RESOLVED.name and d.outcome in (CANCELLED, MOVED):
         out.append(Withdrawal(d.event, ENDED))  # « son entretien jeudi » ne tient plus
+    elif name == DELICATE.name:
+        # devenu une confidence : ce qui le reprenait à la sensibilité d'avant se tait aussi (ADR 0099)
+        out += [Withdrawal(item, DELICATE_TOPIC) for item in d.items]
     return tuple(out)
 
 
 #: Les événements de la mémoire qui peuvent retirer quelque chose (``withdrawals``).
 WITHDRAWING = (BELIEVED, ATTESTED, REINFORCED, EVENT_NOTED, JOINED, NIGHT_SORTED, SITUATION_ENDED, CONFRONTED,
-               RESOLVED)
+               RESOLVED, DELICATE)
 
 
 #: Le dernier message relu par la consolidation.

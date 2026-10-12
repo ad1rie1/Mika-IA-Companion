@@ -62,15 +62,16 @@ def _narrated(s: SelfState, e, cx) -> SelfState:
 
 @SELF.reducer(*memory_c.WITHDRAWING)
 def _sources_withdrawn(s: SelfState, e, cx) -> SelfState:
-    """Ce qu'elle a écrit à partir de ce qu'elle sait suit ses sources (ADR 0082) : un souvenir devenu secret fait
-    taire le récit (jusqu'à sa réécriture), le rêve et la version intime du journal qui le reprenaient ; remplacé,
+    """Ce qu'elle a écrit à partir de ce qu'elle sait suit ses sources (ADR 0082) : un souvenir devenu secret (ou une
+    confidence : un sujet délicat, ADR 0099) fait taire le récit (jusqu'à sa réécriture), le rêve et la version intime
+    du journal qui le reprenaient ; remplacé,
     contesté, joint, il fait réécrire le récit — un rêve, une journée écrite, restent ce qu'ils étaient."""
     gone = memory_c.withdrawals(e.type.name, e.data, e.seq)
     if not gone:
         return s
     private = {w.item for w in gone if w.reason in memory_c.PRIVATE_REASONS}
     # joint à la même croyance, une situation finie : ce qu'il disait reste vrai
-    every = {w.item for w in gone if w.reason in (memory_c.SECRET, memory_c.SUPERSEDED, memory_c.CONTESTED)}
+    every = {w.item for w in gone if w.reason in (*memory_c.PRIVATE_REASONS, memory_c.SUPERSEDED, memory_c.CONTESTED)}
     if set(s.narrative_sources) & every:
         s = replace(s, narrative_stale=True, narrative_masked=s.narrative_masked or bool(set(s.narrative_sources) & private))
     if not private:

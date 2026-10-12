@@ -361,3 +361,23 @@ def test_her_rhythm_follows_her_into_her_work_sessions(tmp_path):
     assert steps
     shown = "\n".join(m.content for m in steps[0].messages)
     assert "TON RYTHME" in shown and "Nous sommes lundi 28 septembre 2026" in shown and "%" not in shown
+
+
+def test_woken_by_a_friend_once_her_night_is_over_her_mood_wakes_too(tmp_path):
+    """Une proche la tire du sommeil au petit matin, sa nuit déjà finie : elle reste debout, et son corps ne dira pas
+    « réveillée » (elle ne s'est pas rendormie). Son humeur la sait éveillée quand même — l'affect attendait
+    ``body.woke`` et la croyait endormie jusqu'au soir, le fond de sa journée figé."""
+    async def scenario(kernel):
+        await befriend(kernel, "user_1", "close")
+        await until(kernel, at_paris(2026, 9, 29, 6, 20))
+        before = kernel.mind.frame().get(body_c.SLEEP)
+        await (await kernel.perceive(said("user_1", "debout ?"))).reply
+        await asyncio.sleep(HOUR / US)
+        frame = kernel.mind.frame()
+        return before, frame.get(body_c.SLEEP), of(kernel, body_c.ROUSED), of(kernel, body_c.WOKE), \
+            frame.state("affect").mood
+
+    (before, after, roused, woke, mood), _ = run(tmp_path, scenario)
+    assert before is not body_c.SleepPhase.AWAKE and after is body_c.SleepPhase.AWAKE and roused
+    assert not [w for w in woke if w.data.at > roused[-1].at]  # le cas : pas de « réveillée » derrière
+    assert not mood.asleep

@@ -74,6 +74,8 @@ class StanceReading:
     lasting: bool = False
     #: la dernière fois que cette personne s'est excusée, et que ça a compté (0 : jamais)
     apologized_at: int = 0
+    #: blessée par elle, elle s'est refermée jusqu'à cet instant (0 : jamais ; ADR 0100)
+    withdrawn_until: int = 0
 
 
 @dataclass(frozen=True, slots=True)

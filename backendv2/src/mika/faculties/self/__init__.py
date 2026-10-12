@@ -9,7 +9,7 @@ Carte des modules — l'ordre des imports ci-dessous fixe l'ordre de ses section
   d'actes ;
 - ``persona`` : le document de persona et son rendu (``load``, ``render``, ``persona_for``) ;
 - ``narrative`` : le récit « Je suis quelqu'un qui… », sur tout ce qu'elle sait d'elle (section ``narrative``) ;
-- ``character`` : son tempérament dit au modèle, en tendances (section ``temperament``, ADR 0100) ;
+- ``character`` : son tempérament dit au modèle, trait par trait avec sa mesure — un bloc de sa persona, partout où elle est injectée (ADR 0100) ;
 - ``esteem`` : l'estime, ce que les autres lui disent d'elle, ses actes (section ``self_state``) ;
 - ``model`` : ce qu'elle sait d'elle — tenir parole, mener au bout, voir venir, ses changements d'avis (section
   ``self_model``) ;
@@ -27,7 +27,6 @@ from __future__ import annotations
 # l'ordre d'enregistrement est l'ordre de ses sections dans le prompt (``kernel/prompt.py``) : pas de tri
 # isort: off
 from mika.faculties.self import narrative as _narrative  # noqa: F401 — « QUI TU ES DEVENUE » d'abord
-from mika.faculties.self import character as _character  # noqa: F401 — son tempérament, dit au modèle
 from mika.faculties.self import esteem as _esteem  # noqa: F401
 from mika.faculties.self import model as _model  # noqa: F401
 from mika.faculties.self import interests as _interests  # noqa: F401

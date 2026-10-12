@@ -137,6 +137,12 @@ def _names(frame: Frame, person: str) -> tuple[str, ...]:
     return (frame.get(identity_c.IDENTITY(person)).name, self_c.name_of(frame.get(self_c.PERSONA)))
 
 
+def _concerns(frame: Frame, ev: c.LifeEvent, person: str) -> bool:
+    """Ce moment est-il de la vie de cette personne ? Une clé notée alors (une adresse, un nom) parle pour elle
+    quand elle lui a été reliée depuis — comme pour ``LIFE_EVENTS`` (ADR 0035, 0048)."""
+    return any(k == person or (frame.get(identity_c.PERSON(k)) or k) == person for k in ev.about)
+
+
 # ── Ce que la personne en dit elle-même : jugé à l'arrivée du message ─────
 
 
@@ -152,7 +158,7 @@ def _told_about(s: MemoryState, frame: Frame, ev: Any, ports: Any) -> list[Draft
     person = frame.get(identity_c.PERSON(d.handle)) or d.handle
     # ce qui se fête n'est « repris » que par ses vœux à elle : « c'est mon anniv aujourd'hui ! » ne le lui souhaite pas
     mine = [e for e in events_at(s, ev.at, frame.env.tz_of(frame.root), p)
-            if person in e.about and e.id < ev.seq and not e.festive
+            if _concerns(frame, e, person) and e.id < ev.seq and not e.festive
             and open_moment(e, ev.at, p, opens_at(e, frame, theirs=True))]
     store = ports.get("store") if ports else None
     if not mine or store is None:
@@ -207,7 +213,7 @@ class Follow:
             person = frame.get(identity_c.PERSON(handle)) or handle
             names = _names(frame, person)
             for e in moments:
-                if e.id in done or person not in e.about or int(seq) < e.id or int(at) < opens[e.id]:
+                if e.id in done or not _concerns(frame, e, person) or int(seq) < e.id or int(at) < opens[e.id]:
                     continue
                 if takes_up_moment(e, texts.get(e.text_ref) or "", str(said or ""), names):
                     done.add(e.id)

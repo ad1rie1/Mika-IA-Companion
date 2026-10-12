@@ -26,3 +26,7 @@ app/src/main/assets/avatar3d/
 # Les identifiants du projet Firebase des notifications (ADR 0077) : propres à chaque installation, jamais versionnés.
 # Sans eux, l'app se construit sans notifications app fermée.
 app/google-services.json
+# La clé d'un compte de service Firebase (ADR 0077) : une clé privée, pour le serveur seulement — jamais versionnée,
+# même posée ici par commodité. Elle se colle dans la console de Mika, puis s'efface.
+*-firebase-adminsdk-*.json
+**/*service-account*.json

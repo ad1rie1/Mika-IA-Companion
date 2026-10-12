@@ -24,7 +24,7 @@ from mika.kernel.state import FrozenDict
 from mika.vocab.affect import Emotion
 from mika.vocab.episodes import Kind
 from mika.vocab.people import fold, is_identifiable
-from mika.vocab.temperament import Temperament, around, lerp
+from mika.vocab.temperament import Temperament, around, lerp, shift
 
 KEEP_DAYS = 64
 #: Les dernières conversations dont on retient qui les a ouvertes.
@@ -245,6 +245,10 @@ class SocialParams(BaseModel):
              "onglet rechargé, une connexion coupée quelques minutes, un redémarrage d'elle (qui était là y est "
              "compté parti à l'instant où elle revient) ne font pas revenir quelqu'un qui n'était pas parti.")] \
         = HOUR
+    stranger_greeting: Annotated[float, Knob(
+        label="Saluer une inconnue qui arrive", group="Saluer", lo=0.0, hi=15.0, step=0.5,
+        help="La preuve (log-odds, seuil d'initiative : 9) pour saluer une inconnue ou une connaissance qui arrive ; "
+             "une amie, une proche : 11 toujours. Dérivé de la timidité : 11 au milieu, moins chez une timide.")] = 11.0
     grudge_demote: Annotated[float, Knob(
         label="Rancune qui défait une amitié installée", group="Retenue", lo=0.05, hi=1, step=0.05,
         help="Une amitié installée (ci-dessous) n'est rétrogradée pour rancune qu'à partir de cette hostilité : "
@@ -389,9 +393,12 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
     """L'optimisme recule le seuil de la détresse : une optimiste tient plus
     longtemps avant d'aller chercher du réconfort (au milieu : −0,35, la valeur
     d'avant). L'attachement à sa propriétaire (ADR 0100) dit combien elle compte plus qu'une proche — jamais moins
-    (au milieu : 1,3, la valeur d'avant). Les surcharges sont posées par ``runtime/params.py``."""
+    (au milieu : 1,3, la valeur d'avant). La timidité (ADR 0100) : timide, elle salue moins une inconnue ou une
+    connaissance qui arrive ; ouverte, davantage. Les surcharges sont posées par ``runtime/params.py``."""
     values: dict[str, Any] = {"distress_valence": round(lerp(-0.2, -0.5, t.optimism), 3),
-                              "owner_weight": max(1.0, around(t.devotion, 1.3, 1.3))}
+                              "owner_weight": max(1.0, around(t.devotion, 1.3, 1.3)),
+                              # la timidité : saluer une inconnue qui arrive (au milieu : 11, la valeur d'avant)
+                              "stranger_greeting": shift(t.shyness, 11.0, -4.0)}
     values.update(dict(overrides or {}))
     return SocialParams(**values)
 
@@ -406,8 +413,9 @@ def derive(t: Temperament, overrides: Any = None) -> SocialParams:
 #: v6 : le dernier cran ressenti de chaque lien (``bond_shifted``, ``bond_noted``).
 #: v11 : un lien suit chaque témoignage de la croyance d'où il vient, et passe à la gardée d'une jointure (ADR 0080).
 #: v12 : un portrait suit ce qu'il reprenait : devenu secret, il se tait ; changé, il se réécrit (ADR 0082).
+#: v13 : … devenu une confidence (un sujet délicat, ``memory.delicate``), aussi (ADR 0099).
 SOCIAL = Faculty("social", state=SocialState, init=lambda p: SocialState(), params=SocialParams, derive=derive,
-                 state_version=12, retired_params=("ignored_shift", "tie_room_max"))
+                 state_version=13, retired_params=("ignored_shift", "tie_room_max"))
 SOCIAL.declare(*c.ALL)
 
 
@@ -644,10 +652,12 @@ def _profiled(s: SocialState, e, cx) -> SocialState:
 
 @SOCIAL.reducer(*memory_c.WITHDRAWING)
 def _portrait_sources(s: SocialState, e, cx) -> SocialState:
-    """Un portrait suit ce qu'il reprenait (ADR 0082) : un élément devenu secret le fait taire tout de suite (il se
-    réécrit sans lui) ; remplacé, contesté, il se réécrit sans recopier l'ancien."""
+    """Un portrait suit ce qu'il reprenait (ADR 0082) : un élément devenu secret, ou une confidence (un sujet délicat,
+    ADR 0099), le fait taire tout de suite (il se réécrit sans lui) ; remplacé, contesté, il se réécrit sans recopier
+    l'ancien."""
     gone = memory_c.withdrawals(e.type.name, e.data, e.seq)
-    changed = {w.item for w in gone if w.reason in (memory_c.SECRET, memory_c.SUPERSEDED, memory_c.CONTESTED)}
+    changed = {w.item for w in gone
+               if w.reason in (*memory_c.PRIVATE_REASONS, memory_c.SUPERSEDED, memory_c.CONTESTED)}
     private = {w.item for w in gone if w.reason in memory_c.PRIVATE_REASONS}
     if not changed:
         return s

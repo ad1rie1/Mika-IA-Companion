@@ -46,13 +46,16 @@ from mika.faculties.memory.recall import _ahead as ahead_section
 from mika.faculties.memory.reread import expired
 from mika.faculties.others.faculty import OthersParams, _cheer_window
 from mika.kernel.clock import DAY, HOUR
-from mika.kernel.events import Content
+from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience
 from mika.kernel.state import FrozenDict
 from mika.vocab import causes
 from mika.vocab.affect import Emotion
+from mika.sim.clock import run_virtual
 from mika.vocab.privacy import Sensitivity, Verdict
+from tests.fixtures.mika import at_paris, boot, build
 from tests.unit.test_audit_regressions import event
+from tests.unit.test_bonds_over_time import Script
 from tests.unit.test_knowledge_coherence import FRAME, Frame, Store, alice_says
 from tests.unit.test_readings import LLM, read, store
 from tests.unit.test_readings import night as reread_night
@@ -463,3 +466,52 @@ async def test_a_forecast_that_came_true_is_constated_and_she_learns_from_it():
     db.put(mc.RESOLVED.draft(**r.model_dump()), 11, NOW)
     assert Consolidate._forecasts(FRAME, db, conv, P, {ALICE: "Alice [P1]"}) == ([], {})
     db.conn.close()
+
+
+# ── L'issue d'un moment précisé le jour même ; un report compte à moitié (audit du 2026-10-12) ─────────────────
+
+
+def test_an_outcome_under_a_number_replaced_the_same_day_lands_on_the_moment_without_undoing_the_append(tmp_path):
+    """« Finalement c'est à 14 h », puis « ah non, il est annulé », relus ensemble : la précision remplace le moment (le
+    même jour, le même fil) et l'issue arrive sous l'ancien numéro, que l'archive vient d'effacer. L'archive lisait
+    l'occurrence d'une issue, qui n'en a pas : tout l'ajout était défait — et la consolidation rejouait les mêmes
+    brouillons à chaque passage. L'issue va au moment tel qu'il est noté maintenant, dans la tranche et dans
+    l'archive."""
+    kernel, clock, _llm, _out = build(tmp_path, Script(), start=at_paris(2026, 9, 28, 15, 0))
+    morning, afternoon = at_paris(2026, 9, 29, 10, 0), at_paris(2026, 9, 29, 14, 0)
+
+    def noted(text, when, **kw):
+        return mc.EVENT_NOTED.draft(text=Content.of(text, level=1), when=when, about=(ALICE,), told_by=(ALICE,),
+                                    all_day=False, sensitivity=1, **kw)
+
+    async def main():
+        await boot(kernel)
+        try:
+            (first,) = (await kernel.mind.append([noted("Son entretien chez Ubisoft", morning)], emitter="memory",
+                                                 correlation="genese", origin=Origin.GENESIS)).seqs
+            commit = await kernel.mind.append(
+                [noted("Son entretien chez Ubisoft, à 14 h", afternoon, replaces=first),
+                 mc.RESOLVED.draft(event=first, thread=first, outcome=mc.CANCELLED, by=ALICE)],
+                emitter="memory", correlation="relecture", origin=Origin.GENESIS)
+            now = commit.seqs[0]
+            rows = kernel.mind.store.query_mind(
+                f"SELECT id, json_extract(payload,'$.outcome') FROM {mc.LIFE_TABLE} ORDER BY id")
+            return now, kernel.mind.frame().state("memory").events[now].outcome, rows
+        finally:
+            await kernel.stop()
+
+    now, outcome, rows = run_virtual(clock, main)
+    assert outcome == mc.CANCELLED  # la tranche : le même moment, annulé
+    assert rows == [(now, mc.CANCELLED)]  # l'archive : pareil, et l'ancien numéro n'y est plus
+
+
+def test_a_moved_moment_counts_half_in_her_expectations_as_in_her_surprise():
+    """Déplacé, un moment n'a pas eu lieu ce jour-là mais aura lieu : à moitié (``OUTCOME_VALUE``). La surprise le
+    comptait ainsi ; ses attentes (le score de Brier) le comptaient comme une annulation."""
+    s = _moment_resolved(MemoryState(), event(mc.RESOLVED.draft(event=10, outcome=mc.MOVED, nature=lk.FIRST_HAND,
+                                                                likelihood=0.9), 20, NOW), CX)
+    assert s.calibration[lk.FIRST_HAND] == (1, pytest.approx((0.9 - mc.OUTCOME_VALUE[mc.MOVED]) ** 2))
+    assert lk.surprise(mc.MOVED, 0.9, 1.0) == pytest.approx(0.9 - mc.OUTCOME_VALUE[mc.MOVED])
+    s = _moment_resolved(s, event(mc.RESOLVED.draft(event=11, outcome=mc.CANCELLED, nature=lk.FIRST_HAND,
+                                                    likelihood=0.9), 21, NOW), CX)
+    assert s.calibration[lk.FIRST_HAND][1] == pytest.approx(0.16 + 0.81)  # une annulation, elle, compte pleine

@@ -16,7 +16,7 @@ from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.dynamics import Oscillator
 from mika.kernel.forms import Knob
 from mika.vocab.affect import ANCHORS, FR, Emotion
-from mika.vocab.temperament import Temperament, around, geometric, lerp, shift
+from mika.vocab.temperament import DEFENSES, REACTIONS, Temperament, around, geometric, lerp, shift
 
 _MOODS = tuple(sorted(((e.value, FR[e]) for e in Emotion), key=lambda m: m[1]))
 
@@ -90,8 +90,16 @@ def physics_of(t: Temperament) -> dict[str, Any]:
         "wary_us": round(around(t.trust, 14 * DAY, 0.5)),
         "hostile_heal_steps": max(1, round(around(t.grudge, 6, 1 / 2.5))),
         "hostile_heal_max_us": round(around(t.grudge, 21 * DAY, 2.0)),
+        # la rancune une fois : ce que valent des excuses ; venant de quelqu'un de moins proche, une part de cela
+        # (``apology_distant``, réglée à part — la dériver aussi comptait la rancune deux fois)
         "apology_heal": around(t.grudge, 0.3, 1 / 1.8),
-        "apology_distant": around(t.grudge, 0.3, 1 / 1.8),
+        # ce qu'elle fait d'une blessure, ce qu'elle montre quand on la touche, avec qui elle se cache, sa jalousie :
+        # au milieu (ou sans choix), rien ne change
+        "reaction": t.reaction,
+        "defense": t.defense,
+        "jealous_weight": around(t.jealousy, 1.0, 2.5),
+        "stranger_shown": round(1.0 - 1.6 * max(0.0, 0.5 - t.mask), 4),
+        "tender_shown": round(1.0 - 1.6 * max(0.0, t.mask - 0.5), 4),
     }
 
 
@@ -175,6 +183,57 @@ class AffectParams(BaseModel):
         label="Ce que montre son visage", group="Lecture", lo=0.2, hi=3.0, step=0.05,
         help="Multiplie l'intensité que montrent son visage et ses trames (jamais au-delà du plein). Dérivé de "
              "l'expressivité : au milieu, 1.")] = 1.0
+
+    #: quand on la blesse (ADR 0100) : le modèle lit des mots qui la blessent (``geste : des mots blessants``)
+    reaction: Annotated[str, Knob(
+        label="Quand on la blesse", group="Blessure et défense", choices=REACTIONS,
+        help="Ce vers quoi elle va d'abord quand le modèle lit des mots qui la blessent : la colère (sa rancune "
+             "s'allonge), la tristesse, la peur (elle se méfie de la personne), ou se refermer (son visage se ferme "
+             "envers elle, elle ne lui écrit plus d'elle-même un moment). Vient du tempérament.")] = ""
+    reaction_weight: Annotated[float, Knob(
+        label="Poids de sa réaction", group="Blessure et défense", lo=1.0, hi=3.0, step=0.05,
+        help="Blessée, les facettes de sa réaction (colère, tristesse ou peur) pèsent autant de fois plus.")] = 1.5
+    reaction_share: Annotated[float, Knob(
+        label="Part de sa réaction", group="Blessure et défense", lo=0.0, hi=1.0, step=0.05,
+        help="Blessée, sa réaction est là au moins pour cette part de ce qu'elle a déclaré de plus fort, même si "
+             "elle ne l'a pas dite (une colérique qui se dit triste a aussi de la colère).")] = 0.5
+    withdraw_us: Annotated[int, Knob(
+        label="Refermée pendant", group="Blessure et défense", lo=0, hi=3 * DAY,
+        help="Quand se refermer est sa réaction, combien de temps elle reste fermée envers qui l'a blessée.")] = 6 * HOUR
+    withdrawn_shown: Annotated[float, Knob(
+        label="Ce que montre son visage, refermée", group="Blessure et défense", lo=0.0, hi=1.0, step=0.05,
+        help="Refermée, son visage ne montre plus que cette part de ce qu'elle ressent envers la personne.")] = 0.4
+    withdrawn_shift: Annotated[float, Knob(
+        label="Recul de ses initiatives, refermée", group="Blessure et défense", lo=0.0, hi=20.0, step=0.5,
+        help="Refermée, ses initiatives vers la personne reculent d'autant (log-odds) ; ce qui prévient (un "
+             "rappel promis) passe quand même.")] = 6.0
+    fear_wary_close: Annotated[float, Knob(
+        label="Méfiance d'une peur, envers une amie", group="Blessure et défense", lo=0.0, hi=1.0, step=0.05,
+        help="Quand la peur est sa réaction, elle se méfie de qui l'a blessée : la durée de la méfiance envers une "
+             "inconnue, multipliée par cette part pour une amie ou une proche.")] = 0.25
+    defense: Annotated[str, Knob(
+        label="Quand on la touche", group="Blessure et défense", choices=DEFENSES,
+        help="Ce que montre son visage quand on la prend en flagrant délit de tendresse (le modèle lit un "
+             "compliment ou un merci, et elle s'est laissée toucher) : nier, attaquer, en rire, se taire, avouer. "
+             "Ce qu'elle ressent ne change pas. Vient du tempérament.")] = ""
+    touched_from: Annotated[float, Knob(
+        label="Touchée dès", group="Blessure et défense", lo=0.0, hi=1.0, step=0.05,
+        help="Une facette tendre au moins aussi forte (amour, gratitude, gêne, joie, fierté) : elle s'est laissée "
+             "toucher, sa défense se voit.")] = 0.25
+    #: la jalousie (ADR 0100) : ce que pèse la jalousie qu'elle déclare
+    jealous_weight: Annotated[float, Knob(
+        label="Poids de sa jalousie", group="Impulsions", lo=0.2, hi=3.0, step=0.05,
+        help="Multiplie la jalousie qu'elle déclare, sur son humeur et sa posture (bornée au plein). Dérivé de la "
+             "jalousie : au milieu, 1.")] = 1.0
+    #: le masque selon l'intimité (ADR 0100) : avec qui elle se cache
+    stranger_shown: Annotated[float, Knob(
+        label="Ce que voit une inconnue", group="Lecture", lo=0.1, hi=1.0, step=0.05,
+        help="Ce que son visage montre à une inconnue (une connaissance : à mi-chemin). Dérivé du masque : 1 au "
+             "milieu et au-dessus ; en dessous, elle s'ouvre à mesure qu'elle connaît.")] = 1.0
+    tender_shown: Annotated[float, Knob(
+        label="La tendresse que voit une proche", group="Lecture", lo=0.1, hi=1.0, step=0.05,
+        help="Ce que son visage montre de sa tendresse à une proche (une amie : à mi-chemin). Dérivé du masque : 1 "
+             "au milieu et en dessous ; au-dessus, elle la cache d'autant plus qu'elle aime.")] = 1.0
 
     def valence_gain(self, emotion: Emotion) -> float:
         """Le poids d'une impulsion vers cette émotion : le biais négatif (une émotion sans valence : 1)."""
@@ -327,9 +386,9 @@ class AffectParams(BaseModel):
              "moment. Des excuses qui rient (« pardon mdr ») ne comptent pas.")] = 0.3
     apology_distant: Annotated[float, Knob(
         label="Des excuses : venant de quelqu'un de moins proche", group="L'histoire d'une relation", lo=0, hi=1,
-        step=0.05, help="La part qui compte quand elles viennent de quelqu'un qui n'est ni une amie ni une "
-                        "proche (une connaissance, une inconnue) : on pardonne moins vite à qui on ne connaît "
-                        "pas, et la méfiance plancher reste.")] = 0.3
+        step=0.05, help="Quand elles viennent de quelqu'un qui n'est ni une amie ni une proche (une connaissance, "
+                        "une inconnue), elles ne pardonnent que cette part de ce qu'auraient pardonné celles d'une "
+                        "amie : on pardonne moins vite à qui on ne connaît pas, et la méfiance plancher reste.")] = 0.3
     #: Débordement d'humeur → preuve d'initiative (log-odds).
     overflow_floor: Annotated[float, Knob(
         label="Seuil de débordement de l'humeur", group="Humeur qui déborde", lo=0, hi=0.95, step=0.05,

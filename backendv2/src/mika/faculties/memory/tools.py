@@ -21,6 +21,7 @@ from mika.faculties.memory.recall import (
     concerned_name,
     doubted,
     feelings,
+    felt_here,
     items_by_id,
     knowledge_label,
     names_of,
@@ -104,7 +105,8 @@ async def memory_search(args: SearchArgs, ctx: Any) -> str:
     names = names_of(frame, {o for it, v in found for o in (*v.others, *it.about, it.holder) if o})
     return "\n".join(f"- {age_words(it.born_at, frame.now)} : {it.text}{tag(v, names)}{doubted(frame, it, memo, person, v)}"
                      + (f" ({knowledge_label(it, names)})" if it.kind == c.BELIEF else "")
-                     + feelings(it.felt, it.empathy, concerned_name(frame, it.about, names, memo)) for it, v in found)
+                     + feelings(felt_here(frame, it, person, aud, memo, store), it.empathy,
+                                concerned_name(frame, it.about, names, memo)) for it, v in found)
 
 
 #: par émotion, au plus tant d'éléments relus avant le verdict
@@ -118,22 +120,33 @@ async def _by_feeling(args: SearchArgs, emotions: list[str], ctx: Any, person: s
     chercher par ressenti, et lesquels ; rien ici ne devine une émotion dans les mots. Le verdict de chaque élément,
     comme toujours."""
     vectors, store, frame = ctx.ports.get("vectors"), ctx.ports.get("store"), ctx.frame
+    aud = frame.audience
     whose = {"moi": (c.HERS,), "la_personne": (c.THEIRS,)}.get(args.de_qui, (c.HERS, c.THEIRS))
     marks_w, marks_e = ",".join("?" * len(whose)), ",".join("?" * len(emotions))
     rows = store.query_mind(
-        f"SELECT f.item, MAX(f.intensity) FROM {c.FEELINGS_TABLE} f JOIN {c.ITEMS_TABLE} i ON i.id = f.item "
+        f"SELECT f.item, f.whose, MAX(f.intensity) FROM {c.FEELINGS_TABLE} f JOIN {c.ITEMS_TABLE} i ON i.id = f.item "
         f"WHERE f.whose IN ({marks_w}) AND f.emotion IN ({marks_e}) AND i.status='active' AND i.kind IN (?, ?) "
-        f"GROUP BY f.item ORDER BY MAX(f.intensity) DESC, f.item LIMIT ?",
+        f"GROUP BY f.item, f.whose ORDER BY MAX(f.intensity) DESC, f.item LIMIT ?",
         (*whose, *emotions, c.SOUVENIR, c.BELIEF, FEELING_CANDIDATES))
-    strength = {int(i): float(x) for i, x in rows}
+    felt: dict[int, dict[str, float]] = {}
+    for i, who, x in rows:
+        felt.setdefault(int(i), {})[str(who)] = float(x)
+    items = items_by_id(store, list(felt))
+    # ce que la personne en ressent ne compte que là où le témoignage qui l'a dit s'entend : sinon, trouvé par sa
+    # honte, l'élément dirait qu'elle en a honte (ADR 0080, 0083)
+    strength: dict[int, float] = {}
+    for i, it in items.items():
+        got = {who: x for who, x in felt[i].items()
+               if who != c.THEIRS or felt_here(frame, it, person, aud, memo, store)}
+        if got:
+            strength[i] = max(got.values())
     if not strength:
         return []
     near = dict(await vectors.search(args.query, len(strength), keys=list(strength))) if vectors is not None else {}
-    items = items_by_id(store, list(strength))
+    items = {i: it for i, it in items.items() if i in strength}
     score = {i: strength[i] + 0.5 * relevance(near.get(i, 0.0), wanted, it.text) for i, it in items.items()}
     taken = {it.id for it, _v in found}
     out: list[Any] = []
-    aud = frame.audience
     for item in sorted(items.values(), key=lambda it: (-score[it.id], it.id)):
         if item.id in taken:
             continue

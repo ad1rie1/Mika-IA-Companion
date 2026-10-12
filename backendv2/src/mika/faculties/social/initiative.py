@@ -58,6 +58,9 @@ from mika.vocab.phrasebook import phrase
 GREETING_WINDOW = 10 * MINUTE
 GREETING_SPACING = HOUR
 GREETING_EVIDENCE = 11.0
+#: une inconnue ou une connaissance qui arrive : saluée selon sa timidité (``SocialParams.stranger_greeting``)
+GREETING_MAX = 15.0
+_LITTLE_KNOWN = frozenset({c.STRANGER, c.ACQUAINTANCE})
 RECENT_CONVERSATION = 30 * MINUTE
 #: Après un échange, parler de soi-même à la même personne attend un peu.
 CONVERSATION_COOLDOWN = 5 * MINUTE
@@ -98,9 +101,10 @@ def _guard(frame: Frame, person: str) -> Guard:
     return Guard("silence", reads=tuple(transcript_c.LAST_FROM(h) for h in handles))
 
 
-@SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.GREETING: (0.0, GREETING_EVIDENCE), c.PRESENT_PERSON: (0.0, 0.0)},
+@SOCIAL.propose(kinds=[Kind.INITIATIVE], reasons={c.GREETING: (0.0, GREETING_MAX), c.PRESENT_PERSON: (0.0, 0.0)},
                 reads=[presence_c.PRESENT, presence_c.SINCE, identity_c.PERSON, identity_c.IDENTITY,
-                       identity_c.HANDLES, transcript_c.LAST_FROM, transcript_c.LAST_TO, affect_c.HOSTILITY])
+                       identity_c.HANDLES, transcript_c.LAST_FROM, transcript_c.LAST_TO, affect_c.HOSTILITY,
+                       c.CLOSENESS])
 def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
     out: list[Candidate] = []
     now = frame.now
@@ -133,7 +137,9 @@ def _arrivals(s: SocialState, frame: Frame) -> list[Candidate]:
         who = f"« {name} »" if name else phrase("social.initiative.greet.someone")
         brief = phrase("social.initiative.greet.brief", who=who,
                        whom=f"« {name} »" if name else phrase("social.initiative.this_person"))
-        out.append(Candidate(Kind.INITIATIVE, handle, c.GREETING, GREETING_EVIDENCE, resources=resources,
+        # timide, elle salue moins qui elle connaît peu (ADR 0100) ; une amie, une proche : toujours
+        evidence = p.stranger_greeting if frame.get(c.CLOSENESS(person)) in _LITTLE_KNOWN else GREETING_EVIDENCE
+        out.append(Candidate(Kind.INITIATIVE, handle, c.GREETING, evidence, resources=resources,
                              guards=(guard,), args=FrozenDict({"brief:social": brief})))
     return out
 

@@ -1,7 +1,9 @@
 """La persona : un seul document pour toutes ses voix, écrit par l'opératrice. Deux profondeurs : ``full``
 (répondre, prendre la parole, se raconter) et ``compact`` (murmurer, travailler) — rendues depuis le même document,
 pour qu'aucune de ses voix ne soit quelqu'un d'autre. Elle est une IA et le sait, ou une personne incarnée (``nature``)
-; ses bonjours donnent un ton, jamais une phrase à recopier."""
+; ses bonjours donnent un ton, jamais une phrase à recopier. Son tempérament, trait par trait avec sa mesure (ADR
+0100), est dans les deux profondeurs : partout où la persona est injectée — répondre, prendre la parole, murmurer,
+travailler, un réveil, un brouillon, son journal, ses rêves, son récit — elle a le même caractère."""
 
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ from pathlib import Path
 import yaml
 
 from mika.contracts import self_ as c
+from mika.faculties.self.character import temperament_text
 from mika.faculties.self.faculty import SELF, SelfState
 from mika.kernel.codec import digest
 from mika.kernel.frame import Frame
@@ -74,6 +77,7 @@ def render(doc: c.PersonaDoc, depth: str = "full") -> str:
         ]
     else:
         parts.append(_bullets(phrase("self.persona.in_short"), doc.traits[:3]))
+    parts.append(temperament_text(doc.temperament))  # dans ses deux profondeurs : le même caractère partout
     parts.append(phrase("self.persona.language", language=doc.language, nature=nature_of(doc)))
     parts.append(life_rule(doc))
     return "\n\n".join(p for p in parts if p)

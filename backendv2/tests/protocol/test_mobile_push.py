@@ -32,6 +32,7 @@ from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web import push
 from mika.adapters.web.app import WebConfig
 from mika.app.server import build
+from mika.app.settings import PUSH_KEY_FILE
 from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.delivery import Delivery
 from mika.vocab import voice
@@ -68,6 +69,8 @@ class Ctx:
     client: TestClient
     live: Any
     firebase: FakeFirebase
+    #: l'expéditeur Firebase branché par le serveur (les envois passent par le faux ; lui dit quelle clé il lit)
+    fcm: Any = None
 
     def call(self, fn, *args, **kw):
         return self.client.portal.call(functools.partial(fn, *args, **kw))
@@ -107,8 +110,8 @@ def ctx(tmp_path) -> Iterator[Ctx]:
                       arbitration=ArbitrationPolicy(), reply_wait=None)
     firebase = FakeFirebase()
     with TestClient(app, base_url="http://localhost:8001") as client:  # un client natif : pas d'Origin
-        live.hub.push.sender = firebase
-        yield Ctx(client, live, firebase)
+        real, live.hub.push.sender = live.hub.push.sender, firebase
+        yield Ctx(client, live, firebase, real)
 
 
 def test_only_a_phone_says_where_to_notify_it(ctx) -> None:
@@ -125,13 +128,36 @@ def test_only_a_phone_says_where_to_notify_it(ctx) -> None:
     assert ctx.pushes()[phone.token_id] is True
 
 
-def test_available_when_the_server_has_a_key(ctx) -> None:
+def service_account(project: str) -> str:
     key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
                             serialization.NoEncryption()).decode()
-    ctx.call(ctx.live.settings.save_push, json.dumps({"type": "service_account", "project_id": "p",
-                                                      "client_email": "m@p.iam", "private_key": pem}))
+    return json.dumps({"type": "service_account", "project_id": project, "client_email": f"m@{project}.iam",
+                       "private_key": pem})
+
+
+def test_available_when_the_server_has_a_key(ctx) -> None:
+    ctx.call(ctx.live.settings.save_push, service_account("p"))
     assert ctx.register(ctx.phone()).json()["available"] is True
+
+
+def test_the_key_can_be_a_file_of_the_data_folder_and_the_console_wins(ctx) -> None:
+    """La clé posée dans le dossier de données (``firebase-service-account.json``, à côté de ``secret.key``) sert
+    sans rien coller ; une clé collée dans la console passe devant ; le fichier retiré, plus rien ne part."""
+    def project() -> str | None:  # lu sur le fil du serveur (la base n'est lisible que là)
+        account = ctx.call(ctx.fcm.account)
+        return account.project_id if account is not None else None
+
+    path = ctx.live.data / PUSH_KEY_FILE
+    path.write_text(service_account("depuis-le-fichier"))
+    path.chmod(0o600)
+    assert ctx.register(ctx.phone()).json()["available"] is True
+    assert project() == "depuis-le-fichier"
+    ctx.call(ctx.live.settings.save_push, service_account("depuis-la-console"))
+    assert project() == "depuis-la-console"
+    ctx.call(ctx.live.settings.save_push, "")
+    path.unlink()
+    assert project() is None
 
 
 def test_a_closed_phone_gets_the_sealed_message(ctx) -> None:

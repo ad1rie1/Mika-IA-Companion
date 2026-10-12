@@ -10,6 +10,10 @@ de sa journée et l'allège au réveil (ADR 0032).
 Des excuses sincères (``self.touched``, une fois par jour et par personne)
 ôtent une part de ce que la relation a installé d'hostile — davantage venant
 d'une amie que d'une inconnue, dont la méfiance plancher reste (ADR 0047).
+
+Son tempérament (ADR 0100) agit sur ce qu'elle déclare : blessée (le modèle a lu des mots qui la blessent), sa
+réaction pèse (la colère, la tristesse, la peur) ou elle se referme ; touchée (un compliment, un merci), son visage se
+défend ; sa jalousie pèse ce qu'elle pèse ; son masque règle ce que son visage montre selon l'intimité.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from mika.contracts import affect as c
+from mika.contracts import agency as agency_c
 from mika.contracts import body as body_c
 from mika.contracts import expression as expression_c
 from mika.contracts import identity as identity_c
@@ -33,7 +38,7 @@ from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.vocab import affect as A
-from mika.vocab import causes
+from mika.vocab import causes, reading
 from mika.vocab.affect import Declared, Emotion
 from mika.vocab.episodes import CONVERSATIONAL, Kind, Tag
 from mika.vocab.people import is_identifiable
@@ -55,7 +60,13 @@ AFFECT = Faculty("affect", state=AffectState, init=lambda p: AffectState(), para
                  # vivre touche sa posture envers elle ; des excuses pardonnent sous chacune de ses adresses (ADR 0094)
                  # 6 : la matrice de personnalité — tout ce que les autres lui font vivre suit la contagion, le biais
                  # négatif pèse sur chaque impulsion (ADR 0100)
-                 state_version=6, retired_params=("declared_window_us",))
+                 # 7 : blessée, sa réaction pèse et la relation se refroidit (jamais de tendresse) ; refermée, touchée :
+                 # sa posture le retient (ADR 0100)
+                 # 8 : un message qui la tire du sommeil la réveille aussi ici (une nuit coupée allège en deux fois),
+                 # ses nuits datées de l'instant du croisement (ADR 0101)
+                 state_version=8, retired_params=("declared_window_us",))
+#: ni une connaissance ni une inconnue : sa tendresse s'y cache (le masque, au-dessus du milieu)
+_TENDER_TO = frozenset({social_c.FRIEND, social_c.CLOSE})
 
 #: Ni une amie ni une proche : une hostilité forte y laisse de la méfiance.
 _DISTANT = frozenset({social_c.STRANGER, social_c.ACQUAINTANCE})
@@ -72,6 +83,8 @@ def _clockwork(cx: Any) -> ph.Clockwork:
 @AFFECT.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, body_c.RHYTHM, social_c.CLOSENESS])
 def _declared(s: AffectState, e, cx) -> AffectState:
     d = e.data
+    if d.visible:
+        s = _awake_now(s, e.at, cx)  # parler en dormant la réveille (son corps aussi : ``body._uttered``)
     if d.kind not in CONVERSATIONAL:
         return s
     declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
@@ -83,6 +96,14 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     # quelqu'un qu'elle ne peut pas reconnaître (une adresse jetable) la touche comme une inconnue, jamais davantage
     level = (cx.facts.get(social_c.CLOSENESS(key)) if is_identifiable(d.target) else social_c.STRANGER) \
         if d.target else ""
+    # ce que le modèle a lu de la personne (ADR 0093) : des mots qui la blessent, un compliment, un merci
+    their = reading.Reading.decode(d.annotation(expression_c.READING_ANNOTATION))
+    hurt = their is not None and their.gesture == reading.INSULTED
+    touched = their is not None and their.gesture in (reading.COMPLIMENTED, reading.THANKED)
+    # son tempérament sur ce qu'elle déclare (ADR 0100) : sa jalousie pèse ; blessée, sa réaction aussi
+    declared = ph.weighed(declared, {Emotion.JEALOUS: p.jealous_weight})
+    if hurt:
+        declared = ph.reacting(declared, p.reaction, p.reaction_weight, p.reaction_share)
     mood = ph.advance_mood(s.mood, e.at, p, cw)
     # le biais négatif (ADR 0100) : le mauvais et le bon ne pèsent pas pareil (au milieu, 1)
     weight = p.valence_gain(declared.emotion)
@@ -104,11 +125,19 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     recent = (*stance.recent, (e.at, declared.emotion.value))[-ph.RECENT_IMPULSES:]
     stance = replace(stance, declared=declared.encode(), declared_at=e.at, declared_reply=d.kind == Kind.REPLY,
                      recent=recent)
+    if hurt and p.reaction == ph.WITHDRAWAL:
+        stance = replace(stance, withdrawn_until=max(stance.withdrawn_until, e.at + p.withdraw_us))
+    if touched and p.defense and ph.tender(declared, p.touched_from):
+        stance = replace(stance, defended_at=e.at)  # prise en flagrant délit de tendresse : son visage se défend
     if is_identifiable(d.target) and e.at - stance.folded_at >= p.anchor_fold_interval_us:
         ref = ph.reference(p, cw)
-        stance = ph.fold(stance, declared, e.at, cx.local(e.at).date().toordinal(), ref, p)
+        stance = ph.fold(stance, declared, e.at, cx.local(e.at).date().toordinal(), ref, p, hurt=hurt)
         if level in _DISTANT and ph.hostility_of(stance.anchor, stance.bond, 0, e.at, ref, p) > p.wary_from:
             stance = replace(stance, wary_until=e.at + p.wary_us)
+    if hurt and p.reaction == ph.FEAR and is_identifiable(d.target):
+        # la peur : elle se méfie de qui l'a blessée (moins longtemps d'une amie que d'une inconnue)
+        lasting = p.wary_us if level in _DISTANT else round(p.wary_us * p.fear_wary_close)
+        stance = replace(stance, wary_until=max(stance.wary_until, e.at + lasting))
     return replace(s, stances=s.stances.set(key, stance))
 
 
@@ -167,16 +196,34 @@ def _apologized(s: AffectState, e, cx) -> AffectState:
 
 @AFFECT.reducer(body_c.FELL_ASLEEP, reads=[body_c.RHYTHM])
 def _asleep(s: AffectState, e, cx) -> AffectState:
-    """Pendant qu'elle dort, le fond de sa journée ne bouge plus."""
+    """Pendant qu'elle dort, le fond de sa journée ne bouge plus — depuis l'instant où elle s'est endormie (un
+    rattrapage après un arrêt le date au passé)."""
     p = _params(cx.params)
-    return replace(s, mood=ph.fall_asleep(ph.advance_mood(s.mood, e.at, p, _clockwork(cx))))
+    cw = _clockwork(cx)
+    return replace(s, mood=ph.fall_asleep(ph.advance_mood(s.mood, e.data.at, p, cw), e.data.at, cw))
 
 
 @AFFECT.reducer(body_c.WOKE, reads=[body_c.RHYTHM])
 def _woke(s: AffectState, e, cx) -> AffectState:
     """Le sommeil l'allège : au réveil, il en reste une part, qui colore son matin."""
     p = _params(cx.params)
-    return replace(s, mood=ph.wake(ph.advance_mood(s.mood, e.at, p, _clockwork(cx)), p))
+    cw = _clockwork(cx)
+    return replace(s, mood=ph.woke(ph.advance_mood(s.mood, e.data.at, p, cw), e.data.at, p, cw))
+
+
+@AFFECT.reducer(body_c.ROUSED, reads=[body_c.RHYTHM])
+def _roused(s: AffectState, e, cx) -> AffectState:
+    """Un message la tire du sommeil : elle est éveillée. Son corps ne dira pas toujours « réveillée » ensuite (une
+    conversation qui dépasse l'heure de son lever ne la rendort pas) — son humeur ne reste pas figée pour autant."""
+    return _awake_now(s, e.at, cx)
+
+
+def _awake_now(s: AffectState, at: int, cx: Any) -> AffectState:
+    if s.mood is None or not s.mood.asleep:
+        return s
+    p = _params(cx.params)
+    cw = _clockwork(cx)
+    return replace(s, mood=ph.roused(ph.advance_mood(s.mood, at, p, cw), at, p, cw))
 
 
 # ── Lectures ──────────────────────────────────────────────────────────────
@@ -281,7 +328,7 @@ def stance_reading(s: AffectState, person: str, now: int, p: AffectParams, cw: p
     return c.StanceReading(
         person, position, rest, felt, felt_i, declared, anchor, quiet, anchored, ref,
         ph.regard_of(st.anchor, st.bond, ref, p), ph.hostility_of(st.anchor, st.bond, st.wary_until, now, ref, p),
-        st.bond, st.declared_at, st.declared_reply, lasting, st.apologized_at)
+        st.bond, st.declared_at, st.declared_reply, lasting, st.apologized_at, withdrawn_until=st.withdrawn_until)
 
 
 @AFFECT.fact(c.MOOD, reads=[body_c.RHYTHM, needs_c.NEEDS])
@@ -343,8 +390,31 @@ def _bond(s: AffectState, cx, person: str) -> float:
     return bond(s, person, cx.now, _params(cx.params), _handles(cx, person))
 
 
+def shown_factor(p: AffectParams, closeness: str, withdrawn: bool, defended: bool = False) -> Any:
+    """Ce que son visage montre de chaque émotion, devant cette personne (ADR 0100) : son expressivité ; son masque
+    (une inconnue en voit moins quand elle s'ouvre à mesure qu'elle connaît, une proche voit moins sa tendresse quand
+    elle pique d'autant plus qu'elle aime — une connaissance, une amie : à mi-chemin) ; refermée, presque rien. Au
+    milieu de tout : 1 partout. Son visage qui se défend (``defended``) montre déjà ce qu'il laisse passer de sa
+    tendresse — la rougeur de celle qui pique : le masque ne la cache pas une seconde fois."""
+    base = p.face_expressiveness * (p.withdrawn_shown if withdrawn else 1.0)
+    if closeness == social_c.STRANGER:
+        base *= p.stranger_shown
+    elif closeness == social_c.ACQUAINTANCE:
+        base *= 1.0 - (1.0 - p.stranger_shown) / 2
+    tender = 1.0
+    if closeness == social_c.CLOSE and not defended:
+        tender = p.tender_shown
+    elif closeness == social_c.FRIEND and not defended:
+        tender = 1.0 - (1.0 - p.tender_shown) / 2
+
+    def factor(emotion: Emotion) -> float:
+        return base * (tender if emotion in ph.TENDER else 1.0)
+
+    return factor
+
+
 def face_reading(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.Clockwork,
-                 handles: tuple[str, ...] = ()) -> c.Face:
+                 handles: tuple[str, ...] = (), closeness: str = "") -> c.Face:
     m = mood_reading(s, now, p, cw)  # le visage ne dit pas de cause
     st = _now_toward(s, person, handles, now, p, cw)
     if st is None:
@@ -352,19 +422,29 @@ def face_reading(s: AffectState, person: str, now: int, p: AffectParams, cw: ph.
     else:
         position, declared = st.position, ph.fresh(st, now, p)
     label, intensity, parts, person_part, mood_part = ph.face(position, m.position, p.background, declared)
-    if p.face_expressiveness != 1.0:
-        # ce que montre son visage de ce qu'elle ressent (l'expressivité, ADR 0100) — jamais au-delà du plein
-        def shown(x: float) -> float:
-            return round(min(1.0, x * p.face_expressiveness), 2)
+    defended: list[tuple[Emotion, float]] = []
+    if st is not None and declared is not None and p.defense and st.defended_at and st.defended_at == st.declared_at:
+        # prise en flagrant délit de tendresse : son visage se défend (ce qu'elle ressent ne change pas)
+        defended = ph.defended(declared, p.defense)
+        if defended:
+            (label, intensity), parts, person_part = defended[0], defended, defended[0]
+    withdrawn = st is not None and st.withdrawn_until > now
+    factor = shown_factor(p, closeness, withdrawn, defended=bool(defended))
+    if any(factor(e) != 1.0 for e in (label, person_part[0], mood_part[0], *(e for e, _w in parts))):
+        # jamais au-delà du plein
+        def shown(e: Emotion, x: float) -> float:
+            return round(min(1.0, x * factor(e)), 2)
 
-        intensity, parts = shown(intensity), [(e, shown(w)) for e, w in parts]
-        person_part, mood_part = (person_part[0], shown(person_part[1])), (mood_part[0], shown(mood_part[1]))
+        intensity, parts = shown(label, intensity), [(e, shown(e, w)) for e, w in parts]
+        person_part = (person_part[0], shown(*person_part))
+        mood_part = (mood_part[0], shown(*mood_part))
     return c.Face(label, intensity, tuple(parts), person_part, mood_part)
 
 
-@AFFECT.fact(c.FACE, reads=[body_c.RHYTHM, identity_c.HANDLES])
+@AFFECT.fact(c.FACE, reads=[body_c.RHYTHM, identity_c.HANDLES, social_c.CLOSENESS])
 def _face(s: AffectState, cx, person: str) -> c.Face:
-    return face_reading(s, person, cx.now, _params(cx.params), _clockwork(cx), _handles(cx, person))
+    closeness = cx.facts.get(social_c.CLOSENESS(person)) if is_identifiable(person) else social_c.STRANGER
+    return face_reading(s, person, cx.now, _params(cx.params), _clockwork(cx), _handles(cx, person), closeness)
 
 
 # ── Prompt ────────────────────────────────────────────────────────────────
@@ -438,6 +518,18 @@ def _not_to_whom_upset_her(s: AffectState, frame: Frame, row: RowView) -> Modula
         return Modulation()
     cut = overflow_evidence(m, _params(frame.env.params_of("affect", frame.root)))
     return Modulation(shift=-cut) if cut > 0 else Modulation()
+
+
+@AFFECT.modulate(kinds=[Kind.INITIATIVE], reads=[c.STANCE, identity_c.PERSON])
+def _withdrawn(s: AffectState, frame: Frame, row: RowView) -> Modulation:
+    """Blessée par quelqu'un, et se refermer est sa réaction (ADR 0100) : un moment, elle ne lui écrit plus d'elle-même
+    — ce qui prévient (un rappel promis, une nouvelle à donner) passe quand même."""
+    if row.target in (Anyone.ANY, Anyone.NONE) or (agency_c.INFORMS | agency_c.OWED) & set(row.reasons):
+        return Modulation()
+    person = frame.get(identity_c.PERSON(row.target)) or row.target
+    if frame.get(c.STANCE(person)).withdrawn_until <= frame.now:
+        return Modulation()
+    return Modulation(shift=-_params(frame.env.params_of("affect", frame.root)).withdrawn_shift)
 
 
 # ── Inspection ────────────────────────────────────────────────────────────

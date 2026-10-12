@@ -39,6 +39,7 @@ from mika.faculties.attention.faculty import (
     Pending,
     awaiting,
     due_at,
+    envy,
     habituation,
     params,
 )
@@ -599,6 +600,19 @@ def _touches(state: AttentionState, frame: Frame, ev: Any, ports: Any) -> list[D
     said = stems(d.text.text) - stems(_name(frame, person))
     hit = tuple(t.id for t in thoughts if said & stems(_subject(texts.get(t.text_ref) or "")))
     return [c.TOUCHED.draft(person=person, thoughts=hit)] if hit else []
+
+
+@ATTENTION.interpret(rt.PERCEPTION_RECEIVED)
+def _elsewhere(state: AttentionState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]:
+    """Quelqu'un qui compte, dont elle attend la réponse, écrit aux autres (dans un salon, sans s'adresser à elle) :
+    de la jalousie, selon son tempérament (ADR 0100). Ce qu'elle perçoit, jamais ce que dit le message."""
+    d = ev.data
+    if d.addressed or not is_identifiable(d.handle):
+        return []
+    person = frame.get(identity_c.PERSON(d.handle))
+    felt = envy(state, person, frame.get(social_c.CLOSENESS(person)), frame.get(social_c.WEIGHT(person)),
+                params(frame.env.params_of("attention", frame.root)))
+    return [c.ENVIED.draft(person=person, intensity=felt)] if felt > 0 else []
 
 
 def _subject(text: str) -> str:

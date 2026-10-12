@@ -59,9 +59,40 @@ Il a aussi demandé des profils préremplis à appliquer puis ajuster, et pour c
    | scrupules | le remords et son seuil, la gêne d'un mensonge, d'une promesse non tenue (`attention`, `self`) |
    | anxiété | le rythme et la force du « y repenser », la durée d'une pensée (`attention`) |
    | énergie | quand vient le brouillard de la fatigue, et ce que la somnolence prend (`body`) |
+   | masque selon l'intimité | ce que son visage montre à une inconnue, et de sa tendresse à une proche (`affect.stranger_shown`, `tender_shown`) |
+   | jalousie | le poids de la jalousie qu'elle déclare (`affect.jealous_weight`) ; la jalousie quand une amie dont elle attend la réponse écrit aux autres (`attention.envy_intensity`) |
 
-   La jalousie et le masque ne se calculent pas : ils se disent au modèle. Rien ne lui montre encore les autres
-   relations de ses proches.
+   Des curseurs d'avant tiennent enfin ce que leur description promettait :
+   - la sociabilité règle aussi le nombre d'initiatives par jour et le délai d'une relance douce (`agency`) ;
+   - la persévérance, le nombre de séances sans conclure avant qu'un but bloque (`goals.silent_before_blocked`) ;
+   - l'introspection, ce que la nuit digère (`attention.digest_factor`) ;
+   - la timidité, saluer une inconnue ou une connaissance qui arrive (`social.stranger_greeting`).
+
+   Le nombre de séances d'une réflexion reste à un : plus de séances en font une enquête qui invente (sonde réelle
+   du 2026-10-03).
+
+   Les 28 curseurs pilotent tous au moins un paramètre ; `test_every_slider_drives_something_and_is_told` le
+   garde.
+
+   **Sa réaction et sa défense** agissent aussi sur l'affect, sur ce que le modèle a lu de la personne (`geste`,
+   ADR 0093), jamais sur une liste de mots :
+   - *blessée* (le modèle lit des mots qui la blessent) :
+     - la famille de sa réaction pèse davantage : colère, tristesse ou peur ;
+     - cette famille est là au moins pour la moitié de ce qu'elle a déclaré. Une colérique qui se dit triste a
+       aussi de la colère, et ce qu'elle a déclaré n'est jamais effacé ;
+     - la peur la rend méfiante envers la personne ;
+     - se refermer ferme son visage envers elle, et fait reculer ses initiatives vers elle (`withdraw_us`). Ce qui
+       prévient, comme un rappel promis, passe quand même ;
+   - *touchée* (un compliment ou un merci, et elle s'est montrée tendre) : son visage se défend. Il nie, pique
+     (frustrée et gênée), en rit, se tait ou l'avoue. Ce qu'elle ressent ne change pas.
+
+   **Blessée, la relation se refroidit et ne s'attendrit jamais** (constat G4 de l'audit). Triste envers qui la
+   blesse, ce n'est pas être triste *avec* lui :
+   - l'ancre va vers ce qu'elle a ressenti, toutes facettes ensemble ;
+   - aucun attachement ne naît ;
+   - une colère nette, même en seconde facette, compte comme une hostilité.
+
+   Restent à corriger, pour la même racine, les « temps durs » (`memory`) et l'inquiétude (`others`).
 
 4. *La contagion couvre tout ce que les autres lui font vivre* (réponse 14 du questionnaire : « de marbre, compatir
    sans s'impliquer »). Sont désormais relationnelles, et suivent donc la contagion du tempérament :
@@ -74,20 +105,32 @@ Il a aussi demandé des profils préremplis à appliquer puis ajuster, et pour c
 
    Au milieu (et au-dessus), rien ne change.
 
-5. *Le tempérament se dit au modèle* (section `temperament`, « TON TEMPÉRAMENT », `faculties/self/character.py`).
-   C'est le modèle qui choisit ses émotions : sans ces mots, une Mika anxieuse aurait les balises d'une Mika sereine.
-   - Un trait se dit à 0,3 ou moins, ou à 0,7 ou plus, par une phrase de `voix.yaml` (`self.temperament.trait.*`).
-   - S'y ajoutent sa réaction et sa défense.
-   - Ce sont des tendances, jamais un chiffre ni une obligation. Au milieu partout : rien.
+5. *Le tempérament se dit au modèle, partout où sa persona est injectée* (bloc « Ton tempérament : »,
+   `faculties/self/character.py`, rendu par `persona.render` dans ses deux profondeurs). C'est le modèle qui choisit
+   ses émotions : sans ces mots, une Mika anxieuse aurait les balises d'une Mika sereine. Il est d'abord né comme
+   section des seules conversations ; il est passé dans la persona le 2026-10-12. Ses répliques, ses initiatives, ses
+   murmures, ses séances de travail, ses projets, ses réveils, ses brouillons, son journal, ses rêves et son récit
+   ont donc tous le même caractère. Le travail impersonnel, sans persona, n'en a pas.
+   - **Tous ses traits se disent, chacun avec sa mesure** (demandé le 2026-10-12), rangés par famille, par exemple
+     « Introspection : 90 % — tu repenses longuement… ». Le modèle dose d'après elle : 75 % ne se lit pas comme 95 %.
+   - La phrase vient de `voix.yaml` (`self.temperament.*`) :
+     - celle du bas à 40 % ou moins, celle du haut à 60 % ou plus ;
+     - « comme la plupart des gens » entre les deux.
+   - S'y ajoutent son humeur de fond, sa réaction et sa défense (« rien de particulier » sans choix).
+   - Les noms des traits sont écrits pour elle, à la deuxième personne, jamais les libellés de la console.
+   - Ce sont des tendances, jamais une obligation. Les mesures sont pour elle seule : elle ne dit jamais un
+     pourcentage.
 
-   Un trait très marqué (0,15 ou moins, 0,85 ou plus) le dit (« C'est très marqué chez toi »). La section s'ouvre sur
-   « Ton caractère, pour toi seule : il se sent dans ta façon de répondre, tu ne le décris jamais à personne ».
+   Un trait très marqué (15 % ou moins, 85 % ou plus) le dit (« C'est très marqué chez toi »). La section s'ouvre sur
+   « Ton caractère, pour toi seule : il se sent dans ta façon de répondre, tu ne le décris jamais à personne », suivi
+   de ce que veulent dire les mesures et de la consigne de ne jamais les dire. Au second banc (2026-10-12, mesures
+   comprises), aucune réplique ne cite un pourcentage ni ne récite un trait.
    Le banc du tempérament (`tools/banc_temperament`, Haiku par la CLI) l'a montré : sans ces deux ajouts, une
    tsundere rougissait sans piquer, et une psychopathe récitait un trait.
 
 6. *Des précisions* (`notes`). Pour chaque trait, une phrase facultative est écrite en lui parlant : « tu t'énerves
-   quand on t'appelle poulet ». Elle se dit avec le trait (« En particulier : … »), ou seule quand le trait est au
-   milieu. Elle compte 200 caractères au plus, et seuls les traits connus en ont une.
+   quand on t'appelle poulet ». Elle suit la phrase de son trait (« En particulier : … ») et ne la remplace jamais,
+   même au milieu. Elle compte 200 caractères au plus, et seuls les traits connus en ont une.
 
 7. *Des profils* (`PROFILES`) :
    - **les tempéraments ordinaires** : neutre, réfléchie, calme, anxieuse, nerveuse, solaire, rancunière, de
@@ -108,14 +151,26 @@ Il a aussi demandé des profils préremplis à appliquer puis ajuster, et pour c
    personnage.
 
 **Conséquences.**
-- **Nouveaux paramètres**, tous bornés et documentés : `affect.negative_gain`, `positive_gain`,
-  `face_expressiveness` ; `attention.unanswered_felt`, `broken_promise_felt` (des constantes d'avant) ;
-  `self.esteem_rest`.
+- **Nouveaux paramètres**, tous bornés et documentés :
+  - `affect` : `negative_gain`, `positive_gain`, `face_expressiveness`, `reaction`, `reaction_weight`, `reaction_share`, `withdraw_us`, `withdrawn_shown`, `withdrawn_shift`, `fear_wary_close`, `defense`, `touched_from`, `jealous_weight`, `stranger_shown`, `tender_shown` ;
+  - `attention` : `unanswered_felt`, `broken_promise_felt` (des constantes d'avant), `envy_intensity` ;
+  - `self` : `esteem_rest` ;
+  - `social` : `stranger_greeting`.
+- **Un événement neuf**, `attention.envied` (jalouse : quelqu'un dont elle attend la réponse écrit aux autres), avec
+  sa cause `envied` et sa phrase.
+- **Ce qu'elle a déclaré décroît avec toutes ses facettes** (`physics.fresh`, constat M2) : son visage et sa défense
+  les lisent encore quelques minutes plus tard.
 - **Nouvelles dérivations** : `attention`, `self` et `agency` dérivent désormais leurs paramètres du tempérament.
   Leurs paramètres sont donc journalisés à chaque configuration, avec les mêmes valeurs au milieu.
-- **Versions** : `affect` passe en v6 et se reconstruit (le relationnel suit la contagion).
+- **Versions** :
+  - `affect` passe en v7 (v6 : le relationnel suit la contagion ; v7 : blessée, touchée, refermée) ;
+  - `attention` passe en v15 (la jalousie d'un silence).
+  Toutes deux se reconstruisent.
 - **Console** : une section `temperament` (libellée) et une page « Profil » sous Personnalité.
-- **Tests et banc** : `tests/unit/test_temperament_paths.py` suit chaque chemin dans le vrai noyau, sous deux ou trois tempéraments contrastés ; `tools/banc_temperament` mesure le vrai modèle. Les fixtures mesurent un tempérament neutre (`tests/fixtures/mika.py` : `DOC`). La persona livrée
+- **Tests et banc** :
+  - `tests/unit/test_temperament_paths.py` suit chaque chemin dans le vrai noyau, sous deux ou trois tempéraments contrastés ;
+  - trois vies de trois jours (`tests/unit/test_temperament_life_{tsundere,yandere,psychopathe}.py`, harnais `tests/fixtures/temperament_life.py`, marquées lentes) vivent les mêmes situations, nuits et absence comprises. Elles vérifient que chaque appel qui porte sa persona porte aussi son tempérament, et que chaque personnalité réagit à sa façon, comparée à la Mika du milieu ;
+  - `tools/banc_temperament` mesure le vrai modèle. Les fixtures mesurent un tempérament neutre (`tests/fixtures/mika.py` : `DOC`). La persona livrée
   reste disponible (`SHIPPED`), et un profil se teste comme tel. Cibles : `tests/unit/test_temperament_matrix.py`.
 - **Une installation dont la persona a été rédigée dans la console** garde la sienne. On y applique « Réfléchie »
   par la page Profil ou par `mika profil reflechie`.
@@ -132,7 +187,6 @@ Ce qui reste :
   conduite ; sa physique, elle, reste froide (empathie basse).
 
 **Ce qui n'est pas fait** (réponses du questionnaire, pour un lot suivant) :
-- la jalousie n'a pas de déclencheur perçu ;
 - une conversation qui l'enthousiasme ne la porte pas encore malgré la fatigue ;
 - une grosse colère ne dure pas tant que son objet dure, et la durée ne dépend pas de l'intensité ;
 - « pardon mdr » n'aggrave rien (il est seulement ignoré) ;
@@ -142,4 +196,5 @@ Ce qui reste :
 - une rêverie soulage encore entièrement la solitude ;
 - une inconnue qui se tait reçoit encore jusqu'à deux initiatives.
 
-Les constats G1 à G4, E1 et E2 de l'audit relèvent de règles, pas de la matrice.
+Les constats G1 à G3, E1 et E2 de l'audit relèvent de règles, pas de la matrice. G4 est corrigé pour l'affect ;
+la mémoire (« temps durs ») et l'inquiétude (`others`) restent à corriger.

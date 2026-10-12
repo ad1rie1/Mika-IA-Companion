@@ -1,13 +1,15 @@
 """Sa matrice de personnalité (ADR 0100) : des curseurs en familles, des profils préremplis, ce qui se dit au modèle.
 
-- chaque curseur pilote quelque chose — un paramètre d'une faculté, ou ce qui se dit au modèle ;
+- chaque curseur pilote un paramètre d'une faculté (et se dit au modèle) ; sa réaction et sa défense aussi ;
 - au milieu, chaque dérivation redonne exactement la valeur d'avant la matrice : une vie existante ne change pas ;
 - les profils posent tous les curseurs de caractère (jamais tout à fait 0 ni 1), gardent le chronotype, se
   reconnaissent ; Mika est livrée « Réfléchie » ;
-- son tempérament se dit au modèle en tendances, jamais en chiffres ; au milieu partout, rien ;
+- son tempérament se dit au modèle trait par trait, chacun avec sa mesure (« 90 % ») et sa phrase ;
 - une cible par famille : la rancune dure, les scrupules font naître le remords, l'anxiété fait revenir les pensées,
   l'empathie inquiète, l'impulsivité fait déborder et reprendre la parole plus tôt, le biais négatif fait peser le
-  mauvais, l'expressivité se voit, cloisonnée elle reste de marbre devant ce que les autres lui font vivre.
+  mauvais, l'expressivité se voit, cloisonnée elle reste de marbre devant ce que les autres lui font vivre ; blessée,
+  sa réaction pèse et la relation refroidit ; touchée, son visage se défend ; son masque règle ce que voient une
+  inconnue et une proche ; sa jalousie pèse.
 """
 
 from __future__ import annotations
@@ -49,9 +51,6 @@ from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import PARIS, SHIPPED, at_paris
 
 T0 = at_paris(2026, 9, 28, 15, 0)
-#: ce qui ne se calcule pas, mais se dit au modèle (rien ne lui montre encore les autres relations de ses proches,
-#: et le sens de son masque est une façon de parler)
-TOLD_ONLY = frozenset({"jealousy", "mask"})
 #: les curseurs nés avec la matrice (les huit d'avant ont gardé leur sens)
 NEW = frozenset(T.SLIDERS) - {"reactivity", "resilience", "contagion", "optimism", "sociability", "curiosity",
                               "perseverance", "chronotype"}
@@ -72,14 +71,29 @@ def _cw() -> ph.Clockwork:
 # ── la matrice ────────────────────────────────────────────────────────────
 
 
-def test_every_slider_drives_something_or_is_told():
-    """Un curseur sans effet serait un mensonge de la console : il pilote un paramètre quelque part, ou il se dit au
-    modèle (et alors il a ses deux phrases)."""
+def test_every_slider_drives_something_and_is_told():
+    """Un curseur sans effet serait un mensonge de la console : chacun pilote un paramètre quelque part — et se dit au
+    modèle (il a ses deux phrases)."""
     moved = params.influences([f for f in faculties() if f.params is not None], T.Temperament())
     idle = {s for s, where in moved.items() if not where}
-    assert idle == set(TOLD_ONLY), f"curseurs sans effet : {sorted(idle - TOLD_ONLY)}"
-    for slider in T.PERSONALITY:
+    assert idle == set(), f"curseurs sans effet : {sorted(idle)}"
+    for slider in T.SLIDERS:
         assert phrase(f"self.temperament.trait.{slider}.low") and phrase(f"self.temperament.trait.{slider}.high")
+        assert phrase(f"self.temperament.name.{slider}")
+
+
+def test_her_reaction_and_her_defense_drive_the_affect_too():
+    """Sa réaction et sa défense ne sont pas que des mots : chacune règle l'affect (et se dit au modèle)."""
+    for key, _label in T.REACTIONS:
+        assert affect_derive(_t(reaction=key)).reaction == key
+        if key:
+            assert phrase(f"self.temperament.trait.reaction.{key}")
+    for key, _label in T.DEFENSES:
+        assert affect_derive(_t(defense=key)).defense == key
+        if key:
+            assert phrase(f"self.temperament.trait.defense.{key}")
+    assert set(ph.REACTION_FAMILIES) | {ph.WITHDRAWAL} == {k for k, _l in T.REACTIONS if k}
+    assert set(ph.DEFENSE_FACE) == {k for k, _l in T.DEFENSES if k}
 
 
 def test_at_the_middle_every_new_slider_gives_back_the_values_from_before():
@@ -125,40 +139,71 @@ def test_mika_ships_as_reflechie():
 # ── ce qui se dit au modèle ───────────────────────────────────────────────
 
 
-def test_her_temperament_is_told_in_words_never_numbers():
-    assert told(T.Temperament()) == []  # au milieu partout : rien à dire
-    tsundere = told(T.apply_profile(T.Temperament(), "tsundere"))
+def _line(t: T.Temperament, slider: str) -> str:
+    """La ligne d'un trait dans ce qu'on lui dit."""
+    name = phrase(f"self.temperament.name.{slider}") + " : "
+    return next(line for line in told(t) if line.startswith(f"- {name}"))
+
+
+def test_every_trait_is_told_with_its_measure_and_its_sentence():
+    """Tous ses traits, chacun avec sa mesure (« 90 % ») : le modèle dose d'après elle. La phrase du bas à 40 % ou
+    moins, du haut à 60 % ou plus, « comme la plupart des gens » entre les deux ; très marqué, il le dit. Les seuls
+    chiffres sont des mesures."""
+    middle = phrase("self.temperament.middle")
+    neutral = told(T.Temperament())
+    for slider in T.SLIDERS:
+        assert _line(T.Temperament(), slider).endswith(f": 50 % — {middle}")
+    assert sum(1 for line in neutral if line.startswith("- ")) == len(T.SLIDERS) + 3  # humeur, réaction, défense
+    reflechie = SHIPPED.temperament
     marked = phrase("self.temperament.marked")
-    assert phrase("self.temperament.trait.mask.high") + " " + marked in tsundere  # 9 sur 9 : très marqué
-    assert phrase("self.temperament.trait.defense.attack") in tsundere
-    assert phrase("self.temperament.trait.empathy.high") in tsundere  # 7 sur 9 : net, sans plus
-    reflechie = told(SHIPPED.temperament)
-    assert phrase("self.temperament.trait.introspection.high") + " " + marked in reflechie
-    assert phrase("self.temperament.trait.impulsivity.low") in reflechie
-    for key in T.PROFILES:
-        assert not any(re.search(r"\d", line) for line in told(T.apply_profile(T.Temperament(), key)))
+    introspection = phrase("self.temperament.trait.introspection.high")
+    assert _line(reflechie, "introspection").endswith(f": 90 % — {introspection[0].lower()}{introspection[1:]} {marked}")
+    assert ": 40 % — " in _line(reflechie, "contagion") and middle not in _line(reflechie, "contagion")
+    assert ": 20 % — " in _line(reflechie, "impulsivity")
+    # la mesure suit le curseur : 75 % ne se lit pas comme 95 %
+    assert ": 75 % — " in _line(T.Temperament(grudge=0.75), "grudge")
+    assert ": 95 % — " in _line(T.Temperament(grudge=0.95), "grudge") and marked in _line(T.Temperament(grudge=0.95),
+                                                                                             "grudge")
+    tsundere = told(T.apply_profile(T.Temperament(), "tsundere"))
+    assert "- " + phrase("self.temperament.trait.defense.attack") in tsundere
+    assert "- " + phrase("self.temperament.trait.reaction.none") in neutral
+    assert "- " + phrase("self.temperament.background", feeling="contente") in neutral
+    for key in T.PROFILES:  # les seuls chiffres sont des mesures
+        assert not any(re.search(r"\d", re.sub(r"\b\d{1,3} %", "", line))
+                       for line in told(T.apply_profile(T.Temperament(), key)))
 
 
-def test_the_section_says_it_with_its_tail_and_nothing_at_the_middle():
-    from mika.faculties.self.character import _temperament  # noqa: PLC0415 — la section, appelée telle quelle
+def test_her_persona_carries_her_temperament_in_both_depths():
+    """Le bloc de son tempérament fait partie de sa persona, complète comme compacte : partout où elle est injectée
+    (répondre, murmurer, travailler, son journal, ses rêves, son récit), elle a le même caractère. Il s'ouvre pour
+    elle seule et se ferme sur des tendances."""
+    from mika.faculties.self.character import temperament_text  # noqa: PLC0415
+    from mika.faculties.self.persona import render  # noqa: PLC0415
 
-    neutral = SelfState(persona=self_c.PersonaDoc(name="Mika"))
-    assert _temperament(neutral, None, {}) is None
-    shy = SelfState(persona=self_c.PersonaDoc(name="Mika", temperament=T.apply_profile(T.Temperament(), "dandere")))
-    text = _temperament(shy, None, {})
-    assert phrase("self.temperament.trait.shyness.high") in text and text.endswith(phrase("self.temperament.tail"))
-    assert text.startswith(phrase("self.temperament.lead"))  # pour elle seule : elle ne le récite pas (banc)
+    shy = self_c.PersonaDoc(name="Mika", temperament=T.apply_profile(T.Temperament(), "dandere"))
+    block = temperament_text(shy.temperament)
+    lines = block.split("\n")
+    assert lines[0] == phrase("self.temperament.title") and lines[1] == phrase("self.temperament.lead")
+    assert lines[-1] == phrase("self.temperament.tail")
+    for family in ("feel", "show", "act", "others", "self", "body"):
+        assert phrase(f"self.temperament.family.{family}") in lines
+    high = phrase("self.temperament.trait.shyness.high")
+    assert f"{high[0].lower()}{high[1:]}" in block
+    for depth in ("full", "compact"):
+        assert block in render(shy, depth)
 
 
-def test_a_note_says_what_sets_a_trait_off_even_at_the_middle():
-    """Une précision par trait (« tu t'énerves quand on t'appelle poulet ») : dite avec le trait, ou seule quand le
-    trait est au milieu ; un trait inconnu ou un roman sont refusés ; un profil ne l'efface pas."""
+def test_a_note_follows_its_trait_and_never_replaces_it():
+    """Une précision par trait (« tu t'énerves quand on t'appelle poulet ») : à la suite de la phrase de son trait,
+    même au milieu ; un trait inconnu ou un roman sont refusés ; un profil ne l'efface pas."""
     t = T.Temperament(reactivity=0.8, notes={"reactivity": "tu t'énerves quand on t'appelle « poulet ».",
                                              "grudge": "  tu pardonnes tout à ceux qui te font rire  "})
-    lines = told(t)
-    assert lines[0] == phrase("self.temperament.trait.reactivity.high") + " " + phrase(
-        "self.temperament.precisely", note="tu t'énerves quand on t'appelle « poulet »")
-    assert phrase("self.temperament.particular", note="tu pardonnes tout à ceux qui te font rire") in lines
+    high = phrase("self.temperament.trait.reactivity.high")
+    assert _line(t, "reactivity").endswith(
+        f"{high[0].lower()}{high[1:]} " + phrase("self.temperament.precisely",
+                                                 note="tu t'énerves quand on t'appelle « poulet »"))
+    assert _line(t, "grudge").endswith(phrase("self.temperament.middle") + " " + phrase(
+        "self.temperament.precisely", note="tu pardonnes tout à ceux qui te font rire"))
     assert T.apply_profile(t, "calme").notes == t.notes
     assert {k for k, _ in T.NOTE_KEYS} == {*T.PERSONALITY, "reaction", "defense"}
     with pytest.raises(ValueError):
@@ -186,6 +231,9 @@ def test_a_grudge_lasts_and_apologies_weigh_less():
     held, forgiving = _t(grudge=0.9), _t(grudge=0.1)
     assert _hostility_after(held, 7) > _hostility_after(T.Temperament(), 7) > _hostility_after(forgiving, 7)
     assert affect_derive(held).apology_heal < affect_derive(forgiving).apology_heal
+    # la rancune n'entre qu'une fois : venant de quelqu'un de moins proche, la même part de ce qu'auraient pardonné
+    # les excuses d'une amie, rancunière ou non (dérivée deux fois, elle tombait au carré : 0,035 contre 0,19)
+    assert affect_derive(held).apology_distant == affect_derive(forgiving).apology_distant
 
 
 def test_scruples_make_remorse_born_of_a_milder_harshness():
@@ -273,3 +321,68 @@ def test_shyness_energy_attachment_and_stability():
     assert body_derive(_t(energy=0.9)).tired_below < body_derive(_t(energy=0.1)).tired_below
     assert affect_derive(_t(attachment=0.9)).bond_step > affect_derive(_t(attachment=0.1)).bond_step
     assert affect_derive(_t(stability=0.1)).anchor_alpha > affect_derive(_t(stability=0.9)).anchor_alpha
+
+
+# ── blessée, touchée, masquée, jalouse ────────────────────────────────────
+
+
+def test_hurt_her_reaction_adds_to_what_she_said_and_never_erases_it():
+    """Blessée et dite triste : la colérique a aussi de la colère (la moitié de sa tristesse), la peureuse de la peur ;
+    se refermer, ou rien de particulier : rien ne change. Une colère déclarée pèse davantage chez la colérique."""
+    sad = Declared(Emotion.SAD, 0.6)
+    angry = dict(ph.reacting(sad, "anger", 1.5, 0.5).all)
+    assert angry == {"sad": 0.6, "angry": 0.3}
+    assert dict(ph.reacting(sad, "fear", 1.5, 0.5).all) == {"sad": 0.6, "scared": 0.3}
+    assert ph.reacting(sad, "withdrawal", 1.5, 0.5) is sad and ph.reacting(sad, "", 1.5, 0.5) is sad
+    assert ph.reacting(Declared(Emotion.ANGRY, 0.5), "anger", 1.5, 0.5).intensity == 0.75
+
+
+def test_hurt_the_relation_cools_and_never_grows_tender():
+    """Le constat G4 : triste envers qui la blesse, ce n'est pas être triste avec lui — l'ancre se refroidit autant
+    qu'avec de la colère, sans attachement ; la même tristesse partagée, elle, rapproche."""
+    p, ref = affect_derive(T.Temperament()), ph.reference(affect_derive(T.Temperament()), _cw())
+    st = ph.Stance(ph.Osc(ref, ph.ZERO, T0))
+    hurt_sad = ph.fold(st, Declared(Emotion.SAD, 0.7), T0, 1, ref, p, hurt=True)
+    hurt_angry = ph.fold(st, Declared(Emotion.ANGRY, 0.7), T0, 1, ref, p, hurt=True)
+    shared = ph.fold(st, Declared(Emotion.SAD, 0.7), T0, 1, ref, p)
+    assert hurt_sad.bond == 0 and shared.bond > 0
+    assert ph.regard_of(hurt_sad.anchor, 0, ref, p) < 0 < ph.regard_of(shared.anchor, shared.bond, ref, p)
+    assert ph.regard_of(hurt_sad.anchor, 0, ref, p) <= ph.regard_of(hurt_angry.anchor, 0, ref, p) + 0.05
+    mixed = ph.fold(st, Declared(Emotion.SAD, 0.6, (("sad", 0.6), ("angry", 0.3))), T0, 1, ref, p, hurt=True)
+    assert mixed.hostile == 1 and hurt_sad.hostile == 0  # une colère nette, même seconde, compte
+
+
+def test_touched_her_face_defends_itself_but_what_she_feels_stays():
+    love = Declared(Emotion.LOVE, 0.6, (("love", 0.6), ("embarrassed", 0.3)))
+    assert ph.defended(love, "attack") == [(Emotion.FRUSTRATED, 0.48), (Emotion.EMBARRASSED, 0.3)]
+    assert ph.defended(love, "deny") == [(Emotion.LOVE, 0.15)]
+    assert ph.defended(love, "admit") == [(Emotion.LOVE, 0.72)]
+    assert ph.defended(love, "") == [] and ph.defended(Declared(Emotion.ANGRY, 0.6), "attack") == []
+    assert ph.tender(love, 0.25) and not ph.tender(Declared(Emotion.SAD, 0.9), 0.25)
+
+
+def test_the_mask_who_sees_what():
+    """Au milieu, la même avec toutes ; la dandere en montre moins à une inconnue, la tsundere cache sa tendresse à
+    une proche (pas sa colère) ; une connaissance, une amie : à mi-chemin."""
+    from mika.faculties.affect import shown_factor
+
+    def seen(mask, closeness, emotion):
+        return shown_factor(affect_derive(_t(mask=mask)), closeness, False)(emotion)
+
+    for closeness in ("stranger", "acquaintance", "friend", "close"):
+        assert seen(0.5, closeness, Emotion.LOVE) == 1.0
+    assert seen(0.1, "stranger", Emotion.LOVE) < seen(0.1, "acquaintance", Emotion.LOVE) < seen(0.1, "close",
+                                                                                                Emotion.LOVE) == 1.0
+    assert seen(0.9, "close", Emotion.LOVE) < seen(0.9, "friend", Emotion.LOVE) < seen(0.9, "stranger",
+                                                                                         Emotion.LOVE) == 1.0
+    assert seen(0.9, "close", Emotion.ANGRY) == 1.0
+    assert shown_factor(affect_derive(T.Temperament()), "close", True)(Emotion.LOVE) < 1.0  # refermée
+
+
+def test_jealousy_weighs_what_she_declares_and_wakes_only_above_the_middle():
+    jealous = Declared(Emotion.JEALOUS, 0.4)
+    assert ph.weighed(jealous, {Emotion.JEALOUS: affect_derive(T.Temperament()).jealous_weight}) is jealous
+    assert ph.weighed(jealous, {Emotion.JEALOUS: affect_derive(_t(jealousy=0.9)).jealous_weight}).intensity > 0.4 \
+        > ph.weighed(jealous, {Emotion.JEALOUS: affect_derive(_t(jealousy=0.1)).jealous_weight}).intensity
+    assert attention_derive(T.Temperament()).envy_intensity == 0 == attention_derive(_t(jealousy=0.1)).envy_intensity
+    assert attention_derive(_t(jealousy=0.9)).envy_intensity > 0

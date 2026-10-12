@@ -30,7 +30,7 @@ dépend jamais du moment ni du pas de la lecture.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from zoneinfo import ZoneInfo
 
@@ -58,6 +58,30 @@ EMPATHIC = frozenset({Emotion.SAD, Emotion.LONELY, Emotion.ANXIOUS, Emotion.SCAR
                       Emotion.NOSTALGIC})
 #: L'hostilité : un déplaisir dominant (la colère, le dégoût, la frustration).
 HOSTILE = frozenset(e for e, (pl, _a, d) in A.ANCHORS.items() if pl < 0 < d)
+#: Une facette hostile au moins aussi forte, dans une réplique à des mots qui la blessent, compte comme une hostilité
+#: répétée (sa guérison s'allonge), même quand ce n'est pas la plus forte.
+HOSTILE_FACET = 0.3
+
+#: Ce vers quoi elle va d'abord quand on la blesse (``Temperament.reaction``, ADR 0100) : la famille de facettes qui
+#: pèse plus, la première étant là au moins pour une part de ce qu'elle a déclaré. Se refermer (``withdrawal``) n'est
+#: pas une émotion : c'est un retrait (``Stance.withdrawn_until``).
+REACTION_FAMILIES: Mapping[str, tuple[Emotion, ...]] = {
+    "anger": (Emotion.ANGRY, Emotion.FRUSTRATED, Emotion.DISGUSTED),
+    "sadness": (Emotion.SAD, Emotion.MELANCHOLIC, Emotion.LONELY),
+    "fear": (Emotion.SCARED, Emotion.ANXIOUS),
+}
+WITHDRAWAL, FEAR = "withdrawal", "fear"
+#: Ce qu'on la surprend à ressentir quand on la touche (un compliment, un merci) : sa tendresse.
+TENDER = frozenset({Emotion.LOVE, Emotion.GRATEFUL, Emotion.EMBARRASSED, Emotion.HAPPY, Emotion.PROUD})
+#: Ce que montre son visage quand on la prend en flagrant délit de tendresse (``Temperament.defense``) : (émotion
+#: montrée, part de l'intensité déclarée) — ``None`` : sa tendresse elle-même. Ce qu'elle ressent ne change pas.
+DEFENSE_FACE: Mapping[str, tuple[tuple[Emotion | None, float], ...]] = {
+    "deny": ((None, 0.25),),  # rien ne passe, ou presque
+    "attack": ((Emotion.FRUSTRATED, 0.8), (Emotion.EMBARRASSED, 0.5)),  # elle pique, rouge
+    "laugh": ((Emotion.AMUSED, 0.9), (None, 0.3)),
+    "silence": ((Emotion.EMBARRASSED, 0.5),),  # elle détourne les yeux
+    "admit": ((None, 1.2),),  # elle le montre franchement
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +109,9 @@ class Mood:
     fond: Vec3 = ZERO  # non borné ; lu borné (``fond_of``)
     asleep: bool = False
     marks: tuple[Mark, ...] = ()
+    asleep_at: int = 0  # quand elle s'est endormie (pour ce que le sommeil a déjà allégé)
+    roused_at: int = 0  # tirée du sommeil par un message cette nuit-là (0 : sa nuit n'a pas été coupée)
+    relieved: float = 0.0  # la part de l'allègement de cette nuit déjà donnée (une nuit coupée)
 
     @property
     def at(self) -> int:
@@ -110,6 +137,10 @@ class Stance:
     recent: tuple[tuple[int, str], ...] = field(default_factory=tuple)
     #: la dernière fois que cette personne s'est excusée (et que ça a compté)
     apologized_at: int = 0
+    #: blessée par elle, elle s'est refermée jusqu'à cet instant (``Temperament.reaction`` : se refermer)
+    withdrawn_until: int = 0
+    #: la réplique où on l'a prise en flagrant délit de tendresse (un compliment, un merci) : son visage se défend
+    defended_at: int = 0
 
     @property
     def at(self) -> int:
@@ -252,13 +283,46 @@ def mood_target_of(m: Mood, declared: Declared, p: AffectParams) -> Vec3:
     return blend(A.add(m.rest.position, fond_of(m, p)), declared.all)
 
 
-def fall_asleep(m: Mood) -> Mood:
-    return replace(m, asleep=True)
+def night_us(cw: Clockwork) -> int:
+    """La longueur de sa nuit (de la phase « nuit » au matin) : ce qu'il faut dormir pour tout l'allègement."""
+    minutes = (cw.rhythm.start_of(circadian.Phase.MORNING) - cw.rhythm.start_of(circadian.Phase.NIGHT)) % (24 * 60)
+    return max(1, minutes) * 60 * 1_000_000
 
 
-def wake(m: Mood, p: AffectParams) -> Mood:
-    """Le sommeil allège le fond ; ce qui en reste colore le réveil."""
-    return replace(m, asleep=False, fond=A.scale(m.fond, 1.0 - p.sleep_relief))
+def fall_asleep(m: Mood, at: int, cw: Clockwork) -> Mood:
+    """Elle s'endort ; rendormie la nuit même où un message l'a tirée du sommeil, sa nuit reste une nuit coupée."""
+    if m.roused_at and at - m.roused_at < night_us(cw):
+        return replace(m, asleep=True, asleep_at=at)
+    return replace(m, asleep=True, asleep_at=at, roused_at=0, relieved=0.0)
+
+
+def slept_share(m: Mood, at: int, cw: Clockwork) -> float:
+    """La part de sa nuit qu'elle vient de dormir (0 à 1)."""
+    return max(0.0, min(1.0, (at - m.asleep_at) / night_us(cw))) if m.asleep_at else 1.0
+
+
+def wake(m: Mood, p: AffectParams, share: float = 1.0) -> Mood:
+    """Le sommeil allège le fond ; ce qui en reste colore le réveil. ``share`` : la part d'une nuit dormie (une nuit
+    coupée par un message allège en deux fois, jamais davantage qu'une nuit entière)."""
+    keep = (1.0 - p.sleep_relief) ** max(0.0, min(1.0, share))
+    return replace(m, asleep=False, fond=A.scale(m.fond, keep))
+
+
+def roused(m: Mood, at: int, p: AffectParams, cw: Clockwork) -> Mood:
+    """Un message la tire du sommeil (ou elle parle en dormant) : elle est éveillée — son fond bouge de nouveau, et
+    ce qu'elle a déjà dormi l'a allégé d'autant."""
+    if not m.asleep:
+        return m
+    share = min(slept_share(m, at, cw), 1.0 - m.relieved)
+    return replace(wake(m, p, share), roused_at=at, relieved=m.relieved + share)
+
+
+def woke(m: Mood, at: int, p: AffectParams, cw: Clockwork) -> Mood:
+    """Le réveil du matin : tout l'allègement d'une nuit ; après une nuit coupée, la part qu'elle vient de dormir."""
+    if not m.asleep:
+        return replace(m, roused_at=0, relieved=0.0)
+    share = min(slept_share(m, at, cw), 1.0 - m.relieved) if m.roused_at else 1.0
+    return replace(wake(m, p, share), roused_at=0, relieved=0.0)
 
 
 # ── Les postures ──────────────────────────────────────────────────────────
@@ -357,29 +421,36 @@ def fold_alpha(st: Stance, p: AffectParams) -> float:
     return p.anchor_alpha / (1.0 + st.days / p.anchor_history_days)
 
 
-def fold_point(declared: Declared, current: Vec3, ref: Vec3, p: AffectParams) -> Vec3:
+def fold_point(declared: Declared, current: Vec3, ref: Vec3, p: AffectParams, hurt: bool = False) -> Vec3:
     """Le point vers lequel une déclaration tire l'ancre (``current``, en
     absolu) : sur le rayon repos moyen → émotion. L'empathie (être triste
     *avec* quelqu'un) la tire vers la tendresse depuis là où en est la
-    relation : consoler rapproche, jamais ne refroidit."""
+    relation : consoler rapproche, jamais ne refroidit. Blessée par la personne (``hurt`` : le modèle a lu des mots
+    qui blessent), sa peine n'est pas de l'empathie : la relation se refroidit de ce qu'elle a ressenti, toutes ses
+    facettes ensemble — triste autant que fâchée (constat G4 de l'audit du 2026-10-11)."""
+    if hurt:
+        return blend(ref, declared.all)
     if declared.emotion in EMPATHIC:
         return A.lerp(current, A.ANCHORS[Emotion.LOVE], p.empathy_tenderness * declared.intensity)
     return A.lerp(ref, A.ANCHORS[declared.emotion], declared.intensity)
 
 
-def fold(st: Stance, declared: Declared, at: int, day: int, ref: Vec3, p: AffectParams) -> Stance:
+def fold(st: Stance, declared: Declared, at: int, day: int, ref: Vec3, p: AffectParams, hurt: bool = False) -> Stance:
     """Une déclaration envers une personne identifiable : l'ancre s'en
-    rapproche, l'attachement en naît s'il y a de la chaleur ou de l'empathie."""
+    rapproche, l'attachement en naît s'il y a de la chaleur ou de l'empathie — jamais de mots qui la blessent
+    (``hurt``) : ni tendresse ni attachement, et une facette hostile nette compte comme une hostilité."""
     days, last_day = (st.days + 1, day) if day != st.last_day else (st.days, st.last_day)
     st = replace(st, days=days, last_day=last_day)
     current = ref if st.anchor is None else A.add(ref, st.anchor)
-    point = fold_point(declared, current, ref, p)
+    point = fold_point(declared, current, ref, p, hurt)
     absolute = A.cap_norm(A.lerp(current, point, fold_alpha(st, p)), p.anchor_max)
     anchor = A.sub(absolute, ref)
     bond = st.bond
-    if declared.emotion in WARM or declared.emotion in EMPATHIC:
+    if not hurt and (declared.emotion in WARM or declared.emotion in EMPATHIC):
         bond = min(1.0, bond + p.bond_step * declared.intensity * (1.0 - bond))
-    hostile = st.hostile + (1 if declared.emotion in HOSTILE else 0)
+    hostile_now = declared.emotion in HOSTILE or (
+        hurt and any(Emotion(e) in HOSTILE and x >= HOSTILE_FACET for e, x in declared.all))
+    hostile = st.hostile + (1 if hostile_now else 0)
     return replace(st, anchor=None if A.norm(anchor) < HEALED_NORM else anchor, bond=bond, hostile=hostile,
                    folded_at=at)
 
@@ -447,7 +518,8 @@ def joined(stances: Sequence[Stance]) -> Stance:
                    bond=max(st.bond for st in stances), hostile=sum(st.hostile for st in stances),
                    days=sum(st.days for st in stances), last_day=max(st.last_day for st in stances),
                    wary_until=max(st.wary_until for st in stances),
-                   apologized_at=max(st.apologized_at for st in stances), recent=recent)
+                   apologized_at=max(st.apologized_at for st in stances), recent=recent,
+                   withdrawn_until=max(st.withdrawn_until for st in stances))
 
 
 def relation_joined(stances: Sequence[Stance], now: int, p: AffectParams) -> tuple[Vec3 | None, float, int]:
@@ -490,17 +562,71 @@ def mood_gain(intensity: float, p: AffectParams) -> float:
     return min(p.mood_gain_cap, base * p.mood_gain_max_factor, base * (p.mood_gain_floor + p.mood_gain_slope * force))
 
 
+# ── Le tempérament sur ce qu'elle déclare (ADR 0100) ────────────────────
+
+
+def weighed(declared: Declared, weights: Mapping[Emotion, float]) -> Declared:
+    """Ses facettes, chacune pesée selon son tempérament (la jalousie : ``jealous_weight``), bornées au plein ;
+    inchangées quand aucun poids ne s'écarte de 1."""
+    if all(weights.get(Emotion(e), 1.0) == 1.0 for e, _x in declared.all):
+        return declared
+    felt = [(e, round(min(1.0, x * weights.get(Emotion(e), 1.0)), 3)) for e, x in declared.all]
+    return Declared.of(tuple(sorted(felt, key=lambda f: -f[1]))) or declared
+
+
+def reacting(declared: Declared, reaction: str, weight: float, share: float) -> Declared:
+    """Blessée (le modèle a lu des mots qui la blessent) : ce vers quoi elle va d'abord. Les facettes de cette
+    famille pèsent ``weight`` fois plus ; la première de la famille est là au moins pour ``share`` de sa facette la
+    plus forte — une colérique qui s'est dite triste a aussi de la colère. Ce qu'elle a déclaré reste : on ajoute, on
+    n'efface rien. Se refermer, ou rien de particulier : inchangé."""
+    family = REACTION_FAMILIES.get(reaction)
+    if not family:
+        return declared
+    felt = dict(declared.all)
+    for e in family:
+        if e.value in felt:
+            felt[e.value] = round(min(1.0, felt[e.value] * weight), 3)
+    head = family[0].value
+    felt[head] = max(felt.get(head, 0.0), round(min(1.0, share * declared.intensity), 3))
+    return Declared.of(tuple(sorted(felt.items(), key=lambda f: -f[1]))) or declared
+
+
+def tender(declared: Declared, floor: float) -> bool:
+    """A-t-elle laissé voir sa tendresse (une facette tendre au moins aussi forte que ``floor``) ?"""
+    return any(Emotion(e) in TENDER and x >= floor for e, x in declared.all)
+
+
+def defended(declared: Declared, defense: str) -> list[tuple[Emotion, float]]:
+    """Ce que montre son visage quand on la prend en flagrant délit de tendresse : sa défense (``DEFENSE_FACE``) sur
+    sa facette tendre la plus forte ; ``[]`` sans défense ou sans tendresse."""
+    shape = DEFENSE_FACE.get(defense)
+    soft = next(((Emotion(e), x) for e, x in declared.all if Emotion(e) in TENDER), None)
+    if not shape or soft is None:
+        return []
+    out: list[tuple[Emotion, float]] = []
+    for emotion, part in shape:
+        shown = soft[0] if emotion is None else emotion
+        if all(e is not shown for e, _w in out):
+            out.append((shown, round(min(1.0, soft[1] * part), 2)))
+    return out
+
+
 # ── Lectures ──────────────────────────────────────────────────────────────
 
 
 def fresh(st: Stance, now: int, p: AffectParams) -> Declared | None:
     """Ce qu'elle a déclaré envers la personne, en décroissance au rythme de
-    sa posture ; ``None`` une fois sous le plancher (plus de fenêtre dure)."""
+    sa posture ; ``None`` une fois sous le plancher (plus de fenêtre dure). Ses facettes décroissent ensemble : celles
+    qui passent sous le plancher s'effacent (une seule restante : la balise d'avant)."""
     declared = Declared.decode(st.declared)
     if declared is None or now < st.declared_at:
         return declared
-    decayed = declared.intensity * math.exp(-(now - st.declared_at) / 1e6 / p.person.tau_s)
-    return None if decayed < p.declared_floor else Declared(declared.emotion, decayed)
+    keep = math.exp(-(now - st.declared_at) / 1e6 / p.person.tau_s)
+    decayed = declared.intensity * keep
+    if decayed < p.declared_floor:
+        return None
+    facets = tuple((e, x * keep) for e, x in declared.facets if x * keep >= p.declared_floor)
+    return Declared(declared.emotion, decayed, facets if len(facets) > 1 else ())
 
 
 def anchored(st: Stance, now: int, p: AffectParams) -> bool:
@@ -521,7 +647,8 @@ def anchored(st: Stance, now: int, p: AffectParams) -> bool:
 def face(person_pos: Vec3, mood_pos: Vec3, background: Emotion, declared: Declared | None = None
          ) -> tuple[Emotion, float, list[tuple[Emotion, float]], tuple[Emotion, float], tuple[Emotion, float]]:
     """Ce que montre le visage : la balise de sa dernière réplique tant qu'elle
-    dure (en décroissance), sinon 60 % la posture, 40 % son humeur."""
+    dure (en décroissance) — sa seconde facette dessous quand elle en a dit deux (son ambivalence, ADR 0093) —,
+    sinon 60 % la posture, 40 % son humeur."""
     blended = A.add(A.scale(person_pos, 0.6), A.scale(mood_pos, 0.4))
     label, intensity = A.label(blended)
     parts = A.blend(blended, top_k=2)
@@ -534,6 +661,7 @@ def face(person_pos: Vec3, mood_pos: Vec3, background: Emotion, declared: Declar
     mood_part = (ml if mi > 0.05 else background, round(mi, 2))
     if declared is not None:
         shown = round(declared.intensity, 2)
-        under = [(e, w) for e, w in parts if e is not declared.emotion][:1]
+        under = [(Emotion(e), round(x, 2)) for e, x in declared.facets[1:2]] or \
+            [(e, w) for e, w in parts if e is not declared.emotion][:1]
         return declared.emotion, shown, [(declared.emotion, shown), *under], (declared.emotion, shown), mood_part
     return label, round(intensity, 2), parts, person_part, mood_part

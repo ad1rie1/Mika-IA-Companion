@@ -159,6 +159,14 @@ class Touched(Payload):
     thoughts: tuple[int, ...] = ()
 
 
+class Envied(Payload):
+    """Quelqu'un qui compte, dont elle attend la réponse, écrit aux autres sans s'adresser à elle (ADR 0100) : de la
+    jalousie, une fois par attente, à la mesure de son tempérament."""
+
+    person: str
+    intensity: float
+
+
 class DigestedThought(Payload):
     thought: int
     before: float
@@ -202,7 +210,8 @@ DIGESTED = event_type("attention.digested", OWNER, Digested, public=True)
 NOTICED = event_type("attention.noticed", OWNER, Noticed, public=True)
 TOUCHED = event_type("attention.touched", OWNER, Touched, subjects=("person",))
 ANTICIPATED = event_type("attention.anticipated", OWNER, Anticipated, public=True, subjects=("about",))
-ALL = (THOUGHT_BORN, DWELT, EXPECTATION_MET, EXPECTATION_MISSED, DIGESTED, NOTICED, TOUCHED, ANTICIPATED)
+ENVIED = event_type("attention.envied", OWNER, Envied, public=True, subjects=("person",))
+ALL = (THOUGHT_BORN, DWELT, EXPECTATION_MET, EXPECTATION_MISSED, DIGESTED, NOTICED, TOUCHED, ANTICIPATED, ENVIED)
 
 
 @dataclass(frozen=True, slots=True)

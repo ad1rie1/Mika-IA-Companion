@@ -264,7 +264,7 @@ def _persona(s: SelfState) -> list[Block]:
         ("quand on la blesse", dict(T.REACTIONS).get(t.reaction, t.reaction) or Text("—", kind="muted")),
         ("quand on la touche", dict(T.DEFENSES).get(t.defense, t.defense) or Text("—", kind="muted")),
         *((f"précision · {labels.get(k, k).lower()}", Text(note, clamp=CLAMP)) for k, note in sorted(t.notes.items())),
-    ), title="Son caractère, dit au modèle comme des tendances", columns=2)
+    ), title="Quand on la blesse, quand on la touche", columns=2)
     return [persona, temperament, character]
 
 

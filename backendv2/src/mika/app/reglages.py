@@ -28,6 +28,7 @@ from mika.adapters.mcp.config import McpConfig
 from mika.adapters.push import parse_service_account
 from mika.adapters.teams import TeamsConfig
 from mika.app import persona as persona_file
+from mika.app.settings import PUSH_KEY_FILE, push_key_file
 from mika.app.wakeups import NO_PROJECT, TOOLS, WakeupConfig
 from mika.contracts import projects as projects_c
 from mika.contracts import self_ as self_c
@@ -493,12 +494,16 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
         return []
 
     def push_facts() -> list[tuple[str, str]]:
-        key = settings.push()
+        pasted = settings.push()
+        filed = push_key_file(live.data) if live.data is not None and not pasted else ""
+        key = pasted or filed
         try:
             project = parse_service_account(key).project_id if key else ""
-        except ValueError:
-            project = ""
-        facts = [("Projet Firebase", project or "aucune clé : rien ne part"),
+        except ValueError as exc:
+            project = f"clé illisible : {exc}"
+        where = ("collée ici" if pasted else f"fichier {PUSH_KEY_FILE} du dossier de données" if filed
+                 else f"aucune (colle-la ici, ou pose {PUSH_KEY_FILE} dans le dossier de données)")
+        facts = [("Clé", where), ("Projet Firebase", project or "rien ne part"),
                  ("Téléphones notifiables", str(live.accounts.push_count()))]
         stats = live.hub.push.stats if live.hub.push is not None else None
         if stats is not None and (stats.sent or stats.failed or stats.gone):
@@ -712,9 +717,10 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                             "L'application Android ne garde aucune connexion ouverte quand elle est fermée : ce "
                             "qu'elle écrit à la personne lui arrive en notification par Firebase Cloud Messaging, "
                             "chiffré avec une clé que seul son téléphone connaît (Google ne transporte qu'un "
-                            "chiffré). Il faut un projet Firebase où l'application est déclarée, et ici la clé d'un "
-                            "compte de service de ce projet. Sans elle, l'application ne reçoit que ce qu'elle "
-                            "trouve en s'ouvrant.")),)),
+                            "chiffré). Il faut un projet Firebase où l'application est déclarée, et la clé d'un "
+                            "compte de service de ce projet : collée ici, ou posée dans le dossier de données sous "
+                            "le nom firebase-service-account.json (droits 600) — collée ici, elle prime. Sans elle, "
+                            "l'application ne reçoit que ce qu'elle trouve en s'ouvrant.")),)),
         SettingsSection("depots", "Dépôts git", "canaux", GitSettings, git, save_git,
                         description="Le jeton avec lequel ses projets poussent vers leur dépôt distant.",
                         facts=lambda: [("Jeton", "défini" if settings.git()["token"] else "aucun")],

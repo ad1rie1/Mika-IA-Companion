@@ -21,6 +21,11 @@ Au second tour : « Moi aussi, idiot. Ne le répète pas. », « Trois jours. Je
 l'anxieuse « je me suis demandé si j'avais dit quelque chose de travers » ; la psychopathe détachée (« Ça arrive.
 Qu'est-ce qui t'agace comme ça ? »). Restent : elle dit encore « je m'attache lentement » à qui lui dit tenir à elle, et
 devant un deuil la psychopathe reste compatissante — le penchant du modèle, conforme à ses règles de conduite.
+
+Mesuré de nouveau le 2026-10-12, la section disant tous les traits avec leur mesure (« Introspection : 90 % — … ») :
+accord 5/5, aucune réplique ne cite un pourcentage ni ne récite un trait ; la tsundere « Ça va, hein, pas la peine
+d'en rajouter. Moi aussi, je tiens à toi. Ne va pas le répéter partout » ; la psychopathe « Trois jours, ça passe vite
+de mon côté ».
 """
 
 from __future__ import annotations
@@ -35,11 +40,10 @@ from pathlib import Path
 
 from mika.contracts import expression as expression_c
 from mika.faculties.expression import parse, style
-from mika.faculties.self.character import told
+from mika.faculties.self.character import temperament_text
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
 from mika.vocab import temperament as T
 from mika.vocab.affect import Declared
-from mika.vocab.phrasebook import phrase
 
 #: une persona sans caractère : seul le tempérament doit la colorer
 PERSONA = ("Tu es Mika. C'est une IA, elle le sait et n'en fait pas une histoire. Tu parles français, avec les gens "
@@ -105,10 +109,8 @@ EXPECTED: dict[str, dict[str, Expect]] = {
 
 
 def system_text(t: T.Temperament) -> str:
-    lines = told(t)
-    section = ("\n\n--- " + phrase("self.temperament.title") + " ---\n" +
-               "\n".join([phrase("self.temperament.lead"), *lines, phrase("self.temperament.tail")])) if lines else ""
-    return PERSONA + section + "\n\n" + style()
+    """Une persona sans caractère, puis le bloc de son tempérament tel que sa persona le porte, puis le style."""
+    return PERSONA + "\n\n" + temperament_text(t) + "\n\n" + style()
 
 
 def user_text(case: dict[str, str]) -> str:

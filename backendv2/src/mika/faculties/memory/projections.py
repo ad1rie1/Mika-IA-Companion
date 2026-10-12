@@ -50,7 +50,7 @@ ITEM_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "con
                 "emotion", "born_at", "touched_at", "recalled_at", "recalls", "status", "replaces", "recipient",
                 "due", "sources", "told_by", "heard_by", "secret", "informants", "about_self", "shown_at", "between_us",
                 "knowledge_kind", "holder", "constraints", "internal_only", "superseded_by", "as_of", "valid_until",
-                "felt", "empathy", "until", "precision", "likelihood", "gist", "veiled")
+                "felt", "empathy", "until", "precision", "likelihood", "gist", "veiled", "felt_from")
 CHUNK_TEXT_MAX = 600
 #: élément → la référence de son texte (``Content.ref``)
 REFS_TABLE = "memory_refs"
@@ -228,7 +228,7 @@ class Items:
             "superseded_by INTEGER, superseded_at INTEGER, as_of INTEGER, valid_until INTEGER, "
             "felt TEXT NOT NULL DEFAULT '[]', empathy TEXT NOT NULL DEFAULT '[]', until INTEGER, "
             "precision TEXT NOT NULL DEFAULT '', likelihood REAL, gist TEXT NOT NULL DEFAULT '', "
-            "veiled TEXT NOT NULL DEFAULT '')"
+            "veiled TEXT NOT NULL DEFAULT '', felt_from INTEGER)"
         )
         t, about = f"{c.ITEMS_TABLE}{sfx}", f"{c.ABOUT_TABLE}{sfx}"
         sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_kind ON {t}(kind, status, born_at)")
@@ -275,7 +275,7 @@ class Items:
                     "heard_by": "[]", "secret": 0, "informants": "[]", "about_self": 0, "shown_at": 0, "between_us": 0,
                     "knowledge_kind": "claim", "holder": None, "constraints": "[]", "internal_only": 0,
                     "superseded_by": None, "as_of": None, "valid_until": None, "felt": "[]", "empathy": "[]", "until": None,
-                    "precision": "", "likelihood": None, "gist": "", "veiled": "", **row}
+                    "precision": "", "likelihood": None, "gist": "", "veiled": "", "felt_from": None, **row}
             sql.execute(f"INSERT OR REPLACE INTO {t}({cols},fingerprint) VALUES({marks},?)",
                         (*[full[k] for k in ITEM_COLUMNS], fingerprint(full["text"])))
             _about_rows(sql, about, int(full["id"]), _loads(full["about"]))
@@ -327,7 +327,9 @@ class Items:
                         "emotion": dominant(d.empathy), "felt": _facets_json(d.felt),
                         "empathy": _facets_json(d.empathy), "due": d.expected, "until": d.expected_until,
                         "precision": d.expected_precision, "likelihood": d.likelihood,
-                        "veiled": (d.veiled.text or "") if d.veiled else ""})
+                        "veiled": (d.veiled.text or "") if d.veiled else "",
+                        # ce que la personne en ressent vient de ce premier témoignage (ADR 0083)
+                        "felt_from": e.seq if d.felt else None})
                 # le premier témoignage : comment elle l'a appris la première fois (ADR 0080)
                 _testify(sql, sfx, e.seq, e.seq, told_by=d.told_by, informants=informants_of(d.source, d.told_by),
                          origin=d.origin, confidence=d.confidence, heard_by=d.heard_by, sensitivity=d.sensitivity,
@@ -407,14 +409,18 @@ class Items:
         if d.source or d.told_by:
             informants = [*informants, *informants_of(d.source, d.told_by)]
         sql.execute(
-            f"UPDATE {t} SET touched_at=?, importance=MIN(1.0, importance + 0.05), sensitivity=?, about=?, told_by=?, "
-            "heard_by=?, secret=?, informants=?, sources=? WHERE id=?",
+            f"UPDATE {t} SET sensitivity=?, about=?, told_by=?, heard_by=?, secret=?, informants=?, sources=? WHERE id=?",
             # Un ancien renfort peut avoir été fondé sur une simple similarité. En rejouant le journal,
             # il ne doit pas élargir les permissions du texte conservé.
-            (at, sens, _keys([*_loads(row["about"]), *d.about]), row["told_by"],
+            (sens, _keys([*_loads(row["about"]), *d.about]), row["told_by"],
              row["heard_by"], int(bool(row["secret"]) or d.secret), _keys(informants),
              json.dumps(sorted({*map(int, _loads(row["sources"])), *d.sources})),
              d.item))
+        if not d.restricts:
+            # ce qui revient dure plus longtemps — une discrétion demandée ferme sans rien redire : ni plus
+            # d'importance, ni un oubli remis à zéro
+            sql.execute(f"UPDATE {t} SET touched_at=?, importance=MIN(1.0, importance + 0.05) WHERE id=?",
+                        (at, d.item))
         _about_rows(sql, about, d.item, d.about)
         if d.corroborated:
             sql.execute(f"UPDATE {t} SET confidence=MIN(0.95, COALESCE(confidence, 0.5) + 0.1) WHERE id=?", (d.item,))
@@ -461,10 +467,12 @@ class Items:
             same = sql.query(f"SELECT seq, sources FROM {tt} WHERE item=? AND told_by=? AND informants=? AND "
                              "heard_by=? AND secret=? AND between_us=? AND speaks=1",
                              (d.item, mine, informants, _keys(d.heard_by), int(d.secret), int(d.between_us)))
+            testimony = seq
             if same:
                 # la même personne, de la même façon, de la même source : elle le redit — la date et les messages,
                 # rien de plus sûr
                 kept_seq, kept_sources = same[0]
+                testimony = int(kept_seq)
                 sql.execute(f"UPDATE {tt} SET at=?, sources=?, confidence=MAX(confidence, ?), "
                             "sensitivity=MAX(sensitivity, ?) WHERE item=? AND seq=?",
                             (at, json.dumps(sorted({*map(int, _loads(kept_sources)), *d.sources})), d.confidence,
@@ -489,8 +497,9 @@ class Items:
                  json.dumps(sorted({*map(int, _loads(row["sources"])), *d.sources})), int(d.between_us), d.item))
             _about_rows(sql, about, d.item, d.about)
             if d.felt and (not json.loads(row["felt"] or "[]") or set(d.told_by) & set(_loads(row["about"]))):
-                # ce que la personne en ressent : son mot à elle l'emporte sur celui d'un autre (ADR 0083)
-                sql.execute(f"UPDATE {t} SET felt=? WHERE id=?", (_facets_json(d.felt), d.item))
+                # ce que la personne en ressent : son mot à elle l'emporte sur celui d'un autre (ADR 0083) — et l'on
+                # sait de quel témoignage il vient : il ne se dit que là où ce témoignage peut s'entendre
+                sql.execute(f"UPDATE {t} SET felt=?, felt_from=? WHERE id=?", (_facets_json(d.felt), testimony, d.item))
                 _feel(sql, sfx, d.item, [list(f) for f in d.felt], json.loads(row["empathy"] or "[]"), row["emotion"])
         if d.replaces is not None and d.replaces != d.item:
             # ce qu'elle croyait, redit, revient (ADR 0081) : la croyance qui l'avait remplacée le cède
@@ -545,14 +554,15 @@ class Items:
         if not same_words(a["text"], b["text"]):
             return  # une négation ou un détail différent ne disparaît pas dans un quasi-doublon
         if a is not None and b is not None:
+            # les messages de l'un et de l'autre : une discrétion demandée sur ceux du fondu atteint le gardé
             sql.execute(
-                f"UPDATE {t} SET importance=?, sensitivity=?, about=?, told_by=?, heard_by=?, secret=?, touched_at=? "
-                "WHERE id=?",
+                f"UPDATE {t} SET importance=?, sensitivity=?, about=?, told_by=?, heard_by=?, secret=?, touched_at=?, "
+                "sources=? WHERE id=?",
                 (max(float(a["importance"]), float(b["importance"])), max(int(a["sensitivity"]), int(b["sensitivity"])),
                  _keys([*_loads(a["about"]), *_loads(b["about"])]),
                  _keys([*_loads(a["told_by"]), *_loads(b["told_by"])]),
                  _keys([*_loads(a["heard_by"]), *_loads(b["heard_by"])]), int(bool(a["secret"]) or bool(b["secret"])),
-                 at, keep))
+                 at, json.dumps(sorted({*map(int, _loads(a["sources"])), *map(int, _loads(b["sources"]))})), keep))
             _about_rows(sql, about, keep, _loads(b["about"]))
         sql.execute(f"UPDATE {t} SET status='merged' WHERE id=?", (drop,))
 
@@ -721,7 +731,9 @@ class Told:
 # v16 : la même chose, racontée sans qu'on puisse reconnaître la personne (``veiled``, ADR 0091)
 # v17 : ce qui touche un sujet délicat d'une personne est une confidence, à la porte (``memory.delicate``, ADR 0099)
 # v18 : une prévision constatée (``memory.resolved``, sorte « prévision ») n'est plus à constater (ADR 0099)
-MEMORY.projector(c.ITEMS_TABLE, version=18, tier=Tier.T0,
+# v19 : de quel témoignage vient ce que la personne en ressent (``felt_from``) ; une discrétion demandée ne renforce
+# pas (``Reinforced.restricts``) ; un souvenir fondu la nuit garde aussi les messages de l'autre (``sources``)
+MEMORY.projector(c.ITEMS_TABLE, version=19, tier=Tier.T0,
                  types=[*c.ALL, rt.UTTERANCE, SUBJECT_FORGOTTEN])(Items)
 # v3 : l'échange garde tout le tour (``Utterance.answers``), pas seulement le dernier message d'une rafale
 # v4 : index (personne, instant) et (salon, instant) ; l'oublié ne revient pas (ADR 0059)

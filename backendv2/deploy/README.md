@@ -148,11 +148,17 @@ tout marche, mais l'application ne reçoit que ce qu'elle trouve en s'ouvrant.
    `frontend/Android/app/` — il n'est jamais versionné. Reconstruis et réinstalle
    l'application : sans lui, la construction le dit (« Firebase : pas d'identifiants… »).
 3. Paramètres du projet › **Comptes de service** › « Générer une nouvelle clé
-   privée » : un fichier JSON. Colle-le tel quel dans la console de Mika, **Réglages ›
-   Canaux › Notifications du téléphone**. Il est chiffré (`secret.key` ou
-   `MIKA_SECRET_KEY`) et jamais réaffiché ; la page dit le projet, combien de téléphones
-   sont notifiables, ce qui est parti et le dernier échec. Garde le fichier hors du
-   dépôt, ou efface-le une fois collé.
+   privée » : un fichier JSON. Deux façons de le donner au serveur :
+   - le poser dans le dossier de données, à côté de `secret.key`, sous le nom
+     `firebase-service-account.json` :
+     `sudo install -o mika -g mika -m 600 <fichier>.json /var/lib/mika/firebase-service-account.json`.
+     Il est relu à chaque envoi (pas de redémarrage) et la sauvegarde l'emporte ;
+   - ou le coller tel quel dans la console de Mika, **Réglages › Canaux › Notifications
+     du téléphone** : chiffré (`secret.key` ou `MIKA_SECRET_KEY`), jamais réaffiché. Collé,
+     il passe devant le fichier.
+
+   La page dit d'où vient la clé, le projet, combien de téléphones sont notifiables, ce
+   qui est parti et le dernier échec. Ne laisse jamais ce fichier dans le dépôt.
 4. Ouvre l'application une fois **chez toi** (le serveur doit être joignable) : elle
    dit au serveur où la notifier. Paramètres › Notifications › « Application fermée »
    dit où elle en est.

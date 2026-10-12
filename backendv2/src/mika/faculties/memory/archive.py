@@ -7,7 +7,7 @@ from dataclasses import asdict, replace
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import runtime as rt
-from mika.faculties.memory.faculty import MEMORY
+from mika.faculties.memory.faculty import MEMORY, cached, params
 from mika.kernel.clock import DAY
 from mika.kernel.faculty import CatchUp, Tier
 from mika.vocab.affect import facets
@@ -54,9 +54,12 @@ class LifeArchive:
                 previous = sql.query(f"SELECT payload FROM {t} WHERE id=?", (d.event,))
                 if not previous and e.type.name in (c.MOMENT_FOLLOWED.name, c.RESOLVED.name) and d.thread:
                     # repris sous un numéro remplacé depuis : le moment tel qu'il est noté maintenant, s'il est à la
-                    # même date (ADR 0079)
+                    # même date (ADR 0079). Une issue (``resolved``) ne dit pas d'occurrence : le numéro remplacé
+                    # l'a été le même jour (précisé, redit de première main) — un moment déplacé à un autre jour a
+                    # déjà reçu la sienne (``moved``, même clé de dédoublonnage), comme dans la tranche
+                    occurrence = d.occurrence if e.type.name == c.MOMENT_FOLLOWED.name else 0
                     previous = [r for r in sql.query(f"SELECT payload FROM {t} WHERE thread=?", (d.thread,))
-                                if not d.occurrence or decode(r[0]).when == d.occurrence or decode(r[0]).yearly]
+                                if not occurrence or decode(r[0]).when == occurrence or decode(r[0]).yearly]
                 if not previous:
                     continue
                 item = decode(previous[0][0])
@@ -103,7 +106,11 @@ def recall_life(s, frame, ev, ports):
         return []
     person = frame.get(identity_c.PERSON(ev.data.handle)) or ev.data.handle
     keys = tuple(sorted({person, ev.data.handle, *frame.get(identity_c.HANDLES(person))}))
-    items = tuple(item for item in for_people(store, keys) if s.events.get(item.id) != item)
+    # seulement ce que la tranche garderait : un moment passé depuis longtemps, rechargé, en sortirait au prochain
+    # moment noté — et reviendrait dans le journal au message suivant
+    p = params(frame.env.params_of("memory", frame.root))
+    items = tuple(item for item in for_people(store, keys)
+                  if cached(item, ev.at, p) and s.events.get(item.id) != item)
     return [c.LIFE_RECALLED.draft(items=items)] if items else []
 
 

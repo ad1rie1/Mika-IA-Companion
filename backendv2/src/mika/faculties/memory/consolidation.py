@@ -439,7 +439,11 @@ class Consolidate:
                   conv: x.Conversation) -> list[tuple[int, str, str]]:
         """Les promesses en cours envers les personnes de cette conversation
         (des clés de personne : toutes leurs adresses comptent — une adresse
-        reliée depuis à quelqu'un parle pour lui)."""
+        reliée depuis à quelqu'un parle pour lui). Comme les situations et les
+        moments : dans un salon, seulement ce que le salon peut entendre —
+        l'anodin, ou ce qu'elle a promis dans ce salon même ; une promesse
+        faite en privé, recopiée par le modèle dans ce que le salon a
+        « entendu », ferait de chacun un témoin."""
         persons = set(conv.persons)
         pending = [(pr, frame.get(identity_c.PERSON(pr.to)) or pr.to) for pr in state.promises.values()]
         pending = [(pr, to) for pr, to in pending if to in persons]
@@ -447,8 +451,25 @@ class Consolidate:
             return []
         ids = [pr.id for pr, _ in pending]
         marks = ",".join("?" * len(ids))
-        texts = dict(store.query_mind(f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE id IN ({marks})", tuple(ids)))
+        rows = store.query_mind(f"SELECT id, text, sensitivity, sources FROM {c.ITEMS_TABLE} WHERE id IN ({marks})",
+                                tuple(ids))
+        texts = {int(i): t for i, t, _s, _m in rows}
+        if conv.room:
+            heard = {int(i) for i, _t, sens, sources in rows
+                     if int(sens) <= Sensitivity.ANODYNE or self._said_in(store, _keys(sources), conv.room)}
+            texts = {i: t for i, t in texts.items() if i in heard}
         return [(pr.id, to, texts.get(pr.id, "")) for pr, to in pending if texts.get(pr.id)]
+
+    @staticmethod
+    def _said_in(store: Any, sources: Sequence[str], room: str) -> bool:
+        """Tous ces messages ont été dits dans ce salon (et il y en a)."""
+        ids = sorted({int(m) for m in sources if str(m).lstrip("-").isdigit()})
+        if not ids:
+            return False
+        marks = ",".join("?" * len(ids))
+        here = store.query_mind(f"SELECT COUNT(*) FROM {transcript_c.THREAD_TABLE} WHERE id IN ({marks}) AND room=?",
+                                (*ids, room))
+        return int(here[0][0]) == len(ids)
 
     @staticmethod
     def _situations(frame: Frame, store: Any, state: MemoryState, conv: x.Conversation, p: MemoryParams,
@@ -1484,7 +1505,8 @@ class Consolidate:
         found = store.query_mind(
             f"SELECT DISTINCT i.id FROM {c.ITEMS_TABLE} i, json_each(i.sources) j WHERE i.kind=? AND "
             f"i.status='active' AND i.secret=0 AND j.value IN ({marks}) ORDER BY i.id", (c.SOUVENIR, *theirs))
-        return [c.REINFORCED.draft(item=int(i), secret=True, sensitivity=int(Sensitivity.CONFIDENCE)) for (i,) in found]
+        return [c.REINFORCED.draft(item=int(i), secret=True, sensitivity=int(Sensitivity.CONFIDENCE), restricts=True)
+                for (i,) in found]
 
 
 @dataclass(frozen=True, slots=True)

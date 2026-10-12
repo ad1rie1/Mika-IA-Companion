@@ -600,6 +600,17 @@ def hearing(frame: Frame, item: Item, person: str | None, aud: Audience, memo: d
     return (own or refused)[0][1], ()
 
 
+def felt_here(frame: Frame, item: Item, person: str | None, aud: Audience, memo: dict[str, str],
+              store: Any = None) -> tuple[tuple[str, float], ...]:
+    """Ce que la personne concernée en ressent, tel que cette audience peut l'entendre (ADR 0083) : pour une croyance,
+    seulement quand le témoignage qui l'a dit est de ceux qu'elle entend ici — la honte qu'Alice a confiée ne passe
+    pas par la rumeur de Bob (ADR 0080). Un souvenir, qui n'a pas de témoignages, suit son propre verdict."""
+    if not item.felt or not item.testimonies:
+        return item.felt
+    heard = hearing(frame, item, person, aud, memo, store)[1]
+    return item.felt if item.felt_from in {t.seq for t in heard if t.speaks} else ()
+
+
 def contested_line(frame: Frame, item: Item, person: str | None, aud: Audience, memo: dict[str, str],
                    store: Any, names: Mapping[str, str]) -> str:
     """Le doute d'une croyance qu'une autre contredit sans la remplacer (ADR 0081) : « mais Carol t'a dit autre
@@ -614,9 +625,16 @@ def contested_line(frame: Frame, item: Item, person: str | None, aud: Audience, 
         verdict = verdict_of(frame, other, person, aud, memo, store)
         if not verdict.ok:
             continue
-        tellers = verdict.tellers or tuple(k for t in other.testimonies[:1] for k in t.told_by if k != person)
-        who = ", ".join(names.get(k) or named_label(k) or phrase("memory.names.someone") for k in tellers) or \
-            phrase("memory.names.someone")
+        # qui a dit l'autre version : le témoin auquel elle l'attribue ici, jamais un témoignage que cette audience
+        # ne peut pas entendre (le premier pouvait être un secret, ADR 0080) ; quand c'est l'interlocuteur qui l'a
+        # dite, c'est lui — sinon « quelqu'un »
+        tellers = verdict.tellers
+        if not tellers and person is not None and other.testimonies and any(
+                t.speaks and person in canon(frame, t.told_by, memo)
+                for t in hearing(frame, other, person, aud, memo, store)[1]):
+            tellers = (person,)
+        who = ", ".join(names.get(k) or names_of(frame, {k}).get(k) or phrase("memory.names.someone")
+                        for k in tellers) or phrase("memory.names.someone")
         return phrase("memory.recall.contested", who=who, other=other.text)
     return ""
 
@@ -849,7 +867,8 @@ async def _recall(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> Rec
                                        doubted(frame, item, memo, person, verdict) +
                                        contested_line(frame, item, person, aud, memo, store, names) +
                                        expected_line(item, frame) +
-                                       feelings(item.felt, own, concerned_name(frame, item.about, names, memo))), cap)
+                                       feelings(felt_here(frame, item, person, aud, memo, store), own,
+                                                concerned_name(frame, item.about, names, memo))), cap)
     relevant = [cand for _score, cand in sorted(veil, key=lambda v: (-v[0], v[1].item.id))]
     out.veiled = choose(frame, store, [*relevant, *(n for n in told_news if n.item.id not in {r.item.id for r in relevant})],
                         person, aud, p)
