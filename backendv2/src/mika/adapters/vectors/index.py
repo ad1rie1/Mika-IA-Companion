@@ -160,6 +160,20 @@ class SqliteVectorIndex:
             self._by_person.setdefault(p, []).append(at)
             self._person_rows.pop(p, None)
 
+    async def dump(self, limit: int | None = None) -> tuple[list[int], list[str], list[tuple[str, ...]], np.ndarray]:
+        """Tout l'index de ce modèle, rangé par clé — (clés, sortes, personnes, matrice (n, d)) : de quoi en tirer une
+        carte (``layout``). ``limit`` : seulement les ``limit`` clés les plus récentes (les plus grandes)."""
+        t, model = self._t, self.model
+        query = select(t.c.key, t.c.kind, t.c.persons, t.c.vec).where(t.c.model == model)
+        if limit is not None:
+            query = query.order_by(t.c.key.desc()).limit(max(0, limit))
+        rows = sorted(await self.store.run_views(lambda sql: sql.query(query)), key=lambda r: int(r[0]))
+        if not rows:
+            return [], [], [], np.zeros((0, 0), dtype=np.float32)
+        mat = np.vstack([np.frombuffer(blob, dtype=np.float16) for _, _, _, blob in rows]).astype(np.float32)
+        return ([int(k) for k, _, _, _ in rows], [str(kind) for _, kind, _, _ in rows],
+                [tuple(json.loads(p)) for _, _, p, _ in rows], mat)
+
     def indexed(self) -> set[int]:
         if self._spilled:
             t = self._t

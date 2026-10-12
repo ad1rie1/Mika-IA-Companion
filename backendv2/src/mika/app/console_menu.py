@@ -21,6 +21,7 @@ MENU = (
         MenuLink("Sommeil et rythme", "vie/rythme"),
         MenuLink("Pensées et attention", "pensees"),
         MenuLink("Mémoire", "memoire"),
+        MenuLink("Constellation", "constellation"),
         MenuLink("Journal et rêves", "pensees/nuits"),
         MenuLink("Estime et récit", "vie/soi"),
         MenuLink("Monde et corps", "vie/monde"),

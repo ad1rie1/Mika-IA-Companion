@@ -18,7 +18,8 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "mika"
 #: ce qui reste hors de la règle, et pourquoi (le lot qui le reprend)
 EXEMPT = {
     "adapters/database.py": "le seul module qui parle de SQLite par nature (sa mise en route, la troncature du WAL)",
-    "app/backup.py": "la sauvegarde : lot 5",
+    "app/backup.py": "la copie d'un fichier SQLite par son API de sauvegarde (PRAGMA), par nature ; sur un serveur, "
+                     "elle passe par mariadb-dump (app/backup_server.py)",
 }
 
 #: tout ``src`` (les révisions générées d'Alembic à part), sauf ``EXEMPT``

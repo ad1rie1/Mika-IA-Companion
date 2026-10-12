@@ -31,7 +31,7 @@ from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from tests.fixtures.mika import AFTERNOON, boot, build, connect, said
 
-#: la sauvegarde archive les fichiers SQLite du dossier ; sous MariaDB, elle refuse (ADR 0101, lot 5)
+#: la sauvegarde des fichiers SQLite du dossier ; celle d'un serveur MariaDB : ``test_backup_server.py``
 pytestmark = pytest.mark.sqlite_only
 
 WEEK = [

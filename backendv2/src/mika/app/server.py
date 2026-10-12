@@ -63,6 +63,7 @@ from mika.app import backup, composition, datadir, reglages, schema, system_mcp
 from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import MENU
+from mika.app.constellation import Constellation
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
 from mika.app.settings import SecretBox, Settings, push_key_file
@@ -199,6 +200,8 @@ class Live:
     data: Path | None = None
     #: les clients du monde (``/ws/world``, ADR 0051) : moteurs de jeu et écrans
     world: WorldHub | None = None
+    #: sa mémoire en une boule de points, et ce qui la parcourt (la console, ADR 0103)
+    constellation: Constellation | None = None
     #: la génération d'images (désactivée tant qu'aucun fournisseur n'est branché, ADR 0061)
     imaging: LiveImaging = field(default_factory=LiveImaging)
     #: une génération d'images fournie de l'extérieur (tests) n'est pas rechargée
@@ -411,6 +414,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                 world_hub.publish(*update)
 
     kernel.mind.subscribe(publish_world)
+    # sa mémoire en une boule de points, et ce qui la parcourt (console, opérateurs) : ne traduit rien sans lecteur
+    constellation = live.constellation = Constellation(kernel, vectors, live.accounts)
+    kernel.mind.subscribe(constellation.listen)
 
     @contextlib.asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
@@ -441,6 +447,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         mcp.start()  # chaque serveur actif est joint en tâche de fond
         hub.start()
         world_hub.start()
+        constellation.start()
         # sa mémoire prête avant sa première réponse : un message qui attendait au démarrage, une reprise, ne passent
         # pas sans souvenirs parce que le modèle de plongements finissait de se charger (borné : ``WARM_WAIT_S``)
         with contextlib.suppress(TimeoutError):
@@ -450,6 +457,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             yield
         finally:
             warming.cancel()
+            await constellation.stop()
             await world_hub.stop()
             await hub.stop()
 
@@ -481,8 +489,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     relay = Mount(RELAY_PREFIX, app=live.relay.app)
     console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token, console_pages))
     return create_app(port, live.accounts, hub, web, lifespan=lifespan,
-                      extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *inspector, relay, console_mcp,
-                                    world_hub.route()],
+                      extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(), *inspector,
+                                    relay, console_mcp, world_hub.route()],
                       preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token,
                       wakeup=wakeups.call, teams=teams, push_ready=push_sender.configured), live
 

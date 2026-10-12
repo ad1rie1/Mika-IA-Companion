@@ -3,7 +3,8 @@
 [Unit]
 Description=Mika v2
 Documentation=file:/opt/mika/backendv2/deploy/README.md
-After=network-online.target
+# MariaDB (si ses bases y sont, deploy/README.md) démarre avant elle
+After=network-online.target mariadb.service
 Wants=network-online.target
 
 [Service]
@@ -11,7 +12,7 @@ Type=simple
 User=mika
 Group=mika
 WorkingDirectory=/opt/mika/backendv2
-# MIKA_SECRET_KEY (facultatif), HF_HOME…
+# MIKA_SECRET_KEY (facultatif), MIKA_DATABASE_URL (ses bases sur MariaDB), HF_HOME…
 EnvironmentFile=-/etc/mika/mika.env
 Environment=HF_HOME=/var/lib/mika/cache/huggingface
 # les dossiers d'appel de Claude Code (prompts privés, jetons de session) : en mémoire, privés, jamais sauvegardés

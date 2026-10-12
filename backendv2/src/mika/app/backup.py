@@ -23,6 +23,20 @@ se reconstruit pas :
 ``views.db`` n'y est pas : projections et vecteurs se reconstruisent depuis
 le journal au démarrage suivant.
 
+**Sur un serveur MariaDB** (``MIKA_DATABASE_URL``, ADR 0101 point 10), ses
+bases ne sont pas des fichiers du dossier : l'archive porte, à côté du dossier
+(``data/``), une copie SQL de chacune (``bases/`` : ``mind``, ``mail``,
+``feeds``, ``teams`` et la base de chaque app forgée), faite par
+``mariadb-dump`` en un instantané cohérent, serveur en marche
+(``backup_server``). La vérification recharge ``mind`` dans une base de
+travail et l'y rejoue. La restauration vérifie les sommes et rejoue ``mind``
+rechargé dans une base de travail, **copie les bases en service** dans le
+dossier mis de côté (``<dossier>.avant-restauration-…/bases/``), puis recharge
+chaque copie à sa place ; ``views`` est vidée (elle se reconstruit). Une copie
+qui ne se rechargerait pas en route laisse les bases en service à portée de
+main, dans ce dossier mis de côté. Une archive faite sur
+fichiers ne se restaure pas sur un serveur, ni l'inverse.
+
 Restaurer vérifie les sommes, rejoue la copie et compare son empreinte au
 manifeste **avant** de toucher au dossier de données. L'empreinte de l'état
 dépend du code autant que des données (un champ de tranche, un réducteur
@@ -43,6 +57,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import shutil
 import sqlite3
 import tarfile
@@ -52,19 +67,26 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from sqlalchemy import delete
+from sqlalchemy.exc import SQLAlchemyError
+
+from mika.adapters.database import Target, as_target
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
-from mika.app import datadir, schema
+from mika.app import backup_server, datadir, schema
 from mika.app.composition import faculties
 from mika.app.settings import PUSH_KEY_FILE
 from mika.kernel.codec import digest
 from mika.kernel.inspect import describe_error
 from mika.kernel.registry import Registry
+from mika.ports.journal import JournalSnapshot
 from mika.runtime.mind import Mind
 from mika.runtime.state import RUNTIME
 
 FORMAT = 1
 MANIFEST = "MANIFEST.json"
+#: les copies des bases d'un serveur, à côté du dossier, dans l'archive
+BASES = "bases"
 #: jetables : se reconstruisent depuis le journal
 SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm", "sauvegardes.json", "sauvegardes.partial",
                      datadir.LOCK_NAME})
@@ -134,37 +156,51 @@ def code_fingerprint() -> str:
 
 
 def state_of(mind_db: Path) -> tuple[int, str]:
-    """(tête, empreinte de l'état persisté) d'une copie de ``mind.db``, rejouée
-    dans un dossier jetable (la copie n'est jamais modifiée)."""
+    """(tête, empreinte de l'état persisté) d'une copie de ``mind.db`` — ou de la copie SQL de ``mind`` (``.sql``,
+    sur un serveur) —, rejouée à part (la copie n'est jamais modifiée)."""
     head, state, _ = _replay(mind_db)
     return head, state
 
 
-def _replay(mind_db: Path, *, genesis: bool = False) -> tuple[int, str, list[str]]:
-    """(tête, empreinte, tranches dont un réducteur a levé) d'une copie de ``mind.db`` rejouée dans un
-    dossier jetable. ``genesis`` : sans ses instantanés (écrits par le code d'alors), tout le journal
-    repasse par les réducteurs d'aujourd'hui."""
+def _replay(mind_copy: Path, *, genesis: bool = False) -> tuple[int, str, list[str]]:
+    """(tête, empreinte, tranches dont un réducteur a levé) d'une copie de ``mind`` rejouée à part : un fichier
+    SQLite dans un dossier jetable, ou une copie SQL rechargée dans des bases de travail du serveur, supprimées
+    ensuite. ``genesis`` : sans ses instantanés (écrits par le code d'alors), tout le journal repasse par les
+    réducteurs d'aujourd'hui."""
+    if mind_copy.suffix == ".sql":
+        url, prefix = _server()
+        mind, views = backup_server.scratch(url, prefix, 2)
+        try:
+            backup_server.load(mind_copy, mind)
+            return _replay_on(mind, views, genesis)
+        finally:
+            mind.drop()
+            views.drop()
     with tempfile.TemporaryDirectory(prefix="mika-verif-") as tmp:
         work = Path(tmp)
-        shutil.copy2(mind_db, work / "mind.db")
-        if genesis:
-            db = sqlite3.connect(str(work / "mind.db"))
-            try:
-                with db:
-                    db.execute("DELETE FROM snapshots")
-            finally:
-                db.close()
+        shutil.copy2(mind_copy, work / "mind.db")
+        return _replay_on(work / "mind.db", work / "views.db", genesis)
 
-        async def replay() -> tuple[int, str, list[str]]:
-            store = SqlStore(work / "mind.db", work / "views.db", threaded=False)
-            mind = Mind(Registry([RUNTIME, *faculties()]), store, RealClock(), RandomIdGen())
-            report = await mind.boot(append_boot=False)
-            state = digest({o: mind.root.slices[o] for o in mind.registry.persisted_owners()})
-            tainted = sorted(mind.root.tainted.keys())
-            await mind.close()
-            return report.head, state, tainted
 
-        return asyncio.run(replay())
+def _replay_on(mind_at: Path | Target, views_at: Path | Target, genesis: bool) -> tuple[int, str, list[str]]:
+    if genesis:
+        engine = as_target(mind_at).engine()
+        try:
+            with engine.begin() as conn:
+                conn.execute(delete(JournalSnapshot))
+        finally:
+            engine.dispose()
+
+    async def replay() -> tuple[int, str, list[str]]:
+        store = SqlStore(mind_at, views_at, threaded=False)
+        mind = Mind(Registry([RUNTIME, *faculties()]), store, RealClock(), RandomIdGen())
+        report = await mind.boot(append_boot=False)
+        state = digest({o: mind.root.slices[o] for o in mind.registry.persisted_owners()})
+        tainted = sorted(mind.root.tainted.keys())
+        await mind.close()
+        return report.head, state, tainted
+
+    return asyncio.run(replay())
 
 
 def _check(manifest: dict[str, Any], mind_db: Path) -> tuple[int, str, list[str]]:
@@ -252,15 +288,18 @@ def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None
     cause en mots (``tentative``, lue par la console) et ne laisse pas d'archive partielle derrière
     elle ; l'erreur sort en ``BackupError``."""
     data, dest = data.resolve(), dest.resolve()
-    _not_on_a_server()
-    if not (data / "mind.db").exists():
+    if schema.server_url():
+        url, prefix = _server()
+        if not backup_server.tables(Target(url=url, name=f"{prefix}mind")):
+            raise BackupError(f"pas de base {prefix}mind sur le serveur")
+    elif not (data / "mind.db").exists():
         raise BackupError(f"pas de mind.db dans {data}")
     stamp = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%S")
     archive = dest / f"{ARCHIVE_PREFIX}{stamp}.tar.gz"
     try:
         done = _write(data, dest, archive, stamp, keep)
-    except (BackupError, OSError, sqlite3.Error, tarfile.TarError) as exc:
-        why = str(exc) if isinstance(exc, BackupError) else _why(exc, dest)
+    except (BackupError, OSError, sqlite3.Error, tarfile.TarError, backup_server.ServerError, SQLAlchemyError) as exc:
+        why = str(exc) if isinstance(exc, BackupError | backup_server.ServerError) else _why(exc, dest)
         with contextlib.suppress(OSError):  # la cause à noter est l'échec, pas ce nettoyage
             archive.with_suffix(".partial").unlink(missing_ok=True)
         note(data, "tentative", {"at": _us(now), "dossier": str(dest), "ok": False, "erreur": why})
@@ -273,12 +312,40 @@ def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None
     return done
 
 
-def _not_on_a_server() -> None:
-    """Sous MariaDB, ses bases ne sont pas des fichiers du dossier : une archive faite ici n'en contiendrait aucune (ou
-    un vieux ``mind.db`` oublié là). Refusé en le disant, jusqu'à la sauvegarde par le serveur (ADR 0101, lot 5)."""
-    if schema.server_url():
-        raise BackupError("ses bases vivent sur un serveur MariaDB (MIKA_DATABASE_URL) : la sauvegarde par le "
-                          "serveur n'est pas encore là (ADR 0101, lot 5) — rien n'a été archivé ni restauré")
+def _server() -> tuple[str, str]:
+    """(adresse, préfixe) du serveur de ses bases ; une archive de serveur ne se vérifie ni ne se restaure sans lui."""
+    url = schema.server_url()
+    if not url:
+        raise BackupError("cette archive vient d'un serveur MariaDB : la vérifier ou la restaurer demande ce serveur "
+                          "(MIKA_DATABASE_URL)")
+    return url, schema.database_prefix()
+
+
+#: ce qu'une archive de serveur peut nommer : ses bases, et celle d'une app forgée
+_BASE_KEY = re.compile(r"^(mind|mail|feeds|teams|forge/[a-z][a-z0-9_]{1,30})$")
+
+
+def _live(url: str, prefix: str, key: str) -> Target:
+    """La base en service d'une clé d'archive (``mind``, ``forge/<app>``…)."""
+    name = f"{prefix}forge_{key[6:]}" if key.startswith("forge/") else f"{prefix}{key}"
+    return Target(url=url, name=name)
+
+
+def _server_bases(url: str, prefix: str) -> dict[str, Target]:
+    """Ce qu'on sauvegarde sur le serveur : ``mind``, ``mail``, ``feeds``, ``teams`` et la base de chaque app forgée
+    (celles qui existent)."""
+    out = {key: _live(url, prefix, key) for key in backup_server.KEPT}
+    start = f"{prefix}forge_"
+    for name in backup_server.named_like(url, start):
+        app = name[len(start):]
+        if _BASE_KEY.match(f"forge/{app}"):
+            out[f"forge/{app}"] = Target(url=url, name=name)
+    return out
+
+
+def _mind_copy(manifest: dict[str, Any], root: Path) -> Path:
+    """La copie de ``mind`` dans une archive extraite sous ``root`` : le fichier, ou la copie SQL du serveur."""
+    return root / BASES / "mind.sql" if manifest.get("engine") == "mariadb" else root / "data" / "mind.db"
 
 
 def _why(exc: BaseException, dest: Path) -> str:
@@ -301,6 +368,7 @@ def _write(data: Path, dest: Path, archive: Path, stamp: str, keep: int) -> Summ
     warnings = []
     if os.environ.get("MIKA_SECRET_KEY", "").strip():
         warnings.append("la clé de chiffrement vient de MIKA_SECRET_KEY : sauvegarde-la à part")
+    on_server = bool(schema.server_url())
     with tempfile.TemporaryDirectory(prefix=".mika-sauvegarde-", dir=dest) as tmp:
         stage = Path(tmp) / "data"
         stage.mkdir()
@@ -309,19 +377,36 @@ def _write(data: Path, dest: Path, archive: Path, stamp: str, keep: int) -> Summ
         links = {rel.as_posix(): os.readlink(data / rel) for rel in linked}
         for rel in members:
             src, dst = data / rel, stage / rel
-            dst.parent.mkdir(parents=True, exist_ok=True)
             if _is_sqlite(src):
+                if on_server:  # un fichier d'avant le serveur : ses bases sont ailleurs, le copier tromperait
+                    warnings.append(f"{rel} : une base SQLite d'avant le serveur, laissée hors de l'archive")
+                    continue
                 _copy_sqlite(src, dst)
             else:
+                dst.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(src, dst)
             files[rel.as_posix()] = _sha256(dst)
-        head, state = state_of(stage / "mind.db")
+        bases: dict[str, dict[str, str]] = {}
+        if on_server:
+            url, prefix = _server()
+            for key, target in _server_bases(url, prefix).items():
+                rel = f"{BASES}/{key}.sql"
+                target.ensure()  # une base encore vide (aucun courrier) se copie vide
+                backup_server.dump(target, Path(tmp) / rel)
+                bases[key] = {"file": rel, "sha256": _sha256(Path(tmp) / rel)}
+            head, state = state_of(Path(tmp) / BASES / "mind.sql")
+        else:
+            head, state = state_of(stage / "mind.db")
         manifest = {"format": FORMAT, "created": stamp, "head": head, "state": state, "code": code_fingerprint(),
                     "files": files, "links": links}
+        if on_server:
+            manifest |= {"engine": "mariadb", "bases": bases}
         (stage / MANIFEST).write_text(json.dumps(manifest, indent=1, ensure_ascii=False), encoding="utf-8")
         partial = archive.with_suffix(".partial")
         with tarfile.open(partial, "w:gz") as tar:
             tar.add(stage, arcname="data")
+            if on_server:
+                tar.add(Path(tmp) / BASES, arcname=BASES)
         partial.replace(archive)
     if keep > 0:
         for old in sorted(dest.glob(f"{ARCHIVE_PREFIX}*.tar.gz"))[:-keep]:
@@ -392,6 +477,17 @@ def _extract(archive: Path, into: Path) -> dict[str, Any]:
         path = root / rel
         if not path.is_file() or _sha256(path) != expected:
             raise BackupError(f"fichier absent ou altéré dans l'archive : {rel}")
+    bases = manifest.get("bases") or {}
+    if manifest.get("engine", "sqlite") not in ("sqlite", "mariadb") or not isinstance(bases, dict) \
+            or (manifest.get("engine") == "mariadb" and "mind" not in bases):
+        raise BackupError("copies des bases illisibles dans le manifeste")
+    for key, entry in bases.items():
+        rel = entry.get("file") if isinstance(entry, dict) else None
+        if not isinstance(key, str) or not _BASE_KEY.match(key) or rel != f"{BASES}/{key}.sql":
+            raise BackupError(f"copie de base invalide dans l'archive : {str(key)[:80]!r}")
+        path = into / rel
+        if not path.is_file() or _sha256(path) != entry.get("sha256"):
+            raise BackupError(f"copie de base absente ou altérée dans l'archive : {key}")
     _relink(root, manifest.get("links", {}))  # une archive d'avant les liens n'en a pas
     return manifest
 
@@ -402,7 +498,7 @@ def verify(archive: Path, *, record: Path | None = None, now: datetime | None = 
     try:
         with tempfile.TemporaryDirectory(prefix="mika-verif-") as tmp:
             manifest = _extract(archive, Path(tmp))
-            head, state, warnings = _check(manifest, Path(tmp) / "data" / "mind.db")
+            head, state, warnings = _check(manifest, _mind_copy(manifest, Path(tmp)))
     except BackupError as exc:
         if record is not None:
             note(record, "verification", {"at": _us(now), "archive": str(archive), "ok": False, "erreur": str(exc)})
@@ -414,39 +510,60 @@ def verify(archive: Path, *, record: Path | None = None, now: datetime | None = 
 
 
 def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | None = None) -> Summary:
-    """Restaure dans ``data``. Un dossier non vide n'est remplacé qu'avec
-    ``force`` ; il est alors mis de côté (``<data>.avant-restauration-…``).
+    """Restaure dans ``data`` (et, sur un serveur, dans ses bases). Un dossier non vide — ou des bases en service —
+    n'est remplacé qu'avec ``force`` ; il est alors mis de côté (``<data>.avant-restauration-…``, les bases copiées
+    dans son ``bases/``).
 
     Le verrou du dossier est pris d'abord : un Mika qui tourne dessus (``DataDirBusy``) ne voit
     rien bouger. Il passe au dossier restauré avec son fichier, tenu jusqu'au bout."""
     data = data.resolve()
-    _not_on_a_server()
+    server = schema.server_url()
     fresh = not data.exists()
     datadir.hold(data)  # crée le dossier s'il n'existait pas : on le retire si rien n'est restauré
     lock = data / datadir.LOCK_NAME
     done = False
     try:
-        if any(p.name != datadir.LOCK_NAME for p in data.iterdir()) and not force:
-            raise BackupError(f"{data} n'est pas vide : relance avec --force (l'ancien dossier sera mis de côté)")
+        occupied = any(p.name != datadir.LOCK_NAME for p in data.iterdir())
+        if server:
+            occupied = occupied or _server_occupied(*_server())
+        if occupied and not force:
+            raise BackupError(f"{data} n'est pas vide{' (ou ses bases sur le serveur)' if server else ''} : relance "
+                              f"avec --force (l'ancien dossier sera mis de côté)")
         stamp = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%S")
         stage_root = Path(tempfile.mkdtemp(prefix=f".{data.name}.restauration-", dir=data.parent))
         try:
             manifest = _extract(archive, stage_root)
+            from_server = manifest.get("engine") == "mariadb"
+            if from_server and not server:
+                raise BackupError("cette archive vient d'un serveur MariaDB : elle se restaure sur un serveur "
+                                  "(MIKA_DATABASE_URL), pas dans des fichiers — rien n'est touché")
+            if server and not from_server:
+                raise BackupError("cette archive est faite de fichiers SQLite : elle ne se restaure pas sur un serveur "
+                                  "MariaDB — rien n'est touché")
             stage = stage_root / "data"
             try:
-                head, state, warnings = _check(manifest, stage / "mind.db")
-            except BackupError as exc:
+                head, state, warnings = _check(manifest, _mind_copy(manifest, stage_root))
+            except (BackupError, backup_server.ServerError, SQLAlchemyError) as exc:
                 raise BackupError(f"{exc} : rien n'est touché") from exc
             (stage / MANIFEST).unlink()
+            aside = data.parent / f"{data.name}.avant-restauration-{stamp}"
+            kept = stage_root / "avant-bases"
+            if server:
+                if occupied:  # les bases en service, copiées avant d'être remplacées
+                    _copy_live(*_server(), kept)
+                _reload_bases(*_server(), manifest, stage_root)
             lock.replace(stage / datadir.LOCK_NAME)  # le verrou (son inode, tenu) suit le dossier restauré
             if any(data.iterdir()):
-                aside = data.parent / f"{data.name}.avant-restauration-{stamp}"
                 data.rename(aside)
                 warnings.append(f"ancien dossier mis de côté : {aside}")
             else:
                 data.rmdir()
             stage.rename(data)
             done = True
+            if kept.exists():
+                aside.mkdir(exist_ok=True)
+                kept.rename(aside / BASES)
+                warnings.append(f"bases en service copiées avant d'être remplacées : {aside / BASES}")
             for sub in ("forge", "ateliers", "partages"):
                 (data / sub).mkdir(exist_ok=True)
             (data / "partages").chmod(0o700)  # ce qu'elle a envoyé à chacun : à elle seule
@@ -465,3 +582,28 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
             except OSError:
                 pass
     return Summary(archive, head, state, len(manifest["files"]), archive.stat().st_size, tuple(warnings))
+
+
+def _server_occupied(url: str, prefix: str) -> bool:
+    return any(backup_server.tables(t) for t in _server_bases(url, prefix).values())
+
+
+def _copy_live(url: str, prefix: str, into: Path) -> None:
+    """Une copie SQL de chaque base en service (``views`` exceptée : elle se reconstruit)."""
+    for key, target in _server_bases(url, prefix).items():
+        if backup_server.exists(target):
+            backup_server.dump(target, into / f"{key}.sql")
+
+
+def _reload_bases(url: str, prefix: str, manifest: dict[str, Any], root: Path) -> None:
+    """Chaque copie rechargée à la place de sa base ; une app forgée absente de l'archive perd sa base et son
+    utilisateur ; ``views`` est vidée (ses projections se reconstruisent au démarrage)."""
+    live = _server_bases(url, prefix)
+    for key, entry in sorted(manifest["bases"].items()):
+        target = _live(url, prefix, key)
+        target.drop()
+        backup_server.load(root / entry["file"], target)
+    for key, target in live.items():
+        if key.startswith("forge/") and key not in manifest["bases"]:
+            backup_server.drop_app(target)
+    Target(url=url, name=f"{prefix}views").drop()
