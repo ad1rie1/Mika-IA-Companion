@@ -59,7 +59,7 @@ from mika.adapters.web.hub import Hub
 from mika.adapters.web.push import MobilePush
 from mika.adapters.workshop import BwrapWorkshop
 from mika.adapters.world.server import WorldHub
-from mika.app import backup, composition, datadir, reglages, system_mcp
+from mika.app import backup, composition, datadir, reglages, schema, system_mcp
 from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import MENU
@@ -332,6 +332,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     """L'application et ce qu'elle fait vivre. Tout est construit ici ; le
     cycle de vie ouvre, démarre et arrête."""
     data.mkdir(parents=True, exist_ok=True)
+    schema.migrate_data(data)  # chaque base à sa dernière révision, avant que rien ne s'ouvre (ADR 0101)
     web = web or WebConfig()
     store = SqliteStore(data / "mind.db", data / "views.db", threaded=True)
     clock = RealClock()

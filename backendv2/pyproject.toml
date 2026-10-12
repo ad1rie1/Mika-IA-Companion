@@ -18,6 +18,9 @@ dependencies = [
     "httpx>=0.27",
     "pyyaml>=6.0",
     "python-multipart>=0.0.9",
+    # le schéma déclaré et ses migrations : SQLite (tests, simulateur) et MariaDB (sa vie), ADR 0101
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +28,8 @@ llm = ["anthropic>=0.40", "openai>=1.40", "ollama>=0.4", "google-genai>=1.0"]
 memory = ["numpy>=1.26", "sentence-transformers>=3.0"]
 # lire les PDF joints (sans : « je ne peux pas le lire »)
 documents = ["pypdf>=4"]
+# le pilote MariaDB (ADR 0101) : en production
+mariadb = ["mariadb>=1.1"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6.100", "import-linter>=2.0", "ruff>=0.6", "time-machine>=2.14", "jsonschema>=4.20"]
 
 [project.scripts]
@@ -36,6 +41,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 "mika.inspector" = ["templates/*.html", "static/*.css", "static/*.js"]
 "mika.faculties.world" = ["*.json"]
+"mika.app" = ["migrations/*/script.py.mako"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

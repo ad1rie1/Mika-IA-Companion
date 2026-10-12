@@ -1,7 +1,7 @@
 """Les jetons de client natif disent ce qu'ils ouvrent et d'où ils viennent (ADR 0062).
 
-- une table ``client_tokens`` d'avant (sans ``client`` ni ``source``) se complète à l'ouverture : ses jetons sont
-  des écrans donnés en ligne de commande, et le restent ;
+- ouvrir deux fois ne casse rien ; un identifiant trop long est refusé avant d'écrire, une recherche trop longue
+  ne trouve rien sans lever (ADR 0101 : les tables sont des entités, sans migration à la main) ;
 - un jeton ``mobile`` créé ou révoqué prévient ``on_change`` (la joignabilité de la personne en dépend), un écran non ;
 - une sorte de client inconnue est refusée ;
 - changer le mot de passe ou désactiver le compte révoque les jetons obtenus par mot de passe, et eux seuls.
@@ -9,12 +9,10 @@
 
 from __future__ import annotations
 
-import sqlite3
-
 import pytest
 
 from mika.adapters.store_sqlite.store import SqliteStore
-from mika.adapters.web.accounts import Accounts
+from mika.adapters.web.accounts import USERNAME_MAX, Accounts, password_problems
 
 PASSWORD = "un-mot-de-passe-long"
 
@@ -27,25 +25,29 @@ async def store(tmp_path):
     await s.close()
 
 
-async def test_une_table_d_avant_se_complete(tmp_path) -> None:
-    db = sqlite3.connect(tmp_path / "mind.db")
-    db.execute("CREATE TABLE client_tokens(id INTEGER PRIMARY KEY, account INTEGER NOT NULL, "
-               "label TEXT NOT NULL DEFAULT '', digest TEXT UNIQUE NOT NULL, created_at INTEGER NOT NULL, "
-               "last_used INTEGER, revoked_at INTEGER)")
-    db.execute("INSERT INTO client_tokens(account, label, digest, created_at) VALUES(1, 'Unity', 'x', 1)")
-    db.commit()
-    db.close()
-    s = SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
-    await s.open()
-    try:
-        accounts = Accounts(s)
-        await accounts.open()
-        await accounts.open()  # deux fois : rien ne casse
-        [old] = accounts.tokens()
-        assert (old.label, old.client, old.source) == ("Unity", "screen", "cli")
-        assert accounts.token_client(old.id) == "screen"
-    finally:
-        await s.close()
+async def test_ouvrir_deux_fois_ne_casse_rien(store) -> None:
+    accounts = Accounts(store)
+    await accounts.open()
+    await accounts.open()
+    acc = await accounts.create("bea", PASSWORD, operator=False)
+    found = accounts.by_name("bea")
+    assert found is not None and found[0] == acc
+    token, _raw = await accounts.create_token(acc.id, "Unity")
+    assert (token.client, token.source) == ("screen", "cli") and accounts.token_client(token.id) == "screen"
+
+
+def test_un_identifiant_trop_long_est_refuse_avant_d_ecrire() -> None:
+    assert not any("trop long" in p for p in password_problems(PASSWORD, "x" * USERNAME_MAX))
+    assert any("trop long" in p for p in password_problems(PASSWORD, "x" * (USERNAME_MAX + 1)))
+
+
+async def test_une_recherche_trop_longue_ne_trouve_rien(store) -> None:
+    accounts = Accounts(store)
+    await accounts.open()
+    await accounts.create("bea", PASSWORD, operator=False)
+    assert accounts.by_name("x" * 500) is None
+    assert accounts.session("y" * 500) is None
+    assert accounts.credential("z" * 500) is None
 
 
 async def test_un_telephone_previent_un_ecran_non(store) -> None:

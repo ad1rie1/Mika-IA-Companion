@@ -12,16 +12,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import ValidationError
+from sqlalchemy import select
 
 from mika.adapters.store_sqlite import SqliteStore
 from mika.app.paths import ROOT
+from mika.app.settings import NO_TABLE, SettingRow
 from mika.contracts import self_ as self_c
 from mika.contracts.self_ import PersonaDoc
 from mika.faculties.self import load
@@ -127,8 +128,8 @@ async def _kept(data: Path) -> tuple[bool, bool]:
     try:
         journaled = bool(store.latest([self_c.PERSONA_REVISED.name], 1))
         try:
-            rows = store.query_mind("SELECT value FROM settings WHERE key=?", (CONSOLE_KEY,))
-        except sqlite3.OperationalError:  # pas encore de table des réglages : pas de persona de console
+            rows = store.query_mind(select(SettingRow.value).where(SettingRow.key == CONSOLE_KEY))
+        except NO_TABLE:  # pas encore de table des réglages : pas de persona de console
             rows = []
         return bool(rows) and _valid_console(rows[0][0]), journaled
     finally:

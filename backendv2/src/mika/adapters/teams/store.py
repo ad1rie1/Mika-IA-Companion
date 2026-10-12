@@ -1,5 +1,5 @@
-"""Le cache de Teams (``teams.db``) : ce que l'extension a poussé (conversations, messages), ses brouillons et la
-file de ce qui doit repartir.
+"""Le cache de Teams (la base ``teams``, déclarée dans ``models`` : SQLite pour les tests, MariaDB en production —
+ADR 0101) : ce que l'extension a poussé (conversations, messages), ses brouillons et la file de ce qui doit repartir.
 
 - **Un message se désigne par sa référence**, attribuée ici (``ports.teams.message_ref``) : la même pour un même
   message, qu'il arrive par le réseau ou par la base locale du client, rejoué ou retouché (un message modifié dans
@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import difflib
 import hashlib
-import sqlite3
 import threading
 import time
 import uuid
@@ -25,7 +24,23 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import delete, false, func, or_, select, update
+from sqlalchemy.orm import Session, sessionmaker
+
+from mika.adapters.database import sqlite_engine
 from mika.adapters.teams.config import HER, TeamsConfig
+from mika.adapters.teams.models import (
+    AUTHOR_MAX,
+    CONVERSATION_MAX,
+    REF_MAX,
+    ConversationRow,
+    DraftRow,
+    MessageRow,
+    MetaRow,
+    fit,
+)
+from mika.ports.paging import fold_text
+from mika.ports.sql import TEAMS
 from mika.ports.teams import (
     ACCEPTED,
     CONFLICT,
@@ -55,7 +70,6 @@ from mika.ports.teams import (
     to_fill,
 )
 
-SCHEMA = 1
 #: au plus tant de messages gardés par conversation (les plus récents)
 KEEP_PER_CONVERSATION = 1000
 #: un message de la personne compte pour un brouillon posé s'il est écrit au plus tant avant qu'on le sache posé
@@ -66,24 +80,17 @@ SIMILAR = 0.5
 #: un message Teams est coupé à cette longueur par l'extension : au-delà, on compare ce qui en reste
 CUT_AT = 3990
 
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT);
-CREATE TABLE IF NOT EXISTS conversations(id TEXT PRIMARY KEY, title TEXT, kind TEXT, last_at INTEGER);
-CREATE TABLE IF NOT EXISTS messages(
-  ref TEXT PRIMARY KEY, conversation TEXT NOT NULL, external_id TEXT NOT NULL, author TEXT, author_id TEXT,
-  at INTEGER, text TEXT, own INTEGER, mentions_me INTEGER, received INTEGER, acked INTEGER);
-CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation, at);
-CREATE INDEX IF NOT EXISTS messages_pending ON messages(acked, own, at);
-CREATE INDEX IF NOT EXISTS messages_author ON messages(author_id);
-CREATE TABLE IF NOT EXISTS drafts(
-  id TEXT PRIMARY KEY, conversation TEXT, body TEXT, reply_to TEXT, author TEXT, created INTEGER, updated INTEGER,
-  state TEXT, mode TEXT, digest TEXT, final TEXT, expires_at INTEGER, placed_at INTEGER, sent_at INTEGER,
-  sent_text TEXT, edited INTEGER, edited_by TEXT, reason TEXT);
-CREATE INDEX IF NOT EXISTS drafts_open ON drafts(state, conversation);
-"""
-_MESSAGE = ("ref", "conversation", "author", "author_id", "at", "text", "own", "mentions_me")
-_DRAFT = ("id", "conversation", "body", "reply_to", "author", "created", "updated", "state", "mode", "digest",
-          "final", "expires_at", "placed_at", "sent_at", "sent_text", "edited", "edited_by", "reason")
+#: ce qu'on lit d'un message, d'une conversation, d'un brouillon (dans l'ordre des champs de ``Message``,
+#: ``Conversation`` — sans son compte —, ``Draft``)
+_MESSAGE = (MessageRow.ref, MessageRow.conversation, MessageRow.author, MessageRow.author_id, MessageRow.at,
+            MessageRow.text, MessageRow.own, MessageRow.mentions_me)
+_CONVERSATION = (ConversationRow.id, ConversationRow.title, ConversationRow.kind, ConversationRow.last_at)
+_DRAFT = (DraftRow.draft_id, DraftRow.conversation, DraftRow.body, DraftRow.reply_to, DraftRow.author,
+          DraftRow.created, DraftRow.updated, DraftRow.state, DraftRow.mode, DraftRow.digest, DraftRow.final,
+          DraftRow.expires_at, DraftRow.placed_at, DraftRow.sent_at, DraftRow.sent_text, DraftRow.edited,
+          DraftRow.edited_by, DraftRow.reason)
+#: un tête-à-tête se reconnaît aussi à son identifiant (``19:a_b@unq.gbl.spaces``)
+_DM_SUFFIX = "@unq.gbl.spaces"
 
 
 def _now_us() -> int:
@@ -103,33 +110,54 @@ def _edited(sent: str, d: Draft) -> bool:
     return not (len(sent) >= CUT_AT and (plain(d.final).startswith(got) or plain(d.body).startswith(got)))
 
 
-def _like(text: str) -> str:
-    return "%" + text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+def _conversation(row: Any) -> Conversation:
+    return Conversation(row[0], row[1] or "", row[2] or "other", int(row[3] or 0), int(row[4] or 0))
+
+
+def _draft(row: Any) -> Draft:
+    d = Draft(*row)
+    return d if d.state else replace(d, state=WRITTEN)
+
+
+def _count(result: Any) -> int:
+    """Combien de lignes une suppression a touchées."""
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
+def _counted() -> Any:
+    """Le nombre de messages d'une conversation (corrélée à la requête qui l'appelle)."""
+    return select(func.count(MessageRow.id)).where(MessageRow.conversation == ConversationRow.id).scalar_subquery()
 
 
 class TeamsStore:
-    """Le port ``teams`` : le cache et la file d'envoi. ``config`` est relue à chaque usage (la signature, le nom)."""
+    """Le port ``teams`` : le cache et la file d'envoi. ``config`` est relue à chaque usage (la signature, le nom).
+
+    Le cache a une seule connexion, partagée sous ``_lock`` : chaque méthode publique ouvre une session courte
+    (``begin`` pour écrire, validée à la sortie) ; les aides internes reçoivent la sienne (``s``) — deux sessions à
+    la fois sur la même connexion se marcheraient dessus."""
 
     def __init__(self, config: Callable[[], TeamsConfig], path: Path, *,
                  now: Callable[[], int] = _now_us) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
         self._config = config
         self._now = now
-        self._db = sqlite3.connect(str(path), check_same_thread=False)
         self._lock = threading.RLock()
-        with self._lock:
-            self._db.executescript(_SCHEMA)
-            self._db.execute("INSERT OR IGNORE INTO meta VALUES('schema', ?)", (str(SCHEMA),))
-            self._db.commit()
+        self._engine = sqlite_engine(path, shared=True)
+        TEAMS.create_all(self._engine)
+        self._session = sessionmaker(self._engine, expire_on_commit=False)
 
     # ── ce qu'on sait ──
-    def _meta(self, key: str) -> str:
-        with self._lock:
-            row = self._db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
-        return str(row[0]) if row else ""
+    @staticmethod
+    def _meta_in(s: Session, key: str) -> str:
+        row = s.get(MetaRow, key)
+        return str(row.value or "") if row is not None else ""
 
-    def _set_meta(self, key: str, value: str) -> None:
-        self._db.execute("INSERT OR REPLACE INTO meta VALUES(?, ?)", (key, value))
+    def _meta(self, key: str) -> str:
+        with self._lock, self._session() as s:
+            return self._meta_in(s, key)
+
+    @staticmethod
+    def _set_meta(s: Session, key: str, value: str) -> None:
+        s.merge(MetaRow(name=key, value=value))
 
     def configured(self) -> bool:
         return bool(self._meta("last_batch"))
@@ -139,198 +167,224 @@ class TeamsStore:
         return int(self._meta("last_batch") or 0)
 
     def owner(self) -> tuple[str, str]:
-        return self._meta("self_id"), self._meta("self_name")
+        with self._lock, self._session() as s:
+            return self._meta_in(s, "self_id"), self._meta_in(s, "self_name")
+
+    def _voice_in(self, s: Session) -> Voice:
+        return self._config().voice(fallback_name=self._meta_in(s, "self_name"))
 
     def voice(self) -> Voice:
-        return self._config().voice(fallback_name=self._meta("self_name"))
+        with self._lock, self._session() as s:
+            return self._voice_in(s)
 
     # ── ce que pousse l'extension ──
+    @staticmethod
+    def _conversation_row(s: Session, seen: dict[str, ConversationRow], cid: str) -> ConversationRow:
+        """La conversation de ce lot (créée vide si on ne la connaissait pas)."""
+        row = seen.get(cid) or s.get(ConversationRow, cid)
+        if row is None:
+            row = ConversationRow(id=cid, title="", kind="other", last_at=0)
+            s.add(row)
+        seen[cid] = row
+        return row
+
     def store_batch(self, batch: InboxBatch, now: int) -> Stored:
         new = known = 0
         replied: dict[str, int] = {}
         settled: list[Settled] = []
-        with self._lock:
+        with self._lock, self._session.begin() as s:
             if batch.self_id:
-                self._set_meta("self_id", batch.self_id)
+                self._set_meta(s, "self_id", batch.self_id)
             if batch.self_name:
-                self._set_meta("self_name", batch.self_name)
-            self._set_meta("last_batch", str(now))
+                self._set_meta(s, "self_name", batch.self_name)
+            self._set_meta(s, "last_batch", str(now))
+            seen: dict[str, ConversationRow] = {}
             for c in batch.conversations:
-                self._db.execute("INSERT INTO conversations VALUES(?, ?, ?, 0) ON CONFLICT(id) DO UPDATE SET "
-                                 "title=CASE WHEN excluded.title<>'' THEN excluded.title ELSE title END, "
-                                 "kind=CASE WHEN excluded.kind<>'other' THEN excluded.kind ELSE kind END",
-                                 (c.id, c.title, c.kind))
+                found = self._conversation_row(s, seen, fit(c.id, CONVERSATION_MAX))
+                if c.title:  # un titre vide ou un genre inconnu n'efface pas ce qu'on savait
+                    found.title = c.title
+                if c.kind != "other":
+                    found.kind = c.kind
             for m in sorted(batch.messages, key=lambda m: m.time_ms):
                 ref = message_ref(m.conversation, m.id)
                 at = m.time_ms * 1000
-                row = self._db.execute("SELECT text FROM messages WHERE ref=?", (ref,)).fetchone()
+                row = s.scalars(select(MessageRow).where(MessageRow.ref == ref)).first()
                 if m.deleted:  # supprimé dans Teams : son texte part du cache (jamais remarqué s'il ne l'était pas)
                     if row is not None:
                         known += 1
-                        self._db.execute("UPDATE messages SET text='', acked=1 WHERE ref=?", (ref,))
+                        row.text, row.acked = "", True
                     continue
                 if row is not None:  # déjà connu (rejoué, ou retouché dans Teams : son texte suit)
                     known += 1
-                    if row[0] != m.text:
-                        self._db.execute("UPDATE messages SET text=? WHERE ref=?", (m.text, ref))
+                    if row.text != m.text:
+                        row.text = m.text
                     continue
                 new += 1
-                self._db.execute("INSERT INTO messages VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                                 (ref, m.conversation, m.id, m.author, m.author_id, at, m.text, int(m.own),
-                                  int(m.mentions_me), now, int(m.own)))
-                self._db.execute("INSERT OR IGNORE INTO conversations VALUES(?, '', 'other', 0)", (m.conversation,))
-                self._db.execute("UPDATE conversations SET last_at=MAX(last_at, ?) WHERE id=?", (at, m.conversation))
+                conv = fit(m.conversation, CONVERSATION_MAX)
+                s.add(MessageRow(ref=ref, conversation=conv, external_id=m.id, author=m.author, author_id=m.author_id,
+                                 author_key=fit(m.author_id.strip().lower(), AUTHOR_MAX), at=at, text=m.text,
+                                 own=m.own, mentions_me=m.mentions_me, received=now, acked=m.own))
+                found = self._conversation_row(s, seen, conv)
+                found.last_at = max(found.last_at or 0, at)
                 if m.own:
-                    replied[m.conversation] = max(replied.get(m.conversation, 0), at)
-                    settled.extend(self._answered_by_owner(m.conversation, at, m.text, now))
+                    replied[conv] = max(replied.get(conv, 0), at)
+                    settled.extend(self._answered_by_owner(s, conv, at, m.text, now))
             if new:
-                self._prune()
-            self._db.commit()
+                self._prune(s)
         return Stored(new=new, known=known, replied=tuple(sorted(replied.items())), settled=tuple(settled))
 
-    def _answered_by_owner(self, conversation: str, at: int, text: str, now: int) -> list[Settled]:
+    def _answered_by_owner(self, s: Session, conversation: str, at: int, text: str, now: int) -> list[Settled]:
         """La personne a écrit dans cette conversation : un brouillon posé (ou en file pour être posé) qui ressemble
         à ce qu'elle a écrit est parti ; sinon, il n'a pas servi. Un envoi encore en file (validation, autonome)
         n'est réglé que s'il lui ressemble (l'extension l'a envoyé, et son accusé s'est perdu)."""
         out: list[Settled] = []
-        rows = self._db.execute(f"SELECT {', '.join(_DRAFT)} FROM drafts WHERE conversation=? AND state IN (?, ?, ?)",
-                                (conversation, QUEUED, SENDING, PLACED)).fetchall()
-        for d in (self._draft(r) for r in rows):
+        rows = s.execute(select(*_DRAFT).where(DraftRow.conversation == conversation,
+                                               DraftRow.state.in_((QUEUED, SENDING, PLACED)))
+                         .order_by(DraftRow.id)).all()
+        for d in (_draft(r) for r in rows):
             since = (d.placed_at or d.updated) - CLOCK_SLACK
             if at < since:
                 continue
             similar = max(_ratio(text, d.final), _ratio(text, d.body)) >= SIMILAR
             if similar:
                 edited = _edited(text, d)
-                self._write(replace(d, state=GONE, sent_at=now, sent_text=text, edited=edited))
+                self._write(s, replace(d, state=GONE, sent_at=now, sent_text=text, edited=edited))
                 out.append(Settled(d.id, GONE, edited=edited))
             elif d.mode == DRAFT:
                 reason = "tu as écrit autre chose" if d.state == PLACED else "tu as répondu toi-même"
-                self._write(replace(d, state=UNUSED, reason=reason))
+                self._write(s, replace(d, state=UNUSED, reason=reason))
                 out.append(Settled(d.id, UNUSED, reason=reason))
         return out
 
-    def _prune(self) -> None:
-        self._db.execute(
-            "DELETE FROM messages WHERE rowid IN (SELECT rowid FROM (SELECT rowid, ROW_NUMBER() OVER "
-            "(PARTITION BY conversation ORDER BY at DESC) AS n FROM messages) WHERE n > ?)",
-            (KEEP_PER_CONVERSATION,))
+    @staticmethod
+    def _prune(s: Session) -> None:
+        """Au plus ``KEEP_PER_CONVERSATION`` messages par conversation, les plus récents. Les messages en trop se
+        lisent d'abord, puis partent (MariaDB refuse de supprimer d'une table en relisant la même dans la
+        condition)."""
+        ranked = select(MessageRow.id, func.row_number().over(
+            partition_by=MessageRow.conversation, order_by=(MessageRow.at.desc(), MessageRow.id.desc())
+        ).label("rank")).subquery()
+        beyond = s.scalars(select(ranked.c.id).where(ranked.c.rank > KEEP_PER_CONVERSATION)).all()
+        if beyond:
+            s.execute(delete(MessageRow).where(MessageRow.id.in_(beyond)))
 
     # ── ce qu'elle remarque ──
-    @staticmethod
-    def _message(r: tuple[Any, ...]) -> Message:
-        d = dict(zip(_MESSAGE, r, strict=True))
-        return Message(ref=d["ref"], conversation=d["conversation"], author=d["author"] or "",
-                       author_id=d["author_id"] or "", at=int(d["at"] or 0), text=d["text"] or "",
-                       own=bool(d["own"]), mentions_me=bool(d["mentions_me"]))
-
     async def fetch_new(self, limit: int) -> list[Message]:
-        with self._lock:
-            rows = self._db.execute(f"SELECT {', '.join(_MESSAGE)} FROM messages WHERE acked=0 AND own=0 "
-                                    "ORDER BY at, rowid LIMIT ?", (max(0, limit),)).fetchall()
-        return [self._message(r) for r in rows]
+        with self._lock, self._session() as s:
+            rows = s.execute(select(*_MESSAGE).where(MessageRow.acked == false(), MessageRow.own == false())
+                             .order_by(MessageRow.at, MessageRow.id).limit(max(0, limit))).all()
+        return [Message(*r) for r in rows]
 
     def ack(self, refs: Sequence[str]) -> None:
         if not refs:
             return
-        with self._lock:
-            self._db.executemany("UPDATE messages SET acked=1 WHERE ref=?", [(r,) for r in refs])
-            self._db.commit()
+        with self._lock, self._session.begin() as s:
+            s.execute(update(MessageRow).where(MessageRow.ref.in_(list(refs))).values(acked=True))
 
     def message(self, ref: str) -> Message | None:
-        with self._lock:
-            row = self._db.execute(f"SELECT {', '.join(_MESSAGE)} FROM messages WHERE ref=?", (ref,)).fetchone()
-        return self._message(row) if row else None
+        with self._lock, self._session() as s:
+            row = s.execute(select(*_MESSAGE).where(MessageRow.ref == ref)).first()
+        return Message(*row) if row else None
 
     def thread(self, conversation: str, limit: int, *, before: int = 0) -> list[Message]:
-        with self._lock:
-            rows = self._db.execute(f"SELECT {', '.join(_MESSAGE)} FROM messages WHERE conversation=? AND "
-                                    "(?=0 OR at<?) ORDER BY at DESC, rowid DESC LIMIT ?",
-                                    (conversation, before, before, max(0, limit))).fetchall()
-        return [self._message(r) for r in reversed(rows)]
+        where = [MessageRow.conversation == fit(conversation, CONVERSATION_MAX)]
+        if before:
+            where.append(MessageRow.at < before)
+        with self._lock, self._session() as s:
+            rows = s.execute(select(*_MESSAGE).where(*where).order_by(MessageRow.at.desc(), MessageRow.id.desc())
+                             .limit(max(0, limit))).all()
+        return [Message(*r) for r in reversed(rows)]
+
+    @staticmethod
+    def _conversation_in(s: Session, conversation: str) -> Conversation | None:
+        row = s.execute(select(*_CONVERSATION, _counted())
+                        .where(ConversationRow.id == fit(conversation, CONVERSATION_MAX))).first()
+        return _conversation(row) if row else None
 
     def conversation(self, conversation: str) -> Conversation | None:
-        with self._lock:
-            row = self._db.execute("SELECT c.id, c.title, c.kind, c.last_at, (SELECT COUNT(*) FROM messages m "
-                                   "WHERE m.conversation=c.id) FROM conversations c WHERE c.id=?",
-                                   (conversation,)).fetchone()
-        return Conversation(row[0], row[1] or "", row[2] or "other", int(row[3] or 0), int(row[4] or 0)) \
-            if row else None
+        with self._lock, self._session() as s:
+            return self._conversation_in(s, conversation)
 
     def conversations(self, limit: int, *, text: str = "") -> list[Conversation]:
-        like = _like(text.strip().lower()) if text.strip() else ""
-        with self._lock:
-            rows = self._db.execute("SELECT c.id, c.title, c.kind, c.last_at, (SELECT COUNT(*) FROM messages m "
-                                    "WHERE m.conversation=c.id) FROM conversations c WHERE c.last_at>0 AND "
-                                    "(?='' OR lower(c.title) LIKE ? ESCAPE '\\' OR lower(c.id) LIKE ? ESCAPE '\\') "
-                                    "ORDER BY c.last_at DESC LIMIT ?", (like, like, like, max(0, limit))).fetchall()
-        return [Conversation(r[0], r[1] or "", r[2] or "other", int(r[3] or 0), int(r[4] or 0)) for r in rows]
+        """Les conversations où quelque chose a été écrit, la plus récente d'abord ; ``text`` cherché dans le titre
+        et l'identifiant, casse et accents ignorés (les deux côtés repliés, comparés par ``instr`` : pareil sur les
+        deux moteurs, ``%`` et ``_`` n'y sont que des caractères)."""
+        where = [ConversationRow.last_at > 0]
+        if folded := fold_text(text.strip()):
+            where.append(or_(func.instr(ConversationRow.title_fold, folded) > 0,
+                             func.instr(ConversationRow.id_fold, folded) > 0))
+        with self._lock, self._session() as s:
+            rows = s.execute(select(*_CONVERSATION, _counted()).where(*where)
+                             .order_by(ConversationRow.last_at.desc(), ConversationRow.id).limit(max(0, limit))).all()
+        return [_conversation(r) for r in rows]
+
+    def _title_in(self, s: Session, conversation: str) -> str:
+        found = self._conversation_in(s, conversation)
+        if found is not None and found.title:
+            return found.title
+        name = s.scalar(select(MessageRow.author)
+                        .where(MessageRow.conversation == fit(conversation, CONVERSATION_MAX),
+                               MessageRow.own == false(), MessageRow.author != "")
+                        .order_by(MessageRow.at.desc(), MessageRow.id.desc()).limit(1))
+        return str(name) if name else ""
 
     def title(self, conversation: str) -> str:
         """Le nom d'une conversation : celui de Teams, sinon (un tête-à-tête) l'autre personne."""
-        found = self.conversation(conversation)
-        if found is not None and found.title:
-            return found.title
-        with self._lock:
-            row = self._db.execute("SELECT author FROM messages WHERE conversation=? AND own=0 AND author<>'' "
-                                   "ORDER BY at DESC LIMIT 1", (conversation,)).fetchone()
-        return str(row[0]) if row else ""
+        with self._lock, self._session() as s:
+            return self._title_in(s, conversation)
 
     # ── ses brouillons ──
     @staticmethod
-    def _draft(r: tuple[Any, ...]) -> Draft:
-        d = dict(zip(_DRAFT, r, strict=True))
-        return Draft(id=d["id"], conversation=d["conversation"] or "", body=d["body"] or "",
-                     reply_to=d["reply_to"] or "", author=d["author"] or "", created=int(d["created"] or 0),
-                     updated=int(d["updated"] or 0), state=d["state"] or WRITTEN, mode=d["mode"] or "",
-                     digest=d["digest"] or "", final=d["final"] or "", expires_at=int(d["expires_at"] or 0),
-                     placed_at=int(d["placed_at"] or 0), sent_at=int(d["sent_at"] or 0),
-                     sent_text=d["sent_text"] or "", edited=bool(d["edited"]), edited_by=d["edited_by"] or "",
-                     reason=d["reason"] or "")
-
-    def _write(self, d: Draft) -> Draft:
-        self._db.execute(f"INSERT OR REPLACE INTO drafts({', '.join(_DRAFT)}) VALUES({', '.join('?' * len(_DRAFT))})",
-                         (d.id, d.conversation, d.body, d.reply_to, d.author, d.created, d.updated, d.state, d.mode,
-                          d.digest, d.final, d.expires_at, d.placed_at, d.sent_at, d.sent_text, int(d.edited),
-                          d.edited_by, d.reason))
+    def _write(s: Session, d: Draft) -> Draft:
+        """Écrit un brouillon tout entier : la ligne d'avant part, la nouvelle prend le numéro suivant (l'ordre de la
+        dernière écriture, qui départage deux brouillons du même instant)."""
+        key = fit(d.id, REF_MAX)
+        s.execute(delete(DraftRow).where(DraftRow.draft_id == key))
+        s.add(DraftRow(draft_id=key, conversation=fit(d.conversation, CONVERSATION_MAX), body=d.body,
+                       reply_to=d.reply_to, author=d.author, created=d.created, updated=d.updated, state=d.state,
+                       mode=d.mode, digest=d.digest, final=d.final, expires_at=d.expires_at, placed_at=d.placed_at,
+                       sent_at=d.sent_at, sent_text=d.sent_text, edited=d.edited, edited_by=d.edited_by,
+                       reason=d.reason))
         return d
 
     def save_draft(self, d: Draft) -> Draft:
         now = self._now()
         if not d.id:
             d = replace(d, id=f"t{uuid.uuid4().hex[:12]}", created=now)
-        with self._lock:
-            d = self._write(replace(d, updated=now))
-            self._db.commit()
-        return d
+        with self._lock, self._session.begin() as s:
+            return self._write(s, replace(d, updated=now))
+
+    @staticmethod
+    def _draft_in(s: Session, draft_id: str) -> Draft | None:
+        row = s.execute(select(*_DRAFT).where(DraftRow.draft_id == fit(draft_id, REF_MAX))).first()
+        return _draft(row) if row else None
 
     def draft(self, draft_id: str) -> Draft | None:
-        with self._lock:
-            row = self._db.execute(f"SELECT {', '.join(_DRAFT)} FROM drafts WHERE id=?", (draft_id,)).fetchone()
-        return self._draft(row) if row else None
+        with self._lock, self._session() as s:
+            return self._draft_in(s, draft_id)
 
     def drafts(self, limit: int, *, state: str = "") -> list[Draft]:
-        with self._lock:
-            rows = self._db.execute(f"SELECT {', '.join(_DRAFT)} FROM drafts WHERE ?='' OR state=? "
-                                    "ORDER BY updated DESC, rowid DESC LIMIT ?", (state, state, max(0, limit))).fetchall()
-        return [self._draft(r) for r in rows]
+        where = [DraftRow.state == state] if state else []
+        with self._lock, self._session() as s:
+            rows = s.execute(select(*_DRAFT).where(*where).order_by(DraftRow.updated.desc(), DraftRow.id.desc())
+                             .limit(max(0, limit))).all()
+        return [_draft(r) for r in rows]
 
     def discard_draft(self, draft_id: str) -> None:
-        with self._lock:
-            found = self.draft(draft_id)
+        with self._lock, self._session.begin() as s:
+            found = self._draft_in(s, draft_id)
             if found is not None and found.state == WRITTEN:
-                self._write(replace(found, state=DISCARDED, updated=self._now()))
-                self._db.commit()
+                self._write(s, replace(found, state=DISCARDED, updated=self._now()))
 
-    def _final(self, d: Draft, her: str) -> str:
-        signature = self.voice().signature.replace(HER, her.strip() or "son IA")
+    def _final(self, s: Session, d: Draft, her: str) -> str:
+        signature = self._voice_in(s).signature.replace(HER, her.strip() or "son IA")
         return f"{d.body.strip()}\n\n{signature}" if signature else d.body.strip()
 
-    def preview(self, draft_id: str, *, her: str = "") -> Preview | None:
-        d = self.draft(draft_id)
+    def _preview_in(self, s: Session, draft_id: str, her: str) -> Preview | None:
+        d = self._draft_in(s, draft_id)
         if d is None:
             return None
-        text = d.final if d.state != WRITTEN and d.final else self._final(d, her)
+        text = d.final if d.state != WRITTEN and d.final else self._final(s, d, her)
         digest = hashlib.sha256(f"{d.conversation}\n{text}".encode()).hexdigest()[:32]
         blocked = ""
         if d.state != WRITTEN:
@@ -339,55 +393,57 @@ class TeamsStore:
             blocked = "il reste des passages [À COMPLÉTER] à remplir"
         elif not d.body.strip():
             blocked = "il est vide"
-        return Preview(d.conversation, self.title(d.conversation), text, digest, blocked)
+        return Preview(d.conversation, self._title_in(s, d.conversation), text, digest, blocked)
+
+    def preview(self, draft_id: str, *, her: str = "") -> Preview | None:
+        with self._lock, self._session() as s:
+            return self._preview_in(s, draft_id, her)
 
     # ── la file ──
     def enqueue(self, draft_id: str, *, mode: str, digest: str, expires_at: int, now: int, her: str = "") -> str:
-        with self._lock:
-            d = self.draft(draft_id)
+        with self._lock, self._session.begin() as s:
+            d = self._draft_in(s, draft_id)
             if d is None:
                 return "ce brouillon n'existe plus"
             if d.state in (QUEUED, PLACED, GONE) and d.digest == digest:
                 return ""  # déjà fait : rejoué après un arrêt
-            shown = self.preview(draft_id, her=her)
+            shown = self._preview_in(s, draft_id, her)
             if shown is None or d.state != WRITTEN:
                 return "il n'est plus à envoyer"
             if digest and shown.digest != digest:
                 return "il a changé depuis qu'on l'a montré"
             if shown.blocked and (mode == SEND or not to_fill(d.body)):
                 return shown.blocked  # posé dans Teams, un « à compléter » se remplit ; envoyé, jamais
-            self._write(replace(d, state=QUEUED, mode=mode, digest=shown.digest, final=shown.text,
-                                expires_at=expires_at, updated=now))
-            self._db.commit()
+            self._write(s, replace(d, state=QUEUED, mode=mode, digest=shown.digest, final=shown.text,
+                                   expires_at=expires_at, updated=now))
         return ""
 
     def outbox(self, now: int) -> list[OutboxItem]:
-        with self._lock:
-            # un envoi réservé n'est plus offert : le navigateur qui l'a réservé l'envoie, aucun autre
-            rows = self._db.execute(f"SELECT {', '.join(_DRAFT)} FROM drafts WHERE state IN (?, ?) "
-                                    "ORDER BY updated, rowid", (QUEUED, PLACED)).fetchall()
         out = []
-        for d in (self._draft(r) for r in rows):
-            if d.expires_at and d.expires_at <= now:
-                continue
-            found = self.conversation(d.conversation)
-            out.append(OutboxItem(d.id, d.conversation, self.title(d.conversation),
-                                  found.kind if found is not None else "other", d.mode,
-                                  "placed" if d.state == PLACED else "queued", d.final, d.updated // 1000,
-                                  d.expires_at // 1000))
+        with self._lock, self._session() as s:
+            # un envoi réservé n'est plus offert : le navigateur qui l'a réservé l'envoie, aucun autre
+            rows = s.execute(select(*_DRAFT).where(DraftRow.state.in_((QUEUED, PLACED)))
+                             .order_by(DraftRow.updated, DraftRow.id)).all()
+            for d in (_draft(r) for r in rows):
+                if d.expires_at and d.expires_at <= now:
+                    continue
+                found = self._conversation_in(s, d.conversation)
+                out.append(OutboxItem(d.id, d.conversation, self._title_in(s, d.conversation),
+                                      found.kind if found is not None else "other", d.mode,
+                                      "placed" if d.state == PLACED else "queued", d.final, d.updated // 1000,
+                                      d.expires_at // 1000))
         return out
 
     def settle(self, draft_id: str, result: str, *, now: int, text: str = "", reason: str = "") \
             -> tuple[str, Settled | None]:
-        with self._lock:
-            d = self.draft(draft_id)
+        with self._lock, self._session.begin() as s:
+            d = self._draft_in(s, draft_id)
             if d is None or (d.state not in (*OPEN_STATES, GONE, FAILED, UNUSED)):
                 return MISSING, None
             if result == "sending":
                 if d.state != QUEUED or d.mode != SEND:
                     return CONFLICT, None  # déjà réservé (ailleurs, ou par un essai d'avant), réglé, ou à poser
-                self._write(replace(d, state=SENDING, updated=now))
-                self._db.commit()
+                self._write(s, replace(d, state=SENDING, updated=now))
                 return ACCEPTED, None
             if result == "placed":
                 if d.state == PLACED:
@@ -395,7 +451,7 @@ class TeamsStore:
                 if d.state != QUEUED or d.mode != DRAFT:
                     return CONFLICT, None
                 done = Settled(d.id, PLACED)
-                self._write(replace(d, state=PLACED, placed_at=now))
+                self._write(s, replace(d, state=PLACED, placed_at=now))
             elif result == "sent":
                 if d.state == GONE:
                     return ACCEPTED, None
@@ -404,7 +460,7 @@ class TeamsStore:
                     return CONFLICT, None
                 edited = bool(text) and _edited(text, d)
                 done = Settled(d.id, GONE, edited=edited)
-                self._write(replace(d, state=GONE, sent_at=now, sent_text=text or d.final, edited=edited))
+                self._write(s, replace(d, state=GONE, sent_at=now, sent_text=text or d.final, edited=edited))
             elif result == "failed":
                 if d.state == FAILED:
                     return ACCEPTED, None
@@ -412,23 +468,22 @@ class TeamsStore:
                     return CONFLICT, None
                 why = reason.strip()[:300] or "l'extension n'a pas pu le faire"
                 done = Settled(d.id, FAILED, reason=why)
-                self._write(replace(d, state=FAILED, reason=why))
+                self._write(s, replace(d, state=FAILED, reason=why))
             elif result == "expired":
                 if d.state not in OPEN_STATES:
                     return ACCEPTED, None
                 if d.state == SENDING:
                     done = Settled(d.id, FAILED, reason="incertain : l'envoi a commencé sans qu'on sache s'il est parti "
                                                          "(à vérifier dans Teams)")
-                    self._write(replace(d, state=FAILED, reason=done.reason))
+                    self._write(s, replace(d, state=FAILED, reason=done.reason))
                 elif d.mode == SEND:
                     done = Settled(d.id, FAILED, reason="jamais envoyé : l'extension ne l'a pas relevé à temps")
-                    self._write(replace(d, state=FAILED, reason=done.reason))
+                    self._write(s, replace(d, state=FAILED, reason=done.reason))
                 else:
                     done = Settled(d.id, UNUSED, reason="personne ne l'a envoyé à temps")
-                    self._write(replace(d, state=UNUSED, reason=done.reason))
+                    self._write(s, replace(d, state=UNUSED, reason=done.reason))
             else:
                 return CONFLICT, None
-            self._db.commit()
         return ACCEPTED, done
 
     # ── l'oubli ──
@@ -440,22 +495,25 @@ class TeamsStore:
         author = subject[len("teams:"):].strip().lower()
         if not author:
             return 0
-        with self._lock:
-            convs = [r[0] for r in self._db.execute(
-                "SELECT DISTINCT m.conversation FROM messages m LEFT JOIN conversations c ON c.id=m.conversation "
-                "WHERE lower(m.author_id)=? AND (c.kind='dm' OR m.conversation LIKE '%@unq.gbl.spaces')",
-                (author,)).fetchall()]
+        key = fit(author, AUTHOR_MAX)
+        with self._lock, self._session.begin() as s:
+            # ses tête-à-tête : le genre que Teams leur donne, ou leur identifiant (le suffixe comparé ici, en
+            # minuscules, pareil sur les deux moteurs)
+            pairs = s.execute(select(MessageRow.conversation, ConversationRow.kind).distinct()
+                              .join_from(MessageRow, ConversationRow, ConversationRow.id == MessageRow.conversation,
+                                         isouter=True)
+                              .where(MessageRow.author_key == key)).all()
+            convs = sorted({conv for conv, kind in pairs if kind == "dm" or conv.lower().endswith(_DM_SUFFIX)})
             # les réponses à ses messages, ailleurs (un groupe) : elles citent ce qu'il a écrit
-            n = self._db.execute("DELETE FROM drafts WHERE reply_to IN (SELECT ref FROM messages WHERE "
-                                 "lower(author_id)=?)", (author,)).rowcount
-            n += self._db.execute("DELETE FROM messages WHERE lower(author_id)=?", (author,)).rowcount
+            n = _count(s.execute(delete(DraftRow).where(
+                DraftRow.reply_to.in_(select(MessageRow.ref).where(MessageRow.author_key == key)))))
+            n += _count(s.execute(delete(MessageRow).where(MessageRow.author_key == key)))
             for conv in convs:
-                n += self._db.execute("DELETE FROM messages WHERE conversation=?", (conv,)).rowcount
-                n += self._db.execute("DELETE FROM drafts WHERE conversation=?", (conv,)).rowcount
-                self._db.execute("DELETE FROM conversations WHERE id=?", (conv,))
-            self._db.commit()
+                n += _count(s.execute(delete(MessageRow).where(MessageRow.conversation == conv)))
+                n += _count(s.execute(delete(DraftRow).where(DraftRow.conversation == conv)))
+                s.execute(delete(ConversationRow).where(ConversationRow.id == conv))
         return n
 
     def close(self) -> None:
         with self._lock:
-            self._db.close()
+            self._engine.dispose()

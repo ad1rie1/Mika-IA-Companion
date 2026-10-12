@@ -15,7 +15,9 @@ from mika.adapters.llm.gateway import Gateway
 from mika.adapters.system import RealClock
 from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import WebConfig
-from mika.app.server import build
+from mika.app.server import PERSONA, build
+from mika.faculties.affect.params import derive as affect_derive
+from mika.faculties.self.persona import load as load_persona
 from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.llm import LLMResponse
 from mika.vocab.affect import Emotion
@@ -178,7 +180,10 @@ def test_ws_conversation_round_trip(world):
         speech = frames[-1]
         assert speech["person_id"] == "user_1"  # l'indice du client est ignoré sur une session
         assert "[EMOTION" not in speech["text"] and "[SIGH]" in speech["text"]
-        assert speech["emotion"] == "happy" and speech["emotion_intensity"] == 0.6
+        # son visage tel qu'elle le laisse voir, pas la balise brute (ADR 0102) : la persona livrée est un peu moins
+        # expressive que le milieu
+        shown = round(0.6 * affect_derive(load_persona(PERSONA).temperament).face_expressiveness, 2)
+        assert speech["emotion"] == "happy" and speech["emotion_intensity"] == shown < 0.6
         assert isinstance(speech["emotion_blend"], list) and speech["emotion_blend"][0]["emotion"] == "happy"
         assert set(speech["voice_profile"]) == {"pitch", "rate", "gain"}
         assert speech["voice_persona"] == "speaking" and speech["speak"] is True

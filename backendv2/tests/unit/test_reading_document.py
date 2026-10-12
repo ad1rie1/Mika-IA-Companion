@@ -80,21 +80,15 @@ def test_apps_keep_the_typed_language_without_raw_html():
         encode([Prose("x", html="<p>x</p>")])
 
 
-def test_mail_cache_migrates_without_losing_messages_and_keeps_html(tmp_path):
-    import sqlite3
+def test_mail_cache_keeps_html_and_knows_which_mails_lack_it(tmp_path):
     from dataclasses import replace
 
     from mika.adapters.mail.cache import MailCache
     from mika.ports.mail import Mail
 
-    path = tmp_path / "mail.db"
-    cache = MailCache(path)
+    cache = MailCache(tmp_path / "mail.db")
     original = Mail("<one@x>", "Alice", "alice@x", "Sujet", 1, "Bonjour", account="pro", folder="INBOX", has_html=True)
-    cache.store(original, 3)
-    cache.close()
-    with sqlite3.connect(path) as db:
-        db.execute("ALTER TABLE messages DROP COLUMN html")  # état du schéma précédent
-    cache = MailCache(path)
+    cache.store(original, 3)  # un mail HTML gardé sans sa source
     # la référence attribuée par le cache est la forme historique (les journaux restent valables)
     assert cache.one(original.ref) == replace(original, key=original.ref)
     assert cache.missing_html("pro", "INBOX", 25) == [3]

@@ -53,7 +53,7 @@ from mika.adapters.store_sqlite import SqliteStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
 from mika.adapters.web.accounts import Accounts, password_problems
-from mika.app import backup, composition, datadir
+from mika.app import backup, composition, datadir, schema
 from mika.app import persona as persona_file
 from mika.app.composition import faculties, for_simulation
 from mika.app.paths import PERSONA
@@ -110,6 +110,7 @@ def ask_password(ask: Callable[[str], str] | None = None) -> str | None:
 
 def _mind(data: Path, *, snapshot_every: int = 500) -> Mind:
     datadir.hold(data)  # le journal ne s'écrit qu'à un seul à la fois (serveur arrêté)
+    schema.migrate_data(data)
     store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
     return Mind(Registry([RUNTIME, *faculties()]), store, RealClock(), RandomIdGen(), snapshot_every=snapshot_every)
 
@@ -161,6 +162,7 @@ async def rebuild(data: Path, owners: list[str]) -> dict[str, object]:
 async def _offline(data: Path, *, vectors: bool = False) -> Kernel:
     """Un noyau relu, rien de vivant : aucun processus, aucun modèle (serveur arrêté)."""
     datadir.hold(data)  # serveur arrêté : une seule écriture à la fois
+    schema.migrate_data(data)
     store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
     ports: dict[str, object] = {}
     if vectors:  # le modèle ne se charge qu'à un plongement : jamais ici
@@ -294,6 +296,7 @@ async def mcp_command(settings: Settings, args: argparse.Namespace) -> dict[str,
 
 
 async def _with_settings(data: Path, fn):  # type: ignore[no-untyped-def]
+    schema.migrate_data(data)
     store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
     await store.open()
     try:

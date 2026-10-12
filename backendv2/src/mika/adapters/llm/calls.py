@@ -13,8 +13,12 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import Index, delete, func, insert, select
+from sqlalchemy.orm import Mapped, mapped_column
+
 from mika.adapters.llm.gateway import LLMTrace
 from mika.kernel.clock import DAY
+from mika.ports.sql import Id, Key, LongText, ViewsBase, table_args
 
 log = logging.getLogger("mika.llm")
 
@@ -23,9 +27,34 @@ KEEP_DAYS = 30
 _PRUNE_EVERY = 500
 _COLUMNS = ("at", "role", "backend", "model", "lane", "priority", "latency_us", "wait_us", "input_tokens",
             "output_tokens", "cache_read", "cache_write", "cost_usd", "outcome", "call_id", "correlation")
-_TEXT = frozenset({"role", "backend", "model", "lane", "outcome", "call_id", "correlation"})
-#: colonnes ajoutées après la création de la table : ajoutées en place si absentes
-_ADDED = ("correlation",)
+
+
+class CallRow(ViewsBase):
+    """Un appel de modèle : quand, pour quel rôle, chez qui, ce qu'il a coûté, comment il a fini."""
+
+    __tablename__ = TABLE
+    __table_args__ = table_args(Index(f"{TABLE}_at", "at"), Index(f"{TABLE}_correlation", "correlation"),
+                                Index(f"{TABLE}_call_id", "call_id"))
+    id: Mapped[int] = mapped_column(Id, primary_key=True)
+    at: Mapped[int]
+    role: Mapped[str] = mapped_column(LongText)
+    backend: Mapped[str] = mapped_column(LongText)
+    model: Mapped[str] = mapped_column(LongText)
+    lane: Mapped[str] = mapped_column(LongText)
+    priority: Mapped[int]
+    latency_us: Mapped[int]
+    wait_us: Mapped[int]
+    input_tokens: Mapped[int]
+    output_tokens: Mapped[int]
+    cache_read: Mapped[int]
+    cache_write: Mapped[int]
+    cost_usd: Mapped[float]
+    outcome: Mapped[str] = mapped_column(LongText)
+    call_id: Mapped[str] = mapped_column(Key(255))
+    correlation: Mapped[str] = mapped_column(Key(255), default="")
+
+
+_FIELDS = tuple(getattr(CallRow, c) for c in _COLUMNS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,19 +87,7 @@ class CallLog:
         self._ready = False
 
     async def open(self) -> None:
-        cols = ", ".join(f"{c} {'TEXT' if c in _TEXT else 'REAL' if c == 'cost_usd' else 'INTEGER'}" for c in _COLUMNS)
-
-        def create(sql: Any) -> None:
-            sql.execute(f"CREATE TABLE IF NOT EXISTS {TABLE}(id INTEGER PRIMARY KEY, {cols})")
-            present = {row[1] for row in sql.query(f"PRAGMA table_info({TABLE})")}
-            for column in _ADDED:
-                if column not in present:  # un registre d'avant la colonne : complété, pas recréé
-                    sql.execute(f"ALTER TABLE {TABLE} ADD COLUMN {column} TEXT")
-            sql.execute(f"CREATE INDEX IF NOT EXISTS {TABLE}_at ON {TABLE}(at)")
-            sql.execute(f"CREATE INDEX IF NOT EXISTS {TABLE}_correlation ON {TABLE}(correlation)")
-            sql.execute(f"CREATE INDEX IF NOT EXISTS {TABLE}_call_id ON {TABLE}(call_id)")
-
-        await self.store.run_views(create)
+        await self.store.run_views(lambda sql: sql.create(CallRow))
         self._ready = True
 
     def record(self, tr: LLMTrace) -> None:
@@ -82,16 +99,16 @@ class CallLog:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        values = tuple(getattr(tr, c) for c in _COLUMNS)
+        values = {c: getattr(tr, c) for c in _COLUMNS}
         self._since_prune += 1
         prune_before = tr.at - self.keep_us if self._since_prune >= _PRUNE_EVERY else None
         if prune_before is not None:
             self._since_prune = 0
 
         def write(sql: Any) -> None:
-            sql.execute(f"INSERT INTO {TABLE}({', '.join(_COLUMNS)}) VALUES({', '.join('?' * len(_COLUMNS))})", values)
+            sql.execute(insert(CallRow).values(**values))
             if prune_before is not None:
-                sql.execute(f"DELETE FROM {TABLE} WHERE at < ?", (prune_before,))
+                sql.execute(delete(CallRow).where(CallRow.at < prune_before))
 
         task = loop.create_task(self.store.run_views(write))
         self._pending.add(task)
@@ -112,28 +129,30 @@ class CallLog:
 
     async def prune(self, now: int) -> int:
         def run(sql: Any) -> int:
-            return int(sql.execute(f"DELETE FROM {TABLE} WHERE at < ?", (now - self.keep_us,)).rowcount or 0)
+            return int(sql.execute(delete(CallRow).where(CallRow.at < now - self.keep_us)).rowcount or 0)
 
         return int(await self.store.run_views(run))
 
     def recent(self, limit: int = 100, *, role: str = "", offset: int = 0) -> list[LLMTrace]:
         if not self._ready:
             return []
-        where, args = ("WHERE role=?", (role,)) if role else ("", ())
-        rows = self.store.query_views(
-            f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} {where} ORDER BY at DESC, id DESC LIMIT ? OFFSET ?",
-            (*args, max(1, min(limit, 1000)), max(0, offset)))
+        query = select(*_FIELDS)
+        if role:
+            query = query.where(CallRow.role == role)
+        rows = self.store.query_views(query.order_by(CallRow.at.desc(), CallRow.id.desc())
+                                      .limit(max(1, min(limit, 1000))).offset(max(0, offset)))
         return [_trace(r) for r in rows]
 
     def count(self, *, role: str = "", correlation: str = "") -> int:
         """Combien d'appels le registre garde (pour paginer)."""
         if not self._ready:
             return 0
-        clauses = [("role=?", role)] if role else []
+        query = select(func.count()).select_from(CallRow)
+        if role:
+            query = query.where(CallRow.role == role)
         if correlation:
-            clauses.append(("correlation=?", correlation))
-        where, args = ("WHERE " + " AND ".join(c for c, _ in clauses), tuple(v for _, v in clauses)) if clauses else ("", ())
-        rows = self.store.query_views(f"SELECT COUNT(*) FROM {TABLE} {where}", args)
+            query = query.where(CallRow.correlation == correlation)
+        rows = self.store.query_views(query)
         return int(rows[0][0]) if rows else 0
 
     def for_correlation(self, correlation: str, *, limit: int = 200, offset: int = 0) -> list[LLMTrace]:
@@ -142,8 +161,8 @@ class CallLog:
         if not self._ready or not correlation:
             return []
         rows = self.store.query_views(
-            f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} WHERE correlation=? ORDER BY at, id LIMIT ? OFFSET ?",
-            (correlation, max(1, min(limit, 1000)), max(0, offset)))
+            select(*_FIELDS).where(CallRow.correlation == correlation).order_by(CallRow.at, CallRow.id)
+            .limit(max(1, min(limit, 1000))).offset(max(0, offset)))
         return [_trace(r) for r in rows]
 
     def by_call_id(self, call_id: str) -> LLMTrace | None:
@@ -153,8 +172,7 @@ class CallLog:
         if not self._ready or not call_id:
             return None
         rows = self.store.query_views(
-            f"SELECT {', '.join(_COLUMNS)} FROM {TABLE} WHERE call_id=? ORDER BY at DESC, id DESC LIMIT 1",
-            (call_id,))
+            select(*_FIELDS).where(CallRow.call_id == call_id).order_by(CallRow.at.desc(), CallRow.id.desc()).limit(1))
         return _trace(rows[0]) if rows else None
 
     def usage(self, since: int, *, by: str = "role", day_of: Any = None) -> list[Usage]:
@@ -163,8 +181,9 @@ class CallLog:
         if not self._ready:
             return []
         rows = self.store.query_views(
-            f"SELECT at, role, backend, outcome, input_tokens, output_tokens, cache_read, cache_write, cost_usd, "
-            f"latency_us, model FROM {TABLE} WHERE at >= ? ORDER BY at", (since,))
+            select(CallRow.at, CallRow.role, CallRow.backend, CallRow.outcome, CallRow.input_tokens,
+                   CallRow.output_tokens, CallRow.cache_read, CallRow.cache_write, CallRow.cost_usd, CallRow.latency_us,
+                   CallRow.model).where(CallRow.at >= since).order_by(CallRow.at))
         acc: dict[str, list[float]] = {}
         for at, role, backend, outcome, i, o, cr, cw, cost, lat, model in rows:
             key = day_of(at) if by == "day" and day_of is not None else backend if by == "backend" else \
@@ -183,6 +202,4 @@ class CallLog:
 
 
 def _trace(row: tuple[Any, ...]) -> LLMTrace:
-    fields = dict(zip(_COLUMNS, row, strict=True))
-    fields["correlation"] = fields["correlation"] or ""  # les lignes d'avant la colonne
-    return LLMTrace(**fields)
+    return LLMTrace(**dict(zip(_COLUMNS, row, strict=True)))

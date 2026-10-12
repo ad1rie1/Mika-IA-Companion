@@ -55,15 +55,18 @@ Quatre endroits faisaient leurs migrations à la main (« si la colonne manque, 
      des apps de la Forge — reconstructible), `mika_mail`, `mika_feeds`, `mika_teams`, et un `forge_<app>` par app ;
    - comptes `mika` (le cœur), `mika_forge_admin` (création d'utilisateurs, droits limités aux bases `forge\_%`), et
      un compte par app de la Forge ;
-   - sur MariaDB, une seule transaction couvre `mika_mind` et `mika_views` ; sur SQLite, chaque schéma est un fichier,
-     attaché sous son nom à la connexion qui en a besoin (`ATTACH … AS mika_mind`), si bien que les noms qualifiés
-     sont les mêmes partout ;
+   - sur SQLite, chaque schéma est un fichier, avec ses connexions (comme avant) ; sur MariaDB, une même transaction
+     pourra couvrir `mika_mind` et `mika_views` ;
    - chaque base garde son écrivain : le magasin son fil unique, le courrier, les flux et Teams les leurs.
 
 4. *Types et collation, déclarés dans les modèles.* `BIGINT` pour les instants, les `seq` et les identifiants ;
-   `VARCHAR(n)` pour toute clé ou colonne indexée ; `LONGTEXT` pour les charges du journal, les contenus, les
-   instantanés et les corps de mail ; `LONGBLOB` pour le message brut d'un envoi. Collation `utf8mb4_nopad_bin` par
-   défaut (le `BINARY` de SQLite) ; `utf8mb4_uca1400_ai_ci` seulement sur la colonne de recherche du courrier.
+   `VARCHAR(n)` pour toute clé ou colonne indexée (`Key(n)`) ; `LONGTEXT` pour tout autre texte (les charges du
+   journal, les contenus, les instantanés, les corps de mail) ; `LONGBLOB` pour les octets. La borne d'une `Key` est
+   vérifiée par le code à chaque écriture, sur les deux moteurs (`KeyTooLong`) — SQLite ne borne rien, MariaDB
+   refuse ; une recherche avec une valeur plus longue ne lève pas, elle ne trouve rien, comme sous MariaDB. Une
+   valeur venue de l'extérieur qui peut dépasser sa borne est coupée ou remplacée par une empreinte avant d'être
+   écrite. Collation `utf8mb4_nopad_bin` partout (le `BINARY` de SQLite) : une recherche insensible à la casse et aux
+   accents compare un texte replié à l'écriture (`fold_text`), en binaire, pareil sur les deux moteurs.
    `sql_mode` strict (une valeur trop longue est refusée, jamais coupée), `time_zone='+00:00'`,
    `max_allowed_packet` à 64 Mo, `innodb_flush_log_at_trx_commit=1` (l'équivalent de `synchronous=FULL`).
 
@@ -75,15 +78,21 @@ Quatre endroits faisaient leurs migrations à la main (« si la colonne manque, 
    adresses) ; `||` devient `concat()` ; `rowid` devient un `id` déclaré ; l'élagage des instantanés lit d'abord son
    seuil, puis supprime en dessous. Un test d'architecture relit le SQL écrit en clair (par l'AST, jamais par le texte
    du source) et refuse `INSERT OR`, `ON CONFLICT`, `json_each`, `json_extract`, `||`, `rowid`, `PRAGMA`,
-   `sqlite_master`, `WITHOUT ROWID` et `MAX`/`MIN` à deux arguments hors du module des aides.
+   `sqlite_master`, `WITHOUT ROWID`, `LIMIT -1` et `MAX`/`MIN` à deux arguments, ainsi que toute fonction Python
+   enregistrée dans un moteur (`tests/architecture/test_sql_portable.py`) ; sa liste de modules s'allonge à chaque
+   lot jusqu'à tout `src`. Pendant la transition, le SQL encore écrit en clair passe au curseur du pilote (paramètres
+   `?`, que SQLite et le pilote MariaDB comprennent tous deux).
 
 6. *Les migrations : Alembic pour ce qui est stable, la reconstruction pour ce qui dérive du journal.* Alembic gère
    les tables du journal, de la file de sortie, de `meta`, des comptes, des réglages, des appels de modèle, du
    courrier, des flux et de Teams. Une seule révision initiale, générée depuis les modèles : rien d'ancien n'est
    reconnu. Les migrations faites à la main et la reprise de l'ancien cache du courrier sont supprimées. Au
-   démarrage, sous le verrou du dossier de données, le serveur passe le schéma à `head` ; s'il n'y arrive pas, il ne
-   démarre pas. Les tables des projections (T0 et différées) sont exclues de l'autogénération : leur schéma évolue,
-   comme avant, par leur version et une reconstruction depuis le journal.
+   démarrage (`mika.app.schema.migrate_data`), le serveur et les commandes qui écrivent passent chaque base à `head`
+   ; s'ils n'y arrivent pas, ils ne démarrent pas. Une base née des entités seules (les tests et le simulateur créent
+   leurs tables par `Sql.create`) est complétée par elles puis marquée à `head`. Les tables qu'on ne déclare pas (le
+   journal tant qu'il n'est pas déclaré, les projections T0 et différées) sont ignorées par les révisions : le schéma
+   d'une projection évolue, comme avant, par sa version et une reconstruction depuis le journal. Une révision
+   s'écrit par `python -m mika.app.schema revision <base> "<message>"` et se relit.
 
 7. *La reconstruction T0 bascule par `RENAME`.* `ensure_t0` ne fait plus `DROP` + `CREATE` + rejeu dans une même
    transaction (MariaDB valide chaque DDL à part). Il construit la table neuve à côté, la remplit, puis bascule
@@ -136,10 +145,11 @@ Quatre endroits faisaient leurs migrations à la main (« si la colonne manque, 
     remettre un lot, sous la borne mémoire, jamais en parallèle d'une autre suite.
 
 12. *L'ordre de travail.* Chaque lot garde la suite verte sur SQLite ; MariaDB n'est, à la fin, qu'une adresse.
-    1. modèles et Alembic sur SQLite : comptes, réglages, appels de modèle, courrier, flux, Teams ; migrations à la
-       main supprimées ;
-    2. journal et projections en SQLAlchemy ; aides de dialecte ; colonnes calculées du courrier ; test
-       d'architecture du SQL écrit en clair ;
+    1. les fondations (`ports/sql.py`, `adapters/database.py`, le magasin sur des connexions SQLAlchemy), puis
+       entités et Alembic sur SQLite : comptes, réglages, appels de modèle, traces, séries, courrier (ses colonnes
+       calculées), flux, Teams ; migrations à la main supprimées ; test d'architecture du SQL écrit en clair ;
+    2. le journal, les projections, les facultés et la console en SQLAlchemy ; le test d'architecture sur tout
+       `src` ;
     3. moteur MariaDB : schémas, comptes, bascule par `RENAME`, voie de tests `mariadb` et test différentiel ;
     4. une base par app de la Forge, ses outils, son quota ;
     5. oubli et sauvegarde sur MariaDB, `deploy/README.md`, puis démarrage à vide sur le portable.
@@ -149,7 +159,11 @@ passer à un moteur asynchrone serait un chantier à part. Une base MariaDB sur 
 charge. La recherche du courrier reste un parcours de la colonne repliée (pas d'index plein texte). Les apps de la
 Forge n'ont aucun accès aux données de Mika.
 
-**Conséquences.** Contrats : le port `Sql` repose sur une connexion SQLAlchemy ; `adapters/store_sqlite` devient
+**Conséquences.** Contrats : le port `Sql` repose sur une connexion SQLAlchemy et gagne `session` (une session ORM
+dans la transaction en cours), `create` et `dialect` ; le magasin gagne `read_mind` / `read_views` (des sessions de
+lecture) et ses `query_*` acceptent une requête SQLAlchemy ; `mika.ports.sql` (bases, types, `upsert`,
+`insert_ignore`, `greatest`/`least`), `mika.adapters.database` (les moteurs), `mika.app.schema` et
+`mika.app.migrations` (une révision par base) ; `adapters/store_sqlite` devient
 `adapters/store_sql` (un adaptateur, deux moteurs) et `SqliteStore` disparaît ; `tests/conftest.py::make_mind`
 construit le magasin depuis une adresse ; `app/backup.py` et la commande de restauration sont réécrits ; le port de la
 Forge gagne le service `sql` et les trois outils ; `forge.db` et `mail.db` / `feeds.db` / `teams.db` en tant que

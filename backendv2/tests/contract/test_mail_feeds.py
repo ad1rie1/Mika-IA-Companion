@@ -94,19 +94,6 @@ def test_feeds_hand_new_entries_once_and_skip_the_archives(tmp_path, site):
     assert feeds.health() == [] and feeds.cached_count() == len(feeds.cached(100)) == 10
 
 
-def test_a_feed_cache_from_before_feed_health_is_completed(tmp_path, site):
-    import sqlite3
-
-    old = sqlite3.connect(str(tmp_path / "f.db"))
-    old.executescript("CREATE TABLE feeds(url TEXT PRIMARY KEY, polled INTEGER DEFAULT 0);"
-                      f"INSERT INTO feeds VALUES('{site}/flux.xml', 1);")
-    old.commit()
-    old.close()
-    feeds = HttpFeeds(lambda: [f"{site}/flux.xml"], tmp_path / "f.db")
-    assert feeds.health()[0]["attempted_at"] == 0  # colonnes ajoutées, rien de faux inventé
-    assert go(feeds.poll(30)) and feeds.health()[0]["ok_at"]  # déjà relevé : tout ce qui paraît est neuf
-
-
 # ── Un flux peut mentir : un article ne mène jamais à une machine privée (EDG-4, CON-2) ──
 
 #: un faux DNS : des noms publics, un nom qui pointe vers le réseau local, un nom qui donne les deux

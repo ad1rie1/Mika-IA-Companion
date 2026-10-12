@@ -38,7 +38,11 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import Index, case, delete, func, select, tuple_
+from sqlalchemy.orm import Mapped, mapped_column
+
 from mika.kernel.clock import DAY
+from mika.ports.sql import Id, Key, LongBlob, LongText, ViewsBase, insert_ignore, table_args, upsert
 from mika.ports.store import EventStore, Sql
 
 log = logging.getLogger("mika.traces")
@@ -60,6 +64,41 @@ _MIN_CAP = 2_000
 _PRUNE_EVERY = 50
 #: les épisodes dont une trace a été écrite récemment (voir ``forget``)
 _RECENT_KEPT = 512
+
+
+class TraceRow(ViewsBase):
+    """La trace d'un épisode : sa corrélation, son instant, l'empreinte de son préfixe stable, le reste compressé."""
+
+    __tablename__ = TABLE
+    __table_args__ = table_args(Index(f"{TABLE}_at", "at"))
+    correlation: Mapped[str] = mapped_column(Key(255), primary_key=True)
+    at: Mapped[int]
+    kind: Mapped[str] = mapped_column(LongText)
+    target: Mapped[str | None] = mapped_column(LongText)
+    stable: Mapped[str | None] = mapped_column(Key(64))
+    blob: Mapped[bytes] = mapped_column(LongBlob)
+
+
+class PromptBlobRow(ViewsBase):
+    """Un préfixe stable, rangé une fois par empreinte (compressé)."""
+
+    __tablename__ = BLOBS
+    hash: Mapped[str] = mapped_column(Key(64), primary_key=True)
+    text: Mapped[bytes] = mapped_column(LongBlob)
+
+
+class ToolUseRow(ViewsBase):
+    """Un appel d'outil d'une trace, sans ses arguments."""
+
+    __tablename__ = USES
+    __table_args__ = table_args(Index(f"{USES}_name", "name", "at"), Index(f"{USES}_corr", "correlation"))
+    id: Mapped[int] = mapped_column(Id, primary_key=True)
+    correlation: Mapped[str] = mapped_column(Key(255))
+    at: Mapped[int]
+    kind: Mapped[str] = mapped_column(LongText)
+    name: Mapped[str] = mapped_column(Key(200))
+    ok: Mapped[bool]
+    executed: Mapped[bool]
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,17 +144,7 @@ class EpisodeTraces:
         self._barred: frozenset[str] = frozenset()
 
     async def open(self) -> None:
-        def create(sql: Sql) -> None:
-            sql.execute(f"CREATE TABLE IF NOT EXISTS {TABLE}(correlation TEXT PRIMARY KEY, at INTEGER, "
-                        f"kind TEXT, target TEXT, stable TEXT, blob BLOB)")
-            sql.execute(f"CREATE INDEX IF NOT EXISTS {TABLE}_at ON {TABLE}(at)")
-            sql.execute(f"CREATE TABLE IF NOT EXISTS {BLOBS}(hash TEXT PRIMARY KEY, text BLOB)")
-            sql.execute(f"CREATE TABLE IF NOT EXISTS {USES}(correlation TEXT, at INTEGER, kind TEXT, name TEXT, "
-                        f"ok INTEGER, executed INTEGER)")
-            sql.execute(f"CREATE INDEX IF NOT EXISTS {USES}_name ON {USES}(name, at)")
-            sql.execute(f"CREATE INDEX IF NOT EXISTS {USES}_corr ON {USES}(correlation)")
-
-        await self.store.run_views(create)
+        await self.store.run_views(lambda sql: sql.create(TraceRow, PromptBlobRow, ToolUseRow))
         self._ready = True
 
     # ── écriture ──
@@ -147,18 +176,16 @@ class EpisodeTraces:
                 body[f"{STABLE_KEY}_truncated"] = True
             blob = zlib.compress(_bounded_json(body).encode())
             if key is not None:
-                sql.execute(f"INSERT OR IGNORE INTO {BLOBS}(hash, text) VALUES(?, ?)",
-                            (key, zlib.compress(stable.encode())))
-            sql.execute(f"INSERT OR REPLACE INTO {TABLE}(correlation, at, kind, target, stable, blob) "
-                        f"VALUES(?, ?, ?, ?, ?, ?)", (correlation, at, kind, target, key, blob))
+                insert_ignore(sql, PromptBlobRow, {"hash": key, "text": zlib.compress(stable.encode())})
+            upsert(sql, TraceRow, {"correlation": correlation, "at": at, "kind": kind, "target": target,
+                                   "stable": key, "blob": blob}, keys=["correlation"])
             if isinstance(body.get("tool_calls"), list):
-                sql.execute(f"DELETE FROM {USES} WHERE correlation=?", (correlation,))
-                for t in body["tool_calls"]:
-                    if isinstance(t, Mapping) and t.get("name"):
-                        sql.execute(f"INSERT INTO {USES}(correlation, at, kind, name, ok, executed) "
-                                    f"VALUES(?, ?, ?, ?, ?, ?)",
-                                    (correlation, at, kind, str(t["name"])[:200], int(bool(t.get("ok"))),
-                                     int(bool(t.get("executed", True)))))
+                sql.execute(delete(ToolUseRow).where(ToolUseRow.correlation == correlation))
+                uses = [{"correlation": correlation, "at": at, "kind": kind, "name": str(t["name"])[:200],
+                         "ok": bool(t.get("ok")), "executed": bool(t.get("executed", True))}
+                        for t in body["tool_calls"] if isinstance(t, Mapping) and t.get("name")]
+                if uses:
+                    sql.execute(ToolUseRow.__table__.insert(), uses)
             if prune:
                 _prune(sql, at - keep_us, max_rows)
 
@@ -196,10 +223,9 @@ class EpisodeTraces:
             return 0
 
         def clear(sql: Sql) -> int:
-            n = int(sql.query(f"SELECT COUNT(*) FROM {TABLE}")[0][0])
-            sql.execute(f"DELETE FROM {TABLE}")
-            sql.execute(f"DELETE FROM {BLOBS}")
-            sql.execute(f"DELETE FROM {USES}")
+            n = int(sql.query(select(func.count()).select_from(TraceRow))[0][0])
+            for row in (TraceRow, PromptBlobRow, ToolUseRow):
+                sql.execute(delete(row))
             return n
 
         return int(await self.store.run_views(clear))
@@ -210,8 +236,8 @@ class EpisodeTraces:
         (``None`` s'il a été élagué entre-temps) ; ``None`` si aucune."""
         if not self._ready:
             return None
-        rows = self.store.query_views(
-            f"SELECT at, kind, target, stable, blob FROM {TABLE} WHERE correlation=?", (correlation,))
+        rows = self.store.query_views(select(TraceRow.at, TraceRow.kind, TraceRow.target, TraceRow.stable,
+                                             TraceRow.blob).where(TraceRow.correlation == correlation))
         if not rows:
             return None
         at, kind, target, key, blob = rows[0]
@@ -222,7 +248,7 @@ class EpisodeTraces:
             return {**head, "error": f"trace illisible ({exc})"}
         stable: str | None = None
         if key:
-            found = self.store.query_views(f"SELECT text FROM {BLOBS} WHERE hash=?", (key,))
+            found = self.store.query_views(select(PromptBlobRow.text).where(PromptBlobRow.hash == key))
             if found:
                 try:
                     stable = zlib.decompress(found[0][0]).decode()
@@ -236,23 +262,19 @@ class EpisodeTraces:
         """Les dernières traces (sans leur contenu), les plus récentes d'abord."""
         if not self._ready:
             return []
-        where, args = [], []
+        query = select(TraceRow.correlation, TraceRow.at, TraceRow.kind, TraceRow.target)
         if kind:
-            where.append("kind=?")
-            args.append(kind)
+            query = query.where(TraceRow.kind == kind)
         if target:
-            where.append("target=?")
-            args.append(target)
-        clause = f"WHERE {' AND '.join(where)}" if where else ""
-        rows = self.store.query_views(
-            f"SELECT correlation, at, kind, target FROM {TABLE} {clause} ORDER BY at DESC, correlation DESC "
-            f"LIMIT ?", (*args, max(1, min(limit, 1000))))
+            query = query.where(TraceRow.target == target)
+        rows = self.store.query_views(query.order_by(TraceRow.at.desc(), TraceRow.correlation.desc())
+                                      .limit(max(1, min(limit, 1000))))
         return [TraceHead(str(c), int(a), str(k), t) for c, a, k, t in rows]
 
     def count(self) -> int:
         if not self._ready:
             return 0
-        return int(self.store.query_views(f"SELECT COUNT(*) FROM {TABLE}")[0][0])
+        return int(self.store.query_views(select(func.count()).select_from(TraceRow))[0][0])
 
     def tool_usage(self, since: int) -> dict[str, ToolUsage]:
         """Par outil, ses appels depuis ``since`` (ceux qu'un refus a arrêtés avant le gestionnaire compris :
@@ -260,8 +282,8 @@ class EpisodeTraces:
         if not self._ready:
             return {}
         rows = self.store.query_views(
-            f"SELECT name, COUNT(*), SUM(CASE WHEN ok THEN 0 ELSE 1 END), MAX(at) FROM {USES} WHERE at >= ? "
-            f"GROUP BY name", (since,))
+            select(ToolUseRow.name, func.count(), func.sum(case((ToolUseRow.ok, 0), else_=1)), func.max(ToolUseRow.at))
+            .where(ToolUseRow.at >= since).group_by(ToolUseRow.name))
         return {str(n): ToolUsage(int(c), int(f or 0), int(a)) for n, c, f, a in rows}
 
     def tool_uses(self, name: str, limit: int = 20) -> list[ToolUse]:
@@ -269,19 +291,26 @@ class EpisodeTraces:
         if not self._ready:
             return []
         rows = self.store.query_views(
-            f"SELECT correlation, at, kind, ok, executed FROM {USES} WHERE name=? ORDER BY at DESC, rowid DESC "
-            f"LIMIT ?", (name, max(1, min(limit, 500))))
+            select(ToolUseRow.correlation, ToolUseRow.at, ToolUseRow.kind, ToolUseRow.ok, ToolUseRow.executed)
+            .where(ToolUseRow.name == name).order_by(ToolUseRow.at.desc(), ToolUseRow.id.desc())
+            .limit(max(1, min(limit, 500))))
         return [ToolUse(str(c), int(a), str(k), bool(o), bool(e)) for c, a, k, o, e in rows]
 
 
 # ── bornes ──
 def _prune(sql: Sql, before: int, max_rows: int) -> int:
-    removed = int(sql.execute(f"DELETE FROM {TABLE} WHERE at < ?", (before,)).rowcount or 0)
-    removed += int(sql.execute(
-        f"DELETE FROM {TABLE} WHERE correlation IN (SELECT correlation FROM {TABLE} "
-        f"ORDER BY at DESC, correlation DESC LIMIT -1 OFFSET ?)", (max_rows,)).rowcount or 0)
-    sql.execute(f"DELETE FROM {BLOBS} WHERE hash NOT IN (SELECT stable FROM {TABLE} WHERE stable IS NOT NULL)")
-    sql.execute(f"DELETE FROM {USES} WHERE correlation NOT IN (SELECT correlation FROM {TABLE})")
+    removed = int(sql.execute(delete(TraceRow).where(TraceRow.at < before)).rowcount or 0)
+    # au-delà de ``max_rows`` : la première trace de trop (dans l'ordre le plus récent d'abord) donne le seuil, et
+    # tout ce qui vient après elle part — lu d'abord : MariaDB ne supprime pas d'une table relue avec ``LIMIT``
+    edge = sql.query(select(TraceRow.at, TraceRow.correlation)
+                     .order_by(TraceRow.at.desc(), TraceRow.correlation.desc()).limit(1).offset(max_rows))
+    if edge:
+        at, correlation = edge[0]
+        removed += int(sql.execute(delete(TraceRow).where(
+            tuple_(TraceRow.at, TraceRow.correlation) <= tuple_(at, correlation))).rowcount or 0)
+    sql.execute(delete(PromptBlobRow).where(
+        PromptBlobRow.hash.not_in(select(TraceRow.stable).where(TraceRow.stable.is_not(None)))))
+    sql.execute(delete(ToolUseRow).where(ToolUseRow.correlation.not_in(select(TraceRow.correlation))))
     return removed
 
 

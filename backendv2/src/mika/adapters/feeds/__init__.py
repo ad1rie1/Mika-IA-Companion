@@ -1,5 +1,6 @@
 """Les flux réels : HTTP (httpx), RSS 2.0 / RDF / Atom en bibliothèque
-standard, un cache SQLite à part.
+standard, un cache à part (la base ``feeds``, déclarée dans ``models`` :
+SQLite pour les tests, MariaDB en production — ADR 0101).
 
 - Chaque article n'est rendu qu'une fois (``poll``) ; au premier relevé d'un
   flux, seuls les plus récents (on n'hérite pas de trois ans d'archives).
@@ -34,9 +35,8 @@ import asyncio
 import email.utils
 import hashlib
 import ipaddress
-import json
 import socket
-import sqlite3
+import threading
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
@@ -46,11 +46,16 @@ from urllib.parse import urljoin, urlsplit, urlunsplit
 from xml.etree import ElementTree
 
 import httpx
+from sqlalchemy import delete, false, func, select, true, update
+from sqlalchemy.orm import Session, sessionmaker
 
+from mika.adapters.database import sqlite_engine
+from mika.adapters.feeds.models import URL_MAX, EntryRow, FeedRow, entry_values, fit
 from mika.kernel.clock import DAY
 from mika.ports.feeds import Entry, shown
 from mika.ports.paging import Page, fold_text
 from mika.ports.preprocess import HTML_SKIPPED, html_text
+from mika.ports.sql import FEEDS, insert_ignore
 from mika.vocab.phrasebook import phrase
 
 NS_ATOM = "http://www.w3.org/2005/Atom"
@@ -66,9 +71,6 @@ MAX_REDIRECTS = 3
 POLL_TOTAL_S = 120.0
 #: ce qu'on ne lit pas d'une page d'article
 ARTICLE_SKIPPED = HTML_SKIPPED | frozenset({"nav", "footer", "aside"})
-#: ce qu'un relevé note de chaque flux (ajouté à un cache plus ancien)
-HEALTH_COLUMNS = (("attempted_at", "INTEGER DEFAULT 0"), ("ok_at", "INTEGER DEFAULT 0"), ("error", "TEXT DEFAULT ''"),
-                  ("failures", "INTEGER DEFAULT 0"), ("items", "INTEGER DEFAULT 0"), ("added", "INTEGER DEFAULT 0"))
 #: un article déjà rendu que son flux ne liste plus depuis ce délai quitte le cache…
 KEPT_US = 60 * DAY
 #: … comme au-delà de tant d'articles par flux (le garde-fou d'un flux qui déborde : un flux d'actualité
@@ -77,6 +79,10 @@ KEEP_PER_FEED = 5000
 
 #: une résolution de nom : ``(hôte, port)`` → les adresses IP
 Resolver = Callable[[str, int], Awaitable[Sequence[str]]]
+#: ce qu'on lit d'un article (dans l'ordre des champs d'``Entry``)
+_ENTRY = (EntryRow.id, EntryRow.feed, EntryRow.title, EntryRow.link, EntryRow.summary, EntryRow.published)
+#: les plus récents d'abord ; l'ordre d'arrivée, puis l'identifiant, départagent (le même ordre sur les deux moteurs)
+_NEWEST = (EntryRow.published.desc(), EntryRow.n.desc(), EntryRow.id)
 
 __all__ = ["HttpFeeds", "NotPublic", "clean", "parse", "routable", "shown"]
 
@@ -198,6 +204,10 @@ def _origin(url: str) -> tuple[str, int]:
 
 
 class HttpFeeds:
+    """Le port ``feeds``. Le cache a une seule connexion, partagée sous ``_lock`` : chaque accès est une
+    session courte (``begin`` pour écrire, validée à la sortie), jamais deux à la fois, jamais à travers un
+    ``await``."""
+
     def __init__(self, feeds: Callable[[], Sequence[str]], cache: Path, *, client: httpx.AsyncClient | None = None,
                  timeout_s: float = 20.0, poll_total_s: float = POLL_TOTAL_S,
                  resolve: Resolver | None = None, kept_us: int = KEPT_US,
@@ -209,27 +219,10 @@ class HttpFeeds:
         self._resolve = resolve or system_resolve
         self._kept = kept_us
         self._keep_per_feed = keep_per_feed
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(str(cache), check_same_thread=False)
-        self._db.create_function("fold", 1, lambda s: fold_text(s or ""), deterministic=True)
-        self._db.executescript(
-            "CREATE TABLE IF NOT EXISTS entries(id TEXT PRIMARY KEY, feed_url TEXT, feed TEXT, title TEXT,"
-            " link TEXT, summary TEXT, published INTEGER, handed INTEGER DEFAULT 0, n INTEGER,"
-            " seen_at INTEGER DEFAULT 0);"
-            "CREATE TABLE IF NOT EXISTS feeds(url TEXT PRIMARY KEY, polled INTEGER DEFAULT 0);"
-            # le relevé (ce qui reste à rendre) et la console (les plus récents) sans parcourir tout le cache
-            "CREATE INDEX IF NOT EXISTS entries_to_hand ON entries(handed, published);"
-            "CREATE INDEX IF NOT EXISTS entries_published ON entries(published);")
-        known = {r[1] for r in self._db.execute("PRAGMA table_info(feeds)")}
-        for column, kind in HEALTH_COLUMNS:  # un cache d'avant la santé des flux : on complète la table
-            if column not in known:
-                self._db.execute(f"ALTER TABLE feeds ADD COLUMN {column} {kind}")
-        if "seen_at" not in {r[1] for r in self._db.execute("PRAGMA table_info(entries)")}:
-            # un cache d'avant l'horizon : ses articles comptent comme vus aujourd'hui (rien ne s'efface d'un
-            # coup, et un titre remarqué la veille reste lisible)
-            self._db.execute("ALTER TABLE entries ADD COLUMN seen_at INTEGER DEFAULT 0")
-            self._db.execute("UPDATE entries SET seen_at=?", (int(time.time() * 1_000_000),))
-        self._db.commit()
+        self._lock = threading.RLock()
+        self._engine = sqlite_engine(cache, shared=True)
+        FEEDS.create_all(self._engine)
+        self._session = sessionmaker(self._engine, expire_on_commit=False)
 
     def configured(self) -> bool:
         return bool(list(self._feeds()))
@@ -305,7 +298,8 @@ class HttpFeeds:
                 await client.aclose()
 
     async def poll(self, limit: int) -> list[Entry]:
-        n = self._db.execute("SELECT COALESCE(MAX(n), 0) FROM entries").fetchone()[0]
+        with self._lock, self._session() as s:
+            n = int(s.scalar(select(func.coalesce(func.max(EntryRow.n), 0))) or 0)
         urls = list(self._feeds())
         loop = asyncio.get_running_loop()
         stop = loop.time() + self._poll_total
@@ -314,120 +308,159 @@ class HttpFeeds:
             now = int(time.time() * 1_000_000)
             left = stop - loop.time()
             if left <= 0:  # le relevé a assez duré : les flux restants attendent le suivant
-                self._note(url, now, error="pas relevé : le relevé précédent a pris trop de temps")
+                self._failed(url, now, "pas relevé : le relevé précédent a pris trop de temps")
                 continue
             try:
                 # un délai **total** par flux : un serveur qui égoutte sa réponse ne retient rien
                 raw = await asyncio.wait_for(self._get(url, public=False), min(self._timeout, left))
             except httpx.HTTPStatusError as exc:  # un flux injoignable n'empêche pas les autres : on le note
-                self._note(url, now, error=f"le serveur répond {exc.response.status_code}")
+                self._failed(url, now, f"le serveur répond {exc.response.status_code}")
                 continue
             except (httpx.HTTPError, OSError, TimeoutError) as exc:
-                self._note(url, now, error=_why(exc))
+                self._failed(url, now, _why(exc))
                 continue
             title, items = await asyncio.to_thread(parse, raw)  # hors de la boucle : un gros flux ne la fige pas
-            last = self._db.execute("SELECT ok_at FROM feeds WHERE url=? AND polled=1", (url,)).fetchone()
-            # le premier relevé n'hérite pas des archives ; ni celui d'un flux revenu après plus longtemps en panne
-            # que le cache ne garde ses articles (ils reviendraient comme neufs)
-            first = last is None or 0 < (last[0] or 0) < now - self._kept
-            ordered = sorted(items, key=lambda it: -it[4])
-            added = 0
-            for i, (uid, t, link, summary, date) in enumerate(ordered):
-                n += 1
-                handed = 1 if first and i >= FIRST_POLL else 0
-                key = _key(url, uid)
-                # un flux sans titre est nommé par son adresse montrable (jamais son jeton)
-                inserted = self._db.execute(
-                    "INSERT OR IGNORE INTO entries(id, feed_url, feed, title, link, summary, published, handed, n,"
-                    " seen_at) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                    (key, url, title or shown(url), t, link, summary, date, handed, n, now)).rowcount
-                if not inserted:  # son flux le liste encore : il reste dans le cache
-                    self._db.execute("UPDATE entries SET seen_at=? WHERE id=?", (now, key))
-                added += inserted
-            self._note(url, now, ok=True, items=len(items), added=added,
-                       error="" if items or title else "rien de lisible (ni RSS, ni Atom)")
-        rows = self._db.execute("SELECT id, feed, title, link, summary, published FROM entries WHERE handed=0 "
-                                "ORDER BY published DESC, n LIMIT ?", (limit,)).fetchall()
-        self._db.executemany("UPDATE entries SET handed=1 WHERE id=?", [(r[0],) for r in rows])
-        self._prune(start)
-        self._db.commit()
+            with self._lock, self._session.begin() as s:
+                feed = s.get(FeedRow, fit(url, URL_MAX))
+                # le premier relevé n'hérite pas des archives ; ni celui d'un flux revenu après plus longtemps en
+                # panne que le cache ne garde ses articles (ils reviendraient comme neufs)
+                first = feed is None or not feed.polled or 0 < feed.ok_at < now - self._kept
+                ordered = sorted(items, key=lambda it: -it[4])
+                added = 0
+                for i, (uid, t, link, summary, date) in enumerate(ordered):
+                    n += 1
+                    key = _key(url, uid)
+                    # un flux sans titre est nommé par son adresse montrable (jamais son jeton)
+                    inserted = insert_ignore(s, EntryRow, entry_values(
+                        id=key, feed_url=url, feed=title or shown(url), title=t, link=link, summary=summary,
+                        published=date, handed=first and i >= FIRST_POLL, n=n, seen_at=now))
+                    if not inserted:  # son flux le liste encore : il reste dans le cache
+                        s.execute(update(EntryRow).where(EntryRow.id == key).values(seen_at=now))
+                    added += inserted
+                self._note(s, url, now, ok=True, items=len(items), added=added,
+                           error="" if items or title else "rien de lisible (ni RSS, ni Atom)")
+        with self._lock, self._session.begin() as s:
+            rows = s.execute(select(*_ENTRY).where(EntryRow.handed == false())
+                             .order_by(EntryRow.published.desc(), EntryRow.n, EntryRow.id).limit(limit)).all()
+            if rows:
+                s.execute(update(EntryRow).where(EntryRow.id.in_([r[0] for r in rows])).values(handed=True))
+            self._prune(s, start)
         return [Entry(*r) for r in rows]
 
-    def _prune(self, start: int) -> None:
+    def _prune(self, s: Session, start: int) -> None:
         """Ce que le cache oublie : un article déjà rendu que son flux ne liste plus depuis ``kept_us``, ou
         au-delà des ``keep_per_feed`` derniers vus de son flux. Jamais un article pas encore rendu, ni un que ce
-        relevé vient de voir dans son flux : effacé, il reviendrait comme neuf au relevé suivant."""
-        self._db.execute(
-            "DELETE FROM entries WHERE handed=1 AND seen_at<? AND (seen_at<? OR rowid IN (SELECT rowid FROM"
-            " (SELECT rowid, ROW_NUMBER() OVER(PARTITION BY feed_url ORDER BY seen_at DESC, n DESC) AS rank"
-            " FROM entries) WHERE rank>?))", (start, start - self._kept, self._keep_per_feed))
+        relevé vient de voir dans son flux : effacé, il reviendrait comme neuf au relevé suivant.
+
+        Le rang se lit d'abord, la suppression vient après (MariaDB refuse de supprimer d'une table en relisant
+        la même dans la condition) ; les articles trop vieux, partis avant, étaient les derniers de leur flux : le
+        rang des autres n'en bouge pas."""
+        s.execute(delete(EntryRow).where(EntryRow.handed == true(), EntryRow.seen_at < start - self._kept))
+        ranked = select(EntryRow.id, EntryRow.handed, EntryRow.seen_at, func.row_number().over(
+            partition_by=EntryRow.feed_url, order_by=(EntryRow.seen_at.desc(), EntryRow.n.desc())).label("rank")
+        ).subquery()
+        beyond = s.scalars(select(ranked.c.id).where(ranked.c.rank > self._keep_per_feed, ranked.c.handed == true(),
+                                                     ranked.c.seen_at < start)).all()
+        if beyond:
+            s.execute(delete(EntryRow).where(EntryRow.id.in_(beyond)))
 
     async def entry(self, entry_id: str) -> Entry | None:
-        rows = self._db.execute("SELECT id, feed, title, link, summary, published FROM entries WHERE id=?",
-                                (entry_id,)).fetchall()
-        return Entry(*rows[0]) if rows else None
+        with self._lock, self._session() as s:
+            row = s.execute(select(*_ENTRY).where(EntryRow.id == entry_id)).first()
+        return Entry(*row) if row else None
 
     async def recent(self, limit: int) -> list[Entry]:
         return self.cached(limit)
 
     def cached(self, limit: int) -> list[Entry]:
-        rows = self._db.execute("SELECT id, feed, title, link, summary, published FROM entries "
-                                "ORDER BY published DESC, n DESC LIMIT ?", (limit,)).fetchall()
+        with self._lock, self._session() as s:
+            rows = s.execute(select(*_ENTRY).order_by(*_NEWEST).limit(limit)).all()
         return [Entry(*r) for r in rows]
 
     def cached_count(self) -> int:
-        return self._db.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+        with self._lock, self._session() as s:
+            return int(s.scalar(select(func.count()).select_from(EntryRow)) or 0)
+
+    @staticmethod
+    def _matching(feed: str = "", text: str = "") -> list[Any]:
+        """Les articles d'un flux et qui contiennent un texte, casse et accents ignorés : les deux côtés repliés
+        (le texte cherché ici, la colonne à l'écriture), comparés par ``instr`` — pareil sur les deux moteurs, et
+        ``%`` ou ``_`` n'y sont que des caractères."""
+        where = []
+        if folded := fold_text(feed):
+            where.append(func.instr(EntryRow.feed_fold, folded) > 0)
+        if folded := fold_text(text):
+            where.append(func.instr(EntryRow.text_fold, folded) > 0)
+        return where
 
     def entries_page(self, feed: str = "", text: str = "", page: int = 1, size: int = 25) -> Page[Entry]:
-        where = "instr(fold(feed),?)>0 AND instr(fold(title || ' ' || summary),?)>0"
-        args = (fold_text(feed), fold_text(text))
-        total = self._db.execute("SELECT COUNT(*) FROM entries WHERE " + where, args).fetchone()[0]
-        page, size, offset = Page.bounds(total, page, size)
-        rows = self._db.execute("SELECT id,feed,title,link,summary,published FROM entries WHERE " + where +
-                                " ORDER BY published DESC,n DESC,id LIMIT ? OFFSET ?", (*args, size, offset))
+        where = self._matching(feed, text)
+        with self._lock, self._session() as s:
+            total = int(s.scalar(select(func.count()).select_from(EntryRow).where(*where)) or 0)
+            page, size, offset = Page.bounds(total, page, size)
+            rows = s.execute(select(*_ENTRY).where(*where).order_by(*_NEWEST).limit(size).offset(offset)).all()
         return Page(tuple(Entry(*r) for r in rows), total, page, size)
 
     def entry_count(self, feed: str = "", exclude: tuple[str, ...] = ()) -> int:
-        return self._db.execute("SELECT COUNT(*) FROM entries WHERE instr(fold(feed),?)>0 "
-                               "AND id NOT IN (SELECT value FROM json_each(?))", (fold_text(feed), json.dumps(exclude))).fetchone()[0]
+        where = self._matching(feed)
+        if exclude:
+            where.append(EntryRow.id.not_in(exclude))
+        with self._lock, self._session() as s:
+            return int(s.scalar(select(func.count()).select_from(EntryRow).where(*where)) or 0)
 
     def feed_counts(self) -> dict[str, int]:
-        return dict(self._db.execute("SELECT feed,COUNT(*) FROM entries GROUP BY feed"))
+        with self._lock, self._session() as s:
+            rows = s.execute(select(EntryRow.feed, func.count()).group_by(EntryRow.feed)).all()
+        return {feed: int(count) for feed, count in rows}
 
-    def _note(self, url: str, at: int, *, ok: bool = False, items: int = 0, added: int = 0,
+    def _note(self, s: Session, url: str, at: int, *, ok: bool = False, items: int = 0, added: int = 0,
               error: str = "") -> None:
+        """Ce que ce relevé a donné pour un flux : un succès remet les échecs à zéro, un échec s'ajoute aux
+        précédents."""
+        key = fit(url, URL_MAX)
+        feed = s.get(FeedRow, key)
+        if feed is None:
+            feed = FeedRow(url=key)
+            s.add(feed)
+        feed.attempted_at = at
         if ok:
-            self._db.execute("INSERT INTO feeds(url, polled, attempted_at, ok_at, error, items, added) "
-                             "VALUES(?, 1, ?, ?, ?, ?, ?) ON CONFLICT(url) DO UPDATE SET polled=1, attempted_at=?, "
-                             "ok_at=?, error=?, items=?, added=?, failures=0",
-                             (url, at, at, error, items, added, at, at, error, items, added))
+            feed.polled, feed.ok_at, feed.error, feed.items, feed.added, feed.failures = True, at, error, items, added, 0
         else:
-            self._db.execute("INSERT INTO feeds(url, polled, attempted_at, error, failures) VALUES(?, 0, ?, ?, 1) "
-                             "ON CONFLICT(url) DO UPDATE SET attempted_at=?, error=?, failures=failures+1",
-                             (url, at, error[:300], at, error[:300]))
+            feed.error = error[:300]
+            feed.failures = (feed.failures or 0) + 1
 
-    def _title(self, url: str) -> str:
-        """Le titre d'un flux, s'il en a un (un nom de repli n'en est pas un)."""
-        row = self._db.execute("SELECT feed FROM entries WHERE feed_url=? LIMIT 1", (url,)).fetchone()
-        return row[0] if row and row[0] not in (url, shown(url)) else ""
+    def _failed(self, url: str, at: int, error: str) -> None:
+        with self._lock, self._session.begin() as s:
+            self._note(s, url, at, error=error)
+
+    @staticmethod
+    def _title(s: Session, url: str) -> str:
+        """Le titre d'un flux, s'il en a un (un nom de repli n'en est pas un) : celui de son dernier article
+        arrivé (un flux qui se renomme est nommé comme aujourd'hui)."""
+        name = s.scalar(select(EntryRow.feed).where(EntryRow.feed_url == fit(url, URL_MAX))
+                        .order_by(EntryRow.n.desc(), EntryRow.id).limit(1))
+        return name if name and name not in (url, shown(url)) else ""
 
     def health(self) -> list[dict[str, Any]]:
         """Pour chaque flux suivi : son titre, son adresse montrable, la dernière tentative, le dernier
         succès, l'erreur (vide : il va bien), les échecs d'affilée, les articles lus au dernier relevé, les
         nouveaux, et ce que le cache en garde. Lecture seule (l'inspecteur)."""
         out = []
-        for url in list(self._feeds()):
-            row = self._db.execute("SELECT attempted_at, ok_at, error, failures, items, added FROM feeds WHERE url=?",
-                                   (url,)).fetchone()
-            kept = self._db.execute("SELECT COUNT(*) FROM entries WHERE feed_url=?", (url,)).fetchone()[0]
-            attempted, ok, error, failures, items, added = row if row else (0, 0, "", 0, 0, 0)
-            out.append({"title": self._title(url), "url": shown(url),
-                        "attempted_at": attempted or 0, "ok_at": ok or 0, "error": error or "",
-                        "failures": failures or 0, "items": items or 0, "added": added or 0, "kept": kept})
+        with self._lock, self._session() as s:
+            for url in list(self._feeds()):
+                feed = s.get(FeedRow, fit(url, URL_MAX))
+                kept = s.scalar(select(func.count()).select_from(EntryRow)
+                                .where(EntryRow.feed_url == fit(url, URL_MAX)))
+                out.append({"title": self._title(s, url), "url": shown(url),
+                            "attempted_at": feed.attempted_at if feed else 0, "ok_at": feed.ok_at if feed else 0,
+                            "error": feed.error if feed else "", "failures": feed.failures if feed else 0,
+                            "items": feed.items if feed else 0, "added": feed.added if feed else 0,
+                            "kept": int(kept or 0)})
         return out
 
     def followed(self) -> list[tuple[str, str]]:
-        return [(self._title(url), shown(url)) for url in list(self._feeds())]
+        with self._lock, self._session() as s:
+            return [(self._title(s, url), shown(url)) for url in list(self._feeds())]
 
     async def article(self, entry_id: str) -> str:
         e = await self.entry(entry_id)
@@ -441,4 +474,5 @@ class HttpFeeds:
                                        limit=ARTICLE_MAX)
 
     def close(self) -> None:
-        self._db.close()
+        with self._lock:
+            self._engine.dispose()

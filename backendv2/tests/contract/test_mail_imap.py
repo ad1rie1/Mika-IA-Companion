@@ -12,13 +12,12 @@ protocole.
   sont ajoutées, le fil est chaîné, une copie est rangée dans « Envoyés » et le
   mail d'origine est marqué répondu ; un brouillon ne part que tel qu'il a été
   lu, et jamais avec un « [À COMPLÉTER » ;
-- l'ancien cache et l'ancienne configuration (un seul compte) sont repris.
+- l'ancienne configuration (un seul compte) est reprise.
 """
 
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime
 from email import policy
@@ -28,7 +27,6 @@ from email.parser import BytesParser
 import pytest
 
 from mika.adapters.mail import ImapSmtpMail, MailAccount, MailConfig, compose, from_stored, utf7
-from mika.adapters.mail.cache import MailCache
 from mika.adapters.mail.parse import attachment_files, parse
 from mika.ports.mail import AccountInfo, Draft, Mail, reply_recipients, split_ref
 from tests.fixtures.mail_servers import Imap, Smtp, raw_mail, serve
@@ -222,27 +220,7 @@ def _voice(info: AccountInfo, voice: str, *, send: bool = True) -> AccountInfo:
     return replace(info, voice=voice, can_send=send)
 
 
-def test_the_old_cache_and_the_old_single_account_config_are_taken_over(tmp_path):
-    path = tmp_path / "mail.db"
-    db = sqlite3.connect(str(path))
-    db.executescript(
-        "CREATE TABLE mails(message_id TEXT PRIMARY KEY, uid TEXT, sender TEXT, address TEXT, subject TEXT,"
-        " date INTEGER, body TEXT, dest TEXT, in_reply_to TEXT, bulk INTEGER, seen_at TEXT);"
-        "CREATE TABLE uids(uid TEXT PRIMARY KEY);"
-        "CREATE TABLE envoyes(message_id TEXT PRIMARY KEY, dest TEXT, subject TEXT, body TEXT, date INTEGER,"
-        " in_reply_to TEXT, by TEXT);"
-        "INSERT INTO mails VALUES('<old@x>', '12', 'Alice <a@x.fr>', 'a@x.fr', 'Avant', 5, 'Texte', 'mika@x',"
-        " '', 0, '');"
-        "INSERT INTO uids VALUES('12');"
-        "INSERT INTO envoyes VALUES('<gone@x>', 'bob@x.fr', 'Parti', 'Corps', 6, '', 'user_1');")
-    db.commit()
-    db.close()
-    cache = MailCache(path)
-    [old] = cache.recent(10)
-    assert (old.account, old.folder, old.subject) == ("principal", "INBOX", "Avant")
-    assert cache.handed("principal", "<old@x>") and cache.cursor("principal", "INBOX") == (0, 13)
-    assert cache.sent(5)[0].account == "principal" and cache.one("<old@x>") == old
-    cache.close()
+def test_the_old_single_account_config_is_taken_over():
     cfg = MailConfig.model_validate(from_stored({"address": "mika@x.fr", "imap_host": "h", "user": "u",
                                                  "password": "p", "folder": "Boîte"}))
     assert list(cfg.accounts) == ["principal"] and cfg.accounts["principal"].folders == ("Boîte",)

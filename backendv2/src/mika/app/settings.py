@@ -12,11 +12,13 @@ import json
 import logging
 import os
 import secrets
-import sqlite3
 from pathlib import Path
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
+from sqlalchemy import delete, select
+from sqlalchemy.exc import OperationalError, ProgrammingError
+from sqlalchemy.orm import Mapped, mapped_column
 
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.llm.config import ROLES, BackendSpec, LLMConfig
@@ -25,6 +27,7 @@ from mika.adapters.mcp.config import McpConfig, McpServer, StoredReview
 from mika.adapters.teams import TeamsConfig
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.ports.imaging import ROLES as IMAGE_ROLES
+from mika.ports.sql import Key, LongText, MindBase, upsert
 
 log = logging.getLogger("mika.settings")
 #: les rôles inconnus déjà signalés au journal
@@ -60,6 +63,18 @@ TEAMS_KEYS_KEY = "teams_key"
 #: les réglages d'un canal retiré (Telegram, ADR 0060) : effacés à l'ouverture — un jeton scellé que plus
 #: rien ne lit ne reste pas dans ``mind.db`` ni dans ses sauvegardes
 RETIRED_KEYS = ("telegram",)
+
+
+class SettingRow(MindBase):
+    """Un réglage : sa clé, sa valeur en JSON (les secrets y sont scellés)."""
+
+    __tablename__ = "settings"
+    key: Mapped[str] = mapped_column(Key(100), primary_key=True)
+    value: Mapped[str] = mapped_column(LongText)
+
+
+#: une lecture avant que la table existe (avant ``open``) : sous SQLite comme sous MariaDB
+NO_TABLE = (OperationalError, ProgrammingError)
 
 
 _SAID_OPEN: set[str] = set()  # les fichiers de clé déjà signalés lisibles par d'autres
@@ -120,25 +135,24 @@ class Settings:
         self._forge: dict[str, dict[str, Any]] = {}
 
     async def open(self) -> None:
-        await self.store.run_mind(lambda sql: sql.execute(
-            "CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)"))
-        await self.store.run_mind(lambda sql: sql.executemany(
-            "DELETE FROM settings WHERE key=?", [(k,) for k in RETIRED_KEYS]))
+        def create(sql: Any) -> None:
+            sql.create(SettingRow)
+            sql.execute(delete(SettingRow).where(SettingRow.key.in_(RETIRED_KEYS)))
+
+        await self.store.run_mind(create)
         data = self._get(FORGE_CONFIG_KEY) or {}
         self._forge = {str(k): dict(v) for k, v in data.items() if isinstance(v, dict)}
 
     def _get(self, key: str) -> Any:
         try:
-            rows = self.store.query_mind("SELECT value FROM settings WHERE key=?", (key,))
-        except sqlite3.OperationalError:  # la table n'existe pas encore (avant ``open``)
+            rows = self.store.query_mind(select(SettingRow.value).where(SettingRow.key == key))
+        except NO_TABLE:  # la table n'existe pas encore (avant ``open``)
             return None
         return json.loads(rows[0][0]) if rows else None
 
     async def _put(self, key: str, value: Any) -> None:
         raw = json.dumps(value, ensure_ascii=False, sort_keys=True)
-        await self.store.run_mind(lambda sql: sql.execute(
-            "INSERT INTO settings(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (key, raw)))
+        await self.store.run_mind(lambda sql: upsert(sql, SettingRow, {"key": key, "value": raw}, keys=["key"]))
 
     def llm(self) -> LLMConfig:
         data = self._get(LLM_KEY) or {}

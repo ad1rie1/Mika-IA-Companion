@@ -103,13 +103,18 @@ def test_a_sent_message_copied_to_inbox_keeps_its_outgoing_role(archive):
 
 
 def test_rss_pages_filter_in_sql_and_keep_counts_consistent(tmp_path):
+    from sqlalchemy import insert
+
+    from mika.adapters.feeds.models import EntryRow, entry_values
+
     feeds = HttpFeeds(lambda: [], tmp_path / "feeds.db")
     try:
-        feeds._db.executemany("INSERT INTO entries VALUES(?,?,?,?,?,?,?,?,?,?)", [
-            (str(i), "https://example.test/rss", "Création", f"Été {i}", "https://example.test/article", f"Résumé {i}", i, 1, i,
-             0)
-            for i in range(555)])
-        feeds._db.commit()
+        with feeds._session.begin() as s:
+            s.execute(insert(EntryRow), [
+                entry_values(id=str(i), feed_url="https://example.test/rss", feed="Création", title=f"Été {i}",
+                             link="https://example.test/article", summary=f"Résumé {i}", published=i, handed=True,
+                             n=i, seen_at=0)
+                for i in range(555)])
         page = feeds.entries_page("creation", "ete", 23)
         assert page.total == 555 and [e.id for e in page.items] == ["4", "3", "2", "1", "0"]
         assert feeds.entry_count("crea", ("0", "1", "inconnu")) == 553
@@ -133,9 +138,11 @@ def test_synchronizing_keeps_more_than_two_thousand_messages(tmp_path):
             return [(u, frozenset(), raw_mail(u, f'Message {u}', 'Corps')) for u in uids]
         def flags(self, uids):
             return {u: frozenset() for u in uids}
+    # ce que ``parse`` lirait de chacun : seuls le Message-ID et l'objet changent (lu une fois, pas 2 001)
+    template = parse(raw_mail(1, 'Message 1', 'Corps'), '1', account='pro', folder='INBOX', complete=True)
     try:
         for uid in range(1, 2002):
-            cache.store(parse(raw_mail(uid, f'Message {uid}', 'Corps'), str(uid), account='pro', folder='INBOX', complete=True), uid)
+            cache.store(replace(template, message_id=f'<mail-{uid}@exemple.fr>', subject=f'Message {uid}'), uid)
         cache.save_folder('pro', 'INBOX', uidvalidity=1, uidnext=2002)
         box._sync_sync(Session(), 'pro', acc, 'INBOX', 25, hand=False)
         assert cache.folder_count('pro', 'INBOX') == 2002

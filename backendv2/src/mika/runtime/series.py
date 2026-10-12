@@ -13,8 +13,12 @@ import logging
 from collections.abc import Sequence
 from typing import Any
 
+from sqlalchemy import delete, func, select, tuple_
+from sqlalchemy.orm import Mapped, mapped_column
+
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.faculty import CatchUp, ProcessSpec, SeriesSpec
+from mika.ports.sql import Key, ViewsBase, upsert
 from mika.runtime.boundary import Failed, call
 
 log = logging.getLogger("mika.series")
@@ -22,6 +26,15 @@ log = logging.getLogger("mika.series")
 TABLE = "series"
 KEEP_DAYS = 60
 THIN_AFTER_DAYS = 7
+
+
+class SeriesRow(ViewsBase):
+    """Une mesure : sa série, son instant, sa valeur."""
+
+    __tablename__ = TABLE
+    key: Mapped[str] = mapped_column(Key(200), primary_key=True)
+    at: Mapped[int] = mapped_column(primary_key=True, autoincrement=False)
+    value: Mapped[float]
 
 
 class SeriesStore:
@@ -32,11 +45,7 @@ class SeriesStore:
         self._pruned_at = 0
 
     async def open(self) -> None:
-        def create(sql: Any) -> None:
-            sql.execute(f"CREATE TABLE IF NOT EXISTS {TABLE}(key TEXT NOT NULL, at INTEGER NOT NULL, "
-                        "value REAL NOT NULL, PRIMARY KEY(key, at))")
-
-        await self.store.run_views(create)
+        await self.store.run_views(lambda sql: sql.create(SeriesRow))
         self._ready = True
 
     async def write(self, rows: Sequence[tuple[str, int, float]], now: int) -> None:
@@ -45,13 +54,18 @@ class SeriesStore:
         prune = now - self._pruned_at > DAY
 
         def put(sql: Any) -> None:
-            sql.executemany(f"INSERT OR REPLACE INTO {TABLE}(key, at, value) VALUES(?,?,?)", list(rows))
+            upsert(sql, SeriesRow, [{"key": k, "at": at, "value": v} for k, at, v in rows], keys=["key", "at"])
             if prune:
-                sql.execute(f"DELETE FROM {TABLE} WHERE at < ?", (now - self.keep_us,))
-                # au-delà d'une semaine : la première mesure de chaque heure
-                sql.execute(f"DELETE FROM {TABLE} WHERE at < ? AND rowid NOT IN (SELECT MIN(rowid) FROM {TABLE} "
-                            f"WHERE at < ? GROUP BY key, at / {HOUR})", (now - THIN_AFTER_DAYS * DAY,
-                                                                         now - THIN_AFTER_DAYS * DAY))
+                sql.execute(delete(SeriesRow).where(SeriesRow.at < now - self.keep_us))
+                # au-delà d'une semaine : la première mesure de chaque heure. L'heure d'une mesure est
+                # ``at - at % HOUR`` (``at / HOUR`` serait une division entière sous SQLite, décimale sous MariaDB) ;
+                # les mesures gardées passent par une table dérivée : MariaDB ne supprime pas d'une table relue
+                cut = now - THIN_AFTER_DAYS * DAY
+                first = (select(SeriesRow.key.label("k"), func.min(SeriesRow.at).label("m"))
+                         .where(SeriesRow.at < cut).group_by(SeriesRow.key, SeriesRow.at - SeriesRow.at % HOUR)
+                         .subquery())
+                sql.execute(delete(SeriesRow).where(SeriesRow.at < cut, tuple_(SeriesRow.key, SeriesRow.at).not_in(
+                    select(first.c.k, first.c.m))))
 
         await self.store.run_views(put)
         if prune:
@@ -61,8 +75,9 @@ class SeriesStore:
         """Des moyennes par tranches égales entre ``since`` et ``until`` (au plus ``points``)."""
         if not self._ready or until <= since:
             return []
-        rows = self.store.query_views(f"SELECT at, value FROM {TABLE} WHERE key=? AND at BETWEEN ? AND ? "
-                                      "ORDER BY at", (key, since, until))
+        rows = self.store.query_views(select(SeriesRow.at, SeriesRow.value)
+                                      .where(SeriesRow.key == key, SeriesRow.at.between(since, until))
+                                      .order_by(SeriesRow.at))
         if len(rows) <= points:
             return [(int(at), float(v)) for at, v in rows]
         width = (until - since) / points

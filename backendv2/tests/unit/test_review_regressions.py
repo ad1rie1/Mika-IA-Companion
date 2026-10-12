@@ -79,8 +79,9 @@ def test_life_and_relationship_archives_survive_eviction():
         state = _noted(state, ev, cx)
     assert len(state.events) == LIFE_CACHE_CAP and 1 not in state.events
     assert for_people(db, ('user_1',))[0].id == 1
-    frame = NS(get=lambda key: () if key.name == 'identity.handles' else key.arg)
-    incoming = NS(data=NS(handle='user_1'))
+    frame = NS(get=lambda key: () if key.name == 'identity.handles' else key.arg,
+               env=NS(params_of=lambda *_: None), root=None)
+    incoming = NS(at=101 * DAY, data=NS(handle='user_1'))
     drafts = recall_life(state, frame, incoming, {'store': db})
     state = _life_recalled(state, event(drafts[0], 3000), cx)
     assert 1 in state.events and len(state.events) == LIFE_CACHE_CAP

@@ -1,5 +1,5 @@
 """Le courrier réel : IMAP pour lire et ranger, SMTP pour envoyer (bibliothèque
-standard, dans un fil), un cache SQLite à part pour ce qui est arrivé.
+standard, dans un fil), un cache à part pour ce qui est arrivé (sa base, ADR 0101).
 
 - **Plusieurs comptes**, chacun avec ses dossiers relevés ; une panne sur un
   compte n'empêche pas de relever les autres (elle est notée : la console la
@@ -394,7 +394,8 @@ class ImapSmtpMail:
         return mail.account, self._account(mail.account), mail, uid
 
     def _uid_sync(self, s: Session, mail: Mail, uid: int) -> int:
-        """L'UID d'un mail dont le cache ne connaît pas l'UID (repris d'un ancien cache)."""
+        """L'UID d'un mail que le cache tient à une place provisoire (déplacé sans que le serveur ait dit son nouvel
+        UID) : demandé au serveur par son Message-ID."""
         if uid > 0:
             return uid
         wanted = mail.message_id.replace("\\", "").replace('"', "")

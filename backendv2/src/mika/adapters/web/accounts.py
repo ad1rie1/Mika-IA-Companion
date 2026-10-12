@@ -45,6 +45,11 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import Index, delete, func, select, update
+from sqlalchemy.orm import Mapped, mapped_column
+
+from mika.ports.sql import Id, Key, LongText, MindBase, table_args
+
 SESSION_TTL_S = 14 * 24 * 3600
 #: le préfixe d'un jeton de client natif (il se reconnaît dans un journal, et ne ressemble à aucune session)
 TOKEN_PREFIX = "mw_"
@@ -66,6 +71,9 @@ LOGIN_TOKENS_KEPT = 10
 #: une connexion ouverte (``/ws``, ``/ws/world``) revérifie son identifiant au moins aussi souvent (secondes) : ce
 #: qu'aucun écouteur n'a pu dire — un jeton révoqué par la ligne de commande, une session expirée
 CREDENTIAL_CHECK_S = 10.0
+#: la longueur d'un identifiant de compte, et d'un nom affiché (le reste est coupé)
+USERNAME_MAX = 150
+FULL_NAME_MAX = 120
 _N, _R, _P = 2**14, 8, 1
 _COMMON = frozenset({"password", "motdepasse", "azertyuiop", "qwertyuiop", "12345678", "123456789", "iloveyou",
                      "password1", "baseball", "football", "sunshine", "princess", "letmein1", "trustno1"})
@@ -99,7 +107,11 @@ def check_password(password: str, stored: str) -> bool:
 
 
 def password_problems(password: str, username: str = "") -> list[str]:
+    """Ce qui empêche de créer ce compte (ou de changer ce mot de passe), en français ; l'identifiant compris : chaque
+    création passe par ici."""
     out = []
+    if len(username) > USERNAME_MAX:
+        out.append(f"L'identifiant est trop long ({USERNAME_MAX} caractères au plus).")
     if len(password) < 8:
         out.append("Le mot de passe doit contenir au moins 8 caractères.")
     if password.isdigit():
@@ -164,6 +176,53 @@ class PushRegistration:
         return f"{TOKEN_KEY}{self.token_id}"
 
 
+class AccountRow(MindBase):
+    """Un compte : son identifiant, l'empreinte de son mot de passe, ses droits."""
+
+    __tablename__ = "accounts"
+    id: Mapped[int] = mapped_column(Id, primary_key=True)
+    username: Mapped[str] = mapped_column(Key(USERNAME_MAX), unique=True)
+    full_name: Mapped[str] = mapped_column(Key(FULL_NAME_MAX), default="")
+    password: Mapped[str] = mapped_column(Key(255))
+    operator: Mapped[bool]
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[int]
+
+
+class SessionRow(MindBase):
+    """Une session web : son jeton opaque, son compte, son échéance."""
+
+    __tablename__ = "sessions"
+    __table_args__ = table_args(Index("sessions_account", "account"), Index("sessions_expires", "expires_at"))
+    key: Mapped[str] = mapped_column(Key(64), primary_key=True)
+    account: Mapped[int]
+    created_at: Mapped[int]
+    expires_at: Mapped[int]
+
+
+class ClientTokenRow(MindBase):
+    """Un jeton de client natif : son empreinte (jamais le secret), ce qu'il ouvre, d'où il vient, et où notifier son
+    téléphone (un jeton Firebase va jusqu'à 4 096 caractères : un texte, sans index — les jetons sont peu nombreux)."""
+
+    __tablename__ = "client_tokens"
+    __table_args__ = table_args(Index("client_tokens_account", "account"))
+    id: Mapped[int] = mapped_column(Id, primary_key=True)
+    account: Mapped[int]
+    label: Mapped[str] = mapped_column(Key(60), default="")
+    digest: Mapped[str] = mapped_column(Key(64), unique=True)
+    created_at: Mapped[int]
+    last_used: Mapped[int | None]
+    revoked_at: Mapped[int | None]
+    client: Mapped[str] = mapped_column(Key(16), default=CLIENT_SCREEN)
+    source: Mapped[str] = mapped_column(Key(16), default=SOURCE_CLI)
+    push_token: Mapped[str | None] = mapped_column(LongText)
+    push_key: Mapped[str | None] = mapped_column(Key(128))
+    push_at: Mapped[int | None]
+
+
+ENTITIES = (AccountRow, SessionRow, ClientTokenRow)
+
+
 def token_digest(raw: str) -> str:
     return hashlib.sha256(raw.encode()).hexdigest()
 
@@ -177,7 +236,7 @@ def account_of_handle(handle: str | None) -> int | None:
 
 
 class Accounts:
-    """Sur le port de magasin : écritures par ``run_mind``, lectures par ``query_mind``."""
+    """Sur le port de magasin : écritures par ``run_mind``, lectures par ``read_mind`` / ``query_mind``."""
 
     def __init__(self, store: Any) -> None:
         self.store = store
@@ -197,52 +256,37 @@ class Accounts:
             await listener(account_id)
 
     async def open(self) -> None:
-        def create(sql: Any) -> None:
-            sql.execute("CREATE TABLE IF NOT EXISTS accounts(id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, "
-                        "full_name TEXT NOT NULL DEFAULT '', password TEXT NOT NULL, operator INTEGER NOT NULL, "
-                        "active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL)")
-            sql.execute("CREATE TABLE IF NOT EXISTS sessions(key TEXT PRIMARY KEY, account INTEGER NOT NULL, "
-                        "created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL)")
-            sql.execute("CREATE TABLE IF NOT EXISTS client_tokens(id INTEGER PRIMARY KEY, account INTEGER NOT NULL, "
-                        "label TEXT NOT NULL DEFAULT '', digest TEXT UNIQUE NOT NULL, created_at INTEGER NOT NULL, "
-                        "last_used INTEGER, revoked_at INTEGER)")
-            # ADR 0062 : ce qu'ouvre le jeton et d'où il vient (une table d'avant n'a ni l'un ni l'autre)
-            cols = {r[1] for r in sql.execute("PRAGMA table_info(client_tokens)").fetchall()}
-            if "client" not in cols:
-                sql.execute(f"ALTER TABLE client_tokens ADD COLUMN client TEXT NOT NULL DEFAULT '{CLIENT_SCREEN}'")
-            if "source" not in cols:
-                sql.execute(f"ALTER TABLE client_tokens ADD COLUMN source TEXT NOT NULL DEFAULT '{SOURCE_CLI}'")
-            # ADR 0077 : où notifier le téléphone (son jeton Firebase, la clé qui scelle), et depuis quand
-            for col, kind in (("push_token", "TEXT"), ("push_key", "TEXT"), ("push_at", "INTEGER")):
-                if col not in cols:
-                    sql.execute(f"ALTER TABLE client_tokens ADD COLUMN {col} {kind}")
+        await self.store.run_mind(lambda sql: sql.create(*ENTITIES))
 
-        await self.store.run_mind(create)
+    def _read(self, fn: Callable[[Any], Any]) -> Any:
+        """``fn(session)`` sur la connexion de lecture."""
+        return self.store.read_mind(lambda sql: fn(sql.session))
 
     def count(self) -> int:
-        return int(self.store.query_mind("SELECT COUNT(*) FROM accounts")[0][0])
+        return int(self.store.query_mind(select(func.count()).select_from(AccountRow))[0][0])
 
-    def _account(self, row: tuple[Any, ...] | None) -> Account | None:
+    @staticmethod
+    def _account(row: AccountRow | None) -> Account | None:
         if row is None:
             return None
-        return Account(int(row[0]), row[1], row[2], bool(row[3]), bool(row[4]))
+        return Account(int(row.id), row.username, row.full_name, bool(row.operator), bool(row.active))
 
     def by_name(self, username: str) -> tuple[Account, str] | None:
-        rows = self.store.query_mind("SELECT id, username, full_name, operator, active, password FROM accounts "
-                                     "WHERE username=?", (username,))
-        if not rows:
+        row = self._read(lambda s: s.scalar(select(AccountRow).where(AccountRow.username == username)))
+        if row is None:
             return None
-        acc = self._account(rows[0][:5])
+        acc = self._account(row)
         assert acc is not None
-        return acc, rows[0][5]
+        return acc, row.password
 
     async def create(self, username: str, password: str, *, operator: bool, full_name: str = "") -> Account:
         hashed = hash_password(password)
         now = int(time.time())
+        name = " ".join(full_name.split())[:FULL_NAME_MAX]
 
         def insert(sql: Any) -> None:
-            sql.execute("INSERT INTO accounts(username, full_name, password, operator, active, created_at) "
-                        "VALUES(?,?,?,?,1,?)", (username, full_name, hashed, int(operator), now))
+            sql.session.add(AccountRow(username=username, full_name=name, password=hashed, operator=operator,
+                                       active=True, created_at=now))
 
         await self.store.run_mind(insert)
         found = self.by_name(username)
@@ -257,10 +301,10 @@ class Accounts:
         created: list[bool] = []
 
         def insert(sql: Any) -> None:
-            if sql.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]:
+            if sql.session.scalar(select(func.count()).select_from(AccountRow)):
                 return
-            sql.execute("INSERT INTO accounts(username, full_name, password, operator, active, created_at) "
-                        "VALUES(?,?,?,1,1,?)", (username, "", hashed, now))
+            sql.session.add(AccountRow(username=username, full_name="", password=hashed, operator=True, active=True,
+                                       created_at=now))
             created.append(True)
 
         await self.store.run_mind(insert)
@@ -292,19 +336,18 @@ class Accounts:
         now = int(time.time())
 
         def insert(sql: Any) -> None:
-            sql.execute("INSERT INTO sessions(key, account, created_at, expires_at) VALUES(?,?,?,?)",
-                        (key, account.id, now, now + SESSION_TTL_S))
-            sql.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+            sql.session.add(SessionRow(key=key, account=account.id, created_at=now, expires_at=now + SESSION_TTL_S))
+            sql.execute(delete(SessionRow).where(SessionRow.expires_at < now))
 
         await self.store.run_mind(insert)
         return key
 
     async def close_session(self, key: str) -> None:
-        await self.store.run_mind(lambda sql: sql.execute("DELETE FROM sessions WHERE key=?", (key,)))
+        await self.store.run_mind(lambda sql: sql.execute(delete(SessionRow).where(SessionRow.key == key)))
 
     # ── administration (l'inspecteur) ──
     def all(self) -> list[Account]:
-        rows = self.store.query_mind("SELECT id, username, full_name, operator, active FROM accounts ORDER BY id")
+        rows = self._read(lambda s: list(s.scalars(select(AccountRow).order_by(AccountRow.id))))
         return [a for a in (self._account(r) for r in rows) if a is not None]
 
     async def update(self, account_id: int, *, operator: bool | None = None, active: bool | None = None,
@@ -325,23 +368,23 @@ class Accounts:
             if problems:
                 return " ".join(problems)
         hashed = hash_password(password) if password is not None else None
-        after_name = target.full_name if full_name is None else " ".join(full_name.split())[:120]
+        after_name = target.full_name if full_name is None else " ".join(full_name.split())[:FULL_NAME_MAX]
         now = int(time.time())
         dropped: list[int] = []
 
         def write(sql: Any) -> None:
-            sql.execute("UPDATE accounts SET operator=?, active=?, full_name=? WHERE id=?",
-                        (int(after_operator), int(after_active), after_name, account_id))
+            sql.execute(update(AccountRow).where(AccountRow.id == account_id)
+                        .values(operator=after_operator, active=after_active, full_name=after_name))
             if hashed is not None:
-                sql.execute("UPDATE accounts SET password=? WHERE id=?", (hashed, account_id))
+                sql.execute(update(AccountRow).where(AccountRow.id == account_id).values(password=hashed))
             if not after_active or hashed is not None:
-                sql.execute("DELETE FROM sessions WHERE account=?", (account_id,))
+                sql.execute(delete(SessionRow).where(SessionRow.account == account_id))
                 # un jeton obtenu par ce mot de passe tombe avec lui ; ceux d'un opérateur restent
-                dropped.extend(int(r[0]) for r in sql.execute(
-                    "SELECT id FROM client_tokens WHERE account=? AND source=? AND revoked_at IS NULL",
-                    (account_id, SOURCE_LOGIN)).fetchall())
-                sql.execute("UPDATE client_tokens SET revoked_at=?, push_token=NULL, push_key=NULL WHERE account=? "
-                            "AND source=? AND revoked_at IS NULL", (now, account_id, SOURCE_LOGIN))
+                by_login = (ClientTokenRow.account == account_id) & (ClientTokenRow.source == SOURCE_LOGIN) \
+                    & ClientTokenRow.revoked_at.is_(None)
+                dropped.extend(int(r[0]) for r in sql.query(select(ClientTokenRow.id).where(by_login)))
+                sql.execute(update(ClientTokenRow).where(by_login)
+                            .values(revoked_at=now, push_token=None, push_key=None))
 
         await self.store.run_mind(write)
         for token_id in dropped:
@@ -356,10 +399,11 @@ class Accounts:
     def session(self, key: str | None) -> Account | None:
         if not key:
             return None
-        rows = self.store.query_mind(
-            "SELECT a.id, a.username, a.full_name, a.operator, a.active FROM sessions s JOIN accounts a "
-            "ON a.id = s.account WHERE s.key=? AND s.expires_at >= ?", (key, int(time.time())))
-        acc = self._account(rows[0]) if rows else None
+        now = int(time.time())
+        row = self._read(lambda s: s.scalar(
+            select(AccountRow).join(SessionRow, SessionRow.account == AccountRow.id)
+            .where(SessionRow.key == key, SessionRow.expires_at >= now)))
+        acc = self._account(row)
         return acc if acc is not None and acc.active else None
 
     # ── jetons de client natif ──
@@ -377,14 +421,17 @@ class Accounts:
         raw = TOKEN_PREFIX + secrets.token_urlsafe(32)
         clean = " ".join(label.split())[:60]
         now = int(time.time())
+        made: list[int] = []
 
         def insert(sql: Any) -> None:
-            sql.execute("INSERT INTO client_tokens(account, label, digest, created_at, client, source) "
-                        "VALUES(?,?,?,?,?,?)", (account_id, clean, token_digest(raw), now, client, source))
+            row = ClientTokenRow(account=account_id, label=clean, digest=token_digest(raw), created_at=now,
+                                 client=client, source=source)
+            sql.session.add(row)
+            sql.session.flush()
+            made.append(int(row.id))
 
         await self.store.run_mind(insert)
-        rows = self.store.query_mind("SELECT id FROM client_tokens WHERE digest=?", (token_digest(raw),))
-        info = ClientToken(int(rows[0][0]), account_id, account.username, clean, now, None, False, client, source)
+        info = ClientToken(made[0], account_id, account.username, clean, now, None, False, client, source)
         if client == CLIENT_MOBILE:
             await self._changed()  # une application qui reçoit hors ligne : on peut désormais lui écrire
         return info, raw
@@ -401,48 +448,48 @@ class Accounts:
 
     def tokens(self, account_id: int | None = None) -> list[ClientToken]:
         """Les jetons (révoqués compris), du plus ancien au plus récent — jamais leur secret."""
-        sql = ("SELECT t.id, t.account, COALESCE(a.username, '?'), t.label, t.created_at, t.last_used, t.revoked_at, "
-               "t.client, t.source, t.push_token IS NOT NULL FROM client_tokens t LEFT JOIN accounts a "
-               "ON a.id = t.account")
-        params: tuple[Any, ...] = ()
+        query = (select(ClientTokenRow, AccountRow.username)
+                 .outerjoin(AccountRow, AccountRow.id == ClientTokenRow.account).order_by(ClientTokenRow.id))
         if account_id is not None:
-            sql += " WHERE t.account=?"
-            params = (account_id,)
-        rows = self.store.query_mind(sql + " ORDER BY t.id", params)
-        return [ClientToken(int(r[0]), int(r[1]), r[2], r[3], int(r[4]), r[5], r[6] is not None,
-                            r[7] or CLIENT_SCREEN, r[8] or SOURCE_CLI, bool(r[9])) for r in rows]
+            query = query.where(ClientTokenRow.account == account_id)
+        rows = self._read(lambda s: s.execute(query).all())
+        return [ClientToken(int(t.id), int(t.account), name or "?", t.label, int(t.created_at), t.last_used,
+                            t.revoked_at is not None, t.client or CLIENT_SCREEN, t.source or SOURCE_CLI,
+                            t.push_token is not None) for t, name in rows]
 
     def token_client(self, token_id: int) -> str:
         """Ce qu'ouvre ce jeton (``screen`` pour un jeton inconnu : dans le doute, un écran)."""
-        rows = self.store.query_mind("SELECT client FROM client_tokens WHERE id=?", (token_id,))
+        rows = self.store.query_mind(select(ClientTokenRow.client).where(ClientTokenRow.id == token_id))
         client = rows[0][0] if rows else None
         return client if client in TOKEN_CLIENTS else CLIENT_SCREEN
 
     def has_mobile(self, account_id: int) -> bool:
         """Ce compte a-t-il une application de téléphone vivante (un jeton ``mobile`` non révoqué) ?"""
-        rows = self.store.query_mind("SELECT 1 FROM client_tokens WHERE account=? AND client=? AND revoked_at IS NULL "
-                                     "LIMIT 1", (account_id, CLIENT_MOBILE))
+        rows = self.store.query_mind(select(ClientTokenRow.id).where(
+            ClientTokenRow.account == account_id, ClientTokenRow.client == CLIENT_MOBILE,
+            ClientTokenRow.revoked_at.is_(None)).limit(1))
         return bool(rows)
 
     def token(self, raw: str | None) -> tuple[Account, int] | None:
         """Le compte (actif) d'un jeton valide, et l'identifiant du jeton ; ``None`` sinon."""
         if not raw or not raw.startswith(TOKEN_PREFIX) or len(raw) > 200:
             return None
-        rows = self.store.query_mind(
-            "SELECT a.id, a.username, a.full_name, a.operator, a.active, t.id FROM client_tokens t JOIN accounts a "
-            "ON a.id = t.account WHERE t.digest=? AND t.revoked_at IS NULL", (token_digest(raw),))
-        if not rows:
+        digest = token_digest(raw)
+        found = self._read(lambda s: s.execute(
+            select(AccountRow, ClientTokenRow.id).join(ClientTokenRow, ClientTokenRow.account == AccountRow.id)
+            .where(ClientTokenRow.digest == digest, ClientTokenRow.revoked_at.is_(None))).first())
+        if found is None:
             return None
-        acc = self._account(rows[0][:5])
-        return (acc, int(rows[0][5])) if acc is not None and acc.active else None
+        acc = self._account(found[0])
+        return (acc, int(found[1])) if acc is not None and acc.active else None
 
     async def use_token(self, raw: str | None) -> tuple[Account, int] | None:
         """Comme ``token``, et la date de dernier usage notée (ce que la liste des jetons montre)."""
         found = self.token(raw)
         if found is not None:
             now, token_id = int(time.time()), found[1]
-            await self.store.run_mind(lambda sql: sql.execute("UPDATE client_tokens SET last_used=? WHERE id=?",
-                                                              (now, token_id)))
+            await self.store.run_mind(lambda sql: sql.execute(
+                update(ClientTokenRow).where(ClientTokenRow.id == token_id).values(last_used=now)))
         return found
 
     async def revoke_token(self, token_id: int) -> bool:
@@ -452,8 +499,9 @@ class Accounts:
         done: list[bool] = []
 
         def write(sql: Any) -> None:
-            cur = sql.execute("UPDATE client_tokens SET revoked_at=?, push_token=NULL, push_key=NULL WHERE id=? "
-                              "AND revoked_at IS NULL", (now, token_id))
+            cur = sql.execute(update(ClientTokenRow)
+                              .where(ClientTokenRow.id == token_id, ClientTokenRow.revoked_at.is_(None))
+                              .values(revoked_at=now, push_token=None, push_key=None))
             done.append(bool(getattr(cur, "rowcount", 0)))
 
         await self.store.run_mind(write)
@@ -472,36 +520,40 @@ class Accounts:
         now = int(time.time())
 
         def write(sql: Any) -> None:
-            sql.execute("UPDATE client_tokens SET push_token=NULL, push_key=NULL WHERE push_token=? AND id<>?",
-                        (device_token, token_id))
-            sql.execute("UPDATE client_tokens SET push_token=?, push_key=?, push_at=? WHERE id=? AND revoked_at IS NULL",
-                        (device_token, key, now, token_id))
+            sql.execute(update(ClientTokenRow)
+                        .where(ClientTokenRow.push_token == device_token, ClientTokenRow.id != token_id)
+                        .values(push_token=None, push_key=None))
+            sql.execute(update(ClientTokenRow)
+                        .where(ClientTokenRow.id == token_id, ClientTokenRow.revoked_at.is_(None))
+                        .values(push_token=device_token, push_key=key, push_at=now))
 
         await self.store.run_mind(write)
 
     async def clear_push(self, token_id: int, device_token: str | None = None) -> None:
         """Ce téléphone ne veut plus de notifications, ou ``device_token`` (son jeton Firebase) ne vaut plus — et
         seulement s'il est toujours celui-là : un jeton neuf donné entre-temps reste."""
-        if device_token is None:
-            await self.store.run_mind(lambda sql: sql.execute(
-                "UPDATE client_tokens SET push_token=NULL, push_key=NULL WHERE id=?", (token_id,)))
-            return
+        where = [ClientTokenRow.id == token_id]
+        if device_token is not None:
+            where.append(ClientTokenRow.push_token == device_token)
         await self.store.run_mind(lambda sql: sql.execute(
-            "UPDATE client_tokens SET push_token=NULL, push_key=NULL WHERE id=? AND push_token=?",
-            (token_id, device_token)))
+            update(ClientTokenRow).where(*where).values(push_token=None, push_key=None)))
 
     def push_registrations(self, account_id: int) -> list[PushRegistration]:
         """Les téléphones vivants de ce compte qui ont dit où les notifier."""
         rows = self.store.query_mind(
-            "SELECT t.id, t.push_token, t.push_key FROM client_tokens t JOIN accounts a ON a.id = t.account "
-            "WHERE t.account=? AND t.client=? AND t.revoked_at IS NULL AND a.active=1 AND t.push_token IS NOT NULL "
-            "AND t.push_key IS NOT NULL ORDER BY t.id", (account_id, CLIENT_MOBILE))
+            select(ClientTokenRow.id, ClientTokenRow.push_token, ClientTokenRow.push_key)
+            .join(AccountRow, AccountRow.id == ClientTokenRow.account)
+            .where(ClientTokenRow.account == account_id, ClientTokenRow.client == CLIENT_MOBILE,
+                   ClientTokenRow.revoked_at.is_(None), AccountRow.active.is_(True),
+                   ClientTokenRow.push_token.is_not(None), ClientTokenRow.push_key.is_not(None))
+            .order_by(ClientTokenRow.id))
         return [PushRegistration(int(r[0]), str(r[1]), str(r[2])) for r in rows]
 
     def push_count(self) -> int:
         """Combien de téléphones vivants ont dit où les notifier (ce que la console montre)."""
-        rows = self.store.query_mind("SELECT COUNT(*) FROM client_tokens WHERE client=? AND revoked_at IS NULL "
-                                     "AND push_token IS NOT NULL", (CLIENT_MOBILE,))
+        rows = self.store.query_mind(select(func.count()).select_from(ClientTokenRow).where(
+            ClientTokenRow.client == CLIENT_MOBILE, ClientTokenRow.revoked_at.is_(None),
+            ClientTokenRow.push_token.is_not(None)))
         return int(rows[0][0]) if rows else 0
 
     def credential(self, key: str | None) -> Account | None:
@@ -511,10 +563,10 @@ class Accounts:
                 token_id = int(key[len(TOKEN_KEY):])
             except ValueError:
                 return None
-            rows = self.store.query_mind(
-                "SELECT a.id, a.username, a.full_name, a.operator, a.active FROM client_tokens t JOIN accounts a "
-                "ON a.id = t.account WHERE t.id=? AND t.revoked_at IS NULL", (token_id,))
-            acc = self._account(rows[0]) if rows else None
+            row = self._read(lambda s: s.scalar(
+                select(AccountRow).join(ClientTokenRow, ClientTokenRow.account == AccountRow.id)
+                .where(ClientTokenRow.id == token_id, ClientTokenRow.revoked_at.is_(None))))
+            acc = self._account(row)
             return acc if acc is not None and acc.active else None
         return self.session(key)
 
