@@ -13,7 +13,6 @@ qu'il partageait avec Léa ; une croyance devenue secrète restait une matière 
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from types import SimpleNamespace as NS
 from zoneinfo import ZoneInfo
 
@@ -37,28 +36,18 @@ from mika.vocab.knowledge import knowns
 from mika.vocab.lineage import Lineage, admits, requirement
 from mika.vocab.privacy import PUBLIC_FLOOR, Sensitivity, private_to
 from tests.fixtures.mika import at_paris, boot, build, said
+from tests.fixtures.sqldb import SqlDB
 
 SAM, BOB, LEA = "user_2", "user_3", "user_4"
 NOW = 20 * DAY
 
 
-class DB:
+class DB(SqlDB):
     def __init__(self):
-        self.conn = sqlite3.connect(":memory:")
+        super().__init__()
         Items().create(self, "")
         Told().create(self, "")
         self.seq = 0
-
-    def execute(self, sql, args=()):
-        return self.conn.execute(sql, args)
-
-    def executemany(self, sql, rows):
-        return self.conn.executemany(sql, rows)
-
-    def query(self, sql, args=()):
-        return self.execute(sql, args).fetchall()
-
-    query_mind = query
 
     def content(self, refs):
         return {}
@@ -69,7 +58,7 @@ class DB:
         return self.seq
 
     def known(self):
-        return knowns(self.query(mc.SELECT_KNOWN + " ORDER BY id"), mc.KNOWN_COLUMNS)
+        return knowns(self.query(mc.select_known().order_by(mc.KNOWLEDGE.c.id)), mc.KNOWN_COLUMNS)
 
 
 DEFAULTS = {"identity.person": "", "identity.presumed": "", "identity.handles": (), "memory.life_events": (),

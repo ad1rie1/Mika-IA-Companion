@@ -1,7 +1,10 @@
 """États fictifs pour relire l'activité et les erreurs, dans le magasin temporaire de l'aperçu."""
 
+from sqlalchemy import select
+
 from mika.contracts import runtime as rt
 from mika.kernel.events import Content, Origin
+from mika.ports.journal import JournalEvent, JournalOutbox
 from mika.vocab.episodes import Kind
 
 #: « pas avant » : aussi loin qu'un instant peut l'être
@@ -41,9 +44,10 @@ async def activity(kernel) -> list[str]:
     urls = [f"/inspecteur/episode/{corr}", f"/inspecteur/evenement/{question.seqs[0]}"]
     cases = (("failed", "TimeoutError()"), ("interrupted", "Action interrompue pendant un redémarrage."),
              ("stale", "La réponse a dépassé son délai d’envoi."))
+    o, e = JournalOutbox, JournalEvent
     for (key, seq), (status, error) in zip(kernel.mind.store.query_mind(
-            "SELECT o.key, o.seq FROM outbox o JOIN events e ON e.seq=o.seq "
-            "WHERE e.type=? ORDER BY o.seq DESC LIMIT 3", (rt.UTTERANCE.name,)), cases, strict=False):
+            select(o.key, o.seq).join(e, e.seq == o.seq).where(e.type == rt.UTTERANCE.name)
+            .order_by(o.seq.desc(), o.key).limit(3)), cases, strict=False):
         urls.append(f"/inspecteur/evenement/{seq}")
         await kernel.mind.store.mark_outbox(key, status, error)
     return urls

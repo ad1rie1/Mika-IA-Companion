@@ -25,11 +25,12 @@ OWNERS = (SRC / "faculties" / "memory", SRC / "contracts" / "memory.py")
 #: les noms de ses tables, comme constantes de ``contracts.memory`` et comme texte SQL
 TABLE_NAMES = frozenset({"ITEMS_TABLE", "ABOUT_TABLE", "TOLD_TABLE", "TOLD_LINES_TABLE", "FORGETS_TABLE"})
 TABLE_TEXT = re.compile(r"\bmemory_(?:items|about|told_lines|told|refs|changes|forgets|testimonies|contests)\b")
-#: ce que les facultés et les plugins ne lisent pas (sauf la raison nommée)
-BEHIND = frozenset({"LEDGER_VIEW", "FORMER_VIEW", "SELECT_FORMER"})
+#: ce que les facultés et les plugins ne lisent pas (sauf la raison nommée) : par leur nom, leur texte en clair, ou les
+#: colonnes déclarées pour les lire par des requêtes (``FORMER``, ``LEDGER``, ADR 0101)
+BEHIND = frozenset({"LEDGER_VIEW", "FORMER_VIEW", "FORMER", "LEDGER"})
 ALLOWED_BEHIND = {
     # la pensée d'une croyance révisée cite l'ancienne et la nouvelle (sous la filiation des deux)
-    (SRC / "faculties" / "attention" / "watch.py", "SELECT_FORMER"),
+    (SRC / "faculties" / "attention" / "watch.py", "FORMER"),
 }
 
 

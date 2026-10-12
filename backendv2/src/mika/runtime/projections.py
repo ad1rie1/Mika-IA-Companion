@@ -1,7 +1,10 @@
 """Projections : modèles de lecture matérialisés depuis le journal.
 
 - T0 : tables dans ``mind.db``, appliquées dans la transaction d'ajout
-  (versionnées dans ``meta`` ; reconstruites au démarrage si la version change).
+  (versionnées dans ``meta`` ; reconstruites au démarrage si la version change :
+  supprimées, recréées, rejouées, la version écrite en dernier — sous MariaDB, où un
+  DDL valide ce qui précède, une reconstruction interrompue se refait simplement au
+  démarrage suivant, ADR 0101).
 - T1/T2 : tables dans ``views.db``, rattrapées par lots ; le point de contrôle
   est écrit dans la même transaction que les lignes (exactement une fois). Un
   événement qui échoue est réessayé puis mis en quarantaine — la projection
@@ -21,9 +24,13 @@ from collections.abc import Sequence
 from itertools import islice
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import delete, select, update
+
 from mika.kernel.events import Event
 from mika.kernel.faculty import ProjectorSpec, Tier
 from mika.kernel.state import Root
+from mika.ports.journal import MindMeta, ProjectorQuarantine, ProjectorState
+from mika.ports.sql import upsert
 from mika.ports.store import Sql
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.effects import with_content
@@ -43,7 +50,7 @@ async def ensure_t0(mind: Mind) -> list[str]:
         if spec.tier is not Tier.T0:
             continue
         key = f"t0:{spec.name}"
-        rows = mind.store.query_mind("SELECT value FROM meta WHERE key=?", (key,))
+        rows = mind.store.query_mind(select(MindMeta.value).where(MindMeta.key == key))
         current = int(rows[0][0]) if rows else None
         if current == spec.version:
             continue
@@ -55,7 +62,7 @@ async def ensure_t0(mind: Mind) -> list[str]:
             spec.projector.create(sql, "")
             if events:
                 spec.projector.apply(sql, events, "")
-            sql.execute("INSERT OR REPLACE INTO meta(key, value) VALUES(?,?)", (f"t0:{spec.name}", str(spec.version)))
+            upsert(sql, MindMeta, {"key": f"t0:{spec.name}", "value": str(spec.version)}, keys=["key"])
 
         await mind.store.run_mind(rebuild)
         rebuilt.append(spec.name)
@@ -115,8 +122,7 @@ class ProjectionWorker:
 
     def _create(self, sql: Sql, name: str, spec: ProjectorSpec, version: int) -> None:
         spec.projector.create(sql, suffix(version))
-        sql.execute("INSERT OR REPLACE INTO projector_state(name, version, applied_seq) VALUES(?,?,0)",
-                    (name, version))
+        upsert(sql, ProjectorState, {"name": name, "version": version, "applied_seq": 0}, keys=["name"])
 
     async def _follow(self, spec: ProjectorSpec, name: str, sfx: str) -> None:
         while True:
@@ -169,7 +175,7 @@ class ProjectionWorker:
                 spec.projector.apply(sql, events, sfx)
             else:
                 spec.projector.apply(sql, events, sfx, prep)
-            sql.execute("UPDATE projector_state SET applied_seq=? WHERE name=?", (last, name))
+            sql.execute(update(ProjectorState).where(ProjectorState.name == name).values(applied_seq=last))
 
         out = await acall(self.mind.store.run_views, fn, label=f"projection {name}")
         return not isinstance(out, Failed)
@@ -183,9 +189,8 @@ class ProjectionWorker:
         self.quarantined.append((name, ev.seq, error))
 
         def fn(sql: Sql) -> None:
-            sql.execute("INSERT OR REPLACE INTO projector_quarantine(name, seq, error) VALUES(?,?,?)",
-                        (name, ev.seq, error))
-            sql.execute("UPDATE projector_state SET applied_seq=? WHERE name=?", (ev.seq, name))
+            upsert(sql, ProjectorQuarantine, {"name": name, "seq": ev.seq, "error": error}, keys=["name", "seq"])
+            sql.execute(update(ProjectorState).where(ProjectorState.name == name).values(applied_seq=ev.seq))
 
         await self.mind.store.run_views(fn)
 
@@ -197,9 +202,9 @@ class ProjectionWorker:
         applied = self.mind.store.projector_state(building)[1]  # type: ignore[index]
 
         def switch(sql: Sql) -> None:
-            sql.execute("UPDATE projector_state SET version=?, applied_seq=? WHERE name=?",
-                        (spec.version, applied, spec.name))
-            sql.execute("DELETE FROM projector_state WHERE name=?", (building,))
+            sql.execute(update(ProjectorState).where(ProjectorState.name == spec.name)
+                        .values(version=spec.version, applied_seq=applied))
+            sql.execute(delete(ProjectorState).where(ProjectorState.name == building))
             call(spec.projector.drop, sql, suffix(old_version), label="abandon de l'ancienne version")
 
         await self.mind.store.run_views(switch)

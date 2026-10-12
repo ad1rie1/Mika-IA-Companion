@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from sqlalchemy import select
+
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import self_ as c
@@ -321,9 +323,10 @@ def _knowing(s: SelfState, frame: Frame) -> Table:
 
 
 def _changes(frame: Frame, ctx: InspectContext) -> Table:
+    v = memory_c.SELF_CHANGES
     rows = ctx.store.query_mind(
-        f"SELECT was, was_text, text, knowledge_kind, secret, changed_at FROM {memory_c.SELF_CHANGES_VIEW} "
-        f"ORDER BY changed_at DESC LIMIT {SHOWN}")
+        select(v.c.was, v.c.was_text, v.c.text, v.c.knowledge_kind, v.c.secret, v.c.changed_at)
+        .order_by(v.c.changed_at.desc(), v.c.item.desc(), v.c.was.desc()).limit(SHOWN))
     return Table((Column("avant"), Column("maintenant"), Column("sorte"), Column("quand")), tuple(
         (Text(clip(was_text)), Text(clip(text)) if not secret else Badge("à taire", tone="warn"),
          SELF_KIND_FR.get(kind, kind), When(at)) for _was, was_text, text, kind, secret, at in rows),
@@ -331,9 +334,11 @@ def _changes(frame: Frame, ctx: InspectContext) -> Table:
 
 
 def _defining(frame: Frame, ctx: InspectContext) -> Table:
+    v = memory_c.KNOWLEDGE
     rows = ctx.store.query_mind(
-        f"SELECT text, knowledge_kind, born_at, secret FROM {memory_c.KNOWLEDGE_VIEW} "
-        f"WHERE kind=? AND about_self >= 2 ORDER BY born_at DESC LIMIT {SHOWN}", (memory_c.BELIEF,))
+        select(v.c.text, v.c.knowledge_kind, v.c.born_at, v.c.secret)
+        .where(v.c.kind == memory_c.BELIEF, v.c.about_self >= 2).order_by(v.c.born_at.desc(), v.c.id.desc())
+        .limit(SHOWN))
     return Table((Column("ce qui la définit"), Column("sorte"), Column("depuis")), tuple(
         (Text(clip(text)) if not secret else Badge("à taire", tone="warn"), SELF_KIND_FR.get(kind, kind),
          When(at)) for text, kind, at, secret in rows),

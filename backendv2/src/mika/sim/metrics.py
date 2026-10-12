@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 from collections.abc import Sequence
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.contracts import transcript as transcript_c
@@ -72,7 +74,8 @@ def thread_consistent(driver: Driver, events: Sequence[Any]) -> tuple[bool, str]
     assert driver.kernel is not None
     expected = {e.seq for e in events if e.type.name == rt.PERCEPTION_RECEIVED.name}
     expected |= {e.seq for e in events if e.type.name == rt.UTTERANCE.name and e.data.visible}
-    rows = {r[0] for r in driver.kernel.mind.store.query_mind(f"SELECT id FROM {transcript_c.THREAD_TABLE}")}
+    t = transcript_c.thread_table()
+    rows = {r[0] for r in driver.kernel.mind.store.query_mind(select(t.c.id))}
     missing, extra = expected - rows, rows - expected
     return not missing and not extra, f"manquants {sorted(missing)[:5]}, en trop {sorted(extra)[:5]}"
 
@@ -81,6 +84,7 @@ def duplicate_items(driver: Driver) -> list[tuple[str, str]]:
     """Des éléments retenus en double (même sorte, même texte) — une panne
     entre l'appel du modèle et l'enregistrement ne doit jamais en créer."""
     assert driver.kernel is not None
-    rows = driver.kernel.mind.store.query_mind(
-        f"SELECT kind, text, COUNT(*) FROM {memory_c.LEDGER_VIEW} GROUP BY kind, text HAVING COUNT(*) > 1")
-    return [(k, t) for k, t, _n in rows]
+    v = memory_c.LEDGER
+    # compté en Python : sous MariaDB, un ``GROUP BY`` sur un texte long ne compare que son début (``max_sort_length``)
+    counts = Counter((k, t) for k, t in driver.kernel.mind.store.query_mind(select(v.c.kind, v.c.text)))
+    return sorted(key for key, n in counts.items() if n > 1)

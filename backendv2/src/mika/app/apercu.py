@@ -22,6 +22,7 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote
 
+from sqlalchemy import select
 from starlette.testclient import TestClient
 
 from mika.adapters.llm.config import BackendSpec, LiveGateway, LLMConfig
@@ -38,6 +39,7 @@ from mika.contracts import runtime as rt
 from mika.inspector.pages.journal import EPISODE_TABS
 from mika.inspector.pages.tools import TOOLS_PAGE
 from mika.kernel.events import Content, Origin
+from mika.ports.journal import JournalEvent
 from mika.ports.llm import LLMRequest, LLMResponse, Usage
 from mika.runtime.inspection import Inspection
 from mika.runtime.operations import perform
@@ -216,7 +218,8 @@ def export(out: Path) -> list[str]:
             said = client.portal.call(lambda: live.kernel.mind.store.latest(["episode.utterance"], 20))
             urls += [f"/inspecteur/parole/{utterance.seq}" for utterance in said]
             # Les liens du résumé et du déroulé doivent aussi pouvoir s'ouvrir dans l'aperçu statique.
-            event_ids = client.portal.call(lambda: live.kernel.mind.store.query_mind("SELECT seq FROM events ORDER BY seq"))
+            event_ids = client.portal.call(lambda: live.kernel.mind.store.query_mind(
+                select(JournalEvent.seq).order_by(JournalEvent.seq)))
             urls += [f"/inspecteur/evenement/{seq}" for seq, in event_ids]
             urls.append("/inspecteur/decisions/envers?personne=adrien")
             urls += ["/inspecteur/reglages/fournisseurs?enregistrement=backends&cle=",

@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import replace
 from types import SimpleNamespace as NS
 from zoneinfo import ZoneInfo
 
 import pytest
+from sqlalchemy import insert
 
 from mika.adapters.llm.config import BackendSpec, LLMConfig, build_gateway
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.contracts import memory as mc
 from mika.contracts import social as sc
+from mika.contracts.transcript import thread_table
 from mika.faculties.memory.consolidation import Consolidate, Index, _item_vector
 from mika.faculties.memory.extraction import Conversation, Extraction, Line, People, Speaker, XCroyance, parse
 from mika.faculties.memory.faculty import MemoryParams, MemoryState, _noted
@@ -34,26 +35,11 @@ from mika.sim.clock import run_virtual
 from mika.vocab.people import named_label
 from tests.fixtures.memory import Script
 from tests.fixtures.mika import boot, build, connect
+from tests.fixtures.sqldb import SqlDB
 
 
-class DB:
-    def __init__(self):
-        self.conn = sqlite3.connect(":memory:")
-
-    def execute(self, sql, args=()):
-        return self.conn.execute(sql, args)
-
-    def executemany(self, sql, rows):
-        return self.conn.executemany(sql, rows)
-
-    def query(self, sql, args=()):
-        return self.execute(sql, args).fetchall()
-
-    query_mind = query
-    query_views = query
-
-    async def run_views(self, f):
-        return f(self)
+class DB(SqlDB):
+    """Une base en mémoire derrière le port ``Sql`` (``tests.fixtures.sqldb``)."""
 
 
 @pytest.fixture
@@ -131,8 +117,8 @@ def test_exchange_deduplication_uses_history_after_budget_trimming():
 
 async def test_default_history_covers_the_gap_before_first_compaction(db):
     Thread().create(db, "")
-    db.executemany("INSERT INTO thread(id,at,role,person,text) VALUES(?,?,?,?,?)",
-                   [(i, DAY + i, "user", "user_2", f"Message {i}") for i in range(1, 62)])
+    db.execute(insert(thread_table()), [{"id": i, "at": DAY + i, "role": "user", "person": "user_2",
+                                         "text": f"Message {i}", "folded": f"message {i}"} for i in range(1, 62)])
     frame = NS(episode=NS(target="user_2", attrs={}), audience=None, root=None, now=DAY + 62,
                env=NS(params_of=lambda *a: TranscriptParams(), tz_of=lambda *a: ZoneInfo("UTC")))
     view = await _thread(TranscriptState(), frame, {"store": db})

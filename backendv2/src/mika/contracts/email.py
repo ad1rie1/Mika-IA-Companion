@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from mika.contracts.attention import Signal
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactKey
+from mika.ports.sql import HANDLE_MAX, fit
 
 OWNER = "email"
 MAIL = "mail"
@@ -34,7 +35,7 @@ HANDLE_PREFIX = "mail:"
 
 def address_handle(address: str) -> str:
     """``mail:alice@exemple.fr`` : le sujet (au sens de l'oubli) d'un correspondant."""
-    return f"{HANDLE_PREFIX}{address.strip().lower()}" if address.strip() else ""
+    return fit(f"{HANDLE_PREFIX}{address.strip().lower()}", HANDLE_MAX) if address.strip() else ""
 
 
 class MailNoticed(Signal):

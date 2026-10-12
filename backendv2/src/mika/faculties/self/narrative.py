@@ -12,6 +12,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
 from mika.contracts import self_ as c
@@ -182,25 +184,28 @@ def gather(frame: Frame, store: Any, s: SelfState, p: SelfParams, *, floor: Audi
     """La matière de son récit, devant ``floor`` (tout le monde) : rien qu'une audience quelconque ne pourrait
     entendre, rien qui la nomme ni nomme quelqu'un."""
     since = frame.now - p.narrative_lookback_us
+    v, lv = memory_c.KNOWLEDGE, memory_c.LIVED
     rows = knowns(store.query_mind(
-        f"{memory_c.SELECT_KNOWN} WHERE kind=? AND status='active' AND born_at >= ? ORDER BY id DESC LIMIT ?",
-        (memory_c.SOUVENIR, since, NARRATIVE_ROWS)), memory_c.KNOWN_COLUMNS)
-    cols = ", ".join(memory_c.KNOWN_COLUMNS)
-    lived_rows = store.query_mind(f"SELECT {cols}, gist FROM {memory_c.LIVED_VIEW} WHERE born_at >= ? "
-                                  "ORDER BY id DESC LIMIT ?", (since, NARRATIVE_ROWS))
+        memory_c.select_known().where(v.c.kind == memory_c.SOUVENIR, v.c.status == "active", v.c.born_at >= since)
+        .order_by(v.c.id.desc()).limit(NARRATIVE_ROWS)), memory_c.KNOWN_COLUMNS)
+    lived_rows = store.query_mind(memory_c.select_known(lv).add_columns(lv.c.gist)
+                                  .where(lv.c.born_at >= since).order_by(lv.c.id.desc()).limit(NARRATIVE_ROWS))
     lived_ids = {int(r[0]) for r in lived_rows}
     told, felt = material([k for k in rows if k.id not in lived_ids], frame, p.narrative_max_souvenirs)
     out = Material(told=told, felt=felt)
     resolve, presumed = identity_c.resolvers(frame.get)
+    # départagés par l'élément : la même liste sur les deux moteurs
     for k in knowns(store.query_mind(
-            f"{memory_c.SELECT_KNOWN} WHERE kind=? AND status='active' AND about_self >= 2 ORDER BY touched_at DESC "
-            "LIMIT 40", (memory_c.BELIEF,)), memory_c.KNOWN_COLUMNS):
+            memory_c.select_known().where(v.c.kind == memory_c.BELIEF, v.c.status == "active", v.c.about_self >= 2)
+            .order_by(v.c.touched_at.desc(), v.c.id.desc()).limit(40)), memory_c.KNOWN_COLUMNS):
         if len(out.beliefs) < BELIEFS_SHOWN and not k.secret and k.origin != memory_c.LIED \
                 and admits(k.lineage, None, floor, resolve=resolve, presumed=presumed).ok:
             out.beliefs.append(k.text)
+    c_ = memory_c.SELF_CHANGES
     changed = store.query_mind(
-        f"SELECT was, was_text, item, text, sensitivity, secret FROM {memory_c.SELF_CHANGES_VIEW} WHERE changed_at > ? "
-        "ORDER BY changed_at DESC LIMIT ?", (s.narrated_at, CHANGES_SHOWN))
+        select(c_.c.was, c_.c.was_text, c_.c.item, c_.c.text, c_.c.sensitivity, c_.c.secret)
+        .where(c_.c.changed_at > s.narrated_at)
+        .order_by(c_.c.changed_at.desc(), c_.c.item.desc(), c_.c.was.desc()).limit(CHANGES_SHOWN))
     for was, was_text, item, text, sensitivity, secret in changed:
         both = Lineage(requirements=(requirement(was, (), int(sensitivity), secret=bool(secret)),
                                      requirement(item, (), int(sensitivity), secret=bool(secret))))

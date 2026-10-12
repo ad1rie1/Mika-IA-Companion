@@ -16,6 +16,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import affect as affect_c
 from mika.contracts import identity as c
 from mika.contracts import memory as memory_c
@@ -207,8 +209,8 @@ def _named_exists(ctx: InspectContext, key: str) -> bool:
     """Une personne connue seulement de nom existe si la mémoire en parle."""
     if len(key) <= len(NAMED) or ctx.store is None:
         return False
-    rows = ctx.store.query_mind(f"SELECT 1 FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} WHERE person=? LIMIT 1", (key,))
-    return bool(rows)
+    a = memory_c.KNOWLEDGE_ABOUT
+    return bool(ctx.store.query_mind(select(a.c.item).where(a.c.person == key).limit(1)))
 
 
 def canonical(s: IdentityState, frame: Frame, ctx: InspectContext, key: str) -> str | None:
@@ -301,11 +303,11 @@ def waiting_names(s: IdentityState, store: Any) -> list[Waiting]:
     """Les noms dont on lui a parlé, encore libres, qu'une personne connue porte : un couple par personne, sauf
     ceux qu'un opérateur a écartés ; les arrivées les plus récentes d'abord. Lu dans le magasin, en lecture seule
     (l'index par personne de la mémoire), jamais dans une autre faculté."""
+    a, i = memory_c.KNOWLEDGE_ABOUT, memory_c.KNOWLEDGE
+    # un intervalle de clés (``name:`` ≤ clé < ``name;``) : comparé en binaire sur les deux moteurs
     rows = store.query_mind(
-        f"SELECT DISTINCT a.person FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} a JOIN {memory_c.KNOWLEDGE_VIEW} i "
-        "ON i.id = a.item "
-        "WHERE a.person >= ? AND a.person < ? AND i.status='active' AND i.kind IN (?, ?, ?)",
-        (NAMED, _NAMED_END, *NAMED_KINDS))
+        select(a.c.person).distinct().select_from(a.join(i, i.c.id == a.c.item))
+        .where(a.c.person >= NAMED, a.c.person < _NAMED_END, i.c.status == "active", i.c.kind.in_(list(NAMED_KINDS))))
     free = sorted({str(k) for (k,) in rows} - set(s.names))
     if not free:
         return []
@@ -329,11 +331,11 @@ def _named_items(store: Any, keys: Sequence[str]) -> dict[str, list[tuple[str, i
     """Ce que sa mémoire garde sous ces noms, par nom : (sorte, sensibilité, secret, qui le lui a confié, quand)."""
     if not keys:
         return {}
-    marks = ",".join("?" * len(keys))
+    a, i = memory_c.KNOWLEDGE_ABOUT, memory_c.KNOWLEDGE
     rows = store.query_mind(
-        f"SELECT a.person, i.kind, i.sensitivity, i.secret, i.told_by, i.born_at FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} "
-        f"a JOIN {memory_c.KNOWLEDGE_VIEW} i ON i.id = a.item WHERE a.person IN ({marks}) AND i.status='active' "
-        "AND i.kind IN (?, ?, ?)", (*keys, *NAMED_KINDS))
+        select(a.c.person, i.c.kind, i.c.sensitivity, i.c.secret, i.c.told_by, i.c.born_at)
+        .select_from(a.join(i, i.c.id == a.c.item))
+        .where(a.c.person.in_(list(keys)), i.c.status == "active", i.c.kind.in_(list(NAMED_KINDS))))
     out: dict[str, list[tuple[str, int, bool, tuple[str, ...], int]]] = {}
     for key, kind, sensitivity, secret, told_by, born_at in rows:
         try:

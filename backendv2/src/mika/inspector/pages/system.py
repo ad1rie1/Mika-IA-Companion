@@ -6,10 +6,14 @@ from __future__ import annotations
 import re
 import secrets as _secrets
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlencode
 
+from sqlalchemy import column, func, inspect, select
+from sqlalchemy import table as sa_table
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
@@ -51,6 +55,7 @@ from mika.kernel.inspect import (
     pct_fr,
     read_params,
 )
+from mika.ports.journal import JournalContent, JournalEvent, JournalOutbox, JournalSnapshot
 from mika.runtime import health
 from mika.runtime import operations as ops
 from mika.runtime.boundary import Failed, call
@@ -177,21 +182,19 @@ async def chronologie(ui: Any, request: Request) -> Any:
     values, _ = read_params(TIMELINE_PARAMS, request.query_params)
     ctx = ui.inspection.context(request.query_params)
     before = ctx.int_param("avant", 0) or None
-    kind = str(values["type"] or "")[:80]
+    # un type commence par ce qu'on tape, en minuscules (tous les types le sont) : un préfixe comparé tel quel, pareil
+    # sur les deux moteurs (``LIKE`` ignore la casse sous SQLite, pas sous MariaDB)
+    kind = str(values["type"] or "")[:80].lower()
     corr = str(values["correlation"] or "")[:160]
-    clauses, params = [], []
+    query = select(JournalEvent.seq)
     if kind:
-        clauses.append("type LIKE ? ESCAPE '\\'")
-        params.append(kind.replace("\\", "").replace("%", "").replace("_", "\\_") + "%")
+        query = query.where(func.substr(JournalEvent.type, 1, len(kind)) == kind)
     if corr:
-        clauses.append("correlation=?")
-        params.append(corr)
+        query = query.where(JournalEvent.correlation == corr)
     if before:
-        clauses.append("seq < ?")
-        params.append(before)
-    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        query = query.where(JournalEvent.seq < before)
     seqs = [int(r[0]) for r in kernel.mind.store.query_mind(
-        f"SELECT seq FROM events {where} ORDER BY seq DESC LIMIT {CHRONOLOGY_PAGE + 1}", tuple(params))]
+        query.order_by(JournalEvent.seq.desc()).limit(CHRONOLOGY_PAGE + 1))]
     found = sorted((ui.decode(s) for s in kernel.mind.store.get_events(seqs)), key=lambda e: -e.seq)
     events, pager = cursor_page(found, CHRONOLOGY_PAGE, current=before or 0)
     episodes = _episode_correlations(ui, {e.correlation for e in events})
@@ -220,10 +223,10 @@ def _episode_correlations(ui: Any, correlations: set[str]) -> set[str]:
     corrs = sorted(c for c in correlations if c)[:500]
     if not corrs:
         return set()
-    marks = ",".join("?" * len(corrs))
     rows = ui.kernel.mind.store.query_mind(
-        f"SELECT DISTINCT correlation FROM events WHERE type IN (?, ?) AND correlation IN ({marks})",
-        (rt.EPISODE_STARTED.name, rt.EPISODE_ENDED.name, *corrs))
+        select(JournalEvent.correlation).distinct()
+        .where(JournalEvent.type.in_([rt.EPISODE_STARTED.name, rt.EPISODE_ENDED.name]),
+               JournalEvent.correlation.in_(corrs)))
     return {str(r[0]) for r in rows}
 
 
@@ -418,18 +421,20 @@ async def anomalies(ui: Any, request: Request) -> list[Any]:
                       "l'exécuter.")
 async def sorties(ui: Any, request: Request) -> Any:
     store = ui.kernel.mind.store
-    counts = dict(store.query_mind("SELECT status, COUNT(*) FROM outbox GROUP BY status"))
+    o = JournalOutbox
+    counts = dict(store.query_mind(select(o.status, func.count()).group_by(o.status)))
     ctx = ui.inspection.context(request.query_params)
     status = request.query_params.get("etat", "")[:40]
     labels = OUTBOX_LABELS
     invalid = bool(status and status not in labels and status not in counts)
     if invalid:
         status = ""
-    where, args = ("WHERE status=?", (status,)) if status else ("", ())
-    total = int(store.query_mind(f"SELECT COUNT(*) FROM outbox {where}", args)[0][0])
+    where = (o.status == status,) if status else ()
+    total = int(store.query_mind(select(func.count()).select_from(o).where(*where))[0][0])
     pager = ctx.pager("page", size=PAGE, total=total)
-    rows = store.query_mind(f"SELECT key, seq, effect, status, attempts, last_error FROM outbox {where} "
-                            f"ORDER BY seq DESC LIMIT ? OFFSET ?", (*args, pager.size, pager.offset))
+    # départagés par la clé : un événement fait partir plusieurs effets (la même page sur les deux moteurs)
+    rows = store.query_mind(select(o.key, o.seq, o.effect, o.status, o.attempts, o.last_error).where(*where)
+                            .order_by(o.seq.desc(), o.key).limit(pager.size).offset(pager.offset))
     tones = OUTBOX_TONES
     chips = tuple(NavItem(f"{labels.get(k, k)}", Ref("local", "/inspecteur/systeme/sorties", k, (("etat", k),)),
                           count=n, active=k == status, tone=tones.get(k, "")) for k, n in sorted(counts.items()))
@@ -438,13 +443,13 @@ async def sorties(ui: Any, request: Request) -> Any:
     selected_problems = (status,) if status in OUTBOX_PROBLEMS else OUTBOX_PROBLEMS if not status else ()
     problem_total = sum(counts.get(st, 0) for st in selected_problems)
     problem_page = ctx.pager("page_problemes", size=OUTBOX_PROBLEMS_SHOWN, total=problem_total)
-    marks = ",".join("?" * len(selected_problems))
     problems = [{"key": key, "seq": seq, "label": _effect_label(ui, effect), "status": labels.get(st, st),
                  "tone": tones.get(st, "warn"), "error": names.detail(err) if err else "", "retry": st not in OUTBOX_SEEN_ONLY,
                  "hint": OUTBOX_GUIDANCE[st]}
                 for key, seq, effect, st, err in store.query_mind(
-                    f"SELECT key, seq, effect, status, last_error FROM outbox WHERE status IN ({marks}) "
-                    "ORDER BY seq DESC LIMIT ? OFFSET ?", (*selected_problems, problem_page.size, problem_page.offset))] if selected_problems else []
+                    select(o.key, o.seq, o.effect, o.status, o.last_error).where(o.status.in_(selected_problems))
+                    .order_by(o.seq.desc(), o.key).limit(problem_page.size).offset(problem_page.offset))] \
+        if selected_problems else []
     panel = Panel("outbox.html", {"problems": problems, "back": back,
                                   "problem_total": problem_total, "problem_pager": render._pager(problem_page, request.query_params),
                                   "panel_after_blocks": 3 if invalid else 2})
@@ -487,8 +492,8 @@ def _effect_label(ui: Any, effect: str) -> str:
 
 
 def _outbox_problems(ui: Any) -> int:
-    marks = ",".join("?" * len(OUTBOX_PROBLEMS))
-    rows = ui.kernel.mind.store.query_mind(f"SELECT COUNT(*) FROM outbox WHERE status IN ({marks})", OUTBOX_PROBLEMS)
+    rows = ui.kernel.mind.store.query_mind(select(func.count()).select_from(JournalOutbox)
+                                           .where(JournalOutbox.status.in_(OUTBOX_PROBLEMS)))
     return int(rows[0][0]) if rows else 0
 
 
@@ -506,7 +511,7 @@ async def outbox_post(ui: Any, request: Request) -> Response:
     else:
         key, what = str(data.get("cle", ""))[:300], str(data.get("faire", ""))
         store = ui.kernel.mind.store
-        found = store.query_mind("SELECT status, last_error FROM outbox WHERE key=?", (key,))
+        found = store.query_mind(select(JournalOutbox.status, JournalOutbox.last_error).where(JournalOutbox.key == key))
         if not found or found[0][0] not in OUTBOX_PROBLEMS or what not in ("relancer", "vu"):
             ui.flash(token, "warn", "Rien à faire : cet effet n'est plus en échec (déjà relancé ou vu ?).")
         elif what == "relancer" and found[0][0] in OUTBOX_SEEN_ONLY:
@@ -644,29 +649,19 @@ def _world_warnings(view: dict[str, Any]) -> list[tuple[dict[str, Any], list[str
 async def stockage(ui: Any, request: Request) -> list[Any]:
     store = ui.kernel.mind.store
     mind = ui.kernel.mind
-
-    def size(query: Any) -> int:
-        try:
-            pages = query("PRAGMA page_count")[0][0]
-            page = query("PRAGMA page_size")[0][0]
-            return int(pages) * int(page)
-        except (IndexError, TypeError, ValueError):
-            return 0
-
-    tables = {r[0] for r in store.query_mind("SELECT name FROM sqlite_master WHERE type='table'")}
+    mind_base = call(store.read_mind, _base, label="stockage : mind")
+    views_base = call(store.read_views, _base, label="stockage : views")
+    mind_base = mind_base if not isinstance(mind_base, Failed) else _Base("mind", None, " (illisible)", {})
+    views_base = views_base if not isinstance(views_base, Failed) else _Base("views", None, " (illisible)", {})
 
     def count(table: str) -> int:
-        if table not in tables:
-            return 0
-        rows = store.query_mind(f"SELECT COUNT(*) FROM {table}")  # noqa: S608 — un nom de table de cette liste
-        return int(rows[0][0]) if rows else 0
+        return mind_base.counts.get(table, 0)
 
     snap = store.latest_snapshot()
-    mind_size, views_size = size(store.query_mind), size(store.query_views)
     boots = mind.root.slices["kernel"].boots
     return [
-        Stats((Stat("mind.db", _bytes(mind_size), "sa vie : à sauvegarder"),
-               Stat("views.db", _bytes(views_size), "reconstruisible"),
+        Stats((Stat(mind_base.name, _size(mind_base), f"sa vie : à sauvegarder{mind_base.note}"),
+               Stat(views_base.name, _size(views_base), f"reconstruisible{views_base.note}"),
                Stat("Événements", mind.head, f"{boots} démarrage(s)"),
                Stat("Dernier instantané", f"seq {snap.seq}" if snap else "aucun",
                     ui.when_long(snap.at) if snap else "le démarrage rejoue tout"))),
@@ -676,12 +671,56 @@ async def stockage(ui: Any, request: Request) -> list[Any]:
             ("snapshots", count("snapshots"), "les instantanés (démarrage rapide)"),
             ("outbox", count("outbox"), "la file de sortie"),
             ("settings", count("settings"), "les réglages d'exploitation"),
-        ), title="Ce que garde mind.db"),
+        ), title=f"Ce que garde {mind_base.name}"),
         *backup_blocks(ui),
         Note("Sauvegarder : « mika --data DOSSIER backup ARCHIVES --keep 14 » (sans risque serveur en marche) ; "
              "vérifier : « mika --data DOSSIER verify ARCHIVE » ; restaurer (serveur arrêté) : « mika restore "
              "ARCHIVE ». Chaque sauvegarde (réussie ou non) et chaque vérification se notent ici.", "muted"),
     ]
+
+
+@dataclass(frozen=True, slots=True)
+class _Base:
+    """Une base telle que la page Stockage la montre : son nom, sa place (``None`` : le moteur ne la dit pas), ce
+    qu'en dit la mesure, et le nombre de lignes des tables qu'elle détaille."""
+
+    name: str
+    size: int | None
+    note: str
+    counts: dict[str, int]
+
+
+#: les tables de ``mind`` que la page détaille ; ``settings`` est à l'application (``app/settings.py``), qu'on ne
+#: nomme pas d'ici : compté par son nom
+_COUNTED = {"events": JournalEvent.__table__, "content": JournalContent.__table__,
+            "snapshots": JournalSnapshot.__table__, "outbox": JournalOutbox.__table__, "settings": sa_table("settings")}
+
+
+def _base(sql: Any) -> _Base:
+    """Une base lue par sa connexion : ses tables (``inspect`` de SQLAlchemy, jamais le catalogue d'un moteur) et sa
+    place, qui dépend du moteur et le dit — la taille du fichier sous SQLite, ce qu'InnoDB déclare de ses données et
+    de ses index sous MariaDB (``information_schema`` : une estimation, sans les journaux du serveur)."""
+    bind = sql.session.get_bind()
+    tables = set(inspect(bind).get_table_names())
+    counts = {name: int(sql.query(select(func.count()).select_from(t))[0][0])
+              for name, t in _COUNTED.items() if name in tables}
+    url = bind.engine.url
+    engine = sql.dialect.name
+    if engine == "sqlite":
+        path = Path(url.database) if url.database and url.database != ":memory:" else None
+        size = path.stat().st_size if path is not None and path.exists() else None
+        return _Base(path.name if path is not None else "en mémoire", size, "", counts)
+    if engine in ("mysql", "mariadb"):
+        info = sa_table("tables", column("table_schema"), column("data_length"), column("index_length"),
+                        schema="information_schema")
+        got = sql.query(select(func.coalesce(func.sum(info.c.data_length + info.c.index_length), 0))
+                        .where(info.c.table_schema == func.database()))
+        return _Base(str(url.database or engine), int(got[0][0] or 0), " (estimation d'InnoDB)", counts)
+    return _Base(str(url.database or engine), None, f" (place inconnue sous {engine})", counts)
+
+
+def _size(base: _Base) -> str:
+    return _bytes(base.size) if base.size is not None else "—"
 
 
 #: au-delà, une sauvegarde est « ancienne » (le tableau de bord le signale)

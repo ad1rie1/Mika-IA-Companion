@@ -615,7 +615,7 @@ def _knit(s: SocialState, e, cx) -> SocialState:
         item = d.item if e.type.name == memory_c.ATTESTED.name else e.seq
         edge = KnownRelation(other, relation.kind, status, item, e.at,
                              tuple(d.told_by), tuple(d.sources), d.secret, subjects)
-        key = f"{other}|{relation.kind}|{','.join(sorted(d.told_by))}"
+        key = c.relation_key(other, relation.kind, d.told_by)
         mine = relations.get(subject) or FrozenDict()
         relations = relations.delete(subject).set(subject, mine.delete(key).set(key, edge))
     return replace(s, relations=relation_cache(relations))

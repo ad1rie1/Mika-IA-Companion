@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import expression as expression_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
@@ -95,7 +97,8 @@ class Lies:
         who = clean_display_name(frame.get(identity_c.IDENTITY(person)).name) or phrase("memory.lie.someone")
         asked = ""
         if data.get("reply_to"):
-            rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id=?", (data["reply_to"],))
+            thread = transcript_c.thread_table()
+            rows = store.query_mind(select(thread.c.text).where(thread.c.id == data["reply_to"]))
             asked = clip(rows[0][0]) if rows and rows[0][0] else ""
         text = phrase("memory.lie.asked", who=who, asked=asked, said=said) if asked else \
             phrase("memory.lie.souvenir", who=who, said=said)

@@ -20,6 +20,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from sqlalchemy.exc import OperationalError
+
 from mika.contracts import attention as attention_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
@@ -263,10 +265,10 @@ def test_on_a_fresh_kernel_every_view_reads_and_says_there_is_nothing(tmp_path):
 
 
 class _NoTables:
-    """Un magasin où la projection n'existe pas encore."""
+    """Un magasin où la projection n'existe pas encore : toute lecture de ses tables lève, comme le moteur."""
 
-    def query_mind(self, sql: str, params: Any = ()) -> list[tuple[Any, ...]]:
-        return []
+    def query_mind(self, sql: Any, params: Any = ()) -> list[tuple[Any, ...]]:
+        raise OperationalError(str(sql), params, Exception("no such table"))
 
     def query_views(self, sql: str, params: Any = ()) -> list[tuple[Any, ...]]:
         return []

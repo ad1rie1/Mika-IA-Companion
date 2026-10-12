@@ -22,13 +22,27 @@ from collections.abc import Collection, Sequence
 from typing import Any
 
 import numpy as np
+from sqlalchemy import BigInteger, Column, Table, delete, func, or_, select
 
+from mika.ports.sql import Key, LongBlob, LongText, json_has, projection_table, upsert
 from mika.ports.vectors import Embedder, VectorItem
 
 #: la première réservation de la matrice (en lignes) ; elle double ensuite à la demande
 _MIN_CAPACITY = 64
 #: au plus tant de valeurs dans un filtre posé en SQL (la limite de paramètres de SQLite reste loin)
 _SQL_FILTER_MAX = 900
+
+
+def vectors_table(name: str) -> Table:
+    """La table d'un index (hors des migrations : un index jeté se reconstruit en replongeant les textes)."""
+    return projection_table(
+        name,
+        Column("key", BigInteger, primary_key=True, autoincrement=False),
+        Column("model", Key(200), primary_key=True),
+        Column("kind", LongText, nullable=False),
+        Column("persons", LongText, nullable=False),
+        Column("vec", LongBlob, nullable=False),
+    )
 
 
 async def _compute(fn, *args):
@@ -47,6 +61,7 @@ class SqliteVectorIndex:
         self.store = store
         self.embedder = embedder
         self.table = table
+        self._t = vectors_table(table)
         self.max_resident_vectors = max(1, max_resident_vectors)
         self._spilled = False
         self._lock = asyncio.Lock()
@@ -57,20 +72,15 @@ class SqliteVectorIndex:
         return self.embedder.name
 
     async def open(self) -> None:
-        table = self.table
-
-        def create(sql: Any) -> None:
-            sql.execute(f"CREATE TABLE IF NOT EXISTS {table}(key INTEGER NOT NULL, model TEXT NOT NULL, "
-                        "kind TEXT NOT NULL, persons TEXT NOT NULL, vec BLOB NOT NULL, PRIMARY KEY(key, model))")
-
-        await self.store.run_views(create)
-        count = self.store.query_views(f"SELECT COUNT(*) FROM {table} WHERE model=?", (self.model,))[0][0]
+        t = self._t
+        await self.store.run_views(lambda sql: sql.create(t))
+        count = self.store.query_views(select(func.count()).select_from(t).where(t.c.model == self.model))[0][0]
         if count > self.max_resident_vectors:
             self._reset([])
             self._spilled = True
             return
-        rows = self.store.query_views(f"SELECT key, kind, persons, vec FROM {table} WHERE model=? ORDER BY key",
-                                      (self.model,))
+        rows = self.store.query_views(select(t.c.key, t.c.kind, t.c.persons, t.c.vec)
+                                      .where(t.c.model == self.model).order_by(t.c.key))
         self._reset([(int(k), kind, tuple(json.loads(p)), np.frombuffer(v, dtype=np.float16).astype(np.float32))
                      for k, kind, p, v in rows])
 
@@ -152,8 +162,8 @@ class SqliteVectorIndex:
 
     def indexed(self) -> set[int]:
         if self._spilled:
-            return {int(k) for (k,) in self.store.query_views(
-                f"SELECT key FROM {self.table} WHERE model=?", (self.model,))}
+            t = self._t
+            return {int(k) for (k,) in self.store.query_views(select(t.c.key).where(t.c.model == self.model))}
         return set(self._pos)
 
     async def upsert(self, items: Sequence[VectorItem]) -> int:
@@ -162,12 +172,12 @@ class SqliteVectorIndex:
             return 0
         vecs = np.asarray(await self.embedder.embed([i.text for i in items]), dtype=np.float32)
         half = vecs.astype(np.float16)
-        table, model = self.table, self.model
-        rows = [(i.key, model, i.kind, json.dumps(sorted(i.persons), ensure_ascii=False), half[n].tobytes())
-                for n, i in enumerate(items)]
+        t, model = self._t, self.model
+        rows = [{"key": i.key, "model": model, "kind": i.kind, "persons": json.dumps(sorted(i.persons),
+                 ensure_ascii=False), "vec": half[n].tobytes()} for n, i in enumerate(items)]
 
         def write(sql: Any) -> None:
-            sql.executemany(f"INSERT OR REPLACE INTO {table}(key, model, kind, persons, vec) VALUES(?,?,?,?,?)", rows)
+            upsert(sql, t, rows, keys=["key", "model"])
 
         async with self._lock:
             await self.store.run_views(write)
@@ -217,12 +227,12 @@ class SqliteVectorIndex:
         Le verrou protège la cohérence entre les blocs ; le calcul quitte la boucle d'événements.
         Le coût CPU reste linéaire, la mémoire de travail est bornée à 1024 vecteurs.
         """
-        where, args = ["model=?"], [self.model]
+        t = self._t
+        where = [t.c.model == self.model]
         if kinds is not None:
             if not kinds:
                 return []
-            where.append(f"kind IN ({','.join('?' for _ in kinds)})")
-            args.extend(sorted(kinds))
+            where.append(t.c.kind.in_(sorted(kinds)))
         wanted = set(keys) if keys is not None else None
         people = set(persons) if persons is not None else None
         if (wanted is not None and not wanted) or (people is not None and not people):
@@ -231,11 +241,9 @@ class SqliteVectorIndex:
         # pas toute la mémoire (audit du 2026-10-08). Au-delà de ``_SQL_FILTER_MAX`` valeurs, le filtre reste en
         # Python (la limite de paramètres de SQLite) ; il est de toute façon réappliqué ci-dessous.
         if wanted is not None and len(wanted) <= _SQL_FILTER_MAX:
-            where.append(f"key IN ({','.join('?' for _ in wanted)})")
-            args.extend(sorted(wanted))
+            where.append(t.c.key.in_(sorted(wanted)))
         if people is not None and len(people) <= _SQL_FILTER_MAX:
-            where.append(f"EXISTS(SELECT 1 FROM json_each(persons) WHERE value IN ({','.join('?' for _ in people)}))")
-            args.extend(sorted(people))
+            where.append(or_(*(json_has(t.c.persons, p) for p in sorted(people))))
         best: list[tuple[int, float]] = []
         after = -1
 
@@ -244,11 +252,9 @@ class SqliteVectorIndex:
             return np.einsum("ij,j->i", mat, q, dtype=np.float64).astype(np.float32)
 
         while True:
-            query = (f"SELECT key, persons, vec FROM {self.table} WHERE {' AND '.join(where)} AND key>? "
-                     "ORDER BY key LIMIT 1024")
-            params = (*args, after)
+            query = select(t.c.key, t.c.persons, t.c.vec).where(*where, t.c.key > after).order_by(t.c.key).limit(1024)
             # La connexion appartient au worker du magasin, pas au thread de la boucle asyncio.
-            rows = await self.store.run_views(lambda sql, query=query, params=params: sql.query(query, params))
+            rows = await self.store.run_views(lambda sql, query=query: sql.query(query))
             if not rows:
                 break
             after = int(rows[-1][0])
@@ -288,15 +294,16 @@ class SqliteVectorIndex:
     async def forget(self, subject: str) -> int:
         """Retire les vecteurs de tout ce qui concerne ``subject``, pour tous les
         modèles (la table peut en garder plusieurs) ; rend combien de clés."""
-        table, like = self.table, f'%"{subject}"%'
+        t = self._t
 
-        def delete(sql: Any) -> int:
-            keys = {int(r[0]) for r in sql.query(f"SELECT key FROM {table} WHERE persons LIKE ?", (like,))}
-            sql.execute(f"DELETE FROM {table} WHERE persons LIKE ?", (like,))
+        def erase(sql: Any) -> int:
+            keys = {int(r[0]) for r in sql.query(select(t.c.key).where(json_has(t.c.persons, subject)))}
+            if keys:
+                sql.execute(delete(t).where(t.c.key.in_(sorted(keys))))
             return len(keys)
 
         async with self._lock:
-            removed = int(await self.store.run_views(delete) or 0)
+            removed = int(await self.store.run_views(erase) or 0)
             self._drop({int(self._keys[at]) for at in self._by_person.get(subject, ())})
         return removed
 
@@ -305,19 +312,19 @@ class SqliteVectorIndex:
         doomed = {int(k) for k in keys}
         if not doomed:
             return 0
-        table, rows = self.table, [(k,) for k in sorted(doomed)]
+        t, ids = self._t, sorted(doomed)
 
-        def delete(sql: Any) -> None:
-            sql.executemany(f"DELETE FROM {table} WHERE key=?", rows)
+        def erase(sql: Any) -> None:
+            for i in range(0, len(ids), 512):
+                sql.execute(delete(t).where(t.c.key.in_(ids[i:i + 512])))
 
         async with self._lock:
             before = len(self._pos.keys() & doomed)
             if self._spilled:
-                ids = sorted(doomed)
                 before = sum(int(self.store.query_views(
-                    f"SELECT COUNT(*) FROM {table} WHERE model=? AND key IN ({','.join('?' for _ in ids[i:i+512])})",
-                    (self.model, *ids[i:i+512]))[0][0]) for i in range(0, len(ids), 512))
-            await self.store.run_views(delete)
+                    select(func.count()).select_from(t).where(t.c.model == self.model, t.c.key.in_(ids[i:i + 512])))[0][0])
+                    for i in range(0, len(ids), 512))
+            await self.store.run_views(erase)
             self._drop(doomed)
             return before
 
@@ -347,9 +354,9 @@ class SqliteVectorIndex:
             self._n -= 1
 
     async def clear(self) -> None:
-        table, model = self.table, self.model
+        t, model = self._t, self.model
         async with self._lock:
-            await self.store.run_views(lambda sql: sql.execute(f"DELETE FROM {table} WHERE model=?", (model,)))
+            await self.store.run_views(lambda sql: sql.execute(delete(t).where(t.c.model == model)))
             self._reset([])
             self._spilled = False
 
@@ -357,9 +364,9 @@ class SqliteVectorIndex:
         h = hashlib.blake2b(digest_size=16)
         if self._spilled:
             after = -1
-            while rows := self.store.query_views(
-                f"SELECT key,vec FROM {self.table} WHERE model=? AND key>? ORDER BY key LIMIT 1024",
-                (self.model, after)):
+            t = self._t
+            while rows := self.store.query_views(select(t.c.key, t.c.vec).where(t.c.model == self.model, t.c.key > after)
+                                                 .order_by(t.c.key).limit(1024)):
                 for key, blob in rows:
                     h.update(str(key).encode())
                     h.update(blob)

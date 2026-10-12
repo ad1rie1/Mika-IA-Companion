@@ -31,6 +31,7 @@ from mika.contracts.memory import Relation
 from mika.kernel.clock import instant
 from mika.kernel.codec import digest
 from mika.ports.llm import LLMResponse, ToolDecl
+from mika.ports.sql import HANDLE_MAX, fit
 from mika.vocab.affect import facets, facets_valence
 from mika.vocab.circadian import DAYS_FR, MONTHS_FR
 from mika.vocab.people import clean_tokens, fold
@@ -577,7 +578,8 @@ class People:
                 key = found[0]
         if key is None and folded == self.first and len(found) != 1:
             return None  # son prénom seul, que personne d'autre de connu ne porte : c'est elle
-        return key or f"name:{self.scope}:{folded}"
+        # une mention inconnue devient une clé (``memory_about``…) : un « nom » démesuré y est ramené à sa borne
+        return key or fit(f"name:{self.scope}:{folded}", HANDLE_MAX)
 
     def resolve(self, names: Sequence[str]) -> tuple[str, ...]:
         return tuple(sorted({k for n in names if (k := self.one(n)) is not None}))

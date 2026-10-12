@@ -14,6 +14,8 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import identity as c
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
@@ -44,26 +46,25 @@ def _candidates(store: Any, s: IdentityState, person: str,
                 exclude: frozenset[int] = frozenset()) -> list[corroboration.Candidate]:
     """Ce que seule ``person`` pouvait savoir (voir ``corroboration``)."""
     own = set(handles_of(s, person)) | {person}
+    v = memory_c.KNOWLEDGE
     rows = store.query_mind(
-        f"SELECT id, text, sources FROM {memory_c.KNOWLEDGE_VIEW} WHERE id IN "
-        f"(SELECT item FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} WHERE person=?) AND sensitivity >= ? AND status='active' "
-        "AND kind IN (?, ?) ORDER BY id",
-        (person, int(privacy.Sensitivity.PERSONAL), memory_c.SOUVENIR, memory_c.BELIEF))
+        select(v.c.id, v.c.text, v.c.sources)
+        .where(memory_c.concerning(v, [person]), v.c.sensitivity >= int(privacy.Sensitivity.PERSONAL),
+               v.c.status == "active", v.c.kind.in_([memory_c.SOUVENIR, memory_c.BELIEF])).order_by(v.c.id))
     rows = [r for r in rows if int(r[0]) not in exclude]
     if not rows:
         return []
     sources = {int(i): [int(x) for x in json.loads(src or "[]")] for i, _t, src in rows}
     wanted = sorted({x for xs in sources.values() for x in xs})
     origin: dict[int, tuple[str, str | None]] = {}
+    t = transcript_c.thread_table()
     for start in range(0, len(wanted), 500):
         chunk = wanted[start:start + 500]
-        marks = ",".join("?" * len(chunk))
-        for mid, who, room in store.query_mind(
-                f"SELECT id, person, room FROM {transcript_c.THREAD_TABLE} WHERE id IN ({marks})", tuple(chunk)):
+        for mid, who, room in store.query_mind(select(t.c.id, t.c.person, t.c.room).where(t.c.id.in_(chunk))):
             origin[int(mid)] = (who, room)
     ids = [int(i) for i, _t, _s in rows]
-    marks = ",".join("?" * len(ids))
-    told = store.query_mind(f"SELECT item, handle FROM {memory_c.RETOLD_VIEW} WHERE item IN ({marks})", tuple(ids))
+    r = memory_c.RETOLD
+    told = store.query_mind(select(r.c.item, r.c.handle).where(r.c.item.in_(ids)))
     retold = {int(item) for item, handle in told if handle not in own}
     out = []
     for i, text, _src in rows:
@@ -76,8 +77,10 @@ def _candidates(store: Any, s: IdentityState, person: str,
 
 def _corpus(store: Any) -> list[str]:
     """Sa mémoire vivante (les plus récents d'abord, bornée) : la rareté d'un mot s'y mesure."""
-    rows = store.query_mind(f"SELECT text FROM {memory_c.KNOWLEDGE_VIEW} WHERE status='active' AND kind IN (?, ?) "
-                            "ORDER BY id DESC LIMIT ?", (memory_c.SOUVENIR, memory_c.BELIEF, corroboration.CORPUS_MAX))
+    v = memory_c.KNOWLEDGE
+    rows = store.query_mind(select(v.c.text).where(v.c.status == "active",
+                                                   v.c.kind.in_([memory_c.SOUVENIR, memory_c.BELIEF]))
+                            .order_by(v.c.id.desc()).limit(corroboration.CORPUS_MAX))
     return [str(r[0]) for r in rows]
 
 

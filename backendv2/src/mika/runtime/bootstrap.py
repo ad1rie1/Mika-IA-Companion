@@ -106,17 +106,18 @@ class KernelDeps:
 
 class ReadOnlyStore:
     """Ce que les facultés peuvent lire du magasin (enrichisseurs, effets) :
-    des requêtes SQL en lecture, jamais une écriture."""
+    des requêtes en lecture, jamais une écriture."""
 
     __slots__ = ("_store",)
 
     def __init__(self, store: EventStore) -> None:
         self._store = store
 
-    def query_mind(self, sql: str, params: Sequence[Any] = ()) -> list[tuple[Any, ...]]:
+    def query_mind(self, sql: Any, params: Sequence[Any] = ()) -> list[tuple[Any, ...]]:
+        """Une lecture de ``mind`` : une requête SQLAlchemy, ou du SQL écrit en clair."""
         return self._store.query_mind(sql, params)
 
-    def query_views(self, sql: str, params: Sequence[Any] = ()) -> list[tuple[Any, ...]]:
+    def query_views(self, sql: Any, params: Sequence[Any] = ()) -> list[tuple[Any, ...]]:
         return self._store.query_views(sql, params)
 
     def content(self, refs: Sequence[str]) -> dict[str, str]:

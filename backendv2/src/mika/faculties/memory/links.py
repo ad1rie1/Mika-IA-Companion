@@ -18,11 +18,15 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy import literal, or_, select, union
+
 from mika.contracts import identity as identity_c
-from mika.contracts import memory as c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
+from mika.faculties.memory.tables import about, handle_key, items, prefixed, told
 from mika.kernel.frame import Frame
+from mika.ports.paging import fold_text
+from mika.ports.sql import alias_of, json_has
 from mika.vocab.people import fold
 
 log = logging.getLogger(__name__)
@@ -32,30 +36,22 @@ def handles_of(frame: Frame, person: str) -> tuple[str, ...]:
     return tuple(sorted({person, *frame.get(identity_c.HANDLES(person))}))
 
 
-def _spellings(word: str) -> tuple[str, ...]:
-    """Les graphies d'un mot qu'un ``LIKE`` de SQLite ne confond pas d'office (il ne replie la casse que des lettres
-    sans accent) : « inès », « Inès », « INÈS », « ines »."""
-    low = word.lower()
-    return tuple(dict.fromkeys((low, low[:1].upper() + low[1:], low.upper(), fold(low))))
-
-
-def _like(word: str) -> str:
-    return "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+def _keys(values: tuple[str, ...]) -> list[str]:
+    return sorted({handle_key(v) for v in values})
 
 
 def _named_in(store: Any, writers: tuple[str, ...], name: str) -> bool:
     """Le nom (ou le prénom) de quelqu'un paraît-il dans ce que ces adresses lui ont écrit — sur tout l'historique ?
-    La base n'en rend que les messages qui contiennent le prénom sous une de ses graphies ; le mot entier se vérifie
-    ici (« Léa » n'est pas dans « léard »)."""
+    La base n'en rend que les messages dont le texte replié (``folded`` : casse et accents ignorés, pareil sur les deux
+    moteurs) contient le prénom replié ; le mot entier se vérifie ici (« Léa » n'est pas dans « léard »)."""
     parts = re.findall(r"\w+", fold(name))
     raw = re.findall(r"\w+", name)
     if not parts or len(parts[0]) < 3:
         return False
-    marks = ",".join("?" * len(writers))
-    spellings = _spellings(raw[0] if raw else parts[0])
-    likes = " OR ".join("text LIKE ? ESCAPE '\\'" for _ in spellings)
-    rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE role='user' AND person IN ({marks}) "
-                            f"AND ({likes})", (*writers, *(_like(w) for w in spellings)))
+    t = transcript_c.thread_table()
+    rows = store.query_mind(select(t.c.text).where(t.c.role == "user", t.c.person.in_(_keys(writers)),
+                                                   t.c.folded.contains(fold_text(raw[0] if raw else parts[0]),
+                                                                       autoescape=True)))
     first, full = f" {parts[0]} ", f" {' '.join(parts)} "
     for (text,) in rows:
         said = " " + " ".join(re.findall(r"\w+", fold(text or ""))) + " "
@@ -73,55 +69,61 @@ def written(store: Any, writers: tuple[str, ...], names: tuple[str, ...]) -> boo
 def _related(store: Any, a: tuple[str, ...], b: tuple[str, ...], depth: int) -> bool:
     """Le graphe social les relie-t-il — directement, ou (``depth`` 2) par quelqu'un qui connaît les deux ? Une
     relation dans un sens ou dans l'autre, quel qu'en soit l'état : un lien qui ferme n'a pas à être prouvé."""
-    ma, mb = ",".join("?" * len(a)), ",".join("?" * len(b))
-    edges = (f"(SELECT subject AS x, other AS y FROM {social_c.RELATIONS_TABLE} "
-             f"UNION SELECT other, subject FROM {social_c.RELATIONS_TABLE})")
-    if store.query_mind(f"SELECT 1 FROM {edges} WHERE x IN ({ma}) AND y IN ({mb}) LIMIT 1", (*a, *b)):
+    ka, kb = _keys(a), _keys(b)
+    r = social_c.relations_table()
+    edges = union(select(r.c.subject.label("x"), r.c.other.label("y")),
+                  select(r.c.other.label("x"), r.c.subject.label("y")))
+    e = edges.subquery("e")
+    if store.query_mind(select(literal(1)).select_from(e).where(e.c.x.in_(ka), e.c.y.in_(kb)).limit(1)):
         return True
     if depth < 2:
         return False
+    p, q = edges.subquery("p"), edges.subquery("q")
     return bool(store.query_mind(
-        f"SELECT 1 FROM {edges} p JOIN {edges} q ON p.y = q.y WHERE p.x IN ({ma}) AND q.x IN ({mb}) "
-        f"AND p.y NOT IN ({ma}) AND p.y NOT IN ({mb}) LIMIT 1", (*a, *b, *a, *b)))
+        select(literal(1)).select_from(p.join(q, p.c.y == q.c.y))
+        .where(p.c.x.in_(ka), q.c.x.in_(kb), p.c.y.not_in(ka), p.c.y.not_in(kb)).limit(1)))
 
 
 def _rooms(store: Any, handles: tuple[str, ...]) -> set[str]:
-    marks = ",".join("?" * len(handles))
+    t = transcript_c.thread_table()
     return {str(r) for (r,) in store.query_mind(
-        f"SELECT DISTINCT room FROM {transcript_c.THREAD_TABLE} WHERE room IS NOT NULL AND person IN ({marks})",
-        handles)}
+        select(t.c.room).distinct().where(t.c.room.is_not(None), t.c.person.in_(_keys(handles))))}
 
 
-def _told_about(store: Any, tellers: tuple[str, ...], about: tuple[str, ...]) -> bool:
+def _told_about(store: Any, tellers: tuple[str, ...], about_: tuple[str, ...]) -> bool:
     """L'un de ces témoins lui a-t-il parlé de l'une de ces clés (un élément qui les concerne, confié par lui) ?"""
-    marks = ",".join("?" * len(about))
-    rows = store.query_mind(f"SELECT DISTINCT i.told_by FROM {c.ABOUT_TABLE} a JOIN {c.ITEMS_TABLE} i ON i.id = a.item "
-                            f"WHERE a.person IN ({marks})", about)
-    return any(f'"{t}"' in (told or "") for (told,) in rows for t in tellers)
+    if not tellers:
+        return False
+    a, i = alias_of(about(), "a"), alias_of(items(), "i")
+    return bool(store.query_mind(
+        select(literal(1)).select_from(a.join(i, i.c.id == a.c.item))
+        .where(a.c.person.in_(_keys(about_)), or_(*(json_has(i.c.told_by, t) for t in sorted(set(tellers)))))
+        .limit(1)))
 
 
 def _named_together(store: Any, a: tuple[str, ...], b: tuple[str, ...]) -> bool:
-    ma, mb = ",".join("?" * len(a)), ",".join("?" * len(b))
+    x, y = alias_of(about(), "x"), alias_of(about(), "y")
     return bool(store.query_mind(
-        f"SELECT 1 FROM {c.ABOUT_TABLE} x JOIN {c.ABOUT_TABLE} y ON x.item = y.item "
-        f"WHERE x.person IN ({ma}) AND y.person IN ({mb}) LIMIT 1", (*a, *b)))
+        select(literal(1)).select_from(x.join(y, x.c.item == y.c.item))
+        .where(x.c.person.in_(_keys(a)), y.c.person.in_(_keys(b))).limit(1)))
 
 
-def _told_named(store: Any, listener: tuple[str, ...], about: tuple[str, ...]) -> bool:
+def _told_named(store: Any, listener: tuple[str, ...], about_: tuple[str, ...]) -> bool:
     """Lui a-t-elle déjà raconté nommément quelque chose de la personne ?"""
-    ml, ma = ",".join("?" * len(listener)), ",".join("?" * len(about))
+    t, a = alias_of(told(), "t"), alias_of(about(), "a")
     return bool(store.query_mind(
-        f"SELECT 1 FROM {c.TOLD_TABLE} t JOIN {c.ABOUT_TABLE} a ON a.item = t.item "
-        f"WHERE t.veiled = 0 AND t.handle IN ({ml}) AND a.person IN ({ma}) LIMIT 1", (*listener, *about)))
+        select(literal(1)).select_from(t.join(a, a.c.item == t.c.item))
+        .where(t.c.veiled == 0, t.c.handle.in_(_keys(listener)), a.c.person.in_(_keys(about_))).limit(1)))
 
 
 def _presumed_keys(store: Any, frame: Frame, person: str) -> tuple[str, ...]:
     """Les mentions (``name:…``) qu'elle présume désigner la personne (ADR 0075), dans ce qu'elle sait et dans le
     graphe social."""
-    keys = {str(k) for (k,) in store.query_mind(
-        f"SELECT person FROM {c.ABOUT_TABLE} WHERE person LIKE 'name:%' "
-        f"UNION SELECT subject FROM {social_c.RELATIONS_TABLE} WHERE subject LIKE 'name:%' "
-        f"UNION SELECT other FROM {social_c.RELATIONS_TABLE} WHERE other LIKE 'name:%'")}
+    ab, r = about(), social_c.relations_table()
+    keys = {str(k) for (k,) in store.query_mind(union(
+        select(ab.c.person).where(prefixed(ab.c.person, "name:")),
+        select(r.c.subject).where(prefixed(r.c.subject, "name:")),
+        select(r.c.other).where(prefixed(r.c.other, "name:"))))}
     return tuple(sorted(k for k in keys if frame.get(identity_c.PRESUMED(k)) == person))
 
 

@@ -45,6 +45,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import goals as c
@@ -83,6 +85,7 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard
+from mika.ports.sql import alias_of
 from mika.vocab import affect as A
 from mika.vocab.interests import EXPLORE_WEIGHT, LIVED, InterestView, subject_of
 from mika.vocab.people import is_identifiable
@@ -394,11 +397,14 @@ def talk_subjects(s: GoalsState, frame: Frame, store: Any, p: Any) -> list[Talk]
     attristée. Lu dans le fil, jamais deviné par un modèle."""
     if store is None or p.talk_lookback_us <= 0:
         return []
-    t = transcript_c.THREAD_TABLE
+    a, u = alias_of(transcript_c.thread_table(), "a"), alias_of(transcript_c.thread_table(), "u")
+    # départagé par la réponse : deux paroles qui répondent au même message, la première dit ce qu'elle a ressenti
+    # en le lisant (sur les deux moteurs)
     rows = store.query_mind(
-        f"SELECT u.id, u.at, u.person, u.room, u.text, a.emotion, a.emotion_intensity FROM {t} a JOIN {t} u "
-        "ON u.id = a.reply_to WHERE a.role='assistant' AND a.at >= ? AND u.role='user' ORDER BY u.id DESC LIMIT 60",
-        (frame.now - p.talk_lookback_us,))
+        select(u.c.id, u.c.at, u.c.person, u.c.room, u.c.text, a.c.emotion, a.c.emotion_intensity)
+        .select_from(a.join(u, u.c.id == a.c.reply_to))
+        .where(a.c.role == "assistant", a.c.at >= frame.now - p.talk_lookback_us, u.c.role == "user")
+        .order_by(u.c.id.desc(), a.c.id).limit(60))
     busy = _live_sources(s, frame.now)
     seen: set[int] = set()
     out: list[Talk] = []

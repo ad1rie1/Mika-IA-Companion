@@ -243,11 +243,13 @@ class Revise:
             # vit dans leur registre, pas dans la fiche
             her = self_c.name_of(frame.get(self_c.PERSONA))
             names = [frame.get(identity_c.IDENTITY(person)).name or "", her]
+            v = memory_c.KNOWLEDGE
             rows = knowns(store.query_mind(
-                f"{memory_c.SELECT_KNOWN} WHERE about=? AND told_by IN ('[]', ?) AND status='active' "
-                "AND kind IN (?, ?) AND between_us=0 AND secret=0 AND knowledge_kind NOT IN ('hypothesis','opinion') "
-                "ORDER BY importance DESC, id DESC LIMIT ?",
-                (only, only, memory_c.SOUVENIR, memory_c.BELIEF, p.profile_max_items * 2)), memory_c.KNOWN_COLUMNS)
+                memory_c.select_known().where(
+                    v.c.about == only, v.c.told_by.in_(["[]", only]), v.c.status == "active",
+                    v.c.kind.in_([memory_c.SOUVENIR, memory_c.BELIEF]), v.c.between_us == 0, v.c.secret == 0,
+                    v.c.knowledge_kind.not_in(["hypothesis", "opinion"]))
+                .order_by(v.c.importance.desc(), v.c.id.desc()).limit(p.profile_max_items * 2)), memory_c.KNOWN_COLUMNS)
             # … et ce que la personne peut entendre de sa propre fiche (le verdict de la mémoire : une réflexion de
             # nuit qui reprend ce qu'un autre a confié n'y entre pas)
             floor, (resolve, presumed) = private_to(person), identity_c.resolvers(frame.get)

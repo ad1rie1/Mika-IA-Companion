@@ -23,6 +23,13 @@ mémoire) ; ``memory_chunks`` est indexée par personne et par salon, dans le
 temps (« ce que je t'ai dit lundi » se lit sur l'intervalle, jamais par la
 liste de tous ses échanges) ; ``memory_forgets`` compte les oublis, pour que
 l'index des vecteurs se rapproche de ce qui reste sans tout relire.
+
+**Deux moteurs** (ADR 0101) : les tables se déclarent dans ``tables.py``, les écritures passent par SQLAlchemy
+(``upsert`` pour ce qui remplaçait, ``insert_ignore`` pour ce qui ignorait un doublon, ``greatest`` / ``least`` pour le
+``MAX(a, b)`` scalaire). « Cette liste JSON contient-elle ce sujet ? » est ``json_has`` : une égalité exacte, sensible
+à la casse — le ``LIKE '%"sujet"%'`` d'avant ignorait la casse ASCII sous SQLite et prenait ``_`` et ``%`` d'une
+adresse pour des jokers (``user_7`` attrapait ``userX7``). Ce que MariaDB refuse (une sous-requête sur la table qu'on
+met à jour, ``INSERT … SELECT`` sur elle-même) se lit d'abord, puis s'écrit.
 """
 
 from __future__ import annotations
@@ -30,6 +37,8 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Sequence
 from typing import Any
+
+from sqlalchemy import delete, func, or_, select, update
 
 from mika.contracts import mcp as mcp_c
 from mika.contracts import memory as c
@@ -39,9 +48,36 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.memory.extraction import IMPORTANCE
 from mika.faculties.memory.faculty import MEMORY
 from mika.faculties.memory.knowledge import Testimony, pooled
+from mika.faculties.memory.tables import (
+    CHANGES_TABLE,
+    CONTESTS_TABLE,
+    DEFERRED_TABLE,
+    EMOTION,
+    READING_COLUMNS,
+    READINGS_TABLE,
+    REFS_TABLE,
+    TESTIMONIES_TABLE,
+    TESTIMONY_COLUMNS,
+    about,
+    batches,
+    changes,
+    contests,
+    deferred,
+    feelings,
+    forgets,
+    handle_key,
+    items,
+    readings,
+    refs,
+    testimonies,
+    told,
+    told_lines,
+)
 from mika.kernel.builtin import SUBJECT_FORGOTTEN
 from mika.kernel.codec import digest
 from mika.kernel.faculty import Tier
+from mika.ports.paging import fold_text
+from mika.ports.sql import create_view, drop_view, fit, greatest, insert_ignore, json_has, least, upsert
 from mika.ports.store import Sql
 from mika.vocab.affect import FACET_DEFAULT, dominant, strip_prosody
 from mika.vocab.words import WORD, fold, same_words, stems
@@ -52,16 +88,6 @@ ITEM_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "con
                 "knowledge_kind", "holder", "constraints", "internal_only", "superseded_by", "as_of", "valid_until",
                 "felt", "empathy", "until", "precision", "likelihood", "gist", "veiled", "felt_from")
 CHUNK_TEXT_MAX = 600
-#: élément → la référence de son texte (``Content.ref``)
-REFS_TABLE = "memory_refs"
-#: une croyance → ses témoignages (ADR 0080) : qui le lui a dit, qui l'a entendu, ce que ça pèse, secret ou non
-TESTIMONIES_TABLE = "memory_testimonies"
-TESTIMONY_COLUMNS = ("item", "seq", "told_by", "informants", "origin", "confidence", "heard_by", "sensitivity",
-                     "secret", "between_us", "sources", "at", "speaks", "first_hand")
-#: deux croyances qui se contredisent sans que l'une remplace l'autre (``item``, ``other``, ``at``), dans les deux sens
-#: (ADR 0081) : elle doute
-CONTESTS_TABLE = "memory_contests"
-CHANGES_TABLE = "memory_changes"
 #: un élément → ses émotions, de qui (``theirs`` : la personne concernée ; ``hers`` : elle) et à quelle intensité
 #: (ADR 0083)
 FEELINGS_TABLE = c.FEELINGS_TABLE
@@ -92,28 +118,23 @@ def informants_of(source: str | None, told_by: Sequence[str]) -> tuple[str, ...]
 def _testify(sql: Sql, sfx: str, item: int, seq: int, *, told_by: Sequence[str], informants: Sequence[str],
              origin: str | None, confidence: float | None, heard_by: Sequence[str], sensitivity: int, secret: bool,
              between_us: bool, sources: Sequence[int], at: int, speaks: bool = True, first_hand: bool = False) -> None:
-    sql.execute(f"INSERT OR REPLACE INTO {TESTIMONIES_TABLE}{sfx}({','.join(TESTIMONY_COLUMNS)}) "
-                f"VALUES({','.join('?' * len(TESTIMONY_COLUMNS))})",
-                (item, seq, _keys(told_by), _keys(informants), origin or c.TOLD,
-                 0.5 if confidence is None else float(confidence), _keys(heard_by), int(sensitivity), int(secret),
-                 int(between_us), json.dumps(sorted(set(sources))), at, int(speaks), int(first_hand)))
+    values = (item, seq, _keys(told_by), _keys(informants), origin or c.TOLD,
+              0.5 if confidence is None else float(confidence), _keys(heard_by), int(sensitivity), int(secret),
+              int(between_us), json.dumps(sorted(set(sources))), at, int(speaks), int(first_hand))
+    upsert(sql, testimonies(sfx), dict(zip(TESTIMONY_COLUMNS, values, strict=True)), keys=["item", "seq"])
 
 
-def sfx_of(table: str) -> str:
-    """Le suffixe d'une table de la mémoire (``memory_items_v3`` → ``_v3`` ; T0 : rien)."""
-    return table[len(c.ITEMS_TABLE):]
-
-
-def _supersede(sql: Sql, t: str, sfx: str, old: int, new: int, at: int) -> None:
+def _supersede(sql: Sql, sfx: str, old: int, new: int, at: int) -> None:
     """``new`` remplace ``old`` : ce qu'elle croyait ne l'est plus, et sait par quoi (ADR 0081) ; le doute qui
     portait sur l'ancienne n'a plus d'objet."""
-    sql.execute(f"UPDATE {t} SET status='superseded', superseded_by=?, superseded_at=? WHERE id=?", (new, at, old))
-    sql.execute(f"DELETE FROM {CONTESTS_TABLE}{sfx} WHERE item=? OR other=?", (old, old))
+    t, ct = items(sfx), contests(sfx)
+    sql.execute(update(t).where(t.c.id == old).values(status="superseded", superseded_by=new, superseded_at=at))
+    sql.execute(delete(ct).where(or_(ct.c.item == old, ct.c.other == old)))
 
 
 def _contest(sql: Sql, sfx: str, item: int, other: int, at: int) -> None:
-    sql.executemany(f"INSERT OR REPLACE INTO {CONTESTS_TABLE}{sfx}(item, other, at) VALUES(?,?,?)",
-                    [(item, other, at), (other, item, at)])
+    upsert(sql, contests(sfx), [{"item": item, "other": other, "at": at}, {"item": other, "other": item, "at": at}],
+           keys=["item", "other"])
 
 
 def testimony_of(row: Sequence[Any]) -> Testimony:
@@ -124,29 +145,36 @@ def testimony_of(row: Sequence[Any]) -> Testimony:
                      int(r["at"]), bool(r["between_us"]), bool(r["speaks"]), bool(r["first_hand"]))
 
 
+def testimony_columns(sfx: str = "") -> list[Any]:
+    """Les colonnes de ``memory_testimonies`` dans l'ordre de ``TESTIMONY_COLUMNS`` (ce que lit ``testimony_of``)."""
+    tt = testimonies(sfx)
+    return [tt.c[n] for n in TESTIMONY_COLUMNS]
+
+
 def _testimonies(sql: Sql, sfx: str, item: int) -> list[Testimony]:
-    rows = sql.query(f"SELECT {','.join(TESTIMONY_COLUMNS)} FROM {TESTIMONIES_TABLE}{sfx} WHERE item=? ORDER BY seq",
-                     (item,))
+    tt = testimonies(sfx)
+    rows = sql.query(select(*testimony_columns(sfx)).where(tt.c.item == item).order_by(tt.c.seq))
     return [testimony_of(r) for r in rows]
 
 
-def _settle(sql: Sql, t: str, sfx: str, item: int) -> None:
+def _settle(sql: Sql, sfx: str, item: int) -> None:
     """L'enveloppe d'une croyance suit ses témoignages : qui le lui a appris (tous), et la confiance mise en commun de
     tous ses témoins (le rappel, lui, ne met en commun que ce que l'audience peut entendre)."""
     got = _testimonies(sql, sfx, item)
     if not got:
         return
-    row = sql.query(f"SELECT about FROM {t} WHERE id=?", (item,))
+    t, tt = items(sfx), testimonies(sfx)
+    row = sql.query(select(t.c.about).where(t.c.id == item))
     concerned = set(_loads(row[0][0])) if row else set()
     if any(x.secret and set(x.told_by) & concerned for x in got) and not all(x.secret for x in got):
         # la discrétion demandée par la personne concernée ferme tout — ce qui était déjà dit, et ce qu'un autre en
         # dira ensuite (ADR 0080) : Bob qui le redit après « garde-le pour toi » d'Alice ne l'ouvre pas
-        sql.execute(f"UPDATE {TESTIMONIES_TABLE}{sfx} SET secret=1 WHERE item=?", (item,))
-        sql.execute(f"UPDATE {t} SET secret=1 WHERE id=?", (item,))
+        sql.execute(update(tt).where(tt.c.item == item).values(secret=1))
+        sql.execute(update(t).where(t.c.id == item).values(secret=1))
         got = _testimonies(sql, sfx, item)
     informants = sorted({k for x in got for k in (x.informants or x.told_by)})
-    sql.execute(f"UPDATE {t} SET informants=?, confidence=? WHERE id=?",
-                (json.dumps(informants, ensure_ascii=False), pooled(got), item))
+    sql.execute(update(t).where(t.c.id == item)
+                .values(informants=json.dumps(informants, ensure_ascii=False), confidence=pooled(got)))
 
 
 def forgotten(text: Any) -> bool:
@@ -154,9 +182,8 @@ def forgotten(text: Any) -> bool:
     return text is not None and text.ref is not None and text.text is None
 
 
-def _about_rows(sql: Sql, table: str, item: int, keys: Iterable[str]) -> None:
-    sql.executemany(f"INSERT OR IGNORE INTO {table}(item, person) VALUES(?,?)",
-                    [(item, k) for k in sorted({k for k in keys if k})])
+def _about_rows(sql: Sql, sfx: str, item: int, keys: Iterable[str]) -> None:
+    insert_ignore(sql, about(sfx), [{"item": item, "person": k} for k in sorted({handle_key(k) for k in keys if k})])
 
 
 def used(item_text: str, said: str) -> bool:
@@ -168,34 +195,42 @@ def fingerprint(text: str) -> str:
     return digest(WORD.findall(fold(text)))
 
 
-VIEWS = (c.KNOWLEDGE_VIEW, c.KNOWLEDGE_ABOUT_VIEW, c.FORMER_VIEW, c.RETOLD_VIEW, c.LEDGER_VIEW, c.FEELINGS_VIEW,
+#: les vues de la porte (``contracts.memory``) que ``memory_items`` porte ; ``RETOLD_VIEW`` est à ``memory_told``
+VIEWS = (c.KNOWLEDGE_VIEW, c.KNOWLEDGE_ABOUT_VIEW, c.FORMER_VIEW, c.LEDGER_VIEW, c.FEELINGS_VIEW,
          c.SELF_CHANGES_VIEW, c.LIVED_VIEW)
 
 
 def create_views(sql: Sql, sfx: str) -> None:
-    """La porte de la mémoire (``contracts.memory``) : ce que les autres facultés lisent de ce qu'elle sait. Une vue
-    peut précéder la table qu'elle lit (``memory_told`` est un autre projecteur) et survit à sa reconstruction."""
-    t, about, told = f"{c.ITEMS_TABLE}{sfx}", f"{c.ABOUT_TABLE}{sfx}", f"{c.TOLD_TABLE}{sfx}"
-    cols = ", ".join(c.KNOWN_COLUMNS)
-    former = ", ".join(f"'{s}'" for s in c.FORMER_STATUSES)
-    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.KNOWLEDGE_VIEW}{sfx} AS SELECT {cols} FROM {t} "
-                f"WHERE status NOT IN ({former})")
-    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.KNOWLEDGE_ABOUT_VIEW}{sfx} AS SELECT a.item AS item, a.person AS person "
-                f"FROM {about} a JOIN {t} i ON i.id = a.item WHERE i.status NOT IN ({former})")
-    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.FORMER_VIEW}{sfx} AS SELECT {cols} FROM {t} WHERE status IN ({former})")
-    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.RETOLD_VIEW}{sfx} AS SELECT item, handle, at, veiled FROM {told}")
-    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.LEDGER_VIEW}{sfx} AS SELECT * FROM {t}")
-    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.FEELINGS_VIEW}{sfx} AS SELECT f.item AS item, f.whose AS whose, "
-                f"f.emotion AS emotion, f.intensity AS intensity FROM {c.FEELINGS_TABLE}{sfx} f "
-                f"JOIN {t} i ON i.id = f.item WHERE i.status NOT IN ({former})")
-    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.SELF_CHANGES_VIEW}{sfx} AS SELECT o.id AS was, o.text AS was_text, "
-                "n.id AS item, n.text AS text, n.knowledge_kind AS knowledge_kind, "
-                "MAX(o.sensitivity, n.sensitivity) AS sensitivity, MAX(o.secret, n.secret) AS secret, "
-                f"o.superseded_at AS changed_at FROM {t} o JOIN {t} n ON n.id = o.superseded_by "
-                "WHERE o.status = 'superseded' AND o.about_self > 0 AND n.about_self > 0 AND n.status = 'active' "
-                "AND o.internal_only = 0 AND n.internal_only = 0")
-    sql.execute(f"CREATE VIEW IF NOT EXISTS {c.LIVED_VIEW}{sfx} AS SELECT {cols}, gist FROM {t} "
-                f"WHERE kind = '{c.SOUVENIR}' AND gist != '' AND status NOT IN ({former})")
+    """La porte de la mémoire (``contracts.memory``) : ce que les autres facultés lisent de ce qu'elle sait. Chaque
+    vue est une requête compilée pour le moteur (``create_view``), créée après les tables qu'elle lit — MariaDB
+    refuse une vue sur une table qui n'existe pas encore ; la vue de ce qu'elle a répété (``RETOLD_VIEW``) naît
+    donc avec ``memory_told``, son propre projecteur."""
+    t, ab, ft = items(sfx), about(sfx), feelings(sfx)
+    known = [t.c[n] for n in c.KNOWN_COLUMNS]
+    held = t.c.status.not_in(c.FORMER_STATUSES)
+    create_view(sql, f"{c.KNOWLEDGE_VIEW}{sfx}", select(*known).where(held))
+    a, i = ab.alias("a"), t.alias("i")
+    create_view(sql, f"{c.KNOWLEDGE_ABOUT_VIEW}{sfx}",
+                select(a.c.item.label("item"), a.c.person.label("person"))
+                .select_from(a.join(i, i.c.id == a.c.item)).where(i.c.status.not_in(c.FORMER_STATUSES)))
+    create_view(sql, f"{c.FORMER_VIEW}{sfx}", select(*known).where(t.c.status.in_(c.FORMER_STATUSES)))
+    create_view(sql, f"{c.LEDGER_VIEW}{sfx}", select(*(t.c[n] for n in c.LEDGER_COLUMNS)))
+    f = ft.alias("f")
+    create_view(sql, f"{c.FEELINGS_VIEW}{sfx}",
+                select(f.c.item.label("item"), f.c.whose.label("whose"), f.c.emotion.label("emotion"),
+                       f.c.intensity.label("intensity"))
+                .select_from(f.join(i, i.c.id == f.c.item)).where(i.c.status.not_in(c.FORMER_STATUSES)))
+    o, n = t.alias("o"), t.alias("n")
+    create_view(sql, f"{c.SELF_CHANGES_VIEW}{sfx}",
+                select(o.c.id.label("was"), o.c.text.label("was_text"), n.c.id.label("item"), n.c.text.label("text"),
+                       n.c.knowledge_kind.label("knowledge_kind"),
+                       greatest(o.c.sensitivity, n.c.sensitivity).label("sensitivity"),
+                       greatest(o.c.secret, n.c.secret).label("secret"), o.c.superseded_at.label("changed_at"))
+                .select_from(o.join(n, n.c.id == o.c.superseded_by))
+                .where(o.c.status == "superseded", o.c.about_self > 0, n.c.about_self > 0, n.c.status == "active",
+                       o.c.internal_only == 0, n.c.internal_only == 0))
+    create_view(sql, f"{c.LIVED_VIEW}{sfx}",
+                select(*known, t.c.gist).where(t.c.kind == c.SOUVENIR, t.c.gist != "", held))
 
 
 def _facets_json(felt: Any) -> str:
@@ -205,80 +240,54 @@ def _facets_json(felt: Any) -> str:
 def _feel(sql: Sql, sfx: str, item: int, felt: Any, empathy: Any, emotion: str | None) -> None:
     """Relie un élément à ses émotions (ADR 0083) : ce que la personne en ressent (``theirs``), ce qu'elle-même en
     ressent (``hers`` — sa seule émotion pour un souvenir d'avant les facettes)."""
-    t = f"{FEELINGS_TABLE}{sfx}"
-    sql.execute(f"DELETE FROM {t} WHERE item=?", (item,))
+    ft = feelings(sfx)
+    sql.execute(delete(ft).where(ft.c.item == item))
     hers = [tuple(f) for f in empathy] or ([(emotion, FACET_DEFAULT)] if emotion else [])
-    rows = [(item, c.THEIRS, str(e), float(x)) for e, x in felt] + [(item, c.HERS, str(e), float(x)) for e, x in hers]
-    sql.executemany(f"INSERT OR REPLACE INTO {t}(item, whose, emotion, intensity) VALUES(?,?,?,?)", rows)
+    rows = [{"item": item, "whose": whose, "emotion": fit(str(e), EMOTION), "intensity": float(x)}
+            for whose, facets in ((c.THEIRS, felt), (c.HERS, hers)) for e, x in facets]
+    upsert(sql, ft, rows, keys=["item", "whose", "emotion"])
+
+
+#: ce qu'un élément inséré porte quand l'événement ne le dit pas
+_ITEM_DEFAULTS: dict[str, Any] = {
+    "confidence": None, "origin": None, "source": None, "emotion": None, "recalled_at": 0, "recalls": 0,
+    "replaces": None, "recipient": None, "due": None, "told_by": "[]", "heard_by": "[]", "secret": 0,
+    "informants": "[]", "about_self": 0, "shown_at": 0, "between_us": 0, "knowledge_kind": "claim", "holder": None,
+    "constraints": "[]", "internal_only": 0, "superseded_by": None, "superseded_at": None, "as_of": None,
+    "valid_until": None, "felt": "[]", "empathy": "[]", "until": None, "precision": "", "likelihood": None, "gist": "",
+    "veiled": "", "felt_from": None}
+#: ce qu'on relit d'un élément pour le renforcer, le fondre ou le joindre
+_ROW_COLUMNS = ("about", "told_by", "heard_by", "informants", "sensitivity", "secret", "importance", "sources", "text",
+                "constraints", "internal_only", "felt", "empathy", "emotion", "between_us")
 
 
 class Items:
     def create(self, sql: Sql, sfx: str) -> None:
-        sql.execute(
-            f"CREATE TABLE IF NOT EXISTS {c.ITEMS_TABLE}{sfx}(id INTEGER PRIMARY KEY, kind TEXT NOT NULL, "
-            "text TEXT NOT NULL, about TEXT NOT NULL, sensitivity INTEGER NOT NULL, importance REAL NOT NULL, "
-            "confidence REAL, origin TEXT, source TEXT, emotion TEXT, born_at INTEGER NOT NULL, "
-            "touched_at INTEGER NOT NULL, recalled_at INTEGER NOT NULL DEFAULT 0, recalls INTEGER NOT NULL DEFAULT 0, "
-            "status TEXT NOT NULL, replaces INTEGER, recipient TEXT, due INTEGER, sources TEXT NOT NULL, "
-            "told_by TEXT NOT NULL DEFAULT '[]', heard_by TEXT NOT NULL DEFAULT '[]', "
-            "secret INTEGER NOT NULL DEFAULT 0, informants TEXT NOT NULL DEFAULT '[]', "
-            "about_self INTEGER NOT NULL DEFAULT 0, shown_at INTEGER NOT NULL DEFAULT 0, "
-            "between_us INTEGER NOT NULL DEFAULT 0, knowledge_kind TEXT NOT NULL DEFAULT 'claim', holder TEXT, "
-            "constraints TEXT NOT NULL DEFAULT '[]', internal_only INTEGER NOT NULL DEFAULT 0, fingerprint TEXT NOT NULL DEFAULT '', "
-            "superseded_by INTEGER, superseded_at INTEGER, as_of INTEGER, valid_until INTEGER, "
-            "felt TEXT NOT NULL DEFAULT '[]', empathy TEXT NOT NULL DEFAULT '[]', until INTEGER, "
-            "precision TEXT NOT NULL DEFAULT '', likelihood REAL, gist TEXT NOT NULL DEFAULT '', "
-            "veiled TEXT NOT NULL DEFAULT '', felt_from INTEGER)"
-        )
-        t, about = f"{c.ITEMS_TABLE}{sfx}", f"{c.ABOUT_TABLE}{sfx}"
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_kind ON {t}(kind, status, born_at)")
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_fingerprint ON {t}"
-                    "(fingerprint, kind, status, about, told_by, heard_by)")
-        sql.execute(f"CREATE TABLE IF NOT EXISTS {about}(item INTEGER NOT NULL, person TEXT NOT NULL, "
-                    "PRIMARY KEY(item, person)) WITHOUT ROWID")
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {about}_person ON {about}(person, item)")
-        sql.execute(f"CREATE TABLE IF NOT EXISTS {REFS_TABLE}{sfx}(item INTEGER PRIMARY KEY, ref TEXT NOT NULL)")
-        sql.execute(f"CREATE TABLE IF NOT EXISTS {CHANGES_TABLE}{sfx}(item INTEGER PRIMARY KEY, seq INTEGER NOT NULL)")
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {CHANGES_TABLE}{sfx}_seq ON {CHANGES_TABLE}{sfx}(seq)")
-        sql.execute(f"CREATE TABLE IF NOT EXISTS {c.FORGETS_TABLE}{sfx}(n INTEGER NOT NULL)")
-        if not sql.query(f"SELECT 1 FROM {c.FORGETS_TABLE}{sfx}"):
-            sql.execute(f"INSERT INTO {c.FORGETS_TABLE}{sfx}(n) VALUES(0)")
-        sql.execute(f"CREATE TABLE IF NOT EXISTS {TESTIMONIES_TABLE}{sfx}(item INTEGER NOT NULL, seq INTEGER NOT NULL, "
-                    "told_by TEXT NOT NULL, informants TEXT NOT NULL, origin TEXT NOT NULL, confidence REAL NOT NULL, "
-                    "heard_by TEXT NOT NULL, sensitivity INTEGER NOT NULL, secret INTEGER NOT NULL, "
-                    "between_us INTEGER NOT NULL, sources TEXT NOT NULL, at INTEGER NOT NULL, speaks INTEGER NOT NULL, "
-                    "first_hand INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(item, seq))")
-        sql.execute(f"CREATE TABLE IF NOT EXISTS {CONTESTS_TABLE}{sfx}(item INTEGER NOT NULL, other INTEGER NOT NULL, "
-                    "at INTEGER NOT NULL, PRIMARY KEY(item, other)) WITHOUT ROWID")
-        # chaque élément relié à ses émotions (ADR 0083) : « ce qui t'énerve » se cherche par l'émotion
-        sql.execute(f"CREATE TABLE IF NOT EXISTS {FEELINGS_TABLE}{sfx}(item INTEGER NOT NULL, whose TEXT NOT NULL, "
-                    "emotion TEXT NOT NULL, intensity REAL NOT NULL, PRIMARY KEY(item, whose, emotion)) WITHOUT ROWID")
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {FEELINGS_TABLE}{sfx}_emotion ON {FEELINGS_TABLE}{sfx}"
-                    "(whose, emotion, intensity)")
+        sql.create(items(sfx), about(sfx), refs(sfx), changes(sfx), forgets(sfx), testimonies(sfx), contests(sfx),
+                   feelings(sfx))
+        ft = forgets(sfx)
+        if not sql.query(select(ft.c.id).limit(1)):
+            sql.execute(ft.insert().values(id=1, n=0))
         create_views(sql, sfx)
 
     def drop(self, sql: Sql, sfx: str) -> None:
         for view in VIEWS:
-            sql.execute(f"DROP VIEW IF EXISTS {view}{sfx}")
-        for table in (c.ITEMS_TABLE, c.ABOUT_TABLE, c.FORGETS_TABLE, REFS_TABLE, CHANGES_TABLE, TESTIMONIES_TABLE,
-                      CONTESTS_TABLE, FEELINGS_TABLE):
-            sql.execute(f"DROP TABLE IF EXISTS {table}{sfx}")
+            drop_view(sql, f"{view}{sfx}")
+        sql.drop(items(sfx), about(sfx), forgets(sfx), refs(sfx), changes(sfx), testimonies(sfx), contests(sfx),
+                 feelings(sfx))
 
     def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
-        t, about = f"{c.ITEMS_TABLE}{sfx}", f"{c.ABOUT_TABLE}{sfx}"
-        cols = ",".join(ITEM_COLUMNS)
-        marks = ",".join("?" * len(ITEM_COLUMNS))
+        t = items(sfx)
+        columns = (*ITEM_COLUMNS, "superseded_at", "fingerprint", "folded")
 
         def insert(row: dict[str, Any]) -> None:
-            full = {"confidence": None, "origin": None, "source": None, "emotion": None, "recalled_at": 0,
-                    "recalls": 0, "replaces": None, "recipient": None, "due": None, "told_by": "[]",
-                    "heard_by": "[]", "secret": 0, "informants": "[]", "about_self": 0, "shown_at": 0, "between_us": 0,
-                    "knowledge_kind": "claim", "holder": None, "constraints": "[]", "internal_only": 0,
-                    "superseded_by": None, "as_of": None, "valid_until": None, "felt": "[]", "empathy": "[]", "until": None,
-                    "precision": "", "likelihood": None, "gist": "", "veiled": "", "felt_from": None, **row}
-            sql.execute(f"INSERT OR REPLACE INTO {t}({cols},fingerprint) VALUES({marks},?)",
-                        (*[full[k] for k in ITEM_COLUMNS], fingerprint(full["text"])))
-            _about_rows(sql, about, int(full["id"]), _loads(full["about"]))
+            # « insérer ou remplacer » : toute la ligne, ``superseded_at`` compris (remis à rien, comme le faisait
+            # ``INSERT OR REPLACE``)
+            full = {**_ITEM_DEFAULTS, **row}
+            full["fingerprint"] = fingerprint(full["text"])
+            full["folded"] = fold_text(full["text"])
+            upsert(sql, t, {k: full[k] for k in columns}, keys=["id"])
+            _about_rows(sql, sfx, int(full["id"]), _loads(full["about"]))
             _feel(sql, sfx, int(full["id"]), json.loads(full["felt"]), json.loads(full["empathy"]), full["emotion"])
 
         for e in events:
@@ -296,13 +305,12 @@ class Items:
                 changed.update(i for pair in d.pairs for i in pair)
             if name == c.CONFRONTED.name:
                 changed.update(i for pair in (*d.supersedes, *d.contests) for i in pair)
-            sql.executemany(f"INSERT OR REPLACE INTO {CHANGES_TABLE}{sfx}(item, seq) VALUES(?,?)",
-                            [(i, e.seq) for i in sorted(changed)])
+            upsert(sql, changes(sfx), [{"item": i, "seq": e.seq} for i in sorted(changed)], keys=["item"])
             if name in _CREATES and forgotten(d.text):
                 continue  # relu après un oubli (une reconstruction) : ce qui a été oublié ne revient pas
             if name in _CREATES and d.text is not None and d.text.ref:
                 # la référence de son texte : l'oubli d'une personne rattachée depuis (un renfort) l'atteint aussi
-                sql.execute(f"INSERT OR REPLACE INTO {REFS_TABLE}{sfx}(item, ref) VALUES(?,?)", (e.seq, d.text.ref))
+                upsert(sql, refs(sfx), {"item": e.seq, "ref": d.text.ref}, keys=["item"])
             if name == c.REMEMBERED.name:
                 insert({"id": e.seq, "kind": c.SOUVENIR, "text": d.text.text or "", "about": _keys(d.about),
                         "sensitivity": d.sensitivity, "importance": d.importance,
@@ -336,7 +344,7 @@ class Items:
                          secret=d.secret, between_us=d.between_us, sources=d.sources, at=e.at,
                          first_hand=d.first_hand)
                 if d.replaces is not None:
-                    _supersede(sql, t, sfx, d.replaces, e.seq, e.at)
+                    _supersede(sql, sfx, d.replaces, e.seq, e.at)
                 if d.contests is not None:
                     _contest(sql, sfx, e.seq, d.contests, e.at)
             elif name == c.PROMISE_NOTICED.name:
@@ -352,85 +360,86 @@ class Items:
                         "felt": _facets_json(d.felt), "empathy": _facets_json(d.empathy), "until": d.until,
                         "precision": d.precision, "likelihood": d.likelihood})
                 if d.replaces is not None:
-                    sql.execute(f"UPDATE {t} SET status='superseded' WHERE id=? AND kind=?", (d.replaces, c.EVENT))
+                    sql.execute(update(t).where(t.c.id == d.replaces, t.c.kind == c.EVENT).values(status="superseded"))
             elif name == c.PROMISE_RESOLVED.name:
-                sql.execute(f"UPDATE {t} SET status=?, touched_at=? WHERE id=?", (d.status, e.at, d.promise))
+                sql.execute(update(t).where(t.c.id == d.promise).values(status=d.status, touched_at=e.at))
             elif name == c.SITUATION_ENDED.name:
-                sql.execute(f"UPDATE {t} SET status='ended', touched_at=? WHERE id=?", (e.at, d.event))
+                sql.execute(update(t).where(t.c.id == d.event).values(status="ended", touched_at=e.at))
             elif name == c.REINFORCED.name:
-                self._reinforce(sql, t, about, d, e.at)
-                self._reinforce_testimonies(sql, t, sfx, d, e.seq, e.at)
+                self._reinforce(sql, sfx, d, e.at)
+                self._reinforce_testimonies(sql, sfx, d, e.seq, e.at)
             elif name == c.ATTESTED.name:
-                self._attest(sql, t, about, sfx, d, e.seq, e.at)
+                self._attest(sql, sfx, d, e.seq, e.at)
             elif name == c.JOINED.name:
                 for keep, drop in d.pairs:
-                    self._join(sql, t, about, sfx, keep, drop, e.at, mute=d.mute)
+                    self._join(sql, sfx, keep, drop, e.at, mute=d.mute)
             elif name == c.CONFRONTED.name:
                 # la nuit a confronté deux témoins sur la même personne (ADR 0085)
                 for new, old in d.supersedes:
-                    _supersede(sql, t, sfx, old, new, e.at)
+                    _supersede(sql, sfx, old, new, e.at)
                 for a, b in d.contests:
                     _contest(sql, sfx, a, b, e.at)
             elif name == c.RESOLVED.name and d.nature == c.PREDICTION:
                 # une prévision constatée (ADR 0099) : de l'histoire — elle ne se montre plus à constater
-                sql.execute(f"UPDATE {t} SET status='resolved', touched_at=? WHERE id=? AND kind=?",
-                            (e.at, d.event, c.BELIEF))
+                sql.execute(update(t).where(t.c.id == d.event, t.c.kind == c.BELIEF)
+                            .values(status="resolved", touched_at=e.at))
             elif name == c.DELICATE.name:
                 # un sujet délicat de la personne : une confidence, pour tous ses témoignages (ADR 0099)
+                tt = testimonies(sfx)
                 for item in d.items:
-                    sql.execute(f"UPDATE {t} SET sensitivity=MAX(sensitivity, ?) WHERE id=?", (int(d.level), item))
-                    sql.execute(f"UPDATE {TESTIMONIES_TABLE}{sfx} SET sensitivity=MAX(sensitivity, ?) WHERE item=?",
-                                (int(d.level), item))
+                    sql.execute(update(t).where(t.c.id == item)
+                                .values(sensitivity=greatest(t.c.sensitivity, int(d.level))))
+                    sql.execute(update(tt).where(tt.c.item == item)
+                                .values(sensitivity=greatest(tt.c.sensitivity, int(d.level))))
             elif name == SUBJECT_FORGOTTEN.name:
-                self._forget_testimonies(sql, t, sfx, d.subject)
+                self._forget_testimonies(sql, sfx, d.subject)
             elif name == c.NIGHT_SORTED.name:
                 for keep, drop in d.merges:
-                    self._merge(sql, t, about, keep, drop, e.at)
+                    self._merge(sql, sfx, keep, drop, e.at)
             elif name == rt.UTTERANCE.name:
-                self._uttered(sql, t, d, e.at)
+                self._uttered(sql, sfx, d, e.at)
 
     @staticmethod
-    def _row(sql: Sql, t: str, item: int) -> dict[str, Any] | None:
-        columns = ("about", "told_by", "heard_by", "informants", "sensitivity", "secret", "importance", "sources", "text",
-                   "constraints", "internal_only", "felt", "empathy", "emotion")
-        got = sql.query(f"SELECT {','.join(columns)} FROM {t} WHERE id=?", (item,))
+    def _row(sql: Sql, sfx: str, item: int) -> dict[str, Any] | None:
+        t = items(sfx)
+        got = sql.query(select(*(t.c[k] for k in _ROW_COLUMNS)).where(t.c.id == item))
         if not got:
             return None
-        return dict(zip(columns, got[0], strict=True))
+        return dict(zip(_ROW_COLUMNS, got[0], strict=True))
 
-    def _reinforce(self, sql: Sql, t: str, about: str, d: Any, at: int) -> None:
+    def _reinforce(self, sql: Sql, sfx: str, d: Any, at: int) -> None:
         """Ce qui revient dure plus longtemps ; il garde la plus haute
         sensibilité, et les personnes, confidents et témoins s'unissent."""
-        row = self._row(sql, t, d.item)
+        row = self._row(sql, sfx, d.item)
         if row is None:
             return
+        t = items(sfx)
         sens = max(int(row["sensitivity"]), int(d.sensitivity)) if d.sensitivity is not None else int(row["sensitivity"])
         informants = _loads(row["informants"])
         if d.source or d.told_by:
             informants = [*informants, *informants_of(d.source, d.told_by)]
-        sql.execute(
-            f"UPDATE {t} SET sensitivity=?, about=?, told_by=?, heard_by=?, secret=?, informants=?, sources=? WHERE id=?",
+        sql.execute(update(t).where(t.c.id == d.item).values(
             # Un ancien renfort peut avoir été fondé sur une simple similarité. En rejouant le journal,
             # il ne doit pas élargir les permissions du texte conservé.
-            (sens, _keys([*_loads(row["about"]), *d.about]), row["told_by"],
-             row["heard_by"], int(bool(row["secret"]) or d.secret), _keys(informants),
-             json.dumps(sorted({*map(int, _loads(row["sources"])), *d.sources})),
-             d.item))
+            sensitivity=sens, about=_keys([*_loads(row["about"]), *d.about]), told_by=row["told_by"],
+            heard_by=row["heard_by"], secret=int(bool(row["secret"]) or d.secret), informants=_keys(informants),
+            sources=json.dumps(sorted({*map(int, _loads(row["sources"])), *d.sources}))))
         if not d.restricts:
             # ce qui revient dure plus longtemps — une discrétion demandée ferme sans rien redire : ni plus
             # d'importance, ni un oubli remis à zéro
-            sql.execute(f"UPDATE {t} SET touched_at=?, importance=MIN(1.0, importance + 0.05) WHERE id=?",
-                        (at, d.item))
-        _about_rows(sql, about, d.item, d.about)
+            sql.execute(update(t).where(t.c.id == d.item)
+                        .values(touched_at=at, importance=least(1.0, t.c.importance + 0.05)))
+        _about_rows(sql, sfx, d.item, d.about)
         if d.corroborated:
-            sql.execute(f"UPDATE {t} SET confidence=MIN(0.95, COALESCE(confidence, 0.5) + 0.1) WHERE id=?", (d.item,))
+            sql.execute(update(t).where(t.c.id == d.item)
+                        .values(confidence=least(0.95, func.coalesce(t.c.confidence, 0.5) + 0.1)))
         if d.between_us:
-            sql.execute(f"UPDATE {t} SET between_us=1 WHERE id=?", (d.item,))
+            sql.execute(update(t).where(t.c.id == d.item).values(between_us=1))
         if d.replaces is not None and d.replaces != d.item:
-            _supersede(sql, t, sfx_of(t), d.replaces, d.item, at)
+            _supersede(sql, sfx, d.replaces, d.item, at)
 
     @staticmethod
-    def _reinforce_testimonies(sql: Sql, t: str, sfx: str, d: Any, seq: int, at: int) -> None:
+    def _reinforce_testimonies(sql: Sql, sfx: str, d: Any, seq: int, at: int) -> None:
         """Un ancien renforcement d'une croyance (d'avant les témoignages) : sa discrétion et sa sensibilité valent pour
         tous ses témoignages ; corroboré, il compte un témoin de plus pour la confiance — un témoignage **muet**, qui
         n'ouvre aucune diffusion (il pouvait reposer sur une simple ressemblance)."""
@@ -438,45 +447,50 @@ class Items:
         if not first:
             return  # un souvenir, ou une croyance oubliée
         if d.secret or d.sensitivity is not None:
-            sql.execute(f"UPDATE {TESTIMONIES_TABLE}{sfx} SET secret=MAX(secret, ?), sensitivity=MAX(sensitivity, ?) "
-                        "WHERE item=?", (int(d.secret), int(d.sensitivity or 0), d.item))
+            tt = testimonies(sfx)
+            sql.execute(update(tt).where(tt.c.item == d.item)
+                        .values(secret=greatest(tt.c.secret, int(d.secret)),
+                                sensitivity=greatest(tt.c.sensitivity, int(d.sensitivity or 0))))
         if d.corroborated:
             base = first[0]
             _testify(sql, sfx, d.item, seq, told_by=base.told_by, informants=informants_of(d.source, d.told_by),
                      origin=c.TOLD, confidence=0.8, heard_by=base.heard_by, sensitivity=base.sensitivity,
                      secret=base.secret, between_us=base.between_us, sources=d.sources, at=at, speaks=False)
-        _settle(sql, t, sfx, d.item)
+        _settle(sql, sfx, d.item)
 
-    def _attest(self, sql: Sql, t: str, about: str, sfx: str, d: Any, seq: int, at: int) -> None:
+    def _attest(self, sql: Sql, sfx: str, d: Any, seq: int, at: int) -> None:
         """Un témoignage de plus — ou une discrétion demandée : sur le témoignage de qui la demande, ou sur tous
         quand c'est la personne concernée (ADR 0080)."""
-        row = self._row(sql, t, d.item)
+        row = self._row(sql, sfx, d.item)
         if row is None:
             return  # oubliée entre-temps
-        tt = f"{TESTIMONIES_TABLE}{sfx}"
+        t, tt = items(sfx), testimonies(sfx)
         mine = _keys(d.told_by)
         if d.restricts:
             for got in _testimonies(sql, sfx, d.item):
                 if d.everyone or set(got.told_by) & set(d.told_by) or (not got.told_by and not d.told_by):
-                    sql.execute(f"UPDATE {tt} SET secret=1, sensitivity=MAX(sensitivity, ?) WHERE item=? AND seq=?",
-                                (int(d.sensitivity), d.item, got.seq))
-            sql.execute(f"UPDATE {t} SET secret=1, sensitivity=MAX(sensitivity, ?) WHERE id=?",
-                        (int(d.sensitivity), d.item))
+                    sql.execute(update(tt).where(tt.c.item == d.item, tt.c.seq == got.seq)
+                                .values(secret=1, sensitivity=greatest(tt.c.sensitivity, int(d.sensitivity))))
+            sql.execute(update(t).where(t.c.id == d.item)
+                        .values(secret=1, sensitivity=greatest(t.c.sensitivity, int(d.sensitivity))))
         else:
             informants = _keys(informants_of(d.source, d.told_by))
-            same = sql.query(f"SELECT seq, sources FROM {tt} WHERE item=? AND told_by=? AND informants=? AND "
-                             "heard_by=? AND secret=? AND between_us=? AND speaks=1",
-                             (d.item, mine, informants, _keys(d.heard_by), int(d.secret), int(d.between_us)))
+            # le plus ancien d'abord : deux témoignages identiques ne se départagent pas au hasard du moteur
+            same = sql.query(select(tt.c.seq, tt.c.sources)
+                             .where(tt.c.item == d.item, tt.c.told_by == mine, tt.c.informants == informants,
+                                    tt.c.heard_by == _keys(d.heard_by), tt.c.secret == int(d.secret),
+                                    tt.c.between_us == int(d.between_us), tt.c.speaks == 1)
+                             .order_by(tt.c.seq))
             testimony = seq
             if same:
                 # la même personne, de la même façon, de la même source : elle le redit — la date et les messages,
                 # rien de plus sûr
                 kept_seq, kept_sources = same[0]
                 testimony = int(kept_seq)
-                sql.execute(f"UPDATE {tt} SET at=?, sources=?, confidence=MAX(confidence, ?), "
-                            "sensitivity=MAX(sensitivity, ?) WHERE item=? AND seq=?",
-                            (at, json.dumps(sorted({*map(int, _loads(kept_sources)), *d.sources})), d.confidence,
-                             int(d.sensitivity), d.item, kept_seq))
+                sql.execute(update(tt).where(tt.c.item == d.item, tt.c.seq == kept_seq).values(
+                    at=at, sources=json.dumps(sorted({*map(int, _loads(kept_sources)), *d.sources})),
+                    confidence=greatest(tt.c.confidence, d.confidence),
+                    sensitivity=greatest(tt.c.sensitivity, int(d.sensitivity))))
             else:
                 _testify(sql, sfx, d.item, seq, told_by=d.told_by, informants=informants_of(d.source, d.told_by),
                          origin=d.origin, confidence=d.confidence, heard_by=d.heard_by, sensitivity=d.sensitivity,
@@ -484,129 +498,136 @@ class Items:
                          first_hand=d.first_hand)
             if d.secret:
                 # ce qu'une personne demande de garder pour soi vaut pour tout ce qu'elle en a dit
-                sql.execute(f"UPDATE {tt} SET secret=1 WHERE item=? AND told_by=?", (d.item, mine))
+                sql.execute(update(tt).where(tt.c.item == d.item, tt.c.told_by == mine).values(secret=1))
             if d.about_self and d.durable:
                 # une anecdote redite comme ce qui la définit le devient (ADR 0087)
-                sql.execute(f"UPDATE {t} SET about_self=2, importance=MAX(importance, ?), "
-                            "knowledge_kind=COALESCE(?, knowledge_kind) WHERE id=? AND about_self=1",
-                            (IMPORTANCE[3], d.knowledge_kind, d.item))
-            sql.execute(
-                f"UPDATE {t} SET touched_at=?, importance=MIN(1.0, importance + 0.05), sensitivity=MAX(sensitivity, ?), "
-                "secret=MAX(secret, ?), about=?, sources=?, between_us=MAX(between_us, ?) WHERE id=?",
-                (at, int(d.sensitivity), int(d.secret), _keys([*_loads(row["about"]), *d.about]),
-                 json.dumps(sorted({*map(int, _loads(row["sources"])), *d.sources})), int(d.between_us), d.item))
-            _about_rows(sql, about, d.item, d.about)
+                sql.execute(update(t).where(t.c.id == d.item, t.c.about_self == 1).values(
+                    about_self=2, importance=greatest(t.c.importance, IMPORTANCE[3]),
+                    knowledge_kind=func.coalesce(d.knowledge_kind, t.c.knowledge_kind)))
+            sql.execute(update(t).where(t.c.id == d.item).values(
+                touched_at=at, importance=least(1.0, t.c.importance + 0.05),
+                sensitivity=greatest(t.c.sensitivity, int(d.sensitivity)), secret=greatest(t.c.secret, int(d.secret)),
+                about=_keys([*_loads(row["about"]), *d.about]),
+                sources=json.dumps(sorted({*map(int, _loads(row["sources"])), *d.sources})),
+                between_us=greatest(t.c.between_us, int(d.between_us))))
+            _about_rows(sql, sfx, d.item, d.about)
             if d.felt and (not json.loads(row["felt"] or "[]") or set(d.told_by) & set(_loads(row["about"]))):
                 # ce que la personne en ressent : son mot à elle l'emporte sur celui d'un autre (ADR 0083) — et l'on
                 # sait de quel témoignage il vient : il ne se dit que là où ce témoignage peut s'entendre
-                sql.execute(f"UPDATE {t} SET felt=?, felt_from=? WHERE id=?", (_facets_json(d.felt), testimony, d.item))
+                sql.execute(update(t).where(t.c.id == d.item).values(felt=_facets_json(d.felt), felt_from=testimony))
                 _feel(sql, sfx, d.item, [list(f) for f in d.felt], json.loads(row["empathy"] or "[]"), row["emotion"])
         if d.replaces is not None and d.replaces != d.item:
             # ce qu'elle croyait, redit, revient (ADR 0081) : la croyance qui l'avait remplacée le cède
-            sql.execute(f"UPDATE {t} SET status='active', superseded_by=NULL, superseded_at=NULL "
-                        "WHERE id=? AND status='superseded'", (d.item,))
-            _supersede(sql, t, sfx, d.replaces, d.item, at)
+            sql.execute(update(t).where(t.c.id == d.item, t.c.status == "superseded")
+                        .values(status="active", superseded_by=None, superseded_at=None))
+            _supersede(sql, sfx, d.replaces, d.item, at)
         if d.contests is not None and d.contests != d.item:
             _contest(sql, sfx, d.item, d.contests, at)
-        _settle(sql, t, sfx, d.item)
+        _settle(sql, sfx, d.item)
 
-    def _join(self, sql: Sql, t: str, about: str, sfx: str, keep: int, drop: int, at: int, *,
-              mute: bool = False) -> None:
+    def _join(self, sql: Sql, sfx: str, keep: int, drop: int, at: int, *, mute: bool = False) -> None:
         """La nuit, la même croyance dite par un autre (un doublon d'avant les témoignages) devient un témoignage de
         la gardée : ses témoignages passent, l'enveloppe garde le plus strict de chacune. ``mute`` : d'autres mots,
         jugés la même chose — ses témoignages passent muets (la confiance, jamais la diffusion, ADR 0085)."""
-        a, b = self._row(sql, t, keep), self._row(sql, t, drop)
+        a, b = self._row(sql, sfx, keep), self._row(sql, sfx, drop)
         if a is None or b is None:
             return
-        sql.execute(f"UPDATE {TESTIMONIES_TABLE}{sfx} SET item=?, speaks=CASE WHEN ? THEN 0 ELSE speaks END "
-                    "WHERE item=?", (keep, mute, drop))
-        sql.execute(
-            f"UPDATE {t} SET importance=?, sensitivity=?, secret=?, about=?, sources=?, touched_at=MAX(touched_at, ?) "
-            "WHERE id=?",
-            (max(float(a["importance"]), float(b["importance"])), max(int(a["sensitivity"]), int(b["sensitivity"])),
-             int(bool(a["secret"]) or bool(b["secret"])), _keys([*_loads(a["about"]), *_loads(b["about"])]),
-             json.dumps(sorted({*map(int, _loads(a["sources"])), *map(int, _loads(b["sources"]))})), at, keep))
-        sql.execute(f"UPDATE {t} SET between_us=MAX(between_us, (SELECT between_us FROM {t} WHERE id=?)) WHERE id=?",
-                    (drop, keep))
-        _about_rows(sql, about, keep, _loads(b["about"]))
-        sql.execute(f"UPDATE {t} SET status='joined' WHERE id=?", (drop,))
-        _settle(sql, t, sfx, keep)
+        t, tt = items(sfx), testimonies(sfx)
+        sql.execute(update(tt).where(tt.c.item == drop).values(item=keep, **({"speaks": 0} if mute else {})))
+        sql.execute(update(t).where(t.c.id == keep).values(
+            importance=max(float(a["importance"]), float(b["importance"])),
+            sensitivity=max(int(a["sensitivity"]), int(b["sensitivity"])),
+            secret=int(bool(a["secret"]) or bool(b["secret"])), about=_keys([*_loads(a["about"]), *_loads(b["about"])]),
+            sources=json.dumps(sorted({*map(int, _loads(a["sources"])), *map(int, _loads(b["sources"]))})),
+            touched_at=greatest(t.c.touched_at, at),
+            # ce qui n'appartenait qu'à elles dans la jointe le reste dans la gardée (lu avant : MariaDB refuse une
+            # sous-requête sur la table qu'on met à jour)
+            between_us=greatest(t.c.between_us, int(b["between_us"]))))
+        _about_rows(sql, sfx, keep, _loads(b["about"]))
+        sql.execute(update(t).where(t.c.id == drop).values(status="joined"))
+        _settle(sql, sfx, keep)
 
     @staticmethod
-    def _forget_testimonies(sql: Sql, t: str, sfx: str, subject: str) -> None:
+    def _forget_testimonies(sql: Sql, sfx: str, subject: str) -> None:
         """Un témoin oublié emporte son témoignage — y compris quand la projection se reconstruit (le journal rejoue
         ses témoignages, puis son oubli)."""
-        like = f'%"{subject}"%'
-        tt = f"{TESTIMONIES_TABLE}{sfx}"
-        items = [int(i) for (i,) in sql.query(f"SELECT DISTINCT item FROM {tt} WHERE told_by LIKE ? OR informants LIKE ?",
-                                               (like, like))]
-        sql.execute(f"DELETE FROM {tt} WHERE told_by LIKE ? OR informants LIKE ?", (like, like))
-        for item in items:
-            _settle(sql, t, sfx, item)
+        tt = testimonies(sfx)
+        named = or_(json_has(tt.c.told_by, subject), json_has(tt.c.informants, subject))
+        touched = sorted({int(i) for (i,) in sql.query(select(tt.c.item).distinct().where(named))})
+        sql.execute(delete(tt).where(named))
+        for item in touched:
+            _settle(sql, sfx, item)
 
-    def _merge(self, sql: Sql, t: str, about: str, keep: int, drop: int, at: int) -> None:
+    def _merge(self, sql: Sql, sfx: str, keep: int, drop: int, at: int) -> None:
         """La nuit, un souvenir se fond dans un autre : le gardé prend le plus
         haut de chaque et l'union des personnes — une confidence fondue dans un
         souvenir anodin reste une confidence."""
-        a, b = self._row(sql, t, keep), self._row(sql, t, drop)
-        if a is None or b is None or any(a[k] != b[k] for k in ("about", "told_by", "heard_by", "secret", "constraints", "internal_only")):
+        a, b = self._row(sql, sfx, keep), self._row(sql, sfx, drop)
+        if a is None or b is None or any(a[k] != b[k] for k in ("about", "told_by", "heard_by", "secret", "constraints",
+                                                                 "internal_only")):
             return  # même lors du rejeu d'un ancien journal, aucune permission ne s'élargit
         if not same_words(a["text"], b["text"]):
             return  # une négation ou un détail différent ne disparaît pas dans un quasi-doublon
-        if a is not None and b is not None:
-            # les messages de l'un et de l'autre : une discrétion demandée sur ceux du fondu atteint le gardé
-            sql.execute(
-                f"UPDATE {t} SET importance=?, sensitivity=?, about=?, told_by=?, heard_by=?, secret=?, touched_at=?, "
-                "sources=? WHERE id=?",
-                (max(float(a["importance"]), float(b["importance"])), max(int(a["sensitivity"]), int(b["sensitivity"])),
-                 _keys([*_loads(a["about"]), *_loads(b["about"])]),
-                 _keys([*_loads(a["told_by"]), *_loads(b["told_by"])]),
-                 _keys([*_loads(a["heard_by"]), *_loads(b["heard_by"])]), int(bool(a["secret"]) or bool(b["secret"])),
-                 at, json.dumps(sorted({*map(int, _loads(a["sources"])), *map(int, _loads(b["sources"]))})), keep))
-            _about_rows(sql, about, keep, _loads(b["about"]))
-        sql.execute(f"UPDATE {t} SET status='merged' WHERE id=?", (drop,))
+        t = items(sfx)
+        # les messages de l'un et de l'autre : une discrétion demandée sur ceux du fondu atteint le gardé
+        sql.execute(update(t).where(t.c.id == keep).values(
+            importance=max(float(a["importance"]), float(b["importance"])),
+            sensitivity=max(int(a["sensitivity"]), int(b["sensitivity"])),
+            about=_keys([*_loads(a["about"]), *_loads(b["about"])]),
+            told_by=_keys([*_loads(a["told_by"]), *_loads(b["told_by"])]),
+            heard_by=_keys([*_loads(a["heard_by"]), *_loads(b["heard_by"])]),
+            secret=int(bool(a["secret"]) or bool(b["secret"])), touched_at=at,
+            sources=json.dumps(sorted({*map(int, _loads(a["sources"])), *map(int, _loads(b["sources"]))}))))
+        _about_rows(sql, sfx, keep, _loads(b["about"]))
+        sql.execute(update(t).where(t.c.id == drop).values(status="merged"))
 
     @staticmethod
-    def _uttered(sql: Sql, t: str, d: Any, at: int) -> None:
-        ids = [int(p.split(":", 1)[1]) for p in d.provenance if p.startswith("memory:") and p[7:].isdigit()]
+    def _uttered(sql: Sql, sfx: str, d: Any, at: int) -> None:
+        ids = sorted({int(p.split(":", 1)[1]) for p in d.provenance if p.startswith("memory:") and p[7:].isdigit()})
         if not ids:
             return
-        sql.executemany(f"UPDATE {t} SET shown_at=? WHERE id=?", [(at, i) for i in ids])
+        t = items(sfx)
+        sql.execute(update(t).where(t.c.id.in_(ids)).values(shown_at=at))
         said = strip_prosody(d.text.text or "")
         if not said:
             return
-        marks = ",".join("?" * len(ids))
-        rows = sql.query(f"SELECT id, text FROM {t} WHERE id IN ({marks})", tuple(ids))
-        hits = [(at, at, int(i)) for i, text in rows if used(text or "", said)]
+        rows = sql.query(select(t.c.id, t.c.text).where(t.c.id.in_(ids)))
+        hits = sorted(int(i) for i, text in rows if used(text or "", said))
         if hits:
-            sql.executemany(f"UPDATE {t} SET recalls=recalls+1, recalled_at=?, touched_at=? WHERE id=?", hits)
+            sql.execute(update(t).where(t.c.id.in_(hits))
+                        .values(recalls=t.c.recalls + 1, recalled_at=at, touched_at=at))
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> list[str]:
-        t, about = f"{c.ITEMS_TABLE}{sfx}", f"{c.ABOUT_TABLE}{sfx}"
-        like = f'%"{subject}"%'
-        doomed = [(int(i),) for (i,) in sql.query(
-            f"SELECT id FROM {t} WHERE id IN (SELECT item FROM {about} WHERE person=?) OR told_by LIKE ? "
-            "OR recipient=? OR holder=?", (subject, like, subject, subject))]
-        refs = [str(r) for (i,) in doomed for (r,) in sql.query(f"SELECT ref FROM {REFS_TABLE}{sfx} WHERE item=?", (i,))]
-        sql.executemany(f"DELETE FROM {t} WHERE id=?", doomed)
-        sql.executemany(f"DELETE FROM {about} WHERE item=?", doomed)
-        sql.executemany(f"DELETE FROM {REFS_TABLE}{sfx} WHERE item=?", doomed)
-        sql.executemany(f"DELETE FROM {CHANGES_TABLE}{sfx} WHERE item=?", doomed)
-        sql.executemany(f"DELETE FROM {TESTIMONIES_TABLE}{sfx} WHERE item=?", doomed)
-        sql.executemany(f"DELETE FROM {CONTESTS_TABLE}{sfx} WHERE item=?1 OR other=?1", doomed)
-        sql.executemany(f"DELETE FROM {FEELINGS_TABLE}{sfx} WHERE item=?", doomed)
-        self._forget_testimonies(sql, t, sfx, subject)
+        t, ab, rf = items(sfx), about(sfx), refs(sfx)
+        doomed = [int(i) for (i,) in sql.query(
+            select(t.c.id).where(or_(t.c.id.in_(select(ab.c.item).where(ab.c.person == handle_key(subject))),
+                                     json_has(t.c.told_by, subject), t.c.recipient == subject,
+                                     t.c.holder == subject)).order_by(t.c.id))]
+        refs_out: list[str] = []
+        for chunk in batches(doomed):
+            refs_out += [str(r) for (r,) in sql.query(select(rf.c.ref).where(rf.c.item.in_(chunk))
+                                                      .order_by(rf.c.item))]
+            sql.execute(delete(t).where(t.c.id.in_(chunk)))
+            sql.execute(delete(ab).where(ab.c.item.in_(chunk)))
+            sql.execute(delete(rf).where(rf.c.item.in_(chunk)))
+            for table in (changes(sfx), testimonies(sfx), feelings(sfx)):
+                sql.execute(delete(table).where(table.c.item.in_(chunk)))
+            ct = contests(sfx)
+            sql.execute(delete(ct).where(or_(ct.c.item.in_(chunk), ct.c.other.in_(chunk))))
+        self._forget_testimonies(sql, sfx, subject)
         # l'index des vecteurs saura qu'il a quelque chose à oublier (``memory.index``)
-        sql.execute(f"UPDATE {c.FORGETS_TABLE}{sfx} SET n=n+1")
+        ft = forgets(sfx)
+        sql.execute(update(ft).values(n=ft.c.n + 1))
         # qui l'a seulement entendu (un salon) ou appris en passant : son nom s'efface des listes
         for column in ("heard_by", "informants"):
-            for item, raw in sql.query(f"SELECT id, {column} FROM {t} WHERE {column} LIKE ?", (like,)):
-                sql.execute(f"UPDATE {t} SET {column}=? WHERE id=?",
-                            (_keys(k for k in _loads(raw) if k != subject), item))
-        sql.execute(f"UPDATE {t} SET source=NULL WHERE source=?", (subject,))
+            for item, raw in sql.query(select(t.c.id, t.c[column]).where(json_has(t.c[column], subject))
+                                       .order_by(t.c.id)):
+                sql.execute(update(t).where(t.c.id == item)
+                            .values({column: _keys(k for k in _loads(raw) if k != subject)}))
+        sql.execute(update(t).where(t.c.source == subject).values(source=None))
         # un élément qu'on lui a rattaché par un renfort ne nomme pas toujours ce sujet dans son texte : le magasin
         # efface ces textes-là aussi (sinon une reconstruction le ferait revenir — audit du lot L2 du 2026-10-03)
-        return refs
+        return refs_out
 
 
 def _joined(texts: Iterable[str | None]) -> str:
@@ -626,19 +647,13 @@ class Chunks:
     """T0 : un échange par réponse visible — ce qu'on lui a dit (tout le tour) et ce qu'elle a répondu."""
 
     def create(self, sql: Sql, sfx: str) -> None:
-        t = f"{c.CHUNKS_TABLE}{sfx}"
-        sql.execute(
-            f"CREATE TABLE IF NOT EXISTS {t}(id INTEGER PRIMARY KEY, person TEXT NOT NULL, "
-            "question INTEGER, user_text TEXT NOT NULL, reply_text TEXT NOT NULL, at INTEGER NOT NULL, room TEXT)"
-        )
-        # ses échanges dans le temps (« ce que je t'ai dit lundi »), et ceux d'un salon
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_person_at ON {t}(person, at)")
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_room_at ON {t}(room, at)")
+        sql.create(c.chunks_table(sfx))
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"DROP TABLE IF EXISTS {c.CHUNKS_TABLE}{sfx}")
+        sql.drop(c.chunks_table(sfx))
 
     def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
+        t, thread = c.chunks_table(sfx), transcript_c.thread_table()
         for e in events:
             d = e.data
             if not d.visible or not d.target or d.reply_to is None or forgotten(d.text):
@@ -647,15 +662,16 @@ class Chunks:
             # question n'est souvent pas le dernier message — l'échange les garde tous, dans l'ordre (un journal
             # d'avant le tour : ``reply_to`` seul)
             asked = tuple(sorted({*d.answers, d.reply_to}))
-            marks = ",".join("?" * len(asked))
-            rows = sql.query(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id IN ({marks}) ORDER BY id", asked)
+            rows = sql.query(select(thread.c.text).where(thread.c.id.in_(asked)).order_by(thread.c.id))
             user_text = _joined(t for (t,) in rows)
             reply = strip_prosody(d.text.text or "")[:CHUNK_TEXT_MAX]
-            sql.execute(f"INSERT OR REPLACE INTO {c.CHUNKS_TABLE}{sfx}(id, person, question, user_text, reply_text, at, "
-                        "room) VALUES(?,?,?,?,?,?,?)", (e.seq, d.target, asked[0], user_text, reply, e.at, d.room))
+            upsert(sql, t, {"id": e.seq, "person": handle_key(d.target), "question": asked[0], "user_text": user_text,
+                            "reply_text": reply, "at": e.at, "room": handle_key(d.room) if d.room else d.room},
+                   keys=["id"])
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> None:
-        sql.execute(f"DELETE FROM {c.CHUNKS_TABLE}{sfx} WHERE person=?", (subject,))
+        t = c.chunks_table(sfx)
+        sql.execute(delete(t).where(t.c.person == handle_key(subject)))
 
 
 class Told:
@@ -664,55 +680,64 @@ class Told:
     dans le doute, ce qu'on lui a montré pour parler à Bob compte comme dit :
     c'est la règle de qui ferme (un lien, une preuve d'identité). Pour un récit
     sans nom, chaque énoncé qui le montrait est gardé (``TOLD_LINES_TABLE``) :
-    ce qu'elle a vraiment dit s'y juge à la lecture, sur sa réponse (ADR 0092)."""
+    ce qu'elle a vraiment dit s'y juge à la lecture, sur sa réponse (ADR 0092).
+    La vue de la porte (``RETOLD_VIEW``) naît et meurt avec ces tables."""
 
     def create(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"CREATE TABLE IF NOT EXISTS {c.TOLD_TABLE}{sfx}(item INTEGER NOT NULL, handle TEXT NOT NULL, "
-                    "at INTEGER NOT NULL, veiled INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(item, handle))")
-        sql.execute(f"CREATE TABLE IF NOT EXISTS {c.TOLD_LINES_TABLE}{sfx}(item INTEGER NOT NULL, "
-                    "handle TEXT NOT NULL, utterance INTEGER NOT NULL, at INTEGER NOT NULL, "
-                    "PRIMARY KEY(item, handle, utterance))")
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {c.TOLD_LINES_TABLE}{sfx}_handle ON {c.TOLD_LINES_TABLE}{sfx}"
-                    "(handle, at)")
+        tt = told(sfx)
+        sql.create(tt, told_lines(sfx))
+        create_view(sql, f"{c.RETOLD_VIEW}{sfx}", select(tt.c.item, tt.c.handle, tt.c.at, tt.c.veiled))
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"DROP TABLE IF EXISTS {c.TOLD_TABLE}{sfx}")
-        sql.execute(f"DROP TABLE IF EXISTS {c.TOLD_LINES_TABLE}{sfx}")
+        drop_view(sql, f"{c.RETOLD_VIEW}{sfx}")
+        sql.drop(told(sfx), told_lines(sfx))
 
     def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
+        tt, tl = told(sfx), told_lines(sfx)
         rows: list[tuple[int, str, int, int]] = []
         lines: list[tuple[int, str, int, int]] = []
         for e in events:
             d = e.data
             if e.type.name == c.JOINED.name:
-                # ce qu'elle avait raconté de la jointe, elle l'a raconté de la gardée
+                # ce qu'elle avait raconté de la jointe, elle l'a raconté de la gardée (lu, puis écrit : MariaDB
+                # n'insère pas dans une table ce qu'il y lit)
                 for keep, drop in d.pairs:
-                    sql.execute(f"INSERT OR IGNORE INTO {c.TOLD_TABLE}{sfx}(item, handle, at, veiled) "
-                                f"SELECT ?, handle, at, veiled FROM {c.TOLD_TABLE}{sfx} WHERE item=?", (keep, drop))
-                    sql.execute(f"INSERT OR IGNORE INTO {c.TOLD_LINES_TABLE}{sfx}(item, handle, utterance, at) "
-                                f"SELECT ?, handle, utterance, at FROM {c.TOLD_LINES_TABLE}{sfx} WHERE item=?",
-                                (keep, drop))
+                    got = sql.query(select(tt.c.handle, tt.c.at, tt.c.veiled).where(tt.c.item == drop))
+                    insert_ignore(sql, tt, [{"item": keep, "handle": h, "at": at, "veiled": v} for h, at, v in got])
+                    got = sql.query(select(tl.c.handle, tl.c.utterance, tl.c.at).where(tl.c.item == drop))
+                    insert_ignore(sql, tl, [{"item": keep, "handle": h, "utterance": u, "at": at} for h, u, at in got])
                 continue
             if not d.visible or not d.target:
                 continue
-            rows += [(int(p.split(":", 1)[1]), d.target, e.at, 0) for p in d.provenance
+            target = handle_key(d.target)
+            rows += [(int(p.split(":", 1)[1]), target, e.at, 0) for p in d.provenance
                      if p.startswith("memory:") and p[7:].isdigit()]
             # raconté sans nommer personne (ADR 0091) : compté à part — une fois nommé, il reste nommé
-            veiled = [(int(p.split(":", 1)[1]), d.target, e.at, 1) for p in d.provenance
+            veiled = [(int(p.split(":", 1)[1]), target, e.at, 1) for p in d.provenance
                       if p.startswith(c.VEILED_PROVENANCE) and p[len(c.VEILED_PROVENANCE):].isdigit()]
             rows += veiled
             lines += [(item, handle, e.seq, at) for item, handle, at, _ in veiled]
         if lines:
-            sql.executemany(f"INSERT OR IGNORE INTO {c.TOLD_LINES_TABLE}{sfx}(item, handle, utterance, at) "
-                            "VALUES(?,?,?,?)", lines)
+            insert_ignore(sql, tl, [{"item": i, "handle": h, "utterance": u, "at": at} for i, h, u, at in lines])
         if rows:
-            sql.executemany(f"INSERT INTO {c.TOLD_TABLE}{sfx}(item, handle, at, veiled) VALUES(?,?,?,?) "
-                            "ON CONFLICT(item, handle) DO UPDATE SET at=excluded.at, "
-                            "veiled=MIN(veiled, excluded.veiled)", rows)
+            # la dernière fois qu'elle l'a dit ; nommé une fois, nommé pour de bon (le plus petit ``veiled``, celui
+            # de la table compris)
+            merged: dict[tuple[int, str], tuple[int, int]] = {}
+            for item, handle, at, v in rows:
+                was = merged.get((item, handle))
+                merged[(item, handle)] = (at, v if was is None else min(was[1], v))
+            for chunk in batches(sorted({item for item, _h in merged})):
+                for item, handle, v in sql.query(select(tt.c.item, tt.c.handle, tt.c.veiled)
+                                                 .where(tt.c.item.in_(chunk))):
+                    if (key := (int(item), str(handle))) in merged:
+                        merged[key] = (merged[key][0], min(merged[key][1], int(v)))
+            upsert(sql, tt, [{"item": i, "handle": h, "at": at, "veiled": v} for (i, h), (at, v) in merged.items()],
+                   keys=["item", "handle"], update=["at", "veiled"])
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> None:
-        sql.execute(f"DELETE FROM {c.TOLD_TABLE}{sfx} WHERE handle=?", (subject,))
-        sql.execute(f"DELETE FROM {c.TOLD_LINES_TABLE}{sfx} WHERE handle=?", (subject,))
+        tt, tl = told(sfx), told_lines(sfx)
+        sql.execute(delete(tt).where(tt.c.handle == handle_key(subject)))
+        sql.execute(delete(tl).where(tl.c.handle == handle_key(subject)))
 
 
 # v3 : ce qui n'appartient qu'à elle et à la personne (``between_us`` : un surnom, une blague à elles, ADR 0055)
@@ -733,62 +758,54 @@ class Told:
 # v18 : une prévision constatée (``memory.resolved``, sorte « prévision ») n'est plus à constater (ADR 0099)
 # v19 : de quel témoignage vient ce que la personne en ressent (``felt_from``) ; une discrétion demandée ne renforce
 # pas (``Reinforced.restricts``) ; un souvenir fondu la nuit garde aussi les messages de l'autre (``sources``)
-MEMORY.projector(c.ITEMS_TABLE, version=19, tier=Tier.T0,
+# v20 : les tables déclarées pour les deux moteurs (ADR 0101) ; ``folded`` (le texte replié que cherche la console)
+MEMORY.projector(c.ITEMS_TABLE, version=20, tier=Tier.T0,
                  types=[*c.ALL, rt.UTTERANCE, SUBJECT_FORGOTTEN])(Items)
 # v3 : l'échange garde tout le tour (``Utterance.answers``), pas seulement le dernier message d'une rafale
 # v4 : index (personne, instant) et (salon, instant) ; l'oublié ne revient pas (ADR 0059)
-MEMORY.projector(c.CHUNKS_TABLE, version=4, tier=Tier.T0, types=[rt.UTTERANCE])(Chunks)
+# v5 : la table déclarée pour les deux moteurs (ADR 0101)
+MEMORY.projector(c.CHUNKS_TABLE, version=5, tier=Tier.T0, types=[rt.UTTERANCE])(Chunks)
 # v2 : une croyance jointe la nuit (ADR 0080) : ce qu'elle en avait raconté passe à la gardée
 # v3 : ce qu'elle a raconté sans nommer personne (``veiled``, ADR 0091)
 # v4 : chaque énoncé qui lui montrait un récit sans nom (``memory_told_lines``) : raconté se juge sur sa réponse
-MEMORY.projector(c.TOLD_TABLE, version=4, tier=Tier.T0, types=[rt.UTTERANCE, c.JOINED])(Told)
+# v5 : les tables déclarées pour les deux moteurs (ADR 0101) ; la vue ``memory_retold`` naît avec elles
+MEMORY.projector(c.TOLD_TABLE, version=5, tier=Tier.T0, types=[rt.UTTERANCE, c.JOINED])(Told)
 
 
-DEFERRED_TABLE = "memory_extraction_queue"
+#: ce qu'une extraction remise à plus tard réécrit (``since`` : la première fois, gardée)
+_DEFERRED_UPDATE = ("messages", "about", "attempts", "retry_at", "status", "reason", "detail_ref", "aside")
 
 
 class ExtractionQueue:
     def create(self, sql: Sql, sfx: str) -> None:
-        t = DEFERRED_TABLE + sfx
-        sql.execute(f"CREATE TABLE IF NOT EXISTS {t}(key INTEGER PRIMARY KEY, messages TEXT NOT NULL, "
-                    "about TEXT NOT NULL, attempts INTEGER NOT NULL, retry_at INTEGER NOT NULL, "
-                    "status TEXT NOT NULL, reason TEXT NOT NULL, detail_ref TEXT NOT NULL, since INTEGER NOT NULL, "
-                    "aside TEXT NOT NULL DEFAULT '[]')")
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {t}_due ON {t}(status,retry_at,key)")
+        sql.create(deferred(sfx))
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"DROP TABLE IF EXISTS {DEFERRED_TABLE}{sfx}")
+        sql.drop(deferred(sfx))
 
     def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
-        t = DEFERRED_TABLE + sfx
+        t = deferred(sfx)
         for e in events:
             d = e.data
             if d.status == "resolved" or forgotten(d.detail):
-                sql.execute(f"DELETE FROM {t} WHERE key=?", (d.key,))
+                sql.execute(delete(t).where(t.c.key == d.key))
                 continue
-            sql.execute(f"INSERT INTO {t}(key,messages,about,attempts,retry_at,status,reason,detail_ref,since,aside) "
-                        "VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
-                        "messages=excluded.messages,about=excluded.about,attempts=excluded.attempts,"
-                        "retry_at=excluded.retry_at,status=excluded.status,reason=excluded.reason,"
-                        "detail_ref=excluded.detail_ref,aside=excluded.aside",
-                        (d.key, json.dumps(d.messages), _keys(d.about), d.attempts, d.retry_at, d.status,
-                         d.failure_code, d.detail.ref or "", e.at, json.dumps(sorted(d.aside))))
+            upsert(sql, t, {"key": d.key, "messages": json.dumps(d.messages), "about": _keys(d.about),
+                            "attempts": d.attempts, "retry_at": d.retry_at, "status": d.status,
+                            "reason": d.failure_code, "detail_ref": d.detail.ref or "", "since": e.at,
+                            "aside": json.dumps(sorted(d.aside))}, keys=["key"], update=_DEFERRED_UPDATE)
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> list[str]:
-        t = DEFERRED_TABLE + sfx
-        rows = sql.query(f"SELECT key,detail_ref FROM {t} WHERE EXISTS "
-                         "(SELECT 1 FROM json_each(about) WHERE value=?)", (subject,))
-        sql.executemany(f"DELETE FROM {t} WHERE key=?", [(key,) for key, _ in rows])
+        t = deferred(sfx)
+        rows = sql.query(select(t.c.key, t.c.detail_ref).where(json_has(t.c.about, subject)).order_by(t.c.key))
+        for chunk in batches([key for key, _ in rows]):
+            sql.execute(delete(t).where(t.c.key.in_(chunk)))
         return [ref for _, ref in rows]
 
 
 # v2 : ``aside`` (ce qui, dans un salon, ne lui était pas adressé), relu tel quel à la reprise
-MEMORY.projector(DEFERRED_TABLE, version=2, tier=Tier.T0, types=[c.EXTRACTION_DEFERRED])(ExtractionQueue)
-
-
-#: ce qu'elle a lu (ADR 0085) : une ligne par lecture, jusqu'à ce que la nuit l'ait relue
-READINGS_TABLE = "memory_readings"
-READING_COLUMNS = ("seq", "source", "ref", "title_ref", "excerpt_ref", "depth", "at")
+# v3 : la table déclarée pour les deux moteurs (ADR 0101)
+MEMORY.projector(DEFERRED_TABLE, version=3, tier=Tier.T0, types=[c.EXTRACTION_DEFERRED])(ExtractionQueue)
 
 
 class Readings:
@@ -796,26 +813,32 @@ class Readings:
     relues, elles s'effacent — ce qu'elle en a gardé est dans ce qu'elle sait."""
 
     def create(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"CREATE TABLE IF NOT EXISTS {READINGS_TABLE}{sfx}(seq INTEGER PRIMARY KEY, source TEXT NOT NULL, "
-                    "ref TEXT NOT NULL, title_ref TEXT NOT NULL, excerpt_ref TEXT NOT NULL, depth TEXT NOT NULL, "
-                    "at INTEGER NOT NULL)")
+        sql.create(readings(sfx))
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"DROP TABLE IF EXISTS {READINGS_TABLE}{sfx}")
+        sql.drop(readings(sfx))
 
     def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
-        t = READINGS_TABLE + sfx
+        t = readings(sfx)
         for e in events:
             d = e.data
             if e.type.name == c.REREAD.name:
-                sql.execute(f"DELETE FROM {t} WHERE seq<=?", (d.upto,))
+                sql.execute(delete(t).where(t.c.seq <= d.upto))
                 continue
             if forgotten(d.title):
                 continue
-            sql.execute(f"INSERT OR REPLACE INTO {t}({','.join(READING_COLUMNS)}) VALUES(?,?,?,?,?,?,?)",
-                        (e.seq, d.source[:200], d.ref[:500], d.title.ref or "",
-                         (d.excerpt.ref or "") if d.excerpt is not None else "", d.depth, e.at))
+            upsert(sql, t, dict(zip(READING_COLUMNS, (
+                e.seq, d.source[:200], d.ref[:500], d.title.ref or "",
+                (d.excerpt.ref or "") if d.excerpt is not None else "", d.depth, e.at), strict=True)), keys=["seq"])
 
 
-MEMORY.projector(READINGS_TABLE, version=1, tier=Tier.T0,
+# v2 : la table déclarée pour les deux moteurs (ADR 0101)
+MEMORY.projector(READINGS_TABLE, version=2, tier=Tier.T0,
                  types=[rss_c.READ, mcp_c.CONSULTED, c.REREAD])(Readings)
+
+__all__ = [
+    "CHANGES_TABLE", "CONTESTS_TABLE", "DEFERRED_TABLE", "FEELINGS_TABLE", "ITEM_COLUMNS", "READINGS_TABLE",
+    "READING_COLUMNS", "REFS_TABLE", "TESTIMONIES_TABLE", "TESTIMONY_COLUMNS", "Chunks", "ExtractionQueue", "Items",
+    "Readings", "Told", "create_views", "fingerprint", "forgotten", "informants_of", "testimony_columns",
+    "testimony_of", "used",
+]

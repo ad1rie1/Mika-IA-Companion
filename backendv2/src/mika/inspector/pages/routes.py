@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from typing import Any
 from urllib.parse import quote, urlencode
 
+from sqlalchemy import select
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 from starlette.routing import Route
@@ -40,6 +41,7 @@ from mika.kernel.inspect import (
     is_table_choice,
     walk_blocks,
 )
+from mika.ports.journal import JournalEvent
 from mika.runtime.operations import dynamic_fields, fixed_values, initial_values, offered, perform
 
 #: les anciennes adresses de l'inspecteur → la console
@@ -340,7 +342,8 @@ class Pages:
         corr = request.path_params["corr"]
         info = episode_head(self.ui, corr)
         if info is None:
-            if self.ui.kernel.mind.store.query_mind("SELECT 1 FROM events WHERE correlation=? LIMIT 1", (corr,)):
+            if self.ui.kernel.mind.store.query_mind(
+                    select(JournalEvent.seq).where(JournalEvent.correlation == corr).limit(1)):
                 # une action d'opérateur, un effet, un processus : pas un épisode — ses événements, dans le journal
                 return RedirectResponse(f"{PREFIX}/systeme/chronologie?" + urlencode({"correlation": corr}),
                                         status_code=303)

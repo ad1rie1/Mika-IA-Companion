@@ -10,9 +10,11 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
+from mika.faculties.memory import tables as tb
 from mika.faculties.memory.faculty import MEMORY, params
 from mika.faculties.memory.life import kept_too_early
 from mika.faculties.memory.recall import (
@@ -31,6 +33,7 @@ from mika.faculties.memory.recall import (
     when_words,
 )
 from mika.faculties.memory.salience import age_words, tag
+from mika.ports.sql import alias_of
 from mika.vocab.affect import facets
 from mika.vocab.episodes import CONVERSATIONAL, WORKING
 from mika.vocab.people import is_identifiable
@@ -122,12 +125,13 @@ async def _by_feeling(args: SearchArgs, emotions: list[str], ctx: Any, person: s
     vectors, store, frame = ctx.ports.get("vectors"), ctx.ports.get("store"), ctx.frame
     aud = frame.audience
     whose = {"moi": (c.HERS,), "la_personne": (c.THEIRS,)}.get(args.de_qui, (c.HERS, c.THEIRS))
-    marks_w, marks_e = ",".join("?" * len(whose)), ",".join("?" * len(emotions))
+    f, i = alias_of(tb.feelings(), "f"), alias_of(tb.items(), "i")
+    strongest = func.max(f.c.intensity)
     rows = store.query_mind(
-        f"SELECT f.item, f.whose, MAX(f.intensity) FROM {c.FEELINGS_TABLE} f JOIN {c.ITEMS_TABLE} i ON i.id = f.item "
-        f"WHERE f.whose IN ({marks_w}) AND f.emotion IN ({marks_e}) AND i.status='active' AND i.kind IN (?, ?) "
-        f"GROUP BY f.item, f.whose ORDER BY MAX(f.intensity) DESC, f.item LIMIT ?",
-        (*whose, *emotions, c.SOUVENIR, c.BELIEF, FEELING_CANDIDATES))
+        select(f.c.item, f.c.whose, strongest).select_from(f.join(i, i.c.id == f.c.item))
+        .where(f.c.whose.in_(whose), f.c.emotion.in_(emotions), i.c.status == "active",
+               i.c.kind.in_((c.SOUVENIR, c.BELIEF)))
+        .group_by(f.c.item, f.c.whose).order_by(strongest.desc(), f.c.item, f.c.whose).limit(FEELING_CANDIDATES))
     felt: dict[int, dict[str, float]] = {}
     for i, who, x in rows:
         felt.setdefault(int(i), {})[str(who)] = float(x)

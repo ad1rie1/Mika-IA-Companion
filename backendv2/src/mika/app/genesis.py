@@ -33,6 +33,8 @@ from collections.abc import Callable, Iterable, Mapping
 from types import MappingProxyType
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.app import composition
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
@@ -163,7 +165,7 @@ def _replaced(kernel: Kernel, item: int | None, kind: str) -> int | None:
     """Ce qu'un élément remplace doit exister dans sa mémoire, de la même sorte."""
     if item is None:
         return None
-    rows = kernel.mind.store.query_mind(f"SELECT kind FROM {memory_c.LEDGER_VIEW} WHERE id=?", (int(item),))
+    rows = kernel.mind.store.query_mind(select(memory_c.LEDGER.c.kind).where(memory_c.LEDGER.c.id == int(item)))
     if not rows or rows[0][0] != kind:
         raise ValueError(f"rien à remplacer : l'élément n° {item} n'est pas une {kind} de sa mémoire")
     return int(item)

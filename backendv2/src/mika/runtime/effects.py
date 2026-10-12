@@ -38,9 +38,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import select, update
+
 from mika.kernel.events import Content, Draft, Event, Origin
 from mika.kernel.faculty import CAPABILITY_LANE, EffectSpec
 from mika.kernel.state import Root
+from mika.ports.journal import JournalOutbox
 from mika.ports.store import OutboxRow
 from mika.runtime.boundary import Failed, acall, call
 
@@ -333,7 +336,7 @@ class EffectExecutor:
     async def _mark(self, key: str, status: str, error: str | None) -> None:
         if status == "running":
             await acall(lambda: self.mind.store.run_mind(
-                lambda sql: sql.execute("UPDATE outbox SET status='running' WHERE key=?", (key,))),
+                lambda sql: sql.execute(update(JournalOutbox).where(JournalOutbox.key == key).values(status="running"))),
                 label="file de sortie : en cours")
             return
         await acall(lambda: self.mind.store.mark_outbox(key, status, error), label="file de sortie")
@@ -342,9 +345,10 @@ class EffectExecutor:
     async def recover(self) -> int:
         """Les lignes trouvées « en cours » : le processus est mort pendant leur exécution. Le crochet
         ``on_interrupted`` de leur effet décide : rejouée (``None``) ou close avec son échec journalisé."""
+        o = JournalOutbox
         rows = call(self.mind.store.query_mind,
-                    "SELECT key, seq, effect, status, attempts, last_error FROM outbox WHERE status='running' "
-                    "ORDER BY seq", label="file de sortie : lignes en cours")
+                    select(o.key, o.seq, o.effect, o.status, o.attempts, o.last_error).where(o.status == "running")
+                    .order_by(o.seq, o.key), label="file de sortie : lignes en cours")
         if isinstance(rows, Failed):
             return 0
         closed = 0

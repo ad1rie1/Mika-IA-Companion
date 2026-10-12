@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import func, select
+
 from mika.contracts import runtime as rt
 from mika.inspector import names
 from mika.kernel.clock import US
@@ -25,6 +27,7 @@ from mika.kernel.inspect import (
     Text,
     When,
 )
+from mika.ports.journal import JournalEvent
 
 PREVIEW_SPEECHES = 3
 
@@ -32,7 +35,8 @@ PREVIEW_SPEECHES = 3
 def overview(ui: Any, corr: str, info: dict[str, Any]) -> list[Any]:
     started, ended = info["started"], info["ended"]
     store = ui.kernel.mind.store
-    counts = dict(store.query_mind("SELECT type, COUNT(*) FROM events WHERE correlation=? GROUP BY type", (corr,)))
+    e = JournalEvent
+    counts = dict(store.query_mind(select(e.type, func.count()).where(e.correlation == corr).group_by(e.type)))
     speeches = counts.get(rt.UTTERANCE.name, 0)
 
     def tab(slug: str, label: str) -> Ref:

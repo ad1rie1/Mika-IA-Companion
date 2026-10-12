@@ -30,6 +30,7 @@ from mika.ports.sql import DATABASES
 
 #: les modules qui déclarent des entités : les importer remplit les ``MetaData`` de ``mika.ports.sql``
 MODELS = (
+    "mika.ports.journal",
     "mika.adapters.web.accounts",
     "mika.app.settings",
     "mika.adapters.llm.calls",

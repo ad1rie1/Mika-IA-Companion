@@ -19,6 +19,7 @@ from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 
 from mika.contracts import affect as affect_c
 from mika.contracts import agency as agency_c
@@ -229,11 +230,16 @@ async def _own_words(s: ExpressionState, frame: Frame, ports: Mapping[str, Any])
     store, ep = ports.get("store"), frame.episode
     if store is None or ep is None or not ep.target:
         return None
-    room = ep.attrs.get("room")
-    where, arg = ("room=?", room) if room else ("person=? AND room IS NULL", ep.target)
-    rows = store.query_mind(f"SELECT at, text FROM {transcript_c.THREAD_TABLE} WHERE role='assistant' AND {where} "
-                            "ORDER BY id DESC LIMIT ?", (arg, HABIT_WINDOW))
+    t = transcript_c.thread_table()
+    rows = store.query_mind(select(t.c.at, t.c.text).where(t.c.role == "assistant", *_where(t, ep))
+                            .order_by(t.c.id.desc()).limit(HABIT_WINDOW))
     return tuple((int(r[0]), str(r[1] or "")) for r in reversed(rows))
+
+
+def _where(t: Any, ep: Any) -> tuple[Any, ...]:
+    """Le fil de cet épisode : son salon, ou le fil privé avec sa cible."""
+    room = ep.attrs.get("room")
+    return (t.c.room == room,) if room else (t.c.person == ep.target, t.c.room.is_(None))
 
 
 #: au plus tant de messages du fil relus pour y retrouver ses entrées en matière (trois conversations, largement)
@@ -256,23 +262,33 @@ async def _own_openings(s: ExpressionState, frame: Frame, ports: Mapping[str, An
     store, ep = ports.get("store"), frame.episode
     if store is None or ep is None or not ep.target:
         return None
-    room = ep.attrs.get("room")
-    where, arg = ("room=?", room) if room else ("person=? AND room IS NULL", ep.target)
     gap = params(frame.env.params_of("expression", frame.root)).opening_gap_us
+    t = transcript_c.thread_table()
+    window = store.query_mind(select(t.c.id, t.c.at, t.c.role).where(*_where(t, ep))
+                              .order_by(t.c.id.desc()).limit(OPENINGS_SCAN))
     # chaque silence d'au moins ``gap`` ouvre une conversation (numérotée dans l'ordre), le tout début du fil aussi
     # quand on l'a relu en entier ; sinon, ce qui précède le premier silence relu a commencé avant la fenêtre et ne
     # compte pas. De chaque conversation, son premier message à elle — aucun dans la dernière : elle n'y a encore
-    # rien dit
-    rows = store.query_mind(
-        f"WITH w AS (SELECT id, at, role FROM {transcript_c.THREAD_TABLE} WHERE {where} ORDER BY id DESC LIMIT ?), "
-        "s AS (SELECT id, role, SUM(CASE WHEN gap >= ? OR gap IS NULL AND (SELECT COUNT(*) FROM w) < ? THEN 1 "
-        "ELSE 0 END) OVER (ORDER BY id) AS conv FROM (SELECT id, role, at - LAG(at) OVER (ORDER BY id) AS gap FROM w)), "
-        "c AS (SELECT conv, MIN(CASE WHEN role='assistant' THEN id END) AS first FROM s WHERE conv > 0 GROUP BY conv) "
-        f"SELECT c.conv, t.text FROM c LEFT JOIN {transcript_c.THREAD_TABLE} t ON t.id = c.first "
-        "WHERE c.first IS NOT NULL OR c.conv = (SELECT MAX(conv) FROM s) ORDER BY c.conv DESC LIMIT 4",
-        (arg, OPENINGS_SCAN, gap, OPENINGS_SCAN))
-    said = tuple(str(r[1]) for r in reversed(rows) if r[1] is not None)[-3:]
-    return Openings(said=said, opens=bool(rows) and rows[0][1] is None)
+    # rien dit. Compté ici plutôt qu'en SQL (des fenêtres et une table dérivée sans nom : SQLite les prend, MariaDB
+    # veut un nom à chaque table dérivée)
+    whole = len(window) < OPENINGS_SCAN
+    conv, prev = 0, None
+    first: dict[int, int] = {}
+    for mid, at, role in reversed(window):
+        if (prev is None and whole) or (prev is not None and int(at) - prev >= gap):
+            conv += 1
+        prev = int(at)
+        if conv > 0 and role == "assistant":
+            first.setdefault(conv, int(mid))
+    # les dernières conversations, de la plus récente à la plus ancienne : la dernière toujours, les autres si elle
+    # y a parlé
+    convs = [n for n in range(conv, 0, -1) if n in first or n == conv][:4]
+    wanted = [first[n] for n in convs if n in first]
+    texts = {int(i): str(x) for i, x in store.query_mind(select(t.c.id, t.c.text).where(t.c.id.in_(wanted)))} \
+        if wanted else {}
+    rows = [texts.get(first[n]) if n in first else None for n in convs]
+    said = tuple(x for x in reversed(rows) if x is not None)[-3:]
+    return Openings(said=said, opens=bool(rows) and rows[0] is None)
 
 
 @EXPRESSION.enricher("last_heard", episodes=[Kind.REPLY], deadline_ms=300)
@@ -282,7 +298,8 @@ async def _last_heard(s: ExpressionState, frame: Frame, ports: Mapping[str, Any]
     reply_to = ep.attrs.get("reply_to") if ep is not None else None
     if store is None or reply_to is None:
         return None
-    rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id=?", (reply_to,))
+    t = transcript_c.thread_table()
+    rows = store.query_mind(select(t.c.text).where(t.c.id == reply_to))
     return str(rows[0][0] or "") if rows else None
 
 
@@ -337,7 +354,8 @@ def _habits(s: ExpressionState, frame: Frame, enrich: Mapping[str, Any]) -> str 
 def _client_msg_id(store: Any, reply_to: int | None) -> str | None:
     if store is None or reply_to is None:
         return None
-    rows = store.query_mind(f"SELECT client_msg_id FROM {transcript_c.THREAD_TABLE} WHERE id=?", (reply_to,))
+    t = transcript_c.thread_table()
+    rows = store.query_mind(select(t.c.client_msg_id).where(t.c.id == reply_to))
     return rows[0][0] if rows else None
 
 

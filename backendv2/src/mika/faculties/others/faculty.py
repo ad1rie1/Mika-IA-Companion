@@ -52,6 +52,7 @@ from datetime import date, datetime, time
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 
 from mika.contracts import agency as agency_c
 from mika.contracts import attention as attention_c
@@ -476,10 +477,9 @@ def _their_words(ports: Any, d: Any) -> str:
     ids = tuple(getattr(d, "answers", ()) or ()) or ((d.reply_to,) if d.reply_to is not None else ())
     if store is None or not ids:
         return ""
-    marks = ",".join("?" * len(ids))
+    t = transcript_c.thread_table()
     try:
-        rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id IN ({marks}) ORDER BY id",
-                                ids)
+        rows = store.query_mind(select(t.c.text).where(t.c.id.in_(list(ids))).order_by(t.c.id))
     except Exception:  # noqa: BLE001 — une lecture manquée : ni « bref », ni rassurant par sa longueur
         return ""
     return " ".join(str(r[0] or "") for r in rows)
@@ -1129,10 +1129,10 @@ async def _their_last_words(s: OthersState, frame: Frame, ports: Any) -> tuple[s
     if store is None or ep is None or not ep.target or reply_to is None:
         return None
     room = ep.attrs.get("room")
-    where, arg = ("room=?", room) if room else ("room IS NULL", None)
-    args = (ep.target, reply_to, frame.now - CURT_SPAN_US) + ((arg,) if room else ())
-    rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE person=? AND role='user' AND id<=? "
-                            f"AND at>=? AND {where} ORDER BY id DESC LIMIT ?", (*args, CURT_RUN))
+    t = transcript_c.thread_table()
+    rows = store.query_mind(select(t.c.text).where(
+        t.c.person == ep.target, t.c.role == "user", t.c.id <= reply_to, t.c.at >= frame.now - CURT_SPAN_US,
+        t.c.room == room if room else t.c.room.is_(None)).order_by(t.c.id.desc()).limit(CURT_RUN))
     return tuple(str(r[0] or "") for r in reversed(rows))
 
 

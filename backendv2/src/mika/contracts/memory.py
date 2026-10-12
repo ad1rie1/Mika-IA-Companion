@@ -51,12 +51,15 @@ public quand ça s'est dit en privé (ADR 0055).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cache
 from typing import Annotated, Any, Literal
 
 from pydantic import BeforeValidator, model_validator
+from sqlalchemy import BigInteger, Column, Double, Index, Select, Table, select
 
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.ports.sql import HANDLE_MAX, Key, LongText, projection_table, view_table
 from mika.vocab.affect import facets
 from mika.vocab.lineage import Restriction
 
@@ -742,6 +745,29 @@ HARD_TIMES = FactFamily("memory.hard_times", arg=str, type=int, time_varying=Tru
 
 ITEMS_TABLE = "memory_items"
 CHUNKS_TABLE = "memory_chunks"
+
+
+@cache
+def chunks_table(sfx: str = "") -> Table:
+    """``memory_chunks`` (suffixée de sa version) : un échange par réponse visible — ce qu'on lui a dit (tout le tour)
+    et ce qu'elle a répondu ; la console relit l'échange d'où vient un souvenir (ADR 0101 : déclarée pour les deux
+    moteurs, hors des migrations). ``person`` et ``room`` sont des clés bornées à ``HANDLE_MAX`` (la projection y range
+    une valeur plus longue par ``fit``)."""
+    name = f"{CHUNKS_TABLE}{sfx}"
+    return projection_table(
+        name,
+        Column("id", BigInteger, primary_key=True, autoincrement=False),
+        Column("person", Key(HANDLE_MAX), nullable=False),
+        Column("question", BigInteger),
+        Column("user_text", LongText, nullable=False),
+        Column("reply_text", LongText, nullable=False),
+        Column("at", BigInteger, nullable=False),
+        Column("room", Key(HANDLE_MAX)),
+        # ses échanges dans le temps (« ce que je t'ai dit lundi »), et ceux d'un salon
+        Index(f"{name}_person_at", "person", "at"),
+        Index(f"{name}_room_at", "room", "at"),
+    )
+
 #: Qui concerne chaque élément (``item``, ``person``) : les clés de ``memory_items.about``, une par ligne, indexées
 #: par personne. « Ce qu'elle sait d'Alice » se lit sans parcourir toute la mémoire (ADR 0059) ; une clé telle
 #: qu'elle a été notée (une adresse, ``name:…``), jamais résolue.
@@ -803,10 +829,63 @@ KNOWN_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "co
 #: Les statuts qui sortent de ce qu'elle sait (``FORMER_VIEW``) : remplacée, fondue la nuit dans un souvenir, jointe
 #: la nuit à la même croyance dite par un autre (ADR 0080).
 FORMER_STATUSES = ("superseded", "merged", "joined")
-#: « SELECT <KNOWN_COLUMNS> FROM <vue> » : à compléter d'un ``WHERE`` ; chaque ligne se lit par
-#: ``vocab.knowledge.knowns(rows, KNOWN_COLUMNS)``.
-SELECT_KNOWN = f"SELECT {', '.join(KNOWN_COLUMNS)} FROM {KNOWLEDGE_VIEW}"
-SELECT_FORMER = f"SELECT {', '.join(KNOWN_COLUMNS)} FROM {FORMER_VIEW}"
+
+# ── Les colonnes des vues (ADR 0101) : on les lit par des requêtes (``select(KNOWLEDGE.c.text)``), compilées pour le
+# moteur. Les vues elles-mêmes se créent dans la mémoire (``faculties.memory.projections``), sur ses tables.
+
+#: toutes les colonnes d'un élément, dans l'ordre de sa table : celles de ``LEDGER_VIEW`` — ``folded`` : son texte
+#: replié (``fold_text`` : casse et accents ignorés), ce qu'on y cherche pareil sur les deux moteurs (un ``LIKE`` sur
+#: ``text`` ignore la casse ASCII sous SQLite, pas sous MariaDB)
+LEDGER_COLUMNS = ("id", "kind", "text", "about", "sensitivity", "importance", "confidence", "origin", "source",
+                  "emotion", "born_at", "touched_at", "recalled_at", "recalls", "status", "replaces", "recipient",
+                  "due", "sources", "told_by", "heard_by", "secret", "informants", "about_self", "shown_at",
+                  "between_us", "knowledge_kind", "holder", "constraints", "internal_only", "fingerprint",
+                  "superseded_by", "superseded_at", "as_of", "valid_until", "felt", "empathy", "until", "precision",
+                  "likelihood", "gist", "veiled", "felt_from", "folded")
+#: la borne d'une sorte d'élément et d'un statut (``souvenir``, ``superseded``…), clés indexées
+KIND_MAX = STATUS_MAX = 32
+_INTEGERS = frozenset({"id", "sensitivity", "born_at", "touched_at", "recalled_at", "recalls", "replaces", "due",
+                       "secret", "about_self", "shown_at", "between_us", "internal_only", "superseded_by",
+                       "superseded_at", "as_of", "valid_until", "until", "felt_from", "item", "at", "was",
+                       "changed_at"})
+_REALS = frozenset({"importance", "confidence", "likelihood", "intensity"})
+_KEYS = {"kind": KIND_MAX, "status": STATUS_MAX, "fingerprint": 64, "person": HANDLE_MAX, "handle": HANDLE_MAX}
+
+
+def _column(name: str) -> Column[Any]:
+    kind: Any = BigInteger if name in _INTEGERS else Double if name in _REALS else \
+        Key(_KEYS[name]) if name in _KEYS else LongText
+    return Column(name, kind)
+
+
+def _view(name: str, columns: tuple[str, ...], **kinds: Any) -> Table:
+    """Une vue de ces colonnes, typées par leur nom (``kinds`` : celles qui, ici, veulent dire autre chose)."""
+    return view_table(name, *(Column(n, kinds[n]) if n in kinds else _column(n) for n in columns))
+
+
+KNOWLEDGE = _view(KNOWLEDGE_VIEW, KNOWN_COLUMNS)
+KNOWLEDGE_ABOUT = _view(KNOWLEDGE_ABOUT_VIEW, ("item", "person"))
+FORMER = _view(FORMER_VIEW, KNOWN_COLUMNS)
+#: ``veiled`` y est un drapeau (seulement sans nommer personne) ; dans un élément, le texte raconté sans nom
+RETOLD = _view(RETOLD_VIEW, ("item", "handle", "at", "veiled"), veiled=BigInteger)
+SELF_CHANGES = _view(SELF_CHANGES_VIEW, SELF_CHANGES_COLUMNS)
+LIVED = _view(LIVED_VIEW, (*KNOWN_COLUMNS, "gist"))
+LEDGER = _view(LEDGER_VIEW, LEDGER_COLUMNS)
+FEELINGS = view_table(FEELINGS_VIEW, Column("item", BigInteger), Column("whose", Key(16)), Column("emotion", Key(64)),
+                      Column("intensity", Double))
+
+
+def select_known(view: Table | None = None) -> Select[Any]:
+    """``SELECT <KNOWN_COLUMNS> FROM <vue>`` (``KNOWLEDGE`` par défaut ; ``FORMER``, ``LIVED``) : à compléter d'un
+    ``.where`` ; chaque ligne se lit par ``vocab.knowledge.knowns(rows, KNOWN_COLUMNS)``."""
+    v = KNOWLEDGE if view is None else view
+    return select(*(v.c[n] for n in KNOWN_COLUMNS))
+
+
+def concerning(view: Table, keys: Any) -> Any:
+    """La condition « l'élément de cette vue concerne l'une de ces clés » (``KNOWLEDGE_ABOUT``, indexée par
+    personne) : ``view.c.id IN (SELECT item FROM memory_knowledge_about WHERE person IN (…))``."""
+    return view.c.id.in_(select(KNOWLEDGE_ABOUT.c.item).where(KNOWLEDGE_ABOUT.c.person.in_(list(keys))))
 
 
 class LifeRecalled(Payload):

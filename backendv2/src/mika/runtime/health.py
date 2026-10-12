@@ -11,10 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from sqlalchemy import select
+
 from mika.kernel.clock import DAY, MINUTE, US
 from mika.kernel.forms import show_duration
 from mika.kernel.inspect import describe_error
 from mika.kernel.registry import zone_known
+from mika.ports.journal import JournalOutbox
 from mika.runtime.boundary import Failed, call
 from mika.vocab.episodes import Role
 
@@ -121,8 +124,10 @@ def _outbox(kernel: Kernel) -> Check:
     store = kernel.mind.store
     now = kernel.mind.clock.now()
     # abandonné après ses réessais, ou capacité interrompue par une panne et pas relancée (à décider)
-    rows = store.query_mind("SELECT seq, effect, last_error FROM outbox WHERE status IN ('failed', 'interrupted') "
-                            "ORDER BY seq DESC LIMIT 50")
+    o = JournalOutbox
+    # départagés par la clé : un événement fait partir plusieurs effets (les mêmes 50 sur les deux moteurs)
+    rows = store.query_mind(select(o.seq, o.effect, o.last_error).where(o.status.in_(("failed", "interrupted")))
+                            .order_by(o.seq.desc(), o.key).limit(50))
     at = {e.seq: e.at for e in store.get_events([r[0] for r in rows])}
     failed = [(seq, effect, error) for seq, effect, error in rows if now - at.get(seq, 0) < DAY]
     pending = store.pending_outbox()

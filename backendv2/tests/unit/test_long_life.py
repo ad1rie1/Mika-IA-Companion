@@ -221,7 +221,8 @@ def test_one_more_utterance_does_not_reread_her_whole_memory(tmp_path):
 
         def spy(sql, params=()):
             rows = read(sql, params)
-            if memory_c.ITEMS_TABLE in sql or memory_c.CHUNKS_TABLE in sql:
+            text = str(sql)  # une requête SQLAlchemy se lit par son SQL rendu
+            if memory_c.ITEMS_TABLE in text or memory_c.CHUNKS_TABLE in text:
                 biggest[0] = max(biggest[0], len(rows))
             return rows
 

@@ -14,13 +14,15 @@ from dataclasses import dataclass, replace
 from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.faculties.memory import likelihood as lk
+from mika.faculties.memory import tables as tb
 from mika.faculties.memory.archive import decode
 from mika.faculties.memory.faculty import MEMORY, PENDING_CAP, MemoryParams, MemoryState, occurrence, params
-from mika.faculties.memory.projections import DEFERRED_TABLE, ITEM_COLUMNS
+from mika.faculties.memory.projections import ITEM_COLUMNS
 from mika.faculties.memory.recall import names_of
 from mika.faculties.memory.salience import Item, dormant, salience
 from mika.kernel.clock import MINUTE
@@ -102,17 +104,12 @@ def clip(text: str, n: int = 300) -> str:
     return text if len(text) <= n else text[: n - 1].rstrip() + "…"
 
 
-def _like(text: str) -> str:
-    escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-    return f"%{escaped}%"
-
-
 def _p(frame: Frame) -> MemoryParams:
     return params(frame.env.params_of("memory", frame.root))
 
 
 def _table_exists(store: Any) -> bool:
-    return bool(store.query_mind("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (c.ITEMS_TABLE,)))
+    return tb.has_table(store, tb.items())
 
 
 # ── Une ligne de la projection ────────────────────────────────────────────
@@ -137,24 +134,26 @@ def _kept(row: Sequence[Any]) -> Kept:
     return Kept(Item.of(d), sources, None if d["replaces"] is None else int(d["replaces"]))
 
 
-def _select(store: Any, where: Sequence[str], args: Sequence[Any], limit: int, offset: int = 0) -> list[Kept]:
-    clause = f" WHERE {' AND '.join(where)}" if where else ""
-    rows = store.query_mind(f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE}{clause} ORDER BY id DESC "
-                            "LIMIT ? OFFSET ?", (*args, limit, offset))
+def _select(store: Any, where: Sequence[Any], limit: int, offset: int = 0) -> list[Kept]:
+    t = tb.items()
+    rows = store.query_mind(select(*(t.c[n] for n in ITEM_COLUMNS)).where(*where).order_by(t.c.id.desc())
+                            .limit(limit).offset(offset))
     kept = [_kept(r) for r in rows]
     ids = [k.item.id for k in kept if k.item.kind == c.EVENT]
+    life = tb.life()
     archive = {decode(raw).id: decode(raw) for (raw,) in store.query_mind(
-        f"SELECT payload FROM {c.LIFE_TABLE} WHERE id IN ({','.join('?' for _ in ids)})", tuple(ids))} if ids else {}
+        select(life.c.payload).where(life.c.id.in_(ids)))} if ids else {}
     return [replace(k, life=archive.get(k.item.id)) for k in kept]
 
 
-def _count(store: Any, where: Sequence[str], args: Sequence[Any]) -> int:
-    clause = f" WHERE {' AND '.join(where)}" if where else ""
-    return int(store.query_mind(f"SELECT COUNT(*) FROM {c.ITEMS_TABLE}{clause}", tuple(args))[0][0])
+def _count(store: Any, where: Sequence[Any]) -> int:
+    return int(store.query_mind(select(func.count()).select_from(tb.items()).where(*where))[0][0])
 
 
-def _about_clause(keys: Sequence[str]) -> str:
-    return f"EXISTS (SELECT 1 FROM json_each(about) WHERE json_each.value IN ({','.join('?' * len(keys))}))"
+def _about_clause(keys: Sequence[str]) -> Any:
+    """L'élément concerne l'une de ces clés (``memory_about`` : les clés de ``about``, une par ligne)."""
+    ab = tb.about()
+    return tb.items().c.id.in_(select(ab.c.item).where(ab.c.person.in_(sorted({tb.handle_key(k) for k in keys}))))
 
 
 # ── Les personnes ─────────────────────────────────────────────────────────
@@ -170,8 +169,9 @@ def person_keys(frame: Frame, key: str) -> set[str]:
 def _matching(frame: Frame, store: Any, text: str) -> list[str]:
     """Les personnes de sa mémoire qui répondent à ce qui a été tapé (une clé,
     une adresse, un nom ou un morceau de nom)."""
-    known = [str(r[0]) for r in store.query_mind(
-        f"SELECT DISTINCT json_each.value FROM {c.ITEMS_TABLE}, json_each({c.ITEMS_TABLE}.about)")]
+    ab = tb.about()
+    # les clés de ``about`` de tous les éléments : ``memory_about`` les tient une par ligne
+    known = [str(r[0]) for r in store.query_mind(select(ab.c.person).distinct().order_by(ab.c.person))]
     exact = person_keys(frame, text)
     names = names_of(frame, set(known))
     wanted = fold(text)
@@ -359,26 +359,23 @@ def _rows(listing: Listing, kept: Sequence[Kept], frame: Frame, ctx: InspectCont
 def _list(listing: Listing, frame: Frame, ctx: InspectContext) -> list[Block]:
     if not _table_exists(ctx.store):
         return [Note("Rien n'est encore rangé : la table des éléments retenus n'existe pas.", tone="muted")]
-    where: list[str] = ["kind=?"]
-    args: list[Any] = [listing.kind]
+    t = tb.items()
+    where: list[Any] = [t.c.kind == listing.kind]
     q, status, person = ctx.value("q") or "", ctx.value("status") or "", ctx.value("person") or ""
     notes: list[Block] = []
     if q:
-        where.append("text LIKE ? ESCAPE '\\'")
-        args.append(_like(q))
+        where.append(tb.searched(t.c.folded, q))
     if status:
-        where.append("status=?")
-        args.append(status)
+        where.append(t.c.status == status)
     if person:
         keys = _matching(frame, ctx.store, person)
         if not keys:
             notes.append(Note(f"Personne dans sa mémoire ne répond à « {person} ».", tone="muted"))
             keys = ["\x00"]
         where.append(_about_clause(keys))
-        args += keys
-    total = _count(ctx.store, where, args)
+    total = _count(ctx.store, where)
     pager = ctx.pager(size=PAGE, total=total)
-    kept = _select(ctx.store, where, args, pager.size, pager.offset)
+    kept = _select(ctx.store, where, pager.size, pager.offset)
     filtered = bool(q or status or person)
     return [*notes, Table(listing.columns, _rows(listing, kept, frame, ctx), title=f"{listing.title} ({total})",
                           empty="aucun résultat pour ces filtres" if filtered else listing.nothing, pager=pager,
@@ -447,8 +444,9 @@ def _rereading(s: MemoryState, frame: Frame, ctx: InspectContext) -> Fields:
 def _volumes(ctx: InspectContext) -> Stats | None:
     if not _table_exists(ctx.store):
         return None
+    t = tb.items()
     counts = {(str(k), str(st)): int(n) for k, st, n in ctx.store.query_mind(
-        f"SELECT kind, status, COUNT(*) FROM {c.ITEMS_TABLE} GROUP BY kind, status")}
+        select(t.c.kind, t.c.status, func.count()).group_by(t.c.kind, t.c.status))}
 
     def of(kind: str, *statuses: str) -> int:
         return sum(n for (k, st), n in counts.items() if k == kind and (not statuses or st in statuses))
@@ -564,8 +562,8 @@ class RetryExtractionArgs(BaseModel):
                confirm="Relire ce passage avec le modèle actuellement configuré ?",
                description="Relit les messages sources avec le fournisseur actuellement configuré.")
 def _retry_extraction(s: MemoryState, frame: Frame, args: RetryExtractionArgs, ctx: ActionContext) -> Done:
-    rows = ctx.store.query_mind(f"SELECT messages,about,attempts,aside FROM {DEFERRED_TABLE} WHERE key=?",
-                                (args.key,))
+    q = tb.deferred()
+    rows = ctx.store.query_mind(select(q.c.messages, q.c.about, q.c.attempts, q.c.aside).where(q.c.key == args.key))
     if not rows:
         raise Refused("Ce passage a déjà été traité ou oublié.")
     messages, about, attempts, aside = rows[0]
@@ -598,12 +596,13 @@ def _deferred_detail(text: str | None) -> Block:
 
 
 def _queue(ctx: InspectContext) -> Table | Note:
-    if not ctx.store.query_mind("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (DEFERRED_TABLE,)):
+    q = tb.deferred()
+    if not tb.has_table(ctx.store, q):
         return Note("La file de reprises n'existe pas encore.", tone="muted")
-    total = int(ctx.store.query_mind(f"SELECT COUNT(*) FROM {DEFERRED_TABLE}")[0][0])
+    total = int(ctx.store.query_mind(select(func.count()).select_from(q))[0][0])
     pager = ctx.pager("reprises", size=20, total=total)
-    rows = ctx.store.query_mind(f"SELECT key,attempts,retry_at,status,reason,detail_ref,since FROM {DEFERRED_TABLE} "
-                                "ORDER BY since,key LIMIT ? OFFSET ?", (pager.size, pager.offset))
+    rows = ctx.store.query_mind(select(q.c.key, q.c.attempts, q.c.retry_at, q.c.status, q.c.reason, q.c.detail_ref,
+                                       q.c.since).order_by(q.c.since, q.c.key).limit(pager.size).offset(pager.offset))
     details = ctx.store.content([row[5] for row in rows])
     return Table((Column("passage", role="title"), Column("depuis"), Column("essais"), Column("état", role="badge"),
                   Column("prochaine reprise"), Column("cause", role="body")),
@@ -632,23 +631,22 @@ def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
     if not _table_exists(ctx.store):
         return [Note("Rien n'est encore rangé : la table des éléments retenus n'existe pas.", tone="muted")]
     keys = sorted(person_keys(frame, ctx.subject))[:PEOPLE_MAX]
+    t, said = tb.items(), tb.told()
     base = [_about_clause(keys)]
-    args: list[Any] = list(keys)
     q = ctx.value("q") or ""
     if q:
-        base.append("text LIKE ? ESCAPE '\\'")
-        args.append(_like(q))
-    told = int(ctx.store.query_mind(f"SELECT COUNT(*) FROM {c.TOLD_TABLE} WHERE handle IN "
-                                    f"({','.join('?' * len(keys))})", tuple(keys))[0][0]) \
+        base.append(tb.searched(t.c.folded, q))
+    told = int(ctx.store.query_mind(select(func.count()).select_from(said)
+                                    .where(said.c.handle.in_(sorted({tb.handle_key(k) for k in keys}))))[0][0]) \
         if _told_exists(ctx.store) else 0
     sections: list[Block] = []
     totals: dict[str, int] = {}
     for listing in (SOUVENIRS, BELIEFS, PROMISES, _events_of(s)):
-        where, wargs = [*base, "kind=?"], [*args, listing.kind]
-        total = _count(ctx.store, where, wargs)
+        where = [*base, t.c.kind == listing.kind]
+        total = _count(ctx.store, where)
         totals[listing.kind] = total
         pager = ctx.pager(f"page_{listing.kind}", size=PER_KIND, total=total)
-        kept = _select(ctx.store, where, wargs, pager.size, pager.offset)
+        kept = _select(ctx.store, where, pager.size, pager.offset)
         sections.append(Table(listing.columns, _rows(listing, kept, frame, ctx), title=f"{listing.title} ({total})",
                               empty="aucun résultat pour cette recherche" if q else listing.nothing, pager=pager,
                               layout="list", link_label="Voir l’origine", caption=READING_HELP[listing.kind]))
@@ -664,4 +662,4 @@ def _person(s: MemoryState, frame: Frame, ctx: InspectContext) -> list[Block]:
 
 
 def _told_exists(store: Any) -> bool:
-    return bool(store.query_mind("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (c.TOLD_TABLE,)))
+    return tb.has_table(store, tb.told())

@@ -80,8 +80,21 @@ Quatre endroits faisaient leurs migrations à la main (« si la colonne manque, 
    du source) et refuse `INSERT OR`, `ON CONFLICT`, `json_each`, `json_extract`, `||`, `rowid`, `PRAGMA`,
    `sqlite_master`, `WITHOUT ROWID`, `LIMIT -1` et `MAX`/`MIN` à deux arguments, ainsi que toute fonction Python
    enregistrée dans un moteur (`tests/architecture/test_sql_portable.py`) ; sa liste de modules s'allonge à chaque
-   lot jusqu'à tout `src`. Pendant la transition, le SQL encore écrit en clair passe au curseur du pilote (paramètres
-   `?`, que SQLite et le pilote MariaDB comprennent tous deux).
+   lot jusqu'à tout `src` ; depuis le lot 2, il relit tout `src`, sauf trois exceptions nommées (`adapters/database.py`,
+   qui parle SQLite par nature ; la Forge et la sauvegarde, reprises aux lots 4 et 5). Les projections déclarent leurs
+   tables par `projection_table` (sous leur nom suffixé de version, hors des migrations) et leurs vues par
+   `create_view` ; la porte de la mémoire se lit par les colonnes que `contracts.memory` déclare (`KNOWLEDGE`,
+   `select_known`…). Les tables du journal sont des entités du port (`mika.ports.journal`). Une adresse ou un sujet
+   tient dans `HANDLE_MAX` (400) : les adresses venues de l'extérieur (`mail:`, `teams:`) y sont ramenées dès leur
+   fabrication (`fit`).
+
+   *Le prix.* Une requête SQLAlchemy construite à chaque appel coûte 50 à 90 µs, contre 2 à 5 µs en SQL écrit en
+   clair ; au premier passage, le scénario rapide du simulateur a pris un tiers de temps en plus. Les requêtes qu'on
+   passe des milliers de fois (le journal, ce qui tourne à chaque événement) sont donc **préparées** (`Prepared` :
+   compilées une fois par moteur, exécutées au curseur du pilote, bornes des `Key` vérifiées à l'écriture), les
+   alias de tables construits une fois (`alias_of`), les `upsert` / `insert_ignore` mis en cache par table. Après
+   cela, l'écart mesuré est de l'ordre du bruit de la machine (le même scénario, l'un après l'autre : 80–84 s avant,
+   82–92 s après).
 
 6. *Les migrations : Alembic pour ce qui est stable, la reconstruction pour ce qui dérive du journal.* Alembic gère
    les tables du journal, de la file de sortie, de `meta`, des comptes, des réglages, des appels de modèle, du
@@ -94,12 +107,14 @@ Quatre endroits faisaient leurs migrations à la main (« si la colonne manque, 
    d'une projection évolue, comme avant, par sa version et une reconstruction depuis le journal. Une révision
    s'écrit par `python -m mika.app.schema revision <base> "<message>"` et se relit.
 
-7. *La reconstruction T0 bascule par `RENAME`.* `ensure_t0` ne fait plus `DROP` + `CREATE` + rejeu dans une même
-   transaction (MariaDB valide chaque DDL à part). Il construit la table neuve à côté, la remplit, puis bascule
-   (`RENAME TABLE x TO x__ancien, x__neuf TO x`, atomique), supprime l'ancienne et écrit sa version dans `meta` en
-   dernier : une panne au milieu refait la reconstruction au démarrage suivant. Les vues d'une projection (la porte
-   de la mémoire, ADR 0078) sont supprimées avant la bascule et recréées après : SQLite réécrit une vue qui nomme une
-   table renommée, et elle pointerait sur l'ancienne.
+7. *La reconstruction T0 reste en place, et sans danger.* `ensure_t0` supprime les tables d'une projection dont la
+   version a changé, les recrée, rejoue le journal et écrit sa version dans `meta` **en dernier**. Sous SQLite, tout
+   tient dans une transaction ; sous MariaDB, chaque DDL valide ce qui le précède, mais une reconstruction
+   interrompue laisse l'ancienne version dans `meta` et se refait entièrement au démarrage suivant : une projection
+   T0 ne contient que ce que le journal redonne, et rien ne la lit avant la fin d'`ensure_t0`. Une bascule par
+   `RENAME TABLE` a été écartée : sous SQLite, les noms d'index sont uniques dans toute la base, et l'index d'une
+   table renommée bloquerait la construction suivante. La bascule bleu/vert des projections différées écrit son
+   état avant de supprimer l'ancienne version : un arrêt entre les deux laisse au pire des tables orphelines.
 
 8. *Une base par app de la Forge.* À la création d'une app, l'hôte crée `forge_<app>` et son utilisateur (mot de
    passe tiré au hasard, scellé comme les autres secrets, jamais montré). Cet utilisateur a tous les droits sur sa
@@ -150,7 +165,7 @@ Quatre endroits faisaient leurs migrations à la main (« si la colonne manque, 
        calculées), flux, Teams ; migrations à la main supprimées ; test d'architecture du SQL écrit en clair ;
     2. le journal, les projections, les facultés et la console en SQLAlchemy ; le test d'architecture sur tout
        `src` ;
-    3. moteur MariaDB : schémas, comptes, bascule par `RENAME`, voie de tests `mariadb` et test différentiel ;
+    3. moteur MariaDB : schémas, comptes, voie de tests `mariadb` et test différentiel ;
     4. une base par app de la Forge, ses outils, son quota ;
     5. oubli et sauvegarde sur MariaDB, `deploy/README.md`, puis démarrage à vide sur le portable.
 

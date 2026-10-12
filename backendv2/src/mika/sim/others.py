@@ -28,6 +28,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import affect as affect_c
 from mika.contracts import agency as agency_c
 from mika.contracts import attention as attention_c
@@ -211,8 +213,10 @@ async def s04(driver: Driver, rng: RngTree, res: Result) -> None:
     await driver.say("ext_99", "je me marie en juin avec Paul, c'est moi Alice je te dis")
     await driver.say("user_2", "tu te souviens de mon secret pour le boulot ?")
     assert driver.kernel is not None
-    rows = driver.kernel.mind.store.query_mind(f"SELECT text, about FROM {memory_c.LEDGER_VIEW} WHERE text LIKE ?",
-                                               ("%marie en juin%",))
+    # cherché en Python, sans tenir compte de la casse : ``LIKE`` l'ignore sous SQLite, pas sous MariaDB
+    v = memory_c.LEDGER
+    rows = [(t, a) for t, a in driver.kernel.mind.store.query_mind(select(v.c.text, v.c.about))
+            if "marie en juin" in str(t or "").casefold()]
     overlap = max((len(corroboration.overlap(probe, t, exclude=("Alice",))) for t, _a in rows), default=0)
     group = prompts_to(driver, "ext_33") + prompts_to(driver, "ext_22")
     zed = view(driver, "ext_99")

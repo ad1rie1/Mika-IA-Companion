@@ -40,6 +40,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
+from sqlalchemy import delete, select
 
 from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig
 from mika.adapters.imaging.config import build_gateway as build_image_gateway
@@ -71,7 +72,9 @@ from mika.kernel.registry import Registry
 from mika.ports.imaging import ASPECTS, QUALITIES, ImageRequest
 from mika.ports.imaging import ROLE_LABELS as IMAGE_ROLE_LABELS
 from mika.ports.imaging import ROLES as IMAGE_ROLES
+from mika.ports.journal import JournalSnapshot
 from mika.ports.llm import LLMRequest, Message
+from mika.ports.sql import upsert
 from mika.runtime import operations
 from mika.runtime.bootstrap import Kernel
 from mika.runtime.inspection import Inspection
@@ -127,8 +130,8 @@ async def replay_verify(data: Path) -> dict[str, object]:
 
     full = _mind(data)
     await full.store.open()
-    snaps = full.store.query_mind("SELECT seq, at, data FROM snapshots")
-    await full.store.run_mind(lambda sql: sql.execute("DELETE FROM snapshots"))
+    snaps = full.store.query_mind(select(JournalSnapshot.seq, JournalSnapshot.at, JournalSnapshot.data))
+    await full.store.run_mind(lambda sql: sql.execute(delete(JournalSnapshot)))
     await full.store.close()
     r2 = await full.boot(append_boot=False)
     d2 = _state(full)
@@ -136,7 +139,7 @@ async def replay_verify(data: Path) -> dict[str, object]:
     async def restore(sql_rows=snaps) -> None:
         def put(sql) -> None:
             for seq, at, payload in sql_rows:
-                sql.execute("INSERT OR REPLACE INTO snapshots(seq, at, data) VALUES(?,?,?)", (seq, at, payload))
+                upsert(sql, JournalSnapshot, {"seq": seq, "at": at, "data": payload}, keys=["seq"])
 
         await full.store.run_mind(put)
 
@@ -153,8 +156,8 @@ async def rebuild(data: Path, owners: list[str]) -> dict[str, object]:
     # sans instantané, le prochain démarrage relirait l'ancien : la reconstruction ne durerait pas
     root = mind.root
     data_json = mind.snapshot_data(root)
-    await mind.store.run_mind(lambda sql: sql.execute(
-        "INSERT OR REPLACE INTO snapshots(seq, at, data) VALUES(?,?,?)", (root.seq, root.at, data_json)))
+    await mind.store.run_mind(lambda sql: upsert(sql, JournalSnapshot, {"seq": root.seq, "at": root.at,
+                                                                         "data": data_json}, keys=["seq"]))
     await mind.close()
     return report
 

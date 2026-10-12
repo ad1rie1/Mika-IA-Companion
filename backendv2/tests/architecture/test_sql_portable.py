@@ -2,7 +2,7 @@
 
 Le SQL écrit en clair de ces modules est relu par l'AST (chaînes, f-chaînes et concaténations ; jamais les
 docstrings ni les commentaires, qui nomment justement ce qu'il ne faut pas faire) ; aucune fonction Python n'est
-enregistrée dans un moteur. Le magasin et les facultés suivent au lot 2 : la liste s'allonge jusqu'à tout ``src``.
+enregistrée dans un moteur. Tout ``src`` y passe, sauf les exceptions nommées (``EXEMPT``) et leur raison.
 """
 
 from __future__ import annotations
@@ -15,18 +15,19 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "mika"
 
-PORTED = [
-    "adapters/web/accounts.py",
-    "app/settings.py",
-    "app/persona.py",
-    "app/schema.py",
-    "adapters/llm/calls.py",
-    "runtime/traces.py",
-    "runtime/series.py",
-    *sorted(str(p.relative_to(SRC)) for p in (SRC / "adapters" / "mail").glob("*.py")),
-    *sorted(str(p.relative_to(SRC)) for p in (SRC / "adapters" / "feeds").glob("*.py")),
-    *sorted(str(p.relative_to(SRC)) for p in (SRC / "adapters" / "teams").glob("*.py")),
-]
+#: ce qui reste hors de la règle, et pourquoi (le lot qui le reprend)
+EXEMPT = {
+    "adapters/database.py": "le seul module qui parle de SQLite par nature (sa mise en route, la troncature du WAL)",
+    "adapters/forge/__init__.py": "la Forge : lot 4 (une base par app)",
+    "app/backup.py": "la sauvegarde : lot 5",
+}
+
+#: tout ``src`` (les révisions générées d'Alembic à part), sauf ``EXEMPT``
+PORTED = sorted(
+    rel for rel in (str(p.relative_to(SRC)) for p in SRC.rglob("*.py") if "__pycache__" not in p.parts)
+    if not rel.startswith("app/migrations/") and rel not in EXEMPT
+)
+PORTED = list(dict.fromkeys(PORTED))  # un module nommé deux fois (à la main, puis par son paquet) : relu une fois
 
 _SQL = re.compile(r"^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|WITH|REPLACE|PRAGMA|ALTER|DROP)\b", re.I)
 FORBIDDEN = {
@@ -40,6 +41,8 @@ FORBIDDEN = {
     "WITHOUT ROWID": re.compile(r"\bWITHOUT\s+ROWID\b", re.I),
     "MAX/MIN(a, b)": re.compile(r"\b(MAX|MIN)\s*\([^()]*,[^()]*\)", re.I),
     "LIMIT -1": re.compile(r"\bLIMIT\s+-1\b", re.I),
+    "strftime / unixepoch / julianday": re.compile(r"\b(strftime|unixepoch|julianday)\s*\(", re.I),
+    "total() (SQLite)": re.compile(r"\btotal\s*\(", re.I),
 }
 
 
@@ -109,3 +112,7 @@ db.create_function("fold", 1, f)
     assert any("fonction Python" in f for f in found)
     assert not any("ligne 2" in f for f in found)  # la docstring
     assert offences('X = "SELECT MAX(at) FROM t"\nY = "le rowid, en prose"') == []
+
+
+def test_every_exemption_names_a_real_module() -> None:
+    assert all((SRC / path).is_file() for path in EXEMPT)

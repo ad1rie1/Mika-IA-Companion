@@ -23,6 +23,7 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlencode
 
+from sqlalchemy import and_, func, or_, select
 from starlette.requests import Request
 from starlette.responses import RedirectResponse, Response
 
@@ -53,6 +54,8 @@ from mika.kernel.inspect import (
     cursor_page,
     describe_error,
 )
+from mika.ports.journal import JournalEvent
+from mika.ports.sql import json_field
 from mika.runtime import operations
 from mika.runtime.boundary import Failed, call
 from mika.runtime.params import ParamsOverlay, Planned
@@ -374,11 +377,14 @@ async def journal(ui: Any, request: Request) -> list[Any]:
     ctx = ui.inspection.context(request.query_params)
     before = ctx.int_param("avant", 0)
     # une seule requête, filtrée en SQL, lue avec une ligne de plus : rien ne tombe entre deux pages (deux flux
-    # lus à part puis fusionnés sous un même curseur perdaient ce qui dépassait le plus court)
+    # lus à part puis fusionnés sous un même curseur perdaient ce qui dépassait le plus court). Une action de la
+    # console : son nom commence par ``console.``, comparé tel quel (``LIKE`` ignorerait la casse sous SQLite seul)
+    e = JournalEvent
+    action, outcome = json_field(e.data, "action"), json_field(e.data, "outcome")
+    console = and_(e.type == rt.OPERATED.name, func.substr(action, 1, len(CONSOLE)) == CONSOLE, outcome == "done")
     seqs = [int(r[0]) for r in ui.kernel.mind.store.query_mind(
-        "SELECT seq FROM events WHERE ((type=? AND json_extract(data, '$.action') LIKE 'console.%' "
-        "AND json_extract(data, '$.outcome')='done') OR type=?) AND seq<? ORDER BY seq DESC LIMIT ?",
-        (rt.OPERATED.name, PARAMS_CHANGED.name, before or INT_MAX, JOURNAL_PAGE + 1))]
+        select(e.seq).where(or_(console, e.type == PARAMS_CHANGED.name), e.seq < (before or INT_MAX))
+        .order_by(e.seq.desc()).limit(JOURNAL_PAGE + 1))]
     found = sorted((ui.decode(s) for s in ui.kernel.mind.store.get_events(seqs)), key=lambda e: -e.seq)
     merged, pager = cursor_page(found, JOURNAL_PAGE, current=before)
     rows = []
@@ -397,6 +403,8 @@ async def journal(ui: Any, request: Request) -> list[Any]:
 
 #: le journal des modifications, par page
 JOURNAL_PAGE = 50
+#: le préfixe des actions de la console
+CONSOLE = "console."
 
 
 def _what(ui: Any, action: str) -> str:

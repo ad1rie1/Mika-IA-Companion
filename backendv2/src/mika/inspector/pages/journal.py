@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from sqlalchemy import func, select
+
 from mika.contracts import runtime as rt
 from mika.inspector import names
 from mika.inspector.catalog import Panel
@@ -42,6 +44,7 @@ from mika.kernel.inspect import (
     money_fr,
     num_fr,
 )
+from mika.ports.journal import JournalEvent
 from mika.ports.llm import LLMRequest, Message
 from mika.runtime import operations as ops
 from mika.runtime.boundary import Failed, call
@@ -60,12 +63,13 @@ REPLAY_CALLS = 50
 
 def _events(ui: Any, corr: str, query=None, *, speeches: bool = False) -> tuple[list[Any], Pager]:
     request = ui.inspection.context(query).pager(size=EPISODE_PAGE)
-    clause, args = ("correlation=? AND type=?", (corr, rt.UTTERANCE.name)) if speeches else ("correlation=?", (corr,))
-    total = int(ui.kernel.mind.store.query_mind(f"SELECT COUNT(*) FROM events WHERE {clause}", args)[0][0])
+    e = JournalEvent
+    where = (e.correlation == corr, e.type == rt.UTTERANCE.name) if speeches else (e.correlation == corr,)
+    total = int(ui.kernel.mind.store.query_mind(select(func.count()).select_from(e).where(*where))[0][0])
     pager = Pager(number=min(request.number, max(1, (total + EPISODE_PAGE - 1) // EPISODE_PAGE)), size=EPISODE_PAGE,
                   total=total)
     seqs = [int(r[0]) for r in ui.kernel.mind.store.query_mind(
-        f"SELECT seq FROM events WHERE {clause} ORDER BY seq LIMIT ? OFFSET ?", (*args, pager.size, pager.offset))]
+        select(e.seq).where(*where).order_by(e.seq).limit(pager.size).offset(pager.offset))]
     return [ui.decode(s) for s in ui.kernel.mind.store.get_events(seqs)], pager
 
 
@@ -79,9 +83,10 @@ def _provenance(ref: str) -> Any:
 def is_episode(ui: Any, corr: str) -> bool:
     """Une corrélation d'épisode (un début ou une fin au journal) — pas une action d'opérateur, un effet,
     un processus : ceux-là n'ont pas de page d'épisode."""
+    e = JournalEvent
     return bool(ui.kernel.mind.store.query_mind(
-        "SELECT 1 FROM events WHERE correlation=? AND type IN (?, ?) LIMIT 1",
-        (corr, rt.EPISODE_STARTED.name, rt.EPISODE_ENDED.name)))
+        select(e.seq).where(e.correlation == corr, e.type.in_([rt.EPISODE_STARTED.name, rt.EPISODE_ENDED.name]))
+        .limit(1)))
 
 
 def episode_head(ui: Any, corr: str) -> dict[str, Any] | None:

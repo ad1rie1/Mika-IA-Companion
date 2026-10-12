@@ -27,6 +27,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
 
+from mika.ports.sql import HANDLE_MAX, fit
+
 #: le préfixe d'une clé d'extension (une clé se reconnaît, et ne se confond ni avec un jeton de compte, ``mw_``,
 #: ni avec une clé de réveil, ``mwk_``)
 KEY_PREFIX = "mtk_"
@@ -96,7 +98,7 @@ def message_ref(conversation: str, external_id: str) -> str:
 
 def person_handle(author_id: str) -> str:
     """``teams:8:orgid:…`` : le sujet (au sens de l'oubli) de quelqu'un qu'on ne connaît que par Teams."""
-    return f"{HANDLE_PREFIX}{author_id.strip().lower()}" if author_id.strip() else ""
+    return fit(f"{HANDLE_PREFIX}{author_id.strip().lower()}", HANDLE_MAX) if author_id.strip() else ""
 
 
 def plain(text: str) -> str:

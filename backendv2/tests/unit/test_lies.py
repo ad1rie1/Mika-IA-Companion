@@ -130,7 +130,7 @@ def test_a_lie_thought_mulled_over_at_night_stays_a_secret():
         {"origin": attention_c.LIE, "about": ["user_3"], "sensitivity": 2, "source": 39, "sources": []}))
 
     class Store:
-        def query_mind(self, sql, args):
+        def query_mind(self, sql, args=()):
             return []
 
         def get_events(self, seqs):

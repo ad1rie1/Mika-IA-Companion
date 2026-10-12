@@ -37,6 +37,7 @@ from mika.kernel.clock import DAY
 from mika.kernel.events import Content, VoiceProvenance
 from mika.kernel.frame import Audience
 from mika.kernel.prompt import Budget, Composer, SectionBody, unveiled
+from mika.ports.paging import fold_text
 from mika.vocab import privacy
 from mika.vocab.privacy import ChannelTrust, Sensitivity
 from mika.vocab.retelling import retellable
@@ -184,14 +185,16 @@ def said_to(target: str, provenance: str):
 
 
 def thread(db, seq: int, who: str, text: str, room: str | None = None) -> None:
-    db.execute("INSERT INTO thread(id,at,role,person,text,room) VALUES(?,?,?,?,?,?)",
-               (seq, NOW - DAY, "user", who, text, room))
+    """Un message du fil, tel que l'écrit ``transcript`` : son texte replié (``folded``) compris — la mémoire y cherche
+    un prénom pareil sur les deux moteurs (ADR 0101)."""
+    db.execute("INSERT INTO thread(id,at,role,person,text,room,folded) VALUES(?,?,?,?,?,?,?)",
+               (seq, NOW - DAY, "user", who, text, room, fold_text(text)))
 
 
 def answer(db, seq: int, who: str, text: str) -> None:
     """Sa réponse à ``who``, la ligne du fil de l'énoncé ``seq``."""
-    db.execute("INSERT OR REPLACE INTO thread(id,at,role,person,text,room) VALUES(?,?,?,?,?,?)",
-               (seq, NOW - DAY, "assistant", who, text, None))
+    db.execute("INSERT OR REPLACE INTO thread(id,at,role,person,text,room,folded) VALUES(?,?,?,?,?,?,?)",
+               (seq, NOW - DAY, "assistant", who, text, None, fold_text(text)))
 
 
 def shown_and_said(db, seq: int, who: str, item: int, text: str) -> None:

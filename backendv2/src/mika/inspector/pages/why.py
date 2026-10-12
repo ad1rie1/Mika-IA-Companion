@@ -31,6 +31,8 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
 from mika.inspector import names
@@ -54,6 +56,7 @@ from mika.kernel.inspect import (
     num_fr,
 )
 from mika.ports.delivery import TOO_LATE
+from mika.ports.journal import JournalEvent
 from mika.runtime.boundary import Failed, call
 
 #: au-delà, l'arbitre a pu choisir plus tôt : le choix d'un départ se cherche dans ces événements-ci
@@ -103,9 +106,10 @@ def selection_of(ui: Any, started: Any) -> tuple[Any | None, Any | None, bool]:
         head = int(trigger[len("selected:"):])
     except ValueError:
         return None, None, False
+    e = JournalEvent
     seqs = [int(r[0]) for r in ui.kernel.mind.store.query_mind(
-        "SELECT seq FROM events WHERE type=? AND seq>? AND seq<? ORDER BY seq LIMIT ?",
-        (SELECTED.name, head, started.seq, SELECTION_LOOKUP))]
+        select(e.seq).where(e.type == SELECTED.name, e.seq > head, e.seq < started.seq).order_by(e.seq)
+        .limit(SELECTION_LOOKUP))]
     candidates = [ui.decode(s) for s in ui.kernel.mind.store.get_events(seqs)]
     for e in sorted(candidates, key=lambda x: x.seq):
         row = _fired_row(e.data, kind, target)
@@ -265,9 +269,8 @@ def _split(ref: str) -> tuple[str, int | None]:
 def _memory_items(ui: Any, ids: Sequence[int]) -> dict[int, tuple[str, str | None]]:
     if not ids:
         return {}
-    marks = ",".join("?" * len(ids))
-    got = call(ui.kernel.mind.store.query_mind,
-               f"SELECT id, kind, text FROM {memory_c.LEDGER_VIEW} WHERE id IN ({marks})", tuple(ids),
+    v = memory_c.LEDGER
+    got = call(ui.kernel.mind.store.query_mind, select(v.c.id, v.c.kind, v.c.text).where(v.c.id.in_(list(ids))),
                label="souvenirs d'une parole")
     return {} if isinstance(got, Failed) else {int(r[0]): (str(r[1]), r[2] or None) for r in got}
 
@@ -275,9 +278,9 @@ def _memory_items(ui: Any, ids: Sequence[int]) -> dict[int, tuple[str, str | Non
 def _chunks(ui: Any, ids: Sequence[int]) -> dict[int, tuple[str | None, str | None]]:
     if not ids:
         return {}
-    marks = ",".join("?" * len(ids))
+    t = memory_c.chunks_table()
     got = call(ui.kernel.mind.store.query_mind,
-               f"SELECT id, user_text, reply_text FROM {memory_c.CHUNKS_TABLE} WHERE id IN ({marks})", tuple(ids),
+               select(t.c.id, t.c.user_text, t.c.reply_text).where(t.c.id.in_(list(ids))),
                label="échanges d'une parole")
     return {} if isinstance(got, Failed) else {int(r[0]): (r[1] or None, r[2] or None) for r in got}
 
@@ -353,9 +356,9 @@ def silence_of(ui: Any, seq: int) -> Any | None:
     première qui le suit et le dit — celle d'une rafale porte sur son dernier message et règle ceux d'avant.
     ``None`` : pas retrouvée (il a reçu sa réponse, ou sa fin est trop loin)."""
     store = ui.kernel.mind.store
+    e = JournalEvent
     seqs = [int(r[0]) for r in store.query_mind(
-        "SELECT seq FROM events WHERE type=? AND seq>? ORDER BY seq LIMIT ?",
-        (rt.EPISODE_ENDED.name, seq, SILENCE_LOOKUP))]
+        select(e.seq).where(e.type == rt.EPISODE_ENDED.name, e.seq > seq).order_by(e.seq).limit(SILENCE_LOOKUP))]
     for stored in store.get_events(seqs):  # dans l'ordre du journal
         e = ui.decode(stored)
         if e.data.leaves_unanswered(seq):

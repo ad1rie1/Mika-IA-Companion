@@ -45,6 +45,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
@@ -375,8 +376,9 @@ def notes_of(frame: Frame, store: Any, state: SelfState,
     ce qu'il reprend peut se dire (une note secrète à elle, sans personne, ne se lit pas dans un salon)."""
     tz = frame.env.tz_of(frame.root)
     start, end = d_.day_window(day, tz, _starts(frame))
-    rows = store.query_mind(f"SELECT at, person, role, kind, text, emotion FROM {transcript_c.THREAD_TABLE} "
-                            "WHERE at >= ? AND at < ? ORDER BY id", (start, end))
+    t = transcript_c.thread_table()
+    rows = store.query_mind(select(t.c.at, t.c.person, t.c.role, t.c.kind, t.c.text, t.c.emotion)
+                            .where(t.c.at >= start, t.c.at < end).order_by(t.c.id))
     told: dict[str, list[tuple[int, str]]] = {}
     # ce qu'elle a dit : quand, et sur quel ton — jamais ses phrases, qu'un modèle recopiait telles quelles dans son
     # journal (sonde réelle du 2026-10-03 : « Hey Sam ! Je viens de penser à toi… prendre… »)
@@ -427,9 +429,10 @@ def notes_of(frame: Frame, store: Any, state: SelfState,
         lines.append(phrase("self.night.notes.wrote_answered", who=who(p), moments=moments) if answered else
                      phrase("self.night.notes.wrote_unanswered", who=who(p), moments=moments))
     lines += _deeds(frame, store, state, start, end) + room_doings(frame, start, end)
+    v = memory_c.KNOWLEDGE
     promised = knowns(store.query_mind(
-        f"{memory_c.SELECT_KNOWN} WHERE kind=? AND born_at >= ? AND born_at < ? ORDER BY id LIMIT 4",
-        (memory_c.PROMISE, start, end)), memory_c.KNOWN_COLUMNS)
+        memory_c.select_known().where(v.c.kind == memory_c.PROMISE, v.c.born_at >= start, v.c.born_at < end)
+        .order_by(v.c.id).limit(4)), memory_c.KNOWN_COLUMNS)
     if promised:
         lines.append(phrase("self.night.notes.promised", promises=" ; ".join(
             f"« {_quote(k.text, 120)} »"
@@ -438,8 +441,9 @@ def notes_of(frame: Frame, store: Any, state: SelfState,
         people |= {k.recipient for k in promised if k.recipient}
         names.update(_names(frame, {k.recipient for k in promised if k.recipient and k.recipient not in names}))
     souvenirs = knowns(store.query_mind(
-        f"{memory_c.SELECT_KNOWN} WHERE kind=? AND born_at >= ? AND born_at < ? AND status='active' "
-        "ORDER BY importance DESC, id LIMIT 6", (memory_c.SOUVENIR, start, end)), memory_c.KNOWN_COLUMNS)
+        memory_c.select_known().where(v.c.kind == memory_c.SOUVENIR, v.c.born_at >= start, v.c.born_at < end,
+                                      v.c.status == "active")
+        .order_by(v.c.importance.desc(), v.c.id).limit(6)), memory_c.KNOWN_COLUMNS)
     if souvenirs:
         lines += [phrase("self.night.notes.kept")] + [f"- {clean_tokens(k.text)}" for k in souvenirs]
         # le journal dit qui il concerne : tous ceux dont il parle, pas seulement ceux qui lui ont parlé
@@ -479,8 +483,9 @@ def told_day(frame: Frame, store: Any, state: SelfState, day: date) -> str:
     avec ses mots quand on le lui demande."""
     tz = frame.env.tz_of(frame.root)
     start, end = d_.day_window(day, tz, _starts(frame))
-    rows = store.query_mind(f"SELECT at, person, role, kind, emotion, emotion_intensity "
-                            f"FROM {transcript_c.THREAD_TABLE} WHERE at >= ? AND at < ? ORDER BY id", (start, end))
+    t = transcript_c.thread_table()
+    rows = store.query_mind(select(t.c.at, t.c.person, t.c.role, t.c.kind, t.c.emotion, t.c.emotion_intensity)
+                            .where(t.c.at >= start, t.c.at < end).order_by(t.c.id))
     heard: dict[str, list[int]] = {}
     reached: dict[str, list[int]] = {}
     felt: list[tuple[str, float]] = []
@@ -752,10 +757,11 @@ class Dreaming:
             return
         # ce qu'elle a vécu ces derniers jours — né, ou revécu (renforcé, repris en parlant) : une vie routinière
         # rêve encore de ce qui revient (ADR 0058) ; ``touched_at`` vaut au moins ``born_at``
+        v = memory_c.KNOWLEDGE
         rows = knowns(store.query_mind(
-            f"{memory_c.SELECT_KNOWN} WHERE kind=? AND status='active' AND touched_at >= ? "
-            "ORDER BY importance DESC, id DESC LIMIT 8", (memory_c.SOUVENIR, frame.now - DREAM_LOOKBACK)),
-            memory_c.KNOWN_COLUMNS)
+            memory_c.select_known().where(v.c.kind == memory_c.SOUVENIR, v.c.status == "active",
+                                          v.c.touched_at >= frame.now - DREAM_LOOKBACK)
+            .order_by(v.c.importance.desc(), v.c.id.desc()).limit(8)), memory_c.KNOWN_COLUMNS)
         picked = rng.sample(rows, k=min(3, len(rows))) if rows else []
         thoughts = [t for t in frame.get(attention_c.THOUGHTS) if t.intensity >= 0.3][:1]
         texts = store.content([t.text_ref for t in thoughts if t.text_ref])

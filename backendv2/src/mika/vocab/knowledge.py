@@ -105,5 +105,5 @@ def known_of(row: Mapping[str, Any]) -> Known:
 
 
 def knowns(rows: Iterable[Sequence[Any]], columns: Sequence[str]) -> list[Known]:
-    """Les lignes d'une requête sur une vue de ce qu'elle sait (``SELECT_KNOWN``), dans l'ordre."""
+    """Les lignes d'une requête sur une vue de ce qu'elle sait (``contracts.memory.select_known``), dans l'ordre."""
     return [known_of(dict(zip(columns, r, strict=True))) for r in rows]

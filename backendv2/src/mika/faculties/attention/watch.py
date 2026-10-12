@@ -14,6 +14,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import agency as agency_c
 from mika.contracts import attention as c
 from mika.contracts import body as body_c
@@ -65,9 +67,8 @@ def _known(store: Any, ids: tuple[int, ...]) -> dict[int, Known]:
     """Ce qu'elle sait, ou a cru (une croyance remplacée), par identifiant — par la porte de la mémoire."""
     if store is None or not ids:
         return {}
-    marks = ",".join("?" * len(ids))
-    rows = [*store.query_mind(f"{memory_c.SELECT_KNOWN} WHERE id IN ({marks})", ids),
-            *store.query_mind(f"{memory_c.SELECT_FORMER} WHERE id IN ({marks})", ids)]
+    rows = [*store.query_mind(memory_c.select_known().where(memory_c.KNOWLEDGE.c.id.in_(list(ids)))),
+            *store.query_mind(memory_c.select_known(memory_c.FORMER).where(memory_c.FORMER.c.id.in_(list(ids))))]
     return {k.id: k for k in knowns(rows, memory_c.KNOWN_COLUMNS)}
 
 
@@ -93,18 +94,17 @@ def gist(frame: Frame, store: Any, q: Pending) -> tuple[str, list[tuple[int, str
     """L'échange d'où naît la pensée : le message le plus marquant (``q.source``), et tous les messages de la
     personne dans cet échange, dans l'ordre — (n°, texte). Un échange : ses messages et ceux de Mika avec elle,
     depuis le dernier silence."""
-    rows = store.query_mind(f"SELECT id, at, role, text, room FROM {transcript_c.THREAD_TABLE} WHERE id=?",
-                            (q.source,))
+    t = transcript_c.thread_table()
+    rows = store.query_mind(select(t.c.id, t.c.at, t.c.role, t.c.text, t.c.room).where(t.c.id == q.source))
     if not rows:
         return "", []
     marked_at, said, room = int(rows[0][1]), str(rows[0][3] or ""), rows[0][4]
     if not q.person:
         return said, [(q.source, said)]
-    handles = tuple(frame.get(identity_c.HANDLES(q.person)) or (q.person,))
-    marks = ",".join("?" * len(handles))
+    handles = list(frame.get(identity_c.HANDLES(q.person)) or (q.person,))
     rows = store.query_mind(
-        f"SELECT id, at, role, text, room FROM {transcript_c.THREAD_TABLE} WHERE person IN ({marks}) AND at >= ? "
-        "AND at <= ? ORDER BY id", (*handles, marked_at - GIST_LOOKBACK, frame.now))
+        select(t.c.id, t.c.at, t.c.role, t.c.text, t.c.room)
+        .where(t.c.person.in_(handles), t.c.at >= marked_at - GIST_LOOKBACK, t.c.at <= frame.now).order_by(t.c.id))
     # le même fil seulement : ce qu'elle a dit en privé ne se mêle pas à une pensée née dans un salon (anodine)
     rows = [r[:4] for r in rows if r[4] == room]
     segment: list[tuple[int, int, str, str]] = []
@@ -263,9 +263,10 @@ def reminiscence(state: AttentionState, frame: Frame, store: Any, p: Any) -> Dra
     sources le permettent."""
     if store is None:
         return None
-    rows = store.query_mind(f"{memory_c.SELECT_KNOWN} WHERE kind=? AND born_at <= ? "
-                            "ORDER BY importance DESC, id DESC LIMIT ?",
-                            (memory_c.SOUVENIR, frame.now - p.reminisce_min_age_us, REMINISCE_POOL))
+    v = memory_c.KNOWLEDGE
+    rows = store.query_mind(memory_c.select_known()
+                            .where(v.c.kind == memory_c.SOUVENIR, v.c.born_at <= frame.now - p.reminisce_min_age_us)
+                            .order_by(v.c.importance.desc(), v.c.id.desc()).limit(REMINISCE_POOL))
     recent = {item for _t, item in state.reminisced}
     pool = [k for k in knowns(rows, memory_c.KNOWN_COLUMNS) if k.id not in recent and k.text.strip()]
     if not pool:

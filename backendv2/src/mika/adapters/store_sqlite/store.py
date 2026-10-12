@@ -10,18 +10,18 @@ En mode ``threaded`` (production), toutes les écritures passent par un fil
 dédié ; sinon (simulation, tests) elles s'exécutent en ligne. Les lectures
 utilisent leurs propres connexions (WAL), en autocommit.
 
-Les connexions sont celles de SQLAlchemy (ADR 0101). Le SQL écrit en clair passe
-au pilote tel quel, par son curseur (paramètres ``?``, que SQLite et le pilote
-MariaDB comprennent tous deux : sans le coût d'une compilation) ; une requête
-SQLAlchemy (``select``, ``insert``…) est compilée pour le moteur ; ``Sql.session``
-est une session ORM qui travaille dans la même transaction. Le journal et les
-projections sont encore écrits en clair ; les entités des autres (comptes,
-réglages, traces…) créent leurs tables par ``Sql.create``.
+Les connexions sont celles de SQLAlchemy (ADR 0101), les tables celles de
+``mika.ports.journal`` ; toute requête du magasin est une requête SQLAlchemy,
+compilée pour le moteur. Le port ``Sql`` accepte encore du SQL écrit en clair
+(il va au curseur du pilote, paramètres ``?``) ; ``Sql.session`` est une session
+ORM qui travaille dans la même transaction ; ``Sql.create`` / ``Sql.drop`` créent
+et suppriment des tables déclarées (entités, tables de projection).
 """
 
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import queue
 import re
@@ -31,11 +31,25 @@ from collections.abc import Callable, Collection, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection, Engine
+from sqlalchemy import Connection, Engine, bindparam, delete, func, insert, select, update
 from sqlalchemy.orm import Session
 
-from mika.adapters.database import dbapi_in_transaction, dbapi_of, sqlite_engine
+from mika.adapters.database import dbapi_in_transaction, dbapi_of, sqlite_engine, truncate_log
 from mika.kernel.clock import DAY
+from mika.ports.journal import (
+    DEDUPE_KEY_MAX,
+    MIND_TABLES,
+    SUBJECT_MAX,
+    VIEWS_TABLES,
+    JournalContent,
+    JournalDedupe,
+    JournalEvent,
+    JournalOutbox,
+    JournalSnapshot,
+    JournalSubject,
+    ProjectorState,
+)
+from mika.ports.sql import Prepared, fit, insert_ignore, json_field, upsert
 from mika.ports.store import (
     AppendBatch,
     ContentRow,
@@ -44,35 +58,6 @@ from mika.ports.store import (
     Sql,
     StoredEvent,
 )
-
-_MIND_SCHEMA = """
-CREATE TABLE IF NOT EXISTS events(
-    seq INTEGER PRIMARY KEY, id TEXT NOT NULL UNIQUE, type TEXT NOT NULL, v INTEGER NOT NULL,
-    at INTEGER NOT NULL, causation TEXT, correlation TEXT NOT NULL, basis INTEGER NOT NULL,
-    origin TEXT NOT NULL, data TEXT NOT NULL);
-CREATE INDEX IF NOT EXISTS events_type ON events(type, seq);
-CREATE INDEX IF NOT EXISTS events_corr ON events(correlation);
-CREATE INDEX IF NOT EXISTS events_cause ON events(causation);
-CREATE TABLE IF NOT EXISTS dedupe(type TEXT NOT NULL, key TEXT NOT NULL, seq INTEGER NOT NULL,
-    PRIMARY KEY(type, key));
-CREATE TABLE IF NOT EXISTS content(ref TEXT PRIMARY KEY, seq INTEGER NOT NULL, level INTEGER NOT NULL,
-    text TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS content_subjects(ref TEXT NOT NULL, subject TEXT NOT NULL,
-    PRIMARY KEY(ref, subject));
-CREATE INDEX IF NOT EXISTS content_by_subject ON content_subjects(subject);
-CREATE TABLE IF NOT EXISTS snapshots(seq INTEGER PRIMARY KEY, at INTEGER NOT NULL, data TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS outbox(key TEXT PRIMARY KEY, seq INTEGER NOT NULL, effect TEXT NOT NULL,
-    status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT);
-CREATE INDEX IF NOT EXISTS outbox_pending ON outbox(status, seq);
-CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
-"""
-
-_VIEWS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS projector_state(name TEXT PRIMARY KEY, version INTEGER NOT NULL,
-    applied_seq INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS projector_quarantine(name TEXT NOT NULL, seq INTEGER NOT NULL, error TEXT,
-    PRIMARY KEY(name, seq));
-"""
 
 SNAPSHOTS_KEPT = 3
 #: Une ligne « partie » de la file de sortie se garde tant de temps, puis s'efface à l'instantané suivant : elle ne
@@ -110,6 +95,8 @@ class SqlConn:
 
     def execute(self, sql: Any, params: Any = ()) -> Any:
         self._flush()
+        if isinstance(sql, Prepared):
+            return sql.execute(self.conn, params or None)
         if isinstance(sql, str):
             cur = dbapi_of(self.conn).cursor()
             cur.execute(sql, params)
@@ -118,6 +105,8 @@ class SqlConn:
 
     def executemany(self, sql: Any, rows: Sequence[Any]) -> Any:
         self._flush()
+        if isinstance(sql, Prepared):
+            return sql.execute(self.conn, list(rows))
         if isinstance(sql, str):
             cur = dbapi_of(self.conn).cursor()
             cur.executemany(sql, rows)
@@ -146,6 +135,12 @@ class SqlConn:
         for meta, tables in by_meta.values():
             meta.create_all(self.conn, tables=tables, checkfirst=True)
 
+    def drop(self, *entities: Any) -> None:
+        """Supprime les tables de ces entités (ou tables de projection) si elles existent."""
+        self._flush()
+        for e in entities:
+            getattr(e, "__table__", e).drop(self.conn, checkfirst=True)
+
     def close(self) -> None:
         """Ce que la session avait en attente part ; la session se ferme (la transaction, elle, reste à qui l'a
         ouverte)."""
@@ -158,6 +153,8 @@ class SqlConn:
 
 
 def _query(conn: Connection, sql: Any, params: Any = ()) -> list[tuple[Any, ...]]:
+    if isinstance(sql, Prepared):
+        return sql.fetch(conn, params or None)
     if isinstance(sql, str):
         cur = dbapi_of(conn).cursor()
         cur.execute(sql, params)
@@ -305,9 +302,9 @@ class SqliteStore:
     # ── cycle de vie ──
     def _open_writers(self) -> tuple[Connection, Connection]:
         mind = sqlite_engine(self.mind_path, synchronous=self._mind_sync, check_same_thread=not self._threaded).connect()
-        dbapi_of(mind).executescript(_MIND_SCHEMA)  # hors de toute transaction : à l'ouverture
+        _transaction((mind,), lambda: SqlConn(mind).create(*MIND_TABLES))
         views = sqlite_engine(self.views_path, synchronous="NORMAL", check_same_thread=not self._threaded).connect()
-        dbapi_of(views).executescript(_VIEWS_SCHEMA)
+        _transaction((views,), lambda: SqlConn(views).create(*VIEWS_TABLES))
         return mind, views
 
     async def open(self) -> None:
@@ -316,7 +313,8 @@ class SqliteStore:
         self._views_reader = sqlite_engine(self.views_path, autocommit=True)
         self._mind_r = self._mind_reader.connect()
         self._views_r = self._views_reader.connect()
-        row = _cursor(self._mind_r, "SELECT seq, at FROM events ORDER BY seq DESC LIMIT 1").fetchone()
+        row = self._mind_r.execute(select(JournalEvent.seq, JournalEvent.at)
+                                   .order_by(JournalEvent.seq.desc()).limit(1)).first()
         if row:
             self._head, self._last_at = int(row[0]), int(row[1])
 
@@ -356,10 +354,7 @@ class SqliteStore:
         """Chargement massif (tests de performance) : une transaction."""
 
         def fn(m: Connection, v: Connection) -> None:
-            _transaction((m,), lambda: SqlConn(m).executemany(
-                "INSERT INTO events(seq,id,type,v,at,causation,correlation,basis,origin,data) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                [(e.seq, e.id, e.type, e.v, e.at, e.causation, e.correlation, e.basis, e.origin, e.data) for e in events],
-            ))
+            _transaction((m,), lambda: m.execute(insert(JournalEvent.__table__), [_event_row(e) for e in events]))
 
         self._writer.run_sync(fn)
         if events:
@@ -370,10 +365,8 @@ class SqliteStore:
             raise StoreSealed("magasin scellé")
 
         def fn(m: Connection, v: Connection) -> None:
-            SqlConn(m).execute(
-                "UPDATE outbox SET status=?, attempts=attempts+1, last_error=? WHERE key=?",
-                (status, error, key),
-            )
+            _transaction((m,), lambda: m.execute(update(JournalOutbox).where(JournalOutbox.key == key).values(
+                status=status, attempts=JournalOutbox.attempts + 1, last_error=error)))
 
         await self._writer.run(fn)
 
@@ -405,15 +398,12 @@ class SqliteStore:
             ms, vs = SqlConn(m), SqlConn(v)
 
             def body() -> int:
-                refs = [r[0] for r in ms.execute("SELECT ref FROM content_subjects WHERE subject=?", (subject,))]
-                for ref in refs:
-                    ms.execute("DELETE FROM content WHERE ref=?", (ref,))
-                    ms.execute("DELETE FROM content_subjects WHERE ref=?", (ref,))
+                key = fit(subject, SUBJECT_MAX)
+                refs = [r[0] for r in ms.query(select(JournalSubject.ref).where(JournalSubject.subject == key))]
+                _forget_contents(ms, refs)
                 # ce que les projections lui ont rattaché sans que le texte le nomme (un renfort) : effacé aussi
                 extra = sorted({r for r in (purge(ms, vs) or ()) if r and r not in refs})
-                for ref in extra:
-                    ms.execute("DELETE FROM content WHERE ref=?", (ref,))
-                    ms.execute("DELETE FROM content_subjects WHERE ref=?", (ref,))
+                _forget_contents(ms, extra)
                 if subject.startswith("name:"):
                     # Ces anciennes clés contiennent le nom en clair. L'oubli conserve des
                     # enveloppes rejouables, mais remplace cette clé partout par un jeton opaque.
@@ -433,15 +423,15 @@ class SqliteStore:
                             return {redact(key): redact(part) for key, part in value.items()}
                         return value
 
-                    # Pages bornées : même l'oubli ne charge pas des années de journal en RAM. SQLite écarte
+                    # Pages bornées : même l'oubli ne charge pas des années de journal en RAM. La base écarte
                     # d'abord les enveloppes qui ne contiennent pas la clé (sous ses deux graphies JSON) :
                     # seules celles qui la portent sont décodées en Python.
                     needles = (json.dumps(subject, ensure_ascii=False)[1:-1], json.dumps(subject)[1:-1])
+                    holds = (func.instr(JournalEvent.data, needles[0]) > 0) | (func.instr(JournalEvent.data, needles[1]) > 0)
                     after = 0
                     while True:
-                        rows = ms.execute("SELECT seq,data FROM events WHERE seq>? AND "
-                                         "(instr(data,?)>0 OR instr(data,?)>0) ORDER BY seq LIMIT 256",
-                                         (after, *needles)).fetchall()
+                        rows = ms.query(select(JournalEvent.seq, JournalEvent.data)
+                                        .where(JournalEvent.seq > after, holds).order_by(JournalEvent.seq).limit(256))
                         if not rows:
                             break
                         for seq, raw in rows:
@@ -449,10 +439,10 @@ class SqliteStore:
                             clean = redact(before)
                             if clean != before:
                                 # la forme compacte de ``model_dump_json``, celle de toutes les autres enveloppes
-                                ms.execute("UPDATE events SET data=? WHERE seq=?",
-                                          (json.dumps(clean, ensure_ascii=False, separators=(",", ":")), seq))
+                                ms.execute(update(JournalEvent).where(JournalEvent.seq == seq).values(
+                                    data=json.dumps(clean, ensure_ascii=False, separators=(",", ":"))))
                         after = rows[-1][0]
-                    ms.execute("DELETE FROM snapshots")
+                    ms.execute(delete(JournalSnapshot))
                 return len(refs) + len(extra)
 
             try:
@@ -461,7 +451,7 @@ class SqliteStore:
                 ms.close()
                 vs.close()
             for c in (m, v):
-                dbapi_of(c).execute("PRAGMA wal_checkpoint(TRUNCATE)")  # hors transaction, au pilote
+                truncate_log(c)
             return removed
 
         return await self._writer.run(fn)
@@ -482,28 +472,22 @@ class SqliteStore:
         return self._views_r
 
     def find_dedupe(self, type_name: str, key: str) -> int | None:
-        row = _cursor(self._r(), "SELECT seq FROM dedupe WHERE type=? AND key=?", (type_name, key)).fetchone()
+        rows = _P_DEDUPE.fetch(self._r(), {"type": type_name, "key": fit(key, DEDUPE_KEY_MAX)})
+        row = rows[0] if rows else None
         return int(row[0]) if row else None
 
     def read(
         self, after: int = 0, types: Collection[str] | None = None, upto: int | None = None
     ) -> Iterator[StoredEvent]:
-        sql = "SELECT seq,id,type,v,at,causation,correlation,basis,origin,data FROM events WHERE seq>?"
-        params: list[Any] = [after]
-        if upto is not None:
-            sql += " AND seq<=?"
-            params.append(upto)
         if types is not None:
             types = list(types)
             if not types:
                 return iter(())
-            sql += f" AND type IN ({','.join('?' * len(types))})"
-            params.extend(types)
-        sql += " ORDER BY seq"
+        params: dict[str, Any] = {"after": after, "upto": upto, "types": types}
         # Connexion dédiée : un itérateur long ne doit pas gêner les autres lectures (et le journal se relit
         # magasin fermé, depuis son fichier).
         conn = (self._mind_reader or sqlite_engine(self.mind_path, autocommit=True)).connect()
-        cur = _cursor(conn, sql, params)
+        cur = _read_query(upto is not None, types is not None).execute(conn, params)
 
         def gen() -> Iterator[StoredEvent]:
             try:
@@ -522,10 +506,7 @@ class SqliteStore:
         seqs = list(seqs)
         if not seqs:
             return []
-        rows = _cursor(self._r(),
-            f"SELECT seq,id,type,v,at,causation,correlation,basis,origin,data FROM events WHERE seq IN ({','.join('?' * len(seqs))}) ORDER BY seq",
-            seqs,
-        ).fetchall()
+        rows = _P_EVENTS.fetch(self._r(), {"seqs": seqs})
         return [StoredEvent(*r) for r in rows]
 
     def latest(self, types: Collection[str], limit: int, *, where: tuple[str, Any] | None = None,
@@ -534,60 +515,56 @@ class SqliteStore:
         corrs = list(correlations)[:500] if correlations is not None else None
         if not types or limit <= 0 or corrs == []:
             return []
-        sql = (f"SELECT seq,id,type,v,at,causation,correlation,basis,origin,data FROM events "
-               f"WHERE type IN ({','.join('?' * len(types))})")
-        params: list[Any] = list(types)
+        query = select(*_EVENT_COLUMNS).where(JournalEvent.type.in_(types))
         if where is not None:
-            sql += " AND json_extract(data, ?) = ?"
-            params += [f"$.{_field(where[0])}", where[1]]
+            query = query.where(json_field(JournalEvent.data, _field(where[0])) == _as_text(where[1]))
         if before is not None:
-            sql += " AND seq < ?"
-            params.append(before)
+            query = query.where(JournalEvent.seq < before)
         if corrs is not None:
-            sql += f" AND correlation IN ({','.join('?' * len(corrs))})"
-            params += corrs
-        sql += " ORDER BY seq DESC LIMIT ?"
-        params.append(min(int(limit), 10_000))
-        return [StoredEvent(*r) for r in _cursor(self._r(), sql, params).fetchall()]
+            query = query.where(JournalEvent.correlation.in_(corrs))
+        query = query.order_by(JournalEvent.seq.desc()).limit(min(int(limit), 10_000))
+        return [StoredEvent(*r) for r in self._r().execute(query).all()]
 
     def tally(self, type_name: str, field: str) -> list[tuple[Any, int, int]]:
-        rows = _cursor(self._r(),
-            "SELECT json_extract(data, ?), COUNT(*), MAX(at) FROM events WHERE type=? GROUP BY 1 ORDER BY 3 DESC",
-            (f"$.{_field(field)}", type_name)).fetchall()
+        value = json_field(JournalEvent.data, _field(field)).label("value")
+        last = func.max(JournalEvent.at).label("last")
+        rows = self._r().execute(select(value, func.count(), last).where(JournalEvent.type == type_name)
+                                 .group_by(value).order_by(last.desc(), value)).all()
         return [(r[0], int(r[1]), int(r[2])) for r in rows]
 
     def content(self, refs: Collection[str]) -> dict[str, str]:
         refs = list(refs)
         if not refs:
             return {}
-        rows = _cursor(self._r(),
-            f"SELECT ref, text FROM content WHERE ref IN ({','.join('?' * len(refs))})", refs
-        ).fetchall()
+        rows = [r for i in range(0, len(refs), 500) for r in _P_CONTENT.fetch(self._r(), {"refs": refs[i:i + 500]})]
         return {r[0]: r[1] for r in rows}
 
     def subjects(self, prefix: str) -> list[str]:
         # l'index par sujet : un parcours d'intervalle, jamais de toute la table
-        end = prefix[:-1] + chr(ord(prefix[-1]) + 1) if prefix else ""
-        sql = "SELECT DISTINCT subject FROM content_subjects" + (" WHERE subject >= ? AND subject < ?" if prefix else "")
-        rows = _cursor(self._r(), sql + " ORDER BY subject", (prefix, end) if prefix else ()).fetchall()
+        query = select(JournalSubject.subject).distinct()
+        if prefix:
+            end = prefix[:-1] + chr(ord(prefix[-1]) + 1)
+            query = query.where(JournalSubject.subject >= prefix, JournalSubject.subject < end)
+        rows = self._r().execute(query.order_by(JournalSubject.subject)).all()
         return [str(r[0]) for r in rows]
 
     def latest_snapshot(self) -> SnapshotRow | None:
-        row = _cursor(self._r(), "SELECT seq, at, data FROM snapshots ORDER BY seq DESC LIMIT 1").fetchone()
+        row = self._r().execute(select(JournalSnapshot.seq, JournalSnapshot.at, JournalSnapshot.data)
+                                .order_by(JournalSnapshot.seq.desc()).limit(1)).first()
         return SnapshotRow(int(row[0]), int(row[1]), row[2]) if row else None
 
     def pending_outbox(self) -> list[OutboxRow]:
-        rows = _cursor(self._r(),
-            "SELECT key, seq, effect, status, attempts, last_error FROM outbox WHERE status='pending' ORDER BY seq"
-        ).fetchall()
+        rows = _P_PENDING.fetch(self._r())
         return [OutboxRow(*r) for r in rows]
 
     def outbox_status(self, key: str) -> str | None:
-        row = _cursor(self._r(), "SELECT status FROM outbox WHERE key=?", (key,)).fetchone()
+        rows = _P_STATUS.fetch(self._r(), {"key": key})
+        row = rows[0] if rows else None
         return row[0] if row else None
 
     def projector_state(self, name: str) -> tuple[int, int] | None:
-        row = _cursor(self._v(), "SELECT version, applied_seq FROM projector_state WHERE name=?", (name,)).fetchone()
+        rows = _P_PROJECTOR.fetch(self._v(), {"name": name})
+        row = rows[0] if rows else None
         return (int(row[0]), int(row[1])) if row else None
 
     def query_views(self, sql: Any, params: Any = ()) -> list[tuple[Any, ...]]:
@@ -617,13 +594,6 @@ def _field(name: str) -> str:
 
 class StoreSealed(RuntimeError):
     pass
-
-
-def _cursor(conn: Connection, sql: str, params: Any = ()) -> Any:
-    """Le SQL écrit en clair, au curseur du pilote de ``conn``."""
-    cur = dbapi_of(conn).cursor()
-    cur.execute(sql, params)
-    return cur
 
 
 def _transaction(conns: Sequence[Connection], body: Callable[[], Any]) -> Any:
@@ -661,37 +631,29 @@ def _write_batch(m: Connection, batch: AppendBatch) -> None:
 def _write_rows(m: SqlConn, batch: AppendBatch) -> None:
     """Le corps d'une transaction d'ajout (voir ``_write_batch``) ; les projections T0 écrivent sur la même
     connexion, dans la même transaction."""
-    m.executemany(
-        "INSERT INTO events(seq,id,type,v,at,causation,correlation,basis,origin,data) VALUES(?,?,?,?,?,?,?,?,?,?)",
-        [(e.seq, e.id, e.type, e.v, e.at, e.causation, e.correlation, e.basis, e.origin, e.data) for e in batch.events],
-    )
+    if batch.events:
+        m.execute(_P_INSERT_EVENTS, [_event_row(e) for e in batch.events])
     if batch.contents:
-        m.executemany(
-            "INSERT INTO content(ref, seq, level, text) VALUES(?,?,?,?)",
-            [(c.ref, c.seq, c.level, c.text) for c in batch.contents],
-        )
-        m.executemany(
-            "INSERT OR IGNORE INTO content_subjects(ref, subject) VALUES(?,?)",
-            [(c.ref, s) for c in batch.contents for s in c.subjects],
-        )
+        m.execute(_P_INSERT_CONTENT, [{"ref": c.ref, "seq": c.seq, "level": c.level, "text": c.text}
+                                      for c in batch.contents])
+        insert_ignore(m, JournalSubject, [{"ref": c.ref, "subject": fit(s, SUBJECT_MAX)}
+                                          for c in batch.contents for s in c.subjects])
     if batch.dedupe:
-        m.executemany("INSERT INTO dedupe(type, key, seq) VALUES(?,?,?)", batch.dedupe)
+        m.execute(_P_INSERT_DEDUPE, [{"type": t, "key": fit(k, DEDUPE_KEY_MAX), "seq": q} for t, k, q in batch.dedupe])
     if batch.outbox:
-        m.executemany(
-            "INSERT INTO outbox(key, seq, effect, status, attempts, last_error) VALUES(?,?,?,?,?,?)",
-            [(o.key, o.seq, o.effect, o.status, o.attempts, o.last_error) for o in batch.outbox],
-        )
+        m.execute(_P_INSERT_OUTBOX, [{"key": o.key, "seq": o.seq, "effect": o.effect, "status": o.status,
+                                      "attempts": o.attempts, "last_error": o.last_error} for o in batch.outbox])
     if batch.t0 is not None:
         batch.t0(m)
         m.close()  # ce que la session des projections avait en attente part avant l'instantané
     if batch.snapshot is not None:
-        s = batch.snapshot
-        m.execute("INSERT OR REPLACE INTO snapshots(seq, at, data) VALUES(?,?,?)", (s.seq, s.at, s.data))
-        m.execute(
-            "DELETE FROM snapshots WHERE seq NOT IN (SELECT seq FROM snapshots ORDER BY seq DESC LIMIT ?)",
-            (SNAPSHOTS_KEPT,),
-        )
-        _prune_outbox(m, s.at)
+        snap = batch.snapshot
+        upsert(m, JournalSnapshot, {"seq": snap.seq, "at": snap.at, "data": snap.data}, keys=["seq"])
+        # les plus récents gardés : lus d'abord (MariaDB ne supprime pas d'une table relue avec ``LIMIT``)
+        kept = [r[0] for r in m.query(select(JournalSnapshot.seq).order_by(JournalSnapshot.seq.desc())
+                                      .limit(SNAPSHOTS_KEPT))]
+        m.execute(delete(JournalSnapshot).where(JournalSnapshot.seq.not_in(kept)))
+        _prune_outbox(m, snap.at)
 
 
 def _prune_outbox(m: SqlConn, at: int) -> None:
@@ -699,24 +661,83 @@ def _prune_outbox(m: SqlConn, at: int) -> None:
     quelques fois par jour : une recherche dichotomique dans le journal et une suppression indexée)."""
     upto = _seq_before(m, at - OUTBOX_DONE_KEPT_US)
     if upto:
-        m.execute("DELETE FROM outbox WHERE status='done' AND seq <= ?", (upto,))
+        m.execute(delete(JournalOutbox).where(JournalOutbox.status == "done", JournalOutbox.seq <= upto))
 
 
 def _seq_before(m: SqlConn, t: int) -> int:
     """Le dernier ``seq`` du journal écrit avant l'instant ``t`` (0 s'il n'y en a pas). Les instants du journal ne
     décroissent jamais : une dichotomie sur la clé, jamais un parcours."""
-    first = m.execute("SELECT seq, at FROM events ORDER BY seq LIMIT 1").fetchone()
-    if first is None or int(first[1]) >= t:
+    first = m.query(select(JournalEvent.seq, JournalEvent.at).order_by(JournalEvent.seq).limit(1))
+    if not first or int(first[0][1]) >= t:
         return 0
-    lo, hi = int(first[0]), int(m.execute("SELECT MAX(seq) FROM events").fetchone()[0])
+    lo, hi = int(first[0][0]), int(m.query(select(func.max(JournalEvent.seq)))[0][0])
     while lo < hi:  # l'événement ``lo`` est d'avant ``t``
         mid = (lo + hi + 1) // 2
-        seq, at = m.execute("SELECT seq, at FROM events WHERE seq >= ? ORDER BY seq LIMIT 1", (mid,)).fetchone()
+        seq, at = m.query(select(JournalEvent.seq, JournalEvent.at).where(JournalEvent.seq >= mid)
+                          .order_by(JournalEvent.seq).limit(1))[0]
         if int(at) < t:
             lo = int(seq)
         else:
             hi = mid - 1
     return lo
+
+
+_EVENT_COLUMNS = (JournalEvent.seq, JournalEvent.id, JournalEvent.type, JournalEvent.v, JournalEvent.at,
+                  JournalEvent.causation, JournalEvent.correlation, JournalEvent.basis, JournalEvent.origin,
+                  JournalEvent.data)
+_OUTBOX_COLUMNS = (JournalOutbox.key, JournalOutbox.seq, JournalOutbox.effect, JournalOutbox.status,
+                   JournalOutbox.attempts, JournalOutbox.last_error)
+
+
+#: les requêtes qu'on passe à chaque ajout ou presque (le journal) : préparées une fois par moteur
+_EVENT_FIELDS = ("seq", "id", "type", "v", "at", "causation", "correlation", "basis", "origin", "data")
+_P_INSERT_EVENTS = Prepared(insert(JournalEvent.__table__), columns=_EVENT_FIELDS)
+_P_INSERT_CONTENT = Prepared(insert(JournalContent.__table__), columns=("ref", "seq", "level", "text"))
+_P_INSERT_DEDUPE = Prepared(insert(JournalDedupe.__table__), columns=("type", "key", "seq"))
+_P_INSERT_OUTBOX = Prepared(insert(JournalOutbox.__table__),
+                            columns=("key", "seq", "effect", "status", "attempts", "last_error"))
+_P_CONTENT = Prepared(select(JournalContent.ref, JournalContent.text)
+                      .where(JournalContent.ref.in_(bindparam("refs", expanding=True))))
+_P_EVENTS = Prepared(select(*_EVENT_COLUMNS).where(JournalEvent.seq.in_(bindparam("seqs", expanding=True)))
+                     .order_by(JournalEvent.seq))
+_P_DEDUPE = Prepared(select(JournalDedupe.seq).where(JournalDedupe.type == bindparam("type"),
+                                                     JournalDedupe.key == bindparam("key")))
+_P_PENDING = Prepared(select(*_OUTBOX_COLUMNS).where(JournalOutbox.status == "pending").order_by(JournalOutbox.seq))
+_P_STATUS = Prepared(select(JournalOutbox.status).where(JournalOutbox.key == bindparam("key")))
+_P_PROJECTOR = Prepared(select(ProjectorState.version, ProjectorState.applied_seq)
+                        .where(ProjectorState.name == bindparam("name")))
+
+
+@functools.cache
+def _read_query(bounded: bool, typed: bool) -> Prepared:
+    """La relecture du journal (au démarrage, à chaque reconstruction) : préparée pour chacune de ses quatre formes."""
+    query = select(*_EVENT_COLUMNS).where(JournalEvent.seq > bindparam("after"))
+    if bounded:
+        query = query.where(JournalEvent.seq <= bindparam("upto"))
+    if typed:
+        query = query.where(JournalEvent.type.in_(bindparam("types", expanding=True)))
+    return Prepared(query.order_by(JournalEvent.seq))
+
+
+def _event_row(e: StoredEvent) -> dict[str, Any]:
+    return {"seq": e.seq, "id": e.id, "type": e.type, "v": e.v, "at": e.at, "causation": e.causation,
+            "correlation": e.correlation, "basis": e.basis, "origin": e.origin, "data": e.data}
+
+
+def _forget_contents(m: SqlConn, refs: Collection[str]) -> None:
+    refs = list(refs)
+    for i in range(0, len(refs), 500):
+        chunk = refs[i:i + 500]
+        m.execute(delete(JournalContent).where(JournalContent.ref.in_(chunk)))
+        m.execute(delete(JournalSubject).where(JournalSubject.ref.in_(chunk)))
+
+
+def _as_text(value: Any) -> Any:
+    """Une valeur comparée à un champ JSON lu en texte (``json_field``) : un nombre ou un booléen y est écrit en
+    texte JSON (``5``, ``true``) ; ``None`` reste ``None``."""
+    if value is None or isinstance(value, str):
+        return value
+    return json.dumps(value)
 
 
 __all__ = ["SqliteStore", "SqlConn", "StoreSealed", "ContentRow", "OutboxRow", "SnapshotRow", "StoredEvent"]

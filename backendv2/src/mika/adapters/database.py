@@ -72,4 +72,11 @@ def dbapi_in_transaction(conn: Any) -> bool:
     return bool(getattr(dbapi_of(conn), "in_transaction", False))
 
 
-__all__ = ["BUSY_TIMEOUT_MS", "dbapi_in_transaction", "dbapi_of", "sqlite_engine", "sqlite_url"]
+def truncate_log(conn: Any) -> None:
+    """Après l'oubli, le journal d'écriture de SQLite (WAL) est tronqué : ce qui a été effacé n'y traîne plus. Hors
+    de toute transaction. Sous MariaDB, rien d'équivalent à demander ici (ADR 0101, point 9)."""
+    if conn.dialect.name == "sqlite":
+        dbapi_of(conn).execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+
+__all__ = ["BUSY_TIMEOUT_MS", "dbapi_in_transaction", "dbapi_of", "sqlite_engine", "sqlite_url", "truncate_log"]

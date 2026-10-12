@@ -413,7 +413,8 @@ async def test_a_disk_search_among_a_few_keys_reads_only_them():
 
     def tracked(sql, args=()):
         rows = query(sql, args)
-        if "SELECT key, persons, vec" in sql:
+        text = str(sql)  # une requête SQLAlchemy, rendue en texte
+        if ".persons" in text and ".vec" in text:
             read.append(len(rows))
         return rows
 

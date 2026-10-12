@@ -11,9 +11,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from sqlalchemy import insert
+
 from mika.inspector.pages.why import cause_blocks, selection_of
 from mika.kernel.builtin import SELECTED
 from mika.kernel.inspect import Note, Table
+from mika.ports.journal import JournalEvent
+from tests.fixtures.sqldb import SqlDB
 
 
 def _row(kind: str, target: str, score: float) -> SimpleNamespace:
@@ -26,16 +30,21 @@ def _selected(seq: int, kind: str, target: str) -> SimpleNamespace:
     return SimpleNamespace(seq=seq, at=seq, type=SimpleNamespace(name=SELECTED.name), data=data)
 
 
-class _Store:
+class _Store(SqlDB):
+    """Le journal de ces événements (leurs numéros et leurs types, dans la vraie table) ; les événements eux-mêmes,
+    tels quels."""
+
     def __init__(self, events: list[SimpleNamespace]) -> None:
+        super().__init__()
         self.events = {e.seq: e for e in events}
+        self.create(JournalEvent)
+        if events:
+            self.execute(insert(JournalEvent.__table__), [
+                {"seq": e.seq, "id": f"e{e.seq}", "type": e.type.name, "v": 1, "at": e.at, "causation": None,
+                 "correlation": "c", "basis": 0, "origin": "{}", "data": "{}"} for e in events])
 
     def get_events(self, seqs):
         return [self.events[s] for s in seqs if s in self.events]
-
-    def query_mind(self, sql, args):
-        type_name, after, before, limit = args
-        return [(s,) for s in sorted(self.events) if self.events[s].type.name == type_name and after < s < before][:limit]
 
 
 def _ui(events: list[SimpleNamespace]) -> SimpleNamespace:

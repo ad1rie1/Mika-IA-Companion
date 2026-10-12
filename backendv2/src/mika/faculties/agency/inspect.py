@@ -7,6 +7,8 @@ parole sont relues dans le fil de conversation.
 
 from __future__ import annotations
 
+from sqlalchemy import func, select
+
 from mika.contracts import agency as c
 from mika.contracts import attention as attention_c
 from mika.contracts import identity as identity_c
@@ -79,12 +81,13 @@ def _spoken(frame: Frame, ctx: InspectContext) -> tuple[list[tuple[int, str, str
     pager = Pager(param="avant", size=SPOKEN_PAGE)
     if ctx.store is None:
         return [], pager
-    t = transcript_c.THREAD_TABLE
+    t = transcript_c.thread_table()
     before = ctx.int_param("avant", 0)
-    rows = ctx.store.query_mind(
-        f"SELECT m.id, m.at, m.person, m.text FROM {t} m WHERE m.role='assistant' AND m.kind=?"
-        f"{' AND m.id<?' if before else ''} ORDER BY m.id DESC LIMIT ?",
-        (str(Kind.INITIATIVE), *((before,) if before else ()), SPOKEN_PAGE + 1))
+    query = select(t.c.id, t.c.at, t.c.person, t.c.text).where(t.c.role == "assistant",
+                                                                t.c.kind == str(Kind.INITIATIVE))
+    if before:
+        query = query.where(t.c.id < before)
+    rows = ctx.store.query_mind(query.order_by(t.c.id.desc()).limit(SPOKEN_PAGE + 1))
     page = rows[:SPOKEN_PAGE]
     if len(rows) > SPOKEN_PAGE:
         pager = Pager(param="avant", size=SPOKEN_PAGE, older=(("avant", str(page[-1][0])),))
@@ -93,9 +96,8 @@ def _spoken(frame: Frame, ctx: InspectContext) -> tuple[list[tuple[int, str, str
         handles = _handles(frame, str(person or ""))
         answered = 0
         if handles:
-            marks = ",".join("?" * len(handles))
-            got = ctx.store.query_mind(f"SELECT MIN(u.at) FROM {t} u WHERE u.role='user' AND u.person IN ({marks}) "
-                                       "AND u.id>?", (*handles, n))
+            got = ctx.store.query_mind(select(func.min(t.c.at)).where(t.c.role == "user", t.c.person.in_(handles),
+                                                                       t.c.id > n))
             answered = int(got[0][0] or 0) if got else 0
         out.append((int(at), str(person or ""), text, answered))
     return out, pager

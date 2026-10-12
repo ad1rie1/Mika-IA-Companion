@@ -9,6 +9,8 @@ from dataclasses import replace
 from datetime import date
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.app.console import FACULTY_LABELS
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
@@ -478,9 +480,8 @@ class KernelPort:
         promises = frame.get(memory_c.PROMISES_TO(person))
         if promises:
             ids = [pr.id for pr in promises]
-            marks = ",".join("?" * len(ids))
-            rows = self._store.query_mind(f"SELECT text FROM {memory_c.KNOWLEDGE_VIEW} WHERE id IN ({marks}) "
-                                          "ORDER BY id", tuple(ids))
+            v = memory_c.KNOWLEDGE
+            rows = self._store.query_mind(select(v.c.text).where(v.c.id.in_(ids)).order_by(v.c.id))
             out["pending_commitments"] = [r[0] for r in rows]
         return out
 

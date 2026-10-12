@@ -11,6 +11,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import attention as attention_c
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
@@ -159,9 +161,11 @@ async def _changes(s: SelfState, frame: Frame, ports: Mapping[str, Any]) -> list
         return []
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     resolve, presumed = identity_c.resolvers(frame.get)
-    cols = ", ".join(memory_c.SELF_CHANGES_COLUMNS)
-    rows = store.query_mind(f"SELECT {cols} FROM {memory_c.SELF_CHANGES_VIEW} WHERE changed_at >= ? "
-                            "ORDER BY changed_at DESC LIMIT 8", (frame.now - p.change_shown_us,))
+    v = memory_c.SELF_CHANGES
+    # départagés par l'élément : les mêmes huit sur les deux moteurs
+    rows = store.query_mind(select(*(v.c[n] for n in memory_c.SELF_CHANGES_COLUMNS))
+                            .where(v.c.changed_at >= frame.now - p.change_shown_us)
+                            .order_by(v.c.changed_at.desc(), v.c.item.desc(), v.c.was.desc()).limit(8))
     out: list[Change] = []
     for was, was_text, item, text, _kind, sensitivity, secret, at in rows:
         lineage = Lineage(requirements=(requirement(was, (), int(sensitivity), secret=bool(secret)),

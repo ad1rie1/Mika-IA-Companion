@@ -22,6 +22,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
@@ -264,11 +266,11 @@ def exchange_of(store: Any, frame: Frame, person: str, until: int, public: bool)
     """Le dernier échange avec cette personne avant ``until`` (depuis le dernier silence de trois quarts d'heure),
     dans le fil d'où vient la pensée (un salon, ou leur fil privé) : (c'est elle qui parle, le texte), au plus
     quelques lignes — la fin, là où c'est venu."""
-    handles = tuple(frame.get(identity_c.HANDLES(person)) or (person,))
-    marks = ",".join("?" * len(handles))
-    rows = store.query_mind(
-        f"SELECT at, role, text, room FROM {transcript_c.THREAD_TABLE} WHERE person IN ({marks}) AND at >= ? "
-        "AND at <= ? ORDER BY id", (*handles, until - EXCHANGE_LOOKBACK, until))
+    handles = list(frame.get(identity_c.HANDLES(person)) or (person,))
+    t = transcript_c.thread_table()
+    rows = store.query_mind(select(t.c.at, t.c.role, t.c.text, t.c.room)
+                            .where(t.c.person.in_(handles), t.c.at >= until - EXCHANGE_LOOKBACK, t.c.at <= until)
+                            .order_by(t.c.id))
     rows = [r[:3] for r in rows if (r[3] is not None) == public]
     start = 0
     for i in range(1, len(rows)):
@@ -310,11 +312,11 @@ def life_of(store: Any, frame: Frame, person: str) -> list[tuple[str, int]]:
         heard = phrase("goals.life.heard", names=_names(frame, told)) if told else ""
         out.append((phrase("goals.life.item", text=text, when=when, heard=heard), int(m.sensitivity)))
     handles = tuple(frame.get(identity_c.HANDLES(person)) or (person,))
+    v = memory_c.KNOWLEDGE
     rows = knowns(store.query_mind(
-        f"{memory_c.SELECT_KNOWN} WHERE kind=? AND status='active' AND about_self=0 AND born_at >= ? AND id IN "
-        f"(SELECT item FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} WHERE person IN ({','.join('?' * len(handles))})) "
-        "ORDER BY born_at DESC, id DESC LIMIT ?",
-        (memory_c.BELIEF, frame.now - BELIEFS_SINCE, *handles, BELIEFS_SHOWN * 4)), memory_c.KNOWN_COLUMNS)
+        memory_c.select_known().where(v.c.kind == memory_c.BELIEF, v.c.status == "active", v.c.about_self == 0,
+                                      v.c.born_at >= frame.now - BELIEFS_SINCE, memory_c.concerning(v, handles))
+        .order_by(v.c.born_at.desc(), v.c.id.desc()).limit(BELIEFS_SHOWN * 4)), memory_c.KNOWN_COLUMNS)
     beliefs = [(k.text, k.sensitivity) for k in rows if hears(k.lineage)][:BELIEFS_SHOWN]
     return out + [b for b in beliefs if b[0] not in {t for t, _ in out}]
 

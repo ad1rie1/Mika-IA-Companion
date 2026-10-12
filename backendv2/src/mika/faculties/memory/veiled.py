@@ -19,6 +19,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import social as social_c
@@ -26,10 +28,12 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState
 from mika.faculties.memory.links import handles_of, links_of, written
 from mika.faculties.memory.salience import Item
+from mika.faculties.memory.tables import about, batches, handle_key, items, told_lines
 from mika.kernel.clock import DAY
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.prompt import SectionBody
+from mika.ports.sql import alias_of
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable, named_label
 from mika.vocab.phrasebook import phrase
@@ -122,12 +126,12 @@ def _told(store: Any, handles: tuple[str, ...], since: int, share: float) -> dic
     lui montrait et dont la réponse le reprend (``echoed``) — le prompt montre, il ne dit pas (ADR 0092)."""
     if not handles:
         return {}
-    marks = ",".join("?" * len(handles))
     out: dict[int, int] = {}
+    lines, i, t = alias_of(told_lines(), "l"), alias_of(items(), "i"), alias_of(transcript_c.thread_table(), "t")
     for item, at, veiled, spoken in store.query_mind(
-            f"SELECT l.item, l.at, i.veiled, t.text FROM {c.TOLD_LINES_TABLE} l "
-            f"JOIN {c.ITEMS_TABLE} i ON i.id = l.item LEFT JOIN {transcript_c.THREAD_TABLE} t ON t.id = l.utterance "
-            f"WHERE l.at >= ? AND l.handle IN ({marks})", (since, *handles)):
+            select(lines.c.item, lines.c.at, i.c.veiled, t.c.text)
+            .select_from(lines.join(i, i.c.id == lines.c.item).outerjoin(t, t.c.id == lines.c.utterance))
+            .where(lines.c.at >= since, lines.c.handle.in_(sorted({handle_key(h) for h in handles})))):
         if veiled and echoed(spoken or "", veiled, share):
             out[int(item)] = max(out.get(int(item), 0), int(at))
     return out
@@ -138,10 +142,10 @@ def _told_persons(frame: Frame, store: Any, told: Mapping[int, int]) -> Counter[
     out: Counter[str] = Counter()
     if not told:
         return out
-    marks = ",".join("?" * len(told))
-    for _item, key in store.query_mind(f"SELECT item, person FROM {c.ABOUT_TABLE} WHERE item IN ({marks})",
-                                      tuple(told)):
-        out[frame.get(identity_c.PERSON(key)) or key] += 1
+    ab = about()
+    for chunk in batches(sorted(told)):
+        for _item, key in store.query_mind(select(ab.c.item, ab.c.person).where(ab.c.item.in_(chunk))):
+            out[frame.get(identity_c.PERSON(key)) or key] += 1
     return out
 
 

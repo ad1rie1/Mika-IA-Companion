@@ -18,6 +18,7 @@ import json
 from types import SimpleNamespace as NS
 
 import pytest
+from sqlalchemy import insert
 
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
@@ -32,6 +33,7 @@ from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.vocab import causes
 from mika.vocab.affect import Emotion
 from tests.fixtures.mika import PARIS, at_paris
+from tests.fixtures.sqldb import SqlDB
 
 NOW = at_paris(2026, 10, 12, 15, 0)
 P = AttentionParams()
@@ -48,15 +50,15 @@ def row(item: int, text: str, born_at: int, *, importance: float = 0.5, emotion:
     return tuple(values[c] for c in memory_c.KNOWN_COLUMNS)
 
 
-class Store:
-    def __init__(self, rows):
-        self.rows = rows
-        self.asked = []
+class Store(SqlDB):
+    """Ce qu'elle sait, dans une table qui porte le nom et les colonnes de la vue (``memory_c.KNOWLEDGE``) : la
+    requête de ``reminiscence`` s'y lit telle quelle."""
 
-    def query_mind(self, sql, args):
-        self.asked.append(args)
-        oldest = args[1]
-        return [r for r in self.rows if r[memory_c.KNOWN_COLUMNS.index("born_at")] <= oldest]
+    def __init__(self, rows):
+        super().__init__()
+        self.create(memory_c.KNOWLEDGE)
+        if rows:
+            self.execute(insert(memory_c.KNOWLEDGE), [dict(zip(memory_c.KNOWN_COLUMNS, r, strict=True)) for r in rows])
 
 
 def frame(*, doing=None, idle_since=NOW - 2 * HOUR, now=NOW):

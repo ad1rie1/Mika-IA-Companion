@@ -18,11 +18,13 @@ contenu) et ses octets ; une reconstruction ne fait pas revenir un fichier dont 
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import BigInteger, Column, Index, Table, delete, func, select, update
 
 from mika.contracts import imaging as imaging_c
 from mika.contracts import runtime as rt
@@ -34,6 +36,7 @@ from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.shares import MAX_SHARE_BYTES
+from mika.ports.sql import HANDLE_MAX, Key, LongText, insert_ignore, projection_table
 from mika.ports.store import Sql
 from mika.vocab.phrasebook import phrase
 
@@ -166,6 +169,36 @@ _COLUMNS = ("id", "at", "person", "subjects", "name", "path", "mime", "size", "d
             "project", "message", "expired_at", "reason")
 
 
+@functools.cache
+def table(sfx: str = "") -> Table:
+    """``shared_files`` (suffixée de sa version) : une ligne par fichier préparé (ADR 0101 : déclarée pour les deux
+    moteurs, hors des migrations — une projection évolue par sa version)."""
+    name = f"{c.TABLE}{sfx}"
+    return projection_table(
+        name,
+        Column("id", Key(64), primary_key=True),
+        Column("at", BigInteger, nullable=False),
+        Column("person", Key(HANDLE_MAX), nullable=False),
+        Column("subjects", LongText, nullable=False),
+        Column("name", LongText, nullable=False),
+        Column("path", LongText),
+        Column("mime", LongText, nullable=False),
+        Column("size", BigInteger, nullable=False),
+        Column("digest", LongText, nullable=False),
+        Column("kind", LongText, nullable=False),
+        Column("origin", LongText, nullable=False),
+        Column("project", BigInteger),
+        Column("message", BigInteger),
+        Column("expired_at", BigInteger),
+        Column("reason", LongText),
+        Index(f"{name}_person", "person", "at"),
+    )
+
+
+def _columns(t: Table) -> list[Any]:
+    return [t.c[n] for n in _COLUMNS]
+
+
 def _subjects(target: str, about: Sequence[str]) -> str:
     """Les sujets d'une ligne, entre barres (``|user_7|name:alice|``) : l'oubli d'un seul d'entre eux la retire."""
     keys = sorted({k for k in (target, *about) if k})
@@ -182,50 +215,40 @@ class SharedFiles:
     déjà ses fichiers)."""
 
     def create(self, sql: Sql, sfx: str) -> None:
-        sql.execute(
-            f"CREATE TABLE IF NOT EXISTS {c.TABLE}{sfx}("
-            "id TEXT PRIMARY KEY, at INTEGER NOT NULL, person TEXT NOT NULL, subjects TEXT NOT NULL, "
-            "name TEXT NOT NULL, path TEXT, mime TEXT NOT NULL, size INTEGER NOT NULL, digest TEXT NOT NULL, "
-            "kind TEXT NOT NULL, origin TEXT NOT NULL, project INTEGER, message INTEGER, expired_at INTEGER, "
-            "reason TEXT)")
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {c.TABLE}{sfx}_person ON {c.TABLE}{sfx}(person, at)")
+        sql.create(table(sfx))
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"DROP TABLE IF EXISTS {c.TABLE}{sfx}")
+        sql.drop(table(sfx))
 
     def apply(self, sql: Sql, items: Sequence[Any], sfx: str) -> None:
-        table = f"{c.TABLE}{sfx}"
+        t = table(sfx)
         for e in items:
             d = e.data
             name = e.type.name
             if name in _PRODUCED_NAMES:
                 if _forgotten(d.name):
                     continue  # comme un fichier partagé : un nom oublié ne revient pas à la reconstruction
-                marks = ",".join("?" * len(_COLUMNS))
-                sql.execute(f"INSERT OR IGNORE INTO {table}({','.join(_COLUMNS)}) VALUES({marks})", (
+                insert_ignore(sql, t, dict(zip(_COLUMNS, (
                     d.file, e.at, d.target, _subjects(d.target, d.about), d.name.text or "", None, d.mime, d.size,
-                    d.digest, d.kind, d.origin, None, None, None, None))
+                    d.digest, d.kind, d.origin, None, None, None, None), strict=True)))
             elif name == c.SHARED.name:
                 if _forgotten(d.name) or _forgotten(d.path):
                     # une reconstruction relit tout le journal : un fichier dont le nom a été oublié ne revient pas
                     continue
-                marks = ",".join("?" * len(_COLUMNS))
-                sql.execute(f"INSERT OR IGNORE INTO {table}({','.join(_COLUMNS)}) VALUES({marks})", (
+                insert_ignore(sql, t, dict(zip(_COLUMNS, (
                     d.file, e.at, d.target, _subjects(d.target, d.about), d.name.text or "",
                     d.path.text if d.path is not None else None, d.mime, d.size, d.digest, d.kind, d.origin,
-                    d.project, None, None, None))
+                    d.project, None, None, None), strict=True)))
             elif name == c.EXPIRED.name and d.files:
-                marks = ",".join("?" * len(d.files))
-                sql.execute(f"UPDATE {table} SET expired_at=?, reason=? WHERE id IN ({marks}) AND expired_at IS NULL",
-                            (e.at, d.reason, *d.files))
+                sql.execute(update(t).where(t.c.id.in_(list(d.files)), t.c.expired_at.is_(None))
+                            .values(expired_at=e.at, reason=d.reason))
             elif name == rt.UTTERANCE.name and d.attachments and d.target and d.visible:
-                marks = ",".join("?" * len(d.attachments))
-                sql.execute(f"UPDATE {table} SET message=? WHERE id IN ({marks}) AND person=? AND message IS NULL",
-                            (e.seq, *d.attachments, d.target))
+                sql.execute(update(t).where(t.c.id.in_(list(d.attachments)), t.c.person == d.target,
+                                            t.c.message.is_(None)).values(message=e.seq))
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> None:
-        sql.execute(f"DELETE FROM {c.TABLE}{sfx} WHERE person=? OR instr(subjects, ?) > 0",
-                    (subject, f"|{subject}|"))
+        t = table(sfx)
+        sql.execute(delete(t).where((t.c.person == subject) | (func.instr(t.c.subjects, f"|{subject}|") > 0)))
 
 
 _PRODUCED_NAMES = frozenset(t.name for t in PRODUCED)
@@ -272,9 +295,8 @@ def rows(store: Any, files: Sequence[str]) -> list[FileRow]:
     wanted = list(dict.fromkeys(f for f in files if isinstance(f, str)))
     if store is None or not wanted:
         return []
-    marks = ",".join("?" * len(wanted))
-    found = {r[0]: _row(r) for r in store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.TABLE} WHERE id IN ({marks})", tuple(wanted))}
+    t = table()
+    found = {r[0]: _row(r) for r in store.query_mind(select(*_columns(t)).where(t.c.id.in_(wanted)))}
     return [found[f] for f in wanted if f in found]
 
 
@@ -287,13 +309,11 @@ def of_people(store: Any, handles: Sequence[str], limit: int, before_at: int | N
     """Les fichiers préparés pour ces adresses, du plus récent au plus ancien (une page)."""
     if store is None or not handles:
         return []
-    marks = ",".join("?" * len(handles))
-    clause, args = f"person IN ({marks})", list(handles)
+    t = table()
+    query = select(*_columns(t)).where(t.c.person.in_(list(handles)))
     if before_at is not None:
-        clause += " AND at<?"
-        args.append(before_at)
-    found = store.query_mind(f"SELECT {','.join(_COLUMNS)} FROM {c.TABLE} WHERE {clause} ORDER BY at DESC, id "
-                             "LIMIT ?", (*args, limit))
+        query = query.where(t.c.at < before_at)
+    found = store.query_mind(query.order_by(t.c.at.desc(), t.c.id).limit(limit))
     return [_row(r) for r in found]
 
 

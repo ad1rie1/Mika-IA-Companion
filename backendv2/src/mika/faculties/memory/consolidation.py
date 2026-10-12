@@ -36,6 +36,8 @@ from dataclasses import dataclass, replace
 from datetime import datetime, time
 from typing import Any
 
+from sqlalchemy import Table, func, or_, select
+
 from mika.contracts import expression as expression_c
 from mika.contracts import goals as goals_c
 from mika.contracts import identity as identity_c
@@ -45,18 +47,13 @@ from mika.contracts import self_ as self_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory import likelihood as lk
+from mika.faculties.memory import tables as tb
 from mika.faculties.memory.archive import for_people
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, day_of, occurrence, over, params
 from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, Testimony, judge
 from mika.faculties.memory.life import kept_too_early, same_task
-from mika.faculties.memory.projections import (
-    DEFERRED_TABLE,
-    ITEM_COLUMNS,
-    TESTIMONIES_TABLE,
-    TESTIMONY_COLUMNS,
-    fingerprint,
-    testimony_of,
-)
+from mika.faculties.memory.projections import ITEM_COLUMNS, fingerprint, testimony_columns, testimony_of
+from mika.faculties.memory.tables import batches, handle_key
 from mika.kernel.clock import DAY, MINUTE, instant
 from mika.kernel.events import Content, Draft
 from mika.kernel.faculty import CatchUp
@@ -65,6 +62,7 @@ from mika.kernel.guards import Guard
 from mika.kernel.prompt import PromptBudgetError
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.llm_budget import fits_context
+from mika.ports.sql import json_has
 from mika.ports.vectors import VectorItem
 from mika.vocab import timespan
 from mika.vocab.affect import Emotion, dominant, facets, facets_valence
@@ -82,18 +80,20 @@ KNOWN_SHOWN = 8
 INDEX_RETRY_US = 5 * MINUTE
 
 
-def _rows(store: Any, sql: str, params_: tuple[Any, ...], columns: tuple[str, ...]) -> list[dict[str, Any]]:
-    return [dict(zip(columns, r, strict=True)) for r in store.query_mind(sql, params_)]
+def _rows(store: Any, query: Any, columns: tuple[str, ...]) -> list[dict[str, Any]]:
+    return [dict(zip(columns, r, strict=True)) for r in store.query_mind(query)]
 
 
 def kept_secrets(store: Any, persons: Sequence[str]) -> list[str]:
     """Les secrets qu'elle garde déjà sur ces personnes : ce qui les concerne, ou ce qu'elles lui ont confié."""
     out: list[str] = []
+    t, ab = tb.items(), tb.about()
     for person in persons:
-        like = f'%"{person}"%'
-        out += [str(t) for (t,) in store.query_mind(
-            f"SELECT text FROM {c.ITEMS_TABLE} WHERE secret=1 AND status='active' AND (id IN (SELECT item FROM "
-            f"{c.ABOUT_TABLE} WHERE person=?) OR told_by LIKE ?) ORDER BY id DESC LIMIT 50", (person, like))]
+        out += [str(text) for (text,) in store.query_mind(
+            select(t.c.text).where(t.c.secret == 1, t.c.status == "active",
+                                   or_(t.c.id.in_(select(ab.c.item).where(ab.c.person == handle_key(person))),
+                                       json_has(t.c.told_by, person)))
+            .order_by(t.c.id.desc()).limit(50))]
     return out
 
 
@@ -162,9 +162,11 @@ class Consolidate:
         p = params(frame.env.params_of("memory", frame.root))
         self.retry_at = frame.now + p.retry_us
         self.queue_seq = state.deferred_seq
-        rows = store.query_mind(
-            f"SELECT id, at, role, person, text, reply_to, room FROM {transcript_c.THREAD_TABLE} WHERE id>? "
-            "ORDER BY id LIMIT ?", (state.checkpoint, p.max_window)) if state.pending else []
+        thread = transcript_c.thread_table()
+        said = (thread.c.id, thread.c.at, thread.c.role, thread.c.person, thread.c.text, thread.c.reply_to,
+                thread.c.room)
+        rows = store.query_mind(select(*said).where(thread.c.id > state.checkpoint).order_by(thread.c.id)
+                                .limit(p.max_window)) if state.pending else []
         rows = window(rows, set(frame.get(rt.AWAITING)))
         self.stuck_at = None if rows else frame.seq
         directory = self._directory(frame, store)
@@ -173,13 +175,14 @@ class Consolidate:
         drafts: list[Draft[Any]] = []
         # Une reprise par passage : un document illisible ne monopolise pas la mémoire ; la suivante, si elle est
         # due, au passage d'après, aussitôt.
-        jobs = store.query_mind(f"SELECT key,messages,attempts,about,aside FROM {DEFERRED_TABLE} "
-                                "WHERE status='queued' AND retry_at<=? ORDER BY retry_at,key LIMIT 1", (frame.now,))
+        queue = tb.deferred()
+        jobs = store.query_mind(select(queue.c.key, queue.c.messages, queue.c.attempts, queue.c.about, queue.c.aside)
+                                .where(queue.c.status == "queued", queue.c.retry_at <= frame.now)
+                                .order_by(queue.c.retry_at, queue.c.key).limit(1))
         for key, messages, attempts, about, aside in jobs:
             ids = json.loads(messages)
-            retry_rows = store.query_mind(
-                f"SELECT id, at, role, person, text, reply_to, room FROM {transcript_c.THREAD_TABLE} "
-                f"WHERE id IN ({','.join('?' for _ in ids)}) ORDER BY id", tuple(ids)) if ids else []
+            retry_rows = [r for chunk in batches(sorted(set(ids))) for r in store.query_mind(
+                select(*said).where(thread.c.id.in_(chunk)).order_by(thread.c.id))]
             drafts.append(c.EXTRACTION_DEFERRED.draft(key=key, status="resolved", attempts=attempts,
                           about=tuple(json.loads(about)), detail=Content.of("reprise", level=3)))
             tasks.extend((conv, attempts) for conv in self._conversations(frame, retry_rows, state, directory,
@@ -285,7 +288,8 @@ class Consolidate:
         self.extracted.clear()
         self.outages = 0
         self.retry_at = 0  # un passage mené à bout : le suivant dès qu'il y a de quoi
-        due = store.query_mind(f"SELECT MIN(retry_at) FROM {DEFERRED_TABLE} WHERE status='queued'")
+        queue = tb.deferred()
+        due = store.query_mind(select(func.min(queue.c.retry_at)).where(queue.c.status == "queued"))
         self.next_job_at = int(due[0][0]) if due and due[0][0] is not None else None
 
     # ── qui est qui ──
@@ -295,7 +299,8 @@ class Consolidate:
         par nom et par prénom repliés : un nom porté par une seule personne
         désigne cette personne, même quand elle n'est pas de la conversation."""
         found: dict[str, set[str]] = {}
-        for (handle,) in store.query_mind(f"SELECT DISTINCT person FROM {transcript_c.THREAD_TABLE}"):
+        thread = transcript_c.thread_table()
+        for (handle,) in store.query_mind(select(thread.c.person).distinct().order_by(thread.c.person)):
             if not handle or not is_identifiable(handle):
                 continue
             name = clean_display_name(frame.get(identity_c.IDENTITY(handle)).name)
@@ -310,9 +315,10 @@ class Consolidate:
     def _rooms(self, frame: Frame, store: Any) -> dict[str, set[str]]:
         """Les salons où elle a vu chaque personne : les adresses lues jusqu'ici, plus la suite du fil, rangées sous
         la personne qu'elles désignent maintenant (une adresse reliée depuis parle pour elle)."""
+        thread = transcript_c.thread_table()
         for seq, handle, room in store.query_mind(
-                f"SELECT id, person, room FROM {transcript_c.THREAD_TABLE} WHERE id>? AND room IS NOT NULL "
-                "ORDER BY id", (self.rooms_read,)):
+                select(thread.c.id, thread.c.person, thread.c.room)
+                .where(thread.c.id > self.rooms_read, thread.c.room.is_not(None)).order_by(thread.c.id)):
             self.rooms_read = max(self.rooms_read, int(seq))
             if handle and is_identifiable(handle):
                 self.seen_rooms.setdefault(str(handle), set()).add(str(room))
@@ -405,9 +411,9 @@ class Consolidate:
         if not hits:
             return []
         ids = [k for k, _ in hits]
-        marks = ",".join("?" * len(ids))
-        found = store.query_mind(f"SELECT id, text, about, told_by, sensitivity, secret FROM {c.ITEMS_TABLE} "
-                                 f"WHERE id IN ({marks}) AND status='active'", tuple(ids))
+        t, tt = tb.items(), tb.testimonies()
+        found = store.query_mind(select(t.c.id, t.c.text, t.c.about, t.c.told_by, t.c.sensitivity, t.c.secret)
+                                 .where(t.c.id.in_(ids), t.c.status == "active"))
         persons = set(conv.persons)
         named = {k for w in set(WORD.findall(fold(text))) for k in directory.get(w, ())
                  if len(directory.get(w, ())) == 1}
@@ -415,8 +421,8 @@ class Consolidate:
         # qui l'a dit, témoignage par témoignage (ADR 0080) : ce que les personnes d'ici en ont dit elles-mêmes se
         # montre, même quand un autre l'avait confié avant
         tellers_of: dict[int, list[set[str]]] = {}
-        for item, told, speaks in store.query_mind(f"SELECT item, told_by, speaks FROM {TESTIMONIES_TABLE} "
-                                                   f"WHERE item IN ({marks})", tuple(ids)):
+        for item, told, speaks in store.query_mind(select(tt.c.item, tt.c.told_by, tt.c.speaks)
+                                                   .where(tt.c.item.in_(ids)).order_by(tt.c.item, tt.c.seq)):
             if speaks:
                 tellers_of.setdefault(int(item), []).append(set(_keys(told)))
         out = []
@@ -449,10 +455,10 @@ class Consolidate:
         pending = [(pr, to) for pr, to in pending if to in persons]
         if not pending:
             return []
-        ids = [pr.id for pr, _ in pending]
-        marks = ",".join("?" * len(ids))
-        rows = store.query_mind(f"SELECT id, text, sensitivity, sources FROM {c.ITEMS_TABLE} WHERE id IN ({marks})",
-                                tuple(ids))
+        ids = sorted({pr.id for pr, _ in pending})
+        t = tb.items()
+        rows = [r for chunk in batches(ids) for r in store.query_mind(
+            select(t.c.id, t.c.text, t.c.sensitivity, t.c.sources).where(t.c.id.in_(chunk)).order_by(t.c.id))]
         texts = {int(i): t for i, t, _s, _m in rows}
         if conv.room:
             heard = {int(i) for i, _t, sens, sources in rows
@@ -466,10 +472,11 @@ class Consolidate:
         ids = sorted({int(m) for m in sources if str(m).lstrip("-").isdigit()})
         if not ids:
             return False
-        marks = ",".join("?" * len(ids))
-        here = store.query_mind(f"SELECT COUNT(*) FROM {transcript_c.THREAD_TABLE} WHERE id IN ({marks}) AND room=?",
-                                (*ids, room))
-        return int(here[0][0]) == len(ids)
+        thread = transcript_c.thread_table()
+        here = sum(int(store.query_mind(select(func.count()).select_from(thread)
+                                        .where(thread.c.id.in_(chunk), thread.c.room == handle_key(room)))[0][0])
+                   for chunk in batches(ids))
+        return here == len(ids)
 
     @staticmethod
     def _situations(frame: Frame, store: Any, state: MemoryState, conv: x.Conversation, p: MemoryParams,
@@ -879,11 +886,13 @@ class Consolidate:
         moments : dans un salon, l'anodin seulement ; jamais ce qu'un autre a confié au-delà."""
         persons = set(conv.persons)
         since = frame.now - round(p.resolve_days * DAY)
+        t = tb.items()
+        ends = func.coalesce(t.c.until, t.c.due)
         rows = store.query_mind(
-            f"SELECT id, text, about, holder, told_by, likelihood, importance, due, until, sensitivity, secret, felt, "
-            f"empathy FROM {c.ITEMS_TABLE} WHERE kind=? AND knowledge_kind='prediction' AND status='active' "
-            "AND due IS NOT NULL AND COALESCE(until, due) < ? AND COALESCE(until, due) >= ? ORDER BY id",
-            (c.BELIEF, frame.now, since))
+            select(t.c.id, t.c.text, t.c.about, t.c.holder, t.c.told_by, t.c.likelihood, t.c.importance, t.c.due,
+                   t.c.until, t.c.sensitivity, t.c.secret, t.c.felt, t.c.empathy)
+            .where(t.c.kind == c.BELIEF, t.c.knowledge_kind == "prediction", t.c.status == "active",
+                   t.c.due.is_not(None), ends < frame.now, ends >= since).order_by(t.c.id))
         shown: list[tuple[int, str, str]] = []
         found: dict[int, Forecast] = {}
         for (item, text, about, holder, told_by, likely, importance, due, until, sens, secret, felt,
@@ -1001,9 +1010,11 @@ class Consolidate:
             return []
         person = conv.persons[0]
         noted = ours
-        known = store.query_mind(f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE kind=? AND status='active' "
-                                 f"AND between_us=1 AND id IN (SELECT item FROM {c.ABOUT_TABLE} WHERE person=?) "
-                                 "ORDER BY id", (c.BELIEF, person))
+        t, ab = tb.items(), tb.about()
+        known = store.query_mind(select(t.c.id, t.c.text)
+                                 .where(t.c.kind == c.BELIEF, t.c.status == "active", t.c.between_us == 1,
+                                        t.c.id.in_(select(ab.c.item).where(ab.c.person == handle_key(person))))
+                                 .order_by(t.c.id))
         name = next((sp.name for sp in conv.speakers if sp.person == person), "")
         drafts: list[Draft[Any]] = []
         for nick, seqs in heard.items():
@@ -1087,10 +1098,11 @@ class Consolidate:
     def _self_twin(store: Any, text: str, *, status: str) -> int | None:
         """Ce qu'elle a déjà dit d'elle-même aux mêmes mots, quelle qu'en soit la sorte : vivante (elle le redit — la
         plus ancienne), ou remplacée (elle y revient — la dernière qu'elle a quittée)."""
-        order = "id" if status == "active" else "id DESC"
+        t = tb.items()
         rows = store.query_mind(
-            f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE fingerprint=? AND kind=? AND status=? AND about_self > 0 "
-            f"ORDER BY {order}", (fingerprint(text), c.BELIEF, status))
+            select(t.c.id, t.c.text).where(t.c.fingerprint == fingerprint(text), t.c.kind == c.BELIEF,
+                                           t.c.status == status, t.c.about_self > 0)
+            .order_by(t.c.id if status == "active" else t.c.id.desc()))
         return next((int(k) for k, previous in rows if same_words(previous, text)), None)
 
     async def _promised(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
@@ -1154,10 +1166,10 @@ class Consolidate:
             hits = await vectors.search(text, 1, kinds={c.PROMISE}, keys=pending)
             if hits and hits[0][1] >= p.dedup_similarity:
                 return True
-        marks = ",".join("?" * len(pending))
         mine = stems(text)
-        return any(len(mine & stems(t)) >= max(2, (len(mine) + 1) // 2) for (t,) in store.query_mind(
-            f"SELECT text FROM {c.ITEMS_TABLE} WHERE id IN ({marks})", tuple(pending)))
+        t = tb.items()
+        return any(len(mine & stems(said)) >= max(2, (len(mine) + 1) // 2) for chunk in batches(sorted(set(pending)))
+                   for (said,) in store.query_mind(select(t.c.text).where(t.c.id.in_(chunk)).order_by(t.c.id)))
 
     async def _events(self, ex: x.Extraction, frame: Frame, state: MemoryState, store: Any, conv: x.Conversation,
                       people: x.People, vectors: Any, p: MemoryParams, provenance: Any, concerned: Any,
@@ -1364,11 +1376,13 @@ class Consolidate:
         confié et entendu par les mêmes. Une croyance : **la même proposition**, quel qu'en soit le témoin — ce
         qu'un autre lui en dira sera un témoignage de plus (ADR 0080) ; un avis ou une hypothèse restent à qui les
         porte ; la plus ancienne."""
+        t = tb.items()
         if kind == c.BELIEF:
             rows = store.query_mind(
-                f"SELECT id, text, knowledge_kind, holder FROM {c.ITEMS_TABLE} WHERE fingerprint=? AND kind=? "
-                "AND status='active' AND about=? AND (about_self > 0) = ? ORDER BY id",
-                (fingerprint(text), kind, json.dumps(sorted(set(about)), ensure_ascii=False), about_self))
+                select(t.c.id, t.c.text, t.c.knowledge_kind, t.c.holder)
+                .where(t.c.fingerprint == fingerprint(text), t.c.kind == kind, t.c.status == "active",
+                       t.c.about == json.dumps(sorted(set(about)), ensure_ascii=False),
+                       t.c.about_self > 0 if about_self else t.c.about_self <= 0).order_by(t.c.id))
             for k, previous, nature, owner in rows:
                 if same_words(previous, text) and nature == knowledge_kind \
                         and (knowledge_kind == "claim" or (owner or None) == (holder or None)):
@@ -1376,8 +1390,9 @@ class Consolidate:
             return None
         encoded = tuple(json.dumps(sorted(set(keys)), ensure_ascii=False) for keys in (about, told_by, heard_by))
         rows = store.query_mind(
-            f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE fingerprint=? AND kind=? "
-            "AND status='active' AND about=? AND told_by=? AND heard_by=? ORDER BY id", (fingerprint(text), kind, *encoded))
+            select(t.c.id, t.c.text).where(t.c.fingerprint == fingerprint(text), t.c.kind == kind,
+                                           t.c.status == "active", t.c.about == encoded[0], t.c.told_by == encoded[1],
+                                           t.c.heard_by == encoded[2]).order_by(t.c.id))
         for k, previous in rows:
             if same_words(previous, text):
                 return int(k)
@@ -1391,8 +1406,9 @@ class Consolidate:
         d'un autre porteur ne se corrige pas : deux avis, deux porteurs, aucun n'a tort."""
         if item is None:
             return None
-        rows = store.query_mind(f"SELECT knowledge_kind, holder, about_self FROM {c.ITEMS_TABLE} "
-                                "WHERE id=? AND kind=? AND status='active'", (item, c.BELIEF))
+        t = tb.items()
+        rows = store.query_mind(select(t.c.knowledge_kind, t.c.holder, t.c.about_self)
+                                .where(t.c.id == item, t.c.kind == c.BELIEF, t.c.status == "active"))
         if not rows:
             return None
         kind, owner, self_item = rows[0]
@@ -1407,16 +1423,19 @@ class Consolidate:
     def _testimonies(store: Any, item: int | None) -> list[Testimony]:
         if item is None:
             return []
+        tt = tb.testimonies()
         return [testimony_of(r) for r in store.query_mind(
-            f"SELECT {','.join(TESTIMONY_COLUMNS)} FROM {TESTIMONIES_TABLE} WHERE item=? ORDER BY seq", (item,))]
+            select(*testimony_columns()).where(tt.c.item == item).order_by(tt.c.seq))]
 
     @staticmethod
     def _former_twin(store: Any, text: str, about: tuple[str, ...], nature: str, holder: str | None) -> int | None:
         """Une croyance qu'elle a cessé de croire (remplacée), aux mêmes mots : redite, elle revient."""
+        t = tb.items()
         rows = store.query_mind(
-            f"SELECT id, text, knowledge_kind, holder FROM {c.ITEMS_TABLE} WHERE fingerprint=? AND kind=? "
-            "AND status='superseded' AND about=? AND about_self=0 ORDER BY id DESC",
-            (fingerprint(text), c.BELIEF, json.dumps(sorted(set(about)), ensure_ascii=False)))
+            select(t.c.id, t.c.text, t.c.knowledge_kind, t.c.holder)
+            .where(t.c.fingerprint == fingerprint(text), t.c.kind == c.BELIEF, t.c.status == "superseded",
+                   t.c.about == json.dumps(sorted(set(about)), ensure_ascii=False), t.c.about_self == 0)
+            .order_by(t.c.id.desc()))
         for k, previous, kind, owner in rows:
             if same_words(previous, text) and kind == nature and (nature == "claim" or (owner or None) == (holder or None)):
                 return int(k)
@@ -1429,7 +1448,8 @@ class Consolidate:
         current: int | None = item
         while current is not None and current not in seen and len(seen) < 16:
             seen.add(current)
-            rows = store.query_mind(f"SELECT status, superseded_by FROM {c.ITEMS_TABLE} WHERE id=?", (current,))
+            t = tb.items()
+            rows = store.query_mind(select(t.c.status, t.c.superseded_by).where(t.c.id == current))
             if not rows:
                 return None
             status, after = rows[0]
@@ -1477,7 +1497,8 @@ class Consolidate:
     @staticmethod
     def _about_of(store: Any, item: int) -> list[str]:
         """Qui une croyance concerne (lu par son identifiant)."""
-        rows = store.query_mind(f"SELECT about FROM {c.ITEMS_TABLE} WHERE id=?", (item,))
+        t = tb.items()
+        rows = store.query_mind(select(t.c.about).where(t.c.id == item))
         return _keys(rows[0][0]) if rows else []
 
     @staticmethod
@@ -1489,22 +1510,22 @@ class Consolidate:
         désigne si elle laisse deviner le secret."""
         if not items:
             return []
-        marks = ",".join("?" * len(items))
-        cited = {int(m) for (raw,) in store.query_mind(f"SELECT sources FROM {c.ITEMS_TABLE} WHERE id IN ({marks})",
-                                                       tuple(items)) for m in _keys(raw)}
+        t, thread = tb.items(), transcript_c.thread_table()
+        cited = {int(m) for chunk in batches(sorted(set(items)))
+                 for (raw,) in store.query_mind(select(t.c.sources).where(t.c.id.in_(chunk))) for m in _keys(raw)}
         if not cited:
             return []
         askers = set(conv.persons)
-        marks = ",".join("?" * len(cited))
-        theirs = sorted(int(i) for i, who in store.query_mind(
-            f"SELECT id, person FROM {transcript_c.THREAD_TABLE} WHERE role='user' AND id IN ({marks})",
-            tuple(sorted(cited))) if who and (frame.get(identity_c.PERSON(who)) or who) in askers)
+        theirs = sorted(int(i) for chunk in batches(sorted(cited)) for i, who in store.query_mind(
+            select(thread.c.id, thread.c.person).where(thread.c.role == "user", thread.c.id.in_(chunk)))
+            if who and (frame.get(identity_c.PERSON(who)) or who) in askers)
         if not theirs:
             return []
-        marks = ",".join("?" * len(theirs))
+        # un souvenir né de l'un de ces messages (``sources`` : une liste JSON, lue par ``json_has`` — ``json_each``
+        # n'existe pas sous MariaDB)
         found = store.query_mind(
-            f"SELECT DISTINCT i.id FROM {c.ITEMS_TABLE} i, json_each(i.sources) j WHERE i.kind=? AND "
-            f"i.status='active' AND i.secret=0 AND j.value IN ({marks}) ORDER BY i.id", (c.SOUVENIR, *theirs))
+            select(t.c.id).where(t.c.kind == c.SOUVENIR, t.c.status == "active", t.c.secret == 0,
+                                 or_(*(json_has(t.c.sources, m) for m in theirs))).order_by(t.c.id))
         return [c.REINFORCED.draft(item=int(i), secret=True, sensitivity=int(Sensitivity.CONFIDENCE), restricts=True)
                 for (i,) in found]
 
@@ -1628,16 +1649,14 @@ class LetGo:
         pending = [pr for pr in state.promises.values() if pr.id not in state.kept]
         if not reminders or not pending or store is None:
             return []
-        marks = ",".join("?" * len(pending))
-        texts = dict(store.query_mind(f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE id IN ({marks})",
-                                      tuple(pr.id for pr in pending)))
+        t = tb.items()
+        texts = {int(i): said for chunk in batches(sorted({pr.id for pr in pending}))
+                 for i, said in store.query_mind(select(t.c.id, t.c.text).where(t.c.id.in_(chunk)))}
         return sorted(pr.id for pr in pending if any(
             r.owner == (frame.get(identity_c.PERSON(pr.to)) or pr.to) and r.opened_at >= pr.at and same_task(texts.get(pr.id) or "", r.title)
             and same_day(frame, None if pr.implicit_due else pr.due, r.due) for r in reminders))
 
 
-#: au plus tant de clés par requête ``IN (…)`` (SQLite en refuse au-delà de 32 766)
-IN_MAX = 500
 _CHUNK_COLUMNS = ("id", "person", "user_text", "reply_text", "room")
 
 
@@ -1656,19 +1675,19 @@ def _chunk_vector(r: dict[str, Any]) -> VectorItem:
     return VectorItem(int(r["id"]), kind, f"{r['user_text']}\n{r['reply_text']}", (r["person"],))
 
 
-def _by_ids(store: Any, table: str, columns: tuple[str, ...], ids: Sequence[int]) -> list[dict[str, Any]]:
+def _by_ids(store: Any, table: Table, columns: tuple[str, ...], ids: Sequence[int]) -> list[dict[str, Any]]:
     """Ces lignes, par paquets (jamais une liste ``IN`` sans borne)."""
     out: list[dict[str, Any]] = []
-    for i in range(0, len(ids), IN_MAX):
-        part = tuple(ids[i:i + IN_MAX])
-        out += _rows(store, f"SELECT {','.join(columns)} FROM {table} WHERE id IN ({','.join('?' * len(part))}) "
-                            "ORDER BY id", part, columns)
+    for part in batches(ids):
+        out += _rows(store, select(*(table.c[n] for n in columns)).where(table.c.id.in_(part)).order_by(table.c.id),
+                     columns)
     return out
 
 
 def forgets_of(store: Any) -> int:
     """Combien de fois la mémoire a oublié quelqu'un (``memory_forgets``)."""
-    rows = store.query_mind(f"SELECT n FROM {c.FORGETS_TABLE}")
+    ft = tb.forgets()
+    rows = store.query_mind(select(ft.c.n).order_by(ft.c.id).limit(1))
     return int(rows[0][0]) if rows else 0
 
 
@@ -1709,11 +1728,13 @@ class Index:
             todo, upto = await self._reconcile(vectors, store)
         else:
             todo, upto = self._fresh(store)
+        ch = tb.changes()
         if first:
-            self.revision = int(store.query_mind("SELECT COALESCE(MAX(seq),0) FROM memory_changes")[0][0])
-        changed = store.query_mind("SELECT item, seq FROM memory_changes WHERE seq>? ORDER BY seq", (self.revision,))
+            self.revision = int(store.query_mind(select(func.coalesce(func.max(ch.c.seq), 0)))[0][0])
+        changed = store.query_mind(select(ch.c.item, ch.c.seq).where(ch.c.seq > self.revision)
+                                   .order_by(ch.c.seq, ch.c.item))
         if changed:
-            rows = _by_ids(store, c.ITEMS_TABLE, ITEM_COLUMNS, [int(i) for i, _ in changed])
+            rows = _by_ids(store, tb.items(), ITEM_COLUMNS, [int(i) for i, _ in changed])
             active = [r for r in rows if r["status"] in ("active", "pending")]
             valid = {int(r["id"]) for r in active}
             await vectors.remove([int(i) for i, _ in changed if int(i) not in valid])
@@ -1726,10 +1747,11 @@ class Index:
 
     def _fresh(self, store: Any) -> tuple[list[VectorItem], tuple[int, int]]:
         """Ce qui est né depuis le dernier passage."""
-        items = _rows(store, f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE id > ? ORDER BY id",
-                      (self.upto[0],), ITEM_COLUMNS)
-        chunks = _rows(store, f"SELECT {','.join(_CHUNK_COLUMNS)} FROM {c.CHUNKS_TABLE} WHERE id > ? ORDER BY id",
-                       (self.upto[1],), _CHUNK_COLUMNS)
+        t, ch = tb.items(), c.chunks_table()
+        items = _rows(store, select(*(t.c[n] for n in ITEM_COLUMNS)).where(t.c.id > self.upto[0]).order_by(t.c.id),
+                      ITEM_COLUMNS)
+        chunks = _rows(store, select(*(ch.c[n] for n in _CHUNK_COLUMNS)).where(ch.c.id > self.upto[1])
+                       .order_by(ch.c.id), _CHUNK_COLUMNS)
         upto = (max([self.upto[0], *(int(r["id"]) for r in items)]),
                 max([self.upto[1], *(int(r["id"]) for r in chunks)]))
         return [*map(_item_vector, (r for r in items if r["status"] in ("active", "pending"))),
@@ -1740,15 +1762,15 @@ class Index:
         """Toute la mémoire, par ses identifiants : l'oubli efface des lignes, leurs vecteurs partent aussi (l'index
         n'est qu'un cache) ; ce qui manque (un index neuf, jeté) s'ajoute."""
         indexed = vectors.indexed()
-        items = {int(r[0]) for r in store.query_mind(
-            f"SELECT id FROM {c.ITEMS_TABLE} WHERE status IN ('active','pending')")}
-        chunks = {int(r[0]) for r in store.query_mind(f"SELECT id FROM {c.CHUNKS_TABLE}")}
+        t, ch = tb.items(), c.chunks_table()
+        items = {int(r[0]) for r in store.query_mind(select(t.c.id).where(t.c.status.in_(("active", "pending"))))}
+        chunks = {int(r[0]) for r in store.query_mind(select(ch.c.id))}
         gone = indexed - items - chunks
         remove = getattr(vectors, "remove", None)
         if gone and remove is not None:
             await remove(sorted(gone))
-        todo = [*map(_item_vector, _by_ids(store, c.ITEMS_TABLE, ITEM_COLUMNS, sorted(items - indexed))),
-                *map(_chunk_vector, _by_ids(store, c.CHUNKS_TABLE, _CHUNK_COLUMNS, sorted(chunks - indexed)))]
+        todo = [*map(_item_vector, _by_ids(store, t, ITEM_COLUMNS, sorted(items - indexed))),
+                *map(_chunk_vector, _by_ids(store, ch, _CHUNK_COLUMNS, sorted(chunks - indexed)))]
         return todo, (max(items, default=0), max(chunks, default=0))
 
 

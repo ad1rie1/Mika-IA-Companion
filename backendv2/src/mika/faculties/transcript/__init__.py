@@ -34,6 +34,7 @@ from typing import Annotated, Any
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import case, delete, false, func, select, update
 
 from mika.contracts import expression as expression_c
 from mika.contracts import identity as identity_c
@@ -73,6 +74,8 @@ from mika.kernel.state import FrozenDict
 from mika.ports.delivery import TOO_LATE
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.llm_budget import fits_context
+from mika.ports.paging import fold_text
+from mika.ports.sql import HANDLE_MAX, fit, json_values, upsert
 from mika.ports.store import Sql
 from mika.vocab.affect import Declared, emotion_cell, strip_prosody
 from mika.vocab.circadian import DAYS_FR, MONTHS_FR
@@ -226,34 +229,36 @@ _COLUMNS = ("id", "at", "role", "person", "channel", "room", "source", "kind", "
 
 
 class Thread:
-    """T0 : une ligne par message visible."""
+    """T0 : une ligne par message visible (``contracts.transcript.thread_table``)."""
 
     def create(self, sql: Sql, sfx: str) -> None:
-        sql.execute(
-            f"CREATE TABLE IF NOT EXISTS {c.THREAD_TABLE}{sfx}("
-            "id INTEGER PRIMARY KEY, at INTEGER NOT NULL, role TEXT NOT NULL, person TEXT NOT NULL, "
-            "channel TEXT, room TEXT, source TEXT, kind TEXT, text TEXT NOT NULL, client_msg_id TEXT, "
-            "reply_to INTEGER, emotion TEXT, emotion_intensity REAL, attachments TEXT, typed INTEGER, "
-            "unanswered TEXT)"
-        )
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {c.THREAD_TABLE}{sfx}_person ON {c.THREAD_TABLE}{sfx}(person, id)")
-        sql.execute(f"CREATE INDEX IF NOT EXISTS {c.THREAD_TABLE}{sfx}_room ON {c.THREAD_TABLE}{sfx}(room, id)")
+        sql.create(c.thread_table(sfx))
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"DROP TABLE IF EXISTS {c.THREAD_TABLE}{sfx}")
+        sql.drop(c.thread_table(sfx))
 
     def apply(self, sql: Sql, events: Sequence[Any], sfx: str) -> None:
-        rows = [row for e in events if (row := _row(e)) is not None]
+        t = c.thread_table(sfx)
+        rows = [_stored(row) for e in events if (row := _row(e)) is not None]
         if rows:
-            marks = ",".join("?" * len(_COLUMNS))
-            sql.executemany(f"INSERT OR REPLACE INTO {c.THREAD_TABLE}{sfx}({','.join(_COLUMNS)}) VALUES({marks})", rows)
+            upsert(sql, t, rows, keys=["id"])
         # après les lignes : une fin ne laisse sans réponse que des messages reçus avant elle
-        left = [pair for e in events if e.type.name == rt.EPISODE_ENDED.name for pair in _left(e.data)]
-        if left:
-            sql.executemany(f"UPDATE {c.THREAD_TABLE}{sfx} SET unanswered=? WHERE id=? AND role='user'", left)
+        for issue, seq in (pair for e in events if e.type.name == rt.EPISODE_ENDED.name for pair in _left(e.data)):
+            sql.execute(update(t).where(t.c.id == seq, t.c.role == "user").values(unanswered=issue))
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> None:
-        sql.execute(f"DELETE FROM {c.THREAD_TABLE}{sfx} WHERE person=?", (subject,))
+        t = c.thread_table(sfx)
+        sql.execute(delete(t).where(t.c.person == fit(subject, HANDLE_MAX)))
+
+
+def _stored(row: tuple[Any, ...]) -> dict[str, Any]:
+    """Une ligne telle qu'écrite : l'adresse et le salon bornés (``fit`` : jamais un ajout refusé pour une adresse
+    trop longue), et le texte replié que cherche la console."""
+    out = dict(zip(_COLUMNS, row, strict=True))
+    out["person"] = fit(out["person"], HANDLE_MAX)
+    out["room"] = fit(out["room"], HANDLE_MAX) if out["room"] is not None else None
+    out["folded"] = fold_text(out["text"])
+    return out
 
 
 def _forgotten(text: Any) -> bool:
@@ -315,29 +320,38 @@ def _left(d: rt.EpisodeEnded) -> list[tuple[str, int]]:
     return [(issue, int(seq)) for seq in seqs]
 
 
-#: version 3 : la colonne ``unanswered`` (pourquoi un message reçu est resté sans réponse), d'où les fins
+#: version 5 : la table déclarée pour les deux moteurs (ADR 0101), et ``folded`` (le texte replié que cherche la
+#: console) ; version 3 : la colonne ``unanswered`` (pourquoi un message reçu est resté sans réponse), d'où les fins
 #: d'épisode ; version 2 : la colonne ``typed`` (ce que la personne a tapé, à part de ce que ses pièces jointes ont
 #: donné) — la table se reconstruit depuis le journal au premier démarrage
-TRANSCRIPT.projector(c.THREAD_TABLE, version=4, tier=Tier.T0,
+TRANSCRIPT.projector(c.THREAD_TABLE, version=5, tier=Tier.T0,
                      types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_ENDED])(Thread)
+
+
+def _columns() -> list[Any]:
+    t = c.thread_table()
+    return [t.c[n] for n in _COLUMNS]
+
+
+def _messages_of(store: Any, *where: Any, newest_first: bool = True, limit: int | None = None) -> list[Any]:
+    """Les lignes du fil qui répondent à ``where`` (les colonnes de ``_COLUMNS``), triées par numéro."""
+    t = c.thread_table()
+    query = select(*_columns()).where(*where).order_by(t.c.id.desc() if newest_first else t.c.id)
+    return store.query_mind(query.limit(limit) if limit is not None else query)
 
 
 def recent(store: Any, person: str, limit: int) -> list[dict[str, Any]]:
     """La fin du fil d'une personne, du plus ancien au plus récent."""
-    rows = store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person=? ORDER BY id DESC LIMIT ?",
-        (person, limit),
-    )
+    t = c.thread_table()
+    rows = _messages_of(store, t.c.person == person, limit=limit)
     return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
 
 
 def after(store: Any, person: str, after_id: int, limit: int) -> tuple[list[dict[str, Any]], bool]:
     """Tout ce qu'elle a manqué depuis ``after_id`` (les plus récents si ça
     dépasse ``limit``, et on le dit)."""
-    rows = store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person=? AND id>? ORDER BY id DESC LIMIT ?",
-        (person, after_id, limit + 1),
-    )
+    t = c.thread_table()
+    rows = _messages_of(store, t.c.person == person, t.c.id > after_id, limit=limit + 1)
     truncated = len(rows) > limit
     rows = rows[:limit]
     return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)], truncated
@@ -347,10 +361,8 @@ def thread_of(store: Any, person: str, limit: int, before: int | None = None, af
     """Le fil avec une adresse, entre ``after`` et ``before`` (le message en
     cours de réponse n'y est pas : il arrive comme dernier tour)."""
     bound = before if before is not None else 2**62
-    rows = store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person=? AND id<? AND id>? ORDER BY id DESC LIMIT ?",
-        (person, bound, after, limit),
-    )
+    t = c.thread_table()
+    rows = _messages_of(store, t.c.person == person, t.c.id < bound, t.c.id > after, limit=limit)
     return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
 
 
@@ -358,18 +370,21 @@ def oldest_after(store: Any, person: str, after: int, limit: int) -> list[dict[s
     """Les ``limit`` plus anciens messages du fil privé d'une adresse après
     ``after``, dans l'ordre : ce qu'un résumé replie en premier (il n'est relu
     qu'en privé, un salon n'a rien à y faire)."""
-    rows = store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE person=? AND room IS NULL AND id>? "
-        "ORDER BY id LIMIT ?",
-        (person, after, limit),
-    )
+    t = c.thread_table()
+    rows = _messages_of(store, t.c.person == person, t.c.room.is_(None), t.c.id > after, newest_first=False,
+                        limit=limit)
     return [dict(zip(_COLUMNS, r, strict=True)) for r in rows]
 
 
-def count_after(store: Any, person: str, after: int) -> int:
-    rows = store.query_mind(f"SELECT COUNT(*) FROM {c.THREAD_TABLE} WHERE person=? AND room IS NULL AND id>?",
-                            (person, after))
+def _count(store: Any, *where: Any) -> int:
+    t = c.thread_table()
+    rows = store.query_mind(select(func.count()).select_from(t).where(*where))
     return int(rows[0][0]) if rows else 0
+
+
+def count_after(store: Any, person: str, after: int) -> int:
+    t = c.thread_table()
+    return _count(store, t.c.person == person, t.c.room.is_(None), t.c.id > after)
 
 
 def window_start(total: int, window: int, step: int) -> int:
@@ -382,15 +397,12 @@ def window_start(total: int, window: int, step: int) -> int:
     return -(-start // step) * step
 
 
-def _window(store: Any, where: str, args: Sequence[Any], window: int, step: int) -> list[dict[str, Any]]:
+def _window(store: Any, where: Sequence[Any], window: int, step: int) -> list[dict[str, Any]]:
     limit = window
     if step > 1:
-        total = int(store.query_mind(f"SELECT COUNT(*) FROM {c.THREAD_TABLE} WHERE {where}", tuple(args))[0][0])
+        total = _count(store, *where)
         limit = total - window_start(total, window, step)
-    rows = store.query_mind(
-        f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE {where} ORDER BY id DESC LIMIT ?",
-        (*args, limit),
-    )
+    rows = _messages_of(store, *where, limit=limit)
     return [dict(zip(_COLUMNS, r, strict=True)) for r in reversed(rows)]
 
 
@@ -399,8 +411,8 @@ def private_thread(store: Any, handles: Sequence[str], limit: int, before: int |
     """Le fil privé avec une personne, toutes ses adresses confondues (ce
     qu'elle a dit dans un salon n'y est pas : hors de son contexte)."""
     bound = before if before is not None else 2**62
-    marks = ",".join("?" * len(handles))
-    return _window(store, f"person IN ({marks}) AND room IS NULL AND id<? AND id>?", (*handles, bound, after),
+    t = c.thread_table()
+    return _window(store, (t.c.person.in_(list(handles)), t.c.room.is_(None), t.c.id < bound, t.c.id > after),
                    limit, step)
 
 
@@ -408,12 +420,20 @@ def room_thread(store: Any, room: str, limit: int, before: int | None = None, st
                 after: int = 0) -> list[dict[str, Any]]:
     """Ce qui s'est dit dans un salon (public pour ce salon), tous ensemble."""
     bound = before if before is not None else 2**62
-    return _window(store, "room=? AND id<? AND id>?", (room, bound, after), limit, step)
+    t = c.thread_table()
+    return _window(store, (t.c.room == room, t.c.id < bound, t.c.id > after), limit, step)
 
 
 def _message(store: Any, seq: int) -> dict[str, Any] | None:
-    rows = store.query_mind(f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE id=?", (seq,))
+    t = c.thread_table()
+    rows = _messages_of(store, t.c.id == seq)
     return dict(zip(_COLUMNS, rows[0], strict=True)) if rows else None
+
+
+def _any(store: Any, *where: Any) -> bool:
+    """Au moins un message du fil répond à ``where``."""
+    t = c.thread_table()
+    return bool(store.query_mind(select(t.c.id).where(*where).limit(1)))
 
 
 # ── Les repères de temps ──────────────────────────────────────────────────
@@ -663,12 +683,11 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
         pinned.append(ChatTurn("user", phrase("transcript.thread.summary", text=text), id=summary[0], pinned=True))
         return summary[0]
 
+    t = c.thread_table()
     if room:
         since = summary_for(f"room:{room}")
         rows = room_thread(store, room, limit, before=before, step=p.window_step, after=since)
-        gap = bool(rows and store.query_mind(
-            f"SELECT 1 FROM {c.THREAD_TABLE} WHERE room=? AND id>? AND id<? LIMIT 1",
-            (room, since, rows[0]["id"])))
+        gap = bool(rows) and _any(store, t.c.room == room, t.c.id > since, t.c.id < rows[0]["id"])
         names = speakers(frame, [str(r["person"]) for r in rows if r["role"] != "assistant"] +
                          ([str(asked["person"])] if asked else []))
         key = f"room:{room}"
@@ -687,9 +706,8 @@ async def _thread(s: TranscriptState, frame: Frame, ports: Mapping[str, Any]) ->
         for handle in handles:
             since = summary_for(handle)
             part = private_thread(store, (handle,), limit, before=before, after=since, step=p.window_step)
-            gap |= bool(part and store.query_mind(
-                f"SELECT 1 FROM {c.THREAD_TABLE} WHERE person=? AND room IS NULL AND id>? AND id<? LIMIT 1",
-                (handle, since, part[0]["id"])))
+            gap |= bool(part) and _any(store, t.c.person == handle, t.c.room.is_(None), t.c.id > since,
+                                       t.c.id < part[0]["id"])
             rows += part
         rows.sort(key=lambda r: r["id"])
     if gap:
@@ -734,12 +752,25 @@ def _compact_lines(frame: Frame, person: str, rows: Sequence[Mapping[str, Any]],
 
 def secret_sources(store: Any, room: str, upto: int) -> set[int]:
     """Les messages d'un salon (jusqu'à ``upto``) d'où vient ce qu'on lui a demandé de garder pour soi — par la porte
-    de la mémoire (ADR 0078)."""
-    rows = store.query_mind(
-        f"SELECT DISTINCT CAST(j.value AS INTEGER) FROM {memory_c.KNOWLEDGE_VIEW} k, json_each(k.sources) j "
-        f"WHERE k.secret=1 AND CAST(j.value AS INTEGER) IN (SELECT id FROM {c.THREAD_TABLE} WHERE room=? AND id<=?)",
-        (room, upto))
-    return {int(r[0]) for r in rows}
+    de la mémoire (ADR 0078). Les sources des secrets se déplient en Python (``json_values``), puis le fil dit
+    lesquelles sont de ce salon."""
+    sources: set[int] = set()
+    v = memory_c.KNOWLEDGE
+    for (raw,) in store.query_mind(select(v.c.sources).where(v.c.secret == 1)):
+        for x in json_values(raw):
+            try:
+                seq = int(x)
+            except (TypeError, ValueError):
+                continue
+            if seq <= upto:
+                sources.add(seq)
+    t = c.thread_table()
+    found: set[int] = set()
+    wanted = sorted(sources)
+    for start in range(0, len(wanted), 500):
+        chunk = wanted[start:start + 500]
+        found |= {int(r[0]) for r in store.query_mind(select(t.c.id).where(t.c.room == room, t.c.id.in_(chunk)))}
+    return found
 
 
 @TRANSCRIPT.process("transcript.compact", wake_on=[memory_c.CONSOLIDATED], lane="background",
@@ -768,10 +799,11 @@ class Compact:
             self.seen = checkpoint
             return
         p = _params(frame.env.params_of("transcript", frame.root))
+        t = c.thread_table()
         topics = [(str(person), None) for (person,) in store.query_mind(
-            f"SELECT DISTINCT person FROM {c.THREAD_TABLE} WHERE room IS NULL ORDER BY person")]
+            select(t.c.person).distinct().where(t.c.room.is_(None)).order_by(t.c.person))]
         topics += [(f"room:{room}", str(room)) for (room,) in store.query_mind(
-            f"SELECT DISTINCT room FROM {c.THREAD_TABLE} WHERE room IS NOT NULL ORDER BY room")]
+            select(t.c.room).distinct().where(t.c.room.is_not(None)).order_by(t.c.room))]
         for person, room in topics:
             failed_at, cap, attempts = self.failures.get(person, (0, p.compact_batch, 0))
             if failed_at > frame.now:
@@ -785,15 +817,16 @@ class Compact:
                                                          dedupe_key=f"résumé-refait:{person}:{max(kept)}"))
                     return
             since = summary[0] if summary else 0
-            where, args = ("room=? AND id>?", (room, since)) if room else (
-                "person=? AND room IS NULL AND id>?", (person, since))
-            total = int(store.query_mind(f"SELECT COUNT(*) FROM {c.THREAD_TABLE} WHERE {where}", args)[0][0])
+            where = (t.c.room == room, t.c.id > since) if room else (
+                t.c.person == person, t.c.room.is_(None), t.c.id > since)
+            total = _count(store, *where)
             if total <= p.compact_after:
                 continue
-            # les plus anciens d'abord, par lots : jamais « résumé » ce qui n'a pas été lu
-            got = store.query_mind(f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} WHERE {where} "
-                                    "AND id<=? ORDER BY id LIMIT ?",
-                                    (*args, checkpoint, min(total - p.keep, p.compact_batch, cap)))
+            # les plus anciens d'abord, par lots : jamais « résumé » ce qui n'a pas été lu ; ni ce qu'il faut garder
+            # tel quel (``keep`` peut dépasser ``compact_after`` : une borne négative, SQLite la lisait « sans
+            # borne » et repliait tout, MariaDB la refuse)
+            got = _messages_of(store, *where, t.c.id <= checkpoint, newest_first=False,
+                               limit=max(0, min(total - p.keep, p.compact_batch, cap)))
             folded = [dict(zip(_COLUMNS, r, strict=True)) for r in got]
             if not folded or (len(folded) < p.compact_min_fold and not attempts):
                 continue
@@ -864,10 +897,6 @@ def _clip(text: str | None, limit: int = INSPECT_CHARS) -> str:
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 
-def _like(q: str) -> str:
-    return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-
-
 def _internal(r: Mapping[str, Any]) -> bool:
     """Adressé à personne (ou venu de sa propre tuyauterie) : pas un échange."""
     return not r["person"] or is_internal(r["person"])
@@ -882,16 +911,13 @@ def _who(frame: Frame, handle: str) -> Cell:
     return Ref.subject("person", person, f"{name} ({handle})" if name else handle)
 
 
-def _page(store: Any, clauses: Sequence[str], args: Sequence[Any], before: int | None,
+def _page(store: Any, clauses: Sequence[Any], before: int | None,
           size: int = PAGE) -> tuple[list[dict[str, Any]], Pager | None]:
     """Une page du fil, du plus récent au plus ancien, et le curseur de la suivante."""
-    where, params = list(clauses), list(args)
+    where = list(clauses)
     if before:
-        where.append("id<?")
-        params.append(before)
-    clause = f"WHERE {' AND '.join(where)} " if where else ""
-    found = store.query_mind(f"SELECT {','.join(_COLUMNS)} FROM {c.THREAD_TABLE} {clause}ORDER BY id DESC LIMIT ?",
-                             (*params, size + 1))
+        where.append(c.thread_table().c.id < before)
+    found = _messages_of(store, *where, limit=size + 1)
     rows = [dict(zip(_COLUMNS, r, strict=True)) for r in found[:size]]
     more = len(found) > size and rows
     return rows, Pager(older=(("avant", str(rows[-1]["id"])),)) if more else Pager()
@@ -926,9 +952,10 @@ def _answers(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[int
     if store is None or not asked:
         return {}
     ids = [int(r["id"]) for r in asked]
-    marks = ",".join("?" * len(ids))
+    t = c.thread_table()
+    # par numéro : deux paroles qui répondent au même message, la dernière l'emporte (sur les deux moteurs)
     out = {int(q): int(a) for a, q in store.query_mind(
-        f"SELECT id, reply_to FROM {c.THREAD_TABLE} WHERE role='assistant' AND reply_to IN ({marks})", tuple(ids))}
+        select(t.c.id, t.c.reply_to).where(t.c.role == "assistant", t.c.reply_to.in_(ids)).order_by(t.c.id))}
     for r in asked:
         q = int(r["id"])
         if q in out:
@@ -936,8 +963,8 @@ def _answers(ctx: InspectContext, rows: Sequence[Mapping[str, Any]]) -> dict[int
         # le premier énoncé vers la même adresse, au même endroit, qui répond à un message d'après : il a peut-être
         # lu celui-ci avec (une rafale reçoit une seule réponse, à son dernier message)
         later = store.query_mind(
-            f"SELECT id FROM {c.THREAD_TABLE} WHERE person=? AND role='assistant' AND id>? AND reply_to>? "
-            "AND COALESCE(room, '')=? ORDER BY id LIMIT 1", (r["person"], q, q, r["room"] or ""))
+            select(t.c.id).where(t.c.person == r["person"], t.c.role == "assistant", t.c.id > q, t.c.reply_to > q,
+                                 func.coalesce(t.c.room, "") == (r["room"] or "")).order_by(t.c.id).limit(1))
         if not later:
             continue
         seq = int(later[0][0])
@@ -984,9 +1011,11 @@ def _silences(ctx: InspectContext, rows: Sequence[Mapping[str, Any]], pending: s
         ended = _ended_leaving(ctx, q, q)
         if ended is None and store is not None:
             # une rafale dont la fin porte sur un message d'après, de la même adresse au même endroit
+            t = c.thread_table()
             for (later,) in store.query_mind(
-                    f"SELECT id FROM {c.THREAD_TABLE} WHERE person=? AND role='user' AND id>? "
-                    "AND COALESCE(room, '')=? ORDER BY id LIMIT ?", (r["person"], q, r["room"] or "", BURST_LOOKUP)):
+                    select(t.c.id).where(t.c.person == r["person"], t.c.role == "user", t.c.id > q,
+                                         func.coalesce(t.c.room, "") == (r["room"] or ""))
+                    .order_by(t.c.id).limit(BURST_LOOKUP)):
                 ended = _ended_leaving(ctx, int(later), q)
                 if ended is not None:
                     break
@@ -1081,23 +1110,22 @@ def _all_messages(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list
     if store is None:
         return _no_store()
     handle, q, role = str(ctx.value("handle") or ""), str(ctx.value("q") or ""), str(ctx.value("role") or "")
-    clauses, args = [], []
+    t = c.thread_table()
+    clauses: list[Any] = []
     matched = None
     if handle:
-        known_handles = sorted({str(r[0]) for r in store.query_mind(f"SELECT DISTINCT person FROM {c.THREAD_TABLE}")} |
+        known_handles = sorted({str(r[0]) for r in store.query_mind(select(t.c.person).distinct())} |
                                set(s.summaries))
         exact = [h for h in known_handles if h == handle]
         matched = exact or [h for h in known_handles if handle.casefold() in _who(frame, h).text.casefold()]
-        clauses.append("person IN (" + ",".join("?" for _ in matched) + ")" if matched else "0")
-        args.extend(matched)
+        clauses.append(t.c.person.in_(matched) if matched else false())
     if q:
-        clauses.append("text LIKE ? ESCAPE '\\'")
-        args.append(_like(q))
+        # le texte replié à l'écriture, comparé en binaire : casse et accents ignorés, pareil sur les deux moteurs
+        clauses.append(func.instr(t.c.folded, fold_text(q)) > 0)
     if role:
-        clauses.append("role=?")
-        args.append(role)
+        clauses.append(t.c.role == role)
     before = ctx.int_param("avant", 0) or None
-    rows, pager = _page(store, clauses, args, before)
+    rows, pager = _page(store, clauses, before)
     known = bool(matched) or handle in s.last_from or handle in s.last_to or handle in s.summaries
     if handle and not rows and not known and not before:
         return [Note(f"Aucun message avec « {handle} ».", tone="muted")]
@@ -1131,9 +1159,9 @@ def _questions(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Bl
         return _no_store()
     waiting = sorted((int(x) for x in frame.get(rt.AWAITING)), reverse=True)
     page, pager = paginate(waiting, ctx.pager(size=PAGE))
-    marks = ",".join("?" * len(page))
+    t = c.thread_table()
     found = {int(r[0]): r for r in store.query_mind(
-        f"SELECT id, at, person, text FROM {c.THREAD_TABLE} WHERE id IN ({marks})", tuple(page))} if page else {}
+        select(t.c.id, t.c.at, t.c.person, t.c.text).where(t.c.id.in_(list(page))))} if page else {}
     rows = []
     for seq in page:
         r = found.get(seq)
@@ -1151,10 +1179,10 @@ def _questions(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Bl
 
 
 def _stats(store: Any, handles: Sequence[str]) -> Stats:
-    marks = ",".join("?" * len(handles))
+    t = c.thread_table()
     total, received = store.query_mind(
-        f"SELECT COUNT(*), COALESCE(SUM(role='user'), 0) FROM {c.THREAD_TABLE} WHERE person IN ({marks})",
-        tuple(handles))[0]
+        select(func.count(), func.coalesce(func.sum(case((t.c.role == "user", 1), else_=0)), 0))
+        .where(t.c.person.in_(list(handles))))[0]
     return Stats((Stat("messages", int(total)), Stat("reçus", int(received)),
                   Stat("envoyés", int(total) - int(received))))
 
@@ -1171,8 +1199,8 @@ def _exchanges(s: TranscriptState, frame: Frame, ctx: InspectContext) -> list[Bl
     if store is None:
         return _no_store()
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
-    marks = ",".join("?" * len(handles))
-    rows, pager = _page(store, [f"person IN ({marks})"], handles, ctx.int_param("avant", 0) or None)
+    t = c.thread_table()
+    rows, pager = _page(store, [t.c.person.in_(handles)], ctx.int_param("avant", 0) or None)
     blocks: list[Block] = [_stats(store, handles),
                            Table(MESSAGE_COLUMNS, _messages(frame, ctx, rows), pager=pager, title="Échanges",
                                  layout="feed", link_label="Pourquoi cette réponse ?",
@@ -1193,7 +1221,7 @@ def _handle_thread(s: TranscriptState, frame: Frame, ctx: InspectContext) -> lis
     if store is None:
         return _no_store()
     before = ctx.int_param("avant", 0) or None
-    rows, pager = _page(store, ["person=?"], [handle], before)
+    rows, pager = _page(store, [c.thread_table().c.person == handle], before)
     if not rows and not before and not (handle in s.last_from or handle in s.last_to):
         return [Note(f"Aucun message avec « {handle} ».", tone="muted")]
     blocks: list[Block] = [_stats(store, [handle]),

@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, ValidationError, field_validator
+from sqlalchemy import func, select
 
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
@@ -33,11 +34,11 @@ from mika.contracts import memory as c
 from mika.contracts import self_ as self_c
 from mika.faculties.memory import extraction as x
 from mika.faculties.memory import likelihood as lk
+from mika.faculties.memory import tables as tb
 from mika.faculties.memory.archive import decode
 from mika.faculties.memory.consolidation import Consolidate, resolution
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, over, params
 from mika.faculties.memory.knowledge import CONTEST, SUPERSEDE, Testimony, judge
-from mika.faculties.memory.projections import CONTESTS_TABLE, READINGS_TABLE, TESTIMONIES_TABLE
 from mika.faculties.memory.recall import addresses_her, items_by_id, names_of, query_of, verdict_of
 from mika.faculties.memory.salience import Item, age_words
 from mika.kernel.clock import DAY, local_date_of_night
@@ -46,6 +47,7 @@ from mika.kernel.faculty import CatchUp, Zone
 from mika.kernel.frame import Frame
 from mika.kernel.prompt import SectionBody
 from mika.ports.llm import LLMRequest, Message, ToolDecl
+from mika.ports.sql import json_field
 from mika.vocab import timespan
 from mika.vocab.episodes import Kind
 from mika.vocab.people import clean_tokens, read_source
@@ -180,8 +182,9 @@ def source_label(source: str) -> str:
 def readings(store: Any, p: MemoryParams) -> tuple[list[Lu], int]:
     """Ses lectures en attente (les plus anciennes d'abord), et jusqu'où elles vont : une lecture dont le texte a été
     oublié depuis est relue sans rien en garder."""
-    rows = store.query_mind(f"SELECT seq, source, title_ref, excerpt_ref FROM {READINGS_TABLE} ORDER BY seq LIMIT ?",
-                            (p.reread_max_readings,))
+    t = tb.readings()
+    rows = store.query_mind(select(t.c.seq, t.c.source, t.c.title_ref, t.c.excerpt_ref).order_by(t.c.seq)
+                            .limit(p.reread_max_readings))
     texts = store.content([r for row in rows for r in row[2:] if r])
     return ([Lu(int(seq), str(source), texts.get(title) or "", texts.get(excerpt) or "")
              for seq, source, title, excerpt in rows if texts.get(title)], max((int(r[0]) for r in rows), default=0))
@@ -205,10 +208,12 @@ async def pairs(frame: Frame, store: Any, vectors: Any, p: MemoryParams) -> list
     l'a déjà jugé), pas déjà en doute l'une de l'autre."""
     if vectors is None or p.confront_max_pairs <= 0:
         return []
+    t, ct = tb.items(), tb.contests()
     rows = store.query_mind(
-        f"SELECT id, text, about FROM {c.ITEMS_TABLE} WHERE kind=? AND status='active' AND about_self=0 "
-        "AND about != '[]' AND knowledge_kind='claim' AND born_at>=? ORDER BY id DESC LIMIT 40",
-        (c.BELIEF, frame.now - round(p.confront_days * DAY)))
+        select(t.c.id, t.c.text, t.c.about)
+        .where(t.c.kind == c.BELIEF, t.c.status == "active", t.c.about_self == 0, t.c.about != "[]",
+               t.c.knowledge_kind == "claim", t.c.born_at >= frame.now - round(p.confront_days * DAY))
+        .order_by(t.c.id.desc()).limit(40))
     out: list[Paire] = []
     seen: set[tuple[int, int]] = set()
     for item, text, about in rows:
@@ -222,10 +227,12 @@ async def pairs(frame: Frame, store: Any, vectors: Any, p: MemoryParams) -> list
             if not _persons(frame, other.about) & mine:
                 continue
             first, second = _told(store, pair[0]), _told(store, pair[1])
-            if first & second or store.query_mind(f"SELECT 1 FROM {CONTESTS_TABLE} WHERE item=? AND other=?", pair):
+            if first & second or store.query_mind(select(ct.c.item).where(ct.c.item == pair[0],
+                                                                           ct.c.other == pair[1])):
                 continue
             seen.add(pair)
-            texts = dict(store.query_mind(f"SELECT id, text FROM {c.ITEMS_TABLE} WHERE id IN (?, ?)", pair))
+            texts = {int(i): said for i, said in store.query_mind(select(t.c.id, t.c.text)
+                                                                  .where(t.c.id.in_(pair)))}
             out.append(Paire(pair[0], pair[1], str(texts.get(pair[0], "")), str(texts.get(pair[1], "")),
                              tuple(sorted(first)), tuple(sorted(second))))
             if len(out) >= p.confront_max_pairs:
@@ -241,10 +248,12 @@ def world_moments(frame: Frame, store: Any, state: MemoryState, p: MemoryParams)
     """Les moments du monde dont elle ne sait pas encore comment ils tournent — à venir, ou passés depuis moins de
     ``resolve_days`` —, avec leur texte : une lecture peut dire qu'ils ont eu lieu, sont annulés ou reportés (ADR
     0086). Le monde n'est la vie de personne : rien de confié."""
+    t = tb.life()
     rows = store.query_mind(
-        f"SELECT payload FROM {c.LIFE_TABLE} WHERE yearly=0 AND ongoing=0 AND when_at>=? "
-        "AND json_extract(payload,'$.scope')=? AND COALESCE(json_extract(payload,'$.outcome'),'')='' "
-        "ORDER BY when_at LIMIT ?", (frame.now - round(p.resolve_days * DAY), c.WORLD, WORLD_SHOWN))
+        select(t.c.payload)
+        .where(t.c.yearly == 0, t.c.ongoing == 0, t.c.when_at >= frame.now - round(p.resolve_days * DAY),
+               json_field(t.c.payload, "scope") == c.WORLD, func.coalesce(json_field(t.c.payload, "outcome"), "") == "")
+        .order_by(t.c.when_at, t.c.id).limit(WORLD_SHOWN))
     found = {ev.id: ev for ev in (decode(raw) for (raw,) in rows)}
     found.update({ev.id: ev for ev in state.events.values() if ev.scope == c.WORLD and not ev.outcome
                   and not ev.yearly and over(ev) >= frame.now - round(p.resolve_days * DAY)})
@@ -257,10 +266,12 @@ def expired(frame: Frame, store: Any, p: MemoryParams) -> list[c.LifeEvent]:
     """Les moments passés depuis plus de ``resolve_grace_days`` sans que personne ne dise comment ils ont tourné :
     elle ne le saura pas (ADR 0086) — sur deux mois au plus, ce qui est plus ancien n'attend plus rien."""
     until = frame.now - round(p.resolve_grace_days * DAY)
+    t = tb.life()
     rows = store.query_mind(
-        f"SELECT payload FROM {c.LIFE_TABLE} WHERE yearly=0 AND ongoing=0 AND when_at<? AND when_at>=? "
-        "AND COALESCE(json_extract(payload,'$.outcome'),'')='' ORDER BY when_at LIMIT ?",
-        (until, until - 60 * DAY, EXPIRED_MAX))
+        select(t.c.payload)
+        .where(t.c.yearly == 0, t.c.ongoing == 0, t.c.when_at < until, t.c.when_at >= until - 60 * DAY,
+               func.coalesce(json_field(t.c.payload, "outcome"), "") == "")
+        .order_by(t.c.when_at, t.c.id).limit(EXPIRED_MAX))
     return [decode(raw) for (raw,) in rows]
 
 
@@ -274,8 +285,8 @@ def _keys(raw: Any) -> list[str]:
 
 def _told(store: Any, item: int) -> set[str]:
     """Qui le lui a dit : les témoins de tous ses témoignages."""
-    return {k for (told,) in store.query_mind(f"SELECT told_by FROM {TESTIMONIES_TABLE} WHERE item=?", (item,))
-            for k in _keys(told)}
+    tt = tb.testimonies()
+    return {k for (told,) in store.query_mind(select(tt.c.told_by).where(tt.c.item == item)) for k in _keys(told)}
 
 
 async def _known(store: Any, vectors: Any, lus: Sequence[Lu], *, mine: bool) -> list[tuple[int, str]]:
@@ -543,8 +554,15 @@ async def _learned(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> li
         return None  # « salut » ne lui fait pas réciter ses lectures ; « et toi, quoi de neuf ? », si
     p = params(frame.env.params_of("memory", frame.root))
     since = frame.now - round(p.learned_fresh_days * DAY)
-    rows = store.query_mind(f"SELECT item, told_by, MAX(at) FROM {TESTIMONIES_TABLE} WHERE origin=? AND at>=? "
-                            "GROUP BY item ORDER BY MAX(at) DESC LIMIT 40", (c.READ, since))
+    # le dernier témoignage de chaque élément appris d'une lecture, ``told_by`` compris : une fenêtre, jamais une
+    # colonne nue à côté d'un ``MAX`` (SQLite y met la ligne du maximum, MariaDB une ligne quelconque)
+    tt = tb.testimonies()
+    last = (select(tt.c.item, tt.c.told_by, tt.c.at,
+                   func.row_number().over(partition_by=tt.c.item, order_by=(tt.c.at.desc(), tt.c.seq.desc()))
+                   .label("nth"))
+            .where(tt.c.origin == c.READ, tt.c.at >= since).subquery("last"))
+    rows = store.query_mind(select(last.c.item, last.c.told_by, last.c.at).where(last.c.nth == 1)
+                            .order_by(last.c.at.desc(), last.c.item).limit(40))
     if not rows:
         return None
     read = {int(i): (_keys(told), int(at)) for i, told, at in rows}
@@ -552,8 +570,9 @@ async def _learned(s: MemoryState, frame: Frame, ports: Mapping[str, Any]) -> li
     told: set[int] = set()
     if person:
         handles = sorted({ep.target, person, *frame.get(identity_c.HANDLES(person))})
+        said = tb.told()
         told = {int(i) for (i,) in store.query_mind(
-            f"SELECT item FROM {c.TOLD_TABLE} WHERE handle IN ({','.join('?' * len(handles))})", tuple(handles))}
+            select(said.c.item).where(said.c.handle.in_(sorted({tb.handle_key(h) for h in handles}))))}
     memo: dict[str, str] = {}
     out: list[Learned] = []
     for item in sorted(items_by_id(store, sorted(read)).values(), key=lambda it: (-it.importance, -read[it.id][1])):

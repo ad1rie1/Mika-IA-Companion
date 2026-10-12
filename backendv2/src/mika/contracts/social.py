@@ -42,12 +42,17 @@ proximité fixée par un opérateur, le plancher d'une propriétaire) est relev�
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from functools import cache
 from typing import Any
+
+from sqlalchemy import BigInteger, Column, Index, Table
 
 from mika.contracts.attention import Signal
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.ports.sql import HANDLE_MAX, Key, LongText, projection_table
 
 OWNER = "social"
 
@@ -233,3 +238,35 @@ class RelationsRecalled(Payload):
 RELATIONS_RECALLED = event_type("social.relations_recalled", OWNER, RelationsRecalled, public=True)
 ALL = (*ALL, RELATIONS_RECALLED)
 RELATIONS_TABLE = "social_relations"
+
+
+#: la borne d'une clé de lien dans la table : avec ``subject``, la clé primaire tient dans les 768 caractères
+#: qu'InnoDB indexe (``utf8mb4``)
+RELATION_KEY_MAX = 768 - HANDLE_MAX
+
+
+def relation_key(other: str, kind: str, told_by: Iterable[str]) -> str:
+    """L'identité d'un lien dans l'état de ``social`` (``autre|sorte|témoins``) — la même à l'écriture et à la
+    relecture du graphe (elle se refait depuis la charge utile rangée)."""
+    return f"{other}|{kind}|{','.join(sorted(told_by))}"
+
+
+@cache
+def relations_table(sfx: str = "") -> Table:
+    """``social_relations`` (suffixée de sa version) : le graphe durable des liens explicites, une ligne par lien et
+    par témoin — ce que relisent ``social`` (à la rencontre) et la mémoire (ADR 0101 : déclarée pour les deux
+    moteurs, hors des migrations ; elle évolue par sa version).
+
+    ``subject``, ``other`` et ``key`` sont des clés bornées ; la projection y range une valeur plus longue par ``fit``
+    (jamais un ajout refusé) — la clé d'un lien se relit exacte depuis sa charge utile (``relation_key``)."""
+    name = f"{RELATIONS_TABLE}{sfx}"
+    return projection_table(
+        name,
+        Column("subject", Key(HANDLE_MAX), primary_key=True),
+        Column("key", Key(RELATION_KEY_MAX), primary_key=True),
+        Column("other", Key(HANDLE_MAX), nullable=False),
+        Column("item", BigInteger, nullable=False),
+        Column("payload", LongText, nullable=False),
+        Index(f"{name}_other", "other", "item"),
+        Index(f"{name}_item", "item"),
+    )

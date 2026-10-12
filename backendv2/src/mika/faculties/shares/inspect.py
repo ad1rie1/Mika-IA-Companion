@@ -5,10 +5,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import func, select
+
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as projects_c
 from mika.contracts import shares as c
-from mika.faculties.shares.faculty import PORT, SHARES, FileRow, SharesState, of_people, row
+from mika.faculties.shares.faculty import PORT, SHARES, FileRow, SharesState, of_people, row, table
 from mika.faculties.shares.tools import size_words
 from mika.kernel.frame import Frame
 from mika.kernel.inspect import (
@@ -77,8 +79,8 @@ def _files_tab(s: SharesState, frame: Frame, ctx: InspectContext) -> list[Block]
     if store is None:
         return [Note("Le magasin n'est pas disponible : les fichiers ne se relisent pas.", tone="muted")]
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
-    marks = ",".join("?" * len(handles))
-    total = int(store.query_mind(f"SELECT COUNT(*) FROM {c.TABLE} WHERE person IN ({marks})", tuple(handles))[0][0])
+    t = table()
+    total = int(store.query_mind(select(func.count()).select_from(t).where(t.c.person.in_(handles)))[0][0])
     pager = ctx.pager(size=PAGE, total=total)
     found = of_people(store, handles, pager.offset + pager.size)[pager.offset:]
     rows = tuple(Row((

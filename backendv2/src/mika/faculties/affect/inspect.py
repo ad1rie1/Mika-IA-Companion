@@ -9,6 +9,8 @@ des séries mesurées toutes les dix minutes (``affect.valence``,
 
 from __future__ import annotations
 
+from sqlalchemy import select
+
 from mika.contracts import affect as c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
@@ -170,18 +172,16 @@ def _declared_rows(ctx: InspectContext, handles: tuple[str, ...] | None = None, 
     ``before`` : avant ce message."""
     if ctx.store is None:
         return []
-    where, args = "", ()
+    t = transcript_c.thread_table()
+    query = select(t.c.id, t.c.at, t.c.person, t.c.emotion, t.c.emotion_intensity, t.c.kind, t.c.text) \
+        .where(t.c.role == "assistant", t.c.emotion.is_not(None))
     if handles is not None:
         if not handles:
             return []
-        where = f" AND person IN ({','.join('?' * len(handles))})"
-        args = tuple(handles)
+        query = query.where(t.c.person.in_(list(handles)))
     if before:
-        where += " AND id<?"
-        args = (*args, before)
-    rows = ctx.store.query_mind(
-        f"SELECT id, at, person, emotion, emotion_intensity, kind, text FROM {transcript_c.THREAD_TABLE} "
-        f"WHERE role='assistant' AND emotion IS NOT NULL{where} ORDER BY id DESC LIMIT ?", (*args, limit))
+        query = query.where(t.c.id < before)
+    rows = ctx.store.query_mind(query.order_by(t.c.id.desc()).limit(limit))
     return [(int(n), int(at), str(person or ""), str(name), float(intensity or 0.0), str(kind or ""), text)
             for n, at, person, name, intensity, kind, text in rows]
 

@@ -23,6 +23,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
@@ -143,11 +145,10 @@ async def _answer(s: ProjectsState, frame: Frame, ports: Mapping[str, Any]) -> d
     o = got[1] if got is not None else None
     if store is None or o is None or not o.asked_to or not answered(o):
         return None
-    handles = tuple(frame.get(identity_c.HANDLES(o.asked_to)) or (o.asked_to,))
-    marks = ",".join("?" * len(handles))
-    rows = store.query_mind(
-        f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE person IN ({marks}) AND role='user' AND room IS NULL "
-        "AND at > ? ORDER BY id LIMIT ?", (*handles, o.asked_at, ANSWER_LINES))
+    handles = list(frame.get(identity_c.HANDLES(o.asked_to)) or (o.asked_to,))
+    t = transcript_c.thread_table()
+    rows = store.query_mind(select(t.c.text).where(t.c.person.in_(handles), t.c.role == "user", t.c.room.is_(None),
+                                                   t.c.at > o.asked_at).order_by(t.c.id).limit(ANSWER_LINES))
     lines = [_clip(str(text), ANSWER_CLIP) for (text,) in rows if str(text or "").strip()]
     return {"lines": lines} if lines else None
 

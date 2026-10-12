@@ -7,8 +7,13 @@ seule suite, strictement croissante, stable aux reconstructions.
 
 from __future__ import annotations
 
+from functools import cache
+
+from sqlalchemy import BigInteger, Column, Double, Index, Table
+
 from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily, FactKey
+from mika.ports.sql import HANDLE_MAX, Key, LongText, projection_table
 
 OWNER = "transcript"
 
@@ -20,6 +25,42 @@ LAST_TO = FactFamily("transcript.last_to", arg=str, type=int)
 HEAD = FactKey("transcript.head", type=int)
 
 THREAD_TABLE = "thread"
+
+
+@cache
+def thread_table(sfx: str = "") -> Table:
+    """``thread`` (suffixée de sa version) : une ligne par message visible — ce que relisent toutes les facultés qui
+    lisent le fil (ADR 0101 : déclarée pour les deux moteurs, hors des migrations ; elle évolue par sa version).
+
+    ``id`` est le ``seq`` de l'événement qui a créé le message. ``person`` (l'adresse) et ``room`` sont des clés
+    bornées à ``HANDLE_MAX`` : la projection y range une valeur plus longue par ``fit`` plutôt que de faire échouer
+    l'ajout, et une lecture par la valeur brute ne la trouve pas. ``folded`` : le texte replié (``fold_text`` : casse
+    et accents ignorés), ce que cherche la console — pareil sur les deux moteurs, là où ``LIKE`` ne l'est pas ; la
+    projection l'écrit toujours (nul seulement pour une ligne posée à la main, que la recherche ne trouve pas)."""
+    name = f"{THREAD_TABLE}{sfx}"
+    return projection_table(
+        name,
+        Column("id", BigInteger, primary_key=True, autoincrement=False),
+        Column("at", BigInteger, nullable=False),
+        Column("role", LongText, nullable=False),
+        Column("person", Key(HANDLE_MAX), nullable=False),
+        Column("channel", LongText),
+        Column("room", Key(HANDLE_MAX)),
+        Column("source", LongText),
+        Column("kind", LongText),
+        Column("text", LongText, nullable=False),
+        Column("client_msg_id", LongText),
+        Column("reply_to", BigInteger),
+        Column("emotion", LongText),
+        Column("emotion_intensity", Double),
+        Column("attachments", LongText),
+        Column("typed", BigInteger),
+        Column("unanswered", LongText),
+        Column("folded", LongText),
+        Index(f"{name}_person", "person", "id"),
+        Index(f"{name}_room", "room", "id"),
+    )
+
 
 #: Pourquoi un message reçu est resté sans réponse pour de bon — la colonne ``unanswered`` du fil, nulle pour un
 #: message répondu, encore en attente ou qui ne lui était pas adressé (``EpisodeEnded.unanswered``) : elle a

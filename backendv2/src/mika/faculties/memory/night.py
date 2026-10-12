@@ -14,9 +14,12 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from collections.abc import Sequence
 from datetime import date, datetime, time, timedelta
 from typing import Any
+
+from sqlalchemy import func, select
 
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
@@ -29,6 +32,7 @@ from mika.faculties.memory.consolidation import kept_secrets
 from mika.faculties.memory.faculty import MEMORY, MemoryState, Reflection, params
 from mika.faculties.memory.projections import ITEM_COLUMNS
 from mika.faculties.memory.salience import Item
+from mika.faculties.memory.tables import items
 from mika.kernel.clock import instant, local_date_of_night
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
@@ -96,7 +100,8 @@ def _disclosure(frame: Frame, store: Any, thought: int) -> tuple[tuple[c.Disclos
         if source in seen:
             continue
         seen.add(source)
-        rows = store.query_mind(f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE id=?", (source,))
+        t = items()
+        rows = store.query_mind(select(*(t.c[k] for k in ITEM_COLUMNS)).where(t.c.id == source))
         if rows:
             item = Item.of(dict(zip(ITEM_COLUMNS, rows[0], strict=True)))
             if item.constraints:
@@ -184,9 +189,10 @@ class Sort:
         day = date.fromisoformat(night)
         start = instant(datetime.combine(day, time(5), tzinfo=tz))
         end = instant(datetime.combine(day + timedelta(days=1), time(5), tzinfo=tz))
-        rows = store.query_mind(f"SELECT id, text, about, told_by, heard_by FROM {c.ITEMS_TABLE} WHERE kind=? AND "
-                                "status='active' AND born_at >= ? AND born_at < ? ORDER BY id DESC",
-                                (c.SOUVENIR, start, end))
+        t = items()
+        rows = store.query_mind(select(t.c.id, t.c.text, t.c.about, t.c.told_by, t.c.heard_by)
+                                .where(t.c.kind == c.SOUVENIR, t.c.status == "active", t.c.born_at >= start,
+                                       t.c.born_at < end).order_by(t.c.id.desc()))
         merged: set[int] = set()
         out: list[tuple[int, int]] = []
         for item_id, text, *people in rows:
@@ -195,8 +201,8 @@ class Sort:
             for hit, sim in await vectors.search(text, 4, kinds={c.SOUVENIR}):
                 if hit == item_id or hit in merged or sim < p.night_merge_similarity or hit > item_id:
                     continue
-                alive = store.query_mind(f"SELECT status, about, told_by, heard_by, text FROM {c.ITEMS_TABLE} WHERE id=?",
-                                         (hit,))
+                alive = store.query_mind(select(t.c.status, t.c.about, t.c.told_by, t.c.heard_by, t.c.text)
+                                         .where(t.c.id == hit))
                 # la fusion unit les personnes, confidents et témoins : « Bob m'a dit que son père est hospitalisé »
                 # fondu dans la confidence d'Alice la rendrait « ses propres mots » pour Bob, et l'oubli de Bob
                 # l'effacerait — seuls deux souvenirs des mêmes personnes, confiés et entendus par les mêmes, se fondent
@@ -211,14 +217,19 @@ class Sort:
 def joinable_pairs(store: Any, p: Any) -> tuple[tuple[int, int], ...]:
     """Les croyances notées deux fois parce que deux personnes les ont dites (d'avant les témoignages, ADR 0080) :
     les mêmes mots, sur les mêmes personnes, de même nature — un avis ou une hypothèse, du même porteur — et pas un
-    de ses mensonges. La plus ancienne garde ; chaque autre devient un de ses témoignages."""
-    rows = store.query_mind(
-        f"SELECT i.id, i.text, i.about, i.knowledge_kind, i.about_self > 0, i.holder, i.origin FROM {c.ITEMS_TABLE} i "
-        f"JOIN (SELECT fingerprint, about, knowledge_kind, about_self > 0 AS mine FROM {c.ITEMS_TABLE} "
-        "WHERE kind=? AND status='active' GROUP BY fingerprint, about, knowledge_kind, about_self > 0 "
-        "HAVING COUNT(*) > 1) g ON g.fingerprint = i.fingerprint AND g.about = i.about "
-        "AND g.knowledge_kind = i.knowledge_kind AND g.mine = (i.about_self > 0) "
-        "WHERE i.kind=? AND i.status='active' ORDER BY i.id", (c.BELIEF, c.BELIEF))
+    de ses mensonges. La plus ancienne garde ; chaque autre devient un de ses témoignages.
+
+    La base ne groupe que par l'empreinte (une clé) ; les listes des personnes et la nature, des textes longs que
+    MariaDB ne grouperait que par leur début (``max_sort_length``), se comparent ici en entier."""
+    t = items()
+    active = (t.c.kind == c.BELIEF, t.c.status == "active")
+    twice = select(t.c.fingerprint).where(*active).group_by(t.c.fingerprint).having(func.count() > 1)
+    found = [(int(i), text, about, nature, int(int(own) > 0), holder, origin, mark) for i, text, about, nature, own,
+             holder, origin, mark in store.query_mind(
+                 select(t.c.id, t.c.text, t.c.about, t.c.knowledge_kind, t.c.about_self, t.c.holder, t.c.origin,
+                        t.c.fingerprint).where(*active, t.c.fingerprint.in_(twice)).order_by(t.c.id))]
+    groups = Counter((mark, about, nature, mine) for _i, _t, about, nature, mine, _h, _o, mark in found)
+    rows = [r[:7] for r in found if groups[(r[7], r[2], r[3], r[4])] > 1]
     kept: list[tuple[int, str, str, str, int, str | None]] = []
     out: list[tuple[int, int]] = []
     for item, text, about, nature, mine, holder, origin in rows:

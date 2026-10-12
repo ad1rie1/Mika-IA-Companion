@@ -51,24 +51,21 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from sqlalchemy import func, select
+
 from mika.contracts import affect as affect_c
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
+from mika.faculties.memory import tables as tb
 from mika.faculties.memory.extraction import date_words, mention_scope, same_moment, scope_of, weekday_words
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, over, params
 from mika.faculties.memory.knowledge import Testimony, pooled
 from mika.faculties.memory.life import due_now, kept_too_early, takes_up_moment
 from mika.faculties.memory.likelihood import cautious, likely_words, nature_of
-from mika.faculties.memory.projections import (
-    CONTESTS_TABLE,
-    ITEM_COLUMNS,
-    TESTIMONIES_TABLE,
-    TESTIMONY_COLUMNS,
-    testimony_of,
-)
+from mika.faculties.memory.projections import ITEM_COLUMNS, testimony_columns, testimony_of
 from mika.faculties.memory.salience import (
     Item,
     Verdict,
@@ -85,11 +82,13 @@ from mika.faculties.memory.salience import (
     unsaid_public_line,
     valence_sign,
 )
+from mika.faculties.memory.tables import batches, handle_key
 from mika.faculties.memory.veiled import Candidate, Veiled, asks_news, choose
 from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.faculty import Zone
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.prompt import Fragment, SectionBody
+from mika.ports.sql import alias_of
 from mika.vocab import affect as A
 from mika.vocab import timespan
 from mika.vocab.days import when_fr, window_of
@@ -295,10 +294,16 @@ def addresses_her(text: str) -> bool:
     return bool(_TO_HER.search(fold(text)))
 
 
-def about_any(keys: Sequence[str]) -> str:
-    """La condition SQL « l'élément concerne l'une de ces clés » (``memory_about``, indexée par personne) ; les clés
-    vont en paramètres, dans l'ordre."""
-    return f"id IN (SELECT item FROM {c.ABOUT_TABLE} WHERE person IN ({','.join('?' * len(keys))}))"
+def about_any(keys: Sequence[str]) -> Any:
+    """La condition « l'élément concerne l'une de ces clés » (``memory_about``, indexée par personne)."""
+    ab = tb.about()
+    return tb.items().c.id.in_(select(ab.c.item).where(ab.c.person.in_(sorted({handle_key(k) for k in keys}))))
+
+
+def item_columns() -> list[Any]:
+    """Les colonnes de ``memory_items`` dans l'ordre de ``ITEM_COLUMNS`` (ce que lit ``Item.of``)."""
+    t = tb.items()
+    return [t.c[n] for n in ITEM_COLUMNS]
 
 
 def about_us(text: str) -> bool:
@@ -314,9 +319,11 @@ def between_us(frame: Frame, store: Any, person: str, aud: Audience, memo: dict[
     if not is_identifiable(person):
         return []
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
-    rows = store.query_mind(
-        f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE kind=? AND status='active' AND between_us=1 "
-        f"AND {about_any(handles)} ORDER BY importance DESC, id DESC LIMIT ?", (c.BELIEF, *handles, _BETWEEN_SHOWN))
+    t = tb.items()
+    rows = store.query_mind(select(*item_columns())
+                            .where(t.c.kind == c.BELIEF, t.c.status == "active", t.c.between_us == 1,
+                                   about_any(handles))
+                            .order_by(t.c.importance.desc(), t.c.id.desc()).limit(_BETWEEN_SHOWN))
     out = []
     for row in rows:
         item = Item.of(dict(zip(ITEM_COLUMNS, row, strict=True)))
@@ -344,8 +351,9 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
     # son prénom seul aussi : « salut Léa ! » s'adresse à elle, pas à une autre Léa qu'elle connaît
     her_first = her.split()[0] if " " in her else her
     tokens = set(said.split())
-    rows = store.query_mind(f"SELECT DISTINCT a.person FROM {c.ABOUT_TABLE} a JOIN {c.ITEMS_TABLE} i ON i.id = a.item "
-                            "WHERE i.status='active' AND i.kind IN (?, ?)", (c.SOUVENIR, c.BELIEF))
+    a, i = alias_of(tb.about(), "a"), alias_of(tb.items(), "i")
+    rows = store.query_mind(select(a.c.person).distinct().select_from(a.join(i, i.c.id == a.c.item))
+                            .where(i.c.status == "active", i.c.kind.in_((c.SOUVENIR, c.BELIEF))))
     raw = {str(k) for (k,) in rows if k}
     by_name: dict[str, set[str]] = {}
     keys_of: dict[str, set[str]] = {}
@@ -386,10 +394,10 @@ def about_named(frame: Frame, store: Any, named: Mapping[str, tuple[str, ...]], 
     for keys in named.values():
         if not keys:
             continue
-        rows = store.query_mind(
-            f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE kind IN (?, ?) AND status='active' "
-            f"AND {about_any(keys)} ORDER BY importance DESC, id DESC LIMIT ?",
-            (c.SOUVENIR, c.BELIEF, *keys, _THEIR_LIFE_POOL))
+        t = tb.items()
+        rows = store.query_mind(select(*item_columns())
+                                .where(t.c.kind.in_((c.SOUVENIR, c.BELIEF)), t.c.status == "active", about_any(keys))
+                                .order_by(t.c.importance.desc(), t.c.id.desc()).limit(_THEIR_LIFE_POOL))
         items = [Item.of(dict(zip(ITEM_COLUMNS, r, strict=True))) for r in rows]
         items.sort(key=lambda it: (-it.importance * min(1.0, salience(it, frame.now, p)), -it.id))
         out += items[: max(1, p.max_person_items)]
@@ -408,7 +416,8 @@ def query_of(frame: Frame, store: Any) -> str:
         return ""
     reply_to = ep.attrs.get("reply_to")
     if reply_to is not None:
-        rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE id=?", (reply_to,))
+        thread = transcript_c.thread_table()
+        rows = store.query_mind(select(thread.c.text).where(thread.c.id == reply_to))
         if rows:
             return str(rows[0][0])
     args = ep.attrs.get("args") or {}
@@ -425,13 +434,10 @@ def context_of(frame: Frame, store: Any, n: int) -> str:
         return ""
     since = frame.now - CONTEXT_SPAN_US
     room = ep.attrs.get("room")
-    if room:
-        rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE room=? AND role='user' AND id<? "
-                                "AND at>=? ORDER BY id DESC LIMIT ?", (room, reply_to, since, n - 1))
-    else:
-        rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE person=? AND room IS NULL AND "
-                                "role='user' AND id<? AND at>=? ORDER BY id DESC LIMIT ?",
-                                (ep.target, reply_to, since, n - 1))
+    t = transcript_c.thread_table()
+    where = (t.c.room == handle_key(room),) if room else (t.c.person == handle_key(ep.target), t.c.room.is_(None))
+    rows = store.query_mind(select(t.c.text).where(*where, t.c.role == "user", t.c.id < reply_to, t.c.at >= since)
+                            .order_by(t.c.id.desc()).limit(n - 1))
     return " ".join(str(r[0]) for r in reversed(rows))
 
 
@@ -500,9 +506,10 @@ def news(frame: Frame, store: Any, person: str, aud: Audience, p: MemoryParams, 
     """On lui demande des nouvelles : ce qu'elle a appris de récent sur d'autres et qui ne se dit pas nommé ici, le
     plus important d'abord — de quoi raconter sans nommer personne (ADR 0091)."""
     since = frame.now - round(p.veiled_fresh_days * DAY)
+    t = tb.items()
     ids = [int(i) for (i,) in store.query_mind(
-        f"SELECT id FROM {c.ITEMS_TABLE} WHERE status='active' AND veiled != '' AND kind IN (?, ?) AND born_at >= ? "
-        "ORDER BY importance DESC, id DESC LIMIT 30", (c.SOUVENIR, c.BELIEF, since))]
+        select(t.c.id).where(t.c.status == "active", t.c.veiled != "", t.c.kind.in_((c.SOUVENIR, c.BELIEF)),
+                             t.c.born_at >= since).order_by(t.c.importance.desc(), t.c.id.desc()).limit(30))]
     found = items_by_id(store, ids)
     return [candidate_of(frame, found[i], person, memo, store) for i in ids
             if i in found and not verdict_of(frame, found[i], person, aud, memo, store).ok]
@@ -514,25 +521,27 @@ VEILED_POOL = 500
 
 def veiled_pool(store: Any) -> tuple[int, ...]:
     """Les souvenirs et croyances qui ont une version sans nom (ADR 0091), les plus récents d'abord."""
+    t = tb.items()
     return tuple(int(i) for (i,) in store.query_mind(
-        f"SELECT id FROM {c.ITEMS_TABLE} WHERE status='active' AND veiled != '' AND kind IN (?, ?) "
-        "ORDER BY id DESC LIMIT ?", (c.SOUVENIR, c.BELIEF, VEILED_POOL)))
+        select(t.c.id).where(t.c.status == "active", t.c.veiled != "", t.c.kind.in_((c.SOUVENIR, c.BELIEF)))
+        .order_by(t.c.id.desc()).limit(VEILED_POOL)))
 
 
 def items_by_id(store: Any, ids: list[int]) -> dict[int, Item]:
     if not ids:
         return {}
-    marks = ",".join("?" * len(ids))
-    rows = store.query_mind(f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE id IN ({marks})",
-                            tuple(ids))
-    found = {int(r[0]): Item.of(dict(zip(ITEM_COLUMNS, r, strict=True))) for r in rows}
-    beliefs = [i for i, it in found.items() if it.kind == c.BELIEF]
+    t, tt = tb.items(), tb.testimonies()
+    found: dict[int, Item] = {}
+    for chunk in batches(sorted(set(ids))):
+        rows = store.query_mind(select(*item_columns()).where(t.c.id.in_(chunk)))
+        found.update({int(r[0]): Item.of(dict(zip(ITEM_COLUMNS, r, strict=True))) for r in rows})
+    beliefs = sorted(i for i, it in found.items() if it.kind == c.BELIEF)
     if beliefs:
         said: dict[int, list[Testimony]] = {}
-        marks = ",".join("?" * len(beliefs))
-        for r in store.query_mind(f"SELECT {','.join(TESTIMONY_COLUMNS)} FROM {TESTIMONIES_TABLE} "
-                                  f"WHERE item IN ({marks}) ORDER BY seq", tuple(beliefs)):
-            said.setdefault(int(r[0]), []).append(testimony_of(r))
+        for chunk in batches(beliefs):
+            for r in store.query_mind(select(*testimony_columns()).where(tt.c.item.in_(chunk))
+                                      .order_by(tt.c.item, tt.c.seq)):
+                said.setdefault(int(r[0]), []).append(testimony_of(r))
         found.update({i: replace(found[i], testimonies=tuple(ts)) for i, ts in said.items()})
     return found
 
@@ -617,8 +626,9 @@ def contested_line(frame: Frame, item: Item, person: str | None, aud: Audience, 
     chose » — seulement quand l'autre version peut se dire ici aussi (sinon le doute la laisserait deviner)."""
     if item.kind != c.BELIEF or store is None:
         return ""
-    others = [int(o) for (o,) in store.query_mind(f"SELECT other FROM {CONTESTS_TABLE} WHERE item=? ORDER BY other",
-                                                  (item.id,))]
+    ct = tb.contests()
+    others = [int(o) for (o,) in store.query_mind(select(ct.c.other).where(ct.c.item == item.id)
+                                                  .order_by(ct.c.other))]
     for other in items_by_id(store, others).values():
         if other.status != "active":
             continue
@@ -999,10 +1009,11 @@ def _their_life(out: Recall, frame: Frame, store: Any, person: str, aud: Audienc
         return
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
     since = frame.now - round(p.person_recall_days * DAY)
-    rows = store.query_mind(
-        f"SELECT {','.join(ITEM_COLUMNS)} FROM {c.ITEMS_TABLE} WHERE kind IN (?, ?) AND status='active' "
-        f"AND born_at>=? AND {about_any(handles)} ORDER BY importance DESC, id DESC LIMIT ?",
-        (c.SOUVENIR, c.BELIEF, since, *handles, _THEIR_LIFE_POOL))
+    t = tb.items()
+    rows = store.query_mind(select(*item_columns())
+                            .where(t.c.kind.in_((c.SOUVENIR, c.BELIEF)), t.c.status == "active", t.c.born_at >= since,
+                                   about_any(handles))
+                            .order_by(t.c.importance.desc(), t.c.id.desc()).limit(_THEIR_LIFE_POOL))
     picked: list[tuple[float, Item, Verdict]] = []
     for row in rows:
         item = Item.of(dict(zip(ITEM_COLUMNS, row, strict=True)))
@@ -1028,9 +1039,10 @@ async def _self_said(vectors: Any, store: Any, query: str, p: MemoryParams) -> l
     on lui demande son plat préféré, la réponse d'il y a trois semaines est là, même sans un mot commun."""
     if p.max_self_said <= 0:
         return []
+    t = tb.items()
     ids = [int(r[0]) for r in store.query_mind(
-        f"SELECT id FROM {c.ITEMS_TABLE} WHERE kind=? AND about_self>=2 AND status='active' ORDER BY id DESC LIMIT 200",
-        (c.BELIEF,))]
+        select(t.c.id).where(t.c.kind == c.BELIEF, t.c.about_self >= 2, t.c.status == "active")
+        .order_by(t.c.id.desc()).limit(200))]
     if not ids:
         return []
     order = ids
@@ -1043,7 +1055,7 @@ async def _self_said(vectors: Any, store: Any, query: str, p: MemoryParams) -> l
 
 #: deux échanges dont ce qu'on lui a dit porte à ce point les mêmes mots du sujet sont le même échange
 SAME_EXCHANGE = 0.8
-_EXCHANGE_COLUMNS = "id, at, user_text, reply_text, person, question"
+_EXCHANGE_COLUMNS = ("id", "at", "user_text", "reply_text", "person", "question")
 
 
 def contentless(text: str, names: Sequence[str] = ()) -> bool:
@@ -1081,12 +1093,14 @@ async def _exchanges_for(frame: Frame, store: Any, vectors: Any, query: str, con
         return []
     room = ep.attrs.get("room") or aud.room
     before = ep.attrs.get("reply_to") or frame.now
+    t = c.chunks_table()
+    columns = [t.c[n] for n in _EXCHANGE_COLUMNS]
     # ce qui est encore à l'écran (sans fil connu) ne se répète pas (le fil exact se vérifie à la composition)
     shown_after = frame.now - RECENT_EXCHANGE_US
     if room:
         # dans un salon : seulement ce qui s'y est dit (public pour ce salon)
-        scope, args = "room=?", (room,)
-        ids = [int(r[0]) for r in store.query_mind(f"SELECT id FROM {c.CHUNKS_TABLE} WHERE room=?", (room,))]
+        scope: tuple[Any, ...] = (t.c.room == handle_key(room),)
+        ids = [int(r[0]) for r in store.query_mind(select(t.c.id).where(*scope).order_by(t.c.id))]
         if not ids:
             return []
         among: dict[str, Any] = {"keys": ids}
@@ -1095,7 +1109,7 @@ async def _exchanges_for(frame: Frame, store: Any, vectors: Any, query: str, con
         # (une liaison par simple recoupement, pas encore confirmée : ses seuls échanges)
         handles = tuple(frame.get(identity_c.THREAD(ep.target))) if aud.private_ok else ()
         handles = tuple(sorted({ep.target, *handles}))
-        scope, args = f"room IS NULL AND person IN ({','.join('?' * len(handles))})", handles
+        scope = (t.c.room.is_(None), t.c.person.in_(sorted({handle_key(h) for h in handles})))
         among = {"kinds": {c.CHUNK}, "persons": handles}
     speakers: dict[str, str] = {}
 
@@ -1113,10 +1127,11 @@ async def _exchanges_for(frame: Frame, store: Any, vectors: Any, query: str, con
     dated: list[Exchange] = []
     window = window_of(query, frame.now, frame.env.tz_of(frame.root)) if ep.attrs.get("reply_to") else None
     if window is not None:
+        # la longueur en caractères (``char_length`` : ``length`` compte des octets sous MariaDB)
         dated = distinct(exchanges(store.query_mind(
-            f"SELECT {_EXCHANGE_COLUMNS} FROM {c.CHUNKS_TABLE} WHERE {scope} AND at >= ? AND at < ? AND at < ? "
-            "AND id < ? ORDER BY length(user_text) DESC, id LIMIT ?",
-            (*args, window[0], window[1], shown_after, before, p.max_chunks * 4))))[: p.max_chunks]
+            select(*columns).where(*scope, t.c.at >= window[0], t.c.at < window[1], t.c.at < shown_after,
+                                   t.c.id < before)
+            .order_by(func.char_length(t.c.user_text).desc(), t.c.id).limit(p.max_chunks * 4))))[: p.max_chunks]
         dated = [replace(e, dated=True) for e in dated]
     if vectors is None:
         return dated  # une question faite des mots d'une politesse : seulement le moment qu'elle désigne
@@ -1124,9 +1139,7 @@ async def _exchanges_for(frame: Frame, store: Any, vectors: Any, query: str, con
     if not near and not wider:
         return dated
     hits = tuple(sorted({*near, *wider}))
-    found = exchanges(store.query_mind(
-        f"SELECT {_EXCHANGE_COLUMNS} FROM {c.CHUNKS_TABLE} WHERE id IN ({','.join('?' * len(hits))}) AND {scope}",
-        (*hits, *args)))
+    found = exchanges(store.query_mind(select(*columns).where(t.c.id.in_(hits), *scope).order_by(t.c.id)))
     ok = {e.id for e in found}
     sims = kept(scored({k: v for k, v in near.items() if k in ok}, {k: v for k, v in wider.items() if k in ok},
                        {e.id: f"{e.user_text}\n{e.reply_text}" for e in found}, query, context), p)
@@ -1147,9 +1160,11 @@ def _already_mentioned(moments: list[Moment], frame: Frame, store: Any, handle: 
     pas »)."""
     if store is None or not any(not m.event.ongoing and m.event.when > frame.now for m in moments):
         return moments
-    rows = store.query_mind(f"SELECT text FROM {transcript_c.THREAD_TABLE} WHERE person=? AND room IS NULL AND "
-                           "role='assistant' AND at>=? ORDER BY id DESC LIMIT 12",
-                           (handle, frame.now - MENTIONED_SPAN_US))
+    thread = transcript_c.thread_table()
+    rows = store.query_mind(select(thread.c.text)
+                            .where(thread.c.person == handle_key(handle), thread.c.room.is_(None),
+                                   thread.c.role == "assistant", thread.c.at >= frame.now - MENTIONED_SPAN_US)
+                            .order_by(thread.c.id.desc()).limit(12))
     said = [str(r[0] or "") for r in rows]
     names = (frame.get(identity_c.IDENTITY(handle)).name, self_c.name_of(frame.get(self_c.PERSONA)))
     return [replace(m, mentioned=True) if not m.event.ongoing and m.event.when > frame.now and any(

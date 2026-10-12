@@ -41,6 +41,8 @@ from collections.abc import Iterable
 from datetime import datetime, time
 from typing import Any
 
+from sqlalchemy import select
+
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as c
 from mika.contracts import presence as presence_c
@@ -204,8 +206,10 @@ class Follow:
             self.upto = head
             return
         since = min(opens[e.id] for e in moments)
-        rows = store.query_mind(f"SELECT id, at, person, text FROM {transcript_c.THREAD_TABLE} WHERE role='assistant' "
-                                "AND id>? AND id<=? AND at>=? ORDER BY id", (self.upto, head, since))
+        t = transcript_c.thread_table()
+        rows = store.query_mind(select(t.c.id, t.c.at, t.c.person, t.c.text)
+                                .where(t.c.role == "assistant", t.c.id > self.upto, t.c.id <= head, t.c.at >= since)
+                                .order_by(t.c.id))
         texts = store.content([e.text_ref for e in moments if e.text_ref])
         drafts: list[Draft[Any]] = []
         done: set[int] = set()

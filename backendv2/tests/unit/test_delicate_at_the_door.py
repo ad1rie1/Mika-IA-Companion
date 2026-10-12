@@ -50,7 +50,7 @@ def run(tmp_path, scenario):
 
 def door(kernel) -> dict[str, int]:
     """Ce que les autres facultés lisent : la sensibilité de chaque élément, par son texte."""
-    rows = kernel.mind.store.query_mind(f"{memory_c.SELECT_KNOWN} WHERE kind=?", (memory_c.BELIEF,))
+    rows = kernel.mind.store.query_mind(memory_c.select_known().where(memory_c.KNOWLEDGE.c.kind == memory_c.BELIEF))
     return {k.text: k.sensitivity for k in knowns(rows, memory_c.KNOWN_COLUMNS)}
 
 

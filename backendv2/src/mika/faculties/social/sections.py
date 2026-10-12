@@ -157,12 +157,11 @@ def between_us(store: Any, frame: Frame, person: str) -> tuple[tuple[int, str], 
     ne concerne qu'elles deux (« Sam et Léa m'appellent Mimi » n'est pas à Sam seul), et ce que le verdict de la
     mémoire laisse dire ici (audit du 2026-10-09)."""
     handles = sorted({person, *frame.get(identity_c.HANDLES(person))})
-    marks = ",".join("?" * len(handles))
+    v = memory_c.KNOWLEDGE
     rows = knowns(store.query_mind(
-        f"{memory_c.SELECT_KNOWN} WHERE kind=? AND status='active' AND between_us=1 AND id IN "
-        f"(SELECT item FROM {memory_c.KNOWLEDGE_ABOUT_VIEW} WHERE person IN ({marks})) "
-        "ORDER BY importance DESC, id DESC LIMIT ?", (memory_c.BELIEF, *handles, BETWEEN_SHOWN * 2)),
-        memory_c.KNOWN_COLUMNS)
+        memory_c.select_known().where(v.c.kind == memory_c.BELIEF, v.c.status == "active", v.c.between_us == 1,
+                                      memory_c.concerning(v, handles))
+        .order_by(v.c.importance.desc(), v.c.id.desc()).limit(BETWEEN_SHOWN * 2)), memory_c.KNOWN_COLUMNS)
     aud = frame.audience
     resolve, presumed = identity_c.resolvers(frame.get)
     out = []
