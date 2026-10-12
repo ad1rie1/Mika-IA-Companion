@@ -15,6 +15,7 @@ from types import SimpleNamespace as NS
 from zoneinfo import ZoneInfo
 
 import pytest
+from sqlalchemy import select
 
 from mika.contracts import memory as mc
 from mika.contracts import social as social_c
@@ -44,11 +45,13 @@ from mika.faculties.memory.faculty import (
 from mika.faculties.memory.recall import Moment, Recall, _ahead_moments, _moment_line, _moments
 from mika.faculties.memory.recall import _ahead as ahead_section
 from mika.faculties.memory.reread import expired
+from mika.faculties.memory.tables import life
 from mika.faculties.others.faculty import OthersParams, _cheer_window
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience
 from mika.kernel.state import FrozenDict
+from mika.ports.sql import json_field
 from mika.sim.clock import run_virtual
 from mika.vocab import causes
 from mika.vocab.affect import Emotion
@@ -142,7 +145,7 @@ async def test_no_news_expires_unknown_without_surprise_or_learning():
     db.put(mc.RESOLVED.draft(**r.model_dump()), 9, NOW)
     assert expired(Frame(), db, P) == []  # tranché une fois pour toutes
     db.put(mc.RESOLVED.draft(**{**r.model_dump(), "outcome": mc.HAPPENED}), 10, NOW)
-    (row,) = db.query_mind(f"SELECT json_extract(payload,'$.outcome') FROM {mc.LIFE_TABLE} WHERE id=5")
+    (row,) = db.query_mind(select(json_field(life().c.payload, "outcome")).where(life().c.id == 5))
     assert row[0] == mc.UNKNOWN  # une issue ne se retranche pas
     db.conn.close()
 
@@ -495,7 +498,7 @@ def test_an_outcome_under_a_number_replaced_the_same_day_lands_on_the_moment_wit
                 emitter="memory", correlation="relecture", origin=Origin.GENESIS)
             now = commit.seqs[0]
             rows = kernel.mind.store.query_mind(
-                f"SELECT id, json_extract(payload,'$.outcome') FROM {mc.LIFE_TABLE} ORDER BY id")
+                select(life().c.id, json_field(life().c.payload, "outcome")).order_by(life().c.id))
             return now, kernel.mind.frame().state("memory").events[now].outcome, rows
         finally:
             await kernel.stop()

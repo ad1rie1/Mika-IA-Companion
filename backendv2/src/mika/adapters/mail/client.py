@@ -35,6 +35,7 @@ from email.parser import BytesParser
 from pathlib import Path
 from typing import Any
 
+from mika.adapters.database import Target
 from mika.adapters.mail import compose
 from mika.adapters.mail.cache import MailCache
 from mika.adapters.mail.config import MailAccount, MailConfig
@@ -66,7 +67,7 @@ def _local_tz() -> tzinfo:
 
 
 class ImapSmtpMail:
-    def __init__(self, config: Callable[[], MailConfig], cache: Path, *,
+    def __init__(self, config: Callable[[], MailConfig], cache: Path | Target, *,
                  now: Callable[[], datetime] = lambda: datetime.now(UTC), tz: tzinfo | None = None,
                  timeout: float = 30.0, her: Callable[[], str] | None = None) -> None:
         self._config = config

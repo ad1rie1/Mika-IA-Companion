@@ -342,10 +342,10 @@ def test_her_names_for_external_tools_are_what_providers_accept():
 
 
 async def test_settings_seal_the_token_and_reviews_survive(tmp_path):
-    from mika.adapters.store_sqlite import SqliteStore
+    from mika.adapters.store_sql import SqlStore
     from mika.app.settings import SecretBox, Settings
 
-    store = SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+    store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
     await store.open()
     settings = Settings(store, SecretBox.for_data(tmp_path))
     await settings.open()

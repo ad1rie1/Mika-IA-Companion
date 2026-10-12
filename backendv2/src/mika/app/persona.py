@@ -20,7 +20,8 @@ import yaml
 from pydantic import ValidationError
 from sqlalchemy import select
 
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
+from mika.app import schema
 from mika.app.paths import ROOT
 from mika.app.settings import NO_TABLE, SettingRow
 from mika.contracts import self_ as self_c
@@ -121,9 +122,10 @@ def _node_at(tree: Any, loc: Sequence[Any]) -> Any:
 
 async def _kept(data: Path) -> tuple[bool, bool]:
     """(une persona valide rédigée dans la console, une persona gardée au journal)."""
-    if not (data / "mind.db").exists():
+    bases = schema.targets(data)
+    if bases["mind"].is_sqlite and not (data / "mind.db").exists():
         return False, False
-    store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
+    store = SqlStore(bases["mind"], bases["views"], threaded=False)
     await store.open()
     try:
         journaled = bool(store.latest([self_c.PERSONA_REVISED.name], 1))

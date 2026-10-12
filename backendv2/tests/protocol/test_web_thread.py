@@ -120,6 +120,7 @@ def test_a_cursor_on_an_empty_thread_resets_it(world):
         assert frame["mode"] == "initial" and frame["reset"] is True and frame["messages"] == []
 
 
+@pytest.mark.sqlite_only  # sous MariaDB, c'est le préfixe des bases, pas le dossier, qui distingue deux vies
 def test_her_life_has_one_fingerprint_and_another_folder_another(world, tmp_path):
     """L'empreinte suit la vie (le journal depuis sa genèse) : la même d'une connexion à l'autre et après un
     redémarrage sur le même dossier ; une autre pour un autre dossier de données (``--data``)."""
@@ -181,6 +182,7 @@ def test_a_message_from_an_older_journal_keeps_its_display(world):
     assert shown["text"] == body and shown["attachments"] == []
 
 
+@pytest.mark.sqlite_only  # la table d'une version d'avant, écrite à la main dans le fichier
 def test_the_thread_of_a_former_version_is_rebuilt_from_her_journal(tmp_path):
     """Une installation dont la table du fil est d'avant (version 1, sans la part tapée) : au démarrage, elle se
     reconstruit depuis le journal, et ce qui a été tapé s'y retrouve (la perception le portait)."""

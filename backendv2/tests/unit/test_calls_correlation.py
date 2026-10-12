@@ -6,14 +6,14 @@ from __future__ import annotations
 
 from mika.adapters.llm.calls import CallLog
 from mika.adapters.llm.gateway import Gateway, LLMTrace
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.kernel.clock import ManualClock
 from mika.ports.llm import LLMRequest, LLMResponse, Usage
 from mika.sim.llm.scripted import ScriptedLLM
 
 
-def store_at(tmp_path) -> SqliteStore:
-    return SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+def store_at(tmp_path) -> SqlStore:
+    return SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
 
 
 async def test_a_restarted_log_finds_an_episodes_calls(tmp_path):

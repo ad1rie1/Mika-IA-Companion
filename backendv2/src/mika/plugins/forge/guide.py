@@ -1,13 +1,15 @@
 """Le mode d'emploi de la Forge, pour Mika (``forge_help``).
 
 Du texte seulement : ce qu'un manifeste déclare, comment une vue, une action
-et des réglages s'écrivent, le vocabulaire des blocs d'une vue, et un exemple
+et des réglages s'écrivent, le vocabulaire des blocs d'une vue, sa base, et un exemple
 complet — **valide** (un test l'exécute et décode sa vue).
 """
 
 from __future__ import annotations
 
-TOPICS = ("manifeste", "vues", "actions", "reglages", "blocs", "exemple")
+from mika.vocab.phrasebook import phrase
+
+TOPICS = ("manifeste", "vues", "actions", "reglages", "blocs", "base", "exemple")
 
 MANIFESTE = """\
 Une app = un manifeste (manifest.yaml) + du code (main.py), écrits ensemble par forge_write.
@@ -25,7 +27,9 @@ Le manifeste (YAML) :
 Le code (main.py, bibliothèque standard seulement, sans réseau ni processus) :
 - tick(api), context(api), on_event(api, événement), tool_<nom>(api, args) ;
 - view_<vue>(api, params) pour chaque vue déclarée, action_<vue>_<action>(api, data) pour chaque action ;
-- api.kv_get(clé, défaut) / api.kv_set / api.kv_delete / api.kv_keys(préfixe) : ton stockage (16 Ko par valeur) ;
+- api.query(sql, params) / api.execute(sql, params) : ta base SQL à toi (voir forge_help base) ;
+- api.kv_get(clé, défaut) / api.kv_set / api.kv_delete / api.kv_keys(préfixe) : un stockage simple, dans ta base
+  (16 Ko par valeur, 1 000 clés) ;
 - api.config(clé, défaut) : un réglage (celui de l'opérateur, sinon le défaut du manifeste) ;
 - api.log(…) ou print(…) : ton journal ; api.signal(résumé, pertinence, émotion) : attirer ton attention
   (espacé) ; api.emit(type, données) ; api.http_get(url) vers tes domaines déclarés.
@@ -152,6 +156,9 @@ Cellules : un texte, un nombre, vrai/faux, null, ou un objet {"kind": …} :
 Un instant (at, points d'une courbe) est en microsecondes depuis 1970 : int(time.time() * 1_000_000).
 """
 
+BASE = phrase("forge.guide.base")  # le texte vit dans sa voix (ADR 0071)
+
+
 EXAMPLE_MANIFEST = """\
 title: Carnet météo
 description: Des relevés de température par ville, notés par l'opérateur, avec leur courbe.
@@ -264,7 +271,7 @@ manifest.yaml :
 main.py :
 {EXAMPLE_CODE}"""
 
-_TEXTS = {"manifeste": MANIFESTE, "vues": VUES, "actions": ACTIONS, "reglages": REGLAGES, "blocs": BLOCS,
+_TEXTS = {"manifeste": MANIFESTE, "vues": VUES, "actions": ACTIONS, "reglages": REGLAGES, "blocs": BLOCS, "base": BASE,
           "exemple": EXEMPLE}
 
 

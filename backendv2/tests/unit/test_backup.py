@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from mika.adapters.llm.config import BackendSpec, LLMConfig
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.app import backup, datadir
 from mika.app.cli import main, replay_verify
 from mika.app.settings import SecretBox, Settings
@@ -30,6 +30,9 @@ from mika.contracts import memory as memory_c
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
 from tests.fixtures.mika import AFTERNOON, boot, build, connect, said
+
+#: la sauvegarde archive les fichiers SQLite du dossier ; sous MariaDB, elle refuse (ADR 0101, lot 5)
+pytestmark = pytest.mark.sqlite_only
 
 WEEK = [
     "Mardi j'ai un entretien d'embauche chez Ubisoft, je stresse un peu",
@@ -73,7 +76,7 @@ def settle(data: Path) -> None:
     """Ce qui vit hors du journal : un secret chiffré, un atelier, une app."""
 
     async def run() -> None:
-        store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
+        store = SqlStore(data / "mind.db", data / "views.db", threaded=False)
         await store.open()
         settings = Settings(store, SecretBox.for_data(data))
         await settings.open()
@@ -90,7 +93,7 @@ def settle(data: Path) -> None:
 
 def secret_of(data: Path) -> str:
     async def run() -> str:
-        store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
+        store = SqlStore(data / "mind.db", data / "views.db", threaded=False)
         await store.open()
         settings = Settings(store, SecretBox.for_data(data))
         key = settings.llm().backends["claude"].api_key

@@ -18,7 +18,7 @@ from typing import Any
 from mika.adapters.forge import ForgeHost
 from mika.adapters.llm.gateway import Gateway
 from mika.adapters.shares import MemoryShares
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.adapters.workshop import BwrapWorkshop
 from mika.contracts import presence as presence_c
@@ -34,6 +34,15 @@ from mika.sim.outside import FakeFeeds, FakeMail
 from mika.vocab import privacy
 from mika.vocab.episodes import FALLBACKS
 from mika.vocab.people import EXTERNAL_PREFIX
+
+
+def _files(root: Path) -> tuple[Any, Any]:
+    return root / "mind.db", root / "views.db"
+
+
+#: où un monde range son magasin (``mind``, ``views``) : deux fichiers de son dossier ; la voie MariaDB des tests le
+#: remplace (des bases jetables d'un serveur, ADR 0101)
+STORES: Callable[[Path], tuple[Any, Any]] = _files
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,7 +146,7 @@ class Driver:
                           voice_roles=self.composition.voice_roles, slots={self.llm.name: self.slots},
                           preempt=frozenset({self.llm.name}) if self.slots == 1 else frozenset(),
                           fallbacks={str(k): str(v) for k, v in FALLBACKS.items()})
-        store = SqliteStore(self.root / "mind.db", self.root / "views.db", threaded=False)
+        store = SqlStore(*STORES(self.root), threaded=False)
         ports = {"delivery": self.transport, "vectors": SqliteVectorIndex(store, self.embedder or HashEmbedder()),
                  "workshop": BwrapWorkshop(self.root / "ateliers"), "mail": self.mail, "feeds": self.feeds,
                  "forge": ForgeHost(self.root / "forge"), "shares": self.shares}

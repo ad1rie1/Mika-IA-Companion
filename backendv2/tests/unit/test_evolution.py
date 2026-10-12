@@ -104,13 +104,14 @@ async def test_boot_rebuilds_stale_slice_from_snapshot(tmp_path):
         await mind.append([BUMPED.draft(by=1)], emitter="counter", correlation="t")
     await mind.close()
 
-    from mika.adapters.store_sqlite import SqliteStore
+    from mika.adapters.store_sql import SqlStore
     from mika.kernel.clock import ManualClock
     from mika.kernel.ids import SeededIdGen
     from mika.runtime.mind import Mind
     from tests.conftest import START
+    from tests.fixtures import backend
 
-    store = SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+    store = SqlStore(*backend.store_targets(tmp_path), threaded=False)
     mind2 = Mind(Registry([counter_v2(), ECHO]), store, ManualClock(START), SeededIdGen(0), snapshot_every=100)
     report = await mind2.boot(append_boot=False)
     assert report.stale == ("counter",)

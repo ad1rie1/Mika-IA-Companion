@@ -1,8 +1,8 @@
 """schema initial (ADR 0101)
 
-Revision ID: ed1f516693b3
+Revision ID: a5d9d6a6af54
 Revises:
-Create Date: 2026-10-12 12:35:23.069534
+Create Date: 2026-10-12 17:45:54.916060
 """
 
 from collections.abc import Sequence
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import mysql
 
-revision: str = 'ed1f516693b3'
+revision: str = 'a5d9d6a6af54'
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -33,6 +33,19 @@ def upgrade() -> None:
     )
     with op.batch_alter_table('episode_traces', schema=None) as batch_op:
         batch_op.create_index('episode_traces_at', ['at'], unique=False)
+
+    op.create_table('forge_logs',
+    sa.Column('id', sa.BigInteger().with_variant(sa.Integer(), 'sqlite'), autoincrement=True, nullable=False),
+    sa.Column('app', sa.String(length=31), nullable=False),
+    sa.Column('at', sa.Double(), nullable=False),
+    sa.Column('line', sa.Text().with_variant(mysql.LONGTEXT(), 'mariadb').with_variant(mysql.LONGTEXT(), 'mysql'), nullable=False),
+    sa.PrimaryKeyConstraint('id', name=op.f('pk_forge_logs')),
+    mariadb_charset='utf8mb4',
+    mariadb_collate='utf8mb4_nopad_bin',
+    mariadb_engine='InnoDB'
+    )
+    with op.batch_alter_table('forge_logs', schema=None) as batch_op:
+        batch_op.create_index('forge_logs_app', ['app', 'id'], unique=False)
 
     op.create_table('llm_calls',
     sa.Column('id', sa.BigInteger().with_variant(sa.Integer(), 'sqlite'), nullable=False),
@@ -134,6 +147,10 @@ def downgrade() -> None:
         batch_op.drop_index('llm_calls_at')
 
     op.drop_table('llm_calls')
+    with op.batch_alter_table('forge_logs', schema=None) as batch_op:
+        batch_op.drop_index('forge_logs_app')
+
+    op.drop_table('forge_logs')
     with op.batch_alter_table('episode_traces', schema=None) as batch_op:
         batch_op.drop_index('episode_traces_at')
 

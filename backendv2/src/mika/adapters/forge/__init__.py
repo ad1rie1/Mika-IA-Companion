@@ -15,6 +15,12 @@ fonctions attendues, taille) est une politesse, pas la défense.
 Le processus d'une app reste chaud entre deux appels ; une nouvelle version
 le remplace ; il est relancé s'il meurt.
 
+**Sa base** (``bases.py``, ADR 0101) : une base SQL à elle, créée à sa
+première écriture, que l'hôte interroge pour elle (``api.query``,
+``api.execute``) sous un utilisateur qui n'a de droits que sur elle ; son
+stockage clé/valeur en est une table. Une nouvelle version la garde ; vider
+la vide ; effacer l'exporte dans la corbeille, puis la supprime.
+
 **Seules les fonctions déclarées s'appellent** : les fixes (``tick``,
 ``context``, ``view``, ``action``, ``on_event``) quand elles existent, et
 celles que le manifeste déclare (``view_<vue>``, ``action_<vue>_<action>``,
@@ -25,9 +31,11 @@ celles que le manifeste déclare (``view_<vue>``, ``action_<vue>_<action>``,
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import ipaddress
 import json
+import logging
 import os
 import re
 import resource
@@ -35,7 +43,6 @@ import select
 import shutil
 import signal
 import socket
-import sqlite3
 import subprocess
 import threading
 import time
@@ -46,7 +53,9 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 
+from mika.adapters.forge.bases import ForgeBases, SqlRefused
 from mika.adapters.forge.manifest import HANDLERS, coherence, lint, read_manifest, signatures
 from mika.ports.forge import (
     AppInfo,
@@ -59,15 +68,17 @@ from mika.ports.forge import (
     view_specs,
 )
 
-__all__ = ["ForgeHost", "Limits", "fingerprint", "lint", "read_manifest", "real_http_get"]
+__all__ = ["ForgeBases", "ForgeHost", "Limits", "fingerprint", "lint", "read_manifest", "real_http_get"]
+
+log = logging.getLogger("mika.forge")
 
 WORKER = Path(__file__).with_name("worker.py")
 NAME = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
 MAX_LINE = 1_000_000
 MAX_RESULT = 64_000
 MAX_LOGS = 500
-KV_MAX_KEYS = 1000
-KV_MAX_VALUE = 16_000
+#: ce qu'une requête de Mika (ses outils, la console) a pour s'exécuter
+DB_TIMEOUT_S = 5.0
 HTTP_MAX = 1_000_000
 #: les vues rendues gardées un instant (même app, version, fonction, paramètres, réglages)
 CACHE_MAX = 64
@@ -196,6 +207,12 @@ def real_http_get(url: str, deadline: float | None = None) -> str:
         return b"".join(chunks).decode("utf-8", "replace")
 
 
+def _said(exc: BaseException) -> str:
+    """Ce qu'une erreur de base dit, sans la requête que SQLAlchemy y ajoute."""
+    text = str(getattr(exc, "orig", None) or exc).strip()
+    return text.splitlines()[0][:300] if text else type(exc).__name__
+
+
 def fingerprint(manifest: str, code: str) -> str:
     """L'empreinte d'une version : son manifeste et son code, rien d'autre."""
     return hashlib.sha256(manifest.encode() + b"\x00" + code.encode()).hexdigest()[:16]
@@ -205,7 +222,7 @@ class ForgeHost:
     def __init__(self, root: Path, *, limits: Limits = Limits(), bwrap: str | None = None,
                  http_get: Callable[[str], str] | None = None, public: Callable[[str], bool] | None = None,
                  config: Callable[[str], Mapping[str, Any]] | None = None,
-                 which: Callable[[str], str | None] = shutil.which) -> None:
+                 which: Callable[[str], str | None] = shutil.which, bases: ForgeBases | None = None) -> None:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
         self.limits = limits
@@ -216,11 +233,8 @@ class ForgeHost:
         self._config = config
         self._workers: dict[str, _Worker] = {}
         self._locks: dict[str, threading.Lock] = {}
-        self._db = sqlite3.connect(str(self.root / "forge.db"), check_same_thread=False)
-        self._db.executescript(
-            "CREATE TABLE IF NOT EXISTS kv(app TEXT, key TEXT, value TEXT, PRIMARY KEY(app, key));"
-            "CREATE TABLE IF NOT EXISTS logs(id INTEGER PRIMARY KEY, app TEXT, at REAL, line TEXT);")
-        self._dblock = threading.Lock()
+        #: leurs bases (sur le serveur de Mika, ou des fichiers sous ``root/_bases``) et leur journal
+        self.bases = bases or ForgeBases(self.root)
         #: ``info`` relu seulement quand ses fichiers changent (la console le demande à chaque page)
         self._infos: dict[str, tuple[tuple[Any, ...], AppInfo | None]] = {}
         #: les vues rendues : clé → (instant, résultat)
@@ -349,6 +363,11 @@ class ForgeHost:
     async def write(self, app: str, manifest: str, code: str) -> tuple[int, list[str]]:
         d = self._dir(app)
         self._check(manifest, code)
+        if not (d / "main.py").exists():  # une app neuve : sa base naît avec elle
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, self.bases.ensure, app)
+            except (SqlRefused, SQLAlchemyError) as exc:
+                raise ForgeRefused(f"sa base ne se crée pas : {_said(exc)}") from None
         version = self._version(app) + 1
         if (d / "main.py").exists():
             archive = d / "_versions" / str(version - 1)
@@ -385,15 +404,41 @@ class ForgeHost:
         target = trash / f"{app}-{self._version(app)}-{int(time.time())}"
         shutil.move(str(d), str(target))
         self._forget(app)
+        try:  # sa base : exportée à côté de son code, puis supprimée (recréée, l'app repartira de rien)
+            await asyncio.get_running_loop().run_in_executor(None, self.bases.drop, app, target)
+        except (SqlRefused, SQLAlchemyError, OSError) as exc:
+            log.warning("forge : la base de « %s » n'a pas pu être supprimée : %s", app, _said(exc))
         return str(target)
 
     async def reset_storage(self, app: str) -> int:
+        """Vide sa base (ses tables, ses vues, son stockage clé/valeur) ; rend combien de lignes il y avait."""
         self._dir(app)
-        with self._dblock:
-            n = self._db.execute("DELETE FROM kv WHERE app=?", (app,)).rowcount
-            self._db.commit()
+        try:
+            n = await asyncio.get_running_loop().run_in_executor(None, self.bases.reset, app)
+        except (SqlRefused, SQLAlchemyError) as exc:
+            raise ForgeRefused(_said(exc)) from None
         self._drop_cache(app)
         return n
+
+    # ── sa base, pour Mika et la console ──
+    async def _on_base(self, app: str, fn: Callable[..., Any], *args: Any) -> Any:
+        if not (self._dir(app) / "main.py").exists():
+            raise ForgeRefused("cette app n'existe pas")
+        try:
+            return await asyncio.get_running_loop().run_in_executor(None, functools.partial(fn, app, *args))
+        except (SqlRefused, SQLAlchemyError) as exc:
+            raise ForgeRefused(_said(exc)) from None
+
+    async def db_schema(self, app: str) -> dict[str, Any]:
+        return await self._on_base(app, self.bases.schema)
+
+    async def db_query(self, app: str, sql: str, params: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+        return await self._on_base(app, self.bases.query, sql, dict(params or {}), time.monotonic() + DB_TIMEOUT_S)
+
+    async def db_execute(self, app: str, sql: str, params: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        out = await self._on_base(app, self.bases.execute, sql, dict(params or {}), time.monotonic() + DB_TIMEOUT_S)
+        self._drop_cache(app)  # ce qu'elle montre a pu changer
+        return out
 
     async def reload(self, app: str) -> None:
         """Arrête son processus chaud (après l'appel en cours) : l'appel suivant
@@ -417,9 +462,11 @@ class ForgeHost:
                 del self._cache[key]
 
     def logs(self, app: str, n: int = 20) -> list[str]:
-        with self._dblock:
-            rows = self._db.execute("SELECT line FROM logs WHERE app=? ORDER BY id DESC LIMIT ?", (app, n)).fetchall()
-        return [r[0] for r in reversed(rows)]
+        try:
+            return self.bases.logs(app, n)
+        except SQLAlchemyError as exc:
+            log.warning("forge : journal illisible : %s", _said(exc))
+            return []
 
     # ── l'exécution ──
     async def call(self, app: str, method: str, args: dict[str, Any] | None = None, *,
@@ -500,6 +547,7 @@ class ForgeHost:
     def shutdown(self) -> None:
         for app in list(self._workers):
             self._stop(app)
+        self.bases.close()
 
     def _read(self, w: _Worker, deadline: float) -> dict[str, Any] | str | None:
         """Une ligne JSON avant l'échéance ; ``None`` au délai, un texte si le processus meurt."""
@@ -630,17 +678,18 @@ class ForgeHost:
 
     # ── les services de l'hôte ──
     def _log(self, app: str, line: str) -> None:
-        with self._dblock:
-            self._db.execute("INSERT INTO logs(app, at, line) VALUES(?,?,?)", (app, time.time(), line[:1000]))
-            self._db.execute("DELETE FROM logs WHERE app=? AND id NOT IN (SELECT id FROM logs WHERE app=? "
-                             "ORDER BY id DESC LIMIT ?)", (app, app, MAX_LOGS))
-            self._db.commit()
+        try:  # un journal qui ne s'écrit pas ne fait jamais échouer un appel
+            self.bases.log(app, line, MAX_LOGS)
+        except SQLAlchemyError as exc:
+            log.warning("forge : journal de « %s » non écrit : %s", app, _said(exc))
 
     def _serve(self, app: str, info: AppInfo, name: str, p: Mapping[str, Any], call: _Call) -> dict[str, Any]:
         try:
             return {"result": self._service(app, name, p, call)}
         except (ValueError, RuntimeError, OSError, httpx.HTTPError) as exc:
             return {"error": str(exc)[:300]}
+        except SQLAlchemyError as exc:
+            return {"error": _said(exc)}
 
     def _service(self, app: str, name: str, p: Mapping[str, Any], call: _Call) -> Any:
         if name == "log":
@@ -649,32 +698,17 @@ class ForgeHost:
             self._log(app, line)
             return None
         if name == "kv_get":
-            with self._dblock:
-                row = self._db.execute("SELECT value FROM kv WHERE app=? AND key=?", (app, str(p.get("key")))).fetchone()
-            return json.loads(row[0]) if row else p.get("default")
+            return self.bases.kv_get(app, str(p.get("key")), p.get("default"))
         if name == "kv_set":
-            key, raw = str(p.get("key"))[:200], json.dumps(p.get("value"), ensure_ascii=False)
-            if len(raw) > KV_MAX_VALUE:
-                raise ValueError(f"valeur trop grosse (> {KV_MAX_VALUE // 1000} Ko)")
-            with self._dblock:
-                count = self._db.execute("SELECT COUNT(*) FROM kv WHERE app=?", (app,)).fetchone()[0]
-                exists = self._db.execute("SELECT 1 FROM kv WHERE app=? AND key=?", (app, key)).fetchone()
-                if count >= KV_MAX_KEYS and not exists:
-                    raise ValueError(f"trop de clés (> {KV_MAX_KEYS})")
-                self._db.execute("INSERT INTO kv VALUES(?,?,?) ON CONFLICT(app, key) DO UPDATE SET value=excluded.value",
-                                 (app, key, raw))
-                self._db.commit()
-            return True
+            return self.bases.kv_set(app, str(p.get("key")), p.get("value"))
         if name == "kv_delete":
-            with self._dblock:
-                self._db.execute("DELETE FROM kv WHERE app=? AND key=?", (app, str(p.get("key"))))
-                self._db.commit()
-            return True
+            return self.bases.kv_delete(app, str(p.get("key")))
         if name == "kv_keys":
-            with self._dblock:
-                rows = self._db.execute("SELECT key FROM kv WHERE app=? AND key LIKE ? ORDER BY key LIMIT 1000",
-                                        (app, f"{p.get('prefix') or ''}%")).fetchall()
-            return [r[0] for r in rows]
+            return self.bases.kv_keys(app, str(p.get("prefix") or ""))
+        if name == "sql_query":
+            return self.bases.query(app, str(p.get("sql") or ""), p.get("params"), call.deadline)
+        if name == "sql_execute":
+            return self.bases.execute(app, str(p.get("sql") or ""), p.get("params"), call.deadline)
         if name == "config":
             info = self.info(app)
             defaults = {**dict(info.config), **{f.path: f.default for f in info.config_fields

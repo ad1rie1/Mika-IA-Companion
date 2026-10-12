@@ -17,6 +17,8 @@ import pytest
 
 from mika.contracts import memory as mc
 from mika.contracts import runtime as rt
+from mika.contracts.social import relations_table
+from mika.contracts.transcript import thread_table
 from mika.faculties.memory.extraction import (
     Conversation,
     Extraction,
@@ -38,6 +40,7 @@ from mika.kernel.events import Content, VoiceProvenance
 from mika.kernel.frame import Audience
 from mika.kernel.prompt import Budget, Composer, SectionBody, unveiled
 from mika.ports.paging import fold_text
+from mika.ports.sql import upsert
 from mika.vocab import privacy
 from mika.vocab.privacy import ChannelTrust, Sensitivity
 from mika.vocab.retelling import retellable
@@ -105,8 +108,8 @@ def alices_life():
 
 
 def ask(db, who: str, text: str = "salut ! quoi de neuf ?", *, room: str | None = None) -> None:
-    db.execute("INSERT OR REPLACE INTO thread(id,at,role,person,text,room) VALUES(?,?,?,?,?,?)",
-               (10000, NOW, "user", who, text, room))
+    upsert(db, thread_table(), {"id": 10000, "at": NOW, "role": "user", "person": who, "text": text, "room": room},
+           keys=["id"])
 
 
 async def told_to(db, frame: Hears) -> list[str]:
@@ -193,8 +196,8 @@ def thread(db, seq: int, who: str, text: str, room: str | None = None) -> None:
 
 def answer(db, seq: int, who: str, text: str) -> None:
     """Sa réponse à ``who``, la ligne du fil de l'énoncé ``seq``."""
-    db.execute("INSERT OR REPLACE INTO thread(id,at,role,person,text,room,folded) VALUES(?,?,?,?,?,?,?)",
-               (seq, NOW - DAY, "assistant", who, text, None, fold_text(text)))
+    upsert(db, thread_table(), {"id": seq, "at": NOW - DAY, "role": "assistant", "person": who, "text": text,
+                                "room": None, "folded": fold_text(text)}, keys=["id"])
 
 
 def shown_and_said(db, seq: int, who: str, item: int, text: str) -> None:
@@ -238,8 +241,9 @@ async def test_every_kind_of_link_closes(link):
 
 def relate(db, subject: str, other: str, kind: str = "friend", status: str = "active") -> None:
     """Une arête du graphe social (``social_relations``), telle que la relecture l'aurait rangée."""
-    db.execute("INSERT OR REPLACE INTO social_relations VALUES(?,?,?,?,?)",
-               (subject, f"{other}|{kind}|{subject}", other, 1, json.dumps({"other": other, "kind": kind, "status": status})))
+    upsert(db, relations_table(), {"subject": subject, "key": f"{other}|{kind}|{subject}", "other": other, "item": 1,
+                                   "payload": json.dumps({"other": other, "kind": kind, "status": status})},
+           keys=["subject", "key"])
 
 
 async def test_a_friend_in_common_closes_at_the_second_degree():

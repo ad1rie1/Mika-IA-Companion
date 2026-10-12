@@ -32,7 +32,7 @@ from starlette.routing import Mount, Route
 
 from mika.adapters.camera import CameraBuffer
 from mika.adapters.feeds import HttpFeeds
-from mika.adapters.forge import ForgeHost
+from mika.adapters.forge import ForgeBases, ForgeHost
 from mika.adapters.imaging.config import LiveImaging
 from mika.adapters.imaging.config import build_gateway as build_image_gateway
 from mika.adapters.imaging.gateway import ImageTrace
@@ -48,7 +48,7 @@ from mika.adapters.mcp.system import SystemServers
 from mika.adapters.preprocess import LocalPreprocessor, whisper
 from mika.adapters.push import FcmSender
 from mika.adapters.shares import DiskShares
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.teams import TeamsStore
 from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
@@ -332,9 +332,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     """L'application et ce qu'elle fait vivre. Tout est construit ici ; le
     cycle de vie ouvre, démarre et arrête."""
     data.mkdir(parents=True, exist_ok=True)
-    schema.migrate_data(data)  # chaque base à sa dernière révision, avant que rien ne s'ouvre (ADR 0101)
+    bases = schema.targets(data)  # des fichiers du dossier, ou les bases du serveur de MIKA_DATABASE_URL (ADR 0101)
+    schema.migrate_data(data, bases)  # chaque base à sa dernière révision, avant que rien ne s'ouvre
     web = web or WebConfig()
-    store = SqliteStore(data / "mind.db", data / "views.db", threaded=True)
+    store = SqlStore(bases["mind"], bases["views"], threaded=True)
     clock = RealClock()
     fixed = gateway is not None
     gateway = gateway or LiveGateway()
@@ -345,14 +346,17 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     camera = CameraBuffer(clock.now)
     settings = Settings(store, SecretBox.for_data(data))
     forge_settings = ForgeSettingsStore(settings)
-    forge = forge_settings.host = ForgeHost(data / "forge", config=forge_settings.values)
+    # une base par app, sur le même serveur que les siennes (ou des fichiers du dossier), son journal dans ``views``
+    forge_bases = ForgeBases(data / "forge", server=schema.server_url() or None, prefix=schema.database_prefix(),
+                             logs=bases["views"])
+    forge = forge_settings.host = ForgeHost(data / "forge", config=forge_settings.values, bases=forge_bases)
     def her() -> str:
         """Son nom, celui de la persona en vigueur (journalisée) : ce que signent ses mails et ses enregistrements
         d'atelier — un adaptateur ne lit pas sa persona lui-même (ADR 0070)."""
         return name_of(kernel.mind.root.slices["self"].persona)
 
-    world = {"mail": ImapSmtpMail(settings.email, data / "mail.db", her=her),
-             "feeds": HttpFeeds(settings.feeds, data / "feeds.db"),
+    world = {"mail": ImapSmtpMail(settings.email, bases["mail"], her=her),
+             "feeds": HttpFeeds(settings.feeds, bases["feeds"]),
              "workshop": BwrapWorkshop(data / "ateliers", credentials=settings.git, author=her), "camera": camera,
              "forge": forge, "forge_settings": forge_settings, "imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
@@ -360,7 +364,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # les réveils par API (ADR 0068) : leurs réglages et leurs clés, et la porte qui admet un appel
     wakeups = world["wakeup"] = WakeupDesk(settings, clock.now)
     # Teams (ADR 0069) : ce que l'extension pousse, ses brouillons et la file (hors du journal), et la porte
-    teams_store = world["teams"] = TeamsStore(settings.teams, data / "teams.db", now=clock.now)
+    teams_store = world["teams"] = TeamsStore(settings.teams, bases["teams"], now=clock.now)
     teams = TeamsDesk(settings, clock.now, teams_store)
     # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi — plus les
     # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)

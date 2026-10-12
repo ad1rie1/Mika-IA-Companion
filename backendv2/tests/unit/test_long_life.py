@@ -25,8 +25,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from mika.adapters.store_sqlite import SqliteStore
-from mika.adapters.store_sqlite.store import OUTBOX_DONE_KEPT_US
+from mika.adapters.store_sql import SqlStore
+from mika.adapters.store_sql.store import OUTBOX_DONE_KEPT_US
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.app import composition
 from mika.contracts import identity as identity_c
@@ -280,7 +280,7 @@ def test_the_vector_index_answers_like_an_exhaustive_search_and_grows_without_co
     embedder = HashEmbedder()
 
     async def main():
-        store = SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+        store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
         await store.open()
         index = SqliteVectorIndex(store, embedder)
         await index.open()
@@ -331,7 +331,7 @@ def test_the_outbox_forgets_what_left_long_ago_never_what_did_not(tmp_path):
         return StoredEvent(seq, f"e{seq}", "test.event", 1, at, None, "c", 0, "kernel", "{}")
 
     async def main():
-        store = SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+        store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
         await store.open()
         rows = []
         for n in range(1, 61):  # un événement tous les deux jours, chacun avec une sortie
@@ -463,6 +463,7 @@ def extract(prompt):
     return None
 
 
+@pytest.mark.sqlite_only  # une installation d'avant : des fichiers SQLite écrits à la main
 def test_an_install_from_before_migrates_by_itself_and_what_was_forgotten_stays_forgotten(tmp_path):
     """Une vie écrite par le code d'avant : Alice et Bob ont parlé, un compte extérieur est relié à Alice, puis Alice a été
     oubliée. Au démarrage, la mémoire se reconstruit (nouvelle version), l'index des adresses aussi (depuis la

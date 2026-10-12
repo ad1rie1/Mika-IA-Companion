@@ -3,12 +3,13 @@
 - **La fiche d'une app** (type d'objet ``app``, clé = son nom) : son en-tête
   (titre, version, état, agenda, dernier tour), et ses onglets — **État**,
   **Vues** (ses vues déclarées, rendues depuis le bac à sable), **Réglages**
-  (ses réglages typés, les secrets jamais montrés), **Code**, **Journal**,
-  **Vécu**. La recherche la trouve par son nom ou son titre.
+  (ses réglages typés, les secrets jamais montrés), **Code**, **Base** (son
+  schéma, et une lecture : rien ne s'y écrit d'ici — la console en MCP la sert
+  comme toute fiche), **Journal**, **Vécu**. La recherche la trouve par son nom ou son titre.
 - **Apps forgées** (la destination) : toutes ses apps, un lien vers chaque
   fiche ; le badge compte les apps cassées.
 - **Les commandes** (``forge.*``) : recharger, activer, arrêter, promouvoir,
-  rétrograder, revenir à la version précédente, vider le stockage, effacer
+  rétrograder, revenir à la version précédente, vider sa base, effacer
   (retaper le nom), tester une fonction ; et, en place dans une vue, **agir**
   (une action déclarée par l'app) et, dans ses réglages, **régler**.
 
@@ -572,6 +573,48 @@ def _tab_code(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     return blocks
 
 
+@FORGE.inspect("base", title="Base", subject="app", order=45,
+               params=(Param("requete", "Lecture", "search", placeholder="SELECT … FROM … LIMIT 50"),),
+               description="Sa base à elle : ses tables, leurs colonnes et leurs lignes, sa taille. Une lecture "
+                           "(SELECT) pour y regarder ; rien ne s'y écrit d'ici.")
+async def _tab_base(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
+    got = _subject(s, ctx)
+    if isinstance(got, list):
+        return got
+    name, app, info, port = got
+    if port is None:
+        return [Note(NOT_HERE, tone="muted")]
+    try:
+        schema = await port.db_schema(name)
+    except ForgeRefused as exc:
+        return [Note(f"Sa base ne répond pas : {_clip(str(exc), 300)}", tone="warn")]
+    rows = tuple((Text(t["name"], kind="mono"), t["rows"],
+                  ", ".join(f"{c['name']} {c['type']}" + (" (clé)" if c.get("key") else "") for c in t["columns"]))
+                 for t in schema["tables"])
+    blocks: list[Block] = [
+        Fields((("moteur", schema["engine"]), ("taille", _octets(schema["size"])),
+                ("plafond", _octets(schema["max"])), ("vues", ", ".join(schema["views"]) or "aucune")),
+               title="Sa base"),
+        Table(("table", Column("lignes", "num"), "colonnes"), rows, title="Ses tables",
+              caption="_kv : le stockage de api.kv_*."),
+    ]
+    wanted = (ctx.param("requete") or "").strip()
+    if not wanted:
+        return blocks
+    try:
+        found = await port.db_query(name, wanted)
+    except ForgeRefused as exc:
+        return [*blocks, Note(f"Refusée : {_clip(str(exc), 300)}", tone="warn")]
+    columns = tuple(dict.fromkeys(k for r in found for k in r)) or ("(aucune colonne)",)
+    page, pager = paginate(found, ctx.pager(size=LOGS_PAGE))
+    return [*blocks, Table(columns, tuple(tuple(_shown(r.get(c)) for c in columns) for r in page),
+                           title=f"{len(found)} ligne(s)", pager=pager, empty="aucune ligne")]
+
+
+def _octets(n: int) -> str:
+    return f"{n / 1_000_000:.1f} Mo".replace(".", ",") if n >= 100_000 else f"{max(1, n // 1000)} Ko"
+
+
 @FORGE.inspect("journal", title="Journal", subject="app", order=50,
                description="Les sorties techniques de l'app, de la ligne la plus récente à la plus ancienne.")
 def _tab_logs(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
@@ -702,20 +745,25 @@ async def _rollback(s: ForgeState, frame: Frame, args: Any, ctx: ActionContext) 
     return Done(drafts=(draft,), message=f"Revenue à la version précédente (désormais version {version}).")
 
 
-@FORGE.action("vider", title="Vider le stockage", args=NoArgs, emits=[SWITCHED], subject="app", order=40,
-              description="Efface tout ce qu'elle a rangé (api.kv_*). Son code et ses réglages restent.",
-              danger=True, confirm="Vider tout le stockage de cette app ?")
+@FORGE.action("vider", title="Vider sa base", args=NoArgs, emits=[SWITCHED], subject="app", order=40,
+              description="Efface tout ce qu'elle a rangé : les tables de sa base et api.kv_*. Son code et ses "
+                          "réglages restent.",
+              danger=True, confirm="Vider toute la base de cette app ?")
 async def _reset(s: ForgeState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
     name = ctx.subject
     _info(ctx, name)
-    n = await _port(ctx).reset_storage(name)
-    drafts = (SWITCHED.draft(app=name, state="reset", reason=f"opérateur : stockage vidé ({n} clés)"),) \
+    try:
+        n = await _port(ctx).reset_storage(name)
+    except ForgeRefused as exc:
+        raise Refused(f"Impossible : {exc}") from exc
+    drafts = (SWITCHED.draft(app=name, state="reset", reason=f"opérateur : base vidée ({n} lignes)"),) \
         if name in s.apps else ()
-    return Done(drafts=drafts, message=f"Stockage vidé ({n} clés).")
+    return Done(drafts=drafts, message=f"Base vidée ({n} lignes).")
 
 
 @FORGE.action("effacer", title="Effacer", args=NoArgs, emits=[SWITCHED], subject="app", order=50,
-              description="Met l'app à la corbeille (restaurable à la main) et la sort de sa vie.",
+              description="Met l'app à la corbeille avec un export de sa base (restaurable à la main), supprime "
+                          "sa base et la sort de sa vie.",
               danger=True, retype=True, confirm="Effacer cette app ?")
 async def _erase(s: ForgeState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
     name = ctx.subject

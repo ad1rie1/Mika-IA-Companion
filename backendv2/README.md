@@ -69,7 +69,7 @@ Les réflexions héritent des restrictions de toutes leurs sources identifiées 
 origine indéterminée reste intérieure. Les budgets de tokens restent des limites de fournisseur.
 L'oubli purge aussi les archives et remplace les anciennes clés `name:…` concernées
 par des identifiants opaques dans les enveloppes du journal, puis reconstruit l'état.
-Au-delà de 50 000 vecteurs, la recherche parcourt SQLite par blocs de 1 024 : les lectures et calculs quittent la boucle d’événements et la RAM des
+Au-delà de 50 000 vecteurs, la recherche parcourt la base par blocs de 1 024 : les lectures et calculs quittent la boucle d’événements et la RAM des
 vecteurs est bornée, mais le coût d'une recherche exacte reste proportionnel au volume.
 
 Tant qu'aucun modèle ne sert « répondre », chaque message reste sans réponse
@@ -114,4 +114,6 @@ Connecte-toi avec le compte créé à l'étape 3, et parle-lui.
 - **Tout se règle aussi en ligne de commande** : `python -m mika --help`.
 - **Les tests** : `pip install -e ".[dev]"`, puis `python -m pytest -q` (les tests longs —
   scénarios complets, vies de plusieurs semaines, performances — sont écartés par défaut :
-  `--slow` les ajoute, `-m slow` ne lance qu'eux).
+  `--slow` les ajoute, `-m slow` ne lance qu'eux). `--mariadb` (avec `pip install -e ".[mariadb]"`) rejoue la
+  suite sur des bases jetables d'un serveur MariaDB — `MIKA_TEST_MARIADB`, sinon le serveur local par son socket,
+  sous ton utilisateur — et ajoute la même vie simulée vécue sur les deux moteurs (ADR 0101).

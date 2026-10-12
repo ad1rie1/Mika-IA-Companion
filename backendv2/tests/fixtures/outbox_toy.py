@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.kernel.clock import ManualClock
 from mika.kernel.events import Payload
 from mika.kernel.faculty import Faculty
@@ -56,7 +56,7 @@ async def deliver(ev, ports) -> None:
 
 
 def make(root: Path) -> tuple[Mind, EffectExecutor]:
-    store = SqliteStore(root / "mind.db", root / "views.db", threaded=False)
+    store = SqlStore(root / "mind.db", root / "views.db", threaded=False)
     mind = Mind(Registry([RUNTIME, SENDER]), store, ManualClock(1_790_000_000_000_000), SeededIdGen(root.name))
     return mind, EffectExecutor(mind, {"root": str(root)})
 

@@ -10,7 +10,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from mika.adapters.llm.gateway import Gateway
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
 from mika.app import composition
 from mika.contracts import presence as presence_c
@@ -27,6 +27,7 @@ from mika.sim.clock import SimClock
 from mika.sim.llm.scripted import ScriptedLLM
 from mika.vocab.episodes import VOICE_ROLES, Role
 from mika.vocab.temperament import Temperament
+from tests.fixtures import backend
 
 PARIS = ZoneInfo("Europe/Paris")
 PERSONA_PATH = Path(__file__).resolve().parents[2] / "persona" / "mika.yaml"
@@ -74,7 +75,7 @@ def build(
     gateway = Gateway({"fake": llm}, {str(r): "fake" for r in Role}, clock=clock,
                       voice_roles=frozenset(str(r) for r in VOICE_ROLES), slots={"fake": 1},
                       preempt=frozenset({"fake"}))
-    store = SqliteStore(tmp / "mind.db", tmp / "views.db", threaded=False)
+    store = SqlStore(*backend.store_targets(tmp), threaded=False)
     deliveries = Deliveries()
     ports = {"delivery": deliveries, "vectors": SqliteVectorIndex(store, HashEmbedder()), **kw.pop("ports", {})}
     deps = composition.deps(store=store, clock=clock, ids=SeededIdGen(seed), gateway=gateway, ports=ports,

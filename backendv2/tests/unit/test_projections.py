@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import asyncio
 
+from sqlalchemy import inspect
+
 from mika.kernel.codec import digest
 from mika.runtime.projections import ProjectionWorker
 from tests.conftest import make_mind
@@ -14,7 +16,7 @@ from tests.fixtures.toys import BUMPED
 
 
 def table(mind, name: str) -> list[tuple]:
-    return mind.store.query_views(f"SELECT * FROM {name} ORDER BY 1")
+    return [tuple(r) for r in mind.store.query_views(f"SELECT * FROM {name} ORDER BY 1")]
 
 
 async def test_poison_is_quarantined_and_projection_continues(tmp_path):
@@ -49,7 +51,7 @@ async def test_blue_green_rebuild_gives_the_same_table(tmp_path):
     await worker.catch_up(mind2.registry.projectors["tally"])
     assert mind2.store.projector_state("tally") == (2, mind2.head)
     assert digest(table(mind2, "tally_v2")) == before
-    tables = {r[0] for r in mind2.store.query_views("SELECT name FROM sqlite_master WHERE type='table'")}
+    tables = set(mind2.store.read_views(lambda sql: inspect(sql.conn).get_table_names()))
     assert "tally_v1" not in tables  # l'ancienne version est abandonnée après bascule
     await mind2.close()
 

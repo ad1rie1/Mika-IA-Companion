@@ -4,10 +4,11 @@
 Une app est un dossier (``manifest.yaml`` + ``main.py``) ; elle tourne dans
 un processus isolé (bubblewrap : sans réseau, sans les bases, sans
 l'environnement du serveur, mémoire et temps bornés — un délai dépassé tue le
-processus). Elle ne parle au monde que par l'hôte : un stockage clé/valeur à
-elle, sa configuration, un journal, ``http_get`` vers les seuls domaines
-qu'elle déclare, et des **signaux** (ce qu'elle veut porter à l'attention de
-Mika) que le plugin journalise.
+processus). Elle ne parle au monde que par l'hôte : **sa base** (une base SQL à
+elle, qu'elle seule atteint, et son stockage clé/valeur dedans — ADR 0101), sa
+configuration, un journal, ``http_get`` vers les seuls domaines qu'elle
+déclare, et des **signaux** (ce qu'elle veut porter à l'attention de Mika) que
+le plugin journalise.
 
 Ce qu'une app **déclare** pour la console (ses vues, leurs paramètres et leurs
 actions, ses réglages typés) est décrit ici en données : l'hôte le lit du
@@ -192,7 +193,25 @@ class ForgePort(Protocol):
 
     async def erase(self, app: str) -> str: ...
 
-    async def reset_storage(self, app: str) -> int: ...
+    async def reset_storage(self, app: str) -> int:
+        """Vide sa base (tables, vues, stockage clé/valeur) ; rend combien de lignes il y avait."""
+        ...
+
+    async def db_schema(self, app: str) -> dict[str, Any]:
+        """Sa base : ``engine`` (``mariadb`` | ``sqlite``), ``size`` et ``max`` (octets), ``tables`` (``name``,
+        ``rows``, ``columns`` : ``name``, ``type``, ``nullable``, ``key``) et ``views``. ``ForgeRefused`` : l'app
+        n'existe pas, ou sa base ne répond pas."""
+        ...
+
+    async def db_query(self, app: str, sql: str, params: Mapping[str, Any] | None = None) -> list[dict[str, Any]]:
+        """Une lecture de sa base, exécutée sous son utilisateur (une instruction, paramètres nommés) ; ses lignes.
+        ``ForgeRefused`` : refusée (forme, résultat trop gros, erreur du moteur — le message le dit)."""
+        ...
+
+    async def db_execute(self, app: str, sql: str, params: Mapping[str, Any] | None = None) -> dict[str, Any]:
+        """Une écriture dans sa base : ``{"rows": …, "id": …}``. ``ForgeRefused`` comme ``db_query`` (et base
+        pleine)."""
+        ...
 
     async def reload(self, app: str) -> None:
         """Arrête son processus chaud : l'appel suivant repart du disque."""

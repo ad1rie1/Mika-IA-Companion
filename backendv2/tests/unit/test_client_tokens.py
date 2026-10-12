@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from mika.adapters.store_sqlite.store import SqliteStore
+from mika.adapters.store_sql.store import SqlStore
 from mika.adapters.web.accounts import USERNAME_MAX, Accounts, password_problems
 
 PASSWORD = "un-mot-de-passe-long"
@@ -19,7 +19,7 @@ PASSWORD = "un-mot-de-passe-long"
 
 @pytest.fixture
 async def store(tmp_path):
-    s = SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+    s = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
     await s.open()
     yield s
     await s.close()

@@ -50,6 +50,7 @@ class WallClockUser:
         await ctx.emit(STAMPED.draft(when=instant(datetime.now(UTC))))
 
 
+@pytest.mark.sqlite_only  # la garde réseau de la simulation coupe aussi le socket d'un serveur MariaDB : c'est son rôle
 def test_sentinel_catches_a_wall_clock_read(tmp_path):
     kernel, clock, _ = build(tmp_path, [BUGGY])
 

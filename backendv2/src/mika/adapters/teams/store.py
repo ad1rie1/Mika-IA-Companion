@@ -27,7 +27,7 @@ from typing import Any
 from sqlalchemy import delete, false, func, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from mika.adapters.database import sqlite_engine
+from mika.adapters.database import Target, as_target
 from mika.adapters.teams.config import HER, TeamsConfig
 from mika.adapters.teams.models import (
     AUTHOR_MAX,
@@ -136,12 +136,14 @@ class TeamsStore:
     (``begin`` pour écrire, validée à la sortie) ; les aides internes reçoivent la sienne (``s``) — deux sessions à
     la fois sur la même connexion se marcheraient dessus."""
 
-    def __init__(self, config: Callable[[], TeamsConfig], path: Path, *,
+    def __init__(self, config: Callable[[], TeamsConfig], path: Path | Target, *,
                  now: Callable[[], int] = _now_us) -> None:
         self._config = config
         self._now = now
         self._lock = threading.RLock()
-        self._engine = sqlite_engine(path, shared=True)
+        target = as_target(path)
+        target.ensure()
+        self._engine = target.engine(shared=True)
         TEAMS.create_all(self._engine)
         self._session = sessionmaker(self._engine, expire_on_commit=False)
 

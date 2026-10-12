@@ -1,21 +1,22 @@
-"""Magasin SQLite à deux bases, un seul écrivain.
+"""Le magasin à deux bases, un seul écrivain — deux fichiers SQLite, ou deux bases d'un serveur MariaDB (ADR 0101).
 
-- ``mind.db`` (``synchronous=FULL``) : journal, contenus, dédoublonnage,
+- ``mind`` (``synchronous=FULL`` sous SQLite) : journal, contenus, dédoublonnage,
   instantanés, file de sortie, tables des projections T0 (appliquées dans la
   transaction d'ajout). C'est sa vie : c'est ce qu'on sauvegarde.
-- ``views.db`` (``synchronous=NORMAL``) : projections différées et vecteurs,
+- ``views`` (``synchronous=NORMAL``) : projections différées et vecteurs,
   jetable et reconstructible.
 
 En mode ``threaded`` (production), toutes les écritures passent par un fil
 dédié ; sinon (simulation, tests) elles s'exécutent en ligne. Les lectures
-utilisent leurs propres connexions (WAL), en autocommit.
+utilisent leurs propres connexions, en autocommit.
 
-Les connexions sont celles de SQLAlchemy (ADR 0101), les tables celles de
+Les connexions sont celles de SQLAlchemy, les tables celles de
 ``mika.ports.journal`` ; toute requête du magasin est une requête SQLAlchemy,
 compilée pour le moteur. Le port ``Sql`` accepte encore du SQL écrit en clair
-(il va au curseur du pilote, paramètres ``?``) ; ``Sql.session`` est une session
-ORM qui travaille dans la même transaction ; ``Sql.create`` / ``Sql.drop`` créent
-et suppriment des tables déclarées (entités, tables de projection).
+(il va au curseur du pilote, paramètres ``?``, traduits pour PyMySQL) ;
+``Sql.session`` est une session ORM qui travaille dans la même transaction ;
+``Sql.create`` / ``Sql.drop`` créent et suppriment des tables déclarées (entités,
+tables de projection).
 """
 
 from __future__ import annotations
@@ -34,7 +35,15 @@ from typing import Any
 from sqlalchemy import Connection, Engine, bindparam, delete, func, insert, select, update
 from sqlalchemy.orm import Session
 
-from mika.adapters.database import dbapi_in_transaction, dbapi_of, sqlite_engine, truncate_log
+from mika.adapters.database import (
+    Kept,
+    Target,
+    as_target,
+    dbapi_in_transaction,
+    dbapi_of,
+    placeholder,
+    truncate_log,
+)
 from mika.kernel.clock import DAY
 from mika.ports.journal import (
     DEDUPE_KEY_MAX,
@@ -99,7 +108,10 @@ class SqlConn:
             return sql.execute(self.conn, params or None)
         if isinstance(sql, str):
             cur = dbapi_of(self.conn).cursor()
-            cur.execute(sql, params)
+            if params:
+                cur.execute(_marks(sql, self.conn.dialect), params)
+            else:
+                cur.execute(sql)
             return cur
         return self.conn.execute(sql, params or None)
 
@@ -109,7 +121,7 @@ class SqlConn:
             return sql.execute(self.conn, list(rows))
         if isinstance(sql, str):
             cur = dbapi_of(self.conn).cursor()
-            cur.executemany(sql, rows)
+            cur.executemany(_marks(sql, self.conn.dialect), rows)
             return cur
         return self.conn.execute(sql, list(rows))
 
@@ -157,9 +169,30 @@ def _query(conn: Connection, sql: Any, params: Any = ()) -> list[tuple[Any, ...]
         return sql.fetch(conn, params or None)
     if isinstance(sql, str):
         cur = dbapi_of(conn).cursor()
-        cur.execute(sql, params)
-        return cur.fetchall()
+        if params:
+            cur.execute(_marks(sql, conn.dialect), params)
+        else:
+            cur.execute(sql)
+        return list(cur.fetchall())
     return [tuple(r) for r in conn.execute(sql, params or None)]
+
+
+def _marks(sql: str, dialect: Any) -> str:
+    """Le SQL écrit en clair (``?``) pour un pilote à ``%s`` (PyMySQL) : chaque ``?`` hors d'une chaîne entre
+    apostrophes devient ``%s``, chaque ``%`` est doublé. Pour SQLite, tel quel."""
+    if placeholder(dialect) == "?":
+        return sql
+    out, quoted = [], False
+    for ch in sql:
+        if ch == "'":
+            quoted = not quoted
+        if ch == "%":
+            out.append("%%")
+        elif ch == "?" and not quoted:
+            out.append("%s")
+        else:
+            out.append(ch)
+    return "".join(out)
 
 
 def _in_job(conn: Connection, fn: Callable[[Sql], Any]) -> Any:
@@ -178,11 +211,11 @@ Done = Callable[[Any, BaseException | None], None]
 class _Writer:
     """Exécute les écritures en ligne ou dans un fil dédié (un seul écrivain)."""
 
-    def __init__(self, threaded: bool, opener: Callable[[], tuple[Connection, Connection]]) -> None:
+    def __init__(self, threaded: bool, opener: Callable[[], tuple[Kept, Kept]]) -> None:
         self.threaded = threaded
         self._opener = opener
-        self._mind: Connection | None = None
-        self._views: Connection | None = None
+        self._mind: Kept | None = None
+        self._views: Kept | None = None
         self._queue: queue.Queue[tuple[Job, Done] | None] = queue.Queue()
         self._thread: threading.Thread | None = None
 
@@ -207,14 +240,12 @@ class _Writer:
                     break
                 job, done = item
                 try:
-                    result = job(self._mind, self._views)
+                    result = job(self._mind.get(), self._views.get())  # type: ignore[union-attr]
                 except BaseException as exc:
                     done(None, exc)
                 else:
                     done(result, None)
-            for c in (self._mind, self._views):
-                if c is not None:
-                    c.close()
+            _close(self._mind, self._views)
 
         self._thread = threading.Thread(target=run, name="mika-store-writer", daemon=True)
         self._thread.start()
@@ -225,7 +256,7 @@ class _Writer:
     async def run(self, job: Job) -> Any:
         if not self.threaded:
             assert self._mind is not None and self._views is not None
-            return job(self._mind, self._views)
+            return job(self._mind.get(), self._views.get())
         loop = asyncio.get_running_loop()
         fut: asyncio.Future[Any] = loop.create_future()
 
@@ -247,7 +278,7 @@ class _Writer:
         """Exécution bloquante (outils hors boucle, chargements massifs)."""
         if not self.threaded:
             assert self._mind is not None and self._views is not None
-            return job(self._mind, self._views)
+            return job(self._mind.get(), self._views.get())
         finished = threading.Event()
         box: dict[str, Any] = {}
 
@@ -267,30 +298,31 @@ class _Writer:
             self._thread.join(timeout=10)
             self._thread = None
         elif not self.threaded:
-            for c in (self._mind, self._views):
-                if c is not None:
-                    c.close()
+            _close(self._mind, self._views)
             self._mind = self._views = None
 
 
-class SqliteStore:
-    """Le port ``EventStore`` sur deux fichiers SQLite."""
+class SqlStore:
+    """Le port ``EventStore`` sur deux bases : deux fichiers SQLite, ou deux bases d'un serveur MariaDB (``Target``,
+    ADR 0101)."""
 
     def __init__(
         self,
-        mind_path: str | Path,
-        views_path: str | Path,
+        mind_path: str | Path | Target,
+        views_path: str | Path | Target,
         *,
         threaded: bool = True,
         mind_synchronous: str = "FULL",
     ) -> None:
-        self.mind_path = str(mind_path)
-        self.views_path = str(views_path)
+        self.mind_target, self.views_target = as_target(mind_path), as_target(views_path)
+        #: le fichier de ``mind`` sous SQLite (la sauvegarde, la console) ; la base et son serveur sous MariaDB
+        self.mind_path = str(self.mind_target)
+        self.views_path = str(self.views_target)
         self._threaded = threaded
         self._mind_sync = mind_synchronous
         self._writer = _Writer(threaded, self._open_writers)
-        self._mind_r: Connection | None = None
-        self._views_r: Connection | None = None
+        self._mind_r: Kept | None = None
+        self._views_r: Kept | None = None
         #: les moteurs des lectures (une connexion à part pour chaque ``read``)
         self._mind_reader: Engine | None = None
         self._views_reader: Engine | None = None
@@ -300,20 +332,22 @@ class SqliteStore:
         self._on_append: list[Callable[[AppendBatch], None]] = []
 
     # ── cycle de vie ──
-    def _open_writers(self) -> tuple[Connection, Connection]:
-        mind = sqlite_engine(self.mind_path, synchronous=self._mind_sync, check_same_thread=not self._threaded).connect()
+    def _open_writers(self) -> tuple[Kept, Kept]:
+        for target in (self.mind_target, self.views_target):
+            target.ensure()
+        mind = self.mind_target.engine(synchronous=self._mind_sync, check_same_thread=not self._threaded).connect()
         _transaction((mind,), lambda: SqlConn(mind).create(*MIND_TABLES))
-        views = sqlite_engine(self.views_path, synchronous="NORMAL", check_same_thread=not self._threaded).connect()
+        views = self.views_target.engine(synchronous="NORMAL", check_same_thread=not self._threaded).connect()
         _transaction((views,), lambda: SqlConn(views).create(*VIEWS_TABLES))
-        return mind, views
+        return Kept(mind), Kept(views)
 
     async def open(self) -> None:
         self._writer.start()
-        self._mind_reader = sqlite_engine(self.mind_path, autocommit=True)
-        self._views_reader = sqlite_engine(self.views_path, autocommit=True)
-        self._mind_r = self._mind_reader.connect()
-        self._views_r = self._views_reader.connect()
-        row = self._mind_r.execute(select(JournalEvent.seq, JournalEvent.at)
+        self._mind_reader = self.mind_target.engine(autocommit=True)
+        self._views_reader = self.views_target.engine(autocommit=True)
+        self._mind_r = Kept(self._mind_reader.connect())
+        self._views_r = Kept(self._views_reader.connect())
+        row = self._mind_r.get().execute(select(JournalEvent.seq, JournalEvent.at)
                                    .order_by(JournalEvent.seq.desc()).limit(1)).first()
         if row:
             self._head, self._last_at = int(row[0]), int(row[1])
@@ -322,7 +356,7 @@ class SqliteStore:
         self._writer.stop()
         for c in (self._mind_r, self._views_r):
             if c is not None:
-                c.close()
+                c.conn.close()
         self._mind_r = self._views_r = None
         for e in (self._mind_reader, self._views_reader):
             if e is not None:
@@ -465,11 +499,11 @@ class SqliteStore:
 
     def _r(self) -> Connection:
         assert self._mind_r is not None, "magasin non ouvert"
-        return self._mind_r
+        return self._mind_r.get()
 
     def _v(self) -> Connection:
         assert self._views_r is not None, "magasin non ouvert"
-        return self._views_r
+        return self._views_r.get()
 
     def find_dedupe(self, type_name: str, key: str) -> int | None:
         rows = _P_DEDUPE.fetch(self._r(), {"type": type_name, "key": fit(key, DEDUPE_KEY_MAX)})
@@ -486,7 +520,7 @@ class SqliteStore:
         params: dict[str, Any] = {"after": after, "upto": upto, "types": types}
         # Connexion dédiée : un itérateur long ne doit pas gêner les autres lectures (et le journal se relit
         # magasin fermé, depuis son fichier).
-        conn = (self._mind_reader or sqlite_engine(self.mind_path, autocommit=True)).connect()
+        conn = (self._mind_reader or self.mind_target.engine(autocommit=True)).connect()
         cur = _read_query(upto is not None, types is not None).execute(conn, params)
 
         def gen() -> Iterator[StoredEvent]:
@@ -594,6 +628,13 @@ def _field(name: str) -> str:
 
 class StoreSealed(RuntimeError):
     pass
+
+
+def _close(*kept: Kept | None) -> None:
+    for k in kept:
+        if k is not None:
+            k.conn.close()
+            k.conn.engine.dispose()
 
 
 def _transaction(conns: Sequence[Connection], body: Callable[[], Any]) -> Any:
@@ -740,4 +781,4 @@ def _as_text(value: Any) -> Any:
     return json.dumps(value)
 
 
-__all__ = ["SqliteStore", "SqlConn", "StoreSealed", "ContentRow", "OutboxRow", "SnapshotRow", "StoredEvent"]
+__all__ = ["SqlStore", "SqlConn", "StoreSealed", "ContentRow", "OutboxRow", "SnapshotRow", "StoredEvent"]

@@ -12,6 +12,7 @@ telle que les révisions précédentes la laissent ; on la relit avant de la gar
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 import tempfile
 from collections.abc import Mapping
@@ -24,7 +25,7 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import Engine, inspect
 
-from mika.adapters.database import sqlite_engine
+from mika.adapters.database import Target, sqlite_engine
 from mika.app.migrations import _declared
 from mika.ports.sql import DATABASES
 
@@ -39,10 +40,36 @@ MODELS = (
     "mika.adapters.mail.models",
     "mika.adapters.feeds.models",
     "mika.adapters.teams.models",
+    "mika.adapters.forge.bases",
 )
 
 #: le fichier de chaque base dans un dossier de données (SQLite)
 FILES = {"mind": "mind.db", "views": "views.db", "mail": "mail.db", "feeds": "feeds.db", "teams": "teams.db"}
+#: l'adresse d'un serveur MariaDB, sans base (``mariadb+pymysql://mika@localhost/?unix_socket=…``) : avec elle, ses
+#: bases vivent sur ce serveur ; sans, ce sont des fichiers SQLite dans le dossier de données
+DATABASE_URL_ENV = "MIKA_DATABASE_URL"
+#: le préfixe de ses bases sur le serveur (``mika_`` : ``mika_mind``, ``mika_views``…)
+DATABASE_PREFIX_ENV = "MIKA_DATABASE_PREFIX"
+DEFAULT_PREFIX = "mika_"
+
+
+def server_url() -> str:
+    return os.environ.get(DATABASE_URL_ENV, "").strip()
+
+
+def database_prefix() -> str:
+    """Le début du nom de ses bases sur le serveur (celles des apps de la Forge aussi)."""
+    return os.environ.get(DATABASE_PREFIX_ENV, DEFAULT_PREFIX)
+
+
+def targets(data: Path, *, url: str | None = None, prefix: str | None = None) -> dict[str, Target]:
+    """Où vit chacune de ses bases : sur le serveur de ``MIKA_DATABASE_URL`` s'il est dit, sinon dans le dossier de
+    données (un fichier par base)."""
+    url = server_url() if url is None else url
+    if not url:
+        return {name: Target(path=data / file) for name, file in FILES.items()}
+    prefix = database_prefix() if prefix is None else prefix
+    return {name: Target(url=url, name=f"{prefix}{name}") for name in FILES}
 
 _HERE = Path(__file__).parent / "migrations"
 
@@ -79,11 +106,12 @@ def migrate(name: str, engine: Engine) -> None:
         conn.commit()
 
 
-def migrate_data(data: Path) -> None:
-    """Chaque base du dossier de données à sa dernière révision (fichiers SQLite)."""
+def migrate_data(data: Path, where: Mapping[str, Target] | None = None) -> None:
+    """Chaque base à sa dernière révision : celles de ``where``, sinon celles du dossier de données (``targets``)."""
     data.mkdir(parents=True, exist_ok=True)
-    for name, file in FILES.items():
-        engine = sqlite_engine(data / file)
+    for name, target in (where or targets(data)).items():
+        target.ensure()
+        engine = target.engine()
         try:
             migrate(name, engine)
         finally:

@@ -52,9 +52,9 @@ from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
-from mika.app import datadir
+from mika.app import datadir, schema
 from mika.app.composition import faculties
 from mika.app.settings import PUSH_KEY_FILE
 from mika.kernel.codec import digest
@@ -156,7 +156,7 @@ def _replay(mind_db: Path, *, genesis: bool = False) -> tuple[int, str, list[str
                 db.close()
 
         async def replay() -> tuple[int, str, list[str]]:
-            store = SqliteStore(work / "mind.db", work / "views.db", threaded=False)
+            store = SqlStore(work / "mind.db", work / "views.db", threaded=False)
             mind = Mind(Registry([RUNTIME, *faculties()]), store, RealClock(), RandomIdGen())
             report = await mind.boot(append_boot=False)
             state = digest({o: mind.root.slices[o] for o in mind.registry.persisted_owners()})
@@ -252,6 +252,7 @@ def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None
     cause en mots (``tentative``, lue par la console) et ne laisse pas d'archive partielle derrière
     elle ; l'erreur sort en ``BackupError``."""
     data, dest = data.resolve(), dest.resolve()
+    _not_on_a_server()
     if not (data / "mind.db").exists():
         raise BackupError(f"pas de mind.db dans {data}")
     stamp = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%S")
@@ -270,6 +271,14 @@ def backup(data: Path, dest: Path, *, keep: int = 0, now: datetime | None = None
                               "tete": done.head, "fichiers": done.files, "octets": done.size, "garde": keep,
                               "remarques": list(done.warnings)})
     return done
+
+
+def _not_on_a_server() -> None:
+    """Sous MariaDB, ses bases ne sont pas des fichiers du dossier : une archive faite ici n'en contiendrait aucune (ou
+    un vieux ``mind.db`` oublié là). Refusé en le disant, jusqu'à la sauvegarde par le serveur (ADR 0101, lot 5)."""
+    if schema.server_url():
+        raise BackupError("ses bases vivent sur un serveur MariaDB (MIKA_DATABASE_URL) : la sauvegarde par le "
+                          "serveur n'est pas encore là (ADR 0101, lot 5) — rien n'a été archivé ni restauré")
 
 
 def _why(exc: BaseException, dest: Path) -> str:
@@ -411,6 +420,7 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
     Le verrou du dossier est pris d'abord : un Mika qui tourne dessus (``DataDirBusy``) ne voit
     rien bouger. Il passe au dossier restauré avec son fichier, tenu jusqu'au bout."""
     data = data.resolve()
+    _not_on_a_server()
     fresh = not data.exists()
     datadir.hold(data)  # crée le dossier s'il n'existait pas : on le retire si rien n'est restauré
     lock = data / datadir.LOCK_NAME

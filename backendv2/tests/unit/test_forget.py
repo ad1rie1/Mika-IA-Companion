@@ -7,7 +7,11 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
+from sqlalchemy import update
+
 from mika.kernel.events import Content
+from mika.ports.journal import MindMeta
 from mika.runtime.projections import ensure_t0
 from tests.conftest import make_mind
 from tests.fixtures.projectors import with_projectors
@@ -24,6 +28,7 @@ def files_containing(root: Path, needle: bytes) -> list[str]:
     return hits
 
 
+@pytest.mark.sqlite_only  # cherche le texte oublié dans les fichiers de la base eux-mêmes
 async def test_forget_removes_canary_everywhere_and_replay_survives(tmp_path):
     fac = with_projectors(t0=True)
     mind = make_mind(tmp_path, [fac], snapshot_every=2)
@@ -68,7 +73,8 @@ def test_forgetting_a_person_takes_the_files_she_was_sent(tmp_path):
         events = [with_content(kernel.mind, kernel.mind.decode(e)) for e in read.read()
                   if e.type == shares_c.SHARED.name]
         names = {e.data.file: e.data.name.text for e in events}
-        await read.run_mind(lambda sql: sql.execute(f"UPDATE meta SET value='0' WHERE key='t0:{shares_c.TABLE}'"))
+        await read.run_mind(lambda sql: sql.execute(
+            update(MindMeta).where(MindMeta.key == f"t0:{shares_c.TABLE}").values(value="0")))
         rebuilt = await ensure_t0(kernel.mind)
         return g, k, store.files(), after, names, rebuilt, [r.id for r in rows(read, [g, k])]
 

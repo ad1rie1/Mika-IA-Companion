@@ -12,7 +12,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.app.settings import RETIRED_KEYS, SecretBox, Settings
 from mika.vocab import privacy
 from mika.vocab.people import EXTERNAL_PREFIX, RESERVED_PREFIXES
@@ -26,7 +26,7 @@ def test_the_retired_settings_row_and_its_sealed_token_are_erased_at_open(tmp_pa
     ne reste ni dans la base ni dans ses sauvegardes. Le reste des réglages ne bouge pas."""
 
     async def run() -> tuple[list[str], str]:
-        store = SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+        store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
         await store.open()
         box = SecretBox.for_data(tmp_path)
         settings = Settings(store, box)

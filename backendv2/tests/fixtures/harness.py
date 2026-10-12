@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from mika.adapters.llm.gateway import Gateway
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.contracts.runtime import PERCEPTION_RECEIVED, PerceptionReceived
 from mika.kernel.episode import EpisodePolicy
 from mika.kernel.events import Content
@@ -22,6 +22,7 @@ from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.sim.clock import SimClock
 from mika.sim.llm.scripted import ScriptedLLM
 from tests.conftest import START
+from tests.fixtures import backend
 
 # ── une faculté « contacts » qui lit les perceptions du runtime ──────────
 
@@ -81,7 +82,7 @@ def build(
         {"fake": llm}, {"reply": "fake", "initiative": "fake", "step": "fake"}, clock=clock,
         voice_roles=frozenset({"reply", "initiative", "step"}), slots={"fake": 1}, preempt=frozenset({"fake"}),
     )
-    store = SqliteStore(tmp / "mind.db", tmp / "views.db", threaded=False)
+    store = SqlStore(*backend.store_targets(tmp), threaded=False)
     deps = KernelDeps(
         faculties=list(faculties), store=store, clock=clock, ids=SeededIdGen(seed), gateway=gateway,
         policies=policies or DEFAULT_POLICIES, arbitration=arbitration, persona=persona, seed=seed, **kw,

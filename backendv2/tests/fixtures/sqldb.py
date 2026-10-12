@@ -9,18 +9,25 @@ Un test qui avait sa propre classe sur ``sqlite3.connect(":memory:")`` en hérit
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
-from mika.adapters.store_sqlite.store import SqlConn
+from mika.adapters.store_sql.store import SqlConn
+from tests.fixtures import backend
 
 
 class SqlDB:
     def __init__(self) -> None:
-        engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False},
-                               isolation_level="AUTOCOMMIT")
+        if backend.active():  # la voie MariaDB : une base jetable du serveur
+            target = backend.target(Path("."), "sqldb")
+            target.ensure()
+            engine = target.engine(autocommit=True)
+        else:
+            engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False},
+                                   isolation_level="AUTOCOMMIT")
         self.engine = engine
         self.conn = engine.connect()
         self.sql = SqlConn(self.conn)

@@ -120,11 +120,11 @@ def test_failed_extraction_progresses_and_retries_after_restart(tmp_path):
             await result.reply
         await asyncio.sleep(15 * 60)
         # Une panne passagère : la fenêtre attend d'un seul tenant, rien n'est encore mis en file.
-        assert not kernel.mind.store.query_mind(f'SELECT key FROM {DEFERRED_TABLE}')
+        assert not kernel.mind.store.query_mind(f'SELECT `key` FROM {DEFERRED_TABLE}')
         assert kernel.mind.root.slices['memory'].pending
         await asyncio.sleep(2 * 60 * 60)
         # Au-delà de max_attempts passages, elle part en file et la consolidation avance.
-        rows = kernel.mind.store.query_mind(f'SELECT key,attempts,retry_at FROM {DEFERRED_TABLE}')
+        rows = kernel.mind.store.query_mind(f'SELECT `key`,attempts,retry_at FROM {DEFERRED_TABLE}')
         assert rows and max(row[1] for row in rows) >= 2
         assert kernel.mind.root.slices['memory'].checkpoint > rows[0][0]
         assert not kernel.mind.root.slices['memory'].pending
@@ -144,7 +144,7 @@ def test_failed_extraction_progresses_and_retries_after_restart(tmp_path):
         for _ in rows:
             await process.run(NS(frame=kernel.mind.frame(), state=kernel.mind.root.slices['memory'],
                                 ports={'store': kernel.mind.store}, llm=kernel.deps.gateway, run_id='review', emit=emit))
-        assert not kernel.mind.store.query_mind(f'SELECT key FROM {DEFERRED_TABLE}')
+        assert not kernel.mind.store.query_mind(f'SELECT `key` FROM {DEFERRED_TABLE}')
         await kernel.stop()
     run_virtual(clock, again)
 
@@ -243,10 +243,10 @@ def test_compaction_halves_a_truncated_batch_and_retries_without_new_messages(tm
 async def test_spilled_vector_reads_use_the_store_worker(tmp_path):
     import threading
 
-    from mika.adapters.store_sqlite.store import SqliteStore
+    from mika.adapters.store_sql.store import SqlStore
     from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
     from mika.ports.vectors import VectorItem
-    store = SqliteStore(tmp_path / 'mind.db', tmp_path / 'views.db')
+    store = SqlStore(tmp_path / 'mind.db', tmp_path / 'views.db')
     await store.open()
     try:
         index = SqliteVectorIndex(store, HashEmbedder(), max_resident_vectors=1)

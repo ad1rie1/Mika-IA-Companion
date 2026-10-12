@@ -14,7 +14,7 @@ from types import SimpleNamespace
 
 from pydantic import BaseModel
 
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.kernel.clock import DAY, HOUR
 from mika.kernel.episode import EpisodePolicy, Outcome
 from mika.kernel.events import Payload
@@ -168,8 +168,8 @@ def data(system: str, message: str = "salut") -> dict:
     return {"system_stable": system, "messages": [{"role": "user", "content": message}], "tools": []}
 
 
-async def opened(tmp_path, **kw) -> tuple[SqliteStore, EpisodeTraces]:
-    store = SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+async def opened(tmp_path, **kw) -> tuple[SqlStore, EpisodeTraces]:
+    store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
     await store.open()
     traces = EpisodeTraces(store, **kw)
     await traces.open()

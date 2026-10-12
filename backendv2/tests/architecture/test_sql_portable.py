@@ -18,7 +18,6 @@ SRC = Path(__file__).resolve().parents[2] / "src" / "mika"
 #: ce qui reste hors de la règle, et pourquoi (le lot qui le reprend)
 EXEMPT = {
     "adapters/database.py": "le seul module qui parle de SQLite par nature (sa mise en route, la troncature du WAL)",
-    "adapters/forge/__init__.py": "la Forge : lot 4 (une base par app)",
     "app/backup.py": "la sauvegarde : lot 5",
 }
 

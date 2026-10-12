@@ -28,8 +28,8 @@ llm = ["anthropic>=0.40", "openai>=1.40", "ollama>=0.4", "google-genai>=1.0"]
 memory = ["numpy>=1.26", "sentence-transformers>=3.0"]
 # lire les PDF joints (sans : « je ne peux pas le lire »)
 documents = ["pypdf>=4"]
-# le pilote MariaDB (ADR 0101) : en production
-mariadb = ["mariadb>=1.1"]
+# le pilote MariaDB (ADR 0101) : en production, et pour la voie de tests ``--mariadb``
+mariadb = ["pymysql>=1.1"]
 dev = ["pytest>=8", "pytest-asyncio>=0.23", "hypothesis>=6.100", "import-linter>=2.0", "ruff>=0.6", "time-machine>=2.14", "jsonschema>=4.20"]
 
 [project.scripts]

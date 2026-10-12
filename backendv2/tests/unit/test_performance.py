@@ -16,7 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.kernel.faculty import Faculty
 from mika.kernel.ids import encode_ulid
@@ -55,7 +55,7 @@ async def test_append_p95_under_10ms_while_t2_runs():
     disk = Path(__file__).resolve().parents[2] / ".perf"
     disk.mkdir(exist_ok=True)
     tmp_path = Path(tempfile.mkdtemp(dir=disk))
-    store = SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=True, mind_synchronous="FULL")
+    store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=True, mind_synchronous="FULL")
     mind = Mind(Registry([RUNTIME, with_projectors(t2=True)]), store, RealClock(), RandomIdGen())
     await mind.boot()
     worker = ProjectionWorker(mind)
@@ -77,7 +77,7 @@ async def test_append_p95_under_10ms_while_t2_runs():
 
 async def test_replay_one_million_events_and_snapshot_load(tmp_path):
     n = 1_000_000
-    store = SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False, mind_synchronous="OFF")
+    store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False, mind_synchronous="OFF")
     reg = Registry([RUNTIME, COUNTER, *summers(9)])
     await store.open()
     batch: list[StoredEvent] = []
@@ -90,7 +90,7 @@ async def test_replay_one_million_events_and_snapshot_load(tmp_path):
             batch = []
     await store.close()
 
-    mind = Mind(reg, SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False),
+    mind = Mind(reg, SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False),
                 RealClock(), RandomIdGen(), snapshot_every=10**12)
     t0 = time.perf_counter()
     report = await mind.boot(append_boot=False)

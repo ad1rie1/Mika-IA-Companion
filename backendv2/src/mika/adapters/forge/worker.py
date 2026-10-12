@@ -9,7 +9,8 @@ conclut par ``{"result": …}`` ou ``{"error": …}``. ``print`` va au journal.
 ``tick(api)``, ``context(api)``, ``view(api)`` ; ``view_<vue>(api, params)``,
 ``action_<vue>_<action>(api, data)``, ``tool_<nom>(api, args)``,
 ``on_event(api, événement)`` ; l'ancienne ``action(api, nom, args)``. L'hôte
-ne demande que les fonctions déclarées.
+ne demande que les fonctions déclarées. Sa base (``api.query``,
+``api.execute``), c'est l'hôte qui l'interroge pour elle.
 """
 
 import json
@@ -51,6 +52,14 @@ class Api:
 
     def kv_keys(self, prefix=""):
         return host("kv_keys", prefix=prefix)
+
+    def query(self, sql, params=None):
+        """Lire sa base : une instruction (SELECT, WITH), des paramètres nommés (:nom) ; ses lignes en dictionnaires."""
+        return host("sql_query", sql=str(sql), params=dict(params or {}))
+
+    def execute(self, sql, params=None):
+        """Écrire dans sa base : une instruction ; {"rows": lignes touchées, "id": identifiant inséré ou None}."""
+        return host("sql_execute", sql=str(sql), params=dict(params or {}))
 
     def config(self, key, default=None):
         return host("config", key=key, default=default)

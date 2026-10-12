@@ -311,7 +311,7 @@ def test_a_failed_delivery_can_be_retried_or_marked_seen(world):  # noqa: F811
     bootstrap(client)
     converse(client)
     store = live.kernel.mind.store
-    key = client.portal.call(lambda: store.query_mind("SELECT key FROM outbox ORDER BY seq DESC LIMIT 1"))[0][0]
+    key = client.portal.call(lambda: store.query_mind("SELECT `key` FROM outbox ORDER BY seq DESC LIMIT 1"))[0][0]
     client.portal.call(store.mark_outbox, key, "failed", "TimeoutError()")
     sorties = html_of(client.get(f"{BASE}/systeme/sorties"))
     assert "Marquer comme vu" in sorties and "délai dépassé" in sorties and "TimeoutError" not in sorties
@@ -343,7 +343,7 @@ def test_stale_and_interrupted_effects_are_named_filtered_and_to_handle(world): 
         ws.send_json({"type": "chat", "message": "et demain, tu fais quoi ?", "client_msg_id": "o2"})
         recv_until(ws, "speech")
     store = live.kernel.mind.store
-    keys = [k for (k,) in client.portal.call(lambda: store.query_mind("SELECT key FROM outbox ORDER BY seq"))]
+    keys = [k for (k,) in client.portal.call(lambda: store.query_mind("SELECT `key` FROM outbox ORDER BY seq"))]
     assert len(keys) >= 2
     client.portal.call(store.mark_outbox, keys[-1], "stale", "trop tard : elle ne le dit plus")
     client.portal.call(store.mark_outbox, keys[-2], "interrupted", "délai dépassé : coupée au bout de 900 s")
@@ -383,7 +383,7 @@ def test_outbox_action_cards_follow_filter_and_paginate_without_deciding(world):
             ws.send_json({'type': 'chat', 'message': f'message de test {i}', 'client_msg_id': f'outbox-page-{i}'})
             recv_until(ws, 'speech')
     store = live.kernel.mind.store
-    keys = [k for (k,) in client.portal.call(lambda: store.query_mind('SELECT key FROM outbox ORDER BY seq DESC LIMIT 10'))]
+    keys = [k for (k,) in client.portal.call(lambda: store.query_mind('SELECT `key` FROM outbox ORDER BY seq DESC LIMIT 10'))]
     assert len(keys) == 10
     for key in keys[:9]:
         client.portal.call(store.mark_outbox, key, 'failed', 'échec fictif')

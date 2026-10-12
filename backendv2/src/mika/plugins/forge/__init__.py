@@ -521,7 +521,13 @@ class TestArgs(BaseModel):
 
 
 class HelpArgs(BaseModel):
-    sujet: Literal["manifeste", "vues", "actions", "reglages", "blocs", "exemple"] = "manifeste"
+    sujet: Literal["manifeste", "vues", "actions", "reglages", "blocs", "base", "exemple"] = "manifeste"
+
+
+class DbArgs(BaseModel):
+    app: str = Field(min_length=2, max_length=31)
+    sql: str = Field(min_length=1, max_length=20_000, description=phrase("forge.tools.db.sql"))
+    params: dict[str, Any] = Field(default_factory=dict, description=phrase("forge.tools.db.params"))
 
 
 class CommandArgs(BaseModel):
@@ -737,6 +743,84 @@ async def forge_command(args: CommandArgs, ctx: Any) -> Any:
         return phrase("forge.tools.command.reset", count=n)
     except ForgeRefused as exc:
         return ToolResult(ok=False, content=str(exc))
+
+
+# ── Sa base (ADR 0101) ────────────────────────────────────────────────────
+
+#: ce qu'une lecture montre au plus (le reste est coupé, et elle le voit)
+DB_SHOWN = 6_000
+
+
+def schema_text(got: Mapping[str, Any]) -> str:
+    """Le schéma d'une base d'app, en lignes."""
+    lines = [phrase("forge.tools.db_schema.head", engine=got.get("engine", "?"), size=_size(got.get("size", 0)),
+                    max=_size(got.get("max", 0)))]
+    for t in got.get("tables", []):
+        columns = ", ".join(phrase("forge.tools.db_schema.column", name=c["name"], type=c["type"],
+                                   key=phrase("forge.tools.db_schema.key") if c.get("key") else "")
+                            for c in t.get("columns", []))
+        line = phrase("forge.tools.db_schema.table", table=t["name"], rows=t.get("rows", 0), columns=columns)
+        lines.append(line + (phrase("forge.tools.db_schema.kv") if t["name"] == "_kv" else ""))
+    if got.get("views"):
+        lines.append(phrase("forge.tools.db_schema.views", views=", ".join(got["views"])))
+    return "\n".join(lines)
+
+
+def _size(n: Any) -> str:
+    n = int(n or 0)
+    return f"{n / 1_000_000:.1f} Mo".replace(".", ",") if n >= 100_000 else f"{max(1, n // 1000)} Ko"
+
+
+def rows_text(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return phrase("forge.tools.db_query.none")
+    shown, size = [], 0
+    for row in rows:
+        line = json.dumps(row, ensure_ascii=False, default=str)
+        size += len(line) + 1
+        if size > DB_SHOWN:
+            shown.append(phrase("forge.tools.db_query.cut"))
+            break
+        shown.append(line)
+    return phrase("forge.tools.db_query.result", count=len(rows), rows="\n".join(shown))
+
+
+@FORGE.tool("forge_db_schema", description=phrase("forge.tools.db_schema.description"), args=AppArgs, bundle=BUNDLE,
+            episodes=BUILD, owner_only=True)
+async def forge_db_schema(args: AppArgs, ctx: Any) -> Any:
+    port = _port(ctx)
+    if port is None or not _may_build(ctx):
+        return _refused(ctx)
+    try:
+        return schema_text(await port.db_schema(args.app))
+    except ForgeRefused as exc:
+        return ToolResult(ok=False, content=phrase("forge.tools.db.refused", error=exc))
+
+
+@FORGE.tool("forge_db_query", description=phrase("forge.tools.db_query.description"), args=DbArgs, bundle=BUNDLE,
+            episodes=BUILD, max_calls_per_episode=8, owner_only=True)
+async def forge_db_query(args: DbArgs, ctx: Any) -> Any:
+    port = _port(ctx)
+    if port is None or not _may_build(ctx):
+        return _refused(ctx)
+    try:
+        return rows_text(await port.db_query(args.app, args.sql, args.params))
+    except ForgeRefused as exc:
+        return ToolResult(ok=False, content=phrase("forge.tools.db.refused", error=exc))
+
+
+@FORGE.tool("forge_db_execute", description=phrase("forge.tools.db_execute.description"), args=DbArgs,
+            bundle=BUNDLE, episodes=BUILD, max_calls_per_episode=6, owner_only=True)
+async def forge_db_execute(args: DbArgs, ctx: Any) -> Any:
+    port = _port(ctx)
+    if port is None or not _may_build(ctx):
+        return _refused(ctx)
+    try:
+        got = await port.db_execute(args.app, args.sql, args.params)
+    except ForgeRefused as exc:
+        return ToolResult(ok=False, content=phrase("forge.tools.db.refused", error=exc))
+    inserted = phrase("forge.tools.db_execute.inserted", id=got["id"]) if got.get("id") is not None else ""
+    return phrase("forge.tools.db_execute.done", rows=got.get("rows", 0), id=inserted)
 
 
 @FORGE.tool("forge_call", description=phrase("forge.tools.call.description"), args=CallArgs, bundle=APPS_BUNDLE,

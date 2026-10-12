@@ -15,13 +15,13 @@ from pathlib import Path
 logging.disable(logging.WARNING)
 from mika.app.composition import for_simulation
 from mika.kernel.codec import digest
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.sim.catalog import QUICK, run_plan
 import asyncio
 plan = next(p for p in QUICK if p.name.startswith("S13"))
 with tempfile.TemporaryDirectory() as tmp:
     run_plan(plan, for_simulation(), Path(tmp), 4)
-    store = SqliteStore(Path(tmp) / "mind.db", Path(tmp) / "views.db", threaded=False)
+    store = SqlStore(Path(tmp) / "mind.db", Path(tmp) / "views.db", threaded=False)
     asyncio.run(store.open())
     print(digest([(s.seq, s.type, s.at, s.data) for s in store.read()]))
     asyncio.run(store.close())

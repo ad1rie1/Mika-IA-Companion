@@ -10,9 +10,9 @@ commande passe désormais par les actions et l'oubli de la console.
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from pathlib import Path
 
+from mika.adapters.store_sql import SqlStore
 from mika.app import cli
 from mika.app.console import LABELS
 from mika.contracts import identity as identity_c
@@ -21,23 +21,30 @@ from mika.inspector.names import Names
 from mika.kernel.events import Origin
 from mika.plugins.forge import SWITCHED, WRITTEN
 from mika.sim.clock import run_virtual
+from tests.fixtures import backend
 from tests.fixtures.mika import boot, build, connect, reply, said
 
 
+def _read(data: Path, sql: str, params: tuple = ()) -> list[tuple]:
+    """Une lecture de ``mind`` après coup, là où vivent ses bases (fichiers, ou serveur sous ``--mariadb``)."""
+
+    async def run() -> list[tuple]:
+        store = SqlStore(*backend.store_targets(data), threaded=False)
+        await store.open()
+        try:
+            return [tuple(r) for r in store.query_mind(sql, params)]
+        finally:
+            await store.close()
+
+    return asyncio.run(run())
+
+
 def _subjects(data: Path) -> set[str]:
-    db = sqlite3.connect(data / "mind.db")
-    try:
-        return {s for (s,) in db.execute("SELECT subject FROM content_subjects")}
-    finally:
-        db.close()
+    return {s for (s,) in _read(data, "SELECT subject FROM content_subjects")}
 
 
 def _journal(data: Path, type_name: str) -> list[tuple[int]]:
-    db = sqlite3.connect(data / "mind.db")
-    try:
-        return list(db.execute("SELECT seq FROM events WHERE type = ?", (type_name,)))
-    finally:
-        db.close()
+    return _read(data, "SELECT seq FROM events WHERE type = ?", (type_name,))
 
 
 def _live(data: Path, scene) -> None:  # type: ignore[no-untyped-def]

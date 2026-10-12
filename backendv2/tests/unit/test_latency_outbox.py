@@ -182,7 +182,7 @@ def test_a_poisoned_effect_does_not_kill_the_outbox(tmp_path):
     async def main():
         await kernel.start()
         await kernel.mind.store.run_mind(lambda sql: sql.execute(
-            "INSERT INTO outbox(key, seq, effect, status, attempts, last_error) VALUES(?,?,?,?,?,?)",
+            "INSERT INTO outbox(`key`, seq, effect, status, attempts, last_error) VALUES(?,?,?,?,?,?)",
             ("illisible", 0, "out:out.say", "pending", 0, None)))
         await _emit(kernel, BAD, n=0)
         await asyncio.sleep(1)
@@ -190,7 +190,7 @@ def test_a_poisoned_effect_does_not_kill_the_outbox(tmp_path):
             await _emit(kernel, SAY, n=10 + i)
             await asyncio.sleep(1)
         dead = kernel.dead_loops()
-        status = kernel.mind.store.query_mind("SELECT status FROM outbox WHERE key='illisible'")
+        status = kernel.mind.store.query_mind("SELECT status FROM outbox WHERE `key`='illisible'")
         await kernel.stop()
         return dead, status
 

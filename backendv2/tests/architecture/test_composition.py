@@ -116,7 +116,7 @@ def test_a_forbidden_import_breaks_the_layers(tmp_path):
     copy = tmp_path / "src"
     shutil.copytree(ROOT / "src" / "mika", copy / "mika", ignore=shutil.ignore_patterns("__pycache__"))
     target = copy / "mika" / "faculties" / "body" / "__init__.py"
-    target.write_text("import mika.adapters.store_sqlite  # interdit\n")
+    target.write_text("import mika.adapters.store_sql  # interdit\n")
     out = _lint(copy)
     assert out.returncode != 0
     assert "BROKEN" in out.stdout or "broken" in out.stdout.lower()

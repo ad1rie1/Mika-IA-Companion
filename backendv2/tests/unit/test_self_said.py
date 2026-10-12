@@ -52,7 +52,7 @@ def said_of_herself(db: Store, text: str, genre: str | None = None, *, remplace:
 
 
 def item(db: Store, seq: int) -> Item:
-    raw = db.query(f"SELECT {','.join(ITEM_COLUMNS)} FROM {mc.ITEMS_TABLE} WHERE id=?", (seq,))[0]
+    raw = db.query(f"SELECT {','.join(f'`{c}`' for c in ITEM_COLUMNS)} FROM {mc.ITEMS_TABLE} WHERE id=?", (seq,))[0]
     return Item.of(dict(zip(ITEM_COLUMNS, raw, strict=True)))
 
 
@@ -101,7 +101,7 @@ def test_coming_back_to_what_she_thought_brings_it_back():
     assert back.type.name == mc.ATTESTED.name and (back.data.item, back.data.replaces) == (5, 6)
     db.put(back, 7)
     assert status(db) == {5: "active", 6: "superseded"}  # une seule de ses deux idées vit
-    changes = db.query(f"SELECT {','.join(mc.SELF_CHANGES_COLUMNS[:4])} FROM {mc.SELF_CHANGES_VIEW}")
+    changes = db.query(f"SELECT {','.join(f'`{c}`' for c in mc.SELF_CHANGES_COLUMNS[:4])} FROM {mc.SELF_CHANGES_VIEW}")
     assert changes == [(6, NO_JAZZ, 5, JAZZ)]
 
 

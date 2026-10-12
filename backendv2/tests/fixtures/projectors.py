@@ -5,55 +5,75 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Sequence
 
+from sqlalchemy import BigInteger, Column, delete, update
+
 from mika.kernel.faculty import Tier
+from mika.ports.sql import HANDLE_MAX, Key, LongText, insert_ignore, projection_table, upsert
 from mika.ports.store import Sql
 from tests.fixtures.toys import BUMPED, COUNTER
+
+
+def _textlog(sfx: str):
+    return projection_table(f"textlog{sfx}", Column("seq", BigInteger, primary_key=True, autoincrement=False),
+                            Column("who", Key(HANDLE_MAX)), Column("body", LongText))
+
+
+def _tally(sfx: str):
+    return projection_table(f"tally{sfx}", Column("who", Key(HANDLE_MAX), primary_key=True),
+                            Column("n", BigInteger, nullable=False))
+
+
+def _heavy(sfx: str):
+    return projection_table(f"heavy{sfx}", Column("seq", BigInteger, primary_key=True, autoincrement=False),
+                            Column("h", LongText))
 
 
 class TextLog:
     """T0 : garde le texte des notes (pour éprouver l'oubli)."""
 
     def create(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"CREATE TABLE IF NOT EXISTS textlog{sfx}(seq INTEGER PRIMARY KEY, who TEXT, body TEXT)")
+        sql.create(_textlog(sfx))
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"DROP TABLE IF EXISTS textlog{sfx}")
+        sql.drop(_textlog(sfx))
 
     def apply(self, sql: Sql, events: Sequence, sfx: str) -> None:
+        t = _textlog(sfx)
         for e in events:
             if e.data.note is not None:
-                sql.execute(f"INSERT OR REPLACE INTO textlog{sfx}(seq, who, body) VALUES(?,?,?)",
-                            (e.seq, e.data.who, e.data.note.text or ""))
+                upsert(sql, t, {"seq": e.seq, "who": e.data.who, "body": e.data.note.text or ""}, keys=["seq"])
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> None:
-        sql.execute(f"DELETE FROM textlog{sfx} WHERE who=?", (subject,))
+        t = _textlog(sfx)
+        sql.execute(delete(t).where(t.c.who == subject))
 
 
 class Tally:
     """T1 : décompte par personne ; « poison » fait lever."""
 
     def create(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"CREATE TABLE IF NOT EXISTS tally{sfx}(who TEXT PRIMARY KEY, n INTEGER NOT NULL)")
+        sql.create(_tally(sfx))
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"DROP TABLE IF EXISTS tally{sfx}")
+        sql.drop(_tally(sfx))
 
     def apply(self, sql: Sql, events: Sequence, sfx: str) -> None:
+        t = _tally(sfx)
         for e in events:
             if e.data.who == "poison":
                 raise ValueError("événement empoisonné")
-            sql.execute(f"INSERT INTO tally{sfx}(who, n) VALUES(?, ?) ON CONFLICT(who) DO UPDATE SET n = n + ?",
-                        (e.data.who, e.data.by, e.data.by))
+            if not insert_ignore(sql, t, {"who": e.data.who, "n": e.data.by}):
+                sql.execute(update(t).where(t.c.who == e.data.who).values(n=t.c.n + e.data.by))
 
 
 class Heavy:
     """T2 : une préparation coûteuse hors de l'écrivain, une écriture légère."""
 
     def create(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"CREATE TABLE IF NOT EXISTS heavy{sfx}(seq INTEGER PRIMARY KEY, h TEXT)")
+        sql.create(_heavy(sfx))
 
     def drop(self, sql: Sql, sfx: str) -> None:
-        sql.execute(f"DROP TABLE IF EXISTS heavy{sfx}")
+        sql.drop(_heavy(sfx))
 
     def prepare(self, rows: Sequence[dict]) -> list[tuple[int, str]]:
         out = []
@@ -65,7 +85,8 @@ class Heavy:
         return out
 
     def apply(self, sql: Sql, events: Sequence, sfx: str, prepared: list[tuple[int, str]]) -> None:
-        sql.executemany(f"INSERT OR REPLACE INTO heavy{sfx}(seq, h) VALUES(?,?)", prepared)
+        if prepared:
+            upsert(sql, _heavy(sfx), [{"seq": seq, "h": h} for seq, h in prepared], keys=["seq"])
 
 
 def with_projectors(t0: bool = False, t1: int | None = None, t2: bool = False):

@@ -36,7 +36,7 @@ from typing import Any
 from sqlalchemy import and_, bindparam, case, delete, exists, func, insert, literal, or_, select, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from mika.adapters.database import sqlite_engine
+from mika.adapters.database import Target, as_target
 from mika.adapters.mail.browse import Browse
 from mika.adapters.mail.models import (
     ACCOUNT,
@@ -122,8 +122,10 @@ def _files(text: str) -> tuple[Attachment, ...]:
 
 
 class MailCache:
-    def __init__(self, path: Path) -> None:
-        self._engine = sqlite_engine(path, shared=True)
+    def __init__(self, path: Path | Target) -> None:
+        target = as_target(path)
+        target.ensure()
+        self._engine = target.engine(shared=True)
         MAIL.create_all(self._engine)
         self._session = sessionmaker(self._engine, expire_on_commit=False)
         self._lock = threading.RLock()

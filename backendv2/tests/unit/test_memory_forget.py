@@ -9,6 +9,8 @@ import asyncio
 import json
 import sqlite3
 
+import pytest
+
 from mika.app import cli
 from mika.contracts import memory as memory_c
 from mika.kernel.clock import HOUR
@@ -31,6 +33,7 @@ def extract(prompt):
     return None
 
 
+@pytest.mark.sqlite_only  # relit ou réécrit les fichiers SQLite eux-mêmes (une version d'avant, l'effacement sur le disque)
 def test_the_command_line_forgets_everywhere(tmp_path):
     script = Script(extract)
     kernel, clock, _, _out = build(tmp_path, script)
@@ -91,6 +94,7 @@ def test_forgetting_whoever_confided_it_forgets_what_they_said(tmp_path):
     assert stale and pruned, "le cache perd ce que la mémoire a perdu"
 
 
+@pytest.mark.sqlite_only  # relit ou réécrit les fichiers SQLite eux-mêmes (une version d'avant, l'effacement sur le disque)
 def test_a_rebuilt_thread_does_not_bring_back_someone_forgotten(tmp_path):
     """Alice est oubliée ; plus tard, la table du fil change de version et se reconstruit depuis le journal (une mise
     à jour) : les messages d'Alice n'y reviennent pas — ni en texte vide, ni par les noms de leurs pièces jointes
@@ -125,6 +129,7 @@ def test_a_rebuilt_thread_does_not_bring_back_someone_forgotten(tmp_path):
     assert any(r[0] == "user_3" for r in rows), "contre-exemple : le fil de Bob se reconstruit"
 
 
+@pytest.mark.sqlite_only  # relit ou réécrit les fichiers SQLite eux-mêmes (une version d'avant, l'effacement sur le disque)
 def test_forgetting_a_mentioned_person_erases_their_evidence_without_erasing_others(tmp_path):
     """La version impliquant Inès s'efface pour de bon. Le témoignage antérieur de Sam seul survit."""
     fact = "Le concert de jazz CANARI-RENFORT est samedi au Pavillon"

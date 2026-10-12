@@ -1,7 +1,7 @@
 """Étape 0 du jumeau numérique : rejouer une archive dans le vrai noyau, sur horloge virtuelle.
 
 Rien n'est modifié dans ``backendv2`` : on compose le noyau comme le simulateur (``sim/world.py::Driver``), sur un
-``SqliteStore`` sur disque, avec un fournisseur LLM scripté (le « rejoueur ») qui ne fait aucun appel réel.
+``SqlStore`` sur disque, avec un fournisseur LLM scripté (le « rejoueur ») qui ne fait aucun appel réel.
 
 Le pilote (``Pilote``) éprouve le mécanisme retenu pour l'avance rapide :
 

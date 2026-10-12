@@ -49,7 +49,7 @@ import httpx
 from sqlalchemy import delete, false, func, select, true, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from mika.adapters.database import sqlite_engine
+from mika.adapters.database import Target, as_target
 from mika.adapters.feeds.models import URL_MAX, EntryRow, FeedRow, entry_values, fit
 from mika.kernel.clock import DAY
 from mika.ports.feeds import Entry, shown
@@ -208,7 +208,7 @@ class HttpFeeds:
     session courte (``begin`` pour écrire, validée à la sortie), jamais deux à la fois, jamais à travers un
     ``await``."""
 
-    def __init__(self, feeds: Callable[[], Sequence[str]], cache: Path, *, client: httpx.AsyncClient | None = None,
+    def __init__(self, feeds: Callable[[], Sequence[str]], cache: Path | Target, *, client: httpx.AsyncClient | None = None,
                  timeout_s: float = 20.0, poll_total_s: float = POLL_TOTAL_S,
                  resolve: Resolver | None = None, kept_us: int = KEPT_US,
                  keep_per_feed: int = KEEP_PER_FEED) -> None:
@@ -220,7 +220,9 @@ class HttpFeeds:
         self._kept = kept_us
         self._keep_per_feed = keep_per_feed
         self._lock = threading.RLock()
-        self._engine = sqlite_engine(cache, shared=True)
+        target = as_target(cache)
+        target.ensure()
+        self._engine = target.engine(shared=True)
         FEEDS.create_all(self._engine)
         self._session = sessionmaker(self._engine, expire_on_commit=False)
 

@@ -13,7 +13,7 @@ from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.kernel.clock import HOUR, US, instant
 from mika.kernel.codec import digest
 from mika.kernel.events import Payload
@@ -48,7 +48,7 @@ def _r(s: _Tick, e, cx) -> _Tick:
 
 def _toy_run(root: Path, seed: int, wall_clock_bug: bool = False) -> str:
     clock = SimClock(START)
-    store = SqliteStore(root / "mind.db", root / "views.db", threaded=False)
+    store = SqlStore(root / "mind.db", root / "views.db", threaded=False)
     kernel = Kernel(KernelDeps(faculties=[_TOY], store=store, clock=clock, ids=SeededIdGen(seed), seed=seed))
 
     async def main() -> str:
@@ -79,7 +79,7 @@ def check_determinism() -> bool:
 def check_sentinel() -> bool:
     with tempfile.TemporaryDirectory() as d, sim_environment():
         _toy_run(Path(d), 1, wall_clock_bug=True)
-        store = SqliteStore(Path(d) / "mind.db", Path(d) / "views.db", threaded=False)
+        store = SqlStore(Path(d) / "mind.db", Path(d) / "views.db", threaded=False)
         asyncio.run(store.open())
         leaks = sentinel_leaks(store.read())
         asyncio.run(store.close())

@@ -50,7 +50,7 @@ from mika.adapters.mail import LEGACY_ACCOUNT
 from mika.adapters.mcp.hub import McpHub
 from mika.adapters.mcp.relay import Relay
 from mika.adapters.shares import DiskShares
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
 from mika.adapters.web.accounts import Accounts, password_problems
@@ -113,8 +113,9 @@ def ask_password(ask: Callable[[str], str] | None = None) -> str | None:
 
 def _mind(data: Path, *, snapshot_every: int = 500) -> Mind:
     datadir.hold(data)  # le journal ne s'écrit qu'à un seul à la fois (serveur arrêté)
-    schema.migrate_data(data)
-    store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
+    bases = schema.targets(data)
+    schema.migrate_data(data, bases)
+    store = SqlStore(bases["mind"], bases["views"], threaded=False)
     return Mind(Registry([RUNTIME, *faculties()]), store, RealClock(), RandomIdGen(), snapshot_every=snapshot_every)
 
 
@@ -165,8 +166,9 @@ async def rebuild(data: Path, owners: list[str]) -> dict[str, object]:
 async def _offline(data: Path, *, vectors: bool = False) -> Kernel:
     """Un noyau relu, rien de vivant : aucun processus, aucun modèle (serveur arrêté)."""
     datadir.hold(data)  # serveur arrêté : une seule écriture à la fois
-    schema.migrate_data(data)
-    store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
+    bases = schema.targets(data)
+    schema.migrate_data(data, bases)
+    store = SqlStore(bases["mind"], bases["views"], threaded=False)
     ports: dict[str, object] = {}
     if vectors:  # le modèle ne se charge qu'à un plongement : jamais ici
         ports["vectors"] = SqliteVectorIndex(store, SentenceEmbedder())
@@ -299,8 +301,9 @@ async def mcp_command(settings: Settings, args: argparse.Namespace) -> dict[str,
 
 
 async def _with_settings(data: Path, fn):  # type: ignore[no-untyped-def]
-    schema.migrate_data(data)
-    store = SqliteStore(data / "mind.db", data / "views.db", threaded=False)
+    bases = schema.targets(data)
+    schema.migrate_data(data, bases)
+    store = SqlStore(bases["mind"], bases["views"], threaded=False)
     await store.open()
     try:
         settings = Settings(store, SecretBox.for_data(data))

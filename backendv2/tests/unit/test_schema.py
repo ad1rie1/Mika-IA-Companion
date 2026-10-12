@@ -17,6 +17,7 @@ from sqlalchemy.schema import CreateIndex, CreateTable
 from mika.adapters.database import sqlite_engine
 from mika.app import schema
 from mika.ports.sql import DATABASES, MIND, TABLE_OPTIONS, Key
+from tests.fixtures import backend
 
 schema.load_models()
 TABLES = [table for meta in DATABASES.values() for table in meta.sorted_tables]
@@ -31,6 +32,7 @@ def test_every_base_has_a_file_and_entities() -> None:
     assert all(DATABASES[name].tables for name in DATABASES)
 
 
+@pytest.mark.sqlite_only  # les fichiers d'un dossier ; sur un serveur : la variante « on_mariadb »
 @pytest.mark.parametrize("name", sorted(schema.FILES))
 def test_each_base_reaches_its_last_revision_without_drift(tmp_path, name) -> None:
     schema.migrate_data(tmp_path)
@@ -45,6 +47,7 @@ def test_each_base_reaches_its_last_revision_without_drift(tmp_path, name) -> No
         engine.dispose()
 
 
+@pytest.mark.sqlite_only  # les fichiers d'un dossier ; sur un serveur : la variante « on_mariadb »
 def test_a_base_born_of_its_entities_is_completed_and_marked(tmp_path) -> None:
     engine = _engine(tmp_path, "mind")
     try:
@@ -86,3 +89,24 @@ def test_every_table_compiles_for_mariadb(table) -> None:
     assert " TEXT" not in ddl and " BLOB" not in ddl.replace("LONGBLOB", "")  # 64 Ko : jamais assez
     for index in table.indexes:
         str(CreateIndex(index).compile(dialect=dialect))
+
+
+@pytest.mark.parametrize("name", sorted(schema.FILES))
+def test_each_base_reaches_its_last_revision_on_mariadb(tmp_path, name) -> None:
+    """La même chose sur un serveur MariaDB (``--mariadb``) : les révisions d'Alembic y créent exactement les entités."""
+    if not backend.active():
+        pytest.skip("la voie MariaDB (--mariadb)")
+    where = {n: backend.target(tmp_path, n) for n in schema.FILES}
+    schema.migrate_data(tmp_path, where)
+    schema.migrate_data(tmp_path, where)  # deux fois : rien ne change
+    engine = where[name].engine()
+    try:
+        assert schema.differences(name, engine) == []
+        with engine.connect() as conn:
+            assert set(DATABASES[name].tables) <= set(inspect(conn).get_table_names())
+            collations = {r[0] for r in conn.exec_driver_sql(
+                "SELECT DISTINCT table_collation FROM information_schema.tables WHERE table_schema = DATABASE() "
+                "AND table_name <> 'alembic_version'")}
+            assert collations == {"utf8mb4_nopad_bin"}
+    finally:
+        engine.dispose()

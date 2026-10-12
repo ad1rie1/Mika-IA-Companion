@@ -26,7 +26,7 @@ from mika.adapters.imaging.config import ImageBackendSpec, ImagingConfig, LiveIm
 from mika.adapters.imaging.fake import FakeImageBackend, solid_png
 from mika.adapters.imaging.pricing import price_usd
 from mika.adapters.imaging.sizes import dimensions, pixels, sniff
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.app import cli
 from mika.app.settings import IMAGING_KEY, SecretBox, Settings
 from mika.kernel.clock import ManualClock
@@ -98,7 +98,7 @@ async def test_a_local_server_has_one_slot_and_preempts_a_hosted_service_two():
 
 
 async def test_settings_seal_the_key_and_refuse_a_broken_configuration(tmp_path):
-    store = SqliteStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
+    store = SqlStore(tmp_path / "mind.db", tmp_path / "views.db", threaded=False)
     await store.open()
     try:
         settings = Settings(store, SecretBox.for_data(tmp_path))

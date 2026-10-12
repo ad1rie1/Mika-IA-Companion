@@ -3,7 +3,8 @@
 - une liste (``IN``) se déplie, une liste vide ne trouve rien ;
 - les valeurs écrites dans la requête (``== "pending"``, ``limit(1)``) n'ont pas à être données ;
 - une insertion en lot passe, et une valeur trop longue pour sa ``Key`` y est refusée comme ailleurs ;
-- le SQL compilé pour MariaDB a la même forme (paramètres ``?``, la liste à déplier).
+- le SQL compilé pour MariaDB a la même forme (paramètres ``%s`` de PyMySQL, la liste à déplier), compilé à part
+  de celui de SQLite même quand les deux servent dans le même processus.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from __future__ import annotations
 import pytest
 from sqlalchemy import Column, Integer, bindparam, insert, select
 from sqlalchemy.dialects.mysql.mariadb import loader
+from sqlalchemy.dialects.sqlite.pysqlite import SQLiteDialect_pysqlite
 
 from mika.ports.sql import Key, KeyTooLong, LongText, Prepared, projection_table
 from tests.fixtures.sqldb import SqlDB
@@ -47,8 +49,10 @@ def test_a_batch_insert_checks_the_bounds_of_its_keys(db) -> None:
 
 
 def test_the_mariadb_form_is_the_same() -> None:
-    dialect = loader("mariadbconnector").__new__(loader("mariadbconnector"))
-    dialect.__init__()
+    assert "?" in BY_IDS._sql(SQLiteDialect_pysqlite())[0]  # la forme SQLite d'abord, gardée en cache
+    dialect = loader("pymysql")(paramstyle="format")  # comme le moteur (``adapters.database.mariadb_engine``)
     sql, names, expanding, fixed = BY_IDS._sql(dialect)
-    assert "?" in sql and "__[POSTCOMPILE_ids]" in sql and "LIMIT" in sql
+    assert "%s" in sql and "?" not in sql and "__[POSTCOMPILE_ids]" in sql and "LIMIT" in sql
     assert expanding == {"ids"} and "ids" in names and set(fixed.values()) >= {"a"}
+    bound, args = BY_IDS._bind(dialect, {"ids": [1, 3]})
+    assert "IN (%s, %s)" in bound and args[:2] == [1, 3]

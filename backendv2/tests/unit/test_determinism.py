@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from mika.adapters.store_sqlite import SqliteStore
+from mika.adapters.store_sql import SqlStore
 from mika.kernel.clock import ManualClock
 from mika.kernel.ids import SeededIdGen
 from mika.kernel.registry import Registry
@@ -33,7 +33,7 @@ def run_child(tmp: Path, hashseed: str) -> dict:
 
 
 async def replay_digest(tmp: Path, *, keep_snapshot: str) -> tuple[str, int]:
-    store = SqliteStore(tmp / "mind.db", tmp / "views.db", threaded=False)
+    store = SqlStore(tmp / "mind.db", tmp / "views.db", threaded=False)
     await store.open()
     if keep_snapshot == "none":
         await store.run_mind(lambda sql: sql.execute("DELETE FROM snapshots"))
@@ -43,7 +43,7 @@ async def replay_digest(tmp: Path, *, keep_snapshot: str) -> tuple[str, int]:
     rows = store.query_mind("SELECT seq FROM snapshots")
     await store.close()
     reg = Registry([RUNTIME, FRIENDLY])
-    mind = Mind(reg, SqliteStore(tmp / "mind.db", tmp / "views.db", threaded=False), ManualClock(START),
+    mind = Mind(reg, SqlStore(tmp / "mind.db", tmp / "views.db", threaded=False), ManualClock(START),
                 SeededIdGen(0))
     report = await mind.boot(append_boot=False)
     d = state_digest(mind.root, reg)

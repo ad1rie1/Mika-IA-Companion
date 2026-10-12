@@ -324,12 +324,14 @@ class Prepared:
     def __init__(self, stmt: Any, *, columns: Sequence[str] | None = None) -> None:
         self.stmt = stmt
         self.columns = tuple(columns) if columns is not None else None
-        self._compiled: dict[str, tuple[str, tuple[str, ...], frozenset[str], dict[str, Any]]] = {}
+        self._compiled: dict[tuple[str, str], tuple[str, tuple[str, ...], frozenset[str], dict[str, Any]]] = {}
         table = getattr(stmt, "table", None) if getattr(stmt, "is_dml", False) else None
         self._bounds = tuple((c.key, c.type.length) for c in _key_columns(table))
 
     def _sql(self, dialect: Any) -> tuple[str, tuple[str, ...], frozenset[str], dict[str, Any]]:
-        got = self._compiled.get(dialect.name)
+        # par moteur et par forme des paramètres : deux pilotes d'un même moteur ne marquent pas pareil (``?``, ``%s``)
+        key = (dialect.name, getattr(dialect, "paramstyle", "qmark"))
+        got = self._compiled.get(key)
         if got is None:
             kw: dict[str, Any] = {"column_keys": list(self.columns)} if self.columns is not None else {}
             compiled = self.stmt.compile(dialect=dialect, **kw)
@@ -337,7 +339,7 @@ class Prepared:
             expanding = frozenset(n for n in names if f"__[POSTCOMPILE_{n}]" in compiled.string)
             # les valeurs écrites dans la requête (``status == "pending"``, ``limit(1)``) sont des paramètres anonymes
             fixed = {n: b.effective_value for n, b in compiled.binds.items() if n in names and not b.required}
-            got = self._compiled[dialect.name] = (compiled.string, names, expanding, fixed)
+            got = self._compiled[key] = (compiled.string, names, expanding, fixed)
         return got
 
     def _check(self, rows: Sequence[Mapping[str, Any]]) -> None:
@@ -356,7 +358,8 @@ class Prepared:
         for n in names:
             if n in expanding:
                 items = list(params[n] if n in params else fixed[n])
-                sql = sql.replace(f"__[POSTCOMPILE_{n}]", ", ".join("?" * len(items)) if items else "NULL", 1)
+                mark = "?" if getattr(dialect, "paramstyle", "qmark") == "qmark" else "%s"
+                sql = sql.replace(f"__[POSTCOMPILE_{n}]", ", ".join([mark] * len(items)) if items else "NULL", 1)
                 values.extend(items)
             else:
                 values.append(params[n] if n in params else fixed[n])

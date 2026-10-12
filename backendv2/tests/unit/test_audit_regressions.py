@@ -172,7 +172,7 @@ async def test_semantic_similarity_cannot_give_bob_alices_secret(db):
     drafts = await drafts_for(db, original.split(" Son salaire")[0], teller="user_3")
     assert len(drafts) == 1 and drafts[0].type == mc.BELIEVED
     Items().apply(db, [event(drafts[0], 2)], "")
-    row = db.query(f"SELECT {','.join(ITEM_COLUMNS)} FROM memory_items WHERE id=1")[0]
+    row = db.query(f"SELECT {','.join(f'`{c}`' for c in ITEM_COLUMNS)} FROM memory_items WHERE id=1")[0]
     item = Item.of(dict(zip(ITEM_COLUMNS, row, strict=True)))
     audience = Audience(persons=("user_3",), public=False, level=1, witness_level=2, private_ok=True)
     assert not admissible(item.about, item.sensitivity, "user_3", audience,
@@ -235,7 +235,7 @@ async def test_her_own_opinions_are_not_reclassified_as_facts(db, genre, nature)
 def test_forgetting_the_holder_erases_an_indirectly_reported_opinion(db):
     Items().apply(db, [event(mc.BELIEVED.draft(text=Content.of("Avis de Carol sur Alice, rapporté par Bob"),
         about=("user_2",), told_by=("user_3",), holder="user_4", knowledge_kind="opinion"), 1)], "")
-    raw = db.query(f"SELECT {','.join(ITEM_COLUMNS)} FROM memory_items")[0]
+    raw = db.query(f"SELECT {','.join(f'`{c}`' for c in ITEM_COLUMNS)} FROM memory_items")[0]
     assert "user_4" in _item_vector(dict(zip(ITEM_COLUMNS, raw, strict=True))).persons
     Items().forget(db, "user_4", "")
     assert db.query("SELECT id FROM memory_items") == []
