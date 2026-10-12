@@ -17,9 +17,18 @@ from mika.contracts import memory as memory_c
 from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
+from mika.faculties.memory.archive import recall_life
 from mika.faculties.memory.consolidation import Consolidate
 from mika.faculties.memory.extraction import Conversation, Extraction, People, XEvenement, render
-from mika.faculties.memory.faculty import MemoryParams, MemoryState, _followed, _noted, moment_thread
+from mika.faculties.memory.faculty import (
+    MemoryParams,
+    MemoryState,
+    _followed,
+    _life_recalled,
+    _noted,
+    moment_thread,
+)
+from mika.faculties.memory.life import Follow, _told_about
 from mika.faculties.needs import NeedsParams
 from mika.faculties.others.faculty import _cheer
 from mika.kernel.clock import DAY, US
@@ -27,7 +36,7 @@ from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
 from tests.fixtures.mika import at_paris, befriend, boot, build, said
-from tests.unit.test_knowledge_coherence import ALICE, FRAME, Store, alice_says, drafts
+from tests.unit.test_knowledge_coherence import ALICE, FRAME, Frame, Store, alice_says, drafts
 
 MONDAY = at_paris(2026, 10, 5, 8, 45)
 SAM = "ext_1"
@@ -241,4 +250,66 @@ def test_the_archive_keeps_the_thread():
     db.put(_note("son entretien", FRAME.now + 3 * DAY, replaces=1), 5)
     (raw,) = db.query(f"SELECT payload FROM {memory_c.LIFE_TABLE}")
     assert '"thread": 1' in raw[0]
+    db.conn.close()
+
+
+# ── Ce que la relecture de sa vie recharge ; une adresse reliée depuis (audit du 2026-10-12) ─────────────────
+
+
+def test_her_life_reloaded_at_a_message_is_only_what_she_keeps_in_mind():
+    """À chaque message, sa vie se relisait dans l'archive : tous les moments de la personne, même passés depuis
+    longtemps. Le moment noté suivant (de n'importe qui) les chassait de la tranche, le message suivant les y remettait
+    — recopiés dans le journal à chaque fois. Seul revient ce que la tranche garde : à venir, en cours, passé depuis
+    peu ; et ce qui est revenu y reste."""
+    db = Store()
+    db.put(_note("son déménagement", FRAME.now - 20 * DAY), 1, FRAME.now - 25 * DAY)
+    db.put(_note("son entretien chez Ubisoft", FRAME.now + 2 * DAY), 2, FRAME.now - DAY)
+    db.put(_note("son chat Moustache est malade", FRAME.now - 20 * DAY, ongoing=True), 3, FRAME.now - 20 * DAY)
+    message = NS(seq=10, at=FRAME.now, data=NS(handle="user_2"))
+    (reloaded,) = recall_life(MemoryState(), FRAME, message, {"store": db})
+    assert sorted(item.id for item in reloaded.data.items) == [2, 3]  # le déménagement d'il y a vingt jours, non
+    s = _life_recalled(MemoryState(), _event(reloaded, 11, FRAME.now), CX)
+    s = _noted(s, _event(_note("son dîner", FRAME.now + 3 * DAY, person="user_3"), 12, FRAME.now), CX)
+    assert {2, 3} <= set(s.events)  # le moment suivant n'en chasse rien
+    assert recall_life(s, FRAME, message, {"store": db}) == []  # rien ne revient dans le journal au message suivant
+    db.conn.close()
+
+
+WEB = "web_ab12cd"
+
+
+class _Linked(Frame):
+    """Un cadre où l'adresse ``web_…`` a été reliée à Alice depuis qu'un moment y a été noté."""
+
+    def get(self, key):
+        if key.name == "identity.person" and key.arg == WEB:
+            return "user_2"
+        if key.name == "transcript.head":
+            return 10001
+        return super().get(key)
+
+
+async def test_a_moment_noted_under_an_address_linked_since_is_taken_up_by_the_person():
+    """Un moment noté quand Alice écrivait sans compte (``web_…``) ; l'adresse a été reliée à elle depuis. Quand elle
+    raconte comment ça s'est passé, ou que Mika le lui demande, le moment est repris — la relecture comparait la
+    personne aux clés notées alors, sans les résoudre, et lui redemandait « alors, cet entretien ? » (audit du
+    2026-10-12)."""
+    frame = _Linked()
+    s = _noted(MemoryState(), _event(_note("son entretien chez Ubisoft", FRAME.now - DAY, person=WEB), 1,
+                                     FRAME.now - 3 * DAY), CX)
+    texts = NS(content=lambda refs: {r: "son entretien chez Ubisoft" for r in refs})
+    told = NS(seq=20, at=FRAME.now, data=NS(handle="user_2", addressed=True,
+                                            text=Content(ref="m", text="l'entretien s'est super bien passé !")))
+    assert [d.data.event for d in _told_about(s, frame, told, {"store": texts})] == [1]  # elle le raconte
+    db = Store()
+    db.execute("INSERT INTO thread(id,at,role,person,text,room) VALUES(?,?,?,?,?,?)",
+               (10001, FRAME.now, "assistant", "user_2", "alors, cet entretien chez Ubisoft ?", None))
+    db.texts["son entretien chez Ubisoft.ref"] = "son entretien chez Ubisoft"
+    emitted = []
+
+    async def emit(*drafts, **_kw):
+        emitted.extend(drafts)
+
+    await Follow().run(NS(frame=frame, state=s, ports={"store": db}, emit=emit))
+    assert [d.data.event for d in emitted] == [1]  # elle le lui demande
     db.conn.close()

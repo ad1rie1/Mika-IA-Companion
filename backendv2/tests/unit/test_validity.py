@@ -151,6 +151,27 @@ def test_a_contest_is_voiced_only_when_both_sides_can_be_said():
     db.conn.close()
 
 
+def test_the_other_side_is_never_attributed_to_a_testimony_this_audience_cannot_hear():
+    """Alice lui a confié en secret que « Inès habite à Marseille » ; Bob, à qui elle parle, le lui a dit aussi. Le doute
+    sur « Inès habite à Lyon » s'attribue à Bob — c'est lui qui le lui a dit —, jamais au premier témoignage, celui
+    d'Alice, que Bob ne peut pas entendre (il était repris d'office : « mais Alice t'a dit autre chose », audit du
+    2026-10-12). Vu par elle-même, sans témoin qui s'entende ici : « quelqu'un »."""
+    ines = "user_5"
+    friend = Audience(persons=(BOB,), public=False, level=int(Sensitivity.PERSONAL),
+                      witness_level=int(Sensitivity.PERSONAL), private_ok=True)
+    for second, said_by in ((mc.ATTESTED.draft(item=2, told_by=(BOB,), heard_by=(BOB,), source=BOB, sensitivity=1),
+                             "Bob"),
+                            (mc.ATTESTED.draft(item=2, origin=mc.OBSERVED, sensitivity=1), "quelqu'un")):
+        db = Store()
+        db.put(believed("Inès habite à Lyon", (ines,), (CAROL,), sensitivity=1), 1)
+        db.put(mc.BELIEVED.draft(text=Content.of("Inès habite à Marseille"), about=(ines,), told_by=(ALICE,),
+                                 heard_by=(ALICE,), source=ALICE, sensitivity=1, secret=True, contests=1), 2)
+        db.put(second, 3)
+        line = contested_line(FRAME, items_by_id(db, [1])[1], BOB, friend, {}, db, {})
+        assert "Marseille" in line and said_by in line and "Alice" not in line
+        db.conn.close()
+
+
 # ── Changer d'avis se ressent ───────────────────────────────────────────────
 
 

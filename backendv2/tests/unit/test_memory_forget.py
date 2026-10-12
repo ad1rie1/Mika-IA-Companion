@@ -11,6 +11,8 @@ import sqlite3
 
 from mika.app import cli
 from mika.contracts import memory as memory_c
+from mika.kernel.clock import HOUR
+from mika.kernel.events import Content, Origin
 from mika.runtime.traces import TABLE as TRACES
 from mika.sim.clock import run_virtual
 from mika.vocab.people import named_label
@@ -175,3 +177,35 @@ def test_forgetting_a_mentioned_person_erases_their_evidence_without_erasing_oth
     remaining = run_virtual(clock, main)
     assert len(remaining) == 1 and remaining[0][0] != forgotten_id
     assert json.loads(remaining[0][2]) == ["user_1"], "la mention oubliée ne revient pas à la reconstruction"
+
+
+def test_forgetting_someone_drops_what_she_owed_them_and_what_weighed_on_them(tmp_path):
+    """Oublier Alice efface ses textes ; ce que Mika lui avait promis restait pourtant dû — à l'heure dite, une
+    initiative « tu lui avais promis quelque chose » partait vers une personne oubliée, sur une section vide —, et ce
+    qui l'avait touchée de grave taisait encore le banal de sa vie (audit du 2026-10-12)."""
+    kernel, clock, _, _out = build(tmp_path, Script())
+    alice = "user_2"
+
+    async def main():
+        await boot(kernel)
+        now = clock.now()
+        await kernel.mind.append(
+            [memory_c.PROMISE_NOTICED.draft(text=Content.of("Lui envoyer le lien du concert", level=2), to=alice,
+                                            due=now + 2 * HOUR, sensitivity=2),
+             memory_c.REMEMBERED.draft(text=Content.of("Alice m'a dit que son père est mort", level=3), about=(alice,),
+                                       told_by=(alice,), heard_by=(alice,), sensitivity=3, importance=0.95,
+                                       felt=(("sad", 0.9),))],
+            emitter="memory", correlation="genese", origin=Origin.GENESIS)
+        frame = kernel.mind.frame()
+        before = (len(frame.get(memory_c.PROMISES_TO(alice))), frame.get(memory_c.HARD_TIMES(alice)) > 0)
+        await kernel.forget(alice)
+        frame = kernel.mind.frame()
+        state = frame.state("memory")
+        after = (len(frame.get(memory_c.PROMISES_TO(alice))), frame.get(memory_c.HARD_TIMES(alice)) > 0,
+                 dict(state.promises), alice in state.hard)
+        await kernel.stop()
+        return before, after
+
+    before, after = run_virtual(clock, main)
+    assert before == (1, True)  # contrôle : promise, et touchée
+    assert after == (0, False, {}, False)

@@ -49,9 +49,9 @@ from mika.kernel.clock import DAY, HOUR
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience
 from mika.kernel.state import FrozenDict
+from mika.sim.clock import run_virtual
 from mika.vocab import causes
 from mika.vocab.affect import Emotion
-from mika.sim.clock import run_virtual
 from mika.vocab.privacy import Sensitivity, Verdict
 from tests.fixtures.mika import at_paris, boot, build
 from tests.unit.test_audit_regressions import event

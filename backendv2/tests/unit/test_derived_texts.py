@@ -182,3 +182,35 @@ def test_a_secret_said_in_a_room_is_not_kept_by_its_summary():
             {"id": 11, "at": FRAME.now - 500, "role": "user", "person": SAM, "text": "et sinon ça va"}]
     lines = _compact_lines(frame, "room:salon", rows, 20 * 60 * 10**6, withheld={10})
     assert "CANARI" not in lines and "et sinon ça va" in lines
+
+
+# ── Une source devenue une confidence : un sujet délicat (audit du 2026-10-12) ───────────────────────────────
+
+
+DELICATE_5 = mc.DELICATE.draft(person=SAM, items=(5,), level=int(Sensitivity.CONFIDENCE))
+
+
+def test_a_source_that_touches_a_delicate_subject_silences_what_was_written_from_it():
+    """Le portrait de Sam dit maintenant « son travail » : ce qu'elle savait de son travail devient une confidence, à la
+    porte (``memory.delicate``, ADR 0099). Ce qu'elle en avait déjà tiré — une pensée, un rêve, son journal intime, son
+    récit, le portrait — gardait la sensibilité d'avant dans sa filiation, et pouvait le redire à une amie : il se
+    tait, comme pour une source devenue secrète, puis se réécrit."""
+    assert mc.DELICATE in mc.WITHDRAWING  # toutes les facultés qui gardent un texte dérivé le reçoivent
+    assert mc.withdrawals(DELICATE_5.type.name, DELICATE_5.data, 9) == (mc.Withdrawal(5, mc.DELICATE_TOPIC),)
+    thoughts = AttentionState(thoughts=FrozenDict({40: _thought(Lineage(sources=(5, 6)))}))
+    assert 40 not in _sources_withdrawn(thoughts, _event(DELICATE_5), CX).thoughts
+    frame = NS(get=lambda _r: "")
+    dream = Dream(30, "2026-10-07", "rêve", "pleasant", 0.9, "happy", (SAM,), 2, FRAME.now, lineage=_lineage())
+    journal = Journal("2026-10-07", "intime", (SAM,), "happy", FRAME.now, shareable_ref="partageable",
+                      lineage=_lineage())
+    night = self_withdrawn(SelfState(dreams=(dream,), journals=FrozenDict({"2026-10-07": journal})),
+                           _event(DELICATE_5), CX)
+    d, j = night.dreams[0], night.journals["2026-10-07"]
+    assert not dream_hearable(self_c.DreamReading(d.id, d.night, d.text_ref, d.kind, d.vividness, d.emotion, d.about,
+                                                  d.sensitivity, d.recalled, d.lineage, d.masked), SAM, PRIVATE, frame)
+    assert journal_ref(self_c.JournalReading(j.day, j.text_ref, j.about, j.dominant, j.shareable_ref, j.lineage,
+                                             j.masked), SAM, PRIVATE, frame) == "partageable"
+    told = self_withdrawn(_narrated(SelfState(), _narration((5, 6)), CX), _event(DELICATE_5), CX)
+    assert told.narrative_masked and told.narrative_stale
+    portrait = _portrait_sources(_portrait(), _event(DELICATE_5), CX)
+    assert portrait.profiles[SAM].masked and portrait.profiles[SAM].stale

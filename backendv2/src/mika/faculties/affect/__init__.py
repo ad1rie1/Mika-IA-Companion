@@ -63,7 +63,7 @@ AFFECT = Faculty("affect", state=AffectState, init=lambda p: AffectState(), para
                  # 7 : blessée, sa réaction pèse et la relation se refroidit (jamais de tendresse) ; refermée, touchée :
                  # sa posture le retient (ADR 0100)
                  # 8 : un message qui la tire du sommeil la réveille aussi ici (une nuit coupée allège en deux fois),
-                 # ses nuits datées de l'instant du croisement (ADR 0101)
+                 # ses nuits datées de l'instant du croisement (ADR 0102)
                  state_version=8, retired_params=("declared_window_us",))
 #: ni une connaissance ni une inconnue : sa tendresse s'y cache (le masque, au-dessus du milieu)
 _TENDER_TO = frozenset({social_c.FRIEND, social_c.CLOSE})

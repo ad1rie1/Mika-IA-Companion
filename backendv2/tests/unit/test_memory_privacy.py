@@ -14,24 +14,36 @@ from __future__ import annotations
 
 import asyncio
 import re
+from types import SimpleNamespace as NS
 
 from hypothesis import given
 from hypothesis import strategies as st
 
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
+from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import extraction as x
+from mika.faculties.memory.consolidation import Consolidate
+from mika.faculties.memory.extraction import Conversation, Line, Speaker
+from mika.faculties.memory.faculty import MemoryState, _promised
+from mika.faculties.memory.recall import _recall, feelings
 from mika.faculties.memory.salience import admissible, unsaid
+from mika.faculties.memory.tools import SearchArgs, memory_search
 from mika.kernel.clock import DAY, HOUR, US
 from mika.kernel.events import Content, Origin
 from mika.kernel.frame import Audience
 from mika.ports.llm import LLMResponse, ToolCall
+from mika.ports.vectors import VectorItem
 from mika.runtime.operations import FIXED_FIELD, forget_subject, perform
 from mika.sim.clock import SimClock, run_virtual
 from mika.sim.llm.persona import PersonaSimLLM
+from mika.vocab.affect import facets
 from mika.vocab.people import named_label
+from mika.vocab.privacy import Sensitivity
 from tests.fixtures.memory import SIX, Script, chat, kept, section, seq_of, token
 from tests.fixtures.mika import AFTERNOON, befriend, boot, build, connect, said
+from tests.unit.test_knowledge_coherence import CX, FRAME, Frame, ask, index
+from tests.unit.test_knowledge_coherence import Store as KnowledgeStore
 
 REVIENT = "CE QUI TE REVIENT"
 
@@ -858,3 +870,120 @@ def test_in_a_room_she_does_not_pretend_to_know_nothing_about_a_friend(tmp_path)
     assert "moment difficile" not in room_said, "le salon n'a pas à deviner ce qui pèse"
     secret = run_with("CANARI-S2", tmp_path / "b")
     assert "Alice" not in section(secret.replies("ext_1")[-1], REVIENT), "contre-exemple : un secret, rien"
+
+
+# ── Ce que la personne en ressent, ses promesses en salon (audit du 2026-10-12) ─────────────────────────────
+
+
+def _listener(target, aud):
+    """Le cadre d'une réponse à ``target`` (les noms des tests de cohérence)."""
+    frame = Frame(aud)
+    frame.episode = NS(target=target, kind="REPLY", attrs={"reply_to": 10000})
+    return frame
+
+
+async def test_what_someone_feels_is_told_only_where_the_testimony_that_said_it_can_be_heard():
+    """Bob a dit devant Carol qu'Alice a perdu son travail (anodin) ; Alice lui a confié, en privé, qu'elle en a honte.
+    Ce qu'Alice en ressent vient de sa confidence : redite à Carol par le témoignage de Bob, la croyance ne dit pas sa
+    honte — ni ne se trouve en cherchant « ce qui fait honte » (audit du 2026-10-12 : le ressenti suivait la ligne, pas
+    le témoignage). Devant Alice, si."""
+    alice, bob, carol = "user_2", "user_3", "user_4"
+    text = "Alice a perdu son travail chez Ubisoft"
+    shame = facets((("embarrassed", 0.8),))
+    db = KnowledgeStore()
+    db.put(memory_c.BELIEVED.draft(text=Content.of(text, level=1), about=(alice,), told_by=(bob,),
+                                   heard_by=(bob, carol), source=bob, sensitivity=1), 1)
+    db.put(memory_c.ATTESTED.draft(item=1, told_by=(alice,), heard_by=(alice,), source=alice, first_hand=True,
+                                   sensitivity=int(Sensitivity.CONFIDENCE), felt=shame), 2)
+    ask(db, "Tu sais ce qui arrive à Alice avec son travail chez Ubisoft ?")
+    vectors = await index(db, [VectorItem(1, memory_c.BELIEF, text, (alice, bob))])
+    told = feelings(shame, (), "Alice")
+    friend = Audience(persons=(carol,), public=False, level=int(Sensitivity.ANODYNE),
+                      witness_level=int(Sensitivity.PERSONAL), private_ok=True)
+    to_carol = _listener(carol, friend)
+    found = await memory_search(SearchArgs(query=text), NS(ports={"store": db, "vectors": vectors}, frame=to_carol))
+    assert text in found and told not in found  # la rumeur se redit, pas la confidence de ce qu'elle vit
+    recalled = [r.label for r in (await _recall(MemoryState(), to_carol, {"store": db, "vectors": vectors})).beliefs]
+    assert any(text in label for label in recalled) and not any(told in label for label in recalled)  # au rappel aussi
+    by_feeling = await memory_search(SearchArgs(query="honte", ressenti=["embarrassed"], de_qui="la_personne"),
+                                     NS(ports={"store": db, "vectors": vectors}, frame=to_carol))
+    assert text not in by_feeling  # ni trouvée par la honte d'Alice
+    to_alice = _listener(alice, Audience(persons=(alice,), public=False, level=int(Sensitivity.PERSONAL),
+                                         witness_level=int(Sensitivity.CONFIDENCE), private_ok=True))
+    found = await memory_search(SearchArgs(query=text), NS(ports={"store": db, "vectors": vectors}, frame=to_alice))
+    assert text in found and told in found  # contrôle : devant elle, ce qu'elle en a dit
+    recalled = [r.label for r in (await _recall(MemoryState(), to_alice, {"store": db, "vectors": vectors})).beliefs]
+    assert any(told in label for label in recalled)
+    db.conn.close()
+
+
+def test_a_room_reread_sees_only_the_promises_the_room_heard():
+    """Une promesse faite à Alice en privé (« je te passe le numéro de mon avocate ») ne se montre pas à la relecture
+    d'un salon où elle parle : le modèle pourrait la recopier dans ce que le salon a « entendu ». Ce que Mika lui a
+    promis dans ce salon même, le salon l'a entendu ; en privé, tout se montre (audit du 2026-10-12)."""
+    alice = "user_2"
+    db = KnowledgeStore()
+    s = MemoryState()
+    for seq, text, message, room in ((1, "Lui passer le numéro de mon avocate pour son divorce", 500, None),
+                                     (2, "Lui envoyer la playlist du karaoké", 501, "salon")):
+        db.execute(f"INSERT INTO {transcript_c.THREAD_TABLE}(id,at,role,person,text,room) VALUES(?,?,?,?,?,?)",
+                   (message, FRAME.now - DAY, "assistant", alice, text, room))
+        e = db.put(memory_c.PROMISE_NOTICED.draft(text=Content.of(text, level=2), to=alice, due=FRAME.now + DAY,
+                                                  sensitivity=2, sources=(message,)), seq, FRAME.now - DAY)
+        s = _promised(s, e, CX)
+    speaker = (Speaker("P1", alice, "Alice"),)
+    line = (Line(10000, FRAME.now, "Alice [P1]", "coucou tout le monde", alice),)
+    in_room = Consolidate()._promises(FRAME, db, s, Conversation("room:salon", speaker, line, "salon"))
+    assert [i for i, _to, _t in in_room] == [2]  # le salon a entendu la playlist, pas l'avocate
+    in_private = Consolidate()._promises(FRAME, db, s, Conversation(f"private:{alice}", speaker, line))
+    assert [i for i, _to, _t in in_private] == [1, 2]  # contrôle : en privé, tout
+    db.conn.close()
+
+
+def _confided(db, alice, *messages):
+    for message in messages:
+        db.execute(f"INSERT INTO {transcript_c.THREAD_TABLE}(id,at,role,person,text,room) VALUES(?,?,?,?,?,?)",
+                   (message, FRAME.now - DAY, "user", alice, "je quitte ma boîte, j'ai démissionné", None))
+
+
+def _souvenir(text, alice, message):
+    return memory_c.REMEMBERED.draft(text=Content.of(text, level=2), about=(alice,), told_by=(alice,),
+                                     heard_by=(alice,), sensitivity=2, importance=0.5, sources=(message,))
+
+
+def test_a_discretion_reaches_a_souvenir_the_night_merged_into_another():
+    """Alice l'a dit lundi puis mardi : la nuit a fondu le souvenir de mardi dans celui de lundi. Mercredi, « garde ce
+    que je t'ai dit hier pour toi » vise le message de mardi : la discrétion ferme les souvenirs nés des mêmes mots — le
+    gardé ne connaissait que ceux de lundi, et restait dicible à toute amie (audit du 2026-10-12)."""
+    alice = "user_2"
+    db = KnowledgeStore()
+    _confided(db, alice, 500, 501)
+    text = "Alice m'a dit qu'elle quitte sa boîte"
+    db.put(_souvenir(text, alice, 500), 1, FRAME.now - 2 * DAY)
+    db.put(_souvenir(text, alice, 501), 2, FRAME.now - DAY)
+    db.put(memory_c.NIGHT_SORTED.draft(night="2026-10-07", merges=((1, 2),)), 3, FRAME.now - DAY // 2)
+    db.put(memory_c.BELIEVED.draft(text=Content.of("Alice quitte sa boîte", level=2), about=(alice,), told_by=(alice,),
+                                   heard_by=(alice,), sensitivity=2, sources=(501,)), 4, FRAME.now - DAY)
+    conv = Conversation(f"private:{alice}", (Speaker("P1", alice, "Alice"),),
+                        (Line(10000, FRAME.now, "Alice [P1]", "garde ce que je t'ai dit hier pour toi", alice),))
+    assert [d.data.item for d in Consolidate._closed_souvenirs(FRAME, db, conv, [4])] == [1]
+    db.conn.close()
+
+
+def test_a_discretion_closes_a_souvenir_without_making_it_last_longer():
+    """« Garde-le pour toi » ferme le souvenir de la même confidence ; il le renforçait aussi — plus d'importance, son
+    oubli remis à zéro : demander la discrétion faisait durer le souvenir (audit du 2026-10-12)."""
+    alice = "user_2"
+    db = KnowledgeStore()
+    _confided(db, alice, 500)
+    born = FRAME.now - 10 * DAY
+    db.put(_souvenir("Alice m'a dit qu'elle quitte sa boîte", alice, 500), 1, born)
+    db.put(memory_c.BELIEVED.draft(text=Content.of("Alice quitte sa boîte", level=2), about=(alice,), told_by=(alice,),
+                                   heard_by=(alice,), sensitivity=2, sources=(500,)), 2, born)
+    conv = Conversation(f"private:{alice}", (Speaker("P1", alice, "Alice"),),
+                        (Line(10000, FRAME.now, "Alice [P1]", "garde-le pour toi", alice),))
+    for n, draft in enumerate(Consolidate._closed_souvenirs(FRAME, db, conv, [2]), start=3):
+        db.put(draft, n, FRAME.now)
+    row = db.query(f"SELECT importance, touched_at, secret, sensitivity FROM {memory_c.ITEMS_TABLE} WHERE id=1")
+    assert row == [(0.5, born, 1, int(Sensitivity.CONFIDENCE))]  # fermé, sans durer davantage
+    db.conn.close()
