@@ -1,8 +1,0 @@
-{% extends "gestion/social/personne/_base.html" %}
-{% block panneau %}
-{% if no_handle %}
-{% include "gestion/social/personne/_sans_handle.html" with quoi="Les messages sont gardés par identifiant de transport" %}
-{% else %}
-{% include "gestion/partials/messages_list.html" %}
-{% endif %}
-{% endblock %}

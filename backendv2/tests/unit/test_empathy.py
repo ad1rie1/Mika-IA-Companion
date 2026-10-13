@@ -14,7 +14,18 @@ from __future__ import annotations
 from types import SimpleNamespace as NS
 
 from mika.contracts import memory as mc
-from mika.faculties.memory.extraction import Extraction, XCroyance, XEvenement, XSouvenir
+from mika.contracts import runtime as rt
+from mika.faculties.memory.consolidation import Consolidate
+from mika.faculties.memory.extraction import (
+    Conversation,
+    Extraction,
+    Line,
+    Speaker,
+    XCroyance,
+    XEvenement,
+    XSouvenir,
+    render,
+)
 from mika.faculties.memory.faculty import MemoryParams, MemoryState, _retained
 from mika.faculties.memory.recall import _body, _recall
 from mika.faculties.memory.tools import SearchArgs, memory_search
@@ -30,6 +41,30 @@ CLOSE = Audience(persons=(ALICE,), public=False, level=int(Sensitivity.PERSONAL)
 
 
 # ── La relecture juge ce que chacun ressent ─────────────────────────────────
+
+
+def test_the_reread_starts_from_what_she_said_she_felt():
+    """Ce qu'elle a déclaré en répondant (sa balise) se montre à la relecture, en mots, après sa réplique : son
+    « mon_ressenti » en part au lieu de se juger à neuf (ADR 0107). Jamais un nombre ; le calme ne se dit pas ; une
+    réplique qui racontait sans nom ne dit rien de plus."""
+    class Events:
+        def get_events(self, seqs):
+            notes = {11: '[["emotion", "sad:0.600,anxious:0.300"]]', 12: '[["emotion", "neutral:0.500"]]',
+                     13: '[["emotion", "sad:0.700"]]'}
+            return [NS(seq=s, type=rt.UTTERANCE.name, data=f'{{"annotations": {notes[s]}, "provenance": '
+                                                            f'{"[\"veiled:1\"]" if s == 13 else "[]"}}}')
+                    for s in seqs]
+
+    lines = (Line(10, FRAME.now, "Alice [P1]", "mon chat est mort cette nuit", ALICE),
+             Line(11, FRAME.now, "Mika", "Oh non, Alice… je suis là."),
+             Line(12, FRAME.now, "Mika", "Tu veux en parler ?"),
+             Line(13, FRAME.now, "Mika", "Une amie a vécu ça aussi."))
+    conv = Consolidate._her_lines(Events(), Conversation(f"private:{ALICE}", (Speaker("P1", ALICE, "Alice"),), lines))
+    text = render(conv, now=FRAME.local(), beliefs=(), promises=())
+    assert "je suis là. (en l'écrivant : tristesse et un peu d'inquiétude)" in text
+    assert "en parler ? " not in text and "0.6" not in text and "0,6" not in text
+    assert text.count("en l'écrivant") == 1  # ni le calme, ni ce qui se racontait sans nom
+
 
 
 async def test_the_reread_says_what_the_person_feels_and_what_she_feels():

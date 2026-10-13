@@ -1831,7 +1831,7 @@ memory:
       - l'importance (1 anodin, 2 notable, 3 important, 4 marquant) ;
       - la sensibilité — anodin (ce qu'on dirait devant n'importe qui : goûts, loisirs, anecdotes ; ce qui a été annoncé à tout un groupe), personnel (au moins personnel dès que ça touche la santé, le travail, l'argent, la famille, les amours ou les émotions de quelqu'un), confidence (lourd, intime : ce qu'on ne raconte qu'à des proches). Dans le doute : personnel ;
       - « ressenti » : ce que la personne concernée en ressent, d'après ce qu'elle dit et la façon dont elle le dit — souvent plusieurs émotions à la fois, chacune avec son intensité de 0 à 1 (« je suis enceinte !!! » : joie 0.9 et excitation 0.6 ; « il m'a encore menti » : colère 0.8 et dégoût 0.4) ; vide si rien ne le montre ;
-      - « mon_ressenti » : ce que {name} en ressent elle-même, de la même façon — de l'empathie, selon son lien avec la personne et ce qu'elle sait et pense (se réjouir pour une amie, s'inquiéter pour elle ; ou autre chose quand elle voit les choses autrement) ; vide si rien de particulier ;
+      - « mon_ressenti » : ce que {name} en ressent elle-même, de la même façon — de l'empathie, selon son lien avec la personne et ce qu'elle sait et pense (se réjouir pour une amie, s'inquiéter pour elle ; ou autre chose quand elle voit les choses autrement). Après ses répliques, « (en l'écrivant : …) » dit ce qu'elle a ressenti sur le moment : pars de là, sauf si la suite de la conversation montre autre chose. Vide si rien de particulier ;
       - « secret » : vrai si la personne a demandé de ne pas le répéter — à personne (« dis-le à personne », « entre nous », « garde-le pour toi ») ou à quelqu'un en particulier (« ne lui dis pas »). Tout ce qui laisse deviner un secret est secret aussi. Si elle le demande pour une croyance déjà connue, donne son numéro dans « confidentiel ». Le secret de l'un ne rend pas secret ce qui a été dit sans le demander, dans la même conversation ;
       - « sans_nom », pour tout souvenir ou fait sur la vie d'une personne — celle qui parle comprise, pas {name} elle-même — qui n'est pas secret : la même chose, comme {name} la raconterait à quelqu'un qui ne connaît pas la personne — sans prénom, lieu précis, employeur, nom d'animal, aucun nom propre ni sigle (pas même en minuscules), ni date, ni mois, ni jour, ni métier ou formation précis : l'essentiel, en termes généraux (« quelqu'un que je connais vient de perdre son travail », « le frère d'une amie part vivre à l'étranger », « une amie reprend des études ») ; vide si ce n'est pas possible.
       Dans un salon, ce qui est marqué « (entre eux) » ne lui était pas adressé : n'en retiens que ce qui compte.
@@ -1862,8 +1862,9 @@ memory:
         son intensité de 0 à 1 (« colère » 0.8, « dégoût » 0.4) ; vide si rien ne le montre
       # Le champ « mon_ressenti » : ce qu'elle-même en ressent, de l'empathie (ADR 0083).
       mon_ressenti: >-
-        ce qu'elle-même en ressent, avec son lien à la personne et ce qu'elle pense : chaque émotion et son
-        intensité de 0 à 1 ; vide si rien de particulier
+        ce qu'elle-même en ressent, avec son lien à la personne et ce qu'elle pense — d'abord ce qu'elle a ressenti
+        en lui répondant (« en l'écrivant ») : chaque émotion et son intensité de 0 à 1 ; vide si rien de
+        particulier
       # Le champ « personnes ».
       personnes: >-
         qui c'est concerne : le jeton ([P1]) pour quelqu'un de la conversation, le prénom pour quelqu'un d'autre ;
@@ -2013,6 +2014,9 @@ memory:
       aside: " (entre eux)"
       # Après une de ses répliques (avec son espace de tête) : elle l'a marquée mensonge ([MENSONGE]).
       lie: " (un mensonge)"
+      # Après une de ses répliques (avec son espace de tête) : ce qu'elle a déclaré ressentir en l'écrivant, sa
+      # balise en mots (ADR 0107). {what} : ses facettes (memory.recall.felt : « tristesse et un peu d'inquiétude »).
+      felt: " (en l'écrivant : {what})"
       # Après un message qui porte des pièces jointes (avec son espace de tête) : leurs repères (ADR 0106).
       # {pieces} : « #12.1 « chat.jpg » (photo), #12.2 … ».
       pieces: " [pièces : {pieces}]"

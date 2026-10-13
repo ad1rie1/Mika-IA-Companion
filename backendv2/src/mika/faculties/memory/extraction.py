@@ -33,6 +33,7 @@ from mika.kernel.codec import digest
 from mika.ports.llm import LLMResponse, ToolDecl
 from mika.ports.preprocess import inert
 from mika.ports.sql import HANDLE_MAX, fit
+from mika.vocab import affect as A
 from mika.vocab.affect import facets, facets_valence
 from mika.vocab.circadian import DAYS_FR, MONTHS_FR
 from mika.vocab.people import clean_tokens, fold
@@ -371,6 +372,9 @@ class Line:
     veiled: bool = False
     #: les pièces jointes que porte le message (ADR 0106)
     pieces: tuple[Piece, ...] = ()
+    #: une de ses répliques : ce qu'elle a déclaré ressentir en l'écrivant (sa balise, ses facettes) — la relecture en
+    #: part pour juger ce qu'elle-même ressent de ce qui s'est dit (ADR 0107)
+    felt: tuple[tuple[str, float], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -467,8 +471,26 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
         aside = phrase("memory.extraction.render.aside") if ln.aside else ""
         lie = phrase("memory.extraction.render.lie") if ln.lie else ""
         text = phrase("memory.extraction.render.veiled_said") if ln.veiled else ln.text
-        out.append(f"[#{ln.seq}] {moment:%H:%M} {ln.speaker}{aside} : {text}{lie}{pieces_words(ln.pieces)}")
+        felt = [(e, x) for e, x in ln.felt if e != A.Emotion.NEUTRAL.value] if not ln.veiled else []
+        felt_said = phrase("memory.extraction.render.felt", what=facet_words(felt)) if felt else ""
+        out.append(f"[#{ln.seq}] {moment:%H:%M} {ln.speaker}{aside} : {text}{lie}{felt_said}"
+                   f"{pieces_words(ln.pieces)}")
     return "\n".join(out)
+
+
+#: une facette sous cette intensité se dit « un peu » (« colère et un peu de dégoût »)
+LIGHT_FACET = 0.5
+
+
+def facet_words(felt: Sequence[tuple[str, float]], *, lead: bool = True) -> str:
+    """Les facettes d'un ressenti en mots, jamais un nombre : « colère », « colère et un peu de dégoût »,
+    « amusement, tendresse et joie » (ADR 0083). ``lead`` : la première se dit franchement, quelle que soit son
+    intensité (c'est la plus forte)."""
+    words = [A.NOUN[A.Emotion(e)] if (lead and i == 0) or x >= LIGHT_FACET else
+             phrase("memory.recall.felt.light", what=A.partitive(A.Emotion(e))) for i, (e, x) in enumerate(felt)]
+    if len(words) < 2:
+        return "".join(words)
+    return phrase("memory.recall.felt.and", first=", ".join(words[:-1]), last=words[-1])
 
 
 def pieces_words(pieces: Sequence[Piece]) -> str:

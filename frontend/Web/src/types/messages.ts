@@ -223,7 +223,8 @@ export interface SpeechMessage {
   voice_persona?: VoicePersona;
   voice_profile?: VoiceProfile;
   /**
-   * Persistence cursors (old/backend/communication/history.py). `message_id` is
+   * Persistence cursors (backendv2/src/mika/adapters/web/protocol.py; a `message_id`
+   * is the message's transcript `seq`). `message_id` is
    * this reply's row; the client keeps the highest it has rendered and asks
    * for everything after it on reconnect. Null when the turn was not
    * persisted — a message the server did not record must never advance the
@@ -323,7 +324,7 @@ export interface HistoryMessage {
 
 /**
  * Une pièce jointe que la validation serveur a écartée
- * (old/backend/pipeline/media.py::RejectedAttachment).
+ * (backendv2/src/mika/adapters/web/protocol.py, `rejected_attachments`).
  */
 export interface RejectedAttachment {
   name: string;
@@ -397,7 +398,7 @@ export interface InnerStateUpdateMessage {
 }
 
 /**
- * Live emotional state, pushed between turns (old/backend/emotion/sync.py).
+ * Live emotional state, pushed between turns (backendv2/src/mika/adapters/web/hub.py).
  * Same emotion fields as `speech`, no text and no inner state: the PAD
  * oscillators keep moving while Mika is silent, and this is what stops the
  * face and the readout from freezing on the last reply. Applied as ambient

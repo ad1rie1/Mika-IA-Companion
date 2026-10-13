@@ -4,19 +4,18 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-    
+
         {
-            "name": "VTuber backend (Uvicorn + ASGI lifespan)",
+            "name": "Mika v2 (mika serve)",
             "type": "debugpy",
             "request": "launch",
-            "program": "${workspaceFolder}/run.py",
-            "cwd": "${workspaceFolder}",
+            "module": "mika",
+            "args": ["--data", "data/v2", "serve", "--port", "8001"],
+            "cwd": "${workspaceFolder}/backendv2",
+            "python": "${workspaceFolder}/backendv2/.venv/bin/python",
             "console": "integratedTerminal",
             "justMyCode": false,
-            "autoStartBrowser": false,
-            "env": {
-                "API_PORT": "8001"
-            }
+            "autoStartBrowser": false
         }
     ]
 }

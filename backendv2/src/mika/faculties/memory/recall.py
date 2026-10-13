@@ -60,7 +60,14 @@ from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.faculties.memory import tables as tb
-from mika.faculties.memory.extraction import date_words, mention_scope, same_moment, scope_of, weekday_words
+from mika.faculties.memory.extraction import (
+    date_words,
+    facet_words,
+    mention_scope,
+    same_moment,
+    scope_of,
+    weekday_words,
+)
 from mika.faculties.memory.faculty import MEMORY, MemoryParams, MemoryState, over, params
 from mika.faculties.memory.knowledge import Testimony, pooled
 from mika.faculties.memory.life import due_now, kept_too_early, takes_up_moment
@@ -933,21 +940,6 @@ def tone(item: Item) -> int:
     """Ce qu'un élément est pour qui le vit : une peine (−1), une joie (+1), on ne sait pas (0) — ce que la personne
     concernée en ressent d'abord, sinon ce qu'elle-même en ressent ; toutes facettes pesées (ADR 0083)."""
     return facets_sign(item.felt) or facets_sign(item.empathy) or valence_sign(item.emotion)
-
-
-#: une facette sous cette intensité se dit « un peu » (« colère et un peu de dégoût »)
-LIGHT_FACET = 0.5
-
-
-def facet_words(felt: Sequence[tuple[str, float]], *, lead: bool = True) -> str:
-    """Les facettes d'un ressenti en mots, jamais un nombre : « colère », « colère et un peu de dégoût »,
-    « amusement, tendresse et joie » (ADR 0083). ``lead`` : la première se dit franchement, quelle que soit son
-    intensité (c'est la plus forte)."""
-    words = [A.NOUN[A.Emotion(e)] if (lead and i == 0) or x >= LIGHT_FACET else
-             phrase("memory.recall.felt.light", what=A.partitive(A.Emotion(e))) for i, (e, x) in enumerate(felt)]
-    if len(words) < 2:
-        return "".join(words)
-    return phrase("memory.recall.felt.and", first=", ".join(words[:-1]), last=words[-1])
 
 
 def feelings(felt: Sequence[tuple[str, float]], empathy: Sequence[tuple[str, float]], who: str) -> str:

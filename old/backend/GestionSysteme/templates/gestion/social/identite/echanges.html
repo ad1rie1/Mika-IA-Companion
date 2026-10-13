@@ -1,8 +1,0 @@
-{% extends "gestion/social/identite/_base.html" %}
-{% block panneau %}
-{% if no_handle %}
-<div class="card"><div class="empty">Aucun identifiant de transport lié : les échanges ne peuvent pas être rattachés à cette fiche.</div></div>
-{% else %}
-{% include "gestion/partials/messages_list.html" %}
-{% endif %}
-{% endblock %}

@@ -66,7 +66,7 @@ from mika.ports.shares import valid_id
 from mika.ports.sql import json_has
 from mika.ports.vectors import VectorItem
 from mika.vocab import timespan
-from mika.vocab.affect import Emotion, dominant, facets, facets_valence
+from mika.vocab.affect import Declared, Emotion, dominant, facets, facets_valence
 from mika.vocab.people import clean_display_name, fold, is_identifiable
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import Sensitivity
@@ -188,7 +188,7 @@ class Consolidate:
                           about=tuple(json.loads(about)), detail=Content.of("reprise", level=3)))
             tasks.extend((conv, attempts) for conv in self._conversations(frame, retry_rows, state, directory,
                                                                            aside=json.loads(aside)))
-        tasks = [(self._lies(store, conv), attempts) for conv, attempts in tasks]
+        tasks = [(self._her_lines(store, conv), attempts) for conv, attempts in tasks]
         vectors = ctx.ports.get("vectors")
         rooms = self._rooms(frame, store) if tasks else {}
         failed = False
@@ -329,24 +329,35 @@ class Consolidate:
         return out
 
     @staticmethod
-    def _lies(store: Any, conv: x.Conversation) -> x.Conversation:
-        """Ses répliques qu'elle a marquées mensonge (``LIE_ANNOTATION``) : la relecture le sait, et n'en tire rien
-        comme vrai — ni une croyance, ni une note sur elle (« je ne sais rien de ses projets », redit, ne doit pas
-        devenir ce qu'elle croit). Et celles qui racontaient sans nom ce qu'elle sait de quelqu'un (``veiled:…`` dans
-        leur provenance, ADR 0091) : la relecture n'en voit pas le texte — rien à en retenir sur qui l'écoutait."""
+    def _her_lines(store: Any, conv: x.Conversation) -> x.Conversation:
+        """Ce que ses répliques disent d'elles-mêmes, lu dans leurs annotations :
+
+        - celles qu'elle a marquées mensonge (``LIE_ANNOTATION``) : la relecture le sait, et n'en tire rien comme
+          vrai — ni une croyance, ni une note sur elle (« je ne sais rien de ses projets », redit, ne doit pas devenir
+          ce qu'elle croit) ;
+        - celles qui racontaient sans nom ce qu'elle sait de quelqu'un (``veiled:…`` dans leur provenance, ADR 0091) :
+          la relecture n'en voit pas le texte — rien à en retenir sur qui l'écoutait ;
+        - ce qu'elle a déclaré ressentir en écrivant chacune (sa balise, ``EMOTION_ANNOTATION``) : la relecture en
+          part pour juger ce qu'elle-même ressent de ce qui s'est dit, au lieu de le juger à neuf (ADR 0107)."""
         mine = [ln.seq for ln in conv.lines if ln.person is None]
         if not mine:
             return conv
         said = {e.seq: json.loads(e.data) for e in store.get_events(mine) if e.type == rt.UTTERANCE.name}
-        lied = {seq for seq, d in said.items()
-                if any(k == expression_c.LIE_ANNOTATION for k, _v in d.get("annotations") or ())}
+
+        def note(d: Mapping[str, Any], key: str) -> str | None:
+            return next((str(v) for k, v in d.get("annotations") or () if k == key), None)
+
+        lied = {seq for seq, d in said.items() if note(d, expression_c.LIE_ANNOTATION) is not None}
         # ce qu'elle a raconté sans nommer personne (ADR 0091) : la relecture n'en voit pas le texte
         veiled = {seq for seq, d in said.items()
                   if any(str(x).startswith(c.VEILED_PROVENANCE) for x in d.get("provenance") or ())}
-        if not lied and not veiled:
+        felt = {seq: declared.all for seq, d in said.items()
+                if (declared := Declared.decode(note(d, expression_c.EMOTION_ANNOTATION))) is not None}
+        if not lied and not veiled and not felt:
             return conv
-        return replace(conv, lines=tuple(replace(ln, lie=ln.seq in lied, veiled=ln.seq in veiled)
-                                         if ln.seq in lied or ln.seq in veiled else ln for ln in conv.lines))
+        return replace(conv, lines=tuple(
+            replace(ln, lie=ln.seq in lied, veiled=ln.seq in veiled, felt=felt.get(ln.seq, ()))
+            if ln.person is None and ln.seq in said else ln for ln in conv.lines))
 
     @staticmethod
     def _near(conv: x.Conversation, rooms: Mapping[str, set[str]]) -> tuple[str, ...]:

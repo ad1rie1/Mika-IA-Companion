@@ -152,7 +152,7 @@ def test_the_extraction_knows_her_lied_line_is_not_true():
 
     lines = (Line(10, FRAME.now, "Bob [P1]", ASKED, "ext_1"), Line(11, FRAME.now, "Mika", "Aucune idée, honnêtement."),
              Line(12, FRAME.now, "Mika", "Tu lui as demandé ?"))
-    conv = Consolidate._lies(Store(), Conversation("private:ext_1", (Speaker("P1", "ext_1", "Bob"),), lines))
+    conv = Consolidate._her_lines(Store(), Conversation("private:ext_1", (Speaker("P1", "ext_1", "Bob"),), lines))
     assert [ln.lie for ln in conv.lines] == [False, True, False]
     text = render(conv, now=FRAME.local(), beliefs=(), promises=())
     assert "Mika : Aucune idée, honnêtement. (un mensonge)" in text and "demandé ? (un mensonge)" not in text

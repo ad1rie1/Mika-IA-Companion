@@ -227,7 +227,7 @@ export class SpeechPresenter {
       this.lastAsleepAt = null;
     }
 
-    // Le backend décide si ce tour est vocalisé (old/backend/pipeline/voice.py).
+    // Le backend décide si ce tour est vocalisé (backendv2/src/mika/vocab/voice.py).
     // `speak: false` montre le texte et anime l'avatar, sans un son.
     const willSpeak = data.speak !== false && !this.voice.isMuted;
     if (!willSpeak) {
