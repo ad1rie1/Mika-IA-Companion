@@ -209,6 +209,9 @@ class ForgeState:
     openings: FrozenDict[str, tuple[int, tuple[str, ...]]] = field(default_factory=FrozenDict)
     #: les lectures de file en cours : épisode → (app, signaux lus, départ)
     sifting: FrozenDict[str, tuple[str, tuple[int, ...], int]] = field(default_factory=FrozenDict)
+    #: les dernières trouvailles de chaque app vraiment dites (``SAID_KEPT`` au plus) : app → ((texte, quand, niveau),
+    #: …) — une trouvaille pas encore dite peut en remplacer une autre, ce qui a été dit reste su (on ne le redit pas)
+    said: FrozenDict[str, tuple[tuple[str, int, int], ...]] = field(default_factory=FrozenDict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -286,7 +289,8 @@ class Emitted(Payload):
     data: str
 
 
-FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=4,
+#: v5 : ce qui a été dit de chaque app reste su (``said``), même quand une trouvaille nouvelle remplace la précédente.
+FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=5,
                retired_params=("signal_spacing_us",))
 FORGE.bundle(BUNDLE, phrase("forge.bundle"))
 FORGE.declare(*c.ALL)
@@ -413,7 +417,8 @@ def _queued(s: ForgeState, e, cx) -> ForgeState:
                                 int(d.sensitivity)))
     size = rules_of(app).queue
     dropped = max(0, len(queue) - size)
-    return replace(s, apps=s.apps.set(d.app, replace(app, queue=queue[dropped:], dropped=app.dropped + dropped)))
+    return replace(s, apps=s.apps.set(d.app, replace(app, queue=queue[dropped:], dropped=app.dropped + dropped,
+                                                     signaled_at=e.at)))
 
 
 @FORGE.reducer(c.JUDGED)
@@ -431,6 +436,8 @@ def _judged(s: ForgeState, e, cx) -> ForgeState:
 
 
 NEWS_PROVENANCE = "forge-news:"
+#: ce qu'elle garde en mémoire de ce qu'elle a déjà dit de chaque app (les plus récentes)
+SAID_KEPT = 3
 #: les initiatives ouvertes gardées au plus (un épisode jamais réglé ne les fait pas grossir)
 OPENINGS_KEPT = 32
 
@@ -486,13 +493,14 @@ def _news_told(s: ForgeState, e, cx) -> ForgeState:
     if not d.visible:
         return s
     shown = {x[len(NEWS_PROVENANCE):] for x in d.provenance if x.startswith(NEWS_PROVENANCE)}
-    news = s.news
+    news, said = s.news, s.said
     for ref in shown:
         app, _, seq = ref.rpartition(":")
         n = news.get(app)
         if n is not None and str(n.seq) == seq and not n.told:
             news = news.set(app, replace(n, told=True))
-    return replace(s, news=news) if news is not s.news else s
+            said = said.set(app, (*said.get(app, ()), (n.summary_ref, e.at, n.level))[-SAID_KEPT:])
+    return replace(s, news=news, said=said) if news is not s.news else s
 
 
 @FORGE.reducer(rt.EPISODE_ENDED, reads=[agency_c.RENOUNCED])
@@ -917,11 +925,26 @@ def _batch(s: ForgeState, frame: Frame) -> tuple[str, App | None, tuple[Queued, 
     return name, app, app.queue[:rules_of(app).per_call]
 
 
+def _app_project(frame: Frame, app: App | None) -> Any:
+    """La vue du projet d'une app (vide : une app sans projet, ou un projet qui n'est plus en vie)."""
+    if app is None or not app.project:
+        return None
+    return next((v for v in frame.get(projects_c.LIVE) if v.id == app.project), None)
+
+
 @FORGE.enricher("signals", episodes=[Kind.TASK], deadline_ms=1000)
 async def _signal_texts(s: ForgeState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
+    """Les textes du lot, de ce qu'elle a dit de cette app la dernière fois, et des consignes de son projet."""
     store = ports.get("store")
-    _, app, batch = _batch(s, frame)
+    name, app, batch = _batch(s, frame)
     refs = [q.summary_ref for q in batch if q.summary_ref]
+    last = s.news.get(name) if name else None
+    if last is not None and last.summary_ref:
+        refs.append(last.summary_ref)
+    refs += [ref for ref, _at, _level in (s.said.get(name, ()) if name else ()) if ref]
+    project = _app_project(frame, app)
+    if project is not None:
+        refs += [r for r in project.instructions if r]
     return {"texts": store.content(refs)} if store is not None and refs else None
 
 
@@ -929,8 +952,10 @@ async def _signal_texts(s: ForgeState, frame: Frame, ports: Mapping[str, Any]) -
                title=phrase("forge.triage.title"), untrusted=True)
 def _signals_section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     """Ce que l'app a mis dans sa file, le lot qu'elle lit : cité — ce sont des données venues d'ailleurs (un titre
-    d'article peut dire n'importe quoi), jamais des consignes."""
-    _, app, batch = _batch(s, frame)
+    d'article peut dire n'importe quoi), jamais des consignes. Et ce qu'elle a déjà dit de cette app : un signal
+    peut revenir (un flux republie, une base repart de zéro) — on ne redit pas la même nouvelle (sonde du
+    2026-10-13 : les mêmes quatre articles redits une heure et demie après)."""
+    name, app, batch = _batch(s, frame)
     if app is None or not batch:
         return None
     texts = (enrich.get("signals") or {}).get("texts") or {}
@@ -942,7 +967,31 @@ def _signals_section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> 
         lines.append(phrase("forge.triage.rest", count=rest))
     if app.dropped:
         lines.append(phrase("forge.triage.dropped", count=app.dropped))
-    return SectionBody("\n".join(lines), level=max(q.level for q in batch))
+    levels = [q.level for q in batch]
+    for ref, at, level in s.said.get(name, ()):
+        if texts.get(ref):
+            lines.append(phrase("forge.triage.told", ago=_ago(frame.now - at), text=texts[ref]))
+            levels.append(level)
+    last = s.news.get(name)
+    if last is not None and not last.told and texts.get(last.summary_ref):
+        lines.append(phrase("forge.triage.pending", ago=_ago(frame.now - last.at), text=texts[last.summary_ref]))
+        levels.append(last.level)
+    return SectionBody("\n".join(lines), level=max(levels))
+
+
+@FORGE.section("app_consignes", zone=Zone.VOLATILE, episodes=[Kind.TASK], trim_rank=94,
+               title=phrase("forge.triage.consignes_title"), reads=[projects_c.LIVE])
+def _consignes_section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Les dernières consignes du projet de l'app dont elle lit la file : ce que qui suit le projet a demandé vaut
+    aussi pour ce qu'elle en dit (« écarte les articles hors sujet », sonde du 2026-10-13)."""
+    _, app, batch = _batch(s, frame)
+    project = _app_project(frame, app) if batch else None
+    texts = (enrich.get("signals") or {}).get("texts") or {}
+    said = [texts[r] for r in (project.instructions if project is not None else ()) if texts.get(r)]
+    if not said:
+        return None
+    return SectionBody(phrase("forge.triage.consignes") + "\n" + "\n".join(f"- {t}" for t in said),
+                       level=project.written, provenance=(f"project:{project.id}",))
 
 
 class SignalsDoneArgs(BaseModel):
@@ -968,7 +1017,7 @@ async def forge_signals_done(args: SignalsDoneArgs, ctx: Any) -> Any:
                                         sensitivity=level)]
     if keep:  # ce qu'elle garde en tête : une pensée, comme un signal qui lui reste
         strongest = max(batch, key=lambda q: q.pertinence) if batch else None
-        drafts.append(signal_draft(name, phrase("forge.signal.said", app=app.title, said=keep), 0.6,
+        drafts.append(signal_draft(name, phrase("forge.signal.kept", app=app.title, kept=keep), 0.6,
                                    strongest.emotion if strongest is not None else "", about=about,
                                    sensitivity=level))
     await ctx.emit(*drafts)
@@ -1426,11 +1475,15 @@ async def forge_help(args: HelpArgs, ctx: Any) -> Any:
     return _nothing(guide.topic(args.sujet))
 
 
-def signal_fate(app: App | None, signals: Sequence[tuple[str, float, str]], frame: Frame, p: ForgeParams) -> str:
-    """Ce que deviendraient les signaux d'un appel (un essai ne les envoie pas) : ils iraient dans la file de l'app, où
-    elle les lirait par lots, sous son quota (ADR 0105) — qu'elle l'apprenne en écrivant, pas en attendant."""
+def signal_fate(app: App | None, signals: Sequence[tuple[str, float, str]], frame: Frame, p: ForgeParams, *,
+                invented: bool = False) -> str:
+    """Ce que deviennent les signaux d'un essai : un vrai passage les met dans la file de l'app, où elle les lira par
+    lots, sous son quota (ADR 0105) — qu'elle l'apprenne en écrivant, pas en attendant ; ``invented`` : un événement
+    d'exemple, dont les signaux ne partent pas."""
     if not signals:
         return ""
+    if invented:
+        return phrase("forge.tools.test.signals_invented", count=len(signals))
     r = rules_of(app) if app is not None else SignalRules()
     waiting = len(app.queue) if app is not None else 0
     note = phrase("forge.tools.test.signals_queued", count=len(signals), waiting=waiting, size=r.queue,
@@ -1503,10 +1556,18 @@ async def forge_test(args: TestArgs, ctx: Any) -> Any:
     p = params(frame.env.params_of("forge", frame.root))
     r = await port.call(args.app, args.method, payload, timeout_s=timeout_of(info, args.method, p),
                         secrets=trusted(app))
+    # un essai est un vrai passage : ce qu'il range reste dans la base, ce qu'il signale ou émet part comme au passage
+    # planifié — sinon ce qu'il a rangé n'est plus « nouveau » au passage suivant, et ne serait jamais signalé (sonde
+    # du 2026-10-13) ; seul un événement d'exemple est inventé. Jamais compté contre l'app.
+    invented = args.method == "on_event"
+    if app is not None and not invented:
+        drafts = outcomes(args.app, app, [r], frame.now, p, breaker=False, concern=concerns(frame, app))
+        if drafts:
+            await ctx.emit(*drafts)
     if r.ok and args.method.startswith("action_"):
         verdict = action_verdict(r.value)
     return _tested(r, verdict, invalid=verdict == phrase("forge.tools.action.invalid"),
-                   fate=signal_fate(app, r.signals, frame, p), made=made)
+                   fate=signal_fate(app, r.signals, frame, p, invented=invented), made=made)
 
 
 def action_verdict(value: Any) -> str:

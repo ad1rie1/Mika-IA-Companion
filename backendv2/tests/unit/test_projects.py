@@ -1050,10 +1050,85 @@ def test_asking_for_help_or_telling_counts_only_real_tries(purpose, ending, coun
     deux silences choisis, non."""
     from mika.faculties.projects.faculty import Objective, Project, ProjectsState, _ended, _set, _started
 
-    o = Objective(id=1, text_ref="o", status=c.BLOCKED, closed_at=at_paris(2026, 9, 28, 14, 0), notable=0.9)
+    # une demande porte sur un objectif qui bloque, un récit sur un objectif mené à bout (lu sur l'objectif)
+    status = c.BLOCKED if purpose == c.NEED else c.DONE
+    o = Objective(id=1, text_ref="o", status=status, closed_at=at_paris(2026, 9, 28, 14, 0), notable=0.9)
     p = Project(id=1, title_ref="t", authority=c.USER, created_at=0, owner="user_1", objectives=(o,))
     s = initiative_ends((_started, _ended), _set(ProjectsState(), p), params(None), purpose, subject_of(1, 1),
                          ending)
     got = s.projects[1].objectives[0]
     attempts = got.ask_attempts if purpose == c.NEED else got.share_attempts
     assert attempts == (2 if counts else 0), why
+
+
+def test_an_initiative_is_a_request_or_a_story_by_its_subject_not_by_the_reasons_of_its_line():
+    """Une initiative porte un seul sujet ; la ligne qui l'a lancée porte aussi les raisons des autres candidats vers
+    la même personne (sonde du 2026-10-13 : un récit et deux demandes). Son sujet est une demande : dite, l'objectif
+    est « demandé » — il n'est pas pris pour un récit parce qu'un récit figurait sur la ligne, et l'objectif raconté,
+    lui, attend son tour."""
+    from types import SimpleNamespace
+
+    from mika.faculties.projects.faculty import Objective, Project, ProjectsState, _set, _started, _uttered
+
+    t = at_paris(2026, 10, 13, 16, 9)
+    done = Objective(id=1, text_ref="o1", status=c.DONE, closed_at=t - HOUR, notable=0.9)
+    need = Objective(id=2, text_ref="o2", status=c.OPEN, need_ref="n2")
+    p = Project(id=1, title_ref="t", authority=c.USER, created_at=0, owner="user_1", objectives=(done, need))
+    cx = SimpleNamespace(params=params(None), facts=SimpleNamespace(get=lambda key: None))
+    s = _started(_set(ProjectsState(), p), SimpleNamespace(correlation="c", at=t, data=rt.EpisodeStarted(
+        kind="INITIATIVE", target="user_1", reason=f"{c.SHARE},{c.NEED},greeting", subject=subject_of(1, 2))), cx)
+    s = _uttered(s, SimpleNamespace(correlation="c", at=t + US, data=SimpleNamespace()), cx)
+    told, asked = s.projects[1].objectives
+    assert asked.asked and asked.asked_to == "user_1"  # la demande est dite : elle attend sa réponse
+    assert not told.shared  # le récit n'a pas été fait : il reviendra
+
+
+def test_two_projects_waiting_on_the_same_person_make_one_wish_not_a_double_one(tmp_path):
+    """Deux projets qui attendent quelque chose de la même personne : une seule demande à la fois vers elle. Leurs
+    envies s'additionnaient (19 contre un seuil de 9) pour un message qui n'en porte qu'une, et la seconde partait
+    huit secondes après la première (sonde du 2026-10-13)."""
+    from mika.faculties.projects.tools import ReportArgs, StartArgs, report_run, start_project
+    from mika.faculties.projects.work import _need
+
+    async def scenario(kernel, llm):
+        reply = _context(kernel, "start_project", Kind.REPLY, "user_1", Audience(owner=True))
+        for title in ("Suivre la bourse", "Suivre l'air de Lyon"):
+            await start_project(StartArgs(title=title, objectives=["Relever"], tools=["forge"]), reply)
+            pid = events(kernel, c.PROJECT_CREATED)[-1].seq
+            oid = kernel.mind.frame().state("projects").projects[pid].objectives[0].id
+            run = _context(kernel, "report_run", Kind.WORK, project_target(pid), Audience(owner=True))
+            run.frame = run.frame.with_episode(EpisodeRef(run.episode_id, Kind.WORK, target=project_target(pid),
+                                                          attrs=FrozenDict({"subject": subject_of(pid, oid)})),
+                                               run.frame.audience)
+            await report_run(ReportArgs(verdict="wait", summary="Il me faut quelque chose de toi.",
+                                        needs_you="une clé d'API"), run)
+        frame = kernel.mind.frame()
+        waiting = [o for p in frame.state("projects").projects.values() for o in p.objectives if o.need_ref]
+        return waiting, _need(frame.state("projects"), frame)
+
+    waiting, candidates = live(tmp_path, scenario)
+    assert len(waiting) == 2  # deux besoins, bien réels
+    assert [cand.target for cand in candidates] == ["user_1"]  # une seule envie de le lui dire
+
+
+def test_a_consigne_given_while_she_waits_is_the_answer_she_waited_for():
+    """« Tu es d'accord pour resserrer le filtre ? » — « Oui, resserre-le » devient une consigne du projet : c'est la
+    réponse. Elle ne l'attend plus (l'attente qu'elle s'était donnée tombe), ne la redemande pas, et son exécution
+    suivante le lit (sonde du 2026-10-13 : elle attendait encore). Un nouveau besoin, lui, se redira."""
+    from types import SimpleNamespace
+
+    from mika.faculties.projects.faculty import AMENDED, Objective, Project, ProjectsState, _amended, _set
+    from mika.faculties.projects.work import _needy
+
+    t = at_paris(2026, 10, 13, 17, 11)
+    o = Objective(id=4, text_ref="o4", status=c.OPEN, need_ref="n4", waiting_until=t + 2 * HOUR)
+    p = Project(id=1, title_ref="t", authority=c.USER, created_at=0, owner="user_1", objectives=(o,))
+    cx = SimpleNamespace(params=params(None), facts=SimpleNamespace(get=lambda key: None))
+    before = _set(ProjectsState(), p)
+    assert _needy(before.projects[1].objectives[0], t, params(None))  # elle allait le redemander
+    steer = AMENDED.payload(project=1, instruction=Content(ref="385.instruction"), by="user_1")
+    after = _amended(before, SimpleNamespace(at=t, seq=385, correlation="c", data=steer), cx)
+    got = after.projects[1].objectives[0]
+    assert got.steered_at == t and got.waiting_until == 0  # elle n'attend plus
+    assert not _needy(got, t, params(None))  # ni ne redemande
+    assert after.projects[1].instructions == ("385.instruction",)  # et la consigne est là, à lire

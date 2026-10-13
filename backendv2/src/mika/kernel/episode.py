@@ -77,6 +77,9 @@ class EpisodePolicy:
     max_tool_turns: int = 8
     max_tokens: int = 1024
     deadline_s: float = 180.0
+    #: au plus tant de paragraphes gardés de son texte (0 : tous) — une pensée à mi-voix tient en un souffle ; ce
+    #: qui suit (un message entier qu'elle rédigerait) n'est pas sa pensée
+    max_paragraphs: int = 0
     tool_bundles: frozenset[str] = frozenset()
     #: les lots « en main » ; les autres lots offerts sont à la demande (le modèle
     #: les cherche quand il en a besoin). None : tout est en main.

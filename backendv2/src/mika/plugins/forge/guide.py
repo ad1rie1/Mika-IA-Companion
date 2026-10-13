@@ -52,7 +52,9 @@ Le code (main.py, bibliothèque standard seulement ; le réseau passe par api) :
   avec son statut et ses en-têtes (voir forge_help reseau).
 
 Seules les fonctions déclarées sont appelées. Une écriture refusée ne change rien et dit pourquoi, champ par
-champ (views[0].actions[1].fields[2] (« ville ») : …). Essaie chaque fonction avec forge_test.
+champ (views[0].actions[1].fields[2] (« ville ») : …). Essaie chaque fonction avec forge_test : c'est un vrai
+passage — ce qu'il range dans ta base y reste, ce qu'il signale part dans sa file (seul on_event reçoit un
+événement inventé, dont les signaux ne partent pas).
 
 Pour changer une app : forge_read (ses lignes numérotées), forge_search (un texte dans tes apps), puis forge_edit
 (remplacer des fragments exacts) — forge_write réécrit tout, c'est pour créer.

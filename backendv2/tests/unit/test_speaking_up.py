@@ -305,6 +305,36 @@ def test_a_silence_consumes_nothing_but_leaves_a_short_hesitation(tmp_path):
     assert said_.initiatives_today == 1 and said_.refractory_until > said_.last_initiative_at > 0
 
 
+
+def test_a_greeting_that_brings_news_counts_as_speaking_up(tmp_path):
+    """Saluer qui arrive n'est pas prendre la parole ; mais la salutation qui emporte une trouvaille, un récit, une
+    demande, si : elle compte au plafond du jour et ouvre la période réfractaire. Sinon le message qui disait tout à
+    l'arrivée ne comptait pour rien, et le suivant partait huit secondes après (sonde du 2026-10-13)."""
+    def voice():
+        return VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m")
+
+    async def said_with(kernel, n, reason):
+        mind, eid = kernel.mind, f"ep{n}"
+        await mind.append([rt.EPISODE_STARTED.draft(kind="INITIATIVE", target="user_1", reason=reason)],
+                          emitter="runtime", correlation=eid, origin=Origin.KERNEL)
+        await mind.append([rt.UTTERANCE.draft(kind="INITIATIVE", text=Content.of("salut !"), target="user_1",
+                                              voice=voice())], emitter="runtime", correlation=eid,
+                          origin=Origin.KERNEL)
+        await mind.append([rt.EPISODE_ENDED.draft(kind="INITIATIVE", outcome="done", target="user_1")],
+                          emitter="runtime", correlation=eid, origin=Origin.KERNEL)
+        return kernel.mind.frame().get(agency_c.AGENCY)
+
+    async def scenario(kernel, script, out, llm):
+        hello = await said_with(kernel, 1, f"{social_c.GREETING},present,second_thoughts")
+        await asyncio.sleep(HOUR / US)
+        brought = await said_with(kernel, 2, f"second_thoughts,app_news,project_need,{social_c.GREETING},present")
+        return hello, brought
+
+    hello, brought = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0))
+    assert hello.initiatives_today == 0 and hello.last_initiative_at == 0  # une salutation seule : rien de compté
+    assert brought.initiatives_today == 1 and brought.base_until > brought.last_initiative_at > 0  # elle a parlé
+
+
 # ── De quoi parler ────────────────────────────────────────────────────────
 
 
@@ -454,6 +484,34 @@ def test_the_murmur_says_why_in_plain_words_never_the_motive_and_only_to_the_one
     assert "Il est " in prompts[0] and "tu te sens" in prompts[0] and "« Alice »" in prompts[0]
     assert "Tu t'apprêtes" not in prompts[0]  # plus la consigne nue qui faisait « pourquoi il m'demande d'écrire »
     assert all(d.target == "user_1" for d in inner)  # pas sur l'écran de Bob
+
+
+
+class Drafting(Script):
+    """Le modèle du murmure écrit sa pensée, puis rédige le message lui-même (sonde Haiku du 2026-10-13)."""
+
+    def __call__(self, req):
+        if req.role == "murmur":
+            return LLMResponse("Je n'aime pas demander, mais là, c'est nécessaire.\n\nSalut Alice, tu as un moment "
+                               "cette semaine ? Je bloque sur une partie de mon projet.")
+        return super().__call__(req)
+
+
+def test_a_murmur_is_one_breath_never_the_message_she_is_about_to_write(tmp_path):
+    """Le murmure se montre à l'écran : sa pensée à mi-voix, en un souffle. Quand le modèle y rédige aussi le message
+    à venir, ce message n'est pas sa pensée — il ne part pas (on lisait trois bulles en huit secondes)."""
+    async def scenario(kernel, script, out, llm):
+        await _worried_about_alice(kernel)
+        for _ in range(6 * 6):
+            await asyncio.sleep(10 * MINUTE / US)
+            if [c for c in llm.calls if c.role == "murmur"]:
+                break
+        await asyncio.sleep(MINUTE / US)
+        return [d.text for d in out.items if d.persona == "inner" and d.kind == "speech"]
+
+    inner = run_with(tmp_path, scenario, {"expression": {"murmur_chance": 1.0, "murmur_charged_chance": 1.0,
+                                                         "murmur_adrift": 0.0}}, script=Drafting())
+    assert inner and all(text == "Je n'aime pas demander, mais là, c'est nécessaire." for text in inner)
 
 
 def test_sometimes_she_thinks_of_writing_then_changes_her_mind(tmp_path):

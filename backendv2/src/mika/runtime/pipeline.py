@@ -415,11 +415,17 @@ class EpisodeRunner:
                     return
                 report.tools = loop.calls
                 text, annotations = self._parse(loop.text, persona.name if persona is not None else "")
+                if policy.max_paragraphs:
+                    text = first_paragraphs(text, policy.max_paragraphs)
                 if not text.strip() or is_silence(text):
                     if loop.stop in _UNFINISHED and not loop.text.strip():
                         # elle n'a pas pu finir (trop d'appels d'outils) : ce n'est pas un silence choisi
                         await self._settle(ep, Outcome.FAILED, detail=f"pas de réponse au bout des outils "
                                                                       f"({loop.stop})")
+                    elif not policy.delivered and any(ok for _name, ok in loop.calls):
+                        # un travail pour elle seule fait par ses outils (le tri d'une file, un verdict) : c'est fait,
+                        # pas un silence choisi — il n'y avait rien à dire à personne
+                        await self._settle(ep, Outcome.DONE)
                     else:
                         await self._settle(ep, Outcome.ABSTAINED)
                     return
@@ -712,6 +718,12 @@ def _scope(root: Any, req: EpisodeRequest, eid: str) -> str:
 def _defers(gateway: LLMGateway | None, role: str) -> bool:
     """Le fournisseur de ce rôle sait-il différer des outils ? (``tools.defers_tools``)"""
     return defers_tools(gateway, role)
+
+
+def first_paragraphs(text: str, n: int) -> str:
+    """Les ``n`` premiers paragraphes d'un texte (séparés par une ligne vide)."""
+    kept = [part.strip() for part in re.split(r"\n\s*\n", text.strip()) if part.strip()]
+    return "\n\n".join(kept[:n])
 
 
 def _in_hand(policy: EpisodePolicy, req: EpisodeRequest) -> frozenset[str] | None:

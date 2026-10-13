@@ -70,6 +70,7 @@ from mika.plugins.forge import (
     NoArgs,
     _next_tick,
     calls_today,
+    concerns,
     has_secrets,
     outcomes,
     params,
@@ -342,7 +343,13 @@ def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     blocks: list[Block] = []
     if port is None:
         blocks.append(Note("Forge non configurée : aucun hôte ne peut faire tourner ses apps.", tone="muted"))
-    signals = {str(app): (count, last) for app, count, last in ctx.tally(c.SIGNALED, "app")}
+    # ce qu'elle a signalé : ses signaux mis en file (api.signal, ADR 0105), et ceux qui passent droit à son attention
+    # (une panne, ce qu'elle garde en tête d'un tri)
+    signals: dict[str, tuple[int, int]] = {}
+    for kind in (c.QUEUED, c.SIGNALED):
+        for app_name, count, last in ctx.tally(kind, "app"):
+            had = signals.get(str(app_name), (0, 0))
+            signals[str(app_name)] = (had[0] + count, max(had[1], last))
     names = sorted(set(s.apps) | set(on_disk))
     query = fold(str(ctx.value("q") or ""))
     if query:
@@ -837,9 +844,12 @@ def _test_fields(s: ForgeState, frame: Frame, key: str, fixed: dict[str, str]) -
                        help="un objet JSON : les paramètres d'une vue, les données d'une action…"))
 
 
-@FORGE.action("tester", title="Tester", args=TestForm, emits=[], subject="app", order=60, fields=_test_fields,
-              description="Lance une de ses fonctions maintenant et montre ce qu'elle rend (sans rien journaliser, "
-                          "sans compter contre elle ; une vue : son enveloppe est vérifiée).")
+@FORGE.action("tester", title="Tester", args=TestForm, emits=[EMITTED, c.QUEUED], subject="app", order=60,
+              fields=_test_fields,
+              description="Lance une de ses fonctions maintenant et montre ce qu'elle rend (sans compter contre "
+                          "elle ; une vue : son enveloppe est vérifiée). C'est un vrai passage : ce qu'elle range "
+                          "reste dans sa base, ce qu'elle signale part dans sa file — sauf un événement d'exemple "
+                          "(on_event), inventé.")
 async def _test(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) -> Done:
     name = ctx.subject
     data = data.model_dump() if isinstance(data, BaseModel) else dict(data)
@@ -867,16 +877,22 @@ async def _test(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) -> D
         return Done(message=f"{fn} : {verdict} ({r.duration_ms} ms)", tone="danger" if _invalid(blocks) else "ok",
                     show=(_facts(r), *without_forms(blocks), *_logs(r)))
     call_args = {"name": args.get("name", ""), "args": args.get("args", {})} if fn == "action" else args
-    r = await port.call(name, fn, call_args, timeout_s=ACTION_TIMEOUT_S, secrets=trusted(s.apps.get(name)))
-    shown: list[Block] = [_facts(r)]
+    app = s.apps.get(name)
+    r = await port.call(name, fn, call_args, timeout_s=ACTION_TIMEOUT_S, secrets=trusted(app))
+    # un vrai passage (ce qu'il range reste) : ce qu'il signale part aussi, sinon la nouveauté se perd en silence ;
+    # un événement d'exemple est inventé (ADR 0105)
+    p = params(frame.env.params_of("forge", frame.root))
+    drafts = tuple(outcomes(name, app, [r], ctx.now, p, breaker=False, concern=concerns(frame, app))) \
+        if app is not None and fn != "on_event" else ()
+    shown: list[Block] = [_facts(r, sent=bool(drafts))]
     if r.ok:
         shown.append(Code(json.dumps(r.value, ensure_ascii=False, indent=2, default=str)[:20_000], title="Ce qu'elle rend"))
         if fn.startswith("action_") and not _is_answer(r.value):
             shown.append(Note("Une action doit rendre {\"ok\": vrai|faux, \"message\": \"…\"}.", tone="warn"))
     else:
         shown.append(Note(r.error, tone="danger", title="Échec"))
-    return Done(message=f"{fn} : {'ok' if r.ok else 'échec'} en {r.duration_ms} ms", tone="ok" if r.ok else "danger",
-                show=(*shown, *_logs(r)))
+    return Done(drafts=drafts, message=f"{fn} : {'ok' if r.ok else 'échec'} en {r.duration_ms} ms",
+                tone="ok" if r.ok else "danger", show=(*shown, *_logs(r)))
 
 
 def _invalid(blocks: Sequence[Any]) -> bool:
@@ -887,13 +903,16 @@ def _is_answer(value: Any) -> bool:
     return isinstance(value, dict) and isinstance(value.get("ok"), bool) and isinstance(value.get("message", ""), str)
 
 
-def _facts(r: CallResult) -> Fields:
+def _facts(r: CallResult, *, sent: bool = False) -> Fields:
+    """Ce qu'a donné l'appel ; ``sent`` : ses signaux et émissions sont partis (un vrai passage)."""
     pairs: list[tuple[str, Cell]] = [("issue", Badge("ok", "ok") if r.ok else Badge("échec", "danger")),
                                      ("durée", f"{r.duration_ms} ms"), ("tuée", "oui" if r.killed else "non")]
     if r.signals:
-        pairs.append(("signaux (non journalisés)", "; ".join(f"{t} ({p:.1f})" for t, p, _ in r.signals)))
+        pairs.append(("signaux (dans sa file)" if sent else "signaux (non journalisés)",
+                      "; ".join(f"{t} ({p:.1f})" for t, p, _ in r.signals)))
     if r.emits:
-        pairs.append(("émissions (non journalisées)", "; ".join(t for t, _ in r.emits)))
+        pairs.append(("émissions (journalisées)" if sent else "émissions (non journalisées)",
+                      "; ".join(t for t, _ in r.emits)))
     return Fields(tuple(pairs), title="L'appel")
 
 
@@ -950,7 +969,8 @@ async def _act(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) -> Do
         raise Refused("Le formulaire a des erreurs.", errors)
     r = await _port(ctx).call(name, action.function, payload, timeout_s=ACTION_TIMEOUT_S, secrets=trusted(app))
     p = params(frame.env.params_of("forge", frame.root))
-    drafts = tuple(outcomes(name, app, [r], ctx.now, p, breaker=False))  # jamais compté contre l'app
+    drafts = tuple(outcomes(name, app, [r], ctx.now, p, breaker=False,  # jamais compté contre l'app
+                            concern=concerns(frame, app)))
     if not r.ok:
         return Done(drafts=drafts, message=f"L'action de l'app a échoué : {r.error}"[:MESSAGE_MAX], tone="danger")
     if not _is_answer(r.value):

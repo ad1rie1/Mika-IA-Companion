@@ -224,6 +224,8 @@ class Objective:
     asked_at: int = 0
     asked_to: str = ""
     answered_at: int = 0
+    #: quand une consigne est arrivée pendant ce besoin : la consigne de qui suit le projet **est** sa réponse
+    steered_at: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -339,8 +341,9 @@ class ProjectsState:
 #: v3 : un récit, un appel à l'aide devancés, interrompus ou dont elle s'est ravisée ne comptent plus comme essais.
 #: v4 : un récit fait le point — il couvre tout ce qu'elle a mené à bout avant son départ, pas un seul objectif.
 #: v5 : une demande d'aide dite attend la réponse de sa personne (``asked_at``, ``asked_to``, ``answered_at``).
+#: v6 : une consigne reçue pendant un besoin y répond (``steered_at``) — elle ne l'attend plus, ne le redemande pas.
 PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
-                   state_version=5)
+                   state_version=6)
 PROJECTS.declare(*c.ALL)
 
 
@@ -922,10 +925,18 @@ def _noted(s: ProjectsState, e, cx) -> ProjectsState:
 
 @PROJECTS.reducer(AMENDED)
 def _amended(s: ProjectsState, e, cx) -> ProjectsState:
+    """Une consigne : elle la lira à l'exécution suivante. Arrivée pendant un besoin (« tu es d'accord pour… ? »),
+    elle **est** la réponse de qui suit le projet : le besoin n'attend plus, ni ne se redemande — même s'il n'avait
+    jamais été dit en propre (glissé dans un récit, sonde du 2026-10-13 : « oui, resserre le filtre » passé en
+    consigne, et l'exécution suivante attendait encore sa réponse)."""
     p = s.projects.get(e.data.project)
     if p is None or not e.data.instruction.ref:
         return s
-    return _set(s, replace(p, instructions=(*p.instructions, e.data.instruction.ref)[-INSTRUCTIONS_KEPT:]))
+    p = replace(p, instructions=(*p.instructions, e.data.instruction.ref)[-INSTRUCTIONS_KEPT:])
+    p = replace(p, objectives=tuple(
+        replace(o, steered_at=e.at, asked=True, waiting_until=0) if o.status == c.OPEN and o.need_ref else o
+        for o in p.objectives))
+    return _set(s, p)
 
 
 @PROJECTS.reducer(DEPOSITED)
@@ -996,7 +1007,10 @@ def _started(s: ProjectsState, e, cx) -> ProjectsState:
     reasons = d.reason.split(",")
     if d.kind != Kind.INITIATIVE or got is None or got[0] not in s.projects:
         return s
-    purpose = "share" if c.SHARE in reasons else "need" if c.NEED in reasons else ""
+    o = objective_at(s.projects[got[0]], got[1])
+    # récit ou demande : lu sur l'objectif du sujet (la ligne porte aussi les raisons des autres candidats)
+    purpose = ("need" if asking(o) else "share") if o is not None and (c.SHARE in reasons or c.NEED in reasons) \
+        else ""
     run = Run(got[0], got[1], purpose, started=e.at, address=d.target or "")
     return replace(s, running=s.running.set(e.correlation, run)) if purpose else s
 
@@ -1036,6 +1050,13 @@ def _answered(s: ProjectsState, e, cx) -> ProjectsState:
         return s
     # sa réponse est là : l'objectif n'attend plus (l'exécution suivante part dans l'espacement normal)
     return _set(s, _objective(p, replace(o, waiting_until=0, answered_at=e.at)))
+
+
+def asking(o: Objective) -> bool:
+    """Une initiative sur cet objectif est une demande (il bloque, ou attend quelque chose d'elle), sinon un récit
+    (il est mené à bout) — lu sur l'objectif, jamais sur les raisons de la ligne : une initiative porte un seul sujet,
+    et les raisons des autres candidats de la ligne y figurent aussi."""
+    return o.status == c.BLOCKED or (o.status == c.OPEN and bool(o.need_ref))
 
 
 def answered(o: Objective) -> bool:
@@ -1111,11 +1132,11 @@ def _reported(s: ProjectsState, e, cx) -> ProjectsState:
                     waiting_until=0)
         needed = d.need.ref if d.need is not None and d.need.ref else ""
         if needed and not o.need_ref:  # un nouveau besoin : elle le dira
-            o = replace(o, need_ref=needed, asked=False, ask_attempts=0)
+            o = replace(o, need_ref=needed, asked=False, ask_attempts=0, steered_at=0)
         elif needed:  # le même besoin, redit à chaque exécution (sa référence change) : déjà dit, on ne relance pas
             o = replace(o, need_ref=needed)
         elif not needed and d.verdict in (c.CONTINUE, c.DONE):  # elle avance seule à nouveau
-            o = replace(o, need_ref="")
+            o = replace(o, need_ref="", steered_at=0)
         if d.verdict == c.WAIT:
             o = replace(o, waiting_until=e.at + max(pm.wait_min_us, min(pm.wait_max_us, d.wait_s * 1_000_000)))
         elif d.verdict in (c.DONE, c.BLOCKED) and o.kind == c.CONSTANT:  # un passage fini (ou buté) : il reviendra
@@ -1260,7 +1281,7 @@ def view(p: Project) -> c.ProjectView:
         blocked_once=sum(1 for o in once if o.status == c.BLOCKED),
         constants=sum(1 for o in p.objectives if o.kind == c.CONSTANT and o.status == c.OPEN),
         blocked=sum(1 for o in p.objectives if o.status == c.BLOCKED), runs=p.runs, last_run_at=p.last_run_at,
-        last_summary_ref=p.summary_ref, written=written(p))
+        last_summary_ref=p.summary_ref, written=written(p), instructions=p.instructions[-3:])
 
 
 @PROJECTS.fact(c.LIVE)

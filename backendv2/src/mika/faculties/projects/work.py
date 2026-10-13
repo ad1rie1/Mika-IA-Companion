@@ -262,7 +262,7 @@ def _share(s: ProjectsState, frame: Frame) -> list[Candidate]:
     factuel à qui l'a confié. Un point quand le travail se pose, pas un message par objectif coché : le récit dit
     tout ce qui a été mené à bout depuis le précédent, sous le sujet du dernier fini."""
     pm = params(frame.env.params_of("projects", frame.root))
-    out = []
+    out, seen = [], set()
     for p in sorted(s.projects.values(), key=lambda p: p.id):
         if p.status != c.ACTIVE:  # en pause ou archivé : on n'en parle plus de soi-même
             continue
@@ -282,6 +282,9 @@ def _share(s: ProjectsState, frame: Frame) -> list[Candidate]:
             person, address = reader
             level = FULL
             brief = phrase("projects.brief.report", who=_who_words(frame, person, address))
+        if address in seen:  # un récit à la fois par personne : les autres projets suivront (une seule envie)
+            continue
+        seen.add(address)
         out.append(Candidate(
             Kind.INITIATIVE, address, c.SHARE, pm.share_evidence, resources=frozenset({floor(address)}),
             args=FrozenDict({"brief:projects": brief, "subject": subject_of(p.id, told[-1].id), "share": level})))
@@ -305,7 +308,7 @@ def _need(s: ProjectsState, frame: Frame) -> list[Candidate]:
     le dit à qui l'a confié, ou, pour un projet à elle, à qui s'occupe d'elle (une fois, quelques tentatives au
     plus), dans les deux modes. Un projet à elle qui bloquait faute d'un accès ne demandait rien (ADR 0104)."""
     pm = params(frame.env.params_of("projects", frame.root))
-    out = []
+    out, seen = [], set()
     for p in sorted(s.projects.values(), key=lambda p: p.id):
         if p.status != c.ACTIVE:
             continue
@@ -314,6 +317,11 @@ def _need(s: ProjectsState, frame: Frame) -> list[Candidate]:
         if o is None or reader is None:
             continue
         person, address = reader
+        if address in seen:
+            # une demande à la fois par personne : deux projets qui attendent ne font pas une envie double — un
+            # message n'en porte qu'une, et la seconde partait huit secondes après la première (sonde du 2026-10-13)
+            continue
+        seen.add(address)
         out.append(Candidate(
             Kind.INITIATIVE, address, c.NEED, pm.need_evidence, resources=frozenset({floor(address)}),
             args=FrozenDict({"brief:projects": phrase("projects.brief.need", who=_who_words(frame, person, address)),

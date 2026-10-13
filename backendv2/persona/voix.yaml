@@ -707,7 +707,7 @@ expression:
     ask: "Juste avant, une pensée te traverse : écris-la"
     ask_adrift: "Écris la pensée qui te traverse"
     # {ask} : ask ou ask_adrift
-    tail: "{ask} en une seule phrase de moins de quinze mots, comme on se parle à mi-voix, à soi-même. Pas de balise, pas de guillemets, rien que tu ne saches pas."
+    tail: "{ask} en une seule phrase de moins de quinze mots, comme on se parle à mi-voix, à soi-même. Pas le message lui-même : tu l'écriras ensuite. Pas de balise, pas de guillemets, rien que tu ne saches pas."
     # pourquoi elle écrit, selon la raison la plus forte de l'initiative (le nom de chaque clé est le code de la
     # raison : NE PAS RENOMMER ; un test vérifie que chaque raison d'initiative a sa phrase)
     why:
@@ -3349,6 +3349,8 @@ projects:
     # ce qu'elle attendait de qui lui a confié le projet. {need} : ce qu'elle attendait ; {reply} : reply, ou rien
     awaited: "Ce que tu attendais de qui t'a confié le projet : {need}{reply}"
     reply: " — sa réponse est arrivée (ses mots sont cités plus bas)"
+    # une consigne est arrivée pendant ce besoin : c'est sa réponse
+    steered: " — une consigne est arrivée depuis (plus bas, « Consignes reçues ») : c'est sa réponse, suis-la"
     # suivis d'une ligne par objectif
     others: "Les autres objectifs du projet :"
     # une exécution sans objectif visé (un réveil par API, ADR 0068) les voit tous
@@ -3386,6 +3388,9 @@ projects:
     apps_tell: >-
       Ce qu'elles te signalent fort et qui concerne la personne de ce projet, tu le lui dis toi-même, comme tu lui
       écris d'habitude : tu n'as besoin ni d'un mail ni d'une notification pour la prévenir.
+    # sous la liste : leurs rythmes vivent à son heure (elle se demandait si leur cron tournait en UTC, sonde du
+    # 2026-10-13). {zone} : son fuseau (« Europe/Paris »)
+    apps_clock: "Leurs rythmes (cron:, interval:) et leur horloge suivent ton heure, {zone} — pas l'UTC."
     app:
       # {title} : son titre ; {app} : son nom ; {version} : sa version ; {state} : un des états ci-dessous
       line: "« {title} » ({app}, version {version}) : {state}"
@@ -4691,8 +4696,9 @@ forge:
 
   # Ce que ses apps lui signalent : une pensée qu'elle garde (elle la remarque). {app} : le titre de l'app
   signal:
-    # {said} : ce que l'app dit
-    said: "Mon app « {app} » me signale : {said}"
+    # ce qu'elle garde en tête après avoir lu la file d'une app : sa pensée à elle, pas ce que l'app dit.
+    # {app} : le titre de l'app ; {kept} : ce qu'elle garde
+    kept: "En lisant ce que mon app « {app} » a trouvé, je me suis dit : {kept}"
     # l'app est mise hors service après trop d'échecs. {error} : la dernière erreur
     broken: "Mon app « {app} » ne marche plus : {error}"
     # un seul de ses services est arrêté (ADR 0104). {service} : son nom ; {error} : la dernière erreur
@@ -4718,6 +4724,17 @@ forge:
     rest: "({count} autre(s) attendent dans la file : tu les liras à une prochaine lecture.)"
     # {count} : combien sont partis sans être lus, faute de place
     dropped: "({count} signal(aux) sont partis sans être lus : la file était pleine.)"
+    # ce qu'elle a dit de cette app la dernière fois : un signal peut revenir (un flux republie, une base repart de
+    # zéro). {ago} : forge.news.minutes ou hours ; {text} : ses mots
+    told: >-
+      Ce que tu as déjà dit de cette app, il y a {ago} : « {text} ». Ne redis pas ce qui y était : seulement ce qui est
+      nouveau.
+    # ce qu'elle comptait dire et n'a pas encore dit : le nouveau verdict le remplace
+    pending: >-
+      Ce que tu comptais dire de cette app (il y a {ago}), et que tu n'as pas encore dit : « {text} ». Ton verdict le
+      remplace : reprends-y ce qui compte encore.
+    consignes_title: LES CONSIGNES DU PROJET DE CETTE APP
+    consignes: "Ce que qui suit le projet a demandé (à suivre aussi pour ce que tu en dis ; la plus récente prime) :"
     description: >-
       Conclure la lecture d'un lot de la file d'une de tes apps : ce que tu diras à la personne qu'il concerne (tell :
       tes mots, que tu lui diras ensuite toi-même), ce que tu gardes en tête (keep), ou rien (les deux vides). Le lot
@@ -5028,8 +5045,10 @@ forge:
         Essayer maintenant une app en marche : un battement (tick, réseau compris), un service (service_<nom>), sa
         ligne de contexte (context), un événement d'exemple (on_event), une vue (view_<vue> : son enveloppe est
         vérifiée), un outil (tool_<nom> : ses arguments sont vérifiés comme pour toi) ou une action
-        (action_<vue>_<action> : sa réponse est vérifiée). Chacun a le délai que son manifeste déclare. Rien n'est
-        envoyé : ce qu'elle signalerait est montré, avec ce qu'il deviendrait.
+        (action_<vue>_<action> : sa réponse est vérifiée). Chacun a le délai que son manifeste déclare. Un essai est
+        un vrai passage : ce qu'il range dans sa base y reste, et ce qu'il signale part dans sa file comme au passage
+        planifié (sinon, ce qu'il a rangé ne serait plus « nouveau » au passage suivant, et jamais signalé). Seul un
+        événement d'exemple (on_event) est inventé : ses signaux ne partent pas.
       # {why} : forge.tools.stopped
       stopped: "Pas d'essai : {why}."
       # {view} : la vue demandée
@@ -5046,14 +5065,18 @@ forge:
       killed: " (tuée)"
       # {signals} : ce que l'app a signalé
       signals: "Signaux : {signals}"
-      # ce que deviendraient ses signaux (ADR 0105) : la file de l'app. {count} : combien l'appel en a émis ;
-      # {waiting} : combien attendent déjà ; {size} : la taille de la file ; {per_call} : combien un appel en lit ;
-      # {quota} : appels par jour au plus
+      # ce que deviennent ses signaux (ADR 0105) : l'essai est un vrai passage, ils sont dans la file de l'app.
+      # {count} : combien l'appel en a émis ; {waiting} : combien attendaient déjà ; {size} : la taille de la file ;
+      # {per_call} : combien un appel en lit ; {quota} : appels par jour au plus
       signals_queued: >-
-        Ses {count} signal(aux) iraient dans sa file ({waiting} déjà en attente, {size} au plus) : tu les lirais par
-        {per_call}, {quota} fois par jour au plus, et tu déciderais quoi en dire, et à qui.
-      # {count} : combien partiraient faute de place
-      signals_overflow: "Sa file déborderait : les {count} plus ancien(s) partiraient sans être lus."
+        Ses {count} signal(aux) sont partis dans sa file ({waiting} y attendaient déjà, {size} au plus) : tu les
+        liras par {per_call}, {quota} fois par jour au plus, et tu décideras quoi en dire, et à qui.
+      # {count} : combien sont partis faute de place
+      signals_overflow: "Sa file a débordé : les {count} plus ancien(s) sont partis sans être lus."
+      # un événement d'exemple (on_event) est inventé : ses signaux ne partent pas. {count} : combien il en a émis
+      signals_invented: >-
+        L'événement était inventé : ses {count} signal(aux) ne partent pas (un vrai événement les mettrait dans sa
+        file).
       logs: "Journal :"
       # une vue rendue mais invalide. {why} : ce qui ne va pas
       invalid: "Invalide : {why}"

@@ -175,6 +175,9 @@ class ProjectView:
     #: la sensibilité de ce qu'elle y écrit (comptes rendus, carnet, fichiers de l'atelier) : au moins
     #: « personnel » — ce qu'il faut pour qu'on puisse l'entendre, le lire ou le recevoir
     written: int = int(Sensitivity.PERSONAL)
+    #: ses dernières consignes (références, la plus récente en dernier) : ce que qui suit le projet a demandé — ce
+    #: qui en dépend (le tri de la file d'une de ses apps) les suit aussi
+    instructions: tuple[str, ...] = ()
 
 
 #: Les projets vivants (actifs ou en pause, pas archivés), du plus ancien au plus récent.

@@ -117,7 +117,7 @@ SECTION_LABELS: dict[str, str] = {
     "task_ask": "Ce qu'on lui demande pour ce mail", "edits": "Ce qu'on change à ses brouillons (retouches, refus)",
     "headlines": "Les titres de ses flux",
     "views": "Ce que voit la caméra", "apps": "Ses apps forgées", "app_news": "Ce que ses apps ont trouvé pour la personne",
-    "app_signals": "Ce qu'une app a mis dans sa file",
+    "app_signals": "Ce qu'une app a mis dans sa file", "app_consignes": "Les consignes du projet d'une app",
     # déclarées par des lots voisins (ADR 0033, 0034, 0036) : nommées d'avance, sans effet tant qu'elles n'existent pas
     "life": "Ce qui se passe dans la vie de la personne",
     "ahead": "Ce qui vient : le monde, et ce qu'elle vivra à travers quelqu'un",

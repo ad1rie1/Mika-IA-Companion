@@ -292,7 +292,8 @@ def test_the_rule_of_her_hands_names_only_the_means_she_is_given():
     both = acting([spec("forge_write"), spec("start_project")])
     assert both.startswith(ACTING) and "ta Forge" in both and "un projet à toi" in both
     # ce qu'une app sait faire est dit ; un travail se lance maintenant, une promesse sans outil ne fait rien
-    assert "site public à heure fixe" in both and "start_project" in both and "ne font rien" in both
+    assert "site public" in both and "flux RSS" in both and "heure fixe" in both
+    assert "start_project" in both and "ne font rien" in both
     forge_only = acting([spec("forge_write")])
     assert "ta Forge" in forge_only and "start_project" not in forge_only  # jamais un outil qu'elle n'a pas
 

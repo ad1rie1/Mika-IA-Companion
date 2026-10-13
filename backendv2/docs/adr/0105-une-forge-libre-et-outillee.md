@@ -155,5 +155,51 @@ d'emblée (« une app ne dit rien d'elle-même »), la description de `forge_wri
 relu au lancement de chaque processus ; illisible : UTC). En conversation, elle ne pensait pas à une app pour lire un
 flux RSS : ses moyens le nomment.
 
+**Troisième sonde (Haiku, même jour) : la chaîne entière, et ce qui la rendait bancale.** Les deux apps signalent
+(korben_ia : file de 40, lue par 10, 96 appels par jour ; temp_lyon : un relevé par appel, 4 par jour). Un relevé met
+quatre articles en file, un appel les lit, juge, et le dit à Adrien dès qu'il se connecte. Ce qui ne tenait pas,
+corrigé et éprouvé à nouveau en réel :
+- *Un essai n'était qu'à moitié réel.* `forge_test` d'un tick rangeait pour de vrai dans la base mais ne signalait
+  rien : le passage planifié suivant ne trouvait plus rien de nouveau, et la nouveauté se perdait sans bruit — elle
+  croyait ses signaux d'essai « déjà dans la file ». Un essai est désormais un vrai passage : ses signaux et
+  émissions partent comme au passage planifié (jamais comptés contre l'app) ; seul `on_event`, dont l'événement est
+  inventé, ne les envoie pas. Même règle pour « Tester » dans la console. Elle l'a compris : elle n'essaie plus
+  temp_lyon pour ne pas ranger un faux relevé du soir, et lit Open-Meteo directement.
+- *Ce qu'elle garde en tête d'un tri était mis au compte de l'app* (« Mon app me signale : … je l'ai signalé quand
+  même ») : c'est sa pensée (« En lisant ce que mon app a trouvé, je me suis dit : … »).
+- *Un tri fait finissait « elle s'est tue ».* Un épisode non livré qui a agi par un outil réussi, sans un mot, est
+  fait (noyau : `runtime/pipeline.py`).
+- *Le tri ne savait ni ce qu'elle avait déjà dit, ni ce que le projet demandait* : elle redisait les mêmes articles,
+  faux positifs compris, alors qu'Adrien avait demandé de les écarter. La lecture d'une file montre les trois dernières
+  trouvailles vraiment dites de l'app (`ForgeState.said`, v5 : une trouvaille non dite qui en remplace une autre
+  n'efface plus ce qui a été dit), celle qui attend encore d'être dite (son verdict la remplace), et les dernières
+  consignes du projet de l'app (`ProjectView.instructions`). Réel : « rien de vraiment nouveau », les faux positifs
+  écartés, et à Adrien « Mistral était déjà passé dans un lot précédent ».
+- *La colonne « signaux » de la console ne comptait plus rien* depuis les files : elle compte ce qui est mis en file
+  et ce qui passe droit à son attention.
+- *Leurs rythmes* : la liste de ses apps, au travail, dit qu'ils suivent son heure (elle croyait encore le cron en
+  UTC).
+
+Trois défauts hors de la Forge, vus par la même sonde, corrigés avec elle :
+- *Une rafale à l'arrivée d'Adrien* : trois bulles en huit secondes. (1) Une salutation qui emporte une nouvelle, un
+  récit ou une demande ne comptait pour rien (ni plafond, ni période réfractaire, ADR 0033) : elle compte désormais
+  (`agency._spoke_up`) — la ligne, elle, passe toujours comme une salutation. (2) Deux projets qui attendaient Adrien
+  additionnaient leurs envies (19 contre un seuil de 9) pour un message qui n'en porte qu'une : une demande et un récit
+  à la fois par personne. (3) Le murmure rédigeait le message entier après sa pensée, et l'écran le montrait : un
+  murmure tient en un paragraphe (`EpisodePolicy.max_paragraphs`), et sa consigne le dit.
+- *Récit ou demande se lisait sur les raisons de la ligne* : une initiative dont le sujet était un récit était prise
+  pour une demande dès qu'une demande figurait sur la ligne (et inversement, une demande dite était marquée
+  « racontée »). C'est l'objectif du sujet qui le dit (`projects.asking`).
+- *Une consigne n'était pas une réponse* : Adrien répond « oui, resserre le filtre », elle en fait une consigne du
+  projet — et l'exécution suivante attendait encore sa réponse. Une consigne reçue pendant un besoin y répond
+  (`Objective.steered_at`, projets v6) : plus d'attente, plus de redemande, et l'exécution le lit. Réel : le filtre
+  resserré (titre et début de description, noms de modèles seulement avec un mot d'IA), essayé, l'objectif clos.
+
+Épreuves : `test_forge_home.py` (un essai met ses signaux dans la file), `test_forge_libre.py` (un tri fini « fait »,
+sa pensée à elle ; ce qui a été dit, ce qui attend, les consignes du projet), `test_speaking_up.py` (la salutation qui
+apporte une nouvelle compte ; un murmure en un souffle), `test_projects.py` (un sujet, pas les raisons de la ligne ;
+une seule envie par personne ; une consigne répond à un besoin) — chacune tombe quand on retire sa correction.
+S05, S07, S16, S18, S19, S20, S23 verts.
+
 **Ce qui n'a pas été fait ici.** Ses explorations d'un centre d'intérêt sans flux restent des rêveries (sans le web).
 Une app n'a qu'un appel à la fois.

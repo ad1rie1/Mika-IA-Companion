@@ -40,6 +40,7 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
     answered,
+    asking,
     cadence,
     effect_words,
     live,
@@ -249,7 +250,8 @@ def app_lines(p: Project, frame: Frame) -> list[str]:
         if a.services:
             line += phrase("projects.run.app.services", services=", ".join(a.services))
         out.append("- " + line)
-    return [*out, phrase("projects.run.apps_tell")]
+    return [*out, phrase("projects.run.apps_tell"),
+            phrase("projects.run.apps_clock", zone=str(frame.env.tz_of(frame.root)))]
 
 
 def run_rules(pm: Any) -> str:
@@ -284,7 +286,8 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
             lines.append(phrase("projects.run.note", note=texts[target.note_ref]))
         if target.need_ref and texts.get(target.need_ref):
             # sa réponse est arrivée : elle l'a sous les yeux, elle n'a ni à l'attendre ni à la redemander
-            reply = phrase("projects.run.reply") if (enrich.get("projects_answer") or {}).get("lines") else ""
+            reply = phrase("projects.run.reply") if (enrich.get("projects_answer") or {}).get("lines") else \
+                phrase("projects.run.steered") if target.steered_at else ""
             lines.append(phrase("projects.run.awaited", need=texts[target.need_ref], reply=reply))
     others = [o for o in p.objectives if target is None or o.id != target.id]
     if others:
@@ -394,20 +397,20 @@ def _share_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) ->
     store = (enrich.get("projects") or {}).get("texts") or {}
     title, objective = store.get(p.title_ref), store.get(o.text_ref)
     args = ep.attrs.get("args") if ep is not None else None
-    reasons = ep.attrs.get("reasons") or () if ep is not None else ()
     share = str(args.get("share", MENTION)) if args else MENTION
+    need = asking(o)  # le sujet le dit, pas les raisons de la ligne (un récit peut y côtoyer une demande)
     aud = frame.audience
     person = frame.get(identity_c.PERSON(ep.target)) if ep is not None and ep.target else None
     if aud is None or not hearable(p.about, written(p), person, aud.level, aud.witness_level, aud.private_ok) \
-            or (share == MENTION and c.NEED not in reasons) or not title:
+            or (share == MENTION and not need) or not title:
         return SectionBody(phrase("projects.share.something"), level=0)
     level = written(p) if any(a != person for a in p.about) else 0
-    if c.NEED in reasons:
-        need = store.get(o.need_ref, "") or store.get(o.result_ref, "")
+    if need:
+        wanted = store.get(o.need_ref, "") or store.get(o.result_ref, "")
         state = phrase("projects.share.blocked") if o.status == c.BLOCKED else phrase("projects.share.waiting")
         body = phrase("projects.share.need_head", title=title, objective=objective or "…", state=state)
-        if need:
-            body += "\n" + phrase("projects.share.need", need=need)
+        if wanted:
+            body += "\n" + phrase("projects.share.need", need=wanted)
         return SectionBody(body, level=level, title=phrase("projects.share.need_title"),
                            provenance=(f"project:{p.id}",))
     pm = params(frame.env.params_of("projects", frame.root))

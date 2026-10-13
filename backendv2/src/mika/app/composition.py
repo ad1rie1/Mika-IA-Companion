@@ -177,7 +177,8 @@ def policies() -> dict[str, EpisodePolicy]:
                                                          "forge_apps", EXTERNAL})),
         # une pensée à voix haute : sa voix brève, pas dans le fil, à l'écran seulement
         Kind.MURMUR: EpisodePolicy(kind=Kind.MURMUR, role=Role.MURMUR, priority=1, lane="conversation",
-                                   persona_depth="compact", visible=False, max_tokens=80, deadline_s=60.0),
+                                   persona_depth="compact", visible=False, max_tokens=80, deadline_s=60.0,
+                                   max_paragraphs=1),
     }
 
 

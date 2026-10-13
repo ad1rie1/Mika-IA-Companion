@@ -69,6 +69,7 @@ from mika.sim.llm.persona import PersonaSimLLM
 from mika.vocab.episodes import Kind, goal_target, project_target
 from tests.fixtures.atelier import Atelier
 from tests.fixtures.console_html import ConsoleHTML
+from tests.fixtures.harness import events_of
 from tests.fixtures.memory import seq_of, token
 from tests.fixtures.mika import boot, build, connect, disconnect, reply
 from tests.protocol.test_web import bootstrap, world  # noqa: F401 — fixture partagée
@@ -279,7 +280,10 @@ def tick(api):
 
 
 @needs_bwrap
-def test_forge_test_tries_what_she_wrote_and_says_what_a_signal_would_become(tmp_path):
+def test_forge_test_tries_what_she_wrote_and_its_signals_really_go_to_the_queue(tmp_path):
+    """Un essai est un vrai passage (sonde du 2026-10-13) : ce qu'il range reste dans la base, alors ce qu'il signale
+    part dans la file — sinon le passage planifié suivant ne trouve plus rien de « nouveau » et la nouveauté se perd
+    sans bruit. Le résultat le dit au présent."""
     kernel, clock, forge = fake_forge(tmp_path)
 
     async def main():
@@ -294,6 +298,8 @@ def test_forge_test_tries_what_she_wrote_and_says_what_a_signal_would_become(tmp
                                   ("view_cours", {}), ("on_event", {"summary": "un titre"})):
                 out[method] = await _her_tool(kernel, "forge_test", {"app": "cours", "method": method, "args": extra})
             out["faint"] = await _her_tool(kernel, "forge_test", {"app": "murmure", "method": "tick"})
+            out["queued"] = [e.data.app for e in events_of(kernel, forge_c.QUEUED.name)]
+            out["queue"] = len(kernel.mind.frame().state("forge").apps["murmure"].queue)
             return out
         finally:
             forge.shutdown()
@@ -309,7 +315,8 @@ def test_forge_test_tries_what_she_wrote_and_says_what_a_signal_would_become(tmp
     assert out["view_cours"].ok
     assert not out["on_event"].ok  # elle n'a pas écrit on_event : l'hôte refuse une fonction absente
     faint = _content(out["faint"])
-    assert "Ses 2 signal(aux) iraient dans sa file" in faint  # les deux : c'est à elle de juger, en les lisant
+    assert "Ses 2 signal(aux) sont partis dans sa file" in faint  # les deux : c'est à elle de juger, en les lisant
+    assert out["queued"].count("murmure") == 2 and out["queue"] == 2  # vraiment dans sa file, pas seulement dits
 
 
 # ── La preuve se déclare sur l'outil (L6) ─────────────────────────────────
@@ -422,6 +429,8 @@ def test_an_app_written_during_a_run_lives_there_and_its_breakage_asks_for_a_rep
     assert repair.status != c.DONE or (closing and closing[-1].data.proof == "outil")
     assert nudges and nudges[-1].data.objective == repair.id  # une exécution tout de suite
     assert any("cours" in line and "en panne" in line and "HTTP 503" in line for line in lines)
+    # leurs rythmes suivent son heure : elle se demandait si leur cron tournait en UTC (sonde du 2026-10-13)
+    assert any("Europe/Paris" in line and "pas l'UTC" in line for line in lines)
 
 
 def test_a_version_waiting_for_approval_is_a_card_in_her_owners_chat_and_a_refusal_comes_back():

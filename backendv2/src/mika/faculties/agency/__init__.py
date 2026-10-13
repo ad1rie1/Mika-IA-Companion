@@ -217,6 +217,16 @@ def _uncounted(reasons: Any) -> bool:
     return bool(c.NOT_SPEAKING_UP & set(reasons))
 
 
+def _spoke_up(reasons: Any) -> bool:
+    """Ce qu'une initiative **dite** a été : saluer qui arrive ou tenir parole, seuls, ce n'est pas prendre la
+    parole ; mais une salutation (ou une parole tenue) qui emporte une nouvelle, un récit, une demande, des nouvelles
+    prises (``c.INFORMS | c.FOR_THEM``), si — elle compte au plafond du jour et ouvre la période réfractaire de base.
+    Sans cela, le message qui disait tout à l'arrivée de quelqu'un ne comptait pour rien, et le suivant partait huit
+    secondes après (sonde du 2026-10-13). La ligne, elle, passe toujours comme une salutation (``_uncounted``)."""
+    got = set(reasons)
+    return not (c.NOT_SPEAKING_UP & got) or bool((c.INFORMS | c.FOR_THEM) & got)
+
+
 def murmur_reason(reason: str) -> tuple[str, str]:
     """(sorte de murmure, adresse visée) d'après la raison d'un épisode de murmure."""
     tag, _, target = reason.partition(":")
@@ -277,7 +287,7 @@ def _said(s: AgencyState, e, cx) -> AgencyState:
         if tag == expression_c.MURMUR_ADRIFT and target:
             return replace(s, renounced=s.renounced.set(target, e.at), hesitated_at=e.at)
         return s
-    if not d.visible or _uncounted(reason.split(",")):
+    if not d.visible or not _spoke_up(reason.split(",")):
         return s
     if d.target and d.target in s.hesitations:
         s = replace(s, hesitations=s.hesitations.delete(d.target))  # elle a fini par lui écrire : tout repart

@@ -650,6 +650,118 @@ def test_a_service_signals_the_temperature_twice_a_day_and_she_tells_it(tmp_path
     assert len(got["said"]) == 4  # chaque relevé dit à Adrien
 
 
+
+@needs_bwrap
+def test_reading_a_queue_is_work_done_and_what_she_keeps_is_her_own_thought(tmp_path):
+    """Lire la file d'une app est un travail fait par un outil, sans un mot à personne : il finit « fait », pas
+    « elle s'est tue ». Ce qu'elle garde pour elle est sa pensée à elle, pas un signal de l'app (sonde du
+    2026-10-13 : « Mon app me signale : … je l'ai signalé quand même »)."""
+    from mika.contracts import forge as forge_c
+    from mika.contracts import runtime as rt
+    from mika.kernel.clock import HOUR, US
+    from mika.ports.llm import LLMResponse, ToolCall
+    from mika.runtime.effects import with_content
+    from mika.sim.clock import run_virtual
+    from mika.vocab.episodes import Kind
+    from tests.fixtures.mika import boot, build, connect
+    from tests.unit.test_forge_console import events
+
+    def respond(req):
+        if any(t.name == "forge_signals_done" for t in req.tools):
+            return LLMResponse("", tool_calls=(ToolCall("v1", "forge_signals_done",
+                                                        {"keep": "QuoiVoir parle de films, pas d'IA"}),))
+        return LLMResponse("D'accord. [EMOTION:happy:0.3]")
+
+    forge = ForgeHost(tmp_path / "forge", http_get=lambda url: "", public=lambda host: True)
+    kernel, clock, _, _ = build(tmp_path, respond, ports={"forge": forge})
+
+    async def main():
+        await boot(kernel)
+        try:
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            await install(kernel, forge, "meteo", WEATHER, WEATHER_CODE)
+            await asyncio.sleep(26 * HOUR / US)
+            mind = kernel.mind
+            return {"ended": [e.data.outcome for e in events(kernel, rt.EPISODE_ENDED) if e.data.kind == Kind.TASK],
+                    "kept": [with_content(mind, e).data.summary.text for e in events(kernel, forge_c.SIGNALED)
+                             if e.data.app == "meteo"]}
+        finally:
+            forge.shutdown()
+            await kernel.stop()
+
+    got = run_virtual(clock, main)
+    assert got["ended"] and set(got["ended"]) == {"done"}
+    assert got["kept"] and all(k.startswith("En lisant ce que mon app « Température » a trouvé, je me suis dit")
+                               for k in got["kept"])
+
+
+
+@needs_bwrap
+def test_reading_a_queue_she_knows_what_she_already_told_and_what_the_project_asked(tmp_path):
+    """Un signal peut revenir (un flux republie, une base repart de zéro), et qui suit le projet a pu demander d'écarter
+    certains articles. En lisant la file, elle a sous les yeux ce qu'elle a déjà dit de cette app et les consignes de
+    son projet (sonde du 2026-10-13 : les mêmes quatre articles redits, faux positifs compris, alors qu'Adrien avait
+    demandé de les écarter)."""
+    from mika.contracts import forge as forge_c
+    from mika.contracts import runtime as rt
+    from mika.faculties.projects.faculty import AMENDED
+    from mika.kernel.clock import MINUTE, US
+    from mika.kernel.events import Content, Origin, VoiceProvenance
+    from mika.plugins.forge import written_draft
+    from mika.ports.llm import LLMResponse, ToolCall
+    from mika.sim.clock import run_virtual
+    from tests.fixtures.mika import boot, build, connect, disconnect
+    from tests.unit.test_projects import create
+
+    seen: list[str] = []
+
+    def respond(req):
+        if any(t.name == "forge_signals_done" for t in req.tools):
+            seen.append(req.system_stable + "\n".join(m.content for m in req.messages))
+            return LLMResponse("", tool_calls=(ToolCall("v1", "forge_signals_done", {"keep": "rien de neuf"}),))
+        return LLMResponse("D'accord. [EMOTION:happy:0.3]")
+
+    forge = ForgeHost(tmp_path / "forge", http_get=lambda url: "", public=lambda host: True)
+    kernel, clock, _, _ = build(tmp_path, respond, ports={"forge": forge})
+
+    async def main():
+        await boot(kernel)
+        try:
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            pid = await create(kernel, "op1", title="Veille domotique", objectives="Suivre la domotique")
+            mind = kernel.mind
+            await mind.append([AMENDED.draft(project=pid, instruction=Content.of("Écarte la cuisine.", level=2),
+                                             by="user_1")], emitter="projects", correlation="op2",
+                              origin=Origin.GENESIS)
+            await forge.write("flux", FEED, FEED_CODE)
+            await mind.append([written_draft(forge.info("flux"), project=pid)], emitter="forge",
+                              correlation="genese", origin=Origin.GENESIS)
+            told = await mind.append([forge_c.JUDGED.draft(app="flux", seqs=(), tell=Content.of(
+                "Matter 1.4 est sorti", level=2), about=("user_1",), sensitivity=2)], emitter="forge",
+                correlation="avant", origin=Origin.GENESIS)
+            voice = VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m")
+            await mind.append([rt.UTTERANCE.draft(kind="INITIATIVE", text=Content.of("Matter 1.4 est sorti !"),
+                                                  target="user_1", voice=voice, visible=True,
+                                                  provenance=(f"forge-news:flux:{told.seqs[-1]}",))],
+                              emitter="runtime", correlation="dit", origin=Origin.KERNEL)
+            # Adrien s'en va ; une trouvaille suivante, pas encore dite, prend sa place : ce qui a été dit reste su
+            await disconnect(kernel, "user_1")
+            await mind.append([forge_c.JUDGED.draft(app="flux", seqs=(), tell=Content.of(
+                "Un thermostat qui apprend", level=2), about=("user_1",), sensitivity=2)], emitter="forge",
+                correlation="ensuite", origin=Origin.GENESIS)
+            await asyncio.sleep(40 * MINUTE / US)
+        finally:
+            forge.shutdown()
+            await kernel.stop()
+
+    run_virtual(clock, main)
+    assert seen, "elle n'a pas lu la file"
+    prompt = seen[0]
+    assert "Ce que tu as déjà dit de cette app" in prompt and "Matter 1.4 est sorti" in prompt
+    assert "pas encore dit" in prompt and "Un thermostat qui apprend" in prompt
+    assert "LES CONSIGNES DU PROJET DE CETTE APP" in prompt and "Écarte la cuisine." in prompt
+
+
 @needs_bwrap
 def test_an_app_lives_on_her_clock(tmp_path):
     """Le bac à sable était en UTC : elle croyait ses rythmes décalés (sonde du 2026-10-13). Une app a son heure ; un
