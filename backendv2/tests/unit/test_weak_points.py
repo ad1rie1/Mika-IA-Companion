@@ -39,6 +39,8 @@ def cx(closeness: dict[str, str]):
             return closeness.get(key.arg, social_c.STRANGER)
         if key.name == "body.rhythm":
             return circadian.DEFAULT
+        if key.name == social_c.WEIGHT.name:
+            return 1.0  # personne ici n'est sa propriétaire (ADR 0107)
         raise KeyError(key.name)
 
     return NS(params=DEFAULT, tz=PARIS, facts=NS(get=get), local=lambda t: datetime.fromtimestamp(t / 1e6, PARIS))

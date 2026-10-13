@@ -66,5 +66,8 @@ La propriétaire l'a trouvé juste et a demandé de corriger quatre écarts entr
     quand le rendu la tait, ou quand le calme se dit ;
   - `test_empathy.py::test_what_moves_strongly_is_kept_better`, quand l'émotion ne compte pas, quand seule celle de
     la personne compte, quand tout monte, ou quand la croyance ou le moment oublie le plancher.
+- Le faux contexte de `test_weak_points.py` répond au poids d'une personne (un fait lu de plus par l'affect).
+- Suite complète avec les tests longs : tout passe sauf le budget de temps de la voie rapide (`test_quick_lane`,
+  84 s pour 60 s permis), qui dépasse aussi sur le code d'avant ces corrections (87 s) : la machine était chargée.
 - Versions : `affect` v9. Pas de version pour la déception : les annotations déjà au journal portent le geste rangé à
   l'époque, qui ne pouvait pas être « décevant ».
