@@ -36,11 +36,23 @@ La propriétaire l'a trouvé juste et a demandé de corriger quatre écarts entr
 - Les évaluations relationnelles envers elle (un retour, une jalousie, une contagion) le pesaient déjà à leur source :
   elles ne sont pas pesées deux fois.
 
+**Décision 3 : la relecture part de ce qu'elle a ressenti.**
+- La relecture jugeait « mon_ressenti » à neuf, sans voir ses balises : un souvenir pouvait dire « tu en étais
+  contente » d'un moment où elle s'était déclarée triste en répondant.
+- Ses répliques portent maintenant, dans le texte relu, ce qu'elle a déclaré en les écrivant, en mots (« (en
+  l'écrivant : tristesse et un peu d'inquiétude) », `memory.extraction.render.felt`), jamais un nombre. La consigne
+  dit au modèle d'en partir, sauf si la suite de la conversation montre autre chose : le dernier mot reste au modèle.
+- Le calme (`neutral`) ne se dit pas ; une réplique qui racontait sans nom (ADR 0091) ne dit rien de plus.
+- `Consolidate._lies` devient `_her_lines` : une seule lecture des événements de ses répliques donne le mensonge, le
+  récit sans nom et la balise. `facet_words` passe de `recall` à `extraction`, qui en a besoin la première.
+
 **Conséquences.**
 - Cibles, rouges sur le code d'avant (mutations détectées) :
   - `test_reading.py::test_sad_because_of_her_cools_the_relation_sad_with_her_brings_closer`, quand l'affect ne lit
     que « blessant » ou quand l'estime prend la déception pour un merci ;
   - `test_temperament_paths.py::test_devotion_what_her_owner_says_to_her_moves_her_more_than_a_close_friend`, quand
-    l'humeur ou la posture oublie le poids.
+    l'humeur ou la posture oublie le poids ;
+  - `test_empathy.py::test_the_reread_starts_from_what_she_said_she_felt`, quand la balise n'atteint pas la ligne,
+    quand le rendu la tait, ou quand le calme se dit.
 - Versions : `affect` v9. Pas de version pour la déception : les annotations déjà au journal portent le geste rangé à
   l'époque, qui ne pouvait pas être « décevant ».
