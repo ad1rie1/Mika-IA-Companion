@@ -25,6 +25,7 @@ from typing import Any
 
 from sqlalchemy import select
 
+from mika.contracts import forge as forge_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
@@ -32,6 +33,8 @@ from mika.contracts import transcript as transcript_c
 from mika.faculties.projects.faculty import (
     ON_DEMAND,
     PROJECTS,
+    SELF_BUNDLES,
+    WEB,
     Decision,
     Objective,
     Project,
@@ -43,6 +46,7 @@ from mika.faculties.projects.faculty import (
     objective_of,
     params,
     pick,
+    run_bundles,
 )
 from mika.faculties.projects.tools import RUNS, steers, written
 from mika.faculties.projects.work import FULL, MENTION, untold
@@ -202,12 +206,59 @@ def _decision_line(d: Decision, texts: Mapping[str, str]) -> str:
         (phrase("projects.decision.because", why=why) if why else "")
 
 
+def missing_tools(p: Project) -> str:
+    """Ce que ce projet n'a pas en main parmi ce qui fabrique et observe (la Forge, ses apps, ses flux, sa
+    mémoire) : à elle, elle peut se le donner (``project_equip``) ; confié, elle le demande (``needs_you``) — une
+    exécution ne devine pas les outils qui lui manquent (ADR 0104)."""
+    have = run_bundles(p)
+    absent = [b for b in (*SELF_BUNDLES, WEB) if b not in have]
+    if not absent:
+        return ""
+    words = family("projects.bundle_words")
+    listed = ", ".join(words[b.removeprefix("mcp.")] for b in absent)
+    if p.authority == c.SELF:
+        return phrase("projects.run.missing_own", tools=listed)
+    return phrase("projects.run.missing_confided", tools=listed)
+
+
+def app_lines(p: Project, frame: Frame) -> list[str]:
+    """Ses apps qui vivent dans ce projet (ADR 0104) : leur état, et ce qui attend quelqu'un — une exécution voit ce
+    qu'elle a fabriqué, au lieu de le redécouvrir par forge_list."""
+    mine = [a for a in frame.get(forge_c.APPS) or () if a.project == p.id]
+    if not mine:
+        return []
+    out = [phrase("projects.run.apps")]
+    for a in mine:
+        if a.held:
+            state = phrase("projects.run.app.held")
+        elif a.broken:
+            state = phrase("projects.run.app.broken", error=a.broken[:160])
+        elif a.broken_services:
+            state = phrase("projects.run.app.service_broken", error=forge_c.failure(a)[:160])
+        elif a.pending:
+            state = phrase("projects.run.app.pending")
+        elif a.refused:
+            state = phrase("projects.run.app.refused")
+        elif not a.enabled:
+            state = phrase("projects.run.app.stopped")
+        elif a.ticked_at:
+            state = phrase("projects.run.app.ticked", ago=ago(frame.now - a.ticked_at))
+        else:
+            state = phrase("projects.run.app.waiting")
+        line = phrase("projects.run.app.line", title=a.title, app=a.name, version=a.version, state=state)
+        if a.services:
+            line += phrase("projects.run.app.services", services=", ".join(a.services))
+        out.append("- " + line)
+    return out
+
+
 def run_rules(pm: Any) -> str:
     """Comment se conclut une exécution, et ce qu'elle a de tours et de temps (dits, pas devinés)."""
     return phrase("projects.run.rules", minutes=max(1, pm.run_programs_us // MINUTE))
 
 
-@PROJECTS.section("project", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=90, title=phrase("projects.run.title"))
+@PROJECTS.section("project", zone=Zone.VOLATILE, episodes=RUNS, trim_rank=90, title=phrase("projects.run.title"),
+                  reads=[forge_c.APPS])
 def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
     got = _project(s, frame)
     if got is None:
@@ -270,6 +321,10 @@ def _run_section(s: ProjectsState, frame: Frame, enrich: Mapping[str, Any]) -> S
                      phrase("projects.run.remote_manual", remote=p.remote, branch=p.branch))
     if "workshop" in p.bundles:
         lines += _atelier_lines(enrich.get("projects_tree") or {})
+    if apps := app_lines(p, frame):
+        lines.append("\n".join(apps))
+    if missing := missing_tools(p):
+        lines.append(missing)
     lines.append(run_rules(pm))
     return SectionBody("\n".join(lines), level=p.sensitivity, provenance=(f"project:{p.id}",))
 

@@ -73,8 +73,16 @@ class Api:
     def signal(self, summary, pertinence=0.3, emotion=""):
         host("signal", summary=str(summary), pertinence=float(pertinence), emotion=str(emotion))
 
-    def http_get(self, url):
-        return host("http_get", url=str(url))
+    def http_get(self, url, headers=None):
+        """Le texte d'une page ou d'une API ; une erreur HTTP lève une exception."""
+        return host("http_get", url=str(url), headers=dict(headers or {}))
+
+    def http(self, url, method="GET", headers=None, json=None, form=None, body=None, binary=False, timeout=None):
+        """Une requête entière : toute méthode, un corps (json, form ou body), ses en-têtes ; rend
+        {status, ok, url, headers, text (ou base64 avec binary=True), truncated} — une erreur HTTP est une réponse."""
+        return host("http", url=str(url), method=str(method), headers=dict(headers or {}), json=json,
+                    form=dict(form) if form is not None else None, body=None if body is None else str(body),
+                    binary=bool(binary), timeout=timeout)
 
 
 class Printer:

@@ -696,7 +696,8 @@ def test_an_exploration_born_of_a_signal_inherits_only_reading_from_its_source()
     outils d'une app (qui appellent ses domaines) ne passent jamais (PRJ-3)."""
     assert "rss" in inherited("rss") and "camera" in inherited("camera")
     assert "email" not in inherited("email") and "forge_apps" not in inherited("forge_apps")
-    assert set(inherited("email")) == set(inherited("")) == {"goals", "memory", "projects"}
+    # et le web, comme quand elle parle (ADR 0105)
+    assert set(inherited("email")) == set(inherited("")) == {"goals", "memory", "projects", "mcp.web"}
 
 
 def test_a_refused_done_is_not_a_verdict_and_the_step_can_still_conclude(tmp_path):

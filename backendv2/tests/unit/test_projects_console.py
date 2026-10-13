@@ -156,7 +156,7 @@ def test_creating_says_what_is_wrong_field_by_field_and_leads_to_the_fiche(tmp_p
     [p] = created
     assert p.origin is Origin.EXTERNAL and p.data.source == "operator" and p.data.owner == "user_1"
     assert p.data.approval is False and p.data.schedule == "interval:2h" and p.data.runs_per_day == 5
-    assert set(p.data.bundles) == {"projects", "workshop", "memory", "rss"}
+    assert set(p.data.bundles) == {"projects", "workshop", "memory", "rss", "mcp.web"}  # le web, coché d'office
     # ses objectifs suivent aussitôt, sous son numéro (lignes vides ignorées)
     assert [(o.data.project, o.data.objective, o.data.kind, o.data.cadence_us) for o in objectives] == [
         (p.seq, 1, c.ONCE, 0), (p.seq, 2, c.CONSTANT, 6 * 3600 * US)]
@@ -226,7 +226,8 @@ def test_every_tab_reads_a_project_that_lived_and_the_forms_stay_in_their_tabs(t
     behaviour = tabs["comportement"]
     assert isinstance(behaviour[0], ActionSlot) and behaviour[0].action == "projects.modifier"
     tools = tables(behaviour)["Ce qu'elle a en main pendant une exécution"]
-    assert {r[0].text for r in tools.rows} == {"ses outils de projet", "son atelier", "sa mémoire (souvenirs, croyances)"}
+    assert {r[0].text for r in tools.rows} == {"ses outils de projet", "son atelier", "sa mémoire (souvenirs, croyances)",
+                                             "le web (chercher, lire des pages)"}
     assert any("ws_write" in r[2].text for r in tools.rows)
     carnet = tabs["carnet"]
     assert "objectif n° 1 ajouté" in flat(carnet) and "attend ton accord" in flat(carnet)

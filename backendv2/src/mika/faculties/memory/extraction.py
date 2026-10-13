@@ -204,6 +204,7 @@ class XPromesse(_Lenient):
     envers: str
     echeance: str | None = Field(default=None, validation_alias=AliasChoices("echeance", "échéance"),
                                  description=phrase("memory.extraction.fields.date"))
+    travail: bool = Field(default=False, description=phrase("memory.extraction.fields.promise_work"))
     messages: list[int] = Field(default_factory=list)
 
     @field_validator("messages", mode="before")

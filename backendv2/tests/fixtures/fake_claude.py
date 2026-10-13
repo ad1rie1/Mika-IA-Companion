@@ -170,6 +170,8 @@ def main():
                                          "user": user["message"]["content"][-1]["text"],
                                          "api_key": os.environ.get("ANTHROPIC_API_KEY", ""),
                                          "max_output": os.environ.get("CLAUDE_CODE_MAX_OUTPUT_TOKENS", ""),
+                                         "flags": {k: os.environ.get(k, "") for k in (
+                                             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "CLAUDE_CODE_HARBOR_KITE")},
                                          "cwd": os.getcwd()})
     event("message_start", message={"model": "fake-cc"})
     out({"type": "assistant", "message": {"model": "fake-cc", "content": [{"type": "text", "text": text}]}})

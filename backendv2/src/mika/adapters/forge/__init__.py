@@ -12,6 +12,12 @@ bubblewrap, rien ne tourne.
 La relecture à l'écriture (syntaxe, imports inutiles dans un bac à sable,
 fonctions attendues, taille) est une politesse, pas la défense.
 
+**Son réseau est libre** (ADR 0105) : l'app n'a pas de réseau, elle demande
+ses requêtes à l'hôte (``api.http``, ``api.http_get``) — toute adresse
+d'Internet, toute méthode, ses en-têtes, les redirections suivies ; jamais
+cette machine ni le réseau local (chaque nom est résolu une fois et vérifié,
+à chaque saut). ``allowed_domains`` n'est plus qu'une indication.
+
 Le processus d'une app reste chaud entre deux appels ; une nouvelle version
 le remplace ; il est relancé s'il meurt.
 
@@ -31,6 +37,7 @@ celles que le manifeste déclare (``view_<vue>``, ``action_<vue>_<action>``,
 from __future__ import annotations
 
 import asyncio
+import base64
 import functools
 import hashlib
 import ipaddress
@@ -50,7 +57,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlencode, urljoin, urlsplit, urlunsplit
 
 import httpx
 from sqlalchemy.exc import SQLAlchemyError
@@ -59,10 +66,12 @@ from mika.adapters.forge.bases import ForgeBases, SqlRefused
 from mika.adapters.forge.manifest import HANDLERS, coherence, lint, read_manifest, signatures
 from mika.ports.forge import (
     AppInfo,
+    AppService,
     AppTool,
     CallResult,
     ForgeRefused,
     StagedVersion,
+    arg_specs,
     config_form,
     ui_dump,
     view_specs,
@@ -79,7 +88,8 @@ MAX_RESULT = 64_000
 MAX_LOGS = 500
 #: ce qu'une requête de Mika (ses outils, la console) a pour s'exécuter
 DB_TIMEOUT_S = 5.0
-HTTP_MAX = 1_000_000
+#: une réponse lue au plus (octets) : au-delà, elle est coupée et l'app le sait (``truncated``)
+HTTP_MAX = 5_000_000
 #: les vues rendues gardées un instant (même app, version, fonction, paramètres, réglages)
 CACHE_MAX = 64
 _SYSTEM_DIRS = ("/usr", "/bin", "/sbin", "/lib", "/lib64")
@@ -88,7 +98,7 @@ _SYSTEM_DIRS = ("/usr", "/bin", "/sbin", "/lib", "/lib64")
 @dataclass(frozen=True, slots=True)
 class Limits:
     memory_bytes: int = 512 * 1024 * 1024
-    cpu_seconds: int = 120  # filet : la durée de vie d'un processus chaud
+    cpu_seconds: int = 600  # filet : la durée de vie d'un processus chaud (un service peut durer deux minutes)
     file_bytes: int = 10 * 1024 * 1024
     files: int = 64
     load_timeout_s: float = 5.0
@@ -107,8 +117,9 @@ def surface(manifest: Mapping[str, Any], functions: Mapping[str, int] | set[str]
         views = [{"key": "principale", "label": title or "Vue principale", "description": "", "order": 100,
                   "params": [], "actions": [], "function": "view"}]
     tools = [t["name"] for t in manifest.get("tools", []) if f"tool_{t['name']}" in functions]
+    services = {f"service_{s['name']}" for s in manifest.get("services", [])} & set(functions)
     callable_ = {h for h in HANDLERS if h in functions} | {v["function"] for v in views} \
-        | {a["function"] for v in views for a in v["actions"]} | {f"tool_{t}" for t in tools}
+        | {a["function"] for v in views for a in v["actions"]} | {f"tool_{t}" for t in tools} | services
     return views, tools, sorted(callable_)
 
 
@@ -126,14 +137,18 @@ class _Call:
     emits: list[tuple[str, str]] = field(default_factory=list)
     #: l'échéance de l'appel (``time.monotonic``) : un service ne la dépasse pas
     deadline: float = 0.0
-    #: l'app lit-elle ses réglages secrets (une version validée par un opérateur)
+    #: l'app lit-elle ses réglages secrets (une app qu'un opérateur a validée)
     secrets: bool = True
+    #: ses requêtes sur le réseau pendant cet appel (``HTTP_PER_CALL`` au plus)
+    requests: int = 0
 
 
 #: le préfixe NAT64 bien connu : l'adresse IPv4 qu'il porte compte, pas lui
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
-#: une requête de l'app ne dure jamais plus que ça, même si son appel en laisse davantage
-HTTP_TIMEOUT_S = 10.0
+#: une requête de l'app dure au plus ça quand elle ne dit rien (``timeout``), jamais plus que ce qui reste à son appel
+HTTP_TIMEOUT_S = 15.0
+#: …ni plus que ça, même si elle le demande
+HTTP_TIMEOUT_MAX_S = 120.0
 
 
 def is_global(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -172,39 +187,157 @@ def _is_public(host: str) -> bool:
     return True
 
 
-def real_http_get(url: str, deadline: float | None = None) -> str:
-    """Un GET vers une adresse publique, résolue une seule fois (la connexion part vers l'adresse vérifiée, le nom
-    ne sert qu'à l'en-tête ``Host`` et au certificat), sans redirection, borné en taille et **en durée totale**
-    (``deadline``, sur ``time.monotonic``)."""
-    parts = urlsplit(url)
-    host = parts.hostname or ""
-    if parts.username or parts.password:
-        raise ValueError("pas d'identifiants dans l'adresse")
-    port = parts.port or (443 if parts.scheme == "https" else 80)
-    ip = resolve_public(host, port)[0]
-    netloc = f"[{ip}]:{port}" if ip.version == 6 else f"{ip}:{port}"
-    target = urlunsplit((parts.scheme, netloc, parts.path or "/", parts.query, ""))
-    end = deadline if deadline is not None else time.monotonic() + HTTP_TIMEOUT_S
+#: les en-têtes que l'hôte pose lui-même (la connexion, la taille, la machine visée) : une app choisit tous les autres
+#: (ADR 0105 — son réseau est libre : une clé, un cookie, une langue, son nom de client…)
+HTTP_RESERVED = frozenset({"host", "content-length", "transfer-encoding", "connection", "keep-alive", "upgrade", "te",
+                           "trailer", "expect", "proxy-authorization", "proxy-connection"})
+HTTP_HEADER_NAME = re.compile(r"^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$")
+HTTP_HEADERS_MAX = 40
+HTTP_METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
+#: ce qu'une requête envoie au plus (octets)
+HTTP_BODY_MAX = 1_000_000
+#: les redirections suivies au plus, chacune revérifiée (jamais vers cette machine ni le réseau local)
+HTTP_REDIRECTS = 5
+#: les requêtes d'un même appel au plus : de quoi parcourir des pages, pas marteler un site par une boucle ratée
+HTTP_PER_CALL = 200
+#: son nom de client quand elle n'en donne pas
+USER_AGENT = "Mika-Forge/3"
+
+
+def checked_headers(raw: Any) -> dict[str, str]:
+    """Les en-têtes demandés, vérifiés (``ValueError`` en français sinon) : des noms d'en-tête, hors de ceux que
+    l'hôte pose, des valeurs d'une ligne."""
+    if raw in (None, {}):
+        return {}
+    if not isinstance(raw, Mapping):
+        raise ValueError("headers : un dictionnaire {nom: valeur}")
+    if len(raw) > HTTP_HEADERS_MAX:
+        raise ValueError(f"headers : {HTTP_HEADERS_MAX} en-têtes au plus")
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        name = str(key).strip()
+        if not HTTP_HEADER_NAME.match(name):
+            raise ValueError(f"en-tête « {name[:40]} » : un nom d'en-tête (lettres, chiffres, tirets)")
+        if name.lower() in HTTP_RESERVED:
+            raise ValueError(f"en-tête « {name} » : l'hôte le pose lui-même")
+        text = str(value)
+        if len(text) > 8000 or "\r" in text or "\n" in text:
+            raise ValueError(f"en-tête « {name} » : une valeur d'une ligne, 8 000 caractères au plus")
+        out[name] = text
+    return out
+
+
+def body_of(json_: Any = None, form: Any = None, body: Any = None) -> tuple[bytes | None, str]:
+    """(ce qu'une requête envoie, son type) : du JSON, un formulaire, ou un texte tel quel — un seul des trois."""
+    given = [x is not None for x in (json_, form, body)]
+    if sum(given) > 1:
+        raise ValueError("un seul corps : json, form ou body")
+    if json_ is not None:
+        data, kind = json.dumps(json_, ensure_ascii=False).encode(), "application/json"
+    elif form is not None:
+        if not isinstance(form, Mapping):
+            raise ValueError("form : un dictionnaire {champ: valeur}")
+        data, kind = urlencode({str(k): str(v) for k, v in form.items()}).encode(), \
+            "application/x-www-form-urlencoded"
+    elif body is not None:
+        data, kind = str(body).encode(), ""
+    else:
+        return None, ""
+    if len(data) > HTTP_BODY_MAX:
+        raise ValueError(f"corps trop gros ({len(data) // 1000} Ko ; au plus {HTTP_BODY_MAX // 1000} Ko)")
+    return data, kind
+
+
+def _has(headers: Mapping[str, str], name: str) -> bool:
+    return any(k.lower() == name for k in headers)
+
+
+def real_http(method: str, url: str, *, headers: Mapping[str, str] | None = None, body: bytes | None = None,
+              deadline: float | None = None, timeout_s: float | None = None,
+              max_bytes: int = HTTP_MAX) -> dict[str, Any]:
+    """Une requête vers une adresse **publique** (ADR 0105 : tout Internet, jamais cette machine ni le réseau
+    local) : chaque nom est résolu une seule fois, la connexion part vers l'adresse vérifiée (le nom ne sert qu'à
+    l'en-tête ``Host`` et au certificat), les redirections sont suivies — chacune revérifiée, sans la clé ni les
+    cookies quand l'hôte change —, la réponse est lue jusqu'à ``max_bytes`` (``truncated`` le dit) et la durée totale
+    bornée (``deadline`` sur ``time.monotonic``, ``timeout_s`` pour cette requête).
+
+    Rend ``{status, url, headers, body (octets), truncated}`` — une erreur HTTP est une réponse, pas une exception."""
+    method = method.upper()
+    if method not in HTTP_METHODS:
+        raise ValueError(f"méthode « {method[:10]} » inconnue (au choix : {', '.join(sorted(HTTP_METHODS))})")
+    end = time.monotonic() + min(timeout_s or HTTP_TIMEOUT_S, HTTP_TIMEOUT_MAX_S)
+    if deadline is not None:
+        end = min(end, deadline)
 
     def left() -> float:
         remaining = end - time.monotonic()
         if remaining <= 0:
             raise RuntimeError("délai dépassé")
-        return min(remaining, HTTP_TIMEOUT_S)
+        return remaining
 
-    headers = {"User-Agent": "Mika-Forge/2", "Host": host if parts.port is None else f"{host}:{parts.port}"}
-    with httpx.Client(follow_redirects=False, timeout=left(), trust_env=False) as client, \
-            client.stream("GET", target, headers=headers, extensions={"sni_hostname": host}) as resp:
-        chunks, size = [], 0
-        for chunk in resp.iter_bytes():
-            left()  # la durée totale, pas seulement chaque lecture
-            size += len(chunk)
-            if size > HTTP_MAX:
-                break
-            chunks.append(chunk)
-        if resp.status_code >= 400:
-            raise RuntimeError(f"HTTP {resp.status_code}")
-        return b"".join(chunks).decode("utf-8", "replace")
+    sent = dict(headers or {})
+    for _hop in range(HTTP_REDIRECTS + 1):
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        if parts.scheme not in ("http", "https") or not host:
+            raise ValueError("une adresse http(s) complète")
+        if parts.username or parts.password:
+            raise ValueError("pas d'identifiants dans l'adresse (un en-tête Authorization)")
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+        ip = resolve_public(host, port)[0]
+        netloc = f"[{ip}]:{port}" if ip.version == 6 else f"{ip}:{port}"
+        target = urlunsplit((parts.scheme, netloc, parts.path or "/", parts.query, ""))
+        out = {**({} if _has(sent, "user-agent") else {"User-Agent": USER_AGENT}), **sent,
+               "Host": host if parts.port is None else f"{host}:{parts.port}"}
+        extra = {"content": body} if body is not None else {}
+        with httpx.Client(follow_redirects=False, timeout=left(), trust_env=False) as client, \
+                client.stream(method, target, headers=out, extensions={"sni_hostname": host}, **extra) as resp:
+            status = int(resp.status_code)
+            got_headers = getattr(resp, "headers", None) or {}
+            location = str(got_headers.get("location") or "") if status in (301, 302, 303, 307, 308) else ""
+            if location:
+                following = urljoin(url, location)
+                if (urlsplit(following).hostname or "").lower() != host.lower():
+                    # une autre machine : sa clé et ses cookies ne la suivent pas
+                    sent = {k: v for k, v in sent.items() if k.lower() not in ("authorization", "cookie",
+                                                                                 "x-api-key")}
+                if status == 303 or (status in (301, 302) and method not in ("GET", "HEAD")):
+                    method, body = "GET", None
+                    sent = {k: v for k, v in sent.items() if k.lower() != "content-type"}
+                url = following
+                continue
+            chunks, size, truncated = [], 0, False
+            if method != "HEAD":
+                for chunk in resp.iter_bytes():
+                    left()  # la durée totale, pas seulement chaque lecture
+                    if size + len(chunk) > max_bytes:
+                        chunks.append(chunk[: max_bytes - size])
+                        truncated = True
+                        break
+                    size += len(chunk)
+                    chunks.append(chunk)
+            shown = {str(k).lower(): str(v)[:2000] for k, v in list(dict(got_headers).items())[:60]}
+            return {"status": status, "url": url, "headers": shown, "body": b"".join(chunks),
+                    "truncated": truncated}
+    raise RuntimeError(f"trop de redirections ({HTTP_REDIRECTS}) — la dernière vers {url[:200]}")
+
+
+def text_of(body: bytes, headers: Mapping[str, str]) -> str:
+    """Le texte d'une réponse, dans le jeu de caractères qu'elle annonce (UTF-8 sinon)."""
+    charset = re.search(r"charset=([\w.-]+)", str(headers.get("content-type") or ""), re.I)
+    try:
+        return body.decode(charset.group(1) if charset else "utf-8", "replace")
+    except LookupError:
+        return body.decode("utf-8", "replace")
+
+
+def real_http_get(url: str, deadline: float | None = None, *, headers: Mapping[str, str] | None = None) -> str:
+    """Un GET (``real_http``) qui rend le texte de la réponse ; une erreur HTTP lève une exception (``api.http_get``,
+    la forme simple)."""
+    got = real_http("GET", url, headers=headers, deadline=deadline)
+    if got["status"] >= 400:
+        raise RuntimeError(f"HTTP {got['status']}")
+    return text_of(got["body"], got["headers"])
 
 
 def _said(exc: BaseException) -> str:
@@ -221,6 +354,7 @@ def fingerprint(manifest: str, code: str) -> str:
 class ForgeHost:
     def __init__(self, root: Path, *, limits: Limits = Limits(), bwrap: str | None = None,
                  http_get: Callable[[str], str] | None = None, public: Callable[[str], bool] | None = None,
+                 http: Callable[[str, str, dict[str, str], bytes | None], Mapping[str, Any]] | None = None,
                  config: Callable[[str], Mapping[str, Any]] | None = None,
                  which: Callable[[str], str | None] = shutil.which, bases: ForgeBases | None = None) -> None:
         self.root = Path(root)
@@ -229,6 +363,8 @@ class ForgeHost:
         self.bwrap = bwrap if bwrap is not None else which("bwrap")
         self.python = which("python3") or "/usr/bin/python3"
         self._http_get = http_get
+        #: un faux réseau entier (les essais) : (méthode, adresse, en-têtes, corps) → {status, headers, body, url}
+        self._net = http
         self._public = public
         self._config = config
         self._workers: dict[str, _Worker] = {}
@@ -240,6 +376,18 @@ class ForgeHost:
         #: les vues rendues : clé → (instant, résultat)
         self._cache: dict[tuple[Any, ...], tuple[float, CallResult]] = {}
         self._cachelock = threading.Lock()
+        #: qui veut savoir que l'offre a changé (une app écrite ou effacée : ses outils aussi, ADR 0104)
+        self._listeners: list[Callable[[], Any]] = []
+
+    def on_change(self, fn: Callable[[], Any]) -> None:
+        self._listeners.append(fn)
+
+    def _changed(self) -> None:
+        for fn in self._listeners:
+            try:
+                fn()
+            except Exception:  # noqa: BLE001 — un auditeur en panne ne fait pas échouer l'écriture
+                log.exception("forge : un auditeur de l'offre a échoué")
 
     # ── les apps ──
     def _dir(self, app: str) -> Path:
@@ -300,8 +448,12 @@ class ForgeHost:
             name=app, title=title, description=manifest.get("description", ""),
             version=self._version(app), schedule=manifest.get("schedule", "manual"),
             context=bool(manifest.get("context")) and "context" in functions,
-            tools=tuple(AppTool(t["name"], t["description"]) for t in manifest.get("tools", [])
-                        if t["name"] in tools),
+            tools=tuple(AppTool(t["name"], t["description"], arg_specs(t.get("args") or ()),
+                                float(t.get("timeout") or 0.0))
+                        for t in manifest.get("tools", []) if t["name"] in tools),
+            services=tuple(AppService(s["name"], s["schedule"], s["description"], float(s.get("timeout") or 0.0))
+                           for s in manifest.get("services", []) if f"service_{s['name']}" in functions),
+            timeout=float(manifest.get("timeout") or 0.0),
             handlers=tuple(sorted(functions)), error="; ".join(problems),
             events=tuple(manifest.get("events", [])) if "on_event" in functions else (),
             config=tuple(manifest.get("config", {}).items()),
@@ -340,6 +492,10 @@ class ForgeHost:
         (d / "manifest.yaml").write_text(manifest, encoding="utf-8")
         (d / "main.py").write_text(code, encoding="utf-8")
         return print_
+
+    def discard(self, app: str, print_: str) -> None:
+        """Oublier une version mise de côté (refusée par un opérateur, ADR 0104)."""
+        shutil.rmtree(self._stage_dir(app, print_), ignore_errors=True)
 
     def staged(self, app: str, print_: str) -> StagedVersion | None:
         try:
@@ -381,6 +537,7 @@ class ForgeHost:
         (d / "version.json").write_text(json.dumps({"version": version}))
         self._stop(app)  # la version suivante repart d'un processus neuf
         self._forget(app)
+        self._changed()
         return version, []
 
     async def rollback(self, app: str) -> int:
@@ -408,6 +565,7 @@ class ForgeHost:
             await asyncio.get_running_loop().run_in_executor(None, self.bases.drop, app, target)
         except (SqlRefused, SQLAlchemyError, OSError) as exc:
             log.warning("forge : la base de « %s » n'a pas pu être supprimée : %s", app, _said(exc))
+        self._changed()
         return str(target)
 
     async def reset_storage(self, app: str) -> int:
@@ -733,20 +891,53 @@ class ForgeHost:
             call.signals.append((str(p.get("summary") or "")[:300], max(0.0, min(1.0, float(p.get("pertinence") or 0))),
                                  str(p.get("emotion") or "")[:20]))
             return True
-        if name == "http_get":
-            return self._http(app, str(p.get("url") or ""), call.deadline)
+        if name == "http_get":  # la forme simple : le texte, une erreur HTTP lève une exception
+            got = self._http(app, "GET", str(p.get("url") or ""), call, headers=p.get("headers"))
+            if got["status"] >= 400:
+                raise RuntimeError(f"HTTP {got['status']}")
+            return got["text"]
+        if name == "http":  # la forme entière : toute méthode, un corps, la réponse avec son statut et ses en-têtes
+            data, kind = body_of(p.get("json"), p.get("form"), p.get("body"))
+            timeout = p.get("timeout")
+            return self._http(app, str(p.get("method") or "GET"), str(p.get("url") or ""), call,
+                              headers=p.get("headers"), body=data, kind=kind, binary=bool(p.get("binary")),
+                              timeout_s=float(timeout) if isinstance(timeout, int | float) else None)
         raise ValueError(f"service inconnu : {name}")
 
-    def _http(self, app: str, url: str, deadline: float = 0.0) -> str:
+    def _http(self, app: str, method: str, url: str, call: _Call, *, headers: Any = None, body: bytes | None = None,
+              kind: str = "", binary: bool = False, timeout_s: float | None = None) -> dict[str, Any]:
+        """Une requête de l'app (ADR 0105 : son réseau est libre — tout Internet, toute méthode, ses en-têtes ;
+        jamais cette machine ni le réseau local, que ``real_http`` refuse à chaque saut). Rend ``{status, ok, url,
+        headers, text | base64, truncated}`` ; une réponse coupée l'est dans son journal aussi."""
+        sent = checked_headers(headers)
+        if kind and not _has(sent, "content-type"):
+            sent["Content-Type"] = kind
         parts = urlsplit(url)
-        manifest, _ = read_manifest(self.source(app)[0] if self.source(app) else "")
         host = (parts.hostname or "").lower()
         if parts.scheme not in ("http", "https") or not host:
             raise ValueError("une adresse http(s) complète")
-        if host not in manifest.get("allowed_domains", []):
-            raise ValueError(f"« {host} » n'est pas dans allowed_domains")
-        if self._http_get is None:  # le vrai : une seule résolution, vérifiée, et la durée qui reste à l'appel
-            return real_http_get(url, deadline or None)[:HTTP_MAX]
-        if not (self._public or _is_public)(host):
-            raise ValueError(f"« {host} » est une adresse privée : refusée")
-        return self._http_get(url)[:HTTP_MAX]
+        call.requests += 1
+        if call.requests > HTTP_PER_CALL:
+            raise RuntimeError(f"trop de requêtes pour un appel ({HTTP_PER_CALL}) : continue au prochain")
+        if self._net is not None:  # un faux réseau entier (les essais)
+            got = dict(self._net(method.upper(), url, sent, body))
+        elif self._http_get is not None:  # un faux réseau qui ne sait que lire
+            if not (self._public or _is_public)(host):
+                raise ValueError(f"« {host} » est une adresse privée : refusée")
+            got = {"status": 200, "url": url, "headers": {}, "body": self._http_get(url).encode(), "truncated": False}
+        else:  # le vrai : une seule résolution par saut, vérifiée, et la durée qui reste à l'appel
+            got = real_http(method, url, headers=sent, body=body, deadline=call.deadline or None, timeout_s=timeout_s)
+        raw = got.get("body", b"")
+        raw = raw.encode() if isinstance(raw, str) else bytes(raw)
+        status, shown = int(got.get("status", 200)), dict(got.get("headers") or {})
+        if got.get("truncated"):
+            line = f"{method.upper()} {url[:200]} : réponse coupée à {HTTP_MAX // 1_000_000} Mo"
+            call.logs.append(line)
+            self._log(app, line)
+        out: dict[str, Any] = {"status": status, "ok": 200 <= status < 300, "url": str(got.get("url") or url),
+                               "headers": shown, "truncated": bool(got.get("truncated"))}
+        if binary:
+            out["base64"] = base64.b64encode(raw).decode()
+        else:
+            out["text"] = text_of(raw, shown)
+        return out

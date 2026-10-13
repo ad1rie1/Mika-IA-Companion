@@ -24,7 +24,7 @@ from mika.contracts import goals as goals_c
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Origin
 from mika.kernel.prompt import UNTRUSTED_NOTE
-from mika.plugins.forge import HANDLED, SWITCHED, TICKED, WRITTEN
+from mika.plugins.forge import HANDLED, TICKED, WRITTEN
 from mika.ports.feeds import Entry
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.ports.mail import Mail
@@ -63,6 +63,7 @@ def run(tmp_path, scenario, *, start, llm=None, world=None):
     llm = llm or PersonaSimLLM(clock, seed=1, abstain_rate=0.0, latency=2.0)
     forge = ForgeHost(tmp_path / "forge")
     kernel, clock, _, _ = build(tmp_path, None, clock=clock, llm=llm, ports={"forge": forge, **(world or {})})
+    forge.on_change(kernel.refresh_tools)  # comme le serveur : une app écrite, ses outils aussi (ADR 0104)
 
     async def main():
         await boot(kernel)
@@ -120,18 +121,22 @@ def test_five_failures_open_the_breaker_and_she_notices(tmp_path):
     broken = [s for s in of(evs, forge_c.SIGNALED) if s.data.kind == forge_c.APP_BROKEN]
     assert broken and "ne marche plus" in broken[0].data.summary.text
     thoughts = [t for t in of(evs, attention_c.THOUGHT_BORN) if t.data.origin == attention_c.SIGNAL]
-    assert thoughts and thoughts[0].data.bundle == "forge"  # une envie de la réparer, avec ses outils
-    # le titre est le sien ; ce que l'app a dit est gardé à part (cité au travail), jamais donné comme le but
-    repairs = [o for o in of(evs, goals_c.GOAL_OPENED) if "ne marche plus" in (o.data.details.text or "")]
-    assert repairs and "forge" in repairs[0].data.bundles and "forge_apps" not in repairs[0].data.bundles
-    assert "ne marche plus" not in repairs[0].data.title.text
+    assert thoughts and thoughts[0].data.bundle == "forge"  # elle y pense (« mon app ne marche plus »)…
+    # …et la réparation n'attend pas que cette pensée soit assez forte : une exploration, une seule, directe (ADR
+    # 0104) ; le titre est le sien, la panne est gardée à part (citée au travail), jamais donnée comme le but
+    opened = of(evs, goals_c.GOAL_OPENED)
+    repairs = [o for o in opened if o.data.origin == goals_c.FROM_REPAIR]
+    assert len(repairs) == 1 and len(opened) == 1, [o.data.source for o in opened]
+    assert repairs[0].data.source == "app:meteo@1" and "la page a changé" in repairs[0].data.details.text
+    assert "forge" in repairs[0].data.bundles and "forge_apps" not in repairs[0].data.bundles
+    assert repairs[0].data.title.text == "Réparer mon app « Météo »"
 
 
-def test_writing_an_app_is_for_her_owner_and_app_tools_need_promotion(tmp_path):
+def test_writing_an_app_is_for_her_owner_and_her_apps_tools_are_hers(tmp_path):
     clock = SimClock(at_paris(2026, 9, 28, 14, 0))
 
     class Wants:
-        """Le modèle tente d'écrire une app, puis d'utiliser l'outil d'une app."""
+        """Le modèle tente d'écrire une app, puis d'utiliser l'outil d'une app (devenu un outil à elle)."""
 
         name = "wants"
 
@@ -150,7 +155,7 @@ def test_writing_an_app_is_for_her_owner_and_app_tools_need_promotion(tmp_path):
             return LLMResponse("", tool_calls=(
                 ToolCall(f"{req.call_id}:w", "forge_write", {"app": "essai", "manifest": "title: Essai\n",
                                                                "code": "def view(api):\n    return 1\n"}),
-                ToolCall(f"{req.call_id}:c", "forge_call", {"app": "cafe", "tool": "prix", "args": {}})),
+                ToolCall(f"{req.call_id}:c", "cafe_prix", {})),
                 stop="tool_use")
 
     wants = Wants()
@@ -161,8 +166,6 @@ def test_writing_an_app_is_for_her_owner_and_app_tools_need_promotion(tmp_path):
         await (await kernel.perceive(said("user_2", "écris une app"))).reply
         await connect(kernel, "user_1", "Adrien", operator=True)
         await (await kernel.perceive(said("user_1", "écris une app"))).reply
-        await kernel.mind.append([SWITCHED.draft(app="cafe", state="promoted")], emitter="forge",
-                                 correlation="opérateur", origin=Origin.EXTERNAL)
         await (await kernel.perceive(said("user_1", "et le prix ?"))).reply
         return forge.info("essai")
 
@@ -172,13 +175,16 @@ def test_writing_an_app_is_for_her_owner_and_app_tools_need_promotion(tmp_path):
         by.setdefault(target, []).append(results)
     bea, adrien = by["user_2"][0], by["user_1"]
     bea_req = next(r for r in wants.calls if r.role == "reply" and r.meta.get("target") == "user_2")
-    # Bea n'est pas propriétaire : les outils de la Forge ne lui sont même pas offerts…
-    assert not {t.name for t in bea_req.tools} & {"forge_write", "forge_call"}
+    # Bea n'est pas propriétaire : les outils de la Forge et ceux de ses apps ne lui sont même pas offerts…
+    assert not {t.name for t in bea_req.tools} & {"forge_write", "cafe_prix"}
     # … et appelés quand même, ils sont refusés avant tout gestionnaire
     assert all(r.startswith("outil inconnu") for r in bea)
     assert "propriétaire" not in adrien[0][0]
-    assert "ne servent que quand tu travailles" in adrien[0][1]  # pas promue : pas en conversation
-    assert '"prix": 12' in adrien[1][1]  # promue : oui
+    # l'outil de son app est un outil à elle : devant Adrien, sans promotion (l'app n'a pas de secret, ADR 0104)
+    assert '"prix": 12' in adrien[0][1] and '"prix": 12' in adrien[1][1]
+    adrien_req = next(r for r in wants.calls if r.role == "reply" and r.meta.get("target") == "user_1")
+    tool = next(t for t in adrien_req.tools if t.name == "cafe_prix")
+    assert not tool.deferred and "Veille café" in tool.description  # en main, annoncé par son app
     assert written is not None and [w.data.app for w in of(evs, WRITTEN)].count("essai") == 2
     del clock
 

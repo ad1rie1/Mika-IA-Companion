@@ -260,9 +260,12 @@ async def email_draft(args: DraftArgs, ctx: Any) -> Any:
         phrase("email.tools.draft.queued")
     if shown.blocked:
         after += phrase("email.tools.draft.to_fill", who=who)
-    return "\n".join((after, phrase("email.tools.draft.would_go"), phrase("email.header.from", who=shown.sender),
-                      phrase("email.header.to", who=shown.to), phrase("email.header.subject", subject=shown.subject),
-                      "", shown.text[:3000]))
+    # un brouillon préparé prouve qu'une exécution a produit (ADR 0104)
+    return ToolResult(content="\n".join((after, phrase("email.tools.draft.would_go"),
+                                         phrase("email.header.from", who=shown.sender),
+                                         phrase("email.header.to", who=shown.to),
+                                         phrase("email.header.subject", subject=shown.subject), "",
+                                         shown.text[:3000])), proof=True)
 
 
 # ── Ce qui part ───────────────────────────────────────────────────────────

@@ -38,6 +38,22 @@ class AppView:
     promoted: bool
     context: bool
     schedule: str
+    #: le projet où elle vit (0 : aucun), ce qui attend un opérateur, son dernier battement (ADR 0104)
+    project: int = 0
+    held: bool = False
+    pending: bool = False
+    refused: bool = False
+    ticked_at: int = 0
+    #: ses services, et ceux que le disjoncteur a arrêtés : (nom, pourquoi) — l'app tourne encore (ADR 0104)
+    services: tuple[str, ...] = ()
+    broken_services: tuple[tuple[str, str], ...] = ()
+
+
+def failure(app: AppView) -> str:
+    """Ce qui ne marche plus dans une app (vide : rien) : elle entière, sinon ses services arrêtés (ADR 0104)."""
+    if app.broken:
+        return app.broken
+    return " ; ".join(f"{name} : {why}" for name, why in app.broken_services)
 
 
 #: Ses apps, par nom.

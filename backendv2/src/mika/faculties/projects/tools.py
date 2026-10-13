@@ -44,7 +44,9 @@ from mika.faculties.projects.faculty import (
     PAUSED,
     PROJECTS,
     PUSH,
+    REFRAMED,
     RESUMED,
+    SELF_BUNDLES,
     Objective,
     Project,
     ProjectsState,
@@ -65,20 +67,21 @@ from mika.faculties.projects.faculty import (
 )
 from mika.kernel.clock import HOUR
 from mika.kernel.events import Content, Draft
-from mika.kernel.faculty import ToolResult
+from mika.kernel.faculty import ToolResult, proving_tools
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, Superseded
 from mika.vocab.episodes import PROJECT_KINDS, Kind, goal_of, project_of, project_target
-from mika.vocab.phrasebook import phrase
+from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity, hearable
 from mika.vocab.words import stems
 
 REPORT, NOTE, DECIDE, OBJECTIVE_ADD = "report_run", "project_note", "project_decide", "project_objective_add"
+EQUIP = "project_equip"
 #: ce qui change quelque chose (le compte rendu le dit) : écrire, modifier, un programme qui a réussi, un
 #: brouillon, une app forgée
 CHANGING = frozenset({"ws_write", "ws_edit", "ws_run", "email_draft", "forge_write"})
-#: …et ce qui, hors de l'atelier, **prouve** qu'une exécution a produit (dans l'atelier, c'est le commit)
-PRODUCING = frozenset({"email_draft", "forge_write"})
+#: hors de l'atelier (où c'est le commit), ce qui **prouve** qu'une exécution a produit se déclare sur l'outil
+#: (``ToolResult.proof`` : un brouillon, une app essayée qui marche — ADR 0104) : aucun nom ici
 RUNS = list(PROJECT_KINDS)
 
 PROJECTS.bundle("projects", phrase("projects.bundle"))
@@ -142,11 +145,14 @@ class ReportArgs(BaseModel):
     needs_you: str = Field(default="", max_length=600, description=phrase("projects.tools.report.needs_you"))
 
 
-def _proof(ctx: Any, sha: str) -> str:
-    """Ce qui prouve que cette exécution a produit : un commit non vide, sinon un brouillon ou une app réussis."""
-    if sha:
-        return "commit"
-    return "outil" if any(ok and name in PRODUCING for name, ok in ctx.calls) else ""
+def _proof(ctx: Any, sha: str, o: Objective | None = None) -> str:
+    """Ce qui prouve que cette exécution a produit : un commit non vide, sinon un brouillon ou une app réussis. Une
+    réparation d'app (ADR 0104) ne se prouve que par l'app réécrite et essayée : un fichier de l'atelier ne répare
+    rien."""
+    tool = "outil" if proving_tools(ctx.calls, getattr(ctx, "proofs", ()), lambda name: False) else ""
+    if o is not None and o.app:
+        return tool
+    return "commit" if sha else tool
 
 
 def _mode(ctx: Any) -> str:
@@ -177,7 +183,7 @@ async def report_run(args: ReportArgs, ctx: Any) -> Any:
     sha = ""
     if port is not None and port.exists(p.id):
         sha = await port.commit(p.id, commit_message(p, o))  # un commit par exécution qui a changé quelque chose
-    proof = _proof(ctx, sha)
+    proof = _proof(ctx, sha, o)
     closed = o is not None and o.status != c.OPEN  # retiré ou clos pendant qu'elle y travaillait
     proven = args.verdict == c.DONE and o is not None and not closed and (bool(proof) or o.evidence > 0)
     if args.verdict == c.DONE and o is not None and not closed and o.kind == c.ONCE and not proven:
@@ -346,6 +352,33 @@ async def project_objective_add(args: ObjectiveArgs, ctx: Any) -> Any:
     return wrap_up(ctx, phrase("projects.tools.objective_add.done", id=number, kind=kind))
 
 
+class EquipArgs(BaseModel):
+    tool: SelfBundle = Field(description=phrase("projects.tools.equip.tool"))
+    why: str = Field(min_length=1, max_length=300, description=phrase("projects.tools.equip.why"))
+
+
+@PROJECTS.tool(EQUIP, description=phrase("projects.tools.equip.description"), args=EquipArgs, bundle="projects",
+               episodes=RUNS, max_calls_per_episode=2)
+async def project_equip(args: EquipArgs, ctx: Any) -> Any:
+    """Se donner un lot de plus, sur un projet à elle (``SELF_BUNDLES``) : en main à l'exécution suivante — les
+    outils d'une exécution sont fixés quand elle commence. Un projet confié garde le cadre qu'on lui a donné : elle
+    le demande (``needs_you``)."""
+    got = current(ctx)
+    if got is None:
+        return gone()
+    p, _ = got
+    if p.authority != c.SELF:
+        return ToolResult(ok=False, content=phrase("projects.tools.equip.confided"))
+    words = family("projects.bundle_words")[args.tool]
+    if args.tool in p.bundles:
+        return ToolResult(ok=False, content=phrase("projects.tools.equip.already", what=words))
+    level = written(p)
+    await ctx.emit(REFRAMED.draft(project=p.id, bundles=(*p.bundles, args.tool), owner=p.owner, about=p.about),
+                   NOTED.draft(project=p.id, owner=p.owner, about=p.about, text=Content.of(
+                       phrase("projects.tools.equip.note", what=words, why=args.why.strip()), level=level)))
+    return wrap_up(ctx, phrase("projects.tools.equip.done", what=words))
+
+
 def _attributed(ctx: Any, project: int, commit: Any, field: str, kind: str, asked: int) -> int:
     """Le numéro que le réducteur a vraiment donné (un ajout concurrent a pu prendre celui qu'on visait)."""
     seq = commit.seqs[-1] if commit is not None and commit.seqs else None
@@ -430,12 +463,24 @@ async def create_project(args: CreateArgs, ctx: Any) -> Any:
     return phrase("projects.tools.create.done", id=pid)
 
 
+#: un lot qu'elle peut se donner (``SELF_BUNDLES``, dans le même ordre : un test les garde égaux)
+SelfBundle = Literal["memory", "rss", "forge", "forge_apps"]
+
+
 class StartArgs(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=4000, description=phrase("projects.tools.start.description_arg"))
     objectives: list[str] = Field(default_factory=list, max_length=12,
                                   description=phrase("projects.tools.start.objectives"))
     constants: list[str] = Field(default_factory=list, max_length=12, description=phrase("projects.tools.start.constants"))
+    tools: list[SelfBundle] = Field(default_factory=list, max_length=4, description=phrase("projects.tools.start.tools"))
+
+
+def own_bundles(*sources: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    """Les lots d'un projet à elle : ceux de tout projet, plus ce qu'elle s'est donné parmi ``SELF_BUNDLES`` (ses
+    outils, ceux de l'exploration d'où il naît) — rien d'autre ne passe."""
+    wanted = {b for src in sources for b in src}
+    return tuple(dict.fromkeys((*DEFAULT_BUNDLES, *(b for b in SELF_BUNDLES if b in wanted))))
 
 
 def _own_live(s: ProjectsState) -> int:
@@ -483,14 +528,17 @@ async def start_project(args: StartArgs, ctx: Any) -> Any:
         return ToolResult(ok=False, content=phrase("projects.tools.start.twin", id=twin.id))
     about: tuple[str, ...] = (who[1],) if who is not None else ()
     level = int(Sensitivity.PERSONAL) if about else int(Sensitivity.NONE)
+    inherited: tuple[str, ...] = ()
     if gid is not None:
         goal = next((g for g in frame.get(goals_c.LIVE) if g.id == gid), None)
         about = goal.about if goal is not None else ()
         # ce que le but disait d'autrui reste au moins aussi protégé dans le projet
         level = max(goal.sensitivity if goal is not None else 0, int(Sensitivity.PERSONAL) if about else 0)
+        # l'exploration devenue projet garde ses mains (la Forge d'une app à réparer, ses flux…)
+        inherited = goal.bundles if goal is not None else ()
     commit = await ctx.emit(opened(
         title=args.title, description=args.description, authority=c.SELF, mode=c.PERSONA, owner=None, address=None,
-        about=about, level=level, source=source))
+        about=about, level=level, source=source, bundles=own_bundles(args.tools, inherited)))
     pid = commit.seqs[-1] if commit.seqs else None
     if pid is None:
         return ToolResult(ok=False, content=phrase("projects.tools.start.failed"))

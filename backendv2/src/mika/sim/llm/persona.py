@@ -41,6 +41,50 @@ IMPORTANT_WORDS = ("mort", "mariage", "marie", "enceinte", "hôpital", "hopital"
 PROMISE_WORDS = ("je te promets", "promis", "je te rappelle", "je t'envoie", "je te dirai", "je te le rappellerai")
 #: « écris-toi une app … » : elle lit le mode d'emploi de la Forge, écrit l'app de l'exemple, teste sa vue
 FORGE_ASK = "écris-toi une app"
+#: « ce serait bien que tu suives le cours… » (sa propriétaire, ADR 0104) : un projet à elle, avec la Forge
+WATCH_ASK = "suives le cours"
+#: « alors, le cours ? » : elle lit ce que son app a trouvé
+WATCH_PEEK = "alors, le cours"
+#: l'app qu'elle se fabrique dans ce projet : fragile d'abord (une panne du site la fait tomber), puis réparée
+WATCH_MANIFEST = """\
+title: Suivi d'un cours
+description: Le cours, relevé chaque heure.
+schedule: interval:1h
+context: true
+allowed_domains: [cours.exemple.fr]
+tools:
+  - {name: maintenant, description: Relever le cours tout de suite}
+views:
+  - key: cours
+    label: Cours
+"""
+WATCH_READ = """\
+def _releve(api):
+    meta = json.loads(api.http_get("https://cours.exemple.fr/cac"))["chart"]["result"][0]["meta"]
+    prix, veille = meta["regularMarketPrice"], meta["chartPreviousClose"]
+    ecart = round((prix - veille) / veille * 100, 2)
+    api.kv_set("dernier", {"prix": prix, "ecart": ecart})
+    if abs(ecart) >= 2:  # l'hôte espace ses signaux : un grand écart se dit, pas à chaque battement
+        api.signal("le cours a bougé de " + str(ecart) + " %", pertinence=0.7, emotion="surprised")
+    return {"prix": prix, "ecart": ecart}
+
+
+def context(api):
+    return "cours : " + str(api.kv_get("dernier", {}))
+
+
+def tool_maintenant(api, args):
+    return tick(api)
+
+
+def view_cours(api, params):
+    return {"version": 2, "blocks": [{"type": "note", "text": "cours : " + str(api.kv_get("dernier", {}))}]}
+"""
+#: fragile : une panne du site fait tomber le battement
+WATCH_CODE = "import json\n\n\ndef tick(api):\n    return _releve(api)\n\n\n" + WATCH_READ
+#: réparée : une panne du site se note, elle ne fait plus tomber le battement
+WATCH_FIXED = ("import json\n\n\ndef tick(api):\n    try:\n        return _releve(api)\n    except RuntimeError as e:\n"
+               "        api.log(\"site indisponible : \" + str(e))\n        return {\"erreur\": str(e)}\n\n\n" + WATCH_READ)
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,6 +274,10 @@ class PersonaSimLLM:
             return self._work(req)
         if req.role == "reply" and FORGE_ASK in _asked(req)[0].lower():
             return self._forge(req)
+        if req.role == "reply" and WATCH_ASK in _asked(req)[0].lower():
+            return self._watch(req)
+        if req.role == "reply" and WATCH_PEEK in _asked(req)[0].lower():
+            return self._peek(req)
         if req.role == "reply" and "rappelle-moi" in _message_of(req).lower():
             got = self._remind(req)
             if got is not None:
@@ -347,6 +395,9 @@ class PersonaSimLLM:
         if self.step_mode == "decide" and done == 0:
             return self._call(req, ("project_decide", {"title": "Langage du module", "choice": "Python",
                                                       "reason": "c'est ce que l'atelier sait lancer"}))
+        aimed = work.split("Les autres objectifs", 1)[0]
+        if "Réparer mon app" in aimed or "suivre le cours" in work.lower():
+            return self._build(req, repair="Réparer mon app" in aimed)
         if "bonjour" in work.lower():
             if done == 0:
                 return self._call(req, ("ws_write", {"path": "bonjour.py", "content": PROJECT_CODE}),
@@ -399,6 +450,40 @@ class PersonaSimLLM:
         ok = "enveloppe valide" in results[-1]
         return self._out(req, ("Voilà : mon carnet météo a sa vue et ses actions !" if ok
                                else "Hmm, sa vue ne passe pas encore.") + " [EMOTION:proud:0.6]")
+
+    def _watch(self, req: LLMRequest) -> LLMResponse:
+        """« ce serait bien que tu suives le cours… » : un projet à elle, avec de quoi se fabriquer une app."""
+        _, results = _asked(req)
+        if results:
+            return self._out(req, "Bonne idée, je m'en occupe : je vais me monter une petite app pour ça. "
+                                  "[EMOTION:curious:0.5]")
+        if "start_project" not in {t.name for t in req.tools}:
+            return self._out(req, "Je n'ai pas de quoi m'y mettre d'ici. [EMOTION:sad:0.3]")
+        return self._call(req, ("start_project", {"title": "Suivre le cours de bourse",
+                                                  "objectives": ["Une app qui relève le cours chaque heure"],
+                                                  "tools": ["forge", "forge_apps"]}))
+
+    def _build(self, req: LLMRequest, *, repair: bool) -> LLMResponse:
+        """Une exécution qui fabrique (ou répare) l'app du cours : l'écrire, l'essayer, conclure sur l'essai."""
+        results = [m.content for m in req.messages if m.role == "tool"]
+        if not results:
+            return self._call(req, ("forge_write", {"app": "cours", "manifest": WATCH_MANIFEST,
+                                                    "code": WATCH_FIXED if repair else WATCH_CODE}))
+        if len(results) == 1:
+            return self._call(req, ("forge_test", {"app": "cours", "method": "tick"}))
+        ok = " ok en " in results[-1]
+        summary = ("Réparée : une panne du site se note, elle ne fait plus tomber l'app." if repair else
+                   "L'app du cours est écrite et essayée : elle relève le cours chaque heure.")
+        return self._call(req, ("report_run", {"verdict": "done" if ok else "continue", "notable": 0.7,
+                                               "summary": summary if ok else "L'essai ne passe pas encore."}))
+
+    def _peek(self, req: LLMRequest) -> LLMResponse:
+        """« alors, le cours ? » : lire la page de son app."""
+        _, results = _asked(req)
+        if not results and "cours_pages" in {t.name for t in req.tools}:
+            return self._call(req, ("cours_pages", {}))
+        seen = results[-1][:120] if results else "rien pour l'instant"
+        return self._out(req, f"D'après mon app : {seen} [EMOTION:happy:0.4]")
 
     def _remind(self, req: LLMRequest) -> LLMResponse | None:
         """« rappelle-moi dans 20 minutes de … » / « rappelle-moi à 3h de … (urgent) »."""

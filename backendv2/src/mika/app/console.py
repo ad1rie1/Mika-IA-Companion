@@ -196,6 +196,7 @@ PROCESS_LABELS: dict[str, str] = {
     "attention.digest": "Digérer ses pensées la nuit", "self.narrate": "Se raconter",
     "self.journal": "Tenir son journal", "self.dream": "Rêver", "self.reflect": "Voir ce qui la passionne", "social.profile": "Comprendre les gens",
     "goals.seed": "Se proposer des buts", "goals.tend": "Suivre ses buts", "projects.tend": "Suivre ses projets",
+    "projects.apps": "Réparer les apps de ses projets",
     "projects.remote": "Pousser et récupérer les dépôts", "email.poll": "Relever le courrier",
     "rss.poll": "Relever les flux", "mcp.watch": "Rejoindre les serveurs d'outils extérieurs", "camera.look": "Regarder par la caméra", "forge.tick": "Faire tourner les apps",
     "forge.events": "Transmettre les événements aux apps", "forge.discover": "Découvrir les apps",

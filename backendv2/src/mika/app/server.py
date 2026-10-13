@@ -438,6 +438,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
         for problem in await live.reload_imaging():
             log.warning("configuration des images : %s", problem)
         mcp.on_change(kernel.refresh_tools)  # son offre change : ses outils aussi (ADR 0064)
+        forge.on_change(kernel.refresh_tools)  # une app écrite ou effacée : ses outils aussi (ADR 0104)
         mcp.start()  # chaque serveur actif est joint en tâche de fond
         hub.start()
         world_hub.start()

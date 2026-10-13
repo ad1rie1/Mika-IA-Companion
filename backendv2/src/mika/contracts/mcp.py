@@ -13,6 +13,9 @@ from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactFamily
 
 OWNER = "mcp"
+#: le lot de ses outils du web (le serveur système « web » du plugin ``web``, ADR 0066) : chercher, lire une page. Ses
+#: projets et ses explorations l'ont en main comme ses autres outils (ADR 0105)
+WEB_BUNDLE = "mcp.web"
 #: la capacité : appeler un outil d'un serveur, après accord
 CALL = "mcp.call"
 #: la raison de l'initiative due : ce qu'un service a rendu (ou un accord refusé, expiré) est à dire

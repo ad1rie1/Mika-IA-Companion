@@ -536,14 +536,28 @@ async def claude_code_check(data: Path, name: str | None) -> dict[str, object]:
     req = LLMRequest(role="check", call_id="verification#0", system_stable="Réponds exactement : ok",
                      messages=(Message("user", "ping"),), priority=0)
     t0 = time.monotonic()
+    done = asyncio.Event()
+
+    async def watch() -> bool:
+        """Pendant l'appel : la CLI ouvre-t-elle une socket de messagerie entre sessions ? (elle ne devrait plus)"""
+        seen = False
+        while not done.is_set():
+            seen = seen or backend.opened_socket(req.call_id)
+            await asyncio.sleep(0.05)
+        return seen
+
+    watcher = asyncio.create_task(watch())
     try:
         resp = await backend.complete(req)
     except ClaudeCodeError as exc:
         return {"ok": False, "erreur": str(exc), "commande": backend.binary(), "connexion": spec.auth}
     finally:
+        done.set()
+        socket = await watcher
         await backend.aclose()
     return {"ok": True, "réponse": resp.text, "modèle": resp.model, "connexion": spec.auth,
-            "secondes": round(time.monotonic() - t0, 1), "abonnement": backend.status()["quota"]}
+            "secondes": round(time.monotonic() - t0, 1), "abonnement": backend.status()["quota"],
+            "messagerie_entre_sessions": "ouverte" if socket else "fermée"}
 
 
 def claude_code_login(data: Path, name: str | None) -> int:

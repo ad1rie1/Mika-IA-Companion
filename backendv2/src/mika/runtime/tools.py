@@ -70,6 +70,8 @@ class ToolContext:
     #: les appels d'outils déjà faits dans cet épisode (nom, réussi) : ce
     #: qu'elle a réellement fait, pour qui doit en juger (« fini » exige une preuve)
     calls: tuple[tuple[str, bool], ...] = ()
+    #: ce que chacun de ces appels a déclaré prouver (``ToolResult.proof``), aligné sur ``calls`` (ADR 0104)
+    proofs: tuple[bool | None, ...] = ()
     #: la portée du dédoublonnage de ses écritures (le tour d'une réponse ; l'épisode sinon)
     dedupe_scope: str | None = None
     #: ce qu'est l'appel dans l'épisode : ``outil:empreinte des arguments:occurrence`` (posé par la boucle)
@@ -138,6 +140,8 @@ class LoopResult:
     text: str
     #: (nom, réussi) des appels exécutés — ce que garde ``Utterance.tools``
     calls: list[tuple[str, bool]] = field(default_factory=list)
+    #: ce que chacun a déclaré prouver (``ToolResult.proof``), aligné sur ``calls``
+    proofs: list[bool | None] = field(default_factory=list)
     stop: str = "end"
     responses: int = 0
     last: LLMResponse | None = None
@@ -184,11 +188,12 @@ def offer(tools: Mapping[str, ToolSpec], policy: EpisodePolicy, kind: str, audie
 
 def admitted(bundles: frozenset[str], bundle: str) -> bool:
     """Un lot est-il admis ? Par son nom, ou par sa famille (``mcp.*`` admet ``mcp.meteo`` : des lots que des
-    sources dynamiques ajoutent, ADR 0064)."""
+    sources dynamiques ajoutent, ADR 0064) — et le lot qui porte le nom d'une famille l'admet entière
+    (``forge_apps`` admet ``forge_apps.cours`` : chaque app est un lot, ses apps en sont un, ADR 0104)."""
     if bundle in bundles:
         return True
     family, dot, _rest = bundle.partition(".")
-    return bool(dot) and f"{family}.*" in bundles
+    return bool(dot) and (f"{family}.*" in bundles or family in bundles)
 
 
 def defers_tools(gateway: Any, role: str) -> bool:
@@ -231,6 +236,8 @@ def acting(specs: Sequence[ToolSpec]) -> str:
     text = phrase("runtime.tools.acting")
     if found:
         text = phrase("runtime.tools.acting_means", acting=text, means=phrase("runtime.tools.means_or").join(found))
+        if "start_project" in names:  # un travail se lance maintenant, ou il n'existe pas (ADR 0104)
+            text = f"{text} {phrase('runtime.tools.means_work')}"
     return f"{text} {phrase('runtime.tools.outside')}" if any(getattr(s, "outside", False) for s in specs) else text
 
 
@@ -343,6 +350,7 @@ async def _loop(
             ctx = make_context(spec, call.id)
             if isinstance(ctx, ToolContext):
                 ctx.calls = tuple(result.calls)
+                ctx.proofs = tuple(result.proofs)
                 what = f"{call.name}:{_args_digest(call.args)}"
                 same[what] = same.get(what, 0) + 1
                 ctx.call_key = f"{what}:{same[what]}"
@@ -352,12 +360,14 @@ async def _loop(
             if isinstance(out, Failed):
                 message = phrase("runtime.tools.refused.failed", error=repr(out.error))
                 result.calls.append((call.name, False))
+                result.proofs.append(False)
                 result.records.append(ToolRecord(call.id, call.name, _args_json(call.args), False,
                                                  _bounded(message), elapsed))
                 outputs.append(Message("tool", message, tool_call_id=call.id, name=call.name, is_error=True))
                 continue
             tr = out if isinstance(out, ToolResult) else ToolResult(content=_as_text(out))
             result.calls.append((call.name, tr.ok))
+            result.proofs.append(tr.proof if tr.ok else False)
             for ref in tr.attach if tr.ok else ():
                 if ref and ref not in result.attachments:
                     result.attachments.append(ref)

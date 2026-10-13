@@ -186,6 +186,12 @@ def _what(g: Goal, frame: Frame, texts: Mapping[str, str],
         lines.append(phrase("goals.step.reflection_rule"))
     elif g.origin == c.FROM_SIGNAL:
         lines.append(phrase("goals.step.noticed", when=when))
+    elif g.origin == c.FROM_REPAIR:
+        app = g.source.removeprefix("app:").rsplit("@", 1)[0]
+        lines.append(phrase("goals.step.repair", app=app))
+    elif g.origin == c.FROM_PROMISE:
+        who = f"« {name} »" if name else phrase("goals.step.someone")
+        lines.append(phrase("goals.step.promised", who=who, when=when, quoted=quoted))
     elif g.origin == c.FROM_INTEREST:
         lines.append(phrase("goals.step.interest"))
     last = _last_time(before, frame, texts)

@@ -49,10 +49,13 @@ from sqlalchemy import select
 
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
+from mika.contracts import forge as forge_c
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
+from mika.contracts import mcp as mcp_c
 from mika.contracts import memory as memory_c
 from mika.contracts import needs as needs_c
+from mika.contracts import projects as projects_c
 from mika.contracts import rss as rss_c
 from mika.contracts import runtime as rt
 from mika.contracts import self_ as self_c
@@ -65,6 +68,8 @@ from mika.faculties.goals.faculty import (
     GOAL_PAUSED,
     GOAL_RESUMED,
     GOALS,
+    PROMISE_SOURCE,
+    REPAIR_SOURCE,
     Goal,
     GoalsState,
     budget,
@@ -97,8 +102,10 @@ SEEDING_ORIGINS = frozenset({attention_c.EXCHANGE, attention_c.REVISION, attenti
 #: d'y voir clair ; une insulte (la colère, le dégoût), non
 SEEDING_EMOTIONS = frozenset({"sad", "anxious", "scared", "confused", "lonely", "melancholic", "thinking",
                               "surprised", "curious", "nostalgic", "frustrated"})
-#: une exploration peut devenir un projet à elle (``start_project``) quand elle s'avère plus grosse qu'une envie
-EXPLORE_BUNDLES = ("goals", "memory", "projects")
+#: une exploration peut devenir un projet à elle (``start_project``) quand elle s'avère plus grosse qu'une envie ;
+#: elle va voir sur le web comme elle le ferait en conversation (ADR 0105) — y repenser et rêvasser, non
+#: (``REFLECT_BUNDLES``)
+EXPLORE_BUNDLES = ("goals", "memory", "projects", mcp_c.WEB_BUNDLE)
 #: repenser à ce qu'on lui a confié, à ce qu'elle croyait : sa tête et sa mémoire, rien d'autre — une réflexion ne
 #: devient pas un projet (sonde réelle du 2026-10-03 : « je prépare un nouveau format de stream », inventé)
 REFLECT_BUNDLES = ("goals", "memory")
@@ -122,10 +129,18 @@ _TALK_WORD = re.compile(r"[\wÀ-ÿ']+")
 #: domaines)
 READ_ONLY_SOURCES = frozenset({"rss", "camera", "forge"})
 #: ce qui arrive à son corps dans sa chambre (un geste qui n'a pas abouti, ``world``) se ressent et se dit, ça ne
-#: s'explore pas : il n'y a rien à lire ailleurs sur une fenêtre qui ne s'est pas ouverte
-UNEXPLORED_SOURCES = frozenset({"world"})
+#: s'explore pas : il n'y a rien à lire ailleurs sur une fenêtre qui ne s'est pas ouverte. Ce que ses apps lui
+#: signalent non plus : leurs trouvailles se lisent dans l'app (et se racontent à qui son projet concerne), leur panne
+#: a son propre chemin, direct (ADR 0104 — par une pensée, elle attendait un seuil et devenait « en savoir plus »)
+UNEXPLORED_SOURCES = frozenset({"world", "forge"})
 #: où elle peut aller chercher du neuf sur un de ses centres d'intérêt
 INTEREST_SOURCES = ("rss",)
+#: tenir une promesse de travail : de quoi se fabriquer un outil (la Forge) ou en faire un projet, et ses lectures
+#: (ADR 0104)
+PROMISE_BUNDLES = ("forge", *EXPLORE_BUNDLES)
+#: réparer une de ses apps : la Forge, sa tête, sa mémoire (ADR 0104), et le web pour voir ce que la source est devenue
+#: (ADR 0105)
+REPAIR_BUNDLES = ("forge", "goals", "memory", mcp_c.WEB_BUNDLE)
 ORIGINS = {attention_c.EXCHANGE: c.FROM_EXCHANGE, attention_c.REVISION: c.FROM_REVISION,
            attention_c.SIGNAL: c.FROM_SIGNAL}
 
@@ -208,12 +223,62 @@ def explored_title(t: attention_c.ThoughtReading, name: str) -> str:
 
 
 @GOALS.process("goals.seed", wake_on=[attention_c.THOUGHT_BORN, attention_c.DWELT, needs_c.FELT, *body_c.ALL,
-                                      *c.ALL], lane="background", catch_up=CatchUp.ONCE, max_quantum_s=1800,
-               priority=60)
+                                      memory_c.PROMISE_NOTICED, *c.ALL], lane="background", catch_up=CatchUp.ONCE,
+               max_quantum_s=1800, priority=60)
 class Seed:
     def __init__(self) -> None:
         #: sa curiosité n'a rien trouvé à ouvrir : elle ne recherche pas avant cet instant
         self.idle_until = 0
+        #: les promesses dont le texte s'est effacé (oubliées avec quelqu'un) : il n'y a plus rien à tenir
+        self.unreadable: set[int] = set()
+
+    def _owed(self, s: GoalsState, frame: Frame) -> memory_c.PendingPromise | None:
+        """Une promesse de travail faite à qui s'occupe d'elle et que rien n'a mise en route — ni exploration
+        vivante, ni close depuis : la plus ancienne d'abord (ADR 0104). Une promesse à une amie reste une promesse
+        (elle la tient en le lui disant), pas un travail qu'on lui donne."""
+        busy = _live_sources(s, frame.now)
+        owed: dict[int, memory_c.PendingPromise] = {}
+        # un projet à elle, ouvert pour cette personne peu avant que la promesse soit relevée : le travail est déjà
+        # en route (sonde du 12 octobre : le filet ouvrait une exploration qui bâtissait l'app hors du projet)
+        started = [(p.created_at, p.about) for p in frame.get(projects_c.LIVE) if p.authority == projects_c.SELF]
+        for owner in frame.get(identity_c.OWNERS):
+            for pr in frame.get(memory_c.PROMISES_TO(owner)) or ():
+                source = f"{PROMISE_SOURCE}{pr.id}"
+                underway = any(owner in about and 0 <= pr.at - at <= DAY for at, about in started)
+                if pr.work and pr.text_ref and pr.id not in self.unreadable and source not in busy \
+                        and source not in s.explored and not underway:
+                    owed[pr.id] = pr
+        return min(owed.values(), key=lambda pr: (pr.at, pr.id), default=None)
+
+    def _broken(self, s: GoalsState, frame: Frame) -> forge_c.AppView | None:
+        """Une de ses apps en panne qui ne vit dans aucun projet (un projet répare les siennes) et qu'aucun opérateur
+        n'a arrêtée, dont cette panne-là n'a pas encore été prise en main (ADR 0104)."""
+        busy = _live_sources(s, frame.now)
+        for a in frame.get(forge_c.APPS) or ():
+            source = f"{REPAIR_SOURCE}{a.name}@{a.version}"
+            if forge_c.failure(a) and not a.held and not a.project and source not in busy and source not in s.explored:
+                return a
+        return None
+
+    async def _keep(self, ctx: Any, frame: Frame, p: Any, pr: memory_c.PendingPromise) -> bool:
+        """Mettre une promesse de travail en route : une exploration qui a de quoi se fabriquer un outil."""
+        store = ctx.ports.get("store")
+        text = store.content([pr.text_ref]).get(pr.text_ref) if store is not None else None
+        if not text:
+            self.unreadable.add(pr.id)
+            return False
+        owner = frame.get(identity_c.PERSON(pr.to)) or pr.to
+        name = _name(frame, owner)
+        level = max(int(Sensitivity.PERSONAL), pr.sensitivity)
+        source = f"{PROMISE_SOURCE}{pr.id}"
+        title = phrase("goals.title.promised", name=name) if name else phrase("goals.title.promised_unnamed")
+        await ctx.emit(c.GOAL_OPENED.draft(
+            kind=c.EXPLORATION, authority=c.SELF, title=Content.of(title, level=level),
+            details=Content.of(text, level=level), owner=owner, about=(owner,),
+            bundles=tuple(sorted({*PROMISE_BUNDLES, *_sources(frame)})), max_steps=p.exploration_steps,
+            source=source, sensitivity=level, desire=0.8, origin=c.FROM_PROMISE, origin_at=pr.at,
+            dedupe_key=f"but:{source}"))
+        return True
 
     def _thoughts(self, s: GoalsState, frame: Frame, p: Any) -> list[attention_c.ThoughtReading]:
         busy = _live_sources(s, frame.now)
@@ -268,6 +333,9 @@ class Seed:
         p = params(frame.env.params_of("goals", frame.root))
         if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE or _live_self(s, frame.now) >= p.live_self_max:
             return None
+        if self._owed(s, frame) is not None or self._broken(s, frame) is not None:
+            # ce qu'elle a promis, et son app qui ne marche plus, ne font pas la queue derrière ses envies
+            return frame.now
         times = [t.born_at + p.seed_thought_age_us for t in self._thoughts(s, frame, p)]
         if self._check(s, frame, p) is not None:
             times.append(frame.now)
@@ -285,6 +353,20 @@ class Seed:
         s: GoalsState = ctx.state
         p = params(frame.env.params_of("goals", frame.root))
         if frame.get(body_c.SLEEP) is not body_c.SleepPhase.AWAKE or _live_self(s, frame.now) >= p.live_self_max:
+            return
+        owed = self._owed(s, frame)
+        if owed is not None and await self._keep(ctx, frame, p, owed):
+            return
+        broken = self._broken(s, frame)
+        if broken is not None:
+            source = f"{REPAIR_SOURCE}{broken.name}@{broken.version}"
+            await ctx.emit(c.GOAL_OPENED.draft(
+                kind=c.EXPLORATION, authority=c.SELF, title=Content.of(phrase("goals.title.repair",
+                                                                              title=broken.title), level=0),
+                details=Content.of(forge_c.failure(broken), level=0), bundles=REPAIR_BUNDLES,
+                max_steps=p.exploration_steps,
+                source=source, sensitivity=0, desire=0.8, origin=c.FROM_REPAIR, origin_at=frame.now,
+                dedupe_key=f"but:{source}"))
             return
         if frame.now < ready_to_undertake(s, p):
             return  # une chose à la fois, et plus lentement après un échec

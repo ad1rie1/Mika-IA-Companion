@@ -347,6 +347,9 @@ class PromiseNoticed(Payload):
     #: un jour sans heure (« je t'envoie ça jeudi ») : elle peut le tenir dans la journée ; ``due`` est alors la
     #: fin de cette journée-là (18 h). Faux dans un journal plus ancien : l'échéance s'y lit comme une heure.
     all_day: bool = False
+    #: la tenir demande un travail (fabriquer, chercher, suivre quelque chose), pas seulement un mot à dire : ``goals``
+    #: le met en route (ADR 0104). Faux dans un journal plus ancien.
+    work: bool = False
 
 
 class PromiseResolved(Payload):
@@ -552,6 +555,10 @@ class PendingPromise:
     implicit_due: bool = False
     #: un jour sans heure : à tenir dans la journée
     all_day: bool = False
+    #: une promesse de travail (``PromiseNoticed.work``), son texte (un contenu, effaçable) et sa sensibilité
+    work: bool = False
+    text_ref: str = ""
+    sensitivity: int = 2
 
 
 @dataclass(frozen=True, slots=True)

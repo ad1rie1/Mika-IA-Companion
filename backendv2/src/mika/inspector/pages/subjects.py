@@ -79,8 +79,7 @@ class Subjects:
             blocks += await self.ui.inspection.arun(current, request.query_params, self.ui.when_long, subject=key)
         context = {k: v for k, v in request.query_params.items() if k not in ("onglet", "flash", "page", "taille")
                    and not is_page_param(k) and not k.startswith(("avant", "pg", "pile"))}
-        tab_list = [{"title": t.title, "href": fiche_url(kind, key, t.name) + ("&" + urlencode(context) if context else ""), "on": current is not None
-                     and t.name == current.name, "badge": 0} for t in tabs]
+        tab_list, gear = self.tab_bar(request, kind, key, tabs, current, head, context)
         actions = self.pages.head_actions(request, kind=kind, subject=key) \
             if not isinstance(head, Head) or (head.automatic_actions and
                 (not head.action_tabs or current is not None and current.name in head.action_tabs)) else []
@@ -105,12 +104,41 @@ class Subjects:
         return self.pages.render_page(
             request, title=f"{title} · {spec.label}", heading=title, active=home.key if home else "",
             subtitle=head.subtitle if isinstance(head, Head) else "", head_badges=badges, facts=facts,
-            crumbs=crumbs, tabs=tab_list, blocks=blocks,
+            crumbs=crumbs, tabs=tab_list, gear=gear, blocks=blocks,
             # le menu allume la page d'où l'on vient (un brouillon : « À valider »), pas seulement la rubrique
             menu_path=crumbs[0][1] if crumbs else "",
             view_description=current.description if current is not None else "",
             filters=current.typed if current is not None else (), head_actions=actions, subject=key,
             keep=(("onglet", current.name),) if current is not None else ())
+
+    @staticmethod
+    def tab_bar(request: Request, kind: str, key: str, tabs: Any, current: Any, head: Any,
+                context: dict[str, str]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """Les onglets d'une fiche et ceux de sa roue. Un objet qui a ses propres pages (``Head.pages``) les montre
+        en onglets à la place de ``Head.pages_tab`` ; ce que ``Head.gear`` nomme passe derrière la roue, en haut à
+        droite (ADR 0104)."""
+        pages = head.pages if isinstance(head, Head) else ()
+        pages_tab = head.pages_tab if isinstance(head, Head) else ""
+        geared = head.gear if isinstance(head, Head) else ()
+        extra = "&" + urlencode(context) if context else ""
+        bar: list[dict[str, Any]] = []
+        for t in tabs:
+            if t.name in geared:
+                continue
+            if pages and t.name == pages_tab:
+                here = current is not None and current.name == t.name
+                chosen = [i for i, ref in enumerate(pages)
+                          if all(request.query_params.get(k, "") == v for k, v in ref.params if k != "onglet")]
+                on = chosen[0] if chosen else 0
+                bar += [{"title": ref.text, "href": render.href(ref), "on": here and i == on, "badge": 0}
+                        for i, ref in enumerate(pages)]
+                continue
+            bar.append({"title": t.title, "href": fiche_url(kind, key, t.name) + extra,
+                        "on": current is not None and t.name == current.name, "badge": 0})
+        by_name = {t.name: t for t in tabs}
+        gear = [{"title": by_name[n].title, "href": fiche_url(kind, key, n),
+                 "on": current is not None and current.name == n} for n in geared if n in by_name]
+        return bar, gear
 
     async def search(self, request: Request) -> Response:
         q = request.query_params.get("q", "").strip()[:200]

@@ -45,7 +45,10 @@ CEILING = {
     "plugins/camera/__init__.py": 10,  # panneaux de console
     "plugins/email/tools.py": 2,  # capacité et résumé (console)
     "plugins/forge/__init__.py": 5,  # capacité d'installation (console)
-    "plugins/forge/guide.py": 9,  # mode d'emploi de forge_help (exemples de code) — à migrer
+    # mode d'emploi de forge_help (exemples de code) — à migrer ; +2 le 2026-10-12 : le manifeste et le code de
+    # l'exemple de veille (ADR 0104), du code qu'un test exécute, pas une phrase qu'elle lit (son texte est dans
+    # la voix, forge.guide.veille)
+    "plugins/forge/guide.py": 11,
     "plugins/forge/views.py": 6,  # rendus de console, aussi lus par forge_test — à migrer
     "plugins/mcp/__init__.py": 2,  # aperçu d'une capacité (console)
     "plugins/mcp/calls.py": 5,  # capacité et résumé (console)

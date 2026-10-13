@@ -39,19 +39,30 @@ from mika.kernel import schedule
 from mika.kernel.inspect import is_page_param
 
 TOOL = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
-EVENT = re.compile(r"^[a-z_]+\.[a-z_*]+$")
+#: le nom d'un service (``service_<nom>``) — « tick » est celui du rythme principal (``schedule``)
+SERVICE = re.compile(r"^[a-z][a-z0-9_]{1,23}$")
+MAX_SERVICES = 8
+#: un type d'événement, ou un motif (« rss.noticed », « body.* », « forge.source.* » : ce qu'une autre app émet)
+EVENT = re.compile(r"^[a-z_]+(\.[a-z0-9_]+)*\.([a-z0-9_]+|\*)$")
 #: vues, actions, paramètres
 KEY = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
 #: réglages, champs d'action
 FIELD_KEY = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 HANDLERS = ("tick", "context", "view", "action", "on_event")
+#: ses outils au plus, et leurs clés (ADR 0105 : chacun déclare ses arguments, dans le vocabulaire des champs d'action)
+MAX_TOOLS = 8
+_TOOL_KEYS = frozenset({"name", "description", "args", "timeout"})
+#: les délais qu'un manifeste peut déclarer (secondes) : son battement, ses événements et ses services ; ses outils
+#: (une réponse attend un outil : plus court) — au-delà de ce qu'il déclare, l'appel est tué (ADR 0105)
+MAX_RUN_TIMEOUT = 120.0
+MAX_TOOL_TIMEOUT = 60.0
 FORBIDDEN_IMPORTS = frozenset({"subprocess", "socket", "ctypes", "multiprocessing", "threading", "asyncio", "signal",
                                "pty", "fcntl", "resource", "mmap", "importlib", "sys"})
 MAX_SOURCE = 200_000
 MAX_MANIFEST = 16_000
 
 CONFIG_TYPES = ("str", "text", "int", "float", "bool", "secret", "select", "lines")
-FIELD_TYPES = ("text", "textarea", "int", "number", "bool", "select", "email", "url")
+FIELD_TYPES = ("text", "textarea", "int", "number", "bool", "select", "email", "url", "lines")
 PARAM_KINDS = ("search", "select", "int", "bool")
 #: les paramètres que la console garde pour elle (``page`` est donné à chaque vue)
 RESERVED_PARAMS = frozenset({"page", "taille", "onglet", "vue", "fait", "avant", "q_global", "flash"})
@@ -405,6 +416,92 @@ def _views(p: _Problems, raw: Any) -> list[dict[str, Any]]:
 # ── Le manifeste ──────────────────────────────────────────────────────────
 
 
+def _services(p: _Problems, raw: Any) -> list[dict[str, Any]]:
+    """Ses services (ADR 0104) : chacun son nom, son rythme et sa fonction ``service_<nom>(api)`` — plusieurs
+    tâches planifiées dans une même app, chacune suivie à part."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        p.append("« services » : une liste d'entrées {name, schedule, description}")
+        return []
+    if len(raw) > MAX_SERVICES:
+        p.append(f"« services » : {MAX_SERVICES} au plus")
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for i, s in enumerate(raw[:MAX_SERVICES]):
+        where = f"services[{i}]"
+        if not isinstance(s, dict) or not SERVICE.match(str(s.get("name") or "")):
+            p.append(f"{where} : name en minuscules, chiffres et _ (2 à 24)")
+            continue
+        name = str(s["name"])
+        if name == "tick":
+            p.append(f"{where} : « tick » est le service du rythme principal (schedule) : choisis un autre nom")
+            continue
+        if name in seen:
+            p.append(f"{where} (« {name} ») : déclaré deux fois")
+            continue
+        rule = str(s.get("schedule") or "").strip()
+        try:
+            if schedule.parse(rule).kind == "manual":
+                p.append(f"{where} (« {name} ») : un service a un rythme (interval:1h, cron:0 9 * * *)")
+                continue
+        except ValueError as exc:
+            p.append(f"{where} (« {name} ») : {exc}")
+            continue
+        seen.add(name)
+        out.append({"name": name, "schedule": rule, "description": str(s.get("description") or "")[:300],
+                    "timeout": _timeout(p, where, s.get("timeout"), MAX_RUN_TIMEOUT)})
+    return out
+
+
+def _timeout(p: _Problems, path: str, raw: Any, most: float) -> float:
+    """Un délai déclaré (secondes, 1 à ``most``) ; 0 : le défaut."""
+    if raw is None:
+        return 0.0
+    if not _is_num(raw) or not 1 <= raw <= most:
+        p.at(path, f"« timeout » : un nombre de secondes, de 1 à {most:g}")
+        return 0.0
+    return float(raw)
+
+
+def _tools(p: _Problems, raw: Any) -> list[dict[str, Any]]:
+    """Ses outils : ``{name, description, args, timeout}`` → ``tool_<nom>(api, args)``. Leurs arguments se déclarent
+    comme les champs d'une action (ADR 0105) ; un outil qui n'en déclare pas n'en reçoit aucun."""
+    if raw is None or raw == []:
+        return []
+    if not isinstance(raw, list):
+        p.append("« tools » : une liste d'outils {name, description, args, timeout}")
+        return []
+    if len(raw) > MAX_TOOLS:
+        p.append(f"« tools » : {MAX_TOOLS} outils au plus")
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i, t in enumerate(raw[:MAX_TOOLS]):
+        path = f"tools[{i}]"
+        if not isinstance(t, dict) or not TOOL.match(str(t.get("name") or "")):
+            p.at(path, "un objet {name, description, args}, name en minuscules, chiffres et _ (2 à 31)")
+            continue
+        name = str(t["name"])
+        path = _where(path, name)
+        if _unknown(p, path, t, _TOOL_KEYS):
+            continue
+        if name in seen:
+            p.at(path, "outil déclaré deux fois")
+            continue
+        seen.add(name)
+        args_raw = t.get("args") or []
+        if not isinstance(args_raw, list) or len(args_raw) > MAX_FIELDS:
+            p.at(path, f"« args » : une liste d'au plus {MAX_FIELDS} arguments {{key, type, label, description, "
+                       "required, default…}}")
+            args_raw = []
+        keys: set[str] = set()
+        args = [x for x in (_field(p, f"{path}.args[{j}]", a, keys) for j, a in enumerate(args_raw)) if x is not None]
+        out.append({"name": name, "description": str(t.get("description") or "")[:300], "args": args,
+                    "timeout": _timeout(p, path, t.get("timeout"), MAX_TOOL_TIMEOUT)})
+    return out
+
+
+
 def read_manifest(text: str) -> tuple[dict[str, Any], list[str]]:
     """(manifeste normalisé, problèmes en français)."""
     problems = _Problems()
@@ -430,15 +527,12 @@ def read_manifest(text: str) -> tuple[dict[str, Any], list[str]]:
     if not isinstance(domains, list) or not all(isinstance(d, str) and re.match(r"^[a-z0-9.-]+$", d) for d in domains):
         problems.append("« allowed_domains » : une liste de noms d'hôtes")
         domains = []
-    out["allowed_domains"] = [d.lower() for d in domains][:10]
+    # une indication seulement (ADR 0105 : son réseau est libre) — ce qu'elle compte appeler, montré dans la console
+    out["allowed_domains"] = [d.lower() for d in domains][:50]
     out["config_fields"], out["config"] = _config(problems, data.get("config"))
-    tools = []
-    for t in data.get("tools") or []:
-        if not isinstance(t, dict) or not TOOL.match(str(t.get("name") or "")):
-            problems.append("« tools » : des entrées {name, description}, name en minuscules")
-            continue
-        tools.append({"name": str(t["name"]), "description": str(t.get("description") or "")[:300]})
-    out["tools"] = tools[:8]
+    out["tools"] = _tools(problems, data.get("tools"))
+    out["services"] = _services(problems, data.get("services"))
+    out["timeout"] = _timeout(problems, "timeout", data.get("timeout"), MAX_RUN_TIMEOUT)
     events = data.get("events") or []
     if not isinstance(events, list) or not all(isinstance(e, str) and EVENT.match(e) for e in events):
         problems.append("« events » : une liste de types (« rss.noticed », « body.* »)")
@@ -473,9 +567,10 @@ def signatures(code: str) -> tuple[list[str], dict[str, int]]:
                                 "système à piloter — passe par api.*")
     functions = {n.name: 99 if n.args.vararg else len(n.args.posonlyargs) + len(n.args.args)
                  for n in tree.body if isinstance(n, ast.FunctionDef)}
-    if not set(functions) & {*HANDLERS} and not any(f.startswith(("tool_", "view_", "action_")) for f in functions):
-        problems.append("aucune fonction attendue : tick(api), context(api), view_<vue>(api, params), "
-                        "action_<vue>_<action>(api, data), tool_<nom>(api, args) ou on_event(api, événement)")
+    if not set(functions) & {*HANDLERS} and \
+            not any(f.startswith(("tool_", "view_", "action_", "service_")) for f in functions):
+        problems.append("aucune fonction attendue : tick(api), service_<nom>(api), context(api), view_<vue>(api, "
+                        "params), action_<vue>_<action>(api, data), tool_<nom>(api, args) ou on_event(api, événement)")
     return problems, functions
 
 
@@ -498,6 +593,8 @@ def coherence(manifest: Mapping[str, Any], functions: Mapping[str, int]) -> list
 
     for t in manifest.get("tools", []):
         need(f"tool_{t['name']}", "api, args", f"l'outil « {t['name']} » est déclaré")
+    for s in manifest.get("services", []):
+        need(f"service_{s['name']}", "api", f"le service « {s['name']} » est déclaré")
     for v in manifest.get("views", []):
         need(v["function"], "api, params", f"la vue « {v['key']} » est déclarée")
         for a in v["actions"]:

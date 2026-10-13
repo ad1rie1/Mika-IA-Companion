@@ -1144,7 +1144,7 @@ class Consolidate:
             sens = int(Sensitivity.CONFIDENCE if secretive(pr.texte) else Sensitivity.PERSONAL)
             drafts.append(c.PROMISE_NOTICED.draft(
                 text=Content.of(pr.texte, level=sens), to=to, due=due, sensitivity=sens, sources=sources,
-                call_id=call_id, implicit_due=implicit, all_day=all_day))
+                call_id=call_id, implicit_due=implicit, all_day=all_day, work=pr.travail))
         pending_ids = {i for i, _, _ in promises}
         said_at = max((ln.at for ln in conv.lines if ln.person is None), default=frame.now)
         for done in ex.promesses_tenues:

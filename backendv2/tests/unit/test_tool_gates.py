@@ -39,7 +39,7 @@ from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
 ACTING = phrase("runtime.tools.acting")
 CATALOGUE_HEADER = phrase("runtime.tools.catalogue_header")
 
-RESERVED = {"forge_write", "forge_list", "forge_call", "camera_look", "create_project"}
+RESERVED = {"forge_write", "forge_list", "camera_look", "create_project"}
 
 
 def test_a_stranger_is_not_offered_the_tools_reserved_to_her_owners(tmp_path):
@@ -182,7 +182,7 @@ def test_in_conversation_the_core_is_in_hand_and_the_rest_is_fetched_on_demand(t
     # l'identité comprise, à la demande — une réponse ordinaire ne porte pas trente outils d'emblée
     assert {"memory_search", "goal_remind"} <= in_hand and len(in_hand) <= 6
     assert {"identity_whoami_with", "social_about"} <= deferred  # relire une section présente : à la demande
-    assert {"forge_write", "rss_list", "camera_look", "forge_call"} <= deferred
+    assert {"forge_write", "rss_list", "camera_look"} <= deferred
     catalogue = req.system_stable.split(CATALOGUE_HEADER, 1)[1]
     assert "- forge : la Forge" in catalogue and "- rss : les flux" in catalogue
     assert "- social" in catalogue  # relire ce que ses sections disent déjà : à la demande
@@ -291,6 +291,10 @@ def test_the_rule_of_her_hands_names_only_the_means_she_is_given():
     assert acting([spec("memory_search")]) == ACTING
     both = acting([spec("forge_write"), spec("start_project")])
     assert both.startswith(ACTING) and "ta Forge" in both and "un projet à toi" in both
+    # ce qu'une app sait faire est dit ; un travail se lance maintenant, une promesse sans outil ne fait rien
+    assert "site public à heure fixe" in both and "start_project" in both and "ne font rien" in both
+    forge_only = acting([spec("forge_write")])
+    assert "ta Forge" in forge_only and "start_project" not in forge_only  # jamais un outil qu'elle n'a pas
 
 
 def test_with_no_feed_followed_she_is_not_told_there_is_nothing_new():

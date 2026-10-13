@@ -41,7 +41,10 @@ boucle d'outils de l'épisode (même ``call_id`` d'un tour à l'autre) :
 - la lecture de la CLI ne peut pas mourir en silence : une ligne illisible, trop
   longue ou d'une forme inattendue est sautée, et la fin du processus est
   toujours signalée ; l'attente d'un tour est bornée (``turn_timeout_s``) ;
-- la sortie est bornée (``CLAUDE_CODE_MAX_OUTPUT_TOKENS`` d'après ``max_tokens``) ;
+- la sortie est bornée (``CLAUDE_CODE_MAX_OUTPUT_TOKENS`` d'après ``max_tokens`` ; avec des outils, assez pour
+  écrire leurs arguments entiers, la CLI ne sachant pas rejouer un appel coupé) ;
+- aucune connexion annexe (``CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC``) et pas de socket de messagerie entre
+  sessions (``CLAUDE_CODE_HARBOR_KITE=0``) ; ``mika claude-code check`` vérifie qu'aucune ne s'ouvre ;
 - les dossiers d'appel (prompt système, configuration MCP et son jeton de
   session) vivent sous ``XDG_RUNTIME_DIR`` (mémoire, propre à l'utilisateur,
   jamais sauvegardé), en ``0700`` ; ceux d'un processus mort sont purgés.
@@ -96,6 +99,37 @@ STDERR_KEPT = 4000
 #: le plafond de sortie donné à la CLI ne descend pas sous ceci (un modèle qui réfléchit
 #: dépenserait un petit budget avant le premier mot)
 MIN_OUTPUT_TOKENS = 1024
+def sockets_dir() -> Path:
+    """Où la CLI ouvre sa socket de messagerie entre sessions (``cc-socks/<pid>.sock``)."""
+    base = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    return Path(base) / "cc-socks"
+
+
+def _parent_of(pid: int) -> int:
+    try:
+        for line in Path(f"/proc/{pid}/status").read_text().splitlines():
+            if line.startswith("PPid:"):
+                return int(line.split()[1])
+    except (OSError, ValueError):
+        pass
+    return 0
+
+
+def opens_socket(pid: int, folder: Path | None = None) -> bool:
+    """Ce processus (ou un de ses enfants) a-t-il une socket de messagerie ouverte ? (la vérification de
+    ``CLAUDE_CODE_HARBOR_KITE``, une variable non documentée)."""
+    try:
+        names = [p.stem for p in (folder or sockets_dir()).glob("*.sock")]
+    except OSError:
+        return False
+    return any(n.isdigit() and (int(n) == pid or _parent_of(int(n)) == pid) for n in names)
+
+
+#: la sortie d'une requête qui porte des outils : ce qu'un appel d'outil coupé à ``max_tokens`` aurait obtenu en étant
+#: rejoué (``runtime.tools.TOOL_CALL_CAP_CEILING``) — la CLI, elle, ne sait pas reprendre une boucle d'outils dans
+#: une nouvelle session : elle l'a d'emblée (sonde du 12 octobre : écrire une app en répondant coupait l'appel, et la
+#: réponse échouait entière, ADR 0104). Le texte, lui, reste court : sa consigne le borne.
+TOOLS_OUTPUT_TOKENS = 16_384
 #: un dossier d'appel sans processus connu, plus vieux que ça, est une épave (secondes)
 STALE_CALL_S = 3600.0
 #: le préfixe des dossiers d'appel
@@ -258,6 +292,12 @@ class ClaudeCodeBackend:
 
     # ── Ce que la CLI reçoit ─────────────────────────────────────────────
 
+    def opened_socket(self, call_id: str) -> bool:
+        """La CLI de cet appel, encore en vie, a-t-elle ouvert une socket de messagerie entre sessions ?"""
+        run = self._runs.get(call_id)
+        proc = run.proc if run is not None else None
+        return proc is not None and opens_socket(proc.pid)
+
     def binary(self) -> str:
         found = self.claude_bin or shutil.which("claude") or str(Path.home() / ".local" / "bin" / "claude")
         return found
@@ -284,9 +324,18 @@ class ClaudeCodeBackend:
         out.update({
             "CLAUDE_CODE_DISABLE_AUTO_MEMORY": "1",
             "ENABLE_CLAUDEAI_MCP_SERVERS": "false",
+            # aucune connexion annexe (mises à jour, télémétrie…) : démarrage 0,42 → 0,12 s, fin ~0,95 → 0,20 s
+            # (audit du 2026-10-08)
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+            # pas de socket de messagerie entre sessions (``/run/user/<uid>/cc-socks/<pid>.sock``) : par elle, tout
+            # processus du même compte pouvait glisser un message dans sa session, hors du runtime. Variable interne,
+            # non documentée : ``mika claude-code check`` dit si la CLI en ouvre encore une
+            "CLAUDE_CODE_HARBOR_KITE": "0",
             "MCP_TOOL_TIMEOUT": str(int(self.tool_timeout_s * 1000)),
-            # la sortie suit le budget de la requête (la CLI l'ignorait : un murmure pouvait faire une page)
-            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(max(MIN_OUTPUT_TOKENS, int(req.max_tokens))),
+            # la sortie suit le budget de la requête (la CLI l'ignorait : un murmure pouvait faire une page) ; avec des
+            # outils, de quoi écrire leurs arguments entiers (le code d'une app)
+            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(max(MIN_OUTPUT_TOKENS, int(req.max_tokens),
+                                                     TOOLS_OUTPUT_TOKENS if req.tools else 0)),
         })
         if self.config_dir:
             out["CLAUDE_CONFIG_DIR"] = self.config_dir

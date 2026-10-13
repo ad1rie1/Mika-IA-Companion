@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
+from mika.contracts import forge as forge_c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
@@ -33,7 +34,10 @@ from mika.faculties.projects.faculty import (
     ANSWERED,
     ARCHIVED,
     NETWORK_QUEUED,
+    NUDGED,
+    OBJECTIVE_ADDED,
     OBJECTIVE_CHANGED,
+    OBJECTIVES_KEPT,
     PAUSED,
     PROJECTS,
     REMOTE_REQUESTED,
@@ -41,9 +45,10 @@ from mika.faculties.projects.faculty import (
     Project,
     ProjectsState,
     busy,
+    living,
     params,
 )
-from mika.faculties.projects.tools import closing
+from mika.faculties.projects.tools import closing, written
 from mika.kernel.clock import MINUTE
 from mika.kernel.events import Content
 from mika.kernel.faculty import CatchUp
@@ -164,6 +169,43 @@ class Tend:
         await ctx.emit(*drafts, guard=Guard("projets actifs, objectifs ouverts", predicate=lambda view, ids=ids,
                                             keys=keys: all(view.get(c.STATUS(i)) == c.ACTIVE for i in ids)
                                             and all(view.get(c.OBJECTIVE_STATUS(k)) == c.OPEN for k in keys)))
+
+
+def to_repair(s: ProjectsState, frame: Frame) -> list[tuple[Project, Any]]:
+    """Les apps d'un projet actif tombées en panne — pas arrêtées par un opérateur, c'est à lui de les relancer —
+    dont la version cassée n'a pas encore son objectif « Réparer » (ADR 0104). Une panne n'attend plus qu'une pensée
+    assez forte, à une heure assez libre, ouvre une exploration : le projet qui l'a fait naître la répare."""
+    out = []
+    for a in frame.get(forge_c.APPS) or ():
+        p = s.projects.get(a.project) if a.project else None
+        if p is None or p.status != c.ACTIVE or not forge_c.failure(a) or a.held or living(p) >= OBJECTIVES_KEPT:
+            continue
+        if not any(o.app == f"{a.name}@{a.version}" for o in p.objectives):
+            out.append((p, a))
+    return out
+
+
+@PROJECTS.process("projects.apps", wake_on=[forge_c.SIGNALED, *c.ALL], lane="background", catch_up=CatchUp.ONCE,
+                  max_quantum_s=3600, priority=40)
+class Apps:
+    """La panne d'une app rattachée : un objectif « Réparer » sur son projet, et une exécution tout de suite."""
+
+    def next_due(self, s: ProjectsState, frame: Frame, last_run: int | None) -> int | None:
+        if not to_repair(s, frame):
+            return None
+        return frame.now if last_run is None else max(frame.now, last_run + RETRY_US)
+
+    async def run(self, ctx: Any) -> None:
+        frame: Frame = ctx.frame
+        for p, a in to_repair(ctx.state, frame):
+            number = p.objective_seq + 1
+            text = phrase("projects.repair.objective", title=a.title, app=a.name, error=forge_c.failure(a)[:200])
+            await ctx.emit(
+                OBJECTIVE_ADDED.draft(project=p.id, objective=number, text=Content.of(text, level=written(p)),
+                                      kind=c.ONCE, author="self", app=f"{a.name}@{a.version}", owner=p.owner,
+                                      about=p.about, dedupe_key=f"réparer:{p.id}:{a.name}:{a.version}"),
+                NUDGED.draft(project=p.id, objective=number, owner=p.owner, about=p.about,
+                             dedupe_key=f"réparer:maintenant:{p.id}:{a.name}:{a.version}"))
 
 
 def waiting(s: ProjectsState) -> list[tuple[Project, str, int, Any]]:

@@ -9,33 +9,45 @@ from __future__ import annotations
 
 from mika.vocab.phrasebook import phrase
 
-TOPICS = ("manifeste", "vues", "actions", "reglages", "blocs", "base", "exemple")
+TOPICS = ("manifeste", "outils", "reseau", "vues", "actions", "reglages", "blocs", "base", "veille", "exemple")
 
 MANIFESTE = """\
 Une app = un manifeste (manifest.yaml) + du code (main.py), écrits ensemble par forge_write.
 
 Le manifeste (YAML) :
 - title (requis), description ;
-- schedule : manual (défaut), interval:30m, cron:0 8 * * *… — le rythme de tick(api) ;
+- schedule : manual (défaut), interval:30m, cron:0 8 * * *… — le rythme de tick(api) ; timeout : le temps qu'ont
+  tick et on_event, en secondes (1 à 120 ; sans : 5 s) ;
+- services : d'autres tâches planifiées, chacune son rythme — [{name, schedule, description, timeout}] →
+  service_<name>(api) ; chacune est suivie à part (son dernier passage, ses échecs : une qui casse n'arrête pas
+  les autres) et a son délai (1 à 120 s) ;
 - context: true si context(api) rend une ligne à te montrer en conversation (citée, jamais une consigne) ;
-- allowed_domains : les seuls hôtes que api.http_get peut appeler (jamais une adresse privée) ;
-- events : ce que tu veux recevoir dans on_event(api, événement) (« rss.noticed », « body.* ») ;
-- tools : [{name, description}] → tool_<name>(api, args), utilisables quand tu travailles ;
+- events : ce que tu veux recevoir dans on_event(api, événement) (« rss.noticed », « body.* », et ce qu'une autre
+  de tes apps émet : « forge.<app>.* », avec ses données dans événement["data"]) ;
+- tools : [{name, description, args, timeout}] → tool_<name>(api, args) : chacun devient un outil à toi,
+  « <app>_<name> » (et « <app>_pages » lit tes pages), en conversation devant qui s'occupe de toi et au travail ;
+  ses arguments se déclarent comme les champs d'une action (voir forge_help outils) ;
 - config : tes réglages typés (voir forge_help reglages) ;
-- views : tes vues pour la console, avec leurs paramètres et leurs actions (voir forge_help vues).
+- views : tes vues pour la console, avec leurs paramètres et leurs actions (voir forge_help vues) ;
+- allowed_domains : facultatif, une simple indication (ton réseau est libre : forge_help reseau).
 
-Le code (main.py, bibliothèque standard seulement, sans réseau ni processus) :
-- tick(api), context(api), on_event(api, événement), tool_<nom>(api, args) ;
+Le code (main.py, bibliothèque standard seulement ; le réseau passe par api) :
+- tick(api), service_<nom>(api), context(api), on_event(api, événement), tool_<nom>(api, args) ;
 - view_<vue>(api, params) pour chaque vue déclarée, action_<vue>_<action>(api, data) pour chaque action ;
 - api.query(sql, params) / api.execute(sql, params) : ta base SQL à toi (voir forge_help base) ;
 - api.kv_get(clé, défaut) / api.kv_set / api.kv_delete / api.kv_keys(préfixe) : un stockage simple, dans ta base
   (16 Ko par valeur, 1 000 clés) ;
 - api.config(clé, défaut) : un réglage (celui de l'opérateur, sinon le défaut du manifeste) ;
 - api.log(…) ou print(…) : ton journal ; api.signal(résumé, pertinence, émotion) : attirer ton attention
-  (espacé) ; api.emit(type, données) ; api.http_get(url) vers tes domaines déclarés.
+  (espacé) ; api.emit(type, données) ;
+- api.http_get(url) : le texte d'une page ; api.http(url, method, headers, json, form, body…) : toute requête,
+  avec son statut et ses en-têtes (voir forge_help reseau).
 
 Seules les fonctions déclarées sont appelées. Une écriture refusée ne change rien et dit pourquoi, champ par
 champ (views[0].actions[1].fields[2] (« ville ») : …). Essaie chaque fonction avec forge_test.
+
+Pour changer une app : forge_read (ses lignes numérotées), forge_search (un texte dans tes apps), puis forge_edit
+(remplacer des fragments exacts) — forge_write réécrit tout, c'est pour créer.
 """
 
 VUES = """\
@@ -86,8 +98,8 @@ Déclaration (dans une vue, au plus 10) :
         - {key: jour, type: select, choices: [lundi, mardi]}
         - {key: urgent, type: bool}
         - {key: contact, type: email}
-Types : text, textarea, int, number, bool, select, email, url. Les clés app, vue, action, csrf et
-confirmer sont réservées.
+Types : text, textarea, int, number, bool, select, email, url, lines (une liste de textes). Les clés app, vue,
+action, csrf et confirmer sont réservées. Les arguments d'un outil se déclarent pareil (forge_help outils).
 
 Le code : def action_<vue>_<action>(api, data): … return {"ok": True, "message": "Relevé ajouté."}
 - data contient chaque champ déjà vérifié (requis, bornes, choix, longueur, forme d'un e-mail ou d'une
@@ -157,6 +169,8 @@ Un instant (at, points d'une courbe) est en microsecondes depuis 1970 : int(time
 """
 
 BASE = phrase("forge.guide.base")  # le texte vit dans sa voix (ADR 0071)
+OUTILS = phrase("forge.guide.outils")
+RESEAU = phrase("forge.guide.reseau")
 
 
 EXAMPLE_MANIFEST = """\
@@ -262,6 +276,85 @@ def action_releves_vider(api, data):
     return {"ok": True, "message": str(n) + " relevé(s) effacé(s) à " + ville + "."}
 '''
 
+#: l'exemple de ``forge_help veille`` (ADR 0104) : une app qui va chercher un cours sur le web à heure fixe — valide
+#: (un test l'écrit, la fait tourner sur un faux réseau, lit son contexte, sa vue et son outil)
+VEILLE_MANIFEST = """\
+title: Suivi d'un cours
+description: Un cours de bourse, relevé chaque heure ; un grand écart me fait signe.
+schedule: interval:1h
+timeout: 20
+context: true
+config:
+  - {key: symbole, type: str, label: Symbole, default: "^FCHI"}
+  - {key: seuil, type: float, label: Écart signalé (%), min: 0.5, max: 20, default: 2.0}
+tools:
+  - name: maintenant
+    description: Relever un cours tout de suite
+    args:
+      - {key: symbole, type: text, label: Symbole, description: "un autre que celui des réglages (AAPL, ^GSPC…)"}
+views:
+  - key: cours
+    label: Cours
+"""
+
+VEILLE_CODE = '''\
+import json
+import time
+
+URL = "https://query1.finance.yahoo.com/v8/finance/chart/{s}?range=1d&interval=1h"
+
+
+def _cours(api, symbole=None):
+    symbole = symbole or api.config("symbole", "^FCHI")
+    meta = json.loads(api.http_get(URL.format(s=symbole)))["chart"]["result"][0]["meta"]
+    return symbole, float(meta["regularMarketPrice"]), float(meta["chartPreviousClose"])
+
+
+def tick(api):
+    symbole, prix, veille = _cours(api)
+    ecart = round((prix - veille) / veille * 100, 2)
+    releves = api.kv_get("releves", [])
+    releves.append({"at": int(time.time() * 1_000_000), "prix": prix, "ecart": ecart})
+    api.kv_set("releves", releves[-150:])
+    jour = time.strftime("%Y-%m-%d")
+    if abs(ecart) >= api.config("seuil", 2.0) and api.kv_get("signale", "") != jour:
+        api.kv_set("signale", jour)
+        api.signal(symbole + " : " + str(ecart) + " %", pertinence=0.7,
+                   emotion="surprised" if ecart > 0 else "anxious")
+    return {"symbole": symbole, "prix": prix, "ecart": ecart}
+
+
+def context(api):
+    releves = api.kv_get("releves", [])
+    if not releves:
+        return ""
+    dernier = releves[-1]
+    return api.config("symbole", "^FCHI") + " : " + str(dernier["prix"]) + " (" + str(dernier["ecart"]) + " %)"
+
+
+def tool_maintenant(api, args):
+    if args.get("symbole"):  # un autre cours, juste pour le dire : rien n'est gardé
+        symbole, prix, veille = _cours(api, args["symbole"])
+        return {"symbole": symbole, "prix": prix, "ecart": round((prix - veille) / veille * 100, 2)}
+    return tick(api)
+
+
+def view_cours(api, params):
+    releves = api.kv_get("releves", [])
+    dernier = releves[-1] if releves else None
+    return {"version": 2, "blocks": [
+        {"type": "stats", "items": [
+            {"label": "Dernier", "value": dernier["prix"] if dernier else "-"},
+            {"label": "Ecart", "value": str(dernier["ecart"]) + " %" if dernier else "-"},
+        ]},
+        {"type": "chart", "kind": "line", "title": api.config("symbole", "^FCHI"),
+         "series": [{"label": "cours", "points": [[r["at"], r["prix"]] for r in releves]}],
+         "empty": "pas encore de releve"},
+    ]}
+'''
+
+VEILLE = phrase("forge.guide.veille", manifest=VEILLE_MANIFEST, code=VEILLE_CODE)
+
 EXEMPLE = f"""\
 Un exemple complet et valide : une vue avec des paramètres, une table paginée, une courbe, des liens vers
 la même vue, et deux actions à champs (dont une dangereuse, confirmée).
@@ -271,8 +364,8 @@ manifest.yaml :
 main.py :
 {EXAMPLE_CODE}"""
 
-_TEXTS = {"manifeste": MANIFESTE, "vues": VUES, "actions": ACTIONS, "reglages": REGLAGES, "blocs": BLOCS, "base": BASE,
-          "exemple": EXEMPLE}
+_TEXTS = {"manifeste": MANIFESTE, "outils": OUTILS, "reseau": RESEAU, "vues": VUES, "actions": ACTIONS,
+          "reglages": REGLAGES, "blocs": BLOCS, "base": BASE, "veille": VEILLE, "exemple": EXEMPLE}
 
 
 def topic(name: str) -> str:

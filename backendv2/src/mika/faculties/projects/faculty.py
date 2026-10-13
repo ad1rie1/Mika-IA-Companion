@@ -35,6 +35,7 @@ from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import agency as agency_c
 from mika.contracts import identity as identity_c
+from mika.contracts import mcp as mcp_c
 from mika.contracts import projects as c
 from mika.contracts import runtime as rt
 from mika.contracts import wakeup as wakeup_c
@@ -62,10 +63,17 @@ OBJECTIVES_HISTORY = 200
 DECISIONS_KEPT = 200
 #: les lots d'outils que tout projet a : son atelier et ses propres outils
 BASE_BUNDLES = ("projects", "workshop")
+#: chercher et lire sur le web (ADR 0105) : un projet à elle l'a toujours en main, comme ses autres outils ; un projet
+#: confié l'a quand son cadre le dit (coché d'office à sa création)
+WEB = mcp_c.WEB_BUNDLE
 #: les lots qu'on peut lui ajouter (dans cet ordre dans la console)
-EXTRA_BUNDLES = ("memory", "email", "rss", "forge", "forge_apps", "camera")
+EXTRA_BUNDLES = ("memory", WEB, "email", "rss", "forge", "forge_apps", "camera")
 #: les lots d'un projet qui n'en dit rien
-DEFAULT_BUNDLES = (*BASE_BUNDLES, "memory")
+DEFAULT_BUNDLES = (*BASE_BUNDLES, "memory", WEB)
+#: les lots qu'elle se donne elle-même, sur un projet à elle : de quoi se fabriquer un outil (la Forge, ses apps) et
+#: lire ce qu'il observe (ses flux) ; le courrier et la caméra touchent la vie des autres — un opérateur seulement
+#: (ADR 0104)
+SELF_BUNDLES = ("memory", "rss", "forge", "forge_apps")
 PRIORITY_RANK = {c.LOW: -1, c.NORMAL: 0, c.HIGH: 1, c.URGENT: 2}
 #: l'agenda « dès que possible » (gardé sous son ancien nom, ``manual`` : les journaux le portent) et le vrai
 #: « sur demande » : il ne part que quand on le lance
@@ -187,6 +195,8 @@ class Objective:
     author: str = "operator"
     at: int = 0
     runs: int = 0
+    #: la panne d'app qu'il répare (« cours@3 ») — un seul objectif par version cassée (ADR 0104)
+    app: str = ""
     #: exécutions de suite sans verdict
     silent: int = 0
     unproven: int = 0
@@ -348,6 +358,8 @@ class ObjectiveAdded(Payload):
     by: str = ""
     owner: str | None = None
     about: tuple[str, ...] = ()
+    #: un objectif « Réparer » né de la panne d'une de ses apps : l'app et sa version cassée (« cours@3 », ADR 0104)
+    app: str = ""
 
 
 class ObjectiveChanged(Payload):
@@ -557,6 +569,12 @@ def live(p: Project) -> bool:
     return p.status in (c.ACTIVE, c.PAUSED)
 
 
+def run_bundles(p: Project) -> tuple[str, ...]:
+    """Ce qu'une exécution a en main : les lots du projet — et, sur un projet à elle, toujours le web, comme ses
+    autres outils (un projet ouvert avant l'ADR 0105 ne l'avait pas) ; un projet confié garde son cadre."""
+    return tuple(dict.fromkeys((*p.bundles, WEB))) if p.authority == c.SELF else p.bundles
+
+
 def written(p: Project) -> int:
     """Le niveau de ce qu'elle écrit pendant une exécution (compte rendu, carnet, décisions, résultat, les fichiers
     de l'atelier) : elle y voit toute sa mémoire, ce qui en sort est au moins personnel."""
@@ -731,7 +749,7 @@ def _objective_added(s: ProjectsState, e, cx) -> ProjectsState:
     oid = d.objective if d.objective > p.objective_seq and objective_at(p, d.objective) is None else \
         max([p.objective_seq, *(o.id for o in p.objectives)]) + 1
     o = Objective(id=oid, text_ref=d.text.ref, kind=d.kind if d.kind in c.OBJECTIVE_KINDS else c.ONCE,
-                  cadence_us=max(0, d.cadence_us), author=d.author, at=e.at)
+                  cadence_us=max(0, d.cadence_us), author=d.author, at=e.at, app=d.app)
     objectives = (*p.objectives, o)
     while len(objectives) > OBJECTIVES_HISTORY:  # l'histoire déborde : le plus ancien clos tombe
         oldest = next((x for x in objectives if x.status in (c.DONE, c.DROPPED)), None)

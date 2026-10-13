@@ -1330,6 +1330,11 @@ def _ignored(s: AttentionState, cx) -> int:
     return s.ignored
 
 
+@ATTENTION.fact(c.SIGNAL_THOUGHT_FROM)
+def _signal_thought_from(s: AttentionState, cx) -> float:
+    return params(cx.params).signal_thought_from
+
+
 def awaiting(s: AttentionState, person: str) -> c.AwaitingReading:
     ex = s.exchanges.get(person) or Exchange()
     return c.AwaitingReading(person, ex.last_in, ex.last_out, ex.asked, ex.owed, ex.initiatives,

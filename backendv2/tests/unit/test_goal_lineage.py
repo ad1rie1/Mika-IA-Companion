@@ -64,7 +64,8 @@ def test_the_goal_born_of_a_thought_keeps_its_lineage():
                                          origin=attention_c.REVISION, about=("sam",), sensitivity=3, born_at=0,
                                          lineage=secret)
     facts = {"body.sleep": body_c.SleepPhase.AWAKE, "attention.thoughts": (thought,),
-             "identity.identity": NS(name="Sam")}
+             "identity.identity": NS(name="Sam"), "identity.owners": (),
+             "forge.apps": (), "projects.live": ()}
     now = DAY
     frame = NS(now=now, get=lambda key: facts[key.name], env=NS(params_of=lambda *_: GoalsParams()), root=None,
                local=lambda t=None: datetime(2026, 10, 12, 15, 0))

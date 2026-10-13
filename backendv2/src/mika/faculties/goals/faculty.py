@@ -379,6 +379,10 @@ def musing(g: Goal) -> bool:
 CURIOSITY_SOURCES = ("interest:", "talk:")
 #: une vérification (ADR 0086) : sa source, « check:<fil du moment> » ; elles se comptent sur sept jours
 CHECK_SOURCE = "check:"
+#: une promesse de travail mise en route (ADR 0104) : une fois, jamais deux — gardée dans ``explored`` sans échéance
+PROMISE_SOURCE = "promise:"
+#: une app à réparer : « app:<nom>@<version cassée> » — une exploration par panne (ADR 0104)
+REPAIR_SOURCE = "app:"
 
 
 def checks_this_week(s: GoalsState, now: int) -> int:
@@ -683,7 +687,7 @@ def _opened(s: GoalsState, e, cx) -> GoalsState:
         origin=d.origin, origin_at=d.origin_at, lineage=d.lineage,
     )
     s = _set(s, g)
-    if d.source.startswith((*CURIOSITY_SOURCES, CHECK_SOURCE)):
+    if d.source.startswith((*CURIOSITY_SOURCES, CHECK_SOURCE, PROMISE_SOURCE, REPAIR_SOURCE)):
         s = replace(s, explored=s.explored.set(d.source, e.at))
     if d.authority == c.SELF:
         s = replace(s, self_opened_at=e.at)
@@ -1005,7 +1009,7 @@ def view(g: Goal, now: int) -> c.GoalView:
         due=g.due, waiting_until=g.waiting_until if status(g, now) == c.WAITING else 0,
         last_summary_ref=g.summary_ref, schedule=g.schedule, priority=g.priority, tasks_total=len(g.tasks),
         tasks_done=sum(1 for t in g.tasks if t.status == c.TASK_DONE),
-        tasks_blocked=sum(1 for t in g.tasks if t.status == c.TASK_BLOCKED), musing=musing(g),
+        tasks_blocked=sum(1 for t in g.tasks if t.status == c.TASK_BLOCKED), musing=musing(g), bundles=g.bundles,
     )
 
 

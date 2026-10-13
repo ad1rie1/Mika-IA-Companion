@@ -263,5 +263,8 @@ THOUGHTS = FactKey("attention.thoughts", type=tuple, time_varying=True)
 ANTICIPATION = FactKey("attention.anticipation", type=object, time_varying=True)
 #: Ses initiatives restées sans réponse, d'affilée (toutes personnes).
 IGNORED = FactKey("attention.ignored", type=int)
+#: la pertinence qu'un signal doit atteindre (après habituation) pour devenir une pensée : lu par ce qui aide à écrire
+#: un signal (la Forge, ``forge_test``), pour qu'elle sache ce que deviendra le sien (ADR 0104)
+SIGNAL_THOUGHT_FROM = FactKey("attention.signal_thought_from", type=float)
 #: Le fil avec une personne (``AwaitingReading``) : ses initiatives sans réponse, par personne.
 AWAITING = FactFamily("attention.awaiting", arg=str, type=AwaitingReading)

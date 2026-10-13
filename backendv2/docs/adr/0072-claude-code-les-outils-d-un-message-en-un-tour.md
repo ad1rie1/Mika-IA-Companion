@@ -38,3 +38,12 @@ en série sans la marque, appel lancé dès son bloc, `stream_event`, réponse d
 Sans ça, le défaut était invisible dans les tests. Contrats : `tests/contract/test_claude_code.py` (lot unique
 malgré un modèle lent, ordre écrit, appel refusé par la CLI, repli sans flux). L'ancien fournisseur échoue à
 chacun, et chaque morceau du correctif est tenu par au moins un test (vérifié par mutation).
+
+**Suite (2026-10-12).** Deux des trois réglages proposés par l'audit du 2026-10-08 sont appliqués à la demande de la
+propriétaire : `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` (aucune connexion annexe ; l'usage de l'abonnement reste
+rapporté, vérifié par un vrai `mika claude-code check`) et `CLAUDE_CODE_HARBOR_KITE=0` (pas de socket de messagerie
+entre sessions). Cette variable n'étant pas documentée, `check` surveille pendant son appel si la CLI ou un de ses
+enfants ouvre une socket (`messagerie_entre_sessions` : « fermée » ; un témoin sans la variable l'a vue « ouverte »).
+La réflexion n'est pas coupée (`MAX_THINKING_TOKENS`) : la propriétaire l'a refusé. Et avec des outils, la CLI reçoit
+d'emblée un plafond de sortie assez haut pour écrire leurs arguments entiers (ADR 0104).
+

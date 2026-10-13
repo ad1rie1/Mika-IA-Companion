@@ -44,6 +44,12 @@ FROM_EXCHANGE, FROM_REVISION, FROM_SIGNAL, FROM_INTEREST = "exchange", "revision
 FROM_TALK = "talk"
 #: un moment du monde qui lui tient à cœur, passé sans qu'elle sache comment il a tourné : aller vérifier (ADR 0086)
 FROM_CHECK = "check"
+#: une promesse de travail faite à qui s'occupe d'elle (« je vais me monter un outil pour ça ») que rien n'a encore
+#: mise en route : la tenir, avec de quoi se fabriquer ce qu'il faut (ADR 0104)
+FROM_PROMISE = "promise"
+#: une de ses apps, qui ne vit dans aucun projet, est tombée en panne : la réparer (ADR 0104 — un projet répare
+#: lui-même les apps qui vivent chez lui)
+FROM_REPAIR = "repair"
 #: ce qui fait une rêverie quand elle n'a nulle part où chercher du neuf : un centre d'intérêt, un sujet de
 #: conversation
 MUSING_ORIGINS = frozenset({FROM_INTEREST, FROM_TALK})
@@ -216,6 +222,8 @@ class GoalView:
     tasks_blocked: int = 0
     #: une rêverie en cours : ce n'est pas « ce sur quoi elle est » (rien de neuf ne se raconte)
     musing: bool = False
+    #: les lots d'outils de ses séances : un projet qui en naît les garde (ADR 0104)
+    bundles: tuple[str, ...] = ()
 
 
 #: Les buts vivants (actifs ou en attente), du plus ancien au plus récent.

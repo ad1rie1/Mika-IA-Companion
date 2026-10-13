@@ -30,7 +30,7 @@ from mika.ports.llm import LLMBackend
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.runtime.effects import with_content
 from mika.sim.clock import SimClock
-from mika.sim.outside import FakeFeeds, FakeMail
+from mika.sim.outside import FakeFeeds, FakeMail, FakeWeb
 from mika.vocab import privacy
 from mika.vocab.episodes import FALLBACKS
 from mika.vocab.people import EXTERNAL_PREFIX
@@ -130,6 +130,8 @@ class Driver:
     #: le monde extérieur (il survit aux redémarrages du noyau)
     mail: FakeMail = field(default_factory=FakeMail)
     feeds: FakeFeeds = field(default_factory=FakeFeeds)
+    #: le web de ses apps (``api.http_get``), qu'on peut couper (ADR 0104)
+    web: FakeWeb = field(default_factory=FakeWeb)
     #: les fichiers qu'elle envoie (leurs octets survivent aux redémarrages du noyau, comme sur le disque)
     shares: MemoryShares = field(default_factory=MemoryShares)
     #: les plongements de la mémoire (un vrai modèle pour la sonde ; par défaut, le hachage, déterministe et rapide)
@@ -149,10 +151,12 @@ class Driver:
         store = SqlStore(*STORES(self.root), threaded=False)
         ports = {"delivery": self.transport, "vectors": SqliteVectorIndex(store, self.embedder or HashEmbedder()),
                  "workshop": BwrapWorkshop(self.root / "ateliers"), "mail": self.mail, "feeds": self.feeds,
-                 "forge": ForgeHost(self.root / "forge"), "shares": self.shares}
+                 "forge": ForgeHost(self.root / "forge", http_get=self.web.get, public=lambda host: True),
+                 "shares": self.shares}
         deps = self.composition.deps(store=store, clock=self.clock, ids=SeededIdGen(f"{self.seed}:{self.boots}"),
                                      gateway=gateway, ports=ports, seed=f"{self.seed}:{self.boots}")
         self.kernel = Kernel(deps)
+        ports["forge"].on_change(self.kernel.refresh_tools)  # comme le serveur : une app écrite, ses outils aussi
         self.boots += 1
         await self.kernel.start(configure=lambda k: self.composition.configure(k, self.composition.persona))
         # les clients encore là se reconnectent (la présence est volatile)

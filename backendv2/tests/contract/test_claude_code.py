@@ -24,6 +24,7 @@ import contextlib
 import json
 import os
 import stat
+import subprocess
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -36,7 +37,7 @@ from pydantic import BaseModel
 from starlette.applications import Starlette
 from starlette.routing import Mount
 
-from mika.adapters.llm.claude_code import ClaudeCodeBackend, ClaudeCodeError, QuotaHeld
+from mika.adapters.llm.claude_code import ClaudeCodeBackend, ClaudeCodeError, QuotaHeld, opens_socket
 from mika.adapters.llm.gateway import Gateway
 from mika.adapters.mcp.protocol import Tool
 from mika.adapters.mcp.relay import PREFIX, Relay
@@ -564,6 +565,44 @@ async def test_the_cli_output_follows_the_request_budget(tmp_path, cli):
                          messages=(Message("user", "x"),), max_tokens=3000)
         report = _report((await be.complete(req)).text)
     assert report["max_output"] == "3000"
+
+
+async def test_the_cli_makes_no_side_connections_and_opens_no_session_socket(tmp_path, cli):
+    """Aucune connexion annexe (démarrage et fin plus rapides), et pas de socket de messagerie entre sessions, par où
+    un autre processus du compte glisserait un message dans sa session (audit du 2026-10-08)."""
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        req = LLMRequest(role="journal", call_id="b-3#0", system_stable=scenario(report=True),
+                         messages=(Message("user", "x"),))
+        report = _report((await be.complete(req)).text)
+    assert report["flags"] == {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "CLAUDE_CODE_HARBOR_KITE": "0"}
+
+
+def test_a_session_socket_is_seen_for_the_cli_or_its_child(tmp_path):
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+    try:
+        assert not opens_socket(os.getpid(), tmp_path)
+        (tmp_path / f"{child.pid}.sock").touch()
+        assert opens_socket(os.getpid(), tmp_path)  # l'enfant de ce processus en a ouvert une
+        assert opens_socket(child.pid, tmp_path) and not opens_socket(1, tmp_path)
+    finally:
+        child.kill()
+        child.wait()
+
+
+async def test_with_tools_the_cli_has_room_for_their_arguments(tmp_path, cli):
+    """La CLI ne sait pas rejouer un appel d'outil coupé à ``max_tokens`` (une boucle commencée ne se reprend pas
+    dans une nouvelle session) : avec des outils, elle a d'emblée de quoi écrire leurs arguments entiers — le code
+    d'une app écrite en répondant (sonde réelle du 2026-10-12, ADR 0104). Sans outil, le budget de la requête."""
+    relay = Relay()
+    async with serving(relay) as base:
+        be = backend(relay, base, cli, tmp_path)
+        req = LLMRequest(role="reply", call_id="b-2#0", system_stable=scenario(report=True),
+                         messages=(Message("user", "x"),), max_tokens=1024,
+                         tools=(ToolDecl("forge_write", "Écrire une app.", {"type": "object"}),))
+        report = _report((await be.complete(req)).text)
+    assert int(report["max_output"]) >= 16_384
 
 
 async def test_a_sentence_cut_by_a_tool_search_keeps_its_beginning(tmp_path, cli):

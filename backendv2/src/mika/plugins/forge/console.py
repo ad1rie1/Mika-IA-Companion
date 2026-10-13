@@ -46,8 +46,6 @@ from mika.kernel.inspect import (
     Found,
     Head,
     InspectContext,
-    Nav,
-    NavItem,
     Note,
     Pager,
     Param,
@@ -71,6 +69,7 @@ from mika.plugins.forge import (
     ForgeState,
     NoArgs,
     _next_tick,
+    has_secrets,
     outcomes,
     params,
     stale,
@@ -90,7 +89,17 @@ from mika.plugins.forge.views import (
     view_params,
     without_forms,
 )
-from mika.ports.forge import AppInfo, AppUI, AppViewSpec, CallResult, ForgeRefused, form_field, ui_load
+from mika.ports.forge import (
+    AppInfo,
+    AppUI,
+    AppViewSpec,
+    CallResult,
+    ForgeRefused,
+    check_args,
+    form_field,
+    said_args,
+    ui_load,
+)
 
 #: une page de ses apps, de ce qu'une app a vécu (au journal), des lignes de son journal
 APPS_PAGE = 25
@@ -103,8 +112,6 @@ LOGS_SHOWN = 50
 LOGS_READ = 500
 MESSAGE_MAX = 500
 APP_NAME = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
-EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-URL = re.compile(r"^https?://[^\s/?#@\\]+(?:[/?#][^\s\\]*)?$", re.IGNORECASE)
 NOT_HERE = "La Forge n'est pas configurée ici."
 
 
@@ -205,8 +212,8 @@ def _about(name: str, app: App | None, info: AppInfo | None, port: Any, frame: F
     if app is not None:
         pairs += [
             ("promue (ses outils servent en conversation)", "oui" if app.promoted else "non"),
-            ("version validée (ses secrets lui sont lisibles)",
-             "oui" if trusted(app) else "non — « Faire confiance à cette version » après l'avoir lue"),
+            ("validée (ses secrets lui sont lisibles, ses versions s'installent sans accord)",
+             "oui" if trusted(app) else "non — « Lui faire confiance » après avoir lu son code"),
             ("arrêtée par un opérateur", "oui" if app.held else "non"),
             ("en vigueur depuis", ctx.when(app.since) if app.since else "—"),
             ("dernier tour", _last_tick(name, ctx)),
@@ -278,9 +285,12 @@ def _head(s: ForgeState, frame: Frame, ctx: InspectContext, key: str) -> Head | 
         ("agenda", (app.schedule if app is not None else info.schedule if info is not None else "") or "manual"),
         ("dernier tour", _last_tick(key, ctx)),
     )
+    pages = tuple(_fiche_view(key, v) for v in info.views) if info is not None and not info.error else ()
+    # ses pages en onglets ; ses réglages et ce qui est technique derrière la roue (ADR 0104)
     return Head(key, title, subtitle=info.description if info is not None else "", badges=tuple(badges),
-                facts=facts, default_tab="vues" if info is not None and info.views and not info.error else "etat",
-                action_tabs=("etat", "code"), back=Ref("local", "/inspecteur/apps", "Toutes les apps"))
+                facts=facts, default_tab="vues" if pages else "etat", action_tabs=("etat", "code"),
+                back=Ref("local", "/inspecteur/apps", "Toutes les apps"), pages=pages, pages_tab="vues",
+                gear=("reglages", "etat", "code", "base", "journal", "vecu"))
 
 
 @FORGE.search("app")
@@ -343,13 +353,15 @@ def _inspect(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     blocks.append(Table(("app", "titre", Column("version", "num", detail=True), Column("agenda", detail=True), "état",
                          Column("promue", detail=True), "dernier tour", Column("signaux", detail=True)),
                         tuple(out), title="Ses apps", empty="Aucune app ne correspond à cette recherche." if query else "Elle n’a encore écrit aucune app.",
-                        pager=pager, caption="Un clic ouvre la fiche de l'app (état, vues, réglages, code, journal)."))
+                        pager=pager, caption="Un clic ouvre l'app : ses pages en onglets, ses réglages et le reste "
+                                             "derrière la roue, en haut à droite."))
     return blocks
 
 
 @FORGE.inspect("outils_apps", title="Outils de ses apps", section="outils", order=50,
-               description="Les outils que ses apps déclarent : elle les appelle par forge_call. Ils se règlent dans "
-                           "la Forge (l'app, sa promotion), pas ici.")
+               description="Les outils que ses apps déclarent : chacun est un outil à elle (« app_outil »), avec un "
+                           "outil « app_pages » pour lire leurs pages (ADR 0104). Ils se règlent dans la Forge (l'app, "
+                           "sa promotion), pas ici.")
 def _inspect_app_tools(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[Block]:
     port = ctx.ports.get("forge")
     if port is None:
@@ -361,17 +373,19 @@ def _inspect_app_tools(s: ForgeState, frame: Frame, ctx: InspectContext) -> list
             continue
         if app is None or not app.enabled or app.broken:
             state, tone = ("en panne", "danger") if app is not None and app.broken else ("arrêtée", "muted")
-        elif app.promoted:
-            state, tone = "sert partout où forge_call est offert", "ok"
+        elif app.promoted or not has_secrets(ctx.ports, info):
+            state, tone = "en conversation (devant qui s'occupe d'elle) et au travail", "ok"
         else:
-            state, tone = "sert seulement quand elle travaille", "info"
+            state, tone = "au travail ; en conversation une fois promue (elle a des secrets)", "info"
         for tool in info.tools:
-            rows.append(Row((_fiche(info.name), Text(tool.name, "mono"), Text(_clip(tool.description, 300)),
-                             Badge(state, tone)), href=_fiche(info.name) if APP_NAME.match(info.name) else None))
-    return [Table(("app", Column("outil", "fit"), "ce qu'il fait", "quand il sert"), tuple(rows),
+            rows.append(Row((_fiche(info.name), Text(f"{info.name}_{tool.name}", "mono"),
+                             Text(_clip(tool.description, 300)), Text(said_args(tool.args) or "aucun", "mono"),
+                             Badge(state, tone)),
+                            href=_fiche(info.name) if APP_NAME.match(info.name) else None))
+    return [Table(("app", Column("outil", "fit"), "ce qu'il fait", "arguments", "quand il sert"), tuple(rows),
                   title="Les outils de ses apps", empty="Aucune de ses apps ne déclare d'outil.",
-                  caption="Une app non promue ne sert que pendant son travail ; l'opérateur la promeut depuis sa "
-                          "fiche.")]
+                  caption="Une app qui a des secrets ne sert en conversation qu'une fois promue ; l'opérateur la "
+                          "promeut depuis sa fiche.")]
 
 
 @FORGE.inspect("app", title="App forgée", hidden=True, params=[("app", "app")])
@@ -469,9 +483,7 @@ async def _tab_views(s: ForgeState, frame: Frame, ctx: InspectContext) -> list[B
             known = ", ".join(v.key for v in info.views)
             blocks.append(Note(f"Vue « {_clip(wanted, 40)} » inconnue (au choix : {known}).", tone="warn"))
         spec = info.views[0]
-    if len(info.views) > 1:
-        blocks.append(Nav(tuple(NavItem(v.label, _fiche_view(name, v), active=v.key == spec.key)
-                                for v in info.views), title="Ses vues"))
+    # ses pages sont les onglets de sa fiche (ADR 0104) : plus de second menu ici
     values, notes = view_params(spec, ctx.params)
     blocks += [Note(n, tone="warn") for n in notes]
     if spec.description:
@@ -679,22 +691,37 @@ def _switch(state: str, message: str, *, vouch: bool = False):
 
 
 def _vouch(s: ForgeState, ctx: ActionContext) -> Any:
-    """« Cette version, je la valide » : ses secrets lui deviennent lisibles (jusqu'à la prochaine version)."""
+    """« Cette app, je la valide » : ses secrets lui deviennent lisibles, pour cette version et les suivantes (ADR
+    0105) — jusqu'à ce qu'un opérateur lui retire sa confiance."""
     app = s.apps.get(ctx.subject)
     return SWITCHED.draft(app=ctx.subject, state="trusted", reason="opérateur",
                           fingerprint=app.fingerprint if app is not None else "")
 
 
-@FORGE.action("valider", title="Faire confiance à cette version", args=NoArgs, emits=[SWITCHED], subject="app",
-              order=12, description="Ses réglages secrets ne se lisent que par une version qu'un opérateur a "
-              "validée : celle-ci, après l'avoir lue (onglet Code).",
+@FORGE.action("valider", title="Lui faire confiance", args=NoArgs, emits=[SWITCHED], subject="app",
+              order=12, description="Ses réglages secrets ne se lisent que par une app qu'un opérateur a validée "
+              "une fois, après avoir lu son code (onglet Code). Ensuite, ses nouvelles versions s'installent sans "
+              "te redemander.",
               available=lambda s, frame, key: (a := _in_life(s, key)) is not None and not trusted(a),
-              confirm="Faire confiance à cette version de l'app ? Elle lira ses réglages secrets et pourra les "
-                      "envoyer vers ses domaines.")
+              confirm="Faire confiance à cette app ? Elle lira ses réglages secrets, ses versions suivantes aussi, "
+                      "et pourra les envoyer sur Internet.")
 def _validate(s: ForgeState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
     if ctx.subject not in s.apps:
         raise Refused("Cette app n'est pas (encore) dans sa vie : « Recharger » l'y fait entrer.")
-    return Done(drafts=(_vouch(s, ctx),), message="Validée : cette version lit ses réglages secrets.")
+    return Done(drafts=(_vouch(s, ctx),), message="Validée : elle lit ses réglages secrets, et ses prochaines "
+                                                  "versions s'installeront sans accord.")
+
+
+@FORGE.action("mefiance", title="Ne plus lui faire confiance", args=NoArgs, emits=[SWITCHED], subject="app",
+              order=13, description="Ses secrets ne lui sont plus lisibles et sa promotion tombe ; sa prochaine "
+              "version attendra de nouveau ton accord.",
+              available=lambda s, frame, key: (a := _in_life(s, key)) is not None and trusted(a),
+              confirm="Retirer ta confiance à cette app ?")
+def _distrust(s: ForgeState, frame: Frame, args: Any, ctx: ActionContext) -> Done:
+    if ctx.subject not in s.apps:
+        raise Refused("Cette app n'est pas (encore) dans sa vie.")
+    return Done(drafts=(SWITCHED.draft(app=ctx.subject, state="untrusted", reason="opérateur"),),
+                message="Confiance retirée : ses secrets ne lui sont plus lisibles.")
 
 
 FORGE.action("activer", title="Activer", args=NoArgs, emits=[SWITCHED], subject="app", order=10,
@@ -706,11 +733,11 @@ FORGE.action("arreter", title="Arrêter", args=NoArgs, emits=[SWITCHED], subject
              available=lambda s, frame, key: (a := _in_life(s, key)) is not None and a.enabled and not a.broken,
              )(_switch("disabled", "Arrêtée."))
 FORGE.action("promouvoir", title="Promouvoir", args=NoArgs, emits=[SWITCHED], subject="app", order=20,
-             description="Ses outils servent aussi en conversation, pas seulement quand elle travaille (cette "
-                         "version seulement : une nouvelle version la fait retomber).",
+             description="Ses outils servent aussi en conversation, pas seulement quand elle travaille (ses "
+                         "versions suivantes gardent la promotion).",
              available=lambda s, frame, key: (a := _in_life(s, key)) is not None and not a.promoted,
-             confirm="Promouvoir cette version ? Ses outils serviront en conversation, et ses secrets lui seront "
-                     "lisibles.",
+             confirm="Promouvoir cette app ? Ses outils serviront en conversation, et ses secrets lui seront "
+                     "lisibles (ses versions suivantes comprises).",
              )(_switch("promoted", "Promue : ses outils servent en conversation.", vouch=True))
 FORGE.action("retrograder", title="Rétrograder", args=NoArgs, emits=[SWITCHED], subject="app", order=21,
              description="Ses outils ne servent plus que quand elle travaille.",
@@ -882,35 +909,10 @@ def _act_fields(s: ForgeState, frame: Frame, key: str, fixed: dict[str, str]) ->
 
 
 def _check(action: Any, data: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
-    """Les données d'une action, vérifiées au-delà du contrôle : présence, longueur, forme."""
-    out: dict[str, Any] = {}
-    errors: dict[str, str] = {}
-    kinds = {f.path: f for f in action.fields}
-    for rule in action.rules:
-        value = data.get(rule.key)
-        field = kinds.get(rule.key)
-        if field is not None and field.kind == "bool":
-            out[rule.key] = bool(value)
-            continue
-        empty = value is None or (isinstance(value, str) and not value.strip())
-        if empty:
-            if rule.required:
-                errors[rule.key] = "valeur requise"
-            out[rule.key] = None if field is not None and field.kind in ("int", "float", "select") else ""
-            continue
-        if field is not None and isinstance(value, int | float) and not isinstance(value, bool) and (
-                (field.lo is not None and value < field.lo) or (field.hi is not None and value > field.hi)):
-            errors[rule.key] = f"doit être entre {field.lo:g} et {field.hi:g}" if field.lo is not None \
-                and field.hi is not None else "hors de ses bornes"
-        elif isinstance(value, str):
-            if rule.max_length and len(value) > rule.max_length:
-                errors[rule.key] = f"trop long : {rule.max_length} caractères au plus"
-            elif rule.type == "email" and not EMAIL.match(value.strip()):
-                errors[rule.key] = "une adresse e-mail est attendue (nom@exemple.fr)"
-            elif rule.type == "url" and not URL.match(value.strip()):
-                errors[rule.key] = "une adresse http(s)://… est attendue"
-        out[rule.key] = value
-    return out, errors
+    """Les données d'une action, vérifiées au-delà du contrôle : présence, longueur, forme — la même vérification que
+    les arguments d'un outil d'app (``ports.forge.check_args``, ADR 0105). Un formulaire envoie ce qu'on y a laissé :
+    pas de défaut pour un champ vide, et les champs de la console (app, vue, action…) passent."""
+    return check_args(action.specs, data, defaults=False, strict=False)
 
 
 async def _act(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) -> Done:
@@ -1011,7 +1013,7 @@ async def _settle(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) ->
     app = s.apps.get(name)
     drafts = (_vouch(s, ctx),) if secret and app is not None and not trusted(app) else ()
     return Done(drafts=drafts, message=f"Réglages enregistrés ({labels}) : lus au prochain appel de l'app."
-                + (" Ses secrets sont confiés à cette version." if drafts else ""))
+                + (" Ses secrets lui sont confiés : elle est validée, ses versions suivantes aussi." if drafts else ""))
 
 
 FORGE.action("regler", title="Enregistrer les réglages", args=NoArgs, emits=[SWITCHED], fields=_settings_fields,

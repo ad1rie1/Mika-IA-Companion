@@ -10,7 +10,7 @@ projections, effets, vues d'inspecteur, invariants. Le registre
 from __future__ import annotations
 
 import enum
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, Generic, TypeVar
 
@@ -60,6 +60,23 @@ class ToolResult(BaseModel):
     #: des références opaques que le message qui suit emporte (un fichier préparé pour la personne) : la boucle
     #: les recueille, l'énoncé les porte, le transport les rend — sans qu'aucun d'eux sache ce qu'elles désignent
     attach: tuple[str, ...] = ()
+    #: ce que l'appel prouve d'un travail : vrai, il a produit quelque chose hors de sa tête (une app essayée qui
+    #: marche, un brouillon) ; faux, rien — quoi qu'en dise la règle de qui en juge (relire sa Forge, réactiver une
+    #: app) ; rien : cette règle décide (ADR 0104)
+    proof: bool | None = None
+
+
+def proving_tools(calls: Sequence[tuple[str, bool]], proofs: Sequence[bool | None],
+           rule: Callable[[str], bool]) -> tuple[str, ...]:
+    """Les outils réussis d'un épisode qui prouvent un travail, dans l'ordre et sans doublon : ce que chaque appel
+    déclare (``ToolResult.proof``), sinon ``rule(nom)`` — la règle de qui en juge (un but, un projet). ``proofs``
+    est aligné sur ``calls`` ; plus court (un appel d'avant), la règle décide."""
+    out: dict[str, None] = {}
+    for i, (name, ok) in enumerate(calls):
+        declared = proofs[i] if i < len(proofs) else None
+        if ok and (declared if declared is not None else rule(name)):
+            out[name] = None
+    return tuple(out)
 
 
 # ── Spécifications de contributions ───────────────────────────────────────

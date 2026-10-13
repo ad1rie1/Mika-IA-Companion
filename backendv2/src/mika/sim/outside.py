@@ -441,3 +441,21 @@ class FakeFeeds:
     async def article(self, entry_id: str) -> str:
         self.read.append(entry_id)
         return self.articles.get(entry_id, "")
+
+
+@dataclass(slots=True)
+class FakeWeb:
+    """Le web que voient ses apps (``api.http_get``) : un cours qui bouge un peu à chaque appel, et une panne qu'on
+    peut provoquer (``down``) — rien ne sort de la machine (ADR 0104)."""
+
+    down: bool = False
+    calls: list[str] = field(default_factory=list)
+    base: float = 100.0
+
+    def get(self, url: str) -> str:
+        self.calls.append(url)
+        if self.down:
+            raise RuntimeError("HTTP 503")
+        price = round(self.base + len(self.calls) * 0.5, 2)
+        return ('{"chart": {"result": [{"meta": {"regularMarketPrice": ' + str(price)
+                + ', "chartPreviousClose": 95.0}}]}}')

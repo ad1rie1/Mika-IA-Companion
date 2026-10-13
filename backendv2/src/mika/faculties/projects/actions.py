@@ -88,7 +88,8 @@ SCHEDULES = (("manual", "dès que possible"), ("demand", "sur demande (seulement
              ("cron:0 9 * * *", "chaque jour à 9 h"), ("cron:0 9 * * MON-FRI", "les jours ouvrés à 9 h"),
              ("cron:0 18 * * SUN", "le dimanche à 18 h"))
 #: les lots qu'on peut lui donner, en mots
-BUNDLE_WORDS = {"memory": "sa mémoire (souvenirs, croyances)", "email": "le courrier (lire, proposer des envois)",
+BUNDLE_WORDS = {"memory": "sa mémoire (souvenirs, croyances)", "mcp.web": "le web (chercher, lire des pages)",
+                "email": "le courrier (lire, proposer des envois)",
                 "rss": "ses flux RSS", "forge": "la Forge (écrire des apps)", "forge_apps": "ses apps forgées",
                 "camera": "la caméra"}
 _HHMM = re.compile(r"^(\d{1,2})(?:\s*[:h]\s*(\d{0,2}))?$")
@@ -169,8 +170,13 @@ def check_branch(branch: str) -> str:
     return raw
 
 
+def knob_of(bundle: str) -> str:
+    """Le nom de la case d'un lot (« mcp.web » → ``tool_web``)."""
+    return "tool_" + bundle.removeprefix("mcp.")
+
+
 def _bundles(args: Any) -> tuple[str, ...]:
-    return (*BASE_BUNDLES, *(b for b in EXTRA_BUNDLES if getattr(args, f"tool_{b}", False)))
+    return (*BASE_BUNDLES, *(b for b in EXTRA_BUNDLES if getattr(args, knob_of(b), False)))
 
 
 def _rhythm(args: Any, errors: dict[str, str]) -> tuple[str, int, int]:
@@ -227,6 +233,8 @@ class CreateArgs(BaseModel):
                               advanced=False, order=60, help=MODE_HELP)] = c.PERSONA
     tool_memory: Annotated[bool, Knob(label=_label("memory"), group="Son mode et ses outils",
                                       advanced=False, order=61, help=TOOL_HELP)] = True
+    tool_web: Annotated[bool, Knob(label=_label("mcp.web"), group="Son mode et ses outils",
+                                   advanced=False, order=62)] = True
     tool_email: Annotated[bool, Knob(label=_label("email"), group="Son mode et ses outils",
                                      advanced=False, order=62)] = False
     tool_rss: Annotated[bool, Knob(label=_label("rss"), group="Son mode et ses outils",
@@ -438,6 +446,7 @@ def _modify(s: ProjectsState, frame: Frame, args: ModifyArgs, ctx: ActionContext
 class ToolsArgs(BaseModel):
     tool_memory: Annotated[bool, Knob(label=_label("memory"), advanced=False, order=1,
                                       help=TOOL_HELP)] = False
+    tool_web: Annotated[bool, Knob(label=_label("mcp.web"), advanced=False, order=2)] = False
     tool_email: Annotated[bool, Knob(label=_label("email"), advanced=False, order=2)] = False
     tool_rss: Annotated[bool, Knob(label=_label("rss"), advanced=False, order=3)] = False
     tool_forge: Annotated[bool, Knob(label=_label("forge"), advanced=False, order=4)] = False
@@ -448,7 +457,7 @@ class ToolsArgs(BaseModel):
 
 def _tools_initial(s: ProjectsState, frame: Frame, key: str) -> dict[str, Any]:
     p = project_at(s, key)
-    return {f"tool_{b}": b in p.bundles for b in EXTRA_BUNDLES} if p is not None else {}
+    return {knob_of(b): b in p.bundles for b in EXTRA_BUNDLES} if p is not None else {}
 
 
 @PROJECTS.action("outils", title="Enregistrer ses outils", args=ToolsArgs, emits=[REFRAMED], subject="project",

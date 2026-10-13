@@ -5,8 +5,8 @@ peut pas faire.
 - une boucle infinie, une bombe d'expression régulière et une bombe mémoire
   sont arrêtées (tuées à leur délai, ou à leur limite) — et l'app repart à
   l'appel suivant ;
-- son stockage lui est propre et borné ; ``http_get`` ne sort que vers ses
-  domaines déclarés, jamais vers une adresse privée ;
+- son stockage lui est propre et borné ; son réseau est libre (ADR 0105) : tout
+  Internet, jamais une adresse privée ;
 - une écriture refusée ne change rien ; une version se remplace, se
   restaure ; sans bubblewrap, rien ne tourne.
 """
@@ -132,7 +132,7 @@ def context(api):
     assert fetched == ["https://api.exemple.fr/prix"] * 2
     write(h, 'def tick(api):\n    return api.http_get("http://169.254.169.254/latest")\n')
     blocked = go(h.call("essai", "tick"))
-    assert not blocked.ok and "allowed_domains" in blocked.error
+    assert not blocked.ok and "privée" in blocked.error  # libre sur Internet (ADR 0105), jamais chez elle
     # un domaine déclaré qui pointe vers une adresse privée : refusé quand même
     write(h, 'def tick(api):\n    return api.http_get("https://interne.exemple.fr/admin")\n',
           manifest="title: Essai\nallowed_domains: [interne.exemple.fr]\n")

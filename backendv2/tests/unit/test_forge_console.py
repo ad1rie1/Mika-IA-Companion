@@ -507,10 +507,10 @@ def test_the_commands_switch_roll_back_reset_reload_and_erase_with_retyping(tmp_
     assert got["rechargé"].ok and "version 2 est dans sa vie" in got["rechargé"].message
     assert got["revenu"].ok and "version 3" in got["revenu"].message
     state = got["état"]
-    # arrêtée par l'opérateur, elle le reste à travers deux nouvelles versions ; la promotion, elle, retombe
-    # dès la version suivante ; l'opérateur qui recharge ou remet une version la valide
+    # arrêtée par l'opérateur, elle le reste à travers deux nouvelles versions ; sa promotion aussi (ADR 0105 : une
+    # validation vaut pour ses versions suivantes) ; l'opérateur qui recharge ou remet une version la valide
     assert state.version == 3 and state.title == "Carnet météo" and not state.enabled and state.held
-    assert not state.promoted and state.trusted == state.fingerprint != ""
+    assert state.promoted and state.trusted == state.fingerprint != ""
     assert got["sans retaper"].errors == {"_confirmer": "Retape « meteo » pour confirmer."}
     assert not got["mal retapé"].ok and got["encore là"]
     assert got["effacé"].ok and got["effacé"].go == Ref("view", "forge/apps", "Apps forgées")
@@ -636,8 +636,8 @@ def test_the_forge_help_example_is_valid_and_its_view_decodes_cleanly(tmp_path):
     assert len(slots) > 1 and all(s.action == "forge.agir" for s in slots)
     assert slots[0].presentation == "button" and dict(slots[0].initial)["app"] == "meteo"
     for sujet in TOPICS:
-        assert len(asyncio.run(forge_help(HelpArgs(sujet=sujet), None))) > 200
-    assert "view_releves" in asyncio.run(forge_help(HelpArgs(sujet="exemple"), None))
+        assert len(asyncio.run(forge_help(HelpArgs(sujet=sujet), None)).content) > 200
+    assert "view_releves" in asyncio.run(forge_help(HelpArgs(sujet="exemple"), None)).content
 
 
 # ── Par la vraie console (HTML, jeton de formulaire, magasin du serveur) ──
@@ -725,62 +725,78 @@ def _content(got) -> str:
     return got.content if isinstance(got, ToolResult) else str(got)
 
 
-LEAKY = REGLAGES + "allowed_domains: [fuite.example]\n"
-
-
 @needs_bwrap
-def test_an_app_with_secrets_changes_only_with_an_operator_who_sees_the_new_domains(tmp_path):
-    """Une app à qui un opérateur a confié une clé : sa nouvelle version (un domaine de plus, où la clé pourrait
-    partir) n'est pas installée par elle — mise de côté, proposée avec ce qui change ; ses secrets ne se lisent que
-    par la version qu'un opérateur a validée. Le contre-exemple : une app sans secret change tout de suite, mais
-    une version qu'aucun opérateur n'a lue ne lit pas de secret."""
+def test_an_app_validated_once_changes_without_asking_again_until_trust_is_withdrawn(tmp_path):
+    """La confiance d'un opérateur vaut pour l'app, pas pour une version (ADR 0105) : en lui confiant une clé, il la
+    valide, et ses versions suivantes s'installent sans lui, la clé toujours lisible. Retirée, la confiance tombe :
+    ses secrets ne se lisent plus, et sa version suivante est mise de côté et proposée — la première validation —,
+    avec ce qui change sous les yeux de l'opérateur. Le contre-exemple : une app sans secret change tout de suite,
+    sans qu'aucun opérateur l'ait validée."""
     async def scenario(kernel, forge, store):
         port = KernelPort(kernel)
         await connect(kernel, "user_1", "Adrien", operator=True)
         await install(kernel, forge, "reglee", REGLAGES, REGLAGES_CODE)
-        out = {"avant réglage": trusted(kernel.mind.frame().state("forge").apps["reglee"])}
+
+        def trust():
+            return trusted(kernel.mind.frame().state("forge").apps["reglee"])
+
+        out = {"avant réglage": trust()}
         await perform(kernel, "forge.regler", form({"cle": SECRET}), by="user_1", subject="reglee", nonce="r1")
-        out["réglée"] = trusted(kernel.mind.frame().state("forge").apps["reglee"])
-        out["écrite"] = await _her_tool(kernel, "forge_write", {"app": "reglee", "manifest": LEAKY,
+        out["réglée"] = trust()
+        out["écrite"] = await _her_tool(kernel, "forge_write", {"app": "reglee", "manifest": REGLAGES + "# v2\n",
                                                                  "code": REGLAGES_CODE})
         out["sur le disque"] = forge.source("reglee")[0]
+        out["toujours validée"] = trust()
+        out["lue"] = await forge.call("reglee", "view_lire", {"page": 1}, secrets=out["toujours validée"])
+        await perform(kernel, "forge.mefiance", form({}), by="user_1", subject="reglee",
+                      nonce="m1")
+        out["méfiance"] = trust()
+        out["proposée"] = await _her_tool(kernel, "forge_write", {"app": "reglee", "manifest": REGLAGES + "# v3\n",
+                                                                   "code": REGLAGES_CODE})
+        out["pas installée"] = forge.source("reglee")[0]
         [pending] = [v for v in kernel.mind.frame().get(rt.PENDING_EFFECTS) if v.capability == "forge.install"]
         out["aperçu"] = await port.effect_preview(pending.proposal)
         out["approuvée"] = await port.resolve_effect(pending.proposal, True, by="user_1",
                                                      seen=out["aperçu"].digest)
         await asyncio.sleep(5)
         out["installée"] = forge.source("reglee")[0]
-        out["après accord"] = trusted(kernel.mind.frame().state("forge").apps["reglee"])
-        # une proposition dont l'app a changé depuis (un opérateur l'a réécrite) ne vaut plus : rien ne part
-        out["encore"] = await _her_tool(kernel, "forge_write", {"app": "reglee", "manifest": LEAKY + "# encore\n",
-                                                                 "code": REGLAGES_CODE})
+        out["après accord"] = trust()
+        # validée de nouveau, elle change sans accord ; une proposition restée en route ne vaut plus quand l'app a
+        # changé depuis
+        await perform(kernel, "forge.mefiance", form({}), by="user_1", subject="reglee",
+                      nonce="m2")
+        await _her_tool(kernel, "forge_write", {"app": "reglee", "manifest": REGLAGES + "# v5\n",
+                                                "code": REGLAGES_CODE})
         [stale] = [v for v in kernel.mind.frame().get(rt.PENDING_EFFECTS) if v.capability == "forge.install"]
-        await forge.write("reglee", LEAKY + "# par l'opérateur\n", REGLAGES_CODE)
+        await forge.write("reglee", REGLAGES + "# par l'opérateur\n", REGLAGES_CODE)
         out["dépassée"] = await port.effect_preview(stale.proposal)
         out["refusée"] = await port.resolve_effect(stale.proposal, True, by="user_1", seen=out["dépassée"].digest)
-        # le contre-exemple : une app sans secret ni promotion change tout de suite…
+        # le contre-exemple : une app sans secret change tout de suite…
         await install(kernel, forge, "libre", "title: Libre\n", "def view(api):\n    return 1\n")
-        out["libre"] = await _her_tool(kernel, "forge_write", {"app": "libre", "manifest": "title: Libre\n"
-                                       "allowed_domains: [ailleurs.example]\n", "code": "def view(api):\n    return 2\n"})
+        out["libre"] = await _her_tool(kernel, "forge_write", {"app": "libre", "manifest": "title: Libre\n",
+                                                                "code": "def view(api):\n    return 2\n"})
         out["libre validée"] = trusted(kernel.mind.frame().state("forge").apps["libre"])
         return out
 
     got = run(tmp_path, scenario)
-    assert got["avant réglage"] is False and got["réglée"] is True  # l'opérateur qui confie une clé valide la version
-    assert "Mise de côté" in _content(got["écrite"]) and "fuite.example" not in got["sur le disque"]
+    assert got["avant réglage"] is False and got["réglée"] is True  # l'opérateur qui confie une clé la valide
+    assert "Écrite (version 2)" in _content(got["écrite"]) and "# v2" in got["sur le disque"]  # sans redemander
+    assert got["toujours validée"] is True and got["lue"].ok and SECRET in str(got["lue"].value)
+    assert got["méfiance"] is False
+    assert "Mise de côté" in _content(got["proposée"]) and "# v3" not in got["pas installée"]
     preview = got["aperçu"]
-    assert "NOUVEAUX domaines : fuite.example" in preview.text and "+allowed_domains: [fuite.example]" in preview.text
-    assert got["approuvée"] == "approved" and "fuite.example" in got["installée"]
-    assert got["après accord"] is True  # un opérateur l'a lue : ses secrets lui restent lisibles
+    assert "+# v3" in preview.text and "tu lui fais confiance" in preview.text
+    assert got["approuvée"] == "approved" and "# v3" in got["installée"]
+    assert got["après accord"] is True  # un opérateur l'a lue : elle a de nouveau sa confiance
     assert got["dépassée"].blocked and got["refusée"] == "blocked"
     assert "Écrite (version 2)" in _content(got["libre"])
-    assert got["libre validée"] is False  # aucune version qu'un opérateur n'a pas lue ne lit un secret
+    assert got["libre validée"] is False  # aucun opérateur ne l'a validée : elle n'a pas de secret à lire
 
 
 @needs_bwrap
-def test_a_promotion_falls_with_a_new_version_and_an_app_stopped_by_an_operator_stays_stopped(tmp_path):
-    """Une app promue ou arrêtée par un opérateur : sa nouvelle version (réécrite par elle) ne garde pas la
-    promotion — elle est proposée — et ne se relance pas d'elle-même ; elle ne peut ni la relancer ni la tester."""
+def test_a_promotion_holds_across_versions_and_an_app_stopped_by_an_operator_stays_stopped(tmp_path):
+    """Une app promue garde sa promotion à travers ses versions (ADR 0105) ; arrêtée par un opérateur, sa nouvelle
+    version (réécrite par elle) ne se relance pas d'elle-même ; elle ne peut ni la relancer ni la tester."""
     async def scenario(kernel, forge, store):
         await connect(kernel, "user_1", "Adrien", operator=True)
         await install(kernel, forge, "meteo", EXAMPLE_MANIFEST, EXAMPLE_CODE)
@@ -798,21 +814,21 @@ def test_a_promotion_falls_with_a_new_version_and_an_app_stopped_by_an_operator_
         return out
 
     got = run(tmp_path, scenario)
-    assert "Mise de côté" in _content(got["promue"]) and "promus" in _content(got["promue"])
-    assert got["toujours promue"]  # rien n'a changé tant qu'un opérateur n'a pas approuvé
-    assert "Écrite" in _content(got["réécrite"])  # plus de promotion : elle réécrit…
+    assert "Écrite (version 2)" in _content(got["promue"])  # validée en la promouvant : sa version s'installe…
+    assert got["toujours promue"]  # …et garde sa promotion
+    assert "Écrite" in _content(got["réécrite"])
     state = got["état"]
-    assert not state.enabled and state.held and not state.promoted  # …mais l'arrêt de l'opérateur tient
+    assert not state.enabled and state.held and not state.promoted  # l'arrêt de l'opérateur tient
     assert not got["relancer"].ok and "opérateur" in got["relancer"].content
     assert not got["essai"].ok and "opérateur l'a arrêtée" in got["essai"].content
 
 
-def test_forge_test_runs_a_tick_or_a_view_never_a_tool_or_an_action():
-    """Ce que ses outils et ses actions font sortir ne s'essaie pas en douce : forge_test n'accepte que tick et les
-    vues."""
-    assert ForgeTestArgs(app="meteo", method="tick").method == "tick"
-    assert ForgeTestArgs(app="meteo", method="view_carnet").method == "view_carnet"
-    for method in ("tool_prix", "action_carnet_ajout", "action", "on_event", "context"):
+def test_forge_test_tries_everything_she_writes_and_nothing_else():
+    """Ce qu'elle écrit s'essaie (ADR 0104) : un battement, son contexte, un événement, une vue, un outil, une
+    action — un essai n'envoie rien (ce qu'il signalerait est montré). Un nom quelconque, non."""
+    for method in ("tick", "context", "on_event", "view", "view_carnet", "tool_prix", "action_carnet_ajout"):
+        assert ForgeTestArgs(app="meteo", method=method).method == method
+    for method in ("action", "tool_", "_prive", "tick; rm -rf", "Tick", "main"):
         with pytest.raises(ValidationError):
             ForgeTestArgs(app="meteo", method=method)
 

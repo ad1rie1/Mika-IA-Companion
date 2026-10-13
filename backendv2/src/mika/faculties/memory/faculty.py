@@ -846,7 +846,8 @@ def _promised(s: MemoryState, e, cx) -> MemoryState:
     due, implicit = e.data.due, e.data.implicit_due
     if due is None:
         due, implicit = e.at + round(params(cx.params).promise_horizon_days * DAY), True
-    promise = c.PendingPromise(e.seq, e.data.to, due, e.at, implicit, all_day=e.data.all_day and not implicit)
+    promise = c.PendingPromise(e.seq, e.data.to, due, e.at, implicit, all_day=e.data.all_day and not implicit,
+                               work=e.data.work, text_ref=e.data.text.ref or "", sensitivity=e.data.sensitivity)
     return replace(s, items=s.items + 1, promises=s.promises.set(e.seq, promise))
 
 

@@ -37,6 +37,7 @@ from mika.faculties.projects.faculty import (
     params,
     pick,
     rank,
+    run_bundles,
     runs_today,
     subject_of,
     window_opens,
@@ -116,7 +117,7 @@ def _run(s: ProjectsState, frame: Frame) -> list[Candidate]:
         out.append(Candidate(
             kind_of(p), project_target(p.id), c.RUN, round(evidence, 4), resources=frozenset({c.run_lease(p.id)}),
             guards=(_still(p.id),),
-            args=FrozenDict({"bundles": ",".join(p.bundles), "subject": subject_of(p.id, target.id)})))
+            args=FrozenDict({"bundles": ",".join(run_bundles(p)), "subject": subject_of(p.id, target.id)})))
     return out
 
 
@@ -300,12 +301,13 @@ def _needy(o: Objective, now: int, pm: Any) -> bool:
                   reads=[identity_c.OWNERS, identity_c.IS_OWNER, identity_c.HANDLES, identity_c.REACHABLE,
                          presence_c.PRESENT, identity_c.IDENTITY])
 def _need(s: ProjectsState, frame: Frame) -> list[Candidate]:
-    """« J'ai besoin de toi pour… » : un objectif d'un projet confié bloque, ou attend quelque chose de qui l'a
-    confié — elle le lui dit (une fois, quelques tentatives au plus), dans les deux modes."""
+    """« J'ai besoin de toi pour… » : un objectif bloque, ou attend quelque chose (une clé, un accord, un outil) — elle
+    le dit à qui l'a confié, ou, pour un projet à elle, à qui s'occupe d'elle (une fois, quelques tentatives au
+    plus), dans les deux modes. Un projet à elle qui bloquait faute d'un accès ne demandait rien (ADR 0104)."""
     pm = params(frame.env.params_of("projects", frame.root))
     out = []
     for p in sorted(s.projects.values(), key=lambda p: p.id):
-        if p.status != c.ACTIVE or p.authority != c.USER:
+        if p.status != c.ACTIVE:
             continue
         o = next((x for x in p.objectives if _needy(x, frame.now, pm)), None)
         reader = _reader(p, frame) if o is not None else None

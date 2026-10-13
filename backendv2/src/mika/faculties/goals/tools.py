@@ -51,7 +51,7 @@ from mika.faculties.goals.faculty import (
 )
 from mika.kernel.clock import MINUTE, instant, local
 from mika.kernel.events import Content
-from mika.kernel.faculty import ToolResult
+from mika.kernel.faculty import ToolResult, proving_tools
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, Superseded
 from mika.vocab.episodes import Kind, goal_of
@@ -75,6 +75,15 @@ def proves(ctx: Any, name: str) -> bool:
         return False
     spec = ctx.mind.registry.tools.get(name) if getattr(ctx, "mind", None) is not None else None
     return spec is not None and spec.bundle not in INNER_BUNDLES
+
+
+def judge(ctx: Any, g: Goal) -> Any:
+    """La règle qui dit si un outil prouve un travail sur ce but. Une réparation ne se prouve que par ce qu'un outil
+    déclare (l'app réécrite et essayée, ADR 0104) : chercher sur le web ce que la source est devenue n'est pas encore
+    l'avoir réparée (ADR 0105)."""
+    if g.origin == c.FROM_REPAIR:
+        return lambda name: False
+    return lambda name: proves(ctx, name) or (name == REFLECT and by_reflecting(g))
 
 
 def by_reflecting(g: Goal) -> bool:
@@ -163,8 +172,7 @@ async def report_step(args: ReportArgs, ctx: Any) -> Any:
         return _gone()
     if any(name == REPORT and ok for name, ok in ctx.calls):
         return ToolResult(ok=False, content=phrase("goals.tools.report.already"))
-    worked = tuple(sorted({name for name, ok in ctx.calls if ok and (proves(ctx, name) or
-                                                                       (name == REFLECT and by_reflecting(g)))}))
+    worked = tuple(sorted(proving_tools(ctx.calls, getattr(ctx, "proofs", ()), judge(ctx, g))))
     if last_session(g, ctx) and args.verdict in (c.CONTINUE, c.WAIT) and (g.evidence + len(worked)) > 0:
         # sa dernière séance (une réflexion, une rêverie : la seule) : ce qu'elle a écrit la clôt, même si le modèle
         # dit qu'il reprendra — il n'y aura pas d'autre séance (sonde réelle du 2026-10-03 : « continue » après

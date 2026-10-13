@@ -21,6 +21,7 @@
   {% if head_actions|selectattr('danger')|list %}<details class="action-overflow"><summary class="btn quiet">Autres actions</summary><div class="toolbar action-overflow-panel">{% for a in head_actions if a.danger %}{{ action_button(a) }}{% endfor %}</div></details>{% endif %}
 </div>
 {% endif %}
+{% if gear %}<details class="gear-menu{{ ' on' if gear|selectattr('on')|list }}"><summary class="btn quiet" title="Réglages et détails" aria-label="Réglages et détails"><span aria-hidden="true">⚙</span> Réglages</summary><nav class="gear-panel" aria-label="Réglages et détails">{% for g in gear %}<a class="{{ 'on' if g.on }}" href="{{ g.href }}"{% if g.on %} aria-current="page"{% endif %}>{{ g.title }}</a>{% endfor %}</nav></details>{% endif %}
 </div>
 {% for m in messages or [] %}<div class="flash {{ {'ko': 'danger', 'ok': 'ok'}.get(m[0], m[0]) }}" role="status">{{ m[1] }}</div>{% endfor %}
 {% if view_description %}<p class="view-description">{{ view_description }}</p>{% endif %}

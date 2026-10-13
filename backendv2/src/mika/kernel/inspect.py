@@ -486,6 +486,12 @@ class Head:
     default_tab: str = ""
     #: Vide : actions communes ; sinon, seulement sur ces onglets de gestion.
     action_tabs: tuple[str, ...] = ()
+    #: les pages de cet objet à lui (celles qu'une app s'est construites) : chacune devient un onglet, à la place de
+    #: l'onglet ``pages_tab`` (ADR 0104)
+    pages: tuple[Ref, ...] = ()
+    pages_tab: str = ""
+    #: les onglets rangés derrière la roue, en haut à droite (ses réglages, ce qui est technique), dans cet ordre
+    gear: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
