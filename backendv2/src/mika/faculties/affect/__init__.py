@@ -65,7 +65,8 @@ AFFECT = Faculty("affect", state=AffectState, init=lambda p: AffectState(), para
                  # sa posture le retient (ADR 0100)
                  # 8 : un message qui la tire du sommeil la réveille aussi ici (une nuit coupée allège en deux fois),
                  # ses nuits datées de l'instant du croisement (ADR 0102)
-                 state_version=8, retired_params=("declared_window_us",))
+                 # 9 : sa propriétaire la touche davantage (``social.WEIGHT``, ADR 0107)
+                 state_version=9, retired_params=("declared_window_us",))
 #: ni une connaissance ni une inconnue : sa tendresse s'y cache (le masque, au-dessus du milieu)
 _TENDER_TO = frozenset({social_c.FRIEND, social_c.CLOSE})
 
@@ -81,7 +82,7 @@ def _clockwork(cx: Any) -> ph.Clockwork:
     return ph.Clockwork(cx.tz, cx.facts.get(body_c.RHYTHM))
 
 
-@AFFECT.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, body_c.RHYTHM, social_c.CLOSENESS])
+@AFFECT.reducer(rt.UTTERANCE, reads=[identity_c.PERSON, body_c.RHYTHM, social_c.CLOSENESS, social_c.WEIGHT])
 def _declared(s: AffectState, e, cx) -> AffectState:
     d = e.data
     if d.visible:
@@ -97,6 +98,9 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     # quelqu'un qu'elle ne peut pas reconnaître (une adresse jetable) la touche comme une inconnue, jamais davantage
     level = (cx.facts.get(social_c.CLOSENESS(key)) if is_identifiable(d.target) else social_c.STRANGER) \
         if d.target else ""
+    # ce que la personne compte au-delà de leur lien (``social.WEIGHT``) : sa propriétaire la touche davantage, son
+    # humeur comme sa posture envers elle (ADR 0107)
+    counts = cx.facts.get(social_c.WEIGHT(key)) if d.target and is_identifiable(d.target) else 1.0
     # ce que le modèle a lu de la personne (ADR 0093) : des mots qui la blessent ou une déception (ADR 0107), un
     # compliment, un merci
     their = reading.Reading.decode(d.annotation(expression_c.READING_ANNOTATION))
@@ -112,7 +116,7 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     gain = min(p.mood_gain_cap, ph.mood_gain(declared.intensity, p) * weight)
     if level:
         # ce qu'un inconnu lui fait vivre la touche moins que ce que vit un proche
-        gain = min(p.mood_gain_cap, gain * p.bleed(level))
+        gain = min(p.mood_gain_cap, gain * p.bleed(level) * counts)
     if gain > 0:
         # toutes ses facettes (« triste 0,6, anxieuse 0,3 »), pas seulement la plus forte (ADR 0093)
         mood = ph.push_mood(mood, ph.mood_target_of(mood, declared, p), gain, p,
@@ -123,7 +127,7 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     stance = s.stances.get(key) or ph.new_stance(e.at, p, cw)
     stance = ph.advance_stance(stance, e.at, p, cw)
     stance = ph.push_stance(stance, ph.stance_target_of(stance, declared),
-                            ph.resonant_gain(ph.blend(A.ORIGIN, declared.all), p) * weight)
+                            ph.resonant_gain(ph.blend(A.ORIGIN, declared.all), p) * weight * counts)
     recent = (*stance.recent, (e.at, declared.emotion.value))[-ph.RECENT_IMPULSES:]
     stance = replace(stance, declared=declared.encode(), declared_at=e.at, declared_reply=d.kind == Kind.REPLY,
                      recent=recent)

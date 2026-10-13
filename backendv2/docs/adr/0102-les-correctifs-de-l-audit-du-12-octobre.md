@@ -64,7 +64,8 @@ bas de cette page.
 - **Les manques, à trancher par la propriétaire :**
   - blessée et triste, la relation refroidit sans rancune (`raw_hostility` exige une dominance) ;
   - des excuses d'un autre jour ne sont lues qu'au-delà d'une hostilité de 0,05 ;
-  - sa propriétaire ne pèse pas plus qu'une proche dans ses conversations (`social.WEIGHT` n'est pas lu par l'affect) ;
+  - sa propriétaire ne pèse pas plus qu'une proche dans ses conversations (`social.WEIGHT` n'est pas lu par l'affect ;
+    fait, ADR 0107) ;
   - une tristesse sans insulte compte toujours comme de l'empathie (une déception lue par le modèle blesse désormais,
     ADR 0107) ;
   - des excuses ne lèvent ni le repli ni la méfiance née de la peur ;

@@ -26,8 +26,21 @@ La propriétaire l'a trouvé juste et a demandé de corriger quatre écarts entr
   l'exemple de la consigne les supprime mais lui fait oublier la syntaxe `geste : …` (vraies insultes 3/7) : l'exemple
   reste.
 
+**Décision 2 : sa propriétaire la touche davantage.**
+- Ce que ses propres répliques font à son humeur ne dépendait que de la proximité (une proche : ×1,2). Le poids de sa
+  propriétaire (`social.WEIGHT`, 1,3 au milieu, dérivé du dévouement) existait, mais seules la contagion, les besoins
+  et l'attention le lisaient. La propriétaire avait dit : elle la touche plus qu'une proche, y compris quand elle la
+  fâche.
+- L'affect lit ce poids : le pas de son humeur (sous son plafond, 0,5) et celui de sa posture envers la personne en
+  sont multipliés. L'ancre de la relation garde son rythme : ce qui s'installe avec sa propriétaire ne va pas plus vite.
+- Les évaluations relationnelles envers elle (un retour, une jalousie, une contagion) le pesaient déjà à leur source :
+  elles ne sont pas pesées deux fois.
+
 **Conséquences.**
-- Cible : `test_reading.py::test_sad_because_of_her_cools_the_relation_sad_with_her_brings_closer`, rouge quand
-  l'affect ne lit que « blessant » ou quand l'estime prend la déception pour un merci (mutations détectées).
-- Pas de nouvelle version de tranche pour ce point : les annotations déjà au journal portent le geste rangé à l'époque,
-  qui ne pouvait pas être « décevant ».
+- Cibles, rouges sur le code d'avant (mutations détectées) :
+  - `test_reading.py::test_sad_because_of_her_cools_the_relation_sad_with_her_brings_closer`, quand l'affect ne lit
+    que « blessant » ou quand l'estime prend la déception pour un merci ;
+  - `test_temperament_paths.py::test_devotion_what_her_owner_says_to_her_moves_her_more_than_a_close_friend`, quand
+    l'humeur ou la posture oublie le poids.
+- Versions : `affect` v9. Pas de version pour la déception : les annotations déjà au journal portent le geste rangé à
+  l'époque, qui ne pouvait pas être « décevant ».

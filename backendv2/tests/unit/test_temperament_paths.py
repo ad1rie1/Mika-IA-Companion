@@ -466,6 +466,34 @@ def test_devotion_her_owner_counts_more_and_never_less_than_a_close_friend(tmp_p
     assert {other for _owner, other in got.values()} == {1.0}
 
 
+def test_devotion_what_her_owner_says_to_her_moves_her_more_than_a_close_friend(tmp_path):
+    """La même réplique fâchée, à sa propriétaire et à une proche (ADR 0107) : son humeur et sa posture bougent
+    davantage avec sa propriétaire, d'autant plus qu'elle lui est dévouée ; avec une proche, son dévouement n'y est
+    pour rien."""
+    def talk_to(handle: str):  # type: ignore[no-untyped-def]
+        async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            await connect(kernel, "user_2", "Alice")
+            for h in ("user_1", "user_2"):
+                await befriend(kernel, h, social_c.CLOSE)
+            await say(kernel, voice, handle, "[EMOTION: angry 0.6]")
+            m = fact(kernel, affect_c.MOOD)
+            return A.distance(m.position, m.home), fact(kernel, affect_c.STANCE(handle)).felt_intensity
+        return scenario
+
+    got = {}
+    for name, t in (("milieu", T.Temperament()), ("devouee", T.Temperament(devotion=T.HIGHEST))):
+        for who, handle in (("proprietaire", "user_1"), ("proche", "user_2")):
+            d = tmp_path / f"{name}-{who}"
+            d.mkdir()
+            got[name, who] = live(d, t, talk_to(handle))
+    for name in ("milieu", "devouee"):
+        owner, close = got[name, "proprietaire"], got[name, "proche"]
+        assert owner[0] > close[0] and owner[1] > close[1], name  # humeur et posture
+    assert got["devouee", "proprietaire"][0] > got["milieu", "proprietaire"][0]
+    assert abs(got["devouee", "proche"][0] - got["milieu", "proche"][0]) < 1e-9
+
+
 # ── elle-même ─────────────────────────────────────────────────────────────
 
 
