@@ -358,9 +358,17 @@ def _source(ports: Mapping[str, Any]) -> tuple[list[ToolSpec], dict[str, str]]:
 class Watch:
     """Rejoindre et relister les serveurs actifs : un outil changé est suspendu, un serveur revenu reprend."""
 
+    def __init__(self) -> None:
+        #: le premier passage, fixé à la première lecture : « maintenant + une minute » relu à chaque réveil de
+        #: l'ordonnanceur reculait sans cesse — il ne passait jamais, et un serveur tombé au démarrage ne revenait
+        #: pas (sonde du 2026-10-13)
+        self.first: int | None = None
+
     def next_due(self, s: McpState, frame: Frame, last_run: int | None) -> int | None:
         if last_run is None:  # le premier passage peu après le démarrage : les serveurs ont été joints entre-temps
-            return frame.now + FIRST_WATCH
+            if self.first is None:
+                self.first = frame.now + FIRST_WATCH
+            return self.first
         return max(frame.now, last_run + WATCH_EVERY)
 
     async def run(self, ctx: Any) -> None:

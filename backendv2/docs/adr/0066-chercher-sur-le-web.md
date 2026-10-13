@@ -57,3 +57,9 @@ test_web_plugin.py` (dans la vraie cage, sans réseau : joint et offert sans acc
 puis réactivé avec une page à la fois), `tests/protocol/test_web_plugin_settings.py` (le vrai serveur : la page de
 ses paramètres, ses outils au registre au démarrage, partis à la désactivation, revenus — l'abonnement aux
 paramètres vérifié par mutation).
+
+**Suite (2026-10-13, ADR 0105).** Sous `mika serve`, le serveur web ne démarrait jamais : uvicorn prend uvloop d'office
+(installé par `uvicorn[standard]`), et sous uvloop `pasta` sort aussitôt, en silence ; les tests tournaient sur la
+boucle asyncio. `serve` lance uvicorn avec `loop="asyncio"`. Et `mcp.watch` recalculait son premier passage
+(« maintenant + une minute ») à chaque réveil de l'ordonnanceur — il ne passait jamais : un serveur tombé au
+démarrage n'était jamais rejoint. Son échéance est fixée à la première lecture.

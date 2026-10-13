@@ -166,3 +166,38 @@ def test_no_port_no_tool(tmp_path):
             await kernel.stop()
 
     assert run_virtual(clock, main) == []
+
+
+# ── Ses serveurs rejoints pour de vrai (sonde du 2026-10-13) ──────────────
+
+
+def test_the_first_watch_is_fixed_once_and_does_not_slide_with_each_wake():
+    """« Maintenant + une minute », relu à chaque réveil de l'ordonnanceur, reculait sans cesse : le premier passage
+    n'arrivait jamais, et un serveur tombé au démarrage ne revenait pas. Fixé à la première lecture, il arrive."""
+    from types import SimpleNamespace
+
+    from mika.kernel.clock import MINUTE
+    from mika.plugins.mcp import FIRST_WATCH, WATCH_EVERY, Watch
+
+    watch = Watch()
+    first = watch.next_due(None, SimpleNamespace(now=1_000), None)
+    for now in (1_000 + 10, 1_000 + 30 * 1_000_000, 1_000 + FIRST_WATCH - 1):
+        assert watch.next_due(None, SimpleNamespace(now=now), None) == first == 1_000 + FIRST_WATCH
+    assert watch.next_due(None, SimpleNamespace(now=first + 5), first + 5) == first + 5 + WATCH_EVERY
+    assert FIRST_WATCH == MINUTE
+
+
+def test_serve_runs_on_the_asyncio_loop_where_pasta_stays_alive():
+    """Sous uvloop (que prend uvicorn d'office quand il est installé), pasta sort aussitôt : un serveur MCP au réseau
+    isolé — son serveur web — ne démarrait jamais. ``serve`` lance uvicorn sur la boucle asyncio (lu dans l'AST)."""
+    import ast
+    import inspect
+
+    from mika.app import server
+
+    tree = ast.parse(inspect.getsource(server.serve))
+    calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+             and n.func.attr == "run" and isinstance(n.func.value, ast.Name) and n.func.value.id == "uvicorn"]
+    assert len(calls) == 1
+    loop = {k.arg: k.value for k in calls[0].keywords}.get("loop")
+    assert isinstance(loop, ast.Constant) and loop.value == "asyncio"

@@ -573,6 +573,10 @@ def serve(*, host: str = "127.0.0.1", port: int = 8001, data: Path = Path("data/
     # un arrêt (SIGTERM) laisse 20 s aux connexions, puis le cycle de vie arrête le noyau. Les en-têtes de
     # mandataire ne sont crus que derrière un mandataire déclaré (local) ; ailleurs, l'adresse vue fait foi.
     # ``log_config=None`` : les journaux d'uvicorn passent par les nôtres (et leur masque des secrets).
-    uvicorn.run(app, host=host, port=port, ws_max_size=protocol.MAX_FRAME_BYTES, log_level="info",
+    # ``loop="asyncio"`` : uvloop (qu'installe uvicorn[standard], et qu'uvicorn prend d'office) donne aux processus
+    # qu'elle lance des sockets pour entrée et sortie, pas des tubes ; pasta, qui isole le réseau d'un serveur MCP
+    # (son serveur web, ADR 0066), sort alors aussitôt, sans un mot — le web ne lui était jamais offert (sonde du
+    # 2026-10-13, ADR 0105).
+    uvicorn.run(app, host=host, port=port, ws_max_size=protocol.MAX_FRAME_BYTES, log_level="info", loop="asyncio",
                 ws_ping_timeout=WS_PING_TIMEOUT_S, timeout_graceful_shutdown=20, log_config=None,
                 proxy_headers=behind_proxy, forwarded_allow_ips="127.0.0.1,::1" if behind_proxy else None)
