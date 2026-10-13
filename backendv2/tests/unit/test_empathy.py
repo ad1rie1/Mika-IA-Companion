@@ -88,6 +88,38 @@ async def test_the_reread_says_what_the_person_feels_and_what_she_feels():
     db.conn.close()
 
 
+async def test_what_moves_strongly_is_kept_better():
+    """Un moment chargé se garde mieux (ADR 0107) : ce que la relecture juge anodin (1) mais vécu fortement — par la
+    personne ou par elle — monte au moins à « important », souvenir, croyance et moment ; vécu sans force, il reste
+    anodin ; et une importance déjà haute ne baisse pas."""
+    said = (alice_says("mon frère a eu un accident, il va bien mais j'ai eu tellement peur"),)
+    ex = Extraction(
+        souvenirs=[XSouvenir(texte="Alice a eu très peur pour son frère", personnes=["P1"], messages=[10000],
+                             importance=1, ressenti={"peur": 0.9})],
+        croyances=[XCroyance(texte="Le frère d'Alice a eu un accident", personnes=["P1"], messages=[10000],
+                             source="P1", importance=1, mon_ressenti={"inquiétude": 0.8})],
+        evenements=[XEvenement(texte="Le repas chez ses parents", quand="2026-10-12", personnes=["P1"],
+                               messages=[10000], importance=1, ressenti={"soulagement": 0.4}),
+                    XEvenement(texte="Le match de son frère", quand="2026-10-14", personnes=["P1"],
+                               messages=[10000], importance=1, ressenti={"excitation": 0.9})])
+    db = Store()
+    got = await drafts(db, ex, said)
+    db.conn.close()
+    out = {d.type.name: d.data for d in got}
+    moments = {str(d.data.text.text): d.data.importance for d in got if d.type.name == mc.EVENT_NOTED.name}
+    p = MemoryParams()
+    assert out[mc.REMEMBERED.name].importance == p.charged_importance  # la peur de la personne
+    assert out[mc.BELIEVED.name].importance == p.charged_importance  # sa propre inquiétude
+    assert moments["Le match de son frère"] == p.charged_importance  # attendu avec excitation
+    assert moments["Le repas chez ses parents"] < p.charged_importance  # un soulagement léger : rien de plus
+    loud = Extraction(souvenirs=[XSouvenir(texte="Alice a eu très peur pour son frère", personnes=["P1"],
+                                           messages=[10000], importance=4, ressenti={"peur": 0.9})])
+    db = Store()
+    (kept,) = [d.data for d in await drafts(db, loud, said) if d.type.name == mc.REMEMBERED.name]
+    db.conn.close()
+    assert kept.importance > p.charged_importance  # marquant le reste
+
+
 # ── Une confidence tue : ce que la personne en ressent ──────────────────────
 
 

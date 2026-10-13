@@ -897,6 +897,15 @@ def _painful(ev: XEvenement) -> bool:
     return _felt_valence(ev) < -SIGN or bool(_DEATH.search(fold(ev.texte)))
 
 
+def charged(importance: float, felt: Sequence[tuple[str, float]], empathy: Sequence[tuple[str, float]], *,
+            from_: float, floor: float) -> float:
+    """Ce qu'un élément pèse quand une émotion forte l'accompagne (ADR 0107) : au moins ``floor`` dès qu'une facette
+    de ce que la personne ressent, ou de ce qu'elle-même en ressent, atteint ``from_`` — un moment chargé se garde
+    mieux. L'émotion est celle que la relecture a jugée, jamais devinée dans le texte."""
+    strongest = max((x for _e, x in (*felt, *empathy)), default=0.0)
+    return max(importance, floor) if strongest >= from_ else importance
+
+
 def moment_importance(ev: XEvenement) -> float:
     """Ce qu'un moment pèse : ce qu'en dit le modèle, et au moins « important » pour ce qui l'est à coup sûr (un
     entretien, un examen, une opération, un mariage) ; « marquant » pour une date qui revient chaque année et qui fait

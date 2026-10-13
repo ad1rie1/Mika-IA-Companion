@@ -46,6 +46,16 @@ La propriétaire l'a trouvé juste et a demandé de corriger quatre écarts entr
 - `Consolidate._lies` devient `_her_lines` : une seule lecture des événements de ses répliques donne le mensonge, le
   récit sans nom et la balise. `facet_words` passe de `recall` à `extraction`, qui en a besoin la première.
 
+**Décision 4 : un moment chargé se garde mieux.**
+- L'oubli ignorait les ressentis : seule l'importance notée de 1 à 4 par la relecture comptait, et une conversation
+  vécue avec une peur ou une joie fortes s'endormait comme une anecdote si la relecture la disait anodine.
+- Quand une facette de ce que la personne ressent, ou de ce qu'elle-même en ressent, atteint `charged_from` (0,7),
+  l'importance d'un souvenir, d'une croyance ou d'un moment monte au moins à `charged_importance` (0,7, « important »).
+  L'importance plus haute de la relecture l'emporte ; 0 désactive (`extraction.charged`, réglages « Oubli »).
+- Le seuil reste sous celui des moments marquants (0,9) : un ressenti fort ne crée pas à lui seul des « temps durs ».
+- Ce qui ne porte pas de ressenti ne change pas : ses notes sur elle-même, un moment vécu à travers quelqu'un (son
+  importance est réglée à part), un souvenir né de la nuit ou d'un mensonge.
+
 **Conséquences.**
 - Cibles, rouges sur le code d'avant (mutations détectées) :
   - `test_reading.py::test_sad_because_of_her_cools_the_relation_sad_with_her_brings_closer`, quand l'affect ne lit
@@ -53,6 +63,8 @@ La propriétaire l'a trouvé juste et a demandé de corriger quatre écarts entr
   - `test_temperament_paths.py::test_devotion_what_her_owner_says_to_her_moves_her_more_than_a_close_friend`, quand
     l'humeur ou la posture oublie le poids ;
   - `test_empathy.py::test_the_reread_starts_from_what_she_said_she_felt`, quand la balise n'atteint pas la ligne,
-    quand le rendu la tait, ou quand le calme se dit.
+    quand le rendu la tait, ou quand le calme se dit ;
+  - `test_empathy.py::test_what_moves_strongly_is_kept_better`, quand l'émotion ne compte pas, quand seule celle de
+    la personne compte, quand tout monte, ou quand la croyance ou le moment oublie le plancher.
 - Versions : `affect` v9. Pas de version pour la déception : les annotations déjà au journal portent le geste rangé à
   l'époque, qui ne pouvait pas être « décevant ».

@@ -337,6 +337,15 @@ class MemoryParams(BaseModel):
         help="Un souvenir vécu avec quelqu'un à qui elle tient s'endort moins vite : sa demi-vie est multipliée par "
              "1 + ce gain × l'attachement (une proche compte au moins pour 1, une amie pour ½). 0 : comme avec "
              "n'importe qui.")] = 2.0
+    charged_from: Annotated[float, Knob(
+        label="Un ressenti fort : à partir de", group="Oubli", lo=0.3, hi=1.0, step=0.05,
+        help="Une émotion au moins aussi intense — ce que la personne ressent ou ce qu'elle-même en ressent, jugé "
+             "par la relecture — fait d'un souvenir, d'une croyance ou d'un moment quelque chose qui se garde mieux "
+             "(ci-dessous) : un moment chargé reste, comme chez tout le monde (ADR 0107).")] = 0.7
+    charged_importance: Annotated[float, Knob(
+        label="Un ressenti fort : importance au moins", group="Oubli", lo=0.0, hi=1.0, step=0.05,
+        help="L'importance minimale de ce qu'un ressenti fort accompagne (0,7 : « important ») ; l'importance que "
+             "la relecture a donnée l'emporte quand elle est plus haute. 0 : l'émotion n'y change rien.")] = 0.7
     landmark_importance: Annotated[float, Knob(
         label="Importance d'un moment marquant", group="Oubli", lo=0.5, hi=1.0, step=0.01,
         help="Un souvenir au moins aussi important ne s'endort jamais tout à fait (ci-dessous) : un deuil, un "

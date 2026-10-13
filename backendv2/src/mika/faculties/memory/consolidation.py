@@ -714,10 +714,13 @@ class Consolidate:
                 continue
             # sans nom : seulement ce qui concerne quelqu'un d'autre, ni secret, ni recopié de sa bouche (ADR 0091)
             veiled = self._veiled(s.sans_nom, people, s.texte) if about and not secret and text == s.texte else None
+            felt, empathy = facets(s.ressenti), facets(s.mon_ressenti)
             drafts.append(c.REMEMBERED.draft(
                 text=Content.of(text, level=sens), about=about, sensitivity=sens,
-                importance=x.IMPORTANCE.get(s.importance, 0.45), emotion=dominant(facets(s.mon_ressenti)),
-                felt=facets(s.ressenti), empathy=facets(s.mon_ressenti), sources=sources, call_id=call_id, told_by=told_by, heard_by=heard,
+                importance=x.charged(x.IMPORTANCE.get(s.importance, 0.45), felt, empathy, from_=p.charged_from,
+                                     floor=p.charged_importance),
+                emotion=dominant(empathy), felt=felt, empathy=empathy, sources=sources, call_id=call_id,
+                told_by=told_by, heard_by=heard,
                 secret=secret, veiled=Content.of(veiled, level=sens) if veiled else None, pieces=pieces))
         for b in ex.croyances:
             if not fresh(c.BELIEF, b.texte):
@@ -747,7 +750,8 @@ class Consolidate:
             sens = x.sensitivity(b.sensibilite, has_person=bool(about or told_by))
             if between and not conv.room:
                 sens = max(sens, int(Sensitivity.PERSONAL))  # dit en privé : jamais devant une inconnue
-            importance = x.IMPORTANCE.get(b.importance, 0.45)
+            importance = x.charged(x.IMPORTANCE.get(b.importance, 0.45), facets(b.ressenti), facets(b.mon_ressenti),
+                                   from_=p.charged_from, floor=p.charged_importance)
             if between:
                 importance = max(importance, x.IMPORTANCE[3])  # entre amis, c'est ce qui fait un lien
             secret = secret_of(b.secret, cited, sens, b.texte)
@@ -1206,6 +1210,13 @@ class Consolidate:
         # « son anniversaire » et « l'anniversaire de Sam », le même samedi : un seul moment (sonde du 2026-10-03)
         names = [*(sp.name for sp in conv.speakers), self_c.name_of(frame.get(self_c.PERSONA))]
         noted: list[tuple[str, int, tuple[str, ...]]] = []
+
+        def weight(ev: x.XEvenement) -> float:
+            """Ce qu'un moment pèse : ce qu'en dit la relecture, et au moins « important » quand un ressenti fort
+            l'accompagne (ADR 0107)."""
+            return x.charged(x.moment_importance(ev), facets(ev.ressenti), facets(ev.mon_ressenti),
+                             from_=p.charged_from, floor=p.charged_importance)
+
         for ev in ex.evenements:
             # une date floue garde sa précision : « en novembre » n'est pas le 1er novembre (ADR 0084)
             span = timespan.parse(ev.quand, tz)
@@ -1256,7 +1267,7 @@ class Consolidate:
                     text=Content.of(ev.texte, level=sens), when=at, about=tuple(dict.fromkeys((*about, *moved.about))),
                     all_day=all_day, sensitivity=sens, sources=sources, told_by=told_by, heard_by=heard,
                     secret=moved.secret or secret_of(ev.secret, cited, sens, ev.texte), replaces=moved.id,
-                    call_id=call_id, ongoing=False, importance=max(moved.importance, x.moment_importance(ev)),
+                    call_id=call_id, ongoing=False, importance=max(moved.importance, weight(ev)),
                     festive=moved.festive or x.festive(ev), yearly=yearly,
                     felt=facets(ev.ressenti) or moved.felt,
                     empathy=facets(ev.mon_ressenti) or moved.empathy, **{**extra, "shared": extra["shared"] or moved.shared}))
@@ -1278,7 +1289,7 @@ class Consolidate:
                     text=Content.of(ev.texte, level=sens), when=at, about=tuple(dict.fromkeys((*about, *again.about))),
                     all_day=all_day, sensitivity=sens, sources=sources, told_by=told_by, heard_by=heard,
                     secret=again.secret or secret_of(ev.secret, cited, sens, ev.texte), recurs=again.id,
-                    call_id=call_id, ongoing=True, importance=max(again.importance, x.moment_importance(ev)),
+                    call_id=call_id, ongoing=True, importance=max(again.importance, weight(ev)),
                     felt=facets(ev.ressenti) or again.felt,
                     empathy=facets(ev.mon_ressenti) or again.empathy, **extra))
                 continue
@@ -1300,7 +1311,7 @@ class Consolidate:
                     all_day=twin.all_day, sensitivity=max(sens, twin.sensitivity), sources=sources, told_by=told_by,
                     heard_by=heard, secret=twin.secret or secret_of(ev.secret, cited, sens, ev.texte),
                     replaces=twin.id, call_id=call_id, ongoing=twin.ongoing,
-                    importance=max(twin.importance, x.moment_importance(ev)),
+                    importance=max(twin.importance, weight(ev)),
                     festive=twin.festive or (not twin.ongoing and x.festive(ev)),
                     yearly=twin.yearly or (not twin.ongoing and yearly),
                     felt=facets(ev.ressenti) or twin.felt,
@@ -1315,7 +1326,7 @@ class Consolidate:
                 text=Content.of(ev.texte, level=sens), when=at, about=about, all_day=all_day, sensitivity=sens,
                 sources=sources, told_by=told_by, heard_by=heard, secret=secret_of(ev.secret, cited, sens, ev.texte),
                 replaces=twin.id if twin is not None else None, call_id=call_id, ongoing=ev.en_cours,
-                importance=x.moment_importance(ev), festive=not ev.en_cours and x.festive(ev), yearly=yearly,
+                importance=weight(ev), festive=not ev.en_cours and x.festive(ev), yearly=yearly,
                 felt=facets(ev.ressenti), empathy=facets(ev.mon_ressenti), **extra))
         return drafts
 
