@@ -381,9 +381,21 @@ class ForgeHost:
         self._cachelock = threading.Lock()
         #: qui veut savoir que l'offre a changé (une app écrite ou effacée : ses outils aussi, ADR 0104)
         self._listeners: list[Callable[[], Any]] = []
+        #: son fuseau (« Europe/Paris »), relu au lancement de chaque processus d'app : l'horloge d'une app est la
+        #: sienne, comme ses rythmes (un bac à sable en UTC lui faisait croire ses relevés décalés, sonde du
+        #: 2026-10-13) ; ``None`` : UTC
+        self.zone: Callable[[], str] | None = None
 
     def on_change(self, fn: Callable[[], Any]) -> None:
         self._listeners.append(fn)
+
+    def _zone(self) -> str:
+        """Son fuseau, s'il se lit (un nom de la base IANA) ; vide sinon."""
+        try:
+            zone = str(self.zone()) if self.zone is not None else ""
+        except Exception:  # noqa: BLE001 — un fuseau illisible : l'app tourne en UTC, jamais une panne
+            return ""
+        return zone if re.fullmatch(r"[A-Za-z_]+(?:/[A-Za-z0-9_+-]+)*", zone) else ""
 
     def _changed(self) -> None:
         for fn in self._listeners:
@@ -669,6 +681,9 @@ class ForgeHost:
     def _start(self, app: str, info: AppInfo, call: _Call) -> _Worker | str:
         env = {"PATH": "/usr/bin:/bin", "HOME": "/tmp", "LANG": "C.UTF-8", "PYTHONIOENCODING": "utf-8",
                "PYTHONDONTWRITEBYTECODE": "1"}
+        zone = self._zone()
+        if zone:
+            env["TZ"] = zone
         proc = subprocess.Popen(self._command(app), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL, env=env, start_new_session=True,
                                 preexec_fn=self._limits)  # noqa: PLW1509 — les limites du processus fils

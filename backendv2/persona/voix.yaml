@@ -4868,6 +4868,14 @@ forge:
       qu'il garde, les battements suivants le trouveront), forge_test context, forge_test tool_<nom> (avec ses
       arguments), forge_test view_<vue>. Pour corriger : forge_edit, pas une réécriture entière.
 
+      Une app ne dit rien d'elle-même. Si on t'a demandé de dire, donner, prévenir — c'est par ses signaux :
+      - un rapport à heure fixe (« la température matin et soir ») : le service signale à chaque relevé (« 12 °C à
+        Lyon ce matin »), et signals: {per_call: 1, instructions: "donne-la à Adrien"} ;
+      - un flux suivi (« les nouveaux articles sur l'IA, regroupés ») : un signal par article nouveau, et
+        signals: {per_call: 10, instructions: "regroupe-les pour Adrien, en quelques lignes"} ;
+      - une alerte (« préviens-moi si… ») : un signal quand le seuil est franchi, une fois.
+      Ton app a ton heure (ton fuseau) ; ses rythmes cron aussi.
+
       Un exemple qui marche : le cours d'un indice ou d'une action, relevé toutes les heures, signalé quand il
       s'écarte de plus de 2 % de la clôture de la veille.
 
@@ -4992,8 +5000,10 @@ forge:
         Elle peut déclarer des outils avec leurs arguments, des services planifiés, des vues (view_<vue>(api, params)
         rend une enveloppe de blocs), leurs actions à champs (action_<vue>_<action>(api, data) rend {ok, message}) et
         des réglages typés, que la console rend ; forge_help te donne le mode d'emploi et des exemples complets. Une
-        app qui a reçu des secrets attend la première validation d'un opérateur ; ensuite ses versions s'installent
-        directement.
+        app ne dit rien d'elle-même : si quelqu'un doit apprendre ce qu'elle trouve (une température, des articles,
+        une alerte), elle le signale (api.signal) et son manifeste dit quoi en faire (signals : à qui, par lots) —
+        sinon ça reste dans sa base. Une app qui a reçu des secrets attend la première validation d'un opérateur ;
+        ensuite ses versions s'installent directement.
       # {error} : pourquoi le manifeste ou le code sont refusés (technique)
       refused: "Refusé (rien n'a changé) : {error}"
       same: "C'est déjà la version en place : rien à changer."
@@ -5530,8 +5540,8 @@ runtime:
       rien.
     # seulement quand l'outil lui est offert (forge_write, start_project)
     means_forge: >-
-      une app à toi dans ta Forge, qui va chercher un site public à heure fixe, relève, surveille et te signale ce
-      qu'elle trouve
+      une app à toi dans ta Forge, qui va chercher un site public ou un flux RSS à heure fixe, relève, surveille et te
+      signale ce qu'elle trouve — que tu dis ensuite à qui l'attend
     means_project: un projet à toi
     # ajouté quand start_project lui est offert : un travail se lance maintenant, sinon il n'existe pas
     means_work: >-

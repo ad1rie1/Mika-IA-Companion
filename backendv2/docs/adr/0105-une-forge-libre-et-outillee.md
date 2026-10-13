@@ -145,5 +145,15 @@ par jour n'y trouvaient pas leur place.
   par un, dits à Adrien ; S18 (une app qui signale à chaque tour : tout entre dans la file, bornée, lue sous son
   quota) et S23 (ce que trouve l'app attend dans sa file, adressé à la personne du projet).
 
+**Seconde sonde (Haiku, même jour) : ses apps rangent sans rien dire.** Adrien demande les nouveaux articles IA de
+Korben, regroupés, et la température de Lyon matin et soir. Elle écrit deux apps soignées (un flux XML lu, des mots
+entiers, un faux positif « j'ai » corrigé d'elle-même ; Open-Meteo à 8 h et 20 h ; `AUTO_INCREMENT` et `INSERT
+IGNORE` écrits pour MariaDB, adaptés à SQLite par l'hôte) — mais aucune ne signale : tout reste dans leur base, et
+Adrien n'apprend rien. Elle croit aussi ses rythmes en UTC (son bac à sable l'était). Le guide le dit désormais
+d'emblée (« une app ne dit rien d'elle-même »), la description de `forge_write` aussi, avec trois recettes (un rapport
+à heure fixe, un flux regroupé, une alerte) ; et une app a son heure : l'hôte lui donne le fuseau de sa vie (`TZ`,
+relu au lancement de chaque processus ; illisible : UTC). En conversation, elle ne pensait pas à une app pour lire un
+flux RSS : ses moyens le nomment.
+
 **Ce qui n'a pas été fait ici.** Ses explorations d'un centre d'intérêt sans flux restent des rêveries (sans le web).
-Le bac à sable d'une app reste à l'heure UTC (son fuseau n'y est pas transmis). Une app n'a qu'un appel à la fois.
+Une app n'a qu'un appel à la fois.

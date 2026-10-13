@@ -648,3 +648,31 @@ def test_a_service_signals_the_temperature_twice_a_day_and_she_tells_it(tmp_path
     assert len(got["queued"]) == 4 and (hours is None or hours == [8, 18])
     assert [len(e.data.seqs) for e in got["judged"]] == [1, 1, 1, 1]
     assert len(got["said"]) == 4  # chaque relevé dit à Adrien
+
+
+@needs_bwrap
+def test_an_app_lives_on_her_clock(tmp_path):
+    """Le bac à sable était en UTC : elle croyait ses rythmes décalés (sonde du 2026-10-13). Une app a son heure ; un
+    fuseau illisible la laisse en UTC, jamais en panne."""
+    code = "import time\n\ndef view(api):\n    return time.strftime('%Z')\n"
+    h = ForgeHost(tmp_path / "forge")
+    h.zone = lambda: "Europe/Paris"
+    go(h.write("heure", "title: Heure\n", code))
+    odd = ForgeHost(tmp_path / "ailleurs")
+    odd.zone = lambda: "../../etc/passwd"
+    go(odd.write("heure", "title: Heure\n", code))
+    try:
+        paris, utc = go(h.call("heure", "view")), go(odd.call("heure", "view"))
+    finally:
+        h.shutdown()
+        odd.shutdown()
+    assert paris.ok and paris.value in ("CET", "CEST")
+    assert utc.ok and utc.value == "UTC"
+
+
+def test_the_guide_says_an_app_tells_nothing_by_itself():
+    """Deux apps écrites pour « dis-moi » et « donne-moi » rangeaient sans jamais signaler (sonde du 2026-10-13) : le
+    guide le dit d'emblée, avec ses recettes."""
+    assert "ne dit rien d'elle-même" in guide.topic("manifeste")
+    recipes = guide.topic("veille")
+    assert "à heure fixe" in recipes and "per_call: 10" in recipes and "ton fuseau" in recipes

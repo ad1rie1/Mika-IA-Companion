@@ -445,6 +445,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
             log.warning("configuration des images : %s", problem)
         mcp.on_change(kernel.refresh_tools)  # son offre change : ses outils aussi (ADR 0064)
         forge.on_change(kernel.refresh_tools)  # une app écrite ou effacée : ses outils aussi (ADR 0104)
+        forge.zone = lambda: str(kernel.mind.registry.tz_of(kernel.mind.frame().root))  # son heure, dans ses apps
         mcp.start()  # chaque serveur actif est joint en tâche de fond
         hub.start()
         world_hub.start()

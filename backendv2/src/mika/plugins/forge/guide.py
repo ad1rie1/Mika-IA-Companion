@@ -14,6 +14,10 @@ TOPICS = ("manifeste", "outils", "reseau", "vues", "actions", "reglages", "blocs
 MANIFESTE = """\
 Une app = un manifeste (manifest.yaml) + du code (main.py), écrits ensemble par forge_write.
 
+Une app ne dit rien d'elle-même : ce qu'elle range reste dans sa base. Si quelqu'un doit l'apprendre (une
+température matin et soir, des articles nouveaux, une alerte), elle le signale (api.signal) et « signals » dit
+quoi en faire — à qui le dire, un par un ou regroupés (forge_help veille : trois recettes).
+
 Le manifeste (YAML) :
 - title (requis), description ;
 - schedule : manual (défaut), interval:30m, cron:0 8 * * *… — le rythme de tick(api) ; timeout : le temps qu'ont
