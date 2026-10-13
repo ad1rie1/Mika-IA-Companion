@@ -72,6 +72,9 @@ max_allowed_packet = 64M
 sql_mode = STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
 character-set-server = utf8mb4
 collation-server = utf8mb4_nopad_bin
+# elle passe par le socket : rien n'écoute sur le réseau (le pare-feu d'un poste Fedora
+# Workstation ouvre 1025-65535 au réseau local)
+bind-address = 127.0.0.1
 ```
 
 Puis son compte, sans mot de passe (`unix_socket` : c'est l'utilisateur

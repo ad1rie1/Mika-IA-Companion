@@ -1,0 +1,141 @@
+/* L'interface du monde (WorldHud.ts) : par-dessus la scène, sous les panneaux.
+   Le haut de l'écran, au centre, est à elle : l'état du monde, les demandes
+   de Mika, les refus du noyau. Le menu d'actions s'ouvre où l'on a cliqué. */
+
+#world-hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 15;
+  font-family: inherit;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+#world-hud .world-top {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: min(520px, calc(100% - 32px));
+}
+
+#world-hud .world-status {
+  padding: 5px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  background: rgba(20, 20, 35, 0.55);
+  backdrop-filter: blur(8px);
+  transition: opacity 0.8s ease;
+}
+#world-hud .world-status.warn { color: #fcd34d; }
+#world-hud .world-status.bad { color: #fca5a5; }
+#world-hud .world-status.ok { color: #86efac; }
+#world-hud .world-status.faded { opacity: 0; }
+
+#world-hud .world-toast {
+  padding: 8px 14px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.35;
+  text-align: center;
+  background: rgba(20, 20, 35, 0.88);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+  animation: world-in 0.18s ease-out;
+}
+
+#world-hud .world-request {
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(20, 20, 35, 0.92);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  font-size: 14px;
+  animation: world-in 0.18s ease-out;
+}
+#world-hud .world-request-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#world-hud button.world-button {
+  padding: 7px 14px;
+  border: none;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.1);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+#world-hud button.world-button:hover,
+#world-hud button.world-button:focus-visible {
+  background: rgba(255, 255, 255, 0.2);
+  outline: none;
+}
+#world-hud button.world-button.primary { background: rgba(129, 140, 248, 0.55); }
+#world-hud button.world-button.primary:hover { background: rgba(129, 140, 248, 0.75); }
+
+#world-hud .world-tag {
+  position: absolute;
+  padding: 4px 9px;
+  border-radius: 9px;
+  font-size: 12px;
+  white-space: nowrap;
+  background: rgba(20, 20, 35, 0.78);
+  backdrop-filter: blur(8px);
+  transform: translate(14px, 14px);
+}
+#world-hud .world-tag small {
+  display: block;
+  opacity: 0.7;
+  font-size: 11px;
+}
+
+#world-hud .world-menu {
+  position: absolute;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 180px;
+  max-width: 280px;
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(20, 20, 35, 0.94);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  animation: world-in 0.12s ease-out;
+}
+#world-hud .world-menu-title {
+  padding: 6px 10px 4px;
+  font-size: 12px;
+  opacity: 0.65;
+}
+#world-hud .world-menu button.world-button {
+  text-align: left;
+  background: transparent;
+}
+#world-hud .world-menu button.world-button:hover,
+#world-hud .world-menu button.world-button:focus-visible { background: rgba(255, 255, 255, 0.12); }
+#world-hud .world-menu button.world-button.primary { font-weight: 600; }
+
+#world-hud [hidden] { display: none !important; }
+
+@keyframes world-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (max-width: 640px) {
+  #world-hud .world-top { top: 70px; }
+}

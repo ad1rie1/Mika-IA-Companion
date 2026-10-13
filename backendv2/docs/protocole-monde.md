@@ -505,7 +505,9 @@ Une trame illisible ou interdite reçoit une erreur de protocole (`fatal` : la c
 print(json.dumps(json_schema(), ensure_ascii=False, indent=1))" > mika-world.schema.json
 ```
 
-et donne les classes C# (NJsonSchema, quicktype) ou TypeScript.
+et donne les classes C# (NJsonSchema, quicktype) ou TypeScript. Les deux clients du dépôt génèrent les leurs ainsi :
+`frontend/Unity/tools/gen_world_protocol.py` (C#) et `frontend/Web/tools/gen_world_protocol.py` (TypeScript), chacun
+avec `--check`, que vérifie `tests/protocol/test_world_wire.py`.
 
 **Un hôte Unity, dans l'ordre :**
 
@@ -523,7 +525,10 @@ et donne les classes C# (NJsonSchema, quicktype) ou TypeScript.
 
 Un écran simple (le client web) n'a que le rôle `viewer` : il montre ce qu'il sait montrer et **ignore sans
 planter** ce qu'il ne connaît pas (un objet sans modèle, une autre pièce) — sinon chaque nouveauté du monde se
-paierait deux fois.
+paierait deux fois. Le client web (`frontend/Web/src/world/`) en est un : il montre l'état des meubles qu'il
+dessine (porte, fenêtre, armoire), une silhouette pour un objet qu'il ne dessine pas, ce que tient une main, les
+autres personnages, et propose les mêmes actions que l'hôte Unity (`act`, `address`, `answer`), dont il lit le
+`result`.
 
 ## Annexe — la définition complète
 

@@ -544,6 +544,17 @@ export class AnimationSystem {
     if (loaded) this.machine.requestGesture(loaded);
   }
 
+  /**
+   * A gesture the world shows on her body (world/WorldStage.ts): her quick
+   * answer to one done to her — a pat on the head makes her duck a little,
+   * a poke startles her —, one of her own, or the animation of what she does
+   * to an object. Asleep, nothing; a clip that isn't loaded, nothing.
+   */
+  playWorldGesture(name: string): boolean {
+    if (this.sleepPhase !== "awake") return false;
+    return this.playGesture(name);
+  }
+
   /** Manual/debug gesture trigger by manifest clip name. */
   playGesture(name: string): boolean {
     if (!this.machine) return false;

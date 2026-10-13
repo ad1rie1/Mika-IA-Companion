@@ -51,7 +51,13 @@ export type HandShapeName = "relaxed" | "open" | "tucked" | "loose" | "clasp" | 
 
 // ── Clip manifest (public/animations/manifest.json) ─────────────────
 
-export type ClipCategory = "idle" | "talk" | "gesture" | "sleep" | "locomotion";
+/**
+ * `posture`: a held body stance the locomotion asks for (`posture: "sit"`,
+ * the Unity workshop's seated idle). `activity`: a stance held while she
+ * does something at a place (`activities`: the backend's `activity.name`s
+ * it shows — leaning on the window sill to look outside).
+ */
+export type ClipCategory = "idle" | "talk" | "gesture" | "sleep" | "locomotion" | "posture" | "activity";
 
 export interface ClipManifestEntry {
   /** URL relative to the site root, e.g. "/animations/idle/idle_breathing.fbx". */
@@ -85,6 +91,10 @@ export interface ClipManifestEntry {
    * for a clip whose side carries meaning.
    */
   mirror?: boolean;
+  /** For a `posture` clip: the stance it holds. */
+  posture?: "sit" | "lie";
+  /** For an `activity` clip: the activities (backend `activity.name`) it shows. */
+  activities?: string[];
 }
 
 export interface AnimationManifest {

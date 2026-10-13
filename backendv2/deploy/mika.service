@@ -31,12 +31,20 @@ TimeoutStopSec=60
 # Forge, les ateliers) a besoin des espaces de noms utilisateur. Pas de
 # ProtectKernelTunables non plus : il masque une partie de /proc, et le noyau
 # refuse alors à bubblewrap de monter le /proc du bac à sable (vérifié).
-NoNewPrivileges=yes
+# Pas de NoNewPrivileges non plus : le réseau à part des cages (le web par
+# DuckDuckGo, les commandes approuvées des ateliers) passe par pasta, qui entre
+# dans son domaine SELinux (pasta_t) ; sous no_new_privs, la cage ne monte plus
+# (« bwrap: setting up uid map: Operation not permitted », vérifié sur Fedora 44).
+# Ce que la cage exécute reste sans privilèges nouveaux : bubblewrap pose
+# no_new_privs lui-même.
 ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=/var/lib/mika
 PrivateTmp=yes
 PrivateDevices=yes
+# pasta ouvre /dev/net/tun, que PrivateDevices retire du /dev privé : lui seul est rendu
+BindPaths=/dev/net/tun
+DeviceAllow=/dev/net/tun rw
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 LockPersonality=yes

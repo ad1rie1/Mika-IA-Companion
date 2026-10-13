@@ -28,8 +28,15 @@ export const WALK_PERIOD = 1.05;
 export const WALK_STRIDE = 0.74;
 export const WALK_SPEED = WALK_STRIDE / WALK_PERIOD;
 
-/** How far below the standing hips the seated hips sit above the seat. */
-export const SEAT_HIPS_ABOVE = 0.06;
+/**
+ * Seated, how high her hips bone is above the underside of her buttocks —
+ * measured on her model with the real furniture in the Unity client's
+ * animation workshop (atelier_desk_check.py, `ChambreSceneBuilder.HipsAboveSeat`).
+ * The hips settle this far above a seat's top, less what the seat gives
+ * (roomLayout.ts `sink`): 0.582 m at her desk, 0.59 m on her bed, as in Unity.
+ * (It was 0.06: her thighs went 5–9 cm into the cushion.)
+ */
+export const SEAT_HIPS_ABOVE = 0.15;
 
 const SAMPLES = 24;
 

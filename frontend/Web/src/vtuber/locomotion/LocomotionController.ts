@@ -402,7 +402,7 @@ export class LocomotionController {
     this.tween("sitting", SIT_S, {
       ...this.pose(),
       pos: onto,
-      height: this.seatOffset(place.seat.height),
+      height: this.seatOffset(place.seat),
       lie: 0,
     });
   }
@@ -451,7 +451,7 @@ export class LocomotionController {
     this.tween("unlying", LIE_S, {
       ...this.pose(),
       pos: bed.seat ? { x: bed.seat.x, z: bed.seat.z } : this.pos,
-      height: bed.seat ? this.seatOffset(bed.seat.height) : 0,
+      height: bed.seat ? this.seatOffset(bed.seat) : 0,
       facing: bed.facing,
       lie: 0,
     });
@@ -518,7 +518,7 @@ export class LocomotionController {
       const lie = place === "bed" && this.sleep !== "awake";
       this.posture = lie ? "lie" : "sit";
       this.pos = { x: p.seat.x, z: p.seat.z };
-      this.height = this.seatOffset(p.seat.height);
+      this.height = this.seatOffset(p.seat);
       this.lieBlend = lie ? 1 : 0;
     } else {
       this.posture = "stand";
@@ -532,8 +532,9 @@ export class LocomotionController {
 
   // ── Root composition ──────────────────────────────────────────────
 
-  private seatOffset(seatHeight: number): number {
-    return seatHeight + SEAT_HIPS_ABOVE - this.opts.hipsHeight;
+  /** How far the root goes down for her hips to sit on this seat (see SEAT_HIPS_ABOVE). */
+  private seatOffset(seat: { height: number; sink: number }): number {
+    return seat.height + SEAT_HIPS_ABOVE - seat.sink - this.opts.hipsHeight;
   }
 
   private pose(): Pose {

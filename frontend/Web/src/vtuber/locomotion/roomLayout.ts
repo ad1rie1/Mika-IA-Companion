@@ -35,8 +35,12 @@ export interface Place {
   /** Facing (world yaw) once there. */
   facing: number;
   posture: "stand" | "sit";
-  /** For a seat: where the hips settle and at what height (seat top). */
-  seat?: { x: number; z: number; height: number };
+  /**
+   * For a seat: where the hips settle, at what height its top is, and how
+   * far it gives under her (the chair's cushion a little, the mattress more)
+   * — the values the Unity client's scene uses (ChambreSceneBuilder.Seats).
+   */
+  seat?: { x: number; z: number; height: number; sink: number };
   /** For the bed when she sleeps: where the hips rest, and the yaw of the
    * body's long axis (head toward the pillow). */
   lie?: { x: number; z: number; height: number; headYaw: number };
@@ -58,7 +62,8 @@ export const ROOM_BOUNDS = { minX: -3.85, maxX: 3.85, minZ: -4.35, maxZ: 3.35 };
 /** The desk chair's yaw in room.glb (its front, local −Z, faces the desk). */
 const CHAIR_YAW = 0.3;
 
-// Measured on room.glb (assets-src/blender, report of 2026-10-02). The
+// Measured on room.glb (assets-src/blender, rebuilt 2026-10-13 from the same
+// scripts as the Unity export: window sill at 0.92, desk chair lowered 6 cm). The
 // procedural fallback room uses the same layout. This table is READ by
 // backendv2/tests/unit/test_world_contract.py (TestLaChambreDuClientWeb),
 // which compares it with backendv2/examples/monde/chambre.json: move a place
@@ -71,13 +76,13 @@ export const PLACES: Record<PlaceId, Place> = {
   window: { id: "window", approach: { x: -3.62, z: -1.2 }, facing: -Math.PI / 2, posture: "stand" },
   // Desk chair: reached from its left side (−x) — on the right, the drawer
   // block leaves no room in front of the seat —, then a step in front of the
-  // seat and down onto it. Seat top 0.51, facing the desk along the chair's front.
+  // seat and down onto it. Cushion top 0.447 (`build_desk.CHAIR_DROP`), facing the desk along the chair's front.
   desk: {
     id: "desk",
     approach: { x: -1.98, z: -2.9 },
     facing: -Math.PI + CHAIR_YAW,
     posture: "sit",
-    seat: { x: -1.4, z: -3.3, height: 0.51 },
+    seat: { x: -1.4, z: -3.3, height: 0.447, sink: 0.015 },
     prop: { name: "DeskChair", pull: 0.42, stand: 0.2 },
   },
   // Edge of the bed (duvet top 0.49, its edge at x −2.63), facing the room;
@@ -87,7 +92,7 @@ export const PLACES: Record<PlaceId, Place> = {
     approach: { x: -2.4, z: 1.3 },
     facing: Math.PI / 2,
     posture: "sit",
-    seat: { x: -2.85, z: 1.3, height: 0.47 },
+    seat: { x: -2.85, z: 1.3, height: 0.47, sink: 0.03 },
     lie: { x: -3.32, z: 1.62, height: 0.56, headYaw: 0 },
   },
   // Bookshelf on the right wall: she faces the books.

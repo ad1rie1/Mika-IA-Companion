@@ -8,6 +8,7 @@ import type {
   SleepPhase,
 } from "../../types";
 import { retargetMixamoClip, type RetargetReport } from "./mixamoRetarget";
+import { fetchAtelierMotion, isAtelierUrl, retargetAtelierClip, type AtelierMeasures } from "./atelierClip";
 import { forwardSign } from "../vrmVersion";
 import { MIRROR_SUFFIX, buildMirrorNodeMap, isMirrorName, mirrorClip } from "./clipMirror";
 
@@ -30,7 +31,12 @@ export interface LoadedClip {
   clip: THREE.AnimationClip;
   meta: ClipManifestEntry;
   report: RetargetReport | null;
+  /** What a Unity-workshop clip measures (its walking speed, its hips height). */
+  measures?: AtelierMeasures;
 }
+
+/** Manifest categories this library loads. */
+const CATEGORIES: ReadonlySet<string> = new Set(["idle", "talk", "gesture", "sleep", "locomotion", "posture", "activity"]);
 
 /** Free the throwaway FBX scene graph once tracks are extracted. */
 function disposeFbxAsset(asset: THREE.Group): void {
@@ -126,9 +132,7 @@ export class ClipLibrary {
           entry &&
           typeof entry.url === "string" &&
           entry.url.length > 0 &&
-          ["idle", "talk", "gesture", "sleep", "locomotion"].includes(
-            entry.category
-          );
+          CATEGORIES.has(entry.category);
         if (!ok) console.warn(`ClipLibrary: manifest entry "${name}" invalid, skipped`);
         return ok;
       }
@@ -188,25 +192,35 @@ export class ClipLibrary {
     onLoaded?: (loaded: LoadedClip) => void
   ): Promise<void> {
     try {
+      if (isAtelierUrl(entry.url)) {
+        // A clip of the Unity client's animation workshop (see atelierClip.ts).
+        const motion = await fetchAtelierMotion(entry.url);
+        const { clip, report, measures } = retargetAtelierClip(motion, this.vrm!, name);
+        this.register({ name, clip, meta: entry, report, measures }, onLoaded);
+        return;
+      }
       const asset = await this.fbx.loadAsync(encodeURI(entry.url));
       try {
         const { clip, report } = retargetMixamoClip(asset, this.vrm!, name, {
           stripFingers: true,
           stripRootXZ: entry.stripRootXZ === true,
         });
-        const loaded: LoadedClip = { name, clip, meta: entry, report };
-        this.clips.set(name, loaded);
-        this.reports.push(report);
-        if (entry.mirror !== false && MIRRORED_CATEGORIES.has(entry.category)) {
-          this.addMirror(loaded);
-        }
-        onLoaded?.(loaded);
+        this.register({ name, clip, meta: entry, report }, onLoaded);
       } finally {
         disposeFbxAsset(asset);
       }
     } catch (e) {
       this.failed.push({ name, url: entry.url, reason: String(e) });
     }
+  }
+
+  private register(loaded: LoadedClip, onLoaded?: (loaded: LoadedClip) => void): void {
+    this.clips.set(loaded.name, loaded);
+    if (loaded.report) this.reports.push(loaded.report);
+    if (loaded.meta.mirror !== false && MIRRORED_CATEGORIES.has(loaded.meta.category)) {
+      this.addMirror(loaded);
+    }
+    onLoaded?.(loaded);
   }
 
   /** Register the left/right mirrored twin of a loaded clip, under
@@ -220,6 +234,7 @@ export class ClipLibrary {
       clip: mirrorClip(loaded.clip, this.mirrorNodes, name),
       meta: { ...loaded.meta, hands: hands ? [hands[1], hands[0]] : undefined },
       report: loaded.report,
+      measures: loaded.measures,
     });
   }
 

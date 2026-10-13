@@ -15,7 +15,11 @@ import { EmotionDisplay } from "./ui/EmotionDisplay";
 import { InnerLifePanel } from "./ui/InnerLifePanel";
 import { LoginOverlay } from "./ui/LoginOverlay";
 import { SpeechPresenter } from "./ui/SpeechPresenter";
-import { WS_URL } from "./network/api";
+import { API_BASE, WS_URL } from "./network/api";
+import { WorldSession, worldUrl } from "./world/WorldSession";
+import { MIKA, WorldStage } from "./world/WorldStage";
+import { WorldHud } from "./world/WorldHud";
+import { affordanceClip, GESTURE_CLIPS, TOUCH_REACTIONS } from "./world/roomBindings";
 import { articulationFor } from "./vtuber/animation/affect";
 import type { EmotionBlend, EmotionName } from "./types";
 
@@ -120,6 +124,38 @@ async function init() {
   const emotionController = new EmotionController();
   const animationSystem = new AnimationSystem();
   const lipSyncController = new LipSyncController();
+
+  // Le monde (mika.world/1, ADR 0050), en spectatrice comme le prévoit le
+  // protocole pour un écran web : l'état des meubles (porte, fenêtre,
+  // armoire), ce qu'elle tient, les gestes, ses demandes, ce qu'on peut faire
+  // des objets. Son corps, lui, suit déjà inner_state par la conversation.
+  // Déclarés avant tout `await` : le modèle et la pièce s'y relient dès
+  // qu'ils sont chargés. La session ne part qu'après la connexion.
+  const world = new WorldSession({ url: worldUrl(API_BASE) });
+  const stage = new WorldStage(sceneManager.scene, {
+    mikaMoving: () => animationSystem.place.moving,
+    onGesture: (g) => {
+      if (g.actor === MIKA) {
+        const own = GESTURE_CLIPS[g.gesture];
+        if (own) animationSystem.playWorldGesture(own);
+        return;
+      }
+      if (g.to_actor !== MIKA) return;
+      // La personne de ce poste lui fait signe : elle la regarde, comme quand
+      // elle lui écrit ; ce qu'elle en ressent revient par la dérive d'humeur.
+      if (g.actor === world.actor) presenter.noteUserTyping();
+      const reaction = TOUCH_REACTIONS[g.gesture];
+      if (reaction) animationSystem.playWorldGesture(reaction);
+    },
+    onMikaAct: (_step, affordance) => {
+      const clip = affordanceClip(affordance?.animation);
+      if (clip) animationSystem.playWorldGesture(clip);
+    },
+  });
+  stage.bindSession(world);
+  void environment.ready.then(() =>
+    stage.bindRoom(environment.group.getObjectByName("RoomModel") ?? environment.group)
+  );
   const emotionDisplay = new EmotionDisplay();
   const innerLifePanel = new InnerLifePanel();
 
@@ -147,6 +183,21 @@ async function init() {
       const head = vrm.humanoid?.getRawBoneNode("head");
       if (head) cameraController.setFollowTarget(head, new THREE.Vector3(0, 0.05, 0));
       else if (root) cameraController.setFollowTarget(root);
+      // Ce qu'elle tient va dans sa main ; on la vise entre ses hanches et sa tête.
+      const bone = (name: Parameters<NonNullable<typeof vrm.humanoid>["getRawBoneNode"]>[0]) =>
+        vrm.humanoid?.getRawBoneNode(name) ?? null;
+      const tip = new THREE.Vector3();
+      stage.bindMika({
+        palm: (side, out) => {
+          const hand = bone(side === "left" ? "leftHand" : "rightHand");
+          if (!hand) return null;
+          hand.getWorldPosition(out);
+          const middle = bone(side === "left" ? "leftMiddleProximal" : "rightMiddleProximal");
+          return middle ? out.lerp(middle.getWorldPosition(tip), 0.7) : out;
+        },
+        hips: (out) => bone("hips")?.getWorldPosition(out) ?? null,
+        head: (out) => bone("head")?.getWorldPosition(out) ?? null,
+      });
       // Starts animating synchronously on the rest pose, then streams the
       // Mixamo clips in — not awaited so the app boots without waiting for
       // FBX downloads.
@@ -311,6 +362,15 @@ async function init() {
 
   ws.connect();
 
+  new WorldHud({
+    session: world,
+    stage,
+    canvas: sceneManager.renderer.domElement,
+    camera: sceneManager.camera,
+    parent: container,
+  });
+  world.start();
+
   // Manual QA hooks: Alt+M cycles every loaded clip on the live model
   // (the only reliable retarget check on this rig), Alt+K skeleton,
   // Alt+S/E/T/G force sleep/emotions/talking/gestures, Alt+D panel.
@@ -365,6 +425,8 @@ async function init() {
     // pose. Calling it first made every expression and rotation land one
     // frame late, which is a ~25% timing error on a 4-frame blink at 30fps.
     vtuberModel.update(delta);
+    // Après le corps : ce qu'elle tient suit sa main telle qu'elle est dessinée.
+    stage.update(delta);
   });
 }
 

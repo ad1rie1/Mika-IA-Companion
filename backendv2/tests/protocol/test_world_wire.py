@@ -3,7 +3,7 @@
 - chaque exemple de la spécification (``docs/protocole-monde.md``) se lit dans son sens, se réécrit à
   l'identique et respecte le schéma JSON publié — celui d'où un moteur génère ses types : la spécification ne
   peut pas vieillir sans qu'un test le dise ;
-- les types C# que Unity en génère (``WorldProtocol.g.cs``) sont à jour ;
+- les types que Unity (``WorldProtocol.g.cs``) et le client web (``protocol.g.ts``) en génèrent sont à jour ;
 - chaque sorte de trame est illustrée ;
 - une trame inconnue, un champ inconnu, une trame du mauvais sens : refusés ;
 - chaque commande dit les rôles qu'elle exige et son débit ; constater est à l'hôte, éditer au créateur.
@@ -29,6 +29,7 @@ ROOT = Path(__file__).resolve().parents[2]
 SPEC = ROOT / "docs" / "protocole-monde.md"
 EXAMPLE = ROOT / "examples" / "monde" / "chambre.json"
 GENERATOR = ROOT.parent / "frontend" / "Unity" / "tools" / "gen_world_protocol.py"
+WEB_GENERATOR = ROOT.parent / "frontend" / "Web" / "tools" / "gen_world_protocol.py"
 BLOCK = re.compile(r"```json (client|serveur)\n(.*?)```", re.S)
 SIDES = {"client": p.CLIENT, "serveur": p.SERVER}
 
@@ -69,6 +70,15 @@ def test_les_types_generes_pour_unity_sont_a_jour() -> None:
     if not GENERATOR.exists():
         pytest.skip("client Unity absent")
     out = subprocess.run([sys.executable, str(GENERATOR), "--check"], capture_output=True, text=True)
+    assert out.returncode == 0, out.stdout + out.stderr
+
+
+def test_les_types_generes_pour_le_web_sont_a_jour() -> None:
+    """Le client web lit le fil avec ses types TypeScript (``src/world/protocol.g.ts``), générés du même schéma :
+    une trame dont il ne connaît pas le type, il la passe — un type qui a vieilli lui ferait passer une vraie."""
+    if not WEB_GENERATOR.exists():
+        pytest.skip("client web absent")
+    out = subprocess.run([sys.executable, str(WEB_GENERATOR), "--check"], capture_output=True, text=True)
     assert out.returncode == 0, out.stdout + out.stderr
 
 

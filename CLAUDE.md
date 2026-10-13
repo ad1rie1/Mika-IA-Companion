@@ -789,7 +789,23 @@ Deux règles le tiennent :
 - La caméra suit sa tête.
 
 **La pièce** : un GLB généré par script Blender (`assets-src/blender/`). La lumière du jour suit l'heure réelle, avec du
-bloom.
+bloom. Les mêmes scripts font la chambre d'Unity (`export_unity.py`) : après une retouche, relancer aussi
+`blender -b --factory-startup --python assets-src/blender/run_final.py` (cuisson de l'occlusion, `room.glb`,
+`room.blend`), sinon les deux clients divergent. Les hauteurs d'assise sont celles d'Unity (`ChambreSceneBuilder.Seats`) :
+hanches à 0,15 m au-dessus du siège, moins ce qu'il s'enfonce.
+
+**Le monde** (`world/`, ADR 0050) : le client web est une spectatrice de `/ws/world` (`mika.world/1`), jumelle du client
+Unity.
+
+- `protocol.g.ts` est généré du schéma du noyau par `backendv2/.venv/bin/python frontend/Web/tools/gen_world_protocol.py`
+  (`--check` échoue s'il a vieilli ; `tests/protocol/test_world_wire.py` le vérifie).
+- `WorldSession` (hello, ping 5 s, reprise, accusés, débits), `WorldMirror` et `WorldIndex` (l'état dans l'ordre du
+  journal), `intentTimeline`, `actionMenu` (mêmes libellés qu'Unity) : purs, testés.
+- `WorldStage` montre l'état des meubles (porte, croisée de la fenêtre et portes d'armoire, sorties par `RoomHinges`
+  des maillages joints de `room.glb`), une silhouette pour un objet que la pièce ne dessine pas, ce qu'elle tient dans
+  sa main, les autres personnages. Le corps de Mika, lui, suit toujours `inner_state` (lieu, occupation, sommeil).
+- `WorldHud` : survol et menu d'actions au clic, refus du noyau, demandes de Mika, état de la connexion. Tant que le
+  noyau ne fait entrer personne dans le monde (P4), agir et faire un geste sont refusés, et le refus se lit.
 
 **Le reste**
 
@@ -797,7 +813,7 @@ bloom.
 - `network/WebSocketClient.ts` : reprise exponentielle, ping toutes les 20 s, reconnexion après 50 s de silence, file de
   sortie rejouée ; un 4401 est terminal.
 - `ui/chatSync.ts` : fusion du fil par curseur.
-- Les 31 fichiers vitest sont dans des dossiers `__tests__`.
+- Les 35 fichiers vitest sont dans des dossiers `__tests__`.
 
 ### Unity, Android, Extension
 
