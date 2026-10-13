@@ -278,16 +278,24 @@ export function consoleHref(href: unknown): string | undefined {
     : undefined;
 }
 
-/** La page de la console qu'ouvre le bouton ⚙️ du chat : « Tous les réglages ». */
-export const SETTINGS_PAGE = "/inspecteur/reglages/apercu";
+/** Les pages de la console qu'ouvre le menu ⚙️ du chat, dans l'ordre. */
+export const OPERATOR_PAGES: readonly { href: string; label: string }[] = [
+  { href: "/inspecteur/reglages/apercu", label: "Réglages" },
+  { href: "/inspecteur/constellation", label: "Sa mémoire en 3D" },
+];
 
 /**
- * Le bouton ⚙️, pour une opératrice seulement : la console, où tout se règle.
- * Un autre compte ne le voit pas — la console lui fermerait sa porte. Le lien
- * n'ouvre aucun droit : la console garde sa propre porte d'opératrice.
+ * Le menu ⚙️, pour une opératrice seulement : la console, où tout se règle,
+ * et sa mémoire vue en 3D (la constellation). Un autre compte n'a aucun lien —
+ * la console lui fermerait sa porte. Un lien n'ouvre aucun droit : la console
+ * garde sa propre porte d'opératrice.
  */
-export function settingsLink(operator: boolean): string | undefined {
-  return operator ? consoleHref(SETTINGS_PAGE) : undefined;
+export function operatorLinks(operator: boolean): { href: string; label: string }[] {
+  if (!operator) return [];
+  return OPERATOR_PAGES.flatMap(({ href, label }) => {
+    const page = consoleHref(href);
+    return page ? [{ href: page, label }] : [];
+  });
 }
 
 /**

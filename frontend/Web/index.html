@@ -128,7 +128,7 @@
       #chat-attach:hover {
         background: rgba(255, 255, 255, 0.2);
       }
-      #tts-mute, #chat-clear, #chat-settings {
+      #tts-mute, #chat-clear, #chat-settings > summary {
         padding: 12px 14px;
         border: none;
         border-radius: 24px;
@@ -140,12 +140,45 @@
         transition: background 0.2s;
         flex-shrink: 0;
       }
-      /* un lien (il ouvre la console) habillé comme ses voisins ; caché par `hidden` hors opératrice */
+      /* le menu ⚙️ d'une opératrice (caché par `hidden` pour un autre compte) : des liens vers la console,
+         ouverts au-dessus de la saisie */
       #chat-settings {
-        text-decoration: none;
-        line-height: normal;
+        position: relative;
+        flex-shrink: 0;
       }
-      #tts-mute:hover, #chat-clear:hover, #chat-settings:hover {
+      #chat-settings > summary {
+        list-style: none;
+        user-select: none;
+      }
+      #chat-settings > summary::-webkit-details-marker { display: none; }
+      #chat-settings[open] > summary { background: rgba(255, 255, 255, 0.2); }
+      #chat-settings-menu {
+        position: absolute;
+        bottom: calc(100% + 8px);
+        left: 0;
+        z-index: 20;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px;
+        border-radius: 14px;
+        background: rgba(20, 20, 35, 0.92);
+        backdrop-filter: blur(12px);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      }
+      #chat-settings-menu a {
+        padding: 9px 14px;
+        border-radius: 9px;
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 14px;
+        text-decoration: none;
+        white-space: nowrap;
+      }
+      #chat-settings-menu a:hover, #chat-settings-menu a:focus-visible {
+        background: rgba(255, 255, 255, 0.12);
+        outline: none;
+      }
+      #tts-mute:hover, #chat-clear:hover, #chat-settings > summary:hover {
         background: rgba(255, 255, 255, 0.2);
       }
       #tts-mute.muted {
@@ -992,7 +1025,10 @@
         <div id="chat-messages"></div>
         <div id="attachment-previews"></div>
         <div id="chat-input-container">
-          <a id="chat-settings" title="Réglages (la console)" target="_blank" rel="noopener" hidden>⚙️</a>
+          <details id="chat-settings" hidden>
+            <summary title="Réglages et sa mémoire (la console)">⚙️</summary>
+            <nav id="chat-settings-menu"></nav>
+          </details>
           <button id="tts-mute" title="Couper / activer la voix">🔊</button>
           <button id="chat-clear" title="Effacer l'historique du chat">🗑️</button>
           <button id="chat-attach" title="Joindre un fichier">📎</button>

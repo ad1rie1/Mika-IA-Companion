@@ -14,8 +14,8 @@ import {
   readCache,
   RESTORED_PENDING_REASON,
   restoredStatus,
-  SETTINGS_PAGE,
-  settingsLink,
+  OPERATOR_PAGES,
+  operatorLinks,
   sortMessages,
   stripProsody,
   withAttachments,
@@ -688,13 +688,20 @@ describe("stripProsody", () => {
   });
 });
 
-describe("settingsLink", () => {
-  it("mène une opératrice aux réglages de la console", () => {
-    expect(settingsLink(true)).toBe("/inspecteur/reglages/apercu");
-    expect(settingsLink(true)).toBe(SETTINGS_PAGE);
+describe("operatorLinks", () => {
+  it("mène une opératrice aux réglages et à sa mémoire en 3D", () => {
+    expect(operatorLinks(true)).toEqual([
+      { href: "/inspecteur/reglages/apercu", label: "Réglages" },
+      { href: "/inspecteur/constellation", label: "Sa mémoire en 3D" },
+    ]);
+  });
+
+  it("ne garde que des pages de la console", () => {
+    for (const { href } of operatorLinks(true)) expect(href).toMatch(/^\/inspecteur\//);
+    expect(operatorLinks(true)).toHaveLength(OPERATOR_PAGES.length);
   });
 
   it("ne mène nulle part pour un autre compte", () => {
-    expect(settingsLink(false)).toBeUndefined();
+    expect(operatorLinks(false)).toEqual([]);
   });
 });

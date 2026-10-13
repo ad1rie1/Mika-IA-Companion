@@ -41,8 +41,8 @@ import {
   mergeHistory,
   nextClientMsgId,
   readCache,
+  operatorLinks,
   restoredStatus,
-  settingsLink,
   stripProsody,
   timeMarkers,
   whyLink,
@@ -339,15 +339,29 @@ export class ChatOverlay {
   setOperator(operator: boolean) {
     if (operator === this.operator) return;
     this.operator = operator;
-    // Et le bouton ⚙️ de la saisie, vers les réglages de la console.
-    const settings = document.getElementById("chat-settings") as HTMLAnchorElement | null;
-    const page = settingsLink(operator);
-    if (settings) {
-      settings.hidden = !page;
-      if (page) settings.href = `${API_BASE}${page}`;
-      else settings.removeAttribute("href");
-    }
+    this.paintOperatorMenu();
     this.repaint({ animate: false });
+  }
+
+  /** Le menu ⚙️ de la saisie : ses liens vers la console pour une opératrice,
+   * rien (et caché) pour un autre compte. */
+  private paintOperatorMenu() {
+    const menu = document.getElementById("chat-settings") as HTMLDetailsElement | null;
+    const list = document.getElementById("chat-settings-menu");
+    if (!menu || !list) return;
+    const links = operatorLinks(this.operator);
+    list.replaceChildren(
+      ...links.map(({ href, label }) => {
+        const link = document.createElement("a");
+        link.href = `${API_BASE}${href}`;
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = label;
+        return link;
+      })
+    );
+    menu.hidden = links.length === 0;
+    if (menu.hidden) menu.open = false;
   }
 
   /** Wipe the displayed messages + persisted history (typing bubble kept). */
@@ -386,6 +400,20 @@ export class ChatOverlay {
       if (!confirm("Effacer l'historique du chat affiché ?")) return;
       this.clearHistory();
     });
+
+    // Le menu ⚙️ se referme une fois un lien suivi, d'un clic ailleurs ou d'Échap.
+    const operatorMenu = document.getElementById("chat-settings") as HTMLDetailsElement | null;
+    if (operatorMenu) {
+      document.getElementById("chat-settings-menu")?.addEventListener("click", (e) => {
+        if ((e.target as HTMLElement).closest("a")) operatorMenu.open = false;
+      });
+      document.addEventListener("click", (e) => {
+        if (operatorMenu.open && !operatorMenu.contains(e.target as Node)) operatorMenu.open = false;
+      });
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && operatorMenu.open) operatorMenu.open = false;
+      });
+    }
 
     this.fileInput.addEventListener("change", () => {
       if (this.fileInput.files) {
