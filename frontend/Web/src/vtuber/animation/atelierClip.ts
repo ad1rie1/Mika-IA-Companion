@@ -122,7 +122,29 @@ export function workshopFrame(rest: AtelierMotion["rest"]): THREE.Quaternion {
   const vrm = new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0), new THREE.Vector3(0, 0, 1));
   const m = vrm.multiply(workshop.transpose());
   if (m.determinant() < 0) throw new Error("the workshop's T-pose is mirrored relative to the VRM's");
-  return new THREE.Quaternion().setFromRotationMatrix(m);
+  return new THREE.Quaternion().setFromRotationMatrix(snapToAxes(m));
+}
+
+/**
+ * The workshop rig IS her VRM skeleton, imported in Blender: the two spaces
+ * differ by an exact change of axes (here (x, y, z) → (x, z, −y)). Measured
+ * on her body the frame is off by her own posture (her head is 0.4° off
+ * the plumb of her hips) — so a frame within 25° of a change of axes is
+ * snapped to it; a rig turned some other way keeps the measured one.
+ */
+function snapToAxes(m: THREE.Matrix4): THREE.Matrix4 {
+  const e = m.elements; // column-major
+  const at = (row: number, col: number) => e[col * 4 + row];
+  const snapped = new THREE.Matrix4().set(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1);
+  const used = new Set<number>();
+  for (let row = 0; row < 3; row++) {
+    let best = 0;
+    for (let col = 1; col < 3; col++) if (Math.abs(at(row, col)) > Math.abs(at(row, best))) best = col;
+    if (Math.abs(at(row, best)) < Math.cos((25 * Math.PI) / 180) || used.has(best)) return m;
+    used.add(best);
+    snapped.elements[best * 4 + row] = Math.sign(at(row, best));
+  }
+  return snapped.determinant() > 0 ? snapped : m;
 }
 
 /** Decode a workshop motion into world changes from the T-pose (pure: no VRM involved). */

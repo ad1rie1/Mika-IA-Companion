@@ -102,16 +102,21 @@ LIE_MARK = re.compile(r"\[\s*(?:MENSONGE|MENTI|LIE)\b\s*:?([^\]]*)(?:\]|$)", re.
 _SENTENCE = re.compile(r"[^.!?…]+[.!?…]*")
 
 
-def lied(text: str, mark: str) -> tuple[int, int]:
+def lied(text: str, mark: str) -> tuple[int, int] | None:
     """Le passage faux de ce qu'elle a dit (``début``, ``fin``) : la phrase qui partage le plus de mots avec sa
-    marque ; toute la réponse quand la marque ne désigne rien. La marque elle-même n'est jamais gardée."""
+    marque, pourvu qu'elle en porte au moins la moitié ; toute la réponse quand la marque ne cite rien
+    (« [mensonge] »). ``None`` quand la marque cite une phrase que cette réponse ne contient pas — celle d'un message
+    précédent, qu'elle croit après coup avoir inventée (ADR 0108) : ce n'est pas un mensonge de cette réponse, rien
+    n'est désigné. La marque elle-même n'est jamais gardée."""
     wanted = stems(mark)
-    best, span = 0, (0, len(text))
+    if not wanted:
+        return 0, len(text)
+    best, span = 0, None
     for m in _SENTENCE.finditer(text):
         shared = len(stems(m.group()) & wanted)
         if shared > best and m.group().strip():
             best, span = shared, (m.start() + len(m.group()) - len(m.group().lstrip()), m.end())
-    return span
+    return span if 2 * best >= len(wanted) else None
 
 
 def parse(text: str, speaker: str = "") -> tuple[str, dict[str, str]]:
@@ -125,9 +130,9 @@ def parse(text: str, speaker: str = "") -> tuple[str, dict[str, str]]:
     annotations: dict[str, str] = {}
     if their is not None:
         annotations[c.READING_ANNOTATION] = their.encode()
-    if marks and tag.text.strip():
-        start, end = lied(tag.text, " ".join(marks))
-        annotations[c.LIE_ANNOTATION] = f"{start}:{end}"
+    span = lied(tag.text, " ".join(marks)) if marks and tag.text.strip() else None
+    if span is not None:
+        annotations[c.LIE_ANNOTATION] = f"{span[0]}:{span[1]}"
     if tag.declared is not None:
         annotations[c.EMOTION_ANNOTATION] = tag.declared.encode()
     elif tag.unknown:

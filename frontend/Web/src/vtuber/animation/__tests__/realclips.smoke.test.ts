@@ -25,8 +25,10 @@ function loadManifestEntries(): Array<[string, { url: string }]> {
   const manifest = JSON.parse(
     fs.readFileSync(MANIFEST_PATH, "utf-8")
   ) as AnimationManifest;
-  return Object.entries(manifest.clips).filter(([, entry]) =>
-    fs.existsSync(path.join(PUBLIC_DIR, entry.url))
+  // Mixamo downloads only: the Unity workshop's motions have their own
+  // smoke test (atelierclips.smoke.test.ts).
+  return Object.entries(manifest.clips).filter(
+    ([, entry]) => entry.url.endsWith(".fbx") && fs.existsSync(path.join(PUBLIC_DIR, entry.url))
   );
 }
 

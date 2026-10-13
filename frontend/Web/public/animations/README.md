@@ -1,7 +1,27 @@
-# Animations Mixamo — pack de départ
+# Animations
 
-Le système d'animation charge les clips listés dans [manifest.json](manifest.json)
-et les retarget à la volée sur le VRM (bones humanoïdes normalisés).
+## Celles de l'atelier d'Unity (par défaut)
+
+Le manifeste pointe vers les mouvements de l'atelier d'animation du client Unity
+(`frontend/Web/assets-src/blender/atelier_*.py`) : faits sur le squelette de Mika
+(le même modèle que `models/default.vrm`), pieds plantés, mains hors du corps,
+boucles refermées, assise à la hauteur de la vraie chaise. `atelier/` est un lien
+vers `frontend/Unity/ArtSource/atelier/motions/` : les deux clients lisent les mêmes
+fichiers (`<nom>.json.gz`, les os seuls, versionnés), et une retouche de l'atelier
+arrive sur le web sans copie. `src/vtuber/animation/atelierClip.ts` les passe sur
+les os normalisés du VRM.
+
+Au-delà des attentes, paroles et gestes, le manifeste en prend la marche
+(`walking`, jouée à sa vitesse de capture), l'assise (`sitting_idle`, catégorie
+`posture`) et deux occupations debout (`window_lean` pour regarder dehors,
+`shelf_browse` pour bouquiner, catégorie `activity`). Les clips du bureau
+(`desk_*`, `chair_*`) attendent la chaise à ses positions de travail, que le web ne
+fait pas encore.
+
+## Mixamo — pack de départ (l'ancienne source)
+
+Un clip du manifeste peut encore pointer vers un FBX Mixamo : le système d'animation
+les retarget à la volée sur le VRM (bones humanoïdes normalisés).
 **Aucun clip n'est fourni dans le repo** : Mixamo exige un compte Adobe, il
 faut les télécharger à la main (5 minutes). Un clip manquant n'est jamais
 bloquant — la pool se réduit, un warn console liste ce qui manque.

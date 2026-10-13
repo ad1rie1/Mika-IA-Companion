@@ -7,7 +7,8 @@
 - le message auquel elle répond est situé par rapport au dernier échange ;
 - ses propres tours gardent leur balise d'émotion ;
 - dans un salon, chacun parle sous son nom, jamais sous son adresse ;
-- le budget compte ce qui part hors du composeur (persona, outils).
+- le budget compte ce qui part hors du composeur (persona, outils) ;
+- un de ses messages écrit avec ses outils dit lesquels (ADR 0108).
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from mika.faculties.transcript import (
 from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.codec import canonical_json
 from mika.kernel.prompt import CONTEXT_FOOTER, Budget, ChatPrompt
-from mika.ports.llm import LLMResponse
+from mika.ports.llm import LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
 from mika.vocab.affect import parse_tag
 from mika.vocab.phrasebook import phrase
@@ -272,3 +273,67 @@ def test_her_own_initiative_is_never_read_as_an_empty_message_from_the_person():
     room = thread_turns([_row(7, mon(19), "assistant", "INITIATIVE", "yo tout le monde", room="salon")], PARIS,
                         mon(20), 20 * MINUTE)
     assert room[0].opening.endswith(phrase("transcript.thread.she_spoke_first"))
+
+
+# ── Ce qu'elle a fait pour répondre (ADR 0108) ──────────────────────────────
+
+
+def _tooled(n: int, at: int, kind: str, text: str, tools: str | None) -> dict:
+    return {**_row(n, at, "assistant", kind, text), "tools": tools}
+
+
+def test_her_message_says_which_tools_it_came_from():
+    """Le fil ne garde que ce qu'elle a dit, pas ce que ses outils lui ont rendu : relisant « j'ai regardé les
+    prévisions » sans trace de la recherche, elle s'est crue prise à inventer et s'en est accusée. Son repère dit
+    maintenant de quels outils son message vient (et ceux qui ont échoué). Contre-exemple : un message écrit sans
+    outil n'a pas de repère ; une initiative garde le sien, et y ajoute ses outils."""
+    searched = '[["mcp_web_search", true], ["mcp_web_read", true], ["camera_look", false]]'
+    rows = [_row(1, mon(22), "user", "message", "tu peux regarder la météo de demain ?"),
+            _tooled(2, mon(22, 1), "REPLY", "j'ai regardé : du soleil, 19 degrés", searched),
+            _row(3, mon(22, 2), "user", "message", "merci !"),
+            _tooled(4, mon(22, 3), "REPLY", "avec plaisir", None),
+            _tooled(5, mon(9, 0, 1), "INITIATIVE", "il fait beau comme prévu", '[["mcp_web_search", true]]')]
+    msgs = ChatPrompt("", history=tuple(thread_turns(rows, PARIS, mon(10, 0, 1), 20 * MINUTE)),
+                      message="x").chat_messages()
+    used = phrase("transcript.thread.used_tools", tools="mcp_web_search, mcp_web_read")
+    failed = phrase("transcript.thread.tools_failed", tools="camera_look")
+    at = [m["content"] for m in msgs].index("j'ai regardé : du soleil, 19 degrés")
+    assert msgs[at - 1] == {"role": "user", "content": f"[{used} ; {failed}]"}, "juste avant ce qu'elle en a dit"
+    plain = [m["content"] for m in msgs].index("avec plaisir")
+    assert msgs[plain - 1] == {"role": "user", "content": "merci !"}, "sans outil, pas de repère"
+    initiative = [m["content"] for m in msgs].index("il fait beau comme prévu")
+    assert msgs[initiative - 1]["content"] == (
+        f"[le lendemain, mardi 9h00 — {phrase('transcript.thread.she_wrote_first')} — "
+        f"{phrase('transcript.thread.used_tools', tools='mcp_web_search')}]")
+    # une valeur illisible ne casse rien : pas de repère
+    assert thread_turns([_tooled(6, mon(22), "REPLY", "ok", "pas du json")], PARIS, mon(23), 20 * MINUTE)[0].mark == ""
+
+
+def test_the_next_turn_sees_that_her_answer_came_from_a_search(tmp_path):
+    """De bout en bout : elle répond en se servant d'un outil ; au tour suivant, le fil le dit avant sa réponse."""
+
+    def searching(req):
+        if req.role == "reply" and "cherche" in req.messages[-1].content and not any(
+                m.role == "tool" for m in req.messages):
+            return LLMResponse("", tool_calls=(ToolCall("s1", "memory_search", {"query": "parapluie"}),),
+                               stop="tool_use")
+        return respond(req)
+
+    kernel, clock, llm, _ = build(tmp_path, searching, start=mon(17, 55))
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_1", "Adrien")
+        for text in ("cherche un peu mon parapluie", "et sinon, ta soirée ?"):
+            p = await kernel.perceive(said("user_1", text))
+            await p.reply
+            await asyncio.sleep(30)
+        await kernel.stop()
+
+    run_virtual(clock, main)
+    later = replies_to(llm, "user_1")[-1]
+    shown = [m.content for m in later.messages[:-1]]
+    note = f"[{phrase('transcript.thread.used_tools', tools='memory_search')}]"
+    assert note in shown, "sa réponse précédente vient d'une recherche, et le fil le dit"
+    asked = next(i for i, m in enumerate(shown) if m.endswith("cherche un peu mon parapluie"))
+    assert shown[asked + 1] == note and later.messages[asked + 2].role == "assistant", "entre la question et sa réponse"

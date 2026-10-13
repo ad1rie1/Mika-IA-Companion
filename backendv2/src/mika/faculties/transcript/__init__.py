@@ -223,9 +223,10 @@ def _head(s: TranscriptState, cx) -> int:
 #: ``typed`` : avec des pièces jointes, combien de caractères du début de ``text`` la personne a tapés (le reste
 #: est ce qu'elle en a perçu, pour le prompt) ; nul quand il n'y a rien à séparer (version 2 de la table).
 #: ``unanswered`` : pourquoi un message reçu est resté sans réponse pour de bon (``c.UNANSWERED_*``), posé par la
-#: fin d'épisode qui l'a réglé ; nul sinon (version 3)
+#: fin d'épisode qui l'a réglé ; nul sinon (version 3). ``tools`` : les outils dont elle s'est servie pour écrire un
+#: de ses messages (version 6, ADR 0108)
 _COLUMNS = ("id", "at", "role", "person", "channel", "room", "source", "kind", "text", "client_msg_id",
-            "reply_to", "emotion", "emotion_intensity", "attachments", "typed", "unanswered")
+            "reply_to", "emotion", "emotion_intensity", "attachments", "typed", "unanswered", "tools")
 
 
 class Thread:
@@ -277,7 +278,7 @@ def _row(e: Any) -> tuple[Any, ...] | None:
         text = d.text.text or ""
         typed = None if d.typed_chars is None else max(0, min(len(text), d.typed_chars))
         return (e.seq, e.at, "user", d.handle, d.channel, d.room, d.channel, "message", text,
-                d.client_msg_id, None, None, None, attachments, typed, None)
+                d.client_msg_id, None, None, None, attachments, typed, None, None)
     if e.type.name == rt.UTTERANCE.name and d.visible:
         declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
         # ce qui est parti avec son message : des identifiants seulement (leur nom, leur taille, leur sort sont à
@@ -286,8 +287,20 @@ def _row(e: Any) -> tuple[Any, ...] | None:
         return (e.seq, e.at, "assistant", d.target or "", d.channel, d.room, _source(d.kind), d.kind,
                 strip_prosody(d.text.text or ""), None, d.reply_to,
                 declared.emotion.value if declared else None, declared.intensity if declared else None, sent, None,
-                None)
+                None, _tools_of(d))
     return None
+
+
+def _tools_of(d: rt.Utterance) -> str | None:
+    """Les outils dont elle s'est servie pour écrire ce message, dans l'ordre et sans doublon : ``[[nom, réussi],
+    …]`` en JSON — leurs noms seulement, jamais ce qu'elle leur a demandé (ce texte-là n'a pas de sujets déclarés,
+    l'oubli ne l'atteindrait pas) ; nul sans outil."""
+    seen: list[list[Any]] = []
+    for tool in d.tools:
+        pair = [tool.name, bool(tool.ok)]
+        if pair not in seen:
+            seen.append(pair)
+    return json.dumps(seen) if seen else None
 
 
 def _source(kind: str) -> str:
@@ -320,11 +333,12 @@ def _left(d: rt.EpisodeEnded) -> list[tuple[str, int]]:
     return [(issue, int(seq)) for seq in seqs]
 
 
+#: version 6 : la colonne ``tools`` (les outils dont elle s'est servie pour écrire un de ses messages, ADR 0108) ;
 #: version 5 : la table déclarée pour les deux moteurs (ADR 0101), et ``folded`` (le texte replié que cherche la
 #: console) ; version 3 : la colonne ``unanswered`` (pourquoi un message reçu est resté sans réponse), d'où les fins
 #: d'épisode ; version 2 : la colonne ``typed`` (ce que la personne a tapé, à part de ce que ses pièces jointes ont
 #: donné) — la table se reconstruit depuis le journal au premier démarrage
-TRANSCRIPT.projector(c.THREAD_TABLE, version=5, tier=Tier.T0,
+TRANSCRIPT.projector(c.THREAD_TABLE, version=6, tier=Tier.T0,
                      types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_ENDED])(Thread)
 
 
@@ -617,6 +631,28 @@ def _first(mark: str, note: str) -> str:
     return f"{mark} — {note}" if mark else note
 
 
+def used_tools(raw: str | None) -> str:
+    """Ce que dit le repère d'un de ses messages écrit avec ses outils (la colonne ``tools``, ADR 0108). Le fil ne
+    garde que ce qu'elle a dit, pas ce que ses outils lui ont rendu : sans ce repère, au tour suivant, elle relisait
+    « j'ai regardé les prévisions » sans trace de la recherche, se croyait prise à inventer et s'en accusait.
+    ``""`` : aucun outil (ou une valeur illisible)."""
+    try:
+        pairs = json.loads(raw) if raw else []
+    except ValueError:
+        return ""
+    if not isinstance(pairs, list):
+        return ""
+    named = [(str(p[0]), bool(p[1])) for p in pairs if isinstance(p, list) and len(p) == 2]
+    worked = list(dict.fromkeys(name for name, ok in named if ok))
+    failed = list(dict.fromkeys(name for name, ok in named if not ok and name not in worked))
+    notes = []
+    if worked:
+        notes.append(phrase("transcript.thread.used_tools", tools=", ".join(worked)))
+    if failed:
+        notes.append(phrase("transcript.thread.tools_failed", tools=", ".join(failed)))
+    return " ; ".join(notes)
+
+
 def thread_turns(rows: Sequence[Mapping[str, Any]], tz: ZoneInfo, now: int, after_us: int,
                  names: Mapping[str, str] | None = None) -> list[ChatTurn]:
     """Les tours du fil, chacun avec son repère par rapport au précédent (et le
@@ -625,7 +661,9 @@ def thread_turns(rows: Sequence[Mapping[str, Any]], tz: ZoneInfo, now: int, afte
     repère (« [jeudi 19h06 — c'est toi qui lui as écrit] ») : personne ne l'avait
     relancée. Un message de la personne resté sans réponse le dit aussi (« [mardi
     14h13 — tu n'as pas pu lui répondre : une panne] ») : posé par la fin qui l'a
-    réglé, avant le tour suivant — le préfixe en cache ne bouge pas."""
+    réglé, avant le tour suivant — le préfixe en cache ne bouge pas. Un des siens
+    écrit avec ses outils dit lesquels (ADR 0108) : ce qu'elle y affirmait venait
+    d'eux, pas de son imagination."""
     out: list[ChatTurn] = []
     prev: int | None = None
     for r in rows:
@@ -633,15 +671,17 @@ def thread_turns(rows: Sequence[Mapping[str, Any]], tz: ZoneInfo, now: int, afte
         mark = gap_mark(prev, at, tz, after_us) if prev is not None else ""
         prev = at
         opening = opening_mark(at, now, tz)
-        if r["role"] == "assistant" and r.get("kind") == Kind.INITIATIVE:
-            # sans lui, le repère seul (« [jeudi 19h06] ») se lit comme un message vide de la personne, qui l'aurait
-            # relancée (HUM-22)
-            note = phrase("transcript.thread.she_spoke_first") if r.get("room") else \
-                phrase("transcript.thread.she_wrote_first")
-            out.append(ChatTurn("assistant", tagged(r), id=r["id"], mark=_first(mark, note),
-                                opening=_first(opening, note)))
-        elif r["role"] == "assistant":
-            out.append(ChatTurn("assistant", tagged(r), id=r["id"], mark=mark, opening=opening))
+        if r["role"] == "assistant":
+            note = ""
+            if r.get("kind") == Kind.INITIATIVE:
+                # sans lui, le repère seul (« [jeudi 19h06] ») se lit comme un message vide de la personne, qui
+                # l'aurait relancée (HUM-22)
+                note = phrase("transcript.thread.she_spoke_first") if r.get("room") else \
+                    phrase("transcript.thread.she_wrote_first")
+            tools = used_tools(r.get("tools"))
+            note = _first(note, tools) if tools else note
+            out.append(ChatTurn("assistant", tagged(r), id=r["id"], mark=_first(mark, note) if note else mark,
+                                opening=_first(opening, note) if note else opening))
         else:
             left = left_unanswered(r.get("unanswered"))
             out.append(ChatTurn("user", r["text"] or "", speaker=(names or {}).get(r["person"], ""), id=r["id"],

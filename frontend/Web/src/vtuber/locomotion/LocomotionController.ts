@@ -55,6 +55,13 @@ export interface LocomotionOptions {
   baseYaw: number;
   /** Standing hips height of the rig (m). */
   hipsHeight: number;
+  /**
+   * Where the seated clip holds the hips above the root (m): the standing
+   * height for the procedural one, which keeps them at rest; the measured
+   * height for the Unity workshop's (≈ 0.567). The root rises or sinks by
+   * the difference so the hips land on the seat. Absent: `hipsHeight`.
+   */
+  seatedHipsHeight?: () => number;
   body: LocomotionBody;
 }
 
@@ -534,7 +541,19 @@ export class LocomotionController {
 
   /** How far the root goes down for her hips to sit on this seat (see SEAT_HIPS_ABOVE). */
   private seatOffset(seat: { height: number; sink: number }): number {
-    return seat.height + SEAT_HIPS_ABOVE - seat.sink - this.opts.hipsHeight;
+    return seat.height + SEAT_HIPS_ABOVE - seat.sink - (this.opts.seatedHipsHeight?.() ?? this.opts.hipsHeight);
+  }
+
+  /**
+   * The seated clip changed under her (the workshop's arrived after the
+   * procedural one): settled on a seat, her root is set again for it.
+   */
+  reseat(): void {
+    if (this.phase !== "settled" || this.posture !== "sit" || !this.place) return;
+    const seat = PLACES[this.place].seat;
+    if (!seat) return;
+    this.height = this.seatOffset(seat);
+    this.compose();
   }
 
   private pose(): Pose {

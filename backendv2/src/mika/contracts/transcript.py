@@ -36,7 +36,9 @@ def thread_table(sfx: str = "") -> Table:
     bornées à ``HANDLE_MAX`` : la projection y range une valeur plus longue par ``fit`` plutôt que de faire échouer
     l'ajout, et une lecture par la valeur brute ne la trouve pas. ``folded`` : le texte replié (``fold_text`` : casse
     et accents ignorés), ce que cherche la console — pareil sur les deux moteurs, là où ``LIKE`` ne l'est pas ; la
-    projection l'écrit toujours (nul seulement pour une ligne posée à la main, que la recherche ne trouve pas)."""
+    projection l'écrit toujours (nul seulement pour une ligne posée à la main, que la recherche ne trouve pas).
+    ``tools`` : pour un de ses messages, les outils dont elle s'est servie pour l'écrire (``rt.Utterance.tools``, en
+    JSON : ``[[nom, réussi], …]``, leurs noms seulement) ; nul pour un message reçu (ADR 0108)."""
     name = f"{THREAD_TABLE}{sfx}"
     return projection_table(
         name,
@@ -56,6 +58,7 @@ def thread_table(sfx: str = "") -> Table:
         Column("attachments", LongText),
         Column("typed", BigInteger),
         Column("unanswered", LongText),
+        Column("tools", LongText),
         Column("folded", LongText),
         Index(f"{name}_person", "person", "id"),
         Index(f"{name}_room", "room", "id"),

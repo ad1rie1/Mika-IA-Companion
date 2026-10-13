@@ -30,6 +30,7 @@ import {
   buildSitClip,
   buildWalkClip,
   standingHipsHeight,
+  WALK_SPEED,
 } from "../locomotion/proceduralClips";
 import type { LoadedClip } from "./ClipLibrary";
 import { SleepOverlay } from "./overlays/SleepOverlay";
@@ -191,6 +192,17 @@ export class AnimationSystem {
         // A downloaded walk (manifest category "locomotion") replaces the
         // procedural one.
         if (loaded.meta.category === "locomotion") this.walkClip = loaded;
+        // The workshop's seated stance replaces the procedural one; seated
+        // already, she takes it at once (and her root its height).
+        if (loaded.meta.category === "posture" && loaded.meta.posture === "sit") {
+          this.sitClip = loaded;
+          if (this.bodyPosture === "sit") this.applyPostureClip(0.6);
+          this.locomotion?.reseat();
+        }
+        // A stance for what she is doing, arrived while she does it.
+        if (loaded.meta.category === "activity" && this.activityName && loaded.meta.activities?.includes(this.activityName)) {
+          this.applyPostureClip(0.9);
+        }
       },
     });
     this._ready = true;
@@ -437,6 +449,37 @@ export class AnimationSystem {
   // ── Locomotion ────────────────────────────────────────────────────
 
   private walkClip: LoadedClip | null = null;
+  private sitClip: LoadedClip | null = null;
+  private lieClip: LoadedClip | null = null;
+  /** The stance the locomotion asked for (stand, sit, lie). */
+  private bodyPosture: Posture = "stand";
+
+  /**
+   * The clip the body holds when it is not walking: seated or lying as the
+   * locomotion says; standing, the stance of what she does there when the
+   * manifest has one (leaning on the sill to look outside — the Unity
+   * workshop's `window_lean`), else none (the idle pool).
+   */
+  private applyPostureClip(fade: number): void {
+    const machine = this.machine;
+    if (!machine) return;
+    let clip: LoadedClip | null = null;
+    if (this.bodyPosture === "sit") clip = this.sitClip;
+    else if (this.bodyPosture === "lie") clip = this.lieClip;
+    else if (this.activityName) {
+      clip =
+        this.library
+          .byCategory("activity")
+          .find((c) => c.meta.activities?.includes(this.activityName!)) ?? null;
+    }
+    machine.setPosture(clip, fade);
+  }
+
+  /** The walk clip's playback for the body's pace: a workshop walk knows its own ground speed. */
+  private walkPace(): number {
+    const speed = this.walkClip?.measures?.speed;
+    return speed && speed > 0.1 ? WALK_SPEED / speed : 1;
+  }
 
   private initLocomotion(vrm: VRM, root: THREE.Object3D): void {
     const machine = this.machine;
@@ -448,19 +491,27 @@ export class AnimationSystem {
       report: null,
     });
     this.walkClip = this.library.byCategory("locomotion")[0] ?? synth(WALK_CLIP_NAME, buildWalkClip(vrm));
-    const sit = synth(SIT_CLIP_NAME, buildSitClip(vrm));
-    const lie = synth(LIE_CLIP_NAME, buildLieClip(vrm));
+    const standing = standingHipsHeight(vrm);
+    this.sitClip =
+      this.library.byCategory("posture").find((c) => c.meta.posture === "sit") ??
+      synth(SIT_CLIP_NAME, buildSitClip(vrm));
+    this.lieClip = synth(LIE_CLIP_NAME, buildLieClip(vrm));
     this.locomotion = new LocomotionController({
       root,
       baseYaw: root.rotation.y,
-      hipsHeight: standingHipsHeight(vrm),
+      hipsHeight: standing,
+      // The procedural seated clip keeps the hips at rest; the workshop's
+      // holds them where it measured them.
+      seatedHipsHeight: () => this.sitClip?.measures?.hipsHeight ?? standing,
       body: {
         walk: (timeScale) => {
           if (timeScale === null) machine.setWalking(null);
-          else if (this.walkClip) machine.setWalking(this.walkClip, timeScale);
+          else if (this.walkClip) machine.setWalking(this.walkClip, timeScale * this.walkPace());
         },
-        posture: (posture: Posture, fade) =>
-          machine.setPosture(posture === "sit" ? sit : posture === "lie" ? lie : null, fade),
+        posture: (posture: Posture, fade) => {
+          this.bodyPosture = posture;
+          this.applyPostureClip(fade);
+        },
       },
     });
     this.locomotion.setSleepPhase(this.requestedSleep);
@@ -502,6 +553,8 @@ export class AnimationSystem {
     this.focus = activityFocus(next);
     if (next !== null && !this.focus) console.warn(`AnimationSystem: unknown activity "${next}"`);
     this.hands.setActivity(this.focus?.hands ?? null, this.focus?.handMotion ?? 1);
+    // Standing, the stance of what she does (seated or lying, the posture stays).
+    if (this.bodyPosture === "stand") this.applyPostureClip(0.9);
   }
 
   /**

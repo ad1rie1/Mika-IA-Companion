@@ -73,7 +73,9 @@ class Launcher:
     """Construit la commande d'un serveur local : sa cage, son environnement, son dossier."""
 
     def __init__(self, root: Path, sandbox: Sandbox | None = None, limits: Limits | None = None) -> None:
-        self.root = root
+        # absolu : bubblewrap reçoit ces chemins et les lit depuis un autre dossier — un ``--data`` relatif
+        # (``data/v2``, le défaut) faisait tomber le serveur au démarrage, sans un mot (sonde du 2026-10-13)
+        self.root = Path(root).resolve()
         self.sandbox = sandbox or Sandbox.find()
         self.limits = limits or Limits()
 

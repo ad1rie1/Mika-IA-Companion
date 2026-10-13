@@ -2664,6 +2664,13 @@ transcript:
     she_wrote_first: c'est toi qui lui as écrit
     # Le même, dans un salon.
     she_spoke_first: c'est toi qui as pris la parole
+    # Dans le repère d'un de ses messages écrit avec ses outils (« [mardi 22h58 — pour écrire ce message, tu t'es
+    # servie de mcp_web_search : ce que tu y dis en vient] ») : le fil ne garde que ce qu'elle a dit, pas ce que ses
+    # outils lui ont rendu ; sans ce repère, au tour suivant, elle relisait « j'ai regardé » sans trace et croyait
+    # l'avoir inventé (ADR 0108). {tools} : leurs noms, séparés par des virgules.
+    used_tools: "pour écrire ce message, tu t'es servie de {tools} : ce que tu y dis en vient"
+    # Les outils qui ont échoué pendant ce message. {tools} : leurs noms.
+    tools_failed: "tu as essayé {tools}, sans succès"
     # Dans le repère d'un message de la personne resté sans réponse (« [mardi 14h13 — tu n'as pas pu lui répondre :
     # une panne] ») : un fait, jamais la cause technique ; ce qu'elle en dit, elle le décide.
     unanswered:

@@ -11,6 +11,7 @@ import os
 import shutil
 import socket
 import textwrap
+from pathlib import Path
 
 import pytest
 
@@ -119,6 +120,29 @@ async def test_a_local_server_lives_in_its_cage(tmp_path, monkeypatch):
     assert (await hub.call("ici", "ecrire", {"x": f"{home}/x.txt"})).ok and (tmp_path / "mcp/ici/x.txt").exists()
     await hub.aclose()
 
+
+
+@pytest.mark.skipif(shutil.which("pasta") is None or shutil.which("ip") is None, reason="pasta absent")
+async def test_a_relative_data_folder_still_starts_its_server(tmp_path, monkeypatch):
+    """``--data data/v2`` (le défaut) est relatif : la cage recevait des chemins relatifs qu'elle lisait depuis un
+    autre dossier, et le serveur tombait au démarrage sans un mot — plus de recherche sur le web en local (sonde du
+    2026-10-13). Dans le réseau à part comme sans, il démarre et vit dans son dossier, en chemin absolu."""
+    (tmp_path / "mcp" / "ici").mkdir(parents=True)
+    (tmp_path / "mcp" / "ici" / "server.py").write_text(SERVER, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    for network in ("isole", "aucun"):
+        spec = McpServer(purpose="un outil sur cette machine", transport="local", command="python3",
+                         args=("-I", "server.py"), network=network)
+        store = Store(ici=spec)
+        hub = McpHub(lambda store=store: store.config, lambda store=store: store.reviews, store.save,
+                     local_root=Path("mcp"))
+        try:
+            ok, message = await hub.test("ici")
+            assert ok, (network, message)
+            seen = await hub.call("ici", "voir", {})
+            assert seen.ok and f'"home": "{tmp_path / "mcp" / "ici"}"' in seen.text, seen.text
+        finally:
+            await hub.aclose()
 
 async def test_without_network_nothing_reaches_the_machine(tmp_path):
     listener = socket.socket()

@@ -216,7 +216,9 @@ class BwrapWorkshop:
                  bwrap: str | None = None, which: Callable[[str], str | None] = shutil.which,
                  credentials: Credentials | None = None, limits: Limits = Limits(),
                  pasta: str | None = None, ip: str | None = None, author: Callable[[], str] | None = None) -> None:
-        self.root = Path(root)
+        # absolu : bubblewrap reçoit ses chemins et les lit depuis un autre dossier (un ``--data`` relatif cassait
+        # la cage, sonde du 2026-10-13)
+        self.root = Path(root).resolve()
         self.credentials = credentials
         #: qui signe ses enregistrements : son nom, celui de sa persona (relu à chaque fois : elle peut en changer)
         self.author = author or (lambda: DEFAULT_NAME)

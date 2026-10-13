@@ -53,6 +53,23 @@ def test_the_mark_never_leaves_and_only_the_false_passage_is_kept():
     assert expression_c.LIE_ANNOTATION not in parse("Salut ! [EMOTION:happy:0.5]", "Mika")[1]
 
 
+
+def test_a_mark_on_what_she_said_before_designates_nothing_in_this_reply():
+    """ADR 0108 : au tour suivant, sans trace de sa recherche dans le fil, elle a cru avoir inventé sa réponse
+    précédente et l'a marquée mensonge — dans une réponse qui, elle, disait vrai (les prévisions de Météo-France).
+    Une marque qui cite une phrase absente de cette réponse ne désigne rien : aucun mensonge n'est retenu.
+    Contre-exemple : la même phrase, dite dans cette réponse, est bien le passage faux."""
+    previous = "J'ai regardé les prévisions pour demain, mercredi 14 octobre à Paris."
+    reply = ("Je dois te corriger : mon message précédent était inventé. Je n'avais rien regardé. Demain, mercredi, il "
+             f"fera environ 11 degrés vers 8 heures. [MENSONGE: {previous}] [EMOTION:embarrassed:0.5]")
+    text, ann = parse(reply, "Mika")
+    assert "MENSONGE" not in text and expression_c.LIE_ANNOTATION not in ann
+    text, ann = parse(f"{previous} Il fera beau. [MENSONGE: {previous}] [EMOTION:embarrassed:0.3]", "Mika")
+    assert false_part(text, ann[expression_c.LIE_ANNOTATION]) == previous
+    # une marque sans phrase (« j'ai menti ici ») désigne toute la réponse
+    text, ann = parse("Non, rien de spécial. [mensonge] [EMOTION:neutral:0.2]", "Mika")
+    assert false_part(text, ann[expression_c.LIE_ANNOTATION]) == text
+
 def test_lying_weighs_on_her_mood():
     thought = SimpleNamespace(data=attention_c.ThoughtBorn(text=Content.of("J'ai menti à Bob."), emotion="embarrassed",
                                                            intensity=0.45, origin=attention_c.LIE, about=("ext_1",)))

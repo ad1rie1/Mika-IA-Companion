@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0107, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0108, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -735,7 +735,7 @@ Tout le reste se déclare par décorateurs.
 | Sens et plugins | 0022, 0027, 0037, 0038, 0044, 0061, 0063, 0064, 0066, 0068, 0069, 0106 |
 | Fournisseurs LLM | 0026, 0072, 0073 |
 | Console et exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103 |
-| Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077 |
+| Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077, 0108 |
 | Voix et genèse | 0070, 0071 |
 | Ce que les sondes et audits ont montré | 0043, 0048, 0054, 0102 |
 
@@ -754,11 +754,17 @@ sur `ui/SpeechPresenter.ts`.
   avec une soupape `VOICED_HOLD_MAX_MS`.
 - Au réveil, elle observe un silence de 1,3 s.
 
+**Les clips** viennent de l'atelier d'animation d'Unity : `public/animations/atelier` est un lien vers
+`frontend/Unity/ArtSource/atelier/motions/`, que `vtuber/animation/atelierClip.ts` passe sur les os normalisés du VRM
+(le même squelette, la même formule que le retargeting Mixamo, qui reste possible clip par clip). La marche se joue à sa
+vitesse de capture ; l'assise (`posture`) et les occupations debout (`activity` : fenêtre, bibliothèque) aussi. Les clips
+du bureau (`desk_*`, `chair_*`) ne sont pas encore joués.
+
 **Le corps** (`vtuber/animation/AnimationSystem.ts`) suit, à chaque image, cet ordre :
 
 1. pose de repos ;
 2. machine à états (repos, parole, geste, sommeil, marche, posture) ;
-3. le mixer des clips Mixamo, reciblés à l'exécution (`mixamoRetarget.ts`), et leurs jumeaux miroirs `~m` ;
+3. le mixer des clips (atelier Unity ou Mixamo, reciblés à l'exécution), et leurs jumeaux miroirs `~m` ;
 4. `AttentionDirector`, pur : contact, aversion en planifiant une phrase, réflexion, écoute, voix intérieure, errance
    au bout de 25 s seule ;
 5. les surcouches additives : respiration, vie, sommeil, tête émotionnelle, tête d'attention, battements de la parole ;
@@ -813,7 +819,7 @@ Unity.
 - `network/WebSocketClient.ts` : reprise exponentielle, ping toutes les 20 s, reconnexion après 50 s de silence, file de
   sortie rejouée ; un 4401 est terminal.
 - `ui/chatSync.ts` : fusion du fil par curseur.
-- Les 35 fichiers vitest sont dans des dossiers `__tests__`.
+- Les 37 fichiers vitest sont dans des dossiers `__tests__`.
 
 ### Unity, Android, Extension
 
