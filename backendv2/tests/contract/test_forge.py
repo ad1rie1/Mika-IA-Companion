@@ -8,7 +8,11 @@ peut pas faire.
 - son stockage lui est propre et borné ; son réseau est libre (ADR 0105) : tout
   Internet, jamais une adresse privée ;
 - une écriture refusée ne change rien ; une version se remplace, se
-  restaure ; sans bubblewrap, rien ne tourne.
+  restaure ; sans bubblewrap, rien ne tourne ;
+- sa base (ADR 0101) : l'app y range ses lignes par l'hôte, n'atteint aucune
+  autre base, la garde d'une version à l'autre ; vider la vide, effacer
+  l'exporte dans la corbeille, et une app recréée repart de rien. Sous
+  ``--mariadb``, ses bases vivent sur le serveur, chacune sous son utilisateur.
 """
 
 from __future__ import annotations
@@ -18,12 +22,14 @@ import ipaddress
 import os
 import shutil
 import socket
+from pathlib import Path
 
 import pytest
 
 from mika.adapters import forge as forge_adapter
-from mika.adapters.forge import ForgeHost, lint
+from mika.adapters.forge import ForgeBases, ForgeHost, lint
 from mika.ports.forge import ForgeRefused
+from tests.fixtures import backend
 
 needs_bwrap = pytest.mark.skipif(shutil.which("bwrap") is None, reason="bubblewrap absent")
 MANIFEST = "title: Essai\nschedule: manual\nallowed_domains: [api.exemple.fr]\nconfig: {seuil: 3}\n"
@@ -35,6 +41,9 @@ def go(coro):
 
 
 def host(tmp_path, **kw):
+    if backend.active() and "bases" not in kw:  # la voie MariaDB : ses bases sur le serveur, sous le préfixe du test
+        kw["bases"] = ForgeBases(tmp_path / "forge", server=backend.url(), prefix=os.environ["MIKA_DATABASE_PREFIX"],
+                                 logs=backend.target(tmp_path, "views"))
     return ForgeHost(tmp_path / "forge", **kw)
 
 
@@ -138,6 +147,81 @@ def context(api):
           manifest="title: Essai\nallowed_domains: [interne.exemple.fr]\n")
     private = go(h.call("essai", "tick"))
     assert not private.ok and "privée" in private.error and "https://interne.exemple.fr/admin" not in fetched
+    h.shutdown()
+
+
+NOTES = """
+def tick(api):
+    api.execute("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, txt VARCHAR(200))")
+    n = api.query("SELECT COUNT(*) AS n FROM notes")[0]["n"]
+    api.execute("INSERT INTO notes (id, txt) VALUES (:id, :txt)", {"id": n + 1, "txt": "note " + str(n + 1)})
+    api.kv_set("dernier", n + 1)
+    return api.query("SELECT txt FROM notes ORDER BY id")
+
+def view(api):
+    out = {}
+    for key, fn, sql in (("attache", api.execute, "ATTACH 'ailleurs.db' AS a"),
+                         ("lecture", api.query, "DELETE FROM notes"),
+                         ("absente", api.query, "SELECT * FROM absente")):
+        try:
+            fn(sql)
+            out[key] = "passé"
+        except RuntimeError as exc:
+            out[key] = str(exc)
+    return out
+"""
+
+
+@needs_bwrap
+def test_an_app_keeps_its_rows_in_its_own_base_across_versions(tmp_path):
+    h = host(tmp_path)
+    write(h, NOTES)
+    assert go(h.call("essai", "tick")).value == [{"txt": "note 1"}]
+    second = go(h.call("essai", "tick"))
+    assert second.ok and second.value == [{"txt": "note 1"}, {"txt": "note 2"}]
+    refused = go(h.call("essai", "view")).value
+    assert "écriture" in refused["attache"] and "lecture" in refused["lecture"] and refused["absente"] != "passé"
+    # Mika (ses outils) et la console voient la même base
+    assert {t["name"]: t["rows"] for t in go(h.db_schema("essai"))["tables"]} == {"_kv": 1, "notes": 2}
+    assert go(h.db_query("essai", "SELECT txt FROM notes WHERE id = :id", {"id": 2})) == [{"txt": "note 2"}]
+    assert go(h.db_execute("essai", "DELETE FROM notes WHERE id = :id", {"id": 1}))["rows"] == 1
+    # une nouvelle version puis le retour à la précédente : le code change, la base reste
+    write(h, NOTES + "\n# v2\n")
+    go(h.rollback("essai"))
+    assert go(h.db_query("essai", "SELECT COUNT(*) AS n FROM notes")) == [{"n": 1}]
+    assert go(h.reset_storage("essai")) == 2  # une note, une clé
+    assert [t["name"] for t in go(h.db_schema("essai"))["tables"]] == ["_kv"]
+    h.shutdown()
+
+
+@needs_bwrap
+def test_an_app_reaches_no_other_base(tmp_path):
+    h = host(tmp_path)
+    write(h, "def tick(api):\n    api.execute(\"CREATE TABLE secret (txt VARCHAR(20))\")\n"
+             "    api.execute(\"INSERT INTO secret VALUES ('CANARI')\")\n    return 1\n", app="coffre")
+    assert go(h.call("coffre", "tick")).ok
+    target = f"`{h.bases.name('coffre')}`.secret" if h.bases.server else "secret"
+    write(h, "def tick(api):\n    try:\n        return api.query(\"SELECT * FROM " + target + "\")\n"
+             "    except RuntimeError as exc:\n        return 'refusé : ' + str(exc)\n", app="curieuse")
+    r = go(h.call("curieuse", "tick"))
+    assert r.ok and str(r.value).startswith("refusé") and "CANARI" not in str(r.value)
+    h.shutdown()
+
+
+def test_erasing_an_app_exports_its_base_and_a_new_one_starts_empty(tmp_path):
+    h = host(tmp_path, bwrap="")
+    write(h, "def view(api):\n    return 1\n")
+    go(h.db_execute("essai", "CREATE TABLE notes (txt VARCHAR(20))"))
+    go(h.db_execute("essai", "INSERT INTO notes VALUES ('gardée')"))
+    trash = Path(go(h.erase("essai")))
+    exported = trash / ("base.json" if h.bases.server else "base.db")
+    assert exported.exists() and "gardée".encode() in exported.read_bytes()
+    write(h, "def view(api):\n    return 1\n")
+    assert [t["name"] for t in go(h.db_schema("essai"))["tables"]] == ["_kv"]
+    with pytest.raises(ForgeRefused, match="n'existe pas"):
+        go(h.db_query("inconnue", "SELECT 1"))
+    with pytest.raises(ForgeRefused, match="lecture"):
+        go(h.db_query("essai", "DROP TABLE _kv"))
     h.shutdown()
 
 

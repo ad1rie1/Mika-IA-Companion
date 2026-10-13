@@ -44,6 +44,63 @@ sudo systemctl enable --now mika.service mika-backup.timer
 Le serveur écoute sur `127.0.0.1:8001`. Pour l'ouvrir au réseau, place un
 mandataire TLS devant (Caddy, nginx) plutôt que de changer `--host`.
 
+## Ses bases sur MariaDB (ADR 0101)
+
+Sans réglage, ses bases sont des fichiers SQLite dans `/var/lib/mika`. Pour
+les ranger dans un serveur MariaDB 11.8 — **sur la même machine, par son
+socket** (ses lectures restent synchrones : un serveur distant ajouterait un
+aller-retour à chacune) — et **dédié à Mika** (son compte crée les comptes
+des apps de la Forge : sous MariaDB, ce droit vaut administration) :
+
+```bash
+sudo dnf install mariadb-server            # ou apt install mariadb-server
+sudo .venv/bin/pip install -e ".[llm,memory,documents,mariadb]"   # mariadb : le pilote PyMySQL
+```
+
+`/etc/my.cnf.d/mika.cnf` (Debian : `/etc/mysql/mariadb.conf.d/90-mika.cnf`) :
+
+```ini
+[mariadb]
+# l'oubli (ADR 0073) : la place libérée par une suppression est remise à zéro ;
+# et ne jamais activer log_bin (le journal binaire garderait ce qui a été effacé)
+innodb_immediate_scrub_data_uncompressed = ON
+# chaque validation sur le disque (l'équivalent de synchronous=FULL)
+innodb_flush_log_at_trx_commit = 1
+# de la marge pour un gros instantané ou un long mail
+max_allowed_packet = 64M
+# une valeur trop longue est refusée, jamais coupée (le défaut, dit ici pour qu'il reste)
+sql_mode = STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+character-set-server = utf8mb4
+collation-server = utf8mb4_nopad_bin
+```
+
+Puis son compte, sans mot de passe (`unix_socket` : c'est l'utilisateur
+système `mika` qui se connecte) — tous les droits sur ses bases (`mika_…`),
+de quoi y donner les siens à chaque app forgée, et créer leurs comptes :
+
+```bash
+sudo systemctl enable --now mariadb
+sudo mariadb <<'SQL'
+CREATE USER 'mika'@'localhost' IDENTIFIED VIA unix_socket;
+GRANT ALL PRIVILEGES ON `mika\_%`.* TO 'mika'@'localhost' WITH GRANT OPTION;
+GRANT CREATE USER ON *.* TO 'mika'@'localhost';
+SQL
+```
+
+Et dans `/etc/mika/mika.env` (le chemin du socket : `/var/lib/mysql/mysql.sock`
+sur Fedora, `/run/mysqld/mysqld.sock` sur Debian) :
+
+```ini
+MIKA_DATABASE_URL=mariadb+pymysql://mika@localhost/?unix_socket=/var/lib/mysql/mysql.sock
+#MIKA_DATABASE_PREFIX=mika_     # le début du nom de ses bases (mika_mind, mika_views…)
+```
+
+Au démarrage, ses bases sont créées (`mika_mind`, `mika_views`, `mika_mail`,
+`mika_feeds`, `mika_teams`) et passées à leur dernière révision ; chaque app
+forgée a la sienne (`mika_forge_<app>`), et un compte du même nom qui n'a de
+droits que sur elle. Rien n'est repris des fichiers SQLite d'avant : elle
+repart d'une base vide.
+
 ## Derrière un mandataire TLS
 
 Trois options de `serve`, à ajouter à `ExecStart` dans `mika.service` :
@@ -207,7 +264,11 @@ Une archive contient `mind.db` (sa vie : le journal, les contenus, les
 comptes, les réglages), les caches du courrier et des flux, ses apps forgées,
 ses ateliers et `secret.key`, avec un manifeste (sommes SHA-256, tête du
 journal, empreinte de l'état rejoué depuis la copie). `views.db` n'y est pas :
-projections et vecteurs se reconstruisent depuis le journal. Les dossiers
+projections et vecteurs se reconstruisent depuis le journal. Sur MariaDB, le
+dossier y est, et à côté une copie SQL de chaque base (`bases/` : `mind`,
+`mail`, `feeds`, `teams`, et celle de chaque app forgée) faite par
+`mariadb-dump` en un instantané cohérent ; la vérification recharge `mind`
+dans une base de travail et l'y rejoue. Les dossiers
 d'appel de Claude Code (prompts privés, jeton de session du relais) ne sont pas
 dans le dossier de données : ils vivent sous `XDG_RUNTIME_DIR` (`/run/mika` avec
 l'unité fournie), en `0700`, effacés en fin d'appel et purgés au démarrage —
@@ -226,7 +287,10 @@ curl -s localhost:8001/health
 
 La restauration vérifie les sommes et rejoue la copie **avant** de toucher au
 dossier ; l'ancien dossier est mis de côté (`/var/lib/mika.avant-restauration-…`),
-jamais effacé. Au démarrage, les vues se reconstruisent (le rappel est moins
+jamais effacé. Sur MariaDB, ses bases en service sont d'abord copiées dans
+`bases/` de ce dossier mis de côté, puis chaque copie de l'archive est rechargée
+à sa place ; `mika_views` est vidée. Une archive faite sur fichiers ne se
+restaure pas sur un serveur, ni l'inverse. Au démarrage, les vues se reconstruisent (le rappel est moins
 bon quelques minutes, le temps de réindexer les souvenirs).
 
 ## Mettre à jour
@@ -250,4 +314,7 @@ sudo systemctl start mika
 ```
 
 Ses contenus sont effacés de `mind.db`, des vues et des journaux WAL ; les
-**archives** plus anciennes les contiennent encore, jusqu'à leur rotation.
+**archives** plus anciennes les contiennent encore, jusqu'à leur rotation. Sur
+MariaDB, ils disparaissent des tables tout de suite (la place est remise à zéro :
+`innodb_immediate_scrub_data_uncompressed`), et des journaux de reprise et
+d'annulation d'InnoDB à leur rotation, sous peu.

@@ -939,7 +939,8 @@ def _run(argv: list[str] | None) -> int:
             if args.cmd == "backup":
                 done = backup.backup(args.data, args.dest, keep=args.keep)
             elif args.cmd == "verify":
-                done = backup.verify(args.archive, record=args.data if (args.data / "mind.db").exists() else None)
+                ours = (args.data / "mind.db").exists() or (schema.server_url() and args.data.is_dir())
+                done = backup.verify(args.archive, record=args.data if ours else None)
             else:
                 done = backup.restore(args.archive, args.data, force=args.force)
         except backup.BackupError as exc:

@@ -184,19 +184,28 @@ Quatre endroits faisaient leurs migrations à la main (« si la colonne manque, 
    réécrirait la table sous l'écrivain unique, la raison pour laquelle l'ADR 0073 refusait `VACUUM`). Le chiffrement
    au repos ne sert pas l'oubli (la clé reste là) ; il n'est pas activé.
 
-10. *La sauvegarde.* `mariadb-dump --single-transaction` de `mika_mind`, `mika_mail`, `mika_feeds`, `mika_teams` et
-    des bases `forge_*`, avec `partages/` et les clés, comme avant ; `mika_views` n'y est pas. La vérification
-    restaure l'archive dans des schémas temporaires, la rejoue et compare l'empreinte, comme le faisait l'ADR 0024.
-    Les anciennes archives SQLite ne se restaurent plus.
+10. *La sauvegarde* (`app/backup.py`, `app/backup_server.py`). Sur un serveur, l'archive garde le même format : le
+    dossier de données (`data/`, avec son manifeste), et à côté une copie SQL de chaque base (`bases/` : `mind`,
+    `mail`, `feeds`, `teams`, et `forge/<app>` pour chaque app forgée), faite par `mariadb-dump --single-transaction`
+    (un instantané cohérent, sans verrou, serveur en marche ; ni procédure, ni événement, ni déclencheur ; les octets
+    en hexadécimal) ; `mika_views` n'y est pas. Le manifeste dit `engine: mariadb` et la somme de chaque copie. La
+    vérification recharge `mind` dans une base de travail (`<préfixe>w<hasard>_<n>`, supprimée ensuite), l'y rejoue
+    et compare l'empreinte, comme le faisait l'ADR 0024. La restauration vérifie d'abord (rien n'est touché si ça
+    échoue), puis copie les bases en service dans le dossier mis de côté (`<dossier>.avant-restauration-…/bases/`),
+    recharge chaque copie à la place de sa base, supprime la base et le compte d'une app absente de l'archive, et
+    vide `mika_views`. Les tables ne sont pas déplacées d'une base de travail à la base en service (`RENAME TABLE`) :
+    MariaDB refuse d'y faire passer une vue, et `mind` en a. Une archive de fichiers ne se restaure pas sur un
+    serveur, ni l'inverse (les deux se refusent en le disant). `mariadb-dump` et `mariadb` viennent avec le serveur.
 
 11. *Les tests.* La suite par défaut reste sur SQLite (`create`, rapide). La voie MariaDB (`--mariadb`, en option
     comme `--slow`) met les magasins de chaque test dans des bases jetables d'un serveur
     (`mika_test_<session>_<n>_<base>`, supprimées à la fin du test, et ce qui en resterait à la fin de la session) :
     `make_mind`, les montages de `tests/fixtures`, le simulateur, le faux magasin `SqlDB` et l'application elle-même
     (`MIKA_DATABASE_URL` et un préfixe par test). Le serveur est `MIKA_TEST_MARIADB` (une adresse sans base), sinon le
-    serveur local par son socket, sous l'utilisateur du système (`unix_socket`, aucun mot de passe) ; ce compte n'a de
-    droits que sur les bases `mika\_test\_%`. Les tests qui lisent ou réécrivent eux-mêmes des fichiers SQLite (une
-    installation d'avant, l'effacement sur le disque, la sauvegarde jusqu'au lot 5, deux dossiers qui sont deux vies),
+    serveur local par son socket, sous l'utilisateur du système (`unix_socket`, aucun mot de passe) ; ce compte a
+    tous les droits sur les bases `mika\_test\_%` (avec `GRANT OPTION`) et `CREATE USER`, pour les comptes des
+    apps de la Forge (`tests/fixtures/backend.py` dit comment le créer). Les tests qui lisent ou réécrivent eux-mêmes des fichiers SQLite (une
+    installation d'avant, l'effacement sur le disque, la sauvegarde des fichiers, deux dossiers qui sont deux vies),
     ou qui coupent le réseau (la garde du simulateur coupe aussi le socket du serveur), sont marqués `sqlite_only` et
     sautés dans cette voie. Elle couvre en plus :
     - chaque base passée deux fois à `head` par Alembic, sans écart avec ses entités, en collation `utf8mb4_nopad_bin` ;
@@ -205,7 +214,9 @@ Quatre endroits faisaient leurs migrations à la main (« si la colonne manque, 
       `mind` et de `views`. Neuf scénarios, riches en mémoire, secrets, conversation, vie intérieure et courrier ; pas
       S16, où l'empreinte d'un commit de l'atelier dépend de l'heure réelle. C'est lui qui attrape ce qui se trompe sans
       erreur ;
-    - au lot 4, la création, les droits et la suppression des bases de la Forge.
+    - les bases de la Forge : une app atteint sa base et aucune autre, ni les bases de Mika ; ni tâche planifiée,
+      ni déclencheur, ni fichier ; le délai d'une instruction ; le plafond ; vider, exporter, supprimer
+      (`tests/unit/test_forge_bases.py`, et la Forge de bout en bout dans `tests/contract/test_forge.py`).
 
     On la lance quand on touche au stockage et avant de remettre un lot, sous la borne mémoire, jamais en parallèle
     d'une autre suite.
@@ -231,8 +242,8 @@ lecture) et ses `query_*` acceptent une requête SQLAlchemy ; `mika.ports.sql` (
 `insert_ignore`, `greatest`/`least`), `mika.adapters.database` (les moteurs), `mika.app.schema` et
 `mika.app.migrations` (une révision par base) ; `adapters/store_sqlite` devient
 `adapters/store_sql` (un adaptateur, deux moteurs) et `SqliteStore` devient `SqlStore` ; `tests/conftest.py::make_mind`
-construit le magasin depuis une adresse ; `app/backup.py` et la commande de restauration sont réécrits ; le port de la
-Forge gagne le service `sql` et les trois outils ; `forge.db` et `mail.db` / `feeds.db` / `teams.db` en tant que
+construit le magasin depuis une adresse ; `app/backup.py` gagne le chemin du serveur (`app/backup_server.py`) ; le port de la
+Forge gagne `db_schema`, `db_query`, `db_execute` (l'app : `api.query`, `api.execute`) et les trois outils ; `forge.db` et `mail.db` / `feeds.db` / `teams.db` en tant que
 fichiers disparaissent sous MariaDB. Dépendances : `sqlalchemy>=2.0`, `alembic`, et le pilote PyMySQL dans l'extra
 `mariadb`. Révisent : l'ADR 0004 (SQLAlchemy plutôt que `sqlite3` ; toujours sans framework), l'ADR 0023 (les bases de Mika
 restent invisibles, l'app a la sienne par l'hôte), l'ADR 0024 (la sauvegarde), l'ADR 0073 (l'oubli).

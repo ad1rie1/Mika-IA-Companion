@@ -1,5 +1,6 @@
 # Mika v2 — une sauvegarde (voir mika-backup.timer). Sans risque serveur en marche :
-# les bases sont copiées par l'API de sauvegarde de SQLite.
+# les bases sont copiées par l'API de sauvegarde de SQLite, ou par mariadb-dump (un
+# instantané cohérent) quand elles sont sur MariaDB.
 [Unit]
 Description=Mika v2 — sauvegarde
 After=mika.service

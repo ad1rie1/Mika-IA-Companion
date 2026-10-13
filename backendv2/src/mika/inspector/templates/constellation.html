@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark"><title>Constellation · {{ her }}</title>
+<link rel="stylesheet" href="{{ PREFIX }}/static/constellation.css?v={{ ASSET_VERSION }}">
+<script src="{{ PREFIX }}/static/constellation.js?v={{ ASSET_VERSION }}" defer></script></head>
+<body class="cst">
+<div id="cst" class="cst-root" data-base="{{ base }}" data-console="{{ PREFIX }}" data-her="{{ her }}">
+<canvas id="cst-canvas" class="cst-canvas" aria-label="Sa mémoire en une boule de points"></canvas>
+<div class="cst-veil" aria-hidden="true"></div>
+
+<header class="cst-head cst-panel">
+<a class="cst-back" href="{{ PREFIX }}/memoire">← console</a>
+<h1 class="cst-title">Constellation <span class="cst-sub">la mémoire de {{ her }}</span></h1>
+<form class="cst-search" id="cst-search" role="search">
+<label class="cst-sr" for="cst-q">Chercher dans sa mémoire</label>
+<input id="cst-q" type="search" placeholder="chercher un mot, une idée…   ( / )" autocomplete="off" spellcheck="false" maxlength="200">
+<button type="button" class="cst-search-clear" id="cst-q-clear" hidden aria-label="Effacer la recherche">×</button>
+<div class="cst-results" id="cst-results" hidden>
+<p class="cst-results-head" id="cst-results-head"></p>
+<ol id="cst-results-list"></ol>
+</div>
+</form>
+<ul class="cst-counts" id="cst-counts" aria-label="Ce que montre la carte"></ul>
+<p class="cst-note" id="cst-note"></p>
+</header>
+
+<div class="cst-live cst-panel" id="cst-live" role="status">
+<span class="cst-dot" id="cst-dot"></span><span id="cst-live-text">connexion…</span>
+<time class="cst-clock" id="cst-clock"></time>
+</div>
+
+<section class="cst-agents cst-panel" aria-labelledby="cst-agents-title">
+<h2 id="cst-agents-title">Ce qui la parcourt</h2>
+<ul id="cst-agents"></ul>
+<p class="cst-legend-note">Le sondage montre ce qui <em>ressemble</em> au message ; la comète, ce que son prompt lui a <em>vraiment</em> montré.</p>
+</section>
+
+<section class="cst-log cst-panel" aria-labelledby="cst-log-title">
+<h2 id="cst-log-title">Flux</h2>
+<ol id="cst-log" class="cst-log-list"></ol>
+</section>
+
+<aside class="cst-detail cst-panel" id="cst-detail" hidden aria-labelledby="cst-detail-title">
+<button type="button" class="cst-close" id="cst-detail-close" aria-label="Fermer">×</button>
+<h2 id="cst-detail-title">—</h2>
+<div class="cst-detail-body" id="cst-detail-body"></div>
+</aside>
+
+<div class="cst-hover" id="cst-hover" hidden></div>
+<div class="cst-caption" id="cst-caption" aria-live="polite"></div>
+
+<nav class="cst-controls cst-panel" aria-label="Affichage">
+<div class="cst-group" role="group" aria-label="Couleur">
+<span class="cst-group-label">couleur</span>
+<button type="button" data-color="kind" aria-pressed="true">sorte</button>
+<button type="button" data-color="person" aria-pressed="false">personne</button>
+<button type="button" data-color="emotion" aria-pressed="false">émotion</button>
+<button type="button" data-color="sensitivity" aria-pressed="false">sensibilité</button>
+<button type="button" data-color="age" aria-pressed="false">âge</button>
+</div>
+<div class="cst-group" role="group" aria-label="Profondeur">
+<span class="cst-group-label">profondeur</span>
+<button type="button" data-depth="age" aria-pressed="true">le temps</button>
+<button type="button" data-depth="vivid" aria-pressed="false">la vivacité</button>
+<button type="button" data-depth="surface" aria-pressed="false">surface</button>
+</div>
+<div class="cst-group" role="group" aria-label="Montrer">
+<button type="button" data-toggle="edges" aria-pressed="true">filaments</button>
+<button type="button" data-toggle="chunks" aria-pressed="true">échanges</button>
+<button type="button" data-toggle="former" aria-pressed="false">anciennes versions</button>
+</div>
+<div class="cst-group" role="group" aria-label="Actions">
+<button type="button" id="cst-replay" class="cst-accent">▶ rejouer</button>
+<button type="button" id="cst-rotate" aria-pressed="true">rotation</button>
+<button type="button" id="cst-home">recentrer</button>
+</div>
+</nav>
+
+<button type="button" class="cst-pending cst-panel" id="cst-pending" hidden></button>
+
+<div class="cst-loading" id="cst-loading">
+<div class="cst-loading-ring" aria-hidden="true"></div>
+<p id="cst-loading-text">calcul de la carte…</p>
+</div>
+</div>
+</body></html>
