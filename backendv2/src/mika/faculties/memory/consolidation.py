@@ -62,6 +62,7 @@ from mika.kernel.guards import Guard
 from mika.kernel.prompt import PromptBudgetError
 from mika.ports.llm import LLMRequest, Message
 from mika.ports.llm_budget import fits_context
+from mika.ports.shares import valid_id
 from mika.ports.sql import json_has
 from mika.ports.vectors import VectorItem
 from mika.vocab import timespan
@@ -164,7 +165,7 @@ class Consolidate:
         self.queue_seq = state.deferred_seq
         thread = transcript_c.thread_table()
         said = (thread.c.id, thread.c.at, thread.c.role, thread.c.person, thread.c.text, thread.c.reply_to,
-                thread.c.room)
+                thread.c.room, thread.c.attachments)
         rows = store.query_mind(select(*said).where(thread.c.id > state.checkpoint).order_by(thread.c.id)
                                 .limit(p.max_window)) if state.pending else []
         rows = window(rows, set(frame.get(rt.AWAITING)))
@@ -380,7 +381,8 @@ class Consolidate:
             room = grows[0][6]
             tokens: dict[str, x.Speaker] = {}
             lines: list[x.Line] = []
-            for seq, at, role, handle, text, _reply, _room in (r[:7] for r in grows):
+            for r in grows:
+                seq, at, role, handle, text, _reply, _room = r[:7]
                 person = person_of[handle]
                 if person not in tokens:
                     tokens[person] = x.Speaker(f"P{len(tokens) + 1}", person, name_of[handle])
@@ -390,7 +392,8 @@ class Consolidate:
                 side = bool(room) and int(seq) in aside
                 if side and not set(WORD.findall(fold(text))) & known_names:
                     continue  # on parle entre soi, de rien ni de personne qu'elle connaisse
-                lines.append(x.Line(int(seq), int(at), tokens[person].label, text, person, side))
+                lines.append(x.Line(int(seq), int(at), tokens[person].label, text, person, side,
+                                    pieces=_pieces(int(seq), r[7] if len(r) > 7 else None)))
             if not any(ln.person for ln in lines):
                 continue  # personne ne lui a rien dit : rien à apprendre
             out.append(x.Conversation(key, tuple(tokens.values()), tuple(lines), room or None))
@@ -693,9 +696,10 @@ class Consolidate:
             sens = x.sensitivity(s.sensibilite, has_person=bool(about or told_by))
             secret = secret_of(s.secret, cited, sens, text)
             twin = await self._twin(store, vectors, text, c.SOUVENIR, about, p, told_by=told_by, heard_by=heard)
+            pieces = x.pieces_of(s.pieces, s.messages, lines)
             if twin is not None:
                 drafts.append(c.REINFORCED.draft(item=twin, sources=sources, sensitivity=sens, about=about,
-                                                 told_by=told_by, heard_by=heard, secret=secret))
+                                                 told_by=told_by, heard_by=heard, secret=secret, pieces=pieces))
                 continue
             # sans nom : seulement ce qui concerne quelqu'un d'autre, ni secret, ni recopié de sa bouche (ADR 0091)
             veiled = self._veiled(s.sans_nom, people, s.texte) if about and not secret and text == s.texte else None
@@ -703,7 +707,7 @@ class Consolidate:
                 text=Content.of(text, level=sens), about=about, sensitivity=sens,
                 importance=x.IMPORTANCE.get(s.importance, 0.45), emotion=dominant(facets(s.mon_ressenti)),
                 felt=facets(s.ressenti), empathy=facets(s.mon_ressenti), sources=sources, call_id=call_id, told_by=told_by, heard_by=heard,
-                secret=secret, veiled=Content.of(veiled, level=sens) if veiled else None))
+                secret=secret, veiled=Content.of(veiled, level=sens) if veiled else None, pieces=pieces))
         for b in ex.croyances:
             if not fresh(c.BELIEF, b.texte):
                 continue
@@ -752,6 +756,7 @@ class Consolidate:
                                                 status=relation.status))
                     about = tuple(sorted({*about, subject, other}))
             origin = x.ORIGIN.get(fold(b.origine), "told")
+            pieces = x.pieces_of(b.pieces, b.messages, lines)
             # de première main : la personne nommée qui parle d'elle-même, ou un témoin qui l'a vu (ADR 0081)
             named = set(people.resolve(b.personnes))
             first_hand = bool(b.de_premiere_main) or (bool(told_by) and bool(named) and set(told_by) <= named)
@@ -779,7 +784,7 @@ class Consolidate:
                     confidence=x.born_confidence(b.confiance, origin, nature), sensitivity=sens, secret=secret,
                     between_us=between, sources=sources, about=about, relations=tuple(relations),
                     replaces=head if again == SUPERSEDE else None, contests=head if again == CONTEST else None,
-                    first_hand=first_hand, call_id=call_id, felt=facets(b.ressenti)))
+                    first_hand=first_hand, call_id=call_id, felt=facets(b.ressenti), pieces=pieces))
                 continue
             if twin is not None:
                 # la même proposition : un témoignage de plus, avec ses propres droits (ADR 0080) — redire une
@@ -790,7 +795,7 @@ class Consolidate:
                     confidence=x.born_confidence(b.confiance, origin, nature), sensitivity=sens, secret=secret,
                     between_us=between, sources=sources, about=about, relations=tuple(relations),
                     replaces=replaces if replaces != twin else None, contests=contests if contests != twin else None,
-                    first_hand=first_hand, call_id=call_id, felt=facets(b.ressenti)))
+                    first_hand=first_hand, call_id=call_id, felt=facets(b.ressenti), pieces=pieces))
                 continue
             since, until = x.when(b.depuis, tz) if b.depuis else None, x.when(b.jusqua, tz) if b.jusqua else None
             # sans nom : un fait sur quelqu'un d'autre, ni secret, ni ce qui n'appartient qu'à eux deux (ADR 0091)
@@ -804,7 +809,7 @@ class Consolidate:
                 knowledge_kind=nature, holder=holder, relations=tuple(relations), first_hand=first_hand,
                 as_of=min(since[0], frame.now) if since else None, valid_until=until[0] if until else None,
                 felt=facets(b.ressenti), empathy=facets(b.mon_ressenti),
-                veiled=Content.of(veiled, level=sens) if veiled else None))
+                veiled=Content.of(veiled, level=sens) if veiled else None, pieces=pieces))
         drafts += self._predictions(ex, frame, conv, people, p, call_id, fresh, provenance, concerned, secret_of,
                                     from_her, lied, heard, tz)
         drafts += self._called(nicks, ours, store, conv, call_id)
@@ -1185,6 +1190,7 @@ class Consolidate:
         rendez-vous chez le dentiste » dont on prendrait des nouvelles."""
         drafts: list[Draft[Any]] = []
         tz = frame.env.tz_of(frame.root)
+        lines = {ln.seq: ln for ln in conv.lines}
         tasks = self._tasks(ex, frame, conv, people, store)
         # « son anniversaire » et « l'anniversaire de Sam », le même samedi : un seul moment (sonde du 2026-10-03)
         names = [*(sp.name for sp in conv.speakers), self_c.name_of(frame.get(self_c.PERSONA))]
@@ -1211,6 +1217,7 @@ class Consolidate:
                     and same_day(frame, at, due) for text, seqs, due in tasks)):
                 continue  # une chose à faire (une promesse, un rappel), pas un moment de sa vie
             sources, told_by, cited = provenance(ev.messages)
+            pieces = x.pieces_of(ev.pieces, ev.messages, lines)
             world = bool(ev.monde)
             if world and not told_by:
                 continue  # un moment du monde est toujours dit par quelqu'un (on peut l'oublier avec lui)
@@ -1234,7 +1241,7 @@ class Consolidate:
                 noted.append((ev.texte, at, about))
                 sens = max(sens, moved.sensitivity)
                 drafts += self._moved(moved, at, frame, told_by, sources, call_id)
-                drafts.append(c.EVENT_NOTED.draft(
+                drafts.append(c.EVENT_NOTED.draft(pieces=pieces,
                     text=Content.of(ev.texte, level=sens), when=at, about=tuple(dict.fromkeys((*about, *moved.about))),
                     all_day=all_day, sensitivity=sens, sources=sources, told_by=told_by, heard_by=heard,
                     secret=moved.secret or secret_of(ev.secret, cited, sens, ev.texte), replaces=moved.id,
@@ -1256,7 +1263,7 @@ class Consolidate:
                 # « il est de nouveau malade » : la même situation, une autre fois — le même fil (ADR 0079)
                 noted.append((ev.texte, at, about))
                 sens = max(sens, again.sensitivity)
-                drafts.append(c.EVENT_NOTED.draft(
+                drafts.append(c.EVENT_NOTED.draft(pieces=pieces,
                     text=Content.of(ev.texte, level=sens), when=at, about=tuple(dict.fromkeys((*about, *again.about))),
                     all_day=all_day, sensitivity=sens, sources=sources, told_by=told_by, heard_by=heard,
                     secret=again.secret or secret_of(ev.secret, cited, sens, ev.texte), recurs=again.id,
@@ -1276,7 +1283,7 @@ class Consolidate:
                 # un tiers l'avait annoncé, la personne le lui dit elle-même : le même moment, de première main
                 # (ses vœux, son encouragement, « alors ? » ne se font jamais sur la foi d'un tiers)
                 noted.append((ev.texte, twin.when, about))
-                drafts.append(c.EVENT_NOTED.draft(
+                drafts.append(c.EVENT_NOTED.draft(pieces=pieces,
                     text=Content.of(ev.texte, level=max(sens, twin.sensitivity)), when=twin.when,
                     about=tuple(dict.fromkeys((*about, *twin.about))),
                     all_day=twin.all_day, sensitivity=max(sens, twin.sensitivity), sources=sources, told_by=told_by,
@@ -1293,7 +1300,7 @@ class Consolidate:
             noted.append((ev.texte, at, about))
             if twin is not None:
                 drafts += self._moved(twin, at, frame, told_by, sources, call_id)
-            drafts.append(c.EVENT_NOTED.draft(
+            drafts.append(c.EVENT_NOTED.draft(pieces=pieces,
                 text=Content.of(ev.texte, level=sens), when=at, about=about, all_day=all_day, sensitivity=sens,
                 sources=sources, told_by=told_by, heard_by=heard, secret=secret_of(ev.secret, cited, sens, ev.texte),
                 replaces=twin.id if twin is not None else None, call_id=call_id, ongoing=ev.en_cours,
@@ -1772,6 +1779,20 @@ class Index:
         todo = [*map(_item_vector, _by_ids(store, t, ITEM_COLUMNS, sorted(items - indexed))),
                 *map(_chunk_vector, _by_ids(store, ch, _CHUNK_COLUMNS, sorted(chunks - indexed)))]
         return todo, (max(items, default=0), max(chunks, default=0))
+
+
+def _pieces(seq: int, raw: Any) -> tuple[x.Piece, ...]:
+    """Les pièces jointes gardées d'un message (la colonne ``attachments`` du fil, ``AttachmentMeta``) : leur place
+    dans le message fait leur repère (« #12.1 »), comme pour la faculté qui les garde (ADR 0106)."""
+    try:
+        items = json.loads(raw) if isinstance(raw, str) and raw else []
+    except ValueError:
+        return ()
+    if not isinstance(items, list):
+        return ()
+    return tuple(x.Piece(f"#{seq}.{i}", str(a.get("name") or ""), str(a.get("kind") or ""), str(a["file"]))
+                 for i, a in enumerate(items, 1) if isinstance(a, dict) and isinstance(a.get("file"), str)
+                 and valid_id(a["file"]))
 
 
 def window(rows: list[tuple[Any, ...]], awaiting: set[int]) -> list[tuple[Any, ...]]:

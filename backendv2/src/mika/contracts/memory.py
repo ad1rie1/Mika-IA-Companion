@@ -125,6 +125,9 @@ class Remembered(Payload):
     importance: float = 0.5
     emotion: str | None = None
     sources: tuple[int, ...] = ()
+    #: les pièces jointes d'où il vient (leurs clés, ``contracts.attachments``, ADR 0106) — **en plus** de ses messages
+    #: sources, et il peut y en avoir plusieurs : une photo, un document, un vocal qui le montre ou le dit
+    pieces: tuple[str, ...] = ()
     call_id: str = ""
     #: qui le lui a confié (les auteurs des messages sources) ; vide : elle l'a vécu, observé
     told_by: tuple[str, ...] = ()
@@ -169,6 +172,9 @@ class Believed(Payload):
     source: str | None = None
     replaces: int | None = None
     sources: tuple[int, ...] = ()
+    #: les pièces jointes d'où il vient (leurs clés, ``contracts.attachments``, ADR 0106) — **en plus** de ses messages
+    #: sources, et il peut y en avoir plusieurs : une photo, un document, un vocal qui le montre ou le dit
+    pieces: tuple[str, ...] = ()
     call_id: str = ""
     told_by: tuple[str, ...] = ()
     heard_by: tuple[str, ...] = ()
@@ -232,6 +238,9 @@ class Reinforced(Payload):
     corroborated: bool = False
     source: str | None = None
     sources: tuple[int, ...] = ()
+    #: les pièces jointes d'où il vient (leurs clés, ``contracts.attachments``, ADR 0106) — **en plus** de ses messages
+    #: sources, et il peut y en avoir plusieurs : une photo, un document, un vocal qui le montre ou le dit
+    pieces: tuple[str, ...] = ()
     sensitivity: int | None = None
     about: tuple[str, ...] = ()
     told_by: tuple[str, ...] = ()
@@ -266,6 +275,9 @@ class Attested(Payload):
     secret: bool = False
     between_us: bool = False
     sources: tuple[int, ...] = ()
+    #: les pièces jointes d'où il vient (leurs clés, ``contracts.attachments``, ADR 0106) — **en plus** de ses messages
+    #: sources, et il peut y en avoir plusieurs : une photo, un document, un vocal qui le montre ou le dit
+    pieces: tuple[str, ...] = ()
     about: tuple[str, ...] = ()
     relations: tuple[Relation, ...] = ()
     #: ce qu'elle redit d'elle-même (une note sur elle)
@@ -370,6 +382,9 @@ class EventNoted(Payload):
     all_day: bool = True
     sensitivity: int = 2
     sources: tuple[int, ...] = ()
+    #: les pièces jointes d'où il vient (leurs clés, ``contracts.attachments``, ADR 0106) — **en plus** de ses messages
+    #: sources, et il peut y en avoir plusieurs : une photo, un document, un vocal qui le montre ou le dit
+    pieces: tuple[str, ...] = ()
     told_by: tuple[str, ...] = ()
     heard_by: tuple[str, ...] = ()
     secret: bool = False

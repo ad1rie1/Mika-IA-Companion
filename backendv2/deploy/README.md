@@ -159,7 +159,9 @@ les 20 s : `proxy_read_timeout` doit rester au-dessus (120 s ci-dessus). Fermée
 ne garde rien d'ouvert : ses messages lui arrivent par Firebase (ADR 0077, ci-dessous).
 Les fichiers qu'elle télécharge (`/files/…`) passent par le même mandataire. Ceux que
 Mika envoie sont gardés hors du journal, dans `partages/` du dossier de données
-(droits 0700/0600) : la sauvegarde les emporte et la restauration les remet.
+(droits 0700/0600), et les pièces jointes qu'on lui envoie dans `pieces/` (ADR 0106,
+2 Gio par personne par défaut, Réglages › Comportement) : la sauvegarde les emporte
+et la restauration les remet.
 
 ## Premier démarrage
 

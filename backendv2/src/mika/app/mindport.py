@@ -26,7 +26,7 @@ from mika.contracts import wakeup as wakeup_c
 from mika.contracts import world as w
 from mika.contracts.entry import Admission, HistoryRow, SharedDownload, SharedMeta
 from mika.contracts.runtime import PerceptionReceived
-from mika.faculties import shares, transcript
+from mika.faculties import attachments, shares, transcript
 from mika.faculties.attention import prompt as attention_prompt
 from mika.faculties.identity import describe
 from mika.faculties.projects import actions as project_actions
@@ -232,6 +232,28 @@ class KernelPort:
 
     def ready(self) -> bool:
         return self.kernel.started
+
+    # ── les pièces jointes qu'on lui envoie (ADR 0106) ──
+    async def keep_attachments(self, handle: str, blobs: Sequence[bytes]) -> list[str | None]:
+        """Les octets d'abord, sous la clé de la pièce (l'adresse et la personne derrière pour sujets : l'oubli de
+        l'une les efface) ; le message qui suit les désigne."""
+        store = self.kernel.ports.get(attachments.PORT)
+        if store is None:
+            return [None for _ in blobs]
+        person = self.kernel.mind.frame().get(identity_c.PERSON(handle))
+        out: list[str | None] = []
+        for data in blobs:
+            if not data or len(data) > MAX_SHARE_BYTES:
+                out.append(None)
+                continue
+            file = attachments.file_id(handle, data)
+            try:
+                await store.put(file, data, subjects=tuple(k for k in (handle, person) if k))
+            except (OSError, ValueError):
+                out.append(None)
+                continue
+            out.append(file)
+        return out
 
     # ── les fichiers qu'elle envoie (ADR 0062) ──
     def shared(self, ids: Sequence[str]) -> list[SharedMeta]:

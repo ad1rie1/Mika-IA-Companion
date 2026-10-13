@@ -27,6 +27,25 @@ def test_a_text_attachment_is_read_at_the_edge(world):  # noqa: F811
     assert "regarde ma liste" in prompt and "café, pain, confiture" in prompt and "courses.txt" in prompt
 
 
+def test_a_photo_sent_in_the_chat_is_kept_and_designated_by_its_message(world):  # noqa: F811
+    """ADR 0106 : ses octets dans ``pieces/`` (hors du journal), désignés par le message qui la porte, et la pièce
+    attend sa lecture de près (ici, aucun modèle ne sert « décrire une image » : la lecture se redemandera)."""
+    client, live, _backend = world
+    bootstrap(client)
+    photo = b"\xff\xd8\xff\xe0" + b"un chat roux" * 50
+    with client.websocket_connect(WS) as ws:
+        ws.receive_json(), ws.receive_json()
+        ws.send_json({"type": "chat", "message": "regarde mon chat", "client_msg_id": "p1",
+                      "attachments": [{"name": "chat.jpg", "type": "image/jpeg",
+                                       "data": base64.b64encode(photo).decode()}]})
+        recv_until(ws, "speech")
+    [stored] = list((live.data / "pieces").glob("*.bin"))
+    assert stored.read_bytes() == photo
+    assert any(stored.stem in e.data for e in live.kernel.mind.store.read(types={"perception.received"}))
+    state = live.kernel.mind.frame().state("attachments")
+    assert stored.stem in state.pending or any(v.file == stored.stem for vs in state.kept.values() for v in vs)
+
+
 def test_camera_frames_need_an_operator(world):  # noqa: F811
     client, live, _ = world
     frame = base64.b64encode(b"\xff\xd8" + b"image" * 50).decode()

@@ -25,7 +25,8 @@ NAVIGATION: tuple[NavGroup, ...] = (
                     "rythme, son estime."),
         Destination("pensees", "Pensées et nuits", "☁", "Ce qui lui trotte dans la tête, ce qu'elle a remarqué, "
                     "ce qu'elle attend, ses nuits."),
-        Destination("memoire", "Mémoire", "❖", "Ses souvenirs, ses croyances, ses promesses et la relecture de ses échanges."),
+        Destination("memoire", "Mémoire", "❖", "Ses souvenirs, ses croyances, ses promesses, les pièces qu'on lui a "
+                    "envoyées et la relecture de ses échanges.", subjects=("piece",)),
     )),
     NavGroup("Ses relations", (
         Destination("personnes", "Personnes", "☺", "Les gens qu'elle connaît et ce qui les lie.",
@@ -82,7 +83,7 @@ NAVIGATION: tuple[NavGroup, ...] = (
 #: pour un opérateur (les autres tombent dans « Autres », sous leur nom technique)
 PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Émotions", ("affect", "needs", "body", "self")),
-    ("Esprit", ("attention", "memory", "transcript")),
+    ("Esprit", ("attention", "memory", "attachments", "transcript")),
     ("Relations", ("social", "others", "identity")),
     ("Action", ("agency", "goals", "projects", "shares", "imaging", "world")),
     ("Canaux", ("email", "teams", "rss", "web", "camera", "forge", "wakeup")),
@@ -95,7 +96,8 @@ FACULTY_LABELS: dict[str, str] = {
     "agency": "Initiatives", "goals": "Buts", "projects": "Projets", "email": "Courrier", "rss": "Flux RSS", "camera": "Caméra",
     "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
-    "world": "Son monde et son corps", "shares": "Fichiers envoyés", "imaging": "Dessins",
+    "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
+    "imaging": "Dessins",
     "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API", "teams": "Teams",
 }
 
@@ -207,6 +209,8 @@ PROCESS_LABELS: dict[str, str] = {
     "memory.follow": "Remarquer qu'elle a repris un moment de la vie de quelqu'un",
     "world.settle": "Conclure ses gestes dans le monde", "world.notice": "Remarquer ce qu'on a changé chez elle",
     "shares.retention": "Retirer les fichiers envoyés trop anciens", "imaging.draw": "Dessiner",
+    "attachments.study": "Lire de près les pièces reçues", "attachments.index": "Indexer les pièces reçues",
+    "attachments.retention": "Retirer les pièces reçues trop anciennes ou de trop",
     "mcp.expire": "Refuser les accords restés sans réponse",
     "wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente",
     "teams.triage": "Trier les messages Teams reçus",
@@ -290,6 +294,9 @@ EVENT_LABELS: dict[str, str] = {
     "memory.moment_followed": "Un moment de la vie de quelqu'un, repris",
     "memory.situation_ended": "Une situation de la vie de quelqu'un, finie",
     "shares.shared": "Un fichier envoyé", "shares.expired": "Des fichiers envoyés retirés",
+    "attachments.kept": "Une pièce reçue, lue de près",
+    "attachments.linked": "Une pièce reçue reliée (ou déliée) à ce qu'elle sait",
+    "attachments.expired": "Des pièces reçues retirées",
     "imaging.requested": "Un dessin demandé", "imaging.drawn": "Un dessin prêt",
     "imaging.failed": "Un dessin qui n'a pas pu se faire",
     "wakeup.called": "Un réveil par API reçu", "wakeup.reported": "Le compte rendu d'un réveil par API",

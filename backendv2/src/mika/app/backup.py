@@ -8,8 +8,9 @@ se reconstruit pas :
   forgées), copiées par l'API de sauvegarde de SQLite : cohérentes même
   serveur en marche, WAL compris ;
 - ses apps forgées (``forge/``, avec leurs versions), ses ateliers
-  (``ateliers/``, avec leur git) et les fichiers qu'elle a envoyés
-  (``partages/``, ADR 0062 : leurs octets ne sont pas dans le journal) ; un
+  (``ateliers/``, avec leur git), les fichiers qu'elle a envoyés
+  (``partages/``, ADR 0062 : leurs octets ne sont pas dans le journal) et les
+  pièces jointes qu'on lui a envoyées (``pieces/``, ADR 0106) ; un
   lien symbolique est gardé comme un lien (sa cible, dans le manifeste) et
   recréé à la restauration : sans lui, le prochain commit de l'atelier
   enregistrerait sa suppression ;
@@ -564,9 +565,10 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
                 aside.mkdir(exist_ok=True)
                 kept.rename(aside / BASES)
                 warnings.append(f"bases en service copiées avant d'être remplacées : {aside / BASES}")
-            for sub in ("forge", "ateliers", "partages"):
+            for sub in ("forge", "ateliers", "partages", "pieces"):
                 (data / sub).mkdir(exist_ok=True)
             (data / "partages").chmod(0o700)  # ce qu'elle a envoyé à chacun : à elle seule
+            (data / "pieces").chmod(0o700)  # ce qu'on lui a envoyé (ADR 0106) : à elle seule
             for name in ("secret.key", PUSH_KEY_FILE):  # des clés : à leur propriétaire seul
                 key = data / name
                 if key.exists():

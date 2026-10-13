@@ -22,6 +22,9 @@ class AttachmentMeta(Payload):
     mime: str = ""
     extracted: bool = False
     error: str | None = None
+    #: la clé de ses octets, gardés (``contracts.attachments``, ADR 0106) ; ``None`` : pas gardée (rien pour la
+    #: garder, ou un message d'avant)
+    file: str | None = None
 
 
 class PerceptionReceived(Payload):

@@ -1064,6 +1064,8 @@ class _Session:
             return
         self.hub.note_asked(c, cid)
         seen = await self._perceive(kept)
+        # ses octets gardés avant que le message n'entre dans sa vie : il les désigne (ADR 0106)
+        files = await self.port.keep_attachments(c.handle, [a.data for a in kept]) if kept else []
         body = "\n".join(x for x in [text, render(seen)] if x).strip()
         perception = PerceptionReceived(
             handle=c.handle, channel=c.channel, text=Content.of(body), authenticated=c.authenticated,
@@ -1072,7 +1074,8 @@ class _Session:
             # (pour le prompt) — le fil relu ne montre que le premier, et les fichiers par leur nom (G-6)
             typed_chars=len(text) if seen else None,
             attachments=tuple(AttachmentMeta(name=a.name, kind=a.kind, mime=a.mime, extracted=p.extracted,
-                                             error=p.error) for a, p in zip(kept, seen, strict=True)),
+                                             error=p.error, file=f)
+                              for a, p, f in zip(kept, seen, files, strict=True)),
         )
         admission = await self.port.perceive(perception, dedupe_key=f"{c.handle}:{cid}" if cid else None)
         if admission.status == "accepted" and not admission.duplicate:

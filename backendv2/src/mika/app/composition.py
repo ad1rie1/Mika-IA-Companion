@@ -20,6 +20,7 @@ from mika.contracts import self_ as self_c
 from mika.faculties.affect import AFFECT
 from mika.faculties.agency import AGENCY, task_brief
 from mika.faculties.agency import brief as initiative_brief
+from mika.faculties.attachments import ATTACHMENTS
 from mika.faculties.attention import ATTENTION
 from mika.faculties.body import BODY
 from mika.faculties.expression import EXPRESSION
@@ -65,8 +66,8 @@ log = logging.getLogger("mika.composition")
 def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, WORLD, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
-            EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, EMAIL, RSS, CAMERA, FORGE, SENSORS, IMAGING,
-            MCP, WEB, WAKEUP, TEAMS]
+            EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, ATTACHMENTS, EMAIL, RSS, CAMERA, FORGE, SENSORS,
+            IMAGING, MCP, WEB, WAKEUP, TEAMS]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -131,20 +132,21 @@ def policies() -> dict[str, EpisodePolicy]:
                                   guard=_reply_guard, max_tokens=1024, deadline_s=180.0,
                                   tool_bundles=frozenset({"memory", "identity", "goals", "projects", "email", "rss",
                                                           "camera", "forge", "forge_apps", "self", "attention",
-                                                          "social", "world", "shares", "imaging", "teams", EXTERNAL}),
+                                                          "social", "world", "shares", "attachments", "imaging",
+                                                          "teams", EXTERNAL}),
                                   core_bundles=REPLY_IN_HAND),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,
                                        tool_bundles=frozenset({"memory", "identity", "rss", "forge_apps", "self",
                                                                "attention", "social", "world", "shares",
-                                                               "imaging", EXTERNAL}),
+                                                               "attachments", "imaging", EXTERNAL}),
                                        core_bundles=INITIATIVE_IN_HAND),
         # un pas de travail : sa voix (compacte), pour elle seule — ni fil, ni livraison ; le verdict fait l'affect
         Kind.STEP: EpisodePolicy(kind=Kind.STEP, role=Role.STEP, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=step_brief,
                                  max_tool_turns=12, max_tokens=2048, deadline_s=300.0,
-                                 tool_bundles=frozenset({"goals", "memory", "projects", "email", "rss",
-                                                         "camera", "forge", "forge_apps", EXTERNAL}),
+                                 tool_bundles=frozenset({"goals", "memory", "attachments", "projects", "email",
+                                                         "rss", "camera", "forge", "forge_apps", EXTERNAL}),
                                  core_bundles=STEP_IN_HAND),
         # une exécution sur un projet, dans son mode à elle : sa voix (compacte), son humeur, ses avis — pour
         # elle seule, ni fil ni livraison ; ses outils, ceux du projet (``bundles`` du candidat)

@@ -10,6 +10,10 @@
   elle le dit.
 - Plusieurs pièces jointes se lisent **ensemble**, sous un délai par pièce et
   un délai pour le tout : trois photos ne font pas attendre trois fois.
+- **De près, en fond** (``study``, ADR 0106) : une pièce gardée se relit sans
+  presse — une photo décrite en détail avec son texte visible et ce qu'elle a
+  d'intime, tout le texte d'un document, la transcription d'un vocal ; et une
+  image se regarde de nouveau pour répondre à une question (``look``).
 
 Rien ne lève vers l'appelant : un échec devient une phrase. Le texte rendu
 est brut : c'est ``ports.preprocess.render`` qui le cite.
@@ -27,8 +31,9 @@ from typing import Any
 import httpx
 
 from mika.ports.llm import Image, LLMRequest, Message
-from mika.ports.preprocess import Perceived, Upload, html_text, tidy
+from mika.ports.preprocess import Perceived, Studied, Upload, html_text, tidy
 from mika.vocab.phrasebook import phrase
+from mika.vocab.words import WORD, fold
 
 try:  # optionnel : sans lui, un PDF se dit illisible
     import pypdf
@@ -49,6 +54,27 @@ TEXT_MAX_BYTES = 2_000_000
 
 #: une transcription ; ``None`` : aucun service n'est branché
 Transcriber = Callable[[bytes, str, str], Awaitable[str | None]]
+#: un document lu de près : au plus tant de pages
+STUDY_PAGES = 200
+#: une image regardée de près : au plus tant de jetons de description
+STUDY_TOKENS = 900
+#: une image regardée pour une question : au plus tant de jetons de réponse
+LOOK_TOKENS = 500
+
+
+def verdict_line(text: str) -> tuple[str, bool]:
+    """(le texte sans sa ligne de verdict, intime ?) : la lecture de près finit par une ligne « INTIME : oui|non »
+    (le mot et la réponse sont dans sa voix, ``preprocess.study``). Sans cette ligne, rien n'est jugé intime ; la
+    ligne est retirée du texte gardé."""
+    marker, yes = fold(phrase("preprocess.study.marker")), fold(phrase("preprocess.study.affirmative"))
+    kept, sensitive = [], False
+    for line in (text or "").splitlines():
+        flat = fold(line).strip().lstrip("*-# ").strip()
+        if flat.startswith(marker):
+            sensitive = sensitive or yes in WORD.findall(flat[len(marker):])
+            continue
+        kept.append(line)
+    return tidy("\n".join(kept)), sensitive
 
 
 def _decode(data: bytes) -> str:
@@ -166,6 +192,64 @@ class LocalPreprocessor:
         if not text:
             return Perceived(u.name, "audio", phrase("preprocess.failed.unclear"), False, "transcription vide")
         return Perceived(u.name, "audio", phrase("preprocess.seen.audio", text=text[:self.max_chars]), True)
+
+
+    # ── de près, en fond (ADR 0106) ──
+
+    async def study(self, upload: Upload, *, max_chars: int) -> Studied:
+        """La lecture de près d'une pièce gardée, sans presse (ne lève pas)."""
+        try:
+            async with asyncio.timeout(max(self.timeout_s, 120.0)):
+                if upload.kind == "image":
+                    return await self._study_image(upload, max_chars)
+                if upload.kind == "audio":
+                    heard = await self._audio(upload)
+                    return Studied(heard.text if heard.extracted else "", heard.extracted, error=heard.error)
+                text, why = await asyncio.to_thread(extract, upload.name, upload.mime, upload.data, STUDY_PAGES)
+                if not text:
+                    return Studied("", False, error=why or phrase("preprocess.failed.unreadable"))
+                return Studied(_cut(text, max_chars), True)
+        except TimeoutError:
+            return Studied("", False, error="délai dépassé", transient=True)
+        except Exception as exc:  # une pièce jointe ne fait jamais tomber un processus
+            log.warning("pièce jointe %s, de près : %r", upload.name, exc)
+            return Studied("", False, error=type(exc).__name__, transient=True)
+
+    async def _study_image(self, u: Upload, max_chars: int) -> Studied:
+        if self.gateway is None:
+            return Studied("", False, error="sans modèle de vision")
+        req = LLMRequest(role="caption", call_id=f"study:{u.name}:{len(u.data)}",
+                         system_stable=phrase("preprocess.study.system"),
+                         messages=(Message("user", phrase("preprocess.study.ask"),
+                                           images=(Image(u.mime, base64.b64encode(u.data).decode()),)),),
+                         max_tokens=STUDY_TOKENS, lane="background", priority=3)
+        resp = await self.gateway.call(req)
+        text, sensitive = verdict_line(resp.text or "")
+        if not text:
+            return Studied("", False, error="description vide", transient=True)
+        return Studied(_cut(text, max_chars), True, sensitive=sensitive)
+
+    async def look(self, upload: Upload, question: str) -> str | None:
+        """Regarder de nouveau une image, pour une question (pendant qu'elle répond : la voie de la conversation)."""
+        if self.gateway is None or upload.kind != "image":
+            return None
+        req = LLMRequest(role="caption", call_id=f"look:{upload.name}:{len(upload.data)}:{len(question)}",
+                         system_stable=phrase("preprocess.look.system"),
+                         messages=(Message("user", phrase("preprocess.look.ask", question=question[:500]),
+                                           images=(Image(upload.mime, base64.b64encode(upload.data).decode()),)),),
+                         max_tokens=LOOK_TOKENS, lane="conversation", priority=0)
+        try:
+            async with asyncio.timeout(self.timeout_s):
+                resp = await self.gateway.call(req)
+        except Exception as exc:  # un regard qui échoue se dit, il ne lève pas
+            log.warning("pièce jointe %s, regard : %r", upload.name, exc)
+            return None
+        text = tidy(resp.text or "")
+        return text or None
+
+
+def _cut(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit].rstrip() + phrase("preprocess.seen.cut")
 
 
 def whisper(config: Callable[[], Mapping[str, str]]) -> Transcriber:

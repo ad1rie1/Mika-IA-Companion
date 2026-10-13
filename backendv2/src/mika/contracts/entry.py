@@ -104,6 +104,12 @@ class MindPort(Protocol):
 
     def ready(self) -> bool: ...
 
+    async def keep_attachments(self, handle: str, blobs: Sequence[bytes]) -> list[str | None]:
+        """Garder les pièces jointes d'un message que ``handle`` envoie (ADR 0106), **avant** de le soumettre : leurs
+        octets hors du journal ; rend la clé de chacune (``AttachmentMeta.file``), ``None`` pour une pièce qui n'a pas
+        pu l'être (rien pour la garder, trop grosse). La même pièce renvoyée par la même adresse a la même clé."""
+        ...
+
     def shared(self, ids: Sequence[str]) -> list[SharedMeta]:
         """Ce qu'on peut montrer des fichiers qui partent avec un message (``Delivery.attachments``, la colonne
         ``attachments`` d'une ligne du fil), dans l'ordre ; un identifiant inconnu (oublié) n'y est pas."""

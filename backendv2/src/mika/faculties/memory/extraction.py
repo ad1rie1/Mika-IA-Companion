@@ -31,11 +31,12 @@ from mika.contracts.memory import Relation
 from mika.kernel.clock import instant
 from mika.kernel.codec import digest
 from mika.ports.llm import LLMResponse, ToolDecl
+from mika.ports.preprocess import inert
 from mika.ports.sql import HANDLE_MAX, fit
 from mika.vocab.affect import facets, facets_valence
 from mika.vocab.circadian import DAYS_FR, MONTHS_FR
 from mika.vocab.people import clean_tokens, fold
-from mika.vocab.phrasebook import phrase, phrases
+from mika.vocab.phrasebook import family, phrase, phrases
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import OPENERS, WORD, stems, words
 from mika.vocab.words import fold as wfold
@@ -138,6 +139,9 @@ class _Item(_Lenient):
                                     description=phrase("memory.extraction.fields.sensibilite"))
     secret: bool = Field(default=False, description=phrase("memory.extraction.fields.secret"))
     messages: list[int] = Field(default_factory=list, description=phrase("memory.extraction.fields.messages"))
+    #: les pièces jointes d'où il vient (leurs repères, « #12.1 ») — en plus de ses messages, plusieurs au besoin
+    #: (ADR 0106)
+    pieces: list[str] = Field(default_factory=list, description=phrase("memory.extraction.fields.pieces"))
     #: ce que la personne concernée en ressent, et ce qu'elle-même en ressent : jugés par la relecture, jamais
     #: devinés d'après les mots (ADR 0083)
     ressenti: dict[str, float] = Field(default_factory=dict, description=phrase("memory.extraction.fields.ressenti"))
@@ -156,6 +160,13 @@ class _Item(_Lenient):
     @classmethod
     def lenient_people(cls, v: Any) -> list[str]:
         return _names(v)
+
+    @field_validator("pieces", mode="before")
+    @classmethod
+    def lenient_pieces(cls, v: Any) -> list[str]:
+        """« #12.1 », 12.1, « [#12.1] » ou un nom de fichier, seuls ou en liste."""
+        return [str(x) for x in (v if isinstance(v, list) else [v] if v not in (None, "") else [])
+                if isinstance(x, str | int | float) and not isinstance(x, bool)]
 
     @field_validator("messages", mode="before")
     @classmethod
@@ -337,6 +348,17 @@ class Speaker:
 
 
 @dataclass(frozen=True, slots=True)
+class Piece:
+    """Une pièce jointe d'un message, telle que la relecture la voit (ADR 0106) : son repère (« #12.1 » : la première
+    pièce du message #12), son nom, sa sorte, la clé de ses octets."""
+
+    token: str
+    name: str
+    kind: str
+    file: str
+
+
+@dataclass(frozen=True, slots=True)
 class Line:
     seq: int
     at: int
@@ -347,6 +369,8 @@ class Line:
     lie: bool = False  # une de ses répliques qu'elle a marquée mensonge : elle ne dit pas le vrai
     #: une de ses répliques qui racontait sans nom ce qu'elle sait de quelqu'un (ADR 0091) : son texte ne se relit pas
     veiled: bool = False
+    #: les pièces jointes que porte le message (ADR 0106)
+    pieces: tuple[Piece, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -443,8 +467,49 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
         aside = phrase("memory.extraction.render.aside") if ln.aside else ""
         lie = phrase("memory.extraction.render.lie") if ln.lie else ""
         text = phrase("memory.extraction.render.veiled_said") if ln.veiled else ln.text
-        out.append(f"[#{ln.seq}] {moment:%H:%M} {ln.speaker}{aside} : {text}{lie}")
+        out.append(f"[#{ln.seq}] {moment:%H:%M} {ln.speaker}{aside} : {text}{lie}{pieces_words(ln.pieces)}")
     return "\n".join(out)
+
+
+def pieces_words(pieces: Sequence[Piece]) -> str:
+    """Les repères des pièces d'un message, après son texte (rien sans pièce)."""
+    if not pieces:
+        return ""
+    kinds = family("memory.extraction.render.piece_kinds")
+    return phrase("memory.extraction.render.pieces", pieces=", ".join(
+        phrase("memory.extraction.render.piece", ref=p.token, name=inert(p.name, 80), kind=kinds.get(p.kind, p.kind))
+        for p in pieces))
+
+
+PIECE_TOKEN = re.compile(r"#?\s*(\d{1,12})\s*[./]\s*(\d{1,2})")
+
+
+def pieces_of(named: Sequence[str], cited: Sequence[int], lines: Mapping[int, Line]) -> tuple[str, ...]:
+    """Les pièces (leurs clés) d'où vient un élément — **en plus** de ses messages : celles que la relecture désigne
+    (un repère « #12.1 », ou le nom de la pièce s'il n'en désigne qu'une), parmi les pièces de la conversation ; sans
+    désignation, la seule pièce des messages qu'il cite, quand ils n'en portent qu'une (avec plusieurs, rien ne se
+    devine). Une clé inventée ne relie rien."""
+    every = {p.token: p for ln in lines.values() for p in ln.pieces}
+    by_name: dict[str, list[Piece]] = {}
+    for p in every.values():
+        for key in {fold(p.name), fold(p.name).rpartition(".")[0]} - {""}:
+            by_name.setdefault(key, []).append(p)
+    out: list[str] = []
+    for raw in named:
+        text = str(raw).strip().strip("[]«»\"' ")
+        m = PIECE_TOKEN.fullmatch(text)
+        token = f"#{m.group(1)}.{m.group(2)}" if m else ""
+        if token in every:
+            out.append(every[token].file)
+            continue
+        same = by_name.get(fold(text), [])
+        if len({p.file for p in same}) == 1:
+            out.append(same[0].file)
+    if not out and not named:
+        carried = {p.file for s in cited if s in lines for p in lines[s].pieces}
+        if len(carried) == 1:
+            out = list(carried)
+    return tuple(dict.fromkeys(out))
 
 
 def parse(resp: LLMResponse) -> Extraction | None:

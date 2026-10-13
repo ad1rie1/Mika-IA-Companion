@@ -69,6 +69,7 @@ from mika.app.paths import PERSONA
 from mika.app.settings import SecretBox, Settings, push_key_file
 from mika.app.teams import TeamsDesk
 from mika.app.wakeups import WakeupDesk
+from mika.contracts import attachments as attachments_c
 from mika.contracts import identity as identity_c
 from mika.contracts.self_ import PersonaDoc, name_of
 from mika.inspector.app import assemble
@@ -346,6 +347,9 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     imaging = imaging or LiveImaging()
     hub = Hub(port=None)  # type: ignore[arg-type] — relié au port juste après
     vectors = SqliteVectorIndex(store, embedder or SentenceEmbedder())
+    # les pièces jointes reçues ont leur propre index (le rapprochement de celui de la mémoire retire toute clé qui
+    # n'est pas à elle), avec le même modèle de plongements (ADR 0106)
+    piece_vectors = SqliteVectorIndex(store, vectors.embedder, table=attachments_c.VECTORS)
     camera = CameraBuffer(clock.now)
     settings = Settings(store, SecretBox.for_data(data))
     forge_settings = ForgeSettingsStore(settings)
@@ -364,6 +368,10 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
              "forge": forge, "forge_settings": forge_settings, "imaging": imaging}
     # les fichiers qu'elle envoie (ADR 0062) : leurs octets hors du journal, sauvegardés avec le dossier
     world["shares"] = DiskShares(data / "partages")
+    # ce qu'on lui envoie (ADR 0106) : les octets des pièces jointes, leur index, et de quoi les relire de près
+    world[attachments_c.PORT] = DiskShares(data / "pieces")
+    world[attachments_c.VECTORS] = piece_vectors
+    preprocess = world["preprocess"] = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     # les réveils par API (ADR 0068) : leurs réglages et leurs clés, et la porte qui admet un appel
     wakeups = world["wakeup"] = WakeupDesk(settings, clock.now)
     # Teams (ADR 0069) : ce que l'extension pousse, ses brouillons et la file (hors du journal), et la porte
@@ -486,7 +494,6 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       faculty_labels=FACULTY_LABELS, labels=LABELS,
                       backups=lambda: backup.overview(data), relay=live.relay, world=world_hub),
         cookie_secure=web.cookie_secure)
-    preprocess = LocalPreprocessor(gateway, transcribe=whisper(settings.stt))
     live.preprocess = preprocess
     relay = Mount(RELAY_PREFIX, app=live.relay.app)
     console_mcp = Mount(CONSOLE_MCP_PREFIX, app=console_app(kernel, settings.console_mcp_token, console_pages))

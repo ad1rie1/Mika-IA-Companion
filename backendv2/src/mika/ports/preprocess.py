@@ -166,8 +166,31 @@ class Perceived:
     error: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class Studied:
+    """Ce qu'elle lit d'une pièce jointe en la regardant de près, en fond (ADR 0106) : une photo décrite en détail
+    avec son texte visible, tout le texte d'un document, la transcription d'un vocal. ``sensitive`` : la lecture
+    l'a jugée intime (une photo intime, des papiers, la santé). ``transient`` : un échec qui peut passer (un modèle
+    injoignable, un délai) — à redemander ; sinon l'échec est définitif (un format illisible, rien pour voir)."""
+
+    text: str
+    read: bool
+    sensitive: bool = False
+    error: str | None = None
+    transient: bool = False
+
+
 class Preprocessor(Protocol):
     async def perceive(self, uploads: Sequence[Upload]) -> list[Perceived]: ...
+
+    async def study(self, upload: Upload, *, max_chars: int) -> Studied:
+        """La lecture de près d'une pièce gardée (ne lève pas)."""
+        ...
+
+    async def look(self, upload: Upload, question: str) -> str | None:
+        """Regarder de nouveau une image avec une question (« qu'est-ce qui est écrit sur le ticket ? ») ; ``None`` :
+        elle n'a pas pu (ne lève pas)."""
+        ...
 
 
 def render(items: Sequence[Perceived]) -> str:

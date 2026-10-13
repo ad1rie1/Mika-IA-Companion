@@ -56,7 +56,8 @@ MEMORY_KEYS = {"origin", "source", "call_id", "status", "by", "model", "night", 
                "heard_by", "holder", "felt", "empathy",  # des émotions et leurs intensités, pas des mots (ADR 0083)
                "precision", "expected_precision",  # la précision d'une date : un code (ADR 0084)
                "nature", "teller",  # la sorte d'une annonce (un code) et qui l'a faite (une clé, sujet) (ADR 0086)
-               "person"}  # de qui un sujet délicat (une clé, sujet de l'événement) (ADR 0099)
+               "person",  # de qui un sujet délicat (une clé, sujet de l'événement) (ADR 0099)
+               "pieces"}  # les clés des pièces jointes d'où vient un élément, pas des mots (ADR 0106)
 
 
 def textual(annotation: Any) -> bool:

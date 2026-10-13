@@ -130,8 +130,9 @@ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
   ci-dessous.
 - `attachments` (clé absente s'il n'y en a pas) : 5 au plus, 5 Mio chacun ; `data` en base64 **sans retour à la
   ligne** (le serveur décode strictement ; un préfixe `data:…;base64,` est toléré). Les images sont décrites, l'audio
-  transcrit, les documents lus ; les octets ne sont jamais gardés. Une trame entière ne dépasse pas ~34 Mio (et
-  OkHttp n'en envoie pas plus de 16 Mio d'un coup).
+  transcrit, les documents lus ; puis les octets sont **gardés** côté serveur (ADR 0106 : relus de près, reliés à ce
+  qu'elle en retient, oubliés avec la personne) — rien ne change pour le client, qui ne reçoit pas de clé. Une trame
+  entière ne dépasse pas ~34 Mio (et OkHttp n'en envoie pas plus de 16 Mio d'un coup).
 - Débit : 20 `chat` par 10 s ; `sync` et `identify` 12 par 10 s (au-delà, ignorés). Au plus 8 `chat` en attente
   sur une connexion, comptés à la réception : au-delà, `overloaded` — les derniers d'une rafale, jamais les premiers.
 
