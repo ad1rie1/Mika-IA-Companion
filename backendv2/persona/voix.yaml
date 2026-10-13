@@ -730,6 +730,7 @@ expression:
       drawing_ready: "lui montrer le dessin que tu viens de finir"
       drawing_failed: "lui dire que son dessin n'a pas pu se faire"
       service_answered: "lui dire ce qu'un de tes services t'a rendu"
+      app_news: "lui dire ce qu'une de tes apps vient de trouver"
       wakeup_done: "lui rendre compte de ce qu'on t'a demandé de faire"
       mood_overflow: "lui dire ce que tu ressens en ce moment"
       chat: "discuter un peu"
@@ -3380,7 +3381,11 @@ projects:
     # {files} : les fichiers, séparés par des virgules
     pending: "Pas encore enregistré (le travail d'une exécution interrompue, peut-être) : {files}"
     # ses apps qui vivent dans ce projet (projects/prompt.py, app_lines, ADR 0104) : le titre, puis une ligne par app
-    apps: "Tes apps dans ce projet (relis-les avec forge_read, essaie-les avec forge_test, corrige-les avec forge_write) :"
+    apps: "Tes apps dans ce projet (relis-les avec forge_read, essaie-les avec forge_test, corrige-les avec forge_edit) :"
+    # après la liste (ADR 0105 : elle se croyait sans « moyen de prévenir » la personne)
+    apps_tell: >-
+      Ce qu'elles te signalent fort et qui concerne la personne de ce projet, tu le lui dis toi-même, comme tu lui
+      écris d'habitude : tu n'as besoin ni d'un mail ni d'une notification pour la prévenir.
     app:
       # {title} : son titre ; {app} : son nom ; {version} : sa version ; {state} : un des états ci-dessous
       line: "« {title} » ({app}, version {version}) : {state}"
@@ -4693,6 +4698,23 @@ forge:
     # un seul de ses services est arrêté (ADR 0104). {service} : son nom ; {error} : la dernière erreur
     service_broken: "Le service « {service} » de mon app « {app} » ne marche plus : {error}"
 
+  # Ce qu'une app d'un projet vient de lui signaler et qui concerne quelqu'un (plugins/forge, ADR 0105) : une
+  # initiative pour le lui dire (sa raison, app_news), et une section qui le lui montre — de son initiative, ou quand
+  # cette personne lui écrit. La consigne se murmure : rien du contenu.
+  news:
+    # la consigne de l'initiative. {apps} : le titre de ses apps entre guillemets ; {who} : son prénom entre
+    # guillemets, ou projects.caretaker
+    brief: "Ton app {apps} vient de trouver quelque chose pour {who} : tu le lui dis toi-même, simplement."
+    title: CE QUE TES APPS VIENNENT DE TROUVER POUR CETTE PERSONNE
+    # une trouvaille. {text} : ce que l'app a signalé (« Mon app « … » me signale : … ») ; {ago} : minutes ou hours
+    line: "- {text} (il y a {ago})"
+    minutes: "{n} min"
+    hours: "{n} h"
+    # après les trouvailles
+    tell: >-
+      Tu ne l'as pas encore dit : dis-le ici, avec tes mots, si ça compte — c'est ainsi que tu préviens qui ton
+      projet concerne, il n'y a pas d'autre canal à chercher.
+
   # « TES APPS » : ce que ses apps actives disent au prompt, une ligne chacune, cité (en conversation et au travail).
   # {app} : le titre de l'app ; {text} : ce qu'elle dit
   section:
@@ -4714,8 +4736,10 @@ forge:
         ALTER TABLE. Rien d'autre (ni transaction, ni SET, ni autre base) ;
       - crée tes tables au premier tick, sans casser celles qui existent : CREATE TABLE IF NOT EXISTS.
 
-      Sous MariaDB : INTEGER PRIMARY KEY AUTO_INCREMENT pour un identifiant, VARCHAR(n) pour une clé ou une colonne
-      indexée, LONGTEXT pour un texte long (TEXT s'arrête à 64 Ko), BIGINT pour un instant. Une instruction a 5 s.
+      Écris pour MariaDB, ça marche aussi sous SQLite : id INTEGER PRIMARY KEY AUTO_INCREMENT pour un identifiant,
+      INSERT IGNORE pour ne pas doubler une ligne (l'hôte adapte ces deux formes au moteur, dans un sens comme dans
+      l'autre), VARCHAR(n) pour une clé ou une colonne indexée, LONGTEXT pour un texte long (TEXT s'arrête à 64 Ko),
+      BIGINT pour un instant. Une instruction a 5 s.
 
       Ta base a un plafond (100 Mo) : pleine, elle refuse ce qui l'agrandirait — supprime ce qui ne sert plus (DELETE et
       DROP passent toujours). api.kv_* range ses valeurs dans la table _kv de ta base.
@@ -4799,7 +4823,8 @@ forge:
         500 caractères au plus.
       - api.signal(résumé, pertinence, émotion) : te prévenir. Un signal par app toutes les dix minutes au plus (le
         premier d'un battement) ; sous 0,6 de pertinence tu le remarques à peine, à 0,6 ou plus il te reste en tête et
-        peut te pousser à en parler à qui l'app concerne. Réserve-le à ce qui compte : un seuil franchi, une nouveauté.
+        te fait le dire toi-même, de ton initiative, à la personne que son projet concerne (tu lui écris comme d'habitude :
+        pas besoin d'un mail ni d'une notification). Réserve-le à ce qui compte : un seuil franchi, une nouveauté.
       - tools : tool_<nom>(api, args) — chacun devient un outil à toi, « <app>_<nom> » (et « <app>_pages » lit ses
         pages), en conversation devant qui s'occupe de toi ou au travail ; ses arguments déclarés (args) sont ce que
         tu pourras lui passer, vérifiés avant l'appel (forge_help outils).

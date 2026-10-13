@@ -249,7 +249,7 @@ def app_lines(p: Project, frame: Frame) -> list[str]:
         if a.services:
             line += phrase("projects.run.app.services", services=", ".join(a.services))
         out.append("- " + line)
-    return out
+    return [*out, phrase("projects.run.apps_tell")]
 
 
 def run_rules(pm: Any) -> str:

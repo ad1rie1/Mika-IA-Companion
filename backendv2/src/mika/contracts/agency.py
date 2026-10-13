@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 from mika.contracts import attention as attention_c
 from mika.contracts import email as email_c
+from mika.contracts import forge as forge_c
 from mika.contracts import goals as goals_c
 from mika.contracts import imaging as imaging_c
 from mika.contracts import mcp as mcp_c
@@ -68,14 +69,15 @@ SECOND_THOUGHTS = "second_thoughts"
 OWED = frozenset({goals_c.REMIND, memory_c.KEEP_PROMISE, imaging_c.DELIVER, imaging_c.COULD_NOT,
                   mcp_c.ANSWERED_REASON, wakeup_c.DONE})
 #: Ce qui **prévient** : ce qui ne peut pas attendre et regarde la personne au premier chef — un mail important
-#: arrivé pour sa propriétaire, un projet qu'elle lui a confié qui n'avance plus sans elle. Prévenir n'est pas
+#: arrivé pour sa propriétaire, un projet qu'elle lui a confié qui n'avance plus sans elle, ce qu'une de ses apps
+#: vient de trouver pour la personne que son projet concerne (ADR 0105). Prévenir n'est pas
 #: relancer : la retenue « ne pas harceler » ne s'y applique pas, une rancune le décale au plus (on prévient
 #: quelqu'un même fâchée contre lui), et être ignorée n'y change rien — ni l'allongement de la période
 #: réfractaire par les initiatives restées sans réponse, ni l'envie moindre envers qui n'a pas répondu, ni s'être
 #: ravisée de lui écrire pour autre chose. C'est déjà borné par sa source (une fois par mail, une fois par
 #: objectif bloqué) ; le plafond du jour et la période réfractaire **de base** s'y appliquent toujours (ne pas
 #: annoncer trois mails en trois messages d'affilée).
-INFORMS = frozenset({email_c.MENTION, projects_c.NEED})
+INFORMS = frozenset({email_c.MENTION, projects_c.NEED, forge_c.APP_NEWS})
 #: **Saluer** qui arrive : pas « prendre la parole » non plus (ni plafond, ni période réfractaire, ni retenue
 #: envers qui ne répond pas) — mais une rancune l'empêche (ADR 0013 : pas même une salutation).
 GREETS = frozenset({social_c.GREETING})

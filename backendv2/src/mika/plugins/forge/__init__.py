@@ -42,18 +42,22 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from mika.contracts import agency as agency_c
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import forge as c
 from mika.contracts import identity as identity_c
+from mika.contracts import presence as presence_c
 from mika.contracts import projects as projects_c
 from mika.contracts import runtime as rt
 from mika.kernel import schedule
-from mika.kernel.clock import DAY, MINUTE
+from mika.kernel.arbitration import Candidate
+from mika.kernel.clock import DAY, HOUR, MINUTE
 from mika.kernel.events import Content, Origin, Payload
 from mika.kernel.faculty import CatchUp, Faculty, ToolResult, ToolSpec, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
+from mika.kernel.guards import floor
 from mika.kernel.operate import Preview
 from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
@@ -70,6 +74,7 @@ from mika.plugins.forge.views import (
 from mika.ports.forge import AppInfo, ForgeRefused, args_schema, check_args, said_args
 from mika.vocab.episodes import CONVERSATIONAL, PROJECT_KINDS, WORKING, Kind, project_of
 from mika.vocab.phrasebook import phrase
+from mika.vocab.privacy import hearable
 
 BUNDLE, APPS_BUNDLE = "forge", "forge_apps"
 
@@ -98,6 +103,18 @@ class ForgeParams(BaseModel):
         label="Contexte par app (caractères)", group="Ses apps", lo=50, hi=4000,
         help="Ce qu'une app ajoute au prompt est coupé à cette longueur : chaque caractère est relu à "
              "chaque réponse.")] = 500
+    news_within_us: Annotated[int, Knob(
+        label="Dire une trouvaille dans les", group="Ce que ses apps trouvent", lo=10 * MINUTE, hi=2 * DAY,
+        help="Ce qu'une app d'un projet lui signale fort (assez pour lui rester en tête) et qui concerne quelqu'un, "
+             "elle le lui dit dans ce délai ; passé, elle ne le dit plus d'elle-même.")] = 6 * HOUR
+    news_attempts: Annotated[int, Knob(
+        label="Tentatives de dire une trouvaille", group="Ce que ses apps trouvent", lo=1, hi=10,
+        help="Après autant d'essais qui n'ont rien dit, elle n'essaie plus.")] = 2
+    news_evidence: Annotated[float, Knob(
+        label="Envie de dire une trouvaille", group="Ce que ses apps trouvent", lo=0.0, hi=10.0, step=0.5,
+        help="La preuve (log-odds) de l'initiative de dire à la personne ce qu'une app vient de trouver pour elle, "
+             "face au seuil d'initiative (9). Elle prévient : ni la retenue envers qui ne répond pas, ni la période "
+             "réfractaire allongée ne la retiennent.")] = 9.5
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +178,26 @@ class ForgeState:
     apps: FrozenDict[str, App] = field(default_factory=FrozenDict)
     #: les propositions d'installer une version mise de côté : proposition → app
     installs: FrozenDict[int, str] = field(default_factory=FrozenDict)
+    #: ce qu'une app d'un projet vient de lui signaler et qui concerne quelqu'un, à lui dire (ADR 0105) : app → la
+    #: dernière trouvaille
+    news: FrozenDict[str, News] = field(default_factory=FrozenDict)
+    #: les initiatives parties pour dire une trouvaille : épisode → (départ, apps) — un essai qui ne dit rien compte
+    openings: FrozenDict[str, tuple[int, tuple[str, ...]]] = field(default_factory=FrozenDict)
+
+
+@dataclass(frozen=True, slots=True)
+class News:
+    """Une trouvaille d'app à dire : le signal (son numéro, son instant, son texte), qui elle concerne et à quel
+    niveau, sa pertinence, et ce qu'il en est (dite, combien d'essais)."""
+
+    seq: int
+    at: int
+    about: tuple[str, ...]
+    level: int
+    summary_ref: str
+    pertinence: float
+    attempts: int = 0
+    told: bool = False
 
 
 class Written(Payload):
@@ -220,7 +257,7 @@ class Emitted(Payload):
     data: str
 
 
-FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=3)
+FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=4)
 FORGE.bundle(BUNDLE, phrase("forge.bundle"))
 FORGE.declare(*c.ALL)
 WRITTEN = FORGE.event("written", Written)
@@ -273,7 +310,7 @@ def _switched(s: ForgeState, e, cx) -> ForgeState:
     if app is None:
         return s
     if d.state == "erased":
-        return replace(s, apps=s.apps.delete(d.app))
+        return replace(s, apps=s.apps.delete(d.app), news=s.news.delete(d.app) if d.app in s.news else s.news)
     operator = e.origin == Origin.EXTERNAL  # une action d'opérateur (la console), pas elle
     if d.state == "broken" and d.service:  # un seul service s'arrête : les autres continuent
         return replace(s, apps=s.apps.set(d.app, replace(
@@ -317,8 +354,159 @@ def _ticked(s: ForgeState, e, cx) -> ForgeState:
 
 @FORGE.reducer(c.SIGNALED)
 def _signaled(s: ForgeState, e, cx) -> ForgeState:
-    app = s.apps.get(e.data.app)
-    return replace(s, apps=s.apps.set(e.data.app, replace(app, signaled_at=e.at))) if app else s
+    """Un signal de l'app est passé (son espacement repart) ; s'il concerne quelqu'un (l'app vit dans son projet),
+    c'est une trouvaille à lui dire — la plus récente remplace la précédente (ADR 0105)."""
+    d = e.data
+    app = s.apps.get(d.app)
+    if app is None:
+        return s
+    s = replace(s, apps=s.apps.set(d.app, replace(app, signaled_at=e.at)))
+    if d.kind == c.APP_SIGNAL and d.about:
+        s = replace(s, news=s.news.set(d.app, News(e.seq, e.at, tuple(d.about), int(d.sensitivity),
+                                                   d.summary.ref or "", float(d.pertinence))))
+    return s
+
+
+NEWS_PROVENANCE = "forge-news:"
+#: les initiatives ouvertes gardées au plus (un épisode jamais réglé ne les fait pas grossir)
+OPENINGS_KEPT = 32
+
+
+def news_for(s: ForgeState, person: str | None, now: int, p: ForgeParams, threshold: float) -> list[tuple[str, News]]:
+    """Ses trouvailles d'apps à dire à cette personne : récentes, assez fortes pour lui être restées en tête, pas
+    encore dites, pas trop essayées — de la plus ancienne à la plus récente."""
+    if not person:
+        return []
+    return sorted(((k, n) for k, n in s.news.items()
+                   if k in s.apps and person in n.about and not n.told and n.attempts < p.news_attempts
+                   and now - n.at <= p.news_within_us and n.pertinence >= threshold), key=lambda kn: kn[1].at)
+
+
+@FORGE.reducer(rt.EPISODE_STARTED, reads=[identity_c.PERSON])
+def _news_opened(s: ForgeState, e, cx) -> ForgeState:
+    d = e.data
+    if d.kind != Kind.INITIATIVE or c.APP_NEWS not in str(d.reason).split(","):
+        return s
+    person = cx.facts.get(identity_c.PERSON(d.target)) or d.target if d.target else ""
+    apps = tuple(k for k, n in s.news.items() if person in n.about and not n.told)
+    openings = s.openings.set(e.correlation, (e.at, apps))
+    if len(openings) > OPENINGS_KEPT:
+        openings = FrozenDict(sorted(openings.items())[-OPENINGS_KEPT:])
+    return replace(s, openings=openings)
+
+
+@FORGE.reducer(rt.UTTERANCE)
+def _news_told(s: ForgeState, e, cx) -> ForgeState:
+    """Elle l'a dit : les trouvailles que son prompt lui montrait (``forge-news:<app>:<signal>``) sont dites — en
+    répondant comme de son initiative."""
+    d = e.data
+    s = replace(s, openings=s.openings.delete(e.correlation)) if e.correlation in s.openings else s
+    if not d.visible:
+        return s
+    shown = {x[len(NEWS_PROVENANCE):] for x in d.provenance if x.startswith(NEWS_PROVENANCE)}
+    news = s.news
+    for ref in shown:
+        app, _, seq = ref.rpartition(":")
+        n = news.get(app)
+        if n is not None and str(n.seq) == seq and not n.told:
+            news = news.set(app, replace(n, told=True))
+    return replace(s, news=news) if news is not s.news else s
+
+
+@FORGE.reducer(rt.EPISODE_ENDED, reads=[agency_c.RENOUNCED])
+def _news_settled(s: ForgeState, e, cx) -> ForgeState:
+    """Une initiative pour dire une trouvaille qui finit sans rien dire : un essai (un silence choisi, une panne),
+    sauf si elle a été devancée, interrompue, ou si elle s'est ravisée (``agency.tried``)."""
+    opening = s.openings.get(e.correlation)
+    if opening is None:
+        return s
+    s = replace(s, openings=s.openings.delete(e.correlation))
+    started, apps = opening
+    renounced = cx.facts.get(agency_c.RENOUNCED(e.data.target)) if e.data.target else 0
+    if not agency_c.tried(e.data.outcome, started, renounced):
+        return s
+    news = s.news
+    for app in apps:
+        n = news.get(app)
+        if n is not None and not n.told:
+            news = news.set(app, replace(n, attempts=n.attempts + 1))
+    return replace(s, news=news)
+
+
+def _address(frame: Frame, person: str) -> str | None:
+    """Où la joindre : là où elle est, sinon une adresse qui la joint (sa messagerie)."""
+    handles = frame.get(identity_c.HANDLES(person)) or (person,)
+    here = [h for h in frame.get(presence_c.PRESENT) if h in handles]
+    if here:
+        return here[0]
+    reachable = frame.get(identity_c.REACHABLE(person))
+    return reachable[0] if reachable else None
+
+
+@FORGE.propose(kinds=[Kind.INITIATIVE], reasons={c.APP_NEWS: (0.0, 10.0)},
+               reads=[attention_c.SIGNAL_THOUGHT_FROM, identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY,
+                      presence_c.PRESENT])
+def _news(s: ForgeState, frame: Frame) -> list[Candidate]:
+    """Ce qu'une app d'un projet vient de lui signaler et qui concerne quelqu'un : elle le lui dit, là où elle est,
+    sinon sur sa messagerie (ADR 0105 — elle croyait n'avoir « aucun moyen de le prévenir », et sa pensée attendait
+    d'insister). Elle prévient (``agency.INFORMS``)."""
+    p = params(frame.env.params_of("forge", frame.root))
+    threshold = frame.get(attention_c.SIGNAL_THOUGHT_FROM)
+    threshold = 0.6 if threshold is None else threshold
+    people = sorted({person for n in s.news.values() for person in n.about})
+    out = []
+    for person in people:
+        found = news_for(s, person, frame.now, p, threshold)
+        address = _address(frame, person) if found else None
+        if address is None:
+            continue
+        name = frame.get(identity_c.IDENTITY(person)).name
+        apps = ", ".join(f"« {s.apps[k].title} »" for k, _ in found)
+        brief = phrase("forge.news.brief", apps=apps, who=f"« {name} »" if name else phrase("projects.caretaker"))
+        out.append(Candidate(Kind.INITIATIVE, address, c.APP_NEWS, p.news_evidence,
+                             resources=frozenset({floor(address)}), args=FrozenDict({"brief:forge": brief})))
+    return out
+
+
+@FORGE.enricher("news", episodes=[*CONVERSATIONAL], deadline_ms=1000)
+async def _news_texts(s: ForgeState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
+    store = ports.get("store")
+    ep = frame.episode
+    if store is None or ep is None or not ep.target or not s.news:
+        return None
+    refs = [n.summary_ref for n in s.news.values() if n.summary_ref and not n.told]
+    return {"texts": store.content(refs)} if refs else None
+
+
+@FORGE.section("app_news", zone=Zone.VOLATILE, episodes=[*CONVERSATIONAL], trim_rank=80,
+               title=phrase("forge.news.title"), untrusted=True)
+def _news_section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> SectionBody | None:
+    """Ce que ses apps viennent de trouver pour la personne à qui elle parle (de son initiative ou en répondant), pas
+    encore dit : le texte du signal, cité. L'énoncé qui suit le dit (sa provenance la marque dite)."""
+    ep, aud = frame.episode, frame.audience
+    if ep is None or aud is None or not ep.target:
+        return None
+    person = frame.get(identity_c.PERSON(ep.target)) or ep.target
+    p = params(frame.env.params_of("forge", frame.root))
+    threshold = frame.get(attention_c.SIGNAL_THOUGHT_FROM)
+    found = news_for(s, person, frame.now, p, 0.6 if threshold is None else threshold)
+    texts = (enrich.get("news") or {}).get("texts") or {}
+    lines, refs, level = [], [], 0
+    for app, n in found:
+        text = texts.get(n.summary_ref)
+        if not text or not hearable(n.about, n.level, person, aud.level, aud.witness_level, aud.private_ok):
+            continue
+        lines.append(phrase("forge.news.line", text=text, ago=_ago(frame.now - n.at)))
+        refs.append(f"{NEWS_PROVENANCE}{app}:{n.seq}")
+        level = max(level, n.level if any(a != person for a in n.about) else 0)
+    if not lines:
+        return None
+    return SectionBody("\n".join([*lines, phrase("forge.news.tell")]), level=level, provenance=tuple(refs))
+
+
+def _ago(us: int) -> str:
+    minutes = max(1, us // MINUTE)
+    return phrase("forge.news.minutes", n=minutes) if minutes < 60 else phrase("forge.news.hours", n=minutes // 60)
 
 
 def wants(patterns: tuple[str, ...], type_name: str) -> bool:

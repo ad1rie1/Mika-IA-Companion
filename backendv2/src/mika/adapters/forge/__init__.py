@@ -537,6 +537,9 @@ class ForgeHost:
         (d / "version.json").write_text(json.dumps({"version": version}))
         self._stop(app)  # la version suivante repart d'un processus neuf
         self._forget(app)
+        # une borne dans son journal : ce qui précède vient d'une version d'avant (sonde du 2026-10-13 — une erreur
+        # d'une ancienne version, relue dans le journal, passait pour une erreur de l'actuelle)
+        self._log(app, f"── version {version} ──")
         self._changed()
         return version, []
 

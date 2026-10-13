@@ -17,6 +17,9 @@ from mika.kernel.facts import FactKey
 
 OWNER = "forge"
 APP_SIGNAL, APP_BROKEN = "app", "broken"
+#: la raison d'une initiative : dire à la personne que son projet concerne ce qu'une de ses apps vient de lui signaler
+#: (ADR 0105) — elle prévient (``agency.INFORMS``) : la personne attend qu'on la prévienne, ce n'est pas une relance
+APP_NEWS = "app_news"
 
 
 class AppSignaled(Signal):

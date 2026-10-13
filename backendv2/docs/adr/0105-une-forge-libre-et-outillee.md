@@ -83,13 +83,42 @@ sa clé — ; ensuite ses versions s'installent sans revalidation.
 `ports.forge.ArgSpec` / `arg_specs` / `args_schema` / `check_args` / `said_args`, `AppTool.args` / `timeout`,
 `AppService.timeout`, `AppInfo.timeout`, `AppAction.specs`, `Switched.state` « untrusted », `api.http`,
 `ForgeHost(http=…)` (un faux réseau entier pour les essais), `forge_edit`, `forge_search`, `forge_help outils |
-reseau`. Le guide (`forge_help`) le dit, l'exemple de veille déclare un outil avec un argument et un délai, sans
+reseau`, `forge.APP_NEWS`, `ForgeState.news`, `bases.portable`, `runtime.tools.unquoted`. Le guide (`forge_help`) le dit, l'exemple de veille déclare un outil avec un argument et un délai, sans
 domaine. Tests d'intention : `tests/unit/test_forge_libre.py` ; les tests de la confiance et de la promotion
 (`test_forge_console.py`) et du réseau (`test_forge_home.py`) disent la nouvelle règle.
 
 **Ce que cela ouvre, sciemment.** Une app validée peut, d'une version à l'autre, envoyer ses secrets n'importe où sur
 Internet sans que l'opérateur relise le code : c'est le choix de la propriétaire (une validation, puis la confiance),
 et « Ne plus lui faire confiance » le défait. La machine et le réseau local restent fermés.
+
+**Après la sonde réelle (Haiku par la CLI, 2026-10-13).** Adrien lui demande de surveiller la qualité de l'air à
+Lyon et de pouvoir interroger une autre ville. Elle ouvre un projet (la Forge et le web en main), écrit en deux
+minutes une app Open-Meteo avec un outil `ville` à l'argument déclaré et des délais déclarés, corrige par
+`forge_edit`, la prouve par l'essai ; en conversation, « et à Grenoble ? » passe par `qualite_air_ville {"nom":
+"Grenoble"}`. Cinq défauts trouvés, corrigés :
+- *Le web n'était offert à aucun épisode d'un vrai serveur* : uvicorn prend uvloop d'office (installé par
+  `uvicorn[standard]`), et sous uvloop `pasta` sort aussitôt (libuv donne des sockets, pas des tubes, à ce qu'elle
+  lance) — le serveur web au réseau isolé ne démarrait jamais ; les tests, sur la boucle asyncio, ne le voyaient
+  pas. `serve` lance uvicorn sur asyncio. Et le contrôle des serveurs MCP (`mcp.watch`) calculait son premier
+  passage « maintenant + une minute » à chaque réveil de l'ordonnanceur : il ne passait jamais, un serveur tombé au
+  démarrage ne revenait pas. Son échéance est fixée à la première lecture (ADR 0066, suite).
+- *Ce que trouve une app ne parvenait pas à la personne.* Elle se croyait sans « moyen de prévenir » Adrien et le
+  lui demandait par écrit ; la pensée née du signal attendait d'« insister » (un délai, une inquiétude, un proche).
+  Une trouvaille d'app (un signal d'au moins `attention.SIGNAL_THOUGHT_FROM` qui concerne quelqu'un, l'app vivant
+  dans son projet) devient une raison d'initiative, `forge.APP_NEWS`, qui **prévient** (`agency.INFORMS` : une
+  question restée sans réponse ne la retient pas) ; une section, « CE QUE TES APPS VIENNENT DE TROUVER POUR CETTE
+  PERSONNE », la lui montre (citée ; la consigne murmurée n'en dit rien), de son initiative ou quand la personne lui
+  écrit ; ce qu'elle dit la marque dite (sa provenance, `forge-news:<app>:<signal>`) ; dans les 6 h, deux essais au
+  plus (réglages « Ce que ses apps trouvent »). Le guide et la liste des apps d'un projet le lui disent.
+- *SQL* : le guide disait `AUTO_INCREMENT` (MariaDB), l'essai tourne sous SQLite, et le premier battement plantait.
+  L'hôte adapte à chaque écriture (`bases.portable`) : `AUTO_INCREMENT` ↔ `AUTOINCREMENT` (la colonne devient
+  `INTEGER PRIMARY KEY AUTOINCREMENT` sous SQLite, sa clé de table redite part, les options `ENGINE=…` aussi),
+  `INSERT IGNORE` ↔ `INSERT OR IGNORE`, `INSERT OR REPLACE` → `REPLACE` ; rien d'autre.
+- *Une liste écrite en texte JSON* (`"edits": "[{…}]"`) est lue comme une liste quand le schéma de l'outil en attend
+  une (`runtime.tools.unquoted`, pour tous les outils). La sonde, elle, avait reçu un argument tronqué — refusé, et
+  elle a réessayé seule : ça, aucun décodage ne le sauve.
+- *Son journal* mêlait les erreurs d'une ancienne version : chaque version écrite y pose une borne
+  (« ── version N ── »).
 
 **Ce qui n'a pas été fait ici.** Ses explorations d'un centre d'intérêt sans flux restent des rêveries (sans le web).
 Le bac à sable d'une app reste à l'heure UTC (son fuseau n'y est pas transmis). Une app n'a qu'un appel à la fois.

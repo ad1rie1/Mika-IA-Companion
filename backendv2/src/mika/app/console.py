@@ -116,7 +116,7 @@ SECTION_LABELS: dict[str, str] = {
     "drafts": "Ses brouillons de mails", "voice": "Sa voix dans cette boîte", "task_mail": "Le mail à traiter",
     "task_ask": "Ce qu'on lui demande pour ce mail", "edits": "Ce qu'on change à ses brouillons (retouches, refus)",
     "headlines": "Les titres de ses flux",
-    "views": "Ce que voit la caméra", "apps": "Ses apps forgées",
+    "views": "Ce que voit la caméra", "apps": "Ses apps forgées", "app_news": "Ce que ses apps ont trouvé pour la personne",
     # déclarées par des lots voisins (ADR 0033, 0034, 0036) : nommées d'avance, sans effet tant qu'elles n'existent pas
     "life": "Ce qui se passe dans la vie de la personne",
     "ahead": "Ce qui vient : le monde, et ce qu'elle vivra à travers quelqu'un",
@@ -156,7 +156,7 @@ REASON_LABELS: dict[str, str] = {
     "comfort": "Réconforter", "recontact": "Reprendre contact après un silence", "work": "Avancer sur un but",
     "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
     "drawing_ready": "Montrer un dessin prêt", "drawing_failed": "Dire qu'un dessin n'a pas pu se faire",
-    "service_answered": "Dire ce qu'un service extérieur a rendu",
+    "service_answered": "Dire ce qu'un service extérieur a rendu", "app_news": "Dire ce qu'une app a trouvé",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
     "rss_for": "Montrer à une amie un titre qui lui a fait penser à elle",

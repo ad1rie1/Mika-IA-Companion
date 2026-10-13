@@ -354,3 +354,151 @@ def test_the_guide_shows_tools_that_read_and_a_free_network():
     network = guide.topic("reseau")
     assert "api.http(" in network and "jamais" in network and "5 Mo" in network
     assert "allowed_domains" not in guide.VEILLE_MANIFEST and "forge_edit" in guide.topic("manifeste")
+
+
+# ── Ce que son app trouve, elle le dit à qui son projet concerne ──────────
+
+
+def test_an_app_finding_informs_and_is_not_held_back_by_an_unanswered_message():
+    """Dire à la personne ce que son app vient de trouver pour elle, c'est prévenir (``agency.INFORMS``) : une question
+    restée sans réponse ne le retient pas (sonde du 2026-10-13 : l'alerte attendait qu'Adrien réponde à autre chose)."""
+    from mika.contracts import agency as agency_c
+    from mika.contracts import forge as forge_c
+
+    assert forge_c.APP_NEWS in agency_c.INFORMS
+
+
+@needs_bwrap
+def test_what_her_app_finds_for_someone_she_tells_them_herself_once(tmp_path):
+    """Une app de son projet pour Adrien signale fort : une initiative part vers Adrien, sa section lui montre la
+    trouvaille (citée, pas dans le murmure), ce qu'elle dit la marque dite — elle ne la redit pas. Un signal faible,
+    ou qui ne concerne personne, ne fait rien dire."""
+    from mika.contracts import projects as projects_c
+    from mika.contracts import runtime as rt
+    from mika.faculties.projects.tools import StartArgs, start_project
+    from mika.kernel.clock import MINUTE, US
+    from mika.kernel.events import Origin
+    from mika.kernel.frame import Audience
+    from mika.plugins.forge import WriteArgs, _news, concerns, forge_write, signal_draft
+    from mika.plugins.forge.guide import VEILLE_CODE, VEILLE_MANIFEST
+    from mika.sim.clock import run_virtual
+    from mika.vocab.episodes import Kind, project_target
+    from tests.fixtures.atelier import Atelier
+    from tests.fixtures.mika import boot, build, connect, reply
+    from tests.unit.test_forge_home import QUOTE
+    from tests.unit.test_projects import _context, events
+
+    forge = ForgeHost(tmp_path / "forge", http_get=lambda url: QUOTE, public=lambda host: True)
+    kernel, clock, _, _ = build(tmp_path, reply("Le cours a bien bougé, je te le dis. [EMOTION:surprised:0.4]"),
+                                ports={"forge": forge, "workshop": Atelier()})
+
+    async def main():
+        await boot(kernel)
+        try:
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            here = _context(kernel, "start_project", Kind.REPLY, "user_1", Audience(owner=True))
+            await start_project(StartArgs(title="Suivre la bourse", objectives=["Une app qui relève le cours"],
+                                          tools=["forge"]), here)
+            pid = events(kernel, projects_c.PROJECT_CREATED)[-1].seq
+            run = _context(kernel, "forge_write", Kind.WORK, project_target(pid), Audience(owner=True))
+            await forge_write(WriteArgs(app="cours", manifest=VEILLE_MANIFEST.replace("interval:1h", "manual"),
+                                        code=VEILLE_CODE), run)
+            frame = kernel.mind.frame()
+            about, level = concerns(frame, frame.state("forge").apps["cours"])
+            await kernel.mind.append([signal_draft("cours", "un écart faible", 0.3, "", about=about, sensitivity=level),
+                                      signal_draft("cours", "le CAC a bougé de 2,82 %", 0.8, "surprised", about=about,
+                                                   sensitivity=level)],
+                                     emitter="forge", correlation="essai-signal", origin=Origin.GENESIS)
+            frame = kernel.mind.frame()
+            out = {"about": about, "candidats": _news(frame.state("forge"), frame)}
+            await asyncio.sleep(30 * MINUTE / US)
+            frame = kernel.mind.frame()
+            out["dite"] = frame.state("forge").news["cours"]
+            out["après"] = _news(frame.state("forge"), frame)
+            out["énoncés"] = [e for e in events(kernel, rt.UTTERANCE) if e.data.kind == Kind.INITIATIVE
+                              and any(p.startswith("forge-news:") for p in e.data.provenance)]
+            return out
+        finally:
+            forge.shutdown()
+            await kernel.stop()
+
+    got = run_virtual(clock, main)
+    assert got["about"] == ("user_1",)
+    [cand] = got["candidats"]  # la trouvaille forte (0,8) : une initiative vers Adrien
+    assert cand.reason == "app_news" and cand.target == "user_1"
+    assert "Suivi d'un cours" in cand.args["brief:forge"] and "2,82" not in cand.args["brief:forge"]  # rien du contenu
+    assert len(got["énoncés"]) == 1  # elle l'a dit, une fois
+    assert got["dite"].told and got["après"] == []  # …et ne le redira pas
+
+
+def test_only_a_strong_recent_untold_finding_about_that_person_is_to_tell():
+    from mika.kernel.clock import HOUR
+    from mika.kernel.state import FrozenDict
+    from mika.plugins.forge import App, ForgeState, News, news_for
+
+    s = ForgeState(apps=FrozenDict({a: App(a, 1) for a in ("fort", "faible", "vieux", "dit", "autre", "essaye")}),
+                   news=FrozenDict({
+                       "fort": News(1, 10 * HOUR, ("user_1",), 2, "r1", 0.8),
+                       "faible": News(2, 10 * HOUR, ("user_1",), 2, "r2", 0.3),
+                       "vieux": News(3, 1 * HOUR, ("user_1",), 2, "r3", 0.9),
+                       "dit": News(4, 10 * HOUR, ("user_1",), 2, "r4", 0.9, told=True),
+                       "autre": News(5, 10 * HOUR, ("user_2",), 2, "r5", 0.9),
+                       "essaye": News(6, 10 * HOUR, ("user_1",), 2, "r6", 0.9, attempts=2),
+                       "efface": News(7, 10 * HOUR, ("user_1",), 2, "r7", 0.9)}))
+    p = ForgeParams()  # dans les 6 h, deux essais au plus
+    assert [k for k, _ in news_for(s, "user_1", 11 * HOUR, p, 0.6)] == ["fort"]
+    assert [k for k, _ in news_for(s, "user_2", 11 * HOUR, p, 0.6)] == ["autre"]
+    assert news_for(s, "", 11 * HOUR, p, 0.6) == []
+
+
+# ── Une base qui se lit sous les deux moteurs ─────────────────────────────
+
+
+def test_what_she_writes_for_mariadb_runs_on_sqlite_and_the_other_way_round(tmp_path):
+    """Le guide dit « AUTO_INCREMENT » (MariaDB) ; l'essai tourne sous SQLite, où ça plantait (sonde du 2026-10-13).
+    L'hôte adapte les deux formes courantes, dans les deux sens, et rien d'autre."""
+    from mika.adapters.forge.bases import ForgeBases, portable
+
+    mariadb = "CREATE TABLE t (id INT NOT NULL AUTO_INCREMENT, nom VARCHAR(20) DEFAULT 'a,b', PRIMARY KEY (id)) " \
+              "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"
+    assert portable(mariadb, "sqlite") == "CREATE TABLE t ( id INTEGER PRIMARY KEY AUTOINCREMENT, nom VARCHAR(20) " \
+                                          "DEFAULT 'a,b')"
+    assert portable(mariadb, "mariadb") == mariadb
+    assert portable("CREATE TABLE u (id INTEGER PRIMARY KEY AUTOINCREMENT)", "mariadb") == \
+        "CREATE TABLE u (id INTEGER PRIMARY KEY AUTO_INCREMENT)"
+    assert portable("insert ignore into t (nom) values (:n)", "sqlite").startswith("INSERT OR IGNORE")
+    assert portable("INSERT OR IGNORE INTO t VALUES (1)", "mariadb").startswith("INSERT IGNORE")
+    assert portable("INSERT OR REPLACE INTO t VALUES (1)", "mariadb").startswith("REPLACE")
+    for kept in ("CREATE TABLE v (k TEXT PRIMARY KEY) WITHOUT ROWID", "CREATE TABLE x (a INT)",
+                 "UPDATE t SET nom = 'auto_increment'"):
+        assert portable(kept, "sqlite") == kept
+    b = ForgeBases(tmp_path / "forge")
+    b.ensure("essai")
+    try:
+        b.execute("essai", "CREATE TABLE IF NOT EXISTS releves (id INTEGER PRIMARY KEY AUTO_INCREMENT, "
+                           "ville VARCHAR(100)) ENGINE=InnoDB")
+        assert b.execute("essai", "INSERT INTO releves (ville) VALUES (:v)", {"v": "Lyon"})["id"] == 1
+        assert b.execute("essai", "INSERT IGNORE INTO releves (id, ville) VALUES (1, 'doublon')")["rows"] == 0
+        assert b.execute("essai", "INSERT INTO releves (ville) VALUES (:v)", {"v": "Paris"})["id"] == 2
+        assert b.query("essai", "SELECT ville FROM releves ORDER BY id") == [{"ville": "Lyon"}, {"ville": "Paris"}]
+    finally:
+        b.close()
+
+
+# ── Une liste écrite en texte JSON ────────────────────────────────────────
+
+
+def test_a_list_given_as_json_text_is_read_as_a_list_and_a_text_stays_a_text():
+    from mika.plugins.forge import EditArgs, WriteArgs
+    from mika.runtime.tools import unquoted
+
+    edit = SimpleNamespace(schema=None, args=EditArgs)
+    got = unquoted(edit, {"app": "meteo", "edits": '[{"old_string": "a", "new_string": "b"}]'})
+    assert EditArgs.model_validate(got).edits[0].new_string == "b"
+    broken = '[{"old_string">  api.execute('  # ce que le modèle a vraiment envoyé une fois : laissé tel quel, refusé
+    assert unquoted(edit, {"app": "meteo", "edits": broken})["edits"] == broken
+    write = SimpleNamespace(schema=None, args=WriteArgs)
+    raw = {"app": "meteo", "manifest": "[pas une liste]", "code": '{"x": 1}'}
+    assert unquoted(write, raw) == raw  # des textes attendus restent des textes
+    schema = SimpleNamespace(schema={"type": "object", "properties": {"autres": {"type": "array"}}}, args=None)
+    assert unquoted(schema, {"autres": '["AAPL", "^FCHI"]'}) == {"autres": ["AAPL", "^FCHI"]}

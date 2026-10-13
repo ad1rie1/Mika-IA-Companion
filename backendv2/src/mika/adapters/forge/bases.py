@@ -148,6 +148,94 @@ def _statement(sql: str, limit: int) -> str:
     return sql
 
 
+_CREATE = re.compile(r"^\s*CREATE\s+TABLE\b", re.I)
+_AUTO = re.compile(r"\bAUTO_?INCREMENT\b", re.I)
+_SQLITE_OPTIONS = re.compile(r"\b(WITHOUT\s+ROWID|STRICT)\b", re.I)
+_TABLE_PK = re.compile(r"^\s*(?:CONSTRAINT\s+\S+\s+)?PRIMARY\s+KEY\s*\(\s*([`\"\w]+)\s*\)\s*$", re.I)
+
+
+def _split_top(text: str) -> list[str]:
+    """Les morceaux séparés par des virgules hors parenthèses et hors guillemets."""
+    parts, depth, quote, cur = [], 0, "", []
+    for ch in text:
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in "'\"`":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append("".join(cur))
+            cur = []
+            continue
+        cur.append(ch)
+    parts.append("".join(cur))
+    return parts
+
+
+def _closing(text: str, start: int) -> int:
+    """L'indice de la parenthèse qui ferme celle ouverte en ``start`` (-1 : aucune)."""
+    depth, quote = 0, ""
+    for i in range(start, len(text)):
+        ch = text[i]
+        if quote:
+            if ch == quote:
+                quote = ""
+        elif ch in "'\"`":
+            quote = ch
+        elif ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth == 0:
+                return i
+    return -1
+
+
+def _sqlite_create(sql: str) -> str:
+    """Un ``CREATE TABLE`` écrit pour MariaDB, lu par SQLite : une colonne ``AUTO_INCREMENT`` devient ``INTEGER
+    PRIMARY KEY AUTOINCREMENT`` (la seule forme que SQLite incrémente), la clé de table qui la redisait part, et les
+    options de table de MariaDB (``ENGINE=…``, ``DEFAULT CHARSET=…``) aussi."""
+    start = sql.find("(")
+    end = _closing(sql, start) if start >= 0 else -1
+    if end < 0:
+        return sql
+    parts = _split_top(sql[start + 1:end])
+    auto = ""
+    for i, part in enumerate(parts):
+        if _AUTO.search(part) and not _TABLE_PK.match(part):
+            name = part.strip().split()[0]
+            parts[i] = f" {name} INTEGER PRIMARY KEY AUTOINCREMENT"
+            auto = name.strip("`\"").lower()
+    if auto:
+        parts = [x for x in parts if not ((m := _TABLE_PK.match(x)) and m.group(1).strip("`\"").lower() == auto)]
+    tail = sql[end + 1:]
+    if _SQLITE_OPTIONS.search(tail):  # les siennes (WITHOUT ROWID, STRICT) restent ; celles de MariaDB partent
+        tail = " " + tail.strip()
+    elif tail.strip():
+        tail = ""
+    if not auto and tail == sql[end + 1:]:
+        return sql
+    return sql[:start + 1] + ",".join(parts) + ")" + tail
+
+
+def portable(sql: str, engine: str) -> str:
+    """Ce qu'elle écrit pour l'un des deux moteurs, compris par l'autre (ADR 0105) : une app écrite en essai (SQLite)
+    tourne en service (MariaDB), et l'inverse — ``AUTO_INCREMENT`` / ``AUTOINCREMENT``, ``INSERT IGNORE`` /
+    ``INSERT OR IGNORE``, ``INSERT OR REPLACE`` / ``REPLACE``. Rien d'autre n'est touché."""
+    if engine == "sqlite":
+        sql = re.sub(r"^\s*INSERT\s+IGNORE\b", "INSERT OR IGNORE", sql, flags=re.I)
+        return _sqlite_create(sql) if _CREATE.match(sql) else sql
+    sql = re.sub(r"^\s*INSERT\s+OR\s+IGNORE\b", "INSERT IGNORE", sql, flags=re.I)
+    sql = re.sub(r"^\s*INSERT\s+OR\s+REPLACE\b", "REPLACE", sql, flags=re.I)
+    return re.sub(r"\bAUTOINCREMENT\b", "AUTO_INCREMENT", sql, flags=re.I) if _CREATE.match(sql) else sql
+
+
 def _params(params: Any) -> dict[str, Any]:
     if params is None:
         return {}
@@ -345,6 +433,7 @@ class ForgeBases:
                              "ou d'une vue, ALTER TABLE (pour lire : api.query)")
         if not FREEING.match(sql):
             self._room(app)
+        sql = portable(sql, self.engine_name)
         writer, _ = self._engines_of(app)
         out = self._run(writer, sql, _params(params), deadline, rows=False)
         with self._lock:

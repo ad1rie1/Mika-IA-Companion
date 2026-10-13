@@ -241,6 +241,38 @@ def acting(specs: Sequence[ToolSpec]) -> str:
     return f"{text} {phrase('runtime.tools.outside')}" if any(getattr(s, "outside", False) for s in specs) else text
 
 
+def _wants_container(prop: Mapping[str, Any]) -> bool:
+    """Ce champ du schéma attend-il une liste ou un objet ?"""
+    for p in (prop, *(prop.get("anyOf") or ()), *(prop.get("oneOf") or ())):
+        kind = p.get("type")
+        kinds = set(kind) if isinstance(kind, list) else {kind}
+        if kinds & {"array", "object"} or "$ref" in p or "items" in p or "properties" in p:
+            return True
+    return False
+
+
+def unquoted(spec: ToolSpec, args: dict[str, Any]) -> dict[str, Any]:
+    """Un modèle passe parfois une liste ou un objet en texte JSON (« "[{…}]" ») : décodé quand le schéma de l'outil
+    attend une liste ou un objet à cet endroit et que le texte en est bien un — sinon laissé tel quel, et la
+    validation dira ce qui ne va pas (sonde du 2026-10-13 : une retouche refusée pour sa liste écrite en texte)."""
+    texts = {k: v for k, v in args.items() if isinstance(v, str) and v.lstrip()[:1] in ("[", "{")}
+    if not texts:
+        return args
+    schema = spec.schema if spec.schema is not None else spec.args.model_json_schema()
+    props = schema.get("properties") or {}
+    out = dict(args)
+    for key, value in texts.items():
+        if not _wants_container(props.get(key) or {}):
+            continue
+        try:
+            decoded = json.loads(value)
+        except ValueError:
+            continue
+        if isinstance(decoded, list | dict):
+            out[key] = decoded
+    return out
+
+
 #: la boucle s'est arrêtée sur un outil qui conclut (``ToolSpec.ends_loop``)
 ENDED_BY_TOOL = "tool_end"
 
@@ -336,13 +368,14 @@ async def _loop(
             if RAW_ARGS_KEY in call.args:
                 outputs.append(_refused(call, phrase("runtime.tools.refused.not_json"), result))
                 continue
+            given = unquoted(spec, dict(call.args))
             try:
-                args = spec.args.model_validate(dict(call.args))
+                args = spec.args.model_validate(given)
             except ValidationError as exc:
                 outputs.append(_refused(call, phrase("runtime.tools.refused.invalid",
                                                      errors=exc.errors(include_url=False)), result))
                 continue
-            wrong = schema_problems(spec.schema, dict(call.args)) if spec.schema is not None else []
+            wrong = schema_problems(spec.schema, given) if spec.schema is not None else []
             if wrong:
                 outputs.append(_refused(call, phrase("runtime.tools.refused.wrong", problems=" ; ".join(wrong)), result))
                 continue

@@ -22,6 +22,12 @@ EXEMPT = {
                      "elle passe par mariadb-dump (app/backup_server.py)",
 }
 
+#: un texte précis permis dans un module, et pourquoi (le reste du module reste relu)
+ALLOWED = {
+    ("adapters/forge/bases.py", "INSERT OR IGNORE"): "la traduction, vers SQLite seulement, d'un INSERT IGNORE "
+                                                     "qu'une app a écrit pour MariaDB (portable, ADR 0105)",
+}
+
 #: tout ``src`` (les révisions générées d'Alembic à part), sauf ``EXEMPT``
 PORTED = sorted(
     rel for rel in (str(p.relative_to(SRC)) for p in SRC.rglob("*.py") if "__pycache__" not in p.parts)
@@ -86,16 +92,16 @@ def registered_functions(source: str) -> list[int]:
             and n.func.attr in {"create_function", "create_aggregate", "create_collation"}]
 
 
-def offences(source: str) -> list[str]:
+def offences(source: str, path: str = "") -> list[str]:
     found = [f"ligne {line} : {name} — {text[:80]!r}" for line, text in sql_strings(source)
-             for name, rx in FORBIDDEN.items() if rx.search(text)]
+             for name, rx in FORBIDDEN.items() if rx.search(text) and (path, text) not in ALLOWED]
     found += [f"ligne {line} : une fonction Python dans le moteur" for line in registered_functions(source)]
     return found
 
 
 @pytest.mark.parametrize("path", PORTED)
 def test_the_sql_of_a_ported_module_is_portable(path: str) -> None:
-    assert offences((SRC / path).read_text(encoding="utf-8")) == []
+    assert offences((SRC / path).read_text(encoding="utf-8"), path) == []
 
 
 def test_the_checker_sees_what_it_must_and_spares_the_prose() -> None:
