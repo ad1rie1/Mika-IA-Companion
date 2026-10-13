@@ -57,7 +57,7 @@ Dans le champ `description`, dans cet ordre :
 
 ### Ne propose JAMAIS :
 - Des tests, de la couverture, un CI, du typage, des docstrings, de la documentation, du logging, du refactoring, du Docker, de la télémétrie. Rien de tout cela n'est une fonctionnalité, et c'est traité ailleurs.
-- Une réécriture, un changement de framework, de base de données ou de bibliothèque 3D. Rien qui s'appuie sur la v1 archivée.
+- Une réécriture, un changement de framework, de base de données ou de bibliothèque 3D.
 - Une intégration de service tiers qui demanderait un compte, une clé ou un abonnement de plus.
 - Quelque chose qui existe déjà : vérifie dans `ARCHITECTURE.md` et les ADR.
 - Une fonctionnalité qui reposerait sur la modification d'un choix explicitement documenté comme délibéré.

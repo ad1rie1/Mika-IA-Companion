@@ -276,7 +276,7 @@ ai_project_context() {
 
 Mika : un personnage d'IA compagne, présent en continu, avec un avatar 3D.
 
-- `backendv2/` — le moteur VIVANT (paquet Python `mika`, sans Django). Une
+- `backendv2/` — le moteur VIVANT (paquet Python `mika`). Une
   psyché à **journal d'événements** : tout ce qui lui arrive s'ajoute au
   journal, l'état de chaque faculté s'en déduit par des réducteurs purs. Couches
   (`kernel` → `vocab` → `ports` → `contracts` → `faculties`/`plugins`/`adapters`
@@ -294,14 +294,12 @@ Mika : un personnage d'IA compagne, présent en continu, avec un avatar 3D.
     (protocole `mika.world/1`, `backendv2/docs/protocole-monde.md`, ADR 0050–0051).
     Couches en assemblies (`Protocol` généré → `Model` sans Unity → `Net` →
     `Chat`, `World`, `Avatar`, `Player`, `UI` → `App`).
-- `old/` — la v1 (Django) ARCHIVÉE. On ne la modifie pas, on ne la prend pas
-  pour référence : son comportement n'est pas un oracle.
 - Langues : identifiants de code en anglais ; prompts, interface, commentaires
   et documentation en français.
 
 **Lis AVANT toute analyse : `backendv2/ARCHITECTURE.md`**, puis les ADR de
 `backendv2/docs/adr/` qui touchent ton périmètre. Le `CLAUDE.md` à la racine
-documente surtout la v1 archivée : il ne fait PAS foi pour `backendv2/`.
+en donne un résumé ; en cas de désaccord, le code et les ADR font foi.
 
 ## Ce qui fait foi dans backendv2 — ne le « corrige » jamais
 
@@ -314,7 +312,7 @@ vérifiées par `lint-imports` et `ruff` ; les contourner est une régression :
   dans une fonction.
 - **L'heure, le hasard et les identifiants sont injectés.** Une lecture directe
   de l'horloge (`datetime.now()`, `time.time()`), de `random` ou d'`uuid` hors
-  des points d'injection EST un défaut — c'est l'inverse de la v1.
+  des points d'injection EST un défaut.
 - **`except Exception` aveugle** : permis seulement dans `runtime/boundary.py`
   et les adaptateurs. Ailleurs, une exception avalée est un vrai défaut.
 - **Un réducteur est pur et total** ; une charge utile d'événement porte des
@@ -334,7 +332,7 @@ vérifiées par `lint-imports` et `ruff` ; les contourner est une régression :
   Telegram (ADR 0060 : on écrit à Mika par une application dédiée, avec un
   compte) : délibérés.
 - Un comportement se valide par une **cible d'intention** (ce qu'une personne
-  ferait), jamais par parité avec la v1.
+  ferait, avec une bande et un contre-exemple qui doit échouer).
 
 Si tu crois vraiment tenir un problème sur l'un de ces points, il te faut un
 scénario de défaillance concret et reproductible — sinon, passe.

@@ -1022,7 +1022,7 @@ class _Session:
         if after_id:
             head = self.port.recent(c.handle, 1)
             if after_id > (head[-1].id if head else 0):
-                # un curseur venu d'ailleurs (l'ancien moteur, une vie restaurée plus ancienne, un fil oublié) : un
+                # un curseur venu d'ailleurs (une vie restaurée plus ancienne, un fil oublié) : un
                 # « rattrapage » vide le laisserait cacher tout ce qui est plus petit que lui — le fil initial
                 # remplace ce que l'écran montre
                 rows = self.port.recent(c.handle, protocol.HISTORY_INITIAL)

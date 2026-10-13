@@ -1,9 +1,9 @@
-"""Parité v1 → v2 : chaque écran de GestionSystème a sa place dans la console.
+"""Chaque chose qu'un opérateur cherche a sa place dans la console.
 
 La liste est la correspondance du plan de la console. Chaque adresse doit
-s'ouvrir sans échec et dire ce qu'elle montre ; une destination de la v2 qui
-disparaît fait tomber la ligne v1 qu'elle reprenait. Ce que la v2 ne fait
-plus (thèmes et entités : elle n'en extrait pas) renvoie à la mémoire disponible.
+s'ouvrir sans échec et dire ce qu'elle montre ; une destination qui disparaît
+fait tomber la ligne qui la cherchait. Ce qu'elle ne tient pas (thèmes et
+entités : elle n'en extrait pas) renvoie à la mémoire disponible.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import pytest
 
 from tests.protocol.test_web import WS, bootstrap, recv_until, world  # noqa: F401 — fixture partagée
 
-#: écran v1 → (adresse v2, un mot que la page doit contenir)
+#: ce qu'on cherche → (adresse, un mot que la page doit contenir)
 PARITY: dict[str, tuple[str, str]] = {
     "Vie intérieure › Émotions": ("/inspecteur/vie/humeur", "Humeur"),
     "Vie intérieure › Pulsions": ("/inspecteur/vie/needs", "Besoins"),
@@ -71,7 +71,7 @@ def lived(world):  # noqa: F811
 
 
 @pytest.mark.parametrize("screen", sorted(PARITY))
-def test_every_v1_screen_has_its_place(lived, screen):
+def test_every_screen_has_its_place(lived, screen):
     client, _ = lived
     url, word = PARITY[screen]
     r = client.get(url, follow_redirects=True)
@@ -81,8 +81,8 @@ def test_every_v1_screen_has_its_place(lived, screen):
     assert word in page, (screen, url, word)
 
 
-def test_the_person_fiche_gathers_what_v1_scattered(lived):
-    """En v1, une personne se lisait sur six écrans ; ici, une fiche réunit
+def test_the_person_fiche_gathers_everything(lived):
+    """Une personne se lit sur une seule fiche, qui réunit
     identité, lien, fil, mémoire, affect, buts, pensées — sans que la console
     nomme une seule faculté."""
     client, live = lived

@@ -13,7 +13,6 @@ Corrige le problème décrit dans l'issue GitHub ci-dessous. L'issue peut venir 
 - Identifiants en anglais ; commentaires, prompts et textes d'interface en français.
 - Ne renomme JAMAIS une fonction existante.
 - Pas de sur-engineering : correction minimale et ciblée.
-- Ne touche jamais à `old/` (la v1 archivée) et ne la prends pas pour modèle.
 
 ### Backend v2 (`backendv2/`, paquet `mika`)
 - Respecte les couches : une faculté n'importe jamais une autre faculté (elle lit des faits), les adaptateurs n'importent ni facultés ni runtime, le runtime et l'inspecteur ne nomment aucune faculté. Pas d'import dans une fonction.

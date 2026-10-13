@@ -309,7 +309,7 @@ export interface HistoryMessage {
   truncated: boolean;
   /**
    * L'empreinte de sa vie (le même journal depuis sa genèse). Un cache local
-   * gardé sous une autre empreinte — ou sans empreinte : l'ancien moteur —
+   * gardé sous une autre empreinte, ou sans empreinte,
    * vient d'une autre vie, dont les identifiants ne veulent rien dire ici :
    * il est vidé avant de fusionner (ADR 0056).
    */

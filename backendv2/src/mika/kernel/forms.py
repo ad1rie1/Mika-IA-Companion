@@ -6,7 +6,7 @@ en tire la liste de ses champs (``describe``), en rend les valeurs
 (``flatten``, ``as_text``), relit une soumission (``parse``), la borne
 (``within``) puis la fait valider par le modèle lui-même (``validate``).
 
-Conventions (reprises de la v1) :
+Conventions :
 
 - chaque champ affiché émet un ``_champs`` caché portant son chemin : une case
   décochée (absente de la soumission, mais affichée) vaut ``False``, et un

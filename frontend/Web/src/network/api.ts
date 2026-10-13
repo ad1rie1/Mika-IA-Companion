@@ -11,8 +11,7 @@
 // développement (localhost/127.0.0.1, ports 3000 et 4173) le sont par
 // défaut ; une autre se déclare par `python -m mika serve --origin <adresse>`.
 //
-// `VITE_BACKEND_ORIGIN` (voir `frontend/Web/.env.example`) change la cible —
-// l'ancien moteur (v1, Django) écoutait sur http://localhost:8000.
+// `VITE_BACKEND_ORIGIN` (voir `frontend/Web/.env.example`) change la cible.
 
 const BACKEND_ORIGIN =
   (import.meta as any).env?.VITE_BACKEND_ORIGIN ?? "http://localhost:8001";

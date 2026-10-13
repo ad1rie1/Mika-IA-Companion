@@ -55,7 +55,7 @@ Garde **au plus 3 améliorations** pour ce module, les meilleures. Si le module 
 
 ## La cible d'intention
 
-Chaque amélioration se valide comme le reste du projet (ADR 0007) : par ce qu'une personne ferait, jamais par parité avec l'ancien moteur.
+Chaque amélioration se valide comme le reste du projet (ADR 0007) : par ce qu'une personne ferait, avec une bande et un contre-exemple qui doit échouer.
 
 - **Situation** : qui, quand, quoi.
 - **Attendu** : ce qu'elle doit faire, avec sa marge (« reprend des nouvelles une seule fois, entre le 3e et le 7e jour »).
@@ -74,6 +74,5 @@ Chaque amélioration se valide comme le reste du projet (ADR 0007) : par ce qu'u
 - Rendre binaire ce qui est gradué, ou lever un garde-fou d'identité.
 - Plus d'initiatives, plus de messages ou plus d'émotion « pour faire vivant » : une personne qui parle trop n'est pas plus humaine, elle est envahissante.
 - Une consigne de plus dans le prompt sans mécanisme derrière, ou une section ajoutée sans en mesurer le coût en tokens.
-- La parité avec la v1 archivée.
 
 ### En cas de doute : NE PROPOSE PAS. Une amélioration qu'on sent dans la vie de tous les jours vaut mieux que cinq qu'on ne remarquerait pas.

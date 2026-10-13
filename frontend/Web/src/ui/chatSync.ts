@@ -541,11 +541,10 @@ export function mergeHistory(
  * Ce que le navigateur garde du fil : ses messages, et l'empreinte de la vie
  * d'où ils viennent (`HistoryMessage.life`).
  *
- * Sans empreinte, un cache survivait au changement de moteur : l'ancien
- * envoyait la clé Django d'un message, le nouveau le `seq` de son journal,
- * qui repart de quelques dizaines, sous la **même** clé de cache
- * (`user_<n>`). Le curseur de l'ancien fil cachait alors le nouveau, et ses
- * identifiants passaient pour des messages déjà connus.
+ * Sans empreinte, le cache d'une autre vie (une sauvegarde plus ancienne
+ * restaurée, un autre dossier de données) survivait sous la **même** clé de
+ * cache (`user_<n>`) : le curseur de l'ancien fil cachait alors le nouveau, et
+ * ses identifiants passaient pour des messages déjà connus.
  */
 export interface CachedThread {
   life: string;
@@ -582,7 +581,7 @@ export function writeCache(life: string, messages: StoredMessage[]): string {
  * Oui quand le serveur le dit (`reset` : le curseur dépassait la tête de ce
  * fil — une sauvegarde plus ancienne restaurée, un fil oublié), ou quand son
  * empreinte n'est pas celle du cache — un cache **sans** empreinte compris :
- * il vient de l'ancien moteur. Un serveur qui n'envoie pas d'empreinte ne
+ * il vient d'une autre vie. Un serveur qui n'envoie pas d'empreinte ne
  * fait rien vider (on ne sait pas).
  */
 export function fromAnotherLife(

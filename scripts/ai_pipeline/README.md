@@ -3,7 +3,7 @@
 Des agents (Claude Code ou Codex) auditent le dépôt, ouvrent des issues, les
 corrigent en PR, et tiennent ces PR à jour. Cible : le moteur vivant
 (`backendv2/`) et ses trois clients (`frontend/Web/`, `frontend/Android/`,
-`frontend/Unity/Mika/`) ; la v1 archivée (`old/`) n'est jamais touchée.
+`frontend/Unity/Mika/`).
 
 Un **module** est un dossier qu'un agent traite en un passage
 (`AVAILABLE_MODULES` dans `config.sh`). Il n'est retenu que s'il existe sur

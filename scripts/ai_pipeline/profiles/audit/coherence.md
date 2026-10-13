@@ -9,9 +9,7 @@ Chaque pièce, lue seule, peut être juste. Le défaut est **entre** elles : c'e
 
 ## Où passent les coutures
 
-Le dépôt vivant : `backendv2/` (le moteur, paquet `mika`), `frontend/Web/`, `frontend/Android/`, `frontend/Unity/Mika/` (et son générateur `frontend/Unity/tools/gen_world_protocol.py`), `frontend/Extension/` (Teams, ADR 0069), `INJECTION/` (le jumeau numérique : son code, ses tests et ses docs seulement — `brut/`, `travail/` et `sortie/` sont des données privées, ne les lis pas), `services/mika-images/`, `scripts/`, `docs/`, les `README.md`, `ARCHITECTURE.md` et `CLAUDE.md`.
-
-`old/` est la v1 archivée : ne l'audite pas. Mais une pièce vivante qui dépend encore de `old/` (un import, un chemin, une commande, une doc qui y renvoie comme si c'était le moteur actuel) est un constat.
+Le dépôt vivant : `backendv2/` (le moteur, paquet `mika`), `frontend/Web/`, `frontend/Android/`, `frontend/Unity/Mika/` (et son générateur `frontend/Unity/tools/gen_world_protocol.py`), `frontend/Extension/` (Teams, ADR 0069), `INJECTION/` (le jumeau numérique : son code, ses tests et ses docs seulement — `brut/`, `travail/` et `sortie/` sont des données privées, ne les lis pas), `services/mika-images/`, `scripts/`, les `README.md`, `ARCHITECTURE.md` et `CLAUDE.md`.
 
 <!-- AXE:protocoles | ce que le serveur envoie et ce que chaque client lit, dans les deux sens -->
 ### Axe « protocoles »
@@ -43,11 +41,11 @@ Un mot qui n'existe que d'un côté, une traduction française qui diverge d'un 
 <!-- AXE:documentation | ce que disent les README, ARCHITECTURE, ADR, CLAUDE.md et les docs face au code -->
 ### Axe « documentation »
 
-La doc face au code qu'elle décrit : `backendv2/README.md`, `backendv2/ARCHITECTURE.md`, `backendv2/docs/adr/`, `backendv2/docs/*.md`, `backendv2/deploy/README.md`, les `README.md` des clients, de l'extension, d'`INJECTION/` et de `scripts/`, `docs/`, et le `CLAUDE.md` racine (sa partie v1 est historique et annoncée comme telle : ne la confronte pas au code v2, mais son tableau de tête et ses sections datées décrivent le présent).
+La doc face au code qu'elle décrit : `backendv2/README.md`, `backendv2/ARCHITECTURE.md`, `backendv2/docs/adr/`, `backendv2/docs/*.md`, `backendv2/deploy/README.md`, les `README.md` des clients, de l'extension, d'`INJECTION/` et de `scripts/`, et le `CLAUDE.md` racine.
 
 Ce qui compte :
 - Une commande, une option, un port, un chemin, une variable d'environnement documentés qui n'existent plus, ou qui existent sous un autre nom.
-- Une fonction retirée encore décrite comme présente (Telegram retiré par l'ADR 0060, le transport OAuth, la v1 présentée comme moteur actuel).
+- Une fonction retirée encore décrite comme présente (Telegram retiré par l'ADR 0060, le transport OAuth).
 - Un ADR dont la décision est contredite par le code sans qu'un ADR ultérieur ne l'ait remplacée : soit le code a dérivé (constat sur le code), soit la décision a changé (l'ADR doit le dire).
 - Un lien de doc vers un fichier qui n'existe pas ; une numérotation d'ADR en double ou trouée ; un ADR « proposé » appliqué depuis longtemps.
 - Un compte ou un chiffre recopié dans la doc (« 49 tests », « 8 rôles ») qui ne correspond plus — seulement si quelqu'un risque d'en tirer une conclusion fausse.
@@ -69,7 +67,7 @@ Une grandeur qui n'est qu'*un peu* différente compte quand l'ordre importe : un
 
 Ce qu'un retrait ou un renommage a laissé derrière lui :
 - Un événement, un fait, un contrat, un outil, une trame, un champ, une route que plus personne n'émet, ne lit ni n'appelle — **vérifie par `grep` sur tout le dépôt, clients compris**, avant de conclure : un champ que seul Unity lit n'est pas mort.
-- Une référence vivante à quelque chose de retiré : Telegram, la v1 (`old/`), le transport OAuth, un module, un chemin, un script.
+- Une référence vivante à quelque chose de retiré : Telegram, le transport OAuth, un module, un chemin, un script.
 - Un fichier suivi par git qui ne devrait pas l'être : répertoires temporaires laissés par un test (par exemple des `tmp*/` dans `INJECTION/`), sorties générées, caches, verrous, journaux ; un `.gitignore` qui laisse passer ce qu'un test produit.
 - Un test qui ne teste plus rien de vivant (il importe une pièce que plus rien n'utilise, ou ne vérifie qu'un bouchon) ; un `TODO`/`FIXME` qui renvoie à un travail fait ou à une pièce disparue.
 - Deux copies d'un même utilitaire dans deux pièces, dont l'une a reçu une correction et l'autre non.

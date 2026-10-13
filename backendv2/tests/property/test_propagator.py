@@ -1,5 +1,5 @@
 """Preuve M0 — propagateur exact : conforme à Euler à petit pas sur la grille
-de paramètres de la v1, semi-groupe à 1e-9, lecture en quelques microsecondes."""
+de paramètres de référence, semi-groupe à 1e-9, lecture en quelques microsecondes."""
 
 from __future__ import annotations
 
@@ -13,8 +13,8 @@ from hypothesis import strategies as st
 from mika.kernel.dynamics import Oscillator, euler_reference, first_crossing, propagate
 
 
-def v1_params(volatility: float, recovery: float) -> Oscillator:
-    """La dérivation des paramètres de la v1 (emotion/physics.py::derive_params)."""
+def reference_params(volatility: float, recovery: float) -> Oscillator:
+    """Une dérivation de référence : la masse par la volatilité, la constante de temps par la récupération."""
     mass = max(0.25, min(4.0, 1.0 / volatility))
     tau = 1800.0 * (240.0 / 1800.0) ** ((recovery - 0.05) / 0.95)
     zeta = 1.0 - 0.35 * volatility
@@ -22,10 +22,10 @@ def v1_params(volatility: float, recovery: float) -> Oscillator:
     return Oscillator(mass=mass, damping=2.0 * mass / tau, stiffness=mass * omega0 * omega0)
 
 
-GRID = [v1_params(v, r) for v, r in itertools.product((0.1, 0.4, 0.7, 1.0), (0.05, 0.5, 1.0))]
+GRID = [reference_params(v, r) for v, r in itertools.product((0.1, 0.4, 0.7, 1.0), (0.05, 0.5, 1.0))]
 
 
-def test_closed_form_matches_small_step_euler_on_v1_grid():
+def test_closed_form_matches_small_step_euler_on_reference_grid():
     home = (0.1, -0.05, 0.02)
     starts = [((0.8, -0.6, 0.3), (0.0, 0.0, 0.0)), ((-0.5, 0.4, -0.7), (0.002, -0.001, 0.0))]
     worst = 0.0

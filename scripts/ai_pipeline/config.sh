@@ -170,7 +170,6 @@ EMAIL_FROM="ai-pipeline@vtuber.local"
 #
 # La cible est le code VIVANT : backendv2/ et les trois clients (web, Android,
 # Unity). Volontairement absents :
-#   old/                         → v1 archivée, on ne la modifie plus
 #   backendv2/src/mika/contracts,
 #   ports, vocab                 → sans logique ; lus comme contexte par les
 #                                  passages des facultés qui s'en servent
@@ -333,9 +332,6 @@ FORBIDDEN_PATTERNS=(
     "*secret.yaml"
     "*.pem"
     "*.key"
-
-    # La v1 est archivée : on ne la modifie plus.
-    "old/*"
 
     # Sa persona est un choix d'auteur, pas du code à corriger.
     "backendv2/persona/*"

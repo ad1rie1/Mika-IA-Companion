@@ -505,8 +505,8 @@ export class ChatOverlay {
   /**
    * Un morceau du fil arrive. S'il vient d'une autre vie que ce que l'écran
    * garde (empreinte changée, ou `reset` : le curseur dépassait la tête du
-   * fil), l'écran est vidé d'abord — sinon le fil d'avant (l'ancien moteur,
-   * une sauvegarde plus récente que celle restaurée) cachait celui-ci.
+   * fil), l'écran est vidé d'abord — sinon le fil d'avant (une sauvegarde plus
+   * récente que celle restaurée) cachait celui-ci.
    */
   private receiveHistory(data: HistoryMessage) {
     let wiped = false;

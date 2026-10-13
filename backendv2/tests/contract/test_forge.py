@@ -87,7 +87,7 @@ def view(api):
 @needs_bwrap
 @pytest.mark.parametrize("bomb", [
     "while True:\n        pass",
-    "import re\n    re.match(r'(a+)+$', 'a' * 40 + 'b')",  # un appel C : v1 ne pouvait pas l'interrompre
+    "import re\n    re.match(r'(a+)+$', 'a' * 40 + 'b')",  # un appel C : seul un processus tué l'interrompt
 ])
 def test_a_runaway_call_is_killed_at_its_deadline_and_the_app_restarts(tmp_path, bomb):
     h = host(tmp_path)

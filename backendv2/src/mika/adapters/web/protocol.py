@@ -205,7 +205,7 @@ def history_item(row: HistoryRow, shared: Mapping[str, SharedMeta] | None = None
 def history(mode: str, rows: Sequence[HistoryRow], *, after_id: int = 0, truncated: bool = False,
             life: str = "", reset: bool = False, shared: Mapping[str, SharedMeta] | None = None) -> dict[str, Any]:
     """Un morceau du fil. ``life`` : l'empreinte de sa vie (le même journal depuis sa genèse) — un navigateur qui
-    garde le fil d'une autre vie (l'ancien moteur, un autre dossier de données) le vide avant de fusionner.
+    garde le fil d'une autre vie (un autre dossier de données) le vide avant de fusionner.
     ``reset`` : le curseur du client dépassait la tête de ce fil (une vie restaurée plus ancienne, un fil oublié,
     des identifiants d'ailleurs) ; ce fil initial remplace ce qu'il montre au lieu de s'y ajouter. ``shared`` :
     ce qu'on peut montrer des fichiers qu'elle a envoyés avec ses messages, par identifiant."""

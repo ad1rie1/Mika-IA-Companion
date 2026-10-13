@@ -556,12 +556,12 @@ describe("asleep", () => {
 });
 
 describe("another life", () => {
-  // B-1 : le cache de l'ancien moteur (ou d'une vie restaurée plus ancienne)
+  // B-1 : le cache d'une autre vie (une sauvegarde plus ancienne restaurée)
   // gardait des identifiants qui ne veulent rien dire ici.
-  const v1Cache = Array.from({ length: 50 }, (_, i) =>
-    local(`v1 ${i}`, i % 2 ? "vtuber" : "user", { id: 1201 + i })
+  const oldCache = Array.from({ length: 50 }, (_, i) =>
+    local(`ancien ${i}`, i % 2 ? "vtuber" : "user", { id: 1201 + i })
   );
-  const v2Rows = [
+  const rows = [
     entry(17, "user", "salut"),
     entry(23, "assistant", "coucou !"),
     entry(1210, "user", "ça va ?"),
@@ -570,17 +570,17 @@ describe("another life", () => {
 
   it("hides what she said when the old cache is merged as is", () => {
     // Le défaut, tel que l'audit l'a reproduit (migr.mjs) : un seul message
-    // v2 reste visible, 1210 passe pour connu, 17 et 23 sont coupés.
-    const { history: out } = mergeHistory(v1Cache.map((m) => ({ ...m })), v2Rows, MAX);
-    expect(out.filter((m) => !m.text.startsWith("v1")).map((m) => m.id)).toEqual([1300]);
+    // reste visible, 1210 passe pour connu, 17 et 23 sont coupés.
+    const { history: out } = mergeHistory(oldCache.map((m) => ({ ...m })), rows, MAX);
+    expect(out.filter((m) => !m.text.startsWith("ancien")).map((m) => m.id)).toEqual([1300]);
   });
 
   it("drops a cache from another life before merging", () => {
-    const cached = readCache(JSON.stringify(v1Cache)); // un tableau nu : l'ancien format, vie inconnue
+    const cached = readCache(JSON.stringify(oldCache)); // un tableau nu : l'ancien format, vie inconnue
     expect(cached.life).toBe("");
     expect(fromAnotherLife(cached.life, { life: "a1b2c3d4e5f60708" })).toBe(true);
     const kept = keepAcrossLives(cached.messages as StoredMessage[]);
-    const { history: out } = mergeHistory(kept, v2Rows, MAX);
+    const { history: out } = mergeHistory(kept, rows, MAX);
     expect(out.map((m) => m.id)).toEqual([17, 23, 1210, 1300]);
     expect(cursorOf(out)).toBe(1300);
   });
@@ -596,7 +596,7 @@ describe("another life", () => {
 
   it("keeps only what this tab is still sending", () => {
     const history = [
-      local("v1", "user", { id: 1250, status: "sent" }),
+      local("ancien", "user", { id: 1250, status: "sent" }),
       local("restauré", "user", { status: "failed", reason: "x" }),
       local("pensée", "vtuber", { after: 1250, inner: true }),
       local("en partance", "user", { cid: "c9", status: "pending" }),

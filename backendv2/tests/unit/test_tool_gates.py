@@ -8,7 +8,7 @@
 - un outil ne peut proposer que les capacités de sa propre faculté ;
 - en conversation, le socle (mémoire, identité, buts) est en main ; le reste est
   à la demande, et le prompt stable dit, lot par lot, ce qu'elle peut aller
-  chercher — le contrat v1 des capacités chargées paresseusement ; un fournisseur
+  chercher ; un fournisseur
   qui ne sait pas différer (Ollama) les reçoit tous et n'entend parler d'aucune
   recherche, y compris à travers la passerelle en service ;
 - quand elle parle, ses outils sont ses mains : faire avant d'annoncer, ne rien

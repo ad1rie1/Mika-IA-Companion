@@ -117,7 +117,7 @@ const TONE_LABEL: Record<string, string> = {
 
 // Les mots de la console (`faculties/body/inspect.py::SLEEP_FR`) : le sommeil
 // léger ouvre chacun de ses cycles de la nuit, il n'a rien à voir avec son
-// journal (« endormie (journal) » était le sens de la v1). Un test côté
+// journal. Un test côté
 // serveur (`tests/protocol/test_web_thread.py`) confronte cette table à la console.
 const SLEEP_PHASE_META: Record<SleepPhase, { label: string; icon: string }> = {
   awake: { label: "éveillée", icon: "" },

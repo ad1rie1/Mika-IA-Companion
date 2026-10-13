@@ -1,8 +1,7 @@
 """Paramètres d'``affect``, dérivés du tempérament.
 
-Le point de départ est la physique de la v1 (oscillateur amorti, cliquet
-d'impulsion, repos circadien) ; ce qui la valide ici, ce sont les cibles de
-comportement des tests, pas la v1 elle-même.
+Un oscillateur amorti, un cliquet d'impulsion, un repos circadien ; ce qui
+les valide, ce sont les cibles de comportement des tests.
 """
 
 from __future__ import annotations

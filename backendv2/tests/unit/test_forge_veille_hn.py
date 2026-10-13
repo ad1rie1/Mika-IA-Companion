@@ -1,4 +1,4 @@
-"""« Veille Hacker News », l'app forgée de la v1, portée vers la Forge v2
+"""« Veille Hacker News », l'app forgée d'exemple
 (``examples/forge/veille_hn``) : son manifeste et son code passent la relecture
 de la Forge ; en mode demo (sans réseau), un passage garde des histoires, les
 consigne, les élague ; ses trois vues se décodent sans une violation ; ses

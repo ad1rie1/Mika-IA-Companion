@@ -4,9 +4,9 @@
 son propre processus, sans réseau, sans les bases ni les clés de Mika (rien
 n'est monté hormis ``/usr`` en lecture, son dossier en lecture, un ``/tmp``
 éphémère), dans un environnement reconstruit, mémoire, CPU, fichiers et
-descripteurs bornés. Un appel qui dépasse son délai **tue** le processus (le
-bac à sable v1 ne pouvait pas interrompre un appel C : une expression
-régulière pathologique tenait un fil pendant des secondes). Sans
+descripteurs bornés. Un appel qui dépasse son délai **tue** le processus : c'est le seul moyen
+d'interrompre un appel C (une expression régulière pathologique tiendrait un
+fil pendant des secondes). Sans
 bubblewrap, rien ne tourne.
 
 La relecture à l'écriture (syntaxe, imports inutiles dans un bac à sable,

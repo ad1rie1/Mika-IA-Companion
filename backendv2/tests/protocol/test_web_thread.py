@@ -1,8 +1,8 @@
 """Le fil tel que la personne le relit (ADR 0056), vérifié contre le contrat du frontend
 (``frontend/Web/src/ui/chatSync.ts``, ``ChatOverlay.ts``) :
 
-- un navigateur qui garde le fil d'une autre vie (l'ancien moteur, une sauvegarde
-  plus ancienne restaurée, un fil oublié) ne cache plus ce que celle-ci a dit : un
+- un navigateur qui garde le fil d'une autre vie (une sauvegarde plus ancienne
+  restaurée, un fil oublié) ne cache plus ce que celle-ci a dit : un
   curseur au-delà de la tête de son fil reçoit un fil initial marqué ``reset``, et
   chaque trame ``history`` porte l'empreinte de sa vie ;
 - le fil rechargé montre ce qu'elle a tapé et ses fichiers par leur nom — pas ce
@@ -84,7 +84,7 @@ def talk(ws, text: str, cid: str, **extra) -> dict:
 
 
 def test_a_cursor_beyond_her_thread_gets_the_thread_back_instead_of_hiding_it(world):
-    """Le navigateur a gardé le fil de l'ancien moteur (des ``pk`` Django jusqu'à 1250) : il demande « ce qui suit
+    """Le navigateur a gardé le fil d'une autre vie (des identifiants jusqu'à 1250) : il demande « ce qui suit
     1250 ». Un rattrapage vide le laissait cacher tout ce qu'elle a dit, d'identifiants plus petits. Le serveur
     répond le fil initial, marqué ``reset`` : le client remplace ce qu'il montre."""
     client, _, _ = world()
@@ -255,7 +255,7 @@ def test_the_panel_names_her_needs_with_the_console_words():
 
 def test_the_panel_names_her_sleep_with_the_console_words():
     """Un seul vocabulaire du sommeil : le sommeil léger ouvre chacun de ses cycles de la nuit, il n'écrit pas son
-    journal. Le panneau (``SLEEP_PHASE_META``) disait « endormie (journal) », le sens de la v1, quand la console dit
+    journal. Le panneau (``SLEEP_PHASE_META``) disait « endormie (journal) » quand la console dit
     « sommeil léger »."""
     source = FRONTEND / "ui" / "InnerLifePanel.ts"
     if not source.exists():

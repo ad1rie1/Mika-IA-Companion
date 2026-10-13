@@ -5,8 +5,7 @@ chaud, et ne me signaler que ce qui sort vraiment du lot (le reste, je le
 retrouve dans ma page). Le mode « demo » fabrique un faux flux : la boucle
 complète se teste sans réseau.
 
-Portée de ma première version (v1) vers la Forge v2 : un stockage clé-valeur
-au lieu de collections, des sujets en lignes « nom | requête | poids », et un
+Un stockage clé-valeur, des sujets en lignes « nom | requête | poids », et un
 titre de flux que je remarque (plutôt qu'une conversation, que mes apps ne
 lisent jamais) fait remonter les histoires qui en parlent.
 """
