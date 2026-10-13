@@ -92,7 +92,7 @@ DREAM_TONE = {c.NIGHTMARE: "danger", c.PLEASANT: "ok", c.MELANCHOLIC: "warn", c.
 CAUSE_FR = {IGNORED: "une initiative restée sans réponse", HEARD: "une réponse après des initiatives ignorées",
             ACHIEVED: "quelque chose mené à bout", STUCK: "un blocage", PROMISE: "une promesse non tenue",
             c.THANKED: "un merci", c.COMPLIMENTED: "un compliment", c.INSULTED: "une insulte",
-            c.APOLOGIZED: "des excuses"}
+            c.APOLOGIZED: "des excuses", c.DISAPPOINTED: "une déception"}
 
 
 def number(value: float) -> str:

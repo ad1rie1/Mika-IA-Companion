@@ -63,6 +63,8 @@ def test_no_tag_reads_nothing_and_nothing_reads_calm():
 @pytest.mark.parametrize(("label", "kind"), [
     ("excuses", reading.APOLOGIZED), ("des excuses sincères", reading.APOLOGIZED), ("un grand merci", reading.THANKED),
     ("compliment", reading.COMPLIMENTED), ("blessant", reading.INSULTED), ("des mots méchants", reading.INSULTED),
+    ("décevant", reading.DISAPPOINTED), ("un oubli qui compte", reading.DISAPPOINTED),
+    ("de la froideur", reading.DISAPPOINTED), ("un rejet", reading.DISAPPOINTED), ("désolée", reading.APOLOGIZED),
     ("aucun", ""), ("rien", "")])
 def test_the_gesture_is_the_models_label(label, kind):
     assert reading.gesture_of(label) == kind
@@ -157,6 +159,29 @@ def test_the_same_words_read_by_the_model_differ_with_the_bond(tmp_path):
                                                 "t'es con": "angry 0.5 | geste : blessant"}, scenario)
     assert [(t.handle, t.kind) for t in touched] == [("user_9", self_c.INSULTED)]
     assert abs(teased - 0.5) < 1e-6 and insulted < teased
+
+
+def test_sad_because_of_her_cools_the_relation_sad_with_her_brings_closer(tmp_path):
+    """Triste *à cause* d'une amie (le modèle lit une déception : son anniversaire oublié) ou triste *avec* elle (le
+    modèle la lit triste) : la même balise de Mika, deux suites (ADR 0107). La déception refroidit la relation, sans
+    attachement, et lui coûte un peu d'estime ; la peine partagée la rapproche."""
+    async def scenario(kernel):
+        await befriend(kernel, "user_1", social_c.FRIEND)
+        await connect(kernel, "user_1", "Inès")
+        await say(kernel, "user_1", "ah zut, j'ai complètement oublié ton anniversaire", "bref, on s'en fiche")
+        frame = kernel.mind.frame()
+        return frame.get(affect_c.STANCE("user_1")), frame.get(self_c.ESTEEM), \
+            [t.kind for t in events(kernel, self_c.TOUCHED.name)]
+
+    sad = "[EMOTION: sad 0.6]"
+    let_down, esteem, touched = live(tmp_path / "decue", {"anniversaire": "rien | geste : décevant",
+                                                          "s'en fiche": "rien | geste : décevant"}, scenario, mine=sad)
+    shared, untouched, none = live(tmp_path / "avec", {"anniversaire": "sad 0.7", "s'en fiche": "sad 0.6"},
+                                   scenario, mine=sad)
+    assert let_down.regard < 0 and let_down.bond == 0  # déçue : ni tendresse ni attachement
+    assert shared.regard > 0 and shared.bond > 0  # triste avec elle : ça rapproche
+    assert touched == [self_c.DISAPPOINTED] * 2 and none == []
+    assert esteem < untouched == 0.5
 
 
 def test_a_grave_event_read_by_the_model_worries_her_and_weighs_on_the_days(tmp_path):

@@ -206,7 +206,7 @@ FORGIVABLE_FROM = 0.05
 
 @SELF.interpret(rt.UTTERANCE)
 def _read_worth(s: SelfState, frame: Frame, ev: Any, ports: Any) -> list[Draft[Any]]:
-    """Un merci, un compliment, des mots qui la blessent, des excuses : ce que le modèle qui lui a répondu a lu du
+    """Un merci, un compliment, des mots qui la blessent, une déception (ADR 0107), des excuses : ce que le modèle qui lui a répondu a lu du
     geste de la personne envers elle (sa balise ``[EN_FACE: … | geste : …]``, ADR 0093) — jamais une liste de mots ;
     enregistré (le rejeu retombe sur la même estime). Des excuses ne comptent qu'une fois par jour et par personne,
     et seulement s'il y a quelque chose à pardonner (une rancune, des mots qui l'ont blessée ce jour-là) : un troll
@@ -249,7 +249,8 @@ def _touched(s: SelfState, e, cx) -> SelfState:
     closeness = cx.facts.get(social_c.CLOSENESS(d.person))
     weight = (p.stranger_weight if closeness == social_c.STRANGER else
               p.acquaintance_weight if closeness == social_c.ACQUAINTANCE else 1.0)
-    base = p.insulted_knock if d.kind == c.INSULTED else p.thanked_knock
+    base = p.insulted_knock if d.kind == c.INSULTED else p.disappointed_knock if d.kind == c.DISAPPOINTED else \
+        p.thanked_knock
     cap = p.social_daily_cap
     delta = max(-cap - so_far, min(cap - so_far, base * weight))
     s = replace(s, social_day=day, social=social.set(d.person, round(so_far + delta, 6)))
@@ -268,7 +269,7 @@ def _esteem(s: SelfState, cx) -> float:
 
 #: ce qui fait douter (dit comme on se le dit, au singulier puis quand ça se répète : ``self.esteem.cause_once``,
 #: ``self.esteem.cause_often`` dans sa voix)
-DOUBTS = frozenset({IGNORED, PROMISE, STUCK, c.INSULTED})
+DOUBTS = frozenset({IGNORED, PROMISE, STUCK, c.INSULTED, c.DISAPPOINTED})
 
 
 def doubt_cause(s: SelfState, now: int, p: SelfParams) -> str:

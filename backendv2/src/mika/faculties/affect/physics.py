@@ -426,7 +426,7 @@ def fold_point(declared: Declared, current: Vec3, ref: Vec3, p: AffectParams, hu
     absolu) : sur le rayon repos moyen → émotion. L'empathie (être triste
     *avec* quelqu'un) la tire vers la tendresse depuis là où en est la
     relation : consoler rapproche, jamais ne refroidit. Blessée par la personne (``hurt`` : le modèle a lu des mots
-    qui blessent), sa peine n'est pas de l'empathie : la relation se refroidit de ce qu'elle a ressenti, toutes ses
+    qui blessent, ou une déception — ADR 0107), sa peine n'est pas de l'empathie : la relation se refroidit de ce qu'elle a ressenti, toutes ses
     facettes ensemble — triste autant que fâchée (constat G4 de l'audit du 2026-10-11)."""
     if hurt:
         return blend(ref, declared.all)

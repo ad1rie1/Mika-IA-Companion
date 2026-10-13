@@ -309,6 +309,9 @@ def test_the_rest_of_her_self_regard_and_what_a_compliment_brings():
     assert esteem(SelfState(), T0, sure) > 0.5 > esteem(SelfState(), T0, doubting)
     assert self_derive(_t(admiration=0.9)).thanked_knock > self_derive(_t(admiration=0.1)).thanked_knock
     assert self_derive(_t(fragility=0.9)).insulted_knock < self_derive(_t(fragility=0.1)).insulted_knock
+    fragile, sturdy, middle = (self_derive(_t(fragility=f)) for f in (0.9, 0.1, 0.5))
+    assert fragile.disappointed_knock < sturdy.disappointed_knock < 0  # une déception pèse selon sa fragilité
+    assert middle.insulted_knock < middle.disappointed_knock  # moins qu'une insulte, qui la vise (ADR 0107)
 
 
 def test_her_owner_always_counts_more_than_a_close_friend():

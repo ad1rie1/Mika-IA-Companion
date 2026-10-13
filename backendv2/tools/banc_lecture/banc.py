@@ -13,6 +13,9 @@ un JSON avec chaque réponse brute.
 
 Mesuré le 2026-10-11 (Haiku, 62 cas) : geste 61/62, ton 57/62, grave 62/62 — contre 54, 42 et 57 pour l'ancienne
 lecture des mots (``others/tone.py``, ``self/worth.py``, retirées par l'ADR 0093).
+
+Le 2026-10-13, le geste « décevant » (ADR 0107) et 7 cas (catégories K) : sur ``nemotron-3-super`` (Ollama Cloud,
+69 cas), geste 53/69 avec l'ancienne consigne comme avec la nouvelle, aucune fausse déception.
 """
 from __future__ import annotations
 

@@ -65,7 +65,8 @@ bas de cette page.
   - blessée et triste, la relation refroidit sans rancune (`raw_hostility` exige une dominance) ;
   - des excuses d'un autre jour ne sont lues qu'au-delà d'une hostilité de 0,05 ;
   - sa propriétaire ne pèse pas plus qu'une proche dans ses conversations (`social.WEIGHT` n'est pas lu par l'affect) ;
-  - une tristesse sans insulte compte toujours comme de l'empathie ;
+  - une tristesse sans insulte compte toujours comme de l'empathie (une déception lue par le modèle blesse désormais,
+    ADR 0107) ;
   - des excuses ne lèvent ni le repli ni la méfiance née de la peur ;
   - les sujets délicats se jugent encore par les mots ;
   - deux émotions sont écrites en dur sur des souvenirs : la gêne d'un mensonge, la joie d'un moment vécu.

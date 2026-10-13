@@ -11,9 +11,10 @@ Des excuses sincères (``self.touched``, une fois par jour et par personne)
 ôtent une part de ce que la relation a installé d'hostile — davantage venant
 d'une amie que d'une inconnue, dont la méfiance plancher reste (ADR 0047).
 
-Son tempérament (ADR 0100) agit sur ce qu'elle déclare : blessée (le modèle a lu des mots qui la blessent), sa
-réaction pèse (la colère, la tristesse, la peur) ou elle se referme ; touchée (un compliment, un merci), son visage se
-défend ; sa jalousie pèse ce qu'elle pèse ; son masque règle ce que son visage montre selon l'intimité.
+Son tempérament (ADR 0100) agit sur ce qu'elle déclare : blessée (le modèle a lu des mots qui la blessent, ou une
+déception — un oubli, de la froideur, un rejet, ADR 0107), sa réaction pèse (la colère, la tristesse, la peur) ou
+elle se referme ; touchée (un compliment, un merci), son visage se défend ; sa jalousie pèse ce qu'elle pèse ; son
+masque règle ce que son visage montre selon l'intimité.
 """
 
 from __future__ import annotations
@@ -96,9 +97,10 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     # quelqu'un qu'elle ne peut pas reconnaître (une adresse jetable) la touche comme une inconnue, jamais davantage
     level = (cx.facts.get(social_c.CLOSENESS(key)) if is_identifiable(d.target) else social_c.STRANGER) \
         if d.target else ""
-    # ce que le modèle a lu de la personne (ADR 0093) : des mots qui la blessent, un compliment, un merci
+    # ce que le modèle a lu de la personne (ADR 0093) : des mots qui la blessent ou une déception (ADR 0107), un
+    # compliment, un merci
     their = reading.Reading.decode(d.annotation(expression_c.READING_ANNOTATION))
-    hurt = their is not None and their.gesture == reading.INSULTED
+    hurt = their is not None and their.gesture in reading.HURTING
     touched = their is not None and their.gesture in (reading.COMPLIMENTED, reading.THANKED)
     # son tempérament sur ce qu'elle déclare (ADR 0100) : sa jalousie pèse ; blessée, sa réaction aussi
     declared = ph.weighed(declared, {Emotion.JEALOUS: p.jealous_weight})

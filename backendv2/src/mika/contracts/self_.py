@@ -245,14 +245,14 @@ class WokeWith(Payload):
 
 
 class Touched(Payload):
-    """Ce qu'un message dit d'elle et qui touche son estime : un merci, un
-    compliment, une insulte qui la vise. Un jugement lu dans la forme du
-    message (sans modèle), enregistré : le rejeu retombe sur la même estime."""
+    """Ce qu'un message dit d'elle et qui touche son estime : un merci, un compliment, une insulte qui la vise, une
+    déception (ADR 0107), des excuses. Le geste que le modèle qui lui a répondu a lu (``vocab.reading``, ADR 0093),
+    enregistré : le rejeu retombe sur la même estime."""
 
     person: str
     handle: str
     message: int
-    kind: str  # THANKED | COMPLIMENTED | INSULTED | APOLOGIZED
+    kind: str  # THANKED | COMPLIMENTED | INSULTED | APOLOGIZED | DISAPPOINTED
 
 
 class InterestBorn(Payload):
@@ -287,6 +287,7 @@ DREAM_KINDS = (NIGHTMARE, PLEASANT, MELANCHOLIC, ASSOCIATIVE, MUNDANE)
 #: des excuses comptent une fois par jour et par personne, quand il y a de quoi pardonner
 THANKED, COMPLIMENTED, INSULTED, APOLOGIZED = reading.THANKED, reading.COMPLIMENTED, reading.INSULTED, \
     reading.APOLOGIZED
+DISAPPOINTED = reading.DISAPPOINTED
 
 PERSONA_REVISED = event_type("self.persona_revised", OWNER, PersonaRevised, public=True, version=2,
                              upcasters={1: _zone_repaired})

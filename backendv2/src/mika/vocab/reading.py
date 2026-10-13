@@ -6,7 +6,8 @@ Le modèle qui lui répond lit le message ; c'est lui qui juge, jamais une liste
     [EN_FACE: sad 0.6, anxious 0.3 | geste : excuses | grave : rupture]
 
 - **ce qu'elle ressent**, en facettes (les 29 émotions, une intensité de 0 à 1) — « rien » quand rien ne se lit ;
-- **son geste envers Mika**, s'il est net : un merci, un compliment, des excuses, des mots qui blessent ;
+- **son geste envers Mika**, s'il est net : un merci, un compliment, des excuses, des mots qui blessent, ou ce
+  qui la déçoit (un oubli, de la froideur, un rejet) ;
 - **un événement grave** qui la touche : un deuil, une maladie ou un accident, une rupture, une perte de travail,
   de la détresse.
 
@@ -30,13 +31,19 @@ TAG = re.compile(
 
 # Les gestes envers elle (les mêmes valeurs que ``contracts.self_``).
 THANKED, COMPLIMENTED, INSULTED, APOLOGIZED = "thanked", "complimented", "insulted", "apologized"
-GESTURES = (THANKED, COMPLIMENTED, INSULTED, APOLOGIZED)
+#: ce qui la déçoit venant de la personne : un oubli, de la froideur, un rejet — pas des mots qui la visent, mais une
+#: blessure quand même (ADR 0107)
+DISAPPOINTED = "disappointed"
+GESTURES = (THANKED, COMPLIMENTED, INSULTED, APOLOGIZED, DISAPPOINTED)
+#: les gestes qui la blessent : sa peine n'y est pas de l'empathie (``affect``), elle refroidit la relation
+HURTING = frozenset({INSULTED, DISAPPOINTED})
 #: les mots du modèle pour un geste (repliés, début de mot) → le geste
 _GESTURE_WORDS = (
     (("merci", "remerci", "gratitude", "reconnaissan"), THANKED),
     (("compliment", "eloge", "flatt", "admir"), COMPLIMENTED),
     (("excus", "pardon", "desole", "regret"), APOLOGIZED),
     (("bless", "insult", "mechan", "mepris", "agress", "offens", "humili", "cruel", "rabaiss"), INSULTED),
+    (("decev", "decu", "decept", "oubli", "froid", "rejet", "delaiss", "neglig", "ignor"), DISAPPOINTED),
 )
 
 # Les événements graves : les sortes que le modèle choisit (``ToneRead.grave_kind``).

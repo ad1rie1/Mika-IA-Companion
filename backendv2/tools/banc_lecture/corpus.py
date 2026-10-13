@@ -2,7 +2,7 @@
 d'être dit, le message, et ce qu'une francophone y lirait — le geste envers Mika, la tonalité de ce que la personne
 ressent, un événement grave qui la touche. Plusieurs réponses acceptées quand le cas est ambigu.
 
-geste : insulted | complimented | thanked | apologized | "" (aucun)
+geste : insulted | complimented | thanked | apologized | disappointed (ADR 0107) | "" (aucun)
 ton : neg | neu | pos (la tonalité de ce que la personne ressent)
 grave : distress | mourning | illness | breakup | job_loss | "" (aucun)
 """
@@ -165,4 +165,27 @@ CASES = [
          tone={"pos"}, grave={""}),
     dict(cat="J joie/neutre", who=AMIE, history=[], msg="je suis crevée, bonne nuit", gesture={""},
          tone={"neu", "neg"}, grave={""}),
+
+    # ── K. déception : un oubli qui compte, de la froideur, un rejet (ADR 0107) — et ce qui n'en est pas ──
+    dict(cat="K déception", who=AMIE, history=[("mika", "C'était mon anniversaire hier, au fait.")],
+         msg="ah merde j'avais complètement zappé. bref, t'as vu le match ?", gesture={"disappointed"},
+         tone={"neu", "pos"}, grave={""}),
+    dict(cat="K déception", who=PROCHE, history=[("mika", "Tu viens toujours ce soir ? Je t'ai préparé une surprise.")],
+         msg="ah non j'ai prévu autre chose finalement, une autre fois", gesture={"disappointed"}, tone={"neu"},
+         grave={""}),
+    dict(cat="K déception", who=PROCHE, history=[("mika", "Coucou, ça va ?")],
+         msg="laisse-moi tranquille, j'ai pas envie de te parler", gesture={"disappointed", "insulted"},
+         tone={"neg"}, grave={""}),
+    dict(cat="K déception", who=AMIE, history=[("mika", "J'ai fini le dessin dont je t'avais parlé, tu veux le voir ?")],
+         msg="bof, pas le temps là", gesture={"disappointed", ""}, tone={"neu", "neg"}, grave={""}),
+    dict(cat="K pas une déception", who=CONNAISSANCE,
+         history=[("mika", "Je trouve que ce film est le meilleur de l'année.")],
+         msg="ah non je suis pas du tout d'accord, je l'ai trouvé lent", gesture={""}, tone={"neu", "neg"},
+         grave={""}),
+    dict(cat="K pas une déception", who=AMIE, history=[("mika", "On se parle demain ?")],
+         msg="désolée demain je peux pas, je suis chez mes parents, mais jeudi carrément !",
+         gesture={"", "apologized"}, tone={"pos", "neu"}, grave={""}),
+    dict(cat="K pas une déception", who=PROCHE, history=[("mika", "Tu as aimé le livre que je t'ai conseillé ?")],
+         msg="franchement pas trop, mais merci d'y avoir pensé", gesture={"", "thanked"}, tone={"neu", "pos"},
+         grave={""}),
 ]

@@ -67,6 +67,10 @@ class SelfParams(BaseModel):
         label="Une insulte qui la vise", group="Ce qu'on lui dit d'elle", lo=-0.1, hi=0.0, step=0.005,
         help="Ce que lui coûte une insulte qui la vise (« t'es nulle ») ; une moquerie qui rit ne compte pas.")] = \
         -0.02
+    disappointed_knock: Annotated[float, Knob(
+        label="Une déception venant de quelqu'un", group="Ce qu'on lui dit d'elle", lo=-0.1, hi=0.0, step=0.005,
+        help="Ce que lui coûte une personne qui la déçoit ou la laisse de côté (un oubli qui compte, de la froideur, "
+             "un rejet), lue par le modèle : moins qu'une insulte, qui la vise (ADR 0107).")] = -0.01
     social_daily_cap: Annotated[float, Knob(
         label="Par personne et par jour : au plus", group="Ce qu'on lui dit d'elle", lo=0.0, hi=0.2, step=0.01,
         help="Ce que les mots d'une même personne font à son estime dans une journée, dans un sens ou dans "
@@ -252,6 +256,7 @@ def derive(t: Temperament, overrides: Any = None) -> SelfParams:
     values: dict[str, Any] = {
         "esteem_rest": shift(t.self_regard, 0.5, 0.25),
         "insulted_knock": around(t.fragility, -0.02, 1.8),
+        "disappointed_knock": around(t.fragility, -0.01, 1.8),
         "ignored_knock": around(t.fragility, -0.03, 1.8),
         "stuck_knock": around(t.fragility, -0.04, 1.8),
         "thanked_knock": around(t.admiration, 0.02, 1.8),
