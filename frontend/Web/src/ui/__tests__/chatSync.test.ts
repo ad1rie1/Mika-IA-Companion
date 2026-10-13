@@ -14,6 +14,8 @@ import {
   readCache,
   RESTORED_PENDING_REASON,
   restoredStatus,
+  SETTINGS_PAGE,
+  settingsLink,
   sortMessages,
   stripProsody,
   withAttachments,
@@ -683,5 +685,16 @@ describe("stripProsody", () => {
     // — pre-existing behaviour, asserted here as it is rather than
     // quietly changed: it decides how every bubble reads.
     expect(stripProsody("Ah [PAUSE:400] !")).toBe("Ah!");
+  });
+});
+
+describe("settingsLink", () => {
+  it("mène une opératrice aux réglages de la console", () => {
+    expect(settingsLink(true)).toBe("/inspecteur/reglages/apercu");
+    expect(settingsLink(true)).toBe(SETTINGS_PAGE);
+  });
+
+  it("ne mène nulle part pour un autre compte", () => {
+    expect(settingsLink(false)).toBeUndefined();
   });
 });

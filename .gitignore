@@ -9,8 +9,6 @@ __pycache__/
 .vite/
 *.egg-info/
 data/
-# Pièces jointes reçues (photos, notes vocales) — pipeline/media.py, files/service.py
-uploads/
 .pytest_cache/
 .env.local
 # Captures et maquettes de travail (aperçus de la console) — jamais versionnées

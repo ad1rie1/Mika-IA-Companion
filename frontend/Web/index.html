@@ -128,7 +128,7 @@
       #chat-attach:hover {
         background: rgba(255, 255, 255, 0.2);
       }
-      #tts-mute, #chat-clear {
+      #tts-mute, #chat-clear, #chat-settings {
         padding: 12px 14px;
         border: none;
         border-radius: 24px;
@@ -140,7 +140,12 @@
         transition: background 0.2s;
         flex-shrink: 0;
       }
-      #tts-mute:hover, #chat-clear:hover {
+      /* un lien (il ouvre la console) habillé comme ses voisins ; caché par `hidden` hors opératrice */
+      #chat-settings {
+        text-decoration: none;
+        line-height: normal;
+      }
+      #tts-mute:hover, #chat-clear:hover, #chat-settings:hover {
         background: rgba(255, 255, 255, 0.2);
       }
       #tts-mute.muted {
@@ -987,6 +992,7 @@
         <div id="chat-messages"></div>
         <div id="attachment-previews"></div>
         <div id="chat-input-container">
+          <a id="chat-settings" title="Réglages (la console)" target="_blank" rel="noopener" hidden>⚙️</a>
           <button id="tts-mute" title="Couper / activer la voix">🔊</button>
           <button id="chat-clear" title="Effacer l'historique du chat">🗑️</button>
           <button id="chat-attach" title="Joindre un fichier">📎</button>

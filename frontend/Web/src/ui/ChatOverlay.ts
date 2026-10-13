@@ -42,6 +42,7 @@ import {
   nextClientMsgId,
   readCache,
   restoredStatus,
+  settingsLink,
   stripProsody,
   timeMarkers,
   whyLink,
@@ -338,6 +339,14 @@ export class ChatOverlay {
   setOperator(operator: boolean) {
     if (operator === this.operator) return;
     this.operator = operator;
+    // Et le bouton ⚙️ de la saisie, vers les réglages de la console.
+    const settings = document.getElementById("chat-settings") as HTMLAnchorElement | null;
+    const page = settingsLink(operator);
+    if (settings) {
+      settings.hidden = !page;
+      if (page) settings.href = `${API_BASE}${page}`;
+      else settings.removeAttribute("href");
+    }
     this.repaint({ animate: false });
   }
 

@@ -278,6 +278,18 @@ export function consoleHref(href: unknown): string | undefined {
     : undefined;
 }
 
+/** La page de la console qu'ouvre le bouton ⚙️ du chat : « Tous les réglages ». */
+export const SETTINGS_PAGE = "/inspecteur/reglages/apercu";
+
+/**
+ * Le bouton ⚙️, pour une opératrice seulement : la console, où tout se règle.
+ * Un autre compte ne le voit pas — la console lui fermerait sa porte. Le lien
+ * n'ouvre aucun droit : la console garde sa propre porte d'opératrice.
+ */
+export function settingsLink(operator: boolean): string | undefined {
+  return operator ? consoleHref(SETTINGS_PAGE) : undefined;
+}
+
 /**
  * « Pourquoi a-t-elle dit ça ? », pour une opératrice : la page de la console
  * qui explique une bulle (`/inspecteur/parole/<seq>`), ou `undefined`.
