@@ -29,7 +29,11 @@ Le manifeste (YAML) :
   ses arguments se déclarent comme les champs d'une action (voir forge_help outils) ;
 - config : tes réglages typés (voir forge_help reglages) ;
 - views : tes vues pour la console, avec leurs paramètres et leurs actions (voir forge_help vues) ;
-- allowed_domains : facultatif, une simple indication (ton réseau est libre : forge_help reseau).
+- allowed_domains : facultatif, une simple indication (ton réseau est libre : forge_help reseau) ;
+- signals : ce que tu fais de ses signaux — {queue: 20, per_call: 1, quota: 12, instructions: "…"} : chaque
+  api.signal va dans la file de l'app (queue : sa taille, de 1 à 100 ; pleine, le plus ancien part) ; tu la lis par
+  lots de per_call signaux (1 à 20 : un par un pour des alertes, par 10 pour des articles), quota fois par jour au
+  plus (1 à 96), et instructions te dit quoi en faire (à qui le dire, ce qui compte). Sans rien : ces défauts.
 
 Le code (main.py, bibliothèque standard seulement ; le réseau passe par api) :
 - tick(api), service_<nom>(api), context(api), on_event(api, événement), tool_<nom>(api, args) ;
@@ -39,7 +43,7 @@ Le code (main.py, bibliothèque standard seulement ; le réseau passe par api) :
   (16 Ko par valeur, 1 000 clés) ;
 - api.config(clé, défaut) : un réglage (celui de l'opérateur, sinon le défaut du manifeste) ;
 - api.log(…) ou print(…) : ton journal ; api.signal(résumé, pertinence, émotion) : attirer ton attention
-  (espacé) ; api.emit(type, données) ;
+  (dans sa file, que tu liras) ; api.emit(type, données) ;
 - api.http_get(url) : le texte d'une page ; api.http(url, method, headers, json, form, body…) : toute requête,
   avec son statut et ses en-têtes (voir forge_help reseau).
 

@@ -173,7 +173,8 @@ def policies() -> dict[str, EpisodePolicy]:
         Kind.TASK: EpisodePolicy(kind=Kind.TASK, role=Role.STEP, priority=2, lane="background",
                                  persona_depth="compact", visible=False, delivered=False, brief=task_brief,
                                  max_tool_turns=6, max_tokens=2048, deadline_s=240.0,
-                                 tool_bundles=frozenset({"email", "memory", "identity", "teams"})),
+                                 tool_bundles=frozenset({"email", "memory", "identity", "teams", "forge_signals",
+                                                         "forge_apps", EXTERNAL})),
         # une pensée à voix haute : sa voix brève, pas dans le fil, à l'écran seulement
         Kind.MURMUR: EpisodePolicy(kind=Kind.MURMUR, role=Role.MURMUR, priority=1, lane="conversation",
                                    persona_depth="compact", visible=False, max_tokens=80, deadline_s=60.0),

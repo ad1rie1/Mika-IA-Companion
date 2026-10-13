@@ -4698,6 +4698,38 @@ forge:
     # un seul de ses services est arrêté (ADR 0104). {service} : son nom ; {error} : la dernière erreur
     service_broken: "Le service « {service} » de mon app « {app} » ne marche plus : {error}"
 
+  # Lire la file de signaux d'une app (plugins/forge, ADR 0105) : une tâche silencieuse, puis son verdict
+  # (forge_signals_done).
+  triage:
+    bundle: "lire la file de signaux d'une de tes apps et dire ce que tu en fais"
+    # la consigne de la tâche. {app} : le titre de l'app ; {count} : combien de signaux elle lit ; {who} : à qui
+    # elle les dirait, entre guillemets (ou projects.caretaker)
+    brief: >-
+      Lis les {count} signal(aux) que ton app « {app} » a mis dans sa file. Pour ce lot, décide : ce qui mérite d'être
+      dit à {who} (tu le lui diras toi-même, ensuite), ce que tu gardes en tête, ou rien. Tu peux te servir des outils
+      de l'app ou lire une page pour en savoir plus. Conclus par forge_signals_done.
+    # ce que l'app déclare (« signals: instructions »). {instructions} : son texte
+    instructions: "Ce que ton app te demande d'en faire : {instructions}"
+    title: CE QUE TON APP A MIS DANS SA FILE
+    # un signal du lot. {n} : son numéro ; {ago} : forge.news.minutes ou hours ; {pertinence} : « 0,7 » ;
+    # {text} : ce que l'app a signalé
+    line: "{n}. (il y a {ago}, pertinence {pertinence}) {text}"
+    # {count} : combien attendent encore après ce lot
+    rest: "({count} autre(s) attendent dans la file : tu les liras à une prochaine lecture.)"
+    # {count} : combien sont partis sans être lus, faute de place
+    dropped: "({count} signal(aux) sont partis sans être lus : la file était pleine.)"
+    description: >-
+      Conclure la lecture d'un lot de la file d'une de tes apps : ce que tu diras à la personne qu'il concerne (tell :
+      tes mots, que tu lui diras ensuite toi-même), ce que tu gardes en tête (keep), ou rien (les deux vides). Le lot
+      quitte la file.
+    tell: "ce que tu diras à la personne qu'il concerne, avec tes mots (vide : rien à dire)"
+    keep: "ce que tu gardes en tête pour toi (vide : rien)"
+    nothing: Il n'y a pas de file à lire ici.
+    # {who} : à qui, entre guillemets (ou projects.caretaker)
+    done_tell: "C'est noté : tu le diras à {who}."
+    done_quiet: "C'est noté : tu le gardes en tête."
+    done_nothing: "C'est noté : rien à en dire."
+
   # Ce qu'une app d'un projet vient de lui signaler et qui concerne quelqu'un (plugins/forge, ADR 0105) : une
   # initiative pour le lui dire (sa raison, app_news), et une section qui le lui montre — de son initiative, ou quand
   # cette personne lui écrit. La consigne se murmure : rien du contenu.
@@ -4821,10 +4853,11 @@ forge:
       - garder : api.kv_set et api.kv_get (16 Ko par valeur), ou ta base (forge_help base).
       - context(api), avec context: true dans le manifeste : une ligne que tu retrouves en conversation (« TES APPS »),
         500 caractères au plus.
-      - api.signal(résumé, pertinence, émotion) : te prévenir. Un signal par app toutes les dix minutes au plus (le
-        premier d'un battement) ; sous 0,6 de pertinence tu le remarques à peine, à 0,6 ou plus il te reste en tête et
-        te fait le dire toi-même, de ton initiative, à la personne que son projet concerne (tu lui écris comme d'habitude :
-        pas besoin d'un mail ni d'une notification). Réserve-le à ce qui compte : un seuil franchi, une nouveauté.
+      - api.signal(résumé, pertinence, émotion) : te prévenir. Chaque signal va dans la file de l'app (20 par appel au
+        plus) ; tu la lis ensuite, par lots, sous un quota par jour, et tu décides de chaque lot : le dire toi-même à la
+        personne que son projet concerne (tu lui écris comme d'habitude : pas besoin d'un mail ni d'une
+        notification), le garder en tête, ou rien. Le manifeste règle la file : signals: {queue, per_call, quota,
+        instructions} (forge_help manifeste). Réserve-le à ce qui compte : un seuil franchi, une nouveauté.
       - tools : tool_<nom>(api, args) — chacun devient un outil à toi, « <app>_<nom> » (et « <app>_pages » lit ses
         pages), en conversation devant qui s'occupe de toi ou au travail ; ses arguments déclarés (args) sont ce que
         tu pourras lui passer, vérifiés avant l'appel (forge_help outils).
@@ -5003,13 +5036,14 @@ forge:
       killed: " (tuée)"
       # {signals} : ce que l'app a signalé
       signals: "Signaux : {signals}"
-      # ce que deviendraient ses signaux (ADR 0104). {count} : combien l'appel en a émis
-      signal_first: "Seul le premier des {count} signaux compterait : un signal par appel."
-      # {minutes} : l'espacement des signaux d'une app
-      signal_spaced: "Trop tôt après son dernier signal : il serait ignoré (un toutes les {minutes} minutes au plus)."
-      # {threshold} : le seuil (« 0,6 »)
-      signal_faint: "Pertinence sous {threshold} : tu le remarquerais à peine, il ne te resterait pas en tête."
-      signal_thought: "Assez pertinent pour te rester en tête (et te pousser à en parler à qui l'app concerne)."
+      # ce que deviendraient ses signaux (ADR 0105) : la file de l'app. {count} : combien l'appel en a émis ;
+      # {waiting} : combien attendent déjà ; {size} : la taille de la file ; {per_call} : combien un appel en lit ;
+      # {quota} : appels par jour au plus
+      signals_queued: >-
+        Ses {count} signal(aux) iraient dans sa file ({waiting} déjà en attente, {size} au plus) : tu les lirais par
+        {per_call}, {quota} fois par jour au plus, et tu déciderais quoi en dire, et à qui.
+      # {count} : combien partiraient faute de place
+      signals_overflow: "Sa file déborderait : les {count} plus ancien(s) partiraient sans être lus."
       logs: "Journal :"
       # une vue rendue mais invalide. {why} : ce qui ne va pas
       invalid: "Invalide : {why}"

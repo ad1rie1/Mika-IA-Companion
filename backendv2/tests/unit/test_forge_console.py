@@ -386,11 +386,11 @@ def test_what_an_action_emits_is_journaled_as_coming_from_the_operator(tmp_path)
         await install(kernel, forge, "idees", IDEES, IDEES_CODE)
         done = await perform(kernel, "forge.agir", form({"texte": "un jardin"}, FIXED), by="user_1",
                              subject="idees", nonce="n1")
-        return done, events(kernel, EMITTED, forge_c.SIGNALED, rt.OPERATED)
+        return done, events(kernel, EMITTED, forge_c.QUEUED, rt.OPERATED)
 
     done, evs = run(tmp_path, scenario)
     emitted = [e for e in evs if e.type.name == EMITTED.name]
-    signaled = [e for e in evs if e.type.name == forge_c.SIGNALED.name]
+    signaled = [e for e in evs if e.type.name == forge_c.QUEUED.name]  # dans la file de l'app (ADR 0105)
     audit = [e for e in evs if e.type.name == rt.OPERATED.name]
     assert [(e.data.type, json.loads(e.data.data)) for e in emitted] == [("idee", {"texte": "un jardin"})]
     assert len(signaled) == 1 and signaled[0].data.app == "idees"

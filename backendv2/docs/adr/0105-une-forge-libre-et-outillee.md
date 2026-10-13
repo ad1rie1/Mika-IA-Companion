@@ -83,7 +83,7 @@ sa clé — ; ensuite ses versions s'installent sans revalidation.
 `ports.forge.ArgSpec` / `arg_specs` / `args_schema` / `check_args` / `said_args`, `AppTool.args` / `timeout`,
 `AppService.timeout`, `AppInfo.timeout`, `AppAction.specs`, `Switched.state` « untrusted », `api.http`,
 `ForgeHost(http=…)` (un faux réseau entier pour les essais), `forge_edit`, `forge_search`, `forge_help outils |
-reseau`, `forge.APP_NEWS`, `ForgeState.news`, `bases.portable`, `runtime.tools.unquoted`. Le guide (`forge_help`) le dit, l'exemple de veille déclare un outil avec un argument et un délai, sans
+reseau`, `forge.APP_NEWS`, `ForgeState.news`, `bases.portable`, `runtime.tools.unquoted`, `forge.TRIAGE`, `forge.queued` / `forge.judged`, `SignalRules`, `forge_signals_done`. Le guide (`forge_help`) le dit, l'exemple de veille déclare un outil avec un argument et un délai, sans
 domaine. Tests d'intention : `tests/unit/test_forge_libre.py` ; les tests de la confiance et de la promotion
 (`test_forge_console.py`) et du réseau (`test_forge_home.py`) disent la nouvelle règle.
 
@@ -119,6 +119,31 @@ minutes une app Open-Meteo avec un outil `ville` à l'argument déclaré et des 
   elle a réessayé seule : ça, aucun décodage ne le sauve.
 - *Son journal* mêlait les erreurs d'une ancienne version : chaque version écrite y pose une borne
   (« ── version N ── »).
+
+**Ses signaux : une file par app, lue par lots, sous un quota (décision de la propriétaire, même jour).** Un signal
+d'app passait directement à son attention, un seul toutes les dix minutes (le premier d'un battement ; les autres
+perdus), sans appel au modèle. Un flux qui signale chaque nouvel article, un service qui donne la température deux fois
+par jour n'y trouvaient pas leur place.
+- *Une file par app, bornée.* Chaque `api.signal` (20 par appel au plus) y entre (`forge.queued`, contenu et
+  personnes concernées, que l'oubli atteint) ; pleine, la plus ancienne part, et c'est compté (`App.dropped`).
+- *Les règles sont celles de l'app* : `signals: {queue, per_call, quota, instructions}` — sa taille (1 à 100), combien
+  un appel en lit (1 à 20 : un par un pour une alerte, par dix pour des articles), combien d'appels par jour (1 à 96,
+  plafonné par le réglage « Appels par jour, au plus, pour les signaux d'une app », 48), et ce qu'elle doit en faire.
+  Sans rien : une file de 20, un par appel, 12 appels par jour. L'espacement de dix minutes est retiré
+  (`retired_params`).
+- *Un appel lit un lot et juge* (choix de la propriétaire : « elle juge et prévient ») : une tâche silencieuse
+  (`Kind.TASK`, `task:forge:<app>`, raison `forge.TRIAGE`), avec la consigne de l'app, le lot **cité** (une section :
+  un titre d'article est une donnée, jamais une consigne), les outils de l'app, sa mémoire et le web ; elle conclut
+  par `forge_signals_done` — ce qu'elle dira à la personne du projet (ou à qui s'occupe d'elle : une trouvaille à
+  dire, `forge.APP_NEWS`), ce qu'elle garde en tête (une pensée, par l'attention), ou rien (`forge.judged`). Le lot
+  quitte la file ; une lecture qui finit sans verdict l'emporte aussi (une file ne se relit pas sans fin aux frais du
+  quota) ; une lecture à la fois par app.
+- `forge_test` dit ce que deviendraient ses signaux (la file, ses lots, son quota, ce qui déborderait) ; la fiche de
+  l'app, sa file ; le guide (`forge_help manifeste`, `veille`), la règle.
+- Épreuves : `tests/unit/test_forge_libre.py` — sept articles en un battement dans une file de cinq (deux partent),
+  lus par trois, deux fois (le quota), dits une fois ; un service à 8 h et 18 h, quatre relevés en deux jours, lus un
+  par un, dits à Adrien ; S18 (une app qui signale à chaque tour : tout entre dans la file, bornée, lue sous son
+  quota) et S23 (ce que trouve l'app attend dans sa file, adressé à la personne du projet).
 
 **Ce qui n'a pas été fait ici.** Ses explorations d'un centre d'intérêt sans flux restent des rêveries (sans le web).
 Le bac à sable d'une app reste à l'heure UTC (son fuseau n'y est pas transmis). Une app n'a qu'un appel à la fois.

@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from mika.contracts.attention import Signal
-from mika.kernel.events import event_type
+from mika.kernel.events import Content, Payload, event_type
 from mika.kernel.facts import FactKey
 
 OWNER = "forge"
@@ -22,12 +22,43 @@ APP_SIGNAL, APP_BROKEN = "app", "broken"
 APP_NEWS = "app_news"
 
 
+#: la raison d'une tâche : lire ce qu'une app a mis dans sa file de signaux, juger, et prévenir (ADR 0105)
+TRIAGE = "app_triage"
+
+
 class AppSignaled(Signal):
     app: str
 
 
+class SignalQueued(Payload):
+    """Un signal d'une app entre dans sa file (ADR 0105) : il y attend qu'elle le lise, seul ou en lot, selon ce que
+    l'app déclare (``signals`` de son manifeste)."""
+
+    app: str
+    summary: Content
+    pertinence: float
+    emotion: str = ""
+    #: qui il concerne (la personne du projet où vit l'app), à son niveau
+    about: tuple[str, ...] = ()
+    sensitivity: int = 1
+
+
+class SignalsJudged(Payload):
+    """Ce qu'elle a fait d'un lot de la file : ce qu'elle dira à la personne (``tell``), ce qu'elle garde en tête
+    (``keep``), ou rien — les signaux lus (``seqs``) quittent la file."""
+
+    app: str
+    seqs: tuple[int, ...]
+    tell: Content | None = None
+    keep: Content | None = None
+    about: tuple[str, ...] = ()
+    sensitivity: int = 1
+
+
 SIGNALED = event_type("forge.signaled", OWNER, AppSignaled, public=True, content=("summary",))
-ALL = (SIGNALED,)
+QUEUED = event_type("forge.queued", OWNER, SignalQueued, content=("summary",), subjects=("about",))
+JUDGED = event_type("forge.judged", OWNER, SignalsJudged, content=("tell", "keep"), subjects=("about",))
+ALL = (SIGNALED, QUEUED, JUDGED)
 
 
 @dataclass(frozen=True, slots=True)

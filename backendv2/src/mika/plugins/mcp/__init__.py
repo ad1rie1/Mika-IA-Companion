@@ -45,7 +45,9 @@ FAMILY = "mcp"
 EPISODES: Mapping[str, frozenset[str]] = {
     "conversation": frozenset({Kind.REPLY}),
     "initiative": frozenset({Kind.INITIATIVE}),
-    "travail": frozenset({Kind.STEP, Kind.WORK, Kind.JOB, Kind.WAKE, Kind.WAKE_JOB}),
+    # une tâche aussi (lire la file d'une app, ADR 0105) : ses lots sont ceux que la tâche choisit — un brouillon de
+    # mail ou de Teams n'en prend aucun
+    "travail": frozenset({Kind.STEP, Kind.WORK, Kind.JOB, Kind.WAKE, Kind.WAKE_JOB, Kind.TASK}),
 }
 #: les serveurs sont rejoints et relistés à ce rythme (ce qu'ils proposent a pu changer)
 WATCH_EVERY = 15 * MINUTE

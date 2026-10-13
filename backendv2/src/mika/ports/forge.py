@@ -63,6 +63,21 @@ class AppTool:
     timeout: float = 0.0
 
 
+#: la file de signaux d'une app qui n'en dit rien (ADR 0105) : 20 signaux au plus, lus un par un, 12 appels par jour
+SIGNAL_QUEUE, SIGNAL_PER_CALL, SIGNAL_QUOTA = 20, 1, 12
+
+
+@dataclass(frozen=True, slots=True)
+class SignalRules:
+    """Ce qu'une app déclare de ses signaux (``signals`` de son manifeste) : la taille de sa file (au-delà, le plus
+    ancien part), combien un appel en lit, combien d'appels par jour au plus, et ce qu'elle doit en faire."""
+
+    queue: int = SIGNAL_QUEUE
+    per_call: int = SIGNAL_PER_CALL
+    quota: int = SIGNAL_QUOTA
+    instructions: str = ""
+
+
 @dataclass(frozen=True, slots=True)
 class AppService:
     """Un de ses services : une tâche planifiée de l'app, ``service_<nom>(api)`` à son rythme (ADR 0104), et son
@@ -159,6 +174,8 @@ class AppInfo:
     services: tuple[AppService, ...] = ()
     #: le délai de son battement et de ses événements (0 : le défaut, ADR 0105)
     timeout: float = 0.0
+    #: la file de ses signaux et ce qu'elle doit en faire (ADR 0105)
+    signals: SignalRules = SignalRules()
     handlers: tuple[str, ...] = ()
     #: un manifeste illisible (l'app existe mais ne peut pas tourner)
     error: str = ""

@@ -52,6 +52,11 @@ HANDLERS = ("tick", "context", "view", "action", "on_event")
 #: ses outils au plus, et leurs clés (ADR 0105 : chacun déclare ses arguments, dans le vocabulaire des champs d'action)
 MAX_TOOLS = 8
 _TOOL_KEYS = frozenset({"name", "description", "args", "timeout"})
+#: la file de ses signaux (ADR 0105) : ses clés et leurs bornes
+_SIGNALS_KEYS = frozenset({"queue", "per_call", "quota", "instructions"})
+SIGNALS_BOUNDS = {"queue": (1, 100), "per_call": (1, 20), "quota": (1, 96)}
+SIGNALS_DEFAULTS = {"queue": 20, "per_call": 1, "quota": 12}
+INSTRUCTIONS_MAX = 600
 #: les délais qu'un manifeste peut déclarer (secondes) : son battement, ses événements et ses services ; ses outils
 #: (une réponse attend un outil : plus court) — au-delà de ce qu'il déclare, l'appel est tué (ADR 0105)
 MAX_RUN_TIMEOUT = 120.0
@@ -464,6 +469,35 @@ def _timeout(p: _Problems, path: str, raw: Any, most: float) -> float:
     return float(raw)
 
 
+def _signals(p: _Problems, raw: Any) -> dict[str, Any]:
+    """Ce qu'elle fait des signaux de l'app (ADR 0105) : ``queue`` (sa file, 1 à 100), ``per_call`` (combien un appel
+    en lit, 1 à 20), ``quota`` (appels par jour, 1 à 96), ``instructions`` (ce qu'elle doit en faire : à qui le dire,
+    quoi garder). Rien de déclaré : les défauts."""
+    out: dict[str, Any] = {**SIGNALS_DEFAULTS, "instructions": ""}
+    if raw is None:
+        return out
+    if not isinstance(raw, dict):
+        p.append("« signals » : un objet {queue, per_call, quota, instructions}")
+        return out
+    if _unknown(p, "signals", raw, _SIGNALS_KEYS):
+        return out
+    for key, (lo, hi) in SIGNALS_BOUNDS.items():
+        value = raw.get(key)
+        if value is None:
+            continue
+        if not _is_int(value) or not lo <= value <= hi:
+            p.at("signals", f"« {key} » : un entier de {lo} à {hi}")
+            continue
+        out[key] = value
+    text = raw.get("instructions")
+    if text is not None:
+        if not isinstance(text, str) or len(text) > INSTRUCTIONS_MAX:
+            p.at("signals", f"« instructions » : un texte de {INSTRUCTIONS_MAX} caractères au plus")
+        else:
+            out["instructions"] = text.strip()
+    return out
+
+
 def _tools(p: _Problems, raw: Any) -> list[dict[str, Any]]:
     """Ses outils : ``{name, description, args, timeout}`` → ``tool_<nom>(api, args)``. Leurs arguments se déclarent
     comme les champs d'une action (ADR 0105) ; un outil qui n'en déclare pas n'en reçoit aucun."""
@@ -533,6 +567,7 @@ def read_manifest(text: str) -> tuple[dict[str, Any], list[str]]:
     out["tools"] = _tools(problems, data.get("tools"))
     out["services"] = _services(problems, data.get("services"))
     out["timeout"] = _timeout(problems, "timeout", data.get("timeout"), MAX_RUN_TIMEOUT)
+    out["signals"] = _signals(problems, data.get("signals"))
     events = data.get("events") or []
     if not isinstance(events, list) or not all(isinstance(e, str) and EVENT.match(e) for e in events):
         problems.append("« events » : une liste de types (« rss.noticed », « body.* »)")

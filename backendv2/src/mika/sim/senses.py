@@ -206,20 +206,27 @@ async def s18(driver: Driver, rng: RngTree, res: Result) -> None:
     ticks = _of(events, TICKED.name)
     cafe = [t for t in ticks if t.data.app == "cafe"]
     runaway = [t for t in ticks if t.data.app == "boucle"]
-    signals = [s for s in _of(events, forge_c.SIGNALED.name) if s.data.app == "cafe"]
+    queued = [s for s in _of(events, forge_c.QUEUED.name) if s.data.app == "cafe"]
+    cafe_app = driver.kernel.mind.frame().state("forge").apps.get("cafe")
+    reads = len(cafe_app.calls_at) if cafe_app is not None else 0
     broken = [s for s in _of(events, forge_c.SIGNALED.name) if s.data.kind == forge_c.APP_BROKEN]
     calls: Any = driver.llm
     reply = [c for c in calls.calls if c.role == "reply"][-1]
     mood = driver.kernel.mind.frame().get(affect_c.MOOD)
-    res.metrics.update({"tours café": len(cafe), "tours boucle": len(runaway), "signaux": len(signals),
+    res.metrics.update({"tours café": len(cafe), "tours boucle": len(runaway), "signaux": len(queued),
+                        "lectures de file": reads,
                         "humeur": A.FR.get(mood.felt, "")})
     res.checks += [
         expect.invariant("une app qui marche tourne à son agenda", len(cafe) >= 30 and all(t.data.ok for t in cafe),
                          "toutes les cinq minutes, sans échec", f"{len(cafe)}"),
-        expect.invariant("ses signaux sont espacés", len(signals) < len(cafe) and all(
-            b.at - a.at >= 10 * MINUTE for a, b in zip(signals, signals[1:], strict=False)),
-                         "elle signale à chaque tour ; on ne l'entend qu'une fois par dix minutes",
-                         f"{len(signals)} signaux pour {len(cafe)} tours"),
+        expect.invariant("ses signaux attendent dans une file bornée, lue sous son quota (ADR 0105)",
+                         len(queued) == len(cafe) and cafe_app is not None and len(cafe_app.queue) <= 20
+                         and cafe_app.dropped > 0 and 0 < reads <= 12,
+                         "elle signale à chaque tour : tout entre dans sa file (vingt au plus, les plus anciens "
+                         "partent) ; elle la lit douze fois par jour au plus",
+                         f"{len(queued)} en file pour {len(cafe)} tours ; "
+                         f"{len(cafe_app.queue) if cafe_app else '?'} en attente, "
+                         f"{cafe_app.dropped if cafe_app else '?'} partis, {reads} lectures"),
         expect.invariant("l'app qui s'emballe est tuée, puis arrêtée", len(runaway) == 5
                          and all(not t.data.ok and "tuée" in t.data.error for t in runaway),
                          "cinq tours tués à leur délai, puis le disjoncteur", f"{[t.data.error for t in runaway]}"),

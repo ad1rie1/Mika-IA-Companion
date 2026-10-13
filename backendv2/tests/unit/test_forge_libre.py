@@ -370,26 +370,29 @@ def test_an_app_finding_informs_and_is_not_held_back_by_an_unanswered_message():
 
 @needs_bwrap
 def test_what_her_app_finds_for_someone_she_tells_them_herself_once(tmp_path):
-    """Une app de son projet pour Adrien signale fort : une initiative part vers Adrien, sa section lui montre la
-    trouvaille (citée, pas dans le murmure), ce qu'elle dit la marque dite — elle ne la redit pas. Un signal faible,
-    ou qui ne concerne personne, ne fait rien dire."""
+    """Une app de son projet pour Adrien signale : le signal attend dans sa file, elle le lit (une tâche), juge qu'il
+    faut le dire — une initiative part vers Adrien, sa section lui montre ce qu'elle a retenu (la consigne murmurée
+    n'en dit rien), ce qu'elle dit la marque dite : elle ne le redit pas. Ce qu'elle juge sans intérêt ne se dit pas."""
+    from dataclasses import replace as replaced
+
+    from mika.contracts import forge as forge_c
     from mika.contracts import projects as projects_c
     from mika.contracts import runtime as rt
     from mika.faculties.projects.tools import StartArgs, start_project
     from mika.kernel.clock import MINUTE, US
-    from mika.kernel.events import Origin
+    from mika.kernel.events import Content, Origin
     from mika.kernel.frame import Audience
-    from mika.plugins.forge import WriteArgs, _news, concerns, forge_write, signal_draft
+    from mika.plugins.forge import WriteArgs, _news, concerns, forge_write
     from mika.plugins.forge.guide import VEILLE_CODE, VEILLE_MANIFEST
     from mika.sim.clock import run_virtual
     from mika.vocab.episodes import Kind, project_target
     from tests.fixtures.atelier import Atelier
-    from tests.fixtures.mika import boot, build, connect, reply
+    from tests.fixtures.mika import boot, build, connect
     from tests.unit.test_forge_home import QUOTE
     from tests.unit.test_projects import _context, events
 
     forge = ForgeHost(tmp_path / "forge", http_get=lambda url: QUOTE, public=lambda host: True)
-    kernel, clock, _, _ = build(tmp_path, reply("Le cours a bien bougé, je te le dis. [EMOTION:surprised:0.4]"),
+    kernel, clock, _, _ = build(tmp_path, _judging_llm("le CAC a bougé de 2,82 %", ""),
                                 ports={"forge": forge, "workshop": Atelier()})
 
     async def main():
@@ -405,26 +408,27 @@ def test_what_her_app_finds_for_someone_she_tells_them_herself_once(tmp_path):
                                         code=VEILLE_CODE), run)
             frame = kernel.mind.frame()
             about, level = concerns(frame, frame.state("forge").apps["cours"])
-            await kernel.mind.append([signal_draft("cours", "un écart faible", 0.3, "", about=about, sensitivity=level),
-                                      signal_draft("cours", "le CAC a bougé de 2,82 %", 0.8, "surprised", about=about,
-                                                   sensitivity=level)],
+            await kernel.mind.append([forge_c.QUEUED.draft(app="cours", summary=Content.of(text, level=level),
+                                                           pertinence=pertinence, about=about, sensitivity=level)
+                                      for text, pertinence in (("le CAC a bougé de 2,82 %", 0.8),
+                                                               ("le CAC n'a presque pas bougé", 0.3))],
                                      emitter="forge", correlation="essai-signal", origin=Origin.GENESIS)
-            frame = kernel.mind.frame()
-            out = {"about": about, "candidats": _news(frame.state("forge"), frame)}
             await asyncio.sleep(30 * MINUTE / US)
             frame = kernel.mind.frame()
-            out["dite"] = frame.state("forge").news["cours"]
-            out["après"] = _news(frame.state("forge"), frame)
-            out["énoncés"] = [e for e in events(kernel, rt.UTTERANCE) if e.data.kind == Kind.INITIATIVE
-                              and any(p.startswith("forge-news:") for p in e.data.provenance)]
-            return out
+            state = frame.state("forge")
+            untold = replaced(state, news=state.news.set("cours", replaced(state.news["cours"], told=False)))
+            return {"about": about, "judged": events(kernel, forge_c.JUDGED), "dite": state.news["cours"],
+                    "après": _news(state, frame), "candidat": _news(untold, frame),
+                    "énoncés": [e for e in events(kernel, rt.UTTERANCE) if e.data.kind == Kind.INITIATIVE
+                                and any(p.startswith("forge-news:") for p in e.data.provenance)]}
         finally:
             forge.shutdown()
             await kernel.stop()
 
     got = run_virtual(clock, main)
     assert got["about"] == ("user_1",)
-    [cand] = got["candidats"]  # la trouvaille forte (0,8) : une initiative vers Adrien
+    assert [e.data.tell is not None for e in got["judged"]] == [True, False]  # lus un par un : l'un se dit
+    [cand] = got["candidat"]  # une trouvaille à dire : une initiative vers Adrien
     assert cand.reason == "app_news" and cand.target == "user_1"
     assert "Suivi d'un cours" in cand.args["brief:forge"] and "2,82" not in cand.args["brief:forge"]  # rien du contenu
     assert len(got["énoncés"]) == 1  # elle l'a dit, une fois
@@ -502,3 +506,145 @@ def test_a_list_given_as_json_text_is_read_as_a_list_and_a_text_stays_a_text():
     assert unquoted(write, raw) == raw  # des textes attendus restent des textes
     schema = SimpleNamespace(schema={"type": "object", "properties": {"autres": {"type": "array"}}}, args=None)
     assert unquoted(schema, {"autres": '["AAPL", "^FCHI"]'}) == {"autres": ["AAPL", "^FCHI"]}
+
+
+# ── Ses signaux : une file par app, lue par lots, sous un quota (ADR 0105) ─
+
+
+def test_the_manifest_declares_the_queue_of_its_signals():
+    manifest, problems = read_manifest("title: X\nsignals: {queue: 5, per_call: 3, quota: 4, instructions: "
+                                       "'dis à Adrien ce qui parle de domotique'}\n")
+    assert problems == [] and manifest["signals"] == {"queue": 5, "per_call": 3, "quota": 4,
+                                                      "instructions": "dis à Adrien ce qui parle de domotique"}
+    assert read_manifest("title: X\n")[0]["signals"] == {"queue": 20, "per_call": 1, "quota": 12, "instructions": ""}
+    _, said = read_manifest("title: X\nsignals: {queue: 500, per_call: 0, couleur: rouge}\n")
+    assert any("couleur" in x for x in said)
+    _, said = read_manifest("title: X\nsignals: {queue: 500, per_call: 0}\n")
+    assert any("« queue » : un entier de 1 à 100" in x for x in said)
+    assert any("« per_call » : un entier de 1 à 20" in x for x in said)
+
+
+FEED = """\
+title: Veille domotique
+schedule: interval:5m
+signals: {queue: 5, per_call: 3, quota: 2, instructions: dis à Adrien ce qui parle de domotique}
+"""
+FEED_CODE = """\
+ARTICLES = ["Matter 1.4 sort", "Un thermostat qui apprend", "La pluie demain", "Zigbee ou Thread",
+            "Un capteur de CO2 à 20 euros", "Recette de crêpes", "Home Assistant change d'interface"]
+
+
+def tick(api):
+    vus = api.kv_get("vus", 0)
+    for titre in ARTICLES[vus:]:
+        api.signal("nouvel article : " + titre, pertinence=0.5)
+    api.kv_set("vus", len(ARTICLES))
+    return len(ARTICLES) - vus
+"""
+WEATHER = """\
+title: Température
+schedule: manual
+services:
+  - {name: releve, schedule: "cron:0 8,18 * * *", description: la température deux fois par jour}
+signals: {per_call: 1, quota: 4, instructions: donne la température à Adrien}
+"""
+WEATHER_CODE = """\
+def service_releve(api):
+    n = api.kv_get("n", 0) + 1
+    api.kv_set("n", n)
+    api.signal("il fait " + str(10 + n) + " °C à Lyon", pertinence=0.4)
+    return n
+"""
+
+
+def _judging_llm(*tells: str):
+    """Un modèle simulé : une tâche qui lit une file conclut par son verdict (le suivant de ``tells``, le dernier
+    ensuite), une initiative dit une phrase."""
+    from mika.ports.llm import LLMResponse, ToolCall
+
+    said = iter(range(1, 1000))
+    verdicts = iter(tells)
+    last = [tells[-1]]
+
+    def respond(req):
+        if any(t.name == "forge_signals_done" for t in req.tools):
+            last[0] = next(verdicts, last[0])
+            return LLMResponse("", tool_calls=(ToolCall("v1", "forge_signals_done", {"tell": last[0]}),))
+        # chaque parole est neuve (sa garde anti-redite tait une phrase déjà dite)
+        return LLMResponse(f"Message n° {next(said)} : {last[0] or tells[0]} [EMOTION:happy:0.3]")
+
+    return respond
+
+
+@needs_bwrap
+def test_an_app_signals_each_new_article_into_its_queue_read_in_batches_under_its_quota(tmp_path):
+    """Sept articles en un battement : la file en garde cinq (deux partent, comptés) ; elle les lit par trois, deux
+    fois au plus dans la journée (son quota), et dit ce qu'elle retient à Adrien — une fois."""
+    from mika.contracts import forge as forge_c
+    from mika.contracts import runtime as rt
+    from mika.kernel.clock import MINUTE, US
+    from mika.sim.clock import run_virtual
+    from mika.vocab.episodes import Kind
+    from tests.fixtures.mika import boot, build, connect
+    from tests.unit.test_forge_console import events
+
+    forge = ForgeHost(tmp_path / "forge", http_get=lambda url: "", public=lambda host: True)
+    kernel, clock, _, _ = build(tmp_path, _judging_llm("Matter 1.4 est sorti, et un capteur de CO2 à 20 euros", ""),
+                                ports={"forge": forge})
+
+    async def main():
+        await boot(kernel)
+        try:
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            await install(kernel, forge, "flux", FEED, FEED_CODE)
+            await asyncio.sleep(90 * MINUTE / US)
+            frame = kernel.mind.frame()
+            return {"app": frame.state("forge").apps["flux"], "queued": events(kernel, forge_c.QUEUED),
+                    "judged": events(kernel, forge_c.JUDGED), "news": frame.state("forge").news.get("flux"),
+                    "said": [e for e in events(kernel, rt.UTTERANCE) if e.data.kind == Kind.INITIATIVE
+                             and any(x.startswith("forge-news:") for x in e.data.provenance)]}
+        finally:
+            forge.shutdown()
+            await kernel.stop()
+
+    got = run_virtual(clock, main)
+    assert len(got["queued"]) == 7 and got["app"].dropped == 2  # une file de cinq : les deux plus anciens partent
+    assert [len(e.data.seqs) for e in got["judged"]] == [3, 2]  # lus par trois : deux appels, le quota du jour
+    assert len(got["app"].calls_at) == 2 and got["app"].queue == ()
+    assert [e.data.tell is not None for e in got["judged"]] == [True, False]  # un lot à dire, l'autre non
+    assert got["news"] is not None and got["news"].told and len(got["said"]) == 1  # dit à Adrien, une fois
+
+
+@needs_bwrap
+def test_a_service_signals_the_temperature_twice_a_day_and_she_tells_it(tmp_path):
+    """Un service relève la température à 8 h et à 18 h et la signale : chaque relevé est lu (un par appel) et dit à
+    Adrien — quatre en deux jours, sous un quota de quatre par jour."""
+    from mika.contracts import forge as forge_c
+    from mika.contracts import runtime as rt
+    from mika.kernel.clock import HOUR, US
+    from mika.sim.clock import run_virtual
+    from mika.vocab.episodes import Kind
+    from tests.fixtures.mika import boot, build, connect
+    from tests.unit.test_forge_console import events
+
+    forge = ForgeHost(tmp_path / "forge", http_get=lambda url: "", public=lambda host: True)
+    kernel, clock, _, _ = build(tmp_path, _judging_llm("il fait doux à Lyon"), ports={"forge": forge})
+
+    async def main():
+        await boot(kernel)
+        try:
+            await connect(kernel, "user_1", "Adrien", operator=True)
+            await install(kernel, forge, "meteo", WEATHER, WEATHER_CODE)
+            await asyncio.sleep(48 * HOUR / US)
+            return {"queued": events(kernel, forge_c.QUEUED), "judged": events(kernel, forge_c.JUDGED),
+                    "said": [e for e in events(kernel, rt.UTTERANCE) if e.data.kind == Kind.INITIATIVE
+                             and any(x.startswith("forge-news:meteo:") for x in e.data.provenance)]}
+        finally:
+            forge.shutdown()
+            await kernel.stop()
+
+    got = run_virtual(clock, main)
+    hours = sorted({clock.local(e.at).hour for e in got["queued"]}) if hasattr(clock, "local") else None
+    assert len(got["queued"]) == 4 and (hours is None or hours == [8, 18])
+    assert [len(e.data.seqs) for e in got["judged"]] == [1, 1, 1, 1]
+    assert len(got["said"]) == 4  # chaque relevé dit à Adrien

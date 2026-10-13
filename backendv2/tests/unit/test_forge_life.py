@@ -99,9 +99,8 @@ def test_an_app_ticks_signals_and_speaks_only_as_a_citation(tmp_path):
     _, evs, llm = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 14, 0))
     ticks = of(evs, TICKED)
     assert len(ticks) >= 3 and all(t.data.ok for t in ticks)
-    signaled = of(evs, forge_c.SIGNALED)
-    assert len(signaled) == 1 and "promo" in signaled[0].data.summary.text
-    assert any(n.data.source == "forge:cafe" for n in of(evs, attention_c.NOTICED))  # l'attention l'a remarqué
+    queued = of(evs, forge_c.QUEUED)  # son signal attend dans la file de l'app, qu'elle lira (ADR 0105)
+    assert len(queued) == 1 and "promo" in queued[0].data.summary.text and queued[0].data.pertinence == 0.8
     reply = [c for c in llm.calls if c.role == "reply"][-1]
     last = reply.messages[-1].content
     assert "TES APPS" in last and UNTRUSTED_NOTE in last and "> Veille café : Prix du café relevés" in last

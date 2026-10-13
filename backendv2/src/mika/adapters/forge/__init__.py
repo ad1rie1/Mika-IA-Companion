@@ -70,6 +70,7 @@ from mika.ports.forge import (
     AppTool,
     CallResult,
     ForgeRefused,
+    SignalRules,
     StagedVersion,
     arg_specs,
     config_form,
@@ -196,6 +197,8 @@ HTTP_HEADERS_MAX = 40
 HTTP_METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
 #: ce qu'une requête envoie au plus (octets)
 HTTP_BODY_MAX = 1_000_000
+#: les signaux qu'un appel peut émettre au plus (ils vont dans la file de l'app, ADR 0105)
+SIGNALS_PER_CALL = 20
 #: les redirections suivies au plus, chacune revérifiée (jamais vers cette machine ni le réseau local)
 HTTP_REDIRECTS = 5
 #: les requêtes d'un même appel au plus : de quoi parcourir des pages, pas marteler un site par une boucle ratée
@@ -454,6 +457,7 @@ class ForgeHost:
             services=tuple(AppService(s["name"], s["schedule"], s["description"], float(s.get("timeout") or 0.0))
                            for s in manifest.get("services", []) if f"service_{s['name']}" in functions),
             timeout=float(manifest.get("timeout") or 0.0),
+            signals=SignalRules(**manifest.get("signals") or {}),
             handlers=tuple(sorted(functions)), error="; ".join(problems),
             events=tuple(manifest.get("events", [])) if "on_event" in functions else (),
             config=tuple(manifest.get("config", {}).items()),
@@ -888,9 +892,9 @@ class ForgeHost:
                 raise ValueError("données trop grosses (4 Ko)")
             call.emits.append((re.sub(r"[^a-z0-9_]", "_", str(p.get("type") or "event").lower())[:40], data))
             return True
-        if name == "signal":
-            if len(call.signals) >= 3:
-                raise ValueError("trop de signaux pour un appel (3)")
+        if name == "signal":  # dans la file de l'app (ADR 0105) : bornée par ce qu'elle déclare, pas ici
+            if len(call.signals) >= SIGNALS_PER_CALL:
+                raise ValueError(f"trop de signaux pour un appel ({SIGNALS_PER_CALL})")
             call.signals.append((str(p.get("summary") or "")[:300], max(0.0, min(1.0, float(p.get("pertinence") or 0))),
                                  str(p.get("emotion") or "")[:20]))
             return True

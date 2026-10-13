@@ -252,7 +252,7 @@ def test_the_watch_example_is_valid_and_watches_a_price():
     other = app["tool_maintenant"](api, {"symbole": "AAPL"})  # un autre cours, juste pour le dire
     assert other["symbole"] == "AAPL" and "AAPL" in api.fetched[-1] and len(api.signals) == 1
     text = guide.topic("veille")
-    assert "http_get" in text and "0,6" in text and "interval:1h" in text and "tick(api)" in text
+    assert "http_get" in text and "file de l'app" in text and "interval:1h" in text and "tick(api)" in text
     assert VEILLE_CODE in text and VEILLE_MANIFEST in text  # l'exemple montré est celui qui tourne
 
 
@@ -302,14 +302,14 @@ def test_forge_test_tries_what_she_wrote_and_says_what_a_signal_would_become(tmp
     out = run_virtual(clock, main)
     assert "Écrite" in _content(out["écrite"])
     tick = _content(out["tick"])
-    assert out["tick"].ok and "7300" in tick and "rester en tête" in tick  # 0,7 : une pensée
+    assert out["tick"].ok and "7300" in tick and "sa file" in tick  # il irait dans la file de l'app (ADR 0105)
     assert out["context"].ok and "^FCHI" in _content(out["context"])
     assert out["tool_maintenant"].ok and "ecart" in _content(out["tool_maintenant"])
     assert not out["tool_inconnu"].ok
     assert out["view_cours"].ok
     assert not out["on_event"].ok  # elle n'a pas écrit on_event : l'hôte refuse une fonction absente
     faint = _content(out["faint"])
-    assert "Seul le premier des 2 signaux" in faint and "à peine" in faint  # 0,3 : remarqué, pas retenu
+    assert "Ses 2 signal(aux) iraient dans sa file" in faint  # les deux : c'est à elle de juger, en les lisant
 
 
 # ── La preuve se déclare sur l'outil (L6) ─────────────────────────────────

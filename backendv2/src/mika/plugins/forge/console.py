@@ -69,9 +69,11 @@ from mika.plugins.forge import (
     ForgeState,
     NoArgs,
     _next_tick,
+    calls_today,
     has_secrets,
     outcomes,
     params,
+    rules_of,
     stale,
     trusted,
     written_draft,
@@ -196,6 +198,16 @@ def _subject(s: ForgeState, ctx: InspectContext) -> tuple[str, App | None, AppIn
     return name, app, info, port
 
 
+def _queue_words(app: App, now: int) -> str:
+    """Sa file de signaux en une ligne : ce qui attend, ce que l'app déclare, ses lectures du jour, ses pertes."""
+    r = rules_of(app)
+    text = (f"{len(app.queue)} en attente sur {r.queue} ; lue par {r.per_call}, {calls_today(app, now)} lecture(s) "
+            f"sur {r.quota} aujourd'hui")
+    if app.dropped:
+        text += f" ; {app.dropped} parti(s) sans être lus (file pleine)"
+    return text + (f" — consigne : {_clip(r.instructions, 200)}" if r.instructions else "")
+
+
 def _about(name: str, app: App | None, info: AppInfo | None, port: Any, frame: Frame,
            ctx: InspectContext) -> list[tuple[str, Cell]]:
     nxt = _next_tick(app, frame.env.tz_of(frame.root)) if app is not None else None
@@ -219,6 +231,7 @@ def _about(name: str, app: App | None, info: AppInfo | None, port: Any, frame: F
             ("dernier tour", _last_tick(name, ctx)),
             ("échecs d'affilée", app.failures),
             ("événements en attente", len(app.inbox)),
+            ("sa file de signaux (ADR 0105)", _queue_words(app, frame.now)),
             ("dernier signal", ctx.when(app.signaled_at) if app.signaled_at else "jamais"),
         ]
     if info is not None:
@@ -947,7 +960,7 @@ async def _act(s: ForgeState, frame: Frame, data: Any, ctx: ActionContext) -> Do
     return Done(drafts=drafts, message=message, tone="ok" if ok else "warn")
 
 
-FORGE.action("agir", title="Agir", args=NoArgs, emits=[EMITTED, c.SIGNALED], fields=_act_fields,
+FORGE.action("agir", title="Agir", args=NoArgs, emits=[EMITTED, c.SIGNALED, c.QUEUED], fields=_act_fields,
              description="Renseigne les champs puis valide pour appliquer cette action dans l'app.")(_act)
 
 

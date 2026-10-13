@@ -100,7 +100,8 @@ async def s23(driver: Driver, rng: RngTree, res: Result) -> None:
     reports = [e for e in _of(events, projects_c.RUN_REPORTED.name) if e.data.project == pid]
     signals = [s for s in _of(events, forge_c.SIGNALED.name) if s.data.app == "cours"]
     broken = [s for s in signals if s.data.kind == forge_c.APP_BROKEN]
-    found = [s for s in signals if s.data.kind == forge_c.APP_SIGNAL]
+    # ce qu'elle trouve attend dans la file de l'app, qu'elle lira (ADR 0105)
+    found = [s for s in _of(events, forge_c.QUEUED.name) if s.data.app == "cours"]
     peeked = [m.content for c in driver.llm.calls if c.role == "reply"  # type: ignore[attr-defined]
               for m in c.messages if m.role == "tool" and m.name == "cours_pages"]
     built_apps = [e for e in _of(built, "forge.written") if e.data.app == "cours"]
