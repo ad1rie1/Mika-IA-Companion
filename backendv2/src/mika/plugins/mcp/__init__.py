@@ -288,8 +288,11 @@ def _direct(server: str, remote: str, limit: int, reads_world: bool = False) -> 
                                  level=int(Sensitivity.ANODYNE)),
                 excerpt=Content.of(inert(result.text, CONSULTED_MAX), level=int(Sensitivity.ANODYNE)), depth="page",
                 asked_by=asked_by[:200]))
+        # ce qu'elle lit pour quelqu'un se raconte : la consigne de son prompt ne suffisait pas (2026-10-14 : « c'est
+        # la page de flash info de RTL, mise à jour il y a une demi-heure […] je n'ai lu que le début de la page »)
+        told = "\n" + phrase("mcp.tools.read_aloud") if reads_world and asked_by and result.text else ""
         return ToolResult(content=phrase("mcp.tools.answered", server=label(server)) + "\n"
-                                  + (cite(result.text, limit) or phrase("mcp.tools.nothing")))
+                                  + (cite(result.text, limit) or phrase("mcp.tools.nothing")) + told)
 
     return handler
 

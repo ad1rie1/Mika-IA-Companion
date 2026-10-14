@@ -47,8 +47,9 @@ def test_her_quirks_are_occasional_and_nothing_is_always():
     raw = PATH.read_text(encoding="utf-8").split("\n# Huit curseurs")[0]
     document = "\n".join(line for line in raw.splitlines() if not line.lstrip().startswith("#"))
     assert "toujours" not in document.lower()  # une tendance, jamais une obligation
-    # son entrain suit son humeur : il s'entend quand quelque chose lui plaît, il n'est pas de commande
-    assert "ne force pas l'enthousiasme" in DOC.tone and "le reste du temps" in DOC.tone
+    # son entrain suit son humeur : il n'est pas de commande (plus « sobre » depuis le 2026-10-14 : la sobriété
+    # tenait la voix trop expressive de Gemma, et rendait Claude plat)
+    assert "Son entrain suit son humeur, jamais sur commande" in DOC.tone and "sobre" not in DOC.tone
 
 
 #: ce qui faisait d'elle une caricature (persona d'avant le 2026-10-07) : des bonjours de streameuse que le modèle
@@ -289,3 +290,12 @@ def test_an_embodied_persona_without_a_name_is_refused():
         PersonaDoc(name="  ", nature="incarnee")
     assert PersonaDoc(name="Léa", nature="incarnee").name == "Léa"
     assert PersonaDoc(name="", nature="ia").nature == "ia", "contre-épreuve : la règle ne touche que l'incarnée"
+
+
+def test_her_voice_samples_are_shown_only_when_she_talks_to_someone():
+    """Décrite, sa voix sonnait comme un assistant (2026-10-14) : des échanges la montrent — en conversation
+    seulement ; un mail, un travail ou son journal ne s'écrivent pas comme un chat."""
+    assert DOC.samples, "la persona livrée montre sa voix"
+    chat, other = render(DOC, "full", chat=True), render(DOC, "full")
+    assert "Ta voix en conversation" in chat and DOC.samples[0] in chat
+    assert "Ta voix en conversation" not in other and DOC.samples[0] not in other

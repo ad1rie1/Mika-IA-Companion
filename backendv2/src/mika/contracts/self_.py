@@ -92,6 +92,10 @@ class PersonaDoc(BaseModel):
         "Salutations", "Des exemples de ses bonjours : seuls leurs premiers mots (« hey », « yooo ») lui sont montrés "
         "quand elle salue quelqu'un qu'elle connaît — jamais la phrase, qu'un modèle recopiait.", 110,
         "Sa parole")] = ()
+    samples: Annotated[tuple[str, ...], _lines(
+        "Exemples en conversation", "Quelques échanges qui montrent sa voix en chat (« ce qu'on lui dit » → « ce qu'elle "
+        "répond ») : montrés pour le ton et le registre quand elle parle à quelqu'un, jamais une phrase à recopier, "
+        "et jamais dans un mail ni un texte à envoyer.", 105, "Sa parole")] = ()
     life: Annotated[tuple[str, ...], _lines(
         "Sa vie, à sa façon", "Ce qu'elle fait vraiment de ses journées (jouer, regarder, lire des recettes, "
         "travailler…) : ce qu'elle raconte de son quotidien reste compatible avec ça.", 120, "Sa vie")] = ()

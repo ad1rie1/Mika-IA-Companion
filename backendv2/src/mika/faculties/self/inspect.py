@@ -243,6 +243,7 @@ def _persona(s: SelfState) -> list[Block]:
         ("centres d'intérêt", _lines(doc.interests)),
         ("façons de parler", _lines(doc.speech)),
         ("salutations (seuls leurs premiers mots lui sont montrés)", _lines(doc.greetings)),
+        ("exemples en conversation (montrés seulement quand elle parle à quelqu'un)", _lines(doc.samples)),
         ("sa vie, à sa façon", _lines(doc.life)),
         ("ses goûts et ses avis", _lines(doc.tastes)),
         ("ce qui est vrai d'elle", _lines(doc.facts)),

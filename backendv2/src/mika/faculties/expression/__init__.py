@@ -223,10 +223,39 @@ def repeats(said: Sequence[tuple[int, str]], now: int, opened: Sequence[str] = (
     if twice is not None:
         raw = next(r for r, k in reversed(starts) if k == twice)
         out.append(phrase("expression.habits.reunion", opener=raw))
+    # trois messages d'affilée qui posent des questions : un interrogatoire, pas une conversation (2026-10-14, avec
+    # Sonnet : « un seul ou plusieurs ? », « tu les as essayés, ou… ? », « tu comptes y aller, ou… ? »)
+    if len(msgs) >= 3 and all("?" in A.strip_prosody(t) for t in msgs[-3:]):
+        out.append(phrase("expression.habits.questions"))
     # trois longs messages d'affilée : un monologue, pas une conversation (sonde : quatre à six phrases à chaque fois)
     if len(msgs) >= 3 and all(len(A.strip_prosody(t)) >= LONG_MESSAGE for t in msgs[-3:]):
         out.append(phrase("expression.habits.long"))
     return out
+
+
+#: une phrase qui parle d'elle (« je », « j'ai », « moi », « mon »…)
+_SELF = re.compile(r"\b(?:je|j['’]|moi|mon|ma|mes)\b", re.IGNORECASE)
+_SENTENCES = re.compile(r"(?<=[.!?…])\s+")
+#: au plus tant de ce qu'elle a dit d'elle, cité
+SAID_OF_HERSELF_MAX = 200
+
+
+def said_of_herself(said: Sequence[tuple[int, str]], now: int) -> str | None:
+    """Ce que son dernier message, il y a moins d'une heure, disait d'elle (ses affirmations, pas ses questions) : la
+    personne l'a lu. Le prompt lui rappelle à chaque tour ce qu'elle fait ; à « et toi ? », elle le redisait presque
+    mot pour mot (2026-10-14 : « je dessine… une aquarelle », puis « je suis toujours à mon aquarelle » — rejoué six
+    fois sur six ; citée, zéro sur huit)."""
+    if not said:
+        return None
+    at, text = said[-1]
+    if now - at > HOUR or not text or A.SILENCE_TOKEN in text:
+        return None
+    mine = [t.strip() for t in _SENTENCES.split(A.strip_prosody(text))
+            if _SELF.search(t) and not t.strip().endswith("?")]
+    if not mine:
+        return None
+    quote = " ".join(mine[:2])
+    return quote if len(quote) <= SAID_OF_HERSELF_MAX else quote[:SAID_OF_HERSELF_MAX - 1].rstrip() + "…"
 
 
 @EXPRESSION.enricher("own_words", episodes=CONVERSATIONAL, deadline_ms=300)
@@ -341,6 +370,9 @@ def _habits(s: ExpressionState, frame: Frame, enrich: Mapping[str, Any]) -> str 
     opened = openings.said if opening else ()
     said = enrich.get("own_words") or ()
     found = repeats(said, frame.now, opened)
+    told = said_of_herself(said, frame.now)
+    if told:
+        found = [*found, phrase("expression.habits.told", said=told)]
     asked = pending_question(said, enrich.get("last_heard") or "", frame.now) \
         if ep is not None and ep.kind == Kind.REPLY else None
     if not found and not asked:

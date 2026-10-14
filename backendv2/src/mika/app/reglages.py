@@ -666,10 +666,11 @@ def sections(live: Live) -> tuple[SettingsSection, ...]:
                                          description="Son nom, ce qu'elle est (une IA qui le sait, ou une personne "
                                                      "incarnée), qui elle est, sa langue et l'heure qu'elle vit "
                                                      "(ses nuits, ses salutations en dépendent)."),
-                            SettingsPage("parole", "Ton et parole", ("tone", "speech", "greetings"), order=20,
+                            SettingsPage("parole", "Ton et parole", ("tone", "speech", "greetings", "samples"), order=20,
                                          facts=False, description="Comment elle parle : son ton général, ses "
-                                                                  "tournures, le ton de ses bonjours (des "
-                                                                  "exemples, jamais recopiés)."),
+                                                                  "tournures, le ton de ses bonjours et des "
+                                                                  "échanges qui montrent sa voix (des exemples, "
+                                                                  "jamais recopiés)."),
                             SettingsPage("caractere", "Caractère",
                                          ("traits", "quirks", "vulnerabilities", "values", "interests"), order=30,
                                          facts=False, description="Ce qui la définit, la touche et la passionne : "

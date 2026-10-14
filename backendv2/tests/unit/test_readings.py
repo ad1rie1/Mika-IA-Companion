@@ -232,6 +232,21 @@ async def test_what_she_reads_working_or_for_someone_is_kept():
     assert McpServer.model_fields["learns"].default is False  # un courrier, un agenda : jamais par défaut
 
 
+async def test_what_she_reads_for_someone_she_tells_as_news():
+    """2026-10-14 : « c'est la page de flash info de RTL, mise à jour il y a une demi-heure […] je n'ai lu que le
+    début de la page » — la consigne de son prompt ne suffisait pas. Ce qu'une lecture du monde lui rend en
+    conversation lui rappelle de le raconter (ce qui l'a frappée, ce qu'elle en pense) ; en travaillant, rien."""
+    async def result(kind: str, target: str | None) -> str:
+        async def emit(*drafts):
+            pass
+        ctx = NS(ports={"mcp": Port()}, frame=NS(episode=NS(kind=kind, target=target)), emit=emit)
+        return (await _direct("web", "search", 4000, True)(ExternalArgs(q="comète"), ctx)).content
+
+    told = await result(Kind.REPLY, ALICE)
+    assert "3 novembre" in told and "Raconte-le comme quelqu'un qui vient de le lire" in told
+    assert "Raconte-le" not in await result(Kind.STEP, None)
+
+
 async def test_the_night_keeps_only_the_news_of_what_she_read_for_someone():
     """Lu pour Alice en conversation : la nuit est prévenue (n'en garder que les nouvelles et les faits publics), ce
     qu'elle en garde est du monde (aucune personne, la source pour témoin), entendu par Alice — à qui elle l'a dit sur

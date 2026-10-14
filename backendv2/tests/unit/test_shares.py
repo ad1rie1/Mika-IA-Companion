@@ -32,6 +32,7 @@ from mika.kernel.clock import DAY, US
 from mika.kernel.events import Origin
 from mika.kernel.frame import Audience, EpisodeRef, Frame
 from mika.kernel.guards import Guard
+from mika.kernel.prompt import CONTEXT_FOOTER
 from mika.kernel.registry import ArbitrationPolicy
 from mika.ports.llm import LLMRequest, LLMResponse, ToolCall
 from mika.runtime.effects import with_content
@@ -328,7 +329,8 @@ SAID = "Je te mets la liste en pièce jointe. [EMOTION:happy:0.5]"
 def sharing(req: LLMRequest) -> LLMResponse:
     if req.role != "reply":
         return LLMResponse("D'accord.")
-    asked = next((m.content for m in reversed(req.messages) if m.role == "user"), "")
+    # ce que la personne a écrit, sans l'état interne (qui peut citer ce qu'elle-même vient de dire)
+    asked = next((m.content for m in reversed(req.messages) if m.role == "user"), "").split(CONTEXT_FOOTER)[-1]
     if "liste" in asked and not any(m.role == "tool" for m in req.messages):
         return LLMResponse("", (ToolCall("c1", "share_text", dict(LIST)),), stop="tool_use")
     return LLMResponse(SAID if "liste" in asked else "Avec plaisir.")

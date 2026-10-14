@@ -18,6 +18,7 @@ from mika.faculties.self.faculty import SELF, SelfState
 from mika.kernel.codec import digest
 from mika.kernel.frame import Frame
 from mika.ports.llm import PersonaRender
+from mika.vocab.episodes import CONVERSATIONAL
 from mika.vocab.phrasebook import phrase
 
 
@@ -55,10 +56,13 @@ def life_rule(doc: c.PersonaDoc) -> str:
     return phrase("self.life.lived") if doc.life or doc.tastes or doc.facts else phrase("self.life.sketched")
 
 
-def render(doc: c.PersonaDoc, depth: str = "full") -> str:
+def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str:
     """Le texte de la persona, en deuxième personne. Sa vie (ce qu'elle fait à sa
     façon, ses goûts, ce qui est vrai d'elle) en profondeur ``full`` : c'est là
-    qu'on lui demande « t'as mangé quoi ? », « c'est quoi ton plat préféré ? »."""
+    qu'on lui demande « t'as mangé quoi ? », « c'est quoi ton plat préféré ? ».
+    ``chat`` : elle parle à quelqu'un — ses exemples en conversation montrent sa
+    voix (décrite, elle sonnait comme un assistant : 2026-10-14) ; jamais dans un
+    mail, un travail ou son journal, qui ne s'écrivent pas comme un chat."""
     head = phrase("self.persona.head", name=c.name_of(doc), description=doc.description).strip()
     parts = [head]
     if doc.tone:
@@ -71,6 +75,7 @@ def render(doc: c.PersonaDoc, depth: str = "full") -> str:
             _bullets(phrase("self.persona.values"), doc.values),
             _bullets(phrase("self.persona.interests"), doc.interests),
             _bullets(phrase("self.persona.speech"), doc.speech),
+            _bullets(phrase("self.persona.samples"), doc.samples) if chat else "",
             _bullets(phrase("self.persona.life"), doc.life),
             _bullets(phrase("self.persona.tastes"), doc.tastes),
             _bullets(phrase("self.persona.facts"), doc.facts),
@@ -86,5 +91,6 @@ def render(doc: c.PersonaDoc, depth: str = "full") -> str:
 def persona_for(frame: Frame, depth: str) -> PersonaRender:
     """Le fournisseur de persona du pipeline (mis en cache par document)."""
     doc: c.PersonaDoc = frame.get(c.PERSONA)
-    text = render(doc, depth)
+    ep = frame.episode
+    text = render(doc, depth, chat=ep is not None and ep.kind in CONVERSATIONAL)
     return PersonaRender(text=text, hash=digest((depth, text)), depth=depth, name=c.name_of(doc))
