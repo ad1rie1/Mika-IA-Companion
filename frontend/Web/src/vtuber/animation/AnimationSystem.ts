@@ -10,6 +10,7 @@ import type {
   VoicePersona,
 } from "../../types";
 import { ClipLibrary, applyRestPose } from "./ClipLibrary";
+import { forceMixerWrite } from "./mixerWrite";
 import { AnimationStateMachine, SLEEP_YAWN_CLIP } from "./AnimationStateMachine";
 import { BlinkController } from "./BlinkController";
 import { FaceIdleController } from "./FaceIdleController";
@@ -21,7 +22,8 @@ import { LifeOverlay } from "./overlays/LifeOverlay";
 import { SpeechBodyOverlay } from "./overlays/SpeechBodyOverlay";
 import { planSpeechBeats } from "./speechBeats";
 import { LocomotionController } from "../locomotion/LocomotionController";
-import { isPlaceId, type PlaceId, type Posture } from "../locomotion/roomLayout";
+import { isPlaceId, PLACES, type PlaceId, type Posture } from "../locomotion/roomLayout";
+import { DeskStage, type DeskProps } from "./desk/DeskStage";
 import {
   LIE_CLIP_NAME,
   SIT_CLIP_NAME,
@@ -181,6 +183,8 @@ export class AnimationSystem {
     this.machine.setSleepPhase(this.sleepPhase);
     this.machine.setAffect(this.ctx.emotion, this.ctx.intensity, this.mood);
     this.machine.start();
+    this.desk = new DeskStage(this.machine, this.library, vrm);
+    if (this.deskProps) this.desk.setProps(this.deskProps);
     if (this.root) this.initLocomotion(vrm, this.root);
     this.vrm = vrm; // update() starts animating from this point on
 
@@ -223,6 +227,7 @@ export class AnimationSystem {
       this.locomotion.update(dt);
       this.applyEffectiveSleep();
       ctx.walking = this.locomotion.walking;
+      this.updateDesk();
     }
 
     if (this.machine && this.mixer && vrm.humanoid) {
@@ -234,6 +239,9 @@ export class AnimationSystem {
       vrm.humanoid.resetNormalizedPose();
       applyRestPose(vrm);
       this.machine.update(dt);
+      // …and the mixer rewrites every bone it animates, a still one too
+      // (mixerWrite.ts: without it, she flickered between seated and standing).
+      forceMixerWrite(this.mixer);
       this.mixer.update(dt);
     }
 
@@ -276,6 +284,8 @@ export class AnimationSystem {
   // ── Signals ───────────────────────────────────────────────────────
 
   setSpeaking(speaking: boolean): void {
+    // She answers someone: at her desk she turns toward them (a murmur to herself turns nobody).
+    if (speaking && !this.speaking && this.lastPersona !== "inner") this.engage(14);
     this.speaking = speaking;
     if (this.ctx) this.ctx.speaking = speaking;
     this.hands.setSpeaking(speaking);
@@ -336,6 +346,7 @@ export class AnimationSystem {
     // the gaze goes off to compose — never while asleep.
     if (pending && !this.replyPending && this.sleepPhase === "awake") {
       this.speechBody.acknowledge();
+      this.engage(16);
     }
     this.replyPending = pending;
   }
@@ -344,6 +355,82 @@ export class AnimationSystem {
    * gaze — eyes on them, fewer aversions — for LISTENING_HOLD_S. */
   noteUserTyping(): void {
     this.lastTypingAt = this.clock;
+    this.engage(8);
+  }
+
+  // ── Her desk (the Unity workshop's clips, see desk/) ──────────────
+
+  private desk: DeskStage | null = null;
+  private deskActive = false;
+  private deskProps: DeskProps | null = null;
+  /** She wants to get up and her desk holds her back: since when (s). */
+  private deskLeavingSince: number | null = null;
+  /** Someone talks to her until then (internal clock): at her desk, she turns toward them. */
+  private engagedUntil = -Infinity;
+
+  private engage(seconds: number): void {
+    this.engagedUntil = Math.max(this.engagedUntil, this.clock + seconds);
+  }
+
+  /** The mug, the pen and the mouse on her desk (taken out of room.glb), for her hands. */
+  setDeskProps(props: DeskProps): void {
+    this.deskProps = props;
+    this.desk?.setProps(props);
+  }
+
+  /**
+   * Seated at her desk, settled, its clips loaded: the desk plays her body
+   * (DeskStage) and moves the chair she sits on. Leaving it — or the clips
+   * missing — she is the plain seated stance again.
+   */
+  private updateDesk(): void {
+    const loco = this.locomotion;
+    const desk = this.desk;
+    if (!loco || !desk) return;
+    const atDesk = desk.ready && loco.place === "desk" && loco.posture === "sit" && loco.currentPhase === "settled";
+    if (!atDesk) {
+      if (this.deskActive) {
+        this.deskActive = false;
+        desk.leave();
+        loco.setSeatDrive(0, 0);
+        this.deskLeavingSince = null;
+        this.applyPostureClip(0.45);
+      }
+      return;
+    }
+    this.deskActive = true;
+    const leaving = loco.wantsToLeave;
+    if (!leaving) this.deskLeavingSince = null;
+    else {
+      this.deskLeavingSince ??= this.clock;
+      // Her gestures could not bring the chair home (as Unity's LeaveSeat): set there.
+      if (this.clock - this.deskLeavingSince > 30) desk.choreography.forceHome();
+    }
+    desk.update(this.clock, {
+      activity: this.activityName === "work" ? "work" : this.activityName === "draw" ? "draw" : null,
+      companion: this.clock < this.engagedUntil ? this.companionYaw() : null,
+      leaving,
+      keyboard: true,
+    });
+    loco.setSeatDrive(desk.choreography.yaw, desk.choreography.roll);
+  }
+
+  /** Where the viewer is from her desk seat (degrees, + to her right), the chair at home. */
+  private companionYaw(): number | null {
+    const seat = PLACES.desk.seat;
+    if (!this.camera || !seat) return null;
+    const p = this.camera.getWorldPosition(new THREE.Vector3());
+    const f = PLACES.desk.facing;
+    const tx = p.x - seat.x;
+    const tz = p.z - seat.z;
+    const ahead = tx * Math.sin(f) + tz * Math.cos(f);
+    const right = -tx * Math.cos(f) + tz * Math.sin(f);
+    return (Math.atan2(right, ahead) * 180) / Math.PI;
+  }
+
+  /** After the VRM's bones are this frame's (vrm.update): what her hands hold follows them. */
+  lateUpdate(delta: number): void {
+    if (this.deskActive) this.desk?.lateUpdate(Math.min(delta, 0.1));
   }
 
   setEmotion(
@@ -453,6 +540,13 @@ export class AnimationSystem {
   private lieClip: LoadedClip | null = null;
   /** The stance the locomotion asked for (stand, sit, lie). */
   private bodyPosture: Posture = "stand";
+  /** A captured sit-down / stand-up plays: nothing else takes the posture slot until it ends. */
+  private transition: "sit" | "stand" | null = null;
+
+  /** The workshop's `sit_down` / `stand_up`, once loaded. */
+  private transitionClip(kind: "sit" | "stand"): LoadedClip | null {
+    return this.library.get(kind === "sit" ? "sit_down" : "stand_up");
+  }
 
   /**
    * The clip the body holds when it is not walking: seated or lying as the
@@ -462,7 +556,8 @@ export class AnimationSystem {
    */
   private applyPostureClip(fade: number): void {
     const machine = this.machine;
-    if (!machine) return;
+    // At her desk, the desk plays her body; sitting down or getting up, the capture does.
+    if (!machine || this.deskActive || this.transition) return;
     let clip: LoadedClip | null = null;
     if (this.bodyPosture === "sit") clip = this.sitClip;
     else if (this.bodyPosture === "lie") clip = this.lieClip;
@@ -503,14 +598,40 @@ export class AnimationSystem {
       // The procedural seated clip keeps the hips at rest; the workshop's
       // holds them where it measured them.
       seatedHipsHeight: () => this.sitClip?.measures?.hipsHeight ?? standing,
+      // The walk clip's own pace (the workshop's ≈ 0.89 m/s): played at its cadence.
+      walkSpeed: () => {
+        const speed = this.walkClip?.measures?.speed;
+        return speed && speed > 0.1 ? Math.min(1.2, Math.max(0.5, speed)) : WALK_SPEED;
+      },
+      // At her desk she gets up only once its chair is back home by her gestures.
+      holdSeat: () => this.deskActive && this.desk !== null && !this.desk.choreography.readyToStand(this.clock),
       body: {
         walk: (timeScale) => {
           if (timeScale === null) machine.setWalking(null);
           else if (this.walkClip) machine.setWalking(this.walkClip, timeScale * this.walkPace());
         },
         posture: (posture: Posture, fade) => {
+          this.transition = null;
           this.bodyPosture = posture;
           this.applyPostureClip(fade);
+        },
+        // The Unity workshop's captured sit-down and stand-up.
+        transition: (kind) => {
+          const clip = this.transitionClip(kind);
+          const travel = clip?.measures?.travel;
+          if (!clip || !travel) return null;
+          return { seconds: clip.clip.duration, travel: Math.abs(travel.forward) };
+        },
+        playTransition: (kind) => {
+          const clip = this.transitionClip(kind);
+          if (!clip) return;
+          this.transition = kind;
+          machine.setPosture(clip, kind === "sit" ? 0.3 : 0.25, { once: true });
+        },
+        transitionProgress: (kind) => {
+          const st = machine.postureState;
+          const clip = this.transitionClip(kind);
+          return st && clip && st.clip === clip && clip.clip.duration > 0 ? st.time / clip.clip.duration : null;
         },
       },
     });

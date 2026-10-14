@@ -19,7 +19,8 @@ import { API_BASE, WS_URL } from "./network/api";
 import { WorldSession, worldUrl } from "./world/WorldSession";
 import { MIKA, WorldStage } from "./world/WorldStage";
 import { WorldHud } from "./world/WorldHud";
-import { affordanceClip, GESTURE_CLIPS, TOUCH_REACTIONS } from "./world/roomBindings";
+import { affordanceClip, DESK_PROPS, GESTURE_CLIPS, takesProp, TOUCH_REACTIONS } from "./world/roomBindings";
+import { extractPart } from "./world/RoomHinges";
 import { articulationFor } from "./vtuber/animation/affect";
 import type { EmotionBlend, EmotionName } from "./types";
 
@@ -153,9 +154,17 @@ async function init() {
     },
   });
   stage.bindSession(world);
-  void environment.ready.then(() =>
-    stage.bindRoom(environment.group.getObjectByName("RoomModel") ?? environment.group)
-  );
+  void environment.ready.then(() => {
+    const room = environment.group.getObjectByName("RoomModel") ?? environment.group;
+    stage.bindRoom(room);
+    // Her mug, her pen and her mouse, out of the desk's joined props: her
+    // hands take them in the Unity workshop's desk clips (desk/DeskStage.ts).
+    const prop = (name: "mug" | "pen" | "mouse") => {
+      const spec = DESK_PROPS.find((p) => p.name === name)!;
+      return extractPart(room, name, [spec.node], (part) => takesProp(spec, part))?.group ?? null;
+    };
+    animationSystem.setDeskProps({ mug: prop("mug"), pen: prop("pen"), mouse: prop("mouse") });
+  });
   const emotionDisplay = new EmotionDisplay();
   const innerLifePanel = new InnerLifePanel();
 
@@ -426,6 +435,7 @@ async function init() {
     // frame late, which is a ~25% timing error on a 4-frame blink at 30fps.
     vtuberModel.update(delta);
     // Après le corps : ce qu'elle tient suit sa main telle qu'elle est dessinée.
+    animationSystem.lateUpdate(delta);
     stage.update(delta);
   });
 }

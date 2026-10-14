@@ -157,6 +157,21 @@ describe("les mouvements de l'atelier Unity", () => {
     expect(Math.max(...Array.from({ length: 31 }, (_, i) => hips.values[3 * i]))).toBeCloseTo(0.03, 2);
   });
 
+  it("une prise qui commence loin de son origine est ramenée sur la racine", () => {
+    // la marche CMU part à 0,58 m de son origine ; la boucle se joue autour de la racine
+    const walk = Array.from({ length: 31 }, (_, i) => frame([0, -0.58 - i / 30, 0.78]));
+    const { clip } = retargetAtelierClip(motion(() => walk, true), stubVrm(), "marche");
+    const z = Array.from({ length: 31 }, (_, i) => track(clip, "Normalized_hips.position")!.values[3 * i + 2]);
+    expect(Math.max(...z.map(Math.abs))).toBeLessThan(1e-6);
+    // l'assise part 0,31 m devant son siège : elle commence au-dessus de la racine
+    const sit = Array.from({ length: 31 }, (_, i) => frame([0, -0.31 + (0.31 * i) / 30, 0.78 - (0.21 * i) / 30]));
+    const once = motion(() => sit, true);
+    once.loop = false;
+    const hips = track(retargetAtelierClip(once, stubVrm(), "assise").clip, "Normalized_hips.position")!;
+    expect(Math.abs(hips.values[2])).toBeLessThan(1e-6);
+    expect(Math.abs(hips.values[3 * 30 + 2])).toBeLessThan(1e-6);
+  });
+
   it("les deltas du monde se calculent sans VRM", () => {
     const d = atelierDeltas(motion(() => [frame([0, -0.3, 0.6])]));
     expect([...d.hips]).toEqual([expect.closeTo(0, 6), expect.closeTo(0.6, 6), expect.closeTo(0.3, 6)]);

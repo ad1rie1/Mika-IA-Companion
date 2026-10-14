@@ -26,6 +26,10 @@ class Embedder(Protocol):
 
     async def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
 
+    async def embed_query(self, texts: Sequence[str]) -> list[list[float]]:
+        """Plonger ce qu'on cherche (un modèle de recherche ne plonge pas une requête comme un document)."""
+        ...
+
 
 class VectorIndex(Protocol):
     model: str

@@ -100,4 +100,20 @@ describe.skipIf(names.length === 0)("the Unity workshop's motions on the web", (
     expect(measures.hipsHeight).toBeGreaterThan(0.55);
     expect(measures.hipsHeight).toBeLessThan(0.59);
   });
+
+  it("sitting down carries her hips back onto the seat, getting up carries them forward", () => {
+    const sit = retargetAtelierClip(read("sit_down"), stubVrm(), "sit_down").measures.travel!;
+    const stand = retargetAtelierClip(read("stand_up"), stubVrm(), "stand_up").measures.travel!;
+    expect(sit.forward).toBeLessThan(-0.25);
+    expect(stand.forward).toBeGreaterThan(0.25);
+    expect(Math.abs(sit.right)).toBeLessThan(0.05);
+  });
+
+  it.each(names)("%s keeps her hips over the root (no body walking ahead of where she is)", (name) => {
+    const { clip } = retargetAtelierClip(read(name), stubVrm(), name);
+    const hips = clip.tracks.find((t) => t.name === "Normalized_hips.position")!;
+    let far = 0;
+    for (let i = 0; i < hips.values.length; i += 3) far = Math.max(far, Math.hypot(hips.values[i], hips.values[i + 2]));
+    expect(far).toBeLessThan(0.2);
+  });
 });

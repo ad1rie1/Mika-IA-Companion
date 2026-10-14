@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0108, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0109, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -293,6 +293,7 @@ Claude Code sont sous `$XDG_RUNTIME_DIR/mika/claude-code/<hash>`.
 - `MIKA_DATABASE_URL` : un serveur MariaDB, par socket Unix, pilote PyMySQL ;
 - `MIKA_DATABASE_PREFIX` : le préfixe des noms de base, `mika_` par défaut ;
 - `MIKA_VOIX` : un autre fichier de voix, pour un jumeau ;
+- `MIKA_EMBEDDINGS_MODEL`, `MIKA_EMBEDDINGS_DEVICE` : le modèle de plongements et son appareil (`cpu`, `cuda`, `auto`), ADR 0109 ;
 - `MIKA_WEB_*` : le plugin web ;
 - `MIKA_TEST_MARIADB` : seulement pour les tests.
 
@@ -728,7 +729,7 @@ Tout le reste se déclare par décorateurs.
 |---|---|
 | Noyau, journal, arbitrage, pipeline | 0001–0003, 0006–0009, 0014, 0015, 0021, 0040, 0059 |
 | Stockage | 0004 (remplacé), 0101 |
-| Mémoire et savoir | 0010, 0011, 0034, 0046, 0052, 0055, 0074–0087, 0091, 0092, 0099, 0102 |
+| Mémoire et savoir | 0010, 0011, 0034, 0046, 0052, 0055, 0074–0087, 0091, 0092, 0099, 0102, 0109 |
 | Identité et divulgation | 0012, 0035, 0048, 0075, 0092 |
 | Vie intérieure (affect, corps, besoins, liens, autres, attention, soi) | 0013, 0016–0019, 0028, 0032, 0033, 0036, 0047, 0053, 0058, 0088–0090, 0093–0098, 0100, 0107 |
 | Buts, projets, Forge, atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
@@ -757,8 +758,10 @@ sur `ui/SpeechPresenter.ts`.
 **Les clips** viennent de l'atelier d'animation d'Unity : `public/animations/atelier` est un lien vers
 `frontend/Unity/ArtSource/atelier/motions/`, que `vtuber/animation/atelierClip.ts` passe sur les os normalisés du VRM
 (le même squelette, la même formule que le retargeting Mixamo, qui reste possible clip par clip). La marche se joue à sa
-vitesse de capture ; l'assise (`posture`) et les occupations debout (`activity` : fenêtre, bibliothèque) aussi. Les clips
-du bureau (`desk_*`, `chair_*`) ne sont pas encore joués.
+vitesse de capture ; l'assise (`posture`) et les occupations debout (`activity` : fenêtre, bibliothèque) aussi. Le bureau
+(`vtuber/animation/desk/`, port de `BodyActivity`) joue les clips `desk_*` et `chair_*` : la chaise passe de « home » à
+« type » (19,45°, 25,5 cm) ou « write » par les courbes de ses gestes, pivote vers qui lui parle, et elle ne se lève qu'une
+fois la chaise rentrée ; la tasse, le stylo et la souris (sortis de `Desk_Props`) suivent ses mains.
 
 **Le corps** (`vtuber/animation/AnimationSystem.ts`) suit, à chaque image, cet ordre :
 
@@ -791,7 +794,10 @@ Deux règles le tiennent :
 **La locomotion** (`vtuber/locomotion/`)
 
 - C'est le backend qui décide du lieu (`inner_state.place`) et de l'activité (`inner_state.activity`). Le client
-  l'exécute : planificateur sur graphe de visibilité, marche procédurale, chaise du bureau tirée et repoussée.
+  l'exécute : planificateur sur graphe de visibilité, marche de l'atelier. Un siège se prend comme dans Unity
+  (`SitDown`, `StandUp`) : elle contourne la chaise à 0,48 m, se place devant le siège à la distance que recule la capture
+  `sit_down` (31 cm), s'assied avec elle, et se lève par `stand_up` ; la racine suit le rythme du clip. La chaise ne bouge
+  que par les gestes du bureau.
 - La caméra suit sa tête.
 
 **La pièce** : un GLB généré par script Blender (`assets-src/blender/`). La lumière du jour suit l'heure réelle, avec du
@@ -819,7 +825,7 @@ Unity.
 - `network/WebSocketClient.ts` : reprise exponentielle, ping toutes les 20 s, reconnexion après 50 s de silence, file de
   sortie rejouée ; un 4401 est terminal.
 - `ui/chatSync.ts` : fusion du fil par curseur.
-- Les 37 fichiers vitest sont dans des dossiers `__tests__`.
+- Les 38 fichiers vitest sont dans des dossiers `__tests__`.
 
 ### Unity, Android, Extension
 

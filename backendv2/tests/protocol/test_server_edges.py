@@ -73,5 +73,9 @@ def test_cli_call_folders_are_never_archived(tmp_path: Path):
     (leak / "mcp.json").write_text("{\"Authorization\": \"Bearer jeton\"}")
     (data / "forge").mkdir()
     (data / "forge" / "app.py").write_text("x")
+    # le cache du modèle de plongements (HF_HOME de l'unité) se retélécharge : jamais dans une archive (ADR 0109)
+    model = data / "cache" / "huggingface" / "hub" / "models--Qwen--Qwen3-Embedding-0.6B"
+    model.mkdir(parents=True)
+    (model / "model.safetensors").write_bytes(b"\0" * 64)
     members = [p.as_posix() for p in backup._members(data)]
-    assert "forge/app.py" in members and not [m for m in members if m.startswith("claude-code")]
+    assert "forge/app.py" in members and not [m for m in members if m.startswith(("claude-code", "cache"))]

@@ -112,6 +112,36 @@ export const HINGES: readonly HingeSpec[] = [
   },
 ];
 
+/**
+ * Ce que ses mains prennent sur son bureau, parmi les accessoires joints de
+ * la pièce (`Desk_Props`) : à sa place du plan de l'atelier Unity
+ * (frontend/Unity/ArtSource/atelier/desk_plan.json, `room` : là où les
+ * gestes du bureau les attendent, build_desk.py), dans ses matériaux.
+ */
+export interface DeskPropSpec {
+  name: "mug" | "pen" | "mouse";
+  node: string;
+  /** Sa place sur le bureau (x, z de la pièce). */
+  at: { x: number; z: number };
+  /** Ses morceaux ont leur centre à moins de tant de cette place (m). */
+  radius: number;
+  materials: readonly string[];
+}
+
+export const DESK_PROPS: readonly DeskPropSpec[] = [
+  // la tasse : son corps, son anse et son café
+  { name: "mug", node: "Desk_Props", at: { x: -1.8655, z: -3.7991 }, radius: 0.07, materials: ["M_CeramicPink", "M_Coffee"] },
+  { name: "pen", node: "Desk_Props", at: { x: -1.6683, z: -3.9091 }, radius: 0.02, materials: ["M_PinBlue"] },
+  { name: "mouse", node: "Desk_Props", at: { x: -1.1038, z: -3.8291 }, radius: 0.03, materials: ["M_PlasticWhite"] },
+];
+
+/** Ce morceau fait-il partie de cet accessoire ? */
+export function takesProp(spec: DeskPropSpec, part: LeafPart): boolean {
+  const cx = (part.box.min[0] + part.box.max[0]) / 2;
+  const cz = (part.box.min[2] + part.box.max[2]) / 2;
+  return part.node === spec.node && spec.materials.includes(part.material) && Math.hypot(cx - spec.at.x, cz - spec.at.z) < spec.radius;
+}
+
 /** Les états qu'un battant connaît ; un autre état ne le fait pas bouger. */
 export const HINGE_OPEN = "open";
 export const HINGE_CLOSED = "closed";

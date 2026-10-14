@@ -100,6 +100,8 @@ export class AnimationStateMachine {
 
   private currentAction: THREE.AnimationAction | null = null;
   private currentClip: LoadedClip | null = null;
+  /** The posture clip is a one-shot (setPosture `once`). */
+  private postureOnce = false;
   /** Manifest/sleep timeScale of the current action, before affect tempo. */
   private currentTimeScale = 1;
 
@@ -272,10 +274,15 @@ export class AnimationStateMachine {
     else this.enterBase(this.speaking ? "talking" : "idle", FADE.fromWalk);
   }
 
-  /** Seated / lying posture clip, or null to stand. */
-  setPosture(loaded: LoadedClip | null, fade = 0.9): void {
-    if (loaded === this.postureClip) return;
+  /**
+   * Seated / lying posture clip, or null to stand. `once`: a one-shot held
+   * on its last frame (a desk gesture: the chair pulled in, the pen taken);
+   * `restart`: replay the same one.
+   */
+  setPosture(loaded: LoadedClip | null, fade = 0.9, opts: { once?: boolean; restart?: boolean } = {}): void {
+    if (loaded === this.postureClip && !opts.restart) return;
     this.postureClip = loaded;
+    this.postureOnce = opts.once === true;
     if (!this.started || this.debugPinned || this._state === "walking") return;
     if (this._state === "sleeping") {
       this.enterSleeping(fade);
@@ -293,6 +300,17 @@ export class AnimationStateMachine {
 
   get posture(): LoadedClip | null {
     return this.postureClip;
+  }
+
+  /**
+   * The posture clip as it plays: its time (clip seconds) and whether its
+   * fade-in is over — what a desk gesture reads to move the chair with it.
+   * Null while another clip owns the base layer (walking, a gesture).
+   */
+  get postureState(): { clip: LoadedClip; time: number; settled: boolean } | null {
+    const action = this.currentAction;
+    if (!this.postureClip || this.currentClip !== this.postureClip || !action) return null;
+    return { clip: this.postureClip, time: action.time, settled: action.getEffectiveWeight() >= 0.999 };
   }
 
   // ── Inputs ────────────────────────────────────────────────────────
@@ -545,7 +563,7 @@ export class AnimationStateMachine {
     // A new pick enters its loop at a random frame and its own pace: the
     // same idle never restarts from the same breath twice.
     this.pickTempo = this.postureClip ? 1 : this.jitter(BASE_TEMPO_JITTER);
-    this.playClip(loaded, fade, { randomPhase: !this.postureClip });
+    this.playClip(loaded, fade, { randomPhase: !this.postureClip, once: this.postureClip !== null && this.postureOnce });
     this.holdTimer = 0;
     this.holdDuration =
       this.sample(loaded.meta.hold ?? DEFAULT_HOLD[state]) *

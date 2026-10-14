@@ -52,6 +52,12 @@ export interface AtelierMeasures {
   speed?: number;
   /** Mean height of the hips over the clip (m): seated, where the seat must put them. */
   hipsHeight: number;
+  /**
+   * A travelling clip's course from its first frame to its last, in her own
+   * frame (m): `forward` along where she faces (negative: back — the
+   * captured sit-down onto the seat behind her), `right` to her right.
+   */
+  travel?: { forward: number; right: number };
 }
 
 /** Bones the web's own controllers own: the fingers (HandAnimator) and the eyes (GazeController). */
@@ -176,10 +182,27 @@ export function atelierDeltas(motion: AtelierMotion): AtelierDeltas {
   return { times, hips, rotations, restHipsHeight: restHips.y };
 }
 
+/** A gesture's own curves (`ChairYaw`, `ChairRoll`: how far the chair has gone, 0 → 1; `Hold`: the object in hand). */
+export interface AtelierCurves {
+  fps: number;
+  values: Record<string, number[]>;
+}
+
 export interface AtelierRetarget {
   clip: THREE.AnimationClip;
   report: RetargetReport;
   measures: AtelierMeasures;
+  curves?: AtelierCurves;
+}
+
+/** A curve's value at `time` (s) into its clip, linearly between frames; 0 for a curve the clip lacks. */
+export function sampleCurve(curves: AtelierCurves | undefined, name: string, time: number): number {
+  const v = curves?.values[name];
+  if (!v || v.length === 0) return 0;
+  const f = Math.max(0, Math.min(v.length - 1, time * curves!.fps));
+  const i = Math.floor(f);
+  const k = f - i;
+  return i + 1 < v.length ? v[i] + (v[i + 1] - v[i]) * k : v[i];
 }
 
 /**
@@ -240,15 +263,34 @@ export function retargetAtelierClip(motion: AtelierMotion, vrm: VRM, clipName: s
   const scale = restHips && d.restHipsHeight > 1e-6 ? Math.abs(restHips[1]) / d.restHipsHeight : 1;
   const duration = d.times[n - 1];
   const drift = { x: d.hips[3 * (n - 1)] - d.hips[0], z: d.hips[3 * (n - 1) + 2] - d.hips[2] };
+  // A travelling clip is brought over the root, as Unity's root motion does:
+  // the capture starts wherever it was shot (the CMU walk 0.58 m from its
+  // origin, the sit-down 0.31 m before its seat) — kept, the body walked
+  // that far ahead of where the locomotion put it, and jumped there at every
+  // start and stop. A one-shot from its first frame (she stands where she
+  // starts), a loop around the middle of its cycle.
+  const base = { x: 0, z: 0 };
+  if (motion.travel) {
+    if (motion.loop) {
+      for (let i = 0; i < n; i++) {
+        const k = i / (n - 1);
+        base.x += (d.hips[3 * i] - drift.x * k) / n;
+        base.z += (d.hips[3 * i + 2] - drift.z * k) / n;
+      }
+    } else {
+      base.x = d.hips[0];
+      base.z = d.hips[2];
+    }
+  }
   const hipsNode = nodes.get("hips");
   let height = 0;
   if (hipsNode) {
     const values = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) {
       const k = motion.travel ? i / (n - 1) : 0;
-      let x = (d.hips[3 * i] - drift.x * k) * scale;
+      let x = (d.hips[3 * i] - base.x - drift.x * k) * scale;
       const y = d.hips[3 * i + 1] * scale;
-      let z = (d.hips[3 * i + 2] - drift.z * k) * scale;
+      let z = (d.hips[3 * i + 2] - base.z - drift.z * k) * scale;
       if (flip) {
         x = -x;
         z = -z;
@@ -261,7 +303,11 @@ export function retargetAtelierClip(motion: AtelierMotion, vrm: VRM, clipName: s
   if (tracks.length === 0) throw new Error(`${clipName}: no retargetable tracks`);
 
   const measures: AtelierMeasures = { hipsHeight: height };
-  if (motion.travel && duration > 0) measures.speed = (Math.hypot(drift.x, drift.z) * scale) / duration;
+  if (motion.travel && duration > 0) {
+    measures.speed = (Math.hypot(drift.x, drift.z) * scale) / duration;
+    // In the VRM 1.0 frame she faces +Z and her left is +X.
+    measures.travel = { forward: drift.z * scale, right: -drift.x * scale };
+  }
   const report: RetargetReport = {
     clipName,
     sourceClipName: motion.name,
@@ -272,5 +318,6 @@ export function retargetAtelierClip(motion: AtelierMotion, vrm: VRM, clipName: s
     hipsPositionScale: scale,
     hipsScaleSuspicious: scale < 0.5 || scale > 2,
   };
-  return { clip: new THREE.AnimationClip(clipName, duration, tracks), report, measures };
+  const curves = motion.curves && Object.keys(motion.curves).length > 0 ? { fps: motion.fps, values: motion.curves } : undefined;
+  return { clip: new THREE.AnimationClip(clipName, duration, tracks), report, measures, curves };
 }

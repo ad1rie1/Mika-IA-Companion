@@ -92,8 +92,9 @@ BASES = "bases"
 SKIPPED = frozenset({"views.db", "views.db-wal", "views.db-shm", "sauvegardes.json", "sauvegardes.partial",
                      datadir.LOCK_NAME})
 #: dossiers jamais archivés : ceux des appels de la CLI de Claude Code (prompts privés, jetons de session)
-#: d'une installation d'avant leur déménagement sous XDG_RUNTIME_DIR
-SKIPPED_DIRS = frozenset({"claude-code"})
+#: d'une installation d'avant leur déménagement sous XDG_RUNTIME_DIR ; ``cache`` (``HF_HOME`` de l'unité : le modèle
+#: de plongements, qui se retélécharge — 1,2 Go pour Qwen3, ADR 0109)
+SKIPPED_DIRS = frozenset({"claude-code", "cache"})
 _SQLITE_SIDECARS = ("-wal", "-shm", "-journal")
 ARCHIVE_PREFIX = "mika-"
 #: ce que la console lit des sauvegardes : la dernière, la dernière vérification (dans le dossier de données)

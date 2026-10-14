@@ -14,7 +14,7 @@ import {
   type Vec2,
 } from "../roomLayout";
 import { LocomotionController } from "../LocomotionController";
-import { CHAIR_BACK, pulledSeat, seatEntry } from "../roomLayout";
+import { CHAIR_CLEAR, aroundChair, placeFrame, seatFront } from "../roomLayout";
 
 const inflated = OBSTACLES.map((r) => ({
   minX: r.minX - BODY_RADIUS + 0.01,
@@ -204,55 +204,151 @@ describe("LocomotionController", () => {
   });
 });
 
-describe("the desk chair", () => {
+describe("the desk chair, as the Unity client takes it", () => {
   function withChair() {
     const s = stage();
     const chair = new THREE.Object3D();
     chair.position.set(-1.4, 0, -3.3);
+    chair.rotation.y = 0.3;
     s.loco.setProp("desk", chair);
-    const out = () => (chair.position.x + 1.4) * CHAIR_BACK.x + (chair.position.z + 3.3) * CHAIR_BACK.z;
-    return { ...s, chair, out };
+    const rest = { pos: chair.position.clone(), rot: chair.quaternion.clone() };
+    const still = () => chair.position.distanceTo(rest.pos) < 1e-9 && chair.quaternion.angleTo(rest.rot) < 1e-6;
+    return { ...s, chair, still };
   }
 
-  it("she pulls it out, sits, and rolls in with it", () => {
+  it("she walks round the chair to the front of its seat and sits down where it stands — it never moves", () => {
     const s = withChair();
     s.loco.setPlace("center");
     s.loco.setPlace("desk");
-    let maxOut = 0;
-    let sawEntry = false;
+    const front = seatFront(PLACES.desk, 0.2)!;
+    const corner = aroundChair(PLACES.desk, front, PLACES.desk.approach)!;
+    expect(corner).not.toBeNull(); // the desk's approach is beside the chair
+    let sawCorner = false;
+    let sawFront = false;
+    let still = true;
     for (let t = 0; t < 30; t += 1 / 30) {
       s.loco.update(1 / 30);
-      maxOut = Math.max(maxOut, s.out());
-      if (near(s.floor(), seatEntry(PLACES.desk)!, 0.03)) sawEntry = true;
+      if (near(s.floor(), corner, 0.03)) sawCorner = true;
+      if (near(s.floor(), front, 0.03)) sawFront = true;
+      still &&= s.still();
     }
-    expect(sawEntry).toBe(true); // she stood in front of the pulled-out seat
-    expect(maxOut).toBeGreaterThan(PLACES.desk.prop!.pull * 0.95);
-    expect(s.out()).toBeLessThan(0.01); // rolled back in, with her on it
+    expect(sawCorner).toBe(true);
+    expect(sawFront).toBe(true);
+    expect(still).toBe(true);
     expect(near(s.floor(), PLACES.desk.seat!)).toBe(true);
     expect(s.loco.posture).toBe("sit");
   });
 
-  it("leaving, she rolls out, steps aside, and the chair goes back in — she never walks through it", () => {
+  it("she never crosses the chair's armrests: beside the seat she keeps her distance", () => {
     const s = withChair();
-    s.loco.setPlace("desk"); // snap: seated, chair in
-    s.loco.setPlace("bookshelf");
-    let maxOut = 0;
-    const trail: THREE.Vector2[] = [];
+    s.loco.setPlace("center");
+    s.loco.setPlace("desk");
+    const seat = PLACES.desk.seat!;
+    const { right } = placeFrame(PLACES.desk);
     for (let t = 0; t < 30; t += 1 / 30) {
       s.loco.update(1 / 30);
-      maxOut = Math.max(maxOut, s.out());
-      trail.push(s.floor().clone());
+      if (s.loco.posture !== "stand") break;
+      const p = s.floor();
+      const lateral = Math.abs((p.x - seat.x) * right.x + (p.y - seat.z) * right.z);
+      const ahead = (p.x - seat.x) * right.z - (p.y - seat.z) * right.x; // along the seat's forward
+      // standing beside the seat (not in front of it, not far behind), she is clear of the armrest
+      if (ahead < 0.1 && ahead > -0.6) expect(lateral).toBeGreaterThan(CHAIR_CLEAR - 0.06);
     }
-    expect(maxOut).toBeGreaterThan(PLACES.desk.prop!.pull * 0.95);
-    expect(s.out()).toBeLessThan(0.01);
-    expect(s.loco.place).toBe("bookshelf");
-    // Her path never crosses the pulled-out seat.
-    const seat = pulledSeat(PLACES.desk)!;
-    const crossed = trail.some((p, i) => i > 60 && Math.hypot(p.x - seat.x, p.y - seat.z) < 0.15);
-    expect(crossed).toBe(false);
   });
 
-  it("without the chair object she still sits (from the side)", () => {
+  it("leaving, she gets up in front of the seat and steps out round the chair", () => {
+    const s = withChair();
+    s.loco.setPlace("desk"); // snap: seated
+    s.loco.setPlace("bookshelf");
+    const front = seatFront(PLACES.desk, 0.2)!;
+    let sawFront = false;
+    let still = true;
+    for (let t = 0; t < 30; t += 1 / 30) {
+      s.loco.update(1 / 30);
+      if (near(s.floor(), front, 0.03)) sawFront = true;
+      still &&= s.still();
+    }
+    expect(sawFront).toBe(true);
+    expect(still).toBe(true);
+    expect(s.loco.place).toBe("bookshelf");
+  });
+
+  it("seated, her desk's gestures swivel and roll the chair — and her with it", () => {
+    const s = withChair();
+    s.loco.setPlace("desk");
+    s.loco.setSeatDrive(19.45, 0.255);
+    s.run(0.1);
+    const { ahead } = placeFrame(PLACES.desk);
+    expect(s.chair.position.x).toBeCloseTo(-1.4 + ahead.x * 0.255, 6);
+    expect(s.chair.position.z).toBeCloseTo(-3.3 + ahead.z * 0.255, 6);
+    // swivelled to her right: a negative turn about +Y
+    expect(new THREE.Euler().setFromQuaternion(s.chair.quaternion, "YXZ").y).toBeCloseTo(0.3 - (19.45 * Math.PI) / 180, 5);
+    expect(near(s.floor(), { x: PLACES.desk.seat!.x + ahead.x * 0.255, z: PLACES.desk.seat!.z + ahead.z * 0.255 }, 0.001)).toBe(true);
+  });
+
+  it("held by her desk, she stays seated; let go, she gets up", () => {
+    let hold = true;
+    const root = new THREE.Object3D();
+    const loco = new LocomotionController({
+      root,
+      baseYaw: Math.PI,
+      hipsHeight: 0.75,
+      holdSeat: () => hold,
+      body: { walk: () => {}, posture: () => {} },
+    });
+    loco.setPlace("desk");
+    loco.setPlace("center");
+    for (let t = 0; t < 3; t += 1 / 30) loco.update(1 / 30);
+    expect(loco.posture).toBe("sit");
+    expect(loco.wantsToLeave).toBe(true);
+    hold = false;
+    for (let t = 0; t < 15; t += 1 / 30) loco.update(1 / 30);
+    expect(loco.place).toBe("center");
+  });
+
+  it("a captured sit-down: she stands as far ahead as it carries her back, the root keeps the clip's pace", () => {
+    const root = new THREE.Object3D();
+    root.position.set(0, 0, -0.5);
+    root.rotation.y = Math.PI;
+    let progress: number | null = null;
+    const played: string[] = [];
+    const loco = new LocomotionController({
+      root,
+      baseYaw: Math.PI,
+      hipsHeight: 0.75,
+      seatedHipsHeight: () => 0.567,
+      body: {
+        walk: () => {},
+        posture: (p) => played.push(p),
+        transition: (kind) => (kind === "sit" ? { seconds: 1.6, travel: 0.313 } : { seconds: 0.9, travel: 0.294 }),
+        playTransition: (kind) => {
+          played.push(`transition:${kind}`);
+          progress = 0;
+        },
+        transitionProgress: () => progress,
+      },
+    });
+    loco.setPlace("center");
+    loco.setPlace("bed"); // no chair: straight to the front of its edge
+    const front = seatFront(PLACES.bed, 0.313)!;
+    for (let t = 0; t < 30 && !played.includes("transition:sit"); t += 1 / 30) loco.update(1 / 30);
+    const at = () => ({ x: root.position.x, z: root.position.z });
+    expect(Math.hypot(at().x - front.x, at().z - front.z)).toBeLessThan(0.05);
+    // the clip half way (whatever the clock says): the root half way to the seat, still on the floor
+    progress = 0.5;
+    loco.update(1 / 30);
+    const seat = PLACES.bed.seat!;
+    expect(at().x).toBeCloseTo((front.x + seat.x) / 2, 2);
+    expect(root.position.y).toBeLessThan(0.02);
+    progress = 1;
+    loco.update(1 / 30);
+    expect(Math.hypot(at().x - seat.x, at().z - seat.z)).toBeLessThan(0.01);
+    expect(played[played.length - 1]).toBe("sit");
+    // the seat puts her hips at 0.47 + 0.15 − 0.03: the workshop clip holds them at 0.567
+    expect(root.position.y).toBeCloseTo(0.47 + 0.15 - 0.03 - 0.567, 6);
+  });
+
+  it("without the chair object she still sits", () => {
     const s = stage();
     s.loco.setPlace("center");
     s.loco.setPlace("desk");

@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { center, components, corner, openingSign, union, volume, type Box, type Component } from "./meshParts";
-import { HINGE_CLOSED, HINGE_OPEN, HINGES, type HingeSpec } from "./roomBindings";
+import { HINGE_CLOSED, HINGE_OPEN, HINGES, type HingeSpec, type LeafPart } from "./roomBindings";
 
 /**
  * Un battant de la pièce sur sa charnière (porte, croisée de fenêtre, porte
@@ -95,7 +95,45 @@ export function buildHinges(root: THREE.Object3D, specs: readonly HingeSpec[] = 
   return hinges;
 }
 
-function sourcesOf(root: THREE.Object3D, rootInverse: THREE.Matrix4, spec: HingeSpec): Source[] {
+/**
+ * Sort un objet posé des maillages joints de la pièce (la tasse, le stylo,
+ * la souris parmi les accessoires du bureau) : ses triangles passent dans un
+ * groupe à lui, dont l'origine est au centre de leur boîte — ce qu'une main
+ * prend et repose (desk/DeskStage.ts). Rien ne change à l'œil tant qu'il est
+ * à sa place. Introuvable : null.
+ */
+export function extractPart(
+  root: THREE.Object3D,
+  name: string,
+  nodes: readonly string[],
+  takes: (part: LeafPart) => boolean
+): { group: THREE.Group; box: Box } | null {
+  root.updateMatrixWorld(true);
+  const rootInverse = root.matrixWorld.clone().invert();
+  const taken = new Map<Source, Component[]>();
+  for (const s of sourcesOf(root, rootInverse, { nodes })) {
+    const material = materialName(s.mesh);
+    const parts = s.parts.filter((p) => takes({ node: s.node, material, box: p.box }));
+    if (parts.length > 0) taken.set(s, parts);
+  }
+  const box = union([...taken.values()].flat().map((p) => p.box));
+  if (!box) return null;
+  const c = center(box);
+  const group = new THREE.Group();
+  group.name = name;
+  group.position.set(c[0], c[1], c[2]);
+  root.add(group);
+  const offset = new THREE.Matrix4().makeTranslation(-c[0], -c[1], -c[2]);
+  for (const [source, parts] of taken) {
+    const piece = split(source.mesh, new Set(parts.flatMap((part) => part.triangles)));
+    offset.clone().multiply(source.toRoot).decompose(piece.position, piece.quaternion, piece.scale);
+    piece.name = `${name}_${source.node}`;
+    group.add(piece);
+  }
+  return { group, box };
+}
+
+function sourcesOf(root: THREE.Object3D, rootInverse: THREE.Matrix4, spec: { nodes: readonly string[] }): Source[] {
   const out: Source[] = [];
   for (const name of spec.nodes) {
     const node = root.getObjectByName(name);
@@ -182,8 +220,16 @@ function sharing(geometry: THREE.BufferGeometry, index: number[]): THREE.BufferG
   const out = new THREE.BufferGeometry();
   for (const [name, attr] of Object.entries(geometry.attributes)) out.setAttribute(name, attr);
   out.setIndex(index);
-  out.boundingBox = geometry.boundingBox?.clone() ?? null;
-  out.boundingSphere = geometry.boundingSphere?.clone() ?? null;
-  if (!out.boundingSphere) out.computeBoundingSphere();
+  // Les bornes des seuls sommets de ce morceau : celles de three.js
+  // parcourraient tout le tampon partagé (le meuble entier).
+  const pos = geometry.getAttribute("position");
+  const box = new THREE.Box3();
+  const v = new THREE.Vector3();
+  for (const i of index) box.expandByPoint(v.fromBufferAttribute(pos, i));
+  const c = box.getCenter(new THREE.Vector3());
+  let r2 = 0;
+  for (const i of index) r2 = Math.max(r2, v.fromBufferAttribute(pos, i).distanceToSquared(c));
+  out.boundingBox = box;
+  out.boundingSphere = new THREE.Sphere(c, Math.sqrt(r2));
   return out;
 }

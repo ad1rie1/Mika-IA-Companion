@@ -8,7 +8,13 @@ import type {
   SleepPhase,
 } from "../../types";
 import { retargetMixamoClip, type RetargetReport } from "./mixamoRetarget";
-import { fetchAtelierMotion, isAtelierUrl, retargetAtelierClip, type AtelierMeasures } from "./atelierClip";
+import {
+  fetchAtelierMotion,
+  isAtelierUrl,
+  retargetAtelierClip,
+  type AtelierCurves,
+  type AtelierMeasures,
+} from "./atelierClip";
 import { forwardSign } from "../vrmVersion";
 import { MIRROR_SUFFIX, buildMirrorNodeMap, isMirrorName, mirrorClip } from "./clipMirror";
 
@@ -33,10 +39,14 @@ export interface LoadedClip {
   report: RetargetReport | null;
   /** What a Unity-workshop clip measures (its walking speed, its hips height). */
   measures?: AtelierMeasures;
+  /** A workshop gesture's curves (the chair it moves, the object in hand). */
+  curves?: AtelierCurves;
 }
 
 /** Manifest categories this library loads. */
-const CATEGORIES: ReadonlySet<string> = new Set(["idle", "talk", "gesture", "sleep", "locomotion", "posture", "activity"]);
+const CATEGORIES: ReadonlySet<string> = new Set([
+  "idle", "talk", "gesture", "sleep", "locomotion", "posture", "transition", "activity", "desk",
+]);
 
 /** Free the throwaway FBX scene graph once tracks are extracted. */
 function disposeFbxAsset(asset: THREE.Group): void {
@@ -195,8 +205,8 @@ export class ClipLibrary {
       if (isAtelierUrl(entry.url)) {
         // A clip of the Unity client's animation workshop (see atelierClip.ts).
         const motion = await fetchAtelierMotion(entry.url);
-        const { clip, report, measures } = retargetAtelierClip(motion, this.vrm!, name);
-        this.register({ name, clip, meta: entry, report, measures }, onLoaded);
+        const { clip, report, measures, curves } = retargetAtelierClip(motion, this.vrm!, name);
+        this.register({ name, clip, meta: entry, report, measures, curves }, onLoaded);
         return;
       }
       const asset = await this.fbx.loadAsync(encodeURI(entry.url));

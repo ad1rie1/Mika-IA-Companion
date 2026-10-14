@@ -14,9 +14,10 @@ les os normalisés du VRM.
 Au-delà des attentes, paroles et gestes, le manifeste en prend la marche
 (`walking`, jouée à sa vitesse de capture), l'assise (`sitting_idle`, catégorie
 `posture`) et deux occupations debout (`window_lean` pour regarder dehors,
-`shelf_browse` pour bouquiner, catégorie `activity`). Les clips du bureau
-(`desk_*`, `chair_*`) attendent la chaise à ses positions de travail, que le web ne
-fait pas encore.
+`shelf_browse` pour bouquiner, catégorie `activity`) et tout le bureau (`desk_*`,
+`chair_*`, catégorie `desk`) : `src/vtuber/animation/desk/` les joue comme Unity —
+la chaise menée par les courbes de ses gestes jusqu'à ses positions de travail, la
+tasse et le stylo dans ses mains selon la courbe `Hold`, la souris sous sa paume.
 
 ## Mixamo — pack de départ (l'ancienne source)
 

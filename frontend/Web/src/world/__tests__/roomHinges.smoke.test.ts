@@ -13,8 +13,8 @@ import * as path from "node:path";
 import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { components } from "../meshParts";
-import { buildHinges } from "../RoomHinges";
-import { HINGES, ROOM_OBJECTS } from "../roomBindings";
+import { buildHinges, extractPart } from "../RoomHinges";
+import { DESK_PROPS, HINGES, ROOM_OBJECTS, takesProp } from "../roomBindings";
 
 const GLB = path.resolve(__dirname, "../../../public/models/room.glb");
 
@@ -155,5 +155,32 @@ describe.skipIf(!present)("les battants de la vraie pièce", () => {
     expect(Math.abs(hinge.pivot.rotation.y)).toBeLessThan(Math.abs(hinge.openAngle));
     hinge.update(1);
     expect(hinge.pivot.rotation.y).toBeCloseTo(0, 6);
+  });
+
+  it("la tasse, le stylo et la souris se sortent des accessoires du bureau, là où les gestes les attendent", () => {
+    const r = room();
+    const before = triangles(r);
+    const got = Object.fromEntries(
+      DESK_PROPS.map((spec) => [spec.name, extractPart(r, spec.name, [spec.node], (p) => takesProp(spec, p))])
+    );
+    expect(triangles(r)).toBe(before);
+    expect(triangles(got.mug!.group)).toBe(448 + 140 + 96);
+    expect(triangles(got.pen!.group)).toBe(40);
+    expect(triangles(got.mouse!.group)).toBe(288);
+    for (const spec of DESK_PROPS) {
+      const g = got[spec.name]!.group;
+      expect(Math.hypot(g.position.x - spec.at.x, g.position.z - spec.at.z), spec.name).toBeLessThan(0.03);
+      expect(g.position.y, spec.name).toBeGreaterThan(0.74); // sur le plateau
+    }
+  });
+
+  it("le plan de l'atelier et la table du web disent les mêmes places", () => {
+    const plan = JSON.parse(
+      fs.readFileSync(path.resolve(__dirname, "../../../../Unity/ArtSource/atelier/desk_plan.json"), "utf-8")
+    ) as { objects: Record<string, { room: [number, number] }> };
+    for (const spec of DESK_PROPS) {
+      const [x, z] = plan.objects[spec.name].room;
+      expect([spec.at.x, spec.at.z], spec.name).toEqual([x, z]);
+    }
   });
 });

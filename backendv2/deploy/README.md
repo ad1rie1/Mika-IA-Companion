@@ -104,6 +104,53 @@ forgée a la sienne (`mika_forge_<app>`), et un compte du même nom qui n'a de
 droits que sur elle. Rien n'est repris des fichiers SQLite d'avant : elle
 repart d'une base vide.
 
+## Le modèle de plongements (ADR 0109)
+
+C'est lui qui fait remonter un souvenir quand on lui parle. Par défaut, `paraphrase-multilingual-MiniLM-L12-v2`
+sur le processeur : petit, mais faible en français. Un autre se choisit dans `/etc/mika/mika.env` :
+
+```ini
+MIKA_EMBEDDINGS_MODEL=Qwen/Qwen3-Embedding-0.6B
+MIKA_EMBEDDINGS_DEVICE=cuda      # cpu (défaut), cuda (la carte graphique), auto
+```
+
+Au banc (`tools/banc_plongements`, 40 messages), Qwen3-Embedding-0.6B, avec sa consigne de souvenirs, retrouve le
+bon souvenir en tête 35 fois sur 40, contre 25 pour le modèle par défaut. Il lui faut environ 1,2 Go sur une carte
+graphique (fp16), ou 2,4 Go de RAM sur le processeur. Sans carte et avec peu de RAM,
+`ibm-granite/granite-embedding-278m-multilingual` (31/40) ou `intfloat/multilingual-e5-base` (30/40) prennent
+environ 1,1 Go.
+
+Changer de modèle ne demande qu'un redémarrage : l'index range ses vecteurs par modèle, et la mémoire replonge ce
+qui manque au premier passage (quelques minutes pour une longue vie). Le modèle se télécharge dans `HF_HOME`
+(`/var/lib/mika/cache/huggingface` avec l'unité fournie). Ce dossier n'entre pas dans les sauvegardes.
+
+**Sur une carte NVIDIA** (Fedora) : le pilote de RPM Fusion, un torch CUDA dans le venv, et la carte rendue au
+service.
+
+```bash
+sudo dnf install https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm \
+                 https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm
+sudo dnf install akmod-nvidia xorg-x11-drv-nvidia-cuda kernel-devel    # kernel-devel du noyau qui démarrera
+sudo akmods --force && sudo reboot                                     # puis : nvidia-smi
+cd /opt/mika/backendv2 && .venv/bin/pip install "torch==$(.venv/bin/python -c 'import torch; print(torch.__version__.split("+")[0])')+cu126" \
+    --index-url https://download.pytorch.org/whl/cu126
+```
+
+`PrivateDevices=yes` cache la carte au service. `/etc/systemd/system/mika.service.d/gpu.conf` rend ses seuls
+périphériques ; `/dev/nvidia-uvm` naît au premier usage de CUDA, ce que le service ne peut pas faire lui-même :
+
+```ini
+[Service]
+ExecStartPre=-+/usr/bin/nvidia-modprobe -u -c=0
+BindPaths=-/dev/nvidiactl -/dev/nvidia0 -/dev/nvidia-uvm -/dev/nvidia-uvm-tools
+DeviceAllow=/dev/nvidiactl rw
+DeviceAllow=/dev/nvidia0 rw
+DeviceAllow=/dev/nvidia-uvm rw
+DeviceAllow=/dev/nvidia-uvm-tools rw
+```
+
+Si Secure Boot est actif, le module du pilote doit être signé (une clé à enrôler à l'écran au redémarrage).
+
 ## Derrière un mandataire TLS
 
 Trois options de `serve`, à ajouter à `ExecStart` dans `mika.service` :

@@ -51,7 +51,7 @@ from mika.adapters.shares import DiskShares
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
 from mika.adapters.teams import TeamsStore
-from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
+from mika.adapters.vectors import SqliteVectorIndex
 from mika.adapters.web import protocol
 from mika.adapters.web.accounts import Accounts
 from mika.adapters.web.app import DEV_ORIGINS, WebConfig, create_app
@@ -59,7 +59,7 @@ from mika.adapters.web.hub import Hub
 from mika.adapters.web.push import MobilePush
 from mika.adapters.workshop import BwrapWorkshop
 from mika.adapters.world.server import WorldHub
-from mika.app import backup, composition, datadir, reglages, schema, system_mcp
+from mika.app import backup, composition, datadir, embeddings, reglages, schema, system_mcp
 from mika.app import persona as persona_file
 from mika.app.console import FACULTY_LABELS, LABELS, NAVIGATION, PARAM_FAMILIES
 from mika.app.console_menu import MENU
@@ -346,7 +346,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     imaging_fixed = imaging is not None
     imaging = imaging or LiveImaging()
     hub = Hub(port=None)  # type: ignore[arg-type] — relié au port juste après
-    vectors = SqliteVectorIndex(store, embedder or SentenceEmbedder())
+    vectors = SqliteVectorIndex(store, embedder or embeddings.embedder())
     # les pièces jointes reçues ont leur propre index (le rapprochement de celui de la mémoire retire toute clé qui
     # n'est pas à elle), avec le même modèle de plongements (ADR 0106)
     piece_vectors = SqliteVectorIndex(store, vectors.embedder, table=attachments_c.VECTORS)

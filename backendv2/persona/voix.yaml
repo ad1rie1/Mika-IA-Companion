@@ -5833,6 +5833,15 @@ llm:
   empty_tool_result: (résultat vide)
 
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+# CE QUE LIT LE MODÈLE DE PLONGEMENTS (adapters/vectors/embedders.py, ADR 0109) : un modèle qui suit une consigne de
+# recherche (Qwen3-Embedding) la lit devant chaque requête, jamais devant ce que sa mémoire range. Mesurée sur
+# tools/banc_plongements : celle-ci retrouve le bon souvenir en tête 35 fois sur 40, la sienne par défaut (une
+# recherche web, en anglais) 31.
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+vectors:
+  query_instruction: Retrouve, parmi ce qu'elle sait des gens, ce qui aide à répondre à ce message
+
+# ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 # CE QU'ELLE ENVOIE PAR MAIL (adapters/mail/compose.py) : un mail tel qu'il partira — l'expéditeur, puis la
 # citation du mail auquel elle répond.
 # ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────

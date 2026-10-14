@@ -52,9 +52,9 @@ from mika.adapters.mcp.relay import Relay
 from mika.adapters.shares import DiskShares
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.system import RandomIdGen, RealClock
-from mika.adapters.vectors import SentenceEmbedder, SqliteVectorIndex
+from mika.adapters.vectors import SqliteVectorIndex
 from mika.adapters.web.accounts import Accounts, password_problems
-from mika.app import backup, composition, datadir, schema
+from mika.app import backup, composition, datadir, embeddings, schema
 from mika.app import persona as persona_file
 from mika.app.composition import faculties, for_simulation
 from mika.app.paths import PERSONA
@@ -171,7 +171,7 @@ async def _offline(data: Path, *, vectors: bool = False) -> Kernel:
     store = SqlStore(bases["mind"], bases["views"], threaded=False)
     ports: dict[str, object] = {}
     if vectors:  # le modèle ne se charge qu'à un plongement : jamais ici
-        ports["vectors"] = SqliteVectorIndex(store, SentenceEmbedder())
+        ports["vectors"] = SqliteVectorIndex(store, embeddings.embedder())
     # les octets des fichiers qu'elle a envoyés (ADR 0062) : l'oubli d'une personne les efface aussi d'ici
     ports["shares"] = DiskShares(data / "partages")
     kernel = Kernel(composition.deps(store=store, clock=RealClock(), ids=RandomIdGen(), ports=ports))
@@ -383,7 +383,7 @@ def _sonde(data: Path, args: argparse.Namespace) -> int:
         print("La sonde ne passe pas par Claude Code : son relais d'outils ne vit que dans le serveur.")
         return 2
     # le vrai modèle de plongements quand il est installé (la mémoire rappelle comme en service), sinon le hachage
-    embedder = SentenceEmbedder() if importlib.util.find_spec("sentence_transformers") else None
+    embedder = embeddings.embedder() if importlib.util.find_spec("sentence_transformers") else None
     out = run_probe(for_simulation(_sim_persona(args.profil)), build_backend(name, spec), args.out, embedder=embedder,
                     which=args.semaine)
     print((out / "bilan.txt").read_text(), end="")

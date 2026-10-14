@@ -1,11 +1,12 @@
 import * as THREE from "three";
 import type { SleepPhase } from "../../types";
 import {
-  CHAIR_BACK,
   PLACES,
+  aroundChair,
+  placeFrame,
   planPath,
-  pulledSeat,
-  seatEntry,
+  seatFront,
+  type Place,
   type PlaceId,
   type Posture,
   type Vec2,
@@ -19,9 +20,13 @@ import { SEAT_HIPS_ABOVE, WALK_SPEED } from "./proceduralClips";
  * controller turns a change of place into a believable trip: get up if she
  * is seated or lying, walk the obstacle-free path at a pace the walk cycle's
  * feet match, turn to face what the place is about, then sit or lie down.
- * At the desk the chair is part of it: she pulls it out on her way in,
- * steps in front of it, sits, and rolls in with it — and rolls back out,
- * stands, steps aside and pushes it in when she leaves.
+ * A seat is taken as the Unity client takes it (`ActorBody.SitDown`,
+ * `StandUp`): a chair is walked round to the front of its seat — never
+ * through its armrests —, she stands there, her back to it, as far ahead as
+ * the captured sit-down carries her hips back, and sits down with the
+ * capture; getting up, the captured stand-up carries her forward, and she
+ * steps out round the chair. The chair itself never moves but by her desk's
+ * gestures (desk/, `setSeatDrive`).
  *
  * It is written to be driven by a model, i.e. by inputs it cannot trust to
  * be well-behaved:
@@ -41,12 +46,26 @@ import { SEAT_HIPS_ABOVE, WALK_SPEED } from "./proceduralClips";
  * a tween of a few numbers and nothing can be left half-rotated.
  */
 
+/** A captured sit-down or stand-up (the Unity workshop's `sit_down`, `stand_up`). */
+export interface SeatTransition {
+  /** Its length (s). */
+  seconds: number;
+  /** How far it carries her hips (m): back onto the seat sitting down, forward standing up. */
+  travel: number;
+}
+
 /** What the controller asks of the animation state machine. */
 export interface LocomotionBody {
   /** Walk at this playback speed (1 = the clip's own stride), or stop. */
   walk(timeScale: number | null): void;
   /** Hold a seated / lying posture clip, or stand. */
   posture(posture: Posture, fade: number): void;
+  /** The captured transition, when its clip is loaded. */
+  transition?(kind: "sit" | "stand"): SeatTransition | null;
+  /** Play it, once; `posture()` follows when it is over. */
+  playTransition?(kind: "sit" | "stand"): void;
+  /** How far into the transition the clip is (0–1), null when it is not playing: the root keeps its pace. */
+  transitionProgress?(kind: "sit" | "stand"): number | null;
 }
 
 export interface LocomotionOptions {
@@ -62,25 +81,36 @@ export interface LocomotionOptions {
    * the difference so the hips land on the seat. Absent: `hipsHeight`.
    */
   seatedHipsHeight?: () => number;
+  /**
+   * Seated, may she get up now? Her desk keeps her until its chair is back
+   * at its place by her own gestures (desk/DeskChoreography.ts): the wanted
+   * place waits. Absent: always.
+   */
+  holdSeat?: () => boolean;
+  /**
+   * Her walking pace (m/s): the walk clip's own (the workshop's capture,
+   * ≈ 0.89 — Unity walks her at 0.9), so its feet keep the ground at its
+   * natural cadence. Absent: the procedural walk's WALK_SPEED.
+   */
+  walkSpeed?: () => number;
   body: LocomotionBody;
 }
 
 type Phase =
   | "settled"
-  | "rollOut" // seated, rolling back from the desk with the chair
   | "rising" // seat → floor
   | "unlying" // bed → bed edge
   | "turning" // in place, toward the first leg of the path
   | "walking"
   | "facing" // in place, toward what the place is about
   | "sitting" // floor → seat
-  | "rollIn" // seated, rolling in to the desk with the chair
   | "lying"; // bed edge → bed
 
 const RISE_S = 0.95;
 const SIT_S = 1.05;
 const LIE_S = 1.7;
-const ROLL_S = 0.8;
+/** Where she stands before sitting without the capture: a little before the seat, her back to it (Unity's StandOff). */
+const STAND_OFF = 0.2;
 /** Turn rate in place (rad/s) and while walking. */
 const TURN_RATE = 2.6;
 const WALK_TURN_RATE = 3.4;
@@ -91,10 +121,6 @@ const ARRIVE_ZONE = 0.35;
 const ARRIVE_MIN = 0.4;
 /** Stepping in place while turning: playback speed of the walk cycle. */
 const SHUFFLE_TIMESCALE = 0.45;
-/** She reaches for the chair this far from where she will sit (m). */
-const CHAIR_REACH = 1.0;
-/** How fast a chair slides when she pulls or pushes it alone (m/s). */
-const CHAIR_SPEED = 0.8;
 
 function smooth(t: number): number {
   const x = Math.max(0, Math.min(1, t));
@@ -111,6 +137,7 @@ function yawTo(from: Vec2, to: Vec2): number {
 
 const dist = (a: Vec2, b: Vec2) => Math.hypot(a.x - b.x, a.z - b.z);
 
+const NO_DRIVE = { yaw: 0, roll: 0 } as const;
 const _qUp = new THREE.Quaternion();
 const _qLie = new THREE.Quaternion();
 const _qBase = new THREE.Quaternion();
@@ -123,13 +150,12 @@ interface Pose {
   height: number;
   facing: number;
   lie: number;
-  /** How far the place's chair is pulled out (m). */
-  chair: number;
 }
 
 interface Prop {
   obj: THREE.Object3D;
   rest: THREE.Vector3;
+  restRot: THREE.Quaternion;
 }
 
 export class LocomotionController {
@@ -150,22 +176,27 @@ export class LocomotionController {
   private facing = 0;
   private lieBlend = 0;
 
-  // The desk chair (or any place's movable seat).
+  // A place's chair (the desk's), moved only by her desk's gestures.
   private props = new Map<PlaceId, Prop>();
-  private chair = 0;
-  private chairGoal = 0;
-  /** Whose chair `chair` measures. */
-  private chairOf: PlaceId | null = null;
-  /** Push the chair back in once she has stepped aside (first waypoint). */
-  private pushChairAtFirstWaypoint = false;
+  /** How her desk's gestures leave the seat she is on (see setSeatDrive). */
+  private drive = { yaw: 0, roll: 0 };
 
   // Tween.
   private t = 0;
   private dur = 1;
-  private from: Pose = { pos: { x: 0, z: 0 }, height: 0, facing: 0, lie: 0, chair: 0 };
-  private to: Pose = { pos: { x: 0, z: 0 }, height: 0, facing: 0, lie: 0, chair: 0 };
+  private from: Pose = { pos: { x: 0, z: 0 }, height: 0, facing: 0, lie: 0 };
+  private to: Pose = { pos: { x: 0, z: 0 }, height: 0, facing: 0, lie: 0 };
+  /** The tween follows a captured transition clip (linear root, the clip's own pace). */
+  private captured: "sit" | "stand" | null = null;
 
   private path: Vec2[] = [];
+  /**
+   * Which waypoints are steps around a seat (into it, out of it): walked
+   * straight, after turning on the spot — the Unity client's `Step`. A walk
+   * rounds its corners by the turn rate, and round a chair that cut through
+   * the armrest.
+   */
+  private steps: boolean[] = [];
   private speed = 0;
 
   constructor(private readonly opts: LocomotionOptions) {
@@ -192,17 +223,32 @@ export class LocomotionController {
   }
 
   /**
-   * The room's movable seat for a place (the `DeskChair` object), once the
-   * room has loaded. Its current position is its rest. Without one, she
-   * sits from the side, as before.
+   * The room's chair for a place (the `DeskChair` object), once the room has
+   * loaded: its current transform is its rest. She walks round it to sit.
    */
   setProp(place: PlaceId, obj: THREE.Object3D | null): void {
     if (!obj) {
       this.props.delete(place);
       return;
     }
-    this.props.set(place, { obj, rest: obj.position.clone() });
+    this.props.set(place, { obj, rest: obj.position.clone(), restRot: obj.quaternion.clone() });
     this.applyChair();
+  }
+
+  /**
+   * Seated at a place with a chair, the chair as her desk's gestures leave
+   * it (the Unity client's `ChairRig`): swivelled `yaw` degrees to her right
+   * on its foot, rolled `roll` metres toward the desk along the seat's
+   * forward at home — and she, sitting on it, turns and rolls with it.
+   */
+  setSeatDrive(yaw: number, roll: number): void {
+    this.drive.yaw = yaw;
+    this.drive.roll = roll;
+  }
+
+  /** Seated and settled, the backend wants her elsewhere: she is about to get up. */
+  get wantsToLeave(): boolean {
+    return this.phase === "settled" && this.posture === "sit" && this.target !== null && this.target !== this.place;
   }
 
   /** The backend's place. `instant` snaps (first state after a connect). */
@@ -220,7 +266,7 @@ export class LocomotionController {
     this.target = place;
     if (this.phase === "settled" || this.phase === "facing") this.depart();
     else if (this.phase === "walking" || this.phase === "turning") this.replan();
-    // rising / sitting / rolling / lying / unlying: picked up when the tween ends.
+    // rising / sitting / lying / unlying: picked up when the tween ends.
   }
 
   setSleepPhase(phase: SleepPhase): void {
@@ -244,17 +290,17 @@ export class LocomotionController {
   update(dt: number): void {
     switch (this.phase) {
       case "settled":
+        // A departure the seat held back (her desk bringing its chair home) goes as soon as it may.
+        if (this.target && this.target !== this.place && this.posture === "sit" && !this.opts.holdSeat?.()) this.depart();
         break;
-      case "rollOut":
       case "rising":
       case "unlying":
       case "sitting":
-      case "rollIn":
       case "lying":
       case "facing":
         this.t += dt;
-        this.applyTween(smooth(this.t / this.dur));
-        if (this.t >= this.dur) this.endTween();
+        this.applyTween(this.progress());
+        if (this.done()) this.endTween();
         break;
       case "turning":
         this.updateTurning(dt);
@@ -263,12 +309,26 @@ export class LocomotionController {
         this.updateWalking(dt);
         break;
     }
-    // A chair she is not holding slides on its own toward where she left it.
-    if (this.phase !== "rollIn" && this.phase !== "rollOut" && this.phase !== "sitting") {
-      const step = CHAIR_SPEED * dt;
-      this.chair += Math.max(-step, Math.min(step, this.chairGoal - this.chair));
-    }
     this.compose();
+  }
+
+  /** Where the tween is: a captured transition at its clip's pace, the rest by the clock. */
+  private progress(): number {
+    if (this.captured) {
+      const p = this.opts.body.transitionProgress?.(this.captured);
+      if (p !== null && p !== undefined) return Math.min(1, p);
+    }
+    return Math.min(1, this.t / this.dur);
+  }
+
+  private done(): boolean {
+    // A captured clip that stopped being reported (cut short): the clock ends it.
+    return this.progress() >= 1 || this.t >= this.dur * 1.6 + 0.3;
+  }
+
+  /** Her walking pace now (m/s). */
+  private cruise(): number {
+    return this.opts.walkSpeed?.() ?? WALK_SPEED;
   }
 
   // ── Trip ──────────────────────────────────────────────────────────
@@ -276,35 +336,43 @@ export class LocomotionController {
   private depart(): void {
     if (this.posture === "lie") return this.startUnlie();
     if (this.posture === "sit") {
-      if (this.place && this.props.has(this.place) && PLACES[this.place].prop) return this.startRollOut();
+      if (this.opts.holdSeat?.()) return; // picked up by update() when the seat lets her go
       return this.startRise();
     }
     this.startWalk();
   }
 
-  /** Where the walk to a place ends: in front of its pulled-out seat, or its approach. */
-  private walkEnd(place: PlaceId): Vec2 {
-    const p = PLACES[place];
-    const entry = this.props.has(place) ? seatEntry(p) : null;
-    return entry ?? p.approach;
+  /** How far the sit-down (or stand-up) carries her hips, the capture's or the procedural step. */
+  private travel(kind: "sit" | "stand"): number {
+    return this.opts.body.transition?.(kind)?.travel ?? STAND_OFF;
+  }
+
+  /** Into a seat: from its approach, round its chair, to the front of the seat. */
+  private intoSeat(place: Place): Vec2[] {
+    const front = seatFront(place, this.travel("sit"));
+    if (!front) return [];
+    const corner = this.props.has(place.id) ? aroundChair(place, front, place.approach) : null;
+    return corner ? [corner, front] : [front];
+  }
+
+  /** Out of a chair she has just got up from: round it, back to its approach. */
+  private outOfSeat(place: Place): Vec2[] {
+    if (!this.props.has(place.id) || dist(this.pos, place.approach) < 0.12) return [];
+    const corner = aroundChair(place, this.pos, place.approach);
+    return corner ? [corner, place.approach] : [place.approach];
   }
 
   private startWalk(): void {
     const place = this.target ? PLACES[this.target] : null;
     if (!place) return this.settle();
     const leaving = this.place && this.place !== this.target ? PLACES[this.place] : null;
-    const fromSeat = leaving && this.props.has(leaving.id) && leaving.prop && this.chair > 0.01;
-    // Out of a pulled chair: step aside first (never through the chair),
-    // and push it back in once out of the way.
-    const start = fromSeat ? leaving.approach : this.pos;
-    let path = planPath(start, place.approach);
-    if (fromSeat) path = [leaving.approach, ...path];
-    this.pushChairAtFirstWaypoint = Boolean(fromSeat);
-    // Into a movable seat: through its approach, then in front of the seat.
-    if (this.props.has(place.id) && place.prop) path = [...path, this.walkEnd(place.id)];
-    this.path = path;
+    const out = leaving ? this.outOfSeat(leaving) : [];
+    const start = out.length > 0 ? out[out.length - 1] : this.pos;
+    const into = place.posture === "sit" ? this.intoSeat(place) : [];
+    const walk = planPath(start, place.approach);
+    this.setPath([...out, ...walk, ...into], out.length, into.length);
     if (this.path.length === 1 && dist(this.path[0], this.pos) < 0.05) {
-      this.path = [];
+      this.setPath([], 0, 0);
       return this.startFacing();
     }
     const heading = yawTo(this.pos, this.path[0]);
@@ -313,7 +381,7 @@ export class LocomotionController {
       this.opts.body.walk(SHUFFLE_TIMESCALE);
     } else {
       this.phase = "walking";
-      this.speed = WALK_SPEED * 0.6;
+      this.speed = this.cruise() * 0.6;
       this.opts.body.walk(this.speed / WALK_SPEED);
     }
   }
@@ -321,9 +389,14 @@ export class LocomotionController {
   private replan(): void {
     const place = this.target ? PLACES[this.target] : null;
     if (!place) return;
-    let path = planPath(this.pos, place.approach);
-    if (this.props.has(place.id) && place.prop) path = [...path, this.walkEnd(place.id)];
+    const into = place.posture === "sit" ? this.intoSeat(place) : [];
+    this.setPath([...planPath(this.pos, place.approach), ...into], 0, into.length);
+  }
+
+  /** A path whose first `lead` and last `tail` waypoints are steps around a seat. */
+  private setPath(path: Vec2[], lead: number, tail: number): void {
     this.path = path;
+    this.steps = path.map((_, i) => i < lead || i >= path.length - tail);
   }
 
   private updateTurning(dt: number): void {
@@ -334,7 +407,7 @@ export class LocomotionController {
     this.facing = wrapAngle(this.facing + step);
     if (Math.abs(err) < 0.25) {
       this.phase = "walking";
-      this.speed = WALK_SPEED * 0.5;
+      this.speed = this.cruise() * 0.5;
     }
   }
 
@@ -348,15 +421,10 @@ export class LocomotionController {
   private updateWalking(dt: number): void {
     if (this.path.length === 0) return this.startFacing();
     const next = this.path[0];
+    if (this.steps[0]) return this.updateStep(dt, next);
     const remaining = this.remaining();
-    // Reaching for the chair of the seat she is heading to.
-    const target = this.target;
-    if (target && this.props.has(target) && PLACES[target].prop && remaining < CHAIR_REACH) {
-      this.chairOf = target;
-      this.chairGoal = PLACES[target].prop!.pull;
-    }
     // Accelerate to cruise, slow into the last steps.
-    const cruise = WALK_SPEED * (remaining < ARRIVE_ZONE ? Math.max(ARRIVE_MIN, remaining / ARRIVE_ZONE) : 1);
+    const cruise = this.cruise() * (remaining < ARRIVE_ZONE ? Math.max(ARRIVE_MIN, remaining / ARRIVE_ZONE) : 1);
     this.speed += (cruise - this.speed) * Math.min(1, dt * 4);
     this.opts.body.walk(Math.max(0.35, this.speed / WALK_SPEED));
 
@@ -370,11 +438,8 @@ export class LocomotionController {
     if (step >= toNext || toNext < 0.04) {
       this.pos = { x: next.x, z: next.z };
       this.path.shift();
+      this.steps.shift();
       step = 0;
-      if (this.pushChairAtFirstWaypoint) {
-        this.pushChairAtFirstWaypoint = false;
-        this.chairGoal = 0;
-      }
       if (this.path.length === 0) return this.startFacing();
     }
     if (step > 0) {
@@ -383,6 +448,33 @@ export class LocomotionController {
       const dir = Math.abs(err) > 0.5 ? heading : this.facing;
       this.pos = { x: this.pos.x + Math.sin(dir) * step, z: this.pos.z + Math.cos(dir) * step };
     }
+  }
+
+  /** A step around a seat: turned toward it on the spot, then straight to it. */
+  private updateStep(dt: number, next: Vec2): void {
+    const toNext = dist(this.pos, next);
+    const heading = toNext > 1e-4 ? yawTo(this.pos, next) : this.facing;
+    const err = wrapAngle(heading - this.facing);
+    if (Math.abs(err) > 0.12 && toNext > 0.04) {
+      this.facing = wrapAngle(this.facing + Math.sign(err) * Math.min(Math.abs(err), TURN_RATE * dt));
+      this.speed = 0;
+      this.opts.body.walk(SHUFFLE_TIMESCALE);
+      return;
+    }
+    // Slow steps (a walk's pace would not stop in a few decimetres).
+    const cruise = this.cruise() * Math.max(ARRIVE_MIN, Math.min(1, toNext / ARRIVE_ZONE));
+    this.speed += (cruise - this.speed) * Math.min(1, dt * 4);
+    this.opts.body.walk(Math.max(0.35, this.speed / WALK_SPEED));
+    this.facing = heading;
+    const step = this.speed * dt;
+    if (step >= toNext || toNext < 0.02) {
+      this.pos = { x: next.x, z: next.z };
+      this.path.shift();
+      this.steps.shift();
+      if (this.path.length === 0) this.startFacing();
+      return;
+    }
+    this.pos = { x: this.pos.x + Math.sin(heading) * step, z: this.pos.z + Math.cos(heading) * step };
   }
 
   private startFacing(): void {
@@ -399,48 +491,36 @@ export class LocomotionController {
     });
   }
 
+  /** Down onto the seat behind her: the capture carries her hips back, the root follows at its pace. */
   private startSit(): void {
     const place = this.target ? PLACES[this.target] : null;
     if (!place?.seat) return this.settle();
     this.posture = "sit";
+    const to = { ...this.pose(), pos: { x: place.seat.x, z: place.seat.z }, height: this.seatOffset(place.seat), lie: 0 };
+    const capture = this.opts.body.transition?.("sit");
+    if (capture && this.opts.body.playTransition) {
+      this.opts.body.playTransition("sit");
+      this.tween("sitting", capture.seconds, to, "sit");
+      return;
+    }
     this.opts.body.posture("sit", SIT_S);
-    // Onto the pulled-out chair (she rolls in after), or straight onto the seat.
-    const onto = (this.props.has(place.id) && pulledSeat(place)) || { x: place.seat.x, z: place.seat.z };
-    this.tween("sitting", SIT_S, {
-      ...this.pose(),
-      pos: onto,
-      height: this.seatOffset(place.seat),
-      lie: 0,
-    });
+    this.tween("sitting", SIT_S, to);
   }
 
-  private startRollIn(): void {
-    const place = this.target ? PLACES[this.target] : null;
-    if (!place?.seat) return this.settle();
-    this.chairOf = place.id;
-    this.tween("rollIn", ROLL_S, { ...this.pose(), pos: { x: place.seat.x, z: place.seat.z }, chair: 0 });
-  }
-
-  private startRollOut(): void {
-    const place = this.place ? PLACES[this.place] : null;
-    const out = place ? pulledSeat(place) : null;
-    if (!place?.prop || !out) return this.startRise();
-    this.chairOf = place.id;
-    this.tween("rollOut", ROLL_S, { ...this.pose(), pos: out, chair: place.prop.pull });
-  }
-
+  /** Up over her feet: the capture carries her hips forward; then she steps out. */
   private startRise(): void {
     const place = this.place ? PLACES[this.place] : null;
     this.posture = "stand";
+    const capture = this.opts.body.transition?.("stand");
+    const front = place ? seatFront(place, capture?.travel ?? STAND_OFF) : null;
+    const to = { ...this.pose(), pos: front ?? (place ? place.approach : this.pos), height: 0, lie: 0 };
+    if (capture && this.opts.body.playTransition) {
+      this.opts.body.playTransition("stand");
+      this.tween("rising", capture.seconds, to, "stand");
+      return;
+    }
     this.opts.body.posture("stand", RISE_S);
-    const entry = place && this.props.has(place.id) ? seatEntry(place) : null;
-    this.chairGoal = this.chair; // the chair stays where it is while she stands
-    this.tween("rising", RISE_S, {
-      ...this.pose(),
-      pos: entry ?? (place ? place.approach : this.pos),
-      height: 0,
-      lie: 0,
-    });
+    this.tween("rising", RISE_S, to);
   }
 
   private startLie(): void {
@@ -466,7 +546,9 @@ export class LocomotionController {
 
   private endTween(): void {
     const phase = this.phase;
+    const captured = this.captured;
     this.applyTween(1);
+    this.captured = null;
     if (phase === "facing") {
       this.opts.body.walk(null);
       this.place = this.target;
@@ -475,18 +557,11 @@ export class LocomotionController {
       return this.settle();
     }
     if (phase === "sitting") {
+      // The capture over, the seated stance holds.
+      if (captured) this.opts.body.posture("sit", 0.35);
       this.place = this.target;
-      if (this.place && this.props.has(this.place) && PLACES[this.place].prop) return this.startRollIn();
       if (this.place === "bed" && this.sleep !== "awake") return this.startLie();
       return this.settle();
-    }
-    if (phase === "rollIn") {
-      this.chairGoal = 0;
-      return this.settle();
-    }
-    if (phase === "rollOut") {
-      this.chairGoal = this.chair;
-      return this.startRise();
     }
     if (phase === "lying") return this.settle();
     if (phase === "unlying") {
@@ -495,6 +570,7 @@ export class LocomotionController {
       return this.settle();
     }
     if (phase === "rising") {
+      if (captured) this.opts.body.posture("stand", 0.35);
       if (this.target && this.target !== this.place) return this.startWalk();
       return this.settle();
     }
@@ -514,13 +590,11 @@ export class LocomotionController {
     this.place = place;
     this.target = place;
     this.deferred = null;
-    this.path = [];
+    this.setPath([], 0, 0);
+    this.captured = null;
     this.opts.body.walk(null);
     this.facing = p.facing;
     this.lieBlend = 0;
-    this.chair = 0;
-    this.chairGoal = 0;
-    this.chairOf = p.prop ? place : this.chairOf;
     if (p.posture === "sit" && p.seat) {
       const lie = place === "bed" && this.sleep !== "awake";
       this.posture = lie ? "lie" : "sit";
@@ -557,46 +631,69 @@ export class LocomotionController {
   }
 
   private pose(): Pose {
-    return { pos: { ...this.pos }, height: this.height, facing: this.facing, lie: this.lieBlend, chair: this.chair };
+    return { pos: { ...this.pos }, height: this.height, facing: this.facing, lie: this.lieBlend };
   }
 
-  private tween(phase: Phase, dur: number, to: Pose): void {
+  private tween(phase: Phase, dur: number, to: Pose, captured: "sit" | "stand" | null = null): void {
     this.phase = phase;
     this.t = 0;
     this.dur = Math.max(0.05, dur);
+    this.captured = captured;
     this.from = this.pose();
     this.to = { ...to, pos: { ...to.pos } };
   }
 
-  private applyTween(k: number): void {
+  private applyTween(p: number): void {
     const f = this.from;
     const t = this.to;
-    this.pos = { x: f.pos.x + (t.pos.x - f.pos.x) * k, z: f.pos.z + (t.pos.z - f.pos.z) * k };
-    this.height = f.height + (t.height - f.height) * k;
+    let kPos = smooth(p);
+    let kHeight = smooth(p);
+    if (this.captured === "sit") {
+      // The capture's own travel, taken out of its hips and given back to the
+      // root at its pace; the root rises to the seat as the hips go down.
+      kPos = p;
+      kHeight = smooth((p - 0.35) / 0.6);
+    } else if (this.captured === "stand") {
+      // The root back on the floor while the legs push (the first part).
+      kPos = p;
+      kHeight = smooth(p / 0.6);
+    }
+    this.pos = { x: f.pos.x + (t.pos.x - f.pos.x) * kPos, z: f.pos.z + (t.pos.z - f.pos.z) * kPos };
+    this.height = f.height + (t.height - f.height) * kHeight;
+    const k = smooth(p);
     this.facing = f.facing + wrapAngle(t.facing - f.facing) * k;
     this.lieBlend = f.lie + (t.lie - f.lie) * k;
-    if (this.phase === "rollIn" || this.phase === "rollOut") this.chair = f.chair + (t.chair - f.chair) * k;
+  }
+
+  /** The seat drive in force: seated and settled at a place with a chair, else none. */
+  private activeDrive(): { yaw: number; roll: number } {
+    const seated = this.posture === "sit" && this.place !== null && this.props.has(this.place) && this.phase === "settled";
+    return seated ? this.drive : NO_DRIVE;
   }
 
   private applyChair(): void {
-    const owner = this.chairOf;
-    const prop = owner ? this.props.get(owner) : null;
-    if (!prop) return;
-    prop.obj.position.set(
-      prop.rest.x + CHAIR_BACK.x * this.chair,
-      prop.rest.y,
-      prop.rest.z + CHAIR_BACK.z * this.chair
-    );
+    const d = this.activeDrive();
+    for (const [place, prop] of this.props) {
+      const driven = place === this.place ? d : NO_DRIVE;
+      // Rolled toward the desk along the seat's forward at home.
+      const { ahead } = placeFrame(PLACES[place]);
+      prop.obj.position.set(prop.rest.x + ahead.x * driven.roll, prop.rest.y, prop.rest.z + ahead.z * driven.roll);
+      // Swivelled on its foot, to her right (a negative turn about +Y).
+      prop.obj.quaternion.setFromAxisAngle(_Y, (-driven.yaw * Math.PI) / 180).multiply(prop.restRot);
+    }
   }
 
   private compose(): void {
     this.applyChair();
     const root = this.opts.root;
+    // On a chair her desk's gestures move: she turns and rolls with it.
+    const d = this.activeDrive();
+    const home = this.place ? PLACES[this.place].facing : this.facing;
     _qBase.setFromAxisAngle(_Y, this.opts.baseYaw);
-    _qUp.setFromAxisAngle(_Y, this.facing).multiply(_qBase);
-    let x = this.pos.x;
+    _qUp.setFromAxisAngle(_Y, this.facing - (d.yaw * Math.PI) / 180).multiply(_qBase);
+    let x = this.pos.x + Math.sin(home) * d.roll;
     let y = this.height;
-    let z = this.pos.z;
+    let z = this.pos.z + Math.cos(home) * d.roll;
     if (this.lieBlend > 0) {
       const lie = PLACES.bed.lie!;
       // Face up, head toward headYaw: Ry(headYaw + π) · Rx(−π/2) · base.
@@ -604,9 +701,9 @@ export class LocomotionController {
         .setFromAxisAngle(_Y, lie.headYaw + Math.PI)
         .multiply(_qTmp.setFromAxisAngle(_X, -Math.PI / 2))
         .multiply(_qBase);
-      const d = { x: Math.sin(lie.headYaw), z: Math.cos(lie.headYaw) };
-      const lx = lie.x - d.x * this.opts.hipsHeight;
-      const lz = lie.z - d.z * this.opts.hipsHeight;
+      const dir = { x: Math.sin(lie.headYaw), z: Math.cos(lie.headYaw) };
+      const lx = lie.x - dir.x * this.opts.hipsHeight;
+      const lz = lie.z - dir.z * this.opts.hipsHeight;
       const k = this.lieBlend;
       x += (lx - x) * k;
       y += (lie.height - y) * k;

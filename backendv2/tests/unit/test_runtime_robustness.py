@@ -201,6 +201,9 @@ def test_on_her_real_life_a_process_that_does_nothing_or_fails_does_not_loop(tmp
         async def embed(self, texts):
             raise ModuleNotFoundError("No module named 'sentence_transformers'")
 
+        async def embed_query(self, texts):
+            raise ModuleNotFoundError("No module named 'sentence_transformers'")
+
     monkeypatch.setattr(LetGo, "run", emptied)
     monkeypatch.setattr(Index, "run", counted)
     kernel, clock, _, _ = build_mika(tmp_path, lambda r: LLMResponse("{}"))

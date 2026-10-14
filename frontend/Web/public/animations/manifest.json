@@ -161,6 +161,20 @@
       "mirror": false,
       "hands": ["relaxed", "relaxed"]
     },
+    "sit_down": {
+      "url": "/animations/atelier/sit_down.json.gz",
+      "category": "transition",
+      "loop": false,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "stand_up": {
+      "url": "/animations/atelier/stand_up.json.gz",
+      "category": "transition",
+      "loop": false,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
     "window_lean": {
       "url": "/animations/atelier/window_lean.json.gz",
       "category": "activity",
@@ -176,6 +190,133 @@
       "loop": true,
       "mirror": false,
       "hands": ["relaxed", "relaxed"]
+    }
+,
+    "desk_rest": {
+      "url": "/animations/atelier/desk_rest.json.gz",
+      "category": "desk",
+      "loop": true,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "desk_type": {
+      "url": "/animations/atelier/desk_type.json.gz",
+      "category": "desk",
+      "loop": true,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "desk_mouse": {
+      "url": "/animations/atelier/desk_mouse.json.gz",
+      "category": "desk",
+      "loop": true,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "desk_write": {
+      "url": "/animations/atelier/desk_write.json.gz",
+      "category": "desk",
+      "loop": true,
+      "mirror": false,
+      "hands": ["relaxed", "grip"]
+    },
+    "desk_read": {
+      "url": "/animations/atelier/desk_read.json.gz",
+      "category": "desk",
+      "loop": true,
+      "mirror": false,
+      "hands": ["grip", "grip"]
+    },
+    "desk_lap": {
+      "url": "/animations/atelier/desk_lap.json.gz",
+      "category": "desk",
+      "loop": true,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "desk_think": {
+      "url": "/animations/atelier/desk_think.json.gz",
+      "category": "desk",
+      "loop": true,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "desk_drink": {
+      "url": "/animations/atelier/desk_drink.json.gz",
+      "category": "desk",
+      "loop": false,
+      "mirror": false,
+      "hands": ["grip", "relaxed"]
+    },
+    "desk_take": {
+      "url": "/animations/atelier/desk_take.json.gz",
+      "category": "desk",
+      "loop": false,
+      "mirror": false,
+      "hands": ["grip", "relaxed"]
+    },
+    "desk_stretch": {
+      "url": "/animations/atelier/desk_stretch.json.gz",
+      "category": "desk",
+      "loop": false,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "chair_turn_left_45": {
+      "url": "/animations/atelier/chair_turn_left_45.json.gz",
+      "category": "desk",
+      "loop": false,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "chair_turn_right_45": {
+      "url": "/animations/atelier/chair_turn_right_45.json.gz",
+      "category": "desk",
+      "loop": false,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "chair_turn_left_90": {
+      "url": "/animations/atelier/chair_turn_left_90.json.gz",
+      "category": "desk",
+      "loop": false,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "chair_turn_right_90": {
+      "url": "/animations/atelier/chair_turn_right_90.json.gz",
+      "category": "desk",
+      "loop": false,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "chair_pull_in": {
+      "url": "/animations/atelier/chair_pull_in.json.gz",
+      "category": "desk",
+      "loop": false,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "chair_push_out": {
+      "url": "/animations/atelier/chair_push_out.json.gz",
+      "category": "desk",
+      "loop": false,
+      "mirror": false,
+      "hands": ["relaxed", "relaxed"]
+    },
+    "desk_write_start": {
+      "url": "/animations/atelier/desk_write_start.json.gz",
+      "category": "desk",
+      "loop": false,
+      "mirror": false,
+      "hands": ["relaxed", "grip"]
+    },
+    "desk_write_end": {
+      "url": "/animations/atelier/desk_write_end.json.gz",
+      "category": "desk",
+      "loop": false,
+      "mirror": false,
+      "hands": ["relaxed", "grip"]
     }
   },
   "sleep": {

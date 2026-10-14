@@ -55,9 +55,12 @@ export type HandShapeName = "relaxed" | "open" | "tucked" | "loose" | "clasp" | 
  * `posture`: a held body stance the locomotion asks for (`posture: "sit"`,
  * the Unity workshop's seated idle). `activity`: a stance held while she
  * does something at a place (`activities`: the backend's `activity.name`s
- * it shows — leaning on the window sill to look outside).
+ * it shows — leaning on the window sill to look outside). `desk`: the Unity
+ * workshop's clips at her desk, played by `desk/DeskChoreography.ts` (typing,
+ * writing, the chair rolled in or turned by her hands and feet). `transition`:
+ * the captured sit-down and stand-up the locomotion plays between the two.
  */
-export type ClipCategory = "idle" | "talk" | "gesture" | "sleep" | "locomotion" | "posture" | "activity";
+export type ClipCategory = "idle" | "talk" | "gesture" | "sleep" | "locomotion" | "posture" | "transition" | "activity" | "desk";
 
 export interface ClipManifestEntry {
   /** URL relative to the site root, e.g. "/animations/idle/idle_breathing.fbx". */

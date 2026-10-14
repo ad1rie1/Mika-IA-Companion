@@ -208,7 +208,7 @@ class SqliteVectorIndex:
                      persons: Collection[str] | None = None) -> list[tuple[int, float]]:
         if (not self._n and not self._spilled) or not query.strip() or k <= 0:
             return []
-        q = np.asarray((await self.embedder.embed([query]))[0], dtype=np.float32)
+        q = np.asarray((await self.embedder.embed_query([query]))[0], dtype=np.float32)
         async with self._lock:
             if self._spilled:
                 return await self._search_disk(q, k, kinds, keys, persons)

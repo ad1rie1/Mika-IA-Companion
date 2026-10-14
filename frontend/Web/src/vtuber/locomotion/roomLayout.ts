@@ -45,12 +45,11 @@ export interface Place {
    * body's long axis (head toward the pillow). */
   lie?: { x: number; z: number; height: number; headYaw: number };
   /**
-   * A seat that moves (the desk chair, object `DeskChair` of room.glb): she
-   * pulls it back along its own backward axis, steps in front of it, sits,
-   * and rolls in with it. `pull` is how far it comes out (m), `stand` how
-   * far in front of the pulled seat her hips stand before sitting back.
+   * A seat on a chair (object `DeskChair` of room.glb): she walks round it to
+   * the front of the seat (never through its armrests) and sits down on it
+   * where it stands; only her desk's gestures move it (desk/).
    */
-  prop?: { name: string; pull: number; stand: number };
+  prop?: { name: string };
 }
 
 /** Body radius kept clear of every obstacle (she is small: ~1.3 m tall). */
@@ -60,7 +59,7 @@ export const BODY_RADIUS = 0.22;
 export const ROOM_BOUNDS = { minX: -3.85, maxX: 3.85, minZ: -4.35, maxZ: 3.35 };
 
 /** The desk chair's yaw in room.glb (its front, local −Z, faces the desk). */
-const CHAIR_YAW = 0.3;
+export const CHAIR_YAW = 0.3;
 
 // Measured on room.glb (assets-src/blender, rebuilt 2026-10-13 from the same
 // scripts as the Unity export: window sill at 0.92, desk chair lowered 6 cm). The
@@ -83,7 +82,7 @@ export const PLACES: Record<PlaceId, Place> = {
     facing: -Math.PI + CHAIR_YAW,
     posture: "sit",
     seat: { x: -1.4, z: -3.3, height: 0.447, sink: 0.015 },
-    prop: { name: "DeskChair", pull: 0.42, stand: 0.2 },
+    prop: { name: "DeskChair" },
   },
   // Edge of the bed (duvet top 0.49, its edge at x −2.63), facing the room;
   // asleep she lies in it, head on the pillow at the bedside-table end (+Z).
@@ -101,21 +100,42 @@ export const PLACES: Record<PlaceId, Place> = {
   door: { id: "door", approach: { x: 1.8, z: 2.75 }, facing: 0, posture: "stand" },
 };
 
-/** The chair's backward axis on the floor — the way it is pulled out. */
-export const CHAIR_BACK: Vec2 = { x: Math.sin(CHAIR_YAW), z: Math.cos(CHAIR_YAW) };
-
-/** Where her hips stand before sitting on a pulled-out seat. */
-export function seatEntry(place: Place): Vec2 | null {
-  if (!place.seat || !place.prop) return null;
-  const d = place.prop.pull - place.prop.stand;
-  return { x: place.seat.x + CHAIR_BACK.x * d, z: place.seat.z + CHAIR_BACK.z * d };
+/** A place's own frame on the floor: ahead (its facing) and to her right. */
+export function placeFrame(place: Place): { ahead: Vec2; right: Vec2 } {
+  const f = place.facing;
+  return { ahead: { x: Math.sin(f), z: Math.cos(f) }, right: { x: -Math.cos(f), z: Math.sin(f) } };
 }
 
-/** The seat once pulled out. */
-export function pulledSeat(place: Place): Vec2 | null {
-  if (!place.seat || !place.prop) return null;
-  const d = place.prop.pull;
-  return { x: place.seat.x + CHAIR_BACK.x * d, z: place.seat.z + CHAIR_BACK.z * d };
+/**
+ * Where she stands to sit down, her back to the seat: `travel` metres in
+ * front of it — how far the captured sit-down carries her hips back (the
+ * Unity client's `SitDown`).
+ */
+export function seatFront(place: Place, travel: number): Vec2 | null {
+  if (!place.seat) return null;
+  const { ahead } = placeFrame(place);
+  return { x: place.seat.x + ahead.x * travel, z: place.seat.z + ahead.z * travel };
+}
+
+/**
+ * How far from the middle of a chair's seat she passes beside it (m): its
+ * armrest reaches 0.34 m, her body 0.14 m either side (Unity's ChairClear).
+ */
+export const CHAIR_CLEAR = 0.48;
+
+/**
+ * Between the front of a seat with armrests and a point beside it, the
+ * corner she goes round: level with the front, `CHAIR_CLEAR` to the side.
+ * Null when the point is ahead of or behind the chair (the straight line
+ * misses it). The Unity client's `AroundChair`.
+ */
+export function aroundChair(place: Place, front: Vec2, side: Vec2): Vec2 | null {
+  if (!place.seat) return null;
+  const { right } = placeFrame(place);
+  const lateral = (side.x - place.seat.x) * right.x + (side.z - place.seat.z) * right.z;
+  if (Math.abs(lateral) < CHAIR_CLEAR) return null;
+  const k = Math.sign(lateral) * CHAIR_CLEAR;
+  return { x: front.x + right.x * k, z: front.z + right.z * k };
 }
 
 export interface Rect {
