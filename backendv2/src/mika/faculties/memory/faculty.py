@@ -87,8 +87,9 @@ class MemoryParams(BaseModel):
              "en échec restent dans une file durable, sans bloquer les conversations suivantes.")] = 3
     dedup_similarity: Annotated[float, Knob(
         label="Seuil de doublon", group="Consolidation", lo=0.5, hi=1.0, step=0.01,
-        help="Seuil pour rechercher un doublon candidat. Seuls les mêmes mots, personnes et confidents "
-             "peuvent ensuite se renforcer ; une ressemblance seule ne fusionne rien.")] = 0.92
+        help="Seuil pour rechercher un doublon candidat (similarité centrée : 0 sans rapport, 1 identique). "
+             "Seuls les mêmes mots, personnes et confidents peuvent ensuite se renforcer ; une ressemblance seule "
+             "ne fusionne rien.")] = 0.9
     # rappel
     recall_k: Annotated[int, Knob(
         label="Candidats cherchés", group="Rappel", lo=5, hi=200,
@@ -96,10 +97,10 @@ class MemoryParams(BaseModel):
              "tour de conversation, avant le tri.")] = 40
     recall_floor: Annotated[float, Knob(
         label="Pertinence minimale", group="Rappel", lo=0.0, hi=1.5, step=0.01,
-        help="Sous cette pertinence avec la conversation (la similarité des vecteurs, plus jusqu'à 0,35 quand "
-             "l'élément contient les mots qui portent le sujet), un candidat ne revient pas tout seul ; la recherche "
-             "délibérée (outil memory_search) tolère 20 % de moins. Trop bas : des souvenirs au hasard à chaque "
-             "tour.")] = 0.45
+        help="Sous cette pertinence avec la conversation (la similarité des vecteurs, centrée : 0 pour un texte "
+             "sans rapport, 1 pour l'identique ; plus jusqu'à 0,35 quand l'élément contient les mots qui portent le "
+             "sujet), un candidat ne revient pas tout seul ; la recherche délibérée (outil memory_search) tolère "
+             "20 % de moins. Trop bas : des souvenirs au hasard à chaque tour.")] = 0.35
     recall_margin: Annotated[float, Knob(
         label="Écart au meilleur candidat", group="Rappel", lo=0.0, hi=1.5, step=0.01,
         help="Quand un élément colle de très près à la conversation, ce qui en reste à plus de cet écart (en "
@@ -112,7 +113,7 @@ class MemoryParams(BaseModel):
     strong_cue: Annotated[float, Knob(
         label="Indice qui réveille", group="Rappel", lo=0.3, hi=1.5, step=0.01,
         help="Un souvenir endormi revient quand même si la conversation lui est au moins aussi pertinente (ses "
-             "mots, presque tous) : on n'oublie pas vraiment, il faut juste le bon indice.")] = 0.75
+             "mots, presque tous) : on n'oublie pas vraiment, il faut juste le bon indice.")] = 0.65
     max_souvenirs: Annotated[int, Knob(
         label="Souvenirs rappelés", group="Rappel", lo=0, hi=30,
         help="Au plus autant de souvenirs montrés au modèle à chaque tour, les mieux classés d'abord (pertinence, "
@@ -390,8 +391,9 @@ class MemoryParams(BaseModel):
              "de la journée. Plus long que son sommeil : pas de tri cette nuit-là.")] = 3 * HOUR
     night_merge_similarity: Annotated[float, Knob(
         label="Similarité pour fusionner", group="La nuit", lo=0.5, hi=1.0, step=0.01,
-        help="Deux souvenirs du jour au moins aussi proches se fusionnent pendant le tri. Trop bas : des "
-             "moments distincts se confondent.")] = 0.9
+        help="Deux souvenirs du jour au moins aussi proches (similarité centrée) se fusionnent pendant le tri, "
+             "s'ils ont les mêmes mots et les mêmes personnes. Trop bas : des moments distincts se "
+             "confondent.")] = 0.87
     night_max_joins: Annotated[int, Knob(
         label="Croyances réunies par nuit, au plus", group="La nuit", lo=0, hi=500,
         help="La nuit, la même croyance dite par deux personnes et notée deux fois (avant que chaque façon de "

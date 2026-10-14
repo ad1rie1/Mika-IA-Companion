@@ -107,14 +107,14 @@ temperament:
   resilience: 0.5
   contagion: 0.4
   optimism: 0.5
-  sociability: 0.5
-  curiosity: 0.5
+  sociability: 0.6
+  curiosity: 0.8
   perseverance: 0.5
   chronotype: 0.5
   background: happy
   negativity: 0.5
   reaction: ''
-  expressiveness: 0.4
+  expressiveness: 0.6
   mask: 0.5
   defense: ''
   impulsivity: 0.2

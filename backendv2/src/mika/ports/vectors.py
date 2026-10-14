@@ -39,10 +39,14 @@ class VectorIndex(Protocol):
     async def upsert(self, items: Sequence[VectorItem]) -> int: ...
 
     async def search(self, query: str, k: int, *, kinds: Collection[str] | None = None,
-                     keys: Collection[int] | None = None,
-                     persons: Collection[str] | None = None) -> list[tuple[int, float]]:
+                     keys: Collection[int] | None = None, persons: Collection[str] | None = None,
+                     document: bool = False) -> list[tuple[int, float]]:
         """Les ``k`` plus proches (clé, similarité), du plus proche au plus lointain, ex æquo départagés par la clé.
-        Filtres cumulables : ces sortes, ces clés, au moins une de ces personnes (``VectorItem.persons``)."""
+        Filtres cumulables : ces sortes, ces clés, au moins une de ces personnes (``VectorItem.persons``).
+
+        La similarité est centrée sur le fond du modèle (ADR 0111) : 0 pour un texte quelconque, 1 pour l'identique,
+        la même échelle pour tout modèle. ``document`` : ``query`` est un texte de sa mémoire comparé à d'autres (un
+        doublon, une confrontation), plongé comme eux ; sinon c'est une recherche, plongée comme une question."""
         ...
 
     async def forget(self, subject: str) -> int: ...

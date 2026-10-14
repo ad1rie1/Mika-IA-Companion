@@ -11,6 +11,11 @@ sorte), les clés (``np.isin``), les personnes (un index inverse personne →
 positions) : rien ne parcourt tous les vecteurs en Python. Les ex æquo se
 départagent par la clé, quel que soit l'ordre dans lequel les vecteurs sont
 arrivés : la même mémoire répond la même chose, avant et après un redémarrage.
+
+**Une échelle commune** (ADR 0111). La similarité rendue est centrée sur le fond du modèle (``background``) : 0 pour
+ce qui ressemble à la requête autant que des textes quelconques, 1 pour l'identique. Un seuil vaut pour tout modèle.
+Une requête se plonge comme une question ; ``document=True`` compare un texte de sa mémoire à d'autres (un doublon,
+deux témoignages), symétriquement.
 """
 
 from __future__ import annotations
@@ -24,6 +29,7 @@ from typing import Any
 import numpy as np
 from sqlalchemy import BigInteger, Column, Table, delete, func, or_, select
 
+from mika.adapters.vectors.background import BACKGROUND
 from mika.ports.sql import Key, LongBlob, LongText, json_has, projection_table, upsert
 from mika.ports.vectors import Embedder, VectorItem
 
@@ -31,6 +37,8 @@ from mika.ports.vectors import Embedder, VectorItem
 _MIN_CAPACITY = 64
 #: au plus tant de valeurs dans un filtre posé en SQL (la limite de paramètres de SQLite reste loin)
 _SQL_FILTER_MAX = 900
+#: le fond d'une requête n'est jamais compté au-delà : une requête vide de sens ne rend pas tout identique
+_MAX_BACKGROUND = 0.95
 
 
 def vectors_table(name: str) -> Table:
@@ -65,6 +73,8 @@ class SqliteVectorIndex:
         self.max_resident_vectors = max(1, max_resident_vectors)
         self._spilled = False
         self._lock = asyncio.Lock()
+        #: les phrases du fond, plongées une fois (comme des documents)
+        self._background: np.ndarray | None = None
         self._reset([])
 
     @property
@@ -204,15 +214,27 @@ class SqliteVectorIndex:
         return len(items)
 
     async def search(self, query: str, k: int, *, kinds: Collection[str] | None = None,
-                     keys: Collection[int] | None = None,
-                     persons: Collection[str] | None = None) -> list[tuple[int, float]]:
+                     keys: Collection[int] | None = None, persons: Collection[str] | None = None,
+                     document: bool = False) -> list[tuple[int, float]]:
         if (not self._n and not self._spilled) or not query.strip() or k <= 0:
             return []
-        q = np.asarray((await self.embedder.embed_query([query]))[0], dtype=np.float32)
+        embed = self.embedder.embed if document else self.embedder.embed_query
+        q = np.asarray((await embed([query]))[0], dtype=np.float32)
+        back = await self.background(q)
         async with self._lock:
             if self._spilled:
-                return await self._search_disk(q, k, kinds, keys, persons)
-            return await _compute(self._search, q, k, kinds, keys, persons)
+                hits = await self._search_disk(q, k, kinds, keys, persons)
+            else:
+                hits = await _compute(self._search, q, k, kinds, keys, persons)
+        # une transformation croissante : l'ordre (et le départage par clé) ne change pas
+        return [(key, (sim - back) / (1.0 - back)) for key, sim in hits]
+
+    async def background(self, q: np.ndarray) -> float:
+        """Le fond de cette requête : sa similarité médiane avec des textes sans rapport (jamais négatif)."""
+        if self._background is None:
+            self._background = np.asarray(await self.embedder.embed(list(BACKGROUND)), dtype=np.float32)
+        sims = np.einsum("ij,j->i", self._background, q, dtype=np.float64)
+        return float(min(_MAX_BACKGROUND, max(0.0, float(np.median(sims)))))
 
     def _search(self, q: np.ndarray, k: int, kinds, keys, persons) -> list[tuple[int, float]]:
         # après le plongement (une attente) : la matrice a pu grandir ou se recomposer entre-temps

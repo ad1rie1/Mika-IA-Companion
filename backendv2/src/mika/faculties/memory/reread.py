@@ -218,7 +218,7 @@ async def pairs(frame: Frame, store: Any, vectors: Any, p: MemoryParams) -> list
     seen: set[tuple[int, int]] = set()
     for item, text, about in rows:
         mine = _persons(frame, _keys(about))
-        hits = await vectors.search(str(text), 8, kinds={c.BELIEF})
+        hits = await vectors.search(str(text), 8, kinds={c.BELIEF}, document=True)
         others = items_by_id(store, [k for k, sim in hits if k != item and sim >= p.recall_floor])
         for other in others.values():
             pair = (min(item, other.id), max(item, other.id))

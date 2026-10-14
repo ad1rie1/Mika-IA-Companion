@@ -127,6 +127,23 @@ def test_one_journal_per_lived_day(tmp_path):
     assert days == ["2026-09-28", "2026-09-29", "2026-09-30"]
 
 
+
+def test_her_very_first_day_without_a_word_leaves_no_journal(tmp_path):
+    """Une vie qui commence à 23 h 50 (une remise à zéro) : sa première « journée » a duré dix minutes et personne
+    ne lui a rien dit. Un journal écrit sur ce vide s'inventait une attente (« je me demandais si quelqu'un allait se
+    montrer »), et ses réponses du lendemain la reprenaient. Contre-exemple : le lendemain, on lui parle, et le
+    journal de ce jour-là s'écrit."""
+    async def scenario(kernel):
+        await until(kernel, at_paris(2026, 9, 29, 18, 0))
+        p = await kernel.perceive(said("user_1", "coucou, enfin un peu de temps"))
+        await p.reply
+        await until(kernel, at_paris(2026, 9, 30, 10, 0))
+        return [e.data.day for e in events(kernel, self_c.JOURNALED.name)]
+
+    days, llm = build_run(tmp_path, scenario, start=at_paris(2026, 9, 28, 23, 50))
+    assert days == ["2026-09-29"]
+    assert len([c for c in llm.calls if c.role == "journal"]) == 1, "pas même un appel pour le jour vide"
+
 def test_a_night_missed_with_the_server_off_is_written_in_the_morning(tmp_path):
     script = Script()
     kernel, clock, llm, _ = build(tmp_path, script, start=at_paris(2026, 9, 28, 17, 0))

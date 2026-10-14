@@ -180,10 +180,10 @@ def test_ws_conversation_round_trip(world):
         speech = frames[-1]
         assert speech["person_id"] == "user_1"  # l'indice du client est ignoré sur une session
         assert "[EMOTION" not in speech["text"] and "[SIGH]" in speech["text"]
-        # son visage tel qu'elle le laisse voir, pas la balise brute (ADR 0102) : la persona livrée est un peu moins
-        # expressive que le milieu
+        # son visage tel qu'elle le laisse voir, pas la balise brute (ADR 0102) : la persona livrée, un peu plus
+        # expressive que le milieu, le montre un peu plus que sa balise (0,6)
         shown = round(0.6 * affect_derive(load_persona(PERSONA).temperament).face_expressiveness, 2)
-        assert speech["emotion"] == "happy" and speech["emotion_intensity"] == shown < 0.6
+        assert speech["emotion"] == "happy" and speech["emotion_intensity"] == shown != 0.6
         assert isinstance(speech["emotion_blend"], list) and speech["emotion_blend"][0]["emotion"] == "happy"
         assert set(speech["voice_profile"]) == {"pitch", "rate", "gain"}
         assert speech["voice_persona"] == "speaking" and speech["speak"] is True

@@ -2,7 +2,7 @@
 
 - une requête et un document se plongent chacun comme le modèle l'attend : sa consigne de recherche pour ce qu'on
   cherche, sa consigne de document pour ce qu'elle range — ``query:``/``passage:`` pour E5, qui ne les déclare pas ;
-- l'index plonge une recherche comme une requête ;
+- l'index plonge une recherche comme une requête, une comparaison entre souvenirs comme un document ;
 - le modèle et l'appareil se choisissent par la machine (comme ses bases), le processeur par défaut.
 """
 
@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
+from mika.adapters.vectors.background import BACKGROUND
 from mika.adapters.vectors.embedders import DEFAULT_MODEL, SentenceEmbedder, load_options, prompts_for
 from mika.app import embeddings
 from mika.ports.vectors import VectorItem
@@ -66,29 +67,33 @@ def test_qwen3_reads_our_memory_instruction_before_a_query_only():
     assert prompts == {"query": f"Instruct: {phrase('vectors.query_instruction')}\nQuery:", "document": ""}
 
 
-def test_a_search_is_embedded_as_a_query():
+def test_a_search_is_embedded_as_a_query_and_a_comparison_as_a_document():
+    """Ce qu'on cherche se plonge comme une question ; un texte de sa mémoire comparé à d'autres (un doublon, deux
+    témoignages) comme eux, sinon la comparaison n'est plus symétrique (ADR 0111). Le fond se plonge une fois."""
     class Recording(HashEmbedder):
         def __init__(self) -> None:
             super().__init__()
-            self.calls: list[str] = []
+            self.calls: list[tuple[str, str]] = []
 
         async def embed(self, texts):
-            self.calls.append("document")
+            self.calls.append(("document", texts[0]))
             return self.encode(texts)
 
         async def embed_query(self, texts):
-            self.calls.append("query")
+            self.calls.append(("query", texts[0]))
             return self.encode(texts)
 
-    async def run() -> list[str]:
+    async def run() -> list[tuple[str, str]]:
         emb = Recording()
         index = SqliteVectorIndex(DB(), emb)
         await index.open()
         await index.upsert([VectorItem(1, "souvenir", "Adrien a un chat qui s'appelle Pixel.", ("user_1",))])
         assert (await index.search("mon chat Pixel", 3))[0][0] == 1
-        return emb.calls
+        assert (await index.search("Adrien a un chat, Pixel.", 3, document=True))[0][0] == 1
+        return [(mode, text) for mode, text in emb.calls if text != BACKGROUND[0]]
 
-    assert asyncio.run(run()) == ["document", "query"]
+    assert asyncio.run(run()) == [("document", "Adrien a un chat qui s'appelle Pixel."), ("query", "mon chat Pixel"),
+                                  ("document", "Adrien a un chat, Pixel.")]
 
 
 def test_the_machine_chooses_the_model_and_the_device(monkeypatch):

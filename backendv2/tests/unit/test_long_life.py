@@ -28,6 +28,7 @@ import pytest
 from mika.adapters.store_sql import SqlStore
 from mika.adapters.store_sql.store import OUTBOX_DONE_KEPT_US
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
+from mika.adapters.vectors.background import BACKGROUND
 from mika.app import composition
 from mika.contracts import identity as identity_c
 from mika.contracts import memory as memory_c
@@ -254,9 +255,11 @@ def _random_items(rng, n):
 
 
 def _exhaustive(embedder, items, query, k, kinds=None, keys=None, persons=None):
-    """La recherche de référence : tous les vecteurs, filtrés un à un, triés par similarité puis par clé."""
+    """La recherche de référence : tous les vecteurs, filtrés un à un, triés par similarité (centrée sur le fond du
+    modèle, ADR 0111) puis par clé."""
     vecs = np.asarray(embedder.encode([i.text for i in items]), dtype=np.float32).astype(np.float16).astype(np.float32)
     q = np.asarray(embedder.encode([query])[0], dtype=np.float32)
+    back = min(0.95, max(0.0, float(np.median(np.asarray(embedder.encode(list(BACKGROUND)), dtype=np.float32) @ q))))
     out = []
     for item, v in zip(items, vecs, strict=True):
         if kinds is not None and item.kind not in kinds:
@@ -265,7 +268,7 @@ def _exhaustive(embedder, items, query, k, kinds=None, keys=None, persons=None):
             continue
         if persons is not None and not set(item.persons) & set(persons):
             continue
-        out.append((item.key, float(v @ q)))
+        out.append((item.key, (float(v @ q) - back) / (1.0 - back)))
     out.sort(key=lambda r: (-r[1], r[0]))
     return out[:k]
 

@@ -198,7 +198,7 @@ class Sort:
         for item_id, text, *people in rows:
             if len(out) >= p.night_max_merges or item_id in merged:
                 continue
-            for hit, sim in await vectors.search(text, 4, kinds={c.SOUVENIR}):
+            for hit, sim in await vectors.search(text, 4, kinds={c.SOUVENIR}, document=True):
                 if hit == item_id or hit in merged or sim < p.night_merge_similarity or hit > item_id:
                     continue
                 alive = store.query_mind(select(t.c.status, t.c.about, t.c.told_by, t.c.heard_by, t.c.text)

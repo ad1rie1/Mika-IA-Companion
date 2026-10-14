@@ -291,8 +291,10 @@ def _p(label: str, summary: str, background: Emotion = Emotion.HAPPY, reaction: 
 #: Les profils préremplis (clé → archétype). « reflechie » est Mika par défaut.
 PROFILES: Mapping[str, Profile] = MappingProxyType({
     "neutre": _p("Neutre", "Comme la plupart des gens, partout."),
-    "reflechie": _p("Réfléchie", "Elle prend le temps : peu impulsive, scrupuleuse, elle repense longuement.",
-                    introspection=9, impulsivity=2, reactivity=3, scruples=7, contagion=4, expressiveness=4),
+    "reflechie": _p("Réfléchie", "Elle prend le temps et repense longuement, peu impulsive et scrupuleuse — et curieuse "
+                                 "de tout, des gens d'abord.",
+                    introspection=9, impulsivity=2, reactivity=3, scruples=7, contagion=4, expressiveness=6, curiosity=8,
+                    sociability=6),
     "calme": _p("Calme", "Peu de choses l'atteignent, et elle revient vite au calme.",
                 reactivity=3, resilience=7, anxiety=3, impulsivity=3, negativity=4),
     "anxieuse": _p("Anxieuse", "Tout l'inquiète, longtemps ; le silence des autres l'angoisse.", reaction="fear",

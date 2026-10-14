@@ -345,6 +345,16 @@ class Write:
         self.tries[key] = self.tries.get(key, 0) + 1
         self.retry_at = frame.now + 30 * MINUTE  # un appel qui échoue réessaie plus tard dans la nuit
         notes, about, dominant, messages, lineage = notes_of(frame, store, state, date.fromisoformat(day))
+        empty = "\n".join([phrase("self.night.notes.day", day=circadian.day_fr(date.fromisoformat(day))),
+                           phrase("self.night.notes.nobody")])
+        if not messages and not state.journals and notes == empty:
+            # sa toute première journée, vide de tout (une vie qui commence le soir, une remise à zéro) : rien à
+            # raconter. Un journal écrit sur du vide se remplissait d'une attente inventée, que ses réponses du
+            # lendemain reprenaient (« je me demandais si quelqu'un allait se montrer », le 2026-10-14) ; un jour où
+            # elle a écrit, fait, retenu ou pensé quelque chose garde le sien
+            self.tries[key] = JOURNAL_TRIES
+            self.retry_at = 0
+            return
         persona = persona_for(frame, "full")
         request = LLMRequest(role="journal", call_id=f"{ctx.run_id}#{key}", persona=persona,
                              system_stable=persona.text + "\n\n" + phrase("self.night.journal_system"),

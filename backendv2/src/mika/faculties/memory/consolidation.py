@@ -1183,7 +1183,7 @@ class Consolidate:
         if not pending:
             return False
         if vectors is not None:
-            hits = await vectors.search(text, 1, kinds={c.PROMISE}, keys=pending)
+            hits = await vectors.search(text, 1, kinds={c.PROMISE}, keys=pending, document=True)
             if hits and hits[0][1] >= p.dedup_similarity:
                 return True
         mine = stems(text)
@@ -1388,7 +1388,7 @@ class Consolidate:
                 if x.same_moment(text, said.get(ev.text_ref) or "", names):
                     return ev
         if vectors is not None:
-            hits = await vectors.search(text, 1, kinds={c.EVENT}, keys=[ev.id for ev in mine])
+            hits = await vectors.search(text, 1, kinds={c.EVENT}, keys=[ev.id for ev in mine], document=True)
             if hits and hits[0][1] >= p.dedup_similarity:
                 return next((ev for ev in mine if ev.id == hits[0][0]), None)
         texts = store.content([ev.text_ref for ev in mine if ev.text_ref])

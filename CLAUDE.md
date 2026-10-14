@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0109, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0111, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -359,6 +359,9 @@ ses identifiants sont dans `ARCHITECTURE.md`. Ce qui suit dit l'essentiel de cha
 
 - **Consolidation**
   - Par conversation : une relecture par le modèle, puis un index de vecteurs et un rappel hybride filtré.
+  - Les similarités de l'index sont centrées sur le fond du modèle : 0 pour un texte sans rapport, 1 pour
+    l'identique. Les seuils valent ainsi pour tout modèle. Une comparaison entre souvenirs passe `document=True`
+    (ADR 0111). Le monde lu est dans le même index que ses proches, sans personne (ADR 0110).
   - Une extraction invalide va dans une file durable, reprenable dans Mémoire › Consolidation, sans bloquer le curseur.
   - Une panne passagère du fournisseur fait attendre la fenêtre. Une paire trop longue pour le contexte attend un
     opérateur.
@@ -729,7 +732,7 @@ Tout le reste se déclare par décorateurs.
 |---|---|
 | Noyau, journal, arbitrage, pipeline | 0001–0003, 0006–0009, 0014, 0015, 0021, 0040, 0059 |
 | Stockage | 0004 (remplacé), 0101 |
-| Mémoire et savoir | 0010, 0011, 0034, 0046, 0052, 0055, 0074–0087, 0091, 0092, 0099, 0102, 0109 |
+| Mémoire et savoir | 0010, 0011, 0034, 0046, 0052, 0055, 0074–0087, 0091, 0092, 0099, 0102, 0109–0111 |
 | Identité et divulgation | 0012, 0035, 0048, 0075, 0092 |
 | Vie intérieure (affect, corps, besoins, liens, autres, attention, soi) | 0013, 0016–0019, 0028, 0032, 0033, 0036, 0047, 0053, 0058, 0088–0090, 0093–0098, 0100, 0107 |
 | Buts, projets, Forge, atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
