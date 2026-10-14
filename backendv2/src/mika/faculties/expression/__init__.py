@@ -100,6 +100,19 @@ def params(p: ExpressionParams | None) -> ExpressionParams:
 #: partir : ce qu'elle y écrit peut dire ce qu'elle cache)
 LIE_MARK = re.compile(r"\[\s*(?:MENSONGE|MENTI|LIE)\b\s*:?([^\]]*)(?:\]|$)", re.IGNORECASE)
 _SENTENCE = re.compile(r"[^.!?…]+[.!?…]*")
+#: une ligne qui ouvre ses balises de fin (« [EMOTION: … », « [EN_FACE: … », « [MENSONGE: … »)
+_TRAILER = re.compile(r"^[ \t]*\[\s*(?:EMOTION|EN_FACE|MENSONGE|MENTI|LIE)\b", re.IGNORECASE | re.MULTILINE)
+_BRACKETS = re.compile(r"\[[^\]\n]*\]?")
+
+
+def closing(text: str) -> str:
+    """Ce qu'elle dit, puis ses balises de fin : passé la première ligne de balises qui suit sa parole, seules les
+    balises comptent. Un texte écrit après n'est pas à dire (2026-10-14 : « Correction de balise : [EN_FACE: …] »
+    arrivait à la personne). Une balise en tête de réponse ne coupe rien."""
+    m = next((m for m in _TRAILER.finditer(text) if text[:m.start()].strip()), None)
+    if m is None:
+        return text
+    return text[:m.start()] + " ".join(_BRACKETS.findall(text[m.start():]))
 
 
 def lied(text: str, mark: str) -> tuple[int, int] | None:
@@ -124,8 +137,9 @@ def parse(text: str, speaker: str = "") -> tuple[str, dict[str, str]]:
     retirée, ADR 0093), si elle a posé une question, et si elle a menti (sa marque ``[MENSONGE: …]``, retirée : seul
     le passage faux est désigné). ``speaker`` : son nom (celui de sa persona) — un « Nom : » recopié en tête de
     réponse se retire."""
-    marks = [m.group(1) or "" for m in LIE_MARK.finditer(text or "")]
-    unread, their = reading.read(LIE_MARK.sub("", text or ""))
+    text = closing(text or "")
+    marks = [m.group(1) or "" for m in LIE_MARK.finditer(text)]
+    unread, their = reading.read(LIE_MARK.sub("", text))
     tag = parse_tag(unread, speaker)
     annotations: dict[str, str] = {}
     if their is not None:
