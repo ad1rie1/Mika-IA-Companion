@@ -301,7 +301,7 @@ def deferred(sfx: str = "") -> Table:
     )
 
 
-READING_COLUMNS = ("seq", "source", "ref", "title_ref", "excerpt_ref", "depth", "at")
+READING_COLUMNS = ("seq", "source", "ref", "title_ref", "excerpt_ref", "depth", "at", "asked_by")
 
 
 @cache
@@ -315,6 +315,7 @@ def readings(sfx: str = "") -> Table:
         _text("excerpt_ref"),
         _text("depth"),
         _int("at"),
+        _text("asked_by", default=""),
     )
 
 

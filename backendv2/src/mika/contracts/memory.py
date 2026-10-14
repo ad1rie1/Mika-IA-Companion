@@ -303,13 +303,18 @@ class Reading(Payload):
     """Ce qu'elle a lu (ADR 0085), d'où que ce soit : ``source`` (« rss:<flux> », « web:<hôte> », « mcp:<serveur> »),
     ``ref`` (l'article, la page), son titre et un extrait — venus d'ailleurs, donc inertes et bornés —, et jusqu'où
     elle l'a lu (un titre et son chapeau, un article, une page). Le monde n'est la vie de personne : aucun sujet ;
-    ce qu'elle en garde se décide la nuit (``memory.reread``)."""
+    ce qu'elle en garde se décide la nuit (``memory.reread``).
+
+    ``asked_by`` : lu en conversation, à la demande de cette adresse (ADR 0110). Ce qu'on cherchait est à cette
+    personne : la recherche elle-même n'est pas gardée, le texte lu s'efface avec elle (son sujet), et la nuit n'en
+    retient que les nouvelles et les faits publics, comme entendus par elle. Vide : lu pour elle-même."""
 
     source: str
     ref: str = ""
     title: Content
     excerpt: Content | None = None
     depth: Literal["headline", "article", "page"] = "headline"
+    asked_by: str = ""
 
 
 class Confronted(Payload):

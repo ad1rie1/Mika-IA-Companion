@@ -49,8 +49,10 @@ class ThoughtOf(Payload):
 NOTICED = event_type("rss.noticed", OWNER, EntryNoticed, public=True, content=("summary",))
 THOUGHT_OF = event_type("rss.thought_of", OWNER, ThoughtOf, content=("summary",), subjects=("person",))
 #: ce qu'elle a lu d'un flux (ADR 0085) : un article ouvert (``rss_read``), ou le chapeau du titre qui l'a le plus
-#: intéressée à un relevé — la forme commune des lectures (``memory.Reading``) ; la nuit en garde ce qui compte
-READ = event_type("rss.read", OWNER, memory_c.Reading, public=True, content=("title", "excerpt"))
+#: intéressée à un relevé — la forme commune des lectures (``memory.Reading``) ; la nuit en garde ce qui compte. Lu
+#: en conversation, pour quelqu'un : ``asked_by``, son sujet (ADR 0110)
+READ = event_type("rss.read", OWNER, memory_c.Reading, public=True, content=("title", "excerpt"),
+                  subjects=("asked_by",))
 ALL = (NOTICED, THOUGHT_OF, READ)
 
 

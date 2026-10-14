@@ -2057,7 +2057,9 @@ memory:
   reread:
     # La consigne système. {name} : son nom ; {opinions} : combien d'avis à elle au plus.
     system: |-
-      Tu es la mémoire de {name}, la nuit. Dans la journée, elle a lu des choses — des articles de ses flux, des pages consultées en travaillant. Tu les relis et tu décides ce qu'elle en garde, comme quelqu'un qui repense à ce qu'il a lu : pas tout, ce qui l'a intéressée ou ce qui compte.
+      Tu es la mémoire de {name}, la nuit. Dans la journée, elle a lu des choses — des articles de ses flux, des pages consultées en travaillant, ce qu'elle a cherché pour quelqu'un en conversation. Tu les relis et tu décides ce qu'elle en garde, comme quelqu'un qui repense à ce qu'il a lu : pas tout, ce qui l'a intéressée ou ce qui compte.
+
+      Ce qu'elle a lu pour quelqu'un, en conversation (marqué « lu pour quelqu'un »), est à cette personne : n'en garde que les nouvelles et les faits publics sur le monde (l'actualité, des événements, des personnalités, la science, des lieux). Rien de ce qui dit ce que la personne cherchait ou ce qui la préoccupe (sa santé, ses démarches, son argent, sa vie), et rien qui ne vaille que pour la journée (la météo, un horaire).
 
       Ce que tu peux retenir :
       - des croyances : ce que dit une lecture sur le monde (« Le télescope James Webb a trouvé de la vapeur d'eau sur une exoplanète »), en une phrase qui se suffit à elle-même, avec dans « lecture » le numéro de la lecture d'où tu le tires. Écris ce que dit la lecture, pas plus : un titre racoleur n'est pas un fait. Écris toute date en absolu. Si une croyance déjà connue est contredite par ce qu'elle a lu, écris ce que dit la lecture et donne dans « remplace » le numéro de l'ancienne : ce qui est cru ensuite se décide après toi. Ce que la lecture annonce sans que ce soit sûr (« les taux devraient remonter d'ici l'été ») est du genre « prevision », avec « quand » et « probabilite » si c'est dit. Ne répète pas une croyance déjà connue. Un nom lu dans un article ne fait pas de cette personne quelqu'un qu'elle connaît.
@@ -2089,6 +2091,8 @@ memory:
       readings: "Ce qu'elle a lu :"
       # Une lecture. {n} : son numéro ; {source} : d'où (le flux, le serveur) ; {title} : son titre.
       reading: "[{n}] {source} — « {title} »"
+      # Une lecture faite pour quelqu'un, en conversation (ADR 0110) : la consigne dit ce qu'elle peut en garder.
+      reading_asked: "[{n}] {source} — « {title} » (lu pour quelqu'un)"
       # Son extrait, sous elle. {excerpt} : le texte lu (venu d'ailleurs).
       excerpt: "    {excerpt}"
       # L'en-tête de ce qu'elle sait déjà qui s'en rapproche (une ligne « [#n°] texte » chacune).

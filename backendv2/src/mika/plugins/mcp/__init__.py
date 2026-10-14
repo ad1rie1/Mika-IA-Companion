@@ -36,7 +36,7 @@ from mika.kernel.faculty import Faculty, ToolResult, ToolSpec
 from mika.kernel.frame import Frame
 from mika.kernel.state import FrozenDict
 from mika.ports.preprocess import cite, inert
-from mika.vocab.episodes import WORKING, Kind
+from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.phrasebook import phrase
 from mika.vocab.privacy import ChannelTrust, Sensitivity
 
@@ -276,14 +276,18 @@ def _direct(server: str, remote: str, limit: int, reads_world: bool = False) -> 
             return ToolResult(ok=False, content=phrase("mcp.tools.failed", server=label(server),
                                                        text=inert(result.text, 600)))
         ep = ctx.frame.episode
-        if reads_world and ep is not None and ep.kind in WORKING and result.text:
-            # ce qu'elle lit en travaillant (une recherche, une page) se garde comme une lecture, relue la nuit ;
-            # jamais en conversation : ce qu'on cherche pour quelqu'un est à lui (ADR 0085)
-            asked = inert(json.dumps(data, ensure_ascii=False, sort_keys=True), 200)
+        # ce qu'elle lit (une recherche, une page) se garde comme une lecture, relue la nuit (ADR 0085). En
+        # conversation, c'est lu pour quelqu'un (ADR 0110) : ce qu'on cherchait (les arguments) est à lui et ne se
+        # garde pas ; ce qu'elle a lu porte son nom, et la nuit n'en retient que les nouvelles et les faits publics
+        asked_by = (ep.target or "") if ep is not None and ep.kind in CONVERSATIONAL else ""
+        if reads_world and ep is not None and result.text and (ep.kind in WORKING or asked_by):
+            sought = inert(json.dumps(data, ensure_ascii=False, sort_keys=True), 200)
             await ctx.emit(c.CONSULTED.draft(
                 source=f"mcp:{server}"[:200], ref=f"{remote}:{call_digest({'server': server, 'remote': remote, 'args': data})}",
-                title=Content.of(inert(f"{remote} {asked}", 250), level=int(Sensitivity.ANODYNE)),
-                excerpt=Content.of(inert(result.text, CONSULTED_MAX), level=int(Sensitivity.ANODYNE)), depth="page"))
+                title=Content.of(inert(remote if asked_by else f"{remote} {sought}", 250),
+                                 level=int(Sensitivity.ANODYNE)),
+                excerpt=Content.of(inert(result.text, CONSULTED_MAX), level=int(Sensitivity.ANODYNE)), depth="page",
+                asked_by=asked_by[:200]))
         return ToolResult(content=phrase("mcp.tools.answered", server=label(server)) + "\n"
                                   + (cite(result.text, limit) or phrase("mcp.tools.nothing")))
 

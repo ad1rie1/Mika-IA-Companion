@@ -19,9 +19,10 @@ from mika.runtime.state import RUNTIME
 #: du texte qui vient du monde, pas d'une personne — et pourquoi
 WORLD = {
     "rss.noticed": "un titre d'article : public",
-    "rss.read": "un article lu (son titre, son chapeau) : public (ADR 0085)",
-    "mcp.consulted": "une page du monde ouvert lue par un outil en lecture seule, pendant un travail : publique "
-                     "(ADR 0085)",
+    "rss.read": "un article lu (son titre, son chapeau) : public (ADR 0085) ; lu pour quelqu'un, il en est le sujet "
+                "(ADR 0110)",
+    "mcp.consulted": "une page du monde ouvert lue par un outil en lecture seule : publique en travaillant (ADR 0085) ; "
+                     "lue pour quelqu'un en conversation, il en est le sujet (ADR 0110)",
     "sensors.sensed": "un appareil (une sonnette) : pas une personne identifiée",
     "forge.signaled": "une app forgée : elle ne reçoit jamais une conversation",
     "camera.seen": "une image décrite : personne n'y est identifié ; réservée aux propriétaires",

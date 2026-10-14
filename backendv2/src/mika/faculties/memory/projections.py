@@ -681,6 +681,9 @@ class Told:
     c'est la règle de qui ferme (un lien, une preuve d'identité). Pour un récit
     sans nom, chaque énoncé qui le montrait est gardé (``TOLD_LINES_TABLE``) :
     ce qu'elle a vraiment dit s'y juge à la lecture, sur sa réponse (ADR 0092).
+    Ce qu'elle a lu pour quelqu'un en conversation, elle le lui a dit sur le
+    moment : la croyance qu'elle en garde la nuit compte comme dite à qui
+    l'a entendue (ADR 0110).
     La vue de la porte (``RETOLD_VIEW``) naît et meurt avec ces tables."""
 
     def create(self, sql: Sql, sfx: str) -> None:
@@ -706,6 +709,11 @@ class Told:
                     insert_ignore(sql, tt, [{"item": keep, "handle": h, "at": at, "veiled": v} for h, at, v in got])
                     got = sql.query(select(tl.c.handle, tl.c.utterance, tl.c.at).where(tl.c.item == drop))
                     insert_ignore(sql, tl, [{"item": keep, "handle": h, "utterance": u, "at": at} for h, u, at in got])
+                continue
+            if e.type.name in (c.BELIEVED.name, c.ATTESTED.name):
+                if d.origin == c.READ:
+                    item = e.seq if e.type.name == c.BELIEVED.name else int(d.item)
+                    rows += [(item, handle_key(h), e.at, 0) for h in d.heard_by if h]
                 continue
             if not d.visible or not d.target:
                 continue
@@ -769,7 +777,9 @@ MEMORY.projector(c.CHUNKS_TABLE, version=5, tier=Tier.T0, types=[rt.UTTERANCE])(
 # v3 : ce qu'elle a raconté sans nommer personne (``veiled``, ADR 0091)
 # v4 : chaque énoncé qui lui montrait un récit sans nom (``memory_told_lines``) : raconté se juge sur sa réponse
 # v5 : les tables déclarées pour les deux moteurs (ADR 0101) ; la vue ``memory_retold`` naît avec elles
-MEMORY.projector(c.TOLD_TABLE, version=5, tier=Tier.T0, types=[rt.UTTERANCE, c.JOINED])(Told)
+# v6 : ce qu'elle a lu pour quelqu'un en conversation compte comme dit à qui l'a entendu (ADR 0110)
+MEMORY.projector(c.TOLD_TABLE, version=6, tier=Tier.T0,
+                 types=[rt.UTTERANCE, c.JOINED, c.BELIEVED, c.ATTESTED])(Told)
 
 
 #: ce qu'une extraction remise à plus tard réécrit (``since`` : la première fois, gardée)
@@ -829,11 +839,13 @@ class Readings:
                 continue
             upsert(sql, t, dict(zip(READING_COLUMNS, (
                 e.seq, d.source[:200], d.ref[:500], d.title.ref or "",
-                (d.excerpt.ref or "") if d.excerpt is not None else "", d.depth, e.at), strict=True)), keys=["seq"])
+                (d.excerpt.ref or "") if d.excerpt is not None else "", d.depth, e.at, d.asked_by[:200]), strict=True)),
+                   keys=["seq"])
 
 
 # v2 : la table déclarée pour les deux moteurs (ADR 0101)
-MEMORY.projector(READINGS_TABLE, version=2, tier=Tier.T0,
+# v3 : lu en conversation, pour quelqu'un (``asked_by``, ADR 0110)
+MEMORY.projector(READINGS_TABLE, version=3, tier=Tier.T0,
                  types=[rss_c.READ, mcp_c.CONSULTED, c.REREAD])(Readings)
 
 __all__ = [

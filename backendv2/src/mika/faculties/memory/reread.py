@@ -1,7 +1,7 @@
 """La relecture de la nuit (ADR 0085) : ce qu'elle a lu devient ce qu'elle sait, et la nuit confronte ses témoins.
 
 Le jour, elle lit (``rss.read``, ``mcp.consulted`` : un article, le chapeau d'un titre, une page consultée en
-travaillant) ; la nuit, une fois sa mémoire triée (``memory.night``), elle les relit **en un seul appel au plus** —
+travaillant, ou pour quelqu'un en conversation — ADR 0110) ; la nuit, une fois sa mémoire triée (``memory.night``), elle les relit **en un seul appel au plus** —
 aucun s'il n'y a rien — avec ce qu'elle sait déjà qui y touche, ses avis, et les paires de croyances qu'elle tient de
 témoins différents sur une même personne. Le modèle propose ; le code juge, avec les règles du socle :
 
@@ -154,12 +154,14 @@ def tool(name: str) -> ToolDecl:
 
 @dataclass(frozen=True, slots=True)
 class Lu:
-    """Une lecture : son numéro dans le journal, sa source, son titre et son extrait."""
+    """Une lecture : son numéro dans le journal, sa source, son titre et son extrait ; ``asked_by`` : lue en
+    conversation pour cette adresse (ADR 0110)."""
 
     seq: int
     source: str
     title: str
     excerpt: str
+    asked_by: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,11 +185,12 @@ def readings(store: Any, p: MemoryParams) -> tuple[list[Lu], int]:
     """Ses lectures en attente (les plus anciennes d'abord), et jusqu'où elles vont : une lecture dont le texte a été
     oublié depuis est relue sans rien en garder."""
     t = tb.readings()
-    rows = store.query_mind(select(t.c.seq, t.c.source, t.c.title_ref, t.c.excerpt_ref).order_by(t.c.seq)
-                            .limit(p.reread_max_readings))
-    texts = store.content([r for row in rows for r in row[2:] if r])
-    return ([Lu(int(seq), str(source), texts.get(title) or "", texts.get(excerpt) or "")
-             for seq, source, title, excerpt in rows if texts.get(title)], max((int(r[0]) for r in rows), default=0))
+    rows = store.query_mind(select(t.c.seq, t.c.source, t.c.title_ref, t.c.excerpt_ref, t.c.asked_by)
+                            .order_by(t.c.seq).limit(p.reread_max_readings))
+    texts = store.content([r for row in rows for r in row[2:4] if r])
+    return ([Lu(int(seq), str(source), texts.get(title) or "", texts.get(excerpt) or "", str(asked or ""))
+             for seq, source, title, excerpt, asked in rows if texts.get(title)],
+            max((int(r[0]) for r in rows), default=0))
 
 
 def _persons(frame: Frame, keys: Sequence[str]) -> set[str]:
@@ -313,7 +316,9 @@ def render(frame: Frame, lus: Sequence[Lu], known: Sequence[tuple[int, str]], op
     if lus:
         out += ["", phrase("memory.reread.render.readings")]
         for n, lu in enumerate(lus, start=1):
-            out.append(phrase("memory.reread.render.reading", n=n, source=source_label(lu.source), title=lu.title))
+            source = source_label(lu.source)
+            out.append(phrase("memory.reread.render.reading_asked", n=n, source=source, title=lu.title) if lu.asked_by
+                       else phrase("memory.reread.render.reading", n=n, source=source, title=lu.title))
             if lu.excerpt.strip():
                 out.append(phrase("memory.reread.render.excerpt", excerpt=" ".join(lu.excerpt.split())))
     if known:
@@ -363,11 +368,12 @@ async def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any
             continue
         born += 1
         source, nature = lu.source, "prediction" if fold(b.genre or "").startswith("prev") else "claim"
+        heard = (lu.asked_by,) if lu.asked_by else ()  # lu pour quelqu'un : il l'a entendu sur le moment
         twin = await consolidate._twin(store, vectors, b.texte, c.BELIEF, (), p, told_by=(source,),
                                        knowledge_kind=nature, holder=source if nature == "prediction" else None)
         confidence = x.born_confidence(0.7, c.READ, nature)
         if twin is not None:
-            out.append(c.ATTESTED.draft(item=twin, told_by=(source,), heard_by=(), source=source, origin=c.READ,
+            out.append(c.ATTESTED.draft(item=twin, told_by=(source,), heard_by=heard, source=source, origin=c.READ,
                                         confidence=confidence, sensitivity=int(Sensitivity.ANODYNE),
                                         sources=(lu.seq,), call_id=call_id))
             continue
@@ -382,7 +388,7 @@ async def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any
             text=Content.of(b.texte, level=int(Sensitivity.ANODYNE)), about=(), sensitivity=int(Sensitivity.ANODYNE),
             importance=x.IMPORTANCE[2], confidence=confidence, origin=c.READ, source=source,
             replaces=target if verdict == SUPERSEDE else None, contests=target if verdict == CONTEST else None,
-            sources=(lu.seq,), call_id=call_id, told_by=(source,), heard_by=(), knowledge_kind=nature,
+            sources=(lu.seq,), call_id=call_id, told_by=(source,), heard_by=heard, knowledge_kind=nature,
             holder=source if nature == "prediction" else None,
             likelihood=lk.likelihood(lk.PREDICTION, b.probabilite, p) if nature == "prediction" else None,
             **predicted))
@@ -400,7 +406,7 @@ async def drafts_of(rel: Relecture, frame: Frame, state: MemoryState, store: Any
         out.append(c.EVENT_NOTED.draft(
             text=Content.of(m.texte, level=int(Sensitivity.ANODYNE)), when=span.point, about=(),
             all_day=span.all_day, sensitivity=int(Sensitivity.ANODYNE), sources=(lu.seq,), told_by=(lu.source,),
-            heard_by=(), call_id=call_id, until=span.end if span.vague else None, precision=span.precision,
+            heard_by=(lu.asked_by,) if lu.asked_by else (), call_id=call_id, until=span.end if span.vague else None, precision=span.precision,
             scope=c.WORLD, official=m.date_officielle,
             likelihood=lk.likelihood(lk.OFFICIAL if m.date_officielle else lk.REPORTED, m.probabilite, p)))
     for a in [a for a in rel.avis if not x.echoes(a.texte, shown, set())][:p.opinions_from_reading]:

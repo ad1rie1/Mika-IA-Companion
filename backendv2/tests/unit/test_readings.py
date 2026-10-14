@@ -69,11 +69,11 @@ def store() -> Store:
     return db
 
 
-def read(db: Store, seq: int, title: str, excerpt: str, *, source: str = FEED) -> None:
-    """Elle a lu un article (``rss.read``), dans la journée."""
+def read(db: Store, seq: int, title: str, excerpt: str, *, source: str = FEED, asked_by: str = "") -> None:
+    """Elle a lu un article (``rss.read``), dans la journée ; ``asked_by`` : pour quelqu'un, en conversation."""
     db.texts[f"{seq}.title"], db.texts[f"{seq}.excerpt"] = title, excerpt
     d = rss_c.READ.draft(source=source, ref=f"article-{seq}", title=Content(ref=f"{seq}.title", text=title),
-                         excerpt=Content(ref=f"{seq}.excerpt", text=excerpt), depth="article")
+                         excerpt=Content(ref=f"{seq}.excerpt", text=excerpt), depth="article", asked_by=asked_by)
     Readings().apply(db, [event(d, seq, NOW - 20 * HOUR)], "")
 
 
@@ -202,27 +202,64 @@ class Port:
         return NS(ok=True, text="La comète C/2026 A1 passera au plus près de la Terre le 3 novembre.")
 
 
-async def _consult(kind: str, reads_world: bool = True) -> list:
+async def _consult(kind: str, reads_world: bool = True, target: str | None = None) -> list:
     out: list = []
 
     async def emit(*drafts):
         out.extend(drafts)
 
-    ctx = NS(ports={"mcp": Port()}, frame=NS(episode=NS(kind=kind)), emit=emit)
+    ctx = NS(ports={"mcp": Port()}, frame=NS(episode=NS(kind=kind, target=target)), emit=emit)
     result = await _direct("web", "search", 4000, reads_world)(ExternalArgs(q="comète"), ctx)
     assert result.ok
     return out
 
 
-async def test_reply_tools_do_not_journal_pages():
+async def test_what_she_reads_working_or_for_someone_is_kept():
     (page,) = await _consult(Kind.STEP)
-    assert (page.type.name, page.data.source, page.data.depth) == ("mcp.consulted", "mcp:web", "page")
-    assert "3 novembre" in page.data.excerpt.text
-    assert await _consult(Kind.REPLY) == []  # ce qu'on cherche pour quelqu'un est à lui
-    assert await _consult(Kind.INITIATIVE) == []
+    assert (page.type.name, page.data.source, page.data.depth, page.data.asked_by) == \
+        ("mcp.consulted", "mcp:web", "page", "")
+    assert "3 novembre" in page.data.excerpt.text and "comète" in page.data.title.text
+    # en conversation, lu pour quelqu'un (ADR 0110) : ce qu'elle a lu est gardé à son nom (son sujet : l'oubli de la
+    # personne l'efface), jamais ce qu'il cherchait
+    for kind in (Kind.REPLY, Kind.INITIATIVE):
+        (page,) = await _consult(kind, target=ALICE)
+        assert page.data.asked_by == ALICE and "3 novembre" in page.data.excerpt.text
+        assert "comète" not in page.data.title.text
+    assert page.type.subject_fields == {"asked_by"}
+    assert await _consult(Kind.REPLY) == []  # personne en face : rien à garder pour quelqu'un
     assert await _consult(Kind.STEP, reads_world=False) == []  # un serveur que l'opérateur n'a pas dit public
     from mika.adapters.mcp.config import McpServer
     assert McpServer.model_fields["learns"].default is False  # un courrier, un agenda : jamais par défaut
+
+
+async def test_the_night_keeps_only_the_news_of_what_she_read_for_someone():
+    """Lu pour Alice en conversation : la nuit est prévenue (n'en garder que les nouvelles et les faits publics), ce
+    qu'elle en garde est du monde (aucune personne, la source pour témoin), entendu par Alice — à qui elle l'a dit sur
+    le moment, et qu'elle ne lui raconte donc pas comme une nouvelle ; à Carol, si."""
+    db = store()
+    read(db, 7, "search", "Le volcan Grimsvötn est entré en éruption ce matin en Islande.", source="mcp:web",
+         asked_by=ALICE)
+    volcano = "Le volcan Grimsvötn est entré en éruption en Islande le 7 octobre 2026"
+    llm = LLM({"croyances": [{"texte": volcano, "lecture": 1}]})
+    out = await night(db, llm)
+    assert "[1] web — « search » (lu pour quelqu'un)" in llm.calls[0].messages[0].content
+    assert "lu pour quelqu'un" in llm.calls[0].system_stable  # ce qu'elle peut en garder
+    (b,) = of(out, mc.BELIEVED)
+    assert (b.about, b.told_by, b.heard_by, b.origin) == ((), ("mcp:web",), (ALICE,), mc.READ)
+    (believed,) = [d for d in out if d.type.name == mc.BELIEVED.name]
+    Told().apply(db, [event(believed, 20, NOW - 2 * HOUR)], "")
+    db.put(believed, 20, NOW - 2 * HOUR)
+
+    async def section(person: str) -> str | None:
+        frame = Frame(FRIEND)
+        frame.episode = NS(target=person, kind=Kind.INITIATIVE, attrs={})
+        got = await _learned(MemoryState(), frame, {"store": db})
+        body = _learned_section(MemoryState(), frame, {"learned": got})
+        return body.content if body is not None else None
+
+    assert await section(ALICE) is None  # elle le lui a dit en le lisant
+    assert volcano in await section(CAROL)
+    db.conn.close()
 
 
 # ── « J'ai lu que… », une fois par personne ─────────────────────────────────

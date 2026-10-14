@@ -403,7 +403,9 @@ ses identifiants sont dans `ARCHITECTURE.md`. Ce qui suit dit l'essentiel de cha
 - **Ressenti** : chaque élément porte ce que la personne en ressent et ce qu'elle-même en ressent (`felt`, `empathy`),
   en facettes de 0 à 1 jugées par la relecture. Chaque élément est relié à ses émotions (`memory_feelings`).
 - **La nuit**
-  - Elle relit ses lectures (`memory.reread`) : des croyances d'origine `read`, au plus 0,7.
+  - Elle relit ses lectures (`memory.reread`) : des croyances d'origine `read`, au plus 0,7. Ce qu'elle a lu pour
+    quelqu'un en conversation porte son nom (`asked_by`), et seules les nouvelles et les faits publics en restent,
+    entendus par cette personne (ADR 0110).
   - Elle réunit les doublons (`memory.joined`) et confronte deux témoins (`memory.confronted`).
   - Ce qui lui tient à cœur dans le monde se vérifie deux fois par semaine (`memory.to_check`).
 - **Promesses et mensonges**

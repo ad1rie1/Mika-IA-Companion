@@ -84,7 +84,7 @@ from mika.kernel.prompt import SectionBody
 from mika.kernel.state import FrozenDict
 from mika.ports.feeds import feed_name, tokenless
 from mika.ports.preprocess import cite, inert
-from mika.vocab.episodes import WORKING, Kind
+from mika.vocab.episodes import CONVERSATIONAL, WORKING, Kind
 from mika.vocab.interests import NOTICE_WEIGHT, matches, pertinence, topic_words
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
@@ -481,10 +481,13 @@ async def rss_read(args: ReadArgs, ctx: Any) -> Any:
     text = await port.article(e.id) or e.summary
     if not text:
         return ToolResult(ok=False, content=phrase("rss.tools.read.unreadable"))
-    # ce qu'elle a lu, gardé (borné, inerte) pour que la nuit en garde ce qui compte (ADR 0085)
+    # ce qu'elle a lu, gardé (borné, inerte) pour que la nuit en garde ce qui compte (ADR 0085) ; en conversation,
+    # lu pour quelqu'un, qui en est le sujet (ADR 0110)
+    ep = ctx.frame.episode
     await ctx.emit(c.READ.draft(
         source=f"rss:{inert(feed_name(e.feed), 120)}"[:200], ref=e.id, title=Content.of(inert(e.title, 250), level=0),
-        excerpt=Content.of(inert(text, ARTICLE_EXCERPT), level=0), depth="article"))
+        excerpt=Content.of(inert(text, ARTICLE_EXCERPT), level=0), depth="article",
+        asked_by=(ep.target or "")[:200] if ep is not None and ep.kind in CONVERSATIONAL else ""))
     return (phrase("rss.tools.read.data") + "\n"
             + phrase("rss.headline", title=inert(e.title, 250), feed=inert(feed_name(e.feed), 120))
             + f"\n{cite(text, 6000)}")

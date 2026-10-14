@@ -34,7 +34,9 @@ class Answered(Payload):
 
 
 ANSWERED = event_type("mcp.answered", OWNER, Answered, content=("text",), subjects=("about",))
-#: ce qu'elle a consulté pendant qu'elle travaillait (ADR 0085) : un outil en lecture seule ouvert sur le monde
-#: (une recherche, une page) — la forme commune des lectures, l'extrait borné et inerte ; jamais en conversation
-CONSULTED = event_type("mcp.consulted", OWNER, memory_c.Reading, public=True, content=("title", "excerpt"))
+#: ce qu'elle a consulté avec un outil en lecture seule ouvert sur le monde (une recherche, une page) — la forme
+#: commune des lectures, l'extrait borné et inerte : en travaillant (ADR 0085), ou en conversation pour quelqu'un
+#: (``asked_by``, son sujet : ADR 0110)
+CONSULTED = event_type("mcp.consulted", OWNER, memory_c.Reading, public=True, content=("title", "excerpt"),
+                       subjects=("asked_by",))
 ALL = (ANSWERED, CONSULTED)

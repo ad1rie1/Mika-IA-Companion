@@ -55,8 +55,23 @@ Une recherche, globale puis propre à la personne qui parle, prend 1,7 ms sur 5 
    (0,04 à 1 000, 0,11 à 4 666). À revoir aussi si l'index passe sur disque (`max_resident_vectors`, 50 000). Le
    banc se relance : `banc.py --tailles …`.
 
-**Ce qui reste ouvert.** Les nouvelles lues pour sa propriétaire n'ont rien laissé, et ce n'est pas une affaire de
-base. L'ADR 0085 ne garde pas une lecture faite en conversation : « ce qu'on cherche pour quelqu'un est à lui ». Une
-recherche dit ce qui préoccupe la personne (des symptômes, un avocat). Garder aussi ces lectures-là, et à quelles
-conditions, est à décider avec la propriétaire. On pourrait par exemple garder les nouvelles et non les recherches
-personnelles, ou garder la lecture comme confiée par la personne qui l'a demandée.
+4. *Ce qu'elle lit pour quelqu'un en conversation se garde, mais seulement les nouvelles.* Les nouvelles lues pour
+   sa propriétaire n'avaient rien laissé, et ce n'était pas une affaire de base. L'ADR 0085 ne gardait pas une
+   lecture faite en conversation : « ce qu'on cherche pour quelqu'un est à lui ». Une recherche dit en effet ce qui
+   préoccupe la personne (des symptômes, un avocat). Le 2026-10-14, la propriétaire choisit de garder les nouvelles
+   et les faits publics, jamais les recherches personnelles :
+   - un outil de lecture du monde (`mcp.consulted`) ou un article de ses flux (`rss.read`) lu en conversation porte
+     `asked_by`, l'adresse de qui l'a demandé. C'est le sujet du texte : l'oubli de la personne efface ce qu'elle a
+     lu pour elle ;
+   - ce qu'on cherchait (les arguments de la recherche) n'est pas gardé : le titre de la lecture n'est que le nom de
+     l'outil ;
+   - la nuit, la lecture est marquée « lu pour quelqu'un ». La consigne n'en fait garder que les nouvelles et les
+     faits publics (l'actualité, des événements, des personnalités, la science, des lieux) : rien de ce qui dit ce
+     que la personne cherchait ou ce qui la préoccupe, rien qui ne vaille que pour la journée, comme la météo ;
+   - ce qu'elle en garde est du monde (aucune personne, la source pour témoin), entendu par qui l'avait demandé
+     (`heard_by`). Elle le lui a dit sur le moment, donc « CE QUE TU AS APPRIS EN LISANT » ne le lui ressert pas
+     comme une nouvelle (`memory_told`, projection v6). À une autre personne, elle peut dire « j'ai lu que… ».
+
+**Conséquences.** Le tri entre une nouvelle et une recherche personnelle est confié au modèle de la nuit, guidé par
+sa consigne. Il n'y a pas de règle dans le code. Ce qu'il garderait à tort reste anodin et sans nom (une croyance du
+monde), et le texte lu s'efface avec la personne. La projection des lectures passe en v3 (`asked_by`).
