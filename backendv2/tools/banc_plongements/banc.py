@@ -28,7 +28,7 @@ sys.path.insert(0, str(HERE))
 
 from corpus import ITEMS, QUERIES  # noqa: E402
 
-#: (nom affiché, modèle Hugging Face, préfixes imposés quand le modèle ne les déclare pas)
+#: (nom affiché, modèle Hugging Face, préfixes imposés quand le modèle ne les déclare pas[, options du chargement])
 MODELS = [
     ("actuel MiniLM-L12", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2", None),
     ("e5-small", "intfloat/multilingual-e5-small", {"query": "query: ", "document": "passage: "}),
@@ -44,6 +44,20 @@ MODELS = [
     # plus gros : pour une carte graphique (fp16 : ~2 octets par paramètre)
     ("qwen3-4b consigne fr", "Qwen/Qwen3-Embedding-4B",
      {"query": "Instruct: Retrouve, parmi ce qu'elle sait des gens, ce qui aide à répondre à ce message\nQuery:", "document": ""}),
+    # EmbeddingGemma 2 (2026-10-06, Apache 2.0) : la partie texte seule (270M) ; jamais en fp16 (vecteurs faux)
+    ("embeddinggemma-2", "google/embeddinggemma-2", None,
+     {"config_kwargs": {"vision_config": None, "audio_config": None}}),
+    ("embeddinggemma-2 QA", "google/embeddinggemma-2",
+     {"query": "task: question answering | query: ", "document": "title: none | text: "},
+     {"config_kwargs": {"vision_config": None, "audio_config": None}}),
+    ("embeddinggemma-2 STS", "google/embeddinggemma-2",
+     {"query": "task: sentence similarity | query: ", "document": "title: none | text: "}, {"config_kwargs": {"vision_config": None, "audio_config": None}}),
+    ("embeddinggemma-2 fact", "google/embeddinggemma-2",
+     {"query": "task: fact checking | query: ", "document": "title: none | text: "}, {"config_kwargs": {"vision_config": None, "audio_config": None}}),
+    ("embeddinggemma-2 fr", "google/embeddinggemma-2",
+     {"query": "task: retrouver un souvenir | query: ", "document": "title: none | text: "}, {"config_kwargs": {"vision_config": None, "audio_config": None}}),
+    ("embeddinggemma-2 sans titre", "google/embeddinggemma-2",
+     {"query": "task: search result | query: ", "document": "text: "}, {"config_kwargs": {"vision_config": None, "audio_config": None}}),
     ("e5-large-instruct", "intfloat/multilingual-e5-large-instruct",
      {"query": "Instruct: Retrouve, parmi ce qu'elle sait des gens, ce qui aide à répondre à ce message\nQuery: ", "document": ""}),
     ("qwen3 consigne en", "Qwen/Qwen3-Embedding-0.6B",
@@ -64,7 +78,7 @@ def rss_mb() -> float:
     return 0.0
 
 
-def bench(label: str, name: str, prompts: dict | None, device: str) -> dict:
+def bench(label: str, name: str, prompts: dict | None, device: str, extra: dict | None = None) -> dict:
     import torch  # noqa: PLC0415
     from sentence_transformers import SentenceTransformer  # noqa: PLC0415
 
@@ -88,6 +102,7 @@ def bench(label: str, name: str, prompts: dict | None, device: str) -> dict:
             load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_compute_dtype=torch.float16)
     if model_kwargs:
         kwargs["model_kwargs"] = model_kwargs
+    kwargs.update(extra or {})
     model = SentenceTransformer(name, **kwargs)
     load_s = time.monotonic() - t0
     loaded = rss_mb() - before
@@ -132,9 +147,9 @@ def main() -> None:
     FP16, BITS4 = args.fp16, args.bits4
     chosen = [m for m in MODELS if not args.models or m[0] in args.models or m[1] in args.models]
     results = []
-    for label, name, prompts in chosen:
+    for label, name, prompts, *extra in chosen:
         try:
-            r = bench(label, name, prompts, args.device)
+            r = bench(label, name, prompts, args.device, extra[0] if extra else None)
         except Exception as exc:  # noqa: BLE001 — un modèle réservé ou introuvable est sauté, en le disant
             print(f"{label:22s} sauté : {type(exc).__name__}: {str(exc)[:140]}", flush=True)
             continue

@@ -110,15 +110,23 @@ C'est lui qui fait remonter un souvenir quand on lui parle. Par défaut, `paraph
 sur le processeur : petit, mais faible en français. Un autre se choisit dans `/etc/mika/mika.env` :
 
 ```ini
-MIKA_EMBEDDINGS_MODEL=Qwen/Qwen3-Embedding-0.6B
+MIKA_EMBEDDINGS_MODEL=google/embeddinggemma-2
 MIKA_EMBEDDINGS_DEVICE=cuda      # cpu (défaut), cuda (la carte graphique), auto
 ```
 
-Au banc (`tools/banc_plongements`, 40 messages), Qwen3-Embedding-0.6B, avec sa consigne de souvenirs, retrouve le
-bon souvenir en tête 35 fois sur 40, contre 25 pour le modèle par défaut. Il lui faut environ 1,2 Go sur une carte
-graphique (fp16), ou 2,4 Go de RAM sur le processeur. Sans carte et avec peu de RAM,
-`ibm-granite/granite-embedding-278m-multilingual` (31/40) ou `intfloat/multilingual-e5-base` (30/40) prennent
-environ 1,1 Go.
+Au banc (`tools/banc_plongements`, 40 messages), le modèle par défaut retrouve le bon souvenir en tête 25 fois sur
+40. Deux modèles font bien mieux :
+
+- `google/embeddinggemma-2` (34/40, le choix du portable) : la seule partie texte (270M), environ 590 Mo sur une
+  carte graphique ou 1,5 Go de RAM sur le processeur. Il lui faut transformers ≥ 5.19, sentence-transformers ≥ 6.1,
+  Pillow et torchvision. **torchvision s'installe depuis l'index de torch**, pour que les deux s'accordent :
+  `.venv/bin/pip install --no-deps "torchvision==<version>+cu126" pillow --index-url
+  https://download.pytorch.org/whl/cu126` (torch 2.14 va avec torchvision 0.29).
+- `Qwen/Qwen3-Embedding-0.6B` (35/40, avec sa consigne de souvenirs) : environ 1,2 Go sur une carte (fp16), ou
+  2,4 Go de RAM sur le processeur.
+
+Sans carte et avec peu de RAM, `ibm-granite/granite-embedding-278m-multilingual` (31/40) ou
+`intfloat/multilingual-e5-base` (30/40) prennent environ 1,1 Go.
 
 Changer de modèle ne demande qu'un redémarrage : l'index range ses vecteurs par modèle, et la mémoire replonge ce
 qui manque au premier passage (quelques minutes pour une longue vie). Le modèle se télécharge dans `HF_HOME`

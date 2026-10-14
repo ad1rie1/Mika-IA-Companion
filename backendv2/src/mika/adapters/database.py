@@ -31,6 +31,7 @@ from urllib.parse import quote
 
 from sqlalchemy import Engine, create_engine, event
 from sqlalchemy.engine import URL, make_url
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.pool import NullPool, StaticPool
 
 #: ce qu'une connexion SQLite attend avant de dire « base verrouillée » (millisecondes)
@@ -234,6 +235,15 @@ class Kept:
                 self.conn.rollback()
         self._used = now
         return self.conn
+
+    def close(self) -> None:
+        """La refermer, même si le serveur l'a coupée pendant un long silence : une nuit sans un mot dépasse le
+        ``wait_timeout`` de MariaDB (8 h). Il n'y a alors plus rien à annuler, et l'arrêt du serveur ne doit pas
+        échouer pour si peu (le 2026-10-14, « MySQL server has gone away » interrompait l'arrêt en plein milieu)."""
+        try:
+            self.conn.close()
+        except DBAPIError:
+            pass  # coupée : SQLAlchemy l'a invalidée en levant
 
 
 def truncate_log(conn: Any) -> None:

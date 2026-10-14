@@ -78,6 +78,27 @@ KNOWN_PROMPTS = {"multilingual-e5": {"query": "query: ", "document": "passage: "
 INSTRUCTED = ("Qwen3-Embedding",)
 
 
+#: les familles qui supportent la demi-précision (fp16) sur une carte graphique : deux fois moins de mémoire, même
+#: rang au banc. Pas les autres : EmbeddingGemma 2 y rend des vecteurs faux (NaN) sans lever d'erreur.
+HALF_SAFE = ("Qwen3-Embedding",)
+
+#: les familles multimodales dont on ne charge que la partie texte (EmbeddingGemma 2 : 270M sur 740M)
+TEXT_ONLY = ("embeddinggemma-2",)
+
+
+def load_options(model: str, device: str, bf16: bool) -> dict[str, Any]:
+    """Comment charger ``model`` sur ``device`` (``bf16`` : la carte le calcule nativement) : la précision (fp16
+    pour une famille qui le supporte, sinon bf16 si la carte le sait, sinon fp32), la seule partie texte."""
+    options: dict[str, Any] = {}
+    if any(family in model for family in TEXT_ONLY):
+        options["config_kwargs"] = {"vision_config": None, "audio_config": None}
+    if device == "cuda":
+        dtype = "float16" if any(family in model for family in HALF_SAFE) else "bfloat16" if bf16 else None
+        if dtype:
+            options["model_kwargs"] = {"torch_dtype": dtype}
+    return options
+
+
 def prompts_for(model: str) -> dict[str, str] | None:
     if any(family in model for family in INSTRUCTED):
         return {"query": f"Instruct: {phrase('vectors.query_instruction')}\nQuery:", "document": ""}
@@ -98,19 +119,19 @@ class SentenceEmbedder:
     def _load(self) -> Any:
         if self._model is None:
             # lourd (torch) : chargé à la première demande, jamais par le simulateur
+            import torch  # noqa: PLC0415
             from sentence_transformers import SentenceTransformer  # noqa: PLC0415
 
             device = self.device
             if device == "auto":
-                import torch  # noqa: PLC0415
-
                 device = "cuda" if torch.cuda.is_available() else "cpu"
+            bf16 = device == "cuda" and torch.cuda.is_bf16_supported(including_emulation=False)
             prompts = prompts_for(self.model_name)
             kwargs: dict[str, Any] = {"prompts": prompts} if prompts else {}
-            if device == "cuda":  # en demi-précision : deux fois moins de mémoire sur la carte, même rang au banc
-                kwargs["model_kwargs"] = {"torch_dtype": "float16"}
+            kwargs.update(load_options(self.model_name, device, bf16))
             self._model = SentenceTransformer(self.model_name, device=device, **kwargs)
-            self.dims = int(self._model.get_sentence_embedding_dimension())
+            dimension = getattr(self._model, "get_embedding_dimension", None)  # le nom depuis sentence-transformers 6
+            self.dims = int((dimension or self._model.get_sentence_embedding_dimension)())
         return self._model
 
     def encode(self, texts: Sequence[str], *, query: bool = False) -> list[list[float]]:

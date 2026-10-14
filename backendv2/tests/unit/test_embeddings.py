@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 
 from mika.adapters.vectors import HashEmbedder, SqliteVectorIndex
-from mika.adapters.vectors.embedders import DEFAULT_MODEL, SentenceEmbedder, prompts_for
+from mika.adapters.vectors.embedders import DEFAULT_MODEL, SentenceEmbedder, load_options, prompts_for
 from mika.app import embeddings
 from mika.ports.vectors import VectorItem
 from mika.vocab.phrasebook import phrase
@@ -101,3 +101,18 @@ def test_the_machine_chooses_the_model_and_the_device(monkeypatch):
     assert (emb.model_name, emb.device, emb.name) == ("Qwen/Qwen3-Embedding-0.6B", "cuda", "st:Qwen/Qwen3-Embedding-0.6B")
     monkeypatch.setenv(embeddings.DEVICE_ENV, "tpu")
     assert embeddings.configured()[1] == "cpu", "un appareil inconnu : le processeur"
+
+
+def test_each_model_loads_in_the_precision_it_supports():
+    """Sur la carte : fp16 pour Qwen3 (même rang au banc, deux fois moins de mémoire), jamais pour EmbeddingGemma 2
+    (vecteurs faux en fp16, sans erreur) — bf16 si la carte le calcule nativement, sinon fp32. Sa seule partie texte
+    est chargée. Sur le processeur, rien d'imposé."""
+    gemma = "google/embeddinggemma-2"
+    text_only = {"vision_config": None, "audio_config": None}
+    assert load_options("Qwen/Qwen3-Embedding-0.6B", "cuda", False) == {"model_kwargs": {"torch_dtype": "float16"}}
+    assert load_options(gemma, "cuda", False) == {"config_kwargs": text_only}, "fp32 sur une GTX 1650 (pas de bf16)"
+    assert load_options(gemma, "cuda", True) == {"config_kwargs": text_only,
+                                                 "model_kwargs": {"torch_dtype": "bfloat16"}}
+    assert load_options(gemma, "cpu", False) == {"config_kwargs": text_only}
+    assert load_options(DEFAULT_MODEL, "cpu", False) == {}
+    assert prompts_for(gemma) is None, "ses consignes à lui (« task: search result ») : les nôtres le desservent"

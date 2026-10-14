@@ -356,7 +356,7 @@ class SqlStore:
         self._writer.stop()
         for c in (self._mind_r, self._views_r):
             if c is not None:
-                c.conn.close()
+                c.close()
         self._mind_r = self._views_r = None
         for e in (self._mind_reader, self._views_reader):
             if e is not None:
@@ -633,7 +633,7 @@ class StoreSealed(RuntimeError):
 def _close(*kept: Kept | None) -> None:
     for k in kept:
         if k is not None:
-            k.conn.close()
+            k.close()
             k.conn.engine.dispose()
 
 
