@@ -233,6 +233,7 @@ def _persona(s: SelfState) -> list[Block]:
         ("nom", doc.name),
         ("nature", NATURE_FR.get(doc.nature, doc.nature)),
         ("description", Text(doc.description, clamp=CLAMP) if doc.description else Text("—", kind="muted")),
+        ("portrait (conversation)", Text(doc.portrait, clamp=CLAMP) if doc.portrait.strip() else Text("—", kind="muted")),
         ("ton", doc.tone or "—"),
         ("langue", doc.language),
         ("fuseau", doc.timezone),
