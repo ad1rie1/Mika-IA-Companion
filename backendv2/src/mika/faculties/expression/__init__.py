@@ -390,6 +390,17 @@ def pending_question(said: Sequence[tuple[int, str]], heard: str, now: int) -> s
 
 #: une question à options (« t'as trouvé quelque chose, ou t'es rentré bredouille ? ») — pas « … ou pas ? »
 _OPTIONS = re.compile(r"\bou\b(?!\s+(?:pas|non|quoi|bien|alors)\b)", re.IGNORECASE)
+#: on la corrige ou on la taquine (« nan celui qui défonce tout », « non c'est ma cousine », « merci maman ») …
+_CORRECTED = re.compile(r"^\s*(?:non|nan|nope|mais non|pas du tout)\b|\bmaman\b|\btu te trompes\b|\bt'as tout faux\b"
+                        r"|\bc'est pas (?:ça|ca)\b", re.IGNORECASE)
+#: … et elle ouvre sur une excuse ou une justification (« ah pardon, j'avais tout faux ») : un réflexe d'assistante.
+#: Banc de recherche du 2026-10-15 : une réponse sur quatre, dans ces cas-là, et aucune consigne ne l'enlève tout à
+#: fait ; relue, elle rebondit (« ah ok, donc la lumière c'est surtout pour le style »). « désolée pour ton
+#: grand-père » n'est pas une excuse : ni « désolée » seul, ni une excuse sans qu'on l'ait corrigée ne sont repris.
+_SORRY = re.compile(r"\b(?:pardon|excuse-moi|je m'excuse|autant pour moi|au temps pour moi|j'(?:ai|avais) tout faux"
+                    r"|je me suis (?:trompée|plantée))\b", re.IGNORECASE)
+#: une excuse se lit dans ses premiers mots
+_SORRY_WITHIN = 80
 #: au moins tant de mots en commun avec l'un de ses derniers messages : une redite ; avec son portrait : une copie
 _AGAIN, _COPIED = 5, 6
 #: à un message de tant de caractères au plus, une réponse de plus de ``_LONG_ANSWER`` (ou en plusieurs paragraphes)
@@ -457,6 +468,8 @@ def review(draft: str, mine: Sequence[str], heard: str = "", portrait: str = "")
         {tuple(ws[i:i + _COPIED]) for i in range(len(ws) - _COPIED + 1)}
     if any(sum(w not in STOPWORDS for w in g) >= 2 for g in copied):
         found.append(phrase("expression.review.portrait"))
+    if _CORRECTED.search(heard or "") and _SORRY.search(text[:_SORRY_WITHIN]):
+        found.append(phrase("expression.review.sorry"))
     heard_plain = " ".join(A.strip_prosody(heard).split())
     # une ligne vide n'allonge rien : en chat, c'est une autre bulle
     if heard_plain and len(heard_plain) <= _SHORT_HEARD and len(text) > _LONG_ANSWER:

@@ -43,6 +43,20 @@ def test_redoing_his_sentence_is_caught_but_not_a_word_taken_up():
     assert review("Bleu marine, ça va avec tout. Moi j'ai un faible pour le vert sapin.", [], heard) is None
 
 
+def test_an_apology_when_she_is_corrected_or_teased_is_caught_but_not_sympathy():
+    """« nan celui qui défonce tout le monde XD » → « ah pardon, j'avais tout faux » : un réflexe d'assistante, qu'on
+    la corrige ou qu'on la taquine. Mais « désolée pour ton grand-père » n'est pas une excuse, et une excuse sans
+    qu'on l'ait corrigée (elle a blessé quelqu'un) n'est pas reprise."""
+    sorry = phrase("expression.review.sorry")
+    assert sorry in review("ah pardon, j'avais tout faux alors. une paladine qui défonce, ça me va", [],
+                           "nan celui qui defonce tout le monde XD")
+    assert sorry in review("Pardon, c'est sorti tout seul.", [], "merci maman")
+    assert sorry in review("ah, j'ai tout faux. elle est comment ta cousine ?", [], "non ma cousine mdr")
+    assert review("ah ok, donc la lumière c'est surtout pour le style", [], "nan celui qui defonce tout le monde XD") is None
+    assert review("je suis désolée pour ton grand-père.", [], "non il est à l'hôpital depuis ce matin") is None
+    assert review("pardon, j'ai été dure tout à l'heure.", [], "tu m'as un peu vexé") is None
+
+
 def test_a_draft_with_a_tic_is_rewritten_once_and_only_the_rewrite_is_said(tmp_path):
     replies = iter(["Ah, sympa. Tu l'as pris en bleu, ou en noir ? [EMOTION:happy:0.4]",
                     "Sympa ! J'espère qu'il tient chaud. [EMOTION:happy:0.4]"])

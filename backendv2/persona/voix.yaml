@@ -780,6 +780,8 @@ expression:
     # ses deux derniers messages posaient déjà une question
     asked: "il pose encore une question, comme tes deux derniers messages : cette fois, réagis sans en poser — ce que ça te fait, ton avis"
     portrait: "il reprend mot pour mot une phrase de ton portrait (un exemple de ta voix) : dis-le avec tes mots du moment"
+    # on la corrige ou on la taquine, et elle ouvre sur une excuse ou une justification (banc de recherche, 2026-10-15)
+    sorry: "il commence par t'excuser ou te justifier alors qu'on te corrige ou qu'on te taquine : entre amis, on rebondit sur ce qu'il vient de dire, sans excuse"
 
   # La seconde passe sur sa réponse (pipeline : polishers, rôle « polish ») : le texte seul, rendu naturel au vu du fil,
   # sans rien y ajouter ; ses balises restent celles du premier jet. Ablation du 2026-10-15 : récrire le texte au vu
