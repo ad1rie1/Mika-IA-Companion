@@ -2,8 +2,9 @@
 (répondre, prendre la parole, se raconter) et ``compact`` (murmurer, travailler) — rendues depuis le même document,
 pour qu'aucune de ses voix ne soit quelqu'un d'autre. Elle est une IA et le sait, ou une personne incarnée (``nature``)
 ; ses bonjours donnent un ton, jamais une phrase à recopier. Son tempérament, trait par trait avec sa mesure (ADR
-0100), est dans les deux profondeurs : partout où la persona est injectée — répondre, prendre la parole, murmurer,
-travailler, un réveil, un brouillon, son journal, ses rêves, son récit — elle a le même caractère."""
+0100), est dans les deux profondeurs hors conversation — murmurer, travailler, un réveil, un brouillon, son journal,
+ses rêves, son récit. En conversation (répondre, prendre la parole), il règle sa physique émotionnelle par les
+facultés, mais ne se dit pas au modèle : dit trait par trait, elle jouait ses traits au lieu de parler."""
 
 from __future__ import annotations
 
@@ -62,7 +63,10 @@ def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str
     qu'on lui demande « t'as mangé quoi ? », « c'est quoi ton plat préféré ? ».
     ``chat`` : elle parle à quelqu'un — ses exemples en conversation montrent sa
     voix (décrite, elle sonnait comme un assistant : 2026-10-14) ; jamais dans un
-    mail, un travail ou son journal, qui ne s'écrivent pas comme un chat."""
+    mail, un travail ou son journal, qui ne s'écrivent pas comme un chat. En
+    conversation, son tempérament ne se dit pas : trait par trait, il lui faisait
+    jouer chaque trait au lieu de parler (banc de recherche, 2026-10-15 : sans le
+    bloc, 7,0/10 d'humanité ; avec, 5,2 ; avec les seuls traits marqués, 5,7)."""
     head = phrase("self.persona.head", name=c.name_of(doc), description=doc.description).strip()
     parts = [head]
     if doc.tone:
@@ -82,7 +86,8 @@ def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str
         ]
     else:
         parts.append(_bullets(phrase("self.persona.in_short"), doc.traits[:3]))
-    parts.append(temperament_text(doc.temperament))  # dans ses deux profondeurs : le même caractère partout
+    if not chat:  # ses deux profondeurs, hors conversation : son journal, ses rêves, son récit, son travail
+        parts.append(temperament_text(doc.temperament))
     parts.append(phrase("self.persona.language", language=doc.language, nature=nature_of(doc)))
     parts.append(life_rule(doc))
     return "\n\n".join(p for p in parts if p)

@@ -495,7 +495,8 @@ ses identifiants sont dans `ARCHITECTURE.md`. Ce qui suit dit l'essentiel de cha
       des notes ;
     - 18 profils (`PROFILES`), `reflechie` par défaut ;
     - chaque faculté à `derive=` en tire ses paramètres ;
-    - `faculties/self/character.py` dit les traits au modèle, partout où la persona est injectée ;
+    - `faculties/self/character.py` dit les traits au modèle là où la persona est injectée, sauf en conversation
+      (répondre, prendre la parole) : dits trait par trait, elle jouait ses traits au lieu de parler ;
     - ses règles de conduite ne dépendent pas du profil.
   - Une estime qui a des causes (sociomètre, `self.touched`).
   - Le récit de soi (« qui elle devient », jamais un prénom), le journal de la journée et sa version « à raconter »,

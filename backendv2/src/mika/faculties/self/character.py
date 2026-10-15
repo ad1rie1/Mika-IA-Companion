@@ -9,8 +9,9 @@ avec sa mesure (« Introspection : 90 % — tu repenses longuement… ») : le m
 S'y ajoutent son humeur de fond, sa réaction quand on la blesse et sa défense quand on la touche. La précision que
 l'opératrice a pu écrire pour un trait (« tu t'énerves quand on t'appelle poulet ») suit sa phrase, sans la remplacer.
 Des tendances, jamais une obligation ; les mesures sont pour elle seule. Le bloc fait partie de sa persona
-(``persona.render``, dans ses deux profondeurs) : ses répliques, ses initiatives, ses murmures, son travail, ses
-brouillons, son journal, ses rêves et son récit le lisent tous.
+(``persona.render``, dans ses deux profondeurs) hors conversation : ses murmures, son travail, ses brouillons, son
+journal, ses rêves et son récit le lisent. En conversation (ses répliques, ses initiatives), il ne se dit pas : trait
+par trait, elle jouait ses traits au lieu de parler (banc de recherche, 2026-10-15).
 """
 
 from __future__ import annotations

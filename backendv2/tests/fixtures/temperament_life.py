@@ -242,12 +242,20 @@ def profile(key: str) -> T.Temperament:
     return T.apply_profile(T.Temperament(), key)
 
 
+#: les voix de la conversation : son tempérament ne s'y dit pas (dit trait par trait, elle jouait ses traits au lieu
+#: de parler — banc de recherche, 2026-10-15) ; il y règle seulement sa physique émotionnelle
+CONVERSATION_ROLES = frozenset({"reply", "initiative"})
+
+
 def assert_her_temperament_everywhere(lived: Lived) -> None:
-    """Chaque appel qui porte sa persona porte aussi le bloc de son tempérament ; ses voix principales y sont (sa
-    réponse, son journal, ses rêves), et la persona compacte aussi (un murmure, une séance de travail)."""
+    """Hors conversation, chaque appel qui porte sa persona porte aussi le bloc de son tempérament (son journal, ses
+    rêves, son récit, et la persona compacte : un murmure, une séance de travail) ; en conversation (sa réponse, ses
+    initiatives), jamais."""
     assert lived.persona_calls, "aucun appel n'a porté sa persona"
-    missing = [c for c in lived.persona_calls if not c.carries]
+    missing = [c for c in lived.persona_calls if not c.carries and c.role not in CONVERSATION_ROLES]
     assert missing == [], f"sa persona sans son tempérament : {missing}"
+    told = [c for c in lived.persona_calls if c.carries and c.role in CONVERSATION_ROLES]
+    assert told == [], f"son tempérament dit en conversation : {told}"
     roles = {c.role for c in lived.persona_calls}
     assert {"reply", "initiative", "journal", "dream", "narrative"} <= roles, roles
     assert any(c.depth == "compact" for c in lived.persona_calls), roles
