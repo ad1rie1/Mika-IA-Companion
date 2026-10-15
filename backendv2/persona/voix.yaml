@@ -4070,7 +4070,8 @@ world:
     # Allongée.
     lie: allongée
 
-  # « AUTOUR DE TOI » (world/__init__.py, ``around``), lue à chaque réponse et initiative quand elle est éveillée.
+  # « AUTOUR DE TOI » (world/__init__.py, ``around``) : ce que lui rend l'outil world_look quand elle est éveillée
+  # (plus une section de la conversation).
   # {where} : sa posture et l'endroit (world.around.where_place) ; {things} : des objets, chacun « nom (`id`,
   # état) : actions », séparés par « ; ».
   around:
@@ -4226,6 +4227,14 @@ world:
     busy: >-
       Tu es déjà en train de faire autre chose (tu seras {where}) : une chose à la fois. Celle-ci n'est pas faite ;
       tu pourras la faire une fois l'autre finie, à ta prochaine réplique.
+
+    # world_look : regarder autour d'elle (ce que disait la section « AUTOUR DE TOI », qui n'est plus lue à chaque
+    # réplique : le décor y était raconté à tout bout de champ).
+    look:
+      # L'outil world_look.
+      description: >-
+        Regarder autour de toi : où tu es, ce que tu fais, ce que tu as à portée de main (avec les identifiants
+        qu'attend interact). Quand on te demande ce que tu fais ou où tu es, ou avant de bouger ; pas pour meubler.
 
     # go_to : aller ailleurs dans sa chambre (un déplacement par épisode).
     go_to:

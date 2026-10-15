@@ -42,10 +42,10 @@ from mika.faculties.world import notice, plan
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.codec import h64
 from mika.kernel.events import Content, Draft
-from mika.kernel.faculty import CatchUp, Faculty, ToolResult, Zone
+from mika.kernel.faculty import CatchUp, Faculty, ToolResult
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
-from mika.kernel.prompt import SectionBody
+from mika.kernel.prompt import SectionBody, readable
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab.affect import Emotion
@@ -661,9 +661,12 @@ def _thing(s: WorldState, me: w.ActorState, oid: str, now: int) -> str:
         f" : {acts}" if acts else "")
 
 
-@WORLD.section("world", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, after=["rhythm"], trim_rank=70,
-               title=phrase("world.around.title"), reads=[body_c.SLEEP, identity_c.PERSON, identity_c.IDENTITY])
 def _around(s: WorldState, frame: Frame, enrich: Any) -> str | SectionBody | None:
+    """Ce qui l'entoure : où elle est, ce qu'elle fait, ce qu'elle a à portée (et ce qu'on a changé chez elle).
+
+    Plus une section de la conversation : lu à chaque réplique, le décor y était raconté à tout bout de champ
+    (« coucou » → « il pleut depuis des heures, je regarde par la fenêtre » ; banc de recherche, 2026-10-15). Elle
+    le regarde quand elle en a besoin, par l'outil ``world_look``."""
     if not _awake(frame):
         return None  # elle dort, dans son lit : rien à dire à qui la réveille qu'il ne voie
     text = around(s, frame.now, params(frame.env.params_of("world", frame.root)))
@@ -671,6 +674,20 @@ def _around(s: WorldState, frame: Frame, enrich: Any) -> str | SectionBody | Non
     if touched is None:
         return text
     return SectionBody(f"{text}\n{touched[0]}", level=touched[1])
+
+
+class LookArgs(BaseModel):
+    pass
+
+
+@WORLD.tool("world_look", description=phrase("world.tools.look.description"), args=LookArgs, bundle="world",
+            episodes=CONVERSATIONAL, max_calls_per_episode=1)
+async def world_look(args: LookArgs, ctx: Any) -> ToolResult:
+    frame: Frame = ctx.frame
+    body = _around(ctx.state, frame, None)
+    if body is None:
+        return ToolResult(ok=False, content=phrase("world.tools.asleep"))
+    return ToolResult(content=phrase("world.around.title") + "\n" + readable(body, frame.audience))
 
 
 # ── Ce qu'elle n'a pas pu faire ───────────────────────────────────────────

@@ -441,7 +441,8 @@ ses identifiants sont dans `ARCHITECTURE.md`. Ce qui suit dit l'essentiel de cha
   - Un réveil par API qui passe outre son rythme la tire du sommeil (`body.roused`).
 - **world** (ADR 0050, 0051, 0098)
   - Son monde et son corps dedans : pièces, lieux, objets. Le monde par défaut est `faculties/world/chambre.json`.
-  - Outils `go_to` et `interact` ; section « AUTOUR DE TOI ».
+  - Outils `go_to`, `interact` et `world_look`. Ce qui l'entoure (« AUTOUR DE TOI ») n'est plus une section de la
+    conversation : elle le regarde par `world_look` quand elle en a besoin (le décor était raconté à tout bout de champ).
   - Le coucher et le bureau sont des réflexes. Chaque geste se conclut à son échéance.
   - Une opératrice édite le monde, et elle remarque ce qu'on a changé chez elle.
   - Désœuvrée, elle s'occupe de ce qui nourrit ce qui lui manque (`occupy_per_day`).

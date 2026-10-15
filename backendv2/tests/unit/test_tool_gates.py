@@ -179,8 +179,9 @@ def test_in_conversation_the_core_is_in_hand_and_the_rest_is_fetched_on_demand(t
     deferred = {t.name for t in req.tools if t.deferred}
     in_hand = {t.name for t in req.tools if not t.deferred}
     # en main, ce qu'une conversation sert vraiment (chercher dans sa mémoire, poser un rappel) ; le reste,
-    # l'identité comprise, à la demande — une réponse ordinaire ne porte pas trente outils d'emblée
-    assert {"memory_search", "goal_remind"} <= in_hand and len(in_hand) <= 6
+    # l'identité comprise, à la demande — une réponse ordinaire ne porte pas trente outils d'emblée. Sept depuis que
+    # « AUTOUR DE TOI » n'est plus lu à chaque réplique : world_look le remplace, dans le lot du monde
+    assert {"memory_search", "goal_remind", "world_look"} <= in_hand and len(in_hand) <= 7
     assert {"identity_whoami_with", "social_about"} <= deferred  # relire une section présente : à la demande
     assert {"forge_write", "rss_list", "camera_look"} <= deferred
     catalogue = req.system_stable.split(CATALOGUE_HEADER, 1)[1]
