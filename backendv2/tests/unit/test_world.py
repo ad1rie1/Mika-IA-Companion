@@ -92,6 +92,24 @@ def test_regarder_dehors_et_le_dire(tmp_path):
     assert "en train de regarder dehors" in (_around(frame.state("world"), frame, None) or "")
 
 
+def test_le_decor_se_regarde_il_ne_se_lit_plus_a_chaque_replique(tmp_path):
+    """« AUTOUR DE TOI » n'est plus une section de la conversation (le décor y était raconté à tout bout de champ) :
+    elle regarde autour d'elle quand elle en a besoin, par world_look, qui rend la même chose."""
+    respond = _calling(("world_look", {}))
+    seen: list[LLMRequest] = []
+
+    def spy(req: LLMRequest) -> LLMResponse:
+        seen.append(req)
+        return respond(req)
+
+    _, out, _ = _run(tmp_path, spy, _talk("Tu fais quoi ?"))
+    first = seen[0]
+    assert not any("AUTOUR DE TOI" in m.content for m in first.messages) and "AUTOUR DE TOI" not in first.system_stable
+    assert "world_look" in {t.name for t in first.tools if not t.deferred}
+    (looked,) = respond.results  # type: ignore[attr-defined]
+    assert looked.startswith("AUTOUR DE TOI") and "`" in looked, "où elle est, et les identifiants qu'attend interact"
+
+
 def test_ouvrir_sa_fenetre(tmp_path):
     _, out, _ = _run(tmp_path, _calling(("interact", {"object": "window_pane", "action": "ouvrir"})),
                      _talk("Il fait chaud, non ?"))

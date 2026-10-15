@@ -132,7 +132,6 @@ SECTION_LABELS: dict[str, str] = {
     "greeting_tone": "Le ton de ses bonjours (sa persona)",
     # ADR 0046
     "self_said": "Ce qu'elle a déjà dit d'elle-même", "register": "Le ton entre eux (selon leur lien)",
-    "world": "Autour d'elle : son corps, ce qu'elle a à portée",
     # ADR 0053
     # ADR 0062
     "sent_files": "Ce qu'elle lui a déjà envoyé (fichiers)", "dessins": "Ses dessins pour la personne",
