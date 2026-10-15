@@ -26,6 +26,8 @@ from mika.contracts import needs as needs_c
 from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.faculties.affect import overflow_evidence
+from mika.faculties.self.character import temperament_in_words
+from mika.faculties.self.persona import render
 from mika.faculties.social.initiative import _arrivals
 from mika.kernel import forms
 from mika.kernel.clock import DAY, HOUR, MINUTE, US
@@ -165,8 +167,10 @@ def test_expressiveness_shows_on_her_face(tmp_path):
 
 
 def test_what_she_is_told_of_herself(tmp_path):
-    """Une tsundere avec une précision : le modèle lit chacun de ses traits avec sa mesure, sa défense, sa
-    précision ; au milieu partout, chaque trait se dit à 50 %, comme la plupart des gens."""
+    """En conversation, une tsundere avec une précision lit ses traits marqués en mots, sans mesure — sa défense et
+    la précision comprises (sans elle, une tsundere n'était plus reconnue : banc de recherche, 2026-10-15) ; au milieu
+    partout, rien ne se dit. Hors conversation (son journal, ses rêves, son travail), le bloc complet : chaque trait
+    avec sa mesure, sa défense, sa précision ; au milieu, chaque trait à 50 %, comme la plupart des gens."""
     tsundere = profile("tsundere").model_copy(update={"notes": {"reactivity": "tu t'énerves quand on t'appelle poulet"}})
 
     async def scenario(kernel, voice):  # type: ignore[no-untyped-def]
@@ -175,13 +179,19 @@ def test_what_she_is_told_of_herself(tmp_path):
 
     got = each(tmp_path, {"tsundere": tsundere, "neutre": T.Temperament()}, scenario)
     title = phrase("self.temperament.title")
-    assert title in got["tsundere"] and title in got["neutre"]
+    words = temperament_in_words(tsundere)
+    assert words and words in got["tsundere"] and title not in got["tsundere"]
+    assert phrase("self.temperament.trait.defense.attack")[:30].lower() in words
+    assert "poulet" in words and "%" not in words
+    assert temperament_in_words(T.Temperament()) == "" and title not in got["neutre"]
+    told = {k: render(self_c.PersonaDoc(name="Mika", temperament=t), "full")
+            for k, t in {"tsundere": tsundere, "neutre": T.Temperament()}.items()}
     mask = phrase("self.temperament.trait.mask.high")
     for line in (phrase("self.temperament.name.mask") + " : 90 % — " + mask[0].lower() + mask[1:],
                  phrase("self.temperament.trait.defense.attack"),
                  phrase("self.temperament.precisely", note="tu t'énerves quand on t'appelle poulet")):
-        assert line in got["tsundere"]
-    assert phrase("self.temperament.name.mask") + " : 50 % — " + phrase("self.temperament.middle") in got["neutre"]
+        assert line in told["tsundere"]
+    assert phrase("self.temperament.name.mask") + " : 50 % — " + phrase("self.temperament.middle") in told["neutre"]
 
 
 HURT = "[EN_FACE: angry 0.7 | geste : blessant]"

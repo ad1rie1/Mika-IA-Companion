@@ -9,8 +9,11 @@ avec sa mesure (« Introspection : 90 % — tu repenses longuement… ») : le m
 S'y ajoutent son humeur de fond, sa réaction quand on la blesse et sa défense quand on la touche. La précision que
 l'opératrice a pu écrire pour un trait (« tu t'énerves quand on t'appelle poulet ») suit sa phrase, sans la remplacer.
 Des tendances, jamais une obligation ; les mesures sont pour elle seule. Le bloc fait partie de sa persona
-(``persona.render``, dans ses deux profondeurs) : ses répliques, ses initiatives, ses murmures, son travail, ses
-brouillons, son journal, ses rêves et son récit le lisent tous.
+(``persona.render``, dans ses deux profondeurs) hors conversation : ses murmures, son travail, ses brouillons, son
+journal, ses rêves et son récit le lisent. En conversation (ses répliques, ses initiatives), il se dit en mots
+(``temperament_in_words``) : ses traits nettement marqués, sa réaction, sa défense, sans mesure — en 28 lignes chiffrées,
+elle jouait ses traits au lieu de parler ; sans rien, une tsundere n'était plus reconnue (banc de recherche,
+2026-10-15).
 """
 
 from __future__ import annotations
@@ -25,6 +28,8 @@ from mika.vocab.phrasebook import phrase
 #: modèle adoucissait les archétypes)
 LOW, HIGH = 0.4, 0.6
 VERY_LOW, VERY_HIGH = 0.15, 0.85
+#: en conversation, seuls les traits nettement marqués se disent (0,3 ou moins, 0,7 ou plus), quatre au plus
+CLEARLY, IN_WORDS = 0.2, 4
 _EPS = 1e-9
 #: les familles de la matrice et le nom de leur titre (``self.temperament.family.*``)
 FAMILIES = {T.FEEL: "feel", T.SHOW: "show", T.ACT: "act", T.OTHERS: "others", T.SELF: "self", T.BODY: "body"}
@@ -83,3 +88,33 @@ def temperament_text(t: T.Temperament) -> str:
     traits, et que ce sont des tendances."""
     return "\n".join([phrase("self.temperament.title"), phrase("self.temperament.lead"), *told(t),
                       phrase("self.temperament.tail")])
+
+
+def _noted(line: str, note: str) -> str:
+    """Un trait en mots, et la précision de l'opératrice à sa suite (« …, tu t'énerves quand on t'appelle poulet »)."""
+    note = note.strip().rstrip(".")
+    return f"{line} — {note}" if note else line
+
+
+def temperament_in_words(t: T.Temperament) -> str:
+    """Son tempérament en conversation, à la place du bloc : ses traits nettement marqués en mots (les plus marqués
+    d'abord, ``IN_WORDS`` au plus), sa réaction quand on la blesse, sa défense quand on la touche, et chaque précision
+    de l'opératrice — sans mesure ni « comme la plupart des gens ». « » : rien de marqué, rien à dire."""
+    marked = sorted((-abs(float(getattr(t, f.path)) - 0.5), f.path) for f in _FIELDS
+                    if f.path not in ("background", "reaction", "defense")
+                    and abs(float(getattr(t, f.path)) - 0.5) >= CLEARLY - _EPS)[:IN_WORDS]
+    said: list[str] = []
+    for _dist, key in marked:
+        value = float(getattr(t, key))
+        line = _lower(phrase(f"self.temperament.trait.{key}.{'low' if value < 0.5 else 'high'}")).rstrip(".")
+        if value <= VERY_LOW + _EPS or value >= VERY_HIGH - _EPS:
+            line += phrase("self.temperament.in_words_marked")
+        said.append(_noted(line, t.notes.get(key, "")))
+    for key in ("reaction", "defense"):
+        if getattr(t, key):
+            said.append(_noted(_lower(phrase(f"self.temperament.trait.{key}.{getattr(t, key)}")).rstrip("."),
+                               t.notes.get(key, "")))
+    shown = {key for _d, key in marked} | {k for k in ("reaction", "defense") if getattr(t, k)}
+    said += [note.strip().rstrip(".") for key, note in t.notes.items() if key not in shown and note.strip()]
+    return phrase("self.temperament.in_words", traits=" ; ".join(said)) if said else ""
+
