@@ -49,6 +49,9 @@ RESUME_MARKER = "(reprise de la conversation)"
 #: d'ailleurs (``untrusted``) est de l'arrière-plan.
 BACKGROUND = "background"
 INTERLOCUTOR = "interlocutor"
+#: Le tout dernier mot de l'état interne, juste avant son message (même après la personne en face) : ce qui doit
+#: peser sur sa réponse elle-même — une consigne placée en tête du prompt ne tient pas contre un tic du modèle.
+LAST = "last"
 
 #: Combien de fils le composeur garde en mémoire pour l'hystérésis de leur coupe.
 HISTORY_KEYS_MAX = 512
@@ -272,6 +275,8 @@ def _band(spec: SectionSpec) -> int:
     """La place d'une section dans l'état interne : arrière-plan, elle, la personne en face."""
     if spec.untrusted or BACKGROUND in spec.tags:
         return 0
+    if LAST in spec.tags:
+        return 3
     return 2 if INTERLOCUTOR in spec.tags else 1
 
 

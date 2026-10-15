@@ -25,6 +25,8 @@ from mika.faculties.attention import ATTENTION
 from mika.faculties.body import BODY
 from mika.faculties.expression import EXPRESSION
 from mika.faculties.expression import parse as parse_reply
+from mika.faculties.expression import polish as polish_reply
+from mika.faculties.expression import review as review_reply
 from mika.faculties.goals import GOALS, step_brief
 from mika.faculties.identity import IDENTITY, audience_for
 from mika.faculties.memory import MEMORY
@@ -58,7 +60,7 @@ from mika.plugins.web import WEB
 from mika.runtime import params
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.sim.world import Composition
-from mika.vocab.episodes import VOICE_ROLES, Kind, Role, Tag
+from mika.vocab.episodes import CONVERSATIONAL, VOICE_ROLES, Kind, Role, Tag
 
 log = logging.getLogger("mika.composition")
 
@@ -211,6 +213,12 @@ def deps(**kw: Any) -> KernelDeps:
         "persona": persona_for,
         "audience_of": audience_for,
         "parsers": [parse_reply],
+        "reviewers": [review_reply],
+        "reviewed": sorted(CONVERSATIONAL),
+        # la seconde passe : seulement si l'opératrice donne un modèle au rôle « polish », et sur ses réponses, où
+        # « TA RÉPONSE » dit ses traits marqués (ADR 0112)
+        "polishers": [polish_reply],
+        "polished": [Kind.REPLY],
         "reply_kind": Kind.REPLY,
         "reply_wait": _reply_wait,
         "lanes": LANES,

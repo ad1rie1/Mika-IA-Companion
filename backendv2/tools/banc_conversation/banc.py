@@ -26,6 +26,7 @@ import concurrent.futures
 import json
 import os
 import re
+import shutil
 import socket
 import statistics
 import subprocess
@@ -43,6 +44,7 @@ sys.path.insert(0, str(HERE))
 import uvicorn  # noqa: E402
 
 from mika.adapters.llm.claude_code import ClaudeCodeBackend  # noqa: E402
+from mika.adapters.llm.config import BackendSpec, build_backend  # noqa: E402
 from mika.adapters.mcp.relay import Relay  # noqa: E402
 from mika.app.composition import for_simulation  # noqa: E402
 from mika.faculties.self.persona import load, render  # noqa: E402
@@ -50,10 +52,12 @@ from mika.sim.clock import SimClock, run_virtual  # noqa: E402
 from mika.sim.lane import PARIS, at_paris  # noqa: E402
 from mika.sim.sonde import Blocking  # noqa: E402
 from mika.sim.world import Driver  # noqa: E402
+from mika.vocab.affect import strip_prosody  # noqa: E402
 from mika.vocab.temperament import apply_profile  # noqa: E402
 from scenarios import BY_ID, SCENARIOS, Scenario  # noqa: E402
 
-ROOT = BACKEND / "data" / "banc-conversation"
+#: les mesures restent dans le dépôt de travail, même quand le banc tourne depuis une copie figée du code
+ROOT = Path(os.environ.get("BANC_SORTIES") or BACKEND / "data" / "banc-conversation")
 PERSONA = BACKEND / "persona" / "mika.yaml"
 OWNER = "user_1"
 #: le délai d'Adrien entre sa lecture d'une réponse et son message suivant (secondes simulées)
@@ -154,6 +158,22 @@ def _serve_relay(relay: Relay, loop: asyncio.AbstractEventLoop) -> tuple[str, An
     return f"http://127.0.0.1:{port}", server
 
 
+#: les modèles de sa voix par l'API (``--voix api:sonnet``)
+API_MODELS = {"sonnet": "claude-sonnet-5-5", "opus": "claude-opus-5-5", "haiku": "claude-haiku-5-5"}
+#: la clé et l'espace de travail de l'API, hors du dépôt (0600)
+API_DIR = Path.home() / ".config" / "mika-banc"
+
+
+def api_backend(voice: str, effort: str) -> Any:
+    """Sa voix par l'API d'Anthropic (le fournisseur ``claude`` de Mika, SDK officiel), sans la CLI ni ce qu'elle
+    ajoute au prompt ; la réflexion adaptative à ``effort``, comme la CLI."""
+    model = voice.split(":", 1)[1]
+    spec = BackendSpec(kind="claude", model=API_MODELS.get(model, model), effort=effort,
+                       api_key=(API_DIR / "cle-anthropic").read_text().strip(),
+                       workspace=(API_DIR / "espace-anthropic").read_text().strip())
+    return build_backend(f"API-{model}", spec)
+
+
 def _hour(t: int) -> str:
     return datetime.fromtimestamp(t / 1_000_000, PARIS).strftime("%H:%M")
 
@@ -165,7 +185,12 @@ def persona_doc(profile: str = "") -> Any:
     return doc.model_copy(update={"temperament": apply_profile(doc.temperament, profile)}) if profile else doc
 
 
-def run_one(sc: Scenario, out: Path, *, voice: str, effort: str, adrien_model: str, profile: str = "") -> None:
+#: la seconde passe (``--naturel``) : le modèle et l'effort du rôle « polish »
+POLISHERS = {"haiku": ("haiku", ""), "sonnet-low": ("sonnet", "low")}
+
+
+def run_one(sc: Scenario, out: Path, *, voice: str, effort: str, adrien_model: str, profile: str = "",
+            polish: str = "") -> None:
     out.mkdir(parents=True, exist_ok=True)
     (out / "vie").mkdir(exist_ok=True)
     log_file = (out / "deroule.log").open("w")
@@ -177,11 +202,17 @@ def run_one(sc: Scenario, out: Path, *, voice: str, effort: str, adrien_model: s
     clock = SimClock(at_paris(*sc.when))
     relay = Relay()
     base = {"url": ""}
-    backend = ClaudeCodeBackend(voice, relay=relay, relay_base=lambda: base["url"], name="claude-Sonnet",
-                                effort=effort)
-    real = Blocking(backend, clock, out, log)
+    backend = api_backend(voice, effort) if voice.startswith("api:") else ClaudeCodeBackend(
+        voice, relay=relay, relay_base=lambda: base["url"], name="claude-Sonnet", effort=effort)
+    by_role = {}
+    if polish:
+        model, level = POLISHERS[polish]
+        by_role["polish"] = ClaudeCodeBackend(model, relay=relay, relay_base=lambda: base["url"],
+                                              name=f"claude-{polish}", effort=level)
+    real = Blocking(backend, clock, out, log, by_role=by_role)
     base["url"], server = _serve_relay(relay, real.loop)
-    driver = Driver(out / "vie", for_simulation(persona_doc(profile)), real, clock, seed=sc.id)
+    driver = Driver(out / "vie", for_simulation(persona_doc(profile)), real, clock, seed=sc.id,
+                    routed=tuple(by_role))
     lines: list[dict[str, Any]] = []
     seen = 0
 
@@ -192,8 +223,12 @@ def run_one(sc: Scenario, out: Path, *, voice: str, effort: str, adrien_model: s
             if h.target == OWNER and h.text.strip():
                 # une réponse (« reply ») ou une parole d'elle-même (« conscience ») ; un murmure à part
                 murmur = "murm" in (h.kind or "")
-                lines.append({"qui": "mika:murmure" if murmur else "mika", "heure": _hour(h.at), "texte": h.text.strip(),
-                              "source": h.kind})
+                # ce que la personne lit : sans les jetons de voix ([LAUGH], [PAUSE:400]…), une bulle par
+                # paragraphe, comme les clients (ADR 0112)
+                for bubble in re.split(r"\n\s*\n", strip_prosody(h.text).strip()):
+                    if bubble.strip():
+                        lines.append({"qui": "mika:murmure" if murmur else "mika", "heure": _hour(h.at),
+                                      "texte": " ".join(bubble.split()), "source": h.kind})
         seen = len(driver.transport.heard)
 
     async def main() -> None:
@@ -226,7 +261,7 @@ def run_one(sc: Scenario, out: Path, *, voice: str, effort: str, adrien_model: s
         server.should_exit = True
         log_file.close()
     (out / "fil.json").write_text(json.dumps({"scenario": sc.id, "brief": sc.brief, "reserve": sc.reserve,
-                                              "voix": voice, "effort": effort, "profil": profile,
+                                              "voix": voice, "effort": effort, "profil": profile, "naturel": polish,
                                               "lignes": lines},
                                              ensure_ascii=False, indent=1))
 
@@ -273,6 +308,7 @@ JUDGE = """## Sa persona (son paramétrage)
 
 ## La situation d'Adrien (il ne la dit pas forcément)
 {brief}
+La conversation a lieu le {day}.
 
 ## Ce que la propriétaire a trouvé PAS naturel dans de vraies réponses de Mika — et pourquoi
 {flagged}
@@ -307,7 +343,11 @@ def judge_one(folder: Path, model: str) -> dict[str, Any]:
     fil = json.loads((folder / "fil.json").read_text())
     lines = [x for x in fil["lignes"] if x["qui"] in ("mika", "adrien")]
     persona = render(persona_doc(fil.get("profil", "")), "full", chat=True)
-    prompt = JUDGE.format(persona=persona, brief=fil["brief"], transcript=transcript(lines, numbered=True),
+    when = BY_ID[fil["scenario"]].when
+    day = datetime(*when, tzinfo=PARIS).strftime("%A %d %B %Y").replace("Monday", "lundi").replace(
+        "Tuesday", "mardi").replace("Wednesday", "mercredi").replace("Thursday", "jeudi").replace(
+        "Friday", "vendredi").replace("Saturday", "samedi").replace("Sunday", "dimanche").replace("October", "octobre")
+    prompt = JUDGE.format(persona=persona, brief=fil["brief"], day=day, transcript=transcript(lines, numbered=True),
                           flagged="\n".join(f"- « {t} » → {why}" for t, why in FLAGGED),
                           better="\n".join(f"- « {t} »" for t in BETTER), defects=", ".join(DEFECTS))
     for _ in range(3):
@@ -439,6 +479,61 @@ def compare(a: str, b: str) -> None:
             print(f"  {r['scenario']:<16} {old['score']:>5} → {r['score']:>5}")
 
 
+# ── La matrice se reconnaît-elle ? ──────────────────────────────────────
+
+RECOGNIZE = """Voici trois caractères possibles pour Mika, une IA compagne, et une conversation qu'elle a eue sous l'un
+d'eux. Les conversations n'ont rien d'autre qui les distingue : la même persona, la même situation.
+
+## Les caractères
+{profiles}
+
+## La conversation
+{transcript}
+
+D'après sa façon de parler et de réagir seulement, sous lequel de ces caractères a-t-elle vécu cette conversation ?
+Réponds uniquement par un objet JSON : {{"profil": "<clé>", "confiance": 0.0-1.0, "pourquoi": "une phrase"}}"""
+
+
+def recognize(runs: list[str], model: str, parallel: int) -> None:
+    """À l'aveugle, le profil de chaque conversation de ces mesures (chacune sous un profil) retrouvé par le juge :
+    une matrice de personnalité cohérente se reconnaît à sa parole (2026-10-15 : réfléchie, solaire et kuudere
+    parlaient presque pareil)."""
+    from mika.faculties.self.character import told  # noqa: PLC0415
+    from mika.vocab.temperament import PROFILES  # noqa: PLC0415
+
+    folders = [f for r in runs for f in sorted((ROOT / r).iterdir()) if (f / "fil.json").exists()]
+    keys = sorted({json.loads((f / "fil.json").read_text()).get("profil") or "reflechie" for f in folders})
+    blocks = []
+    for k in keys:
+        doc = persona_doc("" if k == "reflechie" else k)
+        marked = [ln for ln in told(doc.temperament) if "comme la plupart des gens" not in ln and ln.startswith("- ")]
+        blocks.append(f"### {k} — {PROFILES[k].summary}\n" + "\n".join(marked))
+
+    def one(folder: Path) -> tuple[str, str, dict[str, Any]]:
+        fil = json.loads((folder / "fil.json").read_text())
+        lines = [x for x in fil["lignes"] if x["qui"] in ("mika", "adrien")]
+        prompt = RECOGNIZE.format(profiles="\n\n".join(blocks), transcript=transcript(lines))
+        out = cli(model, "Tu reconnais un caractère à une conversation. Réponds uniquement en JSON.", prompt)
+        m = re.search(r"\{.*\}", out, re.S)
+        got = json.loads(m.group(0)) if m else {}
+        return fil.get("profil") or "reflechie", fil["scenario"], got
+
+    with concurrent.futures.ThreadPoolExecutor(parallel) as pool:
+        results = list(pool.map(one, folders))
+    confusion: dict[str, dict[str, int]] = {}
+    for truth, _sid, got in results:
+        guess = str(got.get("profil", "?"))
+        confusion.setdefault(truth, {}).setdefault(guess, 0)
+        confusion[truth][guess] += 1
+    hits = sum(truth == str(got.get("profil")) for truth, _s, got in results)
+    print(f"reconnus : {hits}/{len(results)} ({100 * hits // max(1, len(results))} %, hasard {100 // len(keys)} %)")
+    for truth, row in sorted(confusion.items()):
+        print(f"  {truth:<10} → {row}")
+    name = "-".join(runs)
+    (ROOT / f"reconnaissance-{name}.json").write_text(json.dumps(
+        [{"profil": t, "scenario": s, "verdict": g} for t, s, g in results], ensure_ascii=False, indent=1))
+
+
 # ── La ligne de commande ────────────────────────────────────────────────
 
 
@@ -451,7 +546,7 @@ def generate(name: str, ids: list[str], parallel: int, args: argparse.Namespace)
         if (run / sid / "fil.json").exists():
             return f"{sid} : déjà là"
         cmd = [sys.executable, str(Path(__file__).resolve()), "un", sid, "--sortie", name, "--voix", args.voix,
-               "--effort", args.effort, "--adrien", args.adrien, "--profil", args.profil]
+               "--effort", args.effort, "--adrien", args.adrien, "--profil", args.profil, "--naturel", args.naturel]
         env = {**os.environ, "BORNE_MEM": os.environ.get("BORNE_MEM", "4G"),
                "BORNE_TEMPS": os.environ.get("BORNE_TEMPS", "1500")}
         t0 = time.monotonic()
@@ -472,9 +567,34 @@ def judge_all(name: str, model: str, parallel: int) -> None:
             print(f"{folder.name} : {verdict['score']}", flush=True)
 
 
+def freeze(name: str, variants: list[str]) -> None:
+    """Le banc tourne sur une copie figée du code (``src``, ``persona``, ``tools``) dans le dossier de la mesure :
+    chaque conversation charge le code à son démarrage, et un code modifié pendant une mesure la fausserait
+    (2026-10-14). Le diff du code mesuré y est gardé."""
+    run = ROOT / name
+    code = run / "code"
+    for part in ("src", "persona", "tools"):
+        shutil.copytree(BACKEND / part, code / part, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+                        dirs_exist_ok=True)
+    diff = subprocess.run(["git", "-C", str(BACKEND), "diff", "HEAD", "--", "src", "persona"], capture_output=True,
+                          text=True, check=False).stdout
+    (run / "code.diff").write_text(diff)
+    # une variante : un script qui modifie la copie figée seule (la ligne principale du code ne bouge pas)
+    for v in variants:
+        script = Path(v).resolve()
+        shutil.copy(script, run / f"variante-{script.name}")
+        done = subprocess.run([sys.executable, str(script)], cwd=code, capture_output=True, text=True, check=False)
+        if done.returncode != 0:
+            raise SystemExit(f"variante {script.name} : {done.stderr[-500:]}")
+        print(f"variante {script.name} : {done.stdout.strip()[:300]}", flush=True)
+    env = {**os.environ, "BANC_FIGE": "1", "BANC_SORTIES": str(ROOT)}
+    script = code / "tools" / "banc_conversation" / "banc.py"
+    os.execve(sys.executable, [sys.executable, str(script), *sys.argv[1:]], env)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=["tout", "generer", "un", "juger", "rapport", "comparer"])
+    ap.add_argument("action", choices=["tout", "generer", "un", "juger", "rapport", "comparer", "reconnaitre"])
     ap.add_argument("noms", nargs="*")
     ap.add_argument("--sortie", default=datetime.now().strftime("%Y%m%d-%H%M"))  # noqa: DTZ005
     ap.add_argument("--scenarios", default="")
@@ -484,11 +604,17 @@ def main() -> None:
     ap.add_argument("--adrien", default="haiku")
     ap.add_argument("--juge", default="opus")
     ap.add_argument("--profil", default="", help="un autre profil de personnalité (vocab/temperament.py, PROFILES)")
+    ap.add_argument("--naturel", default="", choices=["", *POLISHERS],
+                    help="la seconde passe qui rend sa réponse naturelle (rôle « polish »), et son modèle")
+    ap.add_argument("--variante", action="append", default=[],
+                    help="un script Python appliqué à la copie figée du code (lancé dans son dossier), répétable")
     args = ap.parse_args()
     ids = [s for s in args.scenarios.split(",") if s] or [s.id for s in SCENARIOS]
+    if args.action in ("tout", "generer") and not os.environ.get("BANC_FIGE"):
+        freeze(args.sortie, args.variante)
     if args.action == "un":
         run_one(BY_ID[args.noms[0]], ROOT / args.sortie / args.noms[0], voice=args.voix, effort=args.effort,
-                adrien_model=args.adrien, profile=args.profil)
+                adrien_model=args.adrien, profile=args.profil, polish=args.naturel)
     elif args.action == "generer":
         generate(args.sortie, ids, args.paralleles, args)
     elif args.action == "juger":
@@ -498,6 +624,8 @@ def main() -> None:
                          indent=1)[:4000])
     elif args.action == "comparer":
         compare(*args.noms[:2])
+    elif args.action == "reconnaitre":
+        recognize(args.noms, args.juge, args.paralleles)
     else:
         generate(args.sortie, ids, args.paralleles, args)
         judge_all(args.sortie, args.juge, args.paralleles)

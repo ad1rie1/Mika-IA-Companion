@@ -225,6 +225,13 @@ class Gateway:
                 out[role] = ""
         return out
 
+    def serving(self, role: str) -> str:
+        """Le fournisseur qui sert vraiment ce rôle (replis compris) ; « » : aucun (comme ``LiveGateway``)."""
+        try:
+            return self.resolve(role)
+        except UnconfiguredRole:
+            return ""
+
     def resolve(self, role: str) -> str:
         seen = set()
         r: str | None = role

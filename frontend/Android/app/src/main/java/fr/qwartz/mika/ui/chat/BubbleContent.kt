@@ -32,6 +32,16 @@ object BubbleContent {
         }
     }
 
+    /** Ce qui sépare deux bulles d'une réponse de Mika : une ligne vide. */
+    private val BREAK = Regex("\\n\\s*\\n")
+
+    /**
+     * Les bulles d'une réponse de Mika, dans l'ordre (une seule sans ligne vide) : le serveur garde une
+     * seule réponse et sépare ses bulles par une ligne vide (ADR 0112).
+     */
+    fun parts(text: String): List<String> =
+        text.split(BREAK).map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { listOf(text.trim()) }
+
     /** « 21:04 » sous la bulle. */
     fun time(ts: Long, zone: ZoneId): String = TIME.format(Instant.ofEpochMilli(ts).atZone(zone))
 
@@ -56,10 +66,10 @@ object BubbleContent {
      * Une bulle = un nœud pour le lecteur d'écran : « Toi, 21 h 04, envoyé : salut » ou
      * « Mika, 21 h 05 : coucou. Fichiers : liste.md ».
      */
-    fun describe(m: StoredMessage, read: Boolean, zone: ZoneId): String {
+    fun describe(m: StoredMessage, read: Boolean, zone: ZoneId, part: String? = null): String {
         val who = if (m.sender == Sender.USER) "Toi" else "Mika"
         val head = listOfNotNull(who, spokenTime(m.ts, zone), status(m, read)).joinToString(", ")
-        val body = InlineMarkup.plain(text(m))
+        val body = InlineMarkup.plain(part ?: text(m))
         val files = m.attachments.map { it.name }.filter { it.isNotEmpty() }
         val tail = if (files.isEmpty()) "" else (if (body.isEmpty()) "" else ". ") + "Fichiers : " + files.joinToString(", ")
         return "$head : $body$tail"

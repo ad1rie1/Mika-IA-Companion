@@ -57,6 +57,19 @@ class ConversationCuesTest {
         assertTrue(ConversationCues.readingSeconds(60) in 2f..3.5f)
         assertEquals(3.5f, ConversationCues.readingSeconds(2_000), 1e-6f)
     }
+
+    @Test fun `ses bulles d'une même réponse arrivent ensemble, et elle les dit l'une après l'autre`() {
+        val cues = ConversationCues()
+        cues.onItems(opening, watching = true)
+        val reply = StoredMessage("c'est quoi comme réunion ?\n\nen tout cas, **bon courage**", Sender.MIKA, ts = 3, localId = 3)
+        val items = opening + ChatItem.Bubble("m3", reply, read = false, part = "c'est quoi comme réunion ?", last = false) +
+            ChatItem.Bubble("m3.1", reply, read = false, part = "en tout cas, **bon courage**")
+        val cue = cues.onItems(items, watching = true)
+        assertEquals(
+            ConversationCues.Cue.Speak("m3", "c'est quoi comme réunion ?", then = listOf(ConversationCues.Cue.Speak("m3.1", "en tout cas, bon courage"))),
+            cue,
+        )
+    }
 }
 
 class SpeechTrackTest {

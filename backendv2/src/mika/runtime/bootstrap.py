@@ -82,6 +82,11 @@ class KernelDeps:
     persona: PersonaProvider | None = None
     audience_of: AudienceResolver | None = None
     parsers: Sequence[Parser] = ()
+    #: la relecture de ses paroles (``pipeline.Reviewer``) et les sortes d'épisode qu'elle relit
+    reviewers: Sequence[Any] = ()
+    reviewed: Sequence[str] = ()
+    polishers: Sequence[Any] = ()
+    polished: Sequence[str] = ()
     budget: Budget | None = None
     lanes: Mapping[str, int] | None = None
     process_lanes: Mapping[str, int] | None = None
@@ -159,7 +164,9 @@ class Kernel:
         self.ports = ports
         self.runner = EpisodeRunner(
             self.mind, deps.gateway, policies=deps.policies, persona=deps.persona,
-            audience_of=deps.audience_of, parsers=deps.parsers, budget=deps.budget, ports=ports,
+            audience_of=deps.audience_of, parsers=deps.parsers, reviewers=deps.reviewers, reviewed=deps.reviewed,
+            polishers=deps.polishers, polished=deps.polished,
+            budget=deps.budget, ports=ports,
             traces=self.traces,
         )
         self.runner.interpret = self.interpret  # une réponse s'interprète aussi : ce que le modèle a lu (ADR 0093)

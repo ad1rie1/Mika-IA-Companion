@@ -129,7 +129,8 @@ def test_the_reply_prompt_tells_her_not_to_ask_again(tmp_path):
         await kernel.stop()
 
     run_virtual(clock, main)
-    prompts = [c.messages[-1].content for c in llm.calls if c.role == "reply"]
+    # les premiers jets (une réponse relue se réécrit : ``RELIS-TOI``, test_review.py)
+    prompts = [c.messages[-1].content for c in llm.calls if c.role == "reply" and "RELIS-TOI" not in c.messages[-1].content]
     assert "Ne repose pas la question" in prompts[1]
     assert "Ne repose pas la question" not in prompts[2], "contre-exemple : une vraie réponse"
 
@@ -236,8 +237,8 @@ def test_the_reply_prompt_reminds_her_what_she_already_told(tmp_path):
 
     run_virtual(clock, main)
     prompts = [c.messages[-1].content for c in llm.calls if c.role == "reply"]
-    assert "lui a déjà dit" not in prompts[0]
-    assert "lui a déjà dit « Je dessine à mon bureau depuis un bon moment" in prompts[-1]
+    assert "déjà raconté" not in prompts[0]
+    assert "tu lui as déjà raconté « Je dessine à mon bureau depuis un bon moment" in prompts[-1]
 
 
 def test_three_messages_asking_questions_in_a_row_are_heard():
@@ -249,3 +250,13 @@ def test_three_messages_asking_questions_in_a_row_are_heard():
     assert any("posent tous des questions" in f for f in repeats(asking, 3 * M))
     calm = [asking[0], (M, "Des jeans, valeur sûre. Mission accomplie."), asking[2]]
     assert not any("posent tous des questions" in f for f in repeats(calm, 3 * M))
+
+
+def test_what_she_said_of_herself_earlier_in_the_conversation_is_quoted_too():
+    """Trois messages plus tôt, elle traînait dans sa chambre : le rappel le cite encore, le plus récent d'abord ; au
+    bout d'une heure, plus rien."""
+    said_ = [(0, "Je traînais dans ma chambre sans but."), (M, "Ah, le parking, toujours un enfer."),
+             (2 * M, "Moi j'ai relu un chapitre de mon livre.")]
+    got = said_of_herself(said_, 3 * M)
+    assert got == "Moi j'ai relu un chapitre de mon livre. » ; « Je traînais dans ma chambre sans but."
+    assert said_of_herself(said_, 2 * HOUR) is None

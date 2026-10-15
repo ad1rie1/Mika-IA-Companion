@@ -124,7 +124,7 @@ SECTION_LABELS: dict[str, str] = {
     "life": "Ce qui se passe dans la vie de la personne",
     "ahead": "Ce qui vient : le monde, et ce qu'elle vivra à travers quelqu'un",
     "learned": "Ce qu'elle a appris en lisant", "acquainted": "Les gens qu'on nomme (qu'elle connaît dans son cercle)", "veiled": "Ce qu'elle peut raconter sans nommer personne", "matter": "Ce dont elle pourrait parler",
-    "noticed": "Ce qu'elle a remarqué", "habits": "Ce qu'elle s'entend répéter",
+    "noticed": "Ce qu'elle a remarqué", "habits": "Ce qu'elle s'entend répéter", "answer": "Sa réponse (le dernier rappel)",
     "mail_mention": "Le mail important qu'elle annonce", "step_origin": "Ce qui a fait naître le but",
     "project_network": "Ce que le réseau a rendu",
     "project_answer": "La réponse à sa demande d'aide (un projet)",

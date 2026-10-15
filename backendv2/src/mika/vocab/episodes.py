@@ -120,6 +120,9 @@ class Role(enum.StrEnum):
     CAPTION = "caption"
     COMPACT = "compact"
     PLAN = "plan"
+    #: rendre sa parole naturelle, une seconde passe sur le texte seul (ADR 0112) ; sans repli : la passe ne se fait
+    #: que si l'opératrice lui donne un modèle
+    POLISH = "polish"
 
 
 VOICE_ROLES = frozenset({Role.REPLY, Role.INITIATIVE, Role.STEP, Role.MURMUR, Role.JOURNAL, Role.DREAM,

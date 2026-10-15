@@ -67,6 +67,7 @@ from mika.runtime.tools import (
     run_tool_loop,
 )
 from mika.runtime.traces import STABLE_KEY, EpisodeTraces
+from mika.vocab.episodes import Role
 
 if TYPE_CHECKING:
     from mika.runtime.mind import Mind
@@ -84,6 +85,15 @@ PersonaProvider = Callable[[Frame, str], PersonaRender]
 AudienceResolver = Callable[[Frame, "EpisodeRequest"], Audience]
 #: ``(texte, son nom)`` → (texte livrable, annotations) ; son nom vient de la persona rendue (vide : inconnu)
 Parser = Callable[[str, str], tuple[str, Mapping[str, str]]]
+#: La relecture d'une parole : (sa réponse, ses derniers messages, ce que la personne vient de dire, sa persona telle
+#: que le modèle l'a lue) → une remarque à glisser en fin d'état interne pour qu'elle la réécrive une fois, ou ``None``.
+Reviewer = Callable[[str, Sequence[str], str, str], "str | None"]
+#: La seconde passe sur une parole : (sa réponse, les messages de son appel, ce que la personne vient de dire, son nom)
+#: → (consigne, message) d'un appel qui rend sa réponse naturelle sans rien y ajouter, ou ``None`` : rien à reprendre.
+Polisher = Callable[[str, Sequence[Message], str, str], "tuple[str, str] | None"]
+#: une réponse récrite plus longue que ``_POLISH_GROWTH`` fois le premier jet (plus ``_POLISH_SLACK`` caractères) a
+#: ajouté quelque chose : on garde le premier jet
+_POLISH_GROWTH, _POLISH_SLACK = 1.5, 40
 
 
 def is_silence(text: str) -> bool:
@@ -214,6 +224,10 @@ class EpisodeRunner:
         persona: PersonaProvider | None = None,
         audience_of: AudienceResolver | None = None,
         parsers: Sequence[Parser] = (),
+        reviewers: Sequence[Reviewer] = (),
+        reviewed: Sequence[str] = (),
+        polishers: Sequence[Polisher] = (),
+        polished: Sequence[str] = (),
         composer: Composer | None = None,
         budget: Budget | None = None,
         lease_margin_s: float = 30.0,
@@ -228,6 +242,12 @@ class EpisodeRunner:
         self.persona = persona
         self.audience_of = audience_of
         self.parsers = list(parsers)
+        self.reviewers = list(reviewers)
+        #: les sortes d'épisode dont la parole se relit (``reviewers``)
+        self.reviewed = frozenset(reviewed)
+        self.polishers = list(polishers)
+        #: les sortes d'épisode dont la parole passe une seconde fois, pour être rendue naturelle (``polishers``)
+        self.polished = frozenset(polished)
         self.composer = composer or Composer()
         self.budget = budget
         self.lease_margin_us = int(lease_margin_s * 1_000_000)
@@ -429,6 +449,17 @@ class EpisodeRunner:
                     else:
                         await self._settle(ep, Outcome.ABSTAINED)
                     return
+                # la relecture : un tic du modèle repéré dans sa réponse (une question à options, la même ouverture
+                # qu'avant, sa phrase redite…) la fait réécrire une fois, la remarque en fin d'état interne. Jamais
+                # après des outils : un nouvel appel les referait (une recherche, un envoi)
+                if self.reviewers and req.kind in self.reviewed and policy.delivered and not loop.calls:
+                    revised = await self._revise(ep, eid, llm_req, text, message or "", make_ctx, persona)
+                    if revised is not None:
+                        loop, text, annotations, llm_req = revised
+                # la seconde passe : le texte seul, rendu naturel au vu du fil, sans rien y ajouter ; ses balises
+                # restent celles du premier jet (ce qu'elle ressent ne change pas), et ses outils ne se refont pas
+                if self.polishers and req.kind in self.polished and policy.delivered:
+                    text = await self._polish(ep, eid, llm_req, text, message or "", make_ctx, persona)
                 # un message qui emporte un fichier n'est pas une redite, même s'il redit sa phrase (« tiens, la
                 # voilà ») : se taire perdrait le fichier
                 if policy.delivered and not loop.attachments and repeats_last(text, llm_req):
@@ -633,6 +664,76 @@ class EpisodeRunner:
     def _tools(self, policy: EpisodePolicy, kind: str, audience: Audience, only: Any = None) -> dict[str, Any]:
         """Les outils offerts (``tools.offer``, la seule porte)."""
         return offer(self.mind.registry.tools, policy, kind, audience, only)
+
+    async def _revise(self, ep: _Live, eid: str, llm_req: LLMRequest, text: str, heard: str,
+                      make_ctx: Callable[[Any, str], ToolContext], persona: PersonaRender | None
+                      ) -> tuple[Any, str, dict[str, str], LLMRequest] | None:
+        """Sa réponse relue (``reviewers``) : à la première remarque, un second appel, la remarque glissée juste avant
+        la fin de son état interne ; sa nouvelle réponse remplace la première si elle dit quelque chose. Banc de
+        conversation du 2026-10-14 : une consigne dans le prompt ne retenait pas les tics du modèle (une réplique
+        sur deux finissait par « ceci, ou cela ? ») ; relus, ils se voient sur le brouillon même."""
+        mine = [m.content for m in llm_req.messages if m.role == "assistant"]
+        note = None
+        for reviewer in self.reviewers:
+            got = call(reviewer, text, mine, heard, persona.text if persona is not None else "",
+                       label="relecture de la réponse")
+            if isinstance(got, str) and got.strip():
+                note = got.strip()
+                break
+        if note is None or not llm_req.messages:
+            return None
+        last = llm_req.messages[-1]
+        content = (last.content.replace(CONTEXT_FOOTER, f"{note}\n{CONTEXT_FOOTER}", 1) if CONTEXT_FOOTER in last.content
+                   else f"{last.content}\n\n{note}")
+        again_req = replace(llm_req, call_id=f"{eid}#relu", tools=(),
+                            messages=(*llm_req.messages[:-1], replace(last, content=content)))
+        gateway = self.gateway
+        assert gateway is not None
+        again = await acall(lambda: run_tool_loop(gateway, again_req, {}, make_ctx, max_turns=1,
+                                                  clock=self.mind.clock.now),
+                            label="relecture : nouvel appel du modèle")
+        if isinstance(again, Failed):
+            return None
+        text2, annotations2 = self._parse(again.text, persona.name if persona is not None else "")
+        if not text2.strip() or is_silence(text2):
+            return None
+        ep.seen["relecture"] = {"premier_jet": text, "remarque": note}
+        return again, text2, annotations2, again_req
+
+    async def _polish(self, ep: _Live, eid: str, llm_req: LLMRequest, text: str, heard: str,
+                      make_ctx: Callable[[Any, str], ToolContext], persona: PersonaRender | None) -> str:
+        """Sa réponse rendue naturelle (``polishers``) par le modèle du rôle ``polish`` — seulement si l'opératrice
+        lui en a donné un : sans repli, une installation ne paie pas un second appel de sa voix sans l'avoir choisi.
+        Ablation du 2026-10-15 : retirer ou réécrire un bloc de son prompt ne change presque rien (le défaut vient du
+        modèle) ; récrire le texte au vu du fil, si (+0,6 à +1 sur 10). Une panne, un silence, ou une réponse qui
+        s'allonge : le premier jet part tel quel."""
+        gateway = self.gateway
+        serving = getattr(gateway, "serving", None)
+        if gateway is None or not callable(serving) or not serving(str(Role.POLISH)):
+            return text
+        name = persona.name if persona is not None else ""
+        asked = None
+        for polisher in self.polishers:
+            got = call(polisher, text, llm_req.messages, heard, name, label="seconde passe sur la réponse")
+            if isinstance(got, tuple):
+                asked = got
+                break
+        if asked is None:
+            return text
+        system, message = asked
+        req = LLMRequest(role=str(Role.POLISH), call_id=f"{eid}#naturel", system_stable=system,
+                         messages=(Message("user", message),), max_tokens=llm_req.max_tokens, lane=llm_req.lane,
+                         priority=llm_req.priority, meta={**dict(llm_req.meta), "passe": "naturel"})
+        again = await acall(lambda: run_tool_loop(gateway, req, {}, make_ctx, max_turns=1, clock=self.mind.clock.now),
+                            label="seconde passe : appel du modèle")
+        if isinstance(again, Failed):
+            return text
+        polished, _annotations = self._parse(again.text, name)
+        polished = polished.strip()
+        if not polished or is_silence(polished) or len(polished) > len(text) * _POLISH_GROWTH + _POLISH_SLACK:
+            return text
+        ep.seen["naturel"] = {"premier_jet": text}
+        return polished
 
     def _parse(self, text: str, speaker: str = "") -> tuple[str, dict[str, str]]:
         annotations: dict[str, str] = {}

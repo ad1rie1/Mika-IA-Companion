@@ -67,12 +67,15 @@ def build(
     start: int = AFTERNOON,
     seed: int = 0,
     clock: SimClock | None = None,
+    polish: bool = False,
     **kw: Any,
 ) -> tuple[Kernel, SimClock, ScriptedLLM, Deliveries]:
     clock = clock or SimClock(start)
     llm = ScriptedLLM(clock, respond, latency=latency)
     llm = kw.pop("llm", None) or llm
-    gateway = Gateway({"fake": llm}, {str(r): "fake" for r in Role}, clock=clock,
+    # la seconde passe (``Role.POLISH``) ne se fait que si on lui donne un modèle : ici, sur demande (``polish``)
+    routes = {str(r): "fake" for r in Role if polish or r is not Role.POLISH}
+    gateway = Gateway({"fake": llm}, routes, clock=clock,
                       voice_roles=frozenset(str(r) for r in VOICE_ROLES), slots={"fake": 1},
                       preempt=frozenset({"fake"}))
     store = SqlStore(*backend.store_targets(tmp), threaded=False)

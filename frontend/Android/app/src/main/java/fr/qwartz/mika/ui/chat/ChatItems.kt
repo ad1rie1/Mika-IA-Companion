@@ -23,9 +23,16 @@ sealed interface ChatItem {
 
     /**
      * Une bulle. [read] : un message envoyé que Mika a lu — elle a répondu depuis, ou choisi de se
-     * taire (double coche).
+     * taire (double coche). [part] : une des bulles d'une réponse de Mika (une ligne vide les sépare,
+     * ADR 0112) — null, tout le message ; [last] : la dernière, qui porte ses fichiers et l'heure.
      */
-    data class Bubble(override val key: String, val message: StoredMessage, val read: Boolean) : ChatItem
+    data class Bubble(
+        override val key: String,
+        val message: StoredMessage,
+        val read: Boolean,
+        val part: String? = null,
+        val last: Boolean = true,
+    ) : ChatItem
 
     /**
      * Une note de la machine sous une bulle — jamais une parole de Mika. [resendLocalId] : sous une
@@ -94,6 +101,14 @@ object ChatItems {
             when {
                 m.inner -> out += ChatItem.Thought(key, m)
                 isSystemNote(m) -> out += ChatItem.SystemNote(key, m.text)
+                // sa réponse en plusieurs bulles, comme quelqu'un qui écrit : la première garde la clé du message
+                m.sender == Sender.MIKA && BubbleContent.parts(m.text).size > 1 -> {
+                    val parts = BubbleContent.parts(m.text)
+                    parts.forEachIndexed { n, part ->
+                        out += ChatItem.Bubble(if (n == 0) key else "$key.$n", m, read = false, part = part,
+                            last = n == parts.lastIndex)
+                    }
+                }
                 else -> out += ChatItem.Bubble(
                     key,
                     m,

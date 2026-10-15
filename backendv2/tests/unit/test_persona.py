@@ -131,7 +131,10 @@ def test_her_life_is_an_ais_life_and_her_tastes_do_not_move():
     unlived = [e for e in (*DOC.interests, *DOC.tastes, *DOC.life) if any(w in e.lower() for w in FOOD)]
     assert not unlived, f"un goût qu'elle n'a pas pu vivre : {unlived}"
     entries = [DOC.description, DOC.tone, *DOC.traits, *DOC.quirks, *DOC.facts]
-    physical = [e for e in entries if any(w in e.lower() for w in FOOD) and "ne mange pas" not in e.lower()]
+    # des débuts de mots (« tempérament » n'est pas un plat de ramen) ; entre espaces, un mot entier (« bu », pas
+    # « bureau »)
+    physical = [e for e in entries if any(re.search(rf"(?<!\w){re.escape(w.strip())}{'(?!\\w)' if w != w.strip() else ''}",
+                                                    e.lower()) for w in FOOD) and "ne mange pas" not in e.lower()]
     assert not physical, f"une vie physique, incompatible avec sa nature : {physical}"
     # une persona sans vie rédigée garde la règle d'avant
     bare = render(self_c.PersonaDoc(name="Zoé"), "full")

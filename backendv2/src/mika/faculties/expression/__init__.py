@@ -31,6 +31,7 @@ from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
 from mika.contracts import presence as presence_c
 from mika.contracts import runtime as rt
+from mika.contracts import self_ as self_c
 from mika.contracts import social as social_c
 from mika.contracts import transcript as transcript_c
 from mika.kernel.clock import HOUR, MINUTE
@@ -39,7 +40,7 @@ from mika.kernel.episode import Prelude
 from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
-from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
+from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER, LAST
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab import affect as A
@@ -254,22 +255,30 @@ _SENTENCES = re.compile(r"(?<=[.!?…])\s+")
 SAID_OF_HERSELF_MAX = 200
 
 
+#: au plus tant de ses messages de cette conversation relus pour ce qu'elle y a dit d'elle
+SAID_OF_HERSELF_MESSAGES = 3
+
+
 def said_of_herself(said: Sequence[tuple[int, str]], now: int) -> str | None:
-    """Ce que son dernier message, il y a moins d'une heure, disait d'elle (ses affirmations, pas ses questions) : la
-    personne l'a lu. Le prompt lui rappelle à chaque tour ce qu'elle fait ; à « et toi ? », elle le redisait presque
-    mot pour mot (2026-10-14 : « je dessine… une aquarelle », puis « je suis toujours à mon aquarelle » — rejoué six
-    fois sur six ; citée, zéro sur huit)."""
-    if not said:
-        return None
-    at, text = said[-1]
-    if now - at > HOUR or not text or A.SILENCE_TOKEN in text:
-        return None
-    mine = [t.strip() for t in _SENTENCES.split(A.strip_prosody(text))
-            if _SELF.search(t) and not t.strip().endswith("?")]
-    if not mine:
-        return None
-    quote = " ".join(mine[:2])
-    return quote if len(quote) <= SAID_OF_HERSELF_MAX else quote[:SAID_OF_HERSELF_MAX - 1].rstrip() + "…"
+    """Ce que ses derniers messages de cette conversation (la dernière heure, trois au plus, le plus récent d'abord)
+    disaient d'elle — ses affirmations, pas ses questions : la personne les a lus. Le prompt lui rappelle à chaque tour
+    ce qu'elle fait ; à « et toi ? », elle le redisait presque mot pour mot (2026-10-14 : « je dessine… une
+    aquarelle », puis « je suis toujours à mon aquarelle » — rejoué six fois sur six ; citée, zéro sur huit). Au banc
+    de conversation, elle redisait aussi ce qu'elle avait raconté trois messages plus tôt (« je traînais dans ma
+    chambre sans but »)."""
+    quotes: list[str] = []
+    for at, text in reversed(said):
+        if now - at > HOUR or len(quotes) >= SAID_OF_HERSELF_MESSAGES:
+            break
+        if not text or A.SILENCE_TOKEN in text:
+            continue
+        mine = [t.strip() for t in _SENTENCES.split(A.strip_prosody(text))
+                if _SELF.search(t) and not t.strip().endswith("?")]
+        if mine:
+            quote = " ".join(mine[:2])
+            quotes.append(quote if len(quote) <= SAID_OF_HERSELF_MAX
+                          else quote[:SAID_OF_HERSELF_MAX - 1].rstrip() + "…")
+    return " » ; « ".join(quotes) or None
 
 
 @EXPRESSION.enricher("own_words", episodes=CONVERSATIONAL, deadline_ms=300)
@@ -371,6 +380,209 @@ def pending_question(said: Sequence[tuple[int, str]], heard: str, now: int) -> s
         return None
     q = asked[-1]
     return q if len(q) <= 90 else "…" + q[-89:]
+
+
+# ── Sa réponse relue ──────────────────────────────────────────────────────
+#
+# Banc de conversation du 2026-10-14 (Sonnet, jugé par Opus) : malgré la consigne de style et « TA RÉPONSE », une
+# réplique sur deux finissait par « ceci, ou cela ? », s'ouvrait par le même « Ah, » que les précédentes, ou redisait
+# une phrase déjà dite. Ces tics se voient sur le brouillon même : relu, il est réécrit une fois (``pipeline``).
+
+#: une question à options (« t'as trouvé quelque chose, ou t'es rentré bredouille ? ») — pas « … ou pas ? »
+_OPTIONS = re.compile(r"\bou\b(?!\s+(?:pas|non|quoi|bien|alors)\b)", re.IGNORECASE)
+#: au moins tant de mots en commun avec l'un de ses derniers messages : une redite ; avec son portrait : une copie
+_AGAIN, _COPIED = 5, 6
+#: à un message de tant de caractères au plus, une réponse de plus de ``_LONG_ANSWER`` (ou en plusieurs paragraphes)
+#: est hors de mesure
+_SHORT_HEARD, _LONG_ANSWER = 60, 280
+
+
+def _plain(text: str) -> str:
+    """Sa parole sans balise ni jeton de voix."""
+    return " ".join(A.strip_prosody(_BRACKETS.sub(" ", text or "")).split())
+
+
+#: une ligne vide : en chat, ce qui suit part dans une autre bulle (les clients découpent, ADR 0112)
+_BUBBLES = re.compile(r"\n\s*\n")
+
+
+def _bubbles(text: str) -> str:
+    """Sa parole sans balise ni jeton de voix, ses bulles gardées (séparées par une ligne vide)."""
+    return "\n\n".join(p for p in (_plain(b) for b in _BUBBLES.split(text or "")) if p)
+
+
+def review(draft: str, mine: Sequence[str], heard: str = "", portrait: str = "") -> str | None:
+    """Ce qu'elle remarquerait en se relisant, avant d'envoyer : une question à options, plusieurs questions, une
+    question encore après deux messages qui en posaient, la même ouverture que deux de ses trois derniers messages, ses premiers mots qui redisent ceux de la personne, une
+    suite de mots déjà dite dans un de ses derniers messages, ou recopiée de son portrait (``portrait`` : sa persona
+    telle que le modèle l'a lue — un exemple de sa voix repris mot pour mot, banc du 2026-10-14). ``None`` : rien à
+    reprendre."""
+    text = _plain(draft)
+    if not text:
+        return None
+    found: list[str] = []
+    questions = [q.strip() for q in _QUESTION.findall(text) if len(q.strip()) > 3]
+    choice = next((q for q in questions if _OPTIONS.search(q)), None)
+    if choice is not None:
+        found.append(phrase("expression.review.choice", question=choice))
+    if len(questions) >= 2:
+        found.append(phrase("expression.review.questions"))
+    before = [_plain(m) for m in mine if _plain(m)][-3:]
+    # une question à chaque message, la troisième d'affilée : un interrogatoire. Aucune consigne ne le retient
+    # (ablation du 2026-10-15 : 88 à 100 % de ses réponses finissent sur une question, quoi qu'on retire ou ajoute)
+    if questions and len(before) >= 2 and all(_QUESTION.search(m) for m in before[-2:]):
+        found.append(phrase("expression.review.asked"))
+    first = (_words(text)[:1] or [""])[0]
+    if first and first not in GREETINGS and sum((_words(m)[:1] or [""])[0] == first for m in before) >= 2:
+        found.append(phrase("expression.review.opener", word=text.split()[0].rstrip(",;:!?.…")))
+    opening = next(iter(_SENTENCE.findall(text)), "")
+    said = stems(heard)
+    ws = _words(text)
+    # reprendre un mot (« Bleu marine, ça va avec tout ») est naturel ; redire sa phrase (« Un manteau bleu marine un
+    # peu cher, tu l'aimes bien »), ou ses mots tels quels, ne l'est pas
+    hw = _words(heard)
+    echoed = {tuple(hw[i:i + _AGAIN]) for i in range(len(hw) - _AGAIN + 1)} & \
+        {tuple(ws[i:i + _AGAIN]) for i in range(len(ws) - _AGAIN + 1)}
+    if (said and len(stems(opening) & said) >= max(3, (3 * len(stems(opening)) + 4) // 5)) or any(
+            sum(w not in STOPWORDS for w in g) >= 2 for g in echoed):
+        found.append(phrase("expression.review.echo"))
+    # un second bonjour, un second au revoir : son dernier message les a déjà dits
+    last = before[-1] if before else ""
+    if first in GREETINGS and last and (_words(last)[:1] or [""])[0] in GREETINGS:
+        found.append(phrase("expression.review.greeted"))
+    if last and LEAVING.search(fold(text.lower())) and LEAVING.search(fold(last.lower())):
+        found.append(phrase("expression.review.farewell"))
+    pw = _words(portrait)
+    copied = {tuple(pw[i:i + _COPIED]) for i in range(len(pw) - _COPIED + 1)} & \
+        {tuple(ws[i:i + _COPIED]) for i in range(len(ws) - _COPIED + 1)}
+    if any(sum(w not in STOPWORDS for w in g) >= 2 for g in copied):
+        found.append(phrase("expression.review.portrait"))
+    heard_plain = " ".join(A.strip_prosody(heard).split())
+    # une ligne vide n'allonge rien : en chat, c'est une autre bulle
+    if heard_plain and len(heard_plain) <= _SHORT_HEARD and len(text) > _LONG_ANSWER:
+        found.append(phrase("expression.review.long"))
+    grams = {tuple(ws[i:i + _AGAIN]) for i in range(len(ws) - _AGAIN + 1)}
+    for m in before:
+        mw = _words(m)
+        again = next((g for i in range(len(mw) - _AGAIN + 1) if (g := tuple(mw[i:i + _AGAIN])) in grams
+                      and sum(w not in STOPWORDS for w in g) >= 2), None)
+        if again is not None:
+            found.append(phrase("expression.review.again", words=" ".join(again)))
+            break
+    if not found:
+        return None
+    return phrase("expression.review.note", draft=text[:600], found=" ; ".join(found))
+
+
+# ── Sa réponse rendue naturelle ───────────────────────────────────────────
+#
+# Ablation du 2026-10-15 : rejouer un appel mal jugé en retirant ou réécrivant un bloc de son prompt ne change presque
+# rien — faire de ce qu'on lui dit une vérité générale, reformuler, finir par une question, c'est le modèle qui joue
+# l'amie qui écoute (son prompt nu fait bien pire). Une seconde passe sur le texte seul, au vu du fil, le corrige
+# mieux qu'une consigne (``pipeline``, rôle ``polish``) ; ses balises restent celles du premier jet.
+
+#: en deçà de tant de caractères, rien à rendre plus naturel (« Ah merde. Qu'est-ce qui s'est passé ? »)
+_POLISH_FROM = 60
+#: les derniers messages du fil que lit la seconde passe
+_POLISH_THREAD = 8
+
+
+def _traits_said(state: str) -> str:
+    """Ses traits marqués, tels que « TA RÉPONSE » les a dits dans son état interne (« » : aucun)."""
+    before, _hole, after = phrase("expression.answer.character", traits="\x00").partition("\x00")
+    start = state.find(before)
+    if start < 0:
+        return ""
+    rest = state[start + len(before):]
+    end = rest.find(after) if after else -1
+    return rest[:end].strip() if end >= 0 else ""
+
+
+def polish(draft: str, messages: Sequence[Any], heard: str = "", name: str = "") -> tuple[str, str] | None:
+    """La seconde passe sur sa réponse : (consigne, message) d'un appel qui la rend naturelle au vu des derniers
+    messages du fil — sans rien y ajouter, sa voix et ses traits marqués gardés —, ou ``None`` pour une réponse de
+    quelques mots."""
+    text = _bubbles(draft)
+    if len(text) < _POLISH_FROM:
+        return None
+    name = name or phrase("expression.polish.unnamed")
+    turns = [m for m in messages if getattr(m, "role", "") in ("user", "assistant") and (m.content or "").strip()]
+    state = turns[-1].content if turns and turns[-1].role == "user" else ""
+    history = turns[:-1] if state else turns
+    lines = []
+    for m in history[-_POLISH_THREAD:]:
+        said = _plain(m.content)
+        if said:
+            lines.append(phrase("expression.polish.her", name=name, text=said) if m.role == "assistant"
+                         else phrase("expression.polish.them", text=said))
+    # ce que la personne vient d'écrire — jamais le cadrage d'un épisode (« personne ne vient de t'écrire… »)
+    if _plain(heard):
+        lines.append(phrase("expression.polish.them", text=_plain(heard)))
+    system = phrase("expression.polish.system", name=name)
+    traits = _traits_said(state)
+    if traits:
+        system += "\n\n" + phrase("expression.polish.character", traits=traits)
+    return system, phrase("expression.polish.message", thread="\n".join(lines), name=name, draft=text)
+
+
+#: un message de quelques mots : une réponse à la même mesure
+SHORT_MESSAGE = 40
+#: les curseurs de son tempérament qui s'entendent dans une réponse, du plus visible au moins visible ; au plus
+#: ``_MARKED_SHOWN`` d'entre eux, marqués (``_MARKED`` du milieu ou plus), sont rappelés dans « TA RÉPONSE »
+_VOICED = ("expressiveness", "sociability", "optimism", "negativity", "energy", "reactivity", "impulsivity",
+           "shyness", "empathy", "trust", "curiosity", "contagion", "mask", "grudge", "anxiety", "introspection")
+_MARKED, _MARKED_SHOWN = 0.3, 3
+
+
+def marked_traits(temperament: Any) -> list[str]:
+    """Ses traits les plus marqués, tels qu'ils doivent s'entendre dans une réponse (banc de conversation du
+    2026-10-15 : réfléchie, solaire et kuudere parlaient pareil — un juge reconnaissait le profil une fois sur
+    trois, le hasard ; le texte de sa persona l'emportait sur ses curseurs)."""
+    if temperament is None:
+        return []
+    marked = []
+    for rank, slider in enumerate(_VOICED):
+        value = getattr(temperament, slider, None)
+        if isinstance(value, (int, float)) and abs(float(value) - 0.5) >= _MARKED - 1e-9:
+            marked.append((-abs(float(value) - 0.5), rank, slider, "high" if value > 0.5 else "low"))
+    out: list[str] = []
+    # les plus marqués d'abord ; chacun dit ce qu'il change à la façon d'écrire dans un chat (« tu montres peu : des
+    # phrases courtes… »), pas seulement ce qu'il est (« ton attention passe par les actes ») — V5 du banc : la
+    # phrase du trait seule ne changeait rien à sa parole
+    for _dist, _rank, slider, side in sorted(marked)[:_MARKED_SHOWN]:
+        note = (getattr(temperament, "notes", None) or {}).get(slider, "")
+        out.append(f"{phrase(f'expression.answer.traits.{slider}.{side}')} {note}".strip())
+    return out
+
+
+#: un merci, un au revoir (mots repliés) : la réponse d'une amie, pas d'un guichet
+THANKS = frozenset({"merci", "mercii", "thanks", "thx"})
+LEAVING = re.compile(r"\b(?:bonne (?:nuit|soiree|journee|aprem)|a (?:plus tard|demain|toute)|bye|ciao|"
+                     r"je (?:file|te laisse|vais y aller)|j'y vais)\b|\ba plus\W*$|\ba\+")
+
+
+@EXPRESSION.section("answer", zone=Zone.VOLATILE, episodes=[Kind.REPLY], tags=[LAST], trim_rank=90,
+                    title=phrase("expression.answer.title"), reads=[self_c.PERSONA])
+def _answer(s: ExpressionState, frame: Frame, enrich: Mapping[str, Any]) -> str:
+    """« TA RÉPONSE » : le dernier mot avant son message — réagir en personne, une question au plus et ouverte, pas
+    de conseil qu'on ne demande pas, pas sa phrase reformulée ; court à qui écrit court. Banc de conversation du
+    2026-10-14 (Sonnet, jugé par Opus) : avec ces règles seulement dans la consigne de style, en tête du prompt, une
+    réplique sur deux finissait par « ceci, ou cela ? » et les conseils de coach revenaient."""
+    heard = " ".join(A.strip_prosody(enrich.get("last_heard") or "").split())
+    folded = fold(heard.lower())
+    out = [phrase("expression.answer.react")]
+    doc = frame.get(self_c.PERSONA)
+    traits = marked_traits(getattr(doc, "temperament", None))
+    if traits:
+        out.append(phrase("expression.answer.character", traits=" ; ".join(traits)))
+    out.append(phrase("expression.answer.subject"))
+    if heard and len(heard) <= SHORT_MESSAGE:
+        out.append(phrase("expression.answer.short"))
+    if THANKS & set(_words(heard)):
+        out.append(phrase("expression.answer.thanked"))
+    if LEAVING.search(folded):
+        out.append(phrase("expression.answer.leaving"))
+    return " ".join(out)
 
 
 @EXPRESSION.section("habits", zone=Zone.VOLATILE, episodes=CONVERSATIONAL, trim_rank=55,

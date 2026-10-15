@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0111, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0112, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -216,7 +216,15 @@ kernel                      machinerie générique, sans un mot du domaine
     fort passent.
 - **Épisodes** (`runtime/pipeline.py`)
   - Étapes : admission, baux, départ gardé, enrichissements, composition, appel (une boucle d'outils unique,
-    `runtime/tools.py`), analyse, prélude, commit gardé, règlement (ADR 0009).
+    `runtime/tools.py`), analyse, relecture, seconde passe, prélude, commit gardé, règlement (ADR 0009).
+  - **Relecture** (ADR 0112) : une parole de conversation livrée sans outil est relue (`reviewers`, branchés par la
+    composition ; le relecteur est `expression.review`). Un tic repéré sur le brouillon (question à options, même
+    ouverture, sa phrase redite, un second bonjour…) la fait réécrire une fois, la remarque « RELIS-TOI » glissée
+    avant la fin de l'état interne.
+  - **Seconde passe** (ADR 0112) : sa réponse (`REPLY`) est rendue naturelle au vu du fil par un second appel sur le
+    texte seul (`polishers` ; la consigne est `expression.polish`). Elle coupe sans rien ajouter, et peut l'envoyer
+    en plusieurs bulles (une ligne vide les sépare). Ses balises restent celles du premier jet. Elle ne se fait que si
+    le rôle LLM `polish` a un modèle (sans repli).
   - Types d'épisode : REPLY, INITIATIVE, STEP, WORK, JOB, WAKE, WAKE_JOB, TASK, MURMUR. Leurs politiques sont dans
     `app/composition.py::policies()`.
 - **Voies** (`runtime/lanes.py`)
@@ -231,15 +239,21 @@ kernel                      machinerie générique, sans un mot du domaine
   - Le fil porte des repères de temps perçus (« [le lendemain, mardi 14h13] ») et, en salon, le nom de qui parle
     (« Nom : »). Son résumé est épinglé (ADR 0041).
   - Ce qui vient d'ailleurs est **cité** (section `untrusted`) et coupé en premier (ADR 0022).
+  - Une section étiquetée `LAST` passe en tout dernier, juste avant le message : « TA RÉPONSE » (ADR 0112).
 - **Passerelle LLM** (`adapters/llm/gateway.py`, `config.py`)
   - Routage par rôle (`vocab/episodes.py`). Un rôle se replie sur un autre (`FALLBACKS`, par exemple extract → reply),
     mais **jamais un fournisseur sur un autre** (ADR 0073). Un rôle « voix » exige la persona. Le premier fournisseur
-    déclaré sert `reply` d'office, et les autres rôles y retombent.
+    déclaré sert `reply` d'office, et les autres rôles y retombent — sauf `polish` (la seconde passe), qui n'a pas de
+    repli : sans modèle déclaré pour lui, la passe ne se fait pas.
   - Les créneaux sont à priorité (`kernel/slots.py`) : dès deux créneaux, un est réservé au premier plan. Délais :
     120 s en conversation, 300 s en fond. Une trace chiffrée par appel au registre des appels (`adapters/llm/calls.py`).
   - **Claude Code** (`adapters/llm/claude_code.py`, ADR 0026, 0072) : la CLI `claude -p`, isolée, avec deux serveurs
     MCP relais (`mika`, `mika_plus`) servis sur `/mcp/relais` en boucle locale. C'est le runtime qui exécute les
-    outils, et les appels d'un même message font un seul tour, dans l'ordre écrit.
+    outils, et les appels d'un même message font un seul tour, dans l'ordre écrit. La CLI ajoute d'elle-même une
+    identité d'agent, un rappel `userEmail` et un bloc « # Environment » autour du prompt ; aucun réglage ne les
+    retire et on ne les retire pas (ADR 0112).
+  - **API** (`adapters/llm/claude.py`, le SDK Anthropic) : `workspace` pour une clé non attachée à un espace de travail
+    (`--workspace`), `effort` pour la réflexion adaptative native (`thinking`, `output_config`), comme la CLI.
   - Les lots d'outils hors du socle d'un épisode sont « à la demande » : le modèle les cherche, guidé par un catalogue
     d'une ligne par lot. Exception : Ollama et les compatibles OpenAI ne savent pas différer (`defers_tools=False`) et
     reçoivent tout. Un outil peut clore la boucle quand il réussit (`ToolSpec.ends_loop`).
@@ -470,7 +484,7 @@ ses identifiants sont dans `ARCHITECTURE.md`. Ce qui suit dit l'essentiel de cha
   - Elle reconnaît un au revoir à sa forme (`others.farewell`).
   - Les heures d'une personne ouvrent sa nuit à elle, jamais ne ferment sa journée.
 - **self** (ADR 0019, 0036, 0043, 0053, 0070, 0087–0090, 0096, 0100)
-  - Persona et tempérament.
+  - Persona et tempérament. Sa voix en chat se montre par des exemples (`samples`), en conversation seulement.
   - **La matrice de personnalité** (`vocab/temperament.py`) :
     - 28 curseurs de 0 à 1 en six familles : ressentir, montrer, agir, les autres, elle-même, le corps ;
     - un fond (`background`), une réaction quand on la blesse (`reaction`), une défense quand on la touche (`defense`),
@@ -593,6 +607,8 @@ citées, jamais la parole forcée. Leur monde vit hors du journal. Dix sont comp
   - **Trames du client** : `identify`, `chat`, `sync`, `ping`, `presence`, `composing`, `read`, `approval`.
   - Une réponse ne part qu'aux connexions de sa personne, un murmure qu'à celles de sa cible, et une seule voix sonne
     entre deux onglets.
+  - Une ligne vide dans sa réponse sépare deux bulles : le serveur garde un message, les clients le montrent bulle par
+    bulle au rythme de la frappe (web `ui/bubbles.ts`, Android `BubbleContent.parts`, ADR 0112).
   - Le fil porte l'empreinte de sa vie (`life`) ; une réponse qui n'a pas pu venir est `no_reply`.
   - On lui écrit par une application dédiée et un compte : **il n'y a plus de Telegram** (ADR 0060). Un compte
     extérieur (`ext_…`, canal `external`) reste prévu pour les canaux non sécurisés.
@@ -701,6 +717,9 @@ Tout le reste se déclare par décorateurs.
 
 - `tools/banc_lecture` mesure la lecture `[EN_FACE]` ;
 - `tools/banc_temperament` vérifie que la balise suit chaque profil ;
+- `tools/banc_conversation` (ADR 0112) fait vivre des conversations au vrai noyau (Sonnet par la CLI, effort high),
+  face à un Adrien simulé (Haiku), jugées par Opus : un score sur 100, des scénarios réservés, chaque mesure sur une
+  copie figée du code (`--variante`, `--profil`, `--voix api:sonnet`). Tout changement de sa voix s'y mesure.
 - pour les lancer : `PYTHONPATH=src .venv/bin/python tools/<banc>/banc.py [modèle] [parallèle] [sortie.json]`.
 
 ### Invariants
@@ -830,7 +849,8 @@ Unity.
 - `network/WebSocketClient.ts` : reprise exponentielle, ping toutes les 20 s, reconnexion après 50 s de silence, file de
   sortie rejouée ; un 4401 est terminal.
 - `ui/chatSync.ts` : fusion du fil par curseur.
-- Les 38 fichiers vitest sont dans des dossiers `__tests__`.
+- `ui/bubbles.ts` : sa réponse en plusieurs bulles (une ligne vide les sépare), « Mika écrit… » entre deux.
+- Les 40 fichiers vitest sont dans des dossiers `__tests__`.
 
 ### Unity, Android, Extension
 

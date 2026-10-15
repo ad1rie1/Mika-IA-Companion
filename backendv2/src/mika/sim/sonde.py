@@ -25,7 +25,7 @@ import json
 import shutil
 import threading
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -49,8 +49,11 @@ class Blocking:
     """Le vrai modèle, appelé depuis la boucle virtuelle sans la laisser avancer : l'appel tourne sur une boucle
     à part, dans un fil, et la boucle virtuelle l'attend (zéro seconde simulée)."""
 
-    def __init__(self, backend: LLMBackend, clock: SimClock, out: Path, log: Callable[[str], None]) -> None:
+    def __init__(self, backend: LLMBackend, clock: SimClock, out: Path, log: Callable[[str], None],
+                 by_role: Mapping[str, LLMBackend] | None = None) -> None:
         self.backend = backend
+        #: un autre modèle pour certains rôles (la seconde passe sur Haiku, au banc de conversation)
+        self.by_role = dict(by_role or {})
         self.name = backend.name
         self.clock = clock
         self.log = log
@@ -67,7 +70,8 @@ class Blocking:
         error = ""
         for _ in range(3):
             try:
-                resp = asyncio.run_coroutine_threadsafe(self.backend.complete(req), self.loop).result(CALL_TIMEOUT_S)
+                backend = self.by_role.get(req.role, self.backend)
+                resp = asyncio.run_coroutine_threadsafe(backend.complete(req), self.loop).result(CALL_TIMEOUT_S)
                 break
             except Exception as exc:  # noqa: BLE001 — une panne réelle se rejoue au noyau, comme en vrai
                 error = f"{type(exc).__name__}: {exc}"

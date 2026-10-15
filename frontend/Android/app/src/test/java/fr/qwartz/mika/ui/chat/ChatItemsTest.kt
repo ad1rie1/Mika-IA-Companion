@@ -97,4 +97,14 @@ class ChatItemsTest {
         assertEquals("Hier", ChatItems.dayLabel(today.minusDays(1), today))
         assertEquals("samedi 4 octobre 2025", ChatItems.dayLabel(LocalDate.of(2025, 10, 4), today))
     }
+
+    @Test fun `sa réponse en plusieurs bulles - une ligne vide les sépare, la dernière porte l'heure et les fichiers`() {
+        val items = ChatItems.build(
+            listOf(msg("réunion à 9h\n\npas la tête à ça", Sender.USER, 1, now), msg("c'est quoi comme réunion ?\n\nen tout cas, bon courage", Sender.MIKA, 2, now)),
+            nowMs = now, zone = zone,
+        ).filterIsInstance<ChatItem.Bubble>()
+        assertEquals(listOf("m1", "m2", "m2.1"), items.map { it.key })
+        assertEquals(listOf(null, "c'est quoi comme réunion ?", "en tout cas, bon courage"), items.map { it.part })
+        assertEquals(listOf(true, false, true), items.map { it.last })
+    }
 }

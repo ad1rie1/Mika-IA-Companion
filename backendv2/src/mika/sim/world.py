@@ -136,6 +136,8 @@ class Driver:
     shares: MemoryShares = field(default_factory=MemoryShares)
     #: les plongements de la mémoire (un vrai modèle pour la sonde ; par défaut, le hachage, déterministe et rapide)
     embedder: Any = None
+    #: des rôles servis en plus des rôles de sa voix (la seconde passe, ``polish``, au banc de conversation)
+    routed: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         # une messagerie (un compte extérieur) reçoit même hors ligne : on y écrit à quelqu'un d'absent
@@ -143,7 +145,7 @@ class Driver:
 
     # ── cycle de vie ──
     async def boot(self) -> Kernel:
-        roles = {r: self.llm.name for r in self.composition.voice_roles}
+        roles = {r: self.llm.name for r in (*self.composition.voice_roles, *self.routed)}
         gateway = Gateway({self.llm.name: self.llm}, roles, clock=self.clock,
                           voice_roles=self.composition.voice_roles, slots={self.llm.name: self.slots},
                           preempt=frozenset({self.llm.name}) if self.slots == 1 else frozenset(),

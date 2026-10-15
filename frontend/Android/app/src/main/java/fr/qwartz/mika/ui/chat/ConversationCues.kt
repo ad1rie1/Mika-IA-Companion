@@ -18,14 +18,15 @@ import fr.qwartz.mika.ui.components.InlineMarkup
  *
  * Seul ce qui arrive SOUS SES YEUX compte. Le premier fil vu (l'ouverture de l'écran, un rattrapage après une
  * coupure) n'est pas une conversation en cours : elle ne va pas réciter d'un coup ce qu'elle a écrit pendant qu'on
- * n'était pas là. Plusieurs bulles nouvelles d'un coup, c'est aussi un rattrapage.
+ * n'était pas là. Plusieurs bulles nouvelles d'un coup, c'est aussi un rattrapage — sauf les bulles d'une même réponse
+ * (ADR 0112) : elle les dit l'une après l'autre.
  */
 class ConversationCues {
     sealed interface Cue {
         val key: String
 
-        /** Sa réponse vient d'arriver : elle la dit, et la bulle s'écrit à son rythme. */
-        data class Speak(override val key: String, val text: String) : Cue
+        /** Sa réponse vient d'arriver : elle la dit, et la bulle s'écrit à son rythme ; [then] : ses bulles suivantes. */
+        data class Speak(override val key: String, val text: String, val then: List<Speak> = emptyList()) : Cue
 
         /** La personne vient d'envoyer : elle lit, puis hoche la tête. */
         data class Read(override val key: String, val chars: Int) : Cue
@@ -46,14 +47,16 @@ class ConversationCues {
             primed = true
             return null
         }
-        if (!watching || fresh.size != 1) return null
-        val bubble = fresh.single()
-        if (bubble !== bubbles.last()) return null
+        if (!watching || fresh.isEmpty()) return null
+        // plusieurs messages d'un coup : un rattrapage ; plusieurs bulles d'une même réponse : sa réponse
+        val bubble = fresh.first()
         val m = bubble.message
-        val body = InlineMarkup.plain(BubbleContent.text(m))
+        if (fresh.any { it.message !== m } || fresh.last() !== bubbles.last()) return null
+        val said = fresh.map { Cue.Speak(it.key, InlineMarkup.plain(it.part ?: BubbleContent.text(m))) }.filter { it.text.isNotBlank() }
         return when (m.sender) {
-            Sender.MIKA -> if (body.isBlank()) null else Cue.Speak(bubble.key, body)
-            Sender.USER -> Cue.Read(bubble.key, body.length + 12 * m.attachments.size)
+            Sender.MIKA -> said.firstOrNull()?.copy(then = said.drop(1))
+            Sender.USER -> if (fresh.size != 1) null else
+                Cue.Read(bubble.key, InlineMarkup.plain(BubbleContent.text(m)).length + 12 * m.attachments.size)
         }
     }
 
@@ -130,7 +133,11 @@ class ConversationStage {
     /** Le fil a changé : sa réponse qui arrive, elle la dit (si elle a une bouche) ; un message qui part, elle le lit. */
     fun onItems(items: List<ChatItem>, watching: Boolean, speaks: Boolean) {
         when (val cue = cues.onItems(items, watching)) {
-            is ConversationCues.Cue.Speak -> if (speaks) track.say(cue.key, cue.text)
+            is ConversationCues.Cue.Speak -> if (speaks) {
+                // ses bulles l'une après l'autre : la suivante attend son tour, ses trois points à sa place
+                track.say(cue.key, cue.text)
+                cue.then.forEach { track.say(it.key, it.text) }
+            }
             is ConversationCues.Cue.Read -> {
                 // Elle se tait pour lire : ce qu'elle disait s'affiche d'un coup.
                 track.skipAll()

@@ -77,6 +77,9 @@ class BackendSpec(BaseModel):
                                  group="Connexion", secret=True, advanced=False, order=30,
                                  only_any=((("kind", ("claude", "openai", "ollama_cloud")),),
                                            (("kind", ("claude_code",)), ("auth", ("cle_api",)))))] = ""
+    workspace: Annotated[str, Knob(label="Espace de travail", help="L'identifiant de l'espace de travail (wrkspc_…) "
+                                   "quand la clé n'est attachée à aucun (une clé « sk-ant-usr- »). Vide : celui de la "
+                                   "clé.", group="Connexion", order=31, only=(("kind", ("claude",)),))] = ""
     base_url: Annotated[str, Knob(label="Adresse du serveur", help="Seulement pour un serveur compatible OpenAI "
                                                                    "qui n'est pas OpenAI. Vide : OpenAI.",
                                   group="Options avancées", order=40, only=(("kind", ("openai",)),))] = ""
@@ -110,10 +113,11 @@ class BackendSpec(BaseModel):
                                                                     "connectes avec « mika claude-code login ».",
                                     group="Options avancées", order=110, only=(("kind", ("claude_code",)),))] = ""
     effort: Annotated[str, Knob(label="Effort de réflexion", help="Combien le modèle réfléchit avant de répondre "
-                                "(--effort de la CLI). Vide : le défaut de la CLI.",
+                                "(--effort de la CLI ; par l'API, la réflexion adaptative à cet effort). Vide : le "
+                                "défaut de la CLI, et pas de réflexion par l'API.",
                                 choices=(("", "défaut de la CLI"), ("low", "faible"), ("medium", "moyen"),
                                          ("high", "élevé"), ("xhigh", "très élevé"), ("max", "maximal")),
-                                group="Options avancées", order=115, only=(("kind", ("claude_code",)),))] = ""
+                                group="Options avancées", order=115, only=(("kind", ("claude_code", "claude")),))] = ""
     quota_ceiling: Annotated[float, Knob(label="Réserve d'abonnement", help="Au-delà de cet usage de "
                                          "l'abonnement, ses appels de fond sont suspendus (la conversation "
                                          "n'est jamais retenue). 0,8 = 80 % ; 0 : pas de réserve.", lo=0.0,
@@ -159,6 +163,7 @@ ROLE_LABELS = {"reply": "répondre (voix)", "initiative": "prendre la parole (vo
                "profile": "comprendre les gens", "interpret": "interpréter", "triage": "trier le courrier",
                "caption": "décrire une image", "compact": "résumer le fil", "plan": "planifier",
                "project": "travailler sur un projet (voix)", "job": "exécuter un projet (impersonnel)",
+               "polish": "rendre naturel (voix, seconde passe)",
                TRIAL_ROLE: "rejouer une parole (essai de la console)"}
 
 
@@ -259,7 +264,7 @@ def build_backend(name: str, spec: BackendSpec, *, relay: Any = None, relay_base
         from mika.adapters.llm.claude import ClaudeBackend  # noqa: PLC0415
 
         return ClaudeBackend(spec.api_key, spec.model, cache_ttl=spec.cache_ttl, temperature=spec.temperature,
-                             name=name)
+                             name=name, workspace=spec.workspace, effort=spec.effort)
     if spec.kind == "openai":
         from mika.adapters.llm.openai_compat import OpenAICompatBackend  # noqa: PLC0415
 

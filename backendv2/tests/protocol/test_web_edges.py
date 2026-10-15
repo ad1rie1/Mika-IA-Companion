@@ -82,7 +82,7 @@ def make(tmp_path) -> Iterator[Any]:
     clients: list[TestClient] = []
 
     def _make(backend: Fake, *, gateway: LiveGateway | None = None, **kw: Any):
-        roles = {str(r): "fake" for r in Role}
+        roles = {str(r): "fake" for r in Role if r is not Role.POLISH}  # sans seconde passe
         gw = gateway or LiveGateway(Gateway({"fake": backend}, roles, clock=RealClock(), voice_roles=frozenset(),
                                             slots={"fake": 4}))
         app, live = build(tmp_path / "data", web=WebConfig(), gateway=gw, embedder=HashEmbedder(),

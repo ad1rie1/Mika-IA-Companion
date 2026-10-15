@@ -799,3 +799,26 @@ def test_price_unknown_model_is_free_and_warned_once(caplog: pytest.LogCaptureFi
         assert price_usd("modele-inconnu-x", Usage(1_000_000, 1_000_000), provider="openai") == 0.0
         assert price_usd("modele-inconnu-x", Usage(1, 1), provider="openai") == 0.0
     assert len([r for r in caplog.records if "modele-inconnu-x" in r.getMessage()]) == 1
+
+
+async def test_claude_thinks_at_the_chosen_effort_like_the_cli():
+    """Par l'API, la réflexion adaptative à l'effort choisi (comme ``--effort`` de la CLI) : assez de sortie pour
+    réfléchir puis répondre, et jamais de température (la réflexion l'impose). Sans effort, rien ne change."""
+    fake = FakeAnthropic(claude_reply(text("ok")))
+    await ClaudeBackend("k", "claude-sonnet-4-6", temperature=0.7, effort="high", client=fake).complete(
+        request(Message("user", "x")))
+    sent = fake.create.calls[0]
+    assert (sent["thinking"], sent["output_config"]) == ({"type": "adaptive"}, {"effort": "high"})
+    assert sent["max_tokens"] >= 16_384 and "temperature" not in sent
+    plain = FakeAnthropic(claude_reply(text("ok")))
+    await ClaudeBackend("k", "claude-sonnet-4-6", client=plain).complete(request(Message("user", "x")))
+    assert "thinking" not in plain.create.calls[0] and "output_config" not in plain.create.calls[0]
+    with pytest.raises(ValueError):
+        ClaudeBackend("k", "claude-sonnet-4-6", effort="beaucoup", client=plain)
+
+
+def test_claude_a_key_without_workspace_names_it_on_every_request():
+    """Une clé « sk-ant-usr- » n'est attachée à aucun espace de travail : l'en-tête le nomme (2026-10-15)."""
+    backend = ClaudeBackend("sk-ant-usr-x", "claude-sonnet-4-6", workspace="wrkspc_essai")
+    assert backend._client.default_headers.get("anthropic-workspace-id") == "wrkspc_essai"
+    assert "anthropic-workspace-id" not in ClaudeBackend("k", "claude-sonnet-4-6")._client.default_headers

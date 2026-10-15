@@ -513,10 +513,10 @@ private fun Bubble(
     val mine = m.sender == Sender.USER
     val container = if (mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer
     val content = if (mine) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer
-    val body = BubbleContent.text(m)
+    val body = item.part ?: BubbleContent.text(m)
     // Ce qu'on copie : le texte lu, sans les astérisques du Markdown.
     val copyText = remember(body) { InlineMarkup.plain(body) }
-    val description = BubbleContent.describe(m, item.read, zone)
+    val description = BubbleContent.describe(m, item.read, zone, item.part)
     val copyLabel = stringResource(R.string.chat_copy)
     val retryLabel = stringResource(R.string.chat_retry)
     val failed = mine && m.status == MessageStatus.FAILED
@@ -532,7 +532,7 @@ private fun Bubble(
         ) {
             Surface(shape = shape, color = container) {
                 Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (m.attachments.isNotEmpty()) {
+                    if (item.last && m.attachments.isNotEmpty()) {
                         Attachments(m, mine, content, busyFileId, actions)
                     }
                     // Un nœud pour le lecteur d'écran : qui, quand, l'état, le texte ; copier et réessayer
@@ -562,13 +562,16 @@ private fun Bubble(
                                 if (reveal != null && reveal <= 0f) TypingDots(content, Modifier.padding(top = 6.dp))
                             }
                         }
-                        Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                BubbleContent.time(m.ts, zone),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = content.copy(alpha = 0.8f),
-                            )
-                            if (mine) StatusIcon(m.status, item.read, content)
+                        // l'heure sous la dernière bulle d'une réponse, comme une messagerie
+                        if (item.last) {
+                            Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    BubbleContent.time(m.ts, zone),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = content.copy(alpha = 0.8f),
+                                )
+                                if (mine) StatusIcon(m.status, item.read, content)
+                            }
                         }
                     }
                 }

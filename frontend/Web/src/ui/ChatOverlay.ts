@@ -1,4 +1,5 @@
 import { renderInline } from "./inlineMarkup";
+import { BubbleReveal, splitBubbles } from "./bubbles";
 import { WebSocketClient } from "../network/WebSocketClient";
 import { API_BASE } from "../network/api";
 import type {
@@ -175,6 +176,15 @@ export class ChatOverlay {
   private counterEl: HTMLElement | null = null;
   private typingEl: HTMLElement | null = null;
   private typingTimer: number | null = null;
+  /**
+   * Sa réponse qui s'écrit bulle par bulle (une ligne vide les sépare) :
+   * « Mika écrit… » entre deux, au rythme de la frappe (ADR 0112).
+   */
+  private readonly reveal = new BubbleReveal<StoredMessage>((done) => {
+    this.repaint({ animate: true });
+    if (done) this.hideTyping();
+    else this.showTyping();
+  });
   /** The server dropped the oldest part of a catch-up; said, not hidden. */
   private truncated = false;
   /** Cache key for *this* identity's thread — see HISTORY_KEY_PREFIX. */
@@ -366,6 +376,7 @@ export class ChatOverlay {
 
   /** Wipe the displayed messages + persisted history (typing bubble kept). */
   clearHistory() {
+    this.reveal.finish();
     this.history = [];
     this.truncated = false;
     try {
@@ -456,6 +467,8 @@ export class ChatOverlay {
     this.ws.setCursorProvider(() => this.cursor());
 
     this.ws.on("speech", (data) => {
+      // une réponse qui s'écrivait encore se montre en entier : la suivante arrive
+      this.reveal.finish();
       this.hideTyping();
       // Bind the reply's own row, and the user message it answers, to the
       // bubbles already on screen. Doing it here — rather than waiting for
@@ -483,7 +496,9 @@ export class ChatOverlay {
           localOnly: inner && data.message_id == null,
           inner,
           files: sentFiles(data.attachments),
+          reveal: !inner,
         });
+        if (this.reveal.writing) this.showTyping();
       }
     });
 
@@ -964,6 +979,8 @@ export class ChatOverlay {
       inner?: boolean;
       /** Ce qu'elle envoie avec ce message — voir StoredMessage.files. */
       files?: SentFile[];
+      /** Sa réponse, reçue à l'instant : ses bulles s'écrivent l'une après l'autre. */
+      reveal?: boolean;
     } = {}
   ) {
     const display = sender === "vtuber" ? stripProsody(text) : text;
@@ -978,7 +995,7 @@ export class ChatOverlay {
       return;
     }
     const ts = Date.now();
-    this.history.push({
+    const stored: StoredMessage = {
       text: display,
       sender,
       ts,
@@ -989,7 +1006,9 @@ export class ChatOverlay {
       after: opts.localOnly ? this.cursor() : undefined,
       inner: opts.inner || undefined,
       ...(opts.files?.length ? { files: opts.files } : {}),
-    });
+    };
+    this.history.push(stored);
+    if (opts.reveal && sender === "vtuber") this.reveal.start(stored, display);
     this.trimHistory();
     this.persistHistory();
     this.repaint({ animate: true });
@@ -1023,7 +1042,7 @@ export class ChatOverlay {
     this.history.forEach((msg, index) => {
       const marker = markers[index];
       if (marker) this.insertBeforeTyping(this.buildMarker(marker));
-      this.insertBeforeTyping(this.buildBubble(msg, opts.animate));
+      for (const bubble of this.buildBubbles(msg, opts.animate)) this.insertBeforeTyping(bubble);
       // Ce que le serveur a écarté de cet envoi. Sous la bulle plutôt que
       // dans son infobulle : l'envoi a été *accepté*, donc rien dans son
       // apparence ne le distingue d'un envoi complet.
@@ -1074,7 +1093,26 @@ export class ChatOverlay {
     }
   }
 
-  private buildBubble(msg: StoredMessage, animate: boolean): HTMLElement {
+  /**
+   * Les bulles d'un message : une seule pour la personne ; pour elle, une par
+   * paragraphe (une ligne vide les sépare), et seulement celles déjà
+   * « tapées » d'une réponse qui s'écrit encore. Ses fichiers et le lien vers
+   * la console suivent la dernière.
+   */
+  private buildBubbles(msg: StoredMessage, animate: boolean): HTMLElement[] {
+    const parts = msg.sender === "vtuber" ? splitBubbles(msg.text) : [];
+    if (parts.length < 2) return [this.buildBubble(msg, animate)];
+    const shown = this.reveal.shown(msg, parts.length);
+    return parts
+      .slice(0, shown)
+      .map((text, i) => this.buildBubble(msg, animate, { text, last: i === parts.length - 1 }));
+  }
+
+  private buildBubble(
+    msg: StoredMessage,
+    animate: boolean,
+    part?: { text: string; last: boolean }
+  ): HTMLElement {
     const bubble = document.createElement("div");
     bubble.className = `chat-bubble ${msg.sender}`;
     if (!animate) bubble.classList.add("no-anim");
@@ -1082,13 +1120,14 @@ export class ChatOverlay {
     if (msg.sender === "user" && msg.status && msg.status !== "sent") {
       bubble.classList.add(`status-${msg.status}`);
     }
-    if (msg.sender === "vtuber") renderInline(bubble, msg.text);
+    if (msg.sender === "vtuber") renderInline(bubble, part?.text ?? msg.text);
     else bubble.textContent = msg.text;
-    for (const file of msg.files ?? []) bubble.append(this.buildFile(file));
+    const last = part?.last ?? true;
+    if (last) for (const file of msg.files ?? []) bubble.append(this.buildFile(file));
     // Pour une opératrice : où cette parole (ou ce silence) s'explique. Le
     // rendu est rejoué à chaque fusion, donc le lien vient dès que la bulle
     // reçoit son identifiant serveur.
-    const why = this.operator ? whyLink(msg) : undefined;
+    const why = this.operator && last ? whyLink(msg) : undefined;
     if (why) {
       const link = document.createElement("a");
       link.className = "chat-why";

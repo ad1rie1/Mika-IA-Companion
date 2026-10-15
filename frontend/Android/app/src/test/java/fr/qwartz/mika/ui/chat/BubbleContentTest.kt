@@ -46,4 +46,9 @@ class BubbleContentTest {
         val onlyPhoto = StoredMessage("[photo.jpg]", Sender.USER, at, status = MessageStatus.SENT, attachments = listOf(photo))
         assertEquals("Toi, 21 h 04, envoyé : Fichiers : photo.jpg", BubbleContent.describe(onlyPhoto, false, zone))
     }
+
+    @Test fun `les bulles d'une réponse - une ligne vide, jamais un simple retour à la ligne`() {
+        assertEquals(listOf("un", "deux"), BubbleContent.parts("  un \n \n\n deux "))
+        assertEquals(listOf("une ligne\nla suite"), BubbleContent.parts("une ligne\nla suite"))
+    }
 }

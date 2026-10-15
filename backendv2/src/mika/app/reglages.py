@@ -67,7 +67,7 @@ TABS = (SettingsTab("intelligence", "Intelligence"), SettingsTab("personnage", "
 #: la famille de chaque rôle (la page « Qui sert quoi »)
 ROLE_FAMILIES = {**{str(r): "voix" for r in VOICE_ROLES}, "extract": "mémoire", "validate": "mémoire",
                  "compact": "mémoire", "profile": "compréhension", "interpret": "compréhension",
-                 "triage": "sens", "caption": "sens", "plan": "travail", "job": "travail"}
+                 "triage": "sens", "caption": "sens", "plan": "travail", "job": "travail", "polish": "voix"}
 
 
 @cache

@@ -130,5 +130,7 @@ class LLMGateway(Protocol):
 
     async def call(self, req: LLMRequest) -> LLMResponse: ...
 
+    # facultatif (à appeler par ``getattr``) : ``serving(role) -> str`` — le fournisseur qui sert ce rôle, « » : aucun
+    # (une étape qui ne se fait que si l'opératrice lui a donné un modèle : la seconde passe, ``Role.POLISH``).
     # facultatif (à appeler par ``getattr``) : ``defers_tools(role) -> bool`` — le fournisseur qui sert ce rôle
     # sait-il différer des outils (une recherche d'outils) ? Sans réponse : oui.

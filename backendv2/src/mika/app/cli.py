@@ -422,6 +422,7 @@ async def llm_command(data: Path, args: argparse.Namespace) -> dict[str, object]
                 auth=kept(args.auth, "auth", "abonnement"), claude_bin=kept(args.claude_bin, "claude_bin", ""),
                 config_dir=kept(args.config_dir, "config_dir", ""),
                 effort=kept(getattr(args, "effort", None), "effort", ""),
+                workspace=kept(getattr(args, "workspace", None), "workspace", ""),
             )
         elif args.llm_cmd == "route":
             for role in args.roles:
@@ -730,6 +731,8 @@ def _run(argv: list[str] | None) -> int:
     lb.add_argument("--kind", required=True, choices=["claude", "claude_code", "openai", "ollama", "ollama_cloud"])
     lb.add_argument("--model", required=True)
     lb.add_argument("--api-key", default=None, help="laissé vide : la clé actuelle est gardée")
+    lb.add_argument("--workspace", default=None,
+                    help="claude : l'espace de travail (wrkspc_…) d'une clé qui n'y est pas attachée (omis : l'actuel)")
     lb.add_argument("--base-url", default=None, help="openai : un serveur compatible (omis : l'adresse actuelle)")
     lb.add_argument("--host", default=None, help="ollama : l'hôte (omis : l'hôte actuel)")
     lb.add_argument("--slots", type=int, default=None, help="appels simultanés (omis : la valeur actuelle)")

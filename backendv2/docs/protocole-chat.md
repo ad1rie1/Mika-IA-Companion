@@ -196,6 +196,11 @@ répondre — réessaie ».
 ```
 
 - `text` porte des jetons de voix (`[SIGH]`, `[LAUGH]`, `[BREATH]`, `[PAUSE:400]`) : un client sans voix les retire.
+- Une **ligne vide** dans `text` sépare deux bulles : sa réponse en plusieurs messages, comme quelqu'un qui écrit
+  vraiment (ADR 0112). Le serveur garde **un** message (un `message_id`, une notification, un souvenir) ; le client
+  montre ses bulles l'une après l'autre, « Mika écrit… » entre deux, au rythme de la frappe — à l'arrivée seulement :
+  dans l'historique, elles sont là toutes. Le web : `ui/bubbles.ts` ; Android : `BubbleContent.parts`, et sa voix les
+  dit l'une après l'autre (`SpeechTrack`). Ses fichiers vont sous la dernière.
 - Texte vide : elle a choisi de ne pas répondre — sauf `voice_reason: "asleep"` : elle dort, elle répondra à son
   réveil (« Mika dort — elle te répondra à son réveil »).
 - `voice_persona: "inner"` : une pensée à voix haute ; `message_id`, `user_message_id` et `client_msg_id` sont nuls,

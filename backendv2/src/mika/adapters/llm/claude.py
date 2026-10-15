@@ -78,6 +78,12 @@ _STOPS = {
     "refusal": "refusal",
 }
 _THINKING = frozenset({"thinking", "redacted_thinking"})
+#: l'en-tête de l'espace de travail, pour une clé qui n'est attachée à aucun
+WORKSPACE_HEADER = "anthropic-workspace-id"
+#: les efforts de réflexion (ceux de la CLI) ; vide : pas de réflexion
+EFFORTS = ("", "low", "medium", "high", "xhigh", "max")
+#: avec la réflexion, la sortie (réflexion comprise) n'est jamais plafonnée en deçà
+THINKING_OUTPUT_TOKENS = 16_384
 #: la recherche d'outils côté serveur : les outils différés se chargent quand le modèle les cherche
 SEARCH_TOOL = {"type": "tool_search_tool_bm25_20251119", "name": "tool_search_tool_bm25"}
 #: des blocs produits par le serveur, à rendre inchangés au tour suivant
@@ -96,13 +102,21 @@ class ClaudeBackend:
         temperature: float | None = None,
         name: str = "claude",
         client: Any = None,
+        workspace: str = "",
+        effort: str = "",
     ) -> None:
         if cache_ttl not in CACHE_TTLS:
             raise ValueError(f"cache_ttl inconnu : {cache_ttl!r} (attendu : {' ou '.join(CACHE_TTLS)})")
+        if effort not in EFFORTS:
+            raise ValueError(f"effort de réflexion inconnu : {effort!r} (attendu : {', '.join(e for e in EFFORTS if e)})")
         if client is None:
             if anthropic is None:
                 raise RuntimeError("ClaudeBackend exige le paquet « anthropic » (extra « llm »).")
-            client = anthropic.AsyncAnthropic(api_key=api_key or None)
+            # une clé qui n'est attachée à aucun espace de travail (« sk-ant-usr- ») le dit à chaque requête
+            client = anthropic.AsyncAnthropic(api_key=api_key or None,
+                                              default_headers={WORKSPACE_HEADER: workspace} if workspace else None)
+        #: la réflexion adaptative à cet effort (comme ``--effort`` de la CLI) ; vide : pas de réflexion
+        self.effort = effort
         self.name = name
         self.model = model
         self.cache_ttl = cache_ttl
@@ -139,6 +153,11 @@ class ClaudeBackend:
         if len(messages) >= 2:
             _mark_last_block(messages[-2], self.cache_mark())
         body: dict[str, Any] = {"model": self.model, "max_tokens": req.max_tokens, "messages": messages}
+        if self.effort:
+            # la réflexion compte dans la sortie : assez de place pour réfléchir puis répondre (la CLI fait de même)
+            body["max_tokens"] = max(req.max_tokens, THINKING_OUTPUT_TOKENS)
+            body["thinking"] = {"type": "adaptive"}
+            body["output_config"] = {"effort": self.effort}
         if system:
             body["system"] = system
         if tools:
@@ -239,7 +258,9 @@ class ClaudeBackend:
             return await client.messages.create(**kwargs)
 
     def _accepts_temperature(self) -> bool:
-        return not self.model.startswith(NO_SAMPLING_PREFIXES) and self.model not in self._no_temperature
+        # la réflexion impose la température par défaut
+        return not self.effort and not self.model.startswith(NO_SAMPLING_PREFIXES) \
+            and self.model not in self._no_temperature
 
     # ── Réponse ──────────────────────────────────────────────────────────
 
