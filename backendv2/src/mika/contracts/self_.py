@@ -75,6 +75,13 @@ class PersonaDoc(BaseModel):
              "(ci-dessous) doivent aller avec.")] = AI
     description: Annotated[str, Knob(label="Description", help="Qui elle est, en quelques phrases.",
                                      group="Identité", widget="textarea", advanced=False, order=20)] = ""
+    portrait: Annotated[str, Knob(
+        label="Portrait (conversation)", group="Identité", widget="textarea", advanced=False, order=25,
+        help="Qui elle est, écrit comme on décrit quelqu'un : en prose, à la deuxième personne (« Tu es… »), avec sa "
+             "vie, ses avis, ce qui l'agace, comment elle écrit. Rempli, il remplace en conversation la description, "
+             "le ton et les listes (traits, manies, fragilités, valeurs, centres d'intérêt, façons de parler, vie, "
+             "goûts) : en listes, elle les jouait une à une. Les listes servent toujours ailleurs (ses explorations, "
+             "ses flux, son journal).")] = ""
     language: Annotated[str, Knob(label="Langue", help="Celle dans laquelle elle parle et écrit.",
                                   group="Identité", advanced=False, order=30)] = "français"
     tone: Annotated[str, Knob(label="Ton", help="Comment elle parle, en général.", group="Sa parole",

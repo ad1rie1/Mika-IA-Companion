@@ -489,6 +489,8 @@ ses identifiants sont dans `ARCHITECTURE.md`. Ce qui suit dit l'essentiel de cha
   - Les heures d'une personne ouvrent sa nuit à elle, jamais ne ferment sa journée.
 - **self** (ADR 0019, 0036, 0043, 0053, 0070, 0087–0090, 0096, 0100)
   - Persona et tempérament. Sa voix en chat se montre par des exemples (`samples`), en conversation seulement.
+  - Son portrait (`portrait`, en prose) remplace en conversation la description, le ton et les listes, qu'elle jouait
+    une à une ; les listes servent toujours ailleurs (explorations, flux, journal).
   - **La matrice de personnalité** (`vocab/temperament.py`) :
     - 28 curseurs de 0 à 1 en six familles : ressentir, montrer, agir, les autres, elle-même, le corps ;
     - un fond (`background`), une réaction quand on la blesse (`reaction`), une défense quand on la touche (`defense`),
