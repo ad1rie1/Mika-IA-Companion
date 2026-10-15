@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0112, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0113, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -363,6 +363,9 @@ ses identifiants sont dans `ARCHITECTURE.md`. Ce qui suit dit l'essentiel de cha
   - Outils : `identity_whoami_with`, `identity_doubt`, `identity_forget_binding`.
 - **transcript**
   - Le fil (l'id d'un message est son `seq`) et les résumés des fils longs.
+  - L'avis de son opératrice sur ses réponses (ADR 0113, `transcript.judged`, action `transcript.juger`) : 👍/👎 et
+    ce qu'elle aurait dû dire, donnés depuis le chat, gardés à côté du message. Ce n'est pas quelque chose qu'elle vit :
+    l'événement n'est pas public, aucune autre faculté ne le lit.
   - Un message resté sans réponse le dit dans son repère, en mots (une panne, lu trop tard, un silence choisi), jamais
     par la cause technique.
 
@@ -603,8 +606,10 @@ citées, jamais la parole forcée. Leur monde vit hors du journal. Dix sont comp
     `/api/perceptions`, `/api/wake/<nom>`, `/api/teams/…`, `/api/projects/pending/<id>/approve|reject`.
   - **WebSockets** : `/ws`, `/ws/camera`, `/ws/world`.
   - **Trames du serveur** : `speech`, `history`, `ack`, `inner_state_update`, `emotion_update`, `presence`, `composing`,
-    `read`, `approvals`, `approval_result`, `pong`.
-  - **Trames du client** : `identify`, `chat`, `sync`, `ping`, `presence`, `composing`, `read`, `approval`.
+    `read`, `approvals`, `approval_result`, `verdict_result`, `pong`.
+  - **Trames du client** : `identify`, `chat`, `sync`, `ping`, `presence`, `composing`, `read`, `approval`, `verdict`.
+  - Une opératrice juge une de ses réponses depuis le chat (trame `verdict`, ADR 0113) ; l'historique ne porte l'avis
+    (`verdict`, `verdict_note`) qu'aux connexions d'opératrice.
   - Une réponse ne part qu'aux connexions de sa personne, un murmure qu'à celles de sa cible, et une seule voix sonne
     entre deux onglets.
   - Une ligne vide dans sa réponse sépare deux bulles : le serveur garde un message, les clients le montrent bulle par
@@ -631,7 +636,8 @@ citées, jamais la parole forcée. Leur monde vit hors du journal. Dix sont comp
     `app/reglages.py` : des modèles pydantic annotés `Knob`, et les secrets ne sont jamais réaffichés.
   - Il y a une page de paramètres par faculté, qui dit la provenance de chaque valeur.
   - `/inspecteur/parole/<seq>` répond à « pourquoi a-t-elle dit ça ? » (ou « pourquoi n'a-t-elle pas répondu ? ») et
-    offre « Rejouer avec… » un autre fournisseur.
+    offre « Rejouer avec… » un autre fournisseur. L'avis de l'opératrice y figure (« Ton avis ») ; Fil › « Ses
+    réponses jugées » les liste (ADR 0113).
   - La constellation (`/inspecteur/constellation`) montre sa mémoire en points, et ce qui la parcourt en direct.
   - `/mcp/console` sert les mêmes lectures à un agent, en lecture seule, en boucle locale, avec le jeton de
     `mika mcp token`.
@@ -760,7 +766,7 @@ Tout le reste se déclare par décorateurs.
 | Sens et plugins | 0022, 0027, 0037, 0038, 0044, 0061, 0063, 0064, 0066, 0068, 0069, 0106 |
 | Fournisseurs LLM | 0026, 0072, 0073 |
 | Console et exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103 |
-| Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077, 0108 |
+| Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113 |
 | Voix et genèse | 0070, 0071 |
 | Ce que les sondes et audits ont montré | 0043, 0048, 0054, 0102 |
 
@@ -850,7 +856,8 @@ Unity.
   sortie rejouée ; un 4401 est terminal.
 - `ui/chatSync.ts` : fusion du fil par curseur.
 - `ui/bubbles.ts` : sa réponse en plusieurs bulles (une ligne vide les sépare), « Mika écrit… » entre deux.
-- Les 40 fichiers vitest sont dans des dossiers `__tests__`.
+- `ui/verdicts.ts` : pour une opératrice, 👍/👎 sous ses réponses et ce qu'elle aurait dû dire (ADR 0113).
+- Les 41 fichiers vitest sont dans des dossiers `__tests__`.
 
 ### Unity, Android, Extension
 

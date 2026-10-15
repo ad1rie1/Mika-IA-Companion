@@ -38,6 +38,9 @@ data class MessageEntity(
     val source: String?,
     val emotion: String?,
     @ColumnInfo(name = "emotion_intensity") val emotionIntensity: Double?,
+    /** L'avis de l'opératrice sur cette réponse (ADR 0113, base version 2). */
+    val verdict: String? = null,
+    @ColumnInfo(name = "verdict_note") val verdictNote: String? = null,
 )
 
 /**

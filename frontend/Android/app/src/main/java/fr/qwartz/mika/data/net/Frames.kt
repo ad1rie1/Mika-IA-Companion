@@ -81,6 +81,13 @@ sealed interface ServerFrame {
     /** Le sort d'une décision (`approved`, `rejected`, `unknown`…) ; une liste `approvals` à jour suit. */
     data class ApprovalResult(val id: Long, val status: String) : ServerFrame
 
+    /**
+     * Le sort d'un avis sur une de ses réponses (ADR 0113) : `ok`, `invalid`, `forbidden`, `failed`.
+     * [verdict] vide : l'avis retiré.
+     */
+    data class VerdictResult(val messageId: Long, val verdict: String, val comment: String, val status: String) :
+        ServerFrame
+
     /** Un type que cette version ne connaît pas, ou une trame illisible : ignorée, jamais fatale. */
     data class Unknown(val type: String) : ServerFrame
 }
@@ -149,6 +156,9 @@ data class HistoryEntry(
     val emotion: String? = null,
     @SerialName("emotion_intensity") val emotionIntensity: Double? = null,
     val attachments: List<AttachmentRef> = emptyList(),
+    /** L'avis de l'opératrice sur cette réponse (ADR 0113), pour une connexion d'opératrice seulement. */
+    val verdict: String? = null,
+    @SerialName("verdict_note") val verdictNote: String? = null,
 )
 
 // ── L'état intérieur (`inner_state`), lu section par section ─────────────────────────────

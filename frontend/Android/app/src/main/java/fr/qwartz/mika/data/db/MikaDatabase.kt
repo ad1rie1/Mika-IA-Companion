@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** La base locale : un cache du fil et de sa file d'envoi, jamais la référence (c'est le serveur). */
-@Database(entities = [MessageEntity::class, OutboxEntity::class, KvEntity::class], version = 1, exportSchema = true)
+@Database(entities = [MessageEntity::class, OutboxEntity::class, KvEntity::class], version = 2, exportSchema = true)
 abstract class MikaDatabase : RoomDatabase() {
     abstract fun messages(): MessageDao
     abstract fun outbox(): OutboxDao
@@ -15,8 +17,16 @@ abstract class MikaDatabase : RoomDatabase() {
     companion object {
         const val NAME = "mika.db"
 
+        /** Version 2 : l'avis de l'opératrice sur ses réponses (ADR 0113). Le cache garde son fil. */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN verdict TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN verdict_note TEXT")
+            }
+        }
+
         fun open(context: Context): MikaDatabase =
-            Room.databaseBuilder(context, MikaDatabase::class.java, NAME).build()
+            Room.databaseBuilder(context, MikaDatabase::class.java, NAME).addMigrations(MIGRATION_1_2).build()
     }
 }
 

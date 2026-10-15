@@ -9,7 +9,10 @@ import type {
   HistoryMessage,
   RejectedAttachment,
   SentFile,
+  Verdict,
+  VerdictResultMessage,
 } from "../types";
+import { applyVerdict, COMMENT_MAX, nextVerdict, verdictError, verdictFrame } from "./verdicts";
 import {
   acceptRefusal,
   approvalResult,
@@ -180,6 +183,16 @@ export class ChatOverlay {
    * Sa réponse qui s'écrit bulle par bulle (une ligne vide les sépare) :
    * « Mika écrit… » entre deux, au rythme de la frappe (ADR 0112).
    */
+  /**
+   * Ses réponses jugées (ADR 0113, opératrice seulement) : la réponse dont on
+   * écrit ce qu'elle aurait dû dire, et ce qu'on y a tapé — ils survivent à un
+   * nouveau rendu ; l'avis d'avant, le temps que le serveur réponde (un refus
+   * le remet) ; ce qu'un refus a dit, sous la réponse.
+   */
+  private verdictOpen: number | null = null;
+  private verdictDraft = "";
+  private readonly verdictPending = new Map<number, { verdict?: Verdict; note?: string }>();
+  private readonly verdictErrors = new Map<number, string>();
   private readonly reveal = new BubbleReveal<StoredMessage>((done) => {
     this.repaint({ animate: true });
     if (done) this.hideTyping();
@@ -506,6 +519,8 @@ export class ChatOverlay {
 
     this.ws.on("history", (data) => this.receiveHistory(data));
 
+    this.ws.on("verdict_result", (data) => this.verdictResult(data));
+
     // A terminal refusal (4401) means nothing queued will ever be sent.
     // Leaving those bubbles "en attente d'envoi" reads as "still on its
     // way", which is the one thing it is not.
@@ -610,7 +625,7 @@ export class ChatOverlay {
     // session, long after the gap it described had been filled.
     this.truncated =
       mode === "initial" ? truncated : this.truncated || truncated;
-    const changed = wiped || result.added > 0 || result.adopted > 0;
+    const changed = wiped || result.added > 0 || result.adopted > 0 || result.judged > 0;
     if (!changed && this.history.length === before && !truncated) {
       // Nothing new and nothing to say about a gap: repainting would flash
       // the whole thread for no reason.
@@ -1101,11 +1116,160 @@ export class ChatOverlay {
    */
   private buildBubbles(msg: StoredMessage, animate: boolean): HTMLElement[] {
     const parts = msg.sender === "vtuber" ? splitBubbles(msg.text) : [];
-    if (parts.length < 2) return [this.buildBubble(msg, animate)];
-    const shown = this.reveal.shown(msg, parts.length);
-    return parts
-      .slice(0, shown)
-      .map((text, i) => this.buildBubble(msg, animate, { text, last: i === parts.length - 1 }));
+    const shown = parts.length < 2 ? 1 : this.reveal.shown(msg, parts.length);
+    const out =
+      parts.length < 2
+        ? [this.buildBubble(msg, animate)]
+        : parts
+            .slice(0, shown)
+            .map((text, i) => this.buildBubble(msg, animate, { text, last: i === parts.length - 1 }));
+    // l'avis de l'opératrice, une fois toutes ses bulles arrivées (ADR 0113)
+    const complete = parts.length < 2 || shown >= parts.length;
+    if (complete && this.operator && msg.sender === "vtuber" && !msg.inner && typeof msg.id === "number") {
+      out.push(this.buildVerdict(msg, msg.id));
+    }
+    return out;
+  }
+
+  /**
+   * Sous une de ses réponses, pour l'opératrice : 👍 ou 👎 (un second clic
+   * retire l'avis), et ce qu'elle aurait dû dire — le champ s'ouvre de
+   * lui-même sur 👎, à la demande sur 👍.
+   */
+  private buildVerdict(msg: StoredMessage, id: number): HTMLElement {
+    const box = document.createElement("div");
+    box.className = "chat-verdict";
+    const row = document.createElement("div");
+    row.className = "chat-verdict-row";
+    const choices: ReadonlyArray<[Verdict, string, string]> = [
+      ["ok", "👍", "Réponse adaptée"],
+      ["ko", "👎", "Réponse pas adaptée"],
+    ];
+    for (const [verdict, icon, label] of choices) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "chat-verdict-btn";
+      button.textContent = icon;
+      const pressed = msg.verdict === verdict;
+      button.setAttribute("aria-pressed", String(pressed));
+      button.setAttribute("aria-label", label);
+      button.title = pressed ? `${label} — un clic retire ton avis` : label;
+      button.addEventListener("click", () => this.judge(id, nextVerdict(msg.verdict, verdict)));
+      row.append(button);
+    }
+    const editing = this.verdictOpen === id;
+    if (msg.verdict && !editing) {
+      const write = document.createElement("button");
+      write.type = "button";
+      write.className = "chat-verdict-link";
+      write.textContent = msg.verdictNote ? "modifier" : "ce qu'elle aurait dû dire…";
+      write.addEventListener("click", () => this.openVerdict(id));
+      row.append(write);
+    }
+    box.append(row);
+    if (msg.verdictNote && !editing) {
+      const note = document.createElement("div");
+      note.className = "chat-verdict-note";
+      note.textContent = msg.verdictNote;
+      box.append(note);
+    }
+    if (editing) box.append(this.buildVerdictEditor(id));
+    const error = this.verdictErrors.get(id);
+    if (error) {
+      const line = document.createElement("div");
+      line.className = "chat-verdict-error";
+      line.setAttribute("role", "status");
+      line.textContent = error;
+      box.append(line);
+    }
+    return box;
+  }
+
+  private buildVerdictEditor(id: number): HTMLElement {
+    const form = document.createElement("form");
+    form.className = "chat-verdict-editor";
+    const field = document.createElement("textarea");
+    field.id = `verdict-${id}`;
+    field.maxLength = COMMENT_MAX;
+    field.rows = 2;
+    field.placeholder = "Ce qu'elle aurait dû dire, ou pourquoi (facultatif)";
+    field.setAttribute("aria-label", "Ce qu'elle aurait dû dire, ou pourquoi");
+    field.value = this.verdictDraft;
+    field.addEventListener("input", () => {
+      this.verdictDraft = field.value;
+    });
+    const actions = document.createElement("div");
+    actions.className = "chat-verdict-actions";
+    const save = document.createElement("button");
+    save.type = "submit";
+    save.textContent = "Enregistrer";
+    const close = document.createElement("button");
+    close.type = "button";
+    close.textContent = "Fermer";
+    close.addEventListener("click", () => {
+      this.verdictOpen = null;
+      this.repaint({ animate: false });
+    });
+    actions.append(save, close);
+    form.append(field, actions);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      this.saveVerdictNote(id);
+    });
+    window.setTimeout(() => field.focus(), 0);
+    return form;
+  }
+
+  private openVerdict(id: number) {
+    const msg = this.history.find((m) => m.id === id);
+    this.verdictOpen = id;
+    this.verdictDraft = msg?.verdictNote ?? "";
+    this.repaint({ animate: false });
+  }
+
+  /** Envoie un avis ; il s'affiche aussitôt, un refus du serveur le remettra comme avant. */
+  private judge(id: number, verdict: Verdict | "", note?: string) {
+    const msg = this.history.find((m) => m.id === id && m.sender === "vtuber");
+    if (!msg) return;
+    const comment = verdict ? (note ?? msg.verdictNote ?? "") : "";
+    const before = { verdict: msg.verdict, note: msg.verdictNote };
+    this.verdictErrors.delete(id);
+    if (!this.ws.sendVerdict(verdictFrame(id, verdict, comment))) {
+      this.verdictErrors.set(id, "Hors ligne : ton avis n'est pas parti.");
+      this.repaint({ animate: false });
+      return;
+    }
+    if (!this.verdictPending.has(id)) this.verdictPending.set(id, before);
+    applyVerdict(this.history, id, verdict, comment);
+    // 👎 : on dit d'ordinaire ce qu'elle aurait dû dire ; 👍 : à la demande
+    const open = verdict === "ko" && note === undefined && !comment;
+    this.verdictOpen = open ? id : this.verdictOpen === id ? null : this.verdictOpen;
+    if (open) this.verdictDraft = "";
+    this.persistHistory();
+    this.repaint({ animate: false });
+  }
+
+  private saveVerdictNote(id: number) {
+    const msg = this.history.find((m) => m.id === id);
+    if (!msg?.verdict) return;
+    this.verdictOpen = null;
+    this.judge(id, msg.verdict, this.verdictDraft);
+  }
+
+  private verdictResult(data: VerdictResultMessage) {
+    const id = data.message_id;
+    const before = this.verdictPending.get(id);
+    this.verdictPending.delete(id);
+    const error = verdictError(data.status);
+    if (error) {
+      if (before) applyVerdict(this.history, id, before.verdict ?? "", before.note ?? "");
+      this.verdictErrors.set(id, error);
+    } else {
+      applyVerdict(this.history, id, data.verdict, data.comment ?? "");
+      this.verdictErrors.delete(id);
+    }
+    this.persistHistory();
+    this.repaint({ animate: false });
   }
 
   private buildBubble(

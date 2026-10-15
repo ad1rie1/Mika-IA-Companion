@@ -79,6 +79,9 @@ data class StoredMessage(
     var source: String? = null,
     var emotion: String? = null,
     var emotionIntensity: Double? = null,
+    /** L'avis de l'opératrice sur cette réponse (ADR 0113, `ok` | `ko`), et ce qu'elle aurait dû dire. */
+    var verdict: String? = null,
+    var verdictNote: String? = null,
 )
 
 object ChatSync {
@@ -315,7 +318,35 @@ object ChatSync {
         val added: Int,
         val adopted: Int,
         val sawReply: Boolean,
+        /** Ses réponses déjà là dont l'avis a changé (donné d'un autre appareil, ADR 0113). */
+        val judged: Int = 0,
     )
+
+    /** L'avis d'une ligne du fil, tel que le serveur le dit (`null` : pas d'avis). */
+    private fun verdictOf(entry: HistoryEntry): Pair<String?, String?> {
+        val verdict = entry.verdict?.takeIf { it == MikaProtocol.VERDICT_OK || it == MikaProtocol.VERDICT_KO }
+        return verdict to entry.verdictNote?.takeIf { verdict != null && it.isNotEmpty() }
+    }
+
+    const val VERDICT_NOT_SENT = "Hors ligne : ton avis n'est pas parti."
+
+    /** Ce qu'un refus d'avis veut dire, en français. */
+    fun verdictError(status: String): String = when (status) {
+        "forbidden" -> "Seule une opératrice peut juger ses réponses."
+        "invalid" -> "Ce message ne peut pas être jugé (il a peut-être été oublié)."
+        else -> "L'avis n'a pas été enregistré : réessaie."
+    }
+
+    /** Un clic sur 👍 ou 👎 : l'avis choisi, ou retiré (vide) si c'était déjà le sien. */
+    fun nextVerdict(current: String?, clicked: String): String = if (current == clicked) "" else clicked
+
+    /** Pose l'avis sur sa réponse [messageId] ; `false` si elle n'est pas dans le fil. */
+    fun applyVerdict(thread: List<StoredMessage>, messageId: Long, verdict: String, note: String): Boolean {
+        val m = thread.firstOrNull { it.id == messageId && it.sender == Sender.MIKA } ?: return false
+        m.verdict = verdict.ifEmpty { null }
+        m.verdictNote = note.trim().takeIf { verdict.isNotEmpty() && it.isNotEmpty() }
+        return true
+    }
 
     /**
      * Fondre la version du serveur dans ce qui est montré. Trois cas par ligne reçue : déjà là (par
@@ -332,10 +363,21 @@ object ChatSync {
         var added = 0
         var adopted = 0
         var sawReply = false
+        var judged = 0
 
         for (entry in entries.orEmpty()) {
             val id = entry.id ?: continue
-            if (id in known) continue
+            if (id in known) {
+                // une ligne déjà là ne change pas — sauf l'avis de l'opératrice, qui peut venir d'un autre appareil
+                val shown = if (entry.role == MikaProtocol.ROLE_USER) null else history.firstOrNull { it.id == id }
+                val (verdict, note) = verdictOf(entry)
+                if (shown != null && (shown.verdict != verdict || shown.verdictNote != note)) {
+                    shown.verdict = verdict
+                    shown.verdictNote = note
+                    judged += 1
+                }
+                continue
+            }
             val sender = if (entry.role == MikaProtocol.ROLE_USER) Sender.USER else Sender.MIKA
             val typed = entry.text
             val text = if (sender == Sender.MIKA) {
@@ -369,6 +411,8 @@ object ChatSync {
                         source = entry.source,
                         emotion = entry.emotion?.takeIf { it.isNotEmpty() },
                         emotionIntensity = entry.emotionIntensity,
+                        verdict = if (sender == Sender.MIKA) verdictOf(entry).first else null,
+                        verdictNote = if (sender == Sender.MIKA) verdictOf(entry).second else null,
                     ),
                 )
                 added += 1
@@ -382,7 +426,7 @@ object ChatSync {
         } else {
             history
         }
-        return MergeResult(out, added, adopted, sawReply)
+        return MergeResult(out, added, adopted, sawReply, judged)
     }
 
     // ── Le fil d'une autre vie (ADR 0056) ──

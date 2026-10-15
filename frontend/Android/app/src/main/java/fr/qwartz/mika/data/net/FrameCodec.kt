@@ -43,6 +43,7 @@ object FrameCodec {
                 MikaProtocol.TYPE_PONG -> ServerFrame.Pong((obj["t"] as? JsonPrimitive)?.doubleOrNull)
                 MikaProtocol.TYPE_APPROVALS -> decodeApprovals(obj)
                 MikaProtocol.TYPE_APPROVAL_RESULT -> decodeApprovalResult(obj)
+                MikaProtocol.TYPE_VERDICT_RESULT -> decodeVerdictResult(obj)
                 else -> ServerFrame.Unknown(type)
             }
         } catch (_: IllegalArgumentException) {
@@ -124,6 +125,16 @@ object FrameCodec {
         val id = positiveLong(obj["id"]) ?: return unknown
         val status = (obj["status"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return unknown
         return ServerFrame.ApprovalResult(id, status.take(MAX_STATUS_CHARS))
+    }
+
+    private fun decodeVerdictResult(obj: JsonObject): ServerFrame {
+        val unknown = ServerFrame.Unknown(MikaProtocol.TYPE_VERDICT_RESULT)
+        val id = positiveLong(obj["message_id"]) ?: return unknown
+        fun text(key: String) = (obj[key] as? JsonPrimitive)?.takeIf { it.isString }?.content
+        val status = text("status") ?: return unknown
+        val verdict = text("verdict").orEmpty().takeIf { it == MikaProtocol.VERDICT_OK || it == MikaProtocol.VERDICT_KO }
+        return ServerFrame.VerdictResult(id, verdict.orEmpty(), text("comment").orEmpty().take(MAX_COMMENT_CHARS),
+            status.take(MAX_STATUS_CHARS))
     }
 
     /** Un entier JSON strictement positif (jamais une chaîne, jamais un nombre à virgule). */
@@ -221,7 +232,16 @@ object FrameCodec {
         put("digest", digest)
     }.toString()
 
+    /** Un avis sur une de ses réponses (ADR 0113) : `ok`, `ko`, ou vide pour le retirer ; [comment] : ce qu'elle aurait dû dire. */
+    fun verdict(messageId: Long, verdict: String, comment: String): String = buildJsonObject {
+        put("type", MikaProtocol.TYPE_VERDICT)
+        put("message_id", messageId)
+        put("verdict", verdict)
+        put("comment", if (verdict.isEmpty()) "" else comment.trim().take(MAX_COMMENT_CHARS))
+    }.toString()
+
     private const val MAX_STATUS_CHARS = 64
+    const val MAX_COMMENT_CHARS = 2000
 
     const val K_SLEEP_PHASE = "sleep_phase"
     const val K_ENERGY = "energy"

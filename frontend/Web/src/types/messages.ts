@@ -289,6 +289,13 @@ export interface HistoryEntry {
   emotion?: string;
   emotion_intensity?: number;
   attachments?: HistoryAttachment[];
+  /**
+   * L'avis de son opératrice sur cette réponse (ADR 0113) — seulement pour
+   * une connexion d'opératrice, absent sinon.
+   */
+  verdict?: Verdict;
+  /** Ce qu'elle aurait dû dire, ou pourquoi (vide : rien d'écrit). */
+  verdict_note?: string;
 }
 
 /**
@@ -484,6 +491,26 @@ export interface ApprovalResultMessage {
 
 export type ApprovalDecision = "accept" | "refuse";
 
+/** L'avis de son opératrice sur une de ses réponses (ADR 0113) : adaptée, ou pas. */
+export type Verdict = "ok" | "ko";
+
+/** Client → serveur : une de ses réponses jugée ; `verdict` vide retire l'avis. */
+export interface VerdictFrame {
+  type: "verdict";
+  message_id: number;
+  verdict: Verdict | "";
+  /** Ce qu'elle aurait dû dire, ou pourquoi (facultatif). */
+  comment: string;
+}
+
+export interface VerdictResultMessage {
+  type: "verdict_result";
+  message_id: number;
+  verdict: Verdict | "";
+  comment?: string;
+  status: "ok" | "invalid" | "forbidden" | "failed";
+}
+
 /** Client → serveur : une carte décidée, telle qu'elle était affichée. */
 export interface ApprovalFrame {
   type: "approval";
@@ -534,5 +561,6 @@ export interface ServerMessageMap {
   avatar_state: AvatarStateMessage;
   approvals: ApprovalsMessage;
   approval_result: ApprovalResultMessage;
+  verdict_result: VerdictResultMessage;
   connection: ConnectionEvent;
 }

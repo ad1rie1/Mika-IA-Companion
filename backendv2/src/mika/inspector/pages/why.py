@@ -35,6 +35,7 @@ from sqlalchemy import select
 
 from mika.contracts import memory as memory_c
 from mika.contracts import runtime as rt
+from mika.contracts import transcript as transcript_c
 from mika.inspector import names
 from mika.inspector.pages.decisions import arbiter_rows, waterfall
 from mika.kernel.builtin import SELECTED
@@ -310,6 +311,22 @@ def _args(raw: Any) -> str:
         return str(raw)
 
 
+def verdict_blocks(ui: Any, seq: int) -> list[Any]:
+    """L'avis de son opératrice sur cette réponse, donné depuis le chat (ADR 0113) : le plus récent vaut."""
+    judged = next(iter(ui.inspection.context().events([transcript_c.JUDGED], 1, where=("seq", seq))), None)
+    if judged is None or not judged.data.verdict:
+        return []
+    d = judged.data
+    ok = d.verdict == transcript_c.VERDICT_OK
+    note = d.comment.text if d.comment is not None else None
+    return [Section("Ton avis", (Fields((
+        ("sa réponse était", Badge("adaptée", "ok") if ok else Badge("pas adaptée", "warn")),
+        ("ce qu'elle aurait dû dire", Text(note or "—")),
+        ("donné", When(judged.at)),
+        ("par", ui.names.who_cell(d.by)),
+    )),))]
+
+
 def why_page(ui: Any, seq: int) -> dict[str, Any] | None:
     """La page d'une parole, ou ``None`` si ce numéro n'en est pas une."""
     utterance = _decoded(ui, seq)
@@ -327,6 +344,7 @@ def why_page(ui: Any, seq: int) -> dict[str, Any] | None:
              ("visible", "dans le fil" if d.visible else "pas dans le fil")]
     blocks: list[Any] = [
         Prose(text or "(oublié : le texte a été effacé)", "Ce qu'elle a dit", reading=True),
+        *verdict_blocks(ui, seq),
         Section("Ce qui l'a fait parler", tuple(cause_blocks(ui, started))),
         Section("Ce qu'elle avait sous les yeux", (
             *prompt_blocks(ui, trace, tuple(d.sections)),

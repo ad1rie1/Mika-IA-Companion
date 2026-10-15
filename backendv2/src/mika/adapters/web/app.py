@@ -728,7 +728,8 @@ class _Session:
         """Un écran qui s'ouvre : la présence, le fil initial, le visage, le panneau."""
         c = self.conn
         await self._arrive()
-        await self.send(self.hub.history("initial", self.port.recent(c.handle, protocol.HISTORY_INITIAL)))
+        await self.send(self.hub.history("initial", self.port.recent(c.handle, protocol.HISTORY_INITIAL),
+                                         verdicts=self._judges()))
         await self._refresh()
 
     async def run(self) -> None:
@@ -931,6 +932,9 @@ class _Session:
         elif kind == "approval":
             if self.conn.control.allow():
                 await self.approval(frame)
+        elif kind == "verdict":
+            if self.conn.control.allow():
+                await self.verdict(frame)
         elif kind == "chat":
             self.enqueue_chat(frame)
 
@@ -953,6 +957,30 @@ class _Session:
         await self.send({"type": "approval_result", "id": proposal, "status": status})
         await self.hub.push_approvals([self.conn.handle])
         await self.hub.refresh_panels()
+
+    def _judges(self) -> bool:
+        """Une connexion d'opératrice, authentifiée : elle voit et donne son avis sur ses réponses (ADR 0113)."""
+        return bool(self.conn.operator and self.conn.authenticated)
+
+    async def verdict(self, frame: dict[str, Any]) -> None:
+        """Une de ses réponses jugée depuis le chat (ADR 0113) : par une opératrice connectée et authentifiée
+        seulement — ``verdict`` ``ok``, ``ko``, ou vide pour retirer l'avis ; ``comment`` : ce qu'elle aurait dû
+        dire, ou pourquoi. La réponse dit le sort (``ok``, ``forbidden``, ``invalid``, ``failed``)."""
+        try:
+            seq = int(frame.get("message_id"))
+        except (TypeError, ValueError):
+            return
+        verdict = frame.get("verdict") or ""
+        if verdict not in ("ok", "ko", ""):
+            return
+        comment = str(frame.get("comment") or "")[:2000]
+        reply = {"type": "verdict_result", "message_id": seq, "verdict": verdict}
+        if not self._judges() or self.account is None or not self._session_valid():
+            await self.send({**reply, "status": "forbidden"})
+            return
+        judge = getattr(self.port, "judge", None)
+        status = await judge(self.conn.handle, seq, verdict, comment) if judge is not None else "failed"
+        await self.send({**reply, "status": status, "comment": comment if status == "ok" else ""})
 
     def enqueue_chat(self, frame: dict[str, Any]) -> None:
         """Le chat avance dans sa propre tâche : la lecture des trames continue pendant
@@ -1026,12 +1054,13 @@ class _Session:
                 # « rattrapage » vide le laisserait cacher tout ce qui est plus petit que lui — le fil initial
                 # remplace ce que l'écran montre
                 rows = self.port.recent(c.handle, protocol.HISTORY_INITIAL)
-                await self.send(self.hub.history("initial", rows, life=life, reset=True))
+                await self.send(self.hub.history("initial", rows, life=life, reset=True, verdicts=self._judges()))
                 return
             rows, truncated = self.port.after(c.handle, after_id, protocol.HISTORY_MAX)
         else:
             rows, truncated = self.port.recent(c.handle, protocol.HISTORY_INITIAL), False
-        await self.send(self.hub.history("catchup", rows, after_id=after_id, truncated=truncated, life=life))
+        await self.send(self.hub.history("catchup", rows, after_id=after_id, truncated=truncated, life=life,
+                                         verdicts=self._judges()))
 
     def _session_valid(self) -> bool:
         """Revérifiée à chaque message, avant chaque rattrapage, et par le concentrateur à chaque

@@ -10,7 +10,9 @@ import fr.qwartz.mika.data.chat.ChatSync.cursorOf
 import fr.qwartz.mika.data.chat.ChatSync.fromAnotherLife
 import fr.qwartz.mika.data.chat.ChatSync.keepAcrossLives
 import fr.qwartz.mika.data.chat.ChatSync.markAsleep
+import fr.qwartz.mika.data.chat.ChatSync.applyVerdict
 import fr.qwartz.mika.data.chat.ChatSync.mergeHistory
+import fr.qwartz.mika.data.chat.ChatSync.nextVerdict
 import fr.qwartz.mika.data.chat.ChatSync.noReplyNote
 import fr.qwartz.mika.data.chat.ChatSync.restoredStatus
 import fr.qwartz.mika.data.chat.ChatSync.sortMessages
@@ -524,5 +526,21 @@ class ChatSyncTest {
         assertTrue(a.matches(Regex("""c[0-9a-z]+-\d+""")))
         assertTrue(a != b)
         assertTrue(a.length <= 64)
+    }
+
+    @Test fun `un avis donné ailleurs arrive sur sa réponse déjà affichée, et se retire (ADR 0113)`() {
+        val reply = StoredMessage("C'est le piège du métier…", Sender.MIKA, ts = 812, id = 812)
+        val entry = fr.qwartz.mika.data.net.HistoryEntry(id = 812, role = "assistant", text = "C'est le piège du métier…",
+            ts = 812.0, verdict = "ko", verdictNote = "trop long")
+        val got = mergeHistory(mutableListOf(reply), listOf(entry), 50, nowMs = 1_000)
+        assertEquals(1, got.judged)
+        assertEquals("ko", got.history.single().verdict)
+        assertEquals("trop long", got.history.single().verdictNote)
+        assertEquals(0, mergeHistory(got.history, listOf(entry), 50, nowMs = 1_000).judged)
+        assertEquals("", nextVerdict("ko", "ko"))
+        assertEquals("ok", nextVerdict("ko", "ok"))
+        assertTrue(applyVerdict(got.history, 812, "", ""))
+        assertEquals(null, got.history.single().verdict)
+        assertEquals(null, got.history.single().verdictNote)
     }
 }

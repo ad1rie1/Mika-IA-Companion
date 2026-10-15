@@ -115,6 +115,7 @@ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
 | `composing` | `on` (booléen) | la personne commence à écrire un message (`true`) ou cesse (`false`) ; authentifié seulement |
 | `read` | `up_to` (un identifiant de message) | jusqu'où la personne a lu son fil, si elle l'a permis ; authentifié seulement |
 | `approval` | `id`, `decision` (`accept` \| `refuse`), `digest` | décider d'une carte d'accord (§4, `approvals`) ; authentifié seulement |
+| `verdict` | `message_id`, `verdict` (`ok` \| `ko` \| vide), `comment?` | juger une de ses réponses (ADR 0113) ; opératrice authentifiée seulement |
 
 `chat` :
 
@@ -163,6 +164,11 @@ délai de réponse qu'elle attend court à partir de la lecture.
 
 `approval` (ADR 0064) : `digest` est **celui de la carte affichée** — le serveur refuse un accord sur autre chose que
 ce qui a été montré (`changed`). Refuser n'exige pas d'empreinte. Compte dans le débit de `sync` (12 par 10 s).
+
+`verdict` (ADR 0113) : son opératrice dit si une de ses réponses était adaptée (`ok`) ou non (`ko`), et, si elle veut,
+ce qu'elle aurait dû dire ou pourquoi (`comment`, 2 000 caractères au plus) ; un `verdict` vide retire l'avis. Le
+dernier avis vaut. Il passe par le chemin des actions de la console (`transcript.juger`, audité). Compte dans le
+débit de `sync`. Réponse : `verdict_result`.
 
 ## 4. Ce que le serveur envoie
 
@@ -227,6 +233,8 @@ répondre — réessaie ».
 - `ts` en **millisecondes** depuis l'époque Unix.
 - `text` d'un message de la personne : ce qu'elle a tapé ; ses fichiers par leur nom et leur sorte (`image`,
   `audio`, `file`). Un message de Mika : sans jetons de voix ; ses fichiers comme dans `speech`.
+- Une ligne d'elle jugée, **pour une connexion d'opératrice seulement** : `verdict` (`ok` \| `ko`) et `verdict_note`
+  (ce qu'elle aurait dû dire, ou vide) — absents sinon (ADR 0113).
 - Une ligne `user` que tu montres déjà — tapée sur cet appareil, pas encore rattachée à un `id` — s'**adopte** au
   lieu de s'ajouter : la plus ancienne de tes bulles sans identifiant au même texte reçoit l'`id` de la ligne. La
   `speech` ne rattache que le dernier message d'une rafale (`user_message_id`, `client_msg_id`) : les précédents
@@ -259,6 +267,10 @@ liste reçue (une carte absente n'attend plus rien) :
 **`approval_result`** — le sort d'une décision : `{"type": "approval_result", "id": 905, "status": "approved"}` ;
 `status` : `approved`, `rejected`, `unknown` (déjà décidée, ou inconnue), `changed` (ce qui partirait a changé :
 relis la carte), `blocked`, `expired`, `forbidden` (pas à toi de décider). Une liste `approvals` à jour suit.
+
+**`verdict_result`** — le sort d'un avis : `{"type": "verdict_result", "message_id": 812, "verdict": "ko", "comment":
+"…", "status": "ok"}` ; `status` : `ok`, `invalid` (pas une de ses réponses, ou oubliée), `forbidden` (pas une
+opératrice), `failed` (réessayer).
 
 **`emotion_update`** (son visage entre deux tours, seulement vers un écran regardé), **`inner_state_update`**
 (`{"inner_state": {…}}` : sommeil `sleep_phase`, `energy`, lieu `place`, ce qu'elle y fait `activity`

@@ -98,6 +98,13 @@ object MikaProtocol {
     const val TYPE_PONG = "pong"
     const val TYPE_APPROVALS = "approvals"
     const val TYPE_APPROVAL_RESULT = "approval_result"
+    const val TYPE_VERDICT_RESULT = "verdict_result"
+    const val TYPE_VERDICT = "verdict"
+
+    /** L'avis de l'opératrice sur une de ses réponses (ADR 0113) : adaptée, ou pas. */
+    const val VERDICT_OK = "ok"
+    const val VERDICT_KO = "ko"
+    const val VERDICT_STATUS_OK = "ok"
     const val TYPE_CHAT = "chat"
     const val TYPE_SYNC = "sync"
     const val TYPE_PING = "ping"

@@ -101,6 +101,8 @@ class ChatStore(private val db: MikaDatabase) : ThreadStore {
             source = source,
             emotion = emotion,
             emotionIntensity = emotionIntensity,
+            verdict = verdict,
+            verdictNote = verdictNote,
         )
 
         fun StoredMessage.toEntity() = MessageEntity(
@@ -127,6 +129,8 @@ class ChatStore(private val db: MikaDatabase) : ThreadStore {
             source = source,
             emotion = emotion,
             emotionIntensity = emotionIntensity,
+            verdict = verdict,
+            verdictNote = verdictNote,
         )
 
         private fun decodeAttachments(raw: String): List<MessageAttachment> =

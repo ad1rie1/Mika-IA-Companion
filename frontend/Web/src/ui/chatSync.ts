@@ -15,7 +15,7 @@
  * while the database held both.
  */
 
-import type { AckMessage, HistoryAttachment, HistoryEntry, RejectedAttachment, SentFile } from "../types";
+import type { AckMessage, HistoryAttachment, HistoryEntry, RejectedAttachment, SentFile, Verdict } from "../types";
 
 /**
  * What happened to a message the user sent.
@@ -99,6 +99,19 @@ export interface StoredMessage {
    * vignette, un autre fichier en lien) — validés par `sentFiles`.
    */
   files?: SentFile[];
+  /**
+   * L'avis de son opératrice sur cette réponse (ADR 0113), et ce qu'elle
+   * aurait dû dire. Seule une connexion d'opératrice les reçoit.
+   */
+  verdict?: Verdict;
+  verdictNote?: string;
+}
+
+/** L'avis d'une ligne du fil, tel que le serveur le dit (rien : pas d'avis). */
+function verdictOf(entry: HistoryEntry): { verdict?: Verdict; verdictNote?: string } {
+  const verdict = entry.verdict === "ok" || entry.verdict === "ko" ? entry.verdict : undefined;
+  const note = verdict && typeof entry.verdict_note === "string" && entry.verdict_note ? entry.verdict_note : undefined;
+  return { verdict, verdictNote: note };
 }
 
 /**
@@ -498,6 +511,8 @@ export function mergeHistory(
   added: number;
   adopted: number;
   sawReply: boolean;
+  /** Ses réponses déjà affichées dont l'avis a changé (donné d'un autre appareil, ADR 0113). */
+  judged: number;
 } {
   const known = new Set(
     history.map((m) => m.id).filter((id): id is number => typeof id === "number")
@@ -506,9 +521,21 @@ export function mergeHistory(
   let added = 0;
   let adopted = 0;
   let sawReply = false;
+  let judged = 0;
 
   for (const entry of entries ?? []) {
-    if (typeof entry?.id !== "number" || known.has(entry.id)) continue;
+    if (typeof entry?.id !== "number") continue;
+    if (known.has(entry.id)) {
+      // une ligne déjà là ne change pas — sauf l'avis de l'opératrice, qui peut venir d'un autre appareil
+      const shown = entry.role === "user" ? undefined : history.find((m) => m.id === entry.id);
+      const { verdict, verdictNote } = verdictOf(entry);
+      if (shown && (shown.verdict !== verdict || shown.verdictNote !== verdictNote)) {
+        shown.verdict = verdict;
+        shown.verdictNote = verdictNote;
+        judged += 1;
+      }
+      continue;
+    }
     const sender = entry.role === "user" ? "user" : "vtuber";
     const typed = typeof entry.text === "string" ? entry.text : "";
     // Sa bulle comme à l'envoi : ce qu'elle a tapé, ses fichiers par leur nom
@@ -535,6 +562,7 @@ export function mergeHistory(
       }
       adopted += 1;
     } else {
+      const { verdict, verdictNote } = sender === "vtuber" ? verdictOf(entry) : {};
       history.push({
         text,
         sender,
@@ -542,6 +570,8 @@ export function mergeHistory(
         id: entry.id,
         status: sender === "user" ? "sent" : undefined,
         ...(files.length ? { files } : {}),
+        ...(verdict ? { verdict } : {}),
+        ...(verdictNote ? { verdictNote } : {}),
       });
       added += 1;
     }
@@ -552,7 +582,7 @@ export function mergeHistory(
   if (history.length > maxMessages) {
     history = history.slice(-maxMessages);
   }
-  return { history, added, adopted, sawReply };
+  return { history, added, adopted, sawReply, judged };
 }
 
 // ── Le fil d'une autre vie (ADR 0056) ─────────────────────────────────

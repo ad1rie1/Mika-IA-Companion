@@ -1,5 +1,6 @@
 import type {
   ApprovalFrame,
+  VerdictFrame,
   ComposingFrame,
   PresenceFrame,
   ServerMessageMap,
@@ -832,6 +833,11 @@ export class WebSocketClient {
    * Returns false when nothing left the browser.
    */
   sendApproval(frame: ApprovalFrame): boolean {
+    return this.sendNow(frame);
+  }
+
+  /** Une de ses réponses jugée (ADR 0113) : jamais mise en file, comme une décision. */
+  sendVerdict(frame: VerdictFrame): boolean {
     return this.sendNow(frame);
   }
 

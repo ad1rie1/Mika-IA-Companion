@@ -87,6 +87,7 @@ fun ChatScreen(
     val owner = chatOwner(session)
     val vm: ChatViewModel = viewModel(key = "chat:$owner") { ChatViewModel(graph, createSavedStateHandle(), owner) }
     val items by vm.items.collectAsStateWithLifecycle()
+    val verdictErrors by vm.verdictErrors.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val link by vm.link.collectAsStateWithLifecycle()
     val operator by vm.operator.collectAsStateWithLifecycle()
@@ -145,6 +146,7 @@ fun ChatScreen(
         ChatActions(
             retry = vm::retry,
             resend = vm::resend,
+            judge = vm::judge,
             copy = { text ->
                 scope.launch {
                     clipboard.setClipEntry(ClipEntry(ClipData.newPlainText("Mika", text)))
@@ -258,6 +260,7 @@ fun ChatScreen(
                         actions = actions,
                         overPortrait = scene != null,
                         stage = stage,
+                        verdictErrors = verdictErrors,
                         modifier = Modifier.weight(1f),
                     )
                     ApprovalTray(approvals, onDecide = vm::decide, modifier = Modifier.heightIn(max = trayMax))

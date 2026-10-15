@@ -34,7 +34,7 @@ from mika.faculties.projects import work as projects_work
 from mika.faculties.self import night
 from mika.faculties.social.sections import profile_parts, refs_of
 from mika.faculties.world import commands as world_commands
-from mika.kernel import schedule
+from mika.kernel import forms, schedule
 from mika.kernel.clock import MINUTE, local
 from mika.kernel.events import Content, Event, Origin
 from mika.kernel.frame import Audience, Frame
@@ -43,7 +43,7 @@ from mika.kernel.operate import Preview
 from mika.kernel.state import Root
 from mika.ports.shares import MAX_SHARE_BYTES, valid_id
 from mika.ports.workshop import argv_lines
-from mika.runtime import decisions, health
+from mika.runtime import decisions, health, operations
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
 from mika.vocab.affect import emotion_of
 from mika.vocab.circadian import DAYS_FR, day_fr
@@ -75,6 +75,7 @@ def _row(r: dict) -> HistoryRow:
     return HistoryRow(
         id=r["id"], at=r["at"], role=r["role"], text=text, source=r["source"] or "",
         emotion=r["emotion"], emotion_intensity=r["emotion_intensity"], attachments=attachments,
+        verdict=r.get("verdict") or "", verdict_note=r.get("verdict_note") or "",
     )
 
 
@@ -402,6 +403,18 @@ class KernelPort:
                           "blocked": shown.blocked if shown is not None else "",
                           "expires_at": expires // 1000 if expires else None})
         return cards
+
+    async def judge(self, handle: str, seq: int, verdict: str, comment: str) -> str:
+        """Une de ses réponses jugée depuis le chat par une opératrice (ADR 0113) : le chemin des actions de la
+        console (``transcript.juger``, validé et audité). ``ok``, ``invalid`` (pas une de ses réponses, un avis
+        inconnu) ou ``failed``."""
+        # un formulaire tel que la console l'envoie : les champs rendus (``_champs``), la clé cachée en valeur fixe
+        form = {"seq": [str(seq)], operations.FIXED_FIELD: ["seq"], forms.RENDERED: ["verdict", "comment"],
+                "verdict": [verdict or "retire"], "comment": [comment]}
+        outcome = await operations.perform(self.kernel, "transcript.juger", form, by=handle)
+        if outcome.ok:
+            return "ok"
+        return "failed" if outcome.retry else "invalid"
 
     async def decide_card(self, handle: str, proposal: int, approved: bool, seen: str) -> str:
         """Une carte décidée dans le chat : seulement par l'adresse à qui elle est adressée, tant qu'elle vaut,

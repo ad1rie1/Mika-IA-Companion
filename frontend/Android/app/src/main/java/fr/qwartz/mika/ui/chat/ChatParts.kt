@@ -21,6 +21,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import fr.qwartz.mika.data.chat.ChatSync
+import fr.qwartz.mika.data.net.MikaProtocol
+import fr.qwartz.mika.data.net.FrameCodec
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -121,6 +127,8 @@ class ChatActions(
     val openConsole: (String) -> Unit = {},
     val imageUrl: (MessageAttachment) -> String? = { null },
     val ownFile: (cid: String, local: String) -> File? = { _, _ -> null },
+    /** Juger une de ses réponses (ADR 0113) : `ok`, `ko`, ou vide pour retirer l'avis ; puis ce qu'elle aurait dû dire. */
+    val judge: (messageId: Long, verdict: String, comment: String) -> Unit = { _, _, _ -> },
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -256,6 +264,8 @@ internal fun ChatConversation(
     /** Le fil passe sur son portrait : ce qui n'est pas une bulle prend un fond, pour rester lisible. */
     overPortrait: Boolean = false,
     stage: StageLink? = null,
+    /** Ce qu'un refus a dit d'un avis sur une de ses réponses, par message (ADR 0113). */
+    verdictErrors: Map<Long, String> = emptyMap(),
 ) {
     if (items.isEmpty()) {
         // Sur son portrait, l'invitation se met sous elle plutôt qu'en travers.
@@ -335,6 +345,8 @@ internal fun ChatConversation(
                             actions,
                             utterance = stage?.track?.of(item.key),
                             onSkip = { stage?.track?.skip(item.key) },
+                            operator = operator,
+                            verdictError = item.message.id?.let { verdictErrors[it] },
                         )
                         is ChatItem.Note -> Backed(overPortrait) { Note(item, operator, actions) }
                         is ChatItem.Thought -> Backed(overPortrait) { Thought(item.message) }
@@ -507,6 +519,9 @@ private fun Bubble(
     /** Sa réplique, si elle est en train de la dire : le texte s'écrit à son rythme. */
     utterance: Utterance? = null,
     onSkip: () -> Unit = {},
+    /** Une opératrice : sous ses réponses, son avis (ADR 0113). */
+    operator: Boolean = false,
+    verdictError: String? = null,
 ) {
     val m = item.message
     val reveal = utterance?.let { rememberReveal(it) }
@@ -576,6 +591,10 @@ private fun Bubble(
                     }
                 }
             }
+            val judged = m.id
+            if (operator && item.last && !mine && !m.inner && judged != null) {
+                VerdictBar(m, judged, actions, verdictError)
+            }
             if (failed) {
                 Text(
                     stringResource(R.string.status_failed, m.reason ?: stringResource(R.string.status_refused_default)),
@@ -584,6 +603,71 @@ private fun Bubble(
                 )
                 TextButton(onClick = { actions.retry(m.localId) }) { Text(retryLabel) }
             }
+        }
+    }
+}
+
+/**
+ * Sous une de ses réponses, pour l'opératrice (ADR 0113) : 👍 ou 👎 (toucher de nouveau retire l'avis), et ce
+ * qu'elle aurait dû dire — le champ s'ouvre de lui-même sur 👎, à la demande sur 👍. L'avis s'affiche aussitôt ;
+ * un refus du serveur le remet comme avant et le dit ([error]).
+ */
+@Composable
+private fun VerdictBar(m: StoredMessage, id: Long, actions: ChatActions, error: String?) {
+    var editing by rememberSaveable(id) { mutableStateOf(false) }
+    var draft by rememberSaveable(id) { mutableStateOf("") }
+    val choices = listOf(
+        Triple(MikaProtocol.VERDICT_OK, "👍", stringResource(R.string.verdict_ok)),
+        Triple(MikaProtocol.VERDICT_KO, "👎", stringResource(R.string.verdict_ko)),
+    )
+    Column(Modifier.padding(top = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for ((verdict, icon, label) in choices) {
+                val pressed = m.verdict == verdict
+                val said = if (pressed) stringResource(R.string.verdict_withdraw, label) else label
+                FilterChip(
+                    selected = pressed,
+                    onClick = {
+                        val next = ChatSync.nextVerdict(m.verdict, verdict)
+                        actions.judge(id, next, if (next.isEmpty()) "" else m.verdictNote.orEmpty())
+                        editing = next == MikaProtocol.VERDICT_KO && m.verdictNote.isNullOrEmpty()
+                        if (editing) draft = ""
+                    },
+                    label = { Text(icon) },
+                    modifier = Modifier.semantics { contentDescription = said },
+                )
+            }
+            if (m.verdict != null && !editing) {
+                TextButton(onClick = {
+                    draft = m.verdictNote.orEmpty()
+                    editing = true
+                }) {
+                    Text(stringResource(if (m.verdictNote.isNullOrEmpty()) R.string.verdict_write else R.string.verdict_edit))
+                }
+            }
+        }
+        val note = m.verdictNote
+        if (!note.isNullOrEmpty() && !editing) {
+            Text(note, style = MaterialTheme.typography.bodySmall, fontStyle = FontStyle.Italic)
+        }
+        if (editing) {
+            OutlinedTextField(
+                value = draft,
+                onValueChange = { draft = it.take(FrameCodec.MAX_COMMENT_CHARS) },
+                placeholder = { Text(stringResource(R.string.verdict_placeholder)) },
+                minLines = 2,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Button(onClick = {
+                    m.verdict?.let { actions.judge(id, it, draft) }
+                    editing = false
+                }) { Text(stringResource(R.string.verdict_save)) }
+                TextButton(onClick = { editing = false }) { Text(stringResource(R.string.verdict_close)) }
+            }
+        }
+        if (error != null) {
+            Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
     }
 }

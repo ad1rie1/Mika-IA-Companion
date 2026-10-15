@@ -138,6 +138,16 @@ class ConnectionManager(
         sent
     }
 
+    /**
+     * Juger une de ses réponses (ADR 0113), maintenant ou pas du tout : `false` si la socket n'est pas
+     * ouverte. Parti, l'avis s'affiche et attend sa réponse (`verdict_result`).
+     */
+    suspend fun judge(messageId: Long, verdict: String, comment: String): Boolean = withContext(engineContext) {
+        val sent = socket.sendVerdict(messageId, verdict, comment)
+        if (sent) chat.onVerdictSent(messageId, verdict, comment) else chat.onVerdictNotSent(messageId)
+        sent
+    }
+
     /** Fin de session : plus rien ne part ni n'arrive, et une trame en cours de traitement finit d'abord. */
     suspend fun shutdown() = withContext(engineContext) {
         epoch++
@@ -249,6 +259,7 @@ class ConnectionManager(
                 is ServerFrame.InnerStateUpdate -> mind.onInnerState(frame.state)
                 is ServerFrame.Approvals -> approvals.onApprovals(frame)
                 is ServerFrame.ApprovalResult -> approvals.onResult(frame)
+                is ServerFrame.VerdictResult -> chat.onVerdictResult(frame)
                 is ServerFrame.Pong, is ServerFrame.Unknown -> Unit
             }
         } catch (e: CancellationException) {

@@ -150,7 +150,7 @@ class TranscriptState:
 #: refaire (ADR 0082)
 TRANSCRIPT = Faculty("transcript", state=TranscriptState, init=lambda p: TranscriptState(), params=TranscriptParams,
                      state_version=2)
-TRANSCRIPT.declare(c.COMPACTED, c.SUMMARY_RESET)
+TRANSCRIPT.declare(c.COMPACTED, c.SUMMARY_RESET, c.JUDGED)
 
 
 def _params(p: TranscriptParams | None) -> TranscriptParams:
@@ -226,7 +226,8 @@ def _head(s: TranscriptState, cx) -> int:
 #: fin d'épisode qui l'a réglé ; nul sinon (version 3). ``tools`` : les outils dont elle s'est servie pour écrire un
 #: de ses messages (version 6, ADR 0108)
 _COLUMNS = ("id", "at", "role", "person", "channel", "room", "source", "kind", "text", "client_msg_id",
-            "reply_to", "emotion", "emotion_intensity", "attachments", "typed", "unanswered", "tools")
+            "reply_to", "emotion", "emotion_intensity", "attachments", "typed", "unanswered", "tools", "verdict",
+            "verdict_note")
 
 
 class Thread:
@@ -246,6 +247,14 @@ class Thread:
         # après les lignes : une fin ne laisse sans réponse que des messages reçus avant elle
         for issue, seq in (pair for e in events if e.type.name == rt.EPISODE_ENDED.name for pair in _left(e.data)):
             sql.execute(update(t).where(t.c.id == seq, t.c.role == "user").values(unanswered=issue))
+        # l'avis de son opératrice sur une de ses réponses (ADR 0113) : le dernier vaut ; un commentaire oublié ne
+        # revient pas à la reconstruction
+        for e in events:
+            if e.type.name == c.JUDGED.name:
+                d = e.data
+                note = None if d.comment is None or _forgotten(d.comment) else (d.comment.text or None)
+                sql.execute(update(t).where(t.c.id == d.seq, t.c.role == "assistant")
+                            .values(verdict=d.verdict or None, verdict_note=note if d.verdict else None))
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> None:
         t = c.thread_table(sfx)
@@ -278,7 +287,7 @@ def _row(e: Any) -> tuple[Any, ...] | None:
         text = d.text.text or ""
         typed = None if d.typed_chars is None else max(0, min(len(text), d.typed_chars))
         return (e.seq, e.at, "user", d.handle, d.channel, d.room, d.channel, "message", text,
-                d.client_msg_id, None, None, None, attachments, typed, None, None)
+                d.client_msg_id, None, None, None, attachments, typed, None, None, None, None)
     if e.type.name == rt.UTTERANCE.name and d.visible:
         declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
         # ce qui est parti avec son message : des identifiants seulement (leur nom, leur taille, leur sort sont à
@@ -287,7 +296,7 @@ def _row(e: Any) -> tuple[Any, ...] | None:
         return (e.seq, e.at, "assistant", d.target or "", d.channel, d.room, _source(d.kind), d.kind,
                 strip_prosody(d.text.text or ""), None, d.reply_to,
                 declared.emotion.value if declared else None, declared.intensity if declared else None, sent, None,
-                None, _tools_of(d))
+                None, _tools_of(d), None, None)
     return None
 
 
@@ -333,13 +342,14 @@ def _left(d: rt.EpisodeEnded) -> list[tuple[str, int]]:
     return [(issue, int(seq)) for seq in seqs]
 
 
-#: version 6 : la colonne ``tools`` (les outils dont elle s'est servie pour écrire un de ses messages, ADR 0108) ;
+#: version 7 : l'avis de son opératrice sur ses réponses (``verdict``, ``verdict_note``, ADR 0113), d'où
+#: ``transcript.judged`` ; version 6 : la colonne ``tools`` (les outils dont elle s'est servie pour écrire un de ses messages, ADR 0108) ;
 #: version 5 : la table déclarée pour les deux moteurs (ADR 0101), et ``folded`` (le texte replié que cherche la
 #: console) ; version 3 : la colonne ``unanswered`` (pourquoi un message reçu est resté sans réponse), d'où les fins
 #: d'épisode ; version 2 : la colonne ``typed`` (ce que la personne a tapé, à part de ce que ses pièces jointes ont
 #: donné) — la table se reconstruit depuis le journal au premier démarrage
-TRANSCRIPT.projector(c.THREAD_TABLE, version=6, tier=Tier.T0,
-                     types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_ENDED])(Thread)
+TRANSCRIPT.projector(c.THREAD_TABLE, version=7, tier=Tier.T0,
+                     types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_ENDED, c.JUDGED])(Thread)
 
 
 def _columns() -> list[Any]:
@@ -1272,3 +1282,8 @@ def _handle_thread(s: TranscriptState, frame: Frame, ctx: InspectContext) -> lis
     if folded is not None:
         blocks.append(folded)
     return blocks
+
+
+# l'avis de son opératrice sur ses réponses (ADR 0113) : l'action et sa vue, enregistrées sur la faculté
+from mika.faculties.transcript import actions as _actions  # noqa: E402, F401
+from mika.faculties.transcript import inspect as _inspect  # noqa: E402, F401

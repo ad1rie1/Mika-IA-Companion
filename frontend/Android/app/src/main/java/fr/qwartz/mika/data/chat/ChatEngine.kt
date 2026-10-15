@@ -78,6 +78,14 @@ class ChatEngine(
     private val _truncated = MutableStateFlow(false)
     val truncated: StateFlow<Boolean> = _truncated.asStateFlow()
 
+    /**
+     * Ses réponses jugées (ADR 0113) : l'avis d'avant de chaque avis en route — un refus du serveur le
+     * remet —, et ce qu'un refus a dit, par message, pour l'écran.
+     */
+    private val pendingVerdicts = HashMap<Long, Pair<String?, String?>>()
+    private val _verdictErrors = MutableStateFlow<Map<Long, String>>(emptyMap())
+    val verdictErrors: StateFlow<Map<Long, String>> = _verdictErrors.asStateFlow()
+
     private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 16)
     val events: SharedFlow<ChatEvent> = _events.asSharedFlow()
 
@@ -139,6 +147,35 @@ class ChatEngine(
         if (added != null) {
             _events.tryEmit(ChatEvent.MikaSpoke(listOf(added), live = true, replyToClientMsgId = cid, cursorBefore = cursorBefore))
         }
+    }
+
+    /** Un avis parti (ADR 0113) : il s'affiche aussitôt ; l'avis d'avant attend la réponse du serveur. */
+    suspend fun onVerdictSent(messageId: Long, verdict: String, comment: String) {
+        store.mutate {
+            val m = thread.firstOrNull { it.id == messageId && it.sender == Sender.MIKA }
+            if (m != null && messageId !in pendingVerdicts) pendingVerdicts[messageId] = m.verdict to m.verdictNote
+            ChatSync.applyVerdict(thread, messageId, verdict, comment)
+        }
+        _verdictErrors.update { it - messageId }
+    }
+
+    /** Un avis qui n'a pas pu partir (la socket fermée) : rien n'a changé, l'écran le dit. */
+    fun onVerdictNotSent(messageId: Long) {
+        _verdictErrors.update { it + (messageId to ChatSync.VERDICT_NOT_SENT) }
+    }
+
+    /** Le sort d'un avis : gardé tel que le serveur l'a écrit, ou l'avis d'avant remis sur un refus. */
+    suspend fun onVerdictResult(f: ServerFrame.VerdictResult) {
+        val before = pendingVerdicts.remove(f.messageId)
+        val ok = f.status == MikaProtocol.VERDICT_STATUS_OK
+        store.mutate {
+            if (ok) {
+                ChatSync.applyVerdict(thread, f.messageId, f.verdict, f.comment)
+            } else if (before != null) {
+                ChatSync.applyVerdict(thread, f.messageId, before.first.orEmpty(), before.second.orEmpty())
+            }
+        }
+        _verdictErrors.update { if (ok) it - f.messageId else it + (f.messageId to ChatSync.verdictError(f.status)) }
     }
 
     suspend fun onAck(f: ServerFrame.Ack) {

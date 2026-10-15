@@ -138,6 +138,14 @@ class ChatViewModel(
         if (!on || (ids == null && !has3d)) null else AvatarDirector.scene(mind, typing, greet, ids.orEmpty())
     }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
+    /** Ce qu'un refus a dit d'un avis sur une de ses réponses, par message (ADR 0113). */
+    val verdictErrors: StateFlow<Map<Long, String>> = graph.chatEngine.verdictErrors
+
+    /** Juger une de ses réponses : `ok`, `ko`, ou vide pour retirer l'avis ; [comment] : ce qu'elle aurait dû dire. */
+    fun judge(messageId: Long, verdict: String, comment: String) {
+        viewModelScope.launch { graph.connection.judge(messageId, verdict, comment) }
+    }
+
     /** L'app a-t-elle Mika en 3D native (le VRM préparé dans ses assets) ? */
     val has3d: Boolean = Avatar3DState.available(graph.context)
 

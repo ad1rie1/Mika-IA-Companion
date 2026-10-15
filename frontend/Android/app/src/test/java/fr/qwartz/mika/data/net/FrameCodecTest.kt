@@ -270,4 +270,21 @@ class FrameCodecTest {
             FrameCodec.approval(7, ApprovalDecision.REFUSE, ""),
         )
     }
+
+    @Test fun `le sort d'un avis sur une de ses réponses, et la trame qui le donne (ADR 0113)`() {
+        val got = FrameCodec.decode(
+            """{"type":"verdict_result","message_id":812,"verdict":"ko","comment":"trop long","status":"ok"}""",
+        )
+        assertEquals(ServerFrame.VerdictResult(812, "ko", "trop long", "ok"), got)
+        assertEquals(ServerFrame.Unknown("verdict_result"), FrameCodec.decode("""{"type":"verdict_result","status":"ok"}"""))
+        val sent = FrameCodec.verdict(812, "ko", "  juste « salut ! »  ")
+        assertTrue(sent.contains("\"type\":\"verdict\"") && sent.contains("\"comment\":\"juste « salut ! »\""))
+        assertTrue(FrameCodec.verdict(812, "", "oublié").contains("\"comment\":\"\""))
+        val h = FrameCodec.decode(
+            """{"type":"history","mode":"initial","last_id":812,"messages":[{"id":812,"role":"assistant","text":"Coucou",""" +
+                """"ts":1790601615002,"verdict":"ko","verdict_note":"trop long"}]}""",
+        ) as ServerFrame.History
+        assertEquals("ko", h.messages!!.single().verdict)
+        assertEquals("trop long", h.messages!!.single().verdictNote)
+    }
 }

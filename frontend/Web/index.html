@@ -327,6 +327,71 @@
         to { opacity: 1; transform: translateY(0); }
       }
       .chat-bubble.no-anim { animation: none; }
+      /* Son avis sur une de ses réponses (ADR 0113, opératrice seulement) */
+      .chat-verdict {
+        align-self: flex-start;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        max-width: 70%;
+        margin-top: -4px;
+        font-size: 12px;
+        color: rgba(255, 255, 255, 0.8);
+      }
+      .chat-verdict-row { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+      .chat-verdict-btn {
+        background: transparent;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 999px;
+        padding: 1px 8px;
+        font-size: 13px;
+        line-height: 1.5;
+        color: inherit;
+        cursor: pointer;
+        opacity: 0.55;
+      }
+      .chat-verdict-btn:hover, .chat-verdict-btn:focus-visible, .chat-verdict-btn[aria-pressed="true"] { opacity: 1; }
+      .chat-verdict-btn[aria-pressed="true"] {
+        background: rgba(255, 255, 255, 0.18);
+        border-color: rgba(255, 255, 255, 0.5);
+      }
+      .chat-verdict-btn:focus-visible, .chat-verdict-link:focus-visible { outline: 2px solid rgba(165, 167, 255, 0.9); outline-offset: 1px; }
+      .chat-verdict-link {
+        background: none;
+        border: none;
+        padding: 0 4px;
+        font: inherit;
+        color: inherit;
+        text-decoration: underline;
+        cursor: pointer;
+        opacity: 0.8;
+      }
+      .chat-verdict-note { font-style: italic; white-space: pre-wrap; overflow-wrap: anywhere; }
+      .chat-verdict-editor { display: flex; flex-direction: column; gap: 4px; width: min(100%, 360px); }
+      .chat-verdict-editor textarea {
+        font: inherit;
+        font-size: 13px;
+        resize: vertical;
+        min-height: 48px;
+        border-radius: 8px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background: rgba(0, 0, 0, 0.35);
+        color: white;
+        padding: 6px 8px;
+      }
+      .chat-verdict-actions { display: flex; gap: 6px; }
+      .chat-verdict-actions button {
+        font: inherit;
+        font-size: 12px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        background: rgba(99, 102, 241, 0.85);
+        color: white;
+        padding: 3px 10px;
+        cursor: pointer;
+      }
+      .chat-verdict-actions button[type="button"] { background: transparent; }
+      .chat-verdict-error { color: #fca5a5; }
       /* Pensée murmurée pour elle-même, pas une réponse (voice_persona "inner"). */
       .chat-bubble.vtuber.inner {
         font-style: italic;

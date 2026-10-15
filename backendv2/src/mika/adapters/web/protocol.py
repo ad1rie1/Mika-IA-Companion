@@ -180,17 +180,19 @@ def sent_ids(raw: str) -> list[str]:
     return [str(a["id"]) for a in items if isinstance(a, dict) and isinstance(a.get("id"), str)]
 
 
-def history_item(row: HistoryRow, shared: Mapping[str, SharedMeta] | None = None) -> dict[str, Any]:
+def history_item(row: HistoryRow, shared: Mapping[str, SharedMeta] | None = None, *,
+                 verdicts: bool = False) -> dict[str, Any]:
     """Une ligne du fil. Ses pièces jointes : pour un message de la personne, un nom et une sorte ; pour un des
     siens, les fichiers qu'elle a envoyés avec (``shared`` : ce que le port en dit — un fichier oublié n'y est
-    plus, et ne se montre plus)."""
+    plus, et ne se montre plus). ``verdicts`` : une connexion d'opératrice — l'avis qu'elle a donné sur ses
+    réponses (ADR 0113) ; jamais à une autre connexion."""
     emotion = emotion_of(row.emotion)
     if row.role == "assistant":
         known = shared or {}
         attachments: list[dict[str, Any]] = [shared_item(known[i]) for i in sent_ids(row.attachments) if i in known]
     else:
         attachments = _shown_attachments(row.attachments)
-    return {
+    item = {
         "id": row.id,
         "role": row.role,
         "text": row.text,
@@ -200,10 +202,15 @@ def history_item(row: HistoryRow, shared: Mapping[str, SharedMeta] | None = None
         "emotion_intensity": float(row.emotion_intensity or 0.0),
         "attachments": attachments,
     }
+    if verdicts and row.role == "assistant" and row.verdict:
+        item["verdict"] = row.verdict
+        item["verdict_note"] = row.verdict_note
+    return item
 
 
 def history(mode: str, rows: Sequence[HistoryRow], *, after_id: int = 0, truncated: bool = False,
-            life: str = "", reset: bool = False, shared: Mapping[str, SharedMeta] | None = None) -> dict[str, Any]:
+            life: str = "", reset: bool = False, shared: Mapping[str, SharedMeta] | None = None,
+            verdicts: bool = False) -> dict[str, Any]:
     """Un morceau du fil. ``life`` : l'empreinte de sa vie (le même journal depuis sa genèse) — un navigateur qui
     garde le fil d'une autre vie (un autre dossier de données) le vide avant de fusionner.
     ``reset`` : le curseur du client dépassait la tête de ce fil (une vie restaurée plus ancienne, un fil oublié,
@@ -212,7 +219,7 @@ def history(mode: str, rows: Sequence[HistoryRow], *, after_id: int = 0, truncat
     return {
         "type": "history",
         "mode": mode,
-        "messages": [history_item(r, shared) for r in rows],
+        "messages": [history_item(r, shared, verdicts=verdicts) for r in rows],
         "last_id": rows[-1].id if rows else after_id,
         "truncated": bool(truncated),
         "life": life,

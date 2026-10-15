@@ -31,6 +31,15 @@
     <string name="chat_retry">Réessayer</string>
     <string name="chat_resend">Le lui redemander</string>
     <string name="chat_copy">Copier</string>
+    <!-- Ses réponses jugées par l'opératrice (ADR 0113) -->
+    <string name="verdict_ok">Réponse adaptée</string>
+    <string name="verdict_ko">Réponse pas adaptée</string>
+    <string name="verdict_withdraw">%1$s — toucher de nouveau retire ton avis</string>
+    <string name="verdict_write">ce qu\'elle aurait dû dire…</string>
+    <string name="verdict_edit">modifier</string>
+    <string name="verdict_placeholder">Ce qu\'elle aurait dû dire, ou pourquoi (facultatif)</string>
+    <string name="verdict_save">Enregistrer</string>
+    <string name="verdict_close">Fermer</string>
     <string name="chat_more">Plus d\'options</string>
     <string name="chat_empty">Dis bonjour à Mika.</string>
     <string name="chat_typing">Mika écrit…</string>

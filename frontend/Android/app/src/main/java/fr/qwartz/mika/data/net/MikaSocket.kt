@@ -255,6 +255,10 @@ class MikaSocket(
     fun sendApproval(id: Long, decision: ApprovalDecision, digest: String): Boolean =
         sendNow(FrameCodec.approval(id, decision, digest))
 
+    /** Un avis sur une de ses réponses (ADR 0113) : maintenant ou pas du tout, comme une décision. */
+    fun sendVerdict(messageId: Long, verdict: String, comment: String): Boolean =
+        sendNow(FrameCodec.verdict(messageId, verdict, comment))
+
     /**
      * Envoyer un message. `true` : la socket est ouverte, il part maintenant (ou dès qu'un accusé
      * libère une place parmi les envois en vol) ; `false` : il attend une connexion, ou il est

@@ -45,6 +45,10 @@ class HistoryRow:
     emotion: str | None
     emotion_intensity: float | None
     attachments: str
+    #: pour un de ses messages, l'avis de son opératrice et ce qu'elle a écrit avec (ADR 0113) ; montrés aux
+    #: connexions d'opératrice seulement
+    verdict: str = ""
+    verdict_note: str = ""
 
 
 @dataclass(frozen=True, slots=True)
