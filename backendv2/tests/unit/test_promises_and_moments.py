@@ -37,6 +37,7 @@ from mika.kernel.clock import DAY, HOUR, MINUTE, US
 from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.memory import section, seq_of, token
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, disconnect, said
 from tests.fixtures.reading import Reads
@@ -317,8 +318,8 @@ def test_the_day_after_a_loss_she_checks_in_and_does_not_ask_about_the_dentist(t
     """Sam a un rendez-vous chez le dentiste mercredi à 14 h (un moment ordinaire) et un entretien le matin (un
     moment qui compte). Mardi soir, son chat est mort : elle lui répond profondément triste. Mercredi, elle prend
     de ses nouvelles ; ni initiative ni ligne pour lui demander comment s'est passé le dentiste ; l'entretien passe
-    après des nouvelles de lui. Contre-exemple : un mardi ordinaire, l'entretien est la première chose qu'une amie
-    demanderait, le dentiste reste à demander si ça vient."""
+    après des nouvelles de lui. Contre-exemple : un mardi ordinaire, l'entretien est dit comme un moment qui
+    comptait, le dentiste comme un moment passé."""
 
     def reply(message, req):
         if "parti" in message:
@@ -350,14 +351,15 @@ def test_the_day_after_a_loss_she_checks_in_and_does_not_ask_about_the_dentist(t
         assert hard > 0, "un deuil la touche : sa peine pour lui le dit, même sans le mot « mort »"
         assert proposed == [], "pas de « comment s'est passé ton dentiste ? » le lendemain d'un deuil"
         assert "dentiste" not in life and "quelque chose de dur" in life
-        assert "Ubisoft" in life and "après avoir pris de ses nouvelles" in life and "première chose" not in life
+        assert "Ubisoft" in life and "après avoir pris de ses nouvelles" in life
+        assert phrase("memory.life.past_close") not in life
         assert checked and checked[0].at < at_paris(2026, 10, 7, 16, 30), "elle prend de ses nouvelles"
     else:
         assert hard == 0
         assert len(proposed) == 1 and proposed[0].evidence <= 6.0, "un moment ordinaire : si elle y pense"
         lines = {ln.split(" : ", 1)[1].split(" — ")[0]: ln for ln in life.splitlines() if " : " in ln}
-        assert "si ça vient" in lines["son rendez-vous chez le dentiste"]
-        assert "première chose qu'une amie lui demanderait" in lines["son entretien chez Ubisoft"]
+        assert lines["son rendez-vous chez le dentiste"].endswith(phrase("memory.life.past"))
+        assert lines["son entretien chez Ubisoft"].endswith(phrase("memory.life.past_close"))
         assert "quelque chose de dur" not in life
 
 

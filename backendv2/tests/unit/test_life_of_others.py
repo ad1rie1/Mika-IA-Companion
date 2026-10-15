@@ -34,6 +34,7 @@ from mika.kernel.clock import HOUR, MINUTE, US
 from mika.kernel.events import Content, Origin
 from mika.ports.llm import LLMResponse, ToolCall
 from mika.sim.clock import run_virtual
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.memory import section
 from tests.fixtures.mika import at_paris, befriend, boot, build, connect, said
 
@@ -218,7 +219,7 @@ def test_a_moment_shown_but_not_spoken_of_is_still_to_be_asked_about(tmp_path, t
         assert "Ubisoft" not in saturday, "il le lui a raconté : elle ne le redemande pas"
     else:
         assert not followed
-        assert "Ubisoft" in saturday and "la première chose qu'une amie lui demanderait" in saturday
+        assert "Ubisoft" in saturday and phrase("memory.life.past_close") in saturday
     # il a écrit après l'entretien : la conversation était l'occasion, pas une initiative de plus
     assert follow_ups == []
 
