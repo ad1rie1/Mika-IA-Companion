@@ -10,8 +10,10 @@ S'y ajoutent son humeur de fond, sa réaction quand on la blesse et sa défense 
 l'opératrice a pu écrire pour un trait (« tu t'énerves quand on t'appelle poulet ») suit sa phrase, sans la remplacer.
 Des tendances, jamais une obligation ; les mesures sont pour elle seule. Le bloc fait partie de sa persona
 (``persona.render``, dans ses deux profondeurs) hors conversation : ses murmures, son travail, ses brouillons, son
-journal, ses rêves et son récit le lisent. En conversation (ses répliques, ses initiatives), il ne se dit pas : trait
-par trait, elle jouait ses traits au lieu de parler (banc de recherche, 2026-10-15).
+journal, ses rêves et son récit le lisent. En conversation (ses répliques, ses initiatives), il se dit en mots
+(``temperament_in_words``) : ses traits nettement marqués, sa réaction, sa défense, sans mesure — en 28 lignes chiffrées,
+elle jouait ses traits au lieu de parler ; sans rien, une tsundere n'était plus reconnue (banc de recherche,
+2026-10-15).
 """
 
 from __future__ import annotations

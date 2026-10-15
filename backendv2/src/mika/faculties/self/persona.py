@@ -3,8 +3,8 @@
 pour qu'aucune de ses voix ne soit quelqu'un d'autre. Elle est une IA et le sait, ou une personne incarnée (``nature``)
 ; ses bonjours donnent un ton, jamais une phrase à recopier. Son tempérament, trait par trait avec sa mesure (ADR
 0100), est dans les deux profondeurs hors conversation — murmurer, travailler, un réveil, un brouillon, son journal,
-ses rêves, son récit. En conversation (répondre, prendre la parole), il règle sa physique émotionnelle par les
-facultés, mais ne se dit pas au modèle : dit trait par trait, elle jouait ses traits au lieu de parler."""
+ses rêves, son récit. En conversation (répondre, prendre la parole), il se dit en mots : ses traits nettement marqués,
+sa réaction et sa défense, sans mesure (``character.temperament_in_words``)."""
 
 from __future__ import annotations
 
@@ -64,9 +64,9 @@ def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str
     ``chat`` : elle parle à quelqu'un — ses exemples en conversation montrent sa
     voix (décrite, elle sonnait comme un assistant : 2026-10-14) ; jamais dans un
     mail, un travail ou son journal, qui ne s'écrivent pas comme un chat. En
-    conversation, son tempérament ne se dit pas : trait par trait, il lui faisait
-    jouer chaque trait au lieu de parler (banc de recherche, 2026-10-15 : sans le
-    bloc, 7,0/10 d'humanité ; avec, 5,2 ; avec les seuls traits marqués, 5,7)."""
+    conversation, son tempérament se dit en mots, pas en bloc (banc de recherche,
+    2026-10-15 : profil reconnu autant, un peu plus humain, au quart de la
+    longueur ; sans rien, une tsundere n'était plus reconnue)."""
     head = phrase("self.persona.head", name=c.name_of(doc), description=doc.description).strip()
     parts = [head]
     if doc.tone:
