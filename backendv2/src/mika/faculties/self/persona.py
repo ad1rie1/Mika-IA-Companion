@@ -14,7 +14,7 @@ from pathlib import Path
 import yaml
 
 from mika.contracts import self_ as c
-from mika.faculties.self.character import temperament_text
+from mika.faculties.self.character import temperament_in_words, temperament_text
 from mika.faculties.self.faculty import SELF, SelfState
 from mika.kernel.codec import digest
 from mika.kernel.frame import Frame
@@ -86,8 +86,9 @@ def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str
         ]
     else:
         parts.append(_bullets(phrase("self.persona.in_short"), doc.traits[:3]))
-    if not chat:  # ses deux profondeurs, hors conversation : son journal, ses rêves, son récit, son travail
-        parts.append(temperament_text(doc.temperament))
+    # hors conversation (son journal, ses rêves, son récit, son travail), le bloc ; en conversation, ses traits marqués
+    # en mots (banc de recherche, 2026-10-15)
+    parts.append(temperament_in_words(doc.temperament) if chat else temperament_text(doc.temperament))
     parts.append(phrase("self.persona.language", language=doc.language, nature=nature_of(doc)))
     parts.append(life_rule(doc))
     return "\n\n".join(p for p in parts if p)

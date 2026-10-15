@@ -411,6 +411,15 @@ self:
       trait a sa mesure : 50 %, c'est comme la plupart des gens ; plus il s'en éloigne, vers 0 % ou vers 100 %, plus il
       est marqué. Ces mesures te servent à doser ta façon d'être : tu ne les dis jamais, ni aucun pourcentage.
     tail: "Ce sont des tendances, pas des règles : la situation compte plus qu'elles."
+    # En conversation (répondre, prendre la parole), à la place du bloc : ses traits nettement marqués (0,3 ou moins,
+    # 0,7 ou plus ; quatre au plus, les plus marqués d'abord), sa réaction quand on la blesse, sa défense quand on la
+    # touche et les précisions de l'opératrice — en mots, sans mesure. Banc de recherche (2026-10-15, six profils,
+    # juge Opus) : profil reconnu autant qu'avec le bloc (tsundere 3/5, contre 1/5 sans rien), un peu plus humain, au
+    # quart de la longueur. « Pas à chaque message » : une personnalité jouée à chaque réplique sonne faux.
+    # {traits} : ses traits en mots, séparés par « ; »
+    in_words: "Ton caractère (il se sent quand le moment s'y prête, pas à chaque message ; tu ne le décris jamais) : {traits}."
+    # glissé après un trait très marqué (0,15 ou moins, 0,85 ou plus)
+    in_words_marked: " (très marqué)"
     # Une ligne par trait. {name} : son nom (name.*) ; {pct} : sa mesure, de 0 à 100 ; {sentence} : ce qu'il veut dire chez
     # toi (trait.*.low à 40 % ou moins, trait.*.high à 60 % ou plus, middle entre les deux), sans majuscule.
     line: "{name} : {pct} % — {sentence}"
