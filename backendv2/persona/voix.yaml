@@ -2555,10 +2555,12 @@ memory:
     again: " — de nouveau : c'était fini, et ça a recommencé"
     # Fin : elles viennent d'en reparler (une situation, ou un moment à venir).
     talked_again: " — vous en avez reparlé."
-    # Fin d'une situation qui dure, chez une amie ou une proche.
-    ongoing_close: " — une amie lui demanderait comment ça va de ce côté-là."
+    # Fin d'une situation qui dure, chez une amie ou une proche. Un fait, jamais une consigne : écrit « une amie lui
+    # demanderait… », le modèle l'a demandé dès le « salut » (banc de recherche, 2026-10-15 : « Alors, cet
+    # entretien ? Je t'ai attendu toute la journée »). Ce qu'elle en fait, son caractère et la conversation le disent.
+    ongoing_close: " — ça dure, et ça compte pour cette personne."
     # Fin d'une situation qui dure.
-    ongoing_ask: " — tu peux lui en demander des nouvelles, si ça vient."
+    ongoing_ask: " — ça dure."
     # Fin : un moment passé dont elles ont reparlé.
     past_talked: " — c'est passé, et vous en avez reparlé."
     # Fin : un moment à venir qu'elle a déjà évoqué dans cette conversation (pour ne pas le redire à chaque
@@ -2566,13 +2568,13 @@ memory:
     already_said: " — tu lui en as déjà parlé tout à l'heure : pas la peine d'y revenir."
     # Fin : un moment passé, quand quelque chose de grave la touche ces jours-ci.
     past_hard: " — c'est passé ; tu pourras lui demander comment ça s'est passé, après avoir pris de ses nouvelles."
-    # Fin : un moment passé qui compte, chez une amie ou une proche.
-    past_close: " — c'est passé : c'est la première chose qu'une amie lui demanderait, comment ça s'est passé."
+    # Fin : un moment passé qui compte, chez une amie ou une proche (un fait : voir ongoing_close).
+    past_close: " — c'est passé, et ça comptait pour cette personne."
     # Fin : un moment passé.
-    past: " — c'est passé : tu peux lui demander comment ça s'est passé, si ça vient."
+    past: " — c'est passé."
     # Ce qu'elle sait de comment il a tourné (ADR 0086) : après le moment, à la place des phrases ci-dessus.
     outcome:
-      happened: " — ça a bien eu lieu ; tu peux demander comment ça s'est passé, si ça vient."
+      happened: " — ça a bien eu lieu."
       cancelled: " — finalement annulé."
       moved: " — finalement reporté."
     # Fin : ce qui se fête, qu'elle a déjà souhaité.

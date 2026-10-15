@@ -24,6 +24,7 @@ from mika.faculties.memory.salience import Item, dormant
 from mika.kernel.clock import DAY, HOUR, US
 from mika.kernel.events import Content, Origin
 from mika.sim.clock import run_virtual
+from mika.vocab.phrasebook import phrase
 from tests.fixtures.harness import events_of
 from tests.fixtures.memory import SIX, Script, chat, kept, section, seq_of, token
 from tests.fixtures.mika import AFTERNOON, boot, build, connect, disconnect
@@ -79,7 +80,7 @@ def test_a_coming_moment_comes_back_before_and_after(tmp_path, asked):
     facts = run_virtual(clock, main)
     tuesday, friday, later = (section(p, LIFE) for p in script.replies("user_2")[-3:])
     assert "son entretien chez Ubisoft" in tuesday and "jeudi" in tuesday and "dans 2 jours" in tuesday
-    assert "hier" in friday and "comment ça s'est passé" in friday
+    assert "hier" in friday and phrase("memory.life.past") in friday
     assert not any("Ubisoft" in p for p in script.prompts("user_3"))
     assert len(facts) == 1 and facts[0].about == ("user_2",)
     if asked:
