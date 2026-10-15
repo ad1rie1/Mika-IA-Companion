@@ -186,7 +186,7 @@ def persona_doc(profile: str = "") -> Any:
 
 
 #: la seconde passe (``--naturel``) : le modèle et l'effort du rôle « polish »
-POLISHERS = {"haiku": ("haiku", ""), "sonnet-low": ("sonnet", "low")}
+POLISHERS = {"haiku": ("haiku", ""), "sonnet-low": ("sonnet", "low"), "sonnet-high": ("sonnet", "high")}
 
 
 def run_one(sc: Scenario, out: Path, *, voice: str, effort: str, adrien_model: str, profile: str = "",

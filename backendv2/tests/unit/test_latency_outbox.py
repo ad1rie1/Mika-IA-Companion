@@ -427,7 +427,8 @@ def test_when_she_changes_her_mind_the_initiative_is_not_even_composed(tmp_path)
             await asyncio.sleep(2 * 3600)
             before = len(driver.llm.calls)
             report = await _initiative(driver)
-            roles = [c.role for c in driver.llm.calls[before:]]
+            # une réécriture de la relecture (ADR 0112) fait partie de la composition : on compte les épisodes
+            roles = [c.role for c in driver.llm.calls[before:] if not c.call_id.endswith("#relu")]
             events = driver.read_events()
             await driver.stop()
             return report, roles, [e for e in events if e.type.name == rt.UTTERANCE.name

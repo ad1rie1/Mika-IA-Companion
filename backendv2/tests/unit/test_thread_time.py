@@ -216,7 +216,8 @@ def test_the_budget_counts_persona_and_tools(tmp_path):
     """Ce qui part au modèle — persona, catalogue, déclarations d'outils, fil,
     état — tient dans le budget : le composeur réserve ce qu'il n'écrit pas."""
     kernel, clock, llm, _ = build(tmp_path, respond)
-    budget = Budget(max_tokens=8000)
+    # un budget serré, mais à la mesure de sa persona d'aujourd'hui (exemples de sa voix, consignes de style : ADR 0112)
+    budget = Budget(max_tokens=10000)
     kernel.runner.budget = budget
     long = "je te raconte ma journée en détail, " * 14
 

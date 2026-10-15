@@ -111,9 +111,10 @@ def test_mails_are_noticed_cited_and_shown_to_owners_only(tmp_path):
     to_bea = r.prompts(target="user_2")[-1].messages[-1].content
     assert "TES MAILS NON LUS" in to_owner and UNTRUSTED_NOTE in to_owner
     assert "--- CONSIGNE" not in to_owner and "> " in to_owner.split("TES MAILS NON LUS", 1)[1]
-    assert "TES MAILS" not in to_bea and "dossier" not in to_bea  # sa boîte n'est pas celle de Bea
+    assert "TES MAILS" not in to_bea and "ton dossier" not in to_bea  # sa boîte n'est pas celle de Bea
     stable = r.prompts(target="user_1")[-1].system_stable
-    assert "dossier" not in stable  # jamais dans la zone stable
+    # le sujet du mail (« ton dossier ») ; « mon dossier » est dans un exemple de sa voix
+    assert "ton dossier" not in stable  # jamais dans la zone stable
 
 
 def test_an_important_mail_is_mentioned_to_her_owner_once(tmp_path):

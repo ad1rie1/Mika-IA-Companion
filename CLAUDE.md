@@ -709,7 +709,7 @@ Tout le reste se déclare par décorateurs.
 - **Les montages** :
   - `conftest.make_mind(tmp, faculties, clock=…)` donne un Mind nu ;
   - `tests/fixtures/mika.py::build(tmp, respond)` donne le vrai Kernel composé, avec `boot`, `connect`, `befriend`,
-    `said` ;
+    `said`. La relecture et la seconde passe (ADR 0112) y sont coupées par défaut : `review=True`, `polish=True` ;
   - `tests/fixtures/harness.py` donne des facultés jouets.
 - **Le marqueur `sqlite_only`** écarte un test de `--mariadb`.
 

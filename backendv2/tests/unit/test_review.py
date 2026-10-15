@@ -54,7 +54,7 @@ def test_a_draft_with_a_tic_is_rewritten_once_and_only_the_rewrite_is_said(tmp_p
         seen.append(req.messages[-1].content)
         return LLMResponse(next(replies, "D'accord. [EMOTION:calm:0.3]"))
 
-    kernel, clock, _llm, deliveries = build(tmp_path, respond, start=at_paris(2026, 10, 15, 18, 0))
+    kernel, clock, _llm, deliveries = build(tmp_path, respond, start=at_paris(2026, 10, 15, 18, 0), review=True)
 
     async def main():
         await boot(kernel)
