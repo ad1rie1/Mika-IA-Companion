@@ -67,6 +67,8 @@ def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str
     conversation, son tempérament se dit en mots, pas en bloc (banc de recherche,
     2026-10-15 : profil reconnu autant, un peu plus humain, au quart de la
     longueur ; sans rien, une tsundere n'était plus reconnue)."""
+    if chat and depth == "full" and doc.portrait.strip():
+        return _portrait(doc)
     head = phrase("self.persona.head", name=c.name_of(doc), description=doc.description).strip()
     parts = [head]
     if doc.tone:
@@ -91,6 +93,21 @@ def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str
     parts.append(temperament_in_words(doc.temperament) if chat else temperament_text(doc.temperament))
     parts.append(phrase("self.persona.language", language=doc.language, nature=nature_of(doc)))
     parts.append(life_rule(doc))
+    return "\n\n".join(p for p in parts if p)
+
+
+def _portrait(doc: c.PersonaDoc) -> str:
+    """En conversation, quand la persona a un portrait : lui, en prose, à la place de la description, du ton et des
+    listes. Écrites en listes, ses qualités se jouaient une à une (« attentive », « à l'écoute » en faisaient une
+    intervieweuse) ; le même contenu en prose sonnait plus humain, et un portrait réécrit plus encore (banc de
+    recherche, 2026-10-15 : 4,5 → 6,8 → 7,9 sur 10). Ses exemples, ce qui est vrai d'elle, son tempérament (en mots, comme en
+    conversation), sa nature et la règle de sa vie suivent."""
+    parts = [doc.portrait.strip(),
+             _bullets(phrase("self.persona.samples"), doc.samples),
+             _bullets(phrase("self.persona.facts"), doc.facts),
+             temperament_in_words(doc.temperament),
+             phrase("self.persona.language", language=doc.language, nature=nature_of(doc)),
+             life_rule(doc)]
     return "\n\n".join(p for p in parts if p)
 
 
