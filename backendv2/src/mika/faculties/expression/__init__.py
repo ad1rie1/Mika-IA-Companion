@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any
 
@@ -487,55 +487,75 @@ def review(draft: str, mine: Sequence[str], heard: str = "", portrait: str = "")
     return phrase("expression.review.note", draft=text[:600], found=" ; ".join(found))
 
 
-# ── Sa réponse rendue naturelle ───────────────────────────────────────────
+# ── Sa réponse écrite par une autrice (ADR 0114) ──────────────────────────
 #
 # Ablation du 2026-10-15 : rejouer un appel mal jugé en retirant ou réécrivant un bloc de son prompt ne change presque
 # rien — faire de ce qu'on lui dit une vérité générale, reformuler, finir par une question, c'est le modèle qui joue
-# l'amie qui écoute (son prompt nu fait bien pire). Une seconde passe sur le texte seul, au vu du fil, le corrige
-# mieux qu'une consigne (``pipeline``, rôle ``polish``) ; ses balises restent celles du premier jet.
+# l'amie qui écoute. Banc du 2026-10-16 : tour par tour, même Opus reste une assistante qui joue un rôle et s'occupe de
+# l'autre ; le même modèle, qui écrit un fil SMS entier en autrice, fait parler deux personnes. La seconde passe
+# (``pipeline``, rôle ``polish``) est donc une autrice : elle lit son portrait, le fil et ce que le premier jet voulait
+# dire, et écrit la suite du fil — ses messages à elle, puis la réponse probable de l'autre (l'écrire la garde
+# autrice) ; seuls les siens partent. Ses balises, ses outils et ce qu'elle sait restent ceux du premier jet.
 
-#: en deçà de tant de caractères, rien à rendre plus naturel (« Ah merde. Qu'est-ce qui s'est passé ? »)
-_POLISH_FROM = 60
-#: les derniers messages du fil que lit la seconde passe
-_POLISH_THREAD = 8
-
-
-def _traits_said(state: str) -> str:
-    """Ses traits marqués, tels que « TA RÉPONSE » les a dits dans son état interne (« » : aucun)."""
-    before, _hole, after = phrase("expression.answer.character", traits="\x00").partition("\x00")
-    start = state.find(before)
-    if start < 0:
-        return ""
-    rest = state[start + len(before):]
-    end = rest.find(after) if after else -1
-    return rest[:end].strip() if end >= 0 else ""
+#: les derniers messages du fil que lit l'autrice
+_POLISH_THREAD = 16
 
 
-def polish(draft: str, messages: Sequence[Any], heard: str = "", name: str = "") -> tuple[str, str] | None:
-    """La seconde passe sur sa réponse : (consigne, message) d'un appel qui la rend naturelle au vu des derniers
-    messages du fil — sans rien y ajouter, sa voix et ses traits marqués gardés —, ou ``None`` pour une réponse de
-    quelques mots."""
+def _thread_lines(m: Any, name: str) -> list[str]:
+    """Un message du fil en lignes de SMS : une par bulle pour elle, une pour l'autre."""
+    if m.role != "assistant":
+        said = _plain(m.content)
+        return [phrase("expression.polish.them", text=said)] if said else []
+    return [phrase("expression.polish.her", name=name, text=b) for b in _bubbles(m.content).split("\n\n") if b]
+
+
+def authored(text: str, name: str) -> str:
+    """Ses messages dans la suite écrite par l'autrice : les lignes « {name} : … » (ou sans nom) jusqu'à la première
+    de l'autre, une bulle chacune (séparées par une ligne vide) ; « » si l'autrice ne lui fait rien dire."""
+    out: list[str] = []
+    for line in (text or "").splitlines():
+        line = line.strip().strip("«»\"").strip()
+        if not line:
+            continue
+        who = _SPEAKER.match(line)
+        label = who.group(1).strip() if who else ""
+        if label and fold(label.lower()) == fold(name.lower()):
+            said = who.group(2).strip()
+        elif label[:1].isupper():
+            break  # l'autre (« L'autre : … », un prénom) : la suite n'est plus à elle
+        else:
+            said = line  # « bon : t'as raison » est une bulle à elle, pas un nom
+        if said:
+            out.append(said)
+    return "\n\n".join(out)
+
+
+#: « Nom : … » en tête d'une ligne de SMS (un nom court, éventuellement en gras)
+_SPEAKER = re.compile(r"^\**([^:*\n]{1,24}?)\**\s*:\s*(.*)$")
+
+
+def polish(draft: str, messages: Sequence[Any], heard: str = "",
+           persona: Any = None) -> tuple[str, str, Callable[[str], str]] | None:
+    """La seconde passe sur sa réponse : (consigne, message, ce qu'on garde de la suite écrite) d'un appel où une
+    autrice écrit la suite du fil à partir de son premier jet, ou ``None`` sans premier jet. ``persona`` : sa persona
+    rendue pour la conversation (``text``, ``name``, ``reference`` : un fil de référence pour le registre)."""
     text = _bubbles(draft)
-    if len(text) < _POLISH_FROM:
+    if not text:
         return None
-    name = name or phrase("expression.polish.unnamed")
+    name = getattr(persona, "name", "") or phrase("expression.polish.unnamed")
     turns = [m for m in messages if getattr(m, "role", "") in ("user", "assistant") and (m.content or "").strip()]
     state = turns[-1].content if turns and turns[-1].role == "user" else ""
     history = turns[:-1] if state else turns
-    lines = []
-    for m in history[-_POLISH_THREAD:]:
-        said = _plain(m.content)
-        if said:
-            lines.append(phrase("expression.polish.her", name=name, text=said) if m.role == "assistant"
-                         else phrase("expression.polish.them", text=said))
+    lines = [line for m in history[-_POLISH_THREAD:] for line in _thread_lines(m, name)]
     # ce que la personne vient d'écrire — jamais le cadrage d'un épisode (« personne ne vient de t'écrire… »)
     if _plain(heard):
         lines.append(phrase("expression.polish.them", text=_plain(heard)))
-    system = phrase("expression.polish.system", name=name)
-    traits = _traits_said(state)
-    if traits:
-        system += "\n\n" + phrase("expression.polish.character", traits=traits)
-    return system, phrase("expression.polish.message", thread="\n".join(lines), name=name, draft=text)
+    system = phrase("expression.polish.system", name=name, portrait=(getattr(persona, "text", "") or "").strip())
+    reference = (getattr(persona, "reference", "") or "").strip()
+    if reference:
+        system += "\n\n" + phrase("expression.polish.reference", thread=reference)
+    message = phrase("expression.polish.message", thread="\n".join(lines), name=name, draft=text)
+    return system, message, lambda written: authored(written, name)
 
 
 #: un message de quelques mots : une réponse à la même mesure

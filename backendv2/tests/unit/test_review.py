@@ -12,7 +12,7 @@ import asyncio
 from mika.faculties.expression import polish, review
 from mika.kernel.clock import HOUR
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
-from mika.ports.llm import LLMResponse, Message
+from mika.ports.llm import LLMResponse, Message, PersonaRender
 from mika.sim.clock import run_virtual
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import at_paris, boot, build, connect, said
@@ -115,24 +115,32 @@ def test_a_third_question_in_a_row_is_caught():
     assert review("C'est vache, ça. Ton chef, il le voit ?", [asked[0], "Ah merde, désolée."], "personne") is None
 
 
-# ── La seconde passe : le texte seul, rendu naturel au vu du fil (ablation du 2026-10-15) ──
+# ── La seconde passe : une autrice écrit la suite du fil à partir du premier jet (ADR 0114) ──
 
 DRAFT = ("C'est le piège du métier : quand tout marche, personne ne le voit, et le jour où ça casse, tout le monde "
          "regarde. [EMOTION: sad 0.4]")
+PERSONA = PersonaRender(text="Tu es Mika. Tu lis beaucoup.", hash="h", depth="full", name="Mika",
+                        reference="Léa : Coucouuu\nMoi : salut")
 
 
-def test_the_second_pass_reads_the_thread_and_her_marked_traits_but_not_her_tags():
-    state = (f"{CONTEXT_HEADER}\n--- {phrase('expression.answer.title')} ---\n{phrase('expression.answer.react')} "
-             f"{phrase('expression.answer.character', traits='tu montres peu ; tu réponds posément')}\n"
+def test_the_author_reads_her_portrait_the_thread_and_the_draft_but_not_her_tags_nor_her_state():
+    state = (f"{CONTEXT_HEADER}\n--- {phrase('expression.answer.title')} ---\n{phrase('expression.answer.react')}\n"
              f"{CONTEXT_FOOTER}\n\nbah personne voit le taf que je fais")
-    messages = [Message("user", "journée pourrie"), Message("assistant", "Ah merde. [EMOTION: sad 0.5]"),
+    messages = [Message("user", "journée pourrie"), Message("assistant", "Ah merde.\n\nRaconte. [EMOTION: sad 0.5]"),
                 Message("user", state)]
-    system, message = polish(DRAFT, messages, "bah personne voit le taf que je fais", "Mika")
-    assert "Mika" in system and "tu montres peu ; tu réponds posément" in system
-    assert "journée pourrie" in message and "Ah merde." in message and "bah personne voit le taf" in message
+    system, message, keep = polish(DRAFT, messages, "bah personne voit le taf que je fais", PERSONA)
+    assert "Tu es Mika. Tu lis beaucoup." in system and "Léa : Coucouuu" in system  # son portrait, le registre
+    assert "Mika : Ah merde.\nMika : Raconte." in message  # une ligne par bulle, comme un fil de SMS
+    assert "journée pourrie" in message and "bah personne voit le taf" in message
     assert "C'est le piège du métier" in message
     assert "EMOTION" not in message and "TA RÉPONSE" not in message  # ni ses balises, ni son état interne
-    assert polish("Ah merde. Qu'est-ce qui s'est passé ? [EMOTION: sad 0.4]", messages, "", "Mika") is None
+    # l'autrice écrit aussi la réponse de l'autre : seuls ses messages à elle partent, une bulle chacun
+    assert keep("Mika : c'est vache.\nMika : bon : tout le monde voit le bug\nL'autre : ouais") == \
+        "c'est vache.\n\nbon : tout le monde voit le bug"
+    assert polish("[EMOTION: sad 0.4]", messages, "", PERSONA) is None
+    # sans fil de référence, rien n'en est dit
+    bare = PersonaRender(text="Tu es Mika.", hash="h", depth="full", name="Mika")
+    assert "fil_de_reference" not in polish(DRAFT, messages, "", bare)[0]
 
 
 def _polished_life(tmp_path, polished_text, *, routed=True):
@@ -172,7 +180,7 @@ def test_the_rewrite_is_said_with_the_feelings_of_the_first_draft(tmp_path):
 def test_without_a_model_for_it_or_with_a_longer_rewrite_the_first_draft_is_said(tmp_path):
     report, _said, polishes = _polished_life(tmp_path / "a", "C'est vache.", routed=False)
     assert polishes == [] and report.text.startswith("C'est le piège du métier")
-    report, _said, polishes = _polished_life(tmp_path / "b", "Bla bla. " * 40)
+    report, _said, polishes = _polished_life(tmp_path / "b", "Bla bla. " * 80)
     assert len(polishes) == 1 and report.text.startswith("C'est le piège du métier")
 
 
@@ -180,5 +188,5 @@ def test_her_bubbles_go_through_the_second_pass_and_are_not_a_long_answer():
     # en chat, une ligne vide envoie la suite dans une autre bulle (les clients découpent) : ce n'est pas une longueur
     burst = "C'est quoi comme réunion ?\n\nEn tout cas, j'espère que ça va bien se passer pour toi. [EMOTION: calm 0.3]"
     assert review(burst, [], "réunion à 9h, pas la tête à ça") is None
-    _system, message = polish(burst + " Vraiment.", [Message("user", "réunion à 9h")], "réunion à 9h", "Mika")
+    _system, message, _keep = polish(burst + " Vraiment.", [Message("user", "réunion à 9h")], "réunion à 9h", PERSONA)
     assert "C'est quoi comme réunion ?\n\nEn tout cas" in message

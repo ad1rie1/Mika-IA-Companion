@@ -82,6 +82,12 @@ class PersonaDoc(BaseModel):
              "le ton et les listes (traits, manies, fragilités, valeurs, centres d'intérêt, façons de parler, vie, "
              "goûts) : en listes, elle les jouait une à une. Les listes servent toujours ailleurs (ses explorations, "
              "ses flux, son journal).")] = ""
+    reference_thread: Annotated[str, Knob(
+        label="Fil de référence (registre)", group="Sa parole", widget="textarea", advanced=False, order=45,
+        help="Un vrai fil de SMS entre deux personnes, tel qu'on voudrait qu'elle écrive : la longueur des messages, "
+             "leur rythme, ce qu'on y dit et ce qu'on tait. Seule la seconde passe le lit (rôle « polish », une "
+             "autrice qui écrit la suite du fil à partir de son premier jet) : il donne la façon d'écrire, jamais "
+             "les sujets. Vide : l'autrice écrit sans référence.")] = ""
     language: Annotated[str, Knob(label="Langue", help="Celle dans laquelle elle parle et écrit.",
                                   group="Identité", advanced=False, order=30)] = "français"
     tone: Annotated[str, Knob(label="Ton", help="Comment elle parle, en général.", group="Sa parole",

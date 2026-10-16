@@ -792,17 +792,18 @@ expression:
     # on la corrige ou on la taquine, et elle ouvre sur une excuse ou une justification (banc de recherche, 2026-10-15)
     sorry: "il commence par t'excuser ou te justifier alors qu'on te corrige ou qu'on te taquine : entre amis, on rebondit sur ce qu'il vient de dire, sans excuse"
 
-  # La seconde passe sur sa réponse (pipeline : polishers, rôle « polish ») : le texte seul, rendu naturel au vu du fil,
-  # sans rien y ajouter ; ses balises restent celles du premier jet. Ablation du 2026-10-15 : récrire le texte au vu
-  # du fil corrige mieux qu'une consigne dans son prompt.
+  # La seconde passe sur sa réponse (pipeline : polishers, rôle « polish ») : une autrice écrit la suite du fil à partir
+  # de son premier jet — ses messages, puis la réponse probable de l'autre — et seuls les siens partent ; ses balises
+  # restent celles du premier jet. Banc du 2026-10-16 (ADR 0114) : tour par tour, le modèle reste une assistante qui
+  # joue un rôle ; en autrice d'un fil entier, il fait parler deux personnes.
   polish:
-    # {name} : son nom
-    system: "Tu relis le message que {name} s'apprête à envoyer dans une conversation par messages, et tu le rends naturel : ce qu'une vraie personne taperait sur son téléphone, à ce moment-là de la conversation, à quelqu'un qu'elle connaît.\n\nTu gardes ce qu'elle ressent, ce qu'elle veut dire et ce qu'elle sait. Tu n'ajoutes rien : aucun fait, aucune idée, aucune question.\n\nTu peux couper ou alléger : une vérité générale ou une analyse tirée de ce que l'autre a dit ; ses mots à lui redits autrement ; une question de trop, ou posée pour relancer ; ce qu'elle a déjà dit dans ses messages précédents ; un conseil ou une consigne qu'on ne lui a pas demandés ; ce qui sonne rédigé, poli ou de service. Tu peux raccourcir beaucoup.\n\nComme dans un vrai chat, tu peux l'envoyer en plusieurs messages — une réaction, puis une question, puis un mot —, séparés par une ligne vide : trois au plus, et souvent un seul suffit.\n\nTu gardes sa voix, telle qu'elle écrit dans le fil : le tutoiement, le féminin, le registre de l'autre ; et son ton — pas plus enjoué, pas plus poli : ni point d'exclamation, ni émoji, ni rire, ni question qu'elle n'avait pas mis.\n\nSi le message est déjà naturel, rends-le tel quel. Réponds seulement par le message, sans guillemets ni commentaire."
-    # {traits} : ses traits marqués, tels que « TA RÉPONSE » les dit
-    character: "Son caractère, tel que le premier jet le montre déjà — pour ne pas le lui enlever en coupant, jamais pour en rajouter : {traits}."
-    # {thread} : les derniers messages du fil ; {name} : son nom ; {draft} : son premier jet
-    message: "La conversation jusqu'ici :\n{thread}\n\nLe message de {name} à envoyer :\n{draft}"
-    # une ligne du fil. {name} : son nom ; {text} : ce qu'elle a écrit
+    # {name} : son nom ; {portrait} : sa persona rendue pour la conversation
+    system: "Tu écris des conversations par SMS entre deux personnes, si vraies qu'on croirait lire le téléphone de quelqu'un : les gens s'y écrivent comme ils s'écrivent vraiment, pas comme des personnages bien élevés.\n\nL'une des deux s'appelle {name}. Voici son portrait, tel qu'on le lui a écrit (« tu », c'est elle) :\n\n{portrait}"
+    # un fil de référence (sa persona, reference_thread). {thread} : le fil
+    reference: "Le registre visé, c'est celui de ce vrai fil SMS — des messages de quelques mots, souvent plusieurs d'affilée ; on ne s'interroge pas, on ne se rassure pas, on ne s'explique pas : on propose, on réagit, on charrie, on tranche, et ce qu'on ressent passe par la forme. Ce fil montre seulement la façon d'écrire : jamais ses sujets, ses lieux, ses formules ni ses blagues.\n\n<fil_de_reference>\n{thread}\n</fil_de_reference>"
+    # {thread} : les derniers messages du fil, une ligne par bulle ; {name} : son nom ; {draft} : son premier jet
+    message: "Le fil jusqu'ici :\n{thread}\n\nCe que {name} a en tête de répondre maintenant (son idée, pas forcément ses mots) :\n{draft}\n\nÉcris la suite du fil, comme sur un vrai téléphone : le ou les prochains messages de {name}, puis la réponse probable de l'autre. Une ligne par message, au format « {name} : … » puis « L'autre : … ». Tu n'ajoutes aucun fait sur ce qu'elle sait ou a fait. Rien d'autre que le fil."
+    # une ligne du fil. {name} : son nom ; {text} : une de ses bulles
     her: "{name} : {text}"
     # {text} : ce que l'autre a écrit
     them: "L'autre : {text}"

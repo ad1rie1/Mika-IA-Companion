@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0113, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0114, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -221,10 +221,12 @@ kernel                      machinerie générique, sans un mot du domaine
     composition ; le relecteur est `expression.review`). Un tic repéré sur le brouillon (question à options, même
     ouverture, sa phrase redite, un second bonjour…) la fait réécrire une fois, la remarque « RELIS-TOI » glissée
     avant la fin de l'état interne.
-  - **Seconde passe** (ADR 0112) : sa réponse (`REPLY`) est rendue naturelle au vu du fil par un second appel sur le
-    texte seul (`polishers` ; la consigne est `expression.polish`). Elle coupe sans rien ajouter, et peut l'envoyer
-    en plusieurs bulles (une ligne vide les sépare). Ses balises restent celles du premier jet. Elle ne se fait que si
-    le rôle LLM `polish` a un modèle (sans repli).
+  - **Seconde passe : l'autrice** (ADR 0112, 0114) : sa réponse (`REPLY`) est récrite par un second appel
+    (`polishers` ; la consigne est `expression.polish`). Une autrice lit son portrait, le fil (une ligne par bulle),
+    ce que le premier jet voulait dire et son fil de référence (`reference_thread`), puis écrit la suite du fil : ses
+    messages, puis la réponse probable de l'autre. Seuls les siens partent, une bulle chacun (`authored`). Ses
+    balises, ses outils et ce qu'elle sait restent ceux du premier jet. Elle ne se fait que si le rôle LLM `polish`
+    a un modèle (sans repli) ; Opus y est le meilleur.
   - Types d'épisode : REPLY, INITIATIVE, STEP, WORK, JOB, WAKE, WAKE_JOB, TASK, MURMUR. Leurs politiques sont dans
     `app/composition.py::policies()`.
 - **Voies** (`runtime/lanes.py`)
@@ -491,6 +493,8 @@ ses identifiants sont dans `ARCHITECTURE.md`. Ce qui suit dit l'essentiel de cha
   - Persona et tempérament. Sa voix en chat se montre par des exemples (`samples`), en conversation seulement.
   - Son portrait (`portrait`, en prose) remplace en conversation la description, le ton et les listes, qu'elle jouait
     une à une ; les listes servent toujours ailleurs (explorations, flux, journal).
+  - Son fil de référence (`reference_thread`) : un vrai fil de SMS qui donne le registre de sa voix ; seule l'autrice de
+    la seconde passe le lit (ADR 0114).
   - **La matrice de personnalité** (`vocab/temperament.py`) :
     - 28 curseurs de 0 à 1 en six familles : ressentir, montrer, agir, les autres, elle-même, le corps ;
     - un fond (`background`), une réaction quand on la blesse (`reaction`), une défense quand on la touche (`defense`),
@@ -772,7 +776,7 @@ Tout le reste se déclare par décorateurs.
 | Fournisseurs LLM | 0026, 0072, 0073 |
 | Console et exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103 |
 | Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113 |
-| Voix et genèse | 0070, 0071 |
+| Voix et genèse | 0070, 0071, 0112, 0114 |
 | Ce que les sondes et audits ont montré | 0043, 0048, 0054, 0102 |
 
 ## Les clients
