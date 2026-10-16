@@ -85,12 +85,9 @@ def test_parse_tag(text, clean, declared):
     ('"Coucou Adrien !"', "Coucou Adrien !"),
     ("<thinking>Il a l'air triste.</thinking>Oh… ça va ?", "Oh… ça va ?"),
     ("Bon , ok .", "Bon, ok."),
-    # les émojis : sa parole est lue à voix haute (une synthèse lit « visage souriant ») et le style les interdit
-    ("Trop bien 😄", "Trop bien"),
-    ("Bisous Chloé ! 😊", "Bisous Chloé !"),
-    ("J'adore ❤️ ça", "J'adore ça"),
-    ("Ok 👍🏽 vas-y", "Ok vas-y"),
-    ("Tu vas déchirer jeudi ! 💪\nÀ ce soir !", "Tu vas déchirer jeudi !\nÀ ce soir !"),
+    # ses émojis s'écrivent comme on texte (ADR 0114) : c'est la voix du client qui ne les dit pas
+    ("Trop bien 😄", "Trop bien 😄"),
+    ("une heure ?? 💀\nÀ ce soir !", "une heure ?? 💀\nÀ ce soir !"),
 ])
 def test_the_text_is_ready_to_deliver(text, clean):
     assert parse_tag(text).text == clean

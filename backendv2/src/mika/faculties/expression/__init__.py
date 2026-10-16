@@ -513,13 +513,16 @@ def authored(text: str, name: str) -> str:
     """Ses messages dans la suite écrite par l'autrice : les lignes « {name} : … » (ou sans nom) jusqu'à la première
     de l'autre, une bulle chacune (séparées par une ligne vide) ; « » si l'autrice ne lui fait rien dire."""
     out: list[str] = []
-    for line in (text or "").splitlines():
+    # deux messages sur une ligne (« … Mika : … », « … L'autre : … ») : chacun sur la sienne
+    them = phrase("expression.polish.them", text="").strip()
+    split = re.compile(rf"\s+(?=(?:{re.escape(name)}|{re.escape(them.rstrip(':').strip())})\s*:)")
+    for line in (part for raw in (text or "").splitlines() for part in split.split(raw)):
         line = line.strip().strip("«»\"").strip()
         if not line:
             continue
         who = _SPEAKER.match(line)
         label = who.group(1).strip() if who else ""
-        if label and fold(label.lower()) == fold(name.lower()):
+        if label and fold(label.split("(")[0].strip().lower()) == fold(name.lower()):  # « Mika (brouillon) »
             said = who.group(2).strip()
         elif label[:1].isupper():
             break  # l'autre (« L'autre : … », un prénom) : la suite n'est plus à elle
@@ -528,6 +531,17 @@ def authored(text: str, name: str) -> str:
         if said:
             out.append(said)
     return "\n\n".join(out)
+
+
+def _other_titles() -> tuple[str, ...]:
+    """Les sections de son état qui disent qui est l'autre : qui écrit, le ton entre eux, sa fiche."""
+    return phrase("identity.who.title"), phrase("social.register.title"), phrase("social.about.title")
+
+
+def _section(state: str, title: str) -> str:
+    """Le corps d'une section « --- TITRE --- » de son état interne (« » : absente)."""
+    m = re.search(rf"--- {re.escape(title)} ---\n(.*?)(?=\n--- |\Z)", state or "", re.S)
+    return m.group(1).strip() if m else ""
 
 
 #: « Nom : … » en tête d'une ligne de SMS (un nom court, éventuellement en gras)
@@ -551,10 +565,16 @@ def polish(draft: str, messages: Sequence[Any], heard: str = "",
     if _plain(heard):
         lines.append(phrase("expression.polish.them", text=_plain(heard)))
     system = phrase("expression.polish.system", name=name, portrait=(getattr(persona, "text", "") or "").strip())
+    # qui est l'autre, d'après ce qu'elle a vécu avec lui (sa fiche, déjà filtrée pour cette audience) : l'autrice
+    # écrit aussi ses réponses à venir (banc du 2026-10-16 : avec sa fiche, il plaisante comme lui)
+    other = [body for title in _other_titles() if (body := _section(state, title))]
+    if other:
+        system += "\n\n" + phrase("expression.polish.other", name=name, about="\n".join(other))
     reference = (getattr(persona, "reference", "") or "").strip()
     if reference:
-        system += "\n\n" + phrase("expression.polish.reference", thread=reference)
-    message = phrase("expression.polish.message", thread="\n".join(lines), name=name, draft=text)
+        system += "\n\n" + phrase("expression.polish.reference", thread=reference, name=name)
+    message = phrase("expression.polish.message", thread="\n".join(lines), name=name,
+                     draft=" / ".join(text.split("\n\n")))
     return system, message, lambda written: authored(written, name)
 
 

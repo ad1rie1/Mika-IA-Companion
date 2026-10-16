@@ -124,12 +124,15 @@ PERSONA = PersonaRender(text="Tu es Mika. Tu lis beaucoup.", hash="h", depth="fu
 
 
 def test_the_author_reads_her_portrait_the_thread_and_the_draft_but_not_her_tags_nor_her_state():
-    state = (f"{CONTEXT_HEADER}\n--- {phrase('expression.answer.title')} ---\n{phrase('expression.answer.react')}\n"
+    state = (f"{CONTEXT_HEADER}\n--- {phrase('social.about.title')} ---\nAdrien adore plaisanter, sauf au boulot.\n\n"
+             f"--- {phrase('expression.answer.title')} ---\n{phrase('expression.answer.react')}\n"
              f"{CONTEXT_FOOTER}\n\nbah personne voit le taf que je fais")
     messages = [Message("user", "journée pourrie"), Message("assistant", "Ah merde.\n\nRaconte. [EMOTION: sad 0.5]"),
                 Message("user", state)]
     system, message, keep = polish(DRAFT, messages, "bah personne voit le taf que je fais", PERSONA)
     assert "Tu es Mika. Tu lis beaucoup." in system and "Léa : Coucouuu" in system  # son portrait, le registre
+    # qui est l'autre (sa fiche) : l'autrice écrit aussi ses réponses à venir ; le reste de son état ne passe pas
+    assert "Adrien adore plaisanter, sauf au boulot." in system and "Réagis d'abord" not in system
     assert "Mika : Ah merde.\nMika : Raconte." in message  # une ligne par bulle, comme un fil de SMS
     assert "journée pourrie" in message and "bah personne voit le taf" in message
     assert "C'est le piège du métier" in message
@@ -137,6 +140,8 @@ def test_the_author_reads_her_portrait_the_thread_and_the_draft_but_not_her_tags
     # l'autrice écrit aussi la réponse de l'autre : seuls ses messages à elle partent, une bulle chacun
     assert keep("Mika : c'est vache.\nMika : bon : tout le monde voit le bug\nL'autre : ouais") == \
         "c'est vache.\n\nbon : tout le monde voit le bug"
+    assert keep("Mika : et julien qui dit rien Mika : c'est ça qui m'énerverait L'autre : grave") == \
+        "et julien qui dit rien\n\nc'est ça qui m'énerverait"
     assert polish("[EMOTION: sad 0.4]", messages, "", PERSONA) is None
     # sans fil de référence, rien n'en est dit
     bare = PersonaRender(text="Tu es Mika.", hash="h", depth="full", name="Mika")
@@ -189,4 +194,4 @@ def test_her_bubbles_go_through_the_second_pass_and_are_not_a_long_answer():
     burst = "C'est quoi comme réunion ?\n\nEn tout cas, j'espère que ça va bien se passer pour toi. [EMOTION: calm 0.3]"
     assert review(burst, [], "réunion à 9h, pas la tête à ça") is None
     _system, message, _keep = polish(burst + " Vraiment.", [Message("user", "réunion à 9h")], "réunion à 9h", PERSONA)
-    assert "C'est quoi comme réunion ?\n\nEn tout cas" in message
+    assert "Mika (brouillon) : C'est quoi comme réunion ? / En tout cas" in message
