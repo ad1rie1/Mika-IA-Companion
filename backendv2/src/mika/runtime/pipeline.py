@@ -88,12 +88,14 @@ Parser = Callable[[str, str], tuple[str, Mapping[str, str]]]
 #: La relecture d'une parole : (sa réponse, ses derniers messages, ce que la personne vient de dire, sa persona telle
 #: que le modèle l'a lue) → une remarque à glisser en fin d'état interne pour qu'elle la réécrive une fois, ou ``None``.
 Reviewer = Callable[[str, Sequence[str], str, str], "str | None"]
-#: La seconde passe sur une parole : (sa réponse, les messages de son appel, ce que la personne vient de dire, son nom)
-#: → (consigne, message) d'un appel qui rend sa réponse naturelle sans rien y ajouter, ou ``None`` : rien à reprendre.
-Polisher = Callable[[str, Sequence[Message], str, str], "tuple[str, str] | None"]
+#: La seconde passe sur une parole : (sa réponse, les messages de son appel, ce que la personne vient de dire, sa persona
+#: rendue) → (consigne, message, ce qu'on garde de ce que l'appel a écrit) d'un appel qui récrit sa réponse, ou
+#: ``None`` : rien à reprendre.
+Polisher = Callable[[str, Sequence[Message], str, "PersonaRender | None"],
+                    "tuple[str, str, Callable[[str], str]] | None"]
 #: une réponse récrite plus longue que ``_POLISH_GROWTH`` fois le premier jet (plus ``_POLISH_SLACK`` caractères) a
-#: ajouté quelque chose : on garde le premier jet
-_POLISH_GROWTH, _POLISH_SLACK = 1.5, 40
+#: dérivé : on garde le premier jet (l'autrice peut envoyer en plusieurs bulles ce qu'un « ah merde. » disait seul)
+_POLISH_GROWTH, _POLISH_SLACK = 2.0, 120
 
 
 def is_silence(text: str) -> bool:
@@ -702,11 +704,10 @@ class EpisodeRunner:
 
     async def _polish(self, ep: _Live, eid: str, llm_req: LLMRequest, text: str, heard: str,
                       make_ctx: Callable[[Any, str], ToolContext], persona: PersonaRender | None) -> str:
-        """Sa réponse rendue naturelle (``polishers``) par le modèle du rôle ``polish`` — seulement si l'opératrice
-        lui en a donné un : sans repli, une installation ne paie pas un second appel de sa voix sans l'avoir choisi.
-        Ablation du 2026-10-15 : retirer ou réécrire un bloc de son prompt ne change presque rien (le défaut vient du
-        modèle) ; récrire le texte au vu du fil, si (+0,6 à +1 sur 10). Une panne, un silence, ou une réponse qui
-        s'allonge : le premier jet part tel quel."""
+        """Sa réponse récrite (``polishers``) par le modèle du rôle ``polish`` — seulement si l'opératrice lui en a
+        donné un : sans repli, une installation ne paie pas un second appel de sa voix sans l'avoir choisi. Le
+        polisseur dit ce qu'on garde de ce que l'appel a écrit (l'autrice écrit aussi la réponse de l'autre, ADR 0114).
+        Une panne, rien gardé, un silence, ou une réponse qui dérive en longueur : le premier jet part tel quel."""
         gateway = self.gateway
         serving = getattr(gateway, "serving", None)
         if gateway is None or not callable(serving) or not serving(str(Role.POLISH)):
@@ -714,13 +715,13 @@ class EpisodeRunner:
         name = persona.name if persona is not None else ""
         asked = None
         for polisher in self.polishers:
-            got = call(polisher, text, llm_req.messages, heard, name, label="seconde passe sur la réponse")
+            got = call(polisher, text, llm_req.messages, heard, persona, label="seconde passe sur la réponse")
             if isinstance(got, tuple):
                 asked = got
                 break
         if asked is None:
             return text
-        system, message = asked
+        system, message, keep = asked
         req = LLMRequest(role=str(Role.POLISH), call_id=f"{eid}#naturel", system_stable=system,
                          messages=(Message("user", message),), max_tokens=llm_req.max_tokens, lane=llm_req.lane,
                          priority=llm_req.priority, meta={**dict(llm_req.meta), "passe": "naturel"})
@@ -728,7 +729,10 @@ class EpisodeRunner:
                             label="seconde passe : appel du modèle")
         if isinstance(again, Failed):
             return text
-        polished, _annotations = self._parse(again.text, name)
+        kept = call(keep, again.text, label="seconde passe : ses messages")
+        if isinstance(kept, Failed):
+            return text
+        polished, _annotations = self._parse(kept, name)
         polished = polished.strip()
         if not polished or is_silence(polished) or len(polished) > len(text) * _POLISH_GROWTH + _POLISH_SLACK:
             return text

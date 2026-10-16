@@ -116,4 +116,5 @@ def persona_for(frame: Frame, depth: str) -> PersonaRender:
     doc: c.PersonaDoc = frame.get(c.PERSONA)
     ep = frame.episode
     text = render(doc, depth, chat=ep is not None and ep.kind in CONVERSATIONAL)
-    return PersonaRender(text=text, hash=digest((depth, text)), depth=depth, name=c.name_of(doc))
+    return PersonaRender(text=text, hash=digest((depth, text)), depth=depth, name=c.name_of(doc),
+                         reference=doc.reference_thread.strip())

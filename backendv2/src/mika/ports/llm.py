@@ -59,6 +59,9 @@ class PersonaRender:
     depth: str
     #: son nom (celui de sa persona) : un « Nom : » recopié en tête de réponse se retire (ADR 0070)
     name: str = ""
+    #: un fil de messages qui donne le registre de sa voix (sa persona, ``reference_thread``) : seule l'autrice de la
+    #: seconde passe le lit (ADR 0114)
+    reference: str = ""
 
 
 @dataclass(frozen=True, slots=True)
