@@ -253,16 +253,21 @@ def test_her_last_message_left_unanswered_holds_her_back_for_hours_a_question_lo
         await chat(kernel, "user_1", ["tu fais quoi ce soir ?"], gap=1)
         frame = kernel.mind.frame()
         asked = restraint(frame, "user_1", ("need_social",)).veto
-        worried = restraint(frame, "user_1", ("check_in",)).veto
+        live = [restraint(frame, "user_1", (reason,)).veto for reason in ("check_in", goals_c.SHARE)]
+        await asyncio.sleep(20 * MINUTE / US)
+        worried = restraint(kernel.mind.frame(), "user_1", ("check_in",)).veto
         await asyncio.sleep(6 * HOUR / US)
         later = restraint(kernel.mind.frame(), "user_1", ("need_social",)).veto
         await asyncio.sleep(7 * HOUR / US)
         free = restraint(kernel.mind.frame(), "user_1", ("need_social",)).veto
-        return asked, worried, later, free
+        return asked, live, worried, later, free
 
-    asked, worried, later, free = run(tmp_path, scenario)
+    asked, live, worried, later, free = run(tmp_path, scenario)
     assert asked == agency_c.AWAITING_REPLY and later == agency_c.AWAITING_REPLY  # sa question attend
-    assert worried is None  # une prise de nouvelles après une inquiétude n'attend pas autant
+    # elle vient de lui répondre : rien d'autre ne part avant qu'il réponde, pas même ce qui le regarde
+    # (2026-10-16 : un pavé sur une étude lue, dix secondes après sa réponse)
+    assert live == [agency_c.AWAITING_REPLY, agency_c.AWAITING_REPLY]
+    assert worried is None  # une prise de nouvelles après une inquiétude n'attend pas des heures
     assert free is None
 
 

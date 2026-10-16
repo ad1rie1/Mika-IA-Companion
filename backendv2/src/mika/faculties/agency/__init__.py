@@ -147,6 +147,11 @@ class AgencyParams(BaseModel):
         label="Après un message resté sans réponse", group="Ne pas harceler", lo=0, hi=2 * DAY,
         help="Quand son dernier message à quelqu'un (une réponse, une salutation) est resté sans réponse, pas "
              "d'initiative ordinaire vers cette personne pendant cette durée.")] = 4 * HOUR
+    live_wait_us: Annotated[int, Knob(
+        label="Pendant une conversation", group="Ne pas harceler", lo=0, hi=HOUR,
+        help="Son dernier message à quelqu'un attend sa réponse depuis moins que ça : la conversation est en "
+             "cours, elle attend qu'il réponde avant de lancer autre chose — même ce qui le regarde (partager ce "
+             "qu'elle a fini, prendre de ses nouvelles). Seul ce qui prévient passe.")] = 15 * MINUTE
     farewell_quiet_us: Annotated[int, Knob(
         label="Après un au revoir", group="Ne pas harceler", lo=0, hi=DAY,
         help="Quand la personne a clos la conversation (« bonne nuit », « je file »), pas d'initiative ordinaire vers "
@@ -414,7 +419,9 @@ def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str |
     encore, quelques heures de retenue — davantage s'il posait une question ;
     ce qui concerne la personne elle-même (``ABOUT_THEM``) n'attend pas la fin
     de cette retenue-là ; ce qui vient de Mika (l'envie de parler, son humeur,
-    le manque), si. Rend le veto, ou ``None``."""
+    le manque), si. Les premières minutes (``live_wait_us``), la conversation est
+    en cours : rien ne part qu'il n'ait répondu, pas même ce qui le regarde.
+    Rend le veto, ou ``None``."""
     if not is_identifiable(target) or (c.INFORMS | NOT_A_NUDGE) & set(reasons):
         return None  # prévenir n'est pas relancer ; souhaiter un anniversaire, un mot doux un jour difficile non plus
     person = frame.get(identity_c.PERSON(target))
@@ -434,6 +441,9 @@ def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str |
         return c.UNANSWERED
     if mine.closed_at and frame.now - mine.closed_at < p.farewell_quiet_us:
         return c.FAREWELL  # on s'est quittées : pas de « t'es encore là ? »
+    if mine.unanswered and frame.now - mine.last_out < p.live_wait_us:
+        # elle vient de lui répondre : pas un pavé sur autre chose dix secondes après (2026-10-16, sur le PC)
+        return c.AWAITING_REPLY
     if mine.unanswered and not ABOUT_THEM & set(reasons):
         quiet = p.quiet_after_question_us if mine.asked and not mine.owed else p.quiet_after_reply_us
         if frame.now - mine.last_out < quiet:

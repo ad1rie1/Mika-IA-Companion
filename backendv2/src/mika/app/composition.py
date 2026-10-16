@@ -215,10 +215,10 @@ def deps(**kw: Any) -> KernelDeps:
         "parsers": [parse_reply],
         "reviewers": [review_reply],
         "reviewed": sorted(CONVERSATIONAL),
-        # la seconde passe : seulement si l'opératrice donne un modèle au rôle « polish », et sur ses réponses, où
-        # « TA RÉPONSE » dit ses traits marqués (ADR 0112)
+        # la seconde passe, l'autrice : seulement si l'opératrice donne un modèle au rôle « polish » ; sur ses
+        # réponses et ses initiatives, pour qu'un message qu'elle lance sonne comme ses réponses (ADR 0115)
         "polishers": [polish_reply],
-        "polished": [Kind.REPLY],
+        "polished": sorted(CONVERSATIONAL),
         "reply_kind": Kind.REPLY,
         "reply_wait": _reply_wait,
         "lanes": LANES,

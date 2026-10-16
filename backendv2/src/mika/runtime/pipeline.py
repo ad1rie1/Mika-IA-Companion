@@ -454,14 +454,20 @@ class EpisodeRunner:
                 # la relecture : un tic du modèle repéré dans sa réponse (une question à options, la même ouverture
                 # qu'avant, sa phrase redite…) la fait réécrire une fois, la remarque en fin d'état interne. Jamais
                 # après des outils : un nouvel appel les referait (une recherche, un envoi)
-                if self.reviewers and req.kind in self.reviewed and policy.delivered and not loop.calls:
+                # … sauf quand l'autrice la réécrit derrière (ADR 0115) : elle repartirait de toute façon du sens,
+                # pas des mots, et la relecture coûtait un appel de plus
+                authored = self._authored(req.kind) and policy.delivered
+                if (self.reviewers and req.kind in self.reviewed and policy.delivered and not loop.calls
+                        and not authored):
                     revised = await self._revise(ep, eid, llm_req, text, message or "", make_ctx, persona)
                     if revised is not None:
                         loop, text, annotations, llm_req = revised
                 # la seconde passe : le texte seul, rendu naturel au vu du fil, sans rien y ajouter ; ses balises
                 # restent celles du premier jet (ce qu'elle ressent ne change pas), et ses outils ne se refont pas
-                if self.polishers and req.kind in self.polished and policy.delivered:
-                    text = await self._polish(ep, eid, llm_req, text, message or "", make_ctx, persona)
+                if authored:
+                    # ce que la personne vient d'écrire : la consigne d'une initiative (« personne ne vient de
+                    # t'écrire… ») n'est pas une ligne du fil
+                    text = await self._polish(ep, eid, llm_req, text, req.message or "", make_ctx, persona)
                 # un message qui emporte un fichier n'est pas une redite, même s'il redit sa phrase (« tiens, la
                 # voilà ») : se taire perdrait le fichier
                 if policy.delivered and not loop.attachments and repeats_last(text, llm_req):
@@ -701,6 +707,11 @@ class EpisodeRunner:
             return None
         ep.seen["relecture"] = {"premier_jet": text, "remarque": note}
         return again, text2, annotations2, again_req
+
+    def _authored(self, kind: str) -> bool:
+        """Sa parole de cette sorte passe par l'autrice : un polisseur, cette sorte, et un modèle au rôle ``polish``."""
+        serving = getattr(self.gateway, "serving", None)
+        return bool(self.polishers) and kind in self.polished and callable(serving) and bool(serving(str(Role.POLISH)))
 
     async def _polish(self, ep: _Live, eid: str, llm_req: LLMRequest, text: str, heard: str,
                       make_ctx: Callable[[Any, str], ToolContext], persona: PersonaRender | None) -> str:
