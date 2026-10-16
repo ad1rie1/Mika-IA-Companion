@@ -11,6 +11,11 @@ export type { VoiceProfile } from "../types";
 
 const NEUTRAL_PROFILE: VoiceProfile = { pitch: 1.0, rate: 1.0, gain: 1.0 };
 
+/** Le texte à dire, sans ses émojis (ni leurs joints et variantes) : une voix lirait « tête de mort ». */
+export function withoutEmoji(text: string): string {
+  return text.replace(/[\p{Extended_Pictographic}\u{1F3FB}-\u{1F3FF}\u200d\ufe0f]/gu, "").replace(/[ \t]{2,}/g, " ").trim();
+}
+
 /** Ce qu'il est advenu d'un `speak()` : joué (même coupé en route) ou
  * jamais commencé (muet, vidé par un mute ou un stop). */
 export type SpeakOutcome = "played" | "skipped";
@@ -564,9 +569,11 @@ export class TTSService {
     hooks?: SpeakHooks,
     intensity = 1
   ): Promise<SpeakOutcome> {
-    if (this.muted) return Promise.resolve("skipped");
+    // ses émojis s'écrivent, ils ne se disent pas (ADR 0114) : un message fait d'un seul émoji reste muet
+    const spoken = withoutEmoji(text);
+    if (this.muted || !spoken) return Promise.resolve("skipped");
     return new Promise<SpeakOutcome>((settle) => {
-      this.speechQueue.push({ text, emotion, profile, hooks, intensity, settle });
+      this.speechQueue.push({ text: spoken, emotion, profile, hooks, intensity, settle });
       if (!this.processing) {
         this.processQueue();
       }
