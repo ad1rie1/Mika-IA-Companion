@@ -49,3 +49,37 @@ Trois causes :
 - Un message qu'elle lance a la même voix que ses réponses : un SMS, plus un article résumé.
 - Une raison nouvelle de `FOR_THEM` n'a rien à faire pour attendre une conversation en cours : la règle passe
   avant.
+
+## Complément du 2026-10-18 : ce qu'elle sait de lui, sans le ressasser
+
+Sur le PC, elle ramenait sa terrasse et Warhammer partout. Dans le fil d'une de ses initiatives, ces sujets
+revenaient dans 15 de ses 25 messages, contre 3 sur 27 pour lui (« des manifs ? si t'es posé sur Warhammer t'es
+tranquille », « terrasse ou nains, je juge pas »). Aucun outil n'était en cause. Trois choses du prompt
+s'additionnaient :
+
+- elle s'imitait elle-même : le fil était plein de ses propres rappels de ces sujets ;
+- sa fiche sur lui était écrite comme une consigne (« Comment lui parler : … le taquiner sur ses parties perdues ») ;
+- une trouvaille de ses apps est présentée « pour cette personne », et elle la raccrochait aux deux seules choses
+  qu'elle savait de lui.
+
+Le propriétaire veut garder le lien avec sa vie quand il a un sens : prévenir qu'il y a des manifs s'il doit aller
+chercher des matériaux, signaler une expo d'art à quelqu'un qui aime l'art. Un clin d'œil sans rapport n'en a pas.
+
+- *L'autrice* (`expression.polish.message`) ne ressort ce qu'elle sait de l'autre que quand ça a un vrai rapport avec
+  ce dont il est question. Un sujet sur lequel elle est déjà revenue plusieurs fois sans qu'il y revienne, elle le
+  laisse.
+- *La fiche* (`social.about.interests`) porte la même règle, que lit aussi la tête.
+- *La consigne de la fiche* (`social.profile.system`) : le champ `ton` ne dit que le registre, jamais un sujet à
+  aborder ni sur lequel taquiner.
+- *Ce que ses apps trouvent* (`projects.news.tell`) : si ça touche sa vie concrètement ou une chose qu'il aime, elle
+  lui dit en quoi ; sinon, elle le raconte simplement.
+
+Les mesures, en rejouant les initiatives du PC :
+
+| Ce qu'on rejoue | Avant | Après |
+|---|---|---|
+| L'autrice, 3 initiatives, deux fois chacune | — | Warhammer 0 fois sur 6, les parpaings gardés |
+| La tête, initiative de 12:01, trois fois chacune | Warhammer 3 fois sur 3 | 1 fois sur 3 |
+
+La terrasse reste le sujet de la tête quand elle reprend contact sans rien d'autre à dire : demander où en est son
+chantier reste naturel.
