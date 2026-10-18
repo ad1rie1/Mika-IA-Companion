@@ -69,8 +69,10 @@ class ChatViewModel(
         graph.chatEngine.ephemeral,
         graph.chatEngine.truncated,
         graph.chatEngine.typing,
-    ) { messages, ephemeral, truncated, typing ->
-        ChatItems.build(messages, ephemeral, truncated, typing, graph.clock.wallMs(), zone)
+        // ses cartes de travail (ADR 0116) : en mémoire seulement
+        graph.chatEngine.work,
+    ) { messages, ephemeral, truncated, typing, work ->
+        ChatItems.build(messages, ephemeral, truncated, typing, graph.clock.wallMs(), zone, work.cards)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     /** Une seconde : le compte à rebours de « nouvel essai dans N s ». */
@@ -158,6 +160,19 @@ class ChatViewModel(
     val operator: StateFlow<Boolean> = graph.auth.session
         .map { (it as? Session.LoggedIn)?.profile?.operator == true }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /**
+     * Le mode pro (ADR 0116) : l'interrupteur « Pro » de la barre de saisie, retenu sur l'appareil, qui ne vaut que
+     * pour une opératrice — ailleurs il n'apparaît pas, et rien ne part en mode pro.
+     */
+    val proMode: StateFlow<Boolean> = combine(
+        operator,
+        graph.settings.settings.map { it.proMode }.distinctUntilChanged(),
+    ) { op, on -> op && on }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    fun setProMode(on: Boolean) {
+        viewModelScope.launch { graph.settings.setProMode(on) }
+    }
 
     val notificationsAsked: StateFlow<Boolean> = graph.settings.settings
         .map { it.notificationsAsked }
@@ -325,6 +340,8 @@ class ChatViewModel(
         val text = input.trim()
         val files = attachments.toList()
         if (!canSend) return
+        // le mode qu'avait le message à l'envoi : il le garde, renvoi compris
+        val mode = if (proMode.value) MikaProtocol.CHAT_MODE_PRO else null
         // le message clôt la saisie de lui-même (la socket le sait) : son délai n'a plus rien à clore
         composingIdle?.cancel()
         composingIdle = null
@@ -332,7 +349,7 @@ class ChatViewModel(
         attachments.clear()
         notices = emptyList()
         viewModelScope.launch {
-            val result = graph.chat.send(text, files)
+            val result = graph.chat.send(text, files, mode)
             if (result is ChatRepository.SendResult.Rejected) {
                 // Rien n'est parti : tout revient dans la barre de saisie, avec la raison.
                 notices = listOf(result.reason)

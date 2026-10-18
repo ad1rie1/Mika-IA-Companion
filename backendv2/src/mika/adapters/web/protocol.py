@@ -31,9 +31,10 @@ from mika.contracts import world as world_c
 from mika.contracts.entry import HistoryRow, SharedMeta
 from mika.kernel.clock import HOUR, US
 from mika.kernel.frame import Frame
-from mika.ports.delivery import TOO_LATE, Delivery
+from mika.ports.delivery import DONE, NOTE, TOO_LATE, Activity, Delivery
 from mika.vocab import privacy, voice
 from mika.vocab.affect import Emotion, emotion_of
+from mika.vocab.episodes import MODES
 from mika.vocab.people import is_identifiable
 from mika.vocab.phrasebook import phrase
 
@@ -61,6 +62,11 @@ COMPOSING_RATE = (12, 60.0)
 #: une saisie continue ne retient pas la réponse au-delà de ce plafond : l'adaptateur en écrit lui-même la fin
 COMPOSING_MAX_S = presence_c.COMPOSING_MAX_US / US
 MAX_FRAME_BYTES = MAX_ATTACHMENTS * MAX_FILE_BYTES * 4 // 3 + 1024 * 1024
+#: ses outils montrés en direct (trame ``tool``, ADR 0116) : arguments et résultat bornés à tant de caractères
+TOOL_TEXT_MAX = 2000
+TOOL_TEXT_CUT = "…[coupé]"
+#: la raison de voix d'une réponse en mode pro : une réponse de travail se lit, elle ne se dit pas
+PRO_VOICE_REASON = "pro"
 FILENAME_MAX = 80
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
@@ -205,7 +211,25 @@ def history_item(row: HistoryRow, shared: Mapping[str, SharedMeta] | None = None
     if verdicts and row.role == "assistant" and row.verdict:
         item["verdict"] = row.verdict
         item["verdict_note"] = row.verdict_note
+    if row.mode:
+        # écrit en mode pro (ADR 0116) : par elle, avec les outils dont elle s'est servie (leurs noms seulement)
+        item["mode"] = row.mode
+        if row.role == "assistant":
+            item["tools"] = tools_item(row.tools)
     return item
+
+
+def tools_item(raw: str) -> list[dict[str, Any]]:
+    """Les outils d'un de ses messages (la colonne ``tools`` du fil : ``[[nom, réussi], …]``) tels qu'un écran les
+    montre ; illisible : aucun."""
+    try:
+        pairs = json.loads(raw or "[]")
+    except ValueError:
+        return []
+    if not isinstance(pairs, list):
+        return []
+    return [{"name": str(p[0]), "ok": bool(p[1])} for p in pairs
+            if isinstance(p, list | tuple) and len(p) == 2 and isinstance(p[0], str)]
 
 
 def history(mode: str, rows: Sequence[HistoryRow], *, after_id: int = 0, truncated: bool = False,
@@ -246,11 +270,13 @@ def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bo
     pas dans le fil : ``message_id`` nul (le client la range après son curseur et
     ne l'avance pas). ``voiced`` faux : un autre écran de la même personne parle.
     ``attachments`` : les fichiers qu'elle envoie avec (toujours un tableau, vide
-    sans fichier ; jamais avec une pensée)."""
+    sans fichier ; jamais avec une pensée). ``mode`` : le mode dans lequel elle a
+    répondu (ADR 0116) ; en mode pro, sa réponse ne se dit pas à voix haute."""
     decision = voice.decide(voice.SCREEN, hour=d.local_hour, sleep_phase=d.sleep_phase, present=present,
                             muted=muted, persona=d.persona)
     emotion = emotion_of(d.emotion.emotion) or Emotion.NEUTRAL
     inner = d.persona == voice.INNER
+    pro = bool(d.mode) and not inner
     return {
         "type": "speech",
         "text": d.text,
@@ -260,15 +286,42 @@ def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bo
         "emotion_blend": _blend(d.emotion.blend),
         "source": d.source,
         "person_id": d.target,
-        "speak": decision.speak and voiced,
-        "voice_reason": decision.reason if voiced or not decision.speak else OTHER_TAB,
+        "speak": decision.speak and voiced and not pro,
+        "voice_reason": PRO_VOICE_REASON if pro else decision.reason if voiced or not decision.speak else OTHER_TAB,
         "voice_persona": d.persona,
         "voice_profile": voice.profile_for(d.persona).to_dict(),
         "message_id": None if inner else d.message_id,
         "user_message_id": None if inner else d.reply_to,
         "client_msg_id": None if inner else d.client_msg_id,
         "attachments": [] if inner else [shared_item(m) for m in attachments],
+        "mode": d.mode if pro else "",
     }
+
+
+def chat_mode(raw: Any) -> str:
+    """Le mode qu'un ``chat`` demande (ADR 0116) : un des ``MODES``, sinon ``""`` (la conversation ordinaire)."""
+    return raw if isinstance(raw, str) and raw in MODES else ""
+
+
+def _cut(text: str, limit: int = TOOL_TEXT_MAX) -> str:
+    return text if len(text) <= limit else text[: limit - len(TOOL_TEXT_CUT)] + TOOL_TEXT_CUT
+
+
+def tool_activity(a: Activity) -> dict[str, Any]:
+    """Un moment de son travail, en direct (trame ``tool``, ADR 0116) : un outil qui part (``start``), le même fini
+    (``end`` : réussi ou non, ce qu'il a rendu, sa durée), ce qu'elle écrit entre deux appels (``note``), la fin de
+    l'épisode (``done``). Arguments et résultat bornés, en texte brut."""
+    frame: dict[str, Any] = {"type": "tool", "episode": a.episode, "reply_to": a.reply_to, "phase": a.phase,
+                             "at": a.at // 1000}
+    if a.phase == NOTE:
+        frame["text"] = _cut(a.text)
+    elif a.phase == DONE:
+        frame["outcome"] = a.outcome
+    else:
+        frame |= {"call_id": a.call_id, "name": a.name, "args": _cut(a.args)}
+        if a.ok is not None:
+            frame |= {"ok": a.ok, "result": _cut(a.result), "duration_ms": a.duration_us // 1000}
+    return frame
 
 
 #: la raison d'une trame sans texte quand elle dort : la réponse viendra à son réveil

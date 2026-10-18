@@ -4,7 +4,8 @@ pour qu'aucune de ses voix ne soit quelqu'un d'autre. Elle est une IA et le sait
 ; ses bonjours donnent un ton, jamais une phrase à recopier. Son tempérament, trait par trait avec sa mesure (ADR
 0100), est dans les deux profondeurs hors conversation — murmurer, travailler, un réveil, un brouillon, son journal,
 ses rêves, son récit. En conversation (répondre, prendre la parole), il se dit en mots : ses traits nettement marqués,
-sa réaction et sa défense, sans mesure (``character.temperament_in_words``)."""
+sa réaction et sa défense, sans mesure (``character.temperament_in_words``). En mode pro (ADR 0116, la profondeur
+``pro``), qui elle est et rien de sa voix de chat ni de son tempérament."""
 
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from mika.faculties.self.faculty import SELF, SelfState
 from mika.kernel.codec import digest
 from mika.kernel.frame import Frame
 from mika.ports.llm import PersonaRender
-from mika.vocab.episodes import CONVERSATIONAL
+from mika.vocab.episodes import CONVERSATIONAL, PRO
 from mika.vocab.phrasebook import phrase
 
 
@@ -66,7 +67,10 @@ def render(doc: c.PersonaDoc, depth: str = "full", *, chat: bool = False) -> str
     mail, un travail ou son journal, qui ne s'écrivent pas comme un chat. En
     conversation, son tempérament se dit en mots, pas en bloc (banc de recherche,
     2026-10-15 : profil reconnu autant, un peu plus humain, au quart de la
-    longueur ; sans rien, une tsundere n'était plus reconnue)."""
+    longueur ; sans rien, une tsundere n'était plus reconnue). ``pro`` : le mode
+    pro (``_pro``)."""
+    if depth == PRO:
+        return _pro(doc)
     if chat and depth == "full" and doc.portrait.strip():
         return _portrait(doc)
     head = phrase("self.persona.head", name=c.name_of(doc), description=doc.description).strip()
@@ -108,6 +112,16 @@ def _portrait(doc: c.PersonaDoc) -> str:
              temperament_in_words(doc.temperament),
              phrase("self.persona.language", language=doc.language, nature=nature_of(doc)),
              life_rule(doc)]
+    return "\n\n".join(p for p in parts if p)
+
+
+def _pro(doc: c.PersonaDoc) -> str:
+    """En mode pro (ADR 0116) : qui elle est (son nom, sa description), ce qui est vrai d'elle, sa langue et sa
+    nature — ni son portrait, ni sa voix de chat (ton, façon de parler, exemples), ni son tempérament. Un travail
+    demandé dans le chat ne se joue pas en personnage : la consigne du mode dit comment le rendre."""
+    parts = [phrase("self.persona.head", name=c.name_of(doc), description=doc.description).strip(),
+             _bullets(phrase("self.persona.facts"), doc.facts),
+             phrase("self.persona.language", language=doc.language, nature=nature_of(doc))]
     return "\n\n".join(p for p in parts if p)
 
 

@@ -54,7 +54,8 @@ class ConversationCues {
         if (fresh.any { it.message !== m } || fresh.last() !== bubbles.last()) return null
         val said = fresh.map { Cue.Speak(it.key, InlineMarkup.plain(it.part ?: BubbleContent.text(m))) }.filter { it.text.isNotBlank() }
         return when (m.sender) {
-            Sender.MIKA -> said.firstOrNull()?.copy(then = said.drop(1))
+            // une réponse pro (ADR 0116) ne se lit pas à voix haute : elle s'affiche, d'un coup
+            Sender.MIKA -> if (m.isPro) null else said.firstOrNull()?.copy(then = said.drop(1))
             Sender.USER -> if (fresh.size != 1) null else
                 Cue.Read(bubble.key, InlineMarkup.plain(BubbleContent.text(m)).length + 12 * m.attachments.size)
         }

@@ -240,6 +240,15 @@ describe("SpeechPresenter — une réponse vocalisée", () => {
     expect(h.body.emotions.map((e) => e.emotion)).toEqual(["excited"]);
   });
 
+  it("une réponse pro (ADR 0116) n'est jamais lue, même si la trame oubliait `speak: false`", () => {
+    const h = harness();
+    h.presenter.handleSpeech(speech({ mode: "pro", text: "## Rapport\n\n```\ncode\n```" }));
+    h.presenter.handleSpeech(speech({ mode: "pro", speak: true, voice_reason: "pro" }));
+    expect(h.voice.calls).toEqual([]);
+    // l'avatar, lui, continue de vivre : l'émotion de la réponse s'applique
+    expect(h.body.emotions.map((e) => e.emotion)).toEqual(["excited", "excited"]);
+  });
+
   it("muet : idem, immédiat et sans voix ; sans texte : ni voix ni avatar", () => {
     const h = harness();
     h.voice.isMuted = true;

@@ -91,6 +91,7 @@ fun ChatScreen(
     val status by vm.status.collectAsStateWithLifecycle()
     val link by vm.link.collectAsStateWithLifecycle()
     val operator by vm.operator.collectAsStateWithLifecycle()
+    val proMode by vm.proMode.collectAsStateWithLifecycle()
     val asked by vm.notificationsAsked.collectAsStateWithLifecycle()
     val approvals by vm.approvals.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -235,6 +236,9 @@ fun ChatScreen(
                     onRemove = vm::remove,
                     onAttach = { sheet = true },
                     onSend = vm::send,
+                    proAvailable = operator,
+                    pro = proMode,
+                    onPro = vm::setProMode,
                 )
             },
         ) { padding ->

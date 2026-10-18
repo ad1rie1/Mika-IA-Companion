@@ -224,10 +224,10 @@ def _head(s: TranscriptState, cx) -> int:
 #: est ce qu'elle en a perçu, pour le prompt) ; nul quand il n'y a rien à séparer (version 2 de la table).
 #: ``unanswered`` : pourquoi un message reçu est resté sans réponse pour de bon (``c.UNANSWERED_*``), posé par la
 #: fin d'épisode qui l'a réglé ; nul sinon (version 3). ``tools`` : les outils dont elle s'est servie pour écrire un
-#: de ses messages (version 6, ADR 0108)
+#: de ses messages (version 6, ADR 0108). ``mode`` : le mode dans lequel le message a été écrit (version 8, ADR 0116)
 _COLUMNS = ("id", "at", "role", "person", "channel", "room", "source", "kind", "text", "client_msg_id",
             "reply_to", "emotion", "emotion_intensity", "attachments", "typed", "unanswered", "tools", "verdict",
-            "verdict_note")
+            "verdict_note", "mode")
 
 
 class Thread:
@@ -287,7 +287,7 @@ def _row(e: Any) -> tuple[Any, ...] | None:
         text = d.text.text or ""
         typed = None if d.typed_chars is None else max(0, min(len(text), d.typed_chars))
         return (e.seq, e.at, "user", d.handle, d.channel, d.room, d.channel, "message", text,
-                d.client_msg_id, None, None, None, attachments, typed, None, None, None, None)
+                d.client_msg_id, None, None, None, attachments, typed, None, None, None, None, d.mode or None)
     if e.type.name == rt.UTTERANCE.name and d.visible:
         declared = Declared.decode(d.annotation(expression_c.EMOTION_ANNOTATION))
         # ce qui est parti avec son message : des identifiants seulement (leur nom, leur taille, leur sort sont à
@@ -296,7 +296,7 @@ def _row(e: Any) -> tuple[Any, ...] | None:
         return (e.seq, e.at, "assistant", d.target or "", d.channel, d.room, _source(d.kind), d.kind,
                 strip_prosody(d.text.text or ""), None, d.reply_to,
                 declared.emotion.value if declared else None, declared.intensity if declared else None, sent, None,
-                None, _tools_of(d), None, None)
+                None, _tools_of(d), None, None, d.mode or None)
     return None
 
 
@@ -342,13 +342,14 @@ def _left(d: rt.EpisodeEnded) -> list[tuple[str, int]]:
     return [(issue, int(seq)) for seq in seqs]
 
 
+#: version 8 : le mode dans lequel un message a été écrit (``mode``, ADR 0116) ;
 #: version 7 : l'avis de son opératrice sur ses réponses (``verdict``, ``verdict_note``, ADR 0113), d'où
 #: ``transcript.judged`` ; version 6 : la colonne ``tools`` (les outils dont elle s'est servie pour écrire un de ses messages, ADR 0108) ;
 #: version 5 : la table déclarée pour les deux moteurs (ADR 0101), et ``folded`` (le texte replié que cherche la
 #: console) ; version 3 : la colonne ``unanswered`` (pourquoi un message reçu est resté sans réponse), d'où les fins
 #: d'épisode ; version 2 : la colonne ``typed`` (ce que la personne a tapé, à part de ce que ses pièces jointes ont
 #: donné) — la table se reconstruit depuis le journal au premier démarrage
-TRANSCRIPT.projector(c.THREAD_TABLE, version=7, tier=Tier.T0,
+TRANSCRIPT.projector(c.THREAD_TABLE, version=8, tier=Tier.T0,
                      types=[rt.PERCEPTION_RECEIVED, rt.UTTERANCE, rt.EPISODE_ENDED, c.JUDGED])(Thread)
 
 

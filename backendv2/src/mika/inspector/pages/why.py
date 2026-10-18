@@ -342,6 +342,9 @@ def why_page(ui: Any, seq: int) -> dict[str, Any] | None:
              ("épisode", Ref("episode", corr, names.kind(d.kind))), ("issue", Badge(*issue)),
              ("voix", f"{names.role(d.voice.role)} · {d.voice.model or '—'}"),
              ("visible", "dans le fil" if d.visible else "pas dans le fil")]
+    if d.mode:
+        # demandée en mode pro (ADR 0116) : ni sa voix de chat, ni son tempérament, ni la seconde passe
+        facts.append(("mode", Badge(f"{d.mode} — un travail demandé", "info")))
     blocks: list[Any] = [
         Prose(text or "(oublié : le texte a été effacé)", "Ce qu'elle a dit", reading=True),
         *verdict_blocks(ui, seq),

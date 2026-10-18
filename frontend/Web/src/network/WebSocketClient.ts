@@ -1,5 +1,7 @@
 import type {
   ApprovalFrame,
+  ChatFrame,
+  ChatMode,
   VerdictFrame,
   ComposingFrame,
   PresenceFrame,
@@ -768,26 +770,44 @@ export class WebSocketClient {
     }
   }
 
-  private withIdentity(payload: Record<string, any>): Record<string, any> {
+  private withIdentity<T extends object>(payload: T): T & { person_id?: string } {
     return this.personId
       ? { ...payload, person_id: this.personId }
       : payload;
   }
 
   /**
+   * La trame d'un message. Le mode pro (ADR 0116) est porté par la trame
+   * elle-même, pas relu à l'envoi : un message mis en file, puis rejoué à la
+   * reconnexion, garde le mode qu'il avait quand on l'a tapé — même si
+   * l'interrupteur a changé depuis. Ordinaire, la clé est absente.
+   */
+  private chatFrame(
+    message: string,
+    clientMsgId: string | undefined,
+    mode: ChatMode,
+    attachments?: ChatFrame["attachments"]
+  ): ChatFrame & { person_id?: string } {
+    const frame: ChatFrame = { type: "chat", message };
+    if (attachments) frame.attachments = attachments;
+    frame.client_msg_id = clientMsgId;
+    if (mode === "pro") frame.mode = "pro";
+    return this.withIdentity(frame);
+  }
+
+  /**
    * Send a chat turn. `clientMsgId` is echoed back on the `ack` and on the
    * resulting `speech`, which is what lets the UI move a bubble from
    * "queued" to "sent" and recognise its own message when the history
-   * comes back — instead of painting it a second time.
+   * comes back — instead of painting it a second time. `mode` : `"pro"`
+   * pour une demande de travail (ADR 0116), ordinaire sinon.
    *
    * Returns false when the frame was queued because the socket is down, or
    * behind MAX_IN_FLIGHT messages still waiting for their ack.
    */
-  sendChat(message: string, clientMsgId?: string): boolean {
+  sendChat(message: string, clientMsgId?: string, mode: ChatMode = ""): boolean {
     this.stopComposing(false); // le message clôt la saisie de lui-même
-    return this.send(
-      this.withIdentity({ type: "chat", message, client_msg_id: clientMsgId })
-    );
+    return this.send(this.chatFrame(message, clientMsgId, mode));
   }
 
   /**
@@ -806,20 +826,17 @@ export class WebSocketClient {
   sendChatWithAttachments(
     message: string,
     attachments: Array<{ name: string; type: string; data: string }>,
-    clientMsgId?: string
+    clientMsgId?: string,
+    mode: ChatMode = ""
   ): boolean {
     this.stopComposing(false);
     return this.send(
-      this.withIdentity({
-        type: "chat",
+      this.chatFrame(
         message,
-        attachments: attachments.map(({ name, type, data }) => ({
-          name,
-          type,
-          data,
-        })),
-        client_msg_id: clientMsgId,
-      })
+        clientMsgId,
+        mode,
+        attachments.map(({ name, type, data }) => ({ name, type, data }))
+      )
     );
   }
 

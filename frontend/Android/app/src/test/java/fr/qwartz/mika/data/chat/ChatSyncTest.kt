@@ -21,6 +21,7 @@ import fr.qwartz.mika.data.chat.ChatSync.withAttachments
 import fr.qwartz.mika.data.net.AttachmentRef
 import fr.qwartz.mika.data.net.HistoryEntry
 import fr.qwartz.mika.data.net.RejectedAttachment
+import fr.qwartz.mika.data.net.ToolUse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -542,5 +543,50 @@ class ChatSyncTest {
         assertTrue(applyVerdict(got.history, 812, "", ""))
         assertEquals(null, got.history.single().verdict)
         assertEquals(null, got.history.single().verdictNote)
+    }
+
+    @Test fun `le mode pro et ses outils passent du fil du serveur aux bulles (ADR 0116)`() {
+        val code = "Voilà :\n\n```kotlin\nfun main() {\n    println(1)  // deux espaces\n}\n```"
+        val entries = listOf(
+            HistoryEntry(id = 811, role = "user", text = "écris-moi un main", ts = 811.0, mode = "pro"),
+            HistoryEntry(id = 812, role = "assistant", text = "$code\n", ts = 812.0, mode = "pro",
+                tools = listOf(ToolUse("ws_read", true), ToolUse("ws_write", false))),
+            HistoryEntry(id = 813, role = "assistant", text = "coucou  toi !", ts = 813.0, mode = "turbo",
+                tools = listOf(ToolUse("x", true))),
+        )
+        val got = mergeHistory(mutableListOf(), entries, MAX, nowMs = 1_000).history
+        assertEquals(listOf("pro", "pro", null), got.map { it.mode })
+        assertTrue(got[0].isPro && got[1].isPro)
+        // une réponse pro garde ses espaces (ses blocs de code) : elle n'est jamais lue à voix haute
+        assertEquals(code, got[1].text)
+        assertEquals(listOf(ToolUse("ws_read", true), ToolUse("ws_write", false)), got[1].tools)
+        // une ligne ordinaire : la voix comme avant, et ni mode ni outils
+        assertEquals("coucou toi!", got[2].text)
+        assertNull(got[2].tools)
+        assertNull(got[0].tools)
+    }
+
+    @Test fun `une réponse pro reçue en direct apprend ses outils au prochain historique, sans les perdre ensuite`() {
+        val live = StoredMessage("Voilà le mail", VTUBER, ts = 812, id = 812, mode = "pro")
+        val withTools = HistoryEntry(id = 812, role = "assistant", text = "Voilà le mail", ts = 812.0, mode = "pro",
+            tools = listOf(ToolUse("email_search", true)))
+        val first = mergeHistory(mutableListOf(live), listOf(withTools), MAX, nowMs = 1_000)
+        assertEquals(1, first.reworked)
+        assertEquals(listOf(ToolUse("email_search", true)), first.history.single().tools)
+        // la même ligne redite : rien ne change ; une ligne qui ne dit plus rien de ses outils ne les efface pas
+        assertEquals(0, mergeHistory(first.history, listOf(withTools), MAX, nowMs = 1_000).reworked)
+        assertEquals(0, mergeHistory(first.history, listOf(withTools.copy(tools = null)), MAX, nowMs = 1_000).reworked)
+        assertEquals(listOf(ToolUse("email_search", true)), first.history.single().tools)
+    }
+
+    @Test fun `le serveur est la référence du mode d'un message envoyé (ADR 0116)`() {
+        // envoyé en mode pro d'ici, mais le serveur ne l'a pas reçu ainsi (pas une opératrice) : il ne l'est pas
+        val mine = StoredMessage("fais ça", USER, ts = 1, cid = "c1", status = MessageStatus.PENDING, mode = "pro")
+        val adopted = mergeHistory(mutableListOf(mine), listOf(HistoryEntry(id = 5, role = "user", text = "fais ça", ts = 1.0)), MAX, nowMs = 1_000)
+        assertEquals(1, adopted.adopted)
+        assertNull(adopted.history.single().mode)
+        val kept = StoredMessage("et ça", USER, ts = 2, cid = "c2", status = MessageStatus.PENDING, mode = "pro")
+        val again = mergeHistory(mutableListOf(kept), listOf(HistoryEntry(id = 6, role = "user", text = "et ça", ts = 2.0, mode = "pro")), MAX, nowMs = 1_000)
+        assertEquals("pro", again.history.single().mode)
     }
 }

@@ -228,8 +228,11 @@ export class SpeechPresenter {
     }
 
     // Le backend décide si ce tour est vocalisé (backendv2/src/mika/vocab/voice.py).
-    // `speak: false` montre le texte et anime l'avatar, sans un son.
-    const willSpeak = data.speak !== false && !this.voice.isMuted;
+    // `speak: false` montre le texte et anime l'avatar, sans un son. Une
+    // réponse pro (ADR 0116) ne se lit jamais à voix haute — le serveur
+    // l'envoie déjà sans voix ; un rapport en Markdown lu par la synthèse,
+    // blocs de code compris, serait du bruit si une trame l'oubliait.
+    const willSpeak = data.speak !== false && data.mode !== "pro" && !this.voice.isMuted;
     if (!willSpeak) {
       showReply();
       return;

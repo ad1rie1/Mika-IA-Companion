@@ -70,6 +70,17 @@ class ConversationCuesTest {
             cue,
         )
     }
+
+    @Test fun `sa réponse pro ne se dit pas à voix haute (ADR 0116)`() {
+        val cues = ConversationCues()
+        cues.onItems(opening, watching = true)
+        val pro = StoredMessage("Voilà le **devis**", Sender.MIKA, ts = 3, localId = 3, mode = "pro")
+        assertNull(cues.onItems(opening + ChatItem.Bubble("m3", pro, read = false), watching = true))
+        // un message envoyé en mode pro, elle le lit comme un autre
+        val ask = StoredMessage("et la facture ?", Sender.USER, ts = 4, localId = 4, mode = "pro")
+        val cue = cues.onItems(opening + ChatItem.Bubble("m3", pro, read = false) + ChatItem.Bubble("m4", ask, read = false), watching = true)
+        assertEquals(ConversationCues.Cue.Read("m4", "et la facture ?".length), cue)
+    }
 }
 
 class SpeechTrackTest {
@@ -132,4 +143,5 @@ class SpeechTrackTest {
         assertNull(track.of("a"))
         assertEquals(now, track.of("b")!!.startNanos)
     }
+
 }

@@ -81,6 +81,17 @@ import fr.qwartz.mika.data.files.AttachmentPolicy
 import fr.qwartz.mika.data.files.MikaFileRefs
 import fr.qwartz.mika.ui.components.InlineMarkup
 import fr.qwartz.mika.ui.components.InlineMarkupText
+import fr.qwartz.mika.ui.components.ProMarkdown
+import fr.qwartz.mika.ui.components.ProMarkdownText
+import fr.qwartz.mika.data.chat.WorkCard
+import fr.qwartz.mika.data.chat.WorkStep
+import fr.qwartz.mika.data.chat.WorkText
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.text.font.FontFamily
 import fr.qwartz.mika.ui.avatar.AvatarFace
 import fr.qwartz.mika.ui.avatar.LoadedPortrait
 import fr.qwartz.mika.ui.components.MikaAvatar
@@ -303,6 +314,9 @@ internal fun ChatConversation(
         }
     }
     LaunchedEffect(atBottom) { if (atBottom) unseen = 0 }
+    // Sa carte de travail qui apparaît en bas du fil (ADR 0116) : on la suit, si l'on y était.
+    val workAtBottom = (items.lastOrNull() as? ChatItem.Work)?.key
+    LaunchedEffect(workAtBottom) { if (workAtBottom != null && atBottom) listState.animateScrollToItem(0) }
 
     var ownTop by remember { mutableFloatStateOf(Float.NaN) }
     BoxWithConstraints(modifier.fillMaxWidth().onGloballyPositioned { ownTop = it.positionInRoot().y }) {
@@ -351,6 +365,7 @@ internal fun ChatConversation(
                         is ChatItem.Note -> Backed(overPortrait) { Note(item, operator, actions) }
                         is ChatItem.Thought -> Backed(overPortrait) { Thought(item.message) }
                         is ChatItem.SystemNote -> Centered(item.text, overPortrait)
+                        is ChatItem.Work -> WorkCardView(item, overPortrait)
                         ChatItem.Typing -> TypingBubble()
                     }
                 }
@@ -526,14 +541,20 @@ private fun Bubble(
     val m = item.message
     val reveal = utterance?.let { rememberReveal(it) }
     val mine = m.sender == Sender.USER
+    // Une réponse pro (ADR 0116) : une seule bulle, plus large, son Markdown rendu ; ni rythme de frappe ni voix.
+    val proReply = m.isPro && !mine
     val container = if (mine) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondaryContainer
     val content = if (mine) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSecondaryContainer
     val body = item.part ?: BubbleContent.text(m)
     // Ce qu'on copie : le texte lu, sans les astérisques du Markdown.
-    val copyText = remember(body) { InlineMarkup.plain(body) }
-    val description = BubbleContent.describe(m, item.read, zone, item.part)
+    val copyText = remember(body, proReply) { if (proReply) ProMarkdown.plain(body) else InlineMarkup.plain(body) }
+    val description = BubbleContent.describe(m, item.read, zone, item.part, item.toolsLine)
     val copyLabel = stringResource(R.string.chat_copy)
     val retryLabel = stringResource(R.string.chat_retry)
+    // Ses liens, des gestes pour le lecteur d'écran (la bulle est un seul nœud).
+    val links = remember(body, proReply) { if (proReply) ProMarkdown.links(body).take(MAX_LINK_ACTIONS) else emptyList() }
+    val uriHandler = LocalUriHandler.current
+    val openLink = stringResource(R.string.pro_open_link)
     val failed = mine && m.status == MessageStatus.FAILED
     val shape = if (mine) {
         RoundedCornerShape(16.dp, 16.dp, 4.dp, 16.dp)
@@ -542,7 +563,7 @@ private fun Bubble(
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start) {
         Column(
-            Modifier.fillMaxWidth(0.85f),
+            Modifier.fillMaxWidth(if (proReply) 0.96f else 0.85f),
             horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
         ) {
             Surface(shape = shape, color = container) {
@@ -567,19 +588,36 @@ private fun Bubble(
                                 customActions = buildList {
                                     if (body.isNotEmpty()) add(CustomAccessibilityAction(copyLabel) { actions.copy(copyText); true })
                                     if (failed) add(CustomAccessibilityAction(retryLabel) { actions.retry(m.localId); true })
+                                    for ((label, url) in links) {
+                                        add(CustomAccessibilityAction("$openLink : $label") { uriHandler.openUri(url); true })
+                                    }
                                 }
                             },
                     ) {
                         if (body.isNotEmpty()) {
                             Box {
-                                InlineMarkupText(body, content, reveal = reveal)
+                                if (proReply) {
+                                    ProMarkdownText(body, content)
+                                } else {
+                                    InlineMarkupText(body, content, reveal = reveal)
+                                }
                                 // Une réplique qui attend son tour derrière la précédente : les trois points, à sa place.
                                 if (reveal != null && reveal <= 0f) TypingDots(content, Modifier.padding(top = 6.dp))
                             }
                         }
+                        // ses outils, relus de l'historique quand la carte de travail n'est plus là (ADR 0116)
+                        item.toolsLine?.let { tools ->
+                            Text(
+                                stringResource(R.string.pro_tools_line, tools),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = content.copy(alpha = 0.75f),
+                                modifier = Modifier.padding(top = 4.dp),
+                            )
+                        }
                         // l'heure sous la dernière bulle d'une réponse, comme une messagerie
                         if (item.last) {
                             Row(Modifier.align(Alignment.End), verticalAlignment = Alignment.CenterVertically) {
+                                if (m.isPro) ProMark(content)
                                 Text(
                                     BubbleContent.time(m.ts, zone),
                                     style = MaterialTheme.typography.labelSmall,
@@ -668,6 +706,212 @@ private fun VerdictBar(m: StoredMessage, id: Long, actions: ChatActions, error: 
         }
         if (error != null) {
             Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+        }
+    }
+}
+
+/** Les liens d'une réponse pro offerts en gestes au lecteur d'écran, au plus. */
+private const val MAX_LINK_ACTIONS = 8
+
+/** La petite marque « pro » d'un message écrit en mode pro (ADR 0116), à côté de l'heure ; la bulle le dit déjà. */
+@Composable
+private fun ProMark(color: Color) {
+    Surface(
+        shape = RoundedCornerShape(4.dp),
+        color = color.copy(alpha = 0.16f),
+        contentColor = color,
+        modifier = Modifier.padding(end = 6.dp).clearAndSetSemantics { },
+    ) {
+        Text(
+            stringResource(R.string.pro_mark),
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier.padding(horizontal = 5.dp),
+        )
+    }
+}
+
+/**
+ * Sa carte de travail pendant une réponse pro (ADR 0116) : ses outils dans l'ordre — un indicateur qui tourne tant
+ * qu'il travaille, ✓ ou ✗, le nom, un aperçu des arguments, la durée — et ce qu'elle écrit entre deux, en italique.
+ * Toucher un outil déplie ses arguments et son résultat, en texte brut. Repliée ([ChatItem.Work.folded]) au-dessus
+ * de sa réponse, elle se résume (« 4 outils · 3,2 s ») et se déplie au toucher. En mémoire seulement.
+ */
+@Composable
+private fun WorkCardView(item: ChatItem.Work, overPortrait: Boolean) {
+    val card = item.card
+    // Repliée quand sa réponse arrive : l'état se refait à ce moment-là.
+    var open by rememberSaveable(card.key, item.folded) { mutableStateOf(!item.folded) }
+    val scheme = MaterialTheme.colorScheme
+    val color = scheme.onSurfaceVariant
+    val count = card.tools.size
+    val tools = pluralStringResource(R.plurals.work_tools, count, count)
+    val elapsed = card.elapsedMs?.let(WorkText::duration)
+    val summary = if (card.running) {
+        stringResource(R.string.work_running_summary, tools)
+    } else {
+        elapsed?.let { stringResource(R.string.work_summary, tools, it) } ?: tools
+    }
+    val toggleLabel = stringResource(if (open) R.string.work_collapse else R.string.work_expand)
+    val title = stringResource(R.string.work_title)
+    Row(Modifier.fillMaxWidth()) {
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = scheme.surfaceVariant.copy(alpha = if (overPortrait) 0.92f else 1f),
+            contentColor = color,
+            modifier = Modifier.fillMaxWidth(0.96f),
+        ) {
+            Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 40.dp)
+                        .clickable(onClickLabel = toggleLabel) { open = !open }
+                        .semantics {
+                            contentDescription = "$title : $summary"
+                            if (card.running) liveRegion = LiveRegionMode.Polite
+                        },
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (card.running) {
+                        CircularProgressIndicator(Modifier.size(14.dp).clearAndSetSemantics { }, strokeWidth = 2.dp, color = color)
+                    }
+                    Text(
+                        summary,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.weight(1f).clearAndSetSemantics { },
+                    )
+                    Text(if (open) "▾" else "▸", modifier = Modifier.clearAndSetSemantics { })
+                }
+                if (open) {
+                    card.steps.forEachIndexed { index, step ->
+                        when (step) {
+                            is WorkStep.Tool -> ToolRow(card, index, step, color)
+                            is WorkStep.Note -> Text(
+                                step.text,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontStyle = FontStyle.Italic,
+                                modifier = Modifier.padding(vertical = 2.dp),
+                            )
+                        }
+                    }
+                    if (card.dropped > 0) {
+                        Text(
+                            pluralStringResource(R.plurals.work_dropped, card.dropped, card.dropped),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
+                val outcome = card.outcome
+                if (outcome != null && outcome != MikaProtocol.TOOL_OUTCOME_DONE) {
+                    Text(
+                        outcomeLabel(outcome),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (outcome == OUTCOME_FAILED || outcome == OUTCOME_TIMEOUT) scheme.error else color,
+                        modifier = Modifier.padding(bottom = 2.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+private const val OUTCOME_FAILED = "failed"
+private const val OUTCOME_TIMEOUT = "timeout"
+
+/** L'issue d'un épisode qui n'a pas répondu normalement, en mots. */
+@Composable
+private fun outcomeLabel(outcome: String): String = when (outcome) {
+    OUTCOME_FAILED -> stringResource(R.string.work_outcome_failed)
+    OUTCOME_TIMEOUT -> stringResource(R.string.work_outcome_timeout)
+    "abstained" -> stringResource(R.string.work_outcome_abstained)
+    "superseded" -> stringResource(R.string.work_outcome_superseded)
+    "preempted", "cancelled", "interrupted" -> stringResource(R.string.work_outcome_interrupted)
+    else -> stringResource(R.string.work_outcome_other, outcome)
+}
+
+/** Une ligne d'outil ; touchée, ses arguments et son résultat, tels quels. */
+@Composable
+private fun ToolRow(card: WorkCard, index: Int, tool: WorkStep.Tool, color: Color) {
+    var open by rememberSaveable(card.key, index) { mutableStateOf(false) }
+    val running = tool.ok == null && card.running
+    val status = stringResource(
+        when {
+            running -> R.string.work_tool_running
+            tool.ok == true -> R.string.work_tool_ok
+            tool.ok == false -> R.string.work_tool_failed
+            else -> R.string.work_tool_unfinished
+        },
+    )
+    val preview = remember(tool.args) { WorkText.argsPreview(tool.args) }
+    val duration = tool.durationMs?.let(WorkText::duration)
+    val name = tool.name.ifEmpty { "?" }
+    val description = listOfNotNull(name, status, duration, preview.ifEmpty { null }).joinToString(", ")
+    val toggleLabel = stringResource(if (open) R.string.work_detail_hide else R.string.work_detail_show)
+    Column {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 36.dp)
+                .clickable(onClickLabel = toggleLabel) { open = !open }
+                .semantics { contentDescription = description },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Box(Modifier.size(16.dp).clearAndSetSemantics { }, contentAlignment = Alignment.Center) {
+                when {
+                    running -> CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp, color = color)
+                    tool.ok == true -> Text("✓", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                    tool.ok == false -> Text("✗", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelLarge)
+                    else -> Text("–", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+            Text(
+                name,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 160.dp).clearAndSetSemantics { },
+            )
+            Text(
+                preview,
+                style = MaterialTheme.typography.bodySmall,
+                color = color.copy(alpha = 0.75f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).clearAndSetSemantics { },
+            )
+            if (duration != null) {
+                Text(
+                    duration,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = color.copy(alpha = 0.75f),
+                    modifier = Modifier.clearAndSetSemantics { },
+                )
+            }
+        }
+        if (open) {
+            RawBlock(stringResource(R.string.work_args), tool.args, color)
+            if (tool.ok != null) RawBlock(stringResource(R.string.work_result), tool.result, color)
+        }
+    }
+}
+
+/** Un texte venu d'un outil : brut, à chasse fixe, qui défile dans les deux sens — jamais interprété. */
+@Composable
+private fun RawBlock(label: String, text: String, color: Color) {
+    Text(label, style = MaterialTheme.typography.labelSmall, color = color, modifier = Modifier.padding(top = 4.dp))
+    Surface(shape = RoundedCornerShape(8.dp), color = color.copy(alpha = 0.08f), modifier = Modifier.fillMaxWidth()) {
+        Box(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+            Text(
+                text.ifEmpty { "—" },
+                color = color,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall,
+                softWrap = false,
+                modifier = Modifier.horizontalScroll(rememberScrollState()).padding(8.dp),
+            )
         }
     }
 }

@@ -30,6 +30,13 @@ pas : la voie qui la reçoit annule l'épisode moins prioritaire en cours
 **Le prélude** (un murmure avant une initiative) passe *après* le départ
 gardé de l'épisode principal et une fois sa réponse prête, sous la même
 garde : si l'initiative est devancée avant de parler, le murmure ne part pas.
+
+**Un mode** (``EpisodeRequest.mode``, le mode pro : ADR 0116) est choisi par
+la personne pour un message : il plie la politique de l'épisode (son rôle, sa
+persona, ses étiquettes coupées, ses limites), peut taire la relecture et la
+seconde passe, ajoute sa consigne ; ``live`` : chaque moment de sa boucle
+d'outils est montré en direct à la personne (le port ``activity``), puis la
+fin de l'épisode. Rien de ce qui se montre n'est gardé.
 """
 
 from __future__ import annotations
@@ -46,17 +53,19 @@ from mika.contracts.runtime import EPISODE_ENDED, EPISODE_STARTED, UTTERANCE, To
 from mika.kernel.arbitration import Row
 from mika.kernel.builtin import LEASE, LEASE_ACQUIRED, LEASE_RELEASED
 from mika.kernel.codec import canonical_json, to_plain
-from mika.kernel.episode import EpisodePolicy, Outcome, Prelude
+from mika.kernel.episode import EpisodeMode, EpisodePolicy, Outcome, Prelude
 from mika.kernel.events import Content, Origin, VoiceProvenance
 from mika.kernel.facts import FactView
 from mika.kernel.frame import CLOSED, Audience, EpisodeRef, Frame
 from mika.kernel.guards import Guard, Superseded, combine, floor
 from mika.kernel.prompt import CONTEXT_FOOTER, Budget, Composer, ComposeTrace, SectionBody
 from mika.kernel.state import FrozenDict
+from mika.ports.delivery import DONE, NOTE, Activity
 from mika.ports.llm import PREEMPTED, LLMGateway, LLMRequest, Message, PersonaRender, ToolDecl
 from mika.runtime.boundary import Failed, acall, call
 from mika.runtime.state import RUNTIME, turn_upto, unanswered_at_end
 from mika.runtime.tools import (
+    LoopEvent,
     LoopResult,
     ToolContext,
     acting,
@@ -176,6 +185,8 @@ class EpisodeRequest:
     #: les personnes que son énoncé peut nommer sans les viser (``Utterance.about``) : la cible de
     #: l'épisode qu'un prélude précède
     about: tuple[str, ...] = ()
+    #: la façon de répondre que la personne a demandée (``EpisodeRunner.modes``) ; ``""`` : l'ordinaire
+    mode: str = ""
 
 
 @dataclass(slots=True)
@@ -214,6 +225,8 @@ class _Live:
     preemptible: bool = False
     #: il écrit son énoncé : plus rien ne l'interrompt
     committing: bool = False
+    #: le mode qui plie sa politique (``None`` : l'ordinaire)
+    mode: EpisodeMode | None = None
 
 
 class EpisodeRunner:
@@ -230,6 +243,7 @@ class EpisodeRunner:
         reviewed: Sequence[str] = (),
         polishers: Sequence[Polisher] = (),
         polished: Sequence[str] = (),
+        modes: Mapping[str, EpisodeMode] | None = None,
         composer: Composer | None = None,
         budget: Budget | None = None,
         lease_margin_s: float = 30.0,
@@ -250,6 +264,8 @@ class EpisodeRunner:
         self.polishers = list(polishers)
         #: les sortes d'épisode dont la parole passe une seconde fois, pour être rendue naturelle (``polishers``)
         self.polished = frozenset(polished)
+        #: les façons de répondre qu'un message peut demander, par nom (``EpisodeRequest.mode``)
+        self.modes = dict(modes or {})
         self.composer = composer or Composer()
         self.budget = budget
         self.lease_margin_us = int(lease_margin_s * 1_000_000)
@@ -284,10 +300,16 @@ class EpisodeRunner:
 
     async def run(self, req: EpisodeRequest, *, parent: str | None = None) -> EpisodeReport:
         policy = self.policies[req.kind]
+        # un mode inconnu, ou qui ne concerne pas cette sorte d'épisode : l'ordinaire
+        mode = self.modes.get(req.mode) if req.mode else None
+        if mode is not None and req.kind not in mode.kinds:
+            mode = None
+        if mode is not None:
+            policy = mode.applied(policy)
         mind = self.mind
         eid = mind.ids.new(mind.clock.now())
         ep = _Live(eid, req, policy, mind.frame(), EpisodeReport(eid, req.kind, Outcome.DONE),
-                   asyncio.current_task(), parent=parent)
+                   asyncio.current_task(), parent=parent, mode=mode)
         self._live[eid] = ep
         try:
             got = await acall(self._run, ep, label=f"épisode {req.kind}")
@@ -350,6 +372,8 @@ class EpisodeRunner:
                 if req.selected is not None:
                     attrs["reasons"] = tuple(sorted({p[1] for p in req.selected.parts}))
                     attrs["args"] = req.selected.args
+                if ep.mode is not None:
+                    attrs["mode"] = req.mode
                 episode = EpisodeRef(eid, req.kind, req.target, policy.muted_tags, FrozenDict(attrs))
                 frame = Frame(start.root, mind.clock.now(), mind.registry, audience, episode)
                 message = req.message
@@ -380,7 +404,8 @@ class EpisodeRunner:
                     core = None
                 # une parole que quelqu'un lira : ses outils sont ses mains (faire, pas annoncer ni inventer)
                 more = "\n\n".join(filter(None, (acting(offered) if policy.visible else "",
-                                                 catalogue(offered, core, mind.registry.bundles))))
+                                                 catalogue(offered, core, mind.registry.bundles),
+                                                 self._instruction(ep.mode))))
                 declared = declare(offered, core)
                 provider_budget = getattr(self.gateway, "budget", None)
                 budget = self.budget or (provider_budget(policy.role, policy.max_tokens) if (
@@ -397,6 +422,8 @@ class EpisodeRunner:
                 report.trace = trace
                 ep.seen.update(_composition(req, audience, policy.role, message, trace, enrich),
                                at=mind.clock.now())
+                if ep.mode is not None:
+                    ep.seen["mode"] = req.mode
                 if policy.role is None:
                     await self._settle(ep, Outcome.DONE)
                     return
@@ -426,9 +453,10 @@ class EpisodeRunner:
                 gateway = self.gateway
                 self._check_preempted(ep)  # désigné avant d'arriver au modèle : il ne l'appelle pas
                 ep.preemptible = True
+                watch = self._watcher(ep, persona.name if persona is not None else "")
                 loop = await acall(
                     lambda: run_tool_loop(gateway, llm_req, tools, make_ctx, max_turns=policy.max_tool_turns,
-                                          clock=mind.clock.now, result=ep.loop),
+                                          clock=mind.clock.now, result=ep.loop, watch=watch),
                     label=f"appel du modèle ({policy.role})",
                 )
                 ep.preemptible = False
@@ -436,7 +464,8 @@ class EpisodeRunner:
                     await self._settle(ep, Outcome.FAILED, detail=_describe(loop.error))
                     return
                 report.tools = loop.calls
-                text, annotations = self._parse(loop.text, persona.name if persona is not None else "")
+                text, annotations = self._parse(loop.text, persona.name if persona is not None else "",
+                                                markdown=ep.mode is not None and ep.mode.markdown)
                 if policy.max_paragraphs:
                     text = first_paragraphs(text, policy.max_paragraphs)
                 if not text.strip() or is_silence(text):
@@ -455,10 +484,12 @@ class EpisodeRunner:
                 # qu'avant, sa phrase redite…) la fait réécrire une fois, la remarque en fin d'état interne. Jamais
                 # après des outils : un nouvel appel les referait (une recherche, un envoi)
                 # … sauf quand l'autrice la réécrit derrière (ADR 0115) : elle repartirait de toute façon du sens,
-                # pas des mots, et la relecture coûtait un appel de plus
-                authored = self._authored(req.kind) and policy.delivered
+                # pas des mots, et la relecture coûtait un appel de plus. Un mode peut taire l'une et l'autre (le mode
+                # pro, ADR 0116)
+                authored = (self._authored(req.kind) and policy.delivered
+                            and (ep.mode is None or ep.mode.polished))
                 if (self.reviewers and req.kind in self.reviewed and policy.delivered and not loop.calls
-                        and not authored):
+                        and not authored and (ep.mode is None or ep.mode.reviewed)):
                     revised = await self._revise(ep, eid, llm_req, text, message or "", make_ctx, persona)
                     if revised is not None:
                         loop, text, annotations, llm_req = revised
@@ -496,6 +527,7 @@ class EpisodeRunner:
                         tools=tuple(ToolOutcome(name=n, ok=ok) for n, ok in loop.calls),
                         sections=trace.included, provenance=trace.provenance, answers=answers,
                         attachments=tuple(loop.attachments), about=req.about,
+                        mode=req.mode if ep.mode is not None else "",
                     )],
                     emitter="runtime", correlation=eid, origin=Origin.KERNEL, basis=basis,
                     guard=guard, holder=eid,
@@ -750,7 +782,54 @@ class EpisodeRunner:
         ep.seen["naturel"] = {"premier_jet": text}
         return polished
 
-    def _parse(self, text: str, speaker: str = "") -> tuple[str, dict[str, str]]:
+    @staticmethod
+    def _instruction(mode: EpisodeMode | None) -> str:
+        """La consigne du mode (vide sans mode, ou sans consigne) ; une panne la tait."""
+        if mode is None or mode.instruction is None:
+            return ""
+        got = call(mode.instruction, label="consigne du mode")
+        return "" if isinstance(got, Failed) else str(got or "")
+
+    def _watcher(self, ep: _Live, speaker: str) -> Callable[[LoopEvent], Awaitable[None]] | None:
+        """Le regard sur sa boucle d'outils, pour un mode qui la montre en direct à la personne (``live``) : chaque
+        moment part au port ``activity`` — ce qu'elle écrit entre deux appels, sans ses balises. ``None`` : rien à
+        montrer (pas de mode en direct, personne à qui le montrer, pas de port)."""
+        port = self.ports.get("activity")
+        target = ep.req.target
+        if ep.mode is None or not ep.mode.live or port is None or not target:
+            return None
+
+        async def watch(event: LoopEvent) -> None:
+            now = self.mind.clock.now()
+            if event.phase == NOTE:
+                text = self._parse(event.text, speaker, markdown=ep.mode is not None and ep.mode.markdown)[0].strip()
+                if text:
+                    await port.activity(Activity(target, ep.id, NOTE, now, ep.req.reply_to, text=text))
+                return
+            rec = event.record
+            await port.activity(Activity(
+                target, ep.id, event.phase, now, ep.req.reply_to, call_id=event.call_id, name=event.name,
+                args=rec.args_json if rec is not None else event.args, ok=rec.ok if rec is not None else None,
+                result=rec.result if rec is not None else "", duration_us=rec.duration_us if rec is not None else 0,
+            ))
+
+        return watch
+
+    async def _show_done(self, ep: _Live, outcome: Outcome) -> None:
+        """La fin de l'épisode, montrée à qui le regardait travailler (``live``) : plus rien ne tourne."""
+        port = self.ports.get("activity")
+        if ep.mode is None or not ep.mode.live or port is None or not ep.req.target:
+            return
+        await acall(port.activity, Activity(ep.req.target, ep.id, DONE, self.mind.clock.now(), ep.req.reply_to,
+                                            outcome=outcome.value), label="fin de l'activité en direct")
+
+    def _parse(self, text: str, speaker: str = "", *, markdown: bool = False) -> tuple[str, dict[str, str]]:
+        """Le texte livrable et ce que les analyseurs en tirent. ``markdown`` : ses blocs de code, son code en ligne
+        et l'indentation de ses lignes passent à l'abri (``_shield``)."""
+        if markdown:
+            shielded, kept = _shield(text)
+            out, annotations = self._parse(shielded, speaker)
+            return _unshield(out, kept), annotations
         annotations: dict[str, str] = {}
         for parser in self.parsers:
             got = call(parser, text, speaker, label="analyse de réponse")
@@ -784,6 +863,31 @@ class EpisodeRunner:
             lambda: self.mind.append([draft], emitter="runtime", correlation=ep.id, origin=Origin.KERNEL),
             label="régler l'épisode",
         )
+        await self._show_done(ep, outcome)
+
+
+#: ce qu'une réponse en Markdown garde tel quel (``EpisodeMode.markdown``) : un bloc de code (fermé ou non), du code
+#: en ligne, l'indentation d'une ligne — les analyseurs rangent une parole de chat (espaces resserrés, indentation
+#: ôtée, ``[ARR]`` pris pour un jeton)
+_SHIELDED = re.compile(r"```.*?(?:```|\Z)|`[^`\n]+`|^[ \t]{2,}(?=\S)", re.DOTALL | re.MULTILINE)
+_SHIELD = re.compile("\ue000(\\d+)\ue001")
+
+
+def _shield(text: str) -> tuple[str, list[str]]:
+    """Le texte où chaque passage à garder tel quel est remplacé par un repère (des caractères à usage privé), et
+    ces passages dans l'ordre."""
+    kept: list[str] = []
+
+    def keep(m: re.Match[str]) -> str:
+        kept.append(m.group(0))
+        return f"\ue000{len(kept) - 1}\ue001"
+
+    return _SHIELDED.sub(keep, text), kept
+
+
+def _unshield(text: str, kept: Sequence[str]) -> str:
+    """Les passages gardés remis à leur repère (un repère inconnu se retire)."""
+    return _SHIELD.sub(lambda m: kept[int(m.group(1))] if int(m.group(1)) < len(kept) else "", text)
 
 
 def _turn_guard(req: EpisodeRequest) -> Guard | None:

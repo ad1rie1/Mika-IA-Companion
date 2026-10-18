@@ -206,10 +206,24 @@ export interface InnerState {
   };
 }
 
+/**
+ * Le mode d'un message (ADR 0116). `"pro"` : une demande de travail d'une
+ * opératrice, qui reçoit une réponse de travail — longue, structurée, en
+ * Markdown, jamais lue à voix haute, ses outils visibles en direct (trame
+ * `tool`). `""` : un message ordinaire. Le serveur n'honore `"pro"` que sur
+ * une connexion d'opératrice ; ailleurs le message est simplement ordinaire.
+ */
+export type ChatMode = "pro" | "";
+
 // ── Server → client frames ──────────────────────────────────────────
 
 export interface SpeechMessage {
   type: "speech";
+  /** `"pro"` : une réponse de travail (ADR 0116) — `speak` est alors faux,
+   * `voice_reason` vaut `"pro"`, et le texte peut porter du Markdown qui
+   * forme une seule bulle. `""` (ou absent, un serveur plus ancien) : une
+   * réponse ordinaire. */
+  mode?: ChatMode;
   text?: string;
   emotion?: string;
   emotion_intensity?: number;
@@ -296,6 +310,58 @@ export interface HistoryEntry {
   verdict?: Verdict;
   /** Ce qu'elle aurait dû dire, ou pourquoi (vide : rien d'écrit). */
   verdict_note?: string;
+  /** Écrite en mode pro (ADR 0116), de la personne ou d'elle ; absent sinon. */
+  mode?: "pro";
+  /**
+   * Sur une réponse pro d'elle : les outils dont elle s'est servie pour
+   * l'écrire, dans l'ordre des appels — les noms seulement (liste vide
+   * possible). Validés par `ui/toolActivity.ts::toolUses`.
+   */
+  tools?: ToolUse[];
+}
+
+/** Un outil dont elle s'est servie pour une réponse pro, tel que l'historique le garde. */
+export interface ToolUse {
+  name: string;
+  /** Faux : échec, ou appel refusé. */
+  ok: boolean;
+}
+
+/**
+ * Ses outils en direct, pendant qu'elle écrit une réponse pro (ADR 0116).
+ * Envoyée seulement aux connexions d'opératrice de la personne ; jamais dans
+ * l'historique, jamais gardée par le serveur : le client la garde en mémoire
+ * seulement. Du JSON jamais vérifié : `ui/toolActivity.ts::toolFrame` la
+ * valide avant tout usage.
+ */
+export interface ToolMessage {
+  type: "tool";
+  /** L'épisode qui travaille. Une réponse supplantée peut être suivie d'un
+   * nouvel épisode (nouvel identifiant) pour le même `reply_to`. */
+  episode: string;
+  /** L'`id` du message de la personne auquel elle répond — le
+   * `user_message_id` de la `speech` qui suivra. */
+  reply_to: number | null;
+  /** `start` : un outil part ; `end` : il a fini (un `end` sans `start` est
+   * possible : un appel refusé avant de partir) ; `note` : ce qu'elle a écrit
+   * entre deux appels ; `done` : l'épisode est fini. */
+  phase: "start" | "end" | "note" | "done";
+  /** start, end */
+  call_id?: string;
+  name?: string;
+  /** Les arguments en JSON (texte), bornés à ~2 000 caractères. Texte brut, jamais interprété. */
+  args?: string;
+  /** end : faux pour un échec ou un appel refusé. */
+  ok?: boolean;
+  /** end : ce que l'outil a rendu, borné ; peut finir par `…[coupé]`. Texte brut. */
+  result?: string;
+  duration_ms?: number;
+  /** note */
+  text?: string;
+  /** done : `done`, `failed`, `timeout`, `abstained`, `superseded`, `preempted`, `cancelled`… */
+  outcome?: string;
+  /** Millisecondes Unix. */
+  at: number;
 }
 
 /**
@@ -511,6 +577,20 @@ export interface VerdictResultMessage {
   status: "ok" | "invalid" | "forbidden" | "failed";
 }
 
+/**
+ * Client → serveur : un message de la personne. `client_msg_id` revient sur
+ * l'`ack` et sur la `speech` qui y répond. `mode` absent : un message
+ * ordinaire ; `"pro"` : une demande de travail (ADR 0116) — un renvoi depuis
+ * la file d'attente garde le mode qu'il avait à l'envoi.
+ */
+export interface ChatFrame {
+  type: "chat";
+  message: string;
+  client_msg_id?: string;
+  attachments?: Array<{ name: string; type: string; data: string }>;
+  mode?: "pro";
+}
+
 /** Client → serveur : une carte décidée, telle qu'elle était affichée. */
 export interface ApprovalFrame {
   type: "approval";
@@ -562,5 +642,6 @@ export interface ServerMessageMap {
   approvals: ApprovalsMessage;
   approval_result: ApprovalResultMessage;
   verdict_result: VerdictResultMessage;
+  tool: ToolMessage;
   connection: ConnectionEvent;
 }

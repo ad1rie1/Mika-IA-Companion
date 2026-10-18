@@ -23,7 +23,7 @@ from mika.faculties.agency import brief as initiative_brief
 from mika.faculties.attachments import ATTACHMENTS
 from mika.faculties.attention import ATTENTION
 from mika.faculties.body import BODY
-from mika.faculties.expression import EXPRESSION
+from mika.faculties.expression import EXPRESSION, pro_style
 from mika.faculties.expression import parse as parse_reply
 from mika.faculties.expression import polish as polish_reply
 from mika.faculties.expression import review as review_reply
@@ -40,11 +40,12 @@ from mika.faculties.shares import SHARES
 from mika.faculties.social import SOCIAL
 from mika.faculties.transcript import TRANSCRIPT
 from mika.faculties.world import WORLD
-from mika.kernel.episode import EpisodePolicy
+from mika.kernel.episode import EpisodeMode, EpisodePolicy
 from mika.kernel.events import Origin
 from mika.kernel.faculty import Faculty
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard
+from mika.kernel.prompt import LAST
 from mika.kernel.registry import ArbitrationPolicy
 from mika.plugins.camera import CAMERA
 from mika.plugins.email import EMAIL
@@ -60,7 +61,7 @@ from mika.plugins.web import WEB
 from mika.runtime import params
 from mika.runtime.bootstrap import Kernel, KernelDeps
 from mika.sim.world import Composition
-from mika.vocab.episodes import CONVERSATIONAL, VOICE_ROLES, Kind, Role, Tag
+from mika.vocab.episodes import CONVERSATIONAL, PRO, VOICE_ROLES, Kind, Role, Tag
 
 log = logging.getLogger("mika.composition")
 
@@ -186,6 +187,19 @@ def policies() -> dict[str, EpisodePolicy]:
     }
 
 
+def modes() -> dict[str, EpisodeMode]:
+    """Les façons de répondre qu'un message peut demander. Le mode pro (ADR 0116) : un travail que son opératrice lui
+    demande dans le chat, comme dans Claude Code — son rôle de modèle à lui (``pro``, qui retombe sur la réponse), une
+    persona sans voix de chat ni tempérament, ses sections affectives et intérieures coupées avec sa consigne de
+    style et « TA RÉPONSE », ni relecture ni seconde passe ; la place de travailler (24 tours d'outils, 15 min) et
+    d'écrire long, en Markdown ; ses outils montrés en direct."""
+    return {
+        PRO: EpisodeMode(kinds=frozenset({Kind.REPLY}), role=Role.PRO, persona_depth=PRO, max_tool_turns=24,
+                         max_tokens=8192, deadline_s=900.0, muted_tags=frozenset({Tag.AFFECTIVE, Tag.INNER, LAST}),
+                         reviewed=False, polished=False, live=True, markdown=True, instruction=pro_style),
+    }
+
+
 def arbitration() -> ArbitrationPolicy:
     """Seuils en log-odds, taux maximaux par seconde. Une raison forte (saluer
     quelqu'un qui arrive) se déclenche en secondes ; le fond (une présence
@@ -219,6 +233,7 @@ def deps(**kw: Any) -> KernelDeps:
         # réponses et ses initiatives, pour qu'un message qu'elle lance sonne comme ses réponses (ADR 0115)
         "polishers": [polish_reply],
         "polished": sorted(CONVERSATIONAL),
+        "modes": modes(),
         "reply_kind": Kind.REPLY,
         "reply_wait": _reply_wait,
         "lanes": LANES,

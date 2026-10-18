@@ -86,6 +86,13 @@ class ChatEngine(
     private val _verdictErrors = MutableStateFlow<Map<Long, String>>(emptyMap())
     val verdictErrors: StateFlow<Map<Long, String>> = _verdictErrors.asStateFlow()
 
+    /**
+     * Ses cartes de travail (ADR 0116) : ses outils en direct pendant une réponse pro. En mémoire seulement —
+     * jamais en base, perdues au redémarrage (l'historique dit alors ses outils en une ligne).
+     */
+    private val _work = MutableStateFlow(WorkLog())
+    val work: StateFlow<WorkLog> = _work.asStateFlow()
+
     private val _events = MutableSharedFlow<ChatEvent>(extraBufferCapacity = 16)
     val events: SharedFlow<ChatEvent> = _events.asSharedFlow()
 
@@ -104,7 +111,7 @@ class ChatEngine(
     suspend fun onSpeech(f: ServerFrame.Speech) {
         setTyping(false)
         val cursorBefore = cursor
-        val text = ChatSync.stripProsody(f.text)
+        val text = ChatSync.mikaText(f.text, f.mode)
         val cid = f.clientMsgId
         val systemNote = f.source == MikaProtocol.SOURCE_ERROR && f.messageId == null
         val added = store.mutate {
@@ -132,12 +139,15 @@ class ChatEngine(
                 source = f.source.ifEmpty { null },
                 emotion = f.emotion.ifEmpty { null },
                 emotionIntensity = f.emotionIntensity,
+                mode = ChatSync.modeOf(f.mode),
             )
             thread.add(row)
             trim(this)
             row
         }
         refreshCursor()
+        // Sa réponse pro est là : sa carte de travail se replie au-dessus d'elle ; les cartes finies sans réponse partent.
+        if (!f.isInner) _work.update { it.settle(f.userMessageId, f.messageId, f.isPro && added != null) }
         if (text.isNotEmpty() && f.isInner && foreground) {
             addEphemeral(StoredMessage(text, Sender.MIKA, clock.wallMs(), after = cursor, inner = true))
         }
@@ -147,6 +157,11 @@ class ChatEngine(
         if (added != null) {
             _events.tryEmit(ChatEvent.MikaSpoke(listOf(added), live = true, replyToClientMsgId = cid, cursorBefore = cursorBefore))
         }
+    }
+
+    /** Un de ses outils en direct (ADR 0116) : sa carte de travail, en mémoire seulement. */
+    fun onTool(f: ServerFrame.Tool) {
+        _work.update { it.apply(f) }
     }
 
     /** Un avis parti (ADR 0113) : il s'affiche aussitôt ; l'avis d'avant attend la réponse du serveur. */
@@ -193,6 +208,8 @@ class ChatEngine(
             logger.w(TAG, "fichiers du message non rangés", e)
         }
         if (!result.changed) return
+        // Un nouveau message part : les cartes de travail finies sans réponse ne sont plus d'actualité.
+        if (f.status == MikaProtocol.ACK_ACCEPTED) _work.update { it.prune() }
         // Un message refusé, ou dont la réponse ne viendra pas, n'est pas en train d'être répondu.
         if (result.settled) setTyping(false) else if (f.status == MikaProtocol.ACK_ACCEPTED) setTyping(true)
     }
@@ -205,8 +222,9 @@ class ChatEngine(
             var truncated = kvGet(Kv.TRUNCATED) == "1"
             anotherLife = ChatSync.fromAnotherLife(cachedLife, f.life, f.reset)
             if (anotherLife) {
-                // Un fil d'une autre vie : ses identifiants ne veulent rien dire ici.
+                // Un fil d'une autre vie : ses identifiants ne veulent rien dire ici (ni ceux des cartes de travail).
                 thread = ChatSync.keepAcrossLives(thread)
+                _work.value = WorkLog()
                 truncated = false
                 // Son curseur non plus : rien ne se marque « lu » avec lui en attendant la relecture.
                 cursor = 0
@@ -272,6 +290,7 @@ class ChatEngine(
         setTyping(false)
         _ephemeral.value = emptyList()
         _truncated.value = false
+        _work.value = WorkLog()
         cursor = 0
     }
 

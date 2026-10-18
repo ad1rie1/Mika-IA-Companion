@@ -43,13 +43,17 @@ class ChatRepository(
 
     fun observeLastReadId(): Flow<Long> = store.observeKv(Kv.LAST_READ_ID).map { it?.toLongOrNull() ?: 0L }
 
-    /** Envoyer ce qui a été tapé, avec des fichiers déjà préparés (copiés dans l'espace de l'app). */
-    suspend fun send(text: String, staged: List<StagedFile> = emptyList()): SendResult {
+    /**
+     * Envoyer ce qui a été tapé, avec des fichiers déjà préparés (copiés dans l'espace de l'app). [mode] : `pro`
+     * pour un message de travail (ADR 0116), gardé avec la bulle et sa ligne de file d'envoi — un renvoi le garde.
+     */
+    suspend fun send(text: String, staged: List<StagedFile> = emptyList(), mode: String? = null): SendResult {
         val message = text.trim()
         AttachmentPolicy.checkSend(message, staged)?.let { return SendResult.Rejected(it) }
+        val chatMode = ChatSync.modeOf(mode)
         val cid = ChatSync.nextClientMsgId(clock.wallMs())
         val outboxFiles = withContext(io) { files.adopt(cid, staged) }
-        val frameBytes = ChatFrameWriter.frameBytes(message, cid, outgoing(cid, outboxFiles))
+        val frameBytes = ChatFrameWriter.frameBytes(message, cid, outgoing(cid, outboxFiles), chatMode)
         // La même composition que le fil relu : la ligne du serveur reconnaîtra sa bulle.
         val display = ChatSync.withAttachments(message, outboxFiles.map { it.name })
         store.mutate {
@@ -64,6 +68,7 @@ class ChatRepository(
                     attachments = outboxFiles.map {
                         MessageAttachment(it.name, AttachmentPolicy.kindOf(it.mime), it.mime, it.size, local = it.file)
                     },
+                    mode = chatMode,
                 ),
             )
             outboxPut(
@@ -73,10 +78,11 @@ class ChatRepository(
                     attachments = MikaJson.encodeToString(OUTBOX_FILES, outboxFiles),
                     frameBytes = frameBytes,
                     createdAt = clock.wallMs(),
+                    mode = chatMode,
                 ),
             )
         }
-        withContext(engineContext) { socket().offer(outbound(cid, message, outboxFiles, frameBytes)) }
+        withContext(engineContext) { socket().offer(outbound(cid, message, outboxFiles, frameBytes, chatMode)) }
         return SendResult.Queued(cid)
     }
 
@@ -100,14 +106,14 @@ class ChatRepository(
             if (cid != null) outboxDelete(cid)
         }
         if (cid != null) withContext(io) { files.forget(cid) }
-        return send(again.typed, again.staged)
+        return send(again.typed, again.staged, failed.mode)
     }
 
     /**
      * « Le lui redemander » sous une réponse qui n'est pas venue (`no_reply`, `too_late`) : le même
      * texte et les mêmes fichiers repartent comme un nouveau message. La bulle d'origine reste, avec
      * sa note et ses fichiers : le serveur l'a bien reçue, et son fil la garde. Mêmes refus que
-     * [retry], rien n'est envoyé à moitié.
+     * [retry], rien n'est envoyé à moitié. Le mode d'origine repart avec (ADR 0116).
      */
     suspend fun resend(localId: Long): SendResult? {
         val original = store.message(localId) ?: return null
@@ -116,7 +122,7 @@ class ChatRepository(
         }
         val again = prepareAgain(original)
         again.refusal?.let { return SendResult.Rejected(it) }
-        return send(again.typed, again.staged)
+        return send(again.typed, again.staged, original.mode)
     }
 
     /**
@@ -171,7 +177,7 @@ class ChatRepository(
         }
         val offers = rows.filter { it.clientMsgId in known }.map { row ->
             val outboxFiles = decodeFiles(row.attachments)
-            outbound(row.clientMsgId, row.message, outboxFiles, row.frameBytes)
+            outbound(row.clientMsgId, row.message, outboxFiles, row.frameBytes, ChatSync.modeOf(row.mode))
         }
         if (offers.isNotEmpty()) withContext(engineContext) { offers.forEach { socket().offer(it) } }
     }
@@ -191,8 +197,8 @@ class ChatRepository(
         withContext(io) { files.wipe(keepStaging) }
     }
 
-    private fun outbound(cid: String, message: String, outboxFiles: List<OutboxFile>, frameBytes: Long) =
-        MikaSocket.OutboundChat(cid, frameBytes) { ChatFrameWriter.render(message, cid, outgoing(cid, outboxFiles)) }
+    private fun outbound(cid: String, message: String, outboxFiles: List<OutboxFile>, frameBytes: Long, mode: String?) =
+        MikaSocket.OutboundChat(cid, frameBytes) { ChatFrameWriter.render(message, cid, outgoing(cid, outboxFiles), mode) }
 
     private fun outgoing(cid: String, outboxFiles: List<OutboxFile>): List<OutgoingFile> =
         outboxFiles.map { f -> OutgoingFile(f.name, f.mime, f.size) { files.open(cid, f.file) } }

@@ -287,4 +287,79 @@ class FrameCodecTest {
         assertEquals("ko", h.messages!!.single().verdict)
         assertEquals("trop long", h.messages!!.single().verdictNote)
     }
+
+    @Test fun `le mode pro d'une parole et d'une ligne d'historique, et ses outils (ADR 0116)`() {
+        val s = FrameCodec.decode(
+            """{"type":"speech","text":"Voilà le mail…","speak":false,"voice_reason":"pro","mode":"pro",""" +
+                """"message_id":812,"user_message_id":811}""",
+        ) as ServerFrame.Speech
+        assertTrue(s.isPro)
+        assertEquals(MikaProtocol.VOICE_REASON_PRO, s.voiceReason)
+        assertFalse((FrameCodec.decode("""{"type":"speech","text":"coucou","mode":""}""") as ServerFrame.Speech).isPro)
+        assertFalse((FrameCodec.decode("""{"type":"speech","text":"coucou"}""") as ServerFrame.Speech).isPro)
+
+        val h = FrameCodec.decode(
+            """{"type":"history","mode":"initial","last_id":812,"messages":[""" +
+                """{"id":811,"role":"user","text":"trouve le mail","ts":1790601613000,"mode":"pro"},""" +
+                """{"id":812,"role":"assistant","text":"Voilà","ts":1790601615002,"mode":"pro",""" +
+                """"tools":[{"name":"email_search","ok":true},{"name":"email_read","ok":false},{"ok":true},{"name":7},"x"]},""" +
+                """{"id":813,"role":"assistant","text":"cassé","mode":"pro","tools":"pas une liste"},""" +
+                """{"id":814,"role":"assistant","text":"ordinaire"}]}""",
+        ) as ServerFrame.History
+        val (user, reply, broken, plain) = h.messages!!
+        assertEquals("pro", user.mode)
+        assertNull(user.tools)
+        assertEquals(listOf(ToolUse("email_search", true), ToolUse("email_read", false)), reply.tools)
+        // une liste cassée n'emporte pas le message
+        assertEquals("cassé", broken.text)
+        assertNull(broken.tools)
+        assertNull(plain.mode)
+        assertNull(plain.tools)
+    }
+
+    @Test fun `ses outils en direct - les quatre phases (ADR 0116)`() {
+        val start = FrameCodec.decode(
+            """{"type":"tool","episode":"01JB","reply_to":811,"phase":"start","call_id":"toolu_1",""" +
+                """"name":"memory_search","args":"{\"query\": \"anniversaire de Léa\"}","at":1790601613001}""",
+        )
+        assertEquals(
+            ServerFrame.Tool("01JB", 811, "start", callId = "toolu_1", name = "memory_search",
+                args = "{\"query\": \"anniversaire de Léa\"}", at = 1790601613001),
+            start,
+        )
+        val end = FrameCodec.decode(
+            """{"type":"tool","episode":"01JB","reply_to":811,"phase":"end","call_id":"toolu_1","name":"memory_search",""" +
+                """"ok":true,"result":"3 souvenirs : …","duration_ms":182,"at":1790601613183}""",
+        ) as ServerFrame.Tool
+        assertEquals(true, end.ok)
+        assertEquals("3 souvenirs : …", end.result)
+        assertEquals(182L, end.durationMs)
+        val note = FrameCodec.decode(
+            """{"type":"tool","episode":"01JB","reply_to":null,"phase":"note","text":"Je regarde dans ta boîte…","at":1}""",
+        ) as ServerFrame.Tool
+        assertNull(note.replyTo)
+        assertEquals("Je regarde dans ta boîte…", note.text)
+        val done = FrameCodec.decode("""{"type":"tool","episode":"01JB","reply_to":811,"phase":"done","outcome":"done"}""")
+            as ServerFrame.Tool
+        assertEquals("done", done.outcome)
+        assertNull(done.at)
+    }
+
+    @Test fun `une trame d'outil illisible est inconnue, un texte trop long est coupé`() {
+        val unknown = ServerFrame.Unknown(MikaProtocol.TYPE_TOOL)
+        assertEquals(unknown, FrameCodec.decode("""{"type":"tool","episode":"e","phase":"ailleurs"}"""))
+        assertEquals(unknown, FrameCodec.decode("""{"type":"tool","phase":"start","call_id":"c"}"""))
+        assertEquals(unknown, FrameCodec.decode("""{"type":"tool","episode":"","phase":"start"}"""))
+        val long = "x".repeat(MikaProtocol.MAX_TOOL_TEXT_CHARS + 50)
+        val t = FrameCodec.decode(
+            """{"type":"tool","episode":"e","reply_to":"811","phase":"end","call_id":"c","ok":"oui","result":"$long",""" +
+                """"duration_ms":-3}""",
+        ) as ServerFrame.Tool
+        assertEquals(MikaProtocol.MAX_TOOL_TEXT_CHARS, t.result.length)
+        assertTrue(t.result.endsWith("…"))
+        // un identifiant en chaîne, un `ok` qui n'est pas un booléen, une durée négative : rien
+        assertNull(t.replyTo)
+        assertNull(t.ok)
+        assertNull(t.durationMs)
+    }
 }

@@ -260,6 +260,7 @@ class ConnectionManager(
                 is ServerFrame.Approvals -> approvals.onApprovals(frame)
                 is ServerFrame.ApprovalResult -> approvals.onResult(frame)
                 is ServerFrame.VerdictResult -> chat.onVerdictResult(frame)
+                is ServerFrame.Tool -> chat.onTool(frame)
                 is ServerFrame.Pong, is ServerFrame.Unknown -> Unit
             }
         } catch (e: CancellationException) {

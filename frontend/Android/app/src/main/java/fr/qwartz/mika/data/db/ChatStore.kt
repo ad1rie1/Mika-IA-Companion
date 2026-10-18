@@ -7,6 +7,7 @@ import fr.qwartz.mika.data.chat.MessageAttachment
 import fr.qwartz.mika.data.chat.MessageStatus
 import fr.qwartz.mika.data.chat.Sender
 import fr.qwartz.mika.data.chat.StoredMessage
+import fr.qwartz.mika.data.net.ToolUse
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -81,6 +82,7 @@ class ChatStore(private val db: MikaDatabase) : ThreadStore {
 
     companion object {
         private val ATTACHMENTS = ListSerializer(MessageAttachment.serializer())
+        private val TOOLS = ListSerializer(ToolUse.serializer())
 
         fun MessageEntity.toModel() = StoredMessage(
             text = text,
@@ -103,6 +105,8 @@ class ChatStore(private val db: MikaDatabase) : ThreadStore {
             emotionIntensity = emotionIntensity,
             verdict = verdict,
             verdictNote = verdictNote,
+            mode = ChatSync.modeOf(mode),
+            tools = tools?.let { decodeTools(it) },
         )
 
         fun StoredMessage.toEntity() = MessageEntity(
@@ -131,7 +135,16 @@ class ChatStore(private val db: MikaDatabase) : ThreadStore {
             emotionIntensity = emotionIntensity,
             verdict = verdict,
             verdictNote = verdictNote,
+            mode = ChatSync.modeOf(mode),
+            tools = tools?.let { MikaJson.encodeToString(TOOLS, it) },
         )
+
+        /** Les outils d'une réponse pro (ADR 0116) ; illisibles, rien — le prochain historique les redit. */
+        private fun decodeTools(raw: String): List<ToolUse>? = try {
+            MikaJson.decodeFromString(TOOLS, raw)
+        } catch (_: IllegalArgumentException) {
+            null
+        }
 
         private fun decodeAttachments(raw: String): List<MessageAttachment> =
             if (raw.isBlank() || raw == "[]") {

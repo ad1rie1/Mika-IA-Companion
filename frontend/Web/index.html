@@ -185,6 +185,36 @@
         background: rgba(239, 68, 68, 0.3);
         color: #fca5a5;
       }
+      /* L'interrupteur du mode pro (ADR 0116), opératrice seulement : allumé,
+         une pastille ambre, et le champ prend le même liseré. */
+      #chat-pro {
+        padding: 12px 12px;
+        border: 1px solid transparent;
+        border-radius: 24px;
+        background: rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.7);
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        cursor: pointer;
+        backdrop-filter: blur(12px);
+        transition: background 0.2s;
+        flex-shrink: 0;
+      }
+      #chat-pro[hidden] { display: none; }
+      #chat-pro:hover { background: rgba(255, 255, 255, 0.2); }
+      #chat-pro[aria-pressed="true"] {
+        background: rgba(251, 191, 36, 0.28);
+        border-color: rgba(251, 191, 36, 0.75);
+        color: #fde68a;
+      }
+      #chat-pro:focus-visible { outline: 2px solid rgba(251, 191, 36, 0.9); outline-offset: 1px; }
+      #chat-input.pro {
+        box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.7);
+        background: rgba(251, 191, 36, 0.08);
+      }
+      #chat-input.pro::placeholder { color: rgba(253, 230, 138, 0.65); }
       #attachment-previews {
         display: flex;
         flex-wrap: wrap;
@@ -419,6 +449,137 @@
         padding: 0;
         font-size: 12px;
       }
+
+      /* Mode pro (ADR 0116). La marque « pro » d'un message envoyé ou reçu en
+         mode pro. */
+      .chat-pro-mark {
+        display: inline-block;
+        margin-left: 6px;
+        padding: 0 5px;
+        border-radius: 6px;
+        font-size: 9px;
+        font-weight: 700;
+        font-style: normal;
+        letter-spacing: 0.06em;
+        line-height: 1.6;
+        text-transform: uppercase;
+        vertical-align: 1px;
+        color: #fde68a;
+        background: rgba(251, 191, 36, 0.22);
+      }
+      .chat-bubble.vtuber.pro .chat-pro-mark { float: right; margin: 0 0 4px 8px; }
+      /* Sa réponse de travail : une seule bulle, plus large, en Markdown
+         (ui/proMarkdown.ts) — des paragraphes, pas du texte préformaté. */
+      .chat-bubble.vtuber.pro {
+        max-width: min(92%, 820px);
+        white-space: normal;
+        background: rgba(30, 32, 58, 0.9);
+        border: 1px solid rgba(251, 191, 36, 0.3);
+      }
+      .chat-bubble.pro p { margin: 0 0 6px; }
+      .chat-bubble.pro p:last-child { margin-bottom: 0; }
+      .chat-bubble.pro .md-title { margin-top: 8px; }
+      .chat-bubble.pro .md-title:first-child, .chat-bubble.pro .chat-pro-mark + .md-title { margin-top: 0; }
+      .chat-bubble.pro ul, .chat-bubble.pro ol { margin: 2px 0 6px; padding-left: 22px; }
+      .chat-bubble.pro li { margin: 1px 0; }
+      .chat-bubble.pro li > ul, .chat-bubble.pro li > ol { margin: 2px 0; }
+      .chat-bubble.pro hr { border: none; border-top: 1px solid rgba(255, 255, 255, 0.2); margin: 8px 0; }
+      .chat-bubble.pro a { color: #c7d2fe; text-decoration: underline; overflow-wrap: anywhere; }
+      .chat-bubble.pro pre.md-code {
+        margin: 6px 0;
+        padding: 8px 10px;
+        background: rgba(0, 0, 0, 0.35);
+        border-radius: 8px;
+        overflow-x: auto;
+        white-space: pre;
+      }
+      .chat-bubble.pro pre.md-code code { background: none; padding: 0; font-size: 12px; }
+      /* Relue après un rechargement (sa carte ne survit pas) : les outils
+         dont elle s'est servie, une ligne discrète au-dessus de la réponse. */
+      .chat-tools-line {
+        align-self: flex-start;
+        max-width: min(92%, 820px);
+        margin-bottom: -4px;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.5);
+        overflow-wrap: anywhere;
+      }
+      /* La carte de travail : ses outils en direct, puis repliée en un
+         résumé au-dessus de sa réponse. Arguments et résultats en texte brut. */
+      .work-card {
+        align-self: flex-start;
+        width: min(92%, 820px);
+        padding: 6px 10px;
+        border-radius: 12px;
+        background: rgba(20, 20, 35, 0.82);
+        border: 1px solid rgba(251, 191, 36, 0.3);
+        color: rgba(255, 255, 255, 0.85);
+        font-size: 12px;
+        line-height: 1.45;
+        backdrop-filter: blur(8px);
+      }
+      .work-card.collapsed { margin-bottom: -4px; background: rgba(20, 20, 35, 0.6); }
+      .work-head { display: flex; align-items: center; gap: 6px; font-weight: 600; color: #fde68a; }
+      summary.work-head { cursor: pointer; list-style: none; }
+      summary.work-head::-webkit-details-marker { display: none; }
+      .work-card.collapsed > summary.work-head::after { content: "▸"; opacity: 0.7; }
+      .work-card.collapsed[open] > summary.work-head::after { content: "▾"; }
+      .work-steps { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+      .work-step { min-width: 0; }
+      .work-tool summary {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        cursor: pointer;
+        list-style: none;
+        min-width: 0;
+      }
+      .work-tool summary::-webkit-details-marker { display: none; }
+      .work-tool summary:hover, .work-tool details[open] > summary { background: rgba(255, 255, 255, 0.06); border-radius: 4px; }
+      .work-icon { flex-shrink: 0; width: 1em; text-align: center; }
+      .work-tool.ok .work-icon { color: #86efac; }
+      .work-tool.failed .work-icon { color: #fca5a5; }
+      .work-tool.stopped .work-icon { color: rgba(255, 255, 255, 0.5); }
+      .work-spinner::before {
+        content: "";
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        border: 2px solid #fcd34d;
+        border-top-color: transparent;
+        animation: spin 0.9s linear infinite;
+      }
+      .work-name {
+        flex-shrink: 0;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+        color: white;
+      }
+      .work-args {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: rgba(255, 255, 255, 0.55);
+      }
+      .work-duration { flex-shrink: 0; color: rgba(255, 255, 255, 0.5); font-variant-numeric: tabular-nums; }
+      .work-detail { margin: 2px 0 6px 1.5em; }
+      .work-detail-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: rgba(255, 255, 255, 0.5); margin-top: 4px; }
+      .work-pre {
+        margin: 2px 0 0;
+        padding: 6px 8px;
+        max-height: 14em;
+        overflow: auto;
+        background: rgba(0, 0, 0, 0.35);
+        border-radius: 6px;
+        font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+        font-size: 11px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .work-note { font-style: italic; color: rgba(255, 255, 255, 0.7); padding-left: 1.5em; overflow-wrap: anywhere; }
+      .work-end { font-style: italic; color: #fcd34d; padding-left: 1.5em; }
 
       /* Delivery state of a message the user sent. A bubble the server has
          never seen must not look like one it answered — that ambiguity is
@@ -1071,6 +1232,7 @@
         }
         #chat-container { max-height: 50%; }
         .chat-bubble { max-width: 85%; font-size: 13px; }
+        .chat-bubble.vtuber.pro, .work-card, .chat-tools-line { max-width: 100%; width: auto; }
         #chat-input-container { padding: 8px 10px; }
         #chat-send { padding: 12px 14px; }
       }
@@ -1097,6 +1259,7 @@
           <button id="tts-mute" title="Couper / activer la voix">🔊</button>
           <button id="chat-clear" title="Effacer l'historique du chat">🗑️</button>
           <button id="chat-attach" title="Joindre un fichier">📎</button>
+          <button id="chat-pro" type="button" hidden aria-pressed="false">Pro</button>
           <textarea id="chat-input" rows="1" placeholder="Envoie un message..." autocomplete="off"></textarea>
           <button id="chat-send">Envoyer</button>
         </div>

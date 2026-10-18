@@ -45,6 +45,9 @@ class PerceptionReceived(Payload):
     #: ce que ses fichiers lui ont donné à percevoir (pour le prompt, jamais pour la bulle qu'elle relit).
     #: ``None`` : rien à séparer (pas de pièce jointe, ou un journal plus ancien, qui garde son affichage).
     typed_chars: int | None = None
+    #: la façon de répondre qu'elle demande (``vocab.episodes.MODES`` : ``pro``, ADR 0116) ; ``""`` : la conversation
+    #: ordinaire — et dans un journal plus ancien. Le transport ne la pose que pour une opératrice.
+    mode: str = ""
 
 
 class EpisodeStarted(Payload):
@@ -91,6 +94,8 @@ class Utterance(Payload):
     #: les personnes que le texte peut nommer quand ``target`` n'en désigne aucune (un murmure qui pense à
     #: celle à qui elle va écrire) : l'oubli l'atteint. Vide dans un journal plus ancien.
     about: tuple[str, ...] = ()
+    #: le mode dans lequel elle a répondu (``pro``, ADR 0116) ; ``""`` : la conversation ordinaire
+    mode: str = ""
 
     def annotation(self, key: str) -> str | None:
         for k, v in self.annotations:

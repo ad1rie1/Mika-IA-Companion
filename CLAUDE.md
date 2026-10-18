@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0115, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0116, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -228,6 +228,13 @@ kernel                      machinerie générique, sans un mot du domaine
     (`authored`). Ses émojis passent (la voix du client web les saute). Ses balises, ses outils et ce qu'elle sait
     restent ceux du premier jet. Elle ne se fait que si le rôle LLM `polish` a un modèle (sans repli) ; Opus y est le
     meilleur. La consigne d'une initiative n'est jamais une ligne du fil (`heard` est le message reçu, pas la consigne).
+  - **Mode pro** (ADR 0116) : une opératrice demande un travail dans le chat (`chat.mode: "pro"`, gardé dans la
+    perception), comme dans Claude Code. Un mode (`kernel.episode.EpisodeMode`, `app/composition.py::modes()`) plie la
+    politique de `REPLY` : rôle `pro` (repli sur `reply`), persona en profondeur `pro` (sans portrait, voix de chat ni
+    tempérament), sections `affective`, `inner` et `last` coupées, ni relecture ni seconde passe, consigne
+    `expression.pro`, 24 tours d'outils, 8 192 jetons, 15 min. Sa réponse est du Markdown : le code passe l'analyse
+    à l'abri (`pipeline._shield`). Sa boucle d'outils est regardée en direct (`run_tool_loop(watch=…)` → port
+    `activity` → trame `tool`), sans rien en garder.
   - Types d'épisode : REPLY, INITIATIVE, STEP, WORK, JOB, WAKE, WAKE_JOB, TASK, MURMUR. Leurs politiques sont dans
     `app/composition.py::policies()`.
 - **Voies** (`runtime/lanes.py`)
@@ -246,8 +253,8 @@ kernel                      machinerie générique, sans un mot du domaine
 - **Passerelle LLM** (`adapters/llm/gateway.py`, `config.py`)
   - Routage par rôle (`vocab/episodes.py`). Un rôle se replie sur un autre (`FALLBACKS`, par exemple extract → reply),
     mais **jamais un fournisseur sur un autre** (ADR 0073). Un rôle « voix » exige la persona. Le premier fournisseur
-    déclaré sert `reply` d'office, et les autres rôles y retombent — sauf `polish` (la seconde passe), qui n'a pas de
-    repli : sans modèle déclaré pour lui, la passe ne se fait pas.
+    déclaré sert `reply` d'office, et les autres rôles y retombent (`pro`, le mode pro, aussi) — sauf `polish` (la
+    seconde passe), qui n'a pas de repli : sans modèle déclaré pour lui, la passe ne se fait pas.
   - Les créneaux sont à priorité (`kernel/slots.py`) : dès deux créneaux, un est réservé au premier plan. Délais :
     120 s en conversation, 300 s en fond. Une trace chiffrée par appel au registre des appels (`adapters/llm/calls.py`).
   - **Claude Code** (`adapters/llm/claude_code.py`, ADR 0026, 0072) : la CLI `claude -p`, isolée, avec deux serveurs
@@ -618,10 +625,13 @@ citées, jamais la parole forcée. Leur monde vit hors du journal. Dix sont comp
     `/api/perceptions`, `/api/wake/<nom>`, `/api/teams/…`, `/api/projects/pending/<id>/approve|reject`.
   - **WebSockets** : `/ws`, `/ws/camera`, `/ws/world`.
   - **Trames du serveur** : `speech`, `history`, `ack`, `inner_state_update`, `emotion_update`, `presence`, `composing`,
-    `read`, `approvals`, `approval_result`, `verdict_result`, `pong`.
+    `read`, `approvals`, `approval_result`, `verdict_result`, `tool`, `pong`.
   - **Trames du client** : `identify`, `chat`, `sync`, `ping`, `presence`, `composing`, `read`, `approval`, `verdict`.
   - Une opératrice juge une de ses réponses depuis le chat (trame `verdict`, ADR 0113) ; l'historique ne porte l'avis
     (`verdict`, `verdict_note`) qu'aux connexions d'opératrice.
+  - Le mode pro (ADR 0116) : un `chat` d'opératrice porte `mode: "pro"` ; ses outils arrivent en direct (trame `tool` :
+    `start`, `end`, `note`, `done`) aux seuls écrans regardés d'opératrice de la personne ; sa réponse (`speech.mode`)
+    ne se dit pas à voix haute et forme une seule bulle ; l'historique garde `mode` et les noms de ses outils.
   - Une réponse ne part qu'aux connexions de sa personne, un murmure qu'à celles de sa cible, et une seule voix sonne
     entre deux onglets.
   - Une ligne vide dans sa réponse sépare deux bulles : le serveur garde un message, les clients le montrent bulle par
@@ -778,7 +788,7 @@ Tout le reste se déclare par décorateurs.
 | Sens et plugins | 0022, 0027, 0037, 0038, 0044, 0061, 0063, 0064, 0066, 0068, 0069, 0106 |
 | Fournisseurs LLM | 0026, 0072, 0073 |
 | Console et exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103 |
-| Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113 |
+| Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |
 | Voix et genèse | 0070, 0071, 0112, 0114, 0115 |
 | Ce que les sondes et audits ont montré | 0043, 0048, 0054, 0102 |
 
@@ -869,7 +879,10 @@ Unity.
 - `ui/chatSync.ts` : fusion du fil par curseur.
 - `ui/bubbles.ts` : sa réponse en plusieurs bulles (une ligne vide les sépare), « Mika écrit… » entre deux.
 - `ui/verdicts.ts` : pour une opératrice, 👍/👎 sous ses réponses et ce qu'elle aurait dû dire (ADR 0113).
-- Les 41 fichiers vitest sont dans des dossiers `__tests__`.
+- Le mode pro (ADR 0116), pour une opératrice : l'interrupteur « Pro » près du champ (`ChatOverlay`), la carte de
+  travail en direct (`ui/toolActivity.ts`, pur : les trames `tool` fusionnées par message), la bulle pro en Markdown
+  (`ui/proMarkdown.ts` : tout le HTML échappé d'abord, liens http(s) seulement), jamais lue à voix haute.
+- Les 43 fichiers vitest sont dans des dossiers `__tests__`.
 
 ### Unity, Android, Extension
 

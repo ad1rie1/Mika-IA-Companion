@@ -51,4 +51,14 @@ class BubbleContentTest {
         assertEquals(listOf("un", "deux"), BubbleContent.parts("  un \n \n\n deux "))
         assertEquals(listOf("une ligne\nla suite"), BubbleContent.parts("une ligne\nla suite"))
     }
+
+    @Test fun `une bulle pro se dit en mode pro, son Markdown sans marques, ses outils à la fin (ADR 0116)`() {
+        val reply = StoredMessage("# Devis\n\n- **1 200 €**\n- le 3 mars", Sender.MIKA, at, mode = "pro")
+        assertEquals(
+            "Mika, 21 h 04, mode pro : Devis\n• 1 200 €\n• le 3 mars. Outils : email_search ✓",
+            BubbleContent.describe(reply, false, zone, tools = "email_search ✓"),
+        )
+        val ask = StoredMessage("trouve le devis", Sender.USER, at, status = MessageStatus.SENT, mode = "pro")
+        assertEquals("Toi, 21 h 04, mode pro, envoyé : trouve le devis", BubbleContent.describe(ask, false, zone))
+    }
 }

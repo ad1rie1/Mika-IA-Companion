@@ -16,6 +16,8 @@ import {
   restoredStatus,
   OPERATOR_PAGES,
   operatorLinks,
+  proMode,
+  replyText,
   sortMessages,
   stripProsody,
   withAttachments,
@@ -703,5 +705,85 @@ describe("operatorLinks", () => {
 
   it("ne mène nulle part pour un autre compte", () => {
     expect(operatorLinks(false)).toEqual([]);
+  });
+});
+
+describe("le mode pro (ADR 0116)", () => {
+  const pro = (id: number, role: string, text: string, extra: Partial<HistoryEntry> = {}): HistoryEntry => ({
+    ...entry(id, role, text),
+    mode: "pro",
+    ...extra,
+  });
+  const CODE = "Voilà :\n\n```py\ndef f(x) :\n    return x  # [SIGH]\n```";
+
+  it("proMode ne reconnaît que « pro »", () => {
+    expect(proMode("pro")).toBe("pro");
+    for (const other of ["", "PRO", "travail", undefined, null, 1]) expect(proMode(other)).toBeUndefined();
+  });
+
+  it("replyText garde la mise en page d'une réponse pro et ne retire que les balises", () => {
+    expect(replyText("a  [EMOTION: joy 0.4]\n\n    retrait ;", "pro")).toBe("a  \n\n    retrait ;");
+    expect(replyText("a  [SIGH]  b ;")).toBe(stripProsody("a  [SIGH]  b ;"));
+  });
+
+  it("une ligne pro relue porte son mode ; les outils seulement sur sa réponse à elle", () => {
+    const tools = [{ name: "email_search", ok: true }, { name: "email_read", ok: false }];
+    const { history } = mergeHistory(
+      [],
+      [pro(1, "user", "trouve le devis", { tools }), pro(2, "assistant", "Voilà le devis", { tools }), entry(3, "assistant", "coucou")],
+      MAX
+    );
+    expect(history.map((m) => [m.id, m.mode, m.tools])).toEqual([
+      [1, "pro", undefined],
+      [2, "pro", tools],
+      [3, undefined, undefined],
+    ]);
+  });
+
+  it("des outils invalides sont écartés, une liste vide n'est pas gardée", () => {
+    const { history } = mergeHistory(
+      [],
+      [pro(1, "assistant", "a", { tools: [{ name: "", ok: true }] as never }), pro(2, "assistant", "b", { tools: "x" as never })],
+      MAX
+    );
+    expect(history.map((m) => m.tools)).toEqual([undefined, undefined]);
+  });
+
+  it("une réponse pro relue garde le retrait de son code", () => {
+    const { history } = mergeHistory([], [pro(5, "assistant", CODE)], MAX);
+    expect(history[0].text).toBe("Voilà :\n\n```py\ndef f(x) :\n    return x  # \n```");
+  });
+
+  it("sa réponse pro reçue en direct (sans id) est reconnue au rattrapage, pas peinte deux fois", () => {
+    const live = local(replyText(CODE, "pro"), "vtuber", { mode: "pro" });
+    const { history, added, adopted } = mergeHistory([live], [pro(5, "assistant", CODE)], MAX);
+    expect([added, adopted]).toEqual([0, 1]);
+    expect(history).toHaveLength(1);
+    expect(live.id).toBe(5);
+  });
+
+  it("une réponse déjà affichée apprend ses outils du fil relu (le direct ne les porte pas)", () => {
+    const shown = local("Voilà le devis", "vtuber", { id: 2, mode: "pro" });
+    const tools = [{ name: "email_search", ok: true }];
+    const first = mergeHistory([shown], [pro(2, "assistant", "Voilà le devis", { tools })], MAX);
+    expect(first.enriched).toBe(1);
+    expect(shown.tools).toEqual(tools);
+    const again = mergeHistory(first.history, [pro(2, "assistant", "Voilà le devis", { tools })], MAX);
+    expect(again.enriched).toBe(0);
+  });
+
+  it("la marque pro posée à l'envoi est adoptée, et confirmée par le fil", () => {
+    const mine = local("trouve le devis", "user", { cid: "c1", status: "pending", mode: "pro" });
+    mergeHistory([mine], [pro(1, "user", "trouve le devis")], MAX);
+    expect(mine).toMatchObject({ id: 1, mode: "pro", status: "sent" });
+    const known = local("autre", "user", { id: 4 });
+    const { enriched } = mergeHistory([known], [pro(4, "user", "autre")], MAX);
+    expect([enriched, known.mode]).toEqual([1, "pro"]);
+  });
+
+  it("une ligne sans mode n'efface pas la marque d'un message déjà affiché", () => {
+    const shown = local("trouve le devis", "user", { id: 1, mode: "pro" });
+    const { enriched } = mergeHistory([shown], [entry(1, "user", "trouve le devis")], MAX);
+    expect([enriched, shown.mode]).toEqual([0, "pro"]);
   });
 });

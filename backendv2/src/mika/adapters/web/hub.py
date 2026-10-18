@@ -39,6 +39,9 @@ diffusion à tout le monde.
 - **Un tour posé d'un autre appareil** : les autres connexions de la personne
   reçoivent aussi la ligne de la question avant la réponse (sinon leur curseur la
   dépasse et elles ne la verraient jamais).
+- **Ce qu'elle fait en mode pro se voit en direct** (ADR 0116, trame ``tool``) :
+  seulement aux écrans regardés et authentifiés d'opératrice de la personne à
+  qui elle répond ; rien n'en est gardé, rien n'est rattrapé.
 """
 
 from __future__ import annotations
@@ -62,7 +65,7 @@ from mika.contracts import identity as identity_c
 from mika.contracts import runtime as runtime_c
 from mika.contracts.entry import MindPort, SharedMeta
 from mika.ports import delivery as delivery_p
-from mika.ports.delivery import Delivery
+from mika.ports.delivery import Activity, Delivery
 from mika.vocab import voice
 from mika.vocab.people import is_internal
 
@@ -204,6 +207,13 @@ class Hub:
 
     async def send_to(self, handle: str, frame: dict[str, Any]) -> int:
         return await self._send(self.of(handle), frame)
+
+    async def activity(self, a: Activity) -> None:
+        """Un moment de son travail en mode pro (le port ``activity``, ADR 0116) : aux écrans regardés de la personne,
+        s'ils sont d'une opératrice authentifiée — le seul qui a pu le demander. Ni gardé ni rattrapé."""
+        conns = [c for c in self.watching(a.target) if c.operator and c.authenticated]
+        if conns:
+            await self._send(conns, protocol.tool_activity(a))
 
     async def revoke(self, *, account: int | None = None, session: str | None = None) -> int:
         """Ferme en 4401 les connexions d'un compte, ou d'une session : le client sait

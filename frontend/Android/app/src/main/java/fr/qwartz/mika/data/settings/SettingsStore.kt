@@ -35,6 +35,11 @@ data class Settings(
     val notificationsAsked: Boolean = false,
     /** « Lui dire quand j'ai lu » : jusqu'où la conversation a été lue part au serveur ; coupé, rien ne part. */
     val shareReads: Boolean = true,
+    /**
+     * L'interrupteur « Pro » de la barre de saisie (ADR 0116), retenu sur l'appareil. Il ne vaut que pour une
+     * opératrice : ailleurs il n'apparaît pas et rien ne part en mode pro.
+     */
+    val proMode: Boolean = false,
 )
 
 class SettingsStore(private val store: DataStore<Preferences>) {
@@ -49,6 +54,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
             avatar = p[AVATAR] ?: true,
             notificationsAsked = p[NOTIFICATIONS_ASKED] ?: false,
             shareReads = p[SHARE_READS] ?: true,
+            proMode = p[PRO_MODE] ?: false,
         )
     }
 
@@ -86,6 +92,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
     suspend fun setAvatar(on: Boolean) = store.edit { it[AVATAR] = on }
     suspend fun setNotificationsAsked() = store.edit { it[NOTIFICATIONS_ASKED] = true }
     suspend fun setShareReads(on: Boolean) = store.edit { it[SHARE_READS] = on }
+    suspend fun setProMode(on: Boolean) = store.edit { it[PRO_MODE] = on }
 
     private fun decodeProfile(raw: String): Profile? = try {
         MikaJson.decodeFromString(Profile.serializer(), raw)
@@ -105,5 +112,6 @@ class SettingsStore(private val store: DataStore<Preferences>) {
         val AVATAR = booleanPreferencesKey("avatar")
         val NOTIFICATIONS_ASKED = booleanPreferencesKey("notifications_asked")
         val SHARE_READS = booleanPreferencesKey("share_reads")
+        val PRO_MODE = booleanPreferencesKey("pro_mode")
     }
 }

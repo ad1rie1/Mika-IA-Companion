@@ -40,6 +40,42 @@
     <string name="verdict_placeholder">Ce qu\'elle aurait dû dire, ou pourquoi (facultatif)</string>
     <string name="verdict_save">Enregistrer</string>
     <string name="verdict_close">Fermer</string>
+    <!-- Le mode pro, pour une opératrice (ADR 0116) -->
+    <string name="pro_toggle">Pro</string>
+    <string name="pro_toggle_desc">Mode pro : une réponse de travail, ses outils en direct</string>
+    <string name="chat_input_hint_pro">Mode pro : demande-lui un travail…</string>
+    <string name="pro_mark">pro</string>
+    <string name="pro_tools_line">outils : %1$s</string>
+    <string name="pro_open_link">Ouvrir le lien</string>
+    <string name="work_title">Son travail</string>
+    <plurals name="work_tools">
+        <item quantity="one">%d outil</item>
+        <item quantity="many">%d outils</item>
+        <item quantity="other">%d outils</item>
+    </plurals>
+    <string name="work_summary">%1$s · %2$s</string>
+    <string name="work_running_summary">Au travail… · %1$s</string>
+    <string name="work_expand">Déplier</string>
+    <string name="work_collapse">Replier</string>
+    <string name="work_detail_show">voir les arguments et le résultat</string>
+    <string name="work_detail_hide">masquer le détail</string>
+    <string name="work_tool_running">en cours</string>
+    <string name="work_tool_ok">réussi</string>
+    <string name="work_tool_failed">échec</string>
+    <string name="work_tool_unfinished">pas fini</string>
+    <string name="work_args">Arguments</string>
+    <string name="work_result">Résultat</string>
+    <plurals name="work_dropped">
+        <item quantity="one">%d étape de plus, non montrée</item>
+        <item quantity="many">%d étapes de plus, non montrées</item>
+        <item quantity="other">%d étapes de plus, non montrées</item>
+    </plurals>
+    <string name="work_outcome_failed">Le travail a échoué.</string>
+    <string name="work_outcome_timeout">Trop long : le travail a été interrompu.</string>
+    <string name="work_outcome_abstained">Elle a choisi de ne rien répondre.</string>
+    <string name="work_outcome_superseded">Remplacé par une nouvelle réponse.</string>
+    <string name="work_outcome_interrupted">Interrompu.</string>
+    <string name="work_outcome_other">Fini (%1$s).</string>
     <string name="chat_more">Plus d\'options</string>
     <string name="chat_empty">Dis bonjour à Mika.</string>
     <string name="chat_typing">Mika écrit…</string>

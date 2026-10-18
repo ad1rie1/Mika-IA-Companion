@@ -185,4 +185,41 @@ class ChatEngineTest {
         assertEquals(listOf(11L, 13L, 14L), event.messages.map { it.id })
         assertEquals(setOf(13L), event.answeredElsewhere)
     }
+
+    private fun tool(json: String) = FrameCodec.decode("""{"type":"tool","episode":"e1","reply_to":11,$json}""") as ServerFrame.Tool
+
+    @Test fun `ses outils en direct font sa carte de travail, que sa réponse pro replie (ADR 0116)`() = test {
+        pending("trouve le devis", "c1")
+        engine.onAck(ServerFrame.Ack("c1", "accepted"))
+        engine.onTool(tool(""""phase":"start","call_id":"t1","name":"email_search","args":"{}","at":1000"""))
+        engine.onTool(tool(""""phase":"end","call_id":"t1","name":"email_search","ok":true,"result":"2 mails","duration_ms":180,"at":1180"""))
+        engine.onTool(tool(""""phase":"note","text":"Je lis le plus récent…","at":1190"""))
+        val live = engine.work.value.cards.single()
+        assertEquals(11L, live.replyTo)
+        assertTrue(live.running)
+        assertEquals(2, live.steps.size)
+        // jamais en base : le fil n'a que la question
+        assertEquals(1, store.rows.size)
+
+        engine.onSpeech(
+            speech(
+                """"text":"Voilà :\n\n- le devis   de Paul","mode":"pro","speak":false,"voice_reason":"pro",""" +
+                    """"message_id":12,"user_message_id":11,"client_msg_id":"c1"""",
+            ),
+        )
+        val reply = store.sorted().last()
+        assertEquals("pro", reply.mode)
+        // une réponse pro garde son texte tel quel (ses espaces, ses lignes vides)
+        assertEquals("Voilà :\n\n- le devis   de Paul", reply.text)
+        val card = engine.work.value.cards.single()
+        assertTrue(card.answered)
+        assertEquals(12L, card.answerId)
+        assertFalse(card.running)
+        assertFalse(engine.typing.value)
+        // et il n'y a pas de notification différente : la même annonce qu'une réponse ordinaire
+        assertTrue((events.single() as ChatEvent.MikaSpoke).live)
+
+        engine.reset()
+        assertTrue(engine.work.value.cards.isEmpty())
+    }
 }
