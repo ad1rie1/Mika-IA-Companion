@@ -12,6 +12,7 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
 
 /** Une ligne de la conversation telle que l'écran la dessine, avec une clé stable pour la liste. */
 sealed interface ChatItem {
@@ -28,6 +29,7 @@ sealed interface ChatItem {
      * taire (double coche). [part] : une des bulles d'une réponse de Mika (une ligne vide les sépare,
      * ADR 0112) — null, tout le message ; [last] : la dernière, qui porte ses fichiers et l'heure.
      * [toolsLine] : sous une réponse pro relue sans sa carte de travail, ses outils (« a ✓ · b ✗ », ADR 0116).
+     * [joined] : elle suit de près une bulle de la même personne — un même élan, serré à l'écran.
      */
     data class Bubble(
         override val key: String,
@@ -36,6 +38,7 @@ sealed interface ChatItem {
         val part: String? = null,
         val last: Boolean = true,
         val toolsLine: String? = null,
+        val joined: Boolean = false,
     ) : ChatItem
 
     /**
@@ -156,7 +159,26 @@ object ChatItems {
         cards.atEnd.forEach { out += ChatItem.Work(it.key, it, folded = false) }
         // la carte de travail tient la place de « Mika écrit… »
         if (typing && !cards.live) out += ChatItem.Typing
-        return out
+        return grouped(out)
+    }
+
+    /** Au-delà de cet écart, deux bulles de la même personne ne font plus un même élan. */
+    const val GROUP_GAP_MS = 10 * 60_000L
+
+    /**
+     * Les bulles d'un même élan : la même personne, rien entre elles (ni date, ni note, ni carte), à moins de
+     * [GROUP_GAP_MS] l'une de l'autre. Les bulles d'une même réponse en font toujours partie.
+     */
+    private fun grouped(items: MutableList<ChatItem>): List<ChatItem> {
+        for (i in 1 until items.size) {
+            val bubble = items[i] as? ChatItem.Bubble ?: continue
+            val before = items[i - 1] as? ChatItem.Bubble ?: continue
+            val same = before.message === bubble.message ||
+                (before.message.sender == bubble.message.sender &&
+                    abs(bubble.message.ts - before.message.ts) <= GROUP_GAP_MS)
+            if (same) items[i] = bubble.copy(joined = true)
+        }
+        return items
     }
 
     /** Où va chaque carte de travail : au-dessus de sa réponse, sous le message auquel elle répond, ou en bas. */

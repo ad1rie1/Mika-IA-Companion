@@ -27,4 +27,12 @@ class InlineMarkupTest {
         assertEquals("voici :\nprint(1)\nfin", InlineMarkup.plain("voici :\n```py\nprint(1)\n```\nfin"))
         assertEquals("**seul", InlineMarkup.plain("**seul"))
     }
+
+    @Test fun `l'heure se glisse au bout d'un texte, pas au bout d'un bloc de code`() {
+        assertEquals(true, InlineMarkup.endsInText("coucou **toi**"))
+        assertEquals(true, InlineMarkup.endsInText("voici :\n```py\nprint(1)\n```\nfin"))
+        assertEquals(false, InlineMarkup.endsInText("voici :\n```py\nprint(1)\n```"))
+        assertEquals(false, InlineMarkup.endsInText("voici :\n```py\nprint(1)\n```\n"))
+        assertEquals(false, InlineMarkup.endsInText(""))
+    }
 }

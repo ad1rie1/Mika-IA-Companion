@@ -1,6 +1,8 @@
 package fr.qwartz.mika.ui.components
 
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -26,8 +28,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -35,6 +40,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import kotlinx.coroutines.delay
 
 /** Le monogramme « M » de Mika : décoratif, son nom est écrit à côté. */
@@ -58,21 +64,46 @@ fun MikaAvatar(size: Dp = 40.dp) {
  * `reveal` : combien de caractères sont déjà dits (comptés comme [InlineMarkup.plain], fraction comprise), quand sa
  * réponse s'écrit au rythme de sa bouche. Le reste est là mais invisible : la bulle a d'emblée sa taille finale, rien
  * ne saute dans le fil pendant qu'elle parle.
+ *
+ * `trailing` : la place à garder au bout de la dernière ligne (l'heure de la bulle s'y pose) ; quand elle n'y tient
+ * pas, le texte gagne une ligne, comme dans une messagerie. Seulement si le texte finit par du texte
+ * ([InlineMarkup.endsInText]).
  */
 @Composable
-fun InlineMarkupText(text: String, color: Color, modifier: Modifier = Modifier, reveal: Float? = null) {
+fun InlineMarkupText(
+    text: String,
+    color: Color,
+    modifier: Modifier = Modifier,
+    reveal: Float? = null,
+    trailing: Dp = 0.dp,
+) {
     val blocks = remember(text) { InlineMarkup.parseBlocks(text) }
     val codeBackground = color.copy(alpha = 0.12f)
+    val room = with(LocalDensity.current) { trailing.toSp() }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         var offset = 0
-        for (block in blocks) {
+        blocks.forEachIndexed { index, block ->
             val from = offset
             when (block) {
                 is InlineMarkup.Block.Text -> {
                     val body = InlineMarkup.trimAroundBlocks(block.text)
                     val annotated = annotate(body, codeBackground)
                     offset += annotated.length + 1
-                    if (body.isNotEmpty()) Text(annotated.revealed(reveal, from, color), color = color)
+                    val shown = annotated.revealed(reveal, from, color)
+                    when {
+                        body.isEmpty() -> Unit
+                        trailing > 0.dp && index == blocks.lastIndex -> Text(
+                            buildAnnotatedString {
+                                append(shown)
+                                appendInlineContent(TRAILING, " ")
+                            },
+                            color = color,
+                            inlineContent = mapOf(
+                                TRAILING to InlineTextContent(Placeholder(room, 1.em, PlaceholderVerticalAlign.TextBottom)) {},
+                            ),
+                        )
+                        else -> Text(shown, color = color)
+                    }
                 }
                 is InlineMarkup.Block.Code -> Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -114,6 +145,9 @@ private fun AnnotatedString.revealed(reveal: Float?, from: Int, color: Color): A
 
 /** Sur combien de caractères le texte qui s'écrit apparaît en fondu (une plume, pas une machine à écrire). */
 private const val REVEAL_FADE_CHARS = 4f
+
+/** La place gardée au bout de la dernière ligne, pour l'heure. */
+private const val TRAILING = "trailing"
 
 fun annotate(text: String, codeBackground: Color): AnnotatedString = buildAnnotatedString {
     for (segment in InlineMarkup.parseInline(text)) {

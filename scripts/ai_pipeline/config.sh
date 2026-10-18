@@ -220,17 +220,17 @@ declare -A MODULE_GROUPS=(
     [vie-interieure]="$_V/faculties/affect $_V/faculties/attention $_V/faculties/needs $_V/faculties/self $_V/faculties/body"
     [parole]="$_V/faculties/expression $_V/faculties/transcript $_V/faculties/agency $_V/faculties/shares"
     [projets]="$_V/faculties/goals $_V/faculties/projects $_V/plugins/forge $_V/adapters/forge $_V/adapters/workshop"
-    [monde]="$_V/faculties/world $_V/adapters/world"
+    #[monde]="$_V/faculties/world $_V/adapters/world"
 
     # Adaptateurs et plugins (même forme que les facultés, confiance
     # restreinte) : les gros chacun leur passage, le reste d'adapters/ en un
     # lot.
-    [canaux]="$_V/adapters/web $_V/adapters/llm $_V/adapters/mail $_V/plugins/email $_V/plugins/rss $_V/plugins/camera $_V/plugins/imaging $_V/adapters/imaging $_V/adapters"
+    #[canaux]="$_V/adapters/web $_V/adapters/llm $_V/adapters/mail $_V/plugins/email $_V/plugins/rss $_V/plugins/camera $_V/plugins/imaging $_V/adapters/imaging $_V/adapters"
 
     # Client web : l'animation pèse ~7 000 lignes à elle seule ; l'UI et
     # l'audio sont deux métiers distincts ; le reste (scène, réseau, types,
     # main.ts) fait un lot cohérent.
-    [web]="frontend/Web/src/vtuber/animation frontend/Web/src/vtuber frontend/Web/src/ui frontend/Web/src/audio frontend/Web/src"
+    #[web]="frontend/Web/src/vtuber/animation frontend/Web/src/vtuber frontend/Web/src/ui frontend/Web/src/audio frontend/Web/src"
 
     # Client Android (Kotlin, ~11 500 lignes) : le réseau et la conversation
     # sont les deux gros morceaux de `data/` ; « app » couvre le reste (core,
@@ -240,8 +240,17 @@ declare -A MODULE_GROUPS=(
     # Client Unity (C#, ~22 000 lignes) : les acteurs du monde et l'avatar sont
     # les deux gros morceaux du runtime ; l'éditeur (import, animation, labo)
     # fait un lot.
-    [unity]="$_UNITY/Runtime/World/Actors $_UNITY/Runtime/World $_UNITY/Runtime/Avatar $_UNITY/Runtime $_UNITY/Editor"
+    #[unity]="$_UNITY/Runtime/World/Actors $_UNITY/Runtime/World $_UNITY/Runtime/Avatar $_UNITY/Runtime $_UNITY/Editor"
 )
+
+# Un groupe mis en commentaire dans MODULE_GROUPS sort aussi de l'ordre : sans
+# ça, chaque lecture de `${MODULE_GROUPS[$g]}` casse sous `set -u`.
+_order=()
+for _g in "${MODULE_GROUP_ORDER[@]}"; do
+    [[ -n "${MODULE_GROUPS[$_g]+x}" ]] && _order+=("$_g")
+done
+MODULE_GROUP_ORDER=("${_order[@]}")
+unset _order
 
 AVAILABLE_MODULES=()
 for _g in "${MODULE_GROUP_ORDER[@]}"; do

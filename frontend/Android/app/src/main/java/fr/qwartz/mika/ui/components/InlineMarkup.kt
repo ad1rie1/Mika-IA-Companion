@@ -47,6 +47,12 @@ object InlineMarkup {
     /** Les sauts de ligne qui entourent un bloc de code sont portés par le bloc lui-même. */
     fun trimAroundBlocks(text: String): String = text.trimStart('\n').trimEnd('\n')
 
+    /** Le texte finit par du texte, pas par un bloc de code : l'heure peut se glisser au bout de sa dernière ligne. */
+    fun endsInText(text: String): Boolean {
+        val last = parseBlocks(text).lastOrNull() as? Block.Text ?: return false
+        return trimAroundBlocks(last.text).isNotEmpty()
+    }
+
     /**
      * Le texte sans ses marques (astérisques, accents graves) : ce qu'un lecteur d'écran doit dire, et
      * ce qu'on copie. Les blocs de code restent, sur leurs propres lignes.
