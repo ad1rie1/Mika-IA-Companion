@@ -40,7 +40,8 @@ def thread_table(sfx: str = "") -> Table:
     ``tools`` : pour un de ses messages, les outils dont elle s'est servie pour l'écrire (``rt.Utterance.tools``, en
     JSON : ``[[nom, réussi], …]``, leurs noms seulement) ; nul pour un message reçu (ADR 0108). ``verdict`` et
     ``verdict_note`` : pour un de ses messages, l'avis de son opératrice (``VERDICT_*``) et ce qu'elle a écrit avec
-    — ce qu'elle aurait dû dire, ou pourquoi (ADR 0113) ; nuls sinon."""
+    — ce qu'elle aurait dû dire, ou pourquoi (ADR 0113) ; nuls sinon. ``mode`` : le mode dans lequel le message a
+    été écrit (``pro``, ADR 0116) ; nul pour la conversation ordinaire."""
     name = f"{THREAD_TABLE}{sfx}"
     return projection_table(
         name,
@@ -64,6 +65,7 @@ def thread_table(sfx: str = "") -> Table:
         Column("folded", LongText),
         Column("verdict", LongText),
         Column("verdict_note", LongText),
+        Column("mode", LongText),
         Index(f"{name}_person", "person", "id"),
         Index(f"{name}_room", "room", "id"),
     )

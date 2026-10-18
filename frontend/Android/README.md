@@ -18,6 +18,11 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
   au retour du réseau, même si l'application a été tuée entre-temps. Sous une réponse qui n'est pas venue
   (`no_reply`, `too_late`), « Le lui redemander » renvoie le même texte et les mêmes fichiers comme un nouveau
   message ; la bulle d'origine reste.
+- **Le mode pro** (ADR 0116), pour une opératrice : la pastille « Pro » dans le champ (retenue sur le téléphone)
+  envoie le message en mode pro (`chat.mode`). Pendant qu'elle travaille, une carte montre ses outils en direct
+  (trames `tool` : en cours, ✓ ou ✗, durée ; dépliables en texte brut), jamais gardée en base ; elle se replie au-dessus
+  de la réponse, une seule bulle en Markdown que sa voix ne lit pas. L'historique montre la ligne de ses outils. Une
+  réponse depuis une notification part toujours en message ordinaire.
 - **Les cartes d'accord** (ADR 0064) : quand Mika veut appeler un service extérieur et que c'est à toi d'en
   décider, une carte apparaît au-dessus de la barre de saisie — ce qu'elle veut faire, **exactement ce qui partira**
   (en texte brut, à chasse fixe, jamais interprété), le compte à rebours (« expire dans 4 min ») et deux boutons,

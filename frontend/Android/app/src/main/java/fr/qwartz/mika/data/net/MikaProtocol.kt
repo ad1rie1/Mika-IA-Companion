@@ -105,6 +105,8 @@ object MikaProtocol {
     const val VERDICT_OK = "ok"
     const val VERDICT_KO = "ko"
     const val VERDICT_STATUS_OK = "ok"
+    /** Ses outils en direct, pendant une réponse pro (ADR 0116) : jamais dans l'historique, jamais gardés. */
+    const val TYPE_TOOL = "tool"
     const val TYPE_CHAT = "chat"
     const val TYPE_SYNC = "sync"
     const val TYPE_PING = "ping"
@@ -115,6 +117,29 @@ object MikaProtocol {
 
     const val MODE_INITIAL = "initial"
     const val MODE_CATCHUP = "catchup"
+
+    // ── Le mode pro (ADR 0116) : un message de travail, pour une opératrice seulement ──
+    /** Le `mode` d'un `chat`, d'une `speech` ou d'une ligne d'`history` ; toute autre valeur vaut « ordinaire ». */
+    const val CHAT_MODE_PRO = "pro"
+    /** Les phases d'une trame `tool` : un outil part, il a fini, ce qu'elle écrit entre deux, l'épisode est fini. */
+    const val TOOL_START = "start"
+    const val TOOL_END = "end"
+    const val TOOL_NOTE = "note"
+    const val TOOL_DONE = "done"
+    /** L'issue d'un épisode qui a répondu ; les autres (`failed`, `timeout`, `superseded`…) se disent. */
+    const val TOOL_OUTCOME_DONE = "done"
+    /**
+     * Bornes de lecture d'une trame `tool`, au-dessus de celles du serveur (arguments et résultat ~2 000
+     * caractères) : au-delà, le texte est coupé à l'affichage.
+     */
+    const val MAX_TOOL_TEXT_CHARS = 4_000
+    const val MAX_TOOL_NAME_CHARS = 128
+    const val MAX_TOOL_ID_CHARS = 128
+    /** Ce qu'une ligne d'historique peut dire de ses outils, au plus. */
+    const val MAX_HISTORY_TOOLS = 100
+    /** Les cartes de travail gardées en mémoire, et les étapes d'une carte, au plus. */
+    const val MAX_WORK_CARDS = 20
+    const val MAX_WORK_STEPS = 200
 
     // ── Statuts d'accusé (protocol.py ; les trois derniers sont émis par le client lui-même) ──
     const val ACK_ACCEPTED = "accepted"
@@ -153,6 +178,8 @@ object MikaProtocol {
     const val VOICE_REASON_ASLEEP = "asleep"
     /** Une trame sans texte : elle a lu et choisi de se taire (ou, suivie d'un `no_reply`, elle n'a pas pu répondre). */
     const val VOICE_REASON_SILENCE = "silence"
+    /** Une réponse pro ne se lit pas à voix haute (ADR 0116). */
+    const val VOICE_REASON_PRO = "pro"
     const val PERSONA_INNER = "inner"
     const val PERSONA_SPEAKING = "speaking"
     const val SOURCE_ERROR = "error"

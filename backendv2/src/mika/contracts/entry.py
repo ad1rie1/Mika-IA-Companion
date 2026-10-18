@@ -49,6 +49,10 @@ class HistoryRow:
     #: connexions d'opératrice seulement
     verdict: str = ""
     verdict_note: str = ""
+    #: le mode dans lequel le message a été écrit (``pro``, ADR 0116) ; et, pour un des siens écrit en mode pro, les
+    #: outils dont elle s'est servie (JSON : ``[[nom, réussi], …]``, leurs noms seulement — ADR 0108)
+    mode: str = ""
+    tools: str = ""
 
 
 @dataclass(frozen=True, slots=True)

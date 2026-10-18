@@ -28,8 +28,11 @@ sealed interface ServerFrame {
         @SerialName("client_msg_id") val clientMsgId: String? = null,
         /** Les fichiers que Mika envoie (ADR 0062). */
         val attachments: List<AttachmentRef> = emptyList(),
+        /** `pro` : une réponse de travail (ADR 0116) — une seule bulle, du Markdown, jamais lue à voix haute. */
+        val mode: String = "",
     ) : ServerFrame {
         val isInner: Boolean get() = voicePersona == MikaProtocol.PERSONA_INNER
+        val isPro: Boolean get() = mode == MikaProtocol.CHAT_MODE_PRO
     }
 
     /** Un morceau du fil : `initial` à la connexion, `catchup` en réponse à un `sync`. */
@@ -87,6 +90,33 @@ sealed interface ServerFrame {
      */
     data class VerdictResult(val messageId: Long, val verdict: String, val comment: String, val status: String) :
         ServerFrame
+
+    /**
+     * Un de ses outils en direct, pendant une réponse pro (ADR 0116) — aux connexions d'opératrice seulement,
+     * jamais dans l'historique ni en base : l'app la garde en mémoire. Lue à la main par `FrameCodec` : une trame
+     * sans phase connue est inconnue ; les textes trop longs sont coupés.
+     *
+     * [phase] : `start` ([callId], [name], [args]) ; `end` (les mêmes, [ok], [result], [durationMs]) ; `note`
+     * ([text], ce qu'elle écrit entre deux outils) ; `done` ([outcome] : `done`, `failed`, `timeout`…).
+     * [replyTo] : le message de la personne auquel elle répond (le `user_message_id` de la `speech` qui suivra).
+     */
+    data class Tool(
+        val episode: String,
+        val replyTo: Long?,
+        val phase: String,
+        val callId: String = "",
+        val name: String = "",
+        /** Les arguments en JSON (texte), à montrer tels quels, jamais interprétés. */
+        val args: String = "",
+        val ok: Boolean? = null,
+        /** Ce que l'outil a rendu, en texte brut. */
+        val result: String = "",
+        val durationMs: Long? = null,
+        val text: String = "",
+        val outcome: String = "",
+        /** Millisecondes Unix ; `null` si la trame n'en portait pas de lisible. */
+        val at: Long? = null,
+    ) : ServerFrame
 
     /** Un type que cette version ne connaît pas, ou une trame illisible : ignorée, jamais fatale. */
     data class Unknown(val type: String) : ServerFrame
@@ -159,7 +189,18 @@ data class HistoryEntry(
     /** L'avis de l'opératrice sur cette réponse (ADR 0113), pour une connexion d'opératrice seulement. */
     val verdict: String? = null,
     @SerialName("verdict_note") val verdictNote: String? = null,
+    /** `pro` : une ligne écrite en mode pro (ADR 0116) ; absent sinon. */
+    val mode: String? = null,
+    /**
+     * Une ligne d'elle en mode pro : les outils dont elle s'est servie, dans l'ordre des appels (`null` : la
+     * ligne n'en dit rien). Lus à part par `FrameCodec` : une liste cassée n'emporte pas le message.
+     */
+    val tools: List<ToolUse>? = null,
 )
+
+/** Un outil dont elle s'est servie pour une réponse pro (ADR 0116) : son nom, et s'il a réussi. */
+@Serializable
+data class ToolUse(val name: String, val ok: Boolean)
 
 // ── L'état intérieur (`inner_state`), lu section par section ─────────────────────────────
 

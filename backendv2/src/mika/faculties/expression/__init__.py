@@ -169,6 +169,13 @@ def _style(s: ExpressionState, frame: Frame, enrich: Any) -> str:
     return style()
 
 
+def pro_style() -> str:
+    """La consigne du mode pro (``expression.pro`` dans sa voix, ADR 0116), à la place de sa consigne de style (coupée
+    avec ses sections affectives) : un travail, fait avec ses outils, rendu à l'écran en Markdown, sans jetons de voix
+    ni balises — et ce qu'est le bloc d'état interne."""
+    return phrase("expression.pro", header=CONTEXT_HEADER, footer=CONTEXT_FOOTER)
+
+
 # ── Ce qu'elle se répète ──────────────────────────────────────────────────
 
 #: ses derniers messages relus pour s'entendre se répéter
@@ -855,4 +862,5 @@ async def _deliver(ev: Any, ports: Mapping[str, Any]) -> None:
         answers=tuple(d.answers) if persona == voice.SPEAKING else (),
         # ce qui part avec la parole (des références opaques ici) ; jamais avec une pensée à voix haute
         attachments=tuple(d.attachments) if persona == voice.SPEAKING else (),
+        mode=d.mode if persona == voice.SPEAKING else "",
     ))

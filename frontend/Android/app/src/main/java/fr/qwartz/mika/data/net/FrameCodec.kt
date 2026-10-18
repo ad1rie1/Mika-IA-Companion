@@ -12,6 +12,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
@@ -44,6 +45,7 @@ object FrameCodec {
                 MikaProtocol.TYPE_APPROVALS -> decodeApprovals(obj)
                 MikaProtocol.TYPE_APPROVAL_RESULT -> decodeApprovalResult(obj)
                 MikaProtocol.TYPE_VERDICT_RESULT -> decodeVerdictResult(obj)
+                MikaProtocol.TYPE_TOOL -> decodeTool(obj)
                 else -> ServerFrame.Unknown(type)
             }
         } catch (_: IllegalArgumentException) {
@@ -65,13 +67,68 @@ object FrameCodec {
         val raw = obj["messages"] as? JsonArray
         val entries = raw?.mapNotNull { item ->
             try {
-                json.decodeFromJsonElement(HistoryEntry.serializer(), item)
+                // Ses outils (ADR 0116) se lisent à part : une liste cassée n'emporte pas le message.
+                val line = item as? JsonObject
+                val entry = json.decodeFromJsonElement(HistoryEntry.serializer(), line?.let { JsonObject(it - "tools") } ?: item)
+                if (line != null && "tools" in line) entry.copy(tools = toolUses(line["tools"])) else entry
             } catch (_: IllegalArgumentException) {
                 null
             }
         }
         return ServerFrame.History(head.mode, entries, head.lastId, head.truncated, head.life, head.reset)
     }
+
+    /**
+     * Les outils d'une ligne pro (ADR 0116) : `null` quand ce n'est pas une liste ; sinon ceux qui ont un nom (un
+     * `ok` qui n'est pas un booléen vaut un échec), bornés en nombre et en longueur.
+     */
+    private fun toolUses(element: JsonElement?): List<ToolUse>? {
+        val items = element as? JsonArray ?: return null
+        return items.asSequence()
+            .mapNotNull { item ->
+                val o = item as? JsonObject ?: return@mapNotNull null
+                val name = (o["name"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()
+                    ?.takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                ToolUse(clip(name, MikaProtocol.MAX_TOOL_NAME_CHARS), (o["ok"] as? JsonPrimitive)?.booleanOrNull == true)
+            }
+            .take(MikaProtocol.MAX_HISTORY_TOOLS)
+            .toList()
+    }
+
+    /**
+     * Une trame `tool` (ADR 0116). Sans épisode ni phase connue, elle est inconnue ; les textes sont lus en
+     * chaînes (autre chose : vide) et coupés à [MikaProtocol.MAX_TOOL_TEXT_CHARS] ; `reply_to` est un entier
+     * positif ou `null` ; `ok` un booléen ou `null`.
+     */
+    private fun decodeTool(obj: JsonObject): ServerFrame {
+        val unknown = ServerFrame.Unknown(MikaProtocol.TYPE_TOOL)
+        fun text(key: String, max: Int = MikaProtocol.MAX_TOOL_TEXT_CHARS): String =
+            (obj[key] as? JsonPrimitive)?.takeIf { it.isString }?.content?.let { clip(it, max) }.orEmpty()
+        val phase = text("phase", MAX_STATUS_CHARS)
+        if (phase !in TOOL_PHASES) return unknown
+        val episode = text("episode", MikaProtocol.MAX_TOOL_ID_CHARS).ifEmpty { return unknown }
+        val duration = (obj["duration_ms"] as? JsonPrimitive)?.takeIf { !it.isString }
+            ?.let { it.longOrNull ?: it.doubleOrNull?.takeIf { d -> d.isFinite() }?.toLong() }
+            ?.takeIf { it >= 0 }
+        return ServerFrame.Tool(
+            episode = episode,
+            replyTo = positiveLong(obj["reply_to"]),
+            phase = phase,
+            callId = text("call_id", MikaProtocol.MAX_TOOL_ID_CHARS),
+            name = text("name", MikaProtocol.MAX_TOOL_NAME_CHARS),
+            args = text("args"),
+            ok = (obj["ok"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull,
+            result = text("result"),
+            durationMs = duration,
+            text = text("text"),
+            outcome = text("outcome", MAX_STATUS_CHARS),
+            at = obj["at"]?.let { timestampMs(it) },
+        )
+    }
+
+    private val TOOL_PHASES = setOf(
+        MikaProtocol.TOOL_START, MikaProtocol.TOOL_END, MikaProtocol.TOOL_NOTE, MikaProtocol.TOOL_DONE,
+    )
 
     /**
      * La liste entière des cartes d'accord. Sans `items` lisible, la trame est inconnue (la liste

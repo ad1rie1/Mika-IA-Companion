@@ -5,6 +5,7 @@ import fr.qwartz.mika.data.net.HistoryEntry
 import fr.qwartz.mika.data.net.MikaProtocol
 import fr.qwartz.mika.data.net.RejectedAttachment
 import fr.qwartz.mika.data.net.Timestamps
+import fr.qwartz.mika.data.net.ToolUse
 import kotlinx.serialization.Serializable
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -82,7 +83,13 @@ data class StoredMessage(
     /** L'avis de l'opératrice sur cette réponse (ADR 0113, `ok` | `ko`), et ce qu'elle aurait dû dire. */
     var verdict: String? = null,
     var verdictNote: String? = null,
-)
+    /** `pro` : écrit en mode pro (ADR 0116) — gardé à l'envoi pour ses messages, dit par le serveur pour les siens. */
+    var mode: String? = null,
+    /** Une réponse pro : les outils dont elle s'est servie, tels que l'historique les dit (`null` : rien de dit). */
+    var tools: List<ToolUse>? = null,
+) {
+    val isPro: Boolean get() = mode == MikaProtocol.CHAT_MODE_PRO
+}
 
 object ChatSync {
 
@@ -144,6 +151,16 @@ object ChatSync {
         .replace(SPACES, " ")
         .replace(SPACE_BEFORE_PUNCT, "$1")
         .trim()
+
+    /** Le mode d'un message tel qu'on le garde : `pro`, ou `null` (toute autre valeur vaut « ordinaire »). */
+    fun modeOf(raw: String?): String? = raw?.takeIf { it == MikaProtocol.CHAT_MODE_PRO }
+
+    /**
+     * Le texte qu'une bulle d'elle montre. Une réponse pro (ADR 0116) ne passe pas par [stripProsody] : elle
+     * n'est jamais lue à voix haute, et resserrer ses espaces casserait l'indentation de ses blocs de code.
+     */
+    fun mikaText(text: String, mode: String?): String =
+        if (modeOf(mode) != null) text.trim() else stripProsody(text)
 
     /** Le plus haut identifiant serveur reçu : dérivé du fil, jamais tenu à part. */
     fun cursorOf(history: List<StoredMessage>): Long {
@@ -320,6 +337,8 @@ object ChatSync {
         val sawReply: Boolean,
         /** Ses réponses déjà là dont l'avis a changé (donné d'un autre appareil, ADR 0113). */
         val judged: Int = 0,
+        /** Des lignes déjà là dont le mode ou les outils ont été dits par le serveur (ADR 0116). */
+        val reworked: Int = 0,
     )
 
     /** L'avis d'une ligne du fil, tel que le serveur le dit (`null` : pas d'avis). */
@@ -364,6 +383,7 @@ object ChatSync {
         var adopted = 0
         var sawReply = false
         var judged = 0
+        var reworked = 0
 
         for (entry in entries.orEmpty()) {
             val id = entry.id ?: continue
@@ -376,12 +396,14 @@ object ChatSync {
                     shown.verdictNote = note
                     judged += 1
                 }
+                // …et son mode et ses outils (ADR 0116) : une réponse reçue en direct n'apprend ses outils qu'ici
+                if (rework(history.firstOrNull { it.id == id }, entry)) reworked += 1
                 continue
             }
             val sender = if (entry.role == MikaProtocol.ROLE_USER) Sender.USER else Sender.MIKA
             val typed = entry.text
             val text = if (sender == Sender.MIKA) {
-                stripProsody(typed)
+                mikaText(typed, entry.mode)
             } else {
                 withAttachments(typed, entry.attachments.map { it.name })
             }
@@ -398,6 +420,7 @@ object ChatSync {
                     mine.status = MessageStatus.SENT
                     mine.reason = null
                 }
+                rework(mine, entry)
                 adopted += 1
             } else {
                 history.add(
@@ -413,6 +436,8 @@ object ChatSync {
                         emotionIntensity = entry.emotionIntensity,
                         verdict = if (sender == Sender.MIKA) verdictOf(entry).first else null,
                         verdictNote = if (sender == Sender.MIKA) verdictOf(entry).second else null,
+                        mode = modeOf(entry.mode),
+                        tools = toolsOf(entry, sender),
                     ),
                 )
                 added += 1
@@ -426,7 +451,26 @@ object ChatSync {
         } else {
             history
         }
-        return MergeResult(out, added, adopted, sawReply, judged)
+        return MergeResult(out, added, adopted, sawReply, judged, reworked)
+    }
+
+    /** Les outils d'une ligne : seulement pour une réponse pro d'elle (ADR 0116). */
+    private fun toolsOf(entry: HistoryEntry, sender: Sender): List<ToolUse>? =
+        entry.tools?.takeIf { sender == Sender.MIKA && modeOf(entry.mode) != null }
+
+    /**
+     * Le mode et les outils d'une ligne déjà montrée, tels que le serveur les dit (il est la référence : un
+     * message qu'il n'a pas reçu en mode pro ne l'est pas). Des outils absents de la ligne ne retirent pas ceux
+     * qu'on connaît déjà. `true` si quelque chose a changé.
+     */
+    private fun rework(shown: StoredMessage?, entry: HistoryEntry): Boolean {
+        if (shown == null) return false
+        val mode = modeOf(entry.mode)
+        val tools = toolsOf(entry, shown.sender) ?: shown.tools.takeIf { mode != null }
+        if (shown.mode == mode && shown.tools == tools) return false
+        shown.mode = mode
+        shown.tools = tools
+        return true
     }
 
     // ── Le fil d'une autre vie (ADR 0056) ──

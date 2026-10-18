@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AckMessage, ConnectionEvent } from "../../types";
+import type { AckMessage, ConnectionEvent, ToolMessage } from "../../types";
 import { WS_CLOSE_UNAUTHORIZED, WebSocketClient } from "../WebSocketClient";
 
 /**
@@ -518,5 +518,56 @@ describe("WebSocketClient — décisions d'accord (ADR 0064)", () => {
     vi.advanceTimersByTime(1000);
     last().open();
     expect(last().types()).not.toContain("approval");
+  });
+});
+
+describe("WebSocketClient — le mode pro (ADR 0116)", () => {
+  const chats = () => last().frames().filter((f) => f.type === "chat");
+
+  it("un message pro porte `mode: \"pro\"` ; un message ordinaire n'a pas la clé", () => {
+    installDom();
+    const { ws } = client();
+    ws.connect();
+    last().open();
+    ws.sendChat("trouve le devis", "p1", "pro");
+    ws.sendChat("coucou", "o1");
+    ws.sendChatWithAttachments("et ça", [{ name: "a.txt", type: "text/plain", data: "eA==" }], "p2", "pro");
+    const [pro, plain, withFile] = chats();
+    expect(pro).toMatchObject({ message: "trouve le devis", client_msg_id: "p1", mode: "pro" });
+    expect("mode" in plain).toBe(false);
+    expect(withFile).toMatchObject({ client_msg_id: "p2", mode: "pro", attachments: [{ name: "a.txt" }] });
+  });
+
+  it("un message pro mis en file, ou renvoyé faute d'accusé, garde son mode", () => {
+    installDom();
+    const { ws } = client();
+    ws.connect();
+    last().open();
+    ws.sendChat("parti sans accusé", "p1", "pro");
+    last().fail();
+    ws.sendChat("tapé pendant la coupure", "p2", "pro");
+    ws.sendChat("ordinaire", "o1");
+    vi.advanceTimersByTime(1000);
+    last().open();
+    expect(chats().map((f) => [f.client_msg_id, f.mode])).toEqual([
+      ["p1", "pro"],
+      ["p2", "pro"],
+      ["o1", undefined],
+    ]);
+  });
+
+  it("la trame `tool` reçue est diffusée telle quelle à ses abonnés", () => {
+    installDom();
+    const { ws } = client();
+    const seen: ToolMessage[] = [];
+    ws.on("tool", (d) => seen.push(d));
+    ws.connect();
+    last().open();
+    const frame = {
+      type: "tool", episode: "01JB", reply_to: 811, phase: "start", call_id: "toolu_1",
+      name: "memory_search", args: "{}", at: 1,
+    };
+    last().receive(frame);
+    expect(seen).toEqual([frame]);
   });
 });

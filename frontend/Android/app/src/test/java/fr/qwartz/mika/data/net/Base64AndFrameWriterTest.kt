@@ -70,4 +70,20 @@ class Base64AndFrameWriterTest {
         assertEquals("image/png", att["type"]!!.jsonPrimitive.content)
         assertEquals("AQID", att["data"]!!.jsonPrimitive.content)
     }
+
+    @Test fun `un message en mode pro le dit, et sa taille annoncée reste exacte (ADR 0116)`() {
+        assertEquals(
+            """{"type":"chat","message":"trouve le devis","client_msg_id":"c1","mode":"pro"}""",
+            ChatFrameWriter.render("trouve le devis", "c1", emptyList(), "pro"),
+        )
+        // toute autre valeur vaut un message ordinaire
+        assertEquals(
+            """{"type":"chat","message":"salut","client_msg_id":"c1"}""",
+            ChatFrameWriter.render("salut", "c1", emptyList(), "turbo"),
+        )
+        val files = listOf(file("a.txt", byteArrayOf(1, 2, 3, 4)))
+        val frame = ChatFrameWriter.render("avec « fichier »", "c2", files, "pro")
+        assertEquals(frame.toByteArray(Charsets.UTF_8).size.toLong(), ChatFrameWriter.frameBytes("avec « fichier »", "c2", files, "pro"))
+        assertEquals("pro", parse(frame)["mode"]!!.jsonPrimitive.content)
+    }
 }

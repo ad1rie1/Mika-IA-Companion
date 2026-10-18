@@ -384,7 +384,7 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     mcp = world["mcp"] = McpHub(lambda: system.config(settings.mcp()), lambda: system.reviews(settings.mcp_tools()),
                                 system.saving(settings.save_mcp_tools), local_root=data / "mcp")
     kernel = Kernel(composition.deps(store=store, clock=clock, ids=RandomIdGen(), gateway=gateway,
-                                     ports={"delivery": hub, "vectors": vectors, **world}, **deps))
+                                     ports={"delivery": hub, "activity": hub, "vectors": vectors, **world}, **deps))
 
     reconfiguring: set[asyncio.Task[None]] = set()
 

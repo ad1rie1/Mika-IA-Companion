@@ -76,6 +76,7 @@ def _row(r: dict) -> HistoryRow:
         id=r["id"], at=r["at"], role=r["role"], text=text, source=r["source"] or "",
         emotion=r["emotion"], emotion_intensity=r["emotion_intensity"], attachments=attachments,
         verdict=r.get("verdict") or "", verdict_note=r.get("verdict_note") or "",
+        mode=r.get("mode") or "", tools=(r.get("tools") or "") if r.get("mode") else "",
     )
 
 

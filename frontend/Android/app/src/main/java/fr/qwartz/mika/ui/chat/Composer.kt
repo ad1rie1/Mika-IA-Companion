@@ -1,6 +1,14 @@
 package fr.qwartz.mika.ui.chat
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.sizeIn
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -50,7 +58,8 @@ import java.util.Locale
 /**
  * La barre de saisie : ce qu'il faut dire des fichiers (refus, réductions), les puces des pièces
  * jointes avec « ✕ », le compteur à l'approche de la limite, le champ (Entrée = retour à la ligne)
- * et l'envoi.
+ * et l'envoi. Pour une opératrice ([proAvailable]), l'interrupteur « Pro » dans le champ (ADR 0116) :
+ * activé, le champ change de couleur et de libellé, et chaque message part en mode pro.
  */
 @Composable
 internal fun Composer(
@@ -63,6 +72,9 @@ internal fun Composer(
     onRemove: (StagedFile) -> Unit,
     onAttach: () -> Unit,
     onSend: () -> Unit,
+    proAvailable: Boolean = false,
+    pro: Boolean = false,
+    onPro: (Boolean) -> Unit = {},
 ) {
     val count = input.length
     val format = remember { NumberFormat.getIntegerInstance(Locale.FRANCE) }
@@ -108,10 +120,24 @@ internal fun Composer(
                 IconButton(onClick = onAttach, enabled = !staging && attachments.size < MikaProtocol.MAX_ATTACHMENTS) {
                     Icon(painterResource(R.drawable.ic_attach_file), stringResource(R.string.chat_attach))
                 }
+                val proOn = proAvailable && pro
+                val accent = MaterialTheme.colorScheme.tertiary
                 OutlinedTextField(
                     value = input,
                     onValueChange = onInput,
-                    placeholder = { Text(stringResource(R.string.chat_input_hint)) },
+                    placeholder = {
+                        Text(stringResource(if (proOn) R.string.chat_input_hint_pro else R.string.chat_input_hint))
+                    },
+                    leadingIcon = if (proAvailable) {
+                        { ProToggle(pro, onPro) }
+                    } else {
+                        null
+                    },
+                    colors = if (proOn) {
+                        OutlinedTextFieldDefaults.colors(focusedBorderColor = accent, unfocusedBorderColor = accent)
+                    } else {
+                        OutlinedTextFieldDefaults.colors()
+                    },
                     maxLines = 6,
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
                     modifier = Modifier.weight(1f),
@@ -120,6 +146,36 @@ internal fun Composer(
                     Icon(painterResource(R.drawable.ic_send), stringResource(R.string.chat_send))
                 }
             }
+        }
+    }
+}
+
+/**
+ * L'interrupteur « Pro » (ADR 0116), une pastille dans le champ : pleine quand le mode pro est là, en creux sinon.
+ * Retenu sur l'appareil.
+ */
+@Composable
+private fun ProToggle(on: Boolean, onChange: (Boolean) -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val label = stringResource(R.string.pro_toggle_desc)
+    Box(
+        Modifier
+            .sizeIn(minWidth = 48.dp, minHeight = 48.dp)
+            .toggleable(value = on, role = Role.Switch, onValueChange = onChange)
+            .semantics { contentDescription = label },
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            color = if (on) scheme.tertiary else Color.Transparent,
+            contentColor = if (on) scheme.onTertiary else scheme.onSurfaceVariant,
+            border = if (on) null else BorderStroke(1.dp, scheme.outline),
+        ) {
+            Text(
+                stringResource(R.string.pro_toggle),
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            )
         }
     }
 }

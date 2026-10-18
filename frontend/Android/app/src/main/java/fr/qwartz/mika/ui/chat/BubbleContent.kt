@@ -4,6 +4,7 @@ import fr.qwartz.mika.data.chat.MessageStatus
 import fr.qwartz.mika.data.chat.Sender
 import fr.qwartz.mika.data.chat.StoredMessage
 import fr.qwartz.mika.ui.components.InlineMarkup
+import fr.qwartz.mika.ui.components.ProMarkdown
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -64,14 +65,18 @@ object BubbleContent {
 
     /**
      * Une bulle = un nœud pour le lecteur d'écran : « Toi, 21 h 04, envoyé : salut » ou
-     * « Mika, 21 h 05 : coucou. Fichiers : liste.md ».
+     * « Mika, 21 h 05 : coucou. Fichiers : liste.md ». Un message pro le dit (« mode pro »), et une réponse pro
+     * relue ses outils ([tools], ADR 0116).
      */
-    fun describe(m: StoredMessage, read: Boolean, zone: ZoneId, part: String? = null): String {
+    fun describe(m: StoredMessage, read: Boolean, zone: ZoneId, part: String? = null, tools: String? = null): String {
         val who = if (m.sender == Sender.USER) "Toi" else "Mika"
-        val head = listOfNotNull(who, spokenTime(m.ts, zone), status(m, read)).joinToString(", ")
-        val body = InlineMarkup.plain(part ?: text(m))
+        val head = listOfNotNull(who, spokenTime(m.ts, zone), "mode pro".takeIf { m.isPro }, status(m, read))
+            .joinToString(", ")
+        val shown = part ?: text(m)
+        val body = if (m.isPro && m.sender == Sender.MIKA) ProMarkdown.plain(shown) else InlineMarkup.plain(shown)
         val files = m.attachments.map { it.name }.filter { it.isNotEmpty() }
         val tail = if (files.isEmpty()) "" else (if (body.isEmpty()) "" else ". ") + "Fichiers : " + files.joinToString(", ")
-        return "$head : $body$tail"
+        val used = if (tools.isNullOrEmpty()) "" else ". Outils : $tools"
+        return "$head : $body$tail$used"
     }
 }

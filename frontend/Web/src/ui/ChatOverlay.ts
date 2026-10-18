@@ -1,4 +1,5 @@
 import { renderInline } from "./inlineMarkup";
+import { renderProMarkdown } from "./proMarkdown";
 import { BubbleReveal, splitBubbles } from "./bubbles";
 import { WebSocketClient } from "../network/WebSocketClient";
 import { API_BASE } from "../network/api";
@@ -6,12 +7,29 @@ import type {
   AckMessage,
   ApprovalCard,
   ApprovalDecision,
+  ChatMode,
   HistoryMessage,
   RejectedAttachment,
   SentFile,
   Verdict,
   VerdictResultMessage,
 } from "../types";
+import {
+  argsPreview,
+  cardKey,
+  cardSummary,
+  durationLabel,
+  isRunning,
+  outcomeLabel,
+  placeCards,
+  runningLabel,
+  toolFrame,
+  toolsLine,
+  toolUses,
+  withAnswer,
+  withToolFrame,
+} from "./toolActivity";
+import type { ToolStatus, WorkCard, WorkStep } from "./toolActivity";
 import { applyVerdict, COMMENT_MAX, nextVerdict, verdictError, verdictFrame } from "./verdicts";
 import {
   acceptRefusal,
@@ -46,6 +64,8 @@ import {
   nextClientMsgId,
   readCache,
   operatorLinks,
+  proMode,
+  replyText,
   restoredStatus,
   stripProsody,
   timeMarkers,
@@ -108,6 +128,39 @@ const TYPING_TIMEOUT_MS = 300000;
 const APPROVAL_NOTE_MS = 6000;
 const OFFLINE_NOT_SENT =
   "Hors ligne : ta décision n'est pas partie. Réessaie à la reconnexion.";
+/** La préférence de l'appareil pour le mode pro (ADR 0116) : `"1"` activé. */
+const PRO_PREF_KEY = "vtuber_chat_pro";
+const PRO_PLACEHOLDER = "Mode pro : demande-lui un travail…";
+/** Ce que dit l'icône d'un outil de la carte, pour un lecteur d'écran. */
+const STATUS_LABELS: Record<ToolStatus, string> = {
+  running: "en cours",
+  ok: "réussi",
+  failed: "échec",
+  stopped: "sans fin connue",
+};
+const STATUS_ICONS: Record<ToolStatus, string> = {
+  running: "",
+  ok: "✓",
+  failed: "✗",
+  stopped: "–",
+};
+
+/** Le mode pro est-il choisi sur cet appareil ? Un stockage fermé vaut « non ». */
+function readProPreference(): boolean {
+  try {
+    return localStorage.getItem(PRO_PREF_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeProPreference(on: boolean): void {
+  try {
+    localStorage.setItem(PRO_PREF_KEY, on ? "1" : "0");
+  } catch {
+    // stockage fermé : le choix vaut pour cet onglet seulement
+  }
+}
 
 /** Une carte d'accord peinte, et les éléments qu'un rafraîchissement touche. */
 interface ApprovalView {
@@ -223,6 +276,23 @@ export class ChatOverlay {
   /** Un seul minuteur pour les échéances, réarmé à chaque peinture. */
   private approvalTimer: number | null = null;
   private approvalNoteTimer: number | null = null;
+  /**
+   * Le mode pro (ADR 0116) : l'interrupteur près du champ, visible pour une
+   * opératrice seulement, et le choix retenu par l'appareil. Un message part
+   * pro quand les deux y sont (`proMode`).
+   */
+  private proToggle: HTMLButtonElement | null;
+  private proPreferred: boolean;
+  private readonly basePlaceholder: string;
+  /**
+   * Ses cartes de travail en direct (voir toolActivity.ts) — en mémoire
+   * seulement, jamais dans le cache : une carte ne survit pas à un
+   * rechargement. Les cartes et les outils dépliés le restent d'un rendu à
+   * l'autre ; chaque carte peinte, pour la repeindre seule à la trame suivante.
+   */
+  private work: readonly WorkCard[] = [];
+  private readonly openWork = new Set<string>();
+  private readonly workEls = new Map<string, HTMLElement>();
 
   constructor(ws: WebSocketClient, personId: string = "") {
     this.ws = ws;
@@ -242,6 +312,9 @@ export class ChatOverlay {
     this.counterEl.className = "chat-note chat-counter";
     this.counterEl.hidden = true;
     this.previewsEl.after(this.counterEl);
+    this.proToggle = document.getElementById("chat-pro") as HTMLButtonElement | null;
+    this.basePlaceholder = this.inputEl.placeholder;
+    this.proPreferred = readProPreference();
 
     this.approvalsEl = document.createElement("section");
     this.approvalsEl.className = "chat-approvals";
@@ -275,6 +348,7 @@ export class ChatOverlay {
 
     this.restoreHistory();
     this.setupEvents();
+    this.paintProToggle();
   }
 
   /** Repaint messages persisted from the previous session (no animation).
@@ -328,7 +402,12 @@ export class ChatOverlay {
           // restoredStatus). On ne touche `reason` que dans ce cas — un
           // "failed" restauré garde le sien.
           const { status, reason } = restoredStatus(m.status);
-          return reason ? { ...m, status, reason } : { ...m, status };
+          const restored: StoredMessage = reason ? { ...m, status, reason } : { ...m, status };
+          // le mode pro et les outils, relus tels qu'on peut les peindre
+          restored.mode = proMode(m.mode);
+          const tools = toolUses(m.tools);
+          restored.tools = tools.length ? tools : undefined;
+          return restored;
         })
         .slice(-MAX_MESSAGES);
       this.repaint({ animate: false });
@@ -363,7 +442,31 @@ export class ChatOverlay {
     if (operator === this.operator) return;
     this.operator = operator;
     this.paintOperatorMenu();
+    this.paintProToggle();
     this.repaint({ animate: false });
+  }
+
+  /** Le prochain message part-il en mode pro ? Seulement pour une opératrice qui l'a choisi. */
+  private get proMode(): boolean {
+    return this.operator && this.proPreferred;
+  }
+
+  /**
+   * L'interrupteur « Pro » (ADR 0116), visible pour une opératrice seulement,
+   * et le champ qui le montre clairement quand il est allumé : un autre
+   * libellé, un autre liseré.
+   */
+  private paintProToggle() {
+    const on = this.proMode;
+    if (this.proToggle) {
+      this.proToggle.hidden = !this.operator;
+      this.proToggle.setAttribute("aria-pressed", String(on));
+      this.proToggle.title = on
+        ? "Mode pro activé : une réponse de travail, ses outils en direct. Cliquer pour revenir au chat."
+        : "Mode pro : une réponse de travail (longue, structurée, sans voix), ses outils en direct";
+    }
+    this.inputEl.classList.toggle("pro", on);
+    this.inputEl.placeholder = on ? PRO_PLACEHOLDER : this.basePlaceholder;
   }
 
   /** Le menu ⚙️ de la saisie : ses liens vers la console pour une opératrice,
@@ -392,6 +495,9 @@ export class ChatOverlay {
     this.reveal.finish();
     this.history = [];
     this.truncated = false;
+    this.work = [];
+    this.openWork.clear();
+    this.workEls.clear();
     try {
       localStorage.removeItem(this.historyKey);
     } catch {
@@ -404,6 +510,13 @@ export class ChatOverlay {
 
   private setupEvents() {
     this.sendBtn.addEventListener("click", () => this.sendMessage());
+
+    this.proToggle?.addEventListener("click", () => {
+      this.proPreferred = !this.proPreferred;
+      writeProPreference(this.proPreferred);
+      this.paintProToggle();
+      this.inputEl.focus();
+    });
 
     this.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -488,8 +601,11 @@ export class ChatOverlay {
       // the next history frame — is what keeps the cursor moving during a
       // normal conversation, so a later reconnect asks for a small gap
       // instead of the whole window.
+      const pro = proMode(data.mode);
+      const userId = typeof data.user_message_id === "number" ? data.user_message_id : null;
+      const replyId = typeof data.message_id === "number" ? data.message_id : null;
       if (data.client_msg_id) {
-        this.bindServerId(data.client_msg_id, data.user_message_id ?? undefined);
+        this.bindServerId(data.client_msg_id, userId ?? undefined);
         // Elle dort : la réponse attend son réveil. Sans ce mot, « Mika
         // écrit… » s'éteignait et la bulle restait là, sans explication.
         if (!data.text && data.voice_reason === "asleep") {
@@ -504,16 +620,24 @@ export class ChatOverlay {
         // `localOnly`, « pas d'id » veut dire « le plus récent » et la pensée
         // restait épinglée en bas du fil, sous les réponses venues après.
         const inner = data.voice_persona === "inner";
+        // Sa réponse de travail : la carte de ce message se replie juste
+        // au-dessus d'elle (avant le rendu que fait addMessage).
+        if (pro) this.work = withAnswer(this.work, userId, replyId);
         this.addMessage(data.text, "vtuber", {
-          id: data.message_id ?? undefined,
-          localOnly: inner && data.message_id == null,
+          id: replyId ?? undefined,
+          localOnly: inner && replyId === null,
           inner,
           files: sentFiles(data.attachments),
-          reveal: !inner,
+          // une réponse pro forme une seule bulle, sans rythme de frappe
+          reveal: !inner && !pro,
+          mode: pro,
         });
         if (this.reveal.writing) this.showTyping();
       }
     });
+
+    // Ses outils en direct, pendant une réponse pro (ADR 0116).
+    this.ws.on("tool", (data) => this.receiveTool(data));
 
     this.ws.on("ack", (data) => this.applyAck(data));
 
@@ -580,6 +704,8 @@ export class ChatOverlay {
     if (fromAnotherLife(this.life, data)) {
       this.history = keepAcrossLives(this.history);
       this.truncated = false;
+      // ses cartes de travail parlaient de messages d'une autre vie
+      this.work = [];
       wiped = true;
     }
     if (typeof data.life === "string" && data.life) this.life = data.life;
@@ -625,7 +751,8 @@ export class ChatOverlay {
     // session, long after the gap it described had been filled.
     this.truncated =
       mode === "initial" ? truncated : this.truncated || truncated;
-    const changed = wiped || result.added > 0 || result.adopted > 0 || result.judged > 0;
+    const changed =
+      wiped || result.added > 0 || result.adopted > 0 || result.judged > 0 || result.enriched > 0;
     if (!changed && this.history.length === before && !truncated) {
       // Nothing new and nothing to say about a gap: repainting would flash
       // the whole thread for no reason.
@@ -940,6 +1067,10 @@ export class ChatOverlay {
 
     const cid = nextClientMsgId();
     let sent: boolean;
+    // Le mode est pris à l'envoi et voyage avec la trame : un message en file
+    // le garde même si l'interrupteur change avant son départ.
+    const mode: ChatMode = this.proMode ? "pro" : "";
+    const pro = proMode(mode);
 
     if (this.pendingAttachments.length > 0) {
       // La même composition que le fil relu (chatSync.withAttachments) : la
@@ -953,16 +1084,17 @@ export class ChatOverlay {
         cid,
         status: "pending",
         matchText: text,
+        mode: pro,
       });
       sent = this.ws.sendChatWithAttachments(
-        text, this.pendingAttachments, cid,
+        text, this.pendingAttachments, cid, mode,
       );
       this.pendingAttachments = [];
       this.attachmentNotices = [];
       this.renderPreviews();
     } else {
-      this.addMessage(text, "user", { cid, status: "pending" });
-      sent = this.ws.sendChat(text, cid);
+      this.addMessage(text, "user", { cid, status: "pending", mode: pro });
+      sent = this.ws.sendChat(text, cid, mode);
       // Le message parti, la note a fait son office : la laisser en ferait un
       // reproche accroché au tour suivant, qui n'a rien écarté.
       if (this.attachmentNotices.length) {
@@ -996,9 +1128,11 @@ export class ChatOverlay {
       files?: SentFile[];
       /** Sa réponse, reçue à l'instant : ses bulles s'écrivent l'une après l'autre. */
       reveal?: boolean;
+      /** Envoyé ou reçu en mode pro — voir StoredMessage.mode. */
+      mode?: "pro";
     } = {}
   ) {
-    const display = sender === "vtuber" ? stripProsody(text) : text;
+    const display = sender === "vtuber" ? replyText(text, opts.mode) : text;
     if (!display) return;
     // A reply can arrive twice: once live, once in the catch-up that
     // follows a reconnect racing the same turn. The id is what makes the
@@ -1021,6 +1155,7 @@ export class ChatOverlay {
       after: opts.localOnly ? this.cursor() : undefined,
       inner: opts.inner || undefined,
       ...(opts.files?.length ? { files: opts.files } : {}),
+      ...(opts.mode ? { mode: opts.mode } : {}),
     };
     this.history.push(stored);
     if (opts.reveal && sender === "vtuber") this.reveal.start(stored, display);
@@ -1051,13 +1186,36 @@ export class ChatOverlay {
       this.insertBeforeTyping(note);
     }
 
+    // Ses cartes de travail (ADR 0116) : repliées au-dessus de leur réponse,
+    // après le message de la personne, ou en bas du fil (toolActivity.placeCards).
+    const before = new Map<number, HTMLElement[]>();
+    const after = new Map<number, HTMLElement[]>();
+    const end: HTMLElement[] = [];
+    this.workEls.clear();
+    const cards = new Map(this.work.map((card) => [card.key, card]));
+    for (const place of placeCards(this.history, this.work)) {
+      const card = cards.get(place.key);
+      if (!card) continue;
+      const el = this.buildWorkCard(card, place.collapsed);
+      this.workEls.set(card.key, el);
+      if (place.where === "end") {
+        end.push(el);
+        continue;
+      }
+      const at = place.where === "before" ? before : after;
+      at.set(place.index, [...(at.get(place.index) ?? []), el]);
+    }
+
     // Le jour qui commence, l'heure d'une reprise : recalculés à chaque rendu
     // (« Aujourd'hui » devient « Hier » après minuit), jamais stockés.
     const markers = timeMarkers(this.history, Date.now());
     this.history.forEach((msg, index) => {
       const marker = markers[index];
       if (marker) this.insertBeforeTyping(this.buildMarker(marker));
-      for (const bubble of this.buildBubbles(msg, opts.animate)) this.insertBeforeTyping(bubble);
+      for (const card of before.get(index) ?? []) this.insertBeforeTyping(card);
+      for (const bubble of this.buildBubbles(msg, opts.animate, before.has(index))) {
+        this.insertBeforeTyping(bubble);
+      }
       // Ce que le serveur a écarté de cet envoi. Sous la bulle plutôt que
       // dans son infobulle : l'envoi a été *accepté*, donc rien dans son
       // apparence ne le distingue d'un envoi complet.
@@ -1069,8 +1227,136 @@ export class ChatOverlay {
       } else if (asleepNoteShown(this.history, index)) {
         this.insertBeforeTyping(this.buildNote(ASLEEP_NOTE));
       }
+      for (const card of after.get(index) ?? []) this.insertBeforeTyping(card);
     });
+    for (const card of end) this.insertBeforeTyping(card);
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  // ── Ses outils en direct (ADR 0116) ───────────────────────────────
+
+  /**
+   * Une trame `tool` : la carte de ce message apparaît à la première, en bas
+   * du fil, à la place de « Mika écrit… » ; les suivantes la repeignent seule,
+   * sans toucher au reste du fil.
+   */
+  private receiveTool(raw: unknown) {
+    const frame = toolFrame(raw);
+    if (!frame) return;
+    const key = cardKey(frame);
+    const known = this.work.some((card) => card.key === key);
+    this.work = withToolFrame(this.work, frame);
+    const card = this.work.find((c) => c.key === key);
+    if (card && isRunning(card)) this.hideTyping();
+    if (known && card && this.repaintCard(card)) return;
+    this.repaint({ animate: false });
+  }
+
+  /** Repeint une carte déjà dans le fil, à sa place ; le fil suit si on était en bas. */
+  private repaintCard(card: WorkCard): boolean {
+    const old = this.workEls.get(card.key);
+    if (!old?.isConnected) return false;
+    const list = this.messagesEl;
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 48;
+    const fresh = this.buildWorkCard(card, old.dataset.collapsed === "1");
+    old.replaceWith(fresh);
+    this.workEls.set(card.key, fresh);
+    if (atBottom) list.scrollTop = list.scrollHeight;
+    return true;
+  }
+
+  /**
+   * Une carte de travail. En direct : ouverte, un indicateur qui tourne tant
+   * qu'elle travaille. Repliée (sa réponse est là) : un résumé « 4 outils ·
+   * 3,2 s » qui se déplie. Dans l'ordre : chaque outil, chaque note, et un
+   * épisode fini autrement que par sa réponse.
+   */
+  private buildWorkCard(card: WorkCard, collapsed: boolean): HTMLElement {
+    const running = isRunning(card);
+    const root = document.createElement(collapsed ? "details" : "div");
+    root.className = `work-card ${running ? "running" : "done"}${collapsed ? " collapsed" : ""}`;
+    root.dataset.collapsed = collapsed ? "1" : "";
+    const head = document.createElement(collapsed ? "summary" : "div");
+    head.className = "work-head";
+    const icon = document.createElement("span");
+    icon.className = running ? "work-icon work-spinner" : "work-icon";
+    icon.textContent = running ? "" : "⚙";
+    icon.setAttribute("aria-hidden", "true");
+    const label = document.createElement("span");
+    label.className = "work-label";
+    label.textContent = running ? runningLabel(card) : cardSummary(card);
+    head.append(icon, label);
+    root.append(head);
+    if (root instanceof HTMLDetailsElement) this.rememberOpen(root, card.key);
+
+    const steps = document.createElement("ol");
+    steps.className = "work-steps";
+    for (const step of card.steps) steps.append(this.buildWorkStep(card, step));
+    if (steps.childElementCount) root.append(steps);
+    return root;
+  }
+
+  /** Un pas de la carte : un outil (qui se déplie), une note, une fin d'épisode. */
+  private buildWorkStep(card: WorkCard, step: WorkStep): HTMLElement {
+    const item = document.createElement("li");
+    if (step.kind === "note") {
+      item.className = "work-step work-note";
+      item.textContent = step.text;
+      return item;
+    }
+    if (step.kind === "end") {
+      item.className = "work-step work-end";
+      item.textContent = outcomeLabel(step.outcome);
+      return item;
+    }
+    item.className = `work-step work-tool ${step.status}`;
+    const details = document.createElement("details");
+    const summary = document.createElement("summary");
+    const icon = document.createElement("span");
+    icon.className = step.status === "running" ? "work-icon work-spinner" : "work-icon";
+    icon.textContent = STATUS_ICONS[step.status];
+    icon.title = STATUS_LABELS[step.status];
+    icon.setAttribute("aria-label", STATUS_LABELS[step.status]);
+    const name = document.createElement("span");
+    name.className = "work-name";
+    name.textContent = step.name;
+    const args = document.createElement("span");
+    args.className = "work-args";
+    args.textContent = argsPreview(step.args);
+    const duration = document.createElement("span");
+    duration.className = "work-duration";
+    duration.textContent = step.durationMs !== null ? durationLabel(step.durationMs) : "";
+    summary.append(icon, name, args, duration);
+    // Arguments et résultat : du texte brut, jamais interprété.
+    const body = document.createElement("div");
+    body.className = "work-detail";
+    const result =
+      step.status === "running" ? "(en cours…)" : step.result || "(rien rendu)";
+    for (const [title, text] of [
+      ["Arguments", step.args || "(aucun)"],
+      ["Résultat", result],
+    ] as const) {
+      const heading = document.createElement("div");
+      heading.className = "work-detail-title";
+      heading.textContent = title;
+      const pre = document.createElement("pre");
+      pre.className = "work-pre";
+      pre.textContent = text;
+      body.append(heading, pre);
+    }
+    details.append(summary, body);
+    this.rememberOpen(details, `${card.key}|${step.key}`);
+    item.append(details);
+    return item;
+  }
+
+  /** Un dépliant qui reste ouvert (ou fermé) d'un rendu à l'autre. */
+  private rememberOpen(details: HTMLDetailsElement, key: string) {
+    details.open = this.openWork.has(key);
+    details.addEventListener("toggle", () => {
+      if (details.open) this.openWork.add(key);
+      else this.openWork.delete(key);
+    });
   }
 
   /** Une note de la machine sous une bulle (jamais une parole de Mika). Un
@@ -1114,8 +1400,10 @@ export class ChatOverlay {
    * « tapées » d'une réponse qui s'écrit encore. Ses fichiers et le lien vers
    * la console suivent la dernière.
    */
-  private buildBubbles(msg: StoredMessage, animate: boolean): HTMLElement[] {
-    const parts = msg.sender === "vtuber" ? splitBubbles(msg.text) : [];
+  private buildBubbles(msg: StoredMessage, animate: boolean, carded = false): HTMLElement[] {
+    // une réponse pro forme une seule bulle : ses lignes vides sont du Markdown
+    const pro = msg.sender === "vtuber" && msg.mode === "pro";
+    const parts = msg.sender === "vtuber" && !pro ? splitBubbles(msg.text) : [];
     const shown = parts.length < 2 ? 1 : this.reveal.shown(msg, parts.length);
     const out =
       parts.length < 2
@@ -1127,6 +1415,15 @@ export class ChatOverlay {
     const complete = parts.length < 2 || shown >= parts.length;
     if (complete && this.operator && msg.sender === "vtuber" && !msg.inner && typeof msg.id === "number") {
       out.push(this.buildVerdict(msg, msg.id));
+    }
+    // Une réponse pro relue sans sa carte (qui ne survit pas à un
+    // rechargement) : ses outils sur une ligne discrète, au-dessus d'elle.
+    const tools = pro && !carded ? toolsLine(msg.tools) : "";
+    if (tools) {
+      const line = document.createElement("div");
+      line.className = "chat-tools-line";
+      line.textContent = tools;
+      out.unshift(line);
     }
     return out;
   }
@@ -1284,9 +1581,26 @@ export class ChatOverlay {
     if (msg.sender === "user" && msg.status && msg.status !== "sent") {
       bubble.classList.add(`status-${msg.status}`);
     }
-    if (msg.sender === "vtuber") renderInline(bubble, part?.text ?? msg.text);
-    else bubble.textContent = msg.text;
+    const pro = msg.mode === "pro";
+    if (pro) bubble.classList.add("pro");
+    if (msg.sender === "vtuber" && pro) {
+      // Tout le HTML du texte est échappé avant qu'aucune balise ne soit
+      // posée : la sortie ne porte que les balises du module (proMarkdown.ts).
+      bubble.innerHTML = renderProMarkdown(msg.text);
+    } else if (msg.sender === "vtuber") {
+      renderInline(bubble, part?.text ?? msg.text);
+    } else {
+      bubble.textContent = msg.text;
+    }
     const last = part?.last ?? true;
+    if (pro && last) {
+      const mark = document.createElement("span");
+      mark.className = "chat-pro-mark";
+      mark.textContent = "pro";
+      mark.title = msg.sender === "user" ? "Envoyé en mode pro" : "Réponse de travail (mode pro)";
+      if (msg.sender === "vtuber") bubble.prepend(mark);
+      else bubble.append(mark);
+    }
     if (last) for (const file of msg.files ?? []) bubble.append(this.buildFile(file));
     // Pour une opératrice : où cette parole (ou ce silence) s'explique. Le
     // rendu est rejoué à chaque fusion, donc le lien vient dès que la bulle
@@ -1306,6 +1620,7 @@ export class ChatOverlay {
 
     const parts: string[] = [];
     if (msg.inner) parts.push("pensée à voix haute");
+    if (pro) parts.push("mode pro");
     if (msg.ts) {
       parts.push(
         new Date(msg.ts).toLocaleString("fr-FR", {

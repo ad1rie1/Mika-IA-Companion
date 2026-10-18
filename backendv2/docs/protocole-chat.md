@@ -110,7 +110,7 @@ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
 |---|---|---|
 | `ping` | `t` (libre, d'ordinaire l'heure en ms) | → `pong` avec le même `t` ; jamais mise en file |
 | `sync` | `after_id` | le plus grand identifiant de message **affiché** ; `0` = rien de fiable → les 50 derniers |
-| `chat` | `message`, `client_msg_id`, `attachments?` | voir ci-dessous |
+| `chat` | `message`, `client_msg_id`, `attachments?`, `mode?` | voir ci-dessous |
 | `presence` | `here` (booléen) | l'application passe au premier plan (`true`) ou le quitte (`false`) |
 | `composing` | `on` (booléen) | la personne commence à écrire un message (`true`) ou cesse (`false`) ; authentifié seulement |
 | `read` | `up_to` (un identifiant de message) | jusqu'où la personne a lu son fil, si elle l'a permis ; authentifié seulement |
@@ -134,6 +134,9 @@ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
   transcrit, les documents lus ; puis les octets sont **gardés** côté serveur (ADR 0106 : relus de près, reliés à ce
   qu'elle en retient, oubliés avec la personne) — rien ne change pour le client, qui ne reçoit pas de clé. Une trame
   entière ne dépasse pas ~34 Mio (et OkHttp n'en envoie pas plus de 16 Mio d'un coup).
+- `mode` (clé absente d'ordinaire) : `"pro"` demande une réponse de travail (ADR 0116, ci-dessous). Toute autre
+  valeur vaut « absent ». Honoré seulement sur une connexion **authentifiée d'opératrice** ; ailleurs, le message est
+  ordinaire, sans erreur. Un renvoi garde son `mode`.
 - Débit : 20 `chat` par 10 s ; `sync` et `identify` 12 par 10 s (au-delà, ignorés). Au plus 8 `chat` en attente
   sur une connexion, comptés à la réception : au-delà, `overloaded` — les derniers d'une rafale, jamais les premiers.
 
@@ -159,6 +162,10 @@ trame compte dans le débit de `sync`, et s'écrit au journal 6 fois par minute 
 dernière valeur voulue s'applique dès que la fenêtre le permet). Mika sait alors si ce qu'elle a écrit d'elle-même
 a été vu : par messagerie, un message pas encore lu ne la fait pas se sentir ignorée (trois jours au plus), et le
 délai de réponse qu'elle attend court à partir de la lecture.
+
+**Le mode pro** (ADR 0116) : un « mode Claude Code » dans le chat. Le message reçoit une réponse de travail — sans
+seconde passe, sans son tempérament ni sa voix de chat, longue et structurée s'il le faut, en Markdown — et ses
+outils se voient en direct (trame `tool`, §4). Le dernier message d'une rafale décide du mode de la réponse.
 
 `identify` ne sert plus : une connexion authentifiée l'ignore, l'identité vient de la session ou du jeton.
 
@@ -217,6 +224,9 @@ répondre — réessaie ».
 - `attachments` : les fichiers qu'elle envoie (§6). Toujours présent, souvent vide.
 - `speak` n'est vrai que pour un seul écran regardé de la personne (celui qui a demandé, sinon le plus récemment
   actif) ; jamais pour une connexion absente.
+- `mode` : toujours présent, `"pro"` ou `""`. Une réponse pro (ADR 0116) : `speak` toujours faux, `voice_reason:
+  "pro"` ; son texte peut porter du **Markdown** (blocs de code, `code`, gras, italique, listes, titres, liens) et
+  forme **une seule bulle** — une ligne vide ne la coupe pas, pas de rythme de frappe.
 
 **`history`** — un morceau du fil :
 
@@ -235,6 +245,9 @@ répondre — réessaie ».
   `audio`, `file`). Un message de Mika : sans jetons de voix ; ses fichiers comme dans `speech`.
 - Une ligne d'elle jugée, **pour une connexion d'opératrice seulement** : `verdict` (`ok` \| `ko`) et `verdict_note`
   (ce qu'elle aurait dû dire, ou vide) — absents sinon (ADR 0113).
+- Une ligne écrite en mode pro (ADR 0116) porte `mode: "pro"` (absent sinon) ; une ligne d'elle en mode pro porte
+  aussi `tools` : `[{"name": "memory_search", "ok": true}, …]`, les outils dont elle s'est servie, dans l'ordre des
+  appels (leurs noms seulement ; liste vide possible).
 - Une ligne `user` que tu montres déjà — tapée sur cet appareil, pas encore rattachée à un `id` — s'**adopte** au
   lieu de s'ajouter : la plus ancienne de tes bulles sans identifiant au même texte reçoit l'`id` de la ligne. La
   `speech` ne rattache que le dernier message d'une rafale (`user_message_id`, `client_msg_id`) : les précédents
@@ -271,6 +284,34 @@ relis la carte), `blocked`, `expired`, `forbidden` (pas à toi de décider). Une
 **`verdict_result`** — le sort d'un avis : `{"type": "verdict_result", "message_id": 812, "verdict": "ko", "comment":
 "…", "status": "ok"}` ; `status` : `ok`, `invalid` (pas une de ses réponses, ou oubliée), `forbidden` (pas une
 opératrice), `failed` (réessayer).
+
+**`tool`** — ses outils en direct, pendant une réponse en mode pro (ADR 0116). Seulement aux connexions
+**regardées et authentifiées d'opératrice** de la personne à qui elle répond ; jamais dans l'historique, jamais
+notifiée, jamais gardée par le serveur — un client la garde **en mémoire seulement** :
+
+```json
+{"type": "tool", "episode": "01JB…", "reply_to": 811, "phase": "start", "call_id": "toolu_01…",
+ "name": "memory_search", "args": "{\"query\": \"anniversaire de Léa\"}", "at": 1790601613001}
+{"type": "tool", "episode": "01JB…", "reply_to": 811, "phase": "end", "call_id": "toolu_01…",
+ "name": "memory_search", "args": "…", "ok": true, "result": "3 souvenirs : …", "duration_ms": 182, "at": 1790601613183}
+{"type": "tool", "episode": "01JB…", "reply_to": 811, "phase": "note", "text": "Je regarde…", "at": 1790601613190}
+{"type": "tool", "episode": "01JB…", "reply_to": 811, "phase": "done", "outcome": "done", "at": 1790601619002}
+```
+
+| `phase` | Champs | Sens |
+|---|---|---|
+| `start` | `call_id`, `name`, `args` | un outil part |
+| `end` | `call_id`, `name`, `args`, `ok`, `result`, `duration_ms` | il a fini (`ok` faux : échec, ou appel refusé — un `end` **sans `start`** préalable crée sa ligne) |
+| `note` | `text` | ce qu'elle a écrit entre deux appels d'outils |
+| `done` | `outcome` | l'épisode est fini (`done`, `failed`, `timeout`, `abstained`, `superseded`, `preempted`, `cancelled`…) |
+
+- `reply_to` : l'`id` du message auquel elle répond, le `user_message_id` de la `speech` qui suivra (ou `null`).
+- `episode` : une réponse supplantée (un nouveau message pendant qu'elle travaille) peut être suivie d'un nouvel
+  épisode, au même `reply_to`.
+- `args` (JSON, en texte) et `result` (texte brut) : bornés à 2 000 caractères (`…[coupé]`) ; à montrer en texte
+  brut, jamais interprétés.
+- `done` et la `speech` arrivent dans un ordre ou dans l'autre.
+- Un client qui ne connaît pas la trame l'ignore.
 
 **`emotion_update`** (son visage entre deux tours, seulement vers un écran regardé), **`inner_state_update`**
 (`{"inner_state": {…}}` : sommeil `sleep_phase`, `energy`, lieu `place`, ce qu'elle y fait `activity`

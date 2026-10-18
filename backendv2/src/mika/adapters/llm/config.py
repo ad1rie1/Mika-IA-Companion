@@ -163,7 +163,7 @@ ROLE_LABELS = {"reply": "répondre (voix)", "initiative": "prendre la parole (vo
                "profile": "comprendre les gens", "interpret": "interpréter", "triage": "trier le courrier",
                "caption": "décrire une image", "compact": "résumer le fil", "plan": "planifier",
                "project": "travailler sur un projet (voix)", "job": "exécuter un projet (impersonnel)",
-               "polish": "rendre naturel (voix, seconde passe)",
+               "polish": "rendre naturel (voix, seconde passe)", "pro": "répondre en mode pro (voix)",
                TRIAL_ROLE: "rejouer une parole (essai de la console)"}
 
 

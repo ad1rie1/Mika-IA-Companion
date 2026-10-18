@@ -23,6 +23,10 @@ Les sortes (``kind``) :
   tel quel). L'écran qui attendait le dit et cesse d'attendre ;
 - ``reply_abstained`` : elle a choisi de ne pas répondre à ``reply_to`` ;
   l'écran cesse d'afficher « Mika écrit… ».
+
+Le port d'activité (``activity``, ADR 0116) montre à la personne, en direct, ce qu'elle fait pendant qu'elle
+travaille pour elle (le mode pro) : chaque outil qui part et ce qu'il rend, ce qu'elle écrit entre deux. Rien n'en
+est gardé : ni journal, ni historique, ni nouvelle tentative — une connexion absente ne le voit pas.
 """
 
 from __future__ import annotations
@@ -73,7 +77,41 @@ class Delivery:
     #: ce qui part avec ce message (des identifiants de fichiers qu'elle a préparés pour la personne, opaques ici) :
     #: le transport demande au port d'entrée ce qu'il peut en montrer (``MindPort.shared``)
     attachments: tuple[str, ...] = ()
+    #: le mode dans lequel elle a répondu (``pro``, ADR 0116) ; ``""`` : la conversation ordinaire
+    mode: str = ""
 
 
 class DeliveryPort(Protocol):
     async def deliver(self, d: Delivery) -> bool: ...
+
+
+#: les moments d'une activité : un outil part, il a fini, elle écrit entre deux appels, l'épisode est fini
+TOOL_START = "start"
+TOOL_END = "end"
+NOTE = "note"
+DONE = "done"
+
+
+@dataclass(frozen=True, slots=True)
+class Activity:
+    """Un moment de son travail, montré en direct à ``target`` (ADR 0116). ``reply_to`` : le message auquel elle
+    répond. ``args`` et ``result`` sont déjà bornés ; ``text`` : ce qu'elle a écrit entre deux appels (``note``) ;
+    ``outcome`` : l'issue de l'épisode (``done``)."""
+
+    target: str
+    episode: str
+    phase: str
+    at: int
+    reply_to: int | None = None
+    call_id: str = ""
+    name: str = ""
+    args: str = ""
+    ok: bool | None = None
+    result: str = ""
+    duration_us: int = 0
+    text: str = ""
+    outcome: str = ""
+
+
+class ActivityPort(Protocol):
+    async def activity(self, a: Activity) -> None: ...

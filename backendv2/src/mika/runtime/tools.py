@@ -20,12 +20,17 @@ est supplantée puis recomposée, refaire le même appel ne refait pas l'écritu
 Chaque appel d'outil laisse un ``ToolRecord`` (arguments et résultat bornés,
 durée lue sur l'horloge injectée) : de quoi répondre à « pourquoi a-t-elle dit
 ça ? » sans rejouer l'épisode.
+
+Qui regarde la boucle en direct (``watch``, le mode pro : ADR 0116) en voit
+chaque moment (``LoopEvent``) : un outil qui part, le même fini (refusé
+compris), ce qu'elle écrit entre deux appels. Un regard qui lève ne change
+rien à la boucle.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any
 
@@ -39,6 +44,7 @@ from mika.kernel.faculty import ToolResult, ToolSpec
 from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Guard, combine
 from mika.kernel.schema import problems as schema_problems
+from mika.ports.delivery import NOTE, TOOL_END, TOOL_START
 from mika.ports.llm import LLMGateway, LLMRequest, LLMResponse, Message, ToolCall, ToolDecl
 from mika.runtime import boundary
 from mika.runtime.boundary import Failed, acall
@@ -133,6 +139,22 @@ class ToolRecord:
     result: str
     duration_us: int = 0
     executed: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class LoopEvent:
+    """Un moment de la boucle, pour qui la regarde en direct : un outil part (``start`` : ``call_id``, ``name``,
+    ``args``), il a fini (``end`` : son ``record``), elle a écrit entre deux appels (``note`` : ``text``)."""
+
+    phase: str
+    call_id: str = ""
+    name: str = ""
+    args: str = ""
+    record: ToolRecord | None = None
+    text: str = ""
+
+
+Watch = Callable[[LoopEvent], Awaitable[None]]
 
 
 @dataclass(slots=True)
@@ -302,15 +324,18 @@ async def run_tool_loop(
     max_turns: int,
     clock: Callable[[], int] | None = None,
     result: LoopResult | None = None,
+    watch: Watch | None = None,
 ) -> LoopResult:
     """``clock`` date les appels d'outils (sans horloge : durées nulles) ;
     ``result``, s'il est donné, est rempli au fil de l'eau — ce qui a été fait
-    reste lisible quand l'épisode est coupé en route (délai, supplantation).
+    reste lisible quand l'épisode est coupé en route (délai, supplantation) ;
+    ``watch``, s'il est donné, en voit chaque moment au fil de l'eau.
     La boucle finie, de quelque façon que ce soit (réponse, plafond, coupure,
     annulation), la passerelle la relâche (``release(call_id)``) : un
     fournisseur à session n'attend pas son délai d'inactivité."""
     try:
-        return await _loop(gateway, request, tools, make_context, max_turns=max_turns, clock=clock, result=result)
+        return await _loop(gateway, request, tools, make_context, max_turns=max_turns, clock=clock, result=result,
+                           watch=watch)
     finally:
         release(gateway, request.call_id)
 
@@ -331,6 +356,7 @@ async def _loop(
     max_turns: int,
     clock: Callable[[], int] | None,
     result: LoopResult | None,
+    watch: Watch | None = None,
 ) -> LoopResult:
     result = result if result is not None else LoopResult(text="")
     result.stop = "running"  # chaque sortie le fixe ; resté tel quel, la boucle a été coupée en route
@@ -356,28 +382,30 @@ async def _loop(
             return result
         outputs: list[Message] = []
         ended = False
+        if resp.text.strip():
+            await _show(watch, LoopEvent(NOTE, text=resp.text))
         for call in resp.tool_calls:
             spec = tools.get(call.name)
             if spec is None:
-                outputs.append(_refused(call, phrase("runtime.tools.refused.unknown", name=call.name), result))
+                outputs.append(await _refuse(watch, call, phrase("runtime.tools.refused.unknown", name=call.name), result))
                 continue
             limit = spec.max_calls_per_episode
             if limit is not None and counts.get(call.name, 0) >= limit:
-                outputs.append(_refused(call, phrase("runtime.tools.refused.capped", name=call.name), result))
+                outputs.append(await _refuse(watch, call, phrase("runtime.tools.refused.capped", name=call.name), result))
                 continue
             if RAW_ARGS_KEY in call.args:
-                outputs.append(_refused(call, phrase("runtime.tools.refused.not_json"), result))
+                outputs.append(await _refuse(watch, call, phrase("runtime.tools.refused.not_json"), result))
                 continue
             given = unquoted(spec, dict(call.args))
             try:
                 args = spec.args.model_validate(given)
             except ValidationError as exc:
-                outputs.append(_refused(call, phrase("runtime.tools.refused.invalid",
+                outputs.append(await _refuse(watch, call, phrase("runtime.tools.refused.invalid",
                                                      errors=exc.errors(include_url=False)), result))
                 continue
             wrong = schema_problems(spec.schema, given) if spec.schema is not None else []
             if wrong:
-                outputs.append(_refused(call, phrase("runtime.tools.refused.wrong", problems=" ; ".join(wrong)), result))
+                outputs.append(await _refuse(watch, call, phrase("runtime.tools.refused.wrong", problems=" ; ".join(wrong)), result))
                 continue
             counts[call.name] = counts.get(call.name, 0) + 1
             ctx = make_context(spec, call.id)
@@ -387,6 +415,7 @@ async def _loop(
                 what = f"{call.name}:{_args_digest(call.args)}"
                 same[what] = same.get(what, 0) + 1
                 ctx.call_key = f"{what}:{same[what]}"
+            await _show(watch, LoopEvent(TOOL_START, call.id, call.name, _args_json(call.args)))
             t0 = now()
             out = await acall(spec.handler, args, ctx, label=f"outil {call.name}")
             elapsed = max(0, now() - t0)
@@ -397,6 +426,7 @@ async def _loop(
                 result.records.append(ToolRecord(call.id, call.name, _args_json(call.args), False,
                                                  _bounded(message), elapsed))
                 outputs.append(Message("tool", message, tool_call_id=call.id, name=call.name, is_error=True))
+                await _show(watch, LoopEvent(TOOL_END, call.id, call.name, record=result.records[-1]))
                 continue
             tr = out if isinstance(out, ToolResult) else ToolResult(content=_as_text(out))
             result.calls.append((call.name, tr.ok))
@@ -407,6 +437,7 @@ async def _loop(
             result.records.append(ToolRecord(call.id, call.name, _args_json(call.args), tr.ok,
                                              _bounded(tr.content), elapsed))
             outputs.append(Message("tool", tr.content, tool_call_id=call.id, name=call.name, is_error=not tr.ok))
+            await _show(watch, LoopEvent(TOOL_END, call.id, call.name, record=result.records[-1]))
             ended = ended or (spec.ends_loop and tr.ok)
         if ended:
             # l'outil qui conclut a réussi : rien à écrire de plus (le rappeler coûtait un appel sur trois des
@@ -430,6 +461,19 @@ async def _close(gateway: LLMGateway, req: LLMRequest, result: LoopResult, stop:
     result.text = resp.text if answered else ""
     result.stop = stop
     return result
+
+
+async def _refuse(watch: Watch | None, call: ToolCall, message: str, result: LoopResult) -> Message:
+    """Un appel refusé, et sa fin montrée à qui regarde (sans départ : il n'est jamais parti)."""
+    out = _refused(call, message, result)
+    await _show(watch, LoopEvent(TOOL_END, call.id, call.name, record=result.records[-1]))
+    return out
+
+
+async def _show(watch: Watch | None, event: LoopEvent) -> None:
+    """Un moment de la boucle à qui la regarde ; une panne du regard ne change rien à la boucle."""
+    if watch is not None:
+        await acall(watch, event, label="regard sur la boucle d'outils")
 
 
 def _refused(call: ToolCall, message: str, result: LoopResult) -> Message:

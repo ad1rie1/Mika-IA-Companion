@@ -32,7 +32,7 @@ from mika.kernel.arbitration import Row
 from mika.kernel.builtin import BOOT, PARAMS_CHANGED, STOPPED
 from mika.kernel.clock import Clock
 from mika.kernel.codec import canonical_json
-from mika.kernel.episode import EpisodePolicy
+from mika.kernel.episode import EpisodeMode, EpisodePolicy
 from mika.kernel.events import Origin
 from mika.kernel.faculty import Faculty
 from mika.kernel.frame import Frame
@@ -87,6 +87,8 @@ class KernelDeps:
     reviewed: Sequence[str] = ()
     polishers: Sequence[Any] = ()
     polished: Sequence[str] = ()
+    #: les façons de répondre qu'un message peut demander (``kernel.episode.EpisodeMode``, par nom : le mode pro)
+    modes: Mapping[str, EpisodeMode] = field(default_factory=dict)
     budget: Budget | None = None
     lanes: Mapping[str, int] | None = None
     process_lanes: Mapping[str, int] | None = None
@@ -165,7 +167,7 @@ class Kernel:
         self.runner = EpisodeRunner(
             self.mind, deps.gateway, policies=deps.policies, persona=deps.persona,
             audience_of=deps.audience_of, parsers=deps.parsers, reviewers=deps.reviewers, reviewed=deps.reviewed,
-            polishers=deps.polishers, polished=deps.polished,
+            polishers=deps.polishers, polished=deps.polished, modes=deps.modes,
             budget=deps.budget, ports=ports,
             traces=self.traces,
         )
@@ -375,7 +377,7 @@ class Kernel:
         return EpisodeRequest(
             kind=self.deps.reply_kind, target=data.handle, trigger=trigger, reply_to=seq,
             message=data.text.text or "", typed_chars=data.typed_chars, priority=0, channel=data.channel,
-            room=data.room,
+            room=data.room, mode=data.mode,
         )
 
     async def interpret(self, seq: int, correlation: str) -> None:

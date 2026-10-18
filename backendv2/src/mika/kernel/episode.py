@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from mika.kernel.frame import Audience, Frame
@@ -69,7 +69,7 @@ class EpisodePolicy:
     kind: str
     role: str | None  # rôle LLM ; None = pas d'appel de modèle
     voice: bool = True  # un rôle voix exige la persona
-    persona_depth: str = "full"  # "full" | "compact"
+    persona_depth: str = "full"  # "full" | "compact" | un mode (``EpisodeMode.persona_depth``)
     visible: bool = True  # écrit dans le fil de conversation
     delivered: bool = True
     lane: str = "conversation"
@@ -88,3 +88,42 @@ class EpisodePolicy:
     guard: GuardFactory | None = None
     brief: Brief | None = None
     phases: frozenset[Phase] = ALL_PHASES
+
+
+@dataclass(frozen=True, slots=True)
+class EpisodeMode:
+    """Une façon de répondre que la personne choisit pour un message (``EpisodeRequest.mode``), jamais l'arbitre :
+    ce qu'elle change à la politique des épisodes de ``kinds``. Ce qu'elle laisse à ``None`` reste celui de la
+    politique ; ses étiquettes coupées s'ajoutent aux siennes."""
+
+    kinds: frozenset[str]
+    #: un autre rôle de modèle (qui a son repli, comme tout rôle)
+    role: str | None = None
+    #: une autre profondeur de persona : le fournisseur de persona la reconnaît
+    persona_depth: str | None = None
+    max_tool_turns: int | None = None
+    max_tokens: int | None = None
+    deadline_s: float | None = None
+    muted_tags: frozenset[str] = frozenset()
+    #: sa parole relue (``reviewers``) et passée une seconde fois (``polishers``), comme d'ordinaire
+    reviewed: bool = True
+    polished: bool = True
+    #: ses outils montrés à la personne pendant qu'elle travaille (le port ``activity``)
+    live: bool = False
+    #: sa réponse est du Markdown : ses blocs de code, son code en ligne et l'indentation de ses lignes passent
+    #: l'analyse tels quels (elle range une parole de chat : espaces resserrés, jetons entre crochets retirés)
+    markdown: bool = False
+    #: la consigne du mode, à la suite de celle de ses outils
+    instruction: Callable[[], str] | None = None
+
+    def applied(self, policy: EpisodePolicy) -> EpisodePolicy:
+        """La politique de l'épisode dans ce mode."""
+        return replace(
+            policy,
+            role=self.role if self.role is not None and policy.role is not None else policy.role,
+            persona_depth=self.persona_depth or policy.persona_depth,
+            max_tool_turns=self.max_tool_turns if self.max_tool_turns is not None else policy.max_tool_turns,
+            max_tokens=self.max_tokens if self.max_tokens is not None else policy.max_tokens,
+            deadline_s=self.deadline_s if self.deadline_s is not None else policy.deadline_s,
+            muted_tags=policy.muted_tags | self.muted_tags,
+        )

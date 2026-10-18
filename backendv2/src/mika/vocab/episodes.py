@@ -34,6 +34,12 @@ class Kind(enum.StrEnum):
 
 #: Les épisodes où elle s'adresse à quelqu'un, dans le fil de conversation.
 CONVERSATIONAL = frozenset({Kind.REPLY, Kind.INITIATIVE})
+
+#: Le mode pro (ADR 0116) : une façon de répondre que son opératrice choisit pour un message — un travail, comme dans
+#: Claude Code. Ni sa voix de chat, ni son tempérament, ni la seconde passe ; ses outils se voient en direct.
+PRO = "pro"
+#: les modes qu'un message peut demander (``""`` : la conversation ordinaire)
+MODES = frozenset({PRO})
 #: Les épisodes de travail, que personne n'écoute : une séance sur un but, une exécution sur un projet, un réveil.
 WORKING = frozenset({Kind.STEP, Kind.WORK, Kind.JOB, Kind.WAKE, Kind.WAKE_JOB})
 #: Les exécutions d'un projet (ses deux modes).
@@ -123,15 +129,17 @@ class Role(enum.StrEnum):
     #: rendre sa parole naturelle, une seconde passe sur le texte seul (ADR 0112) ; sans repli : la passe ne se fait
     #: que si l'opératrice lui donne un modèle
     POLISH = "polish"
+    #: répondre en mode pro (ADR 0116) : un travail demandé dans le chat ; retombe sur la réponse
+    PRO = "pro"
 
 
 VOICE_ROLES = frozenset({Role.REPLY, Role.INITIATIVE, Role.STEP, Role.MURMUR, Role.JOURNAL, Role.DREAM,
-                         Role.NARRATIVE, Role.PROJECT})
+                         Role.NARRATIVE, Role.PROJECT, Role.PRO})
 #: Replis quand un rôle n'a pas de modèle : tout ce qui parle retombe sur la
 #: réponse (le seul rôle qu'une installation neuve configure forcément).
 FALLBACKS = {
     Role.INITIATIVE: Role.REPLY, Role.STEP: Role.REPLY, Role.MURMUR: Role.REPLY, Role.JOURNAL: Role.REPLY,
-    Role.DREAM: Role.REPLY, Role.NARRATIVE: Role.REPLY,
+    Role.DREAM: Role.REPLY, Role.NARRATIVE: Role.REPLY, Role.PRO: Role.REPLY,
     # un projet travaille d'abord avec le modèle de ses séances ; l'impersonnel, avec celui de ses projets
     Role.PROJECT: Role.STEP, Role.JOB: Role.PROJECT,
     Role.VALIDATE: Role.EXTRACT, Role.PROFILE: Role.EXTRACT, Role.INTERPRET: Role.EXTRACT,

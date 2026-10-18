@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** La base locale : un cache du fil et de sa file d'envoi, jamais la référence (c'est le serveur). */
-@Database(entities = [MessageEntity::class, OutboxEntity::class, KvEntity::class], version = 2, exportSchema = true)
+@Database(entities = [MessageEntity::class, OutboxEntity::class, KvEntity::class], version = 3, exportSchema = true)
 abstract class MikaDatabase : RoomDatabase() {
     abstract fun messages(): MessageDao
     abstract fun outbox(): OutboxDao
@@ -25,8 +25,22 @@ abstract class MikaDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Version 3 : le mode pro (ADR 0116) — le mode d'un message et ses outils (noms et réussites), et le mode
+         * d'un message en partance. Le cache garde son fil ; ses outils reviennent avec le prochain historique.
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN mode TEXT")
+                db.execSQL("ALTER TABLE messages ADD COLUMN tools TEXT")
+                db.execSQL("ALTER TABLE outbox ADD COLUMN mode TEXT")
+            }
+        }
+
         fun open(context: Context): MikaDatabase =
-            Room.databaseBuilder(context, MikaDatabase::class.java, NAME).addMigrations(MIGRATION_1_2).build()
+            Room.databaseBuilder(context, MikaDatabase::class.java, NAME)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .build()
     }
 }
 

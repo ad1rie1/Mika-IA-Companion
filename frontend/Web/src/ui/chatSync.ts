@@ -15,7 +15,16 @@
  * while the database held both.
  */
 
-import type { AckMessage, HistoryAttachment, HistoryEntry, RejectedAttachment, SentFile, Verdict } from "../types";
+import type {
+  AckMessage,
+  HistoryAttachment,
+  HistoryEntry,
+  RejectedAttachment,
+  SentFile,
+  ToolUse,
+  Verdict,
+} from "../types";
+import { sameToolUses, toolUses } from "./toolActivity";
 
 /**
  * What happened to a message the user sent.
@@ -105,6 +114,22 @@ export interface StoredMessage {
    */
   verdict?: Verdict;
   verdictNote?: string;
+  /**
+   * Écrit en mode pro (ADR 0116) : sa demande de travail à elle, ou sa
+   * réponse de travail — une seule bulle en Markdown, sans voix. Depuis
+   * l'interrupteur à l'envoi, depuis la `speech`, ou depuis l'historique.
+   */
+  mode?: "pro";
+  /**
+   * Sur une réponse pro : les outils dont elle s'est servie, dans l'ordre —
+   * depuis l'historique seulement (la carte en direct, elle, ne se garde pas).
+   */
+  tools?: ToolUse[];
+}
+
+/** `"pro"` pour une trame ou une ligne en mode pro ; toute autre valeur vaut « ordinaire ». */
+export function proMode(raw: unknown): "pro" | undefined {
+  return raw === "pro" ? "pro" : undefined;
 }
 
 /** L'avis d'une ligne du fil, tel que le serveur le dit (rien : pas d'avis). */
@@ -175,6 +200,21 @@ export function stripProsody(text: string): string {
     .replace(/\[EMOTION:[^\]]*\]/gi, " ")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/ +([,.!?;:])/g, "$1")
+    .trim();
+}
+
+/**
+ * Le texte affiché d'une de ses réponses. Une réponse pro (ADR 0116) n'a pas
+ * de voix : seules les balises tombent, la mise en page reste — resserrer les
+ * espaces aplatissait le retrait d'un bloc de code, et recoller la
+ * ponctuation touchait le code (`a ;`). La même règle en direct et au
+ * rattrapage : c'est ce qui permet de reconnaître sa propre bulle.
+ */
+export function replyText(text: string, mode?: "pro"): string {
+  if (mode !== "pro") return stripProsody(text);
+  return text
+    .replace(/\[(?:PAUSE(?::\d+)?|SIGH|LAUGH|BREATH)\]/gi, "")
+    .replace(/\[EMOTION:[^\]]*\]/gi, "")
     .trim();
 }
 
@@ -513,6 +553,11 @@ export function mergeHistory(
   sawReply: boolean;
   /** Ses réponses déjà affichées dont l'avis a changé (donné d'un autre appareil, ADR 0113). */
   judged: number;
+  /**
+   * Des lignes déjà affichées qui apprennent leur mode ou leurs outils (ADR
+   * 0116) : une réponse pro reçue en direct ne les porte pas, le fil relu si.
+   */
+  enriched: number;
 } {
   const known = new Set(
     history.map((m) => m.id).filter((id): id is number => typeof id === "number")
@@ -522,18 +567,24 @@ export function mergeHistory(
   let adopted = 0;
   let sawReply = false;
   let judged = 0;
+  let enriched = 0;
 
   for (const entry of entries ?? []) {
     if (typeof entry?.id !== "number") continue;
+    const mode = proMode(entry.mode);
     if (known.has(entry.id)) {
       // une ligne déjà là ne change pas — sauf l'avis de l'opératrice, qui peut venir d'un autre appareil
-      const shown = entry.role === "user" ? undefined : history.find((m) => m.id === entry.id);
-      const { verdict, verdictNote } = verdictOf(entry);
-      if (shown && (shown.verdict !== verdict || shown.verdictNote !== verdictNote)) {
-        shown.verdict = verdict;
-        shown.verdictNote = verdictNote;
-        judged += 1;
+      const shown = history.find((m) => m.id === entry.id);
+      if (shown && entry.role !== "user") {
+        const { verdict, verdictNote } = verdictOf(entry);
+        if (shown.verdict !== verdict || shown.verdictNote !== verdictNote) {
+          shown.verdict = verdict;
+          shown.verdictNote = verdictNote;
+          judged += 1;
+        }
       }
+      // — et ce que le direct ne disait pas : le mode, les outils de sa réponse pro
+      if (shown && enrich(shown, mode, entry)) enriched += 1;
       continue;
     }
     const sender = entry.role === "user" ? "user" : "vtuber";
@@ -542,7 +593,7 @@ export function mergeHistory(
     // — jamais ce que les préprocesseurs en ont tiré.
     const text =
       sender === "vtuber"
-        ? stripProsody(typed)
+        ? replyText(typed, mode)
         : withAttachments(typed, attachmentNames(entry.attachments));
     if (!text) continue;
 
@@ -560,9 +611,11 @@ export function mergeHistory(
         mine.status = "sent";
         mine.reason = undefined;
       }
+      enrich(mine, mode, entry);
       adopted += 1;
     } else {
       const { verdict, verdictNote } = sender === "vtuber" ? verdictOf(entry) : {};
+      const tools = sender === "vtuber" && mode ? toolUses(entry.tools) : [];
       history.push({
         text,
         sender,
@@ -572,6 +625,8 @@ export function mergeHistory(
         ...(files.length ? { files } : {}),
         ...(verdict ? { verdict } : {}),
         ...(verdictNote ? { verdictNote } : {}),
+        ...(mode ? { mode } : {}),
+        ...(tools.length ? { tools } : {}),
       });
       added += 1;
     }
@@ -582,7 +637,29 @@ export function mergeHistory(
   if (history.length > maxMessages) {
     history = history.slice(-maxMessages);
   }
-  return { history, added, adopted, sawReply, judged };
+  return { history, added, adopted, sawReply, judged, enriched };
+}
+
+/**
+ * Le mode et les outils qu'une ligne du serveur dit d'un message déjà
+ * affiché : une marque « pro » posée à l'envoi ne se perd pas sur une ligne
+ * qui ne la dirait pas, et les outils ne vont qu'à une réponse pro d'elle.
+ * Rend vrai si quelque chose a changé.
+ */
+function enrich(shown: StoredMessage, mode: "pro" | undefined, entry: HistoryEntry): boolean {
+  let changed = false;
+  if (mode && shown.mode !== mode) {
+    shown.mode = mode;
+    changed = true;
+  }
+  if (shown.sender === "vtuber" && shown.mode === "pro" && entry.tools !== undefined) {
+    const tools = toolUses(entry.tools);
+    if (!sameToolUses(shown.tools, tools)) {
+      shown.tools = tools.length ? tools : undefined;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 // ── Le fil d'une autre vie (ADR 0056) ─────────────────────────────────

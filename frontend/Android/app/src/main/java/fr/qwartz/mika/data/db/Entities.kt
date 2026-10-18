@@ -41,6 +41,10 @@ data class MessageEntity(
     /** L'avis de l'opératrice sur cette réponse (ADR 0113, base version 2). */
     val verdict: String? = null,
     @ColumnInfo(name = "verdict_note") val verdictNote: String? = null,
+    /** `pro` : un message écrit en mode pro (ADR 0116, base version 3). */
+    val mode: String? = null,
+    /** Une réponse pro : ses outils (`List<ToolUse>` en JSON, noms et réussites), tels que l'historique les dit. */
+    val tools: String? = null,
 )
 
 /**
@@ -58,6 +62,8 @@ data class OutboxEntity(
     @ColumnInfo(name = "created_at") val createdAt: Long,
     val attempts: Int = 0,
     @ColumnInfo(name = "in_flight") val inFlight: Boolean = false,
+    /** `pro` : envoyé en mode pro (ADR 0116, base version 3) ; un renvoi le garde. */
+    val mode: String? = null,
 )
 
 /** De petites valeurs : la vie du fil, son propriétaire, la troncature, le lu, l'état mental… */

@@ -1099,6 +1099,8 @@ class _Session:
         perception = PerceptionReceived(
             handle=c.handle, channel=c.channel, text=Content.of(body), authenticated=c.authenticated,
             client_msg_id=cid or None, display_name=c.display_name,
+            # le mode pro (ADR 0116) : demandé par une opératrice seulement ; ailleurs, la conversation ordinaire
+            mode=protocol.chat_mode(frame.get("mode")) if self._judges() else "",
             # ce qu'elle a tapé est le début du texte ; la suite, ce que ses pièces jointes ont donné à percevoir
             # (pour le prompt) — le fil relu ne montre que le premier, et les fichiers par leur nom (G-6)
             typed_chars=len(text) if seen else None,
