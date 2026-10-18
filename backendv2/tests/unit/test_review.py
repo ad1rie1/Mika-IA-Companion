@@ -13,6 +13,7 @@ from mika.faculties.expression import polish, review
 from mika.kernel.clock import HOUR
 from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
 from mika.ports.llm import LLMResponse, Message, PersonaRender
+from mika.runtime.pipeline import EpisodeRequest
 from mika.sim.clock import run_virtual
 from mika.vocab.phrasebook import phrase
 from tests.fixtures.mika import at_paris, boot, build, connect, said
@@ -187,6 +188,42 @@ def test_without_a_model_for_it_or_with_a_longer_rewrite_the_first_draft_is_said
     assert polishes == [] and report.text.startswith("C'est le piège du métier")
     report, _said, polishes = _polished_life(tmp_path / "b", "Bla bla. " * 80)
     assert len(polishes) == 1 and report.text.startswith("C'est le piège du métier")
+
+
+def test_with_the_author_there_is_no_review_and_what_she_starts_herself_is_authored_too(tmp_path):
+    """L'autrice récrit derrière : la relecture ne coûte plus un appel. Et un message qu'elle lance d'elle-même passe
+    aussi par elle (2026-10-16, sur le PC : de petits SMS, puis un pavé de journaliste qu'elle lançait seule) — sans
+    sa consigne (« personne ne vient de t'écrire… ») comme ligne du fil."""
+    calls: list = []
+
+    def respond(req):
+        calls.append(req)
+        if req.role == "polish":
+            return LLMResponse("Mika : j'ai lu un truc sur la marche 👀\nL'autre : quoi")
+        if req.role == "initiative":
+            return LLMResponse("Je suis allée lire une étude sur la marche, avec 262 malades suivis. [EMOTION:happy:0.4]")
+        if req.role != "reply":
+            return LLMResponse("{}" if req.role in ("extract", "profile") else "[SILENCE]")
+        return LLMResponse("Ah, sympa. Tu l'as pris en bleu, ou en noir ? [EMOTION:happy:0.4]")
+
+    kernel, clock, _llm, deliveries = build(tmp_path, respond, start=at_paris(2026, 10, 15, 18, 0),
+                                            polish=True, review=True)
+
+    async def main():
+        await boot(kernel)
+        await connect(kernel, "user_1", "Adrien")
+        await asyncio.sleep(2 * HOUR / 1e6)
+        await (await kernel.perceive(said("user_1", "j'ai acheté un manteau"))).reply
+        started = await kernel.lanes.submit(EpisodeRequest(kind="INITIATIVE", target="user_1", reason="share"))
+        await kernel.stop()
+        return started
+
+    started = run_virtual(clock, main)
+    assert not [c for c in calls if c.call_id.endswith("#relu")]  # sa réponse à options : pas de relecture
+    assert [str(c.role) for c in calls].count("reply") == 1
+    assert started.text == "j'ai lu un truc sur la marche 👀"
+    authored = [c for c in calls if c.role == "polish"][-1].messages[0].content
+    assert "Mika (brouillon) : Je suis allée lire une étude" in authored and "Personne ne vient" not in authored
 
 
 def test_her_bubbles_go_through_the_second_pass_and_are_not_a_long_answer():
