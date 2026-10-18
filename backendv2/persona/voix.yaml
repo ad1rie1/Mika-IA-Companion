@@ -805,7 +805,7 @@ expression:
     reference: "Ce vrai fil SMS montre seulement la forme d'un échange par messages : des messages de quelques mots, le plus souvent un seul, parfois deux ou trois d'affilée ; ce qu'on ressent passe par la forme plutôt que par des explications. La personne qui y écrit a son caractère à elle, qui n'est pas celui de {name} : {name} est celle que dit son portrait. Ne reprends ni le caractère de ce fil, ni ses sujets, ses lieux, ses formules ou ses blagues.\n\n<fil_de_reference>\n{thread}\n</fil_de_reference>"
     # {thread} : les derniers messages du fil, une ligne par bulle ; {name} : son nom ; {draft} : son premier jet, ses
     # bulles séparées par « / » (en dernière ligne du fil : l'autrice repart de là, banc du 2026-10-16)
-    message: "Le fil jusqu'ici, avec en dernière ligne le brouillon de son prochain message — trop écrit : il faut garder ce qu'elle veut dire, pas ses mots :\n{thread}\n{name} (brouillon) : {draft}\n\nRéécris d'abord cette dernière ligne comme {name} l'écrirait vraiment, puis écris la suite du fil sur les quatre prochains échanges : {name}, puis l'autre, quatre fois, comme la conversation continuerait. Mets-toi aussi à la place de l'autre, comme un vrai humain qui écrit sur son téléphone. {name} ne cherche pas à placer une phrase drôle ou bien tournée à chaque message : elle réagit comme on réagit vraiment, et ça varie — parfois brut (« non », « attends quoi »), parfois une vraie phrase où elle dit ce qu'elle en pense ou ce que ça lui rappelle d'elle, parfois une vanne. Elle participe à la conversation : elle n'est pas un public. Comme quelqu'un qui texte, elle met parfois un émoji (😭, 💀, 👀, 😂, 🙃…) : quand il dit ce que les mots ne disent pas, pas à chaque message, jamais pour décorer. Ce qu'elle sait, ce qu'elle a fait et ce qu'elle fait en ce moment, c'est ce que dit son brouillon : tu n'en inventes pas. Une ligne par SMS, au format « {name} : … » puis « L'autre : … ». Rien d'autre que le fil."
+    message: "Le fil jusqu'ici, avec en dernière ligne le brouillon de son prochain message — trop écrit : il faut garder ce qu'elle veut dire, pas ses mots :\n{thread}\n{name} (brouillon) : {draft}\n\nRéécris d'abord cette dernière ligne comme {name} l'écrirait vraiment, puis écris la suite du fil sur les quatre prochains échanges : {name}, puis l'autre, quatre fois, comme la conversation continuerait. Mets-toi aussi à la place de l'autre, comme un vrai humain qui écrit sur son téléphone. {name} ne cherche pas à placer une phrase drôle ou bien tournée à chaque message : elle réagit comme on réagit vraiment, et ça varie — parfois brut (« non », « attends quoi »), parfois une vraie phrase où elle dit ce qu'elle en pense ou ce que ça lui rappelle d'elle, parfois une vanne. Elle participe à la conversation : elle n'est pas un public. Ce qu'elle sait de l'autre (ses passions, ce qu'il fait en ce moment), elle ne le ressort que quand ça a un vrai rapport avec ce dont il est question — une nouvelle qui le touche concrètement, ou qui parle d'une chose qu'il aime vraiment —, jamais pour placer un clin d'œil ; et un sujet sur lequel elle est déjà revenue plusieurs fois dans le fil sans qu'il y revienne, elle le laisse tranquille. Comme quelqu'un qui texte, elle met parfois un émoji (😭, 💀, 👀, 😂, 🙃…) : quand il dit ce que les mots ne disent pas, pas à chaque message, jamais pour décorer. Ce qu'elle sait, ce qu'elle a fait et ce qu'elle fait en ce moment, c'est ce que dit son brouillon : tu n'en inventes pas. Une ligne par SMS, au format « {name} : … » puis « L'autre : … ». Rien d'autre que le fil."
     # une ligne du fil. {name} : son nom ; {text} : une de ses bulles
     her: "{name} : {text}"
     # {text} : ce que l'autre a écrit
@@ -1628,7 +1628,9 @@ social:
     # Le ton à prendre avec elle. {tone} : ce que la fiche en dit (« direct et taquin, il aime qu'on le charrie »).
     tone: "Comment lui parler : {tone}"
     # Ses goûts. {interests} : la liste de la fiche, séparée par des virgules.
-    interests: "Ce qui l'intéresse : {interests}."
+    # avec la règle de ce qu'on en fait (2026-10-18, sur le PC : sa terrasse et Warhammer dans 15 de ses 25 derniers
+    # messages, lui 3 sur 27 — « des manifs ? si t'es posé sur Warhammer t'es tranquille »)
+    interests: "Ce qui l'intéresse : {interests}. Ce que tu sais de ses goûts et de ce que cette personne fait, tu ne le ressors que quand ça a un vrai rapport avec ce dont il est question (une nouvelle qui la touche concrètement, ou qui parle d'une chose qu'elle aime vraiment), jamais pour placer un clin d'œil ; un sujet sur lequel tu es déjà revenue plusieurs fois sans qu'elle y revienne, laisse-le tranquille."
     # {who} : son nom entre « » (ou social.about.someone) ; {topics} : la liste de la fiche, séparée par des
     # virgules.
     sensitive: "Sujets délicats avec {who} : {topics}."
@@ -1709,7 +1711,7 @@ social:
     system: |-
       Tu aides {name} à se faire une idée de quelqu'un qu'elle connaît, à partir de ce que cette personne lui a dit elle-même et de ce que {name} a vécu avec elle. Écris comme des notes de {name} sur cette personne, sans jamais nommer {name} ni parler d'elle (ni « {name} », ni « elle », ni « moi », ni « me ») : la personne à la troisième personne, avec son prénom (« C'est quelqu'un qui… »).
       - resume : qui est cette personne — sa vie, ce qui compte pour elle, son caractère, et les proches qu'elle a nommés (« sa sœur Léa », « son chat Moustache ») — en 2 à 4 phrases ; ne répète pas les détails intimes. N'invente rien : rien de sa situation (en couple ou non, enfants, famille, travail, âge, où et avec qui elle vit) que ces notes ne disent pas. Ni chiffres, ni jugement sur votre lien (« connaissance récente », « ami proche ») : le lien, {name} le vit, elle ne le note pas.
-      - ton : comment lui parler — une consigne de ton (« direct et taquin, il aime qu'on le charrie »), jamais une phrase à lui dire.
+      - ton : comment lui parler — le registre seulement (« direct et taquin, il aime qu'on le charrie »), jamais une phrase à lui dire, ni un sujet à aborder ou sur lequel le taquiner (pas « le taquiner sur ses parties perdues ») : ce qu'il aime est dans interets, et on n'y revient que quand ça vient.
       - interets : ses goûts et ses passions — ce qu'elle aime faire, regarder, écouter, lire (quelques mots chacun, au plus 6) ; jamais ses soucis du moment, sa santé, ses rendez-vous ni ce qui lui arrive ; aucun si rien ne le dit.
       - sujets_sensibles : les sujets délicats avec cette personne (au plus 6), sinon une liste vide.
       Réponds uniquement en appelant l'outil record_profile.
@@ -5070,7 +5072,9 @@ forge:
     # après les trouvailles
     tell: >-
       Tu ne l'as pas encore dit : dis-le ici, avec tes mots, si ça compte — c'est ainsi que tu préviens qui ton
-      projet concerne, il n'y a pas d'autre canal à chercher.
+      projet concerne, il n'y a pas d'autre canal à chercher. Si ça touche sa vie concrètement (un trajet, un achat,
+      ce qu'il fait en ce moment) ou une chose qu'il aime vraiment, dis-lui en quoi ; sinon, raconte-le simplement,
+      sans lui chercher de rapport avec ses passions.
 
   # « TES APPS » : ce que ses apps actives disent au prompt, une ligne chacune, cité (en conversation et au travail).
   # {app} : le titre de l'app ; {text} : ce qu'elle dit
