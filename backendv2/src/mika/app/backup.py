@@ -45,7 +45,8 @@ corrigé, un upcaster la changent) : elle ne se compare que sous le code qui a
 écrit l'archive. Sous un autre (une mise à jour depuis), la copie est rejouée
 depuis la genèse et doit retomber sur la même tête sans qu'aucun réducteur ne
 lève ; c'est dit dans les remarques. L'ancien dossier est
-mis de côté, jamais effacé. Restaurer prend le verrou du dossier
+mis de côté, jamais effacé (dedans, ``<dossier>/.avant-restauration-…``, quand
+elle ne peut pas écrire dans le parent). Restaurer prend le verrou du dossier
 (``datadir``) : sous un serveur en marche, c'est refusé — il écrirait encore,
 par ses descripteurs ouverts, dans le dossier mis de côté.
 """
@@ -514,7 +515,8 @@ def verify(archive: Path, *, record: Path | None = None, now: datetime | None = 
 def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | None = None) -> Summary:
     """Restaure dans ``data`` (et, sur un serveur, dans ses bases). Un dossier non vide — ou des bases en service —
     n'est remplacé qu'avec ``force`` ; il est alors mis de côté (``<data>.avant-restauration-…``, les bases copiées
-    dans son ``bases/``).
+    dans son ``bases/``). Quand le parent de ``data`` n'est pas à elle (``/var/lib/mika`` de l'installation : elle
+    n'écrit que dedans), tout se fait dans ``data`` : son ancien contenu va dans ``<data>/.avant-restauration-…``.
 
     Le verrou du dossier est pris d'abord : un Mika qui tourne dessus (``DataDirBusy``) ne voit
     rien bouger. Il passe au dossier restauré avec son fichier, tenu jusqu'au bout."""
@@ -532,7 +534,12 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
             raise BackupError(f"{data} n'est pas vide{' (ou ses bases sur le serveur)' if server else ''} : relance "
                               f"avec --force (l'ancien dossier sera mis de côté)")
         stamp = (now or datetime.now(UTC)).strftime("%Y%m%d-%H%M%S")
-        stage_root = Path(tempfile.mkdtemp(prefix=f".{data.name}.restauration-", dir=data.parent))
+        try:  # à côté du dossier, qui se remplace alors d'un renommage
+            stage_root = Path(tempfile.mkdtemp(prefix=f".{data.name}.restauration-", dir=data.parent))
+            beside = True
+        except PermissionError:  # un parent qui n'est pas à elle (``/var/lib`` de l'installation) : tout se fait dedans
+            stage_root = Path(tempfile.mkdtemp(prefix=".restauration-", dir=data))
+            beside = False
         try:
             manifest = _extract(archive, stage_root)
             from_server = manifest.get("engine") == "mariadb"
@@ -548,19 +555,32 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
             except (BackupError, backup_server.ServerError, SQLAlchemyError) as exc:
                 raise BackupError(f"{exc} : rien n'est touché") from exc
             (stage / MANIFEST).unlink()
-            aside = data.parent / f"{data.name}.avant-restauration-{stamp}"
+            # dedans, caché : ni archivé (``_walk``), ni lu comme une partie d'elle
+            aside = data.parent / f"{data.name}.avant-restauration-{stamp}" if beside \
+                else data / f".avant-restauration-{stamp}"
             kept = stage_root / "avant-bases"
             if server:
                 if occupied:  # les bases en service, copiées avant d'être remplacées
                     _copy_live(*_server(), kept)
                 _reload_bases(*_server(), manifest, stage_root)
-            lock.replace(stage / datadir.LOCK_NAME)  # le verrou (son inode, tenu) suit le dossier restauré
-            if any(data.iterdir()):
-                data.rename(aside)
-                warnings.append(f"ancien dossier mis de côté : {aside}")
-            else:
-                data.rmdir()
-            stage.rename(data)
+            if beside:
+                lock.replace(stage / datadir.LOCK_NAME)  # le verrou (son inode, tenu) suit le dossier restauré
+                if any(data.iterdir()):
+                    data.rename(aside)
+                    warnings.append(f"ancien dossier mis de côté : {aside}")
+                else:
+                    data.rmdir()
+                stage.rename(data)
+            else:  # le dossier reste (son propriétaire, ses droits, le verrou) : son contenu change
+                old = [p for p in data.iterdir() if p not in (lock, stage_root)
+                       and not p.name.startswith(".avant-restauration-")]  # les précédents restent à côté
+                if old:
+                    aside.mkdir()
+                    for p in old:
+                        p.rename(aside / p.name)
+                    warnings.append(f"ancien contenu mis de côté : {aside}")
+                for p in stage.iterdir():
+                    p.rename(data / p.name)
             done = True
             if kept.exists():
                 aside.mkdir(exist_ok=True)
