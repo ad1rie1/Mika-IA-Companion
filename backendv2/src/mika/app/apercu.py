@@ -14,11 +14,13 @@ from __future__ import annotations
 import itertools
 import json
 import logging
+import os
 import re
 import shutil
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote
 
@@ -30,6 +32,7 @@ from mika.adapters.llm.gateway import Gateway, LLMTrace
 from mika.adapters.system import RealClock
 from mika.adapters.vectors import HashEmbedder
 from mika.adapters.web.app import WebConfig
+from mika.app import schema
 from mika.app.apercu_activity import activity
 from mika.app.apercu_inner import inner
 from mika.app.apercu_mail import mailbox
@@ -60,6 +63,8 @@ REPLIES = itertools.cycle([
     ("Ha ! Je ne m'y attendais pas du tout.", "surprised", 0.55),
     ("Je comprends. Ça doit être lourd, en ce moment.", "sad", 0.4),
 ])
+#: ce qui, posé dans le shell (``/etc/mika/mika.env`` chargé à la main), mènerait l'aperçu à sa vraie vie
+ENVIRONMENT = (schema.DATABASE_URL_ENV, schema.DATABASE_PREFIX_ENV, "MIKA_SECRET_KEY")
 CONVERSATIONS = (
     ("adrien", ["salut ! moi c'est Adrien", "je bosse sur un jeu en ce moment", "tu aimes le café ?"]),
     ("bea", ["coucou, c'est Béa", "je suis un peu fatiguée aujourd'hui", "à demain !"]),
@@ -119,6 +124,18 @@ def _name(url: str) -> str:
     return re.sub(r"[^A-Za-z0-9._-]+", "_", slug)[:120] + ".html"
 
 
+@contextmanager
+def _apart() -> Iterator[None]:
+    """Le temps de l'export, l'environnement ne la mène pas à sa vraie vie : ni ses bases sur le serveur MariaDB
+    (ADR 0101), que ``build`` ouvrirait quel que soit le dossier, ni sa clé de chiffrement. La vie neuve reste
+    dans le dossier temporaire ; l'environnement est rendu tel quel ensuite."""
+    saved = {name: os.environ.pop(name) for name in ENVIRONMENT if name in os.environ}
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
+
+
 def export(out: Path) -> list[str]:
     """Rend les pages dans ``out`` ; rend la liste des adresses exportées."""
     logging.getLogger("mika").setLevel(logging.ERROR)
@@ -134,7 +151,7 @@ def export(out: Path) -> list[str]:
                                   on_trace=lambda tr: [f(tr) for f in sink]))
     done: list[str] = []
     failed: list[str] = []
-    with tempfile.TemporaryDirectory() as tmp:
+    with _apart(), tempfile.TemporaryDirectory() as tmp:
         # l'horloge est réelle : la nuit, ses réponses attendraient son réveil (ADR 0036) — un aperçu
         # répond à toute heure
         app, live = build(Path(tmp) / "data", web=WebConfig(), gateway=gateway, embedder=HashEmbedder(),
