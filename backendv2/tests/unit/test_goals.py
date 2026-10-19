@@ -44,7 +44,7 @@ from mika.sim.llm.persona import PersonaSimLLM, _section
 from mika.sim.outside import FakeFeeds
 from mika.vocab.episodes import goal_target
 from mika.vocab.phrasebook import phrase
-from tests.fixtures.endings import ENDINGS, initiative_ends
+from tests.fixtures.endings import ENDINGS, facts, initiative_ends
 from tests.fixtures.mika import PARIS, at_paris, befriend, boot, build, connect, disconnect, said
 from tests.unit.test_projects import llm_call
 from tests.unit.test_senses import entry
@@ -744,6 +744,26 @@ def test_telling_what_she_finished_counts_only_real_tries(ending, counts, why):
     attempts = s.goals[1].share_attempts
     assert attempts == (2 if counts else 0), why
     assert (attempts >= p.share_attempts) is counts  # plus proposable / toujours proposable
+
+
+def test_a_follow_up_to_someone_who_does_not_answer_keeps_what_she_finished_for_later():
+    """Elle relance qui ne lui répond plus : la relance prend de ses nouvelles et ne raconte pas ce qu'elle a fini —
+    qui reste à raconter, une fois qu'il aura répondu (2026-10-19). Vers qui lui répond, le raconter le consomme."""
+    from mika.faculties.goals.faculty import Goal, GoalsState, _set, _started, _uttered
+
+    done = Goal(id=1, kind=goals_c.EXPLORATION, authority=goals_c.SELF, title_ref="t", opened_at=0,
+                status=goals_c.ACHIEVED, notable=0.9, owner="user_1")
+
+    def told(unanswered: int) -> bool:
+        cx = SimpleNamespace(params=GoalsParams(), facts=facts(0, unanswered=unanswered))
+        at = at_paris(2026, 9, 28, 15, 0)
+        s = _started(_set(GoalsState(), done), SimpleNamespace(correlation="c", at=at, data=rt.EpisodeStarted(
+            kind="INITIATIVE", target="user_1", reason=f"{goals_c.SHARE},need_social", subject=goal_target(1))), cx)
+        s = _uttered(s, SimpleNamespace(correlation="c", at=at + 40 * US, data=None), cx)
+        return s.goals[1].shared
+
+    assert told(0)  # elle le lui a raconté
+    assert not told(1)  # une relance : elle a pris de ses nouvelles, le récit attend
 
 
 @pytest.mark.parametrize("ending,counts,why", ENDINGS)

@@ -237,7 +237,7 @@ def rekindle_due(s: SocialState, frame: Frame, person: str, p: SocialParams) -> 
                        memory_c.LIFE_EVENTS])
 def _rekindle(s: SocialState, frame: Frame) -> list[Candidate]:
     """Une amie — d'aujourd'hui ou d'avant — partie sans plus donner de nouvelles : elle ne la harcèle pas (après
-    deux messages sans réponse, plus rien, ``agency``), mais des mois plus tard, ou après le moment que la personne
+    ses relances restées sans réponse, plus rien, ``agency``), mais des mois plus tard, ou après le moment que la personne
     lui avait annoncé, elle prend de ses nouvelles **une fois**, doucement (ADR 0058). Pas la nuit."""
     p = params(frame.env.params_of("social", frame.root))
     if not _daytime(frame, p.day_start_min, p.day_end_min):

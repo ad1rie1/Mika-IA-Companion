@@ -9,6 +9,7 @@ import type {
   ApprovalDecision,
   ChatMode,
   HistoryMessage,
+  MessageNote,
   RejectedAttachment,
   SentFile,
   Verdict,
@@ -30,6 +31,7 @@ import {
   withToolFrame,
 } from "./toolActivity";
 import type { ToolStatus, WorkCard, WorkStep } from "./toolActivity";
+import { messageNotes, noteLine } from "./messageNotes";
 import { applyVerdict, COMMENT_MAX, nextVerdict, verdictError, verdictFrame } from "./verdicts";
 import {
   acceptRefusal,
@@ -407,6 +409,9 @@ export class ChatOverlay {
           restored.mode = proMode(m.mode);
           const tools = toolUses(m.tools);
           restored.tools = tools.length ? tools : undefined;
+          // ses petites bulles aussi (ADR 0119)
+          const notes = m.sender === "vtuber" ? messageNotes(m.notes) : [];
+          restored.notes = notes.length ? notes : undefined;
           return restored;
         })
         .slice(-MAX_MESSAGES);
@@ -631,6 +636,7 @@ export class ChatOverlay {
           // une réponse pro forme une seule bulle, sans rythme de frappe
           reveal: !inner && !pro,
           mode: pro,
+          notes: messageNotes(data.notes),
         });
         if (this.reveal.writing) this.showTyping();
       }
@@ -1130,6 +1136,8 @@ export class ChatOverlay {
       reveal?: boolean;
       /** Envoyé ou reçu en mode pro — voir StoredMessage.mode. */
       mode?: "pro";
+      /** Ce qu'elle a fait en l'écrivant — voir StoredMessage.notes. */
+      notes?: MessageNote[];
     } = {}
   ) {
     const display = sender === "vtuber" ? replyText(text, opts.mode) : text;
@@ -1156,6 +1164,7 @@ export class ChatOverlay {
       inner: opts.inner || undefined,
       ...(opts.files?.length ? { files: opts.files } : {}),
       ...(opts.mode ? { mode: opts.mode } : {}),
+      ...(opts.notes?.length ? { notes: opts.notes } : {}),
     };
     this.history.push(stored);
     if (opts.reveal && sender === "vtuber") this.reveal.start(stored, display);
@@ -1377,6 +1386,17 @@ export class ChatOverlay {
     return note;
   }
 
+  /** « 📍 Mika a regardé où tu es · … » : discrète, au-dessus de sa réponse. */
+  private buildMessageNote(note: MessageNote, messageTs: number): HTMLElement {
+    const el = document.createElement("div");
+    el.className = `chat-msg-note ${note.kind}`;
+    const line = noteLine(note, messageTs);
+    el.textContent = line;
+    el.setAttribute("role", "note");
+    el.setAttribute("aria-label", line);
+    return el;
+  }
+
   /** Un repère de temps entre deux bulles : une ligne discrète, pas une note. */
   private buildMarker(marker: TimeMarker): HTMLElement {
     const el = document.createElement("div");
@@ -1415,6 +1435,11 @@ export class ChatOverlay {
     const complete = parts.length < 2 || shown >= parts.length;
     if (complete && this.operator && msg.sender === "vtuber" && !msg.inner && typeof msg.id === "number") {
       out.push(this.buildVerdict(msg, msg.id));
+    }
+    // Ce qu'elle a fait en l'écrivant (ADR 0119) : une petite bulle juste
+    // avant sa réponse — avant la première de ses bulles seulement.
+    if (msg.sender === "vtuber" && msg.notes?.length) {
+      out.unshift(...msg.notes.map((note) => this.buildMessageNote(note, msg.ts)));
     }
     // Une réponse pro relue sans sa carte (qui ne survit pas à un
     // rechargement) : ses outils sur une ligne discrète, au-dessus d'elle.

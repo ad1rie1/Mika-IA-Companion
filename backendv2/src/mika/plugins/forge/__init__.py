@@ -229,6 +229,8 @@ class News:
     pertinence: float
     attempts: int = 0
     told: bool = False
+    #: elle l'a jugée urgente : elle ouvre le dialogue même avec qui ne lui répond plus (``c.APP_ALERT``)
+    urgent: bool = False
 
 
 class Written(Payload):
@@ -292,7 +294,8 @@ class Emitted(Payload):
 
 
 #: v5 : ce qui a été dit de chaque app reste su (``said``), même quand une trouvaille nouvelle remplace la précédente.
-FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=5,
+#: v6 : une trouvaille sait si elle est urgente (``News.urgent``).
+FORGE = Faculty("forge", state=ForgeState, init=lambda p: ForgeState(), params=ForgeParams, state_version=6,
                retired_params=("signal_spacing_us",))
 FORGE.bundle(BUNDLE, phrase("forge.bundle"))
 FORGE.declare(*c.ALL)
@@ -433,7 +436,8 @@ def _judged(s: ForgeState, e, cx) -> ForgeState:
     read = set(d.seqs)
     s = replace(s, apps=s.apps.set(d.app, replace(app, queue=tuple(q for q in app.queue if q.seq not in read))))
     if d.tell is not None and d.tell.ref and d.about:
-        s = replace(s, news=s.news.set(d.app, News(e.seq, e.at, tuple(d.about), int(d.sensitivity), d.tell.ref, 1.0)))
+        s = replace(s, news=s.news.set(d.app, News(e.seq, e.at, tuple(d.about), int(d.sensitivity), d.tell.ref, 1.0,
+                                                   urgent=bool(d.urgent))))
     return replace(s, sifting=s.sifting.delete(e.correlation)) if e.correlation in s.sifting else s
 
 
@@ -476,7 +480,7 @@ def _started(s: ForgeState, e, cx) -> ForgeState:
         if len(sifting) > OPENINGS_KEPT:
             sifting = FrozenDict(sorted(sifting.items())[-OPENINGS_KEPT:])
         return replace(s, apps=s.apps.set(app_name, replace(app, calls_at=calls)), sifting=sifting)
-    if d.kind != Kind.INITIATIVE or c.APP_NEWS not in str(d.reason).split(","):
+    if d.kind != Kind.INITIATIVE or not {c.APP_NEWS, c.APP_ALERT} & set(str(d.reason).split(",")):
         return s
     person = cx.facts.get(identity_c.PERSON(d.target)) or d.target if d.target else ""
     apps = tuple(k for k, n in s.news.items() if person in n.about and not n.told)
@@ -544,13 +548,14 @@ def _address(frame: Frame, person: str) -> str | None:
     return reachable[0] if reachable else None
 
 
-@FORGE.propose(kinds=[Kind.INITIATIVE], reasons={c.APP_NEWS: (0.0, 10.0)},
+@FORGE.propose(kinds=[Kind.INITIATIVE], reasons={c.APP_NEWS: (0.0, 10.0), c.APP_ALERT: (0.0, 10.0)},
                reads=[attention_c.SIGNAL_THOUGHT_FROM, identity_c.HANDLES, identity_c.REACHABLE, identity_c.IDENTITY,
                       presence_c.PRESENT])
 def _news(s: ForgeState, frame: Frame) -> list[Candidate]:
     """Ce qu'une app d'un projet vient de lui signaler et qui concerne quelqu'un : elle le lui dit, là où elle est,
     sinon sur sa messagerie (ADR 0105 — elle croyait n'avoir « aucun moyen de le prévenir », et sa pensée attendait
-    d'insister). Elle prévient (``agency.INFORMS``)."""
+    d'insister). Elle prévient (``agency.INFORMS``) ; ce qu'elle a jugé urgent ouvre le dialogue même avec qui ne lui
+    répond plus (``c.APP_ALERT``), le reste attend qu'il ait répondu."""
     p = params(frame.env.params_of("forge", frame.root))
     threshold = frame.get(attention_c.SIGNAL_THOUGHT_FROM)
     threshold = 0.6 if threshold is None else threshold
@@ -563,8 +568,11 @@ def _news(s: ForgeState, frame: Frame) -> list[Candidate]:
             continue
         name = frame.get(identity_c.IDENTITY(person)).name
         apps = ", ".join(f"« {s.apps[k].title} »" for k, _ in found)
-        brief = phrase("forge.news.brief", apps=apps, who=f"« {name} »" if name else phrase("projects.caretaker"))
-        out.append(Candidate(Kind.INITIATIVE, address, c.APP_NEWS, p.news_evidence,
+        who = f"« {name} »" if name else phrase("projects.caretaker")
+        urgent = any(n.urgent for _, n in found)
+        brief = phrase("forge.news.alert_brief", apps=apps, who=who) if urgent else \
+            phrase("forge.news.brief", apps=apps, who=who)
+        out.append(Candidate(Kind.INITIATIVE, address, c.APP_ALERT if urgent else c.APP_NEWS, p.news_evidence,
                              resources=frozenset({floor(address)}), args=FrozenDict({"brief:forge": brief})))
     return out
 
@@ -588,6 +596,9 @@ def _news_section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -> Sec
     if ep is None or aud is None or not ep.target:
         return None
     person = frame.get(identity_c.PERSON(ep.target)) or ep.target
+    if ep.kind == Kind.INITIATIVE and agency_c.checking_in(ep.attrs.get("reasons") or (),
+                                                           frame.get(attention_c.AWAITING(person)).initiatives):
+        return None  # elle relance qui ne lui répond pas : elle prend de ses nouvelles, la trouvaille attend
     p = params(frame.env.params_of("forge", frame.root))
     threshold = frame.get(attention_c.SIGNAL_THOUGHT_FROM)
     found = news_for(s, person, frame.now, p, 0.6 if threshold is None else threshold)
@@ -1006,6 +1017,7 @@ def _consignes_section(s: ForgeState, frame: Frame, enrich: Mapping[str, Any]) -
 class SignalsDoneArgs(BaseModel):
     tell: str = Field(default="", max_length=1500, description=phrase("forge.triage.tell"))
     keep: str = Field(default="", max_length=500, description=phrase("forge.triage.keep"))
+    urgent: bool = Field(default=False, description=phrase("forge.triage.urgent"))
 
 
 @FORGE.tool("forge_signals_done", description=phrase("forge.triage.description"), args=SignalsDoneArgs,
@@ -1023,7 +1035,7 @@ async def forge_signals_done(args: SignalsDoneArgs, ctx: Any) -> Any:
     drafts: list[Any] = [c.JUDGED.draft(app=name, seqs=tuple(q.seq for q in batch),
                                         tell=Content.of(tell, level=level) if tell and about else None,
                                         keep=Content.of(keep, level=level) if keep else None, about=about,
-                                        sensitivity=level)]
+                                        sensitivity=level, urgent=bool(args.urgent and tell and about))]
     if keep:  # ce qu'elle garde en tête : une pensée, comme un signal qui lui reste
         strongest = max(batch, key=lambda q: q.pertinence) if batch else None
         drafts.append(signal_draft(name, phrase("forge.signal.kept", app=app.title, kept=keep), 0.6,

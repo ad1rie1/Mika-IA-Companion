@@ -63,7 +63,7 @@ from mika.contracts import affect as affect_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
 from mika.contracts import runtime as runtime_c
-from mika.contracts.entry import MindPort, SharedMeta
+from mika.contracts.entry import MessageNote, MindPort, SharedMeta
 from mika.ports import delivery as delivery_p
 from mika.ports.delivery import Activity, Delivery
 from mika.vocab import voice
@@ -120,6 +120,8 @@ class Conn:
     composing: bool = False
     composing_said: bool = False
     typing: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.COMPOSING_RATE))
+    #: où est la personne (``where``, ADR 0119) : au plus ``WHERE_RATE`` écritures au journal
+    places: protocol.RateLimiter = field(default_factory=lambda: protocol.RateLimiter(*protocol.WHERE_RATE))
 
 
 class Hub:
@@ -147,6 +149,9 @@ class Hub:
         self.delivered: deque[str] = deque(maxlen=REMEMBERED)
         #: le dernier « lu jusqu'ici » écrit au journal, par adresse : ce qui ne l'avance pas n'écrit rien
         self.read_up_to: dict[str, int] = {}
+        #: la dernière position écrite au journal, par adresse, et quand (horloge monotone) : une position qui n'a pas
+        #: bougé ne se réécrit pas à chaque ouverture de l'application (ADR 0119)
+        self.located: dict[str, tuple[protocol.Where, float]] = {}
 
     # ── connexions ──
     def attach(self, send: Send, *, handle: str | None = None, **kw: Any) -> Conn:
@@ -280,8 +285,10 @@ class Hub:
             if chosen is not None:
                 voices.add(chosen.id)
         files = self.shared(d.attachments) if not inner else []
+        notes = self.notes(d.attachments) if not inner else []
         for c in targets:
-            await self._send([c], protocol.speech(d, present=c.here, voiced=c.id in voices, attachments=files))
+            await self._send([c], protocol.speech(d, present=c.here, voiced=c.id in voices, attachments=files,
+                                                  notes=notes))
         self.delivered.append(d.key)
         if not inner and target and d.emotion.declared:
             self._hold(target, d)
@@ -344,12 +351,27 @@ class Hub:
             log.warning("fichiers envoyés illisibles (%s) : %r", ", ".join(wanted), exc)
             return []
 
+    def notes(self, ids: Any) -> list[MessageNote]:
+        """Les petites bulles de ce qu'elle a fait en écrivant un message (ADR 0119) ; un port qui ne sait pas le dire,
+        ou qui échoue, n'empêche jamais une livraison : le message part sans elles."""
+        getter = getattr(self.port, "notes", None)
+        wanted = tuple(i for i in (ids or ()) if isinstance(i, str))
+        if getter is None or not wanted:
+            return []
+        try:
+            return list(getter(wanted))
+        except Exception as exc:  # le message part quand même : la bulle reviendra avec le fil
+            log.warning("bulles d'un message illisibles (%s) : %r", ", ".join(wanted), exc)
+            return []
+
     def history(self, mode: str, rows: Any, *, life: str | None = None, **kw: Any) -> dict[str, Any]:
-        """Une trame ``history`` : l'empreinte de sa vie, et ce qu'on peut montrer des fichiers qu'elle a envoyés
-        avec ses messages de ce morceau du fil."""
+        """Une trame ``history`` : l'empreinte de sa vie, ce qu'on peut montrer des fichiers qu'elle a envoyés avec
+        ses messages de ce morceau du fil, et les petites bulles de ce qu'elle a fait en les écrivant."""
         ids = [i for r in rows if r.role == "assistant" for i in protocol.sent_ids(r.attachments)]
         shared = {m.id: m for m in self.shared(ids)}
-        return protocol.history(mode, rows, life=self.life() if life is None else life, shared=shared, **kw)
+        notes = {n.id: n for n in self.notes(ids)}
+        return protocol.history(mode, rows, life=self.life() if life is None else life, shared=shared, notes=notes,
+                                **kw)
 
     def life(self) -> str:
         """L'empreinte de sa vie, jointe à chaque trame ``history`` (vide si le port ne la connaît pas)."""

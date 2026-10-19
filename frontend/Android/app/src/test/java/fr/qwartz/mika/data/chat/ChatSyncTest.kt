@@ -20,6 +20,7 @@ import fr.qwartz.mika.data.chat.ChatSync.stripProsody
 import fr.qwartz.mika.data.chat.ChatSync.withAttachments
 import fr.qwartz.mika.data.net.AttachmentRef
 import fr.qwartz.mika.data.net.HistoryEntry
+import fr.qwartz.mika.data.net.MessageNote
 import fr.qwartz.mika.data.net.RejectedAttachment
 import fr.qwartz.mika.data.net.ToolUse
 import org.junit.Assert.assertEquals
@@ -588,5 +589,36 @@ class ChatSyncTest {
         val kept = StoredMessage("et ça", USER, ts = 2, cid = "c2", status = MessageStatus.PENDING, mode = "pro")
         val again = mergeHistory(mutableListOf(kept), listOf(HistoryEntry(id = 6, role = "user", text = "et ça", ts = 2.0, mode = "pro")), MAX, nowMs = 1_000)
         assertEquals("pro", again.history.single().mode)
+    }
+
+    // ── Ses petites bulles (ADR 0119) ──
+
+    @Test fun `ses petites bulles passent du fil du serveur à ses réponses, jamais aux messages de la personne`() {
+        val looked = listOf(MessageNote("location", "Rue de la République, Lyon", 1_760_889_000_000))
+        val entries = listOf(
+            HistoryEntry(id = 20, role = "user", text = "devine où je suis", ts = 20.0, notes = looked),
+            HistoryEntry(id = 21, role = "assistant", text = "Rue de la République !", ts = 21.0, notes = looked),
+            HistoryEntry(id = 22, role = "assistant", text = "et sinon ?", ts = 22.0, notes = emptyList()),
+        )
+        val got = mergeHistory(mutableListOf(), entries, MAX, nowMs = 1_000).history
+        assertNull(got[0].notes)
+        assertEquals(looked, got[1].notes)
+        assertNull(got[2].notes)
+    }
+
+    @Test fun `une réponse reçue en direct garde ses petites bulles, et le serveur les met à jour`() {
+        val looked = MessageNote("location", "Rue de la République, Lyon", 1_760_889_000_000)
+        val live = StoredMessage("Tu es en ville", VTUBER, ts = 21, id = 21, notes = listOf(looked))
+        // le rattrapage d'un serveur qui ne dit rien de ses bulles ne les retire pas
+        val silent = HistoryEntry(id = 21, role = "assistant", text = "Tu es en ville", ts = 21.0)
+        val same = mergeHistory(mutableListOf(live), listOf(silent), MAX, nowMs = 1_000)
+        assertEquals(0, same.reworked)
+        assertEquals(listOf(looked), same.history.single().notes)
+        // la position oubliée depuis : la bulle reste, sans lieu
+        val forgotten = silent.copy(notes = listOf(looked.copy(text = "")))
+        val refreshed = mergeHistory(same.history, listOf(forgotten), MAX, nowMs = 1_000)
+        assertEquals(1, refreshed.reworked)
+        assertEquals(listOf(looked.copy(text = "")), refreshed.history.single().notes)
+        assertEquals(0, mergeHistory(refreshed.history, listOf(forgotten), MAX, nowMs = 1_000).reworked)
     }
 }

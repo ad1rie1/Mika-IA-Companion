@@ -2,6 +2,7 @@ package fr.qwartz.mika.data.net
 
 import fr.qwartz.mika.core.Clock
 import fr.qwartz.mika.core.Logger
+import fr.qwartz.mika.data.location.WhereShare
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -94,6 +95,9 @@ class MikaSocket(
     private var readUpTo: Long? = null
     private var sentReadUpTo = 0L
 
+    /** Où est la personne, si elle le dit (ADR 0119) : la dernière valeur, redite à chaque socket ; `null` : rien ne part. */
+    private var where: WhereShare? = null
+
     /** La saisie dite à la socket en cours (trame `composing`) : une socket neuve n'en sait rien. */
     private var composing = false
 
@@ -156,6 +160,7 @@ class MikaSocket(
         unacked.clear()
         unackedBytes = 0
         readUpTo = null
+        where = null
         teardown(graceful = true)
         endpoint = null
         stopped = false
@@ -190,6 +195,27 @@ class MikaSocket(
         // Une valeur qui redescend vient du fil d'une autre vie (ADR 0056) : ce qu'en savait la socket ne vaut plus.
         if (wanted != null && wanted < sentReadUpTo) sentReadUpTo = 0L
         if (open) sendRead()
+    }
+
+    /**
+     * Où est la personne (« Lui dire où je suis », ADR 0119) : une position, [WhereShare.Off] pour l'effacer chez
+     * Mika, ou `null` — hors du premier plan — pour ne rien dire, ni maintenant ni aux sockets suivantes. Envoyé
+     * tout de suite si la socket est ouverte, puis à chaque ouverture — jamais en file : seule la dernière valeur
+     * compte, et l'âge d'une position se calcule au moment où elle part.
+     */
+    fun setWhere(where: WhereShare?) {
+        if (where == this.where) return
+        this.where = where
+        if (open) sendWhere()
+    }
+
+    /**
+     * Fin de session : une position dite à cette socket s'efface chez Mika tant qu'elle l'entend encore (sa
+     * position ne survit pas à la session, ADR 0119). Au mieux : socket fermée, rien ne part.
+     */
+    fun withdrawWhere() {
+        if (where is WhereShare.Fix && open) sendNow(FrameCodec.whereOff())
+        where = null
     }
 
     /**
@@ -337,6 +363,8 @@ class MikaSocket(
         // Ce qui a été lu, redit à chaque socket : le serveur ignore ce qui n'avance pas.
         sentReadUpTo = 0L
         sendRead()
+        // Où elle est, si elle le dit : redit à chaque socket, avec l'âge de la mesure à cet instant.
+        sendWhere()
         // Une saisie dite à la précédente : sa fermeture l'a close ; la frappe suivante la redira.
         composing = false
         flushOutbox()
@@ -543,9 +571,17 @@ class MikaSocket(
         if (sendNow(FrameCodec.read(upTo))) sentReadUpTo = upTo
     }
 
+    private fun sendWhere() {
+        val text = when (val w = where ?: return) {
+            WhereShare.Off -> FrameCodec.whereOff()
+            is WhereShare.Fix -> FrameCodec.where(w.lat, w.lon, w.accuracyM, w.label, ageMs = clock.elapsedMs() - w.fixElapsedMs)
+        }
+        sendNow(text)
+    }
+
     /**
      * Envoyer si la socket est ouverte, sinon rien — jamais en file. Pour les trames de contrôle
-     * (`sync`, `ping`, `presence`, `composing`, `read`, `approval`) dont toute la valeur est d'être actuelles.
+     * (`sync`, `ping`, `presence`, `composing`, `read`, `where`, `approval`) dont toute la valeur est d'être actuelles.
      */
     private fun sendNow(text: String): Boolean {
         val s = socket ?: return false

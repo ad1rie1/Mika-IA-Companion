@@ -52,6 +52,7 @@ from mika.plugins.camera import CAMERA
 from mika.plugins.email import EMAIL
 from mika.plugins.forge import FORGE
 from mika.plugins.imaging import IMAGING
+from mika.plugins.location import LOCATION
 from mika.plugins.mcp import MCP
 from mika.plugins.rss import RSS
 from mika.plugins.sensors import SENSORS
@@ -71,7 +72,7 @@ def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, WORLD, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
             EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, ATTACHMENTS, EMAIL, RSS, CAMERA, FORGE, SENSORS,
-            IMAGING, MCP, WEB, WAKEUP, TEAMS]
+            IMAGING, MCP, WEB, WAKEUP, TEAMS, LOCATION]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -104,8 +105,8 @@ EXTERNAL = "mcp.*"
 PROJECT_TOOLS = frozenset({"projects", "workshop", "memory", "email", "rss", "camera", "forge", "forge_apps",
                            EXTERNAL})
 #: les lots qu'un réveil par API sans projet peut avoir (ADR 0068) : chacun choisit les siens parmi eux, et garde de
-#: quoi conclure (``wakeup``)
-WAKE_TOOLS = frozenset({"wakeup", "memory", "email", "rss", "camera", "forge", "forge_apps", EXTERNAL})
+#: quoi conclure (``wakeup``) ; ``goals`` y plante un rappel, y ouvre une exploration (ADR 0117)
+WAKE_TOOLS = frozenset({"wakeup", "memory", "email", "rss", "camera", "forge", "forge_apps", "goals", EXTERNAL})
 
 # Les lots « en main » de chaque sorte d'épisode : ce qu'une conversation ordinaire sert vraiment — chercher
 # dans sa mémoire, dire qu'une promesse est tenue, poser un rappel. Le reste (l'identité, les projets, le
@@ -137,7 +138,7 @@ def policies() -> dict[str, EpisodePolicy]:
                                   tool_bundles=frozenset({"memory", "identity", "goals", "projects", "email", "rss",
                                                           "camera", "forge", "forge_apps", "self", "attention",
                                                           "social", "world", "shares", "attachments", "imaging",
-                                                          "teams", EXTERNAL}),
+                                                          "teams", "location", EXTERNAL}),
                                   core_bundles=REPLY_IN_HAND),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,

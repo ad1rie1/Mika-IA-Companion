@@ -618,28 +618,45 @@ def test_an_app_signals_each_new_article_into_its_queue_read_in_batches_under_it
 @needs_bwrap
 def test_a_service_signals_the_temperature_twice_a_day_and_she_tells_it(tmp_path):
     """Un service relève la température à 8 h et à 18 h et la signale : chaque relevé est lu (un par appel) et dit à
-    Adrien — quatre en deux jours, sous un quota de quatre par jour."""
+    Adrien, qui lui répond — quatre en deux jours, sous un quota de quatre par jour. (S'il ne lui répondait plus, ce
+    qu'une app trouve attendrait qu'il l'ait fait : ``test_speaking_up``, 2026-10-19.)"""
+    from mika.app import composition
     from mika.contracts import forge as forge_c
     from mika.contracts import runtime as rt
-    from mika.kernel.clock import HOUR, US
+    from mika.kernel.clock import HOUR, MINUTE, US
     from mika.sim.clock import run_virtual
     from mika.vocab.episodes import Kind
-    from tests.fixtures.mika import boot, build, connect
+    from tests.fixtures.mika import DOC, build, connect, said
     from tests.unit.test_forge_console import events
 
     forge = ForgeHost(tmp_path / "forge", http_get=lambda url: "", public=lambda host: True)
     kernel, clock, _, _ = build(tmp_path, _judging_llm("il fait doux à Lyon"), ports={"forge": forge})
 
+    async def answers():
+        """Adrien répond à ce qu'elle lui écrit d'elle-même, quelques minutes après."""
+        seen = 0
+        while True:
+            await asyncio.sleep(10 * MINUTE / US)
+            sent = [e for e in events(kernel, rt.UTTERANCE) if e.data.kind == Kind.INITIATIVE]
+            if len(sent) > seen:
+                seen = len(sent)
+                await (await kernel.perceive(said("user_1", "ah merci !"))).reply
+
     async def main():
-        await boot(kernel)
+        # il répond à tout : elle lui écrit plus souvent — ce n'est pas son plafond du jour qu'on regarde ici
+        await kernel.start(configure=lambda k: composition.configure(k, DOC, {"agency": {"daily_cap": 12}}))
+        answering = None
         try:
             await connect(kernel, "user_1", "Adrien", operator=True)
             await install(kernel, forge, "meteo", WEATHER, WEATHER_CODE)
+            answering = asyncio.create_task(answers())
             await asyncio.sleep(48 * HOUR / US)
             return {"queued": events(kernel, forge_c.QUEUED), "judged": events(kernel, forge_c.JUDGED),
                     "said": [e for e in events(kernel, rt.UTTERANCE) if e.data.kind == Kind.INITIATIVE
                              and any(x.startswith("forge-news:meteo:") for x in e.data.provenance)]}
         finally:
+            if answering is not None:
+                answering.cancel()
             forge.shutdown()
             await kernel.stop()
 

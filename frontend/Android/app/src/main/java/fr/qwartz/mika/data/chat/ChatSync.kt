@@ -2,6 +2,7 @@ package fr.qwartz.mika.data.chat
 
 import fr.qwartz.mika.data.net.AttachmentRef
 import fr.qwartz.mika.data.net.HistoryEntry
+import fr.qwartz.mika.data.net.MessageNote
 import fr.qwartz.mika.data.net.MikaProtocol
 import fr.qwartz.mika.data.net.RejectedAttachment
 import fr.qwartz.mika.data.net.Timestamps
@@ -87,6 +88,8 @@ data class StoredMessage(
     var mode: String? = null,
     /** Une réponse pro : les outils dont elle s'est servie, tels que l'historique les dit (`null` : rien de dit). */
     var tools: List<ToolUse>? = null,
+    /** Une réponse d'elle : ses petites bulles (ADR 0119 : elle a regardé où tu es), montrées avant elle ; `null` : rien. */
+    var notes: List<MessageNote>? = null,
 ) {
     val isPro: Boolean get() = mode == MikaProtocol.CHAT_MODE_PRO
 }
@@ -326,7 +329,7 @@ object ChatSync {
     private const val FILENAME_MAX = 80
     private val FILENAME_CONTROL = Regex("""[\x00-\x1f\x7f]+""")
     /** Les blancs que `str.split()` coupe en Python, au-delà de ceux de `\s` (U+00A0, U+202F…). */
-    private val FILENAME_BLANKS = Regex("""[\s\u0085   -     　]+""")
+    private val FILENAME_BLANKS = Regex("""[\s\u0085   -   　]+""")
 
     /**
      * Un nom de fichier tel que le serveur le garde (`protocol.py::sanitize_filename`) : contrôles en espaces,
@@ -365,7 +368,7 @@ object ChatSync {
         val sawReply: Boolean,
         /** Ses réponses déjà là dont l'avis a changé (donné d'un autre appareil, ADR 0113). */
         val judged: Int = 0,
-        /** Des lignes déjà là dont le mode ou les outils ont été dits par le serveur (ADR 0116). */
+        /** Des lignes déjà là dont le mode, les outils (ADR 0116) ou les petites bulles (ADR 0119) ont été dits par le serveur. */
         val reworked: Int = 0,
     )
 
@@ -424,7 +427,8 @@ object ChatSync {
                     shown.verdictNote = note
                     judged += 1
                 }
-                // …et son mode et ses outils (ADR 0116) : une réponse reçue en direct n'apprend ses outils qu'ici
+                // …et son mode et ses outils (ADR 0116) : une réponse reçue en direct n'apprend ses outils qu'ici ; ses
+                // petites bulles (ADR 0119), elle les a reçues en direct, mais le lieu d'une position oubliée s'efface
                 if (rework(history.firstOrNull { it.id == id }, entry)) reworked += 1
                 continue
             }
@@ -468,6 +472,7 @@ object ChatSync {
                         verdictNote = if (sender == Sender.MIKA) verdictOf(entry).second else null,
                         mode = modeOf(entry.mode),
                         tools = toolsOf(entry, sender),
+                        notes = notesOf(entry, sender),
                     ),
                 )
                 added += 1
@@ -488,18 +493,25 @@ object ChatSync {
     private fun toolsOf(entry: HistoryEntry, sender: Sender): List<ToolUse>? =
         entry.tools?.takeIf { sender == Sender.MIKA && modeOf(entry.mode) != null }
 
+    /** Les petites bulles d'une ligne (ADR 0119) : seulement pour une réponse d'elle. */
+    private fun notesOf(entry: HistoryEntry, sender: Sender): List<MessageNote>? =
+        entry.notes?.takeIf { sender == Sender.MIKA && it.isNotEmpty() }
+
     /**
-     * Le mode et les outils d'une ligne déjà montrée, tels que le serveur les dit (il est la référence : un
-     * message qu'il n'a pas reçu en mode pro ne l'est pas). Des outils absents de la ligne ne retirent pas ceux
-     * qu'on connaît déjà. `true` si quelque chose a changé.
+     * Le mode, les outils et les petites bulles d'une ligne déjà montrée, tels que le serveur les dit (il est la
+     * référence : un message qu'il n'a pas reçu en mode pro ne l'est pas ; le lieu d'une position oubliée s'efface).
+     * Des outils ou des bulles absents de la ligne ne retirent pas ceux qu'on connaît déjà. `true` si quelque chose
+     * a changé.
      */
     private fun rework(shown: StoredMessage?, entry: HistoryEntry): Boolean {
         if (shown == null) return false
         val mode = modeOf(entry.mode)
         val tools = toolsOf(entry, shown.sender) ?: shown.tools.takeIf { mode != null }
-        if (shown.mode == mode && shown.tools == tools) return false
+        val notes = notesOf(entry, shown.sender) ?: shown.notes
+        if (shown.mode == mode && shown.tools == tools && shown.notes == notes) return false
         shown.mode = mode
         shown.tools = tools
+        shown.notes = notes
         return true
     }
 

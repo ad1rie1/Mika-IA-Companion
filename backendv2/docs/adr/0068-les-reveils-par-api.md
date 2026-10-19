@@ -1,5 +1,7 @@
 # 0068 — Les réveils par API
 
+*Complété par l'ADR 0117 : le JSON d'un service, la signature d'un webhook, ses buts dans un réveil.*
+
 **Contexte.** Rien ne permettait à un système extérieur (un script, une domotique, une CI, une alerte) de **faire agir**
 Mika. `POST /api/perceptions` (plugin `sensors`) dépose un signal cité dans son attention : il peut colorer son humeur
 ou, des heures plus tard, faire naître une exploration, mais jamais un travail tout de suite. Le seul jeton de ce

@@ -125,6 +125,13 @@ def risks(endpoint: Any) -> list[str]:
     if endpoint.rouse:
         out.append("Il passe outre son sommeil : chaque appel la réveille la nuit, comme le message d'une proche, et "
                    "son compte rendu part aussitôt (la nuit aussi).")
+    if "goals" in endpoint.bundles:
+        out.append("Il a ses buts : un appel peut lui faire planter un rappel pour qui il rend compte, ou ouvrir une "
+                   "exploration qui garde les outils du réveil et qu'elle reprendra en quelques séances — ce qu'un "
+                   "appel apporte agit alors plus tard, hors de lui.")
+    if endpoint.signed and endpoint.key is not None and not endpoint.key.signs:
+        out.append("Il est signé, mais sa clé a été générée avant : aucune signature ne passe (la clé présentée, si). "
+                   "Génère une clé neuve.")
     return out
 
 
@@ -261,6 +268,10 @@ def _tab_state(s: WakeupState, frame: Frame, ctx: InspectContext) -> list[Block]
         ("outils", ", ".join(ep.bundles) or "aucun (seulement de quoi conclure)"),
         ("passe outre son sommeil", "oui : il la réveille" if ep.rouse else "non : il attend son réveil"),
         ("rend compte à", notify_words(frame, ep.notify)),
+        ("signé", "oui : la clé présentée, ou le corps signé par elle (X-Hub-Signature-256)" if ep.signed else
+         "non : la clé présentée (Authorization: Bearer, ou X-Gitlab-Token)"),
+        ("champs gardés", Text(", ".join(ep.fields), "mono") if ep.fields else
+         "tout le corps (quand l'appel n'a pas de « text »)"),
         ("plafonds", f"{ep.per_hour} appels par heure, {ep.max_pending} en attente, texte de "
                      f"{ep.max_chars} caractères"),
         ("durée de vie d'un appel", f"{max(1, ep.lifetime_us // 3_600_000_000)} h"),
@@ -277,8 +288,18 @@ def _tab_state(s: WakeupState, frame: Frame, ctx: InspectContext) -> list[Block]
     ), title="Sa clé", columns=3))
     blocks.append(Code(f"curl -X POST <adresse du serveur>/api/wake/{ep.name} \\\n"
                        "  -H 'Authorization: Bearer <la clé>' -H 'Content-Type: application/json' \\\n"
-                       "  -d '{\"text\": \"…\"}'",
-                       title="L'appeler (202 : reçu ; 401 : nom ou clé ; 403 : désactivé ; 400 : texte ; 429 : trop)"))
+                       "  -d '{\"text\": \"…\", \"context\": {\"source\": \"…\"}}'",
+                       title="L'appeler (202 : reçu ; 401 : nom ou clé ; 403 : désactivé ; 400 : rien à lire ; "
+                             "429 : trop)"))
+    blocks.append(Note("Un service qui envoie son propre JSON (GitHub, Gitea, Home Assistant…) l'appelle tel quel : "
+                       "sans « text », le corps devient ce que l'appel apporte, en lignes « chemin: valeur » (ses "
+                       "champs gardés seulement, s'il en a), l'évènement annoncé en tête. Un « ping » de GitHub reçoit "
+                       "200 sans rien journaliser ; l'identifiant d'une livraison sert de clé d'idempotence.",
+                       tone="muted"))
+    if ep.signed:
+        blocks.append(Code(f"Adresse : <adresse du serveur>/api/wake/{ep.name}\nContent type : application/json\n"
+                           "Secret : <la clé>",
+                           title="Un webhook GitHub, Gitea ou Forgejo (il signe le corps avec la clé)"))
     blocks.append(ActionSlot("wakeup.nouvelle_cle", title="Générer une clé neuve"))
     if key is not None:
         blocks.append(ActionSlot("wakeup.retirer_cle", title="Retirer la clé"))

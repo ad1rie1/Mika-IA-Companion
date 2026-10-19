@@ -7,6 +7,7 @@ import fr.qwartz.mika.data.approvals.ApprovalsRepository
 import fr.qwartz.mika.data.auth.AuthRepository
 import fr.qwartz.mika.data.auth.Session
 import fr.qwartz.mika.data.chat.ChatEngine
+import fr.qwartz.mika.data.location.WhereShare
 import fr.qwartz.mika.data.mind.MindStateRepository
 import fr.qwartz.mika.data.net.ApprovalDecision
 import fr.qwartz.mika.data.net.LinkState
@@ -36,7 +37,8 @@ import kotlinx.coroutines.withContext
  *
  * La présence suit le premier plan : en-tête à la connexion, puis trame `presence` à chaque passage —
  * une app quittée depuis peu ne fait pas croire à Mika qu'on est devant l'écran. Ce qui
- * a été lu suit [reads] (trame `read`), seulement si la personne le permet.
+ * a été lu suit [reads] (trame `read`), seulement si la personne le permet ; où elle est suit [wheres] (trame
+ * `where`, ADR 0119), seulement app au premier plan.
  *
  * Les trames reçues sont traitées une à une, jusqu'au bout (base écrite), dans le contexte sérialisé.
  * L'ouverture d'une socket passe par la même file : ce qui dépend de la socket (les cartes d'accord)
@@ -57,6 +59,11 @@ class ConnectionManager(
     private val logger: Logger = Logger.NONE,
     /** Jusqu'où la personne a lu, si elle permet de le dire (« Lui dire quand j'ai lu ») ; `null` : rien ne part. */
     private val reads: Flow<Long?> = emptyFlow(),
+    /**
+     * Où est la personne (« Lui dire où je suis », ADR 0119) : sa position, `Off` pour l'effacer, `null` hors du
+     * premier plan (rien ne part, même la socket ouverte).
+     */
+    private val wheres: Flow<WhereShare?> = emptyFlow(),
 ) : MikaSocket.Listener {
 
     enum class Holder { UI, REPLY }
@@ -78,6 +85,8 @@ class ConnectionManager(
     private val frameLock = Mutex()
     /** Change à chaque fin de session : une trame d'avant n'écrit plus rien après l'effacement. */
     @Volatile private var epoch = 0
+    /** La dernière valeur de [wheres] : redonnée à la socket repartie de zéro (« Effacer les messages »). */
+    private var latestWhere: WhereShare? = null
 
     /** À appeler une fois, après la restauration de la session. */
     fun start() {
@@ -94,6 +103,12 @@ class ConnectionManager(
         scope.launch { foreground.collect { onForeground(it) } }
         scope.launch { network.collect { onNetwork(it) } }
         scope.launch { reads.collect { socket.setReadUpTo(it) } }
+        scope.launch {
+            wheres.collect {
+                latestWhere = it
+                socket.setWhere(it)
+            }
+        }
         scope.launch { auth.session.collect { reconcile() } }
     }
 
@@ -151,6 +166,8 @@ class ConnectionManager(
     /** Fin de session : plus rien ne part ni n'arrive, et une trame en cours de traitement finit d'abord. */
     suspend fun shutdown() = withContext(engineContext) {
         epoch++
+        // Sa position ne survit pas à la session (ADR 0119) : effacée chez Mika si la socket l'entend encore.
+        socket.withdrawWhere()
         socket.reset()
         frameLock.withLock { }
         chat.reset()
@@ -166,6 +183,8 @@ class ConnectionManager(
     suspend fun clearThread(wipe: suspend () -> Unit) = withContext(engineContext) {
         epoch++
         socket.reset()
+        // La session continue : où elle est, si elle le dit, repart avec la prochaine socket.
+        socket.setWhere(latestWhere)
         frameLock.withLock { }
         wipe()
         chat.reset()

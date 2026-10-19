@@ -707,10 +707,11 @@ def _relational(s: AttentionState, person: str, emotion: str, intensity: float, 
 # ── Réducteurs ────────────────────────────────────────────────────────────
 
 
-def owed(reasons: Any) -> bool:
-    """Saluer qui arrive, dire un rappel promis : ce n'est pas prendre la parole pour qu'on lui réponde
-    (``agency.NOT_SPEAKING_UP``, déclaré une fois)."""
-    return bool(agency_c.NOT_SPEAKING_UP & set(reasons))
+def owed(reasons: Any, *, waiting: bool = False) -> bool:
+    """Saluer qui arrive, dire un rappel promis : ce n'est pas prendre la parole pour qu'on lui réponde — sauf s'ils
+    emportent autre chose, ou si saluer, c'est relancer qui ne lui a pas répondu (``agency.spoke_up``, déclaré une
+    fois)."""
+    return not agency_c.spoke_up(reasons, waiting=waiting)
 
 
 def _wrote_to(s: AttentionState, person: str, at: int, *, asked: bool, due: bool, ordinary: bool,
@@ -797,8 +798,10 @@ def _uttered(s: AttentionState, e, cx) -> AttentionState:
     if d.kind == Kind.INITIATIVE:
         reasons = s.openings.get(e.correlation, "").split(",")
         s = replace(s, openings=s.openings.delete(e.correlation))
-        # dû (saluer, tenir parole) ou un simple encouragement : rien n'est attendu en retour
-        due = owed(reasons) or bool(others_c.WELL_WISHES & set(reasons))
+        # dû (saluer, tenir parole) ou un simple encouragement : rien n'est attendu en retour — une salutation qui
+        # apporte une nouvelle, ou qui relance, si (2026-10-19 : un « hello ! » et un récit ne comptaient pour rien)
+        waiting = (s.exchanges.get(person) or Exchange()).initiatives > 0
+        due = owed(reasons, waiting=waiting) or bool(others_c.WELL_WISHES & set(reasons))
         if not due:
             deadline = reply_deadline(cx, person, d.channel or "", e.at, p)
             # par messagerie, en privé, à quelqu'un devant aucun écran qui se tait sur ce qu'on y lit : si son

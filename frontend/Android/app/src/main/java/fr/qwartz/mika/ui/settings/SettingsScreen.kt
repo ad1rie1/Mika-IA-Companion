@@ -5,6 +5,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -57,6 +58,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
+import fr.qwartz.mika.core.LocationMonitor
 import fr.qwartz.mika.data.auth.Session
 import fr.qwartz.mika.data.push.PushState
 import fr.qwartz.mika.data.settings.Settings as AppSettings
@@ -64,8 +66,9 @@ import fr.qwartz.mika.data.settings.ThemeMode
 import kotlinx.coroutines.launch
 
 /**
- * Les paramètres : le compte, les notifications (et si elles arrivent app fermée, par Firebase), l'apparence, les
- * données. Il n'y a plus de connexion en arrière-plan à régler (ADR 0077) : l'app ne se connecte qu'ouverte.
+ * Les paramètres : le compte, les notifications (et si elles arrivent app fermée, par Firebase), la position (« Lui
+ * dire où je suis », ADR 0119), l'apparence, les données. Il n'y a plus de connexion en arrière-plan à régler
+ * (ADR 0077) : l'app ne se connecte qu'ouverte.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,12 +81,23 @@ fun SettingsScreen(graph: AppGraph, onBack: () -> Unit) {
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     var notifications by remember { mutableStateOf(notificationsEnabled(context)) }
     val push by graph.push.state.collectAsStateWithLifecycle()
+    // La localisation peut être retirée (ou donnée) dans les réglages du téléphone : revue à chaque retour.
+    var locationGranted by remember { mutableStateOf(LocationMonitor.permitted(context)) }
+    var locationRefused by rememberSaveable { mutableStateOf(false) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         notifications = notificationsEnabled(context)
+        locationGranted = LocationMonitor.permitted(context)
+        if (locationGranted) locationRefused = false
     }
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         notifications = notificationsEnabled(context)
         scope.launch { graph.settings.setNotificationsAsked() }
+    }
+    // Précise ou approximative (Android 12 et plus laisse choisir) : l'une ou l'autre suffit pour l'allumer.
+    val askLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        locationGranted = result.values.any { it } || LocationMonitor.permitted(context)
+        locationRefused = !locationGranted
+        if (locationGranted) scope.launch { graph.settings.setShareWhere(true) }
     }
 
     Scaffold(
@@ -154,6 +168,34 @@ fun SettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                 checked = settings.shareReads,
                 onChange = { on -> scope.launch { graph.settings.setShareReads(on) } },
             )
+
+            Section(stringResource(R.string.settings_where))
+            SwitchRow(
+                title = stringResource(R.string.settings_where_title),
+                // allumé mais l'autorisation retirée : rien ne part, et le dire
+                summary = stringResource(
+                    if (settings.shareWhere && !locationGranted) R.string.settings_where_revoked else R.string.settings_where_summary,
+                ),
+                checked = settings.shareWhere && locationGranted,
+                onChange = { on ->
+                    when {
+                        !on -> scope.launch { graph.settings.setShareWhere(false) }
+                        locationGranted -> scope.launch { graph.settings.setShareWhere(true) }
+                        else -> askLocation.launch(
+                            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION),
+                        )
+                    }
+                },
+            )
+            if (locationRefused && !locationGranted) {
+                // Refusée deux fois, Android ne redemande plus : seuls ses réglages peuvent la donner.
+                InfoRow(
+                    title = stringResource(R.string.settings_where_refused_title),
+                    summary = stringResource(R.string.settings_where_refused),
+                    action = stringResource(R.string.settings_where_open_settings),
+                    onAction = { openAppSettings(context) },
+                )
+            }
 
             Section(stringResource(R.string.settings_appearance))
             Column(Modifier.selectableGroup()) {
@@ -296,6 +338,15 @@ private fun notificationsEnabled(context: Context): Boolean {
         return false
     }
     return androidx.core.app.NotificationManagerCompat.from(context).areNotificationsEnabled()
+}
+
+/** La fiche de l'app dans les réglages du téléphone, où se donnent les autorisations qu'Android ne redemande plus. */
+private fun openAppSettings(context: Context) {
+    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+    try {
+        context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+    }
 }
 
 private fun openNotificationSettings(context: Context) {

@@ -163,7 +163,8 @@ def test_the_key_can_be_a_file_of_the_data_folder_and_the_console_wins(ctx) -> N
 def test_a_closed_phone_gets_the_sealed_message(ctx) -> None:
     phone = ctx.phone()
     ctx.register(phone, device="fcm-bea")
-    sent = ctx.say(phone.handle, attachments=("f1",))
+    # un fichier qu'elle envoie, et la petite bulle d'un regard sur sa position (ADR 0119) : pas un fichier
+    sent = ctx.say(phone.handle, attachments=("f1" * 16, "location:7"))
     assert [device for device, _ in sent] == ["fcm-bea"]
     body = seal.unseal(seal.key_from(KEY), sent[0][1])
     assert body["t"] == "speech" and body["text"] == "tu es rentrée ?" and body["id"] == 100

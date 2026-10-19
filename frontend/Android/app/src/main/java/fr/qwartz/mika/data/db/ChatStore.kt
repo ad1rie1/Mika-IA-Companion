@@ -7,6 +7,7 @@ import fr.qwartz.mika.data.chat.MessageAttachment
 import fr.qwartz.mika.data.chat.MessageStatus
 import fr.qwartz.mika.data.chat.Sender
 import fr.qwartz.mika.data.chat.StoredMessage
+import fr.qwartz.mika.data.net.MessageNote
 import fr.qwartz.mika.data.net.ToolUse
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -83,6 +84,7 @@ class ChatStore(private val db: MikaDatabase) : ThreadStore {
     companion object {
         private val ATTACHMENTS = ListSerializer(MessageAttachment.serializer())
         private val TOOLS = ListSerializer(ToolUse.serializer())
+        private val NOTES = ListSerializer(MessageNote.serializer())
 
         fun MessageEntity.toModel() = StoredMessage(
             text = text,
@@ -107,6 +109,7 @@ class ChatStore(private val db: MikaDatabase) : ThreadStore {
             verdictNote = verdictNote,
             mode = ChatSync.modeOf(mode),
             tools = tools?.let { decodeTools(it) },
+            notes = notes?.let { decodeNotes(it) },
         )
 
         fun StoredMessage.toEntity() = MessageEntity(
@@ -137,11 +140,19 @@ class ChatStore(private val db: MikaDatabase) : ThreadStore {
             verdictNote = verdictNote,
             mode = ChatSync.modeOf(mode),
             tools = tools?.let { MikaJson.encodeToString(TOOLS, it) },
+            notes = notes?.takeIf { it.isNotEmpty() }?.let { MikaJson.encodeToString(NOTES, it) },
         )
 
         /** Les outils d'une réponse pro (ADR 0116) ; illisibles, rien — le prochain historique les redit. */
         private fun decodeTools(raw: String): List<ToolUse>? = try {
             MikaJson.decodeFromString(TOOLS, raw)
+        } catch (_: IllegalArgumentException) {
+            null
+        }
+
+        /** Ses petites bulles (ADR 0119) ; illisibles, rien — sa réponse reste. */
+        private fun decodeNotes(raw: String): List<MessageNote>? = try {
+            MikaJson.decodeFromString(NOTES, raw).ifEmpty { null }
         } catch (_: IllegalArgumentException) {
             null
         }

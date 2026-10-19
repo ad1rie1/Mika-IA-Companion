@@ -140,6 +140,7 @@ class ChatEngine(
                 emotion = f.emotion.ifEmpty { null },
                 emotionIntensity = f.emotionIntensity,
                 mode = ChatSync.modeOf(f.mode),
+                notes = f.notes?.takeIf { it.isNotEmpty() },
             )
             thread.add(row)
             trim(this)

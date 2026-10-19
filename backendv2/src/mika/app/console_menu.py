@@ -48,6 +48,7 @@ MENU = (
         MenuLink("Flux RSS", "sens/flux", ("reglages/flux",)),
         MenuLink("Caméra", "sens/camera"),
         MenuLink("Appareils", "sens/appareils", ("reglages/appareils",)),
+        MenuLink("Localisation", "sens/positions"),
         MenuLink("Réveils par API", "reveils", ("reglages/reveils",)),
         MenuLink("Dépôts Git", "reglages/depots"),
     )),

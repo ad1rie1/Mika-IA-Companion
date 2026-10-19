@@ -114,6 +114,17 @@ object MikaProtocol {
     const val TYPE_COMPOSING = "composing"
     const val TYPE_APPROVAL = "approval"
     const val TYPE_READ = "read"
+    /** Où est la personne (« Lui dire où je suis », ADR 0119) : sa position, ou `off` pour l'effacer. */
+    const val TYPE_WHERE = "where"
+
+    // ── Sa position (ADR 0119 ; adapters/web/protocol.py `WHERE_*`, `note_item`) ──
+    /** Le nom du lieu tient sur une ligne, borné par le serveur : au-delà, il est coupé avant de partir. */
+    const val MAX_WHERE_LABEL_CHARS = 200
+    /** La sorte d'une petite bulle (`notes` d'une `speech` ou d'une ligne d'`history`) : elle a regardé où tu es. */
+    const val NOTE_LOCATION = "location"
+    /** Bornes de lecture des petites bulles, au-dessus de celles du serveur (le lieu, 200 caractères). */
+    const val MAX_NOTE_TEXT_CHARS = 400
+    const val MAX_MESSAGE_NOTES = 8
 
     const val MODE_INITIAL = "initial"
     const val MODE_CATCHUP = "catchup"

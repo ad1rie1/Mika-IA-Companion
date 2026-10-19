@@ -25,6 +25,9 @@ DONE = "wakeup_done"
 PREFIX = "wakeup:"
 #: personne à prévenir ; ses propriétaires (sinon : l'adresse d'un compte, ``user_<id>``)
 NOBODY, OWNERS = "personne", "proprietaire"
+#: l'argument du candidat d'un épisode de réveil qui dit à qui il rend compte (``NOBODY``, ``OWNERS`` ou l'adresse
+#: d'un compte) : c'est pour cette personne qu'un rappel se plante depuis un réveil (``goals``, ADR 0117)
+NOTIFY_ARG = "notify"
 
 
 def subject(call: int) -> str:

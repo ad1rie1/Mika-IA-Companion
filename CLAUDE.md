@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0116, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0119, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -541,7 +541,11 @@ ses identifiants sont dans `ARCHITECTURE.md`. Ce qui suit dit l'essentiel de cha
   - Outil `social_about`.
 - **agency** (ADR 0033, 0044, 0047, 0048, 0054, 0058, 0094) n'émet rien.
   - Le budget d'initiatives, la période réfractaire et les vetos.
-  - **Ne pas harceler** : après une initiative sans réponse, plus rien vers la personne, sauf une relance douce.
+  - **Ne pas harceler** : après une initiative sans réponse, plus rien vers la personne, sauf des relances qui
+    prennent de ses nouvelles, sans rien apporter de neuf (ADR 0118). Leur nombre (0 à 3, `follow_ups`) vient de
+    son tempérament, leur délai est tiré au sort autour du jour ; les suivantes disent ce que ce silence lui fait.
+    Saluer qui ne répond pas, c'est relancer. Ce qu'une app trouve attend qu'il ait répondu, sauf l'urgent
+    (`forge.APP_ALERT`).
     Pendant une conversation (son dernier message attend depuis moins de `live_wait_us`, 15 min), rien ne part,
     pas même ce qui regarde la personne ; seul ce qui prévient passe (ADR 0115).
   - Les motifs sont dans `contracts/agency.py` :
@@ -581,7 +585,7 @@ ses identifiants sont dans `ARCHITECTURE.md`. Ce qui suit dit l'essentiel de cha
 ### Les plugins
 
 Les plugins ont la même forme que les facultés mais une confiance restreinte : des signaux, des preuves, des sections
-citées, jamais la parole forcée. Leur monde vit hors du journal. Dix sont composés dans cet ordre.
+citées, jamais la parole forcée. Leur monde vit hors du journal. Onze sont composés dans cet ordre.
 
 - **email** (ADR 0027, 0037)
   - Plusieurs boîtes IMAP/SMTP et leurs dossiers, avec sa voix par boîte.
@@ -607,16 +611,31 @@ citées, jamais la parole forcée. Leur monde vit hors du journal. Dix sont comp
   outils sont approuvés un par un avec leur empreinte, et un outil changé est suspendu (capacité `mcp.call`).
 - **web** (ADR 0066) : sans outil à lui. Il apporte au client MCP un serveur système (DuckDuckGo et lecture de pages,
   dans une cage au réseau isolé).
-- **wakeup** (ADR 0068)
-  - `POST /api/wake/<nom>` avec la clé de ce réveil, dont seule l'empreinte est gardée.
+- **wakeup** (ADR 0068, 0117)
+  - `POST /api/wake/<nom>` avec la clé de ce réveil, dont seule l'empreinte est gardée. Un réveil signé
+    (`signed`) admet aussi le corps signé par sa clé (`X-Hub-Signature-256`, comme GitHub, Gitea, Forgejo) ; sa clé
+    est alors gardée chiffrée. GitLab recopie la clé (`X-Gitlab-Token`).
+  - Le corps est `{"text": "…", "context": …}` ou le JSON d'un service tel quel, mis en lignes `chemin: valeur`
+    (ses champs gardés, `fields`, s'il en a), coupé à la borne. Un `ping` reçoit 200 sans rien journaliser ; un
+    corps signé rejoué rend le même appel.
   - Le texte apporté est cité, et les consignes du réveil priment.
-  - Un épisode `WAKE` ou `WAKE_JOB`, avec les seuls outils du réveil.
+  - Un épisode `WAKE` ou `WAKE_JOB`, avec les seuls outils du réveil. Avec le lot `goals` (sans projet), elle plante
+    un rappel pour qui le réveil rend compte (`goal_plan_reminder`) ou ouvre une exploration qui garde les outils du
+    réveil (`goal_plan_exploration`, dans son mode seulement).
 - **teams** (ADR 0069)
   - L'extension apporte les conversations Teams sur `/api/teams/inbox` et `/api/teams/outbox`, avec une clé `mtk_…`.
     Rien ne parle à Microsoft depuis le serveur.
   - Le monde est dans `teams.db`.
   - Elle rédige à la place de la personne. La capacité `teams.send` sert trois modes : brouillon (le défaut),
     validation, autonome.
+- **location** (ADR 0119)
+  - Le téléphone dit où est la personne (trame `where`), si elle l'a permis (« Lui dire où je suis », coupé par
+    défaut), application ouverte seulement. Coordonnées exactes et nom du lieu sont des contenus personnels
+    (`location.located`) ; couper le réglage les efface (`location.cleared`).
+  - Ce n'est pas un signal : rien ne la remarque, aucune section ne la montre. Elle la regarde par `location_where`
+    (`REPLY` seulement), en tête-à-tête avec une personne authentifiée, et seulement sa position à elle.
+  - Un regard se voit : l'outil attache `location:<seq>` à sa réponse (`ToolResult.attach`), le port en fait une
+    petite bulle (`MindPort.notes`), que `speech` et `history` portent (`notes`).
 
 ## Autour du noyau
 
@@ -626,7 +645,8 @@ citées, jamais la parole forcée. Leur monde vit hors du journal. Dix sont comp
   - **WebSockets** : `/ws`, `/ws/camera`, `/ws/world`.
   - **Trames du serveur** : `speech`, `history`, `ack`, `inner_state_update`, `emotion_update`, `presence`, `composing`,
     `read`, `approvals`, `approval_result`, `verdict_result`, `tool`, `pong`.
-  - **Trames du client** : `identify`, `chat`, `sync`, `ping`, `presence`, `composing`, `read`, `approval`, `verdict`.
+  - **Trames du client** : `identify`, `chat`, `sync`, `ping`, `presence`, `composing`, `read`, `where`, `approval`,
+    `verdict`.
   - Une opératrice juge une de ses réponses depuis le chat (trame `verdict`, ADR 0113) ; l'historique ne porte l'avis
     (`verdict`, `verdict_note`) qu'aux connexions d'opératrice.
   - Le mode pro (ADR 0116) : un `chat` d'opératrice porte `mode: "pro"` ; ses outils arrivent en direct (trame `tool` :
@@ -783,9 +803,9 @@ Tout le reste se déclare par décorateurs.
 | Stockage | 0004 (remplacé), 0101 |
 | Mémoire et savoir | 0010, 0011, 0034, 0046, 0052, 0055, 0074–0087, 0091, 0092, 0099, 0102, 0109–0111 |
 | Identité et divulgation | 0012, 0035, 0048, 0075, 0092 |
-| Vie intérieure (affect, corps, besoins, liens, autres, attention, soi) | 0013, 0016–0019, 0028, 0032, 0033, 0036, 0047, 0053, 0058, 0088–0090, 0093–0098, 0100, 0107 |
+| Vie intérieure (affect, corps, besoins, liens, autres, attention, soi) | 0013, 0016–0019, 0028, 0032, 0033, 0036, 0047, 0053, 0058, 0088–0090, 0093–0098, 0100, 0107, 0118 |
 | Buts, projets, Forge, atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
-| Sens et plugins | 0022, 0027, 0037, 0038, 0044, 0061, 0063, 0064, 0066, 0068, 0069, 0106 |
+| Sens et plugins | 0022, 0027, 0037, 0038, 0044, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119 |
 | Fournisseurs LLM | 0026, 0072, 0073 |
 | Console et exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103 |
 | Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |

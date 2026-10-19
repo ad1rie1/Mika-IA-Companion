@@ -253,6 +253,22 @@ export interface SpeechMessage {
    * backendv2, ADR 0062 et 0063) ; `[]` quand il n'y en a pas.
    */
   attachments?: SentFile[];
+  /** Ce qu'elle a fait en écrivant ce message (ADR 0119) ; absent s'il n'y en a pas. */
+  notes?: MessageNote[];
+}
+
+/**
+ * Une petite bulle jointe à un de ses messages : ce qu'elle a fait en
+ * l'écrivant (ADR 0119). `kind` : `location` seulement aujourd'hui — elle a
+ * regardé où était la personne ; une sorte inconnue s'ignore. Du JSON jamais
+ * vérifié : `ui/messageNotes.ts::messageNotes` la valide avant tout usage.
+ */
+export interface MessageNote {
+  kind: string;
+  /** Ce qu'elle a vu : le lieu, sinon des coordonnées ; vide une fois oublié. */
+  text: string;
+  /** L'instant de la mesure qu'elle a regardée, en millisecondes Unix. */
+  at: number;
 }
 
 /**
@@ -318,6 +334,8 @@ export interface HistoryEntry {
    * possible). Validés par `ui/toolActivity.ts::toolUses`.
    */
   tools?: ToolUse[];
+  /** Sur un message d'elle : ce qu'elle a fait en l'écrivant, comme la `speech` (ADR 0119). */
+  notes?: MessageNote[];
 }
 
 /** Un outil dont elle s'est servie pour une réponse pro, tel que l'historique le garde. */

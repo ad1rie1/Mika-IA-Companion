@@ -30,6 +30,11 @@ sealed interface ServerFrame {
         val attachments: List<AttachmentRef> = emptyList(),
         /** `pro` : une réponse de travail (ADR 0116) — une seule bulle, du Markdown, jamais lue à voix haute. */
         val mode: String = "",
+        /**
+         * Ce qu'elle a fait en l'écrivant, à montrer en petites bulles (ADR 0119 : elle a regardé où tu es) ; `null` :
+         * rien. Lues à part par `FrameCodec` : une liste cassée n'emporte pas la parole.
+         */
+        val notes: List<MessageNote>? = null,
     ) : ServerFrame {
         val isInner: Boolean get() = voicePersona == MikaProtocol.PERSONA_INNER
         val isPro: Boolean get() = mode == MikaProtocol.CHAT_MODE_PRO
@@ -196,11 +201,22 @@ data class HistoryEntry(
      * ligne n'en dit rien). Lus à part par `FrameCodec` : une liste cassée n'emporte pas le message.
      */
     val tools: List<ToolUse>? = null,
+    /** Une ligne d'elle : ses petites bulles (ADR 0119), lues à part comme ses outils ; `null` : rien à montrer. */
+    val notes: List<MessageNote>? = null,
 )
 
 /** Un outil dont elle s'est servie pour une réponse pro (ADR 0116) : son nom, et s'il a réussi. */
 @Serializable
 data class ToolUse(val name: String, val ok: Boolean)
+
+/**
+ * Une petite bulle jointe à un de ses messages (ADR 0119, `protocol.py::note_item`) : ce qu'elle a fait en
+ * l'écrivant. [kind] : `location` (elle a regardé où tu es), la seule sorte que `FrameCodec` laisse passer ;
+ * [text] : ce qu'elle a vu (le lieu, sinon des coordonnées), vide une fois oublié ; [at] : de quand datait ce
+ * qu'elle a vu, en millisecondes Unix (0 : inconnu). L'app compose le texte de la bulle.
+ */
+@Serializable
+data class MessageNote(val kind: String, val text: String = "", val at: Long = 0)
 
 // ── L'état intérieur (`inner_state`), lu section par section ─────────────────────────────
 

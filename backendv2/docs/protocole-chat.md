@@ -114,6 +114,7 @@ cinq minutes au pong de ses propres pings WebSocket avant de fermer (1011).
 | `presence` | `here` (booléen) | l'application passe au premier plan (`true`) ou le quitte (`false`) |
 | `composing` | `on` (booléen) | la personne commence à écrire un message (`true`) ou cesse (`false`) ; authentifié seulement |
 | `read` | `up_to` (un identifiant de message) | jusqu'où la personne a lu son fil, si elle l'a permis ; authentifié seulement |
+| `where` | `lat`, `lon`, `accuracy?`, `label?`, `age_ms?` — ou `off: true` | où est la personne, si elle l'a permis (ADR 0119) ; authentifié seulement |
 | `approval` | `id`, `decision` (`accept` \| `refuse`), `digest` | décider d'une carte d'accord (§4, `approvals`) ; authentifié seulement |
 | `verdict` | `message_id`, `verdict` (`ok` \| `ko` \| vide), `comment?` | juger une de ses réponses (ADR 0113) ; opératrice authentifiée seulement |
 
@@ -162,6 +163,27 @@ trame compte dans le débit de `sync`, et s'écrit au journal 6 fois par minute 
 dernière valeur voulue s'applique dès que la fenêtre le permet). Mika sait alors si ce qu'elle a écrit d'elle-même
 a été vu : par messagerie, un message pas encore lu ne la fait pas se sentir ignorée (trois jours au plus), et le
 délai de réponse qu'elle attend court à partir de la lecture.
+
+`where` (ADR 0119) : où est la personne, d'après son téléphone, si elle l'a permis (« Lui dire où je suis », coupé
+par défaut) et **seulement application au premier plan** — rien en arrière-plan, même connexion ouverte :
+
+```json
+{"type": "where", "lat": 45.764043, "lon": 4.835659, "accuracy": 12, "label": "Rue de la République, Lyon",
+ "age_ms": 1500}
+```
+
+- `lat`, `lon` : des nombres finis dans leurs bornes (sinon la trame est ignorée) ; `accuracy` : la précision en
+  mètres (absente ou 0 : inconnue) ; `label` : le nom du lieu que le téléphone a trouvé (une ligne, 200 caractères au
+  plus ; absent : aucun) ; `age_ms` : l'âge de la mesure **au moment de l'envoi** (une mesure de plus de 24 h est
+  ignorée).
+- Le client envoie la dernière position à l'ouverture et à chaque déplacement, jamais en file. Le serveur ne réécrit
+  pas une position qui n'a pas bougé (même lieu, moins de 50 m, moins de 10 min depuis la dernière écrite) ; 6
+  écritures au journal par minute et par connexion au plus (au-delà, la suivante passera). Compte dans le débit de
+  `sync`.
+- `{"type": "where", "off": true}` : la personne ne le permet pas (ou plus) — sa dernière position s'efface (rien
+  d'écrit s'il n'y en avait pas). Le client peut le redire à chaque ouverture tant que le réglage est coupé.
+- Mika ne la regarde qu'en tête-à-tête avec cette personne, pour elle seule ; chaque regard se voit dans le fil
+  (`notes`, §4). Aucune trame en retour.
 
 **Le mode pro** (ADR 0116) : un « mode Claude Code » dans le chat. Le message reçoit une réponse de travail — sans
 seconde passe, sans son tempérament ni sa voix de chat, longue et structurée s'il le faut, en Markdown — et ses
@@ -222,6 +244,11 @@ répondre — réessaie ».
 - `source: "error"` sans identifiant : un texte de repli, pas une parole d'elle.
 - `user_message_id` / `client_msg_id` rattachent la réponse à la question (la bulle reçoit son identifiant).
 - `attachments` : les fichiers qu'elle envoie (§6). Toujours présent, souvent vide.
+- `notes` (absente s'il n'y en a pas) : les petites bulles de ce qu'elle a fait en écrivant ce message (ADR 0119) —
+  `[{"kind": "location", "text": "Rue de la République, Lyon", "at": 1790601490000}]` : elle a regardé où était la
+  personne ; `text` est le lieu (ou des coordonnées, ou vide une fois oublié), `at` l'instant de la mesure (ms). Le
+  client compose la bulle (« 📍 Mika a regardé où tu es · Rue de la République, Lyon · position de 14:10 ») et la
+  montre juste avant sa réponse ; une sorte inconnue s'ignore ; une liste illisible ne fait jamais perdre le message.
 - `speak` n'est vrai que pour un seul écran regardé de la personne (celui qui a demandé, sinon le plus récemment
   actif) ; jamais pour une connexion absente.
 - `mode` : toujours présent, `"pro"` ou `""`. Une réponse pro (ADR 0116) : `speak` toujours faux, `voice_reason:
@@ -245,6 +272,7 @@ répondre — réessaie ».
   `audio`, `file`). Un message de Mika : sans jetons de voix ; ses fichiers comme dans `speech`.
 - Une ligne d'elle jugée, **pour une connexion d'opératrice seulement** : `verdict` (`ok` \| `ko`) et `verdict_note`
   (ce qu'elle aurait dû dire, ou vide) — absents sinon (ADR 0113).
+- Une ligne d'elle porte `notes` comme la `speech` (absente s'il n'y en a pas, ADR 0119).
 - Une ligne écrite en mode pro (ADR 0116) porte `mode: "pro"` (absent sinon) ; une ligne d'elle en mode pro porte
   aussi `tools` : `[{"name": "memory_search", "ok": true}, …]`, les outils dont elle s'est servie, dans l'ordre des
   appels (leurs noms seulement ; liste vide possible).

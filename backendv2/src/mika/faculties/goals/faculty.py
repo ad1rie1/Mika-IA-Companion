@@ -31,6 +31,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict
 
 from mika.contracts import agency as agency_c
+from mika.contracts import attention as attention_c
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
 from mika.contracts import projects as projects_c
@@ -694,7 +695,7 @@ def _opened(s: GoalsState, e, cx) -> GoalsState:
     return s
 
 
-@GOALS.reducer(rt.EPISODE_STARTED)
+@GOALS.reducer(rt.EPISODE_STARTED, reads=[identity_c.PERSON, attention_c.AWAITING])
 def _started(s: GoalsState, e, cx) -> GoalsState:
     d = e.data
     if d.kind == Kind.STEP:
@@ -712,6 +713,9 @@ def _started(s: GoalsState, e, cx) -> GoalsState:
     purpose = "remind" if c.REMIND in reasons else "share" if c.SHARE in reasons else ""
     if not purpose:
         return s
+    if purpose == "share" and d.target and agency_c.checking_in(
+            reasons, cx.facts.get(attention_c.AWAITING(cx.facts.get(identity_c.PERSON(d.target)))).initiatives):
+        return s  # une relance : elle prend de ses nouvelles — ce qu'elle a fini attend qu'il ait répondu (2026-10-19)
     return replace(s, running=s.running.set(e.correlation, Run(gid, purpose, started=e.at)))
 
 

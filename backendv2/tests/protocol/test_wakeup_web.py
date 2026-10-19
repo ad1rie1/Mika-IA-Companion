@@ -9,6 +9,7 @@ refuse un projet inconnu.
 
 from __future__ import annotations
 
+from mika.adapters.web.app import WAKE_MAX_BYTES
 from mika.app.wakeups import WakeEndpoint, WakeupConfig
 from mika.contracts import runtime as rt
 from mika.contracts import wakeup as c
@@ -162,7 +163,7 @@ def test_a_hostile_body_is_refused_cleanly(world):  # noqa: F811
     assert client.post(ROUTE, content=b"[" * 30_000 + b"]" * 30_000, headers=auth).status_code == 400
 
     def chunks():  # sans Content-Length : lu par morceaux, borné quand même
-        for _ in range(100):
+        for _ in range(WAKE_MAX_BYTES // 4096 + 2):
             yield b"x" * 4096
 
     assert client.post(ROUTE, content=chunks(), headers=auth).status_code == 413

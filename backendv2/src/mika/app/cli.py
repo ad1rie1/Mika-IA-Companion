@@ -357,14 +357,18 @@ async def wakeup_command(settings: Settings, args: argparse.Namespace) -> dict[s
         return {"ok": True, "endpoints": [
             {"name": ep.name, "label": ep.label, "enabled": ep.enabled, "project": ep.project or None,
              "plain": ep.plain, "tools": list(ep.bundles), "rouse": ep.rouse, "notify": ep.notify,
+             "signed": ep.signed, "fields": list(ep.fields),
              "key": f"{ep.key.hint}…" if ep.key is not None else None} for ep in desk.endpoints()]}
     if args.wakeup_cmd == "key":
         try:
             key = await desk.new_key(args.name, "ligne de commande")
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
-        return {"ok": True, "name": args.name, "key": key,
-                "usage": f"POST /api/wake/{args.name} avec l'en-tête Authorization: Bearer <clé>"}
+        usage = f"POST /api/wake/{args.name} avec l'en-tête Authorization: Bearer <clé>"
+        ep = desk.endpoint(args.name)
+        if ep is not None and ep.signed:
+            usage += " — ou le corps signé par la clé (X-Hub-Signature-256 : le « secret » d'un webhook GitHub)"
+        return {"ok": True, "name": args.name, "key": key, "usage": usage}
     if not await desk.revoke_key(args.name, "ligne de commande"):
         return {"ok": False, "error": f"« {args.name} » n'a pas de clé."}
     return {"ok": True, "name": args.name, "revoked": True}

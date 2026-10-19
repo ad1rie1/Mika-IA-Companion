@@ -109,7 +109,9 @@ def test_good_night_is_not_left_unanswered_but_an_ignored_initiative_is(tmp_path
     """Adrien, un proche : « bon je vais me coucher, bonne nuit » ; elle lui répond (« Bonne nuit ! Tu dors
     bien ? ») et il s'en va. Le lendemain soir, il revient : sa salutation ne dit pas « sans réponse » — elle
     n'attendait rien (audit HUM-4 : toutes ses salutations du soir le disaient). Contre-exemple : le lendemain
-    midi, elle lui avait écrit « tu fais quoi ce soir ? », resté sans réponse — là, elle le sait."""
+    midi, elle lui avait écrit « tu fais quoi ce soir ? », resté sans réponse — là, elle le sait : elle ne le salue
+    pas sous son message resté sans réponse, et quand elle le fait, des jours plus tard, c'est pour prendre de ses
+    nouvelles (2026-10-19)."""
     script = Script(reply="Bonne nuit ! Tu dors bien ? [EMOTION:happy:0.5]")
 
     async def scenario(kernel):
@@ -124,6 +126,13 @@ def test_good_night_is_not_left_unanswered_but_an_ignored_initiative_is(tmp_path
         await until(kernel, at_paris(2026, 9, 29, 20, 0))
         await connect(kernel, "user_1", "Adrien")
         await asyncio.sleep(10 * MINUTE / US)
+        if ignored:  # pas de « hello ! » sous son message resté sans réponse ; des jours plus tard, la relance
+            held = len(script.prompts("initiative", "user_1"))
+            await disconnect(kernel, "user_1")
+            await until(kernel, at_paris(2026, 10, 6, 20, 0))
+            await connect(kernel, "user_1", "Adrien")
+            await asyncio.sleep(10 * MINUTE / US)
+            return held
         return mine
 
     # le modèle met quelques secondes à répondre : sa réponse est bien la dernière parole de la soirée
@@ -131,7 +140,8 @@ def test_good_night_is_not_left_unanswered_but_an_ignored_initiative_is(tmp_path
     greeting = script.prompts("initiative", "user_1")[-1]
     who = section(greeting, WHO)
     if ignored:
-        assert "sans réponse" in who
+        assert mine == 0  # le soir même, il se connecte : elle ne le salue pas
+        assert "sans réponse" in who and "c'est de ses nouvelles que tu as envie" in greeting
     else:
         assert not mine.unanswered and not mine.asked and mine.closed_at, mine
         assert "sans réponse" not in who and "attend encore" not in who, who

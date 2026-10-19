@@ -28,6 +28,7 @@ import fr.qwartz.mika.data.files.DownloadStore
 import fr.qwartz.mika.data.files.ImageCompressor
 import fr.qwartz.mika.data.files.OutboxFiles
 import fr.qwartz.mika.data.files.ShareInbox
+import fr.qwartz.mika.data.location.WhereShare
 import fr.qwartz.mika.data.mind.MindStateRepository
 import fr.qwartz.mika.data.net.BearerInterceptor
 import fr.qwartz.mika.data.net.LinkState
@@ -116,6 +117,8 @@ class AppGraph(context: Context) {
 
     val foreground = AppForeground()
     val network = NetworkMonitor(this.context)
+    /** La position du téléphone, écoutée seulement app au premier plan et si elle le permet (ADR 0119). */
+    val location = LocationMonitor(this.context, clock, logger)
 
     val settings = SettingsStore(
         PreferenceDataStoreFactory.create(produceFile = { this.context.preferencesDataStoreFile("settings") }),
@@ -183,6 +186,13 @@ class AppGraph(context: Context) {
         reads = combine(settings.settings.map { it.shareReads }, chat.observeLastReadId()) { on, id ->
             id.takeIf { on }
         },
+        // « Lui dire où je suis » (ADR 0119) : au premier plan seulement — pas tant que la socket est ouverte, car elle
+        // le reste 30 s après le départ, et s'ouvre en arrière-plan pour une réponse depuis une notification
+        wheres = WhereShare.follow(
+            sharing = settings.settings.map { it.shareWhere }.distinctUntilChanged(),
+            visible = foreground.visible,
+            fixes = location::fixes,
+        ),
     )
 
     /**

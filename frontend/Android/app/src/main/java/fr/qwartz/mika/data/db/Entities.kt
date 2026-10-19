@@ -45,6 +45,8 @@ data class MessageEntity(
     val mode: String? = null,
     /** Une réponse pro : ses outils (`List<ToolUse>` en JSON, noms et réussites), tels que l'historique les dit. */
     val tools: String? = null,
+    /** Une réponse d'elle : ses petites bulles (`List<MessageNote>` en JSON, ADR 0119, base version 4). */
+    val notes: String? = null,
 )
 
 /**

@@ -40,6 +40,11 @@ data class Settings(
      * opératrice : ailleurs il n'apparaît pas et rien ne part en mode pro.
      */
     val proMode: Boolean = false,
+    /**
+     * « Lui dire où je suis » (ADR 0119) : app au premier plan, la position de ce téléphone part à Mika. Coupé par
+     * défaut, et remis à zéro à la fin de la session : un autre compte n'en hérite jamais.
+     */
+    val shareWhere: Boolean = false,
 )
 
 class SettingsStore(private val store: DataStore<Preferences>) {
@@ -55,6 +60,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
             notificationsAsked = p[NOTIFICATIONS_ASKED] ?: false,
             shareReads = p[SHARE_READS] ?: true,
             proMode = p[PRO_MODE] ?: false,
+            shareWhere = p[SHARE_WHERE] ?: false,
         )
     }
 
@@ -66,8 +72,14 @@ class SettingsStore(private val store: DataStore<Preferences>) {
         it[PROFILE] = MikaJson.encodeToString(Profile.serializer(), profile)
     }
 
-    /** Hors session : le compte part, l'adresse et le nom restent pour la prochaine connexion. */
-    suspend fun clearProfile() = store.edit { it.remove(PROFILE) }
+    /**
+     * Hors session : le compte part, et ce qu'il permettait de dire de lui (« Lui dire où je suis », ADR 0119) ;
+     * l'adresse et le nom restent pour la prochaine connexion.
+     */
+    suspend fun clearProfile() = store.edit {
+        it.remove(PROFILE)
+        it.remove(SHARE_WHERE)
+    }
 
     /** Ce que le téléphone a dit au serveur pour être notifié (ADR 0077), et quand. */
     data class PushMemo(val fingerprint: String = "", val at: Long = 0, val serverReady: Boolean = false)
@@ -93,6 +105,7 @@ class SettingsStore(private val store: DataStore<Preferences>) {
     suspend fun setNotificationsAsked() = store.edit { it[NOTIFICATIONS_ASKED] = true }
     suspend fun setShareReads(on: Boolean) = store.edit { it[SHARE_READS] = on }
     suspend fun setProMode(on: Boolean) = store.edit { it[PRO_MODE] = on }
+    suspend fun setShareWhere(on: Boolean) = store.edit { it[SHARE_WHERE] = on }
 
     private fun decodeProfile(raw: String): Profile? = try {
         MikaJson.decodeFromString(Profile.serializer(), raw)
@@ -113,5 +126,6 @@ class SettingsStore(private val store: DataStore<Preferences>) {
         val NOTIFICATIONS_ASKED = booleanPreferencesKey("notifications_asked")
         val SHARE_READS = booleanPreferencesKey("share_reads")
         val PRO_MODE = booleanPreferencesKey("pro_mode")
+        val SHARE_WHERE = booleanPreferencesKey("share_where")
     }
 }

@@ -787,3 +787,56 @@ describe("le mode pro (ADR 0116)", () => {
     expect([enriched, shown.mode]).toEqual([0, "pro"]);
   });
 });
+
+describe("ses petites bulles (ADR 0119)", () => {
+  const LYON = { kind: "location", text: "Rue de la République, Lyon", at: 1_790_601_490_000 };
+  const noted = (id: number, role: string, text: string, notes: unknown): HistoryEntry => ({
+    ...entry(id, role, text),
+    notes: notes as HistoryEntry["notes"],
+  });
+
+  it("une ligne d'elle relue porte ses bulles ; une ligne de la personne, jamais", () => {
+    const { history } = mergeHistory(
+      [],
+      [noted(1, "user", "tu sais où je suis ?", [LYON]), noted(2, "assistant", "Tu es place Bellecour.", [LYON])],
+      MAX
+    );
+    expect(history.map((m) => [m.id, m.notes])).toEqual([
+      [1, undefined],
+      [2, [LYON]],
+    ]);
+  });
+
+  it("des bulles illisibles ne font jamais perdre le message", () => {
+    const { history, added } = mergeHistory(
+      [],
+      [noted(1, "assistant", "a", "x"), noted(2, "assistant", "b", [null, { kind: "weather", text: "pluie", at: 1 }])],
+      MAX
+    );
+    expect(added).toBe(2);
+    expect(history.map((m) => [m.text, m.notes])).toEqual([
+      ["a", undefined],
+      ["b", undefined],
+    ]);
+  });
+
+  it("sa réponse déjà affichée par la speech garde ses bulles au rattrapage, sans repeindre pour rien", () => {
+    const shown = local("Tu es place Bellecour.", "vtuber", { id: 2, notes: [LYON] });
+    const { enriched } = mergeHistory([shown], [noted(2, "assistant", "Tu es place Bellecour.", [LYON])], MAX);
+    expect([enriched, shown.notes]).toEqual([0, [LYON]]);
+  });
+
+  it("une réponse reçue en direct sans id apprend ses bulles en étant reconnue", () => {
+    const live = local("Tu es place Bellecour.", "vtuber");
+    const { adopted } = mergeHistory([live], [noted(2, "assistant", "Tu es place Bellecour.", [LYON])], MAX);
+    expect([adopted, live.id, live.notes]).toEqual([1, 2, [LYON]]);
+  });
+
+  it("un lieu oublié depuis quitte aussi l'écran", () => {
+    const shown = local("Tu es place Bellecour.", "vtuber", { id: 2, notes: [LYON] });
+    const forgotten = mergeHistory([shown], [noted(2, "assistant", "Tu es place Bellecour.", [{ ...LYON, text: "" }])], MAX);
+    expect([forgotten.enriched, shown.notes]).toEqual([1, [{ ...LYON, text: "" }]]);
+    const gone = mergeHistory(forgotten.history, [entry(2, "assistant", "Tu es place Bellecour.")], MAX);
+    expect([gone.enriched, shown.notes]).toEqual([1, undefined]);
+  });
+});

@@ -11,6 +11,14 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <!-- Pas de CAMERA : TakePicture délègue à l'appareil photo, et déclarer la permission
          sans l'avoir accordée le ferait lever une SecurityException. -->
+    <!-- « Lui dire où je suis » (ADR 0119) : demandées en activant le réglage, une position approximative suffit.
+         Jamais ACCESS_BACKGROUND_LOCATION : la position n'est lue qu'application au premier plan (ADR 0077). -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- Un téléphone sans GPS (ou sans localisation du tout) installe l'app : le réglage reste simplement muet. -->
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+    <uses-feature android:name="android.hardware.location.network" android:required="false" />
 
     <queries>
         <intent>

@@ -15,6 +15,7 @@ from mika.app.console import FACULTY_LABELS
 from mika.contracts import attention as attention_c
 from mika.contracts import body as body_c
 from mika.contracts import identity as identity_c
+from mika.contracts import location as location_c
 from mika.contracts import memory as memory_c
 from mika.contracts import presence as presence_c
 from mika.contracts import projects as projects_c
@@ -24,7 +25,7 @@ from mika.contracts import sensors as sensors_c
 from mika.contracts import social as social_c
 from mika.contracts import wakeup as wakeup_c
 from mika.contracts import world as w
-from mika.contracts.entry import Admission, HistoryRow, SharedDownload, SharedMeta
+from mika.contracts.entry import Admission, HistoryRow, MessageNote, SharedDownload, SharedMeta
 from mika.contracts.runtime import PerceptionReceived
 from mika.faculties import attachments, shares, transcript
 from mika.faculties.attention import prompt as attention_prompt
@@ -41,10 +42,12 @@ from mika.kernel.frame import Audience, Frame
 from mika.kernel.guards import Superseded
 from mika.kernel.operate import Preview
 from mika.kernel.state import Root
+from mika.plugins import location
 from mika.ports.shares import MAX_SHARE_BYTES, valid_id
 from mika.ports.workshop import argv_lines
 from mika.runtime import decisions, health, operations
 from mika.runtime.bootstrap import Kernel, ReadOnlyStore
+from mika.runtime.effects import with_content
 from mika.vocab.affect import emotion_of
 from mika.vocab.circadian import DAYS_FR, day_fr
 from mika.vocab.episodes import project_of
@@ -339,6 +342,51 @@ class KernelPort:
         commit = await self.kernel.mind.append([draft], emitter="sensors", correlation=f"appareil:{device}",
                                                origin=Origin.EXTERNAL)
         return commit.seqs[-1] if commit.seqs else None
+
+    # ── où est la personne, d'après son téléphone (ADR 0119) ──
+    async def locate(self, handle: str, *, lat: float, lon: float, accuracy_m: int, label: str,
+                     age_ms: int) -> int | None:
+        """Une position, à son adresse et à sa personne pour sujets ; coordonnées et lieu sont personnels (l'oubli
+        de la personne les efface)."""
+        mind = self.kernel.mind
+        person = mind.frame().get(identity_c.PERSON(handle)) or handle
+        level = int(Sensitivity.PERSONAL)
+        draft = location_c.LOCATED.draft(
+            handle=handle, person=person, coords=Content.of(f"{lat:.6f},{lon:.6f}", level=level),
+            label=Content.of(label, level=level) if label else None, accuracy_m=max(0, int(accuracy_m)),
+            fixed_at=mind.clock.now() - max(0, int(age_ms)) * 1000)
+        commit = await mind.append([draft], emitter=location_c.OWNER, correlation=f"lieu:{handle}",
+                                   origin=Origin.EXTERNAL)
+        return commit.seqs[-1] if commit.seqs else None
+
+    async def unlocate(self, handle: str) -> int | None:
+        mind = self.kernel.mind
+        frame = mind.frame()
+        if not location.known(frame.root.slices.get(location_c.OWNER), handle):
+            return None
+        draft = location_c.CLEARED.draft(handle=handle, person=frame.get(identity_c.PERSON(handle)) or handle)
+        commit = await mind.append([draft], emitter=location_c.OWNER, correlation=f"lieu:{handle}",
+                                   origin=Origin.EXTERNAL)
+        return commit.seqs[-1] if commit.seqs else None
+
+    def notes(self, ids: Sequence[str]) -> list[MessageNote]:
+        """Les positions qu'elle a regardées en écrivant ses messages, relues au journal : le lieu (sinon les
+        coordonnées), vide une fois oublié."""
+        wanted = {seq: ref for ref in ids if (seq := location_c.note_seq(ref)) is not None}
+        if not wanted:
+            return []
+        mind = self.kernel.mind
+        found: dict[str, MessageNote] = {}
+        for stored in mind.store.get_events(list(wanted)):
+            ev = mind.decode(stored)
+            if ev.type.name != location_c.LOCATED.name or ev.seq not in wanted:
+                continue
+            ev = with_content(mind, ev)
+            d = ev.data
+            text = (d.label.text if d.label is not None else None) or d.coords.text or ""
+            found[wanted[ev.seq]] = MessageNote(id=wanted[ev.seq], kind=location_c.NOTE_KIND, text=text,
+                                                at=d.fixed_at // 1000)
+        return [found[ref] for ref in ids if ref in found]
 
     def wake_seen(self, endpoint: str, idempotency: str) -> int | None:
         """Le ``seq`` d'un appel déjà reçu par ce réveil sous cette clé d'idempotence (``None`` : aucun)."""

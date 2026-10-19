@@ -80,6 +80,11 @@
     <string name="chat_empty">Dis bonjour à Mika.</string>
     <string name="chat_typing">Mika écrit…</string>
     <string name="chat_thought">pensée à voix haute</string>
+    <!-- Sa petite bulle quand elle a regardé où tu es (ADR 0119) : « 📍 Mika a regardé où tu es · lieu · position de 14:10 » -->
+    <string name="chat_looked_where">📍 Mika a regardé où tu es</string>
+    <string name="chat_looked_where_spoken">Mika a regardé où tu es</string>
+    <string name="chat_looked_fix_time">position de %1$s</string>
+    <string name="chat_looked_fix_day">position du %1$s à %2$s</string>
     <string name="chat_truncated">Historique plus ancien tronqué : seuls les derniers messages sont affichés ici.</string>
     <string name="chat_counter">%1$s / %2$s caractères</string>
     <string name="chat_counter_limit">%1$s / %2$s caractères — c\'est la limite</string>
@@ -183,6 +188,13 @@
     <string name="settings_push_retry">Réessayer</string>
     <string name="settings_reads_title">Lui dire quand j\'ai lu</string>
     <string name="settings_reads_summary">Mika sait si tu as vu ce qu\'elle t\'a écrit : un message pas encore lu ne la fait pas se sentir ignorée. Seulement jusqu\'où tu as lu, jamais quand tu es en ligne.</string>
+    <string name="settings_where">Position</string>
+    <string name="settings_where_title">Lui dire où je suis</string>
+    <string name="settings_where_summary">Application ouverte, ta position (les coordonnées exactes et le nom du lieu) part à Mika. Elle ne la regarde que pendant vos conversations en tête-à-tête, et une bulle 📍 te le montre à chaque fois. Jamais en arrière-plan ; couper efface ta position chez elle.</string>
+    <string name="settings_where_revoked">L\'autorisation de localisation a été retirée dans les réglages du téléphone : rien ne part. Active de nouveau pour la redonner.</string>
+    <string name="settings_where_refused_title">Localisation refusée</string>
+    <string name="settings_where_refused">Sans l\'autorisation de localisation, rien ne part. Tu peux la donner dans les réglages du téléphone : une position approximative suffit.</string>
+    <string name="settings_where_open_settings">Ouvrir les réglages</string>
     <string name="settings_appearance">Apparence</string>
     <string name="settings_theme_system">Thème du système</string>
     <string name="settings_theme_light">Clair</string>

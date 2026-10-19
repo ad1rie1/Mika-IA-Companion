@@ -88,12 +88,29 @@ FILES_RATE = (60, 60.0)
 #: en ``application/octet-stream`` : rien de ce qu'elle envoie ne s'exécute dans une page
 SAFE_MIMES = frozenset({"text/plain", "text/markdown", "text/csv", "application/json", "image/png", "image/jpeg",
                         "image/webp", "image/gif", "application/pdf"})
-#: un réveil par API (ADR 0068) : la taille d'une requête au plus, et les échecs d'authentification tolérés par IP
-WAKE_MAX_BYTES = 64 * 1024
+#: un réveil par API (ADR 0068) : la taille d'une requête au plus (le JSON d'un service, GitHub par exemple, ADR 0117),
+#: et les échecs d'authentification tolérés par IP
+WAKE_MAX_BYTES = 512 * 1024
 WAKE_FAILURES = (20, 60.0)
 #: ce que dit chaque issue d'un appel de réveil, en HTTP
-WAKE_STATUS = {wakeup_p.ACCEPTED: 202, wakeup_p.UNKNOWN: 401, wakeup_p.DISABLED: 403, wakeup_p.INVALID: 400,
-               wakeup_p.BUSY: 429, wakeup_p.REFUSED: 409}
+WAKE_STATUS = {wakeup_p.ACCEPTED: 202, wakeup_p.IGNORED: 200, wakeup_p.UNKNOWN: 401, wakeup_p.DISABLED: 403,
+               wakeup_p.INVALID: 400, wakeup_p.BUSY: 429, wakeup_p.REFUSED: 409}
+#: ce que les services de webhooks envoient (ADR 0117), le premier présent l'emporte : la clé recopiée telle quelle
+#: (le « secret token » de GitLab), la signature du corps par la clé, l'évènement, l'identifiant de la livraison (qui
+#: sert de clé d'idempotence : une livraison rejouée rend le même appel)
+WAKE_KEY_HEADERS = ("x-gitlab-token",)
+WAKE_SIGNATURE_HEADERS = ("x-hub-signature-256", "x-gitea-signature", "x-forgejo-signature", "x-signature-256")
+WAKE_EVENT_HEADERS = ("x-github-event", "x-gitea-event", "x-forgejo-event", "x-gitlab-event")
+WAKE_DELIVERY_HEADERS = ("idempotency-key", "x-github-delivery", "x-gitea-delivery", "x-forgejo-delivery")
+
+
+def first_header(headers: Any, names: tuple[str, ...], limit: int = 200) -> str:
+    """Le premier de ces en-têtes qui est là, réduit à ses caractères imprimables et borné (vide : aucun)."""
+    for name in names:
+        value = "".join(ch for ch in (headers.get(name) or "") if ch.isprintable()).strip()
+        if value:
+            return value[:limit]
+    return ""
 #: l'extension Teams (ADR 0069) : la taille d'un lot au plus, les échecs de clé tolérés par IP, et chaque issue en HTTP
 TEAMS_MAX_BYTES = 512 * 1024
 TEAMS_FAILURES = (20, 60.0)
@@ -466,10 +483,12 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         return JSONResponse({"ok": seq is not None, "seq": seq}, status_code=202)
 
     async def wake(request: Request) -> Response:
-        """Un réveil par API (ADR 0068) : ``{"text": "…"}``, sa clé en ``Authorization: Bearer``, une clé
-        d'idempotence facultative (``Idempotency-Key``). Réveil inconnu et mauvaise clé : le même 401 (et trop
-        d'échecs d'une même adresse : 429) ; désactivé : 403 ; texte : 400 ; trop d'appels : 429 ; son projet n'est
-        pas actif : 409 ; reçu : 202. Rien n'est journalisé avant que la porte l'ait admis."""
+        """Un réveil par API (ADR 0068, 0117) : ``{"text": "…", "context": …}`` ou le JSON d'un service ; sa clé en
+        ``Authorization: Bearer`` (ou ``X-Gitlab-Token``), ou le corps signé par elle (``X-Hub-Signature-256``) ; une
+        clé d'idempotence facultative (``Idempotency-Key``, sinon l'identifiant de la livraison). Réveil inconnu et
+        mauvaise clé : le même 401 (et trop d'échecs d'une même adresse : 429) ; désactivé : 403 ; rien à lire :
+        400 ; trop d'appels : 429 ; son projet n'est pas actif : 409 ; un « ping » : 200 ; reçu : 202. Rien n'est
+        journalisé avant que la porte l'ait admis."""
         headers = {"Cache-Control": "no-store"}
         if wakeup is None:
             return JSONResponse({"error": "Les réveils par API ne sont pas branchés."}, status_code=404,
@@ -493,19 +512,21 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
             if len(raw) > WAKE_MAX_BYTES:
                 return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
         try:
-            data = json.loads(raw or b"{}")
+            data = json.loads(raw) if raw else None
         except (ValueError, RecursionError):  # illisible (et, selon la version de Python, trop imbriqué)
-            data = {}
-        text = str(data.get("text") or "") if isinstance(data, dict) else ""
-        idem = "".join(ch for ch in (request.headers.get("idempotency-key") or "") if ch.isprintable()).strip()
-        got = await wakeup(request.path_params["name"][:60], bearer(request.headers.get("authorization")), text, idem)
+            data = None
+        h = request.headers
+        got = await wakeup(wakeup_p.WakeRequest(
+            name=request.path_params["name"][:60], key=bearer(h.get("authorization")) or first_header(h, WAKE_KEY_HEADERS),
+            body=raw, data=data, signature=first_header(h, WAKE_SIGNATURE_HEADERS),
+            event=first_header(h, WAKE_EVENT_HEADERS, 60), idempotency=first_header(h, WAKE_DELIVERY_HEADERS)))
         if got.outcome == wakeup_p.UNKNOWN:
             wake_failures.fail(f"ip:{ip}")
         status = WAKE_STATUS.get(got.outcome, 400)
         if got.outcome == wakeup_p.BUSY and got.retry_after:
             headers["Retry-After"] = str(got.retry_after)
-        if status == 202:
-            return JSONResponse({"ok": True, "call": got.call}, status_code=202, headers=headers)
+        if status in (200, 202):
+            return JSONResponse({"ok": True, "call": got.call}, status_code=status, headers=headers)
         return JSONResponse({"error": got.message or "Refusé."}, status_code=status, headers=headers)
 
     async def teams_call(request: Request, kind: str) -> Response:
@@ -845,6 +866,34 @@ class _Session:
         self.hub.read_up_to[c.handle] = c.read_up_to
         await self.port.read(c.handle, c.read_up_to)
 
+    # ── où elle est (« Lui dire où je suis », ADR 0119) ──
+    async def where(self, frame: dict[str, Any]) -> None:
+        """``{"type": "where", "lat", "lon", "accuracy", "label", "age_ms"}`` : où est la personne, d'après son
+        téléphone (l'application ouverte, si elle l'a permis) ; ``{"type": "where", "off": true}`` : elle ne le
+        permet plus, sa dernière position s'efface. Une connexion authentifiée seulement ; une position invalide est
+        ignorée, une position qui n'a pas bougé (même lieu, moins de ``WHERE_STILL_M``) ne se réécrit qu'au bout de
+        ``WHERE_REFRESH_S`` ; au plus ``WHERE_RATE`` écritures (au-delà, la suivante passera)."""
+        c = self.conn
+        if self.account is None or not c.authenticated or not self._session_valid():
+            return
+        if frame.get("off") is True:
+            self.hub.located.pop(c.handle, None)
+            await self.port.unlocate(c.handle)
+            return
+        fix = protocol.where_fix(frame)
+        if fix is None:
+            return
+        now = self.hub._monotonic()
+        last = self.hub.located.get(c.handle)
+        if last is not None and last[0].label == fix.label and now - last[1] < protocol.WHERE_REFRESH_S \
+                and protocol.where_moved(last[0], fix) < protocol.WHERE_STILL_M:
+            return
+        if not c.places.allow(now):
+            return
+        self.hub.located[c.handle] = (fix, now)
+        await self.port.locate(c.handle, lat=fix.lat, lon=fix.lon, accuracy_m=fix.accuracy_m, label=fix.label,
+                               age_ms=fix.age_ms)
+
     # ── en train d'écrire ──
     async def composing(self, frame: dict[str, Any]) -> None:
         """``{"type": "composing", "on": bool}`` : la personne commence à écrire un message sur cet écran, ou cesse
@@ -929,6 +978,9 @@ class _Session:
         elif kind == "read":
             if self.conn.control.allow():
                 await self.read(frame)
+        elif kind == "where":
+            if self.conn.control.allow():
+                await self.where(frame)
         elif kind == "approval":
             if self.conn.control.allow():
                 await self.approval(frame)

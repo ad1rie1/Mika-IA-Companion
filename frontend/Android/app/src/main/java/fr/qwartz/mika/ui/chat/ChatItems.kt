@@ -6,6 +6,7 @@ import fr.qwartz.mika.data.chat.Sender
 import fr.qwartz.mika.data.chat.StoredMessage
 import fr.qwartz.mika.data.chat.WorkCard
 import fr.qwartz.mika.data.chat.WorkText
+import fr.qwartz.mika.data.net.MessageNote
 import fr.qwartz.mika.data.net.MikaProtocol
 import java.time.Instant
 import java.time.LocalDate
@@ -55,6 +56,13 @@ sealed interface ChatItem {
         val resendLocalId: Long? = null,
     ) : ChatItem
 
+    /**
+     * Une petite bulle juste avant sa réponse : ce qu'elle a fait en l'écrivant (ADR 0119 : elle a regardé où tu es,
+     * [note] le lieu et de quand datait la position). [messageTs] : l'heure de sa réponse, à laquelle la position se
+     * compare (« position de 14:10 »).
+     */
+    data class Looked(override val key: String, val note: MessageNote, val messageTs: Long) : ChatItem
+
     /** Une pensée à voix haute : éphémère, en italique. */
     data class Thought(override val key: String, val message: StoredMessage) : ChatItem
 
@@ -68,7 +76,7 @@ sealed interface ChatItem {
 
 /**
  * Construire la liste à dessiner, du plus ancien au plus récent : séparateurs de date, note de
- * troncature, bulles et leurs notes, pensées, cartes de travail, « Mika écrit… ». Pur : l'heure et le
+ * troncature, bulles et leurs notes, ses petites bulles, pensées, cartes de travail, « Mika écrit… ». Pur : l'heure et le
  * fuseau sont passés, pour que les tests ne dépendent pas de l'horloge.
  */
 object ChatItems {
@@ -114,6 +122,12 @@ object ChatItems {
             // sa carte de travail, repliée juste au-dessus de sa réponse pro
             val above = if (m.sender == Sender.MIKA) m.id?.let { cards.aboveAnswer[it] } else null
             if (above != null) out += ChatItem.Work(above.key, above, folded = true)
+            // ses petites bulles (ADR 0119), juste avant la première bulle de sa réponse : les sortes connues seulement
+            if (m.sender == Sender.MIKA && !m.inner && !isSystemNote(m)) {
+                m.notes?.forEachIndexed { n, note ->
+                    if (note.kind == MikaProtocol.NOTE_LOCATION) out += ChatItem.Looked("l$key.$n", note, m.ts)
+                }
+            }
             when {
                 m.inner -> out += ChatItem.Thought(key, m)
                 isSystemNote(m) -> out += ChatItem.SystemNote(key, m.text)

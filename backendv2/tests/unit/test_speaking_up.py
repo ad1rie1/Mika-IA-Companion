@@ -20,13 +20,15 @@ import pytest
 from mika.app import composition
 from mika.contracts import agency as agency_c
 from mika.contracts import attention as attention_c
+from mika.contracts import email as email_c
+from mika.contracts import forge as forge_c
 from mika.contracts import goals as goals_c
 from mika.contracts import memory as memory_c
 from mika.contracts import needs as needs_c
 from mika.contracts import others as others_c
 from mika.contracts import runtime as rt
 from mika.contracts import social as social_c
-from mika.faculties.agency import _budget, restraint
+from mika.faculties.agency import _budget, holding_back, restraint
 from mika.kernel.arbitration import RowView
 from mika.kernel.clock import DAY, HOUR, MINUTE, US, local
 from mika.kernel.events import Content, Origin, VoiceProvenance
@@ -195,8 +197,9 @@ def test_a_friend_who_answers_keeps_getting_initiatives(tmp_path):
 def test_the_rule_vetoes_every_ordinary_reason_and_allows_one_gentle_follow_up(tmp_path):
     """Le filet : quelle que soit la raison (une pensée, un manque…), après une
     initiative sans réponse, plus rien — présente ou non — sauf une relance
-    douce après au moins un jour et deux fois le rythme ; après deux, plus rien.
-    Saluer, dire un rappel promis : jamais concernés."""
+    après au moins un jour et le rythme, tiré au sort ; après deux, plus rien.
+    Saluer qui ne lui a pas répondu, c'est relancer : retenu de même. La relance
+    prend de ses nouvelles, rien d'autre (2026-10-19)."""
     def voice():
         return VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m")
 
@@ -222,7 +225,7 @@ def test_the_rule_vetoes_every_ordinary_reason_and_allows_one_gentle_follow_up(t
         greeting = veto(kernel, (social_c.GREETING,))
         first = kernel.mind.clock.now()
         await asyncio.sleep(DAY / US)
-        early = veto(kernel)  # proche, rythme supposé de trois jours : deux fois ça, pas encore
+        early = veto(kernel)  # proche, rythme supposé de trois jours (tiré à ± 40 %) : pas encore
         await asyncio.sleep(9 * DAY / US)  # elle relance d'elle-même, une fois, doucement
         sent = initiatives(kernel, "ext_1")
         briefs = [c.messages[-1].content for c in llm.calls if c.role == "initiative"]
@@ -236,11 +239,13 @@ def test_the_rule_vetoes_every_ordinary_reason_and_allows_one_gentle_follow_up(t
     free, absent, present, greeting, early, first, sent, briefs, after_two, birthday, answered = run(tmp_path, scenario)
     assert free is None
     assert absent == present == agency_c.UNANSWERED  # présente ou non
-    assert greeting is None  # saluer qui arrive n'est pas prendre la parole
+    assert greeting == agency_c.UNANSWERED  # sous son message resté sans réponse, un « hello ! » relancerait
     assert early == agency_c.UNANSWERED
     follow_ups = [e for e in sent if e.at > first]
-    assert len(follow_ups) == 1 and follow_ups[0].at - first >= 6 * DAY, [e.at - first for e in sent]
-    assert any("relance douce" in b for b in briefs)
+    assert len(follow_ups) == 1 and follow_ups[0].at - first >= 1.8 * DAY, [e.at - first for e in sent]
+    # la relance prend de ses nouvelles, seule : ce qui la poussait (le manque, une pensée…) se tait
+    checking = [b for b in briefs if "c'est de ses nouvelles que tu as envie" in b]
+    assert checking and all(b.count("\n- ") == 1 for b in checking), checking
     assert after_two == agency_c.UNANSWERED  # après deux sans réponse : plus rien
     assert birthday is None  # … sauf lui souhaiter son anniversaire le jour même : un vœu n'est pas une relance
     assert answered.initiatives == 0 and answered.ignored == 0  # elle a écrit : tout repart de zéro
@@ -338,6 +343,111 @@ def test_a_greeting_that_brings_news_counts_as_speaking_up(tmp_path):
     hello, brought = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0))
     assert hello.initiatives_today == 0 and hello.last_initiative_at == 0  # une salutation seule : rien de compté
     assert brought.initiatives_today == 1 and brought.base_until > brought.last_initiative_at > 0  # elle a parlé
+
+
+def test_someone_who_no_longer_answers_gets_no_more_news_only_one_word_asking_how_he_is(tmp_path):
+    """2026-10-19, sur le portable : Adrien ne répondait plus. À chaque relevé de sa veille d'actualité, elle lui
+    envoyait les nouvelles (ce qu'une app trouve « prévient ») ; à chaque ouverture de son application, un « hello ! »
+    et un récit, qui ne comptaient pour rien (saluer n'attend pas de réponse). Ce qu'une app a trouvé attend qu'il ait
+    répondu ; saluer en apportant quelque chose, ou saluer qui ne répond pas, c'est prendre la parole ; et la relance
+    ne lui apporte rien de nouveau : elle prend de ses nouvelles. Un mail important, un rappel promis passent."""
+    def voice():
+        return VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m")
+
+    async def said_with(kernel, n, *reasons):
+        mind, eid = kernel.mind, f"ep{n}"
+        await mind.append([rt.EPISODE_STARTED.draft(kind="INITIATIVE", target="user_1", reason=",".join(reasons))],
+                          emitter="runtime", correlation=eid, origin=Origin.KERNEL)
+        await mind.append([rt.UTTERANCE.draft(kind="INITIATIVE", text=Content.of("hello !"), target="user_1",
+                                              voice=voice())], emitter="runtime", correlation=eid,
+                          origin=Origin.KERNEL)
+        await mind.append([rt.EPISODE_ENDED.draft(kind="INITIATIVE", outcome="done", target="user_1")],
+                          emitter="runtime", correlation=eid, origin=Origin.KERNEL)
+        return kernel.mind.frame().get(attention_c.AWAITING("user_1")).initiatives
+
+    def veto(kernel, *reasons):
+        frame = kernel.mind.frame()
+        return _budget(frame.state("agency"), frame, RowView("INITIATIVE", "user_1", 5.0, reasons)).veto
+
+    greeting, news, mail = (social_c.GREETING, "present"), (forge_c.APP_NEWS,), (email_c.MENTION,)
+    alert = (forge_c.APP_ALERT,)
+
+    async def scenario(kernel, script, out, llm):
+        await befriend(kernel, "user_1", social_c.CLOSE)  # proche : un rythme supposé de trois jours
+        await connect(kernel, "user_1", "Adrien")
+        await chat(kernel, "user_1", ["coucou"], gap=60)
+        await disconnect(kernel, "user_1")
+        await asyncio.sleep(13 * HOUR / US)
+        got = {"news_first": veto(kernel, *news)}
+        # elle l'accueille d'un « hello ! » et de ce qu'elle a fini de lire : elle a pris la parole
+        got["first"] = await said_with(kernel, 1, "second_thoughts", goals_c.SHARE, *greeting)
+        got["news"], got["mail"], got["alert"] = veto(kernel, *news), veto(kernel, *mail), veto(kernel, *alert)
+        got["hello"], got["promised"] = veto(kernel, *greeting), veto(kernel, social_c.GREETING, goals_c.REMIND)
+        frame = kernel.mind.frame()
+        got["brief_hello"] = holding_back(frame, "user_1", greeting)
+        got["brief_news"] = holding_back(frame, "user_1", (*news, goals_c.SHARE))
+        got["brief_mail"] = holding_back(frame, "user_1", mail)
+        await asyncio.sleep(8 * DAY / US)
+        got["later"] = veto(kernel, *greeting)  # le délai d'une relance douce (deux fois le rythme) est passé
+        got["second"] = await said_with(kernel, 2, *greeting)  # saluer qui ne répond pas : relancer, compté
+        got["after"], got["news_after"] = veto(kernel, *greeting), veto(kernel, *news)
+        return got
+
+    got = run(tmp_path, scenario, start=at_paris(2026, 9, 28, 10, 0))
+    assert got["news_first"] is None  # rien d'elle n'attend : ce qu'une app a trouvé se dit
+    assert got["first"] == 1  # le « hello ! » qui raconte attend une réponse
+    assert got["news"] == agency_c.UNANSWERED  # … et tant qu'il n'est pas venu, plus de nouvelles
+    assert got["mail"] is None and got["promised"] is None  # un mail important, une parole tenue : toujours
+    assert got["alert"] is None  # ce qu'une app a trouvé d'urgent ouvre le dialogue, même avec qui ne répond plus
+    assert got["hello"] == agency_c.UNANSWERED  # pas de « hello ! » sous son message resté sans réponse
+    for brief in (got["brief_hello"], got["brief_news"]):  # la relance prend de ses nouvelles
+        assert "c'est de ses nouvelles que tu as envie" in brief and "« Adrien »" in brief, brief
+    assert "relance douce" in got["brief_mail"]  # prévenir d'un mail : la retenue d'avant, sans plus
+    assert got["later"] is None and got["second"] == 2
+    assert got["after"] == agency_c.UNANSWERED and got["news_after"] == agency_c.UNANSWERED  # puis plus rien
+
+
+@pytest.mark.parametrize("insists,follow_ups", [(0.1, 0), (0.3, 0), (0.5, 1), (0.6, 1), (0.8, 2), (0.9, 3)])
+def test_how_many_times_she_follows_up_is_her_temperament(insists, follow_ups):
+    """Combien de fois elle relance qui ne lui répond pas avant de laisser tomber : sociable, ou blessée par le
+    silence des autres, davantage (jusqu'à trois) ; ni l'un ni l'autre, pas du tout. Au milieu, une, comme avant."""
+    from mika.faculties.agency import derive
+    from mika.vocab.temperament import Temperament
+
+    assert derive(Temperament(sociability=insists, abandonment=insists)).follow_ups == follow_ups
+    if insists > 0.5:  # l'une ou l'autre suffit
+        assert derive(Temperament(sociability=insists)).follow_ups == follow_ups
+        assert derive(Temperament(abandonment=insists)).follow_ups == follow_ups
+
+
+def test_her_follow_ups_ask_how_he_is_then_say_what_the_silence_does_then_stop(tmp_path):
+    """Réglée pour relancer deux fois : la première relance prend de ses nouvelles ; la seconde dit ce que ce silence
+    lui fait — à sa façon, inquiète, vexée ou agacée — et sait que c'est la dernière ; puis plus rien. Chaque délai
+    est tiré au sort autour du jour (2026-10-19 : « ça doit être assez aléatoire, une fois par jour »)."""
+    def voice():
+        return VoiceProvenance(call_id="x", persona_hash="", role="initiative", model="m")
+
+    async def scenario(kernel, script, out, llm):
+        await befriend(kernel, "ext_1", social_c.CLOSE)
+        p = await kernel.perceive(said("ext_1", "coucou", channel="external"))
+        await p.reply
+        await asyncio.sleep(13 * HOUR / US)
+        await kernel.mind.append([rt.UTTERANCE.draft(
+            kind="INITIATIVE", text=Content.of("tu vas mieux ?"), target="ext_1", channel="external", voice=voice())],
+            emitter="runtime", correlation="genese1", origin=Origin.GENESIS)
+        await asyncio.sleep(12 * DAY / US)  # elle le relance d'elle-même
+        briefs = [c.messages[-1].content for c in llm.calls if c.role == "initiative"]
+        draws = kernel.mind.frame().state("agency").follow_up_draws
+        return initiatives(kernel, "ext_1"), briefs, draws
+
+    sent, briefs, draws = run_with(tmp_path, scenario, {"agency": {"follow_ups": 2}})
+    assert len(sent) == 3, [local(e.at, PARIS).strftime("%a %d %H:%M") for e in sent]  # une, puis deux relances
+    first, again = [b for b in briefs if "c'est de ses nouvelles" in b], [b for b in briefs if "sans réponse, la" in b]
+    assert len(first) == 1 and "dernière relance" not in first[0]
+    assert len(again) == 1 and "ce que ce silence te fait" in again[0] and "C'est ta dernière relance" in again[0]
+    gaps = [b.at - a.at for a, b in zip(sent, sent[1:], strict=False)]
+    assert all(gap >= 0.6 * 3 * DAY for gap in gaps), gaps  # le rythme (trois jours) tiré à ± 40 %
+    assert 0.6 <= draws["ext_1"] <= 1.4
 
 
 # ── De quoi parler ────────────────────────────────────────────────────────

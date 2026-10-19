@@ -6,6 +6,8 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
+from mika.contracts import attention as attention_c
+from mika.contracts import identity as identity_c
 from mika.contracts import runtime as rt
 from mika.kernel.clock import HOUR, US
 from tests.fixtures.mika import at_paris
@@ -24,6 +26,19 @@ ENDINGS = [
 ]
 
 
+def facts(mark: int, *, unanswered: int = 0) -> SimpleNamespace:
+    """Ce que lisent les réducteurs de départ et de fin : quand elle s'est ravisée (``agency.RENOUNCED``) ; combien
+    de ses messages la personne a laissés sans réponse (``attention.AWAITING`` : aucun, sauf ``unanswered``)."""
+    def get(key: Any) -> Any:
+        family = getattr(key, "family", None)
+        if family is attention_c.AWAITING:
+            return attention_c.AwaitingReading(key.arg, initiatives=unanswered)
+        if family is identity_c.PERSON:
+            return key.arg
+        return mark
+    return SimpleNamespace(get=get)
+
+
 def initiative_ends(reducers: tuple[Any, Any], state: Any, params: Any, reason: str, subject: str | None,
                     ending: tuple[str, str | None], *, times: int = 2,
                     start: int = at_paris(2026, 9, 28, 15, 0)) -> Any:
@@ -34,7 +49,7 @@ def initiative_ends(reducers: tuple[Any, Any], state: Any, params: Any, reason: 
     for i in range(times):
         at = start + i * HOUR
         mark = {None: 0, "after": at + 30 * US, "before": at - HOUR}[renounced]
-        cx = SimpleNamespace(params=params, facts=SimpleNamespace(get=lambda key, mark=mark: mark))
+        cx = SimpleNamespace(params=params, facts=facts(mark))
         state = started(state, SimpleNamespace(correlation=f"c{i}", at=at, data=rt.EpisodeStarted(
             kind="INITIATIVE", target="user_1", reason=reason, subject=subject)), cx)
         state = ended(state, SimpleNamespace(correlation=f"c{i}", at=at + 40 * US, data=rt.EpisodeEnded(

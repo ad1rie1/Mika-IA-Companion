@@ -362,4 +362,66 @@ class FrameCodecTest {
         assertNull(t.ok)
         assertNull(t.durationMs)
     }
+
+    // ── Sa position (ADR 0119) ───────────────────────────────────────────────────────────
+
+    @Test fun `où est la personne, au JSON exact - la précision et le lieu omis quand on ne les a pas`() {
+        assertEquals(
+            """{"type":"where","lat":45.764043,"lon":4.835659,"accuracy":12,"label":"Rue de la République, Lyon","age_ms":1500}""",
+            FrameCodec.where(45.764043, 4.835659, 12, "Rue de la République, Lyon", 1_500),
+        )
+        assertEquals(
+            """{"type":"where","lat":-33.5,"lon":151.25,"age_ms":0}""",
+            FrameCodec.where(-33.5, 151.25, 0, "", -40),
+        )
+        assertEquals("""{"type":"where","off":true}""", FrameCodec.whereOff())
+        val long = FrameCodec.where(1.0, 2.0, 5, "x".repeat(300), 0)
+        assertTrue(long.contains("\"label\":\"${"x".repeat(MikaProtocol.MAX_WHERE_LABEL_CHARS)}\""))
+    }
+
+    @Test fun `ses petites bulles d'une parole - le lieu, de quand, les sortes inconnues écartées`() {
+        val s = FrameCodec.decode(
+            """{"type":"speech","text":"Tu es à Lyon !","message_id":812,"notes":[""" +
+                """{"kind":"location","text":"Rue de la République, Lyon","at":1760889000000},""" +
+                """{"kind":"weather","text":"il pleut","at":1},""" +
+                """{"kind":"location","text":"","at":1760889000000.0},""" +
+                """{"kind":"location","text":7},"x",{"text":"sans sorte"}]}""",
+        ) as ServerFrame.Speech
+        assertEquals("Tu es à Lyon !", s.text)
+        assertEquals(
+            listOf(
+                MessageNote("location", "Rue de la République, Lyon", 1_760_889_000_000),
+                MessageNote("location", "", 1_760_889_000_000),
+                // un texte qui n'est pas une chaîne vaut vide, un instant absent vaut 0
+                MessageNote("location", "", 0),
+            ),
+            s.notes,
+        )
+        assertNull((FrameCodec.decode("""{"type":"speech","text":"coucou"}""") as ServerFrame.Speech).notes)
+        assertNull((FrameCodec.decode("""{"type":"speech","text":"coucou","notes":[{"kind":"weather"}]}""") as ServerFrame.Speech).notes)
+    }
+
+    @Test fun `des petites bulles cassées n'emportent ni la parole ni la ligne d'historique`() {
+        val s = FrameCodec.decode("""{"type":"speech","text":"coucou","message_id":3,"notes":"pas une liste"}""")
+        assertTrue("$s", s is ServerFrame.Speech)
+        assertEquals("coucou", (s as ServerFrame.Speech).text)
+        assertNull(s.notes)
+        assertEquals(3L, s.messageId)
+
+        val h = FrameCodec.decode(
+            """{"type":"history","mode":"initial","last_id":813,"messages":[""" +
+                """{"id":811,"role":"assistant","text":"Tu es au parc","ts":1790601615002,""" +
+                """"notes":[{"kind":"location","text":"Parc de la Tête d'Or, Lyon","at":1790601500000}]},""" +
+                """{"id":812,"role":"assistant","text":"cassé","notes":{"kind":"location"}},""" +
+                """{"id":813,"role":"assistant","text":"pro","mode":"pro","tools":[{"name":"location_where","ok":true}],""" +
+                """"notes":[{"kind":"location","text":"45.764043,4.835659","at":1790601500000}]}]}""",
+        ) as ServerFrame.History
+        val (park, broken, pro) = h.messages!!
+        assertEquals(listOf(MessageNote("location", "Parc de la Tête d'Or, Lyon", 1_790_601_500_000)), park.notes)
+        assertEquals("cassé", broken.text)
+        assertNull(broken.notes)
+        // ses outils et ses bulles se lisent chacun à part
+        assertEquals(listOf(ToolUse("location_where", true)), pro.tools)
+        assertEquals("45.764043,4.835659", pro.notes!!.single().text)
+    }
 }

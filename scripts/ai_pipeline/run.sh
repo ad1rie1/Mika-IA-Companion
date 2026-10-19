@@ -311,7 +311,8 @@ run_audits() {
     # PAS taguées Propose_AI_PR (cf. AUDIT_NO_AUTO_PR_PROFILES) : elles ne
     # partent donc jamais toutes seules en PR, elles attendent un arbitrage.
     local profile
-    for profile in "bugs" "quality" "security" "features"; do
+    #for profile in "bugs" "quality" "security" "features"; do
+    for profile in "bugs"; do
         sweep_modules audit "$profile" || return 1
     done
 }

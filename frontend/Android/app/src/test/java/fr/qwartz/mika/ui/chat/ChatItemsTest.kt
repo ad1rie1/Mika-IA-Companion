@@ -6,6 +6,7 @@ import fr.qwartz.mika.data.chat.Sender
 import fr.qwartz.mika.data.chat.StoredMessage
 import fr.qwartz.mika.data.chat.WorkCard
 import fr.qwartz.mika.data.chat.WorkStep
+import fr.qwartz.mika.data.net.MessageNote
 import fr.qwartz.mika.data.net.ToolUse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -161,5 +162,25 @@ class ChatItemsTest {
         // répondue mais sans plus rien où se mettre : elle ne se montre pas
         val orphan = ChatItems.build(listOf(msg("salut", Sender.USER, 40, now)), nowMs = now, zone = zone, work = listOf(answered))
         assertTrue(orphan.none { it is ChatItem.Work })
+    }
+
+    @Test fun `sa petite bulle - juste avant la première bulle de sa réponse, les sortes connues seulement (ADR 0119)`() {
+        val looked = MessageNote("location", "Rue de la République, Lyon", at(2026, 10, 4, 20))
+        val asked = msg("devine où je suis", Sender.USER, 1, now).apply { notes = listOf(looked) }
+        val reply = msg("Rue de la République !\n\nTu vas au cinéma ?", Sender.MIKA, 2, now).apply {
+            notes = listOf(looked, MessageNote("weather", "il pleut", now), looked.copy(text = ""))
+        }
+        val items = ChatItems.build(listOf(asked, reply), nowMs = now, zone = zone).filter { it !is ChatItem.DateSeparator }
+        // la personne n'a pas de petite bulle ; la sorte inconnue ne se montre pas
+        assertEquals(listOf("Bubble", "Looked", "Looked", "Bubble", "Bubble"), items.map { it::class.simpleName })
+        val first = items[1] as ChatItem.Looked
+        assertEquals(looked, first.note)
+        assertEquals(now, first.messageTs)
+        assertEquals("", (items[2] as ChatItem.Looked).note.text)
+        assertEquals(items.size, items.map { it.key }.toSet().size)
+
+        // une pensée à voix haute n'en montre pas
+        val thought = StoredMessage("hmm", Sender.MIKA, now, after = 2, inner = true, notes = listOf(looked))
+        assertTrue(ChatItems.build(listOf(thought), nowMs = now, zone = zone).none { it is ChatItem.Looked })
     }
 }

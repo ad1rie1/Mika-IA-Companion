@@ -28,6 +28,7 @@ from mika.adapters.push import fcm, seal
 from mika.adapters.web.accounts import Accounts, PushRegistration, account_of_handle
 from mika.ports import delivery as delivery_p
 from mika.ports.delivery import Delivery
+from mika.ports.shares import valid_id
 from mika.vocab import voice
 from mika.vocab.affect import strip_prosody
 from mika.vocab.people import is_internal
@@ -105,7 +106,7 @@ class MobilePush:
         if not targets:
             return False
         body = seal.payload(message_id=d.message_id, text=strip_prosody(d.text).strip(), ts_ms=self._now_ms(),
-                            files=len(d.attachments))
+                            files=sum(1 for a in d.attachments if valid_id(a)))  # ses fichiers, pas ses bulles
         task = asyncio.get_running_loop().create_task(self._send_all(targets, body), name="push")
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)

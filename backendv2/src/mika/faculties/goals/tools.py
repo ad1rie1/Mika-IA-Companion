@@ -6,8 +6,11 @@ apporté), ``goal_task_add`` / ``goal_task_update`` (son plan de travail, que
 l'opérateur tient aussi), ``goal_drop`` (renoncer — seulement à ce qu'elle a
 entrepris d'elle-même). En conversation : ``goal_remind`` (un rappel à l'heure
 dite), ``goal_remind_change`` (le décommander ou le déplacer, quand la personne
-qui l'a demandé le lui dit — seulement les siens). Les projets sont une faculté
-à part (``projects``, ADR 0031).
+qui l'a demandé le lui dit — seulement les siens). Dans un réveil par API
+(ADR 0117) : ``goal_plan_reminder`` (un rappel à l'heure dite, pour qui le
+réveil rend compte) et ``goal_plan_exploration`` (un sujet à creuser plus tard,
+avec les seuls outils du réveil). Les projets sont une faculté à part
+(``projects``, ADR 0031).
 
 **« Fini » se prouve** par ce qui touche autre chose que sa tête : lire un
 article de ses flux, écrire dans un atelier… Noter, chercher dans sa mémoire,
@@ -32,6 +35,7 @@ from pydantic import BaseModel, Field
 
 from mika.contracts import goals as c
 from mika.contracts import identity as identity_c
+from mika.contracts import wakeup as wakeup_c
 from mika.faculties.goals.faculty import (
     GOAL_REFRAMED,
     GOALS,
@@ -54,7 +58,7 @@ from mika.kernel.events import Content
 from mika.kernel.faculty import ToolResult, proving_tools
 from mika.kernel.frame import Frame
 from mika.kernel.guards import Guard, Superseded
-from mika.vocab.episodes import Kind, goal_of
+from mika.vocab.episodes import WAKE_KINDS, Kind, goal_of
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import stems
@@ -358,6 +362,93 @@ async def goal_remind(args: RemindArgs, ctx: Any) -> Any:
     when = date_time(local(due, ctx.frame.env.tz_of(ctx.frame.root)))
     return phrase("goals.tools.remind.done_urgent", when=when) if args.urgent else \
         phrase("goals.tools.remind.done", when=when)
+
+
+# ── Dans un réveil par API (ADR 0117) ─────────────────────────────────────
+
+#: l'envie de départ d'une exploration née d'un réveil : ce n'est pas sa curiosité qui l'ouvre, c'est un appel
+WAKE_DESIRE = 0.6
+#: le lot du réveil lui-même (``report_wake``) : il ne sert qu'à conclure l'appel
+WAKE_BUNDLE = "wakeup"
+
+
+def _wake_args(frame: Frame) -> Mapping[str, Any]:
+    ep = frame.episode
+    return (ep.attrs.get("args") or {}) if ep is not None and ep.kind in WAKE_KINDS else {}
+
+
+def _wake_person(frame: Frame) -> str | None:
+    """La personne pour qui ce réveil travaille — celle à qui il rend compte (sa propriétaire, un compte) —, sinon
+    ``None``."""
+    notify = _wake_args(frame).get(wakeup_c.NOTIFY_ARG) or wakeup_c.NOBODY
+    if notify == wakeup_c.NOBODY:
+        return None
+    if notify == wakeup_c.OWNERS:
+        owners = frame.get(identity_c.OWNERS)
+        return owners[0] if owners else None
+    return frame.get(identity_c.PERSON(notify)) or notify
+
+
+def _wake_source(frame: Frame) -> str | None:
+    """``wakeup:<seq>`` : l'appel que traite ce réveil, sinon ``None``."""
+    ep = frame.episode
+    n = wakeup_c.call_of(ep.attrs.get("subject")) if ep is not None else None
+    return wakeup_c.subject(n) if n is not None else None
+
+
+class PlanReminderArgs(BaseModel):
+    when: str = Field(description=phrase("goals.tools.remind.when"))
+    what: str = Field(min_length=1, max_length=300, description=phrase("goals.tools.plan_reminder.what"))
+    urgent: bool = Field(default=False, description=phrase("goals.tools.remind.urgent"))
+
+
+@GOALS.tool("goal_plan_reminder", description=phrase("goals.tools.plan_reminder.description"), args=PlanReminderArgs,
+            bundle="goals", episodes=sorted(WAKE_KINDS), max_calls_per_episode=3)
+async def goal_plan_reminder(args: PlanReminderArgs, ctx: Any) -> Any:
+    person, source = _wake_person(ctx.frame), _wake_source(ctx.frame)
+    if person is None or source is None:
+        return ToolResult(ok=False, content=phrase("goals.tools.plan_reminder.nobody"))
+    due = _due(args.when, ctx.frame)
+    if isinstance(due, str):
+        return ToolResult(ok=False, content=due)
+    level = int(Sensitivity.PERSONAL)
+    # demandé par qui a déclaré le réveil : comme un rappel qu'on lui demande, il se dit à l'heure dite, là où la
+    # personne est alors
+    await ctx.emit(c.GOAL_OPENED.draft(
+        kind=c.REMINDER, authority=c.USER, title=Content.of(args.what.strip(), level=level), owner=person,
+        about=(person,), due=due, urgent=args.urgent, source=source, sensitivity=level))
+    when = date_time(local(due, ctx.frame.env.tz_of(ctx.frame.root)))
+    return phrase("goals.tools.remind.done_urgent", when=when) if args.urgent else \
+        phrase("goals.tools.remind.done", when=when)
+
+
+class PlanExplorationArgs(BaseModel):
+    what: str = Field(min_length=1, max_length=200, description=phrase("goals.tools.plan_exploration.what"))
+    details: str = Field(default="", max_length=600, description=phrase("goals.tools.plan_exploration.details"))
+
+
+@GOALS.tool("goal_plan_exploration", description=phrase("goals.tools.plan_exploration.description"),
+            args=PlanExplorationArgs, bundle="goals", episodes=[Kind.WAKE], max_calls_per_episode=1)
+async def goal_plan_exploration(args: PlanExplorationArgs, ctx: Any) -> Any:
+    frame = ctx.frame
+    source = _wake_source(frame)
+    if source is None:
+        return ToolResult(ok=False, content=phrase("goals.tools.plan_exploration.gone"))
+    person = _wake_person(frame)
+    # jamais plus d'outils que le réveil n'en avait (hors son lot à lui, qui conclut l'appel), et de quoi rendre
+    # compte d'une séance
+    held = [b for b in str(_wake_args(frame).get("bundles") or "").split(",") if b and b != WAKE_BUNDLE]
+    level = int(Sensitivity.PERSONAL)
+    details = args.details.strip()
+    # née d'un signal : son titre est à elle, ce que l'appel apportait reste à part, cité au travail (``titled``)
+    await ctx.emit(c.GOAL_OPENED.draft(
+        kind=c.EXPLORATION, authority=c.SELF, title=Content.of(args.what.strip(), level=level),
+        details=Content.of(details, level=level) if details else None, owner=person,
+        about=(person,) if person else (), bundles=tuple(dict.fromkeys(("goals", *held))),
+        max_steps=params(frame.env.params_of("goals", frame.root)).exploration_steps, source=source,
+        sensitivity=level, origin=c.FROM_SIGNAL, origin_at=frame.now, desire=WAKE_DESIRE,
+        dedupe_key=f"but:{source}"))
+    return phrase("goals.tools.plan_exploration.done")
 
 
 CANCEL, MOVE = "cancel", "move"

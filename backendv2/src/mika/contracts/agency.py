@@ -17,6 +17,7 @@ personne répond, qui écrit la première) — jamais redit dans une faculté.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from mika.contracts import attention as attention_c
@@ -77,12 +78,17 @@ OWED = frozenset({goals_c.REMIND, memory_c.KEEP_PROMISE, imaging_c.DELIVER, imag
 #: ravisée de lui écrire pour autre chose. C'est déjà borné par sa source (une fois par mail, une fois par
 #: objectif bloqué) ; le plafond du jour et la période réfractaire **de base** s'y appliquent toujours (ne pas
 #: annoncer trois mails en trois messages d'affilée).
-INFORMS = frozenset({email_c.MENTION, projects_c.NEED, forge_c.APP_NEWS})
+INFORMS = frozenset({email_c.MENTION, projects_c.NEED, forge_c.APP_NEWS, forge_c.APP_ALERT})
+#: … sauf ce qui prévient sans presser : ce qu'une app a trouvé pour la personne attend qu'elle ait répondu à ce
+#: qu'elle lui a déjà écrit d'elle-même. Sans cela, une veille d'actualité (trois relevés par jour) lui écrivait des
+#: nouvelles sans fin à qui ne répondait plus (2026-10-19, sur le portable). Un mail important, un projet bloqué,
+#: ce qu'une app a trouvé et qu'elle a jugé urgent (``forge.APP_ALERT``) ne l'attendent pas.
+WAITS_FOR_AN_ANSWER = frozenset({forge_c.APP_NEWS})
 #: **Saluer** qui arrive : pas « prendre la parole » non plus (ni plafond, ni période réfractaire, ni retenue
 #: envers qui ne répond pas) — mais une rancune l'empêche (ADR 0013 : pas même une salutation).
 GREETS = frozenset({social_c.GREETING})
 #: Ce qui n'est pas prendre la parole pour qu'on lui réponde : saluer qui arrive, tenir parole. Ni compté au
-#: budget, ni suivi d'une période réfractaire, ni attendu en retour (ce n'était pas une question).
+#: budget, ni suivi d'une période réfractaire, ni attendu en retour (ce n'était pas une question) — seul (``spoke_up``).
 NOT_SPEAKING_UP = GREETS | OWED
 #: Ce qui ne regarde **que la personne** : prendre de ses nouvelles parce qu'on s'inquiète, lui demander comment
 #: s'est passé ce qu'elle avait de prévu, l'encourager ou lui souhaiter (``others.WELL_WISHES``), revenir sur ce qui
@@ -92,6 +98,26 @@ NOT_SPEAKING_UP = GREETS | OWED
 #: ça n'attend pas que son dernier message ait trouvé sa réponse (``agency``).
 FOR_THEM = others_c.WELL_WISHES | frozenset({others_c.CHECK_IN, others_c.FOLLOW_UP, attention_c.THOUGHT,
                                              goals_c.SHARE, projects_c.SHARE})
+
+
+def spoke_up(reasons: Iterable[str], *, waiting: bool = False) -> bool:
+    """Ce qu'une initiative **dite** a été : saluer qui arrive ou tenir parole, seuls, ce n'est pas prendre la
+    parole ; mais une salutation (ou une parole tenue) qui emporte une nouvelle, un récit, une demande, des nouvelles
+    prises (``INFORMS | FOR_THEM``), si — sans quoi le message qui disait tout à l'arrivée de quelqu'un ne comptait
+    pour rien (sonde du 2026-10-13), et n'attendait pas de réponse (2026-10-19). Saluer quelqu'un qui a laissé sans
+    réponse ce qu'elle lui avait écrit d'elle-même (``waiting``), c'est le relancer."""
+    got = set(reasons)
+    if not NOT_SPEAKING_UP & got or (INFORMS | FOR_THEM) & got:
+        return True
+    return waiting and bool(GREETS & got) and not OWED & got
+
+
+def checking_in(reasons: Iterable[str], unanswered: int) -> bool:
+    """Une initiative vers quelqu'un qui a laissé sans réponse ce qu'elle lui avait écrit d'elle-même
+    (``unanswered``), sans rien qui presse (tenir parole, prévenir) : c'est une relance. Elle prend de ses nouvelles
+    et ne lui apporte rien de nouveau ; ce qui la poussait (une nouvelle, un récit) attend qu'il ait répondu — sur le
+    portable, ses relances n'étaient qu'une suite d'actualités (2026-10-19)."""
+    return unanswered > 0 and not (OWED | (INFORMS - WAITS_FOR_AN_ANSWER)) & set(reasons)
 #: Pourquoi elle était en train d'écrire à quelqu'un quand son message est arrivé (« j'allais justement
 #: t'écrire ! ») : la réponse qui suit le sait — le premier motif de cette liste présent parmi les raisons de
 #: l'initiative, dit avec les mots de ``agency.crossed.motive`` (persona/voix.yaml, ADR 0071). Une raison absente
@@ -102,11 +128,14 @@ CROSSED_MOTIVES: tuple[str, ...] = (
 )
 
 #: Après tant d'initiatives restées sans réponse vers quelqu'un, plus rien vers cette personne tant qu'elle n'a pas
-#: écrit (ADR 0033) : elle ne peut plus lui écrire — ce qui lui reste, c'est d'y penser (``attention``).
+#: écrit (ADR 0033) : elle ne peut plus lui écrire — ce qui lui reste, c'est d'y penser (``attention``). C'est la
+#: valeur au milieu de la matrice (une initiative, une relance) ; la sienne, son tempérament la dit
+#: (``AgencyReading.gives_up_after`` : de une à quatre).
 GIVE_UP_AFTER = 2
 #: … sauf, longtemps après, prendre de ses nouvelles **une fois** (``social.REKINDLE``, ADR 0058) : ça passe la
-#: retenue « sans réponse » tant que la personne n'a pas plus de ``GIVE_UP_AFTER`` initiatives sans réponse — dite,
-#: elle en a une de plus, et plus rien ne passe. Être ignorée n'en diminue pas l'envie (c'est déjà rare, et unique).
+#: retenue « sans réponse » tant que la personne n'a pas plus de ``gives_up_after`` initiatives sans réponse —
+#: dite, elle en a une de plus, et plus rien ne passe. Être ignorée n'en diminue pas l'envie (c'est déjà rare, et
+#: unique).
 ONCE_MORE = frozenset({social_c.REKINDLE})
 
 #: Les fins d'une initiative qui ne sont pas un **essai** : elle a été devancée (la personne a écrit pendant
@@ -134,6 +163,9 @@ class AgencyReading:
     #: la fin de la période réfractaire **de base** (sans l'allongement par les initiatives ignorées) : celle
     #: qui s'applique à ce qui prévient (``INFORMS``)
     base_until: int = 0
+    #: après tant d'initiatives restées sans réponse vers quelqu'un, elle laisse tomber (sa première, puis ses
+    #: relances : son tempérament le dit)
+    gives_up_after: int = GIVE_UP_AFTER
 
 
 AGENCY = FactKey("agency.agency", type=AgencyReading, time_varying=True)

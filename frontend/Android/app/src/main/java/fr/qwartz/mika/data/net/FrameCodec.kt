@@ -35,7 +35,7 @@ object FrameCodec {
         val type = (obj["type"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
         return try {
             when (type) {
-                MikaProtocol.TYPE_SPEECH -> json.decodeFromJsonElement(ServerFrame.Speech.serializer(), obj)
+                MikaProtocol.TYPE_SPEECH -> decodeSpeech(obj)
                 MikaProtocol.TYPE_HISTORY -> decodeHistory(obj)
                 MikaProtocol.TYPE_ACK -> json.decodeFromJsonElement(ServerFrame.Ack.serializer(), obj)
                 MikaProtocol.TYPE_EMOTION_UPDATE ->
@@ -62,20 +62,55 @@ object FrameCodec {
         val reset: Boolean = false,
     )
 
+    /** Une parole. Ses petites bulles (ADR 0119) se lisent à part : une liste cassée n'emporte pas ce qu'elle dit. */
+    private fun decodeSpeech(obj: JsonObject): ServerFrame.Speech {
+        val speech = json.decodeFromJsonElement(ServerFrame.Speech.serializer(), JsonObject(obj - K_NOTES))
+        return if (K_NOTES in obj) speech.copy(notes = messageNotes(obj[K_NOTES])) else speech
+    }
+
     private fun decodeHistory(obj: JsonObject): ServerFrame.History {
         val head = json.decodeFromJsonElement(HistoryHead.serializer(), JsonObject(obj - "messages"))
         val raw = obj["messages"] as? JsonArray
         val entries = raw?.mapNotNull { item ->
             try {
-                // Ses outils (ADR 0116) se lisent à part : une liste cassée n'emporte pas le message.
+                // Ses outils (ADR 0116) et ses petites bulles (ADR 0119) se lisent à part : une liste cassée
+                // n'emporte pas le message.
                 val line = item as? JsonObject
-                val entry = json.decodeFromJsonElement(HistoryEntry.serializer(), line?.let { JsonObject(it - "tools") } ?: item)
-                if (line != null && "tools" in line) entry.copy(tools = toolUses(line["tools"])) else entry
+                val entry = json.decodeFromJsonElement(HistoryEntry.serializer(), line?.let { JsonObject(it - K_TOOLS - K_NOTES) } ?: item)
+                if (line == null) {
+                    entry
+                } else {
+                    entry.copy(
+                        tools = if (K_TOOLS in line) toolUses(line[K_TOOLS]) else entry.tools,
+                        notes = if (K_NOTES in line) messageNotes(line[K_NOTES]) else entry.notes,
+                    )
+                }
             } catch (_: IllegalArgumentException) {
                 null
             }
         }
         return ServerFrame.History(head.mode, entries, head.lastId, head.truncated, head.life, head.reset)
+    }
+
+    /**
+     * Les petites bulles d'un de ses messages (ADR 0119) : `null` quand ce n'est pas une liste, ou qu'il n'y en a
+     * aucune de connue. Seules les sortes que cette version sait montrer passent (`location`) ; un texte qui n'est
+     * pas une chaîne vaut vide (la bulle se montre sans lieu), un instant illisible vaut 0 (sans heure). Bornées
+     * en nombre et en longueur.
+     */
+    private fun messageNotes(element: JsonElement?): List<MessageNote>? {
+        val items = element as? JsonArray ?: return null
+        return items.asSequence()
+            .mapNotNull { item ->
+                val o = item as? JsonObject ?: return@mapNotNull null
+                val kind = (o["kind"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+                if (kind != MikaProtocol.NOTE_LOCATION) return@mapNotNull null
+                val text = (o["text"] as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim().orEmpty()
+                MessageNote(kind, clip(text, MikaProtocol.MAX_NOTE_TEXT_CHARS), o["at"]?.let { timestampMs(it) } ?: 0L)
+            }
+            .take(MikaProtocol.MAX_MESSAGE_NOTES)
+            .toList()
+            .ifEmpty { null }
     }
 
     /**
@@ -281,6 +316,25 @@ object FrameCodec {
         put("up_to", upTo)
     }.toString()
 
+    /**
+     * Où est la personne (« Lui dire où je suis », ADR 0119) : ses coordonnées, la précision en mètres (0 :
+     * inconnue, omise), le nom du lieu (vide : omis) et l'âge de la mesure au moment où la trame part.
+     */
+    fun where(lat: Double, lon: Double, accuracyM: Int, label: String, ageMs: Long): String = buildJsonObject {
+        put("type", MikaProtocol.TYPE_WHERE)
+        put("lat", lat)
+        put("lon", lon)
+        if (accuracyM > 0) put("accuracy", accuracyM)
+        if (label.isNotEmpty()) put("label", label.take(MikaProtocol.MAX_WHERE_LABEL_CHARS))
+        put("age_ms", ageMs.coerceAtLeast(0))
+    }.toString()
+
+    /** Elle ne partage pas (ou plus) sa position : la dernière s'efface chez Mika. */
+    fun whereOff(): String = buildJsonObject {
+        put("type", MikaProtocol.TYPE_WHERE)
+        put("off", true)
+    }.toString()
+
     /** Une décision sur une carte d'accord, avec l'empreinte de la carte telle qu'elle était montrée. */
     fun approval(id: Long, decision: ApprovalDecision, digest: String): String = buildJsonObject {
         put("type", MikaProtocol.TYPE_APPROVAL)
@@ -298,6 +352,8 @@ object FrameCodec {
     }.toString()
 
     private const val MAX_STATUS_CHARS = 64
+    private const val K_TOOLS = "tools"
+    private const val K_NOTES = "notes"
     const val MAX_COMMENT_CHARS = 2000
 
     const val K_SLEEP_PHASE = "sleep_phase"

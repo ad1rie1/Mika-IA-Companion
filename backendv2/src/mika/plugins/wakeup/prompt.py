@@ -322,7 +322,7 @@ def _wake(s: WakeupState, frame: Frame) -> list[Candidate]:
             resource = workshop(f"reveil-{call.endpoint}")
         out.append(Candidate(kind, target, c.WAKE, evidence, resources=frozenset({resource}), guards=guards,
                              args=FrozenDict({"bundles": ",".join(dict.fromkeys(bundles)),
-                                              "subject": c.subject(call.seq)})))
+                                              "subject": c.subject(call.seq), c.NOTIFY_ARG: call.notify})))
     return out
 
 

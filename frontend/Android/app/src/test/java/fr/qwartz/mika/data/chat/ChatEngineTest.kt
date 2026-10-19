@@ -6,6 +6,7 @@ import fr.qwartz.mika.data.files.OutboxFiles
 import fr.qwartz.mika.data.net.FakeClock
 import fr.qwartz.mika.data.net.FrameCodec
 import fr.qwartz.mika.data.net.HistoryEntry
+import fr.qwartz.mika.data.net.MessageNote
 import fr.qwartz.mika.data.net.RejectedAttachment
 import fr.qwartz.mika.data.net.ServerFrame
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -186,7 +187,29 @@ class ChatEngineTest {
         assertEquals(setOf(13L), event.answeredElsewhere)
     }
 
-    private fun tool(json: String) = FrameCodec.decode("""{"type":"tool","episode":"e1","reply_to":11,$json}""") as ServerFrame.Tool
+    @Test fun `sa réponse qui a regardé où tu es garde sa petite bulle, que le rattrapage met à jour (ADR 0119)`() = test {
+        engine.onSpeech(
+            speech(
+                """"text":"Tu es en ville !","message_id":21,"user_message_id":20,""" +
+                    """"notes":[{"kind":"location","text":"Rue de la République, Lyon","at":1760889000000}]""",
+            ),
+        )
+        assertEquals(listOf(MessageNote("location", "Rue de la République, Lyon", 1_760_889_000_000)), store.rows.single().notes)
+        // le même tour croisé par un rattrapage, la position oubliée depuis : la bulle reste, sans lieu
+        engine.onHistory(
+            ServerFrame.History(
+                messages = listOf(
+                    HistoryEntry(21, "assistant", "Tu es en ville !", notes = listOf(MessageNote("location", "", 1_760_889_000_000))),
+                ),
+            ),
+        )
+        assertEquals("", store.rows.single().notes!!.single().text)
+        // une parole sans bulle n'en a pas
+        engine.onSpeech(speech(""""text":"autre chose","message_id":22"""))
+        assertNull(store.sorted().last().notes)
+    }
+
+    private fun tool(json: String) =FrameCodec.decode("""{"type":"tool","episode":"e1","reply_to":11,$json}""") as ServerFrame.Tool
 
     @Test fun `ses outils en direct font sa carte de travail, que sa réponse pro replie (ADR 0116)`() = test {
         pending("trouve le devis", "c1")

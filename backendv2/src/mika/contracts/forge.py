@@ -20,6 +20,11 @@ APP_SIGNAL, APP_BROKEN = "app", "broken"
 #: la raison d'une initiative : dire à la personne que son projet concerne ce qu'une de ses apps vient de lui signaler
 #: (ADR 0105) — elle prévient (``agency.INFORMS``) : la personne attend qu'on la prévienne, ce n'est pas une relance
 APP_NEWS = "app_news"
+#: … ce qu'elle a jugé urgent (un danger, une alerte, ce qui le touche de près, maintenant) : ça ouvre le dialogue même
+#: avec qui ne lui répond plus (``agency.INFORMS``, sans attendre de réponse — 2026-10-19). Une trouvaille ordinaire
+#: (une nouvelle, une curiosité), elle, attend qu'il ait répondu à ce qu'elle lui a déjà écrit
+#: (``agency.WAITS_FOR_AN_ANSWER``).
+APP_ALERT = "app_alert"
 
 
 #: la raison d'une tâche : lire ce qu'une app a mis dans sa file de signaux, juger, et prévenir (ADR 0105)
@@ -53,6 +58,8 @@ class SignalsJudged(Payload):
     keep: Content | None = None
     about: tuple[str, ...] = ()
     sensitivity: int = 1
+    #: ce qu'elle dira ne peut pas attendre qu'il lui réponde (``APP_ALERT``)
+    urgent: bool = False
 
 
 SIGNALED = event_type("forge.signaled", OWNER, AppSignaled, public=True, content=("summary",))

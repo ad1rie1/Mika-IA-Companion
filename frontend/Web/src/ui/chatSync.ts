@@ -19,11 +19,13 @@ import type {
   AckMessage,
   HistoryAttachment,
   HistoryEntry,
+  MessageNote,
   RejectedAttachment,
   SentFile,
   ToolUse,
   Verdict,
 } from "../types";
+import { messageNotes, sameNotes } from "./messageNotes";
 import { sameToolUses, toolUses } from "./toolActivity";
 
 /**
@@ -125,6 +127,12 @@ export interface StoredMessage {
    * depuis l'historique seulement (la carte en direct, elle, ne se garde pas).
    */
   tools?: ToolUse[];
+  /**
+   * Ce qu'elle a fait en écrivant ce message (ADR 0119) — un regard sur la
+   * position de la personne : une petite bulle juste avant sa réponse.
+   * Depuis la `speech` ou l'historique, validées par `messageNotes`.
+   */
+  notes?: MessageNote[];
 }
 
 /** `"pro"` pour une trame ou une ligne en mode pro ; toute autre valeur vaut « ordinaire ». */
@@ -556,6 +564,7 @@ export function mergeHistory(
   /**
    * Des lignes déjà affichées qui apprennent leur mode ou leurs outils (ADR
    * 0116) : une réponse pro reçue en direct ne les porte pas, le fil relu si.
+   * Ou dont les petites bulles ont changé (ADR 0119 : un lieu oublié depuis).
    */
   enriched: number;
 } {
@@ -583,7 +592,8 @@ export function mergeHistory(
           judged += 1;
         }
       }
-      // — et ce que le direct ne disait pas : le mode, les outils de sa réponse pro
+      // — et ce que le direct ne disait pas : le mode, les outils de sa réponse
+      // pro ; ses petites bulles, qui peuvent avoir changé (un lieu oublié)
       if (shown && enrich(shown, mode, entry)) enriched += 1;
       continue;
     }
@@ -616,6 +626,7 @@ export function mergeHistory(
     } else {
       const { verdict, verdictNote } = sender === "vtuber" ? verdictOf(entry) : {};
       const tools = sender === "vtuber" && mode ? toolUses(entry.tools) : [];
+      const notes = sender === "vtuber" ? messageNotes(entry.notes) : [];
       history.push({
         text,
         sender,
@@ -627,6 +638,7 @@ export function mergeHistory(
         ...(verdictNote ? { verdictNote } : {}),
         ...(mode ? { mode } : {}),
         ...(tools.length ? { tools } : {}),
+        ...(notes.length ? { notes } : {}),
       });
       added += 1;
     }
@@ -644,7 +656,9 @@ export function mergeHistory(
  * Le mode et les outils qu'une ligne du serveur dit d'un message déjà
  * affiché : une marque « pro » posée à l'envoi ne se perd pas sur une ligne
  * qui ne la dirait pas, et les outils ne vont qu'à une réponse pro d'elle.
- * Rend vrai si quelque chose a changé.
+ * Ses petites bulles (ADR 0119) suivent le fil relu, absentes comprises (le
+ * serveur ne les envoie pas quand il n'y en a pas) : un lieu oublié depuis
+ * quitte aussi l'écran. Rend vrai si quelque chose a changé.
  */
 function enrich(shown: StoredMessage, mode: "pro" | undefined, entry: HistoryEntry): boolean {
   let changed = false;
@@ -656,6 +670,13 @@ function enrich(shown: StoredMessage, mode: "pro" | undefined, entry: HistoryEnt
     const tools = toolUses(entry.tools);
     if (!sameToolUses(shown.tools, tools)) {
       shown.tools = tools.length ? tools : undefined;
+      changed = true;
+    }
+  }
+  if (shown.sender === "vtuber") {
+    const notes = messageNotes(entry.notes);
+    if (!sameNotes(shown.notes, notes)) {
+      shown.notes = notes.length ? notes : undefined;
       changed = true;
     }
   }

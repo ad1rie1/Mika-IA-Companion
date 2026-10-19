@@ -504,6 +504,19 @@
         color: rgba(255, 255, 255, 0.5);
         overflow-wrap: anywhere;
       }
+      /* Ce qu'elle a fait en écrivant sa réponse (ADR 0119) : une petite
+         bulle discrète juste avant elle — « 📍 Mika a regardé où tu es ». */
+      .chat-msg-note {
+        align-self: flex-start;
+        max-width: 85%;
+        margin-bottom: -4px;
+        padding: 2px 9px;
+        border-radius: 10px;
+        font-size: 11px;
+        color: rgba(255, 255, 255, 0.6);
+        background: rgba(255, 255, 255, 0.08);
+        overflow-wrap: anywhere;
+      }
       /* La carte de travail : ses outils en direct, puis repliée en un
          résumé au-dessus de sa réponse. Arguments et résultats en texte brut. */
       .work-card {

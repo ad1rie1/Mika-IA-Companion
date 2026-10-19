@@ -97,7 +97,7 @@ FACULTY_LABELS: dict[str, str] = {
     "forge": "Moteur de la Forge", "kernel": "Noyau", "presence": "Présence", "expression": "Expression",
     "sensors": "Appareils", "runtime": "Moteur", "place": "Où elle est (sa chambre)",
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
-    "imaging": "Dessins",
+    "imaging": "Dessins", "location": "Localisation",
     "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API", "teams": "Teams",
 }
 
@@ -158,7 +158,7 @@ REASON_LABELS: dict[str, str] = {
     "comfort": "Réconforter", "recontact": "Reprendre contact après un silence", "work": "Avancer sur un but",
     "remind": "Rappeler ce qu'on lui a demandé", "share": "Partager où en est un but",
     "drawing_ready": "Montrer un dessin prêt", "drawing_failed": "Dire qu'un dessin n'a pas pu se faire",
-    "service_answered": "Dire ce qu'un service extérieur a rendu", "app_news": "Dire ce qu'une app a trouvé", "app_triage": "Lire la file de signaux d'une app",
+    "service_answered": "Dire ce qu'un service extérieur a rendu", "app_news": "Dire ce qu'une app a trouvé", "app_alert": "Prévenir d'une urgence qu'une app a trouvée", "app_triage": "Lire la file de signaux d'une app",
     "run": "Travailler sur un projet", "project_share": "Partager où en est un projet",
     "mail_mention": "Parler d'un mail reçu", "mail_draft": "Préparer une réponse à un mail",
     "rss_for": "Montrer à une amie un titre qui lui a fait penser à elle",
@@ -281,6 +281,8 @@ EVENT_LABELS: dict[str, str] = {
     "forge.signaled": "Une app l'a interpellée", "forge.switched": "Une app allumée ou éteinte",
     "forge.queued": "Un signal d'app mis en file", "forge.judged": "Une file d'app lue",
     "forge.ticked": "Une app a tourné", "forge.written": "Une app écrite", "sensors.sensed": "Un appareil a signalé",
+    "location.located": "Son téléphone a dit où était la personne",
+    "location.cleared": "La personne ne partage plus où elle est",
     "memory.event_noted": "Un événement de la vie de quelqu'un, noté", "body.roused": "Réveillée par un message",
     "body.waited": "Un message attend son réveil", "attention.touched": "Une pensée effleurée par un message",
     "self.woke_with": "Ce qu'elle emporte de sa nuit", "self.touched": "Touchée par ce qu'on lui a dit",

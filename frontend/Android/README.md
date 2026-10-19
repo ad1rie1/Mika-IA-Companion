@@ -50,8 +50,12 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
   moment, un coucou après sa nuit, jamais joyeux si elle est fâchée) et s'endort la nuit (lumière
   bleue, étoiles en thème sombre). Désactivable (Paramètres › Apparence). Voir
   [Mika en fond](#mika-en-fond-3d-native).
+- **« Lui dire où je suis »** (ADR 0119, coupé par défaut) : application ouverte, la position du téléphone part à
+  Mika — les coordonnées exactes et le nom du lieu trouvé par le téléphone (`Geocoder`). Voir
+  [Sa position](#sa-position).
 - **Paramètres** : compte et déconnexion, notifications (et si elles arrivent application fermée), « Lui dire quand
-  j'ai lu », thème (système / clair / sombre, couleurs dynamiques), « Effacer les messages de ce téléphone ».
+  j'ai lu », « Lui dire où je suis », thème (système / clair / sombre, couleurs dynamiques), « Effacer les messages de
+  ce téléphone ».
 
 Hors périmètre : la voix (ni messages vocaux, ni lecture à voix haute) et le monde 3D (la chambre, les déplacements :
 c'est le client Unity).
@@ -181,6 +185,29 @@ mets Mika à jour. En version de débogage, le lien « Utiliser un jeton (dev) �
   de ta réponse à Mika »). Sans Firebase, l'app ne reçoit rien une fois fermée : ce que Mika a dit t'attend à la
   prochaine ouverture.
 
+## Sa position
+
+« Lui dire où je suis » : décision dans l'ADR 0119. Le réglage est dans Paramètres › Position, **coupé par défaut**.
+
+- **L'autorisation** de localisation est demandée en l'activant : précise ou approximative (Android 12 et plus laisse
+  choisir), l'une ou l'autre suffit. Refusée, le réglage reste coupé et le dit, avec un lien vers les réglages du
+  téléphone. Retirée plus tard dans les réglages du téléphone, rien ne part (le réglage le dit) et la position s'efface
+  chez Mika ; le rallumer redemande l'autorisation.
+- **Seulement application au premier plan** (ADR 0077) : l'app écoute la localisation tant qu'elle est à l'écran (une
+  mesure par minute au plus, pas moins de 30 s ni de 50 m entre deux), et plus du tout dès qu'elle passe en
+  arrière-plan — même si la connexion reste ouverte 30 s, ou s'ouvre le temps d'une réponse depuis une notification.
+  Ni `ACCESS_BACKGROUND_LOCATION`, ni service, ni notification permanente.
+- **Ce qui part** : la trame `where` (`lat`, `lon`, la précision en mètres, le nom du lieu, l'âge de la mesure), redite
+  à chaque ouverture de la connexion — l'âge est compté au moment où elle part. Le serveur ignore une mesure de plus de
+  24 h et ne réécrit pas une position qui n'a pas bougé.
+- **Couper le réglage** envoie `where` `off` : sa dernière position s'efface chez Mika. **Se déconnecter** l'efface
+  aussi, et remet le réglage à zéro : un autre compte n'en hérite jamais.
+- **Elle ne la regarde que quand vous vous parlez**, en tête-à-tête, par un outil — jamais d'elle-même, jamais en
+  salon. Chaque fois, une **petite bulle** le montre juste avant sa réponse : « 📍 Mika a regardé où tu es · Rue de la
+  République, Lyon · position de 14:10 » (l'heure seulement si la position avait plus de 2 min, le jour si elle date
+  d'un autre jour ; sans lieu une fois la position oubliée). Elle vient du champ `notes` de sa réponse (`speech`,
+  `history`), gardé en base avec elle.
+
 ## Se déconnecter, révoquer un téléphone
 
 - **Se déconnecter** (Paramètres) rend le jeton au serveur et efface du téléphone les messages, les fichiers, les
@@ -201,7 +228,7 @@ mets Mika à jour. En version de débogage, le lien « Utiliser un jeton (dev) �
 
 Les tests JVM n'ont besoin d'aucun émulateur : le moteur (protocole, fusion du fil, socket, décisions de
 notification, réduction des images, partage, navigation, cartes de « Ce qu'elle fait », choix du portrait, cartes
-d'accord, ouverture d'un message Firebase — `PushPayloadTest` en ouvre un scellé par le serveur —, inscription aux
+d'accord, ce qui part de sa position et sa petite bulle, ouverture d'un message Firebase — `PushPayloadTest` en ouvre un scellé par le serveur —, inscription aux
 notifications) est du Kotlin pur. Les
 tests instrumentés (`app/src/androidTest`) éprouvent Room en mémoire (`ChatStoreTest`) et les écrans Compose
 (`ChatScreenTest`, `LoginScreenTest`, `MindScreenTest`).
@@ -210,7 +237,7 @@ tests instrumentés (`app/src/androidTest`) éprouvent Room en mémoire (`ChatSt
 
 | Paquet | Contenu |
 |---|---|
-| `core` | `AppGraph` (le graphe de l'app, à la main), horloges, premier plan, réseau |
+| `core` | `AppGraph` (le graphe de l'app, à la main), horloges, premier plan, réseau, localisation |
 | `data/net` | protocole, trames, `MikaSocket` (reconnexion, battement, file d'envoi), adresse du serveur |
 | `data/db` | Room : messages, file d'envoi, petites valeurs |
 | `data/chat` | `ChatSync` (fusion du fil, portage du client web), `ChatEngine`, `ChatRepository` |
@@ -220,6 +247,7 @@ tests instrumentés (`app/src/androidTest`) éprouvent Room en mémoire (`ChatSt
 | `data/avatar` | ses portraits (repli) : le manifeste, le choix du portrait, le rythme des clignements |
 | `data/auth` | jeton chiffré (Keystore), connexion, erreurs en français |
 | `data/files` | pièces jointes (préparation, réduction), brouillon, partages reçus, fichiers de Mika |
+| `data/location` | « Lui dire où je suis » : ce qui part (`WhereShare`, selon le réglage et le premier plan), le nom du lieu (`PlaceLabel`) ; la localisation elle-même est dans `core/LocationMonitor` |
 | `service` | connexion voulue, notifications, réponse depuis une notification (et son service de 60 s) |
 | `data/push` | les notifications par Firebase : ouvrir un message scellé (`PushPayload`), dire au serveur où notifier (`PushRegistrar`) |
 | `push` | Firebase lui-même : le jeton (`FirebasePush`) et la réception (`MikaMessagingService`) |

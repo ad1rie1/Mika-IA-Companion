@@ -8,7 +8,7 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
 /** La base locale : un cache du fil et de sa file d'envoi, jamais la référence (c'est le serveur). */
-@Database(entities = [MessageEntity::class, OutboxEntity::class, KvEntity::class], version = 3, exportSchema = true)
+@Database(entities = [MessageEntity::class, OutboxEntity::class, KvEntity::class], version = 4, exportSchema = true)
 abstract class MikaDatabase : RoomDatabase() {
     abstract fun messages(): MessageDao
     abstract fun outbox(): OutboxDao
@@ -37,9 +37,16 @@ abstract class MikaDatabase : RoomDatabase() {
             }
         }
 
+        /** Version 4 : ses petites bulles (ADR 0119 : elle a regardé où tu es), jointes à ses réponses. Le cache garde son fil. */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN notes TEXT")
+            }
+        }
+
         fun open(context: Context): MikaDatabase =
             Room.databaseBuilder(context, MikaDatabase::class.java, NAME)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
     }
 }

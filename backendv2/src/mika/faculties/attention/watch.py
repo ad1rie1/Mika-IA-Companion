@@ -515,7 +515,7 @@ class Watch:
 
     def _missing(self, state: AttentionState, frame: Frame, p: Any) -> list[Draft[Any]]:
         """Une amie qui manque et à qui elle n'écrit pas : une pensée. Joignable, et tant qu'elle peut encore lui
-        écrire, elle lui écrirait — c'est ``social``. Mais une amie qui ne répond plus (deux messages sans réponse :
+        écrire, elle lui écrirait — c'est ``social``. Mais une amie qui ne répond plus (ses relances restées sans réponse :
         ``agency`` ne la laisse plus écrire), ou qui n'est plus qu'un souvenir d'amitié, ne disparaît pas de sa vie
         intérieure : elle y repense, de plus en plus rarement — quand son silence atteint quatre fois son rythme,
         puis huit, seize… —, chaque fois un peu moins fort (ADR 0058)."""
@@ -551,12 +551,12 @@ class Watch:
     @staticmethod
     def _can_write(state: AttentionState, frame: Frame, person: str) -> bool:
         """Elle peut encore lui écrire d'elle-même : joignable, une amie aujourd'hui, et pas déjà heurtée à son
-        silence (``agency.GIVE_UP_AFTER`` initiatives sans réponse)."""
+        silence (``agency.AgencyReading.gives_up_after`` initiatives sans réponse)."""
         if not frame.get(identity_c.REACHABLE(person)):
             return False
         if frame.get(social_c.CLOSENESS(person)) not in (social_c.FRIEND, social_c.CLOSE):
             return False
-        return awaiting(state, person).initiatives < agency_c.GIVE_UP_AFTER
+        return awaiting(state, person).initiatives < frame.get(agency_c.AGENCY).gives_up_after
 
 
     def _hanging(self, state: AttentionState, frame: Frame, person: str, p: Any) -> Draft[Any]:

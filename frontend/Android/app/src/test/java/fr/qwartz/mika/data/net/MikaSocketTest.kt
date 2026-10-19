@@ -1,5 +1,6 @@
 package fr.qwartz.mika.data.net
 
+import fr.qwartz.mika.data.location.WhereShare
 import fr.qwartz.mika.data.net.MikaSocket.ConnectionStatus
 import fr.qwartz.mika.data.net.MikaSocket.ConnectionStatus.Connected
 import fr.qwartz.mika.data.net.MikaSocket.ConnectionStatus.Disconnected
@@ -8,6 +9,7 @@ import fr.qwartz.mika.data.net.MikaSocket.ConnectionStatus.Unauthorized
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 import org.junit.Assert.assertEquals
@@ -585,6 +587,84 @@ class MikaSocketTest {
         advance(1000)
         last().open()
         assertEquals(listOf("sync"), last().types())
+    }
+
+    // ── Sa position (ADR 0119) ───────────────────────────────────────────────────────────
+
+    private fun Harness.wheres(): List<JsonObject> = last().frames().filter { it["type"]!!.jsonPrimitive.content == "where" }
+
+    @Test fun `où elle est - envoyé tout de suite si la socket est ouverte, jamais en file`() = test {
+        val fix = WhereShare.Fix(45.764043, 4.835659, 12, "Rue de la République, Lyon", fixElapsedMs = clock.elapsedMs())
+        socket.setWhere(fix) // pas de socket : rien ne part, la valeur est gardée
+        connect()
+        clock.jump(1_500)
+        last().open()
+        assertEquals(
+            """{"type":"where","lat":45.764043,"lon":4.835659,"accuracy":12,"label":"Rue de la République, Lyon","age_ms":1500}""",
+            last().sent.single { it.contains("\"where\"") },
+        )
+        // la même valeur redite ne repart pas ; une nouvelle, aussitôt
+        socket.setWhere(fix)
+        assertEquals(1, wheres().size)
+        socket.setWhere(fix.copy(label = "Place Bellecour, Lyon", fixElapsedMs = clock.elapsedMs()))
+        assertEquals(2, wheres().size)
+        assertEquals("Place Bellecour, Lyon", wheres().last()["label"]!!.jsonPrimitive.content)
+        assertEquals(0L, wheres().last()["age_ms"]!!.jsonPrimitive.long)
+    }
+
+    @Test fun `où elle est - redit à chaque socket, l'âge de la mesure compté au moment où elle part`() = test {
+        val fixAt = clock.elapsedMs()
+        socket.setWhere(WhereShare.Fix(1.5, 2.5, 0, "", fixElapsedMs = fixAt))
+        connect()
+        last().open()
+        assertEquals(0L, wheres().single()["age_ms"]!!.jsonPrimitive.long)
+        // ni précision ni lieu connus : omis
+        assertNull(wheres().single()["accuracy"])
+        assertNull(wheres().single()["label"])
+        clock.jump(60_000)
+        last().fail()
+        advance(1000)
+        last().open()
+        assertEquals(61_000L, wheres().single()["age_ms"]!!.jsonPrimitive.long)
+        assertEquals(clock.elapsedMs() - fixAt, wheres().single()["age_ms"]!!.jsonPrimitive.long)
+    }
+
+    @Test fun `hors du premier plan, rien - la dernière position n'est plus redite`() = test {
+        socket.setWhere(WhereShare.Fix(1.0, 2.0, 5, "Lyon", fixElapsedMs = clock.elapsedMs()))
+        connect()
+        last().open()
+        assertEquals(1, wheres().size)
+        socket.setWhere(null) // l'app quitte l'écran ; la socket reste ouverte 30 s : rien ne repart
+        assertEquals(1, wheres().size)
+        last().fail()
+        advance(1000)
+        last().open()
+        assertTrue(wheres().isEmpty())
+    }
+
+    @Test fun `elle ne partage plus - off, tout de suite et à chaque socket`() = test {
+        connect()
+        last().open()
+        socket.setWhere(WhereShare.Off)
+        assertEquals("""{"type":"where","off":true}""", last().sent.last())
+        last().fail()
+        advance(1000)
+        last().open()
+        assertEquals(listOf("""{"type":"where","off":true}"""), last().sent.filter { it.contains("\"where\"") })
+    }
+
+    @Test fun `fin de session - une position dite s'efface chez Mika, puis plus rien`() = test {
+        connect()
+        last().open()
+        socket.withdrawWhere() // rien de dit : rien à effacer
+        assertTrue(wheres().isEmpty())
+        socket.setWhere(WhereShare.Fix(1.0, 2.0, 5, "Lyon", fixElapsedMs = clock.elapsedMs()))
+        socket.withdrawWhere()
+        assertEquals("""{"type":"where","off":true}""", last().sent.last())
+        socket.reset()
+        connect()
+        last().open()
+        assertTrue(wheres().isEmpty())
     }
 
     // ── Diffusion ────────────────────────────────────────────────────────────────────────

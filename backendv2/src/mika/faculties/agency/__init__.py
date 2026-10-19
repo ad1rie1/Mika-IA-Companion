@@ -12,8 +12,10 @@
   toutes personnes) allonge la période réfractaire (×2,5, jusqu'à six
   heures) ; envers la personne même, chacune abaisse l'envie de recommencer.
   Envers quelqu'un qui ne répond pas : plus d'initiative ordinaire tant qu'il
-  n'a pas écrit (une relance douce, puis rien) ; des mois plus tard, une
-  prise de nouvelles, une seule (``ONCE_MORE``, ADR 0058).
+  n'a pas écrit, sauf des relances — combien, son tempérament le dit, chacune
+  après un délai tiré au sort (autour d'un jour) — qui prennent de ses
+  nouvelles, puis rien ; des mois plus tard, une prise de nouvelles, une seule
+  (``ONCE_MORE``, ADR 0058).
 - **Se raviser** : un murmure « sans suite » (elle allait écrire à quelqu'un,
   puis non) arrête l'initiative qu'il précédait.
 - La salutation et le rappel promis ne sont pas concernés — saluer
@@ -64,7 +66,7 @@ from mika.vocab.days import when_fr
 from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable, is_internal
 from mika.vocab.phrasebook import family, phrase
-from mika.vocab.temperament import Temperament, around
+from mika.vocab.temperament import Temperament, around, shift
 
 KEEP = 32
 #: au plus tant d'épisodes en cours retenus (corrélation → raisons, adresse visée, départ)
@@ -168,7 +170,17 @@ class AgencyParams(BaseModel):
     follow_up_rhythms: Annotated[float, Knob(
         label="Relance douce : au moins tant de fois son rythme", group="Ne pas harceler", lo=1, hi=10, step=0.5,
         help="… ni avant ce multiple du rythme habituel de la relation (on n'écrit pas deux fois en deux jours à "
-             "quelqu'un qui écrit une fois par semaine). Après deux initiatives sans réponse : plus rien.")] = 2.0
+             "quelqu'un qui écrit une fois par semaine).")] = 1.0
+    follow_up_jitter: Annotated[float, Knob(
+        label="Relance : part du hasard", group="Ne pas harceler", lo=0, hi=0.8, step=0.05,
+        help="Le délai d'une relance est tiré au sort à chaque message resté sans réponse, à ± cette part "
+             "(enregistré : le rejeu retombe sur le même) — « tous les jours à la même heure » se "
+             "reconnaît.")] = 0.4
+    follow_ups: Annotated[int, Knob(
+        label="Relances avant de laisser tomber", group="Ne pas harceler", lo=0, hi=3,
+        help="Combien de fois elle relance quelqu'un qui ne lui répond pas (chacune prend de ses nouvelles, la "
+             "suivante dit ce que ce silence lui fait), avant de ne plus rien lui écrire tant qu'il ne revient "
+             "pas.")] = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,26 +201,36 @@ class AgencyState:
     #: qui lui a écrit pendant qu'elle était en train de lui écrire d'elle-même : adresse → (quand son message est
     #: arrivé, les raisons de l'initiative) — jusqu'à sa parole suivante vers elle, ou ``CROSSED_SPAN``
     crossed: FrozenDict[str, tuple[int, str]] = field(default_factory=FrozenDict)
+    #: le délai de la prochaine relance envers chaque adresse, tiré à sa dernière initiative : la part du délai de
+    #: base (1,0 : tel quel)
+    follow_up_draws: FrozenDict[str, float] = field(default_factory=FrozenDict)
 
 
 #: v4 : une ouverture garde l'adresse visée et son départ, et un message qui croise une initiative en cours vers sa
-#: personne est retenu (``crossed``) — la tranche se reconstruit depuis la genèse.
+#: personne est retenu (``crossed``) — la tranche se reconstruit depuis la genèse. v5 : le délai de la relance est
+#: tiré à chaque initiative (``follow_up_draws``).
 def derive(t: Temperament, overrides: Any = None) -> AgencyParams:
     """L'impulsivité (ADR 0100) : impulsive, elle reprend la parole plus tôt après une initiative et hésite moins
     longtemps ; la sociabilité : sociable, elle prend la parole plus souvent dans la journée et relance plus tôt qui
-    ne répond pas. Au milieu, les valeurs d'avant (30 min, 10 min, 5 par jour, une relance douce après un jour)."""
+    ne répond pas ; sociable ou blessée par le silence des autres (la peur de l'abandon), elle relance davantage avant
+    de laisser tomber — jusqu'à trois fois ; ni l'un ni l'autre, elle ne relance pas. Au milieu, les valeurs d'avant
+    (30 min, 10 min, 5 par jour, une relance après un jour)."""
+    insists = max(t.sociability, t.abandonment)
     values: dict[str, Any] = {"refractory_us": round(around(t.impulsivity, 30 * MINUTE, 0.5)),
                               "hesitation_us": round(around(t.impulsivity, 10 * MINUTE, 0.5)),
                               "daily_cap": max(1, round(around(t.sociability, 5, 1.6))),
-                              "follow_up_min_us": round(around(t.sociability, DAY, 0.5))}
+                              "follow_up_min_us": round(around(t.sociability, DAY, 0.5)),
+                              "follow_ups": max(0, min(3, round(shift(insists, 1.0, 2.0))))}
     values.update(dict(overrides or {}))
     return AgencyParams(**values)
 
 
 AGENCY = Faculty("agency", state=AgencyState, init=lambda p: AgencyState(), params=AgencyParams, derive=derive,
-                 state_version=4)
+                 state_version=5)
 #: les adresses dont on garde les hésitations, au plus
 HESITATIONS_KEPT = 64
+#: les adresses dont on garde le délai tiré de la prochaine relance, au plus (les plus récentes)
+DRAWS_KEPT = 64
 
 
 def _params(p: AgencyParams | None) -> AgencyParams:
@@ -223,13 +245,10 @@ def _uncounted(reasons: Any) -> bool:
 
 
 def _spoke_up(reasons: Any) -> bool:
-    """Ce qu'une initiative **dite** a été : saluer qui arrive ou tenir parole, seuls, ce n'est pas prendre la
-    parole ; mais une salutation (ou une parole tenue) qui emporte une nouvelle, un récit, une demande, des nouvelles
-    prises (``c.INFORMS | c.FOR_THEM``), si — elle compte au plafond du jour et ouvre la période réfractaire de base.
-    Sans cela, le message qui disait tout à l'arrivée de quelqu'un ne comptait pour rien, et le suivant partait huit
-    secondes après (sonde du 2026-10-13). La ligne, elle, passe toujours comme une salutation (``_uncounted``)."""
-    got = set(reasons)
-    return not (c.NOT_SPEAKING_UP & got) or bool((c.INFORMS | c.FOR_THEM) & got)
+    """Une initiative dite qui a pris la parole (``c.spoke_up``) compte au plafond du jour et ouvre la période
+    réfractaire de base. La ligne, elle, passe comme une salutation (``_uncounted``) — sauf vers qui ne lui a pas
+    répondu (``_greets_the_silent``)."""
+    return c.spoke_up(reasons)
 
 
 def murmur_reason(reason: str) -> tuple[str, str]:
@@ -299,7 +318,13 @@ def _said(s: AgencyState, e, cx) -> AgencyState:
     p = _params(cx.params)
     kept = tuple(t for t in s.initiatives if e.at - t < DAY)
     jittered = round(p.refractory_us * (1.0 + p.jitter * (2.0 * cx.rng.random() - 1.0)))
-    return replace(s, initiatives=(*kept, e.at)[-KEEP:], refractory_us=jittered)
+    s = replace(s, initiatives=(*kept, e.at)[-KEEP:], refractory_us=jittered)
+    if not d.target:
+        return s
+    # le délai de la prochaine relance envers elle, s'il ne répond pas
+    draws = s.follow_up_draws.delete(d.target).set(
+        d.target, round(1.0 + p.follow_up_jitter * (2.0 * cx.rng.random() - 1.0), 4))
+    return replace(s, follow_up_draws=FrozenDict(list(draws.items())[-DRAWS_KEPT:]))
 
 
 @AGENCY.reducer(rt.EPISODE_ENDED)
@@ -343,7 +368,7 @@ def reading(s: AgencyState, now: int, p: AgencyParams, tz: Any, ignored: int = 0
     last = s.initiatives[-1] if s.initiatives else 0
     until = last + REFRACTORY_SPAN * length(s, p, ignored) if last else 0
     base = last + REFRACTORY_SPAN * length(s, p, 0) if last else 0
-    return c.AgencyReading(count, last, until, s.murmured_at, s.hesitated_at, base)
+    return c.AgencyReading(count, last, until, s.murmured_at, s.hesitated_at, base, 1 + p.follow_ups)
 
 
 @AGENCY.fact(c.AGENCY, reads=[attention_c.IGNORED])
@@ -370,9 +395,19 @@ def _second_thoughts(s: AgencyState, frame: Frame) -> list[Candidate]:
 @AGENCY.modulate(kinds=[Kind.INITIATIVE], reads=[c.AGENCY, c.RENOUNCED, attention_c.AWAITING, identity_c.PERSON,
                                                  social_c.CLOSENESS, social_c.CONTACT])
 def _budget(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
-    if _uncounted(row.reasons):
+    if _uncounted(row.reasons) and not _greets_the_silent(frame, row.target, row.reasons):
         return Modulation()
     return restraint(frame, None if row.target in (Anyone.ANY, Anyone.NONE) else row.target, row.reasons)
+
+
+def _greets_the_silent(frame: Frame, target: str, reasons: Any) -> bool:
+    """Saluer quelqu'un qui arrive alors que ce qu'elle lui a écrit d'elle-même est resté sans réponse : ce n'est
+    plus saluer, c'est relancer — la retenue s'y applique (une relance douce, puis plus rien). Sans cela, chaque
+    ouverture de son application lui valait un « hello ! » et une nouvelle de plus, sous son message resté sans
+    réponse (2026-10-19, sur le portable). Tenir parole, non : ça ne relance pas."""
+    if not c.GREETS & set(reasons) or c.OWED & set(reasons) or not is_identifiable(target):
+        return False
+    return frame.get(attention_c.AWAITING(frame.get(identity_c.PERSON(target)))).initiatives > 0
 
 
 @AGENCY.modulate(kinds=[Kind.INITIATIVE], reads=[presence_c.PRESENT, identity_c.PERSON, others_c.HOURS])
@@ -402,42 +437,51 @@ def _composing(s: AgencyState, frame: Frame, row: RowView) -> Modulation:
     return Modulation(veto=c.COMPOSING)
 
 
-def follow_up_after(frame: Frame, person: str, p: AgencyParams) -> int:
-    """Le délai avant une relance douce : au moins un jour, et au moins deux
-    fois le rythme de la relation."""
+def follow_up_after(frame: Frame, target: str, person: str, p: AgencyParams) -> int:
+    """Le délai avant une relance : au moins un jour (selon sa sociabilité), et au moins le rythme de la relation —
+    tiré au sort à sa dernière initiative (± ``follow_up_jitter``)."""
     rhythm = frame.get(social_c.CONTACT(person)).rhythm_days
-    return max(p.follow_up_min_us, round(p.follow_up_rhythms * rhythm * DAY))
+    draw = frame.state("agency").follow_up_draws.get(target, 1.0)
+    return round(draw * max(p.follow_up_min_us, round(p.follow_up_rhythms * rhythm * DAY)))
 
 
 def harassing(frame: Frame, target: str, reasons: Any, p: AgencyParams) -> str | None:
     """Ne pas harceler (ADR 0033) : après une initiative restée sans réponse,
     plus d'initiative ordinaire vers la personne tant qu'elle n'a pas écrit —
-    sauf une relance douce, après un long délai (compté depuis la lecture quand
-    son application la dit ; jamais avant qu'elle l'ait lue), vers une amie ou une proche ;
-    après deux, plus rien — sinon, des mois plus tard, prendre de ses nouvelles
+    sauf des relances (``follow_ups``, selon son tempérament), chacune après un
+    délai tiré au sort (compté depuis la lecture quand son application la dit ;
+    jamais avant qu'elle l'ait lue), vers une amie ou une proche ; après la
+    dernière, plus rien — sinon, des mois plus tard, prendre de ses nouvelles
     une seule fois (``ONCE_MORE``, ADR 0058). Si son dernier message (réponse comprise) attend
     encore, quelques heures de retenue — davantage s'il posait une question ;
     ce qui concerne la personne elle-même (``ABOUT_THEM``) n'attend pas la fin
     de cette retenue-là ; ce qui vient de Mika (l'envie de parler, son humeur,
     le manque), si. Les premières minutes (``live_wait_us``), la conversation est
     en cours : rien ne part qu'il n'ait répondu, pas même ce qui le regarde.
+    Prévenir passe outre (``INFORMS``) — sauf ce qui attend qu'on lui ait
+    répondu (``WAITS_FOR_AN_ANSWER`` : ce qu'une app a trouvé).
     Rend le veto, ou ``None``."""
-    if not is_identifiable(target) or (c.INFORMS | NOT_A_NUDGE) & set(reasons):
-        return None  # prévenir n'est pas relancer ; souhaiter un anniversaire, un mot doux un jour difficile non plus
+    if not is_identifiable(target) or NOT_A_NUDGE & set(reasons):
+        return None  # souhaiter un anniversaire, un mot doux un jour difficile : ce n'est pas relancer
     person = frame.get(identity_c.PERSON(target))
     mine = frame.get(attention_c.AWAITING(person))
+    informs = c.INFORMS & set(reasons)
+    if informs and not (mine.initiatives and informs <= c.WAITS_FOR_AN_ANSWER):
+        return None  # prévenir n'est pas relancer — ce qu'une app a trouvé attend, lui, qu'on lui ait répondu
+    gives_up = 1 + p.follow_ups
     if c.ONCE_MORE & set(reasons):
         # des mois plus tard, une prise de nouvelles, une seule : dite, elle compte une initiative de plus (ADR 0058)
-        return None if mine.initiatives <= c.GIVE_UP_AFTER else c.UNANSWERED
-    if mine.initiatives >= c.GIVE_UP_AFTER:
-        return c.UNANSWERED
-    if mine.initiatives == 1:
+        return None if mine.initiatives <= gives_up else c.UNANSWERED
+    if mine.initiatives >= gives_up:
+        return c.UNANSWERED  # elle a relancé autant que son tempérament le lui permet : elle laisse tomber
+    if mine.initiatives:
         if mine.unseen:
             return c.UNANSWERED  # elle ne l'a pas encore lu (son application le dit) : on ne relance pas
         friendly = frame.get(social_c.CLOSENESS(person)) in (social_c.FRIEND, social_c.CLOSE)
         # le délai d'une relance se compte depuis la lecture, quand on la sait
-        if friendly and frame.now - max(mine.last_initiative_at, mine.seen_at) >= follow_up_after(frame, person, p):
-            return None  # la relance douce (la consigne le lui dit)
+        since = frame.now - max(mine.last_initiative_at, mine.seen_at)
+        if friendly and since >= follow_up_after(frame, target, person, p):
+            return None  # une relance (la consigne le lui dit : prendre de ses nouvelles)
         return c.UNANSWERED
     if mine.closed_at and frame.now - mine.closed_at < p.farewell_quiet_us:
         return c.FAREWELL  # on s'est quittées : pas de « t'es encore là ? »
@@ -533,17 +577,34 @@ def _name(frame: Frame, person: str) -> str:
     return f"« {name} »" if name else phrase("expression.person.unnamed")
 
 
+def _checking_in(frame: Frame, target: str, reasons: Any) -> bool:
+    """Elle relance quelqu'un qui n'a pas répondu à ce qu'elle lui a écrit d'elle-même (``c.checking_in``) : ce
+    message-là prend de ses nouvelles (« ça va ? tu fais quoi ? »), il ne lui apporte rien de nouveau."""
+    if not is_identifiable(target):
+        return False
+    return c.checking_in(reasons, frame.get(attention_c.AWAITING(frame.get(identity_c.PERSON(target)))).initiatives)
+
+
 def holding_back(frame: Frame, target: str, reasons: Any) -> str | None:
     """Ce qu'elle se dit avant d'écrire à quelqu'un qui ne lui a pas répondu :
-    une relance douce, ou ne pas revenir sur ce qui est resté sans réponse."""
-    if not is_identifiable(target) or _uncounted(reasons):
+    prendre de ses nouvelles, une relance douce, ou ne pas revenir sur ce qui
+    est resté sans réponse."""
+    if not is_identifiable(target) or (_uncounted(reasons) and not _greets_the_silent(frame, target, reasons)):
         return None
     person = frame.get(identity_c.PERSON(target))
     mine = frame.get(attention_c.AWAITING(person))
     tz = frame.env.tz_of(frame.root)
     who = _name(frame, person)
     if mine.initiatives:
-        return phrase("agency.brief.nudge", who=who, when=when_fr(mine.last_initiative_at, frame.now, tz))
+        when = when_fr(mine.last_initiative_at, frame.now, tz)
+        if not _checking_in(frame, target, reasons):
+            return phrase("agency.brief.nudge", who=who, when=when)
+        # la première relance prend de ses nouvelles ; les suivantes disent ce que ce silence lui fait
+        said = phrase("agency.brief.check_in", who=who, when=when) if mine.initiatives == 1 else \
+            phrase("agency.brief.check_in_again", who=who, when=when, count=mine.initiatives)
+        if mine.initiatives + 1 >= frame.get(c.AGENCY).gives_up_after:
+            said = f"{said} {phrase('agency.brief.last_follow_up', who=who)}"
+        return said
     if mine.unanswered:
         when = when_fr(mine.last_out, frame.now, tz)
         if mine.asked:
@@ -640,12 +701,15 @@ def brief(frame: Frame, req: Any) -> str:
     """Le dernier tour d'une initiative : personne ne lui a écrit, c'est elle
     qui parle — et pourquoi : la raison la plus forte, au plus une seconde ;
     quand ce sont ses envies, de quoi parler ; et si la personne ne lui a pas
-    répondu, la retenue que ça demande."""
+    répondu, la retenue que ça demande — ou, si c'est une relance, seulement
+    prendre de ses nouvelles."""
     ep = frame.episode
     reasons = tuple(ep.attrs.get("reasons") or ()) if ep is not None else ()
     target = ep.target if ep is not None else None
-    lines = [f"- {m}" for m in motives(frame, req)]
-    if not lines:
+    # elle prend de ses nouvelles : ce qui la poussait (une nouvelle, un récit, l'envie de parler) se tait
+    checking = bool(target) and _checking_in(frame, target, reasons)
+    lines = [] if checking else [f"- {m}" for m in motives(frame, req)]
+    if not lines and not checking:
         lines.append(f"- {phrase('agency.brief.nothing')}")
     held = holding_back(frame, target, reasons) if target else None
     if held is not None:

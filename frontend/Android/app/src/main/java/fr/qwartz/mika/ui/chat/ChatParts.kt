@@ -363,6 +363,7 @@ internal fun ChatConversation(
                             verdictError = item.message.id?.let { verdictErrors[it] },
                         )
                         is ChatItem.Note -> Backed(overPortrait) { Note(item, operator, actions) }
+                        is ChatItem.Looked -> LookedChip(item, zone, overPortrait)
                         is ChatItem.Thought -> Backed(overPortrait) { Thought(item.message) }
                         is ChatItem.SystemNote -> Centered(item.text, overPortrait)
                         is ChatItem.Work -> WorkCardView(item, overPortrait)
@@ -507,6 +508,45 @@ private fun Note(item: ChatItem.Note, operator: Boolean, actions: ChatActions) {
         val href = item.href
         if (operator && href != null) {
             TextButton(onClick = { actions.openConsole(href) }) { Text(stringResource(R.string.chat_open_console)) }
+        }
+    }
+}
+
+/**
+ * Sa petite bulle juste avant sa réponse (ADR 0119) : « 📍 Mika a regardé où tu es · lieu · position de 14:10 ». Discrète,
+ * de son côté, plus petite que ses bulles ; le lieu manque une fois la position oubliée, l'heure quand elle était
+ * fraîche. Le lecteur d'écran l'entend en mots, sans l'épingle.
+ */
+@Composable
+private fun LookedChip(item: ChatItem.Looked, zone: ZoneId, overPortrait: Boolean) {
+    val age = remember(item.note.at, item.messageTs, zone) { LookedNote.age(item.note.at, item.messageTs, zone) }
+    val place = item.note.text.trim().takeIf { it.isNotEmpty() }
+    val shownFix = when (age) {
+        LookedNote.FixAge.Fresh -> null
+        is LookedNote.FixAge.SameDay -> stringResource(R.string.chat_looked_fix_time, age.time)
+        is LookedNote.FixAge.OtherDay -> stringResource(R.string.chat_looked_fix_day, age.date, age.time)
+    }
+    val saidFix = when (age) {
+        LookedNote.FixAge.Fresh -> null
+        is LookedNote.FixAge.SameDay -> stringResource(R.string.chat_looked_fix_time, age.spokenTime)
+        is LookedNote.FixAge.OtherDay -> stringResource(R.string.chat_looked_fix_day, age.spokenDate, age.spokenTime)
+    }
+    val shown = listOfNotNull(stringResource(R.string.chat_looked_where), place, shownFix).joinToString(" · ")
+    val said = listOfNotNull(stringResource(R.string.chat_looked_where_spoken), place, saidFix).joinToString(", ")
+    Row(Modifier.fillMaxWidth().padding(top = 2.dp)) {
+        Box(Modifier.fillMaxWidth(0.85f)) {
+            Surface(
+                shape = RoundedCornerShape(10.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = if (overPortrait) 0.92f else 0.85f),
+                contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.clearAndSetSemantics { contentDescription = said },
+            ) {
+                Text(
+                    shown,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                )
+            }
         }
     }
 }

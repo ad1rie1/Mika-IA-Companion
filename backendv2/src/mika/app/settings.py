@@ -358,22 +358,27 @@ class Settings:
 
     async def save_wakeup(self, cfg: WakeupConfig) -> WakeupConfig:
         """Enregistre les réveils ; la clé d'un réveil retiré part avec lui (un réveil recréé sous ce nom n'en a
-        pas)."""
+        pas), et la copie chiffrée de la clé d'un réveil qui ne signe plus aussi (ADR 0117)."""
         cfg = WakeupConfig.model_validate({"endpoints": dict(cfg.endpoints)})
         await self._put(WAKEUP_KEY, {"endpoints": {n: ep.model_dump(mode="json") for n, ep in cfg.endpoints.items()}})
         keys = self.wakeup_keys()
-        kept = {n: k for n, k in keys.items() if n in cfg.endpoints}
+        kept = {n: k if cfg.endpoints[n].signed else {f: v for f, v in k.items() if f != "sealed"}
+                for n, k in keys.items() if n in cfg.endpoints}
         if kept != keys:
             await self._put(WAKEUP_KEYS_KEY, kept)
         return cfg
 
     def wakeup_keys(self) -> dict[str, dict[str, Any]]:
-        """Réveil → ``{digest, hint, created_at, by}`` : jamais la clé elle-même."""
+        """Réveil → ``{digest, hint, created_at, by}`` : jamais la clé en clair — et, pour un réveil signé,
+        ``sealed`` : la clé chiffrée, qu'il faut relire pour vérifier une signature."""
         return {str(n): dict(k) for n, k in dict(self._get(WAKEUP_KEYS_KEY) or {}).items() if isinstance(k, dict)}
 
-    async def save_wakeup_key(self, name: str, digest: str, hint: str, created_at: int, by: str) -> None:
+    async def save_wakeup_key(self, name: str, digest: str, hint: str, created_at: int, by: str,
+                              sealed: str = "") -> None:
         keys = self.wakeup_keys()
         keys[name] = {"digest": digest, "hint": hint, "created_at": int(created_at), "by": by[:80]}
+        if sealed:
+            keys[name]["sealed"] = sealed
         await self._put(WAKEUP_KEYS_KEY, keys)
 
     async def revoke_wakeup_key(self, name: str) -> bool:

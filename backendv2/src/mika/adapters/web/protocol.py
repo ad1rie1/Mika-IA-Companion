@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import binascii
 import json
+import math
 import re
 import time
 from collections import deque
@@ -28,7 +29,7 @@ from mika.contracts import place as place_c
 from mika.contracts import presence as presence_c
 from mika.contracts import self_ as self_c
 from mika.contracts import world as world_c
-from mika.contracts.entry import HistoryRow, SharedMeta
+from mika.contracts.entry import HistoryRow, MessageNote, SharedMeta
 from mika.kernel.clock import HOUR, US
 from mika.kernel.frame import Frame
 from mika.ports.delivery import DONE, NOTE, TOO_LATE, Activity, Delivery
@@ -68,6 +69,17 @@ TOOL_TEXT_CUT = "…[coupé]"
 #: la raison de voix d'une réponse en mode pro : une réponse de travail se lit, elle ne se dit pas
 PRO_VOICE_REASON = "pro"
 FILENAME_MAX = 80
+#: où est la personne, d'après son téléphone (trame ``where``, ADR 0119) : au plus 6 écritures au journal par minute
+#: et par connexion — au-delà, la position attend la suivante
+WHERE_RATE = (6, 60.0)
+#: une position qui n'a pas bougé de plus de tant de mètres, au même lieu, ne se réécrit qu'au bout de
+#: ``WHERE_REFRESH_S`` (le téléphone la redit à chaque ouverture)
+WHERE_STILL_M = 50.0
+WHERE_REFRESH_S = 600.0
+#: une mesure plus vieille que ça ne dit plus où est la personne : ignorée
+WHERE_MAX_AGE_MS = 24 * 3600 * 1000
+WHERE_LABEL_MAX = 200
+WHERE_ACCURACY_MAX = 100_000
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]+")
 
@@ -175,6 +187,54 @@ def shared_item(meta: SharedMeta) -> dict[str, Any]:
             "available": bool(meta.available)}
 
 
+def note_item(note: MessageNote) -> dict[str, Any]:
+    """Une petite bulle jointe à un de ses messages (ADR 0119), telle qu'un client la montre : sa sorte, ce qu'elle a
+    vu (vide une fois oublié), de quand ça datait (ms). Le texte de la bulle se compose chez le client."""
+    return {"kind": note.kind, "text": _CONTROL.sub(" ", note.text)[:WHERE_LABEL_MAX], "at": int(note.at)}
+
+
+@dataclass(frozen=True, slots=True)
+class Where:
+    """Une position lue d'une trame ``where`` : validée, bornée."""
+
+    lat: float
+    lon: float
+    accuracy_m: int
+    label: str
+    age_ms: int
+
+
+def _finite(v: Any) -> bool:
+    return isinstance(v, int | float) and not isinstance(v, bool) and math.isfinite(v)
+
+
+def where_fix(frame: Mapping[str, Any]) -> Where | None:
+    """La position d'une trame ``where`` (``{"lat", "lon", "accuracy", "label", "age_ms"}``), ou ``None`` si elle
+    n'en est pas une : coordonnées absentes, hors bornes ou non finies, mesure trop vieille. Une précision illisible
+    vaut « inconnue » (0) ; un lieu est replié sur une ligne et borné."""
+    lat, lon = frame.get("lat"), frame.get("lon")
+    if not _finite(lat) or not _finite(lon) or not -90.0 <= lat <= 90.0 or not -180.0 <= lon <= 180.0:
+        return None
+    age = frame.get("age_ms", 0)
+    age = int(age) if _finite(age) and age > 0 else 0
+    if age > WHERE_MAX_AGE_MS:
+        return None
+    accuracy = frame.get("accuracy", 0)
+    accuracy = int(round(accuracy)) if _finite(accuracy) and 0 <= accuracy <= WHERE_ACCURACY_MAX else 0
+    raw = frame.get("label")
+    label = " ".join(_CONTROL.sub(" ", raw).split())[:WHERE_LABEL_MAX] if isinstance(raw, str) else ""
+    return Where(float(lat), float(lon), accuracy, label, age)
+
+
+def where_moved(before: Where, after: Where) -> float:
+    """La distance entre deux positions, en mètres (haversine)."""
+    r = 6_371_000.0
+    p1, p2 = math.radians(before.lat), math.radians(after.lat)
+    dp, dl = p2 - p1, math.radians(after.lon - before.lon)
+    h = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(h)))
+
+
 def sent_ids(raw: str) -> list[str]:
     """Les identifiants rangés avec l'un de ses messages (``[{"id": …}]``)."""
     try:
@@ -187,11 +247,12 @@ def sent_ids(raw: str) -> list[str]:
 
 
 def history_item(row: HistoryRow, shared: Mapping[str, SharedMeta] | None = None, *,
-                 verdicts: bool = False) -> dict[str, Any]:
+                 verdicts: bool = False, notes: Mapping[str, MessageNote] | None = None) -> dict[str, Any]:
     """Une ligne du fil. Ses pièces jointes : pour un message de la personne, un nom et une sorte ; pour un des
     siens, les fichiers qu'elle a envoyés avec (``shared`` : ce que le port en dit — un fichier oublié n'y est
     plus, et ne se montre plus). ``verdicts`` : une connexion d'opératrice — l'avis qu'elle a donné sur ses
-    réponses (ADR 0113) ; jamais à une autre connexion."""
+    réponses (ADR 0113) ; jamais à une autre connexion. ``notes`` : les petites bulles de ce qu'elle a fait en
+    écrivant ses messages (ADR 0119), par référence."""
     emotion = emotion_of(row.emotion)
     if row.role == "assistant":
         known = shared or {}
@@ -208,6 +269,10 @@ def history_item(row: HistoryRow, shared: Mapping[str, SharedMeta] | None = None
         "emotion_intensity": float(row.emotion_intensity or 0.0),
         "attachments": attachments,
     }
+    if row.role == "assistant" and notes:
+        found = [note_item(notes[i]) for i in sent_ids(row.attachments) if i in notes]
+        if found:
+            item["notes"] = found
     if verdicts and row.role == "assistant" and row.verdict:
         item["verdict"] = row.verdict
         item["verdict_note"] = row.verdict_note
@@ -234,7 +299,7 @@ def tools_item(raw: str) -> list[dict[str, Any]]:
 
 def history(mode: str, rows: Sequence[HistoryRow], *, after_id: int = 0, truncated: bool = False,
             life: str = "", reset: bool = False, shared: Mapping[str, SharedMeta] | None = None,
-            verdicts: bool = False) -> dict[str, Any]:
+            verdicts: bool = False, notes: Mapping[str, MessageNote] | None = None) -> dict[str, Any]:
     """Un morceau du fil. ``life`` : l'empreinte de sa vie (le même journal depuis sa genèse) — un navigateur qui
     garde le fil d'une autre vie (un autre dossier de données) le vide avant de fusionner.
     ``reset`` : le curseur du client dépassait la tête de ce fil (une vie restaurée plus ancienne, un fil oublié,
@@ -243,7 +308,7 @@ def history(mode: str, rows: Sequence[HistoryRow], *, after_id: int = 0, truncat
     return {
         "type": "history",
         "mode": mode,
-        "messages": [history_item(r, shared, verdicts=verdicts) for r in rows],
+        "messages": [history_item(r, shared, verdicts=verdicts, notes=notes) for r in rows],
         "last_id": rows[-1].id if rows else after_id,
         "truncated": bool(truncated),
         "life": life,
@@ -265,19 +330,21 @@ OTHER_TAB = "other_tab"
 
 
 def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bool = True,
-           attachments: Sequence[SharedMeta] = ()) -> dict[str, Any]:
+           attachments: Sequence[SharedMeta] = (), notes: Sequence[MessageNote] = ()) -> dict[str, Any]:
     """Une parole ou une pensée. Une pensée à voix haute (persona ``inner``) n'est
     pas dans le fil : ``message_id`` nul (le client la range après son curseur et
     ne l'avance pas). ``voiced`` faux : un autre écran de la même personne parle.
     ``attachments`` : les fichiers qu'elle envoie avec (toujours un tableau, vide
     sans fichier ; jamais avec une pensée). ``mode`` : le mode dans lequel elle a
-    répondu (ADR 0116) ; en mode pro, sa réponse ne se dit pas à voix haute."""
+    répondu (ADR 0116) ; en mode pro, sa réponse ne se dit pas à voix haute.
+    ``notes`` : les petites bulles de ce qu'elle a fait en l'écrivant (ADR 0119 :
+    elle a regardé où était la personne) ; la clé n'est là que s'il y en a."""
     decision = voice.decide(voice.SCREEN, hour=d.local_hour, sleep_phase=d.sleep_phase, present=present,
                             muted=muted, persona=d.persona)
     emotion = emotion_of(d.emotion.emotion) or Emotion.NEUTRAL
     inner = d.persona == voice.INNER
     pro = bool(d.mode) and not inner
-    return {
+    frame = {
         "type": "speech",
         "text": d.text,
         "emotion": emotion.value,
@@ -296,6 +363,9 @@ def speech(d: Delivery, *, present: bool = True, muted: bool = False, voiced: bo
         "attachments": [] if inner else [shared_item(m) for m in attachments],
         "mode": d.mode if pro else "",
     }
+    if notes and not inner:
+        frame["notes"] = [note_item(n) for n in notes]
+    return frame
 
 
 def chat_mode(raw: Any) -> str:

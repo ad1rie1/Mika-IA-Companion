@@ -69,6 +69,18 @@ class SharedMeta:
 
 
 @dataclass(frozen=True, slots=True)
+class MessageNote:
+    """Une petite bulle jointe à un de ses messages : ce qu'elle a fait en l'écrivant, qu'un écran montre (ADR 0119).
+    ``kind`` : ``location`` (elle a regardé où était la personne) ; ``text`` : ce qu'elle a vu (le lieu, sinon les
+    coordonnées), vide une fois oublié ; ``at`` : de quand datait ce qu'elle a vu (millisecondes)."""
+
+    id: str
+    kind: str
+    text: str
+    at: int
+
+
+@dataclass(frozen=True, slots=True)
 class SharedDownload:
     """Ce qu'on rend à qui télécharge un fichier qu'elle lui a envoyé ; ``gone`` : il a été retiré (ou ses octets
     manquent), ``data`` est alors vide."""
@@ -143,6 +155,23 @@ class MindPort(Protocol):
     async def sense(self, device: str, text: str, *, pertinence: float = 0.5, emotion: str = "",
                     sensitivity: int = 1) -> int | None:
         """Un appareil lui signale quelque chose ; rend le ``seq`` (``None`` : refusé)."""
+        ...
+
+    async def locate(self, handle: str, *, lat: float, lon: float, accuracy_m: int, label: str,
+                     age_ms: int) -> int | None:
+        """Où est la personne qui écrit par ``handle``, d'après son téléphone (ADR 0119) : ses coordonnées, le nom du
+        lieu qu'il a trouvé (vide : aucun), sa précision (0 : inconnue), l'âge de la mesure. À l'adaptateur de
+        valider, de borner le débit et de taire une position qui n'a pas bougé ; rend le ``seq``."""
+        ...
+
+    async def unlocate(self, handle: str) -> int | None:
+        """La personne qui écrit par ``handle`` ne partage plus où elle est : sa dernière position s'efface (rien
+        n'est écrit s'il n'y en avait pas)."""
+        ...
+
+    def notes(self, ids: Sequence[str]) -> list[MessageNote]:
+        """Les petites bulles des références qu'un de ses messages emporte (``Delivery.attachments``, la colonne
+        ``attachments`` d'une ligne du fil), dans l'ordre ; une référence qui n'en est pas une n'y est pas."""
         ...
 
     async def resolve_effect(self, proposal: int, approved: bool, *, by: str, note: str = "",
