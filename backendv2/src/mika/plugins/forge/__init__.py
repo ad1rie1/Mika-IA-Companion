@@ -757,7 +757,16 @@ class Tick:
         _, name, service = due[0]  # un appel à la fois : le plus en retard d'abord
         app = ctx.state.apps[name]
         method = f"service_{service}" if service else "tick"
-        r = await port.call(name, method, timeout_s=timeout_of(port.info(name), method, p), secrets=trusted(app))
+        info = port.info(name)
+        r = await port.call(name, method, timeout_s=timeout_of(info, method, p), secrets=trusted(app))
+        after = port.info(name)
+        if not r.ok and info is not None and (after is None or after.version != info.version):
+            # une nouvelle version (ou l'effacement) l'a interrompu : cet échec n'est pas le sien, il ne compte pas
+            # contre elle — son passage n'est pas noté, la nouvelle version le refait aussitôt
+            left = outcomes(name, app, [r], frame.now, p, breaker=False, concern=concerns(frame, app))
+            if left:
+                await ctx.emit(*left)
+            return
         drafts: list[Any] = [TICKED.draft(app=name, ok=r.ok, error=r.error[:300], duration_ms=r.duration_ms,
                                           service=service)]
         await ctx.emit(*drafts, *outcomes(name, app, [r], frame.now, p, concern=concerns(frame, app),
