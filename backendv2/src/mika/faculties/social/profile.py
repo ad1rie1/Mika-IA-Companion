@@ -235,7 +235,8 @@ class Revise:
             return
         p = params(frame.env.params_of("social", frame.root))
         self.retry_at = frame.now + p.profile_retry_us  # si l'appel lève : pas de rafale
-        for _neg, person in self._todo(state, frame.now, p)[: p.profile_per_run]:
+        todo = self._todo(state, frame.now, p)
+        for _neg, person in todo[: p.profile_per_run]:
             self.tried[person] = self._mark(state, person)
             # ce qu'elle a dit elle-même, ou ce que Mika a vu — jamais ce qu'un autre a confié sur elle
             only = json.dumps([person], ensure_ascii=False)
@@ -276,7 +277,8 @@ class Revise:
                 interests=_lines(_short(tastes(got.interets))), sensitive=_lines(_short(got.sujets_sensibles)),
                 upto=max(int(i) for i, _t, _imp in items), call_id=request.call_id, model=response.model,
                 sources=tuple(sorted(int(i) for i, _t, _imp in items))))
-        self.retry_at = 0
+        if len(todo) <= p.profile_per_run:
+            self.retry_at = 0  # plus rien n'attend ; sinon le délai posé plus haut tient : pas de rafale
 
     def _prompt(self, frame: Frame, state: SocialState, person: str, items: list[tuple[Any, ...]], store: Any,
                 notes: str = "") -> str:
