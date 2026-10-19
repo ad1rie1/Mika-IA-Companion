@@ -11,7 +11,7 @@ import asyncio
 
 from mika.faculties.expression import polish, review
 from mika.kernel.clock import HOUR
-from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER
+from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER, ChatPrompt, ChatTurn, label
 from mika.ports.llm import LLMResponse, Message, PersonaRender
 from mika.runtime.pipeline import EpisodeRequest
 from mika.sim.clock import run_virtual
@@ -147,6 +147,34 @@ def test_the_author_reads_her_portrait_the_thread_and_the_draft_but_not_her_tags
     # sans fil de référence, rien n'en est dit
     bare = PersonaRender(text="Tu es Mika.", hash="h", depth="full", name="Mika")
     assert "fil_de_reference" not in polish(DRAFT, messages, "", bare)[0]
+
+
+def _as_sent(prompt: ChatPrompt) -> list[Message]:
+    """Les messages tels que le composeur les envoie (repères compris)."""
+    return [Message(m["role"], m["content"]) for m in prompt.chat_messages()]
+
+
+def test_the_author_reads_when_each_message_came():
+    """Sans les repères du fil, trois jours se lisaient comme une seule conversation : au « coucou » du matin,
+    l'autrice pouvait reprendre la blague de la veille."""
+    history = (ChatTurn("user", "t'as vu le match ?", mark="mardi 21h10"),
+               ChatTurn("assistant", "Non, raconte !"),
+               ChatTurn("user", "on a perdu 3-0", mark="plus tard, vers 23h"),
+               ChatTurn("assistant", "Aïe.\n\nBonne nuit quand même", mark="le surlendemain, jeudi 19h06 — c'est toi "
+                                                                       "qui lui as écrit"))
+    now = label(ChatTurn("user", "", mark="le lendemain, vendredi 8h02")) + "coucou"
+    _system, message, _keep = polish("Coucou ! Bien dormi ?", _as_sent(ChatPrompt("s", "--- QUI ---\nAdrien",
+                                                                                  history, now)), "coucou", PERSONA)
+    assert ("[mardi 21h10]\nL'autre : t'as vu le match ?\nMika : Non, raconte !\n"
+            "[plus tard, vers 23h]\nL'autre : on a perdu 3-0\n"
+            "[le surlendemain, jeudi 19h06 — c'est toi qui lui as écrit]\nMika : Aïe.\nMika : Bonne nuit quand même\n"
+            "[le lendemain, vendredi 8h02]\nL'autre : coucou\nMika (brouillon) : Coucou ! Bien dormi ?") in message
+    # seize messages du fil, leurs repères en plus : un repère seul (avant un des siens) ne compte pas pour un message
+    turns = tuple(ChatTurn("assistant" if i % 2 else "user", f"message {i}", mark=f"jour {i}") for i in range(30))
+    _system, message, _keep = polish("Bah rien.", _as_sent(ChatPrompt("s", "", turns, "et alors")), "et alors",
+                                     PERSONA)
+    lines = message.split("\n")
+    assert "[jour 14]" in lines and "Mika : message 15" in lines and "[jour 13]" not in lines
 
 
 def _polished_life(tmp_path, polished_text, *, routed=True):

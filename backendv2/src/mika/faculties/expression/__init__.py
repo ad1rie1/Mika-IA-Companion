@@ -40,7 +40,7 @@ from mika.kernel.episode import Prelude
 from mika.kernel.faculty import Faculty, Zone
 from mika.kernel.forms import Knob
 from mika.kernel.frame import Frame
-from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER, LAST
+from mika.kernel.prompt import CONTEXT_FOOTER, CONTEXT_HEADER, LAST, unlabel
 from mika.kernel.state import FrozenDict
 from mika.ports.delivery import Delivery, EmotionView
 from mika.vocab import affect as A
@@ -526,12 +526,31 @@ def review(draft: str, mine: Sequence[str], heard: str = "", portrait: str = "")
 _POLISH_THREAD = 16
 
 
-def _thread_lines(m: Any, name: str) -> list[str]:
+def _thread_lines(role: str, content: str, name: str) -> list[str]:
     """Un message du fil en lignes de SMS : une par bulle pour elle, une pour l'autre."""
-    if m.role != "assistant":
-        said = _plain(m.content)
+    if role != "assistant":
+        said = _plain(content)
         return [phrase("expression.polish.them", text=said)] if said else []
-    return [phrase("expression.polish.her", name=name, text=b) for b in _bubbles(m.content).split("\n\n") if b]
+    return [phrase("expression.polish.her", name=name, text=b) for b in _bubbles(content).split("\n\n") if b]
+
+
+def _thread(history: Sequence[Any], name: str) -> list[str]:
+    """Les derniers messages du fil (``_POLISH_THREAD``) en lignes de SMS, chacun précédé de son repère de temps
+    quand du temps a passé (« [le lendemain, mardi 14h13] ») : sans eux, trois jours de fil se lisaient comme une
+    seule conversation, et au « coucou » du matin elle pouvait reprendre la blague de la veille. Le repère seul qui
+    précède un de ses messages (``ChatPrompt.chat_messages``) passe sur ce message."""
+    entries: list[list[str]] = []
+    pending = ""
+    for m in history:
+        mark, rest = ("", m.content) if m.role == "assistant" else unlabel(m.content)
+        mark = mark or pending
+        lines = _thread_lines(m.role, rest, name)
+        if not lines:
+            pending = mark
+            continue
+        pending = ""
+        entries.append([phrase("expression.polish.mark", mark=mark), *lines] if mark else lines)
+    return [line for entry in entries[-_POLISH_THREAD:] for line in entry]
 
 
 def authored(text: str, name: str) -> str:
@@ -585,7 +604,12 @@ def polish(draft: str, messages: Sequence[Any], heard: str = "",
     turns = [m for m in messages if getattr(m, "role", "") in ("user", "assistant") and (m.content or "").strip()]
     state = turns[-1].content if turns and turns[-1].role == "user" else ""
     history = turns[:-1] if state else turns
-    lines = [line for m in history[-_POLISH_THREAD:] for line in _thread_lines(m, name)]
+    lines = _thread(history, name)
+    # le moment du message en cours par rapport au dernier (pour ce qu'elle lance d'elle-même : de maintenant), en
+    # tête de ce qui suit son état interne
+    now = unlabel(state.split(CONTEXT_FOOTER, 1)[-1].lstrip())[0]
+    if now:
+        lines.append(phrase("expression.polish.mark", mark=now))
     # ce que la personne vient d'écrire — jamais le cadrage d'un épisode (« personne ne vient de t'écrire… »)
     if _plain(heard):
         lines.append(phrase("expression.polish.them", text=_plain(heard)))
