@@ -382,9 +382,9 @@ async def remote_proposal(p: Any, what: str, request: int, port: Any) -> Any:
 
 def network_proposal(p: Project, request: int, argv: tuple[str, ...], why: str) -> Any:
     """Sa commande réseau mise en file (un projet sans accord requis), proposée maintenant que l'exécution qui
-    l'a demandée a fini."""
+    l'a demandée a fini — avec l'accord si l'opératrice l'a exigé depuis : le réglage du projet est relu ici."""
     return rt.EFFECT_PROPOSED.draft(
-        capability=NETWORKED, owner=PROJECTS.name, context=project_target(p.id), approval=False,
+        capability=NETWORKED, owner=PROJECTS.name, context=project_target(p.id), approval=p.approval,
         args_json=json.dumps({"project": p.id, "argv": list(argv), "request": request}),
         summary=Content.of(network_summary(p, argv, why or "(sans raison donnée)"), level=p.sensitivity),
         about=tuple(x for x in (p.owner, *p.about) if x), dedupe_key=f"reseau:{p.id}:{request}")
