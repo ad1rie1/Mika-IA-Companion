@@ -78,11 +78,13 @@ class Notice:
         for person in _due(state, frame, p)[:3]:
             name = frame.get(identity_c.IDENTITY(person)).name or phrase("social.reciprocity.someone")
             text = phrase("social.reciprocity.thought", name=name)
-            her, _them, _ = reciprocity(state.contacts[person], p)
+            # la clé suit la remarque précédente (``noticed`` ne bouge qu'à une remarque écrite) : la suivante n'a
+            # jamais la clé d'une ancienne, même quand le décompte n'a pas changé
+            last = state.noticed.get(person, 0)
             await ctx.emit(c.ONE_SIDED.draft(
                 source="social", kind="one_sided", summary=Content.of(text, level=int(Sensitivity.PERSONAL)),
                 pertinence=PERTINENCE, emotion=Emotion.THINKING.value, intensity=0.0, about=(person,),
-                sensitivity=int(Sensitivity.PERSONAL), dedupe_key=f"réciprocité:{person}:{her}"))
+                sensitivity=int(Sensitivity.PERSONAL), dedupe_key=f"réciprocité:{person}:{last}"))
 
 
 @SOCIAL.appraisal(c.ONE_SIDED)
