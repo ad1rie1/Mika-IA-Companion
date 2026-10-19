@@ -243,6 +243,15 @@ declare -A MODULE_GROUPS=(
     [unity]="$_UNITY/Runtime/World/Actors $_UNITY/Runtime/World $_UNITY/Runtime/Avatar $_UNITY/Runtime $_UNITY/Editor"
 )
 
+# Un groupe mis en commentaire dans MODULE_GROUPS sort aussi de l'ordre : sans
+# ça, chaque lecture de `${MODULE_GROUPS[$g]}` casse sous `set -u`.
+_order=()
+for _g in "${MODULE_GROUP_ORDER[@]}"; do
+    [[ -n "${MODULE_GROUPS[$_g]+x}" ]] && _order+=("$_g")
+done
+MODULE_GROUP_ORDER=("${_order[@]}")
+unset _order
+
 AVAILABLE_MODULES=()
 for _g in "${MODULE_GROUP_ORDER[@]}"; do
     read -ra _mods <<< "${MODULE_GROUPS[$_g]}"
