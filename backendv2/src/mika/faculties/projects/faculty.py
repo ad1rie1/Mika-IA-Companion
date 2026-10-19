@@ -342,7 +342,8 @@ class ProjectsState:
 #: v4 : un récit fait le point — il couvre tout ce qu'elle a mené à bout avant son départ, pas un seul objectif.
 #: v5 : une demande d'aide dite attend la réponse de sa personne (``asked_at``, ``asked_to``, ``answered_at``).
 #: v6 : une consigne reçue pendant un besoin y répond (``steered_at``) — elle ne l'attend plus, ne le redemande pas.
-#: v7 : un besoin qui reste après sa réponse (ou sa consigne) est une nouvelle demande — elle le redit, une fois.
+#: v7 : un besoin qui reste après sa réponse (ou sa consigne) est une nouvelle demande — elle le redit, une fois ;
+#:     un objectif qui bloque après cette réponse se dit aussi (« ça bloque »).
 PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
                    state_version=7)
 PROJECTS.declare(*c.ALL)
@@ -1164,6 +1165,8 @@ def _objective_closed(s: ProjectsState, e, cx) -> ProjectsState:
         return s
     o = replace(o, status=d.status if d.status in (c.DONE, c.BLOCKED) else c.BLOCKED, closed_at=e.at,
                 notable=d.notable, result_ref=d.result.ref or "" if d.result is not None else "")
+    if o.status == c.BLOCKED and o.asked and _settled(o, e.at):  # il bloque après sa réponse : elle le dira
+        o = replace(o, asked=False, ask_attempts=0)
     return _set(s, _objective(p, o))
 
 
