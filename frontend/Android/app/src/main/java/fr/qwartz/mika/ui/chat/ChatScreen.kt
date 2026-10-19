@@ -24,6 +24,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -118,6 +119,14 @@ fun ChatScreen(
         vm.onShown()
     }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { vm.onHidden() }
+    // Un écran interne (« Ce qu'elle fait », réglages, image) la remplace sans pause : l'absence se compte
+    // de là, sinon le retour rejoue des retrouvailles. Pas quand l'activité s'en va : la pause l'a déjà dit.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(vm, lifecycleOwner) {
+        onDispose {
+            if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) vm.onHidden()
+        }
+    }
 
     // Mika en fond : son portrait du moment, et son visage dans la barre du haut.
     val avatar by vm.avatar.collectAsStateWithLifecycle()
