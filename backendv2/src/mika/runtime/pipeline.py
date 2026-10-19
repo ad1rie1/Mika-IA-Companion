@@ -102,6 +102,9 @@ Reviewer = Callable[[str, Sequence[str], str, str], "str | None"]
 #: ``None`` : rien à reprendre.
 Polisher = Callable[[str, Sequence[Message], str, "PersonaRender | None"],
                     "tuple[str, str, Callable[[str], str]] | None"]
+#: Les annotations d'une parole récrite par la seconde passe : (son premier jet, ses annotations, le texte récrit) →
+#: celles du texte récrit (ce qui décrit la forme du texte — une question, un passage — suit le message envoyé).
+Reannotator = Callable[[str, Mapping[str, str], str], Mapping[str, str]]
 #: une réponse récrite plus longue que ``_POLISH_GROWTH`` fois le premier jet (plus ``_POLISH_SLACK`` caractères) a
 #: dérivé : on garde le premier jet (l'autrice peut envoyer en plusieurs bulles ce qu'un « ah merde. » disait seul)
 _POLISH_GROWTH, _POLISH_SLACK = 2.0, 120
@@ -243,6 +246,7 @@ class EpisodeRunner:
         reviewed: Sequence[str] = (),
         polishers: Sequence[Polisher] = (),
         polished: Sequence[str] = (),
+        reannotators: Sequence[Reannotator] = (),
         modes: Mapping[str, EpisodeMode] | None = None,
         composer: Composer | None = None,
         budget: Budget | None = None,
@@ -264,6 +268,8 @@ class EpisodeRunner:
         self.polishers = list(polishers)
         #: les sortes d'épisode dont la parole passe une seconde fois, pour être rendue naturelle (``polishers``)
         self.polished = frozenset(polished)
+        #: ce qui recalcule les annotations d'une parole récrite par la seconde passe (``Reannotator``)
+        self.reannotators = list(reannotators)
         #: les façons de répondre qu'un message peut demander, par nom (``EpisodeRequest.mode``)
         self.modes = dict(modes or {})
         self.composer = composer or Composer()
@@ -494,11 +500,15 @@ class EpisodeRunner:
                     if revised is not None:
                         loop, text, annotations, llm_req = revised
                 # la seconde passe : le texte seul, rendu naturel au vu du fil, sans rien y ajouter ; ses balises
-                # restent celles du premier jet (ce qu'elle ressent ne change pas), et ses outils ne se refont pas
+                # restent celles du premier jet (ce qu'elle ressent ne change pas), et ses outils ne se refont pas —
+                # mais ce qui décrit la forme du texte (une question posée, le passage faux) suit le message envoyé
                 if authored:
                     # ce que la personne vient d'écrire : la consigne d'une initiative (« personne ne vient de
                     # t'écrire… ») n'est pas une ligne du fil
-                    text = await self._polish(ep, eid, llm_req, text, req.message or "", make_ctx, persona)
+                    polished = await self._polish(ep, eid, llm_req, text, req.message or "", make_ctx, persona)
+                    if polished != text:
+                        annotations = self._reannotate(text, annotations, polished)
+                    text = polished
                 # un message qui emporte un fichier n'est pas une redite, même s'il redit sa phrase (« tiens, la
                 # voilà ») : se taire perdrait le fichier
                 if policy.delivered and not loop.attachments and repeats_last(text, llm_req):
@@ -781,6 +791,15 @@ class EpisodeRunner:
             return text
         ep.seen["naturel"] = {"premier_jet": text}
         return polished
+
+    def _reannotate(self, draft: str, annotations: Mapping[str, str], text: str) -> dict[str, str]:
+        """Les annotations du texte récrit (``reannotators``) ; une panne garde celles qu'on avait."""
+        out = dict(annotations)
+        for reannotator in self.reannotators:
+            got = call(reannotator, draft, out, text, label="annotations de la réponse récrite")
+            if not isinstance(got, Failed):
+                out = dict(got)
+        return out
 
     @staticmethod
     def _instruction(mode: EpisodeMode | None) -> str:
