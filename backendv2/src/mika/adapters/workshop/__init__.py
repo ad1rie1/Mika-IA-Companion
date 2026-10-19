@@ -314,9 +314,11 @@ class BwrapWorkshop:
         """Ce que git voit (suivis, et nouveaux non ignorés), ou ``None`` (pas de dépôt, ou git ne répond pas)."""
         if not (self.folder(goal) / ".git").is_dir():
             return None
+        # une liste lue par le code : coupée au milieu, elle tairait des dossiers entiers ; trop longue, le parcours
+        # borné prend le relais
         r = await self._git(goal, "-c", "core.quotepath=off", "ls-files", "-z", "--cached", "--others",
-                            "--exclude-standard")
-        if not r.ok:
+                            "--exclude-standard", clip=False)
+        if not r.ok or r.truncated:
             return None
         return [p for p in r.stdout.split("\x00") if p]
 
@@ -480,7 +482,8 @@ class BwrapWorkshop:
 
     async def run(self, goal: int, argv: Sequence[str], *, timeout_s: float | None = None,
                   network: bool = False, check_allowed: bool = True,
-                  extra_env: Mapping[str, str] | None = None, secrets: Sequence[str] = ()) -> RunResult:
+                  extra_env: Mapping[str, str] | None = None, secrets: Sequence[str] = (),
+                  clip: bool = True) -> RunResult:
         args = [str(a) for a in argv]
         if not args:
             return RunResult((), None, refused="commande vide")
@@ -518,7 +521,7 @@ class BwrapWorkshop:
         job = _Job()
         try:
             result = await loop.run_in_executor(None, self._run_sync, tuple(args), cmd, root, limit, extra_env,
-                                                tuple(x for x in secrets if x), job)
+                                                tuple(x for x in secrets if x), job, clip)
         except asyncio.CancelledError:
             job.cancel()  # l'exécution est annulée : ce qu'elle a lancé ne lui survit pas
             raise
@@ -552,8 +555,11 @@ class BwrapWorkshop:
 
     def _run_sync(self, argv: tuple[str, ...], cmd: list[str], root: Path, limit: float,
                   extra_env: Mapping[str, str] | None = None, secrets: tuple[str, ...] = (),
-                  job: _Job | None = None) -> RunResult:
+                  job: _Job | None = None, clip: bool = True) -> RunResult:
+        """``clip=False`` pour une sortie que le code lit lui-même (une liste de chemins) : elle n'est pas coupée au
+        milieu, seulement bornée par le plafond d'octets d'un flux (``truncated`` le dit)."""
         job = job or _Job()
+        cap = self.max_output * 4 if clip else self.limits.output_bytes
         start = time.perf_counter()
         try:
             proc = subprocess.Popen(cmd, cwd=str(root), env=self._env(root, extra_env), stdin=subprocess.DEVNULL,
@@ -563,7 +569,7 @@ class BwrapWorkshop:
             return RunResult(argv, None, refused=f"lancement impossible : {exc}")
         if not job.attach(proc):
             _killpg(proc)  # annulée avant même de partir
-        timed_out, overflow, raw = self._collect(proc, limit, job)
+        timed_out, overflow, raw = self._collect(proc, limit, job, cap + 1)
         if timed_out or overflow or job.cancelled:
             _killpg(proc)
         try:
@@ -575,12 +581,12 @@ class BwrapWorkshop:
         texts = []
         cut = overflow
         for buf in raw:
-            text = bytes(buf[: self.max_output * 4]).decode("utf-8", errors="replace")
+            text = bytes(buf[:cap]).decode("utf-8", errors="replace")
             for secret in secrets:  # avant de couper : un secret à cheval sur la coupure reste reconnu
                 text = text.replace(secret, "***")
-            text, clipped = _clip(text, self.max_output)
+            text, clipped = _clip(text, self.max_output) if clip else (text, False)
             texts.append(text)
-            cut |= clipped or len(buf) > self.max_output * 4
+            cut |= clipped or len(buf) > cap
         notes: tuple[str, ...] = ()
         if overflow:
             notes = (f"Programme arrêté : sa sortie dépassait {_size(self.limits.output_bytes)}.",)
@@ -588,7 +594,7 @@ class BwrapWorkshop:
             notes = ("Programme arrêté : l'exécution qui l'avait lancé a été interrompue.",)
         return RunResult(argv, proc.returncode, texts[0], texts[1], duration, timed_out, cut, notes=notes)
 
-    def _collect(self, proc: subprocess.Popen[bytes], limit: float, job: _Job
+    def _collect(self, proc: subprocess.Popen[bytes], limit: float, job: _Job, keep: int
                  ) -> tuple[bool, bool, tuple[bytearray, bytearray]]:
         """Lit la sortie et les erreurs par leurs tubes jusqu'à la fin du programme, son délai, une annulation ou
         un flux qui dépasse sa limite (on garde le début : ce qu'on rend est de toute façon coupé). Rend (délai,
@@ -597,7 +603,6 @@ class BwrapWorkshop:
         out, err = bytearray(), bytearray()
         streams = {proc.stdout.fileno(): out, proc.stderr.fileno(): err}
         sizes = dict.fromkeys(streams, 0)
-        keep = self.max_output * 4 + 1
         deadline = time.monotonic() + limit
         open_ = set(streams)
         timed_out = overflow = False
@@ -628,10 +633,11 @@ class BwrapWorkshop:
 
     # ── git ──
     async def _git(self, goal: int, *args: str, network: bool = False, timeout_s: float = 30,
-                   extra_env: Mapping[str, str] | None = None, secrets: Sequence[str] = ()) -> RunResult:
+                   extra_env: Mapping[str, str] | None = None, secrets: Sequence[str] = (),
+                   clip: bool = True) -> RunResult:
         return await self.run(goal, ["git", *author_identity(self.author()), *_GIT, *args], timeout_s=timeout_s,
                               check_allowed=False, network=network,
-                              extra_env={**_GIT_ENV, **dict(extra_env or {})}, secrets=secrets)
+                              extra_env={**_GIT_ENV, **dict(extra_env or {})}, secrets=secrets, clip=clip)
 
     async def _init(self, goal: int) -> bool:
         root = self._open(goal)
@@ -685,7 +691,7 @@ class BwrapWorkshop:
         return text
 
     async def _status(self, goal: int) -> list[str]:
-        r = await self._git(goal, "status", "--porcelain", "--untracked-files=all")
+        r = await self._git(goal, "status", "--porcelain", "--untracked-files=all", clip=False)
         return [line for line in r.stdout.splitlines() if line.strip()] if r.ok else []
 
     async def pending(self, goal: int) -> list[str]:
