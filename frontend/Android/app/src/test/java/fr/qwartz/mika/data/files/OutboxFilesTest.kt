@@ -22,7 +22,7 @@ class OutboxFilesTest {
         val files = OutboxFiles(folder.newFolder("app"))
         val s = staged("photo.png", 10)
         val adopted = files.adopt("c1", listOf(s, staged("photo.png", 5)))
-        assertEquals(listOf("photo.png", "photo (2).png"), adopted.map { it.file })
+        assertEquals(listOf("photo.png", "photo_2.png"), adopted.map { it.file })
         assertFalse(File(s.path).exists())
         assertEquals(10L, files.locate("c1", "photo.png")!!.length())
         files.release("c1")

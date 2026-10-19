@@ -48,9 +48,13 @@ class OutboxFiles(
         }
     }
 
-    /** Où lire un fichier d'un message : encore en partance, ou déjà accusé. */
+    /**
+     * Où lire un fichier d'un message : encore en partance, ou déjà accusé. [file] est le nom de disque
+     * qu'[adopt] a choisi : il se cherche tel quel (le renettoyer le ferait manquer), sans chemin.
+     */
     fun locate(cid: String, file: String): File? {
-        val name = sanitize(file)
+        val name = file.takeUnless { it.isEmpty() || it == "." || it == ".." || '/' in it || '\\' in it }
+            ?: return null
         return listOf(File(File(outbox, safe(cid)), name), File(File(sent, safe(cid)), name)).firstOrNull { it.isFile }
     }
 
@@ -142,10 +146,13 @@ class OutboxFiles(
     companion object {
         private val UNSAFE = Regex("""[^\p{L}\p{N}._\- ]""")
 
-        /** Un nom de disque sans chemin ni caractère douteux, jamais vide, jamais caché. */
+        /**
+         * Un nom de disque sans chemin ni caractère douteux, jamais vide, jamais caché. Coupé avant
+         * d'être rogné : le nettoyer une seconde fois ne le change plus.
+         */
         fun sanitize(name: String): String {
             val base = name.substringAfterLast('/').substringAfterLast('\\')
-            val cleaned = UNSAFE.replace(base, "_").trim().trimStart('.').take(80)
+            val cleaned = UNSAFE.replace(base, "_").take(80).trimEnd().trimStart(' ', '.')
             return cleaned.ifEmpty { "fichier" }
         }
 
@@ -156,7 +163,7 @@ class OutboxFiles(
             var n = 2
             while (!taken.add(candidate)) {
                 val dot = name.lastIndexOf('.')
-                candidate = if (dot > 0) "${name.substring(0, dot)} ($n)${name.substring(dot)}" else "$name ($n)"
+                candidate = if (dot > 0) "${name.substring(0, dot)}_$n${name.substring(dot)}" else "${name}_$n"
                 n++
             }
             return candidate
