@@ -799,7 +799,7 @@ def matter(s: NeedsState, person: str, now: int, p: NeedsParams, thoughts: Any, 
             return c.Matter(c.WORKING_MATTER, g.title_ref, g.opened_at, _concerned(g.owner, g.about), g.sensitivity)
     for pr in projects:
         if pr.mode == projects_c.PERSONA and pr.status == projects_c.ACTIVE and pr.title_ref \
-                and pr.last_run_at and now - pr.last_run_at <= p.matter_done_us \
+                and pr.title_ref not in used and pr.last_run_at and now - pr.last_run_at <= p.matter_done_us \
                 and _for(person, _concerned(pr.owner, pr.about), pr.sensitivity):
             return c.Matter(c.WORKING_MATTER, pr.title_ref, pr.last_run_at, _concerned(pr.owner, pr.about),
                             pr.sensitivity)
