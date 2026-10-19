@@ -87,6 +87,8 @@ class KernelDeps:
     reviewed: Sequence[str] = ()
     polishers: Sequence[Any] = ()
     polished: Sequence[str] = ()
+    #: les annotations d'une parole récrite par la seconde passe (``pipeline.Reannotator``)
+    reannotators: Sequence[Any] = ()
     #: les façons de répondre qu'un message peut demander (``kernel.episode.EpisodeMode``, par nom : le mode pro)
     modes: Mapping[str, EpisodeMode] = field(default_factory=dict)
     budget: Budget | None = None
@@ -167,7 +169,7 @@ class Kernel:
         self.runner = EpisodeRunner(
             self.mind, deps.gateway, policies=deps.policies, persona=deps.persona,
             audience_of=deps.audience_of, parsers=deps.parsers, reviewers=deps.reviewers, reviewed=deps.reviewed,
-            polishers=deps.polishers, polished=deps.polished, modes=deps.modes,
+            polishers=deps.polishers, polished=deps.polished, reannotators=deps.reannotators, modes=deps.modes,
             budget=deps.budget, ports=ports,
             traces=self.traces,
         )

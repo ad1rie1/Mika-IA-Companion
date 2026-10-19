@@ -157,6 +157,24 @@ def parse(text: str, speaker: str = "") -> tuple[str, dict[str, str]]:
     return tag.text, annotations
 
 
+def reannotate(draft: str, annotations: Mapping[str, str], text: str) -> dict[str, str]:
+    """Les annotations de sa réponse récrite par l'autrice (``text``, ADR 0114) : ce qu'elle ressent, ce qu'elle a lu
+    de la personne et le fait d'avoir menti restent ceux du premier jet (``draft``) ; ce qui décrit la forme du texte se
+    recalcule sur le message envoyé — une question qu'il pose (le premier jet finissait sur une question, le message
+    envoyé non), et le passage faux, retrouvé dans le texte récrit (le texte entier quand il ne s'y retrouve pas : elle
+    a menti quand même)."""
+    out = {k: v for k, v in annotations.items() if k not in (c.QUESTION_ANNOTATION, c.LIE_ANNOTATION)}
+    if "?" in text:
+        out[c.QUESTION_ANNOTATION] = "1"
+    lie = annotations.get(c.LIE_ANNOTATION)
+    if lie is not None:
+        start, _, end = lie.partition(":")
+        passage = draft[int(start):int(end)] if start.isdigit() and end.isdigit() else ""
+        span = (lied(text, passage) if passage.strip() else None) or (0, len(text))
+        out[c.LIE_ANNOTATION] = f"{span[0]}:{span[1]}"
+    return out
+
+
 def style() -> str:
     """La consigne de style (``expression.style`` dans sa voix) : parler comme on parle, une échelle d'intensité, ce
     qu'est le bloc d'état interne — sa tête à elle, jamais citée."""

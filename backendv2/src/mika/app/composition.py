@@ -26,6 +26,7 @@ from mika.faculties.body import BODY
 from mika.faculties.expression import EXPRESSION, pro_style
 from mika.faculties.expression import parse as parse_reply
 from mika.faculties.expression import polish as polish_reply
+from mika.faculties.expression import reannotate as reannotate_reply
 from mika.faculties.expression import review as review_reply
 from mika.faculties.goals import GOALS, step_brief
 from mika.faculties.identity import IDENTITY, audience_for
@@ -233,6 +234,8 @@ def deps(**kw: Any) -> KernelDeps:
         # réponses et ses initiatives, pour qu'un message qu'elle lance sonne comme ses réponses (ADR 0115)
         "polishers": [polish_reply],
         "polished": sorted(CONVERSATIONAL),
+        # ce qui décrit la forme de sa réponse (une question, le passage faux) suit le message que l'autrice envoie
+        "reannotators": [reannotate_reply],
         "modes": modes(),
         "reply_kind": Kind.REPLY,
         "reply_wait": _reply_wait,
