@@ -98,12 +98,16 @@ class AppGraph(context: Context) {
     /**
      * La socket : pas de délai de lecture (le battement applicatif juge du silence), mais un délai
      * d'écriture, par tranche de 64 Kio — c'est lui qui ferme une montée bloquée, que le battement ne
-     * juge pas tant que la file d'OkHttp porte des octets (`MikaSocket.lastSignOfLife`).
+     * juge pas tant que la file d'OkHttp porte des octets (`MikaSocket.lastSignOfLife`). Un délai global
+     * borne l'ouverture : sans lui, une réponse 101 qui ne vient jamais (serveur figé derrière un noyau qui
+     * accepte, chemin mort après la connexion TCP) laisse « Connexion… » sans fin, puisque le battement
+     * n'est armé qu'à l'ouverture. OkHttp le lève dès la montée en WebSocket : il ne coupe jamais une
+     * socket ouverte.
      */
     private val wsHttp: OkHttpClient = http.newBuilder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
-        .callTimeout(0, TimeUnit.MILLISECONDS)
+        .callTimeout(30, TimeUnit.SECONDS)
         .build()
 
     val database: MikaDatabase = MikaDatabase.open(this.context)
