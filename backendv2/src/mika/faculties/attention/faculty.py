@@ -617,8 +617,9 @@ def derive(t: Temperament, overrides: Any = None) -> AttentionParams:
 
 
 # 15 : la jalousie d'un silence (``Exchange.envied_at``, ADR 0100)
+# 16 : un remords ou un mensonge en attente n'empêche plus la pensée de l'échange (issue #651)
 ATTENTION = Faculty("attention", state=AttentionState, init=lambda p: AttentionState(), params=AttentionParams,
-                    derive=derive, state_version=15)
+                    derive=derive, state_version=16)
 #: les manques dont on retient la dernière pensée (les plus récents)
 MISSING_KEPT = 64
 #: les souvenirs revenus retenus (un même souvenir ne revient pas tant qu'il y est)
@@ -696,7 +697,8 @@ def _relational(s: AttentionState, person: str, emotion: str, intensity: float, 
         return replace(s, pending=tuple(stronger if q is waiting else q for q in s.pending))
     born = sum(1 for t in alive.values() if t.origin in RELATIONAL)
     queued = sum(1 for q in s.pending if q.origin in RELATIONAL)
-    if born + queued >= p.exchange_cap or any(q.person == person for q in s.pending):
+    # une par personne parmi les pensées d'une relation : un remords ou un mensonge en attente ne la retient pas
+    if born + queued >= p.exchange_cap or any(q.person == person and q.origin in RELATIONAL for q in s.pending):
         return s
     return replace(s, pending=(*s.pending, Pending(source, origin, person, emotion, round(intensity, 3), at,
                                                    public=public)))
