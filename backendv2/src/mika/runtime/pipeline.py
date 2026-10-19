@@ -105,6 +105,9 @@ Polisher = Callable[[str, Sequence[Message], str, "PersonaRender | None"],
 #: une réponse récrite plus longue que ``_POLISH_GROWTH`` fois le premier jet (plus ``_POLISH_SLACK`` caractères) a
 #: dérivé : on garde le premier jet (l'autrice peut envoyer en plusieurs bulles ce qu'un « ah merde. » disait seul)
 _POLISH_GROWTH, _POLISH_SLACK = 2.0, 120
+#: ce qu'une passe de plus (relecture, seconde passe) laisse de l'échéance de l'épisode, en secondes, pour écrire la
+#: réponse : passé ce point, elle s'arrête et le premier jet part
+_PASS_SPARE_S = 5.0
 
 
 def is_silence(text: str) -> bool:
@@ -227,6 +230,8 @@ class _Live:
     committing: bool = False
     #: le mode qui plie sa politique (``None`` : l'ordinaire)
     mode: EpisodeMode | None = None
+    #: l'échéance de l'épisode (``policy.deadline_s``), posée à son départ : une passe de plus s'y range
+    deadline: asyncio.Timeout | None = None
 
 
 class EpisodeRunner:
@@ -355,7 +360,8 @@ class EpisodeRunner:
                 me.cancel()
 
         try:
-            async with asyncio.timeout(policy.deadline_s):
+            async with asyncio.timeout(policy.deadline_s) as deadline:
+                ep.deadline = deadline
                 await self._acquire(ep, sorted(resources))
                 start = await mind.append(
                     [EPISODE_STARTED.draft(kind=req.kind, target=req.target, trigger=req.trigger,
@@ -729,9 +735,9 @@ class EpisodeRunner:
                             messages=(*llm_req.messages[:-1], replace(last, content=content)))
         gateway = self.gateway
         assert gateway is not None
-        again = await acall(lambda: run_tool_loop(gateway, again_req, {}, make_ctx, max_turns=1,
-                                                  clock=self.mind.clock.now),
-                            label="relecture : nouvel appel du modèle")
+        again = await self._extra_pass(ep, lambda: run_tool_loop(gateway, again_req, {}, make_ctx, max_turns=1,
+                                                                 clock=self.mind.clock.now),
+                                       label="relecture : nouvel appel du modèle")
         if isinstance(again, Failed):
             return None
         text2, annotations2 = self._parse(again.text, persona.name if persona is not None else "")
@@ -739,6 +745,19 @@ class EpisodeRunner:
             return None
         ep.seen["relecture"] = {"premier_jet": text, "remarque": note}
         return again, text2, annotations2, again_req
+
+    @staticmethod
+    async def _extra_pass(ep: _Live, fn: Callable[[], Awaitable[LoopResult]], *, label: str) -> LoopResult | Failed:
+        """Un appel de plus sur une réponse déjà prête (relecture, seconde passe), rangé dans l'échéance de l'épisode
+        moins de quoi écrire la réponse (``_PASS_SPARE_S``) : s'il n'y tient pas, c'est une panne comme une autre et le
+        premier jet part — jamais l'échéance de l'épisode qui tomberait pendant lui et jetterait la réponse prête."""
+        if ep.deadline is None or (when := ep.deadline.when()) is None:
+            return await acall(fn, label=label)
+        try:
+            async with asyncio.timeout_at(when - _PASS_SPARE_S):
+                return await acall(fn, label=label)
+        except TimeoutError as exc:
+            return Failed(exc)
 
     def _authored(self, kind: str) -> bool:
         """Sa parole de cette sorte passe par l'autrice : un polisseur, cette sorte, et un modèle au rôle ``polish``."""
@@ -768,8 +787,9 @@ class EpisodeRunner:
         req = LLMRequest(role=str(Role.POLISH), call_id=f"{eid}#naturel", system_stable=system,
                          messages=(Message("user", message),), max_tokens=llm_req.max_tokens, lane=llm_req.lane,
                          priority=llm_req.priority, meta={**dict(llm_req.meta), "passe": "naturel"})
-        again = await acall(lambda: run_tool_loop(gateway, req, {}, make_ctx, max_turns=1, clock=self.mind.clock.now),
-                            label="seconde passe : appel du modèle")
+        again = await self._extra_pass(
+            ep, lambda: run_tool_loop(gateway, req, {}, make_ctx, max_turns=1, clock=self.mind.clock.now),
+            label="seconde passe : appel du modèle")
         if isinstance(again, Failed):
             return text
         kept = call(keep, again.text, label="seconde passe : ses messages")
