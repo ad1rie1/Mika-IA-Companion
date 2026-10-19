@@ -403,7 +403,7 @@ class ChatSyncTest {
     }
 
     @Test fun `is cleared by the frame that answers or settles that message`() {
-        val history = listOf(local("tu dors ?", USER, cid = "n1", status = MessageStatus.SENT))
+        val history = mutableListOf(local("tu dors ?", USER, cid = "n1", status = MessageStatus.SENT))
         markAsleep(history, "n1")
         bindServerId(history, "n1", 4)
         assertNull(history[0].waiting)
@@ -458,14 +458,14 @@ class ChatSyncTest {
     // ── bindServerId ──
 
     @Test fun `binds the id the reply reports for the question`() {
-        val history = listOf(local("question", USER, cid = "c1", status = MessageStatus.PENDING))
+        val history = mutableListOf(local("question", USER, cid = "c1", status = MessageStatus.PENDING))
         assertTrue(bindServerId(history, "c1", 42))
         assertEquals(42L, history[0].id)
         assertEquals(MessageStatus.SENT, history[0].status)
     }
 
     @Test fun `still confirms delivery when the server sent no id`() {
-        val history = listOf(local("question", USER, cid = "c1", status = MessageStatus.PENDING))
+        val history = mutableListOf(local("question", USER, cid = "c1", status = MessageStatus.PENDING))
         assertTrue(bindServerId(history, "c1", null))
         assertNull(history[0].id)
         assertEquals(MessageStatus.SENT, history[0].status)

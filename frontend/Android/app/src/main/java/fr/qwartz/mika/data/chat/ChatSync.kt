@@ -303,10 +303,20 @@ object ChatSync {
         return history.subList(index + 1, history.size).none { it.sender == Sender.MIKA && !it.inner }
     }
 
-    /** Rattacher l'identifiant serveur à la bulle à laquelle une réponse répond. */
-    fun bindServerId(history: List<StoredMessage>, cid: String, userId: Long?): Boolean {
+    /**
+     * Rattacher l'identifiant serveur à la bulle à laquelle une réponse répond. Si un rattrapage a déjà
+     * posé ce message à part (une bulle qu'il n'a pas reconnue), cette ligne se fond dans la bulle : deux
+     * lignes au même identifiant feraient échouer l'index unique, et toute l'écriture de la réponse avec.
+     */
+    fun bindServerId(history: MutableList<StoredMessage>, cid: String, userId: Long?): Boolean {
         val msg = history.firstOrNull { it.cid == cid } ?: return false
-        if (userId != null) msg.id = userId
+        val twin = userId?.let { id -> history.firstOrNull { it !== msg && it.id == id } }
+        if (twin != null && twin.sender == Sender.USER) {
+            history.remove(twin)
+            msg.ts = twin.ts
+        }
+        // Un identifiant déjà tenu par une réponse d'elle n'est pas celui de la question : on ne le pose pas.
+        if (userId != null && (twin == null || twin.sender == Sender.USER)) msg.id = userId
         msg.status = MessageStatus.SENT
         msg.waiting = null
         return true
