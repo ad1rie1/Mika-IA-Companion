@@ -767,9 +767,9 @@ class ForgeHost:
         started = time.monotonic()
         call = _Call(secrets=secrets)
 
-        def done(ok: bool, value: Any = None, error: str = "", killed: bool = False) -> CallResult:
+        def done(ok: bool, value: Any = None, error: str = "", killed: bool = False, busy: bool = False) -> CallResult:
             return CallResult(ok, value, error[:1000], killed, int((time.monotonic() - started) * 1000),
-                              tuple(call.logs[-50:]), tuple(call.signals), tuple(call.emits))
+                              tuple(call.logs[-50:]), tuple(call.signals), tuple(call.emits), busy=busy)
 
         if not self.bwrap:
             return done(False, error="bubblewrap est absent : aucune app ne tourne sans isolation")
@@ -811,7 +811,7 @@ class ForgeHost:
              call: _Call, done: Callable[..., CallResult]) -> CallResult:
         lock = self._lock(app)
         if not lock.acquire(timeout=max(0.0, timeout_s)):  # jamais une attente sans fin derrière un autre appel
-            return done(False, error="l'app est occupée par un autre appel : réessaie plus tard")
+            return done(False, error="l'app est occupée par un autre appel : réessaie plus tard", busy=True)
         try:
             return self._run_locked(app, info, method, args, timeout_s, max_result, call, done)
         finally:

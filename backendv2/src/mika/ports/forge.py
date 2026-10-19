@@ -219,6 +219,8 @@ class CallResult:
     signals: tuple[tuple[str, float, str], ...] = ()
     #: ce qu'elle a émis : (type, données JSON)
     emits: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    #: pas appelée : un autre appel tenait l'app — ce n'est pas un échec de l'app, il se refait
+    busy: bool = False
 
 
 class ForgePort(Protocol):
