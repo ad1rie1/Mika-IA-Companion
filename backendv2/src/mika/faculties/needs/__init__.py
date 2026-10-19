@@ -477,18 +477,20 @@ def _learned_a_belief(s: NeedsState, e, cx) -> NeedsState:
     d = e.data
     if d.replaces is not None:
         s = _unlearned(s, d.replaces)
+    p = params(cx.params)
     # ce qu'elle tient de sa bouche, sur elle-même : pas un secret (qui ne s'ouvre pas en initiative), ni un avis ou
     # une hypothèse (ce qu'elle pense, pas ce qui lui arrive), ni ce qui n'appartient qu'à elles deux (un surnom)
     mine = not d.secret and d.knowledge_kind in ("claim", "preference") and not d.between_us and not d.about_self
     if mine and len(d.about) == 1 and d.source == d.about[0] and d.text.ref:
         person = d.about[0]
-        kept = (*(t for t in s.told.get(person, ()) if t.ref != d.text.ref),
+        # ce qui n'est plus une matière (raconté il y a plus de ``matter_told_us``) ne garde pas une place : quatre
+        # vieilles confidences importantes évinceraient pour toujours ce qu'elle raconte aujourd'hui (#614, #647)
+        kept = (*(t for t in s.told.get(person, ()) if t.ref != d.text.ref and e.at - t.at <= p.matter_told_us),
                 Told(d.text.ref, e.at, d.sensitivity, round(d.importance, 4), item=e.seq))
         # les plus importantes, puis les plus récentes : « mon chat est malade » ne cède pas sa place à « j'ai
         # mangé des pâtes »
         kept = tuple(sorted(kept, key=lambda t: (-t.importance, -t.at, t.ref))[:TOLD_KEPT])
         s = replace(s, told=s.told.set(person, kept))
-    p = params(cx.params)
     return _relieve(_touch(s, e.at, p), c.CURIOSITY, p.learned_curiosity, e.at, p)
 
 
