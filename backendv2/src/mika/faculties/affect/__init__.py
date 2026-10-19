@@ -66,7 +66,8 @@ AFFECT = Faculty("affect", state=AffectState, init=lambda p: AffectState(), para
                  # 8 : un message qui la tire du sommeil la réveille aussi ici (une nuit coupée allège en deux fois),
                  # ses nuits datées de l'instant du croisement (ADR 0102)
                  # 9 : sa propriétaire la touche davantage (``social.WEIGHT``, ADR 0107)
-                 state_version=9, retired_params=("declared_window_us",))
+                 # 10 : blessée ou touchée en répondant seulement — une initiative ne lit aucun geste (ADR 0093)
+                 state_version=10, retired_params=("declared_window_us",))
 #: ni une connaissance ni une inconnue : sa tendresse s'y cache (le masque, au-dessus du milieu)
 _TENDER_TO = frozenset({social_c.FRIEND, social_c.CLOSE})
 
@@ -102,8 +103,10 @@ def _declared(s: AffectState, e, cx) -> AffectState:
     # humeur comme sa posture envers elle (ADR 0107)
     counts = cx.facts.get(social_c.WEIGHT(key)) if d.target and is_identifiable(d.target) else 1.0
     # ce que le modèle a lu de la personne (ADR 0093) : des mots qui la blessent ou une déception (ADR 0107), un
-    # compliment, un merci
-    their = reading.Reading.decode(d.annotation(expression_c.READING_ANNOTATION))
+    # compliment, un merci — lu en répondant à un message seulement, comme ``others`` et ``self`` : une initiative
+    # ne lit aucun nouveau geste, et une blessure déjà comptée ne se recompte pas
+    their = reading.Reading.decode(d.annotation(expression_c.READING_ANNOTATION)) \
+        if d.kind == Kind.REPLY and d.reply_to is not None else None
     hurt = their is not None and their.gesture in reading.HURTING
     touched = their is not None and their.gesture in (reading.COMPLIMENTED, reading.THANKED)
     # son tempérament sur ce qu'elle déclare (ADR 0100) : sa jalousie pèse ; blessée, sa réaction aussi
