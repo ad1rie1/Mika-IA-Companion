@@ -82,6 +82,8 @@ HOME_DIRNAME = ".atelier-home"
 ORGANS = (".git", HOME_DIRNAME)
 #: des dossiers qu'un arbre sans git ne parcourt pas (des milliers de fichiers qui ne disent rien du travail)
 NOISE = (".venv", "node_modules", "__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache")
+#: ce que le dépôt de l'atelier ignore : son ``.gitignore`` d'amorce, et son exclusion locale qui survit à un ``reset``
+IGNORED = f"{HOME_DIRNAME}/\n__pycache__/\n*.pyc\n.venv/\nnode_modules/\n"
 #: un parcours d'arbre sans git s'arrête après tant d'entrées vues
 WALK_MAX = 20_000
 SYSTEM_PATH = "/usr/local/bin:/usr/bin:/bin"
@@ -641,19 +643,19 @@ class BwrapWorkshop:
         if not r.ok:
             return False
         self._exclude(root)
-        (root / ".gitignore").write_text(f"{HOME_DIRNAME}/\n__pycache__/\n*.pyc\n.venv/\nnode_modules/\n",
-                                         encoding="utf-8")
+        (root / ".gitignore").write_text(IGNORED, encoding="utf-8")
         await self._git(goal, "add", "-A")
         await self._git(goal, "commit", "-q", "-m", "atelier ouvert")
         return True
 
     @staticmethod
     def _exclude(root: Path) -> None:
-        """La maison de l'atelier n'entre jamais dans le dépôt, même si un dépôt récupéré change le
-        ``.gitignore`` (l'exclusion locale n'est pas versionnée)."""
+        """La maison de l'atelier, ses environnements (``.venv``, ``node_modules``) et ses caches n'entrent jamais
+        dans le dépôt, même si un dépôt récupéré retire ou change le ``.gitignore`` de l'amorce (l'exclusion
+        locale n'est pas versionnée)."""
         info = root / ".git" / "info"
         info.mkdir(parents=True, exist_ok=True)
-        (info / "exclude").write_text(f"{HOME_DIRNAME}/\n", encoding="utf-8")
+        (info / "exclude").write_text(IGNORED, encoding="utf-8")
 
     async def commit(self, goal: int, message: str, paths: Sequence[str] = ()) -> str:
         if not self.exists(goal) or not await self._init(goal):
