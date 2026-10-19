@@ -342,8 +342,9 @@ class ProjectsState:
 #: v4 : un récit fait le point — il couvre tout ce qu'elle a mené à bout avant son départ, pas un seul objectif.
 #: v5 : une demande d'aide dite attend la réponse de sa personne (``asked_at``, ``asked_to``, ``answered_at``).
 #: v6 : une consigne reçue pendant un besoin y répond (``steered_at``) — elle ne l'attend plus, ne le redemande pas.
+#: v7 : un besoin qui reste après sa réponse (ou sa consigne) est une nouvelle demande — elle le redit, une fois.
 PROJECTS = Faculty("projects", state=ProjectsState, init=lambda p: ProjectsState(), params=ProjectsParams,
-                   state_version=6)
+                   state_version=7)
 PROJECTS.declare(*c.ALL)
 
 
@@ -1064,6 +1065,12 @@ def answered(o: Objective) -> bool:
     return o.answered_at > o.asked_at > 0
 
 
+def _settled(o: Objective, before: int) -> bool:
+    """Le besoin qu'elle a dit a eu sa réponse avant ``before`` : la personne a répondu, ou une consigne est venue.
+    Ce qui reste à demander ensuite (le même besoin, pas réglé, ou un autre) est une nouvelle demande."""
+    return (answered(o) and o.answered_at <= before) or o.asked_at < o.steered_at <= before
+
+
 #: Ce qui ne dit rien de l'exécution : elle n'a pas eu lieu, son crédit est rendu.
 REFUND = frozenset({"failed", "timeout", "superseded", "preempted", "cancelled", "interrupted"})
 #: …et parmi elles, une panne du modèle : elle a pu coûter des appels (le plafond horaire ne la rend pas), et
@@ -1131,7 +1138,8 @@ def _reported(s: ProjectsState, e, cx) -> ProjectsState:
         o = replace(o, silent=0, evidence=o.evidence + gained, note_ref=d.summary.ref or o.note_ref,
                     waiting_until=0)
         needed = d.need.ref if d.need is not None and d.need.ref else ""
-        if needed and not o.need_ref:  # un nouveau besoin : elle le dira
+        # un nouveau besoin, ou un besoin qui reste après la réponse que l'exécution avait sous les yeux : elle le dira
+        if needed and (not o.need_ref or (o.asked and _settled(o, began))):
             o = replace(o, need_ref=needed, asked=False, ask_attempts=0, steered_at=0)
         elif needed:  # le même besoin, redit à chaque exécution (sa référence change) : déjà dit, on ne relance pas
             o = replace(o, need_ref=needed)
