@@ -48,9 +48,13 @@ class OutboxFiles(
         }
     }
 
-    /** Où lire un fichier d'un message : encore en partance, ou déjà accusé. */
+    /**
+     * Où lire un fichier d'un message : encore en partance, ou déjà accusé. [file] est le nom de disque
+     * qu'[adopt] a choisi : il se cherche tel quel (le renettoyer le ferait manquer), sans chemin.
+     */
     fun locate(cid: String, file: String): File? {
-        val name = sanitize(file)
+        val name = file.takeUnless { it.isEmpty() || it == "." || it == ".." || '/' in it || '\\' in it }
+            ?: return null
         return listOf(File(File(outbox, safe(cid)), name), File(File(sent, safe(cid)), name)).firstOrNull { it.isFile }
     }
 
