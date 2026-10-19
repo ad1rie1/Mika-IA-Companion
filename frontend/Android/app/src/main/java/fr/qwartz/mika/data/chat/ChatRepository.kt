@@ -52,7 +52,9 @@ class ChatRepository(
         AttachmentPolicy.checkSend(message, staged)?.let { return SendResult.Rejected(it) }
         val chatMode = ChatSync.modeOf(mode)
         val cid = ChatSync.nextClientMsgId(clock.wallMs())
-        val outboxFiles = withContext(io) { files.adopt(cid, staged) }
+        // Nommés comme le serveur les nommera : la trame, la bulle et la ligne relue disent le même nom.
+        val named = staged.map { it.copy(name = ChatSync.fileName(it.name)) }
+        val outboxFiles = withContext(io) { files.adopt(cid, named) }
         val frameBytes = ChatFrameWriter.frameBytes(message, cid, outgoing(cid, outboxFiles), chatMode)
         // La même composition que le fil relu : la ligne du serveur reconnaîtra sa bulle.
         val display = ChatSync.withAttachments(message, outboxFiles.map { it.name })

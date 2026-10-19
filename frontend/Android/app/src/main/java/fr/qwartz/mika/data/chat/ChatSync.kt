@@ -303,13 +303,41 @@ object ChatSync {
         return history.subList(index + 1, history.size).none { it.sender == Sender.MIKA && !it.inner }
     }
 
-    /** Rattacher l'identifiant serveur à la bulle à laquelle une réponse répond. */
-    fun bindServerId(history: List<StoredMessage>, cid: String, userId: Long?): Boolean {
+    /**
+     * Rattacher l'identifiant serveur à la bulle à laquelle une réponse répond. Si un rattrapage a déjà
+     * posé ce message à part (une bulle qu'il n'a pas reconnue), cette ligne se fond dans la bulle : deux
+     * lignes au même identifiant feraient échouer l'index unique, et toute l'écriture de la réponse avec.
+     */
+    fun bindServerId(history: MutableList<StoredMessage>, cid: String, userId: Long?): Boolean {
         val msg = history.firstOrNull { it.cid == cid } ?: return false
-        if (userId != null) msg.id = userId
+        val twin = userId?.let { id -> history.firstOrNull { it !== msg && it.id == id } }
+        if (twin != null && twin.sender == Sender.USER) {
+            history.remove(twin)
+            msg.ts = twin.ts
+        }
+        // Un identifiant déjà tenu par une réponse d'elle n'est pas celui de la question : on ne le pose pas.
+        if (userId != null && (twin == null || twin.sender == Sender.USER)) msg.id = userId
         msg.status = MessageStatus.SENT
         msg.waiting = null
         return true
+    }
+
+    /** La longueur d'un nom de fichier gardé par le serveur (`protocol.py::FILENAME_MAX`), en points de code. */
+    private const val FILENAME_MAX = 80
+    private val FILENAME_CONTROL = Regex("""[\x00-\x1f\x7f]+""")
+    /** Les blancs que `str.split()` coupe en Python, au-delà de ceux de `\s` (U+00A0, U+202F…). */
+    private val FILENAME_BLANKS = Regex("""[\s\u0085   -     　]+""")
+
+    /**
+     * Un nom de fichier tel que le serveur le garde (`protocol.py::sanitize_filename`) : contrôles en espaces,
+     * blancs fusionnés, 80 points de code, `fichier` s'il est vide. Appliqué avant l'envoi, il rend la bulle
+     * identique à la ligne que l'historique relira — sans quoi elle n'est jamais adoptée. Le blanc qu'une
+     * coupure laisse au bout part aussi : le serveur le retirerait en relisant ce nom.
+     */
+    fun fileName(name: String): String {
+        val text = FILENAME_BLANKS.replace(FILENAME_CONTROL.replace(name, " "), " ").trim(' ').ifEmpty { "fichier" }
+        if (text.codePointCount(0, text.length) <= FILENAME_MAX) return text
+        return text.substring(0, text.offsetByCodePoints(0, FILENAME_MAX)).trimEnd(' ')
     }
 
     /** `texte [a.png, b.pdf]`, ou `[a.png]` sans légende : la même composition à l'envoi et à la relecture. */
@@ -412,7 +440,9 @@ object ChatSync {
             if (sender == Sender.MIKA) sawReply = true
             val ts = entry.ts?.let { Timestamps.normalize(it, nowMs) }
 
-            val mine = history.firstOrNull { it.id == null && it.sender == sender && matches(it, text, typed) }
+            // Une bulle en échec n'est adoptée qu'en dernier recours : « coucou » retapé est le nouvel envoi, pas l'ancien.
+            val unbound = history.filter { it.id == null && it.sender == sender && matches(it, text, typed) }
+            val mine = unbound.firstOrNull { it.status != MessageStatus.FAILED } ?: unbound.firstOrNull()
             if (mine != null) {
                 mine.id = id
                 mine.ts = ts ?: mine.ts
