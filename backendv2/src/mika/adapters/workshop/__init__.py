@@ -107,6 +107,8 @@ _BRANCH = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
 #: ce que git dit d'un enregistrement (``--shortstat``)
 _STAT = re.compile(r"(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?")
 REMOTE_TIMEOUT_S = 180.0
+#: le délai d'un git local de l'atelier ; un ``index.lock`` plus vieux, sans git en cours, est périmé
+GIT_TIMEOUT_S = 30.0
 #: l'environnement de tout git de l'atelier : aucune configuration globale ni système, une maison éphémère
 _GIT_ENV = {"HOME": "/tmp", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NOSYSTEM": "1", "GIT_TERMINAL_PROMPT": "0"}
 #: ce qu'un git qui parle au dépôt distant s'interdit : un assistant d'identification (il hériterait du jeton),
@@ -236,6 +238,8 @@ class BwrapWorkshop:
         self.prlimit = which("prlimit")
         #: la dernière taille mesurée de chaque atelier (octets)
         self._sizes: dict[int, int] = {}
+        #: les git de l'atelier en cours, par projet
+        self._gits: dict[int, int] = {}
 
     # ── le dossier ──
     def folder(self, goal: int) -> Path:
@@ -627,11 +631,30 @@ class BwrapWorkshop:
         return timed_out, overflow, (out, err)
 
     # ── git ──
-    async def _git(self, goal: int, *args: str, network: bool = False, timeout_s: float = 30,
+    async def _git(self, goal: int, *args: str, network: bool = False, timeout_s: float = GIT_TIMEOUT_S,
                    extra_env: Mapping[str, str] | None = None, secrets: Sequence[str] = ()) -> RunResult:
-        return await self.run(goal, ["git", *author_identity(self.author()), *_GIT, *args], timeout_s=timeout_s,
-                              check_allowed=False, network=network,
-                              extra_env={**_GIT_ENV, **dict(extra_env or {})}, secrets=secrets)
+        self._gits[goal] = self._gits.get(goal, 0) + 1
+        try:
+            return await self.run(goal, ["git", *author_identity(self.author()), *_GIT, *args], timeout_s=timeout_s,
+                                  check_allowed=False, network=network,
+                                  extra_env={**_GIT_ENV, **dict(extra_env or {})}, secrets=secrets)
+        finally:
+            self._gits[goal] -= 1
+
+    def _unlock(self, goal: int) -> None:
+        """Retire l'``index.lock`` qu'un git de l'atelier tué (délai, annulation) a laissé : sinon plus aucun
+        enregistrement ne passe, pour toujours. Il meurt par ``SIGKILL`` sans pouvoir le retirer — un ``SIGTERM``
+        n'y changerait rien, il frappe bubblewrap (``--new-session``), dont la mort emporte la cage par ``SIGKILL``.
+        Seulement s'il est périmé : aucun git de l'atelier en cours pour ce projet, et plus vieux que leur délai (ce
+        que lance le modèle ne peut pas l'avoir posé : ``.git`` est en lecture seule pour lui)."""
+        if self._gits.get(goal):
+            return
+        lock = self.folder(goal) / ".git" / "index.lock"
+        try:
+            if time.time() - lock.lstat().st_mtime > GIT_TIMEOUT_S:
+                lock.unlink()
+        except OSError:
+            pass
 
     async def _init(self, goal: int) -> bool:
         root = self._open(goal)
@@ -658,6 +681,7 @@ class BwrapWorkshop:
     async def commit(self, goal: int, message: str, paths: Sequence[str] = ()) -> str:
         if not self.exists(goal) or not await self._init(goal):
             return ""
+        self._unlock(goal)
         only = [f":(literal){p}" for p in paths if p]
         scope = ("--", *only) if only else ()
         state = await self._git(goal, "status", "--porcelain", *scope)
@@ -818,6 +842,7 @@ class BwrapWorkshop:
             return RunResult(("git", "pull", url, branch), None,
                              refused=f"le dépôt distant contient « {organs[0] if organs else '?'} », qui appartient à "
                                      "l'atelier lui-même : rien n'est récupéré")
+        self._unlock(goal)
         state = await self._git(goal, "status", "--porcelain")
         if not state.ok:
             return RunResult(("git", "pull", url, branch), None, refused="l'état de l'atelier est illisible")
