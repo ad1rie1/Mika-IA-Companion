@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -143,6 +144,26 @@ def parse(raw: Mapping[str, Any]) -> Relecture:
                 continue
         setattr(out, key, kept)
     return out
+
+
+def answer(response: Any) -> Mapping[str, Any] | None:
+    """L'outil s'il a été appelé, sinon un objet JSON reconnu dans le texte ; ``None`` pour une réponse coupée par
+    son plafond ou illisible, comme ``extraction.parse`` : la nuit est manquée, aucune lecture n'est effacée."""
+    if getattr(response, "stop", "") == "max_tokens" or getattr(response, "truncated_tool_call", False):
+        return None
+    for call in response.tool_calls:
+        if call.name == TOOL_NAME:
+            return dict(call.args)
+    match = re.search(r"\{.*\}", response.text or "", re.DOTALL)
+    if not match:
+        return None
+    try:
+        raw = json.loads(match.group(0))
+    except ValueError:
+        return None
+    if not isinstance(raw, dict) or not set(Relecture.model_fields).intersection(raw):
+        return None
+    return raw
 
 
 def tool(name: str) -> ToolDecl:
@@ -522,7 +543,13 @@ class Reread:
             if gone:
                 await ctx.emit(*gone)
             return
-        raw = next((dict(call.args) for call in response.tool_calls if call.name == TOOL_NAME), {})
+        raw = answer(response)
+        if raw is None:  # coupée ou illisible : ses lectures attendent la nuit suivante
+            log.warning("relecture de la nuit %s : réponse coupée ou illisible", night)
+            self.failed = night
+            if gone:
+                await ctx.emit(*gone)
+            return
         rel = parse(raw)
         drafts = gone + await drafts_of(rel, frame, state, store, vectors, p, lus, known, opinions, paires, night,
                                         call_id, world)
