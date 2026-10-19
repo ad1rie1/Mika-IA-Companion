@@ -184,7 +184,7 @@ NIGHT_TOLD_US = 6 * HOUR
 _KEPT = frozenset({"interrupted", "cancelled", "superseded", "preempted", "abstained"})
 
 BODY = Faculty("body", state=BodyState, init=lambda p: BodyState(), params=BodyParams, derive=derive,
-               state_version=3, retired_params=("pressure_drag_from", "pressure_drag"))
+               state_version=4, retired_params=("pressure_drag_from", "pressure_drag"))
 BODY.declare(*c.ALL, c.WAITED)
 
 
@@ -203,11 +203,26 @@ def rhythm(p: BodyParams | None) -> circadian.Profile:
     return circadian.DEFAULT.shifted(shift) if shift else circadian.DEFAULT
 
 
+def _roused_until(s: BodyState, p: BodyParams, tz: Any) -> int | None:
+    """Tirée du sommeil par un message pendant sa nuit : le matin qui clôt cette nuit-là (``None`` : aucune nuit
+    interrompue). La nuit est celle de son endormissement, pas la seule plage de l'horloge : endormie à 22 h 45 et
+    réveillée à 22 h 52, c'est bien sa nuit qu'on a interrompue."""
+    if not s.sleep.woken_by_message:
+        return None
+    last = s.nights[-1] if s.nights else None
+    start = last.start if last is not None and last.end == s.sleep.since else s.sleep.since
+    end = sl.night_end_from(start, tz, night(p), rhythm(p).start_of(circadian.Phase.EVENING))
+    return end if end is not None and s.sleep.since < end else None
+
+
 def night_waking(s: BodyState, now: int, p: BodyParams, tz: Any) -> bool:
     """Tirée du sommeil par un message au milieu de cette nuit-ci : elle va se
     rendormir. Un réveil d'une nuit passée (un message à 6 h 40, puis debout
     toute la journée) ne compte plus le soir venu."""
-    return not s.sleep.asleep and s.sleep.woken_by_message and sl.same_night(s.sleep.since, now, tz, night(p))
+    if s.sleep.asleep:
+        return False
+    end = _roused_until(s, p, tz)
+    return end is not None and now < end
 
 
 def in_her_night(s: BodyState, now: int, p: BodyParams, tz: Any) -> bool:
@@ -306,8 +321,8 @@ def _night_begins(s: BodyState, at: int, p: BodyParams, tz: Any) -> tuple[Night,
     fin de sa nuit (le temps passé éveillée ne compte pas comme dormi). Endormie bien après le moment où elle se
     serait endormie seule, elle a veillé tard."""
     last = s.nights[-1] if s.nights else None
-    if (last is not None and s.sleep.woken_by_message and last.end == s.sleep.since
-            and sl.same_night(s.sleep.since, at, tz, night(p))):
+    until = _roused_until(s, p, tz)
+    if last is not None and last.end == s.sleep.since and until is not None and at < until:
         return (*s.nights[:-1], replace(last, end=0, awake_us=last.awake_us + max(0, at - last.end)))
     late = -sl.hours_to_sleep(s.sleep, at, p.sleep, tz, p.shift_minutes) >= p.late_hours
     return (*s.nights, Night(start=at, late=late))[-NIGHTS_KEPT:]
@@ -478,7 +493,7 @@ def _reply_wait(s: BodyState, cx, message: int) -> int | None:
         return 0  # tirée du sommeil par quelqu'un d'autre : elle ne répond qu'à lui
     woke = s.sleep.since
     if s.sleep.woken_by_message and not waking:
-        woke = sl.night_end(woke, cx.tz, night(p)) or woke
+        woke = _roused_until(s, p, cx.tz) or woke
     return max(w.at, woke)
 
 

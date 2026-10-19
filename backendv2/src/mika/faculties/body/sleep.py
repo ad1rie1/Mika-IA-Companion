@@ -208,6 +208,17 @@ def night_end(t: int, tz: ZoneInfo, night: tuple[int, int] | None) -> int | None
     return next_local(t, night[1] // 60, night[1] % 60, tz)
 
 
+def night_end_from(start: int, tz: ZoneInfo, night: tuple[int, int] | None, evening: int | None = None) -> int | None:
+    """Le matin qui clôt la nuit d'un sommeil commencé à ``start`` : celle qui le contient — ou, endormie dès le
+    soir (après ``evening``, en minutes locales), un peu avant le début de sa nuit à l'horloge, celle qui commence
+    ce soir-là. ``None`` : un sommeil de jour (après une nuit blanche), qui n'est pas sa nuit."""
+    if night is None:
+        return None
+    if evening is not None and in_night(start, tz, (evening, night[0])):
+        return next_local(start, night[1] // 60, night[1] % 60, tz)
+    return night_end(start, tz, night)
+
+
 def next_transition(s: Sleep, t0: int, p: SleepParams, tz: ZoneInfo, shift: int = 0,
                     night: tuple[int, int] | None = None) -> int | None:
     """Le prochain instant ≥ ``t0`` où elle s'endort (ou se réveille).
