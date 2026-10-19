@@ -97,7 +97,8 @@ class SharesState:
     stamps: FrozenDict[str, tuple[int, ...]] = field(default_factory=FrozenDict)
 
 
-SHARES = Faculty("shares", state=SharesState, init=lambda p: SharesState(), params=SharesParams)
+# version 2 : un message emporte aussi un fichier préparé pour une autre adresse de la même personne
+SHARES = Faculty("shares", state=SharesState, init=lambda p: SharesState(), params=SharesParams, state_version=2)
 SHARES.declare(*c.ALL)
 
 
@@ -140,16 +141,19 @@ def _expired(s: SharesState, e: Any, cx: Any) -> SharesState:
 
 @SHARES.reducer(rt.UTTERANCE)
 def _carried(s: SharesState, e: Any, cx: Any) -> SharesState:
-    """Le message qui les emporte : ses fichiers sont partis (le premier message qui les porte fait foi)."""
+    """Le message qui les emporte : ses fichiers sont partis (le premier message qui les porte fait foi). Un fichier
+    peut avoir été préparé pour une autre adresse de la même personne (un dessin montré là où elle parle) : les
+    identifiants sont uniques, on le cherche sous toutes les adresses (le téléchargement reste gardé par ``THREAD``)."""
     d = e.data
     if not d.attachments or not d.target or not d.visible:
         return s
-    kept = s.sent.get(d.target, ())
     wanted = set(d.attachments)
-    if not any(v.file in wanted and not v.message for v in kept):
-        return s
-    marked = tuple(replace(v, message=e.seq) if v.file in wanted and not v.message else v for v in kept)
-    return replace(s, sent=s.sent.set(d.target, marked))
+    sent = s.sent
+    for target, kept in s.sent.items():
+        if any(v.file in wanted and not v.message for v in kept):
+            sent = sent.set(target, tuple(replace(v, message=e.seq) if v.file in wanted and not v.message else v
+                                          for v in kept))
+    return s if sent is s.sent else replace(s, sent=sent)
 
 
 @SHARES.fact(c.SENT_TODAY)
@@ -243,8 +247,9 @@ class SharedFiles:
                 sql.execute(update(t).where(t.c.id.in_(list(d.files)), t.c.expired_at.is_(None))
                             .values(expired_at=e.at, reason=d.reason))
             elif name == rt.UTTERANCE.name and d.attachments and d.target and d.visible:
-                sql.execute(update(t).where(t.c.id.in_(list(d.attachments)), t.c.person == d.target,
-                                            t.c.message.is_(None)).values(message=e.seq))
+                # par son identifiant seul : il a pu être préparé pour une autre adresse de la même personne
+                sql.execute(update(t).where(t.c.id.in_(list(d.attachments)), t.c.message.is_(None))
+                            .values(message=e.seq))
 
     def forget(self, sql: Sql, subject: str, sfx: str) -> None:
         t = table(sfx)
@@ -252,8 +257,9 @@ class SharedFiles:
 
 
 _PRODUCED_NAMES = frozenset(t.name for t in PRODUCED)
-# version 2 : les fichiers produits ailleurs (les dessins) y entrent aussi
-SHARES.projector(c.TABLE, version=2, tier=Tier.T0, types=[c.SHARED, *PRODUCED, c.EXPIRED, rt.UTTERANCE])(SharedFiles)
+# version 2 : les fichiers produits ailleurs (les dessins) y entrent aussi ; version 3 : un message emporte aussi un
+# fichier préparé pour une autre adresse de la même personne
+SHARES.projector(c.TABLE, version=3, tier=Tier.T0, types=[c.SHARED, *PRODUCED, c.EXPIRED, rt.UTTERANCE])(SharedFiles)
 
 
 @dataclass(frozen=True, slots=True)
