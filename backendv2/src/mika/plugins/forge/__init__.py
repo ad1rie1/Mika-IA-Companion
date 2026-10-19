@@ -74,7 +74,7 @@ from mika.plugins.forge.views import (
 from mika.ports.forge import AppInfo, ForgeRefused, SignalRules, args_schema, check_args, said_args
 from mika.vocab.episodes import CONVERSATIONAL, PROJECT_KINDS, WORKING, Kind, project_of, task_of, task_target
 from mika.vocab.phrasebook import phrase
-from mika.vocab.privacy import hearable
+from mika.vocab.privacy import Sensitivity, hearable
 
 BUNDLE, APPS_BUNDLE = "forge", "forge_apps"
 
@@ -1034,17 +1034,31 @@ async def forge_signals_done(args: SignalsDoneArgs, ctx: Any) -> Any:
 @FORGE.enricher("apps", episodes=[*CONVERSATIONAL, *WORKING], deadline_ms=3000)
 async def _contexts(s: ForgeState, frame: Frame, ports: Mapping[str, Any]) -> dict[str, Any] | None:
     """La ligne de chacune de ses apps, appelées ensemble (une app lente ne fait plus perdre les autres), chacune
-    au niveau de ce qu'elle concerne (son projet, ADR 0104)."""
+    au niveau de ce qu'elle concerne (son projet, ADR 0104). Une app sans projet, ou qui lit ses secrets, parle de
+    la vie de qui s'occupe d'elle (son agenda, sa banque) : au moins le personnel — et une app que l'interlocuteur
+    ne peut pas entendre n'est même pas appelée."""
     port = ports.get("forge")
     live = [(k, a) for k, a in sorted(s.apps.items()) if a.enabled and not a.broken and a.context][:4]
     if port is None or not live:
         return None
+    ep, aud = frame.episode, frame.audience
+    person = (frame.get(identity_c.PERSON(ep.target)) or ep.target) if ep is not None and ep.target else None
+    heard: list[tuple[str, App, int]] = []
+    for name, app in live:
+        about, level = told_to(frame, app)
+        if not concerns(frame, app)[0] or (trusted(app) and has_secrets(ports, port.info(name))):
+            level = max(level, int(Sensitivity.PERSONAL))
+        if aud is None or not hearable(about, level, person, aud.level, aud.witness_level, aud.private_ok):
+            continue
+        heard.append((name, app, level if any(a != person for a in about) else 0))
+    if not heard:
+        return None
     p = params(frame.env.params_of("forge", frame.root))
     got = await asyncio.gather(*(port.call(name, "context", timeout_s=p.context_timeout_s, secrets=trusted(app))
-                                 for name, app in live))
-    lines = {app.title: str(r.value)[: p.context_chars] for (_, app), r in zip(live, got, strict=True)
+                                 for name, app, _ in heard))
+    lines = {app.title: str(r.value)[: p.context_chars] for (_, app, _), r in zip(heard, got, strict=True)
              if r.ok and r.value}
-    level = max((concerns(frame, app)[1] for _, app in live if app.title in lines), default=0)
+    level = max((lvl for _, app, lvl in heard if app.title in lines), default=0)
     return {"lines": lines, "level": level} if lines else None
 
 
