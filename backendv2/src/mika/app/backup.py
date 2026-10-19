@@ -549,11 +549,20 @@ def restore(archive: Path, data: Path, *, force: bool = False, now: datetime | N
                 raise BackupError(f"{exc} : rien n'est touché") from exc
             (stage / MANIFEST).unlink()
             aside = data.parent / f"{data.name}.avant-restauration-{stamp}"
-            kept = stage_root / "avant-bases"
+            # hors du dossier de travail : la copie survit à son nettoyage si un rechargement échoue en route
+            kept = data.parent / f".{data.name}.avant-bases-{stamp}"
             if server:
                 if occupied:  # les bases en service, copiées avant d'être remplacées
-                    _copy_live(*_server(), kept)
-                _reload_bases(*_server(), manifest, stage_root)
+                    try:
+                        _copy_live(*_server(), kept)
+                    except (backup_server.ServerError, SQLAlchemyError, OSError) as exc:
+                        shutil.rmtree(kept, ignore_errors=True)  # les bases en service sont intactes
+                        raise BackupError(f"copie des bases en service impossible ({exc}) : rien n'est touché") \
+                            from exc
+                try:
+                    _reload_bases(*_server(), manifest, stage_root)
+                except (backup_server.ServerError, SQLAlchemyError, OSError) as exc:
+                    raise BackupError(_reload_failed(exc, kept, aside)) from exc
             lock.replace(stage / datadir.LOCK_NAME)  # le verrou (son inode, tenu) suit le dossier restauré
             if any(data.iterdir()):
                 data.rename(aside)
@@ -596,6 +605,20 @@ def _copy_live(url: str, prefix: str, into: Path) -> None:
     for key, target in _server_bases(url, prefix).items():
         if backup_server.exists(target):
             backup_server.dump(target, into / f"{key}.sql")
+
+
+def _reload_failed(exc: BaseException, kept: Path, aside: Path) -> str:
+    """Ce que dit un rechargement interrompu en route ; la copie des bases d'avant passe dans le dossier mis de côté
+    (``aside/bases``), ou reste où elle a été écrite si ce déplacement échoue."""
+    said = f"rechargement des bases interrompu ({exc}) : les bases du serveur sont dans un état mêlé, le dossier " \
+           f"de données n'est pas touché"
+    if not kept.exists():
+        return f"{said} ; aucune base n'était en service avant"
+    with contextlib.suppress(OSError):
+        aside.mkdir(exist_ok=True)
+        kept.rename(aside / BASES)
+        kept = aside / BASES
+    return f"{said} ; les bases d'avant la restauration sont copiées dans {kept}"
 
 
 def _reload_bases(url: str, prefix: str, manifest: dict[str, Any], root: Path) -> None:
