@@ -312,6 +312,24 @@ object ChatSync {
         return true
     }
 
+    /** La longueur d'un nom de fichier gardé par le serveur (`protocol.py::FILENAME_MAX`), en points de code. */
+    private const val FILENAME_MAX = 80
+    private val FILENAME_CONTROL = Regex("""[\x00-\x1f\x7f]+""")
+    /** Les blancs que `str.split()` coupe en Python, au-delà de ceux de `\s` (U+00A0, U+202F…). */
+    private val FILENAME_BLANKS = Regex("""[\s\u0085   -     　]+""")
+
+    /**
+     * Un nom de fichier tel que le serveur le garde (`protocol.py::sanitize_filename`) : contrôles en espaces,
+     * blancs fusionnés, 80 points de code, `fichier` s'il est vide. Appliqué avant l'envoi, il rend la bulle
+     * identique à la ligne que l'historique relira — sans quoi elle n'est jamais adoptée. Le blanc qu'une
+     * coupure laisse au bout part aussi : le serveur le retirerait en relisant ce nom.
+     */
+    fun fileName(name: String): String {
+        val text = FILENAME_BLANKS.replace(FILENAME_CONTROL.replace(name, " "), " ").trim(' ').ifEmpty { "fichier" }
+        if (text.codePointCount(0, text.length) <= FILENAME_MAX) return text
+        return text.substring(0, text.offsetByCodePoints(0, FILENAME_MAX)).trimEnd(' ')
+    }
+
     /** `texte [a.png, b.pdf]`, ou `[a.png]` sans légende : la même composition à l'envoi et à la relecture. */
     fun withAttachments(text: String, names: List<String>): String {
         val label = names.filter { it.isNotEmpty() }.joinToString(", ")
