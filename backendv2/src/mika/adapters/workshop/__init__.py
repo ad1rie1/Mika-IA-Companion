@@ -410,13 +410,18 @@ class BwrapWorkshop:
             raise FileNotFoundError(f"{path} n'existe pas dans l'atelier")
         await self._room(goal)
         await self._init(goal)
-        text = target.read_text(encoding="utf-8", errors="replace")
+        # En octets, décodés strictement : un octet non UTF-8 deviendrait « � » sur le disque, et le mode
+        # texte changerait les fins de ligne de tout le fichier. Hors du fragment, rien ne bouge.
+        try:
+            text = target.read_bytes().decode("utf-8")
+        except UnicodeDecodeError:
+            raise ValueError(f"{path} n'est pas un texte UTF-8 — ws_edit l'abîmerait, il reste tel quel") from None
         n = text.count(old)
         if n == 0:
             raise ValueError(f"fragment introuvable dans {path} — relis le fichier avant de l'éditer")
         if n > 1:
             raise ValueError(f"fragment présent {n} fois dans {path} — donne un extrait plus large")
-        target.write_text(text.replace(old, new, 1), encoding="utf-8")
+        target.write_bytes(text.replace(old, new, 1).encode("utf-8"))
         self._grew(goal, len(new.encode()) - len(old.encode()))
         return self._rel(goal, target)
 
