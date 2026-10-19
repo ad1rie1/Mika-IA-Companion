@@ -119,6 +119,17 @@ def label(turn: ChatTurn) -> str:
     return (f"[{turn.mark}] " if turn.mark else "") + (f"{turn.speaker} : " if turn.speaker else "")
 
 
+#: le repère de temps en tête d'un tour rendu (``label``), ou seul avant un des siens (``ChatPrompt.chat_messages``)
+_LABEL_MARK = re.compile(r"^\[([^\]\n]*)\][ \t]*")
+
+
+def unlabel(content: str) -> tuple[str, str]:
+    """Le repère de temps d'un tour rendu et ce qui le suit — l'inverse de ``label`` pour le repère ; ``("",
+    content)`` sans repère. Pour qui relit le fil hors du prompt."""
+    m = _LABEL_MARK.match(content or "")
+    return (m.group(1).strip(), content[m.end():]) if m else ("", content or "")
+
+
 @dataclass(frozen=True, slots=True)
 class Fragment:
     """Une information indivisible et ses sources : on la montre entière, ou pas du tout."""

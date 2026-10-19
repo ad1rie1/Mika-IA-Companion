@@ -79,3 +79,16 @@ Dans le moteur, face à un Adrien joué par Opus :
 - Le banc de conversation doit jouer Adrien avec Opus (`--adrien opus`) : Haiku raconte trop mal pour juger sa voix.
 - À suivre : des émojis parfois un peu fréquents, et quelques relances par question quand on lui raconte une
   histoire.
+
+## Complément du 2026-10-19 : le fil de l'autrice garde ses repères de temps
+
+Le fil que lit l'autrice passait chaque message par le nettoyage des balises, qui retire tout ce qui est entre
+crochets : « [le lendemain, mardi 14h13] », « [jeudi 19h06 — c'est toi qui lui as écrit] », un message resté sans
+réponse, et le repère du message en cours. Trois jours de fil se lisaient comme une seule conversation : au
+« coucou » du matin, elle pouvait reprendre la blague de la veille.
+
+- Chaque message du fil garde son repère, sur sa ligne avant lui (`expression.polish.mark`), comme la tête le lit. Le
+  message en cours aussi (pour ce qu'elle lance d'elle-même : le moment présent par rapport au dernier message).
+- La consigne dit ce que sont ces crochets : le moment du message qui suit, vu par elle (« tu », c'est elle).
+- Le repère se relit par `kernel.prompt.unlabel`, l'inverse de `label`, à côté du format qu'il défait.
+- Les 16 messages comptent de vrais messages : le repère seul qui précède un des siens n'en prend plus la place.
