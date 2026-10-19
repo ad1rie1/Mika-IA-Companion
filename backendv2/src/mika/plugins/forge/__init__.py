@@ -36,6 +36,8 @@ import difflib
 import hashlib
 import json
 import re
+import subprocess
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Annotated, Any, Literal
@@ -1410,28 +1412,52 @@ def _spans_in(text: str, edits: Sequence[Edit]) -> list[tuple[int, int]]:
     return spans
 
 
-def search(sources: Mapping[str, tuple[str, str]], args: SearchArgs) -> tuple[list[str], int]:
-    """Les lignes de ses apps où se trouve ``pattern`` : « app/fichier:ligne: texte » (et ``context`` lignes
-    autour) ; rend (lignes, nombre de correspondances)."""
-    flags = re.IGNORECASE if args.ignore_case else 0
-    rx = re.compile(args.pattern if args.regex else re.escape(args.pattern), flags)
+#: ce que fait le processus de recherche : rien que la bibliothèque standard, pour démarrer vite ; il reçoit le motif
+#: et les lignes de chaque fichier, et rend les numéros des lignes trouvées
+_MATCH = ("import json, re, sys\n"
+          "q = json.load(sys.stdin)\n"
+          "rx = re.compile(q['pattern'], q['flags'])\n"
+          "json.dump([[i for i, line in enumerate(lines) if rx.search(line[:2000])] for lines in q['files']],"
+          " sys.stdout)\n")
+
+
+def _searched(sources: Mapping[str, tuple[str, str]], args: SearchArgs) -> list[tuple[str, str, list[str]]]:
+    """Les fichiers où chercher, dans l'ordre : (app, nom court, lignes)."""
+    return [(app, short, text.splitlines()) for app, (manifest, code) in sorted(sources.items())
+            for short, text in (("manifest", manifest), ("code", code)) if args.file is None or args.file == short]
+
+
+def _matches(files: Sequence[list[str]], args: SearchArgs) -> list[list[int]] | None:
+    """Les lignes de chaque fichier où se trouve ``pattern`` (``None`` : trop lent). Le moteur ``re`` garde le GIL
+    tant qu'il cherche : une expression qui s'emballe dans un fil figerait tout le serveur. La recherche se fait
+    donc dans un processus à part, tué au bout de ``SEARCH_S``."""
+    query = {"pattern": args.pattern if args.regex else re.escape(args.pattern),
+             "flags": int(re.IGNORECASE) if args.ignore_case else 0, "files": list(files)}
+    try:
+        done = subprocess.run([sys.executable, "-I", "-S", "-c", _MATCH], input=json.dumps(query),
+                              capture_output=True, text=True, timeout=SEARCH_S, check=False)
+    except subprocess.TimeoutExpired:
+        return None
+    return json.loads(done.stdout) if done.returncode == 0 else None
+
+
+def search(sources: Mapping[str, tuple[str, str]], args: SearchArgs,
+           hits: Sequence[Sequence[int]]) -> tuple[list[str], int]:
+    """Les lignes de ses apps où se trouve ``pattern`` (``hits``, rendu par ``_matches`` pour chaque fichier de
+    ``_searched``) : « app/fichier:ligne: texte » (et ``context`` lignes autour) ; rend (lignes, nombre de
+    correspondances)."""
     out: list[str] = []
     found = 0
-    for app, (manifest, code) in sorted(sources.items()):
-        for short, text in (("manifest", manifest), ("code", code)):
-            if args.file is not None and args.file != short:
-                continue
-            lines = text.splitlines()
-            hits = [i for i, line in enumerate(lines) if rx.search(line[:2000])]
-            found += len(hits)
-            shown: set[int] = set()
-            for i in hits:
-                for j in range(max(0, i - args.context), min(len(lines), i + args.context + 1)):
-                    if j in shown or len(out) >= SEARCH_MAX:
-                        continue
-                    shown.add(j)
-                    mark = ":" if j == i else "-"
-                    out.append(f"{app}/{FILES[short]}{mark}{j + 1}{mark} {lines[j][:300]}")
+    for (app, short, lines), found_in in zip(_searched(sources, args), hits, strict=True):
+        found += len(found_in)
+        shown: set[int] = set()
+        for i in found_in:
+            for j in range(max(0, i - args.context), min(len(lines), i + args.context + 1)):
+                if j in shown or len(out) >= SEARCH_MAX:
+                    continue
+                shown.add(j)
+                mark = ":" if j == i else "-"
+                out.append(f"{app}/{FILES[short]}{mark}{j + 1}{mark} {lines[j][:300]}")
     return out, found
 
 
@@ -1457,11 +1483,12 @@ async def forge_search(args: SearchArgs, ctx: Any) -> Any:
             re.compile(args.pattern)
         except re.error as exc:
             return ToolResult(ok=False, content=phrase("forge.tools.search.bad_pattern", error=exc))
-    try:  # une expression qui s'emballe ne bloque pas sa vie : elle a quelques secondes
-        lines, found = await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(
-            None, search, sources, args), SEARCH_S)
-    except TimeoutError:
+    # une expression qui s'emballe ne bloque pas sa vie : elle a quelques secondes, dans un processus à part
+    hits = await asyncio.get_running_loop().run_in_executor(
+        None, _matches, [lines for _, _, lines in _searched(sources, args)], args)
+    if hits is None:
         return ToolResult(ok=False, content=phrase("forge.tools.search.slow"))
+    lines, found = search(sources, args, hits)
     if not found:
         return _nothing(phrase("forge.tools.search.none"))
     more = phrase("forge.tools.search.more", count=found) if found > len(lines) else ""
