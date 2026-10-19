@@ -129,6 +129,12 @@ class _Worker:
     proc: subprocess.Popen[bytes]
     version: int
     buffer: bytes = b""
+    #: tuée parce qu'une nouvelle version la remplace (ou qu'on l'efface) : l'appel en cours ne se dit pas « mort »
+    replaced: bool = False
+
+
+#: la cause d'un appel interrompu par une nouvelle version (ou l'effacement) : rien à voir avec la mémoire ni le CPU
+_REPLACED = "appel interrompu : l'app vient d'être remplacée par une nouvelle version (ou effacée)"
 
 
 @dataclass(slots=True)
@@ -551,7 +557,8 @@ class ForgeHost:
         (d / "manifest.yaml").write_text(manifest, encoding="utf-8")
         (d / "main.py").write_text(code, encoding="utf-8")
         (d / "version.json").write_text(json.dumps({"version": version}))
-        self._stop(app)  # la version suivante repart d'un processus neuf
+        # la version suivante repart d'un processus neuf ; l'appel en cours, interrompu, se dit remplacé
+        await asyncio.get_running_loop().run_in_executor(None, self._halt, app)
         self._forget(app)
         # une borne dans son journal : ce qui précède vient d'une version d'avant (sonde du 2026-10-13 — une erreur
         # d'une ancienne version, relue dans le journal, passait pour une erreur de l'actuelle)
@@ -574,11 +581,13 @@ class ForgeHost:
         d = self._dir(app)
         if not d.exists():
             raise ForgeRefused("cette app n'existe pas")
-        self._stop(app)
         trash = self.root / "_corbeille"
         trash.mkdir(exist_ok=True)
         target = trash / f"{app}-{self._version(app)}-{int(time.time())}"
-        shutil.move(str(d), str(target))
+        # sous son verrou : l'appel en cours rend la main avant que son code ne parte (un service de l'hôte rappelé
+        # après la suppression de sa base la recréerait, orpheline)
+        await asyncio.get_running_loop().run_in_executor(
+            None, self._halt, app, functools.partial(shutil.move, str(d), str(target)))
         self._forget(app)
         try:  # sa base : exportée à côté de son code, puis supprimée (recréée, l'app repartira de rien)
             await asyncio.get_running_loop().run_in_executor(None, self.bases.drop, app, target)
@@ -628,6 +637,26 @@ class ForgeHost:
         with self._lock(app):
             self._stop(app)
         self._forget(app)
+
+    def _halt(self, app: str, then: Callable[[], Any] | None = None) -> None:
+        """Arrête son processus sous son verrou, sans attendre la fin de l'appel en cours : son processus est tué (le
+        signal seulement — le fil qui le lit le voit finir, se dit remplacé et ferme lui-même ses tubes), puis
+        l'appel rend la main. ``then`` se fait encore sous le verrou."""
+        lock = self._lock(app)
+        while not lock.acquire(timeout=0.2):
+            w = self._workers.get(app)
+            if w is not None and not w.replaced and w.proc.returncode is None:
+                w.replaced = True
+                try:
+                    os.killpg(w.proc.pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError):
+                    pass
+        try:
+            self._stop(app)
+            if then is not None:
+                then()
+        finally:
+            lock.release()
 
     def _forget(self, app: str) -> None:
         self._infos.pop(app, None)
@@ -732,15 +761,21 @@ class ForgeHost:
     def _read(self, w: _Worker, deadline: float) -> dict[str, Any] | str | None:
         """Une ligne JSON avant l'échéance ; ``None`` au délai, un texte si le processus meurt."""
         assert w.proc.stdout is not None
-        fd = w.proc.stdout.fileno()
+        try:
+            fd = w.proc.stdout.fileno()
+        except ValueError:  # son tube déjà fermé : il a été arrêté
+            return "le processus de l'app a été arrêté"
         while b"\n" not in w.buffer:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return None
-            ready, _, _ = select.select([fd], [], [], remaining)
-            if not ready:
-                return None
-            chunk = os.read(fd, 65536)
+            try:
+                ready, _, _ = select.select([fd], [], [], remaining)
+                if not ready:
+                    return None
+                chunk = os.read(fd, 65536)
+            except (OSError, ValueError):  # son tube fermé pendant la lecture : il a été arrêté
+                return "le processus de l'app a été arrêté"
             if not chunk:
                 return "le processus de l'app est mort (mémoire, CPU, ou sortie)"
             w.buffer += chunk
@@ -831,19 +866,20 @@ class ForgeHost:
         deadline = call.deadline = time.monotonic() + timeout_s
         if not self._send(w, {"call": method, "args": args}):
             self._stop(app)
-            return done(False, error="le processus de l'app ne répond plus", killed=True)
+            return done(False, error=_REPLACED if w.replaced else "le processus de l'app ne répond plus", killed=True)
         while True:
             msg = self._read(w, deadline)
             if msg is None or isinstance(msg, str):
                 self._stop(app)
-                reason = msg or f"délai de {timeout_s:g} s dépassé : tuée"
+                reason = _REPLACED if w.replaced else msg or f"délai de {timeout_s:g} s dépassé : tuée"
                 self._log(app, f"{method} : {reason}")
                 return done(False, error=reason, killed=True)
             if "host" in msg:
                 reply = self._serve(app, info, str(msg.get("host")), msg.get("params") or {}, call)
                 if not self._send(w, reply):
                     self._stop(app)
-                    return done(False, error="le processus de l'app ne répond plus", killed=True)
+                    return done(False, error=_REPLACED if w.replaced else "le processus de l'app ne répond plus",
+                                killed=True)
                 continue
             if "error" in msg:
                 self._log(app, f"{method} : {msg['error']}")
