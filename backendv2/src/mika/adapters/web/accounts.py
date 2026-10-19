@@ -6,7 +6,8 @@ que tant qu'il n'en existe aucun ; il est opérateur.
 
 Vérifier un mot de passe coûte **un** scrypt, que le compte existe ou non (le
 leurre est calculé une fois) : la durée ne dit pas qui a un compte. ``verify``
-le fait hors de la boucle (un scrypt la figeait ~20 ms par essai).
+le fait hors de la boucle (un scrypt la figeait ~20 ms par essai), comme le hachage
+d'un mot de passe neuf (``create``, ``bootstrap``, ``update``).
 Une session révoquée (compte désactivé, mot de passe changé, droits retirés)
 prévient ceux qui écoutent (``on_revoke``) : ses WebSockets se ferment.
 
@@ -280,7 +281,7 @@ class Accounts:
         return acc, row.password
 
     async def create(self, username: str, password: str, *, operator: bool, full_name: str = "") -> Account:
-        hashed = hash_password(password)
+        hashed = await asyncio.to_thread(hash_password, password)
         now = int(time.time())
         name = " ".join(full_name.split())[:FULL_NAME_MAX]
 
@@ -296,7 +297,7 @@ class Accounts:
 
     async def bootstrap(self, username: str, password: str) -> Account | None:
         """Le premier compte, opérateur — ``None`` s'il en existe déjà un."""
-        hashed = hash_password(password)
+        hashed = await asyncio.to_thread(hash_password, password)
         now = int(time.time())
         created: list[bool] = []
 
@@ -367,7 +368,7 @@ class Accounts:
             problems = password_problems(password, target.username)
             if problems:
                 return " ".join(problems)
-        hashed = hash_password(password) if password is not None else None
+        hashed = await asyncio.to_thread(hash_password, password) if password is not None else None
         after_name = target.full_name if full_name is None else " ".join(full_name.split())[:FULL_NAME_MAX]
         now = int(time.time())
         dropped: list[int] = []
