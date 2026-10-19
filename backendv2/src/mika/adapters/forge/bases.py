@@ -431,13 +431,17 @@ class ForgeBases:
         if not WRITE.match(sql):
             raise SqlRefused("une écriture : INSERT, UPDATE, DELETE, REPLACE, CREATE ou DROP d'une table, d'un index "
                              "ou d'une vue, ALTER TABLE (pour lire : api.query)")
-        if not FREEING.match(sql):
+        freeing = FREEING.match(sql) is not None
+        if not freeing:
             self._room(app)
         sql = portable(sql, self.engine_name)
         writer, _ = self._engines_of(app)
         out = self._run(writer, sql, _params(params), deadline, rows=False)
-        with self._lock:
-            self._sizes.pop(app, None)
+        if freeing:
+            # la place libérée se voit tout de suite ; ce qui agrandit garde la mesure jusqu'à ce qu'elle vieillisse
+            # (sous MariaDB, une mesure relance ``ANALYZE TABLE`` sur toutes ses tables, sur son quota de requêtes)
+            with self._lock:
+                self._sizes.pop(app, None)
         return out
 
     def _room(self, app: str) -> None:
