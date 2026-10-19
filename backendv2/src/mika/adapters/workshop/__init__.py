@@ -818,8 +818,10 @@ class BwrapWorkshop:
                                   network=True, timeout_s=REMOTE_TIMEOUT_S, extra_env=env, secrets=secrets)
         if not fetched.ok:
             return replace(fetched, argv=("git", "fetch", url, branch))
-        listed = await self._git(goal, "ls-tree", "-r", "--name-only", "FETCH_HEAD")
-        organs = [n for n in listed.stdout.splitlines() if n.split("/", 1)[0] in ORGANS]
+        # les organes sont à la racine : le premier niveau suffit, et sa liste reste courte (une liste récursive
+        # était coupée au milieu sur un gros dépôt)
+        listed = await self._git(goal, "ls-tree", "--name-only", "FETCH_HEAD", clip=False)
+        organs = [n for n in listed.stdout.splitlines() if n in ORGANS]
         if not listed.ok or organs:
             return RunResult(("git", "pull", url, branch), None,
                              refused=f"le dépôt distant contient « {organs[0] if organs else '?'} », qui appartient à "
