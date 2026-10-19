@@ -84,7 +84,9 @@ log = logging.getLogger("mika.forge")
 
 WORKER = Path(__file__).with_name("worker.py")
 NAME = re.compile(r"^[a-z][a-z0-9_]{1,30}$")
-MAX_LINE = 1_000_000
+#: une ligne de l'app au plus (octets) : de quoi porter un corps de ``HTTP_BODY_MAX`` encodé en JSON, avec une marge ;
+#: au-delà, le processus est tué (``worker.MAX_LINE``, le même, refuse avant d'envoyer une demande plus grosse)
+MAX_LINE = 2_000_000
 MAX_RESULT = 64_000
 MAX_LOGS = 500
 #: ce qu'une requête de Mika (ses outils, la console) a pour s'exécuter

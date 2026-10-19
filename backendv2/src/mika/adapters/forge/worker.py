@@ -20,6 +20,10 @@ import types
 
 OUT = sys.stdout
 IN = sys.stdin
+#: une ligne envoyée à l'hôte au plus (octets, fin de ligne comprise) : le ``MAX_LINE`` de l'hôte, qui tue au-delà
+MAX_LINE = 2_000_000
+#: une ligne de journal au plus (caractères) : l'hôte n'en garde pas davantage
+LOG_MAX = 1000
 
 
 def send(obj):
@@ -28,7 +32,12 @@ def send(obj):
 
 
 def host(name, **params):
-    send({"host": name, "params": params})
+    line = json.dumps({"host": name, "params": params}, ensure_ascii=False, default=str) + "\n"
+    size = len(line.encode("utf-8", "replace"))
+    if size > MAX_LINE:  # refusée ici, comme un refus de l'hôte : l'app peut la rattraper, son processus survit
+        raise RuntimeError(f"{name} : demande trop grosse ({size // 1000} Ko ; au plus {MAX_LINE // 1000} Ko)")
+    OUT.write(line)
+    OUT.flush()
     line = IN.readline()
     if not line:
         raise SystemExit(0)
@@ -65,7 +74,7 @@ class Api:
         return host("config", key=key, default=default)
 
     def log(self, *parts):
-        host("log", message=" ".join(str(p) for p in parts))
+        host("log", message=" ".join(str(p) for p in parts)[:LOG_MAX])
 
     def emit(self, type, data=None):
         host("emit", type=str(type), data=data)
