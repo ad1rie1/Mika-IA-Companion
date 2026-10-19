@@ -4,28 +4,27 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.addCallback
+import androidx.activity.viewModels
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
 import fr.qwartz.mika.MainActivity
-import fr.qwartz.mika.data.files.ComposerDraft
-import fr.qwartz.mika.graph
 import fr.qwartz.mika.ui.DeepLinks
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
  * « Partager vers Mika ». Rien à montrer (thème translucide) : les fichiers partagés sont copiés tout
  * de suite dans la préparation — le droit de les lire ne survit pas à cette activité —, le texte et
  * les fichiers sont déposés dans la boîte aux lettres de la barre de saisie, puis la conversation
- * s'ouvre. Hors session, le dépôt attend la connexion.
+ * s'ouvre. Hors session, le dépôt attend la connexion. Le travail vit dans [ShareViewModel] : une
+ * recréation de l'activité (rotation, thème…) ne le perd pas.
  */
 class ShareActivity : ComponentActivity() {
+    private val share: ShareViewModel by viewModels()
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState != null) {
-            // Recréée au milieu d'une copie : la première instance a déjà tout pris en main.
-            finish()
-            return
-        }
         val input = ShareInput(
             action = intent.action,
             type = intent.type,
@@ -38,12 +37,13 @@ class ShareActivity : ComponentActivity() {
             finish()
             return
         }
-        val graph = graph
+        // Retour pendant la copie la jetterait sans rien dire (et le droit de lire les fichiers avec
+        // l'activité) : il attend qu'elle finisse, l'activité se ferme alors d'elle-même.
+        onBackPressedDispatcher.addCallback(this) {}
+        // Recréée au milieu d'une copie, l'instance retrouve celle du ViewModel au lieu d'en lancer une autre.
+        share.start(request)
         lifecycleScope.launch {
-            val staged = graph.stager.stage(request.streams.map(Uri::parse), already = emptyList())
-            graph.shareInbox.deposit(
-                ComposerDraft(request.text.orEmpty(), staged.files, request.notices + staged.notices),
-            )
+            share.deposited.first { it }
             startActivity(
                 Intent(this@ShareActivity, MainActivity::class.java)
                     .putExtra(DeepLinks.EXTRA_OPEN, DeepLinks.CHAT)
