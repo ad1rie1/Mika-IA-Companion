@@ -455,7 +455,7 @@ class Pages:
                 response.headers["Retry-After"] = "60"
                 return response
             else:
-                acc = self.ui.deps.accounts.authenticate(username, data.get("password", ""))
+                acc = await self.ui.deps.accounts.verify(username, data.get("password", ""))
                 if acc is None or not acc.operator:
                     self.ui.login_failed(ip, username)
                     error = "Identifiants invalides, ou compte non opérateur."
