@@ -481,11 +481,12 @@ def talk_subjects(s: GoalsState, frame: Frame, store: Any, p: Any) -> list[Talk]
         return []
     a, u = alias_of(transcript_c.thread_table(), "a"), alias_of(transcript_c.thread_table(), "u")
     # départagé par la réponse : deux paroles qui répondent au même message, la première dit ce qu'elle a ressenti
-    # en le lisant (sur les deux moteurs)
+    # en le lisant (sur les deux moteurs) ; un échange en mode pro est un travail, pas une graine (ADR 0116)
     rows = store.query_mind(
         select(u.c.id, u.c.at, u.c.person, u.c.room, u.c.text, a.c.emotion, a.c.emotion_intensity)
         .select_from(a.join(u, u.c.id == a.c.reply_to))
-        .where(a.c.role == "assistant", a.c.at >= frame.now - p.talk_lookback_us, u.c.role == "user")
+        .where(a.c.role == "assistant", a.c.at >= frame.now - p.talk_lookback_us, u.c.role == "user",
+               u.c.mode.is_(None), a.c.mode.is_(None))
         .order_by(u.c.id.desc(), a.c.id).limit(60))
     busy = _live_sources(s, frame.now)
     seen: set[int] = set()
