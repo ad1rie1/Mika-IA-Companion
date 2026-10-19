@@ -577,26 +577,28 @@ class Mind:
     async def rebuild(self, owners: Iterable[str], *, registry: Registry | None = None) -> dict[str, Any]:
         """Reconstruit ``owners`` depuis la genèse dans une racine fantôme, sans
         arrêter les ajouts, puis bascule. Avec ``registry``, le nouveau code
-        (nouvelle version de tranche) est adopté à la bascule."""
-        owners = set(owners)
+        (nouvelle version de tranche) est adopté à la bascule. Une faculté
+        volatile ne se rejoue pas, comme au démarrage : sa tranche vivante reste."""
         new_reg = registry or self.registry
+        skip = {n for n, f in new_reg.faculties.items() if f.volatile}
+        owners = set(owners) - skip
         closure = new_reg.read_closure(owners)
         h1 = self.head
         shadow = new_reg.initial_root()
         count = 0
         for stored in self.store.read(after=0, upto=h1):
-            shadow = self._apply(shadow, self._decode_with(new_reg, stored), only=closure, live=False,
+            shadow = self._apply(shadow, self._decode_with(new_reg, stored), only=closure, skip=skip, live=False,
                                  registry=new_reg)
             count += 1
             if count % 2000 == 0:
                 await asyncio.sleep(0)
         async with self._lock:
             for stored in self.store.read(after=h1, upto=self.head):
-                shadow = self._apply(shadow, self._decode_with(new_reg, stored), only=closure, live=False,
-                                     registry=new_reg)
+                shadow = self._apply(shadow, self._decode_with(new_reg, stored), only=closure, skip=skip,
+                                     live=False, registry=new_reg)
             live = self._root
             mismatches = []
-            for owner in sorted(closure - owners):
+            for owner in sorted(closure - owners - skip):
                 if digest(shadow.slices[owner]) != digest(live.slices[owner]):
                     mismatches.append(owner)
             slices, changed = live.slices, live.changed
