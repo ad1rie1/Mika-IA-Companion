@@ -440,7 +440,9 @@ object ChatSync {
             if (sender == Sender.MIKA) sawReply = true
             val ts = entry.ts?.let { Timestamps.normalize(it, nowMs) }
 
-            val mine = history.firstOrNull { it.id == null && it.sender == sender && matches(it, text, typed) }
+            // Une bulle en échec n'est adoptée qu'en dernier recours : « coucou » retapé est le nouvel envoi, pas l'ancien.
+            val unbound = history.filter { it.id == null && it.sender == sender && matches(it, text, typed) }
+            val mine = unbound.firstOrNull { it.status != MessageStatus.FAILED } ?: unbound.firstOrNull()
             if (mine != null) {
                 mine.id = id
                 mine.ts = ts ?: mine.ts
