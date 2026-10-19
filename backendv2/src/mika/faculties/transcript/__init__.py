@@ -862,10 +862,15 @@ class Compact:
             summary = state.summaries.get(person)
             if room and summary:
                 kept = secret_sources(store, room, summary[0])
-                if kept - set(state.withheld.get(person, ())):
-                    # un secret dit dans ce salon (déclaré après coup) était repris : on le replie de nouveau, tu
-                    await ctx.emit(c.SUMMARY_RESET.draft(person=person, reason="secret",
-                                                         dedupe_key=f"résumé-refait:{person}:{max(kept)}"))
+                fresh = sorted(kept - set(state.withheld.get(person, ())))
+                if fresh:
+                    # un secret dit dans ce salon (déclaré après coup) était repris : on le replie de nouveau, tu ;
+                    # la clé dit les secrets qui le refont (un second, plus ancien, le refait encore)
+                    commit = await ctx.emit(c.SUMMARY_RESET.draft(
+                        person=person, reason="secret",
+                        dedupe_key=f"résumé-refait:{person}:{','.join(map(str, fresh))}"))
+                    if commit.deduped:
+                        continue  # déjà refait : un salon coincé ne retient pas les autres
                     return
             since = summary[0] if summary else 0
             where = (t.c.room == room, t.c.id > since) if room else (
