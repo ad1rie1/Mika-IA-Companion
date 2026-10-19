@@ -945,7 +945,7 @@ async def self_journal(args: JournalArgs, ctx: Any) -> str:
     nothing = phrase("self.night.journal_tool.nothing", day=circadian.day_fr(date.fromisoformat(day)))
     if j is None or store is None or not j.text_ref:
         return nothing
-    reading = c.JournalReading(j.day, j.text_ref, j.about, j.dominant, j.shareable_ref)
+    reading = c.JournalReading(j.day, j.text_ref, j.about, j.dominant, j.shareable_ref, j.lineage, j.masked)
     text = _journal_text(frame, reading, store.content([r for r in (j.text_ref, j.shareable_ref) if r]))
     if not text:
         return nothing
