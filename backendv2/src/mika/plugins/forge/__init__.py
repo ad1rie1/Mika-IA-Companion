@@ -758,6 +758,8 @@ class Tick:
         app = ctx.state.apps[name]
         method = f"service_{service}" if service else "tick"
         r = await port.call(name, method, timeout_s=timeout_of(port.info(name), method, p), secrets=trusted(app))
+        if r.busy:
+            return  # un autre appel tenait l'app : le passage reste dû, il se refera
         drafts: list[Any] = [TICKED.draft(app=name, ok=r.ok, error=r.error[:300], duration_ms=r.duration_ms,
                                           service=service)]
         await ctx.emit(*drafts, *outcomes(name, app, [r], frame.now, p, concern=concerns(frame, app),
@@ -814,10 +816,15 @@ class Events:
                      "summary": texts.get(d.summary_ref, "")}
             if d.data:
                 event["data"] = d.data
-            results.append(await port.call(name, "on_event", event, timeout_s=limit, secrets=trusted(app)))
+            r = await port.call(name, "on_event", event, timeout_s=limit, secrets=trusted(app))
+            if r.busy:
+                break  # un autre appel tenait l'app : ce qui reste du lot attend dans sa boîte
+            results.append(r)
+        if not results:
+            return
         ok = all(r.ok for r in results)
         error = next((r.error for r in results if not r.ok), "")
-        await ctx.emit(HANDLED.draft(app=name, upto=batch[-1].seq, ok=ok, error=error[:300]),
+        await ctx.emit(HANDLED.draft(app=name, upto=batch[len(results) - 1].seq, ok=ok, error=error[:300]),
                        *outcomes(name, app, results, frame.now, p, concern=concerns(frame, app)))
 
 
