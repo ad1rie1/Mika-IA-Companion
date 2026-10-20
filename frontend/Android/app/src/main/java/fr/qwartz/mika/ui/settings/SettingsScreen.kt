@@ -4,10 +4,12 @@ import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +25,7 @@ import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -47,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -60,15 +64,18 @@ import fr.qwartz.mika.R
 import fr.qwartz.mika.core.AppGraph
 import fr.qwartz.mika.core.LocationMonitor
 import fr.qwartz.mika.data.auth.Session
+import fr.qwartz.mika.data.phone.PhoneStatus
 import fr.qwartz.mika.data.push.PushState
 import fr.qwartz.mika.data.settings.Settings as AppSettings
 import fr.qwartz.mika.data.settings.ThemeMode
+import fr.qwartz.mika.service.PhoneListenerService
 import kotlinx.coroutines.launch
+import java.text.DateFormat
 
 /**
  * Les paramètres : le compte, les notifications (et si elles arrivent app fermée, par Firebase), la position (« Lui
- * dire où je suis », ADR 0119), l'apparence, les données. Il n'y a plus de connexion en arrière-plan à régler
- * (ADR 0077) : l'app ne se connecte qu'ouverte.
+ * dire où je suis », ADR 0119), ses messages (« Lui montrer mes messages », ADR 0120), l'apparence, les données. Il n'y
+ * a plus de connexion en arrière-plan à régler (ADR 0077) : l'app ne se connecte qu'ouverte.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -84,10 +91,20 @@ fun SettingsScreen(graph: AppGraph, onBack: () -> Unit) {
     // La localisation peut être retirée (ou donnée) dans les réglages du téléphone : revue à chaque retour.
     var locationGranted by remember { mutableStateOf(LocationMonitor.permitted(context)) }
     var locationRefused by rememberSaveable { mutableStateOf(false) }
+    // L'accès aux notifications (ADR 0120) se donne et se retire dans les réglages d'Android : revu à chaque retour. Parti
+    // le donner depuis ici ([phoneWanted]), l'interrupteur s'allume au retour s'il a été accordé.
+    var phoneGranted by remember { mutableStateOf(PhoneListenerService.granted(context)) }
+    var phoneWanted by rememberSaveable { mutableStateOf(false) }
+    val phoneStatus by graph.phone.status.collectAsStateWithLifecycle()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         notifications = notificationsEnabled(context)
         locationGranted = LocationMonitor.permitted(context)
         if (locationGranted) locationRefused = false
+        phoneGranted = PhoneListenerService.granted(context)
+        if (phoneWanted && phoneGranted) {
+            phoneWanted = false
+            scope.launch { graph.settings.setPhoneShare(true) }
+        }
     }
     val askNotifications = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         notifications = notificationsEnabled(context)
@@ -197,6 +214,54 @@ fun SettingsScreen(graph: AppGraph, onBack: () -> Unit) {
                 )
             }
 
+            Section(stringResource(R.string.settings_phone))
+            SwitchRow(
+                title = stringResource(R.string.settings_phone_title),
+                // allumé mais l'accès retiré : rien ne part, et le dire
+                summary = stringResource(
+                    if (settings.phoneShare && !phoneGranted) R.string.settings_phone_revoked else R.string.settings_phone_summary,
+                ),
+                checked = settings.phoneShare && phoneGranted,
+                enabled = phoneGranted || settings.phoneShare,
+                onChange = { on -> scope.launch { graph.settings.setPhoneShare(on && phoneGranted) } },
+            )
+            if (!phoneGranted) {
+                InfoRow(
+                    title = stringResource(R.string.settings_phone_access_title),
+                    summary = stringResource(R.string.settings_phone_access),
+                    action = stringResource(R.string.settings_phone_access_open),
+                    onAction = {
+                        phoneWanted = true
+                        openListenerSettings(context)
+                    },
+                )
+            } else if (settings.phoneShare) {
+                CheckRow(
+                    title = stringResource(R.string.settings_phone_whatsapp),
+                    summary = stringResource(R.string.settings_phone_whatsapp_summary),
+                    checked = settings.phoneWhatsApp,
+                    onChange = { on -> scope.launch { graph.settings.setPhoneWhatsApp(on) } },
+                )
+                CheckRow(
+                    title = stringResource(R.string.settings_phone_messages),
+                    summary = stringResource(R.string.settings_phone_messages_summary),
+                    checked = settings.phoneMessages,
+                    onChange = { on -> scope.launch { graph.settings.setPhoneMessages(on) } },
+                )
+                CheckRow(
+                    title = stringResource(R.string.settings_phone_groups),
+                    summary = stringResource(R.string.settings_phone_groups_summary),
+                    checked = settings.phoneGroups,
+                    onChange = { on -> scope.launch { graph.settings.setPhoneGroups(on) } },
+                )
+                InfoRow(
+                    title = stringResource(R.string.settings_phone_state_title),
+                    summary = phoneStateText(phoneStatus),
+                    action = null,
+                    onAction = {},
+                )
+            }
+
             Section(stringResource(R.string.settings_appearance))
             Column(Modifier.selectableGroup()) {
                 ThemeRow(R.string.settings_theme_system, settings.theme == ThemeMode.SYSTEM) {
@@ -295,6 +360,38 @@ private fun SwitchRow(title: String, summary: String, checked: Boolean, onChange
 }
 
 @Composable
+private fun CheckRow(title: String, summary: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .toggleable(value = checked, role = Role.Checkbox, onValueChange = onChange)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Le rang entier est la case : la Checkbox elle-même ne capte rien.
+        Checkbox(checked = checked, onCheckedChange = null)
+        Column(Modifier.weight(1f).padding(start = 16.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(summary, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
+
+/** Où en sont ses messages (ADR 0120) : refusés par le serveur, serveur trop ancien, en attente, ou tout est parti. */
+@Composable
+private fun phoneStateText(status: PhoneStatus): String = when {
+    status.refused -> stringResource(R.string.settings_phone_state_refused)
+    status.outdated -> stringResource(R.string.settings_phone_state_outdated)
+    status.queued > 0 -> pluralStringResource(R.plurals.settings_phone_state_queued, status.queued, status.queued)
+    status.sentAt > 0 -> stringResource(
+        R.string.settings_phone_state_sent,
+        DateUtils.formatSameDayTime(status.sentAt, System.currentTimeMillis(), DateFormat.SHORT, DateFormat.SHORT).toString(),
+    )
+    else -> stringResource(R.string.settings_phone_state_empty)
+}
+
+@Composable
 private fun InfoRow(title: String, summary: String, action: String?, onAction: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Text(title, style = MaterialTheme.typography.bodyLarge)
@@ -345,6 +442,28 @@ private fun openAppSettings(context: Context) {
     val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
     try {
         context.startActivity(intent)
+    } catch (_: ActivityNotFoundException) {
+    }
+}
+
+/**
+ * L'accès aux notifications de cette app dans les réglages d'Android (ADR 0120) : sa page à elle quand Android la connaît
+ * (11 et plus), sinon la liste des lecteurs.
+ */
+private fun openListenerSettings(context: Context) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        val detail = Intent(Settings.ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS).putExtra(
+            Settings.EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+            ComponentName(context, PhoneListenerService::class.java).flattenToString(),
+        )
+        try {
+            context.startActivity(detail)
+            return
+        } catch (_: ActivityNotFoundException) {
+        }
+    }
+    try {
+        context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
     } catch (_: ActivityNotFoundException) {
     }
 }

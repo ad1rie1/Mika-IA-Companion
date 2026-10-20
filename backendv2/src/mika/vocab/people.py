@@ -120,6 +120,21 @@ def named_label(key: str) -> str:
     return key.removeprefix("name:").split(":", 1)[-1]
 
 
+#: un contact connu par le téléphone de quelqu'un (ADR 0120) : « phone:<empreinte>:<nom> ». Ce n'est pas une
+#: personne à qui elle parle ; pour les liens, c'est une personne que personne ne connaît (rien ne s'ouvre sur elle)
+PHONE_PREFIX = "phone:"
+#: les clés qui portent un nom en clair : leur oubli les remplace par un jeton opaque dans les enveloppes du journal
+NAME_BEARING = ("name:", PHONE_PREFIX)
+
+
+def phone_label(key: str) -> str:
+    """Le nom d'un contact du téléphone (« phone:3fa9c2d81b0e:Léa » → « Léa ») ; ``""`` pour une autre clé."""
+    if not key.startswith(PHONE_PREFIX):
+        return ""
+    parts = key.split(":", 2)
+    return parts[2] if len(parts) == 3 else ""
+
+
 #: les sources d'une lecture (ADR 0085) : un flux, un serveur d'outils, une page — des témoins, jamais des personnes
 READ_PREFIXES = ("rss:", "mcp:", "web:")
 

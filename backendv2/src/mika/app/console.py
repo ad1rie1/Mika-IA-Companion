@@ -86,7 +86,7 @@ PARAM_FAMILIES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Esprit", ("attention", "memory", "attachments", "transcript")),
     ("Relations", ("social", "others", "identity")),
     ("Action", ("agency", "goals", "projects", "shares", "imaging", "world")),
-    ("Canaux", ("email", "teams", "rss", "web", "camera", "forge", "wakeup")),
+    ("Canaux", ("email", "teams", "phone", "rss", "web", "camera", "forge", "wakeup")),
     ("Noyau", ("kernel",)),
 )
 FACULTY_LABELS: dict[str, str] = {
@@ -99,6 +99,7 @@ FACULTY_LABELS: dict[str, str] = {
     "world": "Son monde et son corps", "shares": "Fichiers envoyés", "attachments": "Pièces reçues",
     "imaging": "Dessins", "location": "Localisation",
     "mcp": "Outils extérieurs", "web": "Recherche web", "wakeup": "Réveils par API", "teams": "Teams",
+    "phone": "Messages du téléphone",
 }
 
 #: Les sections du prompt, nommées par ce qu'elles lui montrent (Pourquoi a-t-elle dit ça ?, Prompt).
@@ -147,6 +148,7 @@ SECTION_LABELS: dict[str, str] = {
     "teams_voice": "Comment elle écrit dans Teams (à ta place)",
     "teams_task": "Le message Teams auquel elle prépare une réponse (cité)",
     "teams_ask": "Ce qu'on lui demande d'y répondre (Teams)",
+    "phone_offers": "Ce que sont devenues ses réponses proposées sur le téléphone",
     "crossed": "Elle allait justement lui écrire (leurs messages se sont croisés)",
 }
 
@@ -214,6 +216,8 @@ PROCESS_LABELS: dict[str, str] = {
     "wakeup.expire": "Laisser tomber les réveils par API restés trop longtemps en attente",
     "teams.triage": "Trier les messages Teams reçus",
     "teams.expire": "Laisser tomber les réponses Teams restées sans accord ou sans envoi",
+    "phone.expire": "Laisser tomber les réponses proposées sur le téléphone restées sans geste",
+    "memory.relayed": "Retenir ce que le téléphone lui montre (les messages reçus)",
 }
 
 #: Les événements des facultés : ce qui s'est passé (ceux du noyau et du moteur sont nommés par la console).
@@ -306,6 +310,9 @@ EVENT_LABELS: dict[str, str] = {
     "teams.noticed": "Un message Teams remarqué", "teams.sent": "Une réponse Teams partie",
     "teams.draft_asked": "Une réponse Teams demandée", "teams.received": "Des messages Teams reçus de l'extension",
     "teams.settled": "Une réponse Teams posée, partie ou laissée",
+    "phone.received": "Un message montré par le téléphone", "phone.drafted": "Une réponse préparée pour le téléphone",
+    "phone.settled": "Une réponse proposée sur le téléphone : partie, laissée ou expirée",
+    "memory.relayed_read": "Des messages du téléphone relus",
 }
 
 #: Tout ce que la console nomme en français, d'un bloc.

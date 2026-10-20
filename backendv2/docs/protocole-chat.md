@@ -389,6 +389,50 @@ Avec un jeton `mobile` vivant, elle peut écrire la première quand tu n'es deva
 prise de nouvelles) : la parole part par Firebase si le téléphone est inscrit, et attend dans le fil jusqu'au
 prochain `sync`. Ses retenues valent toujours (pas de harcèlement, pas la nuit hors rappel).
 
+**Une réponse qu'elle propose** d'envoyer à ta place dans WhatsApp ou Messages (ADR 0120, § 5 bis) a son propre
+clair. Elle part à **chaque** téléphone inscrit du compte, l'application ouverte ou non :
+
+```json
+{"t": "phone_draft", "id": 1234, "app": "whatsapp", "thread": "<clé de conversation du téléphone>",
+ "to": "Léa", "text": "Oui, j'arrive vers 20 h !", "exp": 1791007200000, "ts": 1791000000000}
+```
+
+`id` : la proposition (à rendre dans `/api/phone/settled`) ; `thread` : la clé opaque que le téléphone a donnée à
+la conversation (il y retrouve l'action « Répondre » de la notification) ; `exp` : passé cet instant (ms), ne la
+montre plus ; `text` est coupé pour tenir dans Firebase. Montre-la comme une demande d'autorisation (« Envoyer »,
+« Écrire autre chose », « Ignorer ») : rien ne part sans ton geste.
+
+## 5 bis. Les messages du téléphone (ADR 0120)
+
+Si tu le permets (« Lui montrer mes messages », coupé par défaut), l'application lit les notifications de WhatsApp et
+de Messages et les pousse au serveur. Les deux routes passent sous le jeton de l'application (`mw_…`, client
+`mobile`, sans `Origin`) et sont réservées à une propriétaire : sans jeton valable, 401 ; un jeton d'écran, une
+`Origin`, un compte qui n'est pas propriétaire, ou le plugin coupé, 403 ; un corps illisible, 400 ; plus de 2 Mio,
+413 ; trop de requêtes (120 par minute), 429 avec `Retry-After`.
+
+- `POST /api/phone/inbox` :
+
+  ```json
+  {"messages": [{"id": "<hex, 8 à 64>", "app": "whatsapp", "thread": "<hex>", "title": "", "group": false,
+                 "sender": "<hex>", "name": "Léa", "text": "Tu viens samedi ?", "time": 1791000000000,
+                 "own": false}]}
+  ```
+
+  200 messages au plus. `app` : `whatsapp`, `whatsapp_business`, `messages` ou `samsung_messages`. `id`, `thread` et
+  `sender` sont des empreintes calculées par le téléphone (l'expéditeur est vide quand c'est toi qui as écrit,
+  `own`). `title` est le nom du groupe. `time` est en ms. Un message illisible (clé qui n'est pas en hex, appli
+  inconnue, texte vide, date invraisemblable) est écarté seul. Réponse : `{"ok": true, "accepted", "known",
+  "dropped"}`. Un même `id` renvoyé est « connu », jamais réécrit.
+- `POST /api/phone/settled` :
+
+  ```json
+  {"items": [{"id": 1234, "result": "sent", "reason": ""}]}
+  ```
+
+  `result` : `sent` (sa réponse est partie), `other` (tu as écrit autre chose), `copied` (l'action « Répondre »
+  n'existait plus : le texte a été copié), `ignored` ou `failed`. `reason` : un code (`no_action`,
+  `send_error`). Seul le premier sort compte. Réponse : `{"ok": true, "settled", "unknown"}`.
+
 ## 6. Les fichiers qu'elle envoie
 
 Chaque entrée d'`attachments` d'un message de Mika :

@@ -45,6 +45,8 @@ from mika.vocab.episodes import Kind
 from mika.vocab.people import is_identifiable
 
 PENDING_CAP = 500
+#: les messages reçus ailleurs (son téléphone, ADR 0120) qui attendent d'être relus, au plus
+RELAYED_CAP = 2000
 #: les initiatives en cours qui tiennent une promesse (corrélation → promesse), au plus
 KEEPING_KEPT = 16
 #: le sujet d'une initiative qui tient une promesse : ``promise:<id>``
@@ -223,6 +225,18 @@ class MemoryParams(BaseModel):
         label="Ce qu'elle a appris en lisant : fraîcheur (jours)", group="Ce qu'elle lit", lo=0.5, hi=14,
         help="Ce qu'elle a appris en lisant lui revient quand elle prend d'elle-même la parole ou travaille, pendant "
              "tant de jours — jamais redit à qui l'a déjà entendu.")] = 2.0
+    # ce qu'on lui montre de son téléphone (ADR 0120)
+    relayed_quiet_us: Annotated[int, Knob(
+        label="Messages du téléphone : relus après un calme de", group="Ce qu'on lui montre", lo=MINUTE, hi=DAY,
+        help="Les messages reçus sur un téléphone se relisent quand plus rien n'est arrivé depuis ce temps : une "
+             "conversation se relit posée, pas message par message.")] = 20 * MINUTE
+    relayed_wait_us: Annotated[int, Knob(
+        label="Messages du téléphone : attendus au plus", group="Ce qu'on lui montre", lo=10 * MINUTE, hi=3 * DAY,
+        help="Un message reçu attend au plus ce temps d'être relu, même si d'autres continuent d'arriver.")] = 2 * HOUR
+    relayed_per_run: Annotated[int, Knob(
+        label="Messages du téléphone : conversations par passage", group="Ce qu'on lui montre", lo=1, hi=20,
+        help="Au plus tant de conversations relues à chaque passage (un appel au modèle chacune) ; les autres "
+             "attendent le suivant.")] = 4
     # voir venir, constater (ADR 0086)
     resolve_days: Annotated[float, Knob(
         label="Constater : moments passés montrés (jours)", group="Voir venir, constater", lo=1, hi=60,
@@ -498,6 +512,11 @@ class MemoryState:
     consolidated_at: int = 0
     given_up: int = 0
     given_up_seq: int = 0
+    #: les messages reçus ailleurs qu'on lui montre (``Relayed``, ADR 0120) pas encore relus (``seq``), l'arrivée du
+    #: plus ancien d'entre eux et celle du dernier
+    relayed: tuple[int, ...] = ()
+    relayed_since: int = 0
+    relayed_at: int = 0
 
 
 #: v4 : un moment repris est un jugement enregistré (``moment_followed``), plus « elle l'avait sous les yeux » ;
@@ -512,7 +531,8 @@ class MemoryState:
 #: (``calibration``) (ADR 0086).
 #: v17 : l'oubli d'une personne emporte ce qu'elle lui avait promis et ce qui l'a touchée de grave ; un moment déplacé
 #: compte à moitié dans ses attentes (``OUTCOME_VALUE``), comme dans la surprise.
-MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=17)
+#: v18 : les messages reçus ailleurs qui attendent d'être relus (``relayed``, ADR 0120).
+MEMORY = Faculty("memory", state=MemoryState, init=lambda p: MemoryState(), params=MemoryParams, state_version=18)
 MEMORY.declare(*c.ALL)
 
 
@@ -524,6 +544,23 @@ def params(p: MemoryParams | None) -> MemoryParams:
 def _perceived(s: MemoryState, e, cx) -> MemoryState:
     unaddressed = s.unaddressed if e.data.addressed else (*s.unaddressed, e.seq)[-PENDING_CAP:]
     return replace(s, pending=(*s.pending, e.seq)[-PENDING_CAP:], unaddressed=unaddressed, last_message_at=e.at)
+
+
+@MEMORY.reducer(shapes=[c.Relayed])
+def _relayed(s: MemoryState, e, cx) -> MemoryState:
+    """Un message reçu ailleurs, que la personne lui montre (ADR 0120) : elle le relira avec sa conversation, une
+    fois posée (``memory.relayed``)."""
+    if e.seq in s.relayed:
+        return s
+    since = s.relayed_since if s.relayed else e.at
+    return replace(s, relayed=(*s.relayed, e.seq)[-RELAYED_CAP:], relayed_since=since, relayed_at=e.at)
+
+
+@MEMORY.reducer(c.RELAYED_READ)
+def _relayed_read(s: MemoryState, e, cx) -> MemoryState:
+    done = set(e.data.seqs)
+    left = tuple(q for q in s.relayed if q not in done)
+    return replace(s, relayed=left, relayed_since=s.relayed_since if left else 0)
 
 
 def _hard(s: MemoryState, person: str, at: int) -> MemoryState:

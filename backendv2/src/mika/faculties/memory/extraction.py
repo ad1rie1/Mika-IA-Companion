@@ -379,12 +379,15 @@ class Line:
 
 @dataclass(frozen=True, slots=True)
 class Conversation:
-    """Un fil privé (``room`` vide, une personne) ou un salon."""
+    """Un fil privé (``room`` vide, une personne) ou un salon — ou une conversation reçue ailleurs, qu'on lui montre
+    (ADR 0120) : ``relayed`` est alors la personne qui l'a reçue, et ``heading`` dit à la relecture ce que c'est."""
 
     key: str
     speakers: tuple[Speaker, ...]
     lines: tuple[Line, ...]
     room: str | None = None
+    relayed: str = ""
+    heading: str = ""
 
     @property
     def persons(self) -> tuple[str, ...]:
@@ -441,7 +444,9 @@ def render(conv: Conversation, *, now: datetime, beliefs: Sequence[tuple[int, st
     first = datetime.fromtimestamp(conv.lines[0].at / 1e6, now.tzinfo).date() if conv.lines else now.date()
     out.append(phrase("memory.extraction.render.calendar", days=calendar(first, now.date())))
     who = ", ".join(s.label for s in conv.speakers)
-    if conv.room:
+    if conv.heading:
+        out.append(conv.heading)
+    elif conv.room:
         out.append(phrase("memory.extraction.render.room", who=who))
     else:
         out.append(phrase("memory.extraction.render.private", who=who))

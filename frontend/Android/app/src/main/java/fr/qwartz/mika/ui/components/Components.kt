@@ -54,34 +54,25 @@ fun MikaAvatar(size: Dp = 40.dp) {
 /**
  * Le texte d'une réponse, mis en forme comme sur le web (`inlineMarkup.ts`) : gras, code en ligne,
  * blocs de code dans une surface à chasse fixe qui défile de côté. Jamais de HTML interprété.
- *
- * `reveal` : combien de caractères sont déjà dits (comptés comme [InlineMarkup.plain], fraction comprise), quand sa
- * réponse s'écrit au rythme de sa bouche. Le reste est là mais invisible : la bulle a d'emblée sa taille finale, rien
- * ne saute dans le fil pendant qu'elle parle.
  */
 @Composable
-fun InlineMarkupText(text: String, color: Color, modifier: Modifier = Modifier, reveal: Float? = null) {
+fun InlineMarkupText(text: String, color: Color, modifier: Modifier = Modifier) {
     val blocks = remember(text) { InlineMarkup.parseBlocks(text) }
     val codeBackground = color.copy(alpha = 0.12f)
     Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        var offset = 0
         for (block in blocks) {
-            val from = offset
             when (block) {
                 is InlineMarkup.Block.Text -> {
                     val body = InlineMarkup.trimAroundBlocks(block.text)
-                    val annotated = annotate(body, codeBackground)
-                    offset += annotated.length + 1
-                    if (body.isNotEmpty()) Text(annotated.revealed(reveal, from, color), color = color)
+                    if (body.isNotEmpty()) Text(annotate(body, codeBackground), color = color)
                 }
                 is InlineMarkup.Block.Code -> Surface(
                     shape = RoundedCornerShape(8.dp),
                     color = codeBackground,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    offset += block.text.length + 1
                     Text(
-                        AnnotatedString(block.text).revealed(reveal, from, color),
+                        block.text,
                         color = color,
                         fontFamily = FontFamily.Monospace,
                         style = MaterialTheme.typography.bodySmall,
@@ -93,27 +84,6 @@ fun InlineMarkupText(text: String, color: Color, modifier: Modifier = Modifier, 
         }
     }
 }
-
-/** Les caractères [from] + `reveal` et au-delà, cachés ; les derniers dits apparaissent en fondu. */
-private fun AnnotatedString.revealed(reveal: Float?, from: Int, color: Color): AnnotatedString {
-    val local = (reveal ?: return this) - from
-    if (local >= length) return this
-    val source = this
-    return buildAnnotatedString {
-        append(source)
-        val shown = kotlin.math.ceil(local).toInt().coerceIn(0, length)
-        val fadeFrom = (local - REVEAL_FADE_CHARS).toInt().coerceIn(0, shown)
-        for (i in fadeFrom until shown) {
-            val alpha = ((local - i) / REVEAL_FADE_CHARS).coerceIn(0f, 1f)
-            addStyle(SpanStyle(color = color.copy(alpha = color.alpha * alpha)), i, i + 1)
-        }
-        // Ni le texte ni le fond d'un `code` en ligne : rien de ce qui n'est pas encore dit ne se devine.
-        if (shown < length) addStyle(SpanStyle(color = Color.Transparent, background = Color.Transparent), shown, length)
-    }
-}
-
-/** Sur combien de caractères le texte qui s'écrit apparaît en fondu (une plume, pas une machine à écrire). */
-private const val REVEAL_FADE_CHARS = 4f
 
 fun annotate(text: String, codeBackground: Color): AnnotatedString = buildAnnotatedString {
     for (segment in InlineMarkup.parseInline(text)) {

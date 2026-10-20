@@ -25,7 +25,7 @@ class ConversationCues {
     sealed interface Cue {
         val key: String
 
-        /** Sa réponse vient d'arriver : elle la dit, et la bulle s'écrit à son rythme ; [then] : ses bulles suivantes. */
+        /** Sa réponse vient d'arriver : la bulle se montre entière, elle la dit ; [then] : ses bulles suivantes, à leur tour. */
         data class Speak(override val key: String, val text: String, val then: List<Speak> = emptyList()) : Cue
 
         /** La personne vient d'envoyer : elle lit, puis hoche la tête. */
@@ -72,7 +72,8 @@ class ConversationCues {
 
 /**
  * Les répliques qu'elle dit, dans l'ordre : deux bulles qui arrivent coup sur coup se disent l'une après l'autre, pas
- * en même temps. L'état est observable (Compose) : la bulle qui s'écrit et l'avatar lisent la même liste.
+ * en même temps — la seconde arrive quand la première est dite, ses trois points entre les deux. L'état est
+ * observable (Compose) : les bulles et l'avatar lisent la même liste.
  */
 class SpeechTrack(private val clock: () -> Long = System::nanoTime) {
     var utterances: List<Utterance> by mutableStateOf(emptyList())
@@ -82,13 +83,16 @@ class SpeechTrack(private val clock: () -> Long = System::nanoTime) {
     fun say(key: String, text: String) {
         val now = clock()
         val live = utterances.filter { !it.finished(now - KEEP_NANOS) }
-        val after = live.maxOfOrNull { it.endNanos }?.let { it + Utterance.GAP_NANOS } ?: now
+        val before = live.maxByOrNull { it.endNanos }
+        val start = maxOf(now, before?.let { it.endNanos + Utterance.GAP_NANOS } ?: now)
+        // ses trois points dès que la bulle d'avant est là : une seule bulle « écrit… » à la fois
+        val dots = before?.startNanos?.coerceIn(now, start) ?: now
         live.filter { it.key != key }.let { kept ->
-            utterances = kept + Utterance(key, text, maxOf(now, after), Utterance.charsPerSecond(text.length))
+            utterances = kept + Utterance(key, text, start, Utterance.charsPerSecond(text.length), dotsNanos = dots)
         }
     }
 
-    /** La personne a touché la bulle : tout s'affiche, elle se tait — et ce qui attendait derrière vient aussitôt. */
+    /** La personne a touché la bulle : elle se tait — et ce qui attendait derrière vient aussitôt. */
     fun skip(key: String) {
         val now = clock()
         var shift = 0L
@@ -98,13 +102,14 @@ class SpeechTrack(private val clock: () -> Long = System::nanoTime) {
                     shift = maxOf(0L, u.endNanos - now)
                     u.copy(skippedAtNanos = now)
                 }
-                shift > 0L && u.startNanos > now -> u.copy(startNanos = maxOf(now, u.startNanos - shift))
+                shift > 0L && u.startNanos > now ->
+                    u.copy(startNanos = maxOf(now, u.startNanos - shift), dotsNanos = maxOf(now, u.dotsNanos - shift))
                 else -> u
             }
         }
     }
 
-    /** Tout ce qui reste à dire s'affiche d'un coup (la personne écrit à son tour). */
+    /** Tout ce qui reste à dire arrive d'un coup (la personne écrit à son tour). */
     fun skipAll() {
         val now = clock()
         utterances = utterances.map { if (it.finished(now)) it else it.copy(skippedAtNanos = now) }
@@ -114,7 +119,7 @@ class SpeechTrack(private val clock: () -> Long = System::nanoTime) {
     fun of(key: String): Utterance? = utterances.firstOrNull { it.key == key }
 
     private companion object {
-        /** On garde une réplique finie un moment : la bulle a besoin de savoir qu'elle a fini de s'écrire. */
+        /** On garde une réplique finie un moment : la bulle a besoin de savoir qu'elle a fini d'être dite. */
         const val KEEP_NANOS = 2_000_000_000L
     }
 }
@@ -140,7 +145,7 @@ class ConversationStage {
                 cue.then.forEach { track.say(it.key, it.text) }
             }
             is ConversationCues.Cue.Read -> {
-                // Elle se tait pour lire : ce qu'elle disait s'affiche d'un coup.
+                // Elle se tait pour lire : ce qu'elle allait dire arrive d'un coup.
                 track.skipAll()
                 reading = ReadingCue(cue.key, ConversationCues.readingSeconds(cue.chars))
             }

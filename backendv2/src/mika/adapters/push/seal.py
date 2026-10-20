@@ -7,7 +7,9 @@ ici). Google ne transporte qu'un chiffré ; l'application le déchiffre et l'aff
 
 Le clair est un petit JSON : ``{"t": "speech", "id": …, "text": …, "ts": …, "files": …}`` — l'identifiant du
 message dans le fil, son texte (jetons prosodiques retirés, coupé à ``TEXT_MAX_BYTES`` octets : Firebase refuse
-plus de 4 Kio de données), l'heure (ms depuis l'époque) et le nombre de fichiers joints. Le scellé :
+plus de 4 Kio de données), l'heure (ms depuis l'époque) et le nombre de fichiers joints. Une réponse que Mika
+propose d'envoyer à la place de la personne (ADR 0120) a son propre clair (``phone_payload``, ``"t": "phone_draft"``).
+Le scellé :
 ``{"v": "1", "n": <nonce base64>, "c": <chiffré base64>}``, base64 standard avec bourrage.
 """
 
@@ -34,6 +36,8 @@ TEXT_MAX_BYTES = 2400
 PLAIN_MAX_BYTES = 2600
 ELLIPSIS = "…"
 SPEECH = "speech"
+#: une réponse que Mika propose d'envoyer à la place de la personne, sur son téléphone (ADR 0120)
+PHONE_DRAFT = "phone_draft"
 
 
 def key_from(text: str) -> bytes:
@@ -66,6 +70,25 @@ def payload(*, message_id: int, text: str, ts_ms: int, files: int = 0) -> dict[s
     # trop d'échappements (des sauts de ligne, des guillemets) : le plus long texte qui tient, par dichotomie
     lo, hi = 0, TEXT_MAX_BYTES
     while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if len(_plain(body | {"text": clip(text, mid)})) <= PLAIN_MAX_BYTES:
+            lo = mid
+        else:
+            hi = mid - 1
+    return body | {"text": clip(text, lo)}
+
+
+def phone_payload(*, draft: int, app: str, thread: str, to: str, text: str, expires_ms: int,
+                  ts_ms: int) -> dict[str, Any]:
+    """Le clair d'une réponse proposée sur le téléphone (ADR 0120) : ``{"t": "phone_draft", "id", "app", "thread",
+    "to", "text", "exp", "ts"}`` — la proposition, l'appli et la conversation (la clé opaque du téléphone, qui y
+    retrouve l'action « Répondre »), à qui, le texte, jusqu'à quand elle vaut et l'heure (ms). Le téléphone demande
+    l'autorisation ; le texte voyage avec, pour que le geste marche aussi loin du serveur."""
+    body = {"t": PHONE_DRAFT, "id": int(draft), "app": app, "thread": thread, "to": clip(to, 200), "text": "",
+            "exp": int(expires_ms), "ts": int(ts_ms)}
+    room = PLAIN_MAX_BYTES - len(_plain(body))
+    lo, hi = 0, min(TEXT_MAX_BYTES, max(0, room))
+    while lo < hi:  # le plus long texte qui tient, échappements compris
         mid = (lo + hi + 1) // 2
         if len(_plain(body | {"text": clip(text, mid)})) <= PLAIN_MAX_BYTES:
             lo = mid

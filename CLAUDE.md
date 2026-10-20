@@ -6,7 +6,7 @@ résume ce qu'il faut savoir pour y travailler. Les références sont ailleurs :
 
 - `backendv2/README.md` pour démarrer en local ;
 - `backendv2/ARCHITECTURE.md` pour l'architecture et le détail de chaque faculté ;
-- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0119, d'autres arrivent) ;
+- `backendv2/docs/adr/` pour les décisions et leur pourquoi (0001 à 0120, d'autres arrivent) ;
 - `backendv2/deploy/README.md` pour la mise en service (systemd, MariaDB, mandataire TLS, sauvegardes, Firebase) ;
 - dans `backendv2/docs/` : `protocole-chat.md` pour le protocole du chat (`/ws`), `protocole-monde.md` pour celui du
   monde (`mika.world/1`), `console-carte.md` pour la carte de la console.
@@ -585,7 +585,8 @@ ses identifiants sont dans `ARCHITECTURE.md`. Ce qui suit dit l'essentiel de cha
 ### Les plugins
 
 Les plugins ont la même forme que les facultés mais une confiance restreinte : des signaux, des preuves, des sections
-citées, jamais la parole forcée. Leur monde vit hors du journal. Onze sont composés dans cet ordre.
+citées, jamais la parole forcée. Leur monde vit hors du journal (sauf `location` et `phone`, au journal en contenus). Douze sont composés dans cet
+ordre.
 
 - **email** (ADR 0027, 0037)
   - Plusieurs boîtes IMAP/SMTP et leurs dossiers, avec sa voix par boîte.
@@ -636,12 +637,25 @@ citées, jamais la parole forcée. Leur monde vit hors du journal. Onze sont com
     (`REPLY` seulement), en tête-à-tête avec une personne authentifiée, et seulement sa position à elle.
   - Un regard se voit : l'outil attache `location:<seq>` à sa réponse (`ToolResult.attach`), le port en fait une
     petite bulle (`MindPort.notes`), que `speech` et `history` portent (`notes`).
+- **phone** (ADR 0120)
+  - L'application Android lit les notifications de WhatsApp et de Messages, si la personne l'a permis (« Lui montrer
+    mes messages », coupé par défaut ; les groupes à part), et les pousse sur `/api/phone/inbox` sous son jeton,
+    réservé à une propriétaire. En 4G, sa file attend le serveur.
+  - Au journal, un `phone.received` par message, de la forme `memory.Relayed` : textes et noms en contenus,
+    l'expéditeur sous une clé `phone:<empreinte>:<nom>` avec qui personne n'a de lien. L'oubli d'une clé `phone:`
+    l'efface des enveloppes, comme une clé `name:`.
+  - La mémoire relit la conversation une fois posée (`memory.relayed`), comme une des siennes : ce qu'elle en garde
+    est confié par l'expéditeur et par la personne qui le lui montre ; ni note sur elle, ni promesse.
+  - Elle les lit par `phone_messages` (`REPLY`, en tête-à-tête avec cette personne). `phone_draft` prépare une
+    réponse à sa place ; `phone.send` l'envoie scellée au téléphone (`phone_draft`), qui demande l'autorisation : le
+    geste vaut accord. Le sort revient par `/api/phone/settled` ; sans geste en 2 h, elle expire.
 
 ## Autour du noyau
 
 - **Le chat** (`adapters/web/`, protocole complet dans `docs/protocole-chat.md`)
   - **Routes HTTP** : `/auth/whoami|login|bootstrap|logout|token|push`, `/health`, `/files/<id>`,
-    `/api/perceptions`, `/api/wake/<nom>`, `/api/teams/…`, `/api/projects/pending/<id>/approve|reject`.
+    `/api/perceptions`, `/api/wake/<nom>`, `/api/teams/…`, `/api/phone/inbox|settled`,
+    `/api/projects/pending/<id>/approve|reject`.
   - **WebSockets** : `/ws`, `/ws/camera`, `/ws/world`.
   - **Trames du serveur** : `speech`, `history`, `ack`, `inner_state_update`, `emotion_update`, `presence`, `composing`,
     `read`, `approvals`, `approval_result`, `verdict_result`, `tool`, `pong`.
@@ -801,11 +815,11 @@ Tout le reste se déclare par décorateurs.
 |---|---|
 | Noyau, journal, arbitrage, pipeline | 0001–0003, 0006–0009, 0014, 0015, 0021, 0040, 0059 |
 | Stockage | 0004 (remplacé), 0101 |
-| Mémoire et savoir | 0010, 0011, 0034, 0046, 0052, 0055, 0074–0087, 0091, 0092, 0099, 0102, 0109–0111 |
+| Mémoire et savoir | 0010, 0011, 0034, 0046, 0052, 0055, 0074–0087, 0091, 0092, 0099, 0102, 0109–0111, 0120 |
 | Identité et divulgation | 0012, 0035, 0048, 0075, 0092 |
 | Vie intérieure (affect, corps, besoins, liens, autres, attention, soi) | 0013, 0016–0019, 0028, 0032, 0033, 0036, 0047, 0053, 0058, 0088–0090, 0093–0098, 0100, 0107, 0118 |
 | Buts, projets, Forge, atelier | 0005, 0020, 0023, 0030, 0031, 0039, 0104, 0105 |
-| Sens et plugins | 0022, 0027, 0037, 0038, 0044, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119 |
+| Sens et plugins | 0022, 0027, 0037, 0038, 0044, 0061, 0063, 0064, 0066, 0068, 0069, 0106, 0117, 0119, 0120 |
 | Fournisseurs LLM | 0026, 0072, 0073 |
 | Console et exploitation | 0024, 0025, 0029, 0042, 0045, 0057, 0103 |
 | Clients, fil, monde | 0041, 0049–0051, 0054, 0056, 0060, 0062, 0065, 0067, 0077, 0108, 0113, 0116 |

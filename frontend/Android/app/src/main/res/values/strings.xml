@@ -195,6 +195,31 @@
     <string name="settings_where_refused_title">Localisation refusée</string>
     <string name="settings_where_refused">Sans l\'autorisation de localisation, rien ne part. Tu peux la donner dans les réglages du téléphone : une position approximative suffit.</string>
     <string name="settings_where_open_settings">Ouvrir les réglages</string>
+    <!-- Ses messages : « Lui montrer mes messages » (ADR 0120). « attendent » est le verbe (ils attendent), pas une
+         faute pour « attendant » : d'où les tools:ignore="Typos". -->
+    <string name="settings_phone">Ses messages</string>
+    <string name="settings_phone_title">Lui montrer mes messages</string>
+    <string name="settings_phone_summary" tools:ignore="Typos">Les messages que WhatsApp et Messages affichent sur ce téléphone partent à Mika : qui écrit, le texte, l\'heure (et le nom du groupe). Elle s\'en souvient et peut te proposer une réponse, qui ne part jamais sans ton geste. Seulement les applis cochées : ni la banque, ni les codes. En 4G, ils attendent le Wi-Fi de la maison. Couper vide ce qui attend.</string>
+    <string name="settings_phone_revoked">L\'accès aux notifications a été retiré dans les réglages du téléphone : rien ne part. Redonne-le pour reprendre.</string>
+    <string name="settings_phone_access_title">Accès aux notifications</string>
+    <string name="settings_phone_access">Pour lire tes messages, Android doit permettre à Mika de lire les notifications : dans ses réglages, active Mika dans « Accès aux notifications ». Seules les applis cochées ici seront lues.</string>
+    <string name="settings_phone_access_open">Ouvrir les réglages d\'Android</string>
+    <string name="settings_phone_whatsapp">WhatsApp</string>
+    <string name="settings_phone_whatsapp_summary">WhatsApp et WhatsApp Business</string>
+    <string name="settings_phone_messages">Messages</string>
+    <string name="settings_phone_messages_summary">Tes SMS, dans Messages de Google ou de Samsung</string>
+    <string name="settings_phone_groups">Les groupes aussi</string>
+    <string name="settings_phone_groups_summary">Les conversations de groupe partent aussi : elles sont bavardes.</string>
+    <string name="settings_phone_state_title">Envoi</string>
+    <string name="settings_phone_state_refused">Refusé par le serveur : seule sa propriétaire peut lui montrer ses messages, ou la lecture y est coupée. Rien n\'attend ici ; nouvel essai au prochain message, dans l\'heure.</string>
+    <string name="settings_phone_state_outdated" tools:ignore="Typos">Ce serveur ne sait pas encore lire tes messages : mets Mika à jour. Ils attendent ici.</string>
+    <plurals name="settings_phone_state_queued" tools:ignore="Typos">
+        <item quantity="one">%1$d message attend le serveur (en 4G : le Wi-Fi de la maison).</item>
+        <item quantity="many">%1$d messages attendent le serveur (en 4G : le Wi-Fi de la maison).</item>
+        <item quantity="other">%1$d messages attendent le serveur (en 4G : le Wi-Fi de la maison).</item>
+    </plurals>
+    <string name="settings_phone_state_sent">Tout est parti (dernier envoi : %1$s).</string>
+    <string name="settings_phone_state_empty">Rien n\'attend : les messages partiront à leur arrivée.</string>
     <string name="settings_appearance">Apparence</string>
     <string name="settings_theme_system">Thème du système</string>
     <string name="settings_theme_light">Clair</string>
@@ -215,6 +240,8 @@
     <string name="channel_messages_desc">Les messages que Mika t\'envoie.</string>
     <string name="channel_connection_name">Envoi d\'une réponse</string>
     <string name="channel_connection_desc">Le temps d\'envoyer une réponse écrite depuis une notification (une minute au plus).</string>
+    <string name="channel_phone_drafts_name">Réponses proposées par Mika</string>
+    <string name="channel_phone_drafts_desc">Les réponses que Mika te propose pour WhatsApp ou Messages : rien ne part sans ton geste.</string>
     <string name="reply_sending">Envoi de ta réponse à Mika</string>
     <string name="connection_online">Connectée à Mika</string>
     <string name="connection_reconnecting">Reconnexion…</string>
@@ -223,6 +250,20 @@
     <string name="action_mark_read">Marquer comme lu</string>
     <string name="notification_public">Nouveau message de Mika</string>
     <string name="notification_reply_hint">Répondre à Mika</string>
+    <!-- Une réponse proposée pour WhatsApp ou Messages (ADR 0120) : « Répondre à Léa (WhatsApp) ? » -->
+    <string name="phone_draft_title">Répondre à %1$s (%2$s) ?</string>
+    <string name="phone_draft_title_nameless">Répondre sur %1$s ?</string>
+    <string name="phone_draft_send">Envoyer</string>
+    <string name="phone_draft_other">Écrire autre chose</string>
+    <string name="phone_draft_other_hint">Ta réponse</string>
+    <string name="phone_draft_ignore">Ignorer</string>
+    <string name="phone_draft_public">Mika te propose une réponse</string>
+    <string name="phone_copied_title">Copié : ouvre %1$s pour le coller</string>
+    <string name="phone_copied_public">Réponse copiée</string>
+    <string name="phone_clip_label">Réponse proposée par Mika</string>
+    <string name="phone_app_whatsapp">WhatsApp</string>
+    <string name="phone_app_whatsapp_business">WhatsApp Business</string>
+    <string name="phone_app_messages">Messages</string>
     <plurals name="notification_more">
         <item quantity="one">et %1$d autre</item>
         <item quantity="many">et %1$d autres</item>

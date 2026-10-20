@@ -73,4 +73,11 @@ object Kv {
     const val PUSHED_IDS = "pushed_ids"
     /** Quand on a quitté la conversation pour la dernière fois (heure murale, ms) : l'horloge des retrouvailles. */
     const val LAST_SEEN_WALL = "last_seen_wall"
+    /**
+     * Les messages lus sur le téléphone qui attendent le serveur, et le sort des réponses proposées (JSON, ADR 0120) :
+     * en 4G, ils attendent le Wi-Fi de la maison. Effacés avec la session : un autre compte n'en hérite jamais.
+     */
+    const val PHONE_QUEUE = "phone_queue"
+    /** Les réponses proposées qui attendent un geste, le temps de leur échéance (JSON, ADR 0120). */
+    const val PHONE_DRAFTS = "phone_drafts"
 }

@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import fr.qwartz.mika.core.MikaJson
 import fr.qwartz.mika.data.auth.Profile
+import fr.qwartz.mika.data.phone.PhoneGate
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -45,7 +46,21 @@ data class Settings(
      * défaut, et remis à zéro à la fin de la session : un autre compte n'en hérite jamais.
      */
     val shareWhere: Boolean = false,
-)
+    /**
+     * « Lui montrer mes messages » (ADR 0120) : les messages WhatsApp et SMS que le téléphone affiche partent à Mika.
+     * Coupé par défaut, et remis à zéro à la fin de la session, comme ses cases.
+     */
+    val phoneShare: Boolean = false,
+    /** WhatsApp (et WhatsApp Business) : cochée par défaut une fois l'interrupteur allumé. */
+    val phoneWhatsApp: Boolean = true,
+    /** Messages (Google, Samsung) : cochée par défaut une fois l'interrupteur allumé. */
+    val phoneMessages: Boolean = true,
+    /** « Les groupes aussi » : coupé par défaut (bavards). */
+    val phoneGroups: Boolean = false,
+) {
+    /** Ce que le lecteur de notifications a le droit de lire. */
+    val phone: PhoneGate get() = PhoneGate(phoneShare, phoneWhatsApp, phoneMessages, phoneGroups)
+}
 
 class SettingsStore(private val store: DataStore<Preferences>) {
 
@@ -61,6 +76,10 @@ class SettingsStore(private val store: DataStore<Preferences>) {
             shareReads = p[SHARE_READS] ?: true,
             proMode = p[PRO_MODE] ?: false,
             shareWhere = p[SHARE_WHERE] ?: false,
+            phoneShare = p[PHONE_SHARE] ?: false,
+            phoneWhatsApp = p[PHONE_WHATSAPP] ?: true,
+            phoneMessages = p[PHONE_MESSAGES] ?: true,
+            phoneGroups = p[PHONE_GROUPS] ?: false,
         )
     }
 
@@ -73,12 +92,16 @@ class SettingsStore(private val store: DataStore<Preferences>) {
     }
 
     /**
-     * Hors session : le compte part, et ce qu'il permettait de dire de lui (« Lui dire où je suis », ADR 0119) ;
-     * l'adresse et le nom restent pour la prochaine connexion.
+     * Hors session : le compte part, et ce qu'il permettait de dire de lui (« Lui dire où je suis », ADR 0119 ;
+     * « Lui montrer mes messages » et ses cases, ADR 0120) ; l'adresse et le nom restent pour la prochaine connexion.
      */
     suspend fun clearProfile() = store.edit {
         it.remove(PROFILE)
         it.remove(SHARE_WHERE)
+        it.remove(PHONE_SHARE)
+        it.remove(PHONE_WHATSAPP)
+        it.remove(PHONE_MESSAGES)
+        it.remove(PHONE_GROUPS)
     }
 
     /** Ce que le téléphone a dit au serveur pour être notifié (ADR 0077), et quand. */
@@ -106,6 +129,10 @@ class SettingsStore(private val store: DataStore<Preferences>) {
     suspend fun setShareReads(on: Boolean) = store.edit { it[SHARE_READS] = on }
     suspend fun setProMode(on: Boolean) = store.edit { it[PRO_MODE] = on }
     suspend fun setShareWhere(on: Boolean) = store.edit { it[SHARE_WHERE] = on }
+    suspend fun setPhoneShare(on: Boolean) = store.edit { it[PHONE_SHARE] = on }
+    suspend fun setPhoneWhatsApp(on: Boolean) = store.edit { it[PHONE_WHATSAPP] = on }
+    suspend fun setPhoneMessages(on: Boolean) = store.edit { it[PHONE_MESSAGES] = on }
+    suspend fun setPhoneGroups(on: Boolean) = store.edit { it[PHONE_GROUPS] = on }
 
     private fun decodeProfile(raw: String): Profile? = try {
         MikaJson.decodeFromString(Profile.serializer(), raw)
@@ -127,5 +154,9 @@ class SettingsStore(private val store: DataStore<Preferences>) {
         val SHARE_READS = booleanPreferencesKey("share_reads")
         val PRO_MODE = booleanPreferencesKey("pro_mode")
         val SHARE_WHERE = booleanPreferencesKey("share_where")
+        val PHONE_SHARE = booleanPreferencesKey("phone_share")
+        val PHONE_WHATSAPP = booleanPreferencesKey("phone_whatsapp")
+        val PHONE_MESSAGES = booleanPreferencesKey("phone_messages")
+        val PHONE_GROUPS = booleanPreferencesKey("phone_groups")
     }
 }

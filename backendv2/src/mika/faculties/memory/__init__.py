@@ -15,6 +15,7 @@ from mika.faculties.memory import (  # noqa: F401 — contributions
     night,
     projections,
     recall,
+    relayed,
     reread,
     tools,
 )

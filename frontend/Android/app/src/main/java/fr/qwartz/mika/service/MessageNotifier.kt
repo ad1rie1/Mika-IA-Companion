@@ -271,7 +271,7 @@ class MessageNotifier(
          * Afficher, seulement si on en a le droit (Android 13 : la permission ; sinon les réglages de
          * l'app). Refusé, on ne dit rien : la conversation garde tout.
          */
-        fun show(context: Context, id: Int, notification: Notification) {
+        fun show(context: Context, id: Int, notification: Notification, tag: String? = null) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
                 PackageManager.PERMISSION_GRANTED
@@ -279,7 +279,7 @@ class MessageNotifier(
                 return
             }
             try {
-                NotificationManagerCompat.from(context).notify(id, notification)
+                NotificationManagerCompat.from(context).notify(tag, id, notification)
             } catch (_: SecurityException) {
                 // Permission retirée entre la vérification et l'envoi.
             }

@@ -138,6 +138,7 @@ modules = [
     "mika.plugins.wakeup",
     "mika.plugins.teams",
     "mika.plugins.location",
+    "mika.plugins.phone",
 ]
 
 [[tool.importlinter.contracts]]

@@ -48,6 +48,7 @@ from mika.kernel.registry import Registry
 from mika.kernel.state import FrozenDict, Root
 from mika.ports.store import AppendBatch, ContentRow, EventStore, OutboxRow, SnapshotRow, StoredEvent
 from mika.runtime.boundary import Failed, call
+from mika.vocab.people import NAME_BEARING
 
 log = logging.getLogger("mika.mind")
 
@@ -568,9 +569,10 @@ class Mind:
                           origin=Origin.KERNEL, correlation="forget")
         async with self._lock:
             removed = await self.store.forget_subject(subject, purge)
-        if subject.startswith("name:"):
+        if subject.startswith(NAME_BEARING):
             await self.rebuild(self.registry.faculties)
-        self.trace("forget", subject="name:(oublié)" if subject.startswith("name:") else subject, contents=removed)
+        self.trace("forget", subject="name:(oublié)" if subject.startswith(NAME_BEARING) else subject,
+                   contents=removed)
         return removed
 
     # ── reconstruction en ligne ────────────────────────────────────────────

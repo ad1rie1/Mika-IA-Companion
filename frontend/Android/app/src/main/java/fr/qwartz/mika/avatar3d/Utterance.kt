@@ -3,21 +3,24 @@ package fr.qwartz.mika.avatar3d
 import kotlin.math.min
 
 /**
- * Une réplique de Mika « dite » : l'app n'a pas de voix, alors sa réponse s'écrit dans la bulle pendant que sa bouche
- * la prononce. Une seule horloge pour les deux — le texte affiché et le curseur de la bouche se lisent ici, au même
+ * Une réplique de Mika « dite » : l'app n'a pas de voix, alors sa bouche prononce la bulle, arrivée entière comme un
+ * SMS. Une seule horloge pour les deux — l'arrivée de la bulle et le curseur de la bouche se lisent ici, au même
  * instant (`System.nanoTime`, la base du `Choreographer` et de `withFrameNanos`), si bien qu'ils ne peuvent pas se
  * décaler.
  *
  * `text` est le texte tel que la bulle le montre, sans les marques du Markdown ([fr.qwartz.mika.ui.components.InlineMarkup.plain]) :
- * ce qu'on voit est ce qu'elle dit. Toucher la bulle ([skippedAtNanos]) affiche tout d'un coup et lui ferme la bouche.
+ * ce qu'on voit est ce qu'elle dit. Toucher la bulle ([skippedAtNanos]) lui ferme la bouche, et la suivante vient.
  */
 data class Utterance(
     /** La clé de la bulle (celle de la liste du fil). */
     val key: String,
     val text: String,
+    /** Quand la bulle arrive, entière, et qu'elle commence à la dire. */
     val startNanos: Long,
     val charsPerSecond: Float,
     val skippedAtNanos: Long? = null,
+    /** Quand ses trois points prennent la place de la bulle qui va venir : dès que la réplique d'avant est là. */
+    val dotsNanos: Long = startNanos,
 ) {
     val length: Int get() = text.length
 

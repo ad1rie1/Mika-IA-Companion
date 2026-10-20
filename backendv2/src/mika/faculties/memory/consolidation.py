@@ -606,12 +606,18 @@ class Consolidate:
         def provenance(cited: Sequence[int]) -> tuple[tuple[int, ...], tuple[str, ...], list[str]]:
             """Les messages d'où vient un élément, qui les a écrits (qui l'a
             confié) et leurs textes. Sans citation : toute la conversation, et
-            tous ceux qui y ont parlé l'ont confié (dans le doute, on ferme)."""
+            tous ceux qui y ont parlé l'ont confié (dans le doute, on ferme).
+            Une conversation reçue ailleurs (ADR 0120) : la personne qui l'a reçue
+            la lui montre, elle l'a confiée aussi — on lui redit ce qu'on lui a écrit."""
             seqs = sorted({s for s in cited if s in lines})
             if not seqs:
-                return conv.seqs, speaking if len(speaking) == 1 else (), []
-            persons = sorted({lines[s].person for s in seqs if lines[s].person})
-            return tuple(seqs), tuple(str(k) for k in persons), [lines[s].text for s in seqs if lines[s].person]
+                told = speaking if len(speaking) == 1 else ()
+                return conv.seqs, tuple(sorted({*told, conv.relayed})) if conv.relayed else told, []
+            persons = {lines[s].person for s in seqs if lines[s].person}
+            if conv.relayed:
+                persons.add(conv.relayed)
+            return tuple(seqs), tuple(str(k) for k in sorted(persons)), [lines[s].text for s in seqs
+                                                                         if lines[s].person]
 
         def hers(cited: Sequence[int]) -> bool:
             """L'élément ne s'appuie que sur ce qu'elle a dit elle-même : ce n'est pas quelque chose qu'on lui a
@@ -624,7 +630,10 @@ class Consolidate:
             """Ce qu'elle dit d'elle vient de sa bouche : une de ses répliques est citée (la question qu'on lui a posée
             peut l'être aussi), ou rien ne l'est (le doute d'avant). Ce que seule une autre personne a dit d'elle
             (« ton code, c'est ORCHIDEE, garde-le pour toi ») lui a été appris : il suit le chemin commun, avec son
-            confident et son secret (audit du 2026-10-08)."""
+            confident et son secret (audit du 2026-10-08). Lue ailleurs (ADR 0120), une conversation n'a rien
+            de sa bouche."""
+            if conv.relayed:
+                return False
             seqs = [s for s in cited if s in lines]
             return not seqs or any(not lines[s].person for s in seqs)
 
@@ -686,6 +695,8 @@ class Consolidate:
         for s in ex.souvenirs:
             if not fresh(c.SOUVENIR, s.texte):
                 continue
+            if s.sur_elle and conv.relayed:
+                continue  # lue ailleurs (ADR 0120), une conversation ne dit rien d'elle : elle n'y était pas
             if s.sur_elle and not people.resolve(s.personnes) and from_her(s.messages) \
                     and not people.names_someone(s.texte):
                 if not lied(s.messages):
@@ -725,6 +736,8 @@ class Consolidate:
         for b in ex.croyances:
             if not fresh(c.BELIEF, b.texte):
                 continue
+            if b.sur_elle and conv.relayed:
+                continue  # lue ailleurs (ADR 0120) : rien d'elle
             if b.sur_elle and not people.resolve(b.personnes) and from_her(b.messages) \
                     and not people.names_someone(b.texte):
                 # ce qu'elle dit d'elle seule ; « Mika a dit à Sam : … », lui, nomme quelqu'un : ce n'est pas une
@@ -734,7 +747,8 @@ class Consolidate:
                     drafts += self._about_self(b, store, provenance, call_id, known_ids, secret_of,
                                                her_words(b.messages))
                 continue
-            between = b.entre_vous or any(fold(n) in fold(b.texte) for n in nicks)
+            # ce qui n'appartient qu'à elle et quelqu'un ne se lit pas dans la conversation d'autres (ADR 0120)
+            between = not conv.relayed and (b.entre_vous or any(fold(n) in fold(b.texte) for n in nicks))
             if (not between and hers(b.messages)) or banal(b.texte, said_names):
                 continue  # ce qu'elle a dit des autres n'est pas ce qu'on lui a appris d'eux ; une banalité, rien
             if x.copy_of(b.texte, mine) is not None:
@@ -771,6 +785,8 @@ class Consolidate:
                                                 status=relation.status))
                     about = tuple(sorted({*about, subject, other}))
             origin = x.ORIGIN.get(fold(b.origine), "told")
+            if conv.relayed and origin == c.OBSERVED:
+                origin = c.TOLD  # lu dans les messages d'autres : elle ne l'a pas vu (ADR 0120)
             pieces = x.pieces_of(b.pieces, b.messages, lines)
             # de première main : la personne nommée qui parle d'elle-même, ou un témoin qui l'a vu (ADR 0081)
             named = set(people.resolve(b.personnes))
@@ -828,7 +844,8 @@ class Consolidate:
         drafts += self._predictions(ex, frame, conv, people, p, call_id, fresh, provenance, concerned, secret_of,
                                     from_her, lied, heard, tz)
         drafts += self._called(nicks, ours, store, conv, call_id)
-        closed = [item for item in dict.fromkeys(ex.confidentiel) if item in known_ids]
+        # une discrétion qu'on demande à quelqu'un d'autre, dans sa conversation à lui, ne la vise pas (ADR 0120)
+        closed = [] if conv.relayed else [item for item in dict.fromkeys(ex.confidentiel) if item in known_ids]
         for item in closed:
             # la discrétion demandée : sur ce que celui qui la demande en a dit — sur tout, quand c'est la
             # personne concernée elle-même (ADR 0080)
@@ -838,8 +855,9 @@ class Consolidate:
                                            sensitivity=int(Sensitivity.CONFIDENCE), secret=True,
                                            call_id=call_id))
         drafts += self._closed_souvenirs(frame, store, conv, closed)
-        drafts += await self._promised(ex, frame, state, store, conv, people, promises, vectors, p, provenance,
-                                       fresh, call_id, lambda text: x.echoes(text, secrets, names))
+        if not conv.relayed:  # ce qu'on se promet entre soi n'est pas une promesse d'elle (ADR 0120)
+            drafts += await self._promised(ex, frame, state, store, conv, people, promises, vectors, p, provenance,
+                                           fresh, call_id, lambda text: x.echoes(text, secrets, names))
         drafts += await self._events(ex, frame, state, store, conv, people, vectors, p, provenance, concerned,
                                      secret_of, heard, fresh, call_id, moments or {})
         drafts += self._constats(ex, frame, store, conv, people, passed or {}, p, provenance, call_id,

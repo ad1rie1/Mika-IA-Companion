@@ -317,6 +317,40 @@ class Reading(Payload):
     asked_by: str = ""
 
 
+class Relayed(Payload):
+    """Un message reçu par quelqu'un ailleurs que chez elle — sur son téléphone —, qu'elle lit parce que cette personne
+    le lui montre (ADR 0120). La forme qu'écoute la mémoire, sans connaître le plugin qui l'apporte : elle relit la
+    conversation une fois posée (``memory.relayed``), comme une de celles qu'elle a eues, sauf qu'elle n'y était pas.
+
+    ``recipient`` : la personne qui l'a reçu (sa clé de personne) ; ``handle`` : l'adresse qui l'a apporté ;
+    ``source`` : l'appli (« whatsapp », « messages ») ; ``thread`` : la conversation (une clé opaque) ; ``sender`` :
+    la clé de qui l'a écrit (vide quand c'est la personne elle-même, ``own``) ; ``sender_name``, ``title`` (le nom du
+    groupe) et ``text`` : venus d'ailleurs, des contenus personnels ; ``sent_at`` : son heure (µs)."""
+
+    recipient: str
+    handle: str
+    source: str
+    thread: str
+    sender: str = ""
+    sender_name: Content | None = None
+    title: Content | None = None
+    group: bool = False
+    own: bool = False
+    text: Content
+    sent_at: int = 0
+
+
+class RelayedRead(Payload):
+    """Une conversation reçue ailleurs a été relue (ADR 0120) : ses messages (``seqs``) ne l'attendent plus.
+    ``failed`` : la relecture a échoué trop de fois, on la laisse ; l'appel au modèle qui l'a faite."""
+
+    seqs: tuple[int, ...] = ()
+    produced: int = 0
+    failed: bool = False
+    call_id: str = ""
+    model: str = ""
+
+
 class Confronted(Payload):
     """La nuit, deux croyances sur la même personne, dites par des témoins différents, qui se contredisent (ADR
     0085) : ``supersedes`` (nouvelle, ancienne) — la plus sûre l'emporte ; ``contests`` — elle doute, les deux
@@ -549,6 +583,7 @@ ATTESTED = event_type("memory.attested", OWNER, Attested, public=True, subjects=
 JOINED = event_type("memory.joined", OWNER, Joined, public=True)
 CONFRONTED = event_type("memory.confronted", OWNER, Confronted, public=True)
 REREAD = event_type("memory.reread", OWNER, Reread, public=True)
+RELAYED_READ = event_type("memory.relayed_read", OWNER, RelayedRead, public=True)
 
 
 class Delicate(Payload):
@@ -563,7 +598,8 @@ class Delicate(Payload):
 
 DELICATE = event_type("memory.delicate", OWNER, Delicate, public=True, subjects=("person",))
 ALL = (REMEMBERED, BELIEVED, REINFORCED, PROMISE_NOTICED, PROMISE_RESOLVED, EVENT_NOTED, MOMENT_FOLLOWED, SITUATION_ENDED,
-       CONSOLIDATED, NIGHT_SORTED, EXTRACTION_DEFERRED, ATTESTED, JOINED, CONFRONTED, REREAD, RESOLVED, DELICATE)
+       CONSOLIDATED, NIGHT_SORTED, EXTRACTION_DEFERRED, ATTESTED, JOINED, CONFRONTED, REREAD, RESOLVED, DELICATE,
+       RELAYED_READ)
 
 
 @dataclass(frozen=True, slots=True)

@@ -100,7 +100,7 @@ from mika.vocab import affect as A
 from mika.vocab import timespan
 from mika.vocab.days import when_fr, window_of
 from mika.vocab.episodes import CONVERSATIONAL, Kind
-from mika.vocab.people import clean_tokens, is_identifiable, named_label, read_source
+from mika.vocab.people import clean_tokens, is_identifiable, named_label, phone_label, read_source
 from mika.vocab.phrasebook import family, phrase
 from mika.vocab.privacy import Sensitivity
 from mika.vocab.words import WORD, fold, stems, words
@@ -265,6 +265,8 @@ def names_of(frame: Frame, keys: set[str]) -> dict[str, str]:
             out[k] = named_label(k).title()
         elif read_source(k):
             out[k] = read_source(k)  # ce qu'elle a lu : le flux, pas une personne (ADR 0085)
+        elif phone_label(k):
+            out[k] = phone_label(k)  # un contact du téléphone de quelqu'un (ADR 0120)
         else:
             out[k] = frame.get(identity_c.IDENTITY(k)).name or k
     return out
@@ -375,7 +377,7 @@ def named_people(frame: Frame, store: Any, text: str, interlocutor: str | None,
         if scope is not None and person == k and scope_of(k) not in (None, scope):
             continue  # une mention d'une autre conversation, reliée à personne
         keys_of.setdefault(person, set()).add(k)
-        name = named_label(k) if k.startswith("name:") else frame.get(identity_c.IDENTITY(k)).name
+        name = named_label(k) if k.startswith("name:") else phone_label(k) or frame.get(identity_c.IDENTITY(k)).name
         folded = " ".join(WORD.findall(fold(name or "")))
         for n in {folded, *folded.split()[:1]}:
             if len(n) >= 3:

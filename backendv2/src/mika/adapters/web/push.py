@@ -112,6 +112,24 @@ class MobilePush:
         task.add_done_callback(self._tasks.discard)
         return True
 
+    def offer(self, account: int, body: dict[str, object]) -> int:
+        """Un clair qui n'est pas une parole (une réponse proposée, ADR 0120) : à **chaque** téléphone du compte,
+        que l'application soit ouverte ou non — c'est lui qui demande l'autorisation, une notification qu'aucune
+        connexion ne montre. Envoyé dans une tâche à part ; rend combien de téléphones le recevront."""
+        if self._stopped or not self.sender.configured():
+            return 0
+        try:
+            targets = list(self.accounts.push_registrations(account))
+        except Exception as exc:  # une base illisible ne fait pas tomber la capacité
+            log.warning("notifications : téléphones illisibles (%r)", exc)
+            return 0
+        if not targets:
+            return 0
+        task = asyncio.get_running_loop().create_task(self._send_all(targets, body), name="push")
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return len(targets)
+
     async def _send_all(self, targets: list[PushRegistration], body: dict[str, object]) -> None:
         for reg in targets:
             try:

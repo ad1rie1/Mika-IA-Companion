@@ -53,9 +53,12 @@ Le serveur est `backendv2/` (`python -m mika serve`). Le protocole est décrit d
 - **« Lui dire où je suis »** (ADR 0119, coupé par défaut) : application ouverte, la position du téléphone part à
   Mika — les coordonnées exactes et le nom du lieu trouvé par le téléphone (`Geocoder`). Voir
   [Sa position](#sa-position).
+- **« Lui montrer mes messages »** (ADR 0120, coupé par défaut) : les messages WhatsApp et SMS que le téléphone affiche
+  partent à Mika, qui s'en souvient ; elle peut proposer une réponse, qu'une notification te demande d'autoriser. Voir
+  [Ses messages](#ses-messages).
 - **Paramètres** : compte et déconnexion, notifications (et si elles arrivent application fermée), « Lui dire quand
-  j'ai lu », « Lui dire où je suis », thème (système / clair / sombre, couleurs dynamiques), « Effacer les messages de
-  ce téléphone ».
+  j'ai lu », « Lui dire où je suis », « Lui montrer mes messages », thème (système / clair / sombre, couleurs
+  dynamiques), « Effacer les messages de ce téléphone ».
 
 Hors périmètre : la voix (ni messages vocaux, ni lecture à voix haute) et le monde 3D (la chambre, les déplacements :
 c'est le client Unity).
@@ -94,8 +97,9 @@ Le comportement est celui du client web, porté en Kotlin pur et testé sur la J
 Elle vit la conversation (ADR 0067, point 6) :
 - les derniers messages tiennent dans une bande en bas et s'effacent avant son visage ;
 - remonter dans l'historique la met en retrait ;
-- sa réponse s'écrit dans la bulle au rythme de sa bouche, sur une seule horloge (`avatar3d/Utterance`), et toucher
-  la bulle affiche tout ;
+- chaque bulle de sa réponse arrive entière, comme un SMS, quand sa bouche commence à la dire ; la suivante attend
+  qu'elle l'ait dite, ses trois points à sa place, sur une seule horloge (`avatar3d/Utterance`), et toucher la bulle
+  la fait taire ;
 - un message qu'on envoie, elle le lit, puis hoche la tête.
 
 Ces signaux viennent de `ui/chat/ConversationCues.kt` (`ConversationCues`, `SpeechTrack`).
@@ -208,6 +212,34 @@ mets Mika à jour. En version de débogage, le lien « Utiliser un jeton (dev) �
   d'un autre jour ; sans lieu une fois la position oubliée). Elle vient du champ `notes` de sa réponse (`speech`,
   `history`), gardé en base avec elle.
 
+## Ses messages
+
+« Lui montrer mes messages » : décision dans l'ADR 0120. Le réglage est dans Paramètres › Ses messages, **coupé par
+défaut**.
+
+- **L'accès aux notifications** s'accorde dans les réglages d'Android (« Accès aux notifications ») : le bouton y mène,
+  et l'interrupteur s'allume au retour s'il a été accordé. Retiré plus tard, rien ne part (le réglage le dit).
+- **Ce qui est lu** : seulement les applis cochées — WhatsApp (et WhatsApp Business), Messages (Google et Samsung) —,
+  jamais une liste d'exclusions : ni la banque, ni les codes. Les groupes seulement si « Les groupes aussi » est coché.
+  Le lecteur (`service/PhoneListenerService`) lit le `MessagingStyle` de chaque notification : la conversation, qui
+  écrit, le texte, l'heure, et si c'est toi qui as écrit. Le tri est pur et testé (`data/phone/PhoneReading`).
+- **Ce qui part** : `POST /api/phone/inbox`, par lots de 200, sous le jeton de l'app. La conversation et l'expéditeur
+  ne partent qu'en clés opaques (`sha256` de l'appli et de l'identifiant que donne la notification, 32 caractères) ; le
+  nom affiché et le texte partent en clair.
+- **En 4G**, le serveur de la maison ne répond pas : les messages attendent dans une file sur le téléphone (500 au plus,
+  les plus anciens tombent), et repartent au retour du réseau, à l'ouverture de l'app, ou au message suivant — pas
+  avant 10 min après un échec. Aucune connexion ne reste ouverte (ADR 0077). Paramètres › Ses messages dit combien
+  attendent, ou si le serveur refuse (seule sa propriétaire peut lui montrer ses messages).
+- **Ses réponses proposées** arrivent par Firebase, scellées comme ses paroles (`{"t": "phone_draft", …}`) : une
+  notification « Répondre à Léa (WhatsApp) ? », le texte entier, avec **Envoyer**, **Écrire autre chose** et
+  **Ignorer** (balayer la notification compte comme « Ignorer »). Le geste vaut accord, et marche aussi en 4G.
+  « Envoyer » passe par l'action « Répondre » de la notification de WhatsApp ou de Messages, gardée en mémoire
+  seulement ; si elle n'existe plus (notification balayée, appli redémarrée), le texte est copié et la notification
+  ouvre l'appli pour le coller. Le sort repart au serveur (`POST /api/phone/settled`) par la même file. Sans geste, la
+  proposition expire (2 h) et la notification disparaît.
+- **Couper** le réglage vide la file et oublie les actions gardées ; Android cesse alors d'appeler le lecteur.
+  **Se déconnecter** fait de même et remet le réglage à zéro : un autre compte n'en hérite jamais.
+
 ## Se déconnecter, révoquer un téléphone
 
 - **Se déconnecter** (Paramètres) rend le jeton au serveur et efface du téléphone les messages, les fichiers, les
@@ -229,7 +261,8 @@ mets Mika à jour. En version de débogage, le lien « Utiliser un jeton (dev) �
 Les tests JVM n'ont besoin d'aucun émulateur : le moteur (protocole, fusion du fil, socket, décisions de
 notification, réduction des images, partage, navigation, cartes de « Ce qu'elle fait », choix du portrait, cartes
 d'accord, ce qui part de sa position et sa petite bulle, ouverture d'un message Firebase — `PushPayloadTest` en ouvre un scellé par le serveur —, inscription aux
-notifications) est du Kotlin pur. Les
+notifications, tri des notifications de WhatsApp et de Messages, leurs clés opaques, leur file et son envoi, les
+réponses proposées) est du Kotlin pur. Les
 tests instrumentés (`app/src/androidTest`) éprouvent Room en mémoire (`ChatStoreTest`) et les écrans Compose
 (`ChatScreenTest`, `LoginScreenTest`, `MindScreenTest`).
 
@@ -248,7 +281,8 @@ tests instrumentés (`app/src/androidTest`) éprouvent Room en mémoire (`ChatSt
 | `data/auth` | jeton chiffré (Keystore), connexion, erreurs en français |
 | `data/files` | pièces jointes (préparation, réduction), brouillon, partages reçus, fichiers de Mika |
 | `data/location` | « Lui dire où je suis » : ce qui part (`WhereShare`, selon le réglage et le premier plan), le nom du lieu (`PlaceLabel`) ; la localisation elle-même est dans `core/LocationMonitor` |
-| `service` | connexion voulue, notifications, réponse depuis une notification (et son service de 60 s) |
+| `service` | connexion voulue, notifications, réponse depuis une notification (et son service de 60 s) ; le lecteur des notifications du téléphone (`PhoneListenerService`) et les réponses proposées (`PhoneDraftNotifier`) |
+| `data/phone` | « Lui montrer mes messages » (ADR 0120) : les applis lues, le tri des notifications (`PhoneReading`), les clés opaques, la file et son envoi (`PhoneOutbox`), les réponses proposées (`PhoneDrafts`), les actions « Répondre » gardées en mémoire |
 | `data/push` | les notifications par Firebase : ouvrir un message scellé (`PushPayload`), dire au serveur où notifier (`PushRegistrar`) |
 | `push` | Firebase lui-même : le jeton (`FirebasePush`) et la réception (`MikaMessagingService`) |
 | `share` | « Partager vers Mika », raccourci de conversation |

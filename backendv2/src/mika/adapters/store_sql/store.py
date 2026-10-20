@@ -67,6 +67,7 @@ from mika.ports.store import (
     Sql,
     StoredEvent,
 )
+from mika.vocab.people import NAME_BEARING
 
 SNAPSHOTS_KEPT = 3
 #: Une ligne « partie » de la file de sortie se garde tant de temps, puis s'efface à l'instantané suivant : elle ne
@@ -438,9 +439,9 @@ class SqlStore:
                 # ce que les projections lui ont rattaché sans que le texte le nomme (un renfort) : effacé aussi
                 extra = sorted({r for r in (purge(ms, vs) or ()) if r and r not in refs})
                 _forget_contents(ms, extra)
-                if subject.startswith("name:"):
-                    # Ces anciennes clés contiennent le nom en clair. L'oubli conserve des
-                    # enveloppes rejouables, mais remplace cette clé partout par un jeton opaque.
+                if subject.startswith(NAME_BEARING):
+                    # Ces clés contiennent le nom en clair (une mention, un contact du téléphone : ADR 0120).
+                    # L'oubli conserve des enveloppes rejouables, mais remplace cette clé partout par un jeton opaque.
                     replacement = "forgotten:" + secrets.token_hex(16)
 
                     def redact(value):

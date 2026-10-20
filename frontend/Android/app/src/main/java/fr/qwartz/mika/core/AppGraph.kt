@@ -1,5 +1,6 @@
 package fr.qwartz.mika.core
 
+import android.app.Notification
 import android.content.Context
 import android.os.Build
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
@@ -33,6 +34,12 @@ import fr.qwartz.mika.data.mind.MindStateRepository
 import fr.qwartz.mika.data.net.BearerInterceptor
 import fr.qwartz.mika.data.net.LinkState
 import fr.qwartz.mika.data.net.OkHttpWsTransport
+import fr.qwartz.mika.data.phone.PhoneApi
+import fr.qwartz.mika.data.phone.PhoneKv
+import fr.qwartz.mika.data.phone.PhoneOutbox
+import fr.qwartz.mika.data.phone.PhoneReading
+import fr.qwartz.mika.data.phone.PostedNotification
+import fr.qwartz.mika.data.phone.ReplyRegistry
 import fr.qwartz.mika.data.push.PushPayload
 import fr.qwartz.mika.data.push.PushRegistrar
 import fr.qwartz.mika.data.settings.SettingsStore
@@ -40,6 +47,8 @@ import fr.qwartz.mika.push.FirebasePush
 import fr.qwartz.mika.service.AndroidServiceController
 import fr.qwartz.mika.service.ConnectionManager
 import fr.qwartz.mika.service.MessageNotifier
+import fr.qwartz.mika.service.PhoneDraftNotifier
+import fr.qwartz.mika.service.PhoneListenerService
 import fr.qwartz.mika.service.ReplySender
 import fr.qwartz.mika.service.ServiceController
 import fr.qwartz.mika.share.Shortcuts
@@ -235,15 +244,69 @@ class AppGraph(context: Context) {
         logger = logger,
     )
 
-    /** Un message Firebase : ouvert avec la clé de ce téléphone, montré comme une parole reçue (hors session : rien). */
+    /**
+     * Un message Firebase, ouvert avec la clé de ce téléphone (hors session : rien) : une parole se montre comme une
+     * parole reçue ; une réponse proposée pour WhatsApp ou Messages (ADR 0120), comme une demande d'autorisation.
+     */
     suspend fun onPushed(data: Map<String, String>) {
         val key = push.key() ?: return
-        val message = PushPayload.open(key, data)
-        if (message == null) {
-            logger.w(TAG, "message Firebase illisible : ignoré")
-            return
+        when (val pushed = PushPayload.open(key, data)) {
+            null -> logger.w(TAG, "message Firebase illisible : ignoré")
+            is PushPayload.Pushed.Speech ->
+                notifier.onPushed(pushed.message, online = connection.link.value == LinkState.Online)
+            is PushPayload.Pushed.Draft -> phoneDrafts.onDraft(pushed.draft)
         }
-        notifier.onPushed(message, online = connection.link.value == LinkState.Online)
+    }
+
+    /**
+     * « Lui montrer mes messages » (ADR 0120) : les messages lus sur le téléphone attendent ici le serveur, dans une file
+     * gardée en base (en 4G, le serveur de la maison ne répond pas). Un appel court par lot, jamais une connexion
+     * gardée (ADR 0077) : un délai de connexion plus court que celui d'une connexion voulue, car c'est en 4G qu'il
+     * échoue le plus.
+     */
+    private val phoneKv = object : PhoneKv {
+        override suspend fun get(key: String): String? = store.kvGet(key)
+        override suspend fun put(key: String, value: String?) = store.kvPut(key, value)
+    }
+    val phone = PhoneOutbox(
+        kv = phoneKv,
+        api = PhoneApi(
+            http.newBuilder()
+                .connectTimeout(10, TimeUnit.SECONDS)
+                .callTimeout(30, TimeUnit.SECONDS)
+                .build(),
+        ),
+        credentials = { auth.credentials() },
+        enabled = { settings.current().phoneShare },
+        online = { network.status.value.available },
+        clock = clock,
+        scope = scope,
+        logger = logger,
+    )
+
+    /** L'action « Répondre » de chaque conversation du téléphone, en mémoire seulement (ADR 0120). */
+    val phoneReplies = ReplyRegistry<Notification.Action>()
+
+    /** Les réponses que Mika propose pour WhatsApp ou Messages, et le geste qui les autorise (ADR 0120). */
+    val phoneDrafts = PhoneDraftNotifier(
+        context = this.context,
+        kv = phoneKv,
+        replies = phoneReplies,
+        outbox = phone,
+        enabled = { settings.current().phoneShare },
+        clock = clock::wallMs,
+        logger = logger,
+    )
+
+    /**
+     * Une notification de WhatsApp ou de Messages, décrite par le lecteur (`PhoneListenerService`) : triée selon les
+     * réglages, son action « Répondre » gardée, ses messages neufs en file, puis envoyés bientôt.
+     */
+    suspend fun onPhoneNotification(posted: PostedNotification, reply: Notification.Action?) {
+        if (auth.credentials() == null) return
+        val reading = PhoneReading.read(posted, settings.current().phone) ?: return
+        if (reply != null) phoneReplies.put(reading.thread, reply)
+        if (phone.add(reading.messages) > 0) phone.flushSoon()
     }
 
     /** Les photos prises pour Mika, avant leur réduction (exposées par le FileProvider). */
@@ -251,6 +314,13 @@ class AppGraph(context: Context) {
 
     init {
         onWipe += { notifier.wipe() }
+        // La file des messages du téléphone et les propositions partent avec la session (la table kv est déjà vide) :
+        // un autre compte n'en hérite jamais, et aucune réponse ne part plus par une action gardée d'avant.
+        onWipe += {
+            phone.clear()
+            phoneReplies.clear()
+            phoneDrafts.wipe()
+        }
         onWipe += { withContext(Dispatchers.IO) { downloads.clear() } }
         onWipe += { withContext(Dispatchers.IO) { cameraDir.deleteRecursively() } }
         onWipe += {
@@ -287,7 +357,11 @@ class AppGraph(context: Context) {
      */
     suspend fun clearLocalMessages() {
         connection.clearThread {
-            chat.wipe(keepKeys = DRAFT_KEYS + setOf(Kv.OWNER, Kv.MIND_STATE, Kv.LAST_SEEN_WALL), keepStaging = true)
+            // La file des messages du téléphone et les propositions (ADR 0120) ne sont pas la conversation : elles restent.
+            chat.wipe(
+                keepKeys = DRAFT_KEYS + setOf(Kv.OWNER, Kv.MIND_STATE, Kv.LAST_SEEN_WALL, Kv.PHONE_QUEUE, Kv.PHONE_DRAFTS),
+                keepStaging = true,
+            )
             notifier.wipe()
         }
     }
@@ -324,6 +398,51 @@ class AppGraph(context: Context) {
                 }
         }
         scope.launch(Dispatchers.IO) { Shortcuts.publish(context) }
+        startPhone()
+    }
+
+    /**
+     * « Lui montrer mes messages » (ADR 0120). Coupé : la file se vide, les actions gardées et les propositions partent ;
+     * allumé : Android rebranche le lecteur qu'il avait débranché à sa demande. Ce qui attend repart au retour du réseau
+     * et quand l'app passe au premier plan — sans attendre la fin d'une attente d'après un échec ; jamais en boucle.
+     */
+    private fun startPhone() {
+        scope.launch {
+            ready.await()
+            phone.init()
+            phoneDrafts.prune()
+            settings.settings.map { it.phoneShare }.distinctUntilChanged().collect { on ->
+                if (on) {
+                    PhoneListenerService.rebind(context)
+                } else {
+                    phone.clear()
+                    phoneReplies.clear()
+                    phoneDrafts.wipe()
+                }
+            }
+        }
+        scope.launch {
+            ready.await()
+            network.status.map { it.available to it.networkId }
+                .distinctUntilChanged()
+                .filter { (available, _) -> available }
+                .collect { flushPhone(PhoneOutbox.Trigger.NETWORK) }
+        }
+        scope.launch {
+            ready.await()
+            foreground.visible.filter { it }.collect { flushPhone(PhoneOutbox.Trigger.FOREGROUND) }
+        }
+    }
+
+    /** Un envoi en échec (base illisible…) n'arrête pas ceux des déclencheurs suivants. */
+    private suspend fun flushPhone(trigger: PhoneOutbox.Trigger) {
+        try {
+            phone.flush(trigger)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.w(TAG, "envoi des messages du téléphone en échec", e)
+        }
     }
 
     private companion object {

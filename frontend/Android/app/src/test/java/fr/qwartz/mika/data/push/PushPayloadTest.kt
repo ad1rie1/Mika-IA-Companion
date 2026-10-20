@@ -1,8 +1,10 @@
 package fr.qwartz.mika.data.push
 
+import fr.qwartz.mika.data.phone.PhoneDraft
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.Base64
 import javax.crypto.Cipher
@@ -32,7 +34,10 @@ class PushPayloadTest {
     @Test
     fun opensWhatTheServerSealed() {
         val m = PushPayload.open(key, fromServer)
-        assertEquals(PushPayload.Message("speech", 4242, "Tu es rentrée ? 🙂 « bien » é", 1791000000000, 2), m)
+        assertEquals(
+            PushPayload.Pushed.Speech(PushPayload.Message("speech", 4242, "Tu es rentrée ? 🙂 « bien » é", 1791000000000, 2)),
+            m,
+        )
     }
 
     @Test
@@ -60,6 +65,44 @@ class PushPayloadTest {
         assertNull(PushPayload.open(key, seal("""{"t":"speech","id":0,"text":"coucou"}""")))
         assertNull(PushPayload.open(key, seal("""{"t":"speech","id":3,"text":"  "}""")))
         assertNull(PushPayload.open(key, seal("""pas du json""")))
+    }
+
+    private val thread = "611ae22e6d5c431f8b537e638278435d"
+
+    @Test
+    fun `une réponse proposée s'ouvre à part de la parole`() {
+        val m = PushPayload.open(
+            key,
+            seal(
+                """{"t":"phone_draft","id":77,"app":"whatsapp","thread":"$thread","to":"Léa","text":"J'arrive dans 10 min 🙂",""" +
+                    """"exp":1791007200000,"ts":1791000000000,"futur":1}""",
+            ),
+        )
+        assertEquals(
+            PushPayload.Pushed.Draft(PhoneDraft(77, "whatsapp", thread, "Léa", "J'arrive dans 10 min 🙂", 1791007200000, 1791000000000)),
+            m,
+        )
+        // la parole n'est pas une proposition, ni l'inverse
+        assertTrue(PushPayload.open(key, seal("""{"t":"speech","id":1,"text":"coucou"}""")) is PushPayload.Pushed.Speech)
+    }
+
+    @Test
+    fun `une proposition illisible ne se montre jamais`() {
+        fun draft(fields: String) = PushPayload.open(key, seal("""{"t":"phone_draft",$fields}"""))
+        val ok = """"id":5,"app":"messages","thread":"$thread","to":"Sam","text":"oui","exp":1791007200000"""
+        assertNotNull(draft(ok))
+        assertNull(draft(ok.replace(""""id":5""", """"id":0""")))
+        assertNull(draft(ok.replace(""""app":"messages"""", """"app":"telegram"""")))
+        assertNull(draft(ok.replace(thread, "pas-une-cle")))
+        assertNull(draft(ok.replace(""""text":"oui"""", """"text":"  """")))
+        assertNull(draft(ok.replace(""""exp":1791007200000""", """"exp":0""")))
+        // le même scellé abîmé ne s'ouvre pas, quel que soit son type
+        val sealed = seal("""{"t":"phone_draft",$ok}""")
+        assertNull(PushPayload.open(ByteArray(32), sealed))
+        // ouvrir puis comprendre : deux temps
+        assertEquals("""{"t":"phone_draft",$ok}""", PushPayload.unseal(key, sealed))
+        assertNull(PushPayload.read("""{"t":"phone_draft"}"""))
+        assertNull(PushPayload.read("""["phone_draft"]"""))
     }
 
     @Test

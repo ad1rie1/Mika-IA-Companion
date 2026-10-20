@@ -54,6 +54,7 @@ from mika.plugins.forge import FORGE
 from mika.plugins.imaging import IMAGING
 from mika.plugins.location import LOCATION
 from mika.plugins.mcp import MCP
+from mika.plugins.phone import PHONE
 from mika.plugins.rss import RSS
 from mika.plugins.sensors import SENSORS
 from mika.plugins.teams import TEAMS
@@ -72,7 +73,7 @@ def faculties() -> list[Faculty[Any, Any]]:
     """Les facultés de Mika, puis ses plugins (M7)."""
     return [PRESENCE, IDENTITY, TRANSCRIPT, MEMORY, BODY, WORLD, PLACE, AFFECT, NEEDS, OTHERS, ATTENTION, SELF,
             EXPRESSION, SOCIAL, AGENCY, GOALS, PROJECTS, SHARES, ATTACHMENTS, EMAIL, RSS, CAMERA, FORGE, SENSORS,
-            IMAGING, MCP, WEB, WAKEUP, TEAMS, LOCATION]
+            IMAGING, MCP, WEB, WAKEUP, TEAMS, LOCATION, PHONE]
 
 
 def _reply_guard(frame: Frame, target: str | None, audience: Audience | None) -> Guard | None:
@@ -138,7 +139,7 @@ def policies() -> dict[str, EpisodePolicy]:
                                   tool_bundles=frozenset({"memory", "identity", "goals", "projects", "email", "rss",
                                                           "camera", "forge", "forge_apps", "self", "attention",
                                                           "social", "world", "shares", "attachments", "imaging",
-                                                          "teams", "location", EXTERNAL}),
+                                                          "teams", "location", "phone", EXTERNAL}),
                                   core_bundles=REPLY_IN_HAND),
         Kind.INITIATIVE: EpisodePolicy(kind=Kind.INITIATIVE, role=Role.INITIATIVE, priority=1, lane="conversation",
                                        brief=initiative_brief, max_tokens=600, deadline_s=180.0,

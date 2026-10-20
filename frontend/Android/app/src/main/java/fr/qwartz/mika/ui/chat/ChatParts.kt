@@ -571,15 +571,21 @@ private fun Bubble(
     zone: ZoneId,
     busyFileId: String?,
     actions: ChatActions,
-    /** Sa réplique, si elle est en train de la dire : le texte s'écrit à son rythme. */
+    /** Sa réplique, si elle la dit : la bulle attend son tour, ses trois points avant elle, puis arrive entière. */
     utterance: Utterance? = null,
     onSkip: () -> Unit = {},
     /** Une opératrice : sous ses réponses, son avis (ADR 0113). */
     operator: Boolean = false,
     verdictError: String? = null,
 ) {
+    val turn = utterance?.let { rememberTurn(it) } ?: Turn.SAID
+    // comme une messagerie : rien tant qu'elle n'y est pas, puis « écrit… », puis la bulle d'un coup
+    if (turn == Turn.AWAITING) return
+    if (turn == Turn.TYPING) {
+        TypingBubble()
+        return
+    }
     val m = item.message
-    val reveal = utterance?.let { rememberReveal(it) }
     val mine = m.sender == Sender.USER
     // Une réponse pro (ADR 0116) : une seule bulle, plus large, son Markdown rendu ; ni rythme de frappe ni voix.
     val proReply = m.isPro && !mine
@@ -613,13 +619,13 @@ private fun Bubble(
                     }
                     // Un nœud pour le lecteur d'écran : qui, quand, l'état, le texte ; copier et réessayer
                     // en actions. Les pièces jointes, au-dessus, restent chacune atteignable.
-                    val revealing = reveal != null
+                    val saying = turn == Turn.SAYING
                     Column(
                         Modifier
-                            .pointerInput(copyText, revealing) {
-                                // Toucher une réponse qui s'écrit : tout s'affiche, elle se tait.
+                            .pointerInput(copyText, saying) {
+                                // Toucher une réponse qu'elle dit : elle se tait, la suivante vient.
                                 detectTapGestures(
-                                    onTap = if (revealing) ({ _ -> onSkip() }) else null,
+                                    onTap = if (saying) ({ _ -> onSkip() }) else null,
                                     onLongPress = { actions.copy(copyText) },
                                 )
                             }
@@ -635,14 +641,10 @@ private fun Bubble(
                             },
                     ) {
                         if (body.isNotEmpty()) {
-                            Box {
-                                if (proReply) {
-                                    ProMarkdownText(body, content)
-                                } else {
-                                    InlineMarkupText(body, content, reveal = reveal)
-                                }
-                                // Une réplique qui attend son tour derrière la précédente : les trois points, à sa place.
-                                if (reveal != null && reveal <= 0f) TypingDots(content, Modifier.padding(top = 6.dp))
+                            if (proReply) {
+                                ProMarkdownText(body, content)
+                            } else {
+                                InlineMarkupText(body, content)
                             }
                         }
                         // ses outils, relus de l'historique quand la carte de travail n'est plus là (ADR 0116)
@@ -956,26 +958,30 @@ private fun RawBlock(label: String, text: String, color: Color) {
     }
 }
 
+/** Où en est une bulle qu'elle dit : pas encore là, ses trois points, arrivée pendant qu'elle la dit, dite. */
+private enum class Turn { AWAITING, TYPING, SAYING, SAID }
+
+private fun Utterance.turnAt(now: Long): Turn = when {
+    finished(now) -> Turn.SAID
+    now >= startNanos -> Turn.SAYING
+    now >= dotsNanos -> Turn.TYPING
+    else -> Turn.AWAITING
+}
+
 /**
- * Combien de caractères de sa réplique sont dits, image par image, sur l'horloge qu'elle partage avec la bouche de
- * l'avatar ; null une fois tout dit (la bulle redevient un texte ordinaire). Sans animations : tout, tout de suite.
+ * Le tour d'une bulle, image par image, sur l'horloge qu'elle partage avec la bouche de l'avatar : la bulle arrive
+ * quand elle commence à la dire. Sans animations : tout, tout de suite.
  */
 @Composable
-private fun rememberReveal(u: Utterance): Float? {
+private fun rememberTurn(u: Utterance): Turn {
     val motion = !rememberReducedMotion()
-    val initial = System.nanoTime().let { now -> if (motion && !u.finished(now)) u.revealAt(now) else null }
-    val reveal by produceState(initial, u, motion) {
-        if (initial == null) return@produceState
-        while (true) {
-            val now = withFrameNanos { it }
-            if (u.finished(now)) {
-                value = null
-                break
-            }
-            value = u.revealAt(now)
+    val initial = if (motion) u.turnAt(System.nanoTime()) else Turn.SAID
+    val turn by produceState(initial, u, motion) {
+        while (value != Turn.SAID) {
+            value = u.turnAt(withFrameNanos { it })
         }
     }
-    return reveal
+    return turn
 }
 
 @Composable

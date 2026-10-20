@@ -88,7 +88,7 @@ class SpeechTrackTest {
     private val track = SpeechTrack { now }
     private fun seconds(s: Float) = (s * 1e9f).toLong()
 
-    @Test fun `une réplique s'écrit à son débit et finit quand tout est dit`() {
+    @Test fun `une réplique se dit à son débit et finit quand tout est dit`() {
         track.say("a", "x".repeat(32))
         val u = track.of("a")!!
         assertEquals(Utterance.SPEAKING_CPS, u.charsPerSecond, 1e-6f)
@@ -116,7 +116,7 @@ class SpeechTrackTest {
         assertEquals(0f, b.revealAt(now), 0f)
     }
 
-    @Test fun `toucher la bulle affiche tout, et la suivante vient aussitôt`() {
+    @Test fun `toucher la bulle la fait taire, et la suivante vient aussitôt`() {
         track.say("a", "x".repeat(64))
         track.say("b", "y".repeat(16))
         now += seconds(1f)
@@ -127,13 +127,39 @@ class SpeechTrackTest {
         assertEquals(now + Utterance.GAP_NANOS, track.of("b")!!.startNanos)
     }
 
-    @Test fun `quand la personne écrit à son tour, tout ce qui reste s'affiche`() {
+    @Test fun `quand la personne écrit à son tour, tout ce qui reste arrive`() {
         track.say("a", "x".repeat(64))
         track.say("b", "y".repeat(16))
         now += seconds(0.5f)
         track.skipAll()
         assertTrue(track.utterances.all { it.finished(now) })
         assertEquals(16f, track.of("b")!!.revealAt(now), 0f)
+    }
+
+    @Test fun `ses bulles arrivent entières l'une après l'autre, une seule « écrit… » à la fois`() {
+        track.say("a", "x".repeat(32))
+        track.say("b", "y".repeat(16))
+        track.say("c", "z".repeat(16))
+        val (a, b, c) = listOf("a", "b", "c").map { track.of(it)!! }
+        assertEquals(now, a.startNanos)
+        // la suivante écrit dès que la première est là ; la troisième attend que la deuxième arrive
+        assertEquals(now, b.dotsNanos)
+        assertEquals(a.endNanos + Utterance.GAP_NANOS, b.startNanos)
+        assertEquals(b.startNanos, c.dotsNanos)
+        assertEquals(b.endNanos + Utterance.GAP_NANOS, c.startNanos)
+    }
+
+    @Test fun `toucher la bulle avance aussi les trois points de celles qui attendent`() {
+        track.say("a", "x".repeat(64))
+        track.say("b", "y".repeat(16))
+        track.say("c", "z".repeat(16))
+        now += seconds(1f)
+        track.skip("a")
+        val b = track.of("b")!!
+        val c = track.of("c")!!
+        assertEquals(now, b.dotsNanos)
+        assertEquals(now + Utterance.GAP_NANOS, b.startNanos)
+        assertEquals(b.startNanos, c.dotsNanos)
     }
 
     @Test fun `une réplique finie depuis longtemps quitte la piste à la suivante`() {

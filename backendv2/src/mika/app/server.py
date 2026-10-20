@@ -66,6 +66,7 @@ from mika.app.console_menu import MENU
 from mika.app.constellation import Constellation
 from mika.app.mindport import KernelPort
 from mika.app.paths import PERSONA
+from mika.app.phone import PhoneDesk
 from mika.app.settings import SecretBox, Settings, push_key_file
 from mika.app.teams import TeamsDesk
 from mika.app.wakeups import WakeupDesk
@@ -377,6 +378,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     # Teams (ADR 0069) : ce que l'extension pousse, ses brouillons et la file (hors du journal), et la porte
     teams_store = world["teams"] = TeamsStore(settings.teams, bases["teams"], now=clock.now)
     teams = TeamsDesk(settings, clock.now, teams_store)
+    # les messages du téléphone (ADR 0120) : la porte de ``/api/phone/…``, et l'envoi d'une réponse proposée
+    phone = world["phone"] = PhoneDesk()
     # les outils venus d'ailleurs (ADR 0064) : la configuration relue à chaque usage, les décisions aussi — plus les
     # serveurs de ses plugins système, d'après leurs paramètres, approuvés d'office (ADR 0066)
     system = SystemServers(lambda: system_mcp.provided(
@@ -405,13 +408,14 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
     hub.port = port
     wakeups.port = port
     teams.port = port
+    phone.port = port
     live = Live(kernel, hub, port, Accounts(store), settings, gateway, fixed, calls=CallLog(store),
                 persona_file=persona, data=data, imaging=imaging, imaging_fixed=imaging_fixed, mcp=mcp,
                 wakeups=wakeups, teams=teams)
     # les notifications du téléphone fermé (ADR 0077) : par Firebase, la clé relue à chaque envoi — collée dans la
     # console, sinon le fichier ``firebase-service-account.json`` du dossier de données
     push_sender = FcmSender(lambda: settings.push() or push_key_file(data))
-    hub.push = MobilePush(live.accounts, push_sender)
+    hub.push = phone.push = MobilePush(live.accounts, push_sender)
     # le monde (ADR 0051) : chaque lot commité qui change ce que montrent ses écrans leur part, traduit en trames
     world_hub = live.world = WorldHub(port, live.accounts, origins=web.origins, auth_required=web.auth_required)
 
@@ -501,7 +505,8 @@ def build(data: Path, *, persona: Path = PERSONA, web: WebConfig | None = None,
                       extra_routes=[Route("/", _root, methods=["GET", "HEAD"]), *constellation.routes(), *inspector,
                                     relay, console_mcp, world_hub.route()],
                       preprocess=preprocess, camera=camera, sensor_token=settings.sensors_token,
-                      wakeup=wakeups.call, teams=teams, push_ready=push_sender.configured), live
+                      wakeup=wakeups.call, teams=teams, push_ready=push_sender.configured,
+                      phone=phone), live
 
 
 async def register_accounts(kernel: Kernel, accounts: Accounts) -> int:

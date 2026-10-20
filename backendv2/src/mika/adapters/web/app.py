@@ -67,6 +67,7 @@ from mika.contracts.entry import MindPort
 from mika.contracts.presence import Connected
 from mika.contracts.runtime import AttachmentMeta, PerceptionReceived
 from mika.kernel.events import Content
+from mika.ports import phone as phone_p
 from mika.ports import teams as teams_p
 from mika.ports import wakeup as wakeup_p
 from mika.ports.preprocess import Perceived, Preprocessor, Upload, render
@@ -113,6 +114,10 @@ def first_header(headers: Any, names: tuple[str, ...], limit: int = 200) -> str:
     return ""
 #: l'extension Teams (ADR 0069) : la taille d'un lot au plus, les échecs de clé tolérés par IP, et chaque issue en HTTP
 TEAMS_MAX_BYTES = 512 * 1024
+#: un lot du téléphone (ADR 0120), au plus : 200 messages de 4 000 caractères
+PHONE_MAX_BYTES = 2 * 1024 * 1024
+PHONE_STATUS = {phone_p.ACCEPTED: 200, phone_p.FORBIDDEN: 403, phone_p.DISABLED: 403, phone_p.INVALID: 400,
+                phone_p.BUSY: 429}
 TEAMS_FAILURES = (20, 60.0)
 TEAMS_STATUS = {teams_p.ACCEPTED: 200, teams_p.UNKNOWN: 401, teams_p.DISABLED: 403, teams_p.INVALID: 400,
                 teams_p.BUSY: 429, teams_p.MISSING: 404, teams_p.CONFLICT: 409}
@@ -208,7 +213,8 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
                lifespan: Any = None, extra_routes: Sequence[Any] = (),
                preprocess: Preprocessor | None = None, camera: Any = None,
                sensor_token: Any = None, wakeup: wakeup_p.WakeGate | None = None,
-               teams: teams_p.TeamsGate | None = None, push_ready: Callable[[], bool] | None = None) -> Starlette:
+               teams: teams_p.TeamsGate | None = None, push_ready: Callable[[], bool] | None = None,
+               phone: phone_p.PhoneGate | None = None) -> Starlette:
     cfg = cfg or WebConfig()
     by_name = LoginThrottle(cfg.login_failures, cfg.login_window_s)
     by_ip = LoginThrottle(cfg.login_ip_failures, cfg.login_window_s)
@@ -587,6 +593,54 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
     async def teams_inbox(request: Request) -> Response:
         return await teams_call(request, "inbox")
 
+    async def phone_call(request: Request, kind: str) -> Response:
+        """L'application du téléphone (ADR 0120) : ``POST /api/phone/inbox`` (les messages qu'elle a lus dans ses
+        notifications), ``POST /api/phone/settled`` (ce que sont devenues les réponses proposées). Sous son jeton
+        (``mw_…``, client ``mobile``, sans ``Origin``) : jeton absent ou faux, 401 ; pas l'application du téléphone,
+        pas une propriétaire, ou coupé, 403 ; illisible, 400 ; trop grand, 413 ; trop de requêtes ou pas prête, 429.
+        Rien ne s'écrit avant que la porte l'ait admis."""
+        headers = {"Cache-Control": "no-store"}
+        if phone is None:
+            return JSONResponse({"error": "Les messages du téléphone ne sont pas branchés."}, status_code=404,
+                                headers=headers)
+        token_id = phone_of(request)
+        if isinstance(token_id, JSONResponse):
+            return token_id
+        found = accounts.token(native_token(request.headers))
+        if found is None or not found[0].active:
+            return JSONResponse({"error": "Jeton invalide."}, status_code=401, headers=headers)
+        try:
+            size = int(request.headers.get("content-length") or 0)
+        except ValueError:
+            size = 0
+        if size > PHONE_MAX_BYTES:
+            return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
+        raw = b""
+        async for chunk in request.stream():  # borné aussi sans Content-Length (un envoi par morceaux)
+            raw += chunk
+            if len(raw) > PHONE_MAX_BYTES:
+                return JSONResponse({"error": "Requête trop grande."}, status_code=413, headers=headers)
+        try:
+            data = json.loads(raw or b"{}")
+        except (ValueError, RecursionError):
+            data = None
+        if not isinstance(data, dict):
+            return JSONResponse({"error": "Un objet JSON."}, status_code=400, headers=headers)
+        handle = found[0].handle
+        got = await (phone.inbox(handle, data) if kind == "inbox" else phone.settled(handle, data))
+        status = PHONE_STATUS.get(got.outcome, 400)
+        if got.outcome == phone_p.BUSY and got.retry_after:
+            headers["Retry-After"] = str(got.retry_after)
+        if status == 200:
+            return JSONResponse({"ok": True, **got.data}, headers=headers)
+        return JSONResponse({"error": got.message or "Refusé."}, status_code=status, headers=headers)
+
+    async def phone_inbox(request: Request) -> Response:
+        return await phone_call(request, "inbox")
+
+    async def phone_settled(request: Request) -> Response:
+        return await phone_call(request, "settled")
+
     async def teams_outbox(request: Request) -> Response:
         return await teams_call(request, "outbox")
 
@@ -668,6 +722,8 @@ def create_app(port: MindPort, accounts: Accounts, hub: Hub, cfg: WebConfig | No
         Route("/api/teams/inbox", teams_inbox, methods=["POST"]),
         Route("/api/teams/outbox", teams_outbox, methods=["GET"]),
         Route("/api/teams/outbox/{item:str}", teams_ack, methods=["POST"]),
+        Route("/api/phone/inbox", phone_inbox, methods=["POST"]),
+        Route("/api/phone/settled", phone_settled, methods=["POST"]),
         Route("/files/{file:str}", shared_file, methods=["GET"]),
         WebSocketRoute("/ws", ws),
         *extra_routes,
